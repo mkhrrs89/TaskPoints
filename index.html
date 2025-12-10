@@ -154,16 +154,25 @@
         </div>
 
         <div id="matchupDetails" class="hidden space-y-2">
-          <div class="text-lg font-semibold" id="matchupOpponent">—</div>
+          <div class="flex items-start gap-3">
+            <div class="flex-1 space-y-2">
+              <div class="text-lg font-semibold" id="matchupOpponent">—</div>
 
-          <div>
-            <div class="text-[11px] muted">Opponent Score</div>
-            <div class="text-3xl font-extrabold leading-tight" id="matchupOpponentScore">—</div>
+              <div>
+                <div class="text-[11px] muted">Opponent Score</div>
+                <div class="text-3xl font-extrabold leading-tight" id="matchupOpponentScore">—</div>
+              </div>
+            </div>
+
+            <div class="w-16 h-16 rounded-lg overflow-hidden border border-slate-700/70 bg-slate-900/60 flex-shrink-0 grid place-items-center" aria-hidden="true">
+              <div id="matchupOpponentPhotoFallback" class="text-xs text-slate-500">No photo</div>
+              <img id="matchupOpponentPhoto" src="" alt="Opponent photo" class="hidden w-full h-full object-cover"/>
+            </div>
           </div>
 
-          <div class="flex items-center justify-between text-xs text-slate-400">
+          <div class="flex items-center gap-2 text-xs text-slate-400">
             <span>Your score</span>
-            <span class="font-semibold text-slate-100" id="matchupYourScore">—</span>
+            <span class="text-lg font-semibold text-slate-100" id="matchupYourScore">—</span>
           </div>
 
           <div id="matchupDiff" class="text-sm font-semibold">—</div>
@@ -613,6 +622,13 @@ function getPlayerNameById(id) {
   if (match && match.name) return match.name;
 
   return 'Opponent';
+}
+
+function getPlayerById(id) {
+  if (!id || id === 'YOU') return null;
+
+  const players = Array.isArray(state.players) ? state.players : [];
+  return players.find(p => p && p.id === id) || null;
 }
 
 
@@ -1065,8 +1081,10 @@ function renderTodaysMatchup(todayKeyStr, yourScore){
   const oppScoreEl= $('matchupOpponentScore');
   const yourScoreEl = $('matchupYourScore');
   const diffEl    = $('matchupDiff');
+  const oppPhotoEl = $('matchupOpponentPhoto');
+  const oppPhotoFallbackEl = $('matchupOpponentPhotoFallback');
 
-  if (!detailsEl || !emptyEl || !oppNameEl || !oppScoreEl || !yourScoreEl || !diffEl) return;
+  if (!detailsEl || !emptyEl || !oppNameEl || !oppScoreEl || !yourScoreEl || !diffEl || !oppPhotoEl || !oppPhotoFallbackEl) return;
 
   const matchups = Array.isArray(state.matchups) ? state.matchups : [];
   const matchup = matchups.find(m => m && m.date === todayKeyStr && (m.playerAId === 'YOU' || m.playerBId === 'YOU'));
@@ -1083,15 +1101,30 @@ function renderTodaysMatchup(todayKeyStr, yourScore){
   const oppScoreRaw = youAreA ? matchup.scoreB : matchup.scoreA;
   const yourScoreSaved = youAreA ? matchup.scoreA : matchup.scoreB;
 
+  const oppPlayer = getPlayerById(oppId);
+
   const oppScoreNum = Number(oppScoreRaw);
   const safeOppScore = Number.isFinite(oppScoreNum) ? oppScoreNum : 0;
   const safeYourScore = Number.isFinite(yourScore)
     ? yourScore
     : (Number.isFinite(yourScoreSaved) ? yourScoreSaved : 0);
 
-  oppNameEl.textContent = getPlayerNameById(oppId);
+  const oppName = getPlayerNameById(oppId);
+  oppNameEl.textContent = oppName;
   oppScoreEl.textContent = safeOppScore.toFixed(1);
   yourScoreEl.textContent = safeYourScore.toFixed(1);
+
+  if (oppPlayer && oppPlayer.imageData) {
+    oppPhotoEl.src = oppPlayer.imageData;
+    oppPhotoEl.alt = `${oppName} photo`;
+    oppPhotoEl.classList.remove('hidden');
+    oppPhotoFallbackEl.classList.add('hidden');
+  } else {
+    oppPhotoEl.src = '';
+    oppPhotoEl.classList.add('hidden');
+    oppPhotoFallbackEl.textContent = oppName ? oppName.charAt(0).toUpperCase() : 'No photo';
+    oppPhotoFallbackEl.classList.remove('hidden');
+  }
 
   diffEl.className = 'text-sm font-semibold';
   const diff = Number((safeYourScore - safeOppScore).toFixed(1));
