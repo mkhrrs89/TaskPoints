@@ -74,8 +74,8 @@
 }
 
 
-    .habitRow{display:grid;grid-template-columns:1fr repeat(7,36px);gap:.5rem;align-items:center}
-    .habitDay{height:36px;border-radius:10px;border:1px solid var(--border);display:grid;place-items:center;font-size:12px;cursor:pointer}
+    .habitRow{display:grid;grid-template-columns:1fr repeat(7,40px);gap:.65rem;align-items:center}
+    .habitDay{width:40px;height:38px;border-radius:10px;border:1px solid var(--border);display:grid;place-items:center;font-size:12px;cursor:pointer}
     .habitDay.on{background:#22c55e1a;border-color:#16a34a}
   </style>
 </head>
@@ -112,9 +112,29 @@
     <!-- Habits -->
     <div class="glass mb-6">
       <h2 class="font-bold mb-2">Habits (week of <span id="weekLabel"></span>)</h2>
-      <div class="grid gap-2 text-sm muted mb-2" id="habitWeekLabels"></div>
-      <div id="habitsList" class="grid gap-2"></div>
-      <div id="habitsEmpty" class="muted text-sm">No habits yet.</div>
+
+      <div class="space-y-5">
+        <section>
+          <h3 class="font-semibold mb-2">Habits</h3>
+          <div class="grid gap-2 text-sm muted mb-2" id="habitWeekLabels"></div>
+          <div id="habitsList" class="grid gap-2"></div>
+          <div id="habitsEmpty" class="muted text-sm">No habits yet.</div>
+        </section>
+
+        <section>
+          <h3 class="font-semibold mb-2">Vices</h3>
+          <div class="grid gap-2 text-sm muted mb-2" id="vicesWeekLabels"></div>
+          <div id="vicesList" class="grid gap-2"></div>
+          <div id="vicesEmpty" class="muted text-sm">No vices yet.</div>
+        </section>
+
+        <section>
+          <h3 class="font-semibold mb-2">Retired</h3>
+          <div class="grid gap-2 text-sm muted mb-2" id="retiredWeekLabels"></div>
+          <div id="retiredList" class="grid gap-2"></div>
+          <div id="retiredEmpty" class="muted text-sm">No retired habits or vices.</div>
+        </section>
+      </div>
     </div>
 
     <!-- Flex Actions (this week) -->
@@ -203,55 +223,87 @@ function todayKey(){ const d=new Date(); d.setHours(0,0,0,0); return dateKey(d);
 /* -------- Habits for arbitrary week -------- */
 function renderHabits(baseDate){
   state=load();
-  const row=$('habitWeekLabels'); row.innerHTML='';
   const days=weekDays(baseDate);
-  const labels=document.createElement('div');
-  labels.className='habitRow';
-  labels.innerHTML=`<div></div>` + days.map(d=>`<div class="text-center">${d.label.split(' ')[0]}</div>`).join('');
-  row.appendChild(labels);
 
-  const wrap=$('habitsList'); const empty=$('habitsEmpty'); wrap.innerHTML='';
-  if(!state.habits.length){ empty.style.display='block'; return; }
-  empty.style.display='none';
+  const sections = [
+    {
+      title: 'habit',
+      items: state.habits.filter(h => (h.category||'habit') !== 'vice' && !h.retired),
+      labelsId: 'habitWeekLabels',
+      listId: 'habitsList',
+      emptyId: 'habitsEmpty'
+    },
+    {
+      title: 'vice',
+      items: state.habits.filter(h => (h.category||'habit') === 'vice' && !h.retired),
+      labelsId: 'vicesWeekLabels',
+      listId: 'vicesList',
+      emptyId: 'vicesEmpty'
+    },
+    {
+      title: 'retired',
+      items: state.habits.filter(h => h.retired),
+      labelsId: 'retiredWeekLabels',
+      listId: 'retiredList',
+      emptyId: 'retiredEmpty'
+    }
+  ];
 
-  const habits = state.habits.slice().sort((a,b)=>(b.pointsPerDay||0)-(a.pointsPerDay||0));
-
-habits.forEach(h=>{
-  h.doneKeys = Array.isArray(h.doneKeys)?h.doneKeys:[];
-  const row = document.createElement('div');
-  row.className = 'habitRow';
-
-  const daysHtml = days.map(d=>{
-    const on = h.doneKeys.includes(d.key);
-    return `<div class="habitDay ${on?'on':''}" data-habit="${h.id}" data-day="${d.key}">${d.date.getDate()}</div>`;
-  }).join('');
-
-  row.innerHTML = `
-    <div class="font-semibold truncate" title="${escapeHtml(h.name)}">
-      ${escapeHtml(h.name)}
-      <span class="text-xs text-zinc-400">(${h.pointsPerDay||0} pts/day)</span>
-      ${h.retired ? `<span class="ml-2 text-[11px] text-amber-400">(Retired)</span>` : ''}
-      <button class="btn btn-ghost text-[11px] ml-2" data-habit-toggle="${h.id}">
-        ${h.retired ? 'Unretire' : 'Retire'}
-      </button>
-    </div>
-    ${daysHtml}
-  `;
-
-  wrap.appendChild(row);
-});
-
-
-  wrap.querySelectorAll('.habitDay').forEach(el=>{
-    el.onclick=()=>toggleHabitDay(el.getAttribute('data-habit'), el.getAttribute('data-day'), baseDate);
-  });
-  wrap.querySelectorAll('[data-habit-toggle]').forEach(btn=>{
-    btn.onclick = () => toggleHabitRetired(btn.getAttribute('data-habit-toggle'), baseDate);
-  });
+  sections.forEach(section => renderHabitSection(section, days, baseDate));
 
   const start = startOfWeek(baseDate);
   const end = addDays(start,6);
   $('weekLabel').textContent = `${niceDate(start)} – ${niceDate(end)}`;
+}
+
+function renderHabitSection(section, days, baseDate){
+  const labelsWrap=$(section.labelsId); const list=$(section.listId); const empty=$(section.emptyId);
+  if(!labelsWrap||!list||!empty) return;
+
+  labelsWrap.innerHTML='';
+  list.innerHTML='';
+
+  if(!section.items.length){ empty.style.display='block'; return; }
+  empty.style.display='none';
+
+  const labels=document.createElement('div');
+  labels.className='habitRow';
+  labels.innerHTML=`<div></div>` + days.map(d=>`<div class="text-center text-xs text-zinc-400">${d.label.split(' ')[0]}</div>`).join('');
+  labelsWrap.appendChild(labels);
+
+  const sorted = section.items.slice().sort((a,b)=>(b.pointsPerDay||0)-(a.pointsPerDay||0));
+
+  sorted.forEach(h=>{
+    h.doneKeys = Array.isArray(h.doneKeys)?h.doneKeys:[];
+    const row = document.createElement('div');
+    row.className = 'habitRow';
+
+    const daysHtml = days.map(d=>{
+      const on = h.doneKeys.includes(d.key);
+      return `<div class="habitDay ${on?'on':''}" data-habit="${h.id}" data-day="${d.key}">${d.date.getDate()}</div>`;
+    }).join('');
+
+    row.innerHTML = `
+      <div class="font-semibold truncate" title="${escapeHtml(h.name)}">
+        ${escapeHtml(h.name)}
+        <span class="text-xs text-zinc-400">(${h.pointsPerDay||0} pts/day)</span>
+        ${h.retired ? `<span class="ml-2 text-[11px] text-amber-400">(Retired)</span>` : ''}
+        <button class="btn btn-ghost text-[11px] ml-2" data-habit-toggle="${h.id}">
+          ${h.retired ? 'Unretire' : 'Retire'}
+        </button>
+      </div>
+      ${daysHtml}
+    `;
+
+    list.appendChild(row);
+  });
+
+  list.querySelectorAll('.habitDay').forEach(el=>{
+    el.onclick=()=>toggleHabitDay(el.getAttribute('data-habit'), el.getAttribute('data-day'), baseDate);
+  });
+  list.querySelectorAll('[data-habit-toggle]').forEach(btn=>{
+    btn.onclick = () => toggleHabitRetired(btn.getAttribute('data-habit-toggle'), baseDate);
+  });
 }
 function toggleHabitDay(habitId, dayKey, baseDate){
   state = load();
