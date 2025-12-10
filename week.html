@@ -112,29 +112,23 @@
     <!-- Habits -->
     <div class="glass mb-6">
       <h2 class="font-bold mb-2">Habits (week of <span id="weekLabel"></span>)</h2>
+      <div class="grid gap-2 text-sm muted mb-2" id="habitWeekLabels"></div>
+      <div id="habitsList" class="grid gap-2"></div>
+      <div id="habitsEmpty" class="muted text-sm">No habits yet.</div>
+    </div>
 
-      <div class="space-y-5">
-        <section>
-          <h3 class="font-semibold mb-2">Habits</h3>
-          <div class="grid gap-2 text-sm muted mb-2" id="habitWeekLabels"></div>
-          <div id="habitsList" class="grid gap-2"></div>
-          <div id="habitsEmpty" class="muted text-sm">No habits yet.</div>
-        </section>
+    <div class="glass mb-6">
+      <h2 class="font-bold mb-2">Vices (week of <span id="vicesWeekLabel"></span>)</h2>
+      <div class="grid gap-2 text-sm muted mb-2" id="vicesWeekLabels"></div>
+      <div id="vicesList" class="grid gap-2"></div>
+      <div id="vicesEmpty" class="muted text-sm">No vices yet.</div>
+    </div>
 
-        <section>
-          <h3 class="font-semibold mb-2">Vices</h3>
-          <div class="grid gap-2 text-sm muted mb-2" id="vicesWeekLabels"></div>
-          <div id="vicesList" class="grid gap-2"></div>
-          <div id="vicesEmpty" class="muted text-sm">No vices yet.</div>
-        </section>
-
-        <section>
-          <h3 class="font-semibold mb-2">Retired</h3>
-          <div class="grid gap-2 text-sm muted mb-2" id="retiredWeekLabels"></div>
-          <div id="retiredList" class="grid gap-2"></div>
-          <div id="retiredEmpty" class="muted text-sm">No retired habits or vices.</div>
-        </section>
-      </div>
+    <div class="glass mb-6">
+      <h2 class="font-bold mb-2">Retired (week of <span id="retiredWeekLabel"></span>)</h2>
+      <div class="grid gap-2 text-sm muted mb-2" id="retiredWeekLabels"></div>
+      <div id="retiredList" class="grid gap-2"></div>
+      <div id="retiredEmpty" class="muted text-sm">No retired habits or vices.</div>
     </div>
 
     <!-- Flex Actions (this week) -->
@@ -253,7 +247,11 @@ function renderHabits(baseDate){
 
   const start = startOfWeek(baseDate);
   const end = addDays(start,6);
-  $('weekLabel').textContent = `${niceDate(start)} – ${niceDate(end)}`;
+  const label = `${niceDate(start)} – ${niceDate(end)}`;
+  ['weekLabel','vicesWeekLabel','retiredWeekLabel'].forEach(id=>{
+    const el=$(id);
+    if(el) el.textContent = label;
+  });
 }
 
 function renderHabitSection(section, days, baseDate){
