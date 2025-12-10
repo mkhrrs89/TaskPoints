@@ -292,6 +292,11 @@
       padding:10px 14px;
     }
 
+/* Flex Actions: give each row its own bubble */
+#flexList .glass{
+  padding:10px 12px;
+}
+
 @media (max-width:640px){
   header .row{display:block}
   .toolbar{justify-content:flex-start;margin-top:.5rem;overflow-x:auto}
