@@ -14,6 +14,7 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='%230b0d10'/><text x='50' y='62' font-size='60' text-anchor='middle' fill='white'>TP</text></svg>">
 
   <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="styles.css">
 
   <style>
     body{
@@ -40,26 +41,6 @@
         border-color:rgb(39 39 42);
         background:rgba(24,24,27,0.9);
       }
-    }
-
-    .top-nav-btn{
-      border-radius:999px;
-      padding:6px 10px;
-      font-size:11px;
-      border:1px solid rgba(148,163,184,0.8);
-      background:rgba(255,255,255,0.7);
-    }
-    @media (prefers-color-scheme: dark){
-      .top-nav-btn{
-        background:rgba(24,24,27,0.9);
-        color:#e5e7eb;
-        border-color:rgba(75,85,99,0.9);
-      }
-    }
-    .top-nav-btn-active{
-      background:linear-gradient(135deg,#4f46e5,#22c55e);
-      color:white;
-      border:none;
     }
 
     table{
@@ -114,13 +95,13 @@
         </div>
       </a>
       <div class="flex flex-wrap items-center gap-2">
-        <a href="index.html" class="top-nav-btn">Main</a>
-        <a href="log.html"    class="top-nav-btn">Log</a>
-<a href="week.html"        class="top-nav-btn">Week</a>
-<a href="game.html"        class="top-nav-btn">Game</a>
-<a href="matchups.html"    class="top-nav-btn">Matchups</a>
-<a href="game_ratings.html" class="top-nav-btn top-nav-btn-active">Ratings</a>
-<a href="updates.html"     class="top-nav-btn">Updates</a>
+        <a href="index.html"        class="btn btn-teal btn-toolbar">Main</a>
+        <a href="log.html"          class="btn btn-teal btn-toolbar">Log</a>
+        <a href="week.html"         class="btn btn-teal btn-toolbar">Week</a>
+        <a href="game.html"         class="btn btn-teal btn-toolbar">Game</a>
+        <a href="matchups.html"     class="btn btn-teal btn-toolbar">Matchups</a>
+        <a href="game_ratings.html" class="btn btn-teal btn-toolbar">Ratings</a>
+        <a href="updates.html"      class="btn btn-teal btn-toolbar">Updates</a>
 
       </div>
     </header>
