@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>TaskPoints — Log</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='%230b0d10'/><text x='50' y='62' font-size='60' text-anchor='middle' fill='white'>TP</text></svg>">
+<script src="https://cdn.tailwindcss.com"></script>
+
+
+<link rel="stylesheet" href="styles.css">
+
+
+
+  <style>
+    :root{--bg:#0b0d10;--border:#202830;--muted:#8b98a5}
+    body{background:var(--bg);color:#e6edf6}
+    @media (prefers-color-scheme:light){body{background:#fafafa;color:#0b1220}}
+    .glass{border:1px solid var(--border);background:rgba(255,255,255,.06);border-radius:16px;padding:16px}
+    @media (prefers-color-scheme:light){.glass{background:#fff;border-color:#e5e7eb}}
+    .btn {
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:6px 8px;
+  font-size:11px;
+}
+/* Smaller buttons ONLY inside the Actions column */
+.row .btn {
+  padding: 2px 4px !important;
+  font-size: 10px !important;
+  border-radius: 6px !important;
+}
+
+    .muted{color:var(--muted)}
+.row{
+  display:grid;
+
+  /* Date | Title | Points | Source | Actions | ID */
+  grid-template-columns:140px 1fr 65px 100px 115px 130px;
+
+  gap:.1rem;
+  align-items:center;
+
+  padding:0;              /* no extra vertical padding */
+  font-size:13px;
+  line-height:1.1;
+}
+
+/* Don’t let the date wrap to a second line */
+.row > div:first-child {
+  white-space: nowrap;
+}
+
+
+
+.row > div:nth-child(5){
+  text-align:center;
+}
+
+/* Keep desktop layout, scroll horizontally if needed */
+.row {
+  min-width: 780px;     /* less wide = visually tighter */
+}
+
+    /* === Main Page Top Nav Button Styles === */
+.top-nav-btn{
+  border-radius:999px;
+  padding:6px 10px;
+  font-size:11px;
+  border:1px solid rgba(75,85,99,0.7);
+  background:linear-gradient(180deg, #0f4d4d, #0a2f2f)
+  color:#fff
+}
+
+@media (prefers-color-scheme: light){
+  .top-nav-btn{
+    background:rgba(240,245,255,0.8);
+    color:#1e293b;
+    border-color:rgba(148,163,184,0.8);
+  }
+}
+
+/* Highlighted nav button (active page) */
+.top-nav-btn-active{
+  background:rgba(12,84,96,0.75);  /* your teal blob color */
+  color:white;
+  border:none;
+}
+
+/* Mobile tweaks: prevent overlap + shrink text a bit */
+@media (max-width: 640px) {
+  .row{
+    font-size:11px;      /* smaller text on phones */
+    line-height:1.3;     /* more breathing room so lines don’t overlap */
+    padding:2px 0;       /* tiny bit of vertical padding so it feels clean */
+  }
+
+  /* Allow date to wrap on mobile instead of cramming */
+  .row > div:first-child {
+    white-space: normal;
+  }
+}
+
+
+  </style>
+
+
+</head>
+
+<body class="min-h-screen">
+  <div class="mx-auto max-w-6xl p-4 sm:p-6">
+
+<header class="flex items-center justify-between mb-4 gap-3 flex-wrap">
+  <h1 class="text-2xl font-extrabold">Log</h1>
+  <div class="flex gap-2 flex-wrap items-center">
+    <button id="sleepFilterBtn" class="btn btn-ghost btn-toolbar">Sleep Only: Off</button>
+
+    <a href="index.html"   class="btn btn-teal btn-toolbar">Main</a>
+    <a href="week.html"    class="btn btn-teal btn-toolbar">Week</a>
+    <a href="game.html"    class="btn btn-teal btn-toolbar">Game</a>
+    <a href="updates.html" class="btn btn-teal btn-toolbar">Updates</a>
+  </div>
+
+</header>
+
+
+<div class="glass overflow-x-auto">
+<div class="row font-semibold mb-2">
+  <div>Date</div>
+  <div>Title</div>
+  <div>Points</div>
+  <div>Source</div>
+  <div>Actions</div>
+  <div>ID</div>
+</div>
+
+
+      <div id="logList" class="grid gap-0"></div>
+
+      <div id="empty" class="muted text-sm">No completions yet.</div>
+    </div>
+
+    <footer class="mt-10 text-xs muted text-right">v0.24.3 — 2025-11-25 12:35</footer>
+  </div>
+
+<script>
+const STORAGE_KEY="taskpoints_v1";
+const $=id=>document.getElementById(id);
+
+function sleepBonus(score) {
+  if (score >= 100) return 3;
+  if (score >= 98) return 2;
+  if (score >= 95) return 1;
+  return 0;
+}
+
+
+function load(){ 
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) {
+      return {
+        tasks:      [],
+        completions:[],
+        players:    [],
+        habits:     [],
+        flexActions:[],
+        matchups:   [],
+        gameHistory:[]
+      };
+    }
+
+    const p = JSON.parse(raw);
+    return {
+      tasks:       Array.isArray(p.tasks)       ? p.tasks       : [],
+      completions: Array.isArray(p.completions) ? p.completions : [],
+      players:     Array.isArray(p.players)     ? p.players     : [],
+      habits:      Array.isArray(p.habits)      ? p.habits      : [],
+      flexActions: Array.isArray(p.flexActions) ? p.flexActions : [],
+      matchups:    Array.isArray(p.matchups)    ? p.matchups    : [],
+      gameHistory: Array.isArray(p.gameHistory) ? p.gameHistory : []
+    };
+  } catch {
+    return {
+      tasks:      [],
+      completions:[],
+      players:    [],
+      habits:     [],
+      flexActions:[],
+      matchups:   [],
+      gameHistory:[]
+    };
+  }
+}
+
+
+let state = load();
+let sleepOnly = false; // 👈 new flag
+
+function migrateSleepEntriesForBonus() {
+  if (!state || !Array.isArray(state.completions)) return;
+
+  let changed = false;
+
+  state.completions.forEach(c => {
+    if (!c || !c.title || !c.title.startsWith('Sleep Score')) return;
+
+    const match = c.title.match(/\((\d+)\)/);
+    if (!match) return;
+
+    const raw = Number(match[1]);
+    if (!Number.isFinite(raw)) return;
+
+    const base  = raw / 10;
+    const bonus = sleepBonus(raw);
+    const newPts = base + bonus;
+
+    if (Math.abs((Number(c.points) || 0) - newPts) > 0.0001) {
+      c.points = newPts;
+      changed = true;
+    }
+  });
+
+  if (changed) {
+    save();
+  }
+}
+
+migrateSleepEntriesForBonus();
+
+function save(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+
+function render(){
+  const list=$('logList'), empty=$('empty'); 
+  list.innerHTML='';
+
+  const all = state.completions || [];
+  // Optional filter: only show sleep scores when sleepOnly is true
+  const comps = sleepOnly
+    ? all.filter(c => c.title && c.title.startsWith('Sleep Score'))
+    : all;
+
+  if(!comps.length){
+    empty.style.display='block';
+    return;
+  }
+  empty.style.display='none';
+
+  comps
+    .slice()
+    .sort((a,b)=> new Date(b.completedAtISO)-new Date(a.completedAtISO))
+    .forEach(c=>{
+      const row=document.createElement('div'); 
+      row.className='row text-sm';
+
+      const isHabit = (c.source === 'habit');
+      const isFlex  = (c.source === 'flex');
+      const isSleep = c.title && c.title.startsWith('Sleep Score');
+      const isWork = c.source === 'work';
+      const src = isHabit ? 'Habit' : isFlex ? 'Flex' : isWork ? 'Work' : 'Task';
+      const canDelete = (src === 'Task' || src === 'Flex'); // only tasks + flex get an X
+      const canEditDate = !isHabit;      // allow date-edit for tasks + sleep + flex
+
+
+row.innerHTML = `
+  <div>${new Date(c.completedAtISO).toLocaleString()}</div>
+  <div>${escapeHtml(c.title)}</div>
+  <div class="font-semibold">${(c.points||0).toLocaleString()}</div>
+  <div>${src}</div>
+  <div class="flex gap-1 justify-center">
+    ${canEditDate ? `<button class="btn" data-edit-date-id="${c.id}">📅</button>` : ''}
+    ${isSleep ? `<button class="btn" data-edit-sleep-id="${c.id}">✎</button>` : ''}
+    ${canDelete ? `<button class="btn" data-del-id="${c.id}">✕</button>` : ''}
+  </div>
+  <div class="text-xs text-zinc-400 truncate">${c.id}</div>
+`;
+
+
+
+list.appendChild(row);
+
+// Divider line between entries (very tight)
+const divider = document.createElement('div');
+divider.className = 'h-px bg-zinc-800 my-px opacity-40';
+list.appendChild(divider);
+
+
+    });
+
+  // Hook up delete buttons
+  list.querySelectorAll('button[data-del-id]').forEach(btn=>{
+    btn.onclick = () => deleteCompletion(btn.getAttribute('data-del-id'));
+  });
+
+  // Hook up edit-sleep buttons
+  list.querySelectorAll('button[data-edit-sleep-id]').forEach(btn=>{
+    btn.onclick = () => editSleepScore(btn.getAttribute('data-edit-sleep-id'));
+  });
+
+  // Hook up edit-date buttons
+  list.querySelectorAll('button[data-edit-date-id]').forEach(btn=>{
+    btn.onclick = () => editCompletionDate(btn.getAttribute('data-edit-date-id'));
+  });
+}
+
+function escapeHtml(s){ 
+  return String(s).replace(/[&<>"']/g, m=>({
+    '&':'&amp;',
+    '<':'&lt;',
+    '>':'&gt;',
+    '"':'&quot;',
+    "'":'&#039;'
+  }[m]));
+}
+
+function deleteCompletion(id){
+  const idx = state.completions.findIndex(c=>c.id===id);
+  if(idx===-1) return;
+
+  const c = state.completions[idx];
+
+  // We never show delete for habits, but guard anyway
+  if(c.source === 'habit') return;
+
+  if(!confirm('Delete this completed task from the log and remove its points?')) return;
+
+  // 1) Remove this completion from the log
+  state.completions.splice(idx,1);
+
+  // 2) If it was tied to a task, un-complete that task so it comes back
+  if(c.taskId){
+    const t = state.tasks.find(t=>t.id===c.taskId);
+    if(t){
+      t.completedAtISO = null;
+    }
+  }
+
+  // 3) Save and re-render the log
+  save();
+  render();
+}
+
+function editCompletionDate(id){
+  const entry = state.completions.find(c => c.id === id);
+  if (!entry) return;
+
+  const oldDate = new Date(entry.completedAtISO);
+  if (isNaN(oldDate)) {
+    alert('This entry has an invalid date.');
+    return;
+  }
+
+  // Pre-fill with current completion date as YYYY-MM-DD
+  const current = oldDate.toISOString().slice(0, 10);
+  const input = prompt('Edit completion date (YYYY-MM-DD):', current);
+  if (input === null) return; // user cancelled
+
+  // Basic format check
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input)) {
+    alert('Please use the format YYYY-MM-DD (e.g. 2025-11-23).');
+    return;
+  }
+
+  const newDate = new Date(input + 'T12:00:00');
+  if (isNaN(newDate)) {
+    alert('Invalid date.');
+    return;
+  }
+
+  // Update completion timestamp (normalized to noon for safety)
+  entry.completedAtISO = newDate.toISOString();
+
+  // If linked to a task, keep that task's completedAtISO in sync
+  if (entry.taskId) {
+    const t = state.tasks.find(t => t.id === entry.taskId);
+    if (t) {
+      t.completedAtISO = entry.completedAtISO;
+    }
+  }
+
+  save();
+  render();
+}
+
+function editSleepScore(id){
+  const entry = state.completions.find(c => c.id === id);
+  if (!entry) return;
+
+  const match = entry.title.match(/\((\d+)\)/);
+  const currentScore = match ? match[1] : '';
+
+  const newScore = prompt('Edit sleep score for this entry (0–100):', currentScore);
+  if (newScore === null) return; // user pressed cancel
+
+  const raw = Number(newScore);
+  if (isNaN(raw) || raw < 0 || raw > 100) {
+    alert('Invalid score. Please enter a number between 0 and 100.');
+    return;
+  }
+
+  entry.title = `Sleep Score (${raw})`;
+entry.points = (raw / 10) + sleepBonus(raw); // keep in sync with main-page logic
+
+
+  save();
+  render();
+}
+
+
+render();
+
+const sleepBtn = $('sleepFilterBtn');
+sleepBtn.onclick = () => {
+  sleepOnly = !sleepOnly;
+  sleepBtn.textContent = sleepOnly ? 'Sleep Only: On' : 'Sleep Only: Off';
+  render();
+};
+
+
+</script>
+</body>
+</html>

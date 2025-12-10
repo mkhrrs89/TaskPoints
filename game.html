@@ -1,0 +1,1746 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>TaskPoints — Game</title>
+
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="TaskPoints" />
+
+  <!-- Simple TP icon -->
+  <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='256' height='256'><rect width='256' height='256' fill='%230b0d10'/><text x='128' y='160' text-anchor='middle' font-size='150' fill='white'>TP</text></svg>">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='%230b0d10'/><text x='50' y='62' font-size='60' text-anchor='middle' fill='white'>TP</text></svg>">
+
+  <script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="styles.css">
+
+  <style>
+    body{
+      background:#fafafa;
+      color:#111827;
+    }
+    @media (prefers-color-scheme: dark) {
+      body{
+        background:#0a0a0a;
+        color:#fafafa;
+      }
+    }
+
+/* MOBILE ONLY: 2-column player cards in Card View */
+@media (max-width: 640px) {
+  #playersList.card-view {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+
+.player-img-frame {
+  border-radius: 0;
+  padding: 8px;
+  background: linear-gradient(to bottom, #f4f4f5, #71717a);
+  margin: -6px -6px 8px;
+}
+
+
+.player-img-inner {
+  background: #000;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+
+  padding: 3px; 
+  border-radius: 0;
+
+}
+
+/* extra safety: make sure the image itself never gets rounded */
+.player-img-inner > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 0;
+  display: block;
+}
+
+/* Desktop & mobile: hide content + rotate chevron when collapsed */
+.mobile-collapsible[data-collapsed="true"] .mobile-collapsible-body {
+  display: none;
+}
+
+.mobile-collapsible[data-collapsed="true"] .mobile-collapsible-chevron {
+  transform: rotate(-90deg);
+}
+
+
+/* Mobile tweaks */
+@media (max-width: 640px) {
+  /* 2-column card view grid on mobile */
+  #playersList {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* Collapsible cards (Create Player + Stats Guide) */
+  .mobile-collapsible-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .mobile-collapsible-header h2 {
+    margin-bottom: 0;
+  }
+
+  .mobile-collapsible-body {
+    margin-top: 0.5rem;
+  }
+
+
+
+  .mobile-collapsible[data-collapsed="true"] .mobile-collapsible-body {
+    display: none;
+  }
+
+  .mobile-collapsible-chevron {
+    font-size: 0.8rem;
+    opacity: 0.7;
+    transition: transform 0.2s ease;
+  }
+
+  .mobile-collapsible[data-collapsed="true"] .mobile-collapsible-chevron {
+    transform: rotate(-90deg);
+  }
+}
+
+
+
+    .card{
+      border:1px solid rgb(228 228 231);
+      background:rgba(255,255,255,0.85);
+      border-radius:16px;
+      padding:16px;
+      box-shadow:0 10px 30px rgba(0,0,0,0.12);
+      backdrop-filter:blur(10px);
+    }
+    @media (prefers-color-scheme: dark) {
+      .card{
+        border-color:rgb(39 39 42);
+        background:rgba(24,24,27,0.9);
+      }
+    }
+
+    .scrollbar-thin{
+      scrollbar-width:thin;
+    }
+    .scrollbar-thin::-webkit-scrollbar{
+      height:6px;
+      width:6px;
+    }
+    .scrollbar-thin::-webkit-scrollbar-thumb{
+      background:rgba(148,163,184,0.8);
+      border-radius:999px;
+    }
+
+/* Fix Create Player inputs in new split layout */
+.create-player input,
+.create-player textarea,
+.create-player select {
+  max-width: 100%;
+}
+
+.record-badge{
+  border-radius:999px;
+  padding:1px 8px;
+  font-size:11px;
+  display:inline-flex;
+  align-items:center;
+  gap:3px;
+}
+
+
+.btn-toolbar{
+  padding:6px 8px;
+  font-size:11px;
+  border-radius:999px;
+}
+
+    /* Make form fields readable in both light & dark */
+    input, select, textarea{
+      background: rgba(255,255,255,0.95);
+      color:#111827;
+    }
+    @media (prefers-color-scheme: dark) {
+      input, select, textarea{
+        background: rgba(39,39,42,0.95);
+        color:#fafafa;
+      }
+    }
+  </style>
+</head>
+<body class="min-h-screen">
+  <div class="mx-auto max-w-6xl p-4 sm:p-6">
+
+    <!-- Header / nav -->
+    <header class="flex flex-wrap items-center justify-between gap-3 mb-4">
+      <a href="index.html" class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-2xl grid place-items-center bg-black text-white font-bold">TP</div>
+        <div>
+          <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight">TaskPoints</h1>
+        </div>
+      </a>
+<div class="flex flex-wrap items-center gap-2">
+  <a href="index.html" class="btn btn-teal btn-toolbar">Main</a>
+
+  <a href="log.html"    class="btn btn-teal btn-toolbar">Log</a>
+<a href="week.html"       class="btn btn-teal btn-toolbar">Week</a>
+<a href="game.html"       class="btn btn-teal btn-toolbar">Game</a>
+<a href="matchups.html"   class="btn btn-teal btn-toolbar">Matchups</a>
+<a href="game_ratings.html" class="btn btn-teal btn-toolbar">Ratings</a>
+<a href="updates.html"    class="btn btn-teal btn-toolbar">Updates</a>
+
+</div>
+
+    </header>
+
+<!-- Player Stats Guide -->
+<section id="playerStatsGuide" class="card mb-6 mobile-collapsible" data-collapsed="false">
+  <button type="button" class="mobile-collapsible-header">
+    <h2 class="font-semibold text-lg mb-2">Player Stats Guide</h2>
+    <span class="mobile-collapsible-chevron">▾</span>
+  </button>
+
+  <div class="mobile-collapsible-body">
+    <ul class="text-sm space-y-2">
+      <li><strong>PPD</strong>: Points per day in the TaskPoints app (includes habits, flex actions, sleep, etc.).</li>
+      <li><strong>AVG PPD</strong>: Long-term average PPD for that player.</li>
+      <li><strong>Baseline</strong>: Their “default” nightly performance.</li>
+      <li><strong>Variance</strong>: How swingy they are night-to-night.</li>
+      <li><strong>Momentum</strong>: How much recent good/bad nights affect next game.</li>
+      <li><strong>Risky</strong>: How much they chase boom-or-bust lines.</li>
+      <li><strong>Style</strong>: Just flavor text for now (can inform future sim tweaks).</li>
+    </ul>
+  </div>
+</section>
+
+
+<div class="grid gap-6 md:grid-cols-2 mb-6">
+
+<!-- LEFT: Create player -->
+<section class="card mb-6 mobile-collapsible" data-collapsed="false">
+  <button type="button" class="mobile-collapsible-header">
+    <h2 class="font-semibold text-lg mb-2">Create Player</h2>
+    <span class="mobile-collapsible-chevron">▾</span>
+  </button>
+
+  <div class="mobile-collapsible-body">
+    <form id="createPlayerForm" class="space-y-3">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <label class="text-xs muted">Name</label>
+          <input id="playerName" class="input mt-1" placeholder="Player name">
+        </div>
+
+        <div>
+          <label class="text-xs muted">Style (optional)</label>
+          <select id="playerStyle" class="input mt-1">
+            <option value="">Balanced (default)</option>
+            <option value="scorer">Scorer</option>
+            <option value="sharpshooter">Sharpshooter</option>
+            <option value="playmaker">Playmaker</option>
+            <option value="slasher">Slasher</option>
+            <option value="post">Post scorer</option>
+          </select>
+        </div>
+      </div>
+
+      <div>
+        <label class="text-xs muted">Notes</label>
+        <textarea id="playerNotes" class="input mt-1 h-20" placeholder="Optional notes"></textarea>
+      </div>
+
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div>
+          <label class="text-xs muted">Baseline</label>
+          <input id="playerBaseline" type="number" class="input mt-1" value="60">
+        </div>
+        <div>
+          <label class="text-xs muted">Variance</label>
+          <input id="playerVariance" type="number" class="input mt-1" value="40">
+        </div>
+        <div>
+          <label class="text-xs muted">Momentum</label>
+          <input id="playerMomentum" type="number" class="input mt-1" value="50">
+        </div>
+        <div>
+          <label class="text-xs muted">Risky (0–100)</label>
+          <input id="playerRisky" type="number" class="input mt-1" value="30">
+        </div>
+      </div>
+
+      <div>
+        <label class="text-xs muted">Photo (optional)</label>
+        <input id="playerImage" type="file" accept="image/*" class="mt-1 text-xs">
+        <p class="text-[11px] opacity-60 mt-1">
+          You’ll be able to crop this after selecting.
+        </p>
+      </div>
+
+      <div class="flex justify-end">
+        <button class="btn btn-success" type="submit">Add player</button>
+      </div>
+    </form>
+  </div>
+</section>
+
+  <!-- RIGHT: Simulate Today -->
+  <section class="card mb-6">
+    <h2 class="font-semibold text-lg mb-3">Simulate Today</h2>
+    <button
+      onclick="simulateToday()"
+      class="w-full btn btn-teal rounded-2xl px-4 py-2 font-semibold"
+    >
+      Run Simulation
+    </button>
+
+    <div id="simResults" class="mt-3 text-sm opacity-85"></div>
+  </section>
+
+</div>
+
+
+    <!-- Players list -->
+    <section class="mb-10">
+      <div class="flex items-center justify-between mb-3">
+        <div class="flex items-center gap-3">
+          <h2 class="text-lg font-semibold">Players</h2>
+
+          <!-- View toggle -->
+          <div class="inline-flex rounded-full border border-zinc-700 overflow-hidden text-xs">
+            <button
+              id="viewCardBtn"
+              type="button"
+              class="px-3 py-1 bg-zinc-800 text-white"
+            >
+              Card view
+            </button>
+            <button
+              id="viewGalleryBtn"
+              type="button"
+              class="px-3 py-1 bg-zinc-900/40"
+            >
+              Gallery view
+            </button>
+          </div>
+        </div>
+
+        <span id="playerCount" class="text-xs opacity-70"></span>
+      </div>
+
+      <!-- NOTE: we’ll control the grid classes from JS now -->
+      <div id="playersList" class="grid gap-4"></div>
+
+      <div id="noPlayersMsg" class="text-sm opacity-60 mt-3 hidden">
+        No players yet. Create your first fake hooper above.
+      </div>
+    </section>
+
+
+  <!-- Image cropping modal -->
+  <div id="cropModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 hidden">
+    <div class="bg-zinc-900 text-zinc-50 rounded-2xl shadow-xl w-full max-w-md mx-4 p-4 sm:p-5">
+      <h2 class="text-base sm:text-lg font-semibold mb-3">Crop player photo</h2>
+      <div class="w-full border border-zinc-700 rounded-xl overflow-hidden bg-black mb-3">
+        <canvas id="cropCanvas" class="block w-full"></canvas>
+      </div>
+      <div class="flex flex-wrap items-center gap-2 mb-3">
+        <span class="text-xs opacity-80 mr-1">Aspect:</span>
+        <button type="button" class="px-2 py-1 rounded-full text-xs border border-zinc-600 bg-zinc-800" data-aspect="1:1">Square</button>
+        <button type="button" class="px-2 py-1 rounded-full text-xs border border-zinc-600 bg-transparent hover:bg-zinc-800" data-aspect="2:3">2:3</button>
+        <button type="button" class="px-2 py-1 rounded-full text-xs border border-zinc-600 bg-transparent hover:bg-zinc-800" data-aspect="3:4">3:4</button>
+      </div>
+      <div class="mb-3">
+        <div class="flex items-center justify-between text-xs opacity-80 mb-1">
+          <span>Zoom</span>
+          <span id="cropZoomLabel"></span>
+        </div>
+        <input id="cropZoom" type="range" min="100" max="300" value="100" class="w-full">
+      </div>
+      <p class="text-[11px] opacity-70 mb-3">
+        Drag the image to reposition it inside the frame. Use the zoom slider to adjust how close it is. The result will be saved and used as the player photo.
+      </p>
+      <div class="flex justify-end gap-2">
+        <button type="button" id="cropCancelBtn" class="rounded-xl border border-zinc-500 px-3 py-1.5 text-xs sm:text-sm">
+          Cancel
+        </button>
+        <button type="button" id="cropApplyBtn" class="rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-1.5 text-xs sm:text-sm">
+          Apply crop
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+const STORAGE_KEY = "taskpoints_v1";
+const $ = (id) => document.getElementById(id);
+
+function loadState() {
+  // Base shape with all the shared keys we care about
+  let base = {
+    tasks: [],
+    completions: [],
+    habits: [],
+    players: [],
+    flexActions: [],
+    gameHistory: [],
+    matchups: []
+  };
+
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return base;
+
+    const parsed = JSON.parse(raw) || {};
+
+    base.tasks       = Array.isArray(parsed.tasks)       ? parsed.tasks       : [];
+    base.completions = Array.isArray(parsed.completions) ? parsed.completions : [];
+    base.habits      = Array.isArray(parsed.habits)      ? parsed.habits      : [];
+    base.players     = Array.isArray(parsed.players)     ? parsed.players     : [];
+    base.flexActions = Array.isArray(parsed.flexActions) ? parsed.flexActions : [];
+    base.gameHistory = Array.isArray(parsed.gameHistory) ? parsed.gameHistory : [];
+    base.matchups    = Array.isArray(parsed.matchups)    ? parsed.matchups    : [];
+  } catch (e) {
+    console.error("Failed to load state in game.html", e);
+  }
+
+  return base;
+}
+
+function saveState(s) {
+  // Make sure we always write a complete, normalized object
+  const payload = {
+    tasks:       Array.isArray(s.tasks)       ? s.tasks       : [],
+    completions: Array.isArray(s.completions) ? s.completions : [],
+    habits:      Array.isArray(s.habits)      ? s.habits      : [],
+    players:     Array.isArray(s.players)     ? s.players     : [],
+    flexActions: Array.isArray(s.flexActions) ? s.flexActions : [],
+    gameHistory: Array.isArray(s.gameHistory) ? s.gameHistory : [],
+    matchups:    Array.isArray(s.matchups)    ? s.matchups    : []
+  };
+
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+}
+
+
+const state = loadState();
+let editingPlayerId = null;
+let viewMode = "card"; // "card" | "gallery"
+
+
+
+    // --- Image cropper state ---
+    let cropState = null;
+    let cropCanvasEl = null;
+    let cropCtx = null;
+    let cropModalEl = null;
+    let cropZoomEl = null;
+    let cropZoomLabelEl = null;
+    let cropAspectButtons = [];
+
+    function initCropperElements(){
+      if (cropCanvasEl) return;
+      cropCanvasEl = document.getElementById("cropCanvas");
+      cropCtx = cropCanvasEl.getContext("2d");
+      cropModalEl = document.getElementById("cropModal");
+      cropZoomEl = document.getElementById("cropZoom");
+      cropZoomLabelEl = document.getElementById("cropZoomLabel");
+      cropAspectButtons = Array.from(document.querySelectorAll("#cropModal [data-aspect]"));
+
+      cropAspectButtons.forEach(btn=>{
+        btn.addEventListener("click", ()=>{
+          const val = btn.getAttribute("data-aspect");
+          setCropAspect(val);
+        });
+      });
+
+      cropZoomEl.addEventListener("input", ()=>{
+        if (!cropState) return;
+        const raw = Number(cropZoomEl.value)||100;
+        const scale = Math.max(cropState.minScale, raw/100);
+        cropState.scale = scale;
+        updateZoomLabel();
+        drawCrop();
+      });
+
+      const applyBtn = document.getElementById("cropApplyBtn");
+      const cancelBtn = document.getElementById("cropCancelBtn");
+      applyBtn.addEventListener("click", applyCrop);
+      cancelBtn.addEventListener("click", cancelCrop);
+
+      // Dragging
+      let isDragging = false;
+      let lastX = 0, lastY = 0;
+
+      function pointerDown(clientX, clientY){
+        if (!cropState) return;
+        isDragging = true;
+        lastX = clientX;
+        lastY = clientY;
+      }
+      function pointerMove(clientX, clientY){
+        if (!isDragging || !cropState) return;
+        const dx = clientX - lastX;
+        const dy = clientY - lastY;
+        lastX = clientX;
+        lastY = clientY;
+        cropState.offsetX += dx;
+        cropState.offsetY += dy;
+        drawCrop();
+      }
+      function pointerUp(){
+        isDragging = false;
+      }
+
+      cropCanvasEl.addEventListener("mousedown", (e)=>{
+        e.preventDefault();
+        pointerDown(e.clientX, e.clientY);
+      });
+      window.addEventListener("mousemove", (e)=>{
+        if (!isDragging) return;
+        pointerMove(e.clientX, e.clientY);
+      });
+      window.addEventListener("mouseup", pointerUp);
+
+      // Touch support
+      cropCanvasEl.addEventListener("touchstart", (e)=>{
+        const t = e.touches[0];
+        if (!t) return;
+        pointerDown(t.clientX, t.clientY);
+      }, {passive:true});
+      window.addEventListener("touchmove", (e)=>{
+        if (!isDragging) return;
+        const t = e.touches[0];
+        if (!t) return;
+        pointerMove(t.clientX, t.clientY);
+      }, {passive:true});
+      window.addEventListener("touchend", pointerUp);
+    }
+
+    function openImageCropperFromFile(file, callback){
+      initCropperElements();
+      if (!file){
+        callback(undefined);
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          startCropSession(img, callback);
+        };
+        img.src = reader.result;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    // NEW: open cropper for an existing data URL (already stored image)
+    function openImageCropperFromDataUrl(dataUrl, callback){
+      initCropperElements();
+      if (!dataUrl){
+        callback(undefined);
+        return;
+      }
+      const img = new Image();
+      img.onload = () => {
+        startCropSession(img, callback);
+      };
+      img.src = dataUrl;
+    }
+
+    function startCropSession(img, callback){
+      initCropperElements();
+      cropState = {
+        img,
+        callback,
+        aspectValue: "1:1",
+        aspectRatio: 1,
+        scale: 1,
+        minScale: 1,
+        offsetX: 0,
+        offsetY: 0
+      };
+      cropModalEl.classList.remove("hidden");
+      setCropAspect("1:1");
+    }
+
+    function setCropAspect(val){
+      if (!cropState || !cropCanvasEl) return;
+      cropState.aspectValue = val;
+
+      let ratio = 1; // width / height
+      if (val === "2:3") ratio = 2/3;
+      else if (val === "3:4") ratio = 3/4;
+      else ratio = 1;
+
+      cropState.aspectRatio = ratio;
+
+// smaller base size
+const baseWidth = 260; // or even 220 if you want to be aggressive
+const width = baseWidth;
+const height = Math.round(baseWidth / ratio);
+
+      cropCanvasEl.width = width;
+      cropCanvasEl.height = height;
+
+      const img = cropState.img;
+      const scaleX = width / img.width;
+      const scaleY = height / img.height;
+      const minScale = Math.max(scaleX, scaleY);
+
+      cropState.minScale = minScale;
+      cropState.scale = minScale;
+      cropState.offsetX = width / 2;
+      cropState.offsetY = height / 2;
+
+      cropZoomEl.min = String(Math.round(minScale * 100));
+      cropZoomEl.value = cropZoomEl.min;
+      cropZoomEl.max = String(Math.round(minScale * 100) + 200);
+      updateZoomLabel();
+      updateAspectButtons();
+      drawCrop();
+    }
+
+    function updateAspectButtons(){
+      if (!cropAspectButtons) return;
+      cropAspectButtons.forEach(btn=>{
+        const val = btn.getAttribute("data-aspect");
+        if (val === cropState.aspectValue){
+          btn.classList.add("bg-zinc-800");
+        } else {
+          btn.classList.remove("bg-zinc-800");
+        }
+      });
+    }
+
+    function updateZoomLabel(){
+      if (!cropZoomLabelEl || !cropState) return;
+      const percent = Math.round((cropState.scale / cropState.minScale) * 100);
+      cropZoomLabelEl.textContent = `${percent}%`;
+    }
+
+    function drawCrop(){
+      if (!cropState || !cropCanvasEl || !cropCtx) return;
+      const ctx = cropCtx;
+      const { img, scale, offsetX, offsetY } = cropState;
+      const cw = cropCanvasEl.width;
+      const ch = cropCanvasEl.height;
+
+      ctx.save();
+      ctx.clearRect(0,0,cw,ch);
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0,0,cw,ch);
+
+      const drawW = img.width * scale;
+      const drawH = img.height * scale;
+      const dx = offsetX - drawW/2;
+      const dy = offsetY - drawH/2;
+
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(img, dx, dy, drawW, drawH);
+
+      ctx.restore();
+    }
+
+    function cancelCrop(){
+      if (!cropModalEl) return;
+      cropModalEl.classList.add("hidden");
+      cropState = null;
+    }
+
+    function applyCrop(){
+      if (!cropState || !cropCanvasEl) return;
+      const dataUrl = cropCanvasEl.toDataURL("image/jpeg", 0.7);
+      const cb = cropState.callback;
+      cancelCrop();
+      if (typeof cb === "function"){
+        cb(dataUrl);
+      }
+    }
+
+function simulateToday() {
+  const todayKey = new Date().toISOString().slice(0,10); // "YYYY-MM-DD"
+
+  state.gameHistory = state.gameHistory || [];
+  state.matchups    = state.matchups    || [];
+
+  // Remove any existing scores + matchups for today so re-running is clean
+  state.gameHistory = state.gameHistory.filter(g => g.date !== todayKey);
+  state.matchups    = state.matchups.filter(m => m.date !== todayKey);
+
+  const scoresById = {};
+  const namesById  = {};
+
+  // --- 1) Sim AI players and save their individual scores (same logic as before) ---
+  for (const p of state.players) {
+    if (!p.baseline) continue;
+
+    const baseline = Number(p.baseline);
+    const variance = Number(p.variance);
+    const momentum = Number(p.momentum);
+
+    // Risky stored as 0–10 rating (or legacy 0–100)
+    let riskyRating = Number(p.risky);
+    if (isNaN(riskyRating)) riskyRating = 0;
+    const riskyNormalized = riskyRating > 10 ? riskyRating / 10 : riskyRating;
+
+    // 1. Base random variation
+    const variation = (Math.random() * 2 - 1) * variance;
+
+    // 2. Momentum bonus (small)
+    let momentumBonus = 0;
+    if (momentum && state.gameHistory.length) {
+      const y = state.gameHistory
+        .filter(g => g.playerId === p.id)
+        .sort((a,b) => b.date.localeCompare(a.date))[0];
+
+      if (y && y.date !== todayKey) {
+        momentumBonus = (y.score * (momentum / 100)) * 0.1;
+      }
+    }
+
+    // 3. Risky modifier (boom/bust based on riskyNormalized)
+    let riskyMod = 0;
+    if (Math.random() < riskyNormalized / 10) {
+      const boom = Math.random() < 0.5;
+      riskyMod = boom
+        ? variance * (0.5 + Math.random())
+        : -variance * (0.5 + Math.random());
+    }
+
+    const score = baseline + variation + momentumBonus + riskyMod;
+    const finalScore = Number(score.toFixed(1));
+
+    // Save per-player history
+    state.gameHistory.push({
+      id: crypto.randomUUID(),
+      date: todayKey,
+      playerId: p.id,
+      score: finalScore
+    });
+
+    scoresById[p.id] = finalScore;
+    namesById[p.id]  = p.name || "Unnamed";
+  }
+
+  // --- 2) Add YOU using your real TaskPoints points ---
+  const youScore = computeTodayPoints();
+  if (!isNaN(youScore)) {
+    scoresById["YOU"] = youScore;
+    namesById["YOU"]  = "You";
+  }
+
+  const ids = Object.keys(scoresById);
+
+  if (ids.length < 2) {
+    saveState(state);
+    $('simResults').innerHTML = `
+      <h3 class="font-semibold mb-1">Matchups for ${todayKey}</h3>
+      <div>Not enough players to create matchups.</div>
+    `;
+    renderPlayers();
+    return;
+  }
+
+  // --- 3) Randomly pair everyone into head-to-head matchups ---
+  // Fisher–Yates shuffle
+  for (let i = ids.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+  }
+
+  const todaysMatchups = [];
+
+  for (let i = 0; i + 1 < ids.length; i += 2) {
+    const aId = ids[i];
+    const bId = ids[i+1];
+
+    const scoreA = scoresById[aId];
+    const scoreB = scoresById[bId];
+
+    const matchup = {
+      id: crypto.randomUUID(),
+      date: todayKey,
+      playerAId: aId,
+      playerBId: bId,
+      scoreA,
+      scoreB
+    };
+
+    state.matchups.push(matchup);
+    todaysMatchups.push(matchup);
+  }
+
+  // If odd number of participants, last one just doesn't get a game that day.
+
+  saveState(state);
+
+  // --- 4) Render readable matchup results for today ---
+  const lines = todaysMatchups.map(m => {
+    const aId = m.playerAId;
+    const bId = m.playerBId;
+    const aName = namesById[aId] || aId;
+    const bName = namesById[bId] || bId;
+    const aScore = m.scoreA;
+    const bScore = m.scoreB;
+    const aIsYou = aId === "YOU";
+    const bIsYou = bId === "YOU";
+
+    // Special phrasing when YOU are involved
+    if (aIsYou || bIsYou) {
+      const youScore   = aIsYou ? aScore : bScore;
+      const oppScore   = aIsYou ? bScore : aScore;
+      const oppName    = aIsYou ? bName  : aName;
+
+      if (youScore > oppScore) {
+        return `You beat ${oppName}, ${youScore}–${oppScore}`;
+      } else if (youScore < oppScore) {
+        return `You lost to ${oppName}, ${youScore}–${oppScore}`;
+      } else {
+        return `You tied ${oppName}, ${youScore}–${oppScore}`;
+      }
+    }
+
+    // AI vs AI
+    if (aScore > bScore) {
+      return `${aName} beat ${bName}, ${aScore}–${bScore}`;
+    } else if (bScore > aScore) {
+      return `${bName} beat ${aName}, ${bScore}–${aScore}`;
+    } else {
+      return `${aName} and ${bName} tied, ${aScore}–${bScore}`;
+    }
+  });
+
+  const outHtml = lines.length
+    ? lines.map(l => `<div>• ${l}</div>`).join("")
+    : `<div>No matchups created.</div>`;
+
+  $('simResults').innerHTML = `
+    <h3 class="font-semibold mb-1">Matchups for ${todayKey}</h3>
+    ${outHtml}
+  `;
+
+  // Re-render player cards if they depend on latest gameHistory
+  renderPlayers();
+}
+
+
+
+function maybeAutoSimToday(){
+  const now = new Date();
+  const todayKey = now.toISOString().slice(0,10);
+
+  // Only after 8am local time (your EST)
+  if (now.getHours() < 8) return;
+
+  // Need at least one player
+  if (!Array.isArray(state.players) || state.players.length === 0) return;
+
+  state.gameHistory = state.gameHistory || [];
+
+  // If ANY scores already exist for today, don't auto-sim again
+  const hasToday = state.gameHistory.some(g => g.date === todayKey);
+  if (hasToday) return;
+
+  // Run one sim for today (this will also update #simResults)
+  simulateToday();
+}
+
+function dateKey(d){
+  if (!(d instanceof Date)) d = new Date(d);
+  if (!d || isNaN(d.getTime())) return 'invalid';
+  const y  = d.getFullYear();
+  const m  = String(d.getMonth()+1).padStart(2,'0');
+  const dd = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${dd}`;
+}
+
+function computeTodayPoints() {
+  const comps = Array.isArray(state.completions) ? state.completions : [];
+  if (!comps.length) return 0;
+
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  const todayKey = dateKey(today);
+
+  let total = 0;
+
+  for (const c of comps) {
+    if (!c || !c.completedAtISO) continue;
+
+    const dk = dateKey(c.completedAtISO);
+    if (dk === todayKey) {
+      total += Number(c.points || 0);
+    }
+  }
+
+  return Number(total.toFixed(1));
+}
+
+
+function calcYouStats() {
+  const comps = state.completions || [];
+  if (!comps.length) {
+    return {
+      record: "0-0",
+      avgPPD: 0
+    };
+  }
+
+// --- AVG PPD ---
+// Group completions by dayKey and sum points per day
+const dayMap = {};
+for (const c of comps) {
+  if (!c || !c.completedAtISO) continue;
+  const day = dateKey(c.completedAtISO);
+  if (!dayMap[day]) dayMap[day] = 0;
+  dayMap[day] += Number(c.points || 0);
+}
+
+
+  const dailyTotals = Object.values(dayMap);
+  const avgPPD =
+    dailyTotals.reduce((a, b) => a + b, 0) / dailyTotals.length || 0;
+
+  // --- Record (wins/losses) ---
+  // A "win" = you beat your avgPPD, "loss" = you didn’t.
+  let wins = 0;
+  let losses = 0;
+
+  for (const total of dailyTotals) {
+    if (total > avgPPD) wins++;
+    else losses++;
+  }
+
+  return {
+    record: `${wins}-${losses}`,
+    avgPPD: avgPPD
+  };
+}
+
+
+function renderPlayers() {
+  const container = $("playersList");
+  if (!container) return;
+
+  container.innerHTML = "";
+
+  // Set grid layout based on view mode
+  if (viewMode === "gallery") {
+    container.className = "grid gap-4 grid-cols-2 sm:grid-cols-3 md:grid-cols-5";
+  } else {
+    // Card view: tighter, and 3 columns on wide screens
+    container.className = "grid gap-3 card-view grid-cols-1 md:grid-cols-2 xl:grid-cols-3";
+  }
+
+
+
+
+  // --- compute your real TaskPoints score for today ---
+  const todayPoints = computeTodayPoints();
+
+  // --- special virtual avatar player ---
+  const youPlayer = {
+    id: "YOU",
+    name: "You",
+    imageData: state.youImage || "",
+    todayPoints: todayPoints.toFixed(1),
+    isYou: true
+  };
+
+  // --- normal players ---
+  const normalPlayers = state.players || [];
+
+  // YOU appears first, followed by everyone else
+  const players = [youPlayer, ...normalPlayers];
+
+  // Update count (does NOT count YOU as a player)
+  $("playerCount").textContent =
+    normalPlayers.length
+      ? `${normalPlayers.length} player${normalPlayers.length === 1 ? "" : "s"}`
+      : "";
+
+  if (!players.length) {
+    $("noPlayersMsg").classList.remove("hidden");
+    return;
+  } else {
+    $("noPlayersMsg").classList.add("hidden");
+  }
+
+  // 🔹 THIS is the piece you were missing before
+  players.forEach(p => {
+    const card = document.createElement("div");
+ card.dataset.playerId = p.id;
+
+    // ----- GALLERY VIEW (image + name only) -----
+    if (viewMode === "gallery") {
+      card.className = "playerCard rounded-xl p-2 glass flex flex-col items-center";
+
+      const displayName = p.isYou ? "You" : (p.name || "");
+
+      card.innerHTML = `
+        <div class="w-full md:w-44 aspect-[3/4] player-img-frame">
+          <div class="player-img-inner w-full h-full">
+            ${
+              p.imageData || p.isYou && state.youImage
+                ? `<img src="${escapeHtml(p.isYou ? state.youImage || p.imageData : p.imageData)}"
+                         alt="${escapeHtml(displayName)} photo"
+                         class="w-full h-full object-cover">`
+                : `<div class="text-xs opacity-70 p-4 text-center flex items-center justify-center h-full bg-black">
+                     No photo
+                   </div>`
+            }
+          </div>
+        </div>
+        <p class="mt-1 text-xs sm:text-sm font-medium text-center break-words leading-snug">
+          ${escapeHtml(displayName)}
+        </p>
+      `;
+
+      // NEW: clicking the image in gallery view opens edit mode for that player
+      const imgArea = card.querySelector(".player-img-inner");
+      if (imgArea) {
+        imgArea.style.cursor = "pointer";
+        imgArea.addEventListener("click", () => {
+          viewMode = "card";
+          editingPlayerId = p.id;          // same as hitting the Edit button
+
+          renderPlayers();
+          if (typeof updateViewToggleUI === "function") {
+            updateViewToggleUI();
+          }
+
+          // After re-render, scroll their card into view
+          requestAnimationFrame(() => {
+            const target = document.querySelector(
+              `.playerCard[data-player-id="${p.id}"]`
+            );
+            if (target) {
+              target.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+          });
+        });
+      }
+
+      container.appendChild(card);
+      return; // skip card-mode logic
+
+    }
+
+    // ----- CARD VIEW (existing behavior) -----
+    card.className = "playerCard rounded-xl p-3 glass flex flex-col gap-2";
+
+    // ---------- YOU CARD ----------
+if (p.isYou) {
+  const youStats = calcYouStats();
+
+
+  // 🔹 EDIT MODE for YOU (photo-only)
+  if (editingPlayerId === "YOU") {
+    card.innerHTML = `
+      <div class="w-full md:w-44 aspect-[3/4] player-img-frame">
+        <div class="player-img-inner w-full h-full">
+          ${
+            p.imageData
+              ? `<img src="${escapeHtml(p.imageData)}" alt="Your photo"
+                     class="w-full h-full object-cover">`
+              : `<div class="text-xs opacity-70 p-4 text-center flex items-center justify-center h-full bg-black">
+                   No photo
+                 </div>`
+          }
+        </div>
+      </div>
+
+      <div class="flex-1 flex flex-col gap-2">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <h3 class="font-semibold text-base md:text-lg break-words">You</h3>
+          <div class="flex gap-2 flex-wrap">
+            <button data-act="change-you-photo"
+              class="rounded-xl border px-3 py-1.5 text-sm">
+              Add / Change Photo
+            </button>
+            <button data-act="clear-you-photo"
+              class="rounded-xl border px-3 py-1.5 text-sm">
+              Remove Photo
+            </button>
+            <button data-act="done-you"
+              class="rounded-xl border px-3 py-1.5 text-sm">
+              Done
+            </button>
+          </div>
+        </div>
+
+        <div class="text-xs opacity-80 leading-[1.0] space-y-[2px] mt-1">
+          <p>Record: ${youStats.record}</p>
+          <p>AVG PPD: ${youStats.avgPPD.toFixed(1)}</p>
+          <p><span class="opacity-60">Today:</span> ${p.todayPoints} pts</p>
+        </div>
+      </div>
+    `;
+
+    container.appendChild(card);
+    return;
+  }
+
+  // 🔹 VIEW MODE for YOU – matches other cards
+  card.innerHTML = `
+<div class="flex flex-col md:flex-row gap-3 w-full">
+  <!-- LEFT: photo + name + edit -->
+  <div class="md:w-44 flex flex-col">
+    <div class="w-full aspect-[3/4] player-img-frame">
+      <div class="player-img-inner w-full h-full">
+        ${
+          p.imageData
+            ? `<img src="${escapeHtml(p.imageData)}" alt="Your photo"
+                   class="w-full h-full object-cover">`
+            : `<div class="text-xs opacity-70 p-4 text-center flex items-center justify-center h-full bg-black">
+                 No photo
+               </div>`
+        }
+      </div>
+    </div>
+
+    <!-- Name + today + Edit stay under photo -->
+    <div class="mt-2 flex flex-wrap items-center justify-between gap-2">
+      <h3 class="font-semibold text-base md:text-lg break-words">
+        You
+      </h3>
+      <div class="flex gap-2 flex-wrap items-center">
+        <div class="text-sm opacity-80">
+          <b>${p.todayPoints}</b> pts today
+        </div>
+        <button data-act="edit" data-id="YOU"
+          class="rounded-xl border px-3 py-1.5 text-sm">
+          Edit
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: stats (moves to the side on desktop) -->
+  <div class="flex-1 mt-2 md:mt-0">
+    <div class="text-xs opacity-80 leading-[1.0] space-y-[2px]">
+      <p>Record: ${youStats.record}</p>
+      <p>AVG PPD: ${youStats.avgPPD.toFixed(1)}</p>
+    </div>
+  </div>
+</div>
+  `;
+
+  container.appendChild(card);
+  return;
+}
+
+
+    // ---------- NORMAL PLAYERS ----------
+    if (editingPlayerId === p.id) {
+      // Edit mode
+      card.innerHTML = `
+        <div class="w-full md:w-56 flex flex-col items-center gap-2">
+          <div class="w-full flex items-center justify-center bg-black/40 rounded-2xl overflow-hidden border border-zinc-700">
+            ${
+              p.imageData
+                ? `<img src="${escapeHtml(p.imageData)}" alt="${escapeHtml(p.name)} photo"
+                       class="max-h-56 w-full object-contain bg-black">`
+                : `<div class="text-xs opacity-70 p-4 text-center">No photo</div>`
+            }
+          </div>
+          ${
+            p.imageData
+              ? `
+                <button data-act="recrop" data-id="${p.id}"
+                  class="mt-1 rounded-xl border border-zinc-500 px-3 py-1 text-xs">
+                  Re-crop current photo
+                </button>
+              `
+              : ``
+          }
+        </div>
+        <div class="flex-1 space-y-3">
+          <input
+            data-field="name"
+            class="w-full px-3 py-2 rounded-xl border"
+            value="${escapeHtmlAttr(p.name)}"
+          />
+          <textarea
+            data-field="notes"
+            class="w-full px-3 py-2 rounded-xl border"
+            rows="3"
+          >${escapeHtml(p.notes || "")}</textarea>
+
+          <!-- New: editable stats -->
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+            <div>
+              <label class="opacity-70 block mb-1">Baseline</label>
+              <input
+                data-field="baseline"
+                type="number"
+                min="0"
+                max="100"
+                class="w-full px-3 py-2 rounded-xl border text-sm"
+                value="${typeof p.baseline === "number" ? p.baseline : 60}"
+              />
+            </div>
+            <div>
+              <label class="opacity-70 block mb-1">Variance</label>
+              <input
+                data-field="variance"
+                type="number"
+                min="0"
+                max="100"
+                class="w-full px-3 py-2 rounded-xl border text-sm"
+                value="${typeof p.variance === "number" ? p.variance : 40}"
+              />
+            </div>
+            <div>
+              <label class="opacity-70 block mb-1">Momentum</label>
+              <input
+                data-field="momentum"
+                type="number"
+                min="0"
+                max="100"
+                class="w-full px-3 py-2 rounded-xl border text-sm"
+                value="${typeof p.momentum === "number" ? p.momentum : 50}"
+              />
+            </div>
+            <div>
+              <label class="opacity-70 block mb-1">Risky</label>
+              <input
+                data-field="risky"
+                type="number"
+                min="0"
+                max="100"
+                class="w-full px-3 py-2 rounded-xl border text-sm"
+                value="${
+                  typeof p.risky === "number"
+                    ? (p.risky <= 10 ? (p.risky * 10).toFixed(0) : p.risky.toFixed(0))
+                    : 30
+                }"
+              />
+            </div>
+            <div class="md:col-span-4">
+              <label class="opacity-70 block mb-1">Style</label>
+              <input
+                data-field="style"
+                class="w-full px-3 py-2 rounded-xl border text-sm"
+                value="${escapeHtmlAttr(p.style || "")}"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label class="text-xs opacity-70 block mb-1">Change photo (optional)</label>
+            <input
+              data-field="image"
+              type="file"
+              accept="image/png,image/jpeg,image/jpg,image/gif"
+              class="w-full text-sm"
+            />
+          </div>
+
+          <div class="flex flex-wrap gap-2">
+            <button data-act="save" data-id="${p.id}"
+              class="rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-sm px-3 py-1.5">
+              Save
+            </button>
+            <button data-act="cancel" data-id="${p.id}"
+              class="rounded-xl border text-sm px-3 py-1.5">
+              Cancel
+            </button>
+          </div>
+
+<!-- Desktop-only Remove Photo + Delete inside Edit panel -->
+<div class="hidden md:flex gap-2 mt-3">
+  <button class="rounded-xl border px-3 py-1.5 text-sm"
+          data-act="clear-photo"
+          data-id="${p.id}">
+    Remove photo
+  </button>
+
+  <button class="rounded-xl border px-3 py-1.5 text-sm bg-red-600 text-white"
+          data-act="delete"
+          data-id="${p.id}">
+    Delete
+  </button>
+</div>
+
+
+
+        </div>
+      `;
+    } else {
+      // View mode
+
+      // --- Compute record + AVG PPD from gameHistory ---
+      const history = Array.isArray(state.gameHistory) ? state.gameHistory : [];
+      let games = 0;
+      let totalPoints = 0;
+      let wins = 0;
+      let losses = 0;
+
+      for (const g of history) {
+        if (g.playerId !== p.id) continue;
+
+        games++;
+        const score =
+          typeof g.score === "number" ? g.score : Number(g.score) || 0;
+
+        totalPoints += score;
+
+        // Simple win/loss definition:
+        // win = score >= current baseline, loss = score < baseline
+        if (typeof p.baseline === "number") {
+          if (score >= p.baseline) wins++;
+          else losses++;
+        }
+      }
+
+      const avgPpd = games ? (totalPoints / games).toFixed(1) : "—";
+      const recordText = games ? `${wins}-${losses}` : "0-0";
+
+      card.innerHTML = `
+<div class="flex flex-col md:flex-row gap-3 w-full">
+  <!-- LEFT: photo + name + Edit -->
+  <div class="md:w-44 flex flex-col">
+    <div class="w-full aspect-[3/4] player-img-frame">
+      <div class="player-img-inner w-full h-full">
+        ${
+          p.imageData
+            ? `<img src="${escapeHtml(p.imageData)}" alt="${escapeHtml(p.name)} photo"
+                   class="w-full h-full object-cover">`
+            : `<div class="text-xs opacity-70 p-4 text-center flex items-center justify-center h-full bg-black">
+                 No photo
+               </div>`
+        }
+      </div>
+    </div>
+
+    <!-- Name + Edit (and mobile remove/delete) stay under photo -->
+    <div class="mt-2 flex flex-wrap items-center justify-between gap-2">
+      <h3 class="font-semibold text-base md:text-lg break-words">
+        ${escapeHtml(p.name)}
+      </h3>
+      <div class="flex gap-2 flex-wrap">
+        <button data-act="edit" data-id="${p.id}"
+          class="rounded-xl border px-3 py-1.5 text-sm">
+          Edit
+        </button>
+        ${
+          p.imageData
+            ? `<button data-act="clear-photo" data-id="${p.id}"
+                 class="rounded-xl border px-3 py-1.5 text-sm md:hidden">
+                 Remove photo
+               </button>`
+            : ``
+        }
+        <button data-act="delete" data-id="${p.id}"
+          class="rounded-xl border px-3 py-1.5 text-sm md:hidden">
+          Delete
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: notes + stats (shift to side on desktop) -->
+  <div class="flex-1 mt-2 md:mt-0">
+    ${
+      p.notes
+        ? `<p class="text-sm whitespace-pre-wrap mb-2">${escapeHtml(p.notes)}</p>`
+        : `<p class="text-xs opacity-60 italic mb-2">No notes yet.</p>`
+    }
+
+    <div class="text-xs opacity-80 leading-[1.0] space-y-[2px]">
+      <p>Record: ${recordText}</p>
+      <p>AVG PPD: ${avgPpd}</p>
+      <p>Baseline: ${p.baseline ?? "—"}</p>
+      <p>Variance: ${p.variance ?? "—"}</p>
+      <p>Momentum: ${p.momentum ?? "—"}</p>
+      <p>Risky: ${
+        typeof p.risky === "number"
+          ? (p.risky <= 10 ? p.risky.toFixed(1) : (p.risky / 10).toFixed(1))
+          : "—"
+      }</p>
+      <p>Style: ${escapeHtml(p.style || "—")}</p>
+    </div>
+  </div>
+</div>
+      `;
+    }
+
+    container.appendChild(card);
+  });
+
+  container.querySelectorAll("button[data-act]").forEach(btn => {
+    btn.addEventListener("click", handlePlayerAction);
+  });
+}
+    function handlePlayerAction(e){
+      const btn = e.currentTarget;
+      const id = btn.getAttribute("data-id");
+      const act = btn.getAttribute("data-act");
+      if (!id || !act) return;
+
+      if (act === "edit"){
+        editingPlayerId = id;
+        renderPlayers();
+        return;
+      }
+
+      if (act === "cancel"){
+        editingPlayerId = null;
+        renderPlayers();
+        return;
+      }
+
+      if (act === "delete"){
+        if (!confirm("Delete this player?")) return;
+        const idx = state.players.findIndex(p => p.id === id);
+        if (idx !== -1){
+          state.players.splice(idx,1);
+          saveState(state);
+        }
+        if (editingPlayerId === id) editingPlayerId = null;
+        renderPlayers();
+        return;
+      }
+
+      if (act === "recrop"){
+        const player = state.players.find(p => p.id === id);
+        if (!player || !player.imageData) return;
+        openImageCropperFromDataUrl(player.imageData, (dataUrl)=>{
+          if (dataUrl){
+            player.imageData = dataUrl;
+            saveState(state);
+          }
+          renderPlayers();
+        });
+        return;
+      }
+
+      if (act === "clear-photo"){
+        const player = state.players.find(p => p.id === id);
+        if (!player || !player.imageData) return;
+
+        if (!confirm("Remove this player's photo? You can add a new one later.")) return;
+
+        player.imageData = "";
+        saveState(state);
+        renderPlayers();
+        return;
+      }
+
+  // --- Change YOU photo ---
+  if (act === "change-you-photo") {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/png,image/jpeg,image/jpg,image/gif";
+
+    input.onchange = async () => {
+      const file = input.files[0];
+      if (!file) return;
+
+      const dataUrl = await fileToDataUrl(file);
+
+      // Save image to special YOU field
+      state.youImage = dataUrl;
+      saveState(state);
+      renderPlayers();
+    };
+
+    input.click();
+    return;
+  }
+
+  // --- Clear YOU photo ---
+  if (act === "clear-you-photo") {
+    delete state.youImage;
+    saveState(state);
+    renderPlayers();
+    return;
+  }
+
+  // --- Done editing YOU ---
+  if (act === "done-you") {
+    editingPlayerId = null;
+    renderPlayers();
+    return;
+  }
+
+
+
+      if (act === "save"){
+        const card = btn.closest(".playerCard");
+        if (!card) return;
+        const nameInput = card.querySelector('input[data-field="name"]');
+        const notesInput = card.querySelector('textarea[data-field="notes"]');
+        const fileInput = card.querySelector('input[data-field="image"]');
+  const baselineInput  = card.querySelector('input[data-field="baseline"]');
+  const varianceInput  = card.querySelector('input[data-field="variance"]');
+  const momentumInput  = card.querySelector('input[data-field="momentum"]');
+  const riskyInput     = card.querySelector('input[data-field="risky"]');
+  const styleInput     = card.querySelector('input[data-field="style"]');
+
+        const player = state.players.find(p => p.id === id);
+        if (!player) return;
+
+        const newName = (nameInput.value || "").trim();
+        if (!newName){
+          alert("Player name is required.");
+          return;
+        }
+
+        const newNotes = (notesInput.value || "").trim();
+  const baseline = baselineInput
+    ? Number(baselineInput.value || 60)
+    : (typeof player.baseline === "number" ? player.baseline : 60);
+
+  const variance = varianceInput
+    ? Number(varianceInput.value || 40)
+    : (typeof player.variance === "number" ? player.variance : 40);
+
+  const momentum = momentumInput
+    ? Number(momentumInput.value || 50)
+    : (typeof player.momentum === "number" ? player.momentum : 50);
+
+  // Risky: always treat input as whole number, store as /10
+  const risky = riskyInput
+    ? Number(riskyInput.value || 30) / 10
+    : (typeof player.risky === "number" ? player.risky : 3);
+
+  const style = styleInput
+    ? (styleInput.value || "").trim()
+    : (player.style || "");
+
+  const applyUpdate = (imageData) => {
+    player.name = newName;
+    player.notes = newNotes;
+
+    player.baseline = isNaN(baseline) ? 60 : baseline;
+    player.variance = isNaN(variance) ? 40 : variance;
+    player.momentum = isNaN(momentum) ? 50 : momentum;
+    player.risky    = isNaN(risky) ? 3 : risky;
+    player.style    = style || "balanced";
+
+
+    if (imageData){
+      player.imageData = imageData;
+    }
+    saveState(state);
+    editingPlayerId = null;
+    renderPlayers();
+  };
+
+
+        const file = fileInput.files && fileInput.files[0];
+        if (file){
+          openImageCropperFromFile(file, (dataUrl) => {
+            applyUpdate(dataUrl);
+          });
+        } else {
+          applyUpdate(undefined);
+        }
+      }
+    }
+
+    function escapeHtml(str){
+      if (!str && str !== 0) return "";
+      return String(str).replace(/[&<>"']/g, m => ({
+        "&":"&amp;",
+        "<":"&lt;",
+        ">":"&gt;",
+        '"':"&quot;",
+        "'":"&#039;"
+      }[m]));
+    }
+    function escapeHtmlAttr(str){
+      if (!str) return "";
+      return String(str).replace(/["']/g, m => ({
+        '"':"&quot;",
+        "'":"&#039;"
+      }[m]));
+    }
+
+// Create player form
+$("createPlayerForm").addEventListener("submit", (e)=>{
+  e.preventDefault();
+  const name = ($("playerName").value || "").trim();
+  const notes = ($("playerNotes").value || "").trim();
+  const file = $("playerImage").files && $("playerImage").files[0];
+
+  const baseline = Number($("playerBaseline").value || 60);
+  const variance = Number($("playerVariance").value || 40);
+  const momentum = Number($("playerMomentum").value || 50);
+
+  // NEW: Risky is stored as decimal (input / 10)
+  const riskyInputRaw = Number($("playerRisky").value || 30);
+  const risky = riskyInputRaw / 10;
+
+  const style = ($("playerStyle").value || "").trim();
+
+
+  if (!name){
+    alert("Player name is required.");
+    return;
+  }
+
+  const addPlayer = (imageData) => {
+
+    state.players.push({
+      id: crypto.randomUUID(),
+      name,
+      notes,
+      imageData: imageData || null,
+      createdAtISO: new Date().toISOString(),
+
+      baseline: isNaN(baseline) ? 35 : baseline,
+      variance: isNaN(variance) ? 9 : variance,
+      momentum: isNaN(momentum) ? 5 : momentum,
+
+      // Default Risky = 3.0 (i.e. user sees 30)
+      risky: isNaN(risky) ? 3 : risky,
+
+      style: style || "balanced"
+
+    });
+    saveState(state);
+    $("playerName").value = "";
+    $("playerNotes").value = "";
+    $("playerImage").value = "";
+    $("playerBaseline").value = "60";
+    $("playerVariance").value = "40";
+    $("playerMomentum").value = "50";
+    $("playerRisky").value = "30";
+    $("playerStyle").value = "";
+    renderPlayers();
+  };
+
+  if (file){
+    openImageCropperFromFile(file, (dataUrl) => {
+      addPlayer(dataUrl);
+    });
+  } else {
+    addPlayer(null);
+  }
+});
+
+
+// Export / Import / Paste / Reset
+// (Handled on the main page now; Game view is read-only for backup controls.)
+
+
+    // Auto-sim once per day after 8am, then render
+    maybeAutoSimToday();
+    renderPlayers();
+
+// ----- View mode toggle (Card vs Gallery) -----
+const viewCardBtn = document.getElementById("viewCardBtn");
+const viewGalleryBtn = document.getElementById("viewGalleryBtn");
+
+function updateViewToggleUI() {
+  if (!viewCardBtn || !viewGalleryBtn) return;
+
+  if (viewMode === "card") {
+    viewCardBtn.classList.add("bg-zinc-800", "text-white");
+    viewGalleryBtn.classList.remove("bg-zinc-800", "text-white");
+    viewGalleryBtn.classList.add("bg-zinc-900/40");
+  } else {
+    viewGalleryBtn.classList.add("bg-zinc-800", "text-white");
+    viewCardBtn.classList.remove("bg-zinc-800", "text-white");
+    viewCardBtn.classList.add("bg-zinc-900/40");
+  }
+}
+
+if (viewCardBtn) {
+  viewCardBtn.addEventListener("click", () => {
+    viewMode = "card";
+    editingPlayerId = null; // leave edit mode when switching
+    renderPlayers();
+    updateViewToggleUI();
+  });
+}
+
+if (viewGalleryBtn) {
+  viewGalleryBtn.addEventListener("click", () => {
+    viewMode = "gallery";
+    editingPlayerId = null;
+    renderPlayers();
+    updateViewToggleUI();
+  });
+}
+
+// Initialize toggle styling
+updateViewToggleUI();
+
+// ----- Collapsible panels (Create Player + Player Stats Guide) -----
+function setupMobileCollapsibles() {
+  const sections = document.querySelectorAll(".mobile-collapsible");
+
+  function syncForViewport() {
+    const isMobile = window.matchMedia("(max-width: 640px)").matches;
+
+    sections.forEach((sec) => {
+      // Wire header click once
+      if (!sec.dataset.init) {
+        const header = sec.querySelector(".mobile-collapsible-header");
+        if (header) {
+          header.addEventListener("click", () => {
+            // Toggle on ALL viewports
+            const collapsed = sec.dataset.collapsed === "true";
+            sec.dataset.collapsed = collapsed ? "false" : "true";
+          });
+        }
+        sec.dataset.init = "true";
+      }
+
+      const isStatsGuide = sec.id === "playerStatsGuide";
+
+      // Default per viewport:
+      // mobile → collapsed for all
+      // desktop → Stats Guide collapsed, others expanded
+      if (isMobile) {
+        sec.dataset.collapsed = "true";
+      } else {
+        sec.dataset.collapsed = isStatsGuide ? "true" : "false";
+      }
+    });
+  }
+
+  syncForViewport();
+  window.addEventListener("resize", syncForViewport);
+}
+
+
+setupMobileCollapsibles();
+
+
+async function fileToDataUrl(file) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.readAsDataURL(file);
+  });
+}
+
+  </script>
+</body>
+</html>
+

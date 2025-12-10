@@ -1,0 +1,530 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>TaskPoints — Week</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='%230b0d10'/><text x='50' y='62' font-size='60' text-anchor='middle' fill='white'>TP</text></svg>">
+<script src="https://cdn.tailwindcss.com"></script>
+
+
+<link rel="stylesheet" href="styles.css">
+
+
+  <style>
+    :root{--bg:#0b0d10;--border:#202830;--muted:#8b98a5}
+    body{background:var(--bg);color:#e6edf6}
+    @media (prefers-color-scheme:light){body{background:#fafafa;color:#0b1220}}
+    .glass{border:1px solid var(--border);background:rgba(255,255,255,.06);border-radius:16px;padding:16px}
+    @media (prefers-color-scheme:light){.glass{background:#fff;border-color:#e5e7eb}}
+    .btn{border:1px solid var(--border);border-radius:12px;padding:6px 8px;font-size:11px}
+    .btn-ghost{background:transparent}
+    .btn-success{background:#22c55e;color:#072;border:none}
+.btn-warn {
+  background: rgba(217, 119, 6, 0.25);   /* amber-700 muted */
+  border: 1px solid rgba(217, 119, 6, 0.35);
+  color: #b45309;                        /* amber-700 text */
+}
+
+    .btn-deny{background:#ef4444;color:#fff;border:none}
+    .btn-nav{background:transparent;color:var(--muted)}
+    .btn-nav-primary{background:#1f2937;color:#e5e7eb;border:none}
+    .btn-teal {background: linear-gradient(180deg, #0f4d4d, #0a2f2f);color: #fff;border: none;}
+/* --- Teal Nav Buttons (match main page) --- */
+.top-nav-btn{
+  border-radius:999px;
+  padding:6px 10px;
+  font-size:11px;
+  border:1px solid rgba(75,85,99,0.7);
+  background:rgba(17,25,33,0.8);
+  color:#dbeafe;
+}
+@media (prefers-color-scheme: light){
+  .top-nav-btn{
+    background:rgba(240,245,255,0.8);
+    color:#1e293b;
+    border-color:rgba(148,163,184,0.8);
+  }
+}
+.top-nav-btn-active{
+  background:rgba(12,84,96,0.75);
+  color:white;
+  border:none;
+}
+
+    .muted{color:var(--muted)}
+    .grid7{display:grid;grid-template-columns:repeat(7,1fr);gap:.5rem}
+    .slot{min-height:72px;border:1px dashed var(--border);border-radius:12px;padding:6px}
+    .task{border:1px solid var(--border);border-radius:10px;padding:6px 8px;margin-bottom:6px}
+
+/* Mobile: make week grid horizontal scrollable columns */
+@media (max-width: 640px){
+  .grid7{
+    display:flex;
+    flex-wrap:nowrap;
+    overflow-x:auto;
+    gap:.75rem;
+    padding-bottom:8px;
+  }
+
+  .grid7 .slot{
+    flex:0 0 260px;   /* width of each day column on mobile */
+    min-width:260px;
+  }
+}
+
+
+    .habitRow{display:grid;grid-template-columns:1fr repeat(7,36px);gap:.5rem;align-items:center}
+    .habitDay{height:36px;border-radius:10px;border:1px solid var(--border);display:grid;place-items:center;font-size:12px;cursor:pointer}
+    .habitDay.on{background:#22c55e1a;border-color:#16a34a}
+  </style>
+</head>
+<body class="min-h-screen">
+  <div class="mx-auto max-w-6xl p-4 sm:p-6">
+
+<header class="flex items-center justify-between mb-4 gap-3 flex-wrap">
+  <h1 class="text-2xl font-extrabold">Week</h1>
+  <div class="flex gap-2 flex-wrap items-center">
+
+    <!-- 1–3: Week navigation (unchanged style) -->
+    <button id="prevWeekBtn" class="btn-nav">← Prev</button>
+    <button id="thisWeekBtn" class="btn-nav">This Week</button>
+    <button id="nextWeekBtn" class="btn-nav">Next →</button>
+
+    <!-- 4–7: Teal nav buttons (new) -->
+<a href="index.html"   class="btn btn-teal btn-toolbar">Main</a>
+<a href="log.html"     class="btn btn-teal btn-toolbar">Log</a>
+<a href="game.html"    class="btn btn-teal btn-toolbar">Game</a>
+<a href="updates.html" class="btn btn-teal btn-toolbar">Updates</a>
+<a href="archive.html" class="btn btn-teal btn-toolbar">Archive</a>
+
+
+  </div>
+</header>
+
+
+      <!-- Tasks -->
+      <div class="glass mb-6">
+      <h2 class="font-bold mb-3">Tasks (this week view)</h2>
+      <div id="weekGrid" class="grid7"></div>
+    </div>
+
+    <!-- Habits -->
+    <div class="glass mb-6">
+      <h2 class="font-bold mb-2">Habits (week of <span id="weekLabel"></span>)</h2>
+      <div class="grid gap-2 text-sm muted mb-2" id="habitWeekLabels"></div>
+      <div id="habitsList" class="grid gap-2"></div>
+      <div id="habitsEmpty" class="muted text-sm">No habits yet.</div>
+    </div>
+
+    <!-- Flex Actions (this week) -->
+    <div class="glass mb-6">
+      <h2 class="font-bold mb-2">Flex Actions (this week)</h2>
+      <div id="flexWeekList" class="grid gap-2 text-sm"></div>
+      <div id="flexWeekEmpty" class="muted text-sm">No flex actions logged this week.</div>
+    </div>
+
+<!-- Work Scores (this week) -->
+<div class="glass mb-6">
+  <h2 class="font-bold mb-2">Work Scores (this week)</h2>
+  <div id="workWeekList" class="grid gap-2 text-sm"></div>
+  <div id="workWeekEmpty" class="muted text-sm">No work scores yet this week.</div>
+</div>
+
+
+    <footer class="mt-10 text-xs muted flex items-center justify-between">
+      <span>Use Previous/Next to browse habit history. Click a habit day to toggle; postpone moves overdue tasks to today; “Won’t do” drops just that instance for repeaters.</span>
+      <span>v0.24.0 — 2025-11-13 11:15</span>
+    </footer>
+  </div>
+
+<script>
+const STORAGE_KEY="taskpoints_v1";
+const $=id=>document.getElementById(id);
+
+function load() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) {
+      return {
+        tasks:       [],
+        completions: [],
+        players:     [],
+        habits:      [],
+        flexActions: [],
+        matchups:    [],
+        gameHistory: [],
+        workHistory: []
+      };
+    }
+
+    const p = JSON.parse(raw) || {};
+    return {
+      tasks:       Array.isArray(p.tasks)       ? p.tasks       : [],
+      completions: Array.isArray(p.completions) ? p.completions : [],
+      players:     Array.isArray(p.players)     ? p.players     : [],
+      habits:      Array.isArray(p.habits)      ? p.habits      : [],
+      flexActions: Array.isArray(p.flexActions) ? p.flexActions : [],
+      matchups:    Array.isArray(p.matchups)    ? p.matchups    : [],
+      gameHistory: Array.isArray(p.gameHistory) ? p.gameHistory : [],
+      workHistory: Array.isArray(p.workHistory) ? p.workHistory : []
+    };
+  } catch (e) {
+    console.error("week load error", e);
+    return {
+      tasks:       [],
+      completions: [],
+      players:     [],
+      habits:      [],
+      flexActions: [],
+      matchups:    [],
+      gameHistory: [],
+      workHistory: []
+    };
+  }
+}
+
+
+let state = load();
+let currentBaseDate = new Date();
+
+function addDays(d,n){ const x=new Date(d); x.setDate(x.getDate()+n); x.setHours(0,0,0,0); return x; }
+function startOfWeek(d){ const x=new Date(d); x.setHours(0,0,0,0); const day=(x.getDay()+6)%7; x.setDate(x.getDate()-day); return x; }
+function weekDays(baseDate){
+  const start=startOfWeek(baseDate);
+  const days=[]; for(let i=0;i<7;i++){ const d=addDays(start,i); days.push({date:d,key:dateKey(d),label:d.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'})});}
+  return days;
+}
+function dateKey(d){ const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),dd=String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${dd}`; }
+function fromKey(k){ const [y,m,d]=k.split('-').map(n=>parseInt(n,10)); const dt=new Date(y,m-1,d); dt.setHours(0,0,0,0); return dt; }
+function niceDate(d){ return d.toLocaleDateString(undefined,{month:'short',day:'numeric'}) }
+function todayKey(){ const d=new Date(); d.setHours(0,0,0,0); return dateKey(d); }
+
+/* -------- Habits for arbitrary week -------- */
+function renderHabits(baseDate){
+  state=load();
+  const row=$('habitWeekLabels'); row.innerHTML='';
+  const days=weekDays(baseDate);
+  const labels=document.createElement('div');
+  labels.className='habitRow';
+  labels.innerHTML=`<div></div>` + days.map(d=>`<div class="text-center">${d.label.split(' ')[0]}</div>`).join('');
+  row.appendChild(labels);
+
+  const wrap=$('habitsList'); const empty=$('habitsEmpty'); wrap.innerHTML='';
+  if(!state.habits.length){ empty.style.display='block'; return; }
+  empty.style.display='none';
+
+  const habits = state.habits.slice().sort((a,b)=>(b.pointsPerDay||0)-(a.pointsPerDay||0));
+
+habits.forEach(h=>{
+  h.doneKeys = Array.isArray(h.doneKeys)?h.doneKeys:[];
+  const row = document.createElement('div');
+  row.className = 'habitRow';
+
+  const daysHtml = days.map(d=>{
+    const on = h.doneKeys.includes(d.key);
+    return `<div class="habitDay ${on?'on':''}" data-habit="${h.id}" data-day="${d.key}">${d.date.getDate()}</div>`;
+  }).join('');
+
+  row.innerHTML = `
+    <div class="font-semibold truncate" title="${escapeHtml(h.name)}">
+      ${escapeHtml(h.name)}
+      <span class="text-xs text-zinc-400">(${h.pointsPerDay||0} pts/day)</span>
+      ${h.retired ? `<span class="ml-2 text-[11px] text-amber-400">(Retired)</span>` : ''}
+      <button class="btn btn-ghost text-[11px] ml-2" data-habit-toggle="${h.id}">
+        ${h.retired ? 'Unretire' : 'Retire'}
+      </button>
+    </div>
+    ${daysHtml}
+  `;
+
+  wrap.appendChild(row);
+});
+
+
+  wrap.querySelectorAll('.habitDay').forEach(el=>{
+    el.onclick=()=>toggleHabitDay(el.getAttribute('data-habit'), el.getAttribute('data-day'), baseDate);
+  });
+  wrap.querySelectorAll('[data-habit-toggle]').forEach(btn=>{
+    btn.onclick = () => toggleHabitRetired(btn.getAttribute('data-habit-toggle'), baseDate);
+  });
+
+  const start = startOfWeek(baseDate);
+  const end = addDays(start,6);
+  $('weekLabel').textContent = `${niceDate(start)} – ${niceDate(end)}`;
+}
+function toggleHabitDay(habitId, dayKey, baseDate){
+  state = load();
+  const h = state.habits.find(x=>x.id===habitId);
+  if (!h || h.retired) return;  // ⬅️ NEW: don’t toggle retired habits
+
+  h.doneKeys = Array.isArray(h.doneKeys) ? h.doneKeys : [];
+  const idx = h.doneKeys.indexOf(dayKey);
+
+  if (idx === -1) {
+    // mark this day as done
+    h.doneKeys.push(dayKey);
+    const iso = new Date(fromKey(dayKey).getTime() + 12*3600*1000).toISOString();
+    state.completions.unshift({
+      id: crypto.randomUUID(),
+      taskId: `habit:${habitId}:${dayKey}`,
+      title: `[Habit] ${h.name} (${dayKey})`,
+      points: h.pointsPerDay || 0,
+      completedAtISO: iso,
+      source: 'habit',
+      habitId: habitId,
+      dayKey: dayKey
+    });
+  } else {
+    // unmark this day
+    h.doneKeys.splice(idx,1);
+    const mIdx = state.completions.findIndex(
+      c => c.source === 'habit' && c.habitId === habitId && c.dayKey === dayKey
+    );
+    if (mIdx !== -1) state.completions.splice(mIdx,1);
+  }
+
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  renderHabits(baseDate);
+}
+function toggleHabitRetired(habitId, baseDate){
+  state = load();
+  const h = state.habits.find(x=>x.id === habitId);
+  if (!h) return;
+
+  h.retired = !h.retired;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  renderHabits(baseDate);
+}
+
+/* -------- Tasks for arbitrary week -------- */
+function renderWeekTasks(baseDate){
+  state=load();
+  const days=weekDays(baseDate);
+  const grid=$('weekGrid'); grid.innerHTML='';
+  days.forEach(d=>{
+    const col=document.createElement('div'); col.className='slot';
+    col.innerHTML=`<div class="text-xs text-zinc-400 mb-1">${d.label}</div>`;
+    const list = state.tasks.filter(t=>!t.completedAtISO && t.dueDateISO===d.key);
+    list.forEach(t=>{
+      const overdue = t.dueDateISO && t.dueDateISO < todayKey();
+      const div=document.createElement('div');
+      div.className='task';
+      div.innerHTML=`
+        <div class="flex flex-col gap-1">
+          <div class="text-xs leading-snug break-words">${escapeHtml(t.title)}</div>
+          <div class="flex gap-1 flex-wrap mt-1">
+      ${overdue?`<button class="btn btn-warn" onclick="postponeTask('${t.id}')">Postpone</button>`:''}
+      <button class="btn btn-ghost" onclick="addOneDay('${t.id}')">+1 day</button>
+      <button class="btn btn-teal" onclick="completeTask('${t.id}')" title="Done">✓</button>
+
+          </div>
+        </div>`;
+      col.appendChild(div);
+    });
+    grid.appendChild(col);
+  });
+}
+function postponeTask(id){
+  const st=load(); const t=st.tasks.find(x=>x.id===id); if(!t) return;
+  t.dueDateISO = todayKey(); localStorage.setItem(STORAGE_KEY, JSON.stringify(st));
+  state=st; renderWeekTasks(currentBaseDate);
+}
+function wontDo(id, dayKey){
+  const st=load(); const t=st.tasks.find(x=>x.id===id); if(!t) return;
+  const mode=(t.recurrence && t.recurrence.mode)||'none';
+  if(mode==='none'){
+    if(!confirm('Won’t do this task? It will be removed.')) return;
+    st.tasks = st.tasks.filter(x=>x.id!==id);
+  }else{
+    t.skipDates = Array.isArray(t.skipDates)?t.skipDates:[];
+    if(!t.skipDates.includes(dayKey)) t.skipDates.push(dayKey);
+    if(t.dueDateISO===dayKey) t.dueDateISO = todayKey();
+  }
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(st)); state=st; renderWeekTasks(currentBaseDate);
+}
+
+function addOneDay(id){
+  const st = load();
+  const t = st.tasks.find(x => x.id === id);
+  if(!t) return;
+
+  const oldDate = fromKey(t.dueDateISO);
+  const newDate = addDays(oldDate, 1);
+  t.dueDateISO = dateKey(newDate);
+
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(st));
+  state = st;
+  renderWeekTasks(currentBaseDate);
+}
+
+function completeTask(id){
+  const st=load(); const t=st.tasks.find(x=>x.id===id); if(!t) return;
+  const now=new Date().toISOString();
+  t.completedAtISO=now;
+  st.completions.unshift({ id:crypto.randomUUID(), taskId:id, title:t.title, points:t.points, completedAtISO:now });
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(st)); state=st; renderWeekTasks(currentBaseDate);
+}
+
+function renderFlexWeek(baseDate){
+  state = load();
+  const list = $('flexWeekList');
+  const empty = $('flexWeekEmpty');
+  if(!list || !empty) return;
+  list.innerHTML = '';
+
+  const all = Array.isArray(state.completions) ? state.completions : [];
+  if(!all.length){
+    empty.style.display = 'block';
+    return;
+  }
+
+  const days = weekDays(baseDate);
+  const keys = new Set(days.map(d=>d.key));
+
+  const flexEntries = all.filter(c=>{
+    if(c.source !== 'flex' || !c.completedAtISO) return false;
+    const d = new Date(c.completedAtISO);
+    const dk = dateKey(d);
+    return keys.has(dk);
+  });
+
+  if(!flexEntries.length){
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+
+  flexEntries
+    .slice()
+    .sort((a,b)=> new Date(b.completedAtISO) - new Date(a.completedAtISO))
+    .forEach(c=>{
+      const div = document.createElement('div');
+      div.className = 'flex items-center justify-between';
+      const when = new Date(c.completedAtISO);
+      div.innerHTML = `
+        <div>
+          <div class="font-medium">${escapeHtml(c.title||'Flex action')}</div>
+          <div class="text-xs text-zinc-400">${when.toLocaleString()}</div>
+        </div>
+        <div class="font-semibold">+${(c.points||0).toLocaleString()} pts</div>
+      `;
+      list.appendChild(div);
+    });
+}
+
+function renderWorkWeek(baseDate) {
+  state = load();
+
+  const list  = $('workWeekList');
+  const empty = $('workWeekEmpty');
+  if (!list || !empty) return;
+
+  list.innerHTML = '';
+
+  const allComps = Array.isArray(state.completions) ? state.completions : [];
+
+  // 7 days for the current week
+  const days = weekDays(baseDate);
+  const keys = new Set(days.map(d => d.key));
+
+  // 1) Work Score entries stored as normal completions
+  const completionEntries = allComps.filter(c => {
+    if (!c || !c.title || !c.completedAtISO) return false;
+    if (!c.title.startsWith('Work Score')) return false;
+
+    const d  = new Date(c.completedAtISO);
+    if (isNaN(d)) return false;
+    const dk = dateKey(d);
+    return keys.has(dk);
+  });
+
+  // 2) Optional fallback: Work Score stored in a dedicated workHistory array
+  const hist = Array.isArray(state.workHistory) ? state.workHistory : [];
+  const historyEntries = hist.filter(h => {
+    if (!h) return false;
+
+    // Try to figure out a date key from a variety of possible shapes
+    let dk = null;
+    if (h.dateKey) {
+      dk = h.dateKey;
+    } else if (h.dayKey) {
+      dk = h.dayKey;
+    } else if (h.date) {
+      const d = new Date(h.date);
+      if (!isNaN(d)) dk = dateKey(d);
+    } else if (h.completedAtISO) {
+      const d = new Date(h.completedAtISO);
+      if (!isNaN(d)) dk = dateKey(d);
+    }
+
+    if (!dk) return false;
+    return keys.has(dk);
+  }).map(h => {
+    return {
+      title: h.title || 'Work Score',
+      points: h.points ?? h.score ?? h.value ?? h.workScore ?? 0,
+      completedAtISO: h.completedAtISO || h.date || null
+    };
+  });
+
+  // Combine both sources
+  const combined = [...completionEntries, ...historyEntries];
+
+  if (!combined.length) {
+    empty.style.display = 'block';
+    return;
+  }
+
+  empty.style.display = 'none';
+
+  combined
+    .slice()
+    .sort((a, b) => {
+      const ta = a.completedAtISO ? new Date(a.completedAtISO).getTime() : 0;
+      const tb = b.completedAtISO ? new Date(b.completedAtISO).getTime() : 0;
+      return tb - ta;
+    })
+    .forEach(c => {
+      const when = c.completedAtISO ? new Date(c.completedAtISO) : null;
+      const whenLabel = (when && !isNaN(when)) ? when.toLocaleString() : '';
+
+      const div = document.createElement('div');
+      div.className = 'flex items-center justify-between';
+
+      div.innerHTML = `
+        <div>
+          <div class="font-medium">${escapeHtml(c.title || 'Work Score')}</div>
+          <div class="text-xs text-zinc-400">${whenLabel}</div>
+        </div>
+        <div class="font-semibold">+${(c.points || 0).toLocaleString()} pts</div>
+      `;
+
+      list.appendChild(div);
+    });
+}
+
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m])); }
+
+/* Nav buttons */
+$('prevWeekBtn').onclick=()=>{
+  currentBaseDate = addDays(startOfWeek(currentBaseDate), -7);
+  renderHabits(currentBaseDate); renderWeekTasks(currentBaseDate); renderFlexWeek(currentBaseDate); renderWorkWeek(currentBaseDate);
+};
+$('nextWeekBtn').onclick=()=>{
+  currentBaseDate = addDays(startOfWeek(currentBaseDate), 7);
+  renderHabits(currentBaseDate); renderWeekTasks(currentBaseDate); renderFlexWeek(currentBaseDate); renderWorkWeek(currentBaseDate);
+};
+$('thisWeekBtn').onclick=()=>{
+  currentBaseDate = new Date();
+  renderHabits(currentBaseDate); renderWeekTasks(currentBaseDate); renderFlexWeek(currentBaseDate); renderWorkWeek(currentBaseDate);
+};
+
+renderHabits(currentBaseDate);
+renderWeekTasks(currentBaseDate);
+renderFlexWeek(currentBaseDate);
+renderWorkWeek(currentBaseDate);
+
+</script>
+</body>
+</html>

@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>TaskPoints — Update History</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='%230b0d10'/><text x='50' y='62' font-size='60' text-anchor='middle' fill='white'>TP</text></svg>">
+<script src="https://cdn.tailwindcss.com"></script>
+
+<link rel="stylesheet" href="styles.css">
+
+  <style>
+    :root{--bg:#0b0d10;--border:#202830;--muted:#8b98a5}
+    body{background:var(--bg);color:#e6edf6}
+    @media (prefers-color-scheme:light){body{background:#fafafa;color:#0b1220}}
+    .glass{border:1px solid var(--border);background:rgba(255,255,255,.06);border-radius:16px;padding:16px}
+    @media (prefers-color-scheme:light){.glass{background:#fff;border-color:#e5e7eb}}
+    .btn{border:1px solid var(--border);border-radius:12px;padding:6px 8px;font-size:11px}
+    .muted{color:var(--muted)}
+  </style>
+</head>
+<body class="min-h-screen">
+  <div class="mx-auto max-w-4xl p-4 sm:p-6">
+<header class="flex items-center justify-between mb-4">
+  <div class="title-wrap">
+    <h1 class="text-2xl font-extrabold">Update History</h1>
+  </div>
+
+  <div class="toolbar">
+    <a href="index.html" class="btn btn-teal btn-toolbar">Main</a>
+    <a href="log.html" class="btn btn-teal btn-toolbar">Log</a>
+    <a href="week.html" class="btn btn-teal btn-toolbar">Week</a>
+    <a href="archive.html" class="btn btn-teal btn-toolbar">Archive</a>
+    <a href="game.html" class="btn btn-teal btn-toolbar">Game</a>
+  </div>
+</header>
+
+
+    <div class="glass space-y-4 text-sm">
+
+      <!-- NEWEST VERSION -->
+<!-- NEWEST VERSION -->
+<section>
+  <h2 class="font-bold mb-1">v0.24.4 — 2025-12-04</h2>
+  <ul class="list-disc pl-5 space-y-1">
+
+    <li><b>Major stability fix</b> for the Main page:
+      <ul class="list-disc pl-5 space-y-1 mt-1">
+        <li>Added protective <code>try/catch</code> wrappers around all main rendering functions to prevent the UI from disappearing when one section fails.</li>
+        <li>Added a diagnostic console logger showing counts for tasks, completions, habits, flex actions, players, and game history on load.</li>
+        <li>Restored a missing <code>resetAll()</code> function that previously caused a fatal JavaScript error and prevented the Main page from rendering.</li>
+      </ul>
+    </li>
+
+    <li><b>Date parsing overhaul</b> to prevent rendering crashes:
+      <ul class="list-disc pl-5 space-y-1 mt-1">
+        <li>Hardened <code>dateKey</code>, <code>fromKey</code>, <code>niceDate</code>, <code>monthKey</code>, and <code>isoWeekKey</code> to gracefully handle malformed or legacy date strings.</li>
+        <li>Invalid dates now display “Invalid date” instead of crashing the entire Main page.</li>
+        <li>Stats, leaderboards, sleep history, calorie history, and task grouping are now fully resilient to corrupted or partial data.</li>
+      </ul>
+    </li>
+
+    <li><b>Stats engine reliability</b>:
+      <ul class="list-disc pl-5 space-y-1 mt-1">
+        <li>Rewrote the stats loop so malformed completion entries are safely ignored rather than causing fatal UI errors.</li>
+        <li>Prevents blank renders when old or incomplete backups contain missing fields.</li>
+      </ul>
+    </li>
+
+    <li><b>Unified import/export behavior</b>:
+      <ul class="list-disc pl-5 space-y-1 mt-1">
+        <li>Clarified app behavior: all pages share the same storage key (<code>taskpoints_v1</code>) and therefore share the same data and backup files.</li>
+        <li>Importing from any page now reliably loads the full dataset without partial overwrites.</li>
+      </ul>
+    </li>
+
+    <li><b>Game tab cleanup</b>:
+      <ul class="list-disc pl-5 space-y-1 mt-1">
+        <li>Removed redundant Import, Export, and Paste JSON buttons from the Game page, since they duplicated Main’s functionality and caused confusion.</li>
+        <li>Simplified the Game toolbar for a cleaner, more intuitive layout.</li>
+      </ul>
+    </li>
+
+    <li><b>Global data shape normalization</b>: ensured that tasks, completions, habits, flex actions, players, and game history always load into a complete, fully normalized state object, even when imports are missing fields.</li>
+
+    <li><b>Overall reliability improvements</b>: dramatically reduced the possibility of the Main page failing due to malformed data, incomplete imports, or legacy backups.</li>
+
+  </ul>
+</section>
+
+
+<section>
+  <h2 class="font-bold mb-1">v0.24.3 — 2025-11-24</h2>
+  <ul class="list-disc pl-5 space-y-1">
+    <li><b>Game tab bug fix</b>: fixed a rendering bug where players could temporarily disappear from the Game tab if the player card template failed while rendering. Existing players were never deleted, but now the UI handles the layout correctly and reliably shows all saved players.</li>
+
+    <li><b>Game tab polish</b>:
+      <ul class="list-disc pl-5 space-y-1 mt-1">
+        <li>Simplified player card markup to reduce the chance of template errors when editing players.</li>
+        <li>Kept all existing player data (including notes and photos) fully compatible with older backups.</li>
+      </ul>
+    </li>
+
+    <li><b>Importance bubble styling</b> on the main page:
+      <ul class="list-disc pl-5 space-y-1 mt-1">
+        <li><b>Low</b> importance is now a subtle, almost “clear” pill that blends with the card background, for less visual noise.</li>
+        <li><b>Medium</b> uses a teal-tinted badge that matches the app’s teal accent color, with darker text for better readability.</li>
+        <li><b>High</b> keeps a soft creamsicle / pastel orange background but now uses bright red text so it reads more clearly as a warning.</li>
+        <li><b>Critical</b> remains a deep oxblood / maroon-style badge as the highest urgency level.</li>
+      </ul>
+    </li>
+
+    <li><b>Main task actions</b>: the <b>Postpone</b> button on the main page was visually tuned to better match the Won’t do / Edit action style, using a more muted orange that fits the overall teal / plum / oxblood color palette instead of the older bright orange.</li>
+  </ul>
+</section>
+
+<section>
+  <h2 class="font-bold mb-1">v0.24.2 — 2025-11-18</h2>
+  <ul class="list-disc pl-5 space-y-1">
+
+    <li><b>Removed Lifetime Points card</b> from the main dashboard to declutter the top stats row and keep the focus on active metrics.</li>
+
+    <li><b>Daily / Weekly / Monthly Averages</b> now display <b>1 decimal place</b> instead of rounding to whole numbers (e.g., 4.3 instead of 4 or 5).</li>
+
+    <li><b>Task Log improvements</b>:
+      <ul class="list-disc pl-5 space-y-1 mt-1">
+        <li>Added a small <b>✕</b> button next to each completed <b>task</b> for quick deletion.</li>
+        <li>Deleting a task completion immediately restores the task to the active list.</li>
+        <li>All totals, Today’s Points, averages, leaderboards, and stats now update automatically after deleting a completion.</li>
+        <li>Completed <b>habits</b> are intentionally unaffected (since they can already be edited or undone via the Week tab).</li>
+      </ul>
+    </li>
+
+    <li><b>Internal cleanup</b> to ensure deleting completions doesn’t remove habits or players from local storage.</li>
+
+  </ul>
+</section>
+
+      <section>
+        <h2 class="font-bold mb-1">v0.24.1 — 2025-11-17</h2>
+        <ul class="list-disc pl-5 space-y-1">
+          <li><b>Toolbar buttons</b>: unified the font size of the top-row buttons on all pages (Main, Game, Log, Week, Updates) to match the Week view styling.</li>
+          <li><b>Main task bubbles</b>:
+            <ul class="list-disc pl-5 space-y-1 mt-1">
+              <li>Action buttons inside each task bubble are smaller and cleaner to match the top toolbar scale.</li>
+              <li><b>Done</b> is now a green checkmark button, moved to the far-right edge of the task bubble and slightly larger for easier tapping.</li>
+              <li>Task point values moved to the far left as a bigger point badge (e.g. “5 pts”), with slightly tighter vertical padding so each task takes up less height.</li>
+              <li><b>Won’t do</b> now uses the same neutral button style as Edit.</li>
+              <li><b>Delete</b> is now a darker, “oxblood” red button to stand out as a destructive action.</li>
+            </ul>
+          </li>
+          <li><b>Exports</b>: backup filenames now include the full local date and time, down to seconds, using your local clock (e.g. <code>taskpoints-backup-2025-11-17_12-45-33.json</code>).</li>
+          <li><b>Habit points retroactive update</b>: changing the point value of a habit now updates all existing log entries for that habit so totals, leaderboards, and stats stay in sync.</li>
+          <li><b>Today’s Points</b>: added a dedicated “Today’s Points” card on the main page showing the total points earned for the current day in a large, prominent number.</li>
+          <li><b>PNG support in Game tab</b>: player images now accept reasonably sized <code>.png</code> files (in addition to JPEGs) when adding players.</li>
+          <li><b>Game tab photos</b>: you can edit photos for existing players, not just when adding new ones.</li>
+          <li><b>Mobile habits layout</b> (iPhone / small screens only):
+            <ul class="list-disc pl-5 space-y-1 mt-1">
+              <li>Each habit’s name + “pts/day” + Edit/Delete now sit on the first row, with the Mon–Sun boxes moved to a second row underneath.</li>
+              <li>Long habit names are horizontally scrollable so you can read the entire title without it being cut off.</li>
+            </ul>
+          </li>
+        </ul>
+      </section>
+
+      <!-- EXISTING VERSIONS BELOW -->
+
+      <section>
+        <h2 class="font-bold mb-1">v0.24.0 — 2025-11-13 11:15</h2>
+        <ul class="list-disc pl-5 space-y-1">
+          <li>Added <b>habit history editing</b> via Week view with Previous / This Week / Next navigation.</li>
+          <li>Habits now sorted by <b>points per day (descending)</b> on both main and week pages.</li>
+          <li>Game tab: players now support <b>inline editing</b> of name, notes, and photo; added a notes field.</li>
+          <li>Confirmed players (including images + notes) are stored in <code>taskpoints_v1</code> and included in exports.</li>
+          <li>Leaderboards now tag current entries with <b>(Today)</b>, <b>(This Week)</b>, and <b>(This Month)</b>.</li>
+          <li>Added this <b>Update History</b> page and linked it from the main toolbar.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2 class="font-bold mb-1">v0.23.1 — 2025-11-13 (earlier)</h2>
+        <ul class="list-disc pl-5 space-y-1">
+          <li>Introduced <b>habits</b> with weekly row UI and per-day points.</li>
+          <li>Added <b>inline editing</b> for tasks and habits (no more prompt popups).</li>
+          <li>Added <b>Game</b> tab for managing players with headshots.</li>
+          <li>Reworked main layout into cleaner glass panels, plus daily/weekly/monthly average stats.</li>
+          <li>Added dedicated <b>Log</b> page and <b>Week</b> page.</li>
+        </ul>
+      </section>
+
+      <p class="muted mt-4">
+        You can keep extending this log by appending new version sections here whenever we change the app.
+      </p>
+    </div>
+
+    <footer class="mt-10 text-xs muted text-right">v0.24.3 — 2025-11-24</footer>
+  </div>
+
+<script>
+  const STORAGE_KEY = "taskpoints_v1";
+
+  function saveState(obj){
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(obj));
+  }
+
+  function loadState(){
+    try{
+      return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {};
+    }catch{
+      return {};
+    }
+  }
+
+
+
+</script>
+
+</body>
+</html>

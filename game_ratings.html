@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>TaskPoints — Player Ratings</title>
+
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="TaskPoints" />
+
+  <!-- Simple TP icon (same as other pages) -->
+  <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='256' height='256'><rect width='256' height='256' fill='%230b0d10'/><text x='128' y='160' text-anchor='middle' font-size='150' fill='white'>TP</text></svg>">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='%230b0d10'/><text x='50' y='62' font-size='60' text-anchor='middle' fill='white'>TP</text></svg>">
+
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <style>
+    body{
+      background:#fafafa;
+      color:#111827;
+    }
+    @media (prefers-color-scheme: dark) {
+      body{
+        background:#0a0a0a;
+        color:#fafafa;
+      }
+    }
+
+    .card{
+      border:1px solid rgb(228 228 231);
+      background:rgba(255,255,255,0.85);
+      border-radius:16px;
+      padding:16px;
+      box-shadow:0 10px 30px rgba(0,0,0,0.12);
+      backdrop-filter:blur(10px);
+    }
+    @media (prefers-color-scheme: dark) {
+      .card{
+        border-color:rgb(39 39 42);
+        background:rgba(24,24,27,0.9);
+      }
+    }
+
+    .top-nav-btn{
+      border-radius:999px;
+      padding:6px 10px;
+      font-size:11px;
+      border:1px solid rgba(148,163,184,0.8);
+      background:rgba(255,255,255,0.7);
+    }
+    @media (prefers-color-scheme: dark){
+      .top-nav-btn{
+        background:rgba(24,24,27,0.9);
+        color:#e5e7eb;
+        border-color:rgba(75,85,99,0.9);
+      }
+    }
+    .top-nav-btn-active{
+      background:linear-gradient(135deg,#4f46e5,#22c55e);
+      color:white;
+      border:none;
+    }
+
+    table{
+      width:100%;
+      border-collapse:collapse;
+      font-size:13px;
+    }
+    thead{
+      border-bottom:1px solid rgba(148,163,184,0.4);
+    }
+    th, td{
+      padding:6px 8px;
+      text-align:left;
+      white-space:nowrap;
+    }
+    th{
+      font-size:12px;
+      text-transform:uppercase;
+      letter-spacing:0.06em;
+      opacity:0.75;
+      cursor:pointer;
+      user-select:none;
+    }
+    tr:nth-child(every){
+      background:transparent;
+    }
+    tbody tr:nth-child(2n){
+      background:rgba(148,163,184,0.05);
+    }
+    @media (prefers-color-scheme: dark){
+      tbody tr:nth-child(2n){
+        background:rgba(15,23,42,0.8);
+      }
+    }
+
+    .sort-indicator{
+      font-size:10px;
+      opacity:0.8;
+      margin-left:4px;
+    }
+  </style>
+</head>
+<body class="min-h-screen">
+  <div class="mx-auto max-w-6xl p-4 sm:p-6">
+    <!-- Header / nav -->
+    <header class="flex flex-wrap items-center justify-between gap-3 mb-4">
+      <a href="index.html" class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-2xl grid place-items-center bg-black text-white font-bold">TP</div>
+        <div>
+          <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight">TaskPoints</h1>
+          <p class="text-xs opacity-70">Game — Player Ratings</p>
+        </div>
+      </a>
+      <div class="flex flex-wrap items-center gap-2">
+        <a href="index.html" class="top-nav-btn">Main</a>
+        <a href="log.html"    class="top-nav-btn">Log</a>
+<a href="week.html"        class="top-nav-btn">Week</a>
+<a href="game.html"        class="top-nav-btn">Game</a>
+<a href="matchups.html"    class="top-nav-btn">Matchups</a>
+<a href="game_ratings.html" class="top-nav-btn top-nav-btn-active">Ratings</a>
+<a href="updates.html"     class="top-nav-btn">Updates</a>
+
+      </div>
+    </header>
+
+    <section class="card mb-6">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-semibold text-lg">Player Ratings Table</h2>
+        <span id="playerCount" class="text-xs opacity-70"></span>
+      </div>
+      <p class="text-xs opacity-70 mb-3">
+        Click any column header to sort. Risky is shown as a 0–10 rating (normalized from your stored data).
+      </p>
+
+      <div class="overflow-x-auto">
+        <table>
+          <thead>
+<tr>
+  <th data-sort="name">Name</th>
+  <th data-sort="baseline">Baseline</th>
+  <th data-sort="variance">Variance</th>
+  <th data-sort="momentum">Momentum</th>
+  <th data-sort="risky">Risky</th>
+  <th data-sort="style">Style</th>
+  <th data-sort="wins">W</th>
+  <th data-sort="losses">L</th>
+  <th data-sort="winPct">Win%</th>
+  <th data-sort="ppd">PPD</th>
+  <th data-sort="avgPpd">AVG PPD</th>
+</tr>
+
+          </thead>
+          <tbody id="playersTableBody">
+            <!-- Rows injected by JS -->
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <footer class="mt-8 text-xs opacity-70">
+      <p>TaskPoints — Player ratings view. Read-only; edit players on the main Game page.</p>
+    </footer>
+  </div>
+
+  <script>
+const STORAGE_KEY = "taskpoints_v1";
+const $ = id => document.getElementById(id);
+
+let latestState = null;  // <- new
+
+function loadPlayers() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+
+    const parsed = JSON.parse(raw);
+    latestState = parsed; // <- remember full state
+
+    return Array.isArray(parsed.players) ? parsed.players : [];
+  } catch (e) {
+    console.error("Failed to load players from localStorage", e);
+    latestState = null;
+    return [];
+  }
+}
+
+function computeYouStatsFromCompletions() {
+  const s = latestState;
+  if (!s || !Array.isArray(s.completions) || !s.completions.length) {
+    return {
+      games: 0,
+      wins: 0,
+      losses: 0,
+      winPct: null,
+      avgPPD: null,
+      ppd: null
+    };
+  }
+
+  const dayMap = {};
+  for (const c of s.completions) {
+    const day = c.dateKey;
+    if (!day) continue;
+    const pts = Number(c.points || 0);
+    if (!dayMap[day]) dayMap[day] = 0;
+    dayMap[day] += pts;
+  }
+
+  const dailyTotals = Object.values(dayMap);
+  if (!dailyTotals.length) {
+    return {
+      games: 0,
+      wins: 0,
+      losses: 0,
+      winPct: null,
+      avgPPD: null,
+      ppd: null
+    };
+  }
+
+  const avgPPD =
+    dailyTotals.reduce((sum, val) => sum + val, 0) / dailyTotals.length;
+
+  let wins = 0;
+  let losses = 0;
+  for (const total of dailyTotals) {
+    if (total > avgPPD) wins++;
+    else losses++;
+  }
+
+  const winPct = (wins + losses) ? (wins / (wins + losses)) * 100 : null;
+
+  // For your row, treat PPD as your average points per day
+  const ppd = avgPPD;
+
+  return {
+    games: dailyTotals.length,
+    wins,
+    losses,
+    winPct,
+    avgPPD,
+    ppd
+  };
+}
+
+
+// existing helper
+function getNormalizedRisky(rawRisky) {
+  let n = Number(rawRisky);
+  if (Number.isNaN(n)) return 0;
+  if (n > 10) n = n / 10;
+  if (n < 0) n = 0;
+  if (n > 10) n = 10;
+  return n;
+}
+
+let players = loadPlayers();
+
+// Inject a special "You" row into the ratings table.
+// Ratings fields (baseline, variance, etc.) stay blank, but stats are real.
+const youRow = {
+  id: "YOU",
+  name: "You",
+  baseline: null,
+  variance: null,
+  momentum: null,
+  risky: null,
+  style: "",
+  isYou: true
+};
+
+players = [youRow, ...players];
+
+
+// NEW: pull gameHistory off the last-loaded state
+let gameHistory =
+  latestState && Array.isArray(latestState.gameHistory)
+    ? latestState.gameHistory
+    : [];
+
+let sortKey = "name";
+let sortDir = "asc"; // "asc" or "desc"
+
+function renderTable() {
+  const tbody = $("playersTableBody");
+  if (!tbody) return;
+  tbody.innerHTML = "";
+
+  // Sort a copy so we don't mutate original order
+  const sorted = [...players].sort((a, b) => {
+    const ak = getSortValue(a, sortKey);
+    const bk = getSortValue(b, sortKey);
+
+    if (ak == null && bk == null) return 0;
+    if (ak == null) return 1;
+    if (bk == null) return -1;
+
+    if (typeof ak === "number" && typeof bk === "number") {
+      return sortDir === "asc" ? ak - bk : bk - ak;
+    }
+
+    const as = String(ak).toLowerCase();
+    const bs = String(bk).toLowerCase();
+    if (as < bs) return sortDir === "asc" ? -1 : 1;
+    if (as > bs) return sortDir === "asc" ? 1 : -1;
+    return 0;
+  });
+
+  sorted.forEach(p => {
+    const tr = document.createElement("tr");
+
+    const baseline =
+      typeof p.baseline === "number" ? p.baseline : Number(p.baseline) || null;
+    const variance =
+      typeof p.variance === "number" ? p.variance : Number(p.variance) || null;
+    const momentum =
+      typeof p.momentum === "number" ? p.momentum : Number(p.momentum) || null;
+    const riskyNorm = getNormalizedRisky(p.risky);
+    const style = p.style || "";
+
+    const stats = computePlayerStats(p);
+
+    const winPctDisplay =
+      stats.winPct == null ? "—" : stats.winPct.toFixed(1) + "%";
+    const ppdDisplay =
+      stats.ppd == null ? "—" : stats.ppd.toFixed(1);
+    const avgPpdDisplay =
+      stats.avgPPD == null ? "—" : stats.avgPPD.toFixed(1);
+
+    tr.innerHTML = `
+      <td class="pr-4">${escapeHtml(p.name || "—")}</td>
+      <td>${baseline != null ? baseline : "—"}</td>
+      <td>${variance != null ? variance : "—"}</td>
+      <td>${momentum != null ? momentum : "—"}</td>
+      <td>${riskyNorm != null ? riskyNorm.toFixed(1) : "—"}</td>
+      <td>${escapeHtml(style || "—")}</td>
+      <td>${stats.wins}</td>
+      <td>${stats.losses}</td>
+      <td>${winPctDisplay}</td>
+      <td>${ppdDisplay}</td>
+      <td>${avgPpdDisplay}</td>
+    `;
+
+    tbody.appendChild(tr);
+  });
+
+  const countLabel = $("playerCount");
+  if (countLabel) {
+    if (players.length) {
+      countLabel.textContent = `${players.length} player${players.length === 1 ? "" : "s"}`;
+    } else {
+      countLabel.textContent = "No players found";
+    }
+  }
+
+  updateSortIndicators();
+}
+
+function computePlayerStats(p) {
+  // Special case: the real-you row uses TaskPoints completions,
+  // not simulated gameHistory.
+  if (p && (p.id === "YOU" || p.isYou)) {
+    return computeYouStatsFromCompletions();
+  }
+
+  if (!Array.isArray(gameHistory) || !gameHistory.length) {
+    return {
+      games: 0,
+      wins: 0,
+      losses: 0,
+      winPct: null,
+      avgPPD: null,
+      ppd: null
+    };
+  }
+
+  let games = 0;
+  let totalPoints = 0;
+  let wins = 0;
+  let losses = 0;
+
+  const baseline =
+    typeof p.baseline === "number" ? p.baseline : Number(p.baseline) || 0;
+
+  for (const g of gameHistory) {
+    if (g.playerId !== p.id) continue;
+
+    games++;
+    const score =
+      typeof g.score === "number" ? g.score : Number(g.score) || 0;
+
+    totalPoints += score;
+
+    if (baseline) {
+      if (score >= baseline) wins++;
+      else losses++;
+    }
+  }
+
+  if (!games) {
+    return {
+      games: 0,
+      wins: 0,
+      losses: 0,
+      winPct: null,
+      avgPPD: null,
+      ppd: null
+    };
+  }
+
+  const avgPPD = totalPoints / games;
+  const winPct = (wins + losses) ? (wins / (wins + losses)) * 100 : null;
+  const ppd = baseline ? avgPPD - baseline : null;
+
+  return {
+    games,
+    wins,
+    losses,
+    winPct,
+    avgPPD,
+    ppd
+  };
+}
+
+
+
+function getSortValue(p, key) {
+  const stats = computePlayerStats(p);
+
+  switch (key) {
+    case "name":      return (p.name || "").toLowerCase();
+    case "baseline":  return Number(p.baseline) || 0;
+    case "variance":  return Number(p.variance) || 0;
+    case "momentum":  return Number(p.momentum) || 0;
+    case "risky":     return getNormalizedRisky(p.risky);
+    case "style":     return (p.style || "").toLowerCase();
+    case "wins":      return stats.wins || 0;
+    case "losses":    return stats.losses || 0;
+    case "winPct":    return stats.winPct || 0;
+    case "ppd":       return stats.ppd || 0;
+    case "avgPpd":    return stats.avgPPD || 0;
+    default:          return 0;
+  }
+}
+
+
+    function updateSortIndicators() {
+      const indicators = document.querySelectorAll("[data-indicator]");
+      indicators.forEach(span => {
+        const key = span.getAttribute("data-indicator");
+        if (key === sortKey) {
+          span.textContent = sortDir === "asc" ? "▲" : "▼";
+        } else {
+          span.textContent = "";
+        }
+      });
+    }
+
+    function escapeHtml(str) {
+      if (!str && str !== 0) return "";
+      return String(str).replace(/[&<>"']/g, m => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#039;"
+      }[m]));
+    }
+
+    // Hook up header click sorting
+    document.addEventListener("DOMContentLoaded", () => {
+      const headers = document.querySelectorAll("th[data-sort]");
+      headers.forEach(th => {
+        th.addEventListener("click", () => {
+          const key = th.getAttribute("data-sort");
+          if (!key) return;
+
+          if (sortKey === key) {
+            // Toggle direction
+            sortDir = sortDir === "asc" ? "desc" : "asc";
+          } else {
+            sortKey = key;
+            sortDir = "asc";
+          }
+
+          renderTable();
+        });
+      });
+
+      renderTable();
+    });
+  </script>
+</body>
+</html>

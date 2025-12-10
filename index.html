@@ -1,0 +1,3022 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>TaskPoints — To-Do + Points Tracker</title>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="default"/>
+  <meta name="apple-mobile-web-app-title" content="TaskPoints"/>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='%230b0d10'/><text x='50' y='62' font-size='60' text-anchor='middle' fill='white'>TP</text></svg>">
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+
+<link rel="stylesheet" href="styles.css">
+
+
+</head>
+<body class="min-h-screen">
+<div id="pointsToastContainer" class="points-toast-container"></div>
+<div class="mx-auto max-w-6xl p-4 sm:p-6 pb-20 md:pb-6">
+
+
+  <!-- HEADER -->
+  <header class="mb-4">
+    <div class="row items-center">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-2xl grid place-items-center bg-black text-white font-bold text-sm shrink-0">TP</div>
+        <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight">TaskPoints</h1>
+      </div>
+
+<div class="toolbar">
+  <button id="exportBtn" class="btn btn-ghost btn-toolbar">Export</button>
+  <label class="btn btn-ghost btn-toolbar cursor-pointer">Import
+    <input id="importInput" type="file" accept="application/json" class="hidden"/>
+  </label>
+  <button id="importPasteBtn" class="btn btn-ghost btn-toolbar">Paste JSON</button>
+  <button id="resetBtn" class="btn btn-ghost btn-toolbar">Reset</button>
+
+<button
+  type="button"
+  class="btn btn-ghost btn-toolbar hidden md:inline-flex"
+  onclick="scrollToTasks()">
+  Jump to Tasks
+</button>
+
+
+  <a href="log.html"    class="btn btn-teal btn-toolbar">Log</a>
+  <a href="daily.html"  class="btn btn-teal btn-toolbar">Daily</a>
+  <a href="week.html"   class="btn btn-teal btn-toolbar">Week</a>
+  <a href="archive.html" class="btn btn-teal btn-toolbar">Archive</a>
+  <a href="game.html"   class="btn btn-teal btn-toolbar">Game</a>
+  <a href="updates.html" class="btn btn-teal btn-toolbar">Updates</a>
+
+</div>
+
+    </div>
+  </header>
+
+  <!-- TOP ROW -->
+  <div class="grid gap-6 mb-6 lg:grid-cols-2">
+
+<!-- LEFT: Add a Task -->
+<div class="glass" id="addTaskCard">
+
+  <div class="flex justify-between items-center mb-3">
+    <button id="addTaskToggleBtn"
+      class="btn btn-teal px-6 py-3 text-base font-semibold rounded-xl"
+      onclick="toggleAddTask()">
+      Add a Task
+    </button>
+  </div>
+
+
+  <!-- Collapsible body: your existing form (wrapped so we can move it into a modal) -->
+  <div id="addTaskBodyHost">
+    <div id="addTaskBody" class="grid gap-3 hidden">
+    <!-- Row 1: task title -->
+    <input id="titleInput" class="input" placeholder="e.g., 30-min treadmill walk">
+
+    <!-- Row 2: priority + due date + Today -->
+    <div class="flex flex-wrap gap-2 mt-1">
+      <select id="importanceInput" class="input flex-1 min-w-[120px]">
+        <option>Low</option>
+        <option selected>Medium</option>
+        <option>High</option>
+        <option>Critical</option>
+      </select>
+
+      <input id="dueDateInput" type="date" class="input flex-1 min-w-[120px]">
+
+      <button class="btn btn-ghost text-xs px-2" onclick="setDueToday()">Today</button>
+    </div>
+
+<!-- Row 3: points + repeat rule -->
+    <div class="flex flex-wrap gap-2 mt-1">
+      <input id="pointsInput" type="number" min="0" class="input w-24" placeholder="e.g., 25">
+
+      <select id="repeatInput" class="input flex-1 min-w-[120px]">
+        <option value="none">Does not repeat</option>
+        <option value="daily">Every day</option>
+        <option value="weekdays">Weekdays (Mon–Fri)</option>
+        <option value="weekly">Every week</option>
+        <option value="monthly">Every month (same date)</option>
+        <option value="yearly">Every year (same date)</option>
+        <option value="custom">Custom…</option>
+      </select>
+    </div>
+
+    <!-- Custom repeat controls (hidden unless "Custom" selected) -->
+    <div id="repeatCustomRow" class="flex items-center gap-2 text-xs mt-2 hidden">
+      <span class="muted">Repeat every</span>
+      <input id="repeatCustomCount" type="number" min="1" class="input w-16" value="1">
+      <select id="repeatCustomUnit" class="input w-24">
+        <option value="day">day(s)</option>
+        <option value="week">week(s)</option>
+        <option value="month">month(s)</option>
+        <option value="year">year(s)</option>
+      </select>
+    </div>
+
+  <!-- ✅ Row 4: tags -->
+  <input
+    id="tagsInput"
+    class="input"
+    placeholder="Tags (e.g., work, coding, creative)"
+  >
+
+    <button id="addBtn" class="btn btn-primary">Add Task</button>
+  </div>
+</div>
+</div>
+
+<!-- RIGHT: Today's points + averages + graph -->
+    <div class="grid gap-3 sm:grid-cols-2">
+      <!-- Today's Points + Daily Avg card (left) -->
+      <div class="glass text-center">
+        <div class="font-semibold text-sm muted">Today&#8217;s Points</div>
+        <div id="todayPoints" class="text-5xl sm:text-6xl font-extrabold mt-1">0</div>
+        <div class="text-[11px] muted mt-1">Points earned so far today</div>
+
+        <!-- Daily average moved into this same card -->
+        <div class="mt-2 text-[11px] muted">
+          Daily Avg (active):
+          <span id="dailyAvg" class="font-semibold">0</span>
+        </div>
+      </div>
+
+      <!-- Empty placeholder card (right) -->
+      <div class="glass"></div>
+
+
+
+<!-- Daily line graph (bottom, spans both columns) -->
+<div class="glass sm:col-span-2 flex items-end">
+  <canvas id="dailyTrend" class="w-full h-24"></canvas>
+</div>
+
+    </div>
+
+  </div>
+  <!-- TOP ROW END -->
+
+  <!-- TODAY'S POINTS BREAKDOWN BAR -->
+  <div class="mb-6">
+    <div class="flex items-center justify-between mb-1 text-[11px] muted">
+      <span>Today’s Points Breakdown</span>
+      <span id="todayBreakdownSummary" class="text-[11px]"></span>
+    </div>
+    <div class="today-breakdown-bar">
+      <div id="todayBreakdownBar" class="h-full flex"></div>
+    </div>
+  </div>
+
+  <!-- LEADERBOARDS -->
+  <div class="grid sm:grid-cols-3 gap-3 mb-6">
+    <div class="glass">
+      <h3 class="font-semibold mb-2">🏆 Best Days</h3>
+      <ul id="dailyBoard" class="text-sm space-y-1"></ul>
+    </div>
+    <div class="glass">
+      <h3 class="font-semibold mb-2">🏆 Best Weeks</h3>
+      <ul id="weeklyBoard" class="text-sm space-y-1"></ul>
+    </div>
+    <div class="glass">
+      <h3 class="font-semibold mb-2">🏆 Best Months</h3>
+      <ul id="monthlyBoard" class="text-sm space-y-1"></ul>
+    </div>
+  </div>
+
+<!-- SLEEP + CALORIES -->
+<div class="grid sm:grid-cols-2 gap-3 mb-6">
+  <!-- LEFT: Sleep Score (existing content) -->
+  <div class="glass">
+    <div class="flex items-start justify-between gap-6 flex-wrap">
+      <!-- LEFT: Big stat + input -->
+      <div class="flex-1 min-w-[220px]">
+        <h2 id="sleepAnchor" class="font-bold text-lg mb-2">Sleep Score</h2>
+        <div class="mb-2">
+          <div class="muted text-xs">Today’s Sleep</div>
+          <div id="sleepTodayValue" class="text-4xl font-extrabold leading-tight">—</div>
+          <div id="sleepTodayImpact" class="muted text-xs mt-1">Adds 0 pts to today</div>
+        </div>
+<div class="flex items-center gap-3 flex-wrap mt-3">
+  <input id="sleepScoreInput" class="input w-24" type="number" placeholder="0–100">
+  <button id="saveSleepScoreBtn" class="btn btn-plum">Add</button>
+</div>
+
+
+        <p class="muted text-xs mt-2">
+  Score ÷ 10 plus a bonus is added to today's points:
+  +1 pt for 95–97, +2 pts for 98–99, +3 pts for 100.
+</p>
+      </div>
+
+      <!-- RIGHT: History chips -->
+      <div class="flex-1 min-w-[220px]">
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="font-semibold text-sm">Recent nights</h3>
+        </div>
+        <div id="sleepHistory" class="flex gap-2 flex-wrap"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: Calories card -->
+  <div class="glass">
+    <div class="flex items-start justify-between gap-6 flex-wrap">
+      <!-- LEFT: Big stat + input -->
+      <div class="flex-1 min-w-[220px]">
+        <h2 class="font-bold text-lg mb-2">Calories</h2>
+        <div class="mb-2">
+          <div class="muted text-xs">Today’s Calories</div>
+          <div id="caloriesTodayValue" class="text-4xl font-extrabold leading-tight">—</div>
+          <div id="caloriesTodayImpact" class="muted text-xs mt-1">Adds 0 pts to today</div>
+        </div>
+<div class="flex items-center gap-3 flex-wrap mt-3">
+  <input id="caloriesInput" class="input w-24" type="number" placeholder="0–3000">
+  <input id="caloriesDate" class="input w-32" type="date">
+  <button id="saveCaloriesBtn" class="btn btn-teal">Add</button>
+</div>
+
+        <p class="muted text-xs mt-2">
+          (2400 − calories) ÷ 100, capped between 0 and 10 pts, rounded to the nearest tenth.
+        </p>
+      </div>
+
+      <!-- RIGHT: History chips -->
+      <div class="flex-1 min-w-[220px]">
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="font-semibold text-sm">Recent days</h3>
+        </div>
+        <div id="caloriesHistory" class="flex gap-2 flex-wrap"></div>
+      </div>
+    </div>
+  </div>
+</div> <!-- end of SLEEP + CALORIES block -->
+
+<!-- WORK SCORE + BLANK -->
+<div class="grid sm:grid-cols-2 gap-3 mb-6">
+
+  <!-- LEFT: Work Score -->
+  <div class="glass">
+    <div class="flex items-start justify-between gap-6 flex-wrap">
+
+      <!-- LEFT SIDE: big stat + input -->
+      <div class="flex-1 min-w-[220px]">
+        <h2 id="workAnchor" class="font-bold text-lg mb-2">Work Score</h2>
+
+        <div class="mb-2">
+          <div class="muted text-xs">Today’s Work</div>
+          <div id="workTodayValue" class="text-4xl font-extrabold leading-tight">—</div>
+          <div id="workTodayImpact" class="muted text-xs mt-1">Adds 0 pts to today</div>
+        </div>
+
+        <div class="flex items-center gap-3 flex-wrap mt-3">
+          <input id="workScoreInput" class="input w-24" type="number" placeholder="0–100">
+          <button id="saveWorkScoreBtn" class="btn btn-work">Add</button>
+        </div>
+
+        <p class="muted text-xs mt-2">
+          Work Score is added directly as points. (5 → +5 pts)
+        </p>
+      </div>
+
+      <!-- RIGHT SIDE: history chips -->
+      <div class="flex-1 min-w-[220px]">
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="font-semibold text-sm">Recent days</h3>
+        </div>
+        <div id="workHistory" class="flex gap-2 flex-wrap"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- RIGHT: completely blank card for future use -->
+  <div class="glass"></div>
+
+</div>
+
+
+
+  <!-- HABITS -->
+  <div class="glass mb-6">
+    <div class="flex items-center justify-between mb-3 gap-3 flex-wrap">
+      <h2 id="habitsAnchor" class="font-bold text-lg">Habits</h2>\
+      <div class="flex gap-2 flex-wrap">
+        <input id="habitName" class="input w-48" placeholder="Habit name">
+        <input id="habitPts"  class="input w-28" type="number" placeholder="Pts">
+        <button id="addHabitBtn" class="btn btn-primary">Add Habit</button>
+      </div>
+    </div>
+    <div class="grid gap-2 text-sm muted mb-2" id="habitWeekLabels"></div>
+    <div id="habitsList" class="grid gap-2"></div>
+    <div id="habitsEmpty" class="text-sm muted hidden">No habits yet.</div>
+  </div>
+
+<!-- VICES -->
+<div class="glass mb-6">
+  <div class="flex items-center justify-between mb-3 gap-3 flex-wrap">
+    <h2 id="vicesAnchor" class="font-bold text-lg">Vices</h2>
+    <div class="flex gap-2 flex-wrap">
+      <input id="viceName" class="input w-48" placeholder="Vice name">
+      <input id="vicePts"  class="input w-28" type="number" placeholder="Pts">
+      <button id="addViceBtn" class="btn btn-primary">Add Vice</button>
+    </div>
+  </div>
+  <div class="grid gap-2 text-sm muted mb-2" id="viceWeekLabels"></div>
+  <div id="vicesList" class="grid gap-2"></div>
+  <div id="vicesEmpty" class="text-sm muted hidden">No vices yet.</div>
+</div>
+
+  <!-- FLEX ACTIONS -->
+  <div class="glass mb-6">
+    <div class="flex items-center justify-between mb-3 gap-3 flex-wrap">
+      <h2 id="flexAnchor" class="font-bold text-lg">Flex Actions</h2>
+      <div class="flex gap-2 flex-wrap">
+        <input id="flexName" class="input w-48" placeholder="Flex action">
+        <input id="flexPts"  class="input w-28" type="number" placeholder="Pts/use">
+        <button id="addFlexBtn" class="btn btn-primary">Add</button>
+      </div>
+    </div>
+    <div id="flexList" class="grid gap-2 text-sm"></div>
+    <div id="flexEmpty" class="text-sm muted hidden">No flex actions yet.</div>
+  </div>
+
+  <!-- TASKS grouped by day -->
+  <div class="glass mb-6">
+    <div class="flex justify-between items-center mb-3 gap-3 flex-wrap">
+     <h2 id="tasksAnchor" class="font-bold text-lg">Your Tasks</h2>
+      <select id="sortSelect" class="input w-48">
+        <option value="due">Sort by Due Date</option>
+        <option value="importance">Sort by Importance</option>
+        <option value="points">Sort by Points</option>
+        <option value="alpha">Sort by Name</option>
+      </select>
+    </div>
+    <div id="taskList" class="grid gap-2"></div>
+    <div id="emptyList" class="text-sm muted hidden">No tasks yet.</div>
+  </div>
+
+  <footer class="mt-10 flex items-center justify-between">
+    <p>Tip: On iPhone Safari → <b>Add to Home Screen</b> for an app-like experience.</p>
+    <p>v0.24.2 — 2025-11-18</p>
+  </footer>
+</div>
+
+<script>
+const STORAGE_KEY="taskpoints_v1";
+const OLD_PLAYERS_KEY="taskpoints_players";
+const $=id=>document.getElementById(id);
+let state=load();
+let editingTaskId = null;
+let editingHabitId = null;
+let editingFlexId = null;
+let addTaskExpanded = false;
+let addTaskFormLocation = 'card';  // 'card' or 'modal'
+
+
+function sleepBonus(score) {
+  if (score >= 100) return 3;
+  if (score >= 98) return 2;
+  if (score >= 95) return 1;
+  return 0;
+}
+
+function migrateSleepEntriesForBonus() {
+  if (!state || !Array.isArray(state.completions)) return;
+
+  let changed = false;
+
+  state.completions.forEach(c => {
+    if (!c || !c.title || !c.title.startsWith('Sleep Score')) return;
+
+    const match = c.title.match(/\((\d+)\)/);
+    if (!match) return;
+
+    const raw = Number(match[1]);
+    if (!Number.isFinite(raw)) return;
+
+    const base  = raw / 10;
+    const bonus = sleepBonus(raw);
+    const newPts = base + bonus;
+
+    // only update if different, to avoid noisy rewrites
+    if (Math.abs((Number(c.points) || 0) - newPts) > 0.0001) {
+      c.points = newPts;
+      changed = true;
+    }
+  });
+
+  if (changed) {
+    save();
+  }
+}
+
+migrateSleepEntriesForBonus();
+
+
+function isDesktop() {
+  // Tailwind lg breakpoint (1024px) – matches your layout
+  return window.matchMedia("(min-width: 1024px)").matches;
+}
+
+function syncAddTaskFormLocation() {
+  const body      = $("addTaskBody");
+  const host      = $("addTaskBodyHost");
+  const modalBody = $("addTaskModalBody");
+  if (!body || !host || !modalBody) return;
+
+  if (isDesktop()) {
+    // Move form into the modal container on desktop
+    if (addTaskFormLocation !== "modal") {
+      modalBody.appendChild(body);
+      addTaskFormLocation = "modal";
+      body.classList.add("hidden"); // start hidden until Show Form
+    }
+  } else {
+    // Move form back under the card on mobile/tablet
+    if (addTaskFormLocation !== "card") {
+      host.appendChild(body);
+      addTaskFormLocation = "card";
+      body.classList.add("hidden"); // collapsed until Show Form
+    }
+  }
+}
+
+function openAddTaskModal() {
+  const modal = $("addTaskModal");
+  const body  = $("addTaskBody");
+  const btn   = $("addTaskToggleBtn");
+  if (!modal || !body || !btn) return;
+
+  // Make the modal visible and flex-centered
+  modal.classList.remove("hidden");
+  modal.classList.add("flex");
+
+  body.classList.remove("hidden");
+  addTaskExpanded = true;
+  btn.textContent = "Add a Task";
+}
+
+function closeAddTaskModal() {
+  const modal = $("addTaskModal");
+  const body  = $("addTaskBody");
+  const btn   = $("addTaskToggleBtn");
+  if (!modal || !body || !btn) return;
+
+  // Hide the modal completely
+  modal.classList.add("hidden");
+  modal.classList.remove("flex");
+
+  body.classList.add("hidden");
+  addTaskExpanded = false;
+  btn.textContent = "Add a Task";
+}
+
+
+function toggleAddTask() {
+  const btn  = $("addTaskToggleBtn");
+  const body = $("addTaskBody");
+  if (!btn || !body) return;
+
+  // DESKTOP: use modal
+  if (isDesktop() && addTaskFormLocation === "modal") {
+    if (addTaskExpanded) {
+      closeAddTaskModal();
+    } else {
+      openAddTaskModal();
+    }
+    return;
+  }
+
+  // MOBILE/TABLET: collapse inline under the card (old behavior)
+  addTaskExpanded = !addTaskExpanded;
+
+  if (addTaskExpanded) {
+    body.classList.remove("hidden");
+    btn.textContent = "Add a Task";
+  } else {
+    body.classList.add("hidden");
+    btn.textContent = "Add a Task";
+  }
+}
+
+
+function showPointsToast(points){
+  const container = $('pointsToastContainer');
+  if(!container) return;
+
+  const pts = Number(points) || 0;
+  if(!pts) return;
+
+  const div = document.createElement('div');
+  div.className = 'points-toast';
+  const sign = pts > 0 ? '+' : '';
+  div.textContent = `${sign}${pts} pts`;
+
+  container.appendChild(div);
+
+  // remove after animation
+  setTimeout(()=> {
+    div.remove();
+  }, 3200);
+}
+
+function caloriesToPoints(cal){
+  let pts = (2400 - cal) / 100;
+
+  if (pts < 0) pts = 0;      // no negatives
+  if (pts > 10) pts = 10;    // cap at 10
+
+  pts = Math.round(pts * 10) / 10;  // nearest tenth
+  return pts;
+}
+
+function addCompletion(entry){
+  const pts = Number(entry.points) || 0;
+  state.completions.unshift(entry);
+  showPointsToast(pts);
+}
+
+
+function load() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) {
+      // nothing saved yet on this device
+      return {
+        tasks:        [],
+        completions:  [],
+        players:      [],
+        habits:       [],
+        flexActions:  [],
+        gameHistory:  [],
+        matchups:     []
+      };
+    }
+
+    const p = JSON.parse(raw);
+
+    return {
+      tasks:        Array.isArray(p.tasks)        ? p.tasks        : [],
+      completions:  Array.isArray(p.completions)  ? p.completions  : [],
+      players:      Array.isArray(p.players)      ? p.players      : [],
+      habits:       Array.isArray(p.habits)       ? p.habits       : [],
+      flexActions:  Array.isArray(p.flexActions)  ? p.flexActions  : [],
+      gameHistory:  Array.isArray(p.gameHistory)  ? p.gameHistory  : [],
+      matchups:     Array.isArray(p.matchups)     ? p.matchups     : []
+    };
+  } catch (e) {
+    console.error('Failed to load TaskPoints state on main page', e);
+    return {
+      tasks:        [],
+      completions:  [],
+      players:      [],
+      habits:       [],
+      flexActions:  [],
+      gameHistory:  [],
+      matchups:     []
+    };
+  }
+}
+
+
+function save(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+
+function resetAll(){
+  const msg = [
+    'This will erase ALL TaskPoints data stored on this device:',
+    '- Tasks',
+    '- Completions / log history',
+    '- Habits & their history',
+    '- Flex actions',
+    '- Players / Game data',
+    '',
+    'This cannot be undone. Continue?'
+  ].join('\n');
+
+  if (!confirm(msg)) return;
+
+  try{
+    // Clear local storage for TaskPoints
+    localStorage.removeItem(STORAGE_KEY);
+  }catch(e){
+    console.error('Failed to clear TaskPoints storage', e);
+  }
+
+  // Reset in-memory state so the UI updates immediately
+  state = {
+    tasks:        [],
+    completions:  [],
+    players:      [],
+    habits:       [],
+    flexActions:  []
+  };
+
+  // Re-render everything so the page doesn't look broken
+  try { renderAll(); }           catch(e){ console.error('renderAll after reset:', e); }
+  try { renderHabits(); }        catch(e){ console.error('renderHabits after reset:', e); }
+  try { renderVices(); }         catch(e){ console.error('renderVices after reset:', e); }
+  try { renderFlexActions(); }   catch(e){ console.error('renderFlexActions after reset:', e); }
+  try { renderHabitWeekLabels(); } catch(e){ console.error('renderHabitWeekLabels after reset:', e); }
+  try { renderViceWeekLabels(); }  catch(e){ console.error('renderViceWeekLabels after reset:', e); }
+}
+
+
+function addDays(d,n){ const x=new Date(d); x.setDate(x.getDate()+n); x.setHours(0,0,0,0); return x; }
+function computeNextDueDate(task){
+  const rec = task.recurrence || {};
+  const mode = rec.mode || 'none';
+  if (mode === 'none') return null;
+
+  const baseKey = task.dueDateISO || todayKey();
+  const base = new Date(baseKey + 'T00:00:00');
+
+  let next = null;
+
+  if (mode === 'daily') {
+    next = addDays(base, 1);
+  } else if (mode === 'everyWeekday') {
+    next = addDays(base, 1);
+    let d = next.getDay(); // 0 Sun, 6 Sat
+    if (d === 6) next = addDays(next, 2);     // Sat -> Mon
+    else if (d === 0) next = addDays(next, 1); // Sun -> Mon
+  } else if (mode === 'weekly') {
+    next = addDays(base, 7);
+  } else if (mode === 'monthly') {
+    next = new Date(base);
+    next.setMonth(next.getMonth() + 1);
+    next.setHours(0,0,0,0);
+  } else if (mode === 'yearly') {
+    next = new Date(base);
+    next.setFullYear(next.getFullYear() + 1);
+    next.setHours(0,0,0,0);
+  } else if (mode === 'custom') {
+    const count = Number.isFinite(rec.customCount) && rec.customCount > 0 ? rec.customCount : 1;
+    const unit  = rec.customUnit || 'day';
+    if (unit === 'day') {
+      next = addDays(base, count);
+    } else if (unit === 'week') {
+      next = addDays(base, count * 7);
+    } else if (unit === 'month') {
+      next = new Date(base);
+      next.setMonth(next.getMonth() + count);
+      next.setHours(0,0,0,0);
+    } else if (unit === 'year') {
+      next = new Date(base);
+      next.setFullYear(next.getFullYear() + count);
+      next.setHours(0,0,0,0);
+    }
+  }
+
+  return next ? dateKey(next) : null;
+}
+
+function startOfWeek(d){ const x=new Date(d); x.setHours(0,0,0,0); const day=(x.getDay()+6)%7; x.setDate(x.getDate()-day); return x; }
+function weekDays(baseDate){
+  const start=startOfWeek(baseDate);
+  const days=[];
+  for(let i=0;i<7;i++){
+    const d=addDays(start,i);
+    days.push({date:d, key:dateKey(d), label:d.toLocaleDateString(undefined,{weekday:'short'})});
+  }
+  return days;
+}
+function computeHabitStreak(h){
+  if (!h || !Array.isArray(h.doneKeys) || h.doneKeys.length === 0) return 0;
+
+  // Use fromKey so "YYYY-MM-DD" is parsed the same way everywhere else
+  const dates = h.doneKeys
+    .map(k => fromKey(k))
+    .filter(d => d && !isNaN(d))
+    .sort((a, b) => b - a); // newest → oldest
+
+  if (!dates.length) return 0;
+
+  // Normalize "today"
+  const today = new Date();
+  today.setHours(0,0,0,0);
+
+  const mostRecent = new Date(dates[0].getTime());
+  mostRecent.setHours(0,0,0,0);
+
+  const diffToToday = Math.round((today - mostRecent) / 86400000);
+  if (diffToToday > 0) {
+    // Last completion wasn't today → streak broken
+    return 0;
+  }
+
+  // Count backwards through consecutive days
+  let streak = 1;
+  let prev = mostRecent;
+
+  for (let i = 1; i < dates.length; i++) {
+    const d = new Date(dates[i].getTime());
+    d.setHours(0,0,0,0);
+
+    const diffDays = Math.round((prev - d) / 86400000);
+    if (diffDays === 1) {
+      streak++;
+      prev = d;
+    } else {
+      break;
+    }
+  }
+
+  return streak;
+}
+
+function computeHabitCompletion(h){
+  if (!h) return 0;
+
+  const doneKeys = Array.isArray(h.doneKeys) ? h.doneKeys : [];
+
+  // Normalize "today"
+  const today = new Date();
+  today.setHours(0,0,0,0);
+
+  // Figure out when this habit/vice "started"
+  let start = null;
+
+  // Prefer createdAtISO if present
+  if (h.createdAtISO) {
+    const d = new Date(h.createdAtISO);
+    if (!isNaN(d)) {
+      d.setHours(0,0,0,0);
+      start = d;
+    }
+  }
+
+  // Fallback: earliest doneKey
+  if (!start && doneKeys.length) {
+    const dates = doneKeys
+      .map(k => fromKey(k))
+      .filter(d => d && !isNaN(d))
+      .sort((a, b) => a - b); // oldest → newest
+
+    if (dates.length) {
+      const d0 = new Date(dates[0].getTime());
+      d0.setHours(0,0,0,0);
+      start = d0;
+    }
+  }
+
+  // If we *still* don't have a start, treat as 0% for now
+  if (!start) return 0;
+  if (start > today) start = today;
+
+  const totalDays = Math.max(
+    1,
+    Math.round((today - start) / 86400000) + 1
+  );
+
+  // Count how many days it was actually marked done
+  const doneCount = doneKeys.filter(k => {
+    const d = fromKey(k);
+    if (!d || isNaN(d)) return false;
+    d.setHours(0,0,0,0);
+    return d >= start && d <= today;
+  }).length;
+
+  const pct = Math.round((doneCount / totalDays) * 100);
+  return pct;
+}
+
+
+/* ---------- DATE HELPERS ---------- */
+function todayKey(){
+  const d = new Date();
+  d.setHours(0,0,0,0);
+  return dateKey(d);
+}
+
+function dateKey(d){
+  // Accept either a Date or something parseable
+  if (!(d instanceof Date)) d = new Date(d);
+  if (!d || isNaN(d.getTime())) return 'invalid';
+  const y  = d.getFullYear();
+  const m  = String(d.getMonth()+1).padStart(2,'0');
+  const dd = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${dd}`;
+}
+
+function fromKey(k){
+  if (!k || typeof k !== 'string') return new Date(NaN);
+  const parts = k.split('-');
+  if (parts.length < 3) return new Date(NaN);
+  const [yStr,mStr,dStr] = parts;
+  const y = parseInt(yStr,10);
+  const m = parseInt(mStr,10);
+  const d = parseInt(dStr,10);
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) {
+    return new Date(NaN);
+  }
+  const dt = new Date(y, m-1, d);
+  dt.setHours(0,0,0,0);
+  return dt;
+}
+
+function niceDate(d){
+  if (!(d instanceof Date)) d = new Date(d);
+  if (!d || isNaN(d.getTime())) return 'Invalid date';
+  return d.toLocaleDateString(undefined,{
+    year:'numeric',
+    month:'short',
+    day:'numeric'
+  });
+}
+
+function monthKey(d){
+  if (!(d instanceof Date)) d = new Date(d);
+  if (!d || isNaN(d.getTime())) return 'invalid-month';
+  const y  = d.getFullYear();
+  const m  = String(d.getMonth()+1).padStart(2,'0');
+  return `${y}-${m}`;
+}
+
+function formatMonthKey(k){
+  const parts = (k || '').split('-');
+  if (parts.length < 2) return 'Invalid month';
+  const [yStr,mStr] = parts;
+  const y = parseInt(yStr,10);
+  const m = parseInt(mStr,10);
+  if (!Number.isFinite(y) || !Number.isFinite(m)) return 'Invalid month';
+  const dt = new Date(y, m-1, 1);
+  if (isNaN(dt.getTime())) return 'Invalid month';
+  return dt.toLocaleString(undefined,{month:'long',year:'numeric'});
+}
+
+function isoWeekKey(d){
+  if (!(d instanceof Date)) d = new Date(d);
+  if (!d || isNaN(d.getTime())) return 'invalid-week';
+
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dayNum = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(),0,1));
+  const weekNo = Math.ceil(((date - yearStart) / 86400000 + 1) / 7);
+  return `${date.getUTCFullYear()}-W${String(weekNo).padStart(2,'0')}`;
+}
+
+function isoWeekRange(weekKey){
+  const [yStr, wStr] = weekKey.split('-W');
+  const y = parseInt(yStr, 10);
+  const w = parseInt(wStr, 10);
+
+  // Build a local date that falls in the correct ISO week
+  const simple = new Date(y, 0, 1 + (w - 1) * 7); // local time
+  let dow = simple.getDay(); // 0 = Sun, 1 = Mon, ... 6 = Sat
+  if (dow === 0) dow = 7;    // treat Sunday as 7
+
+  // Start of week = Monday
+  const start = new Date(simple);
+  start.setDate(simple.getDate() + 1 - dow);
+
+  // End of week = Sunday
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6);
+
+  return { start, end };
+}
+
+function renderStats(){
+  const lifetime = state.completions.reduce((s, c) => s + (c.points || 0), 0);
+
+  // Lifetime card was removed in UI, but keep this guard in case the element exists
+  const lifetimeEl = $('lifetimePoints');
+  if (lifetimeEl) {
+    lifetimeEl.textContent = lifetime.toLocaleString();
+  }
+
+  // Build daily/weekly/monthly totals
+  const dailyTotals   = {};
+  const weeklyTotals  = {};
+  const monthlyTotals = {};
+
+  state.completions.forEach(c => {
+    if (!c || !c.completedAtISO) return;
+
+    const d = new Date(c.completedAtISO);
+    if (!d || isNaN(d.getTime())) {
+      // Ignore bad/legacy entries instead of crashing the page
+      return;
+    }
+
+    const dk = dateKey(d);
+    const wk = isoWeekKey(d);
+    const mk = monthKey(d);
+
+    const pts = c.points || 0;
+
+    dailyTotals[dk]   = (dailyTotals[dk]   || 0) + pts;
+    weeklyTotals[wk]  = (weeklyTotals[wk]  || 0) + pts;
+    monthlyTotals[mk] = (monthlyTotals[mk] || 0) + pts;
+  });
+
+
+  const dKeys = Object.keys(dailyTotals);
+
+  const dAvg = dKeys.length
+    ? (dKeys.reduce((s, k) => s + dailyTotals[k], 0) / dKeys.length).toFixed(1)
+    : "0.0";
+
+  const dailyAvgEl = $('dailyAvg');
+  if (dailyAvgEl) {
+    dailyAvgEl.textContent = dAvg.toLocaleString();
+  }
+
+
+  // Draw daily trend line
+  drawDailyTrend(dailyTotals);
+
+  // Today / this week / this month keys
+  const today = new Date();
+  today.setHours(0,0,0,0);
+
+  const todayK    = dateKey(today);
+  const thisWeekK = isoWeekKey(today);
+  const thisMonthK= monthKey(today);
+
+  // Today's points bubble
+  const todayPoints   = dailyTotals[todayK] || 0;
+  const todayPointsEl = $('todayPoints');
+  if (todayPointsEl) {
+    todayPointsEl.textContent = todayPoints.toLocaleString();
+  }
+
+  // Today's breakdown bar – wrapped in try/catch so it can't kill stats
+  try {
+    updateTodayBreakdown(state.completions || [], todayK);
+  } catch (e) {
+    console.error('updateTodayBreakdown error', e);
+  }
+
+  // ----- LEADERBOARDS -----
+  function fillBoard(ulId, entries, labelFn){
+    const ul = $(ulId);
+    if (!ul) return;
+
+    ul.innerHTML = '';
+    if (!entries.length) {
+      ul.innerHTML = '<li class="muted">No data yet.</li>';
+      return;
+    }
+
+    entries.slice(0, 10).forEach((row, i) => {
+      const li = document.createElement('li');
+
+      // Store the key on the <li> so we can highlight the current one later
+      li.dataset.key = row.key;
+      li.className = 'flex items-center justify-between';
+
+      li.innerHTML = `
+        <span>${i+1}. ${labelFn(row)}</span>
+        <span class="font-semibold">${row.total.toLocaleString()} pts</span>
+      `;
+      ul.appendChild(li);
+    });
+  }
+
+  const bestDays = Object.entries(dailyTotals)
+    .map(([k, v]) => ({ key: k, total: v }))
+    .sort((a, b) => b.total - a.total);
+
+  const bestWeeks = Object.entries(weeklyTotals)
+    .map(([k, v]) => ({ key: k, total: v, ...isoWeekRange(k) }))
+    .sort((a, b) => b.total - a.total);
+
+  const bestMonths = Object.entries(monthlyTotals)
+    .map(([k, v]) => ({ key: k, total: v }))
+    .sort((a, b) => b.total - a.total);
+
+  // Labels with NO "(Today / This Week / This Month)" text
+  fillBoard('dailyBoard', bestDays, r =>
+    niceDate(fromKey(r.key))
+  );
+
+  fillBoard('weeklyBoard', bestWeeks, r =>
+    `${niceDate(r.start)} – ${niceDate(r.end)}`
+  );
+
+  fillBoard('monthlyBoard', bestMonths, r =>
+    formatMonthKey(r.key)
+  );
+
+  // Highlight current day/week/month in orange if they appear
+  [
+    ['dailyBoard', todayK],
+    ['weeklyBoard', thisWeekK],
+    ['monthlyBoard', thisMonthK],
+  ].forEach(([ulId, currentKey]) => {
+    const ul = $(ulId);
+    if (!ul) return;
+
+    ul.querySelectorAll('li').forEach(li => {
+      if (li.dataset.key === currentKey) {
+        li.classList.add('leaderboard-current');
+      }
+    });
+  });
+
+function updateTodayBreakdown(completions, todayKey){
+  const bar       = $('todayBreakdownBar');
+  const summaryEl = $('todayBreakdownSummary');
+  if (!bar) return;
+
+  const safeCompletions = Array.isArray(completions) ? completions : [];
+
+  // Totals per category (now includes calories)
+  const totals = {
+    sleep:    0,
+    tasks:    0,
+    habits:   0,
+    vices:    0,
+    flex:     0,
+    calories: 0
+  };
+
+  // Collect today's points by category
+  safeCompletions.forEach(c => {
+    if (!c || !c.completedAtISO) return;
+
+    const d = new Date(c.completedAtISO);
+    if (dateKey(d) !== todayKey) return;
+
+    const pts = Number(c.points) || 0;
+    if (!pts) return;
+
+    const titleStr = typeof c.title === 'string' ? c.title : '';
+
+         // Sleep entries: "Sleep Score (...)"
+// `c.points` already includes bonus, so just add it once.
+if (titleStr.startsWith('Sleep Score (')) {
+  totals.sleep += pts;
+  return;
+}
+
+
+    // Calories entries: "Calories (...)"
+    if (titleStr.startsWith('Calories (')) {
+      totals.calories += pts;
+      return;
+    }
+
+    // Habits / Vices / Flux based on source
+    if (c.source === 'habit') {
+      totals.habits += pts;
+      return;
+    }
+    if (c.source === 'vice') {
+      totals.vices += pts;
+      return;
+    }
+    if (c.source === 'flex') {
+      totals.flex += pts;
+      return;
+    }
+
+    // Everything else counts as Tasks
+    totals.tasks += pts;
+  });
+
+  // Build the bar
+  bar.innerHTML = '';
+
+  const totalPts = Object.values(totals).reduce((sum, v) => sum + v, 0);
+
+  if (!totalPts) {
+    if (summaryEl) {
+      summaryEl.textContent = 'No points yet today.';
+    }
+    return;
+  }
+
+  const segments = [
+    { key: 'sleep',    label: 'Sleep',    cls: 'todayBreakdown-sleep'    },
+    { key: 'tasks',    label: 'Tasks',    cls: 'todayBreakdown-tasks'    },
+    { key: 'habits',   label: 'Habits',   cls: 'todayBreakdown-habits'   },
+    { key: 'vices',    label: 'Vices',    cls: 'todayBreakdown-vices'    },
+    { key: 'flex',     label: 'Flux',     cls: 'todayBreakdown-flex'     },
+    { key: 'calories', label: 'Calories', cls: 'todayBreakdown-calories' }
+  ];
+
+  const parts = [];
+
+  segments.forEach(({ key, label, cls }) => {
+    const val = totals[key];
+    if (val <= 0) return;
+
+    const pct = (val / totalPts) * 100;
+
+    const seg = document.createElement('div');
+    seg.className = 'todayBreakdown-seg ' + cls;
+    seg.style.width = pct + '%';
+    bar.appendChild(seg);
+
+    parts.push(`${label} ${val.toFixed(1)}`);
+  });
+
+  if (summaryEl) {
+    summaryEl.textContent = parts.join(' · ');
+  }
+}
+
+
+function drawDailyTrend(dailyTotals){
+  const canvas = $('dailyTrend');
+  if (!canvas || !canvas.getContext) return;
+
+  const ctx = canvas.getContext('2d');
+
+  const width  = canvas.clientWidth  || 320;
+  const height = canvas.clientHeight || 80;
+  canvas.width  = width;
+  canvas.height = height;
+
+  ctx.clearRect(0, 0, width, height);
+
+  let entries = Object.entries(dailyTotals)
+    .map(([key, total]) => ({ key, total }))
+    .sort((a, b) => a.key.localeCompare(b.key));
+
+  if (entries.length > 30) {
+    entries = entries.slice(entries.length - 30);
+  }
+
+  const n = entries.length;
+  if (!n) {
+    ctx.strokeStyle = 'rgba(148,163,184,0.3)';
+    ctx.beginPath();
+    ctx.moveTo(0, height - 4);
+    ctx.lineTo(width, height - 4);
+    ctx.stroke();
+    return;
+  }
+
+  const maxVal = Math.max(...entries.map(r => r.total));
+  const minVal = Math.min(...entries.map(r => r.total));
+  const range  = (maxVal - minVal) || 1;
+
+  const paddingX = 6;
+  const paddingY = 6;
+  const w = width  - paddingX * 2;
+  const h = height - paddingY * 2;
+
+  // Baseline
+  ctx.strokeStyle = 'rgba(15,23,42,0.7)';
+  ctx.lineWidth   = 1;
+  ctx.beginPath();
+  ctx.moveTo(paddingX, paddingY + h);
+  ctx.lineTo(paddingX + w, paddingY + h);
+  ctx.stroke();
+
+  // Line
+  ctx.strokeStyle = '#22d3ee';
+  ctx.lineWidth   = 2;
+  ctx.beginPath();
+
+  entries.forEach((row, i) => {
+    const x = paddingX + (n === 1 ? w / 2 : (w * i / (n - 1)));
+    const norm = (row.total - minVal) / range;
+    const y = paddingY + h - norm * h;
+
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+
+  ctx.stroke();
+}
+}
+
+function bumpOneDay(task){
+  if (!task.dueDateISO) return;  // nothing to bump
+  const d = new Date(task.dueDateISO + 'T00:00:00');
+  const bumped = addDays(d, 1);
+  task.dueDateISO = dateKey(bumped);
+}
+
+function labelForDay(d,baseToday){
+  const t=dateKey(baseToday), k=dateKey(d);
+  if(k===t) return 'Today';
+  if(k===dateKey(addDays(baseToday,1))) return 'Tomorrow';
+  return d.toLocaleDateString(undefined,{weekday:'long',month:'short',day:'numeric'});
+}
+function cmpImportance(a,b){ const o={Low:0,Medium:1,High:2,Critical:3}; return (o[a.importance]||0)-(o[b.importance]||0); }
+
+/* ---------- HABITS ---------- */
+function renderHabitWeekLabels(){
+  const row = $('habitWeekLabels');
+  row.innerHTML = '';
+
+  const days = weekDays(new Date());
+
+  // Use the same layout container as the habit day bubbles
+  const wrapper = document.createElement('div');
+  wrapper.className = 'habitDaysRow';
+
+  days.forEach(d => {
+    const cell = document.createElement('div');
+    cell.className = 'habitLabelDay';
+    cell.textContent = d.label; // "Mon", "Tue", etc.
+    wrapper.appendChild(cell);
+  });
+
+  row.appendChild(wrapper);
+}
+
+
+function renderViceWeekLabels(){
+  const row = $('viceWeekLabels');
+  row.innerHTML = '';
+
+  const days = weekDays(new Date());
+
+  // Same layout as vices' day bubbles
+  const wrapper = document.createElement('div');
+  wrapper.className = 'habitDaysRow';
+
+  days.forEach(d => {
+    const cell = document.createElement('div');
+    cell.className = 'habitLabelDay';
+    cell.textContent = d.label;
+    wrapper.appendChild(cell);
+  });
+
+  row.appendChild(wrapper);
+}
+
+
+
+function renderHabits(){
+  const wrap  = $('habitsList');
+  const empty = $('habitsEmpty');
+  wrap.innerHTML = '';
+  const days = weekDays(new Date());
+
+  // Only active habits (NOT vices, NOT retired)
+  const habits = state.habits
+    .filter(h => (h.category || 'habit') !== 'vice')
+    .filter(h => !h.retired)
+    .slice()
+    .sort((a,b) => {
+      const ao = (typeof a.order === 'number') ? a.order : 0;
+      const bo = (typeof b.order === 'number') ? b.order : 0;
+      if (ao !== bo) return ao - bo;
+
+      const ac = a.createdAtISO || '';
+      const bc = b.createdAtISO || '';
+      return ac.localeCompare(bc);
+    });
+
+
+  if(!habits.length){
+    empty.classList.remove('hidden');
+    return;
+  }
+  empty.classList.add('hidden');
+
+  habits.forEach(h => {
+    h.doneKeys = Array.isArray(h.doneKeys) ? h.doneKeys : [];
+
+    const streak     = computeHabitStreak(h);
+    const completion = computeHabitCompletion(h);
+
+
+  const row = document.createElement('div');
+  row.className = 'habitRow';
+
+const daysHtml = days.map(d => {
+  const on = h.doneKeys.includes(d.key);
+return `<div class="habitDay ${on ? 'on' : 'off'}" data-habit="${h.id}" data-day="${d.key}">
+    ${d.date.getDate()}
+  </div>`;
+}).join('');
+
+  const daysRowHtml = `<div class="habitDaysRow">${daysHtml}</div>`;
+
+
+    // EDIT MODE
+    if(editingHabitId === h.id){
+      const category = h.category || 'habit';
+      row.innerHTML = `
+        <div class="flex flex-col gap-2 min-w-0">
+          <input class="input" data-field="name" value="${escapeHtml(h.name)}">
+          <input class="input" data-field="points" type="number" value="${h.pointsPerDay||0}">
+          <select class="input" data-field="category">
+            <option value="habit" ${category==='habit'?'selected':''}>Habit</option>
+            <option value="vice"  ${category==='vice'?'selected':''}>Vice</option>
+          </select>
+          <div class="flex gap-2 flex-wrap">
+            <button class="btn btn-success" data-act="habit-save">Save</button>
+            <button class="btn btn-ghost" data-act="habit-cancel">Cancel</button>
+            <button class="btn btn-ghost" data-act="habit-delete">Delete</button>
+          </div>
+        </div>
+        ${daysRowHtml}
+      `;
+
+      wrap.appendChild(row);
+
+      row.querySelector('[data-act="habit-save"]').onclick = () => saveHabitEdit(h.id, row);
+      row.querySelector('[data-act="habit-cancel"]').onclick = () => { editingHabitId=null; renderHabits(); renderVices(); };
+      row.querySelector('[data-act="habit-delete"]').onclick = () => deleteHabit(h.id);
+
+} else {
+// NORMAL MODE
+const nameHtml = `
+  <div class="habitLeft flex items-center gap-2 flex-wrap min-w-0 flex-1 text-xs sm:text-sm">
+    <!-- Left side: habit name + points + streak + completion% -->
+    <div class="habitName" title="${escapeHtml(h.name)}">
+      ${escapeHtml(h.name)}
+    </div>
+    <div class="tag bg-zinc-200/60 dark:bg-zinc-700/60">
+      ${h.pointsPerDay||0} pts
+    </div>
+  ${streak > 0 ? `
+    <div class="tag bg-zinc-200/60 dark:bg-zinc-700/60">
+      ${streak} ${streak === 1 ? 'day' : 'days'}
+    </div>
+  ` : ''}
+    <div class="tag bg-zinc-200/60 dark:bg-zinc-700/60 text-orange-400">
+      ${completion}%
+    </div>
+  </div>
+`;
+
+
+  // Right side: controls only (Edit/Delete/▲/▼)
+  const controlsHtml = `
+    <div class="habitControls flex items-center gap-2 flex-wrap text-xs sm:text-sm">
+      <button class="btn btn-ghost" data-act="habit-edit" data-id="${h.id}">Edit</button>
+      <button class="btn btn-ghost" data-act="habit-delete" data-id="${h.id}">Delete</button>
+      <button class="btn btn-ghost" style="padding:2px 6px;font-size:11px"
+              data-act="habit-up" data-id="${h.id}">▲</button>
+      <button class="btn btn-ghost" style="padding:2px 6px;font-size:11px"
+              data-act="habit-down" data-id="${h.id}">▼</button>
+    </div>
+  `;
+
+
+  // Line 3: date bubbles (sits to the right on desktop, below on mobile)
+  row.innerHTML = nameHtml + controlsHtml + daysRowHtml;
+  wrap.appendChild(row);
+}
+
+
+
+  });
+
+  wrap.querySelectorAll('.habitDay').forEach(el=>{
+    el.onclick = () => toggleHabitDay(el.getAttribute('data-habit'), el.getAttribute('data-day'));
+  });
+  wrap.querySelectorAll('[data-act="habit-edit"]').forEach(btn=>{
+    btn.onclick = () => { editingHabitId = btn.getAttribute('data-id'); renderHabits(); renderVices(); };
+  });
+  wrap.querySelectorAll('[data-act="habit-delete"]').forEach(btn=>{
+    btn.onclick = () => deleteHabit(btn.getAttribute('data-id'));
+  });
+  wrap.querySelectorAll('[data-act="habit-up"]').forEach(btn => {
+    btn.onclick = () => moveHabit(btn.getAttribute('data-id'), -1);
+  });
+  wrap.querySelectorAll('[data-act="habit-down"]').forEach(btn => {
+    btn.onclick = () => moveHabit(btn.getAttribute('data-id'), +1);
+  });
+}
+
+function renderVices(){
+  const wrap  = $('vicesList');
+  const empty = $('vicesEmpty');
+  wrap.innerHTML = '';
+  const days = weekDays(new Date());
+
+  // Only VICES, non-retired
+  const habits = state.habits
+    .filter(h => (h.category || 'habit') === 'vice')
+    .filter(h => !h.retired)
+    .slice()
+    .sort((a,b) => {
+      const ao = (typeof a.order === 'number') ? a.order : 0;
+      const bo = (typeof b.order === 'number') ? b.order : 0;
+      if (ao !== bo) return ao - bo;
+
+      const ac = a.createdAtISO || '';
+      const bc = b.createdAtISO || '';
+      return ac.localeCompare(bc);
+    });
+
+  if (!habits.length) {
+    empty.classList.remove('hidden');
+    return;
+  }
+  empty.classList.add('hidden');
+
+  habits.forEach(h => {
+    h.doneKeys = Array.isArray(h.doneKeys) ? h.doneKeys : [];
+    const streak     = computeHabitStreak(h);
+    const completion = computeHabitCompletion(h);
+    const row = document.createElement('div');
+
+    row.className = 'habitRow';
+
+    const daysHtml = days.map(d => {
+      const on = h.doneKeys.includes(d.key);
+      return `<div class="habitDay viceDay ${on ? 'on' : 'off'}" data-habit="${h.id}" data-day="${d.key}">
+
+        ${d.date.getDate()}
+      </div>`;
+    }).join('');
+
+    const daysRowHtml = `<div class="habitDaysRow">${daysHtml}</div>`;
+
+    if (editingHabitId === h.id) {
+      // EDIT MODE
+      row.innerHTML = `
+        <div class="flex flex-col gap-2 min-w-0">
+          <input class="input" data-field="name" value="${escapeHtml(h.name)}">
+          <input class="input" data-field="points" type="number" value="${h.pointsPerDay||0}">
+          <div class="flex gap-2 flex-wrap">
+            <button class="btn btn-success" data-act="habit-save">Save</button>
+            <button class="btn btn-ghost" data-act="habit-cancel">Cancel</button>
+            <button class="btn btn-ghost" data-act="habit-delete">Delete</button>
+          </div>
+        </div>
+        ${daysRowHtml}
+      `;
+
+      wrap.appendChild(row);
+
+      const saveBtn   = row.querySelector('[data-act="habit-save"]');
+      const cancelBtn = row.querySelector('[data-act="habit-cancel"]');
+      const delBtn    = row.querySelector('[data-act="habit-delete"]');
+
+      saveBtn.onclick   = () => saveHabitEdit(h.id, row);
+      cancelBtn.onclick = () => { editingHabitId = null; renderHabits(); renderVices(); };
+      delBtn.onclick    = () => deleteHabit(h.id);
+
+    } else {
+// NORMAL MODE
+const nameHtml = `
+  <div class="habitLeft flex items-center gap-2 flex-wrap min-w-0 flex-1 text-xs sm:text-sm">
+    <!-- Left side: vice name + points + streak + completion% -->
+    <div class="habitName" title="${escapeHtml(h.name)}">
+      ${escapeHtml(h.name)}
+    </div>
+    <div class="tag bg-zinc-200/60 dark:bg-zinc-700/60">
+      ${h.pointsPerDay||0} pts
+    </div>
+  ${streak > 0 ? `
+    <div class="tag bg-zinc-200/60 dark:bg-zinc-700/60">
+      ${streak} ${streak === 1 ? 'day' : 'days'}
+    </div>
+  ` : ''}
+    <div class="tag bg-zinc-200/60 dark:bg-zinc-700/60 text-orange-400">
+      ${completion}%
+    </div>
+  </div>
+`;
+
+
+      // Right side: controls only (Edit/Delete/▲/▼)
+      const controlsHtml = `
+        <div class="habitControls flex items-center gap-2 flex-wrap text-xs sm:text-sm">
+          <button class="btn btn-ghost" data-act="habit-edit" data-id="${h.id}">Edit</button>
+          <button class="btn btn-ghost" data-act="habit-delete" data-id="${h.id}">Delete</button>
+          <button class="btn btn-ghost" style="padding:2px 6px;font-size:11px"
+                  data-act="habit-up" data-id="${h.id}">▲</button>
+          <button class="btn btn-ghost" style="padding:2px 6px;font-size:11px"
+                  data-act="habit-down" data-id="${h.id}">▼</button>
+        </div>
+      `;
+
+      row.innerHTML = nameHtml + controlsHtml + daysRowHtml;
+      wrap.appendChild(row);
+    }
+
+  });
+
+  // Day toggles
+  wrap.querySelectorAll('.habitDay').forEach(el => {
+    el.onclick = () => toggleHabitDay(
+      el.getAttribute('data-habit'),
+      el.getAttribute('data-day')
+    );
+  });
+
+  // Edit / delete
+  wrap.querySelectorAll('[data-act="habit-edit"]').forEach(btn => {
+    btn.onclick = () => {
+      editingHabitId = btn.getAttribute('data-id');
+      renderHabits();
+      renderVices();
+    };
+  });
+  wrap.querySelectorAll('[data-act="habit-delete"]').forEach(btn => {
+    btn.onclick = () => deleteHabit(btn.getAttribute('data-id'));
+  });
+
+  // ⬆️⬇️ NEW: reordering for vices too
+  wrap.querySelectorAll('[data-act="habit-up"]').forEach(btn => {
+    btn.onclick = () => moveHabit(btn.getAttribute('data-id'), -1);
+  });
+  wrap.querySelectorAll('[data-act="habit-down"]').forEach(btn => {
+    btn.onclick = () => moveHabit(btn.getAttribute('data-id'), +1);
+  });
+}
+
+
+function addHabit(){
+  const name = $('habitName').value.trim();
+  const pts  = Number($('habitPts').value)||0;
+  if(!name) return alert('Enter a habit name');
+
+  // Find the current max order among non-retired HABITS
+  const maxOrder = state.habits
+    .filter(x => !x.retired && (x.category || 'habit') === 'habit')
+    .reduce((max, x) =>
+      (typeof x.order === 'number' && x.order > max) ? x.order : max,
+      0
+    );
+
+  const h = {
+    id: crypto.randomUUID(),
+    name,
+    pointsPerDay: pts,
+    doneKeys: [],
+    createdAtISO: new Date().toISOString(),
+    category: 'habit',
+    order: maxOrder + 1
+  };
+
+
+  state.habits.push(h);
+  save();
+  $('habitName').value=''; $('habitPts').value='';
+
+  renderHabits();
+  renderVices();
+  renderStats();
+}
+
+function addVice(){
+  const name = $('viceName').value.trim();
+  const pts  = Number($('vicePts').value)||0;
+  if(!name) return alert('Enter a vice name');
+
+  // Find the current max order among non-retired VICES
+  const maxOrder = state.habits
+    .filter(x => !x.retired && (x.category || 'habit') === 'vice')
+    .reduce((max, x) =>
+      (typeof x.order === 'number' && x.order > max) ? x.order : max,
+      0
+    );
+
+  const h = {
+    id: crypto.randomUUID(),
+    name,
+    pointsPerDay: pts,
+    doneKeys: [],
+    createdAtISO: new Date().toISOString(),
+    category: 'vice',
+    order: maxOrder + 1
+  };
+
+
+  state.habits.push(h);
+  save();
+  $('viceName').value=''; $('vicePts').value='';
+
+  renderHabits();
+  renderVices();
+  renderStats();
+}
+
+
+function saveHabitEdit(id,row){
+  const h=state.habits.find(x=>x.id===id); if(!h) return;
+  const nameInput=row.querySelector('input[data-field="name"]');
+  const ptsInput=row.querySelector('input[data-field="points"]');
+  const catInput=row.querySelector('[data-field="category"]');
+
+  const oldPoints = h.pointsPerDay || 0;
+
+  h.name = nameInput.value.trim() || h.name;
+  h.pointsPerDay = Number(ptsInput.value)||0;
+  h.category = catInput ? (catInput.value || 'habit') : (h.category || 'habit');
+
+  // update existing log entries
+  if (h.pointsPerDay !== oldPoints) {
+    state.completions.forEach(c => {
+      if (c.source === 'habit' && c.habitId === id) {
+        c.points = h.pointsPerDay;
+      }
+    });
+  }
+
+  editingHabitId=null;
+  save(); 
+  renderHabits(); 
+  renderVices();
+  renderStats();
+}
+
+function deleteHabit(id){
+  if(!confirm('Delete this habit (keeps past log entries)?')) return;
+  state.habits = state.habits.filter(x=>x.id!==id);
+  if(editingHabitId===id) editingHabitId=null;
+  save(); renderHabits(); renderStats(); renderVices();
+}
+function moveHabit(id, delta){
+  const h = state.habits.find(x => x.id === id);
+  if (!h) return;
+  const category = h.category || 'habit';
+
+  // All active items in the same category (habits or vices)
+  const siblings = state.habits
+    .filter(x => !x.retired && (x.category || 'habit') === category)
+    .slice()
+    .sort((a,b) => {
+      const ao = (typeof a.order === 'number') ? a.order : 0;
+      const bo = (typeof b.order === 'number') ? b.order : 0;
+      if (ao !== bo) return ao - bo;
+      const ac = a.createdAtISO || '';
+      const bc = b.createdAtISO || '';
+      return ac.localeCompare(bc);
+    });
+
+  if (!siblings.length) return;
+
+  // Normalize orders to 1..N in current visual order
+  siblings.forEach((x, idx) => { x.order = idx + 1; });
+
+  const idx = siblings.findIndex(x => x.id === id);
+  if (idx === -1) return;
+
+  const newIdx = idx + delta;
+  if (newIdx < 0 || newIdx >= siblings.length) return;
+
+  const a = siblings[idx];
+  const b = siblings[newIdx];
+  const tmp = a.order;
+  a.order = b.order;
+  b.order = tmp;
+
+  save();
+  renderHabits();
+  renderVices();
+}
+
+function toggleHabitDay(habitId, dayKey){
+  const h = state.habits.find(x => x.id === habitId);
+  if (!h || h.retired) return;
+
+  // Figure out whether this is a habit or a vice
+  const category = (h.category || 'habit');   // 'habit' or 'vice'
+  const source   = category === 'vice' ? 'vice' : 'habit';
+
+  h.doneKeys = Array.isArray(h.doneKeys) ? h.doneKeys : [];
+  const idx = h.doneKeys.indexOf(dayKey);
+
+  if (idx === -1) {
+    // ON
+    h.doneKeys.push(dayKey);
+    const iso = new Date(fromKey(dayKey).getTime() + 12 * 3600 * 1000).toISOString();
+    addCompletion({
+      id: crypto.randomUUID(),
+      taskId: `habit:${habitId}:${dayKey}`,
+      title: `[Habit] ${h.name} (${dayKey})`,
+      points: h.pointsPerDay || 0,
+      completedAtISO: iso,
+      source,             // 'habit' or 'vice'
+      habitId: habitId,
+      dayKey: dayKey
+    });
+  } else {
+    // OFF
+    h.doneKeys.splice(idx, 1);
+    const mIdx = state.completions.findIndex(c =>
+      (c.source === 'habit' || c.source === 'vice') &&
+      c.habitId === habitId &&
+      c.dayKey === dayKey
+    );
+    if (mIdx !== -1) state.completions.splice(mIdx, 1);
+  }
+
+  save();
+  renderHabits();
+  renderStats();
+  renderVices();
+}
+
+
+/* ---------- FLEX ACTIONS ---------- */
+function renderFlexActions(){
+  const list = $('flexList'), empty = $('flexEmpty');
+  if (!list || !empty) return;
+  list.innerHTML = '';
+
+  const items = Array.isArray(state.flexActions) ? state.flexActions : [];
+  if (!items.length) {
+    empty.classList.remove('hidden');
+    return;
+  }
+  empty.classList.add('hidden');
+
+  items.forEach(f => {
+    const row = document.createElement('div');
+    row.className = 'flex items-center justify-between gap-2';
+
+    if (editingFlexId === f.id) {
+      // 🔧 EDIT MODE
+      row.innerHTML = `
+        <div class="flex-1 min-w-0">
+          <label class="text-xs muted block mb-1">Flex action</label>
+          <input class="input w-full mb-2" data-field="name"
+                 value="${escapeHtml(f.name || '')}">
+          <label class="text-xs muted block mb-1">Points per use</label>
+          <input class="input w-28" data-field="points" type="number"
+                 value="${f.points || 0}">
+        </div>
+        <div class="flex gap-2 flex-wrap">
+          <button class="btn btn-success btn-task" data-act="flex-save">Save</button>
+          <button class="btn btn-ghost btn-task" data-act="flex-cancel">Cancel</button>
+          <button class="btn btn-delete btn-task" data-act="flex-del" data-id="${f.id}">Delete</button>
+        </div>
+      `;
+      list.appendChild(row);
+
+      const saveBtn   = row.querySelector('[data-act="flex-save"]');
+      const cancelBtn = row.querySelector('[data-act="flex-cancel"]');
+      const delBtn    = row.querySelector('[data-act="flex-del"]');
+
+      saveBtn.onclick   = () => saveFlexEdit(f.id, row);
+      cancelBtn.onclick = () => { editingFlexId = null; renderFlexActions(); };
+      delBtn.onclick    = () => deleteFlexAction(f.id);
+
+    } else {
+      // 📄 NORMAL MODE
+      row.innerHTML = `
+        <div class="min-w-0">
+          <div class="font-medium truncate"
+               title="${escapeHtml(f.name || '')}">
+            ${escapeHtml(f.name || '')}
+          </div>
+          <div class="text-xs text-zinc-400">${f.points || 0} pts/use</div>
+        </div>
+        <div class="flex gap-2 flex-wrap">
+          <button class="btn btn-success btn-task" data-act="flex-do" data-id="${f.id}">Did it</button>
+          <button class="btn btn-ghost btn-task" data-act="flex-edit" data-id="${f.id}">Edit</button>
+          <button class="btn btn-delete btn-task" data-act="flex-del" data-id="${f.id}">Delete</button>
+        </div>
+      `;
+      list.appendChild(row);
+    }
+  });
+
+  // Wire normal-mode buttons
+  list.querySelectorAll('[data-act="flex-do"]').forEach(btn => {
+    btn.onclick = () => logFlexCompletion(btn.getAttribute('data-id'));
+  });
+  list.querySelectorAll('[data-act="flex-edit"]').forEach(btn => {
+    btn.onclick = () => {
+      editingFlexId = btn.getAttribute('data-id');
+      renderFlexActions();
+    };
+  });
+  list.querySelectorAll('[data-act="flex-del"]').forEach(btn => {
+    btn.onclick = () => deleteFlexAction(btn.getAttribute('data-id'));
+  });
+}
+
+
+function addFlexAction(){
+  const nameEl = $('flexName');
+  const ptsEl  = $('flexPts');
+  const name = nameEl.value.trim();
+  const pts = parseInt(ptsEl.value,10) || 0;
+  if(!name) return;
+  if(!Array.isArray(state.flexActions)) state.flexActions = [];
+  state.flexActions.push({
+    id: crypto.randomUUID(),
+    name,
+    points: pts
+  });
+  nameEl.value = '';
+  ptsEl.value = '';
+  save();
+  renderFlexActions();
+  renderStats();
+}
+
+function logFlexCompletion(id){
+  if(!Array.isArray(state.flexActions)) state.flexActions = [];
+  const f = state.flexActions.find(x=>x.id===id);
+  if(!f) return;
+  const now = new Date().toISOString();
+  addCompletion({
+    id: crypto.randomUUID(),
+    taskId: null,
+    flexId: id,
+    title: `[Flex] ${f.name}`,
+    points: f.points || 0,
+    completedAtISO: now,
+    source: 'flex'
+  });
+
+  save();
+  renderAll();
+}
+
+function saveFlexEdit(id, row){
+  if (!Array.isArray(state.flexActions)) state.flexActions = [];
+  const f = state.flexActions.find(x => x.id === id);
+  if (!f) return;
+
+  const nameInput = row.querySelector('input[data-field="name"]');
+  const ptsInput  = row.querySelector('input[data-field="points"]');
+
+  if (nameInput) {
+    const trimmed = nameInput.value.trim();
+    if (trimmed) f.name = trimmed;
+  }
+
+  if (ptsInput) {
+    const pts = parseInt(ptsInput.value, 10);
+    if (!isNaN(pts)) f.points = pts;
+  }
+
+  editingFlexId = null;
+  save();
+  renderFlexActions();
+  renderStats(); // points per use changed => stats affected
+}
+
+
+/* ---------- TASKS ---------- */
+function renderTasks(){
+  const container=$('taskList'), empty=$('emptyList'); container.innerHTML='';
+  const active=state.tasks.filter(t=>!t.completedAtISO && !t.hidden);
+  if(!active.length){ empty.classList.remove('hidden'); } else empty.classList.add('hidden');
+
+  const sort=$('sortSelect').value;
+  let tasks=active.slice();
+  if(sort==='due'){
+    tasks.sort((a,b)=>(a.dueDateISO||'').localeCompare(b.dueDateISO||'') || cmpImportance(b,a) || (b.points-a.points));
+  }else if(sort==='importance'){
+    tasks.sort((a,b)=>cmpImportance(b,a) || (a.dueDateISO||'').localeCompare(b.dueDateISO||''));
+  }else if(sort==='points'){
+    tasks.sort((a,b)=>b.points-a.points || (a.dueDateISO||'').localeCompare(b.dueDateISO||''));
+  }else{
+    tasks.sort((a,b)=>a.title.localeCompare(b.title));
+  }
+
+  const today = new Date(); today.setHours(0,0,0,0);
+  const overdueBucket = { label:'Overdue', key:'overdue', items:[] };
+  const dmap = {};
+  for(let i=0;i<7;i++){ const d=addDays(today,i); const k=dateKey(d); dmap[k]={ label:labelForDay(d,today), key:k, date:d, items:[] }; }
+  const laterBucket = { label:'Later', key:'later', items:[] };
+  const nodueBucket = { label:'No due date', key:'nodue', items:[] };
+
+  for(const t of tasks){
+    if(!t.dueDateISO){ nodueBucket.items.push(t); continue; }
+    if(t.dueDateISO < dateKey(today)) overdueBucket.items.push(t);
+    else if(dmap[t.dueDateISO]) dmap[t.dueDateISO].items.push(t);
+    else laterBucket.items.push(t);
+  }
+
+  const order=[overdueBucket, ...Object.values(dmap), laterBucket, nodueBucket];
+  for(const b of order){
+    if(b.items.length===0) continue;
+    const div=document.createElement('div');
+    div.innerHTML=`<div class="sectionDivider">${b.label}</div>`;
+    container.appendChild(div);
+
+    b.items.forEach(t=>{
+      const isOverdue = t.dueDateISO && t.dueDateISO < dateKey(today);
+
+const badge = {
+  Low:      'bg-transparent text-zinc-500 border border-zinc-700',
+  Medium:   'bg-teal-400/40 text-teal-950',      // darker text for visibility
+  High:              'bg-[rgba(180,83,9,.18)] text-orange-400 border border-orange-500',
+  Critical: 'bg-rose-600/70 text-rose-50'        // perfect as-is
+}[t.importance] || 'bg-zinc-300/60 text-zinc-950';
+
+      // Build tags row if this task has tags
+      const tags = Array.isArray(t.tags) ? t.tags : [];
+const tagsHtml = tags.length
+  ? tags.map(tag =>
+      `<span class="tag bg-zinc-700/40">${escapeHtml(tag)}</span>`
+    ).join('')
+  : '';
+
+
+      const card = document.createElement('div');
+card.className = 'glass' + (t.importance === 'Critical' ? ' critical-card' : '');
+
+
+if (editingTaskId === t.id) {
+  const rec = t.recurrence || {};
+  const recMode = rec.mode || 'none';
+  const recCount = Number.isFinite(rec.customCount) && rec.customCount > 0 ? rec.customCount : 1;
+  const recUnit  = rec.customUnit || 'day';
+
+  card.innerHTML = `
+    <div class="flex flex-col gap-3">
+      <div class="grid gap-2 sm:grid-cols-2">
+        <div class="sm:col-span-2">
+          <label class="text-xs muted">Title</label>
+          <input class="input mt-1" data-field="title" value="${escapeHtml(t.title)}">
+        </div>
+        <div>
+          <label class="text-xs muted">Importance</label>
+          <select class="input mt-1" data-field="importance">
+            <option ${t.importance==='Low'?'selected':''}>Low</option>
+            <option ${t.importance==='Medium'?'selected':''}>Medium</option>
+            <option ${t.importance==='High'?'selected':''}>High</option>
+            <option ${t.importance==='Critical'?'selected':''}>Critical</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs muted">Due Date</label>
+          <input class="input mt-1" type="date" data-field="due" value="${t.dueDateISO||''}">
+        </div>
+        <div>
+          <label class="text-xs muted">Points</label>
+          <input class="input mt-1" type="number" data-field="points" value="${t.points||0}">
+        </div>
+        <div>
+          <label class="text-xs muted">Repeat</label>
+          <select class="input mt-1" data-field="repeat">
+            <option value="none" ${recMode==='none'?'selected':''}>Does not repeat</option>
+            <option value="daily" ${recMode==='daily'?'selected':''}>Daily</option>
+            <option value="everyWeekday" ${recMode==='everyWeekday'?'selected':''}>Every Weekday</option>
+            <option value="weekly" ${recMode==='weekly'?'selected':''}>Weekly</option>
+            <option value="monthly" ${recMode==='monthly'?'selected':''}>Monthly</option>
+            <option value="yearly" ${recMode==='yearly'?'selected':''}>Yearly</option>
+            <option value="custom" ${recMode==='custom'?'selected':''}>Custom…</option>
+          </select>
+
+          <div class="flex items-center gap-2 text-xs mt-2 repeat-custom-row ${recMode==='custom'?'':'hidden'}">
+            <span class="muted">Repeat every</span>
+            <input type="number" min="1" class="input w-16" data-field="repeatCustomCount" value="${recCount}">
+            <select class="input w-24 text-xs" data-field="repeatCustomUnit">
+              <option value="day" ${recUnit==='day'?'selected':''}>day(s)</option>
+              <option value="week" ${recUnit==='week'?'selected':''}>week(s)</option>
+              <option value="month" ${recUnit==='month'?'selected':''}>month(s)</option>
+              <option value="year" ${recUnit==='year'?'selected':''}>year(s)</option>
+            </select>
+          </div>
+        </div>
+        <div class="sm:col-span-2">
+          <label class="text-xs muted">Tags</label>
+          <input class="input mt-1" data-field="tags" value="${(Array.isArray(t.tags) ? t.tags : []).join(', ')}">
+        </div>
+      </div>
+      <div class="flex gap-2 flex-wrap justify-end">
+        <button class="btn btn-success" data-act="task-save">Save</button>
+        <button class="btn btn-ghost" data-act="task-cancel">Cancel</button>
+        <button class="btn btn-ghost" data-act="task-delete">Delete</button>
+      </div>
+    </div>
+  `;
+
+  // ⬇️ keep this
+  container.appendChild(card);
+
+  // wire up custom row toggle for this card
+  const repSel = card.querySelector('select[data-field="repeat"]');
+  const customRow = card.querySelector('.repeat-custom-row');
+  if (repSel && customRow) {
+    const toggle = () => {
+      if (repSel.value === 'custom') customRow.classList.remove('hidden');
+      else customRow.classList.add('hidden');
+    };
+    repSel.addEventListener('change', toggle);
+    toggle();
+  }
+
+  // ⬇️ keep these exactly like before
+  const saveBtn   = card.querySelector('[data-act="task-save"]');
+  const cancelBtn = card.querySelector('[data-act="task-cancel"]');
+  const delBtn    = card.querySelector('[data-act="task-delete"]');
+
+  saveBtn.onclick   = () => saveTaskEdit(t.id,card);
+  cancelBtn.onclick = () => { editingTaskId=null; renderTasks(); };
+  delBtn.onclick    = () => deleteTask(t.id);
+} else {
+card.innerHTML=`
+  <div class="flex flex-wrap sm:flex-nowrap items-center gap-3">
+    <div class="taskPoints flex flex-col items-center justify-center">
+      <div class="taskPointsNumber">${t.points}</div>
+      <div class="taskPointsLabel muted">pts</div>
+    </div>
+<div class="title-wrap min-w-0 flex-1">
+  <div class="font-semibold task-title">${escapeHtml(t.title)}</div>
+
+  <div class="flex gap-2 text-xs mt-1 flex-wrap">
+    <span class="tag ${badge}">${t.importance}</span>
+
+${t.dueDateISO
+  ? `<span class="tag ${isOverdue ? 'bg-rose-600/70 text-rose-50' : 'bg-zinc-700/40'}">
+       ${niceDate(fromKey(t.dueDateISO))}
+     </span>`
+  : ''
+}
+
+
+    ${tagsHtml}
+  </div>
+</div>
+
+
+    <div class="flex gap-2 flex-wrap justify-end ml-auto">
+      ${isOverdue?`<button class="btn btn-ghost btn-task" onclick="postponeTask('${t.id}')">Postpone</button>`:''}
+      <button class="btn btn-ghost btn-task" onclick="wontDoMain('${t.id}')">Won’t do</button>
+      <button class="btn btn-ghost btn-task" onclick="bumpTaskOneDay('${t.id}')">+1d</button>
+      <button class="btn btn-ghost btn-task" onclick="editTask('${t.id}')">Edit</button>
+      <button class="btn btn-ghost btn-task" onclick="hideTask('${t.id}')">Hide</button>
+      <button class="btn btn-delete btn-task" onclick="deleteTask('${t.id}')">Delete</button>
+      <button class="btn btn-success btn-task btn-check" onclick="completeTask('${t.id}')" aria-label="Done">✓</button>
+
+    </div>
+  </div>`;
+
+        container.appendChild(card);
+      }
+    });
+  }
+}
+
+function saveSleepScore(){
+  const rawStr = $('sleepScoreInput').value.trim();
+  if (rawStr === '') return alert("Enter your sleep score (0–100).");
+
+  const raw = Number(rawStr);
+  if (Number.isNaN(raw) || raw < 0 || raw > 100) {
+    return alert("Sleep score must be between 0 and 100.");
+  }
+
+  const basePts  = raw / 10;
+const bonusPts = sleepBonus(raw);
+const pts      = basePts + bonusPts; // e.g. 97 → 10.7
+
+  // Use today's date (local) and normalize so timezones don't mess the day
+  const d = new Date();
+  d.setHours(12, 0, 0, 0);        // force midday
+  const key = dateKey(d);         // e.g. "2025-12-03"
+  const whenISO = d.toISOString();
+
+  // Look for an existing Sleep Score entry for this same day
+  let existing = null;
+  for (const c of state.completions) {
+    if (!c.title || !c.title.startsWith('Sleep Score')) continue;
+    const cd = new Date(c.completedAtISO);
+    if (dateKey(cd) === key) {
+      existing = c;
+      break;
+    }
+  }
+
+  if (existing) {
+    // Update today's sleep entry
+    existing.title = `Sleep Score (${raw})`;
+    existing.points = pts;
+    existing.completedAtISO = whenISO;
+  } else {
+    // Create a new one if none exists for today
+    state.completions.unshift({
+      id: crypto.randomUUID(),
+      taskId: null,
+      title: `Sleep Score (${raw})`,
+      points: pts,
+      completedAtISO: whenISO,
+      source: "task"
+    });
+  }
+
+  $('sleepScoreInput').value = "";  // clear input
+
+  save();
+  renderAll();  // refresh stats, history chips, etc.
+}
+
+
+function saveCalories(){
+  const rawStr = $('caloriesInput').value.trim();
+  if (rawStr === '') return alert("Enter today's calories.");
+
+  const raw = Number(rawStr);
+  if (Number.isNaN(raw) || raw < 0) return alert("Calories can’t be negative.");
+
+  const pts = caloriesToPoints(raw);
+
+  // 1) Figure out what date this entry is for (date picker or today)
+  const dateStr = $('caloriesDate') ? $('caloriesDate').value : '';
+  let d;
+  if (dateStr) {
+    const [y, m, day] = dateStr.split('-').map(n => parseInt(n, 10));
+    d = new Date(y, m - 1, day);
+  } else {
+    d = new Date();
+  }
+  // normalize so timezones don't bump it to the wrong day
+  d.setHours(12, 0, 0, 0);
+  const key = dateKey(d);
+  const whenISO = d.toISOString();
+
+  // 2) Look for an existing Calories entry for this same date
+  let existing = null;
+  for (const c of state.completions) {
+    if (!c.title || !c.title.startsWith('Calories')) continue;
+    const cd = new Date(c.completedAtISO);
+    if (dateKey(cd) === key) {
+      existing = c;
+      break;
+    }
+  }
+
+  // 3) If we found one, UPDATE it; otherwise, create a new one
+  if (existing) {
+    existing.title = `Calories (${raw})`;
+    existing.points = pts;
+    existing.completedAtISO = whenISO;
+  } else {
+    state.completions.unshift({
+      id: crypto.randomUUID(),
+      taskId: null,
+      title: `Calories (${raw})`,
+      points: pts,
+      completedAtISO: whenISO,
+      source: "task"
+    });
+  }
+
+  $('caloriesInput').value = '';
+  // optional: keep the chosen date in the picker so you can tweak same day
+
+  save();
+  renderAll();
+}
+
+
+function renderSleepHistory() {
+  const container = $('sleepHistory');
+  if (container) container.innerHTML = '';
+
+  const sleepEntries = state.completions
+    .filter(c => c.title && c.title.startsWith('Sleep Score'))
+    .slice()
+    .sort((a,b) => new Date(b.completedAtISO) - new Date(a.completedAtISO));
+
+  // --- LEFT SIDE: Today's big stat ---
+  const today = new Date();
+  const todayKey = dateKey(today);
+  let todayEntry = null;
+
+  for (const entry of sleepEntries) {
+    const d = new Date(entry.completedAtISO);
+    if (dateKey(d) === todayKey) {
+      todayEntry = entry;
+      break;
+    }
+  }
+
+  const todayValueEl  = $('sleepTodayValue');
+  const todayImpactEl = $('sleepTodayImpact');
+
+if (todayValueEl && todayImpactEl) {
+  if (todayEntry) {
+    const titleMatch = todayEntry.title.match(/\((\d+)\)/);
+    const scoreNum = titleMatch ? Number(titleMatch[1]) : null;
+
+    if (scoreNum != null && !Number.isNaN(scoreNum)) {
+      todayValueEl.textContent = scoreNum;
+
+      const basePts  = scoreNum / 10;
+      const bonusPts = sleepBonus(scoreNum);   // uses your bonus rules
+      const totalPts = basePts + bonusPts;
+
+      todayImpactEl.textContent = `Adds ${totalPts.toFixed(1)} pts to today`;
+    } else {
+      todayValueEl.textContent = '—';
+      todayImpactEl.textContent = 'Adds — pts to today';
+    }
+  } else {
+    todayValueEl.textContent = '—';
+    todayImpactEl.textContent = 'Adds 0 pts to today';
+  }
+}
+
+
+
+  // --- RIGHT SIDE: recent nights chips ---
+  // Show the 4 most recent *prior* nights (exclude today's entry if present)
+  const recent = sleepEntries
+    .filter(entry => {
+      const d = new Date(entry.completedAtISO);
+      return dateKey(d) !== todayKey;
+    })
+    .slice(0, 4);
+
+  if (!container) return;
+
+
+  recent.forEach(entry => {
+    const date = new Date(entry.completedAtISO);
+
+    const prettyDate = date.toLocaleDateString('en-US', {
+      weekday: 'short',
+      month: 'numeric',
+      day: 'numeric'
+    });
+
+    const score = entry.title.match(/\((\d+)\)/)?.[1] || '?';
+    const pts   = (Number(entry.points) || 0).toFixed(1);
+
+    const block = document.createElement('div');
+    block.className = 'sleep-chip cursor-pointer';
+
+    block.innerHTML = `
+      <div class="sleep-chip-date">${prettyDate}</div>
+      <div class="sleep-chip-score">${score}</div>
+      <div class="sleep-chip-pts">${pts} pts</div>
+    `;
+
+
+
+
+    block.onclick = () => {
+      const newScore = prompt('Edit sleep score for this day:', score);
+      if (!newScore) return;
+
+      const raw = Number(newScore);
+      if (isNaN(raw) || raw < 0 || raw > 100) return alert('Invalid score.');
+
+      entry.title = `Sleep Score (${raw})`;
+entry.points = (raw / 10) + sleepBonus(raw);
+
+
+      save();
+      renderAll();
+    };
+
+    container.appendChild(block);
+  });
+}
+
+function renderCaloriesHistory() {
+  const container = $('caloriesHistory');
+  if (container) container.innerHTML = '';
+
+  const entries = state.completions
+    .filter(c => c.title && c.title.startsWith('Calories'))
+    .slice()
+    .sort((a,b) => new Date(b.completedAtISO) - new Date(a.completedAtISO));
+
+  const today = new Date();
+  const todayKey = dateKey(today);
+  let todayEntry = null;
+
+  for (const entry of entries) {
+    const d = new Date(entry.completedAtISO);
+    if (dateKey(d) === todayKey) {
+      todayEntry = entry;
+      break;
+    }
+  }
+
+  // Big Today stat
+  const todayValueEl  = $('caloriesTodayValue');
+  const todayImpactEl = $('caloriesTodayImpact');
+
+  if (todayValueEl && todayImpactEl) {
+    if (todayEntry) {
+      const titleMatch = todayEntry.title.match(/\((\d+)\)/);
+      const calNum = titleMatch ? Number(titleMatch[1]) : null;
+
+      if (calNum != null && !Number.isNaN(calNum)) {
+        todayValueEl.textContent = calNum;
+
+        const pts = caloriesToPoints(calNum);
+        todayImpactEl.textContent = `Adds ${pts.toFixed(1)} pts to today`;
+      } else {
+        todayValueEl.textContent = '—';
+        todayImpactEl.textContent = 'Adds — pts to today';
+      }
+    } else {
+      todayValueEl.textContent = '—';
+      todayImpactEl.textContent = 'Adds 0 pts to today';
+    }
+  }
+
+  // Recent (max 4) excluding today
+  const recent = entries
+    .filter(entry => dateKey(new Date(entry.completedAtISO)) !== todayKey)
+    .slice(0, 4);
+
+  if (!container) return;
+
+  recent.forEach(entry => {
+    const date = new Date(entry.completedAtISO);
+
+    const prettyDate = date.toLocaleDateString('en-US', {
+      weekday: 'short',
+      month: 'numeric',
+      day: 'numeric'
+    });
+
+    const cal = entry.title.match(/\((\d+)\)/)?.[1] || '?';
+    const pts = (Number(entry.points) || 0).toFixed(1);
+
+    const block = document.createElement('div');
+    block.className = 'cal-chip cursor-pointer';
+
+    block.innerHTML = `
+      <div class="cal-chip-date">${prettyDate}</div>
+      <div class="cal-chip-value">${cal}</div>
+      <div class="cal-chip-pts">${pts} pts</div>
+    `;
+
+
+    // allow editing a past day
+    block.onclick = () => {
+      const newVal = prompt('Edit calories for this day:', cal);
+      if (!newVal && newVal !== '0') return;
+
+      const raw = Number(newVal);
+      if (isNaN(raw) || raw < 0) return alert('Invalid calories.');
+
+      entry.title  = `Calories (${raw})`;
+      entry.points = caloriesToPoints(raw);
+
+      save();
+      renderAll();
+    };
+
+    container.appendChild(block);
+  });
+}
+
+function saveWorkScore() {
+  const rawStr = $('workScoreInput').value.trim();
+  if (rawStr === '') return alert("Enter your work score.");
+
+  const raw = Number(rawStr);
+  if (Number.isNaN(raw)) return alert("Work Score must be a number.");
+
+  // Direct 1:1 mapping → 7 becomes 7 pts
+  const pts = raw;
+
+  // Date normalized so it always logs to the correct day
+  const d = new Date();
+  d.setHours(12, 0, 0, 0);
+  const key = dateKey(d);
+  const whenISO = d.toISOString();
+
+  // Look for an existing Work Score entry for today
+  let existing = null;
+  for (const c of state.completions) {
+    if (!c.title || !c.title.startsWith('Work Score')) continue;
+    const cd = new Date(c.completedAtISO);
+    if (dateKey(cd) === key) {
+      existing = c;
+      break;
+    }
+  }
+
+  if (existing) {
+    existing.title = `Work Score (${raw})`;
+    existing.points = pts;
+    existing.completedAtISO = whenISO;
+  } else {
+    state.completions.unshift({
+      id: crypto.randomUUID(),
+      title: `Work Score (${raw})`,
+      points: pts,
+      completedAtISO: whenISO,
+      source: "task"
+    });
+  }
+
+  $('workScoreInput').value = "";
+
+  save();
+  renderAll();
+}
+
+function renderWorkHistory() {
+  const container = $('workHistory');
+  if (container) container.innerHTML = '';
+
+  const entries = state.completions
+    .filter(c => c.title && c.title.startsWith('Work Score'))
+    .slice()
+    .sort((a,b) => new Date(b.completedAtISO) - new Date(a.completedAtISO));
+
+  // TODAY
+  const today = new Date();
+  const todayK = dateKey(today);
+  let todayEntry = null;
+
+  for (const entry of entries) {
+    const d = new Date(entry.completedAtISO);
+    if (dateKey(d) === todayK) {
+      todayEntry = entry;
+      break;
+    }
+  }
+
+  const todayValueEl = $('workTodayValue');
+  const todayImpactEl = $('workTodayImpact');
+
+  if (todayValueEl && todayImpactEl) {
+    if (todayEntry) {
+      const num = Number(todayEntry.title.match(/\((.+)\)/)?.[1] || NaN);
+      if (!isNaN(num)) {
+        todayValueEl.textContent = num;
+        todayImpactEl.textContent = `Adds ${todayEntry.points} pts to today`;
+      } else {
+        todayValueEl.textContent = '—';
+        todayImpactEl.textContent = 'Adds — pts to today';
+      }
+    } else {
+      todayValueEl.textContent = '—';
+      todayImpactEl.textContent = 'Adds 0 pts to today';
+    }
+  }
+
+  // RECENT HISTORY (4 chips)
+  const recent = entries
+    .filter(e => dateKey(new Date(e.completedAtISO)) !== todayK)
+    .slice(0, 4);
+
+  recent.forEach(entry => {
+    const date = new Date(entry.completedAtISO);
+
+    const prettyDate = date.toLocaleDateString('en-US', {
+      weekday: 'short',
+      month: 'numeric',
+      day: 'numeric'
+    });
+
+    const val = entry.title.match(/\((.+)\)/)?.[1] || '?';
+    const pts = entry.points;
+
+    const block = document.createElement('div');
+    block.className = 'work-chip cursor-pointer';
+
+    block.innerHTML = `
+      <div class="work-chip-date">${prettyDate}</div>
+      <div class="work-chip-value">${val}</div>
+      <div class="work-chip-pts">${pts} pts</div>
+    `;
+
+    block.onclick = () => {
+      const newVal = prompt("Edit work score:", val);
+      if (!newVal && newVal !== "0") return;
+
+      const num = Number(newVal);
+      if (isNaN(num)) return alert("Invalid number.");
+
+      entry.title = `Work Score (${num})`;
+      entry.points = num;
+
+      save();
+      renderAll();
+    };
+
+    container.appendChild(block);
+  });
+}
+
+
+function addTask(){
+  const title = $('titleInput').value.trim();
+  if(!title) return alert('Enter a task name');
+
+  const mode = $('repeatInput').value || 'none';
+  const rec = { mode };
+
+  // Parse tags from the tags input (comma-separated)
+  const rawTags = ($('tagsInput')?.value || '');
+  const tags = rawTags
+    .split(',')
+    .map(s => s.trim())
+    .filter(s => s.length > 0);
+
+  if (mode === 'custom') {
+    const countRaw = $('repeatCustomCount')?.value;
+    const unitRaw  = $('repeatCustomUnit')?.value;
+    let count = parseInt(countRaw, 10);
+    if (!Number.isFinite(count) || count <= 0) count = 1;
+    const unit = (unitRaw === 'week' || unitRaw === 'month' || unitRaw === 'year') ? unitRaw : 'day';
+    rec.customCount = count;
+    rec.customUnit = unit;
+  }
+
+  const task = {
+    id: crypto.randomUUID(),
+    title,
+    importance: $('importanceInput').value,
+    dueDateISO: $('dueDateInput').value || null,
+    points: Number($('pointsInput').value)||0,
+    recurrence: rec,
+    tags,                // ⬅ new
+    skipDates: [],
+    hidden: false,
+    completedAtISO: null,
+    createdAtISO: new Date().toISOString()
+  };
+
+
+  state.tasks.unshift(task);
+
+  save();
+  clearForm();
+  renderAll();
+
+  // ✅ Auto-close modal ONLY on desktop
+  if (isDesktop()) {
+    closeAddTaskModal();
+  }
+}
+
+
+function setDueToday(){
+  $('dueDateInput').value = todayKey();
+}
+
+function scrollToTasks(){
+  const el = $('tasksAnchor');
+  if (el) {
+    el.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start'
+    });
+  }
+}
+
+function clearForm(){
+  $('titleInput').value='';
+  $('pointsInput').value='';
+  $('dueDateInput').value='';
+  $('importanceInput').value='Medium';
+  $('repeatInput').value='none';
+  if ($('repeatCustomCount')) $('repeatCustomCount').value='1';
+  if ($('repeatCustomUnit')) $('repeatCustomUnit').value='day';
+  if ($('tagsInput')) $('tagsInput').value='';          // ⬅ new
+  if (repeatCustomRow) repeatCustomRow.classList.add('hidden');
+}
+
+
+function bumpTaskOneDay(id){
+  const t = state.tasks.find(x => x.id === id);
+  if (!t) return;
+  bumpOneDay(t);
+  save();
+  renderAll();
+}
+
+function postponeTask(id){
+  const t=state.tasks.find(x=>x.id===id); if(!t||!t.dueDateISO) return;
+  t.dueDateISO = todayKey();
+  save(); renderAll();
+}
+function wontDoMain(id){
+  const t=state.tasks.find(x=>x.id===id); if(!t) return;
+  const mode = (t.recurrence && t.recurrence.mode) || 'none';
+  if(mode==='none'){
+    if(!confirm('Won’t do this task? It will be removed.')) return;
+    state.tasks = state.tasks.filter(x=>x.id!==id);
+  }else{
+    const k = t.dueDateISO || todayKey();
+    t.skipDates = Array.isArray(t.skipDates)?t.skipDates:[];
+    if(!t.skipDates.includes(k)) t.skipDates.push(k);
+    if(t.dueDateISO===k) t.dueDateISO = todayKey();
+  }
+  save(); renderAll();
+}
+
+function completeTask(id){
+  const t = state.tasks.find(x=>x.id===id);
+  if(!t) return;
+  const now = new Date().toISOString();
+
+  // always log the completion
+  addCompletion({
+    id: crypto.randomUUID(),
+    taskId: id,
+    title: t.title,
+    points: t.points,
+    completedAtISO: now
+  });
+
+
+  const rec = t.recurrence || {};
+  const mode = rec.mode || 'none';
+
+  if (mode === 'none') {
+    // one-off task → mark completed and hide from list
+    t.completedAtISO = now;
+  } else {
+    // repeating task → move due date forward, keep it active
+    const nextKey = computeNextDueDate(t);
+    if (nextKey) t.dueDateISO = nextKey;
+    t.completedAtISO = null; // keep it in the active list
+  }
+
+  save();
+  renderAll();
+}
+
+function editTask(id){ editingTaskId = id; renderTasks(); }
+function saveTaskEdit(id,card){
+  const t=state.tasks.find(x=>x.id===id); if(!t) return;
+  const titleInput=card.querySelector('input[data-field="title"]');
+  const ptsInput=card.querySelector('input[data-field="points"]');
+  const dueInput=card.querySelector('input[data-field="due"]');
+  const impSel=card.querySelector('select[data-field="importance"]');
+  const repSel=card.querySelector('select[data-field="repeat"]');
+  const tagsInput=card.querySelector('input[data-field="tags"]');
+
+
+  t.title = titleInput.value.trim() || t.title;
+  t.points = Number(ptsInput.value)||0;
+  const dueVal = (dueInput.value||'').trim();
+  t.dueDateISO = dueVal || null;
+  const impVal = impSel.value;
+  if(['Low','Medium','High','Critical'].includes(impVal)) t.importance = impVal;
+
+  if (tagsInput) {
+    const raw = tagsInput.value || '';
+    t.tags = raw
+      .split(',')
+      .map(s => s.trim())
+      .filter(s => s.length > 0);
+  }
+
+if (repSel) {
+  const mode = repSel.value || 'none';
+  t.recurrence = t.recurrence || {};
+  t.recurrence.mode = mode;
+
+  if (mode === 'custom') {
+    const countInput = card.querySelector('input[data-field="repeatCustomCount"]');
+    const unitSel    = card.querySelector('select[data-field="repeatCustomUnit"]');
+    let count = parseInt(countInput && countInput.value, 10);
+    if (!Number.isFinite(count) || count <= 0) count = 1;
+    const unit = (unitSel && (unitSel.value === 'week' || unitSel.value === 'month' || unitSel.value === 'year'))
+      ? unitSel.value
+      : 'day';
+    t.recurrence.customCount = count;
+    t.recurrence.customUnit  = unit;
+  } else {
+    // if you switch away from custom, clean it up
+    delete t.recurrence.customCount;
+    delete t.recurrence.customUnit;
+  }
+}
+
+  editingTaskId=null;
+  save(); renderAll();
+}
+
+function hideTask(id){
+  const t = state.tasks.find(x => x.id === id);
+  if (!t) return;
+  t.hidden = true;
+  save();
+  renderAll();
+}
+
+function deleteTask(id){
+  if(!confirm('Delete this task?')) return;
+  // Remove the task itself
+  state.tasks = state.tasks.filter(t => t.id !== id);
+  // Do NOT touch state.completions here – keep history/log and points
+  if (editingTaskId === id) editingTaskId = null;
+  save();
+  renderAll();
+}
+
+
+/* ---------- IMPORT/EXPORT/RESET ---------- */
+function exportData(){
+  const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});
+  const now = new Date();
+
+  const y  = now.getFullYear();
+  const mo = String(now.getMonth() + 1).padStart(2,'0');
+  const d  = String(now.getDate()).padStart(2,'0');
+  const hh = String(now.getHours()).padStart(2,'0');
+  const mm = String(now.getMinutes()).padStart(2,'0');
+  const ss = String(now.getSeconds()).padStart(2,'0');
+
+  const filename = `taskpoints-backup-${y}-${mo}-${d}_${hh}-${mm}-${ss}.json`;
+
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;
+  a.download=filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+function importFile(ev){
+  const f = ev.target.files?.[0];
+  if (!f) return;
+
+  const r = new FileReader();
+  r.onload = () => {
+    let data;
+    // 1) Parse stage
+    try {
+      const raw = String(r.result);
+      data = JSON.parse(raw);
+      console.log("JSON parsed OK (file import):", data);
+    } catch (err) {
+      console.error("ACTUAL PARSE ERROR (file import):", err);
+      alert("The file is not valid JSON. Check console for details.");
+      return;
+    }
+
+    // 2) App logic stage
+    try {
+      const root =
+        (data && Array.isArray(data.tasks) && Array.isArray(data.completions)) ? data :
+        (data && data.state && Array.isArray(data.state.tasks) && Array.isArray(data.state.completions)) ? data.state :
+        null;
+
+      if (!root) {
+        throw new Error("Root object missing tasks/completions arrays");
+      }
+
+      state = {
+        tasks:       Array.isArray(root.tasks)       ? root.tasks       : [],
+        completions: Array.isArray(root.completions) ? root.completions : [],
+        players:     Array.isArray(root.players)     ? root.players     : [],
+        habits:      Array.isArray(root.habits)      ? root.habits      : [],
+        flexActions: Array.isArray(root.flexActions) ? root.flexActions : [],
+        gameHistory: Array.isArray(root.gameHistory) ? root.gameHistory : []
+      };
+
+      editingTaskId = null;
+      editingHabitId = null;
+
+      save();
+      renderAll();
+      renderHabits();
+      renderHabitWeekLabels();
+      renderVices();
+      renderViceWeekLabels();
+
+      console.log("Import (file) applied successfully.");
+    } catch (logicErr) {
+      console.error("LOGIC ERROR during import (file):", logicErr);
+      alert("JSON was valid, but the app crashed trying to load it. Check console.");
+    }
+  };
+
+  r.readAsText(f);
+  ev.target.value = "";
+}
+
+function importPaste(){
+  const txt = prompt("Paste TaskPoints JSON:");
+  if (!txt) return;
+
+  let data;
+  // 1) Parse stage
+  try {
+    data = JSON.parse(txt);
+    console.log("JSON parsed OK (paste):", data);
+  } catch (err) {
+    console.error("ACTUAL PARSE ERROR (paste):", err);
+    alert("The text is not valid JSON. Check console for details.");
+    return;
+  }
+
+  // 2) App logic stage
+  try {
+    const root =
+      (data && Array.isArray(data.tasks) && Array.isArray(data.completions)) ? data :
+      (data && data.state && Array.isArray(data.state.tasks) && Array.isArray(data.state.completions)) ? data.state :
+      null;
+
+    if (!root) {
+      throw new Error("Root object missing tasks/completions arrays");
+    }
+
+    state = {
+      tasks:       Array.isArray(root.tasks)       ? root.tasks       : [],
+      completions: Array.isArray(root.completions) ? root.completions : [],
+      players:     Array.isArray(root.players)     ? root.players     : [],
+      habits:      Array.isArray(root.habits)      ? root.habits      : [],
+      flexActions: Array.isArray(root.flexActions) ? root.flexActions : [],
+      gameHistory: Array.isArray(root.gameHistory) ? root.gameHistory : []
+    };
+
+    editingTaskId = null;
+    editingHabitId = null;
+
+    save();
+    renderAll();
+    renderHabits();
+    renderHabitWeekLabels();
+    renderVices();
+    renderViceWeekLabels();
+
+    console.log("Import (paste) applied successfully.");
+  } catch (logicErr) {
+    console.error("LOGIC ERROR during import (paste):", logicErr);
+    alert("JSON was valid, but the app crashed trying to load it. Check console.");
+  }
+}
+
+
+/* ---------- RENDER/WIRE ---------- */
+function renderAll(){
+  try {
+    renderStats();
+  } catch (e) {
+    console.error('renderStats error:', e);
+  }
+
+  try {
+    renderTasks();
+  } catch (e) {
+    console.error('renderTasks error:', e);
+  }
+
+  try {
+    renderSleepHistory();
+  } catch (e) {
+    console.error('renderSleepHistory error:', e);
+  }
+
+  try {
+    renderCaloriesHistory();
+  } catch (e) {
+    console.error('renderCaloriesHistory error:', e);
+  }
+}
+
+try {
+  renderWorkHistory();
+} catch (e) {
+  console.error('renderWorkHistory error', e);
+}
+
+
+window.addEventListener("load",   syncAddTaskFormLocation);
+window.addEventListener("resize", syncAddTaskFormLocation);
+
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m])); }
+
+$('addBtn').onclick=addTask;
+$('sortSelect').onchange=renderTasks;
+$('exportBtn').onclick=exportData;
+$('importInput').onchange=importFile;
+$('importPasteBtn').onclick=importPaste;
+$('resetBtn').onclick=resetAll;
+$('addHabitBtn').onclick=addHabit;
+$('addViceBtn').onclick=addVice;
+$('addFlexBtn').onclick=addFlexAction;
+$('saveSleepScoreBtn').onclick = saveSleepScore;
+$('saveCaloriesBtn').onclick = saveCalories;
+$('saveWorkScoreBtn').onclick = saveWorkScore;
+
+
+const repeatSel = $('repeatInput');
+const repeatCustomRow = $('repeatCustomRow');
+if (repeatSel && repeatCustomRow) {
+  const toggleCustomRow = () => {
+    if (repeatSel.value === 'custom') repeatCustomRow.classList.remove('hidden');
+    else repeatCustomRow.classList.add('hidden');
+  };
+  repeatSel.addEventListener('change', toggleCustomRow);
+  toggleCustomRow(); // set initial state
+}
+
+renderHabitWeekLabels();
+renderViceWeekLabels();
+renderHabits();
+renderVices();
+renderFlexActions();
+
+console.log('TaskPoints main state summary:', {
+  tasks:       Array.isArray(state.tasks)       ? state.tasks.length       : 'no array',
+  completions: Array.isArray(state.completions) ? state.completions.length : 'no array',
+  habits:      Array.isArray(state.habits)      ? state.habits.length      : 'no array',
+  flexActions: Array.isArray(state.flexActions) ? state.flexActions.length : 'no array',
+  players:     Array.isArray(state.players)     ? state.players.length     : 'no array',
+  gameHistory: Array.isArray(state.gameHistory) ? state.gameHistory.length : 'no array'
+});
+
+renderAll();
+
+</script>
+
+<!-- DESKTOP-ONLY ADD TASK MODAL -->
+<div
+  id="addTaskModal"
+  class="fixed inset-0 z-40 hidden items-center justify-center bg-black/60"
+>
+  <div class="w-full max-w-xl mx-4 rounded-2xl px-6 pb-6 pt-12 relative bg-zinc-900 text-zinc-100">
+<button
+  type="button"
+  class="absolute top-4 right-4 btn btn-secondary text-xs px-3 py-1 rounded-md"
+  onclick="closeAddTaskModal()"
+>
+  Close
+</button>
+
+
+
+
+    <!-- The real form gets moved in here on desktop -->
+    <div id="addTaskModalBody"></div>
+  </div>
+</div>
+
+
+<!-- MOBILE SCROLL-TO-TOP BUTTON -->
+<button
+  id="scrollTopBtn"
+  class="hidden md:hidden fixed top-3 right-3 z-40 btn btn-teal rounded-full shadow-lg px-4 py-2 text-sm flex items-center gap-1"
+  type="button"
+>
+  <span>⬆️</span>
+  <span>Top</span>
+</button>
+
+<script>
+  (function () {
+    const btn = document.getElementById('scrollTopBtn');
+    if (!btn) return;
+
+    function updateVisibility() {
+      // show if scrolled down a bit, hide when at the very top
+      if (window.scrollY > 40) {
+        btn.classList.remove('hidden');
+      } else {
+        btn.classList.add('hidden');
+      }
+    }
+
+    // update on scroll and on first load
+    window.addEventListener('scroll', updateVisibility, { passive: true });
+    window.addEventListener('load', updateVisibility);
+
+    btn.addEventListener('click', () => {
+      window.scrollTo({
+        top: 0,
+        behavior: 'smooth'
+      });
+    });
+  })();
+
+
+</script>
+
+
+<!-- MOBILE QUICK NAV BAR -->
+<nav
+  class="fixed inset-x-0 bottom-0 z-40 md:hidden border-t border-slate-800 backdrop-blur text-slate-100 drop-shadow-sm"
+  style="background: linear-gradient(180deg, #0f4d4d, #0a2f2f);">
+  <div class="max-w-6xl mx-auto flex justify-center py-3 pb-4 text-[11px] mobile-bottom-nav">
+
+    <a href="#sleepAnchor" class="flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
+      <span class="text-lg">💤</span>
+      <span class="uppercase tracking-wide text-[10px]">Sleep</span>
+    </a>
+
+    <a href="#habitsAnchor" class="flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
+      <span class="text-lg">🔗</span>
+      <span class="uppercase tracking-wide text-[10px]">Habits</span>
+    </a>
+
+    <!-- TASKS moved to the middle -->
+    <a href="#tasksAnchor" class="flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
+      <span class="text-lg">✔️</span>
+      <span class="uppercase tracking-wide text-[10px]">Tasks</span>
+    </a>
+
+    <a href="#vicesAnchor" class="flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
+      <span class="text-lg">💀</span>
+      <span class="uppercase tracking-wide text-[10px]">Vices</span>
+    </a>
+
+    <a href="#flexAnchor" class="flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
+      <span class="text-lg">🌀</span>
+      <span class="uppercase tracking-wide text-[10px]">Flex</span>
+    </a>
+
+  </div>
+</nav>
+
+
+</body>
+</html>
