@@ -292,7 +292,8 @@
     }
 
     /* Tighten vertical padding just for task bubbles, not all glass panels */
-    #taskList .glass{
+    #taskList .glass,
+    #archiveList .glass{
       padding:10px 14px;
     }
 
@@ -388,29 +389,35 @@
   }
 
   /* Mobile: make task cards more compact */
-  #taskList .glass{
+  #taskList .glass,
+  #archiveList .glass{
     padding:8px 10px;              /* less vertical padding */
   }
 
   /* shrink the internal flex gap + align to top so things don't look so tall */
-  #taskList .glass > .flex{
+  #taskList .glass > .flex,
+  #archiveList .glass > .flex{
     gap:0.5rem;
     align-items:flex-start;
   }
 
   /* slightly smaller points badge */
-  #taskList .taskPoints{
+  #taskList .taskPoints,
+  #archiveList .taskPoints{
     min-width:44px;
   }
-  #taskList .taskPointsNumber{
+  #taskList .taskPointsNumber,
+  #archiveList .taskPointsNumber{
     font-size:1.2rem;
   }
-  #taskList .taskPointsLabel{
+  #taskList .taskPointsLabel,
+  #archiveList .taskPointsLabel{
     font-size:0.6rem;
   }
 
   /* smaller buttons inside each task */
-  #taskList .btn-task{
+  #taskList .btn-task,
+  #archiveList .btn-task{
     padding:4px 8px;
     font-size:10px;
   }

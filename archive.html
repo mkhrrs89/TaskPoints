@@ -6,128 +6,7 @@
 <title>TaskPoints — Archive</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='%230b0d10'/><text x='50' y='62' font-size='60' text-anchor='middle' fill='white'>TP</text></svg>">
 <script src="https://cdn.tailwindcss.com"></script>
-
-  <style>
-    :root{--bg:#0b0d10;--border:#202830;--muted:#8b98a5}
-    body{background:var(--bg);color:#e6edf6}
-    @media (prefers-color-scheme:light){
-      body{background:#fafafa;color:#0b1220}
-    }
-    .glass{
-      border:1px solid var(--border);
-      background:rgba(255,255,255,.06);
-      border-radius:16px;
-      padding:16px;
-    }
-    @media (prefers-color-scheme:light){
-      .glass{background:#fff;border-color:#e5e7eb}
-    }
-    .btn{
-      border:1px solid var(--border);
-      border-radius:12px;
-      padding:6px 8px;
-      font-size:11px;
-    }
-    .btn-toolbar{padding:6px 8px;font-size:11px}
-    .btn-ghost{background:transparent}
-    .btn-teal{background:linear-gradient(180deg,#0f4d4d,#0a2f2f);color:#fff;border:none}
-    .btn-success{background:#22c55e;color:#072;border:none}
-    .btn-deny{background:#ef4444;color:white;border:none}
-    .muted{color:var(--muted)}
-    .task{
-      border:1px solid var(--border);
-      border-radius:10px;
-      padding:8px 10px;
-    }
-    /* Match main task card look */
-
-    /* same critical tint as main index */
-    .critical-card{
-      background: linear-gradient(
-        180deg,
-        rgba(60, 20, 20, 0.20),
-        rgba(40, 15, 15, 0.15)
-      ) !important;
-      border-color:#3a1a1a !important;
-    }
-
-    .task-row{
-      display:flex;
-      align-items:stretch;
-      gap:12px;
-    }
-
-    /* left points pill */
-    .task-row-left{
-      display:flex;
-      flex-direction:column;
-      align-items:center;
-      justify-content:center;
-      min-width:52px;
-      padding:8px 10px;
-      border-radius:999px;
-      background:linear-gradient(180deg,#0f4d4d,#0a2f2f);
-      text-align:center;
-    }
-    .task-row-left-main{
-      font-size:20px;
-      line-height:1;
-      font-weight:700;
-    }
-    .task-row-left-label{
-      margin-top:2px;
-      font-size:10px;
-      letter-spacing:0.08em;
-      text-transform:uppercase;
-      opacity:.75;
-    }
-
-    .task-row-body{
-      flex:1;
-      display:flex;
-      flex-direction:column;
-      gap:4px;
-      min-width:0;
-    }
-    .task-row-title{
-      font-size:14px;
-      font-weight:600;
-    }
-
-    .task-row-chips{
-      display:flex;
-      flex-wrap:wrap;
-      gap:6px;
-      font-size:11px;
-    }
-    .chip{
-      padding:3px 8px;
-      border-radius:999px;
-      border:1px solid rgba(148,163,184,.4);
-    }
-    .chip-critical{
-      background:rgba(127,29,29,.25);
-      border-color:#b91c1c;
-    }
-    .chip-high{
-      background:rgba(180,83,9,.18);
-      border-color:#f97316;
-    }
-    .chip-medium{
-      background:rgba(30,64,175,.18);
-      border-color:#3b82f6;
-    }
-    .chip-low{
-      background:rgba(21,128,61,.18);
-      border-color:#22c55e;
-    }
-
-    .btn-task{
-      padding:6px 10px;
-      font-size:12px;
-    }
-
-  </style>
+<link rel="stylesheet" href="styles.css">
 </head>
 <body class="min-h-screen">
   <div class="mx-auto max-w-6xl p-4 sm:p-6">
@@ -219,49 +98,55 @@ function renderArchive(){
   // sort by due date (nulls at end)
   hidden.sort((a,b) => (a.dueDateISO||'').localeCompare(b.dueDateISO||''));
 
-  hidden.forEach(t=>{
-    const imp = t.importance || 'Medium';
-    const impKey = (imp || '').toLowerCase();
+  const today = new Date();
+  today.setHours(0,0,0,0);
 
-    const isCritical = imp === 'Critical';
+  hidden.forEach(t=>{
+    const badge = {
+      Low:      'bg-transparent text-zinc-500 border border-zinc-700',
+      Medium:   'bg-teal-400/40 text-teal-950',
+      High:     'bg-[rgba(180,83,9,.18)] text-orange-400 border border-orange-500',
+      Critical: 'bg-rose-600/70 text-rose-50'
+    }[t.importance] || 'bg-zinc-300/60 text-zinc-950';
+
+    const isOverdue = t.dueDateISO && t.dueDateISO < dateKey(today);
+
+    const tags = Array.isArray(t.tags) ? t.tags : [];
+    const tagsHtml = tags.length
+      ? tags.map(tag => `<span class="tag bg-zinc-700/40">${escapeHtml(tag)}</span>`).join('')
+      : '';
 
     const div = document.createElement('div');
-    div.className = 'glass' + (isCritical ? ' critical-card' : '');
-
-    const dueLabel = t.dueDateISO
-      ? `Due ${niceDate(fromKey(t.dueDateISO))}`
-      : 'No due date';
+    div.className = 'glass' + (t.importance === 'Critical' ? ' critical-card' : '');
 
     div.innerHTML = `
-      <div class="task-row">
-        <!-- left points pill -->
-        <div class="task-row-left">
-          <div class="task-row-left-main">${(t.points || 0)}</div>
-          <div class="task-row-left-label">PTS</div>
+      <div class="flex flex-wrap sm:flex-nowrap items-center gap-3">
+        <div class="taskPoints flex flex-col items-center justify-center">
+          <div class="taskPointsNumber">${t.points || 0}</div>
+          <div class="taskPointsLabel muted">pts</div>
         </div>
 
-        <!-- middle: title + chips -->
-        <div class="task-row-body">
-          <div class="flex items-center justify-between gap-2">
-            <div class="task-row-title break-words">
-              ${escapeHtml(t.title)}
-            </div>
-          </div>
-          <div class="task-row-chips">
-            <span class="chip chip-${impKey}">${escapeHtml(imp)}</span>
-            <span class="chip">${dueLabel}</span>
+        <div class="title-wrap min-w-0 flex-1">
+          <div class="font-semibold task-title">${escapeHtml(t.title)}</div>
+
+          <div class="flex gap-2 text-xs mt-1 flex-wrap">
+            <span class="tag ${badge}">${escapeHtml(t.importance || 'Medium')}</span>
+
+            ${t.dueDateISO
+              ? `<span class="tag ${isOverdue ? 'bg-rose-600/70 text-rose-50' : 'bg-zinc-700/40'}">${niceDate(fromKey(t.dueDateISO))}</span>`
+              : ''}
+
+            ${tagsHtml}
           </div>
         </div>
 
-        <!-- right: buttons -->
-        <div class="flex items-center gap-2 ml-auto flex-wrap justify-end">
+        <div class="flex gap-2 flex-wrap justify-end ml-auto">
           <button class="btn btn-ghost btn-task" onclick="unarchiveTask('${t.id}')">Un-Archive</button>
           <button class="btn btn-ghost btn-task" onclick="wontDo('${t.id}')">Won’t do</button>
-          <button class="btn btn-success btn-task" onclick="completeTask('${t.id}')">Done</button>
+          <button class="btn btn-success btn-task btn-check" onclick="completeTask('${t.id}')" aria-label="Done">✓</button>
         </div>
       </div>
     `;
-
 
     listEl.appendChild(div);
   });
