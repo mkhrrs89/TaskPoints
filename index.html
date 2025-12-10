@@ -1929,9 +1929,9 @@ function renderFlexActions(){
           <div class="text-xs text-zinc-400">${f.points || 0} pts/use</div>
         </div>
         <div class="flex gap-2 flex-wrap">
-          <button class="btn btn-success btn-task" data-act="flex-do" data-id="${f.id}">Did it</button>
           <button class="btn btn-ghost btn-task" data-act="flex-edit" data-id="${f.id}">Edit</button>
           <button class="btn btn-delete btn-task" data-act="flex-del" data-id="${f.id}">Delete</button>
+          <button class="btn btn-success btn-task btn-check" data-act="flex-do" data-id="${f.id}" aria-label="Done">✓</button>
         </div>
       `;
       list.appendChild(row);
