@@ -237,6 +237,10 @@
 
 /* Vices: incomplete / failed days – match "critical" task tint */
 .viceDay.off{
+  background: transparent;
+}
+
+.viceDay.off.past{
   background: linear-gradient(
     180deg,
     rgba(60, 20, 20, 0.20),
