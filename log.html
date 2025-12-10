@@ -36,9 +36,9 @@
   display:grid;
 
   /* Date | Title | Points | Source | Actions | ID */
-  grid-template-columns:140px 1fr 65px 100px 115px 130px;
+  grid-template-columns:160px 1fr 65px 100px 115px 130px;
 
-  gap:.1rem;
+  gap:.35rem;
   align-items:center;
 
   padding:0;              /* no extra vertical padding */
@@ -49,6 +49,7 @@
 /* Don’t let the date wrap to a second line */
 .row > div:first-child {
   white-space: nowrap;
+  padding-right: 12px;
 }
 
 
