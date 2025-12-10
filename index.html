@@ -1390,6 +1390,8 @@ function renderVices(){
   const empty = $('vicesEmpty');
   wrap.innerHTML = '';
   const days = weekDays(new Date());
+  const today = new Date();
+  today.setHours(0,0,0,0);
 
   // Only VICES, non-retired
   const habits = state.habits
@@ -1422,7 +1424,11 @@ function renderVices(){
 
     const daysHtml = days.map(d => {
       const on = h.doneKeys.includes(d.key);
-      return `<div class="habitDay viceDay ${on ? 'on' : 'off'}" data-habit="${h.id}" data-day="${d.key}">
+      const dayDate = new Date(d.date.getTime());
+      dayDate.setHours(0,0,0,0);
+      const isPast = dayDate < today;
+      const statusClass = on ? 'on' : `off${isPast ? ' past' : ''}`;
+      return `<div class="habitDay viceDay ${statusClass}" data-habit="${h.id}" data-day="${d.key}">
 
         ${d.date.getDate()}
       </div>`;
