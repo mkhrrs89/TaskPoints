@@ -303,18 +303,17 @@ function completeTask(id){
     source: "task"
   });
 
-function unarchiveTask(id){
-  const st = load();
-  const t = st.tasks.find(x => x.id === id);
-  if(!t) return;
-
-  t.hidden = false;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(st));
   state = st;
   renderArchive();
 }
 
+function unarchiveTask(id){
+  const st = load();
+  const t = st.tasks.find(x => x.id === id);
+  if (!t) return;
 
+  t.hidden = false;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(st));
   state = st;
   renderArchive();
