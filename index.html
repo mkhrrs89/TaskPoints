@@ -145,8 +145,30 @@
         </div>
       </div>
 
-      <!-- Empty placeholder card (right) -->
-      <div class="glass"></div>
+      <!-- Today's Matchup card (right) -->
+      <div class="glass" id="matchupCard">
+        <div class="font-semibold text-sm muted mb-1">Today’s Matchup</div>
+
+        <div id="matchupEmpty" class="text-[11px] muted">
+          No matchup for today yet. Simulate games in the Game tab.
+        </div>
+
+        <div id="matchupDetails" class="hidden space-y-2">
+          <div class="text-lg font-semibold" id="matchupOpponent">—</div>
+
+          <div>
+            <div class="text-[11px] muted">Opponent Score</div>
+            <div class="text-3xl font-extrabold leading-tight" id="matchupOpponentScore">—</div>
+          </div>
+
+          <div class="flex items-center justify-between text-xs text-slate-400">
+            <span>Your score</span>
+            <span class="font-semibold text-slate-100" id="matchupYourScore">—</span>
+          </div>
+
+          <div id="matchupDiff" class="text-sm font-semibold">—</div>
+        </div>
+      </div>
 
 
 
@@ -582,6 +604,17 @@ function load() {
   }
 }
 
+function getPlayerNameById(id) {
+  if (!id) return 'Unknown opponent';
+  if (id === 'YOU') return 'You';
+
+  const players = Array.isArray(state.players) ? state.players : [];
+  const match = players.find(p => p && p.id === id);
+  if (match && match.name) return match.name;
+
+  return 'Opponent';
+}
+
 
 function save(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
 
@@ -612,7 +645,9 @@ function resetAll(){
     completions:  [],
     players:      [],
     habits:       [],
-    flexActions:  []
+    flexActions:  [],
+    gameHistory:  [],
+    matchups:     []
   };
 
   // Re-render everything so the page doesn't look broken
@@ -946,6 +981,8 @@ function renderStats(){
     todayPointsEl.textContent = todayPoints.toLocaleString();
   }
 
+  renderTodaysMatchup(todayK, todayPoints);
+
   // Today's breakdown bar – wrapped in try/catch so it can't kill stats
   try {
     updateTodayBreakdown(state.completions || [], todayK);
@@ -1019,6 +1056,60 @@ function renderStats(){
       }
     });
   });
+
+
+function renderTodaysMatchup(todayKeyStr, yourScore){
+  const detailsEl = $('matchupDetails');
+  const emptyEl   = $('matchupEmpty');
+  const oppNameEl = $('matchupOpponent');
+  const oppScoreEl= $('matchupOpponentScore');
+  const yourScoreEl = $('matchupYourScore');
+  const diffEl    = $('matchupDiff');
+
+  if (!detailsEl || !emptyEl || !oppNameEl || !oppScoreEl || !yourScoreEl || !diffEl) return;
+
+  const matchups = Array.isArray(state.matchups) ? state.matchups : [];
+  const matchup = matchups.find(m => m && m.date === todayKeyStr && (m.playerAId === 'YOU' || m.playerBId === 'YOU'));
+
+  if (!matchup) {
+    detailsEl.classList.add('hidden');
+    emptyEl.classList.remove('hidden');
+    emptyEl.textContent = 'No matchup for today yet. Simulate games in the Game tab.';
+    return;
+  }
+
+  const youAreA = matchup.playerAId === 'YOU';
+  const oppId = youAreA ? matchup.playerBId : matchup.playerAId;
+  const oppScoreRaw = youAreA ? matchup.scoreB : matchup.scoreA;
+  const yourScoreSaved = youAreA ? matchup.scoreA : matchup.scoreB;
+
+  const oppScoreNum = Number(oppScoreRaw);
+  const safeOppScore = Number.isFinite(oppScoreNum) ? oppScoreNum : 0;
+  const safeYourScore = Number.isFinite(yourScore)
+    ? yourScore
+    : (Number.isFinite(yourScoreSaved) ? yourScoreSaved : 0);
+
+  oppNameEl.textContent = getPlayerNameById(oppId);
+  oppScoreEl.textContent = safeOppScore.toFixed(1);
+  yourScoreEl.textContent = safeYourScore.toFixed(1);
+
+  diffEl.className = 'text-sm font-semibold';
+  const diff = Number((safeYourScore - safeOppScore).toFixed(1));
+
+  if (diff > 0) {
+    diffEl.textContent = `Winning by ${diff.toFixed(1)} pts`;
+    diffEl.classList.add('text-teal-200');
+  } else if (diff < 0) {
+    diffEl.textContent = `Losing by ${Math.abs(diff).toFixed(1)} pts`;
+    diffEl.classList.add('text-orange-300');
+  } else {
+    diffEl.textContent = 'Tied right now';
+    diffEl.classList.add('text-amber-200');
+  }
+
+  emptyEl.classList.add('hidden');
+  detailsEl.classList.remove('hidden');
+}
 
 function updateTodayBreakdown(completions, todayKey){
   const bar       = $('todayBreakdownBar');
@@ -2765,7 +2856,8 @@ function importFile(ev){
         players:     Array.isArray(root.players)     ? root.players     : [],
         habits:      Array.isArray(root.habits)      ? root.habits      : [],
         flexActions: Array.isArray(root.flexActions) ? root.flexActions : [],
-        gameHistory: Array.isArray(root.gameHistory) ? root.gameHistory : []
+        gameHistory: Array.isArray(root.gameHistory) ? root.gameHistory : [],
+        matchups:    Array.isArray(root.matchups)    ? root.matchups    : []
       };
 
       editingTaskId = null;
@@ -2821,7 +2913,8 @@ function importPaste(){
       players:     Array.isArray(root.players)     ? root.players     : [],
       habits:      Array.isArray(root.habits)      ? root.habits      : [],
       flexActions: Array.isArray(root.flexActions) ? root.flexActions : [],
-      gameHistory: Array.isArray(root.gameHistory) ? root.gameHistory : []
+      gameHistory: Array.isArray(root.gameHistory) ? root.gameHistory : [],
+      matchups:    Array.isArray(root.matchups)    ? root.matchups    : []
     };
 
     editingTaskId = null;
