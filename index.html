@@ -153,9 +153,9 @@
           No matchup for today yet. Simulate games in the Game tab.
         </div>
 
-        <div id="matchupDetails" class="hidden space-y-1.5">
-          <div class="flex items-start gap-2.5">
-            <div class="flex-1 space-y-1.5">
+        <div id="matchupDetails" class="hidden space-y-1">
+          <div class="flex items-start gap-3">
+            <div class="flex-1 space-y-1">
               <div class="text-lg font-semibold" id="matchupOpponent">—</div>
 
               <div>
@@ -164,13 +164,16 @@
               </div>
             </div>
 
-            <div class="w-20 aspect-[3/4] overflow-hidden border border-slate-700/70 bg-slate-900/60 flex-shrink-0 grid place-items-center" aria-hidden="true">
-              <div id="matchupOpponentPhotoFallback" class="text-xs text-slate-500">No photo</div>
-              <img id="matchupOpponentPhoto" src="" alt="Opponent photo" class="hidden w-full h-full object-cover"/>
+            <div class="flex flex-col items-center gap-1 w-20 flex-shrink-0 self-start -mt-1">
+              <div class="w-full aspect-[3/4] overflow-hidden border border-slate-700/70 bg-slate-900/60 grid place-items-center">
+                <div id="matchupOpponentPhotoFallback" class="text-xs text-slate-500">No photo</div>
+                <img id="matchupOpponentPhoto" src="" alt="Opponent photo" class="hidden w-full h-full object-cover"/>
+              </div>
+              <div id="matchupOpponentRecord" class="text-[11px] text-slate-400 leading-tight">Record: —</div>
             </div>
           </div>
 
-          <div class="flex items-center gap-2 text-xs text-slate-400">
+          <div class="flex items-center gap-1.5 text-xs text-slate-400">
             <span>Your score</span>
             <span class="text-lg font-semibold text-slate-100" id="matchupYourScore">—</span>
           </div>
@@ -631,6 +634,35 @@ function getPlayerById(id) {
   return players.find(p => p && p.id === id) || null;
 }
 
+function getPlayerRecordText(playerId) {
+  if (!playerId || playerId === 'YOU') return '0-0';
+
+  const player = getPlayerById(playerId);
+  const baseline = player && typeof player.baseline === 'number'
+    ? player.baseline
+    : null;
+
+  const history = Array.isArray(state.gameHistory) ? state.gameHistory : [];
+
+  let wins = 0;
+  let losses = 0;
+  let games = 0;
+
+  for (const g of history) {
+    if (!g || g.playerId !== playerId) continue;
+
+    games++;
+    const score = typeof g.score === 'number' ? g.score : Number(g.score) || 0;
+
+    if (baseline != null) {
+      if (score >= baseline) wins++;
+      else losses++;
+    }
+  }
+
+  return games ? `${wins}-${losses}` : '0-0';
+}
+
 
 function save(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
 
@@ -1083,8 +1115,9 @@ function renderTodaysMatchup(todayKeyStr, yourScore){
   const diffEl    = $('matchupDiff');
   const oppPhotoEl = $('matchupOpponentPhoto');
   const oppPhotoFallbackEl = $('matchupOpponentPhotoFallback');
+  const oppRecordEl = $('matchupOpponentRecord');
 
-  if (!detailsEl || !emptyEl || !oppNameEl || !oppScoreEl || !yourScoreEl || !diffEl || !oppPhotoEl || !oppPhotoFallbackEl) return;
+  if (!detailsEl || !emptyEl || !oppNameEl || !oppScoreEl || !yourScoreEl || !diffEl || !oppPhotoEl || !oppPhotoFallbackEl || !oppRecordEl) return;
 
   const matchups = Array.isArray(state.matchups) ? state.matchups : [];
   const matchup = matchups.find(m => m && m.date === todayKeyStr && (m.playerAId === 'YOU' || m.playerBId === 'YOU'));
@@ -1113,6 +1146,7 @@ function renderTodaysMatchup(todayKeyStr, yourScore){
   oppNameEl.textContent = oppName;
   oppScoreEl.textContent = safeOppScore.toFixed(1);
   yourScoreEl.textContent = safeYourScore.toFixed(1);
+  oppRecordEl.textContent = `Record: ${getPlayerRecordText(oppId)}`;
 
   if (oppPlayer && oppPlayer.imageData) {
     oppPhotoEl.src = oppPlayer.imageData;
