@@ -243,7 +243,7 @@
     rgba(40, 15, 15, 0.15)
   );
   border-color: #3a1a1a;
-  color: #e5c7c7; /* soft, slightly muted text */
+  color: #ffffff;
 }
 
 
@@ -563,4 +563,5 @@
     width: 3.5rem; /* slightly narrower than default */
   }
 }
+
 
