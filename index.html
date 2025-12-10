@@ -1725,7 +1725,7 @@ function renderFlexActions(){
 
   items.forEach(f => {
     const row = document.createElement('div');
-    row.className = 'flex items-center justify-between gap-2';
+    row.className = 'glass flex flex-col sm:flex-row sm:items-start justify-between gap-3';
 
     if (editingFlexId === f.id) {
       // 🔧 EDIT MODE
