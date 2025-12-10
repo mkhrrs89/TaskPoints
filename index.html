@@ -228,22 +228,24 @@
     <div class="flex items-start justify-between gap-6 flex-wrap">
       <!-- LEFT: Big stat + input -->
       <div class="flex-1 min-w-[220px]">
-        <h2 id="sleepAnchor" class="font-bold text-lg mb-2">Sleep Score</h2>
-        <div class="mb-2">
-          <div class="muted text-xs">Today’s Sleep</div>
-          <div id="sleepTodayValue" class="text-4xl font-extrabold leading-tight">—</div>
-          <div id="sleepTodayImpact" class="muted text-xs mt-1">Adds 0 pts to today</div>
+        <div class="sleep-today-card">
+          <h2 id="sleepAnchor" class="font-bold text-lg mb-2">Sleep Score</h2>
+          <div class="mb-2">
+            <div class="muted text-xs">Today’s Sleep</div>
+            <div id="sleepTodayValue" class="text-4xl font-extrabold leading-tight">—</div>
+            <div id="sleepTodayImpact" class="muted text-xs mt-1">Adds 0 pts to today</div>
+          </div>
+
+          <div class="flex items-center gap-3 flex-wrap mt-3">
+            <input id="sleepScoreInput" class="input w-24" type="number" placeholder="0–100">
+            <button id="saveSleepScoreBtn" class="btn btn-plum">Add</button>
+          </div>
+
+          <p class="muted text-xs mt-2">
+            Score ÷ 10 plus a bonus is added to today's points:
+            +1 pt for 95–97, +2 pts for 98–99, +3 pts for 100.
+          </p>
         </div>
-<div class="flex items-center gap-3 flex-wrap mt-3">
-  <input id="sleepScoreInput" class="input w-24" type="number" placeholder="0–100">
-  <button id="saveSleepScoreBtn" class="btn btn-plum">Add</button>
-</div>
-
-
-        <p class="muted text-xs mt-2">
-  Score ÷ 10 plus a bonus is added to today's points:
-  +1 pt for 95–97, +2 pts for 98–99, +3 pts for 100.
-</p>
       </div>
 
       <!-- RIGHT: History chips -->

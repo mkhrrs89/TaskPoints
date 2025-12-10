@@ -520,6 +520,13 @@
   line-height:1;
 }
 
+.sleep-today-card{
+  background: linear-gradient(180deg, #2F2B78, #1B1947);
+  border-radius:16px;
+  padding:16px;
+  color:#fff;
+}
+
 .cal-chip{
   background: linear-gradient(180deg, #0f4d4d, #0a2f2f); /* same as your teal buttons */
   color:#fff;
