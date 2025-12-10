@@ -1103,10 +1103,14 @@ if (p.isYou) {
 
   // 🔹 VIEW MODE for YOU – matches other cards
   card.innerHTML = `
-<div class="flex flex-col md:flex-row gap-3 w-full">
-  <!-- LEFT: photo + name + edit -->
-  <div class="md:w-44 flex flex-col">
-    <div class="w-full aspect-[3/4] player-img-frame">
+<div class="flex flex-col gap-3 w-full">
+  <div class="flex items-start justify-between gap-3">
+    <h3 class="font-semibold text-base md:text-lg break-words">You</h3>
+    <div class="text-sm opacity-80"><b>${p.todayPoints}</b> pts today</div>
+  </div>
+
+  <div class="flex flex-col md:flex-row items-end gap-3">
+    <div class="w-full md:w-44 aspect-[3/4] player-img-frame">
       <div class="player-img-inner w-full h-full">
         ${
           p.imageData
@@ -1119,29 +1123,17 @@ if (p.isYou) {
       </div>
     </div>
 
-    <!-- Name + today + Edit stay under photo -->
-    <div class="mt-2 flex flex-wrap items-center justify-between gap-2">
-      <h3 class="font-semibold text-base md:text-lg break-words">
-        You
-      </h3>
-      <div class="flex gap-2 flex-wrap items-center">
-        <div class="text-sm opacity-80">
-          <b>${p.todayPoints}</b> pts today
-        </div>
-        <button data-act="edit" data-id="YOU"
-          class="rounded-xl border px-3 py-1.5 text-sm">
-          Edit
-        </button>
-      </div>
+    <div class="flex w-full md:w-auto justify-end md:justify-start">
+      <button data-act="edit" data-id="YOU"
+        class="rounded-xl border px-3 py-1.5 text-sm">
+        Edit
+      </button>
     </div>
   </div>
 
-  <!-- RIGHT: stats (moves to the side on desktop) -->
-  <div class="flex-1 mt-2 md:mt-0">
-    <div class="text-xs opacity-80 leading-[1.0] space-y-[2px]">
-      <p>Record: ${youStats.record}</p>
-      <p>AVG PPD: ${youStats.avgPPD.toFixed(1)}</p>
-    </div>
+  <div class="text-xs opacity-80 leading-[1.0] space-y-[2px]">
+    <p>Record: ${youStats.record}</p>
+    <p>AVG PPD: ${youStats.avgPPD.toFixed(1)}</p>
   </div>
 </div>
   `;
@@ -1318,10 +1310,13 @@ if (p.isYou) {
       const recordText = games ? `${wins}-${losses}` : "0-0";
 
       card.innerHTML = `
-<div class="flex flex-col md:flex-row gap-3 w-full">
-  <!-- LEFT: photo + name + Edit -->
-  <div class="md:w-44 flex flex-col">
-    <div class="w-full aspect-[3/4] player-img-frame">
+<div class="flex flex-col gap-3 w-full">
+  <div class="flex items-start justify-between gap-3">
+    <h3 class="font-semibold text-base md:text-lg break-words">${escapeHtml(p.name)}</h3>
+  </div>
+
+  <div class="flex flex-col md:flex-row items-end gap-3">
+    <div class="w-full md:w-44 aspect-[3/4] player-img-frame">
       <div class="player-img-inner w-full h-full">
         ${
           p.imageData
@@ -1334,53 +1329,44 @@ if (p.isYou) {
       </div>
     </div>
 
-    <!-- Name + Edit (and mobile remove/delete) stay under photo -->
-    <div class="mt-2 flex flex-wrap items-center justify-between gap-2">
-      <h3 class="font-semibold text-base md:text-lg break-words">
-        ${escapeHtml(p.name)}
-      </h3>
-      <div class="flex gap-2 flex-wrap">
-        <button data-act="edit" data-id="${p.id}"
-          class="rounded-xl border px-3 py-1.5 text-sm">
-          Edit
-        </button>
-        ${
-          p.imageData
-            ? `<button data-act="clear-photo" data-id="${p.id}"
-                 class="rounded-xl border px-3 py-1.5 text-sm md:hidden">
-                 Remove photo
-               </button>`
-            : ``
-        }
-        <button data-act="delete" data-id="${p.id}"
-          class="rounded-xl border px-3 py-1.5 text-sm md:hidden">
-          Delete
-        </button>
-      </div>
+    <div class="flex w-full md:w-auto justify-end md:justify-start gap-2 flex-wrap md:flex-col md:items-end">
+      <button data-act="edit" data-id="${p.id}"
+        class="rounded-xl border px-3 py-1.5 text-sm">
+        Edit
+      </button>
+      ${
+        p.imageData
+          ? `<button data-act="clear-photo" data-id="${p.id}"
+               class="rounded-xl border px-3 py-1.5 text-sm md:hidden">
+               Remove photo
+             </button>`
+          : ``
+      }
+      <button data-act="delete" data-id="${p.id}"
+        class="rounded-xl border px-3 py-1.5 text-sm md:hidden">
+        Delete
+      </button>
     </div>
   </div>
 
-  <!-- RIGHT: notes + stats (shift to side on desktop) -->
-  <div class="flex-1 mt-2 md:mt-0">
-    ${
-      p.notes
-        ? `<p class="text-sm whitespace-pre-wrap mb-2">${escapeHtml(p.notes)}</p>`
-        : `<p class="text-xs opacity-60 italic mb-2">No notes yet.</p>`
-    }
+  ${
+    p.notes
+      ? `<p class="text-sm whitespace-pre-wrap">${escapeHtml(p.notes)}</p>`
+      : `<p class="text-xs opacity-60 italic">No notes yet.</p>`
+  }
 
-    <div class="text-xs opacity-80 leading-[1.0] space-y-[2px]">
-      <p>Record: ${recordText}</p>
-      <p>AVG PPD: ${avgPpd}</p>
-      <p>Baseline: ${p.baseline ?? "—"}</p>
-      <p>Variance: ${p.variance ?? "—"}</p>
-      <p>Momentum: ${p.momentum ?? "—"}</p>
-      <p>Risky: ${
-        typeof p.risky === "number"
-          ? (p.risky <= 10 ? p.risky.toFixed(1) : (p.risky / 10).toFixed(1))
-          : "—"
-      }</p>
-      <p>Style: ${escapeHtml(p.style || "—")}</p>
-    </div>
+  <div class="text-xs opacity-80 leading-[1.0] space-y-[2px]">
+    <p>Record: ${recordText}</p>
+    <p>AVG PPD: ${avgPpd}</p>
+    <p>Baseline: ${p.baseline ?? "—"}</p>
+    <p>Variance: ${p.variance ?? "—"}</p>
+    <p>Momentum: ${p.momentum ?? "—"}</p>
+    <p>Risky: ${
+      typeof p.risky === "number"
+        ? (p.risky <= 10 ? p.risky.toFixed(1) : (p.risky / 10).toFixed(1))
+        : "—"
+    }</p>
+    <p>Style: ${escapeHtml(p.style || "—")}</p>
   </div>
 </div>
       `;
