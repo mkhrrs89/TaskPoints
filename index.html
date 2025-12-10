@@ -228,22 +228,24 @@
     <div class="flex items-start justify-between gap-6 flex-wrap">
       <!-- LEFT: Big stat + input -->
       <div class="flex-1 min-w-[220px]">
-        <h2 id="sleepAnchor" class="font-bold text-lg mb-2">Sleep Score</h2>
-        <div class="mb-2">
-          <div class="muted text-xs">Today’s Sleep</div>
-          <div id="sleepTodayValue" class="text-4xl font-extrabold leading-tight">—</div>
-          <div id="sleepTodayImpact" class="muted text-xs mt-1">Adds 0 pts to today</div>
+        <div class="sleep-today-card">
+          <h2 id="sleepAnchor" class="font-bold text-lg mb-2">Sleep Score</h2>
+          <div class="mb-2">
+            <div class="muted text-xs">Today’s Sleep</div>
+            <div id="sleepTodayValue" class="text-4xl font-extrabold leading-tight">—</div>
+            <div id="sleepTodayImpact" class="muted text-xs mt-1">Adds 0 pts to today</div>
+          </div>
+
+          <div class="flex items-center gap-3 flex-wrap mt-3">
+            <input id="sleepScoreInput" class="input w-24" type="number" placeholder="0–100">
+            <button id="saveSleepScoreBtn" class="btn btn-plum">Add</button>
+          </div>
+
+          <p class="muted text-xs mt-2">
+            Score ÷ 10 plus a bonus is added to today's points:
+            +1 pt for 95–97, +2 pts for 98–99, +3 pts for 100.
+          </p>
         </div>
-<div class="flex items-center gap-3 flex-wrap mt-3">
-  <input id="sleepScoreInput" class="input w-24" type="number" placeholder="0–100">
-  <button id="saveSleepScoreBtn" class="btn btn-plum">Add</button>
-</div>
-
-
-        <p class="muted text-xs mt-2">
-  Score ÷ 10 plus a bonus is added to today's points:
-  +1 pt for 95–97, +2 pts for 98–99, +3 pts for 100.
-</p>
       </div>
 
       <!-- RIGHT: History chips -->
@@ -261,21 +263,24 @@
     <div class="flex items-start justify-between gap-6 flex-wrap">
       <!-- LEFT: Big stat + input -->
       <div class="flex-1 min-w-[220px]">
-        <h2 class="font-bold text-lg mb-2">Calories</h2>
-        <div class="mb-2">
-          <div class="muted text-xs">Today’s Calories</div>
-          <div id="caloriesTodayValue" class="text-4xl font-extrabold leading-tight">—</div>
-          <div id="caloriesTodayImpact" class="muted text-xs mt-1">Adds 0 pts to today</div>
-        </div>
-<div class="flex items-center gap-3 flex-wrap mt-3">
-  <input id="caloriesInput" class="input w-24" type="number" placeholder="0–3000">
-  <input id="caloriesDate" class="input w-32" type="date">
-  <button id="saveCaloriesBtn" class="btn btn-teal">Add</button>
-</div>
+        <div class="calories-today-card">
+          <h2 class="font-bold text-lg mb-2">Calories</h2>
+          <div class="mb-2">
+            <div class="muted text-xs">Today’s Calories</div>
+            <div id="caloriesTodayValue" class="text-4xl font-extrabold leading-tight">—</div>
+            <div id="caloriesTodayImpact" class="muted text-xs mt-1">Adds 0 pts to today</div>
+          </div>
 
-        <p class="muted text-xs mt-2">
-          (2400 − calories) ÷ 100, capped between 0 and 10 pts, rounded to the nearest tenth.
-        </p>
+          <div class="flex items-center gap-3 flex-wrap mt-3">
+            <input id="caloriesInput" class="input w-24" type="number" placeholder="0–3000">
+            <input id="caloriesDate" class="input w-32" type="date">
+            <button id="saveCaloriesBtn" class="btn btn-teal">Add</button>
+          </div>
+
+          <p class="muted text-xs mt-2">
+            (2400 − calories) ÷ 100, capped between 0 and 10 pts, rounded to the nearest tenth.
+          </p>
+        </div>
       </div>
 
       <!-- RIGHT: History chips -->
@@ -298,22 +303,24 @@
 
       <!-- LEFT SIDE: big stat + input -->
       <div class="flex-1 min-w-[220px]">
-        <h2 id="workAnchor" class="font-bold text-lg mb-2">Work Score</h2>
+        <div class="work-today-card">
+          <h2 id="workAnchor" class="font-bold text-lg mb-2">Work Score</h2>
 
-        <div class="mb-2">
-          <div class="muted text-xs">Today’s Work</div>
-          <div id="workTodayValue" class="text-4xl font-extrabold leading-tight">—</div>
-          <div id="workTodayImpact" class="muted text-xs mt-1">Adds 0 pts to today</div>
+          <div class="mb-2">
+            <div class="muted text-xs">Today’s Work</div>
+            <div id="workTodayValue" class="text-4xl font-extrabold leading-tight">—</div>
+            <div id="workTodayImpact" class="muted text-xs mt-1">Adds 0 pts to today</div>
+          </div>
+
+          <div class="flex items-center gap-3 flex-wrap mt-3">
+            <input id="workScoreInput" class="input w-24" type="number" placeholder="0–100">
+            <button id="saveWorkScoreBtn" class="btn btn-work">Add</button>
+          </div>
+
+          <p class="muted text-xs mt-2">
+            Work Score is added directly as points. (5 → +5 pts)
+          </p>
         </div>
-
-        <div class="flex items-center gap-3 flex-wrap mt-3">
-          <input id="workScoreInput" class="input w-24" type="number" placeholder="0–100">
-          <button id="saveWorkScoreBtn" class="btn btn-work">Add</button>
-        </div>
-
-        <p class="muted text-xs mt-2">
-          Work Score is added directly as points. (5 → +5 pts)
-        </p>
       </div>
 
       <!-- RIGHT SIDE: history chips -->
