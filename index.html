@@ -168,19 +168,12 @@
           <div class="flex items-start gap-3">
             <div class="flex-1 space-y-1">
               <div class="text-lg font-semibold" id="matchupOpponent">—</div>
+              <div id="matchupOpponentRecord" class="text-[11px] text-slate-400 leading-tight">Record: —</div>
 
               <div>
                 <div class="text-[11px] muted">Opponent Score</div>
                 <div class="text-3xl font-extrabold leading-tight" id="matchupOpponentScore">—</div>
               </div>
-            </div>
-
-            <div class="flex flex-col items-center gap-1 w-20 max-sm:w-28 flex-shrink-0 self-start -mt-6">
-              <div class="w-full aspect-[3/4] overflow-hidden border border-slate-700/70 bg-slate-900/60 grid place-items-center">
-                <div id="matchupOpponentPhotoFallback" class="text-xs text-slate-500">No photo</div>
-                <img id="matchupOpponentPhoto" src="" alt="Opponent photo" class="hidden w-full h-full object-cover"/>
-              </div>
-              <div id="matchupOpponentRecord" class="text-[11px] text-slate-400 leading-tight">Record: —</div>
             </div>
           </div>
 
@@ -1139,11 +1132,9 @@ function renderTodaysMatchup(todayKeyStr, yourScore){
   const oppScoreEl= $('matchupOpponentScore');
   const yourScoreEl = $('matchupYourScore');
   const diffEl    = $('matchupDiff');
-  const oppPhotoEl = $('matchupOpponentPhoto');
-  const oppPhotoFallbackEl = $('matchupOpponentPhotoFallback');
   const oppRecordEl = $('matchupOpponentRecord');
 
-  if (!detailsEl || !emptyEl || !oppNameEl || !oppScoreEl || !yourScoreEl || !diffEl || !oppPhotoEl || !oppPhotoFallbackEl || !oppRecordEl) return;
+  if (!detailsEl || !emptyEl || !oppNameEl || !oppScoreEl || !yourScoreEl || !diffEl || !oppRecordEl) return;
 
   const matchups = Array.isArray(state.matchups) ? state.matchups : [];
   const matchup = matchups.find(m => m && m.date === todayKeyStr && (m.playerAId === 'YOU' || m.playerBId === 'YOU'));
@@ -1160,8 +1151,6 @@ function renderTodaysMatchup(todayKeyStr, yourScore){
   const oppScoreRaw = youAreA ? matchup.scoreB : matchup.scoreA;
   const yourScoreSaved = youAreA ? matchup.scoreA : matchup.scoreB;
 
-  const oppPlayer = getPlayerById(oppId);
-
   const oppScoreNum = Number(oppScoreRaw);
   const safeOppScore = Number.isFinite(oppScoreNum) ? oppScoreNum : 0;
   const safeYourScore = Number.isFinite(yourScore)
@@ -1173,18 +1162,6 @@ function renderTodaysMatchup(todayKeyStr, yourScore){
   oppScoreEl.textContent = safeOppScore.toFixed(1);
   yourScoreEl.textContent = safeYourScore.toFixed(1);
   oppRecordEl.textContent = `Record: ${getPlayerRecordText(oppId)}`;
-
-  if (oppPlayer && oppPlayer.imageData) {
-    oppPhotoEl.src = oppPlayer.imageData;
-    oppPhotoEl.alt = `${oppName} photo`;
-    oppPhotoEl.classList.remove('hidden');
-    oppPhotoFallbackEl.classList.add('hidden');
-  } else {
-    oppPhotoEl.src = '';
-    oppPhotoEl.classList.add('hidden');
-    oppPhotoFallbackEl.textContent = oppName ? oppName.charAt(0).toUpperCase() : 'No photo';
-    oppPhotoFallbackEl.classList.remove('hidden');
-  }
 
   diffEl.className = 'text-sm font-semibold';
   const diff = Number((safeYourScore - safeOppScore).toFixed(1));
