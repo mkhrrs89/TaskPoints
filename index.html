@@ -282,7 +282,7 @@
                 <path d="M16 3v4M8 3v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
                 <path d="M4 9h16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
               </svg>
-              <span id="caloriesDateLabel" class="date-trigger-label">Pick date</span>
+              <span id="caloriesDateLabel" class="date-trigger-label"></span>
             </button>
             <input id="caloriesDate" class="visually-hidden-date" type="date">
             <button id="saveCaloriesBtn" class="btn btn-teal">Add</button>
@@ -2343,9 +2343,9 @@ function saveCalories(){
 
 
 function formatCaloriesDateLabel(value) {
-  if (!value) return 'Pick date';
+  if (!value) return '';
   const [y, m, d] = value.split('-').map(v => parseInt(v, 10));
-  if (!y || !m || !d) return 'Pick date';
+  if (!y || !m || !d) return '';
   return `${m}/${d}`;
 }
 
