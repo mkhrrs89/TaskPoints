@@ -1566,8 +1566,6 @@ function renderVices(){
   const empty = $('vicesEmpty');
   wrap.innerHTML = '';
   const days = weekDays(new Date());
-  const today = new Date();
-  today.setHours(0,0,0,0);
 
   // Only VICES, non-retired
   const habits = state.habits
@@ -1592,6 +1590,7 @@ function renderVices(){
 
   habits.forEach(h => {
     h.doneKeys = Array.isArray(h.doneKeys) ? h.doneKeys : [];
+    h.failedKeys = Array.isArray(h.failedKeys) ? h.failedKeys : [];
     const streak     = computeHabitStreak(h);
     const completion = computeHabitCompletion(h);
     const row = document.createElement('div');
@@ -1600,10 +1599,8 @@ function renderVices(){
 
     const daysHtml = days.map(d => {
       const on = h.doneKeys.includes(d.key);
-      const dayDate = new Date(d.date.getTime());
-      dayDate.setHours(0,0,0,0);
-      const isPast = dayDate < today;
-      const statusClass = on ? 'on' : `off${isPast ? ' past' : ''}`;
+      const failed = h.failedKeys.includes(d.key);
+      const statusClass = on ? 'on' : (failed ? 'failed' : 'off');
       return `<div class="habitDay viceDay ${statusClass}" data-habit="${h.id}" data-day="${d.key}">
 
         ${d.date.getDate()}
@@ -1853,36 +1850,73 @@ function toggleHabitDay(habitId, dayKey){
   const h = state.habits.find(x => x.id === habitId);
   if (!h || h.retired) return;
 
-  // Figure out whether this is a habit or a vice
   const category = (h.category || 'habit');   // 'habit' or 'vice'
   const source   = category === 'vice' ? 'vice' : 'habit';
 
-  h.doneKeys = Array.isArray(h.doneKeys) ? h.doneKeys : [];
-  const idx = h.doneKeys.indexOf(dayKey);
+  h.doneKeys   = Array.isArray(h.doneKeys)   ? h.doneKeys   : [];
+  h.failedKeys = Array.isArray(h.failedKeys) ? h.failedKeys : [];
 
-  if (idx === -1) {
-    // ON
-    h.doneKeys.push(dayKey);
-    const iso = new Date(fromKey(dayKey).getTime() + 12 * 3600 * 1000).toISOString();
-    addCompletion({
-      id: crypto.randomUUID(),
-      taskId: `habit:${habitId}:${dayKey}`,
-      title: `[Habit] ${h.name} (${dayKey})`,
-      points: h.pointsPerDay || 0,
-      completedAtISO: iso,
-      source,             // 'habit' or 'vice'
-      habitId: habitId,
-      dayKey: dayKey
-    });
-  } else {
-    // OFF
-    h.doneKeys.splice(idx, 1);
+  const removeCompletionForDay = () => {
     const mIdx = state.completions.findIndex(c =>
       (c.source === 'habit' || c.source === 'vice') &&
       c.habitId === habitId &&
       c.dayKey === dayKey
     );
     if (mIdx !== -1) state.completions.splice(mIdx, 1);
+  };
+
+  if (category === 'vice') {
+    const doneIdx   = h.doneKeys.indexOf(dayKey);
+    const failedIdx = h.failedKeys.indexOf(dayKey);
+
+    if (doneIdx === -1 && failedIdx === -1) {
+      // neutral → completed (award points)
+      h.doneKeys.push(dayKey);
+      const iso = new Date(fromKey(dayKey).getTime() + 12 * 3600 * 1000).toISOString();
+      addCompletion({
+        id: crypto.randomUUID(),
+        taskId: `habit:${habitId}:${dayKey}`,
+        title: `[Habit] ${h.name} (${dayKey})`,
+        points: h.pointsPerDay || 0,
+        completedAtISO: iso,
+        source,
+        habitId: habitId,
+        dayKey: dayKey
+      });
+    } else if (doneIdx !== -1) {
+      // completed → failed (remove points, mark failed)
+      h.doneKeys.splice(doneIdx, 1);
+      removeCompletionForDay();
+      if (failedIdx === -1) h.failedKeys.push(dayKey);
+    } else {
+      // failed → neutral
+      h.failedKeys.splice(failedIdx, 1);
+      removeCompletionForDay();
+    }
+  } else {
+    // Habits keep simple toggle behavior
+    const idx = h.doneKeys.indexOf(dayKey);
+    if (idx === -1) {
+      h.doneKeys.push(dayKey);
+      const iso = new Date(fromKey(dayKey).getTime() + 12 * 3600 * 1000).toISOString();
+      addCompletion({
+        id: crypto.randomUUID(),
+        taskId: `habit:${habitId}:${dayKey}`,
+        title: `[Habit] ${h.name} (${dayKey})`,
+        points: h.pointsPerDay || 0,
+        completedAtISO: iso,
+        source,
+        habitId: habitId,
+        dayKey: dayKey
+      });
+    } else {
+      h.doneKeys.splice(idx, 1);
+      removeCompletionForDay();
+    }
+
+    // If a failed marker snuck in (shouldn't happen for habits), clear it
+    const failedIdx = h.failedKeys.indexOf(dayKey);
+    if (failedIdx !== -1) h.failedKeys.splice(failedIdx, 1);
   }
 
   save();
