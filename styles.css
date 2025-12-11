@@ -209,12 +209,8 @@
 .habitDay.on {background:#3D1C0B;border-color:#fb923c;}
 .habitDay.off{background:transparent}
 
-/* Vices: incomplete / failed days – match "critical" task tint */
-.viceDay.off{
-  background: transparent;
-}
-
-.viceDay.off.past{
+/* Vices: explicit failed state */
+.viceDay.failed{
   background: linear-gradient(
     180deg,
     rgba(60, 20, 20, 0.20),

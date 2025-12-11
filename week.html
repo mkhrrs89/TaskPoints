@@ -309,13 +309,17 @@ function renderHabitSection(section, days, baseDate){
   const sorted = section.items.slice().sort((a,b)=>(b.pointsPerDay||0)-(a.pointsPerDay||0));
 
   sorted.forEach(h=>{
-    h.doneKeys = Array.isArray(h.doneKeys)?h.doneKeys:[];
+    h.doneKeys   = Array.isArray(h.doneKeys)?h.doneKeys:[];
+    h.failedKeys = Array.isArray(h.failedKeys)?h.failedKeys:[];
     const row = document.createElement('div');
     row.className = 'habitRow';
 
     const daysHtml = days.map(d=>{
       const on = h.doneKeys.includes(d.key);
-      return `<div class="habitDay ${on?'on':''}" data-habit="${h.id}" data-day="${d.key}">${d.date.getDate()}</div>`;
+      const failed = h.failedKeys.includes(d.key);
+      const status = on ? 'on' : (failed ? 'failed' : 'off');
+      const className = section.title === 'vice' ? `habitDay viceDay ${status}` : `habitDay ${status}`;
+      return `<div class="${className}" data-habit="${h.id}" data-day="${d.key}">${d.date.getDate()}</div>`;
     }).join('');
 
     row.innerHTML = `
@@ -347,30 +351,68 @@ function toggleHabitDay(habitId, dayKey, baseDate){
   const h = state.habits.find(x=>x.id===habitId);
   if (!h || h.retired) return;  // ⬅️ NEW: don’t toggle retired habits
 
-  h.doneKeys = Array.isArray(h.doneKeys) ? h.doneKeys : [];
-  const idx = h.doneKeys.indexOf(dayKey);
+  h.doneKeys   = Array.isArray(h.doneKeys) ? h.doneKeys : [];
+  h.failedKeys = Array.isArray(h.failedKeys) ? h.failedKeys : [];
 
-  if (idx === -1) {
-    // mark this day as done
-    h.doneKeys.push(dayKey);
-    const iso = new Date(fromKey(dayKey).getTime() + 12*3600*1000).toISOString();
-    state.completions.unshift({
-      id: crypto.randomUUID(),
-      taskId: `habit:${habitId}:${dayKey}`,
-      title: `[Habit] ${h.name} (${dayKey})`,
-      points: h.pointsPerDay || 0,
-      completedAtISO: iso,
-      source: 'habit',
-      habitId: habitId,
-      dayKey: dayKey
-    });
-  } else {
-    // unmark this day
-    h.doneKeys.splice(idx,1);
-    const mIdx = state.completions.findIndex(
-      c => c.source === 'habit' && c.habitId === habitId && c.dayKey === dayKey
+  const category = (h.category || 'habit');
+  const source   = category === 'vice' ? 'vice' : 'habit';
+
+  const removeCompletionForDay = () => {
+    const mIdx = state.completions.findIndex(c =>
+      (c.source === 'habit' || c.source === 'vice') &&
+      c.habitId === habitId &&
+      c.dayKey === dayKey
     );
-    if (mIdx !== -1) state.completions.splice(mIdx,1);
+    if (mIdx !== -1) state.completions.splice(mIdx, 1);
+  };
+
+  if (category === 'vice') {
+    const doneIdx   = h.doneKeys.indexOf(dayKey);
+    const failedIdx = h.failedKeys.indexOf(dayKey);
+
+    if (doneIdx === -1 && failedIdx === -1) {
+      h.doneKeys.push(dayKey);
+      const iso = new Date(fromKey(dayKey).getTime() + 12*3600*1000).toISOString();
+      state.completions.unshift({
+        id: crypto.randomUUID(),
+        taskId: `habit:${habitId}:${dayKey}`,
+        title: `[Habit] ${h.name} (${dayKey})`,
+        points: h.pointsPerDay || 0,
+        completedAtISO: iso,
+        source,
+        habitId: habitId,
+        dayKey: dayKey
+      });
+    } else if (doneIdx !== -1) {
+      h.doneKeys.splice(doneIdx,1);
+      removeCompletionForDay();
+      if (failedIdx === -1) h.failedKeys.push(dayKey);
+    } else {
+      h.failedKeys.splice(failedIdx,1);
+      removeCompletionForDay();
+    }
+  } else {
+    const idx = h.doneKeys.indexOf(dayKey);
+    if (idx === -1) {
+      h.doneKeys.push(dayKey);
+      const iso = new Date(fromKey(dayKey).getTime() + 12*3600*1000).toISOString();
+      state.completions.unshift({
+        id: crypto.randomUUID(),
+        taskId: `habit:${habitId}:${dayKey}`,
+        title: `[Habit] ${h.name} (${dayKey})`,
+        points: h.pointsPerDay || 0,
+        completedAtISO: iso,
+        source,
+        habitId: habitId,
+        dayKey: dayKey
+      });
+    } else {
+      h.doneKeys.splice(idx,1);
+      removeCompletionForDay();
+    }
+
+    const failedIdx = h.failedKeys.indexOf(dayKey);
+    if (failedIdx !== -1) h.failedKeys.splice(failedIdx,1);
   }
 
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
