@@ -211,9 +211,12 @@
 
 /* Vices: explicit failed state */
 .viceDay.failed{
-  background: #4a0b0b;
-  border-color: #4a0b0b;
-  color: #ffffff;
+  background: linear-gradient(
+    180deg,
+    rgba(60, 20, 20, 0.20),
+    rgba(40, 15, 15, 0.15)
+  ) !important;
+  border-color: #3a1a1a !important;
 }
 
 
@@ -625,5 +628,6 @@
     width: 3.5rem; /* slightly narrower than default */
   }
 }
+
 
 
