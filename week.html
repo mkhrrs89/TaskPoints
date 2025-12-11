@@ -224,6 +224,33 @@ function fromKey(k){ const [y,m,d]=k.split('-').map(n=>parseInt(n,10)); const dt
 function niceDate(d){ return d.toLocaleDateString(undefined,{month:'short',day:'numeric'}) }
 function todayKey(){ const d=new Date(); d.setHours(0,0,0,0); return dateKey(d); }
 
+// Keep weekday labels aligned with scrollable date columns
+function syncScrollContainers(a,b){
+  if(!a || !b) return;
+
+  const keyA = a.id ? `${a.id}__synced` : null;
+  const keyB = b.id ? `${b.id}__synced` : null;
+
+  if(keyA && a.dataset.syncKey === keyA && a.dataset.syncedWith === (b.id||'')) return;
+
+  let lock=false;
+  a.addEventListener('scroll',()=>{
+    if(lock) return;
+    lock=true;
+    b.scrollLeft = a.scrollLeft;
+    lock=false;
+  });
+  b.addEventListener('scroll',()=>{
+    if(lock) return;
+    lock=true;
+    a.scrollLeft = b.scrollLeft;
+    lock=false;
+  });
+
+  if(keyA){ a.dataset.syncKey = keyA; a.dataset.syncedWith = b.id||''; }
+  if(keyB){ b.dataset.syncKey = keyB; b.dataset.syncedWith = a.id||''; }
+}
+
 /* -------- Habits for arbitrary week -------- */
 function renderHabits(baseDate){
   state=load();
@@ -312,6 +339,8 @@ function renderHabitSection(section, days, baseDate){
   list.querySelectorAll('[data-habit-toggle]').forEach(btn=>{
     btn.onclick = () => toggleHabitRetired(btn.getAttribute('data-habit-toggle'), baseDate);
   });
+
+  syncScrollContainers(labelsWrap, list);
 }
 function toggleHabitDay(habitId, dayKey, baseDate){
   state = load();
