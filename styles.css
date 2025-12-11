@@ -43,32 +43,6 @@
   background: rgba(147, 197, 253, 0.55);
 }
 
-/* Work Score History chips */
-.work-chip {
-  background: rgba(147, 197, 253, 0.25);
-  border: 1px solid rgba(147, 197, 253, 0.5);
-  border-radius: 0.6rem;
-  padding: 0.4rem 0.55rem;
-  text-align: center;
-  min-width: 64px;
-}
-
-.work-chip-date {
-  font-size: 11px;
-  color: #93c5fd;
-}
-
-.work-chip-value {
-  font-size: 18px;
-  font-weight: 700;
-  color: #dbeafe;
-}
-
-.work-chip-pts {
-  font-size: 11px;
-  color: #bfdbfe;
-}
-
 
     /* Today's points breakdown bar */
     .today-breakdown-bar{
@@ -527,6 +501,22 @@
   color:#fff;
 }
 
+.calories-today-card {
+  background: linear-gradient(180deg, #0f4d4d, #0a2f2f);
+  border-radius: 16px;
+  padding: 16px;
+  color: #fff;
+  border: 1px solid rgba(15, 77, 77, 0.5);
+}
+
+.work-today-card {
+  background: linear-gradient(180deg, rgba(147, 197, 253, 0.5), rgba(59, 130, 246, 0.35));
+  border-radius: 16px;
+  padding: 16px;
+  color: #e3f2ff;
+  border: 1px solid rgba(147, 197, 253, 0.5);
+}
+
 .cal-chip{
   background: linear-gradient(180deg, #0f4d4d, #0a2f2f); /* same as your teal buttons */
   color:#fff;
@@ -560,6 +550,31 @@
   font-size: 11px;
   opacity: 0.8;
   margin-top: 2px;
+}
+
+.work-chip {
+  background: linear-gradient(180deg, rgba(147, 197, 253, 0.5), rgba(59, 130, 246, 0.35));
+  border: 1px solid rgba(147, 197, 253, 0.5);
+  border-radius: 0.6rem;
+  padding: 0.4rem 0.55rem;
+  text-align: center;
+  min-width: 64px;
+}
+
+.work-chip-date {
+  font-size: 11px;
+  color: #e3f2ff;
+}
+
+.work-chip-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: #f8fbff;
+}
+
+.work-chip-pts {
+  font-size: 11px;
+  color: #e3f2ff;
 }
 
 
