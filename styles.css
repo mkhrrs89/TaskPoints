@@ -509,6 +509,10 @@
   border: 1px solid rgba(15, 77, 77, 0.5);
 }
 
+#caloriesDate {
+  width: 7.25rem;
+}
+
 .work-today-card {
   background: linear-gradient(180deg, rgba(147, 197, 253, 0.5), rgba(59, 130, 246, 0.35));
   border-radius: 16px;
