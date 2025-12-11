@@ -75,6 +75,12 @@
 
 
     .habitRow{display:grid;grid-template-columns:1fr repeat(7,40px);gap:.65rem;align-items:center}
+    .habitScroll{overflow-x:auto;padding-bottom:8px}
+    .habitScroll .habitRow{min-width:560px}
+    @media (max-width:640px){
+      .habitRow{grid-template-columns:minmax(140px,1fr) repeat(7,minmax(32px,1fr));gap:.5rem}
+      .habitScroll .habitRow{min-width:520px}
+    }
     .habitDay{width:40px;height:38px;border-radius:10px;border:1px solid var(--border);display:grid;place-items:center;font-size:12px;cursor:pointer}
     .habitDay.on{background:#3D1C0B;border-color:#fb923c}
   </style>
@@ -116,22 +122,22 @@
     <!-- Habits -->
     <div class="glass mb-6">
       <h2 class="font-bold mb-2">Habits (week of <span id="weekLabel"></span>)</h2>
-      <div class="grid gap-2 text-sm muted mb-2" id="habitWeekLabels"></div>
-      <div id="habitsList" class="grid gap-2"></div>
+      <div class="grid gap-2 text-sm muted mb-2 habitScroll" id="habitWeekLabels"></div>
+      <div id="habitsList" class="grid gap-2 habitScroll"></div>
       <div id="habitsEmpty" class="muted text-sm">No habits yet.</div>
     </div>
 
     <div class="glass mb-6">
       <h2 class="font-bold mb-2">Vices (week of <span id="vicesWeekLabel"></span>)</h2>
-      <div class="grid gap-2 text-sm muted mb-2" id="vicesWeekLabels"></div>
-      <div id="vicesList" class="grid gap-2"></div>
+      <div class="grid gap-2 text-sm muted mb-2 habitScroll" id="vicesWeekLabels"></div>
+      <div id="vicesList" class="grid gap-2 habitScroll"></div>
       <div id="vicesEmpty" class="muted text-sm">No vices yet.</div>
     </div>
 
     <div class="glass mb-6">
       <h2 class="font-bold mb-2">Retired (week of <span id="retiredWeekLabel"></span>)</h2>
-      <div class="grid gap-2 text-sm muted mb-2" id="retiredWeekLabels"></div>
-      <div id="retiredList" class="grid gap-2"></div>
+      <div class="grid gap-2 text-sm muted mb-2 habitScroll" id="retiredWeekLabels"></div>
+      <div id="retiredList" class="grid gap-2 habitScroll"></div>
       <div id="retiredEmpty" class="muted text-sm">No retired habits or vices.</div>
     </div>
 
