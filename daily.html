@@ -10,6 +10,7 @@
 
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="styles.css">
+  <script src="toolbar.js" defer></script>
 </head>
 <body class="min-h-screen">
   <div class="mx-auto max-w-6xl p-4 sm:p-6">
@@ -21,9 +22,16 @@
         <a href="daily.html"        class="btn btn-teal btn-toolbar">Daily</a>
         <a href="log.html"          class="btn btn-teal btn-toolbar">Log</a>
         <a href="week.html"         class="btn btn-teal btn-toolbar">Week</a>
-        <a href="game.html"         class="btn btn-teal btn-toolbar">Game</a>
-        <a href="matchups.html"     class="btn btn-teal btn-toolbar">Matchups</a>
-        <a href="game_ratings.html" class="btn btn-teal btn-toolbar">Ratings</a>
+        <div class="dropdown">
+          <button type="button" class="btn btn-teal btn-toolbar dropdown-toggle" data-dropdown-toggle aria-expanded="false">
+            Game <span class="caret">▾</span>
+          </button>
+          <div class="dropdown-menu">
+            <a href="game.html"         class="btn btn-teal btn-toolbar">Game</a>
+            <a href="matchups.html"     class="btn btn-teal btn-toolbar">Matchups</a>
+            <a href="game_ratings.html" class="btn btn-teal btn-toolbar">Ratings</a>
+          </div>
+        </div>
         <a href="updates.html"      class="btn btn-teal btn-toolbar">Updates</a>
       </div>
     </header>
