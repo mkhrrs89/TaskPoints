@@ -241,10 +241,17 @@
 }
 
 /* Habits & Vices: make points, streak, Edit, Delete orange */
-.habitRow .flex.items-center.gap-2.flex-wrap.text-xs .tag,
+.habitRow .flex.items-center.gap-2.flex-wrap.text-xs .tag:not(.streak-pill),
 .habitRow .flex.items-center.gap-2.flex-wrap.text-xs button[data-act="habit-edit"],
 .habitRow .flex.items-center.gap-2.flex-wrap.text-xs button[data-act="habit-delete"]{
   color:#fb923c;
+}
+
+.habitRow .tag.streak-pill{
+  background: linear-gradient(135deg, #14b8a6, #0ea5e9);
+  color: #ecfeff;
+  border: none !important;
+  box-shadow: 0 6px 18px rgba(14, 165, 233, 0.25);
 }
 
     .habitName{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
