@@ -509,6 +509,38 @@
   border: 1px solid rgba(15, 77, 77, 0.5);
 }
 
+.date-trigger {
+  background: rgba(255, 255, 255, 0.03);
+  color: #e6edf6;
+  border: 1px solid var(--border);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  min-height: 44px;
+}
+
+.date-trigger:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.date-trigger-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.date-trigger-label {
+  font-size: 13px;
+}
+
+.visually-hidden-date {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
 .work-today-card {
   background: linear-gradient(180deg, rgba(147, 197, 253, 0.5), rgba(59, 130, 246, 0.35));
   border-radius: 16px;

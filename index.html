@@ -276,7 +276,15 @@
 
           <div class="flex items-center gap-3 flex-wrap mt-3">
             <input id="caloriesInput" class="input w-24" type="number" placeholder="0–3000">
-            <input id="caloriesDate" class="input w-32" type="date">
+            <button id="caloriesDateBtn" type="button" class="btn date-trigger" aria-label="Pick a date for this calorie entry">
+              <svg class="date-trigger-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <rect x="4" y="5" width="16" height="15" rx="2" ry="2" stroke="currentColor" stroke-width="1.5"></rect>
+                <path d="M16 3v4M8 3v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
+                <path d="M4 9h16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
+              </svg>
+              <span id="caloriesDateLabel" class="date-trigger-label">Pick date</span>
+            </button>
+            <input id="caloriesDate" class="visually-hidden-date" type="date">
             <button id="saveCaloriesBtn" class="btn btn-teal">Add</button>
           </div>
 
@@ -2334,6 +2342,37 @@ function saveCalories(){
 }
 
 
+function formatCaloriesDateLabel(value) {
+  if (!value) return 'Pick date';
+  const [y, m, d] = value.split('-').map(v => parseInt(v, 10));
+  if (!y || !m || !d) return 'Pick date';
+  return `${m}/${d}`;
+}
+
+
+function initCaloriesDatePicker() {
+  const dateBtn = $('caloriesDateBtn');
+  const dateInput = $('caloriesDate');
+  const dateLabel = $('caloriesDateLabel');
+  if (!dateBtn || !dateInput) return;
+
+  const syncLabel = () => {
+    if (dateLabel) dateLabel.textContent = formatCaloriesDateLabel(dateInput.value);
+  };
+
+  dateBtn.addEventListener('click', () => {
+    if (typeof dateInput.showPicker === 'function') {
+      dateInput.showPicker();
+    } else {
+      dateInput.click();
+    }
+  });
+
+  dateInput.addEventListener('change', syncLabel);
+  syncLabel();
+}
+
+
 function renderSleepHistory() {
   const container = $('sleepHistory');
   if (container) container.innerHTML = '';
@@ -3063,6 +3102,7 @@ $('addFlexBtn').onclick=addFlexAction;
 $('saveSleepScoreBtn').onclick = saveSleepScore;
 $('saveCaloriesBtn').onclick = saveCalories;
 $('saveWorkScoreBtn').onclick = saveWorkScore;
+initCaloriesDatePicker();
 
 
 const repeatSel = $('repeatInput');
