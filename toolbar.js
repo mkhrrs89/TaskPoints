@@ -29,11 +29,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     toggle.addEventListener('click', handleToggle);
-    toggle.addEventListener('touchstart', (event) => {
-      event.preventDefault();
-      handleToggle(event);
-    }, { passive: false });
-  });
+
 
   document.addEventListener('click', () => {
     closeAllDropdowns();
