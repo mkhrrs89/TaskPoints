@@ -3100,12 +3100,12 @@ function renderAll(){
   } catch (e) {
     console.error('renderCaloriesHistory error:', e);
   }
-}
 
-try {
-  renderWorkHistory();
-} catch (e) {
-  console.error('renderWorkHistory error', e);
+  try {
+    renderWorkHistory();
+  } catch (e) {
+    console.error('renderWorkHistory error:', e);
+  }
 }
 
 
