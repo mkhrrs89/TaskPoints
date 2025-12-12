@@ -3224,7 +3224,8 @@ renderAll();
 
 <!-- MOBILE QUICK NAV BAR -->
 <nav
-  class="fixed inset-x-0 bottom-0 z-40 md:hidden border-t border-slate-800 backdrop-blur text-slate-100 drop-shadow-sm"
+  id="mobileBottomNav"
+  class="mobile-bottom-nav-shell fixed inset-x-0 bottom-0 z-40 md:hidden border-t border-slate-800 backdrop-blur text-slate-100 drop-shadow-sm"
   style="background: linear-gradient(180deg, #0f4d4d, #0a2f2f);">
   <div class="max-w-6xl mx-auto flex justify-center py-3 pb-4 text-[11px] mobile-bottom-nav">
 
@@ -3256,6 +3257,40 @@ renderAll();
 
   </div>
 </nav>
+
+<script>
+  (() => {
+    const nav = document.getElementById('mobileBottomNav');
+    const isMobile = window.matchMedia('(max-width: 768px)');
+
+    // Only run on browsers that expose the visual viewport (mobile Safari/Chrome)
+    if (!nav || !window.visualViewport) return;
+
+    function updateNavOffset() {
+      // Skip adjustments on desktop sizes
+      if (!isMobile.matches) {
+        nav.style.transform = '';
+        return;
+      }
+
+      const vv = window.visualViewport;
+      const keyboardLift = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+
+      if (keyboardLift > 0) {
+        // Translate the bar downward by the keyboard height so it stays docked at the page bottom
+        nav.style.transform = `translateY(${keyboardLift}px)`;
+      } else {
+        nav.style.transform = '';
+      }
+    }
+
+    window.visualViewport.addEventListener('resize', updateNavOffset);
+    window.visualViewport.addEventListener('scroll', updateNavOffset);
+    window.addEventListener('orientationchange', updateNavOffset);
+
+    updateNavOffset();
+  })();
+</script>
 
 
 </body>

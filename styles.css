@@ -133,6 +133,11 @@
   text-align: center;
 }
 
+.mobile-bottom-nav-shell{
+  transition: transform 160ms ease;
+  will-change: transform;
+}
+
 .mobile-bottom-nav a + a{
   border-left: 1px solid rgba(15,23,42,0.7);
 }
