@@ -417,6 +417,23 @@
   }
 }
 
+/* MOBILE: make sure wrapped toolbar rows stay on top of page content */
+.toolbar{
+  position: relative;
+  z-index: 200;      /* lifts the whole toolbar above overlays */
+  overflow: visible; /* so dropdown menus aren’t clipped */
+}
+
+/* make the dropdown itself a top layer */
+.dropdown{
+  position: relative;
+  z-index: 300;
+}
+
+/* dropdown menu must be above everything */
+.dropdown-menu{
+  z-index: 9999;
+}
 
 
     @media (min-width:641px){
@@ -641,6 +658,7 @@
     width: 3.5rem; /* slightly narrower than default */
   }
 }
+
 
 
 
