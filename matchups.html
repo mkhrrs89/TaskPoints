@@ -77,6 +77,7 @@
           <div class="dropdown-menu">
             <a href="game.html"         class="btn btn-teal btn-toolbar">Game</a>
             <a href="matchups.html"     class="btn btn-teal btn-toolbar">Matchups</a>
+            <a href="schedule.html"     class="btn btn-teal btn-toolbar">Schedule</a>
             <a href="game_ratings.html" class="btn btn-teal btn-toolbar">Ratings</a>
           </div>
         </div>
@@ -104,7 +105,7 @@ function load() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) {
-      return { tasks:[], completions:[], players:[], habits:[], flexActions:[], gameHistory:[], matchups:[] };
+      return { tasks:[], completions:[], players:[], habits:[], flexActions:[], gameHistory:[], matchups:[], schedule:[] };
     }
 
     const p = JSON.parse(raw) || {};
@@ -116,12 +117,13 @@ function load() {
       habits:      Array.isArray(p.habits)      ? p.habits      : [],
       flexActions: Array.isArray(p.flexActions) ? p.flexActions : [],
       gameHistory: Array.isArray(p.gameHistory) ? p.gameHistory : [],
-      matchups:    Array.isArray(p.matchups)    ? p.matchups    : []
+      matchups:    Array.isArray(p.matchups)    ? p.matchups    : [],
+      schedule:    Array.isArray(p.schedule)    ? p.schedule    : []
     };
 
   } catch (e) {
     console.error("Failed to load TaskPoints state", e);
-    return { tasks:[], completions:[], players:[], habits:[], flexActions:[], gameHistory:[], matchups:[] };
+    return { tasks:[], completions:[], players:[], habits:[], flexActions:[], gameHistory:[], matchups:[], schedule:[] };
   }
 }
 

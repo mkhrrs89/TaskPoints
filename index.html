@@ -48,17 +48,18 @@
   <a href="index.html"        class="btn btn-teal btn-toolbar">Main</a>
   <a href="daily.html"        class="btn btn-teal btn-toolbar">Daily</a>
   <a href="log.html"          class="btn btn-teal btn-toolbar">Log</a>
-  <a href="week.html"         class="btn btn-teal btn-toolbar">Week</a>
-  <div class="dropdown">
-    <button type="button" class="btn btn-teal btn-toolbar dropdown-toggle" data-dropdown-toggle aria-expanded="false">
-      Game <span class="caret">▾</span>
-    </button>
-    <div class="dropdown-menu">
-      <a href="game.html"         class="btn btn-teal btn-toolbar">Game</a>
-      <a href="matchups.html"     class="btn btn-teal btn-toolbar">Matchups</a>
-      <a href="game_ratings.html" class="btn btn-teal btn-toolbar">Ratings</a>
-    </div>
-  </div>
+      <a href="week.html"         class="btn btn-teal btn-toolbar">Week</a>
+      <div class="dropdown">
+        <button type="button" class="btn btn-teal btn-toolbar dropdown-toggle" data-dropdown-toggle aria-expanded="false">
+          Game <span class="caret">▾</span>
+        </button>
+        <div class="dropdown-menu">
+          <a href="game.html"         class="btn btn-teal btn-toolbar">Game</a>
+          <a href="matchups.html"     class="btn btn-teal btn-toolbar">Matchups</a>
+          <a href="schedule.html"     class="btn btn-teal btn-toolbar">Schedule</a>
+          <a href="game_ratings.html" class="btn btn-teal btn-toolbar">Ratings</a>
+        </div>
+      </div>
   <a href="updates.html"      class="btn btn-teal btn-toolbar">Updates</a>
   <a href="archive.html" class="btn btn-teal btn-toolbar">Archive</a>
 
@@ -606,7 +607,8 @@ function load() {
         habits:       [],
         flexActions:  [],
         gameHistory:  [],
-        matchups:     []
+        matchups:     [],
+        schedule:     []
       };
     }
 
@@ -619,7 +621,8 @@ function load() {
       habits:       Array.isArray(p.habits)       ? p.habits       : [],
       flexActions:  Array.isArray(p.flexActions)  ? p.flexActions  : [],
       gameHistory:  Array.isArray(p.gameHistory)  ? p.gameHistory  : [],
-      matchups:     Array.isArray(p.matchups)     ? p.matchups     : []
+      matchups:     Array.isArray(p.matchups)     ? p.matchups     : [],
+      schedule:     Array.isArray(p.schedule)     ? p.schedule     : []
     };
   } catch (e) {
     console.error('Failed to load TaskPoints state on main page', e);
@@ -630,7 +633,8 @@ function load() {
       habits:       [],
       flexActions:  [],
       gameHistory:  [],
-      matchups:     []
+      matchups:     [],
+      schedule:     []
     };
   }
 }
@@ -714,7 +718,8 @@ function resetAll(){
     habits:       [],
     flexActions:  [],
     gameHistory:  [],
-    matchups:     []
+    matchups:     [],
+    schedule:     []
   };
 
   // Re-render everything so the page doesn't look broken

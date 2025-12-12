@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>TaskPoints — Schedule</title>
+
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="TaskPoints" />
+
+  <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='120' fill='black'/><text x='50%' y='55%' dominant-baseline='middle' text-anchor='middle' font-size='150' fill='white'>TP</text></svg>">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128'><rect width='128' height='128' rx='30' fill='black'/><text x='50%' y='55%' dominant-baseline='middle' text-anchor='middle' font-size='60' fill='white'>TP</text></svg>">
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="styles.css">
+  <script src="toolbar.js" defer></script>
+
+  <style>
+    body {
+      background:#fafafa;
+      color:#111827;
+    }
+    @media (prefers-color-scheme: dark) {
+      body {
+        background:#0a0a0a;
+        color:#fafafa;
+      }
+    }
+
+    .matchup-day {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 0.35rem;
+    }
+
+    .matchup-item {
+      background: rgba(15,23,42,0.35);
+      padding: 0.45rem 0.7rem;
+      border-radius: 0.75rem;
+      border: 1px solid rgba(15,23,42,0.7);
+      font-size: 0.9rem;
+    }
+
+    .matchup-item.you {
+      background: rgba(34,197,94,0.15);
+      border-color: rgba(34,197,94,0.55);
+    }
+  </style>
+</head>
+<body class="min-h-screen">
+  <div class="mx-auto max-w-6xl p-4 sm:p-6">
+
+    <header class="flex flex-wrap items-center justify-between gap-3 mb-4">
+      <a href="index.html" class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-2xl grid place-items-center bg-black text-white font-bold">TP</div>
+        <div>
+          <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight">TaskPoints</h1>
+          <p class="text-xs opacity-70">Game — Schedule</p>
+        </div>
+      </a>
+      <div class="flex flex-wrap items-center gap-2">
+        <a href="index.html"        class="btn btn-teal btn-toolbar">Main</a>
+        <a href="daily.html"        class="btn btn-teal btn-toolbar">Daily</a>
+        <a href="log.html"          class="btn btn-teal btn-toolbar">Log</a>
+        <a href="week.html"         class="btn btn-teal btn-toolbar">Week</a>
+        <div class="dropdown">
+          <button type="button" class="btn btn-teal btn-toolbar dropdown-toggle" data-dropdown-toggle aria-expanded="false">
+            Game <span class="caret">▾</span>
+          </button>
+          <div class="dropdown-menu">
+            <a href="game.html"         class="btn btn-teal btn-toolbar">Game</a>
+            <a href="matchups.html"     class="btn btn-teal btn-toolbar">Matchups</a>
+            <a href="schedule.html"     class="btn btn-teal btn-toolbar">Schedule</a>
+            <a href="game_ratings.html" class="btn btn-teal btn-toolbar">Ratings</a>
+          </div>
+        </div>
+        <a href="updates.html"      class="btn btn-teal btn-toolbar">Updates</a>
+      </div>
+    </header>
+
+    <section class="glass mb-4">
+      <h2 class="font-semibold text-lg mb-1">Weekly Schedule</h2>
+      <p class="text-sm muted">
+        The next seven days of scheduled matchups, including you. The list updates automatically whenever players are added or removed.
+      </p>
+    </section>
+
+    <section id="scheduleContainer" class="space-y-4"></section>
+  </div>
+
+  <script>
+    const STORAGE_KEY = "taskpoints_v1";
+    const $ = (id) => document.getElementById(id);
+
+    function loadState() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) {
+          return {
+            tasks: [],
+            completions: [],
+            players: [],
+            habits: [],
+            flexActions: [],
+            gameHistory: [],
+            matchups: [],
+            schedule: []
+          };
+        }
+
+        const parsed = JSON.parse(raw) || {};
+        return {
+          tasks:       Array.isArray(parsed.tasks)       ? parsed.tasks       : [],
+          completions: Array.isArray(parsed.completions) ? parsed.completions : [],
+          players:     Array.isArray(parsed.players)     ? parsed.players     : [],
+          habits:      Array.isArray(parsed.habits)      ? parsed.habits      : [],
+          flexActions: Array.isArray(parsed.flexActions) ? parsed.flexActions : [],
+          gameHistory: Array.isArray(parsed.gameHistory) ? parsed.gameHistory : [],
+          matchups:    Array.isArray(parsed.matchups)    ? parsed.matchups    : [],
+          schedule:    Array.isArray(parsed.schedule)    ? parsed.schedule    : []
+        };
+      } catch (e) {
+        console.error("Failed to load TaskPoints state", e);
+        return { tasks: [], completions: [], players: [], habits: [], flexActions: [], gameHistory: [], matchups: [], schedule: [] };
+      }
+    }
+
+    function saveState(s) {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
+      } catch (e) {
+        console.error("Failed to save schedule", e);
+      }
+    }
+
+    function dateKey(d) {
+      if (!(d instanceof Date)) d = new Date(d);
+      if (!d || Number.isNaN(d.getTime())) return "";
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      return `${y}-${m}-${day}`;
+    }
+
+    function shuffle(arr) {
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+    }
+
+    function getAllParticipantIds(state) {
+      const ids = ["YOU"];
+      (state.players || []).forEach((p) => {
+        if (p && p.id) ids.push(p.id);
+      });
+      return ids;
+    }
+
+    function participantSignature(ids) {
+      return ids.slice().sort().join("|");
+    }
+
+    function buildDailySchedule(dateKeyStr, participantIds, signature) {
+      const pool = participantIds.slice();
+      shuffle(pool);
+
+      const matchups = [];
+      const byeIds = [];
+
+      for (let i = 0; i + 1 < pool.length; i += 2) {
+        matchups.push({
+          playerAId: pool[i],
+          playerBId: pool[i + 1]
+        });
+      }
+
+      if (pool.length % 2 === 1) {
+        byeIds.push(pool[pool.length - 1]);
+      }
+
+      return {
+        date: dateKeyStr,
+        matchups,
+        byeIds,
+        participantSignature: signature
+      };
+    }
+
+    function ensureUpcomingSchedule(state, days = 7) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const todayKey = dateKey(today);
+
+      const participants = getAllParticipantIds(state);
+      const signature = participantSignature(participants);
+
+      let schedule = Array.isArray(state.schedule)
+        ? state.schedule.filter((d) => d && d.date >= todayKey)
+        : [];
+      let changed = false;
+
+      if (!schedule.every((d) => d.participantSignature === signature)) {
+        schedule = [];
+        changed = true;
+      }
+
+      const neededDates = [];
+      for (let i = 0; i < days; i++) {
+        const dt = new Date(today);
+        dt.setDate(dt.getDate() + i);
+        neededDates.push(dateKey(dt));
+      }
+
+      const byDate = new Map();
+      schedule.forEach((d) => {
+        if (d && d.date) byDate.set(d.date, d);
+      });
+
+      const rebuilt = neededDates.map((key) => {
+        const existing = byDate.get(key);
+        if (existing) return existing;
+        changed = true;
+        return buildDailySchedule(key, participants, signature);
+      });
+
+      if (rebuilt.length !== schedule.length) changed = true;
+
+      state.schedule = rebuilt;
+      return changed;
+    }
+
+    function ordinal(n) {
+      const s = ["th", "st", "nd", "rd"], v = n % 100;
+      return n + (s[(v - 20) % 10] || s[v] || s[0]);
+    }
+
+    function formatLongDate(key) {
+      const [y, m, d] = key.split("-").map((x) => parseInt(x, 10));
+      const dt = new Date(y, m - 1, d);
+      const weekday = dt.toLocaleDateString(undefined, { weekday: "long" });
+      const month = dt.toLocaleDateString(undefined, { month: "short" });
+      return `${weekday}, ${month} ${ordinal(d)}, ${y}`;
+    }
+
+    let state = loadState();
+
+    function renderSchedule() {
+      state = loadState();
+      const changed = ensureUpcomingSchedule(state);
+      if (changed) saveState(state);
+
+      const container = $("scheduleContainer");
+      container.innerHTML = "";
+
+      const schedule = Array.isArray(state.schedule) ? state.schedule : [];
+      if (!schedule.length) {
+        const empty = document.createElement("section");
+        empty.className = "glass";
+        empty.innerHTML = "<div class='text-sm muted'>No schedule available yet.</div>";
+        container.appendChild(empty);
+        return;
+      }
+
+      const nameById = {};
+      (state.players || []).forEach((p) => {
+        if (p && p.id) nameById[p.id] = p.name || "Unnamed";
+      });
+      nameById["YOU"] = "You";
+
+      schedule.forEach((day) => {
+        const section = document.createElement("section");
+        section.className = "glass";
+
+        const heading = document.createElement("h2");
+        heading.className = "matchup-day";
+        heading.textContent = formatLongDate(day.date);
+        section.appendChild(heading);
+
+        const list = document.createElement("ul");
+        list.className = "space-y-1";
+
+        const pairings = Array.isArray(day.matchups) ? day.matchups : [];
+        const byeIds = Array.isArray(day.byeIds) ? day.byeIds : [];
+
+        if (!pairings.length && !byeIds.length) {
+          const li = document.createElement("li");
+          li.className = "text-sm muted";
+          li.textContent = "No matchups scheduled.";
+          list.appendChild(li);
+        }
+
+        pairings.forEach((m) => {
+          const li = document.createElement("li");
+          li.className = "matchup-item";
+          if (m.playerAId === "YOU" || m.playerBId === "YOU") {
+            li.classList.add("you");
+          }
+          li.textContent = `${nameById[m.playerAId] || "Unknown"} vs ${nameById[m.playerBId] || "Unknown"}`;
+          list.appendChild(li);
+        });
+
+        byeIds.forEach((id) => {
+          const li = document.createElement("li");
+          li.className = "matchup-item";
+          if (id === "YOU") li.classList.add("you");
+          li.textContent = `${nameById[id] || "Unknown"} has no matchup scheduled.`;
+          list.appendChild(li);
+        });
+
+        section.appendChild(list);
+        container.appendChild(section);
+      });
+    }
+
+    document.addEventListener("DOMContentLoaded", renderSchedule);
+    window.addEventListener("storage", (e) => {
+      if (e.key === STORAGE_KEY) {
+        renderSchedule();
+      }
+    });
+  </script>
+</body>
+</html>

@@ -105,6 +105,7 @@
   <div class="dropdown-menu">
     <a href="game.html"         class="btn btn-teal btn-toolbar">Game</a>
     <a href="matchups.html"     class="btn btn-teal btn-toolbar">Matchups</a>
+    <a href="schedule.html"     class="btn btn-teal btn-toolbar">Schedule</a>
     <a href="game_ratings.html" class="btn btn-teal btn-toolbar">Ratings</a>
   </div>
 </div>
@@ -223,7 +224,8 @@ function load() {
         flexActions: [],
         matchups:    [],
         gameHistory: [],
-        workHistory: []
+        workHistory: [],
+        schedule:    []
       };
     }
 
@@ -236,7 +238,8 @@ function load() {
       flexActions: Array.isArray(p.flexActions) ? p.flexActions : [],
       matchups:    Array.isArray(p.matchups)    ? p.matchups    : [],
       gameHistory: Array.isArray(p.gameHistory) ? p.gameHistory : [],
-      workHistory: Array.isArray(p.workHistory) ? p.workHistory : []
+      workHistory: Array.isArray(p.workHistory) ? p.workHistory : [],
+      schedule:    Array.isArray(p.schedule)    ? p.schedule    : []
     };
   } catch (e) {
     console.error("week load error", e);
@@ -248,7 +251,8 @@ function load() {
       flexActions: [],
       matchups:    [],
       gameHistory: [],
-      workHistory: []
+      workHistory: [],
+      schedule:    []
     };
   }
 }

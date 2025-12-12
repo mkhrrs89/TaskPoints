@@ -211,6 +211,7 @@
           <div class="dropdown-menu">
             <a href="game.html"         class="btn btn-teal btn-toolbar">Game</a>
             <a href="matchups.html"     class="btn btn-teal btn-toolbar">Matchups</a>
+            <a href="schedule.html"     class="btn btn-teal btn-toolbar">Schedule</a>
             <a href="game_ratings.html" class="btn btn-teal btn-toolbar">Ratings</a>
           </div>
         </div>
@@ -409,7 +410,8 @@ function loadState() {
     players: [],
     flexActions: [],
     gameHistory: [],
-    matchups: []
+    matchups: [],
+    schedule: []
   };
 
   try {
@@ -425,6 +427,7 @@ function loadState() {
     base.flexActions = Array.isArray(parsed.flexActions) ? parsed.flexActions : [];
     base.gameHistory = Array.isArray(parsed.gameHistory) ? parsed.gameHistory : [];
     base.matchups    = Array.isArray(parsed.matchups)    ? parsed.matchups    : [];
+    base.schedule    = Array.isArray(parsed.schedule)    ? parsed.schedule    : [];
   } catch (e) {
     console.error("Failed to load state in game.html", e);
   }
@@ -441,7 +444,8 @@ function saveState(s) {
     players:     Array.isArray(s.players)     ? s.players     : [],
     flexActions: Array.isArray(s.flexActions) ? s.flexActions : [],
     gameHistory: Array.isArray(s.gameHistory) ? s.gameHistory : [],
-    matchups:    Array.isArray(s.matchups)    ? s.matchups    : []
+    matchups:    Array.isArray(s.matchups)    ? s.matchups    : [],
+    schedule:    Array.isArray(s.schedule)    ? s.schedule    : []
   };
 
   localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
@@ -451,6 +455,10 @@ function saveState(s) {
 const state = loadState();
 let editingPlayerId = null;
 let viewMode = "card"; // "card" | "gallery"
+
+if (ensureUpcomingSchedule()) {
+  saveState(state);
+}
 
 
 
@@ -684,124 +692,129 @@ const height = Math.round(baseWidth / ratio);
       }
     }
 
+function simulateAiScoreForPlayer(player, todayKey){
+  if (!player || !player.baseline) return 0;
+
+  const baseline = Number(player.baseline);
+  const variance = Number(player.variance);
+  const momentum = Number(player.momentum);
+
+  let riskyRating = Number(player.risky);
+  if (isNaN(riskyRating)) riskyRating = 0;
+  const riskyNormalized = riskyRating > 10 ? riskyRating / 10 : riskyRating;
+
+  const variation = (Math.random() * 2 - 1) * variance;
+
+  let momentumBonus = 0;
+  if (momentum && state.gameHistory.length) {
+    const prev = state.gameHistory
+      .filter(g => g.playerId === player.id)
+      .sort((a,b) => b.date.localeCompare(a.date))[0];
+
+    if (prev && prev.date !== todayKey) {
+      momentumBonus = (prev.score * (momentum / 100)) * 0.1;
+    }
+  }
+
+  let riskyMod = 0;
+  if (Math.random() < riskyNormalized / 10) {
+    const boom = Math.random() < 0.5;
+    riskyMod = boom
+      ? variance * (0.5 + Math.random())
+      : -variance * (0.5 + Math.random());
+  }
+
+  const score = baseline + variation + momentumBonus + riskyMod;
+  return Number(score.toFixed(1));
+}
+
 function simulateToday() {
-  const todayKey = new Date().toISOString().slice(0,10); // "YYYY-MM-DD"
+  const todayKey = dateKey(new Date());
 
   state.gameHistory = state.gameHistory || [];
   state.matchups    = state.matchups    || [];
+  state.schedule    = state.schedule    || [];
+
+  ensureUpcomingSchedule();
 
   // Remove any existing scores + matchups for today so re-running is clean
   state.gameHistory = state.gameHistory.filter(g => g.date !== todayKey);
   state.matchups    = state.matchups.filter(m => m.date !== todayKey);
 
-  const scoresById = {};
-  const namesById  = {};
+  const todaysSchedule = state.schedule.find(d => d && d.date === todayKey);
+  const todaysPairs = todaysSchedule && Array.isArray(todaysSchedule.matchups)
+    ? todaysSchedule.matchups
+    : [];
+  const byeIds = todaysSchedule && Array.isArray(todaysSchedule.byeIds)
+    ? todaysSchedule.byeIds
+    : [];
 
-  // --- 1) Sim AI players and save their individual scores (same logic as before) ---
-  for (const p of state.players) {
-    if (!p.baseline) continue;
+  const namesById = {};
+  const playerMap = new Map();
+  (state.players || []).forEach(p => {
+    if (!p || !p.id) return;
+    playerMap.set(p.id, p);
+    namesById[p.id] = p.name || "Unnamed";
+  });
+  namesById["YOU"] = "You";
 
-    const baseline = Number(p.baseline);
-    const variance = Number(p.variance);
-    const momentum = Number(p.momentum);
-
-    // Risky stored as 0–10 rating (or legacy 0–100)
-    let riskyRating = Number(p.risky);
-    if (isNaN(riskyRating)) riskyRating = 0;
-    const riskyNormalized = riskyRating > 10 ? riskyRating / 10 : riskyRating;
-
-    // 1. Base random variation
-    const variation = (Math.random() * 2 - 1) * variance;
-
-    // 2. Momentum bonus (small)
-    let momentumBonus = 0;
-    if (momentum && state.gameHistory.length) {
-      const y = state.gameHistory
-        .filter(g => g.playerId === p.id)
-        .sort((a,b) => b.date.localeCompare(a.date))[0];
-
-      if (y && y.date !== todayKey) {
-        momentumBonus = (y.score * (momentum / 100)) * 0.1;
-      }
-    }
-
-    // 3. Risky modifier (boom/bust based on riskyNormalized)
-    let riskyMod = 0;
-    if (Math.random() < riskyNormalized / 10) {
-      const boom = Math.random() < 0.5;
-      riskyMod = boom
-        ? variance * (0.5 + Math.random())
-        : -variance * (0.5 + Math.random());
-    }
-
-    const score = baseline + variation + momentumBonus + riskyMod;
-    const finalScore = Number(score.toFixed(1));
-
-    // Save per-player history
-    state.gameHistory.push({
-      id: crypto.randomUUID(),
-      date: todayKey,
-      playerId: p.id,
-      score: finalScore
-    });
-
-    scoresById[p.id] = finalScore;
-    namesById[p.id]  = p.name || "Unnamed";
-  }
-
-  // --- 2) Add YOU using your real TaskPoints points ---
-  const youScore = computeTodayPoints();
-  if (!isNaN(youScore)) {
-    scoresById["YOU"] = youScore;
-    namesById["YOU"]  = "You";
-  }
-
-  const ids = Object.keys(scoresById);
-
-  if (ids.length < 2) {
+  if (!todaysPairs.length) {
     saveState(state);
+    const byeText = byeIds.length
+      ? byeIds.map(id => `${namesById[id] || 'Unknown'} has no matchup scheduled.`).join('<br>')
+      : 'No matchups scheduled for today.';
+
     $('simResults').innerHTML = `
       <h3 class="font-semibold mb-1">Matchups for ${todayKey}</h3>
-      <div>Not enough players to create matchups.</div>
+      <div>${byeText}</div>
     `;
     renderPlayers();
     return;
   }
 
-  // --- 3) Randomly pair everyone into head-to-head matchups ---
-  // Fisher–Yates shuffle
-  for (let i = ids.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [ids[i], ids[j]] = [ids[j], ids[i]];
+  const participantIds = Array.from(new Set(
+    todaysPairs.flatMap(m => [m.playerAId, m.playerBId])
+  ));
+
+  const scoresById = {};
+
+  const youScore = computeTodayPoints();
+  if (participantIds.includes('YOU') && !isNaN(youScore)) {
+    scoresById['YOU'] = youScore;
   }
+
+  participantIds.forEach(id => {
+    if (id === 'YOU') return;
+    const player = playerMap.get(id);
+    if (!player) return;
+    const score = simulateAiScoreForPlayer(player, todayKey);
+    scoresById[id] = score;
+    state.gameHistory.push({
+      id: crypto.randomUUID(),
+      date: todayKey,
+      playerId: id,
+      score
+    });
+  });
 
   const todaysMatchups = [];
 
-  for (let i = 0; i + 1 < ids.length; i += 2) {
-    const aId = ids[i];
-    const bId = ids[i+1];
-
-    const scoreA = scoresById[aId];
-    const scoreB = scoresById[bId];
-
+  todaysPairs.forEach(pair => {
     const matchup = {
       id: crypto.randomUUID(),
       date: todayKey,
-      playerAId: aId,
-      playerBId: bId,
-      scoreA,
-      scoreB
+      playerAId: pair.playerAId,
+      playerBId: pair.playerBId,
+      scoreA: scoresById[pair.playerAId] ?? 0,
+      scoreB: scoresById[pair.playerBId] ?? 0
     };
 
     state.matchups.push(matchup);
     todaysMatchups.push(matchup);
-  }
-
-  // If odd number of participants, last one just doesn't get a game that day.
+  });
 
   saveState(state);
 
-  // --- 4) Render readable matchup results for today ---
   const lines = todaysMatchups.map(m => {
     const aId = m.playerAId;
     const bId = m.playerBId;
@@ -812,22 +825,20 @@ function simulateToday() {
     const aIsYou = aId === "YOU";
     const bIsYou = bId === "YOU";
 
-    // Special phrasing when YOU are involved
     if (aIsYou || bIsYou) {
-      const youScore   = aIsYou ? aScore : bScore;
+      const youScoreVal = aIsYou ? aScore : bScore;
       const oppScore   = aIsYou ? bScore : aScore;
       const oppName    = aIsYou ? bName  : aName;
 
-      if (youScore > oppScore) {
-        return `You beat ${oppName}, ${youScore}–${oppScore}`;
-      } else if (youScore < oppScore) {
-        return `You lost to ${oppName}, ${youScore}–${oppScore}`;
+      if (youScoreVal > oppScore) {
+        return `You beat ${oppName}, ${youScoreVal}–${oppScore}`;
+      } else if (youScoreVal < oppScore) {
+        return `You lost to ${oppName}, ${youScoreVal}–${oppScore}`;
       } else {
-        return `You tied ${oppName}, ${youScore}–${oppScore}`;
+        return `You tied ${oppName}, ${youScoreVal}–${oppScore}`;
       }
     }
 
-    // AI vs AI
     if (aScore > bScore) {
       return `${aName} beat ${bName}, ${aScore}–${bScore}`;
     } else if (bScore > aScore) {
@@ -837,8 +848,11 @@ function simulateToday() {
     }
   });
 
-  const outHtml = lines.length
-    ? lines.map(l => `<div>• ${l}</div>`).join("")
+  const byeLines = byeIds.map(id => `${namesById[id] || 'Unknown'} has no matchup scheduled.`);
+  const combined = [...lines, ...byeLines];
+
+  const outHtml = combined.length
+    ? combined.map(l => `<div>• ${l}</div>`).join("")
     : `<div>No matchups created.</div>`;
 
   $('simResults').innerHTML = `
@@ -846,7 +860,6 @@ function simulateToday() {
     ${outHtml}
   `;
 
-  // Re-render player cards if they depend on latest gameHistory
   renderPlayers();
 }
 
@@ -879,6 +892,99 @@ function dateKey(d){
   const m  = String(d.getMonth()+1).padStart(2,'0');
   const dd = String(d.getDate()).padStart(2,'0');
   return `${y}-${m}-${dd}`;
+}
+
+function shuffle(arr){
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+}
+
+function getAllParticipantIds(){
+  const ids = ['YOU'];
+  (state.players || []).forEach(p => {
+    if (p && p.id) ids.push(p.id);
+  });
+  return ids;
+}
+
+function participantSignature(ids){
+  return ids.slice().sort().join('|');
+}
+
+function buildDailySchedule(dateKeyStr, participantIds, signature){
+  const pool = participantIds.slice();
+  shuffle(pool);
+
+  const matchups = [];
+  const byeIds = [];
+
+  for (let i = 0; i + 1 < pool.length; i += 2) {
+    matchups.push({
+      playerAId: pool[i],
+      playerBId: pool[i+1]
+    });
+  }
+
+  if (pool.length % 2 === 1) {
+    byeIds.push(pool[pool.length - 1]);
+  }
+
+  return {
+    date: dateKeyStr,
+    matchups,
+    byeIds,
+    participantSignature: signature
+  };
+}
+
+function ensureUpcomingSchedule(days = 7){
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  const todayKey = dateKey(today);
+
+  const participants = getAllParticipantIds();
+  const signature = participantSignature(participants);
+
+  let schedule = Array.isArray(state.schedule) ? state.schedule.filter(d => d && d.date >= todayKey) : [];
+  let changed = false;
+
+  if (!schedule.every(d => d.participantSignature === signature)) {
+    schedule = [];
+    changed = true;
+  }
+
+  const neededDates = [];
+  for (let i = 0; i < days; i++) {
+    const dt = new Date(today);
+    dt.setDate(dt.getDate() + i);
+    neededDates.push(dateKey(dt));
+  }
+
+  const byDate = new Map();
+  schedule.forEach((d) => {
+    if (d && d.date) byDate.set(d.date, d);
+  });
+
+  const rebuilt = neededDates.map((key) => {
+    const existing = byDate.get(key);
+    if (existing) return existing;
+    changed = true;
+    return buildDailySchedule(key, participants, signature);
+  });
+
+  if (rebuilt.length !== schedule.length) changed = true;
+
+  state.schedule = rebuilt;
+  return changed;
+}
+
+function refreshScheduleAfterRosterChange(){
+  const changed = ensureUpcomingSchedule();
+  if (changed) {
+    saveState(state);
+  }
 }
 
 function computeTodayPoints() {
@@ -1409,6 +1515,7 @@ if (p.isYou) {
         const idx = state.players.findIndex(p => p.id === id);
         if (idx !== -1){
           state.players.splice(idx,1);
+          refreshScheduleAfterRosterChange();
           saveState(state);
         }
         if (editingPlayerId === id) editingPlayerId = null;
@@ -1614,6 +1721,7 @@ $("createPlayerForm").addEventListener("submit", (e)=>{
       style: style || "balanced"
 
     });
+    refreshScheduleAfterRosterChange();
     saveState(state);
     $("playerName").value = "";
     $("playerNotes").value = "";

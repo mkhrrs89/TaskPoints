@@ -128,6 +128,7 @@
       <div class="dropdown-menu">
         <a href="game.html"         class="btn btn-teal btn-toolbar">Game</a>
         <a href="matchups.html"     class="btn btn-teal btn-toolbar">Matchups</a>
+        <a href="schedule.html"     class="btn btn-teal btn-toolbar">Schedule</a>
         <a href="game_ratings.html" class="btn btn-teal btn-toolbar">Ratings</a>
       </div>
     </div>
@@ -179,7 +180,8 @@ function load(){
         habits:     [],
         flexActions:[],
         matchups:   [],
-        gameHistory:[]
+        gameHistory:[],
+        schedule:   []
       };
     }
 
@@ -191,7 +193,8 @@ function load(){
       habits:      Array.isArray(p.habits)      ? p.habits      : [],
       flexActions: Array.isArray(p.flexActions) ? p.flexActions : [],
       matchups:    Array.isArray(p.matchups)    ? p.matchups    : [],
-      gameHistory: Array.isArray(p.gameHistory) ? p.gameHistory : []
+      gameHistory: Array.isArray(p.gameHistory) ? p.gameHistory : [],
+      schedule:    Array.isArray(p.schedule)    ? p.schedule    : []
     };
   } catch {
     return {
@@ -201,7 +204,8 @@ function load(){
       habits:     [],
       flexActions:[],
       matchups:   [],
-      gameHistory:[]
+      gameHistory:[],
+      schedule:   []
     };
   }
 }
