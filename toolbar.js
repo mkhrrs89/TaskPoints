@@ -14,16 +14,26 @@ document.addEventListener('DOMContentLoaded', () => {
     const toggle = dropdown.querySelector('[data-dropdown-toggle]');
     if (!toggle) return;
 
-    toggle.addEventListener('click', (event) => {
+    const handleToggle = (event) => {
       event.stopPropagation();
       const isOpening = !dropdown.classList.contains('open');
       closeAllDropdowns(isOpening ? dropdown : null);
       dropdown.classList.toggle('open');
       toggle.setAttribute('aria-expanded', dropdown.classList.contains('open'));
-    });
+    };
+
+    toggle.addEventListener('click', handleToggle);
+    toggle.addEventListener('touchstart', (event) => {
+      event.preventDefault();
+      handleToggle(event);
+    }, { passive: false });
   });
 
   document.addEventListener('click', () => {
+    closeAllDropdowns();
+  });
+
+  document.addEventListener('touchstart', () => {
     closeAllDropdowns();
   });
 
