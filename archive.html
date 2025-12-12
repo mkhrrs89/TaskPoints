@@ -26,6 +26,7 @@
           <div class="dropdown-menu">
             <a href="game.html"         class="btn btn-teal btn-toolbar">Game</a>
             <a href="matchups.html"     class="btn btn-teal btn-toolbar">Matchups</a>
+            <a href="schedule.html"     class="btn btn-teal btn-toolbar">Schedule</a>
             <a href="game_ratings.html" class="btn btn-teal btn-toolbar">Ratings</a>
           </div>
         </div>
@@ -48,14 +49,15 @@ const $ = id => document.getElementById(id);
 function load(){
   try{
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return {tasks:[], completions:[]};
+    if (!raw) return {tasks:[], completions:[], schedule:[]};
     const st = JSON.parse(raw);
     if (!Array.isArray(st.tasks)) st.tasks = [];
     if (!Array.isArray(st.completions)) st.completions = [];
+    if (!Array.isArray(st.schedule)) st.schedule = [];
     return st;
   }catch(e){
     console.error(e);
-    return {tasks:[], completions:[]};
+    return {tasks:[], completions:[], schedule:[]};
   }
 }
 
