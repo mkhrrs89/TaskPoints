@@ -13,38 +13,50 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!toggle) return;
 
     const menu = dropdown.querySelector('.dropdown-menu');
+
+    // Prevent taps inside menu from closing it
     if (menu) {
+      menu.addEventListener('pointerdown', (e) => e.stopPropagation());
       menu.addEventListener('click', (e) => e.stopPropagation());
-      menu.addEventListener('touchstart', (e) => e.stopPropagation(), { passive: true });
     }
 
-    const handleToggle = (event) => {
-      event.preventDefault();
-      event.stopPropagation();
+    function setExpanded(isOpen) {
+      toggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+    }
+
+    function doToggle(e) {
+      e.preventDefault();
+      e.stopPropagation();
 
       const isOpening = !dropdown.classList.contains('open');
       closeAllDropdowns(isOpening ? dropdown : null);
 
       dropdown.classList.toggle('open');
-      toggle.setAttribute('aria-expanded', dropdown.classList.contains('open') ? 'true' : 'false');
-    };
+      setExpanded(dropdown.classList.contains('open'));
+    }
 
-    toggle.addEventListener('click', handleToggle);
+    // Use pointerdown for mobile reliability
+    toggle.addEventListener('pointerdown', (e) => {
+      // mark that this tap already handled, so the synthetic click is ignored
+      toggle.dataset.ignoreClick = '1';
+      doToggle(e);
+      setTimeout(() => delete toggle.dataset.ignoreClick, 350);
+    });
 
-    // iOS sometimes prefers pointer events over touchstart
-    toggle.addEventListener('pointerdown', handleToggle, { passive: false });
+    // Keep click for desktop keyboards/etc, but ignore if it followed a pointer tap
+    toggle.addEventListener('click', (e) => {
+      if (toggle.dataset.ignoreClick) return;
+      doToggle(e);
+    });
   });
 
-  document.addEventListener('click', () => {
+  // Close when tapping/clicking outside
+  document.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('.dropdown')) return;
     closeAllDropdowns();
   });
 
-  document.addEventListener('touchstart', (event) => {
-    if (event.target.closest('.dropdown')) return;
-    closeAllDropdowns();
-  }, { passive: true });
-
-  document.addEventListener('keyup', (event) => {
-    if (event.key === 'Escape') closeAllDropdowns();
+  document.addEventListener('keyup', (e) => {
+    if (e.key === 'Escape') closeAllDropdowns();
   });
 });
