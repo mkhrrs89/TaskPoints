@@ -14,6 +14,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const toggle = dropdown.querySelector('[data-dropdown-toggle]');
     if (!toggle) return;
 
+    const menu = dropdown.querySelector('.dropdown-menu');
+    if (menu) {
+      menu.addEventListener('click', (e) => e.stopPropagation());
+      menu.addEventListener('touchstart', (e) => e.stopPropagation(), { passive: true });
+    }
+    
     const handleToggle = (event) => {
       event.stopPropagation();
       const isOpening = !dropdown.classList.contains('open');
@@ -33,9 +39,11 @@ document.addEventListener('DOMContentLoaded', () => {
     closeAllDropdowns();
   });
 
-  document.addEventListener('touchstart', () => {
-    closeAllDropdowns();
-  });
+document.addEventListener('touchstart', (event) => {
+  // If the touch is inside any dropdown, don't close it
+  if (event.target.closest('.dropdown')) return;
+  closeAllDropdowns();
+}, { passive: true });
 
   document.addEventListener('keyup', (event) => {
     if (event.key === 'Escape') {
