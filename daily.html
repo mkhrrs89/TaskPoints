@@ -63,6 +63,25 @@
       return 0;
     }
 
+    function getSleepInfo(entry) {
+      const match = entry?.title?.match(/\((\d+)\)/);
+      const score = match ? Number(match[1]) : null;
+
+      const restedRaw = entry && Object.prototype.hasOwnProperty.call(entry, 'sleepRested')
+        ? Number(entry.sleepRested)
+        : 0;
+      const rested = Number.isFinite(restedRaw) ? restedRaw : 0;
+
+      return { score, rested };
+    }
+
+    function sleepPoints(score, rested = 0) {
+      if (!Number.isFinite(score)) return 0;
+      const base  = score / 10;
+      const bonus = sleepBonus(score);
+      return base + bonus + (Number.isFinite(rested) ? rested : 0);
+    }
+
     function load() {
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
@@ -94,15 +113,16 @@
       state.completions.forEach(c => {
         if (!c || !c.title || !c.title.startsWith("Sleep Score")) return;
 
-        const match = c.title.match(/\((\d+)\)/);
-        if (!match) return;
+        const { score, rested } = getSleepInfo(c);
+        if (!Number.isFinite(score)) return;
 
-        const raw = Number(match[1]);
-        if (!Number.isFinite(raw)) return;
+        const restVal = Number.isFinite(rested) ? rested : 0;
+        const newPts = sleepPoints(score, restVal);
 
-        const base  = raw / 10;
-        const bonus = sleepBonus(raw);
-        const newPts = base + bonus;
+        if (!Number.isFinite(c.sleepRested)) {
+          c.sleepRested = restVal;
+          changed = true;
+        }
 
         if (Math.abs((Number(c.points) || 0) - newPts) > 0.0001) {
           c.points = newPts;

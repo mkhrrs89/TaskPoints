@@ -168,12 +168,14 @@
 
           <div class="flex items-center gap-3 flex-wrap mt-3">
             <input id="sleepScoreInput" class="input w-24" type="number" placeholder="0–100">
+            <input id="sleepRestedInput" class="input w-24" type="number" placeholder="Rested">
             <button id="saveSleepScoreBtn" class="btn btn-plum">Add</button>
           </div>
 
           <p class="muted text-xs mt-2">
             Score ÷ 10 plus a bonus is added to today's points:
             +1 pt for 95–97, +2 pts for 98–99, +3 pts for 100.
+            Your rested number is added directly on top of that total.
           </p>
         </div>
       </div>
@@ -364,6 +366,25 @@ function sleepBonus(score) {
   return 0;
 }
 
+function getSleepInfo(entry) {
+  const match = entry?.title?.match(/\((\d+)\)/);
+  const score = match ? Number(match[1]) : null;
+
+  const restedRaw = entry && Object.prototype.hasOwnProperty.call(entry, 'sleepRested')
+    ? Number(entry.sleepRested)
+    : 0;
+  const rested = Number.isFinite(restedRaw) ? restedRaw : 0;
+
+  return { score, rested };
+}
+
+function sleepPoints(score, rested = 0) {
+  if (!Number.isFinite(score)) return 0;
+  const base  = score / 10;
+  const bonus = sleepBonus(score);
+  return base + bonus + (Number.isFinite(rested) ? rested : 0);
+}
+
 function migrateSleepEntriesForBonus() {
   if (!state || !Array.isArray(state.completions)) return;
 
@@ -372,15 +393,16 @@ function migrateSleepEntriesForBonus() {
   state.completions.forEach(c => {
     if (!c || !c.title || !c.title.startsWith('Sleep Score')) return;
 
-    const match = c.title.match(/\((\d+)\)/);
-    if (!match) return;
+    const { score, rested } = getSleepInfo(c);
+    if (!Number.isFinite(score)) return;
 
-    const raw = Number(match[1]);
-    if (!Number.isFinite(raw)) return;
+    const restVal = Number.isFinite(rested) ? rested : 0;
+    const newPts = sleepPoints(score, restVal);
 
-    const base  = raw / 10;
-    const bonus = sleepBonus(raw);
-    const newPts = base + bonus;
+    if (!Number.isFinite(c.sleepRested)) {
+      c.sleepRested = restVal;
+      changed = true;
+    }
 
     // only update if different, to avoid noisy rewrites
     if (Math.abs((Number(c.points) || 0) - newPts) > 0.0001) {
@@ -2125,9 +2147,13 @@ function saveSleepScore(){
     return alert("Sleep score must be between 0 and 100.");
   }
 
-  const basePts  = raw / 10;
-const bonusPts = sleepBonus(raw);
-const pts      = basePts + bonusPts; // e.g. 97 → 10.7
+  const restedStr = $('sleepRestedInput')?.value.trim() ?? '';
+  const rested = restedStr === '' ? 0 : Number(restedStr);
+  if (!Number.isFinite(rested)) {
+    return alert("Rested value must be a valid number.");
+  }
+
+  const pts = sleepPoints(raw, rested); // e.g. 97 → 10.7 plus rest
 
   // Use today's date (local) and normalize so timezones don't mess the day
   const d = new Date();
@@ -2148,22 +2174,26 @@ const pts      = basePts + bonusPts; // e.g. 97 → 10.7
 
   if (existing) {
     // Update today's sleep entry
-    existing.title = `Sleep Score (${raw})`;
+    existing.title = `Sleep Score (${raw}) — Rest ${rested}`;
     existing.points = pts;
+    existing.sleepRested = rested;
     existing.completedAtISO = whenISO;
   } else {
     // Create a new one if none exists for today
     state.completions.unshift({
       id: crypto.randomUUID(),
       taskId: null,
-      title: `Sleep Score (${raw})`,
+      title: `Sleep Score (${raw}) — Rest ${rested}`,
       points: pts,
       completedAtISO: whenISO,
+      sleepRested: rested,
       source: "task"
     });
   }
 
   $('sleepScoreInput').value = "";  // clear input
+  const restInput = $('sleepRestedInput');
+  if (restInput) restInput.value = "";
 
   save();
   renderAll();  // refresh stats, history chips, etc.
@@ -2284,28 +2314,25 @@ function renderSleepHistory() {
   const todayValueEl  = $('sleepTodayValue');
   const todayImpactEl = $('sleepTodayImpact');
 
-if (todayValueEl && todayImpactEl) {
-  if (todayEntry) {
-    const titleMatch = todayEntry.title.match(/\((\d+)\)/);
-    const scoreNum = titleMatch ? Number(titleMatch[1]) : null;
+  if (todayValueEl && todayImpactEl) {
+    if (todayEntry) {
+      const { score, rested } = getSleepInfo(todayEntry);
+      if (score != null && !Number.isNaN(score)) {
+        todayValueEl.textContent = score;
 
-    if (scoreNum != null && !Number.isNaN(scoreNum)) {
-      todayValueEl.textContent = scoreNum;
+        const totalPts = sleepPoints(score, rested);
+        const restText = rested ? ` (rest ${rested >= 0 ? '+' : ''}${rested})` : '';
 
-      const basePts  = scoreNum / 10;
-      const bonusPts = sleepBonus(scoreNum);   // uses your bonus rules
-      const totalPts = basePts + bonusPts;
-
-      todayImpactEl.textContent = `Adds ${totalPts.toFixed(1)} pts to today`;
+        todayImpactEl.textContent = `Adds ${totalPts.toFixed(1)} pts to today${restText}`;
+      } else {
+        todayValueEl.textContent = '—';
+        todayImpactEl.textContent = 'Adds — pts to today';
+      }
     } else {
       todayValueEl.textContent = '—';
-      todayImpactEl.textContent = 'Adds — pts to today';
+      todayImpactEl.textContent = 'Adds 0 pts to today';
     }
-  } else {
-    todayValueEl.textContent = '—';
-    todayImpactEl.textContent = 'Adds 0 pts to today';
   }
-}
 
 
 
@@ -2330,30 +2357,40 @@ if (todayValueEl && todayImpactEl) {
       day: 'numeric'
     });
 
-    const score = entry.title.match(/\((\d+)\)/)?.[1] || '?';
-    const pts   = (Number(entry.points) || 0).toFixed(1);
+    const { score, rested } = getSleepInfo(entry);
+    const pts   = sleepPoints(score, rested).toFixed(1);
+    const restLabel = rested ? `<div class="sleep-chip-rest muted text-[11px]">Rest ${rested}</div>` : '';
+    const scoreDisplay = Number.isFinite(score) ? score : '?';
 
     const block = document.createElement('div');
     block.className = 'sleep-chip cursor-pointer';
 
     block.innerHTML = `
       <div class="sleep-chip-date">${prettyDate}</div>
-      <div class="sleep-chip-score">${score}</div>
+      <div class="sleep-chip-score">${scoreDisplay}</div>
       <div class="sleep-chip-pts">${pts} pts</div>
+      ${restLabel}
     `;
 
 
 
 
     block.onclick = () => {
-      const newScore = prompt('Edit sleep score for this day:', score);
-      if (!newScore) return;
+      const newScore = prompt('Edit sleep score for this day:', scoreDisplay);
+      if (newScore === null) return;
+
+      const newRestedInput = prompt('Edit how rested you felt (number, blank = 0):', `${rested ?? 0}`);
+      if (newRestedInput === null) return;
 
       const raw = Number(newScore);
       if (isNaN(raw) || raw < 0 || raw > 100) return alert('Invalid score.');
 
-      entry.title = `Sleep Score (${raw})`;
-entry.points = (raw / 10) + sleepBonus(raw);
+      const newRested = newRestedInput.trim() === '' ? 0 : Number(newRestedInput);
+      if (!Number.isFinite(newRested)) return alert('Invalid rested number.');
+
+      entry.title = `Sleep Score (${raw}) — Rest ${newRested}`;
+      entry.points = sleepPoints(raw, newRested);
+      entry.sleepRested = newRested;
 
 
       save();
