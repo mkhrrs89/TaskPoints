@@ -166,10 +166,15 @@
             <div id="sleepTodayImpact" class="muted text-xs mt-1">Adds 0 pts to today</div>
           </div>
 
-          <div class="flex items-center gap-3 flex-wrap mt-3">
+          <div id="sleepInputRow" class="flex items-center gap-3 flex-wrap mt-3">
             <input id="sleepScoreInput" class="input w-24" type="number" placeholder="0–100">
             <input id="sleepRestedInput" class="input w-24" type="number" placeholder="Rested">
             <button id="saveSleepScoreBtn" class="btn btn-plum">Add</button>
+          </div>
+
+          <div id="sleepEditRow" class="flex items-center gap-3 flex-wrap mt-3 hidden">
+            <button id="editSleepTodayBtn" class="btn btn-ghost">Edit today’s sleep</button>
+            <div class="muted text-xs">Adjust today’s sleep or rested score anytime.</div>
           </div>
 
           <p class="muted text-xs mt-2">
@@ -383,6 +388,46 @@ function sleepPoints(score, rested = 0) {
   const base  = score / 10;
   const bonus = sleepBonus(score);
   return base + bonus + (Number.isFinite(rested) ? rested : 0);
+}
+
+function getTodaySleepEntry() {
+  const today = new Date();
+  const todayKey = dateKey(today);
+
+  for (const entry of state.completions) {
+    if (!entry?.title?.startsWith('Sleep Score')) continue;
+    const d = new Date(entry.completedAtISO);
+    if (dateKey(d) === todayKey) return entry;
+  }
+
+  return null;
+}
+
+function promptEditSleepEntry(entry) {
+  if (!entry) return;
+
+  const { score, rested } = getSleepInfo(entry);
+  const scoreDisplay = Number.isFinite(score) ? score : '';
+
+  const newScoreInput = prompt('Edit sleep score for this day:', scoreDisplay);
+  if (newScoreInput === null) return;
+
+  const raw = Number(newScoreInput);
+  if (Number.isNaN(raw) || raw < 0 || raw > 100) return alert('Invalid score.');
+
+  const restedDefault = Number.isFinite(rested) ? rested : 0;
+  const newRestedInput = prompt('Edit how rested you felt (number, blank = 0):', `${restedDefault}`);
+  if (newRestedInput === null) return;
+
+  const newRested = newRestedInput.trim() === '' ? 0 : Number(newRestedInput);
+  if (!Number.isFinite(newRested)) return alert('Invalid rested number.');
+
+  entry.title = `Sleep Score (${raw}) — Rest ${newRested}`;
+  entry.points = sleepPoints(raw, newRested);
+  entry.sleepRested = newRested;
+
+  save();
+  renderAll();
 }
 
 function migrateSleepEntriesForBonus() {
@@ -2199,6 +2244,13 @@ function saveSleepScore(){
   renderAll();  // refresh stats, history chips, etc.
 }
 
+function editTodaySleepScore() {
+  const entry = getTodaySleepEntry();
+  if (!entry) return alert("You haven't entered today's sleep score yet.");
+
+  promptEditSleepEntry(entry);
+}
+
 
 function saveCalories(){
   const rawStr = $('caloriesInput').value.trim();
@@ -2299,20 +2351,13 @@ function renderSleepHistory() {
     .sort((a,b) => new Date(b.completedAtISO) - new Date(a.completedAtISO));
 
   // --- LEFT SIDE: Today's big stat ---
-  const today = new Date();
-  const todayKey = dateKey(today);
-  let todayEntry = null;
-
-  for (const entry of sleepEntries) {
-    const d = new Date(entry.completedAtISO);
-    if (dateKey(d) === todayKey) {
-      todayEntry = entry;
-      break;
-    }
-  }
+  const todayKey = dateKey(new Date());
+  const todayEntry = getTodaySleepEntry();
 
   const todayValueEl  = $('sleepTodayValue');
   const todayImpactEl = $('sleepTodayImpact');
+  const sleepInputRow = $('sleepInputRow');
+  const sleepEditRow  = $('sleepEditRow');
 
   if (todayValueEl && todayImpactEl) {
     if (todayEntry) {
@@ -2332,6 +2377,14 @@ function renderSleepHistory() {
       todayValueEl.textContent = '—';
       todayImpactEl.textContent = 'Adds 0 pts to today';
     }
+  }
+
+  if (todayEntry) {
+    sleepInputRow?.classList.add('hidden');
+    sleepEditRow?.classList.remove('hidden');
+  } else {
+    sleepInputRow?.classList.remove('hidden');
+    sleepEditRow?.classList.add('hidden');
   }
 
 
@@ -2376,25 +2429,7 @@ function renderSleepHistory() {
 
 
     block.onclick = () => {
-      const newScore = prompt('Edit sleep score for this day:', scoreDisplay);
-      if (newScore === null) return;
-
-      const newRestedInput = prompt('Edit how rested you felt (number, blank = 0):', `${rested ?? 0}`);
-      if (newRestedInput === null) return;
-
-      const raw = Number(newScore);
-      if (isNaN(raw) || raw < 0 || raw > 100) return alert('Invalid score.');
-
-      const newRested = newRestedInput.trim() === '' ? 0 : Number(newRestedInput);
-      if (!Number.isFinite(newRested)) return alert('Invalid rested number.');
-
-      entry.title = `Sleep Score (${raw}) — Rest ${newRested}`;
-      entry.points = sleepPoints(raw, newRested);
-      entry.sleepRested = newRested;
-
-
-      save();
-      renderAll();
+      promptEditSleepEntry(entry);
     };
 
     container.appendChild(block);
@@ -3019,6 +3054,7 @@ document.addEventListener('DOMContentLoaded', () => {
   $('addViceBtn')?.addEventListener('click', addVice);
   $('addFlexBtn')?.addEventListener('click', addFlexAction);
   $('saveSleepScoreBtn')?.addEventListener('click', saveSleepScore);
+  $('editSleepTodayBtn')?.addEventListener('click', editTodaySleepScore);
   $('saveCaloriesBtn')?.addEventListener('click', saveCalories);
   $('saveWorkScoreBtn')?.addEventListener('click', saveWorkScore);
   initCaloriesDatePicker();
