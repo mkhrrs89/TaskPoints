@@ -162,7 +162,10 @@
           <h2 id="sleepAnchor" class="font-bold text-lg mb-2">Sleep Score</h2>
           <div class="mb-2">
             <div class="muted text-xs">Today’s Sleep</div>
-            <div id="sleepTodayValue" class="text-4xl font-extrabold leading-tight">—</div>
+            <div class="flex items-center gap-2">
+              <div id="sleepTodayValue" class="text-4xl font-extrabold leading-tight">—</div>
+              <button id="editSleepTodayBtn" class="btn btn-ghost btn-sm hidden" aria-label="Edit today’s sleep">🛌</button>
+            </div>
             <div id="sleepTodayImpact" class="muted text-xs mt-1">Adds 0 pts to today</div>
           </div>
 
@@ -170,11 +173,6 @@
             <input id="sleepScoreInput" class="input w-24" type="number" placeholder="0–100">
             <input id="sleepRestedInput" class="input w-24" type="number" placeholder="Rested">
             <button id="saveSleepScoreBtn" class="btn btn-plum">Add</button>
-          </div>
-
-          <div id="sleepEditRow" class="flex items-center gap-3 flex-wrap mt-3 hidden">
-            <button id="editSleepTodayBtn" class="btn btn-ghost">Edit today’s sleep</button>
-            <div class="muted text-xs">Adjust today’s sleep or rested score anytime.</div>
           </div>
 
           <p class="muted text-xs mt-2">
@@ -2357,7 +2355,7 @@ function renderSleepHistory() {
   const todayValueEl  = $('sleepTodayValue');
   const todayImpactEl = $('sleepTodayImpact');
   const sleepInputRow = $('sleepInputRow');
-  const sleepEditRow  = $('sleepEditRow');
+  const sleepEditBtn  = $('editSleepTodayBtn');
 
   if (todayValueEl && todayImpactEl) {
     if (todayEntry) {
@@ -2381,10 +2379,10 @@ function renderSleepHistory() {
 
   if (todayEntry) {
     sleepInputRow?.classList.add('hidden');
-    sleepEditRow?.classList.remove('hidden');
+    sleepEditBtn?.classList.remove('hidden');
   } else {
     sleepInputRow?.classList.remove('hidden');
-    sleepEditRow?.classList.add('hidden');
+    sleepEditBtn?.classList.add('hidden');
   }
 
 
