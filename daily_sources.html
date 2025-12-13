@@ -157,7 +157,7 @@
       { key: "habits",   label: "Habits",   match: c => c.source === "habit" },
       { key: "vices",    label: "Vices",    match: c => c.source === "vice" },
       { key: "flex",     label: "Flex",     match: c => c.source === "flex" },
-      { key: "work",     label: "Work",     match: c => c.source === "work" },
+      { key: "work",     label: "Work",     match: c => c.source === "work" || (typeof c.title === "string" && c.title.startsWith("Work Score")) },
       { key: "tasks",    label: "Tasks",    match: () => true }
     ];
 
