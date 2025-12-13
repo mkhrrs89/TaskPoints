@@ -3239,11 +3239,21 @@ renderAll();
       <span class="uppercase tracking-wide text-[10px]">Habits</span>
     </a>
 
-    <!-- TASKS moved to the middle -->
-    <a href="#tasksAnchor" class="flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
-      <span class="text-lg">✔️</span>
-      <span class="uppercase tracking-wide text-[10px]">Tasks</span>
-    </a>
+    <!-- TASKS moved to the middle with submenu -->
+    <div class="mobile-task-dropdown">
+      <button
+        id="mobileTasksToggle"
+        type="button"
+        class="flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
+        <span class="text-lg">✔️</span>
+        <span class="uppercase tracking-wide text-[10px]">Tasks</span>
+      </button>
+
+      <div id="mobileTasksMenu" class="mobile-task-menu hidden">
+        <button type="button" id="mobileAddTaskBtn" class="btn btn-teal btn-toolbar w-full">Add a Task</button>
+        <button type="button" id="mobileGoTasksBtn" class="btn btn-teal btn-toolbar w-full">Go To Tasks</button>
+      </div>
+    </div>
 
     <a href="#vicesAnchor" class="flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
       <span class="text-lg">💀</span>
@@ -3257,6 +3267,53 @@ renderAll();
 
   </div>
 </nav>
+
+<script>
+  (() => {
+    const toggle = document.getElementById('mobileTasksToggle');
+    const menu = document.getElementById('mobileTasksMenu');
+    const addBtn = document.getElementById('mobileAddTaskBtn');
+    const goBtn = document.getElementById('mobileGoTasksBtn');
+
+    if (!toggle || !menu) return;
+
+    const closeMenu = () => menu.classList.add('hidden');
+
+    toggle.addEventListener('click', (e) => {
+      e.preventDefault();
+      menu.classList.toggle('hidden');
+    });
+
+    document.addEventListener('pointerdown', (e) => {
+      if (menu.classList.contains('hidden')) return;
+      if (e.target.closest('.mobile-task-dropdown')) return;
+      closeMenu();
+    });
+
+    addBtn?.addEventListener('click', () => {
+      closeMenu();
+      toggleAddTask?.();
+      document.getElementById('addTaskCard')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+
+    goBtn?.addEventListener('click', () => {
+      closeMenu();
+      document.getElementById('tasksAnchor')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+
+    window.addEventListener('resize', () => {
+      if (window.innerWidth >= 768) closeMenu();
+    });
+
+    // Open on keyboard activation (Enter/Space)
+    toggle.addEventListener('keyup', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        menu.classList.toggle('hidden');
+      }
+    });
+  })();
+</script>
 
 <script>
   (() => {
