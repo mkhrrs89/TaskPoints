@@ -3274,7 +3274,12 @@ renderAll();
       }
 
       const vv = window.visualViewport;
-      const keyboardLift = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+
+      // When the mobile keyboard opens, visualViewport.height shrinks.
+      // Using only the height delta keeps the bar anchored even while the
+      // viewport is scrolled (offsetTop can fluctuate as you pan around).
+      const layoutHeight = Math.min(window.innerHeight, document.documentElement.clientHeight);
+      const keyboardLift = Math.max(0, layoutHeight - vv.height);
 
       if (keyboardLift > 0) {
         // Translate the bar downward by the keyboard height so it stays docked at the page bottom
