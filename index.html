@@ -69,81 +69,7 @@
   </header>
 
   <!-- TOP ROW -->
-  <div class="grid gap-6 mb-6 lg:grid-cols-2">
-
-<!-- LEFT: Add a Task -->
-<div class="glass" id="addTaskCard">
-
-  <div class="flex justify-between items-center mb-3">
-    <button id="addTaskToggleBtn"
-      class="btn btn-teal px-6 py-3 text-base font-semibold rounded-xl"
-      onclick="toggleAddTask()">
-      Add a Task
-    </button>
-  </div>
-
-
-  <!-- Collapsible body: your existing form (wrapped so we can move it into a modal) -->
-  <div id="addTaskBodyHost">
-    <div id="addTaskBody" class="grid gap-3 hidden">
-    <!-- Row 1: task title -->
-    <input id="titleInput" class="input" placeholder="e.g., 30-min treadmill walk">
-
-    <!-- Row 2: priority + due date + Today -->
-    <div class="flex flex-wrap gap-2 mt-1">
-      <select id="importanceInput" class="input flex-1 min-w-[120px]">
-        <option>Low</option>
-        <option selected>Medium</option>
-        <option>High</option>
-        <option>Critical</option>
-      </select>
-
-      <input id="dueDateInput" type="date" class="input flex-1 min-w-[120px]">
-
-      <button class="btn btn-ghost text-xs px-2" onclick="setDueToday()">Today</button>
-    </div>
-
-<!-- Row 3: points + repeat rule -->
-    <div class="flex flex-wrap gap-2 mt-1">
-      <input id="pointsInput" type="number" min="0" class="input w-24" placeholder="e.g., 25">
-
-      <select id="repeatInput" class="input flex-1 min-w-[120px]">
-        <option value="none">Does not repeat</option>
-        <option value="daily">Every day</option>
-        <option value="weekdays">Weekdays (Mon–Fri)</option>
-        <option value="weekly">Every week</option>
-        <option value="monthly">Every month (same date)</option>
-        <option value="yearly">Every year (same date)</option>
-        <option value="custom">Custom…</option>
-      </select>
-    </div>
-
-    <!-- Custom repeat controls (hidden unless "Custom" selected) -->
-    <div id="repeatCustomRow" class="flex items-center gap-2 text-xs mt-2 hidden">
-      <span class="muted">Repeat every</span>
-      <input id="repeatCustomCount" type="number" min="1" class="input w-16" value="1">
-      <select id="repeatCustomUnit" class="input w-24">
-        <option value="day">day(s)</option>
-        <option value="week">week(s)</option>
-        <option value="month">month(s)</option>
-        <option value="year">year(s)</option>
-      </select>
-    </div>
-
-  <!-- ✅ Row 4: tags -->
-  <input
-    id="tagsInput"
-    class="input"
-    placeholder="Tags (e.g., work, coding, creative)"
-  >
-
-    <button id="addBtn" class="btn btn-primary">Add Task</button>
-  </div>
-</div>
-</div>
-
-<!-- RIGHT: Today's points + averages + graph -->
-    <div class="grid gap-3 sm:grid-cols-2">
+    <div class="grid gap-3 sm:grid-cols-2 mb-6">
       <!-- Today's Points + Daily Avg card (left) -->
       <div class="glass text-center">
         <div class="font-semibold text-sm muted">Today&#8217;s Points</div>
@@ -401,7 +327,10 @@
   <!-- TASKS grouped by day -->
   <div class="glass mb-6">
     <div class="flex justify-between items-center mb-3 gap-3 flex-wrap">
-     <h2 id="tasksAnchor" class="font-bold text-lg">Your Tasks</h2>
+     <div class="flex items-center gap-3 flex-wrap">
+       <h2 id="tasksAnchor" class="font-bold text-lg">Your Tasks</h2>
+       <button id="openAddTaskBtn" class="btn btn-primary">Add Task</button>
+     </div>
       <select id="sortSelect" class="input w-48">
         <option value="due">Sort by Due Date</option>
         <option value="importance">Sort by Importance</option>
@@ -427,8 +356,6 @@ let state=load();
 let editingTaskId = null;
 let editingHabitId = null;
 let editingFlexId = null;
-let addTaskExpanded = false;
-let addTaskFormLocation = 'card';  // 'card' or 'modal'
 
 
 function sleepBonus(score) {
@@ -476,85 +403,21 @@ function isDesktop() {
   return window.matchMedia("(min-width: 1024px)").matches;
 }
 
-function syncAddTaskFormLocation() {
-  const body      = $("addTaskBody");
-  const host      = $("addTaskBodyHost");
-  const modalBody = $("addTaskModalBody");
-  if (!body || !host || !modalBody) return;
-
-  if (isDesktop()) {
-    // Move form into the modal container on desktop
-    if (addTaskFormLocation !== "modal") {
-      modalBody.appendChild(body);
-      addTaskFormLocation = "modal";
-      body.classList.add("hidden"); // start hidden until Show Form
-    }
-  } else {
-    // Move form back under the card on mobile/tablet
-    if (addTaskFormLocation !== "card") {
-      host.appendChild(body);
-      addTaskFormLocation = "card";
-      body.classList.add("hidden"); // collapsed until Show Form
-    }
-  }
-}
-
 function openAddTaskModal() {
   const modal = $("addTaskModal");
-  const body  = $("addTaskBody");
-  const btn   = $("addTaskToggleBtn");
-  if (!modal || !body || !btn) return;
+  if (!modal) return;
 
-  // Make the modal visible and flex-centered
   modal.classList.remove("hidden");
   modal.classList.add("flex");
-
-  body.classList.remove("hidden");
-  addTaskExpanded = true;
-  btn.textContent = "Add a Task";
+  $('titleInput')?.focus();
 }
 
 function closeAddTaskModal() {
   const modal = $("addTaskModal");
-  const body  = $("addTaskBody");
-  const btn   = $("addTaskToggleBtn");
-  if (!modal || !body || !btn) return;
+  if (!modal) return;
 
-  // Hide the modal completely
   modal.classList.add("hidden");
   modal.classList.remove("flex");
-
-  body.classList.add("hidden");
-  addTaskExpanded = false;
-  btn.textContent = "Add a Task";
-}
-
-
-function toggleAddTask() {
-  const btn  = $("addTaskToggleBtn");
-  const body = $("addTaskBody");
-  if (!btn || !body) return;
-
-  // DESKTOP: use modal
-  if (isDesktop() && addTaskFormLocation === "modal") {
-    if (addTaskExpanded) {
-      closeAddTaskModal();
-    } else {
-      openAddTaskModal();
-    }
-    return;
-  }
-
-  // MOBILE/TABLET: collapse inline under the card (old behavior)
-  addTaskExpanded = !addTaskExpanded;
-
-  if (addTaskExpanded) {
-    body.classList.remove("hidden");
-    btn.textContent = "Add a Task";
-  } else {
-    body.classList.add("hidden");
-    btn.textContent = "Add a Task";
-  }
 }
 
 
@@ -2773,10 +2636,7 @@ function addTask(){
   clearForm();
   renderAll();
 
-  // ✅ Auto-close modal ONLY on desktop
-  if (isDesktop()) {
-    closeAddTaskModal();
-  }
+  closeAddTaskModal();
 }
 
 
@@ -3109,24 +2969,24 @@ function renderAll(){
 }
 
 
-window.addEventListener("load",   syncAddTaskFormLocation);
-window.addEventListener("resize", syncAddTaskFormLocation);
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#039;'}[m])); }
 
-function escapeHtml(s){ return String(s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m])); }
-
-$('addBtn').onclick=addTask;
-$('sortSelect').onchange=renderTasks;
-$('exportBtn').onclick=exportData;
-$('importInput').onchange=importFile;
-$('importPasteBtn').onclick=importPaste;
-$('resetBtn').onclick=resetAll;
-$('addHabitBtn').onclick=addHabit;
-$('addViceBtn').onclick=addVice;
-$('addFlexBtn').onclick=addFlexAction;
-$('saveSleepScoreBtn').onclick = saveSleepScore;
-$('saveCaloriesBtn').onclick = saveCalories;
-$('saveWorkScoreBtn').onclick = saveWorkScore;
-initCaloriesDatePicker();
+document.addEventListener('DOMContentLoaded', () => {
+  $('addBtn')?.addEventListener('click', addTask);
+  $('openAddTaskBtn')?.addEventListener('click', openAddTaskModal);
+  $('sortSelect')?.addEventListener('change', renderTasks);
+  $('exportBtn')?.addEventListener('click', exportData);
+  $('importInput')?.addEventListener('change', importFile);
+  $('importPasteBtn')?.addEventListener('click', importPaste);
+  $('resetBtn')?.addEventListener('click', resetAll);
+  $('addHabitBtn')?.addEventListener('click', addHabit);
+  $('addViceBtn')?.addEventListener('click', addVice);
+  $('addFlexBtn')?.addEventListener('click', addFlexAction);
+  $('saveSleepScoreBtn')?.addEventListener('click', saveSleepScore);
+  $('saveCaloriesBtn')?.addEventListener('click', saveCalories);
+  $('saveWorkScoreBtn')?.addEventListener('click', saveWorkScore);
+  initCaloriesDatePicker();
+});
 
 
 const repeatSel = $('repeatInput');
@@ -3176,8 +3036,60 @@ renderAll();
 
 
 
-    <!-- The real form gets moved in here on desktop -->
-    <div id="addTaskModalBody"></div>
+    <div id="addTaskModalBody" class="grid gap-3">
+      <!-- Row 1: task title -->
+      <input id="titleInput" class="input" placeholder="e.g., 30-min treadmill walk">
+
+      <!-- Row 2: priority + due date + Today -->
+      <div class="flex flex-wrap gap-2 mt-1">
+        <select id="importanceInput" class="input flex-1 min-w-[120px]">
+          <option>Low</option>
+          <option selected>Medium</option>
+          <option>High</option>
+          <option>Critical</option>
+        </select>
+
+        <input id="dueDateInput" type="date" class="input flex-1 min-w-[120px]">
+
+        <button class="btn btn-ghost text-xs px-2" onclick="setDueToday()">Today</button>
+      </div>
+
+      <!-- Row 3: points + repeat rule -->
+      <div class="flex flex-wrap gap-2 mt-1">
+        <input id="pointsInput" type="number" min="0" class="input w-24" placeholder="e.g., 25">
+
+        <select id="repeatInput" class="input flex-1 min-w-[120px]">
+          <option value="none">Does not repeat</option>
+          <option value="daily">Every day</option>
+          <option value="weekdays">Weekdays (Mon–Fri)</option>
+          <option value="weekly">Every week</option>
+          <option value="monthly">Every month (same date)</option>
+          <option value="yearly">Every year (same date)</option>
+          <option value="custom">Custom…</option>
+        </select>
+      </div>
+
+      <!-- Custom repeat controls (hidden unless "Custom" selected) -->
+      <div id="repeatCustomRow" class="flex items-center gap-2 text-xs mt-2 hidden">
+        <span class="muted">Repeat every</span>
+        <input id="repeatCustomCount" type="number" min="1" class="input w-16" value="1">
+        <select id="repeatCustomUnit" class="input w-24">
+          <option value="day">day(s)</option>
+          <option value="week">week(s)</option>
+          <option value="month">month(s)</option>
+          <option value="year">year(s)</option>
+        </select>
+      </div>
+
+      <!-- ✅ Row 4: tags -->
+      <input
+        id="tagsInput"
+        class="input"
+        placeholder="Tags (e.g., work, coding, creative)"
+      >
+
+      <button id="addBtn" class="btn btn-primary">Add Task</button>
+    </div>
   </div>
 </div>
 
@@ -3292,8 +3204,7 @@ renderAll();
 
     addBtn?.addEventListener('click', () => {
       closeMenu();
-      toggleAddTask?.();
-      document.getElementById('addTaskCard')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      openAddTaskModal?.();
     });
 
     goBtn?.addEventListener('click', () => {
