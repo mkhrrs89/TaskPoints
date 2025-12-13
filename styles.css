@@ -142,6 +142,30 @@
   border-left: 1px solid rgba(15,23,42,0.7);
 }
 
+.mobile-task-dropdown{
+  position: relative;
+  flex: 1;
+  display: flex;
+  justify-content: center;
+}
+
+.mobile-task-menu{
+  position: absolute;
+  bottom: 62px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: linear-gradient(180deg, #0f4d4d, #0a2f2f);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 180px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+  z-index: 50;
+}
+
 /* Light mode tweak so dividers aren’t too harsh */
 @media (prefers-color-scheme: light){
   .mobile-bottom-nav a + a{
