@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>TaskPoints — Daily Sources</title>
+
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%230a2f2f'/><text x='50' y='60' font-size='48' text-anchor='middle' fill='white'>TP</text></svg>">
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="styles.css">
+  <script src="toolbar.js" defer></script>
+</head>
+<body class="min-h-screen">
+  <div class="mx-auto max-w-6xl p-4 sm:p-6">
+
+    <header class="flex items-center justify-between mb-4 gap-3 flex-wrap">
+      <h1 class="text-2xl font-extrabold">Daily Sources</h1>
+      <div class="flex gap-2 flex-wrap items-center">
+        <a href="index.html"        class="btn btn-teal btn-toolbar">Main</a>
+        <a href="daily.html"        class="btn btn-teal btn-toolbar">Daily</a>
+        <a href="daily_sources.html" class="btn btn-teal btn-toolbar">Sources</a>
+        <a href="log.html"          class="btn btn-teal btn-toolbar">Log</a>
+        <a href="week.html"         class="btn btn-teal btn-toolbar">Week</a>
+        <div class="dropdown">
+          <button type="button" class="btn btn-teal btn-toolbar dropdown-toggle" data-dropdown-toggle aria-expanded="false">
+            Game <span class="caret">▾</span>
+          </button>
+          <div class="dropdown-menu">
+            <a href="game.html"         class="btn btn-teal btn-toolbar">Game</a>
+            <a href="matchups.html"     class="btn btn-teal btn-toolbar">Matchups</a>
+            <a href="schedule.html"     class="btn btn-teal btn-toolbar">Schedule</a>
+            <a href="game_ratings.html" class="btn btn-teal btn-toolbar">Ratings</a>
+          </div>
+        </div>
+        <a href="updates.html"      class="btn btn-teal btn-toolbar">Updates</a>
+      </div>
+    </header>
+
+    <main class="space-y-4">
+      <div class="glass">
+        <h2 class="font-semibold mb-1">Points By Source (Daily)</h2>
+        <p class="muted text-xs mb-3">
+          Each card shows a day's total points with a breakdown of where they came from.
+        </p>
+        <div id="dailySummary" class="text-xs mb-2 muted"></div>
+        <div id="scoresList" class="text-xs max-h-[70vh] overflow-y-auto space-y-2"></div>
+      </div>
+    </main>
+
+  </div>
+
+  <script>
+    const STORAGE_KEY = "taskpoints_v1";
+    const $ = id => document.getElementById(id);
+
+    function sleepBonus(score) {
+      if (score >= 100) return 3;
+      if (score >= 98) return 2;
+      if (score >= 95) return 1;
+      return 0;
+    }
+
+    function load() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return { tasks: [], completions: [], players: [], habits: [], flexActions: [], matchups: [], schedule: [] };
+        const p = JSON.parse(raw);
+        return {
+          tasks:       Array.isArray(p.tasks)       ? p.tasks       : [],
+          completions: Array.isArray(p.completions) ? p.completions : [],
+          players:     Array.isArray(p.players)     ? p.players     : [],
+          habits:      Array.isArray(p.habits)      ? p.habits      : [],
+          flexActions: Array.isArray(p.flexActions) ? p.flexActions : [],
+          matchups: Array.isArray(p.matchups) ? p.matchups : [],
+          schedule: Array.isArray(p.schedule) ? p.schedule : []
+        };
+      } catch (e) {
+        console.error("Failed to load TaskPoints state", e);
+        return { tasks: [], completions: [], players: [], habits: [], flexActions: [], matchups: [], schedule: [] };
+      }
+    }
+
+    let state = load();
+
+    function migrateSleepEntriesForBonus() {
+      if (!state || !Array.isArray(state.completions)) return;
+
+      let changed = false;
+
+      state.completions.forEach(c => {
+        if (!c || !c.title || !c.title.startsWith("Sleep Score")) return;
+
+        const match = c.title.match(/\((\d+)\)/);
+        if (!match) return;
+
+        const raw = Number(match[1]);
+        if (!Number.isFinite(raw)) return;
+
+        const base  = raw / 10;
+        const bonus = sleepBonus(raw);
+        const newPts = base + bonus;
+
+        if (Math.abs((Number(c.points) || 0) - newPts) > 0.0001) {
+          c.points = newPts;
+          changed = true;
+        }
+      });
+
+      if (changed) {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        } catch (e) {
+          console.error("Failed to save migrated sleep entries", e);
+        }
+      }
+    }
+
+    function dateKey(d) {
+      if (!(d instanceof Date)) d = new Date(d);
+      if (!d || isNaN(d.getTime())) return "invalid";
+      const y  = d.getFullYear();
+      const m  = String(d.getMonth() + 1).padStart(2, "0");
+      const dd = String(d.getDate()).padStart(2, "0");
+      return `${y}-${m}-${dd}`;
+    }
+
+    function fromKey(k) {
+      if (!k || typeof k !== "string") return new Date(NaN);
+      const parts = k.split("-");
+      if (parts.length < 3) return new Date(NaN);
+      const [yStr, mStr, dStr] = parts;
+      const y = parseInt(yStr, 10);
+      const m = parseInt(mStr, 10);
+      const d = parseInt(dStr, 10);
+      if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) {
+        return new Date(NaN);
+      }
+      const dt = new Date(y, m - 1, d);
+      dt.setHours(0, 0, 0, 0);
+      return dt;
+    }
+
+    function niceDate(d) {
+      if (!(d instanceof Date)) d = new Date(d);
+      if (!d || isNaN(d.getTime())) return "Invalid date";
+      return d.toLocaleDateString(undefined, {
+        year:  "numeric",
+        month: "short",
+        day:   "numeric"
+      });
+    }
+
+    const CATEGORY_DEFS = [
+      { key: "sleep",    label: "Sleep",    match: c => typeof c.title === "string" && c.title.startsWith("Sleep Score (") },
+      { key: "calories", label: "Calories", match: c => typeof c.title === "string" && c.title.startsWith("Calories (") },
+      { key: "habits",   label: "Habits",   match: c => c.source === "habit" },
+      { key: "vices",    label: "Vices",    match: c => c.source === "vice" },
+      { key: "flex",     label: "Flex",     match: c => c.source === "flex" },
+      { key: "work",     label: "Work",     match: c => c.source === "work" },
+      { key: "tasks",    label: "Tasks",    match: () => true }
+    ];
+
+    function categorizeCompletion(c) {
+      for (const def of CATEGORY_DEFS) {
+        try {
+          if (def.match(c)) return def.key;
+        } catch (e) {
+          console.warn("Category check failed", e);
+        }
+      }
+      return "other";
+    }
+
+    function buildDailyBreakdowns() {
+      const daily = {};
+      const comps = Array.isArray(state.completions) ? state.completions : [];
+
+      comps.forEach(c => {
+        if (!c || !c.completedAtISO) return;
+        const d = new Date(c.completedAtISO);
+        if (!d || isNaN(d.getTime())) return;
+        d.setHours(0, 0, 0, 0);
+        const key = dateKey(d);
+
+        if (!daily[key]) {
+          daily[key] = {
+            total: 0,
+            categories: {}
+          };
+        }
+
+        const pts = Number(c.points) || 0;
+        if (!pts) return;
+
+        const catKey = categorizeCompletion(c);
+        daily[key].total += pts;
+        daily[key].categories[catKey] = (daily[key].categories[catKey] || 0) + pts;
+      });
+
+      return daily;
+    }
+
+    function renderDailyBreakdowns() {
+      const listEl = $("scoresList");
+      const summaryEl = $("dailySummary");
+      if (!listEl) return;
+
+      const daily = buildDailyBreakdowns();
+      const keys = Object.keys(daily).sort();
+
+      if (!keys.length) {
+        listEl.innerHTML = '<div class="muted">No days logged yet.</div>';
+        if (summaryEl) summaryEl.textContent = "";
+        return;
+      }
+
+      const totalDays = keys.length;
+      const totalPts = keys.reduce((sum, k) => sum + (daily[k].total || 0), 0);
+      const avg = totalPts / totalDays;
+
+      if (summaryEl) {
+        summaryEl.textContent = `${totalDays} days tracked • Average ${avg.toFixed(1)} pts/day`;
+      }
+
+      listEl.innerHTML = keys.map(k => {
+        const d = fromKey(k);
+        const label = niceDate(d);
+        const entry = daily[k];
+        const categories = entry.categories || {};
+
+        const parts = CATEGORY_DEFS
+          .map(def => ({ key: def.key, label: def.label, pts: categories[def.key] || 0 }))
+          .filter(p => p.pts > 0);
+
+        const otherPts = categories.other || 0;
+        if (otherPts > 0) {
+          parts.push({ key: "other", label: "Other", pts: otherPts });
+        }
+
+        if (!parts.length) {
+          parts.push({ key: "none", label: "No points logged", pts: 0 });
+        }
+
+        const badges = parts.map(p => {
+          return `<span class="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-zinc-800/60 dark:bg-zinc-800 text-[11px]">
+            <span class="font-semibold">${p.label}</span>
+            <span class="font-mono">${p.pts.toFixed(1)}</span>
+          </span>`;
+        }).join(' ');
+
+        return `
+          <div class="border border-zinc-800/60 rounded-xl p-3 sm:p-4 bg-white/5 dark:bg-zinc-900/50">
+            <div class="flex items-center justify-between gap-4 flex-wrap mb-2">
+              <div class="font-semibold">${label}</div>
+              <div class="font-mono text-sm">Total ${entry.total.toFixed(1)} pts</div>
+            </div>
+            <div class="flex flex-wrap gap-2">${badges}</div>
+          </div>
+        `;
+      }).join("\n");
+    }
+
+    migrateSleepEntriesForBonus();
+    renderDailyBreakdowns();
+  </script>
+</body>
+</html>
