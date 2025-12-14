@@ -219,7 +219,7 @@
             <div id="caloriesTodayImpact" class="muted text-xs mt-1">Adds 0 pts to today</div>
           </div>
 
-<div class="flex items-center gap-3 flex-wrap mt-3">
+<div class="flex items-center gap-3 mt-3 flex-nowrap sm:flex-wrap">
   <input id="caloriesInput" class="input w-24" type="number" placeholder="0–3000">
 
   <div class="datePickWrap" title="Pick date">
@@ -241,7 +241,7 @@
               <span id="caloriesDateLabel" class="date-trigger-label"></span>
             </button>
             <input id="caloriesDate" class="visually-hidden-date" type="date">
-            <button id="saveCaloriesBtn" class="btn btn-teal">Add</button>
+            <button id="saveCaloriesBtn" class="btn btn-teal flex-none !w-auto">Add</button>
           </div>
 
           <p class="muted text-xs mt-2">
@@ -279,7 +279,7 @@
             <div id="workTodayImpact" class="muted text-xs mt-1">Adds 0 pts to today</div>
           </div>
 
-          <div class="flex items-center gap-3 flex-wrap mt-3">
+          <div class="flex items-center gap-3 mt-3 flex-nowrap sm:flex-wrap">
             <input id="workScoreInput" class="input w-24" type="number" placeholder="0–100">
             <button id="saveWorkScoreBtn" class="btn btn-work">Add</button>
           </div>
