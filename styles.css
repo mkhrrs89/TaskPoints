@@ -654,6 +654,12 @@
   z-index: 2;
 }
 
+@media (max-width: 520px) {
+  .caloriesEntryRow { flex-wrap: nowrap; }
+  .caloriesEntryRow #caloriesInput { flex: 1 1 auto; min-width: 0; }
+  .caloriesEntryRow #saveCaloriesBtn { flex: 0 0 auto; }
+}
+
 .work-today-card {
   background: linear-gradient(180deg, rgba(147, 197, 253, 0.5), rgba(59, 130, 246, 0.35));
   border-radius: 16px;
@@ -746,6 +752,7 @@
     width: 3.5rem; /* slightly narrower than default */
   }
 }
+
 
 
 
