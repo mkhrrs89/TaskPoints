@@ -559,6 +559,16 @@
   color:#fff;
 }
 
+.sleep-rest-chip {
+  font-size: 14px;
+  font-weight: 700;
+  color: #e8eaff;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  padding: 2px 10px;
+  line-height: 1.1;
+}
+
 .calories-today-card {
   background: linear-gradient(180deg, #0f4d4d, #0a2f2f);
   border-radius: 16px;
