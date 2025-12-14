@@ -165,7 +165,7 @@
             <div class="flex items-center gap-2 flex-wrap">
               <div class="flex items-baseline gap-2">
                 <div id="sleepTodayValue" class="text-4xl font-extrabold leading-tight">—</div>
-                <div id="sleepTodayRest" class="sleep-rest-chip hidden">Rest <span id="sleepTodayRestValue"></span></div>
+                <div id="sleepTodayRest" class="sleep-rest-chip hidden"><span id="sleepTodayRestValue"></span></div>
               </div>
               <button id="editSleepTodayBtn" class="btn btn-ghost btn-sm hidden" aria-label="Edit today’s sleep">🛌</button>
             </div>
@@ -2417,7 +2417,7 @@ function renderSleepHistory() {
         const hasRest = Number.isFinite(rested) && rested !== 0;
         if (todayRestChip && todayRestValue) {
           if (hasRest) {
-            todayRestValue.textContent = rested;
+            todayRestValue.textContent = rested > 0 ? `+${rested}` : `${rested}`;
             todayRestChip.classList.remove('hidden');
           } else {
             todayRestChip.classList.add('hidden');
@@ -2426,7 +2426,7 @@ function renderSleepHistory() {
         }
 
         const totalPts = sleepPoints(score, rested);
-        const restText = hasRest ? ` (rest ${rested >= 0 ? '+' : ''}${rested})` : '';
+        const restText = hasRest ? ` (${rested >= 0 ? '+' : ''}${rested})` : '';
 
         todayImpactEl.textContent = `Adds ${totalPts.toFixed(1)} pts to today${restText}`;
       } else {
@@ -2477,7 +2477,7 @@ function renderSleepHistory() {
 
     const { score, rested } = getSleepInfo(entry);
     const pts   = sleepPoints(score, rested).toFixed(1);
-    const restLabel = rested ? `<div class="sleep-chip-rest muted text-[11px]">Rest ${rested}</div>` : '';
+    const restLabel = rested ? `<div class="sleep-chip-rest muted text-[11px]">${rested > 0 ? `+${rested}` : rested}</div>` : '';
     const scoreDisplay = Number.isFinite(score) ? score : '?';
 
     const block = document.createElement('div');
