@@ -72,8 +72,19 @@
   <!-- TOP ROW -->
     <div class="grid gap-3 sm:grid-cols-2 mb-6">
       <!-- Today's Points + Daily Avg card (left) -->
-      <div class="glass text-center">
-        <div class="font-semibold text-sm muted">Today&#8217;s Points</div>
+<div class="glass text-center relative">
+  <div class="font-semibold text-sm muted">Today&#8217;s Points</div>
+
+  <!-- DESKTOP ONLY: Add Task button (does not affect mobile) -->
+  <button
+    id="todayPointsAddTaskBtn"
+    type="button"
+    class="btn btn-teal hidden lg:inline-flex absolute top-3 right-3"
+    onclick="toggleAddTask()"
+  >
+    Add Task
+  </button>
+
         <div id="todayPoints" class="text-5xl sm:text-6xl font-extrabold mt-1">0</div>
         <div class="text-[11px] muted mt-1">Points earned so far today</div>
 
