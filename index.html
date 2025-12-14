@@ -219,13 +219,24 @@
             <div id="caloriesTodayImpact" class="muted text-xs mt-1">Adds 0 pts to today</div>
           </div>
 
-          <div class="flex items-center gap-3 flex-wrap mt-3">
-            <input id="caloriesInput" class="input w-24" type="number" placeholder="0–3000">
-            <button id="caloriesDateBtn" type="button" class="btn date-trigger" aria-label="Pick a date for this calorie entry">
-              <svg class="date-trigger-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <rect x="4" y="5" width="16" height="15" rx="2" ry="2" stroke="currentColor" stroke-width="1.5"></rect>
-                <path d="M16 3v4M8 3v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
-                <path d="M4 9h16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
+<div class="flex items-center gap-3 flex-wrap mt-3">
+  <input id="caloriesInput" class="input w-24" type="number" placeholder="0–3000">
+
+  <div class="datePickWrap" title="Pick date">
+    <button class="btn date-trigger dateTriggerBtn" type="button" aria-hidden="true" tabindex="-1">
+      <svg class="date-trigger-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <rect x="4" y="5" width="16" height="15" rx="2" ry="2" stroke="currentColor" stroke-width="1.5"></rect>
+        <path d="M16 3v4M8 3v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
+        <path d="M4 9h16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
+      </svg>
+    </button>
+
+    <input id="caloriesDate" type="date" class="dateOverlay" aria-label="Pick date for calories" />
+  </div>
+
+  <div id="caloriesDateLabel" class="datePill"></div>
+</div>
+
               </svg>
               <span id="caloriesDateLabel" class="date-trigger-label"></span>
             </button>
