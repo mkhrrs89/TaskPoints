@@ -162,8 +162,11 @@
           <h2 id="sleepAnchor" class="font-bold text-lg mb-2">Sleep Score</h2>
           <div class="mb-2">
             <div class="muted text-xs">Today’s Sleep</div>
-            <div class="flex items-center gap-2">
-              <div id="sleepTodayValue" class="text-4xl font-extrabold leading-tight">—</div>
+            <div class="flex items-center gap-2 flex-wrap">
+              <div class="flex items-baseline gap-2">
+                <div id="sleepTodayValue" class="text-4xl font-extrabold leading-tight">—</div>
+                <div id="sleepTodayRest" class="sleep-rest-chip hidden">Rest <span id="sleepTodayRestValue"></span></div>
+              </div>
               <button id="editSleepTodayBtn" class="btn btn-ghost btn-sm hidden" aria-label="Edit today’s sleep">🛌</button>
             </div>
             <div id="sleepTodayImpact" class="muted text-xs mt-1">Adds 0 pts to today</div>
@@ -2398,10 +2401,12 @@ function renderSleepHistory() {
   const todayKey = dateKey(new Date());
   const todayEntry = getTodaySleepEntry();
 
-  const todayValueEl  = $('sleepTodayValue');
-  const todayImpactEl = $('sleepTodayImpact');
-  const sleepInputRow = $('sleepInputRow');
-  const sleepEditBtn  = $('editSleepTodayBtn');
+  const todayValueEl   = $('sleepTodayValue');
+  const todayImpactEl  = $('sleepTodayImpact');
+  const todayRestChip  = $('sleepTodayRest');
+  const todayRestValue = $('sleepTodayRestValue');
+  const sleepInputRow  = $('sleepInputRow');
+  const sleepEditBtn   = $('editSleepTodayBtn');
 
   if (todayValueEl && todayImpactEl) {
     if (todayEntry) {
@@ -2409,8 +2414,19 @@ function renderSleepHistory() {
       if (score != null && !Number.isNaN(score)) {
         todayValueEl.textContent = score;
 
+        const hasRest = Number.isFinite(rested) && rested !== 0;
+        if (todayRestChip && todayRestValue) {
+          if (hasRest) {
+            todayRestValue.textContent = rested;
+            todayRestChip.classList.remove('hidden');
+          } else {
+            todayRestChip.classList.add('hidden');
+            todayRestValue.textContent = '';
+          }
+        }
+
         const totalPts = sleepPoints(score, rested);
-        const restText = rested ? ` (rest ${rested >= 0 ? '+' : ''}${rested})` : '';
+        const restText = hasRest ? ` (rest ${rested >= 0 ? '+' : ''}${rested})` : '';
 
         todayImpactEl.textContent = `Adds ${totalPts.toFixed(1)} pts to today${restText}`;
       } else {
@@ -2421,6 +2437,11 @@ function renderSleepHistory() {
       todayValueEl.textContent = '—';
       todayImpactEl.textContent = 'Adds 0 pts to today';
     }
+  }
+
+  if (todayRestChip && todayRestValue && !todayEntry) {
+    todayRestChip.classList.add('hidden');
+    todayRestValue.textContent = '';
   }
 
   if (todayEntry) {
