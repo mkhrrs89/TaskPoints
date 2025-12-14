@@ -218,8 +218,7 @@
             <div id="caloriesTodayValue" class="text-4xl font-extrabold leading-tight">—</div>
             <div id="caloriesTodayImpact" class="muted text-xs mt-1">Adds 0 pts to today</div>
           </div>
-
-<div class="flex items-center gap-3 mt-3 flex-nowrap sm:flex-wrap">
+<div class="caloriesEntryRow flex items-center gap-3 mt-3 flex-nowrap sm:flex-wrap">
   <input id="caloriesInput" class="input w-24" type="number" placeholder="0–3000">
 
   <div class="datePickWrap" title="Pick date">
@@ -231,18 +230,14 @@
       </svg>
     </button>
 
-    <input id="caloriesDate" type="date" class="dateOverlay" aria-label="Pick date for calories" />
+    <input id="caloriesDate" class="dateOverlay" type="date" aria-label="Pick a date for this calorie entry">
   </div>
 
-  <div id="caloriesDateLabel" class="datePill"></div>
+  <button id="saveCaloriesBtn" class="btn btn-teal">Add</button>
 </div>
 
-              </svg>
-              <span id="caloriesDateLabel" class="date-trigger-label"></span>
-            </button>
-            <input id="caloriesDate" class="visually-hidden-date" type="date">
-            <button id="saveCaloriesBtn" class="btn btn-teal flex-none !w-auto">Add</button>
-          </div>
+<div id="caloriesDateLabel" class="datePill"></div>
+
 
           <p class="muted text-xs mt-2">
             (2400 − calories) ÷ 100, capped between 0 and 10 pts, rounded to the nearest tenth.
