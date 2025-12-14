@@ -2418,28 +2418,25 @@ function formatCaloriesDateLabel(value) {
   return `${m}/${d}`;
 }
 
-
-function initCaloriesDatePicker() {
-  const dateBtn = $('caloriesDateBtn');
+function initCaloriesDatePicker(){
   const dateInput = $('caloriesDate');
-  const dateLabel = $('caloriesDateLabel');
-  if (!dateBtn || !dateInput) return;
+  const label = $('caloriesDateLabel');
+  if(!dateInput || !label) return;
 
-  const syncLabel = () => {
-    if (dateLabel) dateLabel.textContent = formatCaloriesDateLabel(dateInput.value);
-  };
-
-  dateBtn.addEventListener('click', () => {
-    if (typeof dateInput.showPicker === 'function') {
-      dateInput.showPicker();
-    } else {
-      dateInput.click();
+  dateInput.addEventListener('change', () => {
+    const picked = dateInput.value; // "YYYY-MM-DD"
+    if(!picked){
+      label.textContent = '';
+      return;
     }
-  });
 
-  dateInput.addEventListener('change', syncLabel);
-  syncLabel();
+    const [y, m, d] = picked.split('-').map(Number);
+    const dt = new Date(y, m - 1, d);
+
+    label.textContent = `📅 ${dt.toLocaleDateString([], { month:'short', day:'numeric', year:'numeric' })}`;
+  });
 }
+
 
 
 function renderSleepHistory() {
