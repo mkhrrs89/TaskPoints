@@ -218,7 +218,7 @@
             <div id="caloriesTodayValue" class="text-4xl font-extrabold leading-tight">—</div>
             <div id="caloriesTodayImpact" class="muted text-xs mt-1">Adds 0 pts to today</div>
           </div>
-<div class="caloriesEntryRow flex items-center gap-3 mt-3 flex-nowrap sm:flex-wrap">
+<div id="caloriesInputRow" class="caloriesEntryRow flex items-center gap-3 mt-3 flex-nowrap sm:flex-wrap">
   <input id="caloriesInput" class="input w-24" type="number" placeholder="0–3000">
 
   <div class="datePickWrap" title="Pick date">
@@ -418,6 +418,39 @@ function getTodaySleepEntry() {
   }
 
   return null;
+}
+
+function getTodayCaloriesEntry() {
+  const todayKey = dateKey(new Date());
+  for (const entry of state.completions) {
+    if (!entry?.title?.startsWith('Calories')) continue;
+    const d = new Date(entry.completedAtISO);
+    if (dateKey(d) === todayKey) return entry;
+  }
+  return null;
+}
+
+function editTodayCalories() {
+  const entry = getTodayCaloriesEntry();
+  if (!entry) return alert("You haven't entered today's calories yet.");
+
+  const current = entry.title.match(/\((\d+)\)/)?.[1] ?? '';
+  const newVal = prompt("Edit today's calories:", String(current));
+  if (newVal === null) return; // user cancelled
+
+  const raw = Number(String(newVal).trim());
+  if (Number.isNaN(raw) || raw < 0) return alert("Invalid calories.");
+
+  // keep it pinned to *today* so it stays a “today” entry
+  const d = new Date();
+  d.setHours(12, 0, 0, 0);
+
+  entry.title = `Calories (${raw})`;
+  entry.points = caloriesToPoints(raw);
+  entry.completedAtISO = d.toISOString();
+
+  save();
+  renderAll();
 }
 
 let sleepEditContext = null;
@@ -2578,22 +2611,55 @@ function renderCaloriesHistory() {
     .slice()
     .sort((a,b) => new Date(b.completedAtISO) - new Date(a.completedAtISO));
 
-  const today = new Date();
-  const todayKey = dateKey(today);
-  let todayEntry = null;
-
-  for (const entry of entries) {
-    const d = new Date(entry.completedAtISO);
-    if (dateKey(d) === todayKey) {
-      todayEntry = entry;
-      break;
-    }
-  }
+  const todayKey = dateKey(new Date());
+  const todayEntry = getTodayCaloriesEntry();
 
   // Big Today stat
   const todayValueEl  = $('caloriesTodayValue');
   const todayImpactEl = $('caloriesTodayImpact');
 
+  const inputRow = $('caloriesInputRow');
+  const dateInput = $('caloriesDate');
+  const dateLabel = $('caloriesDateLabel');
+
+  const setTodayCaloriesEditable = (el) => {
+    if (!el) return;
+    if (todayEntry) {
+      el.classList.add('cursor-pointer');
+      el.setAttribute('role', 'button');
+      el.setAttribute('tabindex', '0');
+      el.onclick = editTodayCalories;
+      el.onkeydown = (ev) => {
+        if (ev.key === 'Enter' || ev.key === ' ') {
+          ev.preventDefault();
+          editTodayCalories();
+        }
+      };
+    } else {
+      el.classList.remove('cursor-pointer');
+      el.removeAttribute('role');
+      el.removeAttribute('tabindex');
+      el.onclick = null;
+      el.onkeydown = null;
+    }
+  };
+
+  // hide the entry UI once today exists (Sleep-style)
+  if (todayEntry) {
+    inputRow?.classList.add('hidden');
+    dateLabel?.classList.add('hidden');
+  } else {
+    inputRow?.classList.remove('hidden');
+    dateLabel?.classList.remove('hidden');
+
+    // optional but recommended: default back to “today” mode
+    if (dateInput) dateInput.value = '';
+    if (dateLabel) dateLabel.textContent = '';
+  }
+
+  setTodayCaloriesEditable(todayValueEl);
+
+  
   if (todayValueEl && todayImpactEl) {
     if (todayEntry) {
       const titleMatch = todayEntry.title.match(/\((\d+)\)/);
