@@ -401,31 +401,77 @@ function getTodaySleepEntry() {
   return null;
 }
 
+let sleepEditContext = null;
+
 function promptEditSleepEntry(entry) {
   if (!entry) return;
 
+  sleepEditContext = entry;
+
   const { score, rested } = getSleepInfo(entry);
+
+  const modal = $('sleepEditModal');
+  const scoreInput = $('sleepEditScoreInput');
+  const restInput  = $('sleepEditRestedInput');
+  const dateLabel  = $('sleepEditDateLabel');
+
+  if (!modal || !scoreInput || !restInput) return;
+
   const scoreDisplay = Number.isFinite(score) ? score : '';
+  const restDisplay  = Number.isFinite(rested) ? rested : '';
 
-  const newScoreInput = prompt('Edit sleep score for this day:', scoreDisplay);
-  if (newScoreInput === null) return;
+  scoreInput.value = scoreDisplay;
+  restInput.value  = restDisplay;
 
-  const raw = Number(newScoreInput);
-  if (Number.isNaN(raw) || raw < 0 || raw > 100) return alert('Invalid score.');
+  if (dateLabel) {
+    const date = new Date(entry.completedAtISO);
+    dateLabel.textContent = date.toLocaleDateString('en-US', {
+      weekday: 'short', month: 'short', day: 'numeric'
+    });
+  }
 
-  const restedDefault = Number.isFinite(rested) ? rested : 0;
-  const newRestedInput = prompt('Edit how rested you felt (number, blank = 0):', `${restedDefault}`);
-  if (newRestedInput === null) return;
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
 
-  const newRested = newRestedInput.trim() === '' ? 0 : Number(newRestedInput);
-  if (!Number.isFinite(newRested)) return alert('Invalid rested number.');
+  scoreInput.focus();
+  scoreInput.select();
+}
 
-  entry.title = `Sleep Score (${raw}) — Rest ${newRested}`;
-  entry.points = sleepPoints(raw, newRested);
-  entry.sleepRested = newRested;
+function closeSleepEditModal() {
+  const modal = $('sleepEditModal');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+  sleepEditContext = null;
+}
+
+function submitSleepEditModal() {
+  if (!sleepEditContext) return closeSleepEditModal();
+
+  const scoreInput = $('sleepEditScoreInput');
+  const restInput  = $('sleepEditRestedInput');
+  if (!scoreInput || !restInput) return;
+
+  const scoreVal = Number(scoreInput.value);
+  if (Number.isNaN(scoreVal) || scoreVal < 0 || scoreVal > 100) {
+    alert('Enter a sleep score between 0 and 100.');
+    return;
+  }
+
+  const restStr = restInput.value.trim();
+  const restVal = restStr === '' ? 0 : Number(restStr);
+  if (!Number.isFinite(restVal)) {
+    alert('Rested value must be a number.');
+    return;
+  }
+
+  sleepEditContext.title = `Sleep Score (${scoreVal}) — Rest ${restVal}`;
+  sleepEditContext.points = sleepPoints(scoreVal, restVal);
+  sleepEditContext.sleepRested = restVal;
 
   save();
   renderAll();
+  closeSleepEditModal();
 }
 
 function migrateSleepEntriesForBonus() {
@@ -3053,6 +3099,14 @@ document.addEventListener('DOMContentLoaded', () => {
   $('addFlexBtn')?.addEventListener('click', addFlexAction);
   $('saveSleepScoreBtn')?.addEventListener('click', saveSleepScore);
   $('editSleepTodayBtn')?.addEventListener('click', editTodaySleepScore);
+  $('sleepEditModal')?.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeSleepEditModal();
+  });
+  ['sleepEditScoreInput','sleepEditRestedInput'].forEach(id => {
+    $(id)?.addEventListener('keydown', e => {
+      if (e.key === 'Enter') submitSleepEditModal();
+    });
+  });
   $('saveCaloriesBtn')?.addEventListener('click', saveCalories);
   $('saveWorkScoreBtn')?.addEventListener('click', saveWorkScore);
   initCaloriesDatePicker();
@@ -3088,6 +3142,50 @@ console.log('TaskPoints main state summary:', {
 renderAll();
 
 </script>
+
+<!-- EDIT SLEEP ENTRY MODAL -->
+<div
+  id="sleepEditModal"
+  class="fixed inset-0 z-40 hidden items-center justify-center bg-black/60"
+  onclick="closeSleepEditModal()"
+>
+  <div
+    id="sleepEditModalBody"
+    class="w-full max-w-md mx-4 rounded-2xl px-6 pb-6 pt-10 relative bg-zinc-900 text-zinc-100"
+    onclick="event.stopPropagation();"
+  >
+    <button
+      type="button"
+      class="absolute top-4 right-4 btn btn-secondary text-xs px-3 py-1 rounded-md"
+      onclick="closeSleepEditModal()"
+    >
+      Close
+    </button>
+
+    <div class="flex items-start justify-between gap-3 mb-4">
+      <div>
+        <div class="muted text-xs uppercase tracking-wide">Edit Sleep</div>
+        <div id="sleepEditDateLabel" class="text-lg font-semibold leading-tight"></div>
+      </div>
+      <div class="text-3xl">🛌</div>
+    </div>
+
+    <label class="grid gap-1 text-sm font-medium">
+      Sleep score (0–100)
+      <input id="sleepEditScoreInput" type="number" min="0" max="100" class="input" placeholder="e.g., 95">
+    </label>
+
+    <label class="grid gap-1 text-sm font-medium mt-3">
+      Rested modifier (can be negative)
+      <input id="sleepEditRestedInput" type="number" class="input" placeholder="e.g., 1">
+    </label>
+
+    <div class="flex justify-end gap-2 mt-6">
+      <button type="button" class="btn btn-secondary" onclick="closeSleepEditModal()">Cancel</button>
+      <button type="button" id="sleepEditSaveBtn" class="btn btn-primary" onclick="submitSleepEditModal()">Save</button>
+    </div>
+  </div>
+</div>
 
 <!-- DESKTOP-ONLY ADD TASK MODAL -->
 <div
