@@ -167,7 +167,6 @@
                 <div id="sleepTodayValue" class="text-4xl font-extrabold leading-tight">—</div>
                 <div id="sleepTodayRest" class="sleep-rest-chip hidden"><span id="sleepTodayRestValue"></span></div>
               </div>
-              <button id="editSleepTodayBtn" class="btn btn-ghost btn-sm hidden" aria-label="Edit today’s sleep">🛌</button>
             </div>
             <div id="sleepTodayImpact" class="muted text-xs mt-1">Adds 0 pts to today</div>
           </div>
@@ -2406,7 +2405,28 @@ function renderSleepHistory() {
   const todayRestChip  = $('sleepTodayRest');
   const todayRestValue = $('sleepTodayRestValue');
   const sleepInputRow  = $('sleepInputRow');
-  const sleepEditBtn   = $('editSleepTodayBtn');
+
+  const setTodaySleepEditable = (el) => {
+    if (!el) return;
+    if (todayEntry) {
+      el.classList.add('cursor-pointer');
+      el.setAttribute('role', 'button');
+      el.setAttribute('tabindex', '0');
+      el.onclick = editTodaySleepScore;
+      el.onkeydown = (ev) => {
+        if (ev.key === 'Enter' || ev.key === ' ') {
+          ev.preventDefault();
+          editTodaySleepScore();
+        }
+      };
+    } else {
+      el.classList.remove('cursor-pointer');
+      el.removeAttribute('role');
+      el.removeAttribute('tabindex');
+      el.onclick = null;
+      el.onkeydown = null;
+    }
+  };
 
   if (todayValueEl && todayImpactEl) {
     if (todayEntry) {
@@ -2444,12 +2464,13 @@ function renderSleepHistory() {
     todayRestValue.textContent = '';
   }
 
+  setTodaySleepEditable(todayValueEl);
+  setTodaySleepEditable(todayRestChip);
+
   if (todayEntry) {
     sleepInputRow?.classList.add('hidden');
-    sleepEditBtn?.classList.remove('hidden');
   } else {
     sleepInputRow?.classList.remove('hidden');
-    sleepEditBtn?.classList.add('hidden');
   }
 
 
@@ -3119,7 +3140,6 @@ document.addEventListener('DOMContentLoaded', () => {
   $('addViceBtn')?.addEventListener('click', addVice);
   $('addFlexBtn')?.addEventListener('click', addFlexAction);
   $('saveSleepScoreBtn')?.addEventListener('click', saveSleepScore);
-  $('editSleepTodayBtn')?.addEventListener('click', editTodaySleepScore);
   $('sleepEditModal')?.addEventListener('keydown', e => {
     if (e.key === 'Escape') closeSleepEditModal();
   });
