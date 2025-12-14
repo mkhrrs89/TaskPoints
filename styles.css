@@ -609,6 +609,24 @@
   pointer-events: none;
 }
 
+/* Calories date picker: make iOS open reliably */
+.caloriesDateRow{
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* invisible, but still tappable (DON'T use display:none) */
+.caloriesDateRow .visually-hidden-date{
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  z-index: 2;
+}
+
 .work-today-card {
   background: linear-gradient(180deg, rgba(147, 197, 253, 0.5), rgba(59, 130, 246, 0.35));
   border-radius: 16px;
