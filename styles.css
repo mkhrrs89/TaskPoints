@@ -538,6 +538,33 @@
   border-radius:12px; /* or 999px if you want very pill-like */
 }
 
+.datePickWrap{
+  position: relative;
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* show the nice button, but don’t let it “eat” taps */
+.datePickWrap .dateTriggerBtn{
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* the REAL tappable thing (invisible, but on top) */
+.datePickWrap .dateOverlay{
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+
 /* date line inside chip */
 .sleep-chip-date{
   font-size:11px;
@@ -719,6 +746,7 @@
     width: 3.5rem; /* slightly narrower than default */
   }
 }
+
 
 
 
