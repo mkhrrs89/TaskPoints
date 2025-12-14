@@ -543,6 +543,39 @@ function closeAddTaskModal() {
   modal.classList.remove("flex");
 }
 
+  function toggleAddTask() {
+  const modal = $("addTaskModal");
+  if (!modal) return;
+
+  if (modal.classList.contains("hidden")) openAddTaskModal();
+  else closeAddTaskModal();
+}
+
+function openAddTaskModal() {
+  const modal = $("addTaskModal");
+  if (!modal) return;
+
+  modal.classList.remove("hidden");
+  modal.classList.add("flex");
+  $("titleInput")?.focus();
+
+  // 👇 this is where btn.textContent belongs
+  const btn = $("todayPointsAddTaskBtn");
+  if (btn) btn.textContent = "Close";
+}
+
+function closeAddTaskModal() {
+  const modal = $("addTaskModal");
+  if (!modal) return;
+
+  modal.classList.add("hidden");
+  modal.classList.remove("flex");
+
+  // 👇 and here
+  const btn = $("todayPointsAddTaskBtn");
+  if (btn) btn.textContent = "Add Task";
+}
+
 
 function showPointsToast(points){
   const container = $('pointsToastContainer');
@@ -3165,16 +3198,22 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 
-const repeatSel = $('repeatInput');
-const repeatCustomRow = $('repeatCustomRow');
-if (repeatSel && repeatCustomRow) {
-  const toggleCustomRow = () => {
-    if (repeatSel.value === 'custom') repeatCustomRow.classList.remove('hidden');
-    else repeatCustomRow.classList.add('hidden');
-  };
-  repeatSel.addEventListener('change', toggleCustomRow);
-  toggleCustomRow(); // set initial state
+function syncCustomRepeatUI(repeatSelectEl) {
+  const row = document.getElementById('repeatCustomRow');
+  if (!row || !repeatSelectEl) return;
+
+  if (repeatSelectEl.value === 'custom') row.classList.remove('hidden');
+  else row.classList.add('hidden');
 }
+
+// Event delegation: works even if the Add Task UI is injected/moved for mobile modal
+document.addEventListener('change', (e) => {
+  const t = e.target;
+  if (t && t.id === 'repeatInput') {
+    syncCustomRepeatUI(t);
+  }
+});
+
 
 renderHabitWeekLabels();
 renderViceWeekLabels();
