@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>TaskPoints — Settings</title>
+
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="default"/>
+  <meta name="apple-mobile-web-app-title" content="TaskPoints"/>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="styles.css">
+  <script src="toolbar.js" defer></script>
+</head>
+
+<body class="min-h-screen">
+  <div class="mx-auto max-w-6xl p-4 sm:p-6 pb-20 md:pb-6">
+
+    <!-- HEADER -->
+    <header class="mb-4">
+      <div class="row items-center">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-2xl grid place-items-center bg-black text-white font-bold text-sm shrink-0">TP</div>
+          <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight">TaskPoints</h1>
+        </div>
+
+        <div class="toolbar">
+          <a href="index.html"         class="btn btn-teal btn-toolbar">Main</a>
+          <a href="daily.html"         class="btn btn-teal btn-toolbar">Daily</a>
+          <a href="daily_sources.html" class="btn btn-teal btn-toolbar">Sources</a>
+          <a href="log.html"           class="btn btn-teal btn-toolbar">Log</a>
+          <a href="week.html"          class="btn btn-teal btn-toolbar">Week</a>
+
+          <div class="dropdown">
+            <button type="button" class="btn btn-teal btn-toolbar dropdown-toggle" data-dropdown-toggle aria-expanded="false">
+              Game <span class="caret">▾</span>
+            </button>
+            <div class="dropdown-menu">
+              <a href="game.html"         class="btn btn-teal btn-toolbar">Game</a>
+              <a href="matchups.html"     class="btn btn-teal btn-toolbar">Matchups</a>
+              <a href="schedule.html"     class="btn btn-teal btn-toolbar">Schedule</a>
+              <a href="game_ratings.html" class="btn btn-teal btn-toolbar">Ratings</a>
+            </div>
+          </div>
+
+          <a href="updates.html" class="btn btn-teal btn-toolbar">Updates</a>
+          <a href="archive.html" class="btn btn-teal btn-toolbar">Archive</a>
+
+          <!-- Settings (top-right, clear style) -->
+          <a href="settings.html" class="btn btn-ghost btn-toolbar" aria-label="Settings">Settings</a>
+        </div>
+      </div>
+    </header>
+
+    <!-- PAGE CONTENT (blank for now) -->
+    <div class="glass">
+      <div class="text-lg font-semibold">Settings</div>
+      <div class="muted text-sm mt-1">Coming soon.</div>
+    </div>
+
+  </div>
+</body>
+</html>
