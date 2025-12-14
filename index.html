@@ -3286,7 +3286,7 @@ renderAll();
   id="addTaskModal"
   class="fixed inset-0 z-40 hidden items-center justify-center bg-black/60"
 >
-  <div class="w-full max-w-xl mx-4 rounded-2xl px-6 pb-6 pt-12 relative bg-zinc-900 text-zinc-100">
+  <div class="addTaskModalPanel w-full max-w-xl mx-4 rounded-2xl px-6 pb-6 pt-12 relative bg-zinc-900 text-zinc-100">
 <button
   type="button"
   class="absolute top-4 right-4 btn btn-secondary text-xs px-3 py-1 rounded-md"
@@ -3303,7 +3303,7 @@ renderAll();
       <input id="titleInput" class="input" placeholder="e.g., 30-min treadmill walk">
 
       <!-- Row 2: priority + due date + Today -->
-      <div class="flex flex-wrap gap-2 mt-1">
+      <div id="addTaskRow2" class="flex flex-wrap gap-2 mt-1">
         <select id="importanceInput" class="input flex-1 min-w-[120px]">
           <option>Low</option>
           <option selected>Medium</option>
@@ -3313,11 +3313,11 @@ renderAll();
 
         <input id="dueDateInput" type="date" class="input flex-1 min-w-[120px]">
 
-        <button class="btn btn-ghost text-xs px-2" onclick="setDueToday()">Today</button>
+        <button class="addTaskTodayBtn btn btn-ghost text-xs px-2" onclick="setDueToday()">Today</button>
       </div>
 
       <!-- Row 3: points + repeat rule -->
-      <div class="flex flex-wrap gap-2 mt-1">
+      <div id="addTaskRow3" class="flex flex-wrap gap-2 mt-1">
         <input id="pointsInput" type="number" min="0" class="input w-24" placeholder="e.g., 25">
 
         <select id="repeatInput" class="input flex-1 min-w-[120px]">
