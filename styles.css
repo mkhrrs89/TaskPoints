@@ -107,6 +107,10 @@
 
     .input,select,textarea{border:1px solid var(--border);background:#0f1419;color:#e6edf6;border-radius:12px;padding:10px 12px;width:100%}
     @media (prefers-color-scheme:light){.input,select,textarea{background:#fff;color:#0b1220}}
+    #sleepEditModalBody{max-width:18rem;font-size:14px}
+    #sleepEditModalBody .input{padding:8px 10px;font-size:14px}
+    #sleepEditModalBody .btn{padding:6px 10px;font-size:13px}
+    #sleepEditModalBody .muted{font-size:11px}
 /* Fix mobile Safari making the date input stick out of the card */
 @media (max-width:640px){
   #dueDateInput{
