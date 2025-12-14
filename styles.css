@@ -753,6 +753,66 @@
   }
 }
 
+/* ============================================
+   Add Task modal: mobile alignment + iOS caret fix
+   ============================================ */
+@media (max-width: 640px){
+
+  /* Let the modal panel scroll instead of forcing layout shifts */
+  .addTaskModalPanel{
+    max-height: calc(100vh - 24px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Row 2: Priority + Date side-by-side, Today full-width below */
+  #addTaskRow2{
+    display: grid !important;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    align-items: stretch;
+  }
+
+  /* override your older #dueDateInput mobile tweak inside this modal */
+  #addTaskRow2 #dueDateInput{
+    width: 100% !important;
+    margin: 0 !important;
+  }
+
+  #addTaskRow2 .addTaskTodayBtn{
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+
+  /* Row 3: Points + Repeat side-by-side */
+  #addTaskRow3{
+    display: grid !important;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    align-items: stretch;
+  }
+
+  /* Custom repeat row: keep it stable and stop .input width:100% from blowing it up */
+  #repeatCustomRow{
+    display: grid !important;
+    grid-template-columns: auto 72px 1fr;
+    gap: 10px;
+    align-items: center;
+  }
+
+  #repeatCustomRow .muted{
+    white-space: nowrap;
+  }
+
+  #repeatCustomCount{
+    width: 72px !important;
+  }
+
+  #repeatCustomUnit{
+    width: 100% !important;
+  }
+}
+
 
 
 
