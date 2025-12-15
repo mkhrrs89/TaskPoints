@@ -173,7 +173,7 @@ function load() {
         const m = list[i];
         if (!m) continue;
 
-        const key = m.dateKey || (m.dateISO ? dateKey(m.dateISO) : "");
+        const key = m.dateKey || m.date || (m.dateISO ? dateKey(m.dateISO) : "");
         if (!key) continue;
 
         const youScoreForDay = dailyTotals[key];
@@ -223,8 +223,9 @@ function load() {
       }
 
 if (changed) {
-  save();
+  save(state);
 }
+
 
 } // <-- closes syncYouMatchupsWithCompletions
 
@@ -381,4 +382,5 @@ function save(nextState) {
   </script>
 </body>
 </html>
+
 
