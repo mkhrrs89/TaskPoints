@@ -435,9 +435,8 @@ function loadState() {
   return base;
 }
 
-function saveState(s) {
-  // Make sure we always write a complete, normalized object
-  const payload = {
+function normalizeState(s) {
+  return {
     tasks:       Array.isArray(s.tasks)       ? s.tasks       : [],
     completions: Array.isArray(s.completions) ? s.completions : [],
     habits:      Array.isArray(s.habits)      ? s.habits      : [],
@@ -445,10 +444,22 @@ function saveState(s) {
     flexActions: Array.isArray(s.flexActions) ? s.flexActions : [],
     gameHistory: Array.isArray(s.gameHistory) ? s.gameHistory : [],
     matchups:    Array.isArray(s.matchups)    ? s.matchups    : [],
-    schedule:    Array.isArray(s.schedule)    ? s.schedule    : []
+    schedule:    Array.isArray(s.schedule)    ? s.schedule    : [],
+    youImage:    typeof s.youImage === "string" ? s.youImage : ""
   };
+}
 
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+function saveState(nextState) {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    const existing = raw ? (JSON.parse(raw) || {}) : {};
+    const merged = normalizeState({ ...existing, ...nextState });
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+    return merged;
+  } catch (e) {
+    console.error("Failed to save state in game.html", e);
+    return nextState;
+  }
 }
 
 
@@ -457,7 +468,7 @@ let editingPlayerId = null;
 let viewMode = "card"; // "card" | "gallery"
 
 if (ensureUpcomingSchedule()) {
-  saveState(state);
+  state = saveState(state);
 }
 
 
@@ -759,7 +770,7 @@ function simulateToday() {
   namesById["YOU"] = "You";
 
   if (!todaysPairs.length) {
-    saveState(state);
+    state = saveState(state);
     const byeText = byeIds.length
       ? byeIds.map(id => `${namesById[id] || 'Unknown'} has no matchup scheduled.`).join('<br>')
       : 'No matchups scheduled for today.';
@@ -813,7 +824,7 @@ function simulateToday() {
     todaysMatchups.push(matchup);
   });
 
-  saveState(state);
+  state = saveState(state);
 
   const lines = todaysMatchups.map(m => {
     const aId = m.playerAId;
@@ -983,7 +994,7 @@ function ensureUpcomingSchedule(days = 7){
 function refreshScheduleAfterRosterChange(){
   const changed = ensureUpcomingSchedule();
   if (changed) {
-    saveState(state);
+    state = saveState(state);
   }
 }
 
@@ -1516,7 +1527,7 @@ if (p.isYou) {
         if (idx !== -1){
           state.players.splice(idx,1);
           refreshScheduleAfterRosterChange();
-          saveState(state);
+          state = saveState(state);
         }
         if (editingPlayerId === id) editingPlayerId = null;
         renderPlayers();
@@ -1529,7 +1540,7 @@ if (p.isYou) {
         openImageCropperFromDataUrl(player.imageData, (dataUrl)=>{
           if (dataUrl){
             player.imageData = dataUrl;
-            saveState(state);
+            state = saveState(state);
           }
           renderPlayers();
         });
@@ -1543,7 +1554,7 @@ if (p.isYou) {
         if (!confirm("Remove this player's photo? You can add a new one later.")) return;
 
         player.imageData = "";
-        saveState(state);
+        state = saveState(state);
         renderPlayers();
         return;
       }
@@ -1562,7 +1573,7 @@ if (p.isYou) {
 
       // Save image to special YOU field
       state.youImage = dataUrl;
-      saveState(state);
+      state = saveState(state);
       renderPlayers();
     };
 
@@ -1573,7 +1584,7 @@ if (p.isYou) {
   // --- Clear YOU photo ---
   if (act === "clear-you-photo") {
     delete state.youImage;
-    saveState(state);
+    state = saveState(state);
     renderPlayers();
     return;
   }
@@ -1644,7 +1655,7 @@ if (p.isYou) {
     if (imageData){
       player.imageData = imageData;
     }
-    saveState(state);
+    state = saveState(state);
     editingPlayerId = null;
     renderPlayers();
   };
@@ -1722,7 +1733,7 @@ $("createPlayerForm").addEventListener("submit", (e)=>{
 
     });
     refreshScheduleAfterRosterChange();
-    saveState(state);
+    state = saveState(state);
     $("playerName").value = "";
     $("playerNotes").value = "";
     $("playerImage").value = "";
@@ -1844,4 +1855,5 @@ async function fileToDataUrl(file) {
   </script>
 </body>
 </html>
+
 
