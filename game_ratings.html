@@ -135,11 +135,6 @@
   <th data-sort="momentum">Momentum</th>
   <th data-sort="risky">Risky</th>
   <th data-sort="style">Style</th>
-  <th data-sort="wins">W</th>
-  <th data-sort="losses">L</th>
-  <th data-sort="winPct">Win%</th>
-  <th data-sort="ppd">PPD</th>
-  <th data-sort="avgPpd">AVG PPD</th>
 </tr>
 
           </thead>
@@ -313,12 +308,6 @@ function renderTable() {
 
     const stats = computePlayerStats(p);
 
-    const winPctDisplay =
-      stats.winPct == null ? "—" : stats.winPct.toFixed(1) + "%";
-    const ppdDisplay =
-      stats.ppd == null ? "—" : stats.ppd.toFixed(1);
-    const avgPpdDisplay =
-      stats.avgPPD == null ? "—" : stats.avgPPD.toFixed(1);
 
     tr.innerHTML = `
       <td class="pr-4">${escapeHtml(p.name || "—")}</td>
@@ -327,11 +316,6 @@ function renderTable() {
       <td>${momentum != null ? momentum : "—"}</td>
       <td>${riskyNorm != null ? riskyNorm.toFixed(1) : "—"}</td>
       <td>${escapeHtml(style || "—")}</td>
-      <td>${stats.wins}</td>
-      <td>${stats.losses}</td>
-      <td>${winPctDisplay}</td>
-      <td>${ppdDisplay}</td>
-      <td>${avgPpdDisplay}</td>
     `;
 
     tbody.appendChild(tr);
@@ -485,3 +469,4 @@ function getSortValue(p, key) {
   </script>
 </body>
 </html>
+
