@@ -126,13 +126,32 @@
       }
     }
 
-    function saveState(s) {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
-      } catch (e) {
-        console.error("Failed to save schedule", e);
-      }
-    }
+function normalizeState(s) {
+  return {
+    tasks:       Array.isArray(s.tasks)       ? s.tasks       : [],
+    completions: Array.isArray(s.completions) ? s.completions : [],
+    players:     Array.isArray(s.players)     ? s.players     : [],
+    habits:      Array.isArray(s.habits)      ? s.habits      : [],
+    flexActions: Array.isArray(s.flexActions) ? s.flexActions : [],
+    gameHistory: Array.isArray(s.gameHistory) ? s.gameHistory : [],
+    matchups:    Array.isArray(s.matchups)    ? s.matchups    : [],
+    schedule:    Array.isArray(s.schedule)    ? s.schedule    : []
+  };
+}
+
+function saveState(nextState) {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    const existing = raw ? (JSON.parse(raw) || {}) : {};
+    const merged = normalizeState({ ...existing, ...nextState });
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+    return merged;
+  } catch (e) {
+    console.error("Failed to save schedule", e);
+    return nextState;
+  }
+}
+
 
     function dateKey(d) {
       if (!(d instanceof Date)) d = new Date(d);
@@ -249,7 +268,8 @@
     function renderSchedule() {
       state = loadState();
       const changed = ensureUpcomingSchedule(state);
-      if (changed) saveState(state);
+      if (changed) state = saveState(state);
+
 
       const container = $("scheduleContainer");
       container.innerHTML = "";
