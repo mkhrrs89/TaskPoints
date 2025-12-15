@@ -222,14 +222,11 @@ function load() {
         changed = true;
       }
 
-      if (changed) {
-        try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-        } catch (e) {
-          console.error("Failed to persist updated matchups", e);
-        }
-      }
-    }
+if (changed) {
+  save();
+}
+
+} // <-- closes syncYouMatchupsWithCompletions
 
 
     function ordinal(n){
@@ -249,8 +246,9 @@ function load() {
     function renderMatchups(){
       const state = load();
 
-      // NEW: keep your side of each matchup in sync with the true per-day total
-      syncYouMatchupsWithCompletions(state);
+// sync may write back; keep local state updated
+syncYouMatchupsWithCompletions(state);
+
 
       const container = $("matchupsContainer");
       container.innerHTML = "";
@@ -313,7 +311,7 @@ function load() {
       // Group by date key
       const groups = new Map();
       matchups.forEach(m => {
-        const key = m.date;
+        const key = m.dateKey || m.date || (m.dateISO ? dateKey(m.dateISO) : "");
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key).push(m);
       });
@@ -351,7 +349,36 @@ function load() {
       });
     }
 
+function normalizeState(s) {
+  return {
+    tasks:       Array.isArray(s.tasks)       ? s.tasks       : [],
+    completions: Array.isArray(s.completions) ? s.completions : [],
+    players:     Array.isArray(s.players)     ? s.players     : [],
+    habits:      Array.isArray(s.habits)      ? s.habits      : [],
+    flexActions: Array.isArray(s.flexActions) ? s.flexActions : [],
+    gameHistory: Array.isArray(s.gameHistory) ? s.gameHistory : [],
+    matchups:    Array.isArray(s.matchups)    ? s.matchups    : [],
+    schedule:    Array.isArray(s.schedule)    ? s.schedule    : []
+  };
+}
+
+function save(nextState) {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    const existing = raw ? (JSON.parse(raw) || {}) : {};
+    const merged = normalizeState({ ...existing, ...nextState });
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+    return merged;
+  } catch (e) {
+    console.error("Failed to save TaskPoints state", e);
+    return nextState;
+  }
+}
+
+
+      
     document.addEventListener("DOMContentLoaded", renderMatchups);
   </script>
 </body>
 </html>
+
