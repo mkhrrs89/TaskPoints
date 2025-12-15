@@ -745,18 +745,40 @@ function getPlayerRecordText(playerId) {
 }
 
 
+function normalizeState(s) {
+  return {
+    tasks:       Array.isArray(s.tasks)       ? s.tasks       : [],
+    completions: Array.isArray(s.completions) ? s.completions : [],
+    players:     Array.isArray(s.players)     ? s.players     : [],
+    habits:      Array.isArray(s.habits)      ? s.habits      : [],
+    flexActions: Array.isArray(s.flexActions) ? s.flexActions : [],
+    gameHistory: Array.isArray(s.gameHistory) ? s.gameHistory : [],
+    matchups:    Array.isArray(s.matchups)    ? s.matchups    : [],
+    schedule:    Array.isArray(s.schedule)    ? s.schedule    : [],
+    youImage:    typeof s.youImage === "string" ? s.youImage : ""
+  };
+}
+
 function save() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     const existing = raw ? (JSON.parse(raw) || {}) : {};
-    const merged = { ...existing, ...state };
+    const merged = normalizeState({ ...existing, ...state });
     localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
-    state = merged; // keep memory in sync
+    state = merged;
   } catch (e) {
     console.error("Failed to save state (index.html)", e);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    // last-ditch: write a normalized snapshot (not raw state)
+    try {
+      const snap = normalizeState(state);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(snap));
+      state = snap;
+    } catch (e2) {
+      console.error("Last-ditch save failed (index.html)", e2);
+    }
   }
 }
+
 
 
 function resetAll(){
