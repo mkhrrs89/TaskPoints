@@ -304,35 +304,30 @@
 
 
   <!-- HABITS -->
-  <div class="glass mb-6">
-<div class="flex items-center justify-between mb-3 gap-3 flex-wrap">
-  <div class="flex items-center gap-3 flex-wrap">
-    <h2 id="habitsAnchor" class="font-bold text-lg">Habits</h2>
+<div class="glass mb-6">
+  <div class="flex items-center justify-between mb-3 gap-3 flex-wrap">
+    <div class="flex items-center gap-3 flex-wrap">
+      <h2 id="habitsAnchor" class="font-bold text-lg">Habits</h2>
 
-    <select id="habitsSortSelect" class="input w-44">
-      <option value="custom">Custom</option>
-      <option value="points">Point value</option>
-      <option value="streak">Current streak</option>
-      <option value="completion">% completion</option>
-    </select>
-  </div>
-
-  <div class="flex gap-2 flex-wrap">
-    <input id="habitName" class="input w-48" placeholder="Habit name">
-    <input id="habitPts"  class="input w-28" type="number" placeholder="Pts">
-    <button id="addHabitBtn" class="btn btn-primary">Add Habit</button>
-  </div>
-</div>
-
-        <input id="habitName" class="input w-48" placeholder="Habit name">
-        <input id="habitPts"  class="input w-28" type="number" placeholder="Pts">
-        <button id="addHabitBtn" class="btn btn-primary">Add Habit</button>
-      </div>
+      <select id="habitsSortSelect" class="input w-44">
+        <option value="custom">Custom</option>
+        <option value="points">Point value</option>
+        <option value="streak">Current streak</option>
+        <option value="completion">% completion</option>
+      </select>
     </div>
-    <div class="grid gap-2 text-sm muted mb-2" id="habitWeekLabels"></div>
-    <div id="habitsList" class="grid gap-2"></div>
-    <div id="habitsEmpty" class="text-sm muted hidden">No habits yet.</div>
+
+    <div class="flex gap-2 flex-wrap">
+      <input id="habitName" class="input w-48" placeholder="Habit name">
+      <input id="habitPts"  class="input w-28" type="number" placeholder="Pts">
+      <button id="addHabitBtn" class="btn btn-primary">Add Habit</button>
+    </div>
   </div>
+
+  <div class="grid gap-2 text-sm muted mb-2" id="habitWeekLabels"></div>
+  <div id="habitsList" class="grid gap-2"></div>
+  <div id="habitsEmpty" class="text-sm muted hidden">No habits yet.</div>
+</div>
 
 <!-- VICES -->
 <div class="glass mb-6">
