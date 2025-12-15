@@ -795,6 +795,24 @@ function makeId() {
   return true;
 }
 
+    npcDailyScores[dateKey][playerId] = { finalScore, generatedAtISO }
+
+    function dayProgress(now = new Date()) {
+  // e.g. progress from 6:00 AM to 2:00 AM next day
+  const start = new Date(now); start.setHours(6,0,0,0);
+  const end   = new Date(now); end.setHours(26,0,0,0); // 2am next day
+  const t = now.getTime();
+  const p = (t - start.getTime()) / (end.getTime() - start.getTime());
+  return Math.max(0, Math.min(1, p));
+}
+
+function visibleNPCScore(finalScore) {
+  const p = dayProgress(new Date());
+  return Math.floor(finalScore * p);
+}
+
+    matchup.isFinal = isClosedDay(dateKey)
+
 function simulateToday() {
   const todayKey = dateKey(new Date());
 
@@ -934,7 +952,8 @@ function simulateToday() {
 
 function maybeAutoSimToday(){
   const now = new Date();
-  const todayKey = dateKey(now);
+  const todayKey = getGameDayKey(now);
+
 
   // Only after 8am local time (your EST)
   if (now.getHours() < 8) return;
@@ -959,6 +978,14 @@ function dateKey(d){
   const m  = String(d.getMonth()+1).padStart(2,'0');
   const dd = String(d.getDate()).padStart(2,'0');
   return `${y}-${m}-${dd}`;
+}
+
+    function getGameDayKey(now = new Date()) {
+  // "day closes" at 2:00 AM local time
+  const dt = new Date(now);
+  const hour = dt.getHours();
+  if (hour < 2) dt.setDate(dt.getDate() - 1);
+  return dateKey(dt);
 }
 
 function shuffle(arr){
@@ -1911,6 +1938,7 @@ async function fileToDataUrl(file) {
   </script>
 </body>
 </html>
+
 
 
 
