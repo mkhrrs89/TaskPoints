@@ -305,9 +305,25 @@
 
   <!-- HABITS -->
   <div class="glass mb-6">
-    <div class="flex items-center justify-between mb-3 gap-3 flex-wrap">
-      <h2 id="habitsAnchor" class="font-bold text-lg">Habits</h2>
-      <div class="flex gap-2 flex-wrap">
+<div class="flex items-center justify-between mb-3 gap-3 flex-wrap">
+  <div class="flex items-center gap-3 flex-wrap">
+    <h2 id="habitsAnchor" class="font-bold text-lg">Habits</h2>
+
+    <select id="habitsSortSelect" class="input w-44">
+      <option value="custom">Custom</option>
+      <option value="points">Point value</option>
+      <option value="streak">Current streak</option>
+      <option value="completion">% completion</option>
+    </select>
+  </div>
+
+  <div class="flex gap-2 flex-wrap">
+    <input id="habitName" class="input w-48" placeholder="Habit name">
+    <input id="habitPts"  class="input w-28" type="number" placeholder="Pts">
+    <button id="addHabitBtn" class="btn btn-primary">Add Habit</button>
+  </div>
+</div>
+
         <input id="habitName" class="input w-48" placeholder="Habit name">
         <input id="habitPts"  class="input w-28" type="number" placeholder="Pts">
         <button id="addHabitBtn" class="btn btn-primary">Add Habit</button>
@@ -376,6 +392,29 @@ const STORAGE_KEY="taskpoints_v1";
 const OLD_PLAYERS_KEY="taskpoints_players";
 const $=id=>document.getElementById(id);
 let state=load();
+  const HABITS_SORT_KEY = "taskpoints_habits_sort";
+
+function getHabitSortMode(){
+  return ($('habitsSortSelect')?.value)
+    || localStorage.getItem(HABITS_SORT_KEY)
+    || 'custom';
+}
+
+function initHabitSortControl(){
+  const sel = $('habitsSortSelect');
+  if(!sel) return;
+
+  const saved = localStorage.getItem(HABITS_SORT_KEY);
+  if(saved && Array.from(sel.options).some(o => o.value === saved)){
+    sel.value = saved;
+  }
+
+  sel.addEventListener('change', () => {
+    localStorage.setItem(HABITS_SORT_KEY, sel.value);
+    renderHabits();
+  });
+}
+
 let editingTaskId = null;
 let editingHabitId = null;
 let editingFlexId = null;
@@ -1517,19 +1556,50 @@ function renderHabits(){
   const days = weekDays(new Date());
 
   // Only active habits (NOT vices, NOT retired)
-  const habits = state.habits
-    .filter(h => (h.category || 'habit') !== 'vice')
-    .filter(h => !h.retired)
-    .slice()
-    .sort((a,b) => {
-      const ao = (typeof a.order === 'number') ? a.order : 0;
-      const bo = (typeof b.order === 'number') ? b.order : 0;
-      if (ao !== bo) return ao - bo;
+const sortMode = getHabitSortMode();
 
-      const ac = a.createdAtISO || '';
-      const bc = b.createdAtISO || '';
-      return ac.localeCompare(bc);
-    });
+const habits = state.habits
+  .filter(h => (h.category || 'habit') !== 'vice')
+  .filter(h => !h.retired)
+  .slice();
+
+// Precompute streak + completion once so sorting is stable + fast
+habits.forEach(h => {
+  h.doneKeys = Array.isArray(h.doneKeys) ? h.doneKeys : [];
+  h.__streak = computeHabitStreak(h);
+  h.__completion = computeHabitCompletion(h);
+});
+
+if (sortMode === 'custom') {
+  habits.sort((a,b) => {
+    const ao = (typeof a.order === 'number') ? a.order : 0;
+    const bo = (typeof b.order === 'number') ? b.order : 0;
+    if (ao !== bo) return ao - bo;
+
+    const ac = a.createdAtISO || '';
+    const bc = b.createdAtISO || '';
+    return ac.localeCompare(bc);
+  });
+} else if (sortMode === 'points') {
+  habits.sort((a,b) =>
+    (Number(b.pointsPerDay||0) - Number(a.pointsPerDay||0)) ||
+    (a.name||'').localeCompare(b.name||'')
+  );
+} else if (sortMode === 'streak') {
+  habits.sort((a,b) =>
+    (Number(b.__streak||0) - Number(a.__streak||0)) ||
+    (Number(b.pointsPerDay||0) - Number(a.pointsPerDay||0)) ||
+    (a.name||'').localeCompare(b.name||'')
+  );
+} else if (sortMode === 'completion') {
+  habits.sort((a,b) =>
+    (Number(b.__completion||0) - Number(a.__completion||0)) ||
+    (Number(b.__streak||0) - Number(a.__streak||0)) ||
+    (Number(b.pointsPerDay||0) - Number(a.pointsPerDay||0)) ||
+    (a.name||'').localeCompare(b.name||'')
+  );
+}
+
 
 
   if(!habits.length){
@@ -1541,8 +1611,9 @@ function renderHabits(){
   habits.forEach(h => {
     h.doneKeys = Array.isArray(h.doneKeys) ? h.doneKeys : [];
 
-    const streak     = computeHabitStreak(h);
-    const completion = computeHabitCompletion(h);
+const streak     = Number(h.__streak || 0);
+const completion = Number(h.__completion || 0);
+
 
 
   const row = document.createElement('div');
@@ -1608,16 +1679,21 @@ const nameHtml = `
 
 
   // Right side: controls only (Edit/Delete/▲/▼)
-  const controlsHtml = `
-    <div class="habitControls flex items-center gap-2 flex-wrap text-xs sm:text-sm">
-      <button class="btn btn-ghost" data-act="habit-edit" data-id="${h.id}">Edit</button>
-      <button class="btn btn-ghost" data-act="habit-delete" data-id="${h.id}">Delete</button>
+const isCustom = (getHabitSortMode() === 'custom');
+
+const controlsHtml = `
+  <div class="habitControls flex items-center gap-2 flex-wrap text-xs sm:text-sm">
+    <button class="btn btn-ghost" data-act="habit-edit" data-id="${h.id}">Edit</button>
+    <button class="btn btn-ghost" data-act="habit-delete" data-id="${h.id}">Delete</button>
+    ${isCustom ? `
       <button class="btn btn-ghost" style="padding:2px 6px;font-size:11px"
               data-act="habit-up" data-id="${h.id}">▲</button>
       <button class="btn btn-ghost" style="padding:2px 6px;font-size:11px"
               data-act="habit-down" data-id="${h.id}">▼</button>
-    </div>
-  `;
+    ` : ``}
+  </div>
+`;
+
 
 
   // Line 3: date bubbles (sits to the right on desktop, below on mobile)
@@ -3301,6 +3377,23 @@ document.addEventListener('DOMContentLoaded', () => {
   $('saveCaloriesBtn')?.addEventListener('click', saveCalories);
   $('saveWorkScoreBtn')?.addEventListener('click', saveWorkScore);
   initCaloriesDatePicker();
+  initHabitSortControl();
+  renderHabitWeekLabels();
+  renderViceWeekLabels();
+  renderHabits();
+  renderVices();
+  renderFlexActions();
+
+console.log('TaskPoints main state summary:', {
+  tasks:       Array.isArray(state.tasks)       ? state.tasks.length       : 'no array',
+  completions: Array.isArray(state.completions) ? state.completions.length : 'no array',
+  habits:      Array.isArray(state.habits)      ? state.habits.length      : 'no array',
+  flexActions: Array.isArray(state.flexActions) ? state.flexActions.length : 'no array',
+  players:     Array.isArray(state.players)     ? state.players.length     : 'no array',
+  gameHistory: Array.isArray(state.gameHistory) ? state.gameHistory.length : 'no array'
+});
+
+renderAll();
 });
 
 
@@ -3319,24 +3412,6 @@ document.addEventListener('change', (e) => {
     syncCustomRepeatUI(t);
   }
 });
-
-
-renderHabitWeekLabels();
-renderViceWeekLabels();
-renderHabits();
-renderVices();
-renderFlexActions();
-
-console.log('TaskPoints main state summary:', {
-  tasks:       Array.isArray(state.tasks)       ? state.tasks.length       : 'no array',
-  completions: Array.isArray(state.completions) ? state.completions.length : 'no array',
-  habits:      Array.isArray(state.habits)      ? state.habits.length      : 'no array',
-  flexActions: Array.isArray(state.flexActions) ? state.flexActions.length : 'no array',
-  players:     Array.isArray(state.players)     ? state.players.length     : 'no array',
-  gameHistory: Array.isArray(state.gameHistory) ? state.gameHistory.length : 'no array'
-});
-
-renderAll();
 
 </script>
 
