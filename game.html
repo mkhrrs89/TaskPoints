@@ -739,6 +739,51 @@ function simulateAiScoreForPlayer(player, todayKey){
   return Number(score.toFixed(1));
 }
 
+    function rebuildGameHistoryFromMatchupsIfNeeded() {
+  const mh = Array.isArray(state.matchups) ? state.matchups : [];
+  const gh = Array.isArray(state.gameHistory) ? state.gameHistory : [];
+
+  // If we have lots of matchups but tiny gameHistory, rebuild.
+  // (Each matchup yields up to 2 AI score entries; "YOU" is excluded.)
+  if (!mh.length) return false;
+  if (gh.length >= Math.floor(mh.length * 1.5)) return false;
+
+  const rebuilt = [];
+  const seen = new Set(); // date|playerId
+
+  for (const m of mh) {
+    if (!m) continue;
+    const date = m.dateKey || m.date || (m.dateISO ? String(m.dateISO).slice(0, 10) : "");
+    if (!date) continue;
+
+    const aId = m.playerAId;
+    const bId = m.playerBId;
+
+    const aScore = Number(m.scoreA);
+    const bScore = Number(m.scoreB);
+
+    if (aId && aId !== "YOU" && Number.isFinite(aScore)) {
+      const k = `${date}|${aId}`;
+      if (!seen.has(k)) {
+        rebuilt.push({ id: crypto.randomUUID(), date, playerId: aId, score: aScore });
+        seen.add(k);
+      }
+    }
+
+    if (bId && bId !== "YOU" && Number.isFinite(bScore)) {
+      const k = `${date}|${bId}`;
+      if (!seen.has(k)) {
+        rebuilt.push({ id: crypto.randomUUID(), date, playerId: bId, score: bScore });
+        seen.add(k);
+      }
+    }
+  }
+
+  rebuilt.sort((x, y) => x.date.localeCompare(y.date));
+  state.gameHistory = rebuilt;
+  return true;
+}
+
 function simulateToday() {
   const todayKey = dateKey(new Date());
 
@@ -1855,6 +1900,7 @@ async function fileToDataUrl(file) {
   </script>
 </body>
 </html>
+
 
 
 
