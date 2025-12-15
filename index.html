@@ -1365,9 +1365,12 @@ function drawDailyTrend(dailyTotals){
     .map(([key, total]) => ({ key, total }))
     .sort((a, b) => a.key.localeCompare(b.key));
 
-  if (entries.length > 30) {
-    entries = entries.slice(entries.length - 30);
-  }
+// Show full history, but downsample if it's huge (keeps last point)
+const MAX_POINTS = 400; // tweak: 200–800 depending on taste
+if (entries.length > MAX_POINTS) {
+  const step = Math.ceil(entries.length / MAX_POINTS);
+  entries = entries.filter((_, i) => i % step === 0 || i === entries.length - 1);
+}
 
   const n = entries.length;
   if (!n) {
