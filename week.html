@@ -573,19 +573,20 @@ renderWeekTasks(currentBaseDate);
 }
 
 function addOneDay(id){
-  const st = load();
+  let st = load();
   const t = st.tasks.find(x => x.id === id);
   if(!t) return;
 
-const oldDate = fromKey(t.dueDateISO) || fromKey(todayKey());
-const newDate = addDays(oldDate, 1);
+  const oldDate = fromKey(t.dueDateISO) || fromKey(todayKey()) || new Date();
+  const newDate = addDays(oldDate, 1);
 
   t.dueDateISO = dateKey(newDate);
 
   st = saveMerged(st);
   state = st;
-  renderWeekTasks(currentBaseDate);
+  renderAll(currentBaseDate);
 }
+
 
 function completeTask(id){
   const st=load(); const t=st.tasks.find(x=>x.id===id); if(!t) return;
@@ -767,5 +768,6 @@ renderAll(currentBaseDate);
 </script>
 </body>
 </html>
+
 
 
