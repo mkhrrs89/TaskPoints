@@ -87,18 +87,25 @@
         const raw = localStorage.getItem(STORAGE_KEY);
         if (!raw) return { tasks: [], completions: [], players: [], habits: [], flexActions: [], matchups: [], schedule: [] };
         const p = JSON.parse(raw);
-        return {
-          tasks:       Array.isArray(p.tasks)       ? p.tasks       : [],
-          completions: Array.isArray(p.completions) ? p.completions : [],
-          players:     Array.isArray(p.players)     ? p.players     : [],
-          habits:      Array.isArray(p.habits)      ? p.habits      : [],
-          flexActions: Array.isArray(p.flexActions) ? p.flexActions : [],
-          matchups: Array.isArray(p.matchups) ? p.matchups : [],
-          schedule: Array.isArray(p.schedule) ? p.schedule : []
-        };
+return {
+  tasks:       Array.isArray(p.tasks)       ? p.tasks       : [],
+  completions: Array.isArray(p.completions) ? p.completions : [],
+  players:     Array.isArray(p.players)     ? p.players     : [],
+  habits:      Array.isArray(p.habits)      ? p.habits      : [],
+  flexActions: Array.isArray(p.flexActions) ? p.flexActions : [],
+  gameHistory: Array.isArray(p.gameHistory) ? p.gameHistory : [],
+  matchups:    Array.isArray(p.matchups)    ? p.matchups    : [],
+  schedule:    Array.isArray(p.schedule)    ? p.schedule    : [],
+  workHistory: Array.isArray(p.workHistory) ? p.workHistory : [],
+  youImage:    typeof p.youImage === "string" ? p.youImage : ""
+};
       } catch (e) {
         console.error("Failed to load TaskPoints state", e);
-        return { tasks: [], completions: [], players: [], habits: [], flexActions: [], matchups: [], schedule: [] };
+        return {
+  tasks: [], completions: [], players: [], habits: [], flexActions: [],
+  gameHistory: [], matchups: [], schedule: [], workHistory: [], youImage: ""
+};
+
       }
     }
 
@@ -258,4 +265,5 @@ listEl.innerHTML = keys.map(k => {
   </script>
 </body>
 </html>
+
 
