@@ -1298,7 +1298,7 @@ if (p.isYou) {
         <div class="text-xs opacity-80 leading-[1.0] space-y-[2px] mt-1">
           <p>Record: ${youStats.record}</p>
           <p>AVG PPD: ${youStats.avgPPD.toFixed(1)}</p>
-          <p><span class="opacity-60">Today:</span> ${p.todayPoints} pts</p>
+         
         </div>
       </div>
     `;
@@ -1312,7 +1312,7 @@ if (p.isYou) {
 <div class="flex flex-col gap-3 w-full">
   <div class="flex items-start justify-between gap-3">
     <h3 class="font-semibold text-base md:text-lg break-words">You</h3>
-    <div class="text-sm opacity-80"><b>${p.todayPoints}</b> pts today</div>
+    
   </div>
 
   <div class="flex flex-col md:flex-row items-end gap-3">
@@ -1937,6 +1937,7 @@ async function fileToDataUrl(file) {
   </script>
 </body>
 </html>
+
 
 
 
