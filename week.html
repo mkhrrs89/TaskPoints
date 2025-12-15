@@ -589,15 +589,32 @@ function addOneDay(id){
 
 
 function completeTask(id){
-  const st=load(); const t=st.tasks.find(x=>x.id===id); if(!t) return;
-  const now=new Date().toISOString();
-  t.completedAtISO=now;
-  st.completions.unshift({ id:crypto.randomUUID(), taskId:id, title:t.title, points:t.points, completedAtISO:now });
-  st = saveMerged(st);
-state = st;
-renderWeekTasks(currentBaseDate);
+  let st = load();
+  const t = st.tasks.find(x => x.id === id);
+  if(!t) return;
 
+  const nowISO = new Date().toISOString();
+  const dk = todayKey();
+
+  t.completedAtISO = nowISO;
+
+  st.completions = Array.isArray(st.completions) ? st.completions : [];
+  st.completions.unshift({
+    id: (window.crypto && typeof crypto.randomUUID === "function")
+      ? crypto.randomUUID()
+      : ("id_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2)),
+    taskId: id,
+    title: t.title,
+    points: Number(t.points || 0),
+    dateKey: dk,
+    completedAtISO: nowISO
+  });
+
+  st = saveMerged(st);
+  state = st;
+  renderAll(currentBaseDate);
 }
+
 
 function renderFlexWeek(baseDate){
   state = load();
@@ -768,6 +785,7 @@ renderAll(currentBaseDate);
 </script>
 </body>
 </html>
+
 
 
 
