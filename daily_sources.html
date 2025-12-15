@@ -73,7 +73,10 @@
           habits:      Array.isArray(p.habits)      ? p.habits      : [],
           flexActions: Array.isArray(p.flexActions) ? p.flexActions : [],
           matchups: Array.isArray(p.matchups) ? p.matchups : [],
-          schedule: Array.isArray(p.schedule) ? p.schedule : []
+          schedule: Array.isArray(p.schedule) ? p.schedule : [],
+          gameHistory: Array.isArray(p.gameHistory) ? p.gameHistory : [],
+          workHistory: Array.isArray(p.workHistory) ? p.workHistory : [],
+          youImage:    typeof p.youImage === "string" ? p.youImage : "",
         };
       } catch (e) {
         console.error("Failed to load TaskPoints state", e);
