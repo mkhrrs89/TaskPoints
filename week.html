@@ -297,7 +297,22 @@ function weekDays(baseDate){
   return days;
 }
 function dateKey(d){ const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),dd=String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${dd}`; }
-function fromKey(k){ const [y,m,d]=k.split('-').map(n=>parseInt(n,10)); const dt=new Date(y,m-1,d); dt.setHours(0,0,0,0); return dt; }
+function fromKey(k){
+  if(!k) return null;
+  const parts = String(k).slice(0,10).split("-");
+  if(parts.length !== 3) return null;
+
+  const y = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10);
+  const d = parseInt(parts[2], 10);
+
+  if(!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null;
+
+  const dt = new Date(y, m - 1, d);
+  dt.setHours(0,0,0,0);
+  return dt;
+}
+
 function niceDate(d){ return d.toLocaleDateString(undefined,{month:'short',day:'numeric'}) }
 function todayKey(){ const d=new Date(); d.setHours(0,0,0,0); return dateKey(d); }
 
@@ -562,8 +577,9 @@ function addOneDay(id){
   const t = st.tasks.find(x => x.id === id);
   if(!t) return;
 
-  const oldDate = fromKey(t.dueDateISO);
-  const newDate = addDays(oldDate, 1);
+const oldDate = fromKey(t.dueDateISO) || fromKey(todayKey());
+const newDate = addDays(oldDate, 1);
+
   t.dueDateISO = dateKey(newDate);
 
   st = saveMerged(st);
@@ -751,4 +767,5 @@ renderAll(currentBaseDate);
 </script>
 </body>
 </html>
+
 
