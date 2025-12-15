@@ -464,6 +464,10 @@ function saveState(nextState) {
 
 
 let state = loadState();
+if (rebuildGameHistoryFromMatchupsIfNeeded()) {
+  state = saveState(state);
+}
+    
 let editingPlayerId = null;
 let viewMode = "card"; // "card" | "gallery"
 
@@ -739,6 +743,12 @@ function simulateAiScoreForPlayer(player, todayKey){
   return Number(score.toFixed(1));
 }
 
+function makeId() {
+  if (window.crypto && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  return "id_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2);
+}
+
+    
     function rebuildGameHistoryFromMatchupsIfNeeded() {
   const mh = Array.isArray(state.matchups) ? state.matchups : [];
   const gh = Array.isArray(state.gameHistory) ? state.gameHistory : [];
@@ -765,7 +775,7 @@ function simulateAiScoreForPlayer(player, todayKey){
     if (aId && aId !== "YOU" && Number.isFinite(aScore)) {
       const k = `${date}|${aId}`;
       if (!seen.has(k)) {
-        rebuilt.push({ id: crypto.randomUUID(), date, playerId: aId, score: aScore });
+        rebuilt.push({ id: makeId(), date, playerId: aId, score: aScore });
         seen.add(k);
       }
     }
@@ -1900,6 +1910,7 @@ async function fileToDataUrl(file) {
   </script>
 </body>
 </html>
+
 
 
 
