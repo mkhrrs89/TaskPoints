@@ -171,41 +171,78 @@
       }
     }
 
-    function computeYouStatsFromCompletions() {
-      const s = latestState;
-      if (!s || !Array.isArray(s.completions) || !s.completions.length) {
-        return { games:0, wins:0, losses:0, winPct:null, avgPPD:null, ppd:null };
-      }
+function computeYouStats() {
+  const s = latestState;
 
-      const dayMap = {};
-      for (const c of s.completions) {
-        const day = c.dateKey;
-        if (!day) continue;
-        const pts = Number(c.points || 0);
-        if (!dayMap[day]) dayMap[day] = 0;
-        dayMap[day] += pts;
-      }
+  // 1) Prefer matchups (most accurate for W/L)
+  const mh = s && Array.isArray(s.matchups) ? s.matchups : [];
+  const youGames = mh.filter(m => m && (m.playerAId === "YOU" || m.playerBId === "YOU"));
 
-      const dailyTotals = Object.values(dayMap);
-      if (!dailyTotals.length) {
-        return { games:0, wins:0, losses:0, winPct:null, avgPPD:null, ppd:null };
-      }
+  if (youGames.length) {
+    let games = 0, wins = 0, losses = 0, totalPoints = 0;
 
-      const avgPPD = dailyTotals.reduce((sum, v) => sum + v, 0) / dailyTotals.length;
+    for (const m of youGames) {
+      const aScore = Number(m.scoreA);
+      const bScore = Number(m.scoreB);
+      if (!Number.isFinite(aScore) || !Number.isFinite(bScore)) continue;
 
-      let wins = 0, losses = 0;
-      for (const total of dailyTotals) {
-        if (total > avgPPD) wins++;
-        else losses++;
-      }
+      const youScore = (m.playerAId === "YOU") ? aScore : bScore;
+      const oppScore = (m.playerAId === "YOU") ? bScore : aScore;
 
-      const winPct = (wins + losses) ? (wins / (wins + losses)) * 100 : null;
+      games++;
+      totalPoints += youScore;
 
-      // match ratings page behavior: PPD for You is avgPPD
-      const ppd = avgPPD;
-
-      return { games: dailyTotals.length, wins, losses, winPct, avgPPD, ppd };
+      if (youScore > oppScore) wins++;
+      else if (youScore < oppScore) losses++;
+      // ties don’t increment W/L
     }
+
+    if (!games) {
+      return { games:0, wins:0, losses:0, winPct:null, avgPPD:null, ppd:null };
+    }
+
+    const avgPPD = totalPoints / games;
+    const winPct = (wins + losses) ? (wins / (wins + losses)) * 100 : null;
+
+    // keep same “You PPD” convention you were using before
+    const ppd = avgPPD;
+
+    return { games, wins, losses, winPct, avgPPD, ppd };
+  }
+
+  // 2) Fallback: completions-based calc (your old behavior)
+  if (!s || !Array.isArray(s.completions) || !s.completions.length) {
+    return { games:0, wins:0, losses:0, winPct:null, avgPPD:null, ppd:null };
+  }
+
+  const dayMap = {};
+  for (const c of s.completions) {
+    const day = c.dateKey;
+    if (!day) continue;
+    const pts = Number(c.points || 0);
+    if (!dayMap[day]) dayMap[day] = 0;
+    dayMap[day] += pts;
+  }
+
+  const dailyTotals = Object.values(dayMap);
+  if (!dailyTotals.length) {
+    return { games:0, wins:0, losses:0, winPct:null, avgPPD:null, ppd:null };
+  }
+
+  const avgPPD = dailyTotals.reduce((sum, v) => sum + v, 0) / dailyTotals.length;
+
+  let wins = 0, losses = 0;
+  for (const total of dailyTotals) {
+    if (total > avgPPD) wins++;
+    else losses++;
+  }
+
+  const winPct = (wins + losses) ? (wins / (wins + losses)) * 100 : null;
+  const ppd = avgPPD;
+
+  return { games: dailyTotals.length, wins, losses, winPct, avgPPD, ppd };
+}
+
 
     let players = loadPlayers();
 
@@ -232,7 +269,7 @@
 
     function computePlayerStats(p) {
       if (p && (p.id === "YOU" || p.isYou)) {
-        return computeYouStatsFromCompletions();
+        return computeYouStats();
       }
 
       if (!Array.isArray(gameHistory) || !gameHistory.length) {
@@ -375,3 +412,4 @@
   </script>
 </body>
 </html>
+
