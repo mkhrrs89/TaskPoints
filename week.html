@@ -261,6 +261,34 @@ function load() {
 let state = load();
 let currentBaseDate = new Date();
 
+  function normalizeState(s) {
+  return {
+    tasks:       Array.isArray(s.tasks)       ? s.tasks       : [],
+    completions: Array.isArray(s.completions) ? s.completions : [],
+    players:     Array.isArray(s.players)     ? s.players     : [],
+    habits:      Array.isArray(s.habits)      ? s.habits      : [],
+    flexActions: Array.isArray(s.flexActions) ? s.flexActions : [],
+    gameHistory: Array.isArray(s.gameHistory) ? s.gameHistory : [],
+    matchups:    Array.isArray(s.matchups)    ? s.matchups    : [],
+    schedule:    Array.isArray(s.schedule)    ? s.schedule    : [],
+    workHistory: Array.isArray(s.workHistory) ? s.workHistory : [],
+    youImage:    typeof s.youImage === "string" ? s.youImage : ""
+  };
+}
+
+function saveMerged(partial) {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    const existing = raw ? (JSON.parse(raw) || {}) : {};
+    const merged = normalizeState({ ...existing, ...partial });
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+    return merged;
+  } catch (e) {
+    console.error("saveMerged failed", e);
+    return partial;
+  }
+}
+
 function addDays(d,n){ const x=new Date(d); x.setDate(x.getDate()+n); x.setHours(0,0,0,0); return x; }
 function startOfWeek(d){ const x=new Date(d); x.setHours(0,0,0,0); const day=(x.getDay()+6)%7; x.setDate(x.getDate()-day); return x; }
 function weekDays(baseDate){
@@ -464,7 +492,7 @@ function toggleHabitDay(habitId, dayKey, baseDate){
     if (failedIdx !== -1) h.failedKeys.splice(failedIdx,1);
   }
 
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  state = saveMerged(state);
   renderHabits(baseDate);
 }
 function toggleHabitRetired(habitId, baseDate){
@@ -473,7 +501,7 @@ function toggleHabitRetired(habitId, baseDate){
   if (!h) return;
 
   h.retired = !h.retired;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  state = saveMerged(state);
   renderHabits(baseDate);
 }
 
@@ -507,7 +535,9 @@ function renderWeekTasks(baseDate){
 }
 function postponeTask(id){
   const st=load(); const t=st.tasks.find(x=>x.id===id); if(!t) return;
-  t.dueDateISO = todayKey(); localStorage.setItem(STORAGE_KEY, JSON.stringify(st));
+  t.dueDateISO = todayKey();
+st = saveMerged(st);
+
   state=st; renderWeekTasks(currentBaseDate);
 }
 function wontDo(id, dayKey){
@@ -521,7 +551,10 @@ function wontDo(id, dayKey){
     if(!t.skipDates.includes(dayKey)) t.skipDates.push(dayKey);
     if(t.dueDateISO===dayKey) t.dueDateISO = todayKey();
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(st)); state=st; renderWeekTasks(currentBaseDate);
+  st = saveMerged(st);
+state = st;
+renderWeekTasks(currentBaseDate);
+
 }
 
 function addOneDay(id){
@@ -533,7 +566,7 @@ function addOneDay(id){
   const newDate = addDays(oldDate, 1);
   t.dueDateISO = dateKey(newDate);
 
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(st));
+  st = saveMerged(st);
   state = st;
   renderWeekTasks(currentBaseDate);
 }
@@ -543,7 +576,10 @@ function completeTask(id){
   const now=new Date().toISOString();
   t.completedAtISO=now;
   st.completions.unshift({ id:crypto.randomUUID(), taskId:id, title:t.title, points:t.points, completedAtISO:now });
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(st)); state=st; renderWeekTasks(currentBaseDate);
+  st = saveMerged(st);
+state = st;
+renderWeekTasks(currentBaseDate);
+
 }
 
 function renderFlexWeek(baseDate){
@@ -715,3 +751,4 @@ renderAll(currentBaseDate);
 </script>
 </body>
 </html>
+
