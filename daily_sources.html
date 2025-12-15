@@ -83,6 +83,35 @@
 
     let state = load();
 
+function normalizeState(s) {
+  return {
+    tasks:       Array.isArray(s.tasks)       ? s.tasks       : [],
+    completions: Array.isArray(s.completions) ? s.completions : [],
+    players:     Array.isArray(s.players)     ? s.players     : [],
+    habits:      Array.isArray(s.habits)      ? s.habits      : [],
+    flexActions: Array.isArray(s.flexActions) ? s.flexActions : [],
+    gameHistory: Array.isArray(s.gameHistory) ? s.gameHistory : [],
+    matchups:    Array.isArray(s.matchups)    ? s.matchups    : [],
+    schedule:    Array.isArray(s.schedule)    ? s.schedule    : [],
+    workHistory: Array.isArray(s.workHistory) ? s.workHistory : [],
+    youImage:    typeof s.youImage === "string" ? s.youImage : ""
+  };
+}
+
+function saveMerged(partial) {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    const existing = raw ? (JSON.parse(raw) || {}) : {};
+    const merged = normalizeState({ ...existing, ...partial });
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+    return merged;
+  } catch (e) {
+    console.error("saveMerged failed (daily.html)", e);
+    return partial;
+  }
+}
+
+    
     function migrateSleepEntriesForBonus() {
       if (!state || !Array.isArray(state.completions)) return;
 
@@ -107,13 +136,10 @@
         }
       });
 
-      if (changed) {
-        try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-        } catch (e) {
-          console.error("Failed to save migrated sleep entries", e);
-        }
-      }
+if (changed) {
+  state = saveMerged(state);
+}
+
     }
 
     function dateKey(d) {
