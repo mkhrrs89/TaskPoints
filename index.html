@@ -745,7 +745,19 @@ function getPlayerRecordText(playerId) {
 }
 
 
-function save(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+function save() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    const existing = raw ? (JSON.parse(raw) || {}) : {};
+    const merged = { ...existing, ...state };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+    state = merged; // keep memory in sync
+  } catch (e) {
+    console.error("Failed to save state (index.html)", e);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }
+}
+
 
 function resetAll(){
   const msg = [
