@@ -46,6 +46,35 @@
 const STORAGE_KEY = "taskpoints_v1";
 const $ = id => document.getElementById(id);
 
+function normalizeState(s) {
+  return {
+    tasks:       Array.isArray(s.tasks)       ? s.tasks       : [],
+    completions: Array.isArray(s.completions) ? s.completions : [],
+    players:     Array.isArray(s.players)     ? s.players     : [],
+    habits:      Array.isArray(s.habits)      ? s.habits      : [],
+    flexActions: Array.isArray(s.flexActions) ? s.flexActions : [],
+    gameHistory: Array.isArray(s.gameHistory) ? s.gameHistory : [],
+    matchups:    Array.isArray(s.matchups)    ? s.matchups    : [],
+    schedule:    Array.isArray(s.schedule)    ? s.schedule    : [],
+    workHistory: Array.isArray(s.workHistory) ? s.workHistory : [],
+    youImage:    typeof s.youImage === "string" ? s.youImage : ""
+  };
+}
+
+function saveMerged(partial) {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    const existing = raw ? (JSON.parse(raw) || {}) : {};
+    const merged = normalizeState({ ...existing, ...partial });
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+    return merged;
+  } catch (e) {
+    console.error("saveMerged failed", e);
+    return partial;
+  }
+}
+
+  
 function load(){
   try{
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -178,7 +207,7 @@ function wontDo(id){
     const tk = todayKey();
     if (!t.skipDates.includes(tk)) t.skipDates.push(tk);
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(st));
+  st = saveMerged(st);
   state = st;
   renderArchive();
 }
@@ -201,7 +230,7 @@ function completeTask(id){
     source: "task"
   });
 
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(st));
+  st = saveMerged(st);
   state = st;
   renderArchive();
 }
@@ -212,7 +241,7 @@ function unarchiveTask(id){
   if (!t) return;
 
   t.hidden = false;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(st));
+  st = saveMerged(st);
   state = st;
   renderArchive();
 }
@@ -221,3 +250,4 @@ window.addEventListener('load', renderArchive);
 </script>
 </body>
 </html>
+
