@@ -463,7 +463,7 @@ function saveState(nextState) {
 }
 
 
-const state = loadState();
+let state = loadState();
 let editingPlayerId = null;
 let viewMode = "card"; // "card" | "gallery"
 
@@ -878,7 +878,7 @@ function simulateToday() {
 
 function maybeAutoSimToday(){
   const now = new Date();
-  const todayKey = now.toISOString().slice(0,10);
+  const todayKey = dateKey(now);
 
   // Only after 8am local time (your EST)
   if (now.getHours() < 8) return;
@@ -1855,5 +1855,6 @@ async function fileToDataUrl(file) {
   </script>
 </body>
 </html>
+
 
 
