@@ -745,7 +745,7 @@ function simulateAiScoreForPlayer(player, todayKey){
 }
 
 function makeId() {
-  if (window.crypto && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  if (window.crypto && typeof crypto.randomUUID === "function") return makeId();
   return "id_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2);
 }
 
@@ -784,7 +784,7 @@ function makeId() {
     if (bId && bId !== "YOU" && Number.isFinite(bScore)) {
       const k = `${date}|${bId}`;
       if (!seen.has(k)) {
-        rebuilt.push({ id: crypto.randomUUID(), date, playerId: bId, score: bScore });
+        rebuilt.push({ id: makeId(), date, playerId: bId, score: bScore });
         seen.add(k);
       }
     }
@@ -874,7 +874,7 @@ function simulateToday() {
     const score = simulateAiScoreForPlayer(player, todayKey);
     scoresById[id] = score;
     state.gameHistory.push({
-      id: crypto.randomUUID(),
+      id: makeId(),
       date: todayKey,
       playerId: id,
       score
@@ -885,7 +885,7 @@ function simulateToday() {
 
   todaysPairs.forEach(pair => {
     const matchup = {
-      id: crypto.randomUUID(),
+      id: makeId(),
       date: todayKey,
       playerAId: pair.playerAId,
       playerBId: pair.playerBId,
@@ -1174,7 +1174,10 @@ function renderPlayers() {
   };
 
   // --- normal players ---
-  const normalPlayers = state.players || [];
+  const normalPlayers = Array.isArray(state.players)
+  ? state.players.filter(p => p && typeof p === "object")
+  : [];
+
 
   // YOU appears first, followed by everyone else
   const players = [youPlayer, ...normalPlayers];
@@ -1790,7 +1793,7 @@ $("createPlayerForm").addEventListener("submit", (e)=>{
   const addPlayer = (imageData) => {
 
     state.players.push({
-      id: crypto.randomUUID(),
+      id: makeId(),
       name,
       notes,
       imageData: imageData || null,
@@ -1833,9 +1836,19 @@ $("createPlayerForm").addEventListener("submit", (e)=>{
 // (Handled on the main page now; Game view is read-only for backup controls.)
 
 
-    // Auto-sim once per day after 8am, then render
-    maybeAutoSimToday();
-    renderPlayers();
+// Auto-sim once per day after 8am, then render
+renderPlayers(); // always render even if auto-sim dies
+
+try {
+  maybeAutoSimToday();
+} catch (e) {
+  console.error("Auto-sim failed; leaving UI rendered", e);
+}
+
+// If auto-sim succeeded, it already calls renderPlayers() internally,
+// but calling again is harmless:
+renderPlayers();
+
 
 // ----- View mode toggle (Card vs Gallery) -----
 const viewCardBtn = document.getElementById("viewCardBtn");
@@ -1929,6 +1942,7 @@ async function fileToDataUrl(file) {
   </script>
 </body>
 </html>
+
 
 
 
