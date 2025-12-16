@@ -465,6 +465,9 @@ function saveState(nextState) {
 
 
 let state = loadState();
+    console.log("STORAGE_KEY =", STORAGE_KEY);
+console.log("state.players =", state.players, "count =", (state.players || []).length);
+
 if (rebuildGameHistoryFromMatchupsIfNeeded()) {
   state = saveState(state);
 }
@@ -1942,6 +1945,7 @@ async function fileToDataUrl(file) {
   </script>
 </body>
 </html>
+
 
 
 
