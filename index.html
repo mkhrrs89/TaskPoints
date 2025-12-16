@@ -274,10 +274,11 @@
             <div id="workTodayImpact" class="muted text-xs mt-1">Adds 0 pts to today</div>
           </div>
 
-          <div class="flex items-center gap-3 mt-3 flex-nowrap sm:flex-wrap">
-            <input id="workScoreInput" class="input w-24" type="number" placeholder="0–100">
-            <button id="saveWorkScoreBtn" class="btn btn-work">Add</button>
-          </div>
+<div id="workInputRow" class="flex items-center gap-3 mt-3 flex-nowrap sm:flex-wrap">
+  <input id="workScoreInput" class="input w-24" type="number" placeholder="0–100">
+  <button id="saveWorkScoreBtn" class="btn btn-work">Add</button>
+</div>
+
 
           <p class="muted text-xs mt-2">
             Work Score is added directly as points. (5 → +5 pts)
@@ -2836,6 +2837,40 @@ function renderCaloriesHistory() {
   });
 }
 
+function getTodayWorkEntry() {
+  const todayKey = dateKey(new Date());
+  for (const entry of state.completions) {
+    if (!entry?.title?.startsWith("Work Score")) continue;
+    const d = new Date(entry.completedAtISO);
+    if (dateKey(d) === todayKey) return entry;
+  }
+  return null;
+}
+
+function editTodayWork() {
+  const entry = getTodayWorkEntry();
+  if (!entry) return alert("You haven't entered today's work score yet.");
+
+  const current = entry.title.match(/\((.+)\)/)?.[1] ?? "";
+  const newVal = prompt("Edit today's work score:", String(current));
+  if (newVal === null) return;
+
+  const num = Number(String(newVal).trim());
+  if (Number.isNaN(num)) return alert("Invalid work score.");
+
+  // keep it pinned to today
+  const d = new Date();
+  d.setHours(12, 0, 0, 0);
+
+  entry.title = `Work Score (${num})`;
+  entry.points = num;
+  entry.completedAtISO = d.toISOString();
+
+  save();
+  renderAll();
+}
+
+  
 function saveWorkScore() {
   const rawStr = $('workScoreInput').value.trim();
   if (rawStr === '') return alert("Enter your work score.");
@@ -2907,22 +2942,41 @@ function renderWorkHistory() {
 
   const todayValueEl = $('workTodayValue');
   const todayImpactEl = $('workTodayImpact');
+  const inputRow = $('workInputRow');
 
-  if (todayValueEl && todayImpactEl) {
-    if (todayEntry) {
-      const num = Number(todayEntry.title.match(/\((.+)\)/)?.[1] || NaN);
-      if (!isNaN(num)) {
-        todayValueEl.textContent = num;
-        todayImpactEl.textContent = `Adds ${todayEntry.points} pts to today`;
-      } else {
-        todayValueEl.textContent = '—';
-        todayImpactEl.textContent = 'Adds — pts to today';
-      }
+  
+if (todayValueEl && todayImpactEl) {
+  if (todayEntry) {
+    const num = Number(todayEntry.title.match(/\((.+)\)/)?.[1] || NaN);
+    if (!isNaN(num)) {
+      todayValueEl.textContent = num;
+      todayImpactEl.textContent = `Adds ${todayEntry.points} pts to today`;
+
+      // ✅ hide input row after initial entry
+      inputRow?.classList.add('hidden');
+
+      // ✅ make today's value behave like a history chip (tap to edit)
+      todayValueEl.classList.add('cursor-pointer');
+      todayValueEl.title = "Tap/click to edit today's work score";
+      todayValueEl.onclick = editTodayWork;
     } else {
       todayValueEl.textContent = '—';
-      todayImpactEl.textContent = 'Adds 0 pts to today';
+      todayImpactEl.textContent = 'Adds — pts to today';
     }
+  } else {
+    todayValueEl.textContent = '—';
+    todayImpactEl.textContent = 'Adds 0 pts to today';
+
+    // ✅ show input row if no entry yet
+    inputRow?.classList.remove('hidden');
+
+    // ✅ remove click behavior
+    todayValueEl.classList.remove('cursor-pointer');
+    todayValueEl.title = "";
+    todayValueEl.onclick = null;
   }
+}
+
 
   // RECENT HISTORY (4 chips)
   const recent = entries
