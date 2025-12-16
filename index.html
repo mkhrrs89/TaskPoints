@@ -668,10 +668,14 @@ function openAddTaskModal() {
   modal.classList.add("flex");
   $("titleInput")?.focus();
 
-  // 👇 this is where btn.textContent belongs
   const btn = $("todayPointsAddTaskBtn");
   if (btn) btn.textContent = "Close";
+
+  // ✅ add this
+  const rep = $("repeatInput");
+  syncCustomRepeatUI(rep);
 }
+
 
 function closeAddTaskModal() {
   const modal = $("addTaskModal");
@@ -3630,6 +3634,11 @@ document.addEventListener('DOMContentLoaded', () => {
   $('saveWorkScoreBtn')?.addEventListener('click', saveWorkScore);
   $('saveMoodScoreBtn')?.addEventListener('click', saveMoodScore);
 
+  const rep = $("repeatInput");
+  rep?.addEventListener("change", () => syncCustomRepeatUI(rep));
+  rep?.addEventListener("input",  () => syncCustomRepeatUI(rep)); // extra iOS safety
+  syncCustomRepeatUI(rep); // sync once at load
+  
   initCaloriesDatePicker();
   initHabitSortControl();
   renderHabitWeekLabels();
