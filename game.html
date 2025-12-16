@@ -748,9 +748,12 @@ function simulateAiScoreForPlayer(player, todayKey){
 }
 
 function makeId() {
-  if (window.crypto && typeof crypto.randomUUID === "function") return makeId();
+  if (window.crypto && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
   return "id_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2);
 }
+
 
     
     function rebuildGameHistoryFromMatchupsIfNeeded() {
@@ -1945,6 +1948,7 @@ async function fileToDataUrl(file) {
   </script>
 </body>
 </html>
+
 
 
 
