@@ -297,8 +297,43 @@
     </div>
   </div>
 
-  <!-- RIGHT: completely blank card for future use -->
-  <div class="glass"></div>
+<!-- RIGHT: Mood Score -->
+<div class="glass">
+  <div class="flex items-start justify-between gap-6 flex-wrap">
+
+    <!-- LEFT SIDE: big stat + input -->
+    <div class="flex-1 min-w-[220px]">
+      <div class="mood-today-card">
+        <h2 id="moodAnchor" class="font-bold text-lg mb-2">Mood Score</h2>
+
+        <div class="mb-2">
+          <div class="muted text-xs">Today’s Mood</div>
+          <div id="moodTodayValue" class="text-4xl font-extrabold leading-tight">—</div>
+          <div id="moodTodayImpact" class="muted text-xs mt-1">Adds 0 pts to today</div>
+        </div>
+
+        <div id="moodInputRow" class="flex items-center gap-3 mt-3 flex-nowrap sm:flex-wrap">
+          <input id="moodScoreInput" class="input w-24" type="number" placeholder="0–10">
+          <button id="saveMoodScoreBtn" class="btn btn-mood">Add</button>
+        </div>
+
+        <p class="muted text-xs mt-2">
+          Mood Score is added directly as points. (5 → +5 pts)
+        </p>
+      </div>
+    </div>
+
+    <!-- RIGHT SIDE: history chips -->
+    <div class="flex-1 min-w-[220px]">
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="font-semibold text-sm">Recent days</h3>
+      </div>
+      <div id="moodHistory" class="flex gap-2 flex-wrap"></div>
+    </div>
+
+  </div>
+</div>
+
 
 </div>
 
@@ -3022,6 +3057,169 @@ if (todayValueEl && todayImpactEl) {
   });
 }
 
+  function getTodayMoodEntry() {
+  const todayKeyStr = dateKey(new Date());
+  for (const c of state.completions) {
+    if (!c?.title?.startsWith('Mood Score')) continue;
+    const d = new Date(c.completedAtISO);
+    if (dateKey(d) === todayKeyStr) return c;
+  }
+  return null;
+}
+
+function editTodayMood() {
+  const entry = getTodayMoodEntry();
+  if (!entry) return alert("You haven't entered today's mood score yet.");
+
+  const current = entry.title.match(/\((.+)\)/)?.[1] ?? "";
+  const newVal = prompt("Edit today's mood score:", String(current));
+  if (newVal === null) return;
+
+  const num = Number(String(newVal).trim());
+  if (Number.isNaN(num)) return alert("Invalid mood score.");
+
+  const d = new Date();
+  d.setHours(12, 0, 0, 0);
+
+  entry.title = `Mood Score (${num})`;
+  entry.points = num;
+  entry.completedAtISO = d.toISOString();
+
+  save();
+  renderAll();
+}
+
+function saveMoodScore() {
+  const rawStr = $('moodScoreInput').value.trim();
+  if (rawStr === '') return alert("Enter your mood score.");
+
+  const raw = Number(rawStr);
+  if (Number.isNaN(raw)) return alert("Mood Score must be a number.");
+
+  const pts = raw;
+
+  const d = new Date();
+  d.setHours(12, 0, 0, 0);
+  const key = dateKey(d);
+  const whenISO = d.toISOString();
+
+  let existing = null;
+  for (const c of state.completions) {
+    if (!c.title || !c.title.startsWith('Mood Score')) continue;
+    const cd = new Date(c.completedAtISO);
+    if (dateKey(cd) === key) { existing = c; break; }
+  }
+
+  if (existing) {
+    existing.title = `Mood Score (${raw})`;
+    existing.points = pts;
+    existing.completedAtISO = whenISO;
+  } else {
+    state.completions.unshift({
+      id: crypto.randomUUID(),
+      title: `Mood Score (${raw})`,
+      points: pts,
+      completedAtISO: whenISO,
+      source: "task"
+    });
+  }
+
+  $('moodScoreInput').value = "";
+  save();
+  renderAll();
+}
+
+function renderMoodHistory() {
+  const container = $('moodHistory');
+  if (container) container.innerHTML = '';
+
+  const entries = state.completions
+    .filter(c => c.title && c.title.startsWith('Mood Score'))
+    .slice()
+    .sort((a,b) => new Date(b.completedAtISO) - new Date(a.completedAtISO));
+
+  const today = new Date();
+  const todayK = dateKey(today);
+
+  let todayEntry = null;
+  for (const entry of entries) {
+    const d = new Date(entry.completedAtISO);
+    if (dateKey(d) === todayK) { todayEntry = entry; break; }
+  }
+
+  const todayValueEl = $('moodTodayValue');
+  const todayImpactEl = $('moodTodayImpact');
+  const inputRow = $('moodInputRow');
+
+  if (todayValueEl && todayImpactEl) {
+    if (todayEntry) {
+      const num = Number(todayEntry.title.match(/\((.+)\)/)?.[1] || NaN);
+      if (!isNaN(num)) {
+        todayValueEl.textContent = num;
+        todayImpactEl.textContent = `Adds ${todayEntry.points} pts to today`;
+      } else {
+        todayValueEl.textContent = '—';
+        todayImpactEl.textContent = 'Adds — pts to today';
+      }
+
+      inputRow?.classList.add('hidden');
+      todayValueEl.classList.add('cursor-pointer');
+      todayValueEl.title = "Tap/click to edit today's mood score";
+      todayValueEl.onclick = editTodayMood;
+    } else {
+      todayValueEl.textContent = '—';
+      todayImpactEl.textContent = 'Adds 0 pts to today';
+
+      inputRow?.classList.remove('hidden');
+      todayValueEl.classList.remove('cursor-pointer');
+      todayValueEl.title = "";
+      todayValueEl.onclick = null;
+    }
+  }
+
+  const recent = entries
+    .filter(e => dateKey(new Date(e.completedAtISO)) !== todayK)
+    .slice(0, 4);
+
+  recent.forEach(entry => {
+    const date = new Date(entry.completedAtISO);
+
+    const prettyDate = date.toLocaleDateString('en-US', {
+      weekday: 'short',
+      month: 'numeric',
+      day: 'numeric'
+    });
+
+    const val = entry.title.match(/\((.+)\)/)?.[1] || '?';
+    const pts = entry.points;
+
+    const block = document.createElement('div');
+    block.className = 'mood-chip cursor-pointer';
+
+    block.innerHTML = `
+      <div class="mood-chip-date">${prettyDate}</div>
+      <div class="mood-chip-value">${val}</div>
+      <div class="mood-chip-pts">${pts} pts</div>
+    `;
+
+    block.onclick = () => {
+      const newVal = prompt("Edit mood score:", val);
+      if (!newVal && newVal !== "0") return;
+
+      const num = Number(newVal);
+      if (isNaN(num)) return alert("Invalid number.");
+
+      entry.title = `Mood Score (${num})`;
+      entry.points = num;
+
+      save();
+      renderAll();
+    };
+
+    container.appendChild(block);
+  });
+}
+
 
 function addTask(){
   const title = $('titleInput').value.trim();
@@ -3400,6 +3598,12 @@ function renderAll(){
   }
 }
 
+  try {
+  renderMoodHistory();
+} catch (e) {
+  console.error('renderMoodHistory error:', e);
+}
+
 
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#039;'}[m])); }
 
@@ -3425,6 +3629,8 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   $('saveCaloriesBtn')?.addEventListener('click', saveCalories);
   $('saveWorkScoreBtn')?.addEventListener('click', saveWorkScore);
+  $('saveMoodScoreBtn')?.addEventListener('click', saveMoodScore);
+
   initCaloriesDatePicker();
   initHabitSortControl();
   renderHabitWeekLabels();
