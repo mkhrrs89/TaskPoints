@@ -1542,7 +1542,7 @@ card.innerHTML = `
       <div class="flex-1 min-w-0">
         <div class="text-xs opacity-80 leading-[1.0] space-y-[2px]">
           <p>Record: ${recordText}</p>
-          <p>AVG PPD: ${avgText}</p>
+          <p>AVG PPD: ${avgPpd}</p>
           <p>Baseline: ${p.baseline ?? "—"}</p>
           <p>Variance: ${p.variance ?? "—"}</p>
           <p>Momentum: ${p.momentum ?? "—"}</p>
@@ -1929,6 +1929,7 @@ async function fileToDataUrl(file) {
   </script>
 </body>
 </html>
+
 
 
 
