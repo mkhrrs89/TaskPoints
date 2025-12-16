@@ -672,6 +672,37 @@
   border: 1px solid rgba(147, 197, 253, 0.5);
 }
 
+/* Mood (navy) */
+.mood-today-card{
+  background: linear-gradient(180deg, rgba(30, 58, 138, 0.55), rgba(15, 23, 42, 0.55));
+  border-radius: 16px;
+  padding: 16px;
+  color: #e0e7ff;
+  border: 1px solid rgba(96, 165, 250, 0.35);
+}
+
+.btn-mood{
+  background: rgba(30, 58, 138, 0.40);
+  border: 1px solid rgba(96, 165, 250, 0.55);
+  color: #e0e7ff;
+}
+.btn-mood:hover{
+  background: rgba(30, 58, 138, 0.60);
+}
+
+.mood-chip{
+  background: linear-gradient(180deg, rgba(30, 58, 138, 0.50), rgba(15, 23, 42, 0.45));
+  border: 1px solid rgba(96, 165, 250, 0.35);
+  border-radius: 0.6rem;
+  padding: 0.4rem 0.55rem;
+  text-align: center;
+  min-width: 64px;
+}
+
+.mood-chip-date{ font-size: 11px; color: #e0e7ff; opacity: 0.9; }
+.mood-chip-value{ font-size: 18px; font-weight: 700; color: #ffffff; }
+.mood-chip-pts{ font-size: 11px; color: #e0e7ff; opacity: 0.9; }
+
 .cal-chip{
   background: linear-gradient(180deg, #0f4d4d, #0a2f2f); /* same as your teal buttons */
   color:#fff;
@@ -816,6 +847,7 @@
     width: 100% !important;
   }
 }
+
 
 
 
