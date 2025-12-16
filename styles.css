@@ -569,15 +569,19 @@
 .sleep-chip-date{
   font-size:11px;
   opacity:0.85;
-  margin-bottom:4px;
+  margin-bottom:0;   /* was 4px */
+  line-height:1.05;
 }
+
 
 /* score line inside chip */
 .sleep-chip-score{
   font-size:20px;
   font-weight:700;
-  line-height:1;
+  line-height:1.0;
+  margin:0;
 }
+
 
 .sleep-today-card{
   background: linear-gradient(180deg, #2F2B78, #1B1947);
@@ -812,6 +816,7 @@
     width: 100% !important;
   }
 }
+
 
 
 
