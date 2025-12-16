@@ -314,7 +314,7 @@
 
         <div id="moodInputRow" class="flex items-center gap-3 mt-3 flex-nowrap sm:flex-wrap">
           <input id="moodScoreInput" class="input w-24" type="number" placeholder="0–10">
-          <button id="saveMoodScoreBtn" class="btn btn-mood">Add</button>
+          <button id="saveMoodScoreBtn" type="button" class="btn btn-mood">Add</button>
         </div>
 
         <p class="muted text-xs mt-2">
@@ -3596,14 +3596,13 @@ function renderAll(){
   } catch (e) {
     console.error('renderWorkHistory error:', e);
   }
-}
 
   try {
   renderMoodHistory();
 } catch (e) {
   console.error('renderMoodHistory error:', e);
 }
-
+  }
 
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#039;'}[m])); }
 
