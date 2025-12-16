@@ -569,7 +569,7 @@
 .sleep-chip-date{
   font-size:11px;
   opacity:0.85;
-  margin-bottom:2;   /* was 4px */
+  margin-bottom:3;   /* was 4px */
   line-height:1.05;
 }
 
@@ -816,6 +816,7 @@
     width: 100% !important;
   }
 }
+
 
 
 
