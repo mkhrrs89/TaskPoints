@@ -669,7 +669,7 @@
   border-radius: 16px;
   padding: 16px;
   color: #e3f2ff;
-  border: 1px solid rgba(147, 197, 253, 0.5);
+  border:none !important;
 }
 
 /* Mood (navy) */
@@ -847,6 +847,7 @@
     width: 100% !important;
   }
 }
+
 
 
 
