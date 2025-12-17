@@ -37,14 +37,6 @@
   <button id="importPasteBtn" class="btn btn-ghost btn-toolbar">Paste JSON</button>
   <button id="resetBtn" class="btn btn-ghost btn-toolbar">Reset</button>
 
-<button
-  type="button"
-  class="btn btn-ghost btn-toolbar hidden md:inline-flex"
-  onclick="scrollToTasks()">
-  Jump to Tasks
-</button>
-
-
   <a href="index.html"        class="btn btn-teal btn-toolbar">Main</a>
   <a href="daily.html"        class="btn btn-teal btn-toolbar">Daily</a>
   <a href="daily_sources.html" class="btn btn-teal btn-toolbar">Sources</a>
@@ -76,14 +68,23 @@
   <div class="font-semibold text-sm muted">Today&#8217;s Points</div>
 
   <!-- DESKTOP ONLY: Add Task button (does not affect mobile) -->
-  <button
-    id="todayPointsAddTaskBtn"
-    type="button"
-    class="btn btn-teal hidden lg:inline-flex absolute top-3 right-3"
-    onclick="toggleAddTask()"
-  >
-    Add Task
-  </button>
+  <div class="hidden lg:flex flex-col gap-2 absolute top-3 right-3 w-32">
+    <button
+      id="todayPointsAddTaskBtn"
+      type="button"
+      class="btn btn-teal w-full"
+      onclick="toggleAddTask()"
+    >
+      Add Task
+    </button>
+    <button
+      type="button"
+      class="btn btn-teal w-full"
+      onclick="scrollToTasks()"
+    >
+      Jump to Tasks
+    </button>
+  </div>
 
         <div id="todayPoints" class="text-5xl sm:text-6xl font-extrabold mt-1">0</div>
         <div class="text-[11px] muted mt-1">Points earned so far today</div>
