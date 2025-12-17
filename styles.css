@@ -872,23 +872,6 @@
 }
 
 
-/* Header nav "selected" (focused) button style */
-.btn-toolbar:focus,
-.btn-toolbar:focus-visible{
-  outline: none !important;
-  border-color: rgba(251,146,60,.95) !important;
-  background: linear-gradient(
-    180deg,
-    rgba(251,146,60,.95),
-    rgba(234,179,8,.90)
-  ) !important;
-  color: #111827 !important; /* dark gray text */
-  box-shadow: 0 10px 24px rgba(251,146,60,.22) !important;
-}
-
-
-
-
 
 
 
