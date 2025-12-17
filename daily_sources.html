@@ -189,8 +189,31 @@ if (changed) {
       { key: "vices",    label: "Vices",    match: c => c.source === "vice" },
       { key: "flex",     label: "Flex",     match: c => c.source === "flex" },
       { key: "work",     label: "Work",     match: c => c.source === "work" || (typeof c.title === "string" && c.title.startsWith("Work Score")) },
+      { key: "inertia",  label: "Inertia",  match: () => false },
       { key: "tasks",    label: "Tasks",    match: () => true }
     ];
+
+    function computeInertiaForDay(dailyTotals, dayKey) {
+      const day = fromKey(dayKey);
+      if (!day || isNaN(day.getTime())) return 0;
+
+      let sum = 0;
+      let count = 0;
+
+      for (let i = 1; i <= 7; i++) {
+        const d = new Date(day);
+        d.setDate(day.getDate() - i);
+        const key = dateKey(d);
+        const val = Number(dailyTotals[key]);
+        if (Number.isFinite(val)) {
+          sum += val;
+          count++;
+        }
+      }
+
+      const average = count ? sum / count : 0;
+      return count ? average * 0.25 : 0;
+    }
 
     function categorizeCompletion(c) {
       for (const def of CATEGORY_DEFS) {
@@ -227,6 +250,15 @@ if (changed) {
         const catKey = categorizeCompletion(c);
         daily[key].total += pts;
         daily[key].categories[catKey] = (daily[key].categories[catKey] || 0) + pts;
+      });
+
+      const dailyTotals = Object.fromEntries(Object.entries(daily).map(([k, v]) => [k, Number(v.total) || 0]));
+      Object.keys(dailyTotals).forEach(k => {
+        const inertia = computeInertiaForDay(dailyTotals, k);
+        if (!inertia) return;
+
+        daily[k].total += inertia;
+        daily[k].categories.inertia = (daily[k].categories.inertia || 0) + inertia;
       });
 
       return daily;
