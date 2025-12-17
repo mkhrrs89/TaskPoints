@@ -197,22 +197,44 @@ if (changed) {
       const day = fromKey(dayKey);
       if (!day || isNaN(day.getTime())) return 0;
 
-      let sum = 0;
-      let count = 0;
+      const keys = Array.from(new Set([...Object.keys(dailyTotals), dayKey]))
+        .filter(k => {
+          const d = fromKey(k);
+          return d && !isNaN(d.getTime());
+        })
+        .sort((a, b) => fromKey(a) - fromKey(b));
 
-      for (let i = 1; i <= 7; i++) {
-        const d = new Date(day);
-        d.setDate(day.getDate() - i);
-        const key = dateKey(d);
-        const val = Number(dailyTotals[key]);
-        if (Number.isFinite(val)) {
-          sum += val;
-          count++;
+      const totalsWithInertia = new Map();
+
+      keys.forEach(k => {
+        const current = fromKey(k);
+        if (!current || isNaN(current.getTime())) return;
+
+        let sum = 0;
+        let count = 0;
+
+        for (let i = 1; i <= 7; i++) {
+          const d = new Date(current);
+          d.setDate(current.getDate() - i);
+          const key = dateKey(d);
+          const total = totalsWithInertia.get(key);
+          if (Number.isFinite(total)) {
+            sum += total;
+            count++;
+          }
         }
-      }
 
-      const average = count ? sum / count : 0;
-      return count ? average * 0.25 : 0;
+        const average = count ? sum / count : 0;
+        const inertia = count ? average * 0.25 : 0;
+        const base = Number(dailyTotals[k]) || 0;
+
+        totalsWithInertia.set(k, base + inertia);
+      });
+
+      const totalForDay = totalsWithInertia.get(dayKey);
+      const base = Number(dailyTotals[dayKey]) || 0;
+
+      return Number.isFinite(totalForDay) ? Math.max(totalForDay - base, 0) : 0;
     }
 
     function categorizeCompletion(c) {

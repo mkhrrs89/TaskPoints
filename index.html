@@ -1298,24 +1298,43 @@ function computeInertia(dailyTotals, todayK){
   const today = fromKey(todayK);
   if (!today || isNaN(today.getTime())) return { inertia: 0, average: 0 };
 
-  let sum = 0;
-  let count = 0;
+  const keys = Array.from(new Set([...Object.keys(dailyTotals), todayK]))
+    .filter(k => {
+      const d = fromKey(k);
+      return d && !isNaN(d.getTime());
+    })
+    .sort((a, b) => fromKey(a) - fromKey(b));
 
-  for (let i = 1; i <= 7; i++) {
-    const d = new Date(today);
-    d.setDate(today.getDate() - i);
-    const key = dateKey(d);
-    const val = Number(dailyTotals[key]);
-    if (Number.isFinite(val)) {
-      sum += val;
-      count++;
+  const inertiaMap = new Map();
+  const totalsWithInertia = new Map();
+
+  keys.forEach(k => {
+    const current = fromKey(k);
+    if (!current || isNaN(current.getTime())) return;
+
+    let sum = 0;
+    let count = 0;
+
+    for (let i = 1; i <= 7; i++) {
+      const d = new Date(current);
+      d.setDate(current.getDate() - i);
+      const key = dateKey(d);
+      const total = totalsWithInertia.get(key);
+      if (Number.isFinite(total)) {
+        sum += total;
+        count++;
+      }
     }
-  }
 
-  const average = count ? sum / count : 0;
-  const inertia = count ? average * 0.25 : 0;
+    const average = count ? sum / count : 0;
+    const inertia = count ? average * 0.25 : 0;
 
-  return { inertia, average };
+    inertiaMap.set(k, { inertia, average });
+    const base = Number(dailyTotals[k]) || 0;
+    totalsWithInertia.set(k, base + inertia);
+  });
+
+  return inertiaMap.get(todayK) || { inertia: 0, average: 0 };
 }
 
 function deriveTodayWithInertia(dailyTotals, todayK){
