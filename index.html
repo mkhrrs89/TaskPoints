@@ -641,8 +641,14 @@ function openAddTaskModal() {
 
   modal.classList.remove("hidden");
   modal.classList.add("flex");
+
+  // ✅ keep custom repeat row in sync immediately
+  const repeatSel = $("repeatInput");
+  if (repeatSel) syncCustomRepeatUI(repeatSel);
+
   $('titleInput')?.focus();
 }
+
 
 function closeAddTaskModal() {
   const modal = $("addTaskModal");
