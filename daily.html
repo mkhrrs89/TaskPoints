@@ -84,31 +84,29 @@
     function load() {
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
-        if (!raw) return { tasks: [], completions: [], players: [], habits: [], flexActions: [], matchups: [], schedule: [] };
-        const p = JSON.parse(raw);
-return {
-  tasks:       Array.isArray(p.tasks)       ? p.tasks       : [],
-  completions: Array.isArray(p.completions) ? p.completions : [],
-  players:     Array.isArray(p.players)     ? p.players     : [],
-  habits:      Array.isArray(p.habits)      ? p.habits      : [],
-  flexActions: Array.isArray(p.flexActions) ? p.flexActions : [],
-  gameHistory: Array.isArray(p.gameHistory) ? p.gameHistory : [],
-  matchups:    Array.isArray(p.matchups)    ? p.matchups    : [],
-  schedule:    Array.isArray(p.schedule)    ? p.schedule    : [],
-  workHistory: Array.isArray(p.workHistory) ? p.workHistory : [],
-  youImage:    typeof p.youImage === "string" ? p.youImage : ""
-};
+        if (!raw) {
+          return { tasks: [], completions: [], players: [], habits: [], flexActions: [], gameHistory: [], matchups: [], schedule: [], opponentDripSchedules: [] };
+        }
+
+        const parsed = JSON.parse(raw) || {};
+        return {
+          tasks:       Array.isArray(parsed.tasks)       ? parsed.tasks       : [],
+          completions: Array.isArray(parsed.completions) ? parsed.completions : [],
+          players:     Array.isArray(parsed.players)     ? parsed.players     : [],
+          habits:      Array.isArray(parsed.habits)      ? parsed.habits      : [],
+          flexActions: Array.isArray(parsed.flexActions) ? parsed.flexActions : [],
+          gameHistory: Array.isArray(parsed.gameHistory) ? parsed.gameHistory : [],
+          matchups:    Array.isArray(parsed.matchups)    ? parsed.matchups    : [],
+          schedule:    Array.isArray(parsed.schedule)    ? parsed.schedule    : [],
+          opponentDripSchedules: Array.isArray(parsed.opponentDripSchedules) ? parsed.opponentDripSchedules : [],
+        };
       } catch (e) {
         console.error("Failed to load TaskPoints state", e);
-        return {
-  tasks: [], completions: [], players: [], habits: [], flexActions: [],
-  gameHistory: [], matchups: [], schedule: [], workHistory: [], youImage: ""
-};
-
+        return { tasks: [], completions: [], players: [], habits: [], flexActions: [], gameHistory: [], matchups: [], schedule: [], opponentDripSchedules: [] };
       }
     }
 
-    let state = load();
+let state = load();
 
 function normalizeState(s) {
   return {
@@ -120,8 +118,9 @@ function normalizeState(s) {
     gameHistory: Array.isArray(s.gameHistory) ? s.gameHistory : [],
     matchups:    Array.isArray(s.matchups)    ? s.matchups    : [],
     schedule:    Array.isArray(s.schedule)    ? s.schedule    : [],
+    opponentDripSchedules: Array.isArray(s.opponentDripSchedules) ? s.opponentDripSchedules : [],
     workHistory: Array.isArray(s.workHistory) ? s.workHistory : [],
-    youImage:    typeof s.youImage === "string" ? s.youImage : ""
+    youImage:    typeof s.youImage === "string" ? s.youImage : "",
   };
 }
 

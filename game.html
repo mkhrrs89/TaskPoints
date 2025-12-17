@@ -411,7 +411,8 @@ function loadState() {
     flexActions: [],
     gameHistory: [],
     matchups: [],
-    schedule: []
+    schedule: [],
+    opponentDripSchedules: []
   };
 
   try {
@@ -428,6 +429,9 @@ function loadState() {
     base.gameHistory = Array.isArray(parsed.gameHistory) ? parsed.gameHistory : [];
     base.matchups    = Array.isArray(parsed.matchups)    ? parsed.matchups    : [];
     base.schedule    = Array.isArray(parsed.schedule)    ? parsed.schedule    : [];
+    base.opponentDripSchedules = Array.isArray(parsed.opponentDripSchedules)
+      ? parsed.opponentDripSchedules
+      : [];
   } catch (e) {
     console.error("Failed to load state in game.html", e);
   }
@@ -445,6 +449,7 @@ function normalizeState(s) {
     gameHistory: Array.isArray(s.gameHistory) ? s.gameHistory : [],
     matchups:    Array.isArray(s.matchups)    ? s.matchups    : [],
     schedule:    Array.isArray(s.schedule)    ? s.schedule    : [],
+    opponentDripSchedules: Array.isArray(s.opponentDripSchedules) ? s.opponentDripSchedules : [],
     youImage:    typeof s.youImage === "string" ? s.youImage : ""
   };
 }
@@ -817,6 +822,109 @@ function visibleNPCScore(finalScore) {
 }
 
 
+function generateOpponentDripSchedule(dateKeyStr, playerId, totalPoints){
+  const totalRounded = Math.max(0, Math.round((Number(totalPoints) || 0) * 10) / 10);
+  const totalUnits   = Math.round(totalRounded * 10);
+
+  const startHour = 6;
+  const endHour   = 23;
+  const count     = Math.max(12, Math.min(40, Math.round(Math.random() * 20) + 15));
+
+  const baseDate = new Date(`${dateKeyStr}T00:00:00`);
+
+  const hourBuckets = [];
+  for (let h = startHour; h <= endHour; h++) {
+    let weight = 1;
+    if ((h >= 7 && h <= 10) || (h >= 17 && h <= 21)) weight += 1.2;
+    if (Math.random() < 0.15) weight *= 0.4;
+    hourBuckets.push({ hour: h, weight });
+  }
+
+  const totalHourWeight = hourBuckets.reduce((s, h) => s + h.weight, 0) || 1;
+
+  function pickTime(){
+    let r = Math.random() * totalHourWeight;
+    let chosenHour = startHour;
+    for (const h of hourBuckets) {
+      if (r <= h.weight) { chosenHour = h.hour; break; }
+      r -= h.weight;
+    }
+
+    const m = Math.floor(Math.random() * 60);
+    const s = Math.floor(Math.random() * 60);
+    const d = new Date(baseDate.getTime());
+    d.setHours(chosenHour, m, s, 0);
+    return d;
+  }
+
+  const weights = [];
+  for (let i = 0; i < count; i++) {
+    const base = Math.pow(Math.random(), 1.4);
+    const burst = Math.random() < 0.35 ? Math.random() * 1.2 : 0;
+    weights.push(base + burst);
+  }
+
+  const weightSum = weights.reduce((s, n) => s + n, 0) || 1;
+
+  let remaining = totalUnits;
+  const pointUnits = [];
+  for (let i = 0; i < count; i++) {
+    if (i === count - 1) {
+      pointUnits.push(Math.max(0, remaining));
+    } else {
+      const share = Math.min(
+        remaining,
+        Math.max(0, Math.round((weights[i] / weightSum) * totalUnits))
+      );
+      pointUnits.push(share);
+      remaining -= share;
+    }
+  }
+
+  if (remaining > 0 && pointUnits.length) {
+    pointUnits[pointUnits.length - 1] += remaining;
+  }
+
+  const times = pointUnits.map(() => pickTime());
+  times.sort((a, b) => a - b);
+
+  const events = pointUnits
+    .map((units, idx) => ({ t: times[idx].toISOString(), pts: units / 10 }))
+    .filter(e => e.pts > 0)
+    .sort((a, b) => new Date(a.t) - new Date(b.t));
+
+  return {
+    date: dateKeyStr,
+    playerId,
+    total: totalRounded,
+    events
+  };
+}
+
+function ensureOpponentDripSchedule(dateKeyStr, playerId, totalPoints){
+  if (!dateKeyStr || !playerId) return null;
+
+  const list = Array.isArray(state.opponentDripSchedules) ? state.opponentDripSchedules : [];
+  const totalRounded = Math.max(0, Math.round((Number(totalPoints) || 0) * 10) / 10);
+  const existingIdx = list.findIndex(s => s && s.date === dateKeyStr && s.playerId === playerId);
+
+  if (existingIdx !== -1) {
+    const existing = list[existingIdx];
+    if (existing && Math.abs((existing.total || 0) - totalRounded) < 0.001 && Array.isArray(existing.events) && existing.events.length) {
+      return existing;
+    }
+  }
+
+  const next = generateOpponentDripSchedule(dateKeyStr, playerId, totalRounded);
+  const updated = list.filter(s => !(s && s.date === dateKeyStr && s.playerId === playerId));
+  updated.push(next);
+
+  state.opponentDripSchedules = updated;
+  state = saveState(state);
+  return next;
+}
+
+
 function simulateToday() {
   const todayKey = getGameDayKey(new Date());
 
@@ -878,6 +986,7 @@ function simulateToday() {
     if (!player) return;
     const score = simulateAiScoreForPlayer(player, todayKey);
     scoresById[id] = score;
+    ensureOpponentDripSchedule(todayKey, id, score);
     state.gameHistory.push({
       id: makeId(),
       date: todayKey,

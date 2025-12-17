@@ -105,7 +105,7 @@ function load() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) {
-      return { tasks:[], completions:[], players:[], habits:[], flexActions:[], gameHistory:[], matchups:[], schedule:[] };
+      return { tasks:[], completions:[], players:[], habits:[], flexActions:[], gameHistory:[], matchups:[], schedule:[], opponentDripSchedules: [] };
     }
 
     const p = JSON.parse(raw) || {};
@@ -118,12 +118,13 @@ function load() {
       flexActions: Array.isArray(p.flexActions) ? p.flexActions : [],
       gameHistory: Array.isArray(p.gameHistory) ? p.gameHistory : [],
       matchups:    Array.isArray(p.matchups)    ? p.matchups    : [],
-      schedule:    Array.isArray(p.schedule)    ? p.schedule    : []
+      schedule:    Array.isArray(p.schedule)    ? p.schedule    : [],
+      opponentDripSchedules: Array.isArray(p.opponentDripSchedules) ? p.opponentDripSchedules : []
     };
 
   } catch (e) {
     console.error("Failed to load TaskPoints state", e);
-    return { tasks:[], completions:[], players:[], habits:[], flexActions:[], gameHistory:[], matchups:[], schedule:[] };
+    return { tasks:[], completions:[], players:[], habits:[], flexActions:[], gameHistory:[], matchups:[], schedule:[], opponentDripSchedules: [] };
   }
 }
 
@@ -359,7 +360,8 @@ function normalizeState(s) {
     flexActions: Array.isArray(s.flexActions) ? s.flexActions : [],
     gameHistory: Array.isArray(s.gameHistory) ? s.gameHistory : [],
     matchups:    Array.isArray(s.matchups)    ? s.matchups    : [],
-    schedule:    Array.isArray(s.schedule)    ? s.schedule    : []
+    schedule:    Array.isArray(s.schedule)    ? s.schedule    : [],
+    opponentDripSchedules: Array.isArray(s.opponentDripSchedules) ? s.opponentDripSchedules : []
   };
 }
 

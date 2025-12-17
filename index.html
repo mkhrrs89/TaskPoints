@@ -743,7 +743,8 @@ function load() {
         flexActions:  [],
         gameHistory:  [],
         matchups:     [],
-        schedule:     []
+        schedule:     [],
+        opponentDripSchedules: []
       };
     }
 
@@ -757,7 +758,8 @@ function load() {
       flexActions:  Array.isArray(p.flexActions)  ? p.flexActions  : [],
       gameHistory:  Array.isArray(p.gameHistory)  ? p.gameHistory  : [],
       matchups:     Array.isArray(p.matchups)     ? p.matchups     : [],
-      schedule:     Array.isArray(p.schedule)     ? p.schedule     : []
+      schedule:     Array.isArray(p.schedule)     ? p.schedule     : [],
+      opponentDripSchedules: Array.isArray(p.opponentDripSchedules) ? p.opponentDripSchedules : []
     };
   } catch (e) {
     console.error('Failed to load TaskPoints state on main page', e);
@@ -769,7 +771,8 @@ function load() {
       flexActions:  [],
       gameHistory:  [],
       matchups:     [],
-      schedule:     []
+      schedule:     [],
+      opponentDripSchedules: []
     };
   }
 }
@@ -822,6 +825,155 @@ function getPlayerRecordText(playerId) {
 }
 
 
+/* ---------- OPPONENT DRIP SCHEDULE ---------- */
+function getOpponentDripSchedules(){
+  return Array.isArray(state.opponentDripSchedules) ? state.opponentDripSchedules : [];
+}
+
+function generateOpponentDripSchedule(dateKeyStr, playerId, totalPoints){
+  const totalRounded = Math.max(0, Math.round((Number(totalPoints) || 0) * 10) / 10);
+  const totalUnits   = Math.round(totalRounded * 10);
+
+  const startHour = 6;
+  const endHour   = 23;
+  const count     = Math.max(12, Math.min(40, Math.round(Math.random() * 20) + 15));
+
+  const baseDate = new Date(`${dateKeyStr}T00:00:00`);
+
+  const hourBuckets = [];
+  for (let h = startHour; h <= endHour; h++) {
+    let weight = 1;
+
+    // Slightly heavier in the morning and evening
+    if ((h >= 7 && h <= 10) || (h >= 17 && h <= 21)) weight += 1.2;
+
+    // Random dead zones
+    if (Math.random() < 0.15) weight *= 0.4;
+
+    hourBuckets.push({ hour: h, weight });
+  }
+
+  const totalHourWeight = hourBuckets.reduce((s, h) => s + h.weight, 0) || 1;
+
+  function pickTime(){
+    let r = Math.random() * totalHourWeight;
+    let chosenHour = startHour;
+    for (const h of hourBuckets) {
+      if (r <= h.weight) { chosenHour = h.hour; break; }
+      r -= h.weight;
+    }
+
+    const m = Math.floor(Math.random() * 60);
+    const s = Math.floor(Math.random() * 60);
+    const d = new Date(baseDate.getTime());
+    d.setHours(chosenHour, m, s, 0);
+    return d;
+  }
+
+  const weights = [];
+  for (let i = 0; i < count; i++) {
+    const base = Math.pow(Math.random(), 1.4);
+    const burst = Math.random() < 0.35 ? Math.random() * 1.2 : 0;
+    weights.push(base + burst);
+  }
+
+  const weightSum = weights.reduce((s, n) => s + n, 0) || 1;
+
+  let remaining = totalUnits;
+  const pointUnits = [];
+  for (let i = 0; i < count; i++) {
+    if (i === count - 1) {
+      pointUnits.push(Math.max(0, remaining));
+    } else {
+      const share = Math.min(
+        remaining,
+        Math.max(0, Math.round((weights[i] / weightSum) * totalUnits))
+      );
+      pointUnits.push(share);
+      remaining -= share;
+    }
+  }
+
+  // If rounding left stragglers, tack them onto the last bucket
+  if (remaining > 0 && pointUnits.length) {
+    pointUnits[pointUnits.length - 1] += remaining;
+  }
+
+  const times = pointUnits.map(() => pickTime());
+  times.sort((a, b) => a - b);
+
+  const events = pointUnits
+    .map((units, idx) => ({ t: times[idx].toISOString(), pts: units / 10 }))
+    .filter(e => e.pts > 0)
+    .sort((a, b) => new Date(a.t) - new Date(b.t));
+
+  return {
+    date: dateKeyStr,
+    playerId,
+    total: totalRounded,
+    events
+  };
+}
+
+function ensureOpponentDripSchedule(dateKeyStr, playerId, totalPoints){
+  if (!dateKeyStr || !playerId) return null;
+
+  const schedules = getOpponentDripSchedules();
+  const existingIdx = schedules.findIndex(s => s && s.date === dateKeyStr && s.playerId === playerId);
+  const totalRounded = Math.max(0, Math.round((Number(totalPoints) || 0) * 10) / 10);
+
+  if (existingIdx !== -1) {
+    const existing = schedules[existingIdx];
+    if (existing && Math.abs((existing.total || 0) - totalRounded) < 0.001 && Array.isArray(existing.events) && existing.events.length) {
+      return existing;
+    }
+  }
+
+  const next = generateOpponentDripSchedule(dateKeyStr, playerId, totalRounded);
+  const updated = schedules.filter(s => !(s && s.date === dateKeyStr && s.playerId === playerId));
+  updated.push(next);
+
+  state.opponentDripSchedules = updated;
+  save();
+
+  return next;
+}
+
+function accruedOpponentPoints(schedule, now = new Date()){
+  if (!schedule) return 0;
+  const events = Array.isArray(schedule.events) ? schedule.events.slice() : [];
+  events.sort((a, b) => new Date(a.t) - new Date(b.t));
+
+  const nowMs = now.getTime();
+  const total = Math.max(0, Number(schedule.total) || 0);
+
+  if (!events.length) return total;
+
+  const firstMs = new Date(events[0].t).getTime();
+  const lastMs  = new Date(events[events.length - 1].t).getTime();
+
+  if (Number.isFinite(firstMs) && nowMs < firstMs) return 0;
+  if (Number.isFinite(lastMs) && nowMs >= lastMs) return total;
+
+  let accruedUnits = 0;
+  events.forEach(e => {
+    const when = new Date(e.t).getTime();
+    const pts = Math.round((Number(e.pts) || 0) * 10);
+    if (Number.isFinite(when) && nowMs >= when) {
+      accruedUnits += Math.max(0, pts);
+    }
+  });
+
+  const capped = Math.min(total * 10, accruedUnits);
+  return Math.max(0, capped / 10);
+}
+
+function visibleOpponentScoreForMatchup(dateKeyStr, playerId, targetTotal){
+  const schedule = ensureOpponentDripSchedule(dateKeyStr, playerId, targetTotal);
+  return schedule ? accruedOpponentPoints(schedule, new Date()) : Math.max(0, Number(targetTotal) || 0);
+}
+
+
 function normalizeState(s) {
   return {
     tasks:       Array.isArray(s.tasks)       ? s.tasks       : [],
@@ -832,6 +984,7 @@ function normalizeState(s) {
     gameHistory: Array.isArray(s.gameHistory) ? s.gameHistory : [],
     matchups:    Array.isArray(s.matchups)    ? s.matchups    : [],
     schedule:    Array.isArray(s.schedule)    ? s.schedule    : [],
+    opponentDripSchedules: Array.isArray(s.opponentDripSchedules) ? s.opponentDripSchedules : [],
     youImage:    typeof s.youImage === "string" ? s.youImage : ""
   };
 }
@@ -1104,6 +1257,39 @@ function niceDate(d){
   });
 }
 
+function todaysPointsTotal(){
+  const todayK = todayKey();
+  let total = 0;
+
+  (state.completions || []).forEach(entry => {
+    if (!entry) return;
+    const d = new Date(entry.completedAtISO || entry.completedAt || entry.due || entry.date || entry.taskDate || Date.now());
+    if (!d || isNaN(d.getTime())) return;
+    if (dateKey(d) !== todayK) return;
+
+    const pts = Number(entry.points) || 0;
+    total += pts;
+  });
+
+  return Math.round(total * 10) / 10;
+}
+
+function startOpponentDripTicker(){
+  function tick(){
+    const todayK = todayKey();
+    const todayPts = todaysPointsTotal();
+
+    const todayPointsEl = $('todayPoints');
+    if (todayPointsEl) todayPointsEl.textContent = todayPts.toLocaleString();
+
+    renderTodaysMatchup(todayK, todayPts);
+  }
+
+  tick();
+  setInterval(tick, 45000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });
+}
+
 function monthKey(d){
   if (!(d instanceof Date)) d = new Date(d);
   if (!d || isNaN(d.getTime())) return 'invalid-month';
@@ -1331,14 +1517,18 @@ function renderTodaysMatchup(todayKeyStr, yourScore){
     ? yourScore
     : (Number.isFinite(yourScoreSaved) ? yourScoreSaved : 0);
 
+  const visibleOppScore = oppId
+    ? visibleOpponentScoreForMatchup(todayKeyStr, oppId, safeOppScore)
+    : safeOppScore;
+
   const oppName = getPlayerNameById(oppId);
   oppNameEl.textContent = oppName;
-  oppScoreEl.textContent = safeOppScore.toFixed(1);
+  oppScoreEl.textContent = visibleOppScore.toFixed(1);
   yourScoreEl.textContent = safeYourScore.toFixed(1);
   oppRecordEl.textContent = `Record: ${getPlayerRecordText(oppId)}`;
 
   diffEl.className = 'text-sm font-semibold';
-  const diff = Number((safeYourScore - safeOppScore).toFixed(1));
+  const diff = Number((safeYourScore - visibleOppScore).toFixed(1));
 
   if (diff > 0) {
     diffEl.textContent = `Winning by ${diff.toFixed(1)} pts`;
@@ -3494,7 +3684,8 @@ function importFile(ev){
         habits:      Array.isArray(root.habits)      ? root.habits      : [],
         flexActions: Array.isArray(root.flexActions) ? root.flexActions : [],
         gameHistory: Array.isArray(root.gameHistory) ? root.gameHistory : [],
-        matchups:    Array.isArray(root.matchups)    ? root.matchups    : []
+        matchups:    Array.isArray(root.matchups)    ? root.matchups    : [],
+        opponentDripSchedules: Array.isArray(root.opponentDripSchedules) ? root.opponentDripSchedules : []
       };
 
       editingTaskId = null;
@@ -3551,7 +3742,8 @@ function importPaste(){
       habits:      Array.isArray(root.habits)      ? root.habits      : [],
       flexActions: Array.isArray(root.flexActions) ? root.flexActions : [],
       gameHistory: Array.isArray(root.gameHistory) ? root.gameHistory : [],
-      matchups:    Array.isArray(root.matchups)    ? root.matchups    : []
+      matchups:    Array.isArray(root.matchups)    ? root.matchups    : [],
+      opponentDripSchedules: Array.isArray(root.opponentDripSchedules) ? root.opponentDripSchedules : []
     };
 
     editingTaskId = null;
@@ -3660,6 +3852,7 @@ console.log('TaskPoints main state summary:', {
 });
 
 renderAll();
+startOpponentDripTicker();
 });
 
 
