@@ -62,6 +62,12 @@
     <div class="grid gap-3 sm:grid-cols-2 mb-6">
       <!-- Today's Points + Daily Avg card (left) -->
 <div class="glass text-center relative">
+  <div id="inertiaPanel" class="absolute left-3 top-3 text-left text-xs space-y-0.5">
+    <div class="muted font-semibold uppercase tracking-wide text-[10px]">Inertia</div>
+    <div id="inertiaValue" class="text-2xl font-bold leading-none">0.0</div>
+    <div class="muted text-[10px] leading-tight">Avg last 7 days (excl. today) × 0.25</div>
+    <div id="inertiaAverage" class="muted text-[10px] leading-tight">7-day avg: 0.0</div>
+  </div>
   <div class="font-semibold text-sm muted">Today&#8217;s Points</div>
 
   <!-- DESKTOP ONLY: Add Task button (does not affect mobile) -->
@@ -1258,32 +1264,100 @@ function niceDate(d){
   });
 }
 
-function todaysPointsTotal(){
-  const todayK = todayKey();
-  let total = 0;
+function aggregateCompletionsByDate(completions){
+  const dailyTotals   = {};
+  const weeklyTotals  = {};
+  const monthlyTotals = {};
 
-  (state.completions || []).forEach(entry => {
-    if (!entry) return;
-    const d = new Date(entry.completedAtISO || entry.completedAt || entry.due || entry.date || entry.taskDate || Date.now());
-    if (!d || isNaN(d.getTime())) return;
-    if (dateKey(d) !== todayK) return;
+  if (!Array.isArray(completions)) return { dailyTotals, weeklyTotals, monthlyTotals };
 
-    const pts = Number(entry.points) || 0;
-    total += pts;
+  completions.forEach(c => {
+    if (!c || !c.completedAtISO) return;
+
+    const d = new Date(c.completedAtISO);
+    if (!d || isNaN(d.getTime())) {
+      // Ignore bad/legacy entries instead of crashing the page
+      return;
+    }
+
+    const dk = dateKey(d);
+    const wk = isoWeekKey(d);
+    const mk = monthKey(d);
+
+    const pts = c.points || 0;
+
+    dailyTotals[dk]   = (dailyTotals[dk]   || 0) + pts;
+    weeklyTotals[wk]  = (weeklyTotals[wk]  || 0) + pts;
+    monthlyTotals[mk] = (monthlyTotals[mk] || 0) + pts;
   });
 
-  return Math.round(total * 10) / 10;
+  return { dailyTotals, weeklyTotals, monthlyTotals };
+}
+
+function computeInertia(dailyTotals, todayK){
+  const today = fromKey(todayK);
+  if (!today || isNaN(today.getTime())) return { inertia: 0, average: 0 };
+
+  let sum = 0;
+  let count = 0;
+
+  for (let i = 1; i <= 7; i++) {
+    const d = new Date(today);
+    d.setDate(today.getDate() - i);
+    const key = dateKey(d);
+    const val = Number(dailyTotals[key]);
+    if (Number.isFinite(val)) {
+      sum += val;
+      count++;
+    }
+  }
+
+  const average = count ? sum / count : 0;
+  const inertia = count ? average * 0.25 : 0;
+
+  return { inertia, average };
+}
+
+function deriveTodayWithInertia(dailyTotals, todayK){
+  const { inertia, average } = computeInertia(dailyTotals, todayK);
+  const todayBase = Number(dailyTotals[todayK]) || 0;
+  const todayPoints = Math.round((todayBase + inertia) * 10) / 10;
+
+  return { todayPoints, inertia, average, base: todayBase };
+}
+
+function renderTodayPointsSummary(todayPoints, inertia, inertiaAvg){
+  const todayPointsEl = $('todayPoints');
+  if (todayPointsEl) {
+    todayPointsEl.textContent = todayPoints.toLocaleString(undefined, {
+      maximumFractionDigits: 1,
+    });
+  }
+
+  const inertiaValueEl = $('inertiaValue');
+  if (inertiaValueEl) inertiaValueEl.textContent = (Number.isFinite(inertia) ? inertia : 0).toFixed(1);
+
+  const inertiaAvgEl = $('inertiaAverage');
+  if (inertiaAvgEl) inertiaAvgEl.textContent = `7-day avg: ${(Number.isFinite(inertiaAvg) ? inertiaAvg : 0).toFixed(1)}`;
+}
+
+function todaysPointsTotal(){
+  const todayK = todayKey();
+  const { dailyTotals } = aggregateCompletionsByDate(state.completions || []);
+  const { todayPoints } = deriveTodayWithInertia(dailyTotals, todayK);
+
+  return todayPoints;
 }
 
 function startOpponentDripTicker(){
   function tick(){
     const todayK = todayKey();
-    const todayPts = todaysPointsTotal();
+    const { dailyTotals } = aggregateCompletionsByDate(state.completions || []);
+    const { todayPoints, inertia, average } = deriveTodayWithInertia(dailyTotals, todayK);
 
-    const todayPointsEl = $('todayPoints');
-    if (todayPointsEl) todayPointsEl.textContent = todayPts.toLocaleString();
+    renderTodayPointsSummary(todayPoints, inertia, average);
 
-    renderTodaysMatchup(todayK, todayPts);
+    renderTodaysMatchup(todayK, todayPoints);
   }
 
   tick();
@@ -1353,30 +1427,7 @@ function renderStats(){
     lifetimeEl.textContent = lifetime.toLocaleString();
   }
 
-  // Build daily/weekly/monthly totals
-  const dailyTotals   = {};
-  const weeklyTotals  = {};
-  const monthlyTotals = {};
-
-  state.completions.forEach(c => {
-    if (!c || !c.completedAtISO) return;
-
-    const d = new Date(c.completedAtISO);
-    if (!d || isNaN(d.getTime())) {
-      // Ignore bad/legacy entries instead of crashing the page
-      return;
-    }
-
-    const dk = dateKey(d);
-    const wk = isoWeekKey(d);
-    const mk = monthKey(d);
-
-    const pts = c.points || 0;
-
-    dailyTotals[dk]   = (dailyTotals[dk]   || 0) + pts;
-    weeklyTotals[wk]  = (weeklyTotals[wk]  || 0) + pts;
-    monthlyTotals[mk] = (monthlyTotals[mk] || 0) + pts;
-  });
+  const { dailyTotals, weeklyTotals, monthlyTotals } = aggregateCompletionsByDate(state.completions || []);
 
 
   const dKeys = Object.keys(dailyTotals);
@@ -1402,12 +1453,10 @@ function renderStats(){
   const thisWeekK = isoWeekKey(today);
   const thisMonthK= monthKey(today);
 
+  const { todayPoints, inertia: inertiaPts, average: inertiaAvg } = deriveTodayWithInertia(dailyTotals, todayK);
+
   // Today's points bubble
-  const todayPoints   = dailyTotals[todayK] || 0;
-  const todayPointsEl = $('todayPoints');
-  if (todayPointsEl) {
-    todayPointsEl.textContent = todayPoints.toLocaleString();
-  }
+  renderTodayPointsSummary(todayPoints, inertiaPts, inertiaAvg);
 
   renderTodaysMatchup(todayK, todayPoints);
 
