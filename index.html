@@ -1485,9 +1485,13 @@ function renderStats(){
       li.dataset.key = row.key;
       li.className = 'flex items-center justify-between';
 
+      const formattedTotal = Number(row.total).toLocaleString(undefined, {
+        maximumFractionDigits: 1,
+      });
+
       li.innerHTML = `
         <span>${i+1}. ${labelFn(row)}</span>
-        <span class="font-semibold">${row.total.toLocaleString()} pts</span>
+        <span class="font-semibold">${formattedTotal} pts</span>
       `;
       ul.appendChild(li);
     });
