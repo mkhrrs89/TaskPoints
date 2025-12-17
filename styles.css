@@ -125,13 +125,22 @@
 .toolbar{display:flex;gap:.5rem;flex-wrap:wrap;justify-content:flex-end}
 .header-nav{align-items:center;}
 .nav-btn{display:inline-flex;align-items:center;gap:6px;}
-.nav-btn.active,.dropdown-toggle.active{
-  outline:1px solid #fb923c;
-  outline-offset:0;
-  border-color:#fb923c;
-  box-shadow:0 8px 24px rgba(251,146,60,.30);
-  background:linear-gradient(180deg,#166666,#0c3d3d);
+.nav-btn.active,
+.dropdown-toggle.active{
+  background: linear-gradient(180deg, #fdba74, #fb923c);
+  color: #111827;            /* dark gray text */
+  outline: none;
+  box-shadow: none;
+  border-color: transparent;  /* keeps the button shape but removes the orange outline vibe */
 }
+.nav-btn:focus,
+.nav-btn:focus-visible,
+.dropdown-toggle:focus,
+.dropdown-toggle:focus-visible{
+  outline: none;
+  box-shadow: none;
+}
+
 
 .dropdown{position:relative}
 .dropdown-toggle{display:inline-flex;align-items:center;gap:6px}
@@ -870,6 +879,7 @@
     width: 100% !important;
   }
 }
+
 
 
 
