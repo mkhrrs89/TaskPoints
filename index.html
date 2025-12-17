@@ -1462,7 +1462,7 @@ function renderStats(){
 
   // Today's breakdown bar – wrapped in try/catch so it can't kill stats
   try {
-    updateTodayBreakdown(state.completions || [], todayK);
+    updateTodayBreakdown(state.completions || [], todayK, inertiaPts);
   } catch (e) {
     console.error('updateTodayBreakdown error', e);
   }
@@ -1595,7 +1595,7 @@ function renderTodaysMatchup(todayKeyStr, yourScore){
   detailsEl.classList.remove('hidden');
 }
 
-function updateTodayBreakdown(completions, todayKey){
+function updateTodayBreakdown(completions, todayKey, inertiaPoints = 0){
   const bar       = $('todayBreakdownBar');
   const summaryEl = $('todayBreakdownSummary');
   if (!bar) return;
@@ -1609,7 +1609,8 @@ function updateTodayBreakdown(completions, todayKey){
     habits:   0,
     vices:    0,
     flex:     0,
-    calories: 0
+    calories: 0,
+    inertia:  Number(inertiaPoints) || 0,
   };
 
   // Collect today's points by category
@@ -1674,7 +1675,8 @@ if (titleStr.startsWith('Sleep Score (')) {
     { key: 'habits',   label: 'Habits',   cls: 'todayBreakdown-habits'   },
     { key: 'vices',    label: 'Vices',    cls: 'todayBreakdown-vices'    },
     { key: 'flex',     label: 'Flux',     cls: 'todayBreakdown-flex'     },
-    { key: 'calories', label: 'Calories', cls: 'todayBreakdown-calories' }
+    { key: 'calories', label: 'Calories', cls: 'todayBreakdown-calories' },
+    { key: 'inertia',  label: 'Inertia',  cls: 'todayBreakdown-inertia'  },
   ];
 
   const parts = [];
