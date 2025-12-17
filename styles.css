@@ -123,6 +123,9 @@
     .tag{border-radius:999px;padding:2px 8px;font-size:12px}
     .muted{color:var(--muted)}
 .toolbar{display:flex;gap:.5rem;flex-wrap:wrap;justify-content:flex-end}
+.header-nav{align-items:center;}
+.nav-btn{display:inline-flex;align-items:center;gap:6px;}
+.nav-btn.active,.dropdown-toggle.active{outline:2px solid var(--accent);outline-offset:0;border-color:var(--accent);box-shadow:0 8px 24px rgba(79,156,255,.3);background:linear-gradient(180deg,#166666,#0c3d3d);}
 .dropdown{position:relative}
 .dropdown-toggle{display:inline-flex;align-items:center;gap:6px}
 .dropdown-toggle .caret{font-size:10px;opacity:.9}

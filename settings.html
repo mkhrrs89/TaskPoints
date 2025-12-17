@@ -25,40 +25,154 @@
           <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight">TaskPoints</h1>
         </div>
 
-        <div class="toolbar">
-          <a href="index.html"         class="btn btn-teal btn-toolbar">Main</a>
-          <a href="daily.html"         class="btn btn-teal btn-toolbar">Daily</a>
-          <a href="daily_sources.html" class="btn btn-teal btn-toolbar">Sources</a>
-          <a href="log.html"           class="btn btn-teal btn-toolbar">Log</a>
-          <a href="week.html"          class="btn btn-teal btn-toolbar">Week</a>
+        <div class="toolbar header-nav">
+          <a href="index.html"         class="btn btn-teal btn-toolbar nav-btn">Main</a>
+          <a href="daily.html"         class="btn btn-teal btn-toolbar nav-btn">Daily</a>
+          <a href="daily_sources.html" class="btn btn-teal btn-toolbar nav-btn">Sources</a>
+          <a href="log.html"           class="btn btn-teal btn-toolbar nav-btn">Log</a>
+          <a href="week.html"          class="btn btn-teal btn-toolbar nav-btn">Week</a>
 
           <div class="dropdown">
-            <button type="button" class="btn btn-teal btn-toolbar dropdown-toggle" data-dropdown-toggle aria-expanded="false">
+            <button type="button" class="btn btn-teal btn-toolbar nav-btn dropdown-toggle" data-dropdown-toggle aria-expanded="false">
               Game <span class="caret">▾</span>
             </button>
             <div class="dropdown-menu">
-              <a href="game.html"         class="btn btn-teal btn-toolbar">Game</a>
-              <a href="matchups.html"     class="btn btn-teal btn-toolbar">Matchups</a>
-              <a href="schedule.html"     class="btn btn-teal btn-toolbar">Schedule</a>
-              <a href="game_ratings.html" class="btn btn-teal btn-toolbar">Ratings</a>
+              <a href="game.html"         class="btn btn-teal btn-toolbar nav-btn">Game</a>
+              <a href="standings.html"    class="btn btn-teal btn-toolbar nav-btn">Standings</a>
+              <a href="matchups.html"     class="btn btn-teal btn-toolbar nav-btn">Matchups</a>
+              <a href="schedule.html"     class="btn btn-teal btn-toolbar nav-btn">Schedule</a>
+              <a href="game_ratings.html" class="btn btn-teal btn-toolbar nav-btn">Ratings</a>
             </div>
           </div>
 
-          <a href="updates.html" class="btn btn-teal btn-toolbar">Updates</a>
-          <a href="archive.html" class="btn btn-teal btn-toolbar">Archive</a>
-
-          <!-- Settings (top-right, clear style) -->
-          <a href="settings.html" class="btn btn-ghost btn-toolbar" aria-label="Settings">Settings</a>
+          <a href="settings.html" class="btn btn-teal btn-toolbar nav-btn active" aria-label="Settings" aria-current="page">Settings</a>
         </div>
       </div>
     </header>
 
-    <!-- PAGE CONTENT (blank for now) -->
-    <div class="glass">
-      <div class="text-lg font-semibold">Settings</div>
-      <div class="muted text-sm mt-1">Coming soon.</div>
+    <!-- PAGE CONTENT -->
+    <div class="space-y-4">
+      <div class="glass space-y-3">
+        <div class="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <div class="text-lg font-semibold">Navigation Shortcuts</div>
+            <div class="muted text-sm">Access updates and archived tasks from here.</div>
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <a href="updates.html" class="btn btn-teal btn-toolbar nav-btn">Updates</a>
+          <a href="archive.html" class="btn btn-teal btn-toolbar nav-btn">Archive</a>
+        </div>
+      </div>
+
+      <div class="glass space-y-3">
+        <div class="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <div class="text-lg font-semibold">Data Management</div>
+            <div class="muted text-sm">Import backups or reset local TaskPoints data.</div>
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-2 items-center">
+          <label class="btn btn-teal btn-toolbar nav-btn cursor-pointer">Import JSON
+            <input id="settingsImportInput" type="file" accept="application/json" class="hidden" />
+          </label>
+          <button id="settingsImportPasteBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Paste JSON</button>
+          <button id="settingsResetBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Reset All Data</button>
+        </div>
+        <p class="muted text-xs">Imports replace your current device data with the contents of the backup.</p>
+      </div>
     </div>
 
   </div>
+
+  <script>
+    const SETTINGS_STORAGE_KEY = "taskpoints_v1";
+
+    function normalizeSettingsState(s) {
+      return {
+        tasks:       Array.isArray(s.tasks)       ? s.tasks       : [],
+        completions: Array.isArray(s.completions) ? s.completions : [],
+        players:     Array.isArray(s.players)     ? s.players     : [],
+        habits:      Array.isArray(s.habits)      ? s.habits      : [],
+        flexActions: Array.isArray(s.flexActions) ? s.flexActions : [],
+        gameHistory: Array.isArray(s.gameHistory) ? s.gameHistory : [],
+        matchups:    Array.isArray(s.matchups)    ? s.matchups    : [],
+        schedule:    Array.isArray(s.schedule)    ? s.schedule    : [],
+        workHistory: Array.isArray(s.workHistory) ? s.workHistory : [],
+        youImage:    typeof s.youImage === "string" ? s.youImage : ""
+      };
+    }
+
+    function applyImportedState(data) {
+      const root =
+        (data && Array.isArray(data.tasks) && Array.isArray(data.completions)) ? data :
+        (data && data.state && Array.isArray(data.state.tasks) && Array.isArray(data.state.completions)) ? data.state :
+        null;
+
+      if (!root) {
+        throw new Error("Root object missing tasks/completions arrays");
+      }
+
+      const normalized = normalizeSettingsState(root);
+      localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(normalized));
+      alert("Import complete! Reload any open TaskPoints tabs to see the changes.");
+    }
+
+    function handleSettingsFile(ev) {
+      const file = ev.target.files?.[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const parsed = JSON.parse(String(reader.result));
+          applyImportedState(parsed);
+        } catch (err) {
+          console.error("Import failed", err);
+          alert("Import failed. Please confirm the file is valid TaskPoints JSON.");
+        }
+      };
+
+      reader.readAsText(file);
+      ev.target.value = "";
+    }
+
+    function handleSettingsPaste() {
+      const txt = prompt("Paste TaskPoints JSON:");
+      if (!txt) return;
+
+      try {
+        const parsed = JSON.parse(txt);
+        applyImportedState(parsed);
+      } catch (err) {
+        console.error("Paste import failed", err);
+        alert("The text is not valid JSON. Please try again.");
+      }
+    }
+
+    function handleSettingsReset() {
+      const msg = [
+        'This will erase ALL TaskPoints data stored on this device:',
+        '- Tasks',
+        '- Completions / log history',
+        '- Habits & their history',
+        '- Flex actions',
+        '- Players / Game data',
+        '',
+        'This cannot be undone. Continue?'
+      ].join('\n');
+
+      if (!confirm(msg)) return;
+
+      localStorage.removeItem(SETTINGS_STORAGE_KEY);
+      alert('All local TaskPoints data has been cleared.');
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('settingsImportInput')?.addEventListener('change', handleSettingsFile);
+      document.getElementById('settingsImportPasteBtn')?.addEventListener('click', handleSettingsPaste);
+      document.getElementById('settingsResetBtn')?.addEventListener('click', handleSettingsReset);
+    });
+  </script>
 </body>
 </html>
