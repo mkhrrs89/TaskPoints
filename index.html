@@ -426,8 +426,20 @@
 const STORAGE_KEY="taskpoints_v1";
 const OLD_PLAYERS_KEY="taskpoints_players";
 const $=id=>document.getElementById(id);
-let state=load();
+let state=normalizeState(load());
   const HABITS_SORT_KEY = "taskpoints_habits_sort";
+
+function normalizeTask(task){
+  if(!task || typeof task !== 'object') return task;
+  const t = { ...task };
+  if (typeof t.postponedDays !== 'number' || Number.isNaN(t.postponedDays)) {
+    t.postponedDays = 0;
+  }
+  if (!t.originalDueDateISO && t.dueDateISO) {
+    t.originalDueDateISO = t.dueDateISO;
+  }
+  return t;
+}
 
 function getHabitSortMode(){
   return ($('habitsSortSelect')?.value)
@@ -983,7 +995,7 @@ function visibleOpponentScoreForMatchup(dateKeyStr, playerId, targetTotal){
 
 function normalizeState(s) {
   return {
-    tasks:       Array.isArray(s.tasks)       ? s.tasks       : [],
+    tasks:       Array.isArray(s.tasks)       ? s.tasks.map(normalizeTask)       : [],
     completions: Array.isArray(s.completions) ? s.completions : [],
     players:     Array.isArray(s.players)     ? s.players     : [],
     habits:      Array.isArray(s.habits)      ? s.habits      : [],
@@ -1062,6 +1074,26 @@ function resetAll(){
 
 
 function addDays(d,n){ const x=new Date(d); x.setDate(x.getDate()+n); x.setHours(0,0,0,0); return x; }
+function dayDiff(fromKey,toKey){
+  if(!fromKey || !toKey) return 0;
+  const from = new Date(fromKey + 'T00:00:00');
+  const to = new Date(toKey + 'T00:00:00');
+  const ms = to - from;
+  if (!Number.isFinite(ms) || ms <= 0) return 0;
+  return Math.round(ms / 86400000);
+}
+function trackDueDatePush(task, oldDueISO, newDueISO){
+  if(!task) return;
+  if (!task.originalDueDateISO && (newDueISO || oldDueISO)) {
+    task.originalDueDateISO = newDueISO || oldDueISO || null;
+  }
+  if(!oldDueISO || !newDueISO) return;
+  const delta = dayDiff(oldDueISO, newDueISO);
+  if(delta>0){
+    const current = Number(task.postponedDays) || 0;
+    task.postponedDays = current + delta;
+  }
+}
 function computeNextDueDate(task){
   const rec = task.recurrence || {};
   const mode = rec.mode || 'none';
@@ -1819,7 +1851,9 @@ function bumpOneDay(task){
   if (!task.dueDateISO) return;  // nothing to bump
   const d = new Date(task.dueDateISO + 'T00:00:00');
   const bumped = addDays(d, 1);
+  const oldDue = task.dueDateISO;
   task.dueDateISO = dateKey(bumped);
+  trackDueDatePush(task, oldDue, task.dueDateISO);
 }
 
 function labelForDay(d,baseToday){
@@ -2596,6 +2630,8 @@ function renderTasks(){
 
     b.items.forEach(t=>{
       const isOverdue = t.dueDateISO && t.dueDateISO < dateKey(today);
+      const postponeDays = Number(t.postponedDays) || 0;
+      const showPostponePill = postponeDays > 0 && !!t.dueDateISO;
 
 const badge = {
   Low:      'bg-transparent text-zinc-500 border border-zinc-700',
@@ -2722,7 +2758,7 @@ card.innerHTML=`
 ${t.dueDateISO
   ? `<span class="tag ${isOverdue ? 'bg-rose-600/70 text-rose-50' : 'bg-zinc-700/40'}">
        ${niceDate(fromKey(t.dueDateISO))}
-     </span>`
+     </span>${showPostponePill ? `<span class="tag postpone-pill">+${postponeDays}d</span>` : ''}`
   : ''
 }
 
@@ -3544,13 +3580,15 @@ function addTask(){
     title,
     importance: $('importanceInput').value,
     dueDateISO: $('dueDateInput').value || null,
+    originalDueDateISO: $('dueDateInput').value || null,
     points: Number($('pointsInput').value)||0,
     recurrence: rec,
     tags,                // ⬅ new
     skipDates: [],
     hidden: false,
     completedAtISO: null,
-    createdAtISO: new Date().toISOString()
+    createdAtISO: new Date().toISOString(),
+    postponedDays: 0
   };
 
 
@@ -3601,7 +3639,9 @@ function bumpTaskOneDay(id){
 
 function postponeTask(id){
   const t=state.tasks.find(x=>x.id===id); if(!t||!t.dueDateISO) return;
+  const oldDue = t.dueDateISO;
   t.dueDateISO = todayKey();
+  trackDueDatePush(t, oldDue, t.dueDateISO);
   save(); renderAll();
 }
 function wontDoMain(id){
@@ -3664,10 +3704,13 @@ function saveTaskEdit(id,card){
 
   t.title = titleInput.value.trim() || t.title;
   t.points = Number(ptsInput.value)||0;
+  const prevDue = t.dueDateISO;
   const dueVal = (dueInput.value||'').trim();
   t.dueDateISO = dueVal || null;
   const impVal = impSel.value;
   if(['Low','Medium','High','Critical'].includes(impVal)) t.importance = impVal;
+
+  trackDueDatePush(t, prevDue, t.dueDateISO);
 
   if (tagsInput) {
     const raw = tagsInput.value || '';
