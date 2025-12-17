@@ -126,7 +126,7 @@
 .header-nav{align-items:center;}
 .nav-btn{display:inline-flex;align-items:center;gap:6px;}
 .nav-btn.active,.dropdown-toggle.active{
-  outline:2px solid #fb923c;
+  outline:1px solid #fb923c;
   outline-offset:0;
   border-color:#fb923c;
   box-shadow:0 8px 24px rgba(251,146,60,.30);
@@ -870,6 +870,7 @@
     width: 100% !important;
   }
 }
+
 
 
 
