@@ -191,7 +191,8 @@ function load(){
         flexActions:[],
         matchups:   [],
         gameHistory:[],
-        schedule:   []
+        schedule:   [],
+        opponentDripSchedules: []
       };
     }
 
@@ -204,7 +205,8 @@ function load(){
       flexActions: Array.isArray(p.flexActions) ? p.flexActions : [],
       matchups:    Array.isArray(p.matchups)    ? p.matchups    : [],
       gameHistory: Array.isArray(p.gameHistory) ? p.gameHistory : [],
-      schedule:    Array.isArray(p.schedule)    ? p.schedule    : []
+      schedule:    Array.isArray(p.schedule)    ? p.schedule    : [],
+      opponentDripSchedules: Array.isArray(p.opponentDripSchedules) ? p.opponentDripSchedules : []
     };
   } catch {
     return {
@@ -215,7 +217,8 @@ function load(){
       flexActions:[],
       matchups:   [],
       gameHistory:[],
-      schedule:   []
+      schedule:   [],
+      opponentDripSchedules: []
     };
   }
 }
@@ -233,6 +236,7 @@ function normalizeState(s) {
     gameHistory: Array.isArray(s.gameHistory) ? s.gameHistory : [],
     matchups:    Array.isArray(s.matchups)    ? s.matchups    : [],
     schedule:    Array.isArray(s.schedule)    ? s.schedule    : [],
+    opponentDripSchedules: Array.isArray(s.opponentDripSchedules) ? s.opponentDripSchedules : [],
     workHistory: Array.isArray(s.workHistory) ? s.workHistory : [],
     youImage:    typeof s.youImage === "string" ? s.youImage : ""
   };
