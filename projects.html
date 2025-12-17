@@ -1,0 +1,809 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>TaskPoints — Projects</title>
+
+  <!-- Tailwind (matches the rest of your app setup) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Your shared app styles -->
+  <link rel="stylesheet" href="styles.css" />
+
+  <style>
+    /* Small, page-local additions that respect your existing theme tokens */
+    :root{
+      --proj-navy-1: rgba(30, 58, 138, 0.55);
+      --proj-navy-2: rgba(15, 23, 42, 0.55);
+      --proj-navy-border: rgba(96, 165, 250, 0.35);
+      --proj-navy-glow: rgba(96, 165, 250, 0.18);
+    }
+    .tag {
+      display:inline-flex;
+      align-items:center;
+      gap:.35rem;
+      padding:.18rem .55rem;
+      border-radius:999px;
+      font-size:11px;
+      border:1px solid var(--border);
+      background: rgba(255,255,255,.05);
+      color: var(--text);
+      opacity:.95;
+      white-space:nowrap;
+    }
+    .tag-navy{
+      border-color: var(--proj-navy-border);
+      background: linear-gradient(180deg, var(--proj-navy-1), var(--proj-navy-2));
+      color:#e0e7ff;
+      box-shadow: 0 10px 24px var(--proj-navy-glow);
+    }
+
+    .bar {
+      width:100%;
+      height:10px;
+      border-radius:999px;
+      border:1px solid var(--border);
+      background: rgba(255,255,255,.06);
+      overflow:hidden;
+    }
+    .bar > div{
+      height:100%;
+      width:0%;
+      border-radius:999px;
+      background: linear-gradient(90deg, rgba(251,146,60,.95), rgba(234,179,8,.9));
+    }
+
+    /* Modal */
+    .modalWrap{
+      position:fixed;
+      inset:0;
+      display:none;
+      align-items:flex-end;
+      justify-content:center;
+      padding:14px;
+      background: rgba(0,0,0,.55);
+      z-index: 50;
+    }
+    .modalWrap.show{ display:flex; }
+    .modalPanel{
+      width: min(720px, 100%);
+      border:1px solid var(--border);
+      background: linear-gradient(180deg, rgba(16,18,24,.98), rgba(10,12,18,.98));
+      border-radius: 18px;
+      padding: 14px;
+      box-shadow: 0 30px 80px rgba(0,0,0,.6);
+      max-height: 86vh;
+      overflow:auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    /* Slightly nicer checkbox alignment inside subtasks */
+    .subtaskRow input[type="checkbox"]{ transform: translateY(1px); }
+
+    /* Make it feel "app-like" on mobile */
+    @media (min-width: 768px){
+      .modalWrap{ align-items:center; }
+      .modalPanel{ padding: 18px; }
+    }
+  </style>
+</head>
+
+<body class="min-h-screen">
+  <div class="max-w-5xl mx-auto p-4 sm:p-6">
+
+    <!-- Header (kept consistent with your app vibe) -->
+    <header class="mb-4">
+      <div class="row items-center">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-2xl grid place-items-center bg-black text-white font-bold text-sm shrink-0">TP</div>
+          <div>
+            <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight">Projects</h1>
+            <div class="muted">Standalone progress tracker (no points linkage… yet).</div>
+          </div>
+        </div>
+
+        <div class="toolbar header-nav mt-3 sm:mt-0">
+          <a href="index.html"         class="btn btn-teal btn-toolbar nav-btn">Main</a>
+          <a href="daily.html"         class="btn btn-teal btn-toolbar nav-btn">Daily</a>
+          <a href="daily_sources.html" class="btn btn-teal btn-toolbar nav-btn">Sources</a>
+          <a href="log.html"           class="btn btn-teal btn-toolbar nav-btn">Log</a>
+          <a href="week.html"          class="btn btn-teal btn-toolbar nav-btn">Week</a>
+
+          <div class="dropdown">
+            <button type="button" class="btn btn-teal btn-toolbar dropdown-toggle nav-btn" data-dropdown-toggle aria-expanded="false">
+              Game <span class="caret">▾</span>
+            </button>
+            <div class="dropdown-menu">
+              <a href="game.html"         class="btn btn-teal btn-toolbar">Game</a>
+              <a href="matchups.html"     class="btn btn-teal btn-toolbar">Matchups</a>
+              <a href="schedule.html"     class="btn btn-teal btn-toolbar">Schedule</a>
+              <a href="game_ratings.html" class="btn btn-teal btn-toolbar">Ratings</a>
+              <a href="standings.html"    class="btn btn-teal btn-toolbar">Standings</a>
+            </div>
+          </div>
+
+          <a href="archive.html" class="btn btn-teal btn-toolbar nav-btn">Archive</a>
+          <a href="projects.html" class="btn btn-teal btn-toolbar nav-btn active">Projects</a>
+        </div>
+      </div>
+    </header>
+
+    <!-- Controls -->
+    <section class="glass mb-4">
+      <div class="flex flex-col sm:flex-row gap-3 sm:items-end sm:justify-between">
+        <div class="flex-1">
+          <label class="muted">Search</label>
+          <input id="searchInput" class="input w-full" placeholder="Find a project…" />
+        </div>
+
+        <div class="flex flex-col sm:flex-row gap-3">
+          <div>
+            <label class="muted">Category</label>
+            <select id="categoryFilter" class="input w-full sm:w-52">
+              <option value="">All</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="muted">Sort</label>
+            <select id="sortSelect" class="input w-full sm:w-56">
+              <option value="updated_desc">Recently updated</option>
+              <option value="progress_desc">Most done</option>
+              <option value="progress_asc">Least done</option>
+              <option value="name_asc">Name (A → Z)</option>
+              <option value="name_desc">Name (Z → A)</option>
+              <option value="category_asc">Category (A → Z)</option>
+            </select>
+          </div>
+
+          <div class="sm:ml-2">
+            <button id="addProjectBtn" class="btn btn-warn w-full sm:w-auto">+ Add Project</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="muted mt-3">
+        Tip: Each project is “out of 100” by default. Use quick +5/+10 bumps, slider, or direct entry.
+      </div>
+    </section>
+
+    <!-- List -->
+    <section id="listWrap" class="grid gap-3"></section>
+
+    <!-- Empty state -->
+    <div id="emptyState" class="glass hidden">
+      <div class="text-lg font-semibold mb-1">No projects yet</div>
+      <div class="muted mb-3">Add one and start chipping away. Little by little = unstoppable.</div>
+      <button class="btn btn-warn" id="emptyAddBtn">+ Add your first project</button>
+    </div>
+  </div>
+
+  <!-- Modal -->
+  <div id="modal" class="modalWrap" role="dialog" aria-modal="true" aria-hidden="true">
+    <div class="modalPanel">
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <div id="modalTitle" class="text-xl font-extrabold">Add Project</div>
+          <div class="muted">Progress is saved locally (separate from points for now).</div>
+        </div>
+        <button id="closeModalBtn" class="btn btn-ghost">✕</button>
+      </div>
+
+      <div class="grid sm:grid-cols-2 gap-3 mt-4">
+        <div class="sm:col-span-2">
+          <label class="muted">Project name</label>
+          <input id="projName" class="input w-full" placeholder="e.g., Finish Christmas shopping" />
+        </div>
+
+        <div>
+          <label class="muted">Category</label>
+          <input id="projCategory" class="input w-full" list="categoryList" placeholder="e.g., Home, Art, Life Admin" />
+          <datalist id="categoryList"></datalist>
+        </div>
+
+        <div>
+          <label class="muted">Starting progress (0–100)</label>
+          <input id="projProgress" class="input w-full" type="number" min="0" max="100" value="0" />
+        </div>
+
+        <div class="sm:col-span-2">
+          <label class="muted">Notes</label>
+          <textarea id="projNotes" class="input w-full" rows="3" placeholder="Optional… brain dump, plan, links to stuff, etc."></textarea>
+        </div>
+
+        <div class="sm:col-span-2">
+          <label class="muted">Subtasks (one per line)</label>
+          <textarea id="projSubtasks" class="input w-full" rows="4" placeholder="Call florist&#10;Order frame&#10;Clean closet top shelf"></textarea>
+        </div>
+      </div>
+
+      <div class="flex flex-col sm:flex-row gap-2 sm:justify-end mt-4">
+        <button id="deleteBtn" class="btn btn-danger hidden">Delete</button>
+        <button id="cancelBtn" class="btn btn-ghost">Cancel</button>
+        <button id="saveBtn" class="btn btn-warn">Save</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* -----------------------------
+   Projects mini-app (standalone)
+------------------------------*/
+const STORAGE_KEY = "tp_projects_v1";
+
+const $ = (id) => document.getElementById(id);
+
+function makeId(){
+  if (window.crypto && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  return "id_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2);
+}
+
+function loadProjects(){
+  try{
+    const raw = localStorage.getItem(STORAGE_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  }catch(e){
+    console.error("projects load error", e);
+    return [];
+  }
+}
+
+function saveProjects(){
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state.projects));
+}
+
+function clamp(n, min, max){
+  n = Number(n);
+  if (Number.isNaN(n)) return min;
+  return Math.max(min, Math.min(max, n));
+}
+
+function normCat(s){
+  return (s || "").trim();
+}
+
+function titleCaseLoose(s){
+  // light touch; don't over-style user text
+  return (s || "").trim();
+}
+
+const state = {
+  projects: loadProjects(),
+  ui: {
+    filterCat: "",
+    search: "",
+    sort: "updated_desc",
+    openId: null, // which project is expanded
+    editingId: null
+  }
+};
+
+/* -----------------------------
+   Rendering
+------------------------------*/
+function getCategories(){
+  const set = new Set();
+  state.projects.forEach(p => {
+    const c = normCat(p.category);
+    if (c) set.add(c);
+  });
+  return Array.from(set).sort((a,b)=>a.localeCompare(b));
+}
+
+function applyFilters(list){
+  const q = state.ui.search.toLowerCase().trim();
+  const cat = state.ui.filterCat;
+
+  return list.filter(p => {
+    const matchesCat = !cat || normCat(p.category) === cat;
+    const matchesQ = !q || (
+      (p.name || "").toLowerCase().includes(q) ||
+      (p.notes || "").toLowerCase().includes(q) ||
+      (normCat(p.category) || "").toLowerCase().includes(q) ||
+      (p.subtasks || []).some(st => (st.text || "").toLowerCase().includes(q))
+    );
+    return matchesCat && matchesQ;
+  });
+}
+
+function applySort(list){
+  const s = state.ui.sort;
+  const copy = list.slice();
+
+  const byName = (a,b) => (a.name||"").localeCompare(b.name||"");
+  const byCat  = (a,b) => (normCat(a.category)||"").localeCompare(normCat(b.category)||"");
+  const byUpd  = (a,b) => (b.updatedAt||0) - (a.updatedAt||0);
+
+  if (s === "updated_desc") return copy.sort(byUpd);
+  if (s === "progress_desc") return copy.sort((a,b)=> (b.done||0) - (a.done||0) || byUpd(a,b));
+  if (s === "progress_asc")  return copy.sort((a,b)=> (a.done||0) - (b.done||0) || byUpd(a,b));
+  if (s === "name_asc")      return copy.sort((a,b)=> byName(a,b) || byUpd(a,b));
+  if (s === "name_desc")     return copy.sort((a,b)=> byName(b,a) || byUpd(a,b));
+  if (s === "category_asc")  return copy.sort((a,b)=> byCat(a,b) || byName(a,b) || byUpd(a,b));
+  return copy.sort(byUpd);
+}
+
+function renderFilters(){
+  // category dropdown + datalist for modal
+  const cats = getCategories();
+  const filter = $("categoryFilter");
+  const list = $("categoryList");
+
+  if (filter){
+    const current = state.ui.filterCat;
+    filter.innerHTML = `<option value="">All</option>` + cats.map(c =>
+      `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`
+    ).join("");
+    filter.value = current;
+  }
+  if (list){
+    list.innerHTML = cats.map(c => `<option value="${escapeHtml(c)}"></option>`).join("");
+  }
+}
+
+function renderList(){
+  const wrap = $("listWrap");
+  const empty = $("emptyState");
+  if (!wrap) return;
+
+  renderFilters();
+
+  const filtered = applySort(applyFilters(state.projects));
+
+  wrap.innerHTML = "";
+
+  if (!filtered.length){
+    empty?.classList.remove("hidden");
+    return;
+  }
+  empty?.classList.add("hidden");
+
+  filtered.forEach(p => {
+    const done = clamp(p.done ?? 0, 0, 100);
+    const percent = done;
+    const isOpen = state.ui.openId === p.id;
+
+    const subtasks = Array.isArray(p.subtasks) ? p.subtasks : [];
+    const doneSubs = subtasks.filter(s=>s.done).length;
+
+    const card = document.createElement("div");
+    card.className = "glass";
+
+    card.innerHTML = `
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <div class="text-lg font-extrabold break-words">${escapeHtml(p.name || "Untitled Project")}</div>
+            ${p.category ? `<span class="tag tag-navy">${escapeHtml(p.category)}</span>` : ""}
+          </div>
+          <div class="muted mt-1">
+            Updated ${timeAgo(p.updatedAt)} · Subtasks ${doneSubs}/${subtasks.length || 0}
+          </div>
+        </div>
+
+        <div class="flex gap-2 shrink-0">
+          <button class="btn btn-ghost" data-action="toggle" data-id="${p.id}">${isOpen ? "Hide" : "Details"}</button>
+          <button class="btn btn-ghost" data-action="edit" data-id="${p.id}">Edit</button>
+        </div>
+      </div>
+
+      <div class="mt-3">
+        <div class="flex items-center justify-between">
+          <div class="muted">Completion</div>
+          <div class="font-extrabold">${percent}%</div>
+        </div>
+        <div class="bar mt-2" aria-label="progress bar">
+          <div style="width:${percent}%"></div>
+        </div>
+
+        <div class="flex items-center gap-2 flex-wrap mt-3">
+          <span class="tag">Quick</span>
+          <button class="btn btn-ghost" data-action="bump" data-id="${p.id}" data-delta="-10">-10</button>
+          <button class="btn btn-ghost" data-action="bump" data-id="${p.id}" data-delta="-5">-5</button>
+          <button class="btn btn-ghost" data-action="bump" data-id="${p.id}" data-delta="-1">-1</button>
+          <button class="btn btn-ghost" data-action="bump" data-id="${p.id}" data-delta="1">+1</button>
+          <button class="btn btn-ghost" data-action="bump" data-id="${p.id}" data-delta="5">+5</button>
+          <button class="btn btn-ghost" data-action="bump" data-id="${p.id}" data-delta="10">+10</button>
+
+          <div class="flex items-center gap-2 ml-auto">
+            <span class="muted">Set</span>
+            <input class="input w-24" type="number" min="0" max="100" value="${percent}" data-action="setInput" data-id="${p.id}">
+          </div>
+        </div>
+
+        <input class="w-full mt-3" type="range" min="0" max="100" value="${percent}" data-action="setRange" data-id="${p.id}" />
+      </div>
+
+      <div class="${isOpen ? "" : "hidden"} mt-4" data-open-panel="${p.id}">
+        <div class="grid sm:grid-cols-2 gap-3">
+          <div class="sm:col-span-2">
+            <label class="muted">Notes</label>
+            <textarea class="input w-full" rows="3" data-action="notes" data-id="${p.id}" placeholder="Add notes…">${escapeHtml(p.notes || "")}</textarea>
+          </div>
+
+          <div class="sm:col-span-2">
+            <div class="flex items-center justify-between mb-2">
+              <div class="font-semibold">Subtasks</div>
+              <div class="muted">${doneSubs}/${subtasks.length || 0} done</div>
+            </div>
+
+            <div class="grid gap-2" data-subtasks="${p.id}">
+              ${subtasks.length ? subtasks.map(st => `
+                <div class="subtaskRow flex items-center gap-2">
+                  <input type="checkbox" ${st.done ? "checked" : ""} data-action="toggleSub" data-id="${p.id}" data-subid="${st.id}">
+                  <input class="input w-full" value="${escapeHtml(st.text || "")}" data-action="editSubText" data-id="${p.id}" data-subid="${st.id}" />
+                  <button class="btn btn-ghost" data-action="delSub" data-id="${p.id}" data-subid="${st.id}">✕</button>
+                </div>
+              `).join("") : `<div class="muted">No subtasks yet. Add one below.</div>`}
+            </div>
+
+            <div class="flex gap-2 mt-3">
+              <input class="input w-full" placeholder="New subtask…" data-action="newSubText" data-id="${p.id}">
+              <button class="btn btn-warn" data-action="addSub" data-id="${p.id}">Add</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex justify-end mt-3">
+          <button class="btn btn-danger" data-action="delete" data-id="${p.id}">Delete Project</button>
+        </div>
+      </div>
+    `;
+
+    wrap.appendChild(card);
+  });
+}
+
+function escapeHtml(s){
+  return String(s ?? "")
+    .replaceAll("&","&amp;")
+    .replaceAll("<","&lt;")
+    .replaceAll(">","&gt;")
+    .replaceAll('"',"&quot;")
+    .replaceAll("'","&#39;");
+}
+
+function timeAgo(ts){
+  if (!ts) return "—";
+  const diff = Date.now() - ts;
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  return `${d}d ago`;
+}
+
+/* -----------------------------
+   Mutations
+------------------------------*/
+function touch(p){
+  p.updatedAt = Date.now();
+}
+
+function bumpProgress(id, delta){
+  const p = state.projects.find(x=>x.id===id);
+  if (!p) return;
+  p.done = clamp((p.done ?? 0) + delta, 0, 100);
+  touch(p);
+  saveProjects();
+  renderList();
+}
+
+function setProgress(id, value){
+  const p = state.projects.find(x=>x.id===id);
+  if (!p) return;
+  p.done = clamp(value, 0, 100);
+  touch(p);
+  saveProjects();
+  renderList();
+}
+
+function toggleOpen(id){
+  state.ui.openId = (state.ui.openId === id) ? null : id;
+  renderList();
+}
+
+/* -----------------------------
+   Modal (Add/Edit)
+------------------------------*/
+function openModal(mode, projectId=null){
+  const modal = $("modal");
+  modal.classList.add("show");
+  modal.setAttribute("aria-hidden","false");
+
+  const isEdit = mode === "edit";
+  state.ui.editingId = isEdit ? projectId : null;
+
+  $("modalTitle").textContent = isEdit ? "Edit Project" : "Add Project";
+  $("deleteBtn").classList.toggle("hidden", !isEdit);
+
+  const p = isEdit ? state.projects.find(x=>x.id===projectId) : null;
+
+  $("projName").value = p ? (p.name || "") : "";
+  $("projCategory").value = p ? (p.category || "") : "";
+  $("projProgress").value = p ? clamp(p.done ?? 0, 0, 100) : 0;
+  $("projNotes").value = p ? (p.notes || "") : "";
+  $("projSubtasks").value = p ? (Array.isArray(p.subtasks) ? p.subtasks.map(s=>s.text||"").join("\n") : "") : "";
+
+  // focus
+  setTimeout(()=> $("projName")?.focus(), 50);
+}
+
+function closeModal(){
+  const modal = $("modal");
+  modal.classList.remove("show");
+  modal.setAttribute("aria-hidden","true");
+  state.ui.editingId = null;
+}
+
+function upsertFromModal(){
+  const name = titleCaseLoose($("projName").value);
+  if (!name) return alert("Project name is required.");
+
+  const category = normCat($("projCategory").value);
+  const done = clamp($("projProgress").value, 0, 100);
+  const notes = $("projNotes").value || "";
+
+  const rawLines = ($("projSubtasks").value || "").split("\n").map(x=>x.trim()).filter(Boolean);
+  const subtasks = rawLines.map(t => ({ id: makeId(), text: t, done: false }));
+
+  const now = Date.now();
+
+  if (state.ui.editingId){
+    const p = state.projects.find(x=>x.id===state.ui.editingId);
+    if (!p) return;
+
+    // keep existing subtasks if user didn't supply lines? (we'll replace if they did)
+    // For now: if they typed anything, replace; if empty, keep current.
+    const replaceSubs = rawLines.length > 0;
+
+    p.name = name;
+    p.category = category;
+    p.done = done;
+    p.notes = notes;
+    if (replaceSubs) p.subtasks = subtasks;
+
+    p.updatedAt = now;
+
+  } else {
+    state.projects.unshift({
+      id: makeId(),
+      name,
+      category,
+      done,
+      notes,
+      subtasks,
+      createdAt: now,
+      updatedAt: now
+    });
+  }
+
+  saveProjects();
+  closeModal();
+  renderList();
+}
+
+/* -----------------------------
+   Subtasks + notes inline
+------------------------------*/
+function toggleSub(projectId, subId, checked){
+  const p = state.projects.find(x=>x.id===projectId);
+  if (!p || !Array.isArray(p.subtasks)) return;
+  const s = p.subtasks.find(x=>x.id===subId);
+  if (!s) return;
+  s.done = !!checked;
+  touch(p);
+  saveProjects();
+  renderList();
+}
+
+function editSubText(projectId, subId, text){
+  const p = state.projects.find(x=>x.id===projectId);
+  if (!p || !Array.isArray(p.subtasks)) return;
+  const s = p.subtasks.find(x=>x.id===subId);
+  if (!s) return;
+  s.text = text;
+  touch(p);
+  saveProjects();
+  // no full rerender needed, but keep simple:
+  // (still safe; list isn't huge)
+  renderList();
+}
+
+function delSub(projectId, subId){
+  const p = state.projects.find(x=>x.id===projectId);
+  if (!p || !Array.isArray(p.subtasks)) return;
+  p.subtasks = p.subtasks.filter(x=>x.id!==subId);
+  touch(p);
+  saveProjects();
+  renderList();
+}
+
+function addSub(projectId, text){
+  const p = state.projects.find(x=>x.id===projectId);
+  if (!p) return;
+  p.subtasks = Array.isArray(p.subtasks) ? p.subtasks : [];
+  p.subtasks.push({ id: makeId(), text: text.trim(), done: false });
+  touch(p);
+  saveProjects();
+  renderList();
+}
+
+function saveNotes(projectId, notes){
+  const p = state.projects.find(x=>x.id===projectId);
+  if (!p) return;
+  p.notes = notes;
+  touch(p);
+  saveProjects();
+  // don't rerender while typing; blur saves
+}
+
+/* -----------------------------
+   Delete
+------------------------------*/
+function deleteProject(id){
+  const p = state.projects.find(x=>x.id===id);
+  const name = p?.name || "this project";
+  if (!confirm(`Delete "${name}"?`)) return;
+  state.projects = state.projects.filter(x=>x.id!==id);
+  saveProjects();
+  renderList();
+}
+
+/* -----------------------------
+   Events
+------------------------------*/
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-action]");
+  if (!btn) return;
+
+  const action = btn.getAttribute("data-action");
+  const id = btn.getAttribute("data-id");
+
+  if (action === "toggle") return toggleOpen(id);
+  if (action === "edit") return openModal("edit", id);
+  if (action === "delete") return deleteProject(id);
+
+  if (action === "bump") {
+    const delta = Number(btn.getAttribute("data-delta") || 0);
+    return bumpProgress(id, delta);
+  }
+
+  if (action === "addSub") {
+    const input = btn.parentElement.querySelector('[data-action="newSubText"][data-id="'+id+'"]');
+    const text = input?.value || "";
+    if (!text.trim()) return;
+    addSub(id, text);
+    return;
+  }
+
+  if (action === "delSub") {
+    const subid = btn.getAttribute("data-subid");
+    return delSub(id, subid);
+  }
+});
+
+document.addEventListener("input", (e) => {
+  const el = e.target;
+
+  if (el?.id === "searchInput"){
+    state.ui.search = el.value || "";
+    renderList();
+    return;
+  }
+
+  if (el?.id === "sortSelect"){
+    state.ui.sort = el.value;
+    renderList();
+    return;
+  }
+
+  if (el?.id === "categoryFilter"){
+    state.ui.filterCat = el.value || "";
+    renderList();
+    return;
+  }
+
+  const action = el.getAttribute?.("data-action");
+  const id = el.getAttribute?.("data-id");
+
+  if (action === "setRange") return setProgress(id, el.value);
+  if (action === "setInput") return setProgress(id, el.value);
+
+  if (action === "notes"){
+    // save lazily on blur; no action here
+    return;
+  }
+
+  if (action === "editSubText"){
+    const subid = el.getAttribute("data-subid");
+    return editSubText(id, subid, el.value || "");
+  }
+});
+
+document.addEventListener("change", (e) => {
+  const el = e.target;
+  const action = el.getAttribute?.("data-action");
+  const id = el.getAttribute?.("data-id");
+
+  if (action === "toggleSub"){
+    const subid = el.getAttribute("data-subid");
+    return toggleSub(id, subid, el.checked);
+  }
+});
+
+document.addEventListener("blur", (e) => {
+  const el = e.target;
+  const action = el.getAttribute?.("data-action");
+  const id = el.getAttribute?.("data-id");
+  if (action === "notes"){
+    return saveNotes(id, el.value || "");
+  }
+}, true);
+
+/* Modal wiring */
+$("addProjectBtn")?.addEventListener("click", () => openModal("add"));
+$("emptyAddBtn")?.addEventListener("click", () => openModal("add"));
+$("cancelBtn")?.addEventListener("click", closeModal);
+$("closeModalBtn")?.addEventListener("click", closeModal);
+
+$("saveBtn")?.addEventListener("click", upsertFromModal);
+
+$("deleteBtn")?.addEventListener("click", () => {
+  const id = state.ui.editingId;
+  if (id) deleteProject(id);
+  closeModal();
+});
+
+// Close modal when clicking outside panel
+$("modal")?.addEventListener("click", (e) => {
+  if (e.target.id === "modal") closeModal();
+});
+
+// Esc to close modal
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && $("modal")?.classList.contains("show")){
+    closeModal();
+  }
+});
+
+/* Dropdown support (matches your existing dropdown behavior) */
+document.addEventListener("click", (e) => {
+  const toggle = e.target.closest("[data-dropdown-toggle]");
+  const openMenus = document.querySelectorAll(".dropdown-menu.open");
+  openMenus.forEach(m => {
+    if (!m.contains(e.target) && !toggle?.closest(".dropdown")?.contains(e.target)){
+      m.classList.remove("open");
+      m.style.display = "none";
+    }
+  });
+
+  if (!toggle) return;
+  const dropdown = toggle.closest(".dropdown");
+  const menu = dropdown?.querySelector(".dropdown-menu");
+  if (!menu) return;
+
+  const isOpen = menu.classList.contains("open");
+  if (isOpen){
+    menu.classList.remove("open");
+    menu.style.display = "none";
+    toggle.setAttribute("aria-expanded","false");
+  }else{
+    menu.classList.add("open");
+    menu.style.display = "block";
+    toggle.setAttribute("aria-expanded","true");
+  }
+});
+
+/* Initial paint */
+(function init(){
+  $("sortSelect").value = state.ui.sort;
+  renderList();
+})();
+</script>
+</body>
+</html>
