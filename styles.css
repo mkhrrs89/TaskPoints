@@ -177,6 +177,8 @@
   }
 }
 
+#repeatCustomRow.hidden { display: none !important; }
+
 
 /* Default (desktop + general) */
 .task-title{word-break:break-word;overflow-wrap:anywhere}
@@ -858,6 +860,7 @@
     width: 100% !important;
   }
 }
+
 
 
 
