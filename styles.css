@@ -87,6 +87,11 @@
   background: linear-gradient(90deg, #14532d, #166534);
 }
 
+/* Inertia - light gray */
+.todayBreakdown-inertia{
+  background: linear-gradient(90deg, #e2e8f0, #cbd5e1);
+}
+
 
 
     /* New delete style: darker oxblood red */
