@@ -1493,15 +1493,37 @@ function renderStats(){
     });
   }
 
-  const bestDays = Object.entries(dailyTotals)
+  const dailyTotalsWithInertia = Object.fromEntries(
+    Object.entries(dailyTotals).map(([k, v]) => {
+      const { inertia } = computeInertia(dailyTotals, k);
+      const inertiaVal = Number.isFinite(inertia) ? inertia : 0;
+      return [k, v + inertiaVal];
+    })
+  );
+
+  const weeklyTotalsWithInertia = {};
+  const monthlyTotalsWithInertia = {};
+
+  Object.entries(dailyTotalsWithInertia).forEach(([k, total]) => {
+    const d = fromKey(k);
+    if (!d || isNaN(d.getTime())) return;
+
+    const wk = isoWeekKey(d);
+    const mk = monthKey(d);
+
+    weeklyTotalsWithInertia[wk]  = (weeklyTotalsWithInertia[wk]  || 0) + total;
+    monthlyTotalsWithInertia[mk] = (monthlyTotalsWithInertia[mk] || 0) + total;
+  });
+
+  const bestDays = Object.entries(dailyTotalsWithInertia)
     .map(([k, v]) => ({ key: k, total: v }))
     .sort((a, b) => b.total - a.total);
 
-  const bestWeeks = Object.entries(weeklyTotals)
+  const bestWeeks = Object.entries(weeklyTotalsWithInertia)
     .map(([k, v]) => ({ key: k, total: v, ...isoWeekRange(k) }))
     .sort((a, b) => b.total - a.total);
 
-  const bestMonths = Object.entries(monthlyTotals)
+  const bestMonths = Object.entries(monthlyTotalsWithInertia)
     .map(([k, v]) => ({ key: k, total: v }))
     .sort((a, b) => b.total - a.total);
 
