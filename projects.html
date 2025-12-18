@@ -18,14 +18,25 @@
       --proj-navy-2: rgba(15, 23, 42, 0.55);
       --proj-navy-border: rgba(96, 165, 250, 0.35);
       --proj-navy-glow: rgba(96, 165, 250, 0.18);
+      --proj-amber-1: rgba(251, 191, 36, 0.15);
+      --proj-amber-2: rgba(255, 214, 102, 0.08);
+      --proj-card: linear-gradient(160deg, rgba(17, 24, 39, 0.65), rgba(15, 23, 42, 0.75));
     }
+
+    body{
+      background: radial-gradient(circle at 20% 20%, rgba(79,156,255,0.08), transparent 28%),
+                  radial-gradient(circle at 80% 0%, rgba(234,179,8,0.08), transparent 22%),
+                  var(--bg);
+    }
+
     .tag {
       display:inline-flex;
       align-items:center;
       gap:.35rem;
-      padding:.18rem .55rem;
+      padding:.24rem .62rem;
       border-radius:999px;
       font-size:11px;
+      letter-spacing: .02em;
       border:1px solid var(--border);
       background: rgba(255,255,255,.05);
       color: var(--text);
@@ -41,18 +52,35 @@
 
     .bar {
       width:100%;
-      height:10px;
+      height:12px;
       border-radius:999px;
       border:1px solid var(--border);
       background: rgba(255,255,255,.06);
       overflow:hidden;
+      position:relative;
     }
     .bar > div{
       height:100%;
       width:0%;
       border-radius:999px;
       background: linear-gradient(90deg, rgba(251,146,60,.95), rgba(234,179,8,.9));
+      box-shadow: 0 10px 18px rgba(234,179,8,.15);
     }
+
+    .card{background:var(--proj-card);border:1px solid rgba(255,255,255,.05);box-shadow:0 18px 38px rgba(0,0,0,.35),0 1px 0 rgba(255,255,255,.05) inset;}
+    .card:hover{border-color:rgba(147,197,253,0.45);box-shadow:0 18px 45px rgba(0,0,0,.45),0 0 0 1px rgba(147,197,253,0.15);transform:translateY(-1px);transition:all .18s ease;}
+    .pill{padding:2px 8px;border-radius:999px;background:rgba(255,255,255,.06);font-size:11px;color:var(--muted);display:inline-flex;align-items:center;gap:6px;}
+
+    .frost{background:linear-gradient(120deg, rgba(255,255,255,.03), rgba(255,255,255,.07));border:1px solid rgba(255,255,255,.05);border-radius:14px;padding:10px;}
+    .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;}
+    .stat-label{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.05em;}
+    .stat-value{font-weight:800;font-size:22px;display:flex;align-items:center;gap:8px;}
+
+    .input-ghost{background:rgba(255,255,255,.04);}
+
+    .range-wrap input[type="range"]{accent-color:#f59e0b;width:100%;}
+    .range-wrap{display:flex;align-items:center;gap:8px;margin-top:10px;}
+    .range-value{min-width:48px;text-align:right;font-variant-numeric:tabular-nums;font-weight:700;}
 
     /* Modal */
     .modalWrap{
@@ -89,17 +117,19 @@
   </style>
 </head>
 
-<body class="min-h-screen">
+  <body class="min-h-screen">
   <div class="max-w-5xl mx-auto p-4 sm:p-6">
 
     <!-- Header (kept consistent with your app vibe) -->
     <header class="mb-4">
-      <div class="row items-center">
-        <div class="flex items-center gap-3">
-          <img src="assets/taskpoints-logo.svg" alt="TaskPoints logo" class="w-10 h-10 rounded-2xl object-cover shrink-0 shadow-sm">
-          <div>
-            <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight">Projects</h1>
-            <div class="muted">Standalone progress tracker (no points linkage… yet).</div>
+      <div class="row items-center gap-3 sm:gap-4">
+        <div class="flex items-center gap-3 flex-1 min-w-0">
+          <div class="p-2 rounded-2xl bg-slate-900/50 border border-slate-700/60 shadow-inner">
+            <img src="assets/taskpoints-logo.svg" alt="TaskPoints logo" class="w-10 h-10 rounded-2xl object-cover shrink-0">
+          </div>
+          <div class="min-w-0">
+            <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight flex items-center gap-2">Projects <span class="pill">Local tracker</span></h1>
+            <div class="muted">Keep the same controls, now in a calmer layout.</div>
           </div>
         </div>
 
@@ -163,10 +193,13 @@
         </div>
       </div>
 
-      <div class="muted mt-3">
-        Tip: Each project is “out of 100” by default. Use quick +5/+10 bumps, slider, or direct entry.
+      <div class="muted mt-3 flex items-center gap-2">
+        <span class="pill">Each project is out of 100</span>
+        <span class="muted">Use quick bumps, the range slider, or direct entry.</span>
       </div>
     </section>
+
+    <section id="summaryStats" class="grid gap-3 mb-4"></section>
 
     <!-- List -->
     <section id="listWrap" class="grid gap-3"></section>
@@ -343,6 +376,43 @@ function renderFilters(){
   }
 }
 
+function renderSummary(list){
+  const wrap = $("summaryStats");
+  if (!wrap) return;
+
+  const total = state.projects.length;
+  const filtered = list.length;
+  const avg = filtered ? Math.round(list.reduce((sum,p)=> sum + clamp(p.done ?? 0, 0, 100), 0) / filtered) : 0;
+  const open = list.filter(p => clamp(p.done ?? 0, 0, 100) < 100).length;
+  const catCount = getCategories().length;
+  const latestTs = list.reduce((max, p) => Math.max(max, p.updatedAt || 0), 0);
+
+  wrap.innerHTML = `
+    <div class="stat-grid">
+      <div class="frost">
+        <div class="stat-label">Visible</div>
+        <div class="stat-value"><span>${filtered || 0}</span><span class="muted text-xs">of ${total || 0} total</span></div>
+      </div>
+      <div class="frost">
+        <div class="stat-label">Avg progress</div>
+        <div class="stat-value">${avg}%</div>
+      </div>
+      <div class="frost">
+        <div class="stat-label">In motion</div>
+        <div class="stat-value">${open}</div>
+      </div>
+      <div class="frost">
+        <div class="stat-label">Categories</div>
+        <div class="stat-value">${catCount || 0}</div>
+      </div>
+      <div class="frost sm:col-span-2">
+        <div class="stat-label">Last touch</div>
+        <div class="stat-value text-sm">${latestTs ? timeAgo(latestTs) : "—"}</div>
+      </div>
+    </div>
+  `;
+}
+
 function renderList(){
   const wrap = $("listWrap");
   const empty = $("emptyState");
@@ -351,6 +421,8 @@ function renderList(){
   renderFilters();
 
   const filtered = applySort(applyFilters(state.projects));
+
+  renderSummary(filtered);
 
   wrap.innerHTML = "";
 
@@ -369,17 +441,18 @@ function renderList(){
     const doneSubs = subtasks.filter(s=>s.done).length;
 
     const card = document.createElement("div");
-    card.className = "glass";
+    card.className = "glass card";
 
     card.innerHTML = `
-      <div class="flex items-start justify-between gap-3">
-        <div class="min-w-0">
+      <div class="flex items-start justify-between gap-3 flex-wrap">
+        <div class="min-w-0 space-y-1">
           <div class="flex items-center gap-2 flex-wrap">
             <div class="text-lg font-extrabold break-words">${escapeHtml(p.name || "Untitled Project")}</div>
             ${p.category ? `<span class="tag tag-navy">${escapeHtml(p.category)}</span>` : ""}
           </div>
-          <div class="muted mt-1">
-            Updated ${timeAgo(p.updatedAt)} · Subtasks ${doneSubs}/${subtasks.length || 0}
+          <div class="muted flex items-center gap-2 flex-wrap">
+            <span class="pill">Updated ${timeAgo(p.updatedAt)}</span>
+            <span class="pill">Subtasks ${doneSubs}/${subtasks.length || 0}</span>
           </div>
         </div>
 
@@ -389,16 +462,24 @@ function renderList(){
         </div>
       </div>
 
-      <div class="mt-3">
-        <div class="flex items-center justify-between">
-          <div class="muted">Completion</div>
-          <div class="font-extrabold">${percent}%</div>
-        </div>
-        <div class="bar mt-2" aria-label="progress bar">
-          <div style="width:${percent}%"></div>
+      <div class="mt-3 space-y-3">
+        <div class="grid sm:grid-cols-3 gap-3 items-center">
+          <div class="sm:col-span-2">
+            <div class="flex items-center justify-between">
+              <div class="muted">Completion</div>
+              <div class="font-extrabold">${percent}%</div>
+            </div>
+            <div class="bar mt-2" aria-label="progress bar">
+              <div style="width:${percent}%"></div>
+            </div>
+          </div>
+          <div class="frost">
+            <div class="stat-label">At a glance</div>
+            <div class="stat-value text-sm">${subtasks.length ? `${doneSubs}/${subtasks.length} subtasks` : "No subtasks"}</div>
+          </div>
         </div>
 
-        <div class="flex items-center gap-2 flex-wrap mt-3">
+        <div class="flex items-center gap-2 flex-wrap">
           <span class="tag">Quick</span>
           <button class="btn btn-ghost" data-action="bump" data-id="${p.id}" data-delta="-10">-10</button>
           <button class="btn btn-ghost" data-action="bump" data-id="${p.id}" data-delta="-5">-5</button>
@@ -406,14 +487,17 @@ function renderList(){
           <button class="btn btn-ghost" data-action="bump" data-id="${p.id}" data-delta="1">+1</button>
           <button class="btn btn-ghost" data-action="bump" data-id="${p.id}" data-delta="5">+5</button>
           <button class="btn btn-ghost" data-action="bump" data-id="${p.id}" data-delta="10">+10</button>
-
           <div class="flex items-center gap-2 ml-auto">
             <span class="muted">Set</span>
-            <input class="input w-24" type="number" min="0" max="100" value="${percent}" data-action="setInput" data-id="${p.id}">
+            <input class="input w-24 input-ghost" type="number" min="0" max="100" value="${percent}" data-action="setInput" data-id="${p.id}">
           </div>
         </div>
 
-        
+        <div class="range-wrap">
+          <div class="muted text-xs uppercase tracking-wide">Slide</div>
+          <input type="range" min="0" max="100" value="${percent}" data-action="setRange" data-id="${p.id}">
+          <div class="range-value">${percent}%</div>
+        </div>
       </div>
 
       <div class="${isOpen ? "" : "hidden"} mt-4" data-open-panel="${p.id}">
@@ -713,6 +797,7 @@ document.addEventListener("input", (e) => {
 
 
   if (action === "setInput") return setProgress(id, el.value);
+  if (action === "setRange") return setProgress(id, el.value);
 
   if (action === "notes"){
     // save lazily on blur; no action here
