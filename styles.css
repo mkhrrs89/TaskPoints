@@ -805,6 +805,11 @@
   color: #e3f2ff;
 }
 
+.work-chip-bonus {
+  font-size: 11px;
+  color: #cfe8ff;
+}
+
 
 /* Make Add-a-Task card more compact */
 #addTaskCard{
