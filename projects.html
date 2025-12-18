@@ -413,7 +413,7 @@ function renderList(){
           </div>
         </div>
 
-        <input class="w-full mt-3" type="range" min="0" max="100" value="${percent}" data-action="setRange" data-id="${p.id}" />
+        
       </div>
 
       <div class="${isOpen ? "" : "hidden"} mt-4" data-open-panel="${p.id}">
@@ -711,7 +711,7 @@ document.addEventListener("input", (e) => {
   const action = el.getAttribute?.("data-action");
   const id = el.getAttribute?.("data-id");
 
-  if (action === "setRange") return setProgress(id, el.value);
+
   if (action === "setInput") return setProgress(id, el.value);
 
   if (action === "notes"){
