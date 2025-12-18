@@ -287,18 +287,24 @@
 
           <div class="mb-2">
             <div class="muted text-xs">Today’s Work</div>
-            <div id="workTodayValue" class="text-4xl font-extrabold leading-tight">—</div>
+            <div class="flex items-center gap-2 flex-wrap">
+              <div class="flex items-baseline gap-2">
+                <div id="workTodayValue" class="text-4xl font-extrabold leading-tight">—</div>
+                <div id="workTodayHours" class="work-hours-chip hidden"><span id="workTodayHoursValue"></span></div>
+              </div>
+            </div>
             <div id="workTodayImpact" class="muted text-xs mt-1">Adds 0 pts to today</div>
           </div>
 
 <div id="workInputRow" class="flex items-center gap-3 mt-3 flex-nowrap sm:flex-wrap">
   <input id="workScoreInput" class="input w-24" type="number" placeholder="0–100">
+  <input id="workHoursInput" class="input w-24" type="number" placeholder="Hours (/100)">
   <button id="saveWorkScoreBtn" class="btn btn-work">Add</button>
 </div>
 
 
           <p class="muted text-xs mt-2">
-            Work Score is added directly as points. (5 → +5 pts)
+            Work Score is added directly as points. (5 → +5 pts) Your hours bonus adds <code>input × 10</code> pts; negatives are treated as 0 for now.
           </p>
         </div>
       </div>
@@ -506,6 +512,28 @@ function sleepPoints(score, rested = 0) {
   return base + bonus + (Number.isFinite(rested) ? rested : 0);
 }
 
+function getWorkInfo(entry) {
+  const match = entry?.title?.match(/\(([^)]+)\)/);
+  const score = match ? Number(match[1]) : null;
+
+  const hoursRaw = entry && Object.prototype.hasOwnProperty.call(entry, 'workHours')
+    ? Number(entry.workHours)
+    : 0;
+  const hours = Number.isFinite(hoursRaw) ? hoursRaw : 0;
+
+  return { score, hours };
+}
+
+function workHoursBonus(hours = 0) {
+  if (!Number.isFinite(hours)) return 0;
+  return Math.max(0, hours) * 10;
+}
+
+function workPoints(score, hours = 0) {
+  if (!Number.isFinite(score)) return 0;
+  return score + workHoursBonus(hours);
+}
+
 function getTodaySleepEntry() {
   const today = new Date();
   const todayKey = dateKey(today);
@@ -625,6 +653,97 @@ function submitSleepEditModal() {
   closeSleepEditModal();
 }
 
+let workEditContext = null;
+let workEditOptions = null;
+
+function promptEditWorkEntry(entry, options = {}) {
+  if (!entry) return;
+
+  workEditContext = entry;
+  workEditOptions = options;
+
+  const { score, hours } = getWorkInfo(entry);
+
+  const modal = $('workEditModal');
+  const scoreInput = $('workEditScoreInput');
+  const hoursInput = $('workEditHoursInput');
+  const dateLabel = $('workEditDateLabel');
+
+  if (!modal || !scoreInput || !hoursInput) return;
+
+  const scoreDisplay = Number.isFinite(score) ? score : '';
+  const hoursDisplay = Number.isFinite(hours) ? hours : '';
+
+  scoreInput.value = scoreDisplay;
+  hoursInput.value = hoursDisplay;
+
+  if (dateLabel) {
+    const date = new Date(entry.completedAtISO);
+    dateLabel.textContent = date.toLocaleDateString('en-US', {
+      weekday: 'short', month: 'short', day: 'numeric'
+    });
+  }
+
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+
+  scoreInput.focus();
+  scoreInput.select();
+}
+
+function closeWorkEditModal() {
+  const modal = $('workEditModal');
+  if (!modal) return;
+
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+  workEditContext = null;
+  workEditOptions = null;
+}
+
+function submitWorkEditModal() {
+  if (!workEditContext) return closeWorkEditModal();
+
+  const scoreInput = $('workEditScoreInput');
+  const hoursInput = $('workEditHoursInput');
+  if (!scoreInput || !hoursInput) return;
+
+  const scoreVal = Number(scoreInput.value);
+  if (Number.isNaN(scoreVal)) {
+    alert('Enter a valid work score.');
+    return;
+  }
+
+  const hoursStr = hoursInput.value.trim();
+  const hoursVal = hoursStr === '' ? 0 : Number(hoursStr);
+  if (!Number.isFinite(hoursVal)) {
+    alert('Hours value must be a number.');
+    return;
+  }
+
+  const safeHours = Math.max(0, hoursVal);
+
+  const d = new Date(workEditContext.completedAtISO);
+  d.setHours(12, 0, 0, 0);
+
+  if (workEditOptions?.pinToToday) {
+    const today = new Date();
+    today.setHours(12, 0, 0, 0);
+    workEditContext.completedAtISO = today.toISOString();
+  } else {
+    workEditContext.completedAtISO = d.toISOString();
+  }
+
+  workEditContext.title = `Work Score (${scoreVal}) — Hours ${safeHours}`;
+  workEditContext.points = workPoints(scoreVal, safeHours);
+  workEditContext.workHours = safeHours;
+  workEditContext.source = 'work';
+
+  save();
+  renderAll();
+  closeWorkEditModal();
+}
+
 function migrateSleepEntriesForBonus() {
   if (!state || !Array.isArray(state.completions)) return;
 
@@ -657,6 +776,50 @@ function migrateSleepEntriesForBonus() {
 }
 
 migrateSleepEntriesForBonus();
+
+function migrateWorkEntriesForHours() {
+  if (!state || !Array.isArray(state.completions)) return;
+
+  let changed = false;
+
+  state.completions.forEach(c => {
+    if (!c || !c.title || !c.title.startsWith('Work Score')) return;
+
+    const { score, hours } = getWorkInfo(c);
+    const safeHours = Number.isFinite(hours) ? Math.max(0, hours) : 0;
+    const safeScore = Number.isFinite(score) ? score : Number(c.points) || 0;
+    const newPts = workPoints(safeScore, safeHours);
+
+    if (!Number.isFinite(c.workHours) || c.workHours !== safeHours) {
+      c.workHours = safeHours;
+      changed = true;
+    }
+
+    if (c.source !== 'work') {
+      c.source = 'work';
+      changed = true;
+    }
+
+    const desiredTitle = Number.isFinite(score)
+      ? `Work Score (${score}) — Hours ${safeHours}`
+      : c.title;
+    if (desiredTitle !== c.title) {
+      c.title = desiredTitle;
+      changed = true;
+    }
+
+    if (Math.abs((Number(c.points) || 0) - newPts) > 0.0001) {
+      c.points = newPts;
+      changed = true;
+    }
+  });
+
+  if (changed) {
+    save();
+  }
+}
+
+migrateWorkEntriesForHours();
 
 
 function isDesktop() {
@@ -3235,23 +3398,7 @@ function editTodayWork() {
   const entry = getTodayWorkEntry();
   if (!entry) return alert("You haven't entered today's work score yet.");
 
-  const current = entry.title.match(/\((.+)\)/)?.[1] ?? "";
-  const newVal = prompt("Edit today's work score:", String(current));
-  if (newVal === null) return;
-
-  const num = Number(String(newVal).trim());
-  if (Number.isNaN(num)) return alert("Invalid work score.");
-
-  // keep it pinned to today
-  const d = new Date();
-  d.setHours(12, 0, 0, 0);
-
-  entry.title = `Work Score (${num})`;
-  entry.points = num;
-  entry.completedAtISO = d.toISOString();
-
-  save();
-  renderAll();
+  promptEditWorkEntry(entry, { pinToToday: true });
 }
 
   
@@ -3262,8 +3409,13 @@ function saveWorkScore() {
   const raw = Number(rawStr);
   if (Number.isNaN(raw)) return alert("Work Score must be a number.");
 
+  const hoursStr = $('workHoursInput')?.value.trim() ?? '';
+  const hoursVal = hoursStr === '' ? 0 : Number(hoursStr);
+  if (!Number.isFinite(hoursVal)) return alert("Hours value must be a number.");
+  const safeHours = Math.max(0, hoursVal);
+
   // Direct 1:1 mapping → 7 becomes 7 pts
-  const pts = raw;
+  const pts = workPoints(raw, safeHours);
 
   // Date normalized so it always logs to the correct day
   const d = new Date();
@@ -3283,20 +3435,25 @@ function saveWorkScore() {
   }
 
   if (existing) {
-    existing.title = `Work Score (${raw})`;
+    existing.title = `Work Score (${raw}) — Hours ${safeHours}`;
     existing.points = pts;
+    existing.workHours = safeHours;
+    existing.source = 'work';
     existing.completedAtISO = whenISO;
   } else {
     state.completions.unshift({
       id: crypto.randomUUID(),
-      title: `Work Score (${raw})`,
+      title: `Work Score (${raw}) — Hours ${safeHours}`,
       points: pts,
       completedAtISO: whenISO,
-      source: "task"
+      workHours: safeHours,
+      source: "work"
     });
   }
 
   $('workScoreInput').value = "";
+  const hoursInput = $('workHoursInput');
+  if (hoursInput) hoursInput.value = "";
 
   save();
   renderAll();
@@ -3305,6 +3462,7 @@ function saveWorkScore() {
 function renderWorkHistory() {
   const container = $('workHistory');
   if (container) container.innerHTML = '';
+  if (!container) return;
 
   const entries = state.completions
     .filter(c => c.title && c.title.startsWith('Work Score'))
@@ -3327,14 +3485,30 @@ function renderWorkHistory() {
   const todayValueEl = $('workTodayValue');
   const todayImpactEl = $('workTodayImpact');
   const inputRow = $('workInputRow');
+  const todayHoursChip = $('workTodayHours');
+  const todayHoursValue = $('workTodayHoursValue');
 
-  
+
 if (todayValueEl && todayImpactEl) {
   if (todayEntry) {
-    const num = Number(todayEntry.title.match(/\((.+)\)/)?.[1] || NaN);
-    if (!isNaN(num)) {
-      todayValueEl.textContent = num;
-      todayImpactEl.textContent = `Adds ${todayEntry.points} pts to today`;
+    const { score, hours } = getWorkInfo(todayEntry);
+    if (!Number.isNaN(score) && score !== null) {
+      todayValueEl.textContent = score;
+
+      const hasHours = Number.isFinite(hours) && hours !== 0;
+      if (todayHoursChip && todayHoursValue) {
+        if (hasHours) {
+          todayHoursValue.textContent = hours > 0 ? `+${hours}` : `${hours}`;
+          todayHoursChip.classList.remove('hidden');
+        } else {
+          todayHoursChip.classList.add('hidden');
+          todayHoursValue.textContent = '';
+        }
+      }
+
+      const totalPts = workPoints(score, hours);
+      const hoursText = hasHours ? ` (${hours >= 0 ? '+' : ''}${hours})` : '';
+      todayImpactEl.textContent = `Adds ${totalPts.toFixed(1)} pts to today${hoursText}`;
 
       // ✅ hide input row after initial entry
       inputRow?.classList.add('hidden');
@@ -3350,6 +3524,11 @@ if (todayValueEl && todayImpactEl) {
   } else {
     todayValueEl.textContent = '—';
     todayImpactEl.textContent = 'Adds 0 pts to today';
+
+    if (todayHoursChip && todayHoursValue) {
+      todayHoursChip.classList.add('hidden');
+      todayHoursValue.textContent = '';
+    }
 
     // ✅ show input row if no entry yet
     inputRow?.classList.remove('hidden');
@@ -3376,8 +3555,13 @@ if (todayValueEl && todayImpactEl) {
       day: 'numeric'
     });
 
-    const val = entry.title.match(/\((.+)\)/)?.[1] || '?';
-    const pts = entry.points;
+    const { score, hours } = getWorkInfo(entry);
+    const val = Number.isFinite(score) ? score : '?';
+    const safeHours = Number.isFinite(hours) ? Math.max(0, hours) : 0;
+    const totalPts = Number.isFinite(score)
+      ? workPoints(score, safeHours)
+      : Number(entry.points) || 0;
+    const bonusPts = workHoursBonus(safeHours);
 
     const block = document.createElement('div');
     block.className = 'work-chip cursor-pointer';
@@ -3385,21 +3569,12 @@ if (todayValueEl && todayImpactEl) {
     block.innerHTML = `
       <div class="work-chip-date">${prettyDate}</div>
       <div class="work-chip-value">${val}</div>
-      <div class="work-chip-pts">${pts} pts</div>
+      <div class="work-chip-pts">${totalPts.toFixed(1)} pts</div>
+      <div class="work-chip-bonus">+${bonusPts.toFixed(1)}</div>
     `;
 
     block.onclick = () => {
-      const newVal = prompt("Edit work score:", val);
-      if (!newVal && newVal !== "0") return;
-
-      const num = Number(newVal);
-      if (isNaN(num)) return alert("Invalid number.");
-
-      entry.title = `Work Score (${num})`;
-      entry.points = num;
-
-      save();
-      renderAll();
+      promptEditWorkEntry(entry);
     };
 
     container.appendChild(block);
@@ -3984,6 +4159,14 @@ document.addEventListener('DOMContentLoaded', () => {
       if (e.key === 'Enter') submitSleepEditModal();
     });
   });
+  $('workEditModal')?.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeWorkEditModal();
+  });
+  ['workEditScoreInput','workEditHoursInput'].forEach(id => {
+    $(id)?.addEventListener('keydown', e => {
+      if (e.key === 'Enter') submitWorkEditModal();
+    });
+  });
   $('saveCaloriesBtn')?.addEventListener('click', saveCalories);
   $('saveWorkScoreBtn')?.addEventListener('click', saveWorkScore);
   $('saveMoodScoreBtn')?.addEventListener('click', saveMoodScore);
@@ -4073,6 +4256,50 @@ document.addEventListener('change', (e) => {
     <div class="flex justify-end gap-2 mt-6">
       <button type="button" class="btn btn-secondary" onclick="closeSleepEditModal()">Cancel</button>
       <button type="button" id="sleepEditSaveBtn" class="btn btn-primary" onclick="submitSleepEditModal()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- EDIT WORK ENTRY MODAL -->
+  <div
+    id="workEditModal"
+  class="fixed inset-0 z-40 hidden items-center justify-center bg-black/60"
+  onclick="closeWorkEditModal()"
+>
+  <div
+    id="workEditModalBody"
+    class="w-full max-w-sm mx-3 rounded-2xl px-4 pb-5 pt-8 relative bg-zinc-900 text-zinc-100 text-sm"
+    onclick="event.stopPropagation();"
+  >
+    <button
+      type="button"
+      class="absolute top-3 right-3 btn btn-secondary text-[11px] px-3 py-1 rounded-md"
+      onclick="closeWorkEditModal()"
+    >
+      Close
+    </button>
+
+    <div class="flex items-start justify-between gap-3 mb-4">
+      <div>
+        <div class="muted text-[11px] uppercase tracking-wide">Edit Work</div>
+        <div id="workEditDateLabel" class="text-base font-semibold leading-tight"></div>
+      </div>
+      <div class="text-2xl">💼</div>
+    </div>
+
+    <label class="grid gap-1 text-sm font-medium">
+      Work score
+      <input id="workEditScoreInput" type="number" class="input" placeholder="e.g., 5">
+    </label>
+
+    <label class="grid gap-1 text-sm font-medium mt-3">
+      Hours (/100, negatives become 0)
+      <input id="workEditHoursInput" type="number" class="input" placeholder="e.g., 0.25">
+    </label>
+
+    <div class="flex justify-end gap-2 mt-6">
+      <button type="button" class="btn btn-secondary" onclick="closeWorkEditModal()">Cancel</button>
+      <button type="button" id="workEditSaveBtn" class="btn btn-primary" onclick="submitWorkEditModal()">Save</button>
     </div>
   </div>
 </div>

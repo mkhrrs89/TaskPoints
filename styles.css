@@ -632,6 +632,16 @@
   line-height: 1.1;
 }
 
+.work-hours-chip {
+  font-size: 14px;
+  font-weight: 700;
+  color: #0b294f;
+  background: rgba(255, 255, 255, 0.8);
+  border-radius: 999px;
+  padding: 4px 10px;
+  line-height: 1.1;
+}
+
 .calories-today-card {
   background: linear-gradient(180deg, #0f4d4d, #0a2f2f);
   border-radius: 16px;
@@ -793,6 +803,11 @@
 .work-chip-pts {
   font-size: 11px;
   color: #e3f2ff;
+}
+
+.work-chip-bonus {
+  font-size: 11px;
+  color: #cfe8ff;
 }
 
 
