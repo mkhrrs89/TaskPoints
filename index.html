@@ -287,18 +287,24 @@
 
           <div class="mb-2">
             <div class="muted text-xs">Today’s Work</div>
-            <div id="workTodayValue" class="text-4xl font-extrabold leading-tight">—</div>
+            <div class="flex items-center gap-2 flex-wrap">
+              <div class="flex items-baseline gap-2">
+                <div id="workTodayValue" class="text-4xl font-extrabold leading-tight">—</div>
+                <div id="workTodayHours" class="work-hours-chip hidden"><span id="workTodayHoursValue"></span></div>
+              </div>
+            </div>
             <div id="workTodayImpact" class="muted text-xs mt-1">Adds 0 pts to today</div>
           </div>
 
 <div id="workInputRow" class="flex items-center gap-3 mt-3 flex-nowrap sm:flex-wrap">
   <input id="workScoreInput" class="input w-24" type="number" placeholder="0–100">
+  <input id="workHoursInput" class="input w-24" type="number" placeholder="Hours (/100)">
   <button id="saveWorkScoreBtn" class="btn btn-work">Add</button>
 </div>
 
 
           <p class="muted text-xs mt-2">
-            Work Score is added directly as points. (5 → +5 pts)
+            Work Score is added directly as points. (5 → +5 pts) Your hours bonus adds <code>input × 10</code> pts; negatives are treated as 0 for now.
           </p>
         </div>
       </div>
@@ -506,6 +512,28 @@ function sleepPoints(score, rested = 0) {
   return base + bonus + (Number.isFinite(rested) ? rested : 0);
 }
 
+function getWorkInfo(entry) {
+  const match = entry?.title?.match(/\(([^)]+)\)/);
+  const score = match ? Number(match[1]) : null;
+
+  const hoursRaw = entry && Object.prototype.hasOwnProperty.call(entry, 'workHours')
+    ? Number(entry.workHours)
+    : 0;
+  const hours = Number.isFinite(hoursRaw) ? hoursRaw : 0;
+
+  return { score, hours };
+}
+
+function workHoursBonus(hours = 0) {
+  if (!Number.isFinite(hours)) return 0;
+  return Math.max(0, hours) * 10;
+}
+
+function workPoints(score, hours = 0) {
+  if (!Number.isFinite(score)) return 0;
+  return score + workHoursBonus(hours);
+}
+
 function getTodaySleepEntry() {
   const today = new Date();
   const todayKey = dateKey(today);
@@ -657,6 +685,50 @@ function migrateSleepEntriesForBonus() {
 }
 
 migrateSleepEntriesForBonus();
+
+function migrateWorkEntriesForHours() {
+  if (!state || !Array.isArray(state.completions)) return;
+
+  let changed = false;
+
+  state.completions.forEach(c => {
+    if (!c || !c.title || !c.title.startsWith('Work Score')) return;
+
+    const { score, hours } = getWorkInfo(c);
+    const safeHours = Number.isFinite(hours) ? Math.max(0, hours) : 0;
+    const safeScore = Number.isFinite(score) ? score : Number(c.points) || 0;
+    const newPts = workPoints(safeScore, safeHours);
+
+    if (!Number.isFinite(c.workHours) || c.workHours !== safeHours) {
+      c.workHours = safeHours;
+      changed = true;
+    }
+
+    if (c.source !== 'work') {
+      c.source = 'work';
+      changed = true;
+    }
+
+    const desiredTitle = Number.isFinite(score)
+      ? `Work Score (${score}) — Hours ${safeHours}`
+      : c.title;
+    if (desiredTitle !== c.title) {
+      c.title = desiredTitle;
+      changed = true;
+    }
+
+    if (Math.abs((Number(c.points) || 0) - newPts) > 0.0001) {
+      c.points = newPts;
+      changed = true;
+    }
+  });
+
+  if (changed) {
+    save();
+  }
+}
+
+migrateWorkEntriesForHours();
 
 
 function isDesktop() {
@@ -3235,19 +3307,31 @@ function editTodayWork() {
   const entry = getTodayWorkEntry();
   if (!entry) return alert("You haven't entered today's work score yet.");
 
-  const current = entry.title.match(/\((.+)\)/)?.[1] ?? "";
-  const newVal = prompt("Edit today's work score:", String(current));
-  if (newVal === null) return;
+  const { score, hours } = getWorkInfo(entry);
+  const scoreStr = Number.isFinite(score) ? String(score) : "";
+  const hoursStr = Number.isFinite(hours) ? String(hours) : "";
 
-  const num = Number(String(newVal).trim());
+  const newScoreInput = prompt("Edit today's work score:", scoreStr);
+  if (newScoreInput === null) return;
+
+  const newHoursInput = prompt("Edit today's work hours (/100, negatives become 0):", hoursStr);
+  if (newHoursInput === null) return;
+
+  const num = Number(String(newScoreInput).trim());
   if (Number.isNaN(num)) return alert("Invalid work score.");
+
+  const hoursVal = newHoursInput.trim() === "" ? 0 : Number(newHoursInput);
+  if (!Number.isFinite(hoursVal)) return alert("Invalid hours value.");
+  const safeHours = Math.max(0, hoursVal);
 
   // keep it pinned to today
   const d = new Date();
   d.setHours(12, 0, 0, 0);
 
-  entry.title = `Work Score (${num})`;
-  entry.points = num;
+  entry.title = `Work Score (${num}) — Hours ${safeHours}`;
+  entry.points = workPoints(num, safeHours);
+  entry.workHours = safeHours;
+  entry.source = 'work';
   entry.completedAtISO = d.toISOString();
 
   save();
@@ -3262,8 +3346,13 @@ function saveWorkScore() {
   const raw = Number(rawStr);
   if (Number.isNaN(raw)) return alert("Work Score must be a number.");
 
+  const hoursStr = $('workHoursInput')?.value.trim() ?? '';
+  const hoursVal = hoursStr === '' ? 0 : Number(hoursStr);
+  if (!Number.isFinite(hoursVal)) return alert("Hours value must be a number.");
+  const safeHours = Math.max(0, hoursVal);
+
   // Direct 1:1 mapping → 7 becomes 7 pts
-  const pts = raw;
+  const pts = workPoints(raw, safeHours);
 
   // Date normalized so it always logs to the correct day
   const d = new Date();
@@ -3283,20 +3372,25 @@ function saveWorkScore() {
   }
 
   if (existing) {
-    existing.title = `Work Score (${raw})`;
+    existing.title = `Work Score (${raw}) — Hours ${safeHours}`;
     existing.points = pts;
+    existing.workHours = safeHours;
+    existing.source = 'work';
     existing.completedAtISO = whenISO;
   } else {
     state.completions.unshift({
       id: crypto.randomUUID(),
-      title: `Work Score (${raw})`,
+      title: `Work Score (${raw}) — Hours ${safeHours}`,
       points: pts,
       completedAtISO: whenISO,
-      source: "task"
+      workHours: safeHours,
+      source: "work"
     });
   }
 
   $('workScoreInput').value = "";
+  const hoursInput = $('workHoursInput');
+  if (hoursInput) hoursInput.value = "";
 
   save();
   renderAll();
@@ -3327,14 +3421,30 @@ function renderWorkHistory() {
   const todayValueEl = $('workTodayValue');
   const todayImpactEl = $('workTodayImpact');
   const inputRow = $('workInputRow');
+  const todayHoursChip = $('workTodayHours');
+  const todayHoursValue = $('workTodayHoursValue');
 
-  
+
 if (todayValueEl && todayImpactEl) {
   if (todayEntry) {
-    const num = Number(todayEntry.title.match(/\((.+)\)/)?.[1] || NaN);
-    if (!isNaN(num)) {
-      todayValueEl.textContent = num;
-      todayImpactEl.textContent = `Adds ${todayEntry.points} pts to today`;
+    const { score, hours } = getWorkInfo(todayEntry);
+    if (!Number.isNaN(score) && score !== null) {
+      todayValueEl.textContent = score;
+
+      const hasHours = Number.isFinite(hours) && hours !== 0;
+      if (todayHoursChip && todayHoursValue) {
+        if (hasHours) {
+          todayHoursValue.textContent = hours > 0 ? `+${hours}` : `${hours}`;
+          todayHoursChip.classList.remove('hidden');
+        } else {
+          todayHoursChip.classList.add('hidden');
+          todayHoursValue.textContent = '';
+        }
+      }
+
+      const totalPts = workPoints(score, hours);
+      const hoursText = hasHours ? ` (${hours >= 0 ? '+' : ''}${hours})` : '';
+      todayImpactEl.textContent = `Adds ${totalPts.toFixed(1)} pts to today${hoursText}`;
 
       // ✅ hide input row after initial entry
       inputRow?.classList.add('hidden');
@@ -3350,6 +3460,11 @@ if (todayValueEl && todayImpactEl) {
   } else {
     todayValueEl.textContent = '—';
     todayImpactEl.textContent = 'Adds 0 pts to today';
+
+    if (todayHoursChip && todayHoursValue) {
+      todayHoursChip.classList.add('hidden');
+      todayHoursValue.textContent = '';
+    }
 
     // ✅ show input row if no entry yet
     inputRow?.classList.remove('hidden');
@@ -3376,8 +3491,10 @@ if (todayValueEl && todayImpactEl) {
       day: 'numeric'
     });
 
-    const val = entry.title.match(/\((.+)\)/)?.[1] || '?';
-    const pts = entry.points;
+    const { score, hours } = getWorkInfo(entry);
+    const val = Number.isFinite(score) ? score : '?';
+    const safeHours = Number.isFinite(hours) ? hours : 0;
+    const pts = workPoints(val, safeHours).toFixed(1);
 
     const block = document.createElement('div');
     block.className = 'work-chip cursor-pointer';
@@ -3385,18 +3502,27 @@ if (todayValueEl && todayImpactEl) {
     block.innerHTML = `
       <div class="work-chip-date">${prettyDate}</div>
       <div class="work-chip-value">${val}</div>
-      <div class="work-chip-pts">${pts} pts</div>
+      <div class="work-chip-pts">${pts} pts${safeHours ? ` (${safeHours > 0 ? '+' : ''}${safeHours}h bonus)` : ''}</div>
     `;
 
     block.onclick = () => {
       const newVal = prompt("Edit work score:", val);
       if (!newVal && newVal !== "0") return;
 
+      const hoursEdit = prompt("Edit hours (/100, negatives become 0):", `${safeHours}`);
+      if (hoursEdit === null) return;
+
       const num = Number(newVal);
       if (isNaN(num)) return alert("Invalid number.");
 
-      entry.title = `Work Score (${num})`;
-      entry.points = num;
+      const hrs = hoursEdit.trim() === '' ? 0 : Number(hoursEdit);
+      if (!Number.isFinite(hrs)) return alert("Invalid hours.");
+      const safe = Math.max(0, hrs);
+
+      entry.title = `Work Score (${num}) — Hours ${safe}`;
+      entry.points = workPoints(num, safe);
+      entry.workHours = safe;
+      entry.source = 'work';
 
       save();
       renderAll();
