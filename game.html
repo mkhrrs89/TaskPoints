@@ -382,7 +382,7 @@
           <span>Zoom</span>
           <span id="cropZoomLabel"></span>
         </div>
-        <input id="cropZoom" type="range" min="100" max="300" value="100" class="w-full">
+        <input id="cropZoom" type="range" min="100" max="150" value="100" class="w-full">
       </div>
       <p class="text-[11px] opacity-70 mb-3">
         Drag the image to reposition it inside the frame. Use the zoom slider to adjust how close it is. The result will be saved and used as the player photo.
@@ -650,9 +650,10 @@ const height = Math.round(baseWidth / ratio);
       cropState.offsetX = width / 2;
       cropState.offsetY = height / 2;
 
-      cropZoomEl.min = String(Math.round(minScale * 100));
-      cropZoomEl.value = cropZoomEl.min;
-      cropZoomEl.max = String(Math.round(minScale * 100) + 200);
+cropZoomEl.min = String(Math.round(minScale * 100));
+cropZoomEl.value = cropZoomEl.min;
+cropZoomEl.max = String(Math.round(minScale * 150)); // caps at 150% of minScale
+
       updateZoomLabel();
       updateAspectButtons();
       drawCrop();
@@ -2057,6 +2058,7 @@ async function fileToDataUrl(file) {
   </script>
 </body>
 </html>
+
 
 
 
