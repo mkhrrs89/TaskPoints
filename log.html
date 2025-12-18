@@ -314,12 +314,13 @@ function render(){
       row.className='row text-sm';
 
       const isHabit = (c.source === 'habit');
+      const isVice  = (c.source === 'vice');
       const isFlex  = (c.source === 'flex');
       const isSleep = c.title && c.title.startsWith('Sleep Score');
       const isWork = c.source === 'work';
-      const src = isHabit ? 'Habit' : isFlex ? 'Flex' : isWork ? 'Work' : 'Task';
+      const src = isHabit ? 'Habit' : isVice ? 'Vice' : isFlex ? 'Flex' : isWork ? 'Work' : 'Task';
       const canDelete = (src === 'Task' || src === 'Flex'); // only tasks + flex get an X
-      const canEditDate = !isHabit;      // allow date-edit for tasks + sleep + flex
+      const canEditDate = (!isHabit && !isVice);      // allow date-edit for tasks + sleep + flex
 
 
 row.innerHTML = `
@@ -379,8 +380,8 @@ function deleteCompletion(id){
 
   const c = state.completions[idx];
 
-  // We never show delete for habits, but guard anyway
-  if(c.source === 'habit') return;
+  // We never show delete for habits or vices, but guard anyway
+  if(c.source === 'habit' || c.source === 'vice') return;
 
   if(!confirm('Delete this completed task from the log and remove its points?')) return;
 
