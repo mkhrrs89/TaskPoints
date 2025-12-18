@@ -84,12 +84,12 @@
 
 /* Calories - forest green */
 .todayBreakdown-calories{
-  background: linear-gradient(90deg, #14532d, #34613C);
+  background: linear-gradient(90deg, #14532d, #0B3B11);
 }
 
 /* Inertia - light gray */
 .todayBreakdown-inertia{
-  background: linear-gradient(90deg, #e2e8f0, #C7C7C7);
+  background: linear-gradient(90deg, #e2e8f0, #7A7A7A);
 }
 
 
@@ -890,6 +890,7 @@
     width: 100% !important;
   }
 }
+
 
 
 
