@@ -67,29 +67,29 @@
       background:linear-gradient(90deg, #0f4d4d, #0a2f2f);
     }
 
-    /* Habits - creamsicle orange */
-    .todayBreakdown-habits{
-      background:#fb923c;
-    }
+/* Habits - creamsicle orange */
+.todayBreakdown-habits{
+  background: linear-gradient(90deg, #fdba74, #fb923c, #c2410c);
+}
 
-    /* Vices - oxblood */
-    .todayBreakdown-vices{
-      background:#4a0b0b;
-    }
+/* Vices - oxblood */
+.todayBreakdown-vices{
+  background: linear-gradient(90deg, #7f1d1d, #4a0b0b, #2a0606);
+}
 
-    /* Flux - aqua */
-    .todayBreakdown-flex{
-      background:#22c5c5;
-    }
+/* Flux - aqua */
+.todayBreakdown-flex{
+  background: linear-gradient(90deg, #67e8f9, #22c5c5, #0e7490);
+}
 
 /* Calories - forest green */
 .todayBreakdown-calories{
-  background: linear-gradient(90deg, #14532d, #166534);
+  background: linear-gradient(90deg, #14532d, #0F766E);
 }
 
 /* Inertia - light gray */
 .todayBreakdown-inertia{
-  background: linear-gradient(90deg, #e2e8f0, #cbd5e1);
+  background: linear-gradient(90deg, #e2e8f0, #334155);
 }
 
 
@@ -890,6 +890,7 @@
     width: 100% !important;
   }
 }
+
 
 
 
