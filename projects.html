@@ -78,6 +78,10 @@
 
     .input-ghost{background:rgba(255,255,255,.04);}
 
+    .range-wrap input[type="range"]{accent-color:#f59e0b;width:100%;}
+    .range-wrap{display:flex;align-items:center;gap:8px;margin-top:10px;}
+    .range-value{min-width:48px;text-align:right;font-variant-numeric:tabular-nums;font-weight:700;}
+
     /* Modal */
     .modalWrap{
       position:fixed;
@@ -191,7 +195,7 @@
 
       <div class="muted mt-3 flex items-center gap-2">
         <span class="pill">Each project is out of 100</span>
-        <span class="muted">Use quick bumps or direct entry.</span>
+        <span class="muted">Use quick bumps, the range slider, or direct entry.</span>
       </div>
     </section>
 
@@ -489,6 +493,11 @@ function renderList(){
           </div>
         </div>
 
+        <div class="range-wrap">
+          <div class="muted text-xs uppercase tracking-wide">Slide</div>
+          <input type="range" min="0" max="100" value="${percent}" data-action="setRange" data-id="${p.id}">
+          <div class="range-value">${percent}%</div>
+        </div>
       </div>
 
       <div class="${isOpen ? "" : "hidden"} mt-4" data-open-panel="${p.id}">
@@ -788,6 +797,7 @@ document.addEventListener("input", (e) => {
 
 
   if (action === "setInput") return setProgress(id, el.value);
+  if (action === "setRange") return setProgress(id, el.value);
 
   if (action === "notes"){
     // save lazily on blur; no action here
