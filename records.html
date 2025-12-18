@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>TaskPoints — Records</title>
+
+  <!-- Tailwind (matches your current setup across pages) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Shared theme -->
+  <link rel="stylesheet" href="styles.css" />
+
+  <style>
+    /* Page-local niceties that sit on top of your existing theme */
+    .pill{
+      display:inline-flex; align-items:center; gap:.35rem;
+      padding:.18rem .55rem; border-radius:999px;
+      border:1px solid var(--border);
+      background: rgba(255,255,255,.06);
+      font-size: 11px; color:#e6edf6;
+      white-space:nowrap;
+    }
+    .pill-orange{
+      border-color: rgba(251,146,60,.45);
+      background: linear-gradient(180deg, rgba(251,146,60,.28), rgba(234,179,8,.18));
+      color: #ffe9d6;
+    }
+    .pill-blue{
+      border-color: rgba(96,165,250,.35);
+      background: linear-gradient(180deg, rgba(59,130,246,.22), rgba(15,23,42,.22));
+      color:#dbeafe;
+    }
+    .tableWrap{
+      overflow:auto;
+      -webkit-overflow-scrolling: touch;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+    }
+    table{
+      width:100%;
+      border-collapse: collapse;
+      min-width: 720px;
+    }
+    th, td{
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: middle;
+    }
+    th{
+      text-align:left;
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 700;
+      letter-spacing: .02em;
+      background: rgba(255,255,255,.03);
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    tr:hover td{ background: rgba(255,255,255,.03); }
+    .num{ font-variant-numeric: tabular-nums; }
+    .rankCell{ width: 72px; }
+    .scoreCell{ width: 140px; }
+    .dateCell{ width: 160px; }
+    .playerCell{ width: 260px; }
+    .srcCell{ width: 140px; }
+  </style>
+</head>
+
+<body class="min-h-screen">
+  <div class="max-w-6xl mx-auto p-4 sm:p-6">
+
+    <!-- Header -->
+    <header class="mb-4">
+      <div class="row items-center">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-2xl grid place-items-center bg-black text-white font-bold text-sm shrink-0">TP</div>
+          <div>
+            <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight">Records</h1>
+            <div class="muted">Top single-day scores across you + all players.</div>
+          </div>
+        </div>
+
+        <!-- Keep nav consistent with your app. If a page doesn't exist, remove that link. -->
+        <div class="toolbar header-nav mt-3 sm:mt-0">
+          <a href="index.html"         class="btn btn-teal btn-toolbar">Main</a>
+          <a href="daily.html"         class="btn btn-teal btn-toolbar">Daily</a>
+          <a href="log.html"           class="btn btn-teal btn-toolbar">Log</a>
+          <a href="week.html"          class="btn btn-teal btn-toolbar">Week</a>
+
+          <div class="dropdown">
+            <button type="button" class="btn btn-teal btn-toolbar dropdown-toggle" data-dropdown-toggle aria-expanded="false">
+              Game <span class="caret">▾</span>
+            </button>
+            <div class="dropdown-menu">
+              <a href="game.html"         class="btn btn-teal btn-toolbar">Game</a>
+              <a href="matchups.html"     class="btn btn-teal btn-toolbar">Matchups</a>
+              <a href="schedule.html"     class="btn btn-teal btn-toolbar">Schedule</a>
+              <a href="game_ratings.html" class="btn btn-teal btn-toolbar">Ratings</a>
+              <a href="standings.html"    class="btn btn-teal btn-toolbar">Standings</a>
+            </div>
+          </div>
+
+          <a href="archive.html"  class="btn btn-teal btn-toolbar">Archive</a>
+          <a href="records.html"  class="btn btn-teal btn-toolbar active" aria-current="page">Records</a>
+        </div>
+      </div>
+    </header>
+
+    <!-- Controls -->
+    <section class="glass mb-4">
+      <div class="grid gap-3 sm:grid-cols-12 sm:items-end">
+        <div class="sm:col-span-4">
+          <label class="muted">Search player</label>
+          <input id="searchInput" class="input" placeholder="Type a name…" />
+        </div>
+
+        <div class="sm:col-span-3">
+          <label class="muted">Include</label>
+          <select id="includeSelect" class="input">
+            <option value="all">All (You + Players)</option>
+            <option value="you">You only</option>
+            <option value="players">Players only</option>
+          </select>
+        </div>
+
+        <div class="sm:col-span-3">
+          <label class="muted">Top</label>
+          <select id="topSelect" class="input">
+            <option value="50">Top 50</option>
+            <option value="25">Top 25</option>
+            <option value="100">Top 100</option>
+            <option value="250">Top 250</option>
+          </select>
+        </div>
+
+        <div class="sm:col-span-2 flex gap-2">
+          <button id="refreshBtn" class="btn btn-warn w-full">Refresh</button>
+        </div>
+      </div>
+
+      <div class="flex flex-col sm:flex-row sm:items-center gap-2 mt-3">
+        <span class="pill pill-orange">Scoring source: your daily completions</span>
+        <span class="pill pill-blue">Players: simulated gameHistory scores</span>
+        <span class="muted sm:ml-auto" id="metaLine">—</span>
+      </div>
+    </section>
+
+    <!-- Records table -->
+    <section class="glass">
+      <div class="flex items-center justify-between gap-3 mb-3">
+        <div>
+          <div class="text-lg font-extrabold">Top Single‑Day Scores</div>
+          <div class="muted" id="subtitleLine">—</div>
+        </div>
+
+        <button id="copyBtn" class="btn btn-ghost">Copy list</button>
+      </div>
+
+      <div id="emptyState" class="muted hidden">No records found. (Either no gameHistory yet, or no completions saved.)</div>
+
+      <div class="tableWrap" id="tableWrap">
+        <table>
+          <thead>
+            <tr>
+              <th class="rankCell">Rank</th>
+              <th class="scoreCell">Score</th>
+              <th class="dateCell">Date</th>
+              <th class="playerCell">Player</th>
+              <th class="srcCell">Source</th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+  </div>
+
+<script>
+/* -----------------------------
+   Records mini-page
+------------------------------*/
+const STORAGE_KEY = "taskpoints_v1";
+const $ = (id) => document.getElementById(id);
+
+function loadState(){
+  const base = {
+    tasks: [], completions: [], habits: [],
+    players: [], flexActions: [],
+    gameHistory: [], matchups: [], schedule: []
+  };
+  try{
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return base;
+    const parsed = JSON.parse(raw);
+    return Object.assign(base, parsed || {});
+  }catch(e){
+    console.error("records loadState error", e);
+    return base;
+  }
+}
+
+function dateKey(d){
+  // supports Date or ISO string
+  const dt = (d instanceof Date) ? d : new Date(d);
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth()+1).padStart(2,"0");
+  const day = String(dt.getDate()).padStart(2,"0");
+  return `${y}-${m}-${day}`;
+}
+
+function fmtDate(key){
+  // key: YYYY-MM-DD
+  try{
+    const [y,m,d] = key.split("-").map(Number);
+    const dt = new Date(y, m-1, d);
+    return dt.toLocaleDateString(undefined, { month:"short", day:"2-digit", year:"numeric" });
+  }catch{
+    return key;
+  }
+}
+
+function esc(s){
+  return String(s ?? "")
+    .replaceAll("&","&amp;")
+    .replaceAll("<","&lt;")
+    .replaceAll(">","&gt;")
+    .replaceAll('"',"&quot;")
+    .replaceAll("'","&#39;");
+}
+
+function num(n){
+  const x = Number(n);
+  if (Number.isNaN(x)) return 0;
+  return x;
+}
+
+/* -----------------------------
+   Build record candidates
+------------------------------*/
+function buildRecords(state){
+  const records = [];
+
+  // Map playerId -> name
+  const playerMap = new Map();
+  (Array.isArray(state.players) ? state.players : []).forEach(p => {
+    if (p && p.id) playerMap.set(p.id, p.name || "");
+  });
+
+  // 1) YOU daily totals from completions (sum points by day)
+  const comps = Array.isArray(state.completions) ? state.completions : [];
+  const sums = new Map(); // dateKey -> score
+  for (const c of comps){
+    if (!c || !c.completedAtISO) continue;
+    const dk = dateKey(c.completedAtISO);
+    sums.set(dk, (sums.get(dk) || 0) + num(c.points || 0));
+  }
+
+  for (const [dk, score] of sums.entries()){
+    records.push({
+      date: dk,
+      playerId: "YOU",
+      playerName: "You",
+      score: Number(score.toFixed(1)),
+      source: "You (daily)"
+    });
+  }
+
+  // 2) AI player day scores from gameHistory
+  const gh = Array.isArray(state.gameHistory) ? state.gameHistory : [];
+  for (const g of gh){
+    if (!g || !g.date || !g.playerId) continue;
+    const name = g.playerId === "YOU"
+      ? "You"
+      : (playerMap.get(g.playerId) || "Unknown Player");
+
+    records.push({
+      date: g.date,
+      playerId: g.playerId,
+      playerName: name,
+      score: Number(num(g.score).toFixed(1)),
+      source: "Player (game)"
+    });
+  }
+
+  return records;
+}
+
+/* -----------------------------
+   UI rendering
+------------------------------*/
+const ui = {
+  include: "all",
+  topN: 50,
+  search: ""
+};
+
+function filteredSortedTop(records){
+  const q = ui.search.trim().toLowerCase();
+
+  let out = records.slice();
+
+  if (ui.include === "you"){
+    out = out.filter(r => r.playerId === "YOU");
+  }else if (ui.include === "players"){
+    out = out.filter(r => r.playerId !== "YOU");
+  }
+
+  if (q){
+    out = out.filter(r => (r.playerName || "").toLowerCase().includes(q));
+  }
+
+  out.sort((a,b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    // tie-breaker: more recent date first
+    return String(b.date).localeCompare(String(a.date));
+  });
+
+  return out.slice(0, ui.topN);
+}
+
+function render(){
+  const state = loadState();
+  const all = buildRecords(state);
+
+  const top = filteredSortedTop(all);
+
+  const tbody = $("tbody");
+  const empty = $("emptyState");
+  const wrap = $("tableWrap");
+  const meta = $("metaLine");
+  const sub = $("subtitleLine");
+
+  const totalDaysYou = new Set(
+    (Array.isArray(state.completions) ? state.completions : [])
+      .filter(c => c?.completedAtISO)
+      .map(c => dateKey(c.completedAtISO))
+  ).size;
+
+  meta.textContent = `Saved: ${all.length.toLocaleString()} records · You days: ${totalDaysYou.toLocaleString()} · Players games: ${(Array.isArray(state.gameHistory)?state.gameHistory.length:0).toLocaleString()}`;
+
+  if (!top.length){
+    empty.classList.remove("hidden");
+    wrap.classList.add("hidden");
+    sub.textContent = "No matching records.";
+    return;
+  }
+
+  empty.classList.add("hidden");
+  wrap.classList.remove("hidden");
+
+  const best = top[0]?.score ?? 0;
+  const avg = top.reduce((s,r)=>s+r.score,0) / top.length;
+  sub.textContent = `Showing ${top.length} — Best: ${best.toFixed(1)} · Avg (shown): ${avg.toFixed(1)}`;
+
+  tbody.innerHTML = top.map((r, i) => {
+    const srcPill = r.playerId === "YOU"
+      ? `<span class="pill pill-orange">You</span>`
+      : `<span class="pill pill-blue">Player</span>`;
+
+    return `
+      <tr>
+        <td class="rankCell num font-extrabold">${i+1}</td>
+        <td class="scoreCell num font-extrabold">${r.score.toFixed(1)}</td>
+        <td class="dateCell num">${esc(fmtDate(r.date))}</td>
+        <td class="playerCell">
+          <div class="font-semibold">${esc(r.playerName || "Unknown")}</div>
+          <div class="muted text-xs">ID: ${esc(r.playerId)}</div>
+        </td>
+        <td class="srcCell">${srcPill}</td>
+      </tr>
+    `;
+  }).join("");
+
+  // Cache last rendered list for copy
+  window.__lastTopRecords = top;
+}
+
+/* Copy list */
+async function copyList(){
+  const rows = window.__lastTopRecords || [];
+  if (!rows.length) return;
+
+  const lines = rows.map((r, i) => {
+    return `${i+1}. ${r.score.toFixed(1)} — ${r.playerName} — ${r.date} — ${r.playerId === "YOU" ? "You" : "Player"}`;
+  });
+  const txt = lines.join("\n");
+
+  try{
+    await navigator.clipboard.writeText(txt);
+    const btn = $("copyBtn");
+    const prev = btn.textContent;
+    btn.textContent = "Copied!";
+    setTimeout(()=>btn.textContent = prev, 900);
+  }catch(e){
+    alert("Couldn’t copy automatically. (Clipboard blocked.)\n\nTip: select and copy from the table.");
+  }
+}
+
+/* Dropdown support (consistent with your other pages) */
+document.addEventListener("click", (e) => {
+  const toggle = e.target.closest("[data-dropdown-toggle]");
+  const openMenus = document.querySelectorAll(".dropdown-menu.open");
+  openMenus.forEach(m => {
+    if (!m.contains(e.target) && !toggle?.closest(".dropdown")?.contains(e.target)){
+      m.classList.remove("open");
+      m.style.display = "none";
+    }
+  });
+
+  if (!toggle) return;
+  const dropdown = toggle.closest(".dropdown");
+  const menu = dropdown?.querySelector(".dropdown-menu");
+  if (!menu) return;
+
+  const isOpen = menu.classList.contains("open");
+  if (isOpen){
+    menu.classList.remove("open");
+    menu.style.display = "none";
+    toggle.setAttribute("aria-expanded","false");
+  }else{
+    menu.classList.add("open");
+    menu.style.display = "block";
+    toggle.setAttribute("aria-expanded","true");
+  }
+});
+
+/* Controls */
+$("includeSelect").addEventListener("change", (e) => { ui.include = e.target.value; render(); });
+$("topSelect").addEventListener("change", (e) => { ui.topN = Number(e.target.value || 50); render(); });
+$("searchInput").addEventListener("input", (e) => { ui.search = e.target.value || ""; render(); });
+$("refreshBtn").addEventListener("click", render);
+$("copyBtn").addEventListener("click", copyList);
+
+/* Initial */
+render();
+</script>
+</body>
+</html>
