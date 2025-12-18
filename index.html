@@ -62,35 +62,11 @@
   </header>
 
   <!-- TOP ROW -->
-    <div class="grid gap-3 sm:grid-cols-2 mb-6">
+  <div class="space-y-3 mb-6">
+    <div class="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1.3fr_0.8fr_1fr]">
       <!-- Today's Points + Daily Avg card (left) -->
-<div class="glass text-center relative">
-  <div id="inertiaPanel" class="absolute left-3 top-3 text-left text-xs space-y-0.5">
-    <div class="muted font-semibold uppercase tracking-wide text-[10px]">Inertia</div>
-    <div id="inertiaValue" class="text-2xl font-bold leading-none">0.0</div>
-    <div class="muted text-[10px] leading-tight">Avg last 7 days (excl. today) × 0.25</div>
-    <div id="inertiaAverage" class="muted text-[10px] leading-tight">7-day avg: 0.0</div>
-  </div>
-  <div class="font-semibold text-sm muted">Today&#8217;s Points</div>
-
-  <!-- DESKTOP ONLY: Add Task button (does not affect mobile) -->
-  <div class="hidden lg:flex flex-col gap-2 absolute top-3 right-3 w-32">
-    <button
-      id="todayPointsAddTaskBtn"
-      type="button"
-      class="btn btn-teal w-full"
-      onclick="toggleAddTask()"
-    >
-      Add Task
-    </button>
-    <button
-      type="button"
-      class="btn btn-teal w-full"
-      onclick="scrollToTasks()"
-    >
-      Jump to Tasks
-    </button>
-  </div>
+      <div class="glass text-center sm:col-span-2 lg:col-span-1">
+        <div class="font-semibold text-sm muted">Today&#8217;s Points</div>
 
         <div id="todayPoints" class="text-5xl sm:text-6xl font-extrabold mt-1">0</div>
         <div class="text-[11px] muted mt-1">Points earned so far today</div>
@@ -102,44 +78,78 @@
         </div>
       </div>
 
+      <!-- Diff card (center) -->
+      <div class="glass text-center sm:col-span-2 lg:col-span-1">
+        <div class="font-semibold text-sm muted">The Diff</div>
+        <div id="matchupDiffValue" class="text-4xl sm:text-5xl font-extrabold mt-1">—</div>
+        <div id="matchupDiff" class="muted text-xs mt-1">—</div>
+      </div>
+
       <!-- Today's Matchup card (right) -->
-      <div class="glass" id="matchupCard">
-        <div class="font-semibold text-sm muted mb-1">Today’s Matchup</div>
+      <div class="glass sm:col-span-2 lg:col-span-1" id="matchupCard">
+        <div class="flex flex-col gap-3 lg:flex-col lg:items-end">
+          <div class="w-full">
+            <div class="font-semibold text-sm muted mb-1">Today’s Matchup</div>
 
-        <div id="matchupEmpty" class="text-[11px] muted">
-          No matchup for today yet. Simulate games in the Game tab.
-        </div>
+            <div id="matchupEmpty" class="text-[11px] muted">
+              No matchup for today yet. Simulate games in the Game tab.
+            </div>
 
-        <div id="matchupDetails" class="hidden flex flex-col gap-0.5">
-          <div class="flex items-start gap-3">
-            <div class="flex-1 space-y-1">
-              <div class="text-lg font-semibold" id="matchupOpponent">—</div>
-              <div id="matchupOpponentRecord" class="text-[11px] text-slate-400 leading-tight">Record: —</div>
+            <div id="matchupDetails" class="hidden flex flex-col gap-0.5">
+              <div class="flex items-start gap-3">
+                <div class="flex-1 space-y-1">
+                  <div class="text-lg font-semibold" id="matchupOpponent">—</div>
+                  <div id="matchupOpponentRecord" class="text-[11px] text-slate-400 leading-tight">Record: —</div>
 
-              <div>
-                <div class="text-[11px] muted">Opponent Score</div>
-                <div class="text-3xl font-extrabold leading-tight" id="matchupOpponentScore">—</div>
+                  <div>
+                    <div class="text-[11px] muted">Opponent Score</div>
+                    <div class="text-3xl font-extrabold leading-tight" id="matchupOpponentScore">—</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="flex items-center gap-1.5 text-xs text-slate-400 -mt-2">
+                <span>Your score</span>
+                <span class="text-lg font-semibold text-slate-100" id="matchupYourScore">—</span>
               </div>
             </div>
           </div>
 
-          <div class="flex items-center gap-1.5 text-xs text-slate-400 -mt-2">
-            <span>Your score</span>
-            <span class="text-lg font-semibold text-slate-100" id="matchupYourScore">—</span>
+          <div class="flex flex-col gap-2 w-full sm:flex-row sm:justify-end lg:flex-col lg:w-auto">
+            <button
+              id="todayPointsAddTaskBtn"
+              type="button"
+              class="btn btn-teal w-full sm:w-auto"
+              onclick="toggleAddTask()"
+            >
+              Add Task
+            </button>
+            <button
+              type="button"
+              class="btn btn-teal w-full sm:w-auto"
+              onclick="scrollToTasks()"
+            >
+              Jump to Tasks
+            </button>
           </div>
-
-          <div id="matchupDiff" class="text-sm font-semibold">—</div>
         </div>
       </div>
-
-
-
-<!-- Daily line graph (bottom, spans both columns) -->
-<div class="glass sm:col-span-2 flex items-end">
-  <canvas id="dailyTrend" class="w-full h-24"></canvas>
-</div>
-
     </div>
+
+    <div class="grid gap-3 grid-cols-1 lg:grid-cols-[0.85fr_1.15fr]">
+      <div class="glass">
+        <div class="muted font-semibold uppercase tracking-wide text-[10px]">Inertia Score</div>
+        <div class="text-3xl font-extrabold" id="inertiaValue">0.0</div>
+        <div class="muted text-[11px] leading-tight mt-1">Avg last 7 days (excl. today) × 0.25</div>
+        <div class="muted text-[11px] leading-tight" id="inertiaAverage">7-day avg: 0.0</div>
+      </div>
+
+      <!-- Daily line graph -->
+      <div class="glass flex items-end">
+        <canvas id="dailyTrend" class="w-full h-24"></canvas>
+      </div>
+    </div>
+  </div>
   <!-- TOP ROW END -->
 
   <!-- TODAY'S POINTS BREAKDOWN BAR -->
@@ -1622,9 +1632,10 @@ function renderTodaysMatchup(todayKeyStr, yourScore){
   const oppScoreEl= $('matchupOpponentScore');
   const yourScoreEl = $('matchupYourScore');
   const diffEl    = $('matchupDiff');
+  const diffValueEl = $('matchupDiffValue');
   const oppRecordEl = $('matchupOpponentRecord');
 
-  if (!detailsEl || !emptyEl || !oppNameEl || !oppScoreEl || !yourScoreEl || !diffEl || !oppRecordEl) return;
+  if (!detailsEl || !emptyEl || !oppNameEl || !oppScoreEl || !yourScoreEl || !diffEl || !diffValueEl || !oppRecordEl) return;
 
   const matchups = Array.isArray(state.matchups) ? state.matchups : [];
   const matchup = matchups.find(m => m && m.date === todayKeyStr && (m.playerAId === 'YOU' || m.playerBId === 'YOU'));
@@ -1633,6 +1644,8 @@ function renderTodaysMatchup(todayKeyStr, yourScore){
     detailsEl.classList.add('hidden');
     emptyEl.classList.remove('hidden');
     emptyEl.textContent = 'No matchup for today yet. Simulate games in the Game tab.';
+    diffEl.textContent = 'No matchup today';
+    diffValueEl.textContent = '—';
     return;
   }
 
@@ -1657,18 +1670,21 @@ function renderTodaysMatchup(todayKeyStr, yourScore){
   yourScoreEl.textContent = safeYourScore.toFixed(1);
   oppRecordEl.textContent = `Record: ${getPlayerRecordText(oppId)}`;
 
-  diffEl.className = 'text-sm font-semibold';
+  diffEl.className = 'muted text-xs mt-1';
   const diff = Number((safeYourScore - visibleOppScore).toFixed(1));
+
+  diffValueEl.textContent = `${diff > 0 ? '+' : ''}${diff.toFixed(1)}`;
+  diffValueEl.className = 'text-4xl sm:text-5xl font-extrabold mt-1 text-center';
 
   if (diff > 0) {
     diffEl.textContent = `Winning by ${diff.toFixed(1)} pts`;
-    diffEl.classList.add('text-teal-200');
+    diffValueEl.classList.add('text-teal-200');
   } else if (diff < 0) {
     diffEl.textContent = `Losing by ${Math.abs(diff).toFixed(1)} pts`;
-    diffEl.classList.add('text-orange-300');
+    diffValueEl.classList.add('text-orange-300');
   } else {
     diffEl.textContent = 'Tied right now';
-    diffEl.classList.add('text-amber-200');
+    diffValueEl.classList.add('text-amber-200');
   }
 
   emptyEl.classList.add('hidden');
