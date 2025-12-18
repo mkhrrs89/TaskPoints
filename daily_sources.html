@@ -292,7 +292,7 @@ if (changed) {
       if (!listEl) return;
 
       const daily = buildDailyBreakdowns();
-      const keys = Object.keys(daily).sort();
+      const keys = Object.keys(daily).sort((a, b) => fromKey(b) - fromKey(a));
 
       if (!keys.length) {
         listEl.innerHTML = '<div class="muted">No days logged yet.</div>';
