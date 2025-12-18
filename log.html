@@ -179,6 +179,28 @@ function sleepPoints(score, rested = 0) {
   return base + bonus + (Number.isFinite(rested) ? rested : 0);
 }
 
+function getWorkInfo(entry) {
+  const match = entry?.title?.match(/\(([^)]+)\)/);
+  const score = match ? Number(match[1]) : null;
+
+  const hoursRaw = entry && Object.prototype.hasOwnProperty.call(entry, 'workHours')
+    ? Number(entry.workHours)
+    : 0;
+  const hours = Number.isFinite(hoursRaw) ? hoursRaw : 0;
+
+  return { score, hours };
+}
+
+function workHoursBonus(hours = 0) {
+  if (!Number.isFinite(hours)) return 0;
+  return Math.max(0, hours) * 10;
+}
+
+function workPoints(score, hours = 0) {
+  if (!Number.isFinite(score)) return 0;
+  return score + workHoursBonus(hours);
+}
+
 
 function load(){ 
   try {
@@ -288,6 +310,48 @@ function migrateSleepEntriesForBonus() {
 }
 
 migrateSleepEntriesForBonus();
+
+function migrateWorkEntriesForHours() {
+  if (!state || !Array.isArray(state.completions)) return;
+
+  let changed = false;
+
+  state.completions.forEach(c => {
+    if (!c || !c.title || !c.title.startsWith('Work Score')) return;
+
+    const { score, hours } = getWorkInfo(c);
+    const safeHours = Number.isFinite(hours) ? Math.max(0, hours) : 0;
+    const safeScore = Number.isFinite(score) ? score : Number(c.points) || 0;
+    const newPts = workPoints(safeScore, safeHours);
+
+    if (!Number.isFinite(c.workHours) || c.workHours !== safeHours) {
+      c.workHours = safeHours;
+      changed = true;
+    }
+
+    if (c.source !== 'work') {
+      c.source = 'work';
+      changed = true;
+    }
+
+    const desiredTitle = Number.isFinite(score)
+      ? `Work Score (${score}) — Hours ${safeHours}`
+      : c.title;
+    if (desiredTitle !== c.title) {
+      c.title = desiredTitle;
+      changed = true;
+    }
+
+    if (Math.abs((Number(c.points) || 0) - newPts) > 0.0001) {
+      c.points = newPts;
+      changed = true;
+    }
+  });
+
+  if (changed) save();
+}
+
+migrateWorkEntriesForHours();
 
 function save() {
   state = saveMerged(state);
