@@ -21,8 +21,7 @@
     rgba(120, 52, 4, 0.22),
     rgba(90, 35, 6, 0.18)
   ) !important;
-  border-color: #8a3b0e !important;
-  box-shadow: 0 10px 30px rgba(138, 59, 14, 0.25);
+  border-color: #6b2a08 !important;
 }
     @media (prefers-color-scheme:light){.glass{background:#fff;border-color:#e5e7eb;box-shadow:0 1px 2px rgba(0,0,0,.04)}}
     .btn{border:1px solid var(--border);border-radius:12px;padding:8px 12px;white-space:nowrap}
