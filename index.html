@@ -3276,7 +3276,7 @@ function renderSleepHistory() {
       const d = new Date(entry.completedAtISO);
       return dateKey(d) !== todayKey;
     })
-    .slice(0, 4);
+    .slice(0, 6);
 
   if (!container) return;
 
@@ -3397,7 +3397,7 @@ function renderCaloriesHistory() {
   // Recent (max 4) excluding today
   const recent = entries
     .filter(entry => dateKey(new Date(entry.completedAtISO)) !== todayKey)
-    .slice(0, 4);
+    .slice(0, 6);
 
   if (!container) return;
 
@@ -3602,7 +3602,7 @@ if (todayValueEl && todayImpactEl) {
   // RECENT HISTORY (4 chips)
   const recent = entries
     .filter(e => dateKey(new Date(e.completedAtISO)) !== todayK)
-    .slice(0, 4);
+    .slice(0, 6);
 
   recent.forEach(entry => {
     const date = new Date(entry.completedAtISO);
@@ -3762,7 +3762,7 @@ function renderMoodHistory() {
 
   const recent = entries
     .filter(e => dateKey(new Date(e.completedAtISO)) !== todayK)
-    .slice(0, 4);
+    .slice(0, 6);
 
   recent.forEach(entry => {
     const date = new Date(entry.completedAtISO);
