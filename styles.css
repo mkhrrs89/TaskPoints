@@ -618,6 +618,31 @@
       }
     }
 
+/* Desktop: 3 per row */
+.recentGrid{
+  display: grid;
+  grid-template-columns: repeat(3, 75px);
+  gap: 10px;
+  align-content: start;
+  justify-content: start;
+}
+
+/* Mobile: horizontal scroll row */
+@media (max-width: 520px){
+  .recentGrid{
+    display: flex;
+    gap: 10px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 6px;
+  }
+  .recentGrid > *{
+    flex: 0 0 auto;
+  }
+}
+
+
+
 /* ============================================================================ */
 /*                               SLEEP: CHIPS + CARD                            */
 /* ============================================================================ */
@@ -1030,6 +1055,7 @@
     width: 100% !important;
   }
 }
+
 
 
 
