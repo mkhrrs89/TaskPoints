@@ -680,9 +680,10 @@
 
 
 /* ============================================================================ */
-/*                               WORK: TODAY + PILLS                            */
+/*                               WORK: TODAY + CHIPS + PILLS                     */
 /* ============================================================================ */
 
+/* Work: today card */
 .work-today-card{
   background: linear-gradient(180deg, rgba(147, 197, 253, 0.5), rgba(59, 130, 246, 0.35));
   border: none !important;
@@ -691,6 +692,7 @@
   padding: 16px;
 }
 
+/* Work: "hours" pill */
 .work-hours-chip{
   background: rgba(255, 255, 255, 0.8);
   border-radius: 999px;
@@ -701,6 +703,50 @@
   line-height: 1.1;
 
   padding: 4px 10px;
+}
+
+/* Work: recent-day chip */
+.work-chip{
+  background: linear-gradient(180deg, rgba(147, 197, 253, 0.5), rgba(59, 130, 246, 0.35));
+  border: 1px solid rgba(147, 197, 253, 0.5);
+  border-radius: 12px;
+
+  width: 75px;
+  height: 75px;
+
+  padding: 0;
+  text-align: center;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Work chip: lines */
+.work-chip-date{
+  font-size: 11px;
+  color: #e3f2ff;
+  line-height: 1.1;
+}
+
+.work-chip-value{
+  font-size: 18px;
+  font-weight: 700;
+  color: #f8fbff;
+  line-height: 1.1;
+}
+
+.work-chip-pts{
+  font-size: 11px;
+  color: #e3f2ff;
+  line-height: 1.2;
+}
+
+.work-chip-bonus{
+  font-size: 11px;
+  color: #cfe8ff;
+  line-height: 1.2;
 }
 
 
@@ -790,53 +836,6 @@
   font-size: 11px;
   margin-top: 2px;
   opacity: 0.8;
-}
-
-
-/* ============================================================================ */
-/*                               WORK: CHIP (RECENT DAYS)                       */
-/* ============================================================================ */
-
-.work-chip{
-  background: linear-gradient(180deg, rgba(147, 197, 253, 0.5), rgba(59, 130, 246, 0.35));
-  border: 1px solid rgba(147, 197, 253, 0.5);
-  border-radius: 12px;
-
-  width: 75px;
-  height: 75px;
-
-  padding: 0;
-  text-align: center;
-
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-}
-
-.work-chip-date{
-  font-size: 11px;
-  color: #e3f2ff;
-  line-height: 1.1;
-}
-
-.work-chip-value{
-  font-size: 18px;
-  font-weight: 700;
-  color: #f8fbff;
-  line-height: 1.1;
-}
-
-.work-chip-pts{
-  font-size: 11px;
-  color: #e3f2ff;
-  line-height: 1.2;
-}
-
-.work-chip-bonus{
-  font-size: 11px;
-  color: #cfe8ff;
-  line-height: 1.2;
 }
 
 
@@ -1031,6 +1030,7 @@
     width: 100% !important;
   }
 }
+
 
 
 
