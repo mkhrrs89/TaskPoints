@@ -641,6 +641,36 @@
   }
 }
 
+/* ============================================================================ */
+/*                          RECENT CHIPS LAYOUT (6)                             */
+/*  Desktop: 3-per-row grid (so 6 becomes 3x2)                                  */
+/*  Mobile: horizontal scroll row (no squish)                                   */
+/* ============================================================================ */
+
+.recentRow{
+  display: grid;
+  grid-template-columns: repeat(3, 75px);
+  gap: 10px;
+  align-content: start;
+  justify-content: start;
+}
+
+/* Mobile: one row you can swipe */
+@media (max-width: 640px){
+  .recentRow{
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 10px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 6px;
+  }
+
+  .recentRow > *{
+    flex: 0 0 auto; /* prevents chips from shrinking */
+  }
+}
+
 
 
 /* ============================================================================ */
@@ -1055,6 +1085,7 @@
     width: 100% !important;
   }
 }
+
 
 
 
