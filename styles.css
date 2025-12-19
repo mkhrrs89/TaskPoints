@@ -812,6 +812,12 @@
 .mood-chip-value{ font-size: 18px; font-weight: 700; color: #ffffff; }
 .mood-chip-pts{ font-size: 11px; color: #e0e7ff; opacity: 0.9; }
 
+
+/* ============================================================================ */
+/*                                 CAL CHIP                                     */
+/* ============================================================================ */
+
+
 .cal-chip{
   background: linear-gradient(180deg, #0f4d4d, #0a2f2f); /* same as your teal buttons */
   color:#fff;
@@ -847,20 +853,27 @@
   margin-top: 2px;
 }
 
+/* ============================================================================ */
+/*                                 WORK CHIP                                    */
+/* ============================================================================ */
+
 .work-chip {
   background: linear-gradient(180deg, rgba(147, 197, 253, 0.5), rgba(59, 130, 246, 0.35));
   border: 1px solid rgba(147, 197, 253, 0.5);
   border-radius: 12px;
-  padding: 0.4rem 0.55rem;
-  width: 82px;
-  height: 88px;
+
+  width: 75px;
+  height: 75px;
+
+  padding: 0;               
+  text-align: center;
+
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  text-align: center;
-  gap: 1px;
 }
+
 
 .work-chip-date {
   font-size: 11px;
@@ -982,6 +995,7 @@
     width: 100% !important;
   }
 }
+
 
 
 
