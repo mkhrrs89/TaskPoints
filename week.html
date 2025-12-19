@@ -317,6 +317,54 @@ function fromKey(k){
 function niceDate(d){ return d.toLocaleDateString(undefined,{month:'short',day:'numeric'}) }
 function todayKey(){ const d=new Date(); d.setHours(0,0,0,0); return dateKey(d); }
 
+function computeNextDueDate(task){
+  const rec = task?.recurrence || {};
+  const mode = rec.mode || 'none';
+  if (mode === 'none') return null;
+
+  const baseKey = task.dueDateISO || todayKey();
+  const base = new Date(baseKey + 'T00:00:00');
+
+  let next = null;
+
+  if (mode === 'daily') {
+    next = addDays(base, 1);
+  } else if (mode === 'everyWeekday') {
+    next = addDays(base, 1);
+    const d = next.getDay(); // 0 Sun, 6 Sat
+    if (d === 6) next = addDays(next, 2);
+    else if (d === 0) next = addDays(next, 1);
+  } else if (mode === 'weekly') {
+    next = addDays(base, 7);
+  } else if (mode === 'monthly') {
+    next = new Date(base);
+    next.setMonth(next.getMonth() + 1);
+    next.setHours(0,0,0,0);
+  } else if (mode === 'yearly') {
+    next = new Date(base);
+    next.setFullYear(next.getFullYear() + 1);
+    next.setHours(0,0,0,0);
+  } else if (mode === 'custom') {
+    const count = Number.isFinite(rec.customCount) && rec.customCount > 0 ? rec.customCount : 1;
+    const unit  = rec.customUnit || 'day';
+    if (unit === 'day') {
+      next = addDays(base, count);
+    } else if (unit === 'week') {
+      next = addDays(base, count * 7);
+    } else if (unit === 'month') {
+      next = new Date(base);
+      next.setMonth(next.getMonth() + count);
+      next.setHours(0,0,0,0);
+    } else if (unit === 'year') {
+      next = new Date(base);
+      next.setFullYear(next.getFullYear() + count);
+      next.setHours(0,0,0,0);
+    }
+  }
+
+  return next ? dateKey(next) : null;
+}
+
 // Keep weekday labels aligned with scrollable date columns
 function syncScrollContainers(a,b){
   if(!a || !b) return;
@@ -597,7 +645,16 @@ function completeTask(id){
   const nowISO = new Date().toISOString();
   const dk = todayKey();
 
-  t.completedAtISO = nowISO;
+  const rec = t.recurrence || {};
+  const mode = rec.mode || 'none';
+
+  if (mode === 'none') {
+    t.completedAtISO = nowISO;
+  } else {
+    const nextKey = computeNextDueDate(t);
+    if (nextKey) t.dueDateISO = nextKey;
+    t.completedAtISO = null;
+  }
 
   st.completions = Array.isArray(st.completions) ? st.completions : [];
   st.completions.unshift({
