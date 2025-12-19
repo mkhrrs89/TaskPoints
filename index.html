@@ -2906,7 +2906,10 @@ const tagsHtml = tags.length
 
 
       const card = document.createElement('div');
-card.className = 'glass' + (t.importance === 'Critical' ? ' critical-card' : '');
+const cardClasses = ['glass'];
+if (t.importance === 'Critical') cardClasses.push('critical-card');
+else if (t.importance === 'High') cardClasses.push('high-card');
+card.className = cardClasses.join(' ');
 
 
 if (editingTaskId === t.id) {
