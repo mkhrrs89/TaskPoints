@@ -732,6 +732,7 @@
   border-radius: 16px;
   padding: 16px;
   color: #fff;
+  height: 100%;
 }
 
 /* Sleep: "rested" pill */
@@ -759,6 +760,7 @@
   border-radius: 16px;
   color: #e3f2ff;
   padding: 16px;
+  height: 100%;
 }
 
 /* Work: "hours" pill */
@@ -830,6 +832,7 @@
   border-radius: 16px;
   color: #e0e7ff;
   padding: 16px;
+  height: 100%;
 }
 
 .btn-mood{
@@ -867,6 +870,7 @@
   border-radius: 16px;
   color: #fff;
   padding: 16px;
+  height: 100%;
 }
 
 /* Calories: recent-day chip */
