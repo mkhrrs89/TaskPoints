@@ -9,6 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="TaskPoints"/>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='%230b0d10'/><text x='50' y='62' font-size='60' text-anchor='middle' fill='white'>TP</text></svg>">
   <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Teko:wght@500;600;700&display=swap">
 
 
 <link rel="stylesheet" href="styles.css">
@@ -63,29 +64,17 @@
 
   <!-- TOP ROW -->
   <div class="space-y-3 mb-6">
-    <div class="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1.1fr_1.05fr_0.9fr]">
-      <!-- Today's Points + Daily Avg card (left) -->
-      <div class="glass text-center sm:col-span-2 lg:col-span-1">
-        <div class="font-semibold text-sm muted">Today&#8217;s Points</div>
-
-        <div id="todayPoints" class="text-5xl sm:text-6xl font-extrabold mt-1">0</div>
-        <div class="text-[11px] muted mt-1">Points earned so far today</div>
-
-        <!-- Daily average moved into this same card -->
-        <div class="mt-2 text-[11px] muted">
-          Daily Avg (active):
-          <span id="dailyAvg" class="font-semibold">0</span>
-        </div>
-      </div>
-
-      <!-- Scoreboard card (center) -->
+    <div class="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-[2fr_1fr]">
+      <!-- Scoreboard card (expanded) -->
       <div class="glass sm:col-span-2 lg:col-span-1">
-        <div class="font-semibold text-sm muted text-center">Matchup Scoreboard</div>
+        <div class="font-semibold text-sm muted">Matchup Scoreboard</div>
         <div class="matchup-scoreboard mt-3">
           <div class="scoreboard-side">
             <div class="muted text-[11px] uppercase tracking-wide">You</div>
+            <div id="matchupYourName" class="scoreboard-name">You</div>
             <div id="matchupYourScore" class="scoreboard-score">—</div>
             <div id="matchupYourRecord" class="scoreboard-record">Record: 0-0</div>
+            <div id="matchupYourAverages" class="scoreboard-meta">Daily Avg: — · PPD: —</div>
           </div>
 
           <div class="scoreboard-diff text-center">
@@ -96,34 +85,18 @@
 
           <div class="scoreboard-side text-right">
             <div class="muted text-[11px] uppercase tracking-wide">Opponent</div>
+            <div id="matchupOpponent" class="scoreboard-name text-right">—</div>
             <div id="matchupOpponentScore" class="scoreboard-score">—</div>
             <div id="matchupOpponentRecord" class="scoreboard-record">Record: 0-0</div>
+            <div id="matchupOpponentAverages" class="scoreboard-meta text-right">Daily Avg: — · PPD: —</div>
           </div>
         </div>
       </div>
 
-      <!-- Today's Matchup card (right) -->
+      <!-- Controls card (right) -->
       <div class="glass sm:col-span-2 lg:col-span-1" id="matchupCard">
-        <div class="flex flex-col gap-3 lg:flex-col lg:items-end">
-          <div class="w-full">
-            <div class="font-semibold text-sm muted mb-1">Today’s Matchup</div>
-
-            <div id="matchupEmpty" class="text-[11px] muted">
-              No matchup for today yet. Simulate games in the Game tab.
-            </div>
-
-            <div id="matchupDetails" class="hidden flex flex-col gap-1.5">
-              <div class="flex items-start gap-3">
-                <div class="flex-1 space-y-1">
-                  <div class="text-lg font-semibold" id="matchupOpponent">—</div>
-
-                  <div class="text-[11px] muted">Opponent Score updates live as tasks drip in.</div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="flex flex-col gap-2 w-full sm:flex-row sm:justify-end lg:flex-col lg:w-auto">
+        <div class="flex items-start justify-end">
+          <div class="flex flex-col gap-2 w-full sm:w-auto sm:flex-row lg:flex-col lg:w-auto">
             <button
               id="todayPointsAddTaskBtn"
               type="button"
@@ -1039,6 +1012,51 @@ function getYourRecordText() {
   return `${wins}-${losses}`;
 }
 
+function computeYouDailyAverages(){
+  const comps = Array.isArray(state.completions) ? state.completions : [];
+  if (!comps.length) return { dailyAvg: 0, ppd: 0, hasData: false };
+
+  const dayTotals = {};
+
+  comps.forEach(c => {
+    if (!c || !c.completedAtISO) return;
+    const k = dateKey(c.completedAtISO);
+    const pts = Number(c.points || 0);
+    dayTotals[k] = (dayTotals[k] || 0) + pts;
+  });
+
+  const totals = Object.values(dayTotals);
+  if (!totals.length) return { dailyAvg: 0, ppd: 0, hasData: false };
+
+  const avg = totals.reduce((a, b) => a + b, 0) / totals.length;
+  const rounded = Number(avg.toFixed(1));
+
+  return { dailyAvg: rounded, ppd: rounded, hasData: true };
+}
+
+function computePlayerDailyAverages(playerId){
+  if (!playerId) return { dailyAvg: 0, ppd: 0, hasData: false };
+  if (playerId === 'YOU') return computeYouDailyAverages();
+
+  const history = Array.isArray(state.gameHistory) ? state.gameHistory : [];
+  const scores = history
+    .filter(h => h && h.playerId === playerId)
+    .map(h => Number(h.score))
+    .filter(Number.isFinite);
+
+  if (!scores.length) return { dailyAvg: 0, ppd: 0, hasData: false };
+
+  const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
+  const rounded = Number(avg.toFixed(1));
+
+  return { dailyAvg: rounded, ppd: rounded, hasData: true };
+}
+
+function formatAverageLine(avg, ppd){
+  const formatVal = (v) => Number.isFinite(v) ? v.toFixed(1) : '—';
+  return `Daily Avg: ${formatVal(avg)} · PPD: ${formatVal(ppd)}`;
+}
+
 
 /* ---------- OPPONENT DRIP SCHEDULE ---------- */
 function getOpponentDripSchedules(){
@@ -1809,8 +1827,6 @@ function renderStats(){
 
 
 function renderTodaysMatchup(todayKeyStr, yourScore){
-  const detailsEl = $('matchupDetails');
-  const emptyEl   = $('matchupEmpty');
   const oppNameEl = $('matchupOpponent');
   const oppScoreEl= $('matchupOpponentScore');
   const yourScoreEl = $('matchupYourScore');
@@ -1818,22 +1834,41 @@ function renderTodaysMatchup(todayKeyStr, yourScore){
   const diffValueEl = $('matchupDiffValue');
   const oppRecordEl = $('matchupOpponentRecord');
   const yourRecordEl = $('matchupYourRecord');
+  const yourNameEl = $('matchupYourName');
+  const yourAvgEl = $('matchupYourAverages');
+  const oppAvgEl = $('matchupOpponentAverages');
 
-  if (!detailsEl || !emptyEl || !oppNameEl || !oppScoreEl || !yourScoreEl || !diffEl || !diffValueEl || !oppRecordEl || !yourRecordEl) return;
+  if (!oppNameEl || !oppScoreEl || !yourScoreEl || !diffEl || !diffValueEl || !oppRecordEl || !yourRecordEl) return;
+
+  if (yourNameEl) yourNameEl.textContent = 'You';
+  const youAverages = computeYouDailyAverages();
+  if (yourAvgEl) {
+    const youAvgVal = youAverages.hasData ? youAverages.dailyAvg : null;
+    const youPpdVal = youAverages.hasData ? youAverages.ppd : null;
+    yourAvgEl.textContent = formatAverageLine(youAvgVal, youPpdVal);
+  }
+  if (oppAvgEl) oppAvgEl.textContent = formatAverageLine(null, null);
+
+  const setOpponentAverages = (playerId) => {
+    if (!oppAvgEl) return;
+    const oppAverages = computePlayerDailyAverages(playerId);
+    const avgVal = oppAverages.hasData ? oppAverages.dailyAvg : null;
+    const ppdVal = oppAverages.hasData ? oppAverages.ppd : null;
+    oppAvgEl.textContent = formatAverageLine(avgVal, ppdVal);
+  };
 
   const matchups = Array.isArray(state.matchups) ? state.matchups : [];
   const matchup = matchups.find(m => m && m.date === todayKeyStr && (m.playerAId === 'YOU' || m.playerBId === 'YOU'));
 
   if (!matchup) {
-    detailsEl.classList.add('hidden');
-    emptyEl.classList.remove('hidden');
-    emptyEl.textContent = 'No matchup for today yet. Simulate games in the Game tab.';
     diffEl.textContent = 'No matchup today';
     diffValueEl.textContent = '—';
     oppScoreEl.textContent = '—';
     yourScoreEl.textContent = '—';
     oppRecordEl.textContent = 'Record: —';
     yourRecordEl.textContent = `Record: ${getYourRecordText()}`;
+    oppNameEl.textContent = '—';
+    setOpponentAverages(null);
     return;
   }
 
@@ -1852,12 +1887,12 @@ function renderTodaysMatchup(todayKeyStr, yourScore){
     ? visibleOpponentScoreForMatchup(todayKeyStr, oppId, safeOppScore)
     : safeOppScore;
 
-  const oppName = getPlayerNameById(oppId);
-  oppNameEl.textContent = oppName;
+  oppNameEl.textContent = getPlayerNameById(oppId);
   oppScoreEl.textContent = visibleOppScore.toFixed(1);
   yourScoreEl.textContent = safeYourScore.toFixed(1);
   oppRecordEl.textContent = `Record: ${getPlayerRecordText(oppId)}`;
   yourRecordEl.textContent = `Record: ${getYourRecordText()}`;
+  setOpponentAverages(oppId);
 
   diffEl.className = 'muted text-xs mt-1';
   const diff = Number((safeYourScore - visibleOppScore).toFixed(1));
@@ -1876,9 +1911,6 @@ function renderTodaysMatchup(todayKeyStr, yourScore){
     diffEl.textContent = 'Tied right now';
     diffValueEl.classList.add('diff-neutral');
   }
-
-  emptyEl.classList.add('hidden');
-  detailsEl.classList.remove('hidden');
 }
 
 function updateTodayBreakdown(completions, todayKey, inertiaPoints = 0){

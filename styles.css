@@ -46,14 +46,14 @@
 .matchup-scoreboard{
   display: grid;
   grid-template-columns: 1fr auto 1fr;
-  align-items: center;
+  align-items: start;
   gap: clamp(10px, 2vw, 18px);
 }
 
 .scoreboard-side{
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
 .scoreboard-diff{
@@ -68,6 +68,8 @@
   font-weight: 800;
   line-height: 1;
   color: #e6edf6;
+  font-family: 'Teko', 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  letter-spacing: 0.3px;
 }
 
 .scoreboard-record{
@@ -79,6 +81,8 @@
   font-size: clamp(2.3rem, 3.3vw, 2.6rem);
   font-weight: 800;
   line-height: 1.05;
+  font-family: 'Teko', 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  letter-spacing: 0.3px;
 }
 
 .diff-positive{
@@ -91,6 +95,19 @@
 
 .diff-neutral{
   color: #fb923c;
+}
+
+.scoreboard-name{
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #cdd6e1;
+  line-height: 1.1;
+}
+
+.scoreboard-meta{
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.2;
 }
 
 
