@@ -671,6 +671,20 @@
   }
 }
 
+/* Compact score inputs used in the 4 cards */
+.scoreInput{
+  height: 34px;          /* shorter */
+  padding: 6px 10px;     /* less padding */
+  font-size: 14px;       /* smaller typed text */
+  border-radius: 12px;   /* slightly tighter pill */
+  width: 110px;          /* narrower (adjust as desired) */
+}
+
+/* Placeholder text size */
+.scoreInput::placeholder{
+  font-size: 12px;
+  opacity: 0.75;         /* optional: keeps it subtle */
+}
 
 
 /* ============================================================================ */
@@ -1085,6 +1099,7 @@
     width: 100% !important;
   }
 }
+
 
 
 
