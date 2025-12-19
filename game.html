@@ -329,7 +329,7 @@
 
     <!-- Players list -->
     <section class="mb-10">
-      <div class="flex items-center justify-between mb-3">
+      <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
         <div class="flex items-center gap-3">
           <h2 class="text-lg font-semibold">Players</h2>
 
@@ -352,7 +352,21 @@
           </div>
         </div>
 
-        <span id="playerCount" class="text-xs opacity-70"></span>
+        <div class="flex flex-wrap items-center gap-2 text-xs">
+          <label for="playerSort" class="opacity-70">Sort by</label>
+          <select
+            id="playerSort"
+            class="input px-3 py-1 text-xs"
+          >
+            <option value="name-asc">Name (A → Z)</option>
+            <option value="name-desc">Name (Z → A)</option>
+            <option value="avg-desc">AVG PPD (high → low)</option>
+            <option value="baseline-desc">Baseline (high → low)</option>
+            <option value="created-desc">Recently added</option>
+            <option value="created-asc">Oldest first</option>
+          </select>
+          <span id="playerCount" class="opacity-70"></span>
+        </div>
       </div>
 
       <!-- NOTE: we’ll control the grid classes from JS now -->
@@ -479,6 +493,28 @@ if (rebuildGameHistoryFromMatchupsIfNeeded()) {
     
 let editingPlayerId = null;
 let viewMode = "card"; // "card" | "gallery"
+const PLAYER_SORT_STORAGE_KEY = "taskpoints_player_sort_mode";
+const PLAYER_SORT_OPTIONS = [
+  "name-asc",
+  "name-desc",
+  "avg-desc",
+  "baseline-desc",
+  "created-desc",
+  "created-asc"
+];
+let playerSortMode = loadSortMode();
+
+function loadSortMode() {
+  const stored = localStorage.getItem(PLAYER_SORT_STORAGE_KEY);
+  if (stored && PLAYER_SORT_OPTIONS.includes(stored)) return stored;
+  return "name-asc";
+}
+
+function persistSortMode(mode) {
+  if (!PLAYER_SORT_OPTIONS.includes(mode)) return;
+  playerSortMode = mode;
+  localStorage.setItem(PLAYER_SORT_STORAGE_KEY, mode);
+}
 
 if (ensureUpcomingSchedule()) {
   state = saveState(state);
@@ -1219,12 +1255,35 @@ function computeTodayPoints() {
 }
 
 
+function buildPlayerHistoryStats() {
+  const map = new Map();
+  const history = Array.isArray(state.gameHistory) ? state.gameHistory : [];
+
+  for (const g of history) {
+    if (!g || !g.playerId) continue;
+    const score = typeof g.score === "number" ? g.score : Number(g.score);
+    if (!Number.isFinite(score)) continue;
+
+    const entry = map.get(g.playerId) || { games: 0, totalPoints: 0, scores: [] };
+    entry.games += 1;
+    entry.totalPoints += score;
+    entry.scores.push(score);
+    map.set(g.playerId, entry);
+  }
+
+  return map;
+}
+
+
 function calcYouStats() {
   const comps = state.completions || [];
   if (!comps.length) {
     return {
       record: "0-0",
-      avgPPD: 0
+      avgPPD: 0,
+      games: 0,
+      wins: 0,
+      losses: 0
     };
   }
 
@@ -1253,9 +1312,14 @@ for (const c of comps) {
     else losses++;
   }
 
+  const games = dailyTotals.length;
+
   return {
     record: `${wins}-${losses}`,
-    avgPPD: avgPPD
+    avgPPD: avgPPD,
+    games,
+    wins,
+    losses
   };
 }
 
@@ -1264,6 +1328,7 @@ function renderPlayers() {
   const container = $("playersList");
   if (!container) return;
 
+  updateSortSelectUI();
   container.innerHTML = "";
 
   // Set grid layout based on view mode
@@ -1279,6 +1344,17 @@ function renderPlayers() {
 
   // --- compute your real TaskPoints score for today ---
   const todayPoints = computeTodayPoints();
+  const youStats = calcYouStats();
+  const historyStats = buildPlayerHistoryStats();
+
+  historyStats.set("YOU", {
+    games: youStats.games || 0,
+    totalPoints: (youStats.avgPPD || 0) * (youStats.games || 0),
+    scores: [],
+    avgPPD: youStats.avgPPD || 0,
+    wins: youStats.wins || 0,
+    losses: youStats.losses || 0
+  });
 
   // --- special virtual avatar player ---
   const youPlayer = {
@@ -1295,7 +1371,6 @@ function renderPlayers() {
   : [];
 
 
-  // YOU appears first, followed by everyone else
   const players = [youPlayer, ...normalPlayers];
 
   // Update count (does NOT count YOU as a player)
@@ -1311,8 +1386,66 @@ function renderPlayers() {
     $("noPlayersMsg").classList.add("hidden");
   }
 
+  const getAverageForPlayer = (playerId) => {
+    const stat = historyStats.get(playerId);
+    if (!stat) return null;
+    if (typeof stat.avgPPD === "number") return stat.avgPPD;
+    if (stat.games) return stat.totalPoints / stat.games;
+    return null;
+  };
+
+  const getCreatedTs = (player) => {
+    if (player.isYou) return -Infinity;
+    const ts = new Date(player.createdAtISO || "").getTime();
+    return Number.isFinite(ts) ? ts : 0;
+  };
+
+  const comparePlayers = (a, b) => {
+    if (a.isYou && !b.isYou) return -1;
+    if (b.isYou && !a.isYou) return 1;
+
+    const nameA = (a.isYou ? "You" : a.name || "").toLowerCase();
+    const nameB = (b.isYou ? "You" : b.name || "").toLowerCase();
+    const avgA = getAverageForPlayer(a.id);
+    const avgB = getAverageForPlayer(b.id);
+    const baselineA = Number.isFinite(a.baseline) ? a.baseline : -Infinity;
+    const baselineB = Number.isFinite(b.baseline) ? b.baseline : -Infinity;
+    const createdA = getCreatedTs(a);
+    const createdB = getCreatedTs(b);
+
+    switch (playerSortMode) {
+      case "name-desc":
+        return nameB.localeCompare(nameA);
+      case "avg-desc": {
+        const aVal = Number.isFinite(avgA) ? avgA : -Infinity;
+        const bVal = Number.isFinite(avgB) ? avgB : -Infinity;
+        if (aVal !== bVal) return bVal - aVal;
+        break;
+      }
+      case "baseline-desc": {
+        if (baselineA !== baselineB) return baselineB - baselineA;
+        break;
+      }
+      case "created-desc": {
+        if (createdA !== createdB) return createdB - createdA;
+        break;
+      }
+      case "created-asc": {
+        if (createdA !== createdB) return createdA - createdB;
+        break;
+      }
+      default:
+        // name-asc
+        break;
+    }
+
+    return nameA.localeCompare(nameB);
+  };
+
+  const sortedPlayers = players.slice().sort(comparePlayers);
+
   // 🔹 THIS is the piece you were missing before
-  players.forEach(p => {
+  sortedPlayers.forEach(p => {
     const card = document.createElement("div");
  card.dataset.playerId = p.id;
 
@@ -1375,9 +1508,7 @@ function renderPlayers() {
     card.className = "playerCard rounded-xl p-3 glass flex flex-col gap-2";
 
     // ---------- YOU CARD ----------
-if (p.isYou) {
-  const youStats = calcYouStats();
-
+    if (p.isYou) {
 
   // 🔹 EDIT MODE for YOU (photo-only)
   if (editingPlayerId === "YOU") {
@@ -1609,31 +1740,13 @@ card.innerHTML = `
     } else {
       // View mode
 
-      // --- Compute record + AVG PPD from gameHistory ---
-      const history = Array.isArray(state.gameHistory) ? state.gameHistory : [];
-      let games = 0;
-      let totalPoints = 0;
-      let wins = 0;
-      let losses = 0;
-
-      for (const g of history) {
-        if (g.playerId !== p.id) continue;
-
-        games++;
-        const score =
-          typeof g.score === "number" ? g.score : Number(g.score) || 0;
-
-        totalPoints += score;
-
-        // Simple win/loss definition:
-        // win = score >= current baseline, loss = score < baseline
-        if (typeof p.baseline === "number") {
-          if (score >= p.baseline) wins++;
-          else losses++;
-        }
-      }
-
-      const avgPpd = games ? (totalPoints / games).toFixed(1) : "—";
+      const stats = historyStats.get(p.id) || { games: 0, totalPoints: 0, scores: [] };
+      const games = stats.games || 0;
+      const avgVal = games ? (stats.totalPoints / games) : null;
+      const avgPpd = Number.isFinite(avgVal) ? avgVal.toFixed(1) : "—";
+      const baselineVal = Number.isFinite(p.baseline) ? p.baseline : 0;
+      const wins = (stats.scores || []).filter(score => score >= baselineVal).length;
+      const losses = games ? Math.max(0, games - wins) : 0;
       const recordText = games ? `${wins}-${losses}` : "0-0";
 
 card.innerHTML = `
@@ -1950,6 +2063,24 @@ $("createPlayerForm").addEventListener("submit", (e)=>{
 
 // Export / Import / Paste / Reset
 // (Handled on the main page now; Game view is read-only for backup controls.)
+
+
+// ----- Sort dropdown -----
+const playerSortSelect = document.getElementById("playerSort");
+
+function updateSortSelectUI() {
+  if (!playerSortSelect) return;
+  playerSortSelect.value = playerSortMode;
+}
+
+if (playerSortSelect) {
+  playerSortSelect.addEventListener("change", (e) => {
+    const mode = e.target.value;
+    if (!PLAYER_SORT_OPTIONS.includes(mode)) return;
+    persistSortMode(mode);
+    renderPlayers();
+  });
+}
 
 
 // Auto-sim once per day after 8am, then render
