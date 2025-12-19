@@ -54,25 +54,38 @@
 }
 
     .muted{color:var(--muted)}
-    .grid7{display:grid;grid-template-columns:repeat(7,1fr);gap:.5rem}
-    .slot{min-height:72px;border:1px dashed var(--border);border-radius:12px;padding:6px}
-    .task{border:1px solid var(--border);border-radius:10px;padding:6px 8px;margin-bottom:6px}
-
-/* Mobile: make week grid horizontal scrollable columns */
-@media (max-width: 640px){
-  .grid7{
-    display:flex;
-    flex-wrap:nowrap;
-    overflow-x:auto;
-    gap:.75rem;
-    padding-bottom:8px;
-  }
-
-  .grid7 .slot{
-    flex:0 0 260px;   /* width of each day column on mobile */
-    min-width:260px;
-  }
-}
+    .grid7{
+      display:flex;
+      flex-wrap:nowrap;
+      gap:.75rem;
+      overflow-x:auto;
+      padding-bottom:10px;
+      scroll-snap-type:x proximity;
+      scrollbar-gutter:stable;
+    }
+    .grid7 .slot{
+      flex:0 0 clamp(280px, 32vw, 360px);
+      min-height:72px;
+      border:1px dashed var(--border);
+      border-radius:12px;
+      padding:10px;
+      scroll-snap-align:start;
+      background:rgba(255,255,255,.02);
+    }
+    .task{
+      border:1px solid var(--border);
+      border-radius:10px;
+      padding:10px;
+      margin-bottom:8px;
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+    }
+    @media (max-width: 640px){
+      .grid7 .slot{
+        flex-basis: clamp(260px, 82vw, 320px);
+      }
+    }
 
 
     .habitRow{display:grid;grid-template-columns:1fr repeat(7,40px);gap:.65rem;align-items:center}
@@ -298,6 +311,26 @@ function weekDays(baseDate){
   return days;
 }
 function dateKey(d){ const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),dd=String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${dd}`; }
+function dayDiff(fromKey,toKey){
+  if(!fromKey || !toKey) return 0;
+  const from = new Date(fromKey + 'T00:00:00');
+  const to = new Date(toKey + 'T00:00:00');
+  const ms = to - from;
+  if (!Number.isFinite(ms) || ms <= 0) return 0;
+  return Math.round(ms / 86400000);
+}
+function trackDueDatePush(task, oldDueISO, newDueISO){
+  if(!task) return;
+  if (!task.originalDueDateISO && (newDueISO || oldDueISO)) {
+    task.originalDueDateISO = newDueISO || oldDueISO || null;
+  }
+  if(!oldDueISO || !newDueISO) return;
+  const delta = dayDiff(oldDueISO, newDueISO);
+  if(delta>0){
+    const current = Number(task.postponedDays) || 0;
+    task.postponedDays = current + delta;
+  }
+}
 function fromKey(k){
   if(!k) return null;
   const parts = String(k).slice(0,10).split("-");
@@ -574,22 +607,50 @@ function renderWeekTasks(baseDate){
   state=load();
   const days=weekDays(baseDate);
   const grid=$('weekGrid'); grid.innerHTML='';
+  const todayK = todayKey();
   days.forEach(d=>{
     const col=document.createElement('div'); col.className='slot';
-    col.innerHTML=`<div class="text-xs text-zinc-400 mb-1">${d.label}</div>`;
+    col.innerHTML=`<div class="text-xs text-zinc-400 mb-2 font-semibold">${d.label}</div>`;
     const list = state.tasks.filter(t=>!t.completedAtISO && t.dueDateISO===d.key);
     list.forEach(t=>{
-      const overdue = t.dueDateISO && t.dueDateISO < todayKey();
-      const div=document.createElement('div');
-      div.className='task';
-      div.innerHTML=`
-        <div class="flex flex-col gap-1">
-          <div class="text-xs leading-snug break-words">${escapeHtml(t.title)}</div>
-          <div class="flex gap-1 flex-wrap mt-1">
-      ${overdue?`<button class="btn btn-warn" onclick="postponeTask('${t.id}')">Postpone</button>`:''}
-      <button class="btn btn-ghost" onclick="addOneDay('${t.id}')">+1 day</button>
-      <button class="btn btn-teal" onclick="completeTask('${t.id}')" title="Done">✓</button>
+      const overdue = t.dueDateISO && t.dueDateISO < todayK;
+      const postponeDays = Number(t.postponedDays) || 0;
+      const showPostponePill = postponeDays > 0 && !!t.dueDateISO;
+      const importance = t.importance || 'Medium';
+      const taskClasses = ['task'];
+      if (importance === 'Critical') taskClasses.push('critical-card');
+      else if (importance === 'High') taskClasses.push('high-card');
 
+      const importanceClass = ({
+        Low:      'tag bg-transparent text-zinc-500 border border-zinc-700',
+        Medium:   'tag bg-teal-400/40 text-teal-950',
+        High:     'tag tag-high',
+        Critical: 'tag tag-critical'
+      }[importance]) || 'tag bg-teal-400/40 text-teal-950';
+      const importanceBadge = `<span class="${importanceClass}">${importance}</span>`;
+
+      const tags = Array.isArray(t.tags) ? t.tags : [];
+      const tagsHtml = tags.length ? tags.map(tag => `<span class="tag bg-zinc-700/40">${escapeHtml(tag)}</span>`).join('') : '';
+      const pointsLabel = Number.isFinite(Number(t.points)) ? `<span class="tag bg-teal-500/20 text-teal-100 border border-teal-500/40">${Number(t.points)} pts</span>` : '';
+
+      const div=document.createElement('div');
+      div.className=taskClasses.join(' ');
+      div.innerHTML=`
+        <div class="flex flex-col gap-2">
+          <div class="flex items-start justify-between gap-3">
+            <div class="text-sm leading-snug break-words font-semibold">${escapeHtml(t.title)}</div>
+            <div class="flex items-center gap-2 flex-shrink-0">${importanceBadge}</div>
+          </div>
+          <div class="flex items-center gap-2 flex-wrap text-[11px] text-zinc-200">
+            ${showPostponePill ? `<span class="tag postpone-pill">+${postponeDays}d</span>` : ''}
+            ${overdue ? `<span class="tag bg-amber-500/20 text-amber-100 border border-amber-500/40">Overdue</span>` : ''}
+            ${pointsLabel}
+            ${tagsHtml}
+          </div>
+          <div class="flex gap-1 flex-wrap mt-1">
+            ${overdue?`<button class="btn btn-warn" onclick="postponeTask('${t.id}')">Postpone</button>`:''}
+            <button class="btn btn-ghost" onclick="addOneDay('${t.id}')">+1 day</button>
+            <button class="btn btn-teal" onclick="completeTask('${t.id}')" title="Done">✓</button>
           </div>
         </div>`;
       col.appendChild(div);
@@ -598,14 +659,16 @@ function renderWeekTasks(baseDate){
   });
 }
 function postponeTask(id){
-  const st=load(); const t=st.tasks.find(x=>x.id===id); if(!t) return;
+  let st=load(); const t=st.tasks.find(x=>x.id===id); if(!t || !t.dueDateISO) return;
+  const oldDue = t.dueDateISO;
   t.dueDateISO = todayKey();
-st = saveMerged(st);
+  trackDueDatePush(t, oldDue, t.dueDateISO);
+  st = saveMerged(st);
 
-  state=st; renderWeekTasks(currentBaseDate);
+  state=st; renderAll(currentBaseDate);
 }
 function wontDo(id, dayKey){
-  const st=load(); const t=st.tasks.find(x=>x.id===id); if(!t) return;
+  let st=load(); const t=st.tasks.find(x=>x.id===id); if(!t) return;
   const mode=(t.recurrence && t.recurrence.mode)||'none';
   if(mode==='none'){
     if(!confirm('Won’t do this task? It will be removed.')) return;
@@ -617,7 +680,7 @@ function wontDo(id, dayKey){
   }
   st = saveMerged(st);
 state = st;
-renderWeekTasks(currentBaseDate);
+renderAll(currentBaseDate);
 
 }
 
@@ -626,10 +689,12 @@ function addOneDay(id){
   const t = st.tasks.find(x => x.id === id);
   if(!t) return;
 
-  const oldDate = fromKey(t.dueDateISO) || fromKey(todayKey()) || new Date();
+  const oldDue = t.dueDateISO || todayKey();
+  const oldDate = fromKey(oldDue) || fromKey(todayKey()) || new Date();
   const newDate = addDays(oldDate, 1);
 
   t.dueDateISO = dateKey(newDate);
+  trackDueDatePush(t, oldDue, t.dueDateISO);
 
   st = saveMerged(st);
   state = st;
