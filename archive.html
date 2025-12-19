@@ -162,7 +162,10 @@ function renderArchive(){
       : '';
 
     const div = document.createElement('div');
-    div.className = 'glass' + (t.importance === 'Critical' ? ' critical-card' : '');
+    const cardClasses = ['glass'];
+    if (t.importance === 'Critical') cardClasses.push('critical-card');
+    else if (t.importance === 'High') cardClasses.push('high-card');
+    div.className = cardClasses.join(' ');
 
     div.innerHTML = `
       <div class="flex flex-wrap sm:flex-nowrap items-center gap-3">
