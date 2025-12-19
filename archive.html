@@ -150,8 +150,8 @@ function renderArchive(){
     const badge = {
       Low:      'bg-transparent text-zinc-500 border border-zinc-700',
       Medium:   'bg-teal-400/40 text-teal-950',
-      High:     'bg-[rgba(180,83,9,.18)] text-orange-400 border border-orange-500',
-      Critical: 'bg-rose-600/70 text-rose-50'
+      High:     'tag-high',
+      Critical: 'tag-critical'
     }[t.importance] || 'bg-zinc-300/60 text-zinc-950';
 
     const isOverdue = t.dueDateISO && t.dueDateISO < dateKey(today);
@@ -253,4 +253,3 @@ window.addEventListener('load', renderArchive);
 </script>
 </body>
 </html>
-
