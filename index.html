@@ -3398,35 +3398,7 @@ function editTodayWork() {
   const entry = getTodayWorkEntry();
   if (!entry) return alert("You haven't entered today's work score yet.");
 
-  const { score, hours } = getWorkInfo(entry);
-  const scoreStr = Number.isFinite(score) ? String(score) : "";
-  const hoursStr = Number.isFinite(hours) ? String(hours) : "";
-
-  const newScoreInput = prompt("Edit today's work score:", scoreStr);
-  if (newScoreInput === null) return;
-
-  const newHoursInput = prompt("Edit today's work hours (/100, negatives become 0):", hoursStr);
-  if (newHoursInput === null) return;
-
-  const num = Number(String(newScoreInput).trim());
-  if (Number.isNaN(num)) return alert("Invalid work score.");
-
-  const hoursVal = newHoursInput.trim() === "" ? 0 : Number(newHoursInput);
-  if (!Number.isFinite(hoursVal)) return alert("Invalid hours value.");
-  const safeHours = Math.max(0, hoursVal);
-
-  // keep it pinned to today
-  const d = new Date();
-  d.setHours(12, 0, 0, 0);
-
-  entry.title = `Work Score (${num}) — Hours ${safeHours}`;
-  entry.points = workPoints(num, safeHours);
-  entry.workHours = safeHours;
-  entry.source = 'work';
-  entry.completedAtISO = d.toISOString();
-
-  save();
-  renderAll();
+  promptEditWorkEntry(entry, { pinToToday: true });
 }
 
   
@@ -3587,6 +3559,10 @@ if (todayValueEl && todayImpactEl) {
     const val = Number.isFinite(score) ? score : '?';
     const safeHours = Number.isFinite(hours) ? hours : 0;
     const pts = workPoints(val, safeHours).toFixed(1);
+    const hoursBonus = workHoursBonus(safeHours);
+    const hoursDisplay = Number.isFinite(hoursBonus)
+      ? `${hoursBonus >= 0 ? '+' : ''}${hoursBonus.toFixed(1)}`
+      : '';
 
     const block = document.createElement('div');
     block.className = 'work-chip cursor-pointer';
@@ -3594,30 +3570,12 @@ if (todayValueEl && todayImpactEl) {
     block.innerHTML = `
       <div class="work-chip-date">${prettyDate}</div>
       <div class="work-chip-value">${val}</div>
-      <div class="work-chip-pts">${pts} pts${safeHours ? ` (${safeHours > 0 ? '+' : ''}${safeHours}h bonus)` : ''}</div>
+      <div class="work-chip-pts">${pts} pts</div>
+      <div class="work-chip-bonus">${hoursDisplay}</div>
     `;
 
     block.onclick = () => {
-      const newVal = prompt("Edit work score:", val);
-      if (!newVal && newVal !== "0") return;
-
-      const hoursEdit = prompt("Edit hours (/100, negatives become 0):", `${safeHours}`);
-      if (hoursEdit === null) return;
-
-      const num = Number(newVal);
-      if (isNaN(num)) return alert("Invalid number.");
-
-      const hrs = hoursEdit.trim() === '' ? 0 : Number(hoursEdit);
-      if (!Number.isFinite(hrs)) return alert("Invalid hours.");
-      const safe = Math.max(0, hrs);
-
-      entry.title = `Work Score (${num}) — Hours ${safe}`;
-      entry.points = workPoints(num, safe);
-      entry.workHours = safe;
-      entry.source = 'work';
-
-      save();
-      renderAll();
+      promptEditWorkEntry(entry);
     };
 
     container.appendChild(block);
