@@ -63,7 +63,7 @@
 
   <!-- TOP ROW -->
   <div class="space-y-3 mb-6">
-    <div class="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1.3fr_0.8fr_1fr]">
+    <div class="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1.1fr_1.05fr_0.9fr]">
       <!-- Today's Points + Daily Avg card (left) -->
       <div class="glass text-center sm:col-span-2 lg:col-span-1">
         <div class="font-semibold text-sm muted">Today&#8217;s Points</div>
@@ -78,11 +78,28 @@
         </div>
       </div>
 
-      <!-- Diff card (center) -->
-      <div class="glass text-center sm:col-span-2 lg:col-span-1">
-        <div class="font-semibold text-sm muted">The Diff</div>
-        <div id="matchupDiffValue" class="text-4xl sm:text-5xl font-extrabold mt-1">—</div>
-        <div id="matchupDiff" class="muted text-xs mt-1">—</div>
+      <!-- Scoreboard card (center) -->
+      <div class="glass sm:col-span-2 lg:col-span-1">
+        <div class="font-semibold text-sm muted text-center">Matchup Scoreboard</div>
+        <div class="matchup-scoreboard mt-3">
+          <div class="scoreboard-side">
+            <div class="muted text-[11px] uppercase tracking-wide">You</div>
+            <div id="matchupYourScore" class="scoreboard-score">—</div>
+            <div id="matchupYourRecord" class="scoreboard-record">Record: 0-0</div>
+          </div>
+
+          <div class="scoreboard-diff text-center">
+            <div class="muted text-[11px] uppercase tracking-wide">The Diff</div>
+            <div id="matchupDiffValue" class="scoreboard-diff-value">—</div>
+            <div id="matchupDiff" class="muted text-xs mt-1">—</div>
+          </div>
+
+          <div class="scoreboard-side text-right">
+            <div class="muted text-[11px] uppercase tracking-wide">Opponent</div>
+            <div id="matchupOpponentScore" class="scoreboard-score">—</div>
+            <div id="matchupOpponentRecord" class="scoreboard-record">Record: 0-0</div>
+          </div>
+        </div>
       </div>
 
       <!-- Today's Matchup card (right) -->
@@ -95,22 +112,13 @@
               No matchup for today yet. Simulate games in the Game tab.
             </div>
 
-            <div id="matchupDetails" class="hidden flex flex-col gap-0.5">
+            <div id="matchupDetails" class="hidden flex flex-col gap-1.5">
               <div class="flex items-start gap-3">
                 <div class="flex-1 space-y-1">
                   <div class="text-lg font-semibold" id="matchupOpponent">—</div>
-                  <div id="matchupOpponentRecord" class="text-[11px] text-slate-400 leading-tight">Record: —</div>
 
-                  <div>
-                    <div class="text-[11px] muted">Opponent Score</div>
-                    <div class="text-3xl font-extrabold leading-tight" id="matchupOpponentScore">—</div>
-                  </div>
+                  <div class="text-[11px] muted">Opponent Score updates live as tasks drip in.</div>
                 </div>
-              </div>
-
-              <div class="flex items-center gap-1.5 text-xs text-slate-400 -mt-2">
-                <span>Your score</span>
-                <span class="text-lg font-semibold text-slate-100" id="matchupYourScore">—</span>
               </div>
             </div>
           </div>
@@ -136,10 +144,10 @@
       </div>
     </div>
 
-    <div class="grid gap-3 grid-cols-1 lg:grid-cols-[0.85fr_1.15fr]">
-      <div class="glass">
+    <div class="grid gap-3 grid-cols-1 lg:grid-cols-[0.7fr_1.3fr]">
+      <div class="glass flex flex-col items-center justify-center text-center gap-1.5">
         <div class="muted font-semibold uppercase tracking-wide text-[10px]">Inertia Score</div>
-        <div class="text-3xl font-extrabold" id="inertiaValue">0.0</div>
+        <div class="text-4xl font-extrabold" id="inertiaValue">0.0</div>
         <div class="muted text-[11px] leading-tight" id="inertiaAverage">7-day avg: 0.0</div>
       </div>
 
@@ -1003,6 +1011,34 @@ function getPlayerRecordText(playerId) {
   return games ? `${wins}-${losses}` : '0-0';
 }
 
+function getYourRecordText() {
+  const comps = Array.isArray(state.completions) ? state.completions : [];
+  if (!comps.length) return '0-0';
+
+  const dayTotals = {};
+
+  comps.forEach(c => {
+    if (!c || !c.completedAtISO) return;
+    const k = dateKey(c.completedAtISO);
+    const pts = Number(c.points || 0);
+    dayTotals[k] = (dayTotals[k] || 0) + pts;
+  });
+
+  const totals = Object.values(dayTotals);
+  if (!totals.length) return '0-0';
+
+  const avg = totals.reduce((a, b) => a + b, 0) / totals.length || 0;
+  let wins = 0;
+  let losses = 0;
+
+  totals.forEach(total => {
+    if (total > avg) wins++;
+    else losses++;
+  });
+
+  return `${wins}-${losses}`;
+}
+
 
 /* ---------- OPPONENT DRIP SCHEDULE ---------- */
 function getOpponentDripSchedules(){
@@ -1781,8 +1817,9 @@ function renderTodaysMatchup(todayKeyStr, yourScore){
   const diffEl    = $('matchupDiff');
   const diffValueEl = $('matchupDiffValue');
   const oppRecordEl = $('matchupOpponentRecord');
+  const yourRecordEl = $('matchupYourRecord');
 
-  if (!detailsEl || !emptyEl || !oppNameEl || !oppScoreEl || !yourScoreEl || !diffEl || !diffValueEl || !oppRecordEl) return;
+  if (!detailsEl || !emptyEl || !oppNameEl || !oppScoreEl || !yourScoreEl || !diffEl || !diffValueEl || !oppRecordEl || !yourRecordEl) return;
 
   const matchups = Array.isArray(state.matchups) ? state.matchups : [];
   const matchup = matchups.find(m => m && m.date === todayKeyStr && (m.playerAId === 'YOU' || m.playerBId === 'YOU'));
@@ -1793,6 +1830,10 @@ function renderTodaysMatchup(todayKeyStr, yourScore){
     emptyEl.textContent = 'No matchup for today yet. Simulate games in the Game tab.';
     diffEl.textContent = 'No matchup today';
     diffValueEl.textContent = '—';
+    oppScoreEl.textContent = '—';
+    yourScoreEl.textContent = '—';
+    oppRecordEl.textContent = 'Record: —';
+    yourRecordEl.textContent = `Record: ${getYourRecordText()}`;
     return;
   }
 
@@ -1816,22 +1857,24 @@ function renderTodaysMatchup(todayKeyStr, yourScore){
   oppScoreEl.textContent = visibleOppScore.toFixed(1);
   yourScoreEl.textContent = safeYourScore.toFixed(1);
   oppRecordEl.textContent = `Record: ${getPlayerRecordText(oppId)}`;
+  yourRecordEl.textContent = `Record: ${getYourRecordText()}`;
 
   diffEl.className = 'muted text-xs mt-1';
   const diff = Number((safeYourScore - visibleOppScore).toFixed(1));
 
   diffValueEl.textContent = `${diff > 0 ? '+' : ''}${diff.toFixed(1)}`;
-  diffValueEl.className = 'text-4xl sm:text-5xl font-extrabold mt-1 text-center';
+  diffValueEl.className = 'scoreboard-diff-value';
+  diffValueEl.classList.remove('diff-positive', 'diff-negative', 'diff-neutral');
 
   if (diff > 0) {
     diffEl.textContent = `Winning by ${diff.toFixed(1)} pts`;
-    diffValueEl.classList.add('text-teal-200');
+    diffValueEl.classList.add('diff-positive');
   } else if (diff < 0) {
     diffEl.textContent = `Losing by ${Math.abs(diff).toFixed(1)} pts`;
-    diffValueEl.classList.add('text-orange-300');
+    diffValueEl.classList.add('diff-negative');
   } else {
     diffEl.textContent = 'Tied right now';
-    diffValueEl.classList.add('text-amber-200');
+    diffValueEl.classList.add('diff-neutral');
   }
 
   emptyEl.classList.add('hidden');
