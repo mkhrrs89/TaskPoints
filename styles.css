@@ -783,31 +783,41 @@
 .work-chip {
   background: linear-gradient(180deg, rgba(147, 197, 253, 0.5), rgba(59, 130, 246, 0.35));
   border: 1px solid rgba(147, 197, 253, 0.5);
-  border-radius: 0.6rem;
+  border-radius: 12px;
   padding: 0.4rem 0.55rem;
+  width: 82px;
+  height: 88px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   text-align: center;
-  min-width: 64px;
+  gap: 1px;
 }
 
 .work-chip-date {
   font-size: 11px;
   color: #e3f2ff;
+  line-height: 1.1;
 }
 
 .work-chip-value {
   font-size: 18px;
   font-weight: 700;
   color: #f8fbff;
+  line-height: 1.1;
 }
 
 .work-chip-pts {
   font-size: 11px;
   color: #e3f2ff;
+  line-height: 1.2;
 }
 
 .work-chip-bonus {
   font-size: 11px;
   color: #cfe8ff;
+  line-height: 1.2;
 }
 
 
