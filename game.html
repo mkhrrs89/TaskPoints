@@ -1751,20 +1751,19 @@ card.innerHTML = `
             </button>
           </div>
 
-<!-- Desktop-only Remove Photo + Delete inside Edit panel -->
-<div class="hidden md:flex gap-2 mt-3">
-  <button class="rounded-xl border px-3 py-1.5 text-sm"
-          data-act="clear-photo"
-          data-id="${p.id}">
-    Remove photo
-  </button>
+          <div class="flex flex-wrap gap-2 mt-3">
+            <button class="rounded-xl border px-3 py-1.5 text-sm"
+                    data-act="clear-photo"
+                    data-id="${p.id}">
+              Remove photo
+            </button>
 
-  <button class="rounded-xl border px-3 py-1.5 text-sm bg-red-600 text-white"
-          data-act="delete"
-          data-id="${p.id}">
-    Delete
-  </button>
-</div>
+            <button class="rounded-xl border px-3 py-1.5 text-sm bg-red-600 text-white"
+                    data-act="delete"
+                    data-id="${p.id}">
+              Delete
+            </button>
+          </div>
 
 
 
@@ -1873,7 +1872,9 @@ card.innerHTML = `
       }
 
       if (act === "delete"){
-        if (!confirm("Delete this player?")) return;
+        const player = state.players.find(p => p.id === id);
+        const name = player && player.name ? `"${player.name}"` : "this player";
+        if (!confirm(`Delete ${name}? This cannot be undone.`)) return;
         const idx = state.players.findIndex(p => p.id === id);
         if (idx !== -1){
           state.players.splice(idx,1);
