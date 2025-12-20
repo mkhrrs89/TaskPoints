@@ -162,16 +162,16 @@
 <div class="grid sm:grid-cols-2 gap-3 mb-6">
   <!-- LEFT: Sleep Score (existing content) -->
   <div class="glass">
-    <div class="flex items-stretch justify-between gap-6 flex-wrap">
+    <div class="flex items-stretch justify-between gap-6 flex-wrap stat-card-row">
       <!-- LEFT: Big stat + input -->
-      <div class="flex-1 min-w-[220px]">
+      <div class="flex-1 min-w-[220px] stat-col stat-col-primary">
         <div class="sleep-today-card">
-          <h2 id="sleepAnchor" class="font-bold text-lg mb-2">Sleep Score</h2>
+          <h2 id="sleepAnchor" class="font-bold text-lg mb-2 stat-title">Sleep Score</h2>
           <div class="mb-2">
             <div class="muted text-xs">Today’s Sleep</div>
             <div class="flex items-center gap-2 flex-wrap">
               <div class="flex items-baseline gap-2">
-                <div id="sleepTodayValue" class="text-4xl font-extrabold leading-tight">—</div>
+                <div id="sleepTodayValue" class="text-4xl font-extrabold leading-tight stat-value">—</div>
                 <div id="sleepTodayRest" class="sleep-rest-chip hidden"><span id="sleepTodayRestValue"></span></div>
               </div>
             </div>
@@ -189,7 +189,7 @@
       </div>
 
       <!-- RIGHT: History chips -->
-      <div class="flex-1 min-w-[220px]">
+      <div class="flex-1 min-w-[220px] stat-col stat-col-secondary">
         <div class="flex items-center justify-between mb-2">
           <h3 class="font-semibold text-sm">Recent nights</h3>
         </div>
@@ -203,14 +203,14 @@
 
   <!-- RIGHT: Calories card -->
   <div class="glass">
-    <div class="flex items-stretch justify-between gap-6 flex-wrap">
+    <div class="flex items-stretch justify-between gap-6 flex-wrap stat-card-row">
       <!-- LEFT: Big stat + input -->
-      <div class="flex-1 min-w-[220px]">
+      <div class="flex-1 min-w-[220px] stat-col stat-col-primary">
         <div class="calories-today-card">
-          <h2 class="font-bold text-lg mb-2">Calories</h2>
+          <h2 class="font-bold text-lg mb-2 stat-title">Calories</h2>
           <div class="mb-2">
             <div class="muted text-xs">Today’s Calories</div>
-            <div id="caloriesTodayValue" class="text-4xl font-extrabold leading-tight">—</div>
+            <div id="caloriesTodayValue" class="text-4xl font-extrabold leading-tight stat-value">—</div>
             <div id="caloriesTodayImpact" class="muted text-xs mt-1">Adds 0 pts to today</div>
           </div>
 <div id="caloriesInputRow" class="caloriesEntryRow flex items-center gap-3 mt-3 flex-wrap sm:flex-nowrap">
@@ -238,7 +238,7 @@
       </div>
 
       <!-- RIGHT: History chips -->
-      <div class="flex-1 min-w-[220px]">
+      <div class="flex-1 min-w-[220px] stat-col stat-col-secondary">
         <div class="flex items-center justify-between mb-2">
           <h3 class="font-semibold text-sm">Recent days</h3>
         </div>
@@ -256,18 +256,18 @@
 
   <!-- LEFT: Work Score -->
   <div class="glass">
-    <div class="flex items-stretch justify-between gap-6 flex-wrap">
+    <div class="flex items-stretch justify-between gap-6 flex-wrap stat-card-row">
 
       <!-- LEFT SIDE: big stat + input -->
-      <div class="flex-1 min-w-[220px]">
+      <div class="flex-1 min-w-[220px] stat-col stat-col-primary">
         <div class="work-today-card">
-          <h2 id="workAnchor" class="font-bold text-lg mb-2">Work Score</h2>
+          <h2 id="workAnchor" class="font-bold text-lg mb-2 stat-title">Work Score</h2>
 
           <div class="mb-2">
             <div class="muted text-xs">Today’s Work</div>
             <div class="flex items-center gap-2 flex-wrap">
               <div class="flex items-baseline gap-2">
-                <div id="workTodayValue" class="text-4xl font-extrabold leading-tight">—</div>
+                <div id="workTodayValue" class="text-4xl font-extrabold leading-tight stat-value">—</div>
                 <div id="workTodayHours" class="work-hours-chip hidden"><span id="workTodayHoursValue"></span></div>
               </div>
             </div>
@@ -286,7 +286,7 @@
       </div>
 
       <!-- RIGHT SIDE: history chips -->
-      <div class="flex-1 min-w-[220px]">
+      <div class="flex-1 min-w-[220px] stat-col stat-col-secondary">
         <div class="flex items-center justify-between mb-2">
           <h3 class="font-semibold text-sm">Recent days</h3>
         </div>
@@ -301,16 +301,16 @@
 
 <!-- RIGHT: Mood Score -->
 <div class="glass">
-    <div class="flex items-stretch justify-between gap-6 flex-wrap">
+    <div class="flex items-stretch justify-between gap-6 flex-wrap stat-card-row">
 
     <!-- LEFT SIDE: big stat + input -->
-    <div class="flex-1 min-w-[220px]">
+    <div class="flex-1 min-w-[220px] stat-col stat-col-primary">
       <div class="mood-today-card">
-        <h2 id="moodAnchor" class="font-bold text-lg mb-2">Mood Score</h2>
+        <h2 id="moodAnchor" class="font-bold text-lg mb-2 stat-title">Mood Score</h2>
 
         <div class="mb-2">
           <div class="muted text-xs">Today’s Mood</div>
-          <div id="moodTodayValue" class="text-4xl font-extrabold leading-tight">—</div>
+          <div id="moodTodayValue" class="text-4xl font-extrabold leading-tight stat-value">—</div>
           <div id="moodTodayImpact" class="muted text-xs mt-1">Adds 0 pts to today</div>
         </div>
 
@@ -324,7 +324,7 @@
     </div>
 
     <!-- RIGHT SIDE: history chips -->
-    <div class="flex-1 min-w-[220px]">
+    <div class="flex-1 min-w-[220px] stat-col stat-col-secondary">
       <div class="flex items-center justify-between mb-2">
         <h3 class="font-semibold text-sm">Recent days</h3>
       </div>
