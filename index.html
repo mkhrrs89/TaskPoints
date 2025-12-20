@@ -424,6 +424,7 @@
 <script>
 const STORAGE_KEY="taskpoints_v1";
 const OLD_PLAYERS_KEY="taskpoints_players";
+const PROJECTS_STORAGE_KEY="tp_projects_v1";
 const $=id=>document.getElementById(id);
 let state=normalizeState(load());
   const HABITS_SORT_KEY = "taskpoints_habits_sort";
@@ -904,6 +905,28 @@ function addCompletion(entry){
   showPointsToast(pts);
 }
 
+function loadProjectsFromStorage(){
+  try{
+    const raw = localStorage.getItem(PROJECTS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  }catch(e){
+    console.error("Failed to load projects from storage", e);
+    return [];
+  }
+}
+
+function saveProjectsToStorage(list){
+  try{
+    if (Array.isArray(list)){
+      localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(list));
+    }
+  }catch(e){
+    console.error("Failed to save projects to storage", e);
+  }
+}
+
 
 function load() {
   try {
@@ -919,11 +942,13 @@ function load() {
         gameHistory:  [],
         matchups:     [],
         schedule:     [],
-        opponentDripSchedules: []
+        opponentDripSchedules: [],
+        projects:     loadProjectsFromStorage()
       };
     }
 
     const p = JSON.parse(raw);
+    const storedProjects = loadProjectsFromStorage();
 
     return {
       tasks:        Array.isArray(p.tasks)        ? p.tasks        : [],
@@ -934,7 +959,8 @@ function load() {
       gameHistory:  Array.isArray(p.gameHistory)  ? p.gameHistory  : [],
       matchups:     Array.isArray(p.matchups)     ? p.matchups     : [],
       schedule:     Array.isArray(p.schedule)     ? p.schedule     : [],
-      opponentDripSchedules: Array.isArray(p.opponentDripSchedules) ? p.opponentDripSchedules : []
+      opponentDripSchedules: Array.isArray(p.opponentDripSchedules) ? p.opponentDripSchedules : [],
+      projects:     Array.isArray(p.projects)     ? p.projects     : storedProjects
     };
   } catch (e) {
     console.error('Failed to load TaskPoints state on main page', e);
@@ -947,7 +973,8 @@ function load() {
       gameHistory:  [],
       matchups:     [],
       schedule:     [],
-      opponentDripSchedules: []
+      opponentDripSchedules: [],
+      projects:     loadProjectsFromStorage()
     };
   }
 }
@@ -1233,7 +1260,8 @@ function normalizeState(s) {
     matchups:    Array.isArray(s.matchups)    ? s.matchups    : [],
     schedule:    Array.isArray(s.schedule)    ? s.schedule    : [],
     opponentDripSchedules: Array.isArray(s.opponentDripSchedules) ? s.opponentDripSchedules : [],
-    youImage:    typeof s.youImage === "string" ? s.youImage : ""
+    youImage:    typeof s.youImage === "string" ? s.youImage : "",
+    projects:    Array.isArray(s.projects)    ? s.projects    : loadProjectsFromStorage()
   };
 }
 
@@ -1276,6 +1304,7 @@ function resetAll(){
   try{
     // Clear local storage for TaskPoints
     localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(PROJECTS_STORAGE_KEY);
   }catch(e){
     console.error('Failed to clear TaskPoints storage', e);
   }
@@ -1289,7 +1318,8 @@ function resetAll(){
     flexActions:  [],
     gameHistory:  [],
     matchups:     [],
-    schedule:     []
+    schedule:     [],
+    projects:     []
   };
 
   // Re-render everything so the page doesn't look broken
@@ -4039,7 +4069,8 @@ function deleteTask(id){
 
 /* ---------- IMPORT/EXPORT/RESET ---------- */
 function exportData(){
-  const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});
+  const snapshot = { ...state, projects: loadProjectsFromStorage() };
+  const blob=new Blob([JSON.stringify(snapshot,null,2)],{type:'application/json'});
   const now = new Date();
 
   const y  = now.getFullYear();
@@ -4060,6 +4091,40 @@ function exportData(){
   a.remove();
   URL.revokeObjectURL(url);
 }
+
+function applyImportedState(root){
+  const normalized = normalizeState({
+    tasks:       Array.isArray(root.tasks)       ? root.tasks       : [],
+    completions: Array.isArray(root.completions) ? root.completions : [],
+    players:     Array.isArray(root.players)     ? root.players     : [],
+    habits:      Array.isArray(root.habits)      ? root.habits      : [],
+    flexActions: Array.isArray(root.flexActions) ? root.flexActions : [],
+    gameHistory: Array.isArray(root.gameHistory) ? root.gameHistory : [],
+    matchups:    Array.isArray(root.matchups)    ? root.matchups    : [],
+    schedule:    Array.isArray(root.schedule)    ? root.schedule    : [],
+    opponentDripSchedules: Array.isArray(root.opponentDripSchedules) ? root.opponentDripSchedules : [],
+    youImage:    typeof root.youImage === "string" ? root.youImage : ""
+  });
+
+  normalized.projects = Array.isArray(root.projects) ? root.projects : loadProjectsFromStorage();
+  state = normalized;
+
+  editingTaskId = null;
+  editingHabitId = null;
+  editingFlexId = null;
+
+  saveProjectsToStorage(state.projects);
+
+  save();
+  renderAll();
+  renderHabits();
+  renderHabitWeekLabels();
+  renderVices();
+  renderViceWeekLabels();
+
+  console.log("Import applied successfully, including projects.");
+}
+
 function importFile(ev){
   const f = ev.target.files?.[0];
   if (!f) return;
@@ -4089,28 +4154,7 @@ function importFile(ev){
         throw new Error("Root object missing tasks/completions arrays");
       }
 
-      state = {
-        tasks:       Array.isArray(root.tasks)       ? root.tasks       : [],
-        completions: Array.isArray(root.completions) ? root.completions : [],
-        players:     Array.isArray(root.players)     ? root.players     : [],
-        habits:      Array.isArray(root.habits)      ? root.habits      : [],
-        flexActions: Array.isArray(root.flexActions) ? root.flexActions : [],
-        gameHistory: Array.isArray(root.gameHistory) ? root.gameHistory : [],
-        matchups:    Array.isArray(root.matchups)    ? root.matchups    : [],
-        opponentDripSchedules: Array.isArray(root.opponentDripSchedules) ? root.opponentDripSchedules : []
-      };
-
-      editingTaskId = null;
-      editingHabitId = null;
-
-      save();
-      renderAll();
-      renderHabits();
-      renderHabitWeekLabels();
-      renderVices();
-      renderViceWeekLabels();
-
-      console.log("Import (file) applied successfully.");
+      applyImportedState(root);
     } catch (logicErr) {
       console.error("LOGIC ERROR during import (file):", logicErr);
       alert("JSON was valid, but the app crashed trying to load it. Check console.");
@@ -4147,28 +4191,7 @@ function importPaste(){
       throw new Error("Root object missing tasks/completions arrays");
     }
 
-    state = {
-      tasks:       Array.isArray(root.tasks)       ? root.tasks       : [],
-      completions: Array.isArray(root.completions) ? root.completions : [],
-      players:     Array.isArray(root.players)     ? root.players     : [],
-      habits:      Array.isArray(root.habits)      ? root.habits      : [],
-      flexActions: Array.isArray(root.flexActions) ? root.flexActions : [],
-      gameHistory: Array.isArray(root.gameHistory) ? root.gameHistory : [],
-      matchups:    Array.isArray(root.matchups)    ? root.matchups    : [],
-      opponentDripSchedules: Array.isArray(root.opponentDripSchedules) ? root.opponentDripSchedules : []
-    };
-
-    editingTaskId = null;
-    editingHabitId = null;
-
-    save();
-    renderAll();
-    renderHabits();
-    renderHabitWeekLabels();
-    renderVices();
-    renderViceWeekLabels();
-
-    console.log("Import (paste) applied successfully.");
+    applyImportedState(root);
   } catch (logicErr) {
     console.error("LOGIC ERROR during import (paste):", logicErr);
     alert("JSON was valid, but the app crashed trying to load it. Check console.");
