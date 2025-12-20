@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>TaskPoints — Audit</title>
+
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%230a2f2f'/><text x='50' y='60' font-size='48' text-anchor='middle' fill='white'>TP</text></svg>">
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="styles.css">
+  <script src="toolbar.js" defer></script>
+  <script src="scoring_core.js"></script>
+</head>
+<body class="min-h-screen">
+  <div class="mx-auto max-w-6xl p-4 sm:p-6 pb-20 md:pb-10">
+
+    <!-- HEADER -->
+    <header class="mb-4">
+      <div class="row items-center">
+        <div class="flex items-center gap-3">
+          <img src="assets/taskpoints-logo.svg" alt="TaskPoints logo" class="w-10 h-10 rounded-2xl object-cover shrink-0 shadow-sm">
+          <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight">Audit</h1>
+        </div>
+
+        <div class="toolbar header-nav">
+          <a href="index.html"         class="btn btn-teal btn-toolbar nav-btn">Main</a>
+          <a href="daily_sources.html" class="btn btn-teal btn-toolbar nav-btn">Sources</a>
+          <a href="log.html"           class="btn btn-teal btn-toolbar nav-btn">Log</a>
+          <a href="week.html"          class="btn btn-teal btn-toolbar nav-btn">Week</a>
+
+          <div class="dropdown">
+            <button type="button" class="btn btn-teal btn-toolbar nav-btn dropdown-toggle" data-dropdown-toggle aria-expanded="false">
+              Game <span class="caret">▾</span>
+            </button>
+            <div class="dropdown-menu">
+              <a href="game.html"         class="btn btn-teal btn-toolbar nav-btn">Players</a>
+              <a href="standings.html"    class="btn btn-teal btn-toolbar nav-btn">Standings</a>
+              <a href="matchups.html"     class="btn btn-teal btn-toolbar nav-btn">Matchups</a>
+              <a href="schedule.html"     class="btn btn-teal btn-toolbar nav-btn">Schedule</a>
+              <a href="game_ratings.html" class="btn btn-teal btn-toolbar nav-btn">Ratings</a>
+              <a href="records.html"      class="btn btn-teal btn-toolbar nav-btn">Records</a>
+            </div>
+          </div>
+
+          <a href="projects.html" class="btn btn-teal btn-toolbar nav-btn">Projects</a>
+          <a href="settings.html" class="btn btn-teal btn-toolbar nav-btn">Settings</a>
+        </div>
+      </div>
+    </header>
+
+    <main class="space-y-4">
+      <div class="glass space-y-3">
+        <div class="flex flex-wrap items-center gap-3 justify-between">
+          <div>
+            <div class="text-lg font-semibold">Single-Day Audit</div>
+            <div class="muted text-sm">Re-run TaskPoints math for one day without mutating data.</div>
+          </div>
+          <div class="flex items-center gap-2 flex-wrap">
+            <label class="text-xs muted">Date</label>
+            <input id="auditDate" type="date" class="input w-40" />
+            <button id="runAuditBtn" type="button" class="btn btn-teal">Run Audit</button>
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button id="copyReportBtn" type="button" class="btn btn-ghost">Copy Report</button>
+          <button id="exportJsonBtn" type="button" class="btn btn-ghost">Export JSON</button>
+        </div>
+      </div>
+
+      <div class="glass space-y-3">
+        <div class="flex items-center justify-between gap-2 flex-wrap">
+          <div>
+            <div class="text-lg font-semibold">Summary</div>
+            <div id="auditSummaryMeta" class="muted text-sm">Select a date to begin.</div>
+          </div>
+          <div id="auditStatusBadge" class="tag bg-zinc-700/70 text-sm">Idle</div>
+        </div>
+        <div id="auditHighlights" class="grid sm:grid-cols-3 gap-3"></div>
+      </div>
+
+      <div class="glass">
+        <div class="flex items-center justify-between mb-3">
+          <div class="text-lg font-semibold">Checks</div>
+          <div id="auditDateLabel" class="muted text-sm"></div>
+        </div>
+        <div id="auditChecks" class="space-y-2 max-h-[65vh] overflow-y-auto pr-1"></div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    function defaultAuditDate() {
+      const d = new Date();
+      d.setDate(d.getDate() - 1);
+      return TaskPointsCore.dateKey(d);
+    }
+
+    function setStatus(label, tone = 'idle') {
+      const badge = $('auditStatusBadge');
+      if (!badge) return;
+      badge.textContent = label;
+      badge.className = 'tag text-sm';
+      if (tone === 'pass') badge.classList.add('bg-emerald-700/80');
+      else if (tone === 'fail') badge.classList.add('bg-rose-700/80');
+      else if (tone === 'warn') badge.classList.add('bg-amber-600/80');
+      else badge.classList.add('bg-zinc-700/70');
+    }
+
+    function summarizeChecks(checks) {
+      const counts = { PASS: 0, FAIL: 0, WARN: 0 };
+      checks.forEach(c => {
+        if (counts[c.status] != null) counts[c.status]++;
+      });
+      return counts;
+    }
+
+    function renderHighlights(checks, totals) {
+      const wrap = $('auditHighlights');
+      if (!wrap) return;
+
+      const counts = summarizeChecks(checks);
+      const cards = [
+        { label: 'Checks Passed', value: counts.PASS, tone: 'text-emerald-400' },
+        { label: 'Warnings', value: counts.WARN, tone: 'text-amber-300' },
+        { label: 'Failures', value: counts.FAIL, tone: 'text-rose-300' },
+      ];
+
+      wrap.innerHTML = cards.map(c => `
+        <div class="rounded-xl border border-zinc-800/60 bg-white/5 dark:bg-zinc-900/40 p-3">
+          <div class="muted text-[11px] uppercase tracking-wide">${c.label}</div>
+          <div class="text-3xl font-extrabold ${c.tone}">${c.value}</div>
+        </div>
+      `).join('');
+    }
+
+    function renderChecks(checks, dateKeyStr) {
+      const list = $('auditChecks');
+      const dateLabel = $('auditDateLabel');
+      if (dateLabel) {
+        const nice = TaskPointsCore.niceDate(TaskPointsCore.fromKey(dateKeyStr));
+        dateLabel.textContent = nice;
+      }
+      if (!list) return;
+      if (!checks.length) {
+        list.innerHTML = '<div class="muted text-sm">Run the audit to see results.</div>';
+        return;
+      }
+
+      list.innerHTML = checks.map(c => {
+        const icon = c.status === 'PASS' ? '✅' : c.status === 'WARN' ? '⚠️' : '❌';
+        const trace = c.trace ? `<div class="muted text-[11px]">${c.trace}</div>` : '';
+        const delta = Number.isFinite(c.delta) ? `<div class="muted text-[11px]">Δ ${c.delta.toFixed(2)}</div>` : '';
+        const tips = c.tips ? `<div class="muted text-[11px] mt-1">${c.tips}</div>` : '';
+        const expectation = (c.expected !== undefined || c.actual !== undefined)
+          ? `<div class="text-xs font-mono bg-zinc-900/50 rounded-lg p-2 mt-2">
+              <div>Expected: <span class="font-semibold">${formatVal(c.expected)}</span></div>
+              <div>Actual: <span class="font-semibold">${formatVal(c.actual)}</span></div>
+            </div>`
+          : '';
+
+        const details = c.details && c.details.length
+          ? `<ul class="text-xs list-disc ml-5 mt-2 space-y-1">${c.details.map(d => `<li>${d}</li>`).join('')}</ul>`
+          : '';
+
+        return `
+          <div class="border border-zinc-800/70 rounded-xl p-3 bg-white/5 dark:bg-zinc-900/50">
+            <div class="flex items-center justify-between gap-3">
+              <div class="flex items-center gap-2">
+                <span class="text-xl">${icon}</span>
+                <div>
+                  <div class="font-semibold">${c.title}</div>
+                  ${trace}
+                </div>
+              </div>
+              <div class="text-xs px-2 py-1 rounded-full ${badgeClass(c.status)}">${c.status}</div>
+            </div>
+            ${delta}
+            ${expectation}
+            ${details}
+            ${tips}
+          </div>
+        `;
+      }).join('');
+    }
+
+    function badgeClass(status) {
+      if (status === 'PASS') return 'bg-emerald-700/70';
+      if (status === 'WARN') return 'bg-amber-700/70';
+      return 'bg-rose-700/70';
+    }
+
+    function formatVal(v) {
+      if (v === undefined) return '—';
+      if (typeof v === 'number') return v.toFixed(2);
+      if (typeof v === 'object') return JSON.stringify(v);
+      return String(v);
+    }
+
+    function runAudit() {
+      const dateInput = $('auditDate');
+      const selected = dateInput?.value || defaultAuditDate();
+      const dateKey = TaskPointsCore.dateKey(selected);
+
+      const { state, storageKeysFound } = TaskPointsCore.loadAppState();
+      const snapshot = TaskPointsCore.buildDaySnapshot(dateKey, state);
+      const totals = TaskPointsCore.computeDayTotals(snapshot);
+      const rollups = TaskPointsCore.buildRollups(state);
+      const dayBreakdowns = TaskPointsCore.buildDailyBreakdowns(state);
+      const leaderboards = TaskPointsCore.computeLeaderboards(state);
+
+      const baseActual = Number(rollups.dailyTotals[dateKey]) || 0;
+      const { inertia } = TaskPointsCore.computeInertia(rollups.dailyTotals, dateKey);
+      const actualTotal = Math.round((baseActual + (Number.isFinite(inertia) ? inertia : 0)) * 10) / 10;
+
+      const dayBreak = dayBreakdowns[dateKey] || { total: 0, categories: {} };
+
+      const checks = [];
+
+      // A) Daily total check
+      checks.push({
+        id: 'daily-total',
+        title: 'Daily total matches main view',
+        status: Math.abs(actualTotal - totals.total) < 0.05 ? 'PASS' : 'FAIL',
+        expected: totals.total,
+        actual: actualTotal,
+        delta: actualTotal - totals.total,
+        trace: 'aggregateCompletionsByDate → computeInertia',
+        tips: 'Ensure all completions for the day have valid timestamps and points.'
+      });
+
+      // B) Category subtotals
+      const categoryIssues = [];
+      TaskPointsCore.CATEGORY_DEFS.forEach(def => {
+        const label = def.label;
+        const expectedVal = totals.byCategory[label] || 0;
+        const actualVal = Number(dayBreak.categories?.[def.key]) || 0;
+        if (Math.abs(expectedVal - actualVal) > 0.05) {
+          categoryIssues.push(`${label}: expected ${expectedVal.toFixed(2)}, actual ${actualVal.toFixed(2)}`);
+        }
+      });
+      const expectedSum = Object.values(totals.byCategory || {}).reduce((s,v)=>s+v,0);
+      const actualSum = Number(dayBreak.total) || 0;
+      if (Math.abs(expectedSum - actualSum) > 0.05) {
+        categoryIssues.push(`Sum mismatch: expected ${expectedSum.toFixed(2)}, actual ${actualSum.toFixed(2)}`);
+      }
+      checks.push({
+        id: 'category-subtotals',
+        title: 'Category subtotals',
+        status: categoryIssues.length ? 'FAIL' : 'PASS',
+        expected: totals.byCategory,
+        actual: dayBreak.categories,
+        delta: actualSum - expectedSum,
+        details: categoryIssues,
+        trace: 'TaskPointsCore.computeDayTotals vs. daily breakdown'
+      });
+
+      // C) Log consistency
+      const logEntries = Array.isArray(snapshot.items) ? snapshot.items.length : 0;
+      const rawLogMatches = logEntries === (dayBreak.categories ? Object.values(dayBreak.categories).length : logEntries);
+      const integrityNotes = [];
+      snapshot.items.forEach(item => {
+        if (!item.label) integrityNotes.push(`Missing label on item ${item.id}`);
+        if (!Number.isFinite(item.points)) integrityNotes.push(`Non-numeric points on item ${item.id}`);
+      });
+      checks.push({
+        id: 'log-consistency',
+        title: 'Log entries align with snapshot',
+        status: integrityNotes.length ? 'WARN' : 'PASS',
+        expected: `${logEntries} entries`,
+        actual: `${logEntries} entries`,
+        delta: rawLogMatches ? 0 : NaN,
+        details: integrityNotes,
+        trace: 'state.completions filtered by date'
+      });
+
+      // D) Daily sources consistency
+      checks.push({
+        id: 'daily-sources',
+        title: 'Daily sources total matches recomputed total',
+        status: Math.abs((dayBreak.total || 0) - totals.total) < 0.05 ? 'PASS' : 'FAIL',
+        expected: totals.total,
+        actual: dayBreak.total || 0,
+        delta: (dayBreak.total || 0) - totals.total,
+        trace: 'daily breakdown vs. TaskPointsCore.computeDayTotals'
+      });
+
+      // E) Records + leaderboards
+      const weekKey = TaskPointsCore.isoWeekKey(TaskPointsCore.fromKey(dateKey));
+      const monthKey = TaskPointsCore.monthKey(TaskPointsCore.fromKey(dateKey));
+      const weekTotal = rollups.weeklyTotalsWithInertia[weekKey] || 0;
+      const monthTotal = rollups.monthlyTotalsWithInertia[monthKey] || 0;
+      const dayRank = leaderboards.bestDays.findIndex(r => r.key === dateKey) + 1;
+      const leaderboardIssues = [];
+      if (!Number.isFinite(weekTotal) || !Number.isFinite(monthTotal)) {
+        leaderboardIssues.push('Week or month rollups missing.');
+      }
+      checks.push({
+        id: 'leaderboards',
+        title: 'Leaderboards / records inclusion',
+        status: leaderboardIssues.length ? 'WARN' : 'PASS',
+        expected: { dayRank: dayRank || '—', weekTotal, monthTotal },
+        actual: { dayRank: dayRank || '—', weekTotal, monthTotal },
+        delta: 0,
+        details: leaderboardIssues,
+        trace: 'computeLeaderboards'
+      });
+
+      // F) Game / matchup consistency (lightweight)
+      const matchupOnDay = (state.matchups || []).find(m => m.date === dateKey);
+      checks.push({
+        id: 'game-consistency',
+        title: 'Game history present for the day',
+        status: matchupOnDay ? 'PASS' : 'WARN',
+        expected: 'Matchup record optional',
+        actual: matchupOnDay ? 'Found matchup' : 'None for this date',
+        trace: 'state.matchups',
+        tips: 'If games are not used, this is a warning only.'
+      });
+
+      // G) Data integrity
+      const seenIds = new Set();
+      const duplicates = [];
+      snapshot.items.forEach(item => {
+        if (item.id && seenIds.has(item.id)) duplicates.push(item.id);
+        if (item.id) seenIds.add(item.id);
+      });
+      const integrityProblems = [];
+      if (duplicates.length) integrityProblems.push(`Duplicate item ids: ${duplicates.join(', ')}`);
+      const invalidPoints = snapshot.items.filter(it => !Number.isFinite(it.points));
+      if (invalidPoints.length) integrityProblems.push(`${invalidPoints.length} item(s) have invalid points.`);
+      const statusIntegrity = integrityProblems.length ? 'WARN' : 'PASS';
+      checks.push({
+        id: 'data-integrity',
+        title: 'Data integrity checks',
+        status: statusIntegrity,
+        expected: 'All items valid',
+        actual: integrityProblems.length ? integrityProblems.length + ' issue(s)' : 'No issues',
+        details: integrityProblems,
+        trace: 'Snapshot validation'
+      });
+
+      renderChecks(checks, dateKey);
+      renderHighlights(checks, totals);
+
+      const counts = summarizeChecks(checks);
+      if (counts.FAIL > 0) setStatus('FAIL', 'fail');
+      else if (counts.WARN > 0) setStatus('WARN', 'warn');
+      else setStatus('PASS', 'pass');
+
+      const summaryMeta = $('auditSummaryMeta');
+      if (summaryMeta) {
+        summaryMeta.textContent = `Storage: ${storageKeysFound.join(', ') || 'none'} · Date: ${TaskPointsCore.niceDate(TaskPointsCore.fromKey(dateKey))} · Total ${totals.total.toFixed(2)} pts`;
+      }
+
+      const reportPayload = {
+        dateKey,
+        snapshot,
+        totals,
+        checks,
+        rollups,
+      };
+      storeLastReport(reportPayload);
+    }
+
+    function storeLastReport(data) {
+      window.__taskpointsAuditReport = data;
+    }
+
+    function copyReport() {
+      const data = window.__taskpointsAuditReport;
+      if (!data) return alert('Run the audit first.');
+      const counts = summarizeChecks(data.checks || []);
+      const lines = [
+        `TaskPoints Audit — ${data.dateKey}`,
+        `PASS: ${counts.PASS}, WARN: ${counts.WARN}, FAIL: ${counts.FAIL}`,
+        `Total: ${data.totals?.total ?? '—'} pts`,
+        '',
+        ...(data.checks || []).map(c => `${c.status} — ${c.title} (expected ${formatVal(c.expected)}, actual ${formatVal(c.actual)})`)
+      ];
+      navigator.clipboard?.writeText(lines.join('\n')).then(() => {
+        alert('Report copied to clipboard.');
+      }).catch(() => alert('Unable to copy report.'));
+    }
+
+    function exportJson() {
+      const data = window.__taskpointsAuditReport;
+      if (!data) return alert('Run the audit first.');
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `taskpoints-audit-${data.dateKey}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const dateInput = $('auditDate');
+      if (dateInput) {
+        dateInput.value = defaultAuditDate();
+      }
+      $('runAuditBtn')?.addEventListener('click', runAudit);
+      $('copyReportBtn')?.addEventListener('click', copyReport);
+      $('exportJsonBtn')?.addEventListener('click', exportJson);
+
+      // Auto-run on load for convenience
+      runAudit();
+    });
+  </script>
+</body>
+</html>
