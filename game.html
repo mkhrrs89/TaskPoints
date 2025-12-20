@@ -236,6 +236,7 @@
       <li><strong>Variance</strong>: How swingy they are night-to-night.</li>
       <li><strong>Momentum</strong>: How much recent good/bad nights affect next game.</li>
       <li><strong>Risky</strong>: How much they chase boom-or-bust lines.</li>
+      <li><strong>Variance Tilt</strong>: What % of their swings land <em>below</em> baseline (0% = always above, 100% = always below).</li>
       <li><strong>Style</strong>: Just flavor text for now (can inform future sim tweaks).</li>
     </ul>
   </div>
@@ -285,6 +286,16 @@
         <div>
           <label class="text-xs muted">Variance</label>
           <input id="playerVariance" type="number" class="input mt-1" value="40">
+        </div>
+        <div>
+          <label class="text-xs muted flex items-center justify-between gap-2">
+            <span>Variance Tilt</span>
+            <span id="playerVarianceTiltLabel" class="opacity-60">50%</span>
+          </label>
+          <input id="playerVarianceTilt" type="range" min="0" max="100" class="input mt-1" value="50">
+          <p class="text-[11px] opacity-60 mt-1">
+            Percent of swings that fall <em>below</em> baseline.
+          </p>
         </div>
         <div>
           <label class="text-xs muted">Momentum</label>
@@ -758,13 +769,19 @@ function simulateAiScoreForPlayer(player, todayKey){
 
   const baseline = Number(player.baseline);
   const variance = Number(player.variance);
+  const varianceTiltRaw = Number(
+    typeof player.varianceTilt === "number" ? player.varianceTilt : (player.varianceTilt || 50)
+  );
+  const varianceTilt = Math.min(100, Math.max(0, varianceTiltRaw)) / 100;
   const momentum = Number(player.momentum);
 
   let riskyRating = Number(player.risky);
   if (isNaN(riskyRating)) riskyRating = 0;
   const riskyNormalized = riskyRating > 10 ? riskyRating / 10 : riskyRating;
 
-  const variation = (Math.random() * 2 - 1) * variance;
+  const variationMagnitude = Math.random() * variance;
+  const variationSign = Math.random() < varianceTilt ? -1 : 1;
+  const variation = variationMagnitude * variationSign;
 
   let momentumBonus = 0;
   if (momentum && state.gameHistory.length) {
@@ -1662,6 +1679,22 @@ card.innerHTML = `
               />
             </div>
             <div>
+              <label class="opacity-70 block mb-1 flex items-center justify-between gap-1">
+                <span>Variance Tilt</span>
+                <span data-tilt-label class="opacity-60">
+                  ${Number.isFinite(p.varianceTilt) ? `${p.varianceTilt}%` : "50%"}
+                </span>
+              </label>
+              <input
+                data-field="varianceTilt"
+                type="range"
+                min="0"
+                max="100"
+                class="w-full px-3 py-2 rounded-xl border text-sm"
+                value="${Number.isFinite(p.varianceTilt) ? p.varianceTilt : 50}"
+              />
+            </div>
+            <div>
               <label class="opacity-70 block mb-1">Momentum</label>
               <input
                 data-field="momentum"
@@ -1778,6 +1811,7 @@ card.innerHTML = `
           <p>Baseline: ${p.baseline ?? "—"}</p>
           <p>Variance: ${p.variance ?? "—"}</p>
           <p>Momentum: ${p.momentum ?? "—"}</p>
+          <p>Variance Tilt: ${Number.isFinite(p.varianceTilt) ? `${p.varianceTilt}%` : "50%"}</p>
           <p>Risky: ${
             typeof p.risky === "number"
               ? (p.risky <= 10 ? p.risky.toFixed(1) : (p.risky / 10).toFixed(1))
@@ -1807,6 +1841,17 @@ card.innerHTML = `
 
   container.querySelectorAll("button[data-act]").forEach(btn => {
     btn.addEventListener("click", handlePlayerAction);
+  });
+
+  // Wire up variance tilt slider labels inside edit cards
+  container.querySelectorAll('input[data-field="varianceTilt"]').forEach(input => {
+    const labelEl = input.parentElement.querySelector("[data-tilt-label]");
+    const update = () => {
+      const val = Number(input.value || 0);
+      if (labelEl) labelEl.textContent = `${val}%`;
+    };
+    input.addEventListener("input", update);
+    update();
   });
 }
     function handlePlayerAction(e){
@@ -1912,6 +1957,7 @@ card.innerHTML = `
         const fileInput = card.querySelector('input[data-field="image"]');
   const baselineInput  = card.querySelector('input[data-field="baseline"]');
   const varianceInput  = card.querySelector('input[data-field="variance"]');
+  const varianceTiltInput = card.querySelector('input[data-field="varianceTilt"]');
   const momentumInput  = card.querySelector('input[data-field="momentum"]');
   const riskyInput     = card.querySelector('input[data-field="risky"]');
   const styleInput     = card.querySelector('input[data-field="style"]');
@@ -1934,6 +1980,10 @@ card.innerHTML = `
     ? Number(varianceInput.value || 40)
     : (typeof player.variance === "number" ? player.variance : 40);
 
+  const varianceTilt = varianceTiltInput
+    ? Number(varianceTiltInput.value || 50)
+    : (typeof player.varianceTilt === "number" ? player.varianceTilt : 50);
+
   const momentum = momentumInput
     ? Number(momentumInput.value || 50)
     : (typeof player.momentum === "number" ? player.momentum : 50);
@@ -1953,6 +2003,7 @@ card.innerHTML = `
 
     player.baseline = isNaN(baseline) ? 60 : baseline;
     player.variance = isNaN(variance) ? 40 : variance;
+    player.varianceTilt = Math.min(100, Math.max(0, isNaN(varianceTilt) ? 50 : varianceTilt));
     player.momentum = isNaN(momentum) ? 50 : momentum;
     player.risky    = isNaN(risky) ? 3 : risky;
     player.style    = style || "balanced";
@@ -2005,6 +2056,7 @@ $("createPlayerForm").addEventListener("submit", (e)=>{
 
   const baseline = Number($("playerBaseline").value || 60);
   const variance = Number($("playerVariance").value || 40);
+  const varianceTilt = Number($("playerVarianceTilt").value || 50);
   const momentum = Number($("playerMomentum").value || 50);
 
   // NEW: Risky is stored as decimal (input / 10)
@@ -2030,6 +2082,7 @@ $("createPlayerForm").addEventListener("submit", (e)=>{
 
       baseline: isNaN(baseline) ? 35 : baseline,
       variance: isNaN(variance) ? 9 : variance,
+      varianceTilt: Math.min(100, Math.max(0, isNaN(varianceTilt) ? 50 : varianceTilt)),
       momentum: isNaN(momentum) ? 5 : momentum,
 
       // Default Risky = 3.0 (i.e. user sees 30)
@@ -2045,6 +2098,8 @@ $("createPlayerForm").addEventListener("submit", (e)=>{
     $("playerImage").value = "";
     $("playerBaseline").value = "60";
     $("playerVariance").value = "40";
+    $("playerVarianceTilt").value = "50";
+    updateCreateVarianceTiltLabel();
     $("playerMomentum").value = "50";
     $("playerRisky").value = "30";
     $("playerStyle").value = "";
@@ -2059,6 +2114,22 @@ $("createPlayerForm").addEventListener("submit", (e)=>{
     addPlayer(null);
   }
 });
+
+
+// Variance tilt label updater (create form)
+const createVarianceTiltInput = $("playerVarianceTilt");
+const createVarianceTiltLabel = $("playerVarianceTiltLabel");
+
+function updateCreateVarianceTiltLabel() {
+  if (!createVarianceTiltInput || !createVarianceTiltLabel) return;
+  const val = Number(createVarianceTiltInput.value || 0);
+  createVarianceTiltLabel.textContent = `${val}%`;
+}
+
+if (createVarianceTiltInput) {
+  createVarianceTiltInput.addEventListener("input", updateCreateVarianceTiltLabel);
+  updateCreateVarianceTiltLabel();
+}
 
 
 // Export / Import / Paste / Reset

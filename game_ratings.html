@@ -123,7 +123,7 @@
         <span id="playerCount" class="text-xs opacity-70"></span>
       </div>
       <p class="text-xs opacity-70 mb-3">
-        Click any column header to sort. Risky is shown as a 0–10 rating (normalized from your stored data).
+        Click any column header to sort. Risky is shown as a 0–10 rating (normalized from your stored data). Variance Tilt shows the % of swings that land below a player’s baseline.
       </p>
 
       <div class="overflow-x-auto">
@@ -133,6 +133,7 @@
   <th data-sort="name">Name</th>
   <th data-sort="baseline">Baseline</th>
   <th data-sort="variance">Variance</th>
+  <th data-sort="varianceTilt">Variance Tilt</th>
   <th data-sort="momentum">Momentum</th>
   <th data-sort="risky">Risky</th>
   <th data-sort="style">Style</th>
@@ -302,6 +303,10 @@ function renderTable() {
       typeof p.baseline === "number" ? p.baseline : Number(p.baseline) || null;
     const variance =
       typeof p.variance === "number" ? p.variance : Number(p.variance) || null;
+    const varianceTilt =
+      typeof p.varianceTilt === "number"
+        ? p.varianceTilt
+        : Number(p.varianceTilt) || null;
     const momentum =
       typeof p.momentum === "number" ? p.momentum : Number(p.momentum) || null;
     const riskyNorm = getNormalizedRisky(p.risky);
@@ -314,6 +319,7 @@ function renderTable() {
       <td class="pr-4">${escapeHtml(p.name || "—")}</td>
       <td>${baseline != null ? baseline : "—"}</td>
       <td>${variance != null ? variance : "—"}</td>
+      <td>${varianceTilt != null ? `${varianceTilt}%` : "—"}</td>
       <td>${momentum != null ? momentum : "—"}</td>
       <td>${riskyNorm != null ? riskyNorm.toFixed(1) : "—"}</td>
       <td>${escapeHtml(style || "—")}</td>
@@ -409,6 +415,7 @@ function getSortValue(p, key) {
     case "name":      return (p.name || "").toLowerCase();
     case "baseline":  return Number(p.baseline) || 0;
     case "variance":  return Number(p.variance) || 0;
+    case "varianceTilt": return Number(p.varianceTilt) || 0;
     case "momentum":  return Number(p.momentum) || 0;
     case "risky":     return getNormalizedRisky(p.risky);
     case "style":     return (p.style || "").toLowerCase();
