@@ -389,7 +389,7 @@
       <h2 id="flexAnchor" class="font-bold text-lg">Flex Actions</h2>
       <div class="flex gap-2 flex-wrap">
         <input id="flexName" class="input w-48" placeholder="Flex action">
-        <input id="flexPts"  class="input w-28" type="number" placeholder="Pts/use">
+        <input id="flexPts"  class="input w-28" type="number" step="any" placeholder="Pts/use">
         <button id="addFlexBtn" class="btn btn-primary">Add</button>
       </div>
     </div>
@@ -2757,7 +2757,7 @@ function renderFlexActions(){
           <input class="input w-full mb-2" data-field="name"
                  value="${escapeHtml(f.name || '')}">
           <label class="text-xs muted block mb-1">Points per use</label>
-          <input class="input w-28" data-field="points" type="number"
+          <input class="input w-28" data-field="points" type="number" step="any"
                  value="${f.points || 0}">
         </div>
         <div class="flex gap-2 flex-wrap">
@@ -2816,13 +2816,14 @@ function addFlexAction(){
   const nameEl = $('flexName');
   const ptsEl  = $('flexPts');
   const name = nameEl.value.trim();
-  const pts = parseInt(ptsEl.value,10) || 0;
+  const pts = parseFloat(ptsEl.value);
+  const safePts = Number.isFinite(pts) ? pts : 0;
   if(!name) return;
   if(!Array.isArray(state.flexActions)) state.flexActions = [];
   state.flexActions.push({
     id: crypto.randomUUID(),
     name,
-    points: pts
+    points: safePts
   });
   nameEl.value = '';
   ptsEl.value = '';
@@ -2864,8 +2865,8 @@ function saveFlexEdit(id, row){
   }
 
   if (ptsInput) {
-    const pts = parseInt(ptsInput.value, 10);
-    if (!isNaN(pts)) f.points = pts;
+    const pts = parseFloat(ptsInput.value);
+    if (Number.isFinite(pts)) f.points = pts;
   }
 
   editingFlexId = null;
