@@ -10,6 +10,7 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="styles.css">
   <script src="toolbar.js" defer></script>
+  <script src="scoring_core.js"></script>
 </head>
 <body class="min-h-screen">
   <div class="mx-auto max-w-6xl p-4 sm:p-6">
@@ -51,248 +52,18 @@
   </div>
 
   <script>
-    const STORAGE_KEY = "taskpoints_v1";
     const $ = id => document.getElementById(id);
-
-    function sleepBonus(score) {
-      if (score >= 100) return 3;
-      if (score >= 98) return 2;
-      if (score >= 95) return 1;
-      return 0;
-    }
-
-    function load() {
-      try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (!raw) return { tasks: [], completions: [], players: [], habits: [], flexActions: [], matchups: [], schedule: [], opponentDripSchedules: [] };
-        const p = JSON.parse(raw);
-        return {
-          tasks:       Array.isArray(p.tasks)       ? p.tasks       : [],
-          completions: Array.isArray(p.completions) ? p.completions : [],
-          players:     Array.isArray(p.players)     ? p.players     : [],
-          habits:      Array.isArray(p.habits)      ? p.habits      : [],
-          flexActions: Array.isArray(p.flexActions) ? p.flexActions : [],
-          matchups: Array.isArray(p.matchups) ? p.matchups : [],
-          schedule: Array.isArray(p.schedule) ? p.schedule : [],
-          gameHistory: Array.isArray(p.gameHistory) ? p.gameHistory : [],
-          workHistory: Array.isArray(p.workHistory) ? p.workHistory : [],
-          opponentDripSchedules: Array.isArray(p.opponentDripSchedules) ? p.opponentDripSchedules : [],
-          youImage:    typeof p.youImage === "string" ? p.youImage : "",
-        };
-      } catch (e) {
-        console.error("Failed to load TaskPoints state", e);
-        return { tasks: [], completions: [], players: [], habits: [], flexActions: [], matchups: [], schedule: [], opponentDripSchedules: [] };
-      }
-    }
-
-let state = load();
-
-function normalizeState(s) {
-  return {
-    tasks:       Array.isArray(s.tasks)       ? s.tasks       : [],
-    completions: Array.isArray(s.completions) ? s.completions : [],
-    players:     Array.isArray(s.players)     ? s.players     : [],
-    habits:      Array.isArray(s.habits)      ? s.habits      : [],
-    flexActions: Array.isArray(s.flexActions) ? s.flexActions : [],
-    gameHistory: Array.isArray(s.gameHistory) ? s.gameHistory : [],
-    matchups:    Array.isArray(s.matchups)    ? s.matchups    : [],
-    schedule:    Array.isArray(s.schedule)    ? s.schedule    : [],
-    opponentDripSchedules: Array.isArray(s.opponentDripSchedules) ? s.opponentDripSchedules : [],
-    workHistory: Array.isArray(s.workHistory) ? s.workHistory : [],
-    youImage:    typeof s.youImage === "string" ? s.youImage : ""
-  };
-}
-
-function saveMerged(partial) {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    const existing = raw ? (JSON.parse(raw) || {}) : {};
-    const merged = normalizeState({ ...existing, ...partial });
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
-    return merged;
-  } catch (e) {
-    console.error("saveMerged failed (daily.html)", e);
-    return partial;
-  }
-}
-
-    
-    function migrateSleepEntriesForBonus() {
-      if (!state || !Array.isArray(state.completions)) return;
-
-      let changed = false;
-
-      state.completions.forEach(c => {
-        if (!c || !c.title || !c.title.startsWith("Sleep Score")) return;
-
-        const match = c.title.match(/\((\d+)\)/);
-        if (!match) return;
-
-        const raw = Number(match[1]);
-        if (!Number.isFinite(raw)) return;
-
-        const base  = raw / 10;
-        const bonus = sleepBonus(raw);
-        const newPts = base + bonus;
-
-        if (Math.abs((Number(c.points) || 0) - newPts) > 0.0001) {
-          c.points = newPts;
-          changed = true;
-        }
-      });
-
-if (changed) {
-  state = saveMerged(state);
-}
-
-    }
-
-    function dateKey(d) {
-      if (!(d instanceof Date)) d = new Date(d);
-      if (!d || isNaN(d.getTime())) return "invalid";
-      const y  = d.getFullYear();
-      const m  = String(d.getMonth() + 1).padStart(2, "0");
-      const dd = String(d.getDate()).padStart(2, "0");
-      return `${y}-${m}-${dd}`;
-    }
-
-    function fromKey(k) {
-      if (!k || typeof k !== "string") return new Date(NaN);
-      const parts = k.split("-");
-      if (parts.length < 3) return new Date(NaN);
-      const [yStr, mStr, dStr] = parts;
-      const y = parseInt(yStr, 10);
-      const m = parseInt(mStr, 10);
-      const d = parseInt(dStr, 10);
-      if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) {
-        return new Date(NaN);
-      }
-      const dt = new Date(y, m - 1, d);
-      dt.setHours(0, 0, 0, 0);
-      return dt;
-    }
-
-    function niceDate(d) {
-      if (!(d instanceof Date)) d = new Date(d);
-      if (!d || isNaN(d.getTime())) return "Invalid date";
-      return d.toLocaleDateString(undefined, {
-        year:  "numeric",
-        month: "short",
-        day:   "numeric"
-      });
-    }
-
-    const CATEGORY_DEFS = [
-      { key: "sleep",    label: "Sleep",    match: c => typeof c.title === "string" && c.title.startsWith("Sleep Score (") },
-      { key: "calories", label: "Calories", match: c => typeof c.title === "string" && c.title.startsWith("Calories (") },
-      { key: "habits",   label: "Habits",   match: c => c.source === "habit" },
-      { key: "vices",    label: "Vices",    match: c => c.source === "vice" },
-      { key: "flex",     label: "Flex",     match: c => c.source === "flex" },
-      { key: "work",     label: "Work",     match: c => c.source === "work" || (typeof c.title === "string" && c.title.startsWith("Work Score")) },
-      { key: "inertia",  label: "Inertia",  match: () => false },
-      { key: "tasks",    label: "Tasks",    match: () => true }
-    ];
-
-    function computeInertiaForDay(dailyTotals, dayKey) {
-      const day = fromKey(dayKey);
-      if (!day || isNaN(day.getTime())) return 0;
-
-      const keys = Array.from(new Set([...Object.keys(dailyTotals), dayKey]))
-        .filter(k => {
-          const d = fromKey(k);
-          return d && !isNaN(d.getTime());
-        })
-        .sort((a, b) => fromKey(a) - fromKey(b));
-
-      const totalsWithInertia = new Map();
-
-      keys.forEach(k => {
-        const current = fromKey(k);
-        if (!current || isNaN(current.getTime())) return;
-
-        let sum = 0;
-        let count = 0;
-
-        for (let i = 1; i <= 7; i++) {
-          const d = new Date(current);
-          d.setDate(current.getDate() - i);
-          const key = dateKey(d);
-          const total = totalsWithInertia.get(key);
-          if (Number.isFinite(total)) {
-            sum += total;
-            count++;
-          }
-        }
-
-        const average = count ? sum / count : 0;
-        const inertia = count ? average * 0.25 : 0;
-        const base = Number(dailyTotals[k]) || 0;
-
-        totalsWithInertia.set(k, base + inertia);
-      });
-
-      const totalForDay = totalsWithInertia.get(dayKey);
-      const base = Number(dailyTotals[dayKey]) || 0;
-
-      return Number.isFinite(totalForDay) ? Math.max(totalForDay - base, 0) : 0;
-    }
-
-    function categorizeCompletion(c) {
-      for (const def of CATEGORY_DEFS) {
-        try {
-          if (def.match(c)) return def.key;
-        } catch (e) {
-          console.warn("Category check failed", e);
-        }
-      }
-      return "other";
-    }
-
-    function buildDailyBreakdowns() {
-      const daily = {};
-      const comps = Array.isArray(state.completions) ? state.completions : [];
-
-      comps.forEach(c => {
-        if (!c || !c.completedAtISO) return;
-        const d = new Date(c.completedAtISO);
-        if (!d || isNaN(d.getTime())) return;
-        d.setHours(0, 0, 0, 0);
-        const key = dateKey(d);
-
-        if (!daily[key]) {
-          daily[key] = {
-            total: 0,
-            categories: {}
-          };
-        }
-
-        const pts = Number(c.points) || 0;
-        if (!pts) return;
-
-        const catKey = categorizeCompletion(c);
-        daily[key].total += pts;
-        daily[key].categories[catKey] = (daily[key].categories[catKey] || 0) + pts;
-      });
-
-      const dailyTotals = Object.fromEntries(Object.entries(daily).map(([k, v]) => [k, Number(v.total) || 0]));
-      Object.keys(dailyTotals).forEach(k => {
-        const inertia = computeInertiaForDay(dailyTotals, k);
-        if (!inertia) return;
-
-        daily[k].total += inertia;
-        daily[k].categories.inertia = (daily[k].categories.inertia || 0) + inertia;
-      });
-
-      return daily;
-    }
+    const STORAGE_KEY = TaskPointsCore.STORAGE_KEY;
+    const CATEGORY_DEFS = TaskPointsCore.CATEGORY_DEFS;
+    let state = TaskPointsCore.loadAppState().state;
 
     function renderDailyBreakdowns() {
       const listEl = $("scoresList");
       const summaryEl = $("dailySummary");
       if (!listEl) return;
 
-      const daily = buildDailyBreakdowns();
-      const keys = Object.keys(daily).sort((a, b) => fromKey(b) - fromKey(a));
+      const daily = TaskPointsCore.buildDailyBreakdowns(state);
+      const keys = Object.keys(daily).sort((a, b) => TaskPointsCore.fromKey(b) - TaskPointsCore.fromKey(a));
 
       if (!keys.length) {
         listEl.innerHTML = '<div class="muted">No days logged yet.</div>';
@@ -309,8 +80,8 @@ if (changed) {
       }
 
       listEl.innerHTML = keys.map(k => {
-        const d = fromKey(k);
-        const label = niceDate(d);
+        const d = TaskPointsCore.fromKey(k);
+        const label = TaskPointsCore.niceDate(d);
         const entry = daily[k];
         const categories = entry.categories || {};
 
@@ -346,7 +117,6 @@ if (changed) {
       }).join("\n");
     }
 
-    migrateSleepEntriesForBonus();
     renderDailyBreakdowns();
   </script>
 </body>
