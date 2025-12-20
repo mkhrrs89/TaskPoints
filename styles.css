@@ -3,6 +3,7 @@
       --bg:#0b0d10;--panel:#11161c;--muted:#8b98a5;--border:#202830;
       --accent:#4f9cff;--accent2:#7c5cff;--accent3:#22c55e
     }
+    html,body{-webkit-text-size-adjust:100%}
     body{background:var(--bg);color:#e6edf6;-webkit-font-smoothing:antialiased}
     @media (prefers-color-scheme:light){body{background:#fafafa;color:#0b1220}}
     .glass{border:1px solid var(--border);background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.03));border-radius:18px;padding:16px;box-shadow:0 1px 0 rgba(255,255,255,.06) inset,0 10px 30px rgba(0,0,0,.25)}
@@ -1079,17 +1080,6 @@
     margin: 0 !important;
   }
 
-/* iOS fix: stop caret/zoom weirdness inside Add Task modal */
-@media (max-width: 640px){
-  .addTaskModalPanel .input,
-  .addTaskModalPanel select,
-  .addTaskModalPanel textarea{
-    font-size: 16px;   /* key: prevents iOS zoom/caret offset */
-    line-height: 1.2;  /* keeps caret centered nicely */
-  }
-}
-
-   
   #addTaskRow2 .addTaskTodayBtn{
     grid-column: 1 / -1;
     justify-self: start;
@@ -1121,6 +1111,14 @@
 
   #repeatCustomUnit{
     width: 100% !important;
+  }
+
+  /* iOS fix: stop caret/zoom weirdness inside Add Task modal */
+  .addTaskModalPanel .input,
+  .addTaskModalPanel select,
+  .addTaskModalPanel textarea{
+    font-size: 16px;   /* key: prevents iOS zoom/caret offset */
+    line-height: 1.35; /* keeps caret centered nicely */
   }
 }
 
