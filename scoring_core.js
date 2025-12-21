@@ -59,7 +59,18 @@
   }
 
   function dateKey(d){
-    if (!(d instanceof Date)) d = new Date(d);
+    if (typeof d === 'string') {
+      const m = d.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (m) {
+        const [, y, mon, day] = m;
+        d = new Date(Number(y), Number(mon) - 1, Number(day));
+      } else {
+        d = new Date(d);
+      }
+    } else if (!(d instanceof Date)) {
+      d = new Date(d);
+    }
+
     if (!d || isNaN(d.getTime())) return 'invalid';
     const y  = d.getFullYear();
     const m  = String(d.getMonth()+1).padStart(2,'0');
