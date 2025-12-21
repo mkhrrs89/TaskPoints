@@ -218,7 +218,6 @@
       background: linear-gradient(180deg, #661222, #3b0f17);
       color:#ffe2e5;
       border:1px solid rgba(248,113,113,0.5);
-      box-shadow: 0 0 12px rgba(239,68,68,0.35);
     }
     .muted{color:var(--muted)}
 .toolbar{display:flex;gap:.5rem;flex-wrap:wrap;justify-content:flex-end}
