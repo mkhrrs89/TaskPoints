@@ -199,6 +199,23 @@
       return String(v);
     }
 
+    // More reliable tap handling on mobile: fire on pointerdown and
+    // ignore the synthetic click that follows.
+    function bindPress(id, handler) {
+      const el = $(id);
+      if (!el) return;
+      el.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        handler(e);
+        el.dataset.ignoreClick = '1';
+        setTimeout(() => delete el.dataset.ignoreClick, 300);
+      });
+      el.addEventListener('click', (e) => {
+        if (el.dataset.ignoreClick) return;
+        handler(e);
+      });
+    }
+
     function runAudit() {
       const dateInput = $('auditDate');
       const selected = dateInput?.value || defaultAuditDate();
@@ -404,9 +421,9 @@
       if (dateInput) {
         dateInput.value = defaultAuditDate();
       }
-      $('runAuditBtn')?.addEventListener('click', runAudit);
-      $('copyReportBtn')?.addEventListener('click', copyReport);
-      $('exportJsonBtn')?.addEventListener('click', exportJson);
+      bindPress('runAuditBtn', runAudit);
+      bindPress('copyReportBtn', copyReport);
+      bindPress('exportJsonBtn', exportJson);
 
       // Auto-run on load for convenience
       runAudit();
