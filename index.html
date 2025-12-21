@@ -24,8 +24,26 @@
 
   <!-- HEADER -->
   <header class="mb-4">
+    <div class="flex items-center justify-between gap-3 mb-3 md:hidden">
+      <a href="index.html" class="flex items-center gap-3">
+        <img src="assets/taskpoints-logo.png" alt="TaskPoints logo" class="w-10 h-10 rounded-2xl object-cover shrink-0 shadow-sm">
+<h1 class="text-2xl font-extrabold tracking-tight leading-tight">
+  <span style="color:#fb923c;">Task</span><span style="color:#1e666d;">Points</span>
+</h1>
+
+      </a>
+
+      <div class="flex items-center gap-2">
+        <button id="exportBtnMobile" type="button" class="btn btn-ghost btn-toolbar" data-export-button>Export</button>
+        <label class="btn btn-ghost btn-toolbar cursor-pointer">
+          <span>Import</span>
+          <input id="importInputMobile" type="file" accept="application/json" class="hidden" data-import-input/>
+        </label>
+      </div>
+    </div>
+
     <div class="row items-center">
-      <div class="flex items-center gap-3">
+      <div class="hidden md:flex items-center gap-3">
         <img src="assets/taskpoints-logo.png" alt="TaskPoints logo" class="w-10 h-10 rounded-2xl object-cover shrink-0 shadow-sm">
 <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight">
   <span style="color:#fb923c;">Task</span><span style="color:#1e666d;">Points</span>
@@ -34,9 +52,9 @@
       </div>
 
 <div class="toolbar header-nav">
-  <button id="exportBtn" class="btn btn-ghost btn-toolbar">Export</button>
-  <label class="btn btn-ghost btn-toolbar cursor-pointer">Import
-    <input id="importInput" type="file" accept="application/json" class="hidden"/>
+  <button id="exportBtn" class="btn btn-ghost btn-toolbar hidden md:inline-flex" data-export-button>Export</button>
+  <label class="btn btn-ghost btn-toolbar cursor-pointer hidden md:inline-flex">Import
+    <input id="importInput" type="file" accept="application/json" class="hidden" data-import-input/>
   </label>
 
   <a href="index.html"         class="btn btn-teal btn-toolbar nav-btn active" aria-current="page">Main</a>
@@ -4248,9 +4266,6 @@ document.addEventListener('DOMContentLoaded', () => {
   $('addBtn')?.addEventListener('click', addTask);
   $('openAddTaskBtn')?.addEventListener('click', openAddTaskModal);
   $('sortSelect')?.addEventListener('change', renderTasks);
-  $('exportBtn')?.addEventListener('click', exportData);
-  $('importInput')?.addEventListener('change', importFile);
-  $('importPasteBtn')?.addEventListener('click', importPaste);
   $('resetBtn')?.addEventListener('click', resetAll);
   $('addHabitBtn')?.addEventListener('click', addHabit);
   $('addViceBtn')?.addEventListener('click', addVice);
@@ -4489,40 +4504,11 @@ document.addEventListener('change', (e) => {
   id="scrollTopBtn"
   class="hidden md:hidden fixed top-3 right-3 z-40 btn btn-teal rounded-full shadow-lg px-4 py-2 text-sm flex items-center gap-1"
   type="button"
+  data-scroll-top
 >
   <span>⬆️</span>
   <span>Top</span>
 </button>
-
-<script>
-  (function () {
-    const btn = document.getElementById('scrollTopBtn');
-    if (!btn) return;
-
-    function updateVisibility() {
-      // show if scrolled down a bit, hide when at the very top
-      if (window.scrollY > 40) {
-        btn.classList.remove('hidden');
-      } else {
-        btn.classList.add('hidden');
-      }
-    }
-
-    // update on scroll and on first load
-    window.addEventListener('scroll', updateVisibility, { passive: true });
-    window.addEventListener('load', updateVisibility);
-
-    btn.addEventListener('click', () => {
-      window.scrollTo({
-        top: 0,
-        behavior: 'smooth'
-      });
-    });
-  })();
-
-
-</script>
-
 
 <!-- MOBILE QUICK NAV BAR -->
 <nav

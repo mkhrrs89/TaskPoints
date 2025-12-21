@@ -105,6 +105,22 @@
 <body class="min-h-screen">
   <div class="mx-auto max-w-6xl p-4 sm:p-6">
 
+<div class="flex items-center justify-between gap-3 mb-3 md:hidden">
+  <a href="index.html" class="flex items-center gap-3">
+    <img src="assets/taskpoints-logo.png" alt="TaskPoints logo" class="w-10 h-10 rounded-2xl object-cover shrink-0 shadow-sm">
+    <h1 class="text-2xl font-extrabold tracking-tight leading-tight">
+      <span style="color:#fb923c;">Task</span><span style="color:#1e666d;">Points</span>
+    </h1>
+  </a>
+  <div class="flex items-center gap-2">
+    <button type="button" class="btn btn-ghost btn-toolbar" data-export-button>Export</button>
+    <label class="btn btn-ghost btn-toolbar cursor-pointer">
+      <span>Import</span>
+      <input type="file" accept="application/json" class="hidden" data-import-input/>
+    </label>
+  </div>
+</div>
+
 <header class="flex items-center justify-between mb-4 gap-3 flex-wrap">
   <h1 class="text-2xl font-extrabold">Log</h1>
   <div class="toolbar header-nav">
@@ -545,6 +561,15 @@ function editSleepScore(id){
 render();
 
 </script>
+
+<button
+  class="hidden md:hidden fixed top-3 right-3 z-40 btn btn-teal rounded-full shadow-lg px-4 py-2 text-sm flex items-center gap-1"
+  type="button"
+  data-scroll-top
+>
+  <span>⬆️</span>
+  <span>Top</span>
+</button>
 </body>
 </html>
 
