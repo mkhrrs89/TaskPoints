@@ -529,6 +529,28 @@
     padding:8px 10px;              /* less vertical padding */
   }
 
+  /* Mobile: compact flex action bubbles + right-align buttons */
+  #flexList .glass{
+    padding:8px 10px;
+  }
+  .flex-action-row:not(.flex-action-row--edit){
+    flex-direction: row;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  .flex-action-main{
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .flex-action-buttons{
+    margin-left: auto;
+    flex-wrap: nowrap;
+    gap: 0.5rem;
+  }
+  .flex-action-buttons .btn{
+    padding: 6px 10px;
+  }
+
   /* shrink the internal flex gap + align to top so things don't look so tall */
   #taskList .glass > .flex,
   #archiveList .glass > .flex{
