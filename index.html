@@ -184,29 +184,29 @@
       <!-- LEFT: Big stat + input -->
       <div class="flex-1 min-w-[220px] stat-col stat-col-primary">
         <div class="sleep-today-card">
-          <div class="stat-compact-row">
-            <h2 id="sleepAnchor" class="font-bold text-lg stat-title">Sleep Score</h2>
-            <div class="stat-compact-controls">
+          <div class="stat-mobile-header">
+            <div class="stat-compact-row">
+              <h2 id="sleepAnchor" class="font-bold text-lg stat-title">Sleep Score</h2>
+              <div class="stat-compact-controls">
 <div id="sleepInputRow" class="stat-input-row flex items-center gap-2 flex-wrap">
   <input id="sleepScoreInput" class="input w-24 scoreInput" type="number" placeholder="0–100">
   <input id="sleepRestedInput" class="input w-24 scoreInput" type="number" placeholder="Rested">
   <button id="saveSleepScoreBtn" class="btn btn-plum">Add</button>
 </div>
-            </div>
-          </div>
-
-          <div class="stat-compact-meta">
-            <div class="muted text-xs">Today’s Sleep</div>
-            <div class="flex items-center gap-2 flex-wrap">
-              <div class="flex items-baseline gap-2">
-                <div id="sleepTodayValue" class="text-4xl font-extrabold leading-tight stat-value">—</div>
-                <div id="sleepTodayRest" class="sleep-rest-chip hidden"><span id="sleepTodayRestValue"></span></div>
               </div>
             </div>
-            <div id="sleepTodayImpact" class="muted text-xs mt-1">Adds 0 pts to today</div>
+
+            <div class="stat-compact-meta">
+              <div class="muted text-xs">Today’s Sleep</div>
+              <div class="flex items-center gap-2 flex-wrap">
+                <div class="flex items-baseline gap-2">
+                  <div id="sleepTodayValue" class="text-4xl font-extrabold leading-tight stat-value">—</div>
+                  <div id="sleepTodayRest" class="sleep-rest-chip hidden"><span id="sleepTodayRestValue"></span></div>
+                </div>
+              </div>
+              <div id="sleepTodayImpact" class="muted text-xs mt-1 stat-impact">Adds 0 pts to today</div>
+            </div>
           </div>
-
-
         </div>
       </div>
 
@@ -229,9 +229,10 @@
       <!-- LEFT: Big stat + input -->
       <div class="flex-1 min-w-[220px] stat-col stat-col-primary">
         <div class="calories-today-card">
-          <div class="stat-compact-row">
-            <h2 class="font-bold text-lg stat-title">Calories</h2>
-            <div class="stat-compact-controls">
+          <div class="stat-mobile-header">
+            <div class="stat-compact-row">
+              <h2 class="font-bold text-lg stat-title">Calories</h2>
+              <div class="stat-compact-controls">
 <div id="caloriesInputRow" class="stat-input-row caloriesEntryRow flex items-center gap-3 flex-wrap sm:flex-nowrap">
   <input id="caloriesInput" class="input w-24" type="number" placeholder="0–3000">
 
@@ -249,17 +250,16 @@
 
   <button id="saveCaloriesBtn" class="btn btn-teal">Add</button>
 </div>
+              </div>
+            </div>
+
+            <div class="stat-compact-meta">
+              <div class="muted text-xs">Today’s Calories</div>
+              <div id="caloriesTodayValue" class="text-4xl font-extrabold leading-tight stat-value">—</div>
+              <div id="caloriesTodayImpact" class="muted text-xs mt-1 stat-impact">Adds 0 pts to today</div>
+              <div id="caloriesDateLabel" class="datePill"></div>
             </div>
           </div>
-
-          <div class="stat-compact-meta">
-            <div class="muted text-xs">Today’s Calories</div>
-            <div id="caloriesTodayValue" class="text-4xl font-extrabold leading-tight stat-value">—</div>
-            <div id="caloriesTodayImpact" class="muted text-xs mt-1">Adds 0 pts to today</div>
-            <div id="caloriesDateLabel" class="datePill"></div>
-          </div>
-
-
         </div>
       </div>
 
@@ -287,30 +287,29 @@
       <!-- LEFT SIDE: big stat + input -->
       <div class="flex-1 min-w-[220px] stat-col stat-col-primary">
         <div class="work-today-card">
-          <div class="stat-compact-row">
-            <h2 id="workAnchor" class="font-bold text-lg stat-title">Work Score</h2>
-            <div class="stat-compact-controls">
+          <div class="stat-mobile-header">
+            <div class="stat-compact-row">
+              <h2 id="workAnchor" class="font-bold text-lg stat-title">Work Score</h2>
+              <div class="stat-compact-controls">
 <div id="workInputRow" class="stat-input-row flex items-center gap-2 flex-wrap sm:flex-nowrap">
   <input id="workScoreInput" class="input w-24 scoreInput" type="number" placeholder="0–10">
   <input id="workHoursInput" class="input w-24 scoreInput" type="number" placeholder="Hours">
   <button id="saveWorkScoreBtn" class="btn btn-work">Add</button>
 </div>
-            </div>
-          </div>
-
-          <div class="stat-compact-meta">
-            <div class="muted text-xs">Today’s Work</div>
-            <div class="flex items-center gap-2 flex-wrap">
-              <div class="flex items-baseline gap-2">
-                <div id="workTodayValue" class="text-4xl font-extrabold leading-tight stat-value">—</div>
-                <div id="workTodayHours" class="work-hours-chip hidden"><span id="workTodayHoursValue"></span></div>
               </div>
             </div>
-            <div id="workTodayImpact" class="muted text-xs mt-1">Adds 0 pts to today</div>
+
+            <div class="stat-compact-meta">
+              <div class="muted text-xs">Today’s Work</div>
+              <div class="flex items-center gap-2 flex-wrap">
+                <div class="flex items-baseline gap-2">
+                  <div id="workTodayValue" class="text-4xl font-extrabold leading-tight stat-value">—</div>
+                  <div id="workTodayHours" class="work-hours-chip hidden"><span id="workTodayHoursValue"></span></div>
+                </div>
+              </div>
+              <div id="workTodayImpact" class="muted text-xs mt-1 stat-impact">Adds 0 pts to today</div>
+            </div>
           </div>
-
-
-
         </div>
       </div>
 
@@ -335,23 +334,23 @@
     <!-- LEFT SIDE: big stat + input -->
     <div class="flex-1 min-w-[220px] stat-col stat-col-primary">
       <div class="mood-today-card">
-        <div class="stat-compact-row">
-          <h2 id="moodAnchor" class="font-bold text-lg stat-title">Mood Score</h2>
-          <div class="stat-compact-controls">
+        <div class="stat-mobile-header">
+          <div class="stat-compact-row">
+            <h2 id="moodAnchor" class="font-bold text-lg stat-title">Mood Score</h2>
+            <div class="stat-compact-controls">
 <div id="moodInputRow" class="stat-input-row flex items-center gap-2 flex-wrap sm:flex-nowrap">
   <input id="moodScoreInput" class="input w-24 scoreInput" type="number" placeholder="0–10">
   <button id="saveMoodScoreBtn" type="button" class="btn btn-mood">Add</button>
 </div>
+            </div>
+          </div>
+
+          <div class="stat-compact-meta">
+            <div class="muted text-xs">Today’s Mood</div>
+            <div id="moodTodayValue" class="text-4xl font-extrabold leading-tight stat-value">—</div>
+            <div id="moodTodayImpact" class="muted text-xs mt-1 stat-impact">Adds 0 pts to today</div>
           </div>
         </div>
-
-        <div class="stat-compact-meta">
-          <div class="muted text-xs">Today’s Mood</div>
-          <div id="moodTodayValue" class="text-4xl font-extrabold leading-tight stat-value">—</div>
-          <div id="moodTodayImpact" class="muted text-xs mt-1">Adds 0 pts to today</div>
-        </div>
-
-
       </div>
     </div>
 
@@ -3368,13 +3367,16 @@ function renderSleepHistory() {
         const restText = hasRest ? ` (${rested >= 0 ? '+' : ''}${rested})` : '';
 
         todayImpactEl.textContent = `Adds ${totalPts.toFixed(1)} pts to today${restText}`;
+        todayImpactEl.dataset.empty = 'false';
       } else {
         todayValueEl.textContent = '—';
         todayImpactEl.textContent = 'Adds — pts to today';
+        todayImpactEl.dataset.empty = 'true';
       }
     } else {
       todayValueEl.textContent = '—';
       todayImpactEl.textContent = 'Adds 0 pts to today';
+      todayImpactEl.dataset.empty = 'true';
     }
   }
 
@@ -3511,13 +3513,16 @@ function renderCaloriesHistory() {
 
         const pts = caloriesToPoints(calNum);
         todayImpactEl.textContent = `Adds ${pts.toFixed(1)} pts to today`;
+        todayImpactEl.dataset.empty = 'false';
       } else {
         todayValueEl.textContent = '—';
         todayImpactEl.textContent = 'Adds — pts to today';
+        todayImpactEl.dataset.empty = 'true';
       }
     } else {
       todayValueEl.textContent = '—';
       todayImpactEl.textContent = 'Adds 0 pts to today';
+      todayImpactEl.dataset.empty = 'true';
     }
   }
 
@@ -3717,16 +3722,19 @@ if (todayValueEl && todayImpactEl) {
       const totalPts = workPoints(score, hours);
       const hoursText = hasHours ? ` (${hours >= 0 ? '+' : ''}${hours})` : '';
       todayImpactEl.textContent = `Adds ${totalPts.toFixed(1)} pts to today${hoursText}`;
+      todayImpactEl.dataset.empty = 'false';
 
       // ✅ hide input row after initial entry
       inputRow?.classList.add('hidden');
     } else {
       todayValueEl.textContent = '—';
       todayImpactEl.textContent = 'Adds — pts to today';
+      todayImpactEl.dataset.empty = 'true';
     }
   } else {
     todayValueEl.textContent = '—';
     todayImpactEl.textContent = 'Adds 0 pts to today';
+    todayImpactEl.dataset.empty = 'true';
 
     if (todayHoursChip && todayHoursValue) {
       todayHoursChip.classList.add('hidden');
@@ -3907,15 +3915,18 @@ function renderMoodHistory() {
       if (!isNaN(num)) {
         todayValueEl.textContent = num;
         todayImpactEl.textContent = `Adds ${todayEntry.points} pts to today`;
+        todayImpactEl.dataset.empty = 'false';
       } else {
         todayValueEl.textContent = '—';
         todayImpactEl.textContent = 'Adds — pts to today';
+        todayImpactEl.dataset.empty = 'true';
       }
 
       inputRow?.classList.add('hidden');
     } else {
       todayValueEl.textContent = '—';
       todayImpactEl.textContent = 'Adds 0 pts to today';
+      todayImpactEl.dataset.empty = 'true';
 
       inputRow?.classList.remove('hidden');
     }

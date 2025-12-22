@@ -1177,6 +1177,40 @@
    Mobile layout tweaks for stat cards + chips
    ============================================ */
 @media (max-width: 640px){
+  .sleep-today-card,
+  .calories-today-card,
+  .work-today-card,
+  .mood-today-card{
+    padding: 0;
+    background: transparent;
+  }
+
+  .stat-mobile-header{
+    border-radius: 12px;
+    overflow: hidden;
+    padding: 8px 10px 6px;
+  }
+
+  .sleep-today-card .stat-mobile-header{
+    background: linear-gradient(180deg, #4035b5, #2F2B78);
+    color: #f8f7ff;
+  }
+
+  .calories-today-card .stat-mobile-header{
+    background: linear-gradient(180deg, #0f5d5d, #0a2f2f);
+    color: #ecfdf3;
+  }
+
+  .work-today-card .stat-mobile-header{
+    background: linear-gradient(180deg, #5fa3ff, #2f5fa8);
+    color: #eaf2ff;
+  }
+
+  .mood-today-card .stat-mobile-header{
+    background: linear-gradient(180deg, #334679, #1d2748);
+    color: #e3e8ff;
+  }
+
   /* Let each half stretch the full mobile width */
   .stat-card-row{
     flex-direction: column;
@@ -1192,23 +1226,23 @@
     width: 100%;
   }
 
-  /* Tighten padding + type sizes on the colored cards */
+  /* Tighten type sizes on the colored cards */
   .sleep-today-card,
   .calories-today-card,
   .work-today-card,
   .mood-today-card{
-    padding: 12px;
     border-radius: 14px;
   }
 
   .stat-title{
-    font-size: 1.05rem;
-    margin-bottom: 8px;
+    font-size: 1.02rem;
+    margin: 0;
+    flex: 0 0 auto;
   }
 
   .stat-value{
-    font-size: 1.9rem;
-    line-height: 1.1;
+    font-size: 2rem;
+    line-height: 1.05;
   }
 
   .sleep-rest-chip,
@@ -1225,8 +1259,8 @@
 
   .recentRow{
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
-    gap: 10px;
+    grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
+    gap: 8px;
     width: 100%;
   }
 
@@ -1264,47 +1298,93 @@
   /* Compact stat headers on mobile */
   .stat-compact-row{
     display: flex;
-    flex-direction: column;
-    align-items: flex-start;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
     gap: 8px;
     width: 100%;
+    padding: 4px 0;
+    flex-wrap: nowrap;
   }
 
   .stat-compact-controls{
-    width: 100%;
+    width: auto;
     display: flex;
-    justify-content: flex-start;
-    gap: 8px;
-    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 6px;
+    flex-wrap: nowrap;
+    flex: 1 1 auto;
   }
 
   .stat-input-row{
-    flex: 1;
-    display: flex;
+    flex: 1 1 auto;
+    display: inline-flex;
     align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-    width: 100%;
+    gap: 6px;
+    flex-wrap: nowrap;
+    width: auto;
+    min-width: 0;
+    justify-content: flex-end;
   }
 
   .stat-input-row .input{
-    height: 32px;
-    padding: 6px 10px;
-    font-size: 14px;
+    height: 34px;
+    min-width: 66px;
+    padding: 7px 10px;
+    font-size: 13px;
+    background: #0b0d10;
+    border-color: #0b0d10;
+    border-radius: 12px;
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08);
   }
 
   .stat-input-row .btn{
     padding: 8px 12px;
     height: 34px;
-    flex: 1 1 120px;
+    flex: 0 0 auto;
     width: auto;
+    font-weight: 700;
   }
 
   .stat-compact-meta{
     display: flex;
-    flex-direction: column;
-    gap: 4px;
-    margin-top: 4px;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0 6px;
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+
+  .stat-compact-meta > .muted{
+    display: none;
+  }
+
+  .stat-compact-meta .flex{
+    justify-content: flex-start;
+    gap: 6px;
+  }
+
+  .stat-compact-meta .stat-value{
+    font-size: 2rem;
+  }
+
+  .stat-impact{
+    margin-top: 0 !important;
+    color: rgba(233,237,255,0.92);
+    font-size: 12px;
+    margin-left: auto;
+  }
+
+  .stat-impact[data-empty="true"]{
+    display: none;
+  }
+
+  .sleep-rest-chip,
+  .work-hours-chip{
+    background: rgba(0,0,0,0.25);
+    border: 1px solid rgba(255,255,255,0.15);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.05);
+    color: #f8f9ff;
   }
 }
 
