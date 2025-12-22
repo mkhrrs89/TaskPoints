@@ -1109,6 +1109,32 @@
    ============================================ */
 @media (max-width: 640px) {
 
+/* Lock stat cards to container width on mobile */
+.sleep-today-card,
+.calories-today-card{
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden; /* prevents any child from pushing it wider */
+}
+
+/* The one-line row must be allowed to shrink */
+.sleep-today-card .stat-summary-row,
+.calories-today-card .stat-summary-row{
+  min-width: 0;
+}
+
+/* Let the "adds 10.0 pts (...)" part shrink + ellipsis instead of widening the card */
+.sleep-today-card .stat-summary-impact,
+.calories-today-card .stat-summary-impact{
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+}
+
+   
   /* Task content block (title + badges + buttons) */
   .task-card-content {
     margin-left: 3.75rem; /* tune this number for exact spacing */
@@ -1444,6 +1470,7 @@
     color: #f8f9ff;
   }
 }
+
 
 
 
