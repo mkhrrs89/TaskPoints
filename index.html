@@ -193,6 +193,16 @@
   <input id="sleepRestedInput" class="input w-24 scoreInput" type="number" placeholder="Rested">
   <button id="saveSleepScoreBtn" class="btn btn-plum">Add</button>
 </div>
+
+                <!-- Mobile-only: one-line summary after today's sleep is logged -->
+<div id="sleepSummaryRow" class="stat-summary-row hidden" aria-live="polite">
+  <span id="sleepSummaryValue" class="stat-summary-value"></span>
+  <div id="sleepSummaryRest" class="sleep-rest-chip hidden">
+    <span id="sleepSummaryRestValue"></span>
+  </div>
+  <span id="sleepSummaryImpact" class="stat-summary-impact"></span>
+</div>
+
               </div>
             </div>
 
@@ -3324,6 +3334,14 @@ function renderSleepHistory() {
   const todayRestValue = $('sleepTodayRestValue');
   const sleepInputRow  = $('sleepInputRow');
 
+// Mobile one-line summary row
+const sleepSummaryRow      = $('sleepSummaryRow');
+const sleepSummaryValue    = $('sleepSummaryValue');
+const sleepSummaryRest     = $('sleepSummaryRest');
+const sleepSummaryRestValue= $('sleepSummaryRestValue');
+const sleepSummaryImpact   = $('sleepSummaryImpact');
+
+  
   const setTodaySleepEditable = (el) => {
     if (!el) return;
     if (todayEntry) {
@@ -3366,6 +3384,35 @@ function renderSleepHistory() {
         const totalPts = sleepPoints(score, rested);
         const restText = hasRest ? ` (${rested >= 0 ? '+' : ''}${rested})` : '';
 
+// --- Mobile summary line: " - 90 (+1)  adds 10 pts (9.0 + 1.0)" ---
+if (sleepSummaryValue && sleepSummaryImpact && sleepSummaryRow) {
+  sleepSummaryValue.textContent = `- ${score}`;
+
+  // show (+rested) chip
+  if (sleepSummaryRest && sleepSummaryRestValue) {
+    if (hasRest) {
+      sleepSummaryRestValue.textContent = rested > 0 ? `+${rested}` : `${rested}`;
+      sleepSummaryRest.classList.remove('hidden');
+    } else {
+      sleepSummaryRest.classList.add('hidden');
+      sleepSummaryRestValue.textContent = '';
+    }
+  }
+
+  const base  = score / 10;
+  const bonus = sleepBonus(score);
+  const rest  = Number.isFinite(rested) ? rested : 0;
+
+  // Breakdown parts: always show base, only show bonus/rest if nonzero
+  const parts = [base];
+  if (bonus) parts.push(bonus);
+  if (rest)  parts.push(rest);
+
+  const breakdown = parts.map(v => Number(v).toFixed(1)).join(' + ');
+  sleepSummaryImpact.textContent = `adds ${totalPts.toFixed(1)} pts (${breakdown})`;
+}
+
+        
         todayImpactEl.textContent = `Adds ${totalPts.toFixed(1)} pts to today${restText}`;
         todayImpactEl.dataset.empty = 'false';
       } else {
@@ -3388,12 +3435,17 @@ function renderSleepHistory() {
   setTodaySleepEditable(todayValueEl);
   setTodaySleepEditable(todayRestChip);
   setTodaySleepEditable(todayImpactEl);
+  setTodaySleepEditable(sleepSummaryRow);
 
-  if (todayEntry) {
-    sleepInputRow?.classList.add('hidden');
-  } else {
-    sleepInputRow?.classList.remove('hidden');
-  }
+
+if (todayEntry) {
+  sleepInputRow?.classList.add('hidden');
+  sleepSummaryRow?.classList.remove('hidden');
+} else {
+  sleepInputRow?.classList.remove('hidden');
+  sleepSummaryRow?.classList.add('hidden');
+}
+
 
 
 
