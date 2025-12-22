@@ -1047,6 +1047,33 @@
 /*                                   MOBILE TWEAKS                              */
 /* ============================================================================ */
 
+/* Shared compact layout helpers */
+.stat-compact-row{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.stat-compact-controls{
+  flex: 1;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.stat-input-row{
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.stat-compact-meta{
+  margin-top: 10px;
+}
+
 @media (max-width: 520px){
   .caloriesEntryRow{ flex-wrap: nowrap; }
   .caloriesEntryRow #caloriesInput{ flex: 1 1 auto; min-width: 0; }
@@ -1203,13 +1230,10 @@
   }
 
   .recentRow{
-    display: grid;
-    grid-auto-flow: column;
-    grid-auto-columns: 68px;
-    grid-template-rows: repeat(2, 68px);
+    display: flex;
+    flex-wrap: nowrap;
     gap: 8px;
-    width: max-content;
-    align-content: start;
+    width: auto;
   }
 
   .recentRow > *{
@@ -1241,6 +1265,41 @@
   .work-chip-pts,
   .mood-chip-pts{
     font-size: 10px;
+  }
+
+  /* Compact stat headers on mobile */
+  .stat-compact-row{
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .stat-compact-controls{
+    flex: 1;
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  .stat-input-row{
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .stat-input-row .input{
+    height: 32px;
+    padding: 6px 10px;
+    font-size: 14px;
+  }
+
+  .stat-input-row .btn{
+    padding: 8px 12px;
+    height: 34px;
+  }
+
+  .stat-compact-meta{
+    display: none;
   }
 }
 
