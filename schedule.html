@@ -13,6 +13,7 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128'><rect width='128' height='128' rx='30' fill='black'/><text x='50%' y='55%' dominant-baseline='middle' text-anchor='middle' font-size='60' fill='white'>TP</text></svg>">
 
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="scoring_core.js"></script>
   <link rel="stylesheet" href="styles.css">
   <script src="toolbar.js" defer></script>
 
@@ -145,6 +146,11 @@
       }
     }
 
+    function matchupDateKey(m) {
+      if (!m) return "";
+      return m.dateKey || m.date || (m.dateISO ? dateKey(m.dateISO) : "");
+    }
+
 function normalizeState(s) {
   return {
     tasks:       Array.isArray(s.tasks)       ? s.tasks       : [],
@@ -171,6 +177,17 @@ function saveState(nextState) {
     return nextState;
   }
 }
+
+    function syncStateWithMatchups(baseState) {
+      if (!window.TaskPointsCore || typeof TaskPointsCore.syncYouMatchups !== "function") {
+        return baseState;
+      }
+      const { state: nextState, changed } = TaskPointsCore.syncYouMatchups(baseState);
+      if (changed) {
+        return saveState(nextState);
+      }
+      return nextState;
+    }
 
 
     function dateKey(d) {
@@ -227,6 +244,27 @@ function saveState(nextState) {
       };
     }
 
+    function buildDayFromExisting(dateKeyStr, participantIds, signature, matchups) {
+      const safeMatchups = (matchups || []).map(m => ({
+        playerAId: m.playerAId,
+        playerBId: m.playerBId
+      }));
+      const used = new Set();
+      safeMatchups.forEach(m => {
+        if (m.playerAId) used.add(m.playerAId);
+        if (m.playerBId) used.add(m.playerBId);
+      });
+
+      const byeIds = participantIds.filter(id => !used.has(id));
+
+      return {
+        date: dateKeyStr,
+        matchups: safeMatchups,
+        byeIds,
+        participantSignature: signature
+      };
+    }
+
     function ensureUpcomingSchedule(state, days = 7) {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
@@ -234,6 +272,7 @@ function saveState(nextState) {
 
       const participants = getAllParticipantIds(state);
       const signature = participantSignature(participants);
+      const participantSet = new Set(participants);
 
       let schedule = Array.isArray(state.schedule)
         ? state.schedule.filter((d) => d && d.date >= todayKey)
@@ -257,9 +296,25 @@ function saveState(nextState) {
         if (d && d.date) byDate.set(d.date, d);
       });
 
+      const existingMatchupsByDate = new Map();
+      (state.matchups || []).forEach((m) => {
+        if (!m) return;
+        const aId = m.playerAId;
+        const bId = m.playerBId;
+        if (!participantSet.has(aId) || !participantSet.has(bId)) return;
+        const key = matchupDateKey(m);
+        if (!key) return;
+        if (!existingMatchupsByDate.has(key)) existingMatchupsByDate.set(key, []);
+        existingMatchupsByDate.get(key).push({ playerAId: aId, playerBId: bId });
+      });
+
       const rebuilt = neededDates.map((key) => {
         const existing = byDate.get(key);
         if (existing) return existing;
+        const syncedFromMatchups = existingMatchupsByDate.get(key);
+        if (syncedFromMatchups && syncedFromMatchups.length) {
+          return buildDayFromExisting(key, participants, signature, syncedFromMatchups);
+        }
         changed = true;
         return buildDailySchedule(key, participants, signature);
       });
@@ -283,10 +338,10 @@ function saveState(nextState) {
       return `${weekday}, ${month} ${ordinal(d)}, ${y}`;
     }
 
-    let state = loadState();
+    let state = syncStateWithMatchups(loadState());
 
     function renderSchedule() {
-      state = loadState();
+      state = syncStateWithMatchups(loadState());
       const changed = ensureUpcomingSchedule(state);
       if (changed) state = saveState(state);
 

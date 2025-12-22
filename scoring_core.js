@@ -464,6 +464,98 @@
     };
   }
 
+  function matchupDateKey(matchup){
+    if (!matchup) return '';
+    return matchup.dateKey
+      || matchup.date
+      || (matchup.dateISO ? dateKey(matchup.dateISO) : '');
+  }
+
+  function youDailyTotalsWithInertia(state){
+    const normalized = normalizeState(state || {});
+    const { dailyTotals } = aggregateCompletionsByDate(normalized.completions);
+
+    const keys = new Set([
+      ...Object.keys(dailyTotals),
+      ...normalized.matchups
+        .map(matchupDateKey)
+        .filter(Boolean),
+    ]);
+
+    const totals = {};
+
+    keys.forEach(key => {
+      const snapshot = buildDaySnapshot(normalized, key);
+      const totalsForDay = computeDayTotals(snapshot);
+      totals[key] = totalsForDay.total;
+    });
+
+    return totals;
+  }
+
+  function syncYouMatchups(state){
+    const normalized = normalizeState(state || {});
+    const youTotals = youDailyTotalsWithInertia(normalized);
+
+    if (!Object.keys(youTotals).length) {
+      return { state: normalized, changed: false };
+    }
+
+    let changed = false;
+
+    const updated = (normalized.matchups || []).map(m => {
+      const key = matchupDateKey(m);
+      const youScore = youTotals[key];
+      const aIsYou = m && m.playerAId === 'YOU';
+      const bIsYou = m && m.playerBId === 'YOU';
+
+      if (!youScore && youScore !== 0) return m;
+      if (!aIsYou && !bIsYou) return m;
+
+      const next = { ...m };
+      let localChange = false;
+
+      if (aIsYou && Number(next.scoreA) !== youScore) {
+        next.scoreA = youScore;
+        localChange = true;
+      }
+      if (bIsYou && Number(next.scoreB) !== youScore) {
+        next.scoreB = youScore;
+        localChange = true;
+      }
+
+      if (!localChange && next.dateKey) return next;
+
+      next.dateKey = key || next.dateKey;
+
+      const aScore = Number(next.scoreA);
+      const bScore = Number(next.scoreB);
+      const diff = (Number.isFinite(aScore) ? aScore : 0) - (Number.isFinite(bScore) ? bScore : 0);
+      next.diff = diff;
+
+      if (aIsYou || bIsYou) {
+        const yourScore = aIsYou ? aScore : bScore;
+        const oppScore  = aIsYou ? bScore : aScore;
+        if (yourScore > oppScore) next.result = 'you-win';
+        else if (yourScore < oppScore) next.result = 'you-loss';
+        else next.result = 'tie';
+      } else {
+        if (aScore > bScore) next.result = 'a-win';
+        else if (aScore < bScore) next.result = 'b-win';
+        else next.result = 'tie';
+      }
+
+      changed = changed || localChange;
+      return next;
+    });
+
+    if (changed) {
+      normalized.matchups = updated;
+    }
+
+    return { state: normalized, changed };
+  }
+
   global.TaskPointsCore = {
     STORAGE_KEY,
     PROJECTS_STORAGE_KEY,
@@ -495,5 +587,7 @@
     computeLeaderboards,
     buildDaySnapshot,
     computeDayTotals,
+    youDailyTotalsWithInertia,
+    syncYouMatchups,
   };
 })(window);

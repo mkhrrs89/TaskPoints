@@ -14,6 +14,7 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='%230b0d10'/><text x='50' y='62' font-size='60' text-anchor='middle' fill='white'>TP</text></svg>">
 
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="scoring_core.js"></script>
 <link rel="stylesheet" href="styles.css">
 <script src="toolbar.js" defer></script>
 
@@ -509,8 +510,19 @@ function saveState(nextState) {
   }
 }
 
+function syncStateWithMatchups(baseState) {
+  if (!window.TaskPointsCore || typeof TaskPointsCore.syncYouMatchups !== "function") {
+    return baseState;
+  }
+  const { state: nextState, changed } = TaskPointsCore.syncYouMatchups(baseState);
+  if (changed) {
+    return saveState(nextState);
+  }
+  return nextState;
+}
 
-let state = loadState();
+
+let state = syncStateWithMatchups(loadState());
     console.log("STORAGE_KEY =", STORAGE_KEY);
 console.log("state.players =", state.players, "count =", (state.players || []).length);
 
@@ -1266,12 +1278,18 @@ function refreshScheduleAfterRosterChange(){
 }
 
 function computeTodayPoints() {
-  const comps = Array.isArray(state.completions) ? state.completions : [];
-  if (!comps.length) return 0;
-
   const today = new Date();
   today.setHours(0,0,0,0);
   const todayKey = dateKey(today);
+
+  if (window.TaskPointsCore && typeof TaskPointsCore.buildDaySnapshot === "function" && typeof TaskPointsCore.computeDayTotals === "function") {
+    const snapshot = TaskPointsCore.buildDaySnapshot(state, todayKey);
+    const totals = TaskPointsCore.computeDayTotals(snapshot);
+    return Number((totals.total || 0).toFixed(1));
+  }
+
+  const comps = Array.isArray(state.completions) ? state.completions : [];
+  if (!comps.length) return 0;
 
   let total = 0;
 

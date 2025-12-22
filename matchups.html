@@ -14,6 +14,7 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128'><rect width='128' height='128' rx='30' fill='black'/><text x='50%' y='55%' dominant-baseline='middle' text-anchor='middle' font-size='60' fill='white'>TP</text></svg>">
 
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="scoring_core.js"></script>
   <link rel="stylesheet" href="styles.css">
   <script src="toolbar.js" defer></script>
 
@@ -155,97 +156,17 @@ function load() {
       return `${y}-${m}-${day}`;
     }
 
-    // Build a map of { dateKey -> your true total points } from completions
-    function computeYouDailyTotals(completions) {
-      const totals = {};
-      if (!Array.isArray(completions)) return totals;
-
-      for (const c of completions) {
-        if (!c) continue;
-
-        // prefer stored dateKey, fall back to completedAtISO
-        let key = c.dateKey;
-        if (!key && c.completedAtISO) {
-          key = dateKey(c.completedAtISO);
-        }
-        if (!key) continue;
-
-        const pts = Number(c.points || 0);
-        if (!Number.isFinite(pts)) continue;
-
-        totals[key] = (totals[key] || 0) + pts;
-      }
-
-      return totals;
-    }
-
-    // OPTION A: only fix *your* side of each matchup to match the new daily totals
     function syncYouMatchupsWithCompletions(state) {
-      const dailyTotals = computeYouDailyTotals(state.completions || []);
-      if (!Object.keys(dailyTotals).length) return;
-
-      const list = state.matchups || [];
-      let changed = false;
-
-      for (let i = 0; i < list.length; i++) {
-        const m = list[i];
-        if (!m) continue;
-
-        const key = m.dateKey || m.date || (m.dateISO ? dateKey(m.dateISO) : "");
-        if (!key) continue;
-
-        const youScoreForDay = dailyTotals[key];
-        if (youScoreForDay == null) continue;
-
-        const aIsYou = m.playerAId === "YOU";
-        const bIsYou = m.playerBId === "YOU";
-        if (!aIsYou && !bIsYou) continue; // AI vs AI stays untouched
-
-        let scoreA = Number(m.scoreA);
-        let scoreB = Number(m.scoreB);
-
-        // if already in sync, skip
-        if (aIsYou && scoreA === youScoreForDay) continue;
-        if (bIsYou && scoreB === youScoreForDay) continue;
-
-        if (aIsYou) scoreA = youScoreForDay;
-        if (bIsYou) scoreB = youScoreForDay;
-
-        const diff = scoreA - scoreB;
-
-        // Re-derive result label, still Option A: opponent scores unchanged
-        let result;
-        if (aIsYou || bIsYou) {
-          const ys = aIsYou ? scoreA : scoreB;
-          const os = aIsYou ? scoreB : scoreA;
-
-          if (ys > os) result = "you-win";
-          else if (ys < os) result = "you-loss";
-          else result = "tie";
-        } else {
-          // (safe fallback, though we never hit this with aIsYou/bIsYou check)
-          if (scoreA > scoreB) result = "a-win";
-          else if (scoreA < scoreB) result = "b-win";
-          else result = "tie";
-        }
-
-        list[i] = {
-          ...m,
-          scoreA,
-          scoreB,
-          diff,
-          result,
-          dateKey: key
-        };
-        changed = true;
+      if (!window.TaskPointsCore || typeof TaskPointsCore.syncYouMatchups !== "function") {
+        return state;
       }
 
-if (changed) {
-  save(state);
-}
-
-
-} // <-- closes syncYouMatchupsWithCompletions
+      const { state: nextState, changed } = TaskPointsCore.syncYouMatchups(state);
+      if (changed) {
+        save(nextState);
+      }
+      return nextState;
+    }
 
 
     function ordinal(n){
@@ -263,11 +184,10 @@ if (changed) {
     }
 
     function renderMatchups(){
-      const state = load();
+      let state = load();
 
 // sync may write back; keep local state updated
-syncYouMatchupsWithCompletions(state);
-
+state = syncYouMatchupsWithCompletions(state);
 
       const container = $("matchupsContainer");
       container.innerHTML = "";
