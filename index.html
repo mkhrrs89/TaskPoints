@@ -10,7 +10,7 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='%230b0d10'/><text x='50' y='62' font-size='60' text-anchor='middle' fill='white'>TP</text></svg>">
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Teko:wght@500;600;700&display=swap">
-
+  <script src="scoring_core.js"></script>
 
 <link rel="stylesheet" href="styles.css">
 <script src="toolbar.js" defer></script>
@@ -468,6 +468,7 @@ const OLD_PLAYERS_KEY="taskpoints_players";
 const PROJECTS_STORAGE_KEY="tp_projects_v1";
 const $=id=>document.getElementById(id);
 let state=normalizeState(load());
+state = syncStateWithMatchups(state);
   const HABITS_SORT_KEY = "taskpoints_habits_sort";
 
 function normalizeTask(task){
@@ -1018,6 +1019,19 @@ function load() {
       projects:     loadProjectsFromStorage()
     };
   }
+}
+
+function syncStateWithMatchups(current){
+  if (!window.TaskPointsCore || typeof TaskPointsCore.syncYouMatchups !== 'function') return current;
+  const { state: nextState, changed } = TaskPointsCore.syncYouMatchups(current);
+  if (changed) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
+    } catch (e) {
+      console.error('Failed to persist synced matchups', e);
+    }
+  }
+  return nextState;
 }
 
 function getPlayerNameById(id) {
