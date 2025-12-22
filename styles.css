@@ -1047,6 +1047,21 @@
 /*                                   MOBILE TWEAKS                              */
 /* ============================================================================ */
 
+/* Mobile-only summary row (kept hidden on desktop) */
+.stat-summary-row{
+  display: none;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+.stat-summary-impact{
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+
 /* Shared compact layout helpers */
 .stat-compact-row{
   display: flex;
@@ -1103,6 +1118,48 @@
   .task-card-points {
     width: 3.5rem; /* slightly narrower than default */
   }
+   /* Sleep top card: keep header to ONE line on mobile */
+.sleep-today-card .stat-compact-row{
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: nowrap;
+}
+
+.sleep-today-card .stat-title{
+  white-space: nowrap;
+}
+
+.sleep-today-card .stat-compact-controls{
+  width: auto;
+  flex: 0 0 auto;
+  justify-content: flex-end;
+}
+
+.sleep-today-card .stat-input-row{
+  width: auto;
+  flex-wrap: nowrap;
+}
+
+.sleep-today-card .stat-input-row .input{
+  width: 72px !important;
+  min-width: 0;
+}
+
+.sleep-today-card .stat-input-row .btn{
+  flex: 0 0 auto;
+}
+
+/* Hide the big “Today’s Sleep” block on mobile */
+.sleep-today-card .stat-compact-meta{
+  display: none;
+}
+
+/* Show the one-line summary row on mobile (when JS removes .hidden) */
+.sleep-today-card .stat-summary-row{
+  display: flex;
+}
+
 }
 
 /* ============================================
@@ -1387,6 +1444,7 @@
     color: #f8f9ff;
   }
 }
+
 
 
 
