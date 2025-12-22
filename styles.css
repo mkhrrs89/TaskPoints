@@ -1109,6 +1109,32 @@
    ============================================ */
 @media (max-width: 640px) {
 
+/* Prevent the ONE-LINE summary from forcing the whole card wider */
+.sleep-today-card .stat-compact-row,
+.calories-today-card .stat-compact-row{
+  min-width: 0;
+}
+
+.sleep-today-card .stat-compact-controls,
+.calories-today-card .stat-compact-controls{
+  min-width: 0;
+}
+
+.sleep-today-card .stat-summary-row,
+.calories-today-card .stat-summary-row{
+  min-width: 0;
+}
+
+.sleep-today-card .stat-summary-impact,
+.calories-today-card .stat-summary-impact{
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+}
+
+   
 /* Lock stat cards to container width on mobile */
 .sleep-today-card,
 .calories-today-card{
@@ -1470,6 +1496,7 @@
     color: #f8f9ff;
   }
 }
+
 
 
 
