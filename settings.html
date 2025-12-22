@@ -96,9 +96,11 @@
             <input id="settingsImportInput" type="file" accept="application/json" class="hidden" />
           </label>
           <button id="settingsImportPasteBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Paste JSON</button>
+          <button id="settingsResetGameStatsBtn" class="btn btn-warn btn-toolbar nav-btn" type="button">Reset Game Stats</button>
           <button id="settingsResetBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Reset All Data</button>
         </div>
         <p class="muted text-xs">Imports replace your current device data with the contents of the backup.</p>
+        <p class="muted text-xs">Resetting game stats clears historical wins/losses, past matchups, and PPD history (for NPCs only), but keeps today&apos;s matchups and all tasks, completions, and points.</p>
       </div>
     </div>
 
@@ -106,6 +108,29 @@
 
   <script>
     const SETTINGS_STORAGE_KEY = "taskpoints_v1";
+
+    function dateKey(d) {
+      if (!(d instanceof Date)) d = new Date(d);
+      if (!d || isNaN(d.getTime())) return "invalid";
+      const y  = d.getFullYear();
+      const m  = String(d.getMonth() + 1).padStart(2, "0");
+      const dd = String(d.getDate()).padStart(2, "0");
+      return `${y}-${m}-${dd}`;
+    }
+
+    function getGameDayKey(now = new Date()) {
+      const dt = new Date(now);
+      if (dt.getHours() < 2) dt.setDate(dt.getDate() - 1);
+      return dateKey(dt);
+    }
+
+    function extractDateKey(obj) {
+      if (!obj || typeof obj !== "object") return null;
+      if (obj.date) return String(obj.date).slice(0, 10);
+      if (obj.dateKey) return String(obj.dateKey).slice(0, 10);
+      if (obj.dateISO) return String(obj.dateISO).slice(0, 10);
+      return null;
+    }
 
     function normalizeSettingsState(s) {
       return {
@@ -120,6 +145,62 @@
         workHistory: Array.isArray(s.workHistory) ? s.workHistory : [],
         youImage:    typeof s.youImage === "string" ? s.youImage : ""
       };
+    }
+
+    function handleSettingsResetGameStats() {
+      const msg = [
+        "This will reset historical game stats PRIOR to today:",
+        "- Past matchups for all players",
+        "- Wins and losses for all players",
+        "- PPD and AVG PPD history for NPC players (not you)",
+        "",
+        "Today's matchups and all tasks/completions/points remain untouched.",
+        "",
+        "Continue?"
+      ].join("\n");
+
+      if (!confirm(msg)) return;
+
+      let parsed;
+      try {
+        const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+        parsed = raw ? (JSON.parse(raw) || {}) : {};
+      } catch (err) {
+        console.error("Failed to load stored state for game reset", err);
+        alert("Could not read your saved TaskPoints data. No changes were made.");
+        return;
+      }
+
+      const todayKey = getGameDayKey(new Date());
+
+      const existingMatchups = Array.isArray(parsed.matchups) ? parsed.matchups : [];
+      const filteredMatchups = existingMatchups.filter((m) => {
+        const dk = extractDateKey(m);
+        if (!dk) return true;
+        return dk >= todayKey;
+      });
+
+      const existingHistory = Array.isArray(parsed.gameHistory) ? parsed.gameHistory : [];
+      const filteredHistory = existingHistory.filter((g) => {
+        const dk = extractDateKey(g);
+        if (!dk) return true;
+        if (dk >= todayKey) return true;
+        return g && g.playerId === "YOU";
+      });
+
+      const nextState = {
+        ...parsed,
+        matchups: filteredMatchups,
+        gameHistory: filteredHistory
+      };
+
+      try {
+        localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(nextState));
+        alert("Game stats before today have been reset. Reload any open TaskPoints tabs to see the changes.");
+      } catch (err) {
+        console.error("Failed to save game stat reset", err);
+        alert("The game stats could not be reset due to a storage error.");
+      }
     }
 
     function applyImportedState(data) {
@@ -190,6 +271,7 @@
     document.addEventListener('DOMContentLoaded', () => {
       document.getElementById('settingsImportInput')?.addEventListener('change', handleSettingsFile);
       document.getElementById('settingsImportPasteBtn')?.addEventListener('click', handleSettingsPaste);
+      document.getElementById('settingsResetGameStatsBtn')?.addEventListener('click', handleSettingsResetGameStats);
       document.getElementById('settingsResetBtn')?.addEventListener('click', handleSettingsReset);
     });
   </script>
