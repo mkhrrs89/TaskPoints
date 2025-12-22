@@ -1309,6 +1309,44 @@ function buildPlayerHistoryStats() {
 
 
 function calcYouStats() {
+  const matchups = Array.isArray(state.matchups) ? state.matchups : [];
+  const youGames = matchups.filter(m => m && (m.playerAId === "YOU" || m.playerBId === "YOU"));
+
+  if (youGames.length) {
+    let wins = 0;
+    let losses = 0;
+    let ties = 0;
+    let games = 0;
+    let totalPoints = 0;
+
+    for (const m of youGames) {
+      const aScore = Number(m.scoreA);
+      const bScore = Number(m.scoreB);
+      if (!Number.isFinite(aScore) || !Number.isFinite(bScore)) continue;
+
+      games++;
+      const yourScore = (m.playerAId === "YOU") ? aScore : bScore;
+      const oppScore  = (m.playerAId === "YOU") ? bScore : aScore;
+
+      totalPoints += yourScore;
+
+      if (yourScore > oppScore) wins++;
+      else if (yourScore < oppScore) losses++;
+      else ties++;
+    }
+
+    const avgPPD = games ? (totalPoints / games) : 0;
+    const record = `${wins}-${losses}`;
+
+    return {
+      record,
+      avgPPD,
+      games,
+      wins,
+      losses
+    };
+  }
+
   const comps = state.completions || [];
   if (!comps.length) {
     return {
@@ -1320,15 +1358,15 @@ function calcYouStats() {
     };
   }
 
-// --- AVG PPD ---
-// Group completions by dayKey and sum points per day
-const dayMap = {};
-for (const c of comps) {
-  if (!c || !c.completedAtISO) continue;
-  const day = dateKey(c.completedAtISO);
-  if (!dayMap[day]) dayMap[day] = 0;
-  dayMap[day] += Number(c.points || 0);
-}
+  // --- AVG PPD ---
+  // Group completions by dayKey and sum points per day
+  const dayMap = {};
+  for (const c of comps) {
+    if (!c || !c.completedAtISO) continue;
+    const day = dateKey(c.completedAtISO);
+    if (!dayMap[day]) dayMap[day] = 0;
+    dayMap[day] += Number(c.points || 0);
+  }
 
 
   const dailyTotals = Object.values(dayMap);
