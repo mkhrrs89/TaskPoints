@@ -1177,24 +1177,19 @@
    Mobile layout tweaks for stat cards + chips
    ============================================ */
 @media (max-width: 640px){
-  /* Keep the two-card rows narrow enough to stay side by side */
+  /* Let each half stretch the full mobile width */
   .stat-card-row{
-    flex-wrap: nowrap;
-    gap: 12px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 14px;
   }
 
-  .stat-col{
-    min-width: 0;
-  }
-
-  .stat-col-primary{
-    flex: 0 0 190px;
-    max-width: 190px;
-  }
-
+  .stat-col,
+  .stat-col-primary,
   .stat-col-secondary{
-    flex: 1 0 140px;
-    max-width: 180px;
+    flex: 1 1 100%;
+    max-width: 100%;
+    width: 100%;
   }
 
   /* Tighten padding + type sizes on the colored cards */
@@ -1224,29 +1219,28 @@
 
   /* Chips: keep 2-row grid, horizontal scroll */
   .recentWrap{
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    padding-bottom: 6px;
+    overflow: visible;
+    padding-bottom: 0;
   }
 
   .recentRow{
-    display: flex;
-    flex-wrap: nowrap;
-    gap: 8px;
-    width: auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+    gap: 10px;
+    width: 100%;
   }
 
   .recentRow > *{
-    width: 68px;
-    height: 68px;
+    width: 100%;
+    min-height: 78px;
   }
 
   .sleep-chip,
   .cal-chip,
   .work-chip,
   .mood-chip{
-    width: 68px;
-    height: 68px;
+    width: 100%;
+    min-height: 78px;
   }
 
   .sleep-chip-score,
@@ -1270,14 +1264,18 @@
   /* Compact stat headers on mobile */
   .stat-compact-row{
     display: flex;
-    align-items: center;
-    gap: 10px;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    width: 100%;
   }
 
   .stat-compact-controls{
-    flex: 1;
+    width: 100%;
     display: flex;
-    justify-content: flex-end;
+    justify-content: flex-start;
+    gap: 8px;
+    flex-wrap: wrap;
   }
 
   .stat-input-row{
@@ -1285,6 +1283,8 @@
     display: flex;
     align-items: center;
     gap: 8px;
+    flex-wrap: wrap;
+    width: 100%;
   }
 
   .stat-input-row .input{
@@ -1296,10 +1296,15 @@
   .stat-input-row .btn{
     padding: 8px 12px;
     height: 34px;
+    flex: 1 1 120px;
+    width: auto;
   }
 
   .stat-compact-meta{
-    display: none;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 4px;
   }
 }
 

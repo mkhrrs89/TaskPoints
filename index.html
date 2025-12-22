@@ -3385,6 +3385,7 @@ function renderSleepHistory() {
 
   setTodaySleepEditable(todayValueEl);
   setTodaySleepEditable(todayRestChip);
+  setTodaySleepEditable(todayImpactEl);
 
   if (todayEntry) {
     sleepInputRow?.classList.add('hidden');
@@ -3497,6 +3498,7 @@ function renderCaloriesHistory() {
   }
 
   setTodayCaloriesEditable(todayValueEl);
+  setTodayCaloriesEditable(todayImpactEl);
 
   
   if (todayValueEl && todayImpactEl) {
@@ -3670,6 +3672,29 @@ function renderWorkHistory() {
   const inputRow = $('workInputRow');
   const todayHoursChip = $('workTodayHours');
   const todayHoursValue = $('workTodayHoursValue');
+  const setTodayWorkEditable = (el) => {
+    if (!el) return;
+    if (todayEntry) {
+      el.classList.add('cursor-pointer');
+      el.setAttribute('role', 'button');
+      el.setAttribute('tabindex', '0');
+      el.title = "Tap/click to edit today's work score";
+      el.onclick = editTodayWork;
+      el.onkeydown = (ev) => {
+        if (ev.key === 'Enter' || ev.key === ' ') {
+          ev.preventDefault();
+          editTodayWork();
+        }
+      };
+    } else {
+      el.classList.remove('cursor-pointer');
+      el.removeAttribute('role');
+      el.removeAttribute('tabindex');
+      el.title = "";
+      el.onclick = null;
+      el.onkeydown = null;
+    }
+  };
 
 
 if (todayValueEl && todayImpactEl) {
@@ -3695,11 +3720,6 @@ if (todayValueEl && todayImpactEl) {
 
       // ✅ hide input row after initial entry
       inputRow?.classList.add('hidden');
-
-      // ✅ make today's value behave like a history chip (tap to edit)
-      todayValueEl.classList.add('cursor-pointer');
-      todayValueEl.title = "Tap/click to edit today's work score";
-      todayValueEl.onclick = editTodayWork;
     } else {
       todayValueEl.textContent = '—';
       todayImpactEl.textContent = 'Adds — pts to today';
@@ -3715,13 +3735,12 @@ if (todayValueEl && todayImpactEl) {
 
     // ✅ show input row if no entry yet
     inputRow?.classList.remove('hidden');
-
-    // ✅ remove click behavior
-    todayValueEl.classList.remove('cursor-pointer');
-    todayValueEl.title = "";
-    todayValueEl.onclick = null;
   }
 }
+
+  setTodayWorkEditable(todayValueEl);
+  setTodayWorkEditable(todayImpactEl);
+  setTodayWorkEditable(todayHoursChip);
 
 
   // RECENT HISTORY (4 chips)
@@ -3858,6 +3877,29 @@ function renderMoodHistory() {
   const todayValueEl = $('moodTodayValue');
   const todayImpactEl = $('moodTodayImpact');
   const inputRow = $('moodInputRow');
+  const setTodayMoodEditable = (el) => {
+    if (!el) return;
+    if (todayEntry) {
+      el.classList.add('cursor-pointer');
+      el.setAttribute('role', 'button');
+      el.setAttribute('tabindex', '0');
+      el.title = "Tap/click to edit today's mood score";
+      el.onclick = editTodayMood;
+      el.onkeydown = (ev) => {
+        if (ev.key === 'Enter' || ev.key === ' ') {
+          ev.preventDefault();
+          editTodayMood();
+        }
+      };
+    } else {
+      el.classList.remove('cursor-pointer');
+      el.removeAttribute('role');
+      el.removeAttribute('tabindex');
+      el.title = "";
+      el.onclick = null;
+      el.onkeydown = null;
+    }
+  };
 
   if (todayValueEl && todayImpactEl) {
     if (todayEntry) {
@@ -3871,19 +3913,15 @@ function renderMoodHistory() {
       }
 
       inputRow?.classList.add('hidden');
-      todayValueEl.classList.add('cursor-pointer');
-      todayValueEl.title = "Tap/click to edit today's mood score";
-      todayValueEl.onclick = editTodayMood;
     } else {
       todayValueEl.textContent = '—';
       todayImpactEl.textContent = 'Adds 0 pts to today';
 
       inputRow?.classList.remove('hidden');
-      todayValueEl.classList.remove('cursor-pointer');
-      todayValueEl.title = "";
-      todayValueEl.onclick = null;
     }
   }
+  setTodayMoodEditable(todayValueEl);
+  setTodayMoodEditable(todayImpactEl);
 
   const recent = entries
     .filter(e => dateKey(new Date(e.completedAtISO)) !== todayK)
