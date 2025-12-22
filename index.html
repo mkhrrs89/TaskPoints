@@ -3367,13 +3367,16 @@ function renderSleepHistory() {
         const restText = hasRest ? ` (${rested >= 0 ? '+' : ''}${rested})` : '';
 
         todayImpactEl.textContent = `Adds ${totalPts.toFixed(1)} pts to today${restText}`;
+        todayImpactEl.dataset.empty = 'false';
       } else {
         todayValueEl.textContent = '—';
         todayImpactEl.textContent = 'Adds — pts to today';
+        todayImpactEl.dataset.empty = 'true';
       }
     } else {
       todayValueEl.textContent = '—';
       todayImpactEl.textContent = 'Adds 0 pts to today';
+      todayImpactEl.dataset.empty = 'true';
     }
   }
 
@@ -3510,13 +3513,16 @@ function renderCaloriesHistory() {
 
         const pts = caloriesToPoints(calNum);
         todayImpactEl.textContent = `Adds ${pts.toFixed(1)} pts to today`;
+        todayImpactEl.dataset.empty = 'false';
       } else {
         todayValueEl.textContent = '—';
         todayImpactEl.textContent = 'Adds — pts to today';
+        todayImpactEl.dataset.empty = 'true';
       }
     } else {
       todayValueEl.textContent = '—';
       todayImpactEl.textContent = 'Adds 0 pts to today';
+      todayImpactEl.dataset.empty = 'true';
     }
   }
 
@@ -3716,16 +3722,19 @@ if (todayValueEl && todayImpactEl) {
       const totalPts = workPoints(score, hours);
       const hoursText = hasHours ? ` (${hours >= 0 ? '+' : ''}${hours})` : '';
       todayImpactEl.textContent = `Adds ${totalPts.toFixed(1)} pts to today${hoursText}`;
+      todayImpactEl.dataset.empty = 'false';
 
       // ✅ hide input row after initial entry
       inputRow?.classList.add('hidden');
     } else {
       todayValueEl.textContent = '—';
       todayImpactEl.textContent = 'Adds — pts to today';
+      todayImpactEl.dataset.empty = 'true';
     }
   } else {
     todayValueEl.textContent = '—';
     todayImpactEl.textContent = 'Adds 0 pts to today';
+    todayImpactEl.dataset.empty = 'true';
 
     if (todayHoursChip && todayHoursValue) {
       todayHoursChip.classList.add('hidden');
@@ -3906,15 +3915,18 @@ function renderMoodHistory() {
       if (!isNaN(num)) {
         todayValueEl.textContent = num;
         todayImpactEl.textContent = `Adds ${todayEntry.points} pts to today`;
+        todayImpactEl.dataset.empty = 'false';
       } else {
         todayValueEl.textContent = '—';
         todayImpactEl.textContent = 'Adds — pts to today';
+        todayImpactEl.dataset.empty = 'true';
       }
 
       inputRow?.classList.add('hidden');
     } else {
       todayValueEl.textContent = '—';
       todayImpactEl.textContent = 'Adds 0 pts to today';
+      todayImpactEl.dataset.empty = 'true';
 
       inputRow?.classList.remove('hidden');
     }
