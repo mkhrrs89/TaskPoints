@@ -169,6 +169,89 @@
 const STORAGE_KEY="taskpoints_v1";
 const $=id=>document.getElementById(id);
 
+function fromKey(key){
+  if(!key || typeof key !== 'string') return null;
+  const [y,m,d]=key.split('-').map(Number);
+  if(!y||!m||!d) return null;
+  const date=new Date(y,m-1,d);
+  date.setHours(0,0,0,0);
+  return isNaN(date)?null:date;
+}
+
+function dateKey(date){
+  if(!(date instanceof Date) || isNaN(date)) return null;
+  const y=date.getFullYear();
+  const m=String(date.getMonth()+1).padStart(2,'0');
+  const d=String(date.getDate()).padStart(2,'0');
+  return `${y}-${m}-${d}`;
+}
+
+function todayKey(){
+  const d=new Date();
+  d.setHours(0,0,0,0);
+  return dateKey(d);
+}
+
+function addDays(d,n){ const x=new Date(d); x.setDate(x.getDate()+n); x.setHours(0,0,0,0); return x; }
+
+function safeCompletionDateKey(completion){
+  if(!completion || !completion.completedAtISO) return null;
+  const when=new Date(completion.completedAtISO);
+  if(isNaN(when)) return null;
+  return dateKey(when);
+}
+
+function computePreviousDueDate(task, completionKey){
+  if(!task) return null;
+  const rec = task.recurrence || {};
+  const mode = rec.mode || 'none';
+  if (mode === 'none') return completionKey || task.dueDateISO || todayKey();
+
+  const nextKey = task.dueDateISO || null;
+  const anchorKey = nextKey || completionKey || todayKey();
+  const anchorDate = fromKey(anchorKey);
+  if(!anchorDate) return null;
+
+  const count = Number.isFinite(rec.customCount) && rec.customCount > 0 ? rec.customCount : 1;
+  let prevDate = null;
+
+  if (mode === 'daily') {
+    prevDate = addDays(anchorDate, -1);
+  } else if (mode === 'everyWeekday') {
+    prevDate = addDays(anchorDate, -1);
+    while(prevDate.getDay() === 0 || prevDate.getDay() === 6){
+      prevDate = addDays(prevDate, -1);
+    }
+  } else if (mode === 'weekly') {
+    prevDate = addDays(anchorDate, -7);
+  } else if (mode === 'monthly') {
+    prevDate = new Date(anchorDate);
+    prevDate.setMonth(prevDate.getMonth() - 1);
+    prevDate.setHours(0,0,0,0);
+  } else if (mode === 'yearly') {
+    prevDate = new Date(anchorDate);
+    prevDate.setFullYear(prevDate.getFullYear() - 1);
+    prevDate.setHours(0,0,0,0);
+  } else if (mode === 'custom') {
+    const unit = rec.customUnit || 'day';
+    if (unit === 'day') {
+      prevDate = addDays(anchorDate, -count);
+    } else if (unit === 'week') {
+      prevDate = addDays(anchorDate, -count * 7);
+    } else if (unit === 'month') {
+      prevDate = new Date(anchorDate);
+      prevDate.setMonth(prevDate.getMonth() - count);
+      prevDate.setHours(0,0,0,0);
+    } else if (unit === 'year') {
+      prevDate = new Date(anchorDate);
+      prevDate.setFullYear(prevDate.getFullYear() - count);
+      prevDate.setHours(0,0,0,0);
+    }
+  }
+
+  return prevDate ? dateKey(prevDate) : null;
+}
+
 function sleepBonus(score) {
   if (score >= 100) return 3;
   if (score >= 98) return 2;
@@ -459,6 +542,7 @@ function deleteCompletion(id){
   if(idx===-1) return;
 
   const c = state.completions[idx];
+  const completionKey = safeCompletionDateKey(c);
 
   // We never show delete for habits or vices, but guard anyway
   if(c.source === 'habit' || c.source === 'vice') return;
@@ -473,6 +557,10 @@ function deleteCompletion(id){
     const t = state.tasks.find(t=>t.id===c.taskId);
     if(t){
       t.completedAtISO = null;
+
+      // If this was a repeating task, roll the due date back to the instance we just removed
+      const prevDue = computePreviousDueDate(t, completionKey);
+      if(prevDue) t.dueDateISO = prevDue;
     }
   }
 
