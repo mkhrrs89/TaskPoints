@@ -22,10 +22,10 @@
 .high-card {
   background: linear-gradient(
     180deg,
-    rgba(120, 52, 4, 0.22),
-    rgba(90, 35, 6, 0.18)
+    rgba(120, 52, 4, 0.15),
+    rgba(90, 35, 6, 0.10)
   ) !important;
-  border-color: #6b2a08 !important;
+  border-color: #421C07 !important;
 }
     @media (prefers-color-scheme:light){.glass{background:#fff;border-color:#e5e7eb;box-shadow:0 1px 2px rgba(0,0,0,.04)}}
     .btn{border:1px solid var(--border);border-radius:12px;padding:8px 12px;white-space:nowrap}
@@ -1307,6 +1307,7 @@
     margin-top: 4px;
   }
 }
+
 
 
 
