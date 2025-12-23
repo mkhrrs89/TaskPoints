@@ -1118,6 +1118,16 @@
    ============================================ */
 @media (max-width: 640px) {
 
+/* Mobile: push Sleep Add button to the far right */
+.sleep-today-card .stat-input-row{
+  flex-wrap: nowrap;            /* keep it one line */
+}
+
+.sleep-today-card .stat-input-row .btn{
+  margin-left: auto;            /* THIS pushes it to the right */
+}
+
+   
 /* Mobile: slim down the 2 Sleep inputs */
 .sleep-today-card #sleepScoreInput,
 .sleep-today-card #sleepRestedInput{
@@ -1500,6 +1510,7 @@
     color: #f8f9ff;
   }
 }
+
 
 
 
