@@ -317,6 +317,10 @@
       const rollups = TaskPointsCore.buildRollups(state);
       const dayBreakdowns = TaskPointsCore.buildDailyBreakdowns(state);
       const leaderboards = TaskPointsCore.computeLeaderboards(state);
+      const dayCompletions = (state.completions || []).filter(c => {
+        if (!c || !c.completedAtISO) return false;
+        return TaskPointsCore.dateKey(c.completedAtISO) === dateKey;
+      });
 
       const baseActual = Number(rollups.dailyTotals[dateKey]) || 0;
       const { inertia } = TaskPointsCore.computeInertia(rollups.dailyTotals, dateKey);
@@ -381,6 +385,73 @@
         delta: rawLogMatches ? 0 : NaN,
         details: integrityNotes,
         trace: 'state.completions filtered by date'
+      });
+
+      // New: Task linkage integrity
+      const taskLinkNotes = [];
+      const taskIds = new Set((state.tasks || []).map(t => t?.id).filter(Boolean));
+      const completionTaskCounts = {};
+      dayCompletions.forEach(c => {
+        const source = c?.source || 'task';
+        if (!c.taskId || source !== 'task') return;
+        completionTaskCounts[c.taskId] = (completionTaskCounts[c.taskId] || 0) + 1;
+        if (!taskIds.has(c.taskId)) {
+          taskLinkNotes.push(`Completion ${c.id || c.taskId} references missing task ${c.taskId}`);
+        }
+      });
+      Object.entries(completionTaskCounts).forEach(([taskId, count]) => {
+        if (count > 1) {
+          taskLinkNotes.push(`Task ${taskId} completed ${count} times on this day`);
+        }
+      });
+      (state.tasks || []).forEach(t => {
+        if (!t?.completedAtISO) return;
+        if (TaskPointsCore.dateKey(t.completedAtISO) !== dateKey) return;
+        const hasCompletion = dayCompletions.some(c => c?.taskId === t.id);
+        if (!hasCompletion) {
+          taskLinkNotes.push(`Task ${t.title || t.id} marked complete without a matching completion entry`);
+        }
+      });
+      checks.push({
+        id: 'task-linkage',
+        title: 'Task completion links stay in sync',
+        status: taskLinkNotes.length ? 'WARN' : 'PASS',
+        expected: 'Tasks and completions cross-reference cleanly',
+        actual: taskLinkNotes.length ? `${taskLinkNotes.length} issue(s)` : 'All linked',
+        details: taskLinkNotes,
+        trace: 'state.tasks ↔ state.completions'
+      });
+
+      // New: Sleep/work point formulas
+      const formulaIssues = [];
+      dayCompletions.forEach(c => {
+        if (!c) return;
+        const sleepInfo = TaskPointsCore.getSleepInfo(c);
+        if (Number.isFinite(sleepInfo.score)) {
+          const expected = TaskPointsCore.sleepPoints(sleepInfo.score, sleepInfo.rested);
+          const actual = Number(c.points);
+          if (Number.isFinite(actual) && Math.abs(actual - expected) > 0.05) {
+            formulaIssues.push(`Sleep "${c.title || c.id}": expected ${expected.toFixed(2)}, got ${actual.toFixed(2)}`);
+          }
+          return;
+        }
+        const workInfo = TaskPointsCore.getWorkInfo(c);
+        if (Number.isFinite(workInfo.score)) {
+          const expected = TaskPointsCore.workPoints(workInfo.score, workInfo.hours);
+          const actual = Number(c.points);
+          if (Number.isFinite(actual) && Math.abs(actual - expected) > 0.05) {
+            formulaIssues.push(`Work "${c.title || c.id}": expected ${expected.toFixed(2)}, got ${actual.toFixed(2)}`);
+          }
+        }
+      });
+      checks.push({
+        id: 'formula-replay',
+        title: 'Sleep/work points match formulas',
+        status: formulaIssues.length ? 'WARN' : 'PASS',
+        expected: 'Derived points align with sleep/work formulas',
+        actual: formulaIssues.length ? `${formulaIssues.length} mismatch(es)` : 'All aligned',
+        details: formulaIssues,
+        trace: 'TaskPointsCore.sleepPoints/workPoints'
       });
 
       // D) Daily sources consistency
