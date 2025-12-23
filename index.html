@@ -184,44 +184,43 @@
       <!-- LEFT: Big stat + input -->
       <div class="flex-1 min-w-[220px] stat-col stat-col-primary">
         <div class="sleep-today-card">
-          <div class="stat-mobile-header">
-            <div class="stat-compact-row">
-              <h2 id="sleepAnchor" class="font-bold text-base sm:text-lg stat-title">Sleep Score</h2>
-              <div class="stat-compact-controls">
-               <div id="sleepInputRow" class="stat-input-row flex items-center gap-2 flex-wrap">
-                 <input id="sleepScoreInput" class="input w-24 scoreInput" type="number" placeholder="0–100">
-                 <input id="sleepRestedInput" class="input w-24 scoreInput" type="number" placeholder="Rested">
-                <button id="saveSleepScoreBtn" class="btn btn-plum">Add</button>
-               </div>
+<div class="stat-mobile-header">
+  <div class="stat-compact-row">
+    <div class="sleep-title-stack">
+      <h2 id="sleepAnchor" class="font-bold text-base sm:text-lg stat-title">Sleep Score</h2>
+      <!-- Mobile-only: line under the title -->
+      <div id="sleepImpactBelow" class="sleep-impact-below hidden"></div>
+    </div>
 
-                <!-- Mobile-only: one-line summary after today's sleep is logged -->
-<div id="sleepSummaryRow" class="stat-summary-row hidden" aria-live="polite">
-  <span id="sleepSummaryValue" class="stat-summary-value"></span>
+    <div class="stat-compact-controls">
+      <div id="sleepInputRow" class="stat-input-row flex items-center gap-2 flex-wrap">
+        <input id="sleepScoreInput" class="input w-24 scoreInput" type="number" placeholder="0–100">
+        <input id="sleepRestedInput" class="input w-24 scoreInput" type="number" placeholder="Rested">
+        <button id="saveSleepScoreBtn" class="btn btn-plum">Add</button>
+      </div>
 
-  <div id="sleepSummaryRest" class="sleep-rest-chip hidden">
-    <span id="sleepSummaryRestValue"></span>
+      <!-- Mobile-only: right side summary (score + rest chip) -->
+      <div id="sleepSummaryRow" class="stat-summary-row hidden" aria-live="polite">
+        <span id="sleepSummaryValue" class="stat-summary-value"></span>
+        <div id="sleepSummaryRest" class="sleep-rest-chip hidden">
+          <span id="sleepSummaryRestValue"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="stat-compact-meta">
+    <div class="muted text-xs">Today’s Sleep</div>
+    <div class="flex items-center gap-2 flex-wrap">
+      <div class="flex items-baseline gap-2">
+        <div id="sleepTodayValue" class="text-4xl font-extrabold leading-tight stat-value">—</div>
+        <div id="sleepTodayRest" class="sleep-rest-chip hidden"><span id="sleepTodayRestValue"></span></div>
+      </div>
+    </div>
+    <div id="sleepTodayImpact" class="muted text-xs mt-1 stat-impact">Adds 0 pts to today</div>
   </div>
 </div>
 
-
-<!-- Mobile-only: second line under the title -->
-<div id="sleepImpactBelow" class="sleep-impact-below hidden"></div>
-
-
-
-            <div class="stat-compact-meta">
-              <div class="muted text-xs">Today’s Sleep</div>
-              <div class="flex items-center gap-2 flex-wrap">
-                <div class="flex items-baseline gap-2">
-                  <div id="sleepTodayValue" class="text-4xl font-extrabold leading-tight stat-value">—</div>
-                  <div id="sleepTodayRest" class="sleep-rest-chip hidden"><span id="sleepTodayRestValue"></span></div>
-                </div>
-              </div>
-              <div id="sleepTodayImpact" class="muted text-xs mt-1 stat-impact">Adds 0 pts to today</div>
-            </div>
-          </div>
-        </div>
-      </div>
 
       <!-- RIGHT: History chips -->
       <div class="flex-1 min-w-[220px] stat-col stat-col-secondary">
