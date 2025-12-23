@@ -303,6 +303,53 @@ function computeYouStats() {
         return computeYouStats();
       }
 
+      // 1) Prefer matchup-derived results (true W/L against opponents)
+      const matchups = latestState && Array.isArray(latestState.matchups)
+        ? latestState.matchups
+        : [];
+
+      if (matchups.length) {
+        let games = 0;
+        let wins = 0;
+        let losses = 0;
+        let totalPoints = 0;
+
+        for (const m of matchups) {
+          if (!m) continue;
+          const isA = m.playerAId === p.id;
+          const isB = m.playerBId === p.id;
+          if (!isA && !isB) continue;
+
+          const aScore = Number(m.scoreA);
+          const bScore = Number(m.scoreB);
+          if (!Number.isFinite(aScore) || !Number.isFinite(bScore)) continue;
+
+          const playerScore = isA ? aScore : bScore;
+          const oppScore    = isA ? bScore : aScore;
+
+          games++;
+          totalPoints += playerScore;
+
+          if (playerScore > oppScore) wins++;
+          else if (playerScore < oppScore) losses++;
+          // ties do not affect W/L
+        }
+
+        if (games) {
+          const avgPPD = totalPoints / games;
+          const winPct = (wins + losses)
+            ? (wins / (wins + losses)) * 100
+            : null;
+          const baseline = Number.isFinite(p?.baseline)
+            ? Number(p.baseline)
+            : (Number(p?.baseline) || null);
+          const ppd = Number.isFinite(baseline) ? (avgPPD - baseline) : null;
+
+          return { games, wins, losses, winPct, avgPPD, ppd };
+        }
+      }
+
+      // 2) Fallback: legacy gameHistory vs baseline model
       if (!Array.isArray(gameHistory) || !gameHistory.length) {
         return { games:0, wins:0, losses:0, winPct:null, avgPPD:null, ppd:null };
       }
