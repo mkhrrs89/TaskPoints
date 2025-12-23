@@ -203,8 +203,10 @@
   </div>
 </div>
 
+
 <!-- Mobile-only: second line under the title -->
 <div id="sleepImpactBelow" class="sleep-impact-below hidden"></div>
+
 
 
             <div class="stat-compact-meta">
@@ -3355,6 +3357,7 @@ const sleepSummaryRest = $('sleepSummaryRest');
 const sleepSummaryRestValue = $('sleepSummaryRestValue');
 const sleepSummaryImpact = $('sleepSummaryImpact');
 
+   const sleepImpactBelow      = $('sleepImpactBelow');
 
 
   
@@ -3398,6 +3401,20 @@ const sleepSummaryImpact = $('sleepSummaryImpact');
         }
 
         const totalPts = sleepPoints(score, rested);
+const base  = score / 10;
+const bonus = sleepBonus(score);
+const rest  = Number.isFinite(rested) ? rested : 0;
+
+const parts = [base];
+if (bonus) parts.push(bonus);
+if (rest)  parts.push(rest);
+
+const breakdown = parts.map(v => Number(v).toFixed(1)).join(' + ');
+
+if (sleepImpactBelow) {
+  sleepImpactBelow.textContent = `adds ${totalPts.toFixed(1)} pts (${breakdown})`;
+}
+
         const restText = hasRest ? ` (${rested >= 0 ? '+' : ''}${rested})` : '';
 
 // --- Mobile summary line: "- 90" and optional (+rested) chip ---
@@ -3460,11 +3477,14 @@ if (sleepSummaryImpact) {
 if (todayEntry) {
   sleepInputRow?.classList.add('hidden');
   sleepSummaryRow?.classList.remove('hidden');
+  sleepImpactBelow?.classList.remove('hidden');
 } else {
   sleepInputRow?.classList.remove('hidden');
   sleepSummaryRow?.classList.add('hidden');
-  if (sleepSummaryImpact) sleepSummaryImpact.textContent = '';
+  sleepImpactBelow?.classList.add('hidden');
+  if (sleepImpactBelow) sleepImpactBelow.textContent = '';
 }
+
 
 
 
