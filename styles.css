@@ -1157,10 +1157,17 @@
 }
 
 .sleep-today-card .stat-compact-controls{
-  width: auto;
-  flex: 0 0 auto;
+  flex: 1 1 auto;     /* allow it to shrink */
+  min-width: 0;       /* REQUIRED for flex shrink to actually work */
   justify-content: flex-end;
 }
+
+   .calories-today-card .stat-compact-controls{
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: flex-end;
+}
+
 
 .sleep-today-card .stat-input-row{
   width: auto;
@@ -1478,6 +1485,7 @@
     color: #f8f9ff;
   }
 }
+
 
 
 
