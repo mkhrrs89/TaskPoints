@@ -702,6 +702,22 @@
 
 /* Mobile: one row you can swipe */
 @media (max-width: 640px){
+
+   /* Sleep post-input: put the impact text on its own line */
+#sleepSummaryRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+#sleepSummaryImpact {
+  flex: 0 0 100%;      /* forces a new line */
+  margin-top: 4px;
+  font-size: 0.9rem;
+  opacity: 0.9;
+}
+
   .recentRow{
     display: flex;
     flex-wrap: nowrap;
@@ -1527,6 +1543,7 @@
     color: #f8f9ff;
   }
 }
+
 
 
 
