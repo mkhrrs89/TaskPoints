@@ -1585,20 +1585,6 @@
 }
 
 
-/* Desktop/tablet: keep stat cards in 2 columns (Sleep + Recent nights side-by-side) */
-@media (min-width: 641px){
-  .stat-card-row{
-    flex-wrap: nowrap;          /* stop stacking */
-  }
-
-  .stat-col,
-  .stat-col-primary,
-  .stat-col-secondary{
-    min-width: 0 !important;    /* allow shrinking instead of wrapping */
-  }
-}
-
-
 
 
 
