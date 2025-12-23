@@ -288,17 +288,22 @@
     // ignore the synthetic click that follows.
     function bindPress(id, handler) {
       const el = $(id);
-      if (!el) return;
-      el.addEventListener('pointerdown', (e) => {
-        e.preventDefault();
-        handler(e);
-        el.dataset.ignoreClick = '1';
+    if (!el) return;
+    el.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      handler(e);
+      el.dataset.ignoreClick = '1';
         setTimeout(() => delete el.dataset.ignoreClick, 300);
       });
       el.addEventListener('click', (e) => {
         if (el.dataset.ignoreClick) return;
         handler(e);
-      });
+    });
+  }
+
+    function matchupDateKey(m) {
+      if (!m) return '';
+      return m.dateKey || m.date || (m.dateISO ? TaskPointsCore.dateKey(m.dateISO) : '');
     }
 
     function runAudit() {
@@ -433,6 +438,37 @@
         details: recordIssues,
         trace: 'state.matchups vs. completions',
         tips: 'When matchups exist, prefer their win/loss record over daily-average fallback so views stay consistent.'
+      });
+
+      // New: verify your matchup scores match recomputed daily totals (with inertia)
+      const youTotalsWithInertia = TaskPointsCore.youDailyTotalsWithInertia(state);
+      const matchupScoreIssues = [];
+
+      (state.matchups || []).forEach(m => {
+        if (!m || (m.playerAId !== 'YOU' && m.playerBId !== 'YOU')) return;
+        const key = matchupDateKey(m);
+        const expectedScore = Number(youTotalsWithInertia[key]);
+        if (!Number.isFinite(expectedScore)) return;
+
+        const storedScore = m.playerAId === 'YOU' ? Number(m.scoreA) : Number(m.scoreB);
+        if (!Number.isFinite(storedScore)) return;
+
+        const delta = storedScore - expectedScore;
+        if (Math.abs(delta) > 0.05) {
+          const dayLabel = TaskPointsCore.niceDate(TaskPointsCore.fromKey(key));
+          matchupScoreIssues.push(`${dayLabel}: stored ${storedScore.toFixed(1)}, expected ${expectedScore.toFixed(1)} (Δ ${delta.toFixed(1)})`);
+        }
+      });
+
+      checks.push({
+        id: 'you-matchup-scores',
+        title: 'Your matchup scores match recomputed totals',
+        status: matchupScoreIssues.length ? 'FAIL' : 'PASS',
+        expected: 'Matchup scores sync to daily totals (incl. inertia)',
+        actual: matchupScoreIssues.length ? `${matchupScoreIssues.length} mismatch(es)` : 'All synced',
+        details: matchupScoreIssues,
+        trace: 'TaskPointsCore.youDailyTotalsWithInertia vs. state.matchups',
+        tips: 'Run matchup sync before viewing standings; mismatches here explain record/PPD drift across pages.'
       });
 
       // G) Game / matchup consistency (lightweight)

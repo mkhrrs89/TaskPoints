@@ -246,7 +246,9 @@ function computeYouStats() {
 
   const dayMap = {};
   for (const c of s.completions) {
-    const day = c.dateKey;
+    const day = (window.TaskPointsCore && typeof TaskPointsCore.dateKey === "function")
+      ? TaskPointsCore.dateKey(c.completedAtISO || c.dateKey)
+      : (c.dateKey || "");
     if (!day) continue;
     const pts = Number(c.points || 0);
     if (!dayMap[day]) dayMap[day] = 0;
