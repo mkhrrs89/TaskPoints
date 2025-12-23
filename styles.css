@@ -1245,6 +1245,16 @@
     margin: 0;
   }
 
+   /* FORCE-hide the input row when Tailwind adds .hidden */
+.sleep-today-card #sleepInputRow.hidden{
+  display: none !important;
+}
+
+/* (Optional, but consistent) Force-hide summary row when hidden */
+.sleep-today-card #sleepSummaryRow.hidden{
+  display: none !important;
+}
+
 
   /* =========================
      CALORIES CARD (MOBILE)
@@ -1573,6 +1583,7 @@
     color: #f8f9ff;
   }
 }
+
 
 
 
