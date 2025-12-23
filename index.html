@@ -188,23 +188,22 @@
             <div class="stat-compact-row">
               <h2 id="sleepAnchor" class="font-bold text-base sm:text-lg stat-title">Sleep Score</h2>
               <div class="stat-compact-controls">
-<div id="sleepInputRow" class="stat-input-row flex items-center gap-2 flex-wrap">
-  <input id="sleepScoreInput" class="input w-24 scoreInput" type="number" placeholder="0–100">
-  <input id="sleepRestedInput" class="input w-24 scoreInput" type="number" placeholder="Rested">
-  <button id="saveSleepScoreBtn" class="btn btn-plum">Add</button>
-</div>
+               <div id="sleepInputRow" class="stat-input-row flex items-center gap-2 flex-wrap">
+                 <input id="sleepScoreInput" class="input w-24 scoreInput" type="number" placeholder="0–100">
+                 <input id="sleepRestedInput" class="input w-24 scoreInput" type="number" placeholder="Rested">
+                <button id="saveSleepScoreBtn" class="btn btn-plum">Add</button>
+               </div>
 
                 <!-- Mobile-only: one-line summary after today's sleep is logged -->
-<div id="sleepSummaryRow" class="stat-summary-row hidden" aria-live="polite">
-  <span id="sleepSummaryValue" class="stat-summary-value"></span>
-  <div id="sleepSummaryRest" class="sleep-rest-chip hidden">
-    <span id="sleepSummaryRestValue"></span>
-  </div>
-  <span id="sleepSummaryImpact" class="stat-summary-impact"></span>
-</div>
+                 <div id="sleepSummaryRow" class="stat-summary-row hidden" aria-live="polite">
+                  <span id="sleepSummaryValue" class="stat-summary-value"></span>
+                  <div id="sleepSummaryRest" class="sleep-rest-chip hidden">
+                   <span id="sleepSummaryRestValue"></span>
 
               </div>
             </div>
+<!-- Mobile-only: second line under the title -->
+<div id="sleepImpactBelow" class="sleep-impact-below hidden"></div>
 
             <div class="stat-compact-meta">
               <div class="muted text-xs">Today’s Sleep</div>
@@ -3354,6 +3353,8 @@ const sleepSummaryValue    = $('sleepSummaryValue');
 const sleepSummaryRest     = $('sleepSummaryRest');
 const sleepSummaryRestValue= $('sleepSummaryRestValue');
 const sleepSummaryImpact   = $('sleepSummaryImpact');
+
+const sleepImpactBelow = $('sleepImpactBelow');
 
   
   const setTodaySleepEditable = (el) => {
