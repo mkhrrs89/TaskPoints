@@ -3349,13 +3349,12 @@ function renderSleepHistory() {
   const todayRestValue = $('sleepTodayRestValue');
   const sleepInputRow  = $('sleepInputRow');
 
-// Mobile one-line summary row
-const sleepSummaryRow       = $('sleepSummaryRow');
-const sleepSummaryValue     = $('sleepSummaryValue');
-const sleepSummaryRest      = $('sleepSummaryRest');
+const sleepSummaryRow = $('sleepSummaryRow');
+const sleepSummaryValue = $('sleepSummaryValue');
+const sleepSummaryRest = $('sleepSummaryRest');
 const sleepSummaryRestValue = $('sleepSummaryRestValue');
+const sleepSummaryImpact = $('sleepSummaryImpact');
 
-const sleepImpactBelow      = $('sleepImpactBelow');
 
 
   
@@ -3417,8 +3416,7 @@ if (sleepSummaryValue && sleepSummaryRow) {
   }
 }
 
-// --- Second line under title: "adds xx pts (...)" ---
-if (sleepImpactBelow) {
+if (sleepSummaryImpact) {
   const base  = score / 10;
   const bonus = sleepBonus(score);
   const rest  = Number.isFinite(rested) ? rested : 0;
@@ -3428,8 +3426,9 @@ if (sleepImpactBelow) {
   if (rest)  parts.push(rest);
 
   const breakdown = parts.map(v => Number(v).toFixed(1)).join(' + ');
-  sleepImpactBelow.textContent = `adds ${totalPts.toFixed(1)} pts (${breakdown})`;
+  sleepSummaryImpact.textContent = `adds ${totalPts.toFixed(1)} pts (${breakdown})`;
 }
+
 
 
         
@@ -3461,13 +3460,12 @@ if (sleepImpactBelow) {
 if (todayEntry) {
   sleepInputRow?.classList.add('hidden');
   sleepSummaryRow?.classList.remove('hidden');
-  sleepImpactBelow?.classList.remove('hidden');
 } else {
   sleepInputRow?.classList.remove('hidden');
   sleepSummaryRow?.classList.add('hidden');
-  sleepImpactBelow?.classList.add('hidden');
-  if (sleepImpactBelow) sleepImpactBelow.textContent = '';
+  if (sleepSummaryImpact) sleepSummaryImpact.textContent = '';
 }
+
 
 
 
