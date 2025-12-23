@@ -1109,6 +1109,12 @@
    ============================================ */
 @media (max-width: 640px) {
 
+/* Mobile: slim down the 2 Sleep inputs */
+.sleep-today-card #sleepScoreInput,
+.sleep-today-card #sleepRestedInput{
+  width: 58px !important;   /* try 52–68px */
+}
+   
 /* Prevent the ONE-LINE summary from forcing the whole card wider */
 .sleep-today-card .stat-compact-row,
 .calories-today-card .stat-compact-row{
@@ -1175,7 +1181,7 @@
 }
 
 .sleep-today-card .stat-input-row .input{
-  width: 72px !important;
+  width: 58px !important;
   min-width: 0;
 }
 
@@ -1485,6 +1491,7 @@
     color: #f8f9ff;
   }
 }
+
 
 
 
