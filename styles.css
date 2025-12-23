@@ -1219,11 +1219,16 @@
 }
 
 /* Mobile: slightly inset the Sleep/Calories header so the bubble matches other cards */
-.sleep-today-card .stat-mobile-header,
-.calories-today-card .stat-mobile-header{
-  width: calc(100% - 12px);
-  margin: 0 6px;
+.sleep-today-card .stat-mobile-header{
+  width: 100%;
+  margin: 0;
 }
+
+.calories-today-card .stat-mobile-header{
+  width: 100%;
+  margin: 0;
+}
+
 
    
 }
@@ -1510,6 +1515,7 @@
     color: #f8f9ff;
   }
 }
+
 
 
 
