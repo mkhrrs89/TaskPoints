@@ -716,6 +716,15 @@
   }
 }
 
+/* Mobile: center "Add" text inside the Sleep button */
+.sleep-today-card .stat-input-row .btn{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+
 /* Compact score inputs used in the 4 cards */
 .scoreInput{
   height: 34px;          /* shorter */
@@ -1491,6 +1500,7 @@
     color: #f8f9ff;
   }
 }
+
 
 
 
