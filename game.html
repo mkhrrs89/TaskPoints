@@ -253,7 +253,7 @@
       <li><strong>Variance</strong>: How swingy they are night-to-night.</li>
       <li><strong>Momentum</strong>: How much recent good/bad nights affect next game.</li>
       <li><strong>Risky</strong>: How much they chase boom-or-bust lines.</li>
-      <li><strong>Variance Tilt</strong>: What % of their swings land <em>below</em> baseline (0% = always above, 100% = always below).</li>
+      <li><strong>Variance Tilt</strong>: What % of their swings land <em>above</em> baseline (0% = always below, 100% = always above).</li>
       <li><strong>Style</strong>: Just flavor text for now (can inform future sim tweaks).</li>
     </ul>
   </div>
@@ -310,9 +310,10 @@
             <span id="playerVarianceTiltLabel" class="opacity-60">50%</span>
           </label>
           <input id="playerVarianceTilt" type="range" min="0" max="100" class="input mt-1" value="50">
-          <p class="text-[11px] opacity-60 mt-1">
-            Percent of swings that fall <em>below</em> baseline.
-          </p>
+<p class="text-[11px] opacity-60 mt-1">
+  Percent of swings that land <em>above</em> baseline.
+</p>
+
         </div>
         <div>
           <label class="text-xs muted">Momentum</label>
@@ -808,7 +809,7 @@ function simulateAiScoreForPlayer(player, todayKey){
   const riskyNormalized = riskyRating > 10 ? riskyRating / 10 : riskyRating;
 
   const variationMagnitude = Math.random() * variance;
-  const variationSign = Math.random() < varianceTilt ? -1 : 1;
+  const variationSign = Math.random() < varianceTilt ? 1 : -1;
   const variation = variationMagnitude * variationSign;
 
   let momentumBonus = 0;
@@ -2342,6 +2343,7 @@ async function fileToDataUrl(file) {
   </button>
 </body>
 </html>
+
 
 
 
