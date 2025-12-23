@@ -1135,131 +1135,161 @@
 
 @media (max-width: 640px) {
 
-/* Sleep: move "adds X pts..." onto its own line under the title */
-.sleep-today-card .sleep-impact-below{
-  margin-top: 6px;
-  font-size: 12px;
-  opacity: 0.85;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+  /* =========================
+     SLEEP CARD (MOBILE)
+     Goal:
+     - "Adds X pts..." sits LEFT under title
+     - Right side shows either inputs OR summary (93 + +1.2)
+     ========================= */
 
-   
-/* Mobile: push Sleep Add button to the far right */
-.sleep-today-card .stat-input-row{
-  flex-wrap: nowrap;            /* keep it one line */
-}
+  /* The header row should be: [title stack] [right controls] */
+  .sleep-today-card .stat-compact-row{
+    flex-direction: row;
+    align-items: flex-start;     /* title + adds line align to the top */
+    justify-content: space-between;
+    flex-wrap: nowrap;
+    min-width: 0;                /* allow flex children to shrink */
+  }
 
-.sleep-today-card .stat-input-row .btn{
-  margin-left: auto;            /* THIS pushes it to the right */
-}
+  /* Left stack: title + adds line */
+  .sleep-today-card .sleep-title-stack{
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
 
-   
-/* Mobile: slim down the 2 Sleep inputs */
-.sleep-today-card #sleepScoreInput,
-.sleep-today-card #sleepRestedInput{
-  width: 58px !important;   /* try 52–68px */
-}
-   
-/* Prevent the ONE-LINE summary from forcing the whole card wider */
-.sleep-today-card .stat-compact-row,
-.calories-today-card .stat-compact-row{
-  min-width: 0;
-}
+  .sleep-today-card .stat-title{
+    white-space: nowrap;
+  }
 
-.sleep-today-card .stat-compact-controls,
-.calories-today-card .stat-compact-controls{
-  min-width: 0;
-}
+  /* The "Adds ..." line under title (wrap, no ellipsis) */
+  .sleep-today-card .sleep-impact-below{
+    text-align: left;
+    white-space: normal;         /* ✅ wraps */
+    overflow: visible;           /* ✅ no clipping */
+    text-overflow: clip;
+    font-size: 12px;
+    opacity: 0.85;
+    margin-top: 0;
+  }
 
-.sleep-today-card .stat-summary-row,
-.calories-today-card .stat-summary-row{
-  min-width: 0;
-}
+  /* Right side: input row OR summary row, aligned to the right */
+  .sleep-today-card .stat-compact-controls{
+    flex: 0 0 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+  }
 
-.sleep-today-card .stat-summary-impact,
-.calories-today-card .stat-summary-impact{
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1 1 auto;
-}
+  /* Inputs: keep on one line + slim widths */
+  .sleep-today-card .stat-input-row{
+    width: auto;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: nowrap;
+    gap: 8px;
+    min-width: 0;
+  }
 
-   
-  /* Task content block (title + badges + buttons) */
-  .task-card-content {
+  .sleep-today-card #sleepScoreInput,
+  .sleep-today-card #sleepRestedInput{
+    width: 58px !important;
+    min-width: 0;
+  }
+
+  /* Push Add button to the far right */
+  .sleep-today-card .stat-input-row .btn{
+    flex: 0 0 auto;
+    margin-left: auto;
+  }
+
+  /* Summary row: ONLY show when JS removes .hidden */
+  .sleep-today-card .stat-summary-row{
+    min-width: 0;
+  }
+  .sleep-today-card .stat-summary-row:not(.hidden){
+    display: flex;               /* overrides base display:none */
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: nowrap;
+    gap: 8px;
+    white-space: nowrap;
+  }
+
+  .sleep-today-card .stat-summary-value{
+    font-size: 28px;
+    font-weight: 800;
+    line-height: 1;
+  }
+
+  /* Make the +1.2 pill look like a small corner chip on mobile */
+  .sleep-today-card #sleepSummaryRow .sleep-rest-chip{
+    font-size: 12px;
+    padding: 3px 10px;
+    line-height: 1.1;
+  }
+
+  /* Hide the big “Today’s Sleep” block on mobile */
+  .sleep-today-card .stat-compact-meta{
+    display: none;
+  }
+
+  /* Keep the bubble aligned like other cards */
+  .sleep-today-card .stat-mobile-header{
+    width: 100%;
+    margin: 0;
+  }
+
+
+  /* =========================
+     CALORIES CARD (MOBILE)
+     (keep it from forcing width)
+     ========================= */
+
+  .calories-today-card .stat-compact-row,
+  .calories-today-card .stat-compact-controls,
+  .calories-today-card .stat-summary-row{
+    min-width: 0;
+  }
+
+  .calories-today-card .stat-summary-row:not(.hidden){
+    display: flex;
+  }
+
+  .calories-today-card .stat-summary-impact{
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1 1 auto;
+  }
+
+  .calories-today-card .stat-mobile-header{
+    width: 100%;
+    margin: 0;
+  }
+
+
+  /* =========================
+     TASK CARDS (MOBILE)
+     (your existing compact tweaks)
+     ========================= */
+
+  .task-card-content{
     margin-left: 3.75rem; /* tune this number for exact spacing */
   }
 
-  /* Points block (big number + PTS) */
-  .task-card-points {
+  .task-card-points{
     width: 3.5rem; /* slightly narrower than default */
   }
-   /* Sleep top card: keep header to ONE line on mobile */
-.sleep-today-card .stat-compact-row{
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: nowrap;
+
 }
 
-.sleep-today-card .stat-title{
-  white-space: nowrap;
-}
-
-.sleep-today-card .stat-compact-controls{
-  flex: 1 1 auto;     /* allow it to shrink */
-  min-width: 0;       /* REQUIRED for flex shrink to actually work */
-  justify-content: flex-end;
-}
-
-   .calories-today-card .stat-compact-controls{
-  flex: 1 1 auto;
-  min-width: 0;
-  justify-content: flex-end;
-}
-
-
-.sleep-today-card .stat-input-row{
-  width: auto;
-  flex-wrap: nowrap;
-}
-
-.sleep-today-card .stat-input-row .input{
-  width: 58px !important;
-  min-width: 0;
-}
-
-.sleep-today-card .stat-input-row .btn{
-  flex: 0 0 auto;
-}
-
-/* Hide the big “Today’s Sleep” block on mobile */
-.sleep-today-card .stat-compact-meta{
-  display: none;
-}
-
-/* Show the one-line summary row on mobile (when JS removes .hidden) */
-.sleep-today-card .stat-summary-row{
-  display: flex;
-}
-
-/* Mobile: slightly inset the Sleep/Calories header so the bubble matches other cards */
-.sleep-today-card .stat-mobile-header{
-  width: 100%;
-  margin: 0;
-}
-
-.calories-today-card .stat-mobile-header{
-  width: 100%;
-  margin: 0;
-}
-
-
-   
-}
 
 /* ============================================
    Add Task modal: mobile alignment + iOS caret fix
@@ -1543,6 +1573,7 @@
     color: #f8f9ff;
   }
 }
+
 
 
 
