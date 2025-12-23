@@ -485,7 +485,7 @@
     const totals = {};
 
     keys.forEach(key => {
-      const snapshot = buildDaySnapshot(normalized, key);
+      const snapshot = buildDaySnapshot(key, normalized);
       const totalsForDay = computeDayTotals(snapshot);
       totals[key] = totalsForDay.total;
     });

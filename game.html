@@ -1283,7 +1283,7 @@ function computeTodayPoints() {
   const todayKey = dateKey(today);
 
   if (window.TaskPointsCore && typeof TaskPointsCore.buildDaySnapshot === "function" && typeof TaskPointsCore.computeDayTotals === "function") {
-    const snapshot = TaskPointsCore.buildDaySnapshot(state, todayKey);
+    const snapshot = TaskPointsCore.buildDaySnapshot(todayKey, state);
     const totals = TaskPointsCore.computeDayTotals(snapshot);
     return Number((totals.total || 0).toFixed(1));
   }
