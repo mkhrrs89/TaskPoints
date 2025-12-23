@@ -195,15 +195,17 @@
                </div>
 
                 <!-- Mobile-only: one-line summary after today's sleep is logged -->
-                 <div id="sleepSummaryRow" class="stat-summary-row hidden" aria-live="polite">
-                  <span id="sleepSummaryValue" class="stat-summary-value"></span>
-                  <div id="sleepSummaryRest" class="sleep-rest-chip hidden">
-                   <span id="sleepSummaryRestValue"></span>
+<div id="sleepSummaryRow" class="stat-summary-row hidden" aria-live="polite">
+  <span id="sleepSummaryValue" class="stat-summary-value"></span>
 
-              </div>
-            </div>
+  <div id="sleepSummaryRest" class="sleep-rest-chip hidden">
+    <span id="sleepSummaryRestValue"></span>
+  </div>
+</div>
+
 <!-- Mobile-only: second line under the title -->
 <div id="sleepImpactBelow" class="sleep-impact-below hidden"></div>
+
 
             <div class="stat-compact-meta">
               <div class="muted text-xs">Today’s Sleep</div>
@@ -3348,13 +3350,13 @@ function renderSleepHistory() {
   const sleepInputRow  = $('sleepInputRow');
 
 // Mobile one-line summary row
-const sleepSummaryRow      = $('sleepSummaryRow');
-const sleepSummaryValue    = $('sleepSummaryValue');
-const sleepSummaryRest     = $('sleepSummaryRest');
-const sleepSummaryRestValue= $('sleepSummaryRestValue');
-const sleepSummaryImpact   = $('sleepSummaryImpact');
+const sleepSummaryRow       = $('sleepSummaryRow');
+const sleepSummaryValue     = $('sleepSummaryValue');
+const sleepSummaryRest      = $('sleepSummaryRest');
+const sleepSummaryRestValue = $('sleepSummaryRestValue');
 
-const sleepImpactBelow = $('sleepImpactBelow');
+const sleepImpactBelow      = $('sleepImpactBelow');
+
 
   
   const setTodaySleepEditable = (el) => {
@@ -3399,8 +3401,8 @@ const sleepImpactBelow = $('sleepImpactBelow');
         const totalPts = sleepPoints(score, rested);
         const restText = hasRest ? ` (${rested >= 0 ? '+' : ''}${rested})` : '';
 
-// --- Mobile summary line: " - 90 (+1)  adds 10 pts (9.0 + 1.0)" ---
-if (sleepSummaryValue && sleepSummaryImpact && sleepSummaryRow) {
+// --- Mobile summary line: "- 90" and optional (+rested) chip ---
+if (sleepSummaryValue && sleepSummaryRow) {
   sleepSummaryValue.textContent = `- ${score}`;
 
   // show (+rested) chip
@@ -3413,19 +3415,22 @@ if (sleepSummaryValue && sleepSummaryImpact && sleepSummaryRow) {
       sleepSummaryRestValue.textContent = '';
     }
   }
+}
 
+// --- Second line under title: "adds xx pts (...)" ---
+if (sleepImpactBelow) {
   const base  = score / 10;
   const bonus = sleepBonus(score);
   const rest  = Number.isFinite(rested) ? rested : 0;
 
-  // Breakdown parts: always show base, only show bonus/rest if nonzero
   const parts = [base];
   if (bonus) parts.push(bonus);
   if (rest)  parts.push(rest);
 
   const breakdown = parts.map(v => Number(v).toFixed(1)).join(' + ');
-  sleepSummaryImpact.textContent = `adds ${totalPts.toFixed(1)} pts (${breakdown})`;
+  sleepImpactBelow.textContent = `adds ${totalPts.toFixed(1)} pts (${breakdown})`;
 }
+
 
         
         todayImpactEl.textContent = `Adds ${totalPts.toFixed(1)} pts to today${restText}`;
@@ -3456,11 +3461,13 @@ if (sleepSummaryValue && sleepSummaryImpact && sleepSummaryRow) {
 if (todayEntry) {
   sleepInputRow?.classList.add('hidden');
   sleepSummaryRow?.classList.remove('hidden');
+  sleepImpactBelow?.classList.remove('hidden');
 } else {
   sleepInputRow?.classList.remove('hidden');
   sleepSummaryRow?.classList.add('hidden');
+  sleepImpactBelow?.classList.add('hidden');
+  if (sleepImpactBelow) sleepImpactBelow.textContent = '';
 }
-
 
 
 
