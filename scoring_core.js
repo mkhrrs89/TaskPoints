@@ -149,7 +149,52 @@
       stripImages: true
     };
     const aggressive = pruneStateForStorage(stripped, aggressiveLimits);
-    return attemptSave(aggressive, true);
+    try {
+      return attemptSave(aggressive, true);
+    } catch (err) {
+      if (!isQuotaError(err)) throw err;
+    }
+
+    const fallbackLimitSets = [
+      { maxCompletions: 1000, maxGameHistory: 500, maxMatchups: 500, maxWorkHistory: 500 },
+      { maxCompletions: 500, maxGameHistory: 250, maxMatchups: 250, maxWorkHistory: 250 },
+      { maxCompletions: 250, maxGameHistory: 125, maxMatchups: 125, maxWorkHistory: 125 },
+      { maxCompletions: 100, maxGameHistory: 50, maxMatchups: 50, maxWorkHistory: 50 }
+    ];
+
+    for (const limits of fallbackLimitSets) {
+      const tightenedLimits = {
+        ...options.limits,
+        maxCompletions: capLimit(options.limits?.maxCompletions, limits.maxCompletions),
+        maxGameHistory: capLimit(options.limits?.maxGameHistory, limits.maxGameHistory),
+        maxMatchups: capLimit(options.limits?.maxMatchups, limits.maxMatchups),
+        maxWorkHistory: capLimit(options.limits?.maxWorkHistory, limits.maxWorkHistory),
+        stripImages: true
+      };
+      const tightened = pruneStateForStorage(aggressive, tightenedLimits);
+      try {
+        return attemptSave(tightened, true);
+      } catch (err) {
+        if (!isQuotaError(err)) throw err;
+      }
+    }
+
+    const emergency = {
+      ...aggressive,
+      completions: aggressive.completions.slice(0, 50),
+      gameHistory: [],
+      matchups: [],
+      schedule: [],
+      opponentDripSchedules: [],
+      workHistory: [],
+      youImage: "",
+      players: aggressive.players.map(p => {
+        if (!p || typeof p !== 'object') return p;
+        return { ...p, imageData: "" };
+      })
+    };
+
+    return attemptSave(emergency, true);
   }
 
   function dateKey(d){

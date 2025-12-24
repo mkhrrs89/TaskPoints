@@ -119,6 +119,13 @@ function loadRawStateFallback() {
 
 function saveStateSnapshotFallback(next) {
   try {
+    if (window.TaskPointsCore?.mergeAndSaveState) {
+      const { trimmed } = TaskPointsCore.mergeAndSaveState(next, { storageKey: STORAGE_KEY_FALLBACK });
+      if (trimmed) {
+        console.warn('Storage nearing capacity. Older history items were trimmed to keep saves working.');
+      }
+      return;
+    }
     localStorage.setItem(STORAGE_KEY_FALLBACK, JSON.stringify(next));
   } catch (e) {
     console.error('Failed to save imported state (toolbar.js)', e);
