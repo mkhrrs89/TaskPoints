@@ -1267,6 +1267,49 @@
     min-width: 0;
   }
 
+@media (max-width: 640px){
+  /* Calories: make pre-input stay on ONE line */
+  .calories-today-card #caloriesInputRow{
+    flex-wrap: nowrap !important;
+  }
+  .calories-today-card #caloriesInput{
+    width: 78px;            /* tweak if needed */
+    min-width: 0;
+  }
+  .calories-today-card #saveCaloriesBtn{
+    margin-left: auto;      /* keeps Add pinned right */
+  }
+
+  /* Make "hidden" actually win over flex classes */
+  .calories-today-card #caloriesInputRow.hidden{
+    display: none !important;
+  }
+
+  /* Post-input: show the mobile summary + impact line */
+  .calories-today-card #caloriesSummaryRow:not(.hidden){
+    display: flex;
+    justify-content: flex-end;
+  }
+  .calories-today-card .stat-summary-value{
+    font-size: 22px;
+    font-weight: 800;
+    line-height: 1;
+  }
+
+  .calories-today-card .cal-impact-below{
+    margin-top: 6px;
+    font-size: 12px;
+    opacity: 0.85;
+    width: 100%;
+    text-align: left;
+  }
+
+  /* Optional: hide the big “Today’s Calories” block on mobile
+     (Sleep hides its meta area on mobile in the new setup) */
+  /* .calories-today-card .stat-compact-meta{ display:none; } */
+}
+
+   
   .calories-today-card .stat-summary-row:not(.hidden){
     display: flex;
   }
@@ -1583,6 +1626,7 @@
     color: #f8f9ff;
   }
 }
+
 
 
 
