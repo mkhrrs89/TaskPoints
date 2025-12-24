@@ -1483,6 +1483,34 @@
    Mobile layout tweaks for stat cards + chips
    ============================================ */
 @media (max-width: 640px){
+
+   /* Calories mobile: make the chips feel INSIDE the teal bubble */
+.calories-glass .stat-card-row{
+  gap: 0 !important;              /* removes the gap between stacked columns */
+}
+
+/* top half (title/inputs/summary) has only TOP rounded corners */
+.calories-glass .calories-today-card{
+  border-radius: 16px 16px 0 0;
+  padding-bottom: 12px;
+}
+
+/* bottom half (Recent days + chips) becomes the continuation of the bubble */
+.calories-glass .stat-col-secondary{
+  background: linear-gradient(180deg, #0f4d4d, #0a2f2f);
+  border-radius: 0 0 16px 16px;
+  padding: 12px 16px 16px;
+}
+
+/* tighten spacing so it looks like one card */
+.calories-glass .stat-col-secondary .flex.items-center.justify-between{
+  margin-bottom: 8px !important;
+}
+
+.calories-glass .stat-col-secondary .recentWrap{
+  margin: 0 !important;
+}
+
   .sleep-today-card,
   .calories-today-card,
   .work-today-card,
@@ -1693,6 +1721,7 @@
     color: #f8f9ff;
   }
 }
+
 
 
 
