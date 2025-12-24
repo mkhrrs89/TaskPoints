@@ -703,6 +703,73 @@
 /* Mobile: one row you can swipe */
 @media (max-width: 640px){
 
+   /* Calories: title stack like Sleep */
+.calories-today-card .cal-title-stack{
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Calories: impact line under title (wrap) */
+.calories-today-card .cal-impact-below{
+  text-align: left;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+/* Calories: right side behaves like Sleep */
+.calories-today-card .stat-compact-controls{
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+/* BEFORE logged: keep inputs on one line */
+.calories-today-card #caloriesInputRow:not(.hidden){
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+  gap: 8px;
+}
+
+/* Slim the calories input on mobile */
+.calories-today-card #caloriesInput{
+  width: 58px !important;
+  min-width: 0;
+}
+
+/* AFTER logged: show summary row */
+.calories-today-card #caloriesSummaryRow:not(.hidden){
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.calories-today-card .stat-summary-value{
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+/* Hide the big meta block on mobile (like Sleep) */
+.calories-today-card .stat-compact-meta{
+  display: none;
+}
+
+/* Make mobile Calories header gradient match chips */
+.calories-today-card .stat-mobile-header{
+  background: linear-gradient(180deg, #0f4d4d, #0a2f2f);
+}
+
    /* Sleep post-input: put the impact text on its own line */
 #sleepSummaryRow {
   display: flex;
@@ -1626,6 +1693,7 @@
     color: #f8f9ff;
   }
 }
+
 
 
 
