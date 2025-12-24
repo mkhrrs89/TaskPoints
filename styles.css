@@ -41,8 +41,8 @@ body {
 /* --- Mobile-only tweaks (END) ------------------------------------------- */
 
 
-/* --- Light mode overrides (START) ---------------------------------------
-   If the device prefers light mode, swap body bg/text colors. */
+/* --- Light mode overrides (START) --------------------------------------- */
+/* If the device prefers light mode, swap body bg/text colors. */
 @media (prefers-color-scheme: light) {
   body {
     background: #fafafa;
@@ -2051,3 +2051,4 @@ body {
     color: #f8f9ff;
   }
 }
+
