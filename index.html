@@ -1029,6 +1029,9 @@ function syncStateWithMatchups(current){
   const { state: nextState, changed } = TaskPointsCore.syncYouMatchups(current);
   if (changed) {
     try {
+      if (window.TaskPointsCore?.mergeAndSaveState) {
+        return TaskPointsCore.mergeAndSaveState(nextState).state;
+      }
       localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
     } catch (e) {
       console.error('Failed to persist synced matchups', e);
@@ -1365,6 +1368,14 @@ function normalizeState(s) {
 
 function save() {
   try {
+    if (window.TaskPointsCore?.mergeAndSaveState) {
+      const { state: merged, trimmed } = TaskPointsCore.mergeAndSaveState(state);
+      if (trimmed) {
+        console.warn('Storage nearing capacity. Older history items were trimmed to keep saves working.');
+      }
+      state = merged;
+      return;
+    }
     const raw = localStorage.getItem(STORAGE_KEY);
     const existing = raw ? (JSON.parse(raw) || {}) : {};
     const merged = normalizeState({ ...existing, ...state });

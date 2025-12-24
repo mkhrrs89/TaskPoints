@@ -58,6 +58,61 @@
     return { state: normalizeState(parsed), storageKeysFound };
   }
 
+  function isQuotaError(err) {
+    if (!err) return false;
+    return err.name === 'QuotaExceededError'
+      || err.name === 'NS_ERROR_DOM_QUOTA_REACHED'
+      || err.code === 22
+      || err.code === 1014;
+  }
+
+  function pruneStateForStorage(state, limits = {}) {
+    const normalized = normalizeState(state || {});
+    const maxCompletions = Number.isFinite(limits.maxCompletions) ? limits.maxCompletions : 10000;
+    const maxGameHistory = Number.isFinite(limits.maxGameHistory) ? limits.maxGameHistory : 2500;
+    const maxMatchups = Number.isFinite(limits.maxMatchups) ? limits.maxMatchups : 2500;
+    const maxWorkHistory = Number.isFinite(limits.maxWorkHistory) ? limits.maxWorkHistory : 2500;
+
+    if (normalized.completions.length > maxCompletions) {
+      normalized.completions = normalized.completions.slice(0, maxCompletions);
+    }
+    if (normalized.gameHistory.length > maxGameHistory) {
+      normalized.gameHistory = normalized.gameHistory.slice(-maxGameHistory);
+    }
+    if (normalized.matchups.length > maxMatchups) {
+      normalized.matchups = normalized.matchups.slice(-maxMatchups);
+    }
+    if (normalized.workHistory.length > maxWorkHistory) {
+      normalized.workHistory = normalized.workHistory.slice(-maxWorkHistory);
+    }
+
+    return normalized;
+  }
+
+  function mergeAndSaveState(nextState, options = {}) {
+    const storageKey = options.storageKey || STORAGE_KEY;
+    let existing = {};
+    try {
+      const raw = options.raw ?? localStorage.getItem(storageKey);
+      existing = raw ? (JSON.parse(raw) || {}) : {};
+    } catch (e) {
+      console.warn('Failed to parse existing TaskPoints storage; saving fresh state.', e);
+      existing = {};
+    }
+
+    const merged = normalizeState({ ...existing, ...nextState });
+
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(merged));
+      return { state: merged, trimmed: false };
+    } catch (err) {
+      if (!isQuotaError(err)) throw err;
+      const trimmed = pruneStateForStorage(merged, options.limits);
+      localStorage.setItem(storageKey, JSON.stringify(trimmed));
+      return { state: trimmed, trimmed: true };
+    }
+  }
+
   function dateKey(d){
     if (typeof d === 'string') {
       const m = d.match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -563,6 +618,8 @@
     normalizeTask,
     normalizeState,
     loadAppState,
+    pruneStateForStorage,
+    mergeAndSaveState,
     dateKey,
     todayKey,
     fromKey,

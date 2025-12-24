@@ -500,6 +500,13 @@ function normalizeState(s) {
 
 function saveState(nextState) {
   try {
+    if (window.TaskPointsCore?.mergeAndSaveState) {
+      const { state: merged, trimmed } = TaskPointsCore.mergeAndSaveState(nextState);
+      if (trimmed) {
+        console.warn('Storage nearing capacity. Older history items were trimmed to keep saves working.');
+      }
+      return merged;
+    }
     const raw = localStorage.getItem(STORAGE_KEY);
     const existing = raw ? (JSON.parse(raw) || {}) : {};
     const merged = normalizeState({ ...existing, ...nextState });
