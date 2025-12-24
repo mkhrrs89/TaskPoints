@@ -1818,23 +1818,23 @@ body {
    ============================================ */
 @media (max-width: 640px){
 
-/* Calories mobile: make the chips feel INSIDE the teal bubble */
+/* Calories mobile: match Sleep layout */
 .calories-glass .stat-card-row{
-  gap: 0 !important; /* remove gap between stacked halves */
+  gap: 14px !important; /* restore the normal spacing between header + chips */
 }
 
-/* Top half = header bubble (make it top-rounded only) */
 .calories-glass .stat-col-primary .stat-mobile-header{
-  border-radius: 12px 12px 0 0;
+  border-radius: 12px !important; /* full rounded like Sleep */
   background: linear-gradient(180deg, #0f4d4d, #0a2f2f);
+  color: #f8fbff;
 }
 
-/* Bottom half = continuation of the same bubble */
 .calories-glass .stat-col-secondary{
-  background: linear-gradient(180deg, #0f4d4d, #0a2f2f);
-  border-radius: 0 0 12px 12px;
-  padding: 12px 16px 16px;
+  background: transparent !important; /* ✅ this is the fix */
+  border-radius: 0 !important;
+  padding: 0 !important;
 }
+
 
 /* tighten spacing */
 .calories-glass .stat-col-secondary .flex.items-center.justify-between{
@@ -2050,3 +2050,4 @@ body {
     color: #f8f9ff;
   }
 }
+
