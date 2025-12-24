@@ -72,6 +72,7 @@
     const maxGameHistory = Number.isFinite(limits.maxGameHistory) ? limits.maxGameHistory : 2500;
     const maxMatchups = Number.isFinite(limits.maxMatchups) ? limits.maxMatchups : 2500;
     const maxWorkHistory = Number.isFinite(limits.maxWorkHistory) ? limits.maxWorkHistory : 2500;
+    const stripImages = Boolean(limits.stripImages);
 
     if (normalized.completions.length > maxCompletions) {
       normalized.completions = normalized.completions.slice(0, maxCompletions);
@@ -85,8 +86,20 @@
     if (normalized.workHistory.length > maxWorkHistory) {
       normalized.workHistory = normalized.workHistory.slice(-maxWorkHistory);
     }
+    if (stripImages) {
+      normalized.youImage = "";
+      normalized.players = normalized.players.map(p => {
+        if (!p || typeof p !== 'object') return p;
+        return { ...p, imageData: "" };
+      });
+    }
 
     return normalized;
+  }
+
+  function capLimit(current, cap) {
+    if (Number.isFinite(current)) return Math.min(current, cap);
+    return cap;
   }
 
   function mergeAndSaveState(nextState, options = {}) {
@@ -102,15 +115,41 @@
 
     const merged = normalizeState({ ...existing, ...nextState });
 
+    const attemptSave = (candidate, trimmed) => {
+      localStorage.setItem(storageKey, JSON.stringify(candidate));
+      return { state: candidate, trimmed };
+    };
+
     try {
-      localStorage.setItem(storageKey, JSON.stringify(merged));
-      return { state: merged, trimmed: false };
+      return attemptSave(merged, false);
     } catch (err) {
       if (!isQuotaError(err)) throw err;
-      const trimmed = pruneStateForStorage(merged, options.limits);
-      localStorage.setItem(storageKey, JSON.stringify(trimmed));
-      return { state: trimmed, trimmed: true };
     }
+
+    const trimmed = pruneStateForStorage(merged, options.limits);
+    try {
+      return attemptSave(trimmed, true);
+    } catch (err) {
+      if (!isQuotaError(err)) throw err;
+    }
+
+    const stripped = pruneStateForStorage(trimmed, { ...options.limits, stripImages: true });
+    try {
+      return attemptSave(stripped, true);
+    } catch (err) {
+      if (!isQuotaError(err)) throw err;
+    }
+
+    const aggressiveLimits = {
+      ...options.limits,
+      maxCompletions: capLimit(options.limits?.maxCompletions, 2000),
+      maxGameHistory: capLimit(options.limits?.maxGameHistory, 1000),
+      maxMatchups: capLimit(options.limits?.maxMatchups, 1000),
+      maxWorkHistory: capLimit(options.limits?.maxWorkHistory, 1000),
+      stripImages: true
+    };
+    const aggressive = pruneStateForStorage(stripped, aggressiveLimits);
+    return attemptSave(aggressive, true);
   }
 
   function dateKey(d){
