@@ -305,15 +305,11 @@
           <input id="playerVariance" type="number" class="input mt-1" value="40">
         </div>
         <div>
-          <label class="text-xs muted flex items-center justify-between gap-2">
-            <span>Variance Tilt</span>
-            <span id="playerVarianceTiltLabel" class="opacity-60">50%</span>
-          </label>
-          <input id="playerVarianceTilt" type="range" min="0" max="100" class="input mt-1" value="50">
-<p class="text-[11px] opacity-60 mt-1">
-  Percent of swings that land <em>above</em> baseline.
-</p>
-
+          <label class="text-xs muted">Variance Tilt (0–100)</label>
+          <input id="playerVarianceTilt" type="number" min="0" max="100" class="input mt-1" value="50">
+          <p class="text-[11px] opacity-60 mt-1">
+            Percent of swings that land <em>above</em> baseline.
+          </p>
         </div>
         <div>
           <label class="text-xs muted">Momentum</label>
@@ -1757,15 +1753,10 @@ card.innerHTML = `
               />
             </div>
             <div>
-              <label class="opacity-70 block mb-1 flex items-center justify-between gap-1">
-                <span>Variance Tilt</span>
-                <span data-tilt-label class="opacity-60">
-                  ${Number.isFinite(p.varianceTilt) ? `${p.varianceTilt}%` : "50%"}
-                </span>
-              </label>
+              <label class="opacity-70 block mb-1">Variance Tilt (0–100)</label>
               <input
                 data-field="varianceTilt"
-                type="range"
+                type="number"
                 min="0"
                 max="100"
                 class="w-full px-3 py-2 rounded-xl border text-sm"
@@ -1920,16 +1911,6 @@ card.innerHTML = `
     btn.addEventListener("click", handlePlayerAction);
   });
 
-  // Wire up variance tilt slider labels inside edit cards
-  container.querySelectorAll('input[data-field="varianceTilt"]').forEach(input => {
-    const labelEl = input.parentElement.querySelector("[data-tilt-label]");
-    const update = () => {
-      const val = Number(input.value || 0);
-      if (labelEl) labelEl.textContent = `${val}%`;
-    };
-    input.addEventListener("input", update);
-    update();
-  });
 }
     function handlePlayerAction(e){
       const btn = e.currentTarget;
@@ -2178,7 +2159,6 @@ $("createPlayerForm").addEventListener("submit", (e)=>{
     $("playerBaseline").value = "60";
     $("playerVariance").value = "40";
     $("playerVarianceTilt").value = "50";
-    updateCreateVarianceTiltLabel();
     $("playerMomentum").value = "50";
     $("playerRisky").value = "30";
     $("playerStyle").value = "";
@@ -2193,22 +2173,6 @@ $("createPlayerForm").addEventListener("submit", (e)=>{
     addPlayer(null);
   }
 });
-
-
-// Variance tilt label updater (create form)
-const createVarianceTiltInput = $("playerVarianceTilt");
-const createVarianceTiltLabel = $("playerVarianceTiltLabel");
-
-function updateCreateVarianceTiltLabel() {
-  if (!createVarianceTiltInput || !createVarianceTiltLabel) return;
-  const val = Number(createVarianceTiltInput.value || 0);
-  createVarianceTiltLabel.textContent = `${val}%`;
-}
-
-if (createVarianceTiltInput) {
-  createVarianceTiltInput.addEventListener("input", updateCreateVarianceTiltLabel);
-  updateCreateVarianceTiltLabel();
-}
 
 
 // Export / Import / Paste / Reset
