@@ -1185,10 +1185,8 @@ function dateKey(d){
 }
 
     function getGameDayKey(now = new Date()) {
-  // "day closes" at 2:00 AM local time
   const dt = new Date(now);
-  const hour = dt.getHours();
-  if (hour < 2) dt.setDate(dt.getDate() - 1);
+  dt.setHours(0,0,0,0);
   return dateKey(dt);
 }
 
