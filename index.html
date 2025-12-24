@@ -3655,17 +3655,22 @@ if (todayEntry) {
       const titleMatch = todayEntry.title.match(/\((\d+)\)/);
       const calNum = titleMatch ? Number(titleMatch[1]) : null;
 
-      if (calNum != null && !Number.isNaN(calNum)) {
-        todayValueEl.textContent = calNum;
-if (caloriesSummaryValue) caloriesSummaryValue.textContent = String(calNum);
-if (caloriesImpactBelow) caloriesImpactBelow.textContent = `Adds ${pts.toFixed(1)} pts to today`;
+if (calNum != null && !Number.isNaN(calNum)) {
+  const pts = caloriesToPoints(calNum);
 
-        const pts = caloriesToPoints(calNum);
-        todayImpactEl.textContent = `Adds ${pts.toFixed(1)} pts to today`;
-        if (summaryValue) summaryValue.textContent = String(calNum);
-if (impactBelow) impactBelow.textContent = todayImpactEl.textContent;
+  todayValueEl.textContent = calNum;
 
-        todayImpactEl.dataset.empty = 'false';
+  // big meta line (the one that already exists)
+  todayImpactEl.textContent = `Adds ${pts.toFixed(1)} pts to today`;
+  todayImpactEl.dataset.empty = 'false';
+
+  // mobile summary number on the right
+  if (summaryValue) summaryValue.textContent = String(calNum);
+
+  // ✅ the gray line UNDER "Calories" title
+  if (impactBelow) impactBelow.textContent = `adds ${pts.toFixed(1)} pts`;
+}
+
       } else {
         todayValueEl.textContent = '—';
         todayImpactEl.textContent = 'Adds — pts to today';
