@@ -133,6 +133,32 @@
       if (!isQuotaError(err)) throw err;
     }
 
+    const imagePreservingLimitSets = [
+      { maxCompletions: 8000, maxGameHistory: 2000, maxMatchups: 2000, maxWorkHistory: 2000 },
+      { maxCompletions: 5000, maxGameHistory: 1500, maxMatchups: 1500, maxWorkHistory: 1500 },
+      { maxCompletions: 3000, maxGameHistory: 1000, maxMatchups: 1000, maxWorkHistory: 1000 },
+      { maxCompletions: 2000, maxGameHistory: 800, maxMatchups: 800, maxWorkHistory: 800 },
+      { maxCompletions: 1000, maxGameHistory: 500, maxMatchups: 500, maxWorkHistory: 500 },
+      { maxCompletions: 500, maxGameHistory: 250, maxMatchups: 250, maxWorkHistory: 250 }
+    ];
+
+    for (const limits of imagePreservingLimitSets) {
+      const tightenedLimits = {
+        ...options.limits,
+        maxCompletions: capLimit(options.limits?.maxCompletions, limits.maxCompletions),
+        maxGameHistory: capLimit(options.limits?.maxGameHistory, limits.maxGameHistory),
+        maxMatchups: capLimit(options.limits?.maxMatchups, limits.maxMatchups),
+        maxWorkHistory: capLimit(options.limits?.maxWorkHistory, limits.maxWorkHistory),
+        stripImages: false
+      };
+      const tightened = pruneStateForStorage(merged, tightenedLimits);
+      try {
+        return attemptSave(tightened, true);
+      } catch (err) {
+        if (!isQuotaError(err)) throw err;
+      }
+    }
+
     const stripped = pruneStateForStorage(trimmed, { ...options.limits, stripImages: true });
     try {
       return attemptSave(stripped, true);
