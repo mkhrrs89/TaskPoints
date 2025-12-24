@@ -1,15 +1,91 @@
-    *,*::before,*::after{box-sizing:border-box}
-    :root{
-      --bg:#0b0d10;--panel:#11161c;--muted:#8b98a5;--border:#202830;
-      --accent:#4f9cff;--accent2:#7c5cff;--accent3:#22c55e
-    }
-    html,body{-webkit-text-size-adjust:100%}
-    body{background:var(--bg);color:#e6edf6;-webkit-font-smoothing:antialiased}
-    @media (max-width:768px){
-      .page-title{display:none!important}
-    }
-    @media (prefers-color-scheme:light){body{background:#fafafa;color:#0b1220}}
-    .glass{border:1px solid var(--border);background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.03));border-radius:18px;padding:16px;box-shadow:0 1px 0 rgba(255,255,255,.06) inset,0 10px 30px rgba(0,0,0,.25)}
+/* =======================================================================
+   GLOBAL DEFAULTS (START)
+   These apply everywhere unless something later overrides them.
+   ======================================================================= */
+
+/* --- Box sizing (START) -------------------------------------------------
+   This makes width/height math predictable. Most modern CSS uses this. */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+/* --- Box sizing (END) --------------------------------------------------- */
+
+
+/* --- Theme variables (START) --------------------------------------------
+   :root = the "global settings" place.
+   These --variables are your site's color palette / theme knobs. */
+:root {
+  --bg:      #0b0d10;  /* main page background */
+  --panel:   #11161c;  /* card/panel background */
+  --muted:   #8b98a5;  /* muted text */
+  --border:  #202830;  /* borders / dividers */
+
+  --accent:  #4f9cff;  /* primary accent color */
+  --accent2: #7c5cff;  /* secondary accent color */
+  --accent3: #22c55e;  /* success/green accent */
+}
+/* --- Theme variables (END) ---------------------------------------------- */
+
+
+/* --- Base page setup (START) --------------------------------------------
+   html/body defaults + how text looks. */
+html,
+body {
+  -webkit-text-size-adjust: 100%; /* iOS/Safari: don't auto-resize text weirdly */
+}
+
+body {
+  background: var(--bg);
+  color: #e6edf6;
+  -webkit-font-smoothing: antialiased; /* slightly nicer font rendering */
+}
+/* --- Base page setup (END) ---------------------------------------------- */
+
+
+/* --- Mobile-only tweaks (START) -----------------------------------------
+   If screen is 768px wide or smaller (phones/tablets), hide the page title. */
+@media (max-width: 768px) {
+  .page-title {
+    display: none !important;
+  }
+}
+/* --- Mobile-only tweaks (END) ------------------------------------------- */
+
+
+/* --- Light mode overrides (START) ---------------------------------------
+   If the device prefers light mode, swap body bg/text colors. */
+@media (prefers-color-scheme: light) {
+  body {
+    background: #fafafa;
+    color: #0b1220;
+  }
+}
+/* --- Light mode overrides (END) ----------------------------------------- */
+
+
+/* --- "Glass" card style (START) -----------------------------------------
+   This is your frosted-glass looking container styling. */
+.glass {
+  border: 1px solid var(--border);
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.06),
+    rgba(255, 255, 255, 0.03)
+  );
+  border-radius: 18px;
+  padding: 16px;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.06) inset,
+    0 10px 30px rgba(0, 0, 0, 0.25);
+}
+/* --- "Glass" card style (END) ------------------------------------------- */
+
+
+/* =======================================================================
+   PRIORITY CARD COLORS (START)
+   These are special backgrounds/borders for task priority cards.
+   ======================================================================= */
+
 /* Slightly brighter oxblood tint for critical task cards */
 .critical-card {
   background: linear-gradient(
@@ -19,6 +95,8 @@
   ) !important;
   border-color: #4f1f23 !important;
 }
+
+/* High priority card tint */
 .high-card {
   background: linear-gradient(
     180deg,
@@ -27,6 +105,11 @@
   ) !important;
   border-color: #30180C !important;
 }
+
+/* =======================================================================
+   PRIORITY CARD COLORS (END)
+   ======================================================================= */
+
     @media (prefers-color-scheme:light){.glass{background:#fff;border-color:#e5e7eb;box-shadow:0 1px 2px rgba(0,0,0,.04)}}
     .btn{border:1px solid var(--border);border-radius:12px;padding:8px 12px;white-space:nowrap}
     .btn-toolbar{padding:6px 8px;font-size:11px}
@@ -1710,6 +1793,7 @@
     color: #f8f9ff;
   }
 }
+
 
 
 
