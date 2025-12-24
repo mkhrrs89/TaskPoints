@@ -17,8 +17,8 @@
   --accent3: #22c55e;  /* success/green accent */
 }
 
-/* --- Base page setup (START) --------------------------------------------
-   html/body defaults + how text looks. */
+
+/* Base page setup - html/body defaults + how text looks. */
 html,
 body {
   -webkit-text-size-adjust: 100%; /* iOS/Safari: don't auto-resize text weirdly */
@@ -29,7 +29,6 @@ body {
   color: #e6edf6;
   -webkit-font-smoothing: antialiased; /* slightly nicer font rendering */
 }
-/* --- Base page setup (END) ---------------------------------------------- */
 
 
 /* --- Mobile-only tweaks (START) -----------------------------------------
@@ -71,6 +70,11 @@ body {
 /* --- "Glass" card style (END) ------------------------------------------- */
 
 
+
+
+/* =========================
+   SECTION 4 — TASK UI (PRIORITIES)
+   ========================= */
 /* =======================================================================
    PRIORITY CARD COLORS (START)
    These are special backgrounds/borders for task priority cards.
@@ -100,6 +104,11 @@ body {
    PRIORITY CARD COLORS (END)
    ======================================================================= */
 
+
+
+/* =========================
+   SECTION 2 — CORE UI ATOMS (BUTTONS)
+   ========================= */
 /* =======================================================================
    BUTTONS + SCOREBOARD STYLES (START)
    ======================================================================= */
@@ -330,6 +339,12 @@ body {
    BUTTONS + SCOREBOARD STYLES (END)
    ======================================================================= */
 
+
+
+/* =========================
+   SECTION 4 — TASK UI (TODAY BREAKDOWN BAR)
+   ========================= */
+
     /* Today's points breakdown bar */
     .today-breakdown-bar{
       width:100%;
@@ -380,6 +395,12 @@ body {
 
 
 
+
+
+/* =========================
+   SECTION 4 — TASK UI (TASK ACTION BUTTONS)
+   ========================= */
+
     /* New delete style: darker oxblood red */
     .btn-delete{
       background:#3b0b0f;
@@ -396,6 +417,12 @@ body {
       font-size:13px;
     }
 
+
+
+/* =========================
+   SECTION 2 — CORE UI ATOMS (FORMS: INPUTS / SELECTS / TEXTAREA)
+   ========================= */
+
     .input,select,textarea{border:1px solid var(--border);background:#0f1419;color:#e6edf6;border-radius:12px;padding:10px 12px;width:100%}
     @media (prefers-color-scheme:light){.input,select,textarea{background:#fff;color:#0b1220}}
     #sleepEditModalBody{max-width:18rem;font-size:14px}
@@ -410,6 +437,12 @@ body {
     margin: 0 6px;             /* add 6px gap left & right */
   }
 }
+
+
+
+/* =========================
+   SECTION 2 — CORE UI ATOMS (TAGS / PILLS / MUTED TEXT)
+   ========================= */
 
     .tag{border-radius:999px;padding:2px 8px;font-size:12px}
     .tag-high{
@@ -430,6 +463,12 @@ body {
       border:1px solid rgba(248,113,113,0.5);
     }
     .muted{color:var(--muted)}
+
+
+/* =========================
+   SECTION 3 — APP CHROME (HEADER / TOOLBAR / NAV / DROPDOWNS)
+   ========================= */
+
 .toolbar{display:flex;gap:.5rem;flex-wrap:wrap;justify-content:flex-end}
 .header-nav{align-items:center;}
 .nav-btn{display:inline-flex;align-items:center;gap:6px;}
@@ -457,6 +496,10 @@ body {
 .dropdown.open .dropdown-menu{display:flex}
 .dropdown-menu .btn{width:100%;text-align:left;justify-content:flex-start}
 .title-wrap{flex:1 1 auto;min-width:0}
+
+
+
+/* --- APP CHROME: MOBILE BOTTOM NAV (START) ------------------------------ */
 
 /* Mobile bottom nav: equal-width buttons + thin dividers */
 .mobile-bottom-nav a{
@@ -507,6 +550,12 @@ body {
 #repeatCustomRow.hidden { display: none !important; }
 
 
+
+
+/* =========================
+   SECTION 4 — TASK UI (TASK TITLE WRAPPING)
+   ========================= */
+
 /* Default (desktop + general) */
 .task-title{word-break:break-word;overflow-wrap:anywhere}
 
@@ -518,7 +567,19 @@ body {
   }
 }
 
+
+
+/* =========================
+   SECTION 2 — CORE UI ATOMS (DIVIDERS)
+   ========================= */
+
 .sectionDivider{margin:18px 0 8px;border-top:1px dashed var(--border);padding-top:8px;font-weight:700;opacity:.9}
+
+
+/* =========================
+   SECTION 5 — HABITS + VICES (DESKTOP BASE)
+   ========================= */
+
     .habitRow{
       display:flex;
       align-items:center;
@@ -619,6 +680,12 @@ body {
     .habitName{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 
+
+
+/* =========================
+   SECTION 4 — TASK UI (TASK POINTS BADGE + CARD PADDING)
+   ========================= */
+
     /* Points badge on left of each task bubble */
     .taskPoints{
       min-width:52px;
@@ -645,6 +712,13 @@ body {
 #flexList .glass{
   padding:10px 12px;
 }
+
+
+
+/* =========================
+   SECTION 10 — RESPONSIVE OVERRIDES (MOBILE: <= 640px)
+   NOTE: Leaving this block here to preserve cascade order.
+   ========================= */
 
 @media (max-width:640px){
   header .row{display:block}
@@ -791,6 +865,12 @@ body {
 }  /* ← IMPORTANT: this closes the mobile styles */
 
 
+
+
+/* =========================
+   SECTION 10 — RESPONSIVE OVERRIDES (DESKTOP HELPERS)
+   ========================= */
+
 /* Align weekday labels with the day bubbles on DESKTOP */
 @media (min-width: 640px){
   #habitWeekLabels,
@@ -800,6 +880,12 @@ body {
     margin-left:0;             /* make sure no leftover margin */
   }
 }
+
+
+
+/* =========================
+   SECTION 9 — LAYERING / Z-INDEX FIXES
+   ========================= */
 
 /* MOBILE: make sure wrapped toolbar rows stay on top of page content */
 .toolbar{
@@ -824,7 +910,19 @@ body {
       header .row{display:flex;align-items:center;justify-content:space-between}
     }
 
+
+
+/* =========================
+   SECTION 2 — CORE UI ATOMS (FOOTER)
+   ========================= */
+
     footer{font-size:11px;color:var(--muted)}
+
+
+
+/* =========================
+   SECTION 8 — FEEDBACK + MOTION (TOASTS)
+   ========================= */
 
     /* --- Points toast --- */
     .points-toast-container{
@@ -869,6 +967,12 @@ body {
         transform:translateY(8px) scale(.97);
       }
     }
+
+
+
+/* =========================
+   SECTION 7 — RECENT / HISTORY UI
+   ========================= */
 
 /* Desktop: 3 per row */
 .recentGrid{
@@ -1030,6 +1134,12 @@ body {
   opacity: 0.75;         /* optional: keeps it subtle */
 }
 
+
+
+
+/* =========================
+   SECTION 6 — STAT CARDS + CHIPS (SLEEP / WORK / MOOD / CALORIES)
+   ========================= */
 
 /* ============================================================================ */
 /*                               SLEEP: CHIPS + CARD                            */
@@ -1256,6 +1366,12 @@ body {
 }
 
 
+
+
+/* =========================
+   SECTION 9 — PLATFORM QUIRKS (DATE PICKERS / TAP OVERLAYS)
+   ========================= */
+
 /* ============================================================================ */
 /*                             DATE PICKERS / TAP OVERLAYS                      */
 /* ============================================================================ */
@@ -1394,6 +1510,12 @@ body {
   .caloriesEntryRow #saveCaloriesBtn{ flex: 0 0 auto; }
 }
 
+
+
+
+/* =========================
+   SECTION 4 — TASK UI (ADD TASK CARD)
+   ========================= */
 
 /* Make Add-a-Task card more compact */
 #addTaskCard{
@@ -1612,6 +1734,12 @@ body {
 }
 
 
+
+
+/* =========================
+   SECTION 4 — TASK UI (ADD TASK MODAL)
+   ========================= */
+
 /* ============================================
    Add Task modal: mobile alignment + iOS caret fix
    ============================================ */
@@ -1679,6 +1807,12 @@ body {
     line-height: 1.35; /* keeps caret centered nicely */
   }
 }
+
+
+
+/* =========================
+   SECTION 10 — RESPONSIVE OVERRIDES (MOBILE STAT CARDS + CHIPS)
+   ========================= */
 
 /* ============================================
    Mobile layout tweaks for stat cards + chips
@@ -1917,53 +2051,3 @@ body {
     color: #f8f9ff;
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
