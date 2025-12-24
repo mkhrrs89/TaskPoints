@@ -1,3 +1,26 @@
+/* =======================================================================
+   QUICK TABLE OF CONTENTS
+   1) Foundations / Theme
+   2) UI Atoms: Buttons
+   3) UI Atoms: Forms
+   4) UI Atoms: Tags + Pills
+   5) UI Atoms: Dividers
+   6) App Chrome (header / toolbar / dropdowns)
+   7) Task UI (priorities, bars, action buttons, wrapping, badges)
+   8) Habits + Vices
+   9) Responsive: Mobile <= 640px (big overrides)
+   10) Responsive: Desktop helpers
+   11) Layering / Z-index fixes
+   12) Feedback + Motion (toasts)
+   13) Recent / History
+   14) Stat Cards + Chips
+   15) Platform quirks (date pickers, tap overlays)
+   16) Add Task UI (card + modal)
+   17) Footer
+   18) Responsive: Extra mobile stat-card tweaks
+   ======================================================================= */
+
+
 /* = SECTION 1 — FOUNDATIONS / THEME (global resets, theme variables, base body styles) = */
 /*  GLOBAL DEFAULTS (START) - These apply everywhere unless something later overrides them. */
 /*  Box sizing */
@@ -41,8 +64,8 @@ body {
 /* --- Mobile-only tweaks (END) ------------------------------------------- */
 
 
-/* --- Light mode overrides (START) --------------------------------------- */
-/* If the device prefers light mode, swap body bg/text colors. */
+/* --- Light mode overrides (START) ---------------------------------------
+   If the device prefers light mode, swap body bg/text colors. */
 @media (prefers-color-scheme: light) {
   body {
     background: #fafafa;
@@ -68,42 +91,6 @@ body {
     0 10px 30px rgba(0, 0, 0, 0.25);
 }
 /* --- "Glass" card style (END) ------------------------------------------- */
-
-
-
-
-/* =========================
-   SECTION 4 — TASK UI (PRIORITIES)
-   ========================= */
-/* =======================================================================
-   PRIORITY CARD COLORS (START)
-   These are special backgrounds/borders for task priority cards.
-   ======================================================================= */
-
-/* Slightly brighter oxblood tint for critical task cards */
-.critical-card {
-  background: linear-gradient(
-    180deg,
-    rgba(110, 32, 36, 0.26),
-    rgba(78, 20, 24, 0.18)
-  ) !important;
-  border-color: #4f1f23 !important;
-}
-
-/* High priority card tint */
-.high-card {
-  background: linear-gradient(
-    180deg,
-    rgba(120, 52, 4, 0.07),
-    rgba(90, 35, 6, 0.05)
-  ) !important;
-  border-color: #30180C !important;
-}
-
-/* =======================================================================
-   PRIORITY CARD COLORS (END)
-   ======================================================================= */
-
 
 
 /* =========================
@@ -340,85 +327,6 @@ body {
    ======================================================================= */
 
 
-
-/* =========================
-   SECTION 4 — TASK UI (TODAY BREAKDOWN BAR)
-   ========================= */
-
-    /* Today's points breakdown bar */
-    .today-breakdown-bar{
-      width:100%;
-      height:12px;
-      border-radius:999px;
-      overflow:hidden;
-      background:rgba(15,23,42,0.95);
-      border:1px solid rgba(15,23,42,0.95);
-    }
-    .todayBreakdown-seg{
-      height:100%;
-    }
-
-    /* Sleep - plum */
-    .todayBreakdown-sleep{
-      background:linear-gradient(90deg, #2F2B78, #1B1947);
-    }
-
-    /* Tasks - teal */
-    .todayBreakdown-tasks{
-      background:linear-gradient(90deg, #0f4d4d, #0a2f2f);
-    }
-
-/* Habits - creamsicle orange */
-.todayBreakdown-habits{
-  background: linear-gradient(90deg, #fdba74, #fb923c, #c2410c);
-}
-
-/* Vices - oxblood */
-.todayBreakdown-vices{
-  background: linear-gradient(90deg, #7f1d1d, #4a0b0b, #2a0606);
-}
-
-/* Flux - aqua */
-.todayBreakdown-flex{
-  background: linear-gradient(90deg, #67e8f9, #22c5c5, #0e7490);
-}
-
-/* Calories - forest green */
-.todayBreakdown-calories{
-  background: linear-gradient(90deg, #14532d, #0B3B11);
-}
-
-/* Inertia - light gray */
-.todayBreakdown-inertia{
-  background: linear-gradient(90deg, #e2e8f0, #7A7A7A);
-}
-
-
-
-
-
-/* =========================
-   SECTION 4 — TASK UI (TASK ACTION BUTTONS)
-   ========================= */
-
-    /* New delete style: darker oxblood red */
-    .btn-delete{
-      background:#3b0b0f;
-      color:#fff;
-      border:none;
-    }
-    .btn-delete:hover{
-      background:#521018;
-    }
-
-    /* Bigger, easier-to-tap checkmark button */
-    .btn-check{
-      padding:8px 13px;
-      font-size:13px;
-    }
-
-
-
 /* =========================
    SECTION 2 — CORE UI ATOMS (FORMS: INPUTS / SELECTS / TEXTAREA)
    ========================= */
@@ -437,7 +345,6 @@ body {
     margin: 0 6px;             /* add 6px gap left & right */
   }
 }
-
 
 
 /* =========================
@@ -463,6 +370,13 @@ body {
       border:1px solid rgba(248,113,113,0.5);
     }
     .muted{color:var(--muted)}
+
+
+/* =========================
+   SECTION 2 — CORE UI ATOMS (DIVIDERS)
+   ========================= */
+
+.sectionDivider{margin:18px 0 8px;border-top:1px dashed var(--border);padding-top:8px;font-weight:700;opacity:.9}
 
 
 /* =========================
@@ -550,6 +464,111 @@ body {
 #repeatCustomRow.hidden { display: none !important; }
 
 
+/* =========================
+   SECTION 4 — TASK UI (PRIORITIES)
+   ========================= */
+/* =======================================================================
+   PRIORITY CARD COLORS (START)
+   These are special backgrounds/borders for task priority cards.
+   ======================================================================= */
+
+/* Slightly brighter oxblood tint for critical task cards */
+.critical-card {
+  background: linear-gradient(
+    180deg,
+    rgba(110, 32, 36, 0.26),
+    rgba(78, 20, 24, 0.18)
+  ) !important;
+  border-color: #4f1f23 !important;
+}
+
+/* High priority card tint */
+.high-card {
+  background: linear-gradient(
+    180deg,
+    rgba(120, 52, 4, 0.07),
+    rgba(90, 35, 6, 0.05)
+  ) !important;
+  border-color: #30180C !important;
+}
+
+/* =======================================================================
+   PRIORITY CARD COLORS (END)
+   ======================================================================= */
+
+
+/* =========================
+   SECTION 4 — TASK UI (TODAY BREAKDOWN BAR)
+   ========================= */
+
+    /* Today's points breakdown bar */
+    .today-breakdown-bar{
+      width:100%;
+      height:12px;
+      border-radius:999px;
+      overflow:hidden;
+      background:rgba(15,23,42,0.95);
+      border:1px solid rgba(15,23,42,0.95);
+    }
+    .todayBreakdown-seg{
+      height:100%;
+    }
+
+    /* Sleep - plum */
+    .todayBreakdown-sleep{
+      background:linear-gradient(90deg, #2F2B78, #1B1947);
+    }
+
+    /* Tasks - teal */
+    .todayBreakdown-tasks{
+      background:linear-gradient(90deg, #0f4d4d, #0a2f2f);
+    }
+
+/* Habits - creamsicle orange */
+.todayBreakdown-habits{
+  background: linear-gradient(90deg, #fdba74, #fb923c, #c2410c);
+}
+
+/* Vices - oxblood */
+.todayBreakdown-vices{
+  background: linear-gradient(90deg, #7f1d1d, #4a0b0b, #2a0606);
+}
+
+/* Flux - aqua */
+.todayBreakdown-flex{
+  background: linear-gradient(90deg, #67e8f9, #22c5c5, #0e7490);
+}
+
+/* Calories - forest green */
+.todayBreakdown-calories{
+  background: linear-gradient(90deg, #14532d, #0B3B11);
+}
+
+/* Inertia - light gray */
+.todayBreakdown-inertia{
+  background: linear-gradient(90deg, #e2e8f0, #7A7A7A);
+}
+
+
+/* =========================
+   SECTION 4 — TASK UI (TASK ACTION BUTTONS)
+   ========================= */
+
+    /* New delete style: darker oxblood red */
+    .btn-delete{
+      background:#3b0b0f;
+      color:#fff;
+      border:none;
+    }
+    .btn-delete:hover{
+      background:#521018;
+    }
+
+    /* Bigger, easier-to-tap checkmark button */
+    .btn-check{
+      padding:8px 13px;
+      font-size:13px;
+    }
 
 
 /* =========================
@@ -568,12 +587,36 @@ body {
 }
 
 
-
 /* =========================
-   SECTION 2 — CORE UI ATOMS (DIVIDERS)
+   SECTION 4 — TASK UI (TASK POINTS BADGE + CARD PADDING)
    ========================= */
 
-.sectionDivider{margin:18px 0 8px;border-top:1px dashed var(--border);padding-top:8px;font-weight:700;opacity:.9}
+    /* Points badge on left of each task bubble */
+    .taskPoints{
+      min-width:52px;
+      text-align:center;
+    }
+    .taskPointsNumber{
+      font-size:1.4rem;
+      font-weight:800;
+      line-height:1;
+    }
+    .taskPointsLabel{
+      font-size:.65rem;
+      text-transform:uppercase;
+      letter-spacing:.04em;
+    }
+
+    /* Tighten vertical padding just for task bubbles, not all glass panels */
+    #taskList .glass,
+    #archiveList .glass{
+      padding:10px 14px;
+    }
+
+/* Flex Actions: give each row its own bubble */
+#flexList .glass{
+  padding:10px 12px;
+}
 
 
 /* =========================
@@ -680,39 +723,10 @@ body {
     .habitName{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 
-
-
-/* =========================
-   SECTION 4 — TASK UI (TASK POINTS BADGE + CARD PADDING)
-   ========================= */
-
-    /* Points badge on left of each task bubble */
-    .taskPoints{
-      min-width:52px;
-      text-align:center;
-    }
-    .taskPointsNumber{
-      font-size:1.4rem;
-      font-weight:800;
-      line-height:1;
-    }
-    .taskPointsLabel{
-      font-size:.65rem;
-      text-transform:uppercase;
-      letter-spacing:.04em;
-    }
-
-    /* Tighten vertical padding just for task bubbles, not all glass panels */
-    #taskList .glass,
-    #archiveList .glass{
-      padding:10px 14px;
-    }
-
-/* Flex Actions: give each row its own bubble */
-#flexList .glass{
-  padding:10px 12px;
-}
-
+/* --- ORDER-SENSITIVE ZONE -------------------------------------------------
+   The next few sections include responsive overrides and layering fixes.
+   Keeping these later helps prevent accidental cascade changes.
+   ------------------------------------------------------------------------ */
 
 
 /* =========================
@@ -865,8 +879,6 @@ body {
 }  /* ← IMPORTANT: this closes the mobile styles */
 
 
-
-
 /* =========================
    SECTION 10 — RESPONSIVE OVERRIDES (DESKTOP HELPERS)
    ========================= */
@@ -880,7 +892,6 @@ body {
     margin-left:0;             /* make sure no leftover margin */
   }
 }
-
 
 
 /* =========================
@@ -909,15 +920,6 @@ body {
     @media (min-width:641px){
       header .row{display:flex;align-items:center;justify-content:space-between}
     }
-
-
-
-/* =========================
-   SECTION 2 — CORE UI ATOMS (FOOTER)
-   ========================= */
-
-    footer{font-size:11px;color:var(--muted)}
-
 
 
 /* =========================
@@ -967,7 +969,6 @@ body {
         transform:translateY(8px) scale(.97);
       }
     }
-
 
 
 /* =========================
@@ -1133,8 +1134,6 @@ body {
   font-size: 12px;
   opacity: 0.75;         /* optional: keeps it subtle */
 }
-
-
 
 
 /* =========================
@@ -1366,8 +1365,6 @@ body {
 }
 
 
-
-
 /* =========================
    SECTION 9 — PLATFORM QUIRKS (DATE PICKERS / TAP OVERLAYS)
    ========================= */
@@ -1509,8 +1506,6 @@ body {
   .caloriesEntryRow #caloriesInput{ flex: 1 1 auto; min-width: 0; }
   .caloriesEntryRow #saveCaloriesBtn{ flex: 0 0 auto; }
 }
-
-
 
 
 /* =========================
@@ -1734,8 +1729,6 @@ body {
 }
 
 
-
-
 /* =========================
    SECTION 4 — TASK UI (ADD TASK MODAL)
    ========================= */
@@ -1808,6 +1801,12 @@ body {
   }
 }
 
+
+/* =========================
+   SECTION 2 — CORE UI ATOMS (FOOTER)
+   ========================= */
+
+    footer{font-size:11px;color:var(--muted)}
 
 
 /* =========================
@@ -2051,4 +2050,3 @@ body {
     color: #f8f9ff;
   }
 }
-
