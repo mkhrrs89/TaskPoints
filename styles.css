@@ -1388,7 +1388,7 @@
   }
 
   .sleep-today-card .stat-mobile-header{
-    background: linear-gradient(180deg, #4035b5, #2F2B78);
+    background: linear-gradient(180deg, #2F2B78, #1B1947);
     color: #f8f7ff;
   }
 
@@ -1583,6 +1583,7 @@
     color: #f8f9ff;
   }
 }
+
 
 
 
