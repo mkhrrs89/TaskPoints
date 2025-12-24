@@ -1334,7 +1334,6 @@
     min-width: 0;
   }
 
-@media (max-width: 640px){
   /* Calories: make pre-input stay on ONE line */
   .calories-today-card #caloriesInputRow{
     flex-wrap: nowrap !important;
@@ -1370,11 +1369,6 @@
     width: 100%;
     text-align: left;
   }
-
-  /* Optional: hide the big “Today’s Calories” block on mobile
-     (Sleep hides its meta area on mobile in the new setup) */
-  /* .calories-today-card .stat-compact-meta{ display:none; } */
-}
 
    
   .calories-today-card .stat-summary-row:not(.hidden){
@@ -1721,6 +1715,7 @@
     color: #f8f9ff;
   }
 }
+
 
 
 
