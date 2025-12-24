@@ -2000,7 +2000,14 @@ function renderTodaysMatchup(todayKeyStr, yourScore){
   };
 
   const matchups = Array.isArray(state.matchups) ? state.matchups : [];
-  const matchup = matchups.find(m => m && m.date === todayKeyStr && (m.playerAId === 'YOU' || m.playerBId === 'YOU'));
+  const matchupDateKey = (m) => {
+    if (!m) return '';
+    if (m.date) return m.date;
+    if (m.dateKey) return m.dateKey;
+    if (m.dateISO) return dateKey(m.dateISO);
+    return '';
+  };
+  const matchup = matchups.find(m => m && matchupDateKey(m) === todayKeyStr && (m.playerAId === 'YOU' || m.playerBId === 'YOU'));
 
   if (!matchup) {
     diffEl.textContent = 'No matchup today';
