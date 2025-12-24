@@ -184,30 +184,31 @@
       <!-- LEFT: Big stat + input -->
       <div class="flex-1 min-w-[220px] stat-col stat-col-primary">
         <div class="sleep-today-card">
-<div class="stat-mobile-header">
-  <div class="stat-compact-row">
-    <div class="sleep-title-stack">
-      <h2 id="sleepAnchor" class="font-bold text-base sm:text-lg stat-title">Sleep Score</h2>
-      <!-- Mobile-only: line under the title -->
-      <div id="sleepImpactBelow" class="sleep-impact-below hidden"></div>
+          
+<div class="stat-compact-row">
+  <div class="sleep-title-stack">
+    <h2 id="sleepAnchor" class="font-bold text-base sm:text-lg stat-title">Sleep Score</h2>
+    <!-- Mobile-only: line under the title -->
+    <div id="sleepImpactBelow" class="sleep-impact-below hidden"></div>
+  </div>
+
+  <div class="stat-compact-controls">
+    <div id="sleepInputRow" class="stat-input-row flex items-center gap-2 flex-wrap">
+      <input id="sleepScoreInput" class="input w-24 scoreInput" type="number" placeholder="0–100">
+      <input id="sleepRestedInput" class="input w-24 scoreInput" type="number" placeholder="Rested">
+      <button id="saveSleepScoreBtn" class="btn btn-plum">Add</button>
     </div>
 
-    <div class="stat-compact-controls">
-      <div id="sleepInputRow" class="stat-input-row flex items-center gap-2 flex-wrap">
-        <input id="sleepScoreInput" class="input w-24 scoreInput" type="number" placeholder="0–100">
-        <input id="sleepRestedInput" class="input w-24 scoreInput" type="number" placeholder="Rested">
-        <button id="saveSleepScoreBtn" class="btn btn-plum">Add</button>
-      </div>
-
-      <!-- Mobile-only: right side summary (score + rest chip) -->
-      <div id="sleepSummaryRow" class="stat-summary-row hidden" aria-live="polite">
-        <span id="sleepSummaryValue" class="stat-summary-value"></span>
-        <div id="sleepSummaryRest" class="sleep-rest-chip hidden">
-          <span id="sleepSummaryRestValue"></span>
-        </div>
+    <!-- Mobile-only: right side summary (score + rest chip) -->
+    <div id="sleepSummaryRow" class="stat-summary-row hidden" aria-live="polite">
+      <span id="sleepSummaryValue" class="stat-summary-value"></span>
+      <div id="sleepSummaryRest" class="sleep-rest-chip hidden">
+        <span id="sleepSummaryRestValue"></span>
       </div>
     </div>
   </div>
+</div>
+
 
   <div class="stat-compact-meta">
     <div class="muted text-xs">Today’s Sleep</div>
