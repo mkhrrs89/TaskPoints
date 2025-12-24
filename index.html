@@ -236,57 +236,53 @@
     </div>
   </div>
 
-  <!-- RIGHT: Calories card -->
+
+  
+  <!------- RIGHT: Calories card ------->
 <div class="glass calories-glass">
   <div class="flex items-stretch justify-between gap-6 flex-wrap stat-card-row">
       <!-- LEFT: Big stat + input -->
       <div class="flex-1 min-w-[220px] stat-col stat-col-primary">
         <div class="calories-today-card">
           <div class="stat-mobile-header">
-<div class="stat-compact-row">
-  <div class="cal-title-stack">
-    <h2 class="font-bold text-lg stat-title">Calories</h2>
-    <div id="caloriesImpactBelow" class="cal-impact-below hidden"></div>
-  </div>
+            <div class="stat-compact-row">
+              <div class="cal-title-stack">
+              <h2 class="font-bold text-lg stat-title">Calories</h2>
+                <div id="caloriesImpactBelow" class="cal-impact-below hidden"></div>
+              </div>
 
-  <div class="stat-compact-controls">
-    <div id="caloriesInputRow" class="stat-input-row caloriesEntryRow flex items-center gap-2 flex-nowrap">
-      <input id="caloriesInput" class="input w-24" type="number" placeholder="0–3000">
+              <div class="stat-compact-controls">
+                <div id="caloriesInputRow" class="stat-input-row caloriesEntryRow flex items-center gap-2 flex-nowrap">
+                <input id="caloriesInput" class="input w-24" type="number" placeholder="0–3000">
 
-      <div class="datePickWrap" title="Pick date">
-        <button class="btn date-trigger dateTriggerBtn" type="button" aria-hidden="true" tabindex="-1">
-          <!-- your svg stays the same -->
-        </button>
-        <input id="caloriesDate" class="dateOverlay" type="date" aria-label="Pick a date for this calorie entry">
-      </div>
+                  <div class="datePickWrap" title="Pick date">
+                  <button class="btn date-trigger dateTriggerBtn" type="button" aria-hidden="true" tabindex="-1">
+                  </button>
+                  <input id="caloriesDate" class="dateOverlay" type="date" aria-label="Pick a date for this calorie entry">
+                  </div>
 
-      <button id="saveCaloriesBtn" class="btn btn-teal">Add</button>
-    </div>
+                <button id="saveCaloriesBtn" class="btn btn-teal">Add</button>
+                </div>
 
-    <div id="caloriesSummaryRow" class="stat-summary-row hidden" aria-live="polite">
-      <span id="caloriesSummaryValue" class="stat-summary-value"></span>
-    </div>
-  </div>
-</div>
-
-
-<!-- Mobile-only: second line under the title -->
-<div id="caloriesImpactBelow" class="cal-impact-below hidden"></div>
-
+                <div id="caloriesSummaryRow" class="stat-summary-row hidden" aria-live="polite">
+                <span id="caloriesSummaryValue" class="stat-summary-value"></span>
+                </div>
               </div>
             </div>
-
-            <div class="stat-compact-meta">
+         
+                      <div class="stat-compact-meta">
               <div class="muted text-xs">Today’s Calories</div>
               <div id="caloriesTodayValue" class="text-4xl font-extrabold leading-tight stat-value">—</div>
               <div id="caloriesTodayImpact" class="muted text-xs mt-1 stat-impact">Adds 0 pts to today</div>
               <div id="caloriesDateLabel" class="datePill"></div>
             </div>
-          </div>
-        </div>
       </div>
+</div>  <!-- closes .stat-mobile-header -->
+</div>  <!-- closes .calories-today-card -->
+</div>  <!-- closes .stat-col-primary -->
 
-      <!-- RIGHT: History chips -->
+
+      <!------- RIGHT: History chips ------->
       <div class="flex-1 min-w-[220px] stat-col stat-col-secondary">
         <div class="flex items-center justify-between mb-2">
           <h3 class="font-semibold text-sm">Recent days</h3>
@@ -300,6 +296,8 @@
   </div>
 </div> <!-- end of SLEEP + CALORIES block -->
 
+
+  
 <!-- WORK SCORE + BLANK -->
 <div class="grid sm:grid-cols-2 gap-3 mb-6">
 
