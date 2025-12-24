@@ -244,7 +244,12 @@
         <div class="calories-today-card">
           <div class="stat-mobile-header">
             <div class="stat-compact-row">
-              <h2 class="font-bold text-lg stat-title">Calories</h2>
+              <div class="cal-title-stack">
+  <h2 class="font-bold text-lg stat-title">Calories</h2>
+                <div id="caloriesImpactBelow" class="cal-impact-below hidden"></div>
+
+</div>
+
               <div class="stat-compact-controls">
 <div id="caloriesInputRow" class="stat-input-row caloriesEntryRow flex items-center gap-3 flex-wrap sm:flex-nowrap">
   <input id="caloriesInput" class="input w-24" type="number" placeholder="0–3000">
@@ -263,6 +268,14 @@
 
   <button id="saveCaloriesBtn" class="btn btn-teal">Add</button>
 </div>
+                <!-- Mobile-only: one-line summary after today's calories are logged -->
+<div id="caloriesSummaryRow" class="stat-summary-row hidden" aria-live="polite">
+  <span id="caloriesSummaryValue" class="stat-summary-value"></span>
+</div>
+
+<!-- Mobile-only: second line under the title -->
+<div id="caloriesImpactBelow" class="cal-impact-below hidden"></div>
+
               </div>
             </div>
 
@@ -3583,6 +3596,10 @@ function renderCaloriesHistory() {
   const inputRow = $('caloriesInputRow');
   const dateInput = $('caloriesDate');
   const dateLabel = $('caloriesDateLabel');
+  const caloriesSummaryRow   = $('caloriesSummaryRow');
+const caloriesSummaryValue = $('caloriesSummaryValue');
+const caloriesImpactBelow  = $('caloriesImpactBelow');
+
 
   const setTodayCaloriesEditable = (el) => {
     if (!el) return;
@@ -3606,18 +3623,26 @@ function renderCaloriesHistory() {
     }
   };
 
-  // hide the entry UI once today exists (Sleep-style)
-  if (todayEntry) {
-    inputRow?.classList.add('hidden');
-    dateLabel?.classList.add('hidden');
-  } else {
-    inputRow?.classList.remove('hidden');
-    dateLabel?.classList.remove('hidden');
+// hide the entry UI once today exists (Sleep-style)
+if (todayEntry) {
+  inputRow?.classList.add('hidden');
+  dateLabel?.classList.add('hidden');
 
-    // optional but recommended: default back to “today” mode
-    if (dateInput) dateInput.value = '';
-    if (dateLabel) dateLabel.textContent = '';
-  }
+  caloriesSummaryRow?.classList.remove('hidden');
+  caloriesImpactBelow?.classList.remove('hidden');
+} else {
+  inputRow?.classList.remove('hidden');
+  dateLabel?.classList.remove('hidden');
+
+  caloriesSummaryRow?.classList.add('hidden');
+  caloriesImpactBelow?.classList.add('hidden');
+  if (caloriesImpactBelow) caloriesImpactBelow.textContent = '';
+
+  // optional but recommended: default back to “today” mode
+  if (dateInput) dateInput.value = '';
+  if (dateLabel) dateLabel.textContent = '';
+}
+
 
   setTodayCaloriesEditable(todayValueEl);
   setTodayCaloriesEditable(todayImpactEl);
@@ -3630,6 +3655,8 @@ function renderCaloriesHistory() {
 
       if (calNum != null && !Number.isNaN(calNum)) {
         todayValueEl.textContent = calNum;
+if (caloriesSummaryValue) caloriesSummaryValue.textContent = String(calNum);
+if (caloriesImpactBelow) caloriesImpactBelow.textContent = `Adds ${pts.toFixed(1)} pts to today`;
 
         const pts = caloriesToPoints(calNum);
         todayImpactEl.textContent = `Adds ${pts.toFixed(1)} pts to today`;
