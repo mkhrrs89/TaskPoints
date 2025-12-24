@@ -1617,6 +1617,12 @@ function todayKey(){
   return dateKey(d);
 }
 
+function getGameDayKey(now = new Date()){
+  const dt = new Date(now);
+  if (dt.getHours() < 2) dt.setDate(dt.getDate() - 1);
+  return dateKey(dt);
+}
+
 function dateKey(d){
   // Accept either a Date or something parseable
   if (!(d instanceof Date)) d = new Date(d);
@@ -1760,12 +1766,14 @@ function todaysPointsTotal(){
 function startOpponentDripTicker(){
   function tick(){
     const todayK = todayKey();
+    const matchupKey = getGameDayKey(new Date());
     const { dailyTotals } = aggregateCompletionsByDate(state.completions || []);
     const { todayPoints, inertia, average } = deriveTodayWithInertia(dailyTotals, todayK);
+    const { todayPoints: matchupPoints } = deriveTodayWithInertia(dailyTotals, matchupKey);
 
     renderTodayPointsSummary(todayPoints, inertia, average);
 
-    renderTodaysMatchup(todayK, todayPoints);
+    renderTodaysMatchup(matchupKey, matchupPoints);
   }
 
   tick();
@@ -1860,13 +1868,15 @@ function renderStats(){
   const todayK    = dateKey(today);
   const thisWeekK = isoWeekKey(today);
   const thisMonthK= monthKey(today);
+  const matchupKey = getGameDayKey(today);
 
   const { todayPoints, inertia: inertiaPts, average: inertiaAvg } = deriveTodayWithInertia(dailyTotals, todayK);
+  const { todayPoints: matchupPoints } = deriveTodayWithInertia(dailyTotals, matchupKey);
 
   // Today's points bubble
   renderTodayPointsSummary(todayPoints, inertiaPts, inertiaAvg);
 
-  renderTodaysMatchup(todayK, todayPoints);
+  renderTodaysMatchup(matchupKey, matchupPoints);
 
   // Today's breakdown bar – wrapped in try/catch so it can't kill stats
   try {
