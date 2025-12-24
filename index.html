@@ -243,35 +243,32 @@
       <div class="flex-1 min-w-[220px] stat-col stat-col-primary">
         <div class="calories-today-card">
           <div class="stat-mobile-header">
-            <div class="stat-compact-row">
-              <div class="cal-title-stack">
-  <h2 class="font-bold text-lg stat-title">Calories</h2>
-                <div id="caloriesImpactBelow" class="cal-impact-below hidden"></div>
-
-</div>
-
-              <div class="stat-compact-controls">
-<div id="caloriesInputRow" class="stat-input-row caloriesEntryRow flex items-center gap-3 flex-wrap sm:flex-nowrap">
-  <input id="caloriesInput" class="input w-24" type="number" placeholder="0–3000">
-
-  <div class="datePickWrap" title="Pick date">
-    <button class="btn date-trigger dateTriggerBtn" type="button" aria-hidden="true" tabindex="-1">
-      <svg class="date-trigger-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <rect x="4" y="5" width="16" height="15" rx="2" ry="2" stroke="currentColor" stroke-width="1.5"></rect>
-        <path d="M16 3v4M8 3v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
-        <path d="M4 9h16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
-      </svg>
-    </button>
-
-    <input id="caloriesDate" class="dateOverlay" type="date" aria-label="Pick a date for this calorie entry">
+<div class="stat-compact-row">
+  <div class="cal-title-stack">
+    <h2 class="font-bold text-lg stat-title">Calories</h2>
+    <div id="caloriesImpactBelow" class="cal-impact-below hidden"></div>
   </div>
 
-  <button id="saveCaloriesBtn" class="btn btn-teal">Add</button>
+  <div class="stat-compact-controls">
+    <div id="caloriesInputRow" class="stat-input-row caloriesEntryRow flex items-center gap-2 flex-nowrap">
+      <input id="caloriesInput" class="input w-24" type="number" placeholder="0–3000">
+
+      <div class="datePickWrap" title="Pick date">
+        <button class="btn date-trigger dateTriggerBtn" type="button" aria-hidden="true" tabindex="-1">
+          <!-- your svg stays the same -->
+        </button>
+        <input id="caloriesDate" class="dateOverlay" type="date" aria-label="Pick a date for this calorie entry">
+      </div>
+
+      <button id="saveCaloriesBtn" class="btn btn-teal">Add</button>
+    </div>
+
+    <div id="caloriesSummaryRow" class="stat-summary-row hidden" aria-live="polite">
+      <span id="caloriesSummaryValue" class="stat-summary-value"></span>
+    </div>
+  </div>
 </div>
-                <!-- Mobile-only: one-line summary after today's calories are logged -->
-<div id="caloriesSummaryRow" class="stat-summary-row hidden" aria-live="polite">
-  <span id="caloriesSummaryValue" class="stat-summary-value"></span>
-</div>
+
 
 <!-- Mobile-only: second line under the title -->
 <div id="caloriesImpactBelow" class="cal-impact-below hidden"></div>
@@ -3599,6 +3596,9 @@ function renderCaloriesHistory() {
   const caloriesSummaryRow   = $('caloriesSummaryRow');
 const caloriesSummaryValue = $('caloriesSummaryValue');
 const caloriesImpactBelow  = $('caloriesImpactBelow');
+const impactBelow  = $('caloriesImpactBelow');
+const summaryRow   = $('caloriesSummaryRow');
+const summaryValue = $('caloriesSummaryValue');
 
 
   const setTodayCaloriesEditable = (el) => {
@@ -3628,20 +3628,24 @@ if (todayEntry) {
   inputRow?.classList.add('hidden');
   dateLabel?.classList.add('hidden');
 
-  caloriesSummaryRow?.classList.remove('hidden');
-  caloriesImpactBelow?.classList.remove('hidden');
+  // show mobile summary + impact-below
+  summaryRow?.classList.remove('hidden');
+  impactBelow?.classList.remove('hidden');
 } else {
   inputRow?.classList.remove('hidden');
   dateLabel?.classList.remove('hidden');
 
-  caloriesSummaryRow?.classList.add('hidden');
-  caloriesImpactBelow?.classList.add('hidden');
-  if (caloriesImpactBelow) caloriesImpactBelow.textContent = '';
+  // hide mobile summary + impact-below
+  summaryRow?.classList.add('hidden');
+  if (summaryValue) summaryValue.textContent = '';
+  impactBelow?.classList.add('hidden');
+  if (impactBelow) impactBelow.textContent = '';
 
-  // optional but recommended: default back to “today” mode
+  // optional: default back to “today” mode
   if (dateInput) dateInput.value = '';
   if (dateLabel) dateLabel.textContent = '';
 }
+
 
 
   setTodayCaloriesEditable(todayValueEl);
@@ -3660,6 +3664,9 @@ if (caloriesImpactBelow) caloriesImpactBelow.textContent = `Adds ${pts.toFixed(1
 
         const pts = caloriesToPoints(calNum);
         todayImpactEl.textContent = `Adds ${pts.toFixed(1)} pts to today`;
+        if (summaryValue) summaryValue.textContent = String(calNum);
+if (impactBelow) impactBelow.textContent = todayImpactEl.textContent;
+
         todayImpactEl.dataset.empty = 'false';
       } else {
         todayValueEl.textContent = '—';
