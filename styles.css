@@ -1,13 +1,9 @@
+/* = SECTION 1 — FOUNDATIONS / THEME (global resets, theme variables, base body styles) = */
 /*  GLOBAL DEFAULTS (START) - These apply everywhere unless something later overrides them. */
-/* --- Box sizing (START) -------------------------------------------------
-   This makes width/height math predictable. Most modern CSS uses this. */
-*, *::before, *::after {
-  box-sizing: border-box;
-}
-/* --- Box sizing (END) --------------------------------------------------- */
+/*  Box sizing */
+*, *::before, *::after {box-sizing: border-box;}
 
-
-/* --- Theme variables (START) --------------------------------------------
+/* Theme variables 
    :root = the "global settings" place.
    These --variables are your site's color palette / theme knobs. */
 :root {
@@ -20,8 +16,6 @@
   --accent2: #7c5cff;  /* secondary accent color */
   --accent3: #22c55e;  /* success/green accent */
 }
-/* --- Theme variables (END) ---------------------------------------------- */
-
 
 /* --- Base page setup (START) --------------------------------------------
    html/body defaults + how text looks. */
@@ -1923,6 +1917,7 @@ body {
     color: #f8f9ff;
   }
 }
+
 
 
 
