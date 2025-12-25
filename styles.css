@@ -1820,11 +1820,6 @@ body {
    ============================================ */
 @media (max-width: 640px){
 
-/* Calories mobile: match Sleep layout */
-.calories-glass .stat-card-row{
-  gap: 14px !important; /* restore the normal spacing between header + chips */
-}
-
 .calories-glass .stat-col-primary .stat-mobile-header{
   border-radius: 12px !important; /* full rounded like Sleep */
   background: linear-gradient(180deg, #0f4d4d, #0a2f2f);
@@ -2058,6 +2053,7 @@ body {
     color: #f8f9ff;
   }
 }
+
 
 
 
