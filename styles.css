@@ -1066,8 +1066,9 @@ body {
   white-space: nowrap;
 }
 
+/* Controls today's calorie value after entry on mobile */
 .calories-today-card .stat-summary-value{
-  font-size: 28px;
+  font-size: 30px;
   font-weight: 800;
   line-height: 1;
 }
@@ -2057,6 +2058,7 @@ body {
     color: #f8f9ff;
   }
 }
+
 
 
 
