@@ -1835,7 +1835,8 @@ body {
 
 /* tighten spacing */
 .calories-glass .stat-col-secondary .flex.items-center.justify-between{
-  margin-bottom: 8px !important;
+  margin-top: 6px !important;     /* ✅ adds the gap ABOVE "Recent days" */
+  margin-bottom: 8px !important;  /* keep your existing spacing below */
 }
 .calories-glass .stat-col-secondary .recentWrap{
   margin: 0 !important;
@@ -2053,6 +2054,7 @@ body {
     color: #f8f9ff;
   }
 }
+
 
 
 
