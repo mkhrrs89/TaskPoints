@@ -81,6 +81,22 @@
       flex-direction:column;
       gap:8px;
     }
+    .task.critical-card{
+      background: linear-gradient(
+        180deg,
+        rgba(110, 32, 36, 0.26),
+        rgba(78, 20, 24, 0.18)
+      ) !important;
+      border-color: #4f1f23 !important;
+    }
+    .task.high-card{
+      background: linear-gradient(
+        180deg,
+        rgba(120, 52, 4, 0.07),
+        rgba(90, 35, 6, 0.05)
+      ) !important;
+      border-color: #30180C !important;
+    }
     @media (max-width: 640px){
       .grid7 .slot{
         flex-basis: clamp(260px, 82vw, 320px);
@@ -148,7 +164,8 @@
       <div class="glass mb-6">
       <div class="flex items-start justify-between gap-3 mb-3">
         <h2 class="font-bold">Tasks (this week view)</h2>
-        <div class="flex gap-1 text-xs whitespace-nowrap">
+        <div class="flex gap-1 text-xs whitespace-nowrap items-center flex-wrap justify-end">
+          <button id="openAddTaskBtn" class="btn btn-primary">Add Task</button>
           <button data-week-nav="prev" class="btn btn-ghost btn-toolbar">← Prev</button>
           <button data-week-nav="this" class="btn btn-ghost btn-toolbar">This Week</button>
           <button data-week-nav="next" class="btn btn-ghost btn-toolbar">Next →</button>
@@ -967,6 +984,99 @@ function renderMoodWeek(baseDate) {
 
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m])); }
 
+function syncCustomRepeatUI(repeatSelectEl) {
+  const row = document.getElementById('repeatCustomRow');
+  if (!row || !repeatSelectEl) return;
+
+  if (repeatSelectEl.value === 'custom') row.classList.remove('hidden');
+  else row.classList.add('hidden');
+}
+
+function openAddTaskModal() {
+  const modal = $("addTaskModal");
+  if (!modal) return;
+
+  modal.classList.remove("hidden");
+  modal.classList.add("flex");
+  $("titleInput")?.focus();
+
+  const rep = $("repeatInput");
+  syncCustomRepeatUI(rep);
+}
+
+function closeAddTaskModal() {
+  const modal = $("addTaskModal");
+  if (!modal) return;
+
+  modal.classList.add("hidden");
+  modal.classList.remove("flex");
+}
+
+function setDueToday(){
+  $('dueDateInput').value = todayKey();
+}
+
+function clearAddTaskForm(){
+  $('titleInput').value='';
+  $('pointsInput').value='';
+  $('dueDateInput').value='';
+  $('importanceInput').value='Medium';
+  $('repeatInput').value='none';
+  if ($('repeatCustomCount')) $('repeatCustomCount').value='1';
+  if ($('repeatCustomUnit')) $('repeatCustomUnit').value='day';
+  if ($('tagsInput')) $('tagsInput').value='';
+  const repeatCustomRow = $('repeatCustomRow');
+  if (repeatCustomRow) repeatCustomRow.classList.add('hidden');
+}
+
+function addTask(){
+  const title = $('titleInput').value.trim();
+  if(!title) return alert('Enter a task name');
+
+  const mode = $('repeatInput').value || 'none';
+  const rec = { mode };
+
+  const rawTags = ($('tagsInput')?.value || '');
+  const tags = rawTags
+    .split(',')
+    .map(s => s.trim())
+    .filter(s => s.length > 0);
+
+  if (mode === 'custom') {
+    const countRaw = $('repeatCustomCount')?.value;
+    const unitRaw  = $('repeatCustomUnit')?.value;
+    let count = parseInt(countRaw, 10);
+    if (!Number.isFinite(count) || count <= 0) count = 1;
+    const unit = (unitRaw === 'week' || unitRaw === 'month' || unitRaw === 'year') ? unitRaw : 'day';
+    rec.customCount = count;
+    rec.customUnit = unit;
+  }
+
+  const dueDate = $('dueDateInput').value || null;
+  const task = {
+    id: crypto.randomUUID(),
+    title,
+    importance: $('importanceInput').value,
+    dueDateISO: dueDate,
+    originalDueDateISO: dueDate,
+    points: Number($('pointsInput').value)||0,
+    recurrence: rec,
+    tags,
+    skipDates: [],
+    hidden: false,
+    completedAtISO: null,
+    createdAtISO: new Date().toISOString(),
+    postponedDays: 0
+  };
+
+  const st = load();
+  st.tasks.unshift(task);
+  state = saveMerged(st);
+  clearAddTaskForm();
+  renderAll(currentBaseDate);
+  closeAddTaskModal();
+}
+
 /* Nav buttons */
 function renderAll(date) {
   renderHabits(date);
@@ -994,9 +1104,85 @@ document.querySelectorAll('[data-week-nav]').forEach(btn => {
   btn.addEventListener('click', () => handleWeekNav(btn.dataset.weekNav));
 });
 
+document.addEventListener('DOMContentLoaded', () => {
+  $('openAddTaskBtn')?.addEventListener('click', openAddTaskModal);
+  $('addBtn')?.addEventListener('click', addTask);
+
+  const rep = $("repeatInput");
+  rep?.addEventListener("change", () => syncCustomRepeatUI(rep));
+  rep?.addEventListener("input",  () => syncCustomRepeatUI(rep));
+  syncCustomRepeatUI(rep);
+});
+
 renderAll(currentBaseDate);
 
 </script>
+
+<!-- ADD TASK MODAL -->
+<div
+  id="addTaskModal"
+  class="fixed inset-0 z-40 hidden items-center justify-center bg-black/60"
+>
+  <div class="addTaskModalPanel w-full max-w-xl mx-4 rounded-2xl px-6 pb-6 pt-12 relative bg-zinc-900 text-zinc-100">
+    <button
+      type="button"
+      class="absolute top-4 right-4 btn btn-secondary text-xs px-3 py-1 rounded-md"
+      onclick="closeAddTaskModal()"
+    >
+      Close
+    </button>
+
+    <div id="addTaskModalBody" class="grid gap-3">
+      <input id="titleInput" class="input" placeholder="e.g., 30-min treadmill walk">
+
+      <div id="addTaskRow2" class="flex flex-wrap gap-2 mt-1">
+        <select id="importanceInput" class="input flex-1 min-w-[120px]">
+          <option>Low</option>
+          <option selected>Medium</option>
+          <option>High</option>
+          <option>Critical</option>
+        </select>
+
+        <input id="dueDateInput" type="date" class="input flex-1 min-w-[120px]">
+
+        <button class="addTaskTodayBtn btn btn-ghost text-xs px-2" onclick="setDueToday()">Today</button>
+      </div>
+
+      <div id="addTaskRow3" class="flex flex-wrap gap-2 mt-1">
+        <input id="pointsInput" type="number" min="0" class="input w-24" placeholder="e.g., 25">
+
+        <select id="repeatInput" class="input flex-1 min-w-[120px]">
+          <option value="none">Does not repeat</option>
+          <option value="daily">Every day</option>
+          <option value="weekdays">Weekdays (Mon–Fri)</option>
+          <option value="weekly">Every week</option>
+          <option value="monthly">Every month (same date)</option>
+          <option value="yearly">Every year (same date)</option>
+          <option value="custom">Custom…</option>
+        </select>
+      </div>
+
+      <div id="repeatCustomRow" class="flex items-center gap-2 text-xs mt-2 hidden">
+        <span class="muted">Repeat every</span>
+        <input id="repeatCustomCount" type="number" min="1" class="input w-16" value="1">
+        <select id="repeatCustomUnit" class="input w-24">
+          <option value="day">day(s)</option>
+          <option value="week">week(s)</option>
+          <option value="month">month(s)</option>
+          <option value="year">year(s)</option>
+        </select>
+      </div>
+
+      <input
+        id="tagsInput"
+        class="input"
+        placeholder="Tags (e.g., work, coding, creative)"
+      >
+
+      <button id="addBtn" class="btn btn-primary">Add Task</button>
+    </div>
+  </div>
+</div>
 
 <button
   class="hidden md:hidden fixed top-3 right-3 z-40 btn btn-teal rounded-full shadow-lg px-4 py-2 text-sm flex items-center gap-1"
