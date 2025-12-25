@@ -3666,6 +3666,10 @@ if (todayEntry) {
 
   setTodayCaloriesEditable(todayValueEl);
   setTodayCaloriesEditable(todayImpactEl);
+  
+  setTodayCaloriesEditable(summaryRow);     // ✅ lets you click the right-side number
+setTodayCaloriesEditable(summaryValue);   // optional, but nice
+setTodayCaloriesEditable(impactBelow);    // optional, makes the "adds X pts" line clickable too
 
   
   if (todayValueEl && todayImpactEl) {
