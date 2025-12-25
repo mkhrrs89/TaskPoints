@@ -9,6 +9,7 @@
 
 
 <link rel="stylesheet" href="styles.css">
+<script src="scoring_core.js"></script>
 <script src="toolbar.js" defer></script>
 
 
@@ -349,6 +350,8 @@ function load() {
 let state = load();
 let currentBaseDate = new Date();
 
+syncDerivedPointsIfNeeded();
+
   function normalizeState(s) {
   return {
     tasks:       Array.isArray(s.tasks)       ? s.tasks       : [],
@@ -375,6 +378,25 @@ function saveMerged(partial) {
   } catch (e) {
     console.error("saveMerged failed", e);
     return partial;
+  }
+}
+
+function getCompletionPoints(entry) {
+  if (window.TaskPointsCore?.pointsForCompletion) {
+    return TaskPointsCore.pointsForCompletion(entry);
+  }
+  return Number(entry?.points) || 0;
+}
+
+function syncDerivedPointsIfNeeded() {
+  if (!window.TaskPointsCore?.syncDerivedPoints) return;
+  const derivedSync = TaskPointsCore.syncDerivedPoints(state);
+  state = derivedSync.state;
+  if (!derivedSync.changed) return;
+  if (window.TaskPointsCore?.mergeAndSaveState) {
+    state = TaskPointsCore.mergeAndSaveState(state).state;
+  } else {
+    state = saveMerged(state);
   }
 }
 
@@ -855,7 +877,7 @@ function renderFlexWeek(baseDate){
           <div class="font-medium">${escapeHtml(c.title||'Flex action')}</div>
           <div class="text-xs text-zinc-400">${when.toLocaleString()}</div>
         </div>
-        <div class="font-semibold">+${(c.points||0).toLocaleString()} pts</div>
+        <div class="font-semibold">+${getCompletionPoints(c).toLocaleString()} pts</div>
       `;
       list.appendChild(div);
     });
@@ -915,7 +937,7 @@ function renderWeekScoreSection(baseDate, config) {
           <div class="font-medium">${escapeHtml(c.title || config.defaultTitle || '')}</div>
           <div class="text-xs text-zinc-400">${whenLabel}</div>
         </div>
-        <div class="font-semibold">+${(c.points || 0).toLocaleString()} pts</div>
+        <div class="font-semibold">+${getCompletionPoints(c).toLocaleString()} pts</div>
       `;
 
       list.appendChild(div);
