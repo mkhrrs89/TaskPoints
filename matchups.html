@@ -213,6 +213,12 @@ state = syncYouMatchupsWithCompletions(state);
         return nameById[id] || "Unknown";
       }
 
+      function formatScore(score){
+        const num = Number(score);
+        if (!Number.isFinite(num)) return "0";
+        return Number.isInteger(num) ? String(num) : num.toFixed(1);
+      }
+
       function describeMatchup(m){
         const aId = m.playerAId;
         const bId = m.playerBId;
@@ -229,21 +235,23 @@ state = syncYouMatchupsWithCompletions(state);
           const oppScore = aIsYou ? bScore : aScore;
           const oppName  = aIsYou ? bName  : aName;
 
+          const youScoreLabel = formatScore(youScore);
+          const oppScoreLabel = formatScore(oppScore);
           if (youScore > oppScore) {
-            return `You beat ${oppName}, ${youScore}–${oppScore}`;
+            return `You beat ${oppName}, ${youScoreLabel}–${oppScoreLabel}`;
           } else if (youScore < oppScore) {
-            return `You lost to ${oppName}, ${youScore}–${oppScore}`;
+            return `You lost to ${oppName}, ${youScoreLabel}–${oppScoreLabel}`;
           } else {
-            return `You tied ${oppName}, ${youScore}–${oppScore}`;
+            return `You tied ${oppName}, ${youScoreLabel}–${oppScoreLabel}`;
           }
         }
 
         if (aScore > bScore) {
-          return `${aName} beat ${bName}, ${aScore}–${bScore}`;
+          return `${aName} beat ${bName}, ${formatScore(aScore)}–${formatScore(bScore)}`;
         } else if (bScore > aScore) {
-          return `${bName} beat ${aName}, ${bScore}–${aScore}`;
+          return `${bName} beat ${aName}, ${formatScore(bScore)}–${formatScore(aScore)}`;
         } else {
-          return `${aName} and ${bName} tied, ${aScore}–${bScore}`;
+          return `${aName} and ${bName} tied, ${formatScore(aScore)}–${formatScore(bScore)}`;
         }
       }
 

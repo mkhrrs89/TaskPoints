@@ -16,6 +16,7 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="styles.css">
   <script src="toolbar.js" defer></script>
+  <script src="scoring_core.js"></script>
 
   <style>
     body{
@@ -191,6 +192,41 @@ function loadPlayers() {
 
 function computeYouStatsFromCompletions() {
   const s = latestState;
+  const record = window.TaskPointsCore?.computeRecord
+    ? TaskPointsCore.computeRecord(s, "YOU")
+    : { wins: 0, losses: 0, games: 0, source: "unknown" };
+
+  if (record.source === "matchups") {
+    const matchups = Array.isArray(s?.matchups) ? s.matchups : [];
+    let games = 0;
+    let totalPoints = 0;
+
+    for (const m of matchups) {
+      if (!m || (m.playerAId !== "YOU" && m.playerBId !== "YOU")) continue;
+      const aScore = Number(m.scoreA);
+      const bScore = Number(m.scoreB);
+      if (!Number.isFinite(aScore) || !Number.isFinite(bScore)) continue;
+      const yourScore = m.playerAId === "YOU" ? aScore : bScore;
+      totalPoints += yourScore;
+      games++;
+    }
+
+    const avgPPD = games ? (totalPoints / games) : 0;
+    const winPct = (record.wins + record.losses)
+      ? (record.wins / (record.wins + record.losses)) * 100
+      : null;
+    const ppd = avgPPD;
+
+    return {
+      games,
+      wins: record.wins,
+      losses: record.losses,
+      winPct,
+      avgPPD,
+      ppd
+    };
+  }
+
   if (!s || !Array.isArray(s.completions) || !s.completions.length) {
     return {
       games: 0,
@@ -204,9 +240,13 @@ function computeYouStatsFromCompletions() {
 
   const dayMap = {};
   for (const c of s.completions) {
-    const day = c.dateKey;
+    const day = c.completedAtISO
+      ? (window.TaskPointsCore?.dateKey ? TaskPointsCore.dateKey(c.completedAtISO) : c.dateKey)
+      : c.dateKey;
     if (!day) continue;
-    const pts = Number(c.points || 0);
+    const pts = window.TaskPointsCore?.pointsForCompletion
+      ? TaskPointsCore.pointsForCompletion(c)
+      : Number(c.points || 0);
     if (!dayMap[day]) dayMap[day] = 0;
     dayMap[day] += pts;
   }
@@ -226,22 +266,16 @@ function computeYouStatsFromCompletions() {
   const avgPPD =
     dailyTotals.reduce((sum, val) => sum + val, 0) / dailyTotals.length;
 
-  let wins = 0;
-  let losses = 0;
-  for (const total of dailyTotals) {
-    if (total > avgPPD) wins++;
-    else losses++;
-  }
+  const winPct = (record.wins + record.losses)
+    ? (record.wins / (record.wins + record.losses)) * 100
+    : null;
 
-  const winPct = (wins + losses) ? (wins / (wins + losses)) * 100 : null;
-
-  // For your row, treat PPD as your average points per day
   const ppd = avgPPD;
 
   return {
     games: dailyTotals.length,
-    wins,
-    losses,
+    wins: record.wins,
+    losses: record.losses,
     winPct,
     avgPPD,
     ppd

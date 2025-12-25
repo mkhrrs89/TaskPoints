@@ -515,10 +515,21 @@ function saveState(nextState) {
 }
 
 function syncStateWithMatchups(baseState) {
-  if (!window.TaskPointsCore || typeof TaskPointsCore.syncYouMatchups !== "function") {
-    return baseState;
+  let nextState = baseState;
+  let changed = false;
+
+  if (window.TaskPointsCore?.syncDerivedPoints) {
+    const derivedSync = TaskPointsCore.syncDerivedPoints(nextState);
+    nextState = derivedSync.state;
+    changed = changed || derivedSync.changed;
   }
-  const { state: nextState, changed } = TaskPointsCore.syncYouMatchups(baseState);
+
+  if (window.TaskPointsCore?.syncYouMatchups) {
+    const matchupSync = TaskPointsCore.syncYouMatchups(nextState);
+    nextState = matchupSync.state;
+    changed = changed || matchupSync.changed;
+  }
+
   if (changed) {
     return saveState(nextState);
   }
@@ -1329,46 +1340,12 @@ function buildPlayerHistoryStats() {
 
 
 function calcYouStats() {
-  const matchups = Array.isArray(state.matchups) ? state.matchups : [];
-  const youGames = matchups.filter(m => m && (m.playerAId === "YOU" || m.playerBId === "YOU"));
-
-  if (youGames.length) {
-    let wins = 0;
-    let losses = 0;
-    let ties = 0;
-    let games = 0;
-    let totalPoints = 0;
-
-    for (const m of youGames) {
-      const aScore = Number(m.scoreA);
-      const bScore = Number(m.scoreB);
-      if (!Number.isFinite(aScore) || !Number.isFinite(bScore)) continue;
-
-      games++;
-      const yourScore = (m.playerAId === "YOU") ? aScore : bScore;
-      const oppScore  = (m.playerAId === "YOU") ? bScore : aScore;
-
-      totalPoints += yourScore;
-
-      if (yourScore > oppScore) wins++;
-      else if (yourScore < oppScore) losses++;
-      else ties++;
-    }
-
-    const avgPPD = games ? (totalPoints / games) : 0;
-    const record = `${wins}-${losses}`;
-
-    return {
-      record,
-      avgPPD,
-      games,
-      wins,
-      losses
-    };
-  }
+  const record = window.TaskPointsCore?.computeRecord
+    ? TaskPointsCore.computeRecord(state, "YOU")
+    : { wins: 0, losses: 0, ties: 0, games: 0, source: "unknown" };
 
   const comps = state.completions || [];
-  if (!comps.length) {
+  if (!comps.length && record.source !== "matchups") {
     return {
       record: "0-0",
       avgPPD: 0,
@@ -1378,39 +1355,55 @@ function calcYouStats() {
     };
   }
 
-  // --- AVG PPD ---
-  // Group completions by dayKey and sum points per day
+  if (record.source === "matchups") {
+    const matchups = Array.isArray(state.matchups) ? state.matchups : [];
+    const youGames = matchups.filter(m => m && (m.playerAId === "YOU" || m.playerBId === "YOU"));
+    let totalPoints = 0;
+    let games = 0;
+
+    for (const m of youGames) {
+      const aScore = Number(m.scoreA);
+      const bScore = Number(m.scoreB);
+      if (!Number.isFinite(aScore) || !Number.isFinite(bScore)) continue;
+
+      const yourScore = (m.playerAId === "YOU") ? aScore : bScore;
+      totalPoints += yourScore;
+      games++;
+    }
+
+    const avgPPD = games ? (totalPoints / games) : 0;
+    return {
+      record: `${record.wins}-${record.losses}`,
+      avgPPD,
+      games,
+      wins: record.wins,
+      losses: record.losses
+    };
+  }
+
   const dayMap = {};
   for (const c of comps) {
     if (!c || !c.completedAtISO) continue;
     const day = dateKey(c.completedAtISO);
     if (!dayMap[day]) dayMap[day] = 0;
-    dayMap[day] += Number(c.points || 0);
+    const pts = window.TaskPointsCore?.pointsForCompletion
+      ? TaskPointsCore.pointsForCompletion(c)
+      : Number(c.points || 0);
+    dayMap[day] += pts;
   }
-
 
   const dailyTotals = Object.values(dayMap);
   const avgPPD =
     dailyTotals.reduce((a, b) => a + b, 0) / dailyTotals.length || 0;
 
-  // --- Record (wins/losses) ---
-  // A "win" = you beat your avgPPD, "loss" = you didn’t.
-  let wins = 0;
-  let losses = 0;
-
-  for (const total of dailyTotals) {
-    if (total > avgPPD) wins++;
-    else losses++;
-  }
-
   const games = dailyTotals.length;
 
   return {
-    record: `${wins}-${losses}`,
+    record: `${record.wins}-${record.losses}`,
     avgPPD: avgPPD,
     games,
-    wins,
-    losses
+    wins: record.wins,
+    losses: record.losses
   };
 }
 
