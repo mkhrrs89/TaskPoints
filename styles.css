@@ -1687,7 +1687,7 @@ body {
   }
 
   .calories-today-card .cal-impact-below{
-    margin-top: 6px;
+    margin-top: 0px;
     font-size: 12px;
     opacity: 0.85;
     width: 100%;
@@ -2050,4 +2050,5 @@ body {
     color: #f8f9ff;
   }
 }
+
 
