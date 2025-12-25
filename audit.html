@@ -614,9 +614,39 @@
         '',
         ...(data.checks || []).map(c => `${c.status} — ${c.title} (expected ${formatVal(c.expected)}, actual ${formatVal(c.actual)})`)
       ];
-      navigator.clipboard?.writeText(lines.join('\n')).then(() => {
+      const reportText = lines.join('\n');
+      const showCopied = () => alert('Report copied to clipboard.');
+      const showCopyFailed = () => alert('Unable to copy report.');
+      if (navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(reportText).then(showCopied).catch(() => {
+          if (!fallbackCopyText(reportText)) showCopyFailed();
+        });
+        return;
+      }
+      if (!fallbackCopyText(reportText)) showCopyFailed();
+    }
+
+    function fallbackCopyText(text) {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.top = '-1000px';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      textarea.setSelectionRange(0, textarea.value.length);
+      let copied = false;
+      try {
+        copied = document.execCommand('copy');
+      } catch (error) {
+        copied = false;
+      }
+      document.body.removeChild(textarea);
+      if (copied) {
         alert('Report copied to clipboard.');
-      }).catch(() => alert('Unable to copy report.'));
+      }
+      return copied;
     }
 
     function exportJson() {
