@@ -1904,6 +1904,12 @@ body {
     flex: 0 0 auto;
   }
 
+     /* Calories: match Sleep’s title sizing */
+  .calories-today-card .stat-title{
+    font-size: 1rem;
+    line-height: 1.1;
+  }
+
   .stat-value{
     font-size: 2rem;
     line-height: 1.05;
@@ -2051,6 +2057,7 @@ body {
     color: #f8f9ff;
   }
 }
+
 
 
 
