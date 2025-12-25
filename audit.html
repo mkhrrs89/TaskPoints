@@ -79,7 +79,7 @@
           </div>
         </div>
         <div class="flex flex-wrap gap-2">
-          <button id="copyReportBtn" type="button" class="btn btn-ghost">Copy Report</button>
+          <button id="copyReportBtn" type="button" class="btn btn-ghost" data-require-click="true">Copy Report</button>
           <button id="exportJsonBtn" type="button" class="btn btn-ghost">Export JSON</button>
         </div>
       </div>
@@ -288,18 +288,21 @@
     // ignore the synthetic click that follows.
     function bindPress(id, handler) {
       const el = $(id);
-    if (!el) return;
-    el.addEventListener('pointerdown', (e) => {
-      e.preventDefault();
-      handler(e);
-      el.dataset.ignoreClick = '1';
-        setTimeout(() => delete el.dataset.ignoreClick, 300);
-      });
+      if (!el) return;
+      const requireClick = el.dataset.requireClick === 'true';
+      if (!requireClick) {
+        el.addEventListener('pointerdown', (e) => {
+          e.preventDefault();
+          handler(e);
+          el.dataset.ignoreClick = '1';
+          setTimeout(() => delete el.dataset.ignoreClick, 300);
+        });
+      }
       el.addEventListener('click', (e) => {
         if (el.dataset.ignoreClick) return;
         handler(e);
-    });
-  }
+      });
+    }
 
     function matchupDateKey(m) {
       if (!m) return '';
