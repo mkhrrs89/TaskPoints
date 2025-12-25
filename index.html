@@ -4652,7 +4652,10 @@ function wontDoMain(id){
     const k = t.dueDateISO || todayKey();
     t.skipDates = Array.isArray(t.skipDates)?t.skipDates:[];
     if(!t.skipDates.includes(k)) t.skipDates.push(k);
-    if(t.dueDateISO===k) t.dueDateISO = todayKey();
+    const nextKey = computeNextDueDate(t);
+    if (nextKey) {
+      t.dueDateISO = nextKey;
+    }
   }
   save(); renderAll();
 }
