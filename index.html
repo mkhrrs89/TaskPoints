@@ -28,38 +28,79 @@ Nothing visible on the page is built here. === -->
     rel="stylesheet" 
     href="https://fonts.googleapis.com/css2?family=Teko:wght@500;600;700&display=swap">
 
-  
+  <!-- Your app scripts + CSS -->
   <script src="scoring_core.js"></script>
   <link rel="stylesheet" href="styles.css">
   <script src="toolbar.js" defer></script>
 
-
 </head>
+<!-- === HEAD (END) === -->
+
+
+<!-- === BODY (START) === -->  
 <body class="min-h-screen">
+
+<!-- =========================================================================
+           Everything visible on the page lives inside <body>.
+========================================================================== -->
+
+<!-- Floating toast notifications container -->
 <div id="pointsToastContainer" class="points-toast-container"></div>
+
+<!-- Main page wrapper (START) --> 
 <div class="mx-auto max-w-6xl p-4 sm:p-6 pb-20 md:pb-6">
 
+<!-- HEADER (START) Top-of-page branding + navigation -->
+<header class="mb-4">
+  <!-- =========================================================
+       MOBILE HEADER ROW (START)
+       Visible on small screens only (md:hidden).
+       ========================================================= -->
+  <div class="flex items-center justify-between gap-3 mb-3 md:hidden">
+    
+    <!-- --- Logo + title (mobile) (START) ---------------------- -->
+    <a href="index.html" class="flex items-center gap-3">
+      <img
+        src="assets/taskpoints-logo.png"
+        alt="TaskPoints logo"
+        class="w-10 h-10 rounded-2xl object-cover shrink-0 shadow-sm"
+      />
 
-  <!-- HEADER -->
-  <header class="mb-4">
-    <div class="flex items-center justify-between gap-3 mb-3 md:hidden">
-      <a href="index.html" class="flex items-center gap-3">
-        <img src="assets/taskpoints-logo.png" alt="TaskPoints logo" class="w-10 h-10 rounded-2xl object-cover shrink-0 shadow-sm">
-<h1 class="text-2xl font-extrabold tracking-tight leading-tight">
-  <span style="color:#fb923c;">Task</span><span style="color:#1e666d;">Points</span>
-</h1>
+      <h1 class="text-2xl font-extrabold tracking-tight leading-tight">
+        <span style="color:#fb923c;">Task</span><span style="color:#1e666d;">Points</span>
+      </h1>
+    </a>
+    <!-- --- Logo + title (mobile) (END) ------------------------ -->
 
-      </a>
+    <!-- --- Import / Export (mobile) (START) ------------------- -->
+    <div class="flex items-center gap-2">
+      <button
+        id="exportBtnMobile"
+        type="button"
+        class="btn btn-ghost btn-toolbar"
+        data-export-button
+      >
+        Export
+      </button>
 
-      <div class="flex items-center gap-2">
-        <button id="exportBtnMobile" type="button" class="btn btn-ghost btn-toolbar" data-export-button>Export</button>
-        <label class="btn btn-ghost btn-toolbar cursor-pointer">
-          <span>Import</span>
-          <input id="importInputMobile" type="file" accept="application/json" class="hidden" data-import-input/>
-        </label>
-      </div>
+      <label class="btn btn-ghost btn-toolbar cursor-pointer">
+        <span>Import</span>
+        <input
+          id="importInputMobile"
+          type="file"
+          accept="application/json"
+          class="hidden"
+          data-import-input
+        />
+      </label>
     </div>
+    <!-- --- Import / Export (mobile) (END) --------------------- -->
+  </div>
+  <!-- =========================================================
+       MOBILE HEADER ROW (END)
+       ========================================================= -->
 
+  
     <div class="row items-center">
       <div class="hidden md:flex items-center gap-3">
         <img src="assets/taskpoints-logo.png" alt="TaskPoints logo" class="w-10 h-10 rounded-2xl object-cover shrink-0 shadow-sm">
