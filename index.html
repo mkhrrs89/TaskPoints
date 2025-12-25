@@ -1052,6 +1052,14 @@ function showPointsToast(points){
   }, 3200);
 }
 
+function parseCaloriesFromTitle(title) {
+  if (typeof title !== 'string') return null;
+  const match = title.match(/calories[^0-9]*([0-9]+(?:\.[0-9]+)?)/i);
+  if (!match) return null;
+  const raw = Number(match[1]);
+  return Number.isFinite(raw) ? raw : null;
+}
+
 function caloriesToPoints(cal){
   let pts = (2400 - cal) / 100;
 
@@ -1242,10 +1250,8 @@ function getCompletionPoints(entry) {
   if (window.TaskPointsCore?.pointsForCompletion) {
     return TaskPointsCore.pointsForCompletion(entry);
   }
-  if (entry?.title?.startsWith('Calories (')) {
-    const raw = Number(entry.title.match(/\((\d+)\)/)?.[1]);
-    if (Number.isFinite(raw)) return caloriesToPoints(raw);
-  }
+  const caloriesRaw = parseCaloriesFromTitle(entry?.title);
+  if (Number.isFinite(caloriesRaw)) return caloriesToPoints(caloriesRaw);
   return Number(entry?.points) || 0;
 }
 
@@ -2530,8 +2536,8 @@ if (titleStr.startsWith('Sleep Score (')) {
 }
 
 
-    // Calories entries: "Calories (...)"
-    if (titleStr.startsWith('Calories (')) {
+    // Calories entries
+    if (titleStr.startsWith('Calories')) {
       totals.calories += pts;
       return;
     }
