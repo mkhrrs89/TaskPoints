@@ -180,17 +180,26 @@
         const parsed = JSON.parse(raw);
         latestState = parsed;
 
-        if (window.TaskPointsCore && typeof TaskPointsCore.syncYouMatchups === "function") {
-          const { state: syncedState, changed } = TaskPointsCore.syncYouMatchups(parsed);
-          if (changed) {
-            try {
-              localStorage.setItem(STORAGE_KEY, JSON.stringify(syncedState));
-            } catch (err) {
-              console.error("Failed to persist synced matchups", err);
-            }
-          }
-          latestState = syncedState;
+        let syncedState = parsed;
+        let changed = false;
+        if (window.TaskPointsCore?.syncDerivedPoints) {
+          const derivedSync = TaskPointsCore.syncDerivedPoints(syncedState);
+          syncedState = derivedSync.state;
+          changed = changed || derivedSync.changed;
         }
+        if (window.TaskPointsCore?.syncYouMatchups) {
+          const matchupSync = TaskPointsCore.syncYouMatchups(syncedState);
+          syncedState = matchupSync.state;
+          changed = changed || matchupSync.changed;
+        }
+        if (changed) {
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(syncedState));
+          } catch (err) {
+            console.error("Failed to persist synced matchups", err);
+          }
+        }
+        latestState = syncedState;
 
         return Array.isArray(latestState.players) ? latestState.players : [];
       } catch (e) {
@@ -203,27 +212,24 @@
 function computeYouStats() {
   const s = latestState;
 
+  const record = window.TaskPointsCore?.computeRecord
+    ? TaskPointsCore.computeRecord(s, "YOU")
+    : { wins: 0, losses: 0, games: 0, source: "unknown" };
+
   // 1) Prefer matchups (most accurate for W/L)
-  const mh = s && Array.isArray(s.matchups) ? s.matchups : [];
-  const youGames = mh.filter(m => m && (m.playerAId === "YOU" || m.playerBId === "YOU"));
+  if (record.source === "matchups") {
+    const mh = s && Array.isArray(s.matchups) ? s.matchups : [];
+    let games = 0;
+    let totalPoints = 0;
 
-  if (youGames.length) {
-    let games = 0, wins = 0, losses = 0, totalPoints = 0;
-
-    for (const m of youGames) {
+    for (const m of mh) {
+      if (!m || (m.playerAId !== "YOU" && m.playerBId !== "YOU")) continue;
       const aScore = Number(m.scoreA);
       const bScore = Number(m.scoreB);
       if (!Number.isFinite(aScore) || !Number.isFinite(bScore)) continue;
-
       const youScore = (m.playerAId === "YOU") ? aScore : bScore;
-      const oppScore = (m.playerAId === "YOU") ? bScore : aScore;
-
-      games++;
       totalPoints += youScore;
-
-      if (youScore > oppScore) wins++;
-      else if (youScore < oppScore) losses++;
-      // ties don’t increment W/L
+      games++;
     }
 
     if (!games) {
@@ -231,12 +237,10 @@ function computeYouStats() {
     }
 
     const avgPPD = totalPoints / games;
-    const winPct = (wins + losses) ? (wins / (wins + losses)) * 100 : null;
-
-    // keep same “You PPD” convention you were using before
+    const winPct = (record.wins + record.losses) ? (record.wins / (record.wins + record.losses)) * 100 : null;
     const ppd = avgPPD;
 
-    return { games, wins, losses, winPct, avgPPD, ppd };
+    return { games, wins: record.wins, losses: record.losses, winPct, avgPPD, ppd };
   }
 
   // 2) Fallback: completions-based calc (your old behavior)
@@ -250,7 +254,9 @@ function computeYouStats() {
       ? TaskPointsCore.dateKey(c.completedAtISO || c.dateKey)
       : (c.dateKey || "");
     if (!day) continue;
-    const pts = Number(c.points || 0);
+    const pts = window.TaskPointsCore?.pointsForCompletion
+      ? TaskPointsCore.pointsForCompletion(c)
+      : Number(c.points || 0);
     if (!dayMap[day]) dayMap[day] = 0;
     dayMap[day] += pts;
   }
@@ -303,15 +309,17 @@ function computeYouStats() {
         return computeYouStats();
       }
 
+      const record = window.TaskPointsCore?.computeRecord
+        ? TaskPointsCore.computeRecord(latestState, p.id)
+        : { wins: 0, losses: 0, games: 0, source: "unknown" };
+
       // 1) Prefer matchup-derived results (true W/L against opponents)
       const matchups = latestState && Array.isArray(latestState.matchups)
         ? latestState.matchups
         : [];
 
-      if (matchups.length) {
+      if (record.source === "matchups") {
         let games = 0;
-        let wins = 0;
-        let losses = 0;
         let totalPoints = 0;
 
         for (const m of matchups) {
@@ -329,23 +337,19 @@ function computeYouStats() {
 
           games++;
           totalPoints += playerScore;
-
-          if (playerScore > oppScore) wins++;
-          else if (playerScore < oppScore) losses++;
-          // ties do not affect W/L
         }
 
         if (games) {
           const avgPPD = totalPoints / games;
-          const winPct = (wins + losses)
-            ? (wins / (wins + losses)) * 100
+          const winPct = (record.wins + record.losses)
+            ? (record.wins / (record.wins + record.losses)) * 100
             : null;
           const baseline = Number.isFinite(p?.baseline)
             ? Number(p.baseline)
             : (Number(p?.baseline) || null);
           const ppd = Number.isFinite(baseline) ? (avgPPD - baseline) : null;
 
-          return { games, wins, losses, winPct, avgPPD, ppd };
+          return { games, wins: record.wins, losses: record.losses, winPct, avgPPD, ppd };
         }
       }
 
@@ -382,7 +386,7 @@ function computeYouStats() {
       const winPct = (wins + losses) ? (wins / (wins + losses)) * 100 : null;
       const ppd = baseline ? (avgPPD - baseline) : null;
 
-      return { games, wins, losses, winPct, avgPPD, ppd };
+      return { games, wins: record.wins || wins, losses: record.losses || losses, winPct, avgPPD, ppd };
     }
 
     function getSortValue(p, key) {

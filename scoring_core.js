@@ -373,6 +373,45 @@
     return score + workHoursBonus(hours);
   }
 
+  function roundPoints(value, decimals = 2) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return 0;
+    const factor = Math.pow(10, decimals);
+    return Math.round(num * factor) / factor;
+  }
+
+  function addPoints(current, delta, decimals = 2) {
+    return roundPoints((Number(current) || 0) + (Number(delta) || 0), decimals);
+  }
+
+  function deriveCompletionPoints(entry) {
+    const sleepInfo = getSleepInfo(entry);
+    if (Number.isFinite(sleepInfo.score)) {
+      return {
+        points: roundPoints(sleepPoints(sleepInfo.score, sleepInfo.rested)),
+        formula: 'sleep',
+        inputs: sleepInfo
+      };
+    }
+
+    const workInfo = getWorkInfo(entry);
+    if (Number.isFinite(workInfo.score)) {
+      return {
+        points: roundPoints(workPoints(workInfo.score, workInfo.hours)),
+        formula: 'work',
+        inputs: workInfo
+      };
+    }
+
+    return null;
+  }
+
+  function pointsForCompletion(entry) {
+    const derived = deriveCompletionPoints(entry);
+    if (derived) return derived.points;
+    return roundPoints(entry?.points);
+  }
+
   function caloriesToPoints(cal){
     let pts = (2400 - cal) / 100;
 
@@ -411,11 +450,11 @@
       const wk = isoWeekKey(d);
       const mk = monthKey(d);
 
-      const pts = c.points || 0;
+      const pts = pointsForCompletion(c);
 
-      dailyTotals[dk]   = (dailyTotals[dk]   || 0) + pts;
-      weeklyTotals[wk]  = (weeklyTotals[wk]  || 0) + pts;
-      monthlyTotals[mk] = (monthlyTotals[mk] || 0) + pts;
+      dailyTotals[dk]   = addPoints(dailyTotals[dk], pts);
+      weeklyTotals[wk]  = addPoints(weeklyTotals[wk], pts);
+      monthlyTotals[mk] = addPoints(monthlyTotals[mk], pts);
     });
 
     return { dailyTotals, weeklyTotals, monthlyTotals };
@@ -467,7 +506,7 @@
   function deriveTodayWithInertia(dailyTotals, todayK){
     const { inertia, average } = computeInertia(dailyTotals, todayK);
     const todayBase = Number(dailyTotals[todayK]) || 0;
-    const todayPoints = Math.round((todayBase + inertia) * 10) / 10;
+    const todayPoints = roundPoints(todayBase + inertia, 2);
 
     return { todayPoints, inertia, average, base: todayBase };
   }
@@ -490,12 +529,12 @@
         };
       }
 
-      const pts = Number(c.points) || 0;
+      const pts = pointsForCompletion(c);
       if (!pts) return;
 
       const catKey = categorizeCompletion(c);
-      daily[key].total += pts;
-      daily[key].categories[catKey] = (daily[key].categories[catKey] || 0) + pts;
+      daily[key].total = addPoints(daily[key].total, pts);
+      daily[key].categories[catKey] = addPoints(daily[key].categories[catKey], pts);
     });
 
     const dailyTotals = Object.fromEntries(Object.entries(daily).map(([k, v]) => [k, Number(v.total) || 0]));
@@ -503,8 +542,8 @@
       const { inertia } = computeInertia(dailyTotals, k);
       if (!inertia) return;
 
-      daily[k].total += inertia;
-      daily[k].categories.inertia = (daily[k].categories.inertia || 0) + inertia;
+      daily[k].total = addPoints(daily[k].total, inertia);
+      daily[k].categories.inertia = addPoints(daily[k].categories.inertia, inertia);
     });
 
     return daily;
@@ -520,7 +559,7 @@
     Object.entries(dailyTotals).forEach(([k, base]) => {
       const { inertia } = computeInertia(dailyTotals, k);
       const inertiaVal = Number.isFinite(inertia) ? inertia : 0;
-      const total = base + inertiaVal;
+      const total = addPoints(base, inertiaVal);
       dailyTotalsWithInertia[k] = total;
 
       const d = fromKey(k);
@@ -528,8 +567,8 @@
 
       const wk = isoWeekKey(d);
       const mk = monthKey(d);
-      weeklyTotalsWithInertia[wk]  = (weeklyTotalsWithInertia[wk]  || 0) + total;
-      monthlyTotalsWithInertia[mk] = (monthlyTotalsWithInertia[mk] || 0) + total;
+      weeklyTotalsWithInertia[wk]  = addPoints(weeklyTotalsWithInertia[wk], total);
+      monthlyTotalsWithInertia[mk] = addPoints(monthlyTotalsWithInertia[mk], total);
     });
 
     return { dailyTotals, dailyTotalsWithInertia, weeklyTotalsWithInertia, monthlyTotalsWithInertia };
@@ -566,7 +605,7 @@
     const items = dayComps.map(c => {
       const category = categorizeCompletion(c);
       const label = typeof c.title === 'string' ? c.title : 'Untitled';
-      const pts = Number(c.points) || 0;
+      const pts = pointsForCompletion(c);
       return {
         source: c.source || 'task',
         id: c.id || c.taskId || label,
@@ -580,7 +619,7 @@
       };
     });
 
-    const baseTotal = items.reduce((s, item) => s + (Number(item.points) || 0), 0);
+    const baseTotal = items.reduce((s, item) => addPoints(s, item.points), 0);
     const { dailyTotals } = aggregateCompletionsByDate(comps);
     const { inertia, average } = computeInertia(dailyTotals, key);
     const inertiaVal = Number.isFinite(inertia) ? inertia : 0;
@@ -607,17 +646,17 @@
     snapshot.items.forEach(item => {
       const def = CATEGORY_DEFS.find(d => d.key === item.category) || CATEGORY_DEFS[CATEGORY_DEFS.length - 1];
       const label = def.label;
-      byCategory[label] = (byCategory[label] || 0) + (Number(item.points) || 0);
+      byCategory[label] = addPoints(byCategory[label], item.points);
     });
 
     if (snapshot.inertia) {
-      byCategory.Inertia = (byCategory.Inertia || 0) + snapshot.inertia;
+      byCategory.Inertia = addPoints(byCategory.Inertia, snapshot.inertia);
     }
 
-    const rawTotal = snapshot.baseTotal + (snapshot.inertia || 0);
-    const total = Math.round(rawTotal * 10) / 10;
+    const rawTotal = addPoints(snapshot.baseTotal, snapshot.inertia || 0);
+    const total = roundPoints(rawTotal, 2);
     const roundingNotes = Math.abs(rawTotal - total) > 1e-9
-      ? [`Rounded to one decimal place from ${rawTotal}`]
+      ? [`Rounded to two decimal places from ${rawTotal}`]
       : [];
 
     return {
@@ -656,6 +695,131 @@
     });
 
     return totals;
+  }
+
+  function syncDerivedPoints(state){
+    const normalized = normalizeState(state || {});
+    const mismatches = [];
+    let changed = false;
+
+    normalized.completions = (normalized.completions || []).map(c => {
+      if (!c) return c;
+      const derived = deriveCompletionPoints(c);
+      if (!derived) return c;
+
+      const storedRaw = Number(c.points);
+      const stored = Number.isFinite(storedRaw) ? storedRaw : 0;
+      const delta = derived.points - stored;
+      if (Math.abs(delta) <= 0.01) return c;
+
+      changed = true;
+      mismatches.push({
+        id: c.id || c.taskId || c.title,
+        title: c.title,
+        storedPoints: stored,
+        derivedPoints: derived.points,
+        delta,
+        formula: derived.formula,
+        inputs: derived.inputs
+      });
+      return { ...c, points: derived.points };
+    });
+
+    return { state: normalized, changed, mismatches };
+  }
+
+  function computeMatchupRecord(state, playerId){
+    const matchups = Array.isArray(state?.matchups) ? state.matchups : [];
+    let wins = 0;
+    let losses = 0;
+    let ties = 0;
+    let games = 0;
+
+    matchups.forEach(m => {
+      if (!m) return;
+      const isA = m.playerAId === playerId;
+      const isB = m.playerBId === playerId;
+      if (!isA && !isB) return;
+
+      const aScore = Number(m.scoreA);
+      const bScore = Number(m.scoreB);
+      if (!Number.isFinite(aScore) || !Number.isFinite(bScore)) return;
+
+      games++;
+      const playerScore = isA ? aScore : bScore;
+      const oppScore = isA ? bScore : aScore;
+
+      if (playerScore > oppScore) wins++;
+      else if (playerScore < oppScore) losses++;
+      else ties++;
+    });
+
+    return { wins, losses, ties, games, source: 'matchups' };
+  }
+
+  function computeCompletionRecord(state){
+    const comps = Array.isArray(state?.completions) ? state.completions : [];
+    if (!comps.length) {
+      return { wins: 0, losses: 0, ties: 0, games: 0, source: 'completions' };
+    }
+
+    const dayTotals = {};
+    comps.forEach(c => {
+      if (!c || !c.completedAtISO) return;
+      const k = dateKey(c.completedAtISO);
+      const pts = pointsForCompletion(c);
+      dayTotals[k] = addPoints(dayTotals[k], pts);
+    });
+
+    const totals = Object.values(dayTotals);
+    if (!totals.length) {
+      return { wins: 0, losses: 0, ties: 0, games: 0, source: 'completions' };
+    }
+
+    const avg = totals.reduce((a, b) => a + b, 0) / totals.length || 0;
+    let wins = 0;
+    let losses = 0;
+    let ties = 0;
+
+    totals.forEach(total => {
+      if (total > avg) wins++;
+      else if (total < avg) losses++;
+      else ties++;
+    });
+
+    return { wins, losses, ties, games: totals.length, source: 'completions' };
+  }
+
+  function computeGameHistoryRecord(state, playerId){
+    const history = Array.isArray(state?.gameHistory) ? state.gameHistory : [];
+    const players = Array.isArray(state?.players) ? state.players : [];
+    const player = players.find(p => p && p.id === playerId);
+    const baseline = typeof player?.baseline === 'number'
+      ? player.baseline
+      : Number(player?.baseline) || 0;
+
+    let games = 0;
+    let wins = 0;
+    let losses = 0;
+
+    history.forEach(g => {
+      if (!g || g.playerId !== playerId) return;
+      games++;
+      const score = typeof g.score === 'number' ? g.score : Number(g.score) || 0;
+      if (baseline) {
+        if (score >= baseline) wins++;
+        else losses++;
+      }
+    });
+
+    return { wins, losses, ties: 0, games, source: 'gameHistory' };
+  }
+
+  function computeRecord(state, playerId = 'YOU'){
+    const matchupRecord = computeMatchupRecord(state, playerId);
+    if (matchupRecord.games > 0) return matchupRecord;
+    if (playerId === 'YOU') return computeCompletionRecord(state);
+    return computeGameHistoryRecord(state, playerId);
   }
 
   function syncYouMatchups(state){
@@ -744,6 +908,14 @@
     getWorkInfo,
     workHoursBonus,
     workPoints,
+    roundPoints,
+    deriveCompletionPoints,
+    pointsForCompletion,
+    syncDerivedPoints,
+    computeMatchupRecord,
+    computeCompletionRecord,
+    computeGameHistoryRecord,
+    computeRecord,
     caloriesToPoints,
     categorizeCompletion,
     aggregateCompletionsByDate,

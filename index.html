@@ -1143,8 +1143,21 @@ function load() {
 }
 
 function syncStateWithMatchups(current){
-  if (!window.TaskPointsCore || typeof TaskPointsCore.syncYouMatchups !== 'function') return current;
-  const { state: nextState, changed } = TaskPointsCore.syncYouMatchups(current);
+  let nextState = current;
+  let changed = false;
+
+  if (window.TaskPointsCore?.syncDerivedPoints) {
+    const derivedSync = TaskPointsCore.syncDerivedPoints(nextState);
+    nextState = derivedSync.state;
+    changed = changed || derivedSync.changed;
+  }
+
+  if (window.TaskPointsCore?.syncYouMatchups) {
+    const matchupSync = TaskPointsCore.syncYouMatchups(nextState);
+    nextState = matchupSync.state;
+    changed = changed || matchupSync.changed;
+  }
+
   if (changed) {
     try {
       if (window.TaskPointsCore?.mergeAndSaveState) {
@@ -1179,6 +1192,11 @@ function getPlayerById(id) {
 function getPlayerRecordText(playerId) {
   if (!playerId || playerId === 'YOU') return '0-0';
 
+  if (window.TaskPointsCore?.computeRecord) {
+    const record = TaskPointsCore.computeRecord(state, playerId);
+    return record.games ? `${record.wins}-${record.losses}` : '0-0';
+  }
+
   const player = getPlayerById(playerId);
   const baseline = player && typeof player.baseline === 'number'
     ? player.baseline
@@ -1212,9 +1230,19 @@ function getYourRecordText() {
 }
 
 function computeYourRecord(){
+  if (window.TaskPointsCore?.computeRecord) {
+    return TaskPointsCore.computeRecord(state, 'YOU');
+  }
   const matchupRecord = computeYourMatchupRecord();
   if (matchupRecord.games > 0) return matchupRecord;
   return computeYourCompletionRecord();
+}
+
+function getCompletionPoints(entry) {
+  if (window.TaskPointsCore?.pointsForCompletion) {
+    return TaskPointsCore.pointsForCompletion(entry);
+  }
+  return Number(entry?.points) || 0;
 }
 
 function computeYourMatchupRecord(){
@@ -1251,7 +1279,7 @@ function computeYourCompletionRecord(){
   comps.forEach(c => {
     if (!c || !c.completedAtISO) return;
     const k = dateKey(c.completedAtISO);
-    const pts = Number(c.points || 0);
+    const pts = getCompletionPoints(c);
     if (!Number.isFinite(pts)) return;
     dayTotals[k] = (dayTotals[k] || 0) + pts;
   });
@@ -1282,7 +1310,7 @@ function computeYouDailyAverages(){
   comps.forEach(c => {
     if (!c || !c.completedAtISO) return;
     const k = dateKey(c.completedAtISO);
-    const pts = Number(c.points || 0);
+    const pts = getCompletionPoints(c);
     dayTotals[k] = (dayTotals[k] || 0) + pts;
   });
 
@@ -2485,7 +2513,7 @@ function updateTodayBreakdown(completions, todayKey, inertiaPoints = 0){
     const d = new Date(c.completedAtISO);
     if (dateKey(d) !== todayKey) return;
 
-    const pts = Number(c.points) || 0;
+    const pts = getCompletionPoints(c);
     if (!pts) return;
 
     const titleStr = typeof c.title === 'string' ? c.title : '';

@@ -224,61 +224,6 @@
       return String(v);
     }
 
-    function computeYouMatchupRecord(state){
-      const matchups = Array.isArray(state.matchups) ? state.matchups : [];
-      let wins = 0;
-      let losses = 0;
-      let ties = 0;
-      let games = 0;
-
-      matchups.forEach(m => {
-        if (!m || (m.playerAId !== 'YOU' && m.playerBId !== 'YOU')) return;
-        const aScore = Number(m.scoreA);
-        const bScore = Number(m.scoreB);
-        if (!Number.isFinite(aScore) || !Number.isFinite(bScore)) return;
-
-        games++;
-        const yourScore = m.playerAId === 'YOU' ? aScore : bScore;
-        const oppScore  = m.playerAId === 'YOU' ? bScore : aScore;
-
-        if (yourScore > oppScore) wins++;
-        else if (yourScore < oppScore) losses++;
-        else ties++;
-      });
-
-      return { wins, losses, ties, games };
-    }
-
-    function computeYouCompletionRecord(state){
-      const comps = Array.isArray(state.completions) ? state.completions : [];
-      if (!comps.length) return { wins: 0, losses: 0, ties: 0, games: 0 };
-
-      const dayTotals = {};
-      comps.forEach(c => {
-        if (!c || !c.completedAtISO) return;
-        const k = TaskPointsCore.dateKey(c.completedAtISO);
-        const pts = Number(c.points || 0);
-        if (!Number.isFinite(pts)) return;
-        dayTotals[k] = (dayTotals[k] || 0) + pts;
-      });
-
-      const totals = Object.values(dayTotals);
-      if (!totals.length) return { wins: 0, losses: 0, ties: 0, games: 0 };
-
-      const avg = totals.reduce((a, b) => a + b, 0) / totals.length || 0;
-      let wins = 0;
-      let losses = 0;
-      let ties = 0;
-
-      totals.forEach(total => {
-        if (total > avg) wins++;
-        else if (total < avg) losses++;
-        else ties++;
-      });
-
-      return { wins, losses, ties, games: totals.length };
-    }
-
     function formatRecord(rec){
       if (!rec) return '0-0';
       return rec.ties ? `${rec.wins}-${rec.losses}-${rec.ties}` : `${rec.wins}-${rec.losses}`;
@@ -427,26 +372,36 @@
 
       // New: Sleep/work point formulas
       const formulaIssues = [];
+      const formulaDebug = [];
       dayCompletions.forEach(c => {
         if (!c) return;
-        const sleepInfo = TaskPointsCore.getSleepInfo(c);
-        if (Number.isFinite(sleepInfo.score)) {
-          const expected = TaskPointsCore.sleepPoints(sleepInfo.score, sleepInfo.rested);
-          const actual = Number(c.points);
-          if (Number.isFinite(actual) && Math.abs(actual - expected) > 0.05) {
-            formulaIssues.push(`Sleep "${c.title || c.id}": expected ${expected.toFixed(2)}, got ${actual.toFixed(2)}`);
-          }
-          return;
-        }
-        const workInfo = TaskPointsCore.getWorkInfo(c);
-        if (Number.isFinite(workInfo.score)) {
-          const expected = TaskPointsCore.workPoints(workInfo.score, workInfo.hours);
-          const actual = Number(c.points);
-          if (Number.isFinite(actual) && Math.abs(actual - expected) > 0.05) {
-            formulaIssues.push(`Work "${c.title || c.id}": expected ${expected.toFixed(2)}, got ${actual.toFixed(2)}`);
-          }
+        const derived = TaskPointsCore.deriveCompletionPoints
+          ? TaskPointsCore.deriveCompletionPoints(c)
+          : null;
+        if (!derived) return;
+
+        const actualRaw = Number(c.points);
+        const actual = Number.isFinite(actualRaw) ? actualRaw : 0;
+        const expected = derived.points;
+        const delta = actual - expected;
+
+        if (Math.abs(delta) > 0.01) {
+          const label = `${derived.formula === 'sleep' ? 'Sleep' : 'Work'} "${c.title || c.id}"`;
+          formulaIssues.push(`${label}: expected ${expected.toFixed(2)}, got ${actual.toFixed(2)}`);
+          formulaDebug.push({
+            date: dateKey,
+            entryId: c.id || c.taskId || c.title,
+            rawInputs: derived.inputs,
+            storedPoints: actual,
+            derivedPoints: expected,
+            delta,
+            formula: derived.formula
+          });
         }
       });
+      if (formulaDebug.length) {
+        console.warn('[TaskPoints Audit] Sleep/work formula mismatch details', formulaDebug);
+      }
       checks.push({
         id: 'formula-replay',
         title: 'Sleep/work points match formulas',
@@ -466,6 +421,18 @@
         actual: dayBreak.total || 0,
         delta: (dayBreak.total || 0) - totals.total,
         trace: 'daily breakdown vs. TaskPointsCore.computeDayTotals'
+      });
+
+      const roundingDelta = Math.abs((dayBreak.total || 0) - (totals.total || 0));
+      checks.push({
+        id: 'rounding-drift',
+        title: 'Rounding drift stays under 0.01',
+        status: roundingDelta <= 0.01 ? 'PASS' : 'WARN',
+        expected: '≤ 0.01',
+        actual: roundingDelta,
+        delta: roundingDelta,
+        trace: 'daily breakdown vs. TaskPointsCore.computeDayTotals',
+        tips: 'Use cents rounding for totals to keep drift under a hundredth of a point.'
       });
 
       // E) Records + leaderboards
@@ -490,27 +457,26 @@
       });
 
       // F) Record alignment (matchups vs. fallback)
-      const matchupRecord = computeYouMatchupRecord(state);
-      const completionRecord = computeYouCompletionRecord(state);
+      const preferredRecord = TaskPointsCore.computeRecord
+        ? TaskPointsCore.computeRecord(state, 'YOU')
+        : { wins: 0, losses: 0, ties: 0, games: 0, source: 'unknown' };
       const recordIssues = [];
       let recordStatus = 'PASS';
-      if (matchupRecord.games > 0) {
-        const mismatch = matchupRecord.wins !== completionRecord.wins
-          || matchupRecord.losses !== completionRecord.losses
-          || matchupRecord.ties !== completionRecord.ties;
-        if (mismatch) {
-          recordStatus = 'WARN';
-          recordIssues.push('Matchup record differs from completions-based fallback. UI should use matchup data when available.');
-        }
+      const hasYouMatchups = Array.isArray(state.matchups)
+        && state.matchups.some(m => m && (m.playerAId === 'YOU' || m.playerBId === 'YOU')
+          && Number.isFinite(Number(m.scoreA)) && Number.isFinite(Number(m.scoreB)));
+      if (hasYouMatchups && preferredRecord.source !== 'matchups') {
+        recordStatus = 'WARN';
+        recordIssues.push('Matchups exist but record is not using matchup-based results.');
       }
       checks.push({
         id: 'record-alignment',
         title: 'Record alignment (matchups vs fallback)',
         status: recordStatus,
-        expected: matchupRecord.games ? formatRecord(matchupRecord) : formatRecord(completionRecord),
-        actual: matchupRecord.games ? formatRecord(completionRecord) : formatRecord(completionRecord),
+        expected: formatRecord(preferredRecord),
+        actual: formatRecord(preferredRecord),
         details: recordIssues,
-        trace: 'state.matchups vs. completions',
+        trace: `TaskPointsCore.computeRecord (${preferredRecord.source})`,
         tips: 'When matchups exist, prefer their win/loss record over daily-average fallback so views stay consistent.'
       });
 
