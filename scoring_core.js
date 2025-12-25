@@ -333,7 +333,8 @@
   }
 
   function getSleepInfo(entry) {
-    const match = entry?.title?.match(/\((\d+)\)/);
+    const title = typeof entry?.title === 'string' ? entry.title : '';
+    const match = title.match(/^Sleep Score\s*\((\d+(?:\.\d+)?)\)/i);
     const score = match ? Number(match[1]) : null;
 
     const restedRaw = entry && Object.prototype.hasOwnProperty.call(entry, 'sleepRested')
@@ -352,7 +353,8 @@
   }
 
   function getWorkInfo(entry) {
-    const match = entry?.title?.match(/\(([^)]+)\)/);
+    const title = typeof entry?.title === 'string' ? entry.title : '';
+    const match = title.match(/^Work Score\s*\((\d+(?:\.\d+)?)\)/i);
     const score = match ? Number(match[1]) : null;
 
     const hoursRaw = entry && Object.prototype.hasOwnProperty.call(entry, 'workHours')
@@ -418,6 +420,16 @@
         points: caloriesToPoints(caloriesRaw),
         formula: 'calories',
         inputs: { calories: caloriesRaw }
+      };
+    }
+
+    const title = typeof entry?.title === 'string' ? entry.title : '';
+    const entryPoints = Number(entry?.points);
+    if (/^calories\b/i.test(title) && Number.isFinite(entryPoints) && entryPoints > 50 && entryPoints < 10000) {
+      return {
+        points: caloriesToPoints(entryPoints),
+        formula: 'calories',
+        inputs: { calories: entryPoints }
       };
     }
 
