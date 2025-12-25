@@ -1004,6 +1004,27 @@ body {
 /*  Mobile: horizontal scroll row (no squish)                                   */
 /* ============================================================================ */
 
+.recent-toggle{
+  font-size:12px;
+  font-weight:600;
+  color:#94a3b8;
+  background:transparent;
+  border:none;
+  padding:2px 6px;
+  border-radius:999px;
+  cursor:pointer;
+}
+
+.recent-toggle:hover{
+  color:#e2e8f0;
+  background:rgba(148, 163, 184, 0.15);
+}
+
+.recent-toggle:focus-visible{
+  outline:2px solid rgba(148, 163, 184, 0.6);
+  outline-offset:2px;
+}
+
 .recentRow{
   display: grid;
   grid-template-columns: repeat(3, 75px);

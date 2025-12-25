@@ -338,8 +338,9 @@ Nothing visible on the page is built here. === -->
       <div class="flex-1 min-w-[220px] stat-col stat-col-secondary">
         <div class="flex items-center justify-between mb-2">
           <h3 class="font-semibold text-sm">Recent nights</h3>
+          <button class="recent-toggle" type="button" data-target="sleepRecentWrap" aria-expanded="false">Show</button>
         </div>
-        <div class="recentWrap">
+        <div id="sleepRecentWrap" class="recentWrap hidden">
   <div id="sleepHistory" class="recentRow"></div>
 </div>
 
@@ -397,8 +398,9 @@ Nothing visible on the page is built here. === -->
       <div class="flex-1 min-w-[220px] stat-col stat-col-secondary">
         <div class="flex items-center justify-between mb-2">
           <h3 class="font-semibold text-sm">Recent days</h3>
+          <button class="recent-toggle" type="button" data-target="caloriesRecentWrap" aria-expanded="false">Show</button>
         </div>
-        <div class="recentWrap">
+        <div id="caloriesRecentWrap" class="recentWrap hidden">
   <div id="caloriesHistory" class="recentRow"></div>
 </div>
 
@@ -448,8 +450,9 @@ Nothing visible on the page is built here. === -->
       <div class="flex-1 min-w-[220px] stat-col stat-col-secondary">
         <div class="flex items-center justify-between mb-2">
           <h3 class="font-semibold text-sm">Recent days</h3>
+          <button class="recent-toggle" type="button" data-target="workRecentWrap" aria-expanded="false">Show</button>
         </div>
-        <div class="recentWrap">
+        <div id="workRecentWrap" class="recentWrap hidden">
   <div id="workHistory" class="recentRow"></div>
 </div>
 
@@ -489,8 +492,9 @@ Nothing visible on the page is built here. === -->
     <div class="flex-1 min-w-[220px] stat-col stat-col-secondary">
       <div class="flex items-center justify-between mb-2">
         <h3 class="font-semibold text-sm">Recent days</h3>
+        <button class="recent-toggle" type="button" data-target="moodRecentWrap" aria-expanded="false">Show</button>
       </div>
-      <div class="recentWrap">
+      <div id="moodRecentWrap" class="recentWrap hidden">
   <div id="moodHistory" class="recentRow"></div>
 </div>
 
@@ -5228,6 +5232,31 @@ document.addEventListener('change', (e) => {
 
   </div>
 </nav>
+
+<script>
+  (() => {
+    const toggles = document.querySelectorAll('.recent-toggle');
+
+    toggles.forEach((toggle) => {
+      const targetId = toggle.dataset.target;
+      const target = targetId ? document.getElementById(targetId) : null;
+      if (!target) return;
+
+      const updateState = () => {
+        const isHidden = target.classList.contains('hidden');
+        toggle.setAttribute('aria-expanded', String(!isHidden));
+        toggle.textContent = isHidden ? 'Show' : 'Hide';
+      };
+
+      toggle.addEventListener('click', () => {
+        target.classList.toggle('hidden');
+        updateState();
+      });
+
+      updateState();
+    });
+  })();
+</script>
 
 <script>
   (() => {
