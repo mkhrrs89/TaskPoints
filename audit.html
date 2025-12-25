@@ -224,6 +224,8 @@
       return String(v);
     }
 
+    const round2 = n => Math.round((Number(n) || 0) * 100) / 100;
+
     function formatRecord(rec){
       if (!rec) return '0-0';
       return rec.ties ? `${rec.wins}-${rec.losses}-${rec.ties}` : `${rec.wins}-${rec.losses}`;
@@ -310,8 +312,8 @@
           categoryIssues.push(`Inertia: expected ${expectedInertia.toFixed(2)}, actual ${actualInertia.toFixed(2)}`);
         }
       }
-      const expectedSum = Object.values(expectedCategories || {}).reduce((s,v)=>s+v,0);
-      const actualSum = Number(dayBreak.total) || 0;
+      const expectedSum = round2(Object.values(expectedCategories || {}).reduce((s,v)=>s+v,0));
+      const actualSum = round2(Number(dayBreak.total) || 0);
       if (Math.abs(expectedSum - actualSum) > 0.05) {
         categoryIssues.push(`Sum mismatch: expected ${expectedSum.toFixed(2)}, actual ${actualSum.toFixed(2)}`);
       }
@@ -321,7 +323,7 @@
         status: categoryIssues.length ? 'FAIL' : 'PASS',
         expected: expectedCategories,
         actual: dayBreak.categories,
-        delta: actualSum - expectedSum,
+        delta: round2(actualSum - expectedSum),
         details: categoryIssues,
         trace: 'TaskPointsCore.computeDayTotals vs. daily breakdown'
       });
