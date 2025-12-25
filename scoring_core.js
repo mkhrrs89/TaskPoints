@@ -385,6 +385,7 @@
   }
 
   function deriveCompletionPoints(entry) {
+    if (!entry) return null;
     const sleepInfo = getSleepInfo(entry);
     if (Number.isFinite(sleepInfo.score)) {
       return {
@@ -401,6 +402,17 @@
         formula: 'work',
         inputs: workInfo
       };
+    }
+
+    if (typeof entry.title === 'string' && entry.title.startsWith('Calories (')) {
+      const raw = Number(entry.title.match(/\((\d+)\)/)?.[1]);
+      if (Number.isFinite(raw)) {
+        return {
+          points: caloriesToPoints(raw),
+          formula: 'calories',
+          inputs: { calories: raw }
+        };
+      }
     }
 
     return null;

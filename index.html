@@ -1242,6 +1242,10 @@ function getCompletionPoints(entry) {
   if (window.TaskPointsCore?.pointsForCompletion) {
     return TaskPointsCore.pointsForCompletion(entry);
   }
+  if (entry?.title?.startsWith('Calories (')) {
+    const raw = Number(entry.title.match(/\((\d+)\)/)?.[1]);
+    if (Number.isFinite(raw)) return caloriesToPoints(raw);
+  }
   return Number(entry?.points) || 0;
 }
 
