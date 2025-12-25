@@ -292,15 +292,25 @@
 
       // B) Category subtotals
       const categoryIssues = [];
+      const expectedCategories = {};
       TaskPointsCore.CATEGORY_DEFS.forEach(def => {
         const label = def.label;
-        const expectedVal = totals.byCategory[label] || 0;
+        const expectedVal = Number(totals.byCategory?.[label]) || 0;
         const actualVal = Number(dayBreak.categories?.[def.key]) || 0;
+        expectedCategories[def.key] = expectedVal;
         if (Math.abs(expectedVal - actualVal) > 0.05) {
           categoryIssues.push(`${label}: expected ${expectedVal.toFixed(2)}, actual ${actualVal.toFixed(2)}`);
         }
       });
-      const expectedSum = Object.values(totals.byCategory || {}).reduce((s,v)=>s+v,0);
+      const expectedInertia = Number(totals.byCategory?.Inertia) || 0;
+      const actualInertia = Number(dayBreak.categories?.inertia) || 0;
+      if (expectedInertia || actualInertia) {
+        expectedCategories.inertia = expectedInertia;
+        if (Math.abs(expectedInertia - actualInertia) > 0.05) {
+          categoryIssues.push(`Inertia: expected ${expectedInertia.toFixed(2)}, actual ${actualInertia.toFixed(2)}`);
+        }
+      }
+      const expectedSum = Object.values(expectedCategories || {}).reduce((s,v)=>s+v,0);
       const actualSum = Number(dayBreak.total) || 0;
       if (Math.abs(expectedSum - actualSum) > 0.05) {
         categoryIssues.push(`Sum mismatch: expected ${expectedSum.toFixed(2)}, actual ${actualSum.toFixed(2)}`);
@@ -309,7 +319,7 @@
         id: 'category-subtotals',
         title: 'Category subtotals',
         status: categoryIssues.length ? 'FAIL' : 'PASS',
-        expected: totals.byCategory,
+        expected: expectedCategories,
         actual: dayBreak.categories,
         delta: actualSum - expectedSum,
         details: categoryIssues,

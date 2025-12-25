@@ -4,7 +4,7 @@
 
   const CATEGORY_DEFS = [
     { key: "sleep",    label: "Sleep",    match: c => typeof c?.title === "string" && c.title.startsWith("Sleep Score (") },
-    { key: "calories", label: "Calories", match: c => typeof c?.title === "string" && c.title.startsWith("Calories (") },
+    { key: "calories", label: "Calories", match: c => typeof c?.title === "string" && c.title.toLowerCase().startsWith("calories") },
     { key: "habits",   label: "Habits",   match: c => c?.source === "habit" },
     { key: "vices",    label: "Vices",    match: c => c?.source === "vice" },
     { key: "flex",     label: "Flex",     match: c => c?.source === "flex" },
@@ -384,6 +384,14 @@
     return roundPoints((Number(current) || 0) + (Number(delta) || 0), decimals);
   }
 
+  function parseCaloriesFromTitle(title) {
+    if (typeof title !== 'string') return null;
+    const match = title.match(/calories[^0-9]*([0-9]+(?:\.[0-9]+)?)/i);
+    if (!match) return null;
+    const raw = Number(match[1]);
+    return Number.isFinite(raw) ? raw : null;
+  }
+
   function deriveCompletionPoints(entry) {
     if (!entry) return null;
     const sleepInfo = getSleepInfo(entry);
@@ -404,15 +412,13 @@
       };
     }
 
-    if (typeof entry.title === 'string' && entry.title.startsWith('Calories (')) {
-      const raw = Number(entry.title.match(/\((\d+)\)/)?.[1]);
-      if (Number.isFinite(raw)) {
-        return {
-          points: caloriesToPoints(raw),
-          formula: 'calories',
-          inputs: { calories: raw }
-        };
-      }
+    const caloriesRaw = parseCaloriesFromTitle(entry.title);
+    if (Number.isFinite(caloriesRaw)) {
+      return {
+        points: caloriesToPoints(caloriesRaw),
+        formula: 'calories',
+        inputs: { calories: caloriesRaw }
+      };
     }
 
     return null;
