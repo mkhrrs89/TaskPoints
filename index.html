@@ -100,43 +100,94 @@ Nothing visible on the page is built here. === -->
        ========================================================= -->
 
   
-    <div class="row items-center">
-      <div class="hidden md:flex items-center gap-3">
-        <img src="assets/taskpoints-logo.png" alt="TaskPoints logo" class="w-10 h-10 rounded-2xl object-cover shrink-0 shadow-sm">
-<h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight">
-  <span style="color:#fb923c;">Task</span><span style="color:#1e666d;">Points</span>
-</h1>
+  <!-- =========================================================
+       DESKTOP HEADER ROW (START)
+       Visible on md+ screens (logo left, nav on same row).
+       ========================================================= -->
+  <div class="row items-center">
+    <!-- --- Logo + title (desktop) (START) --------------------- -->
+    <div class="hidden md:flex items-center gap-3">
+      <img
+        src="assets/taskpoints-logo.png"
+        alt="TaskPoints logo"
+        class="w-10 h-10 rounded-2xl object-cover shrink-0 shadow-sm"
+      />
 
+      <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight">
+        <span style="color:#fb923c;">Task</span><span style="color:#1e666d;">Points</span>
+      </h1>
+    </div>
+    <!-- --- Logo + title (desktop) (END) ----------------------- -->
+
+
+    <!-- =======================================================
+         TOP NAV TOOLBAR (START)
+         Desktop-only Export/Import + page navigation.
+         ======================================================= -->
+    <div class="toolbar header-nav">
+      <!-- --- Export / Import (desktop) (START) ---------------- -->
+      <button
+        id="exportBtn"
+        class="btn btn-ghost btn-toolbar hidden md:inline-flex"
+        data-export-button
+      >
+        Export
+      </button>
+
+      <label class="btn btn-ghost btn-toolbar cursor-pointer hidden md:inline-flex">
+        Import
+        <input
+          id="importInput"
+          type="file"
+          accept="application/json"
+          class="hidden"
+          data-import-input
+        />
+      </label>
+      <!-- --- Export / Import (desktop) (END) ------------------ -->
+
+
+      <!-- --- Main nav links (START) --------------------------- -->
+      <a
+        href="index.html"
+        class="btn btn-teal btn-toolbar nav-btn active"
+        aria-current="page"
+      >
+        Main
+      </a>
+      <a href="daily_sources.html" class="btn btn-teal btn-toolbar nav-btn">Sources</a>
+      <a href="log.html" class="btn btn-teal btn-toolbar nav-btn">Log</a>
+      <a href="week.html" class="btn btn-teal btn-toolbar nav-btn">Week</a>
+
+      <!-- --- Game dropdown (START) ---------------------------- -->
+      <div class="dropdown">
+        <button
+          type="button"
+          class="btn btn-teal btn-toolbar nav-btn dropdown-toggle"
+          data-dropdown-toggle
+          aria-expanded="false"
+        >
+          Game <span class="caret">▾</span>
+        </button>
+
+        <div class="dropdown-menu">
+          <a href="game.html" class="btn btn-teal btn-toolbar nav-btn">Players</a>
+          <a href="standings.html" class="btn btn-teal btn-toolbar nav-btn">Standings</a>
+          <a href="matchups.html" class="btn btn-teal btn-toolbar nav-btn">Matchups</a>
+          <a href="schedule.html" class="btn btn-teal btn-toolbar nav-btn">Schedule</a>
+          <a href="game_ratings.html" class="btn btn-teal btn-toolbar nav-btn">Ratings</a>
+          <a href="records.html" class="btn btn-teal btn-toolbar nav-btn">Records</a>
+        </div>
       </div>
+      <!-- --- Game dropdown (END) ------------------------------ -->
 
-<div class="toolbar header-nav">
-  <button id="exportBtn" class="btn btn-ghost btn-toolbar hidden md:inline-flex" data-export-button>Export</button>
-  <label class="btn btn-ghost btn-toolbar cursor-pointer hidden md:inline-flex">Import
-    <input id="importInput" type="file" accept="application/json" class="hidden" data-import-input/>
-  </label>
-
-  <a href="index.html"         class="btn btn-teal btn-toolbar nav-btn active" aria-current="page">Main</a>
-  <a href="daily_sources.html" class="btn btn-teal btn-toolbar nav-btn">Sources</a>
-  <a href="log.html"           class="btn btn-teal btn-toolbar nav-btn">Log</a>
-  <a href="week.html"          class="btn btn-teal btn-toolbar nav-btn">Week</a>
-  <div class="dropdown">
-    <button type="button" class="btn btn-teal btn-toolbar nav-btn dropdown-toggle" data-dropdown-toggle aria-expanded="false">Game <span class="caret">▾</span></button>
-    <div class="dropdown-menu">
-      <a href="game.html"         class="btn btn-teal btn-toolbar nav-btn">Players</a>
-      <a href="standings.html"    class="btn btn-teal btn-toolbar nav-btn">Standings</a>
-      <a href="matchups.html"     class="btn btn-teal btn-toolbar nav-btn">Matchups</a>
-      <a href="schedule.html"     class="btn btn-teal btn-toolbar nav-btn">Schedule</a>
-      <a href="game_ratings.html" class="btn btn-teal btn-toolbar nav-btn">Ratings</a>
-      <a href="records.html"      class="btn btn-teal btn-toolbar nav-btn">Records</a>
-    </div>
-  </div>
-  <a href="projects.html" class="btn btn-teal btn-toolbar nav-btn">Projects</a>
-  <a href="settings.html" class="btn btn-teal btn-toolbar nav-btn">Settings</a>
-
-</div>
-
-    </div>
-  </header>
+      <a href="projects.html" class="btn btn-teal btn-toolbar nav-btn">Projects</a>
+      <a href="settings.html" class="btn btn-teal btn-toolbar nav-btn">Settings</a>
+      <!-- --- Main nav links (END) ----------------------------- -->
+      
+    </div>  <!--  TOP NAV TOOLBAR (END)  -->
+  </div>  <!-- DESKTOP HEADER ROW (END)  -->
+</header>  <!--  HEADER (END)  -->
 
   <!-- TOP ROW -->
   <div class="space-y-3 mb-6">
