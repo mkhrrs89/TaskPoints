@@ -10,6 +10,7 @@
 
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="styles.css">
+  <script src="scoring_core.js"></script>
   <script src="toolbar.js" defer></script>
 </head>
 <body class="min-h-screen">
@@ -185,6 +186,25 @@ function saveMerged(partial) {
   }
 }
 
+function getCompletionPoints(entry) {
+  if (window.TaskPointsCore?.pointsForCompletion) {
+    return TaskPointsCore.pointsForCompletion(entry);
+  }
+  return Number(entry?.points) || 0;
+}
+
+function syncDerivedPointsIfNeeded() {
+  if (!window.TaskPointsCore?.syncDerivedPoints) return;
+  const derivedSync = TaskPointsCore.syncDerivedPoints(state);
+  state = derivedSync.state;
+  if (!derivedSync.changed) return;
+  if (window.TaskPointsCore?.mergeAndSaveState) {
+    state = TaskPointsCore.mergeAndSaveState(state).state;
+  } else {
+    state = saveMerged(state);
+  }
+}
+
     
     // Run the same sleep migration here so this page is safe even if opened first
     function migrateSleepEntriesForBonus() {
@@ -307,8 +327,8 @@ if (changed) {
         if (!d || isNaN(d.getTime())) return;
         d.setHours(0, 0, 0, 0);
         const key = dateKey(d);
-        if (!daily[key]) daily[key] = 0;
-        daily[key] += Number(c.points) || 0;
+      if (!daily[key]) daily[key] = 0;
+        daily[key] += getCompletionPoints(c);
       });
 
       return daily;
@@ -351,6 +371,7 @@ listEl.innerHTML = keys.map(k => {
 
     // Boot
     migrateSleepEntriesForBonus();
+    syncDerivedPointsIfNeeded();
     renderDailyScores();
   </script>
 </body>

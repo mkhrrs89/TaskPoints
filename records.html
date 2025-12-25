@@ -10,6 +10,7 @@
 
   <!-- Shared theme -->
   <link rel="stylesheet" href="styles.css" />
+  <script src="scoring_core.js"></script>
 
   <style>
     /* Page-local niceties that sit on top of your existing theme */
@@ -219,6 +220,31 @@ function loadState(){
   }
 }
 
+function getCompletionPoints(entry) {
+  if (window.TaskPointsCore?.pointsForCompletion) {
+    return TaskPointsCore.pointsForCompletion(entry);
+  }
+  return Number(entry?.points) || 0;
+}
+
+function syncDerivedPointsIfNeeded(state) {
+  if (!window.TaskPointsCore?.syncDerivedPoints) return state;
+  const derivedSync = TaskPointsCore.syncDerivedPoints(state);
+  let nextState = derivedSync.state;
+  if (derivedSync.changed) {
+    if (window.TaskPointsCore?.mergeAndSaveState) {
+      nextState = TaskPointsCore.mergeAndSaveState(nextState).state;
+    } else {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
+      } catch (e) {
+        console.error("records syncDerivedPoints save error", e);
+      }
+    }
+  }
+  return nextState;
+}
+
 function dateKey(d){
   // supports Date or ISO string
   const dt = (d instanceof Date) ? d : new Date(d);
@@ -272,7 +298,7 @@ function buildRecords(state){
   for (const c of comps){
     if (!c || !c.completedAtISO) continue;
     const dk = dateKey(c.completedAtISO);
-    sums.set(dk, (sums.get(dk) || 0) + num(c.points || 0));
+    sums.set(dk, (sums.get(dk) || 0) + getCompletionPoints(c));
   }
 
   for (const [dk, score] of sums.entries()){
@@ -339,7 +365,8 @@ function filteredSortedTop(records){
 }
 
 function render(){
-  const state = loadState();
+  let state = loadState();
+  state = syncDerivedPointsIfNeeded(state);
   const all = buildRecords(state);
 
   const top = filteredSortedTop(all);

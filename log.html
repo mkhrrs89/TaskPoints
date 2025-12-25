@@ -9,6 +9,7 @@
 
 
 <link rel="stylesheet" href="styles.css">
+<script src="scoring_core.js"></script>
 <script src="toolbar.js" defer></script>
 
 
@@ -377,6 +378,25 @@ function saveMerged(partial) {
   }
 }
 
+function getCompletionPoints(entry) {
+  if (window.TaskPointsCore?.pointsForCompletion) {
+    return TaskPointsCore.pointsForCompletion(entry);
+  }
+  return Number(entry?.points) || 0;
+}
+
+function syncDerivedPointsIfNeeded() {
+  if (!window.TaskPointsCore?.syncDerivedPoints) return;
+  const derivedSync = TaskPointsCore.syncDerivedPoints(state);
+  state = derivedSync.state;
+  if (!derivedSync.changed) return;
+  if (window.TaskPointsCore?.mergeAndSaveState) {
+    state = TaskPointsCore.mergeAndSaveState(state).state;
+  } else {
+    state = saveMerged(state);
+  }
+}
+
 
 function migrateSleepEntriesForBonus() {
   if (!state || !Array.isArray(state.completions)) return;
@@ -452,6 +472,8 @@ function migrateWorkEntriesForHours() {
 
 migrateWorkEntriesForHours();
 
+syncDerivedPointsIfNeeded();
+
 function save() {
   state = saveMerged(state);
 }
@@ -484,12 +506,13 @@ function render(){
       const src = isHabit ? 'Habit' : isVice ? 'Vice' : isFlex ? 'Flex' : isWork ? 'Work' : 'Task';
       const canDelete = (src === 'Task' || src === 'Flex'); // only tasks + flex get an X
       const canEditDate = (!isHabit && !isVice);      // allow date-edit for tasks + sleep + flex
+      const displayPoints = getCompletionPoints(c);
 
 
 row.innerHTML = `
   <div>${new Date(c.completedAtISO).toLocaleString()}</div>
   <div>${escapeHtml(c.title)}</div>
-  <div class="font-semibold">${(c.points||0).toLocaleString()}</div>
+  <div class="font-semibold">${displayPoints.toLocaleString()}</div>
   <div>${src}</div>
   <div class="flex gap-1 justify-center">
     ${canEditDate ? `<button class="btn" data-edit-date-id="${c.id}">📅</button>` : ''}

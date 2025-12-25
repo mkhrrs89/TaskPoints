@@ -295,14 +295,14 @@
       const expectedCategories = {};
       TaskPointsCore.CATEGORY_DEFS.forEach(def => {
         const label = def.label;
-        const expectedVal = Number(totals.byCategory?.[label]) || 0;
+        const expectedVal = Number(totals.byCategory?.[def.key]) || 0;
         const actualVal = Number(dayBreak.categories?.[def.key]) || 0;
         expectedCategories[def.key] = expectedVal;
         if (Math.abs(expectedVal - actualVal) > 0.05) {
           categoryIssues.push(`${label}: expected ${expectedVal.toFixed(2)}, actual ${actualVal.toFixed(2)}`);
         }
       });
-      const expectedInertia = Number(totals.byCategory?.Inertia) || 0;
+      const expectedInertia = Number(totals.byCategory?.inertia) || 0;
       const actualInertia = Number(dayBreak.categories?.inertia) || 0;
       if (expectedInertia || actualInertia) {
         expectedCategories.inertia = expectedInertia;

@@ -657,18 +657,18 @@
     const byCategory = {};
 
     CATEGORY_DEFS.forEach(def => {
-      byCategory[def.label] = 0;
+      byCategory[def.key] = 0;
     });
-    byCategory.Inertia = 0;
+    byCategory.inertia = 0;
 
     snapshot.items.forEach(item => {
       const def = CATEGORY_DEFS.find(d => d.key === item.category) || CATEGORY_DEFS[CATEGORY_DEFS.length - 1];
-      const label = def.label;
-      byCategory[label] = addPoints(byCategory[label], item.points);
+      const key = def.key;
+      byCategory[key] = addPoints(byCategory[key], item.points);
     });
 
     if (snapshot.inertia) {
-      byCategory.Inertia = addPoints(byCategory.Inertia, snapshot.inertia);
+      byCategory.inertia = addPoints(byCategory.inertia, snapshot.inertia);
     }
 
     const rawTotal = addPoints(snapshot.baseTotal, snapshot.inertia || 0);
