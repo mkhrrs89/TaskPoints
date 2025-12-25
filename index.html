@@ -1467,6 +1467,264 @@ function visibleOpponentScoreForMatchup(dateKeyStr, playerId, targetTotal){
   return schedule ? accruedOpponentPoints(schedule, new Date()) : Math.max(0, Number(targetTotal) || 0);
 }
 
+/* ---------- MATCHUP AUTO-SIM ---------- */
+function shuffle(arr){
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+}
+
+function getAllParticipantIds(){
+  const ids = ['YOU'];
+  (state.players || []).forEach(p => {
+    if (p && p.id) ids.push(p.id);
+  });
+  return ids;
+}
+
+function participantSignature(ids){
+  return ids.slice().sort().join('|');
+}
+
+function buildDailySchedule(dateKeyStr, participantIds, signature){
+  const pool = participantIds.slice();
+  shuffle(pool);
+
+  const matchups = [];
+  const byeIds = [];
+
+  for (let i = 0; i + 1 < pool.length; i += 2) {
+    matchups.push({
+      playerAId: pool[i],
+      playerBId: pool[i + 1]
+    });
+  }
+
+  if (pool.length % 2 === 1) {
+    byeIds.push(pool[pool.length - 1]);
+  }
+
+  return {
+    date: dateKeyStr,
+    matchups,
+    byeIds,
+    participantSignature: signature
+  };
+}
+
+function ensureUpcomingSchedule(days = 7){
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  const todayKey = dateKey(today);
+
+  const participants = getAllParticipantIds();
+  const signature = participantSignature(participants);
+
+  let schedule = Array.isArray(state.schedule) ? state.schedule.filter(d => d && d.date >= todayKey) : [];
+  let changed = false;
+
+  if (!schedule.every(d => d.participantSignature === signature)) {
+    schedule = [];
+    changed = true;
+  }
+
+  const neededDates = [];
+  for (let i = 0; i < days; i++) {
+    const dt = new Date(today);
+    dt.setDate(dt.getDate() + i);
+    neededDates.push(dateKey(dt));
+  }
+
+  const byDate = new Map();
+  schedule.forEach((d) => {
+    if (d && d.date) byDate.set(d.date, d);
+  });
+
+  const rebuilt = neededDates.map((key) => {
+    const existing = byDate.get(key);
+    if (existing) return existing;
+    changed = true;
+    return buildDailySchedule(key, participants, signature);
+  });
+
+  if (rebuilt.length !== schedule.length) changed = true;
+
+  state.schedule = rebuilt;
+  return changed;
+}
+
+function computeTodayPoints() {
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  const todayKey = dateKey(today);
+
+  if (window.TaskPointsCore && typeof TaskPointsCore.buildDaySnapshot === "function" && typeof TaskPointsCore.computeDayTotals === "function") {
+    const snapshot = TaskPointsCore.buildDaySnapshot(todayKey, state);
+    const totals = TaskPointsCore.computeDayTotals(snapshot);
+    return Number((totals.total || 0).toFixed(1));
+  }
+
+  const comps = Array.isArray(state.completions) ? state.completions : [];
+  if (!comps.length) return 0;
+
+  let total = 0;
+
+  for (const c of comps) {
+    if (!c || !c.completedAtISO) continue;
+
+    const dk = dateKey(c.completedAtISO);
+    if (dk === todayKey) {
+      total += Number(c.points || 0);
+    }
+  }
+
+  return Number(total.toFixed(1));
+}
+
+function simulateAiScoreForPlayer(player, todayKey){
+  if (!player || !player.baseline) return 0;
+
+  const baseline = Number(player.baseline);
+  const variance = Number(player.variance);
+  const varianceTiltRaw = Number(
+    typeof player.varianceTilt === "number" ? player.varianceTilt : (player.varianceTilt || 50)
+  );
+  const varianceTilt = Math.min(100, Math.max(0, varianceTiltRaw)) / 100;
+  const momentum = Number(player.momentum);
+
+  let riskyRating = Number(player.risky);
+  if (isNaN(riskyRating)) riskyRating = 0;
+  const riskyNormalized = riskyRating > 10 ? riskyRating / 10 : riskyRating;
+
+  const variationMagnitude = Math.random() * variance;
+  const variationSign = Math.random() < varianceTilt ? 1 : -1;
+  const variation = variationMagnitude * variationSign;
+
+  let momentumBonus = 0;
+  if (momentum && state.gameHistory.length) {
+    const prev = state.gameHistory
+      .filter(g => g.playerId === player.id)
+      .sort((a,b) => b.date.localeCompare(a.date))[0];
+
+    if (prev && prev.date !== todayKey) {
+      momentumBonus = (prev.score * (momentum / 100)) * 0.1;
+    }
+  }
+
+  let riskyMod = 0;
+  if (Math.random() < riskyNormalized / 10) {
+    const boom = Math.random() < 0.5;
+    riskyMod = boom
+      ? variance * (0.5 + Math.random())
+      : -variance * (0.5 + Math.random());
+  }
+
+  const score = baseline + variation + momentumBonus + riskyMod;
+  return Number(score.toFixed(1));
+}
+
+function makeId() {
+  if (window.crypto && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return "id_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2);
+}
+
+function simulateToday() {
+  const todayKey = getGameDayKey(new Date());
+
+  state.gameHistory = state.gameHistory || [];
+  state.matchups    = state.matchups    || [];
+  state.schedule    = state.schedule    || [];
+
+  ensureUpcomingSchedule();
+
+  state.gameHistory = state.gameHistory.filter(g => g.date !== todayKey);
+  state.matchups    = state.matchups.filter(m => (m.date || m.dateKey) !== todayKey);
+
+  const todaysSchedule = state.schedule.find(d => d && d.date === todayKey);
+  const todaysPairs = todaysSchedule && Array.isArray(todaysSchedule.matchups)
+    ? todaysSchedule.matchups
+    : [];
+
+  if (!todaysPairs.length) {
+    save();
+    return;
+  }
+
+  const namesById = {};
+  const playerMap = new Map();
+  (state.players || []).forEach(p => {
+    if (!p || !p.id) return;
+    playerMap.set(p.id, p);
+    namesById[p.id] = p.name || "Unnamed";
+  });
+  namesById["YOU"] = "You";
+
+  const participantIds = Array.from(new Set(
+    todaysPairs.flatMap(m => [m.playerAId, m.playerBId])
+  ));
+
+  const scoresById = {};
+
+  const youScore = computeTodayPoints();
+  if (participantIds.includes('YOU') && !isNaN(youScore)) {
+    scoresById['YOU'] = youScore;
+  }
+
+  participantIds.forEach(id => {
+    if (id === 'YOU') return;
+    const player = playerMap.get(id);
+    if (!player) return;
+    const score = simulateAiScoreForPlayer(player, todayKey);
+    scoresById[id] = score;
+    ensureOpponentDripSchedule(todayKey, id, score);
+    state.gameHistory.push({
+      id: makeId(),
+      date: todayKey,
+      playerId: id,
+      score
+    });
+  });
+
+  todaysPairs.forEach(pair => {
+    const matchup = {
+      id: makeId(),
+      date: todayKey,
+      playerAId: pair.playerAId,
+      playerBId: pair.playerBId,
+      scoreA: scoresById[pair.playerAId] ?? 0,
+      scoreB: scoresById[pair.playerBId] ?? 0
+    };
+
+    state.matchups.push(matchup);
+  });
+
+  save();
+}
+
+function maybeAutoSimToday(){
+  const now = new Date();
+  const todayKey = getGameDayKey(now);
+
+  if (now.getHours() < 8) return false;
+  if (!Array.isArray(state.players) || state.players.length === 0) return false;
+
+  state.gameHistory = state.gameHistory || [];
+  state.matchups = state.matchups || [];
+
+  const hasTodayHistory = state.gameHistory.some(g => g.date === todayKey);
+  const hasTodayMatchup = state.matchups.some(m => {
+    const key = m?.date || m?.dateKey || (m?.dateISO ? dateKey(m.dateISO) : "");
+    return key === todayKey;
+  });
+  if (hasTodayHistory || hasTodayMatchup) return false;
+
+  simulateToday();
+  return true;
+}
+
 
 function normalizeState(s) {
   return {
@@ -4677,6 +4935,9 @@ document.addEventListener('DOMContentLoaded', () => {
   renderHabits();
   renderVices();
   renderFlexActions();
+
+  maybeAutoSimToday();
+  state = syncStateWithMatchups(state);
 
 console.log('TaskPoints main state summary:', {
   tasks:       Array.isArray(state.tasks)       ? state.tasks.length       : 'no array',
