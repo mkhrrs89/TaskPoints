@@ -1973,12 +1973,13 @@ card.innerHTML = `
       const file = input.files[0];
       if (!file) return;
 
-      const dataUrl = await fileToDataUrl(file);
-
-      // Save image to special YOU field
-      state.youImage = dataUrl;
-      state = saveState(state);
-      renderPlayers();
+      openImageCropperFromFile(file, (dataUrl) => {
+        if (!dataUrl) return;
+        // Save image to special YOU field
+        state.youImage = dataUrl;
+        state = saveState(state);
+        renderPlayers();
+      });
     };
 
     input.click();
