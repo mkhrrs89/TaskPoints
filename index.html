@@ -524,6 +524,7 @@ Nothing visible on the page is built here. === -->
 
     <div class="flex gap-2 flex-wrap">
       <input id="habitName" class="input w-48" placeholder="Habit name">
+      <input id="habitTag" class="input w-36" placeholder="Tag">
       <input id="habitPts"  class="input w-28" type="number" placeholder="Pts">
       <button id="addHabitBtn" class="btn btn-primary">Add Habit</button>
     </div>
@@ -540,6 +541,7 @@ Nothing visible on the page is built here. === -->
     <h2 id="vicesAnchor" class="font-bold text-lg">Vices</h2>
     <div class="flex gap-2 flex-wrap">
       <input id="viceName" class="input w-48" placeholder="Vice name">
+      <input id="viceTag" class="input w-36" placeholder="Tag">
       <input id="vicePts"  class="input w-28" type="number" placeholder="Pts">
       <button id="addViceBtn" class="btn btn-primary">Add Vice</button>
     </div>
@@ -606,6 +608,85 @@ function normalizeTask(task){
     t.originalDueDateISO = t.dueDateISO;
   }
   return t;
+}
+
+function normalizeHexColor(value) {
+  if (!value) return null;
+  let hex = String(value).trim();
+  if (!hex) return null;
+  if (!hex.startsWith('#')) hex = `#${hex}`;
+  if (!/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(hex)) return null;
+  if (hex.length === 4) {
+    hex = `#${hex.slice(1).split('').map((c) => c + c).join('')}`;
+  }
+  return hex.toLowerCase();
+}
+
+function normalizeHabitTagColors(value) {
+  if (!value || typeof value !== 'object') return {};
+  const next = {};
+  Object.entries(value).forEach(([tag, color]) => {
+    const normalized = normalizeHexColor(color);
+    if (normalized) next[String(tag)] = normalized;
+  });
+  return next;
+}
+
+function normalizeHabit(habit) {
+  if (!habit || typeof habit !== 'object') return habit;
+  return {
+    ...habit,
+    tag: typeof habit.tag === 'string' ? habit.tag.trim() : ''
+  };
+}
+
+function hexToRgb(hex) {
+  const normalized = normalizeHexColor(hex);
+  if (!normalized) return null;
+  const raw = normalized.replace('#', '');
+  const r = parseInt(raw.slice(0, 2), 16);
+  const g = parseInt(raw.slice(2, 4), 16);
+  const b = parseInt(raw.slice(4, 6), 16);
+  return { r, g, b };
+}
+
+function darkenHex(hex, amount = 0.35) {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return null;
+  const clamp = (value) => Math.max(0, Math.min(255, Math.round(value)));
+  const factor = 1 - amount;
+  return `#${[
+    clamp(rgb.r * factor),
+    clamp(rgb.g * factor),
+    clamp(rgb.b * factor)
+  ].map((val) => val.toString(16).padStart(2, '0')).join('')}`;
+}
+
+function getContrastText(hex) {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return '#f8fafc';
+  const toLinear = (c) => {
+    const v = c / 255;
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  };
+  const luminance = 0.2126 * toLinear(rgb.r) + 0.7152 * toLinear(rgb.g) + 0.0722 * toLinear(rgb.b);
+  return luminance > 0.6 ? '#0b0f14' : '#f8fafc';
+}
+
+function getHabitTagColor(tag) {
+  if (!tag) return null;
+  const colors = state.habitTagColors || {};
+  return normalizeHexColor(colors[tag]);
+}
+
+function getHabitBubbleStyleAttr(tag, status) {
+  if (!tag) return '';
+  if (status !== 'on' && status !== 'failed') return '';
+  const color = getHabitTagColor(tag);
+  if (!color) return '';
+  const dark = darkenHex(color, 0.35) || color;
+  const textColor = getContrastText(color);
+  return ` style="background:linear-gradient(135deg, ${color} 0%, ${dark} 100%);border-color:${dark};color:${textColor};"`;
 }
 
 function getHabitSortMode(){
@@ -1775,14 +1856,15 @@ function normalizeState(s) {
     tasks:       Array.isArray(s.tasks)       ? s.tasks.map(normalizeTask)       : [],
     completions: Array.isArray(s.completions) ? s.completions : [],
     players:     Array.isArray(s.players)     ? s.players     : [],
-    habits:      Array.isArray(s.habits)      ? s.habits      : [],
+    habits:      Array.isArray(s.habits)      ? s.habits.map(normalizeHabit)      : [],
     flexActions: Array.isArray(s.flexActions) ? s.flexActions : [],
     gameHistory: Array.isArray(s.gameHistory) ? s.gameHistory : [],
     matchups:    Array.isArray(s.matchups)    ? s.matchups    : [],
     schedule:    Array.isArray(s.schedule)    ? s.schedule    : [],
     opponentDripSchedules: Array.isArray(s.opponentDripSchedules) ? s.opponentDripSchedules : [],
     youImage:    typeof s.youImage === "string" ? s.youImage : "",
-    projects:    Array.isArray(s.projects)    ? s.projects    : loadProjectsFromStorage()
+    projects:    Array.isArray(s.projects)    ? s.projects    : loadProjectsFromStorage(),
+    habitTagColors: normalizeHabitTagColors(s.habitTagColors)
   };
 }
 
@@ -1848,7 +1930,8 @@ function resetAll(){
     gameHistory:  [],
     matchups:     [],
     schedule:     [],
-    projects:     []
+    projects:     [],
+    habitTagColors: {}
   };
 
   // Re-render everything so the page doesn't look broken
@@ -2812,7 +2895,9 @@ const completion = Number(h.__completion || 0);
 
 const daysHtml = days.map(d => {
   const on = h.doneKeys.includes(d.key);
-return `<div class="habitDay ${on ? 'on' : 'off'}" data-habit="${h.id}" data-day="${d.key}">
+  const status = on ? 'on' : 'off';
+  const styleAttr = getHabitBubbleStyleAttr(h.tag, status);
+  return `<div class="habitDay ${status}"${styleAttr} data-habit="${h.id}" data-day="${d.key}">
     ${d.date.getDate()}
   </div>`;
 }).join('');
@@ -2827,6 +2912,7 @@ return `<div class="habitDay ${on ? 'on' : 'off'}" data-habit="${h.id}" data-day
         <div class="flex flex-col gap-2 min-w-0">
           <input class="input" data-field="name" value="${escapeHtml(h.name)}">
           <input class="input" data-field="points" type="number" value="${h.pointsPerDay||0}">
+          <input class="input" data-field="tag" value="${escapeHtml(h.tag || '')}" placeholder="Tag">
           <select class="input" data-field="category">
             <option value="habit" ${category==='habit'?'selected':''}>Habit</option>
             <option value="vice"  ${category==='vice'?'selected':''}>Vice</option>
@@ -2857,6 +2943,7 @@ const nameHtml = `
     <div class="tag bg-zinc-200/60 dark:bg-zinc-700/60">
       ${h.pointsPerDay||0} pts
     </div>
+    ${h.tag ? `<div class="tag tag-clear">${escapeHtml(h.tag)}</div>` : ''}
   ${streak > 0 ? `
     <div class="tag streak-pill">
       ${streak} ${streak === 1 ? 'day' : 'days'}
@@ -2953,7 +3040,8 @@ function renderVices(){
       const on = h.doneKeys.includes(d.key);
       const failed = h.failedKeys.includes(d.key);
       const statusClass = on ? 'on' : (failed ? 'failed' : 'off');
-      return `<div class="habitDay viceDay ${statusClass}" data-habit="${h.id}" data-day="${d.key}">
+      const styleAttr = getHabitBubbleStyleAttr(h.tag, statusClass);
+      return `<div class="habitDay viceDay ${statusClass}"${styleAttr} data-habit="${h.id}" data-day="${d.key}">
 
         ${d.date.getDate()}
       </div>`;
@@ -2967,6 +3055,7 @@ function renderVices(){
         <div class="flex flex-col gap-2 min-w-0">
           <input class="input" data-field="name" value="${escapeHtml(h.name)}">
           <input class="input" data-field="points" type="number" value="${h.pointsPerDay||0}">
+          <input class="input" data-field="tag" value="${escapeHtml(h.tag || '')}" placeholder="Tag">
           <div class="flex gap-2 flex-wrap">
             <button class="btn btn-success" data-act="habit-save">Save</button>
             <button class="btn btn-ghost" data-act="habit-cancel">Cancel</button>
@@ -2997,6 +3086,7 @@ const nameHtml = `
     <div class="tag bg-zinc-200/60 dark:bg-zinc-700/60">
       ${h.pointsPerDay||0} pts
     </div>
+    ${h.tag ? `<div class="tag tag-clear">${escapeHtml(h.tag)}</div>` : ''}
   ${streak > 0 ? `
     <div class="tag streak-pill">
       ${streak} ${streak === 1 ? 'day' : 'days'}
@@ -3059,6 +3149,7 @@ const nameHtml = `
 
 function addHabit(){
   const name = $('habitName').value.trim();
+  const tag  = $('habitTag')?.value.trim() || '';
   const pts  = Number($('habitPts').value)||0;
   if(!name) return alert('Enter a habit name');
 
@@ -3077,13 +3168,14 @@ function addHabit(){
     doneKeys: [],
     createdAtISO: new Date().toISOString(),
     category: 'habit',
+    tag,
     order: maxOrder + 1
   };
 
 
   state.habits.push(h);
   save();
-  $('habitName').value=''; $('habitPts').value='';
+  $('habitName').value=''; $('habitPts').value=''; if ($('habitTag')) $('habitTag').value='';
 
   renderHabits();
   renderVices();
@@ -3092,6 +3184,7 @@ function addHabit(){
 
 function addVice(){
   const name = $('viceName').value.trim();
+  const tag  = $('viceTag')?.value.trim() || '';
   const pts  = Number($('vicePts').value)||0;
   if(!name) return alert('Enter a vice name');
 
@@ -3110,13 +3203,14 @@ function addVice(){
     doneKeys: [],
     createdAtISO: new Date().toISOString(),
     category: 'vice',
+    tag,
     order: maxOrder + 1
   };
 
 
   state.habits.push(h);
   save();
-  $('viceName').value=''; $('vicePts').value='';
+  $('viceName').value=''; $('vicePts').value=''; if ($('viceTag')) $('viceTag').value='';
 
   renderHabits();
   renderVices();
@@ -3128,12 +3222,14 @@ function saveHabitEdit(id,row){
   const h=state.habits.find(x=>x.id===id); if(!h) return;
   const nameInput=row.querySelector('input[data-field="name"]');
   const ptsInput=row.querySelector('input[data-field="points"]');
+  const tagInput=row.querySelector('input[data-field="tag"]');
   const catInput=row.querySelector('[data-field="category"]');
 
   const oldPoints = h.pointsPerDay || 0;
 
   h.name = nameInput.value.trim() || h.name;
   h.pointsPerDay = Number(ptsInput.value)||0;
+  if (tagInput) h.tag = tagInput.value.trim();
   h.category = catInput ? (catInput.value || 'habit') : (h.category || 'habit');
 
   // update existing log entries
