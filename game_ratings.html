@@ -136,7 +136,12 @@
     <section class="card mb-6">
       <div class="flex items-center justify-between mb-3">
         <h2 class="font-semibold text-lg">Player Ratings Table</h2>
-        <span id="playerCount" class="text-xs opacity-70"></span>
+        <div class="flex items-center gap-3">
+          <button type="button" class="btn btn-ghost btn-toolbar text-xs" data-export-ratings>
+            Export Ratings (CSV)
+          </button>
+          <span id="playerCount" class="text-xs opacity-70"></span>
+        </div>
       </div>
       <p class="text-xs opacity-70 mb-3">
         Click any column header to sort. Risky is shown as a 0–10 rating (normalized from your stored data). Variance Tilt shows the % of swings that land above a player’s baseline (50% = neutral).
@@ -320,13 +325,8 @@ let gameHistory =
 let sortKey = "name";
 let sortDir = "asc"; // "asc" or "desc"
 
-function renderTable() {
-  const tbody = $("playersTableBody");
-  if (!tbody) return;
-  tbody.innerHTML = "";
-
-  // Sort a copy so we don't mutate original order
-  const sorted = [...players].sort((a, b) => {
+function getSortedPlayers() {
+  return [...players].sort((a, b) => {
     const ak = getSortValue(a, sortKey);
     const bk = getSortValue(b, sortKey);
 
@@ -344,6 +344,62 @@ function renderTable() {
     if (as > bs) return sortDir === "asc" ? 1 : -1;
     return 0;
   });
+}
+
+function downloadCsv(filename, rows) {
+  const csvRows = rows.map(row => row.map(value => {
+    if (value == null) return "";
+    const str = String(value);
+    if (/[",\n]/.test(str)) {
+      return `"${str.replace(/"/g, '""')}"`;
+    }
+    return str;
+  }).join(","));
+
+  const csv = "\uFEFF" + csvRows.join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function exportRatingsCsv() {
+  const rows = [["Name", "Baseline", "Variance", "Variance Tilt (%)", "Momentum", "Risky", "Style"]];
+
+  getSortedPlayers().forEach(p => {
+    const baseline = typeof p.baseline === "number" ? p.baseline : Number(p.baseline);
+    const variance = typeof p.variance === "number" ? p.variance : Number(p.variance);
+    const varianceTilt = typeof p.varianceTilt === "number" ? p.varianceTilt : Number(p.varianceTilt);
+    const momentum = typeof p.momentum === "number" ? p.momentum : Number(p.momentum);
+    const riskyNorm = getNormalizedRisky(p.risky);
+
+    rows.push([
+      p.name || "—",
+      Number.isFinite(baseline) ? baseline : "",
+      Number.isFinite(variance) ? variance : "",
+      Number.isFinite(varianceTilt) ? varianceTilt : "",
+      Number.isFinite(momentum) ? momentum : "",
+      Number.isFinite(riskyNorm) ? riskyNorm.toFixed(1) : "",
+      p.style || ""
+    ]);
+  });
+
+  const now = new Date();
+  const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  downloadCsv(`taskpoints-player-ratings-${stamp}.csv`, rows);
+}
+
+function renderTable() {
+  const tbody = $("playersTableBody");
+  if (!tbody) return;
+  tbody.innerHTML = "";
+
+  const sorted = getSortedPlayers();
 
   sorted.forEach(p => {
     const tr = document.createElement("tr");
@@ -503,6 +559,11 @@ function getSortValue(p, key) {
 
     // Hook up header click sorting
     document.addEventListener("DOMContentLoaded", () => {
+      const exportButton = document.querySelector("[data-export-ratings]");
+      if (exportButton) {
+        exportButton.addEventListener("click", exportRatingsCsv);
+      }
+
       const headers = document.querySelectorAll("th[data-sort]");
       headers.forEach(th => {
         th.addEventListener("click", () => {
