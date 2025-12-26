@@ -1736,6 +1736,8 @@ function simulateToday() {
       date: todayKey,
       playerAId: pair.playerAId,
       playerBId: pair.playerBId,
+      playerAName: namesById[pair.playerAId] || "Unknown",
+      playerBName: namesById[pair.playerBId] || "Unknown",
       scoreA: scoresById[pair.playerAId] ?? 0,
       scoreB: scoresById[pair.playerBId] ?? 0
     };
