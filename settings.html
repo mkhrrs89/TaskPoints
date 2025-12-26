@@ -96,8 +96,10 @@
             <input id="settingsImportInput" type="file" accept="application/json" class="hidden" />
           </label>
           <button id="settingsImportPasteBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Paste JSON</button>
+          <button id="settingsExportMatchupsBtn" class="btn btn-ghost btn-toolbar nav-btn" type="button">
+            Export Matchups + Player History (CSV)
+          </button>
           <button id="settingsResetGameStatsBtn" class="btn btn-warn btn-toolbar nav-btn" type="button">Reset Game Stats</button>
-          <button id="settingsResetBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Reset All Data</button>
         </div>
         <p class="muted text-xs">Imports replace your current device data with the contents of the backup.</p>
         <p class="muted text-xs">Resetting game stats clears historical wins/losses, past matchups, and baseline Δ history (for NPCs only), but keeps today&apos;s matchups and all tasks, completions, and points.</p>
@@ -148,6 +150,18 @@
             <div class="text-base font-semibold mb-2">Score Trends</div>
             <div id="simulationCharts" class="space-y-6"></div>
           </div>
+        </div>
+      </div>
+
+      <div class="glass space-y-3">
+        <div class="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <div class="text-lg font-semibold">Reset All Data</div>
+            <div class="muted text-sm">Permanently remove everything stored on this device.</div>
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-2 items-center">
+          <button id="settingsResetBtn" class="btn btn-deny btn-toolbar nav-btn" type="button">Reset All Data</button>
         </div>
       </div>
     </div>
@@ -673,6 +687,147 @@
       }[m]));
     }
 
+    function downloadCsv(filename, rows) {
+      const csvRows = rows.map(row => row.map(value => {
+        if (value == null) return "";
+        const str = String(value);
+        if (/[",\n]/.test(str)) {
+          return `"${str.replace(/"/g, '""')}"`;
+        }
+        return str;
+      }).join(","));
+
+      const csv = "\uFEFF" + csvRows.join("\n");
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    function exportMatchupsAndHistoryCsv() {
+      const state = loadSettingsState();
+      const players = Array.isArray(state.players) ? state.players : [];
+      const matchups = Array.isArray(state.matchups) ? state.matchups.slice() : [];
+      const history = Array.isArray(state.gameHistory) ? state.gameHistory.slice() : [];
+
+      const playerById = new Map();
+      players.forEach(player => {
+        if (player && player.id) {
+          playerById.set(player.id, player);
+        }
+      });
+
+      const rows = [];
+      rows.push(["Matchups"]);
+      rows.push([
+        "Date",
+        "Matchup ID",
+        "Player A ID",
+        "Player A Name",
+        "Player B ID",
+        "Player B Name",
+        "Score A",
+        "Score B"
+      ]);
+
+      matchups
+        .sort((a, b) => String(a?.date || "").localeCompare(String(b?.date || "")))
+        .forEach(matchup => {
+          if (!matchup) return;
+          rows.push([
+            matchup.date || "",
+            matchup.id || "",
+            matchup.playerAId || "",
+            matchup.playerAName || playerById.get(matchup.playerAId)?.name || "",
+            matchup.playerBId || "",
+            matchup.playerBName || playerById.get(matchup.playerBId)?.name || "",
+            matchup.scoreA ?? "",
+            matchup.scoreB ?? ""
+          ]);
+        });
+
+      rows.push([]);
+      rows.push(["Player History"]);
+      rows.push(["Date", "History ID", "Player ID", "Player Name", "Score"]);
+
+      history
+        .sort((a, b) => String(a?.date || "").localeCompare(String(b?.date || "")))
+        .forEach(entry => {
+          if (!entry) return;
+          rows.push([
+            entry.date || "",
+            entry.id || "",
+            entry.playerId || "",
+            playerById.get(entry.playerId)?.name || "",
+            entry.score ?? ""
+          ]);
+        });
+
+      const recordById = new Map();
+      matchups.forEach(matchup => {
+        if (!matchup) return;
+        const aId = matchup.playerAId;
+        const bId = matchup.playerBId;
+        const aScore = Number(matchup.scoreA);
+        const bScore = Number(matchup.scoreB);
+        if (!Number.isFinite(aScore) || !Number.isFinite(bScore)) return;
+
+        const ensure = (id) => {
+          if (!recordById.has(id)) {
+            recordById.set(id, { wins: 0, losses: 0, ties: 0, games: 0 });
+          }
+          return recordById.get(id);
+        };
+
+        const aRecord = ensure(aId);
+        const bRecord = ensure(bId);
+        aRecord.games += 1;
+        bRecord.games += 1;
+
+        if (aScore > bScore) {
+          aRecord.wins += 1;
+          bRecord.losses += 1;
+        } else if (aScore < bScore) {
+          aRecord.losses += 1;
+          bRecord.wins += 1;
+        } else {
+          aRecord.ties += 1;
+          bRecord.ties += 1;
+        }
+      });
+
+      rows.push([]);
+      rows.push(["Player Stats"]);
+      rows.push(["Player ID", "Player Name", "Baseline", "Variance", "Variance Tilt", "Momentum", "Risky", "Wins", "Losses", "Ties", "Games"]);
+
+      players.forEach(player => {
+        if (!player || !player.id) return;
+        const record = recordById.get(player.id) || { wins: 0, losses: 0, ties: 0, games: 0 };
+        rows.push([
+          player.id,
+          player.name || "",
+          Number.isFinite(player.baseline) ? player.baseline : player.baseline ?? "",
+          Number.isFinite(player.variance) ? player.variance : player.variance ?? "",
+          Number.isFinite(player.varianceTilt) ? player.varianceTilt : player.varianceTilt ?? "",
+          Number.isFinite(player.momentum) ? player.momentum : player.momentum ?? "",
+          Number.isFinite(player.risky) ? player.risky : player.risky ?? "",
+          record.wins,
+          record.losses,
+          record.ties,
+          record.games
+        ]);
+      });
+
+      const now = new Date();
+      const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+      downloadCsv(`taskpoints-matchups-players-${stamp}.csv`, rows);
+    }
+
     function downloadSimulationCsv(results) {
       const rows = [];
       rows.push(["Scores by Day"]);
@@ -697,27 +852,9 @@
         ]);
       });
 
-      const csvRows = rows.map(row => row.map(value => {
-        if (value == null) return "";
-        const str = String(value);
-        if (/[",\n]/.test(str)) {
-          return `"${str.replace(/"/g, '""')}"`;
-        }
-        return str;
-      }).join(","));
-
-      const csv = "\uFEFF" + csvRows.join("\n");
-      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
       const now = new Date();
       const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-      link.href = url;
-      link.download = `taskpoints-simulation-${stamp}.csv`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
+      downloadCsv(`taskpoints-simulation-${stamp}.csv`, rows);
     }
 
     let latestSimulation = null;
@@ -727,6 +864,7 @@
       document.getElementById('settingsImportPasteBtn')?.addEventListener('click', handleSettingsPaste);
       document.getElementById('settingsResetGameStatsBtn')?.addEventListener('click', handleSettingsResetGameStats);
       document.getElementById('settingsResetBtn')?.addEventListener('click', handleSettingsReset);
+      document.getElementById('settingsExportMatchupsBtn')?.addEventListener('click', exportMatchupsAndHistoryCsv);
 
       const runButton = document.getElementById("runSimulationBtn");
       const downloadButton = document.getElementById("downloadSimulationBtn");
