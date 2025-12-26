@@ -352,19 +352,50 @@ let currentBaseDate = new Date();
 
 syncDerivedPointsIfNeeded();
 
+  function normalizeHexColor(value) {
+    if (!value) return null;
+    let hex = String(value).trim();
+    if (!hex) return null;
+    if (!hex.startsWith('#')) hex = `#${hex}`;
+    if (!/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(hex)) return null;
+    if (hex.length === 4) {
+      hex = `#${hex.slice(1).split('').map((c) => c + c).join('')}`;
+    }
+    return hex.toLowerCase();
+  }
+
+  function normalizeHabitTagColors(value) {
+    if (!value || typeof value !== 'object') return {};
+    const next = {};
+    Object.entries(value).forEach(([tag, color]) => {
+      const normalized = normalizeHexColor(color);
+      if (normalized) next[String(tag)] = normalized;
+    });
+    return next;
+  }
+
+  function normalizeHabit(habit) {
+    if (!habit || typeof habit !== 'object') return habit;
+    return {
+      ...habit,
+      tag: typeof habit.tag === 'string' ? habit.tag.trim() : ''
+    };
+  }
+
   function normalizeState(s) {
   return {
     tasks:       Array.isArray(s.tasks)       ? s.tasks       : [],
     completions: Array.isArray(s.completions) ? s.completions : [],
     players:     Array.isArray(s.players)     ? s.players     : [],
-    habits:      Array.isArray(s.habits)      ? s.habits      : [],
+    habits:      Array.isArray(s.habits)      ? s.habits.map(normalizeHabit)      : [],
     flexActions: Array.isArray(s.flexActions) ? s.flexActions : [],
     gameHistory: Array.isArray(s.gameHistory) ? s.gameHistory : [],
     matchups:    Array.isArray(s.matchups)    ? s.matchups    : [],
     schedule:    Array.isArray(s.schedule)    ? s.schedule    : [],
     opponentDripSchedules: Array.isArray(s.opponentDripSchedules) ? s.opponentDripSchedules : [],
     workHistory: Array.isArray(s.workHistory) ? s.workHistory : [],
-    youImage:    typeof s.youImage === "string" ? s.youImage : ""
+    youImage:    typeof s.youImage === "string" ? s.youImage : "",
+    habitTagColors: normalizeHabitTagColors(s.habitTagColors)
   };
 }
 
@@ -408,6 +439,54 @@ function weekDays(baseDate){
   return days;
 }
 function dateKey(d){ const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),dd=String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${dd}`; }
+function hexToRgb(hex) {
+  const normalized = normalizeHexColor(hex);
+  if (!normalized) return null;
+  const raw = normalized.replace('#', '');
+  const r = parseInt(raw.slice(0, 2), 16);
+  const g = parseInt(raw.slice(2, 4), 16);
+  const b = parseInt(raw.slice(4, 6), 16);
+  return { r, g, b };
+}
+
+function darkenHex(hex, amount = 0.35) {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return null;
+  const clamp = (value) => Math.max(0, Math.min(255, Math.round(value)));
+  const factor = 1 - amount;
+  return `#${[
+    clamp(rgb.r * factor),
+    clamp(rgb.g * factor),
+    clamp(rgb.b * factor)
+  ].map((val) => val.toString(16).padStart(2, '0')).join('')}`;
+}
+
+function getContrastText(hex) {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return '#f8fafc';
+  const toLinear = (c) => {
+    const v = c / 255;
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  };
+  const luminance = 0.2126 * toLinear(rgb.r) + 0.7152 * toLinear(rgb.g) + 0.0722 * toLinear(rgb.b);
+  return luminance > 0.6 ? '#0b0f14' : '#f8fafc';
+}
+
+function getHabitTagColor(tag) {
+  if (!tag) return null;
+  const colors = state.habitTagColors || {};
+  return normalizeHexColor(colors[tag]);
+}
+
+function getHabitBubbleStyleAttr(tag, status) {
+  if (!tag) return '';
+  if (status !== 'on' && status !== 'failed') return '';
+  const color = getHabitTagColor(tag);
+  if (!color) return '';
+  const dark = darkenHex(color, 0.35) || color;
+  const textColor = getContrastText(color);
+  return ` style="background:linear-gradient(135deg, ${color} 0%, ${dark} 100%);border-color:${dark};color:${textColor};"`;
+}
 function dayDiff(fromKey,toKey){
   if(!fromKey || !toKey) return 0;
   const from = new Date(fromKey + 'T00:00:00');
@@ -590,13 +669,15 @@ function renderHabitSection(section, days, baseDate){
       const failed = h.failedKeys.includes(d.key);
       const status = on ? 'on' : (failed ? 'failed' : 'off');
       const className = section.title === 'vice' ? `habitDay viceDay ${status}` : `habitDay ${status}`;
-      return `<div class="${className}" data-habit="${h.id}" data-day="${d.key}">${d.date.getDate()}</div>`;
+      const styleAttr = getHabitBubbleStyleAttr(h.tag, status);
+      return `<div class="${className}"${styleAttr} data-habit="${h.id}" data-day="${d.key}">${d.date.getDate()}</div>`;
     }).join('');
 
     row.innerHTML = `
       <div class="font-semibold truncate" title="${escapeHtml(h.name)}">
         ${escapeHtml(h.name)}
         <span class="text-xs text-zinc-400">(${h.pointsPerDay||0} pts/day)</span>
+        ${h.tag ? `<span class="tag tag-clear ml-2">${escapeHtml(h.tag)}</span>` : ''}
         ${h.retired ? `<span class="ml-2 text-[11px] text-amber-400">(Retired)</span>` : ''}
         <button class="btn btn-ghost text-[11px] ml-2" data-habit-toggle="${h.id}">
           ${h.retired ? 'Unretire' : 'Retire'}

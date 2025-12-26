@@ -65,13 +65,43 @@ document.addEventListener('DOMContentLoaded', () => {
 const STORAGE_KEY_FALLBACK = (window.TaskPointsCore && TaskPointsCore.STORAGE_KEY) || 'taskpoints_v1';
 const PROJECTS_STORAGE_KEY_FALLBACK = (window.TaskPointsCore && TaskPointsCore.PROJECTS_STORAGE_KEY) || 'tp_projects_v1';
 
+const normalizeHexColorFallback = (value) => {
+  if (!value) return null;
+  let hex = String(value).trim();
+  if (!hex) return null;
+  if (!hex.startsWith('#')) hex = `#${hex}`;
+  if (!/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(hex)) return null;
+  if (hex.length === 4) {
+    hex = `#${hex.slice(1).split('').map((c) => c + c).join('')}`;
+  }
+  return hex.toLowerCase();
+};
+
+const normalizeHabitTagColorsFallback = (value) => {
+  if (!value || typeof value !== 'object') return {};
+  const next = {};
+  Object.entries(value).forEach(([tag, color]) => {
+    const normalized = normalizeHexColorFallback(color);
+    if (normalized) next[String(tag)] = normalized;
+  });
+  return next;
+};
+
+const normalizeHabitFallback = (habit) => {
+  if (!habit || typeof habit !== 'object') return habit;
+  return {
+    ...habit,
+    tag: typeof habit.tag === 'string' ? habit.tag.trim() : ''
+  };
+};
+
 const normalizeStateFallback = (s) => {
   const src = s && typeof s === 'object' ? s : {};
   return {
     tasks: Array.isArray(src.tasks) ? src.tasks : [],
     completions: Array.isArray(src.completions) ? src.completions : [],
     players: Array.isArray(src.players) ? src.players : [],
-    habits: Array.isArray(src.habits) ? src.habits : [],
+    habits: Array.isArray(src.habits) ? src.habits.map(normalizeHabitFallback) : [],
     flexActions: Array.isArray(src.flexActions) ? src.flexActions : [],
     gameHistory: Array.isArray(src.gameHistory) ? src.gameHistory : [],
     matchups: Array.isArray(src.matchups) ? src.matchups : [],
@@ -80,6 +110,7 @@ const normalizeStateFallback = (s) => {
     workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
     youImage: typeof src.youImage === 'string' ? src.youImage : '',
     projects: Array.isArray(src.projects) ? src.projects : [],
+    habitTagColors: normalizeHabitTagColorsFallback(src.habitTagColors)
   };
 };
 

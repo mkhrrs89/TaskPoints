@@ -331,7 +331,15 @@ body {
    SECTION 2 — CORE UI ATOMS (FORMS: INPUTS / SELECTS / TEXTAREA)
    ========================= */
 
-    .input,select,textarea{border:1px solid var(--border);background:#0f1419;color:#e6edf6;border-radius:12px;padding:10px 12px;width:100%}
+.input,select,textarea{border:1px solid var(--border);background:#0f1419;color:#e6edf6;border-radius:12px;padding:10px 12px;width:100%}
+.color-input{
+  width:3.25rem;
+  height:2.5rem;
+  padding:2px;
+  border-radius:12px;
+  border:1px solid var(--border);
+  background:transparent;
+}
     @media (prefers-color-scheme:light){.input,select,textarea{background:#fff;color:#0b1220}}
     #sleepEditModalBody{max-width:18rem;font-size:14px}
     #sleepEditModalBody .input{padding:8px 10px;font-size:14px}
@@ -351,7 +359,12 @@ body {
    SECTION 2 — CORE UI ATOMS (TAGS / PILLS / MUTED TEXT)
    ========================= */
 
-    .tag{border-radius:999px;padding:2px 8px;font-size:12px}
+  .tag{border-radius:999px;padding:2px 8px;font-size:12px}
+  .tag-clear{
+    background:transparent;
+    border:1px solid var(--border);
+    color:inherit;
+  }
     .tag-high{
       background: linear-gradient(180deg, rgba(120, 48, 8, 0.32), rgba(92, 34, 6, 0.30)) !important;
       border: 1px solid #b45309 !important;

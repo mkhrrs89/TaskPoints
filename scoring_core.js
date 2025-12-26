@@ -25,12 +25,42 @@
     return t;
   }
 
+  function normalizeHexColor(value) {
+    if (!value) return null;
+    let hex = String(value).trim();
+    if (!hex) return null;
+    if (!hex.startsWith('#')) hex = `#${hex}`;
+    if (!/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(hex)) return null;
+    if (hex.length === 4) {
+      hex = `#${hex.slice(1).split('').map((c) => c + c).join('')}`;
+    }
+    return hex.toLowerCase();
+  }
+
+  function normalizeHabitTagColors(value) {
+    if (!value || typeof value !== 'object') return {};
+    const next = {};
+    Object.entries(value).forEach(([tag, color]) => {
+      const normalized = normalizeHexColor(color);
+      if (normalized) next[String(tag)] = normalized;
+    });
+    return next;
+  }
+
+  function normalizeHabit(habit) {
+    if (!habit || typeof habit !== 'object') return habit;
+    return {
+      ...habit,
+      tag: typeof habit.tag === 'string' ? habit.tag.trim() : ''
+    };
+  }
+
   function normalizeState(s) {
     return {
       tasks:       Array.isArray(s?.tasks)       ? s.tasks.map(normalizeTask)       : [],
       completions: Array.isArray(s?.completions) ? s.completions : [],
       players:     Array.isArray(s?.players)     ? s.players     : [],
-      habits:      Array.isArray(s?.habits)      ? s.habits      : [],
+      habits:      Array.isArray(s?.habits)      ? s.habits.map(normalizeHabit)      : [],
       flexActions: Array.isArray(s?.flexActions) ? s.flexActions : [],
       gameHistory: Array.isArray(s?.gameHistory) ? s.gameHistory : [],
       matchups:    Array.isArray(s?.matchups)    ? s.matchups    : [],
@@ -38,7 +68,8 @@
       opponentDripSchedules: Array.isArray(s?.opponentDripSchedules) ? s.opponentDripSchedules : [],
       workHistory: Array.isArray(s?.workHistory) ? s.workHistory : [],
       youImage:    typeof s?.youImage === "string" ? s.youImage : "",
-      projects:    Array.isArray(s?.projects)    ? s.projects    : []
+      projects:    Array.isArray(s?.projects)    ? s.projects    : [],
+      habitTagColors: normalizeHabitTagColors(s?.habitTagColors)
     };
   }
 
