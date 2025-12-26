@@ -102,6 +102,54 @@
         <p class="muted text-xs">Imports replace your current device data with the contents of the backup.</p>
         <p class="muted text-xs">Resetting game stats clears historical wins/losses, past matchups, and PPD history (for NPCs only), but keeps today&apos;s matchups and all tasks, completions, and points.</p>
       </div>
+
+      <div class="glass space-y-4">
+        <div class="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <div class="text-lg font-semibold">Simulation Lab</div>
+            <div class="muted text-sm">Experiment with player ratings to see simulated scores over time. Results are temporary and never saved.</div>
+          </div>
+        </div>
+        <div class="flex flex-wrap items-end gap-3">
+          <label class="text-sm">
+            <span class="block muted text-xs">Simulation days</span>
+            <input id="simulationDaysInput" type="number" min="1" max="3650" value="30"
+              class="px-3 py-2 rounded-xl border border-white/10 bg-black/30 text-sm w-32" />
+          </label>
+          <button id="runSimulationBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Run Simulation</button>
+          <button id="downloadSimulationBtn" class="btn btn-ghost btn-toolbar nav-btn" type="button" disabled>
+            Download &amp; Clear (CSV)
+          </button>
+        </div>
+        <p class="muted text-xs">Download clears the simulation forever. Re-run if you need another export.</p>
+
+        <div id="simulationResults" class="space-y-6 hidden">
+          <div>
+            <div class="text-base font-semibold mb-2">Scores by Day</div>
+            <div class="overflow-x-auto">
+              <table class="min-w-full text-sm" id="simulationScoresTable">
+                <thead class="text-xs uppercase opacity-70"></thead>
+                <tbody class="divide-y divide-white/5"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div>
+            <div class="text-base font-semibold mb-2">Average PPD + Ratings</div>
+            <div class="overflow-x-auto">
+              <table class="min-w-full text-sm" id="simulationSummaryTable">
+                <thead class="text-xs uppercase opacity-70"></thead>
+                <tbody class="divide-y divide-white/5"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div>
+            <div class="text-base font-semibold mb-2">Score Trends</div>
+            <div id="simulationCharts" class="space-y-6"></div>
+          </div>
+        </div>
+      </div>
     </div>
 
   </div>
@@ -268,11 +316,455 @@
       alert('All local TaskPoints data has been cleared.');
     }
 
+    function loadSettingsState() {
+      try {
+        const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+        if (!raw) return normalizeSettingsState({});
+        return normalizeSettingsState(JSON.parse(raw) || {});
+      } catch (err) {
+        console.error("Failed to load TaskPoints data for simulation", err);
+        return normalizeSettingsState({});
+      }
+    }
+
+    function normalizeSimPlayer(player) {
+      const baseline = Number.isFinite(player?.baseline) ? player.baseline : 60;
+      const variance = Number.isFinite(player?.variance) ? player.variance : 40;
+      const varianceTilt = Number.isFinite(player?.varianceTilt) ? player.varianceTilt : 50;
+      const momentum = Number.isFinite(player?.momentum) ? player.momentum : 50;
+      const risky = Number.isFinite(player?.risky) ? player.risky : 3;
+
+      return {
+        ...player,
+        baseline,
+        variance,
+        varianceTilt: Math.min(100, Math.max(0, varianceTilt)),
+        momentum,
+        risky
+      };
+    }
+
+    function getNormalizedRisky(riskyRating) {
+      let risky = Number(riskyRating);
+      if (!Number.isFinite(risky)) risky = 0;
+      return risky > 10 ? risky / 10 : risky;
+    }
+
+    function simulateScoreForPlayer(player, prevScore) {
+      const baseline = player.baseline;
+      const variance = player.variance;
+      const varianceTilt = Math.min(100, Math.max(0, player.varianceTilt)) / 100;
+      const momentum = player.momentum;
+      const riskyNormalized = getNormalizedRisky(player.risky);
+
+      const variationMagnitude = Math.random() * variance;
+      const variationSign = Math.random() < varianceTilt ? 1 : -1;
+      const variation = variationMagnitude * variationSign;
+
+      let momentumBonus = 0;
+      if (momentum && Number.isFinite(prevScore)) {
+        momentumBonus = (prevScore * (momentum / 100)) * 0.1;
+      }
+
+      let riskyMod = 0;
+      if (Math.random() < riskyNormalized / 10) {
+        const boom = Math.random() < 0.5;
+        riskyMod = boom
+          ? variance * (0.5 + Math.random())
+          : -variance * (0.5 + Math.random());
+      }
+
+      const score = baseline + variation + momentumBonus + riskyMod;
+      return Number(score.toFixed(1));
+    }
+
+    function runSimulation(days) {
+      const state = loadSettingsState();
+      const players = Array.isArray(state.players)
+        ? state.players.filter(p => p && typeof p === "object")
+        : [];
+
+      if (!players.length) {
+        return {
+          players: [],
+          days,
+          scoresByPlayer: new Map(),
+          dayLabels: []
+        };
+      }
+
+      const normalizedPlayers = players.map(normalizeSimPlayer);
+      const scoresByPlayer = new Map();
+      normalizedPlayers.forEach(player => scoresByPlayer.set(player.id, []));
+
+      const dayLabels = [];
+      for (let i = 0; i < days; i++) {
+        dayLabels.push(`Day ${i + 1}`);
+        normalizedPlayers.forEach(player => {
+          const scores = scoresByPlayer.get(player.id) || [];
+          const prevScore = scores.length ? scores[scores.length - 1] : null;
+          const score = simulateScoreForPlayer(player, prevScore);
+          scores.push(score);
+          scoresByPlayer.set(player.id, scores);
+        });
+      }
+
+      return {
+        players: normalizedPlayers,
+        days,
+        scoresByPlayer,
+        dayLabels
+      };
+    }
+
+    function formatNumber(value) {
+      if (!Number.isFinite(value)) return "—";
+      return Number(value).toFixed(1);
+    }
+
+    function average(scores) {
+      if (!scores.length) return 0;
+      return scores.reduce((sum, val) => sum + val, 0) / scores.length;
+    }
+
+    function renderScoresTable(results) {
+      const table = document.getElementById("simulationScoresTable");
+      if (!table) return;
+      const thead = table.querySelector("thead");
+      const tbody = table.querySelector("tbody");
+      if (!thead || !tbody) return;
+
+      const headers = ["Player", ...results.dayLabels];
+      thead.innerHTML = `
+        <tr>
+          ${headers.map((label, idx) => `
+            <th class="text-left pr-4 py-2 cursor-pointer" data-sort-index="${idx}">
+              ${label} <span class="opacity-50 text-xs" data-indicator="${idx}"></span>
+            </th>
+          `).join("")}
+        </tr>
+      `;
+
+      const rows = results.players.map(player => {
+        const scores = results.scoresByPlayer.get(player.id) || [];
+        return {
+          player,
+          values: [player.name || "—", ...scores]
+        };
+      });
+
+      tbody.innerHTML = rows.map(row => `
+        <tr>
+          ${row.values.map((val, idx) => `
+            <td class="pr-4 py-2">${idx === 0 ? escapeHtml(val) : formatNumber(val)}</td>
+          `).join("")}
+        </tr>
+      `).join("");
+
+      let sortIndex = 0;
+      let sortDir = "asc";
+
+      const updateIndicators = () => {
+        table.querySelectorAll("[data-indicator]").forEach(span => {
+          const idx = Number(span.getAttribute("data-indicator"));
+          span.textContent = idx === sortIndex ? (sortDir === "asc" ? "▲" : "▼") : "";
+        });
+      };
+
+      const sortAndRender = () => {
+        rows.sort((a, b) => {
+          const aVal = a.values[sortIndex];
+          const bVal = b.values[sortIndex];
+          if (sortIndex === 0) {
+            return sortDir === "asc"
+              ? String(aVal).localeCompare(String(bVal))
+              : String(bVal).localeCompare(String(aVal));
+          }
+          const aNum = Number(aVal) || 0;
+          const bNum = Number(bVal) || 0;
+          return sortDir === "asc" ? aNum - bNum : bNum - aNum;
+        });
+
+        tbody.innerHTML = rows.map(row => `
+          <tr>
+            ${row.values.map((val, idx) => `
+              <td class="pr-4 py-2">${idx === 0 ? escapeHtml(val) : formatNumber(val)}</td>
+            `).join("")}
+          </tr>
+        `).join("");
+        updateIndicators();
+      };
+
+      table.querySelectorAll("th[data-sort-index]").forEach(th => {
+        th.addEventListener("click", () => {
+          const idx = Number(th.getAttribute("data-sort-index"));
+          if (sortIndex === idx) {
+            sortDir = sortDir === "asc" ? "desc" : "asc";
+          } else {
+            sortIndex = idx;
+            sortDir = idx === 0 ? "asc" : "desc";
+          }
+          sortAndRender();
+        });
+      });
+
+      sortAndRender();
+    }
+
+    function renderSummaryTable(results) {
+      const table = document.getElementById("simulationSummaryTable");
+      if (!table) return;
+      const thead = table.querySelector("thead");
+      const tbody = table.querySelector("tbody");
+      if (!thead || !tbody) return;
+
+      const headers = [
+        { label: "Player", key: "name" },
+        { label: "Avg PPD", key: "avg" },
+        { label: "Baseline", key: "baseline" },
+        { label: "Variance", key: "variance" },
+        { label: "Variance Tilt", key: "varianceTilt" },
+        { label: "Momentum", key: "momentum" },
+        { label: "Risky", key: "risky" }
+      ];
+
+      thead.innerHTML = `
+        <tr>
+          ${headers.map(h => `
+            <th class="text-left pr-4 py-2 cursor-pointer" data-sort-key="${h.key}">
+              ${h.label} <span class="opacity-50 text-xs" data-indicator="${h.key}"></span>
+            </th>
+          `).join("")}
+        </tr>
+      `;
+
+      const rows = results.players.map(player => {
+        const scores = results.scoresByPlayer.get(player.id) || [];
+        return {
+          name: player.name || "—",
+          avg: average(scores),
+          baseline: player.baseline,
+          variance: player.variance,
+          varianceTilt: player.varianceTilt,
+          momentum: player.momentum,
+          risky: getNormalizedRisky(player.risky)
+        };
+      });
+
+      let sortKey = "avg";
+      let sortDir = "desc";
+
+      const updateIndicators = () => {
+        table.querySelectorAll("[data-indicator]").forEach(span => {
+          const key = span.getAttribute("data-indicator");
+          span.textContent = key === sortKey ? (sortDir === "asc" ? "▲" : "▼") : "";
+        });
+      };
+
+      const sortAndRender = () => {
+        rows.sort((a, b) => {
+          const aVal = a[sortKey];
+          const bVal = b[sortKey];
+          if (sortKey === "name") {
+            return sortDir === "asc"
+              ? String(aVal).localeCompare(String(bVal))
+              : String(bVal).localeCompare(String(aVal));
+          }
+          const aNum = Number(aVal) || 0;
+          const bNum = Number(bVal) || 0;
+          return sortDir === "asc" ? aNum - bNum : bNum - aNum;
+        });
+
+        tbody.innerHTML = rows.map(row => `
+          <tr>
+            <td class="pr-4 py-2">${escapeHtml(row.name)}</td>
+            <td class="pr-4 py-2">${formatNumber(row.avg)}</td>
+            <td class="pr-4 py-2">${formatNumber(row.baseline)}</td>
+            <td class="pr-4 py-2">${formatNumber(row.variance)}</td>
+            <td class="pr-4 py-2">${formatNumber(row.varianceTilt)}%</td>
+            <td class="pr-4 py-2">${formatNumber(row.momentum)}</td>
+            <td class="pr-4 py-2">${formatNumber(row.risky)}</td>
+          </tr>
+        `).join("");
+        updateIndicators();
+      };
+
+      table.querySelectorAll("th[data-sort-key]").forEach(th => {
+        th.addEventListener("click", () => {
+          const key = th.getAttribute("data-sort-key");
+          if (!key) return;
+          if (sortKey === key) {
+            sortDir = sortDir === "asc" ? "desc" : "asc";
+          } else {
+            sortKey = key;
+            sortDir = key === "name" ? "asc" : "desc";
+          }
+          sortAndRender();
+        });
+      });
+
+      sortAndRender();
+    }
+
+    function renderCharts(results) {
+      const container = document.getElementById("simulationCharts");
+      if (!container) return;
+      container.innerHTML = "";
+
+      results.players.forEach(player => {
+        const scores = results.scoresByPlayer.get(player.id) || [];
+        const baseline = player.baseline;
+        const variance = player.variance;
+        const minValue = Math.min(...scores, baseline - variance);
+        const maxValue = Math.max(...scores, baseline + variance);
+        const range = maxValue - minValue || 1;
+
+        const width = Math.max(240, scores.length * 24);
+        const height = 120;
+        const pad = 10;
+
+        const pointX = idx => {
+          if (scores.length <= 1) return pad;
+          return pad + (idx / (scores.length - 1)) * (width - pad * 2);
+        };
+        const pointY = value => {
+          const normalized = (value - minValue) / range;
+          return height - pad - normalized * (height - pad * 2);
+        };
+
+        const linePoints = scores.map((val, idx) => `${pointX(idx)},${pointY(val)}`).join(" ");
+        const baselineY = pointY(baseline);
+        const upperY = pointY(baseline + variance);
+        const lowerY = pointY(baseline - variance);
+
+        const wrapper = document.createElement("div");
+        wrapper.className = "glass p-4 space-y-2";
+        wrapper.innerHTML = `
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <div class="font-semibold">${escapeHtml(player.name || "—")}</div>
+            <div class="text-xs muted">
+              Baseline ${formatNumber(baseline)} • Variance ±${formatNumber(variance)}
+            </div>
+          </div>
+          <svg viewBox="0 0 ${width} ${height}" class="w-full h-40 rounded-xl bg-black/20 border border-white/5">
+            <line x1="${pad}" y1="${baselineY}" x2="${width - pad}" y2="${baselineY}" stroke="#38bdf8" stroke-dasharray="4 4" />
+            <line x1="${pad}" y1="${upperY}" x2="${width - pad}" y2="${upperY}" stroke="#fb923c" stroke-dasharray="3 5" />
+            <line x1="${pad}" y1="${lowerY}" x2="${width - pad}" y2="${lowerY}" stroke="#fb923c" stroke-dasharray="3 5" />
+            <polyline fill="none" stroke="#34d399" stroke-width="2" points="${linePoints}" />
+          </svg>
+          <div class="flex flex-wrap gap-3 text-xs muted">
+            <span><span class="inline-block w-3 h-0.5 bg-emerald-400 align-middle mr-1"></span>Score</span>
+            <span><span class="inline-block w-3 h-0.5 bg-sky-400 align-middle mr-1"></span>Baseline</span>
+            <span><span class="inline-block w-3 h-0.5 bg-orange-400 align-middle mr-1"></span>Variance Range</span>
+          </div>
+        `;
+        container.appendChild(wrapper);
+      });
+    }
+
+    function escapeHtml(str) {
+      if (!str && str !== 0) return "";
+      return String(str).replace(/[&<>"']/g, m => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#039;"
+      }[m]));
+    }
+
+    function downloadSimulationCsv(results) {
+      const rows = [];
+      rows.push(["Scores by Day"]);
+      rows.push(["Player", ...results.dayLabels]);
+      results.players.forEach(player => {
+        const scores = results.scoresByPlayer.get(player.id) || [];
+        rows.push([player.name || "—", ...scores.map(score => formatNumber(score))]);
+      });
+      rows.push([]);
+      rows.push(["Average PPD + Ratings"]);
+      rows.push(["Player", "Avg PPD", "Baseline", "Variance", "Variance Tilt", "Momentum", "Risky"]);
+      results.players.forEach(player => {
+        const scores = results.scoresByPlayer.get(player.id) || [];
+        rows.push([
+          player.name || "—",
+          formatNumber(average(scores)),
+          formatNumber(player.baseline),
+          formatNumber(player.variance),
+          `${formatNumber(player.varianceTilt)}%`,
+          formatNumber(player.momentum),
+          formatNumber(getNormalizedRisky(player.risky))
+        ]);
+      });
+
+      const csvRows = rows.map(row => row.map(value => {
+        if (value == null) return "";
+        const str = String(value);
+        if (/[",\n]/.test(str)) {
+          return `"${str.replace(/"/g, '""')}"`;
+        }
+        return str;
+      }).join(","));
+
+      const csv = "\uFEFF" + csvRows.join("\n");
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      const now = new Date();
+      const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+      link.href = url;
+      link.download = `taskpoints-simulation-${stamp}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    let latestSimulation = null;
+
     document.addEventListener('DOMContentLoaded', () => {
       document.getElementById('settingsImportInput')?.addEventListener('change', handleSettingsFile);
       document.getElementById('settingsImportPasteBtn')?.addEventListener('click', handleSettingsPaste);
       document.getElementById('settingsResetGameStatsBtn')?.addEventListener('click', handleSettingsResetGameStats);
       document.getElementById('settingsResetBtn')?.addEventListener('click', handleSettingsReset);
+
+      const runButton = document.getElementById("runSimulationBtn");
+      const downloadButton = document.getElementById("downloadSimulationBtn");
+      const resultsWrapper = document.getElementById("simulationResults");
+      const daysInput = document.getElementById("simulationDaysInput");
+
+      if (runButton && resultsWrapper && daysInput && downloadButton) {
+        runButton.addEventListener("click", () => {
+          const days = Number(daysInput.value || 0);
+          if (!Number.isFinite(days) || days < 1) {
+            alert("Enter a valid number of days (1 or more).");
+            return;
+          }
+
+          const results = runSimulation(Math.floor(days));
+          if (!results.players.length) {
+            resultsWrapper.classList.add("hidden");
+            downloadButton.disabled = true;
+            alert("No players found. Add players on the Game page to run a simulation.");
+            return;
+          }
+
+          latestSimulation = results;
+          renderScoresTable(results);
+          renderSummaryTable(results);
+          renderCharts(results);
+          resultsWrapper.classList.remove("hidden");
+          downloadButton.disabled = false;
+        });
+
+        downloadButton.addEventListener("click", () => {
+          if (!latestSimulation) return;
+          downloadSimulationCsv(latestSimulation);
+          latestSimulation = null;
+          resultsWrapper.classList.add("hidden");
+          downloadButton.disabled = true;
+        });
+      }
     });
   </script>
 
