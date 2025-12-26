@@ -347,6 +347,36 @@
         trace: 'state.completions filtered by date'
       });
 
+      // New: Completion metadata health
+      const metadataIssues = [];
+      const completionIds = new Set();
+      const duplicateCompletionIds = new Set();
+      dayCompletions.forEach(c => {
+        if (!c) return;
+        if (!c.id) {
+          metadataIssues.push(`Completion "${c.title || c.taskId || 'unknown'}" missing id`);
+        } else if (completionIds.has(c.id)) {
+          duplicateCompletionIds.add(c.id);
+        } else {
+          completionIds.add(c.id);
+        }
+        if ((c.source || 'task') === 'task' && !c.taskId) {
+          metadataIssues.push(`Completion "${c.title || c.id || 'unknown'}" missing taskId`);
+        }
+      });
+      if (duplicateCompletionIds.size) {
+        metadataIssues.push(`Duplicate completion ids: ${Array.from(duplicateCompletionIds).join(', ')}`);
+      }
+      checks.push({
+        id: 'completion-metadata',
+        title: 'Completion metadata completeness',
+        status: metadataIssues.length ? 'WARN' : 'PASS',
+        expected: 'Completions include ids and task references',
+        actual: metadataIssues.length ? `${metadataIssues.length} issue(s)` : 'All metadata present',
+        details: metadataIssues,
+        trace: 'state.completions metadata'
+      });
+
       // New: Task linkage integrity
       const taskLinkNotes = [];
       const taskIds = new Set((state.tasks || []).map(t => t?.id).filter(Boolean));
@@ -382,7 +412,7 @@
         trace: 'state.tasks ↔ state.completions'
       });
 
-      // New: Sleep/work point formulas
+      // New: Sleep/work/calories point formulas
       const formulaIssues = [];
       const formulaDebug = [];
       dayCompletions.forEach(c => {
@@ -398,7 +428,10 @@
         const delta = actual - expected;
 
         if (Math.abs(delta) > 0.01) {
-          const label = `${derived.formula === 'sleep' ? 'Sleep' : 'Work'} "${c.title || c.id}"`;
+          const formulaName = derived.formula
+            ? derived.formula.charAt(0).toUpperCase() + derived.formula.slice(1)
+            : 'Derived';
+          const label = `${formulaName} "${c.title || c.id}"`;
           formulaIssues.push(`${label}: expected ${expected.toFixed(2)}, got ${actual.toFixed(2)}`);
           formulaDebug.push({
             date: dateKey,
@@ -416,12 +449,12 @@
       }
       checks.push({
         id: 'formula-replay',
-        title: 'Sleep/work points match formulas',
+        title: 'Sleep/work/calories points match formulas',
         status: formulaIssues.length ? 'WARN' : 'PASS',
-        expected: 'Derived points align with sleep/work formulas',
+        expected: 'Derived points align with sleep/work/calories formulas',
         actual: formulaIssues.length ? `${formulaIssues.length} mismatch(es)` : 'All aligned',
         details: formulaIssues,
-        trace: 'TaskPointsCore.sleepPoints/workPoints'
+        trace: 'TaskPointsCore.sleepPoints/workPoints/caloriesToPoints'
       });
 
       // D) Daily sources consistency
@@ -445,6 +478,27 @@
         delta: roundingDelta,
         trace: 'daily breakdown vs. TaskPointsCore.computeDayTotals',
         tips: 'Use cents rounding for totals to keep drift under a hundredth of a point.'
+      });
+
+      // New: Daily breakdown categories remain known
+      const knownCategoryKeys = new Set([
+        ...TaskPointsCore.CATEGORY_DEFS.map(def => def.key),
+        'inertia',
+      ]);
+      const unknownCategoryIssues = [];
+      Object.entries(dayBreak.categories || {}).forEach(([key, value]) => {
+        if (!knownCategoryKeys.has(key) && Math.abs(Number(value) || 0) > 0.01) {
+          unknownCategoryIssues.push(`Unknown category "${key}" has ${Number(value).toFixed(2)} points`);
+        }
+      });
+      checks.push({
+        id: 'unknown-categories',
+        title: 'Daily breakdown uses known categories',
+        status: unknownCategoryIssues.length ? 'WARN' : 'PASS',
+        expected: 'Only defined categories have points',
+        actual: unknownCategoryIssues.length ? `${unknownCategoryIssues.length} issue(s)` : 'All categories known',
+        details: unknownCategoryIssues,
+        trace: 'TaskPointsCore.CATEGORY_DEFS vs. daily breakdown'
       });
 
       // E) Records + leaderboards
