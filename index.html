@@ -3381,6 +3381,15 @@ function renderFlexActions(){
   list.innerHTML = '';
 
   const items = Array.isArray(state.flexActions) ? state.flexActions : [];
+  const todayKeyStr = dateKey(new Date());
+  const flexUseCounts = new Map();
+  const completions = Array.isArray(state.completions) ? state.completions : [];
+  for (const entry of completions) {
+    if (!entry?.flexId) continue;
+    if (dateKey(entry.completedAtISO) !== todayKeyStr) continue;
+    flexUseCounts.set(entry.flexId, (flexUseCounts.get(entry.flexId) || 0) + 1);
+  }
+
   if (!items.length) {
     empty.classList.remove('hidden');
     return;
@@ -3423,13 +3432,20 @@ function renderFlexActions(){
 
     } else {
       // 📄 NORMAL MODE
+      const usageCount = flexUseCounts.get(f.id) || 0;
+      const usageDots = usageCount
+        ? `<span class="flex-action-dots" aria-label="${usageCount} time${usageCount === 1 ? '' : 's'} used today">${Array.from({ length: usageCount }, () => '<span class="flex-action-dot"></span>').join('')}</span>`
+        : '';
       row.innerHTML = `
         <div class="min-w-0 flex-action-main">
           <div class="font-medium truncate"
                title="${escapeHtml(f.name || '')}">
             ${escapeHtml(f.name || '')}
           </div>
-          <div class="text-xs text-zinc-400">${f.points || 0} pts/use</div>
+          <div class="text-xs text-zinc-400 flex-action-usage">
+            <span>${f.points || 0} pts/use</span>
+            ${usageDots}
+          </div>
         </div>
         <div class="flex gap-2 flex-wrap flex-action-buttons">
           <button class="btn btn-ghost btn-task" data-act="flex-edit" data-id="${f.id}">Edit</button>

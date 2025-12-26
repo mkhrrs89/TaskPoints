@@ -852,6 +852,24 @@ body {
     flex: 1 1 auto;
     min-width: 0;
   }
+  .flex-action-usage{
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .flex-action-dots{
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .flex-action-dot{
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: #0f4d4d;
+    box-shadow: 0 0 0 1px rgba(15, 77, 77, 0.35);
+  }
   .flex-action-buttons{
     margin-left: auto;
     flex-wrap: nowrap;
