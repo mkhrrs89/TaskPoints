@@ -727,10 +727,10 @@ body {
 }
 
 .habitRow .tag.streak-pill{
-  background: linear-gradient(135deg, #14b8a6, #0ea5e9);
-  color: #ecfeff;
+  background: linear-gradient(135deg, #0fa39a, #0b8cc9);
+  color: #2f3437;
   border: none !important;
-  box-shadow: 0 6px 18px rgba(14, 165, 233, 0.25);
+  box-shadow: none;
 }
 
     .habitName{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
