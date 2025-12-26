@@ -61,6 +61,141 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
+// ---------- Shared mobile bottom nav ----------
+function buildMobileBottomNavLinks() {
+  const onIndex = /(^|\/)index\.html$/.test(window.location.pathname) || window.location.pathname === '/' || window.location.pathname === '';
+  const linkFor = (anchor) => (onIndex ? `#${anchor}` : `index.html#${anchor}`);
+
+  return `
+    <a href="${linkFor('sleepAnchor')}" class="flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
+      <span class="text-lg">💤</span>
+      <span class="uppercase tracking-wide text-[10px]">Sleep</span>
+    </a>
+
+    <a href="${linkFor('habitsAnchor')}" class="flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
+      <span class="text-lg">🔗</span>
+      <span class="uppercase tracking-wide text-[10px]">Habits</span>
+    </a>
+
+    <div class="mobile-task-dropdown">
+      <button
+        id="mobileTasksToggle"
+        type="button"
+        class="flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100"
+        aria-expanded="false"
+        aria-haspopup="true">
+        <span class="text-lg">✔️</span>
+        <span class="uppercase tracking-wide text-[10px]">Tasks</span>
+      </button>
+
+      <div id="mobileTasksMenu" class="mobile-task-menu hidden">
+        <button type="button" id="mobileAddTaskBtn" class="btn btn-teal btn-toolbar w-full">Add a Task</button>
+        <button type="button" id="mobileGoTasksBtn" class="btn btn-teal btn-toolbar w-full">Go To Tasks</button>
+      </div>
+    </div>
+
+    <a href="game.html" class="flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
+      <span class="text-lg">👥</span>
+      <span class="uppercase tracking-wide text-[10px]">Players</span>
+    </a>
+
+    <a href="${linkFor('flexAnchor')}" class="flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
+      <span class="text-lg">🌀</span>
+      <span class="uppercase tracking-wide text-[10px]">Flex</span>
+    </a>
+  `;
+}
+
+function ensureMobileBottomNav() {
+  let nav = document.getElementById('mobileBottomNav');
+  if (!nav) {
+    nav = document.createElement('nav');
+    nav.id = 'mobileBottomNav';
+    nav.className =
+      'mobile-bottom-nav-shell fixed inset-x-0 bottom-0 z-40 md:hidden border-t border-slate-800 backdrop-blur text-slate-100 drop-shadow-sm';
+    nav.style.background = 'linear-gradient(180deg, #0f4d4d, #0a2f2f)';
+
+    const inner = document.createElement('div');
+    inner.className = 'max-w-6xl mx-auto flex justify-center py-3 pb-4 text-[11px] mobile-bottom-nav';
+    inner.innerHTML = buildMobileBottomNavLinks();
+    nav.appendChild(inner);
+
+    document.body.appendChild(nav);
+  } else {
+    const inner = nav.querySelector('.mobile-bottom-nav');
+    if (inner) inner.innerHTML = buildMobileBottomNavLinks();
+  }
+
+}
+
+function setupMobileTasksMenu() {
+  const toggle = document.getElementById('mobileTasksToggle');
+  const menu = document.getElementById('mobileTasksMenu');
+  const addBtn = document.getElementById('mobileAddTaskBtn');
+  const goBtn = document.getElementById('mobileGoTasksBtn');
+
+  if (!toggle || !menu) return;
+
+  const onIndex = /(^|\/)index\.html$/.test(window.location.pathname) || window.location.pathname === '/' || window.location.pathname === '';
+  const tasksLink = onIndex ? '#tasksAnchor' : 'index.html#tasksAnchor';
+
+  const closeMenu = () => {
+    menu.classList.add('hidden');
+    toggle.setAttribute('aria-expanded', 'false');
+  };
+
+  const toggleMenu = () => {
+    menu.classList.toggle('hidden');
+    toggle.setAttribute('aria-expanded', String(!menu.classList.contains('hidden')));
+  };
+
+  toggle.addEventListener('click', (e) => {
+    e.preventDefault();
+    toggleMenu();
+  });
+
+  document.addEventListener('pointerdown', (e) => {
+    if (menu.classList.contains('hidden')) return;
+    if (e.target.closest('.mobile-task-dropdown')) return;
+    closeMenu();
+  });
+
+  addBtn?.addEventListener('click', () => {
+    closeMenu();
+    if (typeof window.openAddTaskModal === 'function') {
+      window.openAddTaskModal();
+      return;
+    }
+    window.location.href = tasksLink;
+  });
+
+  goBtn?.addEventListener('click', () => {
+    closeMenu();
+    const tasksAnchor = document.getElementById('tasksAnchor');
+    if (tasksAnchor) {
+      tasksAnchor.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+    window.location.href = tasksLink;
+  });
+
+  window.addEventListener('resize', () => {
+    if (window.innerWidth >= 768) closeMenu();
+  });
+
+  toggle.addEventListener('keyup', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      toggleMenu();
+    }
+  });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  ensureMobileBottomNav();
+  setupMobileTasksMenu();
+});
+
 // ---------- Shared mobile chrome helpers ----------
 const STORAGE_KEY_FALLBACK = (window.TaskPointsCore && TaskPointsCore.STORAGE_KEY) || 'taskpoints_v1';
 const PROJECTS_STORAGE_KEY_FALLBACK = (window.TaskPointsCore && TaskPointsCore.PROJECTS_STORAGE_KEY) || 'tp_projects_v1';

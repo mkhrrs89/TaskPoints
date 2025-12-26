@@ -5359,51 +5359,6 @@ document.addEventListener('change', (e) => {
   })();
 </script>
 
-<script>
-  (() => {
-    const toggle = document.getElementById('mobileTasksToggle');
-    const menu = document.getElementById('mobileTasksMenu');
-    const addBtn = document.getElementById('mobileAddTaskBtn');
-    const goBtn = document.getElementById('mobileGoTasksBtn');
-
-    if (!toggle || !menu) return;
-
-    const closeMenu = () => menu.classList.add('hidden');
-
-    toggle.addEventListener('click', (e) => {
-      e.preventDefault();
-      menu.classList.toggle('hidden');
-    });
-
-    document.addEventListener('pointerdown', (e) => {
-      if (menu.classList.contains('hidden')) return;
-      if (e.target.closest('.mobile-task-dropdown')) return;
-      closeMenu();
-    });
-
-    addBtn?.addEventListener('click', () => {
-      closeMenu();
-      openAddTaskModal?.();
-    });
-
-    goBtn?.addEventListener('click', () => {
-      closeMenu();
-      document.getElementById('tasksAnchor')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
-
-    window.addEventListener('resize', () => {
-      if (window.innerWidth >= 768) closeMenu();
-    });
-
-    // Open on keyboard activation (Enter/Space)
-    toggle.addEventListener('keyup', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        menu.classList.toggle('hidden');
-      }
-    });
-  })();
-</script>
 
 <script>
   (() => {
