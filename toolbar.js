@@ -99,9 +99,9 @@ function buildMobileBottomNavLinks() {
       <span class="uppercase tracking-wide text-[10px]">Players</span>
     </a>
 
-    <a href="${linkFor('flexAnchor')}" class="flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
-      <span class="text-lg">🌀</span>
-      <span class="uppercase tracking-wide text-[10px]">Flex</span>
+    <a href="settings.html" class="flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
+      <span class="text-lg">⚙️</span>
+      <span class="uppercase tracking-wide text-[10px]">Settings</span>
     </a>
   `;
 }
