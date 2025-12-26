@@ -412,9 +412,9 @@
       </div>
       <div class="flex flex-wrap items-center gap-2 mb-3">
         <span class="text-xs opacity-80 mr-1">Aspect:</span>
-        <button type="button" class="px-2 py-1 rounded-full text-xs border border-zinc-600 bg-zinc-800" data-aspect="1:1">Square</button>
+        <button type="button" class="px-2 py-1 rounded-full text-xs border border-zinc-600 bg-transparent hover:bg-zinc-800" data-aspect="1:1">Square</button>
         <button type="button" class="px-2 py-1 rounded-full text-xs border border-zinc-600 bg-transparent hover:bg-zinc-800" data-aspect="2:3">2:3</button>
-        <button type="button" class="px-2 py-1 rounded-full text-xs border border-zinc-600 bg-transparent hover:bg-zinc-800" data-aspect="3:4">3:4</button>
+        <button type="button" class="px-2 py-1 rounded-full text-xs border border-zinc-600 bg-zinc-800" data-aspect="3:4">3:4</button>
       </div>
       <div class="mb-3">
         <div class="flex items-center justify-between text-xs opacity-80 mb-1">
@@ -700,15 +700,15 @@ if (ensureUpcomingSchedule()) {
       cropState = {
         img,
         callback,
-        aspectValue: "1:1",
-        aspectRatio: 1,
+        aspectValue: "3:4",
+        aspectRatio: 3/4,
         scale: 1,
         minScale: 1,
         offsetX: 0,
         offsetY: 0
       };
       cropModalEl.classList.remove("hidden");
-      setCropAspect("1:1");
+      setCropAspect("3:4");
     }
 
     function setCropAspect(val){
