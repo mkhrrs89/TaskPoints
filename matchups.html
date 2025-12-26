@@ -208,9 +208,14 @@ state = syncYouMatchupsWithCompletions(state);
         nameById[p.id] = p.name || "Unnamed";
       });
 
-      function getName(id){
+      function getName(id, matchup){
         if (id === "YOU") return "You";
-        return nameById[id] || "Unknown";
+        if (nameById[id]) return nameById[id];
+        if (matchup) {
+          if (matchup.playerAId === id && matchup.playerAName) return matchup.playerAName;
+          if (matchup.playerBId === id && matchup.playerBName) return matchup.playerBName;
+        }
+        return "Unknown";
       }
 
       function formatScore(score){
@@ -224,8 +229,8 @@ state = syncYouMatchupsWithCompletions(state);
         const bId = m.playerBId;
         const aScore = Number(m.scoreA);
         const bScore = Number(m.scoreB);
-        const aName = getName(aId);
-        const bName = getName(bId);
+        const aName = getName(aId, m);
+        const bName = getName(bId, m);
 
         const aIsYou = aId === "YOU";
         const bIsYou = bId === "YOU";

@@ -1101,6 +1101,8 @@ function simulateToday() {
       date: todayKey,
       playerAId: pair.playerAId,
       playerBId: pair.playerBId,
+      playerAName: namesById[pair.playerAId] || "Unknown",
+      playerBName: namesById[pair.playerBId] || "Unknown",
       scoreA: scoresById[pair.playerAId] ?? 0,
       scoreB: scoresById[pair.playerBId] ?? 0
     };
@@ -1929,6 +1931,13 @@ card.innerHTML = `
         if (!confirm(`Delete ${name}? This cannot be undone.`)) return;
         const idx = state.players.findIndex(p => p.id === id);
         if (idx !== -1){
+          const lastKnownName = player && player.name ? player.name : "Unnamed";
+          const matchups = Array.isArray(state.matchups) ? state.matchups : [];
+          matchups.forEach(m => {
+            if (!m) return;
+            if (m.playerAId === id) m.playerAName = m.playerAName || lastKnownName;
+            if (m.playerBId === id) m.playerBName = m.playerBName || lastKnownName;
+          });
           state.players.splice(idx,1);
           refreshScheduleAfterRosterChange();
           state = saveState(state);
