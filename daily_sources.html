@@ -105,6 +105,11 @@
           .map(def => ({ key: def.key, label: def.label, pts: categories[def.key] || 0 }))
           .filter(p => p.pts > 0);
 
+        const inertiaPts = categories.inertia || 0;
+        if (inertiaPts > 0) {
+          parts.push({ key: "inertia", label: "Inertia", pts: inertiaPts });
+        }
+
         const otherPts = categories.other || 0;
         if (otherPts > 0) {
           parts.push({ key: "other", label: "Other", pts: otherPts });
