@@ -38,6 +38,12 @@
       margin-bottom: 0.35rem;
     }
 
+    .matchup-player {
+      font-size: 1.05rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+    }
+
     /* Individual matchup line, inside a glass-style section */
     .matchup-item {
       background: rgba(15,23,42,0.35);
@@ -107,12 +113,18 @@
     <section class="glass mb-4">
       <h2 class="font-semibold text-lg mb-1">Matchups Log</h2>
       <p class="text-sm muted">
-        Every simulated head-to-head result, grouped by day. You are listed as <strong>You</strong>.
+        Every simulated head-to-head result, grouped by day or player. You are listed as <strong>You</strong>.
       </p>
     </section>
 
+    <div class="flex flex-wrap gap-2 mb-4" id="matchupTabs">
+      <button type="button" class="btn btn-teal btn-toolbar" data-tab="chronological">By Date</button>
+      <button type="button" class="btn btn-ghost btn-toolbar" data-tab="player">By Player</button>
+    </div>
+
     <!-- Where we render daily matchup groups -->
-    <section id="matchupsContainer" class="space-y-4"></section>
+    <section id="matchupsChronological" class="space-y-4"></section>
+    <section id="matchupsByPlayer" class="space-y-4 hidden"></section>
   </div>
 
   <script>
@@ -183,21 +195,39 @@ function load() {
       return `${weekday}, ${month} ${ordinal(d)}, ${y}`;
     }
 
+    function formatShortDate(key){
+      if (!key) return "Unknown date";
+      const parts = key.split("-").map(x => parseInt(x,10));
+      if (parts.length !== 3 || parts.some(n => Number.isNaN(n))) return "Unknown date";
+      const [y,m,d] = parts;
+      const dt = new Date(y, m-1, d);
+      if (!dt || Number.isNaN(dt.getTime())) return "Unknown date";
+      const month = dt.toLocaleDateString(undefined, { month:"short" });
+      return `${month} ${ordinal(d)}, ${y}`;
+    }
+
+    function getMatchupDateKey(matchup){
+      return matchup.dateKey || matchup.date || (matchup.dateISO ? dateKey(matchup.dateISO) : "");
+    }
+
     function renderMatchups(){
       let state = load();
 
 // sync may write back; keep local state updated
 state = syncYouMatchupsWithCompletions(state);
 
-      const container = $("matchupsContainer");
-      container.innerHTML = "";
+      const chronoContainer = $("matchupsChronological");
+      const playerContainer = $("matchupsByPlayer");
+      chronoContainer.innerHTML = "";
+      playerContainer.innerHTML = "";
 
       const matchups = Array.isArray(state.matchups) ? state.matchups.slice() : [];
       if (!matchups.length) {
         const empty = document.createElement("section");
         empty.className = "glass";
         empty.innerHTML = "<div class='text-sm muted'>No matchups have been simulated yet.</div>";
-        container.appendChild(empty);
+        chronoContainer.appendChild(empty.cloneNode(true));
+        playerContainer.appendChild(empty);
         return;
       }
 
@@ -260,10 +290,35 @@ state = syncYouMatchupsWithCompletions(state);
         }
       }
 
+      function describeMatchupForPlayer(m, playerId){
+        const aId = m.playerAId;
+        const bId = m.playerBId;
+        const aScore = Number(m.scoreA);
+        const bScore = Number(m.scoreB);
+        const playerIsA = playerId === aId;
+        const playerIsB = playerId === bId;
+        if (!playerIsA && !playerIsB) return "";
+
+        const playerScore = playerIsA ? aScore : bScore;
+        const oppScore = playerIsA ? bScore : aScore;
+        const oppId = playerIsA ? bId : aId;
+        const oppName = getName(oppId, m);
+
+        const playerLabel = formatScore(playerScore);
+        const oppLabel = formatScore(oppScore);
+        if (playerScore > oppScore) {
+          return `def ${oppName}, ${playerLabel}–${oppLabel}`;
+        } else if (playerScore < oppScore) {
+          return `lost to ${oppName}, ${playerLabel}–${oppLabel}`;
+        } else {
+          return `tied ${oppName}, ${playerLabel}–${oppLabel}`;
+        }
+      }
+
       // Group by date key
       const groups = new Map();
       matchups.forEach(m => {
-        const key = m.dateKey || m.date || (m.dateISO ? dateKey(m.dateISO) : "");
+        const key = getMatchupDateKey(m);
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key).push(m);
       });
@@ -297,7 +352,53 @@ state = syncYouMatchupsWithCompletions(state);
           });
 
         section.appendChild(list);
-        container.appendChild(section);
+        chronoContainer.appendChild(section);
+      });
+
+      const playerGroups = new Map();
+      matchups.forEach(m => {
+        [m.playerAId, m.playerBId].forEach(playerId => {
+          if (!playerId) return;
+          if (!playerGroups.has(playerId)) playerGroups.set(playerId, []);
+          playerGroups.get(playerId).push(m);
+        });
+      });
+
+      const playerIds = Array.from(playerGroups.keys()).sort((a,b) => {
+        const nameA = getName(a);
+        const nameB = getName(b);
+        return nameA.localeCompare(nameB);
+      });
+
+      playerIds.forEach(playerId => {
+        const section = document.createElement("section");
+        section.className = "glass mb-4";
+
+        const heading = document.createElement("h2");
+        heading.className = "matchup-player";
+        heading.textContent = getName(playerId);
+        section.appendChild(heading);
+
+        const list = document.createElement("ul");
+        list.className = "space-y-1";
+
+        playerGroups.get(playerId)
+          .slice()
+          .sort((a,b) => getMatchupDateKey(b).localeCompare(getMatchupDateKey(a)))
+          .forEach(m => {
+            const li = document.createElement("li");
+            li.className = "matchup-item";
+            if (playerId === "YOU") {
+              li.classList.add("you");
+            }
+            const dateLabel = formatShortDate(getMatchupDateKey(m));
+            const summary = describeMatchupForPlayer(m, playerId);
+            li.textContent = `${dateLabel} - ${summary}`;
+            list.appendChild(li);
+          });
+
+        section.appendChild(list);
+        playerContainer.appendChild(section);
       });
     }
 
@@ -331,6 +432,24 @@ function save(nextState) {
 
       
     document.addEventListener("DOMContentLoaded", renderMatchups);
+    document.addEventListener("DOMContentLoaded", () => {
+      const tabs = document.querySelectorAll("#matchupTabs [data-tab]");
+      const chrono = $("matchupsChronological");
+      const player = $("matchupsByPlayer");
+
+      tabs.forEach(tab => {
+        tab.addEventListener("click", () => {
+          const target = tab.getAttribute("data-tab");
+          const isChrono = target === "chronological";
+          chrono.classList.toggle("hidden", !isChrono);
+          player.classList.toggle("hidden", isChrono);
+          tabs.forEach(btn => {
+            btn.classList.toggle("btn-teal", btn === tab);
+            btn.classList.toggle("btn-ghost", btn !== tab);
+          });
+        });
+      });
+    });
   </script>
 
   <button
