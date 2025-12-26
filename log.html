@@ -34,6 +34,35 @@
 }
 
     .muted{color:var(--muted)}
+.day-divider{
+  display:flex;
+  align-items:center;
+  gap:.6rem;
+  margin:12px 0 6px;
+  font-size:11px;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  color:var(--muted);
+}
+.day-divider::before,
+.day-divider::after{
+  content:"";
+  flex:1 1 auto;
+  height:1px;
+  background:linear-gradient(90deg, transparent, rgba(148,163,184,0.5), transparent);
+}
+.day-divider span{
+  padding:2px 8px;
+  border:1px solid var(--border);
+  border-radius:999px;
+  background:rgba(15,23,42,0.55);
+  font-weight:600;
+}
+@media (prefers-color-scheme: light){
+  .day-divider span{
+    background:#fff;
+  }
+}
 .row{
   display:grid;
 
@@ -522,10 +551,27 @@ function render(){
   }
   empty.style.display='none';
 
+  let lastDayKey = null;
+
   comps
     .slice()
     .sort((a,b)=> new Date(b.completedAtISO)-new Date(a.completedAtISO))
     .forEach(c=>{
+      const completionDate = new Date(c.completedAtISO);
+      const completionKey = dateKey(completionDate);
+      if (completionKey && completionKey !== lastDayKey) {
+        const divider = document.createElement('div');
+        divider.className = 'day-divider';
+        divider.innerHTML = `<span>${completionDate.toLocaleDateString(undefined, {
+          weekday: 'short',
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric'
+        })}</span>`;
+        list.appendChild(divider);
+        lastDayKey = completionKey;
+      }
+
       const row=document.createElement('div'); 
       row.className='row text-sm';
 
