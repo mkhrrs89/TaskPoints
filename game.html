@@ -247,8 +247,8 @@
 
   <div class="mobile-collapsible-body">
     <ul class="text-sm space-y-2">
+      <li><strong>Baseline Δ</strong>: Difference between a player’s average score and their baseline (positive = above baseline).</li>
       <li><strong>PPD</strong>: Points per day in the TaskPoints app (includes habits, flex actions, sleep, etc.).</li>
-      <li><strong>AVG PPD</strong>: Long-term average PPD for that player.</li>
       <li><strong>Baseline</strong>: Their “default” nightly performance.</li>
       <li><strong>Variance</strong>: How swingy they are night-to-night.</li>
       <li><strong>Momentum</strong>: How much recent good/bad nights affect next game.</li>
@@ -385,7 +385,7 @@
           >
             <option value="name-asc">Name (A → Z)</option>
             <option value="name-desc">Name (Z → A)</option>
-            <option value="avg-desc">AVG PPD (high → low)</option>
+            <option value="avg-desc">PPD (high → low)</option>
             <option value="baseline-desc">Baseline (high → low)</option>
             <option value="created-desc">Recently added</option>
             <option value="created-asc">Oldest first</option>
@@ -1633,7 +1633,7 @@ function renderPlayers() {
 
         <div class="text-xs opacity-80 leading-[1.0] space-y-[2px] mt-1">
           <p>Record: ${youStats.record}</p>
-          <p>AVG PPD: ${youStats.avgPPD.toFixed(1)}</p>
+          <p>PPD: ${youStats.avgPPD.toFixed(1)}</p>
          
         </div>
       </div>
@@ -1667,7 +1667,7 @@ card.innerHTML = `
       <div class="flex-1 min-w-0">
         <div class="text-xs opacity-80 leading-[1.0] space-y-[2px] mt-1">
           <p>Record: ${youStats.record}</p>
-          <p>AVG PPD: ${youStats.avgPPD.toFixed(1)}</p>
+          <p>PPD: ${youStats.avgPPD.toFixed(1)}</p>
         </div>
       </div>
 
@@ -1870,7 +1870,7 @@ card.innerHTML = `
       <div class="flex-1 min-w-0">
         <div class="text-xs opacity-80 leading-[1.0] space-y-[2px]">
           <p>Record: ${recordText}</p>
-          <p>AVG PPD: ${avgPpd}</p>
+          <p>PPD: ${avgPpd}</p>
           <p>Baseline: ${p.baseline ?? "—"}</p>
           <p>Variance: ${p.variance ?? "—"}</p>
           <p>Momentum: ${p.momentum ?? "—"}</p>

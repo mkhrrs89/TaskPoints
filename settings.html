@@ -100,7 +100,7 @@
           <button id="settingsResetBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Reset All Data</button>
         </div>
         <p class="muted text-xs">Imports replace your current device data with the contents of the backup.</p>
-        <p class="muted text-xs">Resetting game stats clears historical wins/losses, past matchups, and PPD history (for NPCs only), but keeps today&apos;s matchups and all tasks, completions, and points.</p>
+        <p class="muted text-xs">Resetting game stats clears historical wins/losses, past matchups, and baseline Δ history (for NPCs only), but keeps today&apos;s matchups and all tasks, completions, and points.</p>
       </div>
 
       <div class="glass space-y-4">
@@ -135,7 +135,7 @@
           </div>
 
           <div>
-            <div class="text-base font-semibold mb-2">Average PPD + Ratings</div>
+            <div class="text-base font-semibold mb-2">PPD + Ratings</div>
             <div class="overflow-x-auto">
               <table class="min-w-full text-sm" id="simulationSummaryTable">
                 <thead class="text-xs uppercase opacity-70"></thead>
@@ -200,7 +200,7 @@
         "This will reset historical game stats PRIOR to today:",
         "- Past matchups for all players",
         "- Wins and losses for all players",
-        "- PPD and AVG PPD history for NPC players (not you)",
+        "- Baseline Δ and PPD history for NPC players (not you)",
         "",
         "Today's matchups and all tasks/completions/points remain untouched.",
         "",
@@ -520,7 +520,7 @@
 
       const headers = [
         { label: "Player", key: "name" },
-        { label: "Avg PPD", key: "avg" },
+        { label: "PPD", key: "avg" },
         { label: "Baseline", key: "baseline" },
         { label: "Variance", key: "variance" },
         { label: "Variance Tilt", key: "varianceTilt" },
@@ -682,8 +682,8 @@
         rows.push([player.name || "—", ...scores.map(score => formatNumber(score))]);
       });
       rows.push([]);
-      rows.push(["Average PPD + Ratings"]);
-      rows.push(["Player", "Avg PPD", "Baseline", "Variance", "Variance Tilt", "Momentum", "Risky"]);
+      rows.push(["PPD + Ratings"]);
+      rows.push(["Player", "PPD", "Baseline", "Variance", "Variance Tilt", "Momentum", "Risky"]);
       results.players.forEach(player => {
         const scores = results.scoresByPlayer.get(player.id) || [];
         rows.push([
