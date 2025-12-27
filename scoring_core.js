@@ -118,7 +118,6 @@
       normalized.workHistory = normalized.workHistory.slice(-maxWorkHistory);
     }
     if (stripImages) {
-      normalized.youImage = "";
       normalized.players = normalized.players.map(p => {
         if (!p || typeof p !== 'object') return p;
         return { ...p, imageData: "" };
@@ -244,7 +243,6 @@
       schedule: [],
       opponentDripSchedules: [],
       workHistory: [],
-      youImage: "",
       players: aggressive.players.map(p => {
         if (!p || typeof p !== 'object') return p;
         return { ...p, imageData: "" };
