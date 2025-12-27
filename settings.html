@@ -147,7 +147,36 @@
           </div>
 
           <div>
-            <div class="text-base font-semibold mb-2">Score Trends</div>
+            <div class="flex items-center justify-between gap-3 flex-wrap mb-2">
+              <div class="text-base font-semibold">Score Trends</div>
+              <label class="text-xs muted">
+                <span class="block mb-1">Sort graphs</span>
+                <select id="simulationChartsSort" class="px-3 py-2 rounded-xl border border-white/10 bg-black/30 text-xs">
+                  <option value="name-asc">Name (A → Z)</option>
+                  <option value="name-desc">Name (Z → A)</option>
+                  <option value="ppd-desc" selected>PPD (High → Low)</option>
+                  <option value="ppd-asc">PPD (Low → High)</option>
+                  <option value="baseline-desc">Baseline (High → Low)</option>
+                  <option value="baseline-asc">Baseline (Low → High)</option>
+                  <option value="variance-desc">Variance (High → Low)</option>
+                  <option value="variance-asc">Variance (Low → High)</option>
+                  <option value="momentum-desc">Momentum (High → Low)</option>
+                  <option value="momentum-asc">Momentum (Low → High)</option>
+                  <option value="risky-desc">Risky (High → Low)</option>
+                  <option value="risky-asc">Risky (Low → High)</option>
+                  <option value="high-desc">High (High → Low)</option>
+                  <option value="high-asc">High (Low → High)</option>
+                  <option value="low-desc">Low (High → Low)</option>
+                  <option value="low-asc">Low (Low → High)</option>
+                  <option value="aboveBaselinePct-desc">Above Baseline % (High → Low)</option>
+                  <option value="aboveBaselinePct-asc">Above Baseline % (Low → High)</option>
+                  <option value="belowBaselinePct-desc">Below Baseline % (High → Low)</option>
+                  <option value="belowBaselinePct-asc">Below Baseline % (Low → High)</option>
+                  <option value="riskyTriggered-desc">Risky Days (High → Low)</option>
+                  <option value="riskyTriggered-asc">Risky Days (Low → High)</option>
+                </select>
+              </label>
+            </div>
             <div id="simulationCharts" class="space-y-6"></div>
           </div>
         </div>
@@ -595,6 +624,34 @@
       return scores.reduce((sum, val) => sum + val, 0) / scores.length;
     }
 
+    function buildSimulationSummaryRows(results) {
+      return results.players.map(player => {
+        const scores = results.scoresByPlayer.get(player.id) || [];
+        const baseline = player.baseline;
+        const high = scores.length ? Math.max(...scores) : NaN;
+        const low = scores.length ? Math.min(...scores) : NaN;
+        const aboveBaseline = scores.filter(score => score > baseline).length;
+        const belowBaseline = scores.filter(score => score < baseline).length;
+        const total = scores.length || 1;
+        const riskyTriggered = results.riskyTriggersByPlayer?.get(player.id) || 0;
+        return {
+          id: player.id,
+          name: player.name || "—",
+          avg: average(scores),
+          baseline,
+          variance: player.variance,
+          varianceTilt: player.varianceTilt,
+          momentum: player.momentum,
+          risky: getNormalizedRisky(player.risky),
+          high,
+          low,
+          aboveBaselinePct: (aboveBaseline / total) * 100,
+          belowBaselinePct: (belowBaseline / total) * 100,
+          riskyTriggered
+        };
+      });
+    }
+
     function renderScoresTable(results) {
       const table = document.getElementById("simulationScoresTable");
       if (!table) return;
@@ -711,30 +768,7 @@
         </tr>
       `;
 
-      const rows = results.players.map(player => {
-        const scores = results.scoresByPlayer.get(player.id) || [];
-        const baseline = player.baseline;
-        const high = scores.length ? Math.max(...scores) : NaN;
-        const low = scores.length ? Math.min(...scores) : NaN;
-        const aboveBaseline = scores.filter(score => score > baseline).length;
-        const belowBaseline = scores.filter(score => score < baseline).length;
-        const total = scores.length || 1;
-        const riskyTriggered = results.riskyTriggersByPlayer?.get(player.id) || 0;
-        return {
-          name: player.name || "—",
-          avg: average(scores),
-          baseline,
-          variance: player.variance,
-          varianceTilt: player.varianceTilt,
-          momentum: player.momentum,
-          risky: getNormalizedRisky(player.risky),
-          high,
-          low,
-          aboveBaselinePct: (aboveBaseline / total) * 100,
-          belowBaselinePct: (belowBaseline / total) * 100,
-          riskyTriggered
-        };
-      });
+      const rows = buildSimulationSummaryRows(results);
 
       let sortKey = "avg";
       let sortDir = "desc";
@@ -801,7 +835,39 @@
       if (!container) return;
       container.innerHTML = "";
 
-      results.players.forEach(player => {
+      const sortSelect = document.getElementById("simulationChartsSort");
+      const sortValue = sortSelect?.value || "ppd-desc";
+      const rows = buildSimulationSummaryRows(results);
+      const playerById = new Map(results.players.map(player => [player.id, player]));
+      const sorters = {
+        "name-asc": (a, b) => String(a.name).localeCompare(String(b.name)),
+        "name-desc": (a, b) => String(b.name).localeCompare(String(a.name)),
+        "ppd-desc": (a, b) => (b.avg || 0) - (a.avg || 0),
+        "ppd-asc": (a, b) => (a.avg || 0) - (b.avg || 0),
+        "baseline-desc": (a, b) => (b.baseline || 0) - (a.baseline || 0),
+        "baseline-asc": (a, b) => (a.baseline || 0) - (b.baseline || 0),
+        "variance-desc": (a, b) => (b.variance || 0) - (a.variance || 0),
+        "variance-asc": (a, b) => (a.variance || 0) - (b.variance || 0),
+        "momentum-desc": (a, b) => (b.momentum || 0) - (a.momentum || 0),
+        "momentum-asc": (a, b) => (a.momentum || 0) - (b.momentum || 0),
+        "risky-desc": (a, b) => (b.risky || 0) - (a.risky || 0),
+        "risky-asc": (a, b) => (a.risky || 0) - (b.risky || 0),
+        "high-desc": (a, b) => (b.high || 0) - (a.high || 0),
+        "high-asc": (a, b) => (a.high || 0) - (b.high || 0),
+        "low-desc": (a, b) => (b.low || 0) - (a.low || 0),
+        "low-asc": (a, b) => (a.low || 0) - (b.low || 0),
+        "aboveBaselinePct-desc": (a, b) => (b.aboveBaselinePct || 0) - (a.aboveBaselinePct || 0),
+        "aboveBaselinePct-asc": (a, b) => (a.aboveBaselinePct || 0) - (b.aboveBaselinePct || 0),
+        "belowBaselinePct-desc": (a, b) => (b.belowBaselinePct || 0) - (a.belowBaselinePct || 0),
+        "belowBaselinePct-asc": (a, b) => (a.belowBaselinePct || 0) - (b.belowBaselinePct || 0),
+        "riskyTriggered-desc": (a, b) => (b.riskyTriggered || 0) - (a.riskyTriggered || 0),
+        "riskyTriggered-asc": (a, b) => (a.riskyTriggered || 0) - (b.riskyTriggered || 0)
+      };
+      rows.sort(sorters[sortValue] || sorters["ppd-desc"]);
+
+      rows.forEach(row => {
+        const player = playerById.get(row.id);
+        if (!player) return;
         const scores = results.scoresByPlayer.get(player.id) || [];
         const baseline = player.baseline;
         const variance = player.variance;
@@ -1074,6 +1140,7 @@
       const downloadButton = document.getElementById("downloadSimulationBtn");
       const resultsWrapper = document.getElementById("simulationResults");
       const daysInput = document.getElementById("simulationDaysInput");
+      const chartsSort = document.getElementById("simulationChartsSort");
 
       if (runButton && resultsWrapper && daysInput && downloadButton) {
         runButton.addEventListener("click", () => {
@@ -1107,6 +1174,11 @@
           downloadButton.disabled = true;
         });
       }
+
+      chartsSort?.addEventListener("change", () => {
+        if (!latestSimulation) return;
+        renderCharts(latestSimulation);
+      });
     });
   </script>
 
