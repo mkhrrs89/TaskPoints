@@ -871,9 +871,10 @@ function simulateAiScoreForPlayer(player, todayKey){
   let riskyMod = 0;
   if (Math.random() < riskyNormalized / 10) {
     const boom = Math.random() < 0.5;
+    const riskyScale = 0.5 + Math.random() * 2.5;
     riskyMod = boom
-      ? variance * (0.5 + Math.random())
-      : -variance * (0.5 + Math.random());
+      ? variance * riskyScale
+      : -variance * riskyScale;
   }
 
   const score = baseline + variation + momentumBonus + riskyMod;
