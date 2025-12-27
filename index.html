@@ -689,6 +689,15 @@ function getHabitBubbleStyleAttr(tag, status) {
   return ` style="background:linear-gradient(135deg, ${color} 0%, ${dark} 100%);border-color:${dark};color:${textColor};"`;
 }
 
+function getHabitGroupStyleAttr(tag) {
+  if (!tag) return '';
+  const color = getHabitTagColor(tag);
+  if (!color) return '';
+  const dark = darkenHex(color, 0.35) || color;
+  const textColor = getContrastText(color);
+  return ` style="background:linear-gradient(135deg, ${color} 0%, ${dark} 100%);border-color:${dark};color:${textColor};"`;
+}
+
 function getHabitSortMode(){
   return ($('habitsSortSelect')?.value)
     || localStorage.getItem(HABITS_SORT_KEY)
@@ -2822,6 +2831,192 @@ function renderViceWeekLabels(){
   row.appendChild(wrapper);
 }
 
+function sortHabitsForMode(habits, sortMode) {
+  if (sortMode === 'custom') {
+    habits.sort((a,b) => {
+      const ao = (typeof a.order === 'number') ? a.order : 0;
+      const bo = (typeof b.order === 'number') ? b.order : 0;
+      if (ao !== bo) return ao - bo;
+
+      const ac = a.createdAtISO || '';
+      const bc = b.createdAtISO || '';
+      return ac.localeCompare(bc);
+    });
+    return habits;
+  }
+
+  if (sortMode === 'points') {
+    habits.sort((a,b) =>
+      (Number(b.pointsPerDay||0) - Number(a.pointsPerDay||0)) ||
+      (a.name||'').localeCompare(b.name||'')
+    );
+    return habits;
+  }
+
+  if (sortMode === 'streak') {
+    habits.sort((a,b) =>
+      (Number(b.__streak||0) - Number(a.__streak||0)) ||
+      (Number(b.pointsPerDay||0) - Number(a.pointsPerDay||0)) ||
+      (a.name||'').localeCompare(b.name||'')
+    );
+    return habits;
+  }
+
+  if (sortMode === 'completion') {
+    habits.sort((a,b) =>
+      (Number(b.__completion||0) - Number(a.__completion||0)) ||
+      (Number(b.__streak||0) - Number(a.__streak||0)) ||
+      (Number(b.pointsPerDay||0) - Number(a.pointsPerDay||0)) ||
+      (a.name||'').localeCompare(b.name||'')
+    );
+  }
+
+  return habits;
+}
+
+function buildHabitRenderEntries(habits, sortMode) {
+  const tagCounts = new Map();
+  habits.forEach(h => {
+    const tag = (h.tag || '').trim();
+    if (!tag) return;
+    tagCounts.set(tag, (tagCounts.get(tag) || 0) + 1);
+  });
+
+  const groupedTags = new Set(
+    Array.from(tagCounts.entries())
+      .filter(([, count]) => count > 1)
+      .map(([tag]) => tag)
+  );
+
+  const sorted = sortHabitsForMode(habits.slice(), sortMode);
+  const grouped = new Map();
+  const groupOrder = [];
+  const entries = [];
+  const singles = [];
+
+  sorted.forEach(h => {
+    const tag = (h.tag || '').trim();
+    if (tag && groupedTags.has(tag)) {
+      if (!grouped.has(tag)) {
+        grouped.set(tag, []);
+        groupOrder.push(tag);
+        if (sortMode === 'custom') {
+          entries.push({ type: 'group', tag, habits: grouped.get(tag) });
+        }
+      }
+      grouped.get(tag).push(h);
+      return;
+    }
+
+    const entry = { type: 'single', habit: h };
+    if (sortMode === 'custom') {
+      entries.push(entry);
+    } else {
+      singles.push(entry);
+    }
+  });
+
+  if (sortMode === 'custom') {
+    return { entries };
+  }
+
+  const groupedEntries = groupOrder.map(tag => ({
+    type: 'group',
+    tag,
+    habits: grouped.get(tag)
+  }));
+
+  return { entries: [...singles, ...groupedEntries] };
+}
+
+function renderHabitRow(h, days, wrap, options = {}) {
+  const showMoveButtons = options.showMoveButtons ?? (getHabitSortMode() === 'custom');
+
+  h.doneKeys = Array.isArray(h.doneKeys) ? h.doneKeys : [];
+
+  const streak     = Number(h.__streak || 0);
+  const completion = Number(h.__completion || 0);
+
+  const row = document.createElement('div');
+  row.className = 'habitRow';
+
+  const daysHtml = days.map(d => {
+    const on = h.doneKeys.includes(d.key);
+    const status = on ? 'on' : 'off';
+    const styleAttr = getHabitBubbleStyleAttr(h.tag, status);
+    return `<div class="habitDay ${status}"${styleAttr} data-habit="${h.id}" data-day="${d.key}">
+      ${d.date.getDate()}
+    </div>`;
+  }).join('');
+
+  const daysRowHtml = `<div class="habitDaysRow">${daysHtml}</div>`;
+
+  if (editingHabitId === h.id) {
+    const category = h.category || 'habit';
+    row.innerHTML = `
+      <div class="flex flex-col gap-2 min-w-0">
+        <input class="input" data-field="name" value="${escapeHtml(h.name)}">
+        <input class="input" data-field="points" type="number" value="${h.pointsPerDay||0}">
+        <input class="input" data-field="tag" value="${escapeHtml(h.tag || '')}" placeholder="Tag">
+        <select class="input" data-field="category">
+          <option value="habit" ${category==='habit'?'selected':''}>Habit</option>
+          <option value="vice"  ${category==='vice'?'selected':''}>Vice</option>
+        </select>
+        <div class="flex gap-2 flex-wrap">
+          <button class="btn btn-success" data-act="habit-save">Save</button>
+          <button class="btn btn-ghost" data-act="habit-cancel">Cancel</button>
+          <button class="btn btn-ghost" data-act="habit-delete">Delete</button>
+        </div>
+      </div>
+      ${daysRowHtml}
+    `;
+
+    wrap.appendChild(row);
+
+    row.querySelector('[data-act="habit-save"]').onclick = () => saveHabitEdit(h.id, row);
+    row.querySelector('[data-act="habit-cancel"]').onclick = () => { editingHabitId=null; renderHabits(); renderVices(); };
+    row.querySelector('[data-act="habit-delete"]').onclick = () => deleteHabit(h.id);
+    return;
+  }
+
+  const nameHtml = `
+    <div class="habitLeft flex items-center gap-2 flex-wrap min-w-0 flex-1 text-xs sm:text-sm">
+      <!-- Left side: habit name + points + streak + completion% -->
+      <div class="habitName" title="${escapeHtml(h.name)}">
+        ${escapeHtml(h.name)}
+      </div>
+      <div class="tag bg-zinc-200/60 dark:bg-zinc-700/60">
+        ${h.pointsPerDay||0} pts
+      </div>
+      ${h.tag ? `<div class="tag tag-clear">${escapeHtml(h.tag)}</div>` : ''}
+    ${streak > 0 ? `
+      <div class="tag streak-pill">
+        ${streak} ${streak === 1 ? 'day' : 'days'}
+      </div>
+    ` : ''}
+      <div class="tag bg-zinc-200/60 dark:bg-zinc-700/60 text-orange-400">
+        ${completion}%
+      </div>
+    </div>
+  `;
+
+  const controlsHtml = `
+    <div class="habitControls flex items-center gap-2 flex-wrap text-xs sm:text-sm">
+      <button class="btn btn-ghost" data-act="habit-edit" data-id="${h.id}">Edit</button>
+      <button class="btn btn-ghost" data-act="habit-delete" data-id="${h.id}">Delete</button>
+      ${showMoveButtons ? `
+        <button class="btn btn-ghost" style="padding:2px 6px;font-size:11px"
+                data-act="habit-up" data-id="${h.id}">▲</button>
+        <button class="btn btn-ghost" style="padding:2px 6px;font-size:11px"
+                data-act="habit-down" data-id="${h.id}">▼</button>
+      ` : ``}
+    </div>
+  `;
+
+  row.innerHTML = nameHtml + controlsHtml + daysRowHtml;
+  wrap.appendChild(row);
+}
+
 
 
 function renderHabits(){
@@ -2831,51 +3026,19 @@ function renderHabits(){
   const days = weekDays(new Date());
 
   // Only active habits (NOT vices, NOT retired)
-const sortMode = getHabitSortMode();
+  const sortMode = getHabitSortMode();
 
-const habits = state.habits
-  .filter(h => (h.category || 'habit') !== 'vice')
-  .filter(h => !h.retired)
-  .slice();
+  const habits = state.habits
+    .filter(h => (h.category || 'habit') !== 'vice')
+    .filter(h => !h.retired)
+    .slice();
 
-// Precompute streak + completion once so sorting is stable + fast
-habits.forEach(h => {
-  h.doneKeys = Array.isArray(h.doneKeys) ? h.doneKeys : [];
-  h.__streak = computeHabitStreak(h);
-  h.__completion = computeHabitCompletion(h);
-});
-
-if (sortMode === 'custom') {
-  habits.sort((a,b) => {
-    const ao = (typeof a.order === 'number') ? a.order : 0;
-    const bo = (typeof b.order === 'number') ? b.order : 0;
-    if (ao !== bo) return ao - bo;
-
-    const ac = a.createdAtISO || '';
-    const bc = b.createdAtISO || '';
-    return ac.localeCompare(bc);
+  // Precompute streak + completion once so sorting is stable + fast
+  habits.forEach(h => {
+    h.doneKeys = Array.isArray(h.doneKeys) ? h.doneKeys : [];
+    h.__streak = computeHabitStreak(h);
+    h.__completion = computeHabitCompletion(h);
   });
-} else if (sortMode === 'points') {
-  habits.sort((a,b) =>
-    (Number(b.pointsPerDay||0) - Number(a.pointsPerDay||0)) ||
-    (a.name||'').localeCompare(b.name||'')
-  );
-} else if (sortMode === 'streak') {
-  habits.sort((a,b) =>
-    (Number(b.__streak||0) - Number(a.__streak||0)) ||
-    (Number(b.pointsPerDay||0) - Number(a.pointsPerDay||0)) ||
-    (a.name||'').localeCompare(b.name||'')
-  );
-} else if (sortMode === 'completion') {
-  habits.sort((a,b) =>
-    (Number(b.__completion||0) - Number(a.__completion||0)) ||
-    (Number(b.__streak||0) - Number(a.__streak||0)) ||
-    (Number(b.pointsPerDay||0) - Number(a.pointsPerDay||0)) ||
-    (a.name||'').localeCompare(b.name||'')
-  );
-}
-
-
 
   if(!habits.length){
     empty.classList.remove('hidden');
@@ -2883,105 +3046,39 @@ if (sortMode === 'custom') {
   }
   empty.classList.add('hidden');
 
-  habits.forEach(h => {
-    h.doneKeys = Array.isArray(h.doneKeys) ? h.doneKeys : [];
+  const { entries } = buildHabitRenderEntries(habits, sortMode);
 
-const streak     = Number(h.__streak || 0);
-const completion = Number(h.__completion || 0);
+  entries.forEach(entry => {
+    if (entry.type === 'group') {
+      const groupWrap = document.createElement('div');
+      groupWrap.className = 'habitGroup';
 
-
-
-  const row = document.createElement('div');
-  row.className = 'habitRow';
-
-const daysHtml = days.map(d => {
-  const on = h.doneKeys.includes(d.key);
-  const status = on ? 'on' : 'off';
-  const styleAttr = getHabitBubbleStyleAttr(h.tag, status);
-  return `<div class="habitDay ${status}"${styleAttr} data-habit="${h.id}" data-day="${d.key}">
-    ${d.date.getDate()}
-  </div>`;
-}).join('');
-
-  const daysRowHtml = `<div class="habitDaysRow">${daysHtml}</div>`;
-
-
-    // EDIT MODE
-    if(editingHabitId === h.id){
-      const category = h.category || 'habit';
-      row.innerHTML = `
-        <div class="flex flex-col gap-2 min-w-0">
-          <input class="input" data-field="name" value="${escapeHtml(h.name)}">
-          <input class="input" data-field="points" type="number" value="${h.pointsPerDay||0}">
-          <input class="input" data-field="tag" value="${escapeHtml(h.tag || '')}" placeholder="Tag">
-          <select class="input" data-field="category">
-            <option value="habit" ${category==='habit'?'selected':''}>Habit</option>
-            <option value="vice"  ${category==='vice'?'selected':''}>Vice</option>
-          </select>
-          <div class="flex gap-2 flex-wrap">
-            <button class="btn btn-success" data-act="habit-save">Save</button>
-            <button class="btn btn-ghost" data-act="habit-cancel">Cancel</button>
-            <button class="btn btn-ghost" data-act="habit-delete">Delete</button>
-          </div>
+      const header = document.createElement('div');
+      header.className = 'habitGroupHeader';
+      header.innerHTML = `
+        <div class="habitGroupTitle"${getHabitGroupStyleAttr(entry.tag)}>
+          ${escapeHtml(entry.tag)}
         </div>
-        ${daysRowHtml}
+        <div class="habitGroupControls">
+          ${sortMode === 'custom' ? `
+            <button class="btn btn-ghost" style="padding:2px 6px;font-size:11px"
+                    data-act="habit-group-up" data-tag="${escapeHtml(entry.tag)}">▲</button>
+            <button class="btn btn-ghost" style="padding:2px 6px;font-size:11px"
+                    data-act="habit-group-down" data-tag="${escapeHtml(entry.tag)}">▼</button>
+          ` : ``}
+        </div>
       `;
+      groupWrap.appendChild(header);
 
-      wrap.appendChild(row);
+      const body = document.createElement('div');
+      body.className = 'habitGroupBody';
+      entry.habits.forEach(h => renderHabitRow(h, days, body, { showMoveButtons: false }));
+      groupWrap.appendChild(body);
+      wrap.appendChild(groupWrap);
+      return;
+    }
 
-      row.querySelector('[data-act="habit-save"]').onclick = () => saveHabitEdit(h.id, row);
-      row.querySelector('[data-act="habit-cancel"]').onclick = () => { editingHabitId=null; renderHabits(); renderVices(); };
-      row.querySelector('[data-act="habit-delete"]').onclick = () => deleteHabit(h.id);
-
-} else {
-// NORMAL MODE
-const nameHtml = `
-  <div class="habitLeft flex items-center gap-2 flex-wrap min-w-0 flex-1 text-xs sm:text-sm">
-    <!-- Left side: habit name + points + streak + completion% -->
-    <div class="habitName" title="${escapeHtml(h.name)}">
-      ${escapeHtml(h.name)}
-    </div>
-    <div class="tag bg-zinc-200/60 dark:bg-zinc-700/60">
-      ${h.pointsPerDay||0} pts
-    </div>
-    ${h.tag ? `<div class="tag tag-clear">${escapeHtml(h.tag)}</div>` : ''}
-  ${streak > 0 ? `
-    <div class="tag streak-pill">
-      ${streak} ${streak === 1 ? 'day' : 'days'}
-    </div>
-  ` : ''}
-    <div class="tag bg-zinc-200/60 dark:bg-zinc-700/60 text-orange-400">
-      ${completion}%
-    </div>
-  </div>
-`;
-
-
-  // Right side: controls only (Edit/Delete/▲/▼)
-const isCustom = (getHabitSortMode() === 'custom');
-
-const controlsHtml = `
-  <div class="habitControls flex items-center gap-2 flex-wrap text-xs sm:text-sm">
-    <button class="btn btn-ghost" data-act="habit-edit" data-id="${h.id}">Edit</button>
-    <button class="btn btn-ghost" data-act="habit-delete" data-id="${h.id}">Delete</button>
-    ${isCustom ? `
-      <button class="btn btn-ghost" style="padding:2px 6px;font-size:11px"
-              data-act="habit-up" data-id="${h.id}">▲</button>
-      <button class="btn btn-ghost" style="padding:2px 6px;font-size:11px"
-              data-act="habit-down" data-id="${h.id}">▼</button>
-    ` : ``}
-  </div>
-`;
-
-
-
-  // Line 3: date bubbles (sits to the right on desktop, below on mobile)
-  row.innerHTML = nameHtml + controlsHtml + daysRowHtml;
-  wrap.appendChild(row);
-}
-
-
-
+    renderHabitRow(entry.habit, days, wrap, { showMoveButtons: sortMode === 'custom' });
   });
 
   wrap.querySelectorAll('.habitDay').forEach(el=>{
@@ -2998,6 +3095,12 @@ const controlsHtml = `
   });
   wrap.querySelectorAll('[data-act="habit-down"]').forEach(btn => {
     btn.onclick = () => moveHabit(btn.getAttribute('data-id'), +1);
+  });
+  wrap.querySelectorAll('[data-act="habit-group-up"]').forEach(btn => {
+    btn.onclick = () => moveHabitGroup(btn.getAttribute('data-tag'), -1);
+  });
+  wrap.querySelectorAll('[data-act="habit-group-down"]').forEach(btn => {
+    btn.onclick = () => moveHabitGroup(btn.getAttribute('data-tag'), +1);
   });
 }
 
@@ -3289,6 +3392,74 @@ function moveHabit(id, delta){
   const tmp = a.order;
   a.order = b.order;
   b.order = tmp;
+
+  save();
+  renderHabits();
+  renderVices();
+}
+
+function moveHabitGroup(tag, delta) {
+  const groupTag = (tag || '').trim();
+  if (!groupTag) return;
+
+  const activeHabits = state.habits
+    .filter(h => (h.category || 'habit') !== 'vice')
+    .filter(h => !h.retired)
+    .slice();
+
+  const tagCounts = new Map();
+  activeHabits.forEach(h => {
+    const habitTag = (h.tag || '').trim();
+    if (!habitTag) return;
+    tagCounts.set(habitTag, (tagCounts.get(habitTag) || 0) + 1);
+  });
+
+  if ((tagCounts.get(groupTag) || 0) < 2) return;
+
+  const groupedTags = new Set(
+    Array.from(tagCounts.entries())
+      .filter(([, count]) => count > 1)
+      .map(([t]) => t)
+  );
+
+  const sorted = sortHabitsForMode(activeHabits.slice(), 'custom');
+  const blocks = [];
+  const groupBlocks = new Map();
+
+  sorted.forEach(h => {
+    const habitTag = (h.tag || '').trim();
+    if (habitTag && groupedTags.has(habitTag)) {
+      if (!groupBlocks.has(habitTag)) {
+        const block = { type: 'group', tag: habitTag, habits: [] };
+        groupBlocks.set(habitTag, block);
+        blocks.push(block);
+      }
+      groupBlocks.get(habitTag).habits.push(h);
+      return;
+    }
+
+    blocks.push({ type: 'single', habits: [h] });
+  });
+
+  const idx = blocks.findIndex(b => b.type === 'group' && b.tag === groupTag);
+  if (idx === -1) return;
+
+  const newIdx = idx + delta;
+  if (newIdx < 0 || newIdx >= blocks.length) return;
+
+  const nextBlocks = blocks.slice();
+  const [moving] = nextBlocks.splice(idx, 1);
+  nextBlocks.splice(newIdx, 0, moving);
+
+  const reordered = [];
+  nextBlocks.forEach(block => {
+    const blockHabits = sortHabitsForMode(block.habits.slice(), 'custom');
+    reordered.push(...blockHabits);
+  });
+
+  reordered.forEach((h, index) => {
+    h.order = index + 1;
+  });
 
   save();
   renderHabits();
