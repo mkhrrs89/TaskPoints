@@ -512,7 +512,9 @@
       }
 
       let riskyMod = 0;
+      let riskyTriggered = false;
       if (Math.random() < riskyNormalized / 10) {
+        riskyTriggered = true;
         const boom = Math.random() < 0.5;
         const riskyScale = 0.5 + Math.random() * 2.5;
         riskyMod = boom
@@ -521,7 +523,10 @@
       }
 
       const score = baseline + variation + momentumBonus + riskyMod;
-      return Number(score.toFixed(1));
+      return {
+        score: Number(score.toFixed(1)),
+        riskyTriggered
+      };
     }
 
     function runSimulation(days) {
@@ -541,7 +546,9 @@
 
       const normalizedPlayers = players.map(normalizeSimPlayer);
       const scoresByPlayer = new Map();
+      const riskyTriggersByPlayer = new Map();
       normalizedPlayers.forEach(player => scoresByPlayer.set(player.id, []));
+      normalizedPlayers.forEach(player => riskyTriggersByPlayer.set(player.id, 0));
 
       const dayLabels = [];
       for (let i = 0; i < days; i++) {
@@ -549,9 +556,13 @@
         normalizedPlayers.forEach(player => {
           const scores = scoresByPlayer.get(player.id) || [];
           const prevScore = scores.length ? scores[scores.length - 1] : null;
-          const score = simulateScoreForPlayer(player, prevScore);
-          scores.push(score);
+          const result = simulateScoreForPlayer(player, prevScore);
+          scores.push(result.score);
           scoresByPlayer.set(player.id, scores);
+          if (result.riskyTriggered) {
+            const riskyCount = riskyTriggersByPlayer.get(player.id) || 0;
+            riskyTriggersByPlayer.set(player.id, riskyCount + 1);
+          }
         });
       }
 
@@ -559,13 +570,24 @@
         players: normalizedPlayers,
         days,
         scoresByPlayer,
-        dayLabels
+        dayLabels,
+        riskyTriggersByPlayer
       };
     }
 
     function formatNumber(value) {
       if (!Number.isFinite(value)) return "—";
       return Number(value).toFixed(1);
+    }
+
+    function formatCount(value) {
+      if (!Number.isFinite(value)) return "—";
+      return Math.round(value).toString();
+    }
+
+    function formatPercent(value) {
+      if (!Number.isFinite(value)) return "—";
+      return `${Number(value).toFixed(1)}%`;
     }
 
     function average(scores) {
@@ -671,7 +693,12 @@
         { label: "Variance", key: "variance" },
         { label: "Variance Tilt", key: "varianceTilt" },
         { label: "Momentum", key: "momentum" },
-        { label: "Risky", key: "risky" }
+        { label: "Risky", key: "risky" },
+        { label: "High", key: "high" },
+        { label: "Low", key: "low" },
+        { label: "Above Baseline", key: "aboveBaselinePct" },
+        { label: "Below Baseline", key: "belowBaselinePct" },
+        { label: "Risky Days", key: "riskyTriggered" }
       ];
 
       thead.innerHTML = `
@@ -686,14 +713,26 @@
 
       const rows = results.players.map(player => {
         const scores = results.scoresByPlayer.get(player.id) || [];
+        const baseline = player.baseline;
+        const high = scores.length ? Math.max(...scores) : NaN;
+        const low = scores.length ? Math.min(...scores) : NaN;
+        const aboveBaseline = scores.filter(score => score > baseline).length;
+        const belowBaseline = scores.filter(score => score < baseline).length;
+        const total = scores.length || 1;
+        const riskyTriggered = results.riskyTriggersByPlayer?.get(player.id) || 0;
         return {
           name: player.name || "—",
           avg: average(scores),
-          baseline: player.baseline,
+          baseline,
           variance: player.variance,
           varianceTilt: player.varianceTilt,
           momentum: player.momentum,
-          risky: getNormalizedRisky(player.risky)
+          risky: getNormalizedRisky(player.risky),
+          high,
+          low,
+          aboveBaselinePct: (aboveBaseline / total) * 100,
+          belowBaselinePct: (belowBaseline / total) * 100,
+          riskyTriggered
         };
       });
 
@@ -730,6 +769,11 @@
             <td class="pr-4 py-2">${formatNumber(row.varianceTilt)}%</td>
             <td class="pr-4 py-2">${formatNumber(row.momentum)}</td>
             <td class="pr-4 py-2">${formatNumber(row.risky)}</td>
+            <td class="pr-4 py-2">${formatNumber(row.high)}</td>
+            <td class="pr-4 py-2">${formatNumber(row.low)}</td>
+            <td class="pr-4 py-2">${formatPercent(row.aboveBaselinePct)}</td>
+            <td class="pr-4 py-2">${formatPercent(row.belowBaselinePct)}</td>
+            <td class="pr-4 py-2">${formatCount(row.riskyTriggered)}</td>
           </tr>
         `).join("");
         updateIndicators();
@@ -761,6 +805,8 @@
         const scores = results.scoresByPlayer.get(player.id) || [];
         const baseline = player.baseline;
         const variance = player.variance;
+        const varianceTilt = player.varianceTilt;
+        const riskyScore = getNormalizedRisky(player.risky);
         const minValue = Math.min(...scores, baseline - variance);
         const maxValue = Math.max(...scores, baseline + variance);
         const range = maxValue - minValue || 1;
@@ -789,7 +835,7 @@
           <div class="flex items-center justify-between gap-2 flex-wrap">
             <div class="font-semibold">${escapeHtml(player.name || "—")}</div>
             <div class="text-xs muted">
-              Baseline ${formatNumber(baseline)} • Variance ±${formatNumber(variance)}
+              Baseline ${formatNumber(baseline)} • Variance ±${formatNumber(variance)} • Variance Tilt ${formatNumber(varianceTilt)}% • Risky ${formatNumber(riskyScore)}
             </div>
           </div>
           <svg viewBox="0 0 ${width} ${height}" class="w-full h-40 rounded-xl bg-black/20 border border-white/5">
@@ -970,9 +1016,29 @@
       });
       rows.push([]);
       rows.push(["PPD + Ratings"]);
-      rows.push(["Player", "PPD", "Baseline", "Variance", "Variance Tilt", "Momentum", "Risky"]);
+      rows.push([
+        "Player",
+        "PPD",
+        "Baseline",
+        "Variance",
+        "Variance Tilt",
+        "Momentum",
+        "Risky",
+        "High",
+        "Low",
+        "Above Baseline %",
+        "Below Baseline %",
+        "Risky Days"
+      ]);
       results.players.forEach(player => {
         const scores = results.scoresByPlayer.get(player.id) || [];
+        const baseline = player.baseline;
+        const high = scores.length ? Math.max(...scores) : NaN;
+        const low = scores.length ? Math.min(...scores) : NaN;
+        const aboveBaseline = scores.filter(score => score > baseline).length;
+        const belowBaseline = scores.filter(score => score < baseline).length;
+        const total = scores.length || 1;
+        const riskyTriggered = results.riskyTriggersByPlayer?.get(player.id) || 0;
         rows.push([
           player.name || "—",
           formatNumber(average(scores)),
@@ -980,7 +1046,12 @@
           formatNumber(player.variance),
           `${formatNumber(player.varianceTilt)}%`,
           formatNumber(player.momentum),
-          formatNumber(getNormalizedRisky(player.risky))
+          formatNumber(getNormalizedRisky(player.risky)),
+          formatNumber(high),
+          formatNumber(low),
+          formatPercent((aboveBaseline / total) * 100),
+          formatPercent((belowBaseline / total) * 100),
+          formatCount(riskyTriggered)
         ]);
       });
 
