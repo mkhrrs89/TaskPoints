@@ -1368,6 +1368,42 @@ body {
   line-height: 1.2;
 }
 
+  /* WORK card: match Sleep/Calories mobile header behavior */
+  .work-today-card .work-title-stack{
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .work-today-card .work-impact-below{
+    font-size: 0.9rem;
+    line-height: 1.1;
+    opacity: 0.85;
+  }
+
+  /* hide the big meta area on mobile, like Sleep/Calories do */
+  .work-today-card .stat-compact-meta{
+    display: none;
+  }
+
+  /* show summary row on mobile when JS removes .hidden */
+  .work-today-card .stat-summary-row:not(.hidden){
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  .work-today-card .stat-summary-value{
+    font-size: 2.1rem;
+    line-height: 1;
+    font-weight: 800;
+  }
+
+  /* ensure inputs show correctly when not hidden */
+  .work-today-card #workInputRow:not(.hidden){
+    display: flex;
+  }
+}
+
 
 /* ============================================================================ */
 /*                               MOOD: TODAY + BUTTON + CHIPS                   */
@@ -2149,6 +2185,7 @@ body {
     color: #f8f9ff;
   }
 }
+
 
 
 
