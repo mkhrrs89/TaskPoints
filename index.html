@@ -429,29 +429,32 @@ Nothing visible on the page is built here. === -->
         <div class="work-today-card">
           <div class="stat-mobile-header">
             <div class="stat-compact-row">
-              <h2 id="workAnchor" class="font-bold text-lg stat-title">Work Score</h2>
-              <div class="stat-compact-controls">
-<div id="workInputRow" class="stat-input-row flex items-center gap-2 flex-wrap sm:flex-nowrap">
-  <input id="workScoreInput" class="input w-24 scoreInput" type="number" placeholder="0–10">
-  <input id="workHoursInput" class="input w-24 scoreInput" type="number" placeholder="Hours">
-  <button id="saveWorkScoreBtn" class="btn btn-work">Add</button>
-</div>
-              </div>
-            </div>
+  <div class="work-title-stack">
+    <h2 id="workAnchor" class="font-semibold text-sm">Work Score</h2>
+    <div id="workImpactBelow" class="work-impact-below hidden"></div>
+  </div>
 
-            <div class="stat-compact-meta">
-              <div class="muted text-xs">Today’s Work</div>
-              <div class="flex items-center gap-2 flex-wrap">
-                <div class="flex items-baseline gap-2">
-                  <div id="workTodayValue" class="text-4xl font-extrabold leading-tight stat-value">—</div>
-                  <div id="workTodayHours" class="work-hours-chip hidden"><span id="workTodayHoursValue"></span></div>
-                </div>
-              </div>
-              <div id="workTodayImpact" class="muted text-xs mt-1 stat-impact">Adds 0 pts to today</div>
-            </div>
-          </div>
+  <div class="stat-compact-controls">
+    <!-- input row (before entry) -->
+    <div id="workInputRow" class="stat-input-row hidden">
+      <input id="workScoreInput" class="input w-24" type="number" placeholder="0–10">
+      <input id="workHoursInput" class="input w-24" type="number" placeholder="Hours">
+      <button id="saveWorkScoreBtn" class="btn btn-primary">Add</button>
+    </div>
+
+    <!-- summary row (after entry, mobile-only like Sleep/Calories) -->
+    <div id="workSummaryRow" class="stat-summary-row hidden">
+      <div class="flex items-center gap-2">
+        <div id="workSummaryValue" class="stat-summary-value"></div>
+
+        <div id="workSummaryHours" class="work-hours-chip hidden">
+          <span id="workSummaryHoursValue"></span>
         </div>
       </div>
+    </div>
+  </div>
+</div>
+
 
       <!-- RIGHT SIDE: history chips -->
       <div class="flex-1 min-w-[220px] stat-col stat-col-secondary">
@@ -4544,6 +4547,13 @@ function renderWorkHistory() {
     .filter(c => c.title && c.title.startsWith('Work Score'))
     .slice()
     .sort((a,b) => new Date(b.completedAtISO) - new Date(a.completedAtISO));
+
+  const workImpactBelow = document.getElementById('workImpactBelow');
+const workSummaryRow = document.getElementById('workSummaryRow');
+const workSummaryValue = document.getElementById('workSummaryValue');
+const workSummaryHours = document.getElementById('workSummaryHours');
+const workSummaryHoursValue = document.getElementById('workSummaryHoursValue');
+
 
   // TODAY
   const today = new Date();
