@@ -878,7 +878,8 @@ function simulateAiScoreForPlayer(player, todayKey){
   }
 
   const score = baseline + variation + momentumBonus + riskyMod;
-  return Number(score.toFixed(1));
+  const roundedScore = Number(score.toFixed(1));
+  return Math.max(0, roundedScore);
 }
 
 function makeId() {
