@@ -4620,8 +4620,37 @@ if (todayValueEl && todayImpactEl) {
       todayImpactEl.textContent = `Adds ${totalPts.toFixed(1)} pts to today${hoursText}`;
       todayImpactEl.dataset.empty = 'false';
 
-      // ✅ hide input row after initial entry
-      inputRow?.classList.add('hidden');
+// ✅ hide input row after initial entry (Sleep/Calories style)
+inputRow?.classList.add('hidden');
+
+// show mobile summary + impact-below
+workSummaryRow?.classList.remove('hidden');
+workImpactBelow?.classList.remove('hidden');
+
+// fill summary value (right-side number)
+if (workSummaryValue) workSummaryValue.textContent = String(score);
+
+// hours chip should show the HOURS BONUS (not raw hours), like your history chips do
+const hoursBonus = workHoursBonus(hours);
+if (workSummaryHours && workSummaryHoursValue) {
+  const show = Number.isFinite(hoursBonus) && hoursBonus !== 0;
+  if (show) {
+    workSummaryHoursValue.textContent = `${hoursBonus >= 0 ? '+' : ''}${hoursBonus.toFixed(1)}`;
+    workSummaryHours.classList.remove('hidden');
+  } else {
+    workSummaryHours.classList.add('hidden');
+    workSummaryHoursValue.textContent = '';
+  }
+}
+
+// gray line under the title
+if (workImpactBelow) {
+  const breakdown = (Number.isFinite(hoursBonus) && hoursBonus !== 0)
+    ? ` (${score} + ${hoursBonus.toFixed(1)})`
+    : ` (${score})`;
+  workImpactBelow.textContent = `adds ${totalPts.toFixed(1)} pts${breakdown}`;
+}
+
     } else {
       todayValueEl.textContent = '—';
       todayImpactEl.textContent = 'Adds — pts to today';
@@ -4637,14 +4666,26 @@ if (todayValueEl && todayImpactEl) {
       todayHoursValue.textContent = '';
     }
 
-    // ✅ show input row if no entry yet
-    inputRow?.classList.remove('hidden');
+// ✅ show input row if no entry yet (and hide summary/impact)
+inputRow?.classList.remove('hidden');
+
+workSummaryRow?.classList.add('hidden');
+if (workSummaryValue) workSummaryValue.textContent = '';
+if (workSummaryHours) workSummaryHours.classList.add('hidden');
+if (workSummaryHoursValue) workSummaryHoursValue.textContent = '';
+
+workImpactBelow?.classList.add('hidden');
+if (workImpactBelow) workImpactBelow.textContent = '';
+
   }
 }
 
   setTodayWorkEditable(todayValueEl);
   setTodayWorkEditable(todayImpactEl);
   setTodayWorkEditable(todayHoursChip);
+setTodayWorkEditable(workSummaryRow);
+setTodayWorkEditable(workSummaryValue);
+setTodayWorkEditable(workImpactBelow);
 
 
   // RECENT HISTORY (4 chips)
