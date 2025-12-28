@@ -26,7 +26,6 @@
       </a>
       <div class="flex items-center gap-2">
         <button type="button" class="btn btn-ghost btn-toolbar" data-export-button>Export</button>
-        <button type="button" class="btn btn-ghost btn-toolbar" data-export-images>Backup + Images</button>
         <label class="btn btn-ghost btn-toolbar cursor-pointer">
           <span>Import</span>
           <input type="file" accept="application/json" class="hidden" data-import-input/>
@@ -97,6 +96,7 @@
             <input id="settingsImportInput" type="file" accept="application/json" class="hidden" />
           </label>
           <button id="settingsImportPasteBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Paste JSON</button>
+          <button type="button" class="btn btn-ghost btn-toolbar nav-btn md:hidden" data-export-images>Backup + Images</button>
           <button id="settingsExportMatchupsBtn" class="btn btn-ghost btn-toolbar nav-btn" type="button">
             Export Matchups + Player History (CSV)
           </button>
