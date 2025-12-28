@@ -439,6 +439,12 @@ body {
   will-change: transform;
 }
 
+@media (min-width: 768px){
+  .mobile-bottom-nav-shell{
+    display: none;
+  }
+}
+
 .mobile-bottom-nav a + a{
   border-left: 1px solid rgba(15,23,42,0.7);
 }
