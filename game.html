@@ -201,6 +201,7 @@
       </a>
       <div class="flex items-center gap-2">
         <button type="button" class="btn btn-ghost btn-toolbar" data-export-button>Export</button>
+        <button type="button" class="btn btn-ghost btn-toolbar" data-export-images>Backup + Images</button>
         <label class="btn btn-ghost btn-toolbar cursor-pointer">
           <span>Import</span>
           <input type="file" accept="application/json" class="hidden" data-import-input/>
@@ -452,7 +453,8 @@ function loadState() {
     gameHistory: [],
     matchups: [],
     schedule: [],
-    opponentDripSchedules: []
+    opponentDripSchedules: [],
+    youImageId: ""
   };
 
   try {
@@ -472,6 +474,7 @@ function loadState() {
     base.opponentDripSchedules = Array.isArray(parsed.opponentDripSchedules)
       ? parsed.opponentDripSchedules
       : [];
+    base.youImageId = typeof parsed.youImageId === "string" ? parsed.youImageId : "";
   } catch (e) {
     console.error("Failed to load state in game.html", e);
   }
@@ -520,7 +523,7 @@ function normalizeState(s) {
     matchups:    Array.isArray(s.matchups)    ? s.matchups    : [],
     schedule:    Array.isArray(s.schedule)    ? s.schedule    : [],
     opponentDripSchedules: Array.isArray(s.opponentDripSchedules) ? s.opponentDripSchedules : [],
-    youImage:    typeof s.youImage === "string" ? s.youImage : "",
+    youImageId:  typeof s.youImageId === "string" ? s.youImageId : "",
     habitTagColors: normalizeHabitTagColors(s.habitTagColors)
   };
 }
@@ -572,6 +575,118 @@ let state = syncStateWithMatchups(loadState());
     console.log("STORAGE_KEY =", STORAGE_KEY);
 console.log("state.players =", state.players, "count =", (state.players || []).length);
 
+const imageUrlCache = new Map();
+const imageLoadPromises = new Map();
+let renderPlayersNonce = 0;
+
+function dataUrlToBlobFallback(dataUrl) {
+  if (typeof dataUrl !== "string") return null;
+  const match = dataUrl.match(/^data:([^;,]+)(;base64)?,(.*)$/);
+  if (!match) return null;
+  const mime = match[1] || "application/octet-stream";
+  const isBase64 = Boolean(match[2]);
+  const data = match[3] || "";
+
+  if (isBase64) {
+    const binary = atob(data);
+    const len = binary.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i += 1) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return new Blob([bytes], { type: mime });
+  }
+
+  return new Blob([decodeURIComponent(data)], { type: mime });
+}
+
+function getImageHelper() {
+  return window.TaskPointsCore || {};
+}
+
+function getCachedImageUrl(imageId) {
+  return imageUrlCache.get(imageId) || "";
+}
+
+function revokeImageUrl(imageId) {
+  const url = imageUrlCache.get(imageId);
+  if (url) {
+    URL.revokeObjectURL(url);
+    imageUrlCache.delete(imageId);
+  }
+}
+
+async function loadImageUrl(imageId) {
+  if (!imageId) return "";
+  if (imageUrlCache.has(imageId)) return imageUrlCache.get(imageId);
+  if (imageLoadPromises.has(imageId)) return imageLoadPromises.get(imageId);
+
+  const { getImageBlob } = getImageHelper();
+  if (typeof getImageBlob !== "function") return "";
+
+  const promise = (async () => {
+    const blob = await getImageBlob(imageId);
+    if (!blob) return "";
+    const url = URL.createObjectURL(blob);
+    imageUrlCache.set(imageId, url);
+    return url;
+  })();
+
+  imageLoadPromises.set(imageId, promise);
+  const url = await promise;
+  imageLoadPromises.delete(imageId);
+  return url;
+}
+
+async function preloadImageUrls(imageIds) {
+  const unique = Array.from(new Set(imageIds.filter(Boolean)));
+  await Promise.all(unique.map((imageId) => loadImageUrl(imageId)));
+}
+
+async function saveImageFromDataUrl(dataUrl, existingImageId) {
+  if (!dataUrl) return existingImageId || "";
+  const { dataUrlToBlob, generateImageId, saveImageBlob, deleteImageBlob } = getImageHelper();
+  const toBlob = typeof dataUrlToBlob === "function" ? dataUrlToBlob : dataUrlToBlobFallback;
+  const blob = toBlob(dataUrl);
+  if (!blob) return existingImageId || "";
+
+  const imageId = typeof generateImageId === "function" ? generateImageId() : `img_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  if (typeof saveImageBlob === "function") {
+    await saveImageBlob(imageId, blob);
+  }
+
+  if (existingImageId && existingImageId !== imageId) {
+    if (typeof deleteImageBlob === "function") {
+      await deleteImageBlob(existingImageId);
+    }
+    revokeImageUrl(existingImageId);
+  }
+
+  return imageId;
+}
+
+async function deleteImageById(imageId) {
+  if (!imageId) return;
+  const { deleteImageBlob } = getImageHelper();
+  if (typeof deleteImageBlob === "function") {
+    await deleteImageBlob(imageId);
+  }
+  revokeImageUrl(imageId);
+}
+
+async function migrateLegacyImagesIfNeeded() {
+  if (!window.TaskPointsCore?.migrateLegacyImagesInStorage) return;
+  try {
+    const result = await TaskPointsCore.migrateLegacyImagesInStorage();
+    if (result?.migrated) {
+      state = syncStateWithMatchups(result.state || state);
+      renderPlayers();
+    }
+  } catch (e) {
+    console.error("Image migration failed", e);
+  }
+}
+
 if (rebuildGameHistoryFromMatchupsIfNeeded()) {
   state = saveState(state);
 }
@@ -604,6 +719,8 @@ function persistSortMode(mode) {
 if (ensureUpcomingSchedule()) {
   state = saveState(state);
 }
+
+migrateLegacyImagesIfNeeded();
 
 
 
@@ -712,25 +829,34 @@ if (ensureUpcomingSchedule()) {
       reader.readAsDataURL(file);
     }
 
-    // NEW: open cropper for an existing data URL (already stored image)
-    function openImageCropperFromDataUrl(dataUrl, callback){
+    function openImageCropperFromUrl(url, callback, cleanup){
       initCropperElements();
-      if (!dataUrl){
+      if (!url){
         callback(undefined);
         return;
       }
       const img = new Image();
       img.onload = () => {
-        startCropSession(img, callback);
+        startCropSession(img, callback, cleanup);
       };
-      img.src = dataUrl;
+      img.src = url;
     }
 
-    function startCropSession(img, callback){
+    function openImageCropperFromBlob(blob, callback){
+      if (!blob) {
+        callback(undefined);
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      openImageCropperFromUrl(url, callback, () => URL.revokeObjectURL(url));
+    }
+
+    function startCropSession(img, callback, cleanup){
       initCropperElements();
       cropState = {
         img,
         callback,
+        cleanup,
         aspectValue: "3:4",
         aspectRatio: 3/4,
         scale: 1,
@@ -825,6 +951,7 @@ cropZoomEl.max = String(Math.round(minScale * 150)); // caps at 150% of minScale
     function cancelCrop(){
       if (!cropModalEl) return;
       cropModalEl.classList.add("hidden");
+      if (cropState?.cleanup) cropState.cleanup();
       cropState = null;
     }
 
@@ -1443,7 +1570,7 @@ function calcYouStats() {
 }
 
 
-function renderPlayers() {
+async function renderPlayers() {
   const container = $("playersList");
   if (!container) return;
 
@@ -1479,7 +1606,7 @@ function renderPlayers() {
   const youPlayer = {
     id: "YOU",
     name: "You",
-    imageData: state.youImage || "",
+    imageId: state.youImageId || "",
     todayPoints: todayPoints.toFixed(1),
     isYou: true
   };
@@ -1491,6 +1618,13 @@ function renderPlayers() {
 
 
   const players = [youPlayer, ...normalPlayers];
+
+  const imageIds = players
+    .map((player) => player?.imageId)
+    .filter(Boolean);
+  const renderToken = ++renderPlayersNonce;
+  await preloadImageUrls(imageIds);
+  if (renderToken !== renderPlayersNonce) return;
 
   // Update count (does NOT count YOU as a player)
   $("playerCount").textContent =
@@ -1573,13 +1707,14 @@ function renderPlayers() {
       card.className = "playerCard rounded-xl p-2 glass flex flex-col items-center";
 
       const displayName = p.isYou ? "You" : (p.name || "");
+      const imageUrl = p.imageId ? getCachedImageUrl(p.imageId) : "";
 
       card.innerHTML = `
         <div class="w-full md:w-44 aspect-[3/4] player-img-frame">
           <div class="player-img-inner w-full h-full">
             ${
-              p.imageData || p.isYou && state.youImage
-                ? `<img src="${escapeHtml(p.isYou ? state.youImage || p.imageData : p.imageData)}"
+              imageUrl
+                ? `<img src="${escapeHtml(imageUrl)}"
                          alt="${escapeHtml(displayName)} photo"
                          class="w-full h-full object-cover">`
                 : `<div class="text-xs opacity-70 p-4 text-center flex items-center justify-center h-full bg-black">
@@ -1631,12 +1766,13 @@ function renderPlayers() {
 
   // 🔹 EDIT MODE for YOU (photo-only)
   if (editingPlayerId === "YOU") {
+    const youImageUrl = p.imageId ? getCachedImageUrl(p.imageId) : "";
     card.innerHTML = `
       <div class="w-full md:w-44 aspect-[3/4] player-img-frame">
         <div class="player-img-inner w-full h-full">
           ${
-            p.imageData
-              ? `<img src="${escapeHtml(p.imageData)}" alt="Your photo"
+            youImageUrl
+              ? `<img src="${escapeHtml(youImageUrl)}" alt="Your photo"
                      class="w-full h-full object-cover">`
               : `<div class="text-xs opacity-70 p-4 text-center flex items-center justify-center h-full bg-black">
                    No photo
@@ -1677,6 +1813,7 @@ function renderPlayers() {
   }
 
 // 🔹 VIEW MODE for YOU – matches other cards
+const youImageUrl = p.imageId ? getCachedImageUrl(p.imageId) : "";
 card.innerHTML = `
   <div class="flex flex-col gap-3 w-full">
     <div class="flex items-start justify-between gap-3">
@@ -1687,8 +1824,8 @@ card.innerHTML = `
       <div class="w-full md:w-44 aspect-[3/4] player-img-frame">
         <div class="player-img-inner w-full h-full">
           ${
-            p.imageData
-              ? `<img src="${escapeHtml(p.imageData)}" alt="Your photo"
+            youImageUrl
+              ? `<img src="${escapeHtml(youImageUrl)}" alt="Your photo"
                      class="w-full h-full object-cover">`
               : `<div class="text-xs opacity-70 p-4 text-center flex items-center justify-center h-full bg-black">
                    No photo
@@ -1722,19 +1859,20 @@ card.innerHTML = `
 
     // ---------- NORMAL PLAYERS ----------
     if (editingPlayerId === p.id) {
+      const playerImageUrl = p.imageId ? getCachedImageUrl(p.imageId) : "";
       // Edit mode
       card.innerHTML = `
         <div class="w-full md:w-56 flex flex-col items-center gap-2">
           <div class="w-full flex items-center justify-center bg-black/40 rounded-2xl overflow-hidden border border-zinc-700">
             ${
-              p.imageData
-                ? `<img src="${escapeHtml(p.imageData)}" alt="${escapeHtml(p.name)} photo"
+              playerImageUrl
+                ? `<img src="${escapeHtml(playerImageUrl)}" alt="${escapeHtml(p.name)} photo"
                        class="max-h-56 w-full object-contain bg-black">`
                 : `<div class="text-xs opacity-70 p-4 text-center">No photo</div>`
             }
           </div>
           ${
-            p.imageData
+            playerImageUrl
               ? `
                 <button data-act="recrop" data-id="${p.id}"
                   class="mt-1 rounded-xl border border-zinc-500 px-3 py-1 text-xs">
@@ -1877,6 +2015,7 @@ card.innerHTML = `
       const wins = (stats.scores || []).filter(score => score >= baselineVal).length;
       const losses = games ? Math.max(0, games - wins) : 0;
       const recordText = games ? `${wins}-${losses}` : "0-0";
+      const playerImageUrl = p.imageId ? getCachedImageUrl(p.imageId) : "";
 
 card.innerHTML = `
   <div class="flex flex-col gap-3 w-full">
@@ -1890,8 +2029,8 @@ card.innerHTML = `
       <div class="w-full md:w-44 aspect-[3/4] player-img-frame">
         <div class="player-img-inner w-full h-full">
           ${
-            p.imageData
-              ? `<img src="${escapeHtml(p.imageData)}" alt="${escapeHtml(p.name || "Player")} photo"
+            playerImageUrl
+              ? `<img src="${escapeHtml(playerImageUrl)}" alt="${escapeHtml(p.name || "Player")} photo"
                      class="w-full h-full object-cover">`
               : `<div class="text-xs opacity-70 p-4 text-center flex items-center justify-center h-full bg-black">
                    No photo
@@ -1940,7 +2079,7 @@ card.innerHTML = `
   });
 
 }
-    function handlePlayerAction(e){
+    async function handlePlayerAction(e){
       const btn = e.currentTarget;
       const id = btn.getAttribute("data-id");
       const act = btn.getAttribute("data-act");
@@ -1971,6 +2110,7 @@ card.innerHTML = `
             if (m.playerAId === id) m.playerAName = m.playerAName || lastKnownName;
             if (m.playerBId === id) m.playerBName = m.playerBName || lastKnownName;
           });
+          await deleteImageById(player?.imageId);
           state.players.splice(idx,1);
           refreshScheduleAfterRosterChange();
           state = saveState(state);
@@ -1982,10 +2122,15 @@ card.innerHTML = `
 
       if (act === "recrop"){
         const player = state.players.find(p => p.id === id);
-        if (!player || !player.imageData) return;
-        openImageCropperFromDataUrl(player.imageData, (dataUrl)=>{
+        if (!player || !player.imageId) return;
+        const { getImageBlob } = getImageHelper();
+        if (typeof getImageBlob !== "function") return;
+        const blob = await getImageBlob(player.imageId);
+        if (!blob) return;
+        openImageCropperFromBlob(blob, async (dataUrl)=>{
           if (dataUrl){
-            player.imageData = dataUrl;
+            const nextImageId = await saveImageFromDataUrl(dataUrl, player.imageId);
+            player.imageId = nextImageId || "";
             state = saveState(state);
           }
           renderPlayers();
@@ -1995,11 +2140,12 @@ card.innerHTML = `
 
       if (act === "clear-photo"){
         const player = state.players.find(p => p.id === id);
-        if (!player || !player.imageData) return;
+        if (!player || !player.imageId) return;
 
         if (!confirm("Remove this player's photo? You can add a new one later.")) return;
 
-        player.imageData = "";
+        await deleteImageById(player.imageId);
+        player.imageId = "";
         state = saveState(state);
         renderPlayers();
         return;
@@ -2015,10 +2161,10 @@ card.innerHTML = `
       const file = input.files[0];
       if (!file) return;
 
-      openImageCropperFromFile(file, (dataUrl) => {
+      openImageCropperFromFile(file, async (dataUrl) => {
         if (!dataUrl) return;
-        // Save image to special YOU field
-        state.youImage = dataUrl;
+        const nextImageId = await saveImageFromDataUrl(dataUrl, state.youImageId);
+        state.youImageId = nextImageId || "";
         state = saveState(state);
         renderPlayers();
       });
@@ -2030,7 +2176,8 @@ card.innerHTML = `
 
   // --- Clear YOU photo ---
   if (act === "clear-you-photo") {
-    delete state.youImage;
+    await deleteImageById(state.youImageId);
+    state.youImageId = "";
     state = saveState(state);
     renderPlayers();
     return;
@@ -2093,7 +2240,7 @@ card.innerHTML = `
     ? (styleInput.value || "").trim()
     : (player.style || "");
 
-  const applyUpdate = (imageData) => {
+  const applyUpdate = async (imageData) => {
     player.name = newName;
     player.notes = newNotes;
 
@@ -2106,7 +2253,8 @@ card.innerHTML = `
 
 
     if (imageData){
-      player.imageData = imageData;
+      const nextImageId = await saveImageFromDataUrl(imageData, player.imageId);
+      player.imageId = nextImageId || "";
     }
     state = saveState(state);
     editingPlayerId = null;
@@ -2167,13 +2315,14 @@ $("createPlayerForm").addEventListener("submit", (e)=>{
     return;
   }
 
-  const addPlayer = (imageData) => {
+  const addPlayer = async (imageData) => {
+    const imageId = imageData ? await saveImageFromDataUrl(imageData) : "";
 
     state.players.push({
       id: makeId(),
       name,
       notes,
-      imageData: imageData || null,
+      imageId: imageId || "",
       createdAtISO: new Date().toISOString(),
 
       baseline: isNaN(baseline) ? 35 : baseline,
