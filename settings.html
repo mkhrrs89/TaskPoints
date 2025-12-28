@@ -26,6 +26,7 @@
       </a>
       <div class="flex items-center gap-2">
         <button type="button" class="btn btn-ghost btn-toolbar" data-export-button>Export</button>
+        <button type="button" class="btn btn-ghost btn-toolbar" data-export-images>Backup + Images</button>
         <label class="btn btn-ghost btn-toolbar cursor-pointer">
           <span>Import</span>
           <input type="file" accept="application/json" class="hidden" data-import-input/>
@@ -276,7 +277,7 @@
         matchups:    Array.isArray(s.matchups)    ? s.matchups    : [],
         schedule:    Array.isArray(s.schedule)    ? s.schedule    : [],
         workHistory: Array.isArray(s.workHistory) ? s.workHistory : [],
-        youImage:    typeof s.youImage === "string" ? s.youImage : "",
+        youImageId:  typeof s.youImageId === "string" ? s.youImageId : "",
         habitTagColors: normalizeHabitTagColors(s.habitTagColors)
       };
     }

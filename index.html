@@ -83,6 +83,13 @@ Nothing visible on the page is built here. === -->
       >
         Export
       </button>
+      <button
+        type="button"
+        class="btn btn-ghost btn-toolbar"
+        data-export-images
+      >
+        Backup + Images
+      </button>
 
       <label class="btn btn-ghost btn-toolbar cursor-pointer">
         <span>Import</span>
@@ -134,6 +141,13 @@ Nothing visible on the page is built here. === -->
         data-export-button
       >
         Export
+      </button>
+      <button
+        type="button"
+        class="btn btn-ghost btn-toolbar hidden md:inline-flex"
+        data-export-images
+      >
+        Backup + Images
       </button>
 
       <label class="btn btn-ghost btn-toolbar cursor-pointer hidden md:inline-flex">
@@ -597,6 +611,26 @@ const $=id=>document.getElementById(id);
 let state=normalizeState(load());
 state = syncStateWithMatchups(state);
   const HABITS_SORT_KEY = "taskpoints_habits_sort";
+
+async function migrateLegacyImagesIfNeeded() {
+  if (!window.TaskPointsCore?.migrateLegacyImagesInStorage) return;
+  try {
+    const result = await TaskPointsCore.migrateLegacyImagesInStorage();
+    if (result?.migrated) {
+      state = syncStateWithMatchups(result.state || state);
+      save();
+      renderAll();
+      renderHabits();
+      renderHabitWeekLabels();
+      renderVices();
+      renderViceWeekLabels();
+    }
+  } catch (e) {
+    console.error("Image migration failed", e);
+  }
+}
+
+migrateLegacyImagesIfNeeded();
 
 function normalizeTask(task){
   if(!task || typeof task !== 'object') return task;
@@ -1208,7 +1242,8 @@ function load() {
         matchups:     [],
         schedule:     [],
         opponentDripSchedules: [],
-        projects:     loadProjectsFromStorage()
+        projects:     loadProjectsFromStorage(),
+        youImageId:   ""
       };
     }
 
@@ -1225,7 +1260,8 @@ function load() {
       matchups:     Array.isArray(p.matchups)     ? p.matchups     : [],
       schedule:     Array.isArray(p.schedule)     ? p.schedule     : [],
       opponentDripSchedules: Array.isArray(p.opponentDripSchedules) ? p.opponentDripSchedules : [],
-      projects:     Array.isArray(p.projects)     ? p.projects     : storedProjects
+      projects:     Array.isArray(p.projects)     ? p.projects     : storedProjects,
+      youImageId:   typeof p.youImageId === "string" ? p.youImageId : ""
     };
   } catch (e) {
     console.error('Failed to load TaskPoints state on main page', e);
@@ -1239,7 +1275,8 @@ function load() {
       matchups:     [],
       schedule:     [],
       opponentDripSchedules: [],
-      projects:     loadProjectsFromStorage()
+      projects:     loadProjectsFromStorage(),
+      youImageId:   ""
     };
   }
 }
@@ -1872,7 +1909,7 @@ function normalizeState(s) {
     matchups:    Array.isArray(s.matchups)    ? s.matchups    : [],
     schedule:    Array.isArray(s.schedule)    ? s.schedule    : [],
     opponentDripSchedules: Array.isArray(s.opponentDripSchedules) ? s.opponentDripSchedules : [],
-    youImage:    typeof s.youImage === "string" ? s.youImage : "",
+    youImageId:  typeof s.youImageId === "string" ? s.youImageId : "",
     projects:    Array.isArray(s.projects)    ? s.projects    : loadProjectsFromStorage(),
     habitTagColors: normalizeHabitTagColors(s.habitTagColors)
   };
@@ -5052,8 +5089,21 @@ function deleteTask(id){
 
 
 /* ---------- IMPORT/EXPORT/RESET ---------- */
+function stripLegacyImageFields(snapshot) {
+  const next = { ...snapshot };
+  if (next.youImage) delete next.youImage;
+  if (Array.isArray(next.players)) {
+    next.players = next.players.map((player) => {
+      if (!player || typeof player !== "object") return player;
+      const { imageData, ...rest } = player;
+      return rest;
+    });
+  }
+  return next;
+}
+
 function exportData(){
-  const snapshot = { ...state, projects: loadProjectsFromStorage() };
+  const snapshot = stripLegacyImageFields({ ...state, projects: loadProjectsFromStorage() });
   const blob=new Blob([JSON.stringify(snapshot,null,2)],{type:'application/json'});
   const now = new Date();
 
@@ -5076,8 +5126,8 @@ function exportData(){
   URL.revokeObjectURL(url);
 }
 
-function applyImportedState(root){
-  const normalized = normalizeState({
+async function applyImportedState(root){
+  let normalized = normalizeState({
     tasks:       Array.isArray(root.tasks)       ? root.tasks       : [],
     completions: Array.isArray(root.completions) ? root.completions : [],
     players:     Array.isArray(root.players)     ? root.players     : [],
@@ -5087,7 +5137,7 @@ function applyImportedState(root){
     matchups:    Array.isArray(root.matchups)    ? root.matchups    : [],
     schedule:    Array.isArray(root.schedule)    ? root.schedule    : [],
     opponentDripSchedules: Array.isArray(root.opponentDripSchedules) ? root.opponentDripSchedules : [],
-    youImage:    typeof root.youImage === "string" ? root.youImage : ""
+    youImageId:  typeof root.youImageId === "string" ? root.youImageId : ""
   });
 
   normalized.projects = Array.isArray(root.projects) ? root.projects : loadProjectsFromStorage();
@@ -5100,6 +5150,14 @@ function applyImportedState(root){
   saveProjectsToStorage(state.projects);
 
   save();
+
+  if (window.TaskPointsCore?.migrateLegacyImages) {
+    const migrated = await TaskPointsCore.migrateLegacyImages(root);
+    if (migrated?.migrated) {
+      state = normalizeState(stripLegacyImageFields({ ...migrated.state, projects: normalized.projects }));
+      save();
+    }
+  }
   renderAll();
   renderHabits();
   renderHabitWeekLabels();
@@ -5138,7 +5196,10 @@ function importFile(ev){
         throw new Error("Root object missing tasks/completions arrays");
       }
 
-      applyImportedState(root);
+      applyImportedState(root).catch((err) => {
+        console.error("Failed to apply imported state (file):", err);
+        alert("Failed to apply imported data. Check console for details.");
+      });
     } catch (logicErr) {
       console.error("LOGIC ERROR during import (file):", logicErr);
       alert("JSON was valid, but the app crashed trying to load it. Check console.");
@@ -5175,7 +5236,10 @@ function importPaste(){
       throw new Error("Root object missing tasks/completions arrays");
     }
 
-    applyImportedState(root);
+    applyImportedState(root).catch((err) => {
+      console.error("Failed to apply imported state (paste):", err);
+      alert("Failed to apply imported data. Check console for details.");
+    });
   } catch (logicErr) {
     console.error("LOGIC ERROR during import (paste):", logicErr);
     alert("JSON was valid, but the app crashed trying to load it. Check console.");

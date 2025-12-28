@@ -1,6 +1,161 @@
 (function(global){
   const STORAGE_KEY = "taskpoints_v1";
   const PROJECTS_STORAGE_KEY = "tp_projects_v1";
+  const IMAGE_DB_NAME = "taskpoints";
+  const IMAGE_STORE_NAME = "images";
+
+  let imageDbPromise = null;
+
+  function openImageDb() {
+    if (imageDbPromise) return imageDbPromise;
+    imageDbPromise = new Promise((resolve, reject) => {
+      const request = indexedDB.open(IMAGE_DB_NAME, 1);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains(IMAGE_STORE_NAME)) {
+          db.createObjectStore(IMAGE_STORE_NAME);
+        }
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    return imageDbPromise;
+  }
+
+  function requestToPromise(request) {
+    return new Promise((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  function generateImageId() {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+    return `img_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  }
+
+  function dataUrlToBlob(dataUrl) {
+    if (typeof dataUrl !== 'string') return null;
+    const match = dataUrl.match(/^data:([^;,]+)(;base64)?,(.*)$/);
+    if (!match) return null;
+    const mime = match[1] || 'application/octet-stream';
+    const isBase64 = Boolean(match[2]);
+    const data = match[3] || '';
+
+    if (isBase64) {
+      const binary = atob(data);
+      const len = binary.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i += 1) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      return new Blob([bytes], { type: mime });
+    }
+
+    return new Blob([decodeURIComponent(data)], { type: mime });
+  }
+
+  async function saveImageBlob(imageId, blob) {
+    if (!imageId || !blob) return;
+    const db = await openImageDb();
+    const tx = db.transaction(IMAGE_STORE_NAME, 'readwrite');
+    const store = tx.objectStore(IMAGE_STORE_NAME);
+    await requestToPromise(store.put(blob, imageId));
+  }
+
+  async function getImageBlob(imageId) {
+    if (!imageId) return null;
+    const db = await openImageDb();
+    const tx = db.transaction(IMAGE_STORE_NAME, 'readonly');
+    const store = tx.objectStore(IMAGE_STORE_NAME);
+    const result = await requestToPromise(store.get(imageId));
+    return result || null;
+  }
+
+  async function deleteImageBlob(imageId) {
+    if (!imageId) return;
+    const db = await openImageDb();
+    const tx = db.transaction(IMAGE_STORE_NAME, 'readwrite');
+    const store = tx.objectStore(IMAGE_STORE_NAME);
+    await requestToPromise(store.delete(imageId));
+  }
+
+  function isImageDataUrl(value) {
+    return typeof value === 'string' && value.startsWith('data:image/');
+  }
+
+  async function migrateLegacyImages(rawState) {
+    if (!rawState || typeof rawState !== 'object') {
+      return { state: normalizeState(rawState || {}), migrated: false };
+    }
+
+    const next = { ...rawState };
+    let migrated = false;
+
+    if (isImageDataUrl(next.youImage) && !next.youImageId) {
+      const blob = dataUrlToBlob(next.youImage);
+      if (blob) {
+        const imageId = generateImageId();
+        await saveImageBlob(imageId, blob);
+        next.youImageId = imageId;
+        migrated = true;
+      }
+    }
+    if (next.youImage) {
+      delete next.youImage;
+      migrated = true;
+    }
+
+    if (Array.isArray(next.players)) {
+      const updatedPlayers = [];
+      for (const player of next.players) {
+        if (!player || typeof player !== 'object') {
+          updatedPlayers.push(player);
+          continue;
+        }
+        let updated = { ...player };
+        if (isImageDataUrl(updated.imageData) && !updated.imageId) {
+          const blob = dataUrlToBlob(updated.imageData);
+          if (blob) {
+            const imageId = generateImageId();
+            await saveImageBlob(imageId, blob);
+            updated.imageId = imageId;
+            migrated = true;
+          }
+        }
+        if (updated.imageData) {
+          delete updated.imageData;
+          migrated = true;
+        }
+        updatedPlayers.push(updated);
+      }
+      next.players = updatedPlayers;
+    }
+
+    return { state: next, migrated };
+  }
+
+  async function migrateLegacyImagesInStorage(options = {}) {
+    const storageKey = options.storageKey || STORAGE_KEY;
+    let parsed = {};
+    try {
+      const raw = localStorage.getItem(storageKey);
+      parsed = raw ? (JSON.parse(raw) || {}) : {};
+    } catch (e) {
+      console.error('Failed to parse stored state for image migration', e);
+      parsed = {};
+    }
+
+    const { state: migratedState, migrated } = await migrateLegacyImages(parsed);
+    if (!migrated) {
+      return { state: normalizeState(parsed), migrated: false };
+    }
+
+    const { state: savedState } = mergeAndSaveState(migratedState, { storageKey });
+    return { state: savedState, migrated: true };
+  }
 
   const CATEGORY_DEFS = [
     { key: "sleep",    label: "Sleep",    match: c => typeof c?.title === "string" && c.title.startsWith("Sleep Score (") },
@@ -67,7 +222,7 @@
       schedule:    Array.isArray(s?.schedule)    ? s.schedule    : [],
       opponentDripSchedules: Array.isArray(s?.opponentDripSchedules) ? s.opponentDripSchedules : [],
       workHistory: Array.isArray(s?.workHistory) ? s.workHistory : [],
-      youImage:    typeof s?.youImage === "string" ? s.youImage : "",
+      youImageId:  typeof s?.youImageId === "string" ? s.youImageId : "",
       projects:    Array.isArray(s?.projects)    ? s.projects    : [],
       habitTagColors: normalizeHabitTagColors(s?.habitTagColors)
     };
@@ -120,8 +275,9 @@
     if (stripImages) {
       normalized.players = normalized.players.map(p => {
         if (!p || typeof p !== 'object') return p;
-        return { ...p, imageData: "" };
+        return { ...p, imageId: "" };
       });
+      normalized.youImageId = "";
     }
 
     return normalized;
@@ -237,6 +393,7 @@
 
     const emergency = {
       ...aggressive,
+      youImageId: "",
       completions: aggressive.completions.slice(0, 50),
       gameHistory: [],
       matchups: [],
@@ -245,7 +402,7 @@
       workHistory: [],
       players: aggressive.players.map(p => {
         if (!p || typeof p !== 'object') return p;
-        return { ...p, imageData: "" };
+        return { ...p, imageId: "" };
       })
     };
 
@@ -947,6 +1104,8 @@
   global.TaskPointsCore = {
     STORAGE_KEY,
     PROJECTS_STORAGE_KEY,
+    IMAGE_DB_NAME,
+    IMAGE_STORE_NAME,
     CATEGORY_DEFS,
     normalizeTask,
     normalizeState,
@@ -987,5 +1146,12 @@
     computeDayTotals,
     youDailyTotalsWithInertia,
     syncYouMatchups,
+    generateImageId,
+    dataUrlToBlob,
+    saveImageBlob,
+    getImageBlob,
+    deleteImageBlob,
+    migrateLegacyImages,
+    migrateLegacyImagesInStorage,
   };
 })(window);
