@@ -5362,43 +5362,16 @@ function importPaste(){
 
 
 /* ---------- RENDER/WIRE ---------- */
-function renderAll(){
-  try {
-    renderStats();
-  } catch (e) {
-    console.error('renderStats error:', e);
-  }
+function renderAll() {
+  try { renderStats(); } catch (e) { console.error('renderStats error:', e); }
+  try { renderTasks(); } catch (e) { console.error('renderTasks error:', e); }
 
-  try {
-    renderTasks();
-  } catch (e) {
-    console.error('renderTasks error:', e);
-  }
-
-  try {
-    renderSleepHistory();
-  } catch (e) {
-    console.error('renderSleepHistory error:', e);
-  }
-
-  try {
-    renderCaloriesHistory();
-  } catch (e) {
-    console.error('renderCaloriesHistory error:', e);
-  }
-
-  try {
-    renderWorkHistory();
-  } catch (e) {
-    console.error('renderWorkHistory error:', e);
-  }
-
-  try {
-  renderMoodHistory();
-} catch (e) {
-  console.error('renderMoodHistory error:', e);
+  try { renderSleepHistory(); } catch (e) { console.error('renderSleepHistory error:', e); }
+  try { renderCaloriesHistory(); } catch (e) { console.error('renderCaloriesHistory error:', e); }
+  try { renderWorkHistory(); } catch (e) { console.error('renderWorkHistory error:', e); }
+  try { renderMoodHistory(); } catch (e) { console.error('renderMoodHistory error:', e); }
 }
-  }
+
 
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#039;'}[m])); }
 
