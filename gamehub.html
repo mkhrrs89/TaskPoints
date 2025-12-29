@@ -291,7 +291,8 @@
 
   function loadState(){
     if (window.TaskPointsCore && typeof TaskPointsCore.loadAppState === 'function') {
-      return TaskPointsCore.loadAppState();
+      const loaded = TaskPointsCore.loadAppState();
+      return loaded && loaded.state ? loaded.state : {};
     }
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
