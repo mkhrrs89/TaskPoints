@@ -525,13 +525,26 @@ Nothing visible on the page is built here. === -->
       <div class="mood-today-card">
         <div class="stat-mobile-header">
           <div class="stat-compact-row">
-            <h2 id="moodAnchor" class="font-bold text-lg stat-title">Mood Score</h2>
-            <div class="stat-compact-controls">
-<div id="moodInputRow" class="stat-input-row flex items-center gap-2 flex-wrap sm:flex-nowrap">
-  <input id="moodScoreInput" class="input w-24 scoreInput" type="number" placeholder="0–10">
-  <button id="saveMoodScoreBtn" type="button" class="btn btn-mood">Add</button>
+<div class="mood-title-stack">
+  <h2 id="moodAnchor" class="font-semibold text-sm">Mood Score</h2>
+  <div id="moodImpactBelow" class="mood-impact-below hidden"></div>
 </div>
-            </div>
+
+<div class="stat-compact-controls">
+  <!-- input row (before entry) -->
+  <div id="moodInputRow" class="stat-input-row">
+    <input id="moodScoreInput" class="input w-24 scoreInput" type="number" placeholder="0–10">
+    <button id="saveMoodScoreBtn" type="button" class="btn btn-mood">Add</button>
+  </div>
+
+  <!-- summary row (after entry, mobile-only like Work/Sleep/Calories) -->
+  <div id="moodSummaryRow" class="stat-summary-row hidden">
+    <div class="flex items-center gap-2">
+      <div id="moodSummaryValue" class="stat-summary-value"></div>
+    </div>
+  </div>
+</div>
+
           </div>
 
           <div class="stat-compact-meta">
@@ -4867,6 +4880,9 @@ function renderMoodHistory() {
   const todayValueEl = $('moodTodayValue');
   const todayImpactEl = $('moodTodayImpact');
   const inputRow = $('moodInputRow');
+  const moodImpactBelow = document.getElementById('moodImpactBelow');
+const moodSummaryRow = document.getElementById('moodSummaryRow');
+const moodSummaryValue = document.getElementById('moodSummaryValue');
   const setTodayMoodEditable = (el) => {
     if (!el) return;
     if (todayEntry) {
@@ -4905,16 +4921,33 @@ function renderMoodHistory() {
       }
 
       inputRow?.classList.add('hidden');
+// show mobile summary + impact-below (Work style)
+moodSummaryRow?.classList.remove('hidden');
+moodImpactBelow?.classList.remove('hidden');
+
+if (moodSummaryValue) moodSummaryValue.textContent = String(num);
+if (moodImpactBelow) moodImpactBelow.textContent = `adds ${todayEntry.points} pts (${num})`;
+
     } else {
       todayValueEl.textContent = '—';
       todayImpactEl.textContent = 'Adds 0 pts to today';
       todayImpactEl.dataset.empty = 'true';
 
+      // hide summary/impact when no entry yet
+moodSummaryRow?.classList.add('hidden');
+if (moodSummaryValue) moodSummaryValue.textContent = '';
+moodImpactBelow?.classList.add('hidden');
+if (moodImpactBelow) moodImpactBelow.textContent = '';
+
+      
       inputRow?.classList.remove('hidden');
     }
   }
   setTodayMoodEditable(todayValueEl);
   setTodayMoodEditable(todayImpactEl);
+  setTodayMoodEditable(moodSummaryRow);
+setTodayMoodEditable(moodImpactBelow);
+
 
   const recent = entries
     .filter(e => dateKey(new Date(e.completedAtISO)) !== todayK)
