@@ -295,14 +295,13 @@ Nothing visible on the page is built here. === -->
       </div>
     </div>
     <!--------------------------- SECOND ROW (END) --------------------------------->
-    
   </div>
   <!-- ========================================================================== -->
                                <!-- TOP ROW (END) -->
-  <!-- ========================================================================== -->
+
 
   
-  <!-- TODAY'S POINTS BREAKDOWN BAR -->
+  <!------------------------ TODAY'S POINTS BREAKDOWN BAR -------------------------->
   <div class="mb-6">
     <div class="flex items-center justify-between mb-1 text-[11px] muted">
       <span>Today’s Points Breakdown</span>
@@ -313,44 +312,69 @@ Nothing visible on the page is built here. === -->
     </div>
   </div>
 
+  
   <!-- LEADERBOARDS -->
   <div class="grid sm:grid-cols-3 gap-3 mb-6">
+    <!-- BEST DAYS -->
     <div class="glass">
       <h3 class="font-semibold mb-2">🏆 Best Days</h3>
       <ul id="dailyBoard" class="text-xs space-y-1"></ul>
     </div>
+    <!-- BEST WEEKS -->
     <div class="glass">
       <h3 class="font-semibold mb-2">🏆 Best Weeks</h3>
       <ul id="weeklyBoard" class="text-xs space-y-1"></ul>
     </div>
+    <!-- BEST MONTHS -->
     <div class="glass">
       <h3 class="font-semibold mb-2">🏆 Best Months</h3>
       <ul id="monthlyBoard" class="text-xs space-y-1"></ul>
     </div>
   </div>
+  <!-- LEADERBOARDS END -->
 
-<!-- SLEEP + CALORIES -->
+  
+<!-- =================================== SLEEP + CALORIES ========================================= -->
+<!-- ============================================================================================== -->
+  
+<!-- ╔═════════════════════════════════════════════╗
+     ║  S L E E P                                  ║
+     ║  C A R D                                    ║
+     ╚═════════════════════════════════════════════╝ */ -->
+  
 <div class="grid sm:grid-cols-2 gap-3 mb-6">
-  <!-- LEFT: Sleep Score -->
+  
+  <!-- LEFT CARD: SLEEP SCORE (START) -->
   <div class="glass">
     <div class="flex items-stretch justify-between gap-6 flex-wrap stat-card-row">
-      <!-- LEFT: Big stat + input -->
+      
+      <!-- LEFT COLUMN: Big stat + input (Sleep) (START) -->
       <div class="flex-1 min-w-[220px] stat-col stat-col-primary">
         <div class="sleep-today-card">
           <div class="stat-mobile-header">
-<div class="stat-compact-row">
-  <div class="sleep-title-stack">
-    <h2 id="sleepAnchor" class="font-bold text-base sm:text-lg stat-title">Sleep Score</h2>
-    <!-- Mobile-only: line under the title -->
-    <div id="sleepImpactBelow" class="sleep-impact-below hidden"></div>
-  </div>
+            <!-- Compact row = title + inputs + (mobile) summary -->
+            <div class="stat-compact-row">
+              <!-- Title stack (Sleep) -->
+              <div class="sleep-title-stack">
+               <h2
+                  id="sleepAnchor"
+                  class="font-bold text-base sm:text-lg stat-title"
+                >
+                  Sleep Score
+                </h2>
+                
+                <!-- Mobile-only: line under the title -->
+                <div id="sleepImpactBelow" class="sleep-impact-below hidden"></div>
+              </div>
 
-  <div class="stat-compact-controls">
-    <div id="sleepInputRow" class="stat-input-row flex items-center gap-2 flex-wrap">
-      <input id="sleepScoreInput" class="input w-24 scoreInput" type="number" placeholder="0–100">
-      <input id="sleepRestedInput" class="input w-24 scoreInput" type="number" placeholder="Rested">
-      <button id="saveSleepScoreBtn" class="btn btn-plum">Add</button>
-    </div>
+              <!-- Inputs + mobile summary -->
+              <div class="stat-compact-controls">
+               <!-- Input row (before entry) -->   
+               <div id="sleepInputRow" class="stat-input-row flex items-center gap-2 flex-wrap">
+                 <input id="sleepScoreInput" class="input w-24 scoreInput" type="number" placeholder="0–100">
+                 <input id="sleepRestedInput" class="input w-24 scoreInput" type="number" placeholder="Rested">
+                 <button id="saveSleepScoreBtn" class="btn btn-plum">Add</button>
+               </div>
 
     <!-- Mobile-only: right side summary (score + rest chip) -->
     <div id="sleepSummaryRow" class="stat-summary-row hidden" aria-live="polite">
