@@ -451,10 +451,10 @@ Nothing visible on the page is built here. === -->
         <div id="workSummaryHours" class="work-hours-chip hidden">
           <span id="workSummaryHoursValue"></span>
         </div>
-      </div>
-    </div>
-  </div>
-</div>
+      </div> <!-- closes .stat-compact-row -->
+    </div> <!-- closes .stat-mobile-header -->
+  </div> <!-- closes .work-today-card -->
+</div> <!-- closes .stat-col-primary -->
 
 
       <!-- RIGHT SIDE: history chips -->
@@ -464,13 +464,11 @@ Nothing visible on the page is built here. === -->
           <button class="recent-toggle" type="button" data-target="workRecentWrap" aria-expanded="false">Show</button>
         </div>
         <div id="workRecentWrap" class="recentWrap hidden">
-  <div id="workHistory" class="recentRow"></div>
-</div>
-
+         <div id="workHistory" class="recentRow"></div>
+        </div>
       </div>
-
-    </div>
-  </div>
+    </div> <!-- closes .stat-card-row -->
+  </div> <!-- closes .glass -->
 
 <!-- RIGHT: Mood Score -->
 <div class="glass">
