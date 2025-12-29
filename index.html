@@ -465,9 +465,27 @@ Nothing visible on the page is built here. === -->
 </div> <!-- closes .stat-compact-controls -->
 
 </div> <!-- closes .stat-compact-row -->
+
+<!-- ✅ ADD THIS meta block (still inside .stat-mobile-header) -->
+<div class="stat-compact-meta">
+  <div class="muted text-xs">Today’s Work</div>
+
+  <div class="flex items-baseline gap-2 flex-wrap">
+    <div id="workTodayValue" class="text-4xl font-extrabold leading-tight stat-value">—</div>
+
+    <div id="workTodayHours" class="work-hours-chip hidden">
+      <span id="workTodayHoursValue"></span>
+    </div>
+  </div>
+
+  <div id="workTodayImpact" class="muted text-xs mt-1 stat-impact">Adds 0 pts to today</div>
+</div>
+<!-- ✅ END meta block -->
+
 </div> <!-- closes .stat-mobile-header -->
 </div> <!-- closes .work-today-card -->
 </div> <!-- closes .stat-col-primary -->
+
 
 
       <!-- RIGHT SIDE: history chips -->
