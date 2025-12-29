@@ -11,6 +11,7 @@
 
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="styles.css">
+  <script src="scoring_core.js"></script>
   <script src="toolbar.js" defer></script>
 </head>
 
@@ -211,7 +212,7 @@
   </div>
 
   <script>
-    const SETTINGS_STORAGE_KEY = "taskpoints_v1";
+    const SETTINGS_STORAGE_KEY = (window.TaskPointsCore && TaskPointsCore.STORAGE_KEY) || "taskpoints_v1";
 
     function dateKey(d) {
       if (!(d instanceof Date)) d = new Date(d);
@@ -406,8 +407,11 @@
     function loadSettingsState() {
       try {
         const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
-        if (!raw) return normalizeSettingsState({});
-        return normalizeSettingsState(JSON.parse(raw) || {});
+        const parsed = raw ? (JSON.parse(raw) || {}) : {};
+        if (window.TaskPointsCore?.normalizeState) {
+          return TaskPointsCore.normalizeState(parsed);
+        }
+        return normalizeSettingsState(parsed);
       } catch (err) {
         console.error("Failed to load TaskPoints data for simulation", err);
         return normalizeSettingsState({});
@@ -416,6 +420,10 @@
 
     function saveSettingsState(nextState) {
       try {
+        if (window.TaskPointsCore?.mergeAndSaveState) {
+          const { state: merged } = TaskPointsCore.mergeAndSaveState(nextState, { storageKey: SETTINGS_STORAGE_KEY });
+          return merged;
+        }
         const normalized = normalizeSettingsState(nextState);
         localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(normalized));
         return normalized;
