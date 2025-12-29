@@ -4910,42 +4910,34 @@ const moodSummaryValue = document.getElementById('moodSummaryValue');
   if (todayValueEl && todayImpactEl) {
     if (todayEntry) {
       const num = Number(todayEntry.title.match(/\((.+)\)/)?.[1] || NaN);
-      if (!isNaN(num)) {
-        todayValueEl.textContent = num;
-        todayImpactEl.textContent = `Adds ${todayEntry.points} pts to today`;
-        todayImpactEl.dataset.empty = 'false';
-      } else {
-        todayValueEl.textContent = '—';
-        todayImpactEl.textContent = 'Adds — pts to today';
-        todayImpactEl.dataset.empty = 'true';
-      }
+if (!isNaN(num)) {
+  todayValueEl.textContent = num;
+  todayImpactEl.textContent = `Adds ${todayEntry.points} pts to today`;
+  todayImpactEl.dataset.empty = 'false';
 
-      inputRow?.classList.add('hidden');
-// show mobile summary + impact-below (Work style)
-moodSummaryRow?.classList.remove('hidden');
-moodImpactBelow?.classList.remove('hidden');
+  // show mobile summary + impact-below (Work style)
+  moodSummaryRow?.classList.remove('hidden');
+  moodImpactBelow?.classList.remove('hidden');
+  if (moodSummaryValue) moodSummaryValue.textContent = String(num);
+  if (moodImpactBelow) moodImpactBelow.textContent = `adds ${todayEntry.points} pts`;
+} else {
+  todayValueEl.textContent = '—';
+  todayImpactEl.textContent = 'Adds — pts to today';
+  todayImpactEl.dataset.empty = 'true';
 
-if (moodSummaryValue) moodSummaryValue.textContent = String(num);
-if (moodImpactBelow) moodImpactBelow.textContent = `adds ${todayEntry.points} pts (${num})`;
+  // hide summary/impact when parsing fails
+  moodSummaryRow?.classList.add('hidden');
+  if (moodSummaryValue) moodSummaryValue.textContent = '';
+  moodImpactBelow?.classList.add('hidden');
+  if (moodImpactBelow) moodImpactBelow.textContent = '';
+}
 
-    } else {
-      todayValueEl.textContent = '—';
-      todayImpactEl.textContent = 'Adds 0 pts to today';
-      todayImpactEl.dataset.empty = 'true';
+inputRow?.classList.add('hidden');
 
-      // hide summary/impact when no entry yet
-moodSummaryRow?.classList.add('hidden');
-if (moodSummaryValue) moodSummaryValue.textContent = '';
-moodImpactBelow?.classList.add('hidden');
-if (moodImpactBelow) moodImpactBelow.textContent = '';
-
-      
-      inputRow?.classList.remove('hidden');
-    }
-  }
   setTodayMoodEditable(todayValueEl);
   setTodayMoodEditable(todayImpactEl);
   setTodayMoodEditable(moodSummaryRow);
+  setTodayMoodEditable(moodSummaryValue);
 setTodayMoodEditable(moodImpactBelow);
 
 
