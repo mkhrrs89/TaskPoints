@@ -1967,7 +1967,7 @@ body {
 
 /* tighten spacing */
 .calories-glass .stat-col-secondary .flex.items-center.justify-between{
-  margin-top: 6px !important;     /* ✅ adds the gap ABOVE "Recent days" */
+  margin-top: 14px !important;     /* ✅ adds the gap ABOVE "Recent days" */
   margin-bottom: 8px !important;  /* keep your existing spacing below */
 }
 .calories-glass .stat-col-secondary .recentWrap{
@@ -2199,6 +2199,7 @@ body {
     width: 82px;
   }
 }
+
 
 
 
