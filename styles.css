@@ -1113,8 +1113,8 @@ body {
   #habitName,
   #habitTag,
   #habitPts{
-    padding: 8px 10px;   /* was 10px 12px */
-    font-size: 14px;
+    padding: 4px 6px;   /* was 10px 12px */
+    font-size: 12px;
     border-radius: 10px;
   }
 
@@ -2254,6 +2254,7 @@ body {
     width: 82px;
   }
 }
+
 
 
 
