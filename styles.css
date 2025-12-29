@@ -196,16 +196,17 @@ body {
   border: none;
 }
 
-/* Work button (powder blue themed) */
-.btn-work {
-  background: rgba(147, 197, 253, 0.35); /* light powder blue */
-  border: 1px solid rgba(147, 197, 253, 0.8);
-  color: #dbeafe; /* soft blue text */
+/* Work button (powder blue gradient like the Work chips) */
+.btn-work{
+  background: linear-gradient(180deg, rgba(147, 197, 253, 0.5), rgba(59, 130, 246, 0.35));
+  color: #f8fbff;
+  border: none;
 }
 
-.btn-work:hover {
-  background: rgba(147, 197, 253, 0.55);
+.btn-work:hover{
+  background: linear-gradient(180deg, rgba(147, 197, 253, 0.65), rgba(59, 130, 246, 0.45));
 }
+
 
 /* --- Button style variants (END) --------------------------------------- */
 /* =======================================================================
@@ -1993,10 +1994,10 @@ body {
     color: #f8f7ff;
   }
 
-  .work-today-card .stat-mobile-header{
-    background: linear-gradient(180deg, #5fa3ff, #2f5fa8);
-    color: #eaf2ff;
-  }
+.work-today-card .stat-mobile-header{
+  background: linear-gradient(180deg, rgba(147, 197, 253, 0.5), rgba(59, 130, 246, 0.35));
+  color: #eaf2ff;
+}
 
   .mood-today-card .stat-mobile-header{
     background: linear-gradient(180deg, #334679, #1d2748);
@@ -2198,6 +2199,7 @@ body {
     width: 82px;
   }
 }
+
 
 
 
