@@ -1109,6 +1109,21 @@ body {
 /* Mobile: one row you can swipe */
 @media (max-width: 640px){
 
+/* Habits: shrink the "new habit" inputs on mobile */
+  #habitName,
+  #habitTag,
+  #habitPts{
+    padding: 8px 10px;   /* was 10px 12px */
+    font-size: 14px;
+    border-radius: 10px;
+  }
+
+  /* optional: make them a bit narrower too */
+  #habitName{ width: 170px; flex: 0 0 auto; }
+  #habitTag { width: 110px; flex: 0 0 auto; }
+  #habitPts { width:  90px; flex: 0 0 auto; }
+
+   
    /* Calories: title stack like Sleep */
 .calories-today-card .cal-title-stack{
   display: flex;
@@ -2239,6 +2254,7 @@ body {
     width: 82px;
   }
 }
+
 
 
 
