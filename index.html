@@ -1308,7 +1308,8 @@ function load() {
         schedule:     [],
         opponentDripSchedules: [],
         projects:     loadProjectsFromStorage(),
-        youImageId:   ""
+        youImageId:   "",
+        habitTagColors: {}
       };
     }
 
@@ -1326,7 +1327,8 @@ function load() {
       schedule:     Array.isArray(p.schedule)     ? p.schedule     : [],
       opponentDripSchedules: Array.isArray(p.opponentDripSchedules) ? p.opponentDripSchedules : [],
       projects:     Array.isArray(p.projects)     ? p.projects     : storedProjects,
-      youImageId:   typeof p.youImageId === "string" ? p.youImageId : ""
+      youImageId:   typeof p.youImageId === "string" ? p.youImageId : "",
+      habitTagColors: normalizeHabitTagColors(p.habitTagColors)
     };
   } catch (e) {
     console.error('Failed to load TaskPoints state on main page', e);
@@ -1341,7 +1343,8 @@ function load() {
       schedule:     [],
       opponentDripSchedules: [],
       projects:     loadProjectsFromStorage(),
-      youImageId:   ""
+      youImageId:   "",
+      habitTagColors: {}
     };
   }
 }
