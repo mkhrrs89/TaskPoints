@@ -1,0 +1,1001 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>TaskPoints — Game Hub</title>
+
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="TaskPoints" />
+
+  <!-- Simple TP icon (same as other pages) -->
+  <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='256' height='256'><rect width='256' height='256' fill='%230b0d10'/><text x='128' y='160' text-anchor='middle' font-size='150' fill='white'>TP</text></svg>">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='%230b0d10'/><text x='50' y='62' font-size='60' text-anchor='middle' fill='white'>TP</text></svg>">
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="styles.css">
+  <script src="toolbar.js" defer></script>
+  <script src="scoring_core.js"></script>
+</head>
+<body class="min-h-screen">
+  <div class="mx-auto max-w-6xl p-4 sm:p-6 pb-24">
+
+    <!-- Mobile header -->
+    <div class="flex items-center justify-between gap-3 mb-3 md:hidden">
+      <a href="index.html" class="flex items-center gap-3">
+        <img src="assets/taskpoints-logo.png" alt="TaskPoints logo" class="w-10 h-10 rounded-2xl object-cover shrink-0 shadow-sm">
+        <h1 class="text-2xl font-extrabold tracking-tight leading-tight">
+          <span style="color:#fb923c;">Task</span><span style="color:#1e666d;">Points</span>
+        </h1>
+      </a>
+      <div class="flex items-center gap-2">
+        <button type="button" class="btn btn-ghost btn-toolbar" data-export-button>Export</button>
+        <label class="btn btn-ghost btn-toolbar cursor-pointer">
+          <span>Import</span>
+          <input type="file" accept="application/json" class="hidden" data-import-input/>
+        </label>
+      </div>
+    </div>
+
+    <!-- Header / nav -->
+    <header class="flex flex-wrap items-center justify-between gap-3 mb-4">
+      <a href="index.html" class="hidden md:flex items-center gap-3">
+        <img src="assets/taskpoints-logo.svg" alt="TaskPoints logo" class="w-9 h-9 rounded-2xl object-cover shadow-sm">
+        <div>
+          <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight">TaskPoints</h1>
+          <p class="text-xs opacity-70">Game — Hub</p>
+        </div>
+      </a>
+
+      <div class="toolbar header-nav">
+        <a href="index.html"         class="btn btn-teal btn-toolbar nav-btn">Main</a>
+        <a href="daily_sources.html" class="btn btn-teal btn-toolbar nav-btn">Sources</a>
+        <a href="log.html"           class="btn btn-teal btn-toolbar nav-btn">Log</a>
+        <a href="week.html"          class="btn btn-teal btn-toolbar nav-btn">Week</a>
+        <div class="dropdown">
+          <button type="button" class="btn btn-teal btn-toolbar nav-btn dropdown-toggle active" data-dropdown-toggle aria-expanded="false">Game <span class="caret">▾</span></button>
+          <div class="dropdown-menu">
+            <a href="gamehub.html"      class="btn btn-teal btn-toolbar nav-btn active" aria-current="page">Hub</a>
+            <a href="game.html"         class="btn btn-teal btn-toolbar nav-btn">Players</a>
+            <a href="game_ratings.html" class="btn btn-teal btn-toolbar nav-btn">Ratings</a>
+            <a href="matchups.html"     class="btn btn-teal btn-toolbar nav-btn">Matchups</a>
+            <a href="standings.html"    class="btn btn-teal btn-toolbar nav-btn">Standings</a>
+          </div>
+        </div>
+        <a href="settings.html" class="btn btn-teal btn-toolbar nav-btn">Settings</a>
+
+        <button type="button" class="btn btn-ghost btn-toolbar ml-1" data-export-button>Export</button>
+        <label class="btn btn-ghost btn-toolbar cursor-pointer">
+          <span>Import</span>
+          <input type="file" accept="application/json" class="hidden" data-import-input/>
+        </label>
+      </div>
+    </header>
+
+    <!-- Page title row -->
+    <div class="flex items-center justify-between gap-3 mb-3">
+      <div>
+        <h2 class="text-xl sm:text-2xl font-extrabold tracking-tight">GameHub</h2>
+        <div class="muted text-xs">All game snapshots in one spot</div>
+      </div>
+      <button id="refreshGameHub" class="btn btn-ghost btn-toolbar">Refresh</button>
+    </div>
+
+    <!-- Top row: Your snapshot + Today's matchup -->
+    <div class="grid grid-cols-1 lg:grid-cols-[1fr_1.2fr] gap-3 mb-6">
+
+      <!-- Your snapshot -->
+      <div class="glass p-4">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="font-semibold text-lg">Your Stats</h3>
+          <div class="muted text-xs" id="youRankLine">—</div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div class="glass p-3">
+            <div class="muted text-[11px] uppercase tracking-wide">Record</div>
+            <div class="text-xl font-extrabold tabular-nums" id="youRecord">—</div>
+          </div>
+          <div class="glass p-3">
+            <div class="muted text-[11px] uppercase tracking-wide">Win %</div>
+            <div class="text-xl font-extrabold tabular-nums" id="youWinPct">—</div>
+          </div>
+          <div class="glass p-3">
+            <div class="muted text-[11px] uppercase tracking-wide">PPD</div>
+            <div class="text-xl font-extrabold tabular-nums" id="youPPD">—</div>
+          </div>
+          <div class="glass p-3">
+            <div class="muted text-[11px] uppercase tracking-wide">Games</div>
+            <div class="text-xl font-extrabold tabular-nums" id="youGames">—</div>
+          </div>
+        </div>
+
+        <div class="mt-3 glass p-3">
+          <div class="muted text-[11px] uppercase tracking-wide mb-2">Quick Snapshot</div>
+          <div class="space-y-2" id="youQuickLine"></div>
+        </div>
+      </div>
+
+      <!-- Today's matchup -->
+      <div class="glass p-4">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="font-semibold text-lg">Today’s Matchup</h3>
+          <div class="muted text-xs" id="matchupDateLabel">—</div>
+        </div>
+
+        <!-- Scoreboard (same vibe as main page) -->
+        <div class="glass p-3">
+          <div class="matchup-scoreboard">
+            <div class="scoreboard-side">
+              <div class="muted text-[11px] uppercase tracking-wide">You</div>
+              <div class="flex items-center gap-2 mt-1">
+                <div id="matchupYouAvatar" class="shrink-0"></div>
+                <div class="min-w-0">
+                  <div id="matchupYourName" class="scoreboard-name truncate">You</div>
+                  <div id="matchupYourRecord" class="scoreboard-record">Record: —</div>
+                  <div id="matchupYourAverages" class="scoreboard-meta">Daily Avg: — · PPD: —</div>
+                </div>
+              </div>
+              <div id="matchupYourScore" class="scoreboard-score mt-2">—</div>
+            </div>
+
+            <div class="scoreboard-diff text-center">
+              <div class="muted text-[11px] uppercase tracking-wide">The Diff</div>
+              <div id="matchupDiffLabel" class="scoreboard-diff-label">—</div>
+              <div id="matchupDiffValue" class="scoreboard-diff-value">—</div>
+            </div>
+
+            <div class="scoreboard-side">
+              <div class="muted text-[11px] uppercase tracking-wide">Opponent</div>
+              <div class="flex items-center gap-2 mt-1 justify-end">
+                <div class="min-w-0 text-right">
+                  <div id="matchupOppName" class="scoreboard-name truncate">—</div>
+                  <div id="matchupOppRecord" class="scoreboard-record">Record: —</div>
+                  <div id="matchupOppAverages" class="scoreboard-meta">Daily Avg: — · PPD: —</div>
+                </div>
+                <div id="matchupOppAvatar" class="shrink-0"></div>
+              </div>
+              <div id="matchupOppScore" class="scoreboard-score mt-2">—</div>
+            </div>
+          </div>
+
+          <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div class="glass p-3">
+              <div class="muted text-[11px] uppercase tracking-wide mb-2">You (details)</div>
+              <div class="text-sm space-y-1">
+                <div class="flex items-center justify-between"><span class="muted">Record</span><span id="youDetailRecord" class="font-semibold tabular-nums">—</span></div>
+                <div class="flex items-center justify-between"><span class="muted">Win%</span><span id="youDetailWinPct" class="font-semibold tabular-nums">—</span></div>
+                <div class="flex items-center justify-between"><span class="muted">PPD</span><span id="youDetailPPD" class="font-semibold tabular-nums">—</span></div>
+                <div class="flex items-center justify-between"><span class="muted">Ratings</span><span id="youDetailRatings" class="font-semibold">—</span></div>
+              </div>
+            </div>
+
+            <div class="glass p-3">
+              <div class="muted text-[11px] uppercase tracking-wide mb-2">Opponent (details)</div>
+              <div class="text-sm space-y-1">
+                <div class="flex items-center justify-between"><span class="muted">Record</span><span id="oppDetailRecord" class="font-semibold tabular-nums">—</span></div>
+                <div class="flex items-center justify-between"><span class="muted">Win%</span><span id="oppDetailWinPct" class="font-semibold tabular-nums">—</span></div>
+                <div class="flex items-center justify-between"><span class="muted">PPD</span><span id="oppDetailPPD" class="font-semibold tabular-nums">—</span></div>
+                <div class="flex items-center justify-between"><span class="muted">Ratings</span><span id="oppDetailRatings" class="font-semibold">—</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div id="noMatchupNotice" class="muted text-sm mt-3 hidden">
+            No matchup found for today yet.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Best / worst in league (stats) -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-6">
+      <div class="glass p-4">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="font-semibold text-lg">Best in the League</h3>
+          <div class="muted text-xs">Current leaders</div>
+        </div>
+        <div id="bestStatsList" class="space-y-3"></div>
+      </div>
+
+      <div class="glass p-4">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="font-semibold text-lg">Worst in the League</h3>
+          <div class="muted text-xs">Current bottom</div>
+        </div>
+        <div id="worstStatsList" class="space-y-3"></div>
+      </div>
+    </div>
+
+    <!-- Ratings leaderboards -->
+    <div class="glass p-4 mb-6">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="font-semibold text-lg">Ratings — Top 5 / Bottom 5</h3>
+        <div class="muted text-xs">Every rating category</div>
+      </div>
+      <div id="ratingsBoards" class="grid grid-cols-1 lg:grid-cols-2 gap-3"></div>
+    </div>
+
+    <!-- Standings -->
+    <div class="glass p-4 mb-6">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="font-semibold text-lg">Standings (Top 10)</h3>
+        <div class="muted text-xs" id="standingsMeta">—</div>
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-sm">
+          <thead class="muted text-[11px] uppercase tracking-wide">
+            <tr>
+              <th class="py-2 pr-3">#</th>
+              <th class="py-2 pr-3">Player</th>
+              <th class="py-2 pr-3">Record</th>
+              <th class="py-2 pr-3">Win%</th>
+              <th class="py-2 pr-3">PPD</th>
+              <th class="py-2 pr-3">Δ</th>
+            </tr>
+          </thead>
+          <tbody id="standingsTop10"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Surprises / busts -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-10">
+      <div class="glass p-4">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="font-semibold text-lg">Biggest Surprises</h3>
+          <div class="muted text-xs">Baseline → PPD delta</div>
+        </div>
+        <div id="surprisesList" class="space-y-2"></div>
+      </div>
+
+      <div class="glass p-4">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="font-semibold text-lg">Biggest Busts</h3>
+          <div class="muted text-xs">Baseline → PPD delta</div>
+        </div>
+        <div id="bustsList" class="space-y-2"></div>
+      </div>
+    </div>
+
+  </div>
+
+<script>
+(function(){
+  const $ = (id) => document.getElementById(id);
+
+  const STORAGE_KEY = (window.TaskPointsCore && TaskPointsCore.STORAGE_KEY) || 'taskpoints_v1';
+
+  const isNum = (v) => Number.isFinite(Number(v));
+  const fmt1 = (v) => (Number.isFinite(v) ? Number(v).toFixed(1) : '—');
+  const fmtPct = (v) => (Number.isFinite(v) ? `${Number(v).toFixed(1)}%` : '—');
+  const fmtSigned = (v) => {
+    if (!Number.isFinite(v)) return '—';
+    const n = Number(v);
+    return `${n >= 0 ? '+' : ''}${n.toFixed(1)}`;
+  };
+
+  function saveState(state){
+    try {
+      const pruned = (window.TaskPointsCore && typeof TaskPointsCore.pruneStateForStorage === 'function')
+        ? TaskPointsCore.pruneStateForStorage(state)
+        : state;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(pruned));
+    } catch (e) {
+      console.error('Failed saving state', e);
+    }
+  }
+
+  function loadState(){
+    if (window.TaskPointsCore && typeof TaskPointsCore.loadAppState === 'function') {
+      return TaskPointsCore.loadAppState();
+    }
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function getNormalizedRisky(value){
+    const num = Number(value);
+    if (!Number.isFinite(num)) return null;
+    // UI sometimes stores 0-100; sim uses 0-10
+    return num > 10 ? num / 10 : num;
+  }
+
+  function dateKey(d){
+    if (window.TaskPointsCore && typeof TaskPointsCore.dateKey === 'function') return TaskPointsCore.dateKey(d);
+    const dt = new Date(d);
+    if (Number.isNaN(dt.getTime())) return '';
+    const y = dt.getFullYear();
+    const m = String(dt.getMonth()+1).padStart(2,'0');
+    const day = String(dt.getDate()).padStart(2,'0');
+    return `${y}-${m}-${day}`;
+  }
+
+  function todayKey(){
+    if (window.TaskPointsCore && typeof TaskPointsCore.todayKey === 'function') return TaskPointsCore.todayKey();
+    return dateKey(new Date());
+  }
+
+  function safeNameForId(state, id){
+    if (id === 'YOU') return 'You';
+    const ps = Array.isArray(state.players) ? state.players : [];
+    const p = ps.find(x => x && x.id === id);
+    return p ? (p.name || 'Unknown') : 'Unknown';
+  }
+
+  function getPlayerById(state, id){
+    if (id === 'YOU') return { id:'YOU', name:'You', isYou:true, imageId: state.youImageId || null };
+    const ps = Array.isArray(state.players) ? state.players : [];
+    return ps.find(x => x && x.id === id) || null;
+  }
+
+  function getPlayerImageId(state, id){
+    if (id === 'YOU') return state.youImageId || null;
+    const p = getPlayerById(state, id);
+    return p && p.imageId ? p.imageId : null;
+  }
+
+  // ---------- avatar rendering ----------
+  const imageUrlCache = new Map();
+  const pendingLoads = new Map();
+
+  async function getImageUrl(imageId){
+    if (!imageId) return null;
+    if (imageUrlCache.has(imageId)) return imageUrlCache.get(imageId);
+    if (pendingLoads.has(imageId)) return pendingLoads.get(imageId);
+
+    const p = (async () => {
+      try {
+        if (!window.TaskPointsCore || typeof TaskPointsCore.getImageBlob !== 'function') return null;
+        const blob = await TaskPointsCore.getImageBlob(imageId);
+        if (!blob) return null;
+        const url = URL.createObjectURL(blob);
+        imageUrlCache.set(imageId, url);
+        return url;
+      } catch (e) {
+        console.warn('image load failed', imageId, e);
+        return null;
+      } finally {
+        pendingLoads.delete(imageId);
+      }
+    })();
+
+    pendingLoads.set(imageId, p);
+    return p;
+  }
+
+  function initials(name){
+    const s = String(name || '').trim();
+    if (!s) return '•';
+    const parts = s.split(/\s+/).filter(Boolean);
+    const a = parts[0]?.[0] || '•';
+    const b = parts[1]?.[0] || '';
+    return (a + b).toUpperCase();
+  }
+
+  async function renderAvatarInto(el, { name, imageId, size = 28 } = {}){
+    if (!el) return;
+    el.innerHTML = '';
+
+    const wrap = document.createElement('div');
+    wrap.className = 'relative';
+    wrap.style.width = `${size}px`;
+    wrap.style.height = `${size}px`;
+
+    const url = await getImageUrl(imageId);
+    if (url) {
+      const img = document.createElement('img');
+      img.src = url;
+      img.alt = name || 'Player';
+      img.className = 'w-full h-full rounded-full object-cover border border-slate-700/60';
+      wrap.appendChild(img);
+    } else {
+      const fallback = document.createElement('div');
+      fallback.className = 'w-full h-full rounded-full flex items-center justify-center text-[11px] font-bold border border-slate-700/60';
+      fallback.style.background = 'linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02))';
+      fallback.textContent = initials(name);
+      wrap.appendChild(fallback);
+    }
+
+    el.appendChild(wrap);
+  }
+
+  function playerLine(state, id, rightText){
+    const p = getPlayerById(state, id);
+    const name = p ? (p.name || safeNameForId(state, id)) : safeNameForId(state, id);
+
+    const row = document.createElement('div');
+    row.className = 'flex items-center justify-between gap-3';
+
+    const left = document.createElement('div');
+    left.className = 'flex items-center gap-2 min-w-0';
+
+    const avatarSlot = document.createElement('div');
+    avatarSlot.className = 'shrink-0';
+    left.appendChild(avatarSlot);
+
+    const nameEl = document.createElement('div');
+    nameEl.className = 'text-sm font-semibold truncate';
+    nameEl.textContent = name;
+    left.appendChild(nameEl);
+
+    const right = document.createElement('div');
+    right.className = 'text-sm font-extrabold tabular-nums';
+    right.textContent = rightText;
+
+    row.appendChild(left);
+    row.appendChild(right);
+
+    renderAvatarInto(avatarSlot, { name, imageId: getPlayerImageId(state, id), size: 24 });
+
+    return row;
+  }
+
+  // ---------- stats ----------
+  function computeYouStats(state){
+    const record = window.TaskPointsCore?.computeRecord
+      ? TaskPointsCore.computeRecord(state, 'YOU')
+      : { wins:0, losses:0, games:0, source:'unknown' };
+
+    if (record.source === 'matchups') {
+      const matchups = Array.isArray(state.matchups) ? state.matchups : [];
+      let games = 0;
+      let totalPoints = 0;
+      for (const m of matchups) {
+        if (!m || (m.playerAId !== 'YOU' && m.playerBId !== 'YOU')) continue;
+        const a = Number(m.scoreA);
+        const b = Number(m.scoreB);
+        if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+        const youScore = (m.playerAId === 'YOU') ? a : b;
+        totalPoints += youScore;
+        games++;
+      }
+      if (!games) return { games:0, wins:0, losses:0, winPct:null, avgPPD:null, ppd:null };
+      const avgPPD = totalPoints / games;
+      const winPct = (record.wins + record.losses) ? (record.wins / (record.wins + record.losses)) * 100 : null;
+      return { games, wins: record.wins, losses: record.losses, winPct, avgPPD, ppd: avgPPD };
+    }
+
+    if (!state || !Array.isArray(state.completions) || !state.completions.length) {
+      return { games:0, wins:0, losses:0, winPct:null, avgPPD:null, ppd:null };
+    }
+
+    const dayMap = {};
+    for (const c of state.completions) {
+      const day = window.TaskPointsCore && typeof TaskPointsCore.dateKey === 'function'
+        ? TaskPointsCore.dateKey(c.completedAtISO || c.dateKey)
+        : (c.dateKey || '');
+      if (!day) continue;
+      const pts = window.TaskPointsCore?.pointsForCompletion
+        ? TaskPointsCore.pointsForCompletion(c)
+        : Number(c.points || 0);
+      dayMap[day] = (dayMap[day] || 0) + pts;
+    }
+
+    const dailyTotals = Object.values(dayMap);
+    if (!dailyTotals.length) return { games:0, wins:0, losses:0, winPct:null, avgPPD:null, ppd:null };
+
+    const avgPPD = dailyTotals.reduce((s,v)=>s+v,0) / dailyTotals.length;
+    let wins = 0, losses = 0;
+    for (const total of dailyTotals) {
+      if (total > avgPPD) wins++;
+      else losses++;
+    }
+    const winPct = (wins + losses) ? (wins / (wins + losses)) * 100 : null;
+    return { games: dailyTotals.length, wins, losses, winPct, avgPPD, ppd: avgPPD };
+  }
+
+  function computePlayerStats(state, p){
+    if (!p || p.id === 'YOU' || p.isYou) return computeYouStats(state);
+
+    const record = window.TaskPointsCore?.computeRecord
+      ? TaskPointsCore.computeRecord(state, p.id)
+      : { wins:0, losses:0, games:0, source:'unknown' };
+
+    if (record.source === 'matchups') {
+      const matchups = Array.isArray(state.matchups) ? state.matchups : [];
+      let games = 0;
+      let totalPoints = 0;
+
+      for (const m of matchups) {
+        if (!m || (m.playerAId !== p.id && m.playerBId !== p.id)) continue;
+        const a = Number(m.scoreA);
+        const b = Number(m.scoreB);
+        if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+        const playerScore = (m.playerAId === p.id) ? a : b;
+        totalPoints += playerScore;
+        games++;
+      }
+
+      if (!games) return { games:0, wins:0, losses:0, winPct:null, avgPPD:null, ppd:null };
+
+      const avgPPD = totalPoints / games;
+      const winPct = (record.wins + record.losses) ? (record.wins / (record.wins + record.losses)) * 100 : null;
+      const baseline = Number(p.baseline);
+      const ppd = Number.isFinite(baseline) ? (avgPPD - baseline) : null;
+
+      return { games, wins: record.wins, losses: record.losses, winPct, avgPPD, ppd };
+    }
+
+    const history = Array.isArray(state.gameHistory) ? state.gameHistory : [];
+    const entries = history.filter(h => h && h.playerId === p.id && Number.isFinite(Number(h.points)));
+
+    if (!entries.length) return { games:0, wins:0, losses:0, winPct:null, avgPPD:null, ppd:null };
+
+    const totalPoints = entries.reduce((s,h)=>s + Number(h.points), 0);
+    const avgPPD = totalPoints / entries.length;
+
+    const baseline = Number(p.baseline);
+    const ppd = Number.isFinite(baseline) ? (avgPPD - baseline) : null;
+
+    const wins = Number.isFinite(baseline) ? entries.filter(e => Number(e.points) >= baseline).length : null;
+    const losses = Number.isFinite(baseline) ? (entries.length - wins) : null;
+    const winPct = (wins != null && losses != null && (wins + losses)) ? (wins / (wins + losses)) * 100 : null;
+
+    return { games: entries.length, wins, losses, winPct, avgPPD, ppd };
+  }
+
+  function buildStandings(state){
+    const players = Array.isArray(state.players) ? state.players : [];
+    const all = [{ id:'YOU', name:'You', isYou:true }, ...players];
+
+    const rows = all.map(p => {
+      const s = (p.id === 'YOU') ? computeYouStats(state) : computePlayerStats(state, p);
+      return { id: p.id, name: p.name || safeNameForId(state, p.id), ...s };
+    });
+
+    rows.sort((a,b) => {
+      const aw = Number.isFinite(a.winPct) ? a.winPct : -1;
+      const bw = Number.isFinite(b.winPct) ? b.winPct : -1;
+      if (bw !== aw) return bw - aw;
+
+      const ap = Number.isFinite(a.avgPPD) ? a.avgPPD : -1e9;
+      const bp = Number.isFinite(b.avgPPD) ? b.avgPPD : -1e9;
+      if (bp !== ap) return bp - ap;
+
+      const ad = Number.isFinite(a.ppd) ? a.ppd : -1e9;
+      const bd = Number.isFinite(b.ppd) ? b.ppd : -1e9;
+      return bd - ad;
+    });
+
+    return rows;
+  }
+
+  // ---------- render helpers ----------
+  function clearEl(el){
+    if (el) el.innerHTML = '';
+  }
+
+  function renderYourStats(state, standings){
+    const youRow = standings.find(r => r.id === 'YOU');
+    if (!youRow) return;
+
+    $('youRecord').textContent = (youRow.wins != null && youRow.losses != null) ? `${youRow.wins}-${youRow.losses}` : '—';
+    $('youWinPct').textContent = fmtPct(youRow.winPct);
+    $('youPPD').textContent = fmt1(youRow.avgPPD);
+    $('youGames').textContent = youRow.games != null ? String(youRow.games) : '—';
+
+    const rank = standings.findIndex(r => r.id === 'YOU');
+    const total = standings.length;
+    $('youRankLine').textContent = (rank >= 0) ? `#${rank+1} of ${total}` : '—';
+
+    const quick = $('youQuickLine');
+    clearEl(quick);
+    if (quick) {
+      quick.appendChild(playerLine(state, 'YOU', `PPD ${fmt1(youRow.avgPPD)}`));
+      if (Number.isFinite(youRow.winPct)) quick.appendChild(playerLine(state, 'YOU', `Win% ${fmtPct(youRow.winPct)}`));
+    }
+  }
+
+  function renderStandings(state){
+    const standings = buildStandings(state);
+
+    // meta
+    const rank = standings.findIndex(r => r.id === 'YOU');
+    const total = standings.length;
+    $('standingsMeta').textContent = (rank >= 0) ? `You are #${rank+1} of ${total}` : `Players: ${total}`;
+
+    // top 10 table
+    const tbody = $('standingsTop10');
+    clearEl(tbody);
+
+    const top10 = standings.slice(0, 10);
+    for (let i = 0; i < top10.length; i++) {
+      const r = top10[i];
+
+      const tr = document.createElement('tr');
+      tr.className = 'border-t border-slate-700/40';
+
+      const tdRank = document.createElement('td');
+      tdRank.className = 'py-2 pr-3 tabular-nums font-semibold';
+      tdRank.textContent = String(i + 1);
+
+      const tdName = document.createElement('td');
+      tdName.className = 'py-2 pr-3';
+
+      const nameWrap = document.createElement('div');
+      nameWrap.className = 'flex items-center gap-2 min-w-0';
+
+      const avatarSlot = document.createElement('div');
+      avatarSlot.className = 'shrink-0';
+      nameWrap.appendChild(avatarSlot);
+
+      const nameText = document.createElement('div');
+      nameText.className = 'font-semibold truncate';
+      nameText.textContent = r.name;
+      nameWrap.appendChild(nameText);
+
+      tdName.appendChild(nameWrap);
+
+      const tdRec = document.createElement('td');
+      tdRec.className = 'py-2 pr-3 tabular-nums';
+      tdRec.textContent = (r.wins != null && r.losses != null) ? `${r.wins}-${r.losses}` : '—';
+
+      const tdWin = document.createElement('td');
+      tdWin.className = 'py-2 pr-3 tabular-nums';
+      tdWin.textContent = fmtPct(r.winPct);
+
+      const tdPPD = document.createElement('td');
+      tdPPD.className = 'py-2 pr-3 tabular-nums font-semibold';
+      tdPPD.textContent = fmt1(r.avgPPD);
+
+      const tdDelta = document.createElement('td');
+      tdDelta.className = 'py-2 pr-3 tabular-nums';
+      tdDelta.textContent = fmtSigned(r.ppd);
+
+      tr.appendChild(tdRank);
+      tr.appendChild(tdName);
+      tr.appendChild(tdRec);
+      tr.appendChild(tdWin);
+      tr.appendChild(tdPPD);
+      tr.appendChild(tdDelta);
+
+      tbody.appendChild(tr);
+
+      renderAvatarInto(avatarSlot, { name: r.name, imageId: getPlayerImageId(state, r.id), size: 24 });
+    }
+
+    renderYourStats(state, standings);
+    return { standings };
+  }
+
+  function pickExtreme(rows, key, mode){
+    // mode: 'max' or 'min'
+    const filtered = rows.filter(r => Number.isFinite(r[key]));
+    if (!filtered.length) return null;
+    return filtered.reduce((best, cur) => {
+      if (!best) return cur;
+      return (mode === 'max')
+        ? (cur[key] > best[key] ? cur : best)
+        : (cur[key] < best[key] ? cur : best);
+    }, null);
+  }
+
+  function renderBestWorstStats(state, standings){
+    const bestWrap = $('bestStatsList');
+    const worstWrap = $('worstStatsList');
+    clearEl(bestWrap);
+    clearEl(worstWrap);
+
+    const categories = [
+      { key: 'winPct', label: 'Win %', best: 'max', worst: 'min', fmt: fmtPct },
+      { key: 'avgPPD', label: 'PPD', best: 'max', worst: 'min', fmt: fmt1 },
+      { key: 'ppd', label: 'Baseline Δ', best: 'max', worst: 'min', fmt: fmtSigned },
+      { key: 'wins', label: 'Wins', best: 'max', worst: 'min', fmt: (v)=> (Number.isFinite(v) ? String(v) : '—') },
+      { key: 'losses', label: 'Losses', best: 'min', worst: 'max', fmt: (v)=> (Number.isFinite(v) ? String(v) : '—') },
+    ];
+
+    for (const c of categories) {
+      const best = pickExtreme(standings, c.key, c.best);
+      const worst = pickExtreme(standings, c.key, c.worst);
+
+      if (bestWrap) {
+        const block = document.createElement('div');
+        block.className = 'glass p-3';
+
+        const title = document.createElement('div');
+        title.className = 'muted text-[11px] uppercase tracking-wide mb-2';
+        title.textContent = c.label;
+
+        block.appendChild(title);
+
+        if (best) block.appendChild(playerLine(state, best.id, c.fmt(best[c.key])));
+        else block.appendChild(document.createTextNode('—'));
+
+        bestWrap.appendChild(block);
+      }
+
+      if (worstWrap) {
+        const block = document.createElement('div');
+        block.className = 'glass p-3';
+
+        const title = document.createElement('div');
+        title.className = 'muted text-[11px] uppercase tracking-wide mb-2';
+        title.textContent = c.label;
+
+        block.appendChild(title);
+
+        if (worst) block.appendChild(playerLine(state, worst.id, c.fmt(worst[c.key])));
+        else block.appendChild(document.createTextNode('—'));
+
+        worstWrap.appendChild(block);
+      }
+    }
+  }
+
+  function renderRatingsLeaderboards(state){
+    const wrap = $('ratingsBoards');
+    clearEl(wrap);
+
+    const players = Array.isArray(state.players) ? state.players : [];
+
+    const ratingDefs = [
+      { key: 'baseline', label: 'Baseline', get: (p)=> Number(p.baseline) },
+      { key: 'variance', label: 'Variance', get: (p)=> Number(p.variance) },
+      { key: 'varianceTilt', label: 'Variance Tilt', get: (p)=> Number(p.varianceTilt) },
+      { key: 'momentum', label: 'Momentum', get: (p)=> Number(p.momentum) },
+      { key: 'risky', label: 'Risky', get: (p)=> getNormalizedRisky(p.risky) },
+    ];
+
+    const sortedBy = (def, dir) => {
+      const arr = players
+        .map(p => ({ id: p.id, name: p.name, val: def.get(p) }))
+        .filter(x => Number.isFinite(x.val));
+      arr.sort((a,b) => dir === 'desc' ? (b.val - a.val) : (a.val - b.val));
+      return arr;
+    };
+
+    for (const def of ratingDefs) {
+      const top = sortedBy(def, 'desc').slice(0, 5);
+      const bot = sortedBy(def, 'asc').slice(0, 5);
+
+      const card = document.createElement('div');
+      card.className = 'glass p-4';
+
+      const head = document.createElement('div');
+      head.className = 'flex items-center justify-between mb-3';
+      head.innerHTML = `<div class="font-semibold">${def.label}</div><div class="muted text-xs">Top / Bottom 5</div>`;
+      card.appendChild(head);
+
+      const cols = document.createElement('div');
+      cols.className = 'grid grid-cols-1 sm:grid-cols-2 gap-3';
+
+      const topCol = document.createElement('div');
+      topCol.className = 'glass p-3';
+      topCol.innerHTML = `<div class="muted text-[11px] uppercase tracking-wide mb-2">Top 5</div>`;
+      const topList = document.createElement('div');
+      topList.className = 'space-y-2';
+      for (const r of top) topList.appendChild(playerLine(state, r.id, fmt1(r.val)));
+      if (!top.length) topList.appendChild(document.createTextNode('—'));
+      topCol.appendChild(topList);
+
+      const botCol = document.createElement('div');
+      botCol.className = 'glass p-3';
+      botCol.innerHTML = `<div class="muted text-[11px] uppercase tracking-wide mb-2">Bottom 5</div>`;
+      const botList = document.createElement('div');
+      botList.className = 'space-y-2';
+      for (const r of bot) botList.appendChild(playerLine(state, r.id, fmt1(r.val)));
+      if (!bot.length) botList.appendChild(document.createTextNode('—'));
+      botCol.appendChild(botList);
+
+      cols.appendChild(topCol);
+      cols.appendChild(botCol);
+
+      card.appendChild(cols);
+      wrap.appendChild(card);
+    }
+  }
+
+  function renderSurprisesBusts(state, standings){
+    const surprises = $('surprisesList');
+    const busts = $('bustsList');
+    clearEl(surprises);
+    clearEl(busts);
+
+    const pool = standings.filter(r => r.id !== 'YOU' && Number.isFinite(r.ppd));
+    const best = [...pool].sort((a,b)=> (b.ppd - a.ppd)).slice(0, 5);
+    const worst = [...pool].sort((a,b)=> (a.ppd - b.ppd)).slice(0, 5);
+
+    for (const r of best) {
+      const line = playerLine(state, r.id, `${fmtSigned(r.ppd)} (PPD ${fmt1(r.avgPPD)})`);
+      surprises.appendChild(line);
+    }
+    if (!best.length) surprises.appendChild(document.createTextNode('—'));
+
+    for (const r of worst) {
+      const line = playerLine(state, r.id, `${fmtSigned(r.ppd)} (PPD ${fmt1(r.avgPPD)})`);
+      busts.appendChild(line);
+    }
+    if (!worst.length) busts.appendChild(document.createTextNode('—'));
+  }
+
+  function computePlayerAveragesFromMatchups(state, playerId){
+    const matchups = Array.isArray(state.matchups) ? state.matchups : [];
+    let games = 0;
+    let total = 0;
+
+    for (const m of matchups) {
+      if (!m || (m.playerAId !== playerId && m.playerBId !== playerId)) continue;
+      const a = Number(m.scoreA);
+      const b = Number(m.scoreB);
+      if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+
+      const score = (m.playerAId === playerId) ? a : b;
+      total += score;
+      games++;
+    }
+
+    return games ? (total / games) : null;
+  }
+
+  function computeYouTodayScore(state){
+    const key = todayKey();
+    if (!Array.isArray(state.completions)) return null;
+    let total = 0;
+    let any = false;
+    for (const c of state.completions) {
+      const ck = window.TaskPointsCore?.dateKey ? TaskPointsCore.dateKey(c.completedAtISO || c.dateKey) : (c.dateKey || '');
+      if (ck !== key) continue;
+      const pts = window.TaskPointsCore?.pointsForCompletion ? TaskPointsCore.pointsForCompletion(c) : Number(c.points || 0);
+      total += Number(pts) || 0;
+      any = true;
+    }
+    return any ? total : null;
+  }
+
+  function formatRatingsLine(p){
+    if (!p) return '—';
+    if (p.id === 'YOU' || p.isYou) return '—';
+    const b = Number(p.baseline);
+    const v = Number(p.variance);
+    const t = Number(p.varianceTilt);
+    const m = Number(p.momentum);
+    const r = getNormalizedRisky(p.risky);
+
+    const parts = [];
+    if (Number.isFinite(b)) parts.push(`B ${b}`);
+    if (Number.isFinite(v)) parts.push(`V ${v}`);
+    if (Number.isFinite(t)) parts.push(`T ${t}`);
+    if (Number.isFinite(m)) parts.push(`M ${m}`);
+    if (Number.isFinite(r)) parts.push(`R ${r.toFixed(1)}`);
+    return parts.length ? parts.join(' · ') : '—';
+  }
+
+  function renderTodaysMatchup(state){
+    const dateLbl = $('matchupDateLabel');
+    if (dateLbl) dateLbl.textContent = todayKey();
+
+    const matchups = Array.isArray(state.matchups) ? state.matchups : [];
+    const key = todayKey();
+
+    const m = matchups.find(x =>
+      x && x.dateKey === key && (x.playerAId === 'YOU' || x.playerBId === 'YOU')
+    );
+
+    const noNotice = $('noMatchupNotice');
+    if (!m) {
+      noNotice?.classList.remove('hidden');
+      return;
+    }
+    noNotice?.classList.add('hidden');
+
+    const oppId = (m.playerAId === 'YOU') ? m.playerBId : m.playerAId;
+    const oppName = safeNameForId(state, oppId);
+
+    // avatars
+    renderAvatarInto($('matchupYouAvatar'), { name: 'You', imageId: getPlayerImageId(state, 'YOU'), size: 28 });
+    renderAvatarInto($('matchupOppAvatar'), { name: oppName, imageId: getPlayerImageId(state, oppId), size: 28 });
+
+    // names
+    $('matchupYourName').textContent = 'You';
+    $('matchupOppName').textContent = oppName;
+
+    // record + averages
+    const youStats = computeYouStats(state);
+    const oppP = getPlayerById(state, oppId);
+    const oppStats = oppP ? computePlayerStats(state, oppP) : null;
+
+    $('matchupYourRecord').textContent = (youStats.wins != null && youStats.losses != null) ? `Record: ${youStats.wins}-${youStats.losses}` : 'Record: —';
+    $('matchupYourAverages').textContent = `Daily Avg: ${fmt1(youStats.avgPPD)} · PPD: ${fmt1(youStats.avgPPD)}`;
+
+    if (oppStats) {
+      $('matchupOppRecord').textContent = (oppStats.wins != null && oppStats.losses != null) ? `Record: ${oppStats.wins}-${oppStats.losses}` : 'Record: —';
+      $('matchupOppAverages').textContent = `Daily Avg: ${fmt1(oppStats.avgPPD)} · PPD: ${fmt1(oppStats.avgPPD)}`;
+    } else {
+      $('matchupOppRecord').textContent = 'Record: —';
+      $('matchupOppAverages').textContent = 'Daily Avg: — · PPD: —';
+    }
+
+    // scores (today)
+    const youToday = computeYouTodayScore(state);
+    const oppToday = (m.playerAId === oppId) ? Number(m.scoreA) : Number(m.scoreB);
+
+    $('matchupYourScore').textContent = (youToday != null) ? fmt1(youToday) : '—';
+    $('matchupOppScore').textContent = Number.isFinite(oppToday) ? fmt1(oppToday) : '—';
+
+    // diff
+    const diffEl = $('matchupDiffLabel');
+    const diffValEl = $('matchupDiffValue');
+
+    if (youToday != null && Number.isFinite(oppToday)) {
+      const diff = youToday - oppToday;
+      diffEl.textContent = diff >= 0 ? 'You lead' : 'You trail';
+      diffValEl.textContent = fmtSigned(diff);
+
+      diffValEl.classList.remove('diff-positive', 'diff-negative', 'diff-neutral');
+      if (diff > 0.0001) diffValEl.classList.add('diff-positive');
+      else if (diff < -0.0001) diffValEl.classList.add('diff-negative');
+      else diffValEl.classList.add('diff-neutral');
+    } else {
+      diffEl.textContent = 'Scores pending';
+      diffValEl.textContent = '—';
+    }
+
+    // details blocks
+    $('youDetailRecord').textContent = (youStats.wins != null && youStats.losses != null) ? `${youStats.wins}-${youStats.losses}` : '—';
+    $('youDetailWinPct').textContent = fmtPct(youStats.winPct);
+    $('youDetailPPD').textContent = fmt1(youStats.avgPPD);
+    $('youDetailRatings').textContent = '—';
+
+    if (oppStats) {
+      $('oppDetailRecord').textContent = (oppStats.wins != null && oppStats.losses != null) ? `${oppStats.wins}-${oppStats.losses}` : '—';
+      $('oppDetailWinPct').textContent = fmtPct(oppStats.winPct);
+      $('oppDetailPPD').textContent = fmt1(oppStats.avgPPD);
+      $('oppDetailRatings').textContent = formatRatingsLine(oppP);
+    } else {
+      $('oppDetailRecord').textContent = '—';
+      $('oppDetailWinPct').textContent = '—';
+      $('oppDetailPPD').textContent = '—';
+      $('oppDetailRatings').textContent = '—';
+    }
+  }
+
+  function renderAll(){
+    let state = loadState();
+    let changed = false;
+
+    if (window.TaskPointsCore && typeof TaskPointsCore.normalizeState === 'function') {
+      state = TaskPointsCore.normalizeState(state || {});
+    }
+
+    if (window.TaskPointsCore && typeof TaskPointsCore.syncDerivedPoints === 'function') {
+      const res = TaskPointsCore.syncDerivedPoints(state);
+      state = res.state;
+      changed = changed || !!res.changed;
+    }
+
+    if (window.TaskPointsCore && typeof TaskPointsCore.syncYouMatchups === 'function') {
+      const res2 = TaskPointsCore.syncYouMatchups(state);
+      state = res2.state;
+      changed = changed || !!res2.changed;
+    }
+
+    if (changed) saveState(state);
+
+    const { standings } = renderStandings(state);
+    renderBestWorstStats(state, standings);
+    renderRatingsLeaderboards(state);
+    renderSurprisesBusts(state, standings);
+    renderTodaysMatchup(state);
+  }
+
+  $('refreshGameHub')?.addEventListener('click', renderAll);
+
+  window.addEventListener('beforeunload', () => {
+    for (const url of imageUrlCache.values()) {
+      try { URL.revokeObjectURL(url); } catch {}
+    }
+    imageUrlCache.clear();
+  });
+
+  document.addEventListener('DOMContentLoaded', renderAll);
+})();
+</script>
+</body>
+</html>
