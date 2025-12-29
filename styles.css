@@ -2011,6 +2011,11 @@ body {
     gap: 14px;
   }
 
+   /* Mobile: make Sleep/Work/Mood "Recent ..." sit closer (match Calories spacing vibe) */
+  .stat-card-row .stat-col-secondary{
+    padding-top: 0 !important;
+  }
+   
   .stat-col,
   .stat-col-primary,
   .stat-col-secondary{
@@ -2199,6 +2204,7 @@ body {
     width: 82px;
   }
 }
+
 
 
 
