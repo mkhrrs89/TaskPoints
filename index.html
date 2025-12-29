@@ -239,14 +239,15 @@ Nothing visible on the page is built here. === -->
         </div>
       </div>
       
-   <!-- =======================================================
-         SCOREBOARD CARD (END)
-         ======================================================= -->
+   <!--  =======================================================  -->
+     <!--    SCOREBOARD CARD (END)     -->
+   <!--  =======================================================  -->
 
       
-      <!-- Controls card (right) -->
+      <!-- == CONTROLS CARD (START) Right-side card with quick action buttons. == -->
       <div class="glass sm:col-span-2 lg:col-span-1" id="matchupCard">
         <div class="flex items-start justify-end">
+          <!-- Buttons stack differently depending on screen size -->
           <div class="flex flex-col gap-2 w-full sm:w-auto sm:flex-row lg:flex-col lg:w-auto">
             <button
               id="todayPointsAddTaskBtn"
@@ -256,6 +257,7 @@ Nothing visible on the page is built here. === -->
             >
               Add Task
             </button>
+            
             <button
               type="button"
               class="btn btn-teal w-full sm:w-auto"
@@ -266,16 +268,22 @@ Nothing visible on the page is built here. === -->
           </div>
         </div>
       </div>
+      <!-- ==  CONTROLS CARD (END)  == -->
+      
     </div>
 
+    
+  <!-- ==  SECOND ROW (START) Inertia card (left) + daily trend chart (right)  == -->
     <div class="grid gap-3 grid-cols-1 lg:grid-cols-[0.7fr_1.3fr]">
+      
+      <!-- INERTIA SCORE CARD -->
       <div class="glass flex flex-col items-center justify-center text-center gap-1.5">
         <div class="muted font-semibold uppercase tracking-wide text-[10px]">Inertia Score</div>
         <div class="text-4xl font-extrabold" id="inertiaValue">0.0</div>
         <div class="muted text-[11px] leading-tight" id="inertiaAverage">7-day avg: 0.0</div>
       </div>
 
-      <!-- Daily line graph -->
+      <!-- DAILY LINE GRAPH -->
       <div class="glass flex items-end">
         <canvas id="dailyTrend" class="w-full h-24"></canvas>
       </div>
