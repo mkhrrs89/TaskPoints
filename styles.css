@@ -2184,7 +2184,21 @@ body {
     box-shadow: inset 0 0 0 1px rgba(255,255,255,0.05);
     color: #f8f9ff;
   }
+
+   /* Work Score inputs: make them narrower on mobile */
+     #workInputRow #workScoreInput,
+  #workInputRow #workHoursInput{
+    width: 72px;       /* tweak this number */
+    flex: 0 0 auto;    /* prevents stretching */
+    min-width: 0;
+  }
+
+  /* optional: give Hours a tiny bit more room */
+  #workInputRow #workHoursInput{
+    width: 82px;
+  }
 }
+
 
 
 
