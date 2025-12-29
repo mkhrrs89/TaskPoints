@@ -653,6 +653,7 @@ async function applyImportedStateFallback(root) {
     workHistory: Array.isArray(root?.workHistory) ? root.workHistory : [],
     youImageId: typeof root?.youImageId === 'string' ? root.youImageId : '',
     projects: Array.isArray(root?.projects) ? root.projects : loadProjectsFromStorageFallback(),
+    habitTagColors: root?.habitTagColors ?? {}
   });
 
   const migrate = window.TaskPointsCore?.migrateLegacyImages || migrateLegacyImagesFromStateFallback;
