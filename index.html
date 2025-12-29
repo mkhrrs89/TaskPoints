@@ -198,12 +198,18 @@ Nothing visible on the page is built here. === -->
   </div>  <!-- DESKTOP HEADER ROW (END)  -->
 </header>  <!--  HEADER (END)  -->
 
-  <!-- TOP ROW -->
+<!-- ===========================================================
+     TOP ROW (START)
+     This is the first “main content” block under the header.
+     =========================================================== -->
   <div class="space-y-3 mb-6">
     <div class="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-[2fr_1fr]">
-      <!-- Scoreboard card (expanded) -->
+      
+      <!-- SCOREBOARD CARD (START) Shows You vs Opponent + score + diff. -->
       <div class="glass sm:col-span-2 lg:col-span-1">
         <div class="matchup-scoreboard mt-3">
+          
+        <!-- LEFT SIDE: YOU -->
           <div class="scoreboard-side">
             <div class="muted text-[11px] uppercase tracking-wide">You</div>
             <div id="matchupYourName" class="scoreboard-name">You</div>
@@ -212,12 +218,15 @@ Nothing visible on the page is built here. === -->
             <div id="matchupYourAverages" class="scoreboard-meta">Daily Avg: — · PPD: —</div>
           </div>
 
+       <!-- LMIDDLE: DIFF -->
           <div class="scoreboard-diff text-center">
             <div class="muted text-[11px] uppercase tracking-wide">The Diff</div>
             <div id="matchupDiffValue" class="scoreboard-diff-value">—</div>
             <div id="matchupDiff" class="muted text-xs mt-1">—</div>
           </div>
+       
 
+       <!-- RIGHT SIDE: OPPONENT -->
           <div class="scoreboard-side text-right">
             <div class="muted text-[11px] uppercase tracking-wide">Opponent</div>
             <div id="matchupOpponent" class="scoreboard-name text-right">—</div>
