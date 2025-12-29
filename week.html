@@ -232,6 +232,15 @@
       <div id="flexWeekEmpty" class="muted text-sm">No flex actions logged this week.</div>
     </div>
 
+    <!-- Retired Flex Actions -->
+    <div class="glass mb-6">
+      <div class="flex items-start justify-between gap-3 mb-2">
+        <h2 class="font-bold">Retired Flex Actions</h2>
+      </div>
+      <div id="retiredFlexList" class="grid gap-2 text-sm"></div>
+      <div id="retiredFlexEmpty" class="muted text-sm">No retired flex actions.</div>
+    </div>
+
 <!-- Work Scores (this week) -->
 <div class="glass mb-6">
   <div class="flex items-start justify-between gap-3 mb-2">
@@ -964,6 +973,52 @@ function renderFlexWeek(baseDate){
     });
 }
 
+function renderRetiredFlexActions(){
+  state = load();
+  const list = $('retiredFlexList');
+  const empty = $('retiredFlexEmpty');
+  if(!list || !empty) return;
+  list.innerHTML = '';
+
+  const items = (Array.isArray(state.flexActions) ? state.flexActions : []).filter(f => f.retired);
+  if(!items.length){
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+
+  items
+    .slice()
+    .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+    .forEach(f => {
+      const div = document.createElement('div');
+      div.className = 'flex items-center justify-between';
+      div.innerHTML = `
+        <div>
+          <div class="font-medium">${escapeHtml(f.name || 'Flex action')}</div>
+          <div class="text-xs text-zinc-400">${Number(f.points || 0)} pts/use</div>
+        </div>
+        <div class="flex gap-2 flex-wrap">
+          <button class="btn btn-ghost btn-task" data-flex-toggle="${f.id}">Unretire</button>
+        </div>
+      `;
+      list.appendChild(div);
+    });
+
+  list.querySelectorAll('[data-flex-toggle]').forEach(btn => {
+    btn.onclick = () => toggleFlexRetired(btn.getAttribute('data-flex-toggle'));
+  });
+}
+
+function toggleFlexRetired(id){
+  state = load();
+  const f = Array.isArray(state.flexActions) ? state.flexActions.find(x => x.id === id) : null;
+  if(!f) return;
+  f.retired = !f.retired;
+  state = saveMerged(state);
+  renderRetiredFlexActions();
+}
+
 function renderWeekScoreSection(baseDate, config) {
   state = load();
 
@@ -1185,6 +1240,7 @@ function renderAll(date) {
   renderHabits(date);
   renderWeekTasks(date);
   renderFlexWeek(date);
+  renderRetiredFlexActions();
   renderWorkWeek(date);
   renderSleepWeek(date);
   renderCaloriesWeek(date);

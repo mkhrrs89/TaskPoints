@@ -3654,7 +3654,7 @@ function renderFlexActions(){
   if (!list || !empty) return;
   list.innerHTML = '';
 
-  const items = Array.isArray(state.flexActions) ? state.flexActions : [];
+  const items = (Array.isArray(state.flexActions) ? state.flexActions : []).filter(f => !f.retired);
   const todayKeyStr = dateKey(new Date());
   const flexUseCounts = new Map();
   const completions = Array.isArray(state.completions) ? state.completions : [];
@@ -3723,6 +3723,7 @@ function renderFlexActions(){
         </div>
         <div class="flex gap-2 flex-wrap flex-action-buttons">
           <button class="btn btn-ghost btn-task" data-act="flex-edit" data-id="${f.id}">Edit</button>
+          <button class="btn btn-ghost btn-task" data-act="flex-retire" data-id="${f.id}">Retire</button>
           <button class="btn btn-success btn-task btn-check" data-act="flex-do" data-id="${f.id}" aria-label="Done">✓</button>
         </div>
       `;
@@ -3739,6 +3740,9 @@ function renderFlexActions(){
       editingFlexId = btn.getAttribute('data-id');
       renderFlexActions();
     };
+  });
+  list.querySelectorAll('[data-act="flex-retire"]').forEach(btn => {
+    btn.onclick = () => toggleFlexRetired(btn.getAttribute('data-id'));
   });
   list.querySelectorAll('[data-act="flex-del"]').forEach(btn => {
     btn.onclick = () => deleteFlexAction(btn.getAttribute('data-id'));
@@ -3769,7 +3773,7 @@ function addFlexAction(){
 function logFlexCompletion(id){
   if(!Array.isArray(state.flexActions)) state.flexActions = [];
   const f = state.flexActions.find(x=>x.id===id);
-  if(!f) return;
+  if(!f || f.retired) return;
   const now = new Date().toISOString();
   addCompletion({
     id: crypto.randomUUID(),
@@ -3807,6 +3811,17 @@ function saveFlexEdit(id, row){
   save();
   renderFlexActions();
   renderStats(); // points per use changed => stats affected
+}
+
+function toggleFlexRetired(id){
+  if(!Array.isArray(state.flexActions)) state.flexActions = [];
+  const f = state.flexActions.find(x => x.id === id);
+  if(!f) return;
+  f.retired = !f.retired;
+  if (f.retired && editingFlexId === id) editingFlexId = null;
+  save();
+  renderFlexActions();
+  renderStats();
 }
 
 
