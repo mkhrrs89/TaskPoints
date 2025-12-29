@@ -180,6 +180,19 @@
     return t;
   }
 
+  function normalizeCompletion(entry) {
+    if (!entry || typeof entry !== 'object') return entry;
+    const c = { ...entry };
+    const title = typeof c.title === 'string' ? c.title : '';
+    const isMetric = title.startsWith('Sleep Score')
+      || title.startsWith('Mood Score')
+      || title.toLowerCase().startsWith('calories');
+    if (isMetric && (!c.source || c.source === 'task')) {
+      c.source = 'metric';
+    }
+    return c;
+  }
+
   function normalizeHexColor(value) {
     if (!value) return null;
     let hex = String(value).trim();
@@ -213,7 +226,7 @@
   function normalizeState(s) {
     return {
       tasks:       Array.isArray(s?.tasks)       ? s.tasks.map(normalizeTask)       : [],
-      completions: Array.isArray(s?.completions) ? s.completions : [],
+      completions: Array.isArray(s?.completions) ? s.completions.map(normalizeCompletion) : [],
       players:     Array.isArray(s?.players)     ? s.players     : [],
       habits:      Array.isArray(s?.habits)      ? s.habits.map(normalizeHabit)      : [],
       flexActions: Array.isArray(s?.flexActions) ? s.flexActions : [],
