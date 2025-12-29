@@ -1444,6 +1444,41 @@ body {
 .mood-chip-value{ font-size: 18px; font-weight: 700; color: #ffffff; }
 .mood-chip-pts{ font-size: 11px; color: #e0e7ff; opacity: 0.9; }
 
+/* MOOD: match Work mobile header behavior */
+.mood-today-card .mood-title-stack{
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mood-today-card .mood-impact-below{
+  font-size: 0.9rem;
+  line-height: 1.1;
+  opacity: 0.85;
+}
+
+/* hide big meta on mobile (like Sleep/Calories/Work) */
+.mood-today-card .stat-compact-meta{
+  display: none;
+}
+
+/* show summary row on mobile when JS removes .hidden */
+.mood-today-card .stat-summary-row:not(.hidden){
+  display: flex;
+  justify-content: flex-end;
+}
+
+.mood-today-card .stat-summary-value{
+  font-size: 2.1rem;
+  line-height: 1;
+  font-weight: 800;
+}
+
+/* ensure inputs show correctly when not hidden */
+.mood-today-card #moodInputRow:not(.hidden){
+  display: flex;
+}
+
 
 /* ============================================================================ */
 /*                               CALORIES: TODAY + CHIP                         */
@@ -2204,6 +2239,7 @@ body {
     width: 82px;
   }
 }
+
 
 
 
