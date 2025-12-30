@@ -422,7 +422,10 @@
     function saveSettingsState(nextState) {
       try {
         if (window.TaskPointsCore?.mergeAndSaveState) {
-          const { state: merged } = TaskPointsCore.mergeAndSaveState(nextState, { storageKey: SETTINGS_STORAGE_KEY });
+          const { state: merged } = TaskPointsCore.mergeAndSaveState(nextState, {
+            storageKey: SETTINGS_STORAGE_KEY,
+            allowHabitTagColorReset: true
+          });
           return merged;
         }
         const normalized = normalizeSettingsState(nextState);

@@ -303,6 +303,7 @@
 
   function mergeAndSaveState(nextState, options = {}) {
     const storageKey = options.storageKey || STORAGE_KEY;
+    const allowHabitTagColorReset = Boolean(options.allowHabitTagColorReset);
     let existing = {};
     try {
       const raw = options.raw ?? localStorage.getItem(storageKey);
@@ -312,7 +313,18 @@
       existing = {};
     }
 
-    const merged = normalizeState({ ...existing, ...nextState });
+    const mergedSnapshot = { ...existing, ...nextState };
+    if (!allowHabitTagColorReset && Object.prototype.hasOwnProperty.call(nextState || {}, 'habitTagColors')) {
+      const nextColors = nextState?.habitTagColors;
+      const existingColors = existing?.habitTagColors;
+      const nextIsEmpty = !nextColors || (typeof nextColors === 'object' && Object.keys(nextColors).length === 0);
+      const existingHasColors = existingColors && typeof existingColors === 'object' && Object.keys(existingColors).length > 0;
+      if (nextIsEmpty && existingHasColors) {
+        mergedSnapshot.habitTagColors = existingColors;
+      }
+    }
+
+    const merged = normalizeState(mergedSnapshot);
 
     const attemptSave = (candidate, trimmed) => {
       localStorage.setItem(storageKey, JSON.stringify(candidate));
