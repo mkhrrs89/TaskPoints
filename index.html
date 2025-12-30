@@ -862,6 +862,9 @@ let editingFlexId = null;
 
 
 function sleepBonus(score) {
+  if (window.TaskPointsCore?.sleepBonus) {
+    return TaskPointsCore.sleepBonus(score, state);
+  }
   if (score >= 100) return 3;
   if (score >= 98) return 2;
   if (score >= 95) return 1;
@@ -881,6 +884,9 @@ function getSleepInfo(entry) {
 }
 
 function sleepPoints(score, rested = 0) {
+  if (window.TaskPointsCore?.sleepPoints) {
+    return TaskPointsCore.sleepPoints(score, rested, state);
+  }
   if (!Number.isFinite(score)) return 0;
   const base  = score / 10;
   const bonus = sleepBonus(score);
@@ -900,11 +906,17 @@ function getWorkInfo(entry) {
 }
 
 function workHoursBonus(hours = 0) {
+  if (window.TaskPointsCore?.workHoursBonus) {
+    return TaskPointsCore.workHoursBonus(hours, state);
+  }
   if (!Number.isFinite(hours)) return 0;
   return Math.max(0, hours) * 10;
 }
 
 function workPoints(score, hours = 0) {
+  if (window.TaskPointsCore?.workPoints) {
+    return TaskPointsCore.workPoints(score, hours, state);
+  }
   if (!Number.isFinite(score)) return 0;
   return score + workHoursBonus(hours);
 }
@@ -1292,6 +1304,9 @@ function parseCaloriesFromTitle(title) {
 }
 
 function caloriesToPoints(cal){
+  if (window.TaskPointsCore?.caloriesToPoints) {
+    return TaskPointsCore.caloriesToPoints(cal, state);
+  }
   let pts = (2400 - cal) / 100;
 
   if (pts < 0) pts = 0;      // no negatives
@@ -1299,6 +1314,13 @@ function caloriesToPoints(cal){
 
   pts = Math.round(pts * 10) / 10;  // nearest tenth
   return pts;
+}
+
+function moodPoints(score) {
+  if (window.TaskPointsCore?.moodPoints) {
+    return TaskPointsCore.moodPoints(score, state);
+  }
+  return Number.isFinite(score) ? score : 0;
 }
 
 function addCompletion(entry){
@@ -1347,7 +1369,10 @@ function load() {
         opponentDripSchedules: [],
         projects:     loadProjectsFromStorage(),
         youImageId:   "",
-        habitTagColors: {}
+        habitTagColors: {},
+        scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
+          ? TaskPointsCore.normalizeScoringSettings({})
+          : {}
       };
     }
 
@@ -1366,7 +1391,10 @@ function load() {
       opponentDripSchedules: Array.isArray(p.opponentDripSchedules) ? p.opponentDripSchedules : [],
       projects:     Array.isArray(p.projects)     ? p.projects     : storedProjects,
       youImageId:   typeof p.youImageId === "string" ? p.youImageId : "",
-      habitTagColors: normalizeHabitTagColors(p.habitTagColors)
+      habitTagColors: normalizeHabitTagColors(p.habitTagColors),
+      scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
+        ? TaskPointsCore.normalizeScoringSettings(p.scoringSettings || {})
+        : (p.scoringSettings || {})
     };
   } catch (e) {
     console.error('Failed to load TaskPoints state on main page', e);
@@ -1382,7 +1410,10 @@ function load() {
       opponentDripSchedules: [],
       projects:     loadProjectsFromStorage(),
       youImageId:   "",
-      habitTagColors: {}
+      habitTagColors: {},
+      scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
+        ? TaskPointsCore.normalizeScoringSettings({})
+        : {}
     };
   }
 }
@@ -2017,7 +2048,10 @@ function normalizeState(s) {
     opponentDripSchedules: Array.isArray(s.opponentDripSchedules) ? s.opponentDripSchedules : [],
     youImageId:  typeof s.youImageId === "string" ? s.youImageId : "",
     projects:    Array.isArray(s.projects)    ? s.projects    : loadProjectsFromStorage(),
-    habitTagColors: normalizeHabitTagColors(s.habitTagColors)
+    habitTagColors: normalizeHabitTagColors(s.habitTagColors),
+    scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
+      ? TaskPointsCore.normalizeScoringSettings(s.scoringSettings || {})
+      : (s.scoringSettings || {})
   };
 }
 
@@ -2084,7 +2118,10 @@ function resetAll(){
     matchups:     [],
     schedule:     [],
     projects:     [],
-    habitTagColors: {}
+    habitTagColors: {},
+    scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
+      ? TaskPointsCore.normalizeScoringSettings({})
+      : {}
   };
 
   // Re-render everything so the page doesn't look broken
@@ -2327,6 +2364,9 @@ function niceDate(d){
 }
 
 function aggregateCompletionsByDate(completions){
+  if (window.TaskPointsCore?.aggregateCompletionsByDate) {
+    return TaskPointsCore.aggregateCompletionsByDate(completions || [], state);
+  }
   const dailyTotals   = {};
   const weeklyTotals  = {};
   const monthlyTotals = {};
@@ -2357,6 +2397,9 @@ function aggregateCompletionsByDate(completions){
 }
 
 function computeInertia(dailyTotals, todayK){
+  if (window.TaskPointsCore?.computeInertia) {
+    return TaskPointsCore.computeInertia(dailyTotals, todayK, state);
+  }
   const today = fromKey(todayK);
   if (!today || isNaN(today.getTime())) return { inertia: 0, average: 0 };
 
@@ -2400,6 +2443,9 @@ function computeInertia(dailyTotals, todayK){
 }
 
 function deriveTodayWithInertia(dailyTotals, todayK){
+  if (window.TaskPointsCore?.deriveTodayWithInertia) {
+    return TaskPointsCore.deriveTodayWithInertia(dailyTotals, todayK, state);
+  }
   const { inertia, average } = computeInertia(dailyTotals, todayK);
   const todayBase = Number(dailyTotals[todayK]) || 0;
   const todayPoints = Math.round((todayBase + inertia) * 10) / 10;
@@ -2419,7 +2465,12 @@ function renderTodayPointsSummary(todayPoints, inertia, inertiaAvg){
   if (inertiaValueEl) inertiaValueEl.textContent = (Number.isFinite(inertia) ? inertia : 0).toFixed(1);
 
   const inertiaAvgEl = $('inertiaAverage');
-  if (inertiaAvgEl) inertiaAvgEl.textContent = `7-day avg: ${(Number.isFinite(inertiaAvg) ? inertiaAvg : 0).toFixed(1)}`;
+  if (inertiaAvgEl) {
+    const inertiaDays = window.TaskPointsCore?.getScoringSettings
+      ? TaskPointsCore.getScoringSettings(state).inertia?.windowDays
+      : 7;
+    inertiaAvgEl.textContent = `${inertiaDays || 7}-day avg: ${(Number.isFinite(inertiaAvg) ? inertiaAvg : 0).toFixed(1)}`;
+  }
 }
 
 function todaysPointsTotal(){
@@ -4879,7 +4930,7 @@ function editTodayMood() {
   d.setHours(12, 0, 0, 0);
 
   entry.title = `Mood Score (${num})`;
-  entry.points = num;
+  entry.points = moodPoints(num);
   entry.completedAtISO = d.toISOString();
   entry.source = 'metric';
 
@@ -4894,7 +4945,7 @@ function saveMoodScore() {
   const raw = Number(rawStr);
   if (Number.isNaN(raw)) return alert("Mood Score must be a number.");
 
-  const pts = raw;
+  const pts = moodPoints(raw);
 
   const d = new Date();
   d.setHours(12, 0, 0, 0);
@@ -5044,7 +5095,7 @@ setTodayMoodEditable(moodImpactBelow);
       if (isNaN(num)) return alert("Invalid number.");
 
       entry.title = `Mood Score (${num})`;
-      entry.points = num;
+      entry.points = moodPoints(num);
 
       save();
       renderAll();

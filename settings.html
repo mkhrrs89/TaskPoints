@@ -185,6 +185,134 @@
         </div>
       </div>
 
+      <div class="glass space-y-4" id="scoringSettingsSection">
+        <div class="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <div class="text-lg font-semibold">Scoring Systems</div>
+            <div class="muted text-sm">Customize how work, sleep, calories, mood, and inertia points are calculated. Changes auto-save and apply to all history.</div>
+          </div>
+        </div>
+
+        <div class="space-y-4">
+          <div class="rounded-xl border border-white/10 bg-black/20 p-4 space-y-3">
+            <div class="font-semibold">Sleep</div>
+            <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-sm">
+              <label>
+                <span class="block muted text-xs">Base divisor</span>
+                <input id="sleepBaseDivisor" type="number" step="0.1" class="input w-full" />
+              </label>
+              <label>
+                <span class="block muted text-xs">Base multiplier</span>
+                <input id="sleepBaseMultiplier" type="number" step="0.1" class="input w-full" />
+              </label>
+              <label>
+                <span class="block muted text-xs">Base offset</span>
+                <input id="sleepBaseOffset" type="number" step="0.1" class="input w-full" />
+              </label>
+              <label>
+                <span class="block muted text-xs">Rested multiplier</span>
+                <input id="sleepRestedMultiplier" type="number" step="0.1" class="input w-full" />
+              </label>
+            </div>
+            <div class="space-y-2">
+              <div class="text-sm font-semibold">Bonus tiers</div>
+              <div id="sleepBonusTiers" class="space-y-2"></div>
+              <button id="sleepAddBonusTier" type="button" class="btn btn-ghost btn-toolbar nav-btn text-xs">Add bonus tier</button>
+              <p class="muted text-xs">Each tier adds bonus points when the score meets the minimum.</p>
+            </div>
+          </div>
+
+          <div class="rounded-xl border border-white/10 bg-black/20 p-4 space-y-3">
+            <div class="font-semibold">Work</div>
+            <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-sm">
+              <label>
+                <span class="block muted text-xs">Score multiplier</span>
+                <input id="workBaseMultiplier" type="number" step="0.1" class="input w-full" />
+              </label>
+              <label>
+                <span class="block muted text-xs">Score offset</span>
+                <input id="workBaseOffset" type="number" step="0.1" class="input w-full" />
+              </label>
+              <label>
+                <span class="block muted text-xs">Hours multiplier</span>
+                <input id="workHoursMultiplier" type="number" step="0.1" class="input w-full" />
+              </label>
+              <label>
+                <span class="block muted text-xs">Hours offset</span>
+                <input id="workHoursOffset" type="number" step="0.1" class="input w-full" />
+              </label>
+              <label>
+                <span class="block muted text-xs">Hours min</span>
+                <input id="workHoursMin" type="number" step="0.1" class="input w-full" />
+              </label>
+              <label>
+                <span class="block muted text-xs">Hours max (blank = no cap)</span>
+                <input id="workHoursMax" type="number" step="0.1" class="input w-full" />
+              </label>
+            </div>
+          </div>
+
+          <div class="rounded-xl border border-white/10 bg-black/20 p-4 space-y-3">
+            <div class="font-semibold">Calories</div>
+            <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-sm">
+              <label>
+                <span class="block muted text-xs">Target calories</span>
+                <input id="caloriesTarget" type="number" step="1" class="input w-full" />
+              </label>
+              <label>
+                <span class="block muted text-xs">Points per 100 calories</span>
+                <input id="caloriesPointsPer100" type="number" step="0.1" class="input w-full" />
+              </label>
+              <label>
+                <span class="block muted text-xs">Min points (blank = no limit)</span>
+                <input id="caloriesMinPoints" type="number" step="0.1" class="input w-full" />
+              </label>
+              <label>
+                <span class="block muted text-xs">Max points (blank = no limit)</span>
+                <input id="caloriesMaxPoints" type="number" step="0.1" class="input w-full" />
+              </label>
+            </div>
+          </div>
+
+          <div class="rounded-xl border border-white/10 bg-black/20 p-4 space-y-3">
+            <div class="font-semibold">Mood</div>
+            <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-sm">
+              <label>
+                <span class="block muted text-xs">Multiplier</span>
+                <input id="moodMultiplier" type="number" step="0.1" class="input w-full" />
+              </label>
+              <label>
+                <span class="block muted text-xs">Offset</span>
+                <input id="moodOffset" type="number" step="0.1" class="input w-full" />
+              </label>
+              <label>
+                <span class="block muted text-xs">Min points (blank = no limit)</span>
+                <input id="moodMinPoints" type="number" step="0.1" class="input w-full" />
+              </label>
+              <label>
+                <span class="block muted text-xs">Max points (blank = no limit)</span>
+                <input id="moodMaxPoints" type="number" step="0.1" class="input w-full" />
+              </label>
+            </div>
+          </div>
+
+          <div class="rounded-xl border border-white/10 bg-black/20 p-4 space-y-3">
+            <div class="font-semibold">Inertia</div>
+            <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-sm">
+              <label>
+                <span class="block muted text-xs">Window days</span>
+                <input id="inertiaWindowDays" type="number" step="1" min="1" class="input w-full" />
+              </label>
+              <label>
+                <span class="block muted text-xs">Multiplier</span>
+                <input id="inertiaMultiplier" type="number" step="0.01" class="input w-full" />
+              </label>
+            </div>
+            <p class="muted text-xs">Inertia adds a percentage of your previous window average to today.</p>
+          </div>
+        </div>
+      </div>
+
       <div class="glass space-y-3" id="habitTagColorsSection">
         <div class="flex items-center justify-between gap-3 flex-wrap">
           <div>
@@ -280,7 +408,10 @@
         schedule:    Array.isArray(s.schedule)    ? s.schedule    : [],
         workHistory: Array.isArray(s.workHistory) ? s.workHistory : [],
         youImageId:  typeof s.youImageId === "string" ? s.youImageId : "",
-        habitTagColors: normalizeHabitTagColors(s.habitTagColors)
+        habitTagColors: normalizeHabitTagColors(s.habitTagColors),
+        scoringSettings: (window.TaskPointsCore?.normalizeScoringSettings)
+          ? TaskPointsCore.normalizeScoringSettings(s.scoringSettings || {})
+          : (s.scoringSettings || {})
       };
     }
 
@@ -453,6 +584,155 @@
         delete nextColors[tag];
       }
       saveSettingsState({ ...state, habitTagColors: nextColors });
+    }
+
+    function parseScoringNumber(value) {
+      if (value == null) return null;
+      const raw = String(value).trim();
+      if (!raw) return null;
+      const num = Number(raw);
+      return Number.isFinite(num) ? num : null;
+    }
+
+    function getScoringSettingsFromForm() {
+      const read = (id) => parseScoringNumber(document.getElementById(id)?.value);
+      const tiers = Array.from(document.querySelectorAll('[data-sleep-tier]')).map(row => {
+        const min = parseScoringNumber(row.querySelector('[data-sleep-tier-min]')?.value);
+        const bonus = parseScoringNumber(row.querySelector('[data-sleep-tier-bonus]')?.value);
+        return { min, bonus };
+      }).filter(tier => tier.min != null && tier.bonus != null);
+
+      return {
+        sleep: {
+          baseDivisor: read('sleepBaseDivisor'),
+          baseMultiplier: read('sleepBaseMultiplier'),
+          baseOffset: read('sleepBaseOffset'),
+          restedMultiplier: read('sleepRestedMultiplier'),
+          bonusTiers: tiers
+        },
+        work: {
+          baseMultiplier: read('workBaseMultiplier'),
+          baseOffset: read('workBaseOffset'),
+          hoursMultiplier: read('workHoursMultiplier'),
+          hoursOffset: read('workHoursOffset'),
+          hoursMin: read('workHoursMin'),
+          hoursMax: read('workHoursMax')
+        },
+        calories: {
+          target: read('caloriesTarget'),
+          pointsPer100: read('caloriesPointsPer100'),
+          minPoints: read('caloriesMinPoints'),
+          maxPoints: read('caloriesMaxPoints')
+        },
+        mood: {
+          multiplier: read('moodMultiplier'),
+          offset: read('moodOffset'),
+          minPoints: read('moodMinPoints'),
+          maxPoints: read('moodMaxPoints')
+        },
+        inertia: {
+          windowDays: read('inertiaWindowDays'),
+          multiplier: read('inertiaMultiplier')
+        }
+      };
+    }
+
+    function applyScoringSettingsUpdate(nextSettings) {
+      const state = loadSettingsState();
+      const normalized = window.TaskPointsCore?.normalizeScoringSettings
+        ? TaskPointsCore.normalizeScoringSettings(nextSettings)
+        : nextSettings;
+      let nextState = { ...state, scoringSettings: normalized };
+
+      if (window.TaskPointsCore?.syncDerivedPoints) {
+        const derivedSync = TaskPointsCore.syncDerivedPoints(nextState);
+        nextState = derivedSync.state;
+      }
+      if (window.TaskPointsCore?.syncYouMatchups) {
+        const matchupSync = TaskPointsCore.syncYouMatchups(nextState);
+        nextState = matchupSync.state;
+      }
+
+      saveSettingsState(nextState);
+    }
+
+    function renderSleepBonusTiers(settings) {
+      const list = document.getElementById('sleepBonusTiers');
+      if (!list) return;
+      list.innerHTML = '';
+
+      const tiers = settings?.sleep?.bonusTiers || [];
+      tiers.forEach((tier, index) => {
+        const row = document.createElement('div');
+        row.className = 'flex flex-wrap items-center gap-2 text-sm';
+        row.setAttribute('data-sleep-tier', String(index));
+
+        row.innerHTML = `
+          <label class="flex items-center gap-2">
+            <span class="muted text-xs">Min score</span>
+            <input type="number" step="0.1" class="input w-24" data-sleep-tier-min value="${tier.min}">
+          </label>
+          <label class="flex items-center gap-2">
+            <span class="muted text-xs">Bonus</span>
+            <input type="number" step="0.1" class="input w-24" data-sleep-tier-bonus value="${tier.bonus}">
+          </label>
+          <button type="button" class="btn btn-ghost btn-toolbar nav-btn text-xs" data-sleep-tier-remove>Remove</button>
+        `;
+
+        list.appendChild(row);
+
+        row.querySelectorAll('input').forEach(input => {
+          input.addEventListener('input', () => {
+            applyScoringSettingsUpdate(getScoringSettingsFromForm());
+          });
+        });
+        row.querySelector('[data-sleep-tier-remove]')?.addEventListener('click', () => {
+          const updated = getScoringSettingsFromForm();
+          updated.sleep.bonusTiers.splice(index, 1);
+          applyScoringSettingsUpdate(updated);
+          renderScoringSettings();
+        });
+      });
+    }
+
+    function renderScoringSettings() {
+      const state = loadSettingsState();
+      const settings = window.TaskPointsCore?.getScoringSettings
+        ? TaskPointsCore.getScoringSettings(state)
+        : (state.scoringSettings || {});
+
+      const setValue = (id, value) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.value = (value == null ? '' : value);
+      };
+
+      setValue('sleepBaseDivisor', settings.sleep?.baseDivisor);
+      setValue('sleepBaseMultiplier', settings.sleep?.baseMultiplier);
+      setValue('sleepBaseOffset', settings.sleep?.baseOffset);
+      setValue('sleepRestedMultiplier', settings.sleep?.restedMultiplier);
+
+      setValue('workBaseMultiplier', settings.work?.baseMultiplier);
+      setValue('workBaseOffset', settings.work?.baseOffset);
+      setValue('workHoursMultiplier', settings.work?.hoursMultiplier);
+      setValue('workHoursOffset', settings.work?.hoursOffset);
+      setValue('workHoursMin', settings.work?.hoursMin);
+      setValue('workHoursMax', settings.work?.hoursMax);
+
+      setValue('caloriesTarget', settings.calories?.target);
+      setValue('caloriesPointsPer100', settings.calories?.pointsPer100);
+      setValue('caloriesMinPoints', settings.calories?.minPoints);
+      setValue('caloriesMaxPoints', settings.calories?.maxPoints);
+
+      setValue('moodMultiplier', settings.mood?.multiplier);
+      setValue('moodOffset', settings.mood?.offset);
+      setValue('moodMinPoints', settings.mood?.minPoints);
+      setValue('moodMaxPoints', settings.mood?.maxPoints);
+
+      setValue('inertiaWindowDays', settings.inertia?.windowDays);
+      setValue('inertiaMultiplier', settings.inertia?.multiplier);
+
+      renderSleepBonusTiers(settings);
     }
 
     function renderHabitTagColors() {
@@ -1147,7 +1427,44 @@
       document.getElementById('settingsResetGameStatsBtn')?.addEventListener('click', handleSettingsResetGameStats);
       document.getElementById('settingsResetBtn')?.addEventListener('click', handleSettingsReset);
       document.getElementById('settingsExportMatchupsBtn')?.addEventListener('click', exportMatchupsAndHistoryCsv);
+      renderScoringSettings();
       renderHabitTagColors();
+
+      const scoringInputIds = [
+        'sleepBaseDivisor',
+        'sleepBaseMultiplier',
+        'sleepBaseOffset',
+        'sleepRestedMultiplier',
+        'workBaseMultiplier',
+        'workBaseOffset',
+        'workHoursMultiplier',
+        'workHoursOffset',
+        'workHoursMin',
+        'workHoursMax',
+        'caloriesTarget',
+        'caloriesPointsPer100',
+        'caloriesMinPoints',
+        'caloriesMaxPoints',
+        'moodMultiplier',
+        'moodOffset',
+        'moodMinPoints',
+        'moodMaxPoints',
+        'inertiaWindowDays',
+        'inertiaMultiplier'
+      ];
+
+      scoringInputIds.forEach(id => {
+        document.getElementById(id)?.addEventListener('input', () => {
+          applyScoringSettingsUpdate(getScoringSettingsFromForm());
+        });
+      });
+
+      document.getElementById('sleepAddBonusTier')?.addEventListener('click', () => {
+        const current = getScoringSettingsFromForm();
+        current.sleep.bonusTiers.push({ min: 0, bonus: 0 });
+        applyScoringSettingsUpdate(current);
+        renderScoringSettings();
+      });
 
       const runButton = document.getElementById("runSimulationBtn");
       const downloadButton = document.getElementById("downloadSimulationBtn");

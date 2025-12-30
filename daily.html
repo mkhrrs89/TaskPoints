@@ -84,6 +84,9 @@
 
     // Same bonus rules as main app
     function sleepBonus(score) {
+      if (window.TaskPointsCore?.sleepBonus) {
+        return TaskPointsCore.sleepBonus(score, state);
+      }
       if (score >= 100) return 3;
       if (score >= 98) return 2;
       if (score >= 95) return 1;
@@ -103,6 +106,9 @@
     }
 
     function sleepPoints(score, rested = 0) {
+      if (window.TaskPointsCore?.sleepPoints) {
+        return TaskPointsCore.sleepPoints(score, rested, state);
+      }
       if (!Number.isFinite(score)) return 0;
       const base  = score / 10;
       const bonus = sleepBonus(score);
@@ -122,11 +128,17 @@
     }
 
     function workHoursBonus(hours = 0) {
+      if (window.TaskPointsCore?.workHoursBonus) {
+        return TaskPointsCore.workHoursBonus(hours, state);
+      }
       if (!Number.isFinite(hours)) return 0;
       return Math.max(0, hours) * 10;
     }
 
     function workPoints(score, hours = 0) {
+      if (window.TaskPointsCore?.workPoints) {
+        return TaskPointsCore.workPoints(score, hours, state);
+      }
       if (!Number.isFinite(score)) return 0;
       return score + workHoursBonus(hours);
     }
@@ -135,7 +147,20 @@
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
         if (!raw) {
-          return { tasks: [], completions: [], players: [], habits: [], flexActions: [], gameHistory: [], matchups: [], schedule: [], opponentDripSchedules: [] };
+          return {
+            tasks: [],
+            completions: [],
+            players: [],
+            habits: [],
+            flexActions: [],
+            gameHistory: [],
+            matchups: [],
+            schedule: [],
+            opponentDripSchedules: [],
+            scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
+              ? TaskPointsCore.normalizeScoringSettings({})
+              : {}
+          };
         }
 
         const parsed = JSON.parse(raw) || {};
@@ -149,10 +174,26 @@
           matchups:    Array.isArray(parsed.matchups)    ? parsed.matchups    : [],
           schedule:    Array.isArray(parsed.schedule)    ? parsed.schedule    : [],
           opponentDripSchedules: Array.isArray(parsed.opponentDripSchedules) ? parsed.opponentDripSchedules : [],
+          scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
+            ? TaskPointsCore.normalizeScoringSettings(parsed.scoringSettings || {})
+            : (parsed.scoringSettings || {})
         };
       } catch (e) {
         console.error("Failed to load TaskPoints state", e);
-        return { tasks: [], completions: [], players: [], habits: [], flexActions: [], gameHistory: [], matchups: [], schedule: [], opponentDripSchedules: [] };
+        return {
+          tasks: [],
+          completions: [],
+          players: [],
+          habits: [],
+          flexActions: [],
+          gameHistory: [],
+          matchups: [],
+          schedule: [],
+          opponentDripSchedules: [],
+          scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
+            ? TaskPointsCore.normalizeScoringSettings({})
+            : {}
+        };
       }
     }
 
@@ -201,7 +242,10 @@ function normalizeState(s) {
     opponentDripSchedules: Array.isArray(s.opponentDripSchedules) ? s.opponentDripSchedules : [],
     workHistory: Array.isArray(s.workHistory) ? s.workHistory : [],
     youImageId:  typeof s.youImageId === "string" ? s.youImageId : "",
-    habitTagColors: normalizeHabitTagColors(s.habitTagColors)
+    habitTagColors: normalizeHabitTagColors(s.habitTagColors),
+    scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
+      ? TaskPointsCore.normalizeScoringSettings(s.scoringSettings || {})
+      : (s.scoringSettings || {})
   };
 }
 

@@ -160,6 +160,7 @@
   const CATEGORY_DEFS = [
     { key: "sleep",    label: "Sleep",    match: c => typeof c?.title === "string" && c.title.startsWith("Sleep Score (") },
     { key: "calories", label: "Calories", match: c => typeof c?.title === "string" && c.title.toLowerCase().startsWith("calories") },
+    { key: "mood",     label: "Mood",     match: c => typeof c?.title === "string" && c.title.startsWith("Mood Score (") },
     { key: "habits",   label: "Habits",   match: c => c?.source === "habit" },
     { key: "vices",    label: "Vices",    match: c => c?.source === "vice" },
     { key: "flex",     label: "Flex",     match: c => c?.source === "flex" },
@@ -167,6 +168,175 @@
     { key: "game",     label: "Game",     match: c => c?.source === "game" },
     { key: "tasks",    label: "Tasks",    match: () => true }
   ];
+
+  const DEFAULT_SCORING_SETTINGS = {
+    sleep: {
+      baseDivisor: 10,
+      baseMultiplier: 1,
+      baseOffset: 0,
+      restedMultiplier: 1,
+      bonusTiers: [
+        { min: 100, bonus: 3 },
+        { min: 98, bonus: 2 },
+        { min: 95, bonus: 1 }
+      ]
+    },
+    work: {
+      baseMultiplier: 1,
+      baseOffset: 0,
+      hoursMultiplier: 10,
+      hoursOffset: 0,
+      hoursMin: 0,
+      hoursMax: null
+    },
+    calories: {
+      target: 2400,
+      pointsPer100: 1,
+      minPoints: 0,
+      maxPoints: 10
+    },
+    mood: {
+      multiplier: 1,
+      offset: 0,
+      minPoints: null,
+      maxPoints: null
+    },
+    inertia: {
+      windowDays: 7,
+      multiplier: 0.25
+    }
+  };
+
+  function toFiniteNumber(value) {
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+  }
+
+  function normalizeBonusTiers(tiers, fallback) {
+    const source = Array.isArray(tiers) ? tiers : fallback;
+    const cleaned = [];
+    source.forEach(tier => {
+      if (!tier || typeof tier !== 'object') return;
+      const min = toFiniteNumber(tier.min);
+      const bonus = toFiniteNumber(tier.bonus);
+      if (min == null || bonus == null) return;
+      cleaned.push({ min, bonus });
+    });
+    return cleaned.sort((a, b) => b.min - a.min);
+  }
+
+  function normalizeScoringSettings(settings = {}) {
+    const sleepInput = settings?.sleep || {};
+    const workInput = settings?.work || {};
+    const caloriesInput = settings?.calories || {};
+    const moodInput = settings?.mood || {};
+    const inertiaInput = settings?.inertia || {};
+
+    const sleepBaseDivisor = toFiniteNumber(sleepInput.baseDivisor);
+    const sleepBaseMultiplier = toFiniteNumber(sleepInput.baseMultiplier);
+    const sleepBaseOffset = toFiniteNumber(sleepInput.baseOffset);
+    const sleepRestedMultiplier = toFiniteNumber(sleepInput.restedMultiplier);
+
+    const workBaseMultiplier = toFiniteNumber(workInput.baseMultiplier);
+    const workBaseOffset = toFiniteNumber(workInput.baseOffset);
+    const workHoursMultiplier = toFiniteNumber(workInput.hoursMultiplier);
+    const workHoursOffset = toFiniteNumber(workInput.hoursOffset);
+    const workHoursMin = Object.prototype.hasOwnProperty.call(workInput, 'hoursMin')
+      ? toFiniteNumber(workInput.hoursMin)
+      : null;
+    const workHoursMax = Object.prototype.hasOwnProperty.call(workInput, 'hoursMax')
+      ? toFiniteNumber(workInput.hoursMax)
+      : null;
+
+    const caloriesTarget = toFiniteNumber(caloriesInput.target);
+    const caloriesPointsPer100 = toFiniteNumber(caloriesInput.pointsPer100);
+    const caloriesMin = Object.prototype.hasOwnProperty.call(caloriesInput, 'minPoints')
+      ? (caloriesInput.minPoints === null ? null : toFiniteNumber(caloriesInput.minPoints))
+      : null;
+    const caloriesMax = Object.prototype.hasOwnProperty.call(caloriesInput, 'maxPoints')
+      ? (caloriesInput.maxPoints === null ? null : toFiniteNumber(caloriesInput.maxPoints))
+      : null;
+
+    const moodMultiplier = toFiniteNumber(moodInput.multiplier);
+    const moodOffset = toFiniteNumber(moodInput.offset);
+    const moodMin = Object.prototype.hasOwnProperty.call(moodInput, 'minPoints')
+      ? (moodInput.minPoints === null ? null : toFiniteNumber(moodInput.minPoints))
+      : null;
+    const moodMax = Object.prototype.hasOwnProperty.call(moodInput, 'maxPoints')
+      ? (moodInput.maxPoints === null ? null : toFiniteNumber(moodInput.maxPoints))
+      : null;
+
+    const inertiaWindow = toFiniteNumber(inertiaInput.windowDays);
+    const inertiaMultiplier = toFiniteNumber(inertiaInput.multiplier);
+
+    return {
+      sleep: {
+        baseDivisor: sleepBaseDivisor && sleepBaseDivisor > 0 ? sleepBaseDivisor : DEFAULT_SCORING_SETTINGS.sleep.baseDivisor,
+        baseMultiplier: sleepBaseMultiplier != null ? sleepBaseMultiplier : DEFAULT_SCORING_SETTINGS.sleep.baseMultiplier,
+        baseOffset: sleepBaseOffset != null ? sleepBaseOffset : DEFAULT_SCORING_SETTINGS.sleep.baseOffset,
+        restedMultiplier: sleepRestedMultiplier != null ? sleepRestedMultiplier : DEFAULT_SCORING_SETTINGS.sleep.restedMultiplier,
+        bonusTiers: normalizeBonusTiers(sleepInput.bonusTiers, DEFAULT_SCORING_SETTINGS.sleep.bonusTiers)
+      },
+      work: {
+        baseMultiplier: workBaseMultiplier != null ? workBaseMultiplier : DEFAULT_SCORING_SETTINGS.work.baseMultiplier,
+        baseOffset: workBaseOffset != null ? workBaseOffset : DEFAULT_SCORING_SETTINGS.work.baseOffset,
+        hoursMultiplier: workHoursMultiplier != null ? workHoursMultiplier : DEFAULT_SCORING_SETTINGS.work.hoursMultiplier,
+        hoursOffset: workHoursOffset != null ? workHoursOffset : DEFAULT_SCORING_SETTINGS.work.hoursOffset,
+        hoursMin: workHoursMin != null ? workHoursMin : DEFAULT_SCORING_SETTINGS.work.hoursMin,
+        hoursMax: Object.prototype.hasOwnProperty.call(workInput, 'hoursMax')
+          ? workHoursMax
+          : DEFAULT_SCORING_SETTINGS.work.hoursMax
+      },
+      calories: {
+        target: caloriesTarget != null ? caloriesTarget : DEFAULT_SCORING_SETTINGS.calories.target,
+        pointsPer100: caloriesPointsPer100 != null ? caloriesPointsPer100 : DEFAULT_SCORING_SETTINGS.calories.pointsPer100,
+        minPoints: Object.prototype.hasOwnProperty.call(caloriesInput, 'minPoints')
+          ? caloriesMin
+          : DEFAULT_SCORING_SETTINGS.calories.minPoints,
+        maxPoints: Object.prototype.hasOwnProperty.call(caloriesInput, 'maxPoints')
+          ? caloriesMax
+          : DEFAULT_SCORING_SETTINGS.calories.maxPoints
+      },
+      mood: {
+        multiplier: moodMultiplier != null ? moodMultiplier : DEFAULT_SCORING_SETTINGS.mood.multiplier,
+        offset: moodOffset != null ? moodOffset : DEFAULT_SCORING_SETTINGS.mood.offset,
+        minPoints: Object.prototype.hasOwnProperty.call(moodInput, 'minPoints')
+          ? moodMin
+          : DEFAULT_SCORING_SETTINGS.mood.minPoints,
+        maxPoints: Object.prototype.hasOwnProperty.call(moodInput, 'maxPoints')
+          ? moodMax
+          : DEFAULT_SCORING_SETTINGS.mood.maxPoints
+      },
+      inertia: {
+        windowDays: inertiaWindow && inertiaWindow >= 1 ? Math.round(inertiaWindow) : DEFAULT_SCORING_SETTINGS.inertia.windowDays,
+        multiplier: inertiaMultiplier != null ? inertiaMultiplier : DEFAULT_SCORING_SETTINGS.inertia.multiplier
+      }
+    };
+  }
+
+  function getScoringSettings(stateOrSettings) {
+    if (stateOrSettings && typeof stateOrSettings === 'object') {
+      if (Object.prototype.hasOwnProperty.call(stateOrSettings, 'sleep')
+        || Object.prototype.hasOwnProperty.call(stateOrSettings, 'work')
+        || Object.prototype.hasOwnProperty.call(stateOrSettings, 'calories')) {
+        return normalizeScoringSettings(stateOrSettings);
+      }
+      if (Object.prototype.hasOwnProperty.call(stateOrSettings, 'scoringSettings')) {
+        return normalizeScoringSettings(stateOrSettings.scoringSettings);
+      }
+    }
+
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) || {};
+        return normalizeScoringSettings(parsed.scoringSettings || {});
+      }
+    } catch (err) {
+      console.warn('Failed to load scoring settings from storage', err);
+    }
+    return normalizeScoringSettings({});
+  }
 
   function normalizeTask(task){
     if(!task || typeof task !== 'object') return task;
@@ -237,7 +407,8 @@
       workHistory: Array.isArray(s?.workHistory) ? s.workHistory : [],
       youImageId:  typeof s?.youImageId === "string" ? s.youImageId : "",
       projects:    Array.isArray(s?.projects)    ? s.projects    : [],
-      habitTagColors: normalizeHabitTagColors(s?.habitTagColors)
+      habitTagColors: normalizeHabitTagColors(s?.habitTagColors),
+      scoringSettings: normalizeScoringSettings(s?.scoringSettings)
     };
   }
 
@@ -536,10 +707,14 @@
     return { start, end };
   }
 
-  function sleepBonus(score) {
-    if (score >= 100) return 3;
-    if (score >= 98) return 2;
-    if (score >= 95) return 1;
+  function sleepBonus(score, settings) {
+    const scoring = getScoringSettings(settings);
+    const tiers = scoring.sleep.bonusTiers || [];
+    const numScore = Number(score);
+    if (!Number.isFinite(numScore)) return 0;
+    for (const tier of tiers) {
+      if (numScore >= tier.min) return tier.bonus;
+    }
     return 0;
   }
 
@@ -556,11 +731,14 @@
     return { score, rested };
   }
 
-  function sleepPoints(score, rested = 0) {
+  function sleepPoints(score, rested = 0, settings) {
     if (!Number.isFinite(score)) return 0;
-    const base  = score / 10;
-    const bonus = sleepBonus(score);
-    return base + bonus + (Number.isFinite(rested) ? rested : 0);
+    const scoring = getScoringSettings(settings);
+    const sleep = scoring.sleep;
+    const base = (score / sleep.baseDivisor) * sleep.baseMultiplier + sleep.baseOffset;
+    const bonus = sleepBonus(score, scoring);
+    const restedValue = Number.isFinite(rested) ? rested : 0;
+    return base + bonus + (restedValue * sleep.restedMultiplier);
   }
 
   function getWorkInfo(entry) {
@@ -576,14 +754,25 @@
     return { score, hours };
   }
 
-  function workHoursBonus(hours = 0) {
-    if (!Number.isFinite(hours)) return 0;
-    return Math.max(0, hours) * 10;
+  function workHoursBonus(hours = 0, settings) {
+    const scoring = getScoringSettings(settings);
+    const work = scoring.work;
+    let hoursValue = Number.isFinite(hours) ? hours : 0;
+    if (Number.isFinite(work.hoursMin)) {
+      hoursValue = Math.max(work.hoursMin, hoursValue);
+    }
+    if (Number.isFinite(work.hoursMax)) {
+      hoursValue = Math.min(work.hoursMax, hoursValue);
+    }
+    return (hoursValue * work.hoursMultiplier) + work.hoursOffset;
   }
 
-  function workPoints(score, hours = 0) {
+  function workPoints(score, hours = 0, settings) {
     if (!Number.isFinite(score)) return 0;
-    return score + workHoursBonus(hours);
+    const scoring = getScoringSettings(settings);
+    const work = scoring.work;
+    const base = (score * work.baseMultiplier) + work.baseOffset;
+    return base + workHoursBonus(hours, scoring);
   }
 
   function roundPoints(value, decimals = 2) {
@@ -605,12 +794,34 @@
     return Number.isFinite(raw) ? raw : null;
   }
 
-  function deriveCompletionPoints(entry) {
+  function getMoodInfo(entry) {
+    const title = typeof entry?.title === 'string' ? entry.title : '';
+    const match = title.match(/^Mood Score\s*\(([-0-9]+(?:\.\d+)?)\)/i);
+    const score = match ? Number(match[1]) : null;
+    return { score };
+  }
+
+  function moodPoints(score, settings) {
+    if (!Number.isFinite(score)) return 0;
+    const scoring = getScoringSettings(settings);
+    const mood = scoring.mood;
+    let points = (score * mood.multiplier) + mood.offset;
+    if (Number.isFinite(mood.minPoints)) {
+      points = Math.max(mood.minPoints, points);
+    }
+    if (Number.isFinite(mood.maxPoints)) {
+      points = Math.min(mood.maxPoints, points);
+    }
+    return points;
+  }
+
+  function deriveCompletionPoints(entry, settings) {
     if (!entry) return null;
+    const scoring = getScoringSettings(settings);
     const sleepInfo = getSleepInfo(entry);
     if (Number.isFinite(sleepInfo.score)) {
       return {
-        points: roundPoints(sleepPoints(sleepInfo.score, sleepInfo.rested)),
+        points: roundPoints(sleepPoints(sleepInfo.score, sleepInfo.rested, scoring)),
         formula: 'sleep',
         inputs: sleepInfo
       };
@@ -619,7 +830,7 @@
     const workInfo = getWorkInfo(entry);
     if (Number.isFinite(workInfo.score)) {
       return {
-        points: roundPoints(workPoints(workInfo.score, workInfo.hours)),
+        points: roundPoints(workPoints(workInfo.score, workInfo.hours, scoring)),
         formula: 'work',
         inputs: workInfo
       };
@@ -628,7 +839,7 @@
     const caloriesRaw = parseCaloriesFromTitle(entry.title);
     if (Number.isFinite(caloriesRaw)) {
       return {
-        points: caloriesToPoints(caloriesRaw),
+        points: caloriesToPoints(caloriesRaw, scoring),
         formula: 'calories',
         inputs: { calories: caloriesRaw }
       };
@@ -638,26 +849,41 @@
     const entryPoints = Number(entry?.points);
     if (/^calories\b/i.test(title) && Number.isFinite(entryPoints) && entryPoints > 50 && entryPoints < 10000) {
       return {
-        points: caloriesToPoints(entryPoints),
+        points: caloriesToPoints(entryPoints, scoring),
         formula: 'calories',
         inputs: { calories: entryPoints }
+      };
+    }
+
+    const moodInfo = getMoodInfo(entry);
+    if (Number.isFinite(moodInfo.score)) {
+      return {
+        points: roundPoints(moodPoints(moodInfo.score, scoring)),
+        formula: 'mood',
+        inputs: moodInfo
       };
     }
 
     return null;
   }
 
-  function pointsForCompletion(entry) {
-    const derived = deriveCompletionPoints(entry);
+  function pointsForCompletion(entry, settings) {
+    const derived = deriveCompletionPoints(entry, settings);
     if (derived) return derived.points;
     return roundPoints(entry?.points);
   }
 
-  function caloriesToPoints(cal){
-    let pts = (2400 - cal) / 100;
+  function caloriesToPoints(cal, settings){
+    const scoring = getScoringSettings(settings);
+    const calories = scoring.calories;
+    let pts = ((calories.target - cal) / 100) * calories.pointsPer100;
 
-    if (pts < 0) pts = 0;
-    if (pts > 10) pts = 10;
+    if (Number.isFinite(calories.minPoints)) {
+      pts = Math.max(calories.minPoints, pts);
+    }
+    if (Number.isFinite(calories.maxPoints)) {
+      pts = Math.min(calories.maxPoints, pts);
+    }
 
     pts = Math.round(pts * 10) / 10;
     return pts;
@@ -674,7 +900,7 @@
     return 'tasks';
   }
 
-  function aggregateCompletionsByDate(completions){
+  function aggregateCompletionsByDate(completions, settings){
     const dailyTotals   = {};
     const weeklyTotals  = {};
     const monthlyTotals = {};
@@ -691,7 +917,7 @@
       const wk = isoWeekKey(d);
       const mk = monthKey(d);
 
-      const pts = pointsForCompletion(c);
+      const pts = pointsForCompletion(c, settings);
 
       dailyTotals[dk]   = addPoints(dailyTotals[dk], pts);
       weeklyTotals[wk]  = addPoints(weeklyTotals[wk], pts);
@@ -701,7 +927,9 @@
     return { dailyTotals, weeklyTotals, monthlyTotals };
   }
 
-  function computeInertia(dailyTotals, todayK){
+  function computeInertia(dailyTotals, todayK, settings){
+    const scoring = getScoringSettings(settings);
+    const inertiaSettings = scoring.inertia;
     const today = fromKey(todayK);
     if (!today || isNaN(today.getTime())) return { inertia: 0, average: 0 };
 
@@ -722,7 +950,7 @@
       let sum = 0;
       let count = 0;
 
-      for (let i = 1; i <= 7; i++) {
+      for (let i = 1; i <= inertiaSettings.windowDays; i++) {
         const d = new Date(current);
         d.setDate(current.getDate() - i);
         const key = dateKey(d);
@@ -734,7 +962,7 @@
       }
 
       const average = count ? sum / count : 0;
-      const inertia = count ? average * 0.25 : 0;
+      const inertia = count ? average * inertiaSettings.multiplier : 0;
 
       inertiaMap.set(k, { inertia, average });
       const base = Number(dailyTotals[k]) || 0;
@@ -744,8 +972,8 @@
     return inertiaMap.get(todayK) || { inertia: 0, average: 0 };
   }
 
-  function deriveTodayWithInertia(dailyTotals, todayK){
-    const { inertia, average } = computeInertia(dailyTotals, todayK);
+  function deriveTodayWithInertia(dailyTotals, todayK, settings){
+    const { inertia, average } = computeInertia(dailyTotals, todayK, settings);
     const todayBase = Number(dailyTotals[todayK]) || 0;
     const todayPoints = roundPoints(todayBase + inertia, 2);
 
@@ -755,6 +983,7 @@
   function buildDailyBreakdowns(state){
     const daily = {};
     const comps = Array.isArray(state?.completions) ? state.completions : [];
+    const scoringSettings = state?.scoringSettings || state;
 
     comps.forEach(c => {
       if (!c || !c.completedAtISO) return;
@@ -770,7 +999,7 @@
         };
       }
 
-      const pts = pointsForCompletion(c);
+      const pts = pointsForCompletion(c, scoringSettings);
       if (!pts) return;
 
       const catKey = categorizeCompletion(c);
@@ -780,7 +1009,7 @@
 
     const dailyTotals = Object.fromEntries(Object.entries(daily).map(([k, v]) => [k, Number(v.total) || 0]));
     Object.keys(dailyTotals).forEach(k => {
-      const { inertia } = computeInertia(dailyTotals, k);
+      const { inertia } = computeInertia(dailyTotals, k, scoringSettings);
       if (!inertia) return;
 
       daily[k].total = addPoints(daily[k].total, inertia);
@@ -792,13 +1021,13 @@
 
   function buildRollups(state){
     const normalized = normalizeState(state || {});
-    const { dailyTotals } = aggregateCompletionsByDate(normalized.completions);
+    const { dailyTotals } = aggregateCompletionsByDate(normalized.completions, normalized);
     const dailyTotalsWithInertia = {};
     const weeklyTotalsWithInertia = {};
     const monthlyTotalsWithInertia = {};
 
     Object.entries(dailyTotals).forEach(([k, base]) => {
-      const { inertia } = computeInertia(dailyTotals, k);
+      const { inertia } = computeInertia(dailyTotals, k, normalized);
       const inertiaVal = Number.isFinite(inertia) ? inertia : 0;
       const total = addPoints(base, inertiaVal);
       dailyTotalsWithInertia[k] = total;
@@ -846,7 +1075,7 @@
     const items = dayComps.map(c => {
       const category = categorizeCompletion(c);
       const label = typeof c.title === 'string' ? c.title : 'Untitled';
-      const pts = pointsForCompletion(c);
+      const pts = pointsForCompletion(c, normalized);
       return {
         source: c.source || 'task',
         id: c.id || c.taskId || label,
@@ -861,8 +1090,8 @@
     });
 
     const baseTotal = items.reduce((s, item) => addPoints(s, item.points), 0);
-    const { dailyTotals } = aggregateCompletionsByDate(comps);
-    const { inertia, average } = computeInertia(dailyTotals, key);
+    const { dailyTotals } = aggregateCompletionsByDate(comps, normalized);
+    const { inertia, average } = computeInertia(dailyTotals, key, normalized);
     const inertiaVal = Number.isFinite(inertia) ? inertia : 0;
 
     return {
@@ -918,7 +1147,7 @@
 
   function youDailyTotalsWithInertia(state){
     const normalized = normalizeState(state || {});
-    const { dailyTotals } = aggregateCompletionsByDate(normalized.completions);
+    const { dailyTotals } = aggregateCompletionsByDate(normalized.completions, normalized);
 
     const keys = new Set([
       ...Object.keys(dailyTotals),
@@ -945,7 +1174,7 @@
 
     normalized.completions = (normalized.completions || []).map(c => {
       if (!c) return c;
-      const derived = deriveCompletionPoints(c);
+      const derived = deriveCompletionPoints(c, normalized);
       if (!derived) return c;
 
       const storedRaw = Number(c.points);
@@ -1008,7 +1237,7 @@
     comps.forEach(c => {
       if (!c || !c.completedAtISO) return;
       const k = dateKey(c.completedAtISO);
-      const pts = pointsForCompletion(c);
+      const pts = pointsForCompletion(c, state);
       dayTotals[k] = addPoints(dayTotals[k], pts);
     });
 
@@ -1132,7 +1361,10 @@
     IMAGE_DB_NAME,
     IMAGE_STORE_NAME,
     CATEGORY_DEFS,
+    DEFAULT_SCORING_SETTINGS,
     normalizeTask,
+    normalizeScoringSettings,
+    getScoringSettings,
     normalizeState,
     loadAppState,
     pruneStateForStorage,
@@ -1160,6 +1392,7 @@
     computeGameHistoryRecord,
     computeRecord,
     caloriesToPoints,
+    moodPoints,
     categorizeCompletion,
     aggregateCompletionsByDate,
     computeInertia,
