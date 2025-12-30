@@ -319,54 +319,55 @@ body {
 /* --- Name + meta text (END) -------------------------------------------- */
 
 .gamehub-page .matchup-scoreboard {
-  grid-template-columns: minmax(0, 1fr) minmax(140px, 0.65fr) minmax(0, 1fr);
-  align-items: center;
-  gap: clamp(16px, 4vw, 32px);
-  padding: 14px 6px 18px;
+  grid-template-columns: minmax(0, 1fr) minmax(160px, 0.6fr) minmax(0, 1fr);
+  align-items: start;
+  gap: clamp(18px, 5vw, 42px);
+  padding: 10px 6px 18px;
   text-align: center;
 }
 
 .gamehub-page .matchup-scoreboard .scoreboard-side {
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
 .gamehub-page .matchup-scoreboard .scoreboard-role {
-  font-size: 0.95rem;
+  font-size: 1rem;
   font-weight: 700;
   color: #e7edf6;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
 .gamehub-page .matchup-scoreboard .scoreboard-identity {
   flex-direction: column;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
 .gamehub-page .matchup-scoreboard .scoreboard-name {
-  font-size: 1.05rem;
+  font-size: 1.15rem;
   color: #e9f1fb;
+  text-shadow: 0 6px 12px rgba(15, 23, 42, 0.45);
 }
 
 .gamehub-page .matchup-scoreboard .scoreboard-record,
 .gamehub-page .matchup-scoreboard .scoreboard-meta {
-  font-size: 0.78rem;
-  color: rgba(226, 232, 240, 0.7);
+  font-size: 0.75rem;
+  color: rgba(226, 232, 240, 0.6);
 }
 
 .gamehub-page .matchup-scoreboard .scoreboard-score {
-  font-size: clamp(3.2rem, 6vw, 4.6rem);
+  font-size: clamp(3.4rem, 6.4vw, 4.9rem);
   color: #f1f5f9;
 }
 
 .gamehub-page .matchup-scoreboard .scoreboard-diff {
-  gap: 6px;
+  gap: 8px;
 }
 
 .gamehub-page .matchup-scoreboard .scoreboard-diff-label {
-  font-size: 0.95rem;
+  font-size: 0.98rem;
   font-weight: 700;
   letter-spacing: 0.04em;
   color: #e7edf6;
@@ -374,7 +375,31 @@ body {
 }
 
 .gamehub-page .matchup-scoreboard .scoreboard-diff-value {
-  font-size: clamp(2.4rem, 4.5vw, 3.1rem);
+  font-size: clamp(2.5rem, 4.8vw, 3.3rem);
+}
+
+.gamehub-page .matchup-scoreboard .scoreboard-identity .min-w-0 {
+  order: -1;
+  text-align: center;
+}
+
+.gamehub-page #matchupYouAvatar,
+.gamehub-page #matchupOppAvatar {
+  width: clamp(120px, 18vw, 160px);
+  height: clamp(120px, 18vw, 160px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.gamehub-page #matchupYouAvatar img,
+.gamehub-page #matchupOppAvatar img,
+.gamehub-page #matchupYouAvatar .rounded-full,
+.gamehub-page #matchupOppAvatar .rounded-full {
+  width: 100%;
+  height: 100%;
+  border-radius: 9999px;
+  object-fit: cover;
 }
 
 .gamehub-page #matchupYouAvatar .rounded-full,
@@ -387,21 +412,22 @@ body {
 
 .gamehub-page .matchup-details {
   display: grid;
-  border-radius: 12px;
+  border-radius: 10px;
   overflow: hidden;
-  border: 1px solid rgba(148, 163, 184, 0.35);
-  background: rgba(15, 23, 42, 0.45);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: rgba(15, 23, 42, 0.6);
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.3);
 }
 
 .gamehub-page .matchup-details-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(140px, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(150px, 0.8fr) minmax(0, 1fr);
   align-items: center;
   text-align: center;
 }
 
 .gamehub-page .matchup-details-row + .matchup-details-row {
-  border-top: 1px solid rgba(148, 163, 184, 0.25);
+  border-top: 1px solid rgba(148, 163, 184, 0.2);
 }
 
 .gamehub-page .matchup-details-value {
@@ -409,17 +435,19 @@ body {
   font-size: 1rem;
   font-weight: 700;
   color: #f8fafc;
-  background: rgba(226, 232, 240, 0.12);
+  background: rgba(148, 163, 184, 0.18);
 }
 
 .gamehub-page .matchup-details-label {
   padding: 10px 12px;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   color: #e2e8f0;
-  background: rgba(15, 23, 42, 0.65);
+  background: rgba(15, 23, 42, 0.75);
+  border-left: 1px solid rgba(15, 23, 42, 0.5);
+  border-right: 1px solid rgba(15, 23, 42, 0.5);
 }
 
 @media (max-width: 640px) {
@@ -446,6 +474,12 @@ body {
   .gamehub-page .matchup-scoreboard .scoreboard-diff {
     grid-column: 1 / -1;
     margin-top: 4px;
+  }
+
+  .gamehub-page #matchupYouAvatar,
+  .gamehub-page #matchupOppAvatar {
+    width: clamp(96px, 32vw, 120px);
+    height: clamp(96px, 32vw, 120px);
   }
 
   .gamehub-page .matchup-details-row {
