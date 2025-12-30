@@ -442,8 +442,6 @@
     const maxGameHistory = Number.isFinite(limits.maxGameHistory) ? limits.maxGameHistory : 2500;
     const maxMatchups = Number.isFinite(limits.maxMatchups) ? limits.maxMatchups : 2500;
     const maxWorkHistory = Number.isFinite(limits.maxWorkHistory) ? limits.maxWorkHistory : 2500;
-    const stripImages = Boolean(limits.stripImages);
-
     if (normalized.completions.length > maxCompletions) {
       normalized.completions = normalized.completions.slice(0, maxCompletions);
     }
@@ -455,13 +453,6 @@
     }
     if (normalized.workHistory.length > maxWorkHistory) {
       normalized.workHistory = normalized.workHistory.slice(-maxWorkHistory);
-    }
-    if (stripImages) {
-      normalized.players = normalized.players.map(p => {
-        if (!p || typeof p !== 'object') return p;
-        return { ...p, imageId: "" };
-      });
-      normalized.youImageId = "";
     }
 
     return normalized;
@@ -594,17 +585,12 @@
 
     const emergency = {
       ...aggressive,
-      youImageId: "",
       completions: aggressive.completions.slice(0, 50),
       gameHistory: [],
       matchups: [],
       schedule: [],
       opponentDripSchedules: [],
-      workHistory: [],
-      players: aggressive.players.map(p => {
-        if (!p || typeof p !== 'object') return p;
-        return { ...p, imageId: "" };
-      })
+      workHistory: []
     };
 
     return attemptSave(emergency, true);
