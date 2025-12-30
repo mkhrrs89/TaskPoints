@@ -485,13 +485,18 @@
     }
 
     const mergedSnapshot = { ...existing, ...nextState };
-    if (!allowHabitTagColorReset && Object.prototype.hasOwnProperty.call(nextState || {}, 'habitTagColors')) {
-      const nextColors = nextState?.habitTagColors;
-      const existingColors = existing?.habitTagColors;
-      const nextIsEmpty = !nextColors || (typeof nextColors === 'object' && Object.keys(nextColors).length === 0);
-      const existingHasColors = existingColors && typeof existingColors === 'object' && Object.keys(existingColors).length > 0;
-      if (nextIsEmpty && existingHasColors) {
+    if (Object.prototype.hasOwnProperty.call(nextState || {}, 'habitTagColors')) {
+      const nextColors = normalizeHabitTagColors(nextState?.habitTagColors);
+      const existingColors = normalizeHabitTagColors(existing?.habitTagColors);
+      const nextIsEmpty = Object.keys(nextColors).length === 0;
+      const existingHasColors = Object.keys(existingColors).length > 0;
+
+      if (allowHabitTagColorReset) {
+        mergedSnapshot.habitTagColors = nextColors;
+      } else if (nextIsEmpty && existingHasColors) {
         mergedSnapshot.habitTagColors = existingColors;
+      } else if (existingHasColors) {
+        mergedSnapshot.habitTagColors = { ...existingColors, ...nextColors };
       }
     }
 
