@@ -284,6 +284,9 @@ function computePreviousDueDate(task, completionKey){
 }
 
 function sleepBonus(score) {
+  if (window.TaskPointsCore?.sleepBonus) {
+    return TaskPointsCore.sleepBonus(score, state);
+  }
   if (score >= 100) return 3;
   if (score >= 98) return 2;
   if (score >= 95) return 1;
@@ -303,6 +306,9 @@ function getSleepInfo(entry) {
 }
 
 function sleepPoints(score, rested = 0) {
+  if (window.TaskPointsCore?.sleepPoints) {
+    return TaskPointsCore.sleepPoints(score, rested, state);
+  }
   if (!Number.isFinite(score)) return 0;
   const base = score / 10;
   const bonus = sleepBonus(score);
@@ -322,11 +328,17 @@ function getWorkInfo(entry) {
 }
 
 function workHoursBonus(hours = 0) {
+  if (window.TaskPointsCore?.workHoursBonus) {
+    return TaskPointsCore.workHoursBonus(hours, state);
+  }
   if (!Number.isFinite(hours)) return 0;
   return Math.max(0, hours) * 10;
 }
 
 function workPoints(score, hours = 0) {
+  if (window.TaskPointsCore?.workPoints) {
+    return TaskPointsCore.workPoints(score, hours, state);
+  }
   if (!Number.isFinite(score)) return 0;
   return score + workHoursBonus(hours);
 }
@@ -345,7 +357,10 @@ function load(){
         matchups:   [],
         gameHistory:[],
         schedule:   [],
-        opponentDripSchedules: []
+        opponentDripSchedules: [],
+        scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
+          ? TaskPointsCore.normalizeScoringSettings({})
+          : {}
       };
     }
 
@@ -359,7 +374,10 @@ function load(){
       matchups:    Array.isArray(p.matchups)    ? p.matchups    : [],
       gameHistory: Array.isArray(p.gameHistory) ? p.gameHistory : [],
       schedule:    Array.isArray(p.schedule)    ? p.schedule    : [],
-      opponentDripSchedules: Array.isArray(p.opponentDripSchedules) ? p.opponentDripSchedules : []
+      opponentDripSchedules: Array.isArray(p.opponentDripSchedules) ? p.opponentDripSchedules : [],
+      scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
+        ? TaskPointsCore.normalizeScoringSettings(p.scoringSettings || {})
+        : (p.scoringSettings || {})
     };
   } catch {
     return {
@@ -371,7 +389,10 @@ function load(){
       matchups:   [],
       gameHistory:[],
       schedule:   [],
-      opponentDripSchedules: []
+      opponentDripSchedules: [],
+      scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
+        ? TaskPointsCore.normalizeScoringSettings({})
+        : {}
     };
   }
 }
