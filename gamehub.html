@@ -434,7 +434,7 @@
     row.appendChild(left);
     row.appendChild(right);
 
-    renderAvatarInto(avatarSlot, { name, imageId: getPlayerImageId(state, id), size: 24 });
+    renderAvatarInto(avatarSlot, { name, imageId: getPlayerImageId(state, id), size: 28 });
 
     return row;
   }
@@ -660,7 +660,7 @@
 
       tbody.appendChild(tr);
 
-      renderAvatarInto(avatarSlot, { name: r.name, imageId: getPlayerImageId(state, r.id), size: 24 });
+      renderAvatarInto(avatarSlot, { name: r.name, imageId: getPlayerImageId(state, r.id), size: 28 });
     }
 
     renderYourStats(state, standings);
