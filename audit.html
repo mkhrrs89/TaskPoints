@@ -348,6 +348,31 @@
         trace: 'state.completions filtered by date'
       });
 
+      // New: Completion timestamp validity
+      const timestampIssues = [];
+      const allCompletions = Array.isArray(state.completions) ? state.completions : [];
+      allCompletions.forEach(c => {
+        if (!c) return;
+        const label = c.title || c.id || c.taskId || 'unknown';
+        if (!c.completedAtISO) {
+          timestampIssues.push(`Completion "${label}" missing completedAtISO`);
+          return;
+        }
+        const parsed = new Date(c.completedAtISO);
+        if (!parsed || isNaN(parsed.getTime())) {
+          timestampIssues.push(`Completion "${label}" has invalid completedAtISO (${c.completedAtISO})`);
+        }
+      });
+      checks.push({
+        id: 'completion-timestamps',
+        title: 'Completion timestamps are valid',
+        status: timestampIssues.length ? 'WARN' : 'PASS',
+        expected: 'All completions have valid completedAtISO timestamps',
+        actual: timestampIssues.length ? `${timestampIssues.length} issue(s)` : 'All timestamps valid',
+        details: timestampIssues,
+        trace: 'state.completions completedAtISO'
+      });
+
       // New: Completion metadata health
       const metadataIssues = [];
       const completionIds = new Set();
@@ -411,6 +436,36 @@
         actual: taskLinkNotes.length ? `${taskLinkNotes.length} issue(s)` : 'All linked',
         details: taskLinkNotes,
         trace: 'state.tasks ↔ state.completions'
+      });
+
+      // New: Task points match completion points (non-derived)
+      const taskPointIssues = [];
+      const taskById = new Map((state.tasks || []).filter(Boolean).map(t => [t.id, t]));
+      dayCompletions.forEach(c => {
+        if (!c || (c.source || 'task') !== 'task' || !c.taskId) return;
+        const task = taskById.get(c.taskId);
+        if (!task || !Number.isFinite(Number(task.points))) return;
+        const derived = TaskPointsCore.deriveCompletionPoints
+          ? TaskPointsCore.deriveCompletionPoints(c, state)
+          : null;
+        if (derived) return;
+
+        const completionPoints = Number(c.points);
+        if (!Number.isFinite(completionPoints)) return;
+        const taskPoints = Number(task.points);
+        const delta = completionPoints - taskPoints;
+        if (Math.abs(delta) > 0.01) {
+          taskPointIssues.push(`Task "${task.title || task.id}" completion ${completionPoints.toFixed(2)} vs task ${taskPoints.toFixed(2)}`);
+        }
+      });
+      checks.push({
+        id: 'task-point-alignment',
+        title: 'Task points align with completions',
+        status: taskPointIssues.length ? 'WARN' : 'PASS',
+        expected: 'Completion points match task points when not formula-based',
+        actual: taskPointIssues.length ? `${taskPointIssues.length} mismatch(es)` : 'All aligned',
+        details: taskPointIssues,
+        trace: 'state.tasks points vs state.completions points'
       });
 
       // New: Sleep/work/calories point formulas
@@ -588,6 +643,34 @@
         actual: matchupOnDay ? 'Found matchup' : 'None for this date',
         trace: 'state.matchups',
         tips: 'If games are not used, this is a warning only.'
+      });
+
+      // New: Matchup entry integrity
+      const matchupIntegrityIssues = [];
+      (state.matchups || []).forEach(m => {
+        if (!m) return;
+        const key = matchupDateKey(m);
+        if (key !== dateKey) return;
+        if (!m.playerAId || !m.playerBId) {
+          matchupIntegrityIssues.push('Matchup missing player ids');
+        }
+        if (m.playerAId && m.playerBId && m.playerAId === m.playerBId) {
+          matchupIntegrityIssues.push(`Matchup has duplicate player id ${m.playerAId}`);
+        }
+        const scoreA = Number(m.scoreA);
+        const scoreB = Number(m.scoreB);
+        if (!Number.isFinite(scoreA) || !Number.isFinite(scoreB)) {
+          matchupIntegrityIssues.push(`Matchup scores missing/invalid (A: ${m.scoreA}, B: ${m.scoreB})`);
+        }
+      });
+      checks.push({
+        id: 'matchup-integrity',
+        title: 'Matchup entries are complete',
+        status: matchupIntegrityIssues.length ? 'WARN' : 'PASS',
+        expected: 'Matchups include player ids and numeric scores',
+        actual: matchupIntegrityIssues.length ? `${matchupIntegrityIssues.length} issue(s)` : 'All matchups complete',
+        details: matchupIntegrityIssues,
+        trace: 'state.matchups integrity'
       });
 
       // H) Data integrity
