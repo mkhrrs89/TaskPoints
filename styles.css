@@ -430,7 +430,7 @@ body {
 /* --- APP CHROME: MOBILE BOTTOM NAV (START) ------------------------------ */
 
 /* Mobile bottom nav: equal-width buttons + thin dividers */
-.mobile-bottom-nav a{
+.mobile-bottom-nav > *{
   flex: 1;
   text-align: center;
 }
@@ -446,7 +446,7 @@ body {
   }
 }
 
-.mobile-bottom-nav a + a{
+.mobile-bottom-nav > * + *{
   border-left: 1px solid rgba(15,23,42,0.7);
 }
 
@@ -455,6 +455,23 @@ body {
   flex: 1;
   display: flex;
   justify-content: center;
+}
+
+.mobile-task-toggle{
+  position: relative;
+}
+
+.mobile-task-toggle::before{
+  content: "";
+  position: absolute;
+  top: -6px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-bottom: 5px solid rgba(226,232,240,0.6);
 }
 
 .mobile-task-menu{
@@ -476,8 +493,12 @@ body {
 
 /* Light mode tweak so dividers aren’t too harsh */
 @media (prefers-color-scheme: light){
-  .mobile-bottom-nav a + a{
+  .mobile-bottom-nav > * + *{
     border-color: rgba(148,163,184,0.7);
+  }
+
+  .mobile-task-toggle::before{
+    border-bottom-color: rgba(15,23,42,0.45);
   }
 }
 
