@@ -318,6 +318,110 @@ body {
 }
 /* --- Name + meta text (END) -------------------------------------------- */
 
+.gamehub-page .matchup-scoreboard {
+  grid-template-columns: minmax(0, 1fr) minmax(140px, 0.65fr) minmax(0, 1fr);
+  align-items: center;
+  gap: clamp(16px, 4vw, 32px);
+  padding: 14px 6px 18px;
+  text-align: center;
+}
+
+.gamehub-page .matchup-scoreboard .scoreboard-side {
+  align-items: center;
+  gap: 12px;
+}
+
+.gamehub-page .matchup-scoreboard .scoreboard-role {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #e7edf6;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.gamehub-page .matchup-scoreboard .scoreboard-identity {
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.gamehub-page .matchup-scoreboard .scoreboard-name {
+  font-size: 1.05rem;
+  color: #e9f1fb;
+}
+
+.gamehub-page .matchup-scoreboard .scoreboard-record,
+.gamehub-page .matchup-scoreboard .scoreboard-meta {
+  font-size: 0.78rem;
+  color: rgba(226, 232, 240, 0.7);
+}
+
+.gamehub-page .matchup-scoreboard .scoreboard-score {
+  font-size: clamp(3.2rem, 6vw, 4.6rem);
+  color: #f1f5f9;
+}
+
+.gamehub-page .matchup-scoreboard .scoreboard-diff {
+  gap: 6px;
+}
+
+.gamehub-page .matchup-scoreboard .scoreboard-diff-label {
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #e7edf6;
+  text-transform: uppercase;
+}
+
+.gamehub-page .matchup-scoreboard .scoreboard-diff-value {
+  font-size: clamp(2.4rem, 4.5vw, 3.1rem);
+}
+
+.gamehub-page #matchupYouAvatar .rounded-full,
+.gamehub-page #matchupOppAvatar .rounded-full {
+  border-width: 4px;
+  border-color: #2f6db3;
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.45);
+  background: radial-gradient(circle at top, rgba(79, 141, 216, 0.45), rgba(30, 64, 130, 0.9));
+}
+
+.gamehub-page .matchup-details {
+  display: grid;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.gamehub-page .matchup-details-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(140px, 1fr) minmax(0, 1fr);
+  align-items: center;
+  text-align: center;
+}
+
+.gamehub-page .matchup-details-row + .matchup-details-row {
+  border-top: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.gamehub-page .matchup-details-value {
+  padding: 10px 12px;
+  font-size: 1rem;
+  font-weight: 700;
+  color: #f8fafc;
+  background: rgba(226, 232, 240, 0.12);
+}
+
+.gamehub-page .matchup-details-label {
+  padding: 10px 12px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #e2e8f0;
+  background: rgba(15, 23, 42, 0.65);
+}
+
 @media (max-width: 640px) {
   .gamehub-page .matchup-scoreboard {
     grid-template-columns: 1fr 1fr;
@@ -344,13 +448,16 @@ body {
     margin-top: 4px;
   }
 
-  .gamehub-page .matchup-detail-card {
-    padding: 14px;
+  .gamehub-page .matchup-details-row {
+    grid-template-columns: 1fr;
   }
 
-  .gamehub-page .matchup-detail-list {
-    display: grid;
-    gap: 8px;
+  .gamehub-page .matchup-details-value {
+    font-size: 0.95rem;
+  }
+
+  .gamehub-page .matchup-details-label {
+    font-size: 0.8rem;
   }
 }
 
