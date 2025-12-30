@@ -257,6 +257,113 @@
       return m.dateKey || m.date || (m.dateISO ? TaskPointsCore.dateKey(m.dateISO) : '');
     }
 
+    function computeYouDisplayScore(state, dateKeyStr){
+      const { dailyTotals } = TaskPointsCore.aggregateCompletionsByDate(state.completions || [], state);
+      const { todayPoints } = TaskPointsCore.deriveTodayWithInertia(dailyTotals, dateKeyStr, state);
+      return Number.isFinite(todayPoints) ? Math.round(todayPoints * 10) / 10 : null;
+    }
+
+    function findOpponentDripSchedule(state, dateKeyStr, playerId, totalPoints){
+      const schedules = Array.isArray(state.opponentDripSchedules) ? state.opponentDripSchedules : [];
+      const totalRounded = Math.max(0, Math.round((Number(totalPoints) || 0) * 10) / 10);
+      return schedules.find(s =>
+        s && s.date === dateKeyStr && s.playerId === playerId
+        && Math.abs((s.total || 0) - totalRounded) < 0.001
+        && Array.isArray(s.events) && s.events.length
+      ) || null;
+    }
+
+    function accruedOpponentPoints(schedule, now = new Date()){
+      if (!schedule) return 0;
+      const events = Array.isArray(schedule.events) ? schedule.events.slice() : [];
+      events.sort((a, b) => new Date(a.t) - new Date(b.t));
+
+      const nowMs = now.getTime();
+      const total = Math.max(0, Number(schedule.total) || 0);
+
+      if (!events.length) return total;
+
+      const firstMs = new Date(events[0].t).getTime();
+      const lastMs = new Date(events[events.length - 1].t).getTime();
+
+      if (Number.isFinite(firstMs) && nowMs < firstMs) return 0;
+      if (Number.isFinite(lastMs) && nowMs >= lastMs) return total;
+
+      let accruedUnits = 0;
+      events.forEach(e => {
+        const when = new Date(e.t).getTime();
+        const pts = Math.round((Number(e.pts) || 0) * 10);
+        if (Number.isFinite(when) && nowMs >= when) {
+          accruedUnits += Math.max(0, pts);
+        }
+      });
+
+      const capped = Math.min(total * 10, accruedUnits);
+      return Math.max(0, capped / 10);
+    }
+
+    function visibleOpponentScoreForMatchup(state, dateKeyStr, playerId, targetTotal){
+      const schedule = findOpponentDripSchedule(state, dateKeyStr, playerId, targetTotal);
+      if (!schedule) {
+        return { score: Math.max(0, Number(targetTotal) || 0), hasSchedule: false };
+      }
+      return { score: accruedOpponentPoints(schedule, new Date()), hasSchedule: true };
+    }
+
+    function computeHomeMatchupScores(state, dateKeyStr){
+      const matchups = Array.isArray(state.matchups) ? state.matchups : [];
+      const matchup = matchups.find(m =>
+        m && matchupDateKey(m) === dateKeyStr && (m.playerAId === 'YOU' || m.playerBId === 'YOU')
+      );
+      if (!matchup) {
+        return { issues: ['No matchup found for date.'] };
+      }
+
+      const youScore = computeYouDisplayScore(state, dateKeyStr);
+      const oppId = matchup.playerAId === 'YOU' ? matchup.playerBId : matchup.playerAId;
+      const oppTarget = matchup.playerAId === oppId ? Number(matchup.scoreA) : Number(matchup.scoreB);
+      const oppResult = visibleOpponentScoreForMatchup(state, dateKeyStr, oppId, oppTarget);
+
+      const issues = [];
+      if (!Number.isFinite(youScore)) issues.push('Missing your score.');
+      if (!Number.isFinite(oppTarget)) issues.push('Missing opponent target score.');
+      if (!oppResult.hasSchedule) issues.push('Opponent drip schedule missing.');
+
+      return {
+        youScore,
+        oppScore: Number.isFinite(oppResult.score) ? Math.round(oppResult.score * 10) / 10 : null,
+        oppId,
+        issues
+      };
+    }
+
+    function computeGamehubMatchupScores(state, dateKeyStr){
+      const matchups = Array.isArray(state.matchups) ? state.matchups : [];
+      const matchup = matchups.find(m =>
+        m && matchupDateKey(m) === dateKeyStr && (m.playerAId === 'YOU' || m.playerBId === 'YOU')
+      );
+      if (!matchup) {
+        return { issues: ['No matchup found for date.'] };
+      }
+
+      const youScore = computeYouDisplayScore(state, dateKeyStr);
+      const oppId = matchup.playerAId === 'YOU' ? matchup.playerBId : matchup.playerAId;
+      const oppTarget = matchup.playerAId === oppId ? Number(matchup.scoreA) : Number(matchup.scoreB);
+      const oppResult = visibleOpponentScoreForMatchup(state, dateKeyStr, oppId, oppTarget);
+
+      const issues = [];
+      if (!Number.isFinite(youScore)) issues.push('Missing your score.');
+      if (!Number.isFinite(oppTarget)) issues.push('Missing opponent target score.');
+      if (!oppResult.hasSchedule) issues.push('Opponent drip schedule missing.');
+
+      return {
+        youScore,
+        oppScore: Number.isFinite(oppResult.score) ? Math.round(oppResult.score * 10) / 10 : null,
+        oppId,
+        issues
+      };
+    }
+
     function runAudit() {
       const dateInput = $('auditDate');
       const selected = dateInput?.value || defaultAuditDate();
@@ -631,6 +738,49 @@
         details: matchupScoreIssues,
         trace: 'TaskPointsCore.youDailyTotalsWithInertia vs. state.matchups',
         tips: 'Run matchup sync before viewing standings; mismatches here explain record/Baseline Δ drift across pages.'
+      });
+
+      const homeScores = computeHomeMatchupScores(state, dateKey);
+      const hubScores = computeGamehubMatchupScores(state, dateKey);
+      const scoreboardIssues = [];
+
+      const homeIssueList = Array.isArray(homeScores.issues) ? homeScores.issues : [];
+      const hubIssueList = Array.isArray(hubScores.issues) ? hubScores.issues : [];
+      const scheduleMissing = [...homeIssueList, ...hubIssueList].some(issue => issue.includes('drip schedule'));
+
+      if (Number.isFinite(homeScores.youScore) && Number.isFinite(hubScores.youScore)) {
+        const delta = homeScores.youScore - hubScores.youScore;
+        if (Math.abs(delta) > 0.05) {
+          scoreboardIssues.push(`You score mismatch: home ${homeScores.youScore.toFixed(1)} vs hub ${hubScores.youScore.toFixed(1)} (Δ ${delta.toFixed(1)})`);
+        }
+      }
+
+      if (Number.isFinite(homeScores.oppScore) && Number.isFinite(hubScores.oppScore)) {
+        const delta = homeScores.oppScore - hubScores.oppScore;
+        if (Math.abs(delta) > 0.05) {
+          scoreboardIssues.push(`Opponent score mismatch: home ${homeScores.oppScore.toFixed(1)} vs hub ${hubScores.oppScore.toFixed(1)} (Δ ${delta.toFixed(1)})`);
+        }
+      }
+
+      const scoreboardStatus = scoreboardIssues.length
+        ? 'FAIL'
+        : (scheduleMissing || homeIssueList.length || hubIssueList.length ? 'WARN' : 'PASS');
+
+      checks.push({
+        id: 'scoreboard-sync',
+        title: 'Home vs GameHub scoreboard sync',
+        status: scoreboardStatus,
+        expected: {
+          home: { you: homeScores.youScore, opponent: homeScores.oppScore },
+          gamehub: { you: hubScores.youScore, opponent: hubScores.oppScore }
+        },
+        actual: {
+          home: { you: homeScores.youScore, opponent: homeScores.oppScore },
+          gamehub: { you: hubScores.youScore, opponent: hubScores.oppScore }
+        },
+        details: [...homeIssueList, ...hubIssueList, ...scoreboardIssues],
+        trace: 'index.html/renderTodaysMatchup vs gamehub.html/renderTodaysMatchup',
+        tips: 'Both scoreboards should show your inertia-inclusive total and the opponent drip total from the same matchup.'
       });
 
       // G) Game / matchup consistency (lightweight)
