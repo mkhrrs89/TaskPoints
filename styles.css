@@ -2106,10 +2106,10 @@ body {
   color: #eaf2ff;
 }
 
-  .mood-today-card .stat-mobile-header{
-    background: linear-gradient(180deg, #334679, #1d2748);
-    color: #e3e8ff;
-  }
+.mood-today-card .stat-mobile-header{
+  background: linear-gradient(180deg, rgba(30, 58, 138, 0.55), rgba(15, 23, 42, 0.55));
+  color: #e3e8ff;
+}
 
   /* Let each half stretch the full mobile width */
   .stat-card-row{
@@ -2311,6 +2311,7 @@ body {
     width: 82px;
   }
 }
+
 
 
 
