@@ -1484,7 +1484,7 @@ body {
 
 /* Mood (navy) */
 .mood-today-card{
-  background: linear-gradient(180deg, rgba(30, 58, 138, 0.50), rgba(15, 23, 42, 0.45));
+  background: linear-gradient(180deg, rgba(30, 58, 138, 0.60), rgba(15, 23, 42, 0.55));
   border: none !important;
   border-radius: 16px;
   color: #e0e7ff;
@@ -2311,6 +2311,7 @@ body {
     width: 82px;
   }
 }
+
 
 
 
