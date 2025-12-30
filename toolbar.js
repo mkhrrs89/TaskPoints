@@ -63,25 +63,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // ---------- Shared mobile bottom nav ----------
 function buildMobileBottomNavLinks() {
-  const onIndex = /(^|\/)index\.html$/.test(window.location.pathname) || window.location.pathname === '/' || window.location.pathname === '';
-  const linkFor = (anchor) => (onIndex ? `#${anchor}` : `index.html#${anchor}`);
-
   return `
-    <a href="${linkFor('sleepAnchor')}" class="flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
-      <span class="text-lg">💤</span>
-      <span class="uppercase tracking-wide text-[10px]">Sleep</span>
+    <a href="index.html" class="flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
+      <span class="text-lg">🏠</span>
+      <span class="uppercase tracking-wide text-[10px]">Home</span>
     </a>
 
-    <a href="${linkFor('habitsAnchor')}" class="flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
-      <span class="text-lg">🔗</span>
-      <span class="uppercase tracking-wide text-[10px]">Habits</span>
+    <a href="gamehub.html" class="flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
+      <span class="text-lg">🎮</span>
+      <span class="uppercase tracking-wide text-[10px]">GameHub</span>
     </a>
 
     <div class="mobile-task-dropdown">
       <button
         id="mobileTasksToggle"
         type="button"
-        class="flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100"
+        class="mobile-task-toggle flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100"
         aria-expanded="false"
         aria-haspopup="true">
         <span class="text-lg">✔️</span>
