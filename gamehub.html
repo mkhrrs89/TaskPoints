@@ -1147,10 +1147,14 @@ function ordinal(n){
   }
 }
 
-function placeString(rankIndex, total){
+function placeHTML(rankIndex, total){
   if (rankIndex == null || rankIndex < 0) return '—';
-  return `${ordinal(rankIndex + 1)} (${total})`;
+
+  const rank = ordinal(rankIndex + 1);
+  // Wrap total in a span so it can be smaller/thinner
+  return `<span class="placeRank">${rank}</span> <span class="placeTotal">(${total})</span>`;
 }
+
 
 
   
@@ -1255,8 +1259,8 @@ function placeString(rankIndex, total){
     set('muOppWin', oppStats ? fmtPct(oppStats.winPct) : '—');
 
     // PLACE (optional for now; leaving placeholder until you want rankings wired in)
-    set('muYouPlace', placeString(youRankIdx, totalPlayers));
-    set('muOppPlace', placeString(oppRankIdx, totalPlayers));
+    setHTML('muYouPlace', placeHTML(youRankIdx, totalPlayers));
+    setHTML('muOppPlace', placeHTML(oppRankIdx, totalPlayers));
 
     set('muYouPPD', fmt1(youStats.avgPPD));
     set('muOppPPD', oppStats ? fmt1(oppStats.avgPPD) : '—');
@@ -1284,6 +1288,12 @@ function placeString(rankIndex, total){
     }
   }
 
+function setHTML(id, html){
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.innerHTML = html;
+}
+  
   function setModalOpen(isOpen){
     const modal = $('playerDetailsModal');
     if (!modal) return;
