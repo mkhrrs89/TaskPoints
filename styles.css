@@ -2618,7 +2618,7 @@ body {
 
 /* 1) Center label boxes: dark teal instead of navy */
 #muCompare .mu-lbl{
-  background: rgba(7, 30, 30, 0.75) !important;
+  background: rgba(4, 20, 20, 0.82) !important;
 }
 
 /* 2) Beveled container corners (cut-corner look) */
@@ -2649,6 +2649,7 @@ body {
     0 var(--bevel)
   );
 }
+
 
 
 
