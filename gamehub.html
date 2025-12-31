@@ -1165,8 +1165,16 @@ function placeHTML(rankIndex, total){
     const matchups = Array.isArray(state.matchups) ? state.matchups : [];
     const key = todayKey();
 
+    const matchupDateKey = (matchup) => {
+      if (!matchup) return '';
+      if (matchup.dateKey) return matchup.dateKey;
+      if (matchup.date) return matchup.date;
+      if (matchup.dateISO) return dateKey(matchup.dateISO);
+      return '';
+    };
+
     const m = matchups.find(x =>
-      x && x.dateKey === key && (x.playerAId === 'YOU' || x.playerBId === 'YOU')
+      x && matchupDateKey(x) === key && (x.playerAId === 'YOU' || x.playerBId === 'YOU')
     );
 
     const noNotice = $('noMatchupNotice');
