@@ -412,7 +412,7 @@
     };
   }
 
-  function loadAppState() {
+  function loadAppState(options = {}) {
     let parsed = {};
     let storageKeysFound = [];
     try {
@@ -425,7 +425,26 @@
       console.error("Failed to parse stored state", e);
     }
 
-    return { state: normalizeState(parsed), storageKeysFound };
+    let state = normalizeState(parsed);
+    const shouldSync = options.syncDerived !== false;
+    const shouldPersist = options.persistSync !== false;
+    let changed = false;
+
+    if (shouldSync) {
+      const derivedSync = syncDerivedPoints(state);
+      state = derivedSync.state;
+      changed = changed || derivedSync.changed;
+
+      const matchupSync = syncYouMatchups(state);
+      state = matchupSync.state;
+      changed = changed || matchupSync.changed;
+    }
+
+    if (changed && shouldPersist) {
+      mergeAndSaveState(state, { storageKey: STORAGE_KEY });
+    }
+
+    return { state, storageKeysFound };
   }
 
   function isQuotaError(err) {
