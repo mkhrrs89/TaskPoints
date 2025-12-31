@@ -304,11 +304,11 @@ body {
 /* --- Diff color meanings (START) ---------------------------------------
    Positive / negative / neutral coloring for the diff number. */
 .diff-positive {
-  color: #0f4d4d;
+  color: #1C7A7A;
 }
 
 .diff-negative {
-  color: #3b0b0f;
+  color: #8F222D;
 }
 
 .diff-neutral {
@@ -2649,6 +2649,7 @@ body {
     0 var(--bevel)
   );
 }
+
 
 
 
