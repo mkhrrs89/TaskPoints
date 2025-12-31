@@ -3125,6 +3125,7 @@ function buildHabitRenderEntries(habits, sortMode) {
 
 function renderHabitRow(h, days, wrap, options = {}) {
   const showMoveButtons = options.showMoveButtons ?? (getHabitSortMode() === 'custom');
+  const showTag = options.showTag ?? true;
 
   h.doneKeys = Array.isArray(h.doneKeys) ? h.doneKeys : [];
 
@@ -3182,7 +3183,7 @@ function renderHabitRow(h, days, wrap, options = {}) {
       <div class="tag bg-zinc-200/60 dark:bg-zinc-700/60">
         ${h.pointsPerDay||0} pts
       </div>
-      ${h.tag ? `<div class="tag tag-clear">${escapeHtml(h.tag)}</div>` : ''}
+      ${showTag && h.tag ? `<div class="tag tag-clear">${escapeHtml(h.tag)}</div>` : ''}
     ${streak > 0 ? `
       <div class="tag streak-pill">
         ${streak} ${streak === 1 ? 'day' : 'days'}
@@ -3266,7 +3267,7 @@ function renderHabits(){
 
       const body = document.createElement('div');
       body.className = 'habitGroupBody';
-      entry.habits.forEach(h => renderHabitRow(h, days, body, { showMoveButtons: false }));
+      entry.habits.forEach(h => renderHabitRow(h, days, body, { showMoveButtons: false, showTag: false }));
       groupWrap.appendChild(body);
       wrap.appendChild(groupWrap);
       return;
