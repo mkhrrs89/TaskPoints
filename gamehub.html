@@ -134,7 +134,7 @@
               <div class="scoreboard-identity flex items-center gap-2 mt-1">
                 <div id="matchupYouAvatar" class="shrink-0"></div>
                 <div class="min-w-0">
-                  <div id="matchupYourName" class="scoreboard-name truncate">You</div>
+                  <button type="button" id="matchupYourName" class="scoreboard-name truncate player-name-link">You</button>
                   <div id="matchupYourRecord" class="scoreboard-record">Record: —</div>
                   <div id="matchupYourAverages" class="scoreboard-meta">Daily Avg: — · PPD: —</div>
                 </div>
@@ -152,7 +152,7 @@
               <div class="scoreboard-role">Opponent</div>
               <div class="scoreboard-identity flex items-center gap-2 mt-1 justify-end">
                 <div class="min-w-0 text-right">
-                  <div id="matchupOppName" class="scoreboard-name truncate">—</div>
+                  <button type="button" id="matchupOppName" class="scoreboard-name truncate player-name-link">—</button>
                   <div id="matchupOppRecord" class="scoreboard-record">Record: —</div>
                   <div id="matchupOppAverages" class="scoreboard-meta">Daily Avg: — · PPD: —</div>
                 </div>
@@ -265,6 +265,58 @@
 
   </div>
 
+  <div id="playerDetailsModal" class="fixed inset-0 z-50 hidden" role="dialog" aria-modal="true" aria-labelledby="playerModalName">
+    <div class="absolute inset-0 bg-black/60" data-modal-close></div>
+    <div class="relative mx-auto mt-16 w-[min(92vw,620px)]">
+      <div class="glass p-4 sm:p-6">
+        <div class="flex items-start justify-between gap-3 mb-4">
+          <div>
+            <div class="muted text-xs uppercase tracking-wide">Player Snapshot</div>
+            <h3 id="playerModalName" class="text-xl sm:text-2xl font-extrabold"></h3>
+          </div>
+          <button type="button" class="btn btn-ghost btn-toolbar" data-modal-close>Close</button>
+        </div>
+
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4" id="playerModalStats"></div>
+
+        <div class="glass p-4">
+          <div class="flex items-center justify-between mb-3">
+            <div class="font-semibold">Ratings</div>
+            <div class="muted text-xs" id="playerModalRatingsHint">Edit and save ratings</div>
+          </div>
+          <form id="playerRatingsForm" class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <label class="text-xs uppercase tracking-wide muted">
+              Baseline
+              <input type="number" step="0.1" inputmode="decimal" class="input mt-1 w-full" name="baseline">
+            </label>
+            <label class="text-xs uppercase tracking-wide muted">
+              Variance
+              <input type="number" step="0.1" inputmode="decimal" class="input mt-1 w-full" name="variance">
+            </label>
+            <label class="text-xs uppercase tracking-wide muted">
+              Variance Tilt (%)
+              <input type="number" step="0.1" inputmode="decimal" class="input mt-1 w-full" name="varianceTilt">
+            </label>
+            <label class="text-xs uppercase tracking-wide muted">
+              Momentum
+              <input type="number" step="0.1" inputmode="decimal" class="input mt-1 w-full" name="momentum">
+            </label>
+            <label class="text-xs uppercase tracking-wide muted">
+              Risky (0-10)
+              <input type="number" step="0.1" inputmode="decimal" class="input mt-1 w-full" name="risky">
+            </label>
+            <div class="flex items-end">
+              <button type="submit" class="btn btn-teal btn-toolbar w-full" id="playerModalSave">Save Ratings</button>
+            </div>
+          </form>
+          <div class="muted text-xs mt-3 hidden" id="playerModalReadOnlyNotice">
+            Ratings are editable for player profiles, not your own profile.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
 <script>
 (function(){
   const $ = (id) => document.getElementById(id);
@@ -279,6 +331,8 @@
     const n = Number(v);
     return `${n >= 0 ? '+' : ''}${n.toFixed(1)}`;
   };
+
+  let currentState = null;
 
   function saveState(state){
     try {
@@ -343,6 +397,12 @@
     if (id === 'YOU') return state.youImageId || null;
     const p = getPlayerById(state, id);
     return p && p.imageId ? p.imageId : null;
+  }
+
+  function getPlayerName(state, id){
+    if (id === 'YOU') return 'You';
+    const p = getPlayerById(state, id);
+    return p ? (p.name || safeNameForId(state, id)) : safeNameForId(state, id);
   }
 
   // ---------- avatar rendering ----------
@@ -417,6 +477,13 @@
     el.appendChild(wrap);
   }
 
+  function applyNameButton(nameEl, playerId){
+    if (!nameEl) return;
+    nameEl.classList.add('player-name-link');
+    nameEl.type = 'button';
+    nameEl.onclick = () => openPlayerModal(playerId);
+  }
+
   function playerLine(state, id, rightText){
     const p = getPlayerById(state, id);
     const name = p ? (p.name || safeNameForId(state, id)) : safeNameForId(state, id);
@@ -431,7 +498,7 @@
     avatarSlot.className = 'shrink-0';
     left.appendChild(avatarSlot);
 
-    const nameEl = document.createElement('div');
+    const nameEl = document.createElement('button');
     nameEl.className = 'text-sm font-semibold truncate';
     nameEl.textContent = name;
     left.appendChild(nameEl);
@@ -444,6 +511,7 @@
     row.appendChild(right);
 
     renderAvatarInto(avatarSlot, { name, imageId: getPlayerImageId(state, id), size: 28 });
+    applyNameButton(nameEl, id);
 
     return row;
   }
@@ -637,7 +705,7 @@
       avatarSlot.className = 'shrink-0';
       nameWrap.appendChild(avatarSlot);
 
-      const nameText = document.createElement('div');
+      const nameText = document.createElement('button');
       nameText.className = 'font-semibold truncate';
       nameText.textContent = r.name;
       nameWrap.appendChild(nameText);
@@ -670,6 +738,7 @@
       tbody.appendChild(tr);
 
       renderAvatarInto(avatarSlot, { name: r.name, imageId: getPlayerImageId(state, r.id), size: 28 });
+      applyNameButton(nameText, r.id);
     }
 
     renderYourStats(state, standings);
@@ -1058,8 +1127,16 @@
     renderAvatarInto($('matchupOppAvatar'), { name: oppName, imageId: getPlayerImageId(state, oppId), size: avatarSize });
 
     // names
-    $('matchupYourName').textContent = 'You';
-    $('matchupOppName').textContent = oppName;
+    const youNameBtn = $('matchupYourName');
+    const oppNameBtn = $('matchupOppName');
+    if (youNameBtn) {
+      youNameBtn.textContent = 'You';
+      applyNameButton(youNameBtn, 'YOU');
+    }
+    if (oppNameBtn) {
+      oppNameBtn.textContent = oppName;
+      applyNameButton(oppNameBtn, oppId);
+    }
 
     // record + averages
     const youStats = computeYouStats(state);
@@ -1124,6 +1201,100 @@
     }
   }
 
+  function setModalOpen(isOpen){
+    const modal = $('playerDetailsModal');
+    if (!modal) return;
+    modal.classList.toggle('hidden', !isOpen);
+    document.body.classList.toggle('overflow-hidden', isOpen);
+  }
+
+  function ratingValueFromInput(input){
+    if (!input) return null;
+    const raw = input.value.trim();
+    if (!raw) return null;
+    const num = Number(raw);
+    return Number.isFinite(num) ? num : null;
+  }
+
+  function renderPlayerModal(state, playerId){
+    const modal = $('playerDetailsModal');
+    if (!modal) return;
+    const p = getPlayerById(state, playerId) || { id: playerId, name: getPlayerName(state, playerId) };
+    const stats = (playerId === 'YOU' || p.isYou) ? computeYouStats(state) : computePlayerStats(state, p);
+
+    $('playerModalName').textContent = getPlayerName(state, playerId);
+
+    const statsWrap = $('playerModalStats');
+    clearEl(statsWrap);
+    const statItems = [
+      { label: 'Record', value: (stats.wins != null && stats.losses != null) ? `${stats.wins}-${stats.losses}` : '—' },
+      { label: 'Win %', value: fmtPct(stats.winPct) },
+      { label: 'PPD', value: fmt1(stats.avgPPD) },
+      { label: 'Δ vs Baseline', value: fmtSigned(stats.ppd) },
+      { label: 'Games', value: stats.games != null ? String(stats.games) : '—' },
+    ];
+    for (const item of statItems) {
+      const block = document.createElement('div');
+      block.className = 'glass p-3';
+      block.innerHTML = `<div class="muted text-[11px] uppercase tracking-wide">${item.label}</div><div class="text-lg font-extrabold tabular-nums">${item.value}</div>`;
+      statsWrap.appendChild(block);
+    }
+
+    const form = $('playerRatingsForm');
+    const readOnlyNotice = $('playerModalReadOnlyNotice');
+    const ratingsHint = $('playerModalRatingsHint');
+    const inputs = form ? Array.from(form.querySelectorAll('input')) : [];
+    const saveBtn = $('playerModalSave');
+    const isYou = playerId === 'YOU' || p.isYou;
+
+    inputs.forEach(input => {
+      input.value = '';
+      input.disabled = isYou;
+    });
+
+    if (isYou) {
+      readOnlyNotice?.classList.remove('hidden');
+      if (ratingsHint) ratingsHint.textContent = 'Ratings are locked for your profile.';
+      if (saveBtn) saveBtn.disabled = true;
+    } else {
+      readOnlyNotice?.classList.add('hidden');
+      if (ratingsHint) ratingsHint.textContent = 'Edit and save ratings';
+      if (saveBtn) saveBtn.disabled = false;
+
+      const baseline = Number(p.baseline);
+      const variance = Number(p.variance);
+      const varianceTilt = Number(p.varianceTilt);
+      const momentum = Number(p.momentum);
+      const riskyNorm = getNormalizedRisky(p.risky);
+
+      const lookup = {
+        baseline: Number.isFinite(baseline) ? baseline : '',
+        variance: Number.isFinite(variance) ? variance : '',
+        varianceTilt: Number.isFinite(varianceTilt) ? varianceTilt : '',
+        momentum: Number.isFinite(momentum) ? momentum : '',
+        risky: Number.isFinite(riskyNorm) ? riskyNorm.toFixed(1) : ''
+      };
+
+      inputs.forEach(input => {
+        if (Object.prototype.hasOwnProperty.call(lookup, input.name)) {
+          input.value = lookup[input.name];
+        }
+      });
+    }
+
+    modal.dataset.playerId = playerId;
+  }
+
+  function openPlayerModal(playerId){
+    const state = currentState || loadState();
+    renderPlayerModal(state, playerId);
+    setModalOpen(true);
+  }
+
+  function closePlayerModal(){
+    setModalOpen(false);
+  }
+
   function renderAll(){
     let state = loadState();
     let changed = false;
@@ -1145,6 +1316,7 @@
     }
 
     if (changed) saveState(state);
+    currentState = state;
 
     const { standings } = renderStandings(state);
     renderBestWorstStats(state, standings);
@@ -1154,6 +1326,55 @@
   }
 
   $('refreshGameHub')?.addEventListener('click', renderAll);
+
+  $('playerDetailsModal')?.addEventListener('click', (event) => {
+    if (event.target && event.target.hasAttribute('data-modal-close')) {
+      closePlayerModal();
+    }
+  });
+
+  $('playerRatingsForm')?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const modal = $('playerDetailsModal');
+    if (!modal) return;
+    const playerId = modal.dataset.playerId;
+    if (!playerId || playerId === 'YOU') return;
+
+    const state = currentState || loadState();
+    const players = Array.isArray(state.players) ? state.players : [];
+    const player = players.find(p => p && p.id === playerId);
+    if (!player) return;
+
+    const form = event.currentTarget;
+    const baseline = ratingValueFromInput(form.elements.baseline);
+    const variance = ratingValueFromInput(form.elements.variance);
+    const varianceTilt = ratingValueFromInput(form.elements.varianceTilt);
+    const momentum = ratingValueFromInput(form.elements.momentum);
+    const riskyInput = ratingValueFromInput(form.elements.risky);
+
+    player.baseline = baseline;
+    player.variance = variance;
+    player.varianceTilt = varianceTilt;
+    player.momentum = momentum;
+
+    if (riskyInput == null) {
+      player.risky = null;
+    } else {
+      const existing = Number(player.risky);
+      player.risky = Number.isFinite(existing) && existing > 10 ? riskyInput * 10 : riskyInput;
+    }
+
+    saveState(state);
+    currentState = state;
+    closePlayerModal();
+    renderAll();
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !$('playerDetailsModal')?.classList.contains('hidden')) {
+      closePlayerModal();
+    }
+  });
 
   window.addEventListener('beforeunload', () => {
     for (const url of imageUrlCache.values()) {

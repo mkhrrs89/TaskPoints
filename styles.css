@@ -932,6 +932,26 @@ body {
 }
 
 .habitDay.on {background:#3D1C0B;border-color:#fb923c;}
+
+.player-name-link {
+  color: #fb923c;
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.player-name-link:hover,
+.player-name-link:focus-visible {
+  color: #fdba74;
+}
+
+.player-name-link:focus-visible {
+  outline: 2px solid rgba(251, 146, 60, 0.6);
+  outline-offset: 2px;
+  border-radius: 9999px;
+}
 .habitDay.off{background:transparent}
 
 /* Vices: explicit failed state */
