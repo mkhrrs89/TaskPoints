@@ -1136,6 +1136,24 @@
     return parts.length ? parts.join(' · ') : '—';
   }
 
+function ordinal(n){
+  const v = n % 100;
+  if (v >= 11 && v <= 13) return `${n}th`;
+  switch (n % 10) {
+    case 1: return `${n}st`;
+    case 2: return `${n}nd`;
+    case 3: return `${n}rd`;
+    default: return `${n}th`;
+  }
+}
+
+function placeString(rankIndex, total){
+  if (rankIndex == null || rankIndex < 0) return '—';
+  return `${ordinal(rankIndex + 1)} (${total})`;
+}
+
+
+  
   function renderTodaysMatchup(state){
     const dateLbl = $('matchupDateLabel');
     if (dateLbl) dateLbl.textContent = todayKey();
@@ -1156,6 +1174,12 @@
 
     const oppId = (m.playerAId === 'YOU') ? m.playerBId : m.playerAId;
     const oppName = safeNameForId(state, oppId);
+
+    const standings = buildStandings(state);
+    const totalPlayers = standings.length;
+
+    const youRankIdx = standings.findIndex(r => r.id === 'YOU');
+    const oppRankIdx = standings.findIndex(r => r.id === oppId);
 
     // avatars
     const avatarSize = matchupAvatarSize();
@@ -1231,8 +1255,8 @@
     set('muOppWin', oppStats ? fmtPct(oppStats.winPct) : '—');
 
     // PLACE (optional for now; leaving placeholder until you want rankings wired in)
-    set('muYouPlace', '—');
-    set('muOppPlace', '—');
+    set('muYouPlace', placeString(youRankIdx, totalPlayers));
+    set('muOppPlace', placeString(oppRankIdx, totalPlayers));
 
     set('muYouPPD', fmt1(youStats.avgPPD));
     set('muOppPPD', oppStats ? fmt1(oppStats.avgPPD) : '—');
