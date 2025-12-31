@@ -510,6 +510,25 @@ body {
   border-right: 1px solid rgba(15, 23, 42, 0.5);
 }
 
+.placeStat{
+  display:flex;
+  align-items:baseline;   /* keeps it lined up nicely */
+  gap:6px;
+}
+
+.placeRank{
+  font-size:16px;
+  font-weight:700;
+}
+
+.placeTotal{
+  font-size:12px;         /* smaller */
+  font-weight:400;        /* thinner */
+  opacity:.75;            /* optional: subtle */
+  letter-spacing:.2px;    /* optional: a lil cleaner */
+}
+
+
 @media (max-width: 640px) {
   .gamehub-page .matchup-scoreboard {
     grid-template-columns: 1fr auto 1fr;
@@ -2630,6 +2649,7 @@ body {
     0 var(--bevel)
   );
 }
+
 
 
 
