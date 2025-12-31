@@ -740,13 +740,17 @@
     }
   }
 
-  function renderRatingsLeaderboards(state){
+  function renderRatingsLeaderboards(state, standings){
     const wrap = $('ratingsBoards');
     clearEl(wrap);
 
     const players = Array.isArray(state.players) ? state.players : [];
+    const standingsById = new Map(
+      Array.isArray(standings) ? standings.map(row => [row.id, row.avgPPD]) : []
+    );
 
     const ratingDefs = [
+      { key: 'avgPPD', label: 'PPD', get: (p)=> standingsById.get(p.id) },
       { key: 'baseline', label: 'Baseline', get: (p)=> Number(p.baseline) },
       { key: 'variance', label: 'Variance', get: (p)=> Number(p.variance) },
       { key: 'varianceTilt', label: 'Variance Tilt', get: (p)=> Number(p.varianceTilt) },
@@ -764,7 +768,7 @@
 
     for (const def of ratingDefs) {
       const top = sortedBy(def, 'desc').slice(0, 5);
-      const bot = sortedBy(def, 'asc').slice(0, 5);
+      const bot = sortedBy(def, 'asc').slice(0, 5).reverse();
 
       const card = document.createElement('div');
       card.className = 'glass p-4';
@@ -1144,7 +1148,7 @@
 
     const { standings } = renderStandings(state);
     renderBestWorstStats(state, standings);
-    renderRatingsLeaderboards(state);
+    renderRatingsLeaderboards(state, standings);
     renderSurprisesBusts(state, standings);
     renderTodaysMatchup(state);
   }
