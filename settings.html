@@ -1158,28 +1158,6 @@
       };
       rows.sort(sorters[sortValue] || sorters["ppd-desc"]);
 
-      const globalRange = rows.reduce((acc, row) => {
-        const player = playerById.get(row.id);
-        if (!player) return acc;
-        const scores = results.scoresByPlayer.get(player.id) || [];
-        const baseline = player.baseline;
-        const variance = player.variance;
-        const minValue = Math.min(...scores, baseline - variance);
-        const maxValue = Math.max(...scores, baseline + variance);
-        return {
-          min: Math.min(acc.min, minValue),
-          max: Math.max(acc.max, maxValue)
-        };
-      }, { min: Number.POSITIVE_INFINITY, max: Number.NEGATIVE_INFINITY });
-
-      const tickStep = 20;
-      const scaleMin = Number.isFinite(globalRange.min)
-        ? Math.floor(globalRange.min / tickStep) * tickStep
-        : 0;
-      const scaleMax = Number.isFinite(globalRange.max)
-        ? Math.ceil(globalRange.max / tickStep) * tickStep
-        : tickStep;
-
       rows.forEach(row => {
         const player = playerById.get(row.id);
         if (!player) return;
@@ -1188,9 +1166,12 @@
         const variance = player.variance;
         const varianceTilt = player.varianceTilt;
         const riskyScore = getNormalizedRisky(player.risky);
-        const minValue = scaleMin;
-        const maxValue = scaleMax;
+        const scoreValues = scores.length ? scores : [baseline];
+        const minValue = Math.min(...scoreValues, baseline - variance);
+        const maxValue = Math.max(...scoreValues, baseline + variance);
         const range = maxValue - minValue || 1;
+        const tickCount = 4;
+        const tickStep = range / tickCount;
 
         const width = Math.max(240, scores.length * 24);
         const height = 120;
@@ -1211,7 +1192,8 @@
         const upperY = pointY(baseline + variance);
         const lowerY = pointY(baseline - variance);
         const yTicks = [];
-        for (let value = scaleMin; value <= scaleMax + 0.001; value += tickStep) {
+        for (let i = 0; i <= tickCount; i += 1) {
+          const value = minValue + tickStep * i;
           yTicks.push({ value, y: pointY(value) });
         }
         const yTickLines = yTicks.map(tick => `
