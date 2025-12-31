@@ -92,6 +92,20 @@ body {
 }
 /* --- "Glass" card style (END) ------------------------------------------- */
 
+/* --- Player modal: force opaque panel (START) ---------------------------- */
+.player-modal-panel,
+.player-modal-panel .glass {
+  background: var(--panel);
+}
+
+@media (prefers-color-scheme: light) {
+  .player-modal-panel,
+  .player-modal-panel .glass {
+    background: #fff;
+  }
+}
+/* --- Player modal: force opaque panel (END) ------------------------------ */
+
 
 /* =========================
    SECTION 2 — CORE UI ATOMS (BUTTONS)
