@@ -445,12 +445,12 @@
 
   function matchupAvatarSize(){
     if (window.matchMedia && window.matchMedia('(max-width: 640px)').matches) {
-      return 88;
+      return 96;
     }
-    return 110;
+    return 120;
   }
 
-  async function renderAvatarInto(el, { name, imageId, size = 28 } = {}){
+  async function renderAvatarInto(el, { name, imageId, size = 32 } = {}){
     if (!el) return;
     el.innerHTML = '';
 
@@ -510,7 +510,7 @@
     row.appendChild(left);
     row.appendChild(right);
 
-    renderAvatarInto(avatarSlot, { name, imageId: getPlayerImageId(state, id), size: 28 });
+    renderAvatarInto(avatarSlot, { name, imageId: getPlayerImageId(state, id), size: 32 });
     applyNameButton(nameEl, id);
 
     return row;
@@ -737,7 +737,7 @@
 
       tbody.appendChild(tr);
 
-      renderAvatarInto(avatarSlot, { name: r.name, imageId: getPlayerImageId(state, r.id), size: 28 });
+      renderAvatarInto(avatarSlot, { name: r.name, imageId: getPlayerImageId(state, r.id), size: 32 });
       applyNameButton(nameText, r.id);
     }
 
@@ -1388,6 +1388,5 @@
 </script>
 </body>
 </html>
-
 
 
