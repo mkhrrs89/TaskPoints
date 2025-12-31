@@ -2577,6 +2577,44 @@ body {
 }
 
 
+/* =========================================================
+   GameHub — Matchup compare table tweaks (mu-compare)
+   ========================================================= */
+
+/* 1) Center label boxes: dark teal instead of navy */
+#muCompare .mu-lbl{
+  background: linear-gradient(180deg, rgba(15, 77, 77, 0.85), rgba(10, 47, 47, 0.85)) !important;
+}
+
+/* 2) Beveled container corners (cut-corner look) */
+#muCompare{
+  border-radius: 0 !important;
+
+  /* adjust this number to taste (8–14px is the sweet spot) */
+  --bevel: 12px;
+
+  -webkit-clip-path: polygon(
+    var(--bevel) 0,
+    calc(100% - var(--bevel)) 0,
+    100% var(--bevel),
+    100% calc(100% - var(--bevel)),
+    calc(100% - var(--bevel)) 100%,
+    var(--bevel) 100%,
+    0 calc(100% - var(--bevel)),
+    0 var(--bevel)
+  );
+  clip-path: polygon(
+    var(--bevel) 0,
+    calc(100% - var(--bevel)) 0,
+    100% var(--bevel),
+    100% calc(100% - var(--bevel)),
+    calc(100% - var(--bevel)) 100%,
+    var(--bevel) 100%,
+    0 calc(100% - var(--bevel)),
+    0 var(--bevel)
+  );
+}
+
 
 
 
