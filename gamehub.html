@@ -1218,24 +1218,47 @@
       diffValEl.textContent = '—';
     }
 
-    // details blocks
-    $('youDetailRecord').textContent = (youStats.wins != null && youStats.losses != null) ? `${youStats.wins}-${youStats.losses}` : '—';
-    $('youDetailWinPct').textContent = fmtPct(youStats.winPct);
-    $('youDetailPPD').textContent = fmt1(youStats.avgPPD);
-    $('youDetailRatings').textContent = '—';
+    // 3-col comparison table (mockup style)
+    const set = (id, val) => { const el = $(id); if (el) el.textContent = val; };
 
-    if (oppStats) {
-      $('oppDetailRecord').textContent = (oppStats.wins != null && oppStats.losses != null) ? `${oppStats.wins}-${oppStats.losses}` : '—';
-      $('oppDetailWinPct').textContent = fmtPct(oppStats.winPct);
-      $('oppDetailPPD').textContent = fmt1(oppStats.avgPPD);
-      $('oppDetailRatings').textContent = formatRatingsLine(oppP);
+    const youRec = (youStats.wins != null && youStats.losses != null) ? `${youStats.wins}-${youStats.losses}` : '—';
+    const oppRec = (oppStats && oppStats.wins != null && oppStats.losses != null) ? `${oppStats.wins}-${oppStats.losses}` : '—';
+
+    set('muYouRecord', youRec);
+    set('muOppRecord', oppRec);
+
+    set('muYouWin', fmtPct(youStats.winPct));
+    set('muOppWin', oppStats ? fmtPct(oppStats.winPct) : '—');
+
+    // PLACE (optional for now; leaving placeholder until you want rankings wired in)
+    set('muYouPlace', '—');
+    set('muOppPlace', '—');
+
+    set('muYouPPD', fmt1(youStats.avgPPD));
+    set('muOppPPD', oppStats ? fmt1(oppStats.avgPPD) : '—');
+
+    // Ratings rows (YOU is blank; opponent uses their saved ratings)
+    set('muYouBase', '—');
+    set('muYouVar',  '—');
+    set('muYouTilt', '—');
+    set('muYouMom',  '—');
+    set('muYouRisk', '—');
+
+    if (oppP) {
+      set('muOppBase', Number.isFinite(Number(oppP.baseline)) ? String(oppP.baseline) : '—');
+      set('muOppVar',  Number.isFinite(Number(oppP.variance)) ? String(oppP.variance) : '—');
+      set('muOppTilt', Number.isFinite(Number(oppP.varianceTilt)) ? String(oppP.varianceTilt) : '—');
+      set('muOppMom',  Number.isFinite(Number(oppP.momentum)) ? String(oppP.momentum) : '—');
+      const r = getNormalizedRisky(oppP.risky);
+      set('muOppRisk', Number.isFinite(r) ? r.toFixed(1) : '—');
     } else {
-      $('oppDetailRecord').textContent = '—';
-      $('oppDetailWinPct').textContent = '—';
-      $('oppDetailPPD').textContent = '—';
-      $('oppDetailRatings').textContent = '—';
+      set('muOppBase', '—');
+      set('muOppVar',  '—');
+      set('muOppTilt', '—');
+      set('muOppMom',  '—');
+      set('muOppRisk', '—');
     }
-  }
+
 
   function setModalOpen(isOpen){
     const modal = $('playerDetailsModal');
