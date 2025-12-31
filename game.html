@@ -870,6 +870,7 @@ migrateLegacyImagesIfNeeded();
         offsetY: 0
       };
       cropModalEl.classList.remove("hidden");
+      window.lockScrollForModal?.();
       setCropAspect("3:4");
     }
 
@@ -958,6 +959,7 @@ cropZoomEl.max = String(Math.round(minScale * 150)); // caps at 150% of minScale
       cropModalEl.classList.add("hidden");
       if (cropState?.cleanup) cropState.cleanup();
       cropState = null;
+      window.unlockScrollForModal?.();
     }
 
     function applyCrop(){

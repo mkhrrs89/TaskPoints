@@ -1289,6 +1289,11 @@ function placeString(rankIndex, total){
     if (!modal) return;
     modal.classList.toggle('hidden', !isOpen);
     document.body.classList.toggle('overflow-hidden', isOpen);
+    if (isOpen) {
+      window.lockScrollForModal?.();
+    } else {
+      window.unlockScrollForModal?.();
+    }
   }
 
   function ratingValueFromInput(input){
@@ -1471,4 +1476,3 @@ function placeString(rankIndex, total){
 </script>
 </body>
 </html>
-

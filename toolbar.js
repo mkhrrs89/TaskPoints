@@ -193,6 +193,45 @@ document.addEventListener('DOMContentLoaded', () => {
   setupMobileTasksMenu();
 });
 
+// ---------- Modal viewport + iOS focus zoom fix ----------
+// iOS Safari zooms when focusing inputs under 16px and can lose scroll when closing fixed-body modals.
+(() => {
+  let modalLockCount = 0;
+  let savedScrollY = 0;
+
+  function lockScrollForModal() {
+    if (modalLockCount === 0) {
+      savedScrollY = window.scrollY || 0;
+      document.body.style.position = 'fixed';
+      document.body.style.top = `-${savedScrollY}px`;
+      document.body.style.width = '100%';
+    }
+    modalLockCount += 1;
+  }
+
+  function unlockScrollForModal() {
+    if (modalLockCount === 0) return;
+    modalLockCount -= 1;
+    if (modalLockCount > 0) return;
+
+    document.activeElement?.blur?.();
+
+    const restoreY = savedScrollY;
+    document.body.style.position = '';
+    document.body.style.top = '';
+    document.body.style.width = '';
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        window.scrollTo(0, restoreY);
+      });
+    });
+  }
+
+  window.lockScrollForModal = lockScrollForModal;
+  window.unlockScrollForModal = unlockScrollForModal;
+})();
+
 // ---------- Shared mobile chrome helpers ----------
 const STORAGE_KEY_FALLBACK = (window.TaskPointsCore && TaskPointsCore.STORAGE_KEY) || 'taskpoints_v1';
 const PROJECTS_STORAGE_KEY_FALLBACK = (window.TaskPointsCore && TaskPointsCore.PROJECTS_STORAGE_KEY) || 'tp_projects_v1';

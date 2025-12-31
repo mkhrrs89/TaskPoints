@@ -1157,6 +1157,7 @@ function openAddTaskModal() {
 
   modal.classList.remove("hidden");
   modal.classList.add("flex");
+  window.lockScrollForModal?.();
   $("titleInput")?.focus();
 
   const rep = $("repeatInput");
@@ -1169,6 +1170,7 @@ function closeAddTaskModal() {
 
   modal.classList.add("hidden");
   modal.classList.remove("flex");
+  window.unlockScrollForModal?.();
 }
 
 function setDueToday(){

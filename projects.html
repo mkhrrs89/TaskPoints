@@ -608,6 +608,7 @@ function openModal(mode, projectId=null){
   const modal = $("modal");
   modal.classList.add("show");
   modal.setAttribute("aria-hidden","false");
+  window.lockScrollForModal?.();
 
   const isEdit = mode === "edit";
   state.ui.editingId = isEdit ? projectId : null;
@@ -632,6 +633,7 @@ function closeModal(){
   modal.classList.remove("show");
   modal.setAttribute("aria-hidden","true");
   state.ui.editingId = null;
+  window.unlockScrollForModal?.();
 }
 
 function upsertFromModal(){
