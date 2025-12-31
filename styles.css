@@ -570,6 +570,15 @@ body {
    ========================= */
 
 .input,select,textarea{border:1px solid var(--border);background:#0f1419;color:#e6edf6;border-radius:12px;padding:10px 12px;width:100%}
+/* iOS Safari: prevent focus auto-zoom on form controls inside modals/popups. */
+@media (pointer: coarse) {
+  input,
+  select,
+  textarea,
+  .input {
+    font-size: 16px !important;
+  }
+}
 .color-input{
   width:3.25rem;
   height:2.5rem;

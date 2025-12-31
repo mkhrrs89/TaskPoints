@@ -999,6 +999,8 @@ function promptEditSleepEntry(entry) {
   modal.classList.remove('hidden');
   modal.classList.add('flex');
 
+  window.lockScrollForModal?.();
+
   scoreInput.focus();
   scoreInput.select();
 }
@@ -1009,6 +1011,7 @@ function closeSleepEditModal() {
   modal.classList.add('hidden');
   modal.classList.remove('flex');
   sleepEditContext = null;
+  window.unlockScrollForModal?.();
 }
 
 function submitSleepEditModal() {
@@ -1074,6 +1077,8 @@ function promptEditWorkEntry(entry, options = {}) {
   modal.classList.remove('hidden');
   modal.classList.add('flex');
 
+  window.lockScrollForModal?.();
+
   scoreInput.focus();
   scoreInput.select();
 }
@@ -1086,6 +1091,7 @@ function closeWorkEditModal() {
   modal.classList.remove('flex');
   workEditContext = null;
   workEditOptions = null;
+  window.unlockScrollForModal?.();
 }
 
 function submitWorkEditModal() {
@@ -1221,6 +1227,8 @@ function openAddTaskModal() {
   modal.classList.remove("hidden");
   modal.classList.add("flex");
 
+  window.lockScrollForModal?.();
+
   // ✅ keep custom repeat row in sync immediately
   const repeatSel = $("repeatInput");
   if (repeatSel) syncCustomRepeatUI(repeatSel);
@@ -1235,6 +1243,7 @@ function closeAddTaskModal() {
 
   modal.classList.add("hidden");
   modal.classList.remove("flex");
+  window.unlockScrollForModal?.();
 }
 
   function toggleAddTask() {
@@ -1251,6 +1260,7 @@ function openAddTaskModal() {
 
   modal.classList.remove("hidden");
   modal.classList.add("flex");
+  window.lockScrollForModal?.();
   $("titleInput")?.focus();
 
   const btn = $("todayPointsAddTaskBtn");
@@ -1268,6 +1278,7 @@ function closeAddTaskModal() {
 
   modal.classList.add("hidden");
   modal.classList.remove("flex");
+  window.unlockScrollForModal?.();
 
   // 👇 and here
   const btn = $("todayPointsAddTaskBtn");
