@@ -1158,6 +1158,28 @@
       };
       rows.sort(sorters[sortValue] || sorters["ppd-desc"]);
 
+      const globalRange = rows.reduce((acc, row) => {
+        const player = playerById.get(row.id);
+        if (!player) return acc;
+        const scores = results.scoresByPlayer.get(player.id) || [];
+        const baseline = player.baseline;
+        const variance = player.variance;
+        const minValue = Math.min(...scores, baseline - variance);
+        const maxValue = Math.max(...scores, baseline + variance);
+        return {
+          min: Math.min(acc.min, minValue),
+          max: Math.max(acc.max, maxValue)
+        };
+      }, { min: Number.POSITIVE_INFINITY, max: Number.NEGATIVE_INFINITY });
+
+      const tickStep = 20;
+      const scaleMin = Number.isFinite(globalRange.min)
+        ? Math.floor(globalRange.min / tickStep) * tickStep
+        : 0;
+      const scaleMax = Number.isFinite(globalRange.max)
+        ? Math.ceil(globalRange.max / tickStep) * tickStep
+        : tickStep;
+
       rows.forEach(row => {
         const player = playerById.get(row.id);
         if (!player) return;
@@ -1166,27 +1188,38 @@
         const variance = player.variance;
         const varianceTilt = player.varianceTilt;
         const riskyScore = getNormalizedRisky(player.risky);
-        const minValue = Math.min(...scores, baseline - variance);
-        const maxValue = Math.max(...scores, baseline + variance);
+        const minValue = scaleMin;
+        const maxValue = scaleMax;
         const range = maxValue - minValue || 1;
 
         const width = Math.max(240, scores.length * 24);
         const height = 120;
-        const pad = 10;
+        const padX = 32;
+        const padY = 12;
 
         const pointX = idx => {
-          if (scores.length <= 1) return pad;
-          return pad + (idx / (scores.length - 1)) * (width - pad * 2);
+          if (scores.length <= 1) return padX;
+          return padX + (idx / (scores.length - 1)) * (width - padX * 2);
         };
         const pointY = value => {
           const normalized = (value - minValue) / range;
-          return height - pad - normalized * (height - pad * 2);
+          return height - padY - normalized * (height - padY * 2);
         };
 
         const linePoints = scores.map((val, idx) => `${pointX(idx)},${pointY(val)}`).join(" ");
         const baselineY = pointY(baseline);
         const upperY = pointY(baseline + variance);
         const lowerY = pointY(baseline - variance);
+        const yTicks = [];
+        for (let value = scaleMin; value <= scaleMax + 0.001; value += tickStep) {
+          yTicks.push({ value, y: pointY(value) });
+        }
+        const yTickLines = yTicks.map(tick => `
+            <line x1="${padX - 4}" y1="${tick.y}" x2="${width - padX}" y2="${tick.y}" stroke="#334155" stroke-dasharray="2 6" />
+          `).join("");
+        const yTickLabels = yTicks.map(tick => `
+            <text x="${padX - 8}" y="${tick.y + 3}" fill="#94a3b8" font-size="9" text-anchor="end">${formatNumber(tick.value)}</text>
+          `).join("");
 
         const wrapper = document.createElement("div");
         wrapper.className = "glass p-4 space-y-2";
@@ -1198,9 +1231,11 @@
             </div>
           </div>
           <svg viewBox="0 0 ${width} ${height}" class="w-full h-40 rounded-xl bg-black/20 border border-white/5">
-            <line x1="${pad}" y1="${baselineY}" x2="${width - pad}" y2="${baselineY}" stroke="#38bdf8" stroke-dasharray="4 4" />
-            <line x1="${pad}" y1="${upperY}" x2="${width - pad}" y2="${upperY}" stroke="#fb923c" stroke-dasharray="3 5" />
-            <line x1="${pad}" y1="${lowerY}" x2="${width - pad}" y2="${lowerY}" stroke="#fb923c" stroke-dasharray="3 5" />
+            ${yTickLines}
+            ${yTickLabels}
+            <line x1="${padX}" y1="${baselineY}" x2="${width - padX}" y2="${baselineY}" stroke="#38bdf8" stroke-dasharray="4 4" />
+            <line x1="${padX}" y1="${upperY}" x2="${width - padX}" y2="${upperY}" stroke="#fb923c" stroke-dasharray="3 5" />
+            <line x1="${padX}" y1="${lowerY}" x2="${width - padX}" y2="${lowerY}" stroke="#fb923c" stroke-dasharray="3 5" />
             <polyline fill="none" stroke="#34d399" stroke-width="2" points="${linePoints}" />
           </svg>
           <div class="flex flex-wrap gap-3 text-xs muted">
