@@ -330,6 +330,11 @@
         </p>
       </div>
 
+      <div class="flex items-center gap-2 text-xs">
+        <input id="playerActive" type="checkbox" class="toggle-switch" checked>
+        <label for="playerActive" class="opacity-80">Active</label>
+      </div>
+
       <div class="flex justify-end">
         <button class="btn btn-success" type="submit">Add player</button>
       </div>
@@ -1366,10 +1371,14 @@ function shuffle(arr){
   }
 }
 
+function isPlayerActive(player){
+  return !!player && player.active !== false;
+}
+
 function getAllParticipantIds(){
   const ids = ['YOU'];
   (state.players || []).forEach(p => {
-    if (p && p.id) ids.push(p.id);
+    if (p && p.id && isPlayerActive(p)) ids.push(p.id);
   });
   return ids;
 }
@@ -1701,6 +1710,7 @@ async function renderPlayers() {
   sortedPlayers.forEach(p => {
     const card = document.createElement("div");
  card.dataset.playerId = p.id;
+    const isActive = p.isYou ? true : isPlayerActive(p);
 
     // ----- GALLERY VIEW (image + name only) -----
     if (viewMode === "gallery") {
@@ -1723,7 +1733,7 @@ async function renderPlayers() {
             }
           </div>
         </div>
-        <p class="mt-1 text-xs sm:text-sm font-medium text-center break-words leading-snug">
+        <p class="mt-1 text-xs sm:text-sm font-medium text-center break-words leading-snug ${!isActive ? "player-inactive-text" : ""}">
           ${escapeHtml(displayName)}
         </p>
       `;
@@ -1894,6 +1904,16 @@ card.innerHTML = `
             rows="3"
           >${escapeHtml(p.notes || "")}</textarea>
 
+          <div class="flex items-center gap-2 text-xs">
+            <input
+              data-field="active"
+              type="checkbox"
+              class="toggle-switch"
+              ${isActive ? "checked" : ""}
+            />
+            <span class="opacity-80">Active</span>
+          </div>
+
           <!-- New: editable stats -->
           <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
             <div>
@@ -2020,7 +2040,7 @@ card.innerHTML = `
 card.innerHTML = `
   <div class="flex flex-col gap-3 w-full">
     <div class="flex items-start justify-between gap-3">
-      <h3 class="font-semibold text-base md:text-lg break-words">
+      <h3 class="font-semibold text-base md:text-lg break-words ${!isActive ? "player-inactive-text" : ""}">
         ${escapeHtml(p.name || "")}
       </h3>
     </div>
@@ -2039,7 +2059,7 @@ card.innerHTML = `
         </div>
       </div>
 
-      <div class="flex-1 min-w-0">
+      <div class="flex-1 min-w-0 ${!isActive ? "player-inactive-text" : ""}">
         <div class="text-xs opacity-80 leading-[1.0] space-y-[2px]">
           <p>Record: ${recordText}</p>
           <p>PPD: ${avgPpd}</p>
@@ -2198,6 +2218,7 @@ card.innerHTML = `
         const nameInput = card.querySelector('input[data-field="name"]');
         const notesInput = card.querySelector('textarea[data-field="notes"]');
         const fileInput = card.querySelector('input[data-field="image"]');
+        const activeInput = card.querySelector('input[data-field="active"]');
   const baselineInput  = card.querySelector('input[data-field="baseline"]');
   const varianceInput  = card.querySelector('input[data-field="variance"]');
   const varianceTiltInput = card.querySelector('input[data-field="varianceTilt"]');
@@ -2208,6 +2229,8 @@ card.innerHTML = `
         const player = state.players.find(p => p.id === id);
         if (!player) return;
 
+        const wasActive = isPlayerActive(player);
+
         const newName = (nameInput.value || "").trim();
         if (!newName){
           alert("Player name is required.");
@@ -2215,6 +2238,7 @@ card.innerHTML = `
         }
 
         const newNotes = (notesInput.value || "").trim();
+  const nextActive = activeInput ? activeInput.checked : wasActive;
   const baseline = baselineInput
     ? Number(baselineInput.value || 60)
     : (typeof player.baseline === "number" ? player.baseline : 60);
@@ -2243,6 +2267,7 @@ card.innerHTML = `
   const applyUpdate = async (imageData) => {
     player.name = newName;
     player.notes = newNotes;
+    player.active = nextActive;
 
     player.baseline = isNaN(baseline) ? 60 : baseline;
     player.variance = isNaN(variance) ? 40 : variance;
@@ -2255,6 +2280,9 @@ card.innerHTML = `
     if (imageData){
       const nextImageId = await saveImageFromDataUrl(imageData, player.imageId);
       player.imageId = nextImageId || "";
+    }
+    if (wasActive !== nextActive) {
+      refreshScheduleAfterRosterChange();
     }
     state = saveState(state);
     editingPlayerId = null;
@@ -2297,6 +2325,7 @@ $("createPlayerForm").addEventListener("submit", (e)=>{
   const name = ($("playerName").value || "").trim();
   const notes = ($("playerNotes").value || "").trim();
   const file = $("playerImage").files && $("playerImage").files[0];
+  const isActive = $("playerActive").checked;
 
   const baseline = Number($("playerBaseline").value || 60);
   const variance = Number($("playerVariance").value || 40);
@@ -2324,6 +2353,7 @@ $("createPlayerForm").addEventListener("submit", (e)=>{
       notes,
       imageId: imageId || "",
       createdAtISO: new Date().toISOString(),
+      active: isActive,
 
       baseline: isNaN(baseline) ? 35 : baseline,
       variance: isNaN(variance) ? 9 : variance,
@@ -2347,6 +2377,7 @@ $("createPlayerForm").addEventListener("submit", (e)=>{
     $("playerMomentum").value = "50";
     $("playerRisky").value = "30";
     $("playerStyle").value = "";
+    $("playerActive").checked = true;
     renderPlayers();
   };
 

@@ -238,10 +238,14 @@ function saveState(nextState) {
       }
     }
 
+    function isPlayerActive(player) {
+      return !!player && player.active !== false;
+    }
+
     function getAllParticipantIds(state) {
       const ids = ["YOU"];
       (state.players || []).forEach((p) => {
-        if (p && p.id) ids.push(p.id);
+        if (p && p.id && isPlayerActive(p)) ids.push(p.id);
       });
       return ids;
     }
