@@ -80,6 +80,7 @@
           </div>
         </div>
         <div class="flex flex-wrap gap-2">
+          <button id="syncMatchupsBtn" type="button" class="btn btn-ghost">Sync Matchups</button>
           <button id="copyReportBtn" type="button" class="btn btn-ghost" data-require-click="true">Copy Report</button>
           <button id="exportJsonBtn" type="button" class="btn btn-ghost">Export JSON</button>
         </div>
@@ -932,12 +933,47 @@
       URL.revokeObjectURL(url);
     }
 
+    function syncMatchups() {
+      if (!window.TaskPointsCore?.loadAppState) return;
+
+      const { state } = TaskPointsCore.loadAppState();
+      let nextState = state;
+      let changed = false;
+
+      if (window.TaskPointsCore?.syncDerivedPoints) {
+        const derivedSync = TaskPointsCore.syncDerivedPoints(nextState);
+        nextState = derivedSync.state;
+        changed = changed || derivedSync.changed;
+      }
+
+      if (window.TaskPointsCore?.syncYouMatchups) {
+        const matchupSync = TaskPointsCore.syncYouMatchups(nextState);
+        nextState = matchupSync.state;
+        changed = changed || matchupSync.changed;
+      }
+
+      if (!changed) {
+        alert('Matchups already synced.');
+        return;
+      }
+
+      if (window.TaskPointsCore?.mergeAndSaveState) {
+        TaskPointsCore.mergeAndSaveState(nextState);
+      } else {
+        localStorage.setItem(TaskPointsCore.STORAGE_KEY, JSON.stringify(nextState));
+      }
+
+      alert('Matchups synced. Re-running audit.');
+      runAudit();
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
       const dateInput = $('auditDate');
       if (dateInput) {
         dateInput.value = defaultAuditDate();
       }
       bindPress('runAuditBtn', runAudit);
+      bindPress('syncMatchupsBtn', syncMatchups);
       bindPress('copyReportBtn', copyReport);
       bindPress('exportJsonBtn', exportJson);
 
