@@ -332,6 +332,52 @@ body {
 }
 /* --- Name + meta text (END) -------------------------------------------- */
 
+/* GameHub matchup 3-column compare table */
+.mu-compare{
+  margin-top: 14px;
+  border-radius: 18px;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(15, 23, 42, 0.18);
+}
+
+.mu-row{
+  display: grid;
+  grid-template-columns: 1fr 1.2fr 1fr;
+  align-items: center;
+  min-height: 54px;
+}
+
+.mu-row:nth-child(odd){
+  background: rgba(255,255,255,0.06);
+}
+
+.mu-row:nth-child(even){
+  background: rgba(255,255,255,0.03);
+}
+
+.mu-lbl{
+  text-align: center;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  font-size: 12px;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.78);
+  background: rgba(15, 23, 42, 0.55);
+  padding: 12px 10px;
+}
+
+.mu-val{
+  padding: 12px 14px;
+  font-weight: 750;
+  font-size: 18px;
+  color: rgba(255,255,255,0.9);
+}
+
+.mu-left{ text-align: center; }
+.mu-right{ text-align: center; }
+
+
 .gamehub-page .matchup-scoreboard {
   grid-template-columns: minmax(0, 1fr) minmax(160px, 0.6fr) minmax(0, 1fr);
   align-items: start;
@@ -2529,6 +2575,7 @@ body {
 .player-inactive-text{
   color: rgba(148, 163, 184, 0.75);
 }
+
 
 
 
