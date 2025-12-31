@@ -1665,8 +1665,15 @@ async function renderPlayers() {
   };
 
   const comparePlayers = (a, b) => {
-    if (a.isYou && !b.isYou) return -1;
-    if (b.isYou && !a.isYou) return 1;
+    const youPriorityModes = new Set(["baseline-desc", "created-asc"]);
+    if (youPriorityModes.has(playerSortMode)) {
+      if (a.isYou && !b.isYou) return -1;
+      if (b.isYou && !a.isYou) return 1;
+    }
+    if (playerSortMode === "created-desc") {
+      if (a.isYou && !b.isYou) return 1;
+      if (b.isYou && !a.isYou) return -1;
+    }
 
     const nameA = (a.isYou ? "You" : a.name || "").toLowerCase();
     const nameB = (b.isYou ? "You" : b.name || "").toLowerCase();
@@ -1681,6 +1688,9 @@ async function renderPlayers() {
       case "name-desc":
         return nameB.localeCompare(nameA);
       case "avg-desc": {
+        const activeA = a.isYou ? true : isPlayerActive(a);
+        const activeB = b.isYou ? true : isPlayerActive(b);
+        if (activeA !== activeB) return activeA ? -1 : 1;
         const aVal = Number.isFinite(avgA) ? avgA : -Infinity;
         const bVal = Number.isFinite(avgB) ? avgB : -Infinity;
         if (aVal !== bVal) return bVal - aVal;
