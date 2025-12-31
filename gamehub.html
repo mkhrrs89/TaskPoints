@@ -162,28 +162,64 @@
             </div>
           </div>
 
-          <div class="matchup-details mt-4">
-            <div class="matchup-details-row">
-              <div id="youDetailRecord" class="matchup-details-value">—</div>
-              <div class="matchup-details-label">Record</div>
-              <div id="oppDetailRecord" class="matchup-details-value">—</div>
-            </div>
-            <div class="matchup-details-row">
-              <div id="youDetailWinPct" class="matchup-details-value">—</div>
-              <div class="matchup-details-label">Win%</div>
-              <div id="oppDetailWinPct" class="matchup-details-value">—</div>
-            </div>
-            <div class="matchup-details-row">
-              <div id="youDetailPPD" class="matchup-details-value">—</div>
-              <div class="matchup-details-label">PPD</div>
-              <div id="oppDetailPPD" class="matchup-details-value">—</div>
-            </div>
-            <div class="matchup-details-row">
-              <div id="youDetailRatings" class="matchup-details-value">—</div>
-              <div class="matchup-details-label">Ratings</div>
-              <div id="oppDetailRatings" class="matchup-details-value">—</div>
-            </div>
-          </div>
+<!-- 3-col comparison table (mockup style) -->
+<div class="mu-compare" id="muCompare">
+  <div class="mu-row">
+    <div class="mu-val mu-left"  id="muYouRecord">—</div>
+    <div class="mu-lbl">RECORD</div>
+    <div class="mu-val mu-right" id="muOppRecord">—</div>
+  </div>
+
+  <div class="mu-row">
+    <div class="mu-val mu-left"  id="muYouWin">—</div>
+    <div class="mu-lbl">WIN %</div>
+    <div class="mu-val mu-right" id="muOppWin">—</div>
+  </div>
+
+  <div class="mu-row">
+    <div class="mu-val mu-left"  id="muYouPlace">—</div>
+    <div class="mu-lbl">PLACE</div>
+    <div class="mu-val mu-right" id="muOppPlace">—</div>
+  </div>
+
+  <div class="mu-row">
+    <div class="mu-val mu-left"  id="muYouPPD">—</div>
+    <div class="mu-lbl">PPD</div>
+    <div class="mu-val mu-right" id="muOppPPD">—</div>
+  </div>
+
+  <div class="mu-row">
+    <div class="mu-val mu-left"  id="muYouBase">—</div>
+    <div class="mu-lbl">BASELINE</div>
+    <div class="mu-val mu-right" id="muOppBase">—</div>
+  </div>
+
+  <div class="mu-row">
+    <div class="mu-val mu-left"  id="muYouVar">—</div>
+    <div class="mu-lbl">VARIANCE</div>
+    <div class="mu-val mu-right" id="muOppVar">—</div>
+  </div>
+
+  <div class="mu-row">
+    <div class="mu-val mu-left"  id="muYouTilt">—</div>
+    <div class="mu-lbl">TILT</div>
+    <div class="mu-val mu-right" id="muOppTilt">—</div>
+  </div>
+
+  <div class="mu-row">
+    <div class="mu-val mu-left"  id="muYouMom">—</div>
+    <div class="mu-lbl">MOMENTUM</div>
+    <div class="mu-val mu-right" id="muOppMom">—</div>
+  </div>
+
+  <div class="mu-row">
+    <div class="mu-val mu-left"  id="muYouRisk">—</div>
+    <div class="mu-lbl">RISKY</div>
+    <div class="mu-val mu-right" id="muOppRisk">—</div>
+  </div>
+</div>
+
+
 
           <div id="noMatchupNotice" class="muted text-sm mt-3 hidden">
             No matchup found for today yet.
