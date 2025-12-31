@@ -512,7 +512,7 @@ body {
 
 @media (max-width: 640px) {
   .gamehub-page .matchup-scoreboard {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr auto 1fr;
     gap: 12px;
   }
 
@@ -532,8 +532,9 @@ body {
   }
 
   .gamehub-page .matchup-scoreboard .scoreboard-diff {
-    grid-column: 1 / -1;
-    margin-top: 4px;
+    grid-column: auto;     /* stops it from forcing a new row */
+    margin-top: 0;
+    align-self: center;
   }
 
   .gamehub-page #matchupYouAvatar,
@@ -553,6 +554,12 @@ body {
   .gamehub-page .matchup-details-label {
     font-size: 0.8rem;
   }
+
+   /* Put name/meta above avatar on BOTH sides */
+  .gamehub-page .matchup-scoreboard .scoreboard-identity .min-w-0 { order: 1; }
+  .gamehub-page #matchupYouAvatar,
+  .gamehub-page #matchupOppAvatar { order: 2; }
+
 }
 
 
@@ -2592,7 +2599,7 @@ body {
 
 /* 1) Center label boxes: dark teal instead of navy */
 #muCompare .mu-lbl{
-  background: rgba(7, 30, 30, 0.92) !important;
+  background: rgba(7, 30, 30, 0.75) !important;
 }
 
 /* 2) Beveled container corners (cut-corner look) */
@@ -2623,6 +2630,7 @@ body {
     0 var(--bevel)
   );
 }
+
 
 
 
