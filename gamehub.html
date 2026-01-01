@@ -416,6 +416,21 @@
     return dateKey(new Date());
   }
 
+  function isPlayerActive(player){
+    return !!player && player.active !== false;
+  }
+
+  function getActivePlayers(state){
+    const players = Array.isArray(state.players) ? state.players : [];
+    return players.filter(isPlayerActive);
+  }
+
+  function getActiveIds(state){
+    const ids = new Set(['YOU']);
+    getActivePlayers(state).forEach(player => ids.add(player.id));
+    return ids;
+  }
+
   function safeNameForId(state, id){
     if (id === 'YOU') return 'You';
     const ps = Array.isArray(state.players) ? state.players : [];
@@ -560,10 +575,12 @@
 
     if (record.source === 'matchups') {
       const matchups = Array.isArray(state.matchups) ? state.matchups : [];
+      const activeIds = getActiveIds(state);
       let games = 0;
       let totalPoints = 0;
       for (const m of matchups) {
         if (!m || (m.playerAId !== 'YOU' && m.playerBId !== 'YOU')) continue;
+        if (!activeIds.has(m.playerAId) || !activeIds.has(m.playerBId)) continue;
         const a = Number(m.scoreA);
         const b = Number(m.scoreB);
         if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
@@ -615,11 +632,13 @@
 
     if (record.source === 'matchups') {
       const matchups = Array.isArray(state.matchups) ? state.matchups : [];
+      const activeIds = getActiveIds(state);
       let games = 0;
       let totalPoints = 0;
 
       for (const m of matchups) {
         if (!m || (m.playerAId !== p.id && m.playerBId !== p.id)) continue;
+        if (!activeIds.has(m.playerAId) || !activeIds.has(m.playerBId)) continue;
         const a = Number(m.scoreA);
         const b = Number(m.scoreB);
         if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
@@ -657,7 +676,7 @@
   }
 
   function buildStandings(state){
-    const players = Array.isArray(state.players) ? state.players : [];
+    const players = getActivePlayers(state);
     const all = [{ id:'YOU', name:'You', isYou:true }, ...players];
 
     const rows = all.map(p => {
@@ -849,7 +868,7 @@
     const wrap = $('ratingsBoards');
     clearEl(wrap);
 
-    const players = Array.isArray(state.players) ? state.players : [];
+    const players = getActivePlayers(state);
     const standingsById = new Map(
       Array.isArray(standings) ? standings.map(row => [row.id, row.avgPPD]) : []
     );

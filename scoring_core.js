@@ -1208,17 +1208,39 @@
     return { state: normalized, changed, mismatches };
   }
 
+  function isPlayerActive(player) {
+    return !!player && player.active !== false;
+  }
+
+  function activePlayerIds(state) {
+    const ids = new Set(['YOU']);
+    if (Array.isArray(state?.players)) {
+      state.players.forEach((player) => {
+        if (player && player.id && isPlayerActive(player)) {
+          ids.add(player.id);
+        }
+      });
+    }
+    return ids;
+  }
+
   function computeMatchupRecord(state, playerId){
     const matchups = Array.isArray(state?.matchups) ? state.matchups : [];
     let wins = 0;
     let losses = 0;
     let ties = 0;
     let games = 0;
+    const activeIds = activePlayerIds(state);
     const hideToday = playerId && playerId !== 'YOU';
     const today = hideToday ? todayKey() : null;
 
+    if (playerId && !activeIds.has(playerId)) {
+      return { wins, losses, ties, games, source: 'matchups' };
+    }
+
     matchups.forEach(m => {
       if (!m) return;
+      if (!activeIds.has(m.playerAId) || !activeIds.has(m.playerBId)) return;
       if (hideToday) {
         const key = matchupDateKey(m);
         if (key && key >= today) return;
@@ -1278,6 +1300,10 @@
 
   function computeGameHistoryRecord(state, playerId){
     const history = Array.isArray(state?.gameHistory) ? state.gameHistory : [];
+    const activeIds = activePlayerIds(state);
+    if (playerId && !activeIds.has(playerId)) {
+      return { wins: 0, losses: 0, ties: 0, games: 0, source: 'gameHistory' };
+    }
     const players = Array.isArray(state?.players) ? state.players : [];
     const player = players.find(p => p && p.id === playerId);
     const baseline = typeof player?.baseline === 'number'

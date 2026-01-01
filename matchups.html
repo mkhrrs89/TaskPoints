@@ -169,6 +169,17 @@ function load() {
       return `${y}-${m}-${day}`;
     }
 
+    function makeId() {
+      if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+        return crypto.randomUUID();
+      }
+      return `id_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    }
+
+    function isPlayerActive(player) {
+      return !!player && player.active !== false;
+    }
+
     function syncYouMatchupsWithCompletions(state) {
       if (!window.TaskPointsCore || typeof TaskPointsCore.syncYouMatchups !== "function") {
         return state;
@@ -211,6 +222,48 @@ function load() {
       return matchup.dateKey || matchup.date || (matchup.dateISO ? dateKey(matchup.dateISO) : "");
     }
 
+    function activePlayerIds(state) {
+      const ids = new Set(["YOU"]);
+      (state.players || []).forEach(player => {
+        if (player && player.id && isPlayerActive(player)) ids.add(player.id);
+      });
+      return ids;
+    }
+
+    function removeOpponentDripSchedule(state, dateKeyStr, playerId) {
+      const schedules = Array.isArray(state.opponentDripSchedules) ? state.opponentDripSchedules : [];
+      state.opponentDripSchedules = schedules.filter(s => !(s && s.date === dateKeyStr && s.playerId === playerId));
+    }
+
+    function upsertGameHistoryEntry(state, dateKeyStr, playerId, score) {
+      if (!playerId || playerId === "YOU") return;
+      const history = Array.isArray(state.gameHistory) ? state.gameHistory : [];
+      const existing = history.find(entry => entry && entry.playerId === playerId && entry.date === dateKeyStr);
+      if (existing) {
+        existing.score = score;
+      } else {
+        history.push({
+          id: makeId(),
+          date: dateKeyStr,
+          playerId,
+          score
+        });
+      }
+      state.gameHistory = history;
+    }
+
+    function requestScoreInput(label, currentScore) {
+      const current = Number(currentScore);
+      const fallback = Number.isFinite(current) ? current : 0;
+      while (true) {
+        const input = prompt(`Edit ${label} score:`, formatScore(fallback));
+        if (input === null) return null;
+        const next = Number(input);
+        if (Number.isFinite(next)) return next;
+        alert("Please enter a valid numeric score.");
+      }
+    }
+
     function renderMatchups(){
       let state = load();
 
@@ -222,8 +275,12 @@ state = syncYouMatchupsWithCompletions(state);
       chronoContainer.innerHTML = "";
       playerContainer.innerHTML = "";
 
-      const matchups = Array.isArray(state.matchups) ? state.matchups.slice() : [];
-      if (!matchups.length) {
+      const matchups = Array.isArray(state.matchups) ? state.matchups : [];
+      const activeIds = activePlayerIds(state);
+      const visibleMatchups = matchups.filter(m =>
+        m && activeIds.has(m.playerAId) && activeIds.has(m.playerBId)
+      );
+      if (!visibleMatchups.length) {
         const empty = document.createElement("section");
         empty.className = "glass";
         empty.innerHTML = "<div class='text-sm muted'>No matchups have been simulated yet.</div>";
@@ -253,6 +310,48 @@ state = syncYouMatchupsWithCompletions(state);
         const num = Number(score);
         if (!Number.isFinite(num)) return "0";
         return Number.isInteger(num) ? String(num) : num.toFixed(1);
+      }
+
+      function editMatchupScores(matchup) {
+        if (!matchup) return;
+        const key = getMatchupDateKey(matchup);
+        if (!key) {
+          alert("This matchup is missing a date.");
+          return;
+        }
+
+        const aId = matchup.playerAId;
+        const bId = matchup.playerBId;
+        const aIsYou = aId === "YOU";
+        const bIsYou = bId === "YOU";
+        const aName = getName(aId, matchup);
+        const bName = getName(bId, matchup);
+
+        const updates = [];
+
+        if (!aIsYou) {
+          const nextScore = requestScoreInput(aName, matchup.scoreA);
+          if (nextScore === null) return;
+          matchup.scoreA = nextScore;
+          updates.push({ playerId: aId, score: nextScore });
+        }
+
+        if (!bIsYou) {
+          const nextScore = requestScoreInput(bName, matchup.scoreB);
+          if (nextScore === null) return;
+          matchup.scoreB = nextScore;
+          updates.push({ playerId: bId, score: nextScore });
+        }
+
+        if (!updates.length) return;
+
+        updates.forEach(update => {
+          upsertGameHistoryEntry(state, key, update.playerId, update.score);
+          removeOpponentDripSchedule(state, key, update.playerId);
+        });
+
+        state = save(state);
+        renderMatchups();
       }
 
       function describeMatchup(m){
@@ -318,7 +417,7 @@ state = syncYouMatchupsWithCompletions(state);
 
       // Group by date key
       const groups = new Map();
-      matchups.forEach(m => {
+      visibleMatchups.forEach(m => {
         const key = getMatchupDateKey(m);
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key).push(m);
@@ -344,11 +443,23 @@ state = syncYouMatchupsWithCompletions(state);
           .sort((a,b) => (a.id || "").localeCompare(b.id || ""))
           .forEach(m => {
             const li = document.createElement("li");
-            li.className = "matchup-item";
+            li.className = "matchup-item flex items-center justify-between gap-3";
             if (m.playerAId === "YOU" || m.playerBId === "YOU") {
               li.classList.add("you");
             }
-            li.textContent = describeMatchup(m);
+            const summary = document.createElement("span");
+            summary.className = "flex-1";
+            summary.textContent = describeMatchup(m);
+            li.appendChild(summary);
+
+            if (m.playerAId !== "YOU" || m.playerBId !== "YOU") {
+              const editBtn = document.createElement("button");
+              editBtn.type = "button";
+              editBtn.className = "btn btn-ghost btn-toolbar text-xs";
+              editBtn.textContent = "Edit scores";
+              editBtn.addEventListener("click", () => editMatchupScores(m));
+              li.appendChild(editBtn);
+            }
             list.appendChild(li);
           });
 
@@ -357,7 +468,7 @@ state = syncYouMatchupsWithCompletions(state);
       });
 
       const playerGroups = new Map();
-      matchups.forEach(m => {
+      visibleMatchups.forEach(m => {
         [m.playerAId, m.playerBId].forEach(playerId => {
           if (!playerId) return;
           if (!playerGroups.has(playerId)) playerGroups.set(playerId, []);
@@ -388,13 +499,24 @@ state = syncYouMatchupsWithCompletions(state);
           .sort((a,b) => getMatchupDateKey(b).localeCompare(getMatchupDateKey(a)))
           .forEach(m => {
             const li = document.createElement("li");
-            li.className = "matchup-item";
+            li.className = "matchup-item flex items-center justify-between gap-3";
             if (playerId === "YOU") {
               li.classList.add("you");
             }
             const dateLabel = formatShortDate(getMatchupDateKey(m));
             const summary = describeMatchupForPlayer(m, playerId);
-            li.textContent = `${dateLabel} - ${summary}`;
+            const label = document.createElement("span");
+            label.className = "flex-1";
+            label.textContent = `${dateLabel} - ${summary}`;
+            li.appendChild(label);
+            if (m.playerAId !== "YOU" || m.playerBId !== "YOU") {
+              const editBtn = document.createElement("button");
+              editBtn.type = "button";
+              editBtn.className = "btn btn-ghost btn-toolbar text-xs";
+              editBtn.textContent = "Edit scores";
+              editBtn.addEventListener("click", () => editMatchupScores(m));
+              li.appendChild(editBtn);
+            }
             list.appendChild(li);
           });
 
