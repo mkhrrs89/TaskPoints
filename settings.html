@@ -123,65 +123,100 @@
           </label>
           <button id="runSimulationBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Run Simulation</button>
           <button id="downloadSimulationBtn" class="btn btn-ghost btn-toolbar nav-btn" type="button" disabled>
-            Download &amp; Clear (CSV)
+            Download (CSV)
           </button>
         </div>
-        <p class="muted text-xs">Download clears the simulation forever. Re-run if you need another export.</p>
+        <p class="muted text-xs">Simulation results clear when you leave this page.</p>
 
         <div id="simulationResults" class="space-y-6 hidden">
-          <div>
-            <div class="text-base font-semibold mb-2">Scores by Day</div>
-            <div class="overflow-x-auto">
+          <details id="simulationScoresSection" class="glass p-4">
+            <summary class="flex items-center justify-between gap-3 flex-wrap cursor-pointer">
+              <div class="text-base font-semibold">Scores by Day</div>
+              <span class="text-xs muted">Collapsed by default</span>
+            </summary>
+            <div class="overflow-x-auto pt-3">
               <table class="min-w-full text-sm" id="simulationScoresTable">
                 <thead class="text-xs uppercase opacity-70"></thead>
                 <tbody class="divide-y divide-white/5"></tbody>
               </table>
             </div>
-          </div>
+          </details>
 
-          <div>
-            <div class="text-base font-semibold mb-2">PPD + Ratings</div>
-            <div class="overflow-x-auto">
+          <details id="simulationSummarySection" class="glass p-4">
+            <summary class="flex items-center justify-between gap-3 flex-wrap cursor-pointer">
+              <div class="text-base font-semibold">PPD + Ratings</div>
+              <span class="text-xs muted">Collapsed by default</span>
+            </summary>
+            <div class="overflow-x-auto pt-3">
               <table class="min-w-full text-sm" id="simulationSummaryTable">
                 <thead class="text-xs uppercase opacity-70"></thead>
                 <tbody class="divide-y divide-white/5"></tbody>
               </table>
             </div>
-          </div>
+          </details>
 
-          <div>
-            <div class="flex items-center justify-between gap-3 flex-wrap mb-2">
+          <details id="simulationTrendsSection" class="glass p-4">
+            <summary class="flex items-center justify-between gap-3 flex-wrap cursor-pointer">
               <div class="text-base font-semibold">Score Trends</div>
-              <label class="text-xs muted">
-                <span class="block mb-1">Sort graphs</span>
-                <select id="simulationChartsSort" class="px-3 py-2 rounded-xl border border-white/10 bg-black/30 text-xs">
-                  <option value="name-asc">Name (A → Z)</option>
-                  <option value="name-desc">Name (Z → A)</option>
-                  <option value="ppd-desc" selected>PPD (High → Low)</option>
-                  <option value="ppd-asc">PPD (Low → High)</option>
-                  <option value="baseline-desc">Baseline (High → Low)</option>
-                  <option value="baseline-asc">Baseline (Low → High)</option>
-                  <option value="variance-desc">Variance (High → Low)</option>
-                  <option value="variance-asc">Variance (Low → High)</option>
-                  <option value="momentum-desc">Momentum (High → Low)</option>
-                  <option value="momentum-asc">Momentum (Low → High)</option>
-                  <option value="risky-desc">Risky (High → Low)</option>
-                  <option value="risky-asc">Risky (Low → High)</option>
-                  <option value="high-desc">High (High → Low)</option>
-                  <option value="high-asc">High (Low → High)</option>
-                  <option value="low-desc">Low (High → Low)</option>
-                  <option value="low-asc">Low (Low → High)</option>
-                  <option value="aboveBaselinePct-desc">Above Baseline % (High → Low)</option>
-                  <option value="aboveBaselinePct-asc">Above Baseline % (Low → High)</option>
-                  <option value="belowBaselinePct-desc">Below Baseline % (High → Low)</option>
-                  <option value="belowBaselinePct-asc">Below Baseline % (Low → High)</option>
-                  <option value="riskyTriggered-desc">Risky Days (High → Low)</option>
-                  <option value="riskyTriggered-asc">Risky Days (Low → High)</option>
-                </select>
-              </label>
+              <span class="text-xs muted">Collapsed by default</span>
+            </summary>
+            <div class="pt-3 space-y-3">
+              <div class="flex items-center justify-between gap-3 flex-wrap">
+                <label class="text-xs muted">
+                  <span class="block mb-1">Sort graphs</span>
+                  <select id="simulationChartsSort" class="px-3 py-2 rounded-xl border border-white/10 bg-black/30 text-xs">
+                    <option value="name-asc">Name (A → Z)</option>
+                    <option value="name-desc">Name (Z → A)</option>
+                    <option value="ppd-desc" selected>PPD (High → Low)</option>
+                    <option value="ppd-asc">PPD (Low → High)</option>
+                    <option value="baseline-desc">Baseline (High → Low)</option>
+                    <option value="baseline-asc">Baseline (Low → High)</option>
+                    <option value="variance-desc">Variance (High → Low)</option>
+                    <option value="variance-asc">Variance (Low → High)</option>
+                    <option value="momentum-desc">Momentum (High → Low)</option>
+                    <option value="momentum-asc">Momentum (Low → High)</option>
+                    <option value="risky-desc">Risky (High → Low)</option>
+                    <option value="risky-asc">Risky (Low → High)</option>
+                    <option value="high-desc">High (High → Low)</option>
+                    <option value="high-asc">High (Low → High)</option>
+                    <option value="low-desc">Low (High → Low)</option>
+                    <option value="low-asc">Low (Low → High)</option>
+                    <option value="aboveBaselinePct-desc">Above Baseline % (High → Low)</option>
+                    <option value="aboveBaselinePct-asc">Above Baseline % (Low → High)</option>
+                    <option value="belowBaselinePct-desc">Below Baseline % (High → Low)</option>
+                    <option value="belowBaselinePct-asc">Below Baseline % (Low → High)</option>
+                    <option value="riskyTriggered-desc">Risky Days (High → Low)</option>
+                    <option value="riskyTriggered-asc">Risky Days (Low → High)</option>
+                  </select>
+                </label>
+              </div>
+              <div id="simulationCharts" class="space-y-6"></div>
             </div>
-            <div id="simulationCharts" class="space-y-6"></div>
-          </div>
+          </details>
+
+          <details id="simulationCombinedSection" class="glass p-4">
+            <summary class="flex items-center justify-between gap-3 flex-wrap cursor-pointer">
+              <div class="text-base font-semibold">Interactive Combined Trends</div>
+              <span class="text-xs muted">Collapsed by default</span>
+            </summary>
+            <div class="pt-3 space-y-3">
+              <div class="flex flex-col gap-4 md:flex-row">
+                <div class="flex-1 space-y-2">
+                  <div id="simulationCombinedChart" class="rounded-xl bg-black/20 border border-white/5 p-2"></div>
+                  <div id="simulationCombinedLegend" class="flex flex-wrap gap-3 text-xs muted"></div>
+                </div>
+                <div class="w-full md:w-56">
+                  <details id="simulationCombinedSelect" class="relative">
+                    <summary class="btn btn-ghost btn-toolbar nav-btn text-xs">
+                      <span id="simulationCombinedSelectLabel">Select players</span>
+                    </summary>
+                    <div id="simulationCombinedSelectList" class="mt-2 space-y-2 max-h-56 overflow-y-auto rounded-xl border border-white/10 bg-black/40 p-3 text-xs"></div>
+                  </details>
+                </div>
+              </div>
+              <p class="text-xs muted">Check players to overlay their trend lines in one chart.</p>
+            </div>
+          </details>
         </div>
       </div>
 
@@ -1230,6 +1265,139 @@
       });
     }
 
+    function renderCombinedChart(results) {
+      const chart = document.getElementById("simulationCombinedChart");
+      const legend = document.getElementById("simulationCombinedLegend");
+      const selectList = document.getElementById("simulationCombinedSelectList");
+      const selectLabel = document.getElementById("simulationCombinedSelectLabel");
+      if (!chart || !legend || !selectList) return;
+
+      const palette = [
+        "#38bdf8",
+        "#34d399",
+        "#fbbf24",
+        "#fb7185",
+        "#a78bfa",
+        "#f97316",
+        "#22d3ee",
+        "#f472b6",
+        "#4ade80",
+        "#60a5fa",
+        "#facc15",
+        "#c084fc"
+      ];
+
+      const players = results.players.map((player, idx) => ({
+        id: player.id,
+        name: player.name || "—",
+        color: palette[idx % palette.length],
+        scores: results.scoresByPlayer.get(player.id) || []
+      }));
+
+      const selectedIds = new Set();
+
+      const updateLabel = () => {
+        if (!selectLabel) return;
+        selectLabel.textContent = selectedIds.size
+          ? `Players (${selectedIds.size} selected)`
+          : "Select players";
+      };
+
+      const updateLegend = () => {
+        if (!selectedIds.size) {
+          legend.innerHTML = `<span class="text-xs muted">Select players to plot lines.</span>`;
+          return;
+        }
+        legend.innerHTML = players
+          .filter(player => selectedIds.has(player.id))
+          .map(player => `
+            <span class="flex items-center gap-2">
+              <span class="inline-block w-3 h-0.5" style="background:${player.color}"></span>
+              ${escapeHtml(player.name)}
+            </span>
+          `).join("");
+      };
+
+      const updateChart = () => {
+        const selectedPlayers = players.filter(player => selectedIds.has(player.id));
+        const scaleSource = selectedPlayers.length
+          ? selectedPlayers.flatMap(player => player.scores)
+          : players.flatMap(player => player.scores);
+        const fallbackScores = scaleSource.length ? scaleSource : [0, 1];
+        const minValue = Math.min(...fallbackScores);
+        const maxValue = Math.max(...fallbackScores);
+        const range = maxValue - minValue || 1;
+
+        const width = Math.max(320, results.dayLabels.length * 24);
+        const height = 160;
+        const padX = 32;
+        const padY = 16;
+
+        const pointX = idx => {
+          if (results.dayLabels.length <= 1) return padX;
+          return padX + (idx / (results.dayLabels.length - 1)) * (width - padX * 2);
+        };
+        const pointY = value => {
+          const normalized = (value - minValue) / range;
+          return height - padY - normalized * (height - padY * 2);
+        };
+
+        const tickCount = 4;
+        const tickStep = range / tickCount;
+        const yTicks = [];
+        for (let i = 0; i <= tickCount; i += 1) {
+          const value = minValue + tickStep * i;
+          yTicks.push({ value, y: pointY(value) });
+        }
+
+        const yTickLines = yTicks.map(tick => `
+            <line x1="${padX - 4}" y1="${tick.y}" x2="${width - padX}" y2="${tick.y}" stroke="#334155" stroke-dasharray="2 6" />
+          `).join("");
+        const yTickLabels = yTicks.map(tick => `
+            <text x="${padX - 8}" y="${tick.y + 3}" fill="#94a3b8" font-size="9" text-anchor="end">${formatNumber(tick.value)}</text>
+          `).join("");
+
+        const lines = selectedPlayers.map(player => {
+          const points = player.scores.map((score, idx) => `${pointX(idx)},${pointY(score)}`).join(" ");
+          return `<polyline fill="none" stroke="${player.color}" stroke-width="2" points="${points}" />`;
+        }).join("");
+
+        chart.innerHTML = `
+          <svg viewBox="0 0 ${width} ${height}" class="w-full h-44 rounded-xl">
+            ${yTickLines}
+            ${yTickLabels}
+            ${lines}
+          </svg>
+        `;
+      };
+
+      selectList.innerHTML = players.map(player => `
+        <label class="flex items-center gap-2">
+          <input type="checkbox" class="accent-teal-400" data-player-id="${player.id}">
+          <span>${escapeHtml(player.name)}</span>
+        </label>
+      `).join("");
+
+      selectList.querySelectorAll("input[type='checkbox']").forEach(input => {
+        input.addEventListener("change", () => {
+          const id = input.getAttribute("data-player-id");
+          if (!id) return;
+          if (input.checked) {
+            selectedIds.add(id);
+          } else {
+            selectedIds.delete(id);
+          }
+          updateLabel();
+          updateLegend();
+          updateChart();
+        });
+      });
+
+      updateLabel();
+      updateLegend();
+      updateChart();
+    }
+
     function escapeHtml(str) {
       if (!str && str !== 0) return "";
       return String(str).replace(/[&<>"']/g, m => ({
@@ -1488,6 +1656,25 @@
       const resultsWrapper = document.getElementById("simulationResults");
       const daysInput = document.getElementById("simulationDaysInput");
       const chartsSort = document.getElementById("simulationChartsSort");
+      const simulationSectionIds = [
+        "simulationScoresSection",
+        "simulationSummarySection",
+        "simulationTrendsSection",
+        "simulationCombinedSection"
+      ];
+
+      const collapseSimulationSections = () => {
+        simulationSectionIds.forEach(id => {
+          const section = document.getElementById(id);
+          if (section) section.open = false;
+        });
+      };
+
+      const clearSimulationResults = () => {
+        latestSimulation = null;
+        resultsWrapper?.classList.add("hidden");
+        if (downloadButton) downloadButton.disabled = true;
+      };
 
       if (runButton && resultsWrapper && daysInput && downloadButton) {
         runButton.addEventListener("click", () => {
@@ -1509,22 +1696,25 @@
           renderScoresTable(results);
           renderSummaryTable(results);
           renderCharts(results);
+          renderCombinedChart(results);
           resultsWrapper.classList.remove("hidden");
           downloadButton.disabled = false;
+          collapseSimulationSections();
         });
 
         downloadButton.addEventListener("click", () => {
           if (!latestSimulation) return;
           downloadSimulationCsv(latestSimulation);
-          latestSimulation = null;
-          resultsWrapper.classList.add("hidden");
-          downloadButton.disabled = true;
         });
       }
 
       chartsSort?.addEventListener("change", () => {
         if (!latestSimulation) return;
         renderCharts(latestSimulation);
+      });
+
+      window.addEventListener("pagehide", () => {
+        clearSimulationResults();
       });
     });
   </script>
