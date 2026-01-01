@@ -1,0 +1,621 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>TaskPoints — Today</title>
+
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="TaskPoints" />
+
+  <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='256' height='256'><rect width='256' height='256' fill='%230b0d10'/><text x='128' y='160' text-anchor='middle' font-size='150' fill='white'>TP</text></svg>">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='%230b0d10'/><text x='50' y='62' font-size='60' text-anchor='middle' fill='white'>TP</text></svg>">
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="styles.css">
+  <script src="toolbar.js" defer></script>
+  <script src="scoring_core.js"></script>
+
+  <style>
+    /* Local-only styles so we keep your global aesthetic intact */
+    .today-page .today-list{display:flex;flex-direction:column;gap:10px;margin-top:14px}
+    .today-page .today-item{
+      display:flex;align-items:center;justify-content:space-between;gap:12px;
+      padding:12px 12px;border-radius:16px;
+      background:rgba(255,255,255,0.04);
+      border:1px solid rgba(255,255,255,0.07);
+      cursor:pointer;user-select:none;
+      transition:background .15s ease,border-color .15s ease,transform .05s ease;
+    }
+    .today-page .today-item:hover{background:rgba(255,255,255,0.055);border-color:rgba(255,255,255,0.11)}
+    .today-page .today-item:active{transform:scale(.995)}
+    .today-page .today-left{display:flex;align-items:center;gap:12px;min-width:0}
+    .today-page .today-check{
+      width:26px;height:26px;border-radius:999px;
+      border:2px solid rgba(255,255,255,0.22);
+      display:flex;align-items:center;justify-content:center;flex:0 0 auto;
+      background:rgba(255,255,255,0.02);
+    }
+    .today-page .today-check .mark{font-weight:900;font-size:14px;line-height:1;opacity:0;transform:translateY(1px)}
+    .today-page .today-title{font-weight:750;letter-spacing:.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .today-page .today-sub{font-size:.85rem;opacity:.75;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .today-page .today-kind{
+      font-size:.70rem;letter-spacing:.12em;text-transform:uppercase;
+      padding:6px 10px;border-radius:999px;
+      border:1px solid rgba(255,255,255,0.10);
+      opacity:.92;
+    }
+    .today-page .today-kind.task{background:rgba(34,197,94,0.08)}
+    .today-page .today-kind.habit{background:rgba(56,189,248,0.08)}
+    .today-page .today-kind.note{background:rgba(168,85,247,0.08)}
+    .today-page .today-item.is-done{opacity:.60}
+    .today-page .today-item.is-done .today-title{
+      text-decoration:line-through;
+      text-decoration-thickness:2px;
+      text-decoration-color:rgba(255,255,255,0.25);
+    }
+    .today-page .today-item.is-done .today-check{
+      border-color:rgba(34,197,94,0.55);
+      background:rgba(34,197,94,0.14);
+    }
+    .today-page .today-item.is-done .today-check .mark{opacity:1}
+
+    .today-page .habit-picker{
+      border-top:1px solid rgba(255,255,255,0.08);
+      padding-top:12px;margin-top:12px;
+    }
+    .today-page .habit-row{
+      display:flex;align-items:center;justify-content:space-between;gap:12px;
+      padding:10px 12px;border-radius:14px;
+      background:rgba(255,255,255,0.03);
+      border:1px solid rgba(255,255,255,0.06);
+    }
+    .today-page .habit-row:hover{background:rgba(255,255,255,0.045)}
+    .today-page .habit-name{font-weight:700}
+    .today-page .habit-meta{font-size:.85rem;opacity:.75}
+  </style>
+</head>
+
+<body class="min-h-screen today-page">
+  <div class="mx-auto max-w-6xl p-4 sm:p-6 pb-24">
+
+    <!-- Mobile header (matches your other pages) -->
+    <div class="flex items-center justify-between gap-3 mb-3 md:hidden">
+      <a href="index.html" class="flex items-center gap-3">
+        <img src="assets/taskpoints-logo.png" alt="TaskPoints logo" class="w-10 h-10 rounded-2xl object-cover shrink-0 shadow-sm">
+        <h1 class="text-2xl font-extrabold tracking-tight leading-tight">
+          <span style="color:#fb923c;">Task</span><span style="color:#1e666d;">Points</span>
+        </h1>
+      </a>
+      <div class="flex items-center gap-2">
+        <button type="button" class="btn btn-ghost btn-toolbar" data-export-button>Export</button>
+        <label class="btn btn-ghost btn-toolbar cursor-pointer">
+          <span>Import</span>
+          <input type="file" accept="application/json" class="hidden" data-import-input/>
+        </label>
+      </div>
+    </div>
+
+    <!-- Desktop header / nav (matches your other pages) -->
+    <header class="flex flex-wrap items-center justify-between gap-3 mb-4">
+      <a href="index.html" class="hidden md:flex items-center gap-3">
+        <img src="assets/taskpoints-logo.svg" alt="TaskPoints logo" class="w-9 h-9 rounded-2xl object-cover shadow-sm">
+        <div>
+          <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight">TaskPoints</h1>
+          <p class="text-xs opacity-70">Today</p>
+        </div>
+      </a>
+
+      <div class="toolbar header-nav">
+        <a href="index.html"         class="btn btn-teal btn-toolbar nav-btn">Main</a>
+        <a href="daily_sources.html" class="btn btn-teal btn-toolbar nav-btn">Sources</a>
+        <a href="log.html"           class="btn btn-teal btn-toolbar nav-btn">Log</a>
+        <a href="week.html"          class="btn btn-teal btn-toolbar nav-btn">Week</a>
+        <div class="dropdown">
+          <button type="button" class="btn btn-teal btn-toolbar nav-btn dropdown-toggle" data-dropdown-toggle aria-expanded="false">Game <span class="caret">▾</span></button>
+          <div class="dropdown-menu">
+            <a href="gamehub.html"      class="btn btn-teal btn-toolbar nav-btn">Game Hub</a>
+            <a href="game.html"         class="btn btn-teal btn-toolbar nav-btn">Players</a>
+            <a href="game_ratings.html" class="btn btn-teal btn-toolbar nav-btn">Ratings</a>
+            <a href="matchups.html"     class="btn btn-teal btn-toolbar nav-btn">Matchups</a>
+            <a href="schedule.html"     class="btn btn-teal btn-toolbar nav-btn">Schedule</a>
+            <a href="standings.html"    class="btn btn-teal btn-toolbar nav-btn">Standings</a>
+          </div>
+        </div>
+        <a href="settings.html" class="btn btn-teal btn-toolbar nav-btn">Settings</a>
+
+        <button type="button" class="btn btn-ghost btn-toolbar ml-1 hidden md:inline-flex" data-export-button>Export</button>
+        <label class="btn btn-ghost btn-toolbar cursor-pointer hidden md:inline-flex">
+          <span>Import</span>
+          <input type="file" accept="application/json" class="hidden" data-import-input/>
+        </label>
+      </div>
+    </header>
+
+    <!-- Page title row -->
+    <div class="flex items-start justify-between gap-3 flex-wrap mb-3">
+      <div>
+        <h2 class="text-xl sm:text-2xl font-extrabold tracking-tight">Today</h2>
+        <div class="muted text-xs">Tasks due today + habits you pick + your own write-ins — all one checklist.</div>
+      </div>
+      <div class="flex items-center gap-2">
+        <div id="todayDatePill" class="btn btn-ghost btn-toolbar pointer-events-none">—</div>
+        <button id="todayRefreshBtn" class="btn btn-ghost btn-toolbar" type="button">Refresh</button>
+      </div>
+    </div>
+
+    <div class="grid gap-3">
+      <!-- Checklist -->
+      <div class="glass p-4">
+        <div class="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <div class="text-lg font-bold">Today Checklist</div>
+            <div class="muted text-xs mt-1">Tap to cross off. Tasks/Habits also update the real app for today.</div>
+          </div>
+          <button id="clearDoneBtn" class="btn btn-ghost btn-toolbar" type="button">Clear done</button>
+        </div>
+
+        <div id="todayList" class="today-list"></div>
+        <div id="todayEmpty" class="muted text-sm mt-3 hidden">Nothing here yet. Add a write-in or pick habits.</div>
+
+        <div class="mt-4">
+          <div class="flex items-center gap-2">
+            <input id="noteInput" class="input flex-1" placeholder="Add a write-in for today…" />
+            <button id="addNoteBtn" class="btn btn-primary" type="button">Add</button>
+          </div>
+          <div class="muted text-xs mt-2">Write-ins are saved for today only.</div>
+        </div>
+      </div>
+
+      <!-- Habit picker -->
+      <div class="glass p-4">
+        <div class="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <div class="text-lg font-bold">Habits</div>
+            <div class="muted text-xs mt-1">Choose which habits to include in today’s checklist.</div>
+          </div>
+          <button id="toggleHabitPickerBtn" class="btn btn-ghost btn-toolbar" type="button">What habits should be done today?</button>
+        </div>
+
+        <div id="habitPicker" class="habit-picker hidden">
+          <div class="muted text-sm mb-3">Pick habits below — they’ll show up in the checklist above.</div>
+          <div id="habitPickerList" class="grid gap-2"></div>
+          <div class="flex items-center justify-end gap-2 mt-3">
+            <button id="closeHabitPickerBtn" class="btn btn-ghost btn-toolbar" type="button">Done</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    (function () {
+      const STORAGE_KEY = 'taskpoints_v1';
+      const TODAY_STORE_KEY = 'taskpoints_today_view_v1';
+      const $ = (sel) => document.querySelector(sel);
+      const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+
+      let appState = null;
+      let todayStore = null;
+
+      function safeParse(json, fallback) { try { return JSON.parse(json); } catch { return fallback; } }
+
+      function dayKeyNow() {
+        return (window.TaskPointsCore?.todayKey) ? TaskPointsCore.todayKey() : new Date().toISOString().slice(0, 10);
+      }
+      function dateKeyFromISO(iso) {
+        if (!iso) return null;
+        try {
+          const d = new Date(iso);
+          return (window.TaskPointsCore?.dateKey) ? TaskPointsCore.dateKey(d) : d.toISOString().slice(0,10);
+        } catch { return null; }
+      }
+      function makeId() {
+        if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+        return 'id_' + Math.random().toString(16).slice(2) + '_' + Date.now().toString(16);
+      }
+
+      function loadApp() {
+        const res = window.TaskPointsCore?.loadAppState
+          ? TaskPointsCore.loadAppState({ storageKey: STORAGE_KEY })
+          : { state: { tasks: [], habits: [], completions: [] } };
+
+        appState = res.state || { tasks: [], habits: [], completions: [] };
+      }
+      function saveApp(nextState) {
+        if (window.TaskPointsCore?.mergeAndSaveState) {
+          const res = TaskPointsCore.mergeAndSaveState(nextState, { storageKey: STORAGE_KEY });
+          appState = res.state;
+        } else {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
+          appState = nextState;
+        }
+      }
+
+      function loadTodayStore(dayKey) {
+        const raw = localStorage.getItem(TODAY_STORE_KEY);
+        const existing = raw ? safeParse(raw, null) : null;
+
+        const fresh = { dayKey, taskIds: [], selectedHabitIds: [], notes: [] };
+        if (!existing || existing.dayKey !== dayKey) return fresh;
+
+        return {
+          dayKey,
+          taskIds: Array.isArray(existing.taskIds) ? existing.taskIds : [],
+          selectedHabitIds: Array.isArray(existing.selectedHabitIds) ? existing.selectedHabitIds : [],
+          notes: Array.isArray(existing.notes) ? existing.notes : []
+        };
+      }
+      function saveTodayStore() {
+        localStorage.setItem(TODAY_STORE_KEY, JSON.stringify(todayStore));
+      }
+
+      function escapeHtml(str) {
+        return String(str)
+          .replaceAll('&', '&amp;')
+          .replaceAll('<', '&lt;')
+          .replaceAll('>', '&gt;')
+          .replaceAll('"', '&quot;')
+          .replaceAll("'", '&#39;');
+      }
+
+      function hasTaskCompletionToday(taskId, dayKey) {
+        const comps = Array.isArray(appState.completions) ? appState.completions : [];
+        return comps.some(c => c && c.taskId === taskId && dateKeyFromISO(c.completedAtISO) === dayKey);
+      }
+
+      function ensureAutoTasks(dayKey) {
+        const tasks = Array.isArray(appState.tasks) ? appState.tasks : [];
+        const dueToday = tasks
+          .filter(t => t && !t.completedAtISO && !t.hidden && t.dueDateISO === dayKey)
+          .map(t => t.id)
+          .filter(Boolean);
+
+        const set = new Set(todayStore.taskIds);
+        dueToday.forEach(id => set.add(id));
+
+        // drop ids that no longer exist
+        const existingIds = new Set(tasks.map(t => t && t.id).filter(Boolean));
+        todayStore.taskIds = Array.from(set).filter(id => existingIds.has(id) || dueToday.includes(id));
+        saveTodayStore();
+      }
+
+      function getActiveHabits() {
+        const habits = Array.isArray(appState.habits) ? appState.habits : [];
+        return habits.filter(h => h && (h.category || 'habit') === 'habit' && !h.retired);
+      }
+
+      function addCompletion(entry) {
+        const completions = Array.isArray(appState.completions) ? appState.completions.slice() : [];
+        completions.unshift(entry);
+        appState = { ...appState, completions };
+      }
+
+      /* --- Recurrence logic (matches index.html) --- */
+      function addDays(d,n){
+        const x = new Date(d);
+        x.setDate(x.getDate()+n);
+        x.setHours(0,0,0,0);
+        return x;
+      }
+      function computeNextDueDate(task){
+        const rec = task.recurrence || {};
+        const mode = rec.mode || 'none';
+        if (mode === 'none') return null;
+
+        const baseKey = task.dueDateISO || dayKeyNow();
+        const base = new Date(baseKey + 'T00:00:00');
+
+        let next = null;
+
+        if (mode === 'daily') {
+          next = addDays(base, 1);
+        } else if (mode === 'everyWeekday') {
+          next = addDays(base, 1);
+          let d = next.getDay();
+          if (d === 6) next = addDays(next, 2);
+          else if (d === 0) next = addDays(next, 1);
+        } else if (mode === 'weekly') {
+          next = addDays(base, 7);
+        } else if (mode === 'monthly') {
+          next = new Date(base);
+          next.setMonth(next.getMonth() + 1);
+          next.setHours(0,0,0,0);
+        } else if (mode === 'yearly') {
+          next = new Date(base);
+          next.setFullYear(next.getFullYear() + 1);
+          next.setHours(0,0,0,0);
+        } else if (mode === 'custom') {
+          const count = Number.isFinite(rec.customCount) && rec.customCount > 0 ? rec.customCount : 1;
+          const unit  = rec.customUnit || 'day';
+          if (unit === 'day') next = addDays(base, count);
+          else if (unit === 'week') next = addDays(base, count * 7);
+          else if (unit === 'month') { next = new Date(base); next.setMonth(next.getMonth() + count); next.setHours(0,0,0,0); }
+          else if (unit === 'year')  { next = new Date(base); next.setFullYear(next.getFullYear() + count); next.setHours(0,0,0,0); }
+        }
+
+        return next ? (window.TaskPointsCore?.dateKey ? TaskPointsCore.dateKey(next) : next.toISOString().slice(0,10)) : null;
+      }
+
+      function completeTask(taskId) {
+        const tasks = Array.isArray(appState.tasks) ? appState.tasks.slice() : [];
+        const idx = tasks.findIndex(t => t && t.id === taskId);
+        if (idx === -1) return false;
+
+        const t = { ...tasks[idx] };
+        if (t.completedAtISO) return true;
+
+        const now = new Date().toISOString();
+
+        // match main app completion shape (extra fields are harmless)
+        addCompletion({
+          id: makeId(),
+          taskId: t.id,
+          title: t.title,
+          points: Number(t.points || 0),
+          completedAtISO: now
+        });
+
+        const mode = (t.recurrence && t.recurrence.mode) ? t.recurrence.mode : 'none';
+        if (mode === 'none') {
+          t.completedAtISO = now;
+        } else {
+          const nextKey = computeNextDueDate(t);
+          if (nextKey) t.dueDateISO = nextKey;
+          t.completedAtISO = null;
+        }
+
+        tasks[idx] = t;
+        appState = { ...appState, tasks };
+        saveApp(appState);
+        return true;
+      }
+
+      function toggleHabitDay(habitId, dayKey) {
+        const habits = Array.isArray(appState.habits) ? appState.habits.slice() : [];
+        const idx = habits.findIndex(h => h && h.id === habitId);
+        if (idx === -1) return;
+
+        const h = { ...habits[idx] };
+        h.doneKeys = Array.isArray(h.doneKeys) ? h.doneKeys.slice() : [];
+        h.failedKeys = Array.isArray(h.failedKeys) ? h.failedKeys.slice() : [];
+
+        const compTaskId = `habit:${h.id}:${dayKey}`;
+        const already = h.doneKeys.includes(dayKey);
+
+        if (already) {
+          h.doneKeys = h.doneKeys.filter(k => k !== dayKey);
+          const comps = Array.isArray(appState.completions) ? appState.completions.slice() : [];
+          appState = { ...appState, completions: comps.filter(c => !(c && c.taskId === compTaskId)) };
+        } else {
+          h.doneKeys.push(dayKey);
+          addCompletion({
+            id: makeId(),
+            taskId: compTaskId,
+            title: `[Habit] ${h.name} (${dayKey})`,
+            points: Number(h.pointsPerDay || 0),
+            completedAtISO: new Date().toISOString(),
+            source: 'habit',
+            habitId: h.id,
+            dayKey
+          });
+        }
+
+        habits[idx] = h;
+        appState = { ...appState, habits };
+        saveApp(appState);
+      }
+
+      function renderDatePill() {
+        $('#todayDatePill').textContent = dayKeyNow();
+      }
+
+      function renderHabitPicker() {
+        const habits = getActiveHabits();
+        const list = $('#habitPickerList');
+        if (!list) return;
+
+        if (!habits.length) {
+          list.innerHTML = `<div class="muted text-sm">No habits yet.</div>`;
+          return;
+        }
+
+        const selected = new Set(todayStore.selectedHabitIds);
+
+        list.innerHTML = habits.map(h => {
+          const checked = selected.has(h.id) ? 'checked' : '';
+          const pts = Number(h.pointsPerDay || 0);
+          return `
+            <label class="habit-row cursor-pointer">
+              <div class="min-w-0">
+                <div class="habit-name truncate">${escapeHtml(h.name || 'Untitled Habit')}</div>
+                <div class="habit-meta">${pts ? `${pts} pts` : '—'}</div>
+              </div>
+              <input type="checkbox" data-habit-pick="${escapeHtml(h.id)}" ${checked} />
+            </label>
+          `;
+        }).join('');
+
+        $$('#habitPickerList [data-habit-pick]').forEach(input => {
+          input.addEventListener('change', () => {
+            const id = input.getAttribute('data-habit-pick');
+            const set = new Set(todayStore.selectedHabitIds);
+            if (input.checked) set.add(id); else set.delete(id);
+            todayStore.selectedHabitIds = Array.from(set);
+            saveTodayStore();
+            renderTodayList();
+          });
+        });
+      }
+
+      function renderTodayList() {
+        const dayKey = dayKeyNow();
+        ensureAutoTasks(dayKey);
+
+        const el = $('#todayList');
+        const empty = $('#todayEmpty');
+
+        const items = [];
+
+        // Tasks (kept visible even if recurring + moved due date after completion)
+        for (const taskId of todayStore.taskIds) {
+          const t = (Array.isArray(appState.tasks) ? appState.tasks : []).find(x => x && x.id === taskId);
+          if (!t) continue;
+
+          const done = hasTaskCompletionToday(taskId, dayKey) || (t.completedAtISO && dateKeyFromISO(t.completedAtISO) === dayKey);
+          const sub = (t.points != null) ? `${Number(t.points || 0)} pts` : '';
+          items.push({ kind: 'task', id: taskId, title: t.title || 'Untitled Task', sub, done });
+        }
+
+        // Habits
+        for (const habitId of todayStore.selectedHabitIds) {
+          const h = (Array.isArray(appState.habits) ? appState.habits : []).find(x => x && x.id === habitId);
+          if (!h) continue;
+
+          const done = Array.isArray(h.doneKeys) ? h.doneKeys.includes(dayKey) : false;
+          const pts = Number(h.pointsPerDay || 0);
+          const sub = pts ? `${pts} pts` : '';
+          items.push({ kind: 'habit', id: habitId, title: h.name || 'Untitled Habit', sub, done });
+        }
+
+        // Notes
+        for (const n of todayStore.notes) {
+          if (!n || !n.id) continue;
+          items.push({ kind: 'note', id: n.id, title: n.text || '—', sub: '', done: !!n.done });
+        }
+
+        if (!items.length) {
+          el.innerHTML = '';
+          empty.classList.remove('hidden');
+          return;
+        }
+
+        empty.classList.add('hidden');
+        el.innerHTML = items.map(item => {
+          const doneClass = item.done ? 'is-done' : '';
+          const subLine = item.sub ? `<div class="today-sub">${escapeHtml(item.sub)}</div>` : '';
+          return `
+            <div class="today-item ${doneClass}" data-kind="${escapeHtml(item.kind)}" data-id="${escapeHtml(item.id)}">
+              <div class="today-left">
+                <div class="today-check"><span class="mark">✓</span></div>
+                <div class="min-w-0">
+                  <div class="today-title">${escapeHtml(item.title)}</div>
+                  ${subLine}
+                </div>
+              </div>
+              <span class="today-kind ${item.kind}">${escapeHtml(item.kind)}</span>
+            </div>
+          `;
+        }).join('');
+      }
+
+      function onListClick(e) {
+        const row = e.target.closest('.today-item');
+        if (!row) return;
+
+        const kind = row.getAttribute('data-kind');
+        const id = row.getAttribute('data-id');
+        const dayKey = dayKeyNow();
+
+        if (kind === 'task') {
+          if (row.classList.contains('is-done')) return; // one-way here (like main app)
+          const ok = completeTask(id);
+          if (ok) {
+            if (!todayStore.taskIds.includes(id)) todayStore.taskIds.push(id);
+            saveTodayStore();
+            loadApp();
+            renderTodayList();
+          }
+          return;
+        }
+
+        if (kind === 'habit') {
+          toggleHabitDay(id, dayKey);
+          loadApp();
+          renderTodayList();
+          return;
+        }
+
+        if (kind === 'note') {
+          const notes = Array.isArray(todayStore.notes) ? todayStore.notes.slice() : [];
+          const idx = notes.findIndex(n => n && n.id === id);
+          if (idx !== -1) {
+            notes[idx] = { ...notes[idx], done: !notes[idx].done };
+            todayStore.notes = notes;
+            saveTodayStore();
+            renderTodayList();
+          }
+        }
+      }
+
+      function addNote() {
+        const input = $('#noteInput');
+        const text = (input.value || '').trim();
+        if (!text) return;
+
+        todayStore.notes = Array.isArray(todayStore.notes) ? todayStore.notes : [];
+        todayStore.notes.push({ id: makeId(), text, done: false });
+        saveTodayStore();
+
+        input.value = '';
+        renderTodayList();
+      }
+
+      function clearDone() {
+        const dayKey = dayKeyNow();
+
+        // remove completed notes
+        todayStore.notes = (Array.isArray(todayStore.notes) ? todayStore.notes : []).filter(n => !(n && n.done));
+
+        // remove tasks completed today from the list (keeps habits selected)
+        todayStore.taskIds = (Array.isArray(todayStore.taskIds) ? todayStore.taskIds : []).filter(taskId => !hasTaskCompletionToday(taskId, dayKey));
+
+        saveTodayStore();
+        renderTodayList();
+      }
+
+      function toggleHabitPicker(forceOpen) {
+        const panel = $('#habitPicker');
+        const wantOpen = (typeof forceOpen === 'boolean') ? forceOpen : panel.classList.contains('hidden');
+        panel.classList.toggle('hidden', !wantOpen);
+        if (wantOpen) renderHabitPicker();
+      }
+
+      function init() {
+        const dayKey = dayKeyNow();
+        loadApp();
+
+        todayStore = loadTodayStore(dayKey);
+        saveTodayStore();
+
+        renderDatePill();
+        ensureAutoTasks(dayKey);
+        renderTodayList();
+
+        $('#todayList').addEventListener('click', onListClick);
+
+        $('#addNoteBtn').addEventListener('click', addNote);
+        $('#noteInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') addNote(); });
+
+        $('#clearDoneBtn').addEventListener('click', clearDone);
+
+        $('#todayRefreshBtn').addEventListener('click', () => {
+          loadApp();
+          todayStore = loadTodayStore(dayKeyNow());
+          saveTodayStore();
+          renderDatePill();
+          renderHabitPicker();
+          renderTodayList();
+        });
+
+        $('#toggleHabitPickerBtn').addEventListener('click', () => toggleHabitPicker());
+        $('#closeHabitPickerBtn').addEventListener('click', () => toggleHabitPicker(false));
+      }
+
+      document.addEventListener('DOMContentLoaded', init);
+    })();
+  </script>
+</body>
+</html>
