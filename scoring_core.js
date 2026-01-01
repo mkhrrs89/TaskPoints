@@ -1214,9 +1214,15 @@
     let losses = 0;
     let ties = 0;
     let games = 0;
+    const hideToday = playerId && playerId !== 'YOU';
+    const today = hideToday ? todayKey() : null;
 
     matchups.forEach(m => {
       if (!m) return;
+      if (hideToday) {
+        const key = matchupDateKey(m);
+        if (key && key >= today) return;
+      }
       const isA = m.playerAId === playerId;
       const isB = m.playerBId === playerId;
       if (!isA && !isB) return;
