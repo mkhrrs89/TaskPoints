@@ -1163,6 +1163,23 @@
       if (!container) return;
       container.innerHTML = "";
 
+      const getPaddedRange = values => {
+        const safeValues = values.length ? values : [0, 1];
+        const minValue = Math.min(...safeValues);
+        const maxValue = Math.max(...safeValues);
+        const range = maxValue - minValue || 1;
+        const padding = Math.max(range * 0.12, 5);
+        const paddedMin = minValue - padding;
+        const paddedMax = maxValue + padding;
+        return {
+          minValue,
+          maxValue,
+          paddedMin,
+          paddedMax,
+          range: paddedMax - paddedMin || 1
+        };
+      };
+
       const sortSelect = document.getElementById("simulationChartsSort");
       const sortValue = sortSelect?.value || "ppd-desc";
       const rows = buildSimulationSummaryRows(results);
@@ -1202,10 +1219,9 @@
         const varianceTilt = player.varianceTilt;
         const riskyScore = getNormalizedRisky(player.risky);
         const scoreValues = scores.length ? scores : [baseline];
-        const minValue = Math.min(...scoreValues, baseline - variance);
-        const maxValue = Math.max(...scoreValues, baseline + variance);
-        const range = maxValue - minValue || 1;
-        const tickCount = 4;
+        const rangeValues = [...scoreValues, baseline - variance, baseline + variance];
+        const { paddedMin, paddedMax, range } = getPaddedRange(rangeValues);
+        const tickCount = 5;
         const tickStep = range / tickCount;
 
         const width = Math.max(240, scores.length * 24);
@@ -1218,7 +1234,7 @@
           return padX + (idx / (scores.length - 1)) * (width - padX * 2);
         };
         const pointY = value => {
-          const normalized = (value - minValue) / range;
+          const normalized = (value - paddedMin) / range;
           return height - padY - normalized * (height - padY * 2);
         };
 
@@ -1228,7 +1244,7 @@
         const lowerY = pointY(baseline - variance);
         const yTicks = [];
         for (let i = 0; i <= tickCount; i += 1) {
-          const value = minValue + tickStep * i;
+          const value = paddedMin + tickStep * i;
           yTicks.push({ value, y: pointY(value) });
         }
         const yTickLines = yTicks.map(tick => `
@@ -1271,6 +1287,21 @@
       const selectList = document.getElementById("simulationCombinedSelectList");
       const selectLabel = document.getElementById("simulationCombinedSelectLabel");
       if (!chart || !legend || !selectList) return;
+
+      const getPaddedRange = values => {
+        const safeValues = values.length ? values : [0, 1];
+        const minValue = Math.min(...safeValues);
+        const maxValue = Math.max(...safeValues);
+        const range = maxValue - minValue || 1;
+        const padding = Math.max(range * 0.12, 5);
+        const paddedMin = minValue - padding;
+        const paddedMax = maxValue + padding;
+        return {
+          paddedMin,
+          paddedMax,
+          range: paddedMax - paddedMin || 1
+        };
+      };
 
       const palette = [
         "#38bdf8",
@@ -1323,10 +1354,7 @@
         const scaleSource = selectedPlayers.length
           ? selectedPlayers.flatMap(player => player.scores)
           : players.flatMap(player => player.scores);
-        const fallbackScores = scaleSource.length ? scaleSource : [0, 1];
-        const minValue = Math.min(...fallbackScores);
-        const maxValue = Math.max(...fallbackScores);
-        const range = maxValue - minValue || 1;
+        const { paddedMin, paddedMax, range } = getPaddedRange(scaleSource);
 
         const width = Math.max(320, results.dayLabels.length * 24);
         const height = 160;
@@ -1338,15 +1366,15 @@
           return padX + (idx / (results.dayLabels.length - 1)) * (width - padX * 2);
         };
         const pointY = value => {
-          const normalized = (value - minValue) / range;
+          const normalized = (value - paddedMin) / range;
           return height - padY - normalized * (height - padY * 2);
         };
 
-        const tickCount = 4;
+        const tickCount = 5;
         const tickStep = range / tickCount;
         const yTicks = [];
         for (let i = 0; i <= tickCount; i += 1) {
-          const value = minValue + tickStep * i;
+          const value = paddedMin + tickStep * i;
           yTicks.push({ value, y: pointY(value) });
         }
 
