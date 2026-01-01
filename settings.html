@@ -585,12 +585,13 @@
       }
     }
 
-    function saveSettingsState(nextState) {
+    function saveSettingsState(nextState, options = {}) {
       try {
         if (window.TaskPointsCore?.mergeAndSaveState) {
+          const allowHabitTagColorReset = Boolean(options.allowHabitTagColorReset);
           const { state: merged } = TaskPointsCore.mergeAndSaveState(nextState, {
             storageKey: SETTINGS_STORAGE_KEY,
-            allowHabitTagColorReset: true
+            allowHabitTagColorReset
           });
           return merged;
         }
@@ -618,7 +619,7 @@
       } else {
         delete nextColors[tag];
       }
-      saveSettingsState({ ...state, habitTagColors: nextColors });
+      saveSettingsState({ ...state, habitTagColors: nextColors }, { allowHabitTagColorReset: true });
     }
 
     function parseScoringNumber(value) {
