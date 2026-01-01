@@ -173,6 +173,11 @@
     const $ = id => document.getElementById(id);
 
     let latestState = null;
+    let activeIds = new Set(["YOU"]);
+
+    function isPlayerActive(player) {
+      return !!player && player.active !== false;
+    }
 
     function loadPlayers() {
       try {
@@ -202,10 +207,14 @@
         }
         latestState = syncedState;
 
-        return Array.isArray(latestState.players) ? latestState.players : [];
+        const players = Array.isArray(latestState.players) ? latestState.players : [];
+        const activePlayers = players.filter(isPlayerActive);
+        activeIds = new Set(["YOU", ...activePlayers.map(p => p.id)]);
+        return activePlayers;
       } catch (e) {
         console.error("Failed to load players from localStorage", e);
         latestState = null;
+        activeIds = new Set(["YOU"]);
         return [];
       }
     }
@@ -225,6 +234,7 @@ function computeYouStats() {
 
     for (const m of mh) {
       if (!m || (m.playerAId !== "YOU" && m.playerBId !== "YOU")) continue;
+      if (!activeIds.has(m.playerAId) || !activeIds.has(m.playerBId)) continue;
       const aScore = Number(m.scoreA);
       const bScore = Number(m.scoreB);
       if (!Number.isFinite(aScore) || !Number.isFinite(bScore)) continue;
@@ -325,6 +335,7 @@ function computeYouStats() {
 
         for (const m of matchups) {
           if (!m) continue;
+          if (!activeIds.has(m.playerAId) || !activeIds.has(m.playerBId)) continue;
           const isA = m.playerAId === p.id;
           const isB = m.playerBId === p.id;
           if (!isA && !isB) continue;
@@ -367,6 +378,7 @@ function computeYouStats() {
       const baseline = (typeof p.baseline === "number") ? p.baseline : (Number(p.baseline) || 0);
 
       for (const g of gameHistory) {
+        if (!activeIds.has(g.playerId)) continue;
         if (g.playerId !== p.id) continue;
 
         games++;

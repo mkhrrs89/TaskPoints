@@ -282,15 +282,28 @@ function num(n){
   return x;
 }
 
+function isPlayerActive(player) {
+  return !!player && player.active !== false;
+}
+
+function activePlayerIds(state) {
+  const ids = new Set(["YOU"]);
+  (Array.isArray(state.players) ? state.players : [])
+    .filter(isPlayerActive)
+    .forEach(player => ids.add(player.id));
+  return ids;
+}
+
 /* -----------------------------
    Build record candidates
 ------------------------------*/
 function buildRecords(state){
   const records = [];
+  const activeIds = activePlayerIds(state);
 
   // Map playerId -> name
   const playerMap = new Map();
-  (Array.isArray(state.players) ? state.players : []).forEach(p => {
+  (Array.isArray(state.players) ? state.players : []).filter(isPlayerActive).forEach(p => {
     if (p && p.id) playerMap.set(p.id, p.name || "");
   });
 
@@ -317,6 +330,7 @@ function buildRecords(state){
   const gh = Array.isArray(state.gameHistory) ? state.gameHistory : [];
   for (const g of gh){
     if (!g || !g.date || !g.playerId) continue;
+    if (!activeIds.has(g.playerId)) continue;
     const name = g.playerId === "YOU"
       ? "You"
       : (playerMap.get(g.playerId) || "Unknown Player");
@@ -370,6 +384,9 @@ function render(){
   let state = loadState();
   state = syncDerivedPointsIfNeeded(state);
   const all = buildRecords(state);
+  const activeIds = activePlayerIds(state);
+  const activeGameHistoryCount = (Array.isArray(state.gameHistory) ? state.gameHistory : [])
+    .filter(entry => entry && activeIds.has(entry.playerId)).length;
 
   const top = filteredSortedTop(all);
 
@@ -385,7 +402,7 @@ function render(){
       .map(c => dateKey(c.completedAtISO))
   ).size;
 
-  meta.textContent = `Saved: ${all.length.toLocaleString()} records · You days: ${totalDaysYou.toLocaleString()} · Players games: ${(Array.isArray(state.gameHistory)?state.gameHistory.length:0).toLocaleString()}`;
+  meta.textContent = `Saved: ${all.length.toLocaleString()} records · You days: ${totalDaysYou.toLocaleString()} · Players games: ${activeGameHistoryCount.toLocaleString()}`;
 
   if (!top.length){
     empty.classList.remove("hidden");
