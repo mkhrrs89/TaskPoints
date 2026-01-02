@@ -447,6 +447,12 @@ function load() {
       state.gameHistory = history;
     }
 
+    function formatScore(score){
+     const num = Number(score);
+     if (!Number.isFinite(num)) return "0";
+     return Number.isInteger(num) ? String(num) : num.toFixed(1);
+   }
+    
     function requestScoreInput(label, currentScore) {
       const current = Number(currentScore);
       const fallback = Number.isFinite(current) ? current : 0;
@@ -501,12 +507,6 @@ state = syncYouMatchupsWithCompletions(state);
           if (matchup.playerBId === id && matchup.playerBName) return matchup.playerBName;
         }
         return "Unknown";
-      }
-
-      function formatScore(score){
-        const num = Number(score);
-        if (!Number.isFinite(num)) return "0";
-        return Number.isInteger(num) ? String(num) : num.toFixed(1);
       }
 
       function missingIdsForDate(dateKeyStr, sourceState) {
