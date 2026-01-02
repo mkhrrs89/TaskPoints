@@ -5466,6 +5466,8 @@ async function importBackupZip(file) {
 }
 
 function exportData(){
+  const scheduleChanged = ensureUpcomingSchedule();
+  if (scheduleChanged) save();
   const snapshot = stripLegacyImageFields({ ...state, projects: loadProjectsFromStorage() });
   const blob=new Blob([JSON.stringify(snapshot,null,2)],{type:'application/json'});
   const now = new Date();

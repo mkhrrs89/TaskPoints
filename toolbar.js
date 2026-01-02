@@ -482,6 +482,154 @@ function loadRawStateFallback() {
   }
 }
 
+function dateKeyFallback(dateLike) {
+  if (window.TaskPointsCore?.dateKey) return TaskPointsCore.dateKey(dateLike);
+  const d = new Date(dateLike);
+  if (Number.isNaN(d.getTime())) return '';
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function todayKeyFallback() {
+  if (window.TaskPointsCore?.todayKey) return TaskPointsCore.todayKey();
+  return dateKeyFallback(new Date());
+}
+
+function shuffleFallback(arr) {
+  for (let i = arr.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+}
+
+function isPlayerActiveFallback(player) {
+  return !!player && player.active !== false;
+}
+
+function getAllParticipantIdsFallback(state) {
+  const ids = ['YOU'];
+  (state.players || []).forEach((p) => {
+    if (p && p.id && isPlayerActiveFallback(p)) ids.push(p.id);
+  });
+  return ids;
+}
+
+function participantSignatureFallback(ids) {
+  return ids.slice().sort().join('|');
+}
+
+function buildDailyScheduleFallback(dateKeyStr, participantIds, signature) {
+  const pool = participantIds.slice();
+  shuffleFallback(pool);
+
+  const matchups = [];
+  const byeIds = [];
+
+  for (let i = 0; i + 1 < pool.length; i += 2) {
+    matchups.push({ playerAId: pool[i], playerBId: pool[i + 1] });
+  }
+
+  if (pool.length % 2 === 1) {
+    byeIds.push(pool[pool.length - 1]);
+  }
+
+  return {
+    date: dateKeyStr,
+    matchups,
+    byeIds,
+    participantSignature: signature
+  };
+}
+
+function buildDayFromExistingFallback(dateKeyStr, participantIds, signature, matchups) {
+  const safeMatchups = (matchups || []).map((m) => ({
+    playerAId: m.playerAId,
+    playerBId: m.playerBId
+  }));
+  const used = new Set();
+  safeMatchups.forEach((m) => {
+    if (m.playerAId) used.add(m.playerAId);
+    if (m.playerBId) used.add(m.playerBId);
+  });
+
+  const byeIds = participantIds.filter((id) => !used.has(id));
+
+  return {
+    date: dateKeyStr,
+    matchups: safeMatchups,
+    byeIds,
+    participantSignature: signature
+  };
+}
+
+function matchupDateKeyFallback(matchup) {
+  if (!matchup) return '';
+  if (matchup.dateKey) return matchup.dateKey;
+  if (matchup.date) return matchup.date;
+  if (matchup.dateISO) return dateKeyFallback(matchup.dateISO);
+  return '';
+}
+
+function ensureUpcomingScheduleFallback(state, days = 7) {
+  const todayKey = todayKeyFallback();
+  const participants = getAllParticipantIdsFallback(state);
+  const signature = participantSignatureFallback(participants);
+  const participantSet = new Set(participants);
+
+  let schedule = Array.isArray(state.schedule)
+    ? state.schedule.filter((d) => d && d.date >= todayKey)
+    : [];
+  let changed = false;
+
+  if (!schedule.every((d) => d.participantSignature === signature)) {
+    schedule = [];
+    changed = true;
+  }
+
+  const neededDates = [];
+  const today = new Date(`${todayKey}T00:00:00`);
+  for (let i = 0; i < days; i += 1) {
+    const dt = new Date(today);
+    dt.setDate(dt.getDate() + i);
+    neededDates.push(dateKeyFallback(dt));
+  }
+
+  const byDate = new Map();
+  schedule.forEach((d) => {
+    if (d && d.date) byDate.set(d.date, d);
+  });
+
+  const existingMatchupsByDate = new Map();
+  (state.matchups || []).forEach((m) => {
+    if (!m) return;
+    const aId = m.playerAId;
+    const bId = m.playerBId;
+    if (!participantSet.has(aId) || !participantSet.has(bId)) return;
+    const key = matchupDateKeyFallback(m);
+    if (!key) return;
+    if (!existingMatchupsByDate.has(key)) existingMatchupsByDate.set(key, []);
+    existingMatchupsByDate.get(key).push({ playerAId: aId, playerBId: bId });
+  });
+
+  const rebuilt = neededDates.map((key) => {
+    const existing = byDate.get(key);
+    if (existing) return existing;
+    const syncedFromMatchups = existingMatchupsByDate.get(key);
+    if (syncedFromMatchups && syncedFromMatchups.length) {
+      return buildDayFromExistingFallback(key, participants, signature, syncedFromMatchups);
+    }
+    changed = true;
+    return buildDailyScheduleFallback(key, participants, signature);
+  });
+
+  if (rebuilt.length !== schedule.length) changed = true;
+
+  state.schedule = rebuilt;
+  return changed;
+}
+
 function saveStateSnapshotFallback(next) {
   try {
     if (window.TaskPointsCore?.mergeAndSaveState) {
@@ -499,6 +647,10 @@ function saveStateSnapshotFallback(next) {
 
 function exportDataFallback() {
   const snapshot = stripLegacyImageFields(normalizeStateGlobal({ ...loadRawStateFallback(), projects: loadProjectsFromStorageFallback() }));
+  const scheduleChanged = ensureUpcomingScheduleFallback(snapshot);
+  if (scheduleChanged) {
+    saveStateSnapshotFallback(snapshot);
+  }
   const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' });
   const now = new Date();
 
@@ -722,6 +874,10 @@ async function importBackupZipFallback(file) {
 
 async function exportBackupWithImagesFallback() {
   const snapshot = stripLegacyImageFields(normalizeStateGlobal({ ...loadRawStateFallback(), projects: loadProjectsFromStorageFallback() }));
+  const scheduleChanged = ensureUpcomingScheduleFallback(snapshot);
+  if (scheduleChanged) {
+    saveStateSnapshotFallback(snapshot);
+  }
   const imageIds = new Set();
   if (snapshot.youImageId) imageIds.add(snapshot.youImageId);
   if (Array.isArray(snapshot.players)) {
