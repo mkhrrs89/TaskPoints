@@ -234,8 +234,7 @@ function load() {
 
     function shouldRevealMatchup(matchup){
       if (!matchup) return false;
-      const includesYou = matchup.playerAId === "YOU" || matchup.playerBId === "YOU";
-      return isMatchupRevealed(matchup, includesYou);
+      return isMatchupRevealed(matchup, false);
     }
 
     function activePlayerIds(state) {
@@ -374,7 +373,7 @@ state = syncYouMatchupsWithCompletions(state);
         if (!shouldRevealMatchup(m)) {
           const aName = getName(m.playerAId, m);
           const bName = getName(m.playerBId, m);
-          return `${aName} vs ${bName} — matchup pending`;
+          return `${aName} vs ${bName} — Matchup pending (—–—)`;
         }
         const aId = m.playerAId;
         const bId = m.playerBId;
@@ -422,7 +421,7 @@ state = syncYouMatchupsWithCompletions(state);
         if (!shouldRevealMatchup(m)) {
           const oppId = playerIsA ? bId : aId;
           const oppName = getName(oppId, m);
-          return `matchup pending vs ${oppName}`;
+          return `Matchup pending vs ${oppName} (—–—)`;
         }
 
         const playerScore = playerIsA ? aScore : bScore;

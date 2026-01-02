@@ -688,7 +688,7 @@
 
       // F) Record alignment (matchups vs. fallback)
       const preferredRecord = TaskPointsCore.computeRecord
-        ? TaskPointsCore.computeRecord(state, 'YOU')
+        ? TaskPointsCore.computeRecord(state, 'YOU', { includeToday: false, allowFallback: false })
         : { wins: 0, losses: 0, ties: 0, games: 0, source: 'unknown' };
       const recordIssues = [];
       let recordStatus = 'PASS';

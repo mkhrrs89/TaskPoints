@@ -1502,7 +1502,7 @@ function getPlayerRecordText(playerId) {
   if (!playerId || playerId === 'YOU') return '0-0';
 
   if (window.TaskPointsCore?.computeRecord) {
-    const record = TaskPointsCore.computeRecord(state, playerId);
+    const record = TaskPointsCore.computeRecord(state, playerId, { includeToday: false, allowFallback: false });
     return record.games ? `${record.wins}-${record.losses}` : '0-0';
   }
 
@@ -1540,7 +1540,7 @@ function getYourRecordText() {
 
 function computeYourRecord(){
   if (window.TaskPointsCore?.computeRecord) {
-    return TaskPointsCore.computeRecord(state, 'YOU');
+    return TaskPointsCore.computeRecord(state, 'YOU', { includeToday: false, allowFallback: false });
   }
   const matchupRecord = computeYourMatchupRecord();
   if (matchupRecord.games > 0) return matchupRecord;

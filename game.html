@@ -1360,10 +1360,25 @@ function dateKey(d){
   return `${y}-${m}-${dd}`;
 }
 
-    function getGameDayKey(now = new Date()) {
+function getGameDayKey(now = new Date()) {
   const dt = new Date(now);
   dt.setHours(0,0,0,0);
   return dateKey(dt);
+}
+
+function getMatchupDateKey(matchup){
+  if (!matchup) return '';
+  return matchup.dateKey || matchup.date || (matchup.dateISO ? dateKey(matchup.dateISO) : '');
+}
+
+function isMatchupRevealed(matchup){
+  const key = getMatchupDateKey(matchup);
+  if (window.TaskPointsCore?.isMatchupRevealed) {
+    return TaskPointsCore.isMatchupRevealed(key, { includeToday: false });
+  }
+  if (!key) return false;
+  const today = window.TaskPointsCore?.todayKey ? TaskPointsCore.todayKey() : dateKey(new Date());
+  return key < today;
 }
 
 function shuffle(arr){
@@ -1514,7 +1529,7 @@ function buildPlayerHistoryStats() {
 
 function calcYouStats() {
   const record = window.TaskPointsCore?.computeRecord
-    ? TaskPointsCore.computeRecord(state, "YOU")
+    ? TaskPointsCore.computeRecord(state, "YOU", { includeToday: false, allowFallback: false })
     : { wins: 0, losses: 0, ties: 0, games: 0, source: "unknown" };
 
   const comps = state.completions || [];
@@ -1538,6 +1553,7 @@ function calcYouStats() {
       const aScore = Number(m.scoreA);
       const bScore = Number(m.scoreB);
       if (!Number.isFinite(aScore) || !Number.isFinite(bScore)) continue;
+      if (!isMatchupRevealed(m)) continue;
 
       const yourScore = (m.playerAId === "YOU") ? aScore : bScore;
       totalPoints += yourScore;
