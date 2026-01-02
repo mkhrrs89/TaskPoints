@@ -5716,7 +5716,8 @@ startOpponentDripTicker();
   if (taskList && !taskList.dataset.delegated) {
     taskList.dataset.delegated = 'true';
     taskList.addEventListener('click', (e) => {
-      const actionEl = e.target.closest('[data-task-action]');
+      const target = e.target instanceof Element ? e.target : e.target?.parentElement;
+      const actionEl = target ? target.closest('[data-task-action]') : null;
       if (!actionEl || !taskList.contains(actionEl)) return;
       const action = actionEl.dataset.taskAction;
       const id = actionEl.dataset.taskId;
