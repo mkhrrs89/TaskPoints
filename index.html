@@ -5716,11 +5716,23 @@ startOpponentDripTicker();
   if (taskList && !taskList.dataset.delegated) {
     taskList.dataset.delegated = 'true';
     taskList.addEventListener('click', (e) => {
-      const target = e.target instanceof Element ? e.target : e.target?.parentElement;
-      const actionEl = target ? target.closest('[data-task-action]') : null;
+      let actionEl = null;
+      if (e.target instanceof Element) {
+        actionEl = e.target.closest('[data-task-action]');
+      } else if (typeof e.composedPath === 'function') {
+        const path = e.composedPath();
+        for (const node of path) {
+          if (node instanceof Element && node.matches('[data-task-action]')) {
+            actionEl = node;
+            break;
+          }
+        }
+      } else if (e.target?.parentElement) {
+        actionEl = e.target.parentElement.closest('[data-task-action]');
+      }
       if (!actionEl || !taskList.contains(actionEl)) return;
       const action = actionEl.dataset.taskAction;
-      const id = actionEl.dataset.taskId;
+      const id = actionEl.dataset.taskId || actionEl.closest('[data-task-id]')?.dataset.taskId;
       if (!id) return;
       const perfStart = window.TP_DEBUG_PERF ? performance.now() : null;
 
