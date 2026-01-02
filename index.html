@@ -2527,7 +2527,9 @@ function startOpponentDripTicker(){
 
     renderTodayPointsSummary(todayPoints, inertia, average);
 
-    renderTodaysMatchup(matchupKey, matchupPoints);
+    if (typeof window.renderTodaysMatchup === 'function') {
+      window.renderTodaysMatchup(matchupKey, matchupPoints);
+    }
   }
 
   tick();
@@ -4148,6 +4150,58 @@ ${t.dueDateISO
     });
   }
   container.appendChild(fragment);
+  initTaskListDelegation();
+}
+
+function initTaskListDelegation(){
+  const list = document.getElementById('taskList');
+  if (!list) return;
+  if (list.dataset.tpDelegationAttached === '1') return;
+  list.addEventListener('click', (e) => {
+    if (!(e.target instanceof Element)) return;
+    const btn = e.target.closest('[data-task-action][data-task-id]');
+    if (!btn) return;
+    const action = btn.getAttribute('data-task-action');
+    const id = btn.getAttribute('data-task-id');
+    if (!action || !id) return;
+
+    switch (action) {
+      case 'postpone':
+        postponeTask(id);
+        break;
+      case 'wont-do':
+        wontDoMain(id);
+        break;
+      case 'bump':
+        bumpTaskOneDay(id);
+        break;
+      case 'edit':
+        editTask(id);
+        break;
+      case 'hide':
+        hideTask(id);
+        break;
+      case 'delete':
+      case 'task-delete':
+        deleteTask(id);
+        break;
+      case 'complete':
+        completeTask(id);
+        break;
+      case 'task-save': {
+        const card = btn.closest('[data-task-id]');
+        if (card) saveTaskEdit(id, card);
+        break;
+      }
+      case 'task-cancel':
+        editingTaskId = null;
+        renderTasks();
+        break;
+      default:
+        break;
+    }
+  });
+  list.dataset.tpDelegationAttached = '1';
 }
 
 function saveSleepScore(){
@@ -5709,85 +5763,9 @@ console.log('TaskPoints main state summary:', {
   gameHistory: Array.isArray(state.gameHistory) ? state.gameHistory.length : 'no array'
 });
 
-renderAll();
-startOpponentDripTicker();
-
-  const taskList = $('taskList');
-  if (taskList && !taskList.dataset.delegated) {
-    taskList.dataset.delegated = 'true';
-    taskList.addEventListener('click', (e) => {
-      const actionSelector = 'button, a, input, [data-task-action], [data-action], [data-act]';
-      let actionEl = null;
-      if (e.target instanceof Element) {
-        actionEl = e.target.closest(actionSelector);
-      } else if (typeof e.composedPath === 'function') {
-        const path = e.composedPath();
-        for (const node of path) {
-          if (node instanceof Element && node.matches(actionSelector)) {
-            actionEl = node;
-            break;
-          }
-        }
-      } else if (e.target?.parentElement) {
-        actionEl = e.target.parentElement.closest(actionSelector);
-      }
-      if (!actionEl || !taskList.contains(actionEl)) return;
-      const action = actionEl.dataset.taskAction || actionEl.dataset.action || actionEl.dataset.act;
-      const id =
-        actionEl.dataset.taskId
-        || actionEl.dataset.id
-        || actionEl.closest('[data-task-id],[data-id]')?.dataset.taskId
-        || actionEl.closest('[data-task-id],[data-id]')?.dataset.id;
-      if (window.TP_DEBUG_PERF) {
-        console.log('[TP_DEBUG] task action click', { target: e.target, actionEl, action, id });
-      }
-      if (!action || !id) return;
-      const perfStart = window.TP_DEBUG_PERF ? performance.now() : null;
-
-      switch (action) {
-        case 'postpone':
-          postponeTask(id);
-          break;
-        case 'wont-do':
-          wontDoMain(id);
-          break;
-        case 'bump':
-          bumpTaskOneDay(id);
-          break;
-        case 'edit':
-          editTask(id);
-          break;
-        case 'hide':
-          hideTask(id);
-          break;
-        case 'delete':
-        case 'task-delete':
-          deleteTask(id);
-          break;
-        case 'complete':
-          completeTask(id);
-          break;
-        case 'task-save': {
-          const card = actionEl.closest('[data-task-id]');
-          if (card) saveTaskEdit(id, card);
-          break;
-        }
-        case 'task-cancel':
-          editingTaskId = null;
-          renderTasks();
-          break;
-        default:
-          break;
-      }
-
-      if (perfStart != null) {
-        requestAnimationFrame(() => {
-          const elapsed = performance.now() - perfStart;
-          console.log(`[TP_PERF] task-${action}: ${elapsed.toFixed(1)}ms`);
-        });
-      }
-    });
-  }
+  renderAll();
+  startOpponentDripTicker();
+  initTaskListDelegation();
 
   if (window.TP_DEBUG_PERF) {
     requestAnimationFrame(() => {
