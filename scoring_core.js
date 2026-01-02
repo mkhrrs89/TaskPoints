@@ -1241,7 +1241,7 @@
     const activeIds = activePlayerIds(state);
     const includeToday = typeof options.includeToday === 'boolean'
       ? options.includeToday
-      : (playerId === 'YOU');
+      : (typeof options.includeUnrevealedToday === 'boolean' ? options.includeUnrevealedToday : false);
 
     if (playerId && !activeIds.has(playerId)) {
       return { wins, losses, ties, games, source: 'matchups' };
@@ -1337,7 +1337,7 @@
   function computeRecord(state, playerId = 'YOU', options = {}){
     const includeToday = typeof options.includeToday === 'boolean'
       ? options.includeToday
-      : (playerId === 'YOU');
+      : (typeof options.includeUnrevealedToday === 'boolean' ? options.includeUnrevealedToday : false);
     const allowFallback = options.allowFallback !== false;
     const matchupRecord = computeMatchupRecord(state, playerId, { includeToday });
     if (matchupRecord.games > 0) return matchupRecord;

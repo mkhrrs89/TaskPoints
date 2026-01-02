@@ -416,6 +416,20 @@
     return dateKey(new Date());
   }
 
+  function getMatchupDateKey(matchup){
+    if (!matchup) return '';
+    return matchup.dateKey || matchup.date || (matchup.dateISO ? dateKey(matchup.dateISO) : '');
+  }
+
+  function isMatchupRevealed(matchup){
+    const key = getMatchupDateKey(matchup);
+    if (window.TaskPointsCore?.isMatchupRevealed) {
+      return TaskPointsCore.isMatchupRevealed(key, { includeToday: false });
+    }
+    if (!key) return false;
+    return key < todayKey();
+  }
+
   function isPlayerActive(player){
     return !!player && player.active !== false;
   }
@@ -570,7 +584,7 @@
   // ---------- stats ----------
   function computeYouStats(state){
     const record = window.TaskPointsCore?.computeRecord
-      ? TaskPointsCore.computeRecord(state, 'YOU')
+      ? TaskPointsCore.computeRecord(state, 'YOU', { includeToday: false, allowFallback: false })
       : { wins:0, losses:0, games:0, source:'unknown' };
 
     if (record.source === 'matchups') {
@@ -581,6 +595,7 @@
       for (const m of matchups) {
         if (!m || (m.playerAId !== 'YOU' && m.playerBId !== 'YOU')) continue;
         if (!activeIds.has(m.playerAId) || !activeIds.has(m.playerBId)) continue;
+        if (!isMatchupRevealed(m)) continue;
         const a = Number(m.scoreA);
         const b = Number(m.scoreB);
         if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
@@ -627,7 +642,7 @@
     if (!p || p.id === 'YOU' || p.isYou) return computeYouStats(state);
 
     const record = window.TaskPointsCore?.computeRecord
-      ? TaskPointsCore.computeRecord(state, p.id)
+      ? TaskPointsCore.computeRecord(state, p.id, { includeToday: false, allowFallback: false })
       : { wins:0, losses:0, games:0, source:'unknown' };
 
     if (record.source === 'matchups') {
@@ -639,6 +654,7 @@
       for (const m of matchups) {
         if (!m || (m.playerAId !== p.id && m.playerBId !== p.id)) continue;
         if (!activeIds.has(m.playerAId) || !activeIds.has(m.playerBId)) continue;
+        if (!isMatchupRevealed(m)) continue;
         const a = Number(m.scoreA);
         const b = Number(m.scoreB);
         if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
