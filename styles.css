@@ -620,6 +620,11 @@ body {
     font-size: clamp(1.7rem, 8vw, 2.3rem);
     line-height: 1;
   }
+  
+  /* Give the left/right columns more width by limiting the center column */
+.gamehub-page .matchup-scoreboard{
+  grid-template-columns: minmax(0, 1fr) minmax(84px, 110px) minmax(0, 1fr);
+}
 }
 
 
