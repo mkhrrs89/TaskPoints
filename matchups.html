@@ -460,7 +460,7 @@ function load() {
     }
 
     function renderMatchups(){
-      let state = load();
+      state = load();
 
 // sync may write back; keep local state updated
 state = syncYouMatchupsWithCompletions(state);
@@ -950,5 +950,4 @@ function save(nextState) {
   </button>
 </body>
 </html>
-
 
