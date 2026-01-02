@@ -1014,7 +1014,8 @@ function simulateAiScoreForPlayer(player, todayKey){
 
   const score = baseline + variation + momentumBonus + riskyMod;
   const roundedScore = Number(score.toFixed(1));
-  return Math.max(0, roundedScore);
+  const safeScore = Number.isFinite(roundedScore) ? roundedScore : 0;
+  return Math.max(0, safeScore);
 }
 
 function makeId() {
@@ -1084,7 +1085,9 @@ function makeId() {
 
 function visibleNPCScore(finalScore) {
   const p = dayProgress(new Date());
-  return Math.floor(finalScore * p);
+  const scoreValue = Number(finalScore);
+  const safeScore = Number.isFinite(scoreValue) ? scoreValue : 0;
+  return Math.max(0, Math.floor(safeScore * p));
 }
 
 
@@ -2557,7 +2560,6 @@ async function fileToDataUrl(file) {
   </button>
 </body>
 </html>
-
 
 
 
