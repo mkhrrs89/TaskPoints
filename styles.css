@@ -623,8 +623,22 @@ body {
   
   /* Give the left/right columns more width by limiting the center column */
 .gamehub-page .matchup-scoreboard{
-  grid-template-columns: minmax(0, 1fr) minmax(84px, 110px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 78px minmax(0, 1fr);
 }
+
+.gamehub-page .matchup-scoreboard .scoreboard-side,
+.gamehub-page .matchup-scoreboard .scoreboard-identity,
+.gamehub-page .matchup-scoreboard .min-w-0{
+  min-width: 0;
+}
+
+ .gamehub-page .matchup-scoreboard .scoreboard-name{
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+  
 }
 
 
@@ -2696,6 +2710,7 @@ body {
     0 var(--bevel)
   );
 }
+
 
 
 
