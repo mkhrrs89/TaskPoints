@@ -95,7 +95,7 @@
         </div>
         <div class="flex flex-wrap gap-2 items-center">
           <label class="btn btn-teal btn-toolbar nav-btn cursor-pointer">Import JSON
-            <input id="settingsImportInput" type="file" accept="application/json" class="hidden" />
+            <input id="settingsImportInput" type="file" accept="application/json,application/zip,.zip" class="hidden" />
           </label>
           <button id="settingsImportPasteBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Paste JSON</button>
           <button type="button" class="btn btn-ghost btn-toolbar nav-btn md:hidden" data-export-images>Backup + Images</button>
@@ -521,9 +521,115 @@
       alert("Import complete! Reload any open TaskPoints tabs to see the changes.");
     }
 
+    function isZipFile(file) {
+      if (!file) return false;
+      const name = file.name || "";
+      return file.type === "application/zip" || name.toLowerCase().endsWith(".zip");
+    }
+
+    function mimeForImageExtension(ext) {
+      const normalized = ext.toLowerCase();
+      if (normalized === "png") return "image/png";
+      if (normalized === "webp") return "image/webp";
+      if (normalized === "gif") return "image/gif";
+      if (normalized === "jpg" || normalized === "jpeg") return "image/jpeg";
+      return "application/octet-stream";
+    }
+
+    function readZipEntries(arrayBuffer) {
+      const bytes = new Uint8Array(arrayBuffer);
+      const view = new DataView(arrayBuffer);
+      const decoder = new TextDecoder();
+      const entries = new Map();
+      let offset = 0;
+
+      while (offset + 30 <= bytes.length) {
+        const signature = view.getUint32(offset, true);
+        if (signature !== 0x04034b50) break;
+        const flags = view.getUint16(offset + 6, true);
+        const compression = view.getUint16(offset + 8, true);
+        if (flags & 0x08) {
+          throw new Error("Zip entries with data descriptors are not supported.");
+        }
+        if (compression !== 0) {
+          throw new Error("Only stored (uncompressed) zip entries are supported.");
+        }
+        const compressedSize = view.getUint32(offset + 18, true);
+        const nameLength = view.getUint16(offset + 26, true);
+        const extraLength = view.getUint16(offset + 28, true);
+
+        const nameStart = offset + 30;
+        const nameEnd = nameStart + nameLength;
+        const extraEnd = nameEnd + extraLength;
+        const dataStart = extraEnd;
+        const dataEnd = dataStart + compressedSize;
+
+        if (dataEnd > bytes.length) {
+          throw new Error("Zip entry is truncated.");
+        }
+
+        const name = decoder.decode(bytes.slice(nameStart, nameEnd));
+        const data = bytes.slice(dataStart, dataEnd);
+        entries.set(name, { data });
+        offset = dataEnd;
+      }
+
+      return entries;
+    }
+
+    async function importBackupZip(file) {
+      const entries = readZipEntries(await file.arrayBuffer());
+      let manifestEntry = entries.get("manifest.json");
+      if (!manifestEntry) {
+        for (const [name, entry] of entries.entries()) {
+          if (name.endsWith("/manifest.json")) {
+            manifestEntry = entry;
+            break;
+          }
+        }
+      }
+      if (!manifestEntry) {
+        throw new Error("manifest.json not found in zip.");
+      }
+
+      const manifestText = new TextDecoder().decode(manifestEntry.data);
+      const manifest = JSON.parse(manifestText);
+
+      const saveImageBlob = window.TaskPointsCore?.saveImageBlob || window.saveImageBlobFallback;
+      if (typeof saveImageBlob === "function") {
+        for (const [name, entry] of entries.entries()) {
+          if (name.endsWith("/")) continue;
+          const normalized = name.replace(/\\/g, "/");
+          if (!normalized.includes("/images/") && !normalized.startsWith("images/")) continue;
+          const fileName = normalized.split("/").pop() || "";
+          if (!fileName) continue;
+          const dotIndex = fileName.lastIndexOf(".");
+          const imageId = dotIndex > 0 ? fileName.slice(0, dotIndex) : fileName;
+          const ext = dotIndex > 0 ? fileName.slice(dotIndex + 1) : "";
+          if (!imageId) continue;
+          const blob = new Blob([entry.data], { type: mimeForImageExtension(ext) });
+          await saveImageBlob(imageId, blob);
+        }
+      }
+
+      return manifest;
+    }
+
     function handleSettingsFile(ev) {
       const file = ev.target.files?.[0];
       if (!file) return;
+
+      if (isZipFile(file)) {
+        importBackupZip(file).then((manifest) => {
+          applyImportedState(manifest);
+        }).catch((err) => {
+          console.error("Import failed", err);
+          alert("Import failed. Please confirm the zip was exported from TaskPoints.");
+        }).finally(() => {
+          ev.target.value = "";
+        });
+        return;
+      }
 
       const reader = new FileReader();
       reader.onload = () => {

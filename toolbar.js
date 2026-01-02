@@ -627,6 +627,99 @@ function extensionForImageBlob(blob) {
   return 'bin';
 }
 
+function isZipFileFallback(file) {
+  if (!file) return false;
+  const name = file.name || '';
+  return file.type === 'application/zip' || name.toLowerCase().endsWith('.zip');
+}
+
+function mimeForImageExtension(ext) {
+  const normalized = ext.toLowerCase();
+  if (normalized === 'png') return 'image/png';
+  if (normalized === 'webp') return 'image/webp';
+  if (normalized === 'gif') return 'image/gif';
+  if (normalized === 'jpg' || normalized === 'jpeg') return 'image/jpeg';
+  return 'application/octet-stream';
+}
+
+function readZipEntriesFallback(arrayBuffer) {
+  const bytes = new Uint8Array(arrayBuffer);
+  const view = new DataView(arrayBuffer);
+  const decoder = new TextDecoder();
+  const entries = new Map();
+  let offset = 0;
+
+  while (offset + 30 <= bytes.length) {
+    const signature = view.getUint32(offset, true);
+    if (signature !== 0x04034b50) break;
+    const flags = view.getUint16(offset + 6, true);
+    const compression = view.getUint16(offset + 8, true);
+    if (flags & 0x08) {
+      throw new Error('Zip entries with data descriptors are not supported.');
+    }
+    if (compression !== 0) {
+      throw new Error('Only stored (uncompressed) zip entries are supported.');
+    }
+    const compressedSize = view.getUint32(offset + 18, true);
+    const nameLength = view.getUint16(offset + 26, true);
+    const extraLength = view.getUint16(offset + 28, true);
+
+    const nameStart = offset + 30;
+    const nameEnd = nameStart + nameLength;
+    const extraEnd = nameEnd + extraLength;
+    const dataStart = extraEnd;
+    const dataEnd = dataStart + compressedSize;
+
+    if (dataEnd > bytes.length) {
+      throw new Error('Zip entry is truncated.');
+    }
+
+    const name = decoder.decode(bytes.slice(nameStart, nameEnd));
+    const data = bytes.slice(dataStart, dataEnd);
+    entries.set(name, { data });
+    offset = dataEnd;
+  }
+
+  return entries;
+}
+
+async function importBackupZipFallback(file) {
+  const entries = readZipEntriesFallback(await file.arrayBuffer());
+  let manifestEntry = entries.get('manifest.json');
+  if (!manifestEntry) {
+    for (const [name, entry] of entries.entries()) {
+      if (name.endsWith('/manifest.json')) {
+        manifestEntry = entry;
+        break;
+      }
+    }
+  }
+  if (!manifestEntry) {
+    throw new Error('manifest.json not found in zip.');
+  }
+
+  const manifestText = new TextDecoder().decode(manifestEntry.data);
+  const manifest = JSON.parse(manifestText);
+
+  const saveImageBlob = window.TaskPointsCore?.saveImageBlob || saveImageBlobFallback;
+
+  for (const [name, entry] of entries.entries()) {
+    if (name.endsWith('/')) continue;
+    const normalized = name.replace(/\\/g, '/');
+    if (!normalized.includes('/images/') && !normalized.startsWith('images/')) continue;
+    const fileName = normalized.split('/').pop() || '';
+    if (!fileName) continue;
+    const dotIndex = fileName.lastIndexOf('.');
+    const imageId = dotIndex > 0 ? fileName.slice(0, dotIndex) : fileName;
+    const ext = dotIndex > 0 ? fileName.slice(dotIndex + 1) : '';
+    if (!imageId) continue;
+    const blob = new Blob([entry.data], { type: mimeForImageExtension(ext) });
+    await saveImageBlob(imageId, blob);
+  }
+
+  return manifest;
+}
+
 async function exportBackupWithImagesFallback() {
   const snapshot = stripLegacyImageFields(normalizeStateGlobal({ ...loadRawStateFallback(), projects: loadProjectsFromStorageFallback() }));
   const imageIds = new Set();
@@ -708,9 +801,31 @@ async function applyImportedStateFallback(root) {
   window.location.reload();
 }
 
-function importFileFallback(ev) {
+async function importFileFallback(ev) {
   const f = ev.target.files?.[0];
   if (!f) return;
+
+  if (isZipFileFallback(f)) {
+    try {
+      const manifest = await importBackupZipFallback(f);
+      const root =
+        (manifest && Array.isArray(manifest.tasks) && Array.isArray(manifest.completions)) ? manifest :
+        (manifest && manifest.state && Array.isArray(manifest.state.tasks) && Array.isArray(manifest.state.completions)) ? manifest.state :
+        null;
+
+      if (!root) {
+        throw new Error('Root object missing tasks/completions arrays');
+      }
+
+      await applyImportedStateFallback(root);
+    } catch (err) {
+      console.error('Failed to import zip backup', err);
+      alert('Import failed. Make sure the zip was exported from TaskPoints.');
+    } finally {
+      ev.target.value = '';
+    }
+    return;
+  }
 
   const r = new FileReader();
   r.onload = () => {
@@ -801,6 +916,9 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   document.querySelectorAll('[data-import-input]').forEach((input) => {
+    if (input instanceof HTMLInputElement) {
+      input.accept = 'application/json,application/zip,.zip';
+    }
     input.addEventListener('change', fileHandler);
   });
 
