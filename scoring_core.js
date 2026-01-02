@@ -1155,6 +1155,14 @@
       || (matchup.dateISO ? dateKey(matchup.dateISO) : '');
   }
 
+  function isMatchupRevealed(dateKeyStr, options = {}){
+    if (!dateKeyStr) return false;
+    const includeToday = options.includeToday === true;
+    const today = todayKey();
+    if (includeToday) return dateKeyStr <= today;
+    return dateKeyStr < today;
+  }
+
   function youDailyTotalsWithInertia(state){
     const normalized = normalizeState(state || {});
     const { dailyTotals } = aggregateCompletionsByDate(normalized.completions, normalized);
@@ -1224,15 +1232,16 @@
     return ids;
   }
 
-  function computeMatchupRecord(state, playerId){
+  function computeMatchupRecord(state, playerId, options = {}){
     const matchups = Array.isArray(state?.matchups) ? state.matchups : [];
     let wins = 0;
     let losses = 0;
     let ties = 0;
     let games = 0;
     const activeIds = activePlayerIds(state);
-    const hideToday = playerId && playerId !== 'YOU';
-    const today = hideToday ? todayKey() : null;
+    const includeToday = typeof options.includeToday === 'boolean'
+      ? options.includeToday
+      : (playerId === 'YOU');
 
     if (playerId && !activeIds.has(playerId)) {
       return { wins, losses, ties, games, source: 'matchups' };
@@ -1241,10 +1250,8 @@
     matchups.forEach(m => {
       if (!m) return;
       if (!activeIds.has(m.playerAId) || !activeIds.has(m.playerBId)) return;
-      if (hideToday) {
-        const key = matchupDateKey(m);
-        if (key && key >= today) return;
-      }
+      const key = matchupDateKey(m);
+      if (!isMatchupRevealed(key, { includeToday })) return;
       const isA = m.playerAId === playerId;
       const isB = m.playerBId === playerId;
       if (!isA && !isB) return;
@@ -1327,9 +1334,14 @@
     return { wins, losses, ties: 0, games, source: 'gameHistory' };
   }
 
-  function computeRecord(state, playerId = 'YOU'){
-    const matchupRecord = computeMatchupRecord(state, playerId);
+  function computeRecord(state, playerId = 'YOU', options = {}){
+    const includeToday = typeof options.includeToday === 'boolean'
+      ? options.includeToday
+      : (playerId === 'YOU');
+    const allowFallback = options.allowFallback !== false;
+    const matchupRecord = computeMatchupRecord(state, playerId, { includeToday });
     if (matchupRecord.games > 0) return matchupRecord;
+    if (!allowFallback) return matchupRecord;
     if (playerId === 'YOU') return computeCompletionRecord(state);
     return computeGameHistoryRecord(state, playerId);
   }
@@ -1446,6 +1458,7 @@
     computeDayTotals,
     youDailyTotalsWithInertia,
     syncYouMatchups,
+    isMatchupRevealed,
     generateImageId,
     dataUrlToBlob,
     saveImageBlob,

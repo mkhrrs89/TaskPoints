@@ -222,6 +222,22 @@ function load() {
       return matchup.dateKey || matchup.date || (matchup.dateISO ? dateKey(matchup.dateISO) : "");
     }
 
+    function isMatchupRevealed(matchup, includeToday){
+      const key = getMatchupDateKey(matchup);
+      if (window.TaskPointsCore?.isMatchupRevealed) {
+        return TaskPointsCore.isMatchupRevealed(key, { includeToday });
+      }
+      if (!key) return false;
+      const today = window.TaskPointsCore?.todayKey ? TaskPointsCore.todayKey() : "";
+      return includeToday ? key <= today : key < today;
+    }
+
+    function shouldRevealMatchup(matchup){
+      if (!matchup) return false;
+      const includesYou = matchup.playerAId === "YOU" || matchup.playerBId === "YOU";
+      return isMatchupRevealed(matchup, includesYou);
+    }
+
     function activePlayerIds(state) {
       const ids = new Set(["YOU"]);
       (state.players || []).forEach(player => {
@@ -355,6 +371,11 @@ state = syncYouMatchupsWithCompletions(state);
       }
 
       function describeMatchup(m){
+        if (!shouldRevealMatchup(m)) {
+          const aName = getName(m.playerAId, m);
+          const bName = getName(m.playerBId, m);
+          return `${aName} vs ${bName} — matchup pending`;
+        }
         const aId = m.playerAId;
         const bId = m.playerBId;
         const aScore = Number(m.scoreA);
@@ -398,6 +419,11 @@ state = syncYouMatchupsWithCompletions(state);
         const playerIsA = playerId === aId;
         const playerIsB = playerId === bId;
         if (!playerIsA && !playerIsB) return "";
+        if (!shouldRevealMatchup(m)) {
+          const oppId = playerIsA ? bId : aId;
+          const oppName = getName(oppId, m);
+          return `matchup pending vs ${oppName}`;
+        }
 
         const playerScore = playerIsA ? aScore : bScore;
         const oppScore = playerIsA ? bScore : aScore;

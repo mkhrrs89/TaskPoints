@@ -179,6 +179,26 @@
       return !!player && player.active !== false;
     }
 
+    function getMatchupDateKey(matchup) {
+      if (!matchup) return "";
+      if (matchup.dateKey) return matchup.dateKey;
+      if (matchup.date) return matchup.date;
+      if (matchup.dateISO && window.TaskPointsCore?.dateKey) {
+        return TaskPointsCore.dateKey(matchup.dateISO);
+      }
+      return "";
+    }
+
+    function isMatchupRevealed(matchup, includeToday) {
+      const key = getMatchupDateKey(matchup);
+      if (window.TaskPointsCore?.isMatchupRevealed) {
+        return TaskPointsCore.isMatchupRevealed(key, { includeToday });
+      }
+      if (!key) return false;
+      const today = window.TaskPointsCore?.todayKey ? TaskPointsCore.todayKey() : "";
+      return includeToday ? key <= today : key < today;
+    }
+
     function loadPlayers() {
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
@@ -223,7 +243,7 @@ function computeYouStats() {
   const s = latestState;
 
   const record = window.TaskPointsCore?.computeRecord
-    ? TaskPointsCore.computeRecord(s, "YOU")
+    ? TaskPointsCore.computeRecord(s, "YOU", { includeToday: true, allowFallback: true })
     : { wins: 0, losses: 0, games: 0, source: "unknown" };
 
   // 1) Prefer matchups (most accurate for W/L)
@@ -235,6 +255,7 @@ function computeYouStats() {
     for (const m of mh) {
       if (!m || (m.playerAId !== "YOU" && m.playerBId !== "YOU")) continue;
       if (!activeIds.has(m.playerAId) || !activeIds.has(m.playerBId)) continue;
+      if (!isMatchupRevealed(m, true)) continue;
       const aScore = Number(m.scoreA);
       const bScore = Number(m.scoreB);
       if (!Number.isFinite(aScore) || !Number.isFinite(bScore)) continue;
@@ -321,7 +342,7 @@ function computeYouStats() {
       }
 
       const record = window.TaskPointsCore?.computeRecord
-        ? TaskPointsCore.computeRecord(latestState, p.id)
+        ? TaskPointsCore.computeRecord(latestState, p.id, { includeToday: false, allowFallback: false })
         : { wins: 0, losses: 0, games: 0, source: "unknown" };
 
       // 1) Prefer matchup-derived results (true W/L against opponents)
@@ -336,6 +357,7 @@ function computeYouStats() {
         for (const m of matchups) {
           if (!m) continue;
           if (!activeIds.has(m.playerAId) || !activeIds.has(m.playerBId)) continue;
+          if (!isMatchupRevealed(m, false)) continue;
           const isA = m.playerAId === p.id;
           const isB = m.playerBId === p.id;
           if (!isA && !isB) continue;
@@ -363,6 +385,7 @@ function computeYouStats() {
 
           return { games, wins: record.wins, losses: record.losses, winPct, avgPPD, ppd };
         }
+        return { games:0, wins:0, losses:0, winPct:null, avgPPD:null, ppd:null };
       }
 
       // 2) Fallback: legacy gameHistory vs baseline model
