@@ -4190,7 +4190,7 @@ function initTaskListDelegation(){
         completeTask(id);
         break;
       case 'task-save': {
-        const card = btn.closest('[data-task-id]');
+        const card = btn.closest('.glass[data-task-id]');
         if (card) saveTaskEdit(id, card);
         break;
       }
