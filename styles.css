@@ -241,6 +241,7 @@ body {
   grid-template-columns: 1fr auto 1fr;
   align-items: start;
   gap: clamp(10px, 2vw, 18px);
+  --scoreboard-name-height: calc(1.1em * 2);
 }
 /* --- Main scoreboard grid (END) ---------------------------------------- */
 
@@ -262,6 +263,7 @@ body {
   flex-direction: column;
   gap: 4px;
   align-items: center;
+  margin-top: calc(var(--scoreboard-name-height) + 8px);
 }
 /* --- Middle diff stack (END) ------------------------------------------- */
 
@@ -323,6 +325,10 @@ body {
   font-weight: 700;
   color: #cdd6e1;
   line-height: 1.1;
+  min-height: var(--scoreboard-name-height);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
 }
 
 .scoreboard-meta {
