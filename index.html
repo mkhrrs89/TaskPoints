@@ -698,6 +698,8 @@ const STORAGE_KEY="taskpoints_v1";
 const OLD_PLAYERS_KEY="taskpoints_players";
 const PROJECTS_STORAGE_KEY="tp_projects_v1";
 const $=id=>document.getElementById(id);
+const storageCache = { raw: null, parsed: null };
+const bootStart = performance.now();
 let state=normalizeState(load());
 state = syncStateWithMatchups(state);
   const HABITS_SORT_KEY = "taskpoints_habits_sort";
@@ -1362,11 +1364,28 @@ function saveProjectsToStorage(list){
   }
 }
 
+function getCachedStorageState() {
+  if (storageCache.parsed) return storageCache.parsed;
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (!raw) return null;
+  const parsed = JSON.parse(raw);
+  storageCache.raw = raw;
+  storageCache.parsed = parsed;
+  return parsed;
+}
+
+function writeCachedStorageState(nextState) {
+  const raw = JSON.stringify(nextState);
+  localStorage.setItem(STORAGE_KEY, raw);
+  storageCache.raw = raw;
+  storageCache.parsed = nextState;
+}
+
 
 function load() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
+    const cached = getCachedStorageState();
+    if (!cached) {
       // nothing saved yet on this device
       return {
         tasks:        [],
@@ -1387,7 +1406,7 @@ function load() {
       };
     }
 
-    const p = JSON.parse(raw);
+    const p = cached;
     const storedProjects = loadProjectsFromStorage();
 
     return {
@@ -1448,9 +1467,12 @@ function syncStateWithMatchups(current){
   if (changed) {
     try {
       if (window.TaskPointsCore?.mergeAndSaveState) {
-        return TaskPointsCore.mergeAndSaveState(nextState).state;
+        const merged = TaskPointsCore.mergeAndSaveState(nextState).state;
+        storageCache.parsed = merged;
+        storageCache.raw = null;
+        return merged;
       }
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
+      writeCachedStorageState(nextState);
     } catch (e) {
       console.error('Failed to persist synced matchups', e);
     }
@@ -2074,19 +2096,20 @@ function save() {
         console.warn('Storage nearing capacity. Older history items were trimmed to keep saves working.');
       }
       state = merged;
+      storageCache.parsed = merged;
+      storageCache.raw = null;
       return;
     }
-    const raw = localStorage.getItem(STORAGE_KEY);
-    const existing = raw ? (JSON.parse(raw) || {}) : {};
+    const existing = getCachedStorageState() || {};
     const merged = normalizeState({ ...existing, ...state });
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+    writeCachedStorageState(merged);
     state = merged;
   } catch (e) {
     console.error("Failed to save state (index.html)", e);
     // last-ditch: write a normalized snapshot (not raw state)
     try {
       const snap = normalizeState(state);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(snap));
+      writeCachedStorageState(snap);
       state = snap;
     } catch (e2) {
       console.error("Last-ditch save failed (index.html)", e2);
@@ -2114,6 +2137,8 @@ function resetAll(){
     // Clear local storage for TaskPoints
     localStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem(PROJECTS_STORAGE_KEY);
+    storageCache.raw = null;
+    storageCache.parsed = null;
   }catch(e){
     console.error('Failed to clear TaskPoints storage', e);
   }
@@ -3962,11 +3987,12 @@ function renderTasks(){
   }
 
   const order=[overdueBucket, ...Object.values(dmap), laterBucket, nodueBucket];
+  const fragment = document.createDocumentFragment();
   for(const b of order){
     if(b.items.length===0) continue;
     const div=document.createElement('div');
     div.innerHTML=`<div class="sectionDivider">${b.label}</div>`;
-    container.appendChild(div);
+    fragment.appendChild(div);
 
     b.items.forEach(t=>{
       const isOverdue = t.dueDateISO && t.dueDateISO < dateKey(today);
@@ -3990,6 +4016,7 @@ const tagsHtml = tags.length
 
 
       const card = document.createElement('div');
+      card.dataset.taskId = t.id;
 const cardClasses = ['glass'];
 if (t.importance === 'Critical') cardClasses.push('critical-card');
 else if (t.importance === 'High') cardClasses.push('high-card');
@@ -4055,15 +4082,15 @@ if (editingTaskId === t.id) {
         </div>
       </div>
       <div class="flex gap-2 flex-wrap justify-end">
-        <button class="btn btn-success" data-act="task-save">Save</button>
-        <button class="btn btn-ghost" data-act="task-cancel">Cancel</button>
-        <button class="btn btn-ghost" data-act="task-delete">Delete</button>
+        <button class="btn btn-success" data-task-action="task-save" data-task-id="${t.id}">Save</button>
+        <button class="btn btn-ghost" data-task-action="task-cancel" data-task-id="${t.id}">Cancel</button>
+        <button class="btn btn-ghost" data-task-action="task-delete" data-task-id="${t.id}">Delete</button>
       </div>
     </div>
   `;
 
   // ⬇️ keep this
-  container.appendChild(card);
+  fragment.appendChild(card);
 
   // wire up custom row toggle for this card
   const repSel = card.querySelector('select[data-field="repeat"]');
@@ -4078,13 +4105,6 @@ if (editingTaskId === t.id) {
   }
 
   // ⬇️ keep these exactly like before
-  const saveBtn   = card.querySelector('[data-act="task-save"]');
-  const cancelBtn = card.querySelector('[data-act="task-cancel"]');
-  const delBtn    = card.querySelector('[data-act="task-delete"]');
-
-  saveBtn.onclick   = () => saveTaskEdit(t.id,card);
-  cancelBtn.onclick = () => { editingTaskId=null; renderTasks(); };
-  delBtn.onclick    = () => deleteTask(t.id);
 } else {
 card.innerHTML=`
   <div class="flex flex-wrap sm:flex-nowrap items-center gap-3">
@@ -4112,21 +4132,22 @@ ${t.dueDateISO
 
 
     <div class="flex gap-2 flex-wrap justify-end ml-auto">
-      ${isOverdue?`<button class="btn btn-ghost btn-task" onclick="postponeTask('${t.id}')">Postpone</button>`:''}
-      <button class="btn btn-ghost btn-task" onclick="wontDoMain('${t.id}')">Won’t do</button>
-      <button class="btn btn-ghost btn-task" onclick="bumpTaskOneDay('${t.id}')">+1d</button>
-      <button class="btn btn-ghost btn-task" onclick="editTask('${t.id}')">Edit</button>
-      <button class="btn btn-ghost btn-task" onclick="hideTask('${t.id}')">Hide</button>
-      <button class="btn btn-delete btn-task" onclick="deleteTask('${t.id}')">Delete</button>
-      <button class="btn btn-success btn-task btn-check" onclick="completeTask('${t.id}')" aria-label="Done">✓</button>
+      ${isOverdue?`<button class="btn btn-ghost btn-task" data-task-action="postpone" data-task-id="${t.id}">Postpone</button>`:''}
+      <button class="btn btn-ghost btn-task" data-task-action="wont-do" data-task-id="${t.id}">Won’t do</button>
+      <button class="btn btn-ghost btn-task" data-task-action="bump" data-task-id="${t.id}">+1d</button>
+      <button class="btn btn-ghost btn-task" data-task-action="edit" data-task-id="${t.id}">Edit</button>
+      <button class="btn btn-ghost btn-task" data-task-action="hide" data-task-id="${t.id}">Hide</button>
+      <button class="btn btn-delete btn-task" data-task-action="delete" data-task-id="${t.id}">Delete</button>
+      <button class="btn btn-success btn-task btn-check" data-task-action="complete" data-task-id="${t.id}" aria-label="Done">✓</button>
 
     </div>
   </div>`;
 
-        container.appendChild(card);
+        fragment.appendChild(card);
       }
     });
   }
+  container.appendChild(fragment);
 }
 
 function saveSleepScore(){
@@ -5163,7 +5184,7 @@ function addTask(){
 
   save();
   clearForm();
-  renderAll();
+  renderTasks();
 
   closeAddTaskModal();
 }
@@ -5201,7 +5222,7 @@ function bumpTaskOneDay(id){
   if (!t) return;
   bumpOneDay(t);
   save();
-  renderAll();
+  renderTasks();
 }
 
 function postponeTask(id){
@@ -5209,7 +5230,7 @@ function postponeTask(id){
   const oldDue = t.dueDateISO;
   t.dueDateISO = todayKey();
   trackDueDatePush(t, oldDue, t.dueDateISO);
-  save(); renderAll();
+  save(); renderTasks();
 }
 function wontDoMain(id){
   const t=state.tasks.find(x=>x.id===id); if(!t) return;
@@ -5226,7 +5247,7 @@ function wontDoMain(id){
       t.dueDateISO = nextKey;
     }
   }
-  save(); renderAll();
+  save(); renderTasks();
 }
 
 function completeTask(id){
@@ -5310,10 +5331,10 @@ if (repSel) {
     delete t.recurrence.customCount;
     delete t.recurrence.customUnit;
   }
-}
+  }
 
   editingTaskId=null;
-  save(); renderAll();
+  save(); renderTasks();
 }
 
 function hideTask(id){
@@ -5321,7 +5342,7 @@ function hideTask(id){
   if (!t) return;
   t.hidden = true;
   save();
-  renderAll();
+  renderTasks();
 }
 
 function deleteTask(id){
@@ -5331,7 +5352,7 @@ function deleteTask(id){
   // Do NOT touch state.completions here – keep history/log and points
   if (editingTaskId === id) editingTaskId = null;
   save();
-  renderAll();
+  renderTasks();
 }
 
 
@@ -5618,10 +5639,15 @@ function renderAll() {
   try { renderStats(); } catch (e) { console.error('renderStats error:', e); }
   try { renderTasks(); } catch (e) { console.error('renderTasks error:', e); }
 
-  try { renderSleepHistory(); } catch (e) { console.error('renderSleepHistory error:', e); }
-  try { renderCaloriesHistory(); } catch (e) { console.error('renderCaloriesHistory error:', e); }
-  try { renderWorkHistory(); } catch (e) { console.error('renderWorkHistory error:', e); }
-  try { renderMoodHistory(); } catch (e) { console.error('renderMoodHistory error:', e); }
+  const defer = window.requestIdleCallback
+    ? window.requestIdleCallback
+    : (cb) => setTimeout(() => cb({ timeRemaining: () => 0 }), 200);
+  defer(() => {
+    try { renderSleepHistory(); } catch (e) { console.error('renderSleepHistory error:', e); }
+    try { renderCaloriesHistory(); } catch (e) { console.error('renderCaloriesHistory error:', e); }
+    try { renderWorkHistory(); } catch (e) { console.error('renderWorkHistory error:', e); }
+    try { renderMoodHistory(); } catch (e) { console.error('renderMoodHistory error:', e); }
+  });
 }
 
 
@@ -5683,6 +5709,69 @@ console.log('TaskPoints main state summary:', {
 
 renderAll();
 startOpponentDripTicker();
+
+  const taskList = $('taskList');
+  if (taskList && !taskList.dataset.delegated) {
+    taskList.dataset.delegated = 'true';
+    taskList.addEventListener('click', (e) => {
+      const actionEl = e.target.closest('[data-task-action]');
+      if (!actionEl || !taskList.contains(actionEl)) return;
+      const action = actionEl.dataset.taskAction;
+      const id = actionEl.dataset.taskId;
+      if (!id) return;
+      const perfStart = window.TP_DEBUG_PERF ? performance.now() : null;
+
+      switch (action) {
+        case 'postpone':
+          postponeTask(id);
+          break;
+        case 'wont-do':
+          wontDoMain(id);
+          break;
+        case 'bump':
+          bumpTaskOneDay(id);
+          break;
+        case 'edit':
+          editTask(id);
+          break;
+        case 'hide':
+          hideTask(id);
+          break;
+        case 'delete':
+        case 'task-delete':
+          deleteTask(id);
+          break;
+        case 'complete':
+          completeTask(id);
+          break;
+        case 'task-save': {
+          const card = actionEl.closest('[data-task-id]');
+          if (card) saveTaskEdit(id, card);
+          break;
+        }
+        case 'task-cancel':
+          editingTaskId = null;
+          renderTasks();
+          break;
+        default:
+          break;
+      }
+
+      if (perfStart != null) {
+        requestAnimationFrame(() => {
+          const elapsed = performance.now() - perfStart;
+          console.log(`[TP_PERF] task-${action}: ${elapsed.toFixed(1)}ms`);
+        });
+      }
+    });
+  }
+
+  if (window.TP_DEBUG_PERF) {
+    requestAnimationFrame(() => {
+      const elapsed = performance.now() - bootStart;
+      console.log(`[TP_PERF] boot->first-render: ${elapsed.toFixed(1)}ms`);
+    });
+  }
 });
 
 
@@ -5954,6 +6043,8 @@ document.addEventListener('change', (e) => {
   (() => {
     const nav = document.getElementById('mobileBottomNav');
     const isMobile = window.matchMedia('(max-width: 768px)');
+    let rafId = null;
+    let resizeTimer = null;
 
     // Only run on browsers that expose the visual viewport (mobile Safari/Chrome)
     if (!nav || !window.visualViewport) return;
@@ -5981,9 +6072,22 @@ document.addEventListener('change', (e) => {
       }
     }
 
-    window.visualViewport.addEventListener('resize', updateNavOffset);
-    window.visualViewport.addEventListener('scroll', updateNavOffset);
-    window.addEventListener('orientationchange', updateNavOffset);
+    function scheduleNavUpdate() {
+      if (rafId) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        updateNavOffset();
+      });
+    }
+
+    function scheduleNavResize() {
+      if (resizeTimer) clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(updateNavOffset, 250);
+    }
+
+    window.visualViewport.addEventListener('resize', scheduleNavResize);
+    window.visualViewport.addEventListener('scroll', scheduleNavUpdate);
+    window.addEventListener('orientationchange', scheduleNavResize);
 
     updateNavOffset();
   })();
