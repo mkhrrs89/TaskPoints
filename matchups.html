@@ -633,6 +633,30 @@ state = syncYouMatchupsWithCompletions(state);
         renderMatchups();
       }
 
+      function bindEditScoreButton(button, matchup) {
+        if (!button) return;
+        let handled = false;
+        const invoke = (event) => {
+          if (handled) return;
+          handled = true;
+          if (event) {
+            event.preventDefault();
+            event.stopPropagation();
+          }
+          editMatchupScores(matchup);
+          setTimeout(() => {
+            handled = false;
+          }, 0);
+        };
+
+        if (window.PointerEvent) {
+          button.addEventListener("pointerup", invoke);
+        } else {
+          button.addEventListener("touchend", invoke, { passive: false });
+        }
+        button.addEventListener("click", invoke);
+      }
+
       function describeMatchup(m){
         if (!shouldRevealMatchup(m)) {
           const aName = getName(m.playerAId, m);
@@ -746,7 +770,7 @@ state = syncYouMatchupsWithCompletions(state);
               editBtn.type = "button";
               editBtn.className = "btn btn-ghost btn-toolbar text-xs";
               editBtn.textContent = "Edit scores";
-              editBtn.addEventListener("click", () => editMatchupScores(m));
+              bindEditScoreButton(editBtn, m);
               li.appendChild(editBtn);
             }
             list.appendChild(li);
@@ -848,7 +872,7 @@ state = syncYouMatchupsWithCompletions(state);
               editBtn.type = "button";
               editBtn.className = "btn btn-ghost btn-toolbar text-xs";
               editBtn.textContent = "Edit scores";
-              editBtn.addEventListener("click", () => editMatchupScores(m));
+              bindEditScoreButton(editBtn, m);
               li.appendChild(editBtn);
             }
             list.appendChild(li);
@@ -950,4 +974,3 @@ function save(nextState) {
   </button>
 </body>
 </html>
-
