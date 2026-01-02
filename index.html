@@ -5716,24 +5716,32 @@ startOpponentDripTicker();
   if (taskList && !taskList.dataset.delegated) {
     taskList.dataset.delegated = 'true';
     taskList.addEventListener('click', (e) => {
+      const actionSelector = 'button, a, input, [data-task-action], [data-action], [data-act]';
       let actionEl = null;
       if (e.target instanceof Element) {
-        actionEl = e.target.closest('[data-task-action]');
+        actionEl = e.target.closest(actionSelector);
       } else if (typeof e.composedPath === 'function') {
         const path = e.composedPath();
         for (const node of path) {
-          if (node instanceof Element && node.matches('[data-task-action]')) {
+          if (node instanceof Element && node.matches(actionSelector)) {
             actionEl = node;
             break;
           }
         }
       } else if (e.target?.parentElement) {
-        actionEl = e.target.parentElement.closest('[data-task-action]');
+        actionEl = e.target.parentElement.closest(actionSelector);
       }
       if (!actionEl || !taskList.contains(actionEl)) return;
-      const action = actionEl.dataset.taskAction;
-      const id = actionEl.dataset.taskId || actionEl.closest('[data-task-id]')?.dataset.taskId;
-      if (!id) return;
+      const action = actionEl.dataset.taskAction || actionEl.dataset.action || actionEl.dataset.act;
+      const id =
+        actionEl.dataset.taskId
+        || actionEl.dataset.id
+        || actionEl.closest('[data-task-id],[data-id]')?.dataset.taskId
+        || actionEl.closest('[data-task-id],[data-id]')?.dataset.id;
+      if (window.TP_DEBUG_PERF) {
+        console.log('[TP_DEBUG] task action click', { target: e.target, actionEl, action, id });
+      }
+      if (!action || !id) return;
       const perfStart = window.TP_DEBUG_PERF ? performance.now() : null;
 
       switch (action) {
