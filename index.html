@@ -3374,9 +3374,14 @@ function renderHabits(){
     renderHabitRow(entry.habit, days, wrap, { showMoveButtons: sortMode === 'custom' });
   });
 
-  wrap.querySelectorAll('.habitDay').forEach(el=>{
-    el.onclick = () => toggleHabitDay(el.getAttribute('data-habit'), el.getAttribute('data-day'));
-  });
+  if (!wrap.dataset.habitDelegated) {
+    wrap.dataset.habitDelegated = 'true';
+    wrap.addEventListener('click', (e) => {
+      const bubble = e.target.closest('.habitDay[data-habit][data-day]');
+      if (!bubble || !wrap.contains(bubble)) return;
+      handleHabitBubbleTap(bubble);
+    });
+  }
   wrap.querySelectorAll('[data-act="habit-edit"]').forEach(btn=>{
     btn.onclick = () => { editingHabitId = btn.getAttribute('data-id'); renderHabits(); renderVices(); };
   });
@@ -3513,13 +3518,14 @@ const nameHtml = `
 
   });
 
-  // Day toggles
-  wrap.querySelectorAll('.habitDay').forEach(el => {
-    el.onclick = () => toggleHabitDay(
-      el.getAttribute('data-habit'),
-      el.getAttribute('data-day')
-    );
-  });
+  if (!wrap.dataset.viceDelegated) {
+    wrap.dataset.viceDelegated = 'true';
+    wrap.addEventListener('click', (e) => {
+      const bubble = e.target.closest('.habitDay[data-habit][data-day]');
+      if (!bubble || !wrap.contains(bubble)) return;
+      handleHabitBubbleTap(bubble);
+    });
+  }
 
   // Edit / delete
   wrap.querySelectorAll('[data-act="habit-edit"]').forEach(btn => {
@@ -3793,7 +3799,69 @@ function moveHabitGroup(tag, delta) {
 function toggleHabitDay(habitId, dayKey){
   const h = state.habits.find(x => x.id === habitId);
   if (!h || h.retired) return;
+  applyHabitDayToggle(h, dayKey);
+  save();
+  renderHabits();
+  renderStats();
+  renderVices();
+}
 
+let habitSaveDebounceId = null;
+let habitRerenderDebounceId = null;
+let habitLastTapPerfStart = null;
+
+function deferAfterPaint(fn) {
+  requestAnimationFrame(() => {
+    if (window.requestIdleCallback) {
+      requestIdleCallback(fn, { timeout: 500 });
+    } else {
+      setTimeout(fn, 0);
+    }
+  });
+}
+
+function scheduleHabitSave() {
+  if (habitSaveDebounceId) clearTimeout(habitSaveDebounceId);
+  const perfStart = window.TP_DEBUG_PERF ? habitLastTapPerfStart : null;
+  habitSaveDebounceId = setTimeout(() => {
+    habitSaveDebounceId = null;
+    deferAfterPaint(() => {
+      save();
+      if (window.TP_DEBUG_PERF && perfStart !== null) {
+        console.log(`[TP_PERF] tap->save ${Math.round(performance.now() - perfStart)}ms`);
+      }
+    });
+  }, 200);
+}
+
+function scheduleHabitRerender() {
+  if (habitRerenderDebounceId) clearTimeout(habitRerenderDebounceId);
+  const perfStart = window.TP_DEBUG_PERF ? habitLastTapPerfStart : null;
+  habitRerenderDebounceId = setTimeout(() => {
+    habitRerenderDebounceId = null;
+    deferAfterPaint(() => {
+      if (window.TP_DEBUG_PERF && perfStart !== null) {
+        console.log(`[TP_PERF] tap->rerender ${Math.round(performance.now() - perfStart)}ms`);
+      }
+      renderHabits();
+      renderStats();
+      renderVices();
+    });
+  }, 150);
+}
+
+function applyHabitBubbleStyle(el, habit, statusClass) {
+  const styleAttr = getHabitBubbleStyleAttr(habit.tag, statusClass);
+  if (styleAttr) {
+    const styleValue = styleAttr.replace(/^ style="/, '').replace(/"$/, '');
+    el.setAttribute('style', styleValue);
+  } else {
+    el.removeAttribute('style');
+  }
+}
+
+function applyHabitDayToggle(h, dayKey) {
+  const habitId = h.id;
   const category = (h.category || 'habit');   // 'habit' or 'vice'
   const source   = category === 'vice' ? 'vice' : 'habit';
 
@@ -3863,11 +3931,35 @@ function toggleHabitDay(habitId, dayKey){
     if (failedIdx !== -1) h.failedKeys.splice(failedIdx, 1);
   }
 
-  save();
-  renderHabits();
-  renderStats();
-  renderVices();
+  if (h.doneKeys.includes(dayKey)) return 'on';
+  if (h.failedKeys.includes(dayKey)) return 'failed';
+  return 'off';
 }
+
+function handleHabitBubbleTap(bubbleEl) {
+  const habitId = bubbleEl.getAttribute('data-habit');
+  const dayKey = bubbleEl.getAttribute('data-day');
+  if (!habitId || !dayKey) return;
+
+  const h = state.habits.find(x => x.id === habitId);
+  if (!h || h.retired) return;
+
+  const perfStart = performance.now();
+  habitLastTapPerfStart = perfStart;
+
+  const statusClass = applyHabitDayToggle(h, dayKey);
+  bubbleEl.classList.remove('on', 'off', 'failed');
+  bubbleEl.classList.add(statusClass);
+  applyHabitBubbleStyle(bubbleEl, h, statusClass);
+
+  if (window.TP_DEBUG_PERF) {
+    console.log(`[TP_PERF] tap->bubble ${Math.round(performance.now() - perfStart)}ms`);
+  }
+
+  scheduleHabitSave();
+  scheduleHabitRerender();
+}
+
 
 
 /* ---------- FLEX ACTIONS ---------- */
