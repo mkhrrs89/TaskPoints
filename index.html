@@ -210,7 +210,7 @@ Nothing visible on the page is built here. === -->
       
       <!-- SCOREBOARD CARD (START) Shows You vs Opponent + score + diff. -->
       <div class="glass sm:col-span-2 lg:col-span-1">
-        <div class="matchup-scoreboard mt-3">
+        <div class="matchup-scoreboard">
           
           <!-- LEFT SIDE: YOU -->
           <div class="scoreboard-side">
@@ -3297,7 +3297,6 @@ function renderHabitRow(h, days, wrap, options = {}) {
   const controlsHtml = `
     <div class="habitControls flex items-center gap-2 flex-wrap text-xs sm:text-sm">
       <button class="btn btn-ghost" data-act="habit-edit" data-id="${h.id}">Edit</button>
-      <button class="btn btn-ghost" data-act="habit-delete" data-id="${h.id}">Delete</button>
       ${showMoveButtons ? `
         <button class="btn btn-ghost" style="padding:2px 6px;font-size:11px"
                 data-act="habit-up" data-id="${h.id}">▲</button>
@@ -3501,7 +3500,6 @@ const nameHtml = `
       const controlsHtml = `
         <div class="habitControls flex items-center gap-2 flex-wrap text-xs sm:text-sm">
           <button class="btn btn-ghost" data-act="habit-edit" data-id="${h.id}">Edit</button>
-          <button class="btn btn-ghost" data-act="habit-delete" data-id="${h.id}">Delete</button>
           <button class="btn btn-ghost" style="padding:2px 6px;font-size:11px"
                   data-act="habit-up" data-id="${h.id}">▲</button>
           <button class="btn btn-ghost" style="padding:2px 6px;font-size:11px"
