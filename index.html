@@ -212,9 +212,8 @@ Nothing visible on the page is built here. === -->
       <div class="glass sm:col-span-2 lg:col-span-1">
         <div class="matchup-scoreboard mt-3">
           
-        <!-- LEFT SIDE: YOU -->
+          <!-- LEFT SIDE: YOU -->
           <div class="scoreboard-side">
-            <div class="muted text-[11px] uppercase tracking-wide">You</div>
             <div id="matchupYourName" class="scoreboard-name">You</div>
             <div id="matchupYourScore" class="scoreboard-score">—</div>
             <div id="matchupYourRecord" class="scoreboard-record">Record: 0-0</div>
@@ -229,9 +228,8 @@ Nothing visible on the page is built here. === -->
           </div>
        
 
-       <!-- RIGHT SIDE: OPPONENT -->
+          <!-- RIGHT SIDE: OPPONENT -->
           <div class="scoreboard-side text-right">
-            <div class="muted text-[11px] uppercase tracking-wide">Opponent</div>
             <div id="matchupOpponent" class="scoreboard-name text-right">—</div>
             <div id="matchupOpponentScore" class="scoreboard-score">—</div>
             <div id="matchupOpponentRecord" class="scoreboard-record">Record: 0-0</div>
@@ -284,10 +282,27 @@ Nothing visible on the page is built here. === -->
       <!-- ┌─────────────────────────────────┐
            │  I N E R T I A   C A R D        │
            └─────────────────────────────────┘ -->
-      <div class="glass flex flex-col items-center justify-center text-center gap-1.5">
-        <div class="muted font-semibold uppercase tracking-wide text-[10px]">Inertia Score</div>
-        <div class="text-4xl font-extrabold" id="inertiaValue">0.0</div>
-        <div class="muted text-[11px] leading-tight" id="inertiaAverage">7-day avg: 0.0</div>
+      <div class="glass grid grid-cols-2 gap-4">
+        <div class="flex flex-col items-center justify-center text-center gap-1.5">
+          <div class="muted font-semibold uppercase tracking-wide text-[10px]">Inertia Score</div>
+          <div class="text-4xl font-extrabold" id="inertiaValue">0.0</div>
+          <div class="muted text-[11px] leading-tight" id="inertiaAverage">7-day avg: 0.0</div>
+        </div>
+        <div class="flex flex-col justify-center gap-1.5 border-l border-white/10 pl-4">
+          <div class="muted font-semibold uppercase tracking-wide text-[10px]">Yesterday’s Results</div>
+          <div class="flex items-center justify-between text-[11px]">
+            <span class="muted">You</span>
+            <span id="yesterdayYourScore" class="font-semibold">—</span>
+          </div>
+          <div class="flex items-center justify-between text-[11px]">
+            <span id="yesterdayOpponent" class="font-semibold">Opponent</span>
+            <span id="yesterdayOpponentScore" class="font-semibold">—</span>
+          </div>
+          <div class="flex items-center justify-between text-[11px]">
+            <span class="muted">Result</span>
+            <span id="yesterdayResult" class="font-semibold">—</span>
+          </div>
+        </div>
       </div>
 
       
@@ -2623,6 +2638,7 @@ function renderStats(){
   renderTodayPointsSummary(todayPoints, inertiaPts, inertiaAvg);
 
   renderTodaysMatchup(matchupKey, matchupPoints);
+  renderYesterdaysResult(dailyTotals);
 
   // Today's breakdown bar – wrapped in try/catch so it can't kill stats
   try {
@@ -2817,6 +2833,61 @@ function renderTodaysMatchup(todayKeyStr, yourScore){
     diffEl.textContent = 'Tied right now';
     diffValueEl.classList.add('diff-neutral');
   }
+}
+
+function renderYesterdaysResult(dailyTotals){
+  const yourScoreEl = $('yesterdayYourScore');
+  const oppNameEl = $('yesterdayOpponent');
+  const oppScoreEl = $('yesterdayOpponentScore');
+  const resultEl = $('yesterdayResult');
+
+  if (!yourScoreEl || !oppNameEl || !oppScoreEl || !resultEl) return;
+
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayKey = getGameDayKey(yesterday);
+
+  const { todayPoints: yourScore } = deriveTodayWithInertia(dailyTotals, yesterdayKey);
+
+  const matchups = Array.isArray(state.matchups) ? state.matchups : [];
+  const matchupDateKey = (m) => {
+    if (!m) return '';
+    if (m.date) return m.date;
+    if (m.dateKey) return m.dateKey;
+    if (m.dateISO) return dateKey(m.dateISO);
+    return '';
+  };
+  const matchup = matchups.find(m => m && matchupDateKey(m) === yesterdayKey && (m.playerAId === 'YOU' || m.playerBId === 'YOU'));
+
+  if (!matchup) {
+    yourScoreEl.textContent = '—';
+    oppNameEl.textContent = 'Opponent';
+    oppScoreEl.textContent = '—';
+    resultEl.textContent = '—';
+    return;
+  }
+
+  const youAreA = matchup.playerAId === 'YOU';
+  const oppId = youAreA ? matchup.playerBId : matchup.playerAId;
+  const oppScoreRaw = youAreA ? matchup.scoreB : matchup.scoreA;
+  const yourScoreSaved = youAreA ? matchup.scoreA : matchup.scoreB;
+
+  const oppScoreNum = Number(oppScoreRaw);
+  const safeOppScore = Number.isFinite(oppScoreNum) ? oppScoreNum : 0;
+  const safeYourScore = Number.isFinite(yourScore)
+    ? yourScore
+    : (Number.isFinite(yourScoreSaved) ? yourScoreSaved : 0);
+
+  const visibleOppScore = oppId
+    ? visibleOpponentScoreForMatchup(yesterdayKey, oppId, safeOppScore)
+    : safeOppScore;
+
+  oppNameEl.textContent = getPlayerNameById(oppId);
+  yourScoreEl.textContent = safeYourScore.toFixed(1);
+  oppScoreEl.textContent = visibleOppScore.toFixed(1);
+
+  const diff = Number((safeYourScore - visibleOppScore).toFixed(1));
+  resultEl.textContent = diff >= 0 ? 'W' : 'L';
 }
 
 function updateTodayBreakdown(completions, todayKey, inertiaPoints = 0){
