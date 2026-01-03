@@ -636,14 +636,9 @@ Nothing visible on the page is built here. === -->
 
 <!-- VICES -->
 <div class="glass mb-6">
-  <div class="flex items-center justify-between mb-3 gap-3 flex-wrap">
+  <div class="flex items-center gap-3 flex-wrap mb-3">
     <h2 id="vicesAnchor" class="font-bold text-lg">Vices</h2>
-    <div class="flex gap-2 flex-wrap">
-      <input id="viceName" class="input w-48" placeholder="Vice name">
-      <input id="viceTag" class="input w-36" placeholder="Tag">
-      <input id="vicePts"  class="input w-28" type="number" placeholder="Pts">
-      <button id="addViceBtn" class="btn btn-primary">Add Vice</button>
-    </div>
+    <button id="addViceBtn" class="btn btn-primary">Add Vice</button>
   </div>
   <div class="grid gap-2 text-sm muted mb-2" id="viceWeekLabels"></div>
   <div id="vicesList" class="grid gap-2"></div>
@@ -3494,6 +3489,21 @@ function closeHabitModal() {
   modal.classList.remove('flex');
 }
 
+function openViceModal() {
+  const modal = $('addViceModal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+  $('viceName')?.focus();
+}
+
+function closeViceModal() {
+  const modal = $('addViceModal');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+}
+
 function addHabit(){
   const name = $('habitName')?.value.trim() || '';
   const tag  = $('habitTag')?.value.trim() || '';
@@ -3531,9 +3541,9 @@ function addHabit(){
 }
 
 function addVice(){
-  const name = $('viceName').value.trim();
+  const name = $('viceName')?.value.trim() || '';
   const tag  = $('viceTag')?.value.trim() || '';
-  const pts  = Number($('vicePts').value)||0;
+  const pts  = Number($('vicePts')?.value)||0;
   if(!name) return alert('Enter a vice name');
 
   // Find the current max order among non-retired VICES
@@ -3559,6 +3569,7 @@ function addVice(){
   state.habits.push(h);
   save();
   $('viceName').value=''; $('vicePts').value=''; if ($('viceTag')) $('viceTag').value='';
+  closeViceModal();
 
   renderHabits();
   renderVices();
@@ -5726,7 +5737,7 @@ document.addEventListener('DOMContentLoaded', () => {
   $('sortSelect')?.addEventListener('change', renderTasks);
   $('resetBtn')?.addEventListener('click', resetAll);
   $('addHabitBtn')?.addEventListener('click', openHabitModal);
-  $('addViceBtn')?.addEventListener('click', addVice);
+  $('addViceBtn')?.addEventListener('click', openViceModal);
   $('addFlexBtn')?.addEventListener('click', addFlexAction);
   $('saveSleepScoreBtn')?.addEventListener('click', saveSleepScore);
   $('addHabitModal')?.addEventListener('keydown', e => {
@@ -5735,6 +5746,14 @@ document.addEventListener('DOMContentLoaded', () => {
   ['habitName', 'habitTag', 'habitPts'].forEach(id => {
     $(id)?.addEventListener('keydown', e => {
       if (e.key === 'Enter') addHabit();
+    });
+  });
+  $('addViceModal')?.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeViceModal();
+  });
+  ['viceName', 'viceTag', 'vicePts'].forEach(id => {
+    $(id)?.addEventListener('keydown', e => {
+      if (e.key === 'Enter') addVice();
     });
   });
   $('sleepEditModal')?.addEventListener('keydown', e => {
@@ -5945,6 +5964,54 @@ document.addEventListener('change', (e) => {
     <div class="flex justify-end gap-2 mt-6">
       <button type="button" class="btn btn-secondary" onclick="closeHabitModal()">Cancel</button>
       <button type="button" id="confirmHabitBtn" class="btn btn-primary" onclick="addHabit()">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<!-- ADD VICE MODAL -->
+<div
+  id="addViceModal"
+  class="fixed inset-0 z-40 hidden items-center justify-center bg-black/60"
+  onclick="closeViceModal()"
+>
+  <div
+    class="w-full max-w-sm mx-3 rounded-2xl px-4 pb-5 pt-8 relative bg-zinc-900 text-zinc-100 text-sm"
+    onclick="event.stopPropagation();"
+  >
+    <button
+      type="button"
+      class="absolute top-3 right-3 btn btn-secondary text-[11px] px-3 py-1 rounded-md"
+      onclick="closeViceModal()"
+    >
+      Close
+    </button>
+
+    <div class="flex items-start justify-between gap-3 mb-4">
+      <div>
+        <div class="muted text-[11px] uppercase tracking-wide">New Vice</div>
+        <div class="text-base font-semibold leading-tight">Create a vice</div>
+      </div>
+      <div class="text-2xl">⚡</div>
+    </div>
+
+    <label class="grid gap-1 text-sm font-medium">
+      Vice name
+      <input id="viceName" class="input" placeholder="Vice name">
+    </label>
+
+    <label class="grid gap-1 text-sm font-medium mt-3">
+      Tag
+      <input id="viceTag" class="input" placeholder="Tag">
+    </label>
+
+    <label class="grid gap-1 text-sm font-medium mt-3">
+      Points
+      <input id="vicePts" class="input" type="number" placeholder="Pts">
+    </label>
+
+    <div class="flex justify-end gap-2 mt-6">
+      <button type="button" class="btn btn-secondary" onclick="closeViceModal()">Cancel</button>
+      <button type="button" id="confirmViceBtn" class="btn btn-primary" onclick="addVice()">Confirm</button>
     </div>
   </div>
 </div>
