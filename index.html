@@ -619,18 +619,12 @@ Nothing visible on the page is built here. === -->
     <div class="flex items-center gap-3 flex-wrap">
       <h2 id="habitsAnchor" class="font-bold text-lg">Habits</h2>
 
-      <select id="habitsSortSelect" class="input w-44">
+      <select id="habitsSortSelect" class="input w-36">
         <option value="custom">Custom</option>
         <option value="points">Point value</option>
         <option value="streak">Current streak</option>
         <option value="completion">% completion</option>
       </select>
-    </div>
-
-    <div class="flex gap-2 flex-wrap">
-<input id="habitName" class="input w-36 sm:w-48" placeholder="Habit name">
-<input id="habitTag"  class="input w-28 sm:w-36" placeholder="Tag">
-<input id="habitPts"  class="input w-20 sm:w-28" type="number" placeholder="Pts">
       <button id="addHabitBtn" class="btn btn-primary">Add Habit</button>
     </div>
   </div>
@@ -3485,10 +3479,25 @@ const nameHtml = `
 }
 
 
+function openHabitModal() {
+  const modal = $('addHabitModal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+  $('habitName')?.focus();
+}
+
+function closeHabitModal() {
+  const modal = $('addHabitModal');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+}
+
 function addHabit(){
-  const name = $('habitName').value.trim();
+  const name = $('habitName')?.value.trim() || '';
   const tag  = $('habitTag')?.value.trim() || '';
-  const pts  = Number($('habitPts').value)||0;
+  const pts  = Number($('habitPts')?.value)||0;
   if(!name) return alert('Enter a habit name');
 
   // Find the current max order among non-retired HABITS
@@ -3514,6 +3523,7 @@ function addHabit(){
   state.habits.push(h);
   save();
   $('habitName').value=''; $('habitPts').value=''; if ($('habitTag')) $('habitTag').value='';
+  closeHabitModal();
 
   renderHabits();
   renderVices();
@@ -5715,10 +5725,18 @@ document.addEventListener('DOMContentLoaded', () => {
   $('openAddTaskBtn')?.addEventListener('click', openAddTaskModal);
   $('sortSelect')?.addEventListener('change', renderTasks);
   $('resetBtn')?.addEventListener('click', resetAll);
-  $('addHabitBtn')?.addEventListener('click', addHabit);
+  $('addHabitBtn')?.addEventListener('click', openHabitModal);
   $('addViceBtn')?.addEventListener('click', addVice);
   $('addFlexBtn')?.addEventListener('click', addFlexAction);
   $('saveSleepScoreBtn')?.addEventListener('click', saveSleepScore);
+  $('addHabitModal')?.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeHabitModal();
+  });
+  ['habitName', 'habitTag', 'habitPts'].forEach(id => {
+    $(id)?.addEventListener('keydown', e => {
+      if (e.key === 'Enter') addHabit();
+    });
+  });
   $('sleepEditModal')?.addEventListener('keydown', e => {
     if (e.key === 'Escape') closeSleepEditModal();
   });
@@ -5879,6 +5897,54 @@ document.addEventListener('change', (e) => {
     <div class="flex justify-end gap-2 mt-6">
       <button type="button" class="btn btn-secondary" onclick="closeWorkEditModal()">Cancel</button>
       <button type="button" id="workEditSaveBtn" class="btn btn-primary" onclick="submitWorkEditModal()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ADD HABIT MODAL -->
+<div
+  id="addHabitModal"
+  class="fixed inset-0 z-40 hidden items-center justify-center bg-black/60"
+  onclick="closeHabitModal()"
+>
+  <div
+    class="w-full max-w-sm mx-3 rounded-2xl px-4 pb-5 pt-8 relative bg-zinc-900 text-zinc-100 text-sm"
+    onclick="event.stopPropagation();"
+  >
+    <button
+      type="button"
+      class="absolute top-3 right-3 btn btn-secondary text-[11px] px-3 py-1 rounded-md"
+      onclick="closeHabitModal()"
+    >
+      Close
+    </button>
+
+    <div class="flex items-start justify-between gap-3 mb-4">
+      <div>
+        <div class="muted text-[11px] uppercase tracking-wide">New Habit</div>
+        <div class="text-base font-semibold leading-tight">Create a habit</div>
+      </div>
+      <div class="text-2xl">✨</div>
+    </div>
+
+    <label class="grid gap-1 text-sm font-medium">
+      Habit name
+      <input id="habitName" class="input" placeholder="Habit name">
+    </label>
+
+    <label class="grid gap-1 text-sm font-medium mt-3">
+      Tag
+      <input id="habitTag" class="input" placeholder="Tag">
+    </label>
+
+    <label class="grid gap-1 text-sm font-medium mt-3">
+      Points
+      <input id="habitPts" class="input" type="number" placeholder="Pts">
+    </label>
+
+    <div class="flex justify-end gap-2 mt-6">
+      <button type="button" class="btn btn-secondary" onclick="closeHabitModal()">Cancel</button>
+      <button type="button" id="confirmHabitBtn" class="btn btn-primary" onclick="addHabit()">Confirm</button>
     </div>
   </div>
 </div>
