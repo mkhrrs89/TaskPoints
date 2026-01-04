@@ -470,10 +470,9 @@ body {
 
 .gamehub-page #matchupYouAvatar .rounded-full,
 .gamehub-page #matchupOppAvatar .rounded-full {
-  border-width: 4px;
-  border-color: #2f6db3;
+  border-width: 0;
   box-shadow: 0 12px 24px rgba(15, 23, 42, 0.45);
-  background: radial-gradient(circle at top, rgba(79, 141, 216, 0.45), rgba(30, 64, 130, 0.9));
+  background: transparent;
 }
 
 .gamehub-page .matchup-details {
