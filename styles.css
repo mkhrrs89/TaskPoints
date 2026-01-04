@@ -2384,7 +2384,7 @@ body {
 @media (max-width: 640px){
 
 .calories-glass .stat-col-primary .stat-mobile-header{
-  border-radius: 12px !important; /* full rounded like Sleep */
+  border-radius: 0 !important;
   background: linear-gradient(180deg, #0f4d4d, #0a2f2f);
   color: #f8fbff;
 }
@@ -2415,7 +2415,17 @@ body {
   }
 
   .stat-mobile-header{
-    border-radius: 12px;
+    border-radius: 0;
+    clip-path: polygon(
+      10px 0,
+      calc(100% - 10px) 0,
+      100% 10px,
+      100% calc(100% - 10px),
+      calc(100% - 10px) 100%,
+      10px 100%,
+      0 calc(100% - 10px),
+      0 10px
+    );
     overflow: hidden;
     padding: 8px 10px 6px;
   }
