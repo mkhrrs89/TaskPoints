@@ -702,6 +702,7 @@ Nothing visible on the page is built here. === -->
 const STORAGE_KEY="taskpoints_v1";
 const OLD_PLAYERS_KEY="taskpoints_players";
 const PROJECTS_STORAGE_KEY="tp_projects_v1";
+const TODAY_STORE_KEY="taskpoints_today_view_v1";
 const $=id=>document.getElementById(id);
 const storageCache = { raw: null, parsed: null };
 const bootStart = performance.now();
@@ -1345,6 +1346,33 @@ function addCompletion(entry){
   const pts = Number(entry.points) || 0;
   state.completions.unshift(entry);
   showPointsToast(pts);
+}
+
+function removeTaskFromTodayView(taskId, dayKey) {
+  if (!taskId || !dayKey) return;
+  const raw = localStorage.getItem(TODAY_STORE_KEY);
+  if (!raw) return;
+  let parsed = null;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (e) {
+    console.warn("Failed to parse today view storage", e);
+    return;
+  }
+  if (!parsed || parsed.dayKey !== dayKey) return;
+
+  const taskIds = Array.isArray(parsed.taskIds) ? parsed.taskIds : [];
+  const order = Array.isArray(parsed.order) ? parsed.order : [];
+  const nextTaskIds = taskIds.filter((id) => id !== taskId);
+  const taskKey = `task:${taskId}`;
+  const nextOrder = order.filter((key) => key !== taskKey);
+  if (nextTaskIds.length === taskIds.length && nextOrder.length === order.length) return;
+
+  localStorage.setItem(TODAY_STORE_KEY, JSON.stringify({
+    ...parsed,
+    taskIds: nextTaskIds,
+    order: nextOrder
+  }));
 }
 
 function loadProjectsFromStorage(){
@@ -5493,6 +5521,7 @@ function completeTask(id){
   const t = state.tasks.find(x=>x.id===id);
   if(!t) return;
   const now = new Date().toISOString();
+  const completedDayKey = dateKey(now);
 
   // always log the completion
   addCompletion({
@@ -5516,6 +5545,8 @@ function completeTask(id){
     if (nextKey) t.dueDateISO = nextKey;
     t.completedAtISO = null; // keep it in the active list
   }
+
+  removeTaskFromTodayView(id, completedDayKey);
 
   save();
   renderAll();
