@@ -449,6 +449,14 @@ function weekDays(baseDate){
   const days=[]; for(let i=0;i<7;i++){ const d=addDays(start,i); days.push({date:d,key:dateKey(d),label:d.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'})});}
   return days;
 }
+function isMobileWeekGrid(){
+  return window.matchMedia && window.matchMedia('(max-width: 640px)').matches;
+}
+function shouldScrollWeekGridToToday(days){
+  if (!isMobileWeekGrid()) return false;
+  const today = todayKey();
+  return days.some(d => d.key === today);
+}
 function dateKey(d){ const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),dd=String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${dd}`; }
 function hexToRgb(hex) {
   const normalized = normalizeHexColor(hex);
@@ -800,6 +808,7 @@ function renderWeekTasks(baseDate){
   const todayK = todayKey();
   days.forEach(d=>{
     const col=document.createElement('div'); col.className='slot';
+    col.dataset.dayKey = d.key;
     col.innerHTML=`<div class="text-xs text-zinc-400 mb-2 font-semibold">${d.label}</div>`;
     const list = state.tasks.filter(t=>!t.completedAtISO && t.dueDateISO===d.key);
     list.forEach(t=>{
@@ -847,6 +856,15 @@ function renderWeekTasks(baseDate){
     });
     grid.appendChild(col);
   });
+
+  if (shouldScrollWeekGridToToday(days)) {
+    const todaySlot = grid.querySelector(`[data-day-key="${todayK}"]`);
+    if (todaySlot) {
+      requestAnimationFrame(() => {
+        todaySlot.scrollIntoView({ block: 'nearest', inline: 'start' });
+      });
+    }
+  }
 }
 function postponeTask(id){
   let st=load(); const t=st.tasks.find(x=>x.id===id); if(!t || !t.dueDateISO) return;
@@ -1358,6 +1376,3 @@ renderAll(currentBaseDate);
 </button>
 </body>
 </html>
-
-
-
