@@ -3894,6 +3894,7 @@ function applyHabitDayToggle(h, dayKey) {
   const habitId = h.id;
   const category = (h.category || 'habit');   // 'habit' or 'vice'
   const source   = category === 'vice' ? 'vice' : 'habit';
+  const tagLabel = category === 'vice' ? 'Vice' : 'Habit';
 
   h.doneKeys   = Array.isArray(h.doneKeys)   ? h.doneKeys   : [];
   h.failedKeys = Array.isArray(h.failedKeys) ? h.failedKeys : [];
@@ -3918,7 +3919,7 @@ function applyHabitDayToggle(h, dayKey) {
       addCompletion({
         id: crypto.randomUUID(),
         taskId: `habit:${habitId}:${dayKey}`,
-        title: `[Habit] ${h.name} (${dayKey})`,
+        title: `[${tagLabel}] ${h.name} (${dayKey})`,
         points: h.pointsPerDay || 0,
         completedAtISO: iso,
         source,
@@ -3944,7 +3945,7 @@ function applyHabitDayToggle(h, dayKey) {
       addCompletion({
         id: crypto.randomUUID(),
         taskId: `habit:${habitId}:${dayKey}`,
-        title: `[Habit] ${h.name} (${dayKey})`,
+        title: `[${tagLabel}] ${h.name} (${dayKey})`,
         points: h.pointsPerDay || 0,
         completedAtISO: iso,
         source,

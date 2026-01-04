@@ -469,6 +469,30 @@
 
       const checks = [];
 
+      const logTotal = round2((Number(snapshot.baseTotal) || 0) + (Number(snapshot.inertia) || 0));
+      const sourcesTotal = round2(Number(dayBreak.total) || 0);
+      const mainTotal = round2(Number(actualTotal) || 0);
+      const totalDeltas = [
+        { label: 'Log vs Sources', delta: logTotal - sourcesTotal },
+        { label: 'Log vs Main', delta: logTotal - mainTotal },
+        { label: 'Sources vs Main', delta: sourcesTotal - mainTotal }
+      ];
+      const maxDelta = Math.max(...totalDeltas.map(d => Math.abs(d.delta)));
+      const totalIssues = totalDeltas
+        .filter(d => Math.abs(d.delta) > 0.05)
+        .map(d => `${d.label}: Δ ${d.delta.toFixed(2)}`);
+      checks.push({
+        id: 'daily-total-parity',
+        title: 'Daily totals align across Log/Sources/Main',
+        status: maxDelta <= 0.05 ? 'PASS' : 'FAIL',
+        expected: 'Totals match within 0.05',
+        actual: `Log ${logTotal.toFixed(2)} • Sources ${sourcesTotal.toFixed(2)} • Main ${mainTotal.toFixed(2)}`,
+        delta: maxDelta,
+        details: totalIssues,
+        trace: 'log.html ↔ daily_sources.html ↔ index.html totals',
+        tips: 'Recompute derived points and ensure inertia is included in all daily totals.'
+      });
+
       // A) Daily total check
       checks.push({
         id: 'daily-total',
