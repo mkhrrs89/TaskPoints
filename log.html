@@ -468,6 +468,34 @@ function getCompletionPoints(entry) {
   return Number(entry?.points) || 0;
 }
 
+function buildInertiaLogEntries(completions) {
+  if (!window.TaskPointsCore?.aggregateCompletionsByDate) return [];
+  const { dailyTotals } = TaskPointsCore.aggregateCompletionsByDate(completions, state);
+  return Object.keys(dailyTotals).flatMap(dateKeyStr => {
+    const { inertia, average } = TaskPointsCore.computeInertia(dailyTotals, dateKeyStr, state);
+    if (!Number.isFinite(inertia) || Math.abs(inertia) < 0.0001) return [];
+    const date = fromKey(dateKeyStr);
+    if (!date) return [];
+    const iso = new Date(date.getTime() + 12 * 3600 * 1000).toISOString();
+    const rounded = window.TaskPointsCore?.roundPoints
+      ? TaskPointsCore.roundPoints(inertia, 2)
+      : Math.round(inertia * 10) / 10;
+    return [{
+      id: `inertia:${dateKeyStr}`,
+      title: `Inertia Bonus — Avg ${Number(average || 0).toFixed(1)}`,
+      points: rounded,
+      completedAtISO: iso,
+      source: 'inertia',
+      category: 'inertia'
+    }];
+  });
+}
+
+function buildLogEntries(completions) {
+  const base = Array.isArray(completions) ? completions.slice() : [];
+  return base.concat(buildInertiaLogEntries(base));
+}
+
 function syncDerivedPointsIfNeeded() {
   if (!window.TaskPointsCore?.syncDerivedPoints) return;
   const derivedSync = TaskPointsCore.syncDerivedPoints(state);
@@ -566,7 +594,7 @@ function render(){
   const list=$('logList'), empty=$('empty'); 
   list.innerHTML='';
 
-  const comps = state.completions || [];
+  const comps = buildLogEntries(state.completions || []);
 
   if(!comps.length){
     empty.style.display='block';
@@ -601,17 +629,38 @@ function render(){
       const isHabit = (c.source === 'habit');
       const isVice  = (c.source === 'vice');
       const isFlex  = (c.source === 'flex');
+      const isWork = c.source === 'work' || (c.title && c.title.startsWith('Work Score'));
       const isSleep = c.title && c.title.startsWith('Sleep Score');
-      const isWork = c.source === 'work';
-      const src = isHabit ? 'Habit' : isVice ? 'Vice' : isFlex ? 'Flex' : isWork ? 'Work' : 'Task';
-      const canDelete = (src === 'Task' || src === 'Flex'); // only tasks + flex get an X
-      const canEditDate = (!isHabit && !isVice);      // allow date-edit for tasks + sleep + flex
+      const isDiet = typeof c.title === 'string' && c.title.toLowerCase().startsWith('calories');
+      const isMood = c.title && c.title.startsWith('Mood Score');
+      const isInertia = c.source === 'inertia' || c.category === 'inertia';
+      const baseSrc = isHabit ? 'Habit' : isVice ? 'Vice' : isFlex ? 'Flex' : isWork ? 'Work' : 'Task';
+      const category = c.category
+        || (isInertia ? 'inertia' : (window.TaskPointsCore?.categorizeCompletion ? TaskPointsCore.categorizeCompletion(c) : null));
+      const srcMap = {
+        sleep: 'Sleep',
+        calories: 'Diet',
+        mood: 'Mood',
+        habits: 'Habit',
+        vices: 'Vices',
+        flex: 'Flex',
+        work: 'Work',
+        game: 'Game',
+        inertia: 'Inertia',
+        tasks: 'Task'
+      };
+      const src = srcMap[category] || baseSrc;
+      const canDelete = (baseSrc === 'Task' || baseSrc === 'Flex'); // only tasks + flex get an X
+      const canEditDate = (!isHabit && !isVice && !isInertia);      // allow date-edit for tasks + sleep + flex
       const displayPoints = getCompletionPoints(c);
+      const displayTitle = (c.source === 'vice' && typeof c.title === 'string' && c.title.startsWith('[Habit]'))
+        ? c.title.replace('[Habit]', '[Vice]')
+        : c.title;
 
 
 row.innerHTML = `
   <div>${new Date(c.completedAtISO).toLocaleString()}</div>
-  <div>${escapeHtml(c.title)}</div>
+  <div>${escapeHtml(displayTitle)}</div>
   <div class="font-semibold">${displayPoints.toLocaleString()}</div>
   <div>${src}</div>
   <div class="flex gap-1 justify-center">
@@ -783,4 +832,3 @@ render();
 </button>
 </body>
 </html>
-

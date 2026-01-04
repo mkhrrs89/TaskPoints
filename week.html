@@ -719,6 +719,7 @@ function toggleHabitDay(habitId, dayKey, baseDate){
 
   const category = (h.category || 'habit');
   const source   = category === 'vice' ? 'vice' : 'habit';
+  const tagLabel = category === 'vice' ? 'Vice' : 'Habit';
 
   const removeCompletionForDay = () => {
     const mIdx = state.completions.findIndex(c =>
@@ -739,7 +740,7 @@ function toggleHabitDay(habitId, dayKey, baseDate){
       state.completions.unshift({
         id: crypto.randomUUID(),
         taskId: `habit:${habitId}:${dayKey}`,
-        title: `[Habit] ${h.name} (${dayKey})`,
+        title: `[${tagLabel}] ${h.name} (${dayKey})`,
         points: h.pointsPerDay || 0,
         completedAtISO: iso,
         source,
@@ -762,7 +763,7 @@ function toggleHabitDay(habitId, dayKey, baseDate){
       state.completions.unshift({
         id: crypto.randomUUID(),
         taskId: `habit:${habitId}:${dayKey}`,
-        title: `[Habit] ${h.name} (${dayKey})`,
+        title: `[${tagLabel}] ${h.name} (${dayKey})`,
         points: h.pointsPerDay || 0,
         completedAtISO: iso,
         source,
@@ -1357,7 +1358,6 @@ renderAll(currentBaseDate);
 </button>
 </body>
 </html>
-
 
 
 
