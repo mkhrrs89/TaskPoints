@@ -1104,9 +1104,11 @@ function generateOpponentDripSchedule(dateKeyStr, playerId, totalPoints){
   const hourBuckets = [];
   for (let h = startHour; h <= endHour; h++) {
     let weight = 1;
-    if ((h >= 7 && h <= 10) || (h >= 17 && h <= 21)) weight += 1.2;
+    if (h >= 6 && h <= 11) weight += 1.6;
+    if (h >= 12 && h <= 15) weight += 0.6;
+    if (h >= 18 && h <= 23) weight -= 0.2;
     if (Math.random() < 0.15) weight *= 0.4;
-    hourBuckets.push({ hour: h, weight });
+    hourBuckets.push({ hour: h, weight: Math.max(0.2, weight) });
   }
 
   const totalHourWeight = hourBuckets.reduce((s, h) => s + h.weight, 0) || 1;
@@ -1154,10 +1156,10 @@ function generateOpponentDripSchedule(dateKeyStr, playerId, totalPoints){
     pointUnits[pointUnits.length - 1] += remaining;
   }
 
-  const times = pointUnits.map(() => pickTime());
-  times.sort((a, b) => a - b);
+  const times = pointUnits.map(() => pickTime()).sort((a, b) => a - b);
+  const sizedUnits = pointUnits.slice().sort((a, b) => b - a);
 
-  const events = pointUnits
+  const events = sizedUnits
     .map((units, idx) => ({ t: times[idx].toISOString(), pts: units / 10 }))
     .filter(e => e.pts > 0)
     .sort((a, b) => new Date(a.t) - new Date(b.t));
@@ -2560,7 +2562,6 @@ async function fileToDataUrl(file) {
   </button>
 </body>
 </html>
-
 
 
 
