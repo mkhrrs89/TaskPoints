@@ -220,10 +220,12 @@
           changed = changed || matchupSync.changed;
         }
         if (changed) {
-          try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(syncedState));
-          } catch (err) {
-            console.error("Failed to persist synced matchups", err);
+          if (window.TaskPointsCore?.saveAppState) {
+            TaskPointsCore.saveAppState(syncedState, { storageKey: STORAGE_KEY });
+          } else if (window.TaskPointsCore?.mergeAndSaveState) {
+            TaskPointsCore.mergeAndSaveState(syncedState, { storageKey: STORAGE_KEY });
+          } else {
+            console.warn("standings save skipped; TaskPointsCore missing.");
           }
         }
         latestState = syncedState;
@@ -540,4 +542,3 @@ function computeYouStats() {
   </button>
 </body>
 </html>
-

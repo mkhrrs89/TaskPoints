@@ -268,11 +268,14 @@
         appState = res.state || { tasks: [], habits: [], completions: [] };
       }
       function saveApp(nextState) {
-        if (window.TaskPointsCore?.mergeAndSaveState) {
+        if (window.TaskPointsCore?.saveAppState) {
+          const res = TaskPointsCore.saveAppState(nextState, { storageKey: STORAGE_KEY });
+          appState = res.state;
+        } else if (window.TaskPointsCore?.mergeAndSaveState) {
           const res = TaskPointsCore.mergeAndSaveState(nextState, { storageKey: STORAGE_KEY });
           appState = res.state;
         } else {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
+          console.warn("today saveApp skipped localStorage write; TaskPointsCore missing.");
           appState = nextState;
         }
       }

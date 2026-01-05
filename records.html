@@ -235,14 +235,12 @@ function syncDerivedPointsIfNeeded(state) {
   const derivedSync = TaskPointsCore.syncDerivedPoints(state);
   let nextState = derivedSync.state;
   if (derivedSync.changed) {
-    if (window.TaskPointsCore?.mergeAndSaveState) {
+    if (window.TaskPointsCore?.saveAppState) {
+      nextState = TaskPointsCore.saveAppState(nextState).state;
+    } else if (window.TaskPointsCore?.mergeAndSaveState) {
       nextState = TaskPointsCore.mergeAndSaveState(nextState).state;
     } else {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
-      } catch (e) {
-        console.error("records syncDerivedPoints save error", e);
-      }
+      console.warn("records syncDerivedPoints skipped save; TaskPointsCore missing.");
     }
   }
   return nextState;

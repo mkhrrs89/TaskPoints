@@ -499,8 +499,15 @@
       };
 
       try {
-        localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(nextState));
-        alert("Game stats before today have been reset. Reload any open TaskPoints tabs to see the changes.");
+        if (window.TaskPointsCore?.saveAppState) {
+          TaskPointsCore.saveAppState(nextState, { storageKey: SETTINGS_STORAGE_KEY });
+          alert("Game stats before today have been reset. Reload any open TaskPoints tabs to see the changes.");
+        } else if (window.TaskPointsCore?.mergeAndSaveState) {
+          TaskPointsCore.mergeAndSaveState(nextState, { storageKey: SETTINGS_STORAGE_KEY });
+          alert("Game stats before today have been reset. Reload any open TaskPoints tabs to see the changes.");
+        } else {
+          console.warn("settings reset skipped localStorage write; TaskPointsCore missing.");
+        }
       } catch (err) {
         console.error("Failed to save game stat reset", err);
         alert("The game stats could not be reset due to a storage error.");
@@ -518,7 +525,21 @@
       }
 
       const normalized = normalizeSettingsState(root);
-      localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(normalized));
+      if (window.TaskPointsCore?.saveAppState) {
+        TaskPointsCore.saveAppState(normalized, {
+          storageKey: SETTINGS_STORAGE_KEY,
+          allowStickyOverwrite: true,
+          allowHabitTagColorReset: true
+        });
+      } else if (window.TaskPointsCore?.mergeAndSaveState) {
+        TaskPointsCore.mergeAndSaveState(normalized, {
+          storageKey: SETTINGS_STORAGE_KEY,
+          allowStickyOverwrite: true,
+          allowHabitTagColorReset: true
+        });
+      } else {
+        console.warn("settings import skipped localStorage write; TaskPointsCore missing.");
+      }
       alert("Import complete! Reload any open TaskPoints tabs to see the changes.");
     }
 
@@ -694,16 +715,28 @@
 
     function saveSettingsState(nextState, options = {}) {
       try {
+        if (window.TaskPointsCore?.saveAppState) {
+          const allowHabitTagColorReset = Boolean(options.allowHabitTagColorReset);
+          const allowStickyOverwrite = Boolean(options.allowStickyOverwrite);
+          const { state: merged } = TaskPointsCore.saveAppState(nextState, {
+            storageKey: SETTINGS_STORAGE_KEY,
+            allowHabitTagColorReset,
+            allowStickyOverwrite
+          });
+          return merged;
+        }
         if (window.TaskPointsCore?.mergeAndSaveState) {
           const allowHabitTagColorReset = Boolean(options.allowHabitTagColorReset);
+          const allowStickyOverwrite = Boolean(options.allowStickyOverwrite);
           const { state: merged } = TaskPointsCore.mergeAndSaveState(nextState, {
             storageKey: SETTINGS_STORAGE_KEY,
-            allowHabitTagColorReset
+            allowHabitTagColorReset,
+            allowStickyOverwrite
           });
           return merged;
         }
         const normalized = normalizeSettingsState(nextState);
-        localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(normalized));
+        console.warn("saveSettingsState skipped localStorage write; TaskPointsCore missing.");
         return normalized;
       } catch (err) {
         console.error("Failed to save TaskPoints settings", err);
@@ -726,7 +759,10 @@
       } else {
         delete nextColors[tag];
       }
-      saveSettingsState({ ...state, habitTagColors: nextColors }, { allowHabitTagColorReset: true });
+      saveSettingsState(
+        { ...state, habitTagColors: nextColors },
+        { allowHabitTagColorReset: true, allowStickyOverwrite: true }
+      );
     }
 
     function parseScoringNumber(value) {
@@ -796,7 +832,7 @@
         nextState = matchupSync.state;
       }
 
-      saveSettingsState(nextState);
+      saveSettingsState(nextState, { allowStickyOverwrite: true });
     }
 
     function renderSleepBonusTiers(settings) {

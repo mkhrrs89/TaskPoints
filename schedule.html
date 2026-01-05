@@ -202,8 +202,14 @@ function saveState(nextState) {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     const existing = raw ? (JSON.parse(raw) || {}) : {};
-    const merged = normalizeState({ ...existing, ...nextState });
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+    if (window.TaskPointsCore?.saveAppState) {
+      return TaskPointsCore.saveAppState({ ...existing, ...nextState }, { storageKey: STORAGE_KEY }).state;
+    }
+    if (window.TaskPointsCore?.mergeAndSaveState) {
+      return TaskPointsCore.mergeAndSaveState({ ...existing, ...nextState }, { storageKey: STORAGE_KEY }).state;
+    }
+    const merged = { ...existing, ...nextState };
+    console.warn("schedule saveState skipped localStorage write; TaskPointsCore missing.");
     return merged;
   } catch (e) {
     console.error("Failed to save schedule", e);

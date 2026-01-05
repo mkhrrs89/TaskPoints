@@ -254,8 +254,14 @@ function saveMerged(partial) {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     const existing = raw ? (JSON.parse(raw) || {}) : {};
-    const merged = normalizeState({ ...existing, ...partial });
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+    if (window.TaskPointsCore?.saveAppState) {
+      return TaskPointsCore.saveAppState({ ...existing, ...partial }, { storageKey: STORAGE_KEY }).state;
+    }
+    if (window.TaskPointsCore?.mergeAndSaveState) {
+      return TaskPointsCore.mergeAndSaveState({ ...existing, ...partial }, { storageKey: STORAGE_KEY }).state;
+    }
+    const merged = { ...existing, ...partial };
+    console.warn("saveMerged skipped localStorage write; TaskPointsCore missing.");
     return merged;
   } catch (e) {
     console.error("saveMerged failed (daily.html)", e);
@@ -275,7 +281,9 @@ function syncDerivedPointsIfNeeded() {
   const derivedSync = TaskPointsCore.syncDerivedPoints(state);
   state = derivedSync.state;
   if (!derivedSync.changed) return;
-  if (window.TaskPointsCore?.mergeAndSaveState) {
+  if (window.TaskPointsCore?.saveAppState) {
+    state = TaskPointsCore.saveAppState(state).state;
+  } else if (window.TaskPointsCore?.mergeAndSaveState) {
     state = TaskPointsCore.mergeAndSaveState(state).state;
   } else {
     state = saveMerged(state);

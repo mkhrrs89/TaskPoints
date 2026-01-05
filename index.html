@@ -1408,10 +1408,22 @@ function getCachedStorageState() {
 }
 
 function writeCachedStorageState(nextState) {
-  const raw = JSON.stringify(nextState);
-  localStorage.setItem(STORAGE_KEY, raw);
-  storageCache.raw = raw;
+  if (window.TaskPointsCore?.saveAppState) {
+    const res = TaskPointsCore.saveAppState(nextState, { storageKey: STORAGE_KEY });
+    storageCache.raw = JSON.stringify(res.state);
+    storageCache.parsed = res.state;
+    return res.state;
+  }
+  if (window.TaskPointsCore?.mergeAndSaveState) {
+    const res = TaskPointsCore.mergeAndSaveState(nextState, { storageKey: STORAGE_KEY });
+    storageCache.raw = JSON.stringify(res.state);
+    storageCache.parsed = res.state;
+    return res.state;
+  }
+  console.warn("writeCachedStorageState skipped localStorage write; TaskPointsCore missing.");
+  storageCache.raw = JSON.stringify(nextState);
   storageCache.parsed = nextState;
+  return nextState;
 }
 
 
@@ -1499,6 +1511,12 @@ function syncStateWithMatchups(current){
 
   if (changed) {
     try {
+      if (window.TaskPointsCore?.saveAppState) {
+        const merged = TaskPointsCore.saveAppState(nextState).state;
+        storageCache.parsed = merged;
+        storageCache.raw = null;
+        return merged;
+      }
       if (window.TaskPointsCore?.mergeAndSaveState) {
         const merged = TaskPointsCore.mergeAndSaveState(nextState).state;
         storageCache.parsed = merged;
@@ -2129,6 +2147,16 @@ function normalizeState(s) {
 
 function save() {
   try {
+    if (window.TaskPointsCore?.saveAppState) {
+      const { state: merged, trimmed } = TaskPointsCore.saveAppState(state);
+      if (trimmed) {
+        console.warn('Storage nearing capacity. Older history items were trimmed to keep saves working.');
+      }
+      state = merged;
+      storageCache.parsed = merged;
+      storageCache.raw = null;
+      return;
+    }
     if (window.TaskPointsCore?.mergeAndSaveState) {
       const { state: merged, trimmed } = TaskPointsCore.mergeAndSaveState(state);
       if (trimmed) {
@@ -2140,16 +2168,14 @@ function save() {
       return;
     }
     const existing = getCachedStorageState() || {};
-    const merged = normalizeState({ ...existing, ...state });
+    const merged = { ...existing, ...state };
     writeCachedStorageState(merged);
     state = merged;
   } catch (e) {
     console.error("Failed to save state (index.html)", e);
-    // last-ditch: write a normalized snapshot (not raw state)
+    // last-ditch: write the in-memory snapshot
     try {
-      const snap = normalizeState(state);
-      writeCachedStorageState(snap);
-      state = snap;
+      writeCachedStorageState(state);
     } catch (e2) {
       console.error("Last-ditch save failed (index.html)", e2);
     }
