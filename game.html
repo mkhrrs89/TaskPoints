@@ -32,17 +32,20 @@
 
 /* MOBILE ONLY: 2-column player cards in Card View */
 @media (max-width: 640px) {
-  #playersList.card-view {
+  #playersList.card-view,
+  .players-grid.card-view {
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }
 
-  #playersList.gallery-view {
+  #playersList.gallery-view,
+  .players-grid.gallery-view {
     grid-template-columns: repeat(var(--gallery-cols, 2), minmax(0, 1fr));
   }
 }
 
 @media (max-width: 640px) and (orientation: landscape) {
-  #playersList.gallery-view {
+  #playersList.gallery-view,
+  .players-grid.gallery-view {
     grid-template-columns: repeat(var(--gallery-cols-landscape, 3), minmax(0, 1fr));
   }
 }
@@ -117,7 +120,8 @@
 /* Mobile tweaks */
 @media (max-width: 640px) {
   /* 2-column card view grid on mobile */
-  #playersList.card-view {
+  #playersList.card-view,
+  .players-grid.card-view {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
