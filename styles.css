@@ -814,6 +814,13 @@ body {
   justify-content: center;
 }
 
+.mobile-bottom-dropdown{
+  position: relative;
+  flex: 1;
+  display: flex;
+  justify-content: center;
+}
+
 .mobile-task-toggle{
   position: relative;
 }
@@ -845,6 +852,15 @@ body {
   gap: 6px;
   width: 180px;
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+  z-index: 50;
+}
+
+.mobile-bottom-dropdown .dropdown-menu{
+  top: auto;
+  bottom: 62px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: linear-gradient(180deg, #0f4d4d, #0a2f2f);
   z-index: 50;
 }
 

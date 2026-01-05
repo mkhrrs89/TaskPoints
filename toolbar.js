@@ -69,9 +69,9 @@ function buildMobileBottomNavLinks() {
       <span class="uppercase tracking-wide text-[10px]">Home</span>
     </a>
 
-    <a href="gamehub.html" class="flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
-      <span class="text-lg">🎮</span>
-      <span class="uppercase tracking-wide text-[10px]">GameHub</span>
+    <a href="today.html" class="flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
+      <span class="text-lg">📅</span>
+      <span class="uppercase tracking-wide text-[10px]">Today</span>
     </a>
 
     <div class="mobile-task-dropdown">
@@ -91,10 +91,28 @@ function buildMobileBottomNavLinks() {
       </div>
     </div>
 
-    <a href="game.html" class="flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
-      <span class="text-lg">👥</span>
-      <span class="uppercase tracking-wide text-[10px]">Players</span>
-    </a>
+    <div class="dropdown mobile-bottom-dropdown">
+      <button
+        type="button"
+        class="dropdown-toggle flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100"
+        data-dropdown-toggle
+        aria-expanded="false"
+        aria-haspopup="true"
+      >
+        <span class="text-lg">🎮</span>
+        <span class="uppercase tracking-wide text-[10px]">Game</span>
+      </button>
+
+      <div class="dropdown-menu">
+        <a href="gamehub.html" class="btn btn-teal btn-toolbar nav-btn">Game Hub</a>
+        <a href="game.html" class="btn btn-teal btn-toolbar nav-btn">Players</a>
+        <a href="standings.html" class="btn btn-teal btn-toolbar nav-btn">Standings</a>
+        <a href="matchups.html" class="btn btn-teal btn-toolbar nav-btn">Matchups</a>
+        <a href="schedule.html" class="btn btn-teal btn-toolbar nav-btn">Schedule</a>
+        <a href="game_ratings.html" class="btn btn-teal btn-toolbar nav-btn">Ratings</a>
+        <a href="records.html" class="btn btn-teal btn-toolbar nav-btn">Records</a>
+      </div>
+    </div>
 
     <a href="settings.html" class="flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
       <span class="text-lg">⚙️</span>
