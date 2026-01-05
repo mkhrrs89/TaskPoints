@@ -1516,9 +1516,12 @@ function computeTodayPoints() {
 function buildPlayerHistoryStats() {
   const map = new Map();
   const history = Array.isArray(state.gameHistory) ? state.gameHistory : [];
+  const todayKey = getGameDayKey(new Date());
 
   for (const g of history) {
     if (!g || !g.playerId) continue;
+    const gameKey = g.date || (g.dateISO ? dateKey(g.dateISO) : "");
+    if (gameKey === todayKey) continue;
     const score = typeof g.score === "number" ? g.score : Number(g.score);
     if (!Number.isFinite(score)) continue;
 
@@ -2562,7 +2565,6 @@ async function fileToDataUrl(file) {
   </button>
 </body>
 </html>
-
 
 
 

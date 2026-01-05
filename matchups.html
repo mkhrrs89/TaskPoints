@@ -481,7 +481,7 @@ state = syncYouMatchupsWithCompletions(state);
       const matchups = Array.isArray(state.matchups) ? state.matchups : [];
       const activeIds = activePlayerIds(state);
       const visibleMatchups = matchups.filter(m =>
-        m && activeIds.has(m.playerAId) && activeIds.has(m.playerBId)
+        m && (activeIds.has(m.playerAId) || activeIds.has(m.playerBId))
       );
       if (!visibleMatchups.length) {
         const empty = document.createElement("section");

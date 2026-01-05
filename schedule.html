@@ -338,7 +338,7 @@ function saveState(nextState) {
         if (!m) return;
         const aId = m.playerAId;
         const bId = m.playerBId;
-        if (!participantSet.has(aId) || !participantSet.has(bId)) return;
+        if (!participantSet.has(aId) && !participantSet.has(bId)) return;
         const key = matchupDateKey(m);
         if (!key) return;
         if (!existingMatchupsByDate.has(key)) existingMatchupsByDate.set(key, []);
