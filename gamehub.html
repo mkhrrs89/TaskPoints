@@ -366,14 +366,15 @@
   let currentState = null;
 
   function saveState(state){
-    try {
-      const pruned = (window.TaskPointsCore && typeof TaskPointsCore.pruneStateForStorage === 'function')
-        ? TaskPointsCore.pruneStateForStorage(state)
-        : state;
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(pruned));
-    } catch (e) {
-      console.error('Failed saving state', e);
+    if (window.TaskPointsCore?.saveAppState) {
+      TaskPointsCore.saveAppState(state, { storageKey: STORAGE_KEY });
+      return;
     }
+    if (window.TaskPointsCore?.mergeAndSaveState) {
+      TaskPointsCore.mergeAndSaveState(state, { storageKey: STORAGE_KEY });
+      return;
+    }
+    console.warn('gamehub saveState skipped localStorage write; TaskPointsCore missing.');
   }
 
   function loadState(){

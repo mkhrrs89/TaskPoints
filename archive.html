@@ -125,8 +125,14 @@ function saveMerged(partial) {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     const existing = raw ? (JSON.parse(raw) || {}) : {};
-    const merged = normalizeState({ ...existing, ...partial });
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+    if (window.TaskPointsCore?.saveAppState) {
+      return TaskPointsCore.saveAppState({ ...existing, ...partial }, { storageKey: STORAGE_KEY }).state;
+    }
+    if (window.TaskPointsCore?.mergeAndSaveState) {
+      return TaskPointsCore.mergeAndSaveState({ ...existing, ...partial }, { storageKey: STORAGE_KEY }).state;
+    }
+    const merged = { ...existing, ...partial };
+    console.warn("archive saveMerged skipped localStorage write; TaskPointsCore missing.");
     return merged;
   } catch (e) {
     console.error("saveMerged failed", e);

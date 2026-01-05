@@ -457,29 +457,105 @@
 
   function pruneStateForStorage(state, limits = {}) {
     const normalized = normalizeState(state || {});
+    const merged = { ...(state || {}), ...normalized };
     const maxCompletions = Number.isFinite(limits.maxCompletions) ? limits.maxCompletions : 10000;
     const maxGameHistory = Number.isFinite(limits.maxGameHistory) ? limits.maxGameHistory : 2500;
     const maxMatchups = Number.isFinite(limits.maxMatchups) ? limits.maxMatchups : 2500;
     const maxWorkHistory = Number.isFinite(limits.maxWorkHistory) ? limits.maxWorkHistory : 2500;
-    if (normalized.completions.length > maxCompletions) {
-      normalized.completions = normalized.completions.slice(0, maxCompletions);
+    if (merged.completions.length > maxCompletions) {
+      merged.completions = merged.completions.slice(0, maxCompletions);
     }
-    if (normalized.gameHistory.length > maxGameHistory) {
-      normalized.gameHistory = normalized.gameHistory.slice(-maxGameHistory);
+    if (merged.gameHistory.length > maxGameHistory) {
+      merged.gameHistory = merged.gameHistory.slice(-maxGameHistory);
     }
-    if (normalized.matchups.length > maxMatchups) {
-      normalized.matchups = normalized.matchups.slice(-maxMatchups);
+    if (merged.matchups.length > maxMatchups) {
+      merged.matchups = merged.matchups.slice(-maxMatchups);
     }
-    if (normalized.workHistory.length > maxWorkHistory) {
-      normalized.workHistory = normalized.workHistory.slice(-maxWorkHistory);
+    if (merged.workHistory.length > maxWorkHistory) {
+      merged.workHistory = merged.workHistory.slice(-maxWorkHistory);
     }
 
-    return normalized;
+    return merged;
   }
 
   function capLimit(current, cap) {
     if (Number.isFinite(current)) return Math.min(current, cap);
     return cap;
+  }
+
+  function isPlainObject(value) {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+  }
+
+  function deepMerge(base, update) {
+    if (!isPlainObject(base)) base = {};
+    if (!isPlainObject(update)) return { ...base };
+    const result = { ...base };
+    Object.entries(update).forEach(([key, value]) => {
+      if (value === undefined) return;
+      const baseValue = result[key];
+      if (isPlainObject(value) && isPlainObject(baseValue)) {
+        result[key] = deepMerge(baseValue, value);
+      } else {
+        result[key] = value;
+      }
+    });
+    return result;
+  }
+
+  function isDevMode(options = {}) {
+    if (options.devMode === true) return true;
+    if (typeof window === 'undefined') return false;
+    const host = window.location?.hostname || '';
+    return host === 'localhost' || host === '127.0.0.1';
+  }
+
+  const STICKY_KEYS = ['youImageId', 'habitTagColors', 'scoringSettings'];
+
+  function shouldAllowStickyOverwrite(key, options = {}) {
+    if (options.allowStickyOverwrite) return true;
+    if (options.allowStickyOverwriteKeys && options.allowStickyOverwriteKeys[key]) return true;
+    if (Array.isArray(options.allowStickyOverwriteKeys) && options.allowStickyOverwriteKeys.includes(key)) return true;
+    return false;
+  }
+
+  function isStickyEmptyValue(key, value) {
+    if (value == null) return true;
+    if (key === 'youImageId') {
+      if (typeof value !== 'string') return true;
+      return value.trim() === '';
+    }
+    if (key === 'habitTagColors' || key === 'scoringSettings') {
+      if (!isPlainObject(value)) return true;
+      return Object.keys(value).length === 0;
+    }
+    return false;
+  }
+
+  function applyStickyKeyGuard({ existing, nextState, mergedSnapshot, options, storageKey }) {
+    if (!nextState || typeof nextState !== 'object') return;
+    STICKY_KEYS.forEach((key) => {
+      const allowOverwrite = shouldAllowStickyOverwrite(key, options)
+        || (key === 'habitTagColors' && options.allowHabitTagColorReset);
+      if (allowOverwrite) return;
+      if (!Object.prototype.hasOwnProperty.call(nextState, key)) return;
+
+      const incoming = nextState[key];
+      const shouldPreserve = isStickyEmptyValue(key, incoming);
+      if (!shouldPreserve) return;
+
+      if (isDevMode(options)) {
+        console.warn(`TaskPointsCore: prevented sticky key "${key}" from being wiped`, {
+          storageKey,
+          incoming
+        });
+      }
+      if (Object.prototype.hasOwnProperty.call(existing || {}, key)) {
+        mergedSnapshot[key] = existing[key];
+      } else {
+        delete mergedSnapshot[key];
+      }
+    });
   }
 
   function mergeAndSaveState(nextState, options = {}) {
@@ -494,14 +570,15 @@
       existing = {};
     }
 
-    const mergedSnapshot = { ...existing, ...nextState };
+    const mergedSnapshot = deepMerge(existing, nextState || {});
+    applyStickyKeyGuard({ existing, nextState, mergedSnapshot, options, storageKey });
     if (Object.prototype.hasOwnProperty.call(nextState || {}, 'habitTagColors')) {
       const nextColors = normalizeHabitTagColors(nextState?.habitTagColors);
       const existingColors = normalizeHabitTagColors(existing?.habitTagColors);
       const nextIsEmpty = Object.keys(nextColors).length === 0;
       const existingHasColors = Object.keys(existingColors).length > 0;
 
-      if (allowHabitTagColorReset) {
+      if (allowHabitTagColorReset || shouldAllowStickyOverwrite('habitTagColors', options)) {
         mergedSnapshot.habitTagColors = nextColors;
       } else if (nextIsEmpty && existingHasColors) {
         mergedSnapshot.habitTagColors = existingColors;
@@ -510,7 +587,29 @@
       }
     }
 
-    const merged = normalizeState(mergedSnapshot);
+    if (Object.prototype.hasOwnProperty.call(nextState || {}, 'youImageId')) {
+      const allowOverwrite = shouldAllowStickyOverwrite('youImageId', options);
+      const incoming = nextState?.youImageId;
+      if (!allowOverwrite && isStickyEmptyValue('youImageId', incoming)) {
+        mergedSnapshot.youImageId = existing?.youImageId || '';
+      } else if (typeof incoming === 'string') {
+        mergedSnapshot.youImageId = incoming;
+      }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(nextState || {}, 'scoringSettings')) {
+      const allowOverwrite = shouldAllowStickyOverwrite('scoringSettings', options);
+      const incoming = nextState?.scoringSettings;
+      if (!allowOverwrite && isStickyEmptyValue('scoringSettings', incoming)) {
+        mergedSnapshot.scoringSettings = existing?.scoringSettings || {};
+      } else if (isPlainObject(incoming)) {
+        const mergedSettings = deepMerge(existing?.scoringSettings || {}, incoming);
+        mergedSnapshot.scoringSettings = normalizeScoringSettings(mergedSettings);
+      }
+    }
+
+    const normalized = normalizeState(mergedSnapshot);
+    const merged = { ...mergedSnapshot, ...normalized };
 
     const attemptSave = (candidate, trimmed) => {
       localStorage.setItem(storageKey, JSON.stringify(candidate));
@@ -613,6 +712,13 @@
     };
 
     return attemptSave(emergency, true);
+  }
+
+  function saveAppState(nextState, options = {}, maybeOptions = {}) {
+    if (typeof nextState === 'string') {
+      return mergeAndSaveState(options || {}, { ...maybeOptions, storageKey: nextState });
+    }
+    return mergeAndSaveState(nextState || {}, options || {});
   }
 
   function dateKey(d){
@@ -1422,6 +1528,7 @@
     loadAppState,
     pruneStateForStorage,
     mergeAndSaveState,
+    saveAppState,
     dateKey,
     todayKey,
     fromKey,

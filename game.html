@@ -589,10 +589,17 @@ function normalizeState(s) {
   };
 }
 
-function saveState(nextState) {
+function saveState(nextState, options = {}) {
   try {
+    if (window.TaskPointsCore?.saveAppState) {
+      const { state: merged, trimmed } = TaskPointsCore.saveAppState(nextState, options);
+      if (trimmed) {
+        console.warn('Storage nearing capacity. Older history items were trimmed to keep saves working.');
+      }
+      return merged;
+    }
     if (window.TaskPointsCore?.mergeAndSaveState) {
-      const { state: merged, trimmed } = TaskPointsCore.mergeAndSaveState(nextState);
+      const { state: merged, trimmed } = TaskPointsCore.mergeAndSaveState(nextState, options);
       if (trimmed) {
         console.warn('Storage nearing capacity. Older history items were trimmed to keep saves working.');
       }
@@ -600,8 +607,8 @@ function saveState(nextState) {
     }
     const raw = localStorage.getItem(STORAGE_KEY);
     const existing = raw ? (JSON.parse(raw) || {}) : {};
-    const merged = normalizeState({ ...existing, ...nextState });
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+    const merged = { ...existing, ...nextState };
+    console.warn("game saveState skipped localStorage write; TaskPointsCore missing.");
     return merged;
   } catch (e) {
     console.error("Failed to save state in game.html", e);
@@ -2368,7 +2375,7 @@ card.innerHTML = `
         if (!dataUrl) return;
         const nextImageId = await saveImageFromDataUrl(dataUrl, state.youImageId);
         state.youImageId = nextImageId || "";
-        state = saveState(state);
+        state = saveState(state, { allowStickyOverwrite: true });
         renderPlayers();
       });
     };
@@ -2381,7 +2388,7 @@ card.innerHTML = `
   if (act === "clear-you-photo") {
     await deleteImageById(state.youImageId);
     state.youImageId = "";
-    state = saveState(state);
+    state = saveState(state, { allowStickyOverwrite: true });
     renderPlayers();
     return;
   }
