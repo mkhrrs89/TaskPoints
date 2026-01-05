@@ -19,7 +19,7 @@
 
   <style>
     /* Local-only styles so we keep your global aesthetic intact */
-    .today-page .today-list{display:flex;flex-direction:column;gap:10px;margin-top:14px;width:100%}
+    .today-page .today-list{display:flex;flex-direction:column;gap:10px;margin-top:14px;width:100%;touch-action:pan-y}
     .today-page .today-item{
       display:flex;align-items:center;justify-content:space-between;gap:12px;
       padding:12px 12px;border-radius:16px;
@@ -62,18 +62,26 @@
     }
     .today-page .today-item.is-done .today-check .mark{opacity:1}
     .today-page .today-right{display:flex;align-items:center;gap:10px;flex:0 0 auto}
-    .today-page .today-actions{display:flex;align-items:center;gap:6px}
-    .today-page .today-reorder{
-      width:30px;height:30px;border-radius:10px;
-      border:1px solid rgba(255,255,255,0.12);
-      background:rgba(255,255,255,0.04);
-      color:inherit;font-size:14px;font-weight:700;
-      display:inline-flex;align-items:center;justify-content:center;
-      transition:background .15s ease,border-color .15s ease,transform .05s ease;
+    .today-page .today-list{position:relative}
+    .today-page .today-list.is-dragging{touch-action:none}
+    .today-page .today-item.is-pressing{
+      transform:scale(1.02);
+      box-shadow:0 10px 24px rgba(0,0,0,0.35);
+      transition:transform .12s ease,box-shadow .12s ease;
     }
-    .today-page .today-reorder:hover{background:rgba(255,255,255,0.08);border-color:rgba(255,255,255,0.18)}
-    .today-page .today-reorder:active{transform:scale(.96)}
-    .today-page .today-reorder:disabled{opacity:.35;cursor:not-allowed}
+    .today-page .today-item.is-dragging{
+      position:absolute;
+      z-index:20;
+      cursor:grabbing;
+      pointer-events:none;
+      transform:scale(1.03);
+      box-shadow:0 16px 32px rgba(0,0,0,0.45);
+    }
+    .today-page .today-placeholder{
+      border:1px dashed rgba(255,255,255,0.25);
+      border-radius:16px;
+      background:rgba(255,255,255,0.02);
+    }
 
     .today-page .habit-picker{
       border-top:1px solid rgba(255,255,255,0.08);
@@ -102,11 +110,6 @@
         font-size:.6rem;
         padding:4px 8px;
         letter-spacing:.08em;
-      }
-      .today-page .today-reorder{
-        width:26px;height:26px;
-        border-radius:8px;
-        font-size:12px;
       }
       .today-page #toggleHabitPickerBtn{
         width:100%;
@@ -543,14 +546,12 @@
 
         empty.classList.add('hidden');
         const orderedItems = orderItems(items);
-        el.innerHTML = orderedItems.map((item, index) => {
+        el.innerHTML = orderedItems.map((item) => {
           const doneClass = item.done ? 'is-done' : '';
           const subLine = item.sub ? `<div class="today-sub">${escapeHtml(item.sub)}</div>` : '';
           const key = makeItemKey(item.kind, item.id);
-          const isFirst = index === 0;
-          const isLast = index === orderedItems.length - 1;
           return `
-            <div class="today-item ${doneClass}" data-kind="${escapeHtml(item.kind)}" data-id="${escapeHtml(item.id)}">
+            <div class="today-item ${doneClass}" data-kind="${escapeHtml(item.kind)}" data-id="${escapeHtml(item.id)}" data-key="${escapeHtml(key)}">
               <div class="today-left">
                 <div class="today-check"><span class="mark">✓</span></div>
                 <div class="min-w-0">
@@ -560,10 +561,6 @@
               </div>
               <div class="today-right">
                 <span class="today-kind ${item.kind}">${escapeHtml(item.kind)}</span>
-                <div class="today-actions" aria-label="Reorder item">
-                  <button type="button" class="today-reorder" data-move="up" data-key="${escapeHtml(key)}" aria-label="Move item up" title="Move up" ${isFirst ? 'disabled' : ''}>↑</button>
-                  <button type="button" class="today-reorder" data-move="down" data-key="${escapeHtml(key)}" aria-label="Move item down" title="Move down" ${isLast ? 'disabled' : ''}>↓</button>
-                </div>
               </div>
             </div>
           `;
@@ -609,30 +606,22 @@
         return ordered;
       }
 
-      function moveOrder(key, direction) {
-        const order = Array.isArray(todayStore.order) ? todayStore.order.slice() : [];
-        const index = order.indexOf(key);
-        if (index === -1) return;
-        const nextIndex = direction === 'up' ? index - 1 : index + 1;
-        if (nextIndex < 0 || nextIndex >= order.length) return;
-        [order[index], order[nextIndex]] = [order[nextIndex], order[index]];
-        todayStore.order = order;
-        saveTodayStore();
-        renderTodayList();
+      function updateOrderFromDom() {
+        const list = $('#todayList');
+        const keys = Array.from(list.querySelectorAll('.today-item')).map(item => item.getAttribute('data-key')).filter(Boolean);
+        if (keys.length) {
+          todayStore.order = keys;
+          saveTodayStore();
+        }
       }
 
       function onListClick(e) {
-        const moveBtn = e.target.closest('[data-move]');
-        if (moveBtn) {
-          e.stopPropagation();
-          const direction = moveBtn.getAttribute('data-move');
-          const key = moveBtn.getAttribute('data-key');
-          moveOrder(key, direction);
-          return;
-        }
-
         const row = e.target.closest('.today-item');
         if (!row) return;
+        if (dragState.suppressClick) {
+          dragState.suppressClick = false;
+          return;
+        }
 
         const kind = row.getAttribute('data-kind');
         const id = row.getAttribute('data-id');
@@ -718,6 +707,10 @@
         renderTodayList();
 
         $('#todayList').addEventListener('click', onListClick);
+        $('#todayList').addEventListener('pointerdown', onDragStart);
+        $('#todayList').addEventListener('pointermove', onDragMove);
+        $('#todayList').addEventListener('pointerup', onDragEnd);
+        $('#todayList').addEventListener('pointercancel', onDragEnd);
 
         $('#addNoteBtn').addEventListener('click', addNote);
         $('#noteInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') addNote(); });
@@ -735,6 +728,118 @@
 
         $('#toggleHabitPickerBtn').addEventListener('click', () => toggleHabitPicker());
         $('#closeHabitPickerBtn').addEventListener('click', () => toggleHabitPicker(false));
+      }
+
+      const dragState = {
+        active: false,
+        pressReady: false,
+        suppressClick: false,
+        item: null,
+        placeholder: null,
+        pointerId: null,
+        offsetY: 0,
+        timer: null
+      };
+
+      function onDragStart(e) {
+        const row = e.target.closest('.today-item');
+        if (!row || dragState.active) return;
+
+        dragState.item = row;
+        dragState.pointerId = e.pointerId;
+        const rowRect = row.getBoundingClientRect();
+        dragState.offsetY = e.clientY - rowRect.top;
+        dragState.pressReady = false;
+
+        row.setPointerCapture(e.pointerId);
+        clearTimeout(dragState.timer);
+        dragState.timer = setTimeout(() => {
+          dragState.pressReady = true;
+          row.classList.add('is-pressing');
+        }, e.pointerType === 'mouse' ? 120 : 200);
+      }
+
+      function startDragging() {
+        const row = dragState.item;
+        if (!row || dragState.active) return;
+
+        dragState.active = true;
+        dragState.suppressClick = true;
+        $('#todayList').classList.add('is-dragging');
+        row.classList.add('is-dragging');
+        row.classList.remove('is-pressing');
+
+        const placeholder = document.createElement('div');
+        placeholder.className = 'today-placeholder';
+        placeholder.style.height = `${row.getBoundingClientRect().height}px`;
+        dragState.placeholder = placeholder;
+        row.parentNode.insertBefore(placeholder, row.nextSibling);
+
+        const listRect = $('#todayList').getBoundingClientRect();
+        const rowRect = row.getBoundingClientRect();
+        row.style.width = `${rowRect.width}px`;
+        row.style.left = `${rowRect.left - listRect.left}px`;
+        row.style.top = `${rowRect.top - listRect.top}px`;
+      }
+
+      function onDragMove(e) {
+        if (!dragState.item || dragState.pointerId !== e.pointerId) return;
+
+        if (!dragState.pressReady) return;
+        if (!dragState.active) startDragging();
+
+        const list = $('#todayList');
+        const listRect = list.getBoundingClientRect();
+        const y = e.clientY - listRect.top - dragState.offsetY;
+        dragState.item.style.top = `${y}px`;
+
+        const items = Array.from(list.querySelectorAll('.today-item:not(.is-dragging)'));
+        const pointerY = e.clientY;
+        const target = items.find(item => {
+          const rect = item.getBoundingClientRect();
+          return pointerY < rect.top + rect.height / 2;
+        });
+
+        if (target) {
+          if (dragState.placeholder !== target.previousSibling) {
+            list.insertBefore(dragState.placeholder, target);
+          }
+        } else {
+          list.appendChild(dragState.placeholder);
+        }
+      }
+
+      function onDragEnd(e) {
+        if (!dragState.item || dragState.pointerId !== e.pointerId) return;
+
+        clearTimeout(dragState.timer);
+        if (!dragState.active) {
+          dragState.item.classList.remove('is-pressing');
+          if (dragState.pressReady) dragState.suppressClick = true;
+          dragState.pressReady = false;
+          dragState.item = null;
+          dragState.pointerId = null;
+          return;
+        }
+
+        const list = $('#todayList');
+        dragState.item.classList.remove('is-dragging');
+        dragState.item.style.width = '';
+        dragState.item.style.left = '';
+        dragState.item.style.top = '';
+
+        if (dragState.placeholder) {
+          list.insertBefore(dragState.item, dragState.placeholder);
+          dragState.placeholder.remove();
+        }
+
+        dragState.active = false;
+        dragState.pressReady = false;
+        dragState.item = null;
+        dragState.pointerId = null;
+        dragState.placeholder = null;
+        $('#todayList').classList.remove('is-dragging');
+        updateOrderFromDom();
       }
 
       document.addEventListener('DOMContentLoaded', init);
