@@ -505,19 +505,22 @@
 
   function matchupAvatarSize(){
     if (window.matchMedia && window.matchMedia('(max-width: 640px)').matches) {
-      return 96;
+      return { width: 96, height: 128 };
     }
-    return 120;
+    return { width: 120, height: 160 };
   }
 
-  async function renderAvatarInto(el, { name, imageId, size = 32 } = {}){
+  async function renderAvatarInto(el, { name, imageId, size = 32, frame = false } = {}){
     if (!el) return;
     el.innerHTML = '';
 
     const wrap = document.createElement('div');
-    wrap.className = 'relative';
-    wrap.style.width = `${size}px`;
-    wrap.style.height = `${size}px`;
+    wrap.className = frame ? 'relative avatar-frame' : 'relative';
+    const isObject = typeof size === 'object' && size !== null;
+    const width = isObject ? size.width : size;
+    const height = isObject ? size.height : size;
+    wrap.style.width = `${width}px`;
+    wrap.style.height = `${height}px`;
 
     const url = await getImageUrl(imageId);
     if (url) {
@@ -1227,8 +1230,8 @@ function placeHTML(rankIndex, total){
 
     // avatars
     const avatarSize = matchupAvatarSize();
-    renderAvatarInto($('matchupYouAvatar'), { name: 'You', imageId: getPlayerImageId(state, 'YOU'), size: avatarSize });
-    renderAvatarInto($('matchupOppAvatar'), { name: oppName, imageId: getPlayerImageId(state, oppId), size: avatarSize });
+    renderAvatarInto($('matchupYouAvatar'), { name: 'You', imageId: getPlayerImageId(state, 'YOU'), size: avatarSize, frame: true });
+    renderAvatarInto($('matchupOppAvatar'), { name: oppName, imageId: getPlayerImageId(state, oppId), size: avatarSize, frame: true });
 
     // names
     const youNameBtn = $('matchupYourName');
