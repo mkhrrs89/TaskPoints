@@ -7,8 +7,10 @@ function closeAllDropdowns(exception) {
   });
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-  document.querySelectorAll('.dropdown').forEach((dropdown) => {
+function setupDropdowns(root = document) {
+  root.querySelectorAll('.dropdown').forEach((dropdown) => {
+    if (dropdown.dataset.dropdownReady) return;
+    dropdown.dataset.dropdownReady = 'true';
     const toggle = dropdown.querySelector('[data-dropdown-toggle]');
     if (!toggle) return;
 
@@ -49,6 +51,10 @@ document.addEventListener('DOMContentLoaded', () => {
       doToggle(e);
     });
   });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  setupDropdowns();
 
   // Close when tapping/clicking outside
   document.addEventListener('pointerdown', (e) => {
@@ -106,11 +112,10 @@ function buildMobileBottomNavLinks() {
       <div class="dropdown-menu">
         <a href="gamehub.html" class="btn btn-teal btn-toolbar nav-btn">Game Hub</a>
         <a href="game.html" class="btn btn-teal btn-toolbar nav-btn">Players</a>
-        <a href="standings.html" class="btn btn-teal btn-toolbar nav-btn">Standings</a>
+        <a href="game_ratings.html" class="btn btn-teal btn-toolbar nav-btn">Ratings</a>
         <a href="matchups.html" class="btn btn-teal btn-toolbar nav-btn">Matchups</a>
         <a href="schedule.html" class="btn btn-teal btn-toolbar nav-btn">Schedule</a>
-        <a href="game_ratings.html" class="btn btn-teal btn-toolbar nav-btn">Ratings</a>
-        <a href="records.html" class="btn btn-teal btn-toolbar nav-btn">Records</a>
+        <a href="standings.html" class="btn btn-teal btn-toolbar nav-btn">Standings</a>
       </div>
     </div>
 
@@ -136,9 +141,11 @@ function ensureMobileBottomNav() {
     nav.appendChild(inner);
 
     document.body.appendChild(nav);
+    setupDropdowns(nav);
   } else {
     const inner = nav.querySelector('.mobile-bottom-nav');
     if (inner) inner.innerHTML = buildMobileBottomNavLinks();
+    setupDropdowns(nav);
   }
 
 }

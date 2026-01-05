@@ -821,11 +821,28 @@ body {
   justify-content: center;
 }
 
+.mobile-bottom-dropdown .dropdown-toggle{
+  position: relative;
+}
+
 .mobile-task-toggle{
   position: relative;
 }
 
 .mobile-task-toggle::before{
+  content: "";
+  position: absolute;
+  top: -6px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-bottom: 5px solid rgba(226,232,240,0.6);
+}
+
+.mobile-bottom-dropdown .dropdown-toggle::before{
   content: "";
   position: absolute;
   top: -6px;
@@ -871,6 +888,10 @@ body {
   }
 
   .mobile-task-toggle::before{
+    border-bottom-color: rgba(15,23,42,0.45);
+  }
+
+  .mobile-bottom-dropdown .dropdown-toggle::before{
     border-bottom-color: rgba(15,23,42,0.45);
   }
 }
