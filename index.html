@@ -867,6 +867,7 @@ function initHabitSortControl(){
 let editingTaskId = null;
 let editingHabitId = null;
 let editingFlexId = null;
+let lastFlexCompletion = null;
 
 
 function sleepBonus(score) {
@@ -4032,6 +4033,7 @@ function renderFlexActions(){
   const items = (Array.isArray(state.flexActions) ? state.flexActions : []).filter(f => !f.retired);
   const todayKeyStr = dateKey(new Date());
   const flexUseCounts = new Map();
+  let appliedAnimation = false;
   const completions = Array.isArray(state.completions) ? state.completions : [];
   for (const entry of completions) {
     if (!entry?.flexId) continue;
@@ -4082,8 +4084,11 @@ function renderFlexActions(){
     } else {
       // 📄 NORMAL MODE
       const usageCount = flexUseCounts.get(f.id) || 0;
+      const shouldAnimate = lastFlexCompletion
+        && lastFlexCompletion.id === f.id
+        && (Date.now() - lastFlexCompletion.at) < 2000;
       const usageDots = usageCount
-        ? `<span class="flex-action-dots" aria-label="${usageCount} time${usageCount === 1 ? '' : 's'} used today">${Array.from({ length: usageCount }, () => '<span class="flex-action-dot"></span>').join('')}</span>`
+        ? `<span class="flex-action-dots" aria-label="${usageCount} time${usageCount === 1 ? '' : 's'} used today">${Array.from({ length: usageCount }, (_, index) => `<span class="flex-action-dot${shouldAnimate && index === usageCount - 1 ? ' flex-action-dot--pop' : ''}"></span>`).join('')}</span>`
         : '';
       row.innerHTML = `
         <div class="min-w-0 flex-action-main">
@@ -4103,8 +4108,12 @@ function renderFlexActions(){
         </div>
       `;
       list.appendChild(row);
+      if (shouldAnimate) appliedAnimation = true;
     }
   });
+  if (appliedAnimation) {
+    lastFlexCompletion = null;
+  }
 
   // Wire normal-mode buttons
   list.querySelectorAll('[data-act="flex-do"]').forEach(btn => {
@@ -4160,7 +4169,9 @@ function logFlexCompletion(id){
     source: 'flex'
   });
 
+  lastFlexCompletion = { id, at: Date.now() };
   save();
+  renderFlexActions();
   renderAll();
 }
 

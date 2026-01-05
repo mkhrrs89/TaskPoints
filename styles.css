@@ -1309,6 +1309,28 @@ body {
     border-radius: 999px;
     background: #0f4d4d;
     box-shadow: 0 0 0 1px rgba(15, 77, 77, 0.35);
+    transform: scale(1);
+    transform-origin: center;
+  }
+  .flex-action-dot--pop{
+    animation: flex-dot-pop 0.45s ease-out;
+  }
+  @keyframes flex-dot-pop{
+    0%{
+      transform: scale(0.2);
+      opacity: 0;
+      box-shadow: 0 0 0 0 rgba(20, 180, 140, 0.6);
+    }
+    60%{
+      transform: scale(1.4);
+      opacity: 1;
+      box-shadow: 0 0 0 6px rgba(20, 180, 140, 0.15);
+    }
+    100%{
+      transform: scale(1);
+      opacity: 1;
+      box-shadow: 0 0 0 0 rgba(20, 180, 140, 0);
+    }
   }
   .flex-action-buttons{
     margin-left: auto;
