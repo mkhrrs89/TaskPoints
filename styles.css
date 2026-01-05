@@ -2776,6 +2776,37 @@ body {
   .today-page { overflow-x: clip; } /* or hidden */
 }
 
+  /* 1) Safety: never allow horizontal scroll */
+  html, body { overflow-x: hidden; }
+
+  /* 2) Make sure cards can’t exceed the container */
+  .today-page .glass { max-width: 100%; }
+
+  /* 3) If a checklist row’s right-side controls are too wide,
+        WRAP them instead of expanding the page */
+  .today-page .today-item {
+    max-width: 100%;
+    flex-wrap: wrap;
+  }
+
+  /* 4) Let the left text area actually shrink (critical for flex overflow) */
+  .today-page .today-left,
+  .today-page .today-item .min-w-0 {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  /* 5) If your right side controls are in a wrapper, keep them from forcing width.
+        (one of these class names will match your generated markup in practice) */
+  .today-page .today-actions,
+  .today-page .today-right,
+  .today-page .today-controls {
+    margin-left: auto;
+    display: flex;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    max-width: 100%;
+  }
 
 
 
