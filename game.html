@@ -35,6 +35,16 @@
   #playersList.card-view {
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }
+
+  #playersList.gallery-view {
+    grid-template-columns: repeat(var(--gallery-cols, 2), minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) and (orientation: landscape) {
+  #playersList.gallery-view {
+    grid-template-columns: repeat(var(--gallery-cols-landscape, 3), minmax(0, 1fr));
+  }
 }
 
 
@@ -79,7 +89,7 @@
 /* Mobile tweaks */
 @media (max-width: 640px) {
   /* 2-column card view grid on mobile */
-  #playersList {
+  #playersList.card-view {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -381,6 +391,14 @@
             >
               Gallery view
             </button>
+          </div>
+
+          <div id="galleryColumnsControl" class="hidden items-center gap-2 text-xs sm:hidden">
+            <label for="galleryColumnsSelect" class="opacity-70">Mobile columns</label>
+            <select id="galleryColumnsSelect" class="input px-2 py-1 text-xs">
+              <option value="2">2</option>
+              <option value="3">3</option>
+            </select>
           </div>
         </div>
 
@@ -699,6 +717,8 @@ if (rebuildGameHistoryFromMatchupsIfNeeded()) {
     
 let editingPlayerId = null;
 let viewMode = "card"; // "card" | "gallery"
+const GALLERY_COLUMNS_STORAGE_KEY = "taskpoints_gallery_columns";
+let galleryColumns = loadGalleryColumns();
 const PLAYER_SORT_STORAGE_KEY = "taskpoints_player_sort_mode";
 const PLAYER_SORT_OPTIONS = [
   "name-asc",
@@ -709,6 +729,31 @@ const PLAYER_SORT_OPTIONS = [
   "created-asc"
 ];
 let playerSortMode = loadSortMode();
+
+function loadGalleryColumns() {
+  try {
+    const stored = localStorage.getItem(GALLERY_COLUMNS_STORAGE_KEY);
+    if (!stored) return { portrait: 2, landscape: 3 };
+    const parsed = JSON.parse(stored);
+    const portrait = Number(parsed?.portrait);
+    const landscape = Number(parsed?.landscape);
+    return {
+      portrait: portrait === 2 || portrait === 3 ? portrait : 2,
+      landscape: landscape === 3 || landscape === 4 ? landscape : 3
+    };
+  } catch (e) {
+    return { portrait: 2, landscape: 3 };
+  }
+}
+
+function persistGalleryColumns(next) {
+  if (!next) return;
+  galleryColumns = {
+    portrait: next.portrait === 2 || next.portrait === 3 ? next.portrait : 2,
+    landscape: next.landscape === 3 || next.landscape === 4 ? next.landscape : 3
+  };
+  localStorage.setItem(GALLERY_COLUMNS_STORAGE_KEY, JSON.stringify(galleryColumns));
+}
 
 function loadSortMode() {
   const stored = localStorage.getItem(PLAYER_SORT_STORAGE_KEY);
@@ -1605,6 +1650,16 @@ function calcYouStats() {
   };
 }
 
+function applyGalleryColumnsToContainer(container) {
+  if (!container) return;
+  container.style.setProperty("--gallery-cols", galleryColumns.portrait);
+  container.style.setProperty("--gallery-cols-landscape", galleryColumns.landscape);
+}
+
+function getGalleryOrientation() {
+  return window.matchMedia("(orientation: landscape)").matches ? "landscape" : "portrait";
+}
+
 
 async function renderPlayers() {
   const container = $("playersList");
@@ -1615,10 +1670,13 @@ async function renderPlayers() {
 
   // Set grid layout based on view mode
   if (viewMode === "gallery") {
-    container.className = "grid gap-4 grid-cols-2 sm:grid-cols-3 md:grid-cols-5";
+    container.className = "grid gap-4 gallery-view sm:grid-cols-3 md:grid-cols-5";
+    applyGalleryColumnsToContainer(container);
   } else {
     // Card view: tighter, and 3 columns on wide screens
     container.className = "grid gap-3 card-view grid-cols-1 md:grid-cols-2 xl:grid-cols-3";
+    container.style.removeProperty("--gallery-cols");
+    container.style.removeProperty("--gallery-cols-landscape");
   }
 
 
@@ -2467,6 +2525,29 @@ renderPlayers();
 // ----- View mode toggle (Card vs Gallery) -----
 const viewCardBtn = document.getElementById("viewCardBtn");
 const viewGalleryBtn = document.getElementById("viewGalleryBtn");
+const galleryColumnsControl = document.getElementById("galleryColumnsControl");
+const galleryColumnsSelect = document.getElementById("galleryColumnsSelect");
+
+function updateGalleryColumnsControl() {
+  if (!galleryColumnsSelect) return;
+  const orientation = getGalleryOrientation();
+  const options = orientation === "landscape" ? [3, 4] : [2, 3];
+  const desired = galleryColumns[orientation];
+  const nextOptions = options.map((value) => ({
+    value,
+    label: `${value} columns`
+  }));
+
+  galleryColumnsSelect.innerHTML = nextOptions
+    .map((opt) => `<option value="${opt.value}">${opt.label}</option>`)
+    .join("");
+
+  if (options.includes(desired)) {
+    galleryColumnsSelect.value = String(desired);
+  } else {
+    galleryColumnsSelect.value = String(options[0]);
+  }
+}
 
 function updateViewToggleUI() {
   if (!viewCardBtn || !viewGalleryBtn) return;
@@ -2479,6 +2560,15 @@ function updateViewToggleUI() {
     viewGalleryBtn.classList.add("bg-zinc-800", "text-white");
     viewCardBtn.classList.remove("bg-zinc-800", "text-white");
     viewCardBtn.classList.add("bg-zinc-900/40");
+  }
+
+  if (galleryColumnsControl) {
+    galleryColumnsControl.classList.toggle("hidden", viewMode !== "gallery");
+    galleryColumnsControl.classList.toggle("flex", viewMode === "gallery");
+  }
+
+  if (viewMode === "gallery") {
+    updateGalleryColumnsControl();
   }
 }
 
@@ -2499,6 +2589,28 @@ if (viewGalleryBtn) {
     updateViewToggleUI();
   });
 }
+
+if (galleryColumnsSelect) {
+  galleryColumnsSelect.addEventListener("change", (e) => {
+    const value = Number(e.target.value);
+    const orientation = getGalleryOrientation();
+    if (orientation === "portrait" && (value === 2 || value === 3)) {
+      persistGalleryColumns({ ...galleryColumns, portrait: value });
+    }
+    if (orientation === "landscape" && (value === 3 || value === 4)) {
+      persistGalleryColumns({ ...galleryColumns, landscape: value });
+    }
+    const container = document.getElementById("playersList");
+    applyGalleryColumnsToContainer(container);
+  });
+}
+
+const galleryOrientationQuery = window.matchMedia("(orientation: landscape)");
+galleryOrientationQuery.addEventListener("change", () => {
+  updateGalleryColumnsControl();
+  const container = document.getElementById("playersList");
+  applyGalleryColumnsToContainer(container);
+});
 
 // Initialize toggle styling
 updateViewToggleUI();
@@ -2565,13 +2677,6 @@ async function fileToDataUrl(file) {
   </button>
 </body>
 </html>
-
-
-
-
-
-
-
 
 
 
