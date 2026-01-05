@@ -47,6 +47,34 @@
   }
 }
 
+.player-group {
+  border: 1px solid rgba(113, 113, 122, 0.4);
+  border-radius: 16px;
+  padding: 12px;
+  background: rgba(244, 244, 245, 0.7);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.02);
+}
+
+.player-group-title {
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: rgba(63, 63, 70, 0.8);
+}
+
+@media (prefers-color-scheme: dark) {
+  .player-group {
+    background: rgba(24, 24, 27, 0.7);
+    border-color: rgba(63, 63, 70, 0.8);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04);
+  }
+
+  .player-group-title {
+    color: rgba(228, 228, 231, 0.7);
+  }
+}
+
 
 .player-img-frame {
   border-radius: 0;
@@ -393,6 +421,11 @@
             </button>
           </div>
 
+          <div class="flex items-center gap-2 text-xs">
+            <input id="groupActiveToggle" type="checkbox" class="toggle-switch">
+            <label for="groupActiveToggle" class="opacity-70">Group active players</label>
+          </div>
+
           <div id="galleryColumnsControl" class="hidden items-center gap-2 text-xs sm:hidden">
             <label for="galleryColumnsSelect" class="opacity-70">Mobile columns</label>
             <select id="galleryColumnsSelect" class="input px-2 py-1 text-xs">
@@ -720,6 +753,7 @@ let viewMode = "card"; // "card" | "gallery"
 const GALLERY_COLUMNS_STORAGE_KEY = "taskpoints_gallery_columns";
 let galleryColumns = loadGalleryColumns();
 const PLAYER_SORT_STORAGE_KEY = "taskpoints_player_sort_mode";
+const GROUP_ACTIVE_PLAYERS_STORAGE_KEY = "taskpoints_group_active_players";
 const PLAYER_SORT_OPTIONS = [
   "name-asc",
   "name-desc",
@@ -729,6 +763,7 @@ const PLAYER_SORT_OPTIONS = [
   "created-asc"
 ];
 let playerSortMode = loadSortMode();
+let groupActivePlayers = loadGroupActivePlayers();
 
 function loadGalleryColumns() {
   try {
@@ -753,6 +788,19 @@ function persistGalleryColumns(next) {
     landscape: next.landscape === 3 || next.landscape === 4 ? next.landscape : 3
   };
   localStorage.setItem(GALLERY_COLUMNS_STORAGE_KEY, JSON.stringify(galleryColumns));
+}
+
+function loadGroupActivePlayers() {
+  try {
+    return localStorage.getItem(GROUP_ACTIVE_PLAYERS_STORAGE_KEY) === "true";
+  } catch (e) {
+    return false;
+  }
+}
+
+function persistGroupActivePlayers(nextValue) {
+  groupActivePlayers = !!nextValue;
+  localStorage.setItem(GROUP_ACTIVE_PLAYERS_STORAGE_KEY, String(groupActivePlayers));
 }
 
 function loadSortMode() {
@@ -1660,6 +1708,18 @@ function getGalleryOrientation() {
   return window.matchMedia("(orientation: landscape)").matches ? "landscape" : "portrait";
 }
 
+function applyPlayersGridLayout(grid) {
+  if (!grid) return;
+  if (viewMode === "gallery") {
+    grid.className = "players-grid grid gap-4 gallery-view sm:grid-cols-3 md:grid-cols-5";
+    applyGalleryColumnsToContainer(grid);
+  } else {
+    grid.className = "players-grid grid gap-3 card-view grid-cols-1 md:grid-cols-2 xl:grid-cols-3";
+    grid.style.removeProperty("--gallery-cols");
+    grid.style.removeProperty("--gallery-cols-landscape");
+  }
+}
+
 
 async function renderPlayers() {
   const container = $("playersList");
@@ -1668,15 +1728,12 @@ async function renderPlayers() {
   updateSortSelectUI();
   container.innerHTML = "";
 
-  // Set grid layout based on view mode
-  if (viewMode === "gallery") {
-    container.className = "grid gap-4 gallery-view sm:grid-cols-3 md:grid-cols-5";
-    applyGalleryColumnsToContainer(container);
-  } else {
-    // Card view: tighter, and 3 columns on wide screens
-    container.className = "grid gap-3 card-view grid-cols-1 md:grid-cols-2 xl:grid-cols-3";
+  if (groupActivePlayers) {
+    container.className = "flex flex-col gap-6";
     container.style.removeProperty("--gallery-cols");
     container.style.removeProperty("--gallery-cols-landscape");
+  } else {
+    applyPlayersGridLayout(container);
   }
 
 
@@ -1801,10 +1858,9 @@ async function renderPlayers() {
 
   const sortedPlayers = players.slice().sort(comparePlayers);
 
-  // 🔹 THIS is the piece you were missing before
-  sortedPlayers.forEach(p => {
+  const appendPlayerCard = (p, targetContainer) => {
     const card = document.createElement("div");
- card.dataset.playerId = p.id;
+    card.dataset.playerId = p.id;
     const isActive = p.isYou ? true : isPlayerActive(p);
 
     // ----- GALLERY VIEW (image + name only) -----
@@ -1858,7 +1914,7 @@ async function renderPlayers() {
         });
       }
 
-      container.appendChild(card);
+      targetContainer.appendChild(card);
       return; // skip card-mode logic
 
     }
@@ -1913,7 +1969,7 @@ async function renderPlayers() {
       </div>
     `;
 
-    container.appendChild(card);
+    targetContainer.appendChild(card);
     return;
   }
 
@@ -1957,7 +2013,7 @@ card.innerHTML = `
 `;
 
 
-  container.appendChild(card);
+  targetContainer.appendChild(card);
   return;
 }
 
@@ -2186,8 +2242,36 @@ card.innerHTML = `
 `;
     }
 
-    container.appendChild(card);
-  });
+    targetContainer.appendChild(card);
+  };
+
+  if (groupActivePlayers) {
+    const activePlayers = sortedPlayers.filter((p) => (p.isYou ? true : isPlayerActive(p)));
+    const inactivePlayers = sortedPlayers.filter((p) => !(p.isYou ? true : isPlayerActive(p)));
+
+    const buildGroup = (title, list) => {
+      if (!list.length) return;
+      const group = document.createElement("div");
+      group.className = "player-group";
+
+      const header = document.createElement("div");
+      header.className = "player-group-title mb-3";
+      header.textContent = title;
+      group.appendChild(header);
+
+      const grid = document.createElement("div");
+      applyPlayersGridLayout(grid);
+      group.appendChild(grid);
+
+      list.forEach((p) => appendPlayerCard(p, grid));
+      container.appendChild(group);
+    };
+
+    buildGroup("Active players", activePlayers);
+    buildGroup("Inactive players", inactivePlayers);
+  } else {
+    sortedPlayers.forEach((p) => appendPlayerCard(p, container));
+  }
 
   container.querySelectorAll("button[data-act]").forEach(btn => {
     btn.addEventListener("click", handlePlayerAction);
@@ -2525,6 +2609,7 @@ renderPlayers();
 // ----- View mode toggle (Card vs Gallery) -----
 const viewCardBtn = document.getElementById("viewCardBtn");
 const viewGalleryBtn = document.getElementById("viewGalleryBtn");
+const groupActiveToggle = document.getElementById("groupActiveToggle");
 const galleryColumnsControl = document.getElementById("galleryColumnsControl");
 const galleryColumnsSelect = document.getElementById("galleryColumnsSelect");
 
@@ -2572,6 +2657,11 @@ function updateViewToggleUI() {
   }
 }
 
+function updateGroupToggleUI() {
+  if (!groupActiveToggle) return;
+  groupActiveToggle.checked = groupActivePlayers;
+}
+
 if (viewCardBtn) {
   viewCardBtn.addEventListener("click", () => {
     viewMode = "card";
@@ -2590,6 +2680,13 @@ if (viewGalleryBtn) {
   });
 }
 
+if (groupActiveToggle) {
+  groupActiveToggle.addEventListener("change", (e) => {
+    persistGroupActivePlayers(e.target.checked);
+    renderPlayers();
+  });
+}
+
 if (galleryColumnsSelect) {
   galleryColumnsSelect.addEventListener("change", (e) => {
     const value = Number(e.target.value);
@@ -2600,20 +2697,23 @@ if (galleryColumnsSelect) {
     if (orientation === "landscape" && (value === 3 || value === 4)) {
       persistGalleryColumns({ ...galleryColumns, landscape: value });
     }
-    const container = document.getElementById("playersList");
-    applyGalleryColumnsToContainer(container);
+    document
+      .querySelectorAll(".players-grid")
+      .forEach((grid) => applyGalleryColumnsToContainer(grid));
   });
 }
 
 const galleryOrientationQuery = window.matchMedia("(orientation: landscape)");
 galleryOrientationQuery.addEventListener("change", () => {
   updateGalleryColumnsControl();
-  const container = document.getElementById("playersList");
-  applyGalleryColumnsToContainer(container);
+  document
+    .querySelectorAll(".players-grid")
+    .forEach((grid) => applyGalleryColumnsToContainer(grid));
 });
 
 // Initialize toggle styling
 updateViewToggleUI();
+updateGroupToggleUI();
 
 // ----- Collapsible panels (Create Player + Player Stats Guide) -----
 function setupMobileCollapsibles() {
@@ -2677,10 +2777,3 @@ async function fileToDataUrl(file) {
   </button>
 </body>
 </html>
-
-
-
-
-
-
-
