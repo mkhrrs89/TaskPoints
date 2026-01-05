@@ -116,6 +116,14 @@
       .today-page .today-title{font-size:.95rem}
       .today-page .today-sub{font-size:.75rem}
       .today-page .today-right{gap:6px}
+      .today-page .today-list,
+      .today-page .today-item,
+      .today-page .today-item *{
+        -webkit-user-select:none;
+        user-select:none;
+        -webkit-touch-callout:none;
+        -webkit-tap-highlight-color:transparent;
+      }
       .today-page .today-kind{
         font-size:.6rem;
         padding:4px 8px;
@@ -747,9 +755,15 @@
         item: null,
         placeholder: null,
         pointerId: null,
+        pointerType: null,
         offsetY: 0,
         timer: null
       };
+
+      function clearTextSelection() {
+        const selection = window.getSelection ? window.getSelection() : null;
+        if (selection && selection.removeAllRanges) selection.removeAllRanges();
+      }
 
       function onDragStart(e) {
         const row = e.target.closest('.today-item');
@@ -761,6 +775,7 @@
 
         dragState.item = row;
         dragState.pointerId = e.pointerId;
+        dragState.pointerType = e.pointerType;
         const rowRect = row.getBoundingClientRect();
         dragState.offsetY = e.clientY - rowRect.top;
         dragState.pressReady = false;
@@ -770,6 +785,7 @@
         dragState.timer = setTimeout(() => {
           dragState.pressReady = true;
           row.classList.add('is-pressing');
+          if (dragState.pointerType === 'touch') clearTextSelection();
         }, e.pointerType === 'mouse' ? 120 : 200);
       }
 
@@ -807,6 +823,8 @@
         const listRect = list.getBoundingClientRect();
         const y = e.clientY - listRect.top - dragState.offsetY;
         dragState.item.style.top = `${y}px`;
+
+        if (dragState.pointerType === 'touch') clearTextSelection();
 
         const items = Array.from(list.querySelectorAll('.today-item:not(.is-dragging)'));
         const pointerY = e.clientY;
@@ -852,6 +870,7 @@
         dragState.pressReady = false;
         dragState.item = null;
         dragState.pointerId = null;
+        dragState.pointerType = null;
         dragState.placeholder = null;
         $('#todayList').classList.remove('is-dragging');
         updateOrderFromDom();
