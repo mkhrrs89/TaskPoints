@@ -1249,7 +1249,6 @@
 
     matchups.forEach(m => {
       if (!m) return;
-      if (!activeIds.has(m.playerAId) || !activeIds.has(m.playerBId)) return;
       const key = matchupDateKey(m);
       if (!isMatchupRevealed(key, { includeToday })) return;
       const isA = m.playerAId === playerId;
