@@ -840,6 +840,31 @@ body {
   will-change: transform;
 }
 
+.mobile-bottom-nav-btn{
+  position: relative;
+  transform-origin: center;
+  will-change: transform;
+}
+
+.mobile-bottom-nav-btn.is-pressed{
+  animation: mobile-bottom-nav-press 240ms cubic-bezier(.34,1.56,.64,1);
+}
+
+@keyframes mobile-bottom-nav-press{
+  0%{
+    transform: scale(1);
+    filter: drop-shadow(0 0 0 rgba(45,212,191,0));
+  }
+  45%{
+    transform: scale(0.88);
+    filter: drop-shadow(0 0 6px rgba(45,212,191,0.35));
+  }
+  100%{
+    transform: scale(1);
+    filter: drop-shadow(0 0 0 rgba(45,212,191,0));
+  }
+}
+
 @media (min-width: 768px){
   .mobile-bottom-nav-shell{
     display: none;

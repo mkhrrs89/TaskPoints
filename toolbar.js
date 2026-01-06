@@ -70,12 +70,12 @@ document.addEventListener('DOMContentLoaded', () => {
 // ---------- Shared mobile bottom nav ----------
 function buildMobileBottomNavLinks() {
   return `
-    <a href="index.html" class="flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
+    <a href="index.html" class="mobile-bottom-nav-btn flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
       <span class="text-lg">🏠</span>
       <span class="uppercase tracking-wide text-[10px]">Home</span>
     </a>
 
-    <a href="today.html" class="flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
+    <a href="today.html" class="mobile-bottom-nav-btn flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
       <span class="text-lg">📅</span>
       <span class="uppercase tracking-wide text-[10px]">Today</span>
     </a>
@@ -84,7 +84,7 @@ function buildMobileBottomNavLinks() {
       <button
         id="mobileTasksToggle"
         type="button"
-        class="mobile-task-toggle flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100"
+        class="mobile-bottom-nav-btn mobile-task-toggle flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100"
         aria-expanded="false"
         aria-haspopup="true">
         <span class="text-lg">✔️</span>
@@ -100,7 +100,7 @@ function buildMobileBottomNavLinks() {
     <div class="dropdown mobile-bottom-dropdown">
       <button
         type="button"
-        class="dropdown-toggle flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100"
+        class="mobile-bottom-nav-btn dropdown-toggle flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100"
         data-dropdown-toggle
         aria-expanded="false"
         aria-haspopup="true"
@@ -119,7 +119,7 @@ function buildMobileBottomNavLinks() {
       </div>
     </div>
 
-    <a href="settings.html" class="flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
+    <a href="settings.html" class="mobile-bottom-nav-btn flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
       <span class="text-lg">⚙️</span>
       <span class="uppercase tracking-wide text-[10px]">Settings</span>
     </a>
@@ -151,7 +151,10 @@ function renderBottomToolbar() {
   `;
 
   const nav = mount.querySelector('#mobileBottomNav');
-  if (nav) setupDropdowns(nav);
+  if (nav) {
+    setupDropdowns(nav);
+    setupBottomNavPressAnimation(nav);
+  }
 }
 
 function setupMobileTasksMenu() {
@@ -214,6 +217,20 @@ function setupMobileTasksMenu() {
       e.preventDefault();
       toggleMenu();
     }
+  });
+}
+
+function setupBottomNavPressAnimation(root = document) {
+  const nav = root.querySelector('.mobile-bottom-nav');
+  if (!nav) return;
+
+  nav.addEventListener('pointerdown', (event) => {
+    const target = event.target.closest('.mobile-bottom-nav-btn');
+    if (!target || !nav.contains(target)) return;
+    target.classList.remove('is-pressed');
+    void target.offsetWidth;
+    target.classList.add('is-pressed');
+    window.setTimeout(() => target.classList.remove('is-pressed'), 300);
   });
 }
 
