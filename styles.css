@@ -475,8 +475,8 @@ body {
   justify-content: center;
 }
 
-.gamehub-page #matchupYouAvatar img,
-.gamehub-page #matchupOppAvatar img,
+.gamehub-page #matchupYouAvatar img:not(.avatar-in-frame),
+.gamehub-page #matchupOppAvatar img:not(.avatar-in-frame),
 .gamehub-page #matchupYouAvatar .rounded-full,
 .gamehub-page #matchupOppAvatar .rounded-full {
   width: 100%;
@@ -494,20 +494,44 @@ body {
 
 .gamehub-page .matchup-scoreboard .avatar-frame {
   position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+}
+
+.gamehub-page .matchup-scoreboard .avatar-frame .avatar-in-frame {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  right: 14px;
+  bottom: 18px;
+  width: auto;
+  height: auto;
+  object-fit: cover;
+  object-position: 50% 35%;
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
+  z-index: 1;
+}
+
+.gamehub-page .matchup-scoreboard .avatar-frame .avatar-fallback {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 100%;
-  height: 100%;
-  padding: clamp(10px, 2.4vw, 16px);
-  background: url('assets/baseframe.PNG') center / 100% 100% no-repeat;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.06);
 }
 
-.gamehub-page .matchup-scoreboard .avatar-frame img,
-.gamehub-page .matchup-scoreboard .avatar-frame .rounded-full {
-  border-radius: 6px;
-  border: none;
-  box-shadow: none;
+.gamehub-page .matchup-scoreboard .avatar-frame::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: url('assets/baseframe.PNG') center / 100% 100% no-repeat;
+  pointer-events: none;
+  z-index: 2;
 }
 
 .gamehub-page .matchup-details {
