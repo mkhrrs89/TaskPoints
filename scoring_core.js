@@ -431,11 +431,11 @@
     let changed = false;
 
     if (shouldSync) {
-      const derivedSync = syncDerivedPoints(state);
+      const derivedSync = syncDerivedPoints(state, { normalized: true });
       state = derivedSync.state;
       changed = changed || derivedSync.changed;
 
-      const matchupSync = syncYouMatchups(state);
+      const matchupSync = syncYouMatchups(state, { normalized: true });
       state = matchupSync.state;
       changed = changed || matchupSync.changed;
     }
@@ -1269,8 +1269,9 @@
     return dateKeyStr < today;
   }
 
-  function youDailyTotalsWithInertia(state){
-    const normalized = normalizeState(state || {});
+  function youDailyTotalsWithInertia(state, options = {}){
+    // Invariant: options.normalized is only set when state already passed through normalizeState().
+    const normalized = options.normalized ? (state || {}) : normalizeState(state || {});
     const { dailyTotals } = aggregateCompletionsByDate(normalized.completions, normalized);
 
     const keys = new Set([
@@ -1291,8 +1292,9 @@
     return totals;
   }
 
-  function syncDerivedPoints(state){
-    const normalized = normalizeState(state || {});
+  function syncDerivedPoints(state, options = {}){
+    // Invariant: options.normalized is only set when state already passed through normalizeState().
+    const normalized = options.normalized ? (state || {}) : normalizeState(state || {});
     const mismatches = [];
     let changed = false;
 
@@ -1451,9 +1453,10 @@
     return computeGameHistoryRecord(state, playerId);
   }
 
-  function syncYouMatchups(state){
-    const normalized = normalizeState(state || {});
-    const youTotals = youDailyTotalsWithInertia(normalized);
+  function syncYouMatchups(state, options = {}){
+    // Invariant: options.normalized is only set when state already passed through normalizeState().
+    const normalized = options.normalized ? (state || {}) : normalizeState(state || {});
+    const youTotals = youDailyTotalsWithInertia(normalized, { normalized: true });
 
     if (!Object.keys(youTotals).length) {
       return { state: normalized, changed: false };
