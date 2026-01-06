@@ -6354,51 +6354,7 @@ document.addEventListener('change', (e) => {
   <span>Top</span>
 </button>
 
-<!-- MOBILE QUICK NAV BAR -->
-<nav
-  id="mobileBottomNav"
-  class="mobile-bottom-nav-shell fixed inset-x-0 bottom-0 z-40 md:hidden border-t border-slate-800 backdrop-blur text-slate-100 drop-shadow-sm"
-  style="background: linear-gradient(180deg, #0f4d4d, #0a2f2f);">
-  <div class="max-w-6xl mx-auto flex justify-center py-3 pb-4 text-[11px] mobile-bottom-nav">
-
-    <a href="#sleepAnchor" class="flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
-      <span class="text-lg">💤</span>
-      <span class="uppercase tracking-wide text-[10px]">Sleep</span>
-    </a>
-
-    <a href="#habitsAnchor" class="flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
-      <span class="text-lg">🔗</span>
-      <span class="uppercase tracking-wide text-[10px]">Habits</span>
-    </a>
-
-    <!-- TASKS moved to the middle with submenu -->
-    <div class="mobile-task-dropdown">
-      <button
-        id="mobileTasksToggle"
-        type="button"
-        class="flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
-        <span class="text-lg">✔️</span>
-        <span class="uppercase tracking-wide text-[10px]">Tasks</span>
-      </button>
-
-      <div id="mobileTasksMenu" class="mobile-task-menu hidden">
-        <button type="button" id="mobileAddTaskBtn" class="btn btn-teal btn-toolbar w-full">Add a Task</button>
-        <button type="button" id="mobileGoTasksBtn" class="btn btn-teal btn-toolbar w-full">Go To Tasks</button>
-      </div>
-    </div>
-
-    <a href="game.html" class="flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
-      <span class="text-lg">👥</span>
-      <span class="uppercase tracking-wide text-[10px]">Players</span>
-    </a>
-
-    <a href="settings.html" class="flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
-      <span class="text-lg">⚙️</span>
-      <span class="uppercase tracking-wide text-[10px]">Settings</span>
-    </a>
-
-  </div>
-</nav>
+<div id="bottomToolbarMount"></div>
 
 <script>
   (() => {

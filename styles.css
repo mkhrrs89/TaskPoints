@@ -40,6 +40,10 @@
   --accent3: #22c55e;  /* success/green accent */
 }
 
+#bottomToolbarMount {
+  min-height: 72px;
+}
+
 
 /* Base page setup - html/body defaults + how text looks. */
 html,
