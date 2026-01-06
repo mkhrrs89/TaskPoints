@@ -2375,7 +2375,7 @@ card.innerHTML = `
         if (!dataUrl) return;
         const nextImageId = await saveImageFromDataUrl(dataUrl, state.youImageId);
         state.youImageId = nextImageId || "";
-        state = saveState(state, { allowStickyOverwrite: true });
+        state = saveState(state, { allowStickyOverwriteKeys: ["youImageId"] });
         renderPlayers();
       });
     };
@@ -2388,7 +2388,7 @@ card.innerHTML = `
   if (act === "clear-you-photo") {
     await deleteImageById(state.youImageId);
     state.youImageId = "";
-    state = saveState(state, { allowStickyOverwrite: true });
+    state = saveState(state, { allowStickyOverwriteKeys: ["youImageId"] });
     renderPlayers();
     return;
   }

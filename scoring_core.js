@@ -226,11 +226,12 @@
   }
 
   function normalizeScoringSettings(settings = {}) {
-    const sleepInput = settings?.sleep || {};
-    const workInput = settings?.work || {};
-    const caloriesInput = settings?.calories || {};
-    const moodInput = settings?.mood || {};
-    const inertiaInput = settings?.inertia || {};
+    const source = isPlainObject(settings) ? settings : {};
+    const sleepInput = isPlainObject(source.sleep) ? source.sleep : {};
+    const workInput = isPlainObject(source.work) ? source.work : {};
+    const caloriesInput = isPlainObject(source.calories) ? source.calories : {};
+    const moodInput = isPlainObject(source.mood) ? source.mood : {};
+    const inertiaInput = isPlainObject(source.inertia) ? source.inertia : {};
 
     const sleepBaseDivisor = toFiniteNumber(sleepInput.baseDivisor);
     const sleepBaseMultiplier = toFiniteNumber(sleepInput.baseMultiplier);
@@ -269,7 +270,7 @@
     const inertiaWindow = toFiniteNumber(inertiaInput.windowDays);
     const inertiaMultiplier = toFiniteNumber(inertiaInput.multiplier);
 
-    return {
+    const normalized = {
       sleep: {
         baseDivisor: sleepBaseDivisor && sleepBaseDivisor > 0 ? sleepBaseDivisor : DEFAULT_SCORING_SETTINGS.sleep.baseDivisor,
         baseMultiplier: sleepBaseMultiplier != null ? sleepBaseMultiplier : DEFAULT_SCORING_SETTINGS.sleep.baseMultiplier,
@@ -311,6 +312,15 @@
         windowDays: inertiaWindow && inertiaWindow >= 1 ? Math.round(inertiaWindow) : DEFAULT_SCORING_SETTINGS.inertia.windowDays,
         multiplier: inertiaMultiplier != null ? inertiaMultiplier : DEFAULT_SCORING_SETTINGS.inertia.multiplier
       }
+    };
+
+    return {
+      ...source,
+      sleep: { ...sleepInput, ...normalized.sleep },
+      work: { ...workInput, ...normalized.work },
+      calories: { ...caloriesInput, ...normalized.calories },
+      mood: { ...moodInput, ...normalized.mood },
+      inertia: { ...inertiaInput, ...normalized.inertia }
     };
   }
 
@@ -503,6 +513,28 @@
     return result;
   }
 
+  function deepEqual(a, b) {
+    if (a === b) return true;
+    if (Array.isArray(a) && Array.isArray(b)) {
+      if (a.length !== b.length) return false;
+      for (let i = 0; i < a.length; i += 1) {
+        if (!deepEqual(a[i], b[i])) return false;
+      }
+      return true;
+    }
+    if (isPlainObject(a) && isPlainObject(b)) {
+      const keysA = Object.keys(a);
+      const keysB = Object.keys(b);
+      if (keysA.length !== keysB.length) return false;
+      for (const key of keysA) {
+        if (!Object.prototype.hasOwnProperty.call(b, key)) return false;
+        if (!deepEqual(a[key], b[key])) return false;
+      }
+      return true;
+    }
+    return false;
+  }
+
   function isDevMode(options = {}) {
     if (options.devMode === true) return true;
     if (typeof window === 'undefined') return false;
@@ -510,9 +542,10 @@
     return host === 'localhost' || host === '127.0.0.1';
   }
 
-  const STICKY_KEYS = ['youImageId', 'habitTagColors', 'scoringSettings'];
+  const STICKY_KEYS = ['youImageId', 'habitTagColors'];
 
   function shouldAllowStickyOverwrite(key, options = {}) {
+    if (key === 'scoringSettings') return Boolean(options.allowScoringSettingsOverwrite);
     if (options.allowStickyOverwrite) return true;
     if (options.allowStickyOverwriteKeys && options.allowStickyOverwriteKeys[key]) return true;
     if (Array.isArray(options.allowStickyOverwriteKeys) && options.allowStickyOverwriteKeys.includes(key)) return true;
@@ -530,6 +563,42 @@
       return Object.keys(value).length === 0;
     }
     return false;
+  }
+
+  function getDefaultScoringSettings() {
+    return normalizeScoringSettings({});
+  }
+
+  function hasMissingCustomScoringKeys(existing, incoming, defaults) {
+    if (!isPlainObject(existing)) return false;
+    const incomingObj = isPlainObject(incoming) ? incoming : {};
+    const defaultsObj = isPlainObject(defaults) ? defaults : {};
+
+    for (const [key, value] of Object.entries(existing)) {
+      const hasDefault = Object.prototype.hasOwnProperty.call(defaultsObj, key);
+      if (!hasDefault) {
+        if (!Object.prototype.hasOwnProperty.call(incomingObj, key)) return true;
+        continue;
+      }
+      const defaultValue = defaultsObj[key];
+      if (isPlainObject(value) && isPlainObject(defaultValue)) {
+        if (hasMissingCustomScoringKeys(value, incomingObj[key], defaultValue)) return true;
+      }
+    }
+    return false;
+  }
+
+  function isScoringSettingsEmptyLike(incoming, existing) {
+    if (incoming == null) return true;
+    if (!isPlainObject(incoming)) return true;
+    if (Object.keys(incoming).length === 0) return true;
+
+    const defaults = getDefaultScoringSettings();
+    const normalizedIncoming = normalizeScoringSettings(incoming);
+    const missingCustom = hasMissingCustomScoringKeys(existing, incoming, defaults);
+    const matchesDefaults = deepEqual(normalizedIncoming, defaults);
+
+    return missingCustom || matchesDefaults;
   }
 
   function applyStickyKeyGuard({ existing, nextState, mergedSnapshot, options, storageKey }) {
@@ -600,11 +669,31 @@
     if (Object.prototype.hasOwnProperty.call(nextState || {}, 'scoringSettings')) {
       const allowOverwrite = shouldAllowStickyOverwrite('scoringSettings', options);
       const incoming = nextState?.scoringSettings;
-      if (!allowOverwrite && isStickyEmptyValue('scoringSettings', incoming)) {
-        mergedSnapshot.scoringSettings = existing?.scoringSettings || {};
-      } else if (isPlainObject(incoming)) {
-        const mergedSettings = deepMerge(existing?.scoringSettings || {}, incoming);
+      const existingSettings = existing?.scoringSettings || {};
+      const emptyLike = isScoringSettingsEmptyLike(incoming, existingSettings);
+
+      if (!allowOverwrite && emptyLike) {
+        if (isDevMode(options)) {
+          console.warn('scoringSettings overwrite attempt', {
+            prev: existingSettings,
+            next: incoming,
+            allowFlags: {
+              allowScoringSettingsOverwrite: Boolean(options.allowScoringSettingsOverwrite),
+              allowStickyOverwrite: Boolean(options.allowStickyOverwrite),
+              allowStickyOverwriteKeys: options.allowStickyOverwriteKeys
+            }
+          });
+          console.trace();
+        }
+        mergedSnapshot.scoringSettings = existingSettings;
+      } else if (!allowOverwrite && isPlainObject(incoming)) {
+        const mergedSettings = deepMerge(existingSettings, incoming);
         mergedSnapshot.scoringSettings = normalizeScoringSettings(mergedSettings);
+      } else if (allowOverwrite && isPlainObject(incoming)) {
+        const normalizedIncoming = normalizeScoringSettings(incoming);
+        mergedSnapshot.scoringSettings = deepMerge(existingSettings, normalizedIncoming);
+      } else if (allowOverwrite && incoming == null) {
+        mergedSnapshot.scoringSettings = existingSettings;
       }
     }
 

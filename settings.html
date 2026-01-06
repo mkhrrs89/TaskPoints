@@ -528,14 +528,16 @@
       if (window.TaskPointsCore?.saveAppState) {
         TaskPointsCore.saveAppState(normalized, {
           storageKey: SETTINGS_STORAGE_KEY,
-          allowStickyOverwrite: true,
-          allowHabitTagColorReset: true
+          allowScoringSettingsOverwrite: true,
+          allowHabitTagColorReset: true,
+          allowStickyOverwriteKeys: ["youImageId", "habitTagColors"]
         });
       } else if (window.TaskPointsCore?.mergeAndSaveState) {
         TaskPointsCore.mergeAndSaveState(normalized, {
           storageKey: SETTINGS_STORAGE_KEY,
-          allowStickyOverwrite: true,
-          allowHabitTagColorReset: true
+          allowScoringSettingsOverwrite: true,
+          allowHabitTagColorReset: true,
+          allowStickyOverwriteKeys: ["youImageId", "habitTagColors"]
         });
       } else {
         console.warn("settings import skipped localStorage write; TaskPointsCore missing.");
@@ -717,21 +719,25 @@
       try {
         if (window.TaskPointsCore?.saveAppState) {
           const allowHabitTagColorReset = Boolean(options.allowHabitTagColorReset);
-          const allowStickyOverwrite = Boolean(options.allowStickyOverwrite);
+          const allowScoringSettingsOverwrite = Boolean(options.allowScoringSettingsOverwrite);
+          const allowStickyOverwriteKeys = options.allowStickyOverwriteKeys;
           const { state: merged } = TaskPointsCore.saveAppState(nextState, {
             storageKey: SETTINGS_STORAGE_KEY,
             allowHabitTagColorReset,
-            allowStickyOverwrite
+            allowScoringSettingsOverwrite,
+            allowStickyOverwriteKeys
           });
           return merged;
         }
         if (window.TaskPointsCore?.mergeAndSaveState) {
           const allowHabitTagColorReset = Boolean(options.allowHabitTagColorReset);
-          const allowStickyOverwrite = Boolean(options.allowStickyOverwrite);
+          const allowScoringSettingsOverwrite = Boolean(options.allowScoringSettingsOverwrite);
+          const allowStickyOverwriteKeys = options.allowStickyOverwriteKeys;
           const { state: merged } = TaskPointsCore.mergeAndSaveState(nextState, {
             storageKey: SETTINGS_STORAGE_KEY,
             allowHabitTagColorReset,
-            allowStickyOverwrite
+            allowScoringSettingsOverwrite,
+            allowStickyOverwriteKeys
           });
           return merged;
         }
@@ -761,7 +767,7 @@
       }
       saveSettingsState(
         { ...state, habitTagColors: nextColors },
-        { allowHabitTagColorReset: true, allowStickyOverwrite: true }
+        { allowHabitTagColorReset: true, allowStickyOverwriteKeys: ["habitTagColors"] }
       );
     }
 
@@ -832,7 +838,7 @@
         nextState = matchupSync.state;
       }
 
-      saveSettingsState(nextState, { allowStickyOverwrite: true });
+      saveSettingsState(nextState, { allowScoringSettingsOverwrite: true });
     }
 
     function renderSleepBonusTiers(settings) {
