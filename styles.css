@@ -502,19 +502,20 @@ body {
   box-sizing: border-box;
 }
 
+.gamehub-page .matchup-scoreboard .avatar-frame img,
 .gamehub-page .matchup-scoreboard .avatar-frame .avatar-in-frame {
   position: absolute;
-  top: 22px;
-  left: 22px;
-  right: 22px;
-  bottom: 28px;
+  top: 16px;
+  left: 16px;
+  right: 16px;
+  bottom: 20px;
   width: auto;
   height: auto;
   object-fit: cover;
   object-position: 50% 35%;
-  border-radius: 0;
-  border: none;
-  box-shadow: none;
+  border-radius: 0 !important;
+  border: none !important;
+  box-shadow: none !important;
   z-index: 1;
 }
 
