@@ -725,6 +725,74 @@
         trace: 'TaskPointsCore.sleepPoints/workPoints/caloriesToPoints'
       });
 
+      // New: Historical audit for sleep/work/calories/mood entries
+      const metricCategories = new Set(['sleep', 'work', 'calories', 'mood']);
+      const historicalIssues = [];
+      const historicalExtras = [];
+      const historicalMissing = [];
+      const historicalDays = new Map();
+      const scoringSettings = TaskPointsCore.getScoringSettings(state);
+
+      (state.completions || []).forEach(c => {
+        if (!c) return;
+        const derived = TaskPointsCore.deriveCompletionPoints
+          ? TaskPointsCore.deriveCompletionPoints(c, scoringSettings)
+          : null;
+        if (!derived || !metricCategories.has(derived.formula)) return;
+
+        const expected = Number(derived.points) || 0;
+        const actualRaw = Number(c.points);
+        const actual = Number.isFinite(actualRaw) ? actualRaw : 0;
+        const delta = actual - expected;
+        const entryDateKey = TaskPointsCore.dateKey(c.completedAtISO || c.dateKey || '');
+
+        const dayTotals = historicalDays.get(entryDateKey) || { expected: 0, actual: 0, count: 0 };
+        dayTotals.expected += expected;
+        dayTotals.actual += actual;
+        dayTotals.count += 1;
+        historicalDays.set(entryDateKey, dayTotals);
+
+        if (!Number.isFinite(actualRaw)) {
+          historicalMissing.push(`${entryDateKey || 'Unknown date'}: ${derived.formula} "${c.title || c.id}" missing stored points (expected ${expected.toFixed(2)})`);
+          return;
+        }
+
+        if (Math.abs(delta) > 0.01) {
+          const label = `${entryDateKey || 'Unknown date'}: ${derived.formula} "${c.title || c.id}" expected ${expected.toFixed(2)}, got ${actual.toFixed(2)}`;
+          if (delta > 0) {
+            historicalExtras.push(`${label} (+${delta.toFixed(2)})`);
+          } else {
+            historicalMissing.push(`${label} (${delta.toFixed(2)})`);
+          }
+        }
+      });
+
+      historicalDays.forEach((totals, key) => {
+        const delta = totals.actual - totals.expected;
+        if (Math.abs(delta) > 0.01) {
+          historicalIssues.push(`${key || 'Unknown date'}: expected ${totals.expected.toFixed(2)}, got ${totals.actual.toFixed(2)} (Δ ${delta.toFixed(2)}) across ${totals.count} entries`);
+        }
+      });
+
+      const historicalDetails = [
+        ...historicalIssues,
+        ...historicalMissing,
+        ...historicalExtras
+      ];
+
+      checks.push({
+        id: 'historical-metrics',
+        title: 'Historical sleep/work/calories/mood points match current settings',
+        status: historicalDetails.length ? 'WARN' : 'PASS',
+        expected: 'All historical metric points align with current scoring settings',
+        actual: historicalDetails.length
+          ? `${historicalDetails.length} issue(s) · ${historicalMissing.length} missing · ${historicalExtras.length} extra`
+          : 'All aligned',
+        details: historicalDetails,
+        trace: 'TaskPointsCore.deriveCompletionPoints (scoringSettings)',
+        tips: 'If you changed scoring settings over time, older entries may legitimately differ from today’s formulas.'
+      });
+
       // D) Daily sources consistency
       checks.push({
         id: 'daily-sources',
