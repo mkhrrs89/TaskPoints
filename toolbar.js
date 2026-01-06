@@ -126,28 +126,32 @@ function buildMobileBottomNavLinks() {
   `;
 }
 
-function ensureMobileBottomNav() {
-  let nav = document.getElementById('mobileBottomNav');
-  if (!nav) {
-    nav = document.createElement('nav');
-    nav.id = 'mobileBottomNav';
-    nav.className =
-      'mobile-bottom-nav-shell fixed inset-x-0 bottom-0 z-40 md:hidden border-t border-slate-800 backdrop-blur text-slate-100 drop-shadow-sm';
-    nav.style.background = 'linear-gradient(180deg, #0f4d4d, #0a2f2f)';
-
-    const inner = document.createElement('div');
-    inner.className = 'max-w-6xl mx-auto flex justify-center py-3 pb-4 text-[11px] mobile-bottom-nav';
-    inner.innerHTML = buildMobileBottomNavLinks();
-    nav.appendChild(inner);
-
-    document.body.appendChild(nav);
-    setupDropdowns(nav);
-  } else {
-    const inner = nav.querySelector('.mobile-bottom-nav');
-    if (inner) inner.innerHTML = buildMobileBottomNavLinks();
-    setupDropdowns(nav);
+function ensureBottomToolbarMount() {
+  let mount = document.getElementById('bottomToolbarMount');
+  if (!mount) {
+    mount = document.createElement('div');
+    mount.id = 'bottomToolbarMount';
+    document.body.appendChild(mount);
   }
+  return mount;
+}
 
+function renderBottomToolbar() {
+  const mount = ensureBottomToolbarMount();
+  mount.innerHTML = `
+    <nav
+      id="mobileBottomNav"
+      class="mobile-bottom-nav-shell fixed inset-x-0 bottom-0 z-40 md:hidden border-t border-slate-800 backdrop-blur text-slate-100 drop-shadow-sm"
+      style="background: linear-gradient(180deg, #0f4d4d, #0a2f2f);"
+    >
+      <div class="max-w-6xl mx-auto flex justify-center py-3 pb-4 text-[11px] mobile-bottom-nav">
+        ${buildMobileBottomNavLinks()}
+      </div>
+    </nav>
+  `;
+
+  const nav = mount.querySelector('#mobileBottomNav');
+  if (nav) setupDropdowns(nav);
 }
 
 function setupMobileTasksMenu() {
@@ -214,7 +218,7 @@ function setupMobileTasksMenu() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  ensureMobileBottomNav();
+  renderBottomToolbar();
   setupMobileTasksMenu();
 });
 
