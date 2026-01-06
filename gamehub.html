@@ -529,11 +529,15 @@
       const img = document.createElement('img');
       img.src = url;
       img.alt = name || 'Player';
-      img.className = 'w-full h-full rounded-full object-cover border border-slate-700/60';
+      img.className = frame
+        ? 'avatar-in-frame'
+        : 'w-full h-full rounded-full object-cover border border-slate-700/60';
       wrap.appendChild(img);
     } else {
       const fallback = document.createElement('div');
-      fallback.className = 'w-full h-full rounded-full flex items-center justify-center text-[11px] font-bold border border-slate-700/60';
+      fallback.className = frame
+        ? 'avatar-in-frame avatar-fallback'
+        : 'w-full h-full rounded-full flex items-center justify-center text-[11px] font-bold border border-slate-700/60';
       fallback.style.background = 'linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02))';
       fallback.textContent = initials(name);
       wrap.appendChild(fallback);
