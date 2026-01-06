@@ -44,6 +44,19 @@
   min-height: 72px;
 }
 
+#bottomToolbarMount:empty::before {
+  content: "";
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 74px;
+  background: linear-gradient(180deg, rgba(15, 77, 77, 0.92), rgba(10, 47, 47, 0.92));
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  z-index: 9999;
+  backdrop-filter: blur(10px);
+}
+
 
 /* Base page setup - html/body defaults + how text looks. */
 html,

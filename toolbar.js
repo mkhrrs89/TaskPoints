@@ -217,10 +217,16 @@ function setupMobileTasksMenu() {
   });
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+function initToolbarNow() {
   renderBottomToolbar();
   setupMobileTasksMenu();
-});
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initToolbarNow, { once: true });
+} else {
+  initToolbarNow();
+}
 
 // ---------- Modal viewport + iOS focus zoom fix ----------
 // iOS Safari zooms when focusing inputs under 16px and can lose scroll when closing fixed-body modals.
