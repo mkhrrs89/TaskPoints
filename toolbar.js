@@ -154,6 +154,7 @@ function renderBottomToolbar() {
   if (nav) {
     setupDropdowns(nav);
     setupBottomNavPressAnimation(nav);
+    setupBottomNavDragExpand(nav);
   }
 }
 
@@ -231,6 +232,78 @@ function setupBottomNavPressAnimation(root = document) {
     void target.offsetWidth;
     target.classList.add('is-pressed');
     window.setTimeout(() => target.classList.remove('is-pressed'), 300);
+  });
+}
+
+function setupBottomNavDragExpand(nav) {
+  if (!nav) return;
+
+  const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+  const collapsedHeight = nav.getBoundingClientRect().height;
+  const expandedHeight = collapsedHeight * 3;
+  let currentHeight = collapsedHeight;
+  let startY = null;
+  let startHeight = collapsedHeight;
+  let isDragging = false;
+  let isExpanded = false;
+
+  const applyHeight = (height, { dragging = false } = {}) => {
+    currentHeight = clamp(height, collapsedHeight, expandedHeight);
+    nav.style.height = `${currentHeight}px`;
+    nav.style.setProperty('--mobile-bottom-nav-offset', `${currentHeight - collapsedHeight}px`);
+    nav.classList.toggle('is-dragging', dragging);
+  };
+
+  applyHeight(collapsedHeight);
+
+  const onPointerMove = (event) => {
+    if (startY === null) return;
+    const delta = startY - event.clientY;
+    if (!isDragging && Math.abs(delta) > 6) {
+      isDragging = true;
+      nav.dataset.ignoreClick = '1';
+    }
+    if (!isDragging) return;
+    event.preventDefault();
+    applyHeight(startHeight + delta, { dragging: true });
+  };
+
+  const settle = () => {
+    const midpoint = collapsedHeight + (expandedHeight - collapsedHeight) / 2;
+    isExpanded = currentHeight >= midpoint;
+    applyHeight(isExpanded ? expandedHeight : collapsedHeight, { dragging: false });
+    window.setTimeout(() => delete nav.dataset.ignoreClick, 200);
+  };
+
+  nav.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) return;
+    startY = event.clientY;
+    startHeight = currentHeight;
+    isDragging = false;
+    nav.setPointerCapture(event.pointerId);
+  });
+
+  nav.addEventListener('pointermove', onPointerMove);
+
+  nav.addEventListener('pointerup', (event) => {
+    if (startY === null) return;
+    if (isDragging) event.preventDefault();
+    startY = null;
+    nav.releasePointerCapture(event.pointerId);
+    settle();
+  });
+
+  nav.addEventListener('pointercancel', (event) => {
+    if (startY === null) return;
+    startY = null;
+    nav.releasePointerCapture(event.pointerId);
+    settle();
+  });
+
+  nav.addEventListener('click', (event) => {
+    if (!nav.dataset.ignoreClick) return;
+    event.preventDefault();
+    event.stopPropagation();
   });
 }
 
