@@ -1309,27 +1309,33 @@
       sortAndRender();
     }
 
+    function computeNiceYRange(datasets, { padPct = 0.12, minRange = 12 } = {}) {
+      const vals = [];
+      for (const ds of (datasets || [])) {
+        for (const v of (ds.data || [])) {
+          const n = Number(v);
+          if (Number.isFinite(n)) vals.push(n);
+        }
+      }
+      if (!vals.length) return { min: 0, max: 100 };
+
+      let min = Math.min(...vals);
+      let max = Math.max(...vals);
+
+      if (max - min < minRange) {
+        const mid = (min + max) / 2;
+        min = mid - minRange / 2;
+        max = mid + minRange / 2;
+      }
+
+      const pad = (max - min) * padPct;
+      return { min: min - pad, max: max + pad };
+    }
+
     function renderCharts(results) {
       const container = document.getElementById("simulationCharts");
       if (!container) return;
       container.innerHTML = "";
-
-      const getPaddedRange = values => {
-        const safeValues = values.length ? values : [0, 1];
-        const minValue = Math.min(...safeValues);
-        const maxValue = Math.max(...safeValues);
-        const range = maxValue - minValue || 1;
-        const padding = Math.max(range * 0.12, 5);
-        const paddedMin = minValue - padding;
-        const paddedMax = maxValue + padding;
-        return {
-          minValue,
-          maxValue,
-          paddedMin,
-          paddedMax,
-          range: paddedMax - paddedMin || 1
-        };
-      };
 
       const sortSelect = document.getElementById("simulationChartsSort");
       const sortValue = sortSelect?.value || "ppd-desc";
@@ -1370,8 +1376,11 @@
         const varianceTilt = player.varianceTilt;
         const riskyScore = getNormalizedRisky(player.risky);
         const scoreValues = scores.length ? scores : [baseline];
-        const rangeValues = [...scoreValues, baseline - variance, baseline + variance];
-        const { paddedMin, paddedMax, range } = getPaddedRange(rangeValues);
+        const yRange = computeNiceYRange([
+          { data: scoreValues },
+          { data: [baseline - variance, baseline + variance] }
+        ], { padPct: 0.12, minRange: 12 });
+        const range = yRange.max - yRange.min || 1;
         const tickCount = 5;
         const tickStep = range / tickCount;
 
@@ -1385,7 +1394,7 @@
           return padX + (idx / (scores.length - 1)) * (width - padX * 2);
         };
         const pointY = value => {
-          const normalized = (value - paddedMin) / range;
+          const normalized = (value - yRange.min) / range;
           return height - padY - normalized * (height - padY * 2);
         };
 
@@ -1395,7 +1404,7 @@
         const lowerY = pointY(baseline - variance);
         const yTicks = [];
         for (let i = 0; i <= tickCount; i += 1) {
-          const value = paddedMin + tickStep * i;
+          const value = yRange.min + tickStep * i;
           yTicks.push({ value, y: pointY(value) });
         }
         const yTickLines = yTicks.map(tick => `
@@ -1438,21 +1447,6 @@
       const selectList = document.getElementById("simulationCombinedSelectList");
       const selectLabel = document.getElementById("simulationCombinedSelectLabel");
       if (!chart || !legend || !selectList) return;
-
-      const getPaddedRange = values => {
-        const safeValues = values.length ? values : [0, 1];
-        const minValue = Math.min(...safeValues);
-        const maxValue = Math.max(...safeValues);
-        const range = maxValue - minValue || 1;
-        const padding = Math.max(range * 0.12, 5);
-        const paddedMin = minValue - padding;
-        const paddedMax = maxValue + padding;
-        return {
-          paddedMin,
-          paddedMax,
-          range: paddedMax - paddedMin || 1
-        };
-      };
 
       const palette = [
         "#38bdf8",
@@ -1502,10 +1496,11 @@
 
       const updateChart = () => {
         const selectedPlayers = players.filter(player => selectedIds.has(player.id));
-        const scaleSource = selectedPlayers.length
-          ? selectedPlayers.flatMap(player => player.scores)
-          : players.flatMap(player => player.scores);
-        const { paddedMin, paddedMax, range } = getPaddedRange(scaleSource);
+        const yRange = computeNiceYRange(
+          selectedPlayers.map(player => ({ data: player.scores })),
+          { padPct: 0.12, minRange: 12 }
+        );
+        const range = yRange.max - yRange.min || 1;
 
         const width = Math.max(320, results.dayLabels.length * 24);
         const height = 160;
@@ -1517,7 +1512,7 @@
           return padX + (idx / (results.dayLabels.length - 1)) * (width - padX * 2);
         };
         const pointY = value => {
-          const normalized = (value - paddedMin) / range;
+          const normalized = (value - yRange.min) / range;
           return height - padY - normalized * (height - padY * 2);
         };
 
@@ -1525,7 +1520,7 @@
         const tickStep = range / tickCount;
         const yTicks = [];
         for (let i = 0; i <= tickCount; i += 1) {
-          const value = paddedMin + tickStep * i;
+          const value = yRange.min + tickStep * i;
           yTicks.push({ value, y: pointY(value) });
         }
 
