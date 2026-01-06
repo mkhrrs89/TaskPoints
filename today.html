@@ -356,9 +356,12 @@
         const set = new Set(todayStore.taskIds);
         dueToday.forEach(id => set.add(id));
 
-        // drop ids that no longer exist
+        // drop ids that no longer exist or aren't due today (unless completed today)
         const existingIds = new Set(tasks.map(t => t && t.id).filter(Boolean));
-        todayStore.taskIds = Array.from(set).filter(id => existingIds.has(id) || dueToday.includes(id));
+        todayStore.taskIds = Array.from(set).filter(id => {
+          if (!existingIds.has(id)) return false;
+          return dueToday.includes(id) || hasTaskCompletionToday(id, dayKey);
+        });
         syncTodayOrder();
         saveTodayStore();
       }
