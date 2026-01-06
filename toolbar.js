@@ -1117,17 +1117,37 @@ function getHandler(name, fallback) {
   return fallback;
 }
 
+function exportOGDataOnly() {
+  if (typeof window.exportData === 'function' && window.exportData !== exportOGDataOnly) {
+    return window.exportData();
+  }
+  return exportDataFallback();
+}
+
+function exportBackupWithImages() {
+  if (typeof window.exportBackupWithImages === 'function' && window.exportBackupWithImages !== exportBackupWithImages) {
+    return window.exportBackupWithImages();
+  }
+  return exportBackupWithImagesFallback();
+}
+
+if (typeof window.exportOGDataOnly !== 'function') {
+  window.exportOGDataOnly = exportOGDataOnly;
+}
+
+if (typeof window.exportBackupWithImages !== 'function') {
+  window.exportBackupWithImages = exportBackupWithImages;
+}
+
 document.addEventListener('DOMContentLoaded', () => {
-  const exportHandler = getHandler('exportData', exportDataFallback);
-  const exportImagesHandler = getHandler('exportBackupWithImages', exportBackupWithImagesFallback);
   const fileHandler = getHandler('importFile', importFileFallback);
   const pasteHandler = getHandler('importPaste', importPasteFallback);
 
   document.querySelectorAll('[data-export-button]').forEach((btn) => {
-    btn.addEventListener('click', exportHandler);
+    btn.addEventListener('click', exportBackupWithImages);
   });
   document.querySelectorAll('[data-export-images]').forEach((btn) => {
-    btn.addEventListener('click', exportImagesHandler);
+    btn.addEventListener('click', exportOGDataOnly);
   });
 
   document.querySelectorAll('[data-import-input]').forEach((input) => {
