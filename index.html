@@ -4649,10 +4649,14 @@ const sleepSummaryImpact = $('sleepSummaryImpact');
       el.classList.add('cursor-pointer');
       el.setAttribute('role', 'button');
       el.setAttribute('tabindex', '0');
-      el.onclick = editTodaySleepScore;
+      el.onclick = (ev) => {
+        ev?.stopPropagation?.();
+        editTodaySleepScore();
+      };
       el.onkeydown = (ev) => {
         if (ev.key === 'Enter' || ev.key === ' ') {
           ev.preventDefault();
+          ev.stopPropagation();
           editTodaySleepScore();
         }
       };
@@ -4851,10 +4855,14 @@ const summaryValue = $('caloriesSummaryValue');
       el.classList.add('cursor-pointer');
       el.setAttribute('role', 'button');
       el.setAttribute('tabindex', '0');
-      el.onclick = editTodayCalories;
+      el.onclick = (ev) => {
+        ev?.stopPropagation?.();
+        editTodayCalories();
+      };
       el.onkeydown = (ev) => {
         if (ev.key === 'Enter' || ev.key === ' ') {
           ev.preventDefault();
+          ev.stopPropagation();
           editTodayCalories();
         }
       };
@@ -5098,10 +5106,14 @@ const workSummaryHoursValue = document.getElementById('workSummaryHoursValue');
       el.setAttribute('role', 'button');
       el.setAttribute('tabindex', '0');
       el.title = "Tap/click to edit today's work score";
-      el.onclick = editTodayWork;
+      el.onclick = (ev) => {
+        ev?.stopPropagation?.();
+        editTodayWork();
+      };
       el.onkeydown = (ev) => {
         if (ev.key === 'Enter' || ev.key === ' ') {
           ev.preventDefault();
+          ev.stopPropagation();
           editTodayWork();
         }
       };
@@ -5352,10 +5364,14 @@ const moodSummaryValue = document.getElementById('moodSummaryValue');
       el.setAttribute('role', 'button');
       el.setAttribute('tabindex', '0');
       el.title = "Tap/click to edit today's mood score";
-      el.onclick = editTodayMood;
+      el.onclick = (ev) => {
+        ev?.stopPropagation?.();
+        editTodayMood();
+      };
       el.onkeydown = (ev) => {
         if (ev.key === 'Enter' || ev.key === ' ') {
           ev.preventDefault();
+          ev.stopPropagation();
           editTodayMood();
         }
       };
