@@ -956,7 +956,7 @@ body {
 
     /* Tasks - teal */
     .todayBreakdown-tasks{
-      background:linear-gradient(90deg, #0f4d4d, #0a2f2f);
+      background:linear-gradient(90deg, #286969, #0a2f2f);
     }
 
 /* Habits - creamsicle orange */
@@ -969,19 +969,19 @@ body {
   background: linear-gradient(90deg, #7f1d1d, #4a0b0b, #2a0606);
 }
 
-/* Flux - aqua */
+/* Flex - aqua */
 .todayBreakdown-flex{
   background: linear-gradient(90deg, #67e8f9, #22c5c5, #0e7490);
 }
 
 /* Calories - forest green */
 .todayBreakdown-calories{
-  background: linear-gradient(90deg, #14532d, #0B3B11);
+  background: linear-gradient(90deg, #305314, #1F3B0B);
 }
 
 /* Inertia - light gray */
 .todayBreakdown-inertia{
-  background: linear-gradient(90deg, #e2e8f0, #7A7A7A);
+  background: linear-gradient(90deg, #B7BCC4, #7A7A7A);
 }
 
 
@@ -2844,6 +2844,7 @@ body {
     flex-wrap: wrap;
     max-width: 100%;
   }
+
 
 
 
