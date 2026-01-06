@@ -1003,6 +1003,44 @@
         trace: 'Snapshot validation'
       });
 
+      // New: Audit self-check (verifies other checks are wired correctly)
+      const auditMetaIssues = [];
+      const seenCheckIds = new Set();
+      const allowedStatuses = new Set(['PASS', 'WARN', 'FAIL']);
+
+      checks.forEach(check => {
+        if (!check || typeof check !== 'object') {
+          auditMetaIssues.push('Found non-object audit check entry.');
+          return;
+        }
+        if (!check.id) auditMetaIssues.push(`Check "${check.title || 'unknown'}" missing id.`);
+        if (!check.title) auditMetaIssues.push(`Check ${check.id || 'unknown'} missing title.`);
+        if (!allowedStatuses.has(check.status)) {
+          auditMetaIssues.push(`Check ${check.id || check.title || 'unknown'} has invalid status "${check.status}".`);
+        }
+        if (!check.trace) auditMetaIssues.push(`Check ${check.id || check.title || 'unknown'} missing trace.`);
+        if (check.expected === undefined && check.actual === undefined) {
+          auditMetaIssues.push(`Check ${check.id || check.title || 'unknown'} missing expected/actual values.`);
+        }
+        if (check.id) {
+          if (seenCheckIds.has(check.id)) {
+            auditMetaIssues.push(`Duplicate check id "${check.id}".`);
+          }
+          seenCheckIds.add(check.id);
+        }
+      });
+
+      checks.push({
+        id: 'audit-self-check',
+        title: 'Audit checks wired correctly',
+        status: auditMetaIssues.length ? 'FAIL' : 'PASS',
+        expected: 'Every check has id, title, status, trace, and expected/actual',
+        actual: auditMetaIssues.length ? `${auditMetaIssues.length} issue(s)` : 'All checks present',
+        details: auditMetaIssues,
+        trace: 'audit.html runAudit → checks[] schema validation',
+        tips: 'If this fails, a check is missing metadata and may not be evaluating the intended data.'
+      });
+
       renderChecks(checks, dateKey);
       renderHighlights(checks, totals);
 
