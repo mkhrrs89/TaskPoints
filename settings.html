@@ -1878,29 +1878,33 @@ normalizeSvgTickText(svg);
       if (runButton && resultsWrapper && daysInput && downloadButton) {
         runButton.addEventListener("click", () => {
           alert("clicked"); // TEMP
-          const days = Number(daysInput.value || 0);
-          if (!Number.isFinite(days) || days < 1) {
-            alert("Enter a valid number of days (1 or more).");
-            return;
-          }
+try {
+const days = Number(daysInput.value || 0);
+if (!Number.isFinite(days) || days < 1) {
+alert("Enter a valid number of days (1 or more).");
+return;
+}
+        const results = runSimulation(Math.floor(days));
+        if (!results.players.length) {
+          resultsWrapper.classList.add("hidden");
+          downloadButton.disabled = true;
+          alert("No players found. Add players on the Game page to run a simulation.");
+          return;
+        }
 
-          const results = runSimulation(Math.floor(days));
-          if (!results.players.length) {
-            resultsWrapper.classList.add("hidden");
-            downloadButton.disabled = true;
-            alert("No players found. Add players on the Game page to run a simulation.");
-            return;
-          }
-
-          latestSimulation = results;
-          renderScoresTable(results);
-          renderSummaryTable(results);
-          renderCharts(results);
-          renderCombinedChart(results);
-          resultsWrapper.classList.remove("hidden");
-          downloadButton.disabled = false;
-          collapseSimulationSections();
-        });
+        latestSimulation = results;
+        renderScoresTable(results);
+        renderSummaryTable(results);
+        renderCharts(results);
+        renderCombinedChart(results);
+        resultsWrapper.classList.remove("hidden");
+        downloadButton.disabled = false;
+        collapseSimulationSections();
+      } catch (e) {
+        console.error(e);
+        alert("Run Simulation crashed: " + (e?.message || e));
+      }
+    });
 
         downloadButton.addEventListener("click", () => {
           if (!latestSimulation) return;
