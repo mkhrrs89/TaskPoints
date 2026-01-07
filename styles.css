@@ -40,6 +40,8 @@
   --accent3: #22c55e;  /* success/green accent */
   --tp-safe-bottom: env(safe-area-inset-bottom, 0px);
   --tp-toolbar-height: 74px;
+  --tp-menu-gap: 8px;
+  --tp-toolbar-stack-height: var(--tp-toolbar-height);
   --safe-bottom: var(--tp-safe-bottom);
 }
 
@@ -940,7 +942,7 @@ body {
 
 .mobile-task-menu{
   position: absolute;
-  bottom: calc(var(--tp-toolbar-height) + var(--tp-safe-bottom) + var(--mobile-bottom-nav-offset, 0px));
+  bottom: calc(var(--tp-toolbar-stack-height) + var(--tp-menu-gap));
   left: 50%;
   transform: translateX(-50%);
   background: linear-gradient(180deg, #0f4d4d, #0a2f2f);
@@ -957,7 +959,7 @@ body {
 
 .mobile-bottom-dropdown .dropdown-menu{
   top: auto;
-  bottom: calc(var(--tp-toolbar-height) + var(--tp-safe-bottom) + var(--mobile-bottom-nav-offset, 0px));
+  bottom: calc(var(--tp-toolbar-stack-height) + var(--tp-menu-gap));
   left: 50%;
   transform: translateX(-50%);
   background: linear-gradient(180deg, #0f4d4d, #0a2f2f);
@@ -2927,7 +2929,6 @@ body {
     flex-wrap: wrap;
     max-width: 100%;
   }
-
 
 
 
