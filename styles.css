@@ -840,22 +840,15 @@ body {
 }
 
 .mobile-bottom-nav-shell{
-  bottom: var(--tp-safe-bottom);
-  height: var(--tp-toolbar-height);
+  bottom: 0;
+  height: calc(var(--tp-toolbar-height) + var(--tp-safe-bottom));
+  padding-bottom: var(--tp-safe-bottom);
+  box-sizing: border-box;
+  isolation: isolate;
+  z-index: 40;
   transition: transform 160ms ease, height 220ms ease;
   will-change: transform, height;
   touch-action: none;
-}
-
-.mobile-bottom-nav-shell::after{
-  content: "";
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: var(--tp-safe-bottom);
-  background: inherit;
-  pointer-events: none;
 }
 
 .mobile-bottom-nav-shell.is-dragging{
@@ -2934,7 +2927,6 @@ body {
     flex-wrap: wrap;
     max-width: 100%;
   }
-
 
 
 
