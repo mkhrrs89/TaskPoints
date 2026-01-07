@@ -1350,7 +1350,7 @@ if (!isFinite(ratio) || Math.abs(ratio - 1) < 0.01) return;
 svg.querySelectorAll(".tp-yTick").forEach(t => {
 const x = parseFloat(t.getAttribute("x")) || 0;
 const y = parseFloat(t.getAttribute("y")) || 0;
-t.setAttribute("transform", translate(${x} ${y}) scale(1 ${ratio}) translate(${-x} ${-y}));
+t.setAttribute("transform", 	ranslate(${x} ${y}) scale(1 ${ratio}) translate(${-x} ${-y})`);`
 });
 }
     function renderCharts(results) {
