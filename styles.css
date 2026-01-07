@@ -38,10 +38,11 @@
   --accent:  #4f9cff;  /* primary accent color */
   --accent2: #7c5cff;  /* secondary accent color */
   --accent3: #22c55e;  /* success/green accent */
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 #bottomToolbarMount {
-  min-height: 72px;
+  min-height: calc(72px + var(--safe-bottom));
 }
 
 #bottomToolbarMount:empty::before {
@@ -50,7 +51,7 @@
   left: 0;
   right: 0;
   bottom: 0;
-  height: 74px;
+  height: calc(74px + var(--safe-bottom));
   background: linear-gradient(180deg, rgba(15, 77, 77, 0.92), rgba(10, 47, 47, 0.92));
   border-top: 1px solid rgba(255, 255, 255, 0.06);
   z-index: 9999;
@@ -838,6 +839,7 @@ body {
 
 .mobile-bottom-nav-shell{
   bottom: var(--mobile-bottom-nav-lift, 18px);
+  padding-bottom: var(--safe-bottom);
   transition: transform 160ms ease, height 220ms ease;
   will-change: transform, height;
   touch-action: none;
@@ -932,7 +934,7 @@ body {
 
 .mobile-task-menu{
   position: absolute;
-  bottom: calc(62px + var(--mobile-bottom-nav-offset, 0px) + var(--mobile-bottom-nav-lift, 18px));
+  bottom: calc(62px + var(--safe-bottom) + var(--mobile-bottom-nav-offset, 0px) + var(--mobile-bottom-nav-lift, 18px));
   left: 50%;
   transform: translateX(-50%);
   background: linear-gradient(180deg, #0f4d4d, #0a2f2f);
@@ -949,7 +951,7 @@ body {
 
 .mobile-bottom-dropdown .dropdown-menu{
   top: auto;
-  bottom: calc(62px + var(--mobile-bottom-nav-offset, 0px) + var(--mobile-bottom-nav-lift, 18px));
+  bottom: calc(62px + var(--safe-bottom) + var(--mobile-bottom-nav-offset, 0px) + var(--mobile-bottom-nav-lift, 18px));
   left: 50%;
   transform: translateX(-50%);
   background: linear-gradient(180deg, #0f4d4d, #0a2f2f);
