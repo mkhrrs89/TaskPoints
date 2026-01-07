@@ -526,17 +526,20 @@
       }
 
       const normalized = normalizeSettingsState(root);
+      if (!Object.prototype.hasOwnProperty.call(root, "scoringSettings")) {
+  delete normalized.scoringSettings;
+}
       if (window.TaskPointsCore?.saveAppState) {
         TaskPointsCore.saveAppState(normalized, {
           storageKey: SETTINGS_STORAGE_KEY,
-          allowScoringSettingsOverwrite: true,
+          allowScoringSettingsOverwrite: false,
           allowHabitTagColorReset: true,
           allowStickyOverwriteKeys: ["youImageId", "habitTagColors"]
         });
       } else if (window.TaskPointsCore?.mergeAndSaveState) {
         TaskPointsCore.mergeAndSaveState(normalized, {
           storageKey: SETTINGS_STORAGE_KEY,
-          allowScoringSettingsOverwrite: true,
+          allowScoringSettingsOverwrite: false,
           allowHabitTagColorReset: true,
           allowStickyOverwriteKeys: ["youImageId", "habitTagColors"]
         });
