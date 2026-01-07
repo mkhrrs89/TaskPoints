@@ -1331,7 +1331,28 @@
       const pad = (max - min) * padPct;
       return { min: min - pad, max: max + pad };
     }
+    
+function normalizeSvgTickText(svg) {
+if (!svg) return;
+const vb = svg.viewBox && svg.viewBox.baseVal;
+if (!vb || !vb.width || !vb.height) return;
 
+const rect = svg.getBoundingClientRect();
+if (!rect.width || !rect.height) return;
+
+const sx = rect.width / vb.width;
+const sy = rect.height / vb.height;
+if (!isFinite(sx) || !isFinite(sy) || sy === 0) return;
+
+const ratio = sx / sy; // makes text scale uniformly (y matches x)
+if (!isFinite(ratio) || Math.abs(ratio - 1) < 0.01) return;
+
+svg.querySelectorAll(".tp-yTick").forEach(t => {
+const x = parseFloat(t.getAttribute("x")) || 0;
+const y = parseFloat(t.getAttribute("y")) || 0;
+t.setAttribute("transform", translate(${x} ${y}) scale(1 ${ratio}) translate(${-x} ${-y}));
+});
+}
     function renderCharts(results) {
       const container = document.getElementById("simulationCharts");
       if (!container) return;
@@ -1411,7 +1432,7 @@
             <line x1="${padX - 4}" y1="${tick.y}" x2="${width - padX}" y2="${tick.y}" stroke="#334155" stroke-dasharray="2 6" />
           `).join("");
         const yTickLabels = yTicks.map(tick => `
-            <text x="${padX - 8}" y="${tick.y + 3}" fill="#94a3b8" font-size="9" text-anchor="end">${formatNumber(tick.value)}</text>
+            <text class="tp-yTick" x="${padX - 8}" y="${tick.y + 3}" fill="#94a3b8" font-size="9" text-anchor="end">${formatNumber(tick.value)}</text>
           `).join("");
 
         const wrapper = document.createElement("div");
@@ -1438,6 +1459,10 @@
           </div>
         `;
         container.appendChild(wrapper);
+        requestAnimationFrame(() => {
+const svg = wrapper.querySelector("svg");
+normalizeSvgTickText(svg);
+});
       });
     }
 
