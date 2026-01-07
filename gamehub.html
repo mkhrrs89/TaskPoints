@@ -1443,8 +1443,11 @@ function setHTML(id, html){
   }
 
   function renderAll(){
-    let state = loadState();
-    let changed = false;
+    const perfLabel = window.TP_DEBUG_PERF ? 'renderGameHub' : null;
+    if (perfLabel) console.time(perfLabel);
+    try {
+      let state = loadState();
+      let changed = false;
 
     if (window.TaskPointsCore && typeof TaskPointsCore.normalizeState === 'function') {
       state = TaskPointsCore.normalizeState(state || {});
@@ -1462,17 +1465,20 @@ function setHTML(id, html){
       changed = changed || !!res2.changed;
     }
 
-    if (changed) saveState(state);
-    currentState = state;
+      if (changed) saveState(state);
+      currentState = state;
 
-    const { standings } = renderStandings(state);
-    renderBestWorstStats(state, standings);
-    renderRatingsLeaderboards(state, standings);
-    renderSurprisesBusts(state, standings);
-    renderTodaysMatchup(state);
+      const { standings } = renderStandings(state);
+      renderBestWorstStats(state, standings);
+      renderRatingsLeaderboards(state, standings);
+      renderSurprisesBusts(state, standings);
+      renderTodaysMatchup(state);
+    } finally {
+      if (perfLabel) console.timeEnd(perfLabel);
+    }
   }
 
-  $('refreshGameHub')?.addEventListener('click', renderAll);
+  $('refreshGameHub')?.addEventListener('click', () => scheduleRender(renderAll));
 
   $('playerDetailsModal')?.addEventListener('click', (event) => {
     if (event.target && event.target.hasAttribute('data-modal-close')) {
@@ -1514,7 +1520,7 @@ function setHTML(id, html){
     saveState(state);
     currentState = state;
     closePlayerModal();
-    renderAll();
+    scheduleRender(renderAll);
   });
 
   document.addEventListener('keydown', (event) => {
@@ -1530,7 +1536,7 @@ function setHTML(id, html){
     imageUrlCache.clear();
   });
 
-  document.addEventListener('DOMContentLoaded', renderAll);
+  document.addEventListener('DOMContentLoaded', () => scheduleRender(renderAll));
 })();
 </script>
   <div id="bottomToolbarMount"></div>

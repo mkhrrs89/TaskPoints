@@ -617,13 +617,13 @@ function syncScrollContainers(a,b){
     lock=true;
     b.scrollLeft = a.scrollLeft;
     lock=false;
-  });
+  }, { passive: true });
   b.addEventListener('scroll',()=>{
     if(lock) return;
     lock=true;
     a.scrollLeft = b.scrollLeft;
     lock=false;
-  });
+  }, { passive: true });
 
   if(keyA){ a.dataset.syncKey = keyA; a.dataset.syncedWith = b.id||''; }
   if(keyB){ b.dataset.syncKey = keyB; b.dataset.syncedWith = a.id||''; }

@@ -4,6 +4,24 @@
   const IMAGE_DB_NAME = "taskpoints";
   const IMAGE_STORE_NAME = "images";
 
+  if (!global.scheduleRender) {
+    const queue = new Set();
+    let scheduled = false;
+    global.scheduleRender = (fn) => {
+      if (typeof fn !== 'function') return;
+      queue.add(fn);
+      if (scheduled) return;
+      scheduled = true;
+      const raf = global.requestAnimationFrame || ((cb) => setTimeout(cb, 0));
+      raf(() => {
+        scheduled = false;
+        const toRun = Array.from(queue);
+        queue.clear();
+        toRun.forEach((cb) => cb());
+      });
+    };
+  }
+
   let imageDbPromise = null;
 
   function openImageDb() {
@@ -627,7 +645,7 @@
     });
   }
 
-  function mergeAndSaveState(nextState, options = {}) {
+  function mergeState(nextState, options = {}) {
     const storageKey = options.storageKey || STORAGE_KEY;
     const allowHabitTagColorReset = Boolean(options.allowHabitTagColorReset);
     let existing = {};
@@ -700,18 +718,23 @@
     const normalized = normalizeState(mergedSnapshot);
     const merged = { ...mergedSnapshot, ...normalized };
 
+    return { state: merged, storageKey };
+  }
+
+  function saveStateSnapshot(state, options = {}) {
+    const storageKey = options.storageKey || STORAGE_KEY;
     const attemptSave = (candidate, trimmed) => {
       localStorage.setItem(storageKey, JSON.stringify(candidate));
       return { state: candidate, trimmed };
     };
 
     try {
-      return attemptSave(merged, false);
+      return attemptSave(state, false);
     } catch (err) {
       if (!isQuotaError(err)) throw err;
     }
 
-    const trimmed = pruneStateForStorage(merged, options.limits);
+    const trimmed = pruneStateForStorage(state, options.limits);
     try {
       return attemptSave(trimmed, true);
     } catch (err) {
@@ -736,7 +759,7 @@
         maxWorkHistory: capLimit(options.limits?.maxWorkHistory, limits.maxWorkHistory),
         stripImages: false
       };
-      const tightened = pruneStateForStorage(merged, tightenedLimits);
+      const tightened = pruneStateForStorage(state, tightenedLimits);
       try {
         return attemptSave(tightened, true);
       } catch (err) {
@@ -801,6 +824,11 @@
     };
 
     return attemptSave(emergency, true);
+  }
+
+  function mergeAndSaveState(nextState, options = {}) {
+    const merged = mergeState(nextState, options);
+    return saveStateSnapshot(merged.state, { ...options, storageKey: merged.storageKey });
   }
 
   function saveAppState(nextState, options = {}, maybeOptions = {}) {
@@ -1619,6 +1647,8 @@
     normalizeState,
     loadAppState,
     pruneStateForStorage,
+    mergeState,
+    saveStateSnapshot,
     mergeAndSaveState,
     saveAppState,
     dateKey,
