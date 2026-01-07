@@ -1884,7 +1884,6 @@ normalizeSvgTickText(svg);
 
       if (runButton && resultsWrapper && daysInput && downloadButton) {
         runButton.addEventListener("click", () => {
-          alert("clicked"); // TEMP
 try {
 const days = Number(daysInput.value || 0);
 if (!Number.isFinite(days) || days < 1) {
