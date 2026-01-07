@@ -1333,26 +1333,33 @@
     }
     
 function normalizeSvgTickText(svg) {
-if (!svg) return;
-const vb = svg.viewBox && svg.viewBox.baseVal;
-if (!vb || !vb.width || !vb.height) return;
+  if (!svg) return;
 
-const rect = svg.getBoundingClientRect();
-if (!rect.width || !rect.height) return;
+  const vb = svg.viewBox && svg.viewBox.baseVal;
+  if (!vb || !vb.width || !vb.height) return;
 
-const sx = rect.width / vb.width;
-const sy = rect.height / vb.height;
-if (!isFinite(sx) || !isFinite(sy) || sy === 0) return;
+  const rect = svg.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
 
-const ratio = sx / sy; // makes text scale uniformly (y matches x)
-if (!isFinite(ratio) || Math.abs(ratio - 1) < 0.01) return;
+  const sx = rect.width / vb.width;
+  const sy = rect.height / vb.height;
+  if (!Number.isFinite(sx) || !Number.isFinite(sy) || sy === 0) return;
 
-svg.querySelectorAll(".tp-yTick").forEach(t => {
-const x = parseFloat(t.getAttribute("x")) || 0;
-const y = parseFloat(t.getAttribute("y")) || 0;
-t.setAttribute("transform", translate(${x} ${y}) scale(1 ${ratio}) translate(${-x} ${-y}));
-});
+  const ratio = sx / sy; // counter-scale Y so text isn't vertically stretched
+  if (!Number.isFinite(ratio) || Math.abs(ratio - 1) < 0.01) return;
+
+  svg.querySelectorAll(".tp-yTick").forEach(t => {
+    const x = parseFloat(t.getAttribute("x")) || 0;
+    const y = parseFloat(t.getAttribute("y")) || 0;
+
+    // IMPORTANT: this must be a STRING (template literal)
+    t.setAttribute(
+      "transform",
+      `translate(${x} ${y}) scale(1 ${ratio}) translate(${-x} ${-y})`
+    );
+  });
 }
+
     function renderCharts(results) {
       const container = document.getElementById("simulationCharts");
       if (!container) return;
