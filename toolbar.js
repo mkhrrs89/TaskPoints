@@ -495,10 +495,8 @@ function setupDebouncedPersistence() {
     }
     const storageKey = options.storageKey || core.STORAGE_KEY || STORAGE_KEY_FALLBACK;
     const pending = pendingByKey.get(storageKey);
-    const raw = pending?.raw ?? localStorage.getItem(storageKey);
-    const merged = core.mergeState(nextState, { ...options, raw, storageKey });
-    const serialized = JSON.stringify(merged.state);
-    pendingByKey.set(storageKey, { state: merged.state, options: { ...options, storageKey }, raw: serialized });
+    const merged = core.mergeState(nextState, { ...options, storageKey, existing: pending?.state });
+    pendingByKey.set(storageKey, { state: merged.state, options: { ...options, storageKey } });
     scheduleFlush(storageKey);
     return { state: merged.state, trimmed: false };
   };

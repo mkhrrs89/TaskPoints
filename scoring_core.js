@@ -649,12 +649,16 @@
     const storageKey = options.storageKey || STORAGE_KEY;
     const allowHabitTagColorReset = Boolean(options.allowHabitTagColorReset);
     let existing = {};
-    try {
-      const raw = options.raw ?? localStorage.getItem(storageKey);
-      existing = raw ? (JSON.parse(raw) || {}) : {};
-    } catch (e) {
-      console.warn('Failed to parse existing TaskPoints storage; saving fresh state.', e);
-      existing = {};
+    if (options.existing && typeof options.existing === 'object') {
+      existing = options.existing;
+    } else {
+      try {
+        const raw = options.raw ?? localStorage.getItem(storageKey);
+        existing = raw ? (JSON.parse(raw) || {}) : {};
+      } catch (e) {
+        console.warn('Failed to parse existing TaskPoints storage; saving fresh state.', e);
+        existing = {};
+      }
     }
 
     const mergedSnapshot = deepMerge(existing, nextState || {});
