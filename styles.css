@@ -837,6 +837,7 @@ body {
 }
 
 .mobile-bottom-nav-shell{
+  bottom: var(--mobile-bottom-nav-lift, 18px);
   transition: transform 160ms ease, height 220ms ease;
   will-change: transform, height;
   touch-action: none;
@@ -931,7 +932,7 @@ body {
 
 .mobile-task-menu{
   position: absolute;
-  bottom: calc(62px + var(--mobile-bottom-nav-offset, 0px));
+  bottom: calc(62px + var(--mobile-bottom-nav-offset, 0px) + var(--mobile-bottom-nav-lift, 18px));
   left: 50%;
   transform: translateX(-50%);
   background: linear-gradient(180deg, #0f4d4d, #0a2f2f);
@@ -948,7 +949,7 @@ body {
 
 .mobile-bottom-dropdown .dropdown-menu{
   top: auto;
-  bottom: calc(62px + var(--mobile-bottom-nav-offset, 0px));
+  bottom: calc(62px + var(--mobile-bottom-nav-offset, 0px) + var(--mobile-bottom-nav-lift, 18px));
   left: 50%;
   transform: translateX(-50%);
   background: linear-gradient(180deg, #0f4d4d, #0a2f2f);
