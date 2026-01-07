@@ -59,11 +59,12 @@ function setupDropdowns(root = document) {
       e.preventDefault();
       e.stopPropagation();
 
-      const isOpening = !dropdown.classList.contains('open');
-      closeAllDropdowns(isOpening ? dropdown : null);
+// close other dropdowns, but DO NOT close this one before toggling
+closeAllDropdowns(dropdown);
 
-      dropdown.classList.toggle('open');
-      setExpanded(dropdown.classList.contains('open'));
+dropdown.classList.toggle('open');
+setExpanded(dropdown.classList.contains('open'));
+
     }
 
     // Use pointerdown for mobile reliability
