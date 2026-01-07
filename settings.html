@@ -1423,7 +1423,7 @@
               Baseline ${formatNumber(baseline)} • Variance ±${formatNumber(variance)} • Variance Tilt ${formatNumber(varianceTilt)}% • Risky ${formatNumber(riskyScore)}
             </div>
           </div>
-          <svg viewBox="0 0 ${width} ${height}" class="w-full h-40 rounded-xl bg-black/20 border border-white/5">
+          <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" class="w-full h-40 rounded-xl bg-black/20 border border-white/5">
             ${yTickLines}
             ${yTickLabels}
             <line x1="${padX}" y1="${baselineY}" x2="${width - padX}" y2="${baselineY}" stroke="#38bdf8" stroke-dasharray="4 4" />
@@ -1537,7 +1537,7 @@
         }).join("");
 
         chart.innerHTML = `
-          <svg viewBox="0 0 ${width} ${height}" class="w-full h-44 rounded-xl">
+          <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" class="w-full h-44 rounded-xl">
             ${yTickLines}
             ${yTickLabels}
             ${lines}
