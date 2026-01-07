@@ -132,6 +132,8 @@ function ensureBottomToolbarMount() {
     mount = document.createElement('div');
     mount.id = 'bottomToolbarMount';
     document.body.appendChild(mount);
+  } else if (mount.parentElement !== document.body) {
+    document.body.appendChild(mount);
   }
   return mount;
 }
