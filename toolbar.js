@@ -127,7 +127,9 @@ function buildMobileBottomNavLinks() {
 }
 
 function ensureBottomToolbarMount() {
-  let mount = document.getElementById('bottomToolbarMount');
+  const mounts = Array.from(document.querySelectorAll('#bottomToolbarMount'));
+  let mount = mounts.find((item) => item.parentElement === document.body) || mounts[0];
+
   if (!mount) {
     mount = document.createElement('div');
     mount.id = 'bottomToolbarMount';
@@ -135,11 +137,21 @@ function ensureBottomToolbarMount() {
   } else if (mount.parentElement !== document.body) {
     document.body.appendChild(mount);
   }
+
+  mounts.forEach((item) => {
+    if (item !== mount) item.remove();
+  });
+
   return mount;
 }
 
 function renderBottomToolbar() {
   const mount = ensureBottomToolbarMount();
+  const existingNavs = Array.from(document.querySelectorAll('#mobileBottomNav'));
+  existingNavs.forEach((nav) => {
+    if (nav.parentElement !== mount) nav.remove();
+  });
+
   mount.innerHTML = `
     <nav
       id="mobileBottomNav"
@@ -151,6 +163,11 @@ function renderBottomToolbar() {
       </div>
     </nav>
   `;
+
+  const duplicateNavs = Array.from(document.querySelectorAll('#mobileBottomNav'));
+  duplicateNavs.forEach((nav) => {
+    if (nav.parentElement !== mount) nav.remove();
+  });
 
   const nav = mount.querySelector('#mobileBottomNav');
   if (nav) {
