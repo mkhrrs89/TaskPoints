@@ -516,10 +516,16 @@ function setupDebouncedPersistence() {
   core.saveAppState = debouncedSave;
   core.mergeAndSaveState = debouncedMerge;
 
-  window.addEventListener('beforeunload', flushAll);
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') flushAll();
-  });
+  if (!window.__tpDebouncedPersistenceListeners) {
+    window.__tpDebouncedPersistenceListeners = true;
+    window.addEventListener('beforeunload', flushAll);
+    // iOS Safari can skip beforeunload; pagehide/freeze ensures a final flush.
+    window.addEventListener('pagehide', flushAll, { capture: true });
+    window.addEventListener('freeze', flushAll, { capture: true });
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') flushAll();
+    });
+  }
 }
 
 setupDebouncedPersistence();
