@@ -3375,6 +3375,9 @@ function renderHabitRow(h, days, wrap, options = {}) {
 
 
 
+let habitTapHandlerBound = false;
+let viceTapHandlerBound = false;
+
 function renderHabits(){
   const wrap  = $('habitsList');
   const empty = $('habitsEmpty');
@@ -3437,11 +3440,14 @@ function renderHabits(){
     renderHabitRow(entry.habit, days, wrap, { showMoveButtons: sortMode === 'custom' });
   });
 
-  if (!wrap.dataset.habitDelegated) {
-    wrap.dataset.habitDelegated = 'true';
-    wrap.addEventListener('click', (e) => {
+  if (!habitTapHandlerBound) {
+    habitTapHandlerBound = true;
+    wrap.addEventListener('pointerup', (e) => {
       const bubble = e.target.closest('.habitDay[data-habit][data-day]');
       if (!bubble || !wrap.contains(bubble)) return;
+      if (window.TP_DEBUG_PERF) {
+        console.count('habitTapHandler');
+      }
       handleHabitBubbleTap(bubble);
     });
   }
@@ -3581,11 +3587,14 @@ const nameHtml = `
 
   });
 
-  if (!wrap.dataset.viceDelegated) {
-    wrap.dataset.viceDelegated = 'true';
-    wrap.addEventListener('click', (e) => {
+  if (!viceTapHandlerBound) {
+    viceTapHandlerBound = true;
+    wrap.addEventListener('pointerup', (e) => {
       const bubble = e.target.closest('.habitDay[data-habit][data-day]');
       if (!bubble || !wrap.contains(bubble)) return;
+      if (window.TP_DEBUG_PERF) {
+        console.count('habitTapHandler');
+      }
       handleHabitBubbleTap(bubble);
     });
   }
