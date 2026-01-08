@@ -822,6 +822,12 @@ body {
   box-shadow: none;
 }
 
+@media (max-width: 640px) {
+  .header-nav .nav-btn[href="settings.html"] {
+    display: none;
+  }
+}
+
 
 .dropdown{position:relative}
 .dropdown-toggle{display:inline-flex;align-items:center;gap:6px}
@@ -2929,7 +2935,6 @@ body {
     flex-wrap: wrap;
     max-width: 100%;
   }
-
 
 
 
