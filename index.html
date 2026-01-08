@@ -4207,6 +4207,7 @@ function saveFlexEdit(id, row){
 
   const nameInput = row.querySelector('input[data-field="name"]');
   const ptsInput  = row.querySelector('input[data-field="points"]');
+  let pointsChanged = false;
 
   if (nameInput) {
     const trimmed = nameInput.value.trim();
@@ -4215,7 +4216,20 @@ function saveFlexEdit(id, row){
 
   if (ptsInput) {
     const pts = parseFloat(ptsInput.value);
-    if (Number.isFinite(pts)) f.points = pts;
+    if (Number.isFinite(pts)) {
+      pointsChanged = Number(f.points) !== pts;
+      f.points = pts;
+    }
+  }
+
+  if (pointsChanged && window.TaskPointsCore?.syncDerivedPoints) {
+    const derivedSync = TaskPointsCore.syncDerivedPoints(state);
+    state = derivedSync.state;
+
+    if (window.TaskPointsCore?.syncYouMatchups) {
+      const matchupSync = TaskPointsCore.syncYouMatchups(state);
+      state = matchupSync.state;
+    }
   }
 
   editingFlexId = null;

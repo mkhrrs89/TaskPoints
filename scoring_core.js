@@ -1043,6 +1043,18 @@
 
   function deriveCompletionPoints(entry, settings) {
     if (!entry) return null;
+    const flexId = entry?.flexId;
+    if (flexId && Array.isArray(settings?.flexActions)) {
+      const flexAction = settings.flexActions.find(f => f && f.id === flexId);
+      const flexPoints = Number(flexAction?.points);
+      if (Number.isFinite(flexPoints)) {
+        return {
+          points: roundPoints(flexPoints),
+          formula: 'flex',
+          inputs: { flexId, name: flexAction?.name }
+        };
+      }
+    }
     const scoring = getScoringSettings(settings);
     const sleepInfo = getSleepInfo(entry);
     if (Number.isFinite(sleepInfo.score)) {

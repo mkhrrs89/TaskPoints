@@ -794,6 +794,40 @@
         tips: 'If you changed scoring settings over time, older entries may legitimately differ from today’s formulas.'
       });
 
+      // New: Historical flex actions match current points
+      const flexActionMap = new Map((state.flexActions || []).filter(Boolean).map(f => [f.id, f]));
+      const flexPointIssues = [];
+      const flexMissing = [];
+      (state.completions || []).forEach(c => {
+        if (!c || c.source !== 'flex' || !c.flexId) return;
+        const flex = flexActionMap.get(c.flexId);
+        const expectedRaw = Number(flex?.points);
+        if (!flex || !Number.isFinite(expectedRaw)) {
+          flexMissing.push(`Flex entry "${c.title || c.id}" references missing/invalid flex action (${c.flexId})`);
+          return;
+        }
+        const actualRaw = Number(c.points);
+        if (!Number.isFinite(actualRaw)) {
+          flexMissing.push(`Flex entry "${c.title || c.id}" missing stored points (expected ${expectedRaw.toFixed(2)})`);
+          return;
+        }
+        const delta = actualRaw - expectedRaw;
+        if (Math.abs(delta) > 0.01) {
+          flexPointIssues.push(`${TaskPointsCore.dateKey(c.completedAtISO) || 'Unknown date'}: "${c.title || flex.name || c.id}" expected ${expectedRaw.toFixed(2)}, got ${actualRaw.toFixed(2)}`);
+        }
+      });
+      const flexDetails = [...flexPointIssues, ...flexMissing];
+      checks.push({
+        id: 'historical-flex',
+        title: 'Historical flex points match current flex actions',
+        status: flexDetails.length ? 'WARN' : 'PASS',
+        expected: 'Flex completions use the latest points per use',
+        actual: flexDetails.length ? `${flexDetails.length} issue(s)` : 'All aligned',
+        details: flexDetails,
+        trace: 'state.flexActions points vs state.completions (flex)',
+        tips: 'Use Sync Matchups to apply current flex action values to past flex completions.'
+      });
+
       // D) Daily sources consistency
       checks.push({
         id: 'daily-sources',
