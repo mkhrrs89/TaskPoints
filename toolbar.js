@@ -476,7 +476,8 @@ function setupDebouncedPersistence() {
     const pending = pendingByKey.get(storageKey);
     if (!pending) return;
     pendingByKey.delete(storageKey);
-    core.saveStateSnapshot(pending.state, { ...pending.options, storageKey });
+    const merged = core.mergeState(pending.state, { ...pending.options, storageKey });
+    core.saveStateSnapshot(merged.state, { ...pending.options, storageKey });
   };
 
   const flushAll = () => {

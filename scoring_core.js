@@ -691,27 +691,16 @@
     if (Object.prototype.hasOwnProperty.call(nextState || {}, 'scoringSettings')) {
       const allowOverwrite = shouldAllowStickyOverwrite('scoringSettings', options);
       const incoming = nextState?.scoringSettings;
-      const existingSettings = existing?.scoringSettings || {};
-      const emptyLike = isScoringSettingsEmptyLike(incoming, existingSettings);
+      const hasExisting = Object.prototype.hasOwnProperty.call(existing || {}, 'scoringSettings');
+      const existingSettings = normalizeScoringSettings(existing?.scoringSettings || {});
 
-      if (!allowOverwrite && emptyLike) {
-        if (isDevMode(options)) {
-          console.warn('scoringSettings overwrite attempt', {
-            prev: existingSettings,
-            next: incoming,
-            allowFlags: {
-              allowScoringSettingsOverwrite: Boolean(options.allowScoringSettingsOverwrite),
-              allowStickyOverwrite: Boolean(options.allowStickyOverwrite),
-              allowStickyOverwriteKeys: options.allowStickyOverwriteKeys
-            }
-          });
-          console.trace();
+      if (!allowOverwrite) {
+        if (hasExisting) {
+          mergedSnapshot.scoringSettings = existingSettings;
+        } else if (isPlainObject(incoming)) {
+          mergedSnapshot.scoringSettings = normalizeScoringSettings(incoming);
         }
-        mergedSnapshot.scoringSettings = existingSettings;
-      } else if (!allowOverwrite && isPlainObject(incoming)) {
-        const mergedSettings = deepMerge(existingSettings, incoming);
-        mergedSnapshot.scoringSettings = normalizeScoringSettings(mergedSettings);
-      } else if (allowOverwrite && isPlainObject(incoming)) {
+      } else if (isPlainObject(incoming)) {
         const normalizedIncoming = normalizeScoringSettings(incoming);
         mergedSnapshot.scoringSettings = deepMerge(existingSettings, normalizedIncoming);
       } else if (allowOverwrite && incoming == null) {
