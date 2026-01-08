@@ -531,14 +531,17 @@
             todayStore.selectedHabitIds = Array.from(set);
             syncTodayOrder();
             saveTodayStore();
-            renderTodayList();
+            scheduleRender(renderTodayList);
           });
         });
       }
 
       function renderTodayList() {
-        const dayKey = dayKeyNow();
-        ensureAutoTasks(dayKey);
+        const perfLabel = window.TP_DEBUG_PERF ? 'renderTodayList' : null;
+        if (perfLabel) console.time(perfLabel);
+        try {
+          const dayKey = dayKeyNow();
+          ensureAutoTasks(dayKey);
 
         const el = $('#todayList');
         const empty = $('#todayEmpty');
@@ -599,6 +602,9 @@
             </div>
           `;
         }).join('');
+        } finally {
+          if (perfLabel) console.timeEnd(perfLabel);
+        }
       }
 
       function makeItemKey(kind, id) {
@@ -668,7 +674,7 @@
             if (!todayStore.taskIds.includes(id)) todayStore.taskIds.push(id);
             saveTodayStore();
             loadApp();
-            renderTodayList();
+            scheduleRender(renderTodayList);
           }
           return;
         }
@@ -676,7 +682,7 @@
         if (kind === 'habit') {
           toggleHabitDay(id, dayKey);
           loadApp();
-          renderTodayList();
+          scheduleRender(renderTodayList);
           return;
         }
 
@@ -687,7 +693,7 @@
             notes[idx] = { ...notes[idx], done: !notes[idx].done };
             todayStore.notes = notes;
             saveTodayStore();
-            renderTodayList();
+            scheduleRender(renderTodayList);
           }
         }
       }
@@ -705,7 +711,7 @@
         saveTodayStore();
 
         input.value = '';
-        renderTodayList();
+        scheduleRender(renderTodayList);
       }
 
       function clearDone() {
@@ -719,7 +725,7 @@
 
         syncTodayOrder();
         saveTodayStore();
-        renderTodayList();
+        scheduleRender(renderTodayList);
       }
 
       function toggleHabitPicker(forceOpen) {
@@ -738,7 +744,7 @@
 
         renderDatePill();
         ensureAutoTasks(dayKey);
-        renderTodayList();
+        scheduleRender(renderTodayList);
 
         $('#todayList').addEventListener('click', onListClick);
         $('#todayList').addEventListener('pointerdown', onDragStart);
@@ -757,7 +763,7 @@
           saveTodayStore();
           renderDatePill();
           renderHabitPicker();
-          renderTodayList();
+          scheduleRender(renderTodayList);
         });
 
         $('#toggleHabitPickerBtn').addEventListener('click', () => toggleHabitPicker());

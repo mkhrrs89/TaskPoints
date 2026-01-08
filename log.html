@@ -600,23 +600,26 @@ function save() {
 
 
 function render(){
-  const list=$('logList'), empty=$('empty'); 
-  list.innerHTML='';
+  const perfLabel = window.TP_DEBUG_PERF ? 'renderLog' : null;
+  if (perfLabel) console.time(perfLabel);
+  try {
+    const list=$('logList'), empty=$('empty'); 
+    list.innerHTML='';
 
   const comps = buildLogEntries(state.completions || []);
 
-  if(!comps.length){
-    empty.style.display='block';
-    return;
-  }
-  empty.style.display='none';
+    if(!comps.length){
+      empty.style.display='block';
+      return;
+    }
+    empty.style.display='none';
 
   let lastDayKey = null;
 
-  comps
-    .slice()
-    .sort((a,b)=> new Date(b.completedAtISO)-new Date(a.completedAtISO))
-    .forEach(c=>{
+    comps
+      .slice()
+      .sort((a,b)=> new Date(b.completedAtISO)-new Date(a.completedAtISO))
+      .forEach(c=>{
       const completionDate = new Date(c.completedAtISO);
       const completionKey = dateKey(completionDate);
       if (completionKey && completionKey !== lastDayKey) {
@@ -705,7 +708,10 @@ list.appendChild(divider);
   // Hook up edit-date buttons
   list.querySelectorAll('button[data-edit-date-id]').forEach(btn=>{
     btn.onclick = () => editCompletionDate(btn.getAttribute('data-edit-date-id'));
-  });
+      });
+  } finally {
+    if (perfLabel) console.timeEnd(perfLabel);
+  }
 }
 
 function escapeHtml(s){ 
@@ -747,7 +753,7 @@ function deleteCompletion(id){
 
   // 3) Save and re-render the log
   save();
-  render();
+  scheduleRender(render);
 }
 
 function editCompletionDate(id){
@@ -789,7 +795,7 @@ function editCompletionDate(id){
   }
 
   save();
-  render();
+  scheduleRender(render);
 }
 
 function editSleepScore(id){
@@ -823,11 +829,11 @@ function editSleepScore(id){
 
 
   save();
-  render();
+  scheduleRender(render);
 }
 
 
-render();
+scheduleRender(render);
 
 </script>
 

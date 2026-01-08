@@ -718,7 +718,7 @@ async function migrateLegacyImagesIfNeeded() {
     if (result?.migrated) {
       state = syncStateWithMatchups(result.state || state);
       save();
-      renderAll();
+      scheduleRender(renderAll);
       renderHabits();
       renderHabitWeekLabels();
       renderVices();
@@ -974,7 +974,7 @@ function editTodayCalories() {
   entry.completedAtISO = d.toISOString();
 
   save();
-  renderAll();
+  scheduleRender(renderAll);
 }
 
 let sleepEditContext = null;
@@ -1049,7 +1049,7 @@ function submitSleepEditModal() {
   sleepEditContext.sleepRested = restVal;
 
   save();
-  renderAll();
+  scheduleRender(renderAll);
   closeSleepEditModal();
 }
 
@@ -1143,7 +1143,7 @@ function submitWorkEditModal() {
   workEditContext.source = 'work';
 
   save();
-  renderAll();
+  scheduleRender(renderAll);
   closeWorkEditModal();
 }
 
@@ -2201,6 +2201,7 @@ function resetAll(){
   if (!confirm(msg)) return;
 
   try{
+    window.TaskPointsCore?.flushPendingSaves?.();
     // Clear local storage for TaskPoints
     localStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem(PROJECTS_STORAGE_KEY);
@@ -2228,7 +2229,7 @@ function resetAll(){
   };
 
   // Re-render everything so the page doesn't look broken
-  try { renderAll(); }           catch(e){ console.error('renderAll after reset:', e); }
+  try { scheduleRender(renderAll); }           catch(e){ console.error('renderAll after reset:', e); }
   try { renderHabits(); }        catch(e){ console.error('renderHabits after reset:', e); }
   try { renderVices(); }         catch(e){ console.error('renderVices after reset:', e); }
   try { renderFlexActions(); }   catch(e){ console.error('renderFlexActions after reset:', e); }
@@ -3374,6 +3375,9 @@ function renderHabitRow(h, days, wrap, options = {}) {
 
 
 
+let habitTapHandlerBound = false;
+let viceTapHandlerBound = false;
+
 function renderHabits(){
   const wrap  = $('habitsList');
   const empty = $('habitsEmpty');
@@ -3436,11 +3440,14 @@ function renderHabits(){
     renderHabitRow(entry.habit, days, wrap, { showMoveButtons: sortMode === 'custom' });
   });
 
-  if (!wrap.dataset.habitDelegated) {
-    wrap.dataset.habitDelegated = 'true';
-    wrap.addEventListener('click', (e) => {
+  if (!habitTapHandlerBound) {
+    habitTapHandlerBound = true;
+    wrap.addEventListener('pointerup', (e) => {
       const bubble = e.target.closest('.habitDay[data-habit][data-day]');
       if (!bubble || !wrap.contains(bubble)) return;
+      if (window.TP_DEBUG_PERF) {
+        console.count('habitTapHandler');
+      }
       handleHabitBubbleTap(bubble);
     });
   }
@@ -3580,11 +3587,14 @@ const nameHtml = `
 
   });
 
-  if (!wrap.dataset.viceDelegated) {
-    wrap.dataset.viceDelegated = 'true';
-    wrap.addEventListener('click', (e) => {
+  if (!viceTapHandlerBound) {
+    viceTapHandlerBound = true;
+    wrap.addEventListener('pointerup', (e) => {
       const bubble = e.target.closest('.habitDay[data-habit][data-day]');
       if (!bubble || !wrap.contains(bubble)) return;
+      if (window.TP_DEBUG_PERF) {
+        console.count('habitTapHandler');
+      }
       handleHabitBubbleTap(bubble);
     });
   }
@@ -3888,7 +3898,11 @@ function scheduleHabitSave() {
   habitSaveDebounceId = setTimeout(() => {
     habitSaveDebounceId = null;
     deferAfterPaint(() => {
-      save();
+      if (window.TaskPointsCore?.queueStateSnapshot) {
+        TaskPointsCore.queueStateSnapshot(state);
+      } else {
+        save();
+      }
       if (window.TP_DEBUG_PERF && perfStart !== null) {
         console.log(`[TP_PERF] tap->save ${Math.round(performance.now() - perfStart)}ms`);
       }
@@ -4009,6 +4023,9 @@ function handleHabitBubbleTap(bubbleEl) {
 
   const perfStart = performance.now();
   habitLastTapPerfStart = perfStart;
+  if (window.TP_DEBUG_PERF) {
+    console.count('habitTap');
+  }
 
   const statusClass = applyHabitDayToggle(h, dayKey);
   bubbleEl.classList.remove('on', 'off', 'failed');
@@ -4016,6 +4033,13 @@ function handleHabitBubbleTap(bubbleEl) {
   applyHabitBubbleStyle(bubbleEl, h, statusClass);
 
   if (window.TP_DEBUG_PERF) {
+    console.log('[TP_PERF] habitToggle', {
+      habitId,
+      dayKey,
+      statusClass,
+      doneKeys: Array.isArray(h.doneKeys) ? [...h.doneKeys] : [],
+      failedKeys: Array.isArray(h.failedKeys) ? [...h.failedKeys] : []
+    });
     console.log(`[TP_PERF] tap->bubble ${Math.round(performance.now() - perfStart)}ms`);
   }
 
@@ -4173,7 +4197,7 @@ function logFlexCompletion(id){
   lastFlexCompletion = { id, at: Date.now() };
   save();
   renderFlexActions();
-  renderAll();
+  scheduleRender(renderAll);
 }
 
 function saveFlexEdit(id, row){
@@ -4518,7 +4542,7 @@ function saveSleepScore(){
   if (restInput) restInput.value = "";
 
   save();
-  renderAll();  // refresh stats, history chips, etc.
+  scheduleRender(renderAll);  // refresh stats, history chips, etc.
 }
 
 function editTodaySleepScore() {
@@ -4583,7 +4607,7 @@ function saveCalories(){
   // optional: keep the chosen date in the picker so you can tweak same day
 
   save();
-  renderAll();
+  scheduleRender(renderAll);
 }
 
 
@@ -4983,7 +5007,7 @@ if (calNum != null && !Number.isNaN(calNum)) {
       entry.points = caloriesToPoints(raw);
 
       save();
-      renderAll();
+      scheduleRender(renderAll);
     };
 
     container.appendChild(block);
@@ -5062,7 +5086,7 @@ function saveWorkScore() {
   if (hoursInput) hoursInput.value = "";
 
   save();
-  renderAll();
+  scheduleRender(renderAll);
 }
 
 function renderWorkHistory() {
@@ -5290,7 +5314,7 @@ function editTodayMood() {
   entry.source = 'metric';
 
   save();
-  renderAll();
+  scheduleRender(renderAll);
 }
 
 function saveMoodScore() {
@@ -5331,7 +5355,7 @@ function saveMoodScore() {
 
   $('moodScoreInput').value = "";
   save();
-  renderAll();
+  scheduleRender(renderAll);
 }
 
 function renderMoodHistory() {
@@ -5457,7 +5481,7 @@ setTodayMoodEditable(moodImpactBelow);
       entry.points = moodPoints(num);
 
       save();
-      renderAll();
+      scheduleRender(renderAll);
     };
 
     container.appendChild(block);
@@ -5608,7 +5632,7 @@ function completeTask(id){
   removeTaskFromTodayView(id, completedDayKey);
 
   save();
-  renderAll();
+  scheduleRender(renderAll);
 }
 
 function editTask(id){ editingTaskId = id; renderTasks(); }
@@ -5844,15 +5868,17 @@ async function applyImportedState(root){
   saveProjectsToStorage(state.projects);
 
   save();
+  window.TaskPointsCore?.flushPendingSaves?.();
 
   if (window.TaskPointsCore?.migrateLegacyImages) {
     const migrated = await TaskPointsCore.migrateLegacyImages(root);
     if (migrated?.migrated) {
       state = normalizeState(stripLegacyImageFields({ ...migrated.state, projects: normalized.projects }));
       save();
+      window.TaskPointsCore?.flushPendingSaves?.();
     }
   }
-  renderAll();
+  scheduleRender(renderAll);
   renderHabits();
   renderHabitWeekLabels();
   renderVices();
@@ -5967,18 +5993,24 @@ function importPaste(){
 
 /* ---------- RENDER/WIRE ---------- */
 function renderAll() {
-  try { renderStats(); } catch (e) { console.error('renderStats error:', e); }
-  try { renderTasks(); } catch (e) { console.error('renderTasks error:', e); }
+  const perfLabel = window.TP_DEBUG_PERF ? 'renderAll' : null;
+  if (perfLabel) console.time(perfLabel);
+  try {
+    try { renderStats(); } catch (e) { console.error('renderStats error:', e); }
+    try { renderTasks(); } catch (e) { console.error('renderTasks error:', e); }
 
-  const defer = window.requestIdleCallback
-    ? window.requestIdleCallback
-    : (cb) => setTimeout(() => cb({ timeRemaining: () => 0 }), 200);
-  defer(() => {
-    try { renderSleepHistory(); } catch (e) { console.error('renderSleepHistory error:', e); }
-    try { renderCaloriesHistory(); } catch (e) { console.error('renderCaloriesHistory error:', e); }
-    try { renderWorkHistory(); } catch (e) { console.error('renderWorkHistory error:', e); }
-    try { renderMoodHistory(); } catch (e) { console.error('renderMoodHistory error:', e); }
-  });
+    const defer = window.requestIdleCallback
+      ? window.requestIdleCallback
+      : (cb) => setTimeout(() => cb({ timeRemaining: () => 0 }), 200);
+    defer(() => {
+      try { renderSleepHistory(); } catch (e) { console.error('renderSleepHistory error:', e); }
+      try { renderCaloriesHistory(); } catch (e) { console.error('renderCaloriesHistory error:', e); }
+      try { renderWorkHistory(); } catch (e) { console.error('renderWorkHistory error:', e); }
+      try { renderMoodHistory(); } catch (e) { console.error('renderMoodHistory error:', e); }
+    });
+  } finally {
+    if (perfLabel) console.timeEnd(perfLabel);
+  }
 }
 
 
@@ -6054,7 +6086,7 @@ console.log('TaskPoints main state summary:', {
   gameHistory: Array.isArray(state.gameHistory) ? state.gameHistory.length : 'no array'
 });
 
-  renderAll();
+  scheduleRender(renderAll);
   startOpponentDripTicker();
   initTaskListDelegation();
 
@@ -6430,7 +6462,7 @@ document.addEventListener('change', (e) => {
     }
 
     window.visualViewport.addEventListener('resize', scheduleNavResize);
-    window.visualViewport.addEventListener('scroll', scheduleNavUpdate);
+    window.visualViewport.addEventListener('scroll', scheduleNavUpdate, { passive: true });
     window.addEventListener('orientationchange', scheduleNavResize);
 
     updateNavOffset();

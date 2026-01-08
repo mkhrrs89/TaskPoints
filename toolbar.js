@@ -7,6 +7,28 @@ function closeAllDropdowns(exception) {
   });
 }
 
+window.TP_DEBUG_PERF = window.TP_DEBUG_PERF ?? false;
+
+const scheduleRender = window.scheduleRender || (() => {
+  const queue = new Set();
+  let scheduled = false;
+
+  return (fn) => {
+    if (typeof fn !== 'function') return;
+    queue.add(fn);
+    if (scheduled) return;
+    scheduled = true;
+    requestAnimationFrame(() => {
+      scheduled = false;
+      const toRun = Array.from(queue);
+      queue.clear();
+      toRun.forEach((cb) => cb());
+    });
+  };
+})();
+
+window.scheduleRender = scheduleRender;
+
 let toolbarHeightResizeObserver = null;
 let toolbarHeightListenersAdded = false;
 
@@ -215,6 +237,8 @@ function setupMobileTasksMenu() {
   const goBtn = document.getElementById('mobileGoTasksBtn');
 
   if (!toggle || !menu) return;
+  if (toggle.dataset.tpTasksReady) return;
+  toggle.dataset.tpTasksReady = 'true';
 
   const onIndex = /(^|\/)index\.html$/.test(window.location.pathname) || window.location.pathname === '/' || window.location.pathname === '';
   const tasksLink = onIndex ? '#tasksAnchor' : 'index.html#tasksAnchor';
@@ -234,11 +258,14 @@ function setupMobileTasksMenu() {
     toggleMenu();
   });
 
-  document.addEventListener('pointerdown', (e) => {
-    if (menu.classList.contains('hidden')) return;
-    if (e.target.closest('.mobile-task-dropdown')) return;
-    closeMenu();
-  });
+  if (!window.__tpTasksMenuPointerListener) {
+    window.__tpTasksMenuPointerListener = true;
+    document.addEventListener('pointerdown', (e) => {
+      if (menu.classList.contains('hidden')) return;
+      if (e.target.closest('.mobile-task-dropdown')) return;
+      closeMenu();
+    });
+  }
 
   addBtn?.addEventListener('click', () => {
     closeMenu();
@@ -259,9 +286,12 @@ function setupMobileTasksMenu() {
     window.location.href = tasksLink;
   });
 
-  window.addEventListener('resize', () => {
-    if (window.innerWidth >= 768) closeMenu();
-  });
+  if (!window.__tpTasksMenuResizeListener) {
+    window.__tpTasksMenuResizeListener = true;
+    window.addEventListener('resize', () => {
+      if (window.innerWidth >= 768) closeMenu();
+    });
+  }
 
   toggle.addEventListener('keyup', (e) => {
     if (e.key === 'Enter' || e.key === ' ') {
@@ -274,6 +304,8 @@ function setupMobileTasksMenu() {
 function setupBottomNavPressAnimation(root = document) {
   const nav = root.querySelector('.mobile-bottom-nav');
   if (!nav) return;
+  if (nav.dataset.navPressReady) return;
+  nav.dataset.navPressReady = 'true';
 
   nav.addEventListener('pointerdown', (event) => {
     const target = event.target.closest('.mobile-bottom-nav-btn');
@@ -287,6 +319,8 @@ function setupBottomNavPressAnimation(root = document) {
 
 function setupBottomNavDragExpand(nav) {
   if (!nav) return;
+  if (nav.dataset.navDragReady) return;
+  nav.dataset.navDragReady = 'true';
 
   const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
   const collapsedHeight = nav.getBoundingClientRect().height;
@@ -411,6 +445,103 @@ if (document.readyState === 'loading') {
 // ---------- Shared mobile chrome helpers ----------
 const STORAGE_KEY_FALLBACK = (window.TaskPointsCore && TaskPointsCore.STORAGE_KEY) || 'taskpoints_v1';
 const PROJECTS_STORAGE_KEY_FALLBACK = (window.TaskPointsCore && TaskPointsCore.PROJECTS_STORAGE_KEY) || 'tp_projects_v1';
+
+const TP_PERSIST_DEBOUNCE_MS = 250;
+
+function setupDebouncedPersistence() {
+  const core = window.TaskPointsCore;
+  if (!core || core.__tpDebouncedPersistence) return;
+  if (typeof core.mergeState !== 'function' || typeof core.saveStateSnapshot !== 'function') return;
+
+  core.__tpDebouncedPersistence = true;
+  const originalMergeAndSave = core.mergeAndSaveState.bind(core);
+  const pendingByKey = new Map();
+  const timers = new Map();
+
+  const scheduleFlush = (storageKey) => {
+    if (timers.has(storageKey)) return;
+    const id = window.setTimeout(() => {
+      timers.delete(storageKey);
+      flushKey(storageKey);
+    }, TP_PERSIST_DEBOUNCE_MS);
+    timers.set(storageKey, id);
+  };
+
+  const flushKey = (storageKey) => {
+    const timerId = timers.get(storageKey);
+    if (timerId) {
+      clearTimeout(timerId);
+      timers.delete(storageKey);
+    }
+    const pending = pendingByKey.get(storageKey);
+    if (!pending) return;
+    pendingByKey.delete(storageKey);
+    core.saveStateSnapshot(pending.state, { ...pending.options, storageKey });
+  };
+
+  const flushAll = () => {
+    Array.from(pendingByKey.keys()).forEach((storageKey) => flushKey(storageKey));
+  };
+
+  core.flushPendingSaves = flushAll;
+
+  const debouncedMerge = (nextState, options = {}) => {
+    if (window.TP_DEBUG_PERF) {
+      console.count('TaskPointsCore.mergeAndSaveState');
+    }
+    if (options.immediateWrite) {
+      flushAll();
+      return originalMergeAndSave(nextState, options);
+    }
+    const storageKey = options.storageKey || core.STORAGE_KEY || STORAGE_KEY_FALLBACK;
+    const pending = pendingByKey.get(storageKey);
+    const merged = core.mergeState(nextState, { ...options, storageKey, existing: pending?.state });
+    pendingByKey.set(storageKey, { state: merged.state, options: { ...options, storageKey } });
+    scheduleFlush(storageKey);
+    return { state: merged.state, trimmed: false };
+  };
+
+  const debouncedSave = (nextState, options = {}, maybeOptions = {}) => {
+    if (window.TP_DEBUG_PERF) {
+      console.count('TaskPointsCore.saveAppState');
+    }
+    if (typeof nextState === 'string') {
+      return debouncedMerge(options || {}, { ...maybeOptions, storageKey: nextState });
+    }
+    return debouncedMerge(nextState || {}, options || {});
+  };
+
+  const queueStateSnapshot = (nextState, options = {}) => {
+    if (window.TP_DEBUG_PERF) {
+      console.count('TaskPointsCore.queueStateSnapshot');
+    }
+    if (options.immediateWrite) {
+      flushAll();
+      return core.saveStateSnapshot(nextState, options);
+    }
+    const storageKey = options.storageKey || core.STORAGE_KEY || STORAGE_KEY_FALLBACK;
+    pendingByKey.set(storageKey, { state: nextState, options: { ...options, storageKey } });
+    scheduleFlush(storageKey);
+    return { state: nextState, trimmed: false };
+  };
+
+  core.saveAppState = debouncedSave;
+  core.mergeAndSaveState = debouncedMerge;
+  core.queueStateSnapshot = queueStateSnapshot;
+
+  if (!window.__tpDebouncedPersistenceListeners) {
+    window.__tpDebouncedPersistenceListeners = true;
+    window.addEventListener('beforeunload', flushAll);
+    // iOS Safari can skip beforeunload; pagehide/freeze ensures a final flush.
+    window.addEventListener('pagehide', flushAll, { capture: true });
+    window.addEventListener('freeze', flushAll, { capture: true });
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') flushAll();
+    });
+  }
+}
+
+setupDebouncedPersistence();
 
 const normalizeHexColorFallback = (value) => {
   if (!value) return null;
@@ -809,14 +940,14 @@ function ensureUpcomingScheduleFallback(state, days = 7) {
 function saveStateSnapshotFallback(next) {
   try {
     if (window.TaskPointsCore?.saveAppState) {
-      const { trimmed } = TaskPointsCore.saveAppState(next, { storageKey: STORAGE_KEY_FALLBACK });
+      const { trimmed } = TaskPointsCore.saveAppState(next, { storageKey: STORAGE_KEY_FALLBACK, immediateWrite: true });
       if (trimmed) {
         console.warn('Storage nearing capacity. Older history items were trimmed to keep saves working.');
       }
       return;
     }
     if (window.TaskPointsCore?.mergeAndSaveState) {
-      const { trimmed } = TaskPointsCore.mergeAndSaveState(next, { storageKey: STORAGE_KEY_FALLBACK });
+      const { trimmed } = TaskPointsCore.mergeAndSaveState(next, { storageKey: STORAGE_KEY_FALLBACK, immediateWrite: true });
       if (trimmed) {
         console.warn('Storage nearing capacity. Older history items were trimmed to keep saves working.');
       }
@@ -829,6 +960,7 @@ function saveStateSnapshotFallback(next) {
 }
 
 function exportDataFallback() {
+  window.TaskPointsCore?.flushPendingSaves?.();
   const snapshot = stripLegacyImageFields(normalizeStateGlobal({ ...loadRawStateFallback(), projects: loadProjectsFromStorageFallback() }));
   const scheduleChanged = ensureUpcomingScheduleFallback(snapshot);
   if (scheduleChanged) {
@@ -1056,6 +1188,7 @@ async function importBackupZipFallback(file) {
 }
 
 async function exportBackupWithImagesFallback() {
+  window.TaskPointsCore?.flushPendingSaves?.();
   const snapshot = stripLegacyImageFields(normalizeStateGlobal({ ...loadRawStateFallback(), projects: loadProjectsFromStorageFallback() }));
   const scheduleChanged = ensureUpcomingScheduleFallback(snapshot);
   if (scheduleChanged) {
@@ -1242,6 +1375,7 @@ function getHandler(name, fallback) {
 }
 
 function exportOGDataOnly() {
+  window.TaskPointsCore?.flushPendingSaves?.();
   if (typeof window.exportData === 'function' && window.exportData !== exportOGDataOnly) {
     return window.exportData();
   }
@@ -1249,6 +1383,7 @@ function exportOGDataOnly() {
 }
 
 function exportBackupWithImages() {
+  window.TaskPointsCore?.flushPendingSaves?.();
   if (typeof window.exportBackupWithImages === 'function' && window.exportBackupWithImages !== exportBackupWithImages) {
     return window.exportBackupWithImages();
   }

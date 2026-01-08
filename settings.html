@@ -501,10 +501,10 @@
 
       try {
         if (window.TaskPointsCore?.saveAppState) {
-          TaskPointsCore.saveAppState(nextState, { storageKey: SETTINGS_STORAGE_KEY });
+          TaskPointsCore.saveAppState(nextState, { storageKey: SETTINGS_STORAGE_KEY, immediateWrite: true });
           alert("Game stats before today have been reset. Reload any open TaskPoints tabs to see the changes.");
         } else if (window.TaskPointsCore?.mergeAndSaveState) {
-          TaskPointsCore.mergeAndSaveState(nextState, { storageKey: SETTINGS_STORAGE_KEY });
+          TaskPointsCore.mergeAndSaveState(nextState, { storageKey: SETTINGS_STORAGE_KEY, immediateWrite: true });
           alert("Game stats before today have been reset. Reload any open TaskPoints tabs to see the changes.");
         } else {
           console.warn("settings reset skipped localStorage write; TaskPointsCore missing.");
@@ -534,14 +534,16 @@
           storageKey: SETTINGS_STORAGE_KEY,
           allowScoringSettingsOverwrite: false,
           allowHabitTagColorReset: true,
-          allowStickyOverwriteKeys: ["youImageId", "habitTagColors"]
+          allowStickyOverwriteKeys: ["youImageId", "habitTagColors"],
+          immediateWrite: true
         });
       } else if (window.TaskPointsCore?.mergeAndSaveState) {
         TaskPointsCore.mergeAndSaveState(normalized, {
           storageKey: SETTINGS_STORAGE_KEY,
           allowScoringSettingsOverwrite: false,
           allowHabitTagColorReset: true,
-          allowStickyOverwriteKeys: ["youImageId", "habitTagColors"]
+          allowStickyOverwriteKeys: ["youImageId", "habitTagColors"],
+          immediateWrite: true
         });
       } else {
         console.warn("settings import skipped localStorage write; TaskPointsCore missing.");
@@ -701,6 +703,7 @@
 
       if (!confirm(msg)) return;
 
+      window.TaskPointsCore?.flushPendingSaves?.();
       localStorage.removeItem(SETTINGS_STORAGE_KEY);
       alert('All local TaskPoints data has been cleared.');
     }
@@ -879,16 +882,19 @@
           const updated = getScoringSettingsFromForm();
           updated.sleep.bonusTiers.splice(index, 1);
           applyScoringSettingsUpdate(updated);
-          renderScoringSettings();
+          scheduleRender(renderScoringSettings);
         });
       });
     }
 
     function renderScoringSettings() {
-      const state = loadSettingsState();
-      const settings = window.TaskPointsCore?.getScoringSettings
-        ? TaskPointsCore.getScoringSettings(state)
-        : (state.scoringSettings || {});
+      const perfLabel = window.TP_DEBUG_PERF ? 'renderSettings' : null;
+      if (perfLabel) console.time(perfLabel);
+      try {
+        const state = loadSettingsState();
+        const settings = window.TaskPointsCore?.getScoringSettings
+          ? TaskPointsCore.getScoringSettings(state)
+          : (state.scoringSettings || {});
 
       const setValue = (id, value) => {
         const el = document.getElementById(id);
@@ -921,7 +927,10 @@
       setValue('inertiaWindowDays', settings.inertia?.windowDays);
       setValue('inertiaMultiplier', settings.inertia?.multiplier);
 
-      renderSleepBonusTiers(settings);
+        renderSleepBonusTiers(settings);
+      } finally {
+        if (perfLabel) console.timeEnd(perfLabel);
+      }
     }
 
     function renderHabitTagColors() {
@@ -1821,8 +1830,8 @@ normalizeSvgTickText(svg);
       document.getElementById('settingsResetGameStatsBtn')?.addEventListener('click', handleSettingsResetGameStats);
       document.getElementById('settingsResetBtn')?.addEventListener('click', handleSettingsReset);
       document.getElementById('settingsExportMatchupsBtn')?.addEventListener('click', exportMatchupsAndHistoryCsv);
-      renderScoringSettings();
-      renderHabitTagColors();
+      scheduleRender(renderScoringSettings);
+      scheduleRender(renderHabitTagColors);
 
       const scoringInputIds = [
         'sleepBaseDivisor',
@@ -1857,7 +1866,7 @@ normalizeSvgTickText(svg);
         const current = getScoringSettingsFromForm();
         current.sleep.bonusTiers.push({ min: 0, bonus: 0 });
         applyScoringSettingsUpdate(current);
-        renderScoringSettings();
+        scheduleRender(renderScoringSettings);
       });
 
       const runButton = document.getElementById("runSimulationBtn");
