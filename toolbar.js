@@ -511,8 +511,23 @@ function setupDebouncedPersistence() {
     return debouncedMerge(nextState || {}, options || {});
   };
 
+  const queueStateSnapshot = (nextState, options = {}) => {
+    if (window.TP_DEBUG_PERF) {
+      console.count('TaskPointsCore.queueStateSnapshot');
+    }
+    if (options.immediateWrite) {
+      flushAll();
+      return core.saveStateSnapshot(nextState, options);
+    }
+    const storageKey = options.storageKey || core.STORAGE_KEY || STORAGE_KEY_FALLBACK;
+    pendingByKey.set(storageKey, { state: nextState, options: { ...options, storageKey } });
+    scheduleFlush(storageKey);
+    return { state: nextState, trimmed: false };
+  };
+
   core.saveAppState = debouncedSave;
   core.mergeAndSaveState = debouncedMerge;
+  core.queueStateSnapshot = queueStateSnapshot;
 
   if (!window.__tpDebouncedPersistenceListeners) {
     window.__tpDebouncedPersistenceListeners = true;

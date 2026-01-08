@@ -3889,7 +3889,11 @@ function scheduleHabitSave() {
   habitSaveDebounceId = setTimeout(() => {
     habitSaveDebounceId = null;
     deferAfterPaint(() => {
-      save();
+      if (window.TaskPointsCore?.queueStateSnapshot) {
+        TaskPointsCore.queueStateSnapshot(state);
+      } else {
+        save();
+      }
       if (window.TP_DEBUG_PERF && perfStart !== null) {
         console.log(`[TP_PERF] tap->save ${Math.round(performance.now() - perfStart)}ms`);
       }
@@ -4010,6 +4014,9 @@ function handleHabitBubbleTap(bubbleEl) {
 
   const perfStart = performance.now();
   habitLastTapPerfStart = perfStart;
+  if (window.TP_DEBUG_PERF) {
+    console.count('habitTap');
+  }
 
   const statusClass = applyHabitDayToggle(h, dayKey);
   bubbleEl.classList.remove('on', 'off', 'failed');
@@ -4017,6 +4024,13 @@ function handleHabitBubbleTap(bubbleEl) {
   applyHabitBubbleStyle(bubbleEl, h, statusClass);
 
   if (window.TP_DEBUG_PERF) {
+    console.log('[TP_PERF] habitToggle', {
+      habitId,
+      dayKey,
+      statusClass,
+      doneKeys: Array.isArray(h.doneKeys) ? [...h.doneKeys] : [],
+      failedKeys: Array.isArray(h.failedKeys) ? [...h.failedKeys] : []
+    });
     console.log(`[TP_PERF] tap->bubble ${Math.round(performance.now() - perfStart)}ms`);
   }
 
