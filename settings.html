@@ -728,11 +728,13 @@
           const allowHabitTagColorReset = Boolean(options.allowHabitTagColorReset);
           const allowScoringSettingsOverwrite = Boolean(options.allowScoringSettingsOverwrite);
           const allowStickyOverwriteKeys = options.allowStickyOverwriteKeys;
+          const immediateWrite = Boolean(options.immediateWrite);
           const { state: merged } = TaskPointsCore.saveAppState(nextState, {
             storageKey: SETTINGS_STORAGE_KEY,
             allowHabitTagColorReset,
             allowScoringSettingsOverwrite,
-            allowStickyOverwriteKeys
+            allowStickyOverwriteKeys,
+            immediateWrite
           });
           return merged;
         }
@@ -740,11 +742,13 @@
           const allowHabitTagColorReset = Boolean(options.allowHabitTagColorReset);
           const allowScoringSettingsOverwrite = Boolean(options.allowScoringSettingsOverwrite);
           const allowStickyOverwriteKeys = options.allowStickyOverwriteKeys;
+          const immediateWrite = Boolean(options.immediateWrite);
           const { state: merged } = TaskPointsCore.mergeAndSaveState(nextState, {
             storageKey: SETTINGS_STORAGE_KEY,
             allowHabitTagColorReset,
             allowScoringSettingsOverwrite,
-            allowStickyOverwriteKeys
+            allowStickyOverwriteKeys,
+            immediateWrite
           });
           return merged;
         }
@@ -845,7 +849,7 @@
         nextState = matchupSync.state;
       }
 
-      saveSettingsState(nextState, { allowScoringSettingsOverwrite: true });
+      saveSettingsState(nextState, { allowScoringSettingsOverwrite: true, immediateWrite: true });
     }
 
     function renderSleepBonusTiers(settings) {
