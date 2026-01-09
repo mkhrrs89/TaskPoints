@@ -421,6 +421,10 @@
           else if (unit === 'year')  { next = new Date(base); next.setFullYear(next.getFullYear() + count); next.setHours(0,0,0,0); }
         }
 
+        if (!next) {
+          next = addDays(base, 1);
+        }
+
         return next ? (window.TaskPointsCore?.dateKey ? TaskPointsCore.dateKey(next) : next.toISOString().slice(0,10)) : null;
       }
 
