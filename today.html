@@ -1,4 +1,7 @@
-<!doctype html>
+{
+type: "file_change",
+fileName: "today.html",
+fileContent: `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
@@ -156,8 +159,7 @@
 <body class="min-h-screen today-page">
   <div class="mx-auto max-w-6xl p-4 sm:p-6 pb-24">
 
-    <!-- Mobile header (matches your other pages) -->
-<div class="flex flex-wrap items-center justify-between gap-3 mb-3 md:hidden">
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-3 md:hidden">
   <a href="index.html" class="flex items-center gap-3 min-w-0">
         <img src="assets/taskpoints-logo.png" alt="TaskPoints logo" class="w-10 h-10 rounded-2xl object-cover shrink-0 shadow-sm">
         <h1 class="text-2xl font-extrabold tracking-tight leading-tight truncate">
@@ -173,7 +175,6 @@
       </div>
     </div>
 
-    <!-- Desktop header / nav (matches your other pages) -->
     <header class="flex flex-wrap items-center justify-between gap-3 mb-4">
       <a href="index.html" class="hidden md:flex items-center gap-3">
         <img src="assets/taskpoints-logo.svg" alt="TaskPoints logo" class="w-9 h-9 rounded-2xl object-cover shadow-sm">
@@ -210,7 +211,6 @@
       </div>
     </header>
 
-    <!-- Page title row -->
     <div class="flex items-start justify-between gap-3 flex-wrap mb-3">
       <div>
         <h2 class="text-xl sm:text-2xl font-extrabold tracking-tight">Today</h2>
@@ -223,7 +223,6 @@
     </div>
 
     <div class="grid gap-3">
-      <!-- Checklist -->
       <div class="glass p-4">
         <div class="flex items-center justify-between gap-3 flex-wrap">
           <div>
@@ -245,7 +244,6 @@
         </div>
       </div>
 
-      <!-- Habit picker -->
       <div class="glass p-4">
         <div class="flex items-center justify-between gap-3 flex-wrap">
           <div>
@@ -471,7 +469,7 @@
         h.doneKeys = Array.isArray(h.doneKeys) ? h.doneKeys.slice() : [];
         h.failedKeys = Array.isArray(h.failedKeys) ? h.failedKeys.slice() : [];
 
-        const compTaskId = `habit:${h.id}:${dayKey}`;
+        const compTaskId = \`habit:\${h.id}:\${dayKey}\`;
         const already = h.doneKeys.includes(dayKey);
 
         if (already) {
@@ -483,7 +481,7 @@
           addCompletion({
             id: makeId(),
             taskId: compTaskId,
-            title: `[Habit] ${h.name} (${dayKey})`,
+            title: \`[Habit] \${h.name} (\${dayKey})\`,
             points: Number(h.pointsPerDay || 0),
             completedAtISO: new Date().toISOString(),
             source: 'habit',
@@ -507,7 +505,7 @@
         if (!list) return;
 
         if (!habits.length) {
-          list.innerHTML = `<div class="muted text-sm">No habits yet.</div>`;
+          list.innerHTML = \`<div class="muted text-sm">No habits yet.</div>\`;
           return;
         }
 
@@ -516,15 +514,15 @@
         list.innerHTML = habits.map(h => {
           const checked = selected.has(h.id) ? 'checked' : '';
           const pts = Number(h.pointsPerDay || 0);
-          return `
+          return \`
             <label class="habit-row cursor-pointer">
               <div class="min-w-0">
-                <div class="habit-name truncate">${escapeHtml(h.name || 'Untitled Habit')}</div>
-                <div class="habit-meta">${pts ? `${pts} pts` : '—'}</div>
+                <div class="habit-name truncate">\${escapeHtml(h.name || 'Untitled Habit')}</div>
+                <div class="habit-meta">\${pts ? \`\${pts} pts\` : '—'}</div>
               </div>
-              <input type="checkbox" data-habit-pick="${escapeHtml(h.id)}" ${checked} />
+              <input type="checkbox" data-habit-pick="\${escapeHtml(h.id)}" \${checked} />
             </label>
-          `;
+          \`;
         }).join('');
 
         $$('#habitPickerList [data-habit-pick]').forEach(input => {
@@ -558,7 +556,7 @@
           if (!t) continue;
 
           const done = hasTaskCompletionToday(taskId, dayKey) || (t.completedAtISO && dateKeyFromISO(t.completedAtISO) === dayKey);
-          const sub = (t.points != null) ? `${Number(t.points || 0)} pts` : '';
+          const sub = (t.points != null) ? \`\${Number(t.points || 0)} pts\` : '';
           items.push({ kind: 'task', id: taskId, title: t.title || 'Untitled Task', sub, done });
         }
 
@@ -569,7 +567,7 @@
 
           const done = Array.isArray(h.doneKeys) ? h.doneKeys.includes(dayKey) : false;
           const pts = Number(h.pointsPerDay || 0);
-          const sub = pts ? `${pts} pts` : '';
+          const sub = pts ? \`\${pts} pts\` : '';
           items.push({ kind: 'habit', id: habitId, title: h.name || 'Untitled Habit', sub, done });
         }
 
@@ -589,22 +587,22 @@
         const orderedItems = orderItems(items);
         el.innerHTML = orderedItems.map((item) => {
           const doneClass = item.done ? 'is-done' : '';
-          const subLine = item.sub ? `<div class="today-sub">${escapeHtml(item.sub)}</div>` : '';
+          const subLine = item.sub ? \`<div class="today-sub">\${escapeHtml(item.sub)}</div>\` : '';
           const key = makeItemKey(item.kind, item.id);
-          return `
-            <div class="today-item ${doneClass}" data-kind="${escapeHtml(item.kind)}" data-id="${escapeHtml(item.id)}" data-key="${escapeHtml(key)}">
+          return \`
+            <div class="today-item \${doneClass}" data-kind="\${escapeHtml(item.kind)}" data-id="\${escapeHtml(item.id)}" data-key="\${escapeHtml(key)}">
               <div class="today-left">
                 <div class="today-check"><span class="mark">✓</span></div>
                 <div class="min-w-0">
-                  <div class="today-title">${escapeHtml(item.title)}</div>
-                  ${subLine}
+                  <div class="today-title">\${escapeHtml(item.title)}</div>
+                  \${subLine}
                 </div>
               </div>
               <div class="today-right">
-                <span class="today-kind ${item.kind}">${escapeHtml(item.kind)}</span>
+                <span class="today-kind \${item.kind}">\${escapeHtml(item.kind)}</span>
               </div>
             </div>
-          `;
+          \`;
         }).join('');
         } finally {
           if (perfLabel) console.timeEnd(perfLabel);
@@ -612,7 +610,7 @@
       }
 
       function makeItemKey(kind, id) {
-        return `${kind}:${id}`;
+        return \`\${kind}:\${id}\`;
       }
 
       function syncTodayOrder() {
@@ -677,7 +675,7 @@
           if (ok) {
             if (!todayStore.taskIds.includes(id)) todayStore.taskIds.push(id);
             saveTodayStore();
-            loadApp();
+            // loadApp(); <-- OPTIMIZATION: removed redundant load
             scheduleRender(renderTodayList);
           }
           return;
@@ -685,7 +683,7 @@
 
         if (kind === 'habit') {
           toggleHabitDay(id, dayKey);
-          loadApp();
+          // loadApp(); <-- OPTIMIZATION: removed redundant load
           scheduleRender(renderTodayList);
           return;
         }
@@ -827,15 +825,15 @@
 
         const placeholder = document.createElement('div');
         placeholder.className = 'today-placeholder';
-        placeholder.style.height = `${row.getBoundingClientRect().height}px`;
+        placeholder.style.height = \`\${row.getBoundingClientRect().height}px\`;
         dragState.placeholder = placeholder;
         row.parentNode.insertBefore(placeholder, row.nextSibling);
 
         const listRect = $('#todayList').getBoundingClientRect();
         const rowRect = row.getBoundingClientRect();
-        row.style.width = `${rowRect.width}px`;
-        row.style.left = `${rowRect.left - listRect.left}px`;
-        row.style.top = `${rowRect.top - listRect.top}px`;
+        row.style.width = \`\${rowRect.width}px\`;
+        row.style.left = \`\${rowRect.left - listRect.left}px\`;
+        row.style.top = \`\${rowRect.top - listRect.top}px\`;
       }
 
       function onDragMove(e) {
@@ -848,7 +846,7 @@
         const list = $('#todayList');
         const listRect = list.getBoundingClientRect();
         const y = e.clientY - listRect.top - dragState.offsetY;
-        dragState.item.style.top = `${y}px`;
+        dragState.item.style.top = \`\${y}px\`;
 
         if (dragState.pointerType === 'touch') clearTextSelection();
 
@@ -908,3 +906,5 @@
   <div id="bottomToolbarMount"></div>
 </body>
 </html>
+`
+}
