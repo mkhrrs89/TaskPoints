@@ -2304,6 +2304,10 @@ function computeNextDueDate(task){
     }
   }
 
+  if (!next) {
+    next = addDays(base, 1);
+  }
+
   return next ? dateKey(next) : null;
 }
 
@@ -5619,6 +5623,13 @@ function completeTask(id){
   if(!t) return;
   const now = new Date().toISOString();
   const completedDayKey = dateKey(now);
+  const alreadyCompletedToday = Array.isArray(state.completions)
+    ? state.completions.some(c => c && c.taskId === id && dateKey(c.completedAtISO) === completedDayKey)
+    : false;
+
+  if (alreadyCompletedToday) {
+    return;
+  }
 
   // always log the completion
   addCompletion({
