@@ -312,7 +312,7 @@ function load() {
           .sort((a,b) => b.date.localeCompare(a.date))[0];
 
         if (prev && prev.date !== dateKeyStr) {
-          momentumBonus = (prev.score * (momentum / 100)) * 0.12;
+          momentumBonus = (prev.score * (momentum / 100)) * 0.18;
         }
       }
 

@@ -2006,7 +2006,7 @@ function simulateAiScoreForPlayer(player, todayKey){
       .sort((a,b) => b.date.localeCompare(a.date))[0];
 
     if (prev && prev.date !== todayKey) {
-      momentumBonus = (prev.score * (momentum / 100)) * 0.12;
+      momentumBonus = (prev.score * (momentum / 100)) * 0.18;
     }
   }
 
