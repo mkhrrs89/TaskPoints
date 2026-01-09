@@ -1,7 +1,4 @@
-{
-type: "file_change",
-fileName: "today.html",
-fileContent: `<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
@@ -764,20 +761,19 @@ function saveTodayStore(store = todayStore) {
         if (wantOpen) renderHabitPicker();
       }
 
-      function init() {
-        const dayKey = dayKeyNow();
-        loadApp();
+function init() {
+  const dayKey = dayKeyNow();
 
-        todayStore = loadTodayStore(dayKey);
-        saveTodayStore();
+  loadApp();
 
-renderDatePill();
+  todayStore = loadTodayStore(dayKey);
 
-todayStore = loadTodayStore(dayKey);
-ensureAutoTasks(dayKey);
-todayStore = loadTodayStore(dayKey); // reload after auto-add
+  ensureAutoTasks(dayKey);   // this mutates todayStore.taskIds
+  saveTodayStore();          // persist after auto-add
 
-scheduleRender(renderTodayList);
+  renderDatePill();
+  scheduleRender(renderTodayList);
+
 
 
         $('#todayList').addEventListener('click', onListClick);
@@ -938,5 +934,3 @@ scheduleRender(renderTodayList);
   <div id="bottomToolbarMount"></div>
 </body>
 </html>
-`
-}
