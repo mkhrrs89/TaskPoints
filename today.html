@@ -493,7 +493,7 @@ function saveTodayStore(store = todayStore) {
         h.doneKeys = Array.isArray(h.doneKeys) ? h.doneKeys.slice() : [];
         h.failedKeys = Array.isArray(h.failedKeys) ? h.failedKeys.slice() : [];
 
-        const compTaskId = \`habit:\${h.id}:\${dayKey}\`;
+        const compTaskId = `habit:${h.id}:${dayKey}`;
         const already = h.doneKeys.includes(dayKey);
 
         if (already) {
