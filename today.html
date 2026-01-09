@@ -318,24 +318,45 @@ fileContent: `<!doctype html>
         }
       }
 
-      function loadTodayStore(dayKey) {
-        const raw = localStorage.getItem(TODAY_STORE_KEY);
-        const existing = raw ? safeParse(raw, null) : null;
+function loadTodayDb() {
+  const raw = localStorage.getItem(TODAY_STORE_KEY);
+  if (!raw) return { version: 1, tasksByDay: {}, notesByDay: {}, selectedHabitIdsByDay: {}, orderByDay: {} };
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') throw new Error('bad');
+    return {
+      version: 1,
+      tasksByDay: (parsed.tasksByDay && typeof parsed.tasksByDay === 'object') ? parsed.tasksByDay : {},
+      notesByDay: (parsed.notesByDay && typeof parsed.notesByDay === 'object') ? parsed.notesByDay : {},
+      selectedHabitIdsByDay: (parsed.selectedHabitIdsByDay && typeof parsed.selectedHabitIdsByDay === 'object') ? parsed.selectedHabitIdsByDay : {},
+      orderByDay: (parsed.orderByDay && typeof parsed.orderByDay === 'object') ? parsed.orderByDay : {}
+    };
+  } catch {
+    return { version: 1, tasksByDay: {}, notesByDay: {}, selectedHabitIdsByDay: {}, orderByDay: {} };
+  }
+}
 
-        const fresh = { dayKey, taskIds: [], selectedHabitIds: [], notes: [], order: [] };
-        if (!existing || existing.dayKey !== dayKey) return fresh;
+function loadTodayStore(dayKey) {
+  const db = loadTodayDb();
+  return {
+    dayKey,
+    taskIds: Array.isArray(db.tasksByDay[dayKey]) ? db.tasksByDay[dayKey] : [],
+    selectedHabitIds: Array.isArray(db.selectedHabitIdsByDay[dayKey]) ? db.selectedHabitIdsByDay[dayKey] : [],
+    notes: Array.isArray(db.notesByDay[dayKey]) ? db.notesByDay[dayKey] : [],
+    order: Array.isArray(db.orderByDay[dayKey]) ? db.orderByDay[dayKey] : []
+  };
+}
 
-        return {
-          dayKey,
-          taskIds: Array.isArray(existing.taskIds) ? existing.taskIds : [],
-          selectedHabitIds: Array.isArray(existing.selectedHabitIds) ? existing.selectedHabitIds : [],
-          notes: Array.isArray(existing.notes) ? existing.notes : [],
-          order: Array.isArray(existing.order) ? existing.order : []
-        };
-      }
-      function saveTodayStore() {
-        localStorage.setItem(TODAY_STORE_KEY, JSON.stringify(todayStore));
-      }
+function saveTodayStore(store = todayStore) {
+  const dayKey = store?.dayKey || dayKeyNow();
+  const db = loadTodayDb();
+  db.tasksByDay[dayKey] = Array.isArray(store.taskIds) ? store.taskIds : [];
+  db.selectedHabitIdsByDay[dayKey] = Array.isArray(store.selectedHabitIds) ? store.selectedHabitIds : [];
+  db.notesByDay[dayKey] = Array.isArray(store.notes) ? store.notes : [];
+  db.orderByDay[dayKey] = Array.isArray(store.order) ? store.order : [];
+  localStorage.setItem(TODAY_STORE_KEY, JSON.stringify(db));
+}
+
 
       function escapeHtml(str) {
         return String(str)
@@ -750,9 +771,14 @@ fileContent: `<!doctype html>
         todayStore = loadTodayStore(dayKey);
         saveTodayStore();
 
-        renderDatePill();
-        ensureAutoTasks(dayKey);
-        scheduleRender(renderTodayList);
+renderDatePill();
+
+todayStore = loadTodayStore(dayKey);
+ensureAutoTasks(dayKey);
+todayStore = loadTodayStore(dayKey); // reload after auto-add
+
+scheduleRender(renderTodayList);
+
 
         $('#todayList').addEventListener('click', onListClick);
         $('#todayList').addEventListener('pointerdown', onDragStart);
