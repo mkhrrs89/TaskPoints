@@ -23,6 +23,19 @@
     .btn{border:1px solid var(--border);border-radius:12px;padding:6px 8px;font-size:11px}
     .btn-ghost{background:transparent}
     .btn-success{background:#22c55e;color:#072;border:none}
+.btn-icon{
+  padding:2px 6px;
+  font-size:12px;
+  line-height:1;
+  border-radius:999px;
+}
+.btn-icon-delete{
+  border-color:rgba(248,113,113,.5);
+  color:#fecaca;
+}
+.btn-icon-delete:hover{
+  background:rgba(248,113,113,.15);
+}
 .btn-warn {
   background: rgba(217, 119, 6, 0.25);   /* amber-700 muted */
   border: 1px solid rgba(217, 119, 6, 0.35);
@@ -847,7 +860,10 @@ function renderWeekTasks(baseDate){
         <div class="flex flex-col gap-2">
           <div class="flex items-start justify-between gap-3">
             <div class="text-sm leading-snug break-words font-semibold">${escapeHtml(t.title)}</div>
-            <div class="flex items-center gap-2 flex-shrink-0">${importanceBadge}</div>
+            <div class="flex items-center gap-2 flex-shrink-0">
+              ${importanceBadge}
+              <button class="btn btn-ghost btn-icon btn-icon-delete" onclick="deleteTask('${t.id}')" title="Delete task" aria-label="Delete task">✕</button>
+            </div>
           </div>
           <div class="flex items-center gap-2 flex-wrap text-[11px] text-zinc-200">
             ${showPostponePill ? `<span class="tag postpone-pill">+${postponeDays}d</span>` : ''}
@@ -913,6 +929,17 @@ function addOneDay(id){
   t.dueDateISO = dateKey(newDate);
   trackDueDatePush(t, oldDue, t.dueDateISO);
 
+  st = saveMerged(st);
+  state = st;
+  renderAll(currentBaseDate);
+}
+
+function deleteTask(id){
+  let st = load();
+  const t = st.tasks.find(x => x.id === id);
+  if(!t) return;
+  if(!confirm('Delete this task?')) return;
+  st.tasks = st.tasks.filter(x => x.id !== id);
   st = saveMerged(st);
   state = st;
   renderAll(currentBaseDate);
