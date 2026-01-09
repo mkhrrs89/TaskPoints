@@ -18,8 +18,8 @@ fileContent: `<!doctype html>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="styles.css">
   <link rel="preload" href="toolbar.js" as="script">
-  <script src="toolbar.js" defer></script>
   <script src="scoring_core.js"></script>
+  <script src="toolbar.js" defer></script>
 
   <style>
     /* Local-only styles so we keep your global aesthetic intact */
@@ -154,6 +154,12 @@ fileContent: `<!doctype html>
       }
     }
   </style>
+  
+<style>
+  .hidden { display: none !important; }
+</style>
+
+  
 </head>
 
 <body class="min-h-screen today-page">
@@ -267,7 +273,7 @@ fileContent: `<!doctype html>
 
   <script>
     (function () {
-      const STORAGE_KEY = 'taskpoints_v1';
+      const STORAGE_KEY = window.TaskPointsCore?.STORAGE_KEY || 'taskpoints_v1';
       const TODAY_STORE_KEY = 'taskpoints_today_view_v1';
       const $ = (sel) => document.querySelector(sel);
       const $$ = (sel) => Array.from(document.querySelectorAll(sel));
@@ -348,7 +354,7 @@ fileContent: `<!doctype html>
       function ensureAutoTasks(dayKey) {
         const tasks = Array.isArray(appState.tasks) ? appState.tasks : [];
         const dueToday = tasks
-          .filter(t => t && !t.completedAtISO && !t.hidden && t.dueDateISO === dayKey)
+          .filter(t => t && !t.completedAtISO && !t.hidden && (String(t.dueDateISO || '').slice(0, 10) === dayKey))
           .map(t => t.id)
           .filter(Boolean);
 
