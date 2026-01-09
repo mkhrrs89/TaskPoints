@@ -505,7 +505,7 @@ function saveTodayStore(store = todayStore) {
           addCompletion({
             id: makeId(),
             taskId: compTaskId,
-            title: \`[Habit] \${h.name} (\${dayKey})\`,
+            title: `[Habit] ${h.name} (${dayKey})`,
             points: Number(h.pointsPerDay || 0),
             completedAtISO: new Date().toISOString(),
             source: 'habit',
@@ -529,7 +529,7 @@ function saveTodayStore(store = todayStore) {
         if (!list) return;
 
         if (!habits.length) {
-          list.innerHTML = \`<div class="muted text-sm">No habits yet.</div>\`;
+          list.innerHTML = `<div class="muted text-sm">No habits yet.</div>`;
           return;
         }
 
@@ -538,15 +538,15 @@ function saveTodayStore(store = todayStore) {
         list.innerHTML = habits.map(h => {
           const checked = selected.has(h.id) ? 'checked' : '';
           const pts = Number(h.pointsPerDay || 0);
-          return \`
+          return `
             <label class="habit-row cursor-pointer">
               <div class="min-w-0">
-                <div class="habit-name truncate">\${escapeHtml(h.name || 'Untitled Habit')}</div>
-                <div class="habit-meta">\${pts ? \`\${pts} pts\` : '—'}</div>
+                <div class="habit-name truncate">${escapeHtml(h.name || 'Untitled Habit')}</div>
+                <div class="habit-meta">${pts ? `${pts} pts` : '—'}</div>
               </div>
-              <input type="checkbox" data-habit-pick="\${escapeHtml(h.id)}" \${checked} />
+              <input type="checkbox" data-habit-pick="${escapeHtml(h.id)}" ${checked} />
             </label>
-          \`;
+          `;
         }).join('');
 
         $$('#habitPickerList [data-habit-pick]').forEach(input => {
@@ -580,7 +580,7 @@ function saveTodayStore(store = todayStore) {
           if (!t) continue;
 
           const done = hasTaskCompletionToday(taskId, dayKey) || (t.completedAtISO && dateKeyFromISO(t.completedAtISO) === dayKey);
-          const sub = (t.points != null) ? \`\${Number(t.points || 0)} pts\` : '';
+          const sub = (t.points != null) ? `${Number(t.points || 0)} pts` : '';
           items.push({ kind: 'task', id: taskId, title: t.title || 'Untitled Task', sub, done });
         }
 
@@ -591,7 +591,7 @@ function saveTodayStore(store = todayStore) {
 
           const done = Array.isArray(h.doneKeys) ? h.doneKeys.includes(dayKey) : false;
           const pts = Number(h.pointsPerDay || 0);
-          const sub = pts ? \`\${pts} pts\` : '';
+          const sub = pts ? `${pts} pts` : '';
           items.push({ kind: 'habit', id: habitId, title: h.name || 'Untitled Habit', sub, done });
         }
 
@@ -611,22 +611,22 @@ function saveTodayStore(store = todayStore) {
         const orderedItems = orderItems(items);
         el.innerHTML = orderedItems.map((item) => {
           const doneClass = item.done ? 'is-done' : '';
-          const subLine = item.sub ? \`<div class="today-sub">\${escapeHtml(item.sub)}</div>\` : '';
+          const subLine = item.sub ? `<div class="today-sub">${escapeHtml(item.sub)}</div>` : '';
           const key = makeItemKey(item.kind, item.id);
-          return \`
-            <div class="today-item \${doneClass}" data-kind="\${escapeHtml(item.kind)}" data-id="\${escapeHtml(item.id)}" data-key="\${escapeHtml(key)}">
+          return `
+            <div class="today-item ${doneClass}" data-kind="${escapeHtml(item.kind)}" data-id="${escapeHtml(item.id)}" data-key="${escapeHtml(key)}">
               <div class="today-left">
                 <div class="today-check"><span class="mark">✓</span></div>
                 <div class="min-w-0">
-                  <div class="today-title">\${escapeHtml(item.title)}</div>
-                  \${subLine}
+                  <div class="today-title">${escapeHtml(item.title)}</div>
+                  ${subLine}
                 </div>
               </div>
               <div class="today-right">
-                <span class="today-kind \${item.kind}">\${escapeHtml(item.kind)}</span>
+                <span class="today-kind ${item.kind}">${escapeHtml(item.kind)}</span>
               </div>
             </div>
-          \`;
+          `;
         }).join('');
         } finally {
           if (perfLabel) console.timeEnd(perfLabel);
@@ -634,7 +634,7 @@ function saveTodayStore(store = todayStore) {
       }
 
       function makeItemKey(kind, id) {
-        return \`\${kind}:\${id}\`;
+        return `${kind}:${id}`;
       }
 
       function syncTodayOrder() {
@@ -774,8 +774,6 @@ function init() {
   renderDatePill();
   scheduleRender(renderTodayList);
 
-
-
         $('#todayList').addEventListener('click', onListClick);
         $('#todayList').addEventListener('pointerdown', onDragStart);
         $('#todayList').addEventListener('pointermove', onDragMove);
@@ -853,15 +851,15 @@ function init() {
 
         const placeholder = document.createElement('div');
         placeholder.className = 'today-placeholder';
-        placeholder.style.height = \`\${row.getBoundingClientRect().height}px\`;
+        placeholder.style.height = `${row.getBoundingClientRect().height}px`;
         dragState.placeholder = placeholder;
         row.parentNode.insertBefore(placeholder, row.nextSibling);
 
         const listRect = $('#todayList').getBoundingClientRect();
         const rowRect = row.getBoundingClientRect();
-        row.style.width = \`\${rowRect.width}px\`;
-        row.style.left = \`\${rowRect.left - listRect.left}px\`;
-        row.style.top = \`\${rowRect.top - listRect.top}px\`;
+        row.style.width = `${rowRect.width}px`;
+        row.style.left = `${rowRect.left - listRect.left}px`;
+        row.style.top = `${rowRect.top - listRect.top}px`;
       }
 
       function onDragMove(e) {
@@ -874,7 +872,7 @@ function init() {
         const list = $('#todayList');
         const listRect = list.getBoundingClientRect();
         const y = e.clientY - listRect.top - dragState.offsetY;
-        dragState.item.style.top = \`\${y}px\`;
+        dragState.item.style.top = `${y}px`;
 
         if (dragState.pointerType === 'touch') clearTextSelection();
 
