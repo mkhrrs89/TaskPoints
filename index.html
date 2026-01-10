@@ -3292,6 +3292,7 @@ function buildHabitRenderEntries(habits, sortMode) {
 function renderHabitRow(h, days, wrap, options = {}) {
   const showMoveButtons = options.showMoveButtons ?? (getHabitSortMode() === 'custom');
   const showTag = options.showTag ?? true;
+  const isGrouped = options.isGrouped ?? false;
 
   h.doneKeys = Array.isArray(h.doneKeys) ? h.doneKeys : [];
 
@@ -3300,6 +3301,9 @@ function renderHabitRow(h, days, wrap, options = {}) {
 
   const row = document.createElement('div');
   row.className = 'habitRow';
+  if (!isGrouped) {
+    row.classList.add('habitRow--single');
+  }
 
   const daysHtml = days.map(d => {
     const on = h.doneKeys.includes(d.key);
@@ -3434,13 +3438,13 @@ function renderHabits(){
 
       const body = document.createElement('div');
       body.className = 'habitGroupBody';
-      entry.habits.forEach(h => renderHabitRow(h, days, body, { showMoveButtons: false, showTag: false }));
+      entry.habits.forEach(h => renderHabitRow(h, days, body, { showMoveButtons: false, showTag: false, isGrouped: true }));
       groupWrap.appendChild(body);
       wrap.appendChild(groupWrap);
       return;
     }
 
-    renderHabitRow(entry.habit, days, wrap, { showMoveButtons: sortMode === 'custom' });
+    renderHabitRow(entry.habit, days, wrap, { showMoveButtons: sortMode === 'custom', isGrouped: false });
   });
 
   if (!habitTapHandlerBound) {
@@ -3509,6 +3513,7 @@ function renderVices(){
     const row = document.createElement('div');
 
     row.className = 'habitRow';
+    row.classList.add('habitRow--single');
 
     const daysHtml = days.map(d => {
       const on = h.doneKeys.includes(d.key);
