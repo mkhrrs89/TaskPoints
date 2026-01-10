@@ -3352,7 +3352,7 @@ function renderHabitRow(h, days, wrap, options = {}) {
       ${showTag && h.tag ? `<div class="tag tag-clear">${escapeHtml(h.tag)}</div>` : ''}
     ${streak > 0 ? `
       <div class="tag streak-pill">
-        ${streak} ${streak === 1 ? 'day' : 'days'}
+        ${streak}d
       </div>
     ` : ''}
       <div class="tag bg-zinc-200/60 dark:bg-zinc-700/60 text-orange-400">
@@ -3564,7 +3564,7 @@ const nameHtml = `
     ${h.tag ? `<div class="tag tag-clear">${escapeHtml(h.tag)}</div>` : ''}
   ${streak > 0 ? `
     <div class="tag streak-pill">
-      ${streak} ${streak === 1 ? 'day' : 'days'}
+      ${streak}d
     </div>
   ` : ''}
     <div class="tag bg-zinc-200/60 dark:bg-zinc-700/60 text-orange-400">
