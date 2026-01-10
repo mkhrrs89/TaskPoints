@@ -1330,6 +1330,30 @@ body {
     margin-bottom:1rem; /* ← ADD THIS */
   }
 
+  .habitRow--single{
+    display:grid;
+    grid-template-columns:minmax(0, 1fr) auto;
+    grid-template-areas:
+      "meta controls"
+      "days days";
+    row-gap:0.35rem;
+    column-gap:0.5rem;
+    align-items:center;
+  }
+
+  .habitRow--single .habitLeft{
+    grid-area:meta;
+  }
+
+  .habitRow--single .habitControls{
+    grid-area:controls;
+    margin-left:0;
+  }
+
+  .habitRow--single .habitDaysRow{
+    grid-area:days;
+  }
+
   /* On mobile, keep controls left-aligned (don't push them right) */
   .habitControls{
     margin-left:0;
@@ -2935,7 +2959,6 @@ body {
     flex-wrap: wrap;
     max-width: 100%;
   }
-
 
 
 
