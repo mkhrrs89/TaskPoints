@@ -82,6 +82,16 @@
     }
     .today-page .today-item.is-done .today-check .mark{opacity:1}
     .today-page .today-right{display:flex;align-items:center;gap:10px;flex:0 0 auto}
+    .today-page .today-remove{
+      display:inline-flex;align-items:center;justify-content:center;
+      width:30px;height:30px;border-radius:999px;
+      border:1px solid rgba(255,255,255,0.14);
+      background:rgba(255,255,255,0.04);
+      color:#fca5a5;font-weight:700;line-height:1;
+      transition:background .15s ease,border-color .15s ease,transform .05s ease;
+    }
+    .today-page .today-remove:hover{background:rgba(255,255,255,0.08);border-color:rgba(255,255,255,0.22)}
+    .today-page .today-remove:active{transform:scale(.96)}
     .today-page .today-list{position:relative}
     .today-page .today-list.is-dragging{
       touch-action:none;
@@ -129,6 +139,7 @@
       .today-page .today-title{font-size:.95rem}
       .today-page .today-sub{font-size:.75rem}
       .today-page .today-right{gap:6px}
+      .today-page .today-remove{width:26px;height:26px;font-size:.85rem}
       .today-page .today-list,
       .today-page .today-item,
       .today-page .today-item *{
@@ -624,6 +635,7 @@ function saveTodayStore(store = todayStore) {
                 </div>
               </div>
               <div class="today-right">
+                <button class="today-remove" type="button" data-remove="true" aria-label="Remove from today">×</button>
                 <span class="today-kind ${item.kind}">${escapeHtml(item.kind)}</span>
               </div>
             </div>
@@ -683,6 +695,14 @@ function saveTodayStore(store = todayStore) {
       }
 
       function onListClick(e) {
+        if (e.target.closest('[data-remove="true"]')) {
+          const row = e.target.closest('.today-item');
+          if (!row) return;
+          const kind = row.getAttribute('data-kind');
+          const id = row.getAttribute('data-id');
+          removeTodayItem(kind, id);
+          return;
+        }
         const row = e.target.closest('.today-item');
         if (!row) return;
         if (dragState.suppressClick) {
@@ -750,6 +770,20 @@ function saveTodayStore(store = todayStore) {
         // remove tasks completed today from the list (keeps habits selected)
         todayStore.taskIds = (Array.isArray(todayStore.taskIds) ? todayStore.taskIds : []).filter(taskId => !hasTaskCompletionToday(taskId, dayKey));
 
+        syncTodayOrder();
+        saveTodayStore();
+        scheduleRender(renderTodayList);
+      }
+
+      function removeTodayItem(kind, id) {
+        if (!kind || !id) return;
+        if (kind === 'task') {
+          todayStore.taskIds = (Array.isArray(todayStore.taskIds) ? todayStore.taskIds : []).filter(taskId => taskId !== id);
+        } else if (kind === 'habit') {
+          todayStore.selectedHabitIds = (Array.isArray(todayStore.selectedHabitIds) ? todayStore.selectedHabitIds : []).filter(habitId => habitId !== id);
+        } else if (kind === 'note') {
+          todayStore.notes = (Array.isArray(todayStore.notes) ? todayStore.notes : []).filter(note => !(note && note.id === id));
+        }
         syncTodayOrder();
         saveTodayStore();
         scheduleRender(renderTodayList);
