@@ -4100,6 +4100,7 @@ function renderFlexActions(){
         <div class="flex gap-2 flex-wrap">
           <button class="btn btn-success btn-task" data-act="flex-save">Save</button>
           <button class="btn btn-ghost btn-task" data-act="flex-cancel">Cancel</button>
+          <button class="btn btn-ghost btn-task" data-act="flex-retire" data-id="${f.id}">Retire</button>
           <button class="btn btn-delete btn-task" data-act="flex-del" data-id="${f.id}">Delete</button>
         </div>
       `;
@@ -4135,7 +4136,6 @@ function renderFlexActions(){
         </div>
         <div class="flex gap-2 flex-wrap flex-action-buttons">
           <button class="btn btn-ghost btn-task" data-act="flex-edit" data-id="${f.id}">Edit</button>
-          <button class="btn btn-ghost btn-task" data-act="flex-retire" data-id="${f.id}">Retire</button>
           <button class="btn btn-success btn-task btn-check" data-act="flex-do" data-id="${f.id}" aria-label="Done">✓</button>
         </div>
       `;
