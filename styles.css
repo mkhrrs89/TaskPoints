@@ -857,6 +857,7 @@ body {
   transition: transform 160ms ease, height 220ms ease;
   will-change: transform, height;
   touch-action: none;
+  --tp-menu-gap: 0px;
 }
 
 .mobile-bottom-nav-shell.is-dragging{
@@ -2959,7 +2960,6 @@ body {
     flex-wrap: wrap;
     max-width: 100%;
   }
-
 
 
 
