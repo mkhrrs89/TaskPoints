@@ -566,6 +566,7 @@ function saveTodayStore(store = todayStore) {
         const perfLabel = window.TP_DEBUG_PERF ? 'renderTodayList' : null;
         if (perfLabel) console.time(perfLabel);
         try {
+          loadApp();
           const dayKey = dayKeyNow();
           ensureAutoTasks(dayKey);
 
