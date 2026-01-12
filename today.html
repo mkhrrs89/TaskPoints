@@ -770,6 +770,16 @@ function saveTodayStore(store = todayStore) {
         // remove tasks completed today from the list (keeps habits selected)
         todayStore.taskIds = (Array.isArray(todayStore.taskIds) ? todayStore.taskIds : []).filter(taskId => !hasTaskCompletionToday(taskId, dayKey));
 
+        // remove habits completed today from the list
+        const habits = Array.isArray(appState.habits) ? appState.habits : [];
+        const habitsById = new Map(habits.filter(h => h && h.id).map(h => [h.id, h]));
+        todayStore.selectedHabitIds = (Array.isArray(todayStore.selectedHabitIds) ? todayStore.selectedHabitIds : []).filter(habitId => {
+          const h = habitsById.get(habitId);
+          if (!h) return true;
+          const done = Array.isArray(h.doneKeys) ? h.doneKeys.includes(dayKey) : false;
+          return !done;
+        });
+
         syncTodayOrder();
         saveTodayStore();
         scheduleRender(renderTodayList);
