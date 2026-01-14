@@ -2985,6 +2985,22 @@ body {
 
 
 
+/* ====== Hide Work Input Boxes After Entry ====== */
+
+/* Work: if JS adds `hidden`, it MUST disappear */
+#workInputRow.hidden{
+  display: none !important;
+}
+
+/* Work: when unhidden, make sure summary actually shows */
+#workSummaryRow:not(.hidden){
+  display: flex !important;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+
 
 
 
