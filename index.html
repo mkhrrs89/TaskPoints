@@ -3612,53 +3612,58 @@ const nameHtml = `
 
   });
 
-if (!viceTapHandlerBound) {
-  viceTapHandlerBound = true;
+  if (!viceTapHandlerBound) {
+    viceTapHandlerBound = true;
 
-  let tap = null; // { id, startX, startY, startBubble, moved }
+    let tap = null; // { id, startX, startY, startBubble, moved }
 
-  wrap.addEventListener('pointerdown', (e) => {
-    const bubble = e.target.closest('.viceDay[data-vice][data-day]');
-    if (!bubble || !wrap.contains(bubble)) return;
+    const getViceBubble = (e) =>
+      e.target.closest('.habitDay.viceDay[data-habit][data-day]');
 
-    tap = {
-      id: e.pointerId,
-      startX: e.clientX,
-      startY: e.clientY,
-      startBubble: bubble,
-      moved: false
-    };
-  }, { passive: true });
+    wrap.addEventListener('pointerdown', (e) => {
+      const bubble = getViceBubble(e);
+      if (!bubble || !wrap.contains(bubble)) return;
 
-  wrap.addEventListener('pointermove', (e) => {
-    if (!tap || e.pointerId !== tap.id) return;
+      tap = {
+        id: e.pointerId,
+        startX: e.clientX,
+        startY: e.clientY,
+        startBubble: bubble,
+        moved: false
+      };
+    }, { passive: true });
 
-    const dx = Math.abs(e.clientX - tap.startX);
-    const dy = Math.abs(e.clientY - tap.startY);
+    wrap.addEventListener('pointermove', (e) => {
+      if (!tap || e.pointerId !== tap.id) return;
 
-    if (dx > 12 || dy > 12) tap.moved = true; // scroll threshold
-  }, { passive: true });
+      const dx = Math.abs(e.clientX - tap.startX);
+      const dy = Math.abs(e.clientY - tap.startY);
 
-  wrap.addEventListener('pointerup', (e) => {
-    const bubble = e.target.closest('.viceDay[data-vice][data-day]');
-    if (!bubble || !wrap.contains(bubble)) return;
+      // if you dragged, it's a scroll, not a tap
+      if (dx > 12 || dy > 12) tap.moved = true;
+    }, { passive: true });
 
-    // If this pointer became a drag OR ended on a different bubble, ignore.
-    if (tap && e.pointerId === tap.id) {
-      const moved = tap.moved;
-      const sameBubble = (bubble === tap.startBubble);
-      tap = null;
+    wrap.addEventListener('pointerup', (e) => {
+      const bubble = getViceBubble(e);
+      if (!bubble || !wrap.contains(bubble)) return;
 
-      if (moved || !sameBubble) return;
-    }
+      if (tap && e.pointerId === tap.id) {
+        const moved = tap.moved;
+        const sameBubble = (bubble === tap.startBubble);
+        tap = null;
 
-    handleViceBubbleTap(bubble);
-  }, { passive: true });
+        if (moved || !sameBubble) return; // ignore scroll / drift
+      }
 
-  wrap.addEventListener('pointercancel', (e) => {
-    if (tap && e.pointerId === tap.id) tap = null;
-  }, { passive: true });
-}
+      // vices use the same toggle pipeline as habits (category === 'vice' inside applyHabitDayToggle)
+      handleHabitBubbleTap(bubble);
+    }, { passive: true });
+
+    wrap.addEventListener('pointercancel', (e) => {
+      if (tap && e.pointerId === tap.id) tap = null;
+    }, { passive: true });
+  }
+
 
 
   // Edit / delete
