@@ -2744,13 +2744,17 @@ function renderStats(){
     });
   }
 
-  const dailyTotalsWithInertia = Object.fromEntries(
-    Object.entries(dailyTotals).map(([k, v]) => {
-      const { inertia } = computeInertia(dailyTotals, k);
-      const inertiaVal = Number.isFinite(inertia) ? inertia : 0;
-      return [k, v + inertiaVal];
-    })
-  );
+const dailyTotalsWithInertia =
+  window.TaskPointsCore?.computeDailyTotalsWithInertia
+    ? TaskPointsCore.computeDailyTotalsWithInertia(dailyTotals, state)
+    : Object.fromEntries(
+        Object.entries(dailyTotals).map(([k, v]) => {
+          const { inertia } = computeInertia(dailyTotals, k);
+          const inertiaVal = Number.isFinite(inertia) ? inertia : 0;
+          return [k, v + inertiaVal];
+        })
+      );
+
 
   const weeklyTotalsWithInertia = {};
   const monthlyTotalsWithInertia = {};
