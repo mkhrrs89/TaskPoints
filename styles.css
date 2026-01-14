@@ -2967,8 +2967,20 @@ body {
 
 
 
+/* ====== Hide Mood Input Boxes After Entry ====== */
 
+/* Mood: if JS adds `hidden`, it MUST disappear */
+#moodInputRow.hidden{
+  display: none !important;
+}
 
+/* Mood: if JS removes `hidden`, it MUST show */
+#moodSummaryRow:not(.hidden){
+  display: flex !important;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
 
 
 
