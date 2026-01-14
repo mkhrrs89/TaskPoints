@@ -1165,13 +1165,14 @@
     return { dailyTotals, weeklyTotals, monthlyTotals };
   }
 
-  function computeInertia(dailyTotals, todayK, settings){
+  // Compute totals-with-inertia for ALL days in one pass (avoids O(N^2) callers)
+  function computeInertiaMaps(dailyTotals, settings, extraKeys){
     const scoring = getScoringSettings(settings);
     const inertiaSettings = scoring.inertia;
-    const today = fromKey(todayK);
-    if (!today || isNaN(today.getTime())) return { inertia: 0, average: 0 };
+    const totalsObj = dailyTotals && typeof dailyTotals === 'object' ? dailyTotals : {};
+    const extras = Array.isArray(extraKeys) ? extraKeys : (extraKeys ? [extraKeys] : []);
 
-    const keys = Array.from(new Set([...Object.keys(dailyTotals), todayK]))
+    const keys = Array.from(new Set([...Object.keys(totalsObj), ...extras]))
       .filter(k => {
         const d = fromKey(k);
         return d && !isNaN(d.getTime());
@@ -1203,12 +1204,26 @@
       const inertia = count ? average * inertiaSettings.multiplier : 0;
 
       inertiaMap.set(k, { inertia, average });
-      const base = Number(dailyTotals[k]) || 0;
+      const base = Number(totalsObj[k]) || 0;
       totalsWithInertia.set(k, base + inertia);
     });
 
+    return { keys, inertiaMap, totalsWithInertia };
+  }
+
+  // Convenience: return a plain object of totals already including inertia
+  function computeDailyTotalsWithInertia(dailyTotals, settings, extraKeys){
+    const { totalsWithInertia } = computeInertiaMaps(dailyTotals, settings, extraKeys);
+    const out = {};
+    totalsWithInertia.forEach((v, k) => { out[k] = v; });
+    return out;
+  }
+
+  function computeInertia(dailyTotals, todayK, settings){
+    const { inertiaMap } = computeInertiaMaps(dailyTotals, settings, todayK);
     return inertiaMap.get(todayK) || { inertia: 0, average: 0 };
   }
+
 
   function deriveTodayWithInertia(dailyTotals, todayK, settings){
     const { inertia, average } = computeInertia(dailyTotals, todayK, settings);
@@ -1246,13 +1261,18 @@
     });
 
     const dailyTotals = Object.fromEntries(Object.entries(daily).map(([k, v]) => [k, Number(v.total) || 0]));
-    Object.keys(dailyTotals).forEach(k => {
-      const { inertia } = computeInertia(dailyTotals, k, scoringSettings);
-      if (!inertia) return;
+const totalsWithInertia = computeDailyTotalsWithInertia(dailyTotals, scoringSettings);
 
-      daily[k].total = addPoints(daily[k].total, inertia);
-      daily[k].categories.inertia = addPoints(daily[k].categories.inertia, inertia);
-    });
+Object.keys(dailyTotals).forEach(k => {
+  const base = Number(dailyTotals[k]) || 0;
+  const withInertia = Number(totalsWithInertia[k]) || base;
+  const inertia = withInertia - base;
+  if (!inertia) return;
+
+  daily[k].total = addPoints(daily[k].total, inertia);
+  daily[k].categories.inertia = addPoints(daily[k].categories.inertia, inertia);
+});
+
 
     return daily;
   }
@@ -1683,6 +1703,7 @@
     categorizeCompletion,
     aggregateCompletionsByDate,
     computeInertia,
+    computeDailyTotalsWithInertia,
     deriveTodayWithInertia,
     buildDailyBreakdowns,
     buildRollups,
