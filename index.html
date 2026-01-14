@@ -3447,36 +3447,54 @@ function renderHabits(){
     renderHabitRow(entry.habit, days, wrap, { showMoveButtons: sortMode === 'custom', isGrouped: false });
   });
 
-  if (!habitTapHandlerBound) {
-    habitTapHandlerBound = true;
-    wrap.addEventListener('pointerup', (e) => {
-      const bubble = e.target.closest('.habitDay[data-habit][data-day]');
-      if (!bubble || !wrap.contains(bubble)) return;
-      if (window.TP_DEBUG_PERF) {
-        console.count('habitTapHandler');
-      }
-      handleHabitBubbleTap(bubble);
-    });
-  }
-  wrap.querySelectorAll('[data-act="habit-edit"]').forEach(btn=>{
-    btn.onclick = () => { editingHabitId = btn.getAttribute('data-id'); renderHabits(); renderVices(); };
-  });
-  wrap.querySelectorAll('[data-act="habit-delete"]').forEach(btn=>{
-    btn.onclick = () => deleteHabit(btn.getAttribute('data-id'));
-  });
-  wrap.querySelectorAll('[data-act="habit-up"]').forEach(btn => {
-    btn.onclick = () => moveHabit(btn.getAttribute('data-id'), -1);
-  });
-  wrap.querySelectorAll('[data-act="habit-down"]').forEach(btn => {
-    btn.onclick = () => moveHabit(btn.getAttribute('data-id'), +1);
-  });
-  wrap.querySelectorAll('[data-act="habit-group-up"]').forEach(btn => {
-    btn.onclick = () => moveHabitGroup(btn.getAttribute('data-tag'), -1);
-  });
-  wrap.querySelectorAll('[data-act="habit-group-down"]').forEach(btn => {
-    btn.onclick = () => moveHabitGroup(btn.getAttribute('data-tag'), +1);
-  });
+if (!habitTapHandlerBound) {
+  habitTapHandlerBound = true;
+
+  let tap = null; // { id, startX, startY, startBubble, moved }
+
+  wrap.addEventListener('pointerdown', (e) => {
+    const bubble = e.target.closest('.habitDay[data-habit][data-day]');
+    if (!bubble || !wrap.contains(bubble)) return;
+
+    tap = {
+      id: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      startBubble: bubble,
+      moved: false
+    };
+  }, { passive: true });
+
+  wrap.addEventListener('pointermove', (e) => {
+    if (!tap || e.pointerId !== tap.id) return;
+
+    const dx = Math.abs(e.clientX - tap.startX);
+    const dy = Math.abs(e.clientY - tap.startY);
+
+    if (dx > 12 || dy > 12) tap.moved = true; // scroll threshold
+  }, { passive: true });
+
+  wrap.addEventListener('pointerup', (e) => {
+    const bubble = e.target.closest('.habitDay[data-habit][data-day]');
+    if (!bubble || !wrap.contains(bubble)) return;
+
+    // If this pointer became a drag OR ended on a different bubble, ignore.
+    if (tap && e.pointerId === tap.id) {
+      const moved = tap.moved;
+      const sameBubble = (bubble === tap.startBubble);
+      tap = null;
+
+      if (moved || !sameBubble) return;
+    }
+
+    handleHabitBubbleTap(bubble);
+  }, { passive: true });
+
+  wrap.addEventListener('pointercancel', (e) => {
+    if (tap && e.pointerId === tap.id) tap = null;
+  }, { passive: true });
 }
+
 
 function renderVices(){
   const wrap  = $('vicesList');
@@ -3594,17 +3612,54 @@ const nameHtml = `
 
   });
 
-  if (!viceTapHandlerBound) {
-    viceTapHandlerBound = true;
-    wrap.addEventListener('pointerup', (e) => {
-      const bubble = e.target.closest('.habitDay[data-habit][data-day]');
-      if (!bubble || !wrap.contains(bubble)) return;
-      if (window.TP_DEBUG_PERF) {
-        console.count('habitTapHandler');
-      }
-      handleHabitBubbleTap(bubble);
-    });
-  }
+if (!viceTapHandlerBound) {
+  viceTapHandlerBound = true;
+
+  let tap = null; // { id, startX, startY, startBubble, moved }
+
+  wrap.addEventListener('pointerdown', (e) => {
+    const bubble = e.target.closest('.viceDay[data-vice][data-day]');
+    if (!bubble || !wrap.contains(bubble)) return;
+
+    tap = {
+      id: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      startBubble: bubble,
+      moved: false
+    };
+  }, { passive: true });
+
+  wrap.addEventListener('pointermove', (e) => {
+    if (!tap || e.pointerId !== tap.id) return;
+
+    const dx = Math.abs(e.clientX - tap.startX);
+    const dy = Math.abs(e.clientY - tap.startY);
+
+    if (dx > 12 || dy > 12) tap.moved = true; // scroll threshold
+  }, { passive: true });
+
+  wrap.addEventListener('pointerup', (e) => {
+    const bubble = e.target.closest('.viceDay[data-vice][data-day]');
+    if (!bubble || !wrap.contains(bubble)) return;
+
+    // If this pointer became a drag OR ended on a different bubble, ignore.
+    if (tap && e.pointerId === tap.id) {
+      const moved = tap.moved;
+      const sameBubble = (bubble === tap.startBubble);
+      tap = null;
+
+      if (moved || !sameBubble) return;
+    }
+
+    handleViceBubbleTap(bubble);
+  }, { passive: true });
+
+  wrap.addEventListener('pointercancel', (e) => {
+    if (tap && e.pointerId === tap.id) tap = null;
+  }, { passive: true });
+}
+
 
   // Edit / delete
   wrap.querySelectorAll('[data-act="habit-edit"]').forEach(btn => {
