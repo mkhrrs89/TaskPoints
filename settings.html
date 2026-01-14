@@ -109,6 +109,57 @@
         <p class="muted text-xs">Resetting game stats clears historical wins/losses, past matchups, and baseline Δ history (for NPCs only), but keeps today&apos;s matchups and all tasks, completions, and points.</p>
       </div>
 
+      <div class="glass space-y-3" id="missingScoresSection">
+        <div class="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <div class="text-lg font-semibold">Backfill Daily Scores</div>
+            <div class="muted text-sm">Add missing calories, work, mood, or sleep scores for past days.</div>
+          </div>
+        </div>
+        <div class="flex flex-wrap items-end gap-3">
+          <label class="text-sm">
+            <span class="block muted text-xs">Date</span>
+            <input id="missingScoreDate" type="date" class="input w-44" />
+          </label>
+          <label class="text-sm">
+            <span class="block muted text-xs">Metric</span>
+            <select id="missingScoreType" class="input w-44">
+              <option value="calories">Calories</option>
+              <option value="work">Work</option>
+              <option value="mood">Mood</option>
+              <option value="sleep">Sleep</option>
+            </select>
+          </label>
+          <label class="text-sm" data-missing-score-field="calories">
+            <span class="block muted text-xs">Calories</span>
+            <input id="missingCaloriesValue" type="number" min="0" step="1" class="input w-32" placeholder="0–3000" />
+          </label>
+          <label class="text-sm" data-missing-score-field="work">
+            <span class="block muted text-xs">Work score</span>
+            <input id="missingWorkScore" type="number" step="0.1" class="input w-28" placeholder="0–10" />
+          </label>
+          <label class="text-sm" data-missing-score-field="work">
+            <span class="block muted text-xs">Hours</span>
+            <input id="missingWorkHours" type="number" min="0" step="0.1" class="input w-24" placeholder="0" />
+          </label>
+          <label class="text-sm" data-missing-score-field="mood">
+            <span class="block muted text-xs">Mood score</span>
+            <input id="missingMoodScore" type="number" step="0.1" class="input w-28" placeholder="0–10" />
+          </label>
+          <label class="text-sm" data-missing-score-field="sleep">
+            <span class="block muted text-xs">Sleep score</span>
+            <input id="missingSleepScore" type="number" step="0.1" class="input w-28" placeholder="0–100" />
+          </label>
+          <label class="text-sm" data-missing-score-field="sleep">
+            <span class="block muted text-xs">Rested bonus</span>
+            <input id="missingSleepRested" type="number" step="0.1" class="input w-28" placeholder="0" />
+          </label>
+          <button id="missingScoreSaveBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Save Score</button>
+        </div>
+        <p class="muted text-xs">Scores update an existing entry for that date if one already exists.</p>
+        <p id="missingScoreStatus" class="text-xs muted"></p>
+      </div>
+
       <div class="glass space-y-4">
         <div class="flex items-center justify-between gap-3 flex-wrap">
           <div>
@@ -400,6 +451,16 @@
       if (obj.dateKey) return String(obj.dateKey).slice(0, 10);
       if (obj.dateISO) return String(obj.dateISO).slice(0, 10);
       return null;
+    }
+
+    function parseDateInputValue(value) {
+      if (!value) return null;
+      const [year, month, day] = String(value).split("-").map(Number);
+      if (!year || !month || !day) return null;
+      const date = new Date(year, month - 1, day);
+      if (Number.isNaN(date.getTime())) return null;
+      date.setHours(12, 0, 0, 0);
+      return date;
     }
 
     function normalizeHexColor(value) {
@@ -757,6 +818,186 @@
       } catch (err) {
         console.error("Failed to save TaskPoints settings", err);
         return nextState;
+      }
+    }
+
+    function setMissingScoreStatus(message, tone = "muted") {
+      const status = document.getElementById("missingScoreStatus");
+      if (!status) return;
+      status.textContent = message || "";
+      status.classList.remove("text-emerald-400", "text-rose-400");
+      if (tone === "success") status.classList.add("text-emerald-400");
+      if (tone === "error") status.classList.add("text-rose-400");
+    }
+
+    function setMissingScoreFieldVisibility(type) {
+      document.querySelectorAll("[data-missing-score-field]").forEach(field => {
+        if (!(field instanceof HTMLElement)) return;
+        const fieldType = field.getAttribute("data-missing-score-field");
+        if (fieldType === type) {
+          field.classList.remove("hidden");
+        } else {
+          field.classList.add("hidden");
+        }
+      });
+    }
+
+    function readNumberInput(id) {
+      const value = document.getElementById(id)?.value ?? "";
+      const trimmed = String(value).trim();
+      if (!trimmed) return null;
+      const num = Number(trimmed);
+      return Number.isFinite(num) ? num : null;
+    }
+
+    function applyMissingScoreEntry() {
+      const dateValue = document.getElementById("missingScoreDate")?.value;
+      const type = document.getElementById("missingScoreType")?.value;
+      const date = parseDateInputValue(dateValue);
+      if (!date || !type) {
+        setMissingScoreStatus("Choose a date and metric first.", "error");
+        return;
+      }
+
+      const todayKey = dateKey(new Date());
+      const entryKey = dateKey(date);
+      if (entryKey > todayKey) {
+        setMissingScoreStatus("Scores can only be added for today or earlier.", "error");
+        return;
+      }
+
+      if (!window.TaskPointsCore) {
+        setMissingScoreStatus("TaskPoints scoring utilities could not be loaded.", "error");
+        return;
+      }
+
+      const state = loadSettingsState();
+      if (!Array.isArray(state.completions)) state.completions = [];
+      const whenISO = date.toISOString();
+
+      const findEntry = (prefix) => state.completions.find(c => {
+        if (!c?.title?.startsWith(prefix)) return false;
+        const entryDate = c.completedAtISO ? dateKey(new Date(c.completedAtISO)) : null;
+        return entryDate === entryKey;
+      });
+
+      let label = "";
+      let points = 0;
+      let title = "";
+      let source = "metric";
+      let extraFields = {};
+
+      if (type === "sleep") {
+        const score = readNumberInput("missingSleepScore");
+        if (score == null || score < 0 || score > 100) {
+          setMissingScoreStatus("Sleep score must be between 0 and 100.", "error");
+          return;
+        }
+        const rested = readNumberInput("missingSleepRested");
+        const restedValue = rested == null ? 0 : rested;
+        if (!Number.isFinite(restedValue)) {
+          setMissingScoreStatus("Rested bonus must be a number.", "error");
+          return;
+        }
+        points = TaskPointsCore.sleepPoints(score, restedValue, state);
+        title = `Sleep Score (${score}) — Rest ${restedValue}`;
+        label = "Sleep score";
+        extraFields = { sleepRested: restedValue };
+      } else if (type === "work") {
+        const score = readNumberInput("missingWorkScore");
+        if (score == null) {
+          setMissingScoreStatus("Work score must be a number.", "error");
+          return;
+        }
+        const hours = readNumberInput("missingWorkHours");
+        const hoursValue = hours == null ? 0 : hours;
+        if (!Number.isFinite(hoursValue) || hoursValue < 0) {
+          setMissingScoreStatus("Work hours must be zero or more.", "error");
+          return;
+        }
+        points = TaskPointsCore.workPoints(score, hoursValue, state);
+        title = `Work Score (${score}) — Hours ${hoursValue}`;
+        label = "Work score";
+        source = "work";
+        extraFields = { workHours: hoursValue };
+      } else if (type === "calories") {
+        const calories = readNumberInput("missingCaloriesValue");
+        if (calories == null || calories < 0) {
+          setMissingScoreStatus("Calories must be zero or more.", "error");
+          return;
+        }
+        points = TaskPointsCore.caloriesToPoints(calories, state);
+        title = `Calories (${calories})`;
+        label = "Calories";
+      } else if (type === "mood") {
+        const score = readNumberInput("missingMoodScore");
+        if (score == null || score < 0 || score > 10) {
+          setMissingScoreStatus("Mood score must be between 0 and 10.", "error");
+          return;
+        }
+        points = TaskPointsCore.moodPoints(score, state);
+        title = `Mood Score (${score})`;
+        label = "Mood score";
+      } else {
+        setMissingScoreStatus("Select a valid metric to save.", "error");
+        return;
+      }
+
+      const entryPrefixMap = {
+        sleep: "Sleep Score",
+        work: "Work Score",
+        calories: "Calories",
+        mood: "Mood Score"
+      };
+
+      const existing = findEntry(entryPrefixMap[type]);
+      if (existing) {
+        existing.title = title;
+        existing.points = points;
+        existing.completedAtISO = whenISO;
+        existing.source = source;
+        Object.assign(existing, extraFields);
+      } else {
+        state.completions.unshift({
+          id: crypto.randomUUID(),
+          title,
+          points,
+          completedAtISO: whenISO,
+          source,
+          ...extraFields
+        });
+      }
+
+      let nextState = state;
+      if (window.TaskPointsCore?.syncDerivedPoints) {
+        nextState = TaskPointsCore.syncDerivedPoints(nextState).state;
+      }
+      if (window.TaskPointsCore?.syncYouMatchups) {
+        nextState = TaskPointsCore.syncYouMatchups(nextState).state;
+      }
+
+      saveSettingsState(nextState, { immediateWrite: true });
+      setMissingScoreStatus(`${label} saved for ${entryKey}.`, "success");
+
+      if (type === "calories") {
+        const field = document.getElementById("missingCaloriesValue");
+        if (field) field.value = "";
+      }
+      if (type === "work") {
+        const scoreField = document.getElementById("missingWorkScore");
+        const hoursField = document.getElementById("missingWorkHours");
+        if (scoreField) scoreField.value = "";
+        if (hoursField) hoursField.value = "";
+      }
+      if (type === "mood") {
+        const field = document.getElementById("missingMoodScore");
+        if (field) field.value = "";
+      }
+      if (type === "sleep") {
+        const scoreField = document.getElementById("missingSleepScore");
+        const restField = document.getElementById("missingSleepRested");
+        if (scoreField) scoreField.value = "";
+        if (restField) restField.value = "";
       }
     }
 
@@ -1833,6 +2074,21 @@ normalizeSvgTickText(svg);
       document.getElementById('settingsResetGameStatsBtn')?.addEventListener('click', handleSettingsResetGameStats);
       document.getElementById('settingsResetBtn')?.addEventListener('click', handleSettingsReset);
       document.getElementById('settingsExportMatchupsBtn')?.addEventListener('click', exportMatchupsAndHistoryCsv);
+      const missingScoreDateInput = document.getElementById("missingScoreDate");
+      const missingScoreTypeSelect = document.getElementById("missingScoreType");
+      const missingScoreSaveBtn = document.getElementById("missingScoreSaveBtn");
+      if (missingScoreDateInput) {
+        missingScoreDateInput.max = dateKey(new Date());
+        missingScoreDateInput.addEventListener("change", () => setMissingScoreStatus(""));
+      }
+      if (missingScoreTypeSelect) {
+        setMissingScoreFieldVisibility(missingScoreTypeSelect.value);
+        missingScoreTypeSelect.addEventListener("change", () => {
+          setMissingScoreFieldVisibility(missingScoreTypeSelect.value);
+          setMissingScoreStatus("");
+        });
+      }
+      missingScoreSaveBtn?.addEventListener("click", applyMissingScoreEntry);
       scheduleRender(renderScoringSettings);
       scheduleRender(renderHabitTagColors);
 
