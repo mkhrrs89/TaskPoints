@@ -964,6 +964,10 @@ body {
   z-index: 50;
 }
 
+.mobile-task-menu.hidden{
+  display: none !important;
+}
+
 .mobile-bottom-dropdown .dropdown-menu{
   top: auto;
   bottom: calc(var(--tp-toolbar-stack-height) + var(--tp-menu-gap));
