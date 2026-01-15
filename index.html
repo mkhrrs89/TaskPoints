@@ -4685,15 +4685,16 @@ function saveSleepScore(){
     existing.source = 'metric';
   } else {
     // Create a new one if none exists for today
-    state.completions.unshift({
-      markCompletionsDirty();
-      id: crypto.randomUUID(),
-      title: `Sleep Score (${raw}) — Rest ${rested}`,
-      points: pts,
-      completedAtISO: whenISO,
-      sleepRested: rested,
-      source: "metric"
-    });
+// Create a new one if none exists for today
+state.completions.unshift({
+  id: crypto.randomUUID(),
+  title: `Sleep Score (${raw}) — Rest ${rested}`,
+  points: pts,
+  completedAtISO: whenISO,
+  sleepRested: rested,
+  source: "metric"
+});
+markCompletionsDirty();
   }
 
   $('sleepScoreInput').value = "";  // clear input
