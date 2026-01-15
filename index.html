@@ -708,7 +708,6 @@ const $=id=>document.getElementById(id);
 const storageCache = { raw: null, parsed: null };
 const bootStart = performance.now();
 let state = normalizeState(load());
-state = syncStateWithMatchups(state);
   // ---------- Derived cache (speeds up iOS renders) ----------
 const _derived = {
   rev: 0,
@@ -6250,8 +6249,26 @@ document.addEventListener('DOMContentLoaded', () => {
   renderVices();
   renderFlexActions();
 
-  maybeAutoSimToday();
-  state = syncStateWithMatchups(state);
+maybeAutoSimToday();
+
+// paint ASAP
+scheduleRender(renderAll);
+
+// then do the heavier sync after paint / idle
+requestAnimationFrame(() => {
+  if (window.requestIdleCallback) {
+    requestIdleCallback(() => {
+      state = syncStateWithMatchups(state);
+      scheduleRender(renderAll);
+    }, { timeout: 800 });
+  } else {
+    setTimeout(() => {
+      state = syncStateWithMatchups(state);
+      scheduleRender(renderAll);
+    }, 0);
+  }
+});
+  
 
 console.log('TaskPoints main state summary:', {
   tasks:       Array.isArray(state.tasks)       ? state.tasks.length       : 'no array',
@@ -6262,7 +6279,6 @@ console.log('TaskPoints main state summary:', {
   gameHistory: Array.isArray(state.gameHistory) ? state.gameHistory.length : 'no array'
 });
 
-  scheduleRender(renderAll);
   startOpponentDripTicker();
   initTaskListDelegation();
 
