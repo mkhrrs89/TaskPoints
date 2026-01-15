@@ -758,11 +758,13 @@ function getDerived(){
     arr.push(c);
 
     // category lists (match your existing history filters)
-    const t = c.title || "";
-if (t.startsWith("Mood Score")) moodEntries.push(c);
-if (t.startsWith("Work Score")) workEntries.push(c);
-if (t.toLowerCase().startsWith("calories")) caloriesEntries.push(c);
-if (t.startsWith("Sleep Score")) sleepEntries.push(c);
+      const t = typeof c.title === 'string' ? c.title : '';
+
+      if (t.startsWith('Mood Score')) _derived.moodEntries.push(c);
+      if (t.startsWith('Work Score')) _derived.workEntries.push(c);
+      if (t.startsWith('Sleep Score')) _derived.sleepEntries.push(c);
+      if (t.startsWith('Calories')) _derived.caloriesEntries.push(c);
+
 
   }
 
@@ -2662,7 +2664,7 @@ function renderTodayPointsSummary(todayPoints, inertia, inertiaAvg){
 
 function todaysPointsTotal(){
   const todayK = todayKey();
-  const { dailyTotals } = aggregateCompletionsByDate(state.completions || []);
+  const { dailyTotals } = getDerived().agg;
   const { todayPoints } = deriveTodayWithInertia(dailyTotals, todayK);
 
   return todayPoints;
@@ -2672,7 +2674,7 @@ function startOpponentDripTicker(){
   function tick(){
     const todayK = todayKey();
     const matchupKey = getGameDayKey(new Date());
-    const { dailyTotals } = aggregateCompletionsByDate(state.completions || []);
+    const { dailyTotals } = getDerived().agg;
     const { todayPoints, inertia, average } = deriveTodayWithInertia(dailyTotals, todayK);
     const { todayPoints: matchupPoints } = deriveTodayWithInertia(dailyTotals, matchupKey);
 
@@ -3063,9 +3065,6 @@ function updateTodayBreakdown(completions, todayKey, inertiaPoints = 0){
   // Collect today's points by category
   safeCompletions.forEach(c => {
     if (!c || !c.completedAtISO) return;
-
-    const d = new Date(c.completedAtISO);
-    if (dateKey(d) !== todayKey) return;
 
     const pts = getCompletionPoints(c);
     if (!pts) return;
