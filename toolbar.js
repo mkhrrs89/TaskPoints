@@ -207,7 +207,7 @@ function renderBottomToolbar() {
   mount.innerHTML = `
     <nav
       id="mobileBottomNav"
-      class="mobile-bottom-nav-shell fixed inset-x-0 bottom-0 z-40 md:hidden border-t border-slate-800 backdrop-blur text-slate-100 drop-shadow-sm"
+      class="mobile-bottom-nav-shell fixed inset-x-0 bottom-0 z-40 md:hidden border-t border-slate-800 text-slate-100 drop-shadow-sm"
       style="background: linear-gradient(180deg, #0f4d4d, #0a2f2f);"
     >
       <div class="max-w-6xl mx-auto flex justify-center py-3 pb-4 text-[11px] mobile-bottom-nav">
