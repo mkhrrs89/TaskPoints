@@ -2748,16 +2748,13 @@ function isoWeekRange(weekKey){
 }
 
 function renderStats(){
-  const lifetime = derived.lifetimePoints;
-
-  // Lifetime card was removed in UI, but keep this guard in case the element exists
-  const lifetimeEl = $('lifetimePoints');
-  if (lifetimeEl) {
-    lifetimeEl.textContent = lifetime.toLocaleString();
-  }
-
   const derived = getDerived();
-const { dailyTotals, weeklyTotals, monthlyTotals } = derived.agg;
+
+  const lifetime = derived.lifetimePoints;
+  const lifetimeEl = $('lifetimePoints');
+  if (lifetimeEl) lifetimeEl.textContent = String(lifetime);
+
+  const { dailyTotals, weeklyTotals, monthlyTotals } = derived.agg;
 
 
   const dKeys = Object.keys(dailyTotals);
