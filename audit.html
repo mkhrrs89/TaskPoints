@@ -310,7 +310,9 @@
         else losses++;
       });
 
-      return { wins: record.wins || wins, losses: record.losses || losses, source: 'gameHistory' };
+      const w = Number.isFinite(record.wins) ? record.wins : wins;
+      const l = Number.isFinite(record.losses) ? record.losses : losses;
+      return { wins: w, losses: l, source: 'gameHistory' };
     }
 
     // More reliable tap handling on mobile: fire on pointerdown and
@@ -505,6 +507,62 @@
         tips: 'Ensure all completions for the day have valid timestamps and points.'
       });
 
+      // New: Lightweight schema sanity
+      const schemaIssues = [];
+      const schemaWarnings = [];
+      const arrayFields = ['tasks', 'habits', 'completions', 'players', 'matchups'];
+      arrayFields.forEach(field => {
+        if (Object.prototype.hasOwnProperty.call(state || {}, field) && !Array.isArray(state[field])) {
+          schemaIssues.push(`${field} is not an array`);
+        }
+      });
+      const scoringSettingsRaw = state?.scoringSettings;
+      if (!scoringSettingsRaw || typeof scoringSettingsRaw !== 'object') {
+        schemaWarnings.push('scoringSettings missing or not an object');
+      } else {
+        const numericPaths = [
+          ['sleep.baseDivisor', scoringSettingsRaw.sleep?.baseDivisor],
+          ['sleep.baseMultiplier', scoringSettingsRaw.sleep?.baseMultiplier],
+          ['work.baseMultiplier', scoringSettingsRaw.work?.baseMultiplier],
+          ['work.hoursMultiplier', scoringSettingsRaw.work?.hoursMultiplier],
+          ['calories.target', scoringSettingsRaw.calories?.target],
+          ['calories.pointsPer100', scoringSettingsRaw.calories?.pointsPer100],
+          ['mood.multiplier', scoringSettingsRaw.mood?.multiplier],
+          ['inertia.windowDays', scoringSettingsRaw.inertia?.windowDays],
+          ['inertia.multiplier', scoringSettingsRaw.inertia?.multiplier]
+        ];
+        numericPaths.forEach(([label, value]) => {
+          if (value != null && !Number.isFinite(Number(value))) {
+            schemaWarnings.push(`Non-finite scoringSettings ${label}: ${value}`);
+          }
+        });
+      }
+      const totalChecks = [
+        ['snapshot total', totals.total],
+        ['main total', actualTotal],
+        ['log total', logTotal],
+        ['sources total', sourcesTotal],
+        ['daily breakdown total', dayBreak.total]
+      ];
+      totalChecks.forEach(([label, value]) => {
+        if (!Number.isFinite(Number(value))) {
+          schemaWarnings.push(`Non-finite ${label}: ${value}`);
+        }
+      });
+      const schemaStatus = schemaIssues.length ? 'FAIL' : (schemaWarnings.length ? 'WARN' : 'PASS');
+      checks.push({
+        id: 'schema-sanity',
+        title: 'Schema sanity checks',
+        status: schemaStatus,
+        expected: 'Core arrays are arrays; numeric fields are finite',
+        actual: schemaIssues.length || schemaWarnings.length
+          ? `${schemaIssues.length + schemaWarnings.length} issue(s)`
+          : 'Shape looks ok',
+        details: [...schemaIssues, ...schemaWarnings],
+        trace: 'state storage shape + derived totals',
+        tips: 'Array corruption is a fail; NaN/Infinity values are warnings that can skew totals.'
+      });
+
       // B) Category subtotals
       const categoryIssues = [];
       const expectedCategories = {};
@@ -543,19 +601,30 @@
 
       // C) Log consistency
       const logEntries = Array.isArray(snapshot.items) ? snapshot.items.length : 0;
-      const rawLogMatches = logEntries === (dayBreak.categories ? Object.values(dayBreak.categories).length : logEntries);
       const integrityNotes = [];
+      const logIds = new Set();
+      const duplicateLogIds = new Set();
       snapshot.items.forEach(item => {
-        if (!item.label) integrityNotes.push(`Missing label on item ${item.id}`);
-        if (!Number.isFinite(item.points)) integrityNotes.push(`Non-numeric points on item ${item.id}`);
+        if (!item || !item.id) {
+          integrityNotes.push(`Missing id on log item "${item?.label || 'unknown'}"`);
+        } else if (logIds.has(item.id)) {
+          duplicateLogIds.add(item.id);
+        } else {
+          logIds.add(item.id);
+        }
+        if (!item?.label) integrityNotes.push(`Missing label on item ${item?.id || 'unknown'}`);
+        if (!Number.isFinite(item?.points)) integrityNotes.push(`Non-numeric points on item ${item?.id || 'unknown'}`);
       });
+      if (duplicateLogIds.size) {
+        integrityNotes.push(`Duplicate snapshot ids: ${Array.from(duplicateLogIds).join(', ')}`);
+      }
       checks.push({
         id: 'log-consistency',
         title: 'Log entries align with snapshot',
         status: integrityNotes.length ? 'WARN' : 'PASS',
         expected: `${logEntries} entries`,
         actual: `${logEntries} entries`,
-        delta: rawLogMatches ? 0 : NaN,
+        delta: 0,
         details: integrityNotes,
         trace: 'state.completions filtered by date'
       });
@@ -1043,8 +1112,77 @@
         tips: 'Both scoreboards should show your inertia-inclusive total and the opponent drip total from the same matchup.'
       });
 
+      // New: Opponent drip schedule integrity
+      const dripIssues = [];
+      const matchupForDrip = (state.matchups || []).find(m =>
+        m && matchupDateKey(m) === dateKey && (m.playerAId === 'YOU' || m.playerBId === 'YOU')
+      );
+      let dripTrace = 'state.opponentDripSchedules';
+      let dripSchedule = null;
+      let dripTotalTarget = null;
+      if (!matchupForDrip) {
+        dripIssues.push('No matchup found for date; cannot validate drip schedule.');
+      } else {
+        const oppId = matchupForDrip.playerAId === 'YOU' ? matchupForDrip.playerBId : matchupForDrip.playerAId;
+        dripTotalTarget = matchupForDrip.playerAId === oppId
+          ? Number(matchupForDrip.scoreA)
+          : Number(matchupForDrip.scoreB);
+        dripSchedule = findOpponentDripSchedule(state, dateKey, oppId, dripTotalTarget);
+        if (!dripSchedule) {
+          dripIssues.push('No matching opponent drip schedule found.');
+        }
+      }
+      if (dripSchedule) {
+        dripTrace = `state.opponentDripSchedules → ${dripSchedule.id || 'schedule'}`;
+        if (!Array.isArray(dripSchedule.events)) {
+          dripIssues.push('Schedule events are missing or not an array.');
+        } else if (!dripSchedule.events.length) {
+          dripIssues.push('Schedule has no events.');
+        } else {
+          let eventTotal = 0;
+          let lastTime = null;
+          let orderIssue = null;
+          dripSchedule.events.forEach((event, idx) => {
+            const timeVal = event?.t;
+            const timeMs = timeVal ? new Date(timeVal).getTime() : NaN;
+            if (!timeVal || !Number.isFinite(timeMs)) {
+              dripIssues.push(`Event ${idx + 1} missing/invalid time marker`);
+            } else if (lastTime != null && timeMs < lastTime && !orderIssue) {
+              orderIssue = `Events out of order near ${new Date(timeMs).toISOString()}`;
+            }
+            lastTime = Number.isFinite(timeMs) ? timeMs : lastTime;
+
+            const pts = Number(event?.pts);
+            if (!Number.isFinite(pts)) {
+              dripIssues.push(`Event ${idx + 1} has non-numeric points`);
+            } else if (pts < 0) {
+              dripIssues.push(`Event ${idx + 1} has negative points (${pts})`);
+            } else {
+              eventTotal += pts;
+            }
+          });
+          if (orderIssue) dripIssues.push(orderIssue);
+          const scheduleTotal = Number(dripSchedule.total);
+          if (!Number.isFinite(scheduleTotal)) {
+            dripIssues.push(`Schedule total is invalid (${dripSchedule.total})`);
+          } else if (Math.abs(eventTotal - scheduleTotal) > 0.05) {
+            dripIssues.push(`Schedule event sum ${eventTotal.toFixed(2)} ≠ total ${scheduleTotal.toFixed(2)}`);
+          }
+        }
+      }
+      checks.push({
+        id: 'drip-schedule-integrity',
+        title: 'Opponent drip schedule integrity',
+        status: dripIssues.length ? 'WARN' : 'PASS',
+        expected: 'Schedule events are ordered, numeric, and sum to total',
+        actual: dripIssues.length ? `${dripIssues.length} issue(s)` : 'Schedule looks valid',
+        details: dripIssues,
+        trace: dripTrace,
+        tips: 'Drip schedules are optional, but invalid events can skew opponent totals.'
+      });
+
       // G) Game / matchup consistency (lightweight)
-      const matchupOnDay = (state.matchups || []).find(m => m.date === dateKey);
+      const matchupOnDay = (state.matchups || []).find(m => matchupDateKey(m) === dateKey);
       checks.push({
         id: 'game-consistency',
         title: 'Game history present for the day',
@@ -1081,6 +1219,38 @@
         actual: matchupIntegrityIssues.length ? `${matchupIntegrityIssues.length} issue(s)` : 'All matchups complete',
         details: matchupIntegrityIssues,
         trace: 'state.matchups integrity'
+      });
+
+      // New: Id uniqueness across core arrays
+      const uniquenessIssues = [];
+      const collectDuplicates = (items, getId, label) => {
+        const counts = new Map();
+        (items || []).forEach(item => {
+          const id = getId(item);
+          if (!id) return;
+          counts.set(id, (counts.get(id) || 0) + 1);
+        });
+        const duplicates = Array.from(counts.entries()).filter(([, count]) => count > 1);
+        if (duplicates.length) {
+          const detail = duplicates.map(([id, count]) => `${id} (${count}x)`).join(', ');
+          uniquenessIssues.push(`${label}: ${detail}`);
+        }
+      };
+      collectDuplicates(state.tasks, t => t?.id, 'Tasks');
+      collectDuplicates(state.habits, h => h?.id, 'Habits');
+      collectDuplicates((state.players || []).filter(p => p?.id !== 'YOU'), p => p?.id, 'Players');
+      collectDuplicates(state.matchups, m => {
+        if (!m) return null;
+        return m.id || `${matchupDateKey(m)}|${m.playerAId || ''}|${m.playerBId || ''}`;
+      }, 'Matchups');
+      checks.push({
+        id: 'id-uniqueness',
+        title: 'Core ids are unique',
+        status: uniquenessIssues.length ? 'WARN' : 'PASS',
+        expected: 'No duplicate ids across tasks, habits, players, matchups',
+        actual: uniquenessIssues.length ? `${uniquenessIssues.length} duplication(s)` : 'No duplicates found',
+        details: uniquenessIssues,
+        trace: 'state.tasks/habits/players/matchups'
       });
 
       // H) Data integrity
