@@ -446,7 +446,7 @@ if (document.readyState === 'loading') {
 const STORAGE_KEY_FALLBACK = (window.TaskPointsCore && TaskPointsCore.STORAGE_KEY) || 'taskpoints_v1';
 const PROJECTS_STORAGE_KEY_FALLBACK = (window.TaskPointsCore && TaskPointsCore.PROJECTS_STORAGE_KEY) || 'tp_projects_v1';
 
-const TP_PERSIST_DEBOUNCE_MS = 250;
+const TP_PERSIST_DEBOUNCE_MS = 900;
 
 function setupDebouncedPersistence() {
   const core = window.TaskPointsCore;
@@ -458,14 +458,26 @@ function setupDebouncedPersistence() {
   const pendingByKey = new Map();
   const timers = new Map();
 
-  const scheduleFlush = (storageKey) => {
-    if (timers.has(storageKey)) return;
-    const id = window.setTimeout(() => {
-      timers.delete(storageKey);
+const scheduleFlush = (storageKey) => {
+  const existingId = timers.get(storageKey);
+  if (existingId) {
+    clearTimeout(existingId); // trailing debounce: push the flush out
+  }
+
+  const id = window.setTimeout(() => {
+    timers.delete(storageKey);
+
+    // Try to flush when the browser is idle (helps iOS Safari feel less janky)
+    if (typeof window.requestIdleCallback === 'function') {
+      window.requestIdleCallback(() => flushKey(storageKey), { timeout: 1500 });
+    } else {
       flushKey(storageKey);
-    }, TP_PERSIST_DEBOUNCE_MS);
-    timers.set(storageKey, id);
-  };
+    }
+  }, TP_PERSIST_DEBOUNCE_MS);
+
+  timers.set(storageKey, id);
+};
+
 
   const flushKey = (storageKey) => {
     const timerId = timers.get(storageKey);
