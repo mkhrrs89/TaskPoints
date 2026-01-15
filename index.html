@@ -707,8 +707,79 @@ const TODAY_STORE_KEY="taskpoints_today_view_v1";
 const $=id=>document.getElementById(id);
 const storageCache = { raw: null, parsed: null };
 const bootStart = performance.now();
-let state=normalizeState(load());
+let state = normalizeState(load());
 state = syncStateWithMatchups(state);
+  // ---------- Derived cache (speeds up iOS renders) ----------
+const _derived = {
+  rev: 0,
+  builtRev: -1,
+
+  byDay: new Map(),       // key -> [completions]
+  moodEntries: [],
+  workEntries: [],
+  caloriesEntries: [],
+  sleepEntries: [],
+
+  agg: null               // { dailyTotals, weeklyTotals, monthlyTotals }
+};
+
+function markCompletionsDirty(){
+  _derived.rev++;
+}
+
+function getDerived(){
+  if (_derived.builtRev === _derived.rev) return _derived;
+
+  const comps = Array.isArray(state?.completions) ? state.completions : [];
+
+  // reset
+  _derived.byDay = new Map();
+  _derived.moodEntries = [];
+  _derived.workEntries = [];
+  _derived.caloriesEntries = [];
+  _derived.sleepEntries = [];
+  _derived.agg = null;
+
+  // one pass through completions
+  for (const c of comps){
+    if (!c || !c.completedAtISO) continue;
+
+    const d = new Date(c.completedAtISO);
+    if (isNaN(d.getTime())) continue;
+
+    // group by day key (for "today breakdown" etc)
+    d.setHours(0,0,0,0);
+    const k = dateKey(d);
+    let arr = _derived.byDay.get(k);
+    if (!arr){
+      arr = [];
+      _derived.byDay.set(k, arr);
+    }
+    arr.push(c);
+
+    // category lists (match your existing history filters)
+    const t = c.title || "";
+    if (t.startsWith("Mood:")) _derived.moodEntries.push(c);
+    if (t.startsWith("Work:")) _derived.workEntries.push(c);
+    if (t.startsWith("Calories:")) _derived.caloriesEntries.push(c);
+    if (t.startsWith("Sleep:")) _derived.sleepEntries.push(c);
+  }
+
+  // sort once (instead of per-render per-history)
+  const byNewest = (a, b) => new Date(b.completedAtISO) - new Date(a.completedAtISO);
+  _derived.moodEntries.sort(byNewest);
+  _derived.workEntries.sort(byNewest);
+  _derived.caloriesEntries.sort(byNewest);
+  _derived.sleepEntries.sort(byNewest);
+
+  // aggregate once
+  _derived.agg = aggregateCompletionsByDate(comps);
+
+  _derived.builtRev = _derived.rev;
+  return _derived;
+}
+// ---------- /Derived cache ----------
+
   const HABITS_SORT_KEY = "taskpoints_habits_sort";
 
 async function migrateLegacyImagesIfNeeded() {
@@ -1347,6 +1418,7 @@ function moodPoints(score) {
 function addCompletion(entry){
   const pts = Number(entry.points) || 0;
   state.completions.unshift(entry);
+  markCompletionsDirty();
   showPointsToast(pts);
 }
 
@@ -4023,6 +4095,7 @@ function applyHabitDayToggle(h, dayKey) {
       c.dayKey === dayKey
     );
     if (mIdx !== -1) state.completions.splice(mIdx, 1);
+    markCompletionsDirty();
   };
 
   if (category === 'vice') {
@@ -4613,6 +4686,7 @@ function saveSleepScore(){
   } else {
     // Create a new one if none exists for today
     state.completions.unshift({
+      markCompletionsDirty();
       id: crypto.randomUUID(),
       title: `Sleep Score (${raw}) — Rest ${rested}`,
       points: pts,
