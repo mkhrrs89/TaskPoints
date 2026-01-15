@@ -1497,18 +1497,18 @@ function getCachedStorageState() {
 function writeCachedStorageState(nextState) {
   if (window.TaskPointsCore?.saveAppState) {
     const res = TaskPointsCore.saveAppState(nextState, { storageKey: STORAGE_KEY });
-    storageCache.raw = JSON.stringify(res.state);
+    storageCache.raw = null;          // don't stringify here (too expensive)
     storageCache.parsed = res.state;
     return res.state;
   }
   if (window.TaskPointsCore?.mergeAndSaveState) {
     const res = TaskPointsCore.mergeAndSaveState(nextState, { storageKey: STORAGE_KEY });
-    storageCache.raw = JSON.stringify(res.state);
+    storageCache.raw = null;          // don't stringify here (too expensive)
     storageCache.parsed = res.state;
     return res.state;
   }
   console.warn("writeCachedStorageState skipped localStorage write; TaskPointsCore missing.");
-  storageCache.raw = JSON.stringify(nextState);
+  storageCache.raw = null;            // don't stringify here either
   storageCache.parsed = nextState;
   return nextState;
 }
