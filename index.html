@@ -2666,7 +2666,6 @@ function todaysPointsTotal(){
   const todayK = todayKey();
   const { dailyTotals } = getDerived().agg;
   const { todayPoints } = deriveTodayWithInertia(dailyTotals, todayK);
-
   return todayPoints;
 }
 
@@ -2675,6 +2674,7 @@ function startOpponentDripTicker(){
     const todayK = todayKey();
     const matchupKey = getGameDayKey(new Date());
     const { dailyTotals } = getDerived().agg;
+
     const { todayPoints, inertia, average } = deriveTodayWithInertia(dailyTotals, todayK);
     const { todayPoints: matchupPoints } = deriveTodayWithInertia(dailyTotals, matchupKey);
 
@@ -4102,8 +4102,10 @@ function applyHabitDayToggle(h, dayKey) {
       c.habitId === habitId &&
       c.dayKey === dayKey
     );
-    if (mIdx !== -1) state.completions.splice(mIdx, 1);
-    markCompletionsDirty();
+if (mIdx !== -1) {
+  state.completions.splice(mIdx, 1);
+  markCompletionsDirty();
+}
   };
 
   if (category === 'vice') {
