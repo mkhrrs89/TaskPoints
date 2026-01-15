@@ -5261,10 +5261,7 @@ function renderWorkHistory() {
   if (container) container.innerHTML = '';
   if (!container) return;
 
-  const entries = state.completions
-    .filter(c => c.title && c.title.startsWith('Work Score'))
-    .slice()
-    .sort((a,b) => new Date(b.completedAtISO) - new Date(a.completedAtISO));
+const entries = getDerived().workEntries;
 
   const workImpactBelow = document.getElementById('workImpactBelow');
 const workSummaryRow = document.getElementById('workSummaryRow');
@@ -5533,10 +5530,7 @@ function renderMoodHistory() {
   const container = $('moodHistory');
   if (container) container.innerHTML = '';
 
-  const entries = state.completions
-    .filter(c => c.title && c.title.startsWith('Mood Score'))
-    .slice()
-    .sort((a,b) => new Date(b.completedAtISO) - new Date(a.completedAtISO));
+const entries = getDerived().moodEntries;
 
   const today = new Date();
   const todayK = dateKey(today);
