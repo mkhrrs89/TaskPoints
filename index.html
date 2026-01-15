@@ -1044,6 +1044,8 @@ function editTodayCalories() {
   entry.points = caloriesToPoints(raw);
   entry.completedAtISO = d.toISOString();
 
+  markCompletionsDirty();
+  
   save();
   scheduleRender(renderAll);
 }
@@ -1119,6 +1121,7 @@ function submitSleepEditModal() {
   sleepEditContext.points = sleepPoints(scoreVal, restVal);
   sleepEditContext.sleepRested = restVal;
 
+  markCompletionsDirty();
   save();
   scheduleRender(renderAll);
   closeSleepEditModal();
@@ -1213,6 +1216,7 @@ function submitWorkEditModal() {
   workEditContext.workHours = safeHours;
   workEditContext.source = 'work';
 
+  markCompletionsDirty();
   save();
   scheduleRender(renderAll);
   closeWorkEditModal();
@@ -1245,6 +1249,7 @@ function migrateSleepEntriesForBonus() {
   });
 
   if (changed) {
+    markCompletionsDirty();
     save();
   }
 }
@@ -1289,6 +1294,7 @@ function migrateWorkEntriesForHours() {
   });
 
   if (changed) {
+    markCompletionsDirty();
     save();
   }
 }
@@ -4765,7 +4771,7 @@ function saveCalories(){
 
   $('caloriesInput').value = '';
   // optional: keep the chosen date in the picker so you can tweak same day
-
+  markCompletionsDirty();
   save();
   scheduleRender(renderAll);
 }
@@ -5166,6 +5172,8 @@ if (calNum != null && !Number.isNaN(calNum)) {
       entry.title  = `Calories (${raw})`;
       entry.points = caloriesToPoints(raw);
 
+      markCompletionsDirty();
+      
       save();
       scheduleRender(renderAll);
     };
@@ -5244,7 +5252,7 @@ function saveWorkScore() {
   $('workScoreInput').value = "";
   const hoursInput = $('workHoursInput');
   if (hoursInput) hoursInput.value = "";
-
+  markCompletionsDirty();
   save();
   scheduleRender(renderAll);
 }
@@ -5473,6 +5481,8 @@ function editTodayMood() {
   entry.completedAtISO = d.toISOString();
   entry.source = 'metric';
 
+  markCompletionsDirty();
+  
   save();
   scheduleRender(renderAll);
 }
@@ -5513,6 +5523,8 @@ function saveMoodScore() {
     });
   }
 
+  markCompletionsDirty();
+  
   $('moodScoreInput').value = "";
   save();
   scheduleRender(renderAll);
@@ -5640,6 +5652,8 @@ setTodayMoodEditable(moodImpactBelow);
       entry.title = `Mood Score (${num})`;
       entry.points = moodPoints(num);
 
+      markCompletionsDirty();
+      
       save();
       scheduleRender(renderAll);
     };
