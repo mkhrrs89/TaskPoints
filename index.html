@@ -720,7 +720,8 @@ const _derived = {
   caloriesEntries: [],
   sleepEntries: [],
 
-  agg: null               // { dailyTotals, weeklyTotals, monthlyTotals }
+  agg: null,               // { dailyTotals, weeklyTotals, monthlyTotals }
+  lifetimePoints: 0
 };
 
 function markCompletionsDirty(){
@@ -739,11 +740,14 @@ function getDerived(){
   _derived.caloriesEntries = [];
   _derived.sleepEntries = [];
   _derived.agg = null;
-
+ _derived.lifetimePoints = 0;
+  
   // one pass through completions
   for (const c of comps){
     if (!c || !c.completedAtISO) continue;
 
+    _derived.lifetimePoints += Number(c.points) || 0;
+    
     const d = new Date(c.completedAtISO);
     if (isNaN(d.getTime())) continue;
 
@@ -2744,7 +2748,7 @@ function isoWeekRange(weekKey){
 }
 
 function renderStats(){
-  const lifetime = state.completions.reduce((s, c) => s + (c.points || 0), 0);
+  const lifetime = derived.lifetimePoints;
 
   // Lifetime card was removed in UI, but keep this guard in case the element exists
   const lifetimeEl = $('lifetimePoints');
