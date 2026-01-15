@@ -759,10 +759,11 @@ function getDerived(){
 
     // category lists (match your existing history filters)
     const t = c.title || "";
-    if (t.startsWith("Mood:")) _derived.moodEntries.push(c);
-    if (t.startsWith("Work:")) _derived.workEntries.push(c);
-    if (t.startsWith("Calories:")) _derived.caloriesEntries.push(c);
-    if (t.startsWith("Sleep:")) _derived.sleepEntries.push(c);
+if (t.startsWith("Mood Score")) moodEntries.push(c);
+if (t.startsWith("Work Score")) workEntries.push(c);
+if (t.toLowerCase().startsWith("calories")) caloriesEntries.push(c);
+if (t.startsWith("Sleep Score")) sleepEntries.push(c);
+
   }
 
   // sort once (instead of per-render per-history)
@@ -2749,7 +2750,8 @@ function renderStats(){
     lifetimeEl.textContent = lifetime.toLocaleString();
   }
 
-  const { dailyTotals, weeklyTotals, monthlyTotals } = aggregateCompletionsByDate(state.completions || []);
+  const derived = getDerived();
+const { dailyTotals, weeklyTotals, monthlyTotals } = derived.agg;
 
 
   const dKeys = Object.keys(dailyTotals);
@@ -2787,7 +2789,8 @@ function renderStats(){
 
   // Today's breakdown bar – wrapped in try/catch so it can't kill stats
   try {
-    updateTodayBreakdown(state.completions || [], todayK, inertiaPts);
+    const todayList = derived.byDay.get(todayK) || [];
+    updateTodayBreakdown(todayList, todayK, inertiaPts);
   } catch (e) {
     console.error('updateTodayBreakdown error', e);
   }
@@ -4769,9 +4772,10 @@ function saveCalories(){
     });
   }
 
-  $('caloriesInput').value = '';
-  // optional: keep the chosen date in the picker so you can tweak same day
   markCompletionsDirty();
+  
+  $('caloriesInput').value = '';
+  
   save();
   scheduleRender(renderAll);
 }
@@ -4809,10 +4813,8 @@ function renderSleepHistory() {
   const container = $('sleepHistory');
   if (container) container.innerHTML = '';
 
-  const sleepEntries = state.completions
-    .filter(c => c.title && c.title.startsWith('Sleep Score'))
-    .slice()
-    .sort((a,b) => new Date(b.completedAtISO) - new Date(a.completedAtISO));
+const sleepEntries = getDerived().sleepEntries;
+
 
   // --- LEFT SIDE: Today's big stat ---
   const todayKey = dateKey(new Date());
@@ -5017,10 +5019,7 @@ function renderCaloriesHistory() {
   const container = $('caloriesHistory');
   if (container) container.innerHTML = '';
 
-  const entries = state.completions
-    .filter(c => c.title && c.title.startsWith('Calories'))
-    .slice()
-    .sort((a,b) => new Date(b.completedAtISO) - new Date(a.completedAtISO));
+const entries = getDerived().caloriesEntries;
 
   const todayKey = dateKey(new Date());
   const todayEntry = getTodayCaloriesEntry();
