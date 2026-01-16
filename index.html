@@ -6642,6 +6642,36 @@ document.addEventListener('change', (e) => {
   })();
 </script>
 
+  <script>
+(function tpCoreHealthBadge(){
+  const params = new URLSearchParams(location.search);
+  if (!params.has("debug")) return; // only show when you add ?debug=1
+
+  const core = window.TaskPointsCore;
+  const ok = !!core
+    && typeof core.getDerived === "function"
+    && typeof core.loadAppState === "function"
+    && typeof core.saveStateSnapshot === "function";
+
+  const el = document.createElement("div");
+  el.style.cssText = [
+    "position:fixed",
+    "left:8px",
+    "bottom:84px",          // above your bottom toolbar
+    "z-index:99999",
+    "padding:6px 10px",
+    "border-radius:10px",
+    "font:12px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Arial",
+    "background:" + (ok ? "rgba(0,140,90,0.92)" : "rgba(190,40,40,0.92)"),
+    "color:#fff",
+    "box-shadow:0 6px 18px rgba(0,0,0,0.25)"
+  ].join(";");
+
+  el.textContent = ok ? "TaskPointsCore: OK" : "TaskPointsCore: FAIL";
+  document.body.appendChild(el);
+})();
+</script>
+
 
 </body>
 </html>
