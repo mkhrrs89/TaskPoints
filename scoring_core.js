@@ -708,10 +708,41 @@
       }
     }
 
-    const normalized = normalizeState(mergedSnapshot);
-    const merged = { ...mergedSnapshot, ...normalized };
+function fastEnsureStateShape(s) {
+  const src = (s && typeof s === 'object') ? s : {};
+  return {
+    ...src,
+    tasks: Array.isArray(src.tasks) ? src.tasks : [],
+    completions: Array.isArray(src.completions) ? src.completions : [],
+    habits: Array.isArray(src.habits) ? src.habits : [],
+    players: Array.isArray(src.players) ? src.players : [],
+    flexActions: Array.isArray(src.flexActions) ? src.flexActions : [],
+    gameHistory: Array.isArray(src.gameHistory) ? src.gameHistory : [],
+    matchups: Array.isArray(src.matchups) ? src.matchups : [],
+    schedule: Array.isArray(src.schedule) ? src.schedule : [],
+    opponentDripSchedules: Array.isArray(src.opponentDripSchedules) ? src.opponentDripSchedules : [],
+    workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
+    projects: Array.isArray(src.projects) ? src.projects : [],
+    youImageId: typeof src.youImageId === 'string' ? src.youImageId : '',
+    habitTagColors: isPlainObject(src.habitTagColors) ? src.habitTagColors : {},
+    scoringSettings: isPlainObject(src.scoringSettings) ? src.scoringSettings : normalizeScoringSettings(src.scoringSettings)
+  };
+}
 
-    return { state: merged, storageKey };
+function mergeState(nextState, options = {}) {
+  ...
+  // (all your existing sticky-key logic stays exactly the same)
+
+  // 🔥 New: skip heavy normalize on “known-normalized” incremental saves
+  if (options.assumeNormalized) {
+    return { state: fastEnsureStateShape(mergedSnapshot), storageKey };
+  }
+
+  const normalized = normalizeState(mergedSnapshot);
+  const merged = { ...mergedSnapshot, ...normalized };
+  return { state: merged, storageKey };
+}
+
   }
 
   function saveStateSnapshot(state, options = {}) {
