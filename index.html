@@ -707,7 +707,15 @@ const TODAY_STORE_KEY="taskpoints_today_view_v1";
 const $=id=>document.getElementById(id);
 const storageCache = { raw: null, parsed: null };
 const bootStart = performance.now();
-let state = normalizeState(load());
+  const __TP_PERF_BOOT = new URLSearchParams(location.search).has('perf');
+
+let state = (() => {
+  if (__TP_PERF_BOOT) console.time('LOAD: normalizeState(load())');
+  const s = normalizeState(load());
+  if (__TP_PERF_BOOT) console.timeEnd('LOAD: normalizeState(load())');
+  return s;
+})();
+
   // ---------- Derived cache (speeds up iOS renders) ----------
 const _derived = {
   rev: 0,
@@ -1485,13 +1493,22 @@ function saveProjectsToStorage(list){
 
 function getCachedStorageState() {
   if (storageCache.parsed) return storageCache.parsed;
+
+  if (__TP_PERF_BOOT) console.time('LOAD: localStorage.getItem');
   const raw = localStorage.getItem(STORAGE_KEY);
+  if (__TP_PERF_BOOT) console.timeEnd('LOAD: localStorage.getItem');
+
   if (!raw) return null;
+
+  if (__TP_PERF_BOOT) console.time('LOAD: JSON.parse');
   const parsed = JSON.parse(raw);
+  if (__TP_PERF_BOOT) console.timeEnd('LOAD: JSON.parse');
+
   storageCache.raw = raw;
   storageCache.parsed = parsed;
   return parsed;
 }
+
 
 function writeCachedStorageState(nextState) {
   if (window.TaskPointsCore?.saveAppState) {
@@ -6161,19 +6178,21 @@ function renderAll() {
     const perfLabel = window.TP_DEBUG_PERF ? 'renderAll' : null;
     if (perfLabel) console.time(perfLabel);
     try {
-      try { renderStats(); } catch (e) { console.error('renderStats error:', e); }
-      try { renderTasks(); } catch (e) { console.error('renderTasks error:', e); }
+try { tpPerfTime('renderStats (call)', () => renderStats()); } catch (e) { console.error('renderStats error:', e); }
+try { tpPerfTime('renderTasks', () => renderTasks()); } catch (e) { console.error('renderTasks error:', e); }
+
 
       const defer = window.requestIdleCallback
         ? window.requestIdleCallback
         : (cb) => setTimeout(() => cb({ timeRemaining: () => 0 }), 200);
 
-      defer(() => {
-        try { renderSleepHistory(); } catch (e) { console.error('renderSleepHistory error:', e); }
-        try { renderCaloriesHistory(); } catch (e) { console.error('renderCaloriesHistory error:', e); }
-        try { renderWorkHistory(); } catch (e) { console.error('renderWorkHistory error:', e); }
-        try { renderMoodHistory(); } catch (e) { console.error('renderMoodHistory error:', e); }
-      });
+defer(() => {
+  try { tpPerfTime('renderSleepHistory',    () => renderSleepHistory()); } catch (e) { console.error('renderSleepHistory error:', e); }
+  try { tpPerfTime('renderCaloriesHistory', () => renderCaloriesHistory()); } catch (e) { console.error('renderCaloriesHistory error:', e); }
+  try { tpPerfTime('renderWorkHistory',     () => renderWorkHistory()); } catch (e) { console.error('renderWorkHistory error:', e); }
+  try { tpPerfTime('renderMoodHistory',     () => renderMoodHistory()); } catch (e) { console.error('renderMoodHistory error:', e); }
+});
+
     } finally {
       if (perfLabel) console.timeEnd(perfLabel);
     }
