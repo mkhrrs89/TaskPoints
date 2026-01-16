@@ -1719,50 +1719,30 @@ function computeYourMatchupRecord(){
 }
 
 function computeYourCompletionRecord(){
-  const comps = Array.isArray(state.completions) ? state.completions : [];
-  if (!comps.length) return { wins: 0, losses: 0, ties: 0, games: 0, source: 'completions' };
+  const derived = getDerived();
+  const dailyTotals = derived?.agg?.dailyTotals || {};
+  const totals = Object.values(dailyTotals).map(Number).filter(Number.isFinite);
 
-  const dayTotals = {};
-
-  comps.forEach(c => {
-    if (!c || !c.completedAtISO) return;
-    const k = dateKey(c.completedAtISO);
-    const pts = getCompletionPoints(c);
-    if (!Number.isFinite(pts)) return;
-    dayTotals[k] = (dayTotals[k] || 0) + pts;
-  });
-
-  const totals = Object.values(dayTotals);
   if (!totals.length) return { wins: 0, losses: 0, ties: 0, games: 0, source: 'completions' };
 
   const avg = totals.reduce((a, b) => a + b, 0) / totals.length || 0;
-  let wins = 0;
-  let losses = 0;
-  let ties = 0;
 
-  totals.forEach(total => {
+  let wins = 0, losses = 0, ties = 0;
+  for (const total of totals){
     if (total > avg) wins++;
     else if (total < avg) losses++;
     else ties++;
-  });
+  }
 
   return { wins, losses, ties, games: totals.length, source: 'completions' };
 }
 
+
 function computeYouDailyAverages(){
-  const comps = Array.isArray(state.completions) ? state.completions : [];
-  if (!comps.length) return { dailyAvg: 0, ppd: 0, hasData: false };
+  const derived = getDerived();
+  const dailyTotals = derived?.agg?.dailyTotals || {};
+  const totals = Object.values(dailyTotals).map(Number).filter(Number.isFinite);
 
-  const dayTotals = {};
-
-  comps.forEach(c => {
-    if (!c || !c.completedAtISO) return;
-    const k = dateKey(c.completedAtISO);
-    const pts = getCompletionPoints(c);
-    dayTotals[k] = (dayTotals[k] || 0) + pts;
-  });
-
-  const totals = Object.values(dayTotals);
   if (!totals.length) return { dailyAvg: 0, ppd: 0, hasData: false };
 
   const avg = totals.reduce((a, b) => a + b, 0) / totals.length;
@@ -1770,6 +1750,7 @@ function computeYouDailyAverages(){
 
   return { dailyAvg: rounded, ppd: rounded, hasData: true };
 }
+
 
 function computePlayerDailyAverages(playerId){
   if (!playerId) return { dailyAvg: 0, ppd: 0, hasData: false };
