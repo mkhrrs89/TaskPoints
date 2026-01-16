@@ -479,18 +479,22 @@ const scheduleFlush = (storageKey) => {
 };
 
 
-  const flushKey = (storageKey) => {
-    const timerId = timers.get(storageKey);
-    if (timerId) {
-      clearTimeout(timerId);
-      timers.delete(storageKey);
-    }
-    const pending = pendingByKey.get(storageKey);
-    if (!pending) return;
-    pendingByKey.delete(storageKey);
-    const merged = core.mergeState(pending.state, { ...pending.options, storageKey, assumeNormalized: true });
-    core.saveStateSnapshot(merged.state, { ...pending.options, storageKey });
-  };
+const flushKey = (storageKey) => {
+  const timerId = timers.get(storageKey);
+  if (timerId) {
+    clearTimeout(timerId);
+    timers.delete(storageKey);
+  }
+
+  const pending = pendingByKey.get(storageKey);
+  if (!pending) return;
+
+  pendingByKey.delete(storageKey);
+
+  // MIN-MAX: pending.state is already merged by debouncedMerge(), so don't merge again here.
+  core.saveStateSnapshot(pending.state, { ...pending.options, storageKey });
+};
+
 
   const flushAll = () => {
     Array.from(pendingByKey.keys()).forEach((storageKey) => flushKey(storageKey));
