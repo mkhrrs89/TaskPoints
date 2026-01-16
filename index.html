@@ -5750,6 +5750,7 @@ function wontDoMain(id){
 }
 
 function completeTask(id){
+  return tpPerfTime('completeTask total', () => {
   const t = state.tasks.find(x=>x.id===id);
   if(!t) return;
   const now = new Date().toISOString();
@@ -5770,7 +5771,7 @@ function completeTask(id){
     points: t.points,
     completedAtISO: now
   });
-
+  }
 
   const rec = t.recurrence || {};
   const mode = rec.mode || 'none';
@@ -6288,6 +6289,61 @@ document.addEventListener('change', (e) => {
   }
 });
 
+// PERF TOOLS (only active when URL has ?perf=1)
+const TP_PERF = new URLSearchParams(location.search).has('perf');
+let __tpPerfEl = null;
+
+function tpPerfInitPanel() {
+  if (!TP_PERF || __tpPerfEl) return;
+  const el = document.createElement('div');
+  el.id = 'tp-perf-panel';
+  el.style.cssText = [
+    'position:fixed',
+    'left:8px',
+    'top:8px',
+    'z-index:999999',
+    'max-width:92vw',
+    'padding:8px 10px',
+    'border-radius:12px',
+    'background:rgba(0,0,0,0.82)',
+    'color:#fff',
+    'font:12px/1.35 -apple-system, system-ui, Segoe UI, Roboto, Arial',
+    'box-shadow:0 10px 30px rgba(0,0,0,0.35)',
+    'pointer-events:none',
+    'white-space:pre-wrap'
+  ].join(';');
+  el.textContent = 'TP PERF: ready\n';
+  document.body.appendChild(el);
+  __tpPerfEl = el;
+}
+
+function tpPerfLog(msg) {
+  if (!TP_PERF) return;
+  tpPerfInitPanel();
+  const line = `${msg}\n`;
+  __tpPerfEl.textContent = (line + __tpPerfEl.textContent).slice(0, 1400); // keep it short
+}
+
+function tpPerfTime(label, fn) {
+  if (!TP_PERF) return fn();
+  const t0 = performance.now();
+  const result = fn();
+  const dt = (performance.now() - t0);
+  tpPerfLog(`${label}: ${dt.toFixed(1)}ms`);
+  return result;
+}
+
+// Optional: measure async blocks (e.g., scheduleRender)
+function tpPerfMark(label) {
+  if (!TP_PERF) return () => {};
+  const t0 = performance.now();
+  return () => {
+    const dt = performance.now() - t0;
+    tpPerfLog(`${label}: ${dt.toFixed(1)}ms`);
+  };
+}
+
+  
 </script>
 
 <!-- EDIT SLEEP ENTRY MODAL -->
