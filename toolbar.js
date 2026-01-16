@@ -488,7 +488,7 @@ const scheduleFlush = (storageKey) => {
     const pending = pendingByKey.get(storageKey);
     if (!pending) return;
     pendingByKey.delete(storageKey);
-    const merged = core.mergeState(pending.state, { ...pending.options, storageKey });
+    const merged = core.mergeState(pending.state, { ...pending.options, storageKey, assumeNormalized: true });
     core.saveStateSnapshot(merged.state, { ...pending.options, storageKey });
   };
 
@@ -508,7 +508,12 @@ const scheduleFlush = (storageKey) => {
     }
     const storageKey = options.storageKey || core.STORAGE_KEY || STORAGE_KEY_FALLBACK;
     const pending = pendingByKey.get(storageKey);
-    const merged = core.mergeState(nextState, { ...options, storageKey, existing: pending?.state });
+    const merged = core.mergeState(nextState, {
+  ...options,
+  storageKey,
+  existing: pending?.state,
+  assumeNormalized: true
+});
     pendingByKey.set(storageKey, { state: merged.state, options: { ...options, storageKey } });
     scheduleFlush(storageKey);
     return { state: merged.state, trimmed: false };
