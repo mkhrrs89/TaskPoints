@@ -2728,6 +2728,8 @@ function isoWeekRange(weekKey){
 }
 
 function renderStats(){
+    return tpPerfTime('renderStats', () => {
+    if(window.TP_DEBUG_PERF) console.time('renderStats');
   const derived = getDerived();
 
   const lifetime = derived.lifetimePoints;
@@ -2805,6 +2807,7 @@ function renderStats(){
         <span class="font-semibold">${formattedTotal} pts</span>
       `;
       ul.appendChild(li);
+      if(window.TP_DEBUG_PERF) console.timeEnd('renderStats');
     });
   }
 
@@ -5751,46 +5754,47 @@ function wontDoMain(id){
 
 function completeTask(id){
   return tpPerfTime('completeTask total', () => {
-  const t = state.tasks.find(x=>x.id===id);
-  if(!t) return;
-  const now = new Date().toISOString();
-  const completedDayKey = dateKey(now);
-  const alreadyCompletedToday = Array.isArray(state.completions)
-    ? state.completions.some(c => c && c.taskId === id && dateKey(c.completedAtISO) === completedDayKey)
-    : false;
+    const t = state.tasks.find(x=>x.id===id);
+    if(!t) return;
 
-  if (alreadyCompletedToday) {
-    return;
-  }
+    const now = new Date().toISOString();
+    const completedDayKey = dateKey(now);
 
-  // always log the completion
-  addCompletion({
-    id: crypto.randomUUID(),
-    taskId: id,
-    title: t.title,
-    points: t.points,
-    completedAtISO: now
+    const alreadyCompletedToday = Array.isArray(state.completions)
+      ? state.completions.some(c => c && c.taskId === id && dateKey(c.completedAtISO) === completedDayKey)
+      : false;
+
+    if (alreadyCompletedToday) return;
+
+    // always log the completion
+    addCompletion({
+      id: crypto.randomUUID(),
+      taskId: id,
+      title: t.title,
+      points: t.points,
+      completedAtISO: now
+    });
+
+    const rec = t.recurrence || {};
+    const mode = rec.mode || 'none';
+
+    if (mode === 'none') {
+      // one-off task → mark completed and hide from list
+      t.completedAtISO = now;
+    } else {
+      // repeating task → move due date forward, keep it active
+      const nextKey = computeNextDueDate(t);
+      if (nextKey) t.dueDateISO = nextKey;
+      t.completedAtISO = null; // keep it in the active list
+    }
+
+    removeTaskFromTodayView(id, completedDayKey);
+
+    save();
+    scheduleRender(renderAll);
   });
-  }
-
-  const rec = t.recurrence || {};
-  const mode = rec.mode || 'none';
-
-  if (mode === 'none') {
-    // one-off task → mark completed and hide from list
-    t.completedAtISO = now;
-  } else {
-    // repeating task → move due date forward, keep it active
-    const nextKey = computeNextDueDate(t);
-    if (nextKey) t.dueDateISO = nextKey;
-    t.completedAtISO = null; // keep it in the active list
-  }
-
-  removeTaskFromTodayView(id, completedDayKey);
-
-  save();
-  scheduleRender(renderAll);
 }
+
 
 function editTask(id){ editingTaskId = id; renderTasks(); }
 function saveTaskEdit(id,card){
@@ -6150,25 +6154,29 @@ function importPaste(){
 
 /* ---------- RENDER/WIRE ---------- */
 function renderAll() {
-  const perfLabel = window.TP_DEBUG_PERF ? 'renderAll' : null;
-  if (perfLabel) console.time(perfLabel);
-  try {
-    try { renderStats(); } catch (e) { console.error('renderStats error:', e); }
-    try { renderTasks(); } catch (e) { console.error('renderTasks error:', e); }
+  return tpPerfTime('renderAll', () => {
+    const perfLabel = window.TP_DEBUG_PERF ? 'renderAll' : null;
+    if (perfLabel) console.time(perfLabel);
+    try {
+      try { renderStats(); } catch (e) { console.error('renderStats error:', e); }
+      try { renderTasks(); } catch (e) { console.error('renderTasks error:', e); }
 
-    const defer = window.requestIdleCallback
-      ? window.requestIdleCallback
-      : (cb) => setTimeout(() => cb({ timeRemaining: () => 0 }), 200);
-    defer(() => {
-      try { renderSleepHistory(); } catch (e) { console.error('renderSleepHistory error:', e); }
-      try { renderCaloriesHistory(); } catch (e) { console.error('renderCaloriesHistory error:', e); }
-      try { renderWorkHistory(); } catch (e) { console.error('renderWorkHistory error:', e); }
-      try { renderMoodHistory(); } catch (e) { console.error('renderMoodHistory error:', e); }
-    });
-  } finally {
-    if (perfLabel) console.timeEnd(perfLabel);
-  }
+      const defer = window.requestIdleCallback
+        ? window.requestIdleCallback
+        : (cb) => setTimeout(() => cb({ timeRemaining: () => 0 }), 200);
+
+      defer(() => {
+        try { renderSleepHistory(); } catch (e) { console.error('renderSleepHistory error:', e); }
+        try { renderCaloriesHistory(); } catch (e) { console.error('renderCaloriesHistory error:', e); }
+        try { renderWorkHistory(); } catch (e) { console.error('renderWorkHistory error:', e); }
+        try { renderMoodHistory(); } catch (e) { console.error('renderMoodHistory error:', e); }
+      });
+    } finally {
+      if (perfLabel) console.timeEnd(perfLabel);
+    }
+  });
 }
+
 
 
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#039;'}[m])); }
@@ -6291,6 +6299,8 @@ document.addEventListener('change', (e) => {
 
 // PERF TOOLS (only active when URL has ?perf=1)
 const TP_PERF = new URLSearchParams(location.search).has('perf');
+  window.TP_DEBUG_PERF = window.TP_DEBUG_PERF || TP_PERF;
+
 let __tpPerfEl = null;
 
 function tpPerfInitPanel() {
