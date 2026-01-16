@@ -5757,12 +5757,13 @@ function wontDoMain(id){
 
 function completeTask(id){
   return tpPerfTime('completeTask total', () => {
-    const t = state.tasks.find(x=>x.id===id);
-    if(!t) return;
+    const t = state.tasks.find(x => x.id === id);
+    if (!t) return;
 
     const now = new Date().toISOString();
     const completedDayKey = dateKey(now);
 
+    // Prevent duplicate completion same day (for non-recurring)
     const alreadyCompletedToday = Array.isArray(state.completions)
       ? state.completions.some(c => c && c.taskId === id && dateKey(c.completedAtISO) === completedDayKey)
       : false;
@@ -5792,11 +5793,11 @@ function completeTask(id){
     }
 
     removeTaskFromTodayView(id, completedDayKey);
-
-    save();
+    saveState();
     scheduleRender(renderAll);
   });
 }
+
 
 
 function editTask(id){ editingTaskId = id; renderTasks(); }
