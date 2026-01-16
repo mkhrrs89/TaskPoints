@@ -6642,22 +6642,32 @@ document.addEventListener('change', (e) => {
   })();
 </script>
 
-  <script>
+<script>
 (function tpCoreHealthBadge(){
   const params = new URLSearchParams(location.search);
-  if (!params.has("debug")) return; // only show when you add ?debug=1
+  if (!params.has("debug")) return;
 
   const core = window.TaskPointsCore;
-  const ok = !!core
-    && typeof core.getDerived === "function"
-    && typeof core.loadAppState === "function"
-    && typeof core.saveStateSnapshot === "function";
+  const required = [
+    "loadAppState",
+    "mergeState",
+    "saveStateSnapshot",
+    "computeDailyTotalsWithInertia",
+    "buildRollups"
+  ];
+
+  const missing = [];
+  for (const k of required) {
+    if (!core || typeof core[k] !== "function") missing.push(k);
+  }
+
+  const ok = !!core && missing.length === 0;
 
   const el = document.createElement("div");
   el.style.cssText = [
     "position:fixed",
     "left:8px",
-    "bottom:84px",          // above your bottom toolbar
+    "bottom:84px",
     "z-index:99999",
     "padding:6px 10px",
     "border-radius:10px",
@@ -6667,10 +6677,14 @@ document.addEventListener('change', (e) => {
     "box-shadow:0 6px 18px rgba(0,0,0,0.25)"
   ].join(";");
 
-  el.textContent = ok ? "TaskPointsCore: OK" : "TaskPointsCore: FAIL";
+  el.textContent = ok
+    ? "TaskPointsCore: OK"
+    : ("TaskPointsCore: FAIL" + (missing.length ? " (missing: " + missing.join(", ") + ")" : " (core undefined)"));
+
   document.body.appendChild(el);
 })();
 </script>
+
 
 
 </body>
