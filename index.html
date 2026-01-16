@@ -2728,155 +2728,158 @@ function isoWeekRange(weekKey){
 }
 
 function renderStats(){
-    return tpPerfTime('renderStats', () => {
-    if(window.TP_DEBUG_PERF) console.time('renderStats');
-  const derived = getDerived();
+  return tpPerfTime('renderStats', () => {
+    const perfLabel = window.TP_DEBUG_PERF ? 'renderStats' : null;
+    if (perfLabel) console.time(perfLabel);
 
-  const lifetime = derived.lifetimePoints;
-  const lifetimeEl = $('lifetimePoints');
-  if (lifetimeEl) lifetimeEl.textContent = String(lifetime);
+    try {
+      const derived = getDerived();
 
-  const { dailyTotals, weeklyTotals, monthlyTotals } = derived.agg;
+      const lifetime = derived.lifetimePoints;
+      const lifetimeEl = $('lifetimePoints');
+      if (lifetimeEl) lifetimeEl.textContent = String(lifetime);
 
+      const { dailyTotals, weeklyTotals, monthlyTotals } = derived.agg;
 
-  const dKeys = Object.keys(dailyTotals);
+      const dKeys = Object.keys(dailyTotals);
 
-  const dAvg = dKeys.length
-    ? (dKeys.reduce((s, k) => s + dailyTotals[k], 0) / dKeys.length).toFixed(1)
-    : "0.0";
+      const dAvg = dKeys.length
+        ? (dKeys.reduce((s, k) => s + dailyTotals[k], 0) / dKeys.length).toFixed(1)
+        : "0.0";
 
-  const dailyAvgEl = $('dailyAvg');
-  if (dailyAvgEl) {
-    dailyAvgEl.textContent = dAvg.toLocaleString();
-  }
+      const dailyAvgEl = $('dailyAvg');
+      if (dailyAvgEl) {
+        dailyAvgEl.textContent = String(dAvg);
+      }
 
+      // Draw daily trend line
+      drawDailyTrend(dailyTotals);
 
-  // Draw daily trend line
-  drawDailyTrend(dailyTotals);
+      // Today / this week / this month keys
+      const today = new Date();
+      today.setHours(0,0,0,0);
 
-  // Today / this week / this month keys
-  const today = new Date();
-  today.setHours(0,0,0,0);
+      const todayK     = dateKey(today);
+      const thisWeekK  = isoWeekKey(today);
+      const thisMonthK = monthKey(today);
+      const matchupKey = getGameDayKey(today);
 
-  const todayK    = dateKey(today);
-  const thisWeekK = isoWeekKey(today);
-  const thisMonthK= monthKey(today);
-  const matchupKey = getGameDayKey(today);
+      const { todayPoints, inertia: inertiaPts, average: inertiaAvg } =
+        deriveTodayWithInertia(dailyTotals, todayK);
 
-  const { todayPoints, inertia: inertiaPts, average: inertiaAvg } = deriveTodayWithInertia(dailyTotals, todayK);
-  const { todayPoints: matchupPoints } = deriveTodayWithInertia(dailyTotals, matchupKey);
+      const { todayPoints: matchupPoints } =
+        deriveTodayWithInertia(dailyTotals, matchupKey);
 
-  // Today's points bubble
-  renderTodayPointsSummary(todayPoints, inertiaPts, inertiaAvg);
+      // Today's points bubble
+      renderTodayPointsSummary(todayPoints, inertiaPts, inertiaAvg);
 
-  renderTodaysMatchup(matchupKey, matchupPoints);
-  renderYesterdaysResult(dailyTotals);
+      renderTodaysMatchup(matchupKey, matchupPoints);
+      renderYesterdaysResult(dailyTotals);
 
-  // Today's breakdown bar – wrapped in try/catch so it can't kill stats
-  try {
-    const todayList = derived.byDay.get(todayK) || [];
-    updateTodayBreakdown(todayList, todayK, inertiaPts);
-  } catch (e) {
-    console.error('updateTodayBreakdown error', e);
-  }
+      // Today's breakdown bar – wrapped in try/catch so it can't kill stats
+      try {
+        const todayList = derived.byDay.get(todayK) || [];
+        updateTodayBreakdown(todayList, todayK, inertiaPts);
+      } catch (e) {
+        console.error('updateTodayBreakdown error', e);
+      }
 
-  // ----- LEADERBOARDS -----
-  function fillBoard(ulId, entries, labelFn){
-    const ul = $(ulId);
-    if (!ul) return;
+      // ----- LEADERBOARDS -----
+      function fillBoard(ulId, entries, labelFn){
+        const ul = $(ulId);
+        if (!ul) return;
 
-    ul.innerHTML = '';
-    if (!entries.length) {
-      ul.innerHTML = '<li class="muted">No data yet.</li>';
-      return;
-    }
+        ul.innerHTML = '';
+        if (!entries.length) {
+          ul.innerHTML = '<li class="muted">No data yet.</li>';
+          return;
+        }
 
-    entries.slice(0, 10).forEach((row, i) => {
-      const li = document.createElement('li');
+        entries.slice(0, 10).forEach((row, i) => {
+          const li = document.createElement('li');
 
-      // Store the key on the <li> so we can highlight the current one later
-      li.dataset.key = row.key;
-      li.className = 'flex items-center justify-between';
+          // Store the key on the <li> so we can highlight the current one later
+          li.dataset.key = row.key;
+          li.className = 'flex items-center justify-between';
 
-      const formattedTotal = Number(row.total).toLocaleString(undefined, {
-        maximumFractionDigits: 1,
+          const formattedTotal = Number(row.total).toLocaleString(undefined, {
+            maximumFractionDigits: 1,
+          });
+
+          li.innerHTML = `
+            <span>${i+1}. ${labelFn(row)}</span>
+            <span class="font-semibold">${formattedTotal} pts</span>
+          `;
+          ul.appendChild(li);
+        });
+      }
+
+      // Build “with inertia” totals (daily -> weekly/monthly)
+      const dailyTotalsWithInertia =
+        window.TaskPointsCore?.computeDailyTotalsWithInertia
+          ? TaskPointsCore.computeDailyTotalsWithInertia(dailyTotals, state)
+          : Object.fromEntries(
+              Object.entries(dailyTotals).map(([k, v]) => {
+                const { inertia } = computeInertia(dailyTotals, k);
+                const inertiaVal = Number.isFinite(inertia) ? inertia : 0;
+                return [k, v + inertiaVal];
+              })
+            );
+
+      const weeklyTotalsWithInertia = {};
+      const monthlyTotalsWithInertia = {};
+
+      Object.entries(dailyTotalsWithInertia).forEach(([k, total]) => {
+        const d = fromKey(k);
+        if (!d || isNaN(d.getTime())) return;
+
+        const wk = isoWeekKey(d);
+        const mk = monthKey(d);
+
+        weeklyTotalsWithInertia[wk]  = (weeklyTotalsWithInertia[wk]  || 0) + total;
+        monthlyTotalsWithInertia[mk] = (monthlyTotalsWithInertia[mk] || 0) + total;
       });
 
-      li.innerHTML = `
-        <span>${i+1}. ${labelFn(row)}</span>
-        <span class="font-semibold">${formattedTotal} pts</span>
-      `;
-      ul.appendChild(li);
-      if(window.TP_DEBUG_PERF) console.timeEnd('renderStats');
-    });
-  }
+      const bestDays = Object.entries(dailyTotalsWithInertia)
+        .map(([k, v]) => ({ key: k, total: v }))
+        .sort((a, b) => b.total - a.total);
 
-const dailyTotalsWithInertia =
-  window.TaskPointsCore?.computeDailyTotalsWithInertia
-    ? TaskPointsCore.computeDailyTotalsWithInertia(dailyTotals, state)
-    : Object.fromEntries(
-        Object.entries(dailyTotals).map(([k, v]) => {
-          const { inertia } = computeInertia(dailyTotals, k);
-          const inertiaVal = Number.isFinite(inertia) ? inertia : 0;
-          return [k, v + inertiaVal];
-        })
-      );
+      const bestWeeks = Object.entries(weeklyTotalsWithInertia)
+        .map(([k, v]) => ({ key: k, total: v, ...isoWeekRange(k) }))
+        .sort((a, b) => b.total - a.total);
 
+      const bestMonths = Object.entries(monthlyTotalsWithInertia)
+        .map(([k, v]) => ({ key: k, total: v }))
+        .sort((a, b) => b.total - a.total);
 
-  const weeklyTotalsWithInertia = {};
-  const monthlyTotalsWithInertia = {};
+      // Labels with NO "(Today / This Week / This Month)" text
+      fillBoard('dailyBoard', bestDays, r => niceDate(fromKey(r.key)));
+      fillBoard('weeklyBoard', bestWeeks, r => `${niceDate(r.start)} – ${niceDate(r.end)}`);
+      fillBoard('monthlyBoard', bestMonths, r => formatMonthKey(r.key));
 
-  Object.entries(dailyTotalsWithInertia).forEach(([k, total]) => {
-    const d = fromKey(k);
-    if (!d || isNaN(d.getTime())) return;
+      // Highlight current day/week/month in orange if they appear
+      [
+        ['dailyBoard', todayK],
+        ['weeklyBoard', thisWeekK],
+        ['monthlyBoard', thisMonthK],
+      ].forEach(([ulId, currentKey]) => {
+        const ul = $(ulId);
+        if (!ul) return;
 
-    const wk = isoWeekKey(d);
-    const mk = monthKey(d);
+        ul.querySelectorAll('li').forEach(li => {
+          if (li.dataset.key === currentKey) {
+            li.classList.add('leaderboard-current');
+          }
+        });
+      });
 
-    weeklyTotalsWithInertia[wk]  = (weeklyTotalsWithInertia[wk]  || 0) + total;
-    monthlyTotalsWithInertia[mk] = (monthlyTotalsWithInertia[mk] || 0) + total;
+    } catch (e) {
+      console.error('renderStats error:', e);
+    } finally {
+      if (perfLabel) console.timeEnd(perfLabel);
+    }
   });
-
-  const bestDays = Object.entries(dailyTotalsWithInertia)
-    .map(([k, v]) => ({ key: k, total: v }))
-    .sort((a, b) => b.total - a.total);
-
-  const bestWeeks = Object.entries(weeklyTotalsWithInertia)
-    .map(([k, v]) => ({ key: k, total: v, ...isoWeekRange(k) }))
-    .sort((a, b) => b.total - a.total);
-
-  const bestMonths = Object.entries(monthlyTotalsWithInertia)
-    .map(([k, v]) => ({ key: k, total: v }))
-    .sort((a, b) => b.total - a.total);
-
-  // Labels with NO "(Today / This Week / This Month)" text
-  fillBoard('dailyBoard', bestDays, r =>
-    niceDate(fromKey(r.key))
-  );
-
-  fillBoard('weeklyBoard', bestWeeks, r =>
-    `${niceDate(r.start)} – ${niceDate(r.end)}`
-  );
-
-  fillBoard('monthlyBoard', bestMonths, r =>
-    formatMonthKey(r.key)
-  );
-
-  // Highlight current day/week/month in orange if they appear
-  [
-    ['dailyBoard', todayK],
-    ['weeklyBoard', thisWeekK],
-    ['monthlyBoard', thisMonthK],
-  ].forEach(([ulId, currentKey]) => {
-    const ul = $(ulId);
-    if (!ul) return;
-
-    ul.querySelectorAll('li').forEach(li => {
-      if (li.dataset.key === currentKey) {
-        li.classList.add('leaderboard-current');
-      }
-    });
-  });
+}
 
 
 function renderTodaysMatchup(todayKeyStr, yourScore){
