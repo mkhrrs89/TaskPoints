@@ -2750,7 +2750,7 @@ function renderStats(){
     if (perfLabel) console.time(perfLabel);
 
     try {
-      const derived = getDerived();
+      const derived = tpPerfTime('renderStats: getDerived', () => getDerived());
 
       const lifetime = derived.lifetimePoints;
       const lifetimeEl = $('lifetimePoints');
@@ -2770,7 +2770,7 @@ function renderStats(){
       }
 
       // Draw daily trend line
-      drawDailyTrend(dailyTotals);
+      tpPerfTime('renderStats: drawDailyTrend', () => drawDailyTrend(dailyTotals));
 
       // Today / this week / this month keys
       const today = new Date();
@@ -2802,6 +2802,7 @@ function renderStats(){
       }
 
       // ----- LEADERBOARDS -----
+      const __tpBoardsDone = tpPerfMark('renderStats: leaderboards total');
       function fillBoard(ulId, entries, labelFn){
         const ul = $(ulId);
         if (!ul) return;
@@ -2889,6 +2890,7 @@ function renderStats(){
           }
         });
       });
+      __tpBoardsDone();
 
     } catch (e) {
       console.error('renderStats error:', e);
@@ -5809,7 +5811,7 @@ function completeTask(id){
     }
 
     removeTaskFromTodayView(id, completedDayKey);
-    saveState();
+    save();
     scheduleRender(renderAll);
   });
 }
