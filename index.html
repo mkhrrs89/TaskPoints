@@ -1794,6 +1794,48 @@ function formatAverageLine(avg, ppd){
 
 
 /* ---------- OPPONENT DRIP SCHEDULE ---------- */
+function validateOpponentDripSchedule(schedule, expectedTotal){
+  const issues = [];
+  if (!schedule) return ['missing schedule'];
+
+  const events = Array.isArray(schedule.events) ? schedule.events : [];
+  if (!events.length) issues.push('missing events');
+
+  // Validate ordering + numeric values + sum to total (tenths precision)
+  let prevMs = -Infinity;
+  let sumUnits = 0;
+
+  for (const e of events) {
+    const whenMs = Date.parse(e && e.t);
+    const ptsNum = Number(e && e.pts);
+
+    if (!Number.isFinite(whenMs)) {
+      issues.push('invalid event time');
+    } else {
+      if (whenMs < prevMs) issues.push('events not ordered');
+      prevMs = whenMs;
+    }
+
+    if (!Number.isFinite(ptsNum)) {
+      issues.push('non-numeric pts');
+    } else if (ptsNum < 0) {
+      issues.push('negative pts');
+    } else {
+      // keep sum in integer tenths to avoid float drift
+      sumUnits += Math.max(0, Math.round(ptsNum * 10));
+    }
+  }
+
+  const expectedRounded = Math.max(0, Math.round((Number(expectedTotal) || 0) * 10) / 10);
+  const sum = sumUnits / 10;
+
+  // If sum doesn't match expected total (beyond 0.05), treat as invalid
+  if (Math.abs(sum - expectedRounded) > 0.05) {
+    issues.push(`sum ${sum.toFixed(2)} != total ${expectedRounded.toFixed(2)}`);
+  }
+
+  return issues;
+}
 function getOpponentDripSchedules(){
   return Array.isArray(state.opponentDripSchedules) ? state.opponentDripSchedules : [];
 }
@@ -1873,7 +1915,7 @@ function generateOpponentDripSchedule(dateKeyStr, playerId, totalPoints){
   const sizedUnits = pointUnits.slice().sort((a, b) => b - a);
 
   const events = sizedUnits
-    .map((units, idx) => ({ t: times[idx].toISOString(), pts: units / 10 }))
+    .map((units, idx) => ({ t: times[idx].toISOString(), pts: Number((units / 10).toFixed(1)) }))
     .filter(e => e.pts > 0)
     .sort((a, b) => new Date(a.t) - new Date(b.t));
 
@@ -1894,8 +1936,19 @@ function ensureOpponentDripSchedule(dateKeyStr, playerId, totalPoints){
 
   if (existingIdx !== -1) {
     const existing = schedules[existingIdx];
-    if (existing && Math.abs((existing.total || 0) - totalRounded) < 0.001 && Array.isArray(existing.events) && existing.events.length) {
-      return existing;
+
+    const sameTotal =
+      existing &&
+      Math.abs((Number(existing.total) || 0) - totalRounded) < 0.001;
+
+    if (sameTotal) {
+      const issues = validateOpponentDripSchedule(existing, totalRounded);
+
+      // If valid, keep it
+      if (!issues.length) return existing;
+
+      // If invalid, regenerate to eliminate integrity warnings / skew
+      // (We regenerate instead of mutating existing to ensure events match expected total.)
     }
   }
 
