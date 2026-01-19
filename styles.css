@@ -949,7 +949,7 @@ body {
 
 .mobile-task-menu{
   position: absolute;
-  bottom: calc(var(--tp-toolbar-stack-height) + var(--tp-menu-gap));
+  bottom: calc(100% + var(--tp-menu-gap));
   left: 50%;
   transform: translateX(-50%);
   background: linear-gradient(180deg, #0f4d4d, #0a2f2f);
@@ -970,7 +970,7 @@ body {
 
 .mobile-bottom-dropdown .dropdown-menu{
   top: auto;
-  bottom: calc(var(--tp-toolbar-stack-height) + var(--tp-menu-gap));
+  bottom: calc(100% + var(--tp-menu-gap));
   left: 50%;
   transform: translateX(-50%);
   background: linear-gradient(180deg, #0f4d4d, #0a2f2f);
