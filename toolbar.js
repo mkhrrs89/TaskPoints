@@ -333,13 +333,46 @@ function setupBottomNavDragExpand(nav) {
 
   const applyHeight = (height, { dragging = false } = {}) => {
     currentHeight = clamp(height, collapsedHeight, expandedHeight);
-    nav.style.height = `${currentHeight}px`;
-    nav.style.setProperty('--mobile-bottom-nav-offset', `${currentHeight - collapsedHeight}px`);
+    const offset = currentHeight - collapsedHeight;
+
+    nav.style.setProperty('--mobile-bottom-nav-offset', `${offset}px`);
     nav.classList.toggle('is-dragging', dragging);
+
+    // Key fix:
+    // When "collapsed", DO NOT leave an inline height behind.
+    // Let CSS own the collapsed height so iOS safe-area / bfcache restores
+    // can't strand the toolbar in a half-expanded state.
+    if (dragging || offset > 0) {
+      nav.style.height = `${currentHeight}px`;
+    } else {
+      nav.style.removeProperty('height');
+    }
+
     updateToolbarStackHeight(nav);
   };
 
-  applyHeight(collapsedHeight);
+  const forceCollapsed = () => {
+    startY = null;
+    isDragging = false;
+    isExpanded = false;
+
+    nav.classList.remove('is-dragging');
+    delete nav.dataset.ignoreClick;
+
+    nav.style.removeProperty('height');
+    nav.style.setProperty('--mobile-bottom-nav-offset', '0px');
+    currentHeight = collapsedHeight;
+
+    updateToolbarStackHeight(nav);
+  };
+
+  // Always start collapsed
+  forceCollapsed();
+
+  // Also collapse on iOS back/forward cache restores + navigation transitions
+  window.addEventListener('pageshow', forceCollapsed);
+  window.addEventListener('pagehide', forceCollapsed);
+
 
   const onPointerMove = (event) => {
     if (startY === null) return;
