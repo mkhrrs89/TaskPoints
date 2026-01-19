@@ -474,7 +474,8 @@ body {
 .gamehub-page #matchupYouAvatar,
 .gamehub-page #matchupOppAvatar {
   width: clamp(120px, 18vw, 160px);
-  height: clamp(160px, 24vw, 210px);
+    aspect-ratio: 2 / 3; /* matches assets/baseframe.PNG (880x1320) */
+  height: auto;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -512,10 +513,8 @@ body {
   position: absolute;
   top: 16px;
   left: 16px;
-  right: 16px;
-  bottom: 20px;
-  width: auto;
-  height: auto;
+  width: calc(100% - 32px);
+  height: calc(100% - 36px);
   object-fit: cover;
   object-position: 50% 35%;
   border-radius: 0 !important;
