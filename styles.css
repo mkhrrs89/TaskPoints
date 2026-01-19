@@ -706,16 +706,31 @@ body {
 
 /* Center the player names on mobile */
 .gamehub-page .matchup-scoreboard .scoreboard-name{
-  display: block;
-  text-align: center;
   width: 100%;
+  max-width: 100%;
+  padding: 0 6px;
+
+  /* allow wrapping instead of ellipsis */
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  hyphens: auto;
+
+  /* center vertically + horizontally so "You" sits mid-way vs 2-line names */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+
+  /* slightly bigger + narrower */
   font-family: "Avenir Next Condensed", "HelveticaNeue-CondensedBold", "Arial Narrow",
                system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   font-stretch: condensed;
   letter-spacing: -0.015em;
-  font-size: clamp(1.0rem, 3.6vw, 1.12rem);
-
+  font-size: clamp(1.12rem, 4.2vw, 1.32rem);
+  line-height: 1.05;
 }
+
    
 }
 
