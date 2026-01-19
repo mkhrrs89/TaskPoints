@@ -534,7 +534,12 @@ function saveTodayStore(store = todayStore) {
       }
 
       function renderHabitPicker() {
-        const habits = getActiveHabits();
+        const dayKey = dayKeyNow();
+const habits = getActiveHabits().filter(h => {
+  const done = Array.isArray(h.doneKeys) ? h.doneKeys.includes(dayKey) : false;
+  return !done; // hide habits already completed today
+});
+
         const list = $('#habitPickerList');
         if (!list) return;
 
@@ -572,6 +577,14 @@ function saveTodayStore(store = todayStore) {
         });
       }
 
+      function maybeRenderHabitPicker() {
+      const panel = $('#habitPicker');
+      if (panel && !panel.classList.contains('hidden')) {
+        renderHabitPicker();
+        }
+      }
+
+      
       function renderTodayList() {
         const perfLabel = window.TP_DEBUG_PERF ? 'renderTodayList' : null;
         if (perfLabel) console.time(perfLabel);
@@ -729,6 +742,7 @@ function saveTodayStore(store = todayStore) {
           toggleHabitDay(id, dayKey);
           // loadApp(); <-- OPTIMIZATION: removed redundant load
           scheduleRender(renderTodayList);
+          maybeRenderHabitPicker();
           return;
         }
 
