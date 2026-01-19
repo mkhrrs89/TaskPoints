@@ -132,7 +132,8 @@
                 <div class="min-w-0">
                   <button type="button" id="matchupYourName" class="scoreboard-name truncate player-name-link">You</button>
                   <div id="matchupYourRecord" class="scoreboard-record">Record: —</div>
-                  <div id="matchupYourAverages" class="scoreboard-meta">Daily Avg: — · PPD: —</div>
+                  <div id="matchupYourDailyAvg" class="scoreboard-meta">Daily Avg: —</div>
+                  <div id="matchupYourPPD" class="scoreboard-meta">PPD: —</div>
                 </div>
               </div>
               <div id="matchupYourScore" class="scoreboard-score mt-2">—</div>
@@ -149,7 +150,8 @@
                 <div class="min-w-0 text-right">
                   <button type="button" id="matchupOppName" class="scoreboard-name truncate player-name-link">—</button>
                   <div id="matchupOppRecord" class="scoreboard-record">Record: —</div>
-                  <div id="matchupOppAverages" class="scoreboard-meta">Daily Avg: — · PPD: —</div>
+                  <div id="matchupOppDailyAvg" class="scoreboard-meta">Daily Avg: —</div>
+                  <div id="matchupOppPPD" class="scoreboard-meta">PPD: —</div>
                 </div>
                 <div id="matchupOppAvatar" class="shrink-0"></div>
               </div>
@@ -1250,20 +1252,33 @@ function placeHTML(rankIndex, total){
       applyNameButton(oppNameBtn, oppId);
     }
 
-    // record + averages
+    // record + averages (3 fixed rows so both sides align)
     const youStats = computeYouStats(state);
     const oppP = getPlayerById(state, oppId);
     const oppStats = oppP ? computePlayerStats(state, oppP) : null;
 
-    $('matchupYourRecord').textContent = (youStats.wins != null && youStats.losses != null) ? `Record: ${youStats.wins}-${youStats.losses}` : 'Record: —';
-    $('matchupYourAverages').textContent = `Daily Avg: ${fmt1(youStats.avgPPD)} · PPD: ${fmt1(youStats.avgPPD)}`;
+    $('matchupYourRecord').textContent =
+      (youStats.wins != null && youStats.losses != null) ? `Record: ${youStats.wins}-${youStats.losses}` : 'Record: —';
+
+    $('matchupYourDailyAvg').textContent =
+      Number.isFinite(youStats.avgPPD) ? `Daily Avg: ${fmt1(youStats.avgPPD)}` : 'Daily Avg: —';
+
+    $('matchupYourPPD').textContent =
+      Number.isFinite(youStats.ppd) ? `PPD: ${fmt1(youStats.ppd)}` : 'PPD: —';
 
     if (oppStats) {
-      $('matchupOppRecord').textContent = (oppStats.wins != null && oppStats.losses != null) ? `Record: ${oppStats.wins}-${oppStats.losses}` : 'Record: —';
-      $('matchupOppAverages').textContent = `Daily Avg: ${fmt1(oppStats.avgPPD)} · PPD: ${fmt1(oppStats.avgPPD)}`;
+      $('matchupOppRecord').textContent =
+        (oppStats.wins != null && oppStats.losses != null) ? `Record: ${oppStats.wins}-${oppStats.losses}` : 'Record: —';
+
+      $('matchupOppDailyAvg').textContent =
+        Number.isFinite(oppStats.avgPPD) ? `Daily Avg: ${fmt1(oppStats.avgPPD)}` : 'Daily Avg: —';
+
+      $('matchupOppPPD').textContent =
+        Number.isFinite(oppStats.ppd) ? `PPD: ${fmt1(oppStats.ppd)}` : 'PPD: —';
     } else {
       $('matchupOppRecord').textContent = 'Record: —';
-      $('matchupOppAverages').textContent = 'Daily Avg: — · PPD: —';
+      $('matchupOppDailyAvg').textContent = 'Daily Avg: —';
+      $('matchupOppPPD').textContent = 'PPD: —';
     }
 
     // scores (today)
