@@ -883,7 +883,7 @@ body {
   z-index: 40;
   transition: transform 160ms ease, height 220ms ease;
   will-change: transform, height;
-  touch-action: manipulation;
+  touch-action: none !important;
   --tp-menu-gap: 0px;
   overflow: visible;
 }
@@ -3049,7 +3049,6 @@ body {
   justify-content: flex-end;
   gap: 8px;
 }
-
 
 
 
