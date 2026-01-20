@@ -32,12 +32,16 @@ window.scheduleRender = scheduleRender;
 let toolbarHeightResizeObserver = null;
 let toolbarHeightListenersAdded = false;
 
-function updateToolbarStackHeight(nav) {
+function updateToolbarStackHeight(nav, knownHeight) {
   if (!nav) return;
-  const height = Math.round(nav.getBoundingClientRect().height);
+  const height = Number.isFinite(knownHeight)
+    ? Math.round(knownHeight)
+    : Math.round(nav.getBoundingClientRect().height);
+
   if (!Number.isFinite(height) || height <= 0) return;
   document.documentElement.style.setProperty('--tp-toolbar-stack-height', `${height}px`);
 }
+
 
 function setupToolbarStackHeightTracking(nav) {
   if (!nav) return;
@@ -47,7 +51,12 @@ function setupToolbarStackHeightTracking(nav) {
 
   if (toolbarHeightResizeObserver) toolbarHeightResizeObserver.disconnect();
   if (typeof ResizeObserver !== 'undefined') {
-    toolbarHeightResizeObserver = new ResizeObserver(() => updateToolbarStackHeight(nav));
+    toolbarHeightResizeObserver = new ResizeObserver(() => {
+  // During drag we already set --tp-toolbar-stack-height from currentHeight
+  if (nav.classList.contains('is-dragging')) return;
+  scheduleRender(() => updateToolbarStackHeight(nav));
+});
+
     toolbarHeightResizeObserver.observe(nav);
   }
 
@@ -320,7 +329,9 @@ function setupBottomNavDragExpand(nav) {
   if (!nav) return;
   if (nav.dataset.navDragReady) return;
   nav.dataset.navDragReady = 'true';
-
+  
+  let rafId = null;
+  let pendingDragHeight = null;
   const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
   const collapsedHeight = nav.getBoundingClientRect().height;
   const expandedHeight = collapsedHeight * 3;
@@ -363,7 +374,7 @@ function setupBottomNavDragExpand(nav) {
       nav.style.removeProperty('height');
     }
 
-    updateToolbarStackHeight(nav);
+    updateToolbarStackHeight(nav, currentHeight);
   };
 
   const forceCollapsed = () => {
@@ -375,7 +386,6 @@ function setupBottomNavDragExpand(nav) {
     delete nav.dataset.ignoreClick;
 
     nav.style.removeProperty('height');
-    nav.style.setProperty('--mobile-bottom-nav-offset', '0px');
     currentHeight = collapsedHeight;
 
     updateToolbarStackHeight(nav);
@@ -401,9 +411,19 @@ function setupBottomNavDragExpand(nav) {
         pointerCaptured = true;
       }
     }
-    if (!isDragging) return;
-    event.preventDefault();
-    applyHeight(startHeight + delta, { dragging: true });
+if (!isDragging) return;
+event.preventDefault();
+
+pendingDragHeight = startHeight + delta;
+if (rafId) return;
+
+rafId = requestAnimationFrame(() => {
+  rafId = null;
+  if (pendingDragHeight == null) return;
+  applyHeight(pendingDragHeight, { dragging: true });
+  pendingDragHeight = null;
+});
+
   };
 
   const settle = () => {
