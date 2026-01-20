@@ -872,6 +872,9 @@ body {
 }
 
 .mobile-bottom-nav-shell{
+  position: fixed;
+  left: 0;
+  right: 0;
   bottom: 0;
   height: calc(var(--tp-toolbar-height) + var(--tp-safe-bottom));
   padding-bottom: var(--tp-safe-bottom);
@@ -880,14 +883,14 @@ body {
   z-index: 40;
   transition: transform 160ms ease, height 220ms ease;
   will-change: transform, height;
-  touch-action: none;
+  touch-action: manipulation;
   --tp-menu-gap: 0px;
   overflow: hidden;
-  position: relative;
 }
 
 .mobile-bottom-nav-shell.is-dragging{
   transition: none;
+  touch-action: none;
 }
 
 .mobile-bottom-nav-btn{
@@ -3045,7 +3048,6 @@ body {
   justify-content: flex-end;
   gap: 8px;
 }
-
 
 
 

@@ -328,11 +328,26 @@ function setupBottomNavDragExpand(nav) {
   const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
   const collapsedHeight = nav.getBoundingClientRect().height;
   const expandedHeight = collapsedHeight * 3;
+  const DRAG_START_PX = 14;
+  const GRAB_STRIP_PX = 18;
   let currentHeight = collapsedHeight;
   let startY = null;
   let startHeight = collapsedHeight;
   let isDragging = false;
   let isExpanded = false;
+  let pointerCaptured = false;
+  let activePointerId = null;
+
+  const isInteractiveTarget = (eventTarget) => Boolean(
+    eventTarget.closest(
+      'a, button, input, select, textarea, [role="button"], [role="menu"], [role="menuitem"], .mobile-bottom-nav-btn, .dropdown-menu, .menu'
+    )
+  );
+
+  const isInGrabStrip = (clientY) => {
+    const rect = nav.getBoundingClientRect();
+    return clientY - rect.top <= GRAB_STRIP_PX;
+  };
 
   const applyHeight = (height, { dragging = false } = {}) => {
     currentHeight = clamp(height, collapsedHeight, expandedHeight);
@@ -379,11 +394,16 @@ function setupBottomNavDragExpand(nav) {
 
 
   const onPointerMove = (event) => {
+    if (activePointerId !== event.pointerId) return;
     if (startY === null) return;
     const delta = startY - event.clientY;
-    if (!isDragging && Math.abs(delta) > 6) {
+    if (!isDragging && Math.abs(delta) > DRAG_START_PX) {
       isDragging = true;
       nav.dataset.ignoreClick = '1';
+      if (!pointerCaptured) {
+        nav.setPointerCapture(event.pointerId);
+        pointerCaptured = true;
+      }
     }
     if (!isDragging) return;
     event.preventDefault();
@@ -399,26 +419,40 @@ function setupBottomNavDragExpand(nav) {
 
   nav.addEventListener('pointerdown', (event) => {
     if (event.button !== 0) return;
+    const target = event.target;
+    const inGrabStrip = isInGrabStrip(event.clientY);
+    if (!inGrabStrip && isInteractiveTarget(target)) return;
     startY = event.clientY;
     startHeight = currentHeight;
     isDragging = false;
-    nav.setPointerCapture(event.pointerId);
+    pointerCaptured = false;
+    activePointerId = event.pointerId;
   });
 
-  nav.addEventListener('pointermove', onPointerMove);
+  nav.addEventListener('pointermove', onPointerMove, { passive: false });
 
   nav.addEventListener('pointerup', (event) => {
+    if (activePointerId !== event.pointerId) return;
     if (startY === null) return;
     if (isDragging) event.preventDefault();
     startY = null;
-    nav.releasePointerCapture(event.pointerId);
+    if (pointerCaptured) {
+      nav.releasePointerCapture(event.pointerId);
+    }
+    pointerCaptured = false;
+    activePointerId = null;
     settle();
   });
 
   nav.addEventListener('pointercancel', (event) => {
+    if (activePointerId !== event.pointerId) return;
     if (startY === null) return;
     startY = null;
-    nav.releasePointerCapture(event.pointerId);
+    if (pointerCaptured) {
+      nav.releasePointerCapture(event.pointerId);
+    }
+    pointerCaptured = false;
+    activePointerId = null;
     settle();
   });
 
