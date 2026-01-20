@@ -100,6 +100,7 @@
       transform:scale(1.02);
       box-shadow:0 10px 24px rgba(0,0,0,0.35);
       transition:transform .12s ease,box-shadow .12s ease;
+      touch-action:none;
     }
     .today-page .today-item.is-dragging{
       position:absolute;
@@ -833,10 +834,10 @@ function init() {
   scheduleRender(renderTodayList);
 
         $('#todayList').addEventListener('click', onListClick);
-        $('#todayList').addEventListener('pointerdown', onDragStart);
-        $('#todayList').addEventListener('pointermove', onDragMove);
-        $('#todayList').addEventListener('pointerup', onDragEnd);
-        $('#todayList').addEventListener('pointercancel', onDragEnd);
+        $('#todayList').addEventListener('pointerdown', onDragStart, { passive: false });
+        $('#todayList').addEventListener('pointermove', onDragMove, { passive: false });
+        $('#todayList').addEventListener('pointerup', onDragEnd, { passive: false });
+        $('#todayList').addEventListener('pointercancel', onDragEnd, { passive: false });
 
         $('#addNoteBtn').addEventListener('click', addNote);
         $('#noteInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') addNote(); });
@@ -865,7 +866,13 @@ function init() {
         pointerId: null,
         pointerType: null,
         offsetY: 0,
-        timer: null
+        timer: null,
+        startX: 0,
+        startY: 0,
+        lastClientX: 0,
+        lastClientY: 0,
+        autoScrollRaf: 0,
+        autoScrollVelocity: 0
       };
 
       function clearTextSelection() {
@@ -873,28 +880,131 @@ function init() {
         if (selection && selection.removeAllRanges) selection.removeAllRanges();
       }
 
+      function resetDragState() {
+        dragState.active = false;
+        dragState.pressReady = false;
+        dragState.item = null;
+        dragState.pointerId = null;
+        dragState.pointerType = null;
+        dragState.placeholder = null;
+        dragState.timer = null;
+        dragState.autoScrollVelocity = 0;
+      }
+
+      function stopAutoScroll() {
+        if (dragState.autoScrollRaf) {
+          cancelAnimationFrame(dragState.autoScrollRaf);
+          dragState.autoScrollRaf = 0;
+        }
+        dragState.autoScrollVelocity = 0;
+      }
+
+      function updatePlaceholder(clientY) {
+        const list = $('#todayList');
+        const items = Array.from(list.querySelectorAll('.today-item:not(.is-dragging)'));
+        const target = items.find(item => {
+          const rect = item.getBoundingClientRect();
+          return clientY < rect.top + rect.height / 2;
+        });
+
+        if (target) {
+          if (dragState.placeholder !== target.previousSibling) {
+            list.insertBefore(dragState.placeholder, target);
+          }
+        } else {
+          list.appendChild(dragState.placeholder);
+        }
+      }
+
+      function updateDragPosition(clientX, clientY) {
+        const list = $('#todayList');
+        const listRect = list.getBoundingClientRect();
+        const y = clientY - listRect.top - dragState.offsetY;
+        dragState.item.style.top = `${y}px`;
+        updatePlaceholder(clientY);
+      }
+
+      function startAutoScrollLoop() {
+        if (dragState.autoScrollRaf) return;
+        const scrollEl = document.scrollingElement;
+        if (!scrollEl) return;
+
+        const tick = () => {
+          if (!dragState.active || !dragState.autoScrollVelocity) {
+            stopAutoScroll();
+            return;
+          }
+          scrollEl.scrollTop += dragState.autoScrollVelocity;
+          updateDragPosition(dragState.lastClientX, dragState.lastClientY);
+          dragState.autoScrollRaf = requestAnimationFrame(tick);
+        };
+
+        dragState.autoScrollRaf = requestAnimationFrame(tick);
+      }
+
+      function updateAutoScroll() {
+        if (!dragState.active) return;
+        const scrollEl = document.scrollingElement;
+        if (!scrollEl) return;
+        const threshold = 90;
+        const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+        const topZone = threshold;
+        const bottomZone = viewportHeight - threshold;
+        let velocity = 0;
+
+        if (dragState.lastClientY < topZone) {
+          const intensity = (topZone - dragState.lastClientY) / threshold;
+          velocity = -Math.max(2, Math.round(12 * intensity));
+        } else if (dragState.lastClientY > bottomZone) {
+          const intensity = (dragState.lastClientY - bottomZone) / threshold;
+          velocity = Math.max(2, Math.round(12 * intensity));
+        }
+
+        dragState.autoScrollVelocity = velocity;
+        if (velocity) {
+          startAutoScrollLoop();
+        } else {
+          stopAutoScroll();
+        }
+      }
+
+      function armPress() {
+        if (!dragState.item || dragState.pressReady) return;
+        dragState.pressReady = true;
+        dragState.item.classList.add('is-pressing');
+        try {
+          dragState.item.setPointerCapture(dragState.pointerId);
+        } catch (err) {
+          // ignore
+        }
+        if (dragState.pointerType === 'touch') clearTextSelection();
+      }
+
       function onDragStart(e) {
         const row = e.target.closest('.today-item');
         if (!row || dragState.active) return;
 
-        if (e.pointerType === 'touch') {
-          e.preventDefault();
-        }
-
         dragState.item = row;
         dragState.pointerId = e.pointerId;
         dragState.pointerType = e.pointerType;
+        dragState.startX = e.clientX;
+        dragState.startY = e.clientY;
+        dragState.lastClientX = e.clientX;
+        dragState.lastClientY = e.clientY;
+
         const rowRect = row.getBoundingClientRect();
         dragState.offsetY = e.clientY - rowRect.top;
         dragState.pressReady = false;
 
-        row.setPointerCapture(e.pointerId);
         clearTimeout(dragState.timer);
-        dragState.timer = setTimeout(() => {
-          dragState.pressReady = true;
-          row.classList.add('is-pressing');
-          if (dragState.pointerType === 'touch') clearTextSelection();
-        }, e.pointerType === 'mouse' ? 120 : 200);
+        const delay = e.pointerType === 'touch' ? 220 : 0;
+        if (delay === 0) {
+          armPress();
+        } else {
+          dragState.timer = setTimeout(() => {
+            armPress();
+          }, delay);
+        }
       }
 
       function startDragging() {
@@ -920,46 +1030,58 @@ function init() {
         row.style.top = `${rowRect.top - listRect.top}px`;
       }
 
+      function cancelPress() {
+        clearTimeout(dragState.timer);
+        if (dragState.item) {
+          dragState.item.classList.remove('is-pressing');
+        }
+        resetDragState();
+      }
+
       function onDragMove(e) {
         if (!dragState.item || dragState.pointerId !== e.pointerId) return;
 
-        if (!dragState.pressReady) return;
+        dragState.lastClientX = e.clientX;
+        dragState.lastClientY = e.clientY;
+
+        if (!dragState.pressReady) {
+          const deltaX = e.clientX - dragState.startX;
+          const deltaY = e.clientY - dragState.startY;
+          const distance = Math.hypot(deltaX, deltaY);
+          if (distance > 10) {
+            cancelPress();
+          }
+          return;
+        }
+
         if (e.pointerType === 'touch') e.preventDefault();
         if (!dragState.active) startDragging();
 
-        const list = $('#todayList');
-        const listRect = list.getBoundingClientRect();
-        const y = e.clientY - listRect.top - dragState.offsetY;
-        dragState.item.style.top = `${y}px`;
+        updateDragPosition(e.clientX, e.clientY);
 
         if (dragState.pointerType === 'touch') clearTextSelection();
-
-        const items = Array.from(list.querySelectorAll('.today-item:not(.is-dragging)'));
-        const pointerY = e.clientY;
-        const target = items.find(item => {
-          const rect = item.getBoundingClientRect();
-          return pointerY < rect.top + rect.height / 2;
-        });
-
-        if (target) {
-          if (dragState.placeholder !== target.previousSibling) {
-            list.insertBefore(dragState.placeholder, target);
-          }
-        } else {
-          list.appendChild(dragState.placeholder);
-        }
+        updateAutoScroll();
       }
 
       function onDragEnd(e) {
         if (!dragState.item || dragState.pointerId !== e.pointerId) return;
 
         clearTimeout(dragState.timer);
+        stopAutoScroll();
+
         if (!dragState.active) {
-          dragState.item.classList.remove('is-pressing');
+          if (dragState.item) {
+            dragState.item.classList.remove('is-pressing');
+            try {
+              if (dragState.item.hasPointerCapture(dragState.pointerId)) {
+                dragState.item.releasePointerCapture(dragState.pointerId);
+              }
+            } catch (err) {
+              // ignore
+            }
+          }
           if (dragState.pressReady) dragState.suppressClick = true;
-          dragState.pressReady = false;
-          dragState.item = null;
-          dragState.pointerId = null;
+          resetDragState();
           return;
         }
 
@@ -968,20 +1090,22 @@ function init() {
         dragState.item.style.width = '';
         dragState.item.style.left = '';
         dragState.item.style.top = '';
+        try {
+          if (dragState.item.hasPointerCapture(dragState.pointerId)) {
+            dragState.item.releasePointerCapture(dragState.pointerId);
+          }
+        } catch (err) {
+          // ignore
+        }
 
         if (dragState.placeholder) {
           list.insertBefore(dragState.item, dragState.placeholder);
           dragState.placeholder.remove();
         }
 
-        dragState.active = false;
-        dragState.pressReady = false;
-        dragState.item = null;
-        dragState.pointerId = null;
-        dragState.pointerType = null;
-        dragState.placeholder = null;
         $('#todayList').classList.remove('is-dragging');
         updateOrderFromDom();
+        resetDragState();
       }
 
       document.addEventListener('DOMContentLoaded', init);
