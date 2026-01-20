@@ -3613,6 +3613,20 @@ function renderHabits(){
     btn.onclick = () => deleteHabit(btn.getAttribute('data-id'));
   });
 
+  // ⬆️⬇️ reorder habits + habit groups in custom mode
+  wrap.querySelectorAll('[data-act="habit-up"]').forEach(btn => {
+    btn.onclick = () => moveHabit(btn.getAttribute('data-id'), -1);
+  });
+  wrap.querySelectorAll('[data-act="habit-down"]').forEach(btn => {
+    btn.onclick = () => moveHabit(btn.getAttribute('data-id'), +1);
+  });
+  wrap.querySelectorAll('[data-act="habit-group-up"]').forEach(btn => {
+    btn.onclick = () => moveHabitGroup(btn.getAttribute('data-tag'), -1);
+  });
+  wrap.querySelectorAll('[data-act="habit-group-down"]').forEach(btn => {
+    btn.onclick = () => moveHabitGroup(btn.getAttribute('data-tag'), +1);
+  });
+
 if (!habitTapHandlerBound) {
   habitTapHandlerBound = true;
 
