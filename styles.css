@@ -885,12 +885,13 @@ body {
   will-change: transform, height;
   touch-action: manipulation;
   --tp-menu-gap: 0px;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .mobile-bottom-nav-shell.is-dragging{
   transition: none;
   touch-action: none;
+  overflow: hidden;
 }
 
 .mobile-bottom-nav-btn{
@@ -3048,7 +3049,6 @@ body {
   justify-content: flex-end;
   gap: 8px;
 }
-
 
 
 
