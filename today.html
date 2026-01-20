@@ -875,6 +875,13 @@ function init() {
         autoScrollVelocity: 0
       };
 
+      // iOS Safari scroll-lock: once long-press is armed or dragging, prevent page scroll
+      document.addEventListener('touchmove', (e) => {
+        if (dragState.pressReady || dragState.active) {
+          e.preventDefault();
+        }
+      }, { passive: false, capture: true });
+
       function clearTextSelection() {
         const selection = window.getSelection ? window.getSelection() : null;
         if (selection && selection.removeAllRanges) selection.removeAllRanges();
@@ -1045,11 +1052,15 @@ function init() {
         dragState.lastClientY = e.clientY;
 
         if (!dragState.pressReady) {
-          const deltaX = e.clientX - dragState.startX;
-          const deltaY = e.clientY - dragState.startY;
-          const distance = Math.hypot(deltaX, deltaY);
-          if (distance > 10) {
-            cancelPress();
+          const dx = e.clientX - dragState.startX;
+          const dy = e.clientY - dragState.startY;
+          if (Math.hypot(dx, dy) > 10) {
+            clearTimeout(dragState.timer);
+            dragState.timer = null;
+            dragState.item = null;
+            dragState.pointerId = null;
+            dragState.pointerType = null;
+            dragState.pressReady = false;
           }
           return;
         }
