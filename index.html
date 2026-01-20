@@ -3482,6 +3482,7 @@ function renderHabitRow(h, days, wrap, options = {}) {
         <div class="flex gap-2 flex-wrap">
           <button class="btn btn-success" data-act="habit-save">Save</button>
           <button class="btn btn-ghost" data-act="habit-cancel">Cancel</button>
+          <button class="btn btn-ghost" data-act="habit-retire">Retire</button>
           <button class="btn btn-ghost" data-act="habit-delete">Delete</button>
         </div>
       </div>
@@ -3492,6 +3493,7 @@ function renderHabitRow(h, days, wrap, options = {}) {
 
     row.querySelector('[data-act="habit-save"]').onclick = () => saveHabitEdit(h.id, row);
     row.querySelector('[data-act="habit-cancel"]').onclick = () => { editingHabitId=null; renderHabits(); renderVices(); };
+    row.querySelector('[data-act="habit-retire"]').onclick = () => retireHabit(h.id);
     row.querySelector('[data-act="habit-delete"]').onclick = () => deleteHabit(h.id);
     return;
   }
@@ -3720,6 +3722,7 @@ function renderVices(){
           <div class="flex gap-2 flex-wrap">
             <button class="btn btn-success" data-act="habit-save">Save</button>
             <button class="btn btn-ghost" data-act="habit-cancel">Cancel</button>
+            <button class="btn btn-ghost" data-act="habit-retire">Retire</button>
             <button class="btn btn-ghost" data-act="habit-delete">Delete</button>
           </div>
         </div>
@@ -3730,10 +3733,12 @@ function renderVices(){
 
       const saveBtn   = row.querySelector('[data-act="habit-save"]');
       const cancelBtn = row.querySelector('[data-act="habit-cancel"]');
+      const retireBtn = row.querySelector('[data-act="habit-retire"]');
       const delBtn    = row.querySelector('[data-act="habit-delete"]');
 
       saveBtn.onclick   = () => saveHabitEdit(h.id, row);
       cancelBtn.onclick = () => { editingHabitId = null; renderHabits(); renderVices(); };
+      retireBtn.onclick = () => retireHabit(h.id);
       delBtn.onclick    = () => deleteHabit(h.id);
 
     } else {
@@ -3990,6 +3995,18 @@ function deleteHabit(id){
   state.habits = state.habits.filter(x=>x.id!==id);
   if(editingHabitId===id) editingHabitId=null;
   save(); renderHabits(); renderStats(); renderVices();
+}
+function retireHabit(id){
+  const h = state.habits.find(x => x.id === id);
+  if (!h || h.retired) return;
+  const label = (h.category || 'habit') === 'vice' ? 'vice' : 'habit';
+  if (!confirm(`Retire this ${label} (keeps history + score)?`)) return;
+  h.retired = true;
+  if (editingHabitId === id) editingHabitId = null;
+  save();
+  renderHabits();
+  renderVices();
+  renderStats();
 }
 function moveHabit(id, delta){
   const h = state.habits.find(x => x.id === id);
