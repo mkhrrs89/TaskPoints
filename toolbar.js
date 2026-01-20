@@ -89,17 +89,10 @@ setExpanded(dropdown.classList.contains('open'));
 
     }
 
-    // Use pointerdown for mobile reliability
-    toggle.addEventListener('pointerdown', (e) => {
-      // mark that this tap already handled, so the synthetic click is ignored
-      toggle.dataset.ignoreClick = '1';
-      doToggle(e);
-      setTimeout(() => delete toggle.dataset.ignoreClick, 350);
-    });
-
     // Keep click for desktop keyboards/etc, but ignore if it followed a pointer tap
     toggle.addEventListener('click', (e) => {
-      if (toggle.dataset.ignoreClick) return;
+      const nav = dropdown.closest('#mobileBottomNav');
+      if (nav?.dataset.ignoreClick) return;
       doToggle(e);
     });
   });
@@ -256,8 +249,11 @@ function setupMobileTasksMenu() {
     toggle.setAttribute('aria-expanded', String(!menu.classList.contains('hidden')));
   };
 
-  toggle.addEventListener('pointerdown', (e) => {
+  toggle.addEventListener('click', (e) => {
+    const nav = toggle.closest('#mobileBottomNav');
+    if (nav?.dataset.ignoreClick) return;
     e.preventDefault();
+    e.stopPropagation();
     toggleMenu();
   });
 
@@ -414,7 +410,7 @@ function setupBottomNavDragExpand(nav) {
     const midpoint = collapsedHeight + (expandedHeight - collapsedHeight) / 2;
     isExpanded = currentHeight >= midpoint;
     applyHeight(isExpanded ? expandedHeight : collapsedHeight, { dragging: false });
-    window.setTimeout(() => delete nav.dataset.ignoreClick, 200);
+    window.setTimeout(() => delete nav.dataset.ignoreClick, 450);
   };
 
   nav.addEventListener(
