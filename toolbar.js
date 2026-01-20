@@ -213,6 +213,9 @@ function renderBottomToolbar() {
       <div class="max-w-6xl mx-auto flex justify-center py-3 pb-4 text-[11px] mobile-bottom-nav">
         ${buildMobileBottomNavLinks()}
       </div>
+      <div class="mobile-bottom-nav-expanded">
+        <a href="projects.html" class="btn btn-teal btn-toolbar mobile-bottom-nav-expanded-btn">Projects</a>
+      </div>
     </nav>
   `;
 
@@ -336,6 +339,7 @@ function setupBottomNavDragExpand(nav) {
     const offset = currentHeight - collapsedHeight;
 
     nav.style.setProperty('--mobile-bottom-nav-offset', `${offset}px`);
+    nav.classList.toggle('is-expanded', offset > 0);
     nav.classList.toggle('is-dragging', dragging);
 
     // Key fix:
