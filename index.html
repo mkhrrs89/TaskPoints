@@ -3599,6 +3599,18 @@ function renderHabits(){
     renderHabitRow(entry.habit, days, wrap, { showMoveButtons: sortMode === 'custom', isGrouped: false });
   });
 
+  // Edit / delete
+  wrap.querySelectorAll('[data-act="habit-edit"]').forEach(btn => {
+    btn.onclick = () => {
+      editingHabitId = btn.getAttribute('data-id');
+      renderHabits();
+      renderVices();
+    };
+  });
+  wrap.querySelectorAll('[data-act="habit-delete"]').forEach(btn => {
+    btn.onclick = () => deleteHabit(btn.getAttribute('data-id'));
+  });
+
 if (!habitTapHandlerBound) {
   habitTapHandlerBound = true;
 
