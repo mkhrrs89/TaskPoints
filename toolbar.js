@@ -256,7 +256,7 @@ function setupMobileTasksMenu() {
     toggle.setAttribute('aria-expanded', String(!menu.classList.contains('hidden')));
   };
 
-  toggle.addEventListener('click', (e) => {
+  toggle.addEventListener('pointerdown', (e) => {
     e.preventDefault();
     toggleMenu();
   });
@@ -417,17 +417,23 @@ function setupBottomNavDragExpand(nav) {
     window.setTimeout(() => delete nav.dataset.ignoreClick, 200);
   };
 
-  nav.addEventListener('pointerdown', (event) => {
-    if (event.button !== 0) return;
-    const target = event.target;
-    const inGrabStrip = isInGrabStrip(event.clientY);
-    if (!inGrabStrip && isInteractiveTarget(target)) return;
-    startY = event.clientY;
-    startHeight = currentHeight;
-    isDragging = false;
-    pointerCaptured = false;
-    activePointerId = event.pointerId;
-  });
+  nav.addEventListener(
+    'pointerdown',
+    (event) => {
+      if (event.button !== 0) return;
+
+      // If user is interacting with an open popup menu, don't start a drag.
+      if (event.target.closest('.dropdown-menu')) return;
+      if (event.target.closest('#mobileTasksMenu')) return;
+
+      startY = event.clientY;
+      startHeight = currentHeight;
+      isDragging = false;
+      pointerCaptured = false;
+      activePointerId = event.pointerId;
+    },
+    { capture: true }
+  );
 
   nav.addEventListener('pointermove', onPointerMove, { passive: false });
 
