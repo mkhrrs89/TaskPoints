@@ -3051,8 +3051,79 @@ body {
 }
 
 
+/* ====== Force equal card heights + consistent grid on desktop ====== */
 
+@media (min-width: 1024px) {
+  .scwm-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr; /* 2x2 */
+    gap: 16px;
+    align-items: stretch;
+  }
 
+  .scwm-card {
+    height: 240px;          /* pick one height */
+    border-radius: 18px;
+    overflow: hidden;
+    display: grid;
+  }
+}
+
+/* ====== Standardize the “split” layout inside every card on desktop ====== */
+
+@media (min-width: 1024px) {
+  .scwm-split {
+    display: grid;
+    grid-template-columns: 320px 1fr; /* left fixed, right flexible */
+    height: 100%;
+  }
+
+  .scwm-left {
+    padding: 18px;
+    display: grid;
+    grid-template-rows: auto auto 1fr;
+    gap: 12px;
+  }
+
+  .scwm-right {
+    padding: 18px;
+    border-left: 1px solid rgba(255,255,255,0.08);
+    display: grid;
+    grid-template-rows: auto 1fr;
+    gap: 10px;
+    min-width: 0; /* prevents overflow weirdness */
+  }
+
+  .scwm-right-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+  }
+}
+
+/* ====== Make the control rows match (inputs + Add button) on desktop ====== */
+
+@media (min-width: 1024px) {
+  .scwm-controls {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+
+  .scwm-controls input,
+  .scwm-controls select {
+    height: 36px;
+    border-radius: 12px;
+  }
+
+  .scwm-controls .btn-add {
+    height: 36px;
+    padding: 0 14px;
+    border-radius: 12px;
+    white-space: nowrap;
+  }
+}
 
 
 
