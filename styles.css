@@ -3126,6 +3126,66 @@ body {
 }
 
 
+/* =========================
+   Desktop-only: make SCWM cards uniform
+   (ONLY applies when >= 768px)
+   ========================= */
+@media (min-width: 768px) {
+  /* Scope EVERYTHING to just the SCWM section */
+  .scwm-grid .scwm-card {
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Keep the two-column layout stable and stretchy */
+  .scwm-grid .scwm-card .stat-card-row {
+    flex: 1 1 auto;
+    align-items: stretch;
+    flex-wrap: nowrap; /* prevents weird desktop wrapping */
+    gap: 18px;
+  }
+
+  .scwm-grid .scwm-card .stat-col-primary,
+  .scwm-grid .scwm-card .stat-col-secondary {
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Make the colored panel fill the left side consistently */
+  .scwm-grid .scwm-card .stat-mobile-header {
+    flex: 1 1 auto;
+    min-height: 170px; /* tweak 160–210 to taste */
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Push the “Today’s X” value block downward so all cards feel aligned */
+  .scwm-grid .scwm-card .stat-compact-meta {
+    margin-top: auto;
+  }
+
+  /* Unify title sizing on desktop (Work/Mood don’t use .stat-title) */
+  .scwm-grid .scwm-card .stat-title,
+  .scwm-grid .scwm-card #workAnchor,
+  .scwm-grid .scwm-card #moodAnchor {
+    font-weight: 800;
+    font-size: 1.1rem;
+    line-height: 1.1;
+  }
+
+  /* Make the right-side “Recent …” area feel consistent */
+  .scwm-grid .scwm-card .recentWrap {
+    flex: 1 1 auto;
+    min-height: 110px;
+  }
+}
+
+/* If you have a “desktop but narrow” case where nowrap feels cramped,
+   you can relax it below 900px like this:
+@media (min-width: 768px) and (max-width: 899px) {
+  .scwm-grid .scwm-card .stat-card-row { flex-wrap: wrap; }
+}
+*/
 
 
 
