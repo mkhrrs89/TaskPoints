@@ -483,19 +483,21 @@ function renderList(){
 
         </div>
 
-        <div class="flex items-center gap-1.5 flex-wrap">
-          <span class="tag">Quick</span>
-          <button class="btn btn-ghost btn-toolbar" data-action="bump" data-id="${p.id}" data-delta="-10">-10</button>
-          <button class="btn btn-ghost btn-toolbar" data-action="bump" data-id="${p.id}" data-delta="-5">-5</button>
-          <button class="btn btn-ghost btn-toolbar" data-action="bump" data-id="${p.id}" data-delta="-1">-1</button>
-          <button class="btn btn-ghost btn-toolbar" data-action="bump" data-id="${p.id}" data-delta="1">+1</button>
-          <button class="btn btn-ghost btn-toolbar" data-action="bump" data-id="${p.id}" data-delta="5">+5</button>
-          <button class="btn btn-ghost btn-toolbar" data-action="bump" data-id="${p.id}" data-delta="10">+10</button>
-          <div class="flex items-center gap-2 ml-auto">
-            <span class="muted">Set</span>
-            <input class="input w-20" type="number" min="0" max="100" value="${percent}" data-action="setInput" data-id="${p.id}">
-          </div>
-        </div>
+<div class="grid grid-cols-[1fr_auto] items-center gap-2">
+  <div class="flex items-center gap-1.5 overflow-x-auto whitespace-nowrap pr-1">
+    <span class="tag">Quick</span>
+    <button class="btn btn-ghost btn-toolbar" data-action="bump" data-id="${p.id}" data-delta="-10">-10</button>
+    <button class="btn btn-ghost btn-toolbar" data-action="bump" data-id="${p.id}" data-delta="-5">-5</button>
+    <button class="btn btn-ghost btn-toolbar" data-action="bump" data-id="${p.id}" data-delta="5">+5</button>
+    <button class="btn btn-ghost btn-toolbar" data-action="bump" data-id="${p.id}" data-delta="10">+10</button>
+  </div>
+
+  <div class="flex items-center gap-2 whitespace-nowrap">
+    <span class="muted">Set</span>
+    <input class="input w-20" type="number" min="0" max="100" value="${percent}" data-action="setInput" data-id="${p.id}">
+  </div>
+</div>
+
 
 
       </div>
