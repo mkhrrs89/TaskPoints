@@ -89,6 +89,13 @@
   body.projects-compact .summaryRow::-webkit-scrollbar{
     display:none;                 /* Chrome/Safari */
   }
+
+body.projects-compact .quickSetInput{
+  width: 72px !important;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+
     
 </style>
 
@@ -483,8 +490,8 @@ function renderList(){
 
         </div>
 
-<div class="grid grid-cols-[1fr_auto] items-center gap-2">
-  <div class="flex items-center gap-1.5 overflow-x-auto whitespace-nowrap pr-1">
+<div class="flex items-center gap-2 flex-nowrap">
+  <div class="flex items-center gap-1.5 overflow-x-auto whitespace-nowrap pr-1 flex-1 min-w-0">
     <span class="tag">Quick</span>
     <button class="btn btn-ghost btn-toolbar" data-action="bump" data-id="${p.id}" data-delta="-10">-10</button>
     <button class="btn btn-ghost btn-toolbar" data-action="bump" data-id="${p.id}" data-delta="-5">-5</button>
@@ -492,11 +499,12 @@ function renderList(){
     <button class="btn btn-ghost btn-toolbar" data-action="bump" data-id="${p.id}" data-delta="10">+10</button>
   </div>
 
-  <div class="flex items-center gap-2 whitespace-nowrap">
+  <div class="flex items-center gap-2 whitespace-nowrap shrink-0">
     <span class="muted">Set</span>
-    <input class="input w-20" type="number" min="0" max="100" value="${percent}" data-action="setInput" data-id="${p.id}">
+    <input class="input quickSetInput" type="number" min="0" max="100" value="${percent}" data-action="setInput" data-id="${p.id}">
   </div>
 </div>
+
 
 
 
