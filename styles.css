@@ -3053,7 +3053,7 @@ body {
 
 /* ====== Force equal card heights + consistent grid on desktop ====== */
 
-@media (min-width: 1024px) {
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
   .scwm-grid {
     display: grid;
     grid-template-columns: 1fr 1fr; /* 2x2 */
@@ -3071,7 +3071,7 @@ body {
 
 /* ====== Standardize the “split” layout inside every card on desktop ====== */
 
-@media (min-width: 1024px) {
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
   .scwm-split {
     display: grid;
     grid-template-columns: 320px 1fr; /* left fixed, right flexible */
@@ -3104,7 +3104,7 @@ body {
 
 /* ====== Make the control rows match (inputs + Add button) on desktop ====== */
 
-@media (min-width: 1024px) {
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
   .scwm-controls {
     display: flex;
     gap: 10px;
@@ -3125,78 +3125,76 @@ body {
   }
 }
 
-
 /* =========================
-   Desktop-only: make SCWM cards uniform
-   (ONLY applies when >= 768px)
+   Desktop-only: SCWM layout polish
+   (ONLY real desktop: mouse/trackpad)
    ========================= */
-@media (min-width: 768px) {
-  /* Scope EVERYTHING to just the SCWM section */
-  .scwm-grid .scwm-card {
-    display: flex;
-    flex-direction: column;
-  }
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
 
-  /* Keep the two-column layout stable and stretchy */
-  .scwm-grid .scwm-card .stat-card-row {
-    flex: 1 1 auto;
-    align-items: stretch;
-    flex-wrap: nowrap; /* prevents weird desktop wrapping */
+  /* Make each SCWM card use a stable 2-column layout */
+  .scwm-card .stat-card-row{
+    display: grid;
+    grid-template-columns: 1.15fr 1fr;
     gap: 18px;
+    align-items: stretch;
+    height: 100%;
   }
 
-  .scwm-grid .scwm-card .stat-col-primary,
-  .scwm-grid .scwm-card .stat-col-secondary {
+  /* Keep columns well-behaved */
+  .scwm-card .stat-col-primary,
+  .scwm-card .stat-col-secondary{
+    min-width: 0;
+  }
+
+  /* Left side should stretch and not leave dead space */
+  .scwm-card .stat-col-primary{
     display: flex;
     flex-direction: column;
+    height: 100%;
   }
 
-  /* Make the colored panel fill the left side consistently */
-  .scwm-grid .scwm-card .stat-mobile-header {
-    flex: 1 1 auto;
-    min-height: 170px; /* tweak 160–210 to taste */
-    display: flex;
-    flex-direction: column;
-  }
-
-  /* Push the “Today’s X” value block downward so all cards feel aligned */
-  .scwm-grid .scwm-card .stat-compact-meta {
-    margin-top: auto;
-  }
-
-  /* Unify title sizing on desktop (Work/Mood don’t use .stat-title) */
-  .scwm-grid .scwm-card .stat-title,
-  .scwm-grid .scwm-card #workAnchor,
-  .scwm-grid .scwm-card #moodAnchor {
-    font-weight: 800;
-    font-size: 1.1rem;
-    line-height: 1.1;
-  }
-
-  /* Make the right-side “Recent …” area feel consistent */
-  .scwm-grid .scwm-card .recentWrap {
-    flex: 1 1 auto;
-    min-height: 110px;
-  }
-
-     /* Make Work/Mood left panels stretch to match Sleep/Calories on desktop */
-  .scwm-grid .scwm-card .stat-col-primary > .sleep-today-card,
-  .scwm-grid .scwm-card .stat-col-primary > .calories-today-card,
-  .scwm-grid .scwm-card .stat-col-primary > .work-today-card,
-  .scwm-grid .scwm-card .stat-col-primary > .mood-today-card{
-    flex: 1 1 auto;
+  /* Ensure the “today card” wrapper fills the left column */
+  .scwm-card .stat-col-primary > .sleep-today-card,
+  .scwm-card .stat-col-primary > .calories-today-card,
+  .scwm-card .stat-col-primary > .work-today-card,
+  .scwm-card .stat-col-primary > .mood-today-card{
+    flex: 1;
     display: flex;
     flex-direction: column;
     min-height: 0;
   }
 
-  /* Ensure the colored header panel can actually grow to fill */
-  .scwm-grid .scwm-card .stat-mobile-header{
-    flex: 1 1 auto;
+  /* Ensure the colored header panel can grow vertically */
+  .scwm-card .stat-mobile-header{
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
   }
 
-   
+  /* Push the “Today’s …” / value block down for consistent alignment */
+  .scwm-card .stat-compact-meta{
+    margin-top: auto;
+  }
+
+  /* RIGHT SIDE: don’t look empty on desktop—show recents area by default */
+  .scwm-card .stat-col-secondary .recentWrap{
+    display: block !important;
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+  }
+
+  /* Optional: hide the “Show” link since it’s always shown on desktop */
+  #sleepRecentToggle,
+  #caloriesRecentToggle,
+  #workRecentToggle,
+  #moodRecentToggle{
+    display: none;
+  }
 }
+
+
 
 /* If you have a “desktop but narrow” case where nowrap feels cramped,
    you can relax it below 900px like this:
