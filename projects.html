@@ -43,13 +43,50 @@
     height: 18px;
     accent-color: #22c55e;
   }
+
+  /* ==============================
+     Projects-only compact mode
+     ============================== */
+  body.projects-compact { font-size: 0.95rem; }
+
+  body.projects-compact .glass{
+    padding: 12px;
+    border-radius: 16px;
+  }
+
+  body.projects-compact .btn{
+    padding: 6px 10px;
+    border-radius: 11px;
+  }
+
+  body.projects-compact .btn-toolbar{
+    padding: 5px 7px;
+    font-size: 10px;
+  }
+
+  body.projects-compact .tag{
+    padding: 1px 6px;
+    font-size: 11px;
+  }
+
+  body.projects-compact .input,
+  body.projects-compact select,
+  body.projects-compact textarea{
+    padding: 8px 10px;
+    border-radius: 11px;
+  }
+
+  body.projects-compact .today-breakdown-bar{ height: 10px; }
+
+  body.projects-compact .modalWrap{ padding: 12px; }
+  body.projects-compact .modalPanel{ padding: 14px; border-radius: 18px; }
 </style>
 
 
 </head>
 
-  <body class="min-h-screen">
-  <div class="mx-auto max-w-6xl p-4 sm:p-6 pb-20 md:pb-6">
+  <body class="min-h-screen projects-compact">
+  <div class="mx-auto max-w-6xl p-3 sm:p-4 pb-16 md:pb-5">
 
     <div class="flex items-center justify-between gap-3 mb-3 md:hidden">
       <a href="index.html" class="flex items-center gap-3">
@@ -68,7 +105,7 @@
     </div>
 
     <!-- Header (kept consistent with your app vibe) -->
-    <header class="mb-4">
+    <header class="mb-3">
       <div class="row items-center gap-3 sm:gap-4">
         <div class="flex items-center gap-3 flex-1 min-w-0">
           <div class="hidden md:block p-2 rounded-2xl bg-slate-900/50 border border-slate-700/60 shadow-inner">
@@ -108,14 +145,14 @@
     </header>
 
     <!-- Controls -->
-    <section class="glass mb-4">
-      <div class="flex flex-col sm:flex-row gap-3 sm:items-end sm:justify-between">
+    <section class="glass mb-3">
+      <div class="flex flex-col sm:flex-row gap-2 sm:items-end sm:justify-between">
         <div class="flex-1">
           <label class="muted">Search</label>
           <input id="searchInput" class="input w-full" placeholder="Find a project…" />
         </div>
 
-        <div class="flex flex-col sm:flex-row gap-3">
+        <div class="flex flex-col sm:flex-row gap-2">
           <div>
             <label class="muted">Category</label>
             <select id="categoryFilter" class="input w-full sm:w-52">
@@ -142,15 +179,15 @@
       </div>
     </section>
 
-    <section id="summaryStats" class="mb-4"></section>
+    <section id="summaryStats" class="mb-3"></section>
 
     <!-- List -->
-    <section id="listWrap" class="grid gap-3"></section>
+    <section id="listWrap" class="grid gap-2"></section>
 
     <!-- Empty state -->
     <div id="emptyState" class="glass hidden">
-      <div class="text-lg font-semibold mb-1">No projects yet</div>
-      <div class="muted mb-3">Add one and start chipping away. Little by little = unstoppable.</div>
+      <div class="text-base font-semibold mb-1">No projects yet</div>
+      <div class="muted mb-2">Add one and start chipping away. Little by little = unstoppable.</div>
       <button class="btn btn-teal" id="emptyAddBtn">+ Add your first project</button>
     </div>
   </div>
@@ -331,32 +368,32 @@ function renderSummary(list){
   const latestTs = list.reduce((max, p) => Math.max(max, p.updatedAt || 0), 0);
 
   wrap.innerHTML = `
-    <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+    <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
       <div class="glass">
         <div class="muted text-xs">Visible</div>
-        <div class="text-2xl font-extrabold mt-1">
+        <div class="text-xl font-extrabold mt-0.5">
           ${filtered || 0} <span class="muted text-xs font-semibold">of ${total || 0}</span>
         </div>
       </div>
 
       <div class="glass">
         <div class="muted text-xs">Avg progress</div>
-        <div class="text-2xl font-extrabold mt-1">${avg}%</div>
+        <div class="text-xl font-extrabold mt-0.5">${avg}%</div>
       </div>
 
       <div class="glass">
         <div class="muted text-xs">In motion</div>
-        <div class="text-2xl font-extrabold mt-1">${open}</div>
+        <div class="text-xl font-extrabold mt-0.5">${open}</div>
       </div>
 
       <div class="glass">
         <div class="muted text-xs">Categories</div>
-        <div class="text-2xl font-extrabold mt-1">${catCount || 0}</div>
+        <div class="text-xl font-extrabold mt-0.5">${catCount || 0}</div>
       </div>
 
       <div class="glass sm:col-span-2 lg:col-span-4">
         <div class="muted text-xs">Last touch</div>
-        <div class="font-semibold mt-1">${latestTs ? timeAgo(latestTs) : "—"}</div>
+        <div class="font-semibold mt-0.5">${latestTs ? timeAgo(latestTs) : "—"}</div>
       </div>
     </div>
   `;
@@ -394,10 +431,10 @@ function renderList(){
     card.className = "glass";
 
     card.innerHTML = `
-      <div class="flex items-start justify-between gap-3 flex-wrap">
-        <div class="min-w-0 space-y-1">
+      <div class="flex items-start justify-between gap-2 flex-wrap">
+        <div class="min-w-0 space-y-0.5">
           <div class="flex items-center gap-2 flex-wrap">
-            <div class="text-lg font-extrabold break-words">${escapeHtml(p.name || "Untitled Project")}</div>
+            <div class="text-base font-extrabold break-words">${escapeHtml(p.name || "Untitled Project")}</div>
             ${p.category ? `<span class="tag tag-clear">${escapeHtml(p.category)}</span>` : ""}
           </div>
 <div class="muted flex items-center gap-2 flex-wrap">
@@ -408,19 +445,19 @@ function renderList(){
         </div>
 
         <div class="flex gap-2 shrink-0">
-          <button class="btn btn-ghost" data-action="toggle" data-id="${p.id}">${isOpen ? "Hide" : "Details"}</button>
-          <button class="btn btn-ghost" data-action="edit" data-id="${p.id}">Edit</button>
+          <button class="btn btn-ghost btn-toolbar" data-action="toggle" data-id="${p.id}">${isOpen ? "Hide" : "Details"}</button>
+          <button class="btn btn-ghost btn-toolbar" data-action="edit" data-id="${p.id}">Edit</button>
         </div>
       </div>
 
-      <div class="mt-3 space-y-3">
-        <div class="grid sm:grid-cols-3 gap-3 items-center">
+      <div class="mt-2 space-y-2">
+        <div class="grid sm:grid-cols-3 gap-2 items-center">
           <div class="sm:col-span-2">
             <div class="flex items-center justify-between">
               <div class="muted">Completion</div>
               <div class="font-extrabold">${percent}%</div>
             </div>
-            <div class="bar mt-2" aria-label="progress bar">
+            <div class="bar mt-1" aria-label="progress bar">
               <div style="width:${percent}%"></div>
             </div>
           </div>
@@ -431,37 +468,37 @@ function renderList(){
 
         </div>
 
-        <div class="flex items-center gap-2 flex-wrap">
+        <div class="flex items-center gap-1.5 flex-wrap">
           <span class="tag">Quick</span>
-          <button class="btn btn-ghost" data-action="bump" data-id="${p.id}" data-delta="-10">-10</button>
-          <button class="btn btn-ghost" data-action="bump" data-id="${p.id}" data-delta="-5">-5</button>
-          <button class="btn btn-ghost" data-action="bump" data-id="${p.id}" data-delta="-1">-1</button>
-          <button class="btn btn-ghost" data-action="bump" data-id="${p.id}" data-delta="1">+1</button>
-          <button class="btn btn-ghost" data-action="bump" data-id="${p.id}" data-delta="5">+5</button>
-          <button class="btn btn-ghost" data-action="bump" data-id="${p.id}" data-delta="10">+10</button>
+          <button class="btn btn-ghost btn-toolbar" data-action="bump" data-id="${p.id}" data-delta="-10">-10</button>
+          <button class="btn btn-ghost btn-toolbar" data-action="bump" data-id="${p.id}" data-delta="-5">-5</button>
+          <button class="btn btn-ghost btn-toolbar" data-action="bump" data-id="${p.id}" data-delta="-1">-1</button>
+          <button class="btn btn-ghost btn-toolbar" data-action="bump" data-id="${p.id}" data-delta="1">+1</button>
+          <button class="btn btn-ghost btn-toolbar" data-action="bump" data-id="${p.id}" data-delta="5">+5</button>
+          <button class="btn btn-ghost btn-toolbar" data-action="bump" data-id="${p.id}" data-delta="10">+10</button>
           <div class="flex items-center gap-2 ml-auto">
             <span class="muted">Set</span>
-            <input class="input w-24" type="number" min="0" max="100" value="${percent}" data-action="setInput" data-id="${p.id}">
+            <input class="input w-20" type="number" min="0" max="100" value="${percent}" data-action="setInput" data-id="${p.id}">
           </div>
         </div>
 
 
       </div>
 
-      <div class="${isOpen ? "" : "hidden"} mt-4" data-open-panel="${p.id}">
-        <div class="grid sm:grid-cols-2 gap-3">
+      <div class="${isOpen ? "" : "hidden"} mt-3" data-open-panel="${p.id}">
+        <div class="grid sm:grid-cols-2 gap-2">
           <div class="sm:col-span-2">
             <label class="muted">Notes</label>
             <textarea class="input w-full" rows="3" data-action="notes" data-id="${p.id}" placeholder="Add notes…">${escapeHtml(p.notes || "")}</textarea>
           </div>
 
           <div class="sm:col-span-2">
-            <div class="flex items-center justify-between mb-2">
+            <div class="flex items-center justify-between mb-1.5">
               <div class="font-semibold">Subtasks</div>
               <div class="muted">${doneSubs}/${subtasks.length || 0} done</div>
             </div>
 
-            <div class="grid gap-2" data-subtasks="${p.id}">
+            <div class="grid gap-1.5" data-subtasks="${p.id}">
               ${subtasks.length ? subtasks.map(st => `
                 <div class="subtaskRow flex items-center gap-2">
                   <input type="checkbox" ${st.done ? "checked" : ""} data-action="toggleSub" data-id="${p.id}" data-subid="${st.id}">
@@ -471,9 +508,9 @@ function renderList(){
               `).join("") : `<div class="muted">No subtasks yet. Add one below.</div>`}
             </div>
 
-            <div class="flex gap-2 mt-3">
+            <div class="flex gap-2 mt-2">
               <input class="input w-full" placeholder="New subtask…" data-action="newSubText" data-id="${p.id}">
-              <button class="btn btn-warn" data-action="addSub" data-id="${p.id}">Add</button>
+              <button class="btn btn-warn btn-toolbar" data-action="addSub" data-id="${p.id}">Add</button>
             </div>
           </div>
         </div>
