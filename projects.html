@@ -13,6 +13,16 @@
   <link rel="preload" href="toolbar.js" as="script">
   <script src="toolbar.js" defer></script>
 
+  /* Mobile stats: one horizontal row */
+  body.projects-compact .summaryRow{
+    -ms-overflow-style: none;     /* IE/Edge */
+    scrollbar-width: none;        /* Firefox */
+  }
+  body.projects-compact .summaryRow::-webkit-scrollbar{
+    display:none;                 /* Chrome/Safari */
+  }
+
+  
   <style>
   /* Keep Projects page styling minimal so it inherits the main site vibe */
 
@@ -146,37 +156,41 @@
 
     <!-- Controls -->
     <section class="glass mb-3">
-      <div class="flex flex-col sm:flex-row gap-2 sm:items-end sm:justify-between">
-        <div class="flex-1">
-          <label class="muted">Search</label>
-          <input id="searchInput" class="input w-full" placeholder="Find a project…" />
-        </div>
+<div class="grid gap-2">
+  <!-- Row 1: Search + Add -->
+  <div class="grid grid-cols-[1fr_auto] gap-2 items-end">
+    <div class="min-w-0">
+      <label class="muted">Search</label>
+      <input id="searchInput" class="input w-full" placeholder="Find a project…" />
+    </div>
+    <div>
+      <button id="addProjectBtn" class="btn btn-teal whitespace-nowrap">+ Add Project</button>
+    </div>
+  </div>
 
-        <div class="flex flex-col sm:flex-row gap-2">
-          <div>
-            <label class="muted">Category</label>
-            <select id="categoryFilter" class="input w-full sm:w-52">
-              <option value="">All</option>
-            </select>
-          </div>
+  <!-- Row 2: Category + Sort -->
+  <div class="grid grid-cols-2 gap-2 items-end">
+    <div class="min-w-0">
+      <label class="muted">Category</label>
+      <select id="categoryFilter" class="input w-full">
+        <option value="">All</option>
+      </select>
+    </div>
 
-          <div>
-            <label class="muted">Sort</label>
-            <select id="sortSelect" class="input w-full sm:w-56">
-              <option value="updated_desc">Recently updated</option>
-              <option value="progress_desc">Most done</option>
-              <option value="progress_asc">Least done</option>
-              <option value="name_asc">Name (A → Z)</option>
-              <option value="name_desc">Name (Z → A)</option>
-              <option value="category_asc">Category (A → Z)</option>
-            </select>
-          </div>
+    <div class="min-w-0">
+      <label class="muted">Sort</label>
+      <select id="sortSelect" class="input w-full">
+        <option value="updated_desc">Recently updated</option>
+        <option value="progress_desc">Most done</option>
+        <option value="progress_asc">Least done</option>
+        <option value="name_asc">Name (A → Z)</option>
+        <option value="name_desc">Name (Z → A)</option>
+        <option value="category_asc">Category (A → Z)</option>
+      </select>
+    </div>
+  </div>
+</div>
 
-          <div class="sm:ml-2">
-            <button id="addProjectBtn" class="btn btn-teal w-full sm:w-auto">+ Add Project</button>
-          </div>
-        </div>
-      </div>
     </section>
 
     <section id="summaryStats" class="mb-3"></section>
@@ -368,30 +382,30 @@ function renderSummary(list){
   const latestTs = list.reduce((max, p) => Math.max(max, p.updatedAt || 0), 0);
 
   wrap.innerHTML = `
-    <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-      <div class="glass">
+    <div class="summaryRow flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 sm:mx-0 sm:px-0 sm:pb-0 sm:grid sm:overflow-visible sm:grid-cols-2 lg:grid-cols-5">
+      <div class="glass shrink-0 w-44 sm:w-auto">
         <div class="muted text-xs">Visible</div>
         <div class="text-xl font-extrabold mt-0.5">
           ${filtered || 0} <span class="muted text-xs font-semibold">of ${total || 0}</span>
         </div>
       </div>
 
-      <div class="glass">
+      <div class="glass shrink-0 w-44 sm:w-auto">
         <div class="muted text-xs">Avg progress</div>
         <div class="text-xl font-extrabold mt-0.5">${avg}%</div>
       </div>
 
-      <div class="glass">
+      <div class="glass shrink-0 w-44 sm:w-auto">
         <div class="muted text-xs">In motion</div>
         <div class="text-xl font-extrabold mt-0.5">${open}</div>
       </div>
 
-      <div class="glass">
+      <div class="glass shrink-0 w-44 sm:w-auto">
         <div class="muted text-xs">Categories</div>
         <div class="text-xl font-extrabold mt-0.5">${catCount || 0}</div>
       </div>
 
-      <div class="glass sm:col-span-2 lg:col-span-4">
+      <div class="glass shrink-0 w-44 sm:w-auto">
         <div class="muted text-xs">Last touch</div>
         <div class="font-semibold mt-0.5">${latestTs ? timeAgo(latestTs) : "—"}</div>
       </div>
