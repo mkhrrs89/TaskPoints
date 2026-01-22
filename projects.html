@@ -13,16 +13,6 @@
   <link rel="preload" href="toolbar.js" as="script">
   <script src="toolbar.js" defer></script>
 
-  /* Mobile stats: one horizontal row */
-  body.projects-compact .summaryRow{
-    -ms-overflow-style: none;     /* IE/Edge */
-    scrollbar-width: none;        /* Firefox */
-  }
-  body.projects-compact .summaryRow::-webkit-scrollbar{
-    display:none;                 /* Chrome/Safari */
-  }
-
-  
   <style>
   /* Keep Projects page styling minimal so it inherits the main site vibe */
 
@@ -90,6 +80,16 @@
 
   body.projects-compact .modalWrap{ padding: 12px; }
   body.projects-compact .modalPanel{ padding: 14px; border-radius: 18px; }
+
+  /* Mobile stats: one horizontal row */
+  body.projects-compact .summaryRow{
+    -ms-overflow-style: none;     /* IE/Edge */
+    scrollbar-width: none;        /* Firefox */
+  }
+  body.projects-compact .summaryRow::-webkit-scrollbar{
+    display:none;                 /* Chrome/Safari */
+  }
+    
 </style>
 
 
