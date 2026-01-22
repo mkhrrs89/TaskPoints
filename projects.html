@@ -450,16 +450,17 @@ function renderList(){
         </div>
       </div>
 
-      <div class="mt-2 space-y-2">
-        <div class="grid sm:grid-cols-3 gap-2 items-center">
+      <div class="mt-1 space-y-1">
+        <div class="grid sm:grid-cols-3 gap-1.5 items-center">
           <div class="sm:col-span-2">
             <div class="flex items-center justify-between">
               <div class="muted">Completion</div>
               <div class="font-extrabold">${percent}%</div>
             </div>
-            <div class="bar mt-1" aria-label="progress bar">
-              <div style="width:${percent}%"></div>
-            </div>
+<div class="today-breakdown-bar mt-1" aria-label="progress bar">
+  <div class="todayBreakdown-seg todayBreakdown-tasks" style="width:${percent}%"></div>
+</div>
+
           </div>
 <div>
   <div class="muted text-xs">At a glance</div>
