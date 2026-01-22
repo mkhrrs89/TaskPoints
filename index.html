@@ -6144,8 +6144,13 @@ async function applyImportedState(root){
     matchups:    Array.isArray(root.matchups)    ? root.matchups    : [],
     schedule:    Array.isArray(root.schedule)    ? root.schedule    : [],
     opponentDripSchedules: Array.isArray(root.opponentDripSchedules) ? root.opponentDripSchedules : [],
-    youImageId:  typeof root.youImageId === "string" ? root.youImageId : ""
+    youImageId:  typeof root.youImageId === "string" ? root.youImageId : "",
+
+    // ✅ bring over Settings → Habit tag/group colors + scoring settings
+    habitTagColors: root.habitTagColors,
+    scoringSettings: root.scoringSettings
   });
+
 
   normalized.projects = Array.isArray(root.projects) ? root.projects : loadProjectsFromStorage();
   state = normalized;
