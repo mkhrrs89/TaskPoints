@@ -277,13 +277,13 @@ Nothing visible on the page is built here. === -->
   <!-- ========================================================================== -->  
   <!-- ==  SECOND ROW (START) Inertia card (left) + daily trend chart (right)  == -->
   <!-- ========================================================================== -->   
-    <div class="grid gap-3 grid-cols-1 lg:grid-cols-[0.6fr_1.4fr]">
+    <div class="grid gap-3 grid-cols-1 lg:grid-cols-3">
 
       
       <!-- ┌─────────────────────────────────┐
            │  I N E R T I A   C A R D        │
            └─────────────────────────────────┘ -->
-      <div class="glass grid grid-cols-2 gap-4">
+      <div class="glass grid grid-cols-2 gap-4 lg:col-span-1">
         <div class="flex flex-col items-center justify-center text-center gap-1.5">
           <div class="muted font-semibold uppercase tracking-wide text-[10px]">Inertia Score</div>
           <div class="text-4xl font-extrabold" id="inertiaValue">0.0</div>
@@ -308,7 +308,7 @@ Nothing visible on the page is built here. === -->
 
       
       <!-- DAILY LINE GRAPH -->
-      <div class="glass flex items-end">
+      <div class="glass flex items-end lg:col-span-2">
         <canvas id="dailyTrend" class="w-full h-24"></canvas>
       </div>
     </div>
