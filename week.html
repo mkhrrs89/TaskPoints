@@ -76,6 +76,21 @@
       scroll-snap-type:x proximity;
       scrollbar-gutter:stable;
     }
+    .week-grid-scrollbar{
+      overflow-x:auto;
+      overflow-y:hidden;
+      height:12px;
+      margin-bottom:8px;
+      scrollbar-gutter:stable;
+    }
+    .week-grid-scrollbar-inner{
+      height:1px;
+    }
+    @media (max-width:640px){
+      .week-grid-scrollbar{
+        display:none;
+      }
+    }
     .grid7 .slot{
       flex:0 0 clamp(280px, 32vw, 360px);
       min-height:72px;
@@ -238,6 +253,9 @@
           <button data-week-nav="this" class="btn btn-ghost btn-toolbar">This Week</button>
           <button data-week-nav="next" class="btn btn-ghost btn-toolbar">Next →</button>
         </div>
+      </div>
+      <div class="week-grid-scrollbar" id="weekGridScrollTop" aria-hidden="true">
+        <div class="week-grid-scrollbar-inner" id="weekGridScrollTopInner"></div>
       </div>
       <div id="weekGrid" class="grid7"></div>
     </div>
@@ -693,6 +711,16 @@ function syncScrollContainers(a,b){
   if(keyB){ b.dataset.syncKey = keyB; b.dataset.syncedWith = a.id||''; }
 }
 
+function updateWeekGridScrollbar(){
+  const grid = $('weekGrid');
+  const scrollTop = $('weekGridScrollTop');
+  const scrollInner = $('weekGridScrollTopInner');
+  if (!grid || !scrollTop || !scrollInner) return;
+
+  scrollInner.style.width = `${grid.scrollWidth}px`;
+  syncScrollContainers(scrollTop, grid);
+}
+
 /* -------- Habits for arbitrary week -------- */
 function renderHabits(baseDate){
   state=load();
@@ -939,14 +967,15 @@ function renderWeekTasks(baseDate){
     grid.appendChild(col);
   });
 
-  if (shouldScrollWeekGridToToday(days)) {
-    const todaySlot = grid.querySelector(`[data-day-key="${todayK}"]`);
-    if (todaySlot) {
-      requestAnimationFrame(() => {
+  requestAnimationFrame(() => {
+    updateWeekGridScrollbar();
+    if (shouldScrollWeekGridToToday(days)) {
+      const todaySlot = grid.querySelector(`[data-day-key="${todayK}"]`);
+      if (todaySlot) {
         todaySlot.scrollIntoView({ block: 'nearest', inline: 'start' });
-      });
+      }
     }
-  }
+  });
 }
 function postponeTask(id){
   let st=load(); const t=st.tasks.find(x=>x.id===id); if(!t || !t.dueDateISO) return;
@@ -1382,6 +1411,7 @@ document.querySelectorAll('[data-week-nav]').forEach(btn => {
 document.addEventListener('DOMContentLoaded', () => {
   $('openAddTaskBtn')?.addEventListener('click', openAddTaskModal);
   $('addBtn')?.addEventListener('click', addTask);
+  window.addEventListener('resize', updateWeekGridScrollbar, { passive: true });
 
   const rep = $("repeatInput");
   rep?.addEventListener("change", () => syncCustomRepeatUI(rep));
