@@ -862,6 +862,55 @@
         tips: 'If you changed scoring settings over time, older entries may legitimately differ from today’s formulas.'
       });
 
+      // New: Last 7 days (excluding today) have mood/calories/work entries
+      const requiredRecentMetrics = ['mood', 'calories', 'work'];
+      const recentMetricDays = new Map();
+      const recentMissingMetrics = [];
+      const todayKey = TaskPointsCore.todayKey();
+      const todayDate = TaskPointsCore.fromKey(todayKey);
+      const recentDayKeys = Array.from({ length: 7 }, (_, idx) => {
+        const d = new Date(todayDate);
+        d.setDate(d.getDate() - (idx + 1));
+        return TaskPointsCore.dateKey(d);
+      });
+
+      recentDayKeys.forEach(key => {
+        recentMetricDays.set(key, new Set());
+      });
+
+      (state.completions || []).forEach(c => {
+        if (!c) return;
+        const entryDateKey = TaskPointsCore.dateKey(c.completedAtISO || c.dateKey || '');
+        if (!recentMetricDays.has(entryDateKey)) return;
+        const derived = TaskPointsCore.deriveCompletionPoints
+          ? TaskPointsCore.deriveCompletionPoints(c, scoringSettings)
+          : null;
+        if (!derived || !requiredRecentMetrics.includes(derived.formula)) return;
+        recentMetricDays.get(entryDateKey).add(derived.formula);
+      });
+
+      recentDayKeys.forEach(dayKey => {
+        const seenMetrics = recentMetricDays.get(dayKey) || new Set();
+        requiredRecentMetrics.forEach(metric => {
+          if (!seenMetrics.has(metric)) {
+            recentMissingMetrics.push(`${dayKey}: missing ${metric}`);
+          }
+        });
+      });
+
+      checks.push({
+        id: 'recent-metric-coverage',
+        title: 'Last 7 days include mood/calories/work entries',
+        status: recentMissingMetrics.length ? 'WARN' : 'PASS',
+        expected: 'Each day has at least one mood, calories, and work entry',
+        actual: recentMissingMetrics.length
+          ? `${recentMissingMetrics.length} missing entr${recentMissingMetrics.length === 1 ? 'y' : 'ies'}`
+          : 'All covered',
+        details: recentMissingMetrics,
+        trace: 'state.completions → TaskPointsCore.deriveCompletionPoints',
+        tips: 'Log a daily mood score, calorie entry, and work score for each day.'
+      });
+
       // New: Historical flex actions match current points
       const flexActionMap = new Map((state.flexActions || []).filter(Boolean).map(f => [f.id, f]));
       const flexPointIssues = [];
