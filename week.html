@@ -126,6 +126,36 @@
     }
     .habitDay{width:40px;height:38px;border-radius:10px;border:1px solid var(--border);display:grid;place-items:center;font-size:12px;cursor:pointer}
     .habitDay.on{background:#3D1C0B;border-color:#fb923c}
+
+    .week-tasks-header{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+    }
+    .week-task-actions{
+      display:flex;
+      align-items:center;
+      gap:4px;
+      flex-wrap:wrap;
+      justify-content:flex-end;
+    }
+    @media (max-width:640px){
+      .week-tasks-header{
+        flex-wrap:nowrap;
+      }
+      .week-tasks-header h2{
+        white-space:nowrap;
+        font-size:1rem;
+      }
+      .week-task-actions{
+        flex-wrap:nowrap;
+      }
+      .week-task-actions .btn{
+        padding:4px 6px;
+        font-size:10px;
+      }
+    }
   </style>
 </head>
 <body class="min-h-screen">
@@ -177,9 +207,9 @@
 
       <!-- Tasks -->
       <div class="glass mb-6">
-      <div class="flex items-start justify-between gap-3 mb-3">
-        <h2 class="font-bold">Tasks (this week view)</h2>
-        <div class="flex gap-1 text-xs whitespace-nowrap items-center flex-wrap justify-end">
+      <div class="week-tasks-header mb-3">
+        <h2 class="font-bold">Tasks</h2>
+        <div class="week-task-actions text-xs whitespace-nowrap">
           <button id="openAddTaskBtn" class="btn btn-primary">Add Task</button>
           <button data-week-nav="prev" class="btn btn-ghost btn-toolbar">← Prev</button>
           <button data-week-nav="this" class="btn btn-ghost btn-toolbar">This Week</button>
