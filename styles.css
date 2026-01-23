@@ -3204,6 +3204,17 @@ body {
 */
 
 
+/* INDEX: desktop-only layout for Inertia card + Daily trend chart */
+.inertiaTrendRow{
+  grid-template-columns: 1fr; /* mobile stays stacked */
+}
+
+@media (min-width: 1024px){
+  .inertiaTrendRow{
+    grid-template-columns: 1fr 2fr; /* left ~1/3, right ~2/3 */
+    align-items: stretch;
+  }
+}
 
 
 
