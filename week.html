@@ -88,11 +88,29 @@
     .task{
       border:1px solid var(--border);
       border-radius:10px;
-      padding:10px;
+      padding:8px;
       margin-bottom:8px;
       display:flex;
       flex-direction:column;
-      gap:8px;
+      gap:6px;
+      font-size:11px;
+    }
+    .task-title{
+      font-size:12px;
+      font-weight:400;
+    }
+    .task .tag{
+      font-size:10px;
+      line-height:1.1;
+    }
+    .task .btn{
+      font-size:10px;
+      padding:4px 6px;
+    }
+    .task-inline-actions{
+      display:flex;
+      align-items:center;
+      gap:4px;
     }
     .task.critical-card{
       background: linear-gradient(
@@ -112,7 +130,12 @@
     }
     @media (max-width: 640px){
       .grid7 .slot{
-        flex-basis: clamp(260px, 82vw, 320px);
+        flex-basis: clamp(180px, 48vw, 240px);
+      }
+    }
+    @media (max-width: 640px) and (orientation: landscape){
+      .grid7 .slot{
+        flex-basis: clamp(150px, 24vw, 200px);
       }
     }
 
@@ -876,7 +899,13 @@ function renderWeekTasks(baseDate){
         High:     'tag tag-high',
         Critical: 'tag tag-critical'
       }[importance]) || 'tag bg-teal-400/40 text-teal-950';
-      const importanceBadge = `<span class="${importanceClass}">${importance}</span>`;
+      const importanceLabel = ({
+        Low: 'L',
+        Medium: 'M',
+        High: 'H',
+        Critical: 'C'
+      }[importance]) || 'M';
+      const importanceBadge = `<span class="${importanceClass}">${importanceLabel}</span>`;
 
       const tags = Array.isArray(t.tags) ? t.tags : [];
       const tagsHtml = tags.length ? tags.map(tag => `<span class="tag bg-zinc-700/40">${escapeHtml(tag)}</span>`).join('') : '';
@@ -887,23 +916,23 @@ function renderWeekTasks(baseDate){
       div.innerHTML=`
         <div class="flex flex-col gap-2">
           <div class="flex items-start justify-between gap-3">
-            <div class="text-sm leading-snug break-words font-semibold">${escapeHtml(t.title)}</div>
+            <div class="task-title leading-snug break-words">${escapeHtml(t.title)}</div>
             <div class="flex items-center gap-2 flex-shrink-0">
               ${importanceBadge}
               <button class="btn btn-ghost btn-icon btn-icon-delete" onclick="deleteTask('${t.id}')" title="Delete task" aria-label="Delete task">✕</button>
             </div>
           </div>
-          <div class="flex items-center gap-2 flex-wrap text-[11px] text-zinc-200">
+          <div class="flex items-center gap-2 flex-wrap text-[10px] text-zinc-200">
             ${showPostponePill ? `<span class="tag postpone-pill">+${postponeDays}d</span>` : ''}
             ${overdue ? `<span class="tag bg-amber-500/20 text-amber-100 border border-amber-500/40">Overdue</span>` : ''}
             ${pointsLabel}
             ${tagsHtml}
+            <div class="task-inline-actions ml-auto">
+              <button class="btn btn-ghost" onclick="addOneDay('${t.id}')">+1 day</button>
+              <button class="btn btn-teal" onclick="completeTask('${t.id}')" title="Done">✓</button>
+            </div>
           </div>
-          <div class="flex gap-1 flex-wrap mt-1">
-            ${overdue?`<button class="btn btn-warn" onclick="postponeTask('${t.id}')">Postpone</button>`:''}
-            <button class="btn btn-ghost" onclick="addOneDay('${t.id}')">+1 day</button>
-            <button class="btn btn-teal" onclick="completeTask('${t.id}')" title="Done">✓</button>
-          </div>
+          ${overdue ? `<div class="flex gap-1 flex-wrap mt-1"><button class="btn btn-warn" onclick="postponeTask('${t.id}')">Postpone</button></div>` : ''}
         </div>`;
       col.appendChild(div);
     });
