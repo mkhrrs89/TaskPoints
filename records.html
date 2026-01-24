@@ -96,7 +96,7 @@
           <div class="hidden md:grid w-10 h-10 rounded-2xl place-items-center bg-black text-white font-bold text-sm shrink-0">TP</div>
           <div>
             <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight page-title">Records</h1>
-            <div class="muted">Top single-day scores across you + all players.</div>
+            <div class="muted" id="recordsIntro">Top single-day scores across you + all players.</div>
           </div>
         </div>
 
@@ -140,8 +140,8 @@
         <div class="sm:col-span-3">
           <label class="muted">Include</label>
           <select id="includeSelect" class="input">
-            <option value="all">All (You + Players)</option>
-            <option value="you">You only</option>
+            <option value="all" id="includeAllOption">All (You + Players)</option>
+            <option value="you" id="includeYouOption">You only</option>
             <option value="players">Players only</option>
           </select>
         </div>
@@ -210,7 +210,8 @@ function loadState(){
   const base = {
     tasks: [], completions: [], habits: [],
     players: [], flexActions: [],
-    gameHistory: [], matchups: [], schedule: []
+    gameHistory: [], matchups: [], schedule: [],
+    youName: ""
   };
   try{
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -221,6 +222,13 @@ function loadState(){
     console.error("records loadState error", e);
     return base;
   }
+}
+
+function getYouName(state) {
+  const name = state && typeof state.youName === "string"
+    ? state.youName.trim()
+    : "";
+  return name || "You";
 }
 
 function getCompletionPoints(entry) {
@@ -315,13 +323,14 @@ function buildRecords(state){
     sums.set(dk, (sums.get(dk) || 0) + getCompletionPoints(c));
   }
 
+  const youName = getYouName(state);
   for (const [dk, score] of sums.entries()){
     records.push({
       date: dk,
       playerId: "YOU",
-      playerName: "You",
+      playerName: youName,
       score: Number(score.toFixed(1)),
-      source: "You (daily)"
+      source: `${youName} (daily)`
     });
   }
 
@@ -331,7 +340,7 @@ function buildRecords(state){
     if (!g || !g.date || !g.playerId) continue;
     if (!activeIds.has(g.playerId)) continue;
     const name = g.playerId === "YOU"
-      ? "You"
+      ? youName
       : (playerMap.get(g.playerId) || "Unknown Player");
 
     records.push({
@@ -382,6 +391,19 @@ function filteredSortedTop(records){
 function render(){
   let state = loadState();
   state = syncDerivedPointsIfNeeded(state);
+  const youName = getYouName(state);
+  const intro = $("recordsIntro");
+  if (intro) {
+    intro.textContent = `Top single-day scores across ${youName} + all players.`;
+  }
+  const includeAllOption = $("includeAllOption");
+  if (includeAllOption) {
+    includeAllOption.textContent = `All (${youName} + Players)`;
+  }
+  const includeYouOption = $("includeYouOption");
+  if (includeYouOption) {
+    includeYouOption.textContent = `${youName} only`;
+  }
   const all = buildRecords(state);
   const activeIds = activePlayerIds(state);
   const activeGameHistoryCount = (Array.isArray(state.gameHistory) ? state.gameHistory : [])
@@ -401,7 +423,7 @@ function render(){
       .map(c => dateKey(c.completedAtISO))
   ).size;
 
-  meta.textContent = `Saved: ${all.length.toLocaleString()} records · You days: ${totalDaysYou.toLocaleString()} · Players games: ${activeGameHistoryCount.toLocaleString()}`;
+  meta.textContent = `Saved: ${all.length.toLocaleString()} records · ${youName} days: ${totalDaysYou.toLocaleString()} · Players games: ${activeGameHistoryCount.toLocaleString()}`;
 
   if (!top.length){
     empty.classList.remove("hidden");
@@ -419,7 +441,7 @@ function render(){
 
   tbody.innerHTML = top.map((r, i) => {
     const srcPill = r.playerId === "YOU"
-      ? `<span class="pill pill-orange">You</span>`
+      ? `<span class="pill pill-orange">${esc(youName)}</span>`
       : `<span class="pill pill-blue">Player</span>`;
 
     return `
@@ -444,9 +466,10 @@ function render(){
 async function copyList(){
   const rows = window.__lastTopRecords || [];
   if (!rows.length) return;
+  const youName = getYouName(loadState());
 
   const lines = rows.map((r, i) => {
-    return `${i+1}. ${r.score.toFixed(1)} — ${r.playerName} — ${r.date} — ${r.playerId === "YOU" ? "You" : "Player"}`;
+    return `${i+1}. ${r.score.toFixed(1)} — ${r.playerName} — ${r.date} — ${r.playerId === "YOU" ? youName : "Player"}`;
   });
   const txt = lines.join("\n");
 

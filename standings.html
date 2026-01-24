@@ -178,6 +178,13 @@
     let latestState = null;
     let activeIds = new Set(["YOU"]);
 
+    function getYouName() {
+      const name = latestState && typeof latestState.youName === "string"
+        ? latestState.youName.trim()
+        : "";
+      return name || "You";
+    }
+
     function isPlayerActive(player) {
       return !!player && player.active !== false;
     }
@@ -324,7 +331,7 @@ function computeYouStats() {
 
     const youRow = {
       id: "YOU",
-      name: "You",
+      name: getYouName(),
       baseline: null,
       variance: null,
       momentum: null,

@@ -243,6 +243,13 @@
       return !!player && player.active !== false;
     }
 
+    function getYouName(state) {
+      const name = state && typeof state.youName === 'string'
+        ? state.youName.trim()
+        : '';
+      return name || 'You';
+    }
+
     function activePlayerIds(state) {
       const ids = new Set(['YOU']);
       (state.players || []).forEach(player => {
@@ -1040,8 +1047,9 @@
       const standingsExpected = {};
       const standingsActual = {};
       const activeIds = activePlayerIds(state);
+      const youName = getYouName(state);
       const playerRows = [
-        { id: 'YOU', name: 'You' },
+        { id: 'YOU', name: youName },
         ...(Array.isArray(state.players) ? state.players.filter(p => p && isPlayerActive(p)) : [])
       ];
 
@@ -1052,7 +1060,7 @@
           ? TaskPointsCore.computeMatchupRecord(state, player.id, { includeToday: false })
           : { wins: 0, losses: 0, games: 0 };
 
-        const label = player.name || (player.id === 'YOU' ? 'You' : player.id);
+        const label = player.name || (player.id === 'YOU' ? youName : player.id);
         standingsExpected[label] = formatWinLoss(matchupRecord);
         standingsActual[label] = formatWinLoss(standingsRecord);
 

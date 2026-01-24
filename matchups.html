@@ -144,7 +144,7 @@ function load() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) {
-      return { tasks:[], completions:[], players:[], habits:[], flexActions:[], gameHistory:[], matchups:[], schedule:[], opponentDripSchedules: [] };
+      return { tasks:[], completions:[], players:[], habits:[], flexActions:[], gameHistory:[], matchups:[], schedule:[], opponentDripSchedules: [], youName: "" };
     }
 
     const p = JSON.parse(raw) || {};
@@ -158,14 +158,22 @@ function load() {
       gameHistory: Array.isArray(p.gameHistory) ? p.gameHistory : [],
       matchups:    Array.isArray(p.matchups)    ? p.matchups    : [],
       schedule:    Array.isArray(p.schedule)    ? p.schedule    : [],
-      opponentDripSchedules: Array.isArray(p.opponentDripSchedules) ? p.opponentDripSchedules : []
+      opponentDripSchedules: Array.isArray(p.opponentDripSchedules) ? p.opponentDripSchedules : [],
+      youName: typeof p.youName === "string" ? p.youName : ""
     };
 
   } catch (e) {
     console.error("Failed to load TaskPoints state", e);
-    return { tasks:[], completions:[], players:[], habits:[], flexActions:[], gameHistory:[], matchups:[], schedule:[], opponentDripSchedules: [] };
+    return { tasks:[], completions:[], players:[], habits:[], flexActions:[], gameHistory:[], matchups:[], schedule:[], opponentDripSchedules: [], youName: "" };
   }
 }
+
+    function getYouName(state) {
+      const name = state && typeof state.youName === "string"
+        ? state.youName.trim()
+        : "";
+      return name || "You";
+    }
 
     // Turn a Date (or ISO string) into "YYYY-MM-DD" like the rest of the app
     function dateKey(d) {
@@ -503,7 +511,7 @@ state = syncYouMatchupsWithCompletions(state);
       });
 
       function getName(id, matchup){
-        if (id === "YOU") return "You";
+        if (id === "YOU") return getYouName(state);
         if (nameById[id]) return nameById[id];
         if (matchup) {
           if (matchup.playerAId === id && matchup.playerAName) return matchup.playerAName;
@@ -541,7 +549,7 @@ state = syncYouMatchupsWithCompletions(state);
           namesById[p.id] = p.name || "Unnamed";
           playerMap.set(p.id, p);
         });
-        namesById["YOU"] = "You";
+        namesById["YOU"] = getYouName(nextState);
 
         const pool = missingIds.slice();
         shuffle(pool);

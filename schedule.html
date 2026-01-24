@@ -102,7 +102,7 @@
 
     <section class="glass mb-4">
       <h2 class="font-semibold text-lg mb-1">Weekly Schedule</h2>
-      <p class="text-sm muted">
+      <p class="text-sm muted" id="scheduleIntro">
         The next seven days of scheduled matchups, including you. The list updates automatically whenever players are added or removed.
       </p>
     </section>
@@ -123,12 +123,14 @@
             completions: [],
             players: [],
             habits: [],
-        flexActions: [],
-        gameHistory: [],
-        matchups: [],
-        schedule: [],
-        opponentDripSchedules: []
-      };
+            flexActions: [],
+            gameHistory: [],
+            matchups: [],
+            schedule: [],
+            opponentDripSchedules: [],
+            youName: ""
+          };
+        }
     }
 
         const parsed = JSON.parse(raw) || {};
@@ -141,12 +143,20 @@
           gameHistory: Array.isArray(parsed.gameHistory) ? parsed.gameHistory : [],
           matchups:    Array.isArray(parsed.matchups)    ? parsed.matchups    : [],
           schedule:    Array.isArray(parsed.schedule)    ? parsed.schedule    : [],
-          opponentDripSchedules: Array.isArray(parsed.opponentDripSchedules) ? parsed.opponentDripSchedules : []
+          opponentDripSchedules: Array.isArray(parsed.opponentDripSchedules) ? parsed.opponentDripSchedules : [],
+          youName: typeof parsed.youName === "string" ? parsed.youName : ""
         };
       } catch (e) {
         console.error("Failed to load TaskPoints state", e);
-        return { tasks: [], completions: [], players: [], habits: [], flexActions: [], gameHistory: [], matchups: [], schedule: [], opponentDripSchedules: [] };
+        return { tasks: [], completions: [], players: [], habits: [], flexActions: [], gameHistory: [], matchups: [], schedule: [], opponentDripSchedules: [], youName: "" };
       }
+    }
+
+    function getYouName(state) {
+      const name = state && typeof state.youName === "string"
+        ? state.youName.trim()
+        : "";
+      return name || "You";
     }
 
     function matchupDateKey(m) {
@@ -389,6 +399,11 @@ function saveState(nextState) {
       const changed = ensureUpcomingSchedule(state);
       if (changed) state = saveState(state);
 
+      const intro = $("scheduleIntro");
+      if (intro) {
+        intro.textContent = `The next seven days of scheduled matchups, including ${getYouName(state)}. The list updates automatically whenever players are added or removed.`;
+      }
+
 
       const container = $("scheduleContainer");
       container.innerHTML = "";
@@ -406,7 +421,7 @@ function saveState(nextState) {
       (state.players || []).forEach((p) => {
         if (p && p.id) nameById[p.id] = p.name || "Unnamed";
       });
-      nameById["YOU"] = "You";
+      nameById["YOU"] = getYouName(state);
 
       schedule.forEach((day) => {
         const section = document.createElement("section");
