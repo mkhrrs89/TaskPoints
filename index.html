@@ -4608,7 +4608,7 @@ if (editingTaskId === t.id) {
         </div>
         <div>
           <label class="text-xs muted">Due Date</label>
-          <input class="input mt-1" type="date" data-field="due" value="${t.dueDateISO||''}">
+          <input class="input mt-1" type="date" data-field="due" value="">
         </div>
         <div>
           <label class="text-xs muted">Points</label>
@@ -4652,6 +4652,12 @@ if (editingTaskId === t.id) {
 
   // ⬇️ keep this
   fragment.appendChild(card);
+
+  const dueInput = card.querySelector('input[data-field="due"]');
+  if (dueInput) {
+    dueInput.value = t.dueDateISO || '';
+    dueInput.defaultValue = '';
+  }
 
   // wire up custom row toggle for this card
   const repSel = card.querySelector('select[data-field="repeat"]');
