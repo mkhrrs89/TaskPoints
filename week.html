@@ -489,6 +489,7 @@ syncDerivedPointsIfNeeded();
     opponentDripSchedules: Array.isArray(s.opponentDripSchedules) ? s.opponentDripSchedules : [],
     workHistory: Array.isArray(s.workHistory) ? s.workHistory : [],
     youImageId:  typeof s.youImageId === "string" ? s.youImageId : "",
+    youName: typeof s.youName === "string" ? s.youName : "",
     habitTagColors: normalizeHabitTagColors(s.habitTagColors)
   };
 }

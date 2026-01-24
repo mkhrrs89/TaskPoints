@@ -181,6 +181,13 @@ const $ = id => document.getElementById(id);
 
 let latestState = null;  // <- new
 
+function getYouName() {
+  const name = latestState && typeof latestState.youName === "string"
+    ? latestState.youName.trim()
+    : "";
+  return name || "You";
+}
+
 function getMatchupDateKey(matchup) {
   if (!matchup) return "";
   return matchup.dateKey || matchup.date || (matchup.dateISO && window.TaskPointsCore?.dateKey ? TaskPointsCore.dateKey(matchup.dateISO) : "");
@@ -322,7 +329,7 @@ let players = loadPlayers();
 // Ratings fields (baseline, variance, etc.) stay blank, but stats are real.
 const youRow = {
   id: "YOU",
-  name: "You",
+  name: getYouName(),
   baseline: null,
   variance: null,
   momentum: null,
@@ -615,5 +622,3 @@ function getSortValue(p, key) {
   <div id="bottomToolbarMount"></div>
 </body>
 </html>
-
-

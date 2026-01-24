@@ -505,6 +505,7 @@
         schedule:    Array.isArray(s.schedule)    ? s.schedule    : [],
         workHistory: Array.isArray(s.workHistory) ? s.workHistory : [],
         youImageId:  typeof s.youImageId === "string" ? s.youImageId : "",
+        youName: typeof s.youName === "string" ? s.youName : "",
         habitTagColors: normalizeHabitTagColors(s.habitTagColors),
         scoringSettings: (window.TaskPointsCore?.normalizeScoringSettings)
           ? TaskPointsCore.normalizeScoringSettings(s.scoringSettings || {})

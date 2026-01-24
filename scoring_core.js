@@ -434,6 +434,7 @@
       opponentDripSchedules: Array.isArray(s?.opponentDripSchedules) ? s.opponentDripSchedules : [],
       workHistory: Array.isArray(s?.workHistory) ? s.workHistory : [],
       youImageId:  typeof s?.youImageId === "string" ? s.youImageId : "",
+      youName: typeof s?.youName === "string" ? s.youName : "",
       projects:    Array.isArray(s?.projects)    ? s.projects    : [],
       habitTagColors: normalizeHabitTagColors(s?.habitTagColors),
       scoringSettings: normalizeScoringSettings(s?.scoringSettings)
@@ -560,7 +561,7 @@
     return host === 'localhost' || host === '127.0.0.1';
   }
 
-  const STICKY_KEYS = ['youImageId', 'habitTagColors'];
+  const STICKY_KEYS = ['youImageId', 'youName', 'habitTagColors'];
 
   function shouldAllowStickyOverwrite(key, options = {}) {
     if (key === 'scoringSettings') return Boolean(options.allowScoringSettingsOverwrite);
@@ -573,6 +574,10 @@
   function isStickyEmptyValue(key, value) {
     if (value == null) return true;
     if (key === 'youImageId') {
+      if (typeof value !== 'string') return true;
+      return value.trim() === '';
+    }
+    if (key === 'youName') {
       if (typeof value !== 'string') return true;
       return value.trim() === '';
     }
@@ -661,6 +666,7 @@ function fastEnsureStateShape(s) {
     workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
     projects: Array.isArray(src.projects) ? src.projects : [],
     youImageId: typeof src.youImageId === 'string' ? src.youImageId : '',
+    youName: typeof src.youName === 'string' ? src.youName : '',
     habitTagColors: isPlainObject(src.habitTagColors) ? src.habitTagColors : {},
     scoringSettings: isPlainObject(src.scoringSettings)
       ? src.scoringSettings
@@ -709,6 +715,16 @@ function fastEnsureStateShape(s) {
         mergedSnapshot.youImageId = existing?.youImageId || '';
       } else if (typeof incoming === 'string') {
         mergedSnapshot.youImageId = incoming;
+      }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(nextState || {}, 'youName')) {
+      const allowOverwrite = shouldAllowStickyOverwrite('youName', options);
+      const incoming = nextState?.youName;
+      if (!allowOverwrite && isStickyEmptyValue('youName', incoming)) {
+        mergedSnapshot.youName = existing?.youName || '';
+      } else if (typeof incoming === 'string') {
+        mergedSnapshot.youName = incoming;
       }
     }
 

@@ -443,15 +443,22 @@
     return ids;
   }
 
+  function getYouName(state){
+    const name = state && typeof state.youName === 'string'
+      ? state.youName.trim()
+      : '';
+    return name || 'You';
+  }
+
   function safeNameForId(state, id){
-    if (id === 'YOU') return 'You';
+    if (id === 'YOU') return getYouName(state);
     const ps = Array.isArray(state.players) ? state.players : [];
     const p = ps.find(x => x && x.id === id);
     return p ? (p.name || 'Unknown') : 'Unknown';
   }
 
   function getPlayerById(state, id){
-    if (id === 'YOU') return { id:'YOU', name:'You', isYou:true, imageId: state.youImageId || null };
+    if (id === 'YOU') return { id:'YOU', name:getYouName(state), isYou:true, imageId: state.youImageId || null };
     const ps = Array.isArray(state.players) ? state.players : [];
     return ps.find(x => x && x.id === id) || null;
   }
@@ -463,7 +470,7 @@
   }
 
   function getPlayerName(state, id){
-    if (id === 'YOU') return 'You';
+    if (id === 'YOU') return getYouName(state);
     const p = getPlayerById(state, id);
     return p ? (p.name || safeNameForId(state, id)) : safeNameForId(state, id);
   }
@@ -698,7 +705,7 @@
 
   function buildStandings(state){
     const players = getActivePlayers(state);
-    const all = [{ id:'YOU', name:'You', isYou:true }, ...players];
+    const all = [{ id:'YOU', name:getYouName(state), isYou:true }, ...players];
 
     const rows = all.map(p => {
       const s = (p.id === 'YOU') ? computeYouStats(state) : computePlayerStats(state, p);
@@ -1237,14 +1244,14 @@ function placeHTML(rankIndex, total){
 
     // avatars
     const avatarSize = matchupAvatarSize();
-    renderAvatarInto($('matchupYouAvatar'), { name: 'You', imageId: getPlayerImageId(state, 'YOU'), size: avatarSize, frame: true });
+    renderAvatarInto($('matchupYouAvatar'), { name: getYouName(state), imageId: getPlayerImageId(state, 'YOU'), size: avatarSize, frame: true });
     renderAvatarInto($('matchupOppAvatar'), { name: oppName, imageId: getPlayerImageId(state, oppId), size: avatarSize, frame: true });
 
     // names
     const youNameBtn = $('matchupYourName');
     const oppNameBtn = $('matchupOppName');
     if (youNameBtn) {
-      youNameBtn.textContent = 'You';
+      youNameBtn.textContent = getYouName(state);
       applyNameButton(youNameBtn, 'YOU');
     }
     if (oppNameBtn) {

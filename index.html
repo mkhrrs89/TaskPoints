@@ -1547,6 +1547,7 @@ function load() {
         opponentDripSchedules: [],
         projects:     loadProjectsFromStorage(),
         youImageId:   "",
+        youName:      "",
         habitTagColors: {},
         scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
           ? TaskPointsCore.normalizeScoringSettings({})
@@ -1569,6 +1570,7 @@ function load() {
       opponentDripSchedules: Array.isArray(p.opponentDripSchedules) ? p.opponentDripSchedules : [],
       projects:     Array.isArray(p.projects)     ? p.projects     : storedProjects,
       youImageId:   typeof p.youImageId === "string" ? p.youImageId : "",
+      youName:      typeof p.youName === "string" ? p.youName : "",
       habitTagColors: normalizeHabitTagColors(p.habitTagColors),
       scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
         ? TaskPointsCore.normalizeScoringSettings(p.scoringSettings || {})
@@ -1588,6 +1590,7 @@ function load() {
       opponentDripSchedules: [],
       projects:     loadProjectsFromStorage(),
       youImageId:   "",
+      youName:      "",
       habitTagColors: {},
       scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
         ? TaskPointsCore.normalizeScoringSettings({})
@@ -1634,9 +1637,16 @@ function syncStateWithMatchups(current){
   return nextState;
 }
 
+function getYouName(currentState = state) {
+  const name = currentState && typeof currentState.youName === "string"
+    ? currentState.youName.trim()
+    : "";
+  return name || "You";
+}
+
 function getPlayerNameById(id) {
   if (!id) return 'Unknown opponent';
-  if (id === 'YOU') return 'You';
+  if (id === 'YOU') return getYouName();
 
   const players = Array.isArray(state.players) ? state.players : [];
   const match = players.find(p => p && p.id === id);
@@ -2194,7 +2204,7 @@ function simulateToday() {
     playerMap.set(p.id, p);
     namesById[p.id] = p.name || "Unnamed";
   });
-  namesById["YOU"] = "You";
+  namesById["YOU"] = getYouName();
 
   const participantIds = Array.from(new Set(
     todaysPairs.flatMap(m => [m.playerAId, m.playerBId])
@@ -2274,6 +2284,7 @@ function normalizeState(s) {
     schedule:    Array.isArray(s.schedule)    ? s.schedule    : [],
     opponentDripSchedules: Array.isArray(s.opponentDripSchedules) ? s.opponentDripSchedules : [],
     youImageId:  typeof s.youImageId === "string" ? s.youImageId : "",
+    youName: typeof s.youName === "string" ? s.youName : "",
     projects:    Array.isArray(s.projects)    ? s.projects    : loadProjectsFromStorage(),
     habitTagColors: normalizeHabitTagColors(s.habitTagColors),
     scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
@@ -2968,7 +2979,7 @@ function renderTodaysMatchup(todayKeyStr, yourScore){
 
   if (!oppNameEl || !oppScoreEl || !yourScoreEl || !diffEl || !diffValueEl || !oppRecordEl || !yourRecordEl) return;
 
-  if (yourNameEl) yourNameEl.textContent = 'You';
+  if (yourNameEl) yourNameEl.textContent = getYouName();
   const youAverages = computeYouDailyAverages();
   if (yourAvgEl) {
     const youAvgVal = youAverages.hasData ? youAverages.dailyAvg : null;
@@ -6151,6 +6162,7 @@ async function applyImportedState(root){
     schedule:    Array.isArray(root.schedule)    ? root.schedule    : [],
     opponentDripSchedules: Array.isArray(root.opponentDripSchedules) ? root.opponentDripSchedules : [],
     youImageId:  typeof root.youImageId === "string" ? root.youImageId : "",
+    youName:     typeof root.youName === "string" ? root.youName : "",
 
     // ✅ bring over Settings → Habit tag/group colors + scoring settings
     habitTagColors: root.habitTagColors,
