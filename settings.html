@@ -113,7 +113,7 @@
         <div class="flex items-center justify-between gap-3 flex-wrap">
           <div>
             <div class="text-lg font-semibold">Points Category Report</div>
-            <div class="muted text-sm">Average points per day by category over the past week, month, and year.</div>
+            <div class="muted text-sm">Average points per day by category over the past week and month.</div>
           </div>
           <button id="categoryReportBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Generate Report</button>
         </div>
@@ -1417,29 +1417,102 @@
       return averages;
     }
 
+    let categoryReportSort = { key: "category", direction: "asc" };
+
+    function updateCategoryReportSort(key) {
+      if (categoryReportSort.key === key) {
+        categoryReportSort = {
+          key,
+          direction: categoryReportSort.direction === "asc" ? "desc" : "asc"
+        };
+        return;
+      }
+
+      const defaultDirection = key === "category" ? "asc" : "desc";
+      categoryReportSort = { key, direction: defaultDirection };
+    }
+
     function renderCategoryReport(report) {
       const output = document.getElementById("categoryReportOutput");
       if (!output) return;
 
-      const rows = CATEGORY_REPORT_ORDER.map(category => `
+      const collator = new Intl.Collator("en", { sensitivity: "base" });
+      const sortedCategories = [...CATEGORY_REPORT_ORDER].sort((a, b) => {
+        const key = categoryReportSort.key;
+        if (key === "category") {
+          const labelA = CATEGORY_REPORT_LABELS[a] || a;
+          const labelB = CATEGORY_REPORT_LABELS[b] || b;
+          const result = collator.compare(labelA, labelB);
+          return categoryReportSort.direction === "asc" ? result : -result;
+        }
+
+        const rangeIndex = Number(key);
+        const range = report.ranges[rangeIndex];
+        const valueA = range?.averages?.[a] ?? 0;
+        const valueB = range?.averages?.[b] ?? 0;
+        if (valueA === valueB) {
+          const labelA = CATEGORY_REPORT_LABELS[a] || a;
+          const labelB = CATEGORY_REPORT_LABELS[b] || b;
+          const result = collator.compare(labelA, labelB);
+          return categoryReportSort.direction === "asc" ? result : -result;
+        }
+        return categoryReportSort.direction === "asc" ? valueA - valueB : valueB - valueA;
+      });
+
+      const rows = sortedCategories.map(category => `
         <tr class="border-t border-white/5">
           <td class="py-2 pr-4 font-semibold">${CATEGORY_REPORT_LABELS[category] || category}</td>
-          ${report.ranges.map(range => `<td class="py-2 pr-4">${formatNumber(range.averages[category])}</td>`).join("")}
+          ${report.ranges.map(range => {
+            const value = range.averages[category];
+            const percent = range.total ? (value / range.total) * 100 : 0;
+            return `
+              <td class="py-2 pr-4">
+                ${formatNumber(value)}
+                <span class="muted text-xs ml-1">(${formatPercent(percent)})</span>
+              </td>
+            `;
+          }).join("")}
         </tr>
       `).join("");
+
+      const sortIndicator = key => {
+        if (categoryReportSort.key !== key) return "";
+        return categoryReportSort.direction === "asc" ? "▲" : "▼";
+      };
 
       output.innerHTML = `
         <table class="min-w-full text-sm">
           <thead class="text-xs uppercase opacity-70">
             <tr>
-              <th class="text-left py-2 pr-4">Category</th>
-              ${report.ranges.map(range => `<th class="text-left py-2 pr-4">${range.label}</th>`).join("")}
+              <th class="text-left py-2 pr-4">
+                <button class="flex items-center gap-1" type="button" data-category-report-sort="category">
+                  <span>Category</span>
+                  <span class="text-[10px]">${sortIndicator("category")}</span>
+                </button>
+              </th>
+              ${report.ranges.map((range, index) => `
+                <th class="text-left py-2 pr-4">
+                  <button class="flex items-center gap-1" type="button" data-category-report-sort="${index}">
+                    <span>${range.label}</span>
+                    <span class="text-[10px]">${sortIndicator(index)}</span>
+                  </button>
+                </th>
+              `).join("")}
             </tr>
           </thead>
           <tbody>${rows}</tbody>
         </table>
         <p class="text-xs muted mt-2">Generated ${report.generatedAt}.</p>
       `;
+
+      output.querySelectorAll("[data-category-report-sort]").forEach(button => {
+        button.addEventListener("click", () => {
+          const key = button.getAttribute("data-category-report-sort");
+          if (!key) return;
+          updateCategoryReportSort(key === "category" ? "category" : Number(key));
+          renderCategoryReport(report);
+        });
+      });
     }
 
     function generateCategoryReport() {
@@ -1454,8 +1527,7 @@
       const dailyBreakdowns = TaskPointsCore.buildDailyBreakdowns(state);
       const ranges = [
         { label: "Past Week", days: 7 },
-        { label: "Past Month", days: 30 },
-        { label: "Past Year", days: 365 }
+        { label: "Past Month", days: 30 }
       ];
       const report = {
         generatedAt: new Date().toLocaleString(),
@@ -1465,6 +1537,11 @@
           averages: buildCategoryAverages(dailyBreakdowns, range.days)
         }))
       };
+
+      report.ranges = report.ranges.map(range => ({
+        ...range,
+        total: CATEGORY_REPORT_ORDER.reduce((sum, category) => sum + (range.averages[category] || 0), 0)
+      }));
 
       renderCategoryReport(report);
     }
