@@ -5392,6 +5392,41 @@ function renderWorkHistory() {
 
 const entries = getDerived().workEntries;
 
+  const ensureWeekendWorkDefault = () => {
+    const today = new Date();
+    const day = today.getDay();
+    const isWeekend = day === 0 || day === 6;
+    if (!isWeekend) return false;
+
+    const todayKey = dateKey(today);
+    const existing = entries.find(entry => {
+      const d = new Date(entry.completedAtISO);
+      return dateKey(d) === todayKey;
+    });
+    if (existing) return false;
+
+    const when = new Date(today);
+    when.setHours(12, 0, 0, 0);
+    const hours = 0;
+    const score = 0;
+
+    state.completions.unshift({
+      id: crypto.randomUUID(),
+      title: `Work Score (${score}) — Hours ${hours}`,
+      points: workPoints(score, hours),
+      completedAtISO: when.toISOString(),
+      workHours: hours,
+      source: "work"
+    });
+
+    markCompletionsDirty();
+    save();
+    scheduleRender(renderAll);
+    return true;
+  };
+
+  if (ensureWeekendWorkDefault()) return;
+
   const workImpactBelow = document.getElementById('workImpactBelow');
 const workSummaryRow = document.getElementById('workSummaryRow');
 const workSummaryValue = document.getElementById('workSummaryValue');
