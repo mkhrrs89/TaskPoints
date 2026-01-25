@@ -109,6 +109,17 @@
         <p class="muted text-xs">Resetting game stats clears historical wins/losses, past matchups, and baseline Δ history (for NPCs only), but keeps today&apos;s matchups and all tasks, completions, and points.</p>
       </div>
 
+      <div class="glass space-y-3" id="categoryReportSection">
+        <div class="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <div class="text-lg font-semibold">Points Category Report</div>
+            <div class="muted text-sm">Average points per day by category over the past week, month, and year.</div>
+          </div>
+          <button id="categoryReportBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Generate Report</button>
+        </div>
+        <div id="categoryReportOutput" class="overflow-x-auto text-sm"></div>
+      </div>
+
       <div class="glass space-y-3" id="missingScoresSection">
         <div class="flex items-center justify-between gap-3 flex-wrap">
           <div>
@@ -1355,6 +1366,109 @@
       return `${Number(value).toFixed(1)}%`;
     }
 
+    const CATEGORY_REPORT_ORDER = [
+      "inertia",
+      "habits",
+      "vices",
+      "tasks",
+      "mood",
+      "calories",
+      "work",
+      "sleep",
+      "flex"
+    ];
+
+    const CATEGORY_REPORT_LABELS = {
+      inertia: "Inertia",
+      habits: "Habits",
+      vices: "Vices",
+      tasks: "Tasks",
+      mood: "Mood",
+      calories: "Calories",
+      work: "Work",
+      sleep: "Sleep",
+      flex: "Flex"
+    };
+
+    function buildCategoryAverages(dailyBreakdowns, days) {
+      const totals = {};
+      CATEGORY_REPORT_ORDER.forEach(key => {
+        totals[key] = 0;
+      });
+
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      for (let offset = 0; offset < days; offset += 1) {
+        const day = new Date(today);
+        day.setDate(today.getDate() - offset);
+        const key = dateKey(day);
+        const categories = dailyBreakdowns[key]?.categories || {};
+        CATEGORY_REPORT_ORDER.forEach(category => {
+          const value = Number(categories[category]) || 0;
+          totals[category] += value;
+        });
+      }
+
+      const averages = {};
+      CATEGORY_REPORT_ORDER.forEach(category => {
+        averages[category] = totals[category] / days;
+      });
+      return averages;
+    }
+
+    function renderCategoryReport(report) {
+      const output = document.getElementById("categoryReportOutput");
+      if (!output) return;
+
+      const rows = CATEGORY_REPORT_ORDER.map(category => `
+        <tr class="border-t border-white/5">
+          <td class="py-2 pr-4 font-semibold">${CATEGORY_REPORT_LABELS[category] || category}</td>
+          ${report.ranges.map(range => `<td class="py-2 pr-4">${formatNumber(range.averages[category])}</td>`).join("")}
+        </tr>
+      `).join("");
+
+      output.innerHTML = `
+        <table class="min-w-full text-sm">
+          <thead class="text-xs uppercase opacity-70">
+            <tr>
+              <th class="text-left py-2 pr-4">Category</th>
+              ${report.ranges.map(range => `<th class="text-left py-2 pr-4">${range.label}</th>`).join("")}
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+        <p class="text-xs muted mt-2">Generated ${report.generatedAt}.</p>
+      `;
+    }
+
+    function generateCategoryReport() {
+      const output = document.getElementById("categoryReportOutput");
+      if (!output) return;
+      if (!window.TaskPointsCore?.buildDailyBreakdowns) {
+        output.innerHTML = "<p class=\"muted text-xs\">Category reporting is unavailable right now.</p>";
+        return;
+      }
+
+      const state = loadSettingsState();
+      const dailyBreakdowns = TaskPointsCore.buildDailyBreakdowns(state);
+      const ranges = [
+        { label: "Past Week", days: 7 },
+        { label: "Past Month", days: 30 },
+        { label: "Past Year", days: 365 }
+      ];
+      const report = {
+        generatedAt: new Date().toLocaleString(),
+        ranges: ranges.map(range => ({
+          label: range.label,
+          days: range.days,
+          averages: buildCategoryAverages(dailyBreakdowns, range.days)
+        }))
+      };
+
+      renderCategoryReport(report);
+    }
+
     function average(scores) {
       if (!scores.length) return 0;
       return scores.reduce((sum, val) => sum + val, 0) / scores.length;
@@ -2075,6 +2189,7 @@ normalizeSvgTickText(svg);
       document.getElementById('settingsResetGameStatsBtn')?.addEventListener('click', handleSettingsResetGameStats);
       document.getElementById('settingsResetBtn')?.addEventListener('click', handleSettingsReset);
       document.getElementById('settingsExportMatchupsBtn')?.addEventListener('click', exportMatchupsAndHistoryCsv);
+      document.getElementById('categoryReportBtn')?.addEventListener('click', generateCategoryReport);
       const missingScoreDateInput = document.getElementById("missingScoreDate");
       const missingScoreTypeSelect = document.getElementById("missingScoreType");
       const missingScoreSaveBtn = document.getElementById("missingScoreSaveBtn");
