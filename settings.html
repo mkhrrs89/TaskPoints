@@ -467,6 +467,22 @@
       return `${y}-${m}-${dd}`;
     }
 
+    function fromKey(key) {
+      if (!key || typeof key !== "string") return new Date(NaN);
+      const parts = key.split("-");
+      if (parts.length < 3) return new Date(NaN);
+      const [yearStr, monthStr, dayStr] = parts;
+      const year = parseInt(yearStr, 10);
+      const month = parseInt(monthStr, 10);
+      const day = parseInt(dayStr, 10);
+      if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+        return new Date(NaN);
+      }
+      const date = new Date(year, month - 1, day);
+      date.setHours(0, 0, 0, 0);
+      return date;
+    }
+
     function getGameDayKey(now = new Date()) {
       const dt = new Date(now);
       dt.setHours(0, 0, 0, 0);
@@ -1601,6 +1617,48 @@
       return months;
     }
 
+    function computeHabitCompletion(habit) {
+      if (!habit) return 0;
+
+      const doneKeys = Array.isArray(habit.doneKeys) ? habit.doneKeys : [];
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      let start = null;
+      if (habit.createdAtISO) {
+        const created = new Date(habit.createdAtISO);
+        if (!Number.isNaN(created.getTime())) {
+          created.setHours(0, 0, 0, 0);
+          start = created;
+        }
+      }
+
+      if (!start && doneKeys.length) {
+        const dates = doneKeys
+          .map(key => fromKey(key))
+          .filter(date => date && !Number.isNaN(date.getTime()))
+          .sort((a, b) => a - b);
+        if (dates.length) {
+          const earliest = new Date(dates[0].getTime());
+          earliest.setHours(0, 0, 0, 0);
+          start = earliest;
+        }
+      }
+
+      if (!start) return 0;
+      if (start > today) start = today;
+
+      const totalDays = Math.max(1, Math.round((today - start) / 86400000) + 1);
+      const doneCount = doneKeys.filter(key => {
+        const date = fromKey(key);
+        if (!date || Number.isNaN(date.getTime())) return false;
+        date.setHours(0, 0, 0, 0);
+        return date >= start && date <= today;
+      }).length;
+
+      return Math.round((doneCount / totalDays) * 100);
+    }
+
     function renderHabitCalendarSelector() {
       const select = document.getElementById("habitCalendarSelect");
       const output = document.getElementById("habitCalendarOutput");
@@ -1709,11 +1767,13 @@
 
       const habitLabel = `${habit.name || "Untitled"} (${(habit.category || "habit") === "vice" ? "Vice" : "Habit"})`;
       const tagLabel = habit.tag ? `Tag: ${habit.tag}` : "No tag";
+      const completion = computeHabitCompletion(habit);
 
       output.innerHTML = `
         <div class="space-y-2">
           <div class="text-base font-semibold">${escapeHtml(habitLabel)}</div>
           <div class="muted text-xs">${escapeHtml(tagLabel)}</div>
+          <div class="text-xs text-white/70">Total completion: ${completion}%</div>
           <div class="flex flex-wrap gap-3 text-xs">
             <span class="flex items-center gap-2">
               <span class="inline-block h-3 w-3 rounded-sm bg-emerald-400/80 border border-white/10" ${completedLegendStyle}></span>
