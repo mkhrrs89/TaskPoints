@@ -120,6 +120,23 @@
         <div id="categoryReportOutput" class="overflow-x-auto text-sm"></div>
       </div>
 
+      <div class="glass space-y-3" id="habitCalendarReportSection">
+        <div class="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <div class="text-lg font-semibold">Habit/Vice Calendar Report</div>
+            <div class="muted text-sm">Pick a habit or vice to see completed days across every month since it began.</div>
+          </div>
+          <button id="habitCalendarReportBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Generate Calendar</button>
+        </div>
+        <div class="flex flex-wrap items-end gap-3">
+          <label class="text-sm">
+            <span class="block muted text-xs">Habit or vice</span>
+            <select id="habitCalendarSelect" class="input w-64"></select>
+          </label>
+        </div>
+        <div id="habitCalendarOutput" class="space-y-4"></div>
+      </div>
+
       <div class="glass space-y-3" id="missingScoresSection">
         <div class="flex items-center justify-between gap-3 flex-wrap">
           <div>
@@ -1546,6 +1563,191 @@
       renderCategoryReport(report);
     }
 
+    function getHabitCalendarStartDate(habit) {
+      if (!habit) return null;
+      if (habit.createdAtISO) {
+        const created = new Date(habit.createdAtISO);
+        if (!Number.isNaN(created.getTime())) {
+          created.setHours(0, 0, 0, 0);
+          return created;
+        }
+      }
+
+      const doneKeys = Array.isArray(habit.doneKeys) ? habit.doneKeys : [];
+      if (doneKeys.length) {
+        const dates = doneKeys
+          .map(key => new Date(`${key}T00:00:00`))
+          .filter(date => !Number.isNaN(date.getTime()))
+          .sort((a, b) => a - b);
+        if (dates.length) {
+          const earliest = new Date(dates[0].getTime());
+          earliest.setHours(0, 0, 0, 0);
+          return earliest;
+        }
+      }
+
+      return null;
+    }
+
+    function getHabitCalendarMonths(startDate, endDate) {
+      const months = [];
+      if (!startDate || !endDate) return months;
+      const cursor = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+      const last = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
+      while (cursor <= last) {
+        months.push(new Date(cursor.getFullYear(), cursor.getMonth(), 1));
+        cursor.setMonth(cursor.getMonth() + 1);
+      }
+      return months;
+    }
+
+    function renderHabitCalendarSelector() {
+      const select = document.getElementById("habitCalendarSelect");
+      const output = document.getElementById("habitCalendarOutput");
+      if (!select) return;
+
+      const state = loadSettingsState();
+      const habits = Array.isArray(state.habits) ? state.habits.slice() : [];
+      const options = habits
+        .filter(h => h && h.id)
+        .sort((a, b) => {
+          const aName = (a.name || "").toLowerCase();
+          const bName = (b.name || "").toLowerCase();
+          if (aName === bName) return (a.createdAtISO || "").localeCompare(b.createdAtISO || "");
+          return aName.localeCompare(bName);
+        });
+
+      const previousValue = select.value;
+      if (!options.length) {
+        select.innerHTML = `<option value="">No habits or vices yet</option>`;
+        select.disabled = true;
+        if (output) {
+          output.innerHTML = `<p class="muted text-xs">Create a habit or vice first to generate a calendar.</p>`;
+        }
+        return;
+      }
+
+      select.disabled = false;
+      select.innerHTML = options.map(h => {
+        const category = (h.category || "habit") === "vice" ? "Vice" : "Habit";
+        return `<option value="${escapeHtml(h.id)}">${escapeHtml(h.name || "Untitled")} (${category})</option>`;
+      }).join("");
+
+      if (previousValue && options.some(h => h.id === previousValue)) {
+        select.value = previousValue;
+      }
+    }
+
+    function renderHabitCalendarReport(habit, state) {
+      const output = document.getElementById("habitCalendarOutput");
+      if (!output) return;
+
+      if (!habit) {
+        output.innerHTML = `<p class="muted text-xs">Select a habit or vice to generate a calendar.</p>`;
+        return;
+      }
+
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      let startDate = getHabitCalendarStartDate(habit);
+      if (!startDate) {
+        startDate = new Date(today.getTime());
+      }
+      if (startDate > today) startDate = new Date(today.getTime());
+
+      const doneKeys = new Set(Array.isArray(habit.doneKeys) ? habit.doneKeys : []);
+      const months = getHabitCalendarMonths(startDate, today);
+      const tagColor = normalizeHexColor(state?.habitTagColors?.[habit.tag]) || "";
+      const completedStyle = tagColor ? `style="background-color: ${tagColor}; color: #0b0b0b;"` : "";
+      const completedLegendStyle = tagColor ? `style="background-color: ${tagColor};"` : "";
+
+      const monthBlocks = months.map(monthDate => {
+        const year = monthDate.getFullYear();
+        const monthIndex = monthDate.getMonth();
+        const firstDay = new Date(year, monthIndex, 1);
+        const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+        const offset = firstDay.getDay();
+        const cells = [];
+
+        for (let i = 0; i < offset; i += 1) {
+          cells.push('<div></div>');
+        }
+
+        for (let day = 1; day <= daysInMonth; day += 1) {
+          const date = new Date(year, monthIndex, day);
+          date.setHours(0, 0, 0, 0);
+          const key = dateKey(date);
+          const isWithinRange = date >= startDate && date <= today;
+          const isDone = doneKeys.has(key);
+          let classes = "text-xs text-center rounded-lg border border-white/10 py-1";
+          let style = "";
+
+          if (!isWithinRange) {
+            classes += " bg-white/5 text-white/30";
+          } else if (isDone) {
+            classes += tagColor ? "" : " bg-emerald-400/80 text-emerald-950";
+            style = completedStyle;
+          } else {
+            classes += " bg-white/10 text-white/60";
+          }
+
+          cells.push(`<div class="${classes}" ${style}>${day}</div>`);
+        }
+
+        const label = monthDate.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+        return `
+          <div class="space-y-2">
+            <div class="text-sm font-semibold">${escapeHtml(label)}</div>
+            <div class="grid grid-cols-7 gap-1 text-[10px] uppercase tracking-wide text-white/60">
+              ${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(day => `<div class="text-center">${day}</div>`).join("")}
+            </div>
+            <div class="grid grid-cols-7 gap-1">${cells.join("")}</div>
+          </div>
+        `;
+      }).join("");
+
+      const habitLabel = `${habit.name || "Untitled"} (${(habit.category || "habit") === "vice" ? "Vice" : "Habit"})`;
+      const tagLabel = habit.tag ? `Tag: ${habit.tag}` : "No tag";
+
+      output.innerHTML = `
+        <div class="space-y-2">
+          <div class="text-base font-semibold">${escapeHtml(habitLabel)}</div>
+          <div class="muted text-xs">${escapeHtml(tagLabel)}</div>
+          <div class="flex flex-wrap gap-3 text-xs">
+            <span class="flex items-center gap-2">
+              <span class="inline-block h-3 w-3 rounded-sm bg-emerald-400/80 border border-white/10" ${completedLegendStyle}></span>
+              Completed
+            </span>
+            <span class="flex items-center gap-2">
+              <span class="inline-block h-3 w-3 rounded-sm bg-white/10 border border-white/10"></span>
+              Not completed
+            </span>
+            <span class="flex items-center gap-2">
+              <span class="inline-block h-3 w-3 rounded-sm bg-white/5 border border-white/10"></span>
+              Outside range
+            </span>
+          </div>
+        </div>
+        <div class="grid gap-4 md:grid-cols-2">${monthBlocks}</div>
+      `;
+    }
+
+    function generateHabitCalendarReport() {
+      const output = document.getElementById("habitCalendarOutput");
+      const select = document.getElementById("habitCalendarSelect");
+      if (!output || !select) return;
+      const state = loadSettingsState();
+      const habitId = select.value;
+      const habit = Array.isArray(state.habits) ? state.habits.find(h => h && h.id === habitId) : null;
+      if (!habit) {
+        output.innerHTML = `<p class="muted text-xs">Select a habit or vice to generate a calendar.</p>`;
+        return;
+      }
+
+      renderHabitCalendarReport(habit, state);
+    }
+
     function average(scores) {
       if (!scores.length) return 0;
       return scores.reduce((sum, val) => sum + val, 0) / scores.length;
@@ -2267,6 +2469,7 @@ normalizeSvgTickText(svg);
       document.getElementById('settingsResetBtn')?.addEventListener('click', handleSettingsReset);
       document.getElementById('settingsExportMatchupsBtn')?.addEventListener('click', exportMatchupsAndHistoryCsv);
       document.getElementById('categoryReportBtn')?.addEventListener('click', generateCategoryReport);
+      document.getElementById('habitCalendarReportBtn')?.addEventListener('click', generateHabitCalendarReport);
       const missingScoreDateInput = document.getElementById("missingScoreDate");
       const missingScoreTypeSelect = document.getElementById("missingScoreType");
       const missingScoreSaveBtn = document.getElementById("missingScoreSaveBtn");
@@ -2284,6 +2487,7 @@ normalizeSvgTickText(svg);
       missingScoreSaveBtn?.addEventListener("click", applyMissingScoreEntry);
       scheduleRender(renderScoringSettings);
       scheduleRender(renderHabitTagColors);
+      scheduleRender(renderHabitCalendarSelector);
 
       const scoringInputIds = [
         'sleepBaseDivisor',
