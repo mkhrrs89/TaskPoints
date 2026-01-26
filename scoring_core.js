@@ -755,14 +755,13 @@
     // Ensure updatedAtISO exists for versioning
     merged.updatedAtISO = newer.updatedAtISO || older.updatedAtISO || merged.updatedAtISO || merged.createdAtISO || null;
 
-    // De-dupe day key arrays (don’t force union so “untoggles” can win)
+    // De-dupe day key arrays (don’t force union so untoggles can win)
     merged.doneKeys = mergeStringArrayUnique(merged.doneKeys, []);
     merged.failedKeys = mergeStringArrayUnique(merged.failedKeys, []);
 
     return merged;
   }
 
-  
   function mergeById(existingArr, incomingArr, mergeFn) {
     const existing = Array.isArray(existingArr) ? existingArr : [];
     const incoming = Array.isArray(incomingArr) ? incomingArr : [];
