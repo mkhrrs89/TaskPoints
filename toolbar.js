@@ -217,6 +217,7 @@ function renderBottomToolbar() {
       </div>
       <div class="mobile-bottom-nav-expanded">
         <a href="projects.html" class="btn btn-teal btn-toolbar mobile-bottom-nav-expanded-btn">Projects</a>
+        <a href="notes.html" class="btn btn-teal btn-toolbar mobile-bottom-nav-expanded-btn">Notes</a>
       </div>
     </nav>
   `;
@@ -703,6 +704,7 @@ const normalizeStateFallback = (s) => {
     workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
     youImageId: typeof src.youImageId === 'string' ? src.youImageId : '',
     projects: Array.isArray(src.projects) ? src.projects : [],
+    notes: typeof src.notes === 'string' ? src.notes : '',
     habitTagColors: normalizeHabitTagColorsFallback(src.habitTagColors)
   };
 };
@@ -1369,6 +1371,7 @@ async function applyImportedStateFallback(root) {
     workHistory: Array.isArray(root?.workHistory) ? root.workHistory : [],
     youImageId: typeof root?.youImageId === 'string' ? root.youImageId : '',
     projects: Array.isArray(root?.projects) ? root.projects : loadProjectsFromStorageFallback(),
+    notes: typeof root?.notes === 'string' ? root.notes : '',
     habitTagColors: root?.habitTagColors ?? {},
     scoringSettings: root?.scoringSettings ?? {}
   });

@@ -205,6 +205,7 @@ function normalizeState(s) {
     matchups:    Array.isArray(s.matchups)    ? s.matchups    : [],
     schedule:    Array.isArray(s.schedule)    ? s.schedule    : [],
     opponentDripSchedules: Array.isArray(s.opponentDripSchedules) ? s.opponentDripSchedules : [],
+    notes: typeof s.notes === "string" ? s.notes : "",
     habitTagColors: normalizeHabitTagColors(s.habitTagColors)
   };
 }

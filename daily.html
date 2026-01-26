@@ -244,6 +244,7 @@ function normalizeState(s) {
     workHistory: Array.isArray(s.workHistory) ? s.workHistory : [],
     youImageId:  typeof s.youImageId === "string" ? s.youImageId : "",
     youName: typeof s.youName === "string" ? s.youName : "",
+    notes: typeof s.notes === "string" ? s.notes : "",
     habitTagColors: normalizeHabitTagColors(s.habitTagColors),
     scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
       ? TaskPointsCore.normalizeScoringSettings(s.scoringSettings || {})
