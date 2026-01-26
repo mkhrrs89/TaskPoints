@@ -1364,6 +1364,24 @@ body {
    Keeping these later helps prevent accidental cascade changes.
    ------------------------------------------------------------------------ */
 
+/* Habit/Vice calendar report grid */
+.habit-calendar-grid{
+  display:grid;
+  grid-template-columns:repeat(7, minmax(0, 1fr));
+  gap:0.25rem;
+}
+
+.habit-calendar-day{
+  min-height:2.25rem;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+
+.habit-calendar-grid--labels > div{
+  padding:0.15rem 0;
+}
+
 
 /* =========================
    SECTION 10 — RESPONSIVE OVERRIDES (MOBILE: <= 640px)
@@ -3215,6 +3233,5 @@ body {
     align-items: stretch;
   }
 }
-
 
 

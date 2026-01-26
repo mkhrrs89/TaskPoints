@@ -1680,7 +1680,7 @@
           const key = dateKey(date);
           const isWithinRange = date >= startDate && date <= today;
           const isDone = doneKeys.has(key);
-          let classes = "text-xs text-center rounded-lg border border-white/10 py-1";
+          let classes = "habit-calendar-day text-xs text-center rounded-lg border border-white/10 py-1";
           let style = "";
 
           if (!isWithinRange) {
@@ -1699,10 +1699,10 @@
         return `
           <div class="space-y-2">
             <div class="text-sm font-semibold">${escapeHtml(label)}</div>
-            <div class="grid grid-cols-7 gap-1 text-[10px] uppercase tracking-wide text-white/60">
+            <div class="habit-calendar-grid habit-calendar-grid--labels text-[10px] uppercase tracking-wide text-white/60">
               ${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(day => `<div class="text-center">${day}</div>`).join("")}
             </div>
-            <div class="grid grid-cols-7 gap-1">${cells.join("")}</div>
+            <div class="habit-calendar-grid habit-calendar-grid--days">${cells.join("")}</div>
           </div>
         `;
       }).join("");
