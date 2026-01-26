@@ -651,6 +651,157 @@
     });
   }
 
+  function isoToMs(iso) {
+    if (!iso) return 0;
+    const ms = Date.parse(iso);
+    return Number.isFinite(ms) ? ms : 0;
+  }
+
+  function mergeStringArrayUnique(a, b) {
+    const out = [];
+    const seen = new Set();
+    const pushAll = (arr) => {
+      if (!Array.isArray(arr)) return;
+      for (const v of arr) {
+        const s = String(v || '').trim();
+        if (!s) continue;
+        if (seen.has(s)) continue;
+        seen.add(s);
+        out.push(s);
+      }
+    };
+    pushAll(a);
+    pushAll(b);
+    return out;
+  }
+
+  function taskVersionMs(t) {
+    if (!isPlainObject(t)) return 0;
+    return Math.max(
+      isoToMs(t.updatedAtISO),
+      isoToMs(t.createdAtISO),
+      isoToMs(t.completedAtISO),
+      isoToMs(t.deletedAtISO)
+    );
+  }
+
+  function mergeTaskRecords(a, b) {
+    const left = isPlainObject(a) ? a : {};
+    const right = isPlainObject(b) ? b : {};
+    const leftV = taskVersionMs(left);
+    const rightV = taskVersionMs(right);
+
+    const newer = rightV >= leftV ? right : left;
+    const older = rightV >= leftV ? left : right;
+
+    // Older first, then newer overwrites
+    let merged = deepMerge(older, newer);
+
+    // Union array fields that should never shrink during merges
+    merged.tags = mergeStringArrayUnique(older.tags, newer.tags);
+    merged.skipDates = mergeStringArrayUnique(older.skipDates, newer.skipDates);
+
+    // Preserve earliest createdAtISO if both exist
+    const createdA = left.createdAtISO;
+    const createdB = right.createdAtISO;
+    if (createdA && createdB) {
+      merged.createdAtISO = isoToMs(createdA) <= isoToMs(createdB) ? createdA : createdB;
+    } else {
+      merged.createdAtISO = createdA || createdB || merged.createdAtISO;
+    }
+
+    // Keep latest deletedAtISO if either side deleted it
+    const delA = left.deletedAtISO;
+    const delB = right.deletedAtISO;
+    if (delA || delB) {
+      merged.deletedAtISO = isoToMs(delA) >= isoToMs(delB) ? delA : delB;
+    }
+
+    // Ensure updatedAtISO exists for versioning
+    merged.updatedAtISO = newer.updatedAtISO || older.updatedAtISO || merged.updatedAtISO || merged.createdAtISO || null;
+
+    return merged;
+  }
+
+  function mergeById(existingArr, incomingArr, mergeFn) {
+    const existing = Array.isArray(existingArr) ? existingArr : [];
+    const incoming = Array.isArray(incomingArr) ? incomingArr : [];
+
+    const map = new Map();
+    const order = [];
+    const orderSeen = new Set();
+
+    const upsert = (item, preferOrder) => {
+      if (!isPlainObject(item)) return;
+      const id = item.id;
+      if (!id) return;
+
+      const prev = map.get(id);
+      map.set(id, prev ? mergeFn(prev, item) : item);
+
+      if (preferOrder && !orderSeen.has(id)) {
+        orderSeen.add(id);
+        order.push(id);
+      }
+    };
+
+    // Keep incoming order first (writer snapshot order)
+    for (const item of incoming) upsert(item, true);
+
+    // Add/merge any existing not mentioned in incoming
+    for (const item of existing) {
+      if (!isPlainObject(item) || !item.id) continue;
+      const id = item.id;
+
+      if (!map.has(id)) {
+        map.set(id, item);
+        if (!orderSeen.has(id)) {
+          orderSeen.add(id);
+          order.push(id);
+        }
+      } else {
+        // merge without changing order
+        map.set(id, mergeFn(map.get(id), item));
+      }
+    }
+
+    return order.map((id) => map.get(id)).filter(Boolean);
+  }
+
+  function completionKey(c) {
+    if (!isPlainObject(c)) return null;
+    if (c.id) return `id:${c.id}`;
+    const taskId = c.taskId || '';
+    const at = c.completedAtISO || '';
+    const src = c.source || '';
+    const dk = c.dayKey || c.dateKey || '';
+    return `k:${taskId}|${at}|${src}|${dk}`;
+  }
+
+  function mergeCompletions(existingArr, incomingArr) {
+    const existing = Array.isArray(existingArr) ? existingArr : [];
+    const incoming = Array.isArray(incomingArr) ? incomingArr : [];
+
+    const seen = new Set();
+    const out = [];
+
+    const pushAll = (arr) => {
+      for (const c of arr) {
+        const key = completionKey(c);
+        if (!key) continue;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(c);
+      }
+    };
+
+    // incoming first so newest snapshot stays “newest-first”
+    pushAll(incoming);
+    pushAll(existing);
+
+    return out;
+  }
+
 function fastEnsureStateShape(s) {
   const src = (s && typeof s === 'object') ? s : {};
   return {
@@ -749,6 +900,9 @@ function fastEnsureStateShape(s) {
         mergedSnapshot.scoringSettings = existingSettings;
       }
     }
+
+    mergedSnapshot.tasks = mergeById(existing?.tasks, (nextState || {})?.tasks, mergeTaskRecords);
+    mergedSnapshot.completions = mergeCompletions(existing?.completions, (nextState || {})?.completions);
 
 // 🔥 New: skip heavy normalize on “known-normalized” incremental saves
 if (options.assumeNormalized) {
