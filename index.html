@@ -3933,6 +3933,7 @@ function addHabit(){
     pointsPerDay: pts,
     doneKeys: [],
     createdAtISO: new Date().toISOString(),
+    updatedAtISO: new Date().toISOString(),
     category: 'habit',
     tag,
     order: maxOrder + 1
@@ -3969,6 +3970,7 @@ function addVice(){
     pointsPerDay: pts,
     doneKeys: [],
     createdAtISO: new Date().toISOString(),
+    updatedAtISO: new Date().toISOString(),
     category: 'vice',
     tag,
     order: maxOrder + 1
@@ -4284,7 +4286,9 @@ if (mIdx !== -1) {
     const failedIdx = h.failedKeys.indexOf(dayKey);
     if (failedIdx !== -1) h.failedKeys.splice(failedIdx, 1);
   }
-
+  
+  h.updatedAtISO = new Date().toISOString();
+  
   if (h.doneKeys.includes(dayKey)) return 'on';
   if (h.failedKeys.includes(dayKey)) return 'failed';
   return 'off';
