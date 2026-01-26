@@ -436,6 +436,7 @@
       youImageId:  typeof s?.youImageId === "string" ? s.youImageId : "",
       youName: typeof s?.youName === "string" ? s.youName : "",
       projects:    Array.isArray(s?.projects)    ? s.projects    : [],
+      notes: typeof s?.notes === "string" ? s.notes : "",
       habitTagColors: normalizeHabitTagColors(s?.habitTagColors),
       scoringSettings: normalizeScoringSettings(s?.scoringSettings)
     };
@@ -665,6 +666,7 @@ function fastEnsureStateShape(s) {
     opponentDripSchedules: Array.isArray(src.opponentDripSchedules) ? src.opponentDripSchedules : [],
     workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
     projects: Array.isArray(src.projects) ? src.projects : [],
+    notes: typeof src.notes === 'string' ? src.notes : '',
     youImageId: typeof src.youImageId === 'string' ? src.youImageId : '',
     youName: typeof src.youName === 'string' ? src.youName : '',
     habitTagColors: isPlainObject(src.habitTagColors) ? src.habitTagColors : {},

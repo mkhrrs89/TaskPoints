@@ -2286,6 +2286,7 @@ function normalizeState(s) {
     youImageId:  typeof s.youImageId === "string" ? s.youImageId : "",
     youName: typeof s.youName === "string" ? s.youName : "",
     projects:    Array.isArray(s.projects)    ? s.projects    : loadProjectsFromStorage(),
+    notes: typeof s.notes === "string" ? s.notes : "",
     habitTagColors: normalizeHabitTagColors(s.habitTagColors),
     scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
       ? TaskPointsCore.normalizeScoringSettings(s.scoringSettings || {})
@@ -6198,6 +6199,7 @@ async function applyImportedState(root){
     opponentDripSchedules: Array.isArray(root.opponentDripSchedules) ? root.opponentDripSchedules : [],
     youImageId:  typeof root.youImageId === "string" ? root.youImageId : "",
     youName:     typeof root.youName === "string" ? root.youName : "",
+    notes: typeof root.notes === "string" ? root.notes : "",
 
     // ✅ bring over Settings → Habit tag/group colors + scoring settings
     habitTagColors: root.habitTagColors,

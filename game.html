@@ -589,6 +589,7 @@ function normalizeState(s) {
     opponentDripSchedules: Array.isArray(s.opponentDripSchedules) ? s.opponentDripSchedules : [],
     youImageId:  typeof s.youImageId === "string" ? s.youImageId : "",
     youName: typeof s.youName === "string" ? s.youName : "",
+    notes: typeof s.notes === "string" ? s.notes : "",
     habitTagColors: normalizeHabitTagColors(s.habitTagColors)
   };
 }
