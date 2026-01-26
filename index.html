@@ -3517,7 +3517,7 @@ function renderHabitRow(h, days, wrap, options = {}) {
         ${escapeHtml(h.name)}
       </div>
       <div class="tag bg-zinc-200/60 dark:bg-zinc-700/60">
-        ${h.pointsPerDay||0} pts
+        ${h.pointsPerDay||0}p
       </div>
       ${showTag && h.tag ? `<div class="tag tag-clear">${escapeHtml(h.tag)}</div>` : ''}
     ${streak > 0 ? `
@@ -3776,7 +3776,7 @@ const nameHtml = `
       ${escapeHtml(h.name)}
     </div>
     <div class="tag bg-zinc-200/60 dark:bg-zinc-700/60">
-      ${h.pointsPerDay||0} pts
+      ${h.pointsPerDay||0}p
     </div>
     ${h.tag ? `<div class="tag tag-clear">${escapeHtml(h.tag)}</div>` : ''}
   ${streak > 0 ? `
@@ -6371,6 +6371,23 @@ defer(() => {
 
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#039;'}[m])); }
 
+function capitalizeWords(value) {
+  return String(value).replace(/\b([a-z])/g, (match, letter) => letter.toUpperCase());
+}
+
+function applyCapitalizeWordsInput(input) {
+  if (!input) return;
+  input.addEventListener('input', () => {
+    const { selectionStart, selectionEnd, value } = input;
+    const nextValue = capitalizeWords(value);
+    if (nextValue === value) return;
+    input.value = nextValue;
+    if (selectionStart !== null && selectionEnd !== null) {
+      input.setSelectionRange(selectionStart, selectionEnd);
+    }
+  });
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   $('addBtn')?.addEventListener('click', addTask);
   $('openAddTaskBtn')?.addEventListener('click', openAddTaskModal);
@@ -6415,6 +6432,10 @@ document.addEventListener('DOMContentLoaded', () => {
   $('saveCaloriesBtn')?.addEventListener('click', saveCalories);
   $('saveWorkScoreBtn')?.addEventListener('click', saveWorkScore);
   $('saveMoodScoreBtn')?.addEventListener('click', saveMoodScore);
+
+  ['titleInput', 'habitName', 'viceName'].forEach((id) => {
+    applyCapitalizeWordsInput($(id));
+  });
 
   const rep = $("repeatInput");
   rep?.addEventListener("change", () => syncCustomRepeatUI(rep));
