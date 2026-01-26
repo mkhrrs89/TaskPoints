@@ -254,7 +254,7 @@ function renderArchive(){
   const emptyEl = $('archiveEmpty');
   listEl.innerHTML = '';
 
-  const hidden = state.tasks.filter(t => t.hidden && !t.completedAtISO);
+  const hidden = state.tasks.filter(t => t.hidden && !t.completedAtISO && !t.deletedAtISO);
 
   if (!hidden.length){
     emptyEl.classList.remove('hidden');
@@ -323,19 +323,22 @@ function renderArchive(){
 }
 
 function wontDo(id){
-  const st = load();
+  let st = load();
   const t = st.tasks.find(x => x.id === id);
   if (!t) return;
   const mode = (t.recurrence && t.recurrence.mode) || 'none';
   if (mode === 'none'){
     if (!confirm("Won’t do this task? It will be removed.")) return;
-    st.tasks = st.tasks.filter(x => x.id !== id);
+    const now = new Date().toISOString();
+    t.deletedAtISO = now;
+    t.updatedAtISO = now;
   } else {
     t.skipDates = Array.isArray(t.skipDates) ? t.skipDates : [];
     const tk = todayKey();
     if (!t.skipDates.includes(tk)) t.skipDates.push(tk);
     const nextKey = computeNextDueDate(t);
     if (nextKey) t.dueDateISO = nextKey;
+    t.updatedAtISO = new Date().toISOString();
   }
   st = saveMerged(st);
   state = st;
@@ -343,12 +346,11 @@ function wontDo(id){
 }
 
 function completeTask(id){
-  const st = load();
+  let st = load();
   const t = st.tasks.find(x => x.id === id);
   if (!t) return;
 
   const now = new Date().toISOString();
-  t.completedAtISO = now;
 
   st.completions = Array.isArray(st.completions) ? st.completions : [];
   st.completions.unshift({
@@ -360,17 +362,31 @@ function completeTask(id){
     source: "task"
   });
 
+  const rec = t.recurrence || {};
+  const mode = rec.mode || 'none';
+
+  if (mode === 'none') {
+    t.completedAtISO = now;
+  } else {
+    const nextKey = computeNextDueDate(t);
+    if (nextKey) t.dueDateISO = nextKey;
+    t.completedAtISO = null;
+  }
+
+  t.updatedAtISO = now;
+
   st = saveMerged(st);
   state = st;
   renderArchive();
 }
 
 function unarchiveTask(id){
-  const st = load();
+  let st = load();
   const t = st.tasks.find(x => x.id === id);
   if (!t) return;
 
   t.hidden = false;
+  t.updatedAtISO = new Date().toISOString();
   st = saveMerged(st);
   state = st;
   renderArchive();

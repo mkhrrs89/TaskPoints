@@ -913,7 +913,7 @@ function renderWeekTasks(baseDate){
     const col=document.createElement('div'); col.className='slot';
     col.dataset.dayKey = d.key;
     col.innerHTML=`<div class="text-xs text-zinc-400 mb-2 font-semibold">${d.label}</div>`;
-    const list = state.tasks.filter(t=>!t.completedAtISO && t.dueDateISO===d.key);
+    const list = state.tasks.filter(t=>!t.completedAtISO && !t.deletedAtISO && t.dueDateISO===d.key);
     list.forEach(t=>{
       const overdue = t.dueDateISO && t.dueDateISO < todayK;
       const postponeDays = Number(t.postponedDays) || 0;
@@ -993,11 +993,14 @@ function wontDo(id, dayKey){
   const mode=(t.recurrence && t.recurrence.mode)||'none';
   if(mode==='none'){
     if(!confirm('Won’t do this task? It will be removed.')) return;
-    st.tasks = st.tasks.filter(x=>x.id!==id);
+    const nowISO = new Date().toISOString();
+    t.deletedAtISO = nowISO;
+    t.updatedAtISO = nowISO;
   }else{
     t.skipDates = Array.isArray(t.skipDates)?t.skipDates:[];
     if(!t.skipDates.includes(dayKey)) t.skipDates.push(dayKey);
     if(t.dueDateISO===dayKey) t.dueDateISO = todayKey();
+    t.updatedAtISO = new Date().toISOString();
   }
   st = saveMerged(st);
 state = st;
@@ -1027,7 +1030,9 @@ function deleteTask(id){
   const t = st.tasks.find(x => x.id === id);
   if(!t) return;
   if(!confirm('Delete this task?')) return;
-  st.tasks = st.tasks.filter(x => x.id !== id);
+  const nowISO = new Date().toISOString();
+  t.deletedAtISO = nowISO;
+  t.updatedAtISO = nowISO;
   st = saveMerged(st);
   state = st;
   renderAll(currentBaseDate);
@@ -1053,6 +1058,7 @@ function completeTask(id){
     t.completedAtISO = null;
   }
 
+  t.updatedAtISO = nowISO;
   st.completions = Array.isArray(st.completions) ? st.completions : [];
   st.completions.unshift({
     id: (window.crypto && typeof crypto.randomUUID === "function")

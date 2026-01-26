@@ -4530,7 +4530,7 @@ function toggleFlexRetired(id){
 /* ---------- TASKS ---------- */
 function renderTasks(){
   const container=$('taskList'), empty=$('emptyList'); container.innerHTML='';
-  const active=state.tasks.filter(t=>!t.completedAtISO && !t.hidden);
+  const active=state.tasks.filter(t=>!t.completedAtISO && !t.hidden && !t.deletedAtISO);
   if(!active.length){ empty.classList.remove('hidden'); } else empty.classList.add('hidden');
 
   const sort=$('sortSelect').value;
@@ -5858,6 +5858,7 @@ function addTask(){
     hidden: false,
     completedAtISO: null,
     createdAtISO: new Date().toISOString(),
+    updatedAtISO: new Date().toISOString(),
     postponedDays: 0
   };
 
@@ -5919,7 +5920,9 @@ function wontDoMain(id){
   const mode = (t.recurrence && t.recurrence.mode) || 'none';
   if(mode==='none'){
     if(!confirm('Won’t do this task? It will be removed.')) return;
-    state.tasks = state.tasks.filter(x=>x.id!==id);
+    const now = new Date().toISOString();
+    t.deletedAtISO = now;
+    t.updatedAtISO = now;
   }else{
     const k = t.dueDateISO || todayKey();
     t.skipDates = Array.isArray(t.skipDates)?t.skipDates:[];
@@ -5969,6 +5972,7 @@ function completeTask(id){
       t.completedAtISO = null; // keep it in the active list
     }
 
+    t.updatedAtISO = now;
     removeTaskFromTodayView(id, completedDayKey);
     save();
     scheduleRender(renderAll);
@@ -6036,6 +6040,7 @@ function hideTask(id){
   const t = state.tasks.find(x => x.id === id);
   if (!t) return;
   t.hidden = true;
+  t.updatedAtISO = new Date().toISOString();
   save();
   renderTasks();
 }
@@ -6043,7 +6048,12 @@ function hideTask(id){
 function deleteTask(id){
   if(!confirm('Delete this task?')) return;
   // Remove the task itself
-  state.tasks = state.tasks.filter(t => t.id !== id);
+  const t = state.tasks.find(x => x.id === id);
+  if (t) {
+    const now = new Date().toISOString();
+    t.deletedAtISO = now;
+    t.updatedAtISO = now;
+  }
   // Do NOT touch state.completions here – keep history/log and points
   if (editingTaskId === id) editingTaskId = null;
   save();

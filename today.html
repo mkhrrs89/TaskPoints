@@ -383,7 +383,7 @@ function saveTodayStore(store = todayStore) {
       function ensureAutoTasks(dayKey) {
         const tasks = Array.isArray(appState.tasks) ? appState.tasks : [];
         const dueToday = tasks
-          .filter(t => t && !t.completedAtISO && !t.hidden && (String(t.dueDateISO || '').slice(0, 10) === dayKey))
+          .filter(t => t && !t.completedAtISO && !t.hidden && !t.deletedAtISO && (String(t.dueDateISO || '').slice(0, 10) === dayKey))
           .map(t => t.id)
           .filter(Boolean);
 
@@ -391,7 +391,7 @@ function saveTodayStore(store = todayStore) {
         dueToday.forEach(id => set.add(id));
 
         // drop ids that no longer exist or aren't due today (unless completed today)
-        const existingIds = new Set(tasks.map(t => t && t.id).filter(Boolean));
+        const existingIds = new Set(tasks.filter(t => t && !t.deletedAtISO).map(t => t.id).filter(Boolean));
         todayStore.taskIds = Array.from(set).filter(id => {
           if (!existingIds.has(id)) return false;
           return dueToday.includes(id) || hasTaskCompletionToday(id, dayKey);
@@ -489,6 +489,7 @@ function saveTodayStore(store = todayStore) {
           t.completedAtISO = null;
         }
 
+        t.updatedAtISO = now;
         tasks[idx] = t;
         appState = { ...appState, tasks };
         saveApp(appState);
