@@ -723,6 +723,46 @@
     return merged;
   }
 
+  function habitVersionMs(h) {
+    if (!isPlainObject(h)) return 0;
+    return Math.max(
+      isoToMs(h.updatedAtISO),
+      isoToMs(h.createdAtISO)
+    );
+  }
+
+  function mergeHabitRecords(a, b) {
+    const left = isPlainObject(a) ? a : {};
+    const right = isPlainObject(b) ? b : {};
+    const leftV = habitVersionMs(left);
+    const rightV = habitVersionMs(right);
+
+    const newer = rightV >= leftV ? right : left;
+    const older = rightV >= leftV ? left : right;
+
+    // Older first, then newer overwrites
+    let merged = deepMerge(older, newer);
+
+    // Preserve earliest createdAtISO if both exist
+    const createdA = left.createdAtISO;
+    const createdB = right.createdAtISO;
+    if (createdA && createdB) {
+      merged.createdAtISO = isoToMs(createdA) <= isoToMs(createdB) ? createdA : createdB;
+    } else {
+      merged.createdAtISO = createdA || createdB || merged.createdAtISO;
+    }
+
+    // Ensure updatedAtISO exists for versioning
+    merged.updatedAtISO = newer.updatedAtISO || older.updatedAtISO || merged.updatedAtISO || merged.createdAtISO || null;
+
+    // De-dupe day key arrays (don’t force union so “untoggles” can win)
+    merged.doneKeys = mergeStringArrayUnique(merged.doneKeys, []);
+    merged.failedKeys = mergeStringArrayUnique(merged.failedKeys, []);
+
+    return merged;
+  }
+
+  
   function mergeById(existingArr, incomingArr, mergeFn) {
     const existing = Array.isArray(existingArr) ? existingArr : [];
     const incoming = Array.isArray(incomingArr) ? incomingArr : [];
@@ -903,6 +943,8 @@ function fastEnsureStateShape(s) {
 
     mergedSnapshot.tasks = mergeById(existing?.tasks, (nextState || {})?.tasks, mergeTaskRecords);
     mergedSnapshot.completions = mergeCompletions(existing?.completions, (nextState || {})?.completions);
+    mergedSnapshot.habits = mergeById(existing?.habits, (nextState || {})?.habits, mergeHabitRecords);
+
 
 // 🔥 New: skip heavy normalize on “known-normalized” incremental saves
 if (options.assumeNormalized) {
