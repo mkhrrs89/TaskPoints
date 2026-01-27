@@ -1601,10 +1601,8 @@ body {
   /* smaller buttons inside each task */
   #taskList .btn-task,
   #archiveList .btn-task{
-    /* iOS/Android: these were getting too tiny to tap reliably
-       (especially the short “+1d” button). */
-    padding:6px 10px;
-    font-size:11px;
+    padding:4px 8px;
+    font-size:10px;
     min-height: 32px;
     touch-action: manipulation;
   }
