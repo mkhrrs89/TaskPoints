@@ -1283,6 +1283,10 @@ body {
   color: #f97316 !important;
 }
 
+.leaderboard-year-2025 {
+  color: #9a9a9a;
+}
+
 
 /* DESKTOP DAY BUBBLES */
 .habitDay{
@@ -3235,4 +3239,3 @@ body {
     align-items: stretch;
   }
 }
-
