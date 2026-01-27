@@ -92,6 +92,7 @@
 
   <script>
     const STORAGE_KEY = "taskpoints_v1";
+    const NOTES_STORAGE_KEY = "taskpoints_notes_v1";
     const notesInput = document.getElementById("notesInput");
     const notesStatus = document.getElementById("notesStatus");
     let saveTimer = null;
@@ -117,6 +118,11 @@
     function saveNotes(immediate = false) {
       if (!notesInput) return;
       const value = notesInput.value || "";
+      try {
+        localStorage.setItem(NOTES_STORAGE_KEY, value);
+      } catch (err) {
+        console.error("Failed to cache notes", err);
+      }
       if (window.TaskPointsCore?.saveAppState) {
         TaskPointsCore.saveAppState({ notes: value }, { storageKey: STORAGE_KEY, immediateWrite: immediate });
       } else {
@@ -133,6 +139,13 @@
 
     function scheduleSave() {
       setStatus("Saving…");
+      if (notesInput) {
+        try {
+          localStorage.setItem(NOTES_STORAGE_KEY, notesInput.value || "");
+        } catch (err) {
+          console.error("Failed to cache notes", err);
+        }
+      }
       if (saveTimer) window.clearTimeout(saveTimer);
       saveTimer = window.setTimeout(() => saveNotes(), 400);
     }
@@ -140,7 +153,25 @@
     function loadNotes() {
       const state = getStoredState();
       if (notesInput) {
-        notesInput.value = typeof state.notes === "string" ? state.notes : "";
+        const storedNotes = typeof state.notes === "string" ? state.notes : "";
+        if (storedNotes) {
+          notesInput.value = storedNotes;
+          return;
+        }
+        try {
+          const cached = localStorage.getItem(NOTES_STORAGE_KEY);
+          if (typeof cached === "string") {
+            notesInput.value = cached;
+            if (cached.trim()) {
+              saveNotes(true);
+            }
+          } else {
+            notesInput.value = "";
+          }
+        } catch (err) {
+          console.error("Failed to load cached notes", err);
+          notesInput.value = "";
+        }
       }
     }
 
