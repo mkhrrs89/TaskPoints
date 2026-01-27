@@ -4019,6 +4019,7 @@ function saveHabitEdit(id,row){
   h.pointsPerDay = Number(ptsInput.value)||0;
   if (tagInput) h.tag = tagInput.value.trim();
   h.category = catInput ? (catInput.value || 'habit') : (h.category || 'habit');
+  h.updatedAtISO = new Date().toISOString();
 
   // update existing log entries
   if (h.pointsPerDay !== oldPoints) {
@@ -4048,6 +4049,7 @@ function retireHabit(id){
   const label = (h.category || 'habit') === 'vice' ? 'vice' : 'habit';
   if (!confirm(`Retire this ${label} (keeps history + score)?`)) return;
   h.retired = true;
+  h.updatedAtISO = new Date().toISOString();
   if (editingHabitId === id) editingHabitId = null;
   save();
   renderHabits();
@@ -4089,6 +4091,8 @@ function moveHabit(id, delta){
   a.order = b.order;
   b.order = tmp;
 
+  h.updatedAtISO = new Date().toISOString();
+  if (b) b.updatedAtISO = new Date().toISOString();
   save();
   renderHabits();
   renderVices();
