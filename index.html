@@ -2868,7 +2868,7 @@ function renderStats(){
 
       // ----- LEADERBOARDS -----
       const __tpBoardsDone = tpPerfMark('renderStats: leaderboards total');
-      function fillBoard(ulId, entries, labelFn){
+      function fillBoard(ulId, entries, labelFn, labelClassFn){
         const ul = $(ulId);
         if (!ul) return;
 
@@ -2880,6 +2880,7 @@ function renderStats(){
 
         entries.slice(0, 10).forEach((row, i) => {
           const li = document.createElement('li');
+          const labelClass = labelClassFn ? labelClassFn(row) : '';
 
           // Store the key on the <li> so we can highlight the current one later
           li.dataset.key = row.key;
@@ -2890,7 +2891,10 @@ function renderStats(){
           });
 
           li.innerHTML = `
-            <span>${i+1}. ${labelFn(row)}</span>
+            <span class="leaderboard-label">
+              <span>${i+1}.</span>
+              <span class="leaderboard-date ${labelClass}">${labelFn(row)}</span>
+            </span>
             <span class="font-semibold">${formattedTotal} pts</span>
           `;
           ul.appendChild(li);
@@ -2935,10 +2939,23 @@ function renderStats(){
         .map(([k, v]) => ({ key: k, total: v }))
         .sort((a, b) => b.total - a.total);
 
+      const isYear2025 = (value) => {
+        if (!value) return false;
+        const yearStr = String(value).slice(0, 4);
+        return Number(yearStr) === 2025;
+      };
+
+      const dailyDateClass = (row) => (isYear2025(row.key) ? 'leaderboard-year-2025' : '');
+      const weeklyDateClass = (row) =>
+        (row.start && row.end && (row.start.getFullYear() === 2025 || row.end.getFullYear() === 2025))
+          ? 'leaderboard-year-2025'
+          : '';
+      const monthlyDateClass = (row) => (isYear2025(row.key) ? 'leaderboard-year-2025' : '');
+
       // Labels with NO "(Today / This Week / This Month)" text
-      fillBoard('dailyBoard', bestDays, r => niceDate(fromKey(r.key)));
-      fillBoard('weeklyBoard', bestWeeks, r => `${niceDate(r.start)} – ${niceDate(r.end)}`);
-      fillBoard('monthlyBoard', bestMonths, r => formatMonthKey(r.key));
+      fillBoard('dailyBoard', bestDays, r => niceDate(fromKey(r.key)), dailyDateClass);
+      fillBoard('weeklyBoard', bestWeeks, r => `${niceDate(r.start)} – ${niceDate(r.end)}`, weeklyDateClass);
+      fillBoard('monthlyBoard', bestMonths, r => formatMonthKey(r.key), monthlyDateClass);
 
       // Highlight current day/week/month in orange if they appear
       [
