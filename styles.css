@@ -161,6 +161,11 @@ body {
   border-radius: 12px;
   padding: 8px 12px;
   white-space: nowrap; /* keeps button text on one line */
+   
+  /* Mobile tap reliability (especially iOS) */
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
 }
 /* --- Base button (END) -------------------------------------------------- */
 
@@ -1598,7 +1603,16 @@ body {
   #archiveList .btn-task{
     padding:4px 8px;
     font-size:10px;
+    min-height: 32px;
+    touch-action: manipulation;
   }
+
+  /* Give the tiny “+1d” bump button a minimum hitbox width */
+  #taskList .btn-task[data-task-action="bump"],
+  #archiveList .btn-task[data-task-action="bump"]{
+    min-width: 44px;
+  }
+
 
 }  /* ← IMPORTANT: this closes the mobile styles */
 
