@@ -6198,9 +6198,7 @@ async function importBackupZip(file) {
 }
 
 function exportData(){
-  const scheduleChanged = ensureUpcomingSchedule();
-  if (scheduleChanged) save();
-  const snapshot = stripLegacyImageFields({ ...state, projects: loadProjectsFromStorage() });
+  const snapshot = getTaskPointsExportSnapshot();
   const blob=new Blob([JSON.stringify(snapshot,null,2)],{type:'application/json'});
   const now = new Date();
 
@@ -6221,6 +6219,13 @@ function exportData(){
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+// Shared snapshot helper for brief export (uses same state as JSON export).
+function getTaskPointsExportSnapshot() {
+  const scheduleChanged = ensureUpcomingSchedule();
+  if (scheduleChanged) save();
+  return stripLegacyImageFields({ ...state, projects: loadProjectsFromStorage() });
 }
 
 async function applyImportedState(root){
