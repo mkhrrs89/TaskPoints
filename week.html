@@ -162,7 +162,7 @@
       .habitRow{grid-template-columns:minmax(140px,1fr) repeat(7,minmax(32px,1fr));gap:.5rem}
       .habitScroll .habitRow{min-width:520px}
     }
-    .habitDay{width:40px;height:38px;border-radius:10px;border:1px solid var(--border);display:grid;place-items:center;font-size:12px;cursor:pointer}
+    .habitDay{width:40px;height:38px;border-radius:10px;border:1px solid var(--border);display:grid;place-items:center;font-size:12px;cursor:pointer;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none;touch-action:manipulation}
     .habitDay.on{background:#3D1C0B;border-color:#fb923c}
 
     .week-tasks-header{
@@ -769,6 +769,7 @@ function renderHabitSection(section, days, baseDate){
 
   labelsWrap.innerHTML='';
   list.innerHTML='';
+  list.dataset.baseDateISO = baseDate.toISOString();
 
   if(!section.items.length){ empty.style.display='block'; return; }
   empty.style.display='none';
@@ -811,12 +812,43 @@ function renderHabitSection(section, days, baseDate){
     list.appendChild(row);
   });
 
-  list.querySelectorAll('.habitDay').forEach(el=>{
-    el.onclick=()=>toggleHabitDay(el.getAttribute('data-habit'), el.getAttribute('data-day'), baseDate);
-  });
-  list.querySelectorAll('[data-habit-toggle]').forEach(btn=>{
-    btn.onclick = () => toggleHabitRetired(btn.getAttribute('data-habit-toggle'), baseDate);
-  });
+  if(!list.dataset.habitHandlersBound){
+    list.dataset.habitHandlersBound = 'true';
+    list._habitPointerState = null;
+    list.addEventListener('pointerdown', event => {
+      const cell = event.target.closest('.habitDay');
+      if(!cell || !list.contains(cell)) return;
+      list._habitPointerState = {
+        startX: event.clientX,
+        startY: event.clientY,
+        cell
+      };
+      if (event.pointerId !== undefined && cell.setPointerCapture) {
+        cell.setPointerCapture(event.pointerId);
+      }
+    });
+    list.addEventListener('pointerup', event => {
+      const state = list._habitPointerState;
+      if(!state) return;
+      list._habitPointerState = null;
+      const deltaX = Math.abs(event.clientX - state.startX);
+      const deltaY = Math.abs(event.clientY - state.startY);
+      if(deltaX > 8 || deltaY > 8) return;
+      event.preventDefault();
+      const habitId = state.cell.getAttribute('data-habit');
+      const dayKey = state.cell.getAttribute('data-day');
+      const baseDateISO = list.dataset.baseDateISO;
+      const storedBaseDate = baseDateISO ? new Date(baseDateISO) : baseDate;
+      toggleHabitDay(habitId, dayKey, storedBaseDate);
+    });
+    list.addEventListener('click', event => {
+      const btn = event.target.closest('[data-habit-toggle]');
+      if(!btn || !list.contains(btn)) return;
+      const baseDateISO = list.dataset.baseDateISO;
+      const storedBaseDate = baseDateISO ? new Date(baseDateISO) : baseDate;
+      toggleHabitRetired(btn.getAttribute('data-habit-toggle'), storedBaseDate);
+    });
+  }
 
   syncScrollContainers(labelsWrap, list);
 }
