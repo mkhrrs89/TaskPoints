@@ -3320,6 +3320,7 @@ function bumpOneDay(task){
   const oldDue = task.dueDateISO;
   task.dueDateISO = dateKey(bumped);
   trackDueDatePush(task, oldDue, task.dueDateISO);
+  task.updatedAtISO = new Date().toISOString();
 }
 
 function labelForDay(d,baseToday){
