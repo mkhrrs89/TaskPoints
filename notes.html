@@ -125,6 +125,7 @@
       }
       if (window.TaskPointsCore?.saveAppState) {
         TaskPointsCore.saveAppState({ notes: value }, { storageKey: STORAGE_KEY, immediateWrite: immediate });
+        window.TaskPointsCore?.flushPendingSaves?.();
       } else {
         try {
           const existing = getStoredState();
@@ -147,7 +148,7 @@
         }
       }
       if (saveTimer) window.clearTimeout(saveTimer);
-      saveTimer = window.setTimeout(() => saveNotes(), 400);
+      saveTimer = window.setTimeout(() => saveNotes(true), 400);
     }
 
     function loadNotes() {
