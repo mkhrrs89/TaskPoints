@@ -1603,6 +1603,19 @@
         }
       }
 
+      const failedKeys = Array.isArray(habit.failedKeys) ? habit.failedKeys : [];
+      if (failedKeys.length) {
+        const dates = failedKeys
+          .map(key => new Date(`${key}T00:00:00`))
+          .filter(date => !Number.isNaN(date.getTime()))
+          .sort((a, b) => a - b);
+        if (dates.length) {
+          const earliest = new Date(dates[0].getTime());
+          earliest.setHours(0, 0, 0, 0);
+          return earliest;
+        }
+      }
+
       return null;
     }
 
@@ -1715,7 +1728,9 @@
       }
       if (startDate > today) startDate = new Date(today.getTime());
 
+      const isVice = (habit.category || "habit") === "vice";
       const doneKeys = new Set(Array.isArray(habit.doneKeys) ? habit.doneKeys : []);
+      const failedKeys = new Set(Array.isArray(habit.failedKeys) ? habit.failedKeys : []);
       const months = getHabitCalendarMonths(startDate, today);
       const tagColor = normalizeHexColor(state?.habitTagColors?.[habit.tag]) || "";
       const completedStyle = tagColor ? `style="background-color: ${tagColor}; color: #0b0b0b;"` : "";
@@ -1739,11 +1754,14 @@
           const key = dateKey(date);
           const isWithinRange = date >= startDate && date <= today;
           const isDone = doneKeys.has(key);
+          const isFailed = isVice && failedKeys.has(key);
           let classes = "habit-calendar-day text-xs text-center rounded-lg border border-white/10 py-1";
           let style = "";
 
           if (!isWithinRange) {
             classes += " bg-white/5 text-white/30";
+          } else if (isFailed) {
+            classes += " bg-rose-400/80 text-rose-950";
           } else if (isDone) {
             classes += tagColor ? "" : " bg-emerald-400/80 text-emerald-950";
             style = completedStyle;
@@ -1780,6 +1798,12 @@
               <span class="inline-block h-3 w-3 rounded-sm bg-emerald-400/80 border border-white/10" ${completedLegendStyle}></span>
               Completed
             </span>
+            ${isVice ? `
+            <span class="flex items-center gap-2">
+              <span class="inline-block h-3 w-3 rounded-sm bg-rose-400/80 border border-white/10"></span>
+              Failed
+            </span>
+            ` : ""}
             <span class="flex items-center gap-2">
               <span class="inline-block h-3 w-3 rounded-sm bg-white/10 border border-white/10"></span>
               Not completed
