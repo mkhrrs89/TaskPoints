@@ -1393,7 +1393,6 @@ function exportDailyBriefMarkdown() {
 function ensureBriefExportButtons() {
   const exportButtons = Array.from(document.querySelectorAll('[data-export-button]'));
   exportButtons.forEach((btn) => {
-    if (btn.closest('.md\\:hidden')) return;
     const parent = btn.parentElement;
     if (!parent) return;
     if (parent.querySelector('[data-export-brief]')) return;
@@ -1404,7 +1403,8 @@ function ensureBriefExportButtons() {
     briefButton.className = btn.className;
     briefButton.classList.add('ml-1');
     briefButton.setAttribute('data-export-brief', '');
-    briefButton.textContent = 'Export Daily Brief (MD)';
+    const isMobileToolbar = Boolean(btn.closest('.md\\:hidden'));
+    briefButton.textContent = isMobileToolbar ? 'EDB' : 'Export Daily Brief (MD)';
     btn.insertAdjacentElement('afterend', briefButton);
   });
 }
