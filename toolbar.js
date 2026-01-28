@@ -1376,8 +1376,8 @@ function buildDailyBriefMarkdown(snapshot) {
 const TP_GITHUB_TOKEN_KEY = 'tp_github_token';
 // TODO: Fill in your GitHub repo details before publishing.
 const TP_GITHUB = {
-  owner: 'YOUR_OWNER',
-  repo: 'YOUR_REPO',
+  owner: 'mkhrrs89',
+  repo: 'TaskPoints',
   branch: 'main'
 };
 
