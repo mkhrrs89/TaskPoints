@@ -1105,6 +1105,310 @@ function exportDataFallback() {
   URL.revokeObjectURL(url);
 }
 
+// Daily Brief export (shared)
+function getExportSnapshotForBrief() {
+  window.TaskPointsCore?.flushPendingSaves?.();
+  if (typeof window.getTaskPointsExportSnapshot === 'function') {
+    return window.getTaskPointsExportSnapshot();
+  }
+  const snapshot = stripLegacyImageFields(normalizeStateGlobal({ ...loadRawStateFallback(), projects: loadProjectsFromStorageFallback() }));
+  const scheduleChanged = ensureUpcomingScheduleFallback(snapshot);
+  if (scheduleChanged) {
+    saveStateSnapshotFallback(snapshot);
+  }
+  return snapshot;
+}
+
+function dateKeyFromDate(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function addDaysToDate(date, days) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function parseTodayViewTaskIds(todayKey) {
+  const storageKey = window.TODAY_STORE_KEY || 'taskpoints_today_view_v1';
+  try {
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!parsed || parsed.dayKey !== todayKey) return [];
+
+    const order = Array.isArray(parsed.order) ? parsed.order : [];
+    const taskIds = Array.isArray(parsed.taskIds) ? parsed.taskIds : [];
+    const orderedTaskIds = order
+      .filter((key) => typeof key === 'string' && key.startsWith('task:'))
+      .map((key) => key.replace('task:', ''));
+
+    const combined = orderedTaskIds.length ? orderedTaskIds : taskIds;
+    return combined.filter((id) => typeof id === 'string' && id);
+  } catch (e) {
+    console.warn('Failed to parse today view storage for brief export', e);
+    return [];
+  }
+}
+
+function formatBriefTaskLine(task) {
+  if (!task || typeof task !== 'object') return 'Untitled task';
+  const title = typeof task.title === 'string' && task.title.trim() ? task.title.trim() : 'Untitled task';
+  const due = task.dueDateISO ? ` (due ${task.dueDateISO})` : '';
+  const importance = (task.importance === 'High' || task.importance === 'Critical') ? ` [${task.importance}]` : '';
+  return `${title}${importance}${due}`;
+}
+
+function getCompletionPointsForBrief(entry) {
+  if (window.TaskPointsCore?.pointsForCompletion) {
+    return TaskPointsCore.pointsForCompletion(entry);
+  }
+  return Number(entry?.points) || 0;
+}
+
+function buildDailyBriefMarkdown(snapshot) {
+  const today = new Date();
+  const todayKey = dateKeyFromDate(today);
+  const tasks = Array.isArray(snapshot?.tasks) ? snapshot.tasks : [];
+  const activeTasks = tasks.filter((task) => task && !task.hidden && !task.deletedAtISO && !task.completedAtISO);
+
+  const hasDueDates = activeTasks.some((task) => typeof task?.dueDateISO === 'string' && task.dueDateISO);
+
+  let topPriorityTasks = [];
+  const highPriorityTasks = activeTasks.filter((task) => task && (task.importance === 'High' || task.importance === 'Critical'));
+
+  if (highPriorityTasks.length) {
+    const importanceOrder = { Critical: 0, High: 1 };
+    topPriorityTasks = highPriorityTasks
+      .slice()
+      .sort((a, b) => {
+        const impA = importanceOrder[a.importance] ?? 2;
+        const impB = importanceOrder[b.importance] ?? 2;
+        if (impA !== impB) return impA - impB;
+        return String(a.dueDateISO || '').localeCompare(String(b.dueDateISO || ''));
+      });
+  } else if (hasDueDates) {
+    topPriorityTasks = activeTasks
+      .filter((task) => task?.dueDateISO)
+      .slice()
+      .sort((a, b) => String(a.dueDateISO).localeCompare(String(b.dueDateISO)));
+  } else {
+    const todayTaskIds = parseTodayViewTaskIds(todayKey);
+    const todayTaskMap = new Map(activeTasks.map((task) => [task.id, task]));
+    topPriorityTasks = todayTaskIds.map((id) => todayTaskMap.get(id)).filter(Boolean);
+    if (!topPriorityTasks.length) {
+      topPriorityTasks = activeTasks.slice();
+    }
+  }
+
+  topPriorityTasks = topPriorityTasks.slice(0, 5);
+
+  let dueSoonTasks = [];
+  let overdueTasks = [];
+  if (hasDueDates) {
+    const soonEndKey = dateKeyFromDate(addDaysToDate(today, 3));
+    dueSoonTasks = activeTasks
+      .filter((task) => task?.dueDateISO && task.dueDateISO >= todayKey && task.dueDateISO <= soonEndKey)
+      .slice()
+      .sort((a, b) => String(a.dueDateISO).localeCompare(String(b.dueDateISO)))
+      .slice(0, 10);
+
+    overdueTasks = activeTasks
+      .filter((task) => task?.dueDateISO && task.dueDateISO < todayKey)
+      .slice()
+      .sort((a, b) => String(a.dueDateISO).localeCompare(String(b.dueDateISO)))
+      .slice(0, 10);
+  }
+
+  const lines = [
+    `# TaskPoints Daily Brief — ${todayKey}`,
+    '',
+    '## Top priorities (max 5)'
+  ];
+
+  if (topPriorityTasks.length) {
+    topPriorityTasks.forEach((task) => {
+      lines.push(`- ${formatBriefTaskLine(task)}`);
+    });
+  } else {
+    lines.push('- None');
+  }
+
+  if (hasDueDates) {
+    lines.push('');
+    lines.push('## Due soon (next 3 days) (max 10)');
+    if (dueSoonTasks.length) {
+      dueSoonTasks.forEach((task) => lines.push(`- ${formatBriefTaskLine(task)}`));
+    } else {
+      lines.push('- None');
+    }
+
+    lines.push('');
+    lines.push('## Overdue (max 10)');
+    if (overdueTasks.length) {
+      overdueTasks.forEach((task) => lines.push(`- ${formatBriefTaskLine(task)}`));
+    } else {
+      lines.push('- None');
+    }
+  }
+
+  const habits = Array.isArray(snapshot?.habits) ? snapshot.habits : [];
+  const trackableHabits = habits.filter((habit) => habit && (habit.category || 'habit') !== 'vice' && !habit.retired);
+  const hasHabitTracking = trackableHabits.some((habit) => Array.isArray(habit.doneKeys) || Array.isArray(habit.failedKeys));
+
+  if (trackableHabits.length && hasHabitTracking) {
+    const completedToday = trackableHabits.filter((habit) => Array.isArray(habit.doneKeys) && habit.doneKeys.includes(todayKey)).length;
+    const missedToday = trackableHabits.filter((habit) => Array.isArray(habit.failedKeys) && habit.failedKeys.includes(todayKey)).length;
+
+    lines.push('');
+    lines.push('## Habits snapshot');
+    lines.push(`- Completed today: ${completedToday}`);
+    lines.push(`- Missed today: ${missedToday}`);
+
+    if (typeof window.computeHabitStreak === 'function') {
+      const streaks = trackableHabits
+        .map((habit) => ({
+          habit,
+          streak: window.computeHabitStreak(habit)
+        }))
+        .filter((entry) => Number(entry.streak) > 0)
+        .sort((a, b) => b.streak - a.streak)
+        .slice(0, 3);
+
+      if (streaks.length) {
+        const streakText = streaks
+          .map((entry) => `${entry.habit.name || 'Habit'} (${entry.streak}d)`)
+          .join(', ');
+        lines.push(`- Streak highlights: ${streakText}`);
+      }
+    }
+  }
+
+  const completions = Array.isArray(snapshot?.completions) ? snapshot.completions : null;
+  if (completions) {
+    const todayCompletions = completions.filter((entry) => {
+      if (!entry?.completedAtISO) return false;
+      const entryDate = new Date(entry.completedAtISO);
+      return dateKeyFromDate(entryDate) === todayKey;
+    });
+
+    const totals = {
+      sleep: 0,
+      tasks: 0,
+      habits: 0,
+      vices: 0,
+      flex: 0,
+      calories: 0
+    };
+
+    todayCompletions.forEach((entry) => {
+      const pts = getCompletionPointsForBrief(entry);
+      if (!pts) return;
+      const title = typeof entry.title === 'string' ? entry.title : '';
+      if (title.startsWith('Sleep Score (')) {
+        totals.sleep += pts;
+        return;
+      }
+      if (title.startsWith('Calories')) {
+        totals.calories += pts;
+        return;
+      }
+      if (entry.source === 'habit') {
+        totals.habits += pts;
+        return;
+      }
+      if (entry.source === 'vice') {
+        totals.vices += pts;
+        return;
+      }
+      if (entry.source === 'flex') {
+        totals.flex += pts;
+        return;
+      }
+      totals.tasks += pts;
+    });
+
+    const totalScore = Object.values(totals).reduce((sum, val) => sum + val, 0);
+
+    lines.push('');
+    lines.push('## Score snapshot (if scoring exists)');
+    lines.push(`- Total score today: ${totalScore}`);
+
+    const breakdownEntries = [
+      { key: 'sleep', label: 'Sleep' },
+      { key: 'tasks', label: 'Tasks' },
+      { key: 'habits', label: 'Habits' },
+      { key: 'vices', label: 'Vices' },
+      { key: 'flex', label: 'Flux' },
+      { key: 'calories', label: 'Calories' }
+    ].filter(({ key }) => totals[key] > 0);
+
+    const nonTaskCategories = breakdownEntries.filter((entry) => entry.key !== 'tasks');
+    if (nonTaskCategories.length) {
+      const breakdownText = breakdownEntries.map((entry) => `${entry.label} ${totals[entry.key]}`).join(', ');
+      lines.push(`- Breakdown: ${breakdownText}`);
+    }
+  }
+
+  const notes = [];
+  if (overdueTasks.length) {
+    notes.push('Pick one overdue task to clear first.');
+  }
+  if (hasDueDates && !overdueTasks.length && dueSoonTasks.length) {
+    notes.push('Block time for tasks due in the next 3 days.');
+  }
+  if (highPriorityTasks.length) {
+    notes.push('Start with a high-priority task to build momentum.');
+  }
+
+  if (notes.length) {
+    lines.push('');
+    lines.push('## Notes (optional)');
+    notes.slice(0, 3).forEach((note) => lines.push(`- ${note}`));
+  }
+
+  return lines.join('\n');
+}
+
+function exportDailyBriefMarkdown() {
+  const snapshot = getExportSnapshotForBrief();
+  const markdown = buildDailyBriefMarkdown(snapshot);
+  const todayKey = dateKeyFromDate(new Date());
+  const filename = `taskpoints-brief-${todayKey}.md`;
+  const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function ensureBriefExportButtons() {
+  const exportButtons = Array.from(document.querySelectorAll('[data-export-button]'));
+  exportButtons.forEach((btn) => {
+    const parent = btn.parentElement;
+    if (!parent) return;
+    if (parent.querySelector('[data-export-brief]')) return;
+
+    // Insert the Daily Brief export right next to existing export controls.
+    const briefButton = document.createElement('button');
+    briefButton.type = 'button';
+    briefButton.className = btn.className;
+    briefButton.classList.add('ml-1');
+    briefButton.setAttribute('data-export-brief', '');
+    const isMobileToolbar = Boolean(btn.closest('.md\\:hidden'));
+    briefButton.textContent = isMobileToolbar ? 'EDB' : 'Export Daily Brief (MD)';
+    btn.insertAdjacentElement('afterend', briefButton);
+  });
+}
+
 const CRC32_TABLE_FALLBACK = (() => {
   const table = new Uint32Array(256);
   for (let i = 0; i < 256; i += 1) {
@@ -1527,6 +1831,11 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   document.querySelectorAll('[data-export-images]').forEach((btn) => {
     btn.addEventListener('click', exportOGDataOnly);
+  });
+  // Daily Brief export integration (shared export controls).
+  ensureBriefExportButtons();
+  document.querySelectorAll('[data-export-brief]').forEach((btn) => {
+    btn.addEventListener('click', exportDailyBriefMarkdown);
   });
 
   document.querySelectorAll('[data-import-input]').forEach((input) => {
