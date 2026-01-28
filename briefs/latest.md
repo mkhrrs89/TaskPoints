@@ -13,21 +13,14 @@
 - Check Mail [High] (due 2026-01-28)
 - Weigh self [High] (due 2026-01-28)
 - Water Bonsai [High] (due 2026-01-28)
+- Run Audit (due 2026-01-28)
 - Update NetWrth (due 2026-01-28)
 - Check This (due 2026-01-28)
 - Backup OneDrive & Other Files (due 2026-01-28)
 - Ask About Eye Creams (due 2026-01-28)
-- Talk About Physical Activity [High] (due 2026-01-28)
 
 ## Overdue (max 10)
-- Run Audit (due 2026-01-22)
-- Haircut (due 2026-01-22)
-- Patch Up Hole (due 2026-01-22)
-- Boxing Game on Opp. Wall (due 2026-01-22)
-- Upload Session Notes (due 2026-01-23)
-- Take Piss Test for Dr. Van (due 2026-01-23)
-- Move Ornament Boxes to Garage (due 2026-01-24)
-- Clear Out Basement Gym (due 2026-01-24)
+- None
 
 ## Habits snapshot
 - Completed today: 4
@@ -39,5 +32,5 @@
 - Breakdown: Sleep 10.3, Tasks 1.3, Habits 4
 
 ## Notes (optional)
-- Pick one overdue task to clear first.
+- Block time for tasks due in the next 3 days.
 - Start with a high-priority task to build momentum.
