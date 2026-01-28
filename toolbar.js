@@ -1373,6 +1373,175 @@ function buildDailyBriefMarkdown(snapshot) {
   return lines.join('\n');
 }
 
+const TP_GITHUB_TOKEN_KEY = 'tp_github_token';
+// TODO: Fill in your GitHub repo details before publishing.
+const TP_GITHUB = {
+  owner: 'YOUR_OWNER',
+  repo: 'YOUR_REPO',
+  branch: 'main'
+};
+
+function resolveGitHubConfig() {
+  const config = window.TaskPointsConfig?.github
+    || window.TP_GITHUB
+    || TP_GITHUB;
+  return {
+    owner: config.owner,
+    repo: config.repo,
+    branch: config.branch || 'main'
+  };
+}
+
+function updatePublishStatus(statusEl, message, isError = false) {
+  if (!statusEl) return;
+  statusEl.textContent = message;
+  statusEl.classList.toggle('text-red-600', isError);
+}
+
+function base64EncodeUtf8(text) {
+  const encoder = new TextEncoder();
+  const bytes = encoder.encode(text);
+  let binary = '';
+  bytes.forEach((b) => {
+    binary += String.fromCharCode(b);
+  });
+  return btoa(binary);
+}
+
+function getGitHubToken({ promptIfMissing = true } = {}) {
+  const existing = localStorage.getItem(TP_GITHUB_TOKEN_KEY);
+  if (existing) return existing;
+  if (!promptIfMissing) return '';
+  const input = prompt('Paste a GitHub fine-grained token with Contents: read/write for this repo');
+  if (!input) return '';
+  const token = input.trim();
+  if (!token) return '';
+  localStorage.setItem(TP_GITHUB_TOKEN_KEY, token);
+  return token;
+}
+
+function clearGitHubToken() {
+  localStorage.removeItem(TP_GITHUB_TOKEN_KEY);
+}
+
+async function fetchGitHubFileSha({ owner, repo, branch, path, token }) {
+  const url = `https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${encodeURIComponent(branch)}`;
+  const res = await fetch(url, {
+    headers: {
+      Accept: 'application/vnd.github+json',
+      Authorization: `Bearer ${token}`
+    }
+  });
+
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    const error = new Error('GitHub lookup failed');
+    error.status = res.status;
+    throw error;
+  }
+  const data = await res.json();
+  return data.sha || null;
+}
+
+async function putGitHubFile({ owner, repo, branch, path, token, message, content, sha }) {
+  const url = `https://api.github.com/repos/${owner}/${repo}/contents/${path}`;
+  const body = {
+    message,
+    content,
+    branch
+  };
+  if (sha) body.sha = sha;
+
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: {
+      Accept: 'application/vnd.github+json',
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify(body)
+  });
+
+  if (!res.ok) {
+    const error = new Error('GitHub publish failed');
+    error.status = res.status;
+    throw error;
+  }
+  return res.json();
+}
+
+async function publishDailyBriefToGitHub({ alsoArchive = true, statusEl } = {}) {
+  const config = resolveGitHubConfig();
+  if (!config.owner || !config.repo) {
+    updatePublishStatus(statusEl, 'Error: Configure TP_GITHUB owner/repo.', true);
+    return;
+  }
+
+  const token = getGitHubToken();
+  if (!token) {
+    updatePublishStatus(statusEl, 'Publish canceled (no token).', true);
+    return;
+  }
+
+  const todayKey = dateKeyFromDate(new Date());
+  const snapshot = getExportSnapshotForBrief();
+  const markdown = buildDailyBriefMarkdown(snapshot);
+  const encoded = base64EncodeUtf8(markdown);
+  const latestPath = 'briefs/latest.md';
+  const archivePath = `briefs/${todayKey}.md`;
+  const message = `TaskPoints: publish daily brief ${todayKey}`;
+
+  updatePublishStatus(statusEl, 'Publishing…');
+
+  try {
+    const latestSha = await fetchGitHubFileSha({ ...config, path: latestPath, token });
+    await putGitHubFile({
+      ...config,
+      path: latestPath,
+      token,
+      message,
+      content: encoded,
+      sha: latestSha
+    });
+    updatePublishStatus(statusEl, 'Published latest.md');
+
+    if (alsoArchive) {
+      let archiveSha = null;
+      try {
+        archiveSha = await fetchGitHubFileSha({ ...config, path: archivePath, token });
+      } catch (err) {
+        if (err?.status !== 404) throw err;
+      }
+
+      if (archiveSha) {
+        updatePublishStatus(statusEl, 'Archive already exists, skipped.');
+      } else {
+        await putGitHubFile({
+          ...config,
+          path: archivePath,
+          token,
+          message,
+          content: encoded
+        });
+        updatePublishStatus(statusEl, 'Published latest.md + archive');
+      }
+    }
+  } catch (err) {
+    if (err?.status === 401 || err?.status === 403) {
+      clearGitHubToken();
+      updatePublishStatus(statusEl, 'Error: Token rejected. Re-enter token.', true);
+      const retry = confirm('GitHub token invalid or missing permissions. Re-enter token?');
+      if (retry) {
+        const refreshed = getGitHubToken({ promptIfMissing: true });
+        if (refreshed) {
+          await publishDailyBriefToGitHub({ alsoArchive, statusEl });
+        }
+      }
+      return;
+    }
+    updatePublishStatus(statusEl, 'Error: Failed to publish.', true);
+  }
+}
+
 function exportDailyBriefMarkdown() {
   const snapshot = getExportSnapshotForBrief();
   const markdown = buildDailyBriefMarkdown(snapshot);
@@ -1406,6 +1575,27 @@ function ensureBriefExportButtons() {
     const isMobileToolbar = Boolean(btn.closest('.md\\:hidden'));
     briefButton.textContent = isMobileToolbar ? 'EDB' : 'Export Daily Brief (MD)';
     btn.insertAdjacentElement('afterend', briefButton);
+
+    const publishButton = document.createElement('button');
+    publishButton.type = 'button';
+    publishButton.className = btn.className;
+    publishButton.classList.add('ml-1');
+    publishButton.setAttribute('data-publish-brief', '');
+    publishButton.textContent = isMobileToolbar ? 'Publish' : 'Publish Brief to GitHub';
+    briefButton.insertAdjacentElement('afterend', publishButton);
+
+    const clearTokenButton = document.createElement('button');
+    clearTokenButton.type = 'button';
+    clearTokenButton.className = btn.className;
+    clearTokenButton.classList.add('ml-1');
+    clearTokenButton.setAttribute('data-clear-github-token', '');
+    clearTokenButton.textContent = isMobileToolbar ? 'Clear Token' : 'Clear GitHub Token';
+    publishButton.insertAdjacentElement('afterend', clearTokenButton);
+
+    const statusLabel = document.createElement('span');
+    statusLabel.className = 'ml-2 text-xs text-slate-500';
+    statusLabel.setAttribute('data-publish-status', '');
+    clearTokenButton.insertAdjacentElement('afterend', statusLabel);
   });
 }
 
@@ -1836,6 +2026,19 @@ document.addEventListener('DOMContentLoaded', () => {
   ensureBriefExportButtons();
   document.querySelectorAll('[data-export-brief]').forEach((btn) => {
     btn.addEventListener('click', exportDailyBriefMarkdown);
+  });
+  document.querySelectorAll('[data-publish-brief]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const statusEl = btn.parentElement?.querySelector('[data-publish-status]') || null;
+      publishDailyBriefToGitHub({ alsoArchive: true, statusEl });
+    });
+  });
+  document.querySelectorAll('[data-clear-github-token]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      clearGitHubToken();
+      const statusEl = btn.parentElement?.querySelector('[data-publish-status]') || null;
+      updatePublishStatus(statusEl, 'Cleared GitHub token.');
+    });
   });
 
   document.querySelectorAll('[data-import-input]').forEach((input) => {
