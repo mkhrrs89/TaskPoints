@@ -1847,11 +1847,6 @@ async function exportBackupWithImagesFallback() {
 }
 
 async function applyImportedStateFallback(root) {
-  if (typeof window.applyImportedState === 'function') {
-    await window.applyImportedState(root);
-    return;
-  }
-
   let normalized = normalizeStateGlobal({
     tasks: Array.isArray(root?.tasks) ? root.tasks : [],
     completions: Array.isArray(root?.completions) ? root.completions : [],
@@ -2013,8 +2008,8 @@ if (typeof window.exportBackupWithImages !== 'function') {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  const fileHandler = getHandler('importFile', importFileFallback);
-  const pasteHandler = getHandler('importPaste', importPasteFallback);
+  const fileHandler = importFileFallback;
+  const pasteHandler = importPasteFallback;
 
   document.querySelectorAll('[data-export-button]').forEach((btn) => {
     btn.addEventListener('click', exportBackupWithImages);
