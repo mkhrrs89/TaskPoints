@@ -67,6 +67,46 @@ function setupToolbarStackHeightTracking(nav) {
   }
 }
 
+function auditDuplicateHabitCompletions(daysBack = 45) {
+  try {
+    const storageKey = (window.TaskPointsCore && TaskPointsCore.STORAGE_KEY) || STORAGE_KEY_FALLBACK || 'taskpoints_v1';
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) return;
+    const st = JSON.parse(raw) || {};
+    const comps = Array.isArray(st.completions) ? st.completions : [];
+    const habits = Array.isArray(st.habits) ? st.habits : [];
+    const nameById = new Map(habits.map(h => [h.id, h.name || h.id]));
+
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - daysBack);
+    cutoff.setHours(0, 0, 0, 0);
+
+    const counts = new Map();
+    for (const c of comps) {
+      if (!c || (c.source !== 'habit' && c.source !== 'vice') || !c.habitId || !c.dayKey) continue;
+      const dt = new Date(`${c.dayKey}T00:00:00`);
+      if (Number.isNaN(dt.getTime()) || dt < cutoff) continue;
+      const k = `${c.source}|${c.habitId}|${c.dayKey}`;
+      counts.set(k, (counts.get(k) || 0) + 1);
+    }
+
+    const dupes = [...counts.entries()].filter(([, n]) => n > 1).sort((a, b) => b[1] - a[1]);
+    if (!dupes.length) return;
+
+    const preview = dupes.slice(0, 25).map(([k, n]) => {
+      const [src, hid, day] = k.split('|');
+      return { source: src, habitId: hid, habit: nameById.get(hid) || hid, dayKey: day, count: n };
+    });
+
+    console.warn(`[TaskPoints Audit] Duplicate habit/vice completions detected (last ${daysBack} days):`, preview);
+
+    // Light-touch user-visible warning (once per day)
+    alert(`TaskPoints audit: found ${dupes.length} duplicate habit/vice day entries in the last ${daysBack} days. See console for details.`);
+  } catch (e) {
+    console.warn('auditDuplicateHabitCompletions failed', e);
+  }
+}
+
 function setupDropdowns(root = document) {
   root.querySelectorAll('.dropdown').forEach((dropdown) => {
     if (dropdown.dataset.dropdownReady) return;
@@ -489,6 +529,14 @@ rafId = requestAnimationFrame(() => {
 function initToolbarNow() {
   renderBottomToolbar();
   setupMobileTasksMenu();
+  try {
+    const k = 'tp_audit_dupe_habits_last_run';
+    const today = new Date().toISOString().slice(0,10);
+    if (localStorage.getItem(k) !== today) {
+      localStorage.setItem(k, today);
+      auditDuplicateHabitCompletions(45);
+    }
+  } catch (_) {}
 }
 
 if (document.readyState === 'loading') {
