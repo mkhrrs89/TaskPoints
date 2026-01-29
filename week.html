@@ -495,15 +495,21 @@ syncDerivedPointsIfNeeded();
   };
 }
 
-function saveMerged(partial) {
+function saveMerged(partial, opts = {}) {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     const existing = raw ? (JSON.parse(raw) || {}) : {};
     if (window.TaskPointsCore?.saveAppState) {
-      return TaskPointsCore.saveAppState({ ...existing, ...partial }, { storageKey: STORAGE_KEY }).state;
+      return TaskPointsCore.saveAppState(
+        { ...existing, ...partial },
+        { storageKey: STORAGE_KEY, immediateWrite: !!opts.immediateWrite }
+      ).state;
     }
     if (window.TaskPointsCore?.mergeAndSaveState) {
-      return TaskPointsCore.mergeAndSaveState({ ...existing, ...partial }, { storageKey: STORAGE_KEY }).state;
+      return TaskPointsCore.mergeAndSaveState(
+        { ...existing, ...partial },
+        { storageKey: STORAGE_KEY, immediateWrite: !!opts.immediateWrite }
+      ).state;
     }
     const merged = { ...existing, ...partial };
     console.warn("week saveMerged skipped localStorage write; TaskPointsCore missing.");
@@ -865,12 +871,15 @@ function toggleHabitDay(habitId, dayKey, baseDate){
   const tagLabel = category === 'vice' ? 'Vice' : 'Habit';
 
   const removeCompletionForDay = () => {
-    const mIdx = state.completions.findIndex(c =>
-      (c.source === 'habit' || c.source === 'vice') &&
-      c.habitId === habitId &&
-      c.dayKey === dayKey
-    );
-    if (mIdx !== -1) state.completions.splice(mIdx, 1);
+    if (!Array.isArray(state.completions)) return;
+    for (let i = state.completions.length - 1; i >= 0; i--) {
+      const c = state.completions[i];
+      if ((c?.source === 'habit' || c?.source === 'vice') &&
+          c?.habitId === habitId &&
+          c?.dayKey === dayKey) {
+        state.completions.splice(i, 1);
+      }
+    }
   };
 
   if (category === 'vice') {
@@ -880,8 +889,9 @@ function toggleHabitDay(habitId, dayKey, baseDate){
     if (doneIdx === -1 && failedIdx === -1) {
       h.doneKeys.push(dayKey);
       const iso = new Date(fromKey(dayKey).getTime() + 12*3600*1000).toISOString();
+      removeCompletionForDay();
       state.completions.unshift({
-        id: crypto.randomUUID(),
+        id: `habit:${habitId}:${dayKey}`,
         taskId: `habit:${habitId}:${dayKey}`,
         title: `[${tagLabel}] ${h.name} (${dayKey})`,
         points: h.pointsPerDay || 0,
@@ -903,8 +913,9 @@ function toggleHabitDay(habitId, dayKey, baseDate){
     if (idx === -1) {
       h.doneKeys.push(dayKey);
       const iso = new Date(fromKey(dayKey).getTime() + 12*3600*1000).toISOString();
+      removeCompletionForDay();
       state.completions.unshift({
-        id: crypto.randomUUID(),
+        id: `habit:${habitId}:${dayKey}`,
         taskId: `habit:${habitId}:${dayKey}`,
         title: `[${tagLabel}] ${h.name} (${dayKey})`,
         points: h.pointsPerDay || 0,
@@ -923,7 +934,7 @@ function toggleHabitDay(habitId, dayKey, baseDate){
   }
   h.updatedAtISO = new Date().toISOString();
 
-  state = saveMerged(state);
+  state = saveMerged(state, { immediateWrite: true });
   renderHabits(baseDate);
 }
 function toggleHabitRetired(habitId, baseDate){
@@ -933,7 +944,7 @@ function toggleHabitRetired(habitId, baseDate){
 
   h.retired = !h.retired;
   h.updatedAtISO = new Date().toISOString();
-  state = saveMerged(state);
+  state = saveMerged(state, { immediateWrite: true });
   renderHabits(baseDate);
 }
 
