@@ -5939,13 +5939,15 @@ function bumpTaskOneDay(id){
   renderTasks();
 }
 
-function postponeTask(id){
-  const t=state.tasks.find(x=>x.id===id); if(!t||!t.dueDateISO) return;
-  const oldDue = t.dueDateISO;
-  t.dueDateISO = todayKey();
-  trackDueDatePush(t, oldDue, t.dueDateISO);
-  save(); renderTasks();
-}
+  function postponeTask(id){
+    const t=state.tasks.find(x=>x.id===id); if(!t||!t.dueDateISO) return;
+    const oldDue = t.dueDateISO;
+    t.dueDateISO = todayKey();
+    trackDueDatePush(t, oldDue, t.dueDateISO);
+    const now = new Date().toISOString();
+    t.updatedAtISO = now;
+    save(); renderTasks();
+  }
 function wontDoMain(id){
   const t=state.tasks.find(x=>x.id===id); if(!t) return;
   const mode = (t.recurrence && t.recurrence.mode) || 'none';
