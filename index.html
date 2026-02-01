@@ -2997,6 +2997,11 @@ function renderTodaysMatchup(todayKeyStr, yourScore){
 
   if (!oppNameEl || !oppScoreEl || !yourScoreEl || !diffEl || !diffValueEl || !oppRecordEl || !yourRecordEl) return;
 
+  const updateTodayScoreIsland = (value) => {
+    const islandValueEl = $('todayScoreIslandValue');
+    if (islandValueEl) islandValueEl.textContent = value;
+  };
+
   if (yourNameEl) yourNameEl.textContent = getYouName();
   const youAverages = computeYouDailyAverages();
   if (yourAvgEl) {
@@ -3029,6 +3034,7 @@ function renderTodaysMatchup(todayKeyStr, yourScore){
     diffValueEl.textContent = '—';
     oppScoreEl.textContent = '—';
     yourScoreEl.textContent = '—';
+    updateTodayScoreIsland('—');
     oppRecordEl.textContent = 'Record: —';
     yourRecordEl.textContent = `Record: ${getYourRecordText()}`;
     oppNameEl.textContent = '—';
@@ -3054,6 +3060,7 @@ function renderTodaysMatchup(todayKeyStr, yourScore){
   oppNameEl.textContent = getPlayerNameById(oppId);
   oppScoreEl.textContent = visibleOppScore.toFixed(1);
   yourScoreEl.textContent = safeYourScore.toFixed(1);
+  updateTodayScoreIsland(safeYourScore.toFixed(1));
   oppRecordEl.textContent = `Record: ${getPlayerRecordText(oppId)}`;
   yourRecordEl.textContent = `Record: ${getYourRecordText()}`;
   setOpponentAverages(oppId);
@@ -6875,6 +6882,16 @@ function tpPerfMark(label) {
 </div>
 
 
+<!-- MOBILE SCORE ISLAND + SCROLL-TO-TOP BUTTON -->
+<div
+  id="todayScoreIsland"
+  class="hidden md:hidden fixed top-3 left-3 z-40 btn btn-teal rounded-full shadow-lg px-4 py-2 text-sm flex items-center gap-2"
+  role="status"
+  aria-live="polite"
+>
+  <span class="text-xs uppercase tracking-wide">Today</span>
+  <span id="todayScoreIslandValue">—</span>
+</div>
 <!-- MOBILE SCROLL-TO-TOP BUTTON -->
 <button
   id="scrollTopBtn"
