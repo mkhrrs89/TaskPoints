@@ -428,17 +428,19 @@
         </div>
       </details>
 
-      <div class="glass space-y-3" id="habitTagColorsSection">
-        <div class="flex items-center justify-between gap-3 flex-wrap">
+      <details class="glass space-y-3" id="habitTagColorsSection">
+        <summary class="flex items-center justify-between gap-3 flex-wrap cursor-pointer">
           <div>
             <div class="text-lg font-semibold">Edit habit color</div>
             <div class="muted text-sm">Set gradient colors for habit and vice tags.</div>
           </div>
+        </summary>
+        <div class="space-y-3 pt-3">
+          <div id="habitTagColorsList" class="grid gap-3"></div>
+          <div id="habitTagColorsEmpty" class="text-sm muted hidden">No habit or vice tags yet.</div>
+          <p class="muted text-xs">The selected color is the brightest end of the bubble gradient.</p>
         </div>
-        <div id="habitTagColorsList" class="grid gap-3"></div>
-        <div id="habitTagColorsEmpty" class="text-sm muted hidden">No habit or vice tags yet.</div>
-        <p class="muted text-xs">The selected color is the brightest end of the bubble gradient.</p>
-      </div>
+      </details>
 
       <div class="glass space-y-3">
         <div class="flex items-center justify-between gap-3 flex-wrap">
