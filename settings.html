@@ -467,6 +467,13 @@
       return `${y}-${m}-${dd}`;
     }
 
+    function normalizeDayKey(key) {
+      if (!key) return null;
+      const s = String(key);
+      const m = s.match(/\d{4}-\d{2}-\d{2}/);
+      return m ? m[0] : null;
+    }
+
     function fromKey(key) {
       if (!key || typeof key !== "string") return new Date(NaN);
       const parts = key.split("-");
@@ -1590,49 +1597,34 @@
         }
       }
 
-      const doneKeys = Array.isArray(habit.doneKeys) ? habit.doneKeys : [];
-      if (doneKeys.length) {
-        const dates = doneKeys
-          .map(key => new Date(`${key}T00:00:00`))
-          .filter(date => !Number.isNaN(date.getTime()))
-          .sort((a, b) => a - b);
-        if (dates.length) {
-          const earliest = new Date(dates[0].getTime());
-          earliest.setHours(0, 0, 0, 0);
-          return earliest;
-        }
-      }
-
-      // Also consider failedKeys (important for vices)
-      const failedKeys = Array.isArray(habit.failedKeys) ? habit.failedKeys : [];
-      if (failedKeys.length) {
-        const dates = failedKeys
-          .map(key => new Date(`${key}T00:00:00`))
-          .filter(date => !Number.isNaN(date.getTime()))
-          .sort((a, b) => a - b);
-        if (dates.length) {
-          const earliest = new Date(dates[0].getTime());
-          earliest.setHours(0, 0, 0, 0);
-          return earliest;
-        }
-      }
-
-      // Finally, fall back to completions (older data may only exist there)
+      const doneKeysRaw = Array.isArray(habit.doneKeys) ? habit.doneKeys : [];
+      const failedKeysRaw = Array.isArray(habit.failedKeys) ? habit.failedKeys : [];
       const comps = Array.isArray(state?.completions) ? state.completions : [];
-      const compDates = comps
-        .filter(c =>
-          (c?.source === "habit" || c?.source === "vice") &&
-          c?.habitId === habit.id &&
-          typeof c?.dayKey === "string"
-        )
-        .map(c => new Date(`${c.dayKey}T00:00:00`))
-        .filter(d => !Number.isNaN(d.getTime()))
-        .sort((a, b) => a - b);
 
-      if (compDates.length) {
-        const earliest = new Date(compDates[0].getTime());
-        earliest.setHours(0, 0, 0, 0);
-        return earliest;
+      const keys = [
+        ...doneKeysRaw,
+        ...failedKeysRaw,
+        ...comps
+          .filter(c =>
+            (c?.source === "habit" || c?.source === "vice") &&
+            c?.habitId === habit.id &&
+            c?.dayKey
+          )
+          .map(c => c.dayKey)
+      ]
+        .map(normalizeDayKey)
+        .filter(Boolean);
+
+      if (keys.length) {
+        const dates = keys
+          .map(k => new Date(`${k}T00:00:00`))
+          .filter(d => !Number.isNaN(d.getTime()))
+          .sort((a, b) => a - b);
+        if (dates.length) {
+          const earliest = new Date(dates[0].getTime());
+          earliest.setHours(0, 0, 0, 0);
+          return earliest;
+        }
       }
 
       return null;
@@ -1747,22 +1739,41 @@
       }
       if (startDate > today) startDate = new Date(today.getTime());
 
-      const isVice = (habit.category || "habit") === "vice";
+      const category = String(habit.category || "habit").toLowerCase();
+      const isVice = category === "vice";
 
-      const doneFromHabit = Array.isArray(habit.doneKeys) ? habit.doneKeys : [];
-      const failedKeys = new Set(Array.isArray(habit.failedKeys) ? habit.failedKeys : []);
+      const doneKeys = new Set(
+        (Array.isArray(habit.doneKeys) ? habit.doneKeys : [])
+          .map(normalizeDayKey)
+          .filter(Boolean)
+      );
 
-      // Pull “done/success” days from completions too (covers older datasets)
+      const failedKeys = new Set(
+        (Array.isArray(habit.failedKeys) ? habit.failedKeys : [])
+          .map(normalizeDayKey)
+          .filter(Boolean)
+      );
+
+      // Legacy support: if completions exist for this vice/habit, treat them as “done/success” days too
       const comps = Array.isArray(state?.completions) ? state.completions : [];
-      const doneFromCompletions = comps
-        .filter(c =>
-          (c?.source === "habit" || c?.source === "vice") &&
-          c?.habitId === habit.id &&
-          typeof c?.dayKey === "string"
-        )
-        .map(c => c.dayKey);
+      for (const c of comps) {
+        if ((c?.source === "habit" || c?.source === "vice") && c?.habitId === habit.id && c?.dayKey) {
+          const k = normalizeDayKey(c.dayKey);
+          if (k) doneKeys.add(k);
+        }
+      }
 
-      const doneKeys = new Set([...doneFromHabit, ...doneFromCompletions]);
+      if (isVice) {
+        console.info("[Vice calendar debug]", {
+          habitId: habit.id,
+          doneKeysSize: doneKeys.size,
+          failedKeysSize: failedKeys.size,
+          doneSample: [...doneKeys].slice(0, 8),
+          failedSample: [...failedKeys].slice(0, 8),
+          doneRawSample: (Array.isArray(habit.doneKeys) ? habit.doneKeys : []).slice(0, 8),
+          failedRawSample: (Array.isArray(habit.failedKeys) ? habit.failedKeys : []).slice(0, 8),
+        });
+      }
       const months = getHabitCalendarMonths(startDate, today);
       const tagColor = normalizeHexColor(state?.habitTagColors?.[habit.tag]) || "";
       const completedStyle = tagColor ? `style="background-color: ${tagColor}; color: #0b0b0b;"` : "";
@@ -1834,8 +1845,7 @@
             <span class="flex items-center gap-2">
               <span class="inline-block h-3 w-3 rounded-sm bg-rose-400/80 border border-white/10"></span>
               Failed
-            </span>
-            ` : ""}
+            </span>` : ""}
             <span class="flex items-center gap-2">
               <span class="inline-block h-3 w-3 rounded-sm bg-white/10 border border-white/10"></span>
               Not completed
