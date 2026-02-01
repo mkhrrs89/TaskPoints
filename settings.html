@@ -1580,7 +1580,7 @@
       renderCategoryReport(report);
     }
 
-    function getHabitCalendarStartDate(habit) {
+    function getHabitCalendarStartDate(habit, state) {
       if (!habit) return null;
       if (habit.createdAtISO) {
         const created = new Date(habit.createdAtISO);
@@ -1603,6 +1603,7 @@
         }
       }
 
+      // Also consider failedKeys (important for vices)
       const failedKeys = Array.isArray(habit.failedKeys) ? habit.failedKeys : [];
       if (failedKeys.length) {
         const dates = failedKeys
@@ -1614,6 +1615,24 @@
           earliest.setHours(0, 0, 0, 0);
           return earliest;
         }
+      }
+
+      // Finally, fall back to completions (older data may only exist there)
+      const comps = Array.isArray(state?.completions) ? state.completions : [];
+      const compDates = comps
+        .filter(c =>
+          (c?.source === "habit" || c?.source === "vice") &&
+          c?.habitId === habit.id &&
+          typeof c?.dayKey === "string"
+        )
+        .map(c => new Date(`${c.dayKey}T00:00:00`))
+        .filter(d => !Number.isNaN(d.getTime()))
+        .sort((a, b) => a - b);
+
+      if (compDates.length) {
+        const earliest = new Date(compDates[0].getTime());
+        earliest.setHours(0, 0, 0, 0);
+        return earliest;
       }
 
       return null;
@@ -1722,15 +1741,28 @@
       const today = new Date();
       today.setHours(0, 0, 0, 0);
 
-      let startDate = getHabitCalendarStartDate(habit);
+      let startDate = getHabitCalendarStartDate(habit, state);
       if (!startDate) {
         startDate = new Date(today.getTime());
       }
       if (startDate > today) startDate = new Date(today.getTime());
 
       const isVice = (habit.category || "habit") === "vice";
-      const doneKeys = new Set(Array.isArray(habit.doneKeys) ? habit.doneKeys : []);
+
+      const doneFromHabit = Array.isArray(habit.doneKeys) ? habit.doneKeys : [];
       const failedKeys = new Set(Array.isArray(habit.failedKeys) ? habit.failedKeys : []);
+
+      // Pull “done/success” days from completions too (covers older datasets)
+      const comps = Array.isArray(state?.completions) ? state.completions : [];
+      const doneFromCompletions = comps
+        .filter(c =>
+          (c?.source === "habit" || c?.source === "vice") &&
+          c?.habitId === habit.id &&
+          typeof c?.dayKey === "string"
+        )
+        .map(c => c.dayKey);
+
+      const doneKeys = new Set([...doneFromHabit, ...doneFromCompletions]);
       const months = getHabitCalendarMonths(startDate, today);
       const tagColor = normalizeHexColor(state?.habitTagColors?.[habit.tag]) || "";
       const completedStyle = tagColor ? `style="background-color: ${tagColor}; color: #0b0b0b;"` : "";
