@@ -3046,8 +3046,10 @@ const updateTodayScoreIsland = (value) => {
     diffEl.textContent = 'No matchup today';
     diffValueEl.textContent = '—';
     oppScoreEl.textContent = '—';
-    yourScoreEl.textContent = '—';
-    updateTodayScoreIsland('—');
+    const yourNum = Number(yourScore);
+    const safeYour = Number.isFinite(yourNum) ? yourNum : 0;
+    yourScoreEl.textContent = safeYour.toFixed(1);
+    updateTodayScoreIsland(safeYour.toFixed(1));
     oppRecordEl.textContent = 'Record: —';
     yourRecordEl.textContent = `Record: ${getYourRecordText()}`;
     oppNameEl.textContent = '—';
