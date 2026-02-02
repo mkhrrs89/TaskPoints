@@ -2184,8 +2184,8 @@ function simulateToday() {
 
   ensureUpcomingSchedule();
 
-  state.gameHistory = state.gameHistory.filter(g => g.date !== todayKey);
-  state.matchups    = state.matchups.filter(m => (m.date || m.dateKey) !== todayKey);
+  state.gameHistory = state.gameHistory.filter(g => getHistoryDateKey(g) !== todayKey);
+  state.matchups    = state.matchups.filter(m => getMatchupDateKeyLocal(m) !== todayKey);
 
   const todaysSchedule = state.schedule.find(d => d && d.date === todayKey);
   const todaysPairs = todaysSchedule && Array.isArray(todaysSchedule.matchups)
@@ -2250,6 +2250,126 @@ function simulateToday() {
   save();
 }
 
+function getHistoryDateKey(g){
+  if (!g) return '';
+  if (g.date) return String(g.date).slice(0,10);
+  if (g.dateKey) return String(g.dateKey).slice(0,10);
+  if (g.dateISO) return dateKey(g.dateISO);
+  return '';
+}
+
+function getMatchupDateKeyLocal(m){
+  if (!m) return '';
+  if (m.dateKey) return String(m.dateKey).slice(0,10);
+  if (m.date) return String(m.date).slice(0,10);
+  if (m.dateISO) return dateKey(m.dateISO);
+  return '';
+}
+
+// If we already have opponent history for today but matchups are missing,
+// rebuild today's matchups from the existing schedule + history.
+// Returns true if it created matchups.
+function ensureTodayMatchupsFromHistory(){
+  const todayKey = getGameDayKey(new Date());
+
+  state.gameHistory = state.gameHistory || [];
+  state.matchups    = state.matchups    || [];
+  state.schedule    = state.schedule    || [];
+
+  // Ensure schedule exists for today using current participants
+  ensureUpcomingSchedule();
+
+  const todaysSchedule = state.schedule.find(d => d && d.date === todayKey);
+  const todaysPairs = (todaysSchedule && Array.isArray(todaysSchedule.matchups))
+    ? todaysSchedule.matchups
+    : [];
+
+  if (!todaysPairs.length) return false;
+
+  // If matchups already exist, do nothing
+  const alreadyHas = state.matchups.some(m => {
+    const key = getMatchupDateKeyLocal(m);
+    return key === todayKey;
+  });
+  if (alreadyHas) return false;
+
+  // Build name + player maps
+  const namesById = {};
+  const playerMap = new Map();
+  (state.players || []).forEach(p => {
+    if (!p || !p.id) return;
+    playerMap.set(p.id, p);
+    namesById[p.id] = p.name || "Unnamed";
+  });
+  namesById["YOU"] = getYouName();
+
+  // Pull participant ids from todaysPairs
+  const participantIds = Array.from(new Set(
+    todaysPairs.flatMap(m => [m.playerAId, m.playerBId]).filter(Boolean)
+  ));
+
+  const scoresById = {};
+
+  // YOU score (inertia-inclusive via TaskPointsCore snapshot path in computeTodayPoints)
+  const youScore = computeTodayPoints();
+  if (participantIds.includes("YOU") && !isNaN(youScore)) {
+    scoresById["YOU"] = youScore;
+  }
+
+  // For NPCs, prefer existing history score for today (most recent), else simulate
+  for (const id of participantIds) {
+    if (id === "YOU") continue;
+
+    let existingScore = null;
+    for (let i = state.gameHistory.length - 1; i >= 0; i--) {
+      const g = state.gameHistory[i];
+      if (!g) continue;
+      if (g.playerId !== id) continue;
+      if (getHistoryDateKey(g) !== todayKey) continue;
+      const s = Number(g.score);
+      if (Number.isFinite(s)) {
+        existingScore = s;
+        break;
+      }
+    }
+
+    let score = existingScore;
+    if (!Number.isFinite(score)) {
+      const player = playerMap.get(id);
+      score = player ? simulateAiScoreForPlayer(player, todayKey) : 0;
+      // If we had to simulate, also add history so other pages stay consistent
+      state.gameHistory.push({
+        id: makeId(),
+        date: todayKey,
+        playerId: id,
+        score
+      });
+    }
+
+    scoresById[id] = Number(score.toFixed(1));
+    ensureOpponentDripSchedule(todayKey, id, scoresById[id]);
+  }
+
+  // Create matchups from schedule pairs
+  todaysPairs.forEach(pair => {
+    if (!pair || !pair.playerAId || !pair.playerBId) return;
+
+    state.matchups.push({
+      id: makeId(),
+      date: todayKey,
+      playerAId: pair.playerAId,
+      playerBId: pair.playerBId,
+      playerAName: namesById[pair.playerAId] || "Unknown",
+      playerBName: namesById[pair.playerBId] || "Unknown",
+      scoreA: scoresById[pair.playerAId] ?? 0,
+      scoreB: scoresById[pair.playerBId] ?? 0
+    });
+  });
+
+  save();
+  return true;
+}
+
 function maybeAutoSimToday(){
   const now = new Date();
   const todayKey = getGameDayKey(now);
@@ -2260,12 +2380,17 @@ function maybeAutoSimToday(){
   state.gameHistory = state.gameHistory || [];
   state.matchups = state.matchups || [];
 
-  const hasTodayHistory = state.gameHistory.some(g => g.date === todayKey);
   const hasTodayMatchup = state.matchups.some(m => {
-    const key = m?.date || m?.dateKey || (m?.dateISO ? dateKey(m.dateISO) : "");
+    const key = getMatchupDateKeyLocal(m);
     return key === todayKey;
   });
-  if (hasTodayHistory || hasTodayMatchup) return false;
+  if (hasTodayMatchup) return false;
+
+  const hasTodayHistory = state.gameHistory.some(g => getHistoryDateKey(g) === todayKey);
+  if (hasTodayHistory) {
+    const fixed = ensureTodayMatchupsFromHistory();
+    if (fixed) return true;
+  }
 
   simulateToday();
   return true;
