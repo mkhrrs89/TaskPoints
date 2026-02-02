@@ -1778,8 +1778,17 @@
       }
       const months = getHabitCalendarMonths(startDate, today);
       const tagColor = normalizeHexColor(state?.habitTagColors?.[habit.tag]) || "";
-      const completedStyle = tagColor ? `style="background-color: ${tagColor}; color: #0b0b0b;"` : "";
-      const completedLegendStyle = tagColor ? `style="background-color: ${tagColor};"` : "";
+      const completedStyle = tagColor ? ` style="background-color: ${tagColor}; color: #0b0b0b;"` : "";
+      const completedLegendStyle = tagColor ? ` style="background-color: ${tagColor};"` : "";
+
+      const DEFAULT_DONE_BG = "rgba(52, 211, 153, 0.85)";
+      const DEFAULT_DONE_TEXT = "#052e16";
+      const DEFAULT_FAILED_BG = "rgba(251, 113, 133, 0.85)";
+      const DEFAULT_FAILED_TEXT = "#4c0519";
+
+      function styleAttr(bg, color) {
+        return ` style="background:${bg};color:${color};border-color:rgba(255,255,255,0.10)"`;
+      }
 
       const monthBlocks = months.map(monthDate => {
         const year = monthDate.getFullYear();
@@ -1806,15 +1815,14 @@
           if (!isWithinRange) {
             classes += " bg-white/5 text-white/30";
           } else if (isFailed) {
-            classes += " bg-rose-400/80 text-rose-950";
+            style = styleAttr(DEFAULT_FAILED_BG, DEFAULT_FAILED_TEXT);
           } else if (isDone) {
-            classes += tagColor ? "" : " bg-emerald-400/80 text-emerald-950";
-            style = completedStyle;
+            style = tagColor ? completedStyle : styleAttr(DEFAULT_DONE_BG, DEFAULT_DONE_TEXT);
           } else {
             classes += " bg-white/10 text-white/60";
           }
 
-          cells.push(`<div class="${classes}" ${style}>${day}</div>`);
+          cells.push(`<div class="${classes}"${style}>${day}</div>`);
         }
 
         const label = monthDate.toLocaleDateString(undefined, { month: "long", year: "numeric" });
@@ -1833,6 +1841,8 @@
       const tagLabel = habit.tag ? `Tag: ${habit.tag}` : "No tag";
       const completion = computeHabitCompletion(habit);
 
+      const completedLegendInline = completedLegendStyle || styleAttr(DEFAULT_DONE_BG, DEFAULT_DONE_TEXT);
+
       output.innerHTML = `
         <div class="space-y-2">
           <div class="text-base font-semibold">${escapeHtml(habitLabel)}</div>
@@ -1840,12 +1850,12 @@
           <div class="text-xs text-white/70">Total completion: ${completion}%</div>
           <div class="flex flex-wrap gap-3 text-xs">
             <span class="flex items-center gap-2">
-              <span class="inline-block h-3 w-3 rounded-sm bg-emerald-400/80 border border-white/10" ${completedLegendStyle}></span>
+              <span class="inline-block h-3 w-3 rounded-sm border border-white/10"${completedLegendInline}></span>
               Completed
             </span>
             ${isVice ? `
             <span class="flex items-center gap-2">
-              <span class="inline-block h-3 w-3 rounded-sm bg-rose-400/80 border border-white/10"></span>
+              <span class="inline-block h-3 w-3 rounded-sm border border-white/10"${styleAttr(DEFAULT_FAILED_BG, DEFAULT_FAILED_TEXT)}></span>
               Failed
             </span>` : ""}
             <span class="flex items-center gap-2">
