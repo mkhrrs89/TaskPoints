@@ -2997,10 +2997,12 @@ function renderTodaysMatchup(todayKeyStr, yourScore){
 
   if (!oppNameEl || !oppScoreEl || !yourScoreEl || !diffEl || !diffValueEl || !oppRecordEl || !yourRecordEl) return;
 
-  const updateTodayScoreIsland = (value) => {
-    const islandValueEl = $('todayScoreIslandValue');
-    if (islandValueEl) islandValueEl.textContent = value;
-  };
+const updateTodayScoreIsland = (value) => {
+  const islandValueEl = $('todayScoreIslandValue');
+  if (islandValueEl) islandValueEl.textContent = value;
+  try { localStorage.setItem('tpTodayScore', String(value)); } catch (e) {}
+};
+
 
   if (yourNameEl) yourNameEl.textContent = getYouName();
   const youAverages = computeYouDailyAverages();
@@ -6885,7 +6887,8 @@ function tpPerfMark(label) {
 <!-- MOBILE SCORE ISLAND + SCROLL-TO-TOP BUTTON -->
 <div
   id="todayScoreIsland"
-  class="hidden md:hidden fixed top-3 left-3 z-40 btn btn-teal rounded-full shadow-lg px-4 py-2 text-sm flex items-center gap-2"
+  class="md:hidden fixed z-50 btn btn-teal rounded-full shadow-lg px-4 py-2 text-sm flex items-center gap-2"
+  style="top: calc(env(safe-area-inset-top, 0px) + 0.75rem); left: 0.75rem;"
   role="status"
   aria-live="polite"
 >
