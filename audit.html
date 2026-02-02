@@ -347,6 +347,13 @@
       return m.dateKey || m.date || (m.dateISO ? TaskPointsCore.dateKey(m.dateISO) : '');
     }
 
+    function isYouByeDay(state, dateKeyStr){
+      const schedule = Array.isArray(state.schedule) ? state.schedule : [];
+      const day = schedule.find(d => d && (d.date === dateKeyStr || d.dateKey === dateKeyStr));
+      const byeIds = Array.isArray(day?.byeIds) ? day.byeIds : [];
+      return byeIds.includes('YOU');
+    }
+
     function computeYouDisplayScore(state, dateKeyStr){
       const { dailyTotals } = TaskPointsCore.aggregateCompletionsByDate(state.completions || [], state);
       const { todayPoints } = TaskPointsCore.deriveTodayWithInertia(dailyTotals, dateKeyStr, state);
@@ -406,6 +413,15 @@
         m && matchupDateKey(m) === dateKeyStr && (m.playerAId === 'YOU' || m.playerBId === 'YOU')
       );
       if (!matchup) {
+        if (isYouByeDay(state, dateKeyStr)) {
+          return {
+            youScore: computeYouDisplayScore(state, dateKeyStr),
+            oppScore: null,
+            oppId: null,
+            issues: ['Bye day: you are scheduled for a bye.'],
+            bye: true
+          };
+        }
         return { issues: ['No matchup found for date.'] };
       }
 
@@ -433,6 +449,15 @@
         m && matchupDateKey(m) === dateKeyStr && (m.playerAId === 'YOU' || m.playerBId === 'YOU')
       );
       if (!matchup) {
+        if (isYouByeDay(state, dateKeyStr)) {
+          return {
+            youScore: computeYouDisplayScore(state, dateKeyStr),
+            oppScore: null,
+            oppId: null,
+            issues: ['Bye day: you are scheduled for a bye.'],
+            bye: true
+          };
+        }
         return { issues: ['No matchup found for date.'] };
       }
 
@@ -1128,6 +1153,7 @@
 
       const homeScores = computeHomeMatchupScores(state, dateKey);
       const hubScores = computeGamehubMatchupScores(state, dateKey);
+      const byeDay = !!(homeScores?.bye || hubScores?.bye || isYouByeDay(state, dateKey));
       const scoreboardIssues = [];
 
       const homeIssueList = Array.isArray(homeScores.issues) ? homeScores.issues : [];
@@ -1150,7 +1176,7 @@
 
       const scoreboardStatus = scoreboardIssues.length
         ? 'FAIL'
-        : (scheduleMissing || homeIssueList.length || hubIssueList.length ? 'WARN' : 'PASS');
+        : (byeDay ? 'PASS' : (scheduleMissing || homeIssueList.length || hubIssueList.length ? 'WARN' : 'PASS'));
 
       checks.push({
         id: 'scoreboard-sync',
@@ -1171,6 +1197,7 @@
 
       // New: Opponent drip schedule integrity
       const dripIssues = [];
+      const dripByeDay = isYouByeDay(state, dateKey);
       const matchupForDrip = (state.matchups || []).find(m =>
         m && matchupDateKey(m) === dateKey && (m.playerAId === 'YOU' || m.playerBId === 'YOU')
       );
@@ -1178,7 +1205,9 @@
       let dripSchedule = null;
       let dripTotalTarget = null;
       if (!matchupForDrip) {
-        dripIssues.push('No matchup found for date; cannot validate drip schedule.');
+        if (!dripByeDay) {
+          dripIssues.push('No matchup found for date; cannot validate drip schedule.');
+        }
       } else {
         const oppId = matchupForDrip.playerAId === 'YOU' ? matchupForDrip.playerBId : matchupForDrip.playerAId;
         dripTotalTarget = matchupForDrip.playerAId === oppId
@@ -1227,25 +1256,34 @@
           }
         }
       }
+      const dripIsBye = !!(dripByeDay && !matchupForDrip);
+
       checks.push({
         id: 'drip-schedule-integrity',
         title: 'Opponent drip schedule integrity',
         status: dripIssues.length ? 'WARN' : 'PASS',
-        expected: 'Schedule events are ordered, numeric, and sum to total',
-        actual: dripIssues.length ? `${dripIssues.length} issue(s)` : 'Schedule looks valid',
-        details: dripIssues,
+        expected: dripIsBye
+          ? 'Bye day: drip schedule not applicable'
+          : 'Schedule events are ordered, numeric, and sum to total',
+        actual: dripIsBye
+          ? 'Bye day (no matchup)'
+          : (dripIssues.length ? `${dripIssues.length} issue(s)` : 'Schedule looks valid'),
+        details: dripIsBye
+          ? ['Bye day: no matchup exists, so drip schedule validation is skipped.']
+          : dripIssues,
         trace: dripTrace,
         tips: 'Drip schedules are optional, but invalid events can skew opponent totals.'
       });
 
       // G) Game / matchup consistency (lightweight)
       const matchupOnDay = (state.matchups || []).find(m => matchupDateKey(m) === dateKey);
+      const gameByeDay = isYouByeDay(state, dateKey);
       checks.push({
         id: 'game-consistency',
         title: 'Game history present for the day',
-        status: matchupOnDay ? 'PASS' : 'WARN',
+        status: (matchupOnDay || gameByeDay) ? 'PASS' : 'WARN',
         expected: 'Matchup record optional',
-        actual: matchupOnDay ? 'Found matchup' : 'None for this date',
+        actual: matchupOnDay ? 'Found matchup' : (gameByeDay ? 'Bye day (no matchup expected)' : 'None for this date'),
         trace: 'state.matchups',
         tips: 'If games are not used, this is a warning only.'
       });
