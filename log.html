@@ -662,7 +662,7 @@ function render(){
         tasks: 'Task'
       };
       const src = srcMap[category] || baseSrc;
-      const canDelete = (baseSrc === 'Task' || baseSrc === 'Flex'); // only tasks + flex get an X
+      const canDelete = (baseSrc === 'Task' || baseSrc === 'Flex' || isHabit || isVice); // allow delete for tasks, flex, habits, vices
       const canEditDate = (!isHabit && !isVice && !isInertia);      // allow date-edit for tasks + sleep + flex
       const displayPoints = getCompletionPoints(c);
       const displayTitle = (c.source === 'vice' && typeof c.title === 'string' && c.title.startsWith('[Habit]'))
@@ -731,8 +731,16 @@ function deleteCompletion(id){
   const c = state.completions[idx];
   const completionKey = safeCompletionDateKey(c);
 
-  // We never show delete for habits or vices, but guard anyway
-  if(c.source === 'habit' || c.source === 'vice') return;
+  // HABIT / VICE: delete the completion ONLY (no task rollback)
+  if (c.source === 'habit' || c.source === 'vice') {
+    const label = (c.source === 'vice') ? 'vice' : 'habit';
+    if(!confirm(`Delete this ${label} log instance from the log and remove its points? This may affect streaks/percentages.`)) return;
+
+    state.completions.splice(idx, 1);
+    save();
+    scheduleRender(render);
+    return;
+  }
 
   if(!confirm('Delete this completed task from the log and remove its points?')) return;
 
