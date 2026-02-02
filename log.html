@@ -191,6 +191,8 @@
       <div id="logList" class="grid gap-0"></div>
 
       <div id="empty" class="muted text-sm">No completions yet.</div>
+
+      <div id="logPagination" class="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs"></div>
     </div>
 
     <footer class="mt-10 text-xs muted text-right">v0.24.3 — 2025-11-25 12:35</footer>
@@ -199,6 +201,8 @@
 <script>
 const STORAGE_KEY="taskpoints_v1";
 const $=id=>document.getElementById(id);
+const DAYS_PER_PAGE = 15;
+let currentLogPage = 0;
 
 function fromKey(key){
   if(!key || typeof key !== 'string') return null;
@@ -598,28 +602,60 @@ function save() {
   state = saveMerged(state);
 }
 
+function formatDayLabel(key) {
+  if (!key) return 'Unknown date';
+  const date = fromKey(key);
+  return date
+    ? date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+    : key;
+}
+
+function clampPage(page, totalPages) {
+  if (!Number.isFinite(page)) return 0;
+  return Math.min(Math.max(page, 0), Math.max(totalPages - 1, 0));
+}
 
 function render(){
   const perfLabel = window.TP_DEBUG_PERF ? 'renderLog' : null;
   if (perfLabel) console.time(perfLabel);
   try {
-    const list=$('logList'), empty=$('empty'); 
+    const list=$('logList'), empty=$('empty'), pagination=$('logPagination');
     list.innerHTML='';
+    if (pagination) pagination.innerHTML = '';
 
   const comps = buildLogEntries(state.completions || []);
 
     if(!comps.length){
       empty.style.display='block';
+      if (pagination) pagination.style.display = 'none';
       return;
     }
     empty.style.display='none';
 
+    const sortedComps = comps
+      .slice()
+      .sort((a,b)=> new Date(b.completedAtISO)-new Date(a.completedAtISO));
+
+    const dayKeys = [];
+    sortedComps.forEach(c => {
+      const key = safeCompletionDateKey(c);
+      if (!key) return;
+      if (dayKeys[dayKeys.length - 1] !== key) dayKeys.push(key);
+    });
+
+    const totalPages = Math.max(1, Math.ceil(Math.max(dayKeys.length, 1) / DAYS_PER_PAGE));
+    currentLogPage = clampPage(currentLogPage, totalPages);
+    const pageStart = currentLogPage * DAYS_PER_PAGE;
+    const pageEnd = pageStart + DAYS_PER_PAGE;
+    const pageKeys = new Set(dayKeys.slice(pageStart, pageEnd));
+    const pagedComps = sortedComps.filter(c => {
+      const key = safeCompletionDateKey(c);
+      return !key || pageKeys.has(key);
+    });
+
   let lastDayKey = null;
 
-    comps
-      .slice()
-      .sort((a,b)=> new Date(b.completedAtISO)-new Date(a.completedAtISO))
-      .forEach(c=>{
+    pagedComps.forEach(c=>{
       const completionDate = new Date(c.completedAtISO);
       const completionKey = dateKey(completionDate);
       if (completionKey && completionKey !== lastDayKey) {
@@ -694,6 +730,36 @@ list.appendChild(divider);
 
 
     });
+
+  if (pagination) {
+    if (totalPages <= 1) {
+      pagination.style.display = 'none';
+    } else {
+      const rangeStart = dayKeys[pageStart];
+      const rangeEnd = dayKeys[Math.min(pageEnd, dayKeys.length) - 1];
+      pagination.style.display = 'flex';
+      pagination.innerHTML = `
+        <div class="flex items-center gap-2">
+          <button class="btn" data-page="prev" ${currentLogPage === 0 ? 'disabled' : ''}>← Newer</button>
+          <button class="btn" data-page="next" ${currentLogPage >= totalPages - 1 ? 'disabled' : ''}>Older →</button>
+        </div>
+        <div class="muted">
+          Page ${currentLogPage + 1} of ${totalPages} · ${formatDayLabel(rangeStart)} – ${formatDayLabel(rangeEnd)}
+        </div>
+      `;
+      pagination.querySelectorAll('button[data-page]').forEach(btn => {
+        btn.onclick = () => {
+          const action = btn.getAttribute('data-page');
+          const next = action === 'prev' ? currentLogPage - 1 : currentLogPage + 1;
+          const clamped = clampPage(next, totalPages);
+          if (clamped === currentLogPage) return;
+          currentLogPage = clamped;
+          scheduleRender(render);
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        };
+      });
+    }
+  }
 
   // Hook up delete buttons
   list.querySelectorAll('button[data-del-id]').forEach(btn=>{
