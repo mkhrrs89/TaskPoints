@@ -2099,26 +2099,27 @@ document.addEventListener('DOMContentLoaded', () => {
     // Mobile only
     if (window.matchMedia && window.matchMedia('(min-width: 768px)').matches) return;
 
-    // Avoid duplicates
-    if (document.getElementById('todayScoreIsland')) return;
-
-    const island = document.createElement('div');
-    island.id = 'todayScoreIsland';
-    island.className = 'md:hidden fixed z-50 btn btn-teal rounded-full shadow-lg px-4 py-2 text-sm flex items-center gap-2';
-    island.setAttribute('role', 'status');
-    island.setAttribute('aria-live', 'polite');
-    island.style.top = 'calc(env(safe-area-inset-top, 0px) + 0.75rem)';
-    island.style.left = '0.75rem';
-
-    island.innerHTML = `
-      <span class="text-xs uppercase tracking-wide">Today</span>
-      <span id="todayScoreIslandValue">—</span>
-    `;
-
-    document.body.appendChild(island);
-
-    const valueEl = island.querySelector('#todayScoreIslandValue');
     const key = 'tpTodayScore';
+
+    // Create if missing
+    let island = document.getElementById('todayScoreIsland');
+    if (!island) {
+      island = document.createElement('div');
+      island.id = 'todayScoreIsland';
+      island.className = 'md:hidden fixed z-50 btn btn-teal rounded-full shadow-lg px-4 py-2 text-sm flex items-center gap-2';
+      island.setAttribute('role', 'status');
+      island.setAttribute('aria-live', 'polite');
+      island.style.top = 'calc(env(safe-area-inset-top, 0px) + 0.75rem)';
+      island.style.left = '0.75rem';
+      island.innerHTML = `
+        <span class="text-xs uppercase tracking-wide">Today</span>
+        <span id="todayScoreIslandValue">—</span>
+      `;
+      document.body.appendChild(island);
+    }
+
+    const valueEl = document.getElementById('todayScoreIslandValue');
+    if (!valueEl) return;
 
     const sync = () => {
       let v = null;
@@ -2126,15 +2127,14 @@ document.addEventListener('DOMContentLoaded', () => {
       valueEl.textContent = (v == null || v === '') ? '—' : v;
     };
 
-    // Initial + live refresh
     sync();
 
-    // Update if other tabs/pages change it
+    // Other tabs/pages update
     window.addEventListener('storage', (e) => {
       if (e && e.key === key) sync();
     });
 
-    // Also poll lightly in case the same page updates localStorage without firing storage
+    // Same-page updates
     setInterval(sync, 750);
   }
 

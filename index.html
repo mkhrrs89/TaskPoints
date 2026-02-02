@@ -2716,6 +2716,18 @@ function renderTodayPointsSummary(todayPoints, inertia, inertiaAvg){
     });
   }
 
+  // Persist "Today score" across pages for the floating island
+  try {
+    const v = Number.isFinite(todayPoints)
+      ? (Math.round(todayPoints * 10) / 10).toFixed(1)
+      : '—';
+    localStorage.setItem('tpTodayScore', v);
+
+    // If island exists on this page, update it too
+    const islandValueEl = $('todayScoreIslandValue');
+    if (islandValueEl) islandValueEl.textContent = v;
+  } catch (e) {}
+
   const inertiaValueEl = $('inertiaValue');
   if (inertiaValueEl) inertiaValueEl.textContent = (Number.isFinite(inertia) ? inertia : 0).toFixed(1);
 
@@ -3000,7 +3012,6 @@ function renderTodaysMatchup(todayKeyStr, yourScore){
 const updateTodayScoreIsland = (value) => {
   const islandValueEl = $('todayScoreIslandValue');
   if (islandValueEl) islandValueEl.textContent = value;
-  try { localStorage.setItem('tpTodayScore', String(value)); } catch (e) {}
 };
 
 
