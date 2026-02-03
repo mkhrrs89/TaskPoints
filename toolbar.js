@@ -2140,6 +2140,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
   ensureTodayScoreIsland();
 
+  // Hide the Today points island until user scrolls a bit (mobile)
+  const todayIsland = document.getElementById('todayScoreIsland');
+  if (todayIsland) {
+    const updateTodayIslandVisibility = () => {
+      const shouldShow = window.scrollY > 40; // same threshold as the "Top" button
+      if (shouldShow) todayIsland.classList.remove('hidden');
+      else todayIsland.classList.add('hidden');
+    };
+
+    // Ensure it's invisible on initial load at top of page
+    todayIsland.classList.add('hidden');
+
+    window.addEventListener('scroll', updateTodayIslandVisibility, { passive: true });
+    window.addEventListener('load', updateTodayIslandVisibility);
+    updateTodayIslandVisibility();
+  }
+
+  
   const scrollButtons = Array.from(document.querySelectorAll('[data-scroll-top]'));
   if (scrollButtons.length) {
     scrollButtons.forEach((btn) => btn.classList.add('tp-floating-island'));
