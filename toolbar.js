@@ -2066,7 +2066,7 @@ document.addEventListener('DOMContentLoaded', () => {
     btn.addEventListener('click', exportOGDataOnly);
   });
   // Daily Brief export integration (shared export controls).
-  ensureBriefExportButtons();
+  
   document.querySelectorAll('[data-export-brief]').forEach((btn) => {
     btn.addEventListener('click', exportDailyBriefMarkdown);
   });
