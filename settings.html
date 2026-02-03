@@ -99,7 +99,7 @@
             <input id="settingsImportInput" type="file" accept="application/json,application/zip,.zip" class="hidden" />
           </label>
           <button id="settingsImportPasteBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Paste JSON</button>
-          <button type="button" class="btn btn-ghost btn-toolbar nav-btn md:hidden" data-export-images>OG Export</button>
+          <button type="button" class="btn btn-ghost btn-toolbar nav-btn" data-export-images>Backup + Images</button>
           <button id="settingsExportMatchupsBtn" class="btn btn-ghost btn-toolbar nav-btn" type="button">
             Export Matchups + Player History (CSV)
           </button>
@@ -109,6 +109,30 @@
         <p class="muted text-xs">Resetting game stats clears historical wins/losses, past matchups, and baseline Δ history (for NPCs only), but keeps today&apos;s matchups and all tasks, completions, and points.</p>
       </div>
 
+<div class="glass space-y-3" id="briefToolsSection">
+  <div>
+    <div class="text-lg font-semibold">Daily Brief + GitHub</div>
+    <div class="muted text-sm">Export your daily brief as Markdown, publish it, or clear your token.</div>
+  </div>
+
+  <div class="flex flex-wrap gap-2 items-center">
+    <button type="button" class="btn btn-teal btn-toolbar nav-btn" data-export-brief>
+      Export Daily Brief (MD)
+    </button>
+
+    <button type="button" class="btn btn-teal btn-toolbar nav-btn" data-publish-brief>
+      Publish Daily Brief to GitHub
+    </button>
+
+    <button type="button" class="btn btn-ghost btn-toolbar nav-btn" data-clear-github-token>
+      Clear GitHub Token
+    </button>
+
+    <span class="ml-2 text-xs text-slate-500" data-publish-status></span>
+  </div>
+</div>
+
+      
       <div class="glass space-y-3" id="categoryReportSection">
         <div class="flex items-center justify-between gap-3 flex-wrap">
           <div>
