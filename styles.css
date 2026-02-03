@@ -3268,3 +3268,8 @@ header,
     align-items: stretch;
   }
 }
+
+#todayScoreIsland{
+  z-index: 99999 !important;
+}
+
