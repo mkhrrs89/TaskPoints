@@ -728,6 +728,30 @@ function markCompletionsDirty(){
   _derived.rev++;
 }
 
+  function resolveCompletionRef(ref, startsWith = "") {
+  if (!ref) return null;
+
+  // Prefer id if present
+  const id = ref.id;
+  if (id) {
+    const hit = state?.completions?.find(c => c && c.id === id);
+    if (hit) return hit;
+  }
+
+  // Fallback: match by timestamp (+ optional prefix guard)
+  const iso = ref.completedAtISO;
+  if (iso) {
+    return state?.completions?.find(c => {
+      if (!c || c.completedAtISO !== iso) return false;
+      if (!startsWith) return true;
+      return typeof c.title === "string" && c.title.startsWith(startsWith);
+    }) || null;
+  }
+
+  return null;
+}
+
+
 function getDerived(){
   if (_derived.builtRev === _derived.rev) return _derived;
 
@@ -1124,9 +1148,12 @@ function submitSleepEditModal() {
     return;
   }
 
-  sleepEditContext.title = `Sleep Score (${scoreVal}) — Rest ${restVal}`;
-  sleepEditContext.points = sleepPoints(scoreVal, restVal);
-  sleepEditContext.sleepRested = restVal;
+const target = resolveCompletionRef(sleepEditContext, "Sleep Score") || sleepEditContext;
+
+target.title = `Sleep Score (${scoreVal}) — Rest ${restVal}`;
+target.points = sleepPoints(scoreVal, restVal);
+target.sleepRested = restVal;
+
 
   markCompletionsDirty();
   save();
@@ -5462,25 +5489,23 @@ if (calNum != null && !Number.isNaN(calNum)) {
 
 
     // allow editing a past day
-    block.onclick = () => {
-      const newVal = prompt('Edit calories for this day:', cal);
-      if (!newVal && newVal !== '0') return;
+block.onclick = () => {
+  const newVal = prompt('Edit calories for this day:', cal);
+  if (newVal === null) return;
 
-      const raw = Number(newVal);
-      if (isNaN(raw) || raw < 0) return alert('Invalid calories.');
+  const raw = Number(String(newVal).trim());
+  if (!Number.isFinite(raw) || raw < 0) return alert('Invalid calories.');
 
-      entry.title  = `Calories (${raw})`;
-      entry.points = caloriesToPoints(raw);
+  const target = resolveCompletionRef(entry, "Calories") || entry;
 
-      markCompletionsDirty();
-      
-      save();
-      scheduleRender(renderAll);
-    };
+  target.title  = `Calories (${raw})`;
+  target.points = caloriesToPoints(raw);
 
-    container.appendChild(block);
-  });
-}
+  markCompletionsDirty();
+  save();
+  scheduleRender(renderAll);
+};
+
 
 function getTodayWorkEntry() {
   const todayKey = dateKey(new Date());
@@ -5971,25 +5996,23 @@ setTodayMoodEditable(moodImpactBelow);
       <div class="mood-chip-pts">${pts} pts</div>
     `;
 
-    block.onclick = () => {
-      const newVal = prompt("Edit mood score:", val);
-      if (!newVal && newVal !== "0") return;
+block.onclick = () => {
+  const newVal = prompt("Edit mood score:", val);
+  if (newVal === null) return;
 
-      const num = Number(newVal);
-      if (isNaN(num)) return alert("Invalid number.");
+  const num = Number(String(newVal).trim());
+  if (!Number.isFinite(num)) return alert("Invalid number.");
 
-      entry.title = `Mood Score (${num})`;
-      entry.points = moodPoints(num);
+  const target = resolveCompletionRef(entry, "Mood Score") || entry;
 
-      markCompletionsDirty();
-      
-      save();
-      scheduleRender(renderAll);
-    };
+  target.title = `Mood Score (${num})`;
+  target.points = moodPoints(num);
 
-    container.appendChild(block);
-  });
-}
+  markCompletionsDirty();
+  save();
+  scheduleRender(renderAll);
+};
+
 
 
 function addTask(){
