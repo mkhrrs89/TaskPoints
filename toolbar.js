@@ -2161,6 +2161,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const scrollButtons = Array.from(document.querySelectorAll('[data-scroll-top]'));
   if (scrollButtons.length) {
     scrollButtons.forEach((btn) => btn.classList.add('tp-floating-island'));
+
     const updateVisibility = () => {
       const shouldShow = window.scrollY > 40;
       scrollButtons.forEach((btn) => {
@@ -2172,6 +2173,9 @@ document.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('scroll', updateVisibility, { passive: true });
     window.addEventListener('load', updateVisibility);
 
+    // Run once immediately so initial state is correct
+    updateVisibility();
+
     scrollButtons.forEach((btn) => {
       btn.addEventListener('click', () => {
         window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -2179,8 +2183,10 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  const migrate = window.TaskPointsCore?.migrateLegacyImagesInStorage || migrateLegacyImagesInStorageFallback;
+  const migrate =
+    window.TaskPointsCore?.migrateLegacyImagesInStorage || migrateLegacyImagesInStorageFallback;
   if (typeof migrate === 'function') {
     migrate();
   }
 });
+
