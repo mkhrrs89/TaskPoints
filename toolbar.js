@@ -2106,7 +2106,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!island) {
       island = document.createElement('div');
       island.id = 'todayScoreIsland';
-      island.className = 'md:hidden fixed z-50 btn btn-teal rounded-full shadow-lg px-4 py-2 text-sm flex items-center gap-2';
+      island.className = 'md:hidden fixed z-50 tp-floating-island btn btn-teal rounded-full shadow-lg px-4 py-2 text-sm flex items-center gap-2';
       island.setAttribute('role', 'status');
       island.setAttribute('aria-live', 'polite');
       island.style.top = 'calc(env(safe-area-inset-top, 0px) + 0.75rem)';
@@ -2142,6 +2142,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const scrollButtons = Array.from(document.querySelectorAll('[data-scroll-top]'));
   if (scrollButtons.length) {
+    scrollButtons.forEach((btn) => btn.classList.add('tp-floating-island'));
     const updateVisibility = () => {
       const shouldShow = window.scrollY > 40;
       scrollButtons.forEach((btn) => {

@@ -38,6 +38,7 @@
   --accent:  #4f9cff;  /* primary accent color */
   --accent2: #7c5cff;  /* secondary accent color */
   --accent3: #22c55e;  /* success/green accent */
+  --tp-z-floating: 9999;
   --tp-safe-bottom: env(safe-area-inset-bottom, 0px);
   --tp-toolbar-height: 74px;
   --tp-menu-gap: 8px;
@@ -845,6 +846,20 @@ body {
 .dropdown-toggle:focus-visible{
   outline: none;
   box-shadow: none;
+}
+
+/* Ensure floating islands are always above headers/nav */
+.tp-floating-island{
+  z-index: var(--tp-z-floating) !important;
+  position: fixed;
+}
+
+/* Safety: if the header creates a stacking context, keep it below islands */
+.top-ribbon,
+.header,
+header,
+.navbar{
+  z-index: 1000;
 }
 
 @media (max-width: 640px) {
