@@ -790,45 +790,106 @@ function escapeHtml(s){
   }[m]));
 }
 
-function deleteCompletion(id){
-  const idx = state.completions.findIndex(c=>c.id===id);
-  if(idx===-1) return;
+function deleteCompletion(token){
+  if (!token) return;
+
+  const key = String(token);
+
+  // Find by id OR taskId, because older habit logs sometimes used random ids
+  // while taskId stayed stable (habit:ID:YYYY-MM-DD).
+  const idx = (state.completions || []).findIndex(c =>
+    String(c?.id ?? '') === key || String(c?.taskId ?? '') === key
+  );
+
+  if (idx === -1) {
+    console.warn('[log delete] completion not found for token:', key);
+    return;
+  }
 
   const c = state.completions[idx];
-  const completionKey = safeCompletionDateKey(c);
 
-  // HABIT / VICE: delete the completion ONLY (no task rollback)
-  if (c.source === 'habit' || c.source === 'vice') {
+  const isHabitOrVice = (c?.source === 'habit' || c?.source === 'vice');
+
+  // Helper: parse habitId/dayKey from completion or its taskId
+  const parseHabitRef = (comp) => {
+    let habitId = comp?.habitId || null;
+    let dayKey  = comp?.dayKey  || null;
+
+    const raw = String(comp?.taskId || comp?.id || '');
+    const m = raw.match(/^habit:([^:]+):(\d{4}-\d{2}-\d{2})$/);
+    if (m) {
+      if (!habitId) habitId = m[1];
+      if (!dayKey)  dayKey  = m[2];
+    }
+
+    return { habitId, dayKey };
+  };
+
+  if (isHabitOrVice) {
+    const { habitId, dayKey } = parseHabitRef(c);
+
     const label = (c.source === 'vice') ? 'vice' : 'habit';
-    if(!confirm(`Delete this ${label} log instance from the log and remove its points? This may affect streaks/percentages.`)) return;
+    const title = (c.title || '').replace(/^\[[^\]]+\]\s*/, '');
+    const when  = niceISO(c.completedAtISO);
 
+    const ok = confirm(`Delete this ${label} log entry?\n\n${title}\n${when}`);
+    if (!ok) return;
+
+    // Remove ONLY this one logged instance
     state.completions.splice(idx, 1);
+
+    // Now also update habit backing state so it doesn't "snap back"
+    if (habitId && dayKey && Array.isArray(state.habits)) {
+      const h = state.habits.find(x => x && x.id === habitId);
+      if (h) {
+        h.doneKeys   = Array.isArray(h.doneKeys) ? h.doneKeys : [];
+        h.failedKeys = Array.isArray(h.failedKeys) ? h.failedKeys : [];
+
+        // If there are still other completion rows for this same habit/day,
+        // keep done/failed markers. If this was the LAST one, clear markers.
+        const stillHasSameDay = (state.completions || []).some(x => {
+          if (!x) return false;
+          if (x.source !== 'habit' && x.source !== 'vice') return false;
+
+          const ref = parseHabitRef(x);
+          return ref.habitId === habitId && ref.dayKey === dayKey;
+        });
+
+        if (!stillHasSameDay) {
+          h.doneKeys   = h.doneKeys.filter(k => k !== dayKey);
+          h.failedKeys = h.failedKeys.filter(k => k !== dayKey);
+        }
+
+        h.updatedAtISO = new Date().toISOString();
+      }
+    }
+
     save();
     scheduleRender(render);
     return;
   }
 
-  if(!confirm('Delete this completed task from the log and remove its points?')) return;
+  // ---- Original task/flex deletion logic (kept) ----
+  const ok = confirm(`Delete entry?\n\n${(c.title || 'Untitled')}\n${niceISO(c.completedAtISO)}`);
+  if (!ok) return;
 
-  // 1) Remove this completion from the log
-  state.completions.splice(idx,1);
-
-  // 2) If it was tied to a task, un-complete that task so it comes back
-  if(c.taskId){
-    const t = state.tasks.find(t=>t.id===c.taskId);
-    if(t){
-      t.completedAtISO = null;
-
-      // If this was a repeating task, roll the due date back to the instance we just removed
-      const prevDue = computePreviousDueDate(t, completionKey);
-      if(prevDue) t.dueDateISO = prevDue;
+  if (c.taskId) {
+    const t = (state.tasks || []).find(x => x.id === c.taskId);
+    if (t) {
+      if (t.counts && t.counts > 0) {
+        t.counts = Math.max(0, (t.counts || 0) - 1);
+      } else {
+        const newDue = computePreviousDueDate(t, c.completedAtISO);
+        if (newDue) t.dueDateISO = newDue.toISOString();
+      }
     }
   }
 
-  // 3) Save and re-render the log
+  state.completions.splice(idx, 1);
   save();
   scheduleRender(render);
 }
+
 
 function editCompletionDate(id){
   const entry = state.completions.find(c => c.id === id);
