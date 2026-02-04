@@ -457,20 +457,24 @@ function saveMerged(partial) {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     const existing = raw ? (JSON.parse(raw) || {}) : {};
-    if (window.TaskPointsCore?.saveAppState) {
-      return TaskPointsCore.saveAppState({ ...existing, ...partial }, { storageKey: STORAGE_KEY }).state;
-    }
-    if (window.TaskPointsCore?.mergeAndSaveState) {
-      return TaskPointsCore.mergeAndSaveState({ ...existing, ...partial }, { storageKey: STORAGE_KEY }).state;
-    }
+
+    // Merge top-level keys so we don't wipe fields this page didn't load
     const merged = { ...existing, ...partial };
-    console.warn("saveMerged skipped localStorage write; TaskPointsCore missing.");
+
+    // IMPORTANT: snapshot-save (no union merge), so deletions stick
+    if (window.TaskPointsCore?.saveStateSnapshot) {
+      return TaskPointsCore.saveStateSnapshot(merged, { storageKey: STORAGE_KEY }).state;
+    }
+
+    // Fallback if snapshot saver isn't available
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
     return merged;
   } catch (e) {
     console.error("saveMerged failed", e);
     return partial;
   }
 }
+
 
 function getCompletionPoints(entry) {
   if (window.TaskPointsCore?.pointsForCompletion) {
@@ -790,6 +794,23 @@ function escapeHtml(s){
   }[m]));
 }
 
+function niceISO(iso) {
+  try {
+    const d = new Date(iso);
+    if (!iso || isNaN(d.getTime())) return 'Invalid date';
+    return d.toLocaleString(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit'
+    });
+  } catch {
+    return String(iso || '');
+  }
+}
+
+  
 function deleteCompletion(token){
   if (!token) return;
 
