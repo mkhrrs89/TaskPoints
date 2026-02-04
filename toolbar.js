@@ -2059,6 +2059,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const fileHandler = importFileFallback;
   const pasteHandler = importPasteFallback;
 
+  // Ensure Teko font is available on every page (used by .today-island-score)
+  if (!document.querySelector('link[href*="fonts.googleapis.com"][href*="family=Teko"]')) {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = 'https://fonts.googleapis.com/css2?family=Teko:wght@500;600;700&display=swap';
+    document.head.appendChild(link);
+  }
+
   document.querySelectorAll('[data-export-button]').forEach((btn) => {
     btn.addEventListener('click', exportBackupWithImages);
   });
@@ -2106,14 +2114,14 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!island) {
       island = document.createElement('div');
       island.id = 'todayScoreIsland';
-      island.className = 'md:hidden fixed z-50 tp-floating-island btn btn-teal rounded-full shadow-lg px-4 py-2 text-sm flex items-center gap-2';
+      island.className = 'md:hidden fixed tp-floating-island btn btn-teal rounded-full shadow-lg px-4 py-2 flex flex-col items-center';
       island.setAttribute('role', 'status');
       island.setAttribute('aria-live', 'polite');
       island.style.top = 'calc(env(safe-area-inset-top, 0px) + 0.75rem)';
       island.style.left = '0.75rem';
       island.innerHTML = `
         <span class="text-xs uppercase tracking-wide">Today</span>
-        <span id="todayScoreIslandValue">—</span>
+        <span id="todayScoreIslandValue" class="today-island-score">—</span>
       `;
       document.body.appendChild(island);
     }
@@ -2189,4 +2197,3 @@ document.addEventListener('DOMContentLoaded', () => {
     migrate();
   }
 });
-
