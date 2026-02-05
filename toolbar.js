@@ -542,6 +542,12 @@ rafId = requestAnimationFrame(() => {
 
   nav.addEventListener('pointermove', onPointerMove, { passive: false });
 
+// iOS Safari fallback: prevent the page from scrolling while interacting with the toolbar
+nav.addEventListener('touchmove', (e) => {
+  if (startY !== null) e.preventDefault();
+}, { passive: false });
+
+  
 nav.addEventListener('pointerup', (event) => {
   finishDrag(event);
 });
