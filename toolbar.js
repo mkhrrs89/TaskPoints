@@ -447,7 +447,13 @@ function setupBottomNavDragExpand(nav) {
 if (!isDragging && Math.abs(delta) > DRAG_START_PX) {
   isDragging = true;
   nav.dataset.ignoreClick = '1';
+
+  // Capture once we *know* it's a drag (doesn't steal normal taps)
+  if (!pointerCaptured) {
+    try { nav.setPointerCapture(event.pointerId); pointerCaptured = true; } catch (_) {}
+  }
 }
+
 
 if (!isDragging) return;
 event.preventDefault();
@@ -480,16 +486,6 @@ rafId = requestAnimationFrame(() => {
       if (event.target.closest('.dropdown-menu')) return;
       if (event.target.closest('#mobileTasksMenu')) return;
 
-    // Only allow drag from the top grab strip so we don't steal taps on buttons.
-    if (!isInGrabStrip(event.clientY)) return;
-
-    // iOS/Safari reliability: pointer capture works best when set during pointerdown.
-    try {
-      nav.setPointerCapture(event.pointerId);
-      pointerCaptured = true;
-    } catch (_) {
-      pointerCaptured = false;
-    }
 
       
       startY = event.clientY;
@@ -507,8 +503,15 @@ nav.addEventListener('pointerup', (event) => {
   if (activePointerId !== event.pointerId) return;
   if (startY === null) return;
 
-  if (isDragging) event.preventDefault();
+  // If it was just a tap (no drag), don't snap/settle
+  if (!isDragging) {
+    startY = null;
+    activePointerId = null;
+    pointerCaptured = false;
+    return;
+  }
 
+  event.preventDefault();
   startY = null;
 
   if (pointerCaptured) {
@@ -517,26 +520,27 @@ nav.addEventListener('pointerup', (event) => {
 
   pointerCaptured = false;
   activePointerId = null;
-
   settle();
 });
+
 
 
 nav.addEventListener('pointercancel', (event) => {
   if (activePointerId !== event.pointerId) return;
   if (startY === null) return;
 
-  startY = null;
-
   if (pointerCaptured) {
     try { nav.releasePointerCapture(event.pointerId); } catch (_) {}
   }
 
+  startY = null;
   pointerCaptured = false;
   activePointerId = null;
 
-  settle();
+  // If we were dragging, snap; if not, just bail
+  if (isDragging) settle();
 });
+
 
 
  
