@@ -386,6 +386,47 @@ function setupBottomNavDragExpand(nav) {
   let pointerCaptured = false;
   let activePointerId = null;
 
+  // --- Ensure snap always happens on release (even if release occurs off-nav) ---
+let globalReleaseAttached = false;
+
+function attachGlobalRelease() {
+  if (globalReleaseAttached) return;
+  window.addEventListener('pointerup', finishDrag, { capture: true, passive: false });
+  window.addEventListener('pointercancel', finishDrag, { capture: true, passive: false });
+  globalReleaseAttached = true;
+}
+
+function detachGlobalRelease() {
+  if (!globalReleaseAttached) return;
+  window.removeEventListener('pointerup', finishDrag, true);
+  window.removeEventListener('pointercancel', finishDrag, true);
+  globalReleaseAttached = false;
+}
+
+function finishDrag(event) {
+  // Already finished or not our pointer
+  if (startY === null) return;
+  if (event && activePointerId != null && event.pointerId != null && event.pointerId !== activePointerId) return;
+
+  if (isDragging && event?.preventDefault) event.preventDefault();
+
+  startY = null;
+
+  if (pointerCaptured) {
+    try { nav.releasePointerCapture(activePointerId); } catch (_) {}
+  }
+  pointerCaptured = false;
+  activePointerId = null;
+
+  detachGlobalRelease();
+
+  // Only snap if it was actually a drag
+  if (isDragging) {
+    isDragging = false;
+    settle();
+  }
+}
+
   const isInteractiveTarget = (eventTarget) => Boolean(
     eventTarget.closest(
       'a, button, input, select, textarea, [role="button"], [role="menu"], [role="menuitem"], .mobile-bottom-nav-btn, .dropdown-menu, .menu'
@@ -448,11 +489,13 @@ if (!isDragging && Math.abs(delta) > DRAG_START_PX) {
   isDragging = true;
   nav.dataset.ignoreClick = '1';
 
-  // Capture once we *know* it's a drag (doesn't steal normal taps)
   if (!pointerCaptured) {
     try { nav.setPointerCapture(event.pointerId); pointerCaptured = true; } catch (_) {}
   }
+
+  attachGlobalRelease();
 }
+
 
 
 if (!isDragging) return;
@@ -500,46 +543,13 @@ rafId = requestAnimationFrame(() => {
   nav.addEventListener('pointermove', onPointerMove, { passive: false });
 
 nav.addEventListener('pointerup', (event) => {
-  if (activePointerId !== event.pointerId) return;
-  if (startY === null) return;
-
-  // If it was just a tap (no drag), don't snap/settle
-  if (!isDragging) {
-    startY = null;
-    activePointerId = null;
-    pointerCaptured = false;
-    return;
-  }
-
-  event.preventDefault();
-  startY = null;
-
-  if (pointerCaptured) {
-    try { nav.releasePointerCapture(event.pointerId); } catch (_) {}
-  }
-
-  pointerCaptured = false;
-  activePointerId = null;
-  settle();
+  finishDrag(event);
 });
-
-
 
 nav.addEventListener('pointercancel', (event) => {
-  if (activePointerId !== event.pointerId) return;
-  if (startY === null) return;
-
-  if (pointerCaptured) {
-    try { nav.releasePointerCapture(event.pointerId); } catch (_) {}
-  }
-
-  startY = null;
-  pointerCaptured = false;
-  activePointerId = null;
-
-  // If we were dragging, snap; if not, just bail
-  if (isDragging) settle();
+  finishDrag(event);
 });
+
 
 
 
