@@ -919,6 +919,19 @@ header,
   overflow: visible;
 }
 
+:root{
+  --tp-bottom-nav-collapsed-nudge: 6px; /* tweak: 4px–12px */
+}
+
+.mobile-bottom-nav-shell:not(.is-expanded){
+  transform: translateY(var(--tp-bottom-nav-collapsed-nudge));
+}
+
+.mobile-bottom-nav-shell.is-expanded{
+  transform: translateY(0px);
+}
+
+
 .mobile-bottom-nav-shell.is-dragging{
   transition: none;
   touch-action: none;
