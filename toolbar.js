@@ -519,6 +519,40 @@ rafId = requestAnimationFrame(() => {
     settle();
   });
 
+  // --- Snap reliability: settle even if pointerup happens outside the nav ---
+  const finishDrag = (event) => {
+    if (activePointerId !== event.pointerId) return;
+    if (startY === null) return;
+
+    try {
+      if (isDragging) event.preventDefault();
+    } catch (_) {}
+
+    startY = null;
+
+    if (pointerCaptured) {
+      try { nav.releasePointerCapture(event.pointerId); } catch (_) {}
+    }
+    pointerCaptured = false;
+    activePointerId = null;
+
+    settle();
+  };
+
+  // Catch release anywhere on the page (mobile Safari often releases off-nav)
+  window.addEventListener('pointerup', finishDrag, { capture: true, passive: false });
+  window.addEventListener('pointercancel', finishDrag, { capture: true, passive: false });
+
+  // Extra safety: if pointer capture is lost, still settle
+  nav.addEventListener('lostpointercapture', () => {
+    if (startY === null) return;
+    startY = null;
+    pointerCaptured = false;
+    activePointerId = null;
+    settle();
+  });
+
+  
   nav.addEventListener('click', (event) => {
     if (!nav.dataset.ignoreClick) return;
     event.preventDefault();
