@@ -377,7 +377,7 @@ function setupBottomNavDragExpand(nav) {
   const collapsedHeight = nav.getBoundingClientRect().height;
   const expandedHeight = collapsedHeight * 3;
   const DRAG_START_PX = 14;
-  const GRAB_STRIP_PX = 18;
+  const GRAB_STRIP_PX = 30;
   let currentHeight = collapsedHeight;
   let startY = null;
   let startHeight = collapsedHeight;
@@ -444,14 +444,11 @@ function setupBottomNavDragExpand(nav) {
     if (activePointerId !== event.pointerId) return;
     if (startY === null) return;
     const delta = startY - event.clientY;
-    if (!isDragging && Math.abs(delta) > DRAG_START_PX) {
-      isDragging = true;
-      nav.dataset.ignoreClick = '1';
-      if (!pointerCaptured) {
-        nav.setPointerCapture(event.pointerId);
-        pointerCaptured = true;
-      }
-    }
+if (!isDragging && Math.abs(delta) > DRAG_START_PX) {
+  isDragging = true;
+  nav.dataset.ignoreClick = '1';
+}
+
 if (!isDragging) return;
 event.preventDefault();
 
@@ -483,6 +480,18 @@ rafId = requestAnimationFrame(() => {
       if (event.target.closest('.dropdown-menu')) return;
       if (event.target.closest('#mobileTasksMenu')) return;
 
+    // Only allow drag from the top grab strip so we don't steal taps on buttons.
+    if (!isInGrabStrip(event.clientY)) return;
+
+    // iOS/Safari reliability: pointer capture works best when set during pointerdown.
+    try {
+      nav.setPointerCapture(event.pointerId);
+      pointerCaptured = true;
+    } catch (_) {
+      pointerCaptured = false;
+    }
+
+      
       startY = event.clientY;
       startHeight = currentHeight;
       isDragging = false;
@@ -494,64 +503,43 @@ rafId = requestAnimationFrame(() => {
 
   nav.addEventListener('pointermove', onPointerMove, { passive: false });
 
-  nav.addEventListener('pointerup', (event) => {
-    if (activePointerId !== event.pointerId) return;
-    if (startY === null) return;
-    if (isDragging) event.preventDefault();
-    startY = null;
-    if (pointerCaptured) {
-      nav.releasePointerCapture(event.pointerId);
-    }
-    pointerCaptured = false;
-    activePointerId = null;
-    settle();
-  });
+nav.addEventListener('pointerup', (event) => {
+  if (activePointerId !== event.pointerId) return;
+  if (startY === null) return;
 
-  nav.addEventListener('pointercancel', (event) => {
-    if (activePointerId !== event.pointerId) return;
-    if (startY === null) return;
-    startY = null;
-    if (pointerCaptured) {
-      nav.releasePointerCapture(event.pointerId);
-    }
-    pointerCaptured = false;
-    activePointerId = null;
-    settle();
-  });
+  if (isDragging) event.preventDefault();
 
-  // --- Snap reliability: settle even if pointerup happens outside the nav ---
-  const finishDrag = (event) => {
-    if (activePointerId !== event.pointerId) return;
-    if (startY === null) return;
+  startY = null;
 
-    try {
-      if (isDragging) event.preventDefault();
-    } catch (_) {}
+  if (pointerCaptured) {
+    try { nav.releasePointerCapture(event.pointerId); } catch (_) {}
+  }
 
-    startY = null;
+  pointerCaptured = false;
+  activePointerId = null;
 
-    if (pointerCaptured) {
-      try { nav.releasePointerCapture(event.pointerId); } catch (_) {}
-    }
-    pointerCaptured = false;
-    activePointerId = null;
+  settle();
+});
 
-    settle();
-  };
 
-  // Catch release anywhere on the page (mobile Safari often releases off-nav)
-  window.addEventListener('pointerup', finishDrag, { capture: true, passive: false });
-  window.addEventListener('pointercancel', finishDrag, { capture: true, passive: false });
+nav.addEventListener('pointercancel', (event) => {
+  if (activePointerId !== event.pointerId) return;
+  if (startY === null) return;
 
-  // Extra safety: if pointer capture is lost, still settle
-  nav.addEventListener('lostpointercapture', () => {
-    if (startY === null) return;
-    startY = null;
-    pointerCaptured = false;
-    activePointerId = null;
-    settle();
-  });
+  startY = null;
 
+  if (pointerCaptured) {
+    try { nav.releasePointerCapture(event.pointerId); } catch (_) {}
+  }
+
+  pointerCaptured = false;
+  activePointerId = null;
+
+  settle();
+});
+
+
+ 
   
   nav.addEventListener('click', (event) => {
     if (!nav.dataset.ignoreClick) return;
