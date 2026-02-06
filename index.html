@@ -670,12 +670,10 @@ Nothing visible on the page is built here. === -->
 
   <!-- TASKS grouped by day -->
   <div class="glass mb-6">
-    <div class="flex justify-between items-center mb-3 gap-3 flex-wrap">
-     <div class="flex items-center gap-3 flex-wrap">
-       <h2 id="tasksAnchor" class="font-bold text-lg">Your Tasks</h2>
-       <button id="openAddTaskBtn" class="btn btn-primary">Add Task</button>
-     </div>
-      <select id="sortSelect" class="input w-48">
+    <div class="flex items-center mb-3 gap-2 sm:gap-3">
+      <h2 id="tasksAnchor" class="font-bold text-lg shrink-0">Your Tasks</h2>
+      <button id="openAddTaskBtn" class="btn btn-primary shrink-0">Add Task</button>
+      <select id="sortSelect" class="input flex-1 min-w-0 sm:flex-none sm:w-48 sm:ml-auto">
         <option value="due">Sort by Due Date</option>
         <option value="importance">Sort by Importance</option>
         <option value="points">Sort by Points</option>
