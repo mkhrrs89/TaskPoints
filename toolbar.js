@@ -419,6 +419,12 @@ function finishDrag(event) {
   activePointerId = null;
 
   detachGlobalRelease();
+  // Cancel any queued RAF so it can't override the snap after release
+  if (rafId) {
+    cancelAnimationFrame(rafId);
+    rafId = null;
+  }
+  pendingDragHeight = null;
 
   // Only snap if it was actually a drag
   if (isDragging) {
@@ -463,7 +469,12 @@ function finishDrag(event) {
     startY = null;
     isDragging = false;
     isExpanded = false;
-
+    if (rafId) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
+    }
+    pendingDragHeight = null;
+    
     nav.classList.remove('is-dragging');
     delete nav.dataset.ignoreClick;
 
@@ -506,10 +517,18 @@ if (rafId) return;
 
 rafId = requestAnimationFrame(() => {
   rafId = null;
+
+  // If the drag already ended, don't apply a stale height that would "unsnap" the toolbar.
+  if (startY === null || !isDragging) {
+    pendingDragHeight = null;
+    return;
+  }
+
   if (pendingDragHeight == null) return;
   applyHeight(pendingDragHeight, { dragging: true });
   pendingDragHeight = null;
 });
+
 
   };
 
