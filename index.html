@@ -655,18 +655,30 @@ Nothing visible on the page is built here. === -->
 </div>
 
   <!-- FLEX ACTIONS -->
-  <div class="glass mb-6">
-    <div class="flex items-center justify-between mb-3 gap-3 flex-wrap">
-      <h2 id="flexAnchor" class="font-bold text-lg">Flex Actions</h2>
-      <div class="flex gap-2 flex-wrap">
-        <input id="flexName" class="input w-48" placeholder="Flex action">
-        <input id="flexPts"  class="input w-28" type="number" step="any" placeholder="Pts/use">
-        <button id="addFlexBtn" class="btn btn-primary">Add</button>
-      </div>
+<!-- FLEX ACTIONS (collapsible) -->
+<div class="glass mb-6">
+  <div class="flex items-center justify-between mb-3 gap-3 flex-wrap">
+    <h2 id="flexAnchor" class="font-bold text-lg">Flex Actions</h2>
+
+    <!-- Reuses the existing .recent-toggle JS on this page -->
+    <button class="recent-toggle" type="button" data-target="flexWrap" aria-expanded="false">
+      Show
+    </button>
+  </div>
+
+  <!-- Collapsed by default -->
+  <div id="flexWrap" class="hidden">
+    <div class="flex gap-2 flex-wrap mb-3">
+      <input id="flexName" class="input w-48" placeholder="Flex action">
+      <input id="flexPts"  class="input w-28" type="number" step="any" placeholder="Pts/use">
+      <button id="addFlexBtn" class="btn btn-primary">Add</button>
     </div>
+
     <div id="flexList" class="grid gap-2 text-sm"></div>
     <div id="flexEmpty" class="text-sm muted hidden">No flex actions yet.</div>
   </div>
+</div>
+
 
   <!-- TASKS grouped by day -->
   <div class="glass mb-6">
