@@ -376,7 +376,8 @@ function setupBottomNavDragExpand(nav) {
   const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
   const collapsedHeight = nav.getBoundingClientRect().height;
   const expandedHeight = collapsedHeight * 3;
-  const DRAG_START_PX = 14;
+  const DRAG_START_PX = 8;   // easier to “catch” the drag
+  const DRAG_ARM_PX = 2;     // small movement = stop scroll from winning
   const GRAB_STRIP_PX = 30;
   let currentHeight = collapsedHeight;
   let startY = null;
@@ -496,6 +497,12 @@ function finishDrag(event) {
     if (activePointerId !== event.pointerId) return;
     if (startY === null) return;
     const delta = startY - event.clientY;
+    // If the finger is moving at all, stop the page from treating it like a scroll.
+// We still won’t “start dragging” (ignore clicks, animate height, etc.) until DRAG_START_PX.
+if (!isDragging && Math.abs(delta) > DRAG_ARM_PX) {
+  event.preventDefault();
+}
+
 if (!isDragging && Math.abs(delta) > DRAG_START_PX) {
   isDragging = true;
   nav.dataset.ignoreClick = '1';
