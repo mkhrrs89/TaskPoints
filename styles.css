@@ -40,7 +40,7 @@
   --accent3: #22c55e;  /* success/green accent */
   --tp-z-floating: 9999;
   --tp-safe-bottom: env(safe-area-inset-bottom, 0px);
-  --tp-toolbar-height: 74px;
+  --tp-toolbar-height: 68px;
   --tp-menu-gap: 8px;
   --tp-toolbar-stack-height: var(--tp-toolbar-height);
   --safe-bottom: var(--tp-safe-bottom);
