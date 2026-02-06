@@ -919,6 +919,13 @@ header,
   overflow: visible;
 }
 
+/* Ensure touches on child buttons don’t get interpreted as scrolling */
+.mobile-bottom-nav-shell,
+.mobile-bottom-nav-shell *{
+  touch-action: none !important;
+}
+
+
 :root{
   --tp-bottom-nav-collapsed-nudge: 6px; /* tweak: 4px–12px */
 }
