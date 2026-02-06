@@ -982,7 +982,8 @@ function sleepBonus(score) {
 }
 
 function getSleepInfo(entry) {
-  const match = entry?.title?.match(/\((\d+)\)/);
+  const title = typeof entry?.title === 'string' ? entry.title : '';
+  const match = title.match(/^Sleep Score\s*\((\d+(?:\.\d+)?)\)/i);
   const score = match ? Number(match[1]) : null;
 
   const restedRaw = entry && Object.prototype.hasOwnProperty.call(entry, 'sleepRested')
