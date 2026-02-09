@@ -535,7 +535,7 @@ body {
   width: 100%;
   height: 100%;
   padding: 0;
-  overflow: hidden;
+  overflow: visible;
   box-sizing: border-box;
 }
 
@@ -567,7 +567,7 @@ body {
 .gamehub-page .matchup-scoreboard .avatar-frame::after {
   content: "";
   position: absolute;
-  inset: 0;
+  inset: -10px;
   background: url('assets/baseframe.PNG') center / 100% 100% no-repeat;
   pointer-events: none;
   z-index: 2;
