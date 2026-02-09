@@ -490,12 +490,8 @@ body {
 
 .gamehub-page #matchupYouAvatar,
 .gamehub-page #matchupOppAvatar {
-  width: clamp(140px, 20vw, 190px);
-  aspect-ratio: 2 / 3; /* matches assets/baseframe.PNG (880x1320) */
-  height: auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: block;     /* let the JS-sized frame dictate size */
+  line-height: 0;     /* prevents any weird inline spacing */
 }
 
 
