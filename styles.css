@@ -3328,3 +3328,17 @@ header,
 #bottomNav {
   touch-action: none;
 }
+
+/* GameHub: keep "THE / DIFF" up near the frames, but push the numeric diff down */
+.gamehub-page .matchup-scoreboard .scoreboard-diff{
+  align-self: stretch;                /* middle column becomes full height */
+  margin-top: 0 !important;           /* override the global margin-top */
+  padding-top: calc(var(--scoreboard-name-height) + 8px); /* keeps THE/DIFF aligned */
+  padding-bottom: 10px;               /* lift the number slightly above bottom */
+}
+
+/* This is the magic: pushes the diff value down near the big scores */
+.gamehub-page #matchupDiffValue{
+  margin-top: auto;
+}
+
