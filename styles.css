@@ -542,10 +542,10 @@ body {
 .gamehub-page .matchup-scoreboard .avatar-frame img,
 .gamehub-page .matchup-scoreboard .avatar-frame .avatar-in-frame {
   position: absolute;
-  top: 12px;
+  top: 14px;
   left: 12px;
   width: calc(100% - 24px);
-  height: calc(100% - 28px);
+  height: calc(100% - 30px);
   object-fit: cover;
   object-position: 50% 35%;
   border-radius: 0 !important;
