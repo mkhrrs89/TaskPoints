@@ -512,12 +512,13 @@
     return (a + b).toUpperCase();
   }
 
-  function matchupAvatarSize(){
-    if (window.matchMedia && window.matchMedia('(max-width: 640px)').matches) {
-      return { width: 96, height: 128 };
-    }
-    return { width: 120, height: 160 };
+function matchupAvatarSize(){
+  // Bigger framed portraits in the GameHub matchup scoreboard
+  if (window.matchMedia && window.matchMedia('(max-width: 640px)').matches) {
+    return { width: 120, height: 160 }; // mobile
   }
+  return { width: 150, height: 200 };   // desktop/tablet
+}
 
   async function renderAvatarInto(el, { name, imageId, size = 32, frame = false } = {}){
     if (!el) return;
