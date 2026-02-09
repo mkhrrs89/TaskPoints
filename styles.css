@@ -467,6 +467,18 @@ body {
   color: rgba(226, 232, 240, 0.6);
 }
 
+/* Add breathing room between Record / Daily Avg / PPD rows */
+.gamehub-page .matchup-scoreboard .scoreboard-record{
+  margin-top: 6px;   /* space between player name and the stats block */
+  line-height: 1.15;
+}
+
+.gamehub-page .matchup-scoreboard .scoreboard-meta{
+  margin-top: 4px;   /* space between each stat row */
+  line-height: 1.15;
+}
+
+
 .gamehub-page .matchup-scoreboard .scoreboard-score {
   font-size: clamp(3.4rem, 6.4vw, 4.9rem);
   color: #f1f5f9;
