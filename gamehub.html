@@ -139,7 +139,10 @@
             </div>
 
             <div class="scoreboard-diff text-center">
-              <div class="scoreboard-role">The Diff</div>
+             <div class="scoreboard-role">
+  <span>THE</span>
+  <span>DIFF</span>
+</div>
               <div id="matchupDiffLabel" class="scoreboard-diff-label">—</div>
               <div id="matchupDiffValue" class="scoreboard-diff-value">—</div>
             </div>
@@ -1304,7 +1307,6 @@ function placeHTML(rankIndex, total){
 
     if (youToday != null && Number.isFinite(oppToday)) {
       const diff = youToday - oppToday;
-      diffEl.textContent = diff >= 0 ? 'You lead' : 'You trail';
       diffValEl.textContent = fmtSigned(diff);
 
       diffValEl.classList.remove('diff-positive', 'diff-negative', 'diff-neutral');
@@ -1312,7 +1314,6 @@ function placeHTML(rankIndex, total){
       else if (diff < -0.0001) diffValEl.classList.add('diff-negative');
       else diffValEl.classList.add('diff-neutral');
     } else {
-      diffEl.textContent = 'Scores pending';
       diffValEl.textContent = '—';
     }
 
