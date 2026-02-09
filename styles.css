@@ -529,10 +529,10 @@ body {
 .gamehub-page .matchup-scoreboard .avatar-frame img,
 .gamehub-page .matchup-scoreboard .avatar-frame .avatar-in-frame {
   position: absolute;
-  top: 16px;
-  left: 16px;
-  width: calc(100% - 32px);
-  height: calc(100% - 36px);
+  top: 12px;
+  left: 12px;
+  width: calc(100% - 24px);
+  height: calc(100% - 28px);
   object-fit: cover;
   object-position: 50% 35%;
   border-radius: 0 !important;
@@ -540,6 +540,7 @@ body {
   box-shadow: none !important;
   z-index: 1;
 }
+
 
 .gamehub-page .matchup-scoreboard .avatar-frame .avatar-fallback {
   display: flex;
