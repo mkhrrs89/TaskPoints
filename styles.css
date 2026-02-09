@@ -1,26 +1,3 @@
-/* =======================================================================
-   QUICK TABLE OF CONTENTS
-   1) Foundations / Theme
-   2) UI Atoms: Buttons
-   3) UI Atoms: Forms
-   4) UI Atoms: Tags + Pills
-   5) UI Atoms: Dividers
-   6) App Chrome (header / toolbar / dropdowns)
-   7) Task UI (priorities, bars, action buttons, wrapping, badges)
-   8) Habits + Vices
-   9) Responsive: Mobile <= 640px (big overrides)
-   10) Responsive: Desktop helpers
-   11) Layering / Z-index fixes
-   12) Feedback + Motion (toasts)
-   13) Recent / History
-   14) Stat Cards + Chips
-   15) Platform quirks (date pickers, tap overlays)
-   16) Add Task UI (card + modal)
-   17) Footer
-   18) Responsive: Extra mobile stat-card tweaks
-   ======================================================================= */
-
-
 /* = SECTION 1 — FOUNDATIONS / THEME (global resets, theme variables, base body styles) = */
 /*  GLOBAL DEFAULTS (START) - These apply everywhere unless something later overrides them. */
 /*  Box sizing */
@@ -333,6 +310,14 @@ body {
   font-weight: 800;
   letter-spacing: 0.3px;
   line-height: 1;
+}
+
+/* Optical centering for "66.7%" so the % doesn't look tacked on */
+#youWinPct{
+  display: inline-block;   /* shrink to content */
+  width: fit-content;
+  margin: 0 auto;          /* center the shrink-wrapped box */
+  padding-right: 0.22em;   /* shifts the text slightly left */
 }
 
 
