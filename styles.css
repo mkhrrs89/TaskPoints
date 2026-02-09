@@ -644,11 +644,11 @@ body {
     align-self: center;
   }
 
-  .gamehub-page #matchupYouAvatar,
-  .gamehub-page #matchupOppAvatar {
-    width: clamp(96px, 32vw, 132px);
-    height: auto; /* IMPORTANT: keep the 2/3 frame ratio */
-  }
+.gamehub-page #matchupYouAvatar,
+.gamehub-page #matchupOppAvatar {
+  display: block;
+  line-height: 0;
+}
 
   .gamehub-page .matchup-details-row {
     grid-template-columns: 1fr;
