@@ -3337,16 +3337,22 @@ header,
 }
 
 
-/* GameHub: keep THE/DIFF + number together, anchored near the scores */
+/* GameHub: move THE DIFF + value down to live with the big scores */
 .gamehub-page .matchup-scoreboard .scoreboard-diff{
   align-self: stretch;
+  height: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: flex-end;  /* bottom-align the whole diff block */
-  padding: 0 0 12px;          /* move up/down by tweaking this */
-  gap: 8px;                   /* space between THE/DIFF and the number */
+  justify-content: flex-end;
+
+  margin-top: 0 !important;   /* IMPORTANT: overrides the global scoreboard-diff margin-top */
+  padding: 0 !important;
+
+  gap: 6px;
+  transform: translateY(10px); /* tweak this: 6px–16px */
 }
+
 
 /* ensure the number doesn't try to push itself away */
 .gamehub-page #matchupDiffValue{
