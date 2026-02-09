@@ -3333,12 +3333,23 @@ header,
 .gamehub-page .matchup-scoreboard .scoreboard-diff{
   align-self: stretch;                /* middle column becomes full height */
   margin-top: 0 !important;           /* override the global margin-top */
-  padding-top: calc(var(--scoreboard-name-height) + 8px); /* keeps THE/DIFF aligned */
   padding-bottom: 10px;               /* lift the number slightly above bottom */
 }
 
-/* This is the magic: pushes the diff value down near the big scores */
+
+/* GameHub: keep THE/DIFF + number together, anchored near the scores */
+.gamehub-page .matchup-scoreboard .scoreboard-diff{
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;  /* bottom-align the whole diff block */
+  padding: 0 0 12px;          /* move up/down by tweaking this */
+  gap: 8px;                   /* space between THE/DIFF and the number */
+}
+
+/* ensure the number doesn't try to push itself away */
 .gamehub-page #matchupDiffValue{
-  margin-top: auto;
+  margin-top: 0 !important;
 }
 
