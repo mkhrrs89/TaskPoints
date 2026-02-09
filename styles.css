@@ -442,6 +442,11 @@ body {
   color: #e7edf6;
   letter-spacing: 0.1em;
   text-transform: uppercase;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  line-height: 1.05;
 }
 
 .gamehub-page .matchup-scoreboard .scoreboard-identity {
@@ -3055,6 +3060,12 @@ header,
     0 var(--bevel)
   );
 }
+
+/* Hide the "You lead / You trail / Scores pending" line entirely */
+.gamehub-page #matchupDiffLabel{
+  display: none !important;
+}
+
 
 
 /* =========================================================
