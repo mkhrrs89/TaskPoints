@@ -490,13 +490,14 @@ body {
 
 .gamehub-page #matchupYouAvatar,
 .gamehub-page #matchupOppAvatar {
-  width: clamp(120px, 18vw, 160px);
-    aspect-ratio: 2 / 3; /* matches assets/baseframe.PNG (880x1320) */
+  width: clamp(140px, 20vw, 190px);
+  aspect-ratio: 2 / 3; /* matches assets/baseframe.PNG (880x1320) */
   height: auto;
   display: flex;
   align-items: center;
   justify-content: center;
 }
+
 
 .gamehub-page #matchupYouAvatar img:not(.avatar-in-frame),
 .gamehub-page #matchupOppAvatar img:not(.avatar-in-frame),
@@ -648,8 +649,8 @@ body {
 
   .gamehub-page #matchupYouAvatar,
   .gamehub-page #matchupOppAvatar {
-    width: clamp(84px, 28vw, 108px);
-    height: clamp(84px, 28vw, 108px);
+    width: clamp(96px, 32vw, 132px);
+    height: auto; /* IMPORTANT: keep the 2/3 frame ratio */
   }
 
   .gamehub-page .matchup-details-row {
