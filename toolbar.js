@@ -701,9 +701,10 @@ const flushKey = (storageKey) => {
 
   pendingByKey.delete(storageKey);
 
-  // MIN-MAX: pending.state is already merged by debouncedMerge(), so don't merge again here.
-  core.saveStateSnapshot(pending.state, { ...pending.options, storageKey });
+// SAFETY: merge with the latest localStorage at flush-time so stale tabs can't overwrite newer data.
+originalMergeAndSave(pending.state, { ...pending.options, storageKey, immediateWrite: true });
 };
+
 
 
   const flushAll = () => {
