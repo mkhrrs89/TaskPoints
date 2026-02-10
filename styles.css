@@ -456,7 +456,7 @@ body {
 }
 
 .gamehub-page .matchup-scoreboard .scoreboard-name {
-  font-size: 1.15rem;
+  font-size: 1.35rem;
   color: #e9f1fb;
   text-shadow: 0 6px 12px rgba(15, 23, 42, 0.45);
 }
@@ -759,7 +759,7 @@ body {
                system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   font-stretch: condensed;
   letter-spacing: -0.015em;
-  font-size: clamp(1.12rem, 4.2vw, 1.32rem);
+  font-size: clamp(1.28rem, 4.8vw, 1.55rem);
   line-height: 1.05;
 }
 
