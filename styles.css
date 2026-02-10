@@ -377,6 +377,21 @@ body {
 }
 /* --- Name + meta text (END) -------------------------------------------- */
 
+/* Home page scoreboard: reduce top dead-space on mobile */
+@media (max-width: 640px) {
+  .home-scoreboard-card {
+    padding-top: 10px;      /* was effectively 16px via .glass */
+    padding-bottom: 14px;
+  }
+
+  .home-scoreboard-card .matchup-scoreboard {
+    /* Was 2 lines reserved; shrink it for mobile so names sit higher */
+    --scoreboard-name-height: calc(1.1em * 1.5);
+  }
+}
+
+
+
 /* GameHub matchup 3-column compare table */
 .mu-compare{
   margin-top: 14px;
