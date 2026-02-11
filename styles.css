@@ -3374,3 +3374,10 @@ header,
   margin-top: 0 !important;
 }
 
+/* Home page: hide the Add Task / Jump to Tasks card on mobile */
+@media (max-width: 640px) {
+  #matchupCard {
+    display: none !important;
+  }
+}
+
