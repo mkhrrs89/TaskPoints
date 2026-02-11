@@ -1784,6 +1784,42 @@ header,
       }
     }
 
+/* MOBILE: points toasts drop from the Today Score island (top-left) */
+@media (max-width: 640px) {
+  .points-toast-container{
+    bottom: auto;
+    left: var(--tp-toast-left, 0.75rem);
+    top: var(--tp-toast-top, calc(env(safe-area-inset-top, 0px) + 4.25rem));
+    transform: none;
+    align-items: flex-start;
+    z-index: var(--tp-z-floating);
+  }
+
+  /* Keep same vibe/tempo; just invert direction so it "drops down" */
+  .points-toast{
+    transform: translateY(-10px) scale(.95);
+  }
+
+  @keyframes pointsToastInOut{
+    0%{
+      opacity:0;
+      transform:translateY(-12px) scale(.92);
+    }
+    12%{
+      opacity:1;
+      transform:translateY(0) scale(1);
+    }
+    80%{
+      opacity:1;
+      transform:translateY(0) scale(1);
+    }
+    100%{
+      opacity:0;
+      transform:translateY(8px) scale(.97);
+    }
+  }
+}
+
 
 /* =========================
    SECTION 7 — RECENT / HISTORY UI

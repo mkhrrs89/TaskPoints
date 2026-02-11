@@ -2195,8 +2195,61 @@ document.addEventListener('DOMContentLoaded', () => {
       document.body.appendChild(island);
     }
 
+    // --- Ensure points toast container exists on every page (mobile) ---
+    let toast = document.getElementById('pointsToastContainer');
+    if (!toast) {
+      toast = document.createElement('div');
+      toast.id = 'pointsToastContainer';
+      toast.className = 'points-toast-container';
+      document.body.appendChild(toast);
+    }
+
+    // Provide showPointsToast globally ONLY if page doesn’t define it (index.html already does)
+    if (typeof window.showPointsToast !== 'function') {
+      window.showPointsToast = function(points) {
+        const container = document.getElementById('pointsToastContainer');
+        if (!container) return;
+
+        const pts = Number(points) || 0;
+        if (!pts) return;
+
+        const div = document.createElement('div');
+        div.className = 'points-toast';
+        const sign = pts > 0 ? '+' : '';
+        div.textContent = `${sign}${pts} pts`;
+
+        container.appendChild(div);
+        setTimeout(() => div.remove(), 3200);
+      };
+    }
+
     const valueEl = document.getElementById('todayScoreIslandValue');
     if (!valueEl) return;
+
+    // --- Anchor the toast container under the Today Score island (mobile) ---
+    const updateToastAnchor = () => {
+      const isl = document.getElementById('todayScoreIsland');
+      if (!isl) return;
+
+      // If hidden, keep whatever last good values we had; CSS has fallbacks too
+      if (isl.classList.contains('hidden')) return;
+
+      const r = isl.getBoundingClientRect();
+      const root = document.documentElement;
+
+      root.style.setProperty('--tp-toast-left', `${Math.round(r.left)}px`);
+      root.style.setProperty('--tp-toast-top', `${Math.round(r.bottom + 8)}px`);
+    };
+
+    // Expose so other code (visibility toggle) can refresh it
+    window.tpUpdateToastAnchor = updateToastAnchor;
+
+    // Run once (before the island gets hidden at top of page)
+    requestAnimationFrame(updateToastAnchor);
+
+    // Keep it correct on rotate/resize
+    window.addEventListener('resize', updateToastAnchor, { passive: true });
+    window.addEventListener('orientationchange', updateToastAnchor);
 
     const sync = () => {
       let v = null;
@@ -2222,8 +2275,12 @@ document.addEventListener('DOMContentLoaded', () => {
   if (todayIsland) {
     const updateTodayIslandVisibility = () => {
       const shouldShow = window.scrollY > 40; // same threshold as the "Top" button
-      if (shouldShow) todayIsland.classList.remove('hidden');
-      else todayIsland.classList.add('hidden');
+      if (shouldShow) {
+        todayIsland.classList.remove('hidden');
+        window.tpUpdateToastAnchor?.();
+      } else {
+        todayIsland.classList.add('hidden');
+      }
     };
 
     // Ensure it's invisible on initial load at top of page
