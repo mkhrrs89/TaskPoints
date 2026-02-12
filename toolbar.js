@@ -2210,13 +2210,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const container = document.getElementById('pointsToastContainer');
         if (!container) return;
 
-        const pts = Number(points) || 0;
-        if (!pts) return;
+        const pts = Number(points);
+        if (!Number.isFinite(pts) || pts === 0) return;
 
         const div = document.createElement('div');
-        div.className = 'points-toast';
-        const sign = pts > 0 ? '+' : '';
-        div.textContent = `${sign}${pts} pts`;
+        div.className = 'points-toast' + (pts < 0 ? ' is-negative' : '');
+
+        const abs = Math.abs(pts);
+        const sign = pts > 0 ? '+' : (pts < 0 ? '-' : '');
+        div.textContent = `${sign}${abs} pts`;
 
         container.appendChild(div);
         setTimeout(() => div.remove(), 3200);
