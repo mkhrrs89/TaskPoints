@@ -1765,6 +1765,12 @@ header,
       transform:translateY(10px) scale(.95);
       animation:pointsToastInOut 3s ease-out forwards;
     }
+    .points-toast.is-negative{
+      /* Oxblood / deep burgundy */
+      background: linear-gradient(180deg, #5b1322, #2a0710);
+      color: #fff;
+      box-shadow: 0 10px 30px rgba(80, 10, 20, .45);
+    }
     @keyframes pointsToastInOut{
       0%{
         opacity:0;
@@ -3416,4 +3422,3 @@ header,
     display: none !important;
   }
 }
-
