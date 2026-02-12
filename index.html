@@ -1082,8 +1082,11 @@ function editTodayCalories() {
   const d = new Date();
   d.setHours(12, 0, 0, 0);
 
+  const oldPts = Number(entry.points) || 0;
+  const newPts = caloriesToPoints(raw);
   entry.title = `Calories (${raw})`;
-  entry.points = caloriesToPoints(raw);
+  entry.points = newPts;
+  toastPointsDelta(newPts, oldPts);
   entry.completedAtISO = d.toISOString();
 
   markCompletionsDirty();
@@ -1160,9 +1163,12 @@ function submitSleepEditModal() {
   }
 
 const target = resolveCompletionRef(sleepEditContext, "Sleep Score") || sleepEditContext;
+const oldPts = Number(target.points) || 0;
 
 target.title = `Sleep Score (${scoreVal}) — Rest ${restVal}`;
-target.points = sleepPoints(scoreVal, restVal);
+const newPts = sleepPoints(scoreVal, restVal);
+target.points = newPts;
+toastPointsDelta(newPts, oldPts);
 target.sleepRested = restVal;
 
 
@@ -1257,7 +1263,10 @@ function submitWorkEditModal() {
   }
 
   workEditContext.title = `Work Score (${scoreVal}) — Hours ${safeHours}`;
-  workEditContext.points = workPoints(scoreVal, safeHours);
+  const oldPts = Number(workEditContext.points) || 0;
+  const newPts = workPoints(scoreVal, safeHours);
+  workEditContext.points = newPts;
+  toastPointsDelta(newPts, oldPts);
   workEditContext.workHours = safeHours;
   workEditContext.source = 'work';
 
@@ -1442,6 +1451,15 @@ function showPointsToast(points){
   setTimeout(()=> {
     div.remove();
   }, 3200);
+}
+
+function toastPointsDelta(newPts, oldPts){
+  const a = Number(newPts) || 0;
+  const b = Number(oldPts) || 0;
+  let delta = Math.round((a - b) * 10) / 10;
+  if (Object.is(delta, -0)) delta = 0;
+  if (!delta) return;
+  window.showPointsToast?.(delta);
 }
 
 function parseCaloriesFromTitle(title) {
@@ -5029,6 +5047,7 @@ function saveSleepScore(){
       break;
     }
   }
+  const oldPts = existing ? (Number(existing.points) || 0) : 0;
 
   if (existing) {
     // Update today's sleep entry
@@ -5048,8 +5067,10 @@ state.completions.unshift({
   sleepRested: rested,
   source: "metric"
 });
-markCompletionsDirty();
   }
+
+  markCompletionsDirty();
+  toastPointsDelta(pts, oldPts);
 
   $('sleepScoreInput').value = "";  // clear input
   const restInput = $('sleepRestedInput');
@@ -5100,6 +5121,7 @@ function saveCalories(){
       break;
     }
   }
+  const oldPts = existing ? (Number(existing.points) || 0) : 0;
 
   // 3) If we found one, UPDATE it; otherwise, create a new one
   if (existing) {
@@ -5117,6 +5139,7 @@ function saveCalories(){
     });
   }
 
+  toastPointsDelta(pts, oldPts);
   markCompletionsDirty();
   
   $('caloriesInput').value = '';
@@ -5514,10 +5537,13 @@ block.onclick = () => {
   if (!Number.isFinite(raw) || raw < 0) return alert('Invalid calories.');
 
   const target = resolveCompletionRef(entry, "Calories") || entry;
+  const oldPts = Number(target.points) || 0;
+  const newPts = caloriesToPoints(raw);
 
   target.title  = `Calories (${raw})`;
-  target.points = caloriesToPoints(raw);
+  target.points = newPts;
 
+  toastPointsDelta(newPts, oldPts);
   markCompletionsDirty();
   save();
   scheduleRender(renderAll);
@@ -5576,6 +5602,7 @@ function saveWorkScore() {
       break;
     }
   }
+  const oldPts = existing ? (Number(existing.points) || 0) : 0;
 
   if (existing) {
     existing.title = `Work Score (${raw}) — Hours ${safeHours}`;
@@ -5593,6 +5620,8 @@ function saveWorkScore() {
       source: "work"
     });
   }
+
+  toastPointsDelta(pts, oldPts);
 
   $('workScoreInput').value = "";
   const hoursInput = $('workHoursInput');
@@ -5853,8 +5882,11 @@ function editTodayMood() {
   const d = new Date();
   d.setHours(12, 0, 0, 0);
 
+  const oldPts = Number(entry.points) || 0;
+  const newPts = moodPoints(num);
   entry.title = `Mood Score (${num})`;
-  entry.points = moodPoints(num);
+  entry.points = newPts;
+  toastPointsDelta(newPts, oldPts);
   entry.completedAtISO = d.toISOString();
   entry.source = 'metric';
 
@@ -5884,6 +5916,7 @@ function saveMoodScore() {
     const cd = new Date(c.completedAtISO);
     if (dateKey(cd) === key) { existing = c; break; }
   }
+  const oldPts = existing ? (Number(existing.points) || 0) : 0;
 
   if (existing) {
     existing.title = `Mood Score (${raw})`;
@@ -5900,6 +5933,7 @@ function saveMoodScore() {
     });
   }
 
+  toastPointsDelta(pts, oldPts);
   markCompletionsDirty();
   
   $('moodScoreInput').value = "";
@@ -6024,10 +6058,13 @@ block.onclick = () => {
   if (!Number.isFinite(num)) return alert("Invalid number.");
 
   const target = resolveCompletionRef(entry, "Mood Score") || entry;
+  const oldPts = Number(target.points) || 0;
+  const newPts = moodPoints(num);
 
   target.title = `Mood Score (${num})`;
-  target.points = moodPoints(num);
+  target.points = newPts;
 
+  toastPointsDelta(newPts, oldPts);
   markCompletionsDirty();
   save();
   scheduleRender(renderAll);
