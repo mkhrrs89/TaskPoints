@@ -357,7 +357,9 @@ function setupBottomNavPressAnimation(root = document) {
   nav.dataset.navPressReady = 'true';
 
   nav.addEventListener('pointerdown', (event) => {
-    const target = event.target.closest('.mobile-bottom-nav-btn');
+    const target = event.target.closest(
+      '.mobile-bottom-nav-btn, .mobile-task-menu .btn, .mobile-bottom-dropdown .dropdown-menu .btn'
+    );
     if (!target || !nav.contains(target)) return;
     target.classList.remove('is-pressed');
     void target.offsetWidth;
