@@ -985,6 +985,20 @@ header,
   animation: mobile-bottom-nav-press 240ms cubic-bezier(.34,1.56,.64,1);
 }
 
+/* Mobile popup menu items (Tasks menu + Game dropdown): subtle click-in animation */
+@media (max-width: 640px) {
+  .mobile-task-menu .btn,
+  .mobile-bottom-dropdown .dropdown-menu .btn{
+    transform-origin: center;
+    will-change: transform, filter;
+  }
+
+  .mobile-task-menu .btn.is-pressed,
+  .mobile-bottom-dropdown .dropdown-menu .btn.is-pressed{
+    animation: mobile-popup-menu-press 180ms cubic-bezier(.34,1.56,.64,1);
+  }
+}
+
 .mobile-bottom-nav-expanded{
   display: flex;
   justify-content: center;
@@ -1019,6 +1033,21 @@ header,
   100%{
     transform: scale(1);
     filter: drop-shadow(0 0 0 rgba(45,212,191,0));
+  }
+}
+
+@keyframes mobile-popup-menu-press{
+  0%{
+    transform: scale(1);
+    filter: brightness(1);
+  }
+  45%{
+    transform: scale(0.965);
+    filter: brightness(0.96);
+  }
+  100%{
+    transform: scale(1);
+    filter: brightness(1);
   }
 }
 
