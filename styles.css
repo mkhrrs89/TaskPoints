@@ -3561,3 +3561,23 @@ header,
   opacity: .65;
   margin-top: 2px;
 }
+
+/* When card has data, bottom becomes a vertical stack */
+.scoreV2-bottom-hasData{
+  flex-direction: column;
+  gap: 2px;
+}
+
+.scoreV2-total{
+  font-size: 20px;
+  font-weight: 600; /* semi */
+  line-height: 1.05;
+  opacity: 1;
+}
+
+.scoreV2-breakdown{
+  font-size: 11px;
+  opacity: .65;
+  line-height: 1.05;
+}
+
