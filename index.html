@@ -6615,6 +6615,26 @@ function importPaste(){
   }
 }
 
+  function renderScoreDashboardV2_Skeleton(){
+  const mount = document.getElementById("scoreV2Row");
+  if (!mount) return;
+
+  const cards = [
+    { key: "sleep", label: "Sleep" },
+    { key: "calories", label: "Calories" },
+    { key: "work", label: "Work" },
+    { key: "mood", label: "Mood" },
+  ];
+
+  mount.innerHTML = cards.map(c => `
+    <div class="scoreV2-card scoreV2-${c.key}" data-scorev2="${c.key}">
+      <div class="scoreV2-top">${c.label}</div>
+      <div class="scoreV2-divider"></div>
+      <div class="scoreV2-bottom">-</div>
+    </div>
+  `).join("");
+}
+
 
 /* ---------- RENDER/WIRE ---------- */
 function renderAll() {
@@ -6624,6 +6644,7 @@ function renderAll() {
     try {
 try { tpPerfTime('renderStats (call)', () => renderStats()); } catch (e) { console.error('renderStats error:', e); }
 try { tpPerfTime('renderTasks', () => renderTasks()); } catch (e) { console.error('renderTasks error:', e); }
+try { tpPerfTime('renderScoreDashboardV2_Skeleton', () => renderScoreDashboardV2_Skeleton()); } catch (e) { console.error('renderScoreDashboardV2_Skeleton error:', e); }
 
 
       const defer = window.requestIdleCallback
