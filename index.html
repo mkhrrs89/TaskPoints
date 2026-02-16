@@ -6619,46 +6619,75 @@ function renderScoreDashboardV2_Skeleton(){
   const mount = document.getElementById("scoreV2Row");
   if (!mount) return;
 
-  const todayKey = currentDateKey(); // you already use this in other renders
-  const todayData = state.days[todayKey] || {};
+  // Pull today's entries using your existing helpers
+  const sleepEntry = (typeof getTodaySleepEntry === "function") ? getTodaySleepEntry() : null;
+  const calEntry   = (typeof getTodayCaloriesEntry === "function") ? getTodayCaloriesEntry() : null;
+  const workEntry  = (typeof getTodayWorkEntry === "function") ? getTodayWorkEntry() : null;
+  const moodEntry  = (typeof getTodayMoodEntry === "function") ? getTodayMoodEntry() : null;
 
-  const cards = [
-    { key: "sleep", label: "Sleep" },
-    { key: "calories", label: "Calories" },
-    { key: "work", label: "Work" },
-    { key: "mood", label: "Mood" },
-  ];
+  function fmtNum(n){
+    if (!Number.isFinite(n)) return "";
+    // show whole numbers without .0, otherwise 1 decimal
+    return (Math.abs(n - Math.round(n)) < 1e-9) ? String(Math.round(n)) : n.toFixed(1);
+  }
 
-  mount.innerHTML = cards.map(c => {
-    const entry = todayData[c.key];
+  function cardHTML(key, label, entry, breakdownParts){
+    const hasPts = entry && Number.isFinite(Number(entry.points));
+    const pts = hasPts ? Number(entry.points).toFixed(1) : null;
 
-    if (entry && typeof entry.points === "number") {
-      const total = entry.points.toFixed(1);
-      const breakdown = Object.values(entry)
-        .filter(v => typeof v === "number" && v !== entry.points)
-        .join(" | ");
-
-      return `
-        <div class="scoreV2-card scoreV2-${c.key}" data-scorev2="${c.key}">
-          <div class="scoreV2-top">${c.label}</div>
-          <div class="scoreV2-divider"></div>
-          <div class="scoreV2-bottom">
-            <div class="scoreV2-total">${total} pts</div>
-            <div class="scoreV2-breakdown">${breakdown || "-"}</div>
-          </div>
-        </div>
-      `;
-    }
+    const breakdown = (Array.isArray(breakdownParts) ? breakdownParts : [])
+      .filter(v => v !== null && v !== undefined && v !== "")
+      .join(" | ");
 
     return `
-      <div class="scoreV2-card scoreV2-${c.key}" data-scorev2="${c.key}">
-        <div class="scoreV2-top">${c.label}</div>
+      <div class="scoreV2-card scoreV2-${key}" data-scorev2="${key}">
+        <div class="scoreV2-top">${label}</div>
         <div class="scoreV2-divider"></div>
-        <div class="scoreV2-bottom">-</div>
+        <div class="scoreV2-bottom ${hasPts ? "scoreV2-bottom-hasData" : ""}">
+          ${hasPts
+            ? `<div class="scoreV2-total">${pts} pts</div><div class="scoreV2-breakdown">${breakdown || "-"}</div>`
+            : `-`
+          }
+        </div>
       </div>
     `;
-  }).join("");
+  }
+
+  // Build breakdowns (display-only)
+  let sleepBreak = [];
+  if (sleepEntry) {
+    const info = (typeof getSleepInfo === "function") ? getSleepInfo(sleepEntry) : { score: null, rested: null };
+    sleepBreak = [fmtNum(Number(info.score)), fmtNum(Number(info.rested))];
+  }
+
+  let calBreak = [];
+  if (calEntry) {
+    const m = String(calEntry.title || "").match(/\((\d+(?:\.\d+)?)\)/);
+    const calories = m ? Number(m[1]) : null;
+    calBreak = [fmtNum(calories)];
+  }
+
+  let workBreak = [];
+  if (workEntry) {
+    const info = (typeof getWorkInfo === "function") ? getWorkInfo(workEntry) : { score: null, hours: null };
+    workBreak = [fmtNum(Number(info.score)), fmtNum(Number(info.hours))];
+  }
+
+  let moodBreak = [];
+  if (moodEntry) {
+    const m = String(moodEntry.title || "").match(/\(([-\d.]+)\)/);
+    const mood = m ? Number(m[1]) : null;
+    moodBreak = [fmtNum(mood)];
+  }
+
+  mount.innerHTML = [
+    cardHTML("sleep", "Sleep", sleepEntry, sleepBreak),
+    cardHTML("calories", "Calories", calEntry, calBreak),
+    cardHTML("work", "Work", workEntry, workBreak),
+    cardHTML("mood", "Mood", moodEntry, moodBreak),
+  ].join("");
 }
+
 
 
 
