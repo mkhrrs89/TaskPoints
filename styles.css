@@ -3551,10 +3551,13 @@ header,
 
 
 .scoreV2-total{
-  font-size: 20px;
+  font-size: 16px;
   font-weight: 600; /* semi */
-  line-height: 1.1;
+  line-height: 1.0;
+  opacity: 1;
+  letter-spacing: .01em;
 }
+
 
 .scoreV2-breakdown{
   font-size: 11px;
@@ -3565,8 +3568,9 @@ header,
 /* When card has data, bottom becomes a vertical stack */
 .scoreV2-bottom-hasData{
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
 }
+
 
 .scoreV2-total{
   font-size: 20px;
