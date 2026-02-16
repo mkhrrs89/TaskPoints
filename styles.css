@@ -3458,3 +3458,13 @@ header,
     display: none !important;
   }
 }
+
+/* TEMP DEBUG: Score dashboard V2 placeholder */
+#score-dashboard-v2{
+  margin: 14px 0 18px;
+  padding: 12px;
+  border: 1px dashed rgba(255,255,255,0.35);
+  border-radius: 12px;
+  min-height: 60px;
+}
+
