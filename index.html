@@ -6644,10 +6644,12 @@ function renderScoreDashboardV2_Skeleton(){
         <div class="scoreV2-top">${label}</div>
         <div class="scoreV2-divider"></div>
         <div class="scoreV2-bottom ${hasPts ? "scoreV2-bottom-hasData" : ""}">
-          ${hasPts
-            ? `<div class="scoreV2-total">${pts} pts</div><div class="scoreV2-breakdown">${breakdown || "-"}</div>`
-            : `-`
-          }
+${hasPts
+  ? `<div class="scoreV2-total"><span class="scoreV2-ptsNum">${pts}</span> <span class="scoreV2-ptsLabel">pts</span></div>
+     <div class="scoreV2-breakdown">${breakdown || "-"}</div>`
+  : `-`
+}
+
         </div>
       </div>
     `;
