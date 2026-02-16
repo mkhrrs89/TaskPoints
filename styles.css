@@ -3585,3 +3585,7 @@ header,
   line-height: 1.05;
 }
 
+.scoreV2-ptsLabel{
+  font-size: 12px;
+  opacity: .75;
+}
