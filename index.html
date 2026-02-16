@@ -6615,9 +6615,12 @@ function importPaste(){
   }
 }
 
-  function renderScoreDashboardV2_Skeleton(){
+function renderScoreDashboardV2_Skeleton(){
   const mount = document.getElementById("scoreV2Row");
   if (!mount) return;
+
+  const todayKey = currentDateKey(); // you already use this in other renders
+  const todayData = state.days[todayKey] || {};
 
   const cards = [
     { key: "sleep", label: "Sleep" },
@@ -6626,14 +6629,37 @@ function importPaste(){
     { key: "mood", label: "Mood" },
   ];
 
-  mount.innerHTML = cards.map(c => `
-    <div class="scoreV2-card scoreV2-${c.key}" data-scorev2="${c.key}">
-      <div class="scoreV2-top">${c.label}</div>
-      <div class="scoreV2-divider"></div>
-      <div class="scoreV2-bottom">-</div>
-    </div>
-  `).join("");
+  mount.innerHTML = cards.map(c => {
+    const entry = todayData[c.key];
+
+    if (entry && typeof entry.points === "number") {
+      const total = entry.points.toFixed(1);
+      const breakdown = Object.values(entry)
+        .filter(v => typeof v === "number" && v !== entry.points)
+        .join(" | ");
+
+      return `
+        <div class="scoreV2-card scoreV2-${c.key}" data-scorev2="${c.key}">
+          <div class="scoreV2-top">${c.label}</div>
+          <div class="scoreV2-divider"></div>
+          <div class="scoreV2-bottom">
+            <div class="scoreV2-total">${total} pts</div>
+            <div class="scoreV2-breakdown">${breakdown || "-"}</div>
+          </div>
+        </div>
+      `;
+    }
+
+    return `
+      <div class="scoreV2-card scoreV2-${c.key}" data-scorev2="${c.key}">
+        <div class="scoreV2-top">${c.label}</div>
+        <div class="scoreV2-divider"></div>
+        <div class="scoreV2-bottom">-</div>
+      </div>
+    `;
+  }).join("");
 }
+
 
 
 /* ---------- RENDER/WIRE ---------- */
