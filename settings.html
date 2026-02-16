@@ -87,27 +87,30 @@
         </div>
       </div>
 
-      <div class="glass space-y-3">
-        <div class="flex items-center justify-between gap-3 flex-wrap">
+      <details class="glass space-y-3" id="dataManagementSection">
+        <summary class="flex items-center justify-between gap-3 flex-wrap cursor-pointer">
           <div>
             <div class="text-lg font-semibold">Data Management</div>
             <div class="muted text-sm">Import backups or reset local TaskPoints data.</div>
           </div>
+        </summary>
+
+        <div class="space-y-3 pt-4">
+          <div class="flex flex-wrap gap-2 items-center">
+            <label class="btn btn-teal btn-toolbar nav-btn cursor-pointer">Import JSON
+              <input id="settingsImportInput" type="file" accept="application/json,application/zip,.zip" class="hidden" />
+            </label>
+            <button id="settingsImportPasteBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Paste JSON</button>
+            <button type="button" class="btn btn-ghost btn-toolbar nav-btn" data-export-images>Backup + Images</button>
+            <button id="settingsExportMatchupsBtn" class="btn btn-ghost btn-toolbar nav-btn" type="button">
+              Export Matchups + Player History (CSV)
+            </button>
+            <button id="settingsResetGameStatsBtn" class="btn btn-warn btn-toolbar nav-btn" type="button">Reset Game Stats</button>
+          </div>
+          <p class="muted text-xs">Imports replace your current device data with the contents of the backup.</p>
+          <p class="muted text-xs">Resetting game stats clears historical wins/losses, past matchups, and baseline Δ history (for NPCs only), but keeps today&apos;s matchups and all tasks, completions, and points.</p>
         </div>
-        <div class="flex flex-wrap gap-2 items-center">
-          <label class="btn btn-teal btn-toolbar nav-btn cursor-pointer">Import JSON
-            <input id="settingsImportInput" type="file" accept="application/json,application/zip,.zip" class="hidden" />
-          </label>
-          <button id="settingsImportPasteBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Paste JSON</button>
-          <button type="button" class="btn btn-ghost btn-toolbar nav-btn" data-export-images>Backup + Images</button>
-          <button id="settingsExportMatchupsBtn" class="btn btn-ghost btn-toolbar nav-btn" type="button">
-            Export Matchups + Player History (CSV)
-          </button>
-          <button id="settingsResetGameStatsBtn" class="btn btn-warn btn-toolbar nav-btn" type="button">Reset Game Stats</button>
-        </div>
-        <p class="muted text-xs">Imports replace your current device data with the contents of the backup.</p>
-        <p class="muted text-xs">Resetting game stats clears historical wins/losses, past matchups, and baseline Δ history (for NPCs only), but keeps today&apos;s matchups and all tasks, completions, and points.</p>
-      </div>
+      </details>
 
 <div class="glass space-y-3" id="briefToolsSection">
   <div>
@@ -144,93 +147,106 @@
         <div id="categoryReportOutput" class="overflow-x-auto text-sm"></div>
       </div>
 
-      <div class="glass space-y-3" id="habitCalendarReportSection">
-        <div class="flex items-center justify-between gap-3 flex-wrap">
+      <details class="glass space-y-3" id="habitCalendarReportSection">
+        <summary class="flex items-center justify-between gap-3 flex-wrap cursor-pointer">
           <div>
             <div class="text-lg font-semibold">Habit/Vice Calendar Report</div>
             <div class="muted text-sm">Pick a habit or vice to see completed days across every month since it began.</div>
           </div>
-          <button id="habitCalendarReportBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Generate Calendar</button>
-        </div>
-        <div class="flex flex-wrap items-end gap-3">
-          <label class="text-sm">
-            <span class="block muted text-xs">Habit or vice</span>
-            <select id="habitCalendarSelect" class="input w-64"></select>
-          </label>
-        </div>
-        <div id="habitCalendarOutput" class="space-y-4"></div>
-      </div>
+        </summary>
 
-      <div class="glass space-y-3" id="missingScoresSection">
-        <div class="flex items-center justify-between gap-3 flex-wrap">
+        <div class="space-y-3 pt-4">
+          <div class="flex items-center justify-end">
+            <button id="habitCalendarReportBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Generate Calendar</button>
+          </div>
+
+          <div class="flex flex-wrap items-end gap-3">
+            <label class="text-sm">
+              <span class="block muted text-xs">Habit or vice</span>
+              <select id="habitCalendarSelect" class="input w-64"></select>
+            </label>
+          </div>
+
+          <div id="habitCalendarOutput" class="space-y-4"></div>
+        </div>
+      </details>
+
+      <details class="glass space-y-3" id="missingScoresSection">
+        <summary class="flex items-center justify-between gap-3 flex-wrap cursor-pointer">
           <div>
             <div class="text-lg font-semibold">Backfill Daily Scores</div>
             <div class="muted text-sm">Add missing calories, work, mood, or sleep scores for past days.</div>
           </div>
-        </div>
-        <div class="flex flex-wrap items-end gap-3">
-          <label class="text-sm">
-            <span class="block muted text-xs">Date</span>
-            <input id="missingScoreDate" type="date" class="input w-44" />
-          </label>
-          <label class="text-sm">
-            <span class="block muted text-xs">Metric</span>
-            <select id="missingScoreType" class="input w-44">
-              <option value="calories">Calories</option>
-              <option value="work">Work</option>
-              <option value="mood">Mood</option>
-              <option value="sleep">Sleep</option>
-            </select>
-          </label>
-          <label class="text-sm" data-missing-score-field="calories">
-            <span class="block muted text-xs">Calories</span>
-            <input id="missingCaloriesValue" type="number" min="0" step="1" class="input w-32" placeholder="0–3000" />
-          </label>
-          <label class="text-sm" data-missing-score-field="work">
-            <span class="block muted text-xs">Work score</span>
-            <input id="missingWorkScore" type="number" step="0.1" class="input w-28" placeholder="0–10" />
-          </label>
-          <label class="text-sm" data-missing-score-field="work">
-            <span class="block muted text-xs">Hours</span>
-            <input id="missingWorkHours" type="number" min="0" step="0.1" class="input w-24" placeholder="0" />
-          </label>
-          <label class="text-sm" data-missing-score-field="mood">
-            <span class="block muted text-xs">Mood score</span>
-            <input id="missingMoodScore" type="number" step="0.1" class="input w-28" placeholder="0–10" />
-          </label>
-          <label class="text-sm" data-missing-score-field="sleep">
-            <span class="block muted text-xs">Sleep score</span>
-            <input id="missingSleepScore" type="number" step="0.1" class="input w-28" placeholder="0–100" />
-          </label>
-          <label class="text-sm" data-missing-score-field="sleep">
-            <span class="block muted text-xs">Rested bonus</span>
-            <input id="missingSleepRested" type="number" step="0.1" class="input w-28" placeholder="0" />
-          </label>
-          <button id="missingScoreSaveBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Save Score</button>
-        </div>
-        <p class="muted text-xs">Scores update an existing entry for that date if one already exists.</p>
-        <p id="missingScoreStatus" class="text-xs muted"></p>
-      </div>
+        </summary>
 
-      <div class="glass space-y-4">
-        <div class="flex items-center justify-between gap-3 flex-wrap">
+        <div class="space-y-3 pt-4">
+          <div class="flex flex-wrap items-end gap-3">
+            <label class="text-sm">
+              <span class="block muted text-xs">Date</span>
+              <input id="missingScoreDate" type="date" class="input w-44" />
+            </label>
+            <label class="text-sm">
+              <span class="block muted text-xs">Metric</span>
+              <select id="missingScoreType" class="input w-44">
+                <option value="calories">Calories</option>
+                <option value="work">Work</option>
+                <option value="mood">Mood</option>
+                <option value="sleep">Sleep</option>
+              </select>
+            </label>
+            <label class="text-sm" data-missing-score-field="calories">
+              <span class="block muted text-xs">Calories</span>
+              <input id="missingCaloriesValue" type="number" min="0" step="1" class="input w-32" placeholder="0–3000" />
+            </label>
+            <label class="text-sm" data-missing-score-field="work">
+              <span class="block muted text-xs">Work score</span>
+              <input id="missingWorkScore" type="number" step="0.1" class="input w-28" placeholder="0–10" />
+            </label>
+            <label class="text-sm" data-missing-score-field="work">
+              <span class="block muted text-xs">Hours</span>
+              <input id="missingWorkHours" type="number" min="0" step="0.1" class="input w-24" placeholder="0" />
+            </label>
+            <label class="text-sm" data-missing-score-field="mood">
+              <span class="block muted text-xs">Mood score</span>
+              <input id="missingMoodScore" type="number" step="0.1" class="input w-28" placeholder="0–10" />
+            </label>
+            <label class="text-sm" data-missing-score-field="sleep">
+              <span class="block muted text-xs">Sleep score</span>
+              <input id="missingSleepScore" type="number" step="0.1" class="input w-28" placeholder="0–100" />
+            </label>
+            <label class="text-sm" data-missing-score-field="sleep">
+              <span class="block muted text-xs">Rested bonus</span>
+              <input id="missingSleepRested" type="number" step="0.1" class="input w-28" placeholder="0" />
+            </label>
+            <button id="missingScoreSaveBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Save Score</button>
+          </div>
+
+          <p class="muted text-xs">Scores update an existing entry for that date if one already exists.</p>
+          <p id="missingScoreStatus" class="text-xs muted"></p>
+        </div>
+      </details>
+
+      <details class="glass space-y-4" id="simulationLabSection">
+        <summary class="flex items-center justify-between gap-3 flex-wrap cursor-pointer">
           <div>
             <div class="text-lg font-semibold">Simulation Lab</div>
             <div class="muted text-sm">Experiment with player ratings to see simulated scores over time. Results are temporary and never saved.</div>
           </div>
-        </div>
-        <div class="flex flex-wrap items-end gap-3">
-          <label class="text-sm">
-            <span class="block muted text-xs">Simulation days</span>
-            <input id="simulationDaysInput" type="number" min="1" max="3650" value="30"
-              class="px-3 py-2 rounded-xl border border-white/10 bg-black/30 text-sm w-32" />
-          </label>
-          <button id="runSimulationBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Run Simulation</button>
-          <button id="downloadSimulationBtn" class="btn btn-ghost btn-toolbar nav-btn" type="button" disabled>
-            Download (CSV)
-          </button>
-        </div>
-        <p class="muted text-xs">Simulation results clear when you leave this page.</p>
+        </summary>
+
+        <div class="space-y-4 pt-4">
+          <div class="flex flex-wrap items-end gap-3">
+            <label class="text-sm">
+              <span class="block muted text-xs">Simulation days</span>
+              <input id="simulationDaysInput" type="number" min="1" max="3650" value="30"
+                class="px-3 py-2 rounded-xl border border-white/10 bg-black/30 text-sm w-32" />
+            </label>
+            <button id="runSimulationBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Run Simulation</button>
+            <button id="downloadSimulationBtn" class="btn btn-ghost btn-toolbar nav-btn" type="button" disabled>
+              Download (CSV)
+            </button>
+          </div>
+          <p class="muted text-xs">Simulation results clear when you leave this page.</p>
 
         <div id="simulationResults" class="space-y-6 hidden">
           <details id="simulationScoresSection" class="glass p-4">
@@ -322,7 +338,7 @@
             </div>
           </details>
         </div>
-      </div>
+      </details>
 
       <details class="glass space-y-4" id="scoringSettingsSection">
         <summary class="flex items-center justify-between gap-3 flex-wrap cursor-pointer">
