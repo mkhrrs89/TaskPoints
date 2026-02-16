@@ -357,15 +357,43 @@ function setupBottomNavPressAnimation(root = document) {
   nav.dataset.navPressReady = 'true';
 
   nav.addEventListener('pointerdown', (event) => {
-    const target = event.target.closest(
-      '.mobile-bottom-nav-btn, .mobile-task-menu .btn, .mobile-bottom-dropdown .dropdown-menu .btn'
-    );
+    const target = event.target.closest('.mobile-bottom-nav-btn');
     if (!target || !nav.contains(target)) return;
     target.classList.remove('is-pressed');
     void target.offsetWidth;
     target.classList.add('is-pressed');
     window.setTimeout(() => target.classList.remove('is-pressed'), 300);
   });
+}
+
+function setupPopupMenuPressAnimation() {
+  if (window.__tpPopupPressReady) return;
+  window.__tpPopupPressReady = true;
+
+  // Only the mobile bottom toolbar popup menus:
+  const selector = '.mobile-task-menu .btn, .mobile-bottom-dropdown .dropdown-menu .btn';
+
+  const press = (el) => {
+    el.classList.remove('is-pressed');
+    void el.offsetWidth; // restart animation
+    el.classList.add('is-pressed');
+    window.setTimeout(() => el.classList.remove('is-pressed'), 220);
+  };
+
+  const handler = (e) => {
+    const el = e.target?.closest?.(selector);
+    if (!el) return;
+    press(el);
+    // Don’t block navigation; just animate.
+  };
+
+  // CAPTURE ensures this runs even if dropdown-menu stops bubbling pointerdown
+  if (window.PointerEvent) {
+    document.addEventListener('pointerdown', handler, { capture: true, passive: true });
+  } else {
+    document.addEventListener('touchstart', handler, { capture: true, passive: true });
+    document.addEventListener('mousedown', handler, { capture: true });
+  }
 }
 
 function setupBottomNavDragExpand(nav) {
@@ -599,6 +627,7 @@ nav.addEventListener('pointercancel', (event) => {
 function initToolbarNow() {
   renderBottomToolbar();
   setupMobileTasksMenu();
+  setupPopupMenuPressAnimation();
   try {
     const k = 'tp_audit_dupe_habits_last_run';
     const today = new Date().toISOString().slice(0,10);
