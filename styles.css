@@ -3461,12 +3461,10 @@ header,
 
 /* TEMP DEBUG: Score dashboard V2 placeholder */
 #score-dashboard-v2{
-  margin: 14px 0 18px;
-  padding: 12px;
-  border: 1px dashed rgba(255,255,255,0.35);
-  border-radius: 12px;
-  min-height: 60px;
+  margin: 12px 0 18px;
+  padding: 6px 0 2px;
 }
+
 
 /* =========================
    SCORE DASHBOARD V2 (MOBILE FIRST) - STATIC SKELETON
@@ -3486,7 +3484,7 @@ header,
 .scoreV2-card{
   flex: 1 1 0;
   min-width: 0;              /* prevents overflow */
-  height: 62px;              /* empty state: slightly wider-than-tall feel */
+  height: 72px;              /* empty state: slightly wider-than-tall feel */
   position: relative;
   overflow: hidden;
   cursor: pointer;
@@ -3524,9 +3522,10 @@ header,
 
 .scoreV2-bottom{
   height: 54%;
-  font-size: 18px;
+  font-size: 20px;
   opacity: .75;
 }
+
 
 /* Inset shadow divider between halves */
 .scoreV2-divider{
