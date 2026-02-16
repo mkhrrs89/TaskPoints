@@ -997,6 +997,13 @@ header,
   .mobile-bottom-dropdown .dropdown-menu .btn.is-pressed{
     animation: mobile-popup-menu-press 180ms cubic-bezier(.34,1.56,.64,1);
   }
+
+  /* Fallback for iOS/tap edge cases */
+  .mobile-task-menu .btn:active,
+  .mobile-bottom-dropdown .dropdown-menu .btn:active{
+    transform: scale(0.965);
+    filter: brightness(0.96);
+  }
 }
 
 .mobile-bottom-nav-expanded{
