@@ -888,6 +888,7 @@ function fastEnsureStateShape(s) {
     if (Object.prototype.hasOwnProperty.call(nextState || {}, 'habitTagColors')) {
       const nextColors = normalizeHabitTagColors(nextState?.habitTagColors);
       const existingColors = normalizeHabitTagColors(existing?.habitTagColors);
+
       const existingHasColors = Object.keys(existingColors).length > 0;
       const allowChange =
         allowHabitTagColorReset || shouldAllowStickyOverwrite('habitTagColors', options);
