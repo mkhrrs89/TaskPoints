@@ -3642,3 +3642,54 @@ header,
   opacity: 1;
   transform: translateY(0);
 }
+
+
+.scoreV2-recentGrid{
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.scoreV2-gridRow{
+  display: grid;
+  grid-template-columns: 64px repeat(4, 1fr);
+  gap: 8px;
+  align-items: stretch;
+}
+
+.scoreV2-date{
+  font-size: 11px;
+  opacity: .65;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding-left: 2px;
+  line-height: 1.1;
+}
+
+/* Recent cells (slightly wider than tall) */
+.scoreV2-cell{
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  clip-path: polygon(
+    8px 0,
+    calc(100% - 8px) 0,
+    100% 8px,
+    100% calc(100% - 8px),
+    calc(100% - 8px) 100%,
+    8px 100%,
+    0 calc(100% - 8px),
+    0 8px
+  );
+}
+
+.scoreV2-cellPts{
+  font-size: 12px;
+  font-weight: 600;
+  opacity: .9;
+  line-height: 1;
+}
