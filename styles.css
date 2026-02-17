@@ -3479,7 +3479,7 @@ header,
 .scoreV2-card{
   flex: 1 1 0;
   min-width: 0;
-  height: 72px;
+  height: 68px;
   position: relative;
   overflow: hidden;
   cursor: pointer;
@@ -3509,12 +3509,16 @@ header,
   align-items: center;
   justify-content: center;
 
-  font-size: 10px;
+  font-size: 11px;          /* was 10px */
   letter-spacing: .06em;
   text-transform: uppercase;
   opacity: .85;
   line-height: 1;
+
+  /* visual centering compensation for bevel */
+  transform: translateY(1px);
 }
+
 
 .scoreV2-bottom{
   height: calc(100% - var(--scoreV2-split));
@@ -3542,7 +3546,7 @@ header,
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 1px;
+  gap: 0px;
   opacity: 1; /* override the .75 so data looks crisp */
 }
 
@@ -3575,7 +3579,9 @@ header,
   line-height: 1;
   margin: 0;
   padding: 0;
+  transform: translateY(-1px);
 }
+
 
 /* --- TEMP COLORS (NOW MATCH THE SPLIT!) --- */
 .scoreV2-sleep{
