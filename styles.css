@@ -3514,17 +3514,18 @@ header,
 
 .scoreV2-top{
   height: 46%;
-  font-size: 11px;
+  font-size: 10px;
   letter-spacing: .06em;
   text-transform: uppercase;
   opacity: .85;
 }
 
 .scoreV2-bottom{
-  height: 54%;
-  font-size: 20px;
+  height: 56%;
+  font-size: 20px; /* this only affects the "-" state now; ok */
   opacity: .75;
 }
+
 
 
 /* Inset shadow divider between halves */
@@ -3550,21 +3551,6 @@ header,
 .scoreV2-mood     { background: linear-gradient(to bottom, rgba(15,65,160,.75) 0 46%, rgba(5,20,70,.9) 46% 100%); }
 
 
-.scoreV2-total{
-  font-size: 16px;
-  font-weight: 600; /* semi */
-  line-height: 1.0;
-  opacity: 1;
-  letter-spacing: .01em;
-}
-
-
-.scoreV2-breakdown{
-  font-size: 11px;
-  opacity: .65;
-  margin-top: 2px;
-}
-
 /* When card has data, bottom becomes a vertical stack */
 .scoreV2-bottom-hasData{
   flex-direction: column;
@@ -3573,19 +3559,28 @@ header,
 
 
 .scoreV2-total{
-  font-size: 20px;
+  line-height: 1.0;
   font-weight: 600; /* semi */
-  line-height: 1.05;
   opacity: 1;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 4px;
+}
+
+.scoreV2-ptsNum{
+  font-size: 14px;      /* was effectively ~16+ */
+  letter-spacing: .01em;
+}
+
+.scoreV2-ptsLabel{
+  font-size: 11px;
+  opacity: .75;
 }
 
 .scoreV2-breakdown{
   font-size: 11px;
   opacity: .65;
-  line-height: 1.05;
-}
-
-.scoreV2-ptsLabel{
-  font-size: 12px;
-  opacity: .75;
+  line-height: 1.0;
+  margin-top: 2px;
 }
