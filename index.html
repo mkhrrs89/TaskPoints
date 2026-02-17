@@ -6661,8 +6661,6 @@ ${hasPts
   : `-`
 }
 
-
-
         </div>
       </div>
     `;
@@ -6703,6 +6701,24 @@ ${hasPts
   ].join("");
 }
 
+let scoreV2RecentOpen = false;
+
+function initScoreV2Toggle(){
+  const btn = document.getElementById("scoreV2ToggleBtn");
+  const wrap = document.getElementById("scoreV2RecentWrap");
+  if (!btn || !wrap) return;
+
+  btn.onclick = () => {
+    scoreV2RecentOpen = !scoreV2RecentOpen;
+
+    wrap.classList.toggle("is-open", scoreV2RecentOpen);
+    wrap.setAttribute("aria-hidden", String(!scoreV2RecentOpen));
+    btn.textContent = scoreV2RecentOpen ? "Hide recent scores" : "Display recent scores";
+
+    // Later: when opening, render recent grid
+    // renderScoreV2RecentGrid();
+  };
+}
 
 
 
@@ -6715,6 +6731,7 @@ function renderAll() {
 try { tpPerfTime('renderStats (call)', () => renderStats()); } catch (e) { console.error('renderStats error:', e); }
 try { tpPerfTime('renderTasks', () => renderTasks()); } catch (e) { console.error('renderTasks error:', e); }
 try { tpPerfTime('renderScoreDashboardV2_Skeleton', () => renderScoreDashboardV2_Skeleton()); } catch (e) { console.error('renderScoreDashboardV2_Skeleton error:', e); }
+try { tpPerfTime('initScoreV2Toggle', () => initScoreV2Toggle()); } catch (e) { console.error('initScoreV2Toggle error:', e); }
 
 
       const defer = window.requestIdleCallback
