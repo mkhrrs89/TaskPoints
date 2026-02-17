@@ -6716,8 +6716,97 @@ function initScoreV2Toggle(){
     btn.textContent = scoreV2RecentOpen ? "Hide recent scores" : "Display recent scores";
 
     // Later: when opening, render recent grid
-    // renderScoreV2RecentGrid();
+  if (scoreV2RecentOpen) renderScoreV2RecentGrid();
+    
   };
+}
+
+  function renderScoreV2RecentGrid(){
+  const grid = document.getElementById("scoreV2RecentGrid");
+  if (!grid) return;
+
+  // Build last 5 days EXCLUDING today
+  const days = [];
+  const now = new Date();
+  for (let i = 1; i <= 5; i++){
+    const d = new Date(now);
+    d.setDate(now.getDate() - i);
+    days.push(d);
+  }
+
+  function fmtDate(d){
+    const wk = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][d.getDay()];
+    const m = d.getMonth() + 1;
+    const day = d.getDate();
+    return `${wk}, ${m}/${day}`;
+  }
+
+  // IMPORTANT: we use your existing "entry by date" helpers if you have them.
+  // If you DON'T have per-date helpers yet, we can add a safe lookup next.
+  function getEntryForDate(key, dateObj){
+    // Try common patterns in TaskPoints without changing logic:
+    // 1) a helper like getSleepEntryForDate(dateKey)
+    const dateKey = dateObj.toISOString().slice(0,10);
+
+    if (key === "sleep" && typeof getSleepEntryForDateKey === "function") return getSleepEntryForDateKey(dateKey);
+    if (key === "calories" && typeof getCaloriesEntryForDateKey === "function") return getCaloriesEntryForDateKey(dateKey);
+    if (key === "work" && typeof getWorkEntryForDateKey === "function") return getWorkEntryForDateKey(dateKey);
+    if (key === "mood" && typeof getMoodEntryForDateKey === "function") return getMoodEntryForDateKey(dateKey);
+
+    // 2) fallback: search completions array (safe display-only)
+    if (!state || !Array.isArray(state.completions)) return null;
+
+    // categories in your app are stored via completion.title or completion.type;
+    // we’ll match by your existing "today" getters’ category markers.
+    const markers = {
+      sleep: "SLEEP",
+      calories: "CAL",
+      work: "WORK",
+      mood: "MOOD",
+    };
+
+    const marker = markers[key];
+    return state.completions.find(c => {
+      if (!c) return false;
+      if (c.dateKey !== dateKey && c.date !== dateKey) return false;
+      const t = String(c.title || "").toUpperCase();
+      return t.includes(marker);
+    }) || null;
+  }
+
+  function fmtNum(n){
+    if (!Number.isFinite(n)) return "";
+    return (Math.abs(n - Math.round(n)) < 1e-9) ? String(Math.round(n)) : n.toFixed(1);
+  }
+
+  function cellHTML(catKey, entry){
+    const hasPts = entry && Number.isFinite(Number(entry.points));
+    const pts = hasPts ? Number(entry.points).toFixed(1) : null;
+
+    return `
+      <div class="scoreV2-cell scoreV2-${catKey}">
+        <div class="scoreV2-cellPts">${hasPts ? `${pts} pts` : "-"}</div>
+      </div>
+    `;
+  }
+
+  // Build a 5-row grid. Each row: date + 4 cells
+  grid.innerHTML = days.map(d => {
+    const sleepE = getEntryForDate("sleep", d);
+    const calE   = getEntryForDate("calories", d);
+    const workE  = getEntryForDate("work", d);
+    const moodE  = getEntryForDate("mood", d);
+
+    return `
+      <div class="scoreV2-gridRow">
+        <div class="scoreV2-date">${fmtDate(d)}</div>
+        ${cellHTML("sleep", sleepE)}
+        ${cellHTML("calories", calE)}
+        ${cellHTML("work", workE)}
+        ${cellHTML("mood", moodE)}
+      </div>
+    `;
+  }).join("");
 }
 
 
