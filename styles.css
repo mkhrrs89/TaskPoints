@@ -3513,7 +3513,7 @@ header,
 }
 
 .scoreV2-top{
-  height: 46%;
+  height: 36%;
   font-size: 10px;
   letter-spacing: .06em;
   text-transform: uppercase;
@@ -3533,7 +3533,7 @@ header,
   position: absolute;
   left: 0;
   right: 0;
-  top: 46%;
+  top: 36%;
   height: 0;
   box-shadow: 0 1px 0 rgba(255,255,255,0.18) inset, 0 -1px 0 rgba(0,0,0,0.35) inset;
   pointer-events: none;
