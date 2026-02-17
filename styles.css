@@ -3521,7 +3521,7 @@ header,
 }
 
 .scoreV2-bottom{
-  height: 56%;
+  height: 64%;
   font-size: 20px; /* this only affects the "-" state now; ok */
   opacity: .75;
 }
