@@ -623,7 +623,18 @@ Nothing visible on the page is built here. === -->
 
 <section id="score-dashboard-v2">
   <div class="scoreV2-row" id="scoreV2Row"></div>
+
+  <div class="scoreV2-toggleRow">
+    <button class="scoreV2-toggleBtn" id="scoreV2ToggleBtn" type="button">
+      Display recent scores
+    </button>
+  </div>
+
+  <div class="scoreV2-recentWrap" id="scoreV2RecentWrap" aria-hidden="true">
+    <div class="scoreV2-recentGrid" id="scoreV2RecentGrid"></div>
+  </div>
 </section>
+
 
 
   <!-- HABITS -->
@@ -6649,6 +6660,8 @@ ${hasPts
      <div class="scoreV2-breakdown">${breakdown || "-"}</div>`
   : `-`
 }
+
+
 
         </div>
       </div>
