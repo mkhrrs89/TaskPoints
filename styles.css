@@ -3513,18 +3513,34 @@ header,
 }
 
 .scoreV2-top{
-  height: 36%;
+  height: 36%;                 /* or whatever split you’re using */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  /* important: compensate for bevel clipping */
+  padding-top: 4px;
+
   font-size: 10px;
   letter-spacing: .06em;
   text-transform: uppercase;
   opacity: .85;
+  line-height: 1;
 }
 
 .scoreV2-bottom{
-  height: 64%;
-  font-size: 20px; /* this only affects the "-" state now; ok */
+  height: 64%;                 /* must be 100 - top height */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  /* important: compensate for bevel clipping */
+  padding-bottom: 4px;
+
+  line-height: 1;
   opacity: .75;
 }
+
 
 
 
@@ -3553,9 +3569,16 @@ header,
 
 /* When card has data, bottom becomes a vertical stack */
 .scoreV2-bottom-hasData{
+  display: flex;
   flex-direction: column;
+  align-items: center;
+  justify-content: center;   /* THIS is the vertical centering */
   gap: 1px;
+
+  /* keep the bevel compensation */
+  padding-bottom: 4px;
 }
+
 
 
 .scoreV2-total{
@@ -3584,3 +3607,11 @@ header,
   line-height: 1.0;
   margin-top: 2px;
 }
+
+.scoreV2-total,
+.scoreV2-breakdown{
+  margin: 0;
+  padding: 0;
+  line-height: 1;
+}
+
