@@ -3459,19 +3459,14 @@ header,
   }
 }
 
-/* TEMP DEBUG: Score dashboard V2 placeholder */
-#score-dashboard-v2{
-  margin: 12px 0 18px;
-  padding: 6px 0 2px;
-}
-
-
 /* =========================
-   SCORE DASHBOARD V2 (MOBILE FIRST) - STATIC SKELETON
+   SCORE DASHBOARD V2 (MOBILE FIRST)
    ========================= */
 
 #score-dashboard-v2{
-  /* keep the TEMP debug border for now */
+  margin: 12px 0 18px;
+  padding: 6px 0 2px;
+  font-family: "Arial Narrow","Roboto Condensed","Helvetica Neue Condensed",system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
 }
 
 .scoreV2-row{
@@ -3480,11 +3475,11 @@ header,
   width: 100%;
 }
 
-/* One card */
+/* --- One card --- */
 .scoreV2-card{
   flex: 1 1 0;
-  min-width: 0;              /* prevents overflow */
-  height: 72px;              /* empty state: slightly wider-than-tall feel */
+  min-width: 0;
+  height: 72px;
   position: relative;
   overflow: hidden;
   cursor: pointer;
@@ -3503,23 +3498,16 @@ header,
   );
 }
 
-/* Split halves */
-.scoreV2-top,
-.scoreV2-bottom{
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+/* --- Split halves (MATCH THESE WITH GRADIENT SPLIT) --- */
+:root{
+  --scoreV2-split: 36%;   /* <— change this and everything stays aligned */
 }
 
 .scoreV2-top{
-  height: 36%;                 /* or whatever split you’re using */
+  height: var(--scoreV2-split);
   display: flex;
   align-items: center;
   justify-content: center;
-
-  /* important: compensate for bevel clipping */
-  padding-top: 4px;
 
   font-size: 10px;
   letter-spacing: .06em;
@@ -3529,70 +3517,50 @@ header,
 }
 
 .scoreV2-bottom{
-  height: 64%;                 /* must be 100 - top height */
+  height: calc(100% - var(--scoreV2-split));
   display: flex;
   align-items: center;
   justify-content: center;
-
-  /* important: compensate for bevel clipping */
-  padding-bottom: 4px;
 
   line-height: 1;
   opacity: .75;
 }
 
-
-
-
-/* Inset shadow divider between halves */
+/* Divider sits exactly at the split */
 .scoreV2-divider{
   position: absolute;
   left: 0;
   right: 0;
-  top: 36%;
+  top: var(--scoreV2-split);
   height: 0;
   box-shadow: 0 1px 0 rgba(255,255,255,0.18) inset, 0 -1px 0 rgba(0,0,0,0.35) inset;
   pointer-events: none;
 }
 
-/* Narrow font scoped to V2 only */
-#score-dashboard-v2{
-  font-family: "Arial Narrow", "Roboto Condensed", "Helvetica Neue Condensed", system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
-}
-
-/* TEMP COLORS (replace later with exact existing gradients) */
-.scoreV2-sleep    { background: linear-gradient(to bottom, rgba(88,90,200,.75) 0 46%, rgba(22,24,90,.9) 46% 100%); }
-.scoreV2-calories { background: linear-gradient(to bottom, rgba(40,120,70,.75) 0 46%, rgba(10,45,20,.9) 46% 100%); }
-.scoreV2-work     { background: linear-gradient(to bottom, rgba(70,160,235,.75) 0 46%, rgba(10,55,110,.9) 46% 100%); }
-.scoreV2-mood     { background: linear-gradient(to bottom, rgba(15,65,160,.75) 0 46%, rgba(5,20,70,.9) 46% 100%); }
-
-
-/* When card has data, bottom becomes a vertical stack */
+/* Bottom data stack */
 .scoreV2-bottom-hasData{
-  display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;   /* THIS is the vertical centering */
+  justify-content: center;
   gap: 1px;
-
-  /* keep the bevel compensation */
-  padding-bottom: 4px;
+  opacity: 1; /* override the .75 so data looks crisp */
 }
 
-
-
+/* Total / breakdown typography */
 .scoreV2-total{
-  line-height: 1.0;
-  font-weight: 600; /* semi */
-  opacity: 1;
   display: flex;
   align-items: baseline;
   justify-content: center;
   gap: 4px;
+
+  font-weight: 600; /* semi */
+  line-height: 1;
+  margin: 0;
+  padding: 0;
 }
 
 .scoreV2-ptsNum{
-  font-size: 14px;      /* was effectively ~16+ */
+  font-size: 14px;
   letter-spacing: .01em;
 }
 
@@ -3604,14 +3572,33 @@ header,
 .scoreV2-breakdown{
   font-size: 11px;
   opacity: .65;
-  line-height: 1.0;
-  margin-top: 2px;
-}
-
-.scoreV2-total,
-.scoreV2-breakdown{
+  line-height: 1;
   margin: 0;
   padding: 0;
-  line-height: 1;
 }
 
+/* --- TEMP COLORS (NOW MATCH THE SPLIT!) --- */
+.scoreV2-sleep{
+  background: linear-gradient(to bottom,
+    rgba(88,90,200,.75) 0 var(--scoreV2-split),
+    rgba(22,24,90,.9) var(--scoreV2-split) 100%
+  );
+}
+.scoreV2-calories{
+  background: linear-gradient(to bottom,
+    rgba(40,120,70,.75) 0 var(--scoreV2-split),
+    rgba(10,45,20,.9) var(--scoreV2-split) 100%
+  );
+}
+.scoreV2-work{
+  background: linear-gradient(to bottom,
+    rgba(70,160,235,.75) 0 var(--scoreV2-split),
+    rgba(10,55,110,.9) var(--scoreV2-split) 100%
+  );
+}
+.scoreV2-mood{
+  background: linear-gradient(to bottom,
+    rgba(15,65,160,.75) 0 var(--scoreV2-split),
+    rgba(5,20,70,.9) var(--scoreV2-split) 100%
+  );
+}
