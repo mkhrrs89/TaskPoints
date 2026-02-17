@@ -3693,3 +3693,17 @@ header,
   opacity: .9;
   line-height: 1;
 }
+
+/* Recent grid cells should be single-tone (use the darker half) */
+.scoreV2-cell.scoreV2-sleep{
+  background: rgba(22,24,90,.92);
+}
+.scoreV2-cell.scoreV2-calories{
+  background: rgba(10,45,20,.92);
+}
+.scoreV2-cell.scoreV2-work{
+  background: rgba(10,55,110,.92);
+}
+.scoreV2-cell.scoreV2-mood{
+  background: rgba(5,20,70,.92);
+}
