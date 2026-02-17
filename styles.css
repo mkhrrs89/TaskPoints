@@ -3608,3 +3608,37 @@ header,
     rgba(5,20,70,.9) var(--scoreV2-split) 100%
   );
 }
+
+.scoreV2-toggleRow{
+  margin-top: 10px;
+  display: flex;
+  justify-content: center;
+}
+
+.scoreV2-toggleBtn{
+  background: transparent;
+  border: none;
+  color: rgba(255,255,255,0.7);
+  font-size: 12px;
+  letter-spacing: .04em;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.scoreV2-toggleBtn:active{
+  transform: scale(0.98);
+}
+
+.scoreV2-recentWrap{
+  overflow: hidden;
+  max-height: 0;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: max-height 260ms ease, opacity 220ms ease, transform 260ms ease;
+}
+
+.scoreV2-recentWrap.is-open{
+  max-height: 1000px; /* big enough for 5 rows */
+  opacity: 1;
+  transform: translateY(0);
+}
