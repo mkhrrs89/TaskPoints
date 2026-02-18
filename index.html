@@ -5551,7 +5551,7 @@ block.onclick = () => {
   const raw = Number(String(newVal).trim());
   if (!Number.isFinite(raw) || raw < 0) return alert('Invalid calories.');
 
-  const target = resolveCompletionRef(entry, "Calories") || entry;
+  const target = entry;
   const oldPts = Number(target.points) || 0;
   const newPts = caloriesToPoints(raw);
 
@@ -6072,7 +6072,7 @@ block.onclick = () => {
   const num = Number(String(newVal).trim());
   if (!Number.isFinite(num)) return alert("Invalid number.");
 
-  const target = resolveCompletionRef(entry, "Mood Score") || entry;
+  const target = entry;
   const oldPts = Number(target.points) || 0;
   const newPts = moodPoints(num);
 
@@ -6724,6 +6724,7 @@ function initScoreV2Toggle(){
   function renderScoreV2RecentGrid(){
   const grid = document.getElementById("scoreV2RecentGrid");
   if (!grid) return;
+  const entryMap = Object.create(null);
 
   // Build last 5 days EXCLUDING today
   const days = [];
@@ -6779,16 +6780,19 @@ function initScoreV2Toggle(){
     return (Math.abs(n - Math.round(n)) < 1e-9) ? String(Math.round(n)) : n.toFixed(1);
   }
 
-  function cellHTML(catKey, entry){
-    const hasPts = entry && Number.isFinite(Number(entry.points));
-    const pts = hasPts ? Number(entry.points).toFixed(1) : null;
+function cellHTML(catKey, entry, dateKeyStr){
+  const hasPts = entry && Number.isFinite(Number(entry.points));
+  const pts = hasPts ? Number(entry.points).toFixed(1) : null;
 
-    return `
-      <div class="scoreV2-cell scoreV2-${catKey}">
-        <div class="scoreV2-cellPts">${hasPts ? `${pts}` : "-"}</div>
-      </div>
-    `;
-  }
+  return `
+    <div class="scoreV2-cell scoreV2-cell-${catKey}"
+         data-cat="${catKey}"
+         data-datekey="${dateKeyStr}">
+      <div class="scoreV2-cellPts">${hasPts ? `${pts} pts` : "-"}</div>
+    </div>
+  `;
+}
+
 
   // Build a 5-row grid. Each row: date + 4 cells
   grid.innerHTML = days.map(d => {
@@ -6797,18 +6801,100 @@ function initScoreV2Toggle(){
     const workE  = getEntryForDate("work", d);
     const moodE  = getEntryForDate("mood", d);
 
-    return `
-      <div class="scoreV2-gridRow">
-        <div class="scoreV2-date">${fmtDate(d)}</div>
-        ${cellHTML("sleep", sleepE)}
-        ${cellHTML("calories", calE)}
-        ${cellHTML("work", workE)}
-        ${cellHTML("mood", moodE)}
-      </div>
-    `;
-  }).join("");
-}
+const dk = d.toISOString().slice(0,10);
 
+entryMap[`${dk}|sleep`] = sleepE;
+entryMap[`${dk}|calories`] = calE;
+entryMap[`${dk}|work`] = workE;
+entryMap[`${dk}|mood`] = moodE;
+
+return `
+  <div class="scoreV2-gridRow">
+    <div class="scoreV2-date">${fmtDate(d)}</div>
+    ${cellHTML("sleep", sleepE, dk)}
+    ${cellHTML("calories", calE, dk)}
+    ${cellHTML("work", workE, dk)}
+    ${cellHTML("mood", moodE, dk)}
+  </div>
+`;
+
+
+    
+  }).join("");
+    grid.__entryMap = entryMap;
+
+if (!grid.__boundScoreV2Clicks) {
+  grid.__boundScoreV2Clicks = true;
+
+  grid.addEventListener("click", (e) => {
+    const cell = e.target.closest(".scoreV2-cell");
+    if (!cell || !grid.contains(cell)) return;
+
+    const cat = cell.dataset.cat;
+    const dk  = cell.dataset.datekey;
+
+    const entry = grid.__entryMap?.[`${dk}|${cat}`];
+    if (!entry) return;
+
+    // Sleep + Work already have real modals in V1
+    if (cat === "sleep" && typeof promptEditSleepEntry === "function") {
+      promptEditSleepEntry(entry);
+      return;
+    }
+
+    if (cat === "work" && typeof promptEditWorkEntry === "function") {
+      promptEditWorkEntry(entry);
+      return;
+    }
+
+    // Calories uses prompt-style in V1
+    if (cat === "calories") {
+      const current = entry.title.match(/\((\d+)\)/)?.[1] || "";
+      const newVal = prompt("Edit calories for this day:", String(current));
+      if (newVal === null) return;
+
+      const raw = Number(String(newVal).trim());
+      if (!Number.isFinite(raw) || raw < 0) return alert("Invalid calories.");
+
+      const target = entry;
+      const oldPts = Number(target.points) || 0;
+      const newPts = caloriesToPoints(raw);
+
+      target.title  = `Calories (${raw})`;
+      target.points = newPts;
+      toastPointsDelta(newPts, oldPts);
+
+      markCompletionsDirty();
+      save();
+      scheduleRender(renderAll);
+      return;
+    }
+
+    // Mood: prompt-based (keeps it consistent)
+    if (cat === "mood") {
+      const current = entry.title.match(/\(([-\d.]+)\)/)?.[1] || "";
+      const newVal = prompt("Edit mood score for this day:", String(current));
+      if (newVal === null) return;
+
+      const num = Number(String(newVal).trim());
+      if (!Number.isFinite(num)) return alert("Invalid mood score.");
+
+      const target = entry;
+      const oldPts = Number(target.points) || 0;
+      const newPts = moodPoints(num);
+
+      target.title  = `Mood Score (${num})`;
+      target.points = newPts;
+      toastPointsDelta(newPts, oldPts);
+
+      markCompletionsDirty();
+      save();
+      scheduleRender(renderAll);
+      return;
+    }
+  });
+}
+}
 
 
 /* ---------- RENDER/WIRE ---------- */
