@@ -6711,11 +6711,35 @@ ${hasPts
 
       const key = card.dataset.scorev2;
 
-      // TODO: swap these function names to your real V1 open/edit functions
-      if (key === "sleep" && typeof promptSleep === "function") return promptSleep();
-      if (key === "work" && typeof promptWork === "function") return promptWork();
-      if (key === "calories" && typeof promptCalories === "function") return promptCalories();
-      if (key === "mood" && typeof promptMood === "function") return promptMood();
+// Open TODAY entry/edit UI (same logic as V1)
+if (key === "sleep") {
+  const e = (typeof getTodaySleepEntry === "function") ? getTodaySleepEntry() : null;
+  if (e && typeof promptEditSleepEntry === "function") return promptEditSleepEntry(e);
+  // if no entry exists yet, tell user to enter via modal by creating placeholder (optional, see note below)
+  return alert("No sleep entry for today yet. Enter it using the Sleep modal.");
+}
+
+if (key === "work") {
+  const e = (typeof getTodayWorkEntry === "function") ? getTodayWorkEntry() : null;
+  if (e && typeof promptEditWorkEntry === "function") return promptEditWorkEntry(e);
+  return alert("No work entry for today yet. Enter it using the Work modal.");
+}
+
+if (key === "calories") {
+  if (typeof editTodayCalories === "function") return editTodayCalories();
+  return;
+}
+
+if (key === "mood") {
+  if (typeof editTodayMood === "function") return editTodayMood();
+  // if you don’t have editTodayMood, keep using the same prompt flow as your recent-grid mood edit
+  const cur = (typeof getTodayMoodEntry === "function") ? getTodayMoodEntry() : null;
+  const current = cur?.title?.match(/\(([-\d.]+)\)/)?.[1] || "";
+  const newVal = prompt("Mood score for today:", String(current));
+  if (newVal === null) return;
+  // (we can wire this to your real mood save logic next if needed)
+}
+
     });
   }
 }
