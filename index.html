@@ -6783,7 +6783,18 @@ if (key === "work") {
 }
 
 if (key === "calories") {
-  if (typeof editTodayCalories === "function") return editTodayCalories();
+  // Ensure today's calories entry exists so editTodayCalories() won't bail
+  const e = (typeof getTodayCaloriesEntry === "function") ? getTodayCaloriesEntry() : null;
+  if (!e) ensureTodayScoreEntry("calories");
+
+  if (typeof editTodayCalories === "function") editTodayCalories();
+
+  // instant refresh after the prompt saves
+  setTimeout(() => {
+    try { renderScoreDashboardV2_Skeleton(); } catch(e){}
+    try { if (scoreV2RecentOpen) renderScoreV2RecentGrid(); } catch(e){}
+  }, 50);
+
   return;
 }
 
