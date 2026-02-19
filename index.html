@@ -6955,10 +6955,15 @@ if (cat === "work" && typeof promptEditWorkEntry === "function") {
       entry.points = newPts;
       toastPointsDelta(newPts, oldPts);
 
-      markCompletionsDirty();
-      save();
-      scheduleRender(renderAll);
-      return;
+markCompletionsDirty();
+save();
+scheduleRender(renderAll);
+
+try { if (scoreV2RecentOpen) renderScoreV2RecentGrid(); } catch(e){}
+try { renderScoreDashboardV2_Skeleton(); } catch(e){}
+
+return;
+
     }
 
     if (cat === "mood") {
@@ -6976,10 +6981,15 @@ if (cat === "work" && typeof promptEditWorkEntry === "function") {
       entry.points = newPts;
       toastPointsDelta(newPts, oldPts);
 
-      markCompletionsDirty();
-      save();
-      scheduleRender(renderAll);
-      return;
+markCompletionsDirty();
+save();
+scheduleRender(renderAll);
+
+try { if (scoreV2RecentOpen) renderScoreV2RecentGrid(); } catch(e){}
+try { renderScoreDashboardV2_Skeleton(); } catch(e){}
+
+return;
+
     }
   });
 }
