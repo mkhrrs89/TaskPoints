@@ -6720,6 +6720,11 @@ ${hasPts
 
 let scoreV2RecentOpen = false;
 
+function refreshScoreV2UI(){
+  try { renderScoreDashboardV2_Skeleton(); } catch(e){}
+  try { if (scoreV2RecentOpen) renderScoreV2RecentGrid(); } catch(e){}
+}
+  
 function initScoreV2Toggle(){
   const btn = document.getElementById("scoreV2ToggleBtn");
   const wrap = document.getElementById("scoreV2RecentWrap");
@@ -6881,13 +6886,17 @@ grid.__entryMap[`${dk}|${cat}`] = entry;
 
 if (cat === "sleep" && typeof promptEditSleepEntry === "function") {
   promptEditSleepEntry(entry);
-  setTimeout(() => { try { renderAll(); } catch(e){} }, 50);
+  setTimeout(() => { 
+  try { refreshScoreV2UI(); } catch(e){} 
+}, 50);
   return;
 }
 
 if (cat === "work" && typeof promptEditWorkEntry === "function") {
   promptEditWorkEntry(entry);
-  setTimeout(() => { try { renderAll(); } catch(e){} }, 50);
+  setTimeout(() => { 
+  try { refreshScoreV2UI(); } catch(e){} 
+}, 50);
   return;
 }
 
