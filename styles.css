@@ -3707,3 +3707,10 @@ header,
 .scoreV2-cell.scoreV2-mood{
   background: rgba(5,20,70,.92);
 }
+
+
+@media (max-width: 700px){
+  #score-dashboard-v1{
+    display: none !important;
+  }
+}
