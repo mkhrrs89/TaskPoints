@@ -6885,20 +6885,59 @@ grid.__entryMap[`${dk}|${cat}`] = entry;
 
 
 if (cat === "sleep" && typeof promptEditSleepEntry === "function") {
+  const beforeTitle = String(entry.title || "");
+  const beforePts = Number(entry.points) || 0;
+
   promptEditSleepEntry(entry);
-  setTimeout(() => { 
-  try { refreshScoreV2UI(); } catch(e){} 
-}, 50);
+
+  // ✅ wait until the modal actually saves/updates entry, then refresh the open grid
+  let tries = 0;
+  const t = setInterval(() => {
+    tries++;
+
+    const nowTitle = String(entry.title || "");
+    const nowPts = Number(entry.points) || 0;
+
+    if (nowTitle !== beforeTitle || nowPts !== beforePts) {
+      clearInterval(t);
+      try { renderScoreDashboardV2_Skeleton(); } catch(e){}
+      try { if (scoreV2RecentOpen) renderScoreV2RecentGrid(); } catch(e){}
+      return;
+    }
+
+    if (tries >= 30) clearInterval(t); // ~3 seconds max
+  }, 100);
+
   return;
 }
 
+
 if (cat === "work" && typeof promptEditWorkEntry === "function") {
+  const beforeTitle = String(entry.title || "");
+  const beforePts = Number(entry.points) || 0;
+
   promptEditWorkEntry(entry);
-  setTimeout(() => { 
-  try { refreshScoreV2UI(); } catch(e){} 
-}, 50);
+
+  let tries = 0;
+  const t = setInterval(() => {
+    tries++;
+
+    const nowTitle = String(entry.title || "");
+    const nowPts = Number(entry.points) || 0;
+
+    if (nowTitle !== beforeTitle || nowPts !== beforePts) {
+      clearInterval(t);
+      try { renderScoreDashboardV2_Skeleton(); } catch(e){}
+      try { if (scoreV2RecentOpen) renderScoreV2RecentGrid(); } catch(e){}
+      return;
+    }
+
+    if (tries >= 30) clearInterval(t);
+  }, 100);
+
   return;
 }
+
 
 
     if (cat === "calories") {
