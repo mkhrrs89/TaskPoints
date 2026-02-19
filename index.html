@@ -6699,6 +6699,23 @@ ${hasPts
     cardHTML("work", "Work", workEntry, workBreak),
     cardHTML("mood", "Mood", moodEntry, moodBreak),
   ].join("");
+
+    if (!mount.__boundScoreV2TodayClicks) {
+    mount.__boundScoreV2TodayClicks = true;
+
+    mount.addEventListener("click", (e) => {
+      const card = e.target.closest(".scoreV2-card");
+      if (!card || !mount.contains(card)) return;
+
+      const key = card.dataset.scorev2;
+
+      // TODO: swap these function names to your real V1 open/edit functions
+      if (key === "sleep" && typeof promptSleep === "function") return promptSleep();
+      if (key === "work" && typeof promptWork === "function") return promptWork();
+      if (key === "calories" && typeof promptCalories === "function") return promptCalories();
+      if (key === "mood" && typeof promptMood === "function") return promptMood();
+    });
+  }
 }
 
 let scoreV2RecentOpen = false;
