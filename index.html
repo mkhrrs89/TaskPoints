@@ -6850,11 +6850,17 @@ if (!entry) {
   // Convert dk ("YYYY-MM-DD") to a stable ISO timestamp (noon local time)
   const iso = `${dk}T12:00:00`;
 
-  const make = (title) => ({
+const make = (title) => {
+  const obj = {
+    id: `v2_${dk}_${cat}_${Math.random().toString(16).slice(2)}`, // unique-ish id
     title,
     points: 0,
-    completedAtISO: iso,
-  });
+    dateKey: dk,                       // <-- IMPORTANT
+    completedAtISO: `${dk}T12:00:00`,  // <-- IMPORTANT
+  };
+  return obj;
+};
+
 
   if (cat === "sleep")    entry = make("Sleep Score (0) + Rested (0)");
   if (cat === "calories") entry = make("Calories (0)");
@@ -6862,26 +6868,29 @@ if (!entry) {
   if (cat === "mood")     entry = make("Mood Score (0)");
 
   // IMPORTANT: add to state so your existing modals/edit logic can mutate/save it
-  state.completions = Array.isArray(state.completions) ? state.completions : [];
-  state.completions.push(entry);
-
+state.completions = Array.isArray(state.completions) ? state.completions : [];
+state.completions.push(entry);
+  
   // keep the map in sync so subsequent clicks work immediately
-  grid.__entryMap[`${dk}|${cat}`] = entry;
+grid.__entryMap[`${dk}|${cat}`] = entry;
 
   markCompletionsDirty();
   save();
 }
 
 
-    if (cat === "sleep" && typeof promptEditSleepEntry === "function") {
-      promptEditSleepEntry(entry);
-      return;
-    }
+if (cat === "sleep" && typeof promptEditSleepEntry === "function") {
+  promptEditSleepEntry(entry);
+  setTimeout(() => { try { renderAll(); } catch(e){} }, 50);
+  return;
+}
 
-    if (cat === "work" && typeof promptEditWorkEntry === "function") {
-      promptEditWorkEntry(entry);
-      return;
-    }
+if (cat === "work" && typeof promptEditWorkEntry === "function") {
+  promptEditWorkEntry(entry);
+  setTimeout(() => { try { renderAll(); } catch(e){} }, 50);
+  return;
+}
+
 
     if (cat === "calories") {
       const current = entry.title.match(/\((\d+)\)/)?.[1] || "";
