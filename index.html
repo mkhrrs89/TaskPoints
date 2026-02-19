@@ -6628,6 +6628,45 @@ function importPaste(){
   }
 }
 
+  function ensureTodayScoreEntry(cat){
+  const dk = new Date().toISOString().slice(0,10);
+
+  const make = (title) => ({
+    id: `v2_${dk}_${cat}_${Math.random().toString(16).slice(2)}`,
+    title,
+    points: 0,
+    dateKey: dk,
+    completedAtISO: `${dk}T12:00:00`,
+  });
+
+  state.completions = Array.isArray(state.completions) ? state.completions : [];
+
+  // try to find an existing one first (avoid duplicates)
+  const existing = state.completions.find(c => {
+    const cdk = (c?.dateKey) || (c?.completedAtISO ? String(c.completedAtISO).slice(0,10) : "");
+    if (cdk !== dk) return false;
+    const t = String(c?.title || "");
+    if (cat === "sleep") return t.startsWith("Sleep");
+    if (cat === "calories") return t.startsWith("Calories");
+    if (cat === "work") return t.startsWith("Work");
+    if (cat === "mood") return t.startsWith("Mood");
+    return false;
+  });
+
+  if (existing) return existing;
+
+  let entry;
+  if (cat === "sleep")    entry = make("Sleep Score (0) + Rested (0)");
+  if (cat === "calories") entry = make("Calories (0)");
+  if (cat === "work")     entry = make("Work Score (0) (Hours 0)");
+  if (cat === "mood")     entry = make("Mood Score (0)");
+
+  state.completions.push(entry);
+  markCompletionsDirty();
+  save();
+
+  return entry;
+}
 function renderScoreDashboardV2_Skeleton(){
   const mount = document.getElementById("scoreV2Row");
   if (!mount) return;
@@ -6721,8 +6760,26 @@ if (key === "sleep") {
 
 if (key === "work") {
   const e = (typeof getTodayWorkEntry === "function") ? getTodayWorkEntry() : null;
-  if (e && typeof promptEditWorkEntry === "function") return promptEditWorkEntry(e);
-  return alert("No work entry for today yet. Enter it using the Work modal.");
+  const entry = e || ensureTodayScoreEntry("work");
+  if (typeof promptEditWorkEntry === "function") promptEditWorkEntry(entry);
+
+  // refresh V2 immediately after save (same polling trick as recent grid)
+  const beforeTitle = String(entry.title || "");
+  const beforePts = Number(entry.points) || 0;
+  let tries = 0;
+  const t = setInterval(() => {
+    tries++;
+    const nowTitle = String(entry.title || "");
+    const nowPts = Number(entry.points) || 0;
+    if (nowTitle !== beforeTitle || nowPts !== beforePts) {
+      clearInterval(t);
+      try { renderScoreDashboardV2_Skeleton(); } catch(e){}
+      try { if (scoreV2RecentOpen) renderScoreV2RecentGrid(); } catch(e){}
+    }
+    if (tries >= 30) clearInterval(t);
+  }, 100);
+
+  return;
 }
 
 if (key === "calories") {
