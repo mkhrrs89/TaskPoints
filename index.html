@@ -6894,8 +6894,8 @@ function renderAll() {
     try {
 try { tpPerfTime('renderStats (call)', () => renderStats()); } catch (e) { console.error('renderStats error:', e); }
 try { tpPerfTime('renderTasks', () => renderTasks()); } catch (e) { console.error('renderTasks error:', e); }
-// try { tpPerfTime('renderScoreDashboardV2_Skeleton', () => renderScoreDashboardV2_Skeleton()); } catch (e) { console.error('renderScoreDashboardV2_Skeleton error:', e); }
-// try { tpPerfTime('initScoreV2Toggle', () => initScoreV2Toggle()); } catch (e) { console.error('initScoreV2Toggle error:', e); }
+try { tpPerfTime('renderScoreDashboardV2_Skeleton', () => renderScoreDashboardV2_Skeleton()); } catch (e) { console.error('renderScoreDashboardV2_Skeleton error:', e); }
+try { tpPerfTime('initScoreV2Toggle', () => initScoreV2Toggle()); } catch (e) { console.error('initScoreV2Toggle error:', e); }
 
 
 
