@@ -6753,9 +6753,27 @@ ${hasPts
 // Open TODAY entry/edit UI (same logic as V1)
 if (key === "sleep") {
   const e = (typeof getTodaySleepEntry === "function") ? getTodaySleepEntry() : null;
-  if (e && typeof promptEditSleepEntry === "function") return promptEditSleepEntry(e);
-  // if no entry exists yet, tell user to enter via modal by creating placeholder (optional, see note below)
-  return alert("No sleep entry for today yet. Enter it using the Sleep modal.");
+  const entry = e || ensureTodayScoreEntry("sleep");
+
+  if (typeof promptEditSleepEntry === "function") promptEditSleepEntry(entry);
+
+  // refresh V2 immediately after save
+  const beforeTitle = String(entry.title || "");
+  const beforePts = Number(entry.points) || 0;
+  let tries = 0;
+  const t = setInterval(() => {
+    tries++;
+    const nowTitle = String(entry.title || "");
+    const nowPts = Number(entry.points) || 0;
+    if (nowTitle !== beforeTitle || nowPts !== beforePts) {
+      clearInterval(t);
+      try { renderScoreDashboardV2_Skeleton(); } catch(e){}
+      try { if (scoreV2RecentOpen) renderScoreV2RecentGrid(); } catch(e){}
+    }
+    if (tries >= 30) clearInterval(t);
+  }, 100);
+
+  return;
 }
 
 if (key === "work") {
@@ -6799,13 +6817,32 @@ if (key === "calories") {
 }
 
 if (key === "mood") {
-  if (typeof editTodayMood === "function") return editTodayMood();
-  // if you don’t have editTodayMood, keep using the same prompt flow as your recent-grid mood edit
-  const cur = (typeof getTodayMoodEntry === "function") ? getTodayMoodEntry() : null;
-  const current = cur?.title?.match(/\(([-\d.]+)\)/)?.[1] || "";
+  const e = (typeof getTodayMoodEntry === "function") ? getTodayMoodEntry() : null;
+  const entry = e || ensureTodayScoreEntry("mood");
+
+  // Use the same prompt flow you already use for Mood edits
+  const current = String(entry.title || "").match(/\(([-\d.]+)\)/)?.[1] || "";
   const newVal = prompt("Mood score for today:", String(current));
   if (newVal === null) return;
-  // (we can wire this to your real mood save logic next if needed)
+
+  const num = Number(String(newVal).trim());
+  if (!Number.isFinite(num)) return alert("Invalid mood score.");
+
+  const oldPts = Number(entry.points) || 0;
+  const newPts = moodPoints(num);
+
+  entry.title  = `Mood Score (${num})`;
+  entry.points = newPts;
+  toastPointsDelta(newPts, oldPts);
+
+  markCompletionsDirty();
+  save();
+
+  // refresh instantly
+  try { renderScoreDashboardV2_Skeleton(); } catch(e){}
+  try { if (scoreV2RecentOpen) renderScoreV2RecentGrid(); } catch(e){}
+
+  return;
 }
 
     });
