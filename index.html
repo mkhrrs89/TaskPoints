@@ -7146,6 +7146,8 @@ try { tpPerfTime('initScoreV2Toggle', () => initScoreV2Toggle()); } catch (e) { 
         : (cb) => setTimeout(() => cb({ timeRemaining: () => 0 }), 200);
 
 defer(() => {
+  if (!document.getElementById('score-dashboard-v1')) return;
+
   try { tpPerfTime('renderSleepHistory',    () => renderSleepHistory()); } catch (e) { console.error('renderSleepHistory error:', e); }
   try { tpPerfTime('renderCaloriesHistory', () => renderCaloriesHistory()); } catch (e) { console.error('renderCaloriesHistory error:', e); }
   try { tpPerfTime('renderWorkHistory',     () => renderWorkHistory()); } catch (e) { console.error('renderWorkHistory error:', e); }
@@ -7180,6 +7182,12 @@ function applyCapitalizeWordsInput(input) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+    // Mobile: remove V1 dashboard entirely so it can't bind listeners / conflict
+  try {
+    if (window.matchMedia && window.matchMedia('(max-width: 700px)').matches) {
+      document.getElementById('score-dashboard-v1')?.remove();
+    }
+  } catch (e) {}
   $('addBtn')?.addEventListener('click', addTask);
   $('openAddTaskBtn')?.addEventListener('click', openAddTaskModal);
   $('sortSelect')?.addEventListener('change', renderTasks);
