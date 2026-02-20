@@ -3635,7 +3635,11 @@ header,
   opacity: 0;
   transform: translateY(-4px);
   transition: max-height 260ms ease, opacity 220ms ease, transform 260ms ease;
+  will-change: max-height, opacity, transform;
 }
+
+.scoreV2-recentWrap{ padding-top: 0; }
+.scoreV2-recentWrap.is-open{ padding-top: 10px; }
 
 .scoreV2-recentWrap.is-open{
   max-height: 1000px; /* big enough for 5 rows */
