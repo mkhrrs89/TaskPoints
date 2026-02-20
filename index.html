@@ -6628,38 +6628,66 @@ function importPaste(){
   }
 }
 
-  function ensureTodayScoreEntry(cat){
-  const dk = new Date().toISOString().slice(0,10);
+const TP_DEBUG_DUPES = (() => {
+  try {
+    const qs = new URLSearchParams(location.search);
+    return qs.has('debug') || qs.has('debugDupes');
+  } catch (_) {
+    return false;
+  }
+})();
 
-  const make = (title) => ({
-    id: `v2_${dk}_${cat}_${Math.random().toString(16).slice(2)}`,
-    title,
-    points: 0,
-    dateKey: dk,
-    completedAtISO: `${dk}T12:00:00`,
-  });
+function ensureScoreEntryForDate(cat, dk){
+  const prefixes = {
+    sleep: "Sleep",
+    calories: "Calories",
+    work: "Work",
+    mood: "Mood",
+  };
 
+  const defaults = {
+    sleep: "Sleep Score (0) + Rested (0)",
+    calories: "Calories (0)",
+    work: "Work Score (0) (Hours 0)",
+    mood: "Mood Score (0)",
+  };
+
+  const prefix = prefixes[cat];
+  if (!prefix) return null;
+
+  dk = (typeof dk === "string" && dk) ? dk : dateKey(new Date());
   state.completions = Array.isArray(state.completions) ? state.completions : [];
 
-  // try to find an existing one first (avoid duplicates)
-  const existing = state.completions.find(c => {
-    const cdk = (c?.dateKey) || (c?.completedAtISO ? String(c.completedAtISO).slice(0,10) : "");
-    if (cdk !== dk) return false;
+  const matches = [];
+  for (const c of state.completions){
     const t = String(c?.title || "");
-    if (cat === "sleep") return t.startsWith("Sleep");
-    if (cat === "calories") return t.startsWith("Calories");
-    if (cat === "work") return t.startsWith("Work");
-    if (cat === "mood") return t.startsWith("Mood");
-    return false;
-  });
+    if (!t.startsWith(prefix)) continue;
 
-  if (existing) return existing;
+    const cdk =
+      (typeof c?.dateKey === "string" && c.dateKey)
+        ? c.dateKey
+        : dateKey(new Date(c?.completedAtISO));
 
-  let entry;
-  if (cat === "sleep")    entry = make("Sleep Score (0) + Rested (0)");
-  if (cat === "calories") entry = make("Calories (0)");
-  if (cat === "work")     entry = make("Work Score (0) (Hours 0)");
-  if (cat === "mood")     entry = make("Mood Score (0)");
+    if (cdk === dk) matches.push(c);
+  }
+
+  if (matches.length){
+    if (TP_DEBUG_DUPES && matches.length > 1){
+      console.warn(`[TaskPoints] Duplicate ${cat} entries for ${dk}:`, matches);
+    }
+    return matches[0];
+  }
+
+  const dt = fromKey(dk);
+  dt.setHours(12,0,0,0);
+
+  const entry = {
+    id: `v2_${dk}_${cat}_${Math.random().toString(16).slice(2)}`,
+    title: defaults[cat],
+    points: 0,
+    dateKey: dk,
+    completedAtISO: dt.toISOString(),
+  };
 
   state.completions.push(entry);
   markCompletionsDirty();
@@ -6667,6 +6695,12 @@ function importPaste(){
 
   return entry;
 }
+
+function ensureTodayScoreEntry(cat){
+  return ensureScoreEntryForDate(cat, dateKey(new Date()));
+}
+
+  
 function renderScoreDashboardV2_Skeleton(){
   const mount = document.getElementById("scoreV2Row");
   if (!mount) return;
