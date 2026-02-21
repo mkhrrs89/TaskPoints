@@ -27,6 +27,10 @@
   min-height: calc(var(--tp-toolbar-height) + var(--tp-safe-bottom));
 }
 
+#bottomToolbarMount:empty {
+  pointer-events: none;
+}
+
 #bottomToolbarMount:empty::before {
   content: "";
   position: fixed;
@@ -38,6 +42,7 @@
   border-top: 1px solid rgba(255, 255, 255, 0.06);
   z-index: 9999;
   backdrop-filter: blur(10px);
+  pointer-events: none;
 }
 
 
