@@ -1445,14 +1445,11 @@ header,
 }
 .habitDay.off{background:transparent}
 
-/* Vices: explicit failed state */
+/* Vices: explicit failed state (make it POP) */
 .viceDay.failed{
-  background: linear-gradient(
-    180deg,
-    rgba(60, 20, 20, 0.20),
-    rgba(40, 15, 15, 0.15)
-  ) !important;
-  border-color: #3a1a1a !important;
+  background: linear-gradient(135deg, #ef4444 0%, #7f1d1d 100%) !important;
+  border-color: #7f1d1d !important;
+  color: #ffffff !important;
 }
 
 
