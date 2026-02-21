@@ -4984,10 +4984,18 @@ function initTaskListDelegation(){
   const list = document.getElementById('taskList');
   if (!list) return;
   if (list.dataset.tpDelegationAttached === '1') return;
-  list.addEventListener('click', (e) => {
+
+  const handleTaskAction = (e) => {
+    if (e.type === 'pointerup' && e.pointerType === 'mouse') return;
+    const now = Date.now();
+    if (now - (list._lastTaskTapTs || 0) < 350) return;
+
     if (!(e.target instanceof Element)) return;
     const btn = e.target.closest('[data-task-action][data-task-id]');
     if (!btn) return;
+
+    list._lastTaskTapTs = now;
+
     const action = btn.getAttribute('data-task-action');
     const id = btn.getAttribute('data-task-id');
     if (!action || !id) return;
@@ -5027,7 +5035,10 @@ function initTaskListDelegation(){
       default:
         break;
     }
-  });
+  };
+
+  list.addEventListener('click', handleTaskAction);
+  list.addEventListener('pointerup', handleTaskAction);
   list.dataset.tpDelegationAttached = '1';
 }
 
