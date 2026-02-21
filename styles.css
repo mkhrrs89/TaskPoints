@@ -1422,7 +1422,12 @@ header,
   cursor:pointer;
 }
 
-.habitDay.on {background:#3D1C0B;border-color:#fb923c;}
+/* Generic completed bubbles ONLY (untagged). Tag-colored bubbles have inline style="" and will win. */
+.habitDay.on:not([style]){
+  background: linear-gradient(135deg, #f1f1f1 0%, #bdbdbd 100%);
+  border-color: #8f8f8f;
+  color: #111;
+}
 
 .player-name-link {
   color: #fb923c;
