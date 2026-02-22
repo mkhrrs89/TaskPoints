@@ -1424,9 +1424,10 @@ header,
 
 /* Generic completed bubbles ONLY (untagged). Tag-colored bubbles have inline style="" and will win. */
 .habitDay.on:not([style]){
-  background: linear-gradient(135deg, #f1f1f1 0%, #bdbdbd 100%);
-  border-color: #8f8f8f;
+  background: linear-gradient(135deg, #c3ccd3 0%, #7f8c96 100%);
+  border-color: #5b6771;
   color: #111;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.06) inset;
 }
 
 .player-name-link {
