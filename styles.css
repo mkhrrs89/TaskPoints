@@ -1422,11 +1422,11 @@ header,
   cursor:pointer;
 }
 
-/* Generic completed bubbles ONLY (untagged). Tag-colored bubbles have inline style="" and will win. */
+/* Generic completed bubbles ONLY (untagged). Tag-colored bubbles have inline style and will win. */
 .habitDay.on:not([style]){
-  background: linear-gradient(135deg, #c3ccd3 0%, #7f8c96 100%);
-  border-color: #5b6771;
-  color: #111;
+  background: linear-gradient(135deg, #9fd0e3 0%, #4d839c 100%);
+  border-color: #2f5f76;
+  color: #0b1014;
   box-shadow: 0 0 0 1px rgba(255,255,255,0.06) inset;
 }
 
