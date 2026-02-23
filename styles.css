@@ -1424,7 +1424,7 @@ header,
 
 /* Generic completed bubbles ONLY (untagged). Tag-colored bubbles have inline style and will win. */
 .habitDay.on:not([style]){
-  background: linear-gradient(135deg, #9fd0e3 0%, #4d839c 100%);
+  background: linear-gradient(135deg, #9fdedc 0%, #4d8f94 100%);
   border-color: #2f5f76;
   color: #0b1014;
   box-shadow: 0 0 0 1px rgba(255,255,255,0.06) inset;
