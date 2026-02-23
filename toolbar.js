@@ -2203,9 +2203,15 @@ document.addEventListener('DOMContentLoaded', () => {
     btn.addEventListener('click', pasteHandler);
   });
 
+  let todayIslandVisible = false;
+
+  function isMobileViewport() {
+    return !(window.matchMedia && window.matchMedia('(min-width: 768px)').matches);
+  }
+
   function ensureTodayScoreIsland() {
     // Mobile only
-    if (window.matchMedia && window.matchMedia('(min-width: 768px)').matches) return;
+    if (!isMobileViewport()) return;
 
     const key = 'tpTodayScore';
 
@@ -2301,19 +2307,118 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(sync, 750);
   }
 
+  function ensureCriticalTasksIsland() {
+    if (!isMobileViewport()) return;
+
+    let island = document.getElementById('criticalTasksIsland');
+    if (!island) {
+      island = document.createElement('button');
+      island.id = 'criticalTasksIsland';
+      island.type = 'button';
+      island.className = 'hidden md:hidden tp-critical-island';
+      island.setAttribute('aria-label', 'Go to critical tasks due today or overdue');
+      island.innerHTML = '<span class="critIslandMark">!</span>';
+      document.body.appendChild(island);
+    }
+
+    if (!island.dataset.bound) {
+      island.addEventListener('click', () => {
+        const sectionTarget = document.getElementById('tasksAnchor')
+          || document.getElementById('weekTasksSection')
+          || document.getElementById('weekGrid')
+          || document.getElementById('taskList');
+        sectionTarget?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+        const matchingIds = getCriticalDueTaskIds();
+        if (!matchingIds.length) return;
+
+        document.querySelectorAll('.tp-task-critical-pulse').forEach((el) => el.classList.remove('tp-task-critical-pulse'));
+
+        const nodes = document.querySelectorAll('[data-task-id]');
+        nodes.forEach((node) => {
+          if (!(node instanceof HTMLElement)) return;
+          if (!matchingIds.includes(node.getAttribute('data-task-id'))) return;
+          node.classList.add('tp-task-critical-pulse');
+          setTimeout(() => node.classList.remove('tp-task-critical-pulse'), 2000);
+        });
+      });
+      island.dataset.bound = '1';
+    }
+  }
+
+  function getCriticalDueTaskIds() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY_FALLBACK);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      const tasks = Array.isArray(parsed?.tasks) ? parsed.tasks : [];
+      const today = todayKeyFallback();
+      return tasks
+        .filter((task) => task && task.importance === 'Critical')
+        .filter((task) => !task.completedAtISO && !task.hidden && !task.deletedAtISO)
+        .filter((task) => typeof task.dueDateISO === 'string' && task.dueDateISO && task.dueDateISO <= today)
+        .map((task) => String(task.id));
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function updateCriticalTasksIslandPosition() {
+    const island = document.getElementById('criticalTasksIsland');
+    if (!island || island.classList.contains('hidden')) return;
+
+    const todayIsland = document.getElementById('todayScoreIsland');
+    const gapPx = 8;
+    if (todayIsland && todayIslandVisible && !todayIsland.classList.contains('hidden')) {
+      island.style.transform = `translateY(${Math.round(todayIsland.offsetHeight + gapPx)}px)`;
+    } else {
+      island.style.transform = 'translateY(0px)';
+    }
+  }
+
+  function updateCriticalTasksIsland() {
+    const island = document.getElementById('criticalTasksIsland');
+    if (!island) return;
+
+    if (!isMobileViewport()) {
+      island.classList.add('hidden');
+      return;
+    }
+
+    const count = getCriticalDueTaskIds().length;
+    if (count <= 0) {
+      island.classList.add('hidden');
+      return;
+    }
+
+    const mark = island.querySelector('.critIslandMark');
+    if (mark) {
+      const visibleCount = Math.min(count, 5);
+      mark.textContent = '!'.repeat(visibleCount) + (count > 5 ? '+' : '');
+    }
+
+    island.classList.remove('hidden');
+    updateCriticalTasksIslandPosition();
+  }
+
+  window.updateCriticalTasksIsland = updateCriticalTasksIsland;
+
   ensureTodayScoreIsland();
+  ensureCriticalTasksIsland();
 
   // Hide the Today points island until user scrolls a bit (mobile)
   const todayIsland = document.getElementById('todayScoreIsland');
   if (todayIsland) {
     const updateTodayIslandVisibility = () => {
       const shouldShow = window.scrollY > 40; // same threshold as the "Top" button
+      todayIslandVisible = !!shouldShow;
       if (shouldShow) {
         todayIsland.classList.remove('hidden');
         window.tpUpdateToastAnchor?.();
       } else {
         todayIsland.classList.add('hidden');
       }
+      updateCriticalTasksIslandPosition();
     };
 
     // Ensure it's invisible on initial load at top of page
@@ -2323,6 +2428,11 @@ document.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('load', updateTodayIslandVisibility);
     updateTodayIslandVisibility();
   }
+
+  window.addEventListener('load', updateCriticalTasksIsland);
+  window.addEventListener('resize', updateCriticalTasksIsland, { passive: true });
+  window.addEventListener('storage', updateCriticalTasksIsland);
+  setInterval(updateCriticalTasksIsland, 900);
 
   
   const scrollButtons = Array.from(document.querySelectorAll('[data-scroll-top]'));

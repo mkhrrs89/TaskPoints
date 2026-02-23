@@ -244,7 +244,7 @@
 
 
       <!-- Tasks -->
-      <div class="glass mb-6">
+      <div id="weekTasksSection" class="glass mb-6">
       <div class="week-tasks-header mb-3">
         <h2 class="font-bold">Tasks</h2>
         <div class="week-task-actions text-xs whitespace-nowrap">
@@ -988,6 +988,7 @@ function renderWeekTasks(baseDate){
 
       const div=document.createElement('div');
       div.className=taskClasses.join(' ');
+      div.dataset.taskId = t.id;
       div.innerHTML=`
         <div class="flex flex-col gap-2">
           <div class="flex items-start justify-between gap-3">

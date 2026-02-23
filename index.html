@@ -4978,6 +4978,7 @@ ${t.dueDateISO
   }
   container.appendChild(fragment);
   initTaskListDelegation();
+  window.updateCriticalTasksIsland?.();
 }
 
 function initTaskListDelegation(){
@@ -7681,6 +7682,15 @@ function tpPerfMark(label) {
   <span class="text-xs uppercase tracking-wide">Today</span>
   <span id="todayScoreIslandValue" class="today-island-score">—</span>
 </div>
+
+<button
+  id="criticalTasksIsland"
+  class="hidden md:hidden tp-critical-island"
+  type="button"
+  aria-label="Go to critical tasks due today or overdue"
+>
+  <span class="critIslandMark">!</span>
+</button>
 
 <!-- MOBILE SCROLL-TO-TOP BUTTON -->
 <button
