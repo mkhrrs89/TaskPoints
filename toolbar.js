@@ -2265,19 +2265,26 @@ document.addEventListener('DOMContentLoaded', () => {
     const valueEl = document.getElementById('todayScoreIslandValue');
     if (!valueEl) return;
 
-    // --- Anchor the toast container under the Today Score island (mobile) ---
+    // --- Anchor the toast container under the top-left island stack (mobile) ---
     const updateToastAnchor = () => {
-      const isl = document.getElementById('todayScoreIsland');
-      if (!isl) return;
-
-      // If hidden, keep whatever last good values we had; CSS has fallbacks too
-      if (isl.classList.contains('hidden')) return;
-
-      const r = isl.getBoundingClientRect();
       const root = document.documentElement;
 
-      root.style.setProperty('--tp-toast-left', `${Math.round(r.left)}px`);
-      root.style.setProperty('--tp-toast-top', `${Math.round(r.bottom + 8)}px`);
+      const candidates = [
+        document.getElementById('todayScoreIsland'),
+        document.getElementById('criticalTasksIsland'),
+      ].filter((el) => el && !el.classList.contains('hidden'));
+
+      // If nothing visible, don't clobber last good values; CSS has fallbacks.
+      if (!candidates.length) return;
+
+      const rects = candidates.map((el) => el.getBoundingClientRect());
+
+      // Left edge should match the islands; bottom should be the LOWEST visible island
+      const left = Math.round(Math.min(...rects.map((r) => r.left)));
+      const bottom = Math.round(Math.max(...rects.map((r) => r.bottom)));
+
+      root.style.setProperty('--tp-toast-left', `${left}px`);
+      root.style.setProperty('--tp-toast-top', `${bottom + 8}px`);
     };
 
     // Expose so other code (visibility toggle) can refresh it
@@ -2365,7 +2372,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function updateCriticalTasksIslandPosition() {
     const island = document.getElementById('criticalTasksIsland');
-    if (!island || island.classList.contains('hidden')) return;
+    if (!island || island.classList.contains('hidden')) {
+      window.tpUpdateToastAnchor?.();
+      return;
+    }
 
     const todayIsland = document.getElementById('todayScoreIsland');
     const gapPx = 8;
@@ -2374,6 +2384,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
       island.style.transform = 'translateY(0px)';
     }
+    window.tpUpdateToastAnchor?.();
   }
 
   function updateCriticalTasksIsland() {
@@ -2382,12 +2393,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (!isMobileViewport()) {
       island.classList.add('hidden');
+      window.tpUpdateToastAnchor?.();
       return;
     }
 
     const count = getCriticalDueTaskIds().length;
     if (count <= 0) {
       island.classList.add('hidden');
+      window.tpUpdateToastAnchor?.();
       return;
     }
 
@@ -2414,10 +2427,11 @@ document.addEventListener('DOMContentLoaded', () => {
       todayIslandVisible = !!shouldShow;
       if (shouldShow) {
         todayIsland.classList.remove('hidden');
-        window.tpUpdateToastAnchor?.();
       } else {
         todayIsland.classList.add('hidden');
       }
+      // Always refresh so we can anchor to critical island at top scroll
+      window.tpUpdateToastAnchor?.();
       updateCriticalTasksIslandPosition();
     };
 
