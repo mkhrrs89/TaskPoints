@@ -823,8 +823,10 @@ const normalizeHabitTagColorsFallback = (value) => {
   if (!value || typeof value !== 'object') return {};
   const next = {};
   Object.entries(value).forEach(([tag, color]) => {
+    const key = String(tag ?? '').trim();
+    if (!key) return;
     const normalized = normalizeHexColorFallback(color);
-    if (normalized) next[String(tag)] = normalized;
+    if (normalized) next[key] = normalized;
   });
   return next;
 };

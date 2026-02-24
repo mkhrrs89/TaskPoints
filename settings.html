@@ -572,8 +572,10 @@
       if (!value || typeof value !== "object") return {};
       const next = {};
       Object.entries(value).forEach(([tag, color]) => {
+        const key = String(tag ?? "").trim();
+        if (!key) return;
         const normalized = normalizeHexColor(color);
-        if (normalized) next[String(tag)] = normalized;
+        if (normalized) next[key] = normalized;
       });
       return next;
     }
@@ -1104,16 +1106,21 @@
     }
 
     function updateHabitTagColor(tag, color) {
-      const state = loadSettingsState();
-      const nextColors = { ...(state.habitTagColors || {}) };
-      if (color) {
-        nextColors[tag] = color;
-      } else {
-        delete nextColors[tag];
-      }
+      const key = String(tag ?? "").trim();
+      if (!key) return;
+
+      // PATCH: only write the one key we changed.
+      // - color = "#rrggbb" => set/update
+      // - color = null / "" => delete (handled in scoring_core mergeState patch logic)
+      const patch = {};
+      patch[key] = color;
+
       saveSettingsState(
-        { ...state, habitTagColors: nextColors },
-        { allowHabitTagColorReset: true, allowStickyOverwriteKeys: ["habitTagColors"] }
+        { habitTagColors: patch },
+        {
+          allowStickyOverwriteKeys: ["habitTagColors"],
+          immediateWrite: true
+        }
       );
     }
 
