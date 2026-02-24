@@ -1506,12 +1506,14 @@ header,
 /* Make sure the bubble can hold overlays */
 .habitDay{ position: relative; overflow: hidden; }
 
-.habitDay.icy{ position: relative; overflow: hidden; }
+.habitDay.icy{
+  overflow: visible;     /* <-- key: allow spikes to show outside */
+}
 
 .habitDay.icy::before{
   content:"";
   position:absolute;
-  inset:0;
+  inset:-10px;           /* <-- key: pushes overlay beyond border */
   border-radius: inherit;
   pointer-events:none;
   background: url("./assets/frost-border-jagged.svg") no-repeat center / 100% 100%;
