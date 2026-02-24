@@ -1508,6 +1508,7 @@ header,
 
 .habitDay.icy{
   overflow: visible;     /* <-- key: allow spikes to show outside */
+  position: relative; 
 }
 
 .habitDay.icy::before{
@@ -1518,6 +1519,21 @@ header,
   pointer-events:none;
   background: url("./assets/frost-border-jagged.svg") no-repeat center / 100% 100%;
   opacity: 1;
+  z-index: 3;
+}
+
+.habitDay.icy::after{
+  content:"";
+  position:absolute;
+  inset:0;                 /* use 0 so it fills bubble cleanly */
+  pointer-events:none;
+  border-radius: inherit;
+  background:
+    radial-gradient(circle at 18% 20%, rgba(255,255,255,0.30), rgba(255,255,255,0) 55%),
+    radial-gradient(circle at 80% 75%, rgba(170,245,255,0.18), rgba(0,0,0,0) 60%),
+    repeating-linear-gradient(135deg, rgba(220,255,255,0.14) 0 6px, rgba(0,0,0,0) 6px 14px);
+  opacity: 0.9;
+  mix-blend-mode: screen;
   z-index: 2;
 }
 
