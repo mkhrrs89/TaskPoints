@@ -1519,25 +1519,6 @@ header,
   filter: drop-shadow(0 0 6px rgba(140,220,255,0.18));
 }
 
-/* Crystal / shard texture */
-.habitDay.icy::after{
-  content:"";
-  position:absolute;
-  inset:-8px;
-  pointer-events:none;
-  border-radius:12px;
-  background:
-    repeating-linear-gradient(135deg,
-      rgba(240,255,255,0.24) 0px, rgba(240,255,255,0.24) 2px,
-      rgba(0,0,0,0) 2px, rgba(0,0,0,0) 10px),
-    repeating-linear-gradient(35deg,
-      rgba(170,235,255,0.18) 0px, rgba(170,235,255,0.18) 1px,
-      rgba(0,0,0,0) 1px, rgba(0,0,0,0) 12px),
-    radial-gradient(circle at 55% 50%, rgba(255,255,255,0.20), rgba(0,0,0,0) 60%);
-  opacity: 0.85;
-  mix-blend-mode: screen;
-  filter: blur(0.25px) contrast(1.15);
-}
 
 /* Vices: explicit failed state (make it POP) */
 .viceDay.failed{
