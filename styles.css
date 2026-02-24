@@ -1506,27 +1506,17 @@ header,
 /* Make sure the bubble can hold overlays */
 .habitDay{ position: relative; overflow: hidden; }
 
-/* Frosted “amped” state (less glow, more frozen) */
-.habitDay.icy{
-  box-shadow:
-    0 0 0 1px rgba(240,255,255,0.34) inset,
-    0 0 0 2px rgba(160,235,255,0.18);
-}
+.habitDay.icy{ position: relative; overflow: hidden; }
 
-/* Frost rim / edge icing */
 .habitDay.icy::before{
   content:"";
   position:absolute;
-  inset:-6px;
+  inset:-6px;              /* lets the border “wrap” slightly outside */
   pointer-events:none;
-  border-radius:12px;
-  background:
-    radial-gradient(circle at 12% 18%, rgba(255,255,255,0.58), rgba(255,255,255,0) 55%),
-    radial-gradient(circle at 88% 20%, rgba(210,250,255,0.30), rgba(0,0,0,0) 60%),
-    radial-gradient(circle at 18% 88%, rgba(210,250,255,0.26), rgba(0,0,0,0) 62%),
-    radial-gradient(circle at 92% 86%, rgba(255,255,255,0.40), rgba(0,0,0,0) 58%);
+  background: url("assets/frost-border.svg") no-repeat center / 100% 100%;
   opacity: 0.95;
   mix-blend-mode: screen;
+  filter: drop-shadow(0 0 6px rgba(140,220,255,0.18));
 }
 
 /* Crystal / shard texture */
