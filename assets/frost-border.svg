@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 80" preserveAspectRatio="none">
+  <defs>
+    <filter id="frost">
+      <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="4" result="noise"/>
+      <feDisplacementMap in="SourceGraphic" in2="noise" scale="2.8" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+  </defs>
+
+  <!-- Outer jagged stroke -->
+  <rect x="6" y="6" width="108" height="68" rx="14" ry="14"
+        fill="none" stroke="rgba(235,255,255,0.95)" stroke-width="5"
+        stroke-linejoin="round" filter="url(#frost)"/>
+
+  <!-- Inner highlight stroke -->
+  <rect x="9" y="9" width="102" height="62" rx="12" ry="12"
+        fill="none" stroke="rgba(170,245,255,0.55)" stroke-width="2"
+        stroke-linejoin="round" filter="url(#frost)"/>
+</svg>
