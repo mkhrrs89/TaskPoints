@@ -934,6 +934,14 @@ body {
   justify-content: center;
 }
 
+#criticalTasksIsland.stack-under-today {
+  transform: translateY(calc(var(--todayIslandHeight, 0px) + 10px));
+}
+
+#criticalTasksIsland:not(.stack-under-today) {
+  transform: translateY(0px);
+}
+
 .tp-task-critical-pulse{
   animation: tpCriticalPulse 1s ease-in-out 2;
 }

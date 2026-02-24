@@ -2391,18 +2391,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function updateCriticalTasksIslandPosition() {
     const island = document.getElementById('criticalTasksIsland');
-    if (!island || island.classList.contains('hidden')) {
+    if (!island) {
       window.tpUpdateToastAnchor?.();
       return;
     }
 
     const todayIsland = document.getElementById('todayScoreIsland');
-    const gapPx = 8;
-    if (todayIsland && todayIslandVisible && !todayIsland.classList.contains('hidden')) {
-      island.style.transform = `translateY(${Math.round(todayIsland.offsetHeight + gapPx)}px)`;
-    } else {
-      island.style.transform = 'translateY(0px)';
-    }
+    const todayHeight = todayIsland ? Math.round(todayIsland.offsetHeight || 0) : 0;
+    document.documentElement.style.setProperty('--todayIslandHeight', `${todayHeight}px`);
+    const todayVisible = !!(todayIsland && !todayIsland.classList.contains('hidden'));
+    island.classList.toggle('stack-under-today', todayVisible);
     window.tpUpdateToastAnchor?.();
   }
 
@@ -2441,6 +2439,9 @@ document.addEventListener('DOMContentLoaded', () => {
   ensureTodayScoreIsland();
   ensureCriticalTasksIsland();
 
+  requestAnimationFrame(() => updateCriticalTasksIsland());
+  setTimeout(updateCriticalTasksIsland, 50);
+
   // Hide the Today points island until user scrolls a bit (mobile)
   const todayIsland = document.getElementById('todayScoreIsland');
   if (todayIsland) {
@@ -2452,6 +2453,10 @@ document.addEventListener('DOMContentLoaded', () => {
       } else {
         todayIsland.classList.add('hidden');
       }
+      const critIsland = document.getElementById('criticalTasksIsland');
+      const todayVisible = !todayIsland.classList.contains('hidden');
+      document.documentElement.style.setProperty('--todayIslandHeight', `${Math.round(todayIsland.offsetHeight || 0)}px`);
+      critIsland?.classList.toggle('stack-under-today', todayVisible);
       // Always refresh so we can anchor to critical island at top scroll
       window.tpUpdateToastAnchor?.();
       updateCriticalTasksIslandPosition();

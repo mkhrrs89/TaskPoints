@@ -5769,6 +5769,7 @@ const entries = getDerived().workEntries;
 
     markCompletionsDirty();
     save();
+    window.updateCriticalTasksIsland?.();
     scheduleRender(renderAll);
     return true;
   };
@@ -6262,6 +6263,7 @@ function bumpTaskOneDay(id){
   bumpOneDay(t);
   save();
   renderTasks();
+  window.updateCriticalTasksIsland?.();
 }
 
   function postponeTask(id){
@@ -6272,6 +6274,7 @@ function bumpTaskOneDay(id){
     const now = new Date().toISOString();
     t.updatedAtISO = now;
     save(); renderTasks();
+    window.updateCriticalTasksIsland?.();
   }
 function wontDoMain(id){
   const t=state.tasks.find(x=>x.id===id); if(!t) return;
@@ -6291,6 +6294,7 @@ function wontDoMain(id){
     }
   }
   save(); renderTasks();
+  window.updateCriticalTasksIsland?.();
 }
 
 function completeTask(id){
@@ -6333,6 +6337,7 @@ function completeTask(id){
     t.updatedAtISO = now;
     removeTaskFromTodayView(id, completedDayKey);
     save();
+    window.updateCriticalTasksIsland?.();
     scheduleRender(renderAll);
   });
 }
@@ -6393,6 +6398,7 @@ if (repSel) {
   t.updatedAtISO = new Date().toISOString();
   editingTaskId=null;
   save(); renderTasks();
+  window.updateCriticalTasksIsland?.();
 }
 
 function hideTask(id){
@@ -6402,6 +6408,7 @@ function hideTask(id){
   t.updatedAtISO = new Date().toISOString();
   save();
   renderTasks();
+  window.updateCriticalTasksIsland?.();
 }
 
 function deleteTask(id){
@@ -6417,6 +6424,7 @@ function deleteTask(id){
   if (editingTaskId === id) editingTaskId = null;
   save();
   renderTasks();
+  window.updateCriticalTasksIsland?.();
 }
 
 
