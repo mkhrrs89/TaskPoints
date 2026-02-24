@@ -2354,20 +2354,39 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function getCriticalDueTaskIds() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY_FALLBACK);
-      if (!raw) return [];
-      const parsed = JSON.parse(raw);
-      const tasks = Array.isArray(parsed?.tasks) ? parsed.tasks : [];
-      const today = todayKeyFallback();
-      return tasks
-        .filter((task) => task && task.importance === 'Critical')
-        .filter((task) => !task.completedAtISO && !task.hidden && !task.deletedAtISO)
-        .filter((task) => typeof task.dueDateISO === 'string' && task.dueDateISO && task.dueDateISO <= today)
-        .map((task) => String(task.id));
-    } catch (e) {
-      return [];
+    const state = loadRawStateFallback();
+    const todayKey = todayKeyFallback();
+
+    const completions = Array.isArray(state.completions) ? state.completions : [];
+    const doneToday = new Set(
+      completions
+        .filter((c) => c && c.taskId && dateKeyFallback(c.completedAtISO) === todayKey)
+        .map((c) => String(c.taskId)),
+    );
+
+    const tasks = Array.isArray(state.tasks) ? state.tasks : [];
+    const ids = [];
+    for (const t of tasks) {
+      if (!t) continue;
+
+      if (t.importance !== 'Critical') continue;
+      if (t.hidden) continue;
+      if (t.deletedAtISO) continue;
+
+      if (!t.dueDateISO) continue;
+      if (t.dueDateISO > todayKey) continue;
+
+      const mode = (t.recurrence && t.recurrence.mode) || 'none';
+      if (mode === 'none') {
+        if (t.completedAtISO) continue;
+      } else if (doneToday.has(String(t.id))) {
+        continue;
+      }
+
+      ids.push(String(t.id));
     }
+
+    return ids;
   }
 
   function updateCriticalTasksIslandPosition() {
@@ -2393,6 +2412,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (!isMobileViewport()) {
       island.classList.add('hidden');
+      island.setAttribute('aria-hidden', 'true');
       window.tpUpdateToastAnchor?.();
       return;
     }
@@ -2400,6 +2420,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const count = getCriticalDueTaskIds().length;
     if (count <= 0) {
       island.classList.add('hidden');
+      island.setAttribute('aria-hidden', 'true');
       window.tpUpdateToastAnchor?.();
       return;
     }
@@ -2411,6 +2432,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     island.classList.remove('hidden');
+    island.removeAttribute('aria-hidden');
     updateCriticalTasksIslandPosition();
   }
 
@@ -2445,8 +2467,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   window.addEventListener('load', updateCriticalTasksIsland);
   window.addEventListener('resize', updateCriticalTasksIsland, { passive: true });
-  window.addEventListener('storage', updateCriticalTasksIsland);
-  setInterval(updateCriticalTasksIsland, 900);
+  window.addEventListener('storage', (e) => {
+    if (e && e.key === STORAGE_KEY_FALLBACK) updateCriticalTasksIsland();
+  });
+  setInterval(updateCriticalTasksIsland, 750);
 
   
   const scrollButtons = Array.from(document.querySelectorAll('[data-scroll-top]'));
