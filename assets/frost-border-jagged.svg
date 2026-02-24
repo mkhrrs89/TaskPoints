@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 80" preserveAspectRatio="none">
+  <!-- outer jagged ring -->
+  <path d="
+    M14 8
+    L20 12 L28 7 L36 11 L44 8 L52 13 L60 7 L68 12 L76 8 L84 13 L92 7 L100 12 L106 8
+    L112 14 L108 20 L114 28 L109 36 L112 44 L108 52 L114 60 L109 66 L112 72
+    L106 74 L100 70 L92 75 L84 71 L76 74 L68 69 L60 75 L52 70 L44 74 L36 69 L28 75 L20 70 L14 74
+    L8 66 L12 60 L6 52 L11 44 L8 36 L12 28 L6 20 L11 14
+    Z"
+    fill="none"
+    stroke="#f2ffff"
+    stroke-opacity="0.90"
+    stroke-width="4"
+    stroke-linejoin="round"
+    stroke-linecap="round"
+  />
+
+  <!-- inner icy highlight -->
+  <path d="
+    M18 12
+    L24 15 L30 12 L38 14 L46 12 L54 15 L62 12 L70 14 L78 12 L86 15 L94 12 L100 14
+    L104 18 L102 24 L106 30 L103 38 L104 46 L102 54 L106 60 L103 64
+    L100 68 L94 66 L86 69 L78 66 L70 68 L62 66 L54 69 L46 66 L38 68 L30 66 L24 68
+    L18 64 L20 60 L16 54 L19 46 L18 38 L20 30 L16 24 L18 18
+    Z"
+    fill="none"
+    stroke="#aef5ff"
+    stroke-opacity="0.55"
+    stroke-width="2"
+    stroke-linejoin="round"
+    stroke-linecap="round"
+  />
+</svg>
