@@ -403,14 +403,42 @@
     return hex.toLowerCase();
   }
 
+  function normalizeTagKey(tag) {
+    const key = String(tag ?? '').trim();
+    return key;
+  }
+
   function normalizeHabitTagColors(value) {
     if (!value || typeof value !== 'object') return {};
     const next = {};
     Object.entries(value).forEach(([tag, color]) => {
+      const key = normalizeTagKey(tag);
+      if (!key) return;
       const normalized = normalizeHexColor(color);
-      if (normalized) next[String(tag)] = normalized;
+      if (normalized) next[key] = normalized;
     });
     return next;
+  }
+
+  function parseHabitTagColorPatch(value) {
+    const out = { set: {}, del: [] };
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return out;
+
+    Object.entries(value).forEach(([tag, color]) => {
+      const key = normalizeTagKey(tag);
+      if (!key) return;
+
+      // deletion signal (only applies when overwrite is allowed)
+      if (color == null || String(color).trim() === '') {
+        out.del.push(key);
+        return;
+      }
+
+      const normalized = normalizeHexColor(color);
+      if (normalized) out.set[key] = normalized;
+    });
+
+    return out;
   }
 
   function normalizeHabit(habit) {
@@ -886,21 +914,30 @@ function fastEnsureStateShape(s) {
     const mergedSnapshot = deepMerge(existing, nextState || {});
     applyStickyKeyGuard({ existing, nextState, mergedSnapshot, options, storageKey });
     if (Object.prototype.hasOwnProperty.call(nextState || {}, 'habitTagColors')) {
-      const nextColors = normalizeHabitTagColors(nextState?.habitTagColors);
       const existingColors = normalizeHabitTagColors(existing?.habitTagColors);
-
       const existingHasColors = Object.keys(existingColors).length > 0;
+
+      const { set: nextSet, del: nextDel } = parseHabitTagColorPatch(nextState?.habitTagColors);
+
+      // allowChange is ONLY true when we explicitly allow overwriting sticky key behavior
       const allowChange =
         allowHabitTagColorReset || shouldAllowStickyOverwrite('habitTagColors', options);
 
       if (!allowChange) {
-        mergedSnapshot.habitTagColors = existingHasColors ? existingColors : nextColors;
+        // If overwrite isn’t allowed, preserve existing colors (don’t accept incoming empty maps)
+        mergedSnapshot.habitTagColors = existingHasColors ? existingColors : nextSet;
       } else if (allowHabitTagColorReset) {
-        mergedSnapshot.habitTagColors = nextColors;
+        // Full replace (import / explicit reset only)
+        mergedSnapshot.habitTagColors = nextSet;
       } else {
-        mergedSnapshot.habitTagColors = existingHasColors
-          ? { ...existingColors, ...nextColors }
-          : nextColors;
+        // PATCH merge:
+        // - delete only requested keys
+        // - set/update only requested keys
+        // - preserve everything else
+        const mergedColors = existingHasColors ? { ...existingColors } : {};
+        for (const key of nextDel) delete mergedColors[key];
+        Object.assign(mergedColors, nextSet);
+        mergedSnapshot.habitTagColors = mergedColors;
       }
     }
 

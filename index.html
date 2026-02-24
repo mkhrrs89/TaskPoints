@@ -901,8 +901,10 @@ function normalizeHabitTagColors(value) {
   if (!value || typeof value !== 'object') return {};
   const next = {};
   Object.entries(value).forEach(([tag, color]) => {
+    const key = String(tag ?? '').trim();
+    if (!key) return;
     const normalized = normalizeHexColor(color);
-    if (normalized) next[String(tag)] = normalized;
+    if (normalized) next[key] = normalized;
   });
   return next;
 }
@@ -951,7 +953,8 @@ function getContrastText(hex) {
 function getHabitTagColor(tag) {
   if (!tag) return null;
   const colors = state.habitTagColors || {};
-  return normalizeHexColor(colors[tag]);
+  const key = String(tag).trim();
+  return normalizeHexColor(colors[key]);
 }
 
 function getHabitBubbleStyleAttr(tag, status) {
