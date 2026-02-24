@@ -2315,7 +2315,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function ensureCriticalTasksIsland() {
-    if (!isMobileViewport()) return;
+    if (window.matchMedia && window.matchMedia('(min-width: 768px)').matches) return;
 
     let island = document.getElementById('criticalTasksIsland');
     if (!island) {
@@ -2324,9 +2324,15 @@ document.addEventListener('DOMContentLoaded', () => {
       island.type = 'button';
       island.className = 'hidden md:hidden tp-critical-island';
       island.setAttribute('aria-label', 'Go to critical tasks due today or overdue');
-      island.innerHTML = '<span class="critIslandMark">!</span>';
+      island.innerHTML = '<span id="criticalTasksIslandMark">!</span>';
+      island.style.display = 'none';
       document.body.appendChild(island);
+    } else if (!island.querySelector('#criticalTasksIslandMark')) {
+      island.innerHTML = '<span id="criticalTasksIslandMark">!</span>';
     }
+
+    island.style.display = 'none';
+    island.dataset.active = '0';
 
     if (!island.dataset.bound) {
       island.addEventListener('click', () => {
@@ -2336,7 +2342,7 @@ document.addEventListener('DOMContentLoaded', () => {
           || document.getElementById('taskList');
         sectionTarget?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
-        const matchingIds = getCriticalDueTaskIds();
+        const matchingIds = getCriticalDueList().map((t) => String(t.id));
         if (!matchingIds.length) return;
 
         document.querySelectorAll('.tp-task-critical-pulse').forEach((el) => el.classList.remove('tp-task-critical-pulse'));
@@ -2351,89 +2357,80 @@ document.addEventListener('DOMContentLoaded', () => {
       });
       island.dataset.bound = '1';
     }
+
+    updateCriticalTasksIsland();
+    window.addEventListener('load', updateCriticalTasksIsland);
+    window.addEventListener('storage', (e) => {
+      if (e && e.key === STORAGE_KEY_FALLBACK) updateCriticalTasksIsland();
+    });
+    setInterval(updateCriticalTasksIsland, 750);
   }
 
-  function getCriticalDueTaskIds() {
+  function getCriticalDueList() {
     const state = loadRawStateFallback();
     const todayKey = todayKeyFallback();
-
-    const completions = Array.isArray(state.completions) ? state.completions : [];
-    const doneToday = new Set(
-      completions
-        .filter((c) => c && c.taskId && dateKeyFallback(c.completedAtISO) === todayKey)
-        .map((c) => String(c.taskId)),
-    );
-
     const tasks = Array.isArray(state.tasks) ? state.tasks : [];
-    const ids = [];
+    const list = [];
     for (const t of tasks) {
       if (!t) continue;
-
       if (t.importance !== 'Critical') continue;
       if (t.hidden) continue;
       if (t.deletedAtISO) continue;
-
-      if (!t.dueDateISO) continue;
-      if (t.dueDateISO > todayKey) continue;
-
-      const mode = (t.recurrence && t.recurrence.mode) || 'none';
-      if (mode === 'none') {
-        if (t.completedAtISO) continue;
-      } else if (doneToday.has(String(t.id))) {
-        continue;
-      }
-
-      ids.push(String(t.id));
+      if (t.completedAtISO) continue;
+      const due = (t.dueDateISO || '').slice(0, 10);
+      if (!due) continue;
+      if (due <= todayKey) list.push(t);
     }
-
-    return ids;
+    return list;
   }
 
-  function updateCriticalTasksIslandPosition() {
+  function updateCritIslandStacking() {
     const island = document.getElementById('criticalTasksIsland');
-    if (!island) {
-      window.tpUpdateToastAnchor?.();
-      return;
-    }
-
     const todayIsland = document.getElementById('todayScoreIsland');
-    const todayHeight = todayIsland ? Math.round(todayIsland.offsetHeight || 0) : 0;
-    document.documentElement.style.setProperty('--todayIslandHeight', `${todayHeight}px`);
+    if (!island || island.dataset.active !== '1') return;
     const todayVisible = !!(todayIsland && !todayIsland.classList.contains('hidden'));
     island.classList.toggle('stack-under-today', todayVisible);
-    window.tpUpdateToastAnchor?.();
   }
 
   function updateCriticalTasksIsland() {
     const island = document.getElementById('criticalTasksIsland');
-    if (!island) return;
+    const mark = document.getElementById('criticalTasksIslandMark');
+    if (!island || !mark) return;
 
-    if (!isMobileViewport()) {
-      island.classList.add('hidden');
-      island.setAttribute('aria-hidden', 'true');
-      window.tpUpdateToastAnchor?.();
-      return;
-    }
-
-    const count = getCriticalDueTaskIds().length;
+    const list = getCriticalDueList();
+    const count = list.length;
     if (count <= 0) {
+      island.style.display = 'none';
       island.classList.add('hidden');
+      island.classList.remove('stack-under-today');
       island.setAttribute('aria-hidden', 'true');
+      island.dataset.active = '0';
       window.tpUpdateToastAnchor?.();
       return;
     }
 
-    const mark = island.querySelector('.critIslandMark');
-    if (mark) {
-      const visibleCount = Math.min(count, 5);
-      mark.textContent = '!'.repeat(visibleCount) + (count > 5 ? '+' : '');
-    }
-
+    island.style.display = '';
     island.classList.remove('hidden');
     island.removeAttribute('aria-hidden');
-    updateCriticalTasksIslandPosition();
+    island.dataset.active = '1';
+
+    const visibleCount = Math.min(count, 5);
+    mark.textContent = '!'.repeat(visibleCount) + (count > 5 ? '+' : '');
+
+    console.log('[crit-island] showing, counted:', list.map((t) => ({
+      title: t.title,
+      importance: t.importance,
+      due: t.dueDateISO,
+      completedAtISO: t.completedAtISO,
+      hidden: t.hidden,
+      deletedAtISO: t.deletedAtISO,
+    })));
+
+    updateCritIslandStacking();
+    window.tpUpdateToastAnchor?.();
   }
 
+  window.tpUpdateCriticalIsland = updateCriticalTasksIsland;
   window.updateCriticalTasksIsland = updateCriticalTasksIsland;
 
   ensureTodayScoreIsland();
@@ -2453,13 +2450,9 @@ document.addEventListener('DOMContentLoaded', () => {
       } else {
         todayIsland.classList.add('hidden');
       }
-      const critIsland = document.getElementById('criticalTasksIsland');
-      const todayVisible = !todayIsland.classList.contains('hidden');
-      document.documentElement.style.setProperty('--todayIslandHeight', `${Math.round(todayIsland.offsetHeight || 0)}px`);
-      critIsland?.classList.toggle('stack-under-today', todayVisible);
+      updateCritIslandStacking();
       // Always refresh so we can anchor to critical island at top scroll
       window.tpUpdateToastAnchor?.();
-      updateCriticalTasksIslandPosition();
     };
 
     // Ensure it's invisible on initial load at top of page
@@ -2470,12 +2463,7 @@ document.addEventListener('DOMContentLoaded', () => {
     updateTodayIslandVisibility();
   }
 
-  window.addEventListener('load', updateCriticalTasksIsland);
   window.addEventListener('resize', updateCriticalTasksIsland, { passive: true });
-  window.addEventListener('storage', (e) => {
-    if (e && e.key === STORAGE_KEY_FALLBACK) updateCriticalTasksIsland();
-  });
-  setInterval(updateCriticalTasksIsland, 750);
 
   
   const scrollButtons = Array.from(document.querySelectorAll('[data-scroll-top]'));
