@@ -1513,7 +1513,7 @@ header,
 .habitDay.icy::before{
   content:"";
   position:absolute;
-  inset:-10px;           /* <-- key: pushes overlay beyond border */
+  inset:-4px;           /* <-- key: pushes overlay beyond border */
   border-radius: inherit;
   pointer-events:none;
   background: url("./assets/frost-border-jagged.svg") no-repeat center / 100% 100%;
