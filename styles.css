@@ -1464,6 +1464,8 @@ header,
 .habitDay{
   width:48px;        /* ← add width */
   height:40px;       /* ← taller click target */
+  position: relative;
+  overflow: hidden;
   border-radius:10px;
   border:1px solid var(--border);
   display:grid;
@@ -1500,6 +1502,26 @@ header,
   border-radius: 9999px;
 }
 .habitDay.off{background:transparent}
+
+.habitDay.icy{
+  box-shadow:
+    0 0 0 1px rgba(220,255,255,0.18) inset,
+    0 0 10px rgba(140,220,255,0.18);
+}
+
+.habitDay.icy::after{
+  content:"";
+  position:absolute;
+  inset:-8px;
+  pointer-events:none;
+  border-radius:12px;
+  background:
+    radial-gradient(circle at 18% 20%, rgba(255,255,255,0.30), rgba(255,255,255,0) 55%),
+    radial-gradient(circle at 80% 75%, rgba(170,245,255,0.18), rgba(0,0,0,0) 60%),
+    repeating-linear-gradient(135deg, rgba(220,255,255,0.14) 0 6px, rgba(0,0,0,0) 6px 14px);
+  opacity: 0.9;
+  mix-blend-mode: screen;
+}
 
 /* Vices: explicit failed state (make it POP) */
 .viceDay.failed{

@@ -3708,9 +3708,10 @@ function renderHabitRow(h, days, wrap, options = {}) {
 
   const daysHtml = days.map(d => {
     const on = h.doneKeys.includes(d.key);
+    const isIcy = on && Array.isArray(h.iceKeys) && h.iceKeys.includes(d.key);
     const status = on ? 'on' : 'off';
     const styleAttr = getHabitBubbleStyleAttr(h.tag, status);
-    return `<div class="habitDay ${status}"${styleAttr} data-habit="${h.id}" data-day="${d.key}">
+    return `<div class="habitDay ${status}${isIcy ? ' icy' : ''}"${styleAttr} data-habit="${h.id}" data-day="${d.key}">
       ${d.date.getDate()}
     </div>`;
   }).join('');
@@ -4242,9 +4243,11 @@ function saveHabitEdit(id,row){
 
   // update existing log entries
   if (h.pointsPerDay !== oldPoints) {
+    const iceKeys = Array.isArray(h.iceKeys) ? h.iceKeys : [];
     state.completions.forEach(c => {
       if (c.source === 'habit' && c.habitId === id) {
-        c.points = h.pointsPerDay;
+        const isIcyDay = !!c.dayKey && iceKeys.includes(c.dayKey);
+        c.points = isIcyDay ? (h.pointsPerDay + 0.5) : h.pointsPerDay;
       }
     });
   }
@@ -4507,25 +4510,91 @@ function applyHabitDayToggle(h, dayKey) {
       removeCompletionForDay();
     }
   } else {
-    // Habits keep simple toggle behavior
-    const idx = h.doneKeys.indexOf(dayKey);
-    if (idx === -1) {
-      h.doneKeys.push(dayKey);
-      const iso = new Date(fromKey(dayKey).getTime() + 12 * 3600 * 1000).toISOString();
-      removeCompletionForDay();
-      addCompletion({
-        id: `habit:${habitId}:${dayKey}`,
-        taskId: `habit:${habitId}:${dayKey}`,
-        title: `[${tagLabel}] ${h.name} (${dayKey})`,
-        points: h.pointsPerDay || 0,
-        completedAtISO: iso,
-        source,
-        habitId: habitId,
-        dayKey: dayKey
-      });
+    const isShower = String(h.name || '').trim().toLowerCase() === 'shower';
+    h.doneKeys = Array.isArray(h.doneKeys) ? h.doneKeys : [];
+    h.iceKeys  = Array.isArray(h.iceKeys)  ? h.iceKeys  : [];
+
+    if (!isShower) {
+      // Habits keep simple toggle behavior
+      const idx = h.doneKeys.indexOf(dayKey);
+      if (idx === -1) {
+        h.doneKeys.push(dayKey);
+        const iso = new Date(fromKey(dayKey).getTime() + 12 * 3600 * 1000).toISOString();
+        removeCompletionForDay();
+        addCompletion({
+          id: `habit:${habitId}:${dayKey}`,
+          taskId: `habit:${habitId}:${dayKey}`,
+          title: `[${tagLabel}] ${h.name} (${dayKey})`,
+          points: h.pointsPerDay || 0,
+          completedAtISO: iso,
+          source,
+          habitId: habitId,
+          dayKey: dayKey
+        });
+      } else {
+        h.doneKeys.splice(idx, 1);
+        removeCompletionForDay();
+      }
     } else {
-      h.doneKeys.splice(idx, 1);
-      removeCompletionForDay();
+      const idx = h.doneKeys.indexOf(dayKey);
+      const icyIdx = h.iceKeys.indexOf(dayKey);
+
+      if (idx === -1) {
+        h.doneKeys.push(dayKey);
+        h.iceKeys = h.iceKeys.filter(k => k !== dayKey);
+        const iso = new Date(fromKey(dayKey).getTime() + 12 * 3600 * 1000).toISOString();
+        removeCompletionForDay();
+        addCompletion({
+          id: `habit:${habitId}:${dayKey}`,
+          taskId: `habit:${habitId}:${dayKey}`,
+          title: `[${tagLabel}] ${h.name} (${dayKey})`,
+          points: h.pointsPerDay || 0,
+          completedAtISO: iso,
+          source,
+          habitId: habitId,
+          dayKey: dayKey
+        });
+      } else if (icyIdx === -1) {
+        h.iceKeys.push(dayKey);
+
+        const base = Number(h.pointsPerDay) || 0;
+        const newPts = Math.round((base + 0.5) * 10) / 10;
+        let found = false;
+        if (Array.isArray(state.completions)) {
+          for (const c of state.completions) {
+            if ((c?.source === 'habit') && c?.habitId === habitId && c?.dayKey === dayKey) {
+              const oldPts = Number(c.points) || base;
+              c.points = newPts;
+              found = true;
+              markCompletionsDirty();
+              toastPointsDelta(newPts, oldPts);
+              break;
+            }
+          }
+        }
+
+        if (!found) {
+          const iso = new Date(fromKey(dayKey).getTime() + 12 * 3600 * 1000).toISOString();
+          const entry = {
+            id: `habit:${habitId}:${dayKey}`,
+            taskId: `habit:${habitId}:${dayKey}`,
+            title: `[Habit] ${h.name} (${dayKey})`,
+            points: newPts,
+            completedAtISO: iso,
+            source: 'habit',
+            habitId: habitId,
+            dayKey: dayKey
+          };
+          removeCompletionForDay();
+          state.completions.unshift(entry);
+          markCompletionsDirty();
+          showPointsToast(0.5);
+        }
+      } else {
+        h.iceKeys.splice(icyIdx, 1);
+        h.doneKeys.splice(idx, 1);
+        removeCompletionForDay();
+      }
     }
 
     // If a failed marker snuck in (shouldn't happen for habits), clear it
@@ -4557,6 +4626,10 @@ function handleHabitBubbleTap(bubbleEl) {
   const statusClass = applyHabitDayToggle(h, dayKey);
   bubbleEl.classList.remove('on', 'off', 'failed');
   bubbleEl.classList.add(statusClass);
+  const isIcyNow = statusClass === 'on'
+    && Array.isArray(h.iceKeys)
+    && h.iceKeys.includes(dayKey);
+  bubbleEl.classList.toggle('icy', isIcyNow);
   applyHabitBubbleStyle(bubbleEl, h, statusClass);
 
   if (window.TP_DEBUG_PERF) {
