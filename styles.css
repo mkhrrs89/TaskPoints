@@ -1511,16 +1511,13 @@ header,
 .habitDay.icy::before{
   content:"";
   position:absolute;
-  inset:0;                 /* <-- was -6px */
-  border-radius: inherit;  /* <-- important */
+  inset:0;
+  border-radius: inherit;
   pointer-events:none;
-  background: url("./assets/frost-border.svg") no-repeat center / 100% 100%;
+  background: url("./assets/frost-border-jagged.svg") no-repeat center / 100% 100%;
   opacity: 1;
-  mix-blend-mode: normal;  /* <-- temporarily so you can SEE it */
   z-index: 2;
 }
-
-.habitDay.icy{ outline: 3px solid #ff00ff !important; }
 
 /* Vices: explicit failed state (make it POP) */
 .viceDay.failed{
