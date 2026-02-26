@@ -2386,13 +2386,24 @@ document.addEventListener('DOMContentLoaded', () => {
     return list;
   }
 
-  function updateCritIslandStacking() {
-    const island = document.getElementById('criticalTasksIsland');
-    const todayIsland = document.getElementById('todayScoreIsland');
-    if (!island || island.dataset.active !== '1') return;
-    const todayVisible = !!(todayIsland && !todayIsland.classList.contains('hidden'));
-    island.classList.toggle('stack-under-today', todayVisible);
+function updateCritIslandStacking() {
+  const island = document.getElementById('criticalTasksIsland');
+  const todayIsland = document.getElementById('todayScoreIsland');
+  if (!island || island.dataset.active !== '1') return;
+
+  const todayVisible = !!(todayIsland && !todayIsland.classList.contains('hidden'));
+  island.classList.toggle('stack-under-today', todayVisible);
+
+  // Dynamic stacking offset: match the actual Today island height
+  if (todayVisible) {
+    const h = Math.round(todayIsland.getBoundingClientRect().height || 0);
+    if (h > 0) {
+      document.documentElement.style.setProperty('--tp-today-island-h', `${h}px`);
+    }
+  } else {
+    document.documentElement.style.removeProperty('--tp-today-island-h');
   }
+}
 
   function updateCriticalTasksIsland() {
     const island = document.getElementById('criticalTasksIsland');
