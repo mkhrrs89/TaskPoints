@@ -1106,7 +1106,7 @@ function editTodayCalories() {
   const newPts = caloriesToPoints(raw);
   entry.title = `Calories (${raw})`;
   entry.points = newPts;
-  toastPointsDelta(newPts, oldPts);
+  toastPointsDeltaTodayAware(newPts, oldPts, d);
   entry.completedAtISO = d.toISOString();
 
   markCompletionsDirty();
@@ -1188,7 +1188,7 @@ const oldPts = Number(target.points) || 0;
 target.title = `Sleep Score (${scoreVal}) — Rest ${restVal}`;
 const newPts = sleepPoints(scoreVal, restVal);
 target.points = newPts;
-toastPointsDelta(newPts, oldPts);
+toastPointsDeltaTodayAware(newPts, oldPts, target);
 target.sleepRested = restVal;
 
 
@@ -1286,7 +1286,7 @@ function submitWorkEditModal() {
   const oldPts = Number(workEditContext.points) || 0;
   const newPts = workPoints(scoreVal, safeHours);
   workEditContext.points = newPts;
-  toastPointsDelta(newPts, oldPts);
+  toastPointsDeltaTodayAware(newPts, oldPts, workEditContext);
   workEditContext.workHours = safeHours;
   workEditContext.source = 'work';
 
@@ -1482,6 +1482,114 @@ function toastPointsDelta(newPts, oldPts){
   window.showPointsToast?.(delta);
 }
 
+// ==============================
+// Today-aware points toast logic
+// ==============================
+
+// Stores the last-rendered Today score so we can compute deltas reliably.
+// (renderTodayPointsSummary will keep this updated)
+window.__tpLastRenderedTodayScore = window.__tpLastRenderedTodayScore ?? null;
+
+// When a past day is edited, we queue a toast that will fire ONLY after
+// the next render updates today's score (inertia recompute).
+let __tpPendingTodayToastOld = null;
+
+function __tpNumberOrNull(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function __tpGetLastRenderedTodayScore() {
+  const last = __tpNumberOrNull(window.__tpLastRenderedTodayScore);
+  if (last != null) return Math.round(last * 10) / 10;
+
+  // fallback to persisted island value
+  try {
+    const raw = localStorage.getItem('tpTodayScore');
+    const n = parseFloat(raw);
+    if (Number.isFinite(n)) return Math.round(n * 10) / 10;
+  } catch (e) {}
+
+  return null;
+}
+
+function __tpQueueTodayScoreDeltaToast() {
+  // Keep the earliest “old” value in a burst so we toast the net change.
+  if (__tpPendingTodayToastOld != null) return;
+
+  const old = __tpGetLastRenderedTodayScore();
+  if (old == null) return; // nothing to compare yet
+  __tpPendingTodayToastOld = old;
+}
+
+function __tpConsumeQueuedTodayScoreToast(newTodayPoints) {
+  if (__tpPendingTodayToastOld == null) return;
+
+  const old = __tpPendingTodayToastOld;
+  __tpPendingTodayToastOld = null;
+
+  const now = __tpNumberOrNull(newTodayPoints);
+  if (now == null || old == null) return;
+
+  let delta = Math.round((now - old) * 10) / 10;
+  if (Object.is(delta, -0)) delta = 0;
+  if (!delta) return;
+
+  window.showPointsToast?.(delta);
+}
+
+function __tpGetAffectedDayKey(meta) {
+  if (!meta) return null;
+
+  // If meta is already "YYYY-MM-DD"
+  if (typeof meta === 'string') {
+    const s = meta.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+
+    const d = new Date(s);
+    if (!d || isNaN(d.getTime())) return null;
+    return dateKey(d);
+  }
+
+  if (meta instanceof Date) {
+    return dateKey(meta);
+  }
+
+  if (typeof meta === 'object') {
+    if (meta.dayKey) return __tpGetAffectedDayKey(meta.dayKey);
+    if (meta.completedAtISO) return __tpGetAffectedDayKey(meta.completedAtISO);
+    if (meta.date) return __tpGetAffectedDayKey(meta.date);
+  }
+
+  return null;
+}
+
+// Use this everywhere instead of toastPointsDelta(...) directly.
+// - If the affected day is TODAY → toast the direct delta as before.
+// - If the affected day is NOT today → suppress the direct toast and queue a
+//   Today-score delta toast (fires after next renderTodayPointsSummary).
+function toastPointsDeltaTodayAware(newPts, oldPts, meta) {
+  const a = Number(newPts) || 0;
+  const b = Number(oldPts) || 0;
+
+  let delta = Math.round((a - b) * 10) / 10;
+  if (Object.is(delta, -0)) delta = 0;
+  if (!delta) return;
+
+  const affectedKey = __tpGetAffectedDayKey(meta);
+  const todayK = todayKey();
+
+  if (!affectedKey || affectedKey === todayK) {
+    // normal behavior: this change impacts TODAY directly
+    window.showPointsToast?.(delta);
+    return;
+  }
+
+  // Past-day change: do NOT toast the past-day delta.
+  // Instead, queue a toast for the change in TODAY's score after inertia recompute.
+  __tpQueueTodayScoreDeltaToast();
+}
+
 function parseCaloriesFromTitle(title) {
   if (typeof title !== 'string') return null;
   const match = title.match(/calories[^0-9]*([0-9]+(?:\.[0-9]+)?)/i);
@@ -1514,6 +1622,18 @@ function addCompletion(entry){
   const pts = Number(entry.points) || 0;
   state.completions.unshift(entry);
   markCompletionsDirty();
+
+  const dayK = entry?.dayKey
+    ? String(entry.dayKey)
+    : (entry?.completedAtISO ? dateKey(new Date(entry.completedAtISO)) : null);
+
+  if (dayK && dayK !== todayKey()) {
+    // Past day completion: do NOT toast pts, only queue Today-score delta toast.
+    __tpQueueTodayScoreDeltaToast();
+    return;
+  }
+
+  // Today completion: normal toast
   showPointsToast(pts);
 }
 
@@ -2927,6 +3047,14 @@ function renderTodayPointsSummary(todayPoints, inertia, inertiaAvg){
     const islandValueEl = $('todayScoreIslandValue');
     if (islandValueEl) islandValueEl.textContent = v;
   } catch (e) {}
+
+  // Track the last rendered Today score for toast comparisons
+  if (Number.isFinite(todayPoints)) {
+    window.__tpLastRenderedTodayScore = Math.round(todayPoints * 10) / 10;
+  }
+
+  // If a past-day edit queued a Today-score toast, resolve it now
+  try { __tpConsumeQueuedTodayScoreToast(todayPoints); } catch (e) {}
 
   const inertiaValueEl = $('inertiaValue');
   if (inertiaValueEl) inertiaValueEl.textContent = (Number.isFinite(inertia) ? inertia : 0).toFixed(1);
@@ -4570,7 +4698,7 @@ function applyHabitDayToggle(h, dayKey) {
               c.points = newPts;
               found = true;
               markCompletionsDirty();
-              toastPointsDelta(newPts, oldPts);
+              toastPointsDeltaTodayAware(newPts, oldPts, dayKey);
               break;
             }
           }
@@ -4591,7 +4719,11 @@ function applyHabitDayToggle(h, dayKey) {
           removeCompletionForDay();
           state.completions.unshift(entry);
           markCompletionsDirty();
-          showPointsToast(0.5);
+          if (dayKey === todayKey()) {
+            showPointsToast(0.5);
+          } else {
+            __tpQueueTodayScoreDeltaToast();
+          }
         }
       } else {
         h.iceKeys.splice(icyIdx, 1);
@@ -5175,7 +5307,7 @@ state.completions.unshift({
   }
 
   markCompletionsDirty();
-  toastPointsDelta(pts, oldPts);
+  toastPointsDeltaTodayAware(pts, oldPts, key);
 
   $('sleepScoreInput').value = "";  // clear input
   const restInput = $('sleepRestedInput');
@@ -5244,7 +5376,7 @@ function saveCalories(){
     });
   }
 
-  toastPointsDelta(pts, oldPts);
+  toastPointsDeltaTodayAware(pts, oldPts, key);
   markCompletionsDirty();
   
   $('caloriesInput').value = '';
@@ -5648,7 +5780,7 @@ block.onclick = () => {
   target.title  = `Calories (${raw})`;
   target.points = newPts;
 
-  toastPointsDelta(newPts, oldPts);
+  toastPointsDeltaTodayAware(newPts, oldPts, target);
   markCompletionsDirty();
   save();
   scheduleRender(renderAll);
@@ -5726,7 +5858,7 @@ function saveWorkScore() {
     });
   }
 
-  toastPointsDelta(pts, oldPts);
+  toastPointsDeltaTodayAware(pts, oldPts, key);
 
   $('workScoreInput').value = "";
   const hoursInput = $('workHoursInput');
@@ -5992,7 +6124,7 @@ function editTodayMood() {
   const newPts = moodPoints(num);
   entry.title = `Mood Score (${num})`;
   entry.points = newPts;
-  toastPointsDelta(newPts, oldPts);
+  toastPointsDeltaTodayAware(newPts, oldPts, d);
   entry.completedAtISO = d.toISOString();
   entry.source = 'metric';
 
@@ -6039,7 +6171,7 @@ function saveMoodScore() {
     });
   }
 
-  toastPointsDelta(pts, oldPts);
+  toastPointsDeltaTodayAware(pts, oldPts, key);
   markCompletionsDirty();
   
   $('moodScoreInput').value = "";
@@ -6170,7 +6302,7 @@ block.onclick = () => {
   target.title = `Mood Score (${num})`;
   target.points = newPts;
 
-  toastPointsDelta(newPts, oldPts);
+  toastPointsDeltaTodayAware(newPts, oldPts, target);
   markCompletionsDirty();
   save();
   scheduleRender(renderAll);
@@ -6963,7 +7095,7 @@ if (key === "mood") {
 
   entry.title  = `Mood Score (${num})`;
   entry.points = newPts;
-  toastPointsDelta(newPts, oldPts);
+  toastPointsDeltaTodayAware(newPts, oldPts, entry);
 
   markCompletionsDirty();
   save();
@@ -7214,7 +7346,7 @@ if (cat === "work" && typeof promptEditWorkEntry === "function") {
 
       entry.title  = `Calories (${raw})`;
       entry.points = newPts;
-      toastPointsDelta(newPts, oldPts);
+      toastPointsDeltaTodayAware(newPts, oldPts, entry);
 
 markCompletionsDirty();
 save();
@@ -7240,7 +7372,7 @@ return;
 
       entry.title  = `Mood Score (${num})`;
       entry.points = newPts;
-      toastPointsDelta(newPts, oldPts);
+      toastPointsDeltaTodayAware(newPts, oldPts, entry);
 
 markCompletionsDirty();
 save();
