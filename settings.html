@@ -147,6 +147,20 @@
         <div id="categoryReportOutput" class="overflow-x-auto text-sm"></div>
       </div>
 
+      <div class="glass space-y-3" id="scwmTrendSection">
+        <div class="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <div class="text-lg font-semibold">SCWM 2-Week Trend Lines</div>
+            <div class="muted text-sm">Daily points for Sleep, Calories, Work, and Mood over the last 14 days.</div>
+          </div>
+          <button id="scwmTrendBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Generate Graphs</button>
+        </div>
+
+        <div id="scwmTrendMeta" class="text-xs muted"></div>
+
+        <div id="scwmTrendOutput" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+      </div>
+
       <details class="glass space-y-3" id="habitCalendarReportSection">
         <summary class="flex items-center justify-between gap-3 flex-wrap cursor-pointer">
           <div>
@@ -1636,6 +1650,177 @@
       renderCategoryReport(report);
     }
 
+    // =====================================================
+    // SCWM 2-Week Trend Lines (Sleep / Calories / Work / Mood)
+    // =====================================================
+
+    const SCWM_TREND_DEFS = [
+      { key: "sleep",    label: "Sleep",    color: "#a78bfa" },
+      { key: "calories", label: "Calories", color: "#34d399" },
+      { key: "work",     label: "Work",     color: "#60a5fa" },
+      { key: "mood",     label: "Mood",     color: "#fb7185" }
+    ];
+
+    function formatShortDateForTrend(dateObj) {
+      try {
+        return dateObj.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+      } catch (e) {
+        const m = dateObj.getMonth() + 1;
+        const d = dateObj.getDate();
+        return `${m}/${d}`;
+      }
+    }
+
+    function buildPastDayKeys(days) {
+      const out = [];
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      // oldest -> today
+      for (let i = days - 1; i >= 0; i -= 1) {
+        const d = new Date(today);
+        d.setDate(today.getDate() - i);
+        out.push(dateKey(d));
+      }
+      return out;
+    }
+
+    function buildScwmSeries(dailyBreakdowns, dayKeys) {
+      return SCWM_TREND_DEFS.map(def => {
+        const values = dayKeys.map(k => {
+          const v = dailyBreakdowns?.[k]?.categories?.[def.key];
+          return Number(v) || 0;
+        });
+
+        return {
+          ...def,
+          values
+        };
+      });
+    }
+
+    function renderScwmTrendCharts({ generatedAt, startLabel, endLabel, series, dayKeys }) {
+      const out = document.getElementById("scwmTrendOutput");
+      const meta = document.getElementById("scwmTrendMeta");
+      if (!out) return;
+
+      if (meta) {
+        meta.textContent = `Past 14 days: ${startLabel} → ${endLabel} • Generated ${generatedAt}`;
+      }
+
+      out.innerHTML = "";
+
+      series.forEach(s => {
+        const width = Math.max(320, dayKeys.length * 26); // 14 days => ~364
+        const height = 140;
+
+        // padding for y labels + breathing room
+        const padL = 36;
+        const padR = 12;
+        const padT = 14;
+        const padB = 18;
+
+        const yRange = computeNiceYRange([{ data: s.values }], { padPct: 0.12, minRange: 8 });
+        const range = (yRange.max - yRange.min) || 1;
+
+        const pointX = idx => {
+          if (s.values.length <= 1) return padL;
+          return padL + (idx / (s.values.length - 1)) * (width - padL - padR);
+        };
+
+        const pointY = val => {
+          const n = Number(val) || 0;
+          const normalized = (n - yRange.min) / range;
+          return (height - padB) - normalized * (height - padT - padB);
+        };
+
+        const tickCount = 4;
+        const tickStep = range / tickCount;
+        const yTicks = [];
+        for (let i = 0; i <= tickCount; i += 1) {
+          const value = yRange.min + tickStep * i;
+          yTicks.push({ value, y: pointY(value) });
+        }
+
+        const yTickLines = yTicks.map(tick => `
+          <line x1="${padL - 4}" y1="${tick.y}" x2="${width - padR}" y2="${tick.y}" stroke="#334155" stroke-dasharray="2 6" />
+        `).join("");
+
+        const yTickLabels = yTicks.map(tick => `
+          <text class="tp-yTick" x="${padL - 8}" y="${tick.y + 3}" fill="#94a3b8" font-size="9" text-anchor="end">${formatNumber(tick.value)}</text>
+        `).join("");
+
+        const linePoints = s.values.map((v, idx) => `${pointX(idx)},${pointY(v)}`).join(" ");
+
+        const last = s.values.length ? s.values[s.values.length - 1] : 0;
+        const min = s.values.length ? Math.min(...s.values) : 0;
+        const max = s.values.length ? Math.max(...s.values) : 0;
+        const avg = s.values.length ? (s.values.reduce((a,b)=>a+b,0) / s.values.length) : 0;
+
+        const card = document.createElement("div");
+        card.className = "glass p-4 space-y-2";
+        card.innerHTML = `
+          <div class="flex items-center justify-between gap-2">
+            <div class="font-semibold">${escapeHtml(s.label)}</div>
+            <div class="text-xs muted">
+              Last ${formatNumber(last)} • Avg ${formatNumber(avg)} • Min ${formatNumber(min)} • Max ${formatNumber(max)}
+            </div>
+          </div>
+
+          <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" class="w-full h-40 rounded-xl bg-black/20 border border-white/5">
+            ${yTickLines}
+            ${yTickLabels}
+            <polyline fill="none" stroke="${s.color}" stroke-width="2" points="${linePoints}" />
+          </svg>
+
+          <div class="flex items-center justify-between text-[11px] muted">
+            <span>${escapeHtml(startLabel)}</span>
+            <span>${escapeHtml(endLabel)}</span>
+          </div>
+        `;
+
+        out.appendChild(card);
+
+        requestAnimationFrame(() => {
+          const svg = card.querySelector("svg");
+          normalizeSvgTickText(svg);
+        });
+      });
+    }
+
+    function generateScwmTrendReport() {
+      const out = document.getElementById("scwmTrendOutput");
+      const meta = document.getElementById("scwmTrendMeta");
+      if (!out) return;
+
+      if (!window.TaskPointsCore?.buildDailyBreakdowns) {
+        out.innerHTML = `<div class="muted text-xs">SCWM trend reporting is unavailable right now.</div>`;
+        if (meta) meta.textContent = "";
+        return;
+      }
+
+      const state = loadSettingsState();
+      const dailyBreakdowns = TaskPointsCore.buildDailyBreakdowns(state);
+
+      const dayKeys = buildPastDayKeys(14);
+
+      const startDate = new Date(`${dayKeys[0]}T00:00:00`);
+      const endDate = new Date(`${dayKeys[dayKeys.length - 1]}T00:00:00`);
+
+      const startLabel = formatShortDateForTrend(startDate);
+      const endLabel = formatShortDateForTrend(endDate);
+
+      const series = buildScwmSeries(dailyBreakdowns, dayKeys);
+
+      renderScwmTrendCharts({
+        generatedAt: new Date().toLocaleString(),
+        startLabel,
+        endLabel,
+        series,
+        dayKeys
+      });
+    }
+
     function getHabitCalendarStartDate(habit, state) {
       if (!habit) return null;
       if (habit.createdAtISO) {
@@ -2655,6 +2840,7 @@ normalizeSvgTickText(svg);
       document.getElementById('settingsResetBtn')?.addEventListener('click', handleSettingsReset);
       document.getElementById('settingsExportMatchupsBtn')?.addEventListener('click', exportMatchupsAndHistoryCsv);
       document.getElementById('categoryReportBtn')?.addEventListener('click', generateCategoryReport);
+      document.getElementById('scwmTrendBtn')?.addEventListener('click', generateScwmTrendReport);
       document.getElementById('habitCalendarReportBtn')?.addEventListener('click', generateHabitCalendarReport);
       const missingScoreDateInput = document.getElementById("missingScoreDate");
       const missingScoreTypeSelect = document.getElementById("missingScoreType");
