@@ -1343,6 +1343,86 @@ header,
 /* Default (desktop + general) */
 .task-title{word-break:break-word;overflow-wrap:anywhere}
 
+.task-compact-toggle{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  font-size:12px;
+  color:var(--muted);
+}
+
+.task-card-shell{cursor:pointer}
+.task-card-shell:focus-visible{outline:2px solid #22d3ee;outline-offset:2px;border-radius:12px}
+.task-card-header{
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+
+.task-main{flex:1;min-width:0}
+.task-meta-line{margin-top:2px}
+
+.task-card-header-actions{
+  margin-left:auto;
+  display:flex;
+  align-items:center;
+  gap:6px;
+}
+
+.task-more-btn{min-width:34px;padding-inline:10px}
+.task-expanded{margin-top:10px}
+.task-expanded-actions{display:flex;gap:8px;flex-wrap:wrap}
+.task-tags{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+
+.task-action-sheet{
+  position:fixed;
+  inset:0;
+  z-index:1200;
+}
+.task-action-sheet.hidden{display:none}
+.task-action-sheet__backdrop{
+  position:absolute;
+  inset:0;
+  background:rgba(0,0,0,.45);
+}
+.task-action-sheet__panel{
+  position:absolute;
+  left:0;
+  right:0;
+  bottom:0;
+  margin:0 auto;
+  width:min(100%, 460px);
+  background:#111827;
+  border:1px solid var(--border);
+  border-radius:16px 16px 0 0;
+  padding:12px;
+}
+.task-action-sheet__header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  margin-bottom:8px;
+}
+.task-action-sheet__actions{display:grid;gap:8px}
+.task-action-sheet__actions .btn{text-align:left;padding:10px 12px}
+
+@media (min-width: 900px){
+  .task-action-sheet__panel{
+    left:auto;
+    right:24px;
+    top:96px;
+    bottom:auto;
+    border-radius:16px;
+    width:280px;
+  }
+}
+
+.task-compact-view #taskList .glass{padding:8px 10px}
+.task-compact-view .task-title{font-size:.93rem}
+.task-compact-view .task-meta-line{font-size:.68rem}
+.task-compact-view .taskPointsNumber{font-size:1.1rem}
+
 /* On small screens, don't break between every character */
 @media (max-width:640px){
   .task-title{
