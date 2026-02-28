@@ -702,6 +702,10 @@ Nothing visible on the page is built here. === -->
     <div class="flex items-center mb-3 gap-2 sm:gap-3">
       <h2 id="tasksAnchor" class="font-bold text-lg shrink-0">Your Tasks</h2>
       <button id="openAddTaskBtn" class="btn btn-primary shrink-0">Add Task</button>
+      <label for="compactTasksToggle" class="task-compact-toggle shrink-0">
+        <input id="compactTasksToggle" type="checkbox">
+        <span>Compact view</span>
+      </label>
       <select id="sortSelect" class="input flex-1 min-w-0 sm:flex-none sm:w-48 sm:ml-auto">
         <option value="due">Sort by Due Date</option>
         <option value="importance">Sort by Importance</option>
@@ -998,9 +1002,13 @@ function initHabitSortControl(){
 }
 
 let editingTaskId = null;
+let expandedTaskId = null;
+let taskActionSheetTaskId = null;
+let taskActionSheetTrigger = null;
 let editingHabitId = null;
 let editingFlexId = null;
 let lastFlexCompletion = null;
+const TASK_COMPACT_VIEW_KEY = 'tp_tasks_compact_view_v1';
 
 
 function sleepBonus(score) {
@@ -4986,6 +4994,24 @@ function toggleFlexRetired(id){
 
 
 /* ---------- TASKS ---------- */
+
+function taskDueMeta(t, today){
+  const parts = [t.importance || 'Medium'];
+  if (t.dueDateISO) {
+    const dueDate = fromKey(t.dueDateISO);
+    const diff = Math.round((dueDate - today) / 86400000);
+    parts.push(niceDate(dueDate));
+    if (diff > 0) parts.push(`Due in ${diff}d`);
+    else if (diff === 0) parts.push('Due today');
+    else parts.push(`${Math.abs(diff)}d overdue`);
+  } else {
+    parts.push('No due date');
+  }
+  const postponeDays = Number(t.postponedDays) || 0;
+  if (postponeDays > 0) parts.push(`+${postponeDays}d`);
+  return parts.join(' • ');
+}
+
 function renderTasks(){
   const container=$('taskList'), empty=$('emptyList'); container.innerHTML='';
   const active=state.tasks.filter(t=>!t.completedAtISO && !t.hidden && !t.deletedAtISO);
@@ -5004,6 +5030,7 @@ function renderTasks(){
   }
 
   const today = new Date(); today.setHours(0,0,0,0);
+  const todayIso = dateKey(today);
   const overdueBucket = { label:'Overdue', key:'overdue', items:[] };
   const dmap = {};
   for(let i=0;i<7;i++){ const d=addDays(today,i); const k=dateKey(d); dmap[k]={ label:labelForDay(d,today), key:k, date:d, items:[] }; }
@@ -5012,7 +5039,7 @@ function renderTasks(){
 
   for(const t of tasks){
     if(!t.dueDateISO){ nodueBucket.items.push(t); continue; }
-    if(t.dueDateISO < dateKey(today)) overdueBucket.items.push(t);
+    if(t.dueDateISO < todayIso) overdueBucket.items.push(t);
     else if(dmap[t.dueDateISO]) dmap[t.dueDateISO].items.push(t);
     else laterBucket.items.push(t);
   }
@@ -5026,166 +5053,213 @@ function renderTasks(){
     fragment.appendChild(div);
 
     b.items.forEach(t=>{
-      const isOverdue = t.dueDateISO && t.dueDateISO < dateKey(today);
-      const postponeDays = Number(t.postponedDays) || 0;
-      const showPostponePill = postponeDays > 0 && !!t.dueDateISO;
-
-const badge = {
-  Low:      'bg-transparent text-zinc-500 border border-zinc-700',
-  Medium:   'bg-teal-400/40 text-teal-950',      // darker text for visibility
-  High:     'tag-high',
-  Critical: 'tag-critical'
-}[t.importance] || 'bg-zinc-300/60 text-zinc-950';
-
-      // Build tags row if this task has tags
+      const isOverdue = t.dueDateISO && t.dueDateISO < todayIso;
+      const isExpanded = expandedTaskId === t.id;
       const tags = Array.isArray(t.tags) ? t.tags : [];
-const tagsHtml = tags.length
-  ? tags.map(tag =>
-      `<span class="tag bg-zinc-700/40">${escapeHtml(tag)}</span>`
-    ).join('')
-  : '';
-
+      const tagsHtml = tags.length ? `<div class="task-tags">${tags.map(tag => `<span class="tag bg-zinc-700/40">${escapeHtml(tag)}</span>`).join('')}</div>` : '';
 
       const card = document.createElement('div');
       card.dataset.taskId = t.id;
-const cardClasses = ['glass'];
-if (t.importance === 'Critical') cardClasses.push('critical-card');
-else if (t.importance === 'High') cardClasses.push('high-card');
-card.className = cardClasses.join(' ');
+      const cardClasses = ['glass'];
+      if (t.importance === 'Critical') cardClasses.push('critical-card');
+      else if (t.importance === 'High') cardClasses.push('high-card');
+      if (isExpanded) cardClasses.push('task-card-expanded');
+      card.className = cardClasses.join(' ');
 
+      if (editingTaskId === t.id) {
+        const rec = t.recurrence || {};
+        const recMode = rec.mode || 'none';
+        const recCount = Number.isFinite(rec.customCount) && rec.customCount > 0 ? rec.customCount : 1;
+        const recUnit  = rec.customUnit || 'day';
 
-if (editingTaskId === t.id) {
-  const rec = t.recurrence || {};
-  const recMode = rec.mode || 'none';
-  const recCount = Number.isFinite(rec.customCount) && rec.customCount > 0 ? rec.customCount : 1;
-  const recUnit  = rec.customUnit || 'day';
-
-  card.innerHTML = `
-    <div class="flex flex-col gap-3">
-      <div class="grid gap-2 sm:grid-cols-2">
-        <div class="sm:col-span-2">
-          <label class="text-xs muted">Title</label>
-          <input class="input mt-1" data-field="title" value="${escapeHtml(t.title)}">
-        </div>
-        <div>
-          <label class="text-xs muted">Importance</label>
-          <select class="input mt-1" data-field="importance">
-            <option ${t.importance==='Low'?'selected':''}>Low</option>
-            <option ${t.importance==='Medium'?'selected':''}>Medium</option>
-            <option ${t.importance==='High'?'selected':''}>High</option>
-            <option ${t.importance==='Critical'?'selected':''}>Critical</option>
-          </select>
-        </div>
-        <div>
-          <label class="text-xs muted">Due Date</label>
-          <input class="input mt-1" type="date" data-field="due" value="">
-        </div>
-        <div>
-          <label class="text-xs muted">Points</label>
-          <input class="input mt-1" type="number" data-field="points" value="${t.points||0}">
-        </div>
-        <div>
-          <label class="text-xs muted">Repeat</label>
-          <select class="input mt-1" data-field="repeat">
-            <option value="none" ${recMode==='none'?'selected':''}>Does not repeat</option>
-            <option value="daily" ${recMode==='daily'?'selected':''}>Daily</option>
-            <option value="everyWeekday" ${recMode==='everyWeekday'?'selected':''}>Every Weekday</option>
-            <option value="weekly" ${recMode==='weekly'?'selected':''}>Weekly</option>
-            <option value="monthly" ${recMode==='monthly'?'selected':''}>Monthly</option>
-            <option value="yearly" ${recMode==='yearly'?'selected':''}>Yearly</option>
-            <option value="custom" ${recMode==='custom'?'selected':''}>Custom…</option>
-          </select>
-
-          <div class="flex items-center gap-2 text-xs mt-2 repeat-custom-row ${recMode==='custom'?'':'hidden'}">
-            <span class="muted">Repeat every</span>
-            <input type="number" min="1" class="input w-16" data-field="repeatCustomCount" value="${recCount}">
-            <select class="input w-24 text-xs" data-field="repeatCustomUnit">
-              <option value="day" ${recUnit==='day'?'selected':''}>day(s)</option>
-              <option value="week" ${recUnit==='week'?'selected':''}>week(s)</option>
-              <option value="month" ${recUnit==='month'?'selected':''}>month(s)</option>
-              <option value="year" ${recUnit==='year'?'selected':''}>year(s)</option>
-            </select>
+        card.innerHTML = `
+          <div class="flex flex-col gap-3">
+            <div class="grid gap-2 sm:grid-cols-2">
+              <div class="sm:col-span-2">
+                <label class="text-xs muted">Title</label>
+                <input class="input mt-1" data-field="title" value="${escapeHtml(t.title)}">
+              </div>
+              <div>
+                <label class="text-xs muted">Importance</label>
+                <select class="input mt-1" data-field="importance">
+                  <option ${t.importance==='Low'?'selected':''}>Low</option>
+                  <option ${t.importance==='Medium'?'selected':''}>Medium</option>
+                  <option ${t.importance==='High'?'selected':''}>High</option>
+                  <option ${t.importance==='Critical'?'selected':''}>Critical</option>
+                </select>
+              </div>
+              <div>
+                <label class="text-xs muted">Due Date</label>
+                <input class="input mt-1" type="date" data-field="due" value="">
+              </div>
+              <div>
+                <label class="text-xs muted">Points</label>
+                <input class="input mt-1" type="number" data-field="points" value="${t.points||0}">
+              </div>
+              <div>
+                <label class="text-xs muted">Repeat</label>
+                <select class="input mt-1" data-field="repeat">
+                  <option value="none" ${recMode==='none'?'selected':''}>Does not repeat</option>
+                  <option value="daily" ${recMode==='daily'?'selected':''}>Daily</option>
+                  <option value="everyWeekday" ${recMode==='everyWeekday'?'selected':''}>Every Weekday</option>
+                  <option value="weekly" ${recMode==='weekly'?'selected':''}>Weekly</option>
+                  <option value="monthly" ${recMode==='monthly'?'selected':''}>Monthly</option>
+                  <option value="yearly" ${recMode==='yearly'?'selected':''}>Yearly</option>
+                  <option value="custom" ${recMode==='custom'?'selected':''}>Custom...</option>
+                </select>
+              </div>
+              <div class="repeat-custom-row sm:col-span-2 ${recMode==='custom'?'':'hidden'}">
+                <label class="text-xs muted">Custom Repeat</label>
+                <div class="mt-1 flex items-center gap-2">
+                  <span class="text-xs muted">Every</span>
+                  <input class="input" style="max-width:90px" type="number" min="1" data-field="repeatCustomCount" value="${recCount}">
+                  <select class="input" data-field="repeatCustomUnit">
+                    <option value="day" ${recUnit==='day'?'selected':''}>day(s)</option>
+                    <option value="week" ${recUnit==='week'?'selected':''}>week(s)</option>
+                    <option value="month" ${recUnit==='month'?'selected':''}>month(s)</option>
+                    <option value="year" ${recUnit==='year'?'selected':''}>year(s)</option>
+                  </select>
+                </div>
+              </div>
+              <div class="sm:col-span-2">
+                <label class="text-xs muted">Tags</label>
+                <input class="input mt-1" data-field="tags" value="${(Array.isArray(t.tags) ? t.tags : []).join(', ')}">
+              </div>
+            </div>
+            <div class="flex gap-2 flex-wrap justify-end">
+              <button class="btn btn-success" data-task-action="task-save" data-task-id="${t.id}">Save</button>
+              <button class="btn btn-ghost" data-task-action="task-cancel" data-task-id="${t.id}">Cancel</button>
+              <button class="btn btn-ghost" data-task-action="task-delete" data-task-id="${t.id}">Delete</button>
+            </div>
           </div>
-        </div>
-        <div class="sm:col-span-2">
-          <label class="text-xs muted">Tags</label>
-          <input class="input mt-1" data-field="tags" value="${(Array.isArray(t.tags) ? t.tags : []).join(', ')}">
-        </div>
-      </div>
-      <div class="flex gap-2 flex-wrap justify-end">
-        <button class="btn btn-success" data-task-action="task-save" data-task-id="${t.id}">Save</button>
-        <button class="btn btn-ghost" data-task-action="task-cancel" data-task-id="${t.id}">Cancel</button>
-        <button class="btn btn-ghost" data-task-action="task-delete" data-task-id="${t.id}">Delete</button>
-      </div>
-    </div>
-  `;
+        `;
 
-  // ⬇️ keep this
-  fragment.appendChild(card);
+        fragment.appendChild(card);
 
-  const dueInput = card.querySelector('input[data-field="due"]');
-  if (dueInput) {
-    dueInput.value = t.dueDateISO || '';
-    dueInput.defaultValue = '';
-  }
+        const dueInput = card.querySelector('input[data-field="due"]');
+        if (dueInput) {
+          dueInput.value = t.dueDateISO || '';
+          dueInput.defaultValue = '';
+        }
 
-  // wire up custom row toggle for this card
-  const repSel = card.querySelector('select[data-field="repeat"]');
-  const customRow = card.querySelector('.repeat-custom-row');
-  if (repSel && customRow) {
-    const toggle = () => {
-      if (repSel.value === 'custom') customRow.classList.remove('hidden');
-      else customRow.classList.add('hidden');
-    };
-    repSel.addEventListener('change', toggle);
-    toggle();
-  }
-
-  // ⬇️ keep these exactly like before
-} else {
-card.innerHTML=`
-  <div class="flex flex-wrap sm:flex-nowrap items-center gap-3">
-    <div class="taskPoints flex flex-col items-center justify-center">
-      <div class="taskPointsNumber">${t.points}</div>
-      <div class="taskPointsLabel muted">pts</div>
-    </div>
-<div class="title-wrap min-w-0 flex-1">
-  <div class="font-semibold task-title">${escapeHtml(t.title)}</div>
-
-  <div class="flex gap-2 text-xs mt-1 flex-wrap">
-    <span class="tag ${badge}">${t.importance}</span>
-
-${t.dueDateISO
-  ? `<span class="tag ${isOverdue ? 'bg-rose-600/70 text-rose-50' : 'bg-zinc-700/40'}">
-       ${niceDate(fromKey(t.dueDateISO))}
-     </span>${showPostponePill ? `<span class="tag postpone-pill">+${postponeDays}d</span>` : ''}`
-  : ''
-}
-
-
-    ${tagsHtml}
-  </div>
-</div>
-
-
-    <div class="flex gap-2 flex-wrap justify-end ml-auto">
-      ${isOverdue?`<button class="btn btn-ghost btn-task" data-task-action="postpone" data-task-id="${t.id}">Postpone</button>`:''}
-      <button class="btn btn-ghost btn-task" data-task-action="wont-do" data-task-id="${t.id}">Won’t do</button>
-      <button class="btn btn-ghost btn-task" data-task-action="bump" data-task-id="${t.id}">+1d</button>
-      <button class="btn btn-ghost btn-task" data-task-action="edit" data-task-id="${t.id}">Edit</button>
-      <button class="btn btn-ghost btn-task" data-task-action="hide" data-task-id="${t.id}">Hide</button>
-      <button class="btn btn-delete btn-task" data-task-action="delete" data-task-id="${t.id}">Delete</button>
-      <button class="btn btn-success btn-task btn-check" data-task-action="complete" data-task-id="${t.id}" aria-label="Done">✓</button>
-
-    </div>
-  </div>`;
-
+        const repSel = card.querySelector('select[data-field="repeat"]');
+        const customRow = card.querySelector('.repeat-custom-row');
+        if (repSel && customRow) {
+          const toggle = () => {
+            if (repSel.value === 'custom') customRow.classList.remove('hidden');
+            else customRow.classList.add('hidden');
+          };
+          repSel.addEventListener('change', toggle);
+          toggle();
+        }
+      } else {
+        card.innerHTML = `
+          <div class="task-card-shell" data-task-card-body="${t.id}" tabindex="0" role="button" aria-expanded="${isExpanded ? 'true' : 'false'}" aria-label="${isExpanded ? 'Collapse' : 'Expand'} ${escapeHtml(t.title)}">
+            <div class="task-card-header">
+              <div class="taskPoints flex flex-col items-center justify-center">
+                <div class="taskPointsNumber">${t.points}</div>
+                <div class="taskPointsLabel muted">pts</div>
+              </div>
+              <div class="task-main min-w-0">
+                <div class="font-semibold task-title">${escapeHtml(t.title)}</div>
+                <div class="task-meta-line muted text-xs">${taskDueMeta(t, today)}</div>
+              </div>
+              <div class="task-card-header-actions">
+                <button class="btn btn-success btn-task btn-check" data-task-action="complete" data-task-id="${t.id}" aria-label="Done">✓</button>
+                ${isOverdue ? `<button class="btn btn-ghost btn-task" data-task-action="postpone" data-task-id="${t.id}">Postpone</button>` : ''}
+                <button class="btn btn-ghost btn-task task-more-btn" data-task-action="more" data-task-id="${t.id}" aria-haspopup="dialog" aria-label="More actions">⋯</button>
+              </div>
+            </div>
+          </div>
+          <div class="task-expanded ${isExpanded ? '' : 'hidden'}" data-task-expanded="${t.id}">
+            ${tagsHtml}
+            <div class="task-expanded-actions">
+              ${isOverdue?`<button class="btn btn-ghost btn-task" data-task-action="postpone" data-task-id="${t.id}">Postpone</button>`:''}
+              <button class="btn btn-ghost btn-task" data-task-action="wont-do" data-task-id="${t.id}">Won’t do</button>
+              <button class="btn btn-ghost btn-task" data-task-action="bump" data-task-id="${t.id}">+1d</button>
+              <button class="btn btn-ghost btn-task" data-task-action="edit" data-task-id="${t.id}">Edit</button>
+              <button class="btn btn-ghost btn-task" data-task-action="hide" data-task-id="${t.id}">Hide</button>
+              <button class="btn btn-delete btn-task" data-task-action="delete" data-task-id="${t.id}">Delete</button>
+            </div>
+          </div>`;
         fragment.appendChild(card);
       }
     });
   }
   container.appendChild(fragment);
   initTaskListDelegation();
+  updateTaskActionSheetVisibility();
+  window.updateCriticalTasksIsland?.();
+}
+
+function getTaskActionSheetFocusable(){
+  const sheet = $('taskActionSheet');
+  if (!sheet) return [];
+  return Array.from(sheet.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'))
+    .filter(el => !el.disabled && !el.classList.contains('hidden'));
+}
+
+function updateTaskActionSheetVisibility(){
+  const sheet = $('taskActionSheet');
+  if (!sheet) return;
+  sheet.querySelectorAll('[data-task-sheet-action]').forEach(btn => btn.classList.remove('hidden'));
+}
+
+function openTaskActionSheet(id, trigger){
+  const sheet = $('taskActionSheet');
+  if (!sheet) return;
+  taskActionSheetTaskId = id;
+  taskActionSheetTrigger = trigger || null;
+  updateTaskActionSheetVisibility();
+  sheet.classList.remove('hidden');
+  sheet.setAttribute('aria-hidden', 'false');
+  setTimeout(() => {
+    const focusables = getTaskActionSheetFocusable();
+    if (focusables.length) focusables[0].focus();
+    else sheet.querySelector('.task-action-sheet__panel')?.focus();
+  }, 0);
+}
+
+function closeTaskActionSheet(){
+  const sheet = $('taskActionSheet');
+  if (!sheet) return;
+  sheet.classList.add('hidden');
+  sheet.setAttribute('aria-hidden', 'true');
+  taskActionSheetTaskId = null;
+  if (taskActionSheetTrigger && typeof taskActionSheetTrigger.focus === 'function') {
+    taskActionSheetTrigger.focus();
+  }
+  taskActionSheetTrigger = null;
+}
+
+function snoozeTaskDays(id, days){
+  const t = state.tasks.find(x => x.id === id);
+  if (!t || !Number.isFinite(days)) return;
+  const oldDue = t.dueDateISO || todayKey();
+  const base = fromKey(oldDue);
+  const next = addDays(base, days);
+  t.dueDateISO = dateKey(next);
+  trackDueDatePush(t, oldDue, t.dueDateISO);
+  t.updatedAtISO = new Date().toISOString();
+  save();
+  renderTasks();
+  window.updateCriticalTasksIsland?.();
+}
+
+function pickTaskDate(id){
+  const t = state.tasks.find(x => x.id === id);
+  if (!t) return;
+  const initial = t.dueDateISO || todayKey();
+  const val = prompt('Pick due date (YYYY-MM-DD)', initial);
+  if (val === null) return;
+  const next = (val || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(next)) return alert('Please enter a date as YYYY-MM-DD.');
+  const oldDue = t.dueDateISO;
+  t.dueDateISO = next;
+  trackDueDatePush(t, oldDue, t.dueDateISO);
+  t.updatedAtISO = new Date().toISOString();
+  save();
+  renderTasks();
   window.updateCriticalTasksIsland?.();
 }
 
@@ -5197,9 +5271,20 @@ function initTaskListDelegation(){
   const handleTaskAction = (e) => {
     if (e.type === 'pointerup' && e.pointerType === 'mouse') return;
     const now = Date.now();
-    if (now - (list._lastTaskTapTs || 0) < 350) return;
+    if (now - (list._lastTaskTapTs || 0) < 250) return;
 
     if (!(e.target instanceof Element)) return;
+
+    const bodyTarget = e.target.closest('[data-task-card-body]');
+    if (bodyTarget && !e.target.closest('[data-task-action]')) {
+      const id = bodyTarget.getAttribute('data-task-card-body');
+      if (id) {
+        expandedTaskId = expandedTaskId === id ? null : id;
+        renderTasks();
+      }
+      return;
+    }
+
     const btn = e.target.closest('[data-task-action][data-task-id]');
     if (!btn) return;
 
@@ -5225,6 +5310,9 @@ function initTaskListDelegation(){
       case 'hide':
         hideTask(id);
         break;
+      case 'more':
+        openTaskActionSheet(id, btn);
+        break;
       case 'delete':
       case 'task-delete':
         deleteTask(id);
@@ -5248,7 +5336,66 @@ function initTaskListDelegation(){
 
   list.addEventListener('click', handleTaskAction);
   list.addEventListener('pointerup', handleTaskAction);
+  list.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const bodyTarget = e.target.closest('[data-task-card-body]');
+    if (!bodyTarget) return;
+    e.preventDefault();
+    const id = bodyTarget.getAttribute('data-task-card-body');
+    if (!id) return;
+    expandedTaskId = expandedTaskId === id ? null : id;
+    renderTasks();
+  });
   list.dataset.tpDelegationAttached = '1';
+
+  const sheet = $('taskActionSheet');
+  if (sheet && sheet.dataset.wired !== '1') {
+    sheet.addEventListener('click', (e) => {
+      if (!(e.target instanceof Element)) return;
+      if (e.target.closest('[data-sheet-close="1"]')) {
+        closeTaskActionSheet();
+        return;
+      }
+      const actionBtn = e.target.closest('[data-task-sheet-action]');
+      if (!actionBtn || !taskActionSheetTaskId) return;
+      const action = actionBtn.getAttribute('data-task-sheet-action');
+      const targetId = taskActionSheetTaskId;
+      closeTaskActionSheet();
+      if (!targetId) return;
+      switch (action) {
+        case 'edit': editTask(targetId); break;
+        case 'bump': bumpTaskOneDay(targetId); break;
+        case 'bump7': snoozeTaskDays(targetId, 7); break;
+        case 'pick-date': pickTaskDate(targetId); break;
+        case 'hide': hideTask(targetId); break;
+        case 'wont-do': wontDoMain(targetId); break;
+        case 'delete': deleteTask(targetId); break;
+        default: break;
+      }
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (sheet.classList.contains('hidden')) return;
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeTaskActionSheet();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const focusables = getTaskActionSheetFocusable();
+      if (!focusables.length) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    });
+    sheet.dataset.wired = '1';
+  }
 }
 
 function saveSleepScore(){
@@ -7426,6 +7573,26 @@ defer(() => {
 
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#039;'}[m])); }
 
+function setTaskCompactView(isCompact){
+  const enabled = !!isCompact;
+  document.body.classList.toggle('task-compact-view', enabled);
+  const toggle = $('compactTasksToggle');
+  if (toggle) toggle.checked = enabled;
+  try { localStorage.setItem(TASK_COMPACT_VIEW_KEY, enabled ? '1' : '0'); } catch (e) {}
+}
+
+function initTaskCompactToggle(){
+  const toggle = $('compactTasksToggle');
+  if (!toggle) return;
+  let saved = '0';
+  try { saved = localStorage.getItem(TASK_COMPACT_VIEW_KEY) || '0'; } catch (e) {}
+  setTaskCompactView(saved === '1');
+  toggle.addEventListener('change', () => {
+    setTaskCompactView(toggle.checked);
+    renderTasks();
+  });
+}
+
 function capitalizeWords(value) {
   return String(value).replace(/\b([a-z])/g, (match, letter) => letter.toUpperCase());
 }
@@ -7502,6 +7669,7 @@ document.addEventListener('DOMContentLoaded', () => {
   rep?.addEventListener("change", () => syncCustomRepeatUI(rep));
   rep?.addEventListener("input",  () => syncCustomRepeatUI(rep)); // extra iOS safety
   syncCustomRepeatUI(rep); // sync once at load
+  initTaskCompactToggle();
   
   initCaloriesDatePicker();
   initHabitSortControl();
@@ -7882,6 +8050,26 @@ function tpPerfMark(label) {
       >
 
       <button id="addBtn" class="btn btn-primary">Add Task</button>
+    </div>
+  </div>
+</div>
+
+
+<div id="taskActionSheet" class="task-action-sheet hidden" aria-hidden="true">
+  <div class="task-action-sheet__backdrop" data-sheet-close="1"></div>
+  <div class="task-action-sheet__panel" role="dialog" aria-modal="true" aria-labelledby="taskActionSheetTitle" tabindex="-1">
+    <div class="task-action-sheet__header">
+      <h3 id="taskActionSheetTitle" class="font-semibold">Task actions</h3>
+      <button type="button" class="btn btn-ghost btn-task" data-sheet-close="1" aria-label="Close task actions">Close</button>
+    </div>
+    <div class="task-action-sheet__actions">
+      <button type="button" class="btn btn-ghost" data-task-sheet-action="edit">Edit</button>
+      <button type="button" class="btn btn-ghost" data-task-sheet-action="bump">Snooze +1d</button>
+      <button type="button" class="btn btn-ghost" data-task-sheet-action="bump7">Snooze +7d</button>
+      <button type="button" class="btn btn-ghost" data-task-sheet-action="pick-date">Pick date</button>
+      <button type="button" class="btn btn-ghost" data-task-sheet-action="hide">Hide</button>
+      <button type="button" class="btn btn-ghost" data-task-sheet-action="wont-do">Won’t do</button>
+      <button type="button" class="btn btn-delete" data-task-sheet-action="delete">Delete</button>
     </div>
   </div>
 </div>
