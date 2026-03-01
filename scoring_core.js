@@ -175,6 +175,9 @@
     return { state: savedState, migrated: true };
   }
 
+  const CAL_LOG_BONUS_POINTS = 2;
+  const CAL_LOG_BONUS_SOURCE = 'cal_log_bonus';
+
   const CATEGORY_DEFS = [
     { key: "sleep",    label: "Sleep",    match: c => typeof c?.title === "string" && c.title.startsWith("Sleep Score (") },
     { key: "calories", label: "Calories", match: c => typeof c?.title === "string" && c.title.toLowerCase().startsWith("calories") },
@@ -184,6 +187,7 @@
     { key: "flex",     label: "Flex",     match: c => c?.source === "flex" },
     { key: "work",     label: "Work",     match: c => c?.source === "work" || (typeof c?.title === "string" && c.title.startsWith("Work Score")) },
     { key: "game",     label: "Game",     match: c => c?.source === "game" },
+    { key: "calLogBonus", label: "Cal Log Bonus", match: c => c?.source === CAL_LOG_BONUS_SOURCE },
     { key: "tasks",    label: "Tasks",    match: () => true }
   ];
 
@@ -1304,6 +1308,18 @@ return { state: merged, storageKey };
     return Number.isFinite(raw) ? raw : null;
   }
 
+  function computeCalLogBonusPoints(calorieEntries) {
+    const hasNonZero = Array.isArray(calorieEntries) && calorieEntries.some((entry) => {
+      if (!entry || typeof entry !== 'object') return false;
+      const rawCalories = Object.prototype.hasOwnProperty.call(entry, 'calories')
+        ? Number(entry.calories)
+        : parseCaloriesFromTitle(entry.title);
+      const calories = Number.isFinite(rawCalories) ? rawCalories : 0;
+      return calories !== 0;
+    });
+    return hasNonZero ? CAL_LOG_BONUS_POINTS : 0;
+  }
+
   function getMoodInfo(entry) {
     const title = typeof entry?.title === 'string' ? entry.title : '';
     const match = title.match(/^Mood Score\s*\(([-0-9]+(?:\.\d+)?)\)/i);
@@ -1429,6 +1445,8 @@ return { state: merged, storageKey };
 
     if (!Array.isArray(completions)) return { dailyTotals, weeklyTotals, monthlyTotals };
 
+    const calorieEntriesByDay = new Map();
+
     completions.forEach(c => {
       if (!c || !c.completedAtISO) return;
 
@@ -1444,6 +1462,28 @@ return { state: merged, storageKey };
       dailyTotals[dk]   = addPoints(dailyTotals[dk], pts);
       weeklyTotals[wk]  = addPoints(weeklyTotals[wk], pts);
       monthlyTotals[mk] = addPoints(monthlyTotals[mk], pts);
+
+      const caloriesRaw = Object.prototype.hasOwnProperty.call(c, 'calories')
+        ? Number(c.calories)
+        : parseCaloriesFromTitle(c.title);
+      if (Number.isFinite(caloriesRaw)) {
+        if (!calorieEntriesByDay.has(dk)) calorieEntriesByDay.set(dk, []);
+        calorieEntriesByDay.get(dk).push(c);
+      }
+    });
+
+    calorieEntriesByDay.forEach((entries, dk) => {
+      const bonus = computeCalLogBonusPoints(entries);
+      if (!bonus) return;
+
+      const d = fromKey(dk);
+      if (!d || isNaN(d.getTime())) return;
+      const wk = isoWeekKey(d);
+      const mk = monthKey(d);
+
+      dailyTotals[dk] = addPoints(dailyTotals[dk], bonus);
+      weeklyTotals[wk] = addPoints(weeklyTotals[wk], bonus);
+      monthlyTotals[mk] = addPoints(monthlyTotals[mk], bonus);
     });
 
     return { dailyTotals, weeklyTotals, monthlyTotals };
@@ -1630,6 +1670,24 @@ Object.keys(dailyTotals).forEach(k => {
         }
       };
     });
+
+    const calorieEntries = dayComps.filter((entry) => {
+      const caloriesRaw = Object.prototype.hasOwnProperty.call(entry || {}, 'calories')
+        ? Number(entry.calories)
+        : parseCaloriesFromTitle(entry?.title);
+      return Number.isFinite(caloriesRaw);
+    });
+    const calLogBonusPoints = computeCalLogBonusPoints(calorieEntries);
+    if (calLogBonusPoints) {
+      items.push({
+        source: CAL_LOG_BONUS_SOURCE,
+        id: CAL_LOG_BONUS_SOURCE,
+        label: 'Cal Log Bonus',
+        category: 'calLogBonus',
+        points: calLogBonusPoints,
+        details: { reason: 'Applied when any non-zero calories are logged' }
+      });
+    }
 
     const baseTotal = items.reduce((s, item) => addPoints(s, item.points), 0);
     const { dailyTotals } = aggregateCompletionsByDate(comps, normalized);
@@ -1983,6 +2041,8 @@ Object.keys(dailyTotals).forEach(k => {
     computeGameHistoryRecord,
     computeRecord,
     caloriesToPoints,
+    computeCalLogBonusPoints,
+    CAL_LOG_BONUS_POINTS,
     moodPoints,
     categorizeCompletion,
     aggregateCompletionsByDate,

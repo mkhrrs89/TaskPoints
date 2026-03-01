@@ -3505,6 +3505,7 @@ function updateTodayBreakdown(completions, todayKey, inertiaPoints = 0){
     vices:    0,
     flex:     0,
     calories: 0,
+    calLogBonus: 0,
     inertia:  Number(inertiaPoints) || 0,
   };
 
@@ -3549,6 +3550,23 @@ if (titleStr.startsWith('Sleep Score (')) {
     totals.tasks += pts;
   });
 
+  const calorieEntries = safeCompletions.filter((entry) => {
+    const caloriesRaw = Object.prototype.hasOwnProperty.call(entry || {}, 'calories')
+      ? Number(entry.calories)
+      : parseCaloriesFromTitle(entry?.title);
+    return Number.isFinite(caloriesRaw);
+  });
+  const calLogBonus = window.TaskPointsCore?.computeCalLogBonusPoints
+    ? TaskPointsCore.computeCalLogBonusPoints(calorieEntries)
+    : (calorieEntries.some((entry) => {
+        const caloriesRaw = Object.prototype.hasOwnProperty.call(entry || {}, 'calories')
+          ? Number(entry.calories)
+          : parseCaloriesFromTitle(entry?.title);
+        const calories = Number.isFinite(caloriesRaw) ? caloriesRaw : 0;
+        return calories !== 0;
+      }) ? 2 : 0);
+  totals.calLogBonus = calLogBonus;
+
   // Build the bar
   bar.innerHTML = '';
 
@@ -3568,6 +3586,7 @@ if (titleStr.startsWith('Sleep Score (')) {
     { key: 'vices',    label: 'Vices',    cls: 'todayBreakdown-vices'    },
     { key: 'flex',     label: 'Flux',     cls: 'todayBreakdown-flex'     },
     { key: 'calories', label: 'Calories', cls: 'todayBreakdown-calories' },
+    { key: 'calLogBonus', label: 'Cal Log Bonus', cls: 'todayBreakdown-calories' },
     { key: 'inertia',  label: 'Inertia',  cls: 'todayBreakdown-inertia'  },
   ];
 
