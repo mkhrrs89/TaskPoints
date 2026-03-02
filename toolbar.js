@@ -1323,7 +1323,7 @@ function buildDailyBriefMarkdown(snapshot) {
   const today = new Date();
   const todayKey = dateKeyFromDate(today);
   const tasks = Array.isArray(snapshot?.tasks) ? snapshot.tasks : [];
-  const activeTasks = tasks.filter((task) => task && !task.hidden && !task.deletedAtISO && !task.completedAtISO);
+  const activeTasks = tasks.filter((task) => task && !task.hidden && task.status !== 'trashed' && task.status !== 'wontdo' && !task.deletedAtISO && !task.completedAtISO);
 
   const hasDueDates = activeTasks.some((task) => typeof task?.dueDateISO === 'string' && task.dueDateISO);
 
@@ -2377,6 +2377,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!t) continue;
       if (t.importance !== 'Critical') continue;
       if (t.hidden) continue;
+      if (t.status === 'trashed' || t.status === 'wontdo') continue;
       if (t.deletedAtISO) continue;
       if (t.completedAtISO) continue;
       const due = (t.dueDateISO || '').slice(0, 10);

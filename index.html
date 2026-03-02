@@ -5031,9 +5031,74 @@ function taskDueMeta(t, today){
   return parts.join(' • ');
 }
 
+function getTaskStatus(task){
+  const explicit = typeof task?.status === 'string' ? task.status : '';
+  if (['active','done','hidden','wontdo','trashed'].includes(explicit)) return explicit;
+  if (task?.deletedAtISO || task?.deletedAt) return 'trashed';
+  if (task?.hidden) return 'hidden';
+  if (task?.completedAtISO) return 'done';
+  return 'active';
+}
+
+function isTaskTrashed(task){
+  return getTaskStatus(task) === 'trashed';
+}
+
+function moveTaskToTrash(task, deletedFrom = 'TasksScreen') {
+  if (!task || isTaskTrashed(task)) return false;
+  const now = new Date().toISOString();
+  const current = getTaskStatus(task);
+  task.prevStatus = task.prevStatus || current;
+  task.status = 'trashed';
+  task.deletedAtISO = now;
+  task.deletedAt = now;
+  task.deletedFrom = deletedFrom;
+  task.updatedAtISO = now;
+  return true;
+}
+
+function restoreTaskFromTrash(task){
+  if (!task || !isTaskTrashed(task)) return false;
+  const now = new Date().toISOString();
+  task.status = task.prevStatus || 'active';
+  task.prevStatus = null;
+  task.deletedAtISO = null;
+  task.deletedAt = null;
+  task.deletedFrom = null;
+  task.updatedAtISO = now;
+  return true;
+}
+
+function showTrashToast(taskId){
+  const container = document.getElementById('pointsToastContainer');
+  if (!container) return;
+  const toast = document.createElement('div');
+  toast.className = 'points-toast';
+  toast.innerHTML = `<span>Moved to Trash</span> <button class="btn btn-ghost text-xs px-2 py-1" type="button">Undo</button>`;
+  const undoBtn = toast.querySelector('button');
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    toast.style.opacity = '0';
+    setTimeout(() => toast.remove(), 220);
+  };
+  undoBtn?.addEventListener('click', () => {
+    const t = state.tasks.find(x => x.id === taskId);
+    if (restoreTaskFromTrash(t)) {
+      save();
+      renderTasks();
+      window.updateCriticalTasksIsland?.();
+    }
+    close();
+  });
+  container.appendChild(toast);
+  setTimeout(close, 4500);
+}
+
 function renderTasks(){
   const container=$('taskList'), empty=$('emptyList'); container.innerHTML='';
-  const active=state.tasks.filter(t=>!t.completedAtISO && !t.hidden && !t.deletedAtISO);
+  const active=state.tasks.filter(t=>!t.completedAtISO && !t.hidden && !isTaskTrashed(t) && getTaskStatus(t)!=='wontdo');
   if(!active.length){ empty.classList.remove('hidden'); } else empty.classList.add('hidden');
 
   const sort=$('sortSelect').value;
@@ -6514,6 +6579,10 @@ function addTask(){
     tags,                // ⬅ new
     skipDates: [],
     hidden: false,
+    status: 'active',
+    deletedAt: null,
+    deletedFrom: null,
+    prevStatus: null,
     completedAtISO: null,
     createdAtISO: new Date().toISOString(),
     updatedAtISO: new Date().toISOString(),
@@ -6583,7 +6652,10 @@ function wontDoMain(id){
   if(mode==='none'){
     if(!confirm('Won’t do this task? It will be removed.')) return;
     const now = new Date().toISOString();
-    t.deletedAtISO = now;
+    t.status = 'wontdo';
+    t.deletedAtISO = null;
+    t.deletedAt = null;
+    t.prevStatus = null;
     t.updatedAtISO = now;
   }else{
     const k = t.dueDateISO || todayKey();
@@ -6628,6 +6700,7 @@ function completeTask(id){
     if (mode === 'none') {
       // one-off task → mark completed and hide from list
       t.completedAtISO = now;
+      t.status = 'done';
     } else {
       // repeating task → move due date forward, keep it active
       const nextKey = computeNextDueDate(t);
@@ -6706,6 +6779,7 @@ function hideTask(id){
   const t = state.tasks.find(x => x.id === id);
   if (!t) return;
   t.hidden = true;
+  t.status = 'hidden';
   t.updatedAtISO = new Date().toISOString();
   save();
   renderTasks();
@@ -6713,19 +6787,14 @@ function hideTask(id){
 }
 
 function deleteTask(id){
-  if(!confirm('Delete this task?')) return;
-  // Remove the task itself
+  if(!confirm('Move this task to Trash?')) return;
   const t = state.tasks.find(x => x.id === id);
-  if (t) {
-    const now = new Date().toISOString();
-    t.deletedAtISO = now;
-    t.updatedAtISO = now;
-  }
-  // Do NOT touch state.completions here – keep history/log and points
+  if (!t || !moveTaskToTrash(t, 'TasksScreen')) return;
   if (editingTaskId === id) editingTaskId = null;
   save();
   renderTasks();
   window.updateCriticalTasksIsland?.();
+  showTrashToast(id);
 }
 
 
