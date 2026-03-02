@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+  <title>TaskPoints — Trash</title>
+  <link rel="stylesheet" href="assets/tailwind.css">
+  <link rel="stylesheet" href="styles.css">
+  <script src="scoring_core.js"></script>
+  <script src="toolbar.js" defer></script>
+</head>
+<body class="min-h-screen">
+  <div class="mx-auto max-w-6xl p-4 sm:p-6 pb-20 md:pb-6">
+    <header class="mb-4">
+      <div class="row items-center">
+        <div class="flex items-center gap-3">
+          <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight">Trash</h1>
+        </div>
+        <div class="toolbar header-nav">
+          <a href="index.html" class="btn btn-teal btn-toolbar nav-btn">Main</a>
+          <a href="settings.html" class="btn btn-teal btn-toolbar nav-btn">Settings</a>
+          <a href="trash.html" class="btn btn-teal btn-toolbar nav-btn active" aria-current="page">Trash</a>
+        </div>
+      </div>
+    </header>
+
+    <div id="empty" class="glass p-4 hidden">Trash is empty.</div>
+    <div id="trashList" class="space-y-3"></div>
+  </div>
+
+<script>
+const STORAGE_KEY = 'taskpoints_v1';
+let appState = { tasks: [] };
+
+function loadState() {
+  if (window.TaskPointsCore?.loadAppState) return TaskPointsCore.loadAppState().state;
+  const raw = localStorage.getItem(STORAGE_KEY);
+  try { return raw ? JSON.parse(raw) : { tasks: [] }; } catch { return { tasks: [] }; }
+}
+
+function saveState(nextState) {
+  if (window.TaskPointsCore?.mergeAndSaveState) {
+    const res = TaskPointsCore.mergeAndSaveState(nextState, { storageKey: STORAGE_KEY, immediateWrite: true });
+    appState = res.state;
+    return;
+  }
+  appState = nextState;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
+}
+
+function fmt(iso) {
+  if (!iso) return 'Unknown';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return 'Unknown';
+  return d.toLocaleString();
+}
+
+function restoreTask(id) {
+  const task = appState.tasks.find(t => t && t.id === id);
+  if (!task) return;
+  const now = new Date().toISOString();
+  task.status = task.prevStatus || 'active';
+  task.prevStatus = null;
+  task.deletedAtISO = null;
+  task.deletedAt = null;
+  task.deletedFrom = null;
+  task.updatedAtISO = now;
+  saveState(appState);
+  render();
+}
+
+function deleteForever(id) {
+  if (!confirm('Delete forever? This cannot be undone.')) return;
+  appState.tasks = (Array.isArray(appState.tasks) ? appState.tasks : []).filter(t => t && t.id !== id);
+  saveState(appState);
+  render();
+}
+
+function render() {
+  const listEl = document.getElementById('trashList');
+  const emptyEl = document.getElementById('empty');
+  const tasks = (Array.isArray(appState.tasks) ? appState.tasks : [])
+    .filter(t => t && (t.status === 'trashed' || t.deletedAtISO))
+    .sort((a, b) => (new Date(b.deletedAtISO || b.deletedAt || 0)).getTime() - (new Date(a.deletedAtISO || a.deletedAt || 0)).getTime());
+
+  listEl.innerHTML = '';
+  emptyEl.classList.toggle('hidden', tasks.length > 0);
+
+  tasks.forEach(t => {
+    const row = document.createElement('div');
+    row.className = 'glass p-4';
+    row.innerHTML = `
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <div class="font-semibold">${String(t.title || 'Untitled').replaceAll('<','&lt;')}</div>
+          <div class="text-xs muted">${Number(t.points || 0)} pts • Deleted ${fmt(t.deletedAtISO || t.deletedAt)}</div>
+        </div>
+        <div class="flex gap-2">
+          <button class="btn btn-teal btn-toolbar" data-action="restore" data-id="${t.id}">Restore</button>
+          <button class="btn btn-warn btn-toolbar" data-action="delete" data-id="${t.id}">Delete Forever</button>
+        </div>
+      </div>`;
+    listEl.appendChild(row);
+  });
+}
+
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-action][data-id]');
+  if (!btn) return;
+  const id = btn.getAttribute('data-id');
+  const action = btn.getAttribute('data-action');
+  if (action === 'restore') restoreTask(id);
+  if (action === 'delete') deleteForever(id);
+});
+
+appState = loadState();
+render();
+</script>
+</body>
+</html>

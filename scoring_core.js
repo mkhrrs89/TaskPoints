@@ -379,6 +379,17 @@
     if (!t.originalDueDateISO && t.dueDateISO) {
       t.originalDueDateISO = t.dueDateISO;
     }
+    const status = typeof t.status === 'string' ? t.status : '';
+    if (!['active', 'done', 'hidden', 'wontdo', 'trashed'].includes(status)) {
+      if (t.deletedAtISO || t.deletedAt) t.status = 'trashed';
+      else if (t.hidden) t.status = 'hidden';
+      else if (t.completedAtISO) t.status = 'done';
+      else t.status = 'active';
+    }
+    if (t.status === 'trashed') {
+      t.deletedAtISO = t.deletedAtISO || t.deletedAt || null;
+      t.deletedAt = t.deletedAt || t.deletedAtISO || null;
+    }
     return t;
   }
 
@@ -491,6 +502,16 @@
     const shouldSync = options.syncDerived !== false;
     const shouldPersist = options.persistSync !== false;
     let changed = false;
+
+    const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+    const cutoff = Date.now() - THIRTY_DAYS_MS;
+    const beforeCount = state.tasks.length;
+    state.tasks = state.tasks.filter((task) => {
+      if (!task || task.status !== 'trashed') return true;
+      const deletedMs = isoToMs(task.deletedAtISO || task.deletedAt);
+      return deletedMs >= cutoff;
+    });
+    if (state.tasks.length !== beforeCount) changed = true;
 
     if (shouldSync) {
       const derivedSync = syncDerivedPoints(state, { normalized: true });

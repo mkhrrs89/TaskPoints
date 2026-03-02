@@ -958,7 +958,7 @@ function renderWeekTasks(baseDate){
     const col=document.createElement('div'); col.className='slot';
     col.dataset.dayKey = d.key;
     col.innerHTML=`<div class="text-xs text-zinc-400 mb-2 font-semibold">${d.label}</div>`;
-    const list = state.tasks.filter(t=>!t.completedAtISO && !t.deletedAtISO && t.dueDateISO===d.key);
+    const list = state.tasks.filter(t=>!t.completedAtISO && t.status!=='trashed' && t.status!=='wontdo' && !t.deletedAtISO && t.dueDateISO===d.key);
     list.forEach(t=>{
       const overdue = t.dueDateISO && t.dueDateISO < todayK;
       const postponeDays = Number(t.postponedDays) || 0;
@@ -1040,7 +1040,10 @@ function wontDo(id, dayKey){
   if(mode==='none'){
     if(!confirm('Won’t do this task? It will be removed.')) return;
     const nowISO = new Date().toISOString();
-    t.deletedAtISO = nowISO;
+    t.status = 'wontdo';
+    t.deletedAtISO = null;
+    t.deletedAt = null;
+    t.prevStatus = null;
     t.updatedAtISO = nowISO;
   }else{
     t.skipDates = Array.isArray(t.skipDates)?t.skipDates:[];
@@ -1075,9 +1078,13 @@ function deleteTask(id){
   let st = load();
   const t = st.tasks.find(x => x.id === id);
   if(!t) return;
-  if(!confirm('Delete this task?')) return;
+  if(!confirm('Move this task to Trash?')) return;
   const nowISO = new Date().toISOString();
+  t.prevStatus = t.prevStatus || (t.status || (t.hidden ? 'hidden' : (t.completedAtISO ? 'done' : 'active')));
+  t.status = 'trashed';
   t.deletedAtISO = nowISO;
+  t.deletedAt = nowISO;
+  t.deletedFrom = 'WeekScreen';
   t.updatedAtISO = nowISO;
   st = saveMerged(st);
   state = st;
