@@ -5072,16 +5072,16 @@ function restoreTaskFromTrash(task){
 function showTrashToast(taskId){
   const container = document.getElementById('pointsToastContainer');
   if (!container) return;
-  const toast = document.createElement('div');
-  toast.className = 'points-toast';
-  toast.innerHTML = `<span>Moved to Trash</span> <button class="btn btn-ghost text-xs px-2 py-1" type="button">Undo</button>`;
-  const undoBtn = toast.querySelector('button');
+  const toastEl = document.createElement('div');
+  toastEl.className = 'points-toast';
+  toastEl.innerHTML = `<span>Moved to Trash</span> <button class="btn btn-ghost text-xs px-2 py-1" type="button">Undo</button>`;
+  const undoBtn = toastEl.querySelector('button');
   let closed = false;
   const close = () => {
     if (closed) return;
     closed = true;
-    toast.style.opacity = '0';
-    setTimeout(() => toast.remove(), 220);
+    toastEl.style.opacity = '0';
+    setTimeout(() => toastEl.remove(), 220);
   };
   undoBtn?.addEventListener('click', () => {
     const t = state.tasks.find(x => x.id === taskId);
@@ -5092,7 +5092,7 @@ function showTrashToast(taskId){
     }
     close();
   });
-  container.appendChild(toast);
+  container.appendChild(toastEl);
   setTimeout(close, 4500);
 }
 
