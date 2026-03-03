@@ -5133,7 +5133,16 @@ function renderTasks(){
   for(const b of order){
     if(b.items.length===0) continue;
     const div=document.createElement('div');
-    div.innerHTML=`<div class="sectionDivider">${b.label}</div>`;
+    if (b.key === 'overdue') {
+      div.innerHTML = `
+        <div class="sectionDivider flex items-center justify-between gap-2">
+          <span>${b.label}</span>
+          <button class="btn btn-ghost btn-task md:hidden" data-task-action="postpone-all-overdue" data-task-id="__all_overdue__">Postpone all</button>
+        </div>
+      `;
+    } else {
+      div.innerHTML=`<div class="sectionDivider">${b.label}</div>`;
+    }
     fragment.appendChild(div);
 
     b.items.forEach(t=>{
@@ -5376,35 +5385,47 @@ function initTaskListDelegation(){
 
     const action = btn.getAttribute('data-task-action');
     const id = btn.getAttribute('data-task-id');
-    if (!action || !id) return;
+    if (!action) return;
 
     switch (action) {
+      case 'postpone-all-overdue':
+        postponeAllOverdueTasks();
+        break;
       case 'postpone':
+        if (!id) return;
         postponeTask(id);
         break;
       case 'wont-do':
+        if (!id) return;
         wontDoMain(id);
         break;
       case 'bump':
+        if (!id) return;
         bumpTaskOneDay(id);
         break;
       case 'edit':
+        if (!id) return;
         editTask(id);
         break;
       case 'hide':
+        if (!id) return;
         hideTask(id);
         break;
       case 'more':
+        if (!id) return;
         openTaskActionSheet(id, btn);
         break;
       case 'delete':
       case 'task-delete':
+        if (!id) return;
         deleteTask(id);
         break;
       case 'complete':
+        if (!id) return;
         completeTask(id);
         break;
       case 'task-save': {
+        if (!id) return;
         const card = btn.closest('.glass[data-task-id]');
         if (card) saveTaskEdit(id, card);
         break;
@@ -6636,16 +6657,35 @@ function bumpTaskOneDay(id){
   window.updateCriticalTasksIsland?.();
 }
 
+function applyPostponeToTask(task){
+  if (!task || !task.dueDateISO) return false;
+  const oldDue = task.dueDateISO;
+  task.dueDateISO = todayKey();
+  trackDueDatePush(task, oldDue, task.dueDateISO);
+  task.updatedAtISO = new Date().toISOString();
+  return true;
+}
+
   function postponeTask(id){
-    const t=state.tasks.find(x=>x.id===id); if(!t||!t.dueDateISO) return;
-    const oldDue = t.dueDateISO;
-    t.dueDateISO = todayKey();
-    trackDueDatePush(t, oldDue, t.dueDateISO);
-    const now = new Date().toISOString();
-    t.updatedAtISO = now;
+    const t=state.tasks.find(x=>x.id===id);
+    if (!applyPostponeToTask(t)) return;
     save(); renderTasks();
     window.updateCriticalTasksIsland?.();
   }
+
+function postponeAllOverdueTasks(){
+  const todayIso = todayKey();
+  let changed = false;
+  state.tasks.forEach(task => {
+    if (task && !task.completedAtISO && !task.hidden && !isTaskTrashed(task) && getTaskStatus(task)!=='wontdo' && task.dueDateISO && task.dueDateISO < todayIso) {
+      changed = applyPostponeToTask(task) || changed;
+    }
+  });
+  if (!changed) return;
+  save();
+  renderTasks();
+  window.updateCriticalTasksIsland?.();
+}
 function wontDoMain(id){
   const t=state.tasks.find(x=>x.id===id); if(!t) return;
   const mode = (t.recurrence && t.recurrence.mode) || 'none';
