@@ -15,12 +15,25 @@
   --accent:  #4f9cff;  /* primary accent color */
   --accent2: #7c5cff;  /* secondary accent color */
   --accent3: #22c55e;  /* success/green accent */
+  --tp-teal: #0f4d4d;
+  --tp-teal-dark: #0a2f2f;
+  --tp-teal-92: rgba(15, 77, 77, 0.92);
+  --tp-teal-dark-92: rgba(10, 47, 47, 0.92);
+  --tp-teal-grad: linear-gradient(180deg, var(--tp-teal), var(--tp-teal-dark));
   --tp-z-floating: 9999;
   --tp-safe-bottom: env(safe-area-inset-bottom, 0px);
   --tp-toolbar-height: 68px;
   --tp-menu-gap: 8px;
   --tp-toolbar-stack-height: var(--tp-toolbar-height);
   --safe-bottom: var(--tp-safe-bottom);
+}
+
+@supports (color: color-mix(in srgb, white, black)) {
+  :root {
+    --tp-teal-dark: color-mix(in srgb, var(--tp-teal) 62%, black);
+    --tp-teal-92: color-mix(in srgb, var(--tp-teal) 92%, transparent);
+    --tp-teal-dark-92: color-mix(in srgb, var(--tp-teal-dark) 92%, transparent);
+  }
 }
 
 #bottomToolbarMount {
@@ -38,7 +51,7 @@
   right: 0;
   bottom: 0;
   height: calc(var(--tp-toolbar-height) + var(--tp-safe-bottom));
-  background: linear-gradient(180deg, rgba(15, 77, 77, 0.92), rgba(10, 47, 47, 0.92));
+  background: linear-gradient(180deg, var(--tp-teal-92), var(--tp-teal-dark-92));
   border-top: 1px solid rgba(255, 255, 255, 0.06);
   z-index: 9999;
   backdrop-filter: blur(10px);
@@ -175,7 +188,7 @@ body {
 }
 
 .btn-primary {
-  background: linear-gradient(180deg, #0f4d4d, #0a2f2f);
+  background: var(--tp-teal-grad);
   color: #fff;
   border: none;
 }
@@ -187,14 +200,14 @@ body {
 }
 
 .btn-success {
-  background: linear-gradient(180deg, #0f4d4d, #0a2f2f);
+  background: var(--tp-teal-grad);
   color: #fff;
   border: none;
 }
 
 /* “Named color” button variants (teal + plum) */
 .btn-teal {
-  background: linear-gradient(180deg, #0f4d4d, #0a2f2f);
+  background: var(--tp-teal-grad);
   color: #fff;
   border: none;
 }
@@ -1232,7 +1245,7 @@ header,
   bottom: calc(100% + var(--tp-menu-gap) + var(--tp-bottom-nav-pad-top));
   left: 50%;
   transform: translateX(-50%);
-  background: linear-gradient(180deg, #0f4d4d, #0a2f2f);
+  background: var(--tp-teal-grad);
   border: 1px solid var(--border);
   border-radius: 16px;
   padding: 10px;
@@ -1253,7 +1266,7 @@ header,
   bottom: calc(100% + var(--tp-menu-gap) + var(--tp-bottom-nav-pad-top));
   left: 50%;
   transform: translateX(-50%);
-  background: linear-gradient(180deg, #0f4d4d, #0a2f2f);
+  background: var(--tp-teal-grad);
   z-index: 50;
 }
 
@@ -1886,7 +1899,7 @@ header,
     width: 8px;
     height: 8px;
     border-radius: 999px;
-    background: #0f4d4d;
+    background: var(--tp-teal);
     box-shadow: 0 0 0 1px rgba(15, 77, 77, 0.35);
     transform: scale(1);
     transform-origin: center;
@@ -2026,7 +2039,7 @@ header,
       font-size:13px;
       font-weight:600;
       color:#f9fafb;
-      background: linear-gradient(180deg, #0f4d4d, #0a2f2f);color: #fff;border: none;
+      background: var(--tp-teal-grad);color: #fff;border: none;
       box-shadow:0 10px 30px rgba(0,0,0,.45);
       opacity:0;
       transform:translateY(10px) scale(.95);
@@ -2239,7 +2252,7 @@ header,
 
 /* Make mobile Calories header gradient match chips */
 .calories-today-card .stat-mobile-header{
-  background: linear-gradient(180deg, #0f4d4d, #0a2f2f);
+  background: var(--tp-teal-grad);
 }
 
 
@@ -2550,7 +2563,7 @@ header,
 /* ============================================================================ */
 
 .calories-today-card{
-  background: linear-gradient(180deg, #0f4d4d, #0a2f2f);
+  background: var(--tp-teal-grad);
   border: none !important;
   border-radius: 16px;
   color: #fff;
@@ -2560,7 +2573,7 @@ header,
 
 /* Calories: recent-day chip */
 .cal-chip{
-  background: linear-gradient(180deg, #0f4d4d, #0a2f2f); /* same as your teal buttons */
+  background: var(--tp-teal-grad); /* same as your teal buttons */
   border: none !important;
   color: #fff;
 
@@ -3054,7 +3067,7 @@ header,
 
 .calories-glass .stat-col-primary .stat-mobile-header{
   border-radius: 0 !important;
-  background: linear-gradient(180deg, #0f4d4d, #0a2f2f);
+  background: var(--tp-teal-grad);
   color: #f8fbff;
 }
 
