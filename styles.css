@@ -862,7 +862,8 @@ body {
   font-weight: 700;
 }
 
-.habitsControlsRow {
+.habitsControlsRow,
+.vicesControlsRow {
   display: flex;
   align-items: center;
   gap: 10px;
