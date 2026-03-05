@@ -845,6 +845,51 @@ body {
 }
 
 
+
+.sectionHeader {
+  margin-bottom: 10px;
+}
+
+.sectionTitleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.sectionTitle {
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.habitsControlsRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: nowrap;
+}
+
+.habitsSortSelectCompact {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+  height: 34px;
+  padding: 6px 10px;
+  font-size: 14px;
+  border-radius: 12px;
+  text-overflow: ellipsis;
+}
+
+.btn-compact {
+  height: 34px;
+  padding: 6px 10px;
+  font-size: 14px;
+  border-radius: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
 /* =========================
    SECTION 2 — CORE UI ATOMS (TAGS / PILLS / MUTED TEXT)
    ========================= */
