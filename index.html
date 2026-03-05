@@ -22,6 +22,11 @@ Nothing visible on the page is built here. === -->
     rel="icon" 
     href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='%230b0d10'/><text x='50' y='62' font-size='60' text-anchor='middle' fill='white'>TP</text></svg>">
 
+  <style>
+    html, body { background: #000; margin: 0; }
+    #app, #root, #appRoot { opacity: 0; transition: opacity 220ms ease; }
+  </style>
+
   <!-- External libraries / fonts -->
     <link
     rel="stylesheet" 
@@ -50,6 +55,10 @@ Nothing visible on the page is built here. === -->
 <!-- === BODY (START) === -->  
 <body class="min-h-screen">
 
+<div id="bootSplash" class="bootSplash" aria-hidden="true">
+  <div id="matrixTitle" class="matrixTitle" role="img" aria-label="TASKPOINTS"></div>
+</div>
+
 <!-- =========================================================================
            Everything visible on the page lives inside <body>.
 ========================================================================== -->
@@ -58,7 +67,7 @@ Nothing visible on the page is built here. === -->
 <div id="pointsToastContainer" class="points-toast-container"></div>
 
 <!-- MAIN WRAPPER (START) — this gives the whole app side padding + max width -->
-<div class="mx-auto max-w-6xl p-4 sm:p-6 pb-20 md:pb-6">
+<div id="appRoot" class="mx-auto max-w-6xl p-4 sm:p-6 pb-20 md:pb-6">
 
 
 <!-- HEADER (START) Top-of-page branding + navigation -->
@@ -762,6 +771,90 @@ const $=id=>document.getElementById(id);
 const storageCache = { raw: null, parsed: null };
 const bootStart = performance.now();
   const __TP_PERF_BOOT = new URLSearchParams(location.search).has('perf');
+
+const MATRIX_WORD = "TASKPOINTS";
+const MATRIX_GLYPHS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#$%&*+?@";
+
+let bootAnimDoneResolve;
+const bootAnimDone = new Promise(r => (bootAnimDoneResolve = r));
+
+function buildMatrixTitle(){
+  const el = document.getElementById("matrixTitle");
+  if (!el) return null;
+  el.innerHTML = "";
+  const spans = [];
+  for (const ch of MATRIX_WORD){
+    const s = document.createElement("span");
+    s.className = "matrixChar";
+    s.dataset.final = ch;
+    s.textContent = " ";
+    el.appendChild(s);
+    spans.push(s);
+  }
+  return spans;
+}
+
+function randGlyph(){
+  return MATRIX_GLYPHS[(Math.random() * MATRIX_GLYPHS.length) | 0];
+}
+
+function decodeOne(span, finalChar, { scrambleMs = 320, tickMs = 28 } = {}){
+  return new Promise(resolve => {
+    const start = performance.now();
+    const iv = setInterval(() => {
+      const elapsed = performance.now() - start;
+      span.textContent = randGlyph();
+      if (elapsed >= scrambleMs){
+        clearInterval(iv);
+        span.textContent = finalChar;
+        span.classList.add("locked");
+        resolve();
+      }
+    }, tickMs);
+  });
+}
+
+async function runMatrixBootAnim(){
+  const splash = document.getElementById("bootSplash");
+  const titleEl = document.getElementById("matrixTitle");
+  if (!splash || !titleEl){
+    bootAnimDoneResolve?.();
+    return;
+  }
+
+  if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches){
+    titleEl.textContent = MATRIX_WORD;
+    bootAnimDoneResolve?.();
+    return;
+  }
+
+  const spans = buildMatrixTitle();
+  if (!spans){
+    bootAnimDoneResolve?.();
+    return;
+  }
+
+  await new Promise(r => setTimeout(r, 90));
+
+  for (let i = 0; i < spans.length; i++){
+    await decodeOne(spans[i], spans[i].dataset.final, { scrambleMs: 280, tickMs: 26 });
+  }
+
+  await new Promise(r => setTimeout(r, 120));
+  bootAnimDoneResolve?.();
+}
+
+function hideBootSplash(){
+  const splash = document.getElementById("bootSplash");
+  if (!splash) return;
+  splash.style.opacity = "0";
+  setTimeout(() => splash.remove(), 320);
+}
+
+function showApp(){
+  const app = document.getElementById("app") || document.getElementById("root") || document.getElementById("appRoot");
+  if (app) app.style.opacity = "1";
+}
 
 let state = (() => {
   if (__TP_PERF_BOOT) console.time('LOAD: normalizeState(load())');
@@ -7852,6 +7945,7 @@ function applyCapitalizeWordsInput(input) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  runMatrixBootAnim();
     // Mobile: remove V1 dashboard entirely so it can't bind listeners / conflict
   try {
     if (window.matchMedia && window.matchMedia('(max-width: 700px)').matches) {
@@ -7929,6 +8023,13 @@ maybeAutoSimToday();
 
 // paint ASAP
 scheduleRender(renderAll);
+
+(async () => {
+  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+  await bootAnimDone;
+  showApp();
+  hideBootSplash();
+})();
 
 // then do the heavier sync after paint / idle
 requestAnimationFrame(() => {

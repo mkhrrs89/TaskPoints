@@ -3993,3 +3993,41 @@ header,
     display: none !important;
   }
 }
+
+.bootSplash{
+  position: fixed;
+  inset: 0;
+  background: #000;
+  display: grid;
+  place-items: center;
+  z-index: 99999;
+  opacity: 1;
+  transition: opacity 260ms ease;
+}
+
+.matrixTitle{
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 34px;
+  letter-spacing: 0.18em;
+  color: #c8ffd8;
+  text-shadow:
+    0 0 10px rgba(60,255,120,0.20),
+    0 0 24px rgba(60,255,120,0.10);
+  user-select: none;
+}
+
+.matrixChar{
+  display: inline-block;
+  width: 0.85em;
+  text-align: center;
+  opacity: 0.95;
+}
+
+.matrixChar.locked{
+  color: #eafff1;
+}
+
+@media (prefers-reduced-motion: reduce){
+  .bootSplash{ transition: none; }
+  .matrixTitle{ text-shadow: none; }
+}
