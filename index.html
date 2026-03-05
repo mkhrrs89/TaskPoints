@@ -679,14 +679,20 @@ Nothing visible on the page is built here. === -->
 
 <!-- VICES -->
 <div class="glass mb-6">
-  <div class="flex items-center justify-between mb-3 gap-3 flex-wrap">
-    <div class="flex items-center gap-3 flex-wrap">
-      <h2 id="vicesAnchor" class="font-bold text-lg">Vices</h2>
-      <button id="addViceBtn" class="btn btn-primary">Add Vice</button>
+  <div class="sectionHeader">
+    <div class="sectionTitleRow">
+      <h2 id="vicesAnchor" class="sectionTitle">Vices</h2>
     </div>
-    <button id="weekBackBtnVices" class="btn btn-secondary" type="button">
-      ◀︎ Last week
-    </button>
+
+    <div class="vicesControlsRow">
+      <button id="addViceBtn" class="btn btn-primary btn-compact" type="button">
+        + Vice
+      </button>
+
+      <button id="weekBackBtnVices" class="btn btn-secondary btn-compact" type="button">
+        ◀︎ Week
+      </button>
+    </div>
   </div>
   <div id="vicesWeekWrap" class="weekSwapWrap">
     <div class="grid gap-2 text-sm muted mb-2" id="viceWeekLabels"></div>
