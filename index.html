@@ -650,21 +650,24 @@ Nothing visible on the page is built here. === -->
 
   <!-- HABITS -->
 <div class="glass mb-6">
-  <div class="flex items-center justify-between mb-3 gap-3 flex-wrap">
-    <div class="flex items-center gap-3 flex-wrap">
-      <h2 id="habitsAnchor" class="font-bold text-lg">Habits</h2>
+  <div class="sectionHeader">
+    <div class="sectionTitleRow">
+      <h2 id="habitsAnchor" class="sectionTitle">Habits</h2>
+    </div>
 
-      <select id="habitsSortSelect" class="input w-36">
+    <div class="habitsControlsRow">
+      <select id="habitsSortSelect" class="input habitsSortSelectCompact">
         <option value="custom">Custom</option>
         <option value="points">Point value</option>
         <option value="streak">Current streak</option>
         <option value="completion">% completion</option>
       </select>
-      <button id="addHabitBtn" class="btn btn-primary">Add Habit</button>
+      <button id="addHabitBtn" class="btn btn-primary btn-compact" type="button">+ Habit</button>
+
+      <button id="weekBackBtnHabits" class="btn btn-secondary btn-compact" type="button">
+        ◀︎ Week
+      </button>
     </div>
-    <button id="weekBackBtnHabits" class="btn btn-secondary" type="button">
-      ◀︎ Last week
-    </button>
   </div>
 
   <div id="habitsWeekWrap" class="weekSwapWrap">
@@ -3786,7 +3789,7 @@ function renderViceWeekLabels(){
 function updateWeekToggleButtons() {
   const habitsBtn = document.getElementById('weekBackBtnHabits');
   const vicesBtn  = document.getElementById('weekBackBtnVices');
-  const label = isViewingLastWeek() ? 'This week ▶︎' : '◀︎ Last week';
+  const label = isViewingLastWeek() ? 'This ▶︎' : '◀︎ Week';
   if (habitsBtn) habitsBtn.textContent = label;
   if (vicesBtn)  vicesBtn.textContent  = label;
 }
