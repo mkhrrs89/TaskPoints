@@ -250,7 +250,7 @@ function renderBottomToolbar() {
     <nav
       id="mobileBottomNav"
       class="mobile-bottom-nav-shell fixed inset-x-0 bottom-0 z-40 md:hidden border-t border-slate-800 text-slate-100 drop-shadow-sm"
-      style="background: linear-gradient(180deg, #0f4d4d, #0a2f2f);"
+      style="background: linear-gradient(180deg, #254C52, #1A383B);"
     >
       <div class="max-w-6xl mx-auto flex justify-center py-3 pb-4 text-[11px] mobile-bottom-nav">
         ${buildMobileBottomNavLinks()}
