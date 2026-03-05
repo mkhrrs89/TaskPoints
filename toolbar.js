@@ -165,12 +165,12 @@ document.addEventListener('DOMContentLoaded', () => {
 function buildMobileBottomNavLinks() {
   return `
     <a href="index.html" class="mobile-bottom-nav-btn flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
-      <span class="text-lg">🏠</span>
+      <img src="assets/home.png" class="tp-nav-icon" alt="" aria-hidden="true">
       <span class="uppercase tracking-wide text-[10px]">Home</span>
     </a>
 
     <a href="today.html" class="mobile-bottom-nav-btn flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
-      <span class="text-lg">📅</span>
+      <img src="assets/today.png" class="tp-nav-icon" alt="" aria-hidden="true">
       <span class="uppercase tracking-wide text-[10px]">Today</span>
     </a>
 
@@ -181,7 +181,7 @@ function buildMobileBottomNavLinks() {
         class="mobile-bottom-nav-btn mobile-task-toggle flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100"
         aria-expanded="false"
         aria-haspopup="true">
-        <span class="text-lg">✔️</span>
+        <img src="assets/tasks.png" class="tp-nav-icon" alt="" aria-hidden="true">
         <span class="uppercase tracking-wide text-[10px]">Tasks</span>
       </button>
 
@@ -199,7 +199,7 @@ function buildMobileBottomNavLinks() {
         aria-expanded="false"
         aria-haspopup="true"
       >
-        <span class="text-lg">🎮</span>
+        <img src="assets/game.png" class="tp-nav-icon" alt="" aria-hidden="true">
         <span class="uppercase tracking-wide text-[10px]">Game</span>
       </button>
 
@@ -214,7 +214,7 @@ function buildMobileBottomNavLinks() {
     </div>
 
     <a href="settings.html" class="mobile-bottom-nav-btn flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
-      <span class="text-lg">⚙️</span>
+      <img src="assets/settings.png" class="tp-nav-icon" alt="" aria-hidden="true">
       <span class="uppercase tracking-wide text-[10px]">Settings</span>
     </a>
   `;
