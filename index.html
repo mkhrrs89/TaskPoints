@@ -31,6 +31,15 @@ Nothing visible on the page is built here. === -->
   <script src="scoring_core.js"></script><link rel="stylesheet" href="assets/tailwind.css">
 
 <link rel="stylesheet" href="styles.css">
+  <style>
+    .weekSwapWrap {
+      will-change: transform, opacity;
+    }
+
+    .weekSwapDisabled {
+      pointer-events: none;
+    }
+  </style>
   <link rel="preload" href="toolbar.js" as="script">
   <script src="toolbar.js" defer></script>
 
@@ -653,21 +662,33 @@ Nothing visible on the page is built here. === -->
       </select>
       <button id="addHabitBtn" class="btn btn-primary">Add Habit</button>
     </div>
+    <button id="weekBackBtnHabits" class="btn btn-secondary" type="button">
+      ◀︎ Last week
+    </button>
   </div>
 
-  <div class="grid gap-2 text-sm muted mb-2" id="habitWeekLabels"></div>
-  <div id="habitsList" class="grid gap-2"></div>
+  <div id="habitsWeekWrap" class="weekSwapWrap">
+    <div class="grid gap-2 text-sm muted mb-2" id="habitWeekLabels"></div>
+    <div id="habitsList" class="grid gap-2"></div>
+  </div>
   <div id="habitsEmpty" class="text-sm muted hidden">No habits yet.</div>
 </div>
 
 <!-- VICES -->
 <div class="glass mb-6">
-  <div class="flex items-center gap-3 flex-wrap mb-3">
-    <h2 id="vicesAnchor" class="font-bold text-lg">Vices</h2>
-    <button id="addViceBtn" class="btn btn-primary">Add Vice</button>
+  <div class="flex items-center justify-between mb-3 gap-3 flex-wrap">
+    <div class="flex items-center gap-3 flex-wrap">
+      <h2 id="vicesAnchor" class="font-bold text-lg">Vices</h2>
+      <button id="addViceBtn" class="btn btn-primary">Add Vice</button>
+    </div>
+    <button id="weekBackBtnVices" class="btn btn-secondary" type="button">
+      ◀︎ Last week
+    </button>
   </div>
-  <div class="grid gap-2 text-sm muted mb-2" id="viceWeekLabels"></div>
-  <div id="vicesList" class="grid gap-2"></div>
+  <div id="vicesWeekWrap" class="weekSwapWrap">
+    <div class="grid gap-2 text-sm muted mb-2" id="viceWeekLabels"></div>
+    <div id="vicesList" class="grid gap-2"></div>
+  </div>
   <div id="vicesEmpty" class="text-sm muted hidden">No vices yet.</div>
 </div>
 
@@ -1008,7 +1029,19 @@ let taskActionSheetTrigger = null;
 let editingHabitId = null;
 let editingFlexId = null;
 let lastFlexCompletion = null;
+let habitViceWeekOffsetDays = 0; // 0 = this week, -7 = last week
+let weekSwapInFlight = false;
 const TASK_COMPACT_VIEW_KEY = 'tp_tasks_compact_view_v1';
+
+function habitViceBaseDate() {
+  const base = new Date();
+  base.setHours(0,0,0,0);
+  return addDays(base, habitViceWeekOffsetDays);
+}
+
+function isViewingLastWeek() {
+  return habitViceWeekOffsetDays === -7;
+}
 
 
 function sleepBonus(score) {
@@ -3713,7 +3746,7 @@ function renderHabitWeekLabels(){
   const row = $('habitWeekLabels');
   row.innerHTML = '';
 
-  const days = weekDays(new Date());
+  const days = weekDays(habitViceBaseDate());
 
   // Use the same layout container as the habit day bubbles
   const wrapper = document.createElement('div');
@@ -3734,7 +3767,7 @@ function renderViceWeekLabels(){
   const row = $('viceWeekLabels');
   row.innerHTML = '';
 
-  const days = weekDays(new Date());
+  const days = weekDays(habitViceBaseDate());
 
   // Same layout as vices' day bubbles
   const wrapper = document.createElement('div');
@@ -3748,6 +3781,77 @@ function renderViceWeekLabels(){
   });
 
   row.appendChild(wrapper);
+}
+
+function updateWeekToggleButtons() {
+  const habitsBtn = document.getElementById('weekBackBtnHabits');
+  const vicesBtn  = document.getElementById('weekBackBtnVices');
+  const label = isViewingLastWeek() ? 'This week ▶︎' : '◀︎ Last week';
+  if (habitsBtn) habitsBtn.textContent = label;
+  if (vicesBtn)  vicesBtn.textContent  = label;
+}
+
+async function swapWeekViewAnimated(direction) {
+  // direction: 'back' (to last week) or 'forward' (to this week)
+  const habitsWrap = document.getElementById('habitsWeekWrap');
+  const vicesWrap  = document.getElementById('vicesWeekWrap');
+  const wraps = [habitsWrap, vicesWrap].filter(Boolean);
+  if (!wraps.length) return;
+
+  // lock during animation
+  wraps.forEach(w => w.classList.add('weekSwapDisabled'));
+
+  const wpx = wraps[0].getBoundingClientRect().width || 320;
+  const outTo = (direction === 'back') ? wpx : -wpx;
+  const inFrom = (direction === 'back') ? -wpx : wpx;
+
+  // slide current out
+  await Promise.all(
+    wraps.map(el => el.animate(
+      [
+        { transform: 'translateX(0px)', opacity: 1 },
+        { transform: `translateX(${outTo}px)`, opacity: 0 }
+      ],
+      { duration: 220, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)', fill: 'forwards' }
+    ).finished)
+  );
+
+  // re-render BOTH sections for the new week
+  renderHabitWeekLabels();
+  renderHabits();
+  renderViceWeekLabels();
+  renderVices();
+
+  // slide new content in
+  await Promise.all(
+    wraps.map(el => el.animate(
+      [
+        { transform: `translateX(${inFrom}px)`, opacity: 0 },
+        { transform: 'translateX(0px)', opacity: 1 }
+      ],
+      { duration: 240, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)', fill: 'forwards' }
+    ).finished)
+  );
+
+  // cleanup
+  wraps.forEach(w => {
+    w.classList.remove('weekSwapDisabled');
+    w.style.transform = '';
+    w.style.opacity = '';
+  });
+}
+
+async function toggleHabitViceWeek() {
+  if (weekSwapInFlight) return;
+  weekSwapInFlight = true;
+
+  const goingToLast = (habitViceWeekOffsetDays === 0);
+  habitViceWeekOffsetDays = goingToLast ? -7 : 0;
+
+  updateWeekToggleButtons();
+  await swapWeekViewAnimated(goingToLast ? 'back' : 'forward');
+
+  weekSwapInFlight = false;
 }
 
 function sortHabitsForMode(habits, sortMode) {
@@ -3951,7 +4055,7 @@ function renderHabits(){
   const wrap  = $('habitsList');
   const empty = $('habitsEmpty');
   wrap.innerHTML = '';
-  const days = weekDays(new Date());
+  const days = weekDays(habitViceBaseDate());
 
   // Only active habits (NOT vices, NOT retired)
   const sortMode = getHabitSortMode();
@@ -4088,7 +4192,7 @@ function renderVices(){
   const wrap  = $('vicesList');
   const empty = $('vicesEmpty');
   wrap.innerHTML = '';
-  const days = weekDays(new Date());
+  const days = weekDays(habitViceBaseDate());
 
   // Only VICES, non-retired
   const habits = state.habits
@@ -7751,6 +7855,10 @@ document.addEventListener('DOMContentLoaded', () => {
   $('resetBtn')?.addEventListener('click', resetAll);
   $('addHabitBtn')?.addEventListener('click', openHabitModal);
   $('addViceBtn')?.addEventListener('click', openViceModal);
+  const b1 = document.getElementById('weekBackBtnHabits');
+  const b2 = document.getElementById('weekBackBtnVices');
+  if (b1) b1.onclick = toggleHabitViceWeek;
+  if (b2) b2.onclick = toggleHabitViceWeek;
   $('addFlexBtn')?.addEventListener('click', addFlexAction);
   $('saveSleepScoreBtn')?.addEventListener('click', saveSleepScore);
   $('addHabitModal')?.addEventListener('keydown', e => {
@@ -7801,6 +7909,7 @@ document.addEventListener('DOMContentLoaded', () => {
   
   initCaloriesDatePicker();
   initHabitSortControl();
+  updateWeekToggleButtons();
   renderHabitWeekLabels();
   renderViceWeekLabels();
   renderHabits();
