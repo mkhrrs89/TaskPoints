@@ -780,9 +780,19 @@ const bootStart = performance.now();
 
 const MATRIX_WORD = "TASKPOINTS";
 const MATRIX_GLYPHS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#$%&*+?@";
+const TP_BOOT_SEEN_KEY = "tp_boot_seen_v1";
 
 let bootAnimDoneResolve;
 const bootAnimDone = new Promise(r => (bootAnimDoneResolve = r));
+
+function hasSeenBootThisSession(){
+  try { return sessionStorage.getItem(TP_BOOT_SEEN_KEY) === "1"; }
+  catch { return false; }
+}
+
+function markBootSeenThisSession(){
+  try { sessionStorage.setItem(TP_BOOT_SEEN_KEY, "1"); } catch {}
+}
 
 function buildMatrixTitle(){
   const el = document.getElementById("matrixTitle");
@@ -821,6 +831,9 @@ function decodeOne(span, finalChar, { scrambleMs = 320, tickMs = 28 } = {}){
 }
 
 async function runMatrixBootAnim(){
+  if (window.__tpBootAnimStarted) return;
+  window.__tpBootAnimStarted = true;
+
   const splash = document.getElementById("bootSplash");
   const titleEl = document.getElementById("matrixTitle");
   if (!splash || !titleEl){
@@ -7951,7 +7964,20 @@ function applyCapitalizeWordsInput(input) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  runMatrixBootAnim();
+  const shouldPlayBoot = !hasSeenBootThisSession();
+
+  if (shouldPlayBoot){
+    markBootSeenThisSession();
+    runMatrixBootAnim();
+  } else {
+    window.__tpBootAnimStarted = true;
+
+    const splash = document.getElementById("bootSplash");
+    if (splash) splash.remove();
+
+    if (typeof bootAnimDoneResolve === "function") bootAnimDoneResolve();
+  }
+
     // Mobile: remove V1 dashboard entirely so it can't bind listeners / conflict
   try {
     if (window.matchMedia && window.matchMedia('(max-width: 700px)').matches) {
