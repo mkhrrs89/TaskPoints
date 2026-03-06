@@ -897,7 +897,7 @@ async function runMatrixBootAnim(){
   await new Promise(r => setTimeout(r, 90));
 
   for (let i = 0; i < spans.length; i++){
-    await decodeOne(spans[i], spans[i].dataset.final, { scrambleMs: 280, tickMs: 26 });
+    await decodeOne(spans[i], spans[i].dataset.final, { scrambleMs: 210, tickMs: 20 });
   }
 
   await new Promise(r => setTimeout(r, 120));
