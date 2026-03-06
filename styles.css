@@ -71,6 +71,17 @@ body {
   -webkit-font-smoothing: antialiased; /* slightly nicer font rendering */
 }
 
+/* Keep app content below phone status bar / notch on mobile */
+#appRoot {
+  padding-top: max(16px, calc(env(safe-area-inset-top, 0px) + 10px));
+}
+
+@media (min-width: 768px) {
+  #appRoot {
+    padding-top: 16px;
+  }
+}
+
 
 /* --- Mobile-only tweaks (START) -----------------------------------------
    If screen is 768px wide or smaller (phones/tablets), hide the page title. */
