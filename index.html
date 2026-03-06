@@ -29,8 +29,38 @@ Nothing visible on the page is built here. === -->
     href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='%230b0d10'/><text x='50' y='62' font-size='60' text-anchor='middle' fill='white'>TP</text></svg>">
 
   <style>
-    html, body { background: #000; margin: 0; }
-    #app, #root, #appRoot { opacity: 0; transition: opacity 220ms ease; }
+    /* Prepaint lock — prevents any flash before splash */
+    html, body {
+      background:#0b0d10 !important;
+      margin:0;
+      overflow-x:hidden;
+    }
+
+    /* Hide entire app until splash finishes */
+    #appRoot {
+      opacity:0;
+      pointer-events:none;
+      transition:opacity 220ms ease;
+    }
+
+    /* Hide toolbar until boot completes */
+    body.booting .tp-toolbar,
+    body.booting .bottom-toolbar,
+    body.booting [data-toolbar] {
+      opacity:0 !important;
+      pointer-events:none !important;
+    }
+
+    /* Splash always sits above everything */
+    #bootSplash {
+      position:fixed;
+      inset:0;
+      z-index:100000;
+      background:#0b0d10;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
   </style>
 
   <!-- External libraries / fonts -->
@@ -59,7 +89,7 @@ Nothing visible on the page is built here. === -->
 
 
 <!-- === BODY (START) === -->  
-<body class="min-h-screen" style="background:#0b0d10;">
+<body class="min-h-screen booting" style="background:#0b0d10;">
 
 <div id="bootSplash" class="bootSplash" aria-hidden="true">
   <div id="matrixTitle" class="matrixTitle" role="img" aria-label="TASKPOINTS"></div>
@@ -860,6 +890,7 @@ async function runMatrixBootAnim(){
   }
 
   await new Promise(r => setTimeout(r, 120));
+  window.dispatchEvent(new Event("tp:matrixFinished"));
   bootAnimDoneResolve?.();
 }
 
@@ -7971,9 +8002,7 @@ document.addEventListener('DOMContentLoaded', () => {
     runMatrixBootAnim();
   } else {
     window.__tpBootAnimStarted = true;
-
-    const splash = document.getElementById("bootSplash");
-    if (splash) splash.remove();
+    window.dispatchEvent(new Event("tp:matrixFinished"));
 
     if (typeof bootAnimDoneResolve === "function") bootAnimDoneResolve();
   }
@@ -8059,8 +8088,6 @@ scheduleRender(renderAll);
 (async () => {
   await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
   await bootAnimDone;
-  showApp();
-  hideBootSplash();
 })();
 
 // then do the heavier sync after paint / idle
@@ -8558,6 +8585,36 @@ function tpPerfMark(label) {
 
     updateNavOffset();
   })();
+</script>
+
+<script>
+(function(){
+
+  function finishBoot(){
+    const splash = document.getElementById("bootSplash");
+    const app = document.getElementById("appRoot");
+
+    document.body.classList.remove("booting");
+
+    if (app) {
+      app.style.opacity = "1";
+      app.style.pointerEvents = "auto";
+    }
+
+    if (splash){
+      splash.style.transition = "opacity 240ms ease";
+      splash.style.opacity = "0";
+      setTimeout(()=> splash.remove(), 260);
+    }
+  }
+
+  // Wait for matrix animation to finish
+  window.addEventListener("tp:matrixFinished", finishBoot);
+
+  // failsafe in case event never fires
+  setTimeout(finishBoot, 4000);
+
+})();
 </script>
 
 <script>
