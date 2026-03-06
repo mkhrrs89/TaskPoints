@@ -55,6 +55,7 @@ Nothing visible on the page is built here. === -->
     html.tp-boot-seen #root,
     html.tp-boot-seen #appRoot {
       opacity:1 !important;
+      pointer-events:auto !important;
     }
 
     /* Default splash exists */
@@ -77,18 +78,19 @@ Nothing visible on the page is built here. === -->
       pointer-events:none !important;
     }
 
-html.tp-boot-seen body.booting .tp-toolbar,
-html.tp-boot-seen body.booting .bottom-toolbar,
-html.tp-boot-seen body.booting [data-toolbar],
-html.tp-boot-seen body.booting [class*="toolbar"],
-html.tp-boot-seen body.booting [class*="nav"],
-html.tp-boot-seen body.booting [class*="dock"],
-html.tp-boot-seen body.booting footer,
-html.tp-boot-seen body.booting [style*="position:fixed"] {
-  opacity:1 !important;
-  visibility:visible !important;
-  pointer-events:auto !important;
-}
+    /* Safety: if boot was already seen, never hide toolbar/nav via booting rules */
+    html.tp-boot-seen body.booting .tp-toolbar,
+    html.tp-boot-seen body.booting .bottom-toolbar,
+    html.tp-boot-seen body.booting [data-toolbar],
+    html.tp-boot-seen body.booting [class*="toolbar"],
+    html.tp-boot-seen body.booting [class*="nav"],
+    html.tp-boot-seen body.booting [class*="dock"],
+    html.tp-boot-seen body.booting footer,
+    html.tp-boot-seen body.booting [style*="position:fixed"] {
+      opacity:1 !important;
+      visibility:visible !important;
+      pointer-events:auto !important;
+    }
     
     /* Hide anything that could be a bottom toolbar during boot */
     body.booting .tp-toolbar,
@@ -920,6 +922,9 @@ async function runMatrixBootAnim(){
 
   if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches){
     titleEl.textContent = MATRIX_WORD;
+    setTimeout(() => {
+      window.dispatchEvent(new Event("tp:matrixFinished"));
+    }, 1000);
     bootAnimDoneResolve?.();
     return;
   }
@@ -8054,7 +8059,7 @@ document.addEventListener('DOMContentLoaded', () => {
   } else {
     window.__tpBootAnimStarted = true;
 
-    // No splash/boot delay on normal in-app returns to Home
+    // Skip all boot hiding/delay when boot was already seen this session
     document.body.classList.remove('booting');
 
     const splash = document.getElementById('bootSplash');
