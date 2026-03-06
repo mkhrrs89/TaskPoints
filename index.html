@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" style="background:#0b0d10;">
 <!-- === DOCUMENT (START) This is the outer wrapper for the entire page. === -->
 <head>
 <!-- === HEAD (START)
@@ -9,12 +9,18 @@ Nothing visible on the page is built here. === -->
   <!-- --- Basic page metadata (START) ------------------------- -->
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+  <!-- PREPAINT: prevents iOS white flash before CSS loads -->
+  <meta name="theme-color" content="#0b0d10">
+  <meta name="color-scheme" content="dark">
+  <style id="tp-prepaint">
+    html, body { background:#0b0d10 !important; }
+  </style>
   <title>TaskPoints — To-Do + Points Tracker</title>
   <!-- --- Basic page metadata (END) --------------------------- -->
 
   <!-- iPhone / iOS PWA settings -->
   <meta name="apple-mobile-web-app-capable" content="yes"/>
-  <meta name="apple-mobile-web-app-status-bar-style" content="default"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
   <meta name="apple-mobile-web-app-title" content="TaskPoints"/>
 
   <!-- Favicon -->
@@ -53,7 +59,7 @@ Nothing visible on the page is built here. === -->
 
 
 <!-- === BODY (START) === -->  
-<body class="min-h-screen">
+<body class="min-h-screen" style="background:#0b0d10;">
 
 <div id="bootSplash" class="bootSplash" aria-hidden="true">
   <div id="matrixTitle" class="matrixTitle" role="img" aria-label="TASKPOINTS"></div>
