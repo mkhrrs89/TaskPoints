@@ -901,7 +901,10 @@ async function runMatrixBootAnim(){
   }
 
   await new Promise(r => setTimeout(r, 120));
-  window.dispatchEvent(new Event("tp:matrixFinished"));
+  // Hold final title for a moment before boot completes
+  setTimeout(() => {
+    window.dispatchEvent(new Event("tp:matrixFinished"));
+  }, 1000);
   bootAnimDoneResolve?.();
 }
 
@@ -8013,7 +8016,9 @@ document.addEventListener('DOMContentLoaded', () => {
     runMatrixBootAnim();
   } else {
     window.__tpBootAnimStarted = true;
-    window.dispatchEvent(new Event("tp:matrixFinished"));
+    setTimeout(() => {
+      window.dispatchEvent(new Event("tp:matrixFinished"));
+    }, 1000);
 
     if (typeof bootAnimDoneResolve === "function") bootAnimDoneResolve();
   }
