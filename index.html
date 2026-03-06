@@ -77,6 +77,19 @@ Nothing visible on the page is built here. === -->
       pointer-events:none !important;
     }
 
+html.tp-boot-seen body.booting .tp-toolbar,
+html.tp-boot-seen body.booting .bottom-toolbar,
+html.tp-boot-seen body.booting [data-toolbar],
+html.tp-boot-seen body.booting [class*="toolbar"],
+html.tp-boot-seen body.booting [class*="nav"],
+html.tp-boot-seen body.booting [class*="dock"],
+html.tp-boot-seen body.booting footer,
+html.tp-boot-seen body.booting [style*="position:fixed"] {
+  opacity:1 !important;
+  visibility:visible !important;
+  pointer-events:auto !important;
+}
+    
     /* Hide anything that could be a bottom toolbar during boot */
     body.booting .tp-toolbar,
     body.booting .bottom-toolbar,
@@ -123,7 +136,7 @@ Nothing visible on the page is built here. === -->
 
 
 <!-- === BODY (START) === -->  
-<body class="min-h-screen booting" style="background:#0b0d10;">
+<body class="min-h-screen" style="background:#0b0d10;">
 
 <div id="bootSplash" class="bootSplash" aria-hidden="true">
   <div id="matrixTitle" class="matrixTitle" role="img" aria-label="TASKPOINTS"></div>
@@ -8035,13 +8048,23 @@ document.addEventListener('DOMContentLoaded', () => {
   const shouldPlayBoot = !hasSeenBootThisSession();
 
   if (shouldPlayBoot){
+    document.body.classList.add('booting');
     markBootSeenThisSession();
     runMatrixBootAnim();
   } else {
     window.__tpBootAnimStarted = true;
-    setTimeout(() => {
-      window.dispatchEvent(new Event("tp:matrixFinished"));
-    }, 1000);
+
+    // No splash/boot delay on normal in-app returns to Home
+    document.body.classList.remove('booting');
+
+    const splash = document.getElementById('bootSplash');
+    if (splash) splash.remove();
+
+    const app = document.getElementById('app') || document.getElementById('root') || document.getElementById('appRoot');
+    if (app) {
+      app.style.opacity = '1';
+      app.style.pointerEvents = 'auto';
+    }
 
     if (typeof bootAnimDoneResolve === "function") bootAnimDoneResolve();
   }
