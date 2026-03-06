@@ -15,6 +15,15 @@ Nothing visible on the page is built here. === -->
   <style id="tp-prepaint">
     html, body { background:#0b0d10 !important; }
   </style>
+  <script>
+    (function () {
+      try {
+        if (sessionStorage.getItem('tpBootSeenThisSession') === '1') {
+          document.documentElement.classList.add('tp-boot-seen');
+        }
+      } catch (e) {}
+    })();
+  </script>
   <title>TaskPoints — To-Do + Points Tracker</title>
   <!-- --- Basic page metadata (END) --------------------------- -->
 
@@ -29,18 +38,43 @@ Nothing visible on the page is built here. === -->
     href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='%230b0d10'/><text x='50' y='62' font-size='60' text-anchor='middle' fill='white'>TP</text></svg>">
 
   <style>
-    /* Prepaint lock — prevents any flash before splash */
     html, body {
-      background:#0b0d10 !important;
+      background:#0b0d10;
       margin:0;
       overflow-x:hidden;
     }
 
-    /* Hide entire app until splash finishes */
-    #appRoot {
+    /* Default: app stays hidden until boot finishes */
+    #app, #root, #appRoot {
       opacity:0;
-      pointer-events:none;
       transition:opacity 220ms ease;
+    }
+
+    /* If boot already happened this session, show app immediately */
+    html.tp-boot-seen #app,
+    html.tp-boot-seen #root,
+    html.tp-boot-seen #appRoot {
+      opacity:1 !important;
+    }
+
+    /* Default splash exists */
+    #bootSplash {
+      opacity:1;
+      pointer-events:auto;
+      position:fixed;
+      inset:0;
+      z-index:100000;
+      background:#0b0d10;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+
+    /* But if boot already happened this session, never show it */
+    html.tp-boot-seen #bootSplash {
+      display:none !important;
+      opacity:0 !important;
+      pointer-events:none !important;
     }
 
     /* Hide anything that could be a bottom toolbar during boot */
@@ -60,17 +94,6 @@ Nothing visible on the page is built here. === -->
     /* Prevent layout flash from fixed bottom elements */
     body.booting * {
       transition:none !important;
-    }
-
-    /* Splash always sits above everything */
-    #bootSplash {
-      position:fixed;
-      inset:0;
-      z-index:100000;
-      background:#0b0d10;
-      display:flex;
-      align-items:center;
-      justify-content:center;
     }
   </style>
 
@@ -821,18 +844,18 @@ const bootStart = performance.now();
 
 const MATRIX_WORD = "TASKPOINTS";
 const MATRIX_GLYPHS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#$%&*+?@";
-const TP_BOOT_SEEN_KEY = "tp_boot_seen_v1";
+const TP_BOOT_SESSION_KEY = "tpBootSeenThisSession";
 
 let bootAnimDoneResolve;
 const bootAnimDone = new Promise(r => (bootAnimDoneResolve = r));
 
 function hasSeenBootThisSession(){
-  try { return sessionStorage.getItem(TP_BOOT_SEEN_KEY) === "1"; }
+  try { return sessionStorage.getItem(TP_BOOT_SESSION_KEY) === "1"; }
   catch { return false; }
 }
 
 function markBootSeenThisSession(){
-  try { sessionStorage.setItem(TP_BOOT_SEEN_KEY, "1"); } catch {}
+  try { sessionStorage.setItem(TP_BOOT_SESSION_KEY, "1"); } catch {}
 }
 
 function buildMatrixTitle(){
