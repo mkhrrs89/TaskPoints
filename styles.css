@@ -1104,7 +1104,7 @@ header,
   position: fixed;
   left: 0;
   right: 0;
-  bottom: 0;
+  bottom: -6px;
   height: calc(var(--tp-toolbar-height) + var(--tp-safe-bottom));
   padding-bottom: var(--tp-safe-bottom);
   box-sizing: border-box;
