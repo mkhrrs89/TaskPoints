@@ -1033,7 +1033,7 @@ body {
 
 #goToTasksFab{
   right: 0.75rem;
-  bottom: calc(var(--tp-toolbar-height) + var(--tp-safe-bottom) + 0.9rem);
+  bottom: calc(var(--tp-toolbar-height) + var(--tp-safe-bottom) + 0.9rem - 4px);
   min-height: 52px;
   min-width: 144px;
   border-radius: 18px;
@@ -1104,7 +1104,7 @@ header,
   position: fixed;
   left: 0;
   right: 0;
-  bottom: -6px;
+  bottom: -10px;
   height: calc(var(--tp-toolbar-height) + var(--tp-safe-bottom));
   padding-bottom: var(--tp-safe-bottom);
   box-sizing: border-box;
