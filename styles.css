@@ -1097,13 +1097,14 @@ header,
 
 .mobile-bottom-nav{
   --tp-bottom-nav-pad-top: 0.75rem; /* matches toolbar.js: py-3 */
+  padding-bottom: calc(var(--tp-safe-bottom) + 0.25rem);
 }
 
 .mobile-bottom-nav-shell{
   position: fixed;
   left: 0;
   right: 0;
-  bottom: max(0px, calc(env(safe-area-inset-bottom, 0px) - 2px));
+  bottom: 0;
   height: calc(var(--tp-toolbar-height) + var(--tp-safe-bottom));
   padding-bottom: var(--tp-safe-bottom);
   box-sizing: border-box;
