@@ -1193,7 +1193,6 @@ header,
 }
 
 .mobile-bottom-nav-expanded{
-  border-top: 1px solid rgba(15,23,42,0.7);
   opacity: 0;
   transform: translateY(10px);
   pointer-events: none;
@@ -1340,10 +1339,6 @@ header,
 @media (prefers-color-scheme: light){
   .mobile-bottom-nav > * + *{
     border-color: rgba(148,163,184,0.7);
-  }
-
-  .mobile-bottom-nav-expanded{
-    border-top-color: rgba(148,163,184,0.7);
   }
 
   .mobile-bottom-nav-secondary > * + *{
