@@ -214,6 +214,7 @@
     calories: {
       target: 2400,
       pointsPer100: 1,
+      logBonus: 2,
       minPoints: 0,
       maxPoints: 10
     },
@@ -273,6 +274,7 @@
 
     const caloriesTarget = toFiniteNumber(caloriesInput.target);
     const caloriesPointsPer100 = toFiniteNumber(caloriesInput.pointsPer100);
+    const caloriesLogBonus = toFiniteNumber(caloriesInput.logBonus);
     const caloriesMin = Object.prototype.hasOwnProperty.call(caloriesInput, 'minPoints')
       ? (caloriesInput.minPoints === null ? null : toFiniteNumber(caloriesInput.minPoints))
       : null;
@@ -313,6 +315,7 @@
       calories: {
         target: caloriesTarget != null ? caloriesTarget : DEFAULT_SCORING_SETTINGS.calories.target,
         pointsPer100: caloriesPointsPer100 != null ? caloriesPointsPer100 : DEFAULT_SCORING_SETTINGS.calories.pointsPer100,
+        logBonus: caloriesLogBonus != null ? caloriesLogBonus : DEFAULT_SCORING_SETTINGS.calories.logBonus,
         minPoints: Object.prototype.hasOwnProperty.call(caloriesInput, 'minPoints')
           ? caloriesMin
           : DEFAULT_SCORING_SETTINGS.calories.minPoints,
@@ -1329,16 +1332,20 @@ return { state: merged, storageKey };
     return Number.isFinite(raw) ? raw : null;
   }
 
-  function computeCalLogBonusPoints(calorieEntries) {
-    const hasNonZero = Array.isArray(calorieEntries) && calorieEntries.some((entry) => {
+  function computeCalLogBonusPoints(calorieEntries, settings) {
+    const scoring = getScoringSettings(settings);
+    const logBonus = Number(scoring?.calories?.logBonus) || 0;
+    if (!logBonus) return 0;
+
+    const hasLoggedCalories = Array.isArray(calorieEntries) && calorieEntries.some((entry) => {
       if (!entry || typeof entry !== 'object') return false;
       const rawCalories = Object.prototype.hasOwnProperty.call(entry, 'calories')
         ? Number(entry.calories)
         : parseCaloriesFromTitle(entry.title);
       const calories = Number.isFinite(rawCalories) ? rawCalories : 0;
-      return calories !== 0;
+      return calories > 0;
     });
-    return hasNonZero ? CAL_LOG_BONUS_POINTS : 0;
+    return hasLoggedCalories ? logBonus : 0;
   }
 
   function getMoodInfo(entry) {
@@ -1494,7 +1501,7 @@ return { state: merged, storageKey };
     });
 
     calorieEntriesByDay.forEach((entries, dk) => {
-      const bonus = computeCalLogBonusPoints(entries);
+      const bonus = computeCalLogBonusPoints(entries, settings);
       if (!bonus) return;
 
       const d = fromKey(dk);
@@ -1698,7 +1705,7 @@ Object.keys(dailyTotals).forEach(k => {
         : parseCaloriesFromTitle(entry?.title);
       return Number.isFinite(caloriesRaw);
     });
-    const calLogBonusPoints = computeCalLogBonusPoints(calorieEntries);
+    const calLogBonusPoints = computeCalLogBonusPoints(calorieEntries, normalized);
     if (calLogBonusPoints) {
       items.push({
         source: CAL_LOG_BONUS_SOURCE,
@@ -1706,7 +1713,7 @@ Object.keys(dailyTotals).forEach(k => {
         label: 'Cal Log Bonus',
         category: 'calLogBonus',
         points: calLogBonusPoints,
-        details: { reason: 'Applied when any non-zero calories are logged' }
+        details: { reason: 'Applied when any calories over 0 are logged' }
       });
     }
 

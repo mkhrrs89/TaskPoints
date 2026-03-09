@@ -18,7 +18,13 @@ test('computeCalLogBonusPoints handles edge cases', () => {
   assert.equal(core.computeCalLogBonusPoints([{ calories: 10 }]), 2);
   assert.equal(core.computeCalLogBonusPoints([{ calories: 0 }, { calories: 10 }]), 2);
   assert.equal(core.computeCalLogBonusPoints([{ calories: NaN }, { calories: 0 }]), 0);
-  assert.equal(core.computeCalLogBonusPoints([{ calories: -10 }]), 2);
+  assert.equal(core.computeCalLogBonusPoints([{ calories: -10 }]), 0);
+});
+
+test('computeCalLogBonusPoints uses configurable calories.logBonus', () => {
+  const entries = [{ calories: 120 }];
+  assert.equal(core.computeCalLogBonusPoints(entries, { scoringSettings: { calories: { logBonus: 3.5 } } }), 3.5);
+  assert.equal(core.computeCalLogBonusPoints(entries, { scoringSettings: { calories: { logBonus: 0 } } }), 0);
 });
 
 test('aggregateCompletionsByDate adds/removes cal log bonus idempotently', () => {
