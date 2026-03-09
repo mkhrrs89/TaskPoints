@@ -1108,6 +1108,8 @@ header,
 
 .mobile-bottom-nav{
   --tp-bottom-nav-pad-top: 0.75rem; /* matches toolbar.js: py-3 */
+  --tp-bottom-nav-mini-divider-width: 52px;
+  --tp-bottom-nav-mini-divider-bottom: 10px;
   padding-bottom: calc(var(--tp-safe-bottom) + 0.25rem);
 }
 
@@ -1160,6 +1162,19 @@ header,
   will-change: transform;
 }
 
+.mobile-bottom-nav-btn::after{
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: var(--tp-bottom-nav-mini-divider-bottom);
+  width: var(--tp-bottom-nav-mini-divider-width);
+  height: 1px;
+  transform: translateX(-50%);
+  background: rgba(0,0,0,0.75);
+  border-radius: 999px;
+  pointer-events: none;
+}
+
 .tp-nav-icon{
   width:28px;
   height:28px;
@@ -1207,6 +1222,7 @@ header,
 
 .mobile-bottom-nav-secondary{
   --tp-bottom-nav-pad-top: 0.5rem;
+  --tp-bottom-nav-mini-divider-bottom: 9px;
 }
 
 .mobile-bottom-nav-secondary > * + *{
