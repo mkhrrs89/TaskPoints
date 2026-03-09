@@ -5673,14 +5673,13 @@ function initTaskListDelegation(){
   if (list.dataset.tpDelegationAttached === '1') return;
 
   const handleTaskAction = (e) => {
-    if (e.type === 'pointerup' && e.pointerType === 'mouse') return;
-    const now = Date.now();
-    if (now - (list._lastTaskTapTs || 0) < 250) return;
-
     if (!(e.target instanceof Element)) return;
 
     const bodyTarget = e.target.closest('[data-task-card-body]');
     if (bodyTarget && !e.target.closest('[data-task-action]')) {
+      const now = Date.now();
+      if (now - (list._lastTaskTapTs || 0) < 250) return;
+      list._lastTaskTapTs = now;
       const id = bodyTarget.getAttribute('data-task-card-body');
       if (id) {
         expandedTaskId = expandedTaskId === id ? null : id;
@@ -5691,8 +5690,8 @@ function initTaskListDelegation(){
 
     const btn = e.target.closest('[data-task-action][data-task-id]');
     if (!btn) return;
-
-    list._lastTaskTapTs = now;
+    e.preventDefault();
+    e.stopPropagation();
 
     const action = btn.getAttribute('data-task-action');
     const id = btn.getAttribute('data-task-id');
@@ -5751,7 +5750,6 @@ function initTaskListDelegation(){
   };
 
   list.addEventListener('click', handleTaskAction);
-  list.addEventListener('pointerup', handleTaskAction);
   list.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter' && e.key !== ' ') return;
     const bodyTarget = e.target.closest('[data-task-card-body]');
