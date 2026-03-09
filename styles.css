@@ -1037,7 +1037,7 @@ body {
 
 #goToTasksFab{
   right: 0.75rem;
-  bottom: calc(var(--tp-toolbar-height) + var(--tp-safe-bottom) + 0.9rem - 4px);
+  bottom: calc(var(--tp-toolbar-height) + var(--tp-safe-bottom) + 0.4rem - 4px);
   min-height: 52px;
   min-width: 144px;
   border-radius: 18px;
