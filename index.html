@@ -7657,6 +7657,12 @@ function ensureTodayScoreEntry(cat){
   return ensureScoreEntryForDate(cat, dateKey(new Date()));
 }
 
+function getScoreV2DisplayPoints(catKey, entry, dateOrKey){
+  if (!entry) return null;
+  if (catKey === 'calories') return getCalorieDisplayPointsForDate(dateOrKey);
+  return getCompletionPoints(entry);
+}
+
   
 function renderScoreDashboardV2_Skeleton(){
   const mount = document.getElementById("scoreV2Row");
@@ -7675,7 +7681,7 @@ function renderScoreDashboardV2_Skeleton(){
   }
 
   function cardHTML(key, label, entry, breakdownParts, displayPoints = null){
-    const pointsValue = Number.isFinite(Number(displayPoints)) ? Number(displayPoints) : Number(entry?.points);
+    const pointsValue = Number.isFinite(Number(displayPoints)) ? Number(displayPoints) : null;
     const hasPts = Number.isFinite(pointsValue);
     const pts = hasPts ? pointsValue.toFixed(1) : null;
 
@@ -7705,6 +7711,7 @@ ${hasPts
     const info = (typeof getSleepInfo === "function") ? getSleepInfo(sleepEntry) : { score: null, rested: null };
     sleepBreak = [fmtNum(Number(info.score)), fmtNum(Number(info.rested))];
   }
+  const sleepDisplayPoints = getScoreV2DisplayPoints("sleep", sleepEntry, new Date());
 
   let calBreak = [];
   let calDisplayPoints = null;
@@ -7713,13 +7720,14 @@ ${hasPts
     const calories = m ? Number(m[1]) : null;
     calBreak = [fmtNum(calories)];
   }
-  calDisplayPoints = getCalorieDisplayPointsForDate(new Date());
+  calDisplayPoints = getScoreV2DisplayPoints("calories", calEntry, new Date());
 
   let workBreak = [];
   if (workEntry) {
     const info = (typeof getWorkInfo === "function") ? getWorkInfo(workEntry) : { score: null, hours: null };
     workBreak = [fmtNum(Number(info.score)), fmtNum(Number(info.hours))];
   }
+  const workDisplayPoints = getScoreV2DisplayPoints("work", workEntry, new Date());
 
   let moodBreak = [];
   if (moodEntry) {
@@ -7727,12 +7735,13 @@ ${hasPts
     const mood = m ? Number(m[1]) : null;
     moodBreak = [fmtNum(mood)];
   }
+  const moodDisplayPoints = getScoreV2DisplayPoints("mood", moodEntry, new Date());
 
   mount.innerHTML = [
-    cardHTML("sleep", "Sleep", sleepEntry, sleepBreak),
+    cardHTML("sleep", "Sleep", sleepEntry, sleepBreak, sleepDisplayPoints),
     cardHTML("calories", "Calories", calEntry, calBreak, calDisplayPoints),
-    cardHTML("work", "Work", workEntry, workBreak),
-    cardHTML("mood", "Mood", moodEntry, moodBreak),
+    cardHTML("work", "Work", workEntry, workBreak, workDisplayPoints),
+    cardHTML("mood", "Mood", moodEntry, moodBreak, moodDisplayPoints),
   ].join("");
 
     if (!mount.__boundScoreV2TodayClicks) {
@@ -7920,9 +7929,7 @@ function getEntryForDate(key, dateObj){
   }
 
 function cellHTML(catKey, entry, dateKeyStr){
-  const calculatedPoints = catKey === 'calories'
-    ? getCalorieDisplayPointsForDate(dateKeyStr)
-    : Number(entry?.points);
+  const calculatedPoints = getScoreV2DisplayPoints(catKey, entry, dateKeyStr);
   const hasPts = Number.isFinite(calculatedPoints);
   const pts = hasPts ? Number(calculatedPoints).toFixed(1) : null;
 
