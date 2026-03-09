@@ -863,6 +863,27 @@ const TP_BOOT_SESSION_KEY = "tpBootSeenThisSession";
 
 let bootAnimDoneResolve;
 const bootAnimDone = new Promise(r => (bootAnimDoneResolve = r));
+let tpBootSkipRequested = false;
+let tpBootFinished = false;
+let tpBootSkipCleanup = null;
+let tpBootFinishTimer = null;
+
+function clearTpBootFinishTimer(){
+  if (tpBootFinishTimer === null) return;
+  clearTimeout(tpBootFinishTimer);
+  tpBootFinishTimer = null;
+}
+
+function finishMatrixBootNow(){
+  if (tpBootFinished) return;
+  tpBootFinished = true;
+  clearTpBootFinishTimer();
+  if (typeof tpBootSkipCleanup === "function"){
+    tpBootSkipCleanup();
+    tpBootSkipCleanup = null;
+  }
+  window.dispatchEvent(new Event("tp:matrixFinished"));
+}
 
 function hasSeenBootThisSession(){
   try { return sessionStorage.getItem(TP_BOOT_SESSION_KEY) === "1"; }
@@ -897,6 +918,11 @@ function decodeOne(span, finalChar, { scrambleMs = 320, tickMs = 28 } = {}){
   return new Promise(resolve => {
     const start = performance.now();
     const iv = setInterval(() => {
+      if (tpBootSkipRequested){
+        clearInterval(iv);
+        resolve();
+        return;
+      }
       const elapsed = performance.now() - start;
       span.textContent = randGlyph();
       if (elapsed >= scrambleMs){
@@ -920,10 +946,22 @@ async function runMatrixBootAnim(){
     return;
   }
 
+  const requestBootSkip = () => {
+    if (tpBootSkipRequested || tpBootFinished) return;
+    tpBootSkipRequested = true;
+    finishMatrixBootNow();
+  };
+  splash.addEventListener("pointerdown", requestBootSkip, { passive: true });
+  splash.addEventListener("click", requestBootSkip, { passive: true });
+  tpBootSkipCleanup = () => {
+    splash.removeEventListener("pointerdown", requestBootSkip);
+    splash.removeEventListener("click", requestBootSkip);
+  };
+
   if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches){
     titleEl.textContent = MATRIX_WORD;
-    setTimeout(() => {
-      window.dispatchEvent(new Event("tp:matrixFinished"));
+    tpBootFinishTimer = setTimeout(() => {
+      finishMatrixBootNow();
     }, 1000);
     bootAnimDoneResolve?.();
     return;
@@ -936,15 +974,35 @@ async function runMatrixBootAnim(){
   }
 
   await new Promise(r => setTimeout(r, 90));
+  if (tpBootSkipRequested){
+    finishMatrixBootNow();
+    bootAnimDoneResolve?.();
+    return;
+  }
 
   for (let i = 0; i < spans.length; i++){
+    if (tpBootSkipRequested){
+      finishMatrixBootNow();
+      bootAnimDoneResolve?.();
+      return;
+    }
     await decodeOne(spans[i], spans[i].dataset.final, { scrambleMs: 210, tickMs: 20 });
+    if (tpBootSkipRequested){
+      finishMatrixBootNow();
+      bootAnimDoneResolve?.();
+      return;
+    }
   }
 
   await new Promise(r => setTimeout(r, 120));
+  if (tpBootSkipRequested){
+    finishMatrixBootNow();
+    bootAnimDoneResolve?.();
+    return;
+  }
   // Hold final title for a moment before boot completes
-  setTimeout(() => {
-    window.dispatchEvent(new Event("tp:matrixFinished"));
+  tpBootFinishTimer = setTimeout(() => {
+    finishMatrixBootNow();
   }, 1000);
   bootAnimDoneResolve?.();
 }
