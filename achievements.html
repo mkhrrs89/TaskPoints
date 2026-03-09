@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>TaskPoints — Achievements</title>
+
+  <script src="scoring_core.js"></script>
+  <link rel="stylesheet" href="assets/tailwind.css">
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="preload" href="toolbar.js" as="script">
+  <script src="toolbar.js" defer></script>
+</head>
+
+<body class="min-h-screen">
+  <div class="mx-auto max-w-6xl p-3 sm:p-4 pb-16 md:pb-5">
+    <div class="flex items-center justify-between gap-3 mb-3 md:hidden">
+      <a href="index.html" class="flex items-center gap-3">
+        <img src="assets/taskpoints-logo.png" alt="TaskPoints logo" class="w-10 h-10 rounded-2xl object-cover shrink-0 shadow-sm">
+        <h1 class="text-2xl font-extrabold tracking-tight leading-tight">
+          <span style="color:#fb923c;">Task</span><span style="color:#1e666d;">Points</span>
+        </h1>
+      </a>
+      <div class="flex items-center gap-2">
+        <button type="button" class="btn btn-ghost btn-toolbar" data-export-button>Export</button>
+        <label class="btn btn-ghost btn-toolbar cursor-pointer">
+          <span>Import</span>
+          <input type="file" accept="application/json" class="hidden" data-import-input/>
+        </label>
+      </div>
+    </div>
+
+    <header class="mb-3">
+      <div class="row items-center gap-3 sm:gap-4">
+        <div class="flex items-center gap-3 flex-1 min-w-0">
+          <div class="hidden md:block p-2 rounded-2xl bg-slate-900/50 border border-slate-700/60 shadow-inner">
+            <img src="assets/taskpoints-logo.png" alt="TaskPoints logo" class="w-10 h-10 rounded-2xl object-cover shrink-0">
+          </div>
+          <div class="min-w-0">
+            <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight flex items-center gap-2 page-title">Achievements</h1>
+            <p class="muted text-sm">Achievements / Trophies overview.</p>
+          </div>
+        </div>
+
+        <div class="toolbar header-nav mt-3 sm:mt-0">
+          <a href="index.html" class="btn btn-teal btn-toolbar nav-btn">Main</a>
+          <a href="today.html" class="btn btn-teal btn-toolbar nav-btn">Today</a>
+          <a href="daily_sources.html" class="btn btn-teal btn-toolbar nav-btn">Sources</a>
+          <a href="log.html" class="btn btn-teal btn-toolbar nav-btn">Log</a>
+          <a href="week.html" class="btn btn-teal btn-toolbar nav-btn">Week</a>
+
+          <div class="dropdown hidden md:block">
+            <button type="button" class="btn btn-teal btn-toolbar dropdown-toggle nav-btn" data-dropdown-toggle aria-expanded="false">
+              Game <span class="caret">▾</span>
+            </button>
+            <div class="dropdown-menu">
+              <a href="gamehub.html" class="btn btn-teal btn-toolbar nav-btn">Game Hub</a>
+              <a href="game.html" class="btn btn-teal btn-toolbar nav-btn">Players</a>
+              <a href="standings.html" class="btn btn-teal btn-toolbar nav-btn">Standings</a>
+              <a href="matchups.html" class="btn btn-teal btn-toolbar nav-btn">Matchups</a>
+              <a href="schedule.html" class="btn btn-teal btn-toolbar nav-btn">Schedule</a>
+              <a href="game_ratings.html" class="btn btn-teal btn-toolbar nav-btn">Ratings</a>
+              <a href="records.html" class="btn btn-teal btn-toolbar nav-btn">Records</a>
+            </div>
+          </div>
+
+          <a href="projects.html" class="btn btn-teal btn-toolbar nav-btn">Projects</a>
+          <a href="notes.html" class="btn btn-teal btn-toolbar nav-btn">Notes</a>
+          <a href="settings.html" class="btn btn-teal btn-toolbar nav-btn">Settings</a>
+        </div>
+      </div>
+    </header>
+
+    <section class="glass">
+      <h2 class="text-xl font-semibold mb-1">Achievements</h2>
+      <p class="muted text-sm">Coming soon.</p>
+    </section>
+  </div>
+</body>
+</html>

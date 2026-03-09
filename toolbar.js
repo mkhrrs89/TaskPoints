@@ -258,6 +258,7 @@ function renderBottomToolbar() {
       <div class="mobile-bottom-nav-expanded">
         <a href="projects.html" class="btn btn-teal btn-toolbar mobile-bottom-nav-expanded-btn">Projects</a>
         <a href="notes.html" class="btn btn-teal btn-toolbar mobile-bottom-nav-expanded-btn">Notes</a>
+        <a href="achievements.html" class="btn btn-teal btn-toolbar mobile-bottom-nav-expanded-btn">Achievements</a>
       </div>
     </nav>
   `;
@@ -481,6 +482,7 @@ function finishDrag(event) {
 
     nav.style.setProperty('--mobile-bottom-nav-offset', `${offset}px`);
     nav.classList.toggle('is-expanded', offset > 0);
+    document.body.classList.toggle('mobile-toolbar-expanded', offset > 0);
     nav.classList.toggle('is-dragging', dragging);
 
     // Key fix:
@@ -507,6 +509,7 @@ function finishDrag(event) {
     pendingDragHeight = null;
     
     nav.classList.remove('is-dragging');
+    document.body.classList.remove('mobile-toolbar-expanded');
     delete nav.dataset.ignoreClick;
 
     nav.style.removeProperty('height');

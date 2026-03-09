@@ -1066,6 +1066,13 @@ body {
   #goToTasksFab{ display: none !important; }
 }
 
+
+body.mobile-toolbar-expanded #goToTasksFab{
+  pointer-events: none;
+  opacity: 0;
+}
+
+
 /* Safety: if the header creates a stacking context, keep it below islands */
 .top-ribbon,
 .header,
@@ -1113,7 +1120,7 @@ header,
   padding-bottom: var(--tp-safe-bottom);
   box-sizing: border-box;
   isolation: isolate;
-  z-index: 40;
+  z-index: var(--tp-z-floating);
   transition: transform 160ms ease, height 220ms ease;
   will-change: transform, height;
   touch-action: none !important;
