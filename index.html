@@ -3797,14 +3797,20 @@ if (titleStr.startsWith('Sleep Score (')) {
     return Number.isFinite(caloriesRaw);
   });
   const calLogBonus = window.TaskPointsCore?.computeCalLogBonusPoints
-    ? TaskPointsCore.computeCalLogBonusPoints(calorieEntries)
-    : (calorieEntries.some((entry) => {
-        const caloriesRaw = Object.prototype.hasOwnProperty.call(entry || {}, 'calories')
-          ? Number(entry.calories)
-          : parseCaloriesFromTitle(entry?.title);
-        const calories = Number.isFinite(caloriesRaw) ? caloriesRaw : 0;
-        return calories !== 0;
-      }) ? 2 : 0);
+    ? TaskPointsCore.computeCalLogBonusPoints(calorieEntries, state)
+    : (() => {
+        const configuredBonus = Number(state?.scoringSettings?.calories?.logBonus);
+        const logBonus = Number.isFinite(configuredBonus) ? configuredBonus : 2;
+        if (!logBonus) return 0;
+        const hasLoggedCalories = calorieEntries.some((entry) => {
+          const caloriesRaw = Object.prototype.hasOwnProperty.call(entry || {}, 'calories')
+            ? Number(entry.calories)
+            : parseCaloriesFromTitle(entry?.title);
+          const calories = Number.isFinite(caloriesRaw) ? caloriesRaw : 0;
+          return calories > 0;
+        });
+        return hasLoggedCalories ? logBonus : 0;
+      })();
   totals.calLogBonus = calLogBonus;
 
   // Build the bar
