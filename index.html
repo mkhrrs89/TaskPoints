@@ -2163,6 +2163,33 @@ function getCompletionPoints(entry) {
   return Number(entry?.points) || 0;
 }
 
+function getCalorieDisplayPointsForDate(dateOrKey) {
+  const key = typeof dateOrKey === 'string' ? dateOrKey : dateKey(dateOrKey || new Date());
+  const completions = Array.isArray(state.completions) ? state.completions : [];
+
+  const dayCalorieEntries = completions.filter((entry) => {
+    if (!entry || !entry.completedAtISO) return false;
+    const completedKey = typeof entry.dateKey === 'string' && entry.dateKey
+      ? entry.dateKey
+      : dateKey(new Date(entry.completedAtISO));
+    if (completedKey !== key) return false;
+
+    const caloriesRaw = Object.prototype.hasOwnProperty.call(entry, 'calories')
+      ? Number(entry.calories)
+      : parseCaloriesFromTitle(entry.title);
+    return Number.isFinite(caloriesRaw);
+  });
+
+  if (!dayCalorieEntries.length) return null;
+
+  const basePoints = dayCalorieEntries.reduce((sum, entry) => sum + getCompletionPoints(entry), 0);
+  const bonusPoints = window.TaskPointsCore?.computeCalLogBonusPoints
+    ? TaskPointsCore.computeCalLogBonusPoints(dayCalorieEntries, state)
+    : 0;
+
+  return basePoints + bonusPoints;
+}
+
 function computeYourMatchupRecord(){
   const matchups = Array.isArray(state.matchups) ? state.matchups : [];
   let wins = 0;
@@ -7535,9 +7562,10 @@ function renderScoreDashboardV2_Skeleton(){
     return (Math.abs(n - Math.round(n)) < 1e-9) ? String(Math.round(n)) : n.toFixed(1);
   }
 
-  function cardHTML(key, label, entry, breakdownParts){
-    const hasPts = entry && Number.isFinite(Number(entry.points));
-    const pts = hasPts ? Number(entry.points).toFixed(1) : null;
+  function cardHTML(key, label, entry, breakdownParts, displayPoints = null){
+    const pointsValue = Number.isFinite(Number(displayPoints)) ? Number(displayPoints) : Number(entry?.points);
+    const hasPts = Number.isFinite(pointsValue);
+    const pts = hasPts ? pointsValue.toFixed(1) : null;
 
     const breakdown = (Array.isArray(breakdownParts) ? breakdownParts : [])
       .filter(v => v !== null && v !== undefined && v !== "")
@@ -7567,11 +7595,13 @@ ${hasPts
   }
 
   let calBreak = [];
+  let calDisplayPoints = null;
   if (calEntry) {
     const m = String(calEntry.title || "").match(/\((\d+(?:\.\d+)?)\)/);
     const calories = m ? Number(m[1]) : null;
     calBreak = [fmtNum(calories)];
   }
+  calDisplayPoints = getCalorieDisplayPointsForDate(new Date());
 
   let workBreak = [];
   if (workEntry) {
@@ -7588,7 +7618,7 @@ ${hasPts
 
   mount.innerHTML = [
     cardHTML("sleep", "Sleep", sleepEntry, sleepBreak),
-    cardHTML("calories", "Calories", calEntry, calBreak),
+    cardHTML("calories", "Calories", calEntry, calBreak, calDisplayPoints),
     cardHTML("work", "Work", workEntry, workBreak),
     cardHTML("mood", "Mood", moodEntry, moodBreak),
   ].join("");
@@ -7778,8 +7808,11 @@ function getEntryForDate(key, dateObj){
   }
 
 function cellHTML(catKey, entry, dateKeyStr){
-  const hasPts = entry && Number.isFinite(Number(entry.points));
-  const pts = hasPts ? Number(entry.points).toFixed(1) : null;
+  const calculatedPoints = catKey === 'calories'
+    ? getCalorieDisplayPointsForDate(dateKeyStr)
+    : Number(entry?.points);
+  const hasPts = Number.isFinite(calculatedPoints);
+  const pts = hasPts ? Number(calculatedPoints).toFixed(1) : null;
 
   return `
     <div class="scoreV2-cell scoreV2-${catKey} scoreV2-cell-${catKey}"
