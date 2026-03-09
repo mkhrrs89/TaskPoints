@@ -256,7 +256,7 @@ function renderBottomToolbar() {
         ${buildMobileBottomNavLinks()}
       </div>
       <div class="mobile-bottom-nav-expanded">
-        <div class="max-w-6xl mx-auto flex justify-center py-2 pb-4 text-[11px] mobile-bottom-nav mobile-bottom-nav-secondary" aria-label="Expanded toolbar links">
+        <div class="max-w-6xl mx-auto flex justify-center pt-1 pb-4 text-[11px] mobile-bottom-nav mobile-bottom-nav-secondary" aria-label="Expanded toolbar links">
           <a href="projects.html" class="mobile-bottom-nav-btn flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
             <img src="assets/projects.png" class="tp-nav-icon" alt="" aria-hidden="true">
             <span class="uppercase tracking-wide text-[10px]">Projects</span>
@@ -269,7 +269,7 @@ function renderBottomToolbar() {
 
           <a href="achievements.html" class="mobile-bottom-nav-btn flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
             <img src="assets/trophies.png" class="tp-nav-icon" alt="" aria-hidden="true">
-            <span class="uppercase tracking-wide text-[10px]">Achievements</span>
+            <span class="uppercase tracking-wide text-[10px]">Trophies</span>
           </a>
 
           <div class="mobile-bottom-nav-slot-spacer" aria-hidden="true"></div>
