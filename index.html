@@ -17,11 +17,12 @@ Nothing visible on the page is built here. === -->
   </style>
   <script>
     (function () {
+      const root = document.documentElement;
+      root.classList.add('tp-boot-pending');
       try {
         if (sessionStorage.getItem('tpBootSeenThisSession') === '1') {
-          document.documentElement.classList.add('tp-boot-seen');
-        } else {
-          document.documentElement.classList.add('tp-boot-pending');
+          root.classList.remove('tp-boot-pending');
+          root.classList.add('tp-boot-seen');
         }
       } catch (e) {}
     })();
