@@ -1193,11 +1193,7 @@ header,
 }
 
 .mobile-bottom-nav-expanded{
-  display: flex;
-  justify-content: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-  padding: 0 0.75rem 1rem;
+  border-top: 1px solid rgba(15,23,42,0.7);
   opacity: 0;
   transform: translateY(10px);
   pointer-events: none;
@@ -1210,8 +1206,16 @@ header,
   pointer-events: auto;
 }
 
-.mobile-bottom-nav-expanded-btn{
-  min-width: 140px;
+.mobile-bottom-nav-secondary{
+  --tp-bottom-nav-pad-top: 0.5rem;
+}
+
+.mobile-bottom-nav-secondary > * + *{
+  border-left: 1px solid rgba(15,23,42,0.7);
+}
+
+.mobile-bottom-nav-slot-spacer{
+  min-height: 1px;
 }
 
 @keyframes mobile-bottom-nav-press{
@@ -1335,6 +1339,14 @@ header,
 /* Light mode tweak so dividers aren’t too harsh */
 @media (prefers-color-scheme: light){
   .mobile-bottom-nav > * + *{
+    border-color: rgba(148,163,184,0.7);
+  }
+
+  .mobile-bottom-nav-expanded{
+    border-top-color: rgba(148,163,184,0.7);
+  }
+
+  .mobile-bottom-nav-secondary > * + *{
     border-color: rgba(148,163,184,0.7);
   }
 
