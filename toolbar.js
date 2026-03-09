@@ -660,10 +660,27 @@ function initToolbarNow() {
   } catch (_) {}
 }
 
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initToolbarNow, { once: true });
-} else {
+function isMainPagePathname(pathname) {
+  return pathname === '/' || pathname.endsWith('/index.html');
+}
+
+function shouldDelayToolbarForBoot() {
+  return isMainPagePathname(window.location.pathname) &&
+    document.documentElement.classList.contains('tp-boot-pending');
+}
+
+function initToolbarWithBootGate() {
+  if (shouldDelayToolbarForBoot()) {
+    window.addEventListener('tp:bootFinished', initToolbarNow, { once: true });
+    return;
+  }
   initToolbarNow();
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initToolbarWithBootGate, { once: true });
+} else {
+  initToolbarWithBootGate();
 }
 
 // ---------- Modal viewport + iOS focus zoom fix ----------
