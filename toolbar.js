@@ -256,9 +256,25 @@ function renderBottomToolbar() {
         ${buildMobileBottomNavLinks()}
       </div>
       <div class="mobile-bottom-nav-expanded">
-        <a href="projects.html" class="btn btn-teal btn-toolbar mobile-bottom-nav-expanded-btn">Projects</a>
-        <a href="notes.html" class="btn btn-teal btn-toolbar mobile-bottom-nav-expanded-btn">Notes</a>
-        <a href="achievements.html" class="btn btn-teal btn-toolbar mobile-bottom-nav-expanded-btn">Achievements</a>
+        <div class="max-w-6xl mx-auto flex justify-center py-2 pb-4 text-[11px] mobile-bottom-nav mobile-bottom-nav-secondary" aria-label="Expanded toolbar links">
+          <a href="projects.html" class="mobile-bottom-nav-btn flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
+            <img src="assets/projects.png" class="tp-nav-icon" alt="" aria-hidden="true">
+            <span class="uppercase tracking-wide text-[10px]">Projects</span>
+          </a>
+
+          <a href="notes.html" class="mobile-bottom-nav-btn flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
+            <img src="assets/notes.png" class="tp-nav-icon" alt="" aria-hidden="true">
+            <span class="uppercase tracking-wide text-[10px]">Notes</span>
+          </a>
+
+          <a href="achievements.html" class="mobile-bottom-nav-btn flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
+            <img src="assets/trophies.png" class="tp-nav-icon" alt="" aria-hidden="true">
+            <span class="uppercase tracking-wide text-[10px]">Achievements</span>
+          </a>
+
+          <div class="mobile-bottom-nav-slot-spacer" aria-hidden="true"></div>
+          <div class="mobile-bottom-nav-slot-spacer" aria-hidden="true"></div>
+        </div>
       </div>
     </nav>
   `;
@@ -352,18 +368,21 @@ function setupMobileTasksMenu() {
 }
 
 function setupBottomNavPressAnimation(root = document) {
-  const nav = root.querySelector('.mobile-bottom-nav');
-  if (!nav) return;
-  if (nav.dataset.navPressReady) return;
-  nav.dataset.navPressReady = 'true';
+  const navRows = root.querySelectorAll('.mobile-bottom-nav');
+  if (!navRows.length) return;
 
-  nav.addEventListener('pointerdown', (event) => {
-    const target = event.target.closest('.mobile-bottom-nav-btn');
-    if (!target || !nav.contains(target)) return;
-    target.classList.remove('is-pressed');
-    void target.offsetWidth;
-    target.classList.add('is-pressed');
-    window.setTimeout(() => target.classList.remove('is-pressed'), 300);
+  navRows.forEach((nav) => {
+    if (nav.dataset.navPressReady) return;
+    nav.dataset.navPressReady = 'true';
+
+    nav.addEventListener('pointerdown', (event) => {
+      const target = event.target.closest('.mobile-bottom-nav-btn');
+      if (!target || !nav.contains(target)) return;
+      target.classList.remove('is-pressed');
+      void target.offsetWidth;
+      target.classList.add('is-pressed');
+      window.setTimeout(() => target.classList.remove('is-pressed'), 300);
+    });
   });
 }
 
