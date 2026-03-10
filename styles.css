@@ -58,6 +58,11 @@
   pointer-events: none;
 }
 
+html.tp-boot-pending #bottomToolbarMount:empty::before {
+  display: none !important;
+  content: none !important;
+}
+
 
 /* Base page setup - html/body defaults + how text looks. */
 html,
