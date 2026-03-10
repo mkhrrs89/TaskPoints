@@ -1586,47 +1586,21 @@ return { state: merged, storageKey };
   }
 
   function buildDailyBreakdowns(state){
-    const daily = {};
-    const comps = Array.isArray(state?.completions) ? state.completions : [];
-    const scoringSettings = state?.scoringSettings || state;
+    const normalized = normalizeState(state || {});
+    const comps = Array.isArray(normalized.completions) ? normalized.completions : [];
+    const keys = Array.from(new Set(comps
+      .map(c => (c && c.completedAtISO ? dateKey(c.completedAtISO) : null))
+      .filter(Boolean)));
 
-    comps.forEach(c => {
-      if (!c || !c.completedAtISO) return;
-      const d = new Date(c.completedAtISO);
-      if (!d || isNaN(d.getTime())) return;
-      d.setHours(0, 0, 0, 0);
-      const key = dateKey(d);
-
-      if (!daily[key]) {
-        daily[key] = {
-          total: 0,
-          categories: {}
-        };
-      }
-
-      const pts = pointsForCompletion(c, scoringSettings);
-      if (!pts) return;
-
-      const catKey = categorizeCompletion(c);
-      daily[key].total = addPoints(daily[key].total, pts);
-      daily[key].categories[catKey] = addPoints(daily[key].categories[catKey], pts);
-    });
-
-    const dailyTotals = Object.fromEntries(Object.entries(daily).map(([k, v]) => [k, Number(v.total) || 0]));
-const totalsWithInertia = computeDailyTotalsWithInertia(dailyTotals, scoringSettings);
-
-Object.keys(dailyTotals).forEach(k => {
-  const base = Number(dailyTotals[k]) || 0;
-  const withInertia = Number(totalsWithInertia[k]) || base;
-  const inertia = withInertia - base;
-  if (!inertia) return;
-
-  daily[k].total = addPoints(daily[k].total, inertia);
-  daily[k].categories.inertia = addPoints(daily[k].categories.inertia, inertia);
-});
-
-
-    return daily;
+    return keys.reduce((acc, key) => {
+      const snapshot = buildDaySnapshot(key, normalized);
+      const totals = computeDayTotals(snapshot);
+      acc[key] = {
+        total: totals.total,
+        categories: { ...totals.byCategory }
+      };
+      return acc;
+    }, {});
   }
 
   function buildRollups(state){
