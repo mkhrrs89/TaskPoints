@@ -8,6 +8,51 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%230a2f2f'/><text x='50' y='60' font-size='48' text-anchor='middle' fill='white'>TP</text></svg>"><link rel="stylesheet" href="assets/tailwind.css">
 
 <link rel="stylesheet" href="styles.css">
+  <style>
+    #auditProgressWrap {
+      border: 1px solid rgba(63, 63, 70, 0.65);
+      background: rgba(15, 23, 42, 0.35);
+      border-radius: 0.75rem;
+      padding: 0.55rem 0.7rem;
+      display: grid;
+      gap: 0.35rem;
+    }
+    #auditProgressLabel {
+      font-size: 0.8rem;
+      color: rgba(228, 228, 231, 0.95);
+      font-weight: 600;
+    }
+    #auditProgressMeta {
+      font-size: 0.72rem;
+      color: rgba(161, 161, 170, 0.9);
+    }
+    #auditProgressTrack {
+      height: 0.38rem;
+      border-radius: 9999px;
+      background: rgba(39, 39, 42, 0.85);
+      border: 1px solid rgba(82, 82, 91, 0.55);
+      overflow: hidden;
+    }
+    #auditProgressFill {
+      width: 0%;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, rgba(45, 212, 191, 0.55), rgba(45, 212, 191, 0.95));
+      transition: width 260ms ease, background-color 220ms ease;
+    }
+    #auditProgressWrap[data-state="running"] #auditProgressFill {
+      background-size: 220% 100%;
+      animation: auditProgressPulse 1.2s linear infinite;
+    }
+    #auditProgressWrap[data-state="error"] #auditProgressFill {
+      background: linear-gradient(90deg, rgba(251, 113, 133, 0.65), rgba(244, 63, 94, 0.95));
+      animation: none;
+    }
+    @keyframes auditProgressPulse {
+      0% { background-position: 0% 0; }
+      100% { background-position: 220% 0; }
+    }
+  </style>
   <link rel="preload" href="toolbar.js" as="script">
   <script src="toolbar.js" defer></script>
   <script src="scoring_core.js"></script>
@@ -85,6 +130,15 @@
           <button id="copyReportBtn" type="button" class="btn btn-ghost" data-require-click="true">Copy Report</button>
           <button id="exportJsonBtn" type="button" class="btn btn-ghost">Export JSON</button>
         </div>
+        <div id="auditProgressWrap" data-state="idle" aria-live="polite">
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <div id="auditProgressLabel">Ready to run audit</div>
+            <div id="auditProgressMeta">Current results may be stale.</div>
+          </div>
+          <div id="auditProgressTrack" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Audit progress">
+            <div id="auditProgressFill"></div>
+          </div>
+        </div>
       </div>
 
       <div class="glass space-y-3">
@@ -134,7 +188,56 @@
       if (tone === 'pass') badge.classList.add('bg-emerald-700/80');
       else if (tone === 'fail') badge.classList.add('bg-rose-700/80');
       else if (tone === 'warn') badge.classList.add('bg-amber-600/80');
+      else if (tone === 'running') badge.classList.add('bg-teal-700/80');
       else badge.classList.add('bg-zinc-700/70');
+    }
+
+    let auditProgressTimers = [];
+    function clearAuditProgressTimers() {
+      auditProgressTimers.forEach(timer => clearTimeout(timer));
+      auditProgressTimers = [];
+    }
+
+    function setAuditProgressState(state, options = {}) {
+      const wrap = $('auditProgressWrap');
+      const labelEl = $('auditProgressLabel');
+      const metaEl = $('auditProgressMeta');
+      const track = $('auditProgressTrack');
+      const fill = $('auditProgressFill');
+      if (!wrap || !labelEl || !metaEl || !track || !fill) return;
+
+      clearAuditProgressTimers();
+      wrap.dataset.state = state;
+
+      const defaults = {
+        idle: { label: 'Ready to run audit', meta: 'Current results may be stale.', width: 0 },
+        running: { label: 'Running audit…', meta: 'Crunching TaskPoints checks.', width: 18 },
+        complete: { label: 'Audit complete', meta: 'Current results are complete.', width: 100 },
+        error: { label: 'Audit error', meta: 'Audit could not finish. Check console for details.', width: 100 }
+      };
+      const next = { ...(defaults[state] || defaults.idle), ...options };
+
+      labelEl.textContent = next.label;
+      metaEl.textContent = next.meta;
+      fill.style.width = `${Math.max(0, Math.min(100, Number(next.width) || 0))}%`;
+      track.setAttribute('aria-valuenow', String(Math.max(0, Math.min(100, Number(next.width) || 0))));
+
+      if (state === 'running') {
+        const staged = [52, 84];
+        staged.forEach((pct, index) => {
+          const timer = setTimeout(() => {
+            if (($('auditProgressWrap')?.dataset.state) !== 'running') return;
+            fill.style.width = `${pct}%`;
+            track.setAttribute('aria-valuenow', String(pct));
+          }, 250 + index * 260);
+          auditProgressTimers.push(timer);
+        });
+      }
+    }
+
+    function setAuditControlsDisabled(disabled) {
+      const runBtn = $('runAuditBtn');
+      if (runBtn) runBtn.disabled = !!disabled;
     }
 
     function summarizeChecks(checks) {
@@ -479,7 +582,7 @@
       };
     }
 
-    function runAudit() {
+    function executeAudit() {
       const dateInput = $('auditDate');
       const selected = dateInput?.value || defaultAuditDate();
       const dateKey = TaskPointsCore.dateKey(selected);
@@ -1429,6 +1532,43 @@
         rollups,
       };
       storeLastReport(reportPayload);
+      return reportPayload;
+    }
+
+    function runAudit() {
+      if (window.__taskpointsAuditRunning) return;
+      window.__taskpointsAuditRunning = true;
+
+      setAuditControlsDisabled(true);
+      setStatus('RUNNING', 'running');
+      setAuditProgressState('running');
+
+      const summaryMeta = $('auditSummaryMeta');
+      if (summaryMeta) {
+        summaryMeta.textContent = 'Running audit…';
+      }
+
+      requestAnimationFrame(() => {
+        setTimeout(() => {
+          try {
+            executeAudit();
+            setAuditProgressState('complete');
+          } catch (error) {
+            console.error('Audit failed', error);
+            setStatus('ERROR', 'fail');
+            setAuditProgressState('error', {
+              meta: 'Audit failed. Current results are incomplete.'
+            });
+            if (summaryMeta) {
+              const message = error && error.message ? error.message : String(error);
+              summaryMeta.textContent = `Audit failed: ${message}`;
+            }
+          } finally {
+            setAuditControlsDisabled(false);
+            window.__taskpointsAuditRunning = false;
+          }
+        }, 0);
+      });
     }
 
     function storeLastReport(data) {
@@ -1536,6 +1676,7 @@
       if (dateInput) {
         dateInput.value = defaultAuditDate();
       }
+      setAuditProgressState('idle');
       bindPress('runAuditBtn', runAudit);
       bindPress('syncMatchupsBtn', syncMatchups);
       bindPress('copyReportBtn', copyReport);
