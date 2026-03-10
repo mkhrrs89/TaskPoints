@@ -18,13 +18,15 @@ Nothing visible on the page is built here. === -->
   <script>
     (function () {
       const root = document.documentElement;
-      root.classList.add('tp-boot-pending');
       try {
         if (sessionStorage.getItem('tpBootSeenThisSession') === '1') {
-          root.classList.remove('tp-boot-pending');
           root.classList.add('tp-boot-seen');
+        } else {
+          root.classList.add('tp-boot-pending');
         }
-      } catch (e) {}
+      } catch (e) {
+        root.classList.add('tp-boot-pending');
+      }
     })();
   </script>
   <title>TaskPoints — To-Do + Points Tracker</title>
@@ -48,8 +50,13 @@ Nothing visible on the page is built here. === -->
 
     html.tp-boot-pending body > *:not(#bootSplash) {
       visibility:hidden !important;
+      opacity:0 !important;
+      pointer-events:none !important;
     }
 
+    html.tp-boot-pending #app,
+    html.tp-boot-pending #root,
+    html.tp-boot-pending #appRoot,
     html.tp-boot-pending #bottomToolbarMount,
     html.tp-boot-pending #mobileBottomNav,
     html.tp-boot-pending #goToTasksFab,
@@ -101,6 +108,8 @@ Nothing visible on the page is built here. === -->
     /* Default: app stays hidden until boot finishes */
     #app, #root, #appRoot {
       opacity:0;
+      visibility:hidden;
+      pointer-events:none;
       transition:opacity 220ms ease;
     }
 
@@ -109,6 +118,7 @@ Nothing visible on the page is built here. === -->
     html.tp-boot-seen #root,
     html.tp-boot-seen #appRoot {
       opacity:1 !important;
+      visibility:visible !important;
       pointer-events:auto !important;
     }
 
@@ -1070,7 +1080,10 @@ function hideBootSplash(){
 
 function showApp(){
   const app = document.getElementById("app") || document.getElementById("root") || document.getElementById("appRoot");
-  if (app) app.style.opacity = "1";
+  if (!app) return;
+  app.style.visibility = "visible";
+  app.style.pointerEvents = "auto";
+  app.style.opacity = "1";
 }
 
 let state = (() => {
@@ -8223,6 +8236,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const app = document.getElementById('app') || document.getElementById('root') || document.getElementById('appRoot');
     if (app) {
+      app.style.visibility = 'visible';
       app.style.opacity = '1';
       app.style.pointerEvents = 'auto';
     }
@@ -8883,9 +8897,11 @@ function tpPerfMark(label) {
     const app = document.getElementById("appRoot");
 
     document.documentElement.classList.remove("tp-boot-pending");
+    document.documentElement.classList.add("tp-boot-seen");
     document.body.classList.remove("booting");
 
     if (app) {
+      app.style.visibility = "visible";
       app.style.opacity = "1";
       app.style.pointerEvents = "auto";
     }

@@ -660,6 +660,14 @@ function initToolbarNow() {
   } catch (_) {}
 }
 
+let toolbarInitialized = false;
+
+function initToolbarNowOnce() {
+  if (toolbarInitialized) return;
+  toolbarInitialized = true;
+  initToolbarNow();
+}
+
 function isMainPagePathname(pathname) {
   return pathname === '/' || pathname.endsWith('/index.html');
 }
@@ -671,10 +679,10 @@ function shouldDelayToolbarForBoot() {
 
 function initToolbarWithBootGate() {
   if (shouldDelayToolbarForBoot()) {
-    window.addEventListener('tp:bootFinished', initToolbarNow, { once: true });
+    window.addEventListener('tp:bootFinished', initToolbarNowOnce, { once: true });
     return;
   }
-  initToolbarNow();
+  initToolbarNowOnce();
 }
 
 if (document.readyState === 'loading') {
