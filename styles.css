@@ -21,6 +21,7 @@
   --tp-teal-dark-92: rgba(10, 47, 47, 0.92);
   --tp-teal-grad: linear-gradient(180deg, var(--tp-teal), var(--tp-teal-dark));
   --tp-z-floating: 9999;
+  --tp-z-toolbar-popup-layer: 10001;
   --tp-safe-bottom: env(safe-area-inset-bottom, 0px);
   --tp-toolbar-height: 68px;
   --tp-menu-gap: 8px;
@@ -1127,7 +1128,7 @@ header,
   padding-bottom: var(--tp-safe-bottom);
   box-sizing: border-box;
   isolation: isolate;
-  z-index: var(--tp-z-floating);
+  z-index: var(--tp-z-toolbar-popup-layer);
   transition: transform 160ms ease, height 220ms ease;
   will-change: transform, height;
   touch-action: none !important;
@@ -1348,7 +1349,7 @@ header,
   gap: 6px;
   width: 180px;
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
-  z-index: 50;
+  z-index: var(--tp-z-toolbar-popup-layer);
 }
 
 .mobile-task-menu.hidden{
@@ -1361,7 +1362,7 @@ header,
   left: 50%;
   transform: translateX(-50%);
   background: var(--tp-teal-grad);
-  z-index: 50;
+  z-index: var(--tp-z-toolbar-popup-layer);
 }
 
 /* Light mode tweak so dividers aren’t too harsh */
