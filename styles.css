@@ -1727,9 +1727,9 @@ header,
 
 /* Generic completed bubbles ONLY (untagged). Tag-colored bubbles have inline style and will win. */
 .habitDay.on:not([style]){
-  background: linear-gradient(135deg, #d4d4d8 0%, #71717a 100%);
-  border-color: #52525b;
-  color: #0b1014;
+  background: var(--tp-btn-teal-grad);
+  border-color: #1A383B;
+  color: #fff;
   box-shadow: 0 0 0 1px rgba(255,255,255,0.06) inset;
 }
 
