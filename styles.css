@@ -1742,9 +1742,6 @@ header,
   color: rgba(255,255,255,0.18);
 }
 
-.habitDay.viceDay.failed.past-failed{
-  color: rgba(255,255,255,0.18);
-}
 
 .player-name-link {
   color: #fb923c;
@@ -1809,7 +1806,9 @@ header,
   box-shadow: 0 0 0 1px rgba(255,255,255,0.06) inset;
 }
 
-
+.habitDay.viceDay.failed.past-failed{
+  color: rgba(255,255,255,0.18) !important;
+}
 
 
 /* DESKTOP WEEKDAY LABEL CELLS (align with habit/vices bubbles) */
