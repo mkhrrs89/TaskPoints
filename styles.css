@@ -20,6 +20,7 @@
   --tp-teal-92: rgba(15, 77, 77, 0.92);
   --tp-teal-dark-92: rgba(10, 47, 47, 0.92);
   --tp-teal-grad: linear-gradient(180deg, var(--tp-teal), var(--tp-teal-dark));
+  --tp-toolbar-teal-grad: linear-gradient(180deg, var(--tp-teal-92), var(--tp-teal-dark-92));
   --tp-z-floating: 9999;
   --tp-z-toolbar-popup-layer: 10001;
   --tp-safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -52,7 +53,7 @@
   right: 0;
   bottom: 0;
   height: calc(var(--tp-toolbar-height) + var(--tp-safe-bottom));
-  background: linear-gradient(180deg, var(--tp-teal-92), var(--tp-teal-dark-92));
+  background: var(--tp-toolbar-teal-grad);
   border-top: 1px solid rgba(255, 255, 255, 0.06);
   z-index: 9999;
   backdrop-filter: blur(10px);
@@ -224,7 +225,7 @@ body {
 
 /* “Named color” button variants (teal + plum) */
 .btn-teal {
-  background: var(--tp-teal-grad);
+  background: var(--tp-toolbar-teal-grad);
   color: #fff;
   border: none;
 }
