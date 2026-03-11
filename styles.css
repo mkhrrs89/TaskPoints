@@ -1713,8 +1713,8 @@ header,
 
 /* DESKTOP DAY BUBBLES */
 .habitDay{
-  width:48px;        /* ← add width */
-  height:40px;       /* ← taller click target */
+  width:48px;
+  height:40px;
   position: relative;
   overflow: hidden;
   border-radius:10px;
@@ -1722,6 +1722,7 @@ header,
   display:grid;
   place-items:center;
   font-size:14px;
+  font-weight: 400;
   cursor:pointer;
 }
 
@@ -1731,6 +1732,14 @@ header,
   border-color: #1A383B;
   color: #fff;
   box-shadow: 0 0 0 1px rgba(255,255,255,0.06) inset;
+}
+
+.habitDay.on{
+  font-weight: 800;
+}
+
+.habitDay.past-incomplete{
+  color: rgba(255,255,255,0.18);
 }
 
 .player-name-link {
