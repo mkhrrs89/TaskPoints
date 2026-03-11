@@ -4335,12 +4335,11 @@ function renderHabitRow(h, days, wrap, options = {}) {
 
 const daysHtml = days.map(d => {
   const on = h.doneKeys.includes(d.key);
-  const failed = h.failedKeys.includes(d.key);
-  const statusClass = on ? 'on' : (failed ? 'failed' : 'off');
-  const isPastIncomplete = !on && !failed && d.key < dateKey(new Date());
-  const isPastFailed = failed && d.key < dateKey(new Date());
-  const styleAttr = getHabitBubbleStyleAttr(h.tag, statusClass);
-  return `<div class="habitDay viceDay ${statusClass}${isPastIncomplete ? ' past-incomplete' : ''}${isPastFailed ? ' past-failed' : ''}"${styleAttr} data-habit="${h.id}" data-day="${d.key}">
+  const isIcy = on && Array.isArray(h.iceKeys) && h.iceKeys.includes(d.key);
+  const status = on ? 'on' : 'off';
+  const isPastIncomplete = !on && d.key < dateKey(new Date());
+  const styleAttr = getHabitBubbleStyleAttr(h.tag, status);
+  return `<div class="habitDay ${status}${isIcy ? ' icy' : ''}${isPastIncomplete ? ' past-incomplete' : ''}"${styleAttr} data-habit="${h.id}" data-day="${d.key}">
     ${d.date.getDate()}
   </div>`;
 }).join('');
@@ -4597,9 +4596,9 @@ const daysHtml = days.map(d => {
   const failed = h.failedKeys.includes(d.key);
   const statusClass = on ? 'on' : (failed ? 'failed' : 'off');
   const isPastIncomplete = !on && !failed && d.key < dateKey(new Date());
+  const isPastFailed = failed && d.key < dateKey(new Date());
   const styleAttr = getHabitBubbleStyleAttr(h.tag, statusClass);
-  return `<div class="habitDay viceDay ${statusClass}${isPastIncomplete ? ' past-incomplete' : ''}"${styleAttr} data-habit="${h.id}" data-day="${d.key}">
-
+  return `<div class="habitDay viceDay ${statusClass}${isPastIncomplete ? ' past-incomplete' : ''}${isPastFailed ? ' past-failed' : ''}"${styleAttr} data-habit="${h.id}" data-day="${d.key}">
     ${d.date.getDate()}
   </div>`;
 }).join('');
