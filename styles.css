@@ -1825,13 +1825,20 @@ header,
 .habitRow .flex.items-center.gap-2.flex-wrap.text-xs button[data-act="habit-edit"],
 .habitRow .flex.items-center.gap-2.flex-wrap.text-xs button[data-act="habit-delete"]{
   color:#fb923c;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
 }
 
 .habitRow .tag.streak-pill{
-  background: linear-gradient(135deg, #0fa39a, #0b8cc9);
-  color: #2f3437;
+  background: transparent !important;
+  color: #22d3ee;
   border: none !important;
-  box-shadow: none;
+  box-shadow: none !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
 }
 
     .habitName{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
