@@ -1742,6 +1742,10 @@ header,
   color: rgba(255,255,255,0.18);
 }
 
+.habitDay.viceDay.failed.past-failed{
+  color: rgba(255,255,255,0.18);
+}
+
 .player-name-link {
   color: #fb923c;
   background: none;
