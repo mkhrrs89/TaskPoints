@@ -208,7 +208,7 @@ body {
 }
 
 .btn-primary {
-  background: var(--tp-teal-grad);
+  background: var(--tp-btn-teal-grad);
   color: #fff;
   border: none;
 }
@@ -220,7 +220,7 @@ body {
 }
 
 .btn-success {
-  background: var(--tp-teal-grad);
+  background: var(--tp-btn-teal-grad);
   color: #fff;
   border: none;
 }
