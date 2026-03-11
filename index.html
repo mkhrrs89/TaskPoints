@@ -4333,15 +4333,16 @@ function renderHabitRow(h, days, wrap, options = {}) {
     row.classList.add('habitRow--single');
   }
 
-  const daysHtml = days.map(d => {
-    const on = h.doneKeys.includes(d.key);
-    const isIcy = on && Array.isArray(h.iceKeys) && h.iceKeys.includes(d.key);
-    const status = on ? 'on' : 'off';
-    const styleAttr = getHabitBubbleStyleAttr(h.tag, status);
-    return `<div class="habitDay ${status}${isIcy ? ' icy' : ''}"${styleAttr} data-habit="${h.id}" data-day="${d.key}">
-      ${d.date.getDate()}
-    </div>`;
-  }).join('');
+const daysHtml = days.map(d => {
+  const on = h.doneKeys.includes(d.key);
+  const isIcy = on && Array.isArray(h.iceKeys) && h.iceKeys.includes(d.key);
+  const status = on ? 'on' : 'off';
+  const isPastIncomplete = !on && d.key < dateKey(new Date());
+  const styleAttr = getHabitBubbleStyleAttr(h.tag, status);
+  return `<div class="habitDay ${status}${isIcy ? ' icy' : ''}${isPastIncomplete ? ' past-incomplete' : ''}"${styleAttr} data-habit="${h.id}" data-day="${d.key}">
+    ${d.date.getDate()}
+  </div>`;
+}).join('');
 
   const daysRowHtml = `<div class="habitDaysRow">${daysHtml}</div>`;
 
@@ -4590,16 +4591,17 @@ function renderVices(){
     row.className = 'habitRow';
     row.classList.add('habitRow--single');
 
-    const daysHtml = days.map(d => {
-      const on = h.doneKeys.includes(d.key);
-      const failed = h.failedKeys.includes(d.key);
-      const statusClass = on ? 'on' : (failed ? 'failed' : 'off');
-      const styleAttr = getHabitBubbleStyleAttr(h.tag, statusClass);
-      return `<div class="habitDay viceDay ${statusClass}"${styleAttr} data-habit="${h.id}" data-day="${d.key}">
+const daysHtml = days.map(d => {
+  const on = h.doneKeys.includes(d.key);
+  const failed = h.failedKeys.includes(d.key);
+  const statusClass = on ? 'on' : (failed ? 'failed' : 'off');
+  const isPastIncomplete = !on && !failed && d.key < dateKey(new Date());
+  const styleAttr = getHabitBubbleStyleAttr(h.tag, statusClass);
+  return `<div class="habitDay viceDay ${statusClass}${isPastIncomplete ? ' past-incomplete' : ''}"${styleAttr} data-habit="${h.id}" data-day="${d.key}">
 
-        ${d.date.getDate()}
-      </div>`;
-    }).join('');
+    ${d.date.getDate()}
+  </div>`;
+}).join('');
 
     const daysRowHtml = `<div class="habitDaysRow">${daysHtml}</div>`;
 
