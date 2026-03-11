@@ -22,6 +22,15 @@
   --tp-teal-grad: linear-gradient(180deg, var(--tp-teal), var(--tp-teal-dark));
   --tp-toolbar-grad: linear-gradient(180deg, var(--tp-teal-92), var(--tp-teal-dark-92));
   --tp-toolbar-teal-grad: var(--tp-toolbar-grad);
+  --tp-btn-teal-top: var(--tp-teal-92);
+  --tp-btn-teal-mid: rgba(15, 77, 77, 0.9);
+  --tp-btn-teal-bottom: rgba(13, 66, 66, 0.9);
+  --tp-btn-teal-grad: linear-gradient(
+    180deg,
+    var(--tp-btn-teal-top) 0%,
+    var(--tp-btn-teal-mid) 62%,
+    var(--tp-btn-teal-bottom) 100%
+  );
   --tp-z-floating: 9999;
   --tp-z-toolbar-popup-layer: 10001;
   --tp-safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -226,7 +235,7 @@ body {
 
 /* “Named color” button variants (teal + plum) */
 .btn-teal {
-  background: var(--tp-toolbar-grad);
+  background: var(--tp-btn-teal-grad);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   color: #fff;
