@@ -906,9 +906,9 @@ body {
 }
 
 .habitsSortSelectCompact {
-  flex: 0 0 140px;
+  flex: 0 0 115px;
   min-width: 0;
-  width: auto;
+  width: 115px;
   height: 34px;
   padding: 6px 10px;
   font-size: 14px;
