@@ -925,6 +925,10 @@ body {
   letter-spacing: 0.02em;
 }
 
+#weekBackBtnVices{
+  margin-left: auto;
+}
+
 .habitsSortSelectCompact {
   flex: 1 1 auto;
   min-width: 0;
