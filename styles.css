@@ -1603,7 +1603,7 @@ header,
       text-align:center;
     }
     .taskPointsNumber{
-      font-size:1.4rem;
+      font-size:1.8rem;
       font-weight:800;
       line-height:1;
     }
@@ -2068,7 +2068,7 @@ header,
   }
   #taskList .taskPointsNumber,
   #archiveList .taskPointsNumber{
-    font-size:1.2rem;
+    font-size:1.5rem;
   }
   #taskList .taskPointsLabel,
   #archiveList .taskPointsLabel{
