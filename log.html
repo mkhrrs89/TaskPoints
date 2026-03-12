@@ -527,10 +527,10 @@ function buildLogEntries(completions) {
 }
 
 function syncDerivedPointsIfNeeded() {
-  if (!window.TaskPointsCore?.syncDerivedPoints) return;
+  if (!window.TaskPointsCore?.syncDerivedPoints) return false;
   const derivedSync = TaskPointsCore.syncDerivedPoints(state);
   state = derivedSync.state;
-  if (!derivedSync.changed) return;
+  if (!derivedSync.changed) return false;
   if (window.TaskPointsCore?.saveAppState) {
     state = TaskPointsCore.saveAppState(state).state;
   } else if (window.TaskPointsCore?.mergeAndSaveState) {
@@ -538,6 +538,7 @@ function syncDerivedPointsIfNeeded() {
   } else {
     state = saveMerged(state);
   }
+  return true;
 }
 
 
@@ -566,12 +567,9 @@ function migrateSleepEntriesForBonus() {
     }
   });
 
-  if (changed) {
-    save();
-  }
+  if (changed) save();
+  return changed;
 }
-
-migrateSleepEntriesForBonus();
 
 function migrateWorkEntriesForHours() {
   if (!state || !Array.isArray(state.completions)) return;
@@ -611,11 +609,8 @@ function migrateWorkEntriesForHours() {
   });
 
   if (changed) save();
+  return changed;
 }
-
-migrateWorkEntriesForHours();
-
-syncDerivedPointsIfNeeded();
 
 function save() {
   state = normalizeState(state);
@@ -635,6 +630,41 @@ function clampPage(page, totalPages) {
   return Math.min(Math.max(page, 0), Math.max(totalPages - 1, 0));
 }
 
+function preparePagedLogData(completions) {
+  const entries = buildLogEntries(completions || []);
+  if (!entries.length) {
+    return {
+      hasEntries: false,
+      visibleRows: [],
+      dayKeys: [],
+      pageStart: 0,
+      pageEnd: 0,
+      totalPages: 1
+    };
+  }
+
+  const sortedEntries = entries
+    .slice()
+    .sort((a,b)=> new Date(b.completedAtISO)-new Date(a.completedAtISO));
+
+  const dayKeys = [];
+  const withDates = sortedEntries.map(entry => {
+    const dateObj = new Date(entry.completedAtISO);
+    const key = dateKey(dateObj);
+    if (key && dayKeys[dayKeys.length - 1] !== key) dayKeys.push(key);
+    return { entry, dateObj, dayKey: key };
+  });
+
+  const totalPages = Math.max(1, Math.ceil(Math.max(dayKeys.length, 1) / DAYS_PER_PAGE));
+  currentLogPage = clampPage(currentLogPage, totalPages);
+  const pageStart = currentLogPage * DAYS_PER_PAGE;
+  const pageEnd = pageStart + DAYS_PER_PAGE;
+  const pageKeys = new Set(dayKeys.slice(pageStart, pageEnd));
+  const visibleRows = withDates.filter(item => !item.dayKey || pageKeys.has(item.dayKey));
+
+  return { hasEntries: true, visibleRows, dayKeys, pageStart, pageEnd, totalPages };
+}
+
 function render(){
   const perfLabel = window.TP_DEBUG_PERF ? 'renderLog' : null;
   if (perfLabel) console.time(perfLabel);
@@ -643,41 +673,19 @@ function render(){
     list.innerHTML='';
     if (pagination) pagination.innerHTML = '';
 
-  const comps = buildLogEntries(state.completions || []);
+    const renderData = preparePagedLogData(state.completions);
+    const { hasEntries, visibleRows, dayKeys, pageStart, pageEnd, totalPages } = renderData;
 
-    if(!comps.length){
+    if(!hasEntries){
       empty.style.display='block';
       if (pagination) pagination.style.display = 'none';
       return;
     }
     empty.style.display='none';
+    let lastDayKey = null;
+    const listFrag = document.createDocumentFragment();
 
-    const sortedComps = comps
-      .slice()
-      .sort((a,b)=> new Date(b.completedAtISO)-new Date(a.completedAtISO));
-
-    const dayKeys = [];
-    sortedComps.forEach(c => {
-      const key = safeCompletionDateKey(c);
-      if (!key) return;
-      if (dayKeys[dayKeys.length - 1] !== key) dayKeys.push(key);
-    });
-
-    const totalPages = Math.max(1, Math.ceil(Math.max(dayKeys.length, 1) / DAYS_PER_PAGE));
-    currentLogPage = clampPage(currentLogPage, totalPages);
-    const pageStart = currentLogPage * DAYS_PER_PAGE;
-    const pageEnd = pageStart + DAYS_PER_PAGE;
-    const pageKeys = new Set(dayKeys.slice(pageStart, pageEnd));
-    const pagedComps = sortedComps.filter(c => {
-      const key = safeCompletionDateKey(c);
-      return !key || pageKeys.has(key);
-    });
-
-  let lastDayKey = null;
-
-    pagedComps.forEach(c=>{
-      const completionDate = new Date(c.completedAtISO);
-      const completionKey = dateKey(completionDate);
+    visibleRows.forEach(({ entry: c, dateObj: completionDate, dayKey: completionKey })=>{
       if (completionKey && completionKey !== lastDayKey) {
         const divider = document.createElement('div');
         divider.className = 'day-divider';
@@ -687,7 +695,7 @@ function render(){
           month: 'short',
           day: 'numeric'
         })}</span>`;
-        list.appendChild(divider);
+        listFrag.appendChild(divider);
         lastDayKey = completionKey;
       }
 
@@ -741,15 +749,17 @@ row.innerHTML = `
 
 
 
-list.appendChild(row);
+listFrag.appendChild(row);
 
 // Divider line between entries (very tight)
 const divider = document.createElement('div');
 divider.className = 'h-px bg-zinc-800 my-px opacity-40';
-list.appendChild(divider);
+listFrag.appendChild(divider);
 
 
     });
+
+    list.appendChild(listFrag);
 
   if (pagination) {
     if (totalPages <= 1) {
@@ -1006,6 +1016,17 @@ function editSleepScore(id){
 
 
 scheduleRender(render);
+
+requestAnimationFrame(() => {
+  setTimeout(() => {
+    const didMigrateSleep = !!migrateSleepEntriesForBonus();
+    const didMigrateWork = !!migrateWorkEntriesForHours();
+    const didSyncDerived = !!syncDerivedPointsIfNeeded();
+    if (didMigrateSleep || didMigrateWork || didSyncDerived) {
+      scheduleRender(render);
+    }
+  }, 0);
+});
 
 </script>
 
