@@ -350,6 +350,7 @@ function workPoints(score, hours = 0) {
 
 
 function load(){ 
+  console.time('log:load');
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
 
@@ -415,6 +416,8 @@ function load(){
         ? TaskPointsCore.normalizeScoringSettings({})
         : {}
     };
+  } finally {
+    console.timeEnd('log:load');
   }
 }
 
@@ -524,8 +527,11 @@ function buildInertiaLogEntries(completions) {
 }
 
 function buildLogEntries(completions) {
+  console.time('log:buildLogEntries');
   const base = Array.isArray(completions) ? completions.slice() : [];
-  return base.concat(buildInertiaLogEntries(base));
+  const result = base.concat(buildInertiaLogEntries(base));
+  console.timeEnd('log:buildLogEntries');
+  return result;
 }
 
 function syncDerivedPointsIfNeeded() {
@@ -627,24 +633,19 @@ function formatDayLabel(key) {
     : key;
 }
 
-function clampPage(page, totalPages) {
-  if (!Number.isFinite(page)) return 0;
-  return Math.min(Math.max(page, 0), Math.max(totalPages - 1, 0));
-}
+function render(){
+  const list=$('logList'), empty=$('empty'), pagination=$('logPagination');
+  list.innerHTML='';
+  if (pagination) pagination.innerHTML = '';
 
-function preparePagedLogData(completions) {
-  const entries = buildLogEntries(completions || []);
-  if (!entries.length) {
-    return {
-      hasEntries: false,
-      visibleRows: [],
-      dayKeys: [],
-      pageStart: 0,
-      pageEnd: 0,
-      totalPages: 1
-    };
+  const entries = buildLogEntries(state.completions || []);
+  if(!entries.length){
+    empty.style.display='block';
+    if (pagination) pagination.style.display = 'none';
+    return;
   }
 
+  console.time('log:sortGroup');
   const sortedEntries = entries
     .slice()
     .sort((a,b)=> new Date(b.completedAtISO)-new Date(a.completedAtISO));
@@ -656,33 +657,17 @@ function preparePagedLogData(completions) {
     if (key && dayKeys[dayKeys.length - 1] !== key) dayKeys.push(key);
     return { entry, dateObj, dayKey: key };
   });
-
   const totalPages = Math.max(1, Math.ceil(Math.max(dayKeys.length, 1) / DAYS_PER_PAGE));
-  currentLogPage = clampPage(currentLogPage, totalPages);
+  if (!Number.isFinite(currentLogPage)) currentLogPage = 0;
+  currentLogPage = Math.min(Math.max(currentLogPage, 0), Math.max(totalPages - 1, 0));
   const pageStart = currentLogPage * DAYS_PER_PAGE;
   const pageEnd = pageStart + DAYS_PER_PAGE;
   const pageKeys = new Set(dayKeys.slice(pageStart, pageEnd));
   const visibleRows = withDates.filter(item => !item.dayKey || pageKeys.has(item.dayKey));
+  console.timeEnd('log:sortGroup');
 
-  return { hasEntries: true, visibleRows, dayKeys, pageStart, pageEnd, totalPages };
-}
-
-function render(){
-  const perfLabel = window.TP_DEBUG_PERF ? 'renderLog' : null;
-  if (perfLabel) console.time(perfLabel);
+  console.time('log:domRender');
   try {
-    const list=$('logList'), empty=$('empty'), pagination=$('logPagination');
-    list.innerHTML='';
-    if (pagination) pagination.innerHTML = '';
-
-    const renderData = preparePagedLogData(state.completions);
-    const { hasEntries, visibleRows, dayKeys, pageStart, pageEnd, totalPages } = renderData;
-
-    if(!hasEntries){
-      empty.style.display='block';
-      if (pagination) pagination.style.display = 'none';
-      return;
-    }
     empty.style.display='none';
     let lastDayKey = null;
     const listFrag = document.createDocumentFragment();
@@ -783,10 +768,10 @@ listFrag.appendChild(divider);
         btn.onclick = () => {
           const action = btn.getAttribute('data-page');
           const next = action === 'prev' ? currentLogPage - 1 : currentLogPage + 1;
-          const clamped = clampPage(next, totalPages);
+          const clamped = Math.min(Math.max(next, 0), Math.max(totalPages - 1, 0));
           if (clamped === currentLogPage) return;
           currentLogPage = clamped;
-          scheduleRender(render);
+          render();
           window.scrollTo({ top: 0, behavior: 'smooth' });
         };
       });
@@ -808,7 +793,7 @@ listFrag.appendChild(divider);
     btn.onclick = () => editCompletionDate(btn.getAttribute('data-edit-date-id'));
       });
   } finally {
-    if (perfLabel) console.timeEnd(perfLabel);
+    console.timeEnd('log:domRender');
   }
 }
 
@@ -914,7 +899,7 @@ function deleteCompletion(token){
     }
 
     save();
-    scheduleRender(render);
+    render();
     return;
   }
 
@@ -936,7 +921,7 @@ function deleteCompletion(token){
 
   state.completions.splice(idx, 1);
   save();
-  scheduleRender(render);
+  render();
 }
 
 
@@ -979,7 +964,7 @@ function editCompletionDate(id){
   }
 
   save();
-  scheduleRender(render);
+  render();
 }
 
 function editSleepScore(id){
@@ -1013,11 +998,11 @@ function editSleepScore(id){
 
 
   save();
-  scheduleRender(render);
+  render();
 }
 
 
-scheduleRender(render);
+render();
 
 requestAnimationFrame(() => {
   setTimeout(() => {
@@ -1025,7 +1010,7 @@ requestAnimationFrame(() => {
     const didMigrateWork = !!migrateWorkEntriesForHours();
     const didSyncDerived = !!syncDerivedPointsIfNeeded();
     if (didMigrateSleep || didMigrateWork || didSyncDerived) {
-      scheduleRender(render);
+      render();
     }
   }, 0);
 });
