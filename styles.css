@@ -2157,7 +2157,7 @@ header,
     .points-toast{
       padding:6px 14px;
       border-radius:999px;
-      font-size:13px;
+      font-size:15px;
       font-weight:600;
       color:#f9fafb;
       background: var(--tp-btn-teal-grad);
