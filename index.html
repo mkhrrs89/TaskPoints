@@ -836,21 +836,17 @@ Nothing visible on the page is built here. === -->
 
 <!-- VICES -->
 <div class="glass mb-6 habits-card">
-  <div class="sectionHeader">
-    <div class="sectionTitleRow">
-      <h2 id="vicesAnchor" class="sectionTitle">Vices</h2>
-    </div>
+<div class="sectionHeader">
+  <div class="vicesControlsRow vicesControlsRow--withTitle">
+    <h2 id="vicesAnchor" class="sectionTitle vicesInlineTitle">Vices</h2>
 
-    <div class="vicesControlsRow">
-      <button id="addViceBtn" class="btn btn-primary btn-compact" type="button">
-        + Vice
-      </button>
+    <button id="addViceBtn" class="btn btn-primary btn-compact" type="button">+</button>
 
-      <button id="weekBackBtnVices" class="btn btn-secondary btn-compact" type="button">
-        ◀︎ Week
-      </button>
-    </div>
+    <button id="weekBackBtnVices" class="btn btn-secondary btn-compact" type="button">
+      ◀︎ Week
+    </button>
   </div>
+</div>
   <div id="vicesWeekWrap" class="weekSwapWrap">
     <div class="grid gap-2 text-sm muted mb-2" id="viceWeekLabels"></div>
     <div id="vicesList" class="grid gap-2"></div>
