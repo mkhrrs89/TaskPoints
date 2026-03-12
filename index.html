@@ -4064,23 +4064,59 @@ if (entries.length > MAX_POINTS) {
   ctx.lineTo(paddingX + w, paddingY + h);
   ctx.stroke();
 
-  // Line
-  ctx.lineJoin = 'round';
-  ctx.lineCap  = 'round';
-  ctx.strokeStyle = '#254C52';
-  ctx.lineWidth   = 1;
+// Build chart points for the raw daily line
+const points = entries.map((row, i) => {
+  const x = paddingX + (n === 1 ? w / 2 : (w * i / (n - 1)));
+  const norm = (row.total - minVal) / range;
+  const y = paddingY + h - norm * h;
+  return { x, y, total: row.total };
+});
+
+// Raw teal line
+ctx.lineJoin = 'round';
+ctx.lineCap  = 'round';
+ctx.strokeStyle = '#254C52';
+ctx.lineWidth   = 1;
+ctx.beginPath();
+
+points.forEach((pt, i) => {
+  if (i === 0) ctx.moveTo(pt.x, pt.y);
+  else ctx.lineTo(pt.x, pt.y);
+});
+
+ctx.stroke();
+
+// 7-day moving average values
+const maPeriod = 7;
+const maPoints = points.map((pt, i) => {
+  const start = Math.max(0, i - maPeriod + 1);
+  const slice = points.slice(start, i + 1);
+  const avg = slice.reduce((sum, p) => sum + p.total, 0) / slice.length;
+  const norm = (avg - minVal) / range;
+  const y = paddingY + h - norm * h;
+  return { x: pt.x, y };
+});
+
+// Thin orange smoothed moving-average trendline
+if (maPoints.length > 1) {
   ctx.beginPath();
+  ctx.strokeStyle = '#F59E0B';
+  ctx.lineWidth = 0.9;
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
 
-  entries.forEach((row, i) => {
-    const x = paddingX + (n === 1 ? w / 2 : (w * i / (n - 1)));
-    const norm = (row.total - minVal) / range;
-    const y = paddingY + h - norm * h;
+  ctx.moveTo(maPoints[0].x, maPoints[0].y);
 
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  });
+  for (let i = 1; i < maPoints.length - 1; i++) {
+    const cx = (maPoints[i].x + maPoints[i + 1].x) / 2;
+    const cy = (maPoints[i].y + maPoints[i + 1].y) / 2;
+    ctx.quadraticCurveTo(maPoints[i].x, maPoints[i].y, cx, cy);
+  }
 
+  const last = maPoints[maPoints.length - 1];
+  ctx.lineTo(last.x, last.y);
   ctx.stroke();
+}
 }
 
 function bumpOneDay(task){
