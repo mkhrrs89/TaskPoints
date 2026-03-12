@@ -352,67 +352,69 @@ function workPoints(score, hours = 0) {
 function load(){ 
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
+
     if (!raw) {
-return {
-  tasks:      [],
-  completions:[],
-  players:    [],
-  habits:     [],
-  flexActions:[],
-  matchups:   [],
-  gameHistory:[],
-  schedule:   [],
-  opponentDripSchedules: [],
-  workHistory: [],
-  youImageId: "",
-  youName: "",
-  notes: "",
-  habitTagColors: {},
-  scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
-    ? TaskPointsCore.normalizeScoringSettings({})
-    : {}
-};
+      return {
+        tasks: [],
+        completions: [],
+        players: [],
+        habits: [],
+        flexActions: [],
+        matchups: [],
+        gameHistory: [],
+        schedule: [],
+        opponentDripSchedules: [],
+        workHistory: [],
+        youImageId: "",
+        youName: "",
+        notes: "",
+        habitTagColors: {},
+        scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
+          ? TaskPointsCore.normalizeScoringSettings({})
+          : {}
+      };
+    }
 
     const p = JSON.parse(raw);
-return {
-  tasks:       Array.isArray(p.tasks)       ? p.tasks       : [],
-  completions: Array.isArray(p.completions) ? p.completions : [],
-  players:     Array.isArray(p.players)     ? p.players     : [],
-  habits:      Array.isArray(p.habits)      ? p.habits      : [],
-  flexActions: Array.isArray(p.flexActions) ? p.flexActions : [],
-  matchups:    Array.isArray(p.matchups)    ? p.matchups    : [],
-  gameHistory: Array.isArray(p.gameHistory) ? p.gameHistory : [],
-  schedule:    Array.isArray(p.schedule)    ? p.schedule    : [],
-  opponentDripSchedules: Array.isArray(p.opponentDripSchedules) ? p.opponentDripSchedules : [],
-  workHistory: Array.isArray(p.workHistory) ? p.workHistory : [],
-  youImageId:  typeof p.youImageId === "string" ? p.youImageId : "",
-  youName:     typeof p.youName === "string" ? p.youName : "",
-  notes:       typeof p.notes === "string" ? p.notes : "",
-  habitTagColors: normalizeHabitTagColors(p.habitTagColors),
-  scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
-    ? TaskPointsCore.normalizeScoringSettings(p.scoringSettings || {})
-    : (p.scoringSettings || {})
-};
+    return {
+      tasks:       Array.isArray(p.tasks)       ? p.tasks       : [],
+      completions: Array.isArray(p.completions) ? p.completions : [],
+      players:     Array.isArray(p.players)     ? p.players     : [],
+      habits:      Array.isArray(p.habits)      ? p.habits      : [],
+      flexActions: Array.isArray(p.flexActions) ? p.flexActions : [],
+      matchups:    Array.isArray(p.matchups)    ? p.matchups    : [],
+      gameHistory: Array.isArray(p.gameHistory) ? p.gameHistory : [],
+      schedule:    Array.isArray(p.schedule)    ? p.schedule    : [],
+      opponentDripSchedules: Array.isArray(p.opponentDripSchedules) ? p.opponentDripSchedules : [],
+      workHistory: Array.isArray(p.workHistory) ? p.workHistory : [],
+      youImageId:  typeof p.youImageId === "string" ? p.youImageId : "",
+      youName:     typeof p.youName === "string" ? p.youName : "",
+      notes:       typeof p.notes === "string" ? p.notes : "",
+      habitTagColors: normalizeHabitTagColors(p.habitTagColors),
+      scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
+        ? TaskPointsCore.normalizeScoringSettings(p.scoringSettings || {})
+        : (p.scoringSettings || {})
+    };
   } catch {
-return {
-  tasks:      [],
-  completions:[],
-  players:    [],
-  habits:     [],
-  flexActions:[],
-  matchups:   [],
-  gameHistory:[],
-  schedule:   [],
-  opponentDripSchedules: [],
-  workHistory: [],
-  youImageId: "",
-  youName: "",
-  notes: "",
-  habitTagColors: {},
-  scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
-    ? TaskPointsCore.normalizeScoringSettings({})
-    : {}
-};
+    return {
+      tasks: [],
+      completions: [],
+      players: [],
+      habits: [],
+      flexActions: [],
+      matchups: [],
+      gameHistory: [],
+      schedule: [],
+      opponentDripSchedules: [],
+      workHistory: [],
+      youImageId: "",
+      youName: "",
+      notes: "",
+      habitTagColors: {},
+      scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
+        ? TaskPointsCore.normalizeScoringSettings({})
+        : {}
+    };
   }
 }
 
