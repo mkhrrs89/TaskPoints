@@ -4087,7 +4087,7 @@ points.forEach((pt, i) => {
 ctx.stroke();
 
 // 7-day moving average values
-const maPeriod = 7;
+const maPeriod = 14;
 const maPoints = points.map((pt, i) => {
   const start = Math.max(0, i - maPeriod + 1);
   const slice = points.slice(start, i + 1);
