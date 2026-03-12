@@ -2160,7 +2160,9 @@ header,
       font-size:13px;
       font-weight:600;
       color:#f9fafb;
-      background: var(--tp-teal-grad);color: #fff;border: none;
+      background: var(--tp-btn-teal-grad);
+      color: #fff;
+      border: none;
       box-shadow:0 10px 30px rgba(0,0,0,.45);
       opacity:0;
       transform:translateY(10px) scale(.95);
