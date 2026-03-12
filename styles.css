@@ -943,6 +943,14 @@ body {
   justify-content: center;
 }
 
+.habits-card .sectionHeader{
+  background: var(--tp-btn-teal-grad);
+  margin: -16px -16px 10px -16px;
+  padding: 16px;
+  border-top-left-radius: 20px;
+  border-top-right-radius: 20px;
+}
+
 /* =========================
    SECTION 2 — CORE UI ATOMS (TAGS / PILLS / MUTED TEXT)
    ========================= */
