@@ -808,25 +808,24 @@ Nothing visible on the page is built here. === -->
 
   <!-- HABITS -->
 <div class="glass mb-6">
-  <div class="sectionHeader">
-    <div class="sectionTitleRow">
-      <h2 id="habitsAnchor" class="sectionTitle">Habits</h2>
-    </div>
+<div class="sectionHeader">
+  <div class="habitsControlsRow habitsControlsRow--withTitle">
+    <h2 id="habitsAnchor" class="sectionTitle habitsInlineTitle">Habits</h2>
 
-    <div class="habitsControlsRow">
-      <select id="habitsSortSelect" class="input habitsSortSelectCompact">
-        <option value="custom">Custom</option>
-        <option value="points">Point value</option>
-        <option value="streak">Current streak</option>
-        <option value="completion">% completion</option>
-      </select>
-      <button id="addHabitBtn" class="btn btn-primary btn-compact" type="button">+ Habit</button>
+    <select id="habitsSortSelect" class="input habitsSortSelectCompact">
+      <option value="custom">Custom</option>
+      <option value="points">Point value</option>
+      <option value="streak">Current streak</option>
+      <option value="completion">% completion</option>
+    </select>
 
-      <button id="weekBackBtnHabits" class="btn btn-secondary btn-compact" type="button">
-        ◀︎ Week
-      </button>
-    </div>
+    <button id="addHabitBtn" class="btn btn-primary btn-compact" type="button">+ Habit</button>
+
+    <button id="weekBackBtnHabits" class="btn btn-secondary btn-compact" type="button">
+      ◀︎ Week
+    </button>
   </div>
+</div>
 
   <div id="habitsWeekWrap" class="weekSwapWrap">
     <div class="grid gap-2 text-sm muted mb-2" id="habitWeekLabels"></div>
