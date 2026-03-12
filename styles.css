@@ -1075,6 +1075,12 @@ body {
 }
 
 @media (max-width: 767px){
+  .mobile-hide-header-today{
+    display: none !important;
+  }
+}
+
+@media (max-width: 767px){
   .tp-critical-island{
     display: inline-flex;
   }
