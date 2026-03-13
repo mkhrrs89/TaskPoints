@@ -881,20 +881,22 @@ Nothing visible on the page is built here. === -->
 
 
   <!-- TASKS grouped by day -->
-  <div id="tasksSection" class="glass mb-6">
-    <div class="flex items-center mb-3 gap-2 sm:gap-3">
-      <h2 id="tasksAnchor" class="font-bold text-lg shrink-0">Your Tasks</h2>
-      <button id="openAddTaskBtn" class="btn btn-primary shrink-0">Add Task</button>
-      <label for="compactTasksToggle" class="task-compact-toggle shrink-0">
-        <input id="compactTasksToggle" type="checkbox">
-        <span>Compact view</span>
-      </label>
-      <select id="sortSelect" class="input flex-1 min-w-0 sm:flex-none sm:w-48 sm:ml-auto">
-        <option value="due">Sort by Due Date</option>
-        <option value="importance">Sort by Importance</option>
-        <option value="points">Sort by Points</option>
-        <option value="alpha">Sort by Name</option>
-      </select>
+  <div id="tasksSection" class="glass mb-6 tasks-card">
+    <div class="sectionHeader">
+      <div class="tasksControlsRow tasksControlsRow--withTitle">
+        <h2 id="tasksAnchor" class="sectionTitle tasksInlineTitle">Your Tasks</h2>
+        <button id="openAddTaskBtn" class="btn btn-primary btn-compact">Add Task</button>
+        <label for="compactTasksToggle" class="task-compact-toggle shrink-0">
+          <input id="compactTasksToggle" type="checkbox">
+          <span>Compact view</span>
+        </label>
+        <select id="sortSelect" class="input tasksSortSelectCompact">
+          <option value="due">Sort by Due Date</option>
+          <option value="importance">Sort by Importance</option>
+          <option value="points">Sort by Points</option>
+          <option value="alpha">Sort by Name</option>
+        </select>
+      </div>
     </div>
     <div id="taskList" class="grid gap-2"></div>
     <div id="emptyList" class="text-sm muted hidden">No tasks yet.</div>
