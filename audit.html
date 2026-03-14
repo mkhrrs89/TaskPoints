@@ -582,6 +582,77 @@
       };
     }
 
+    const WORK_HOURS_AUDIT_DAYS = 14;
+    const WORK_HOURS_SUSPICIOUS_THRESHOLD = 24;
+
+    function auditWorkHoursLast14Days(state, endDateKey = TaskPointsCore.todayKey()) {
+      const issues = [];
+      const completions = Array.isArray(state?.completions) ? state.completions : [];
+      const scoringSettings = TaskPointsCore.getScoringSettings(state);
+
+      const endDate = TaskPointsCore.fromKey(endDateKey);
+      const recentDayKeys = Array.from({ length: WORK_HOURS_AUDIT_DAYS }, (_, idx) => {
+        const d = new Date(endDate);
+        d.setDate(d.getDate() - idx);
+        return TaskPointsCore.dateKey(d);
+      });
+
+      const dayWorkEntries = new Map(recentDayKeys.map(key => [key, []]));
+
+      completions.forEach(entry => {
+        if (!entry) return;
+        const entryDateKey = TaskPointsCore.dateKey(entry.completedAtISO || entry.dateKey || '');
+        if (!dayWorkEntries.has(entryDateKey)) return;
+
+        const derived = TaskPointsCore.deriveCompletionPoints
+          ? TaskPointsCore.deriveCompletionPoints(entry, scoringSettings)
+          : null;
+        if (!derived || derived.formula !== 'work') return;
+
+        dayWorkEntries.get(entryDateKey).push(entry);
+      });
+
+      recentDayKeys.forEach(dayKey => {
+        const dayEntries = dayWorkEntries.get(dayKey) || [];
+        if (!dayEntries.length) {
+          issues.push(`${dayKey}: value=missing — no Work Hours entry for this day`);
+          return;
+        }
+
+        dayEntries.forEach(entry => {
+          const label = entry?.title || entry?.id || 'Work entry';
+          const hasHoursValue = Object.prototype.hasOwnProperty.call(entry, 'workHours');
+          const rawHours = hasHoursValue ? entry.workHours : undefined;
+
+          if (!hasHoursValue || rawHours === '' || rawHours == null) {
+            issues.push(`${dayKey}: value=missing — ${label} is missing workHours`);
+            return;
+          }
+
+          const hours = Number(rawHours);
+          if (!Number.isFinite(hours)) {
+            issues.push(`${dayKey}: value=${JSON.stringify(rawHours)} — ${label} has non-numeric Hours`);
+            return;
+          }
+
+          if (hours < 0) {
+            issues.push(`${dayKey}: value=${hours} — ${label} has negative Hours`);
+            return;
+          }
+
+          if (hours > WORK_HOURS_SUSPICIOUS_THRESHOLD) {
+            issues.push(`${dayKey}: value=${hours} — ${label} exceeds ${WORK_HOURS_SUSPICIOUS_THRESHOLD} hours (suspiciously high)`);
+          }
+        });
+      });
+
+      return {
+        threshold: WORK_HOURS_SUSPICIOUS_THRESHOLD,
+        days: WORK_HOURS_AUDIT_DAYS,
+        issues
+      };
+    }
+
     function executeAudit() {
       const dateInput = $('auditDate');
       const selected = dateInput?.value || defaultAuditDate();
@@ -1044,6 +1115,20 @@
         details: recentMissingMetrics,
         trace: 'state.completions → TaskPointsCore.deriveCompletionPoints',
         tips: 'Log a daily mood score, calorie entry, and work score for each day.'
+      });
+
+      const workHoursAudit = auditWorkHoursLast14Days(state, dateKey);
+      checks.push({
+        id: 'work-hours-last-14-days',
+        title: 'Work Hours entries are valid over the last 14 days',
+        status: workHoursAudit.issues.length ? 'WARN' : 'PASS',
+        expected: `Each of the last ${workHoursAudit.days} days has a numeric Work Hours value between 0 and ${workHoursAudit.threshold}`,
+        actual: workHoursAudit.issues.length
+          ? `${workHoursAudit.issues.length} issue(s)`
+          : 'All Work Hours entries look valid',
+        details: workHoursAudit.issues,
+        trace: 'state.completions[].workHours for work-derived entries',
+        tips: `Hours above ${workHoursAudit.threshold} are flagged as potential typos.`
       });
 
       // New: Historical flex actions match current points
