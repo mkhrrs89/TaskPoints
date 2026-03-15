@@ -108,6 +108,27 @@
   display: block;
 }
 
+.player-color-swatches {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.player-color-swatch {
+  width: 28px;
+  height: 14px;
+  border-radius: 6px;
+  border: 1px solid rgba(17, 24, 39, 0.35);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+}
+
+@media (prefers-color-scheme: dark) {
+  .player-color-swatch {
+    border-color: rgba(255, 255, 255, 0.45);
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+  }
+}
+
 /* Desktop & mobile: hide content + rotate chevron when collapsed */
 .mobile-collapsible[data-collapsed="true"] .mobile-collapsible-body {
   display: none;
@@ -366,6 +387,17 @@
         </div>
       </div>
 
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <label class="text-xs muted">Primary color</label>
+          <input id="playerPrimaryColor" type="color" class="input mt-1 h-10 p-1" value="#1a383b">
+        </div>
+        <div>
+          <label class="text-xs muted">Secondary color</label>
+          <input id="playerSecondaryColor" type="color" class="input mt-1 h-10 p-1" value="#254c52">
+        </div>
+      </div>
+
       <div>
         <label class="text-xs muted">Photo (optional)</label>
         <input id="playerImage" type="file" accept="image/*" class="mt-1 text-xs">
@@ -502,7 +534,29 @@
 
   <script>
 const STORAGE_KEY = "taskpoints_v1";
+const DEFAULT_PRIMARY_COLOR = "#1a383b";
+const DEFAULT_SECONDARY_COLOR = "#254c52";
 const $ = (id) => document.getElementById(id);
+
+function normalizePlayerColor(value, fallback) {
+  return normalizeHexColor(value) || fallback;
+}
+
+function withPlayerColors(player) {
+  if (!player || typeof player !== "object") return { player, changed: false };
+  const primaryColor = normalizePlayerColor(player.primaryColor, DEFAULT_PRIMARY_COLOR);
+  const secondaryColor = normalizePlayerColor(player.secondaryColor, DEFAULT_SECONDARY_COLOR);
+  const changed = player.primaryColor !== primaryColor || player.secondaryColor !== secondaryColor;
+  if (!changed) return { player, changed: false };
+  return {
+    player: {
+      ...player,
+      primaryColor,
+      secondaryColor
+    },
+    changed: true
+  };
+}
 
 function loadState() {
   // Base shape with all the shared keys we care about
@@ -529,7 +583,20 @@ function loadState() {
     base.tasks       = Array.isArray(parsed.tasks)       ? parsed.tasks       : [];
     base.completions = Array.isArray(parsed.completions) ? parsed.completions : [];
     base.habits      = Array.isArray(parsed.habits)      ? parsed.habits      : [];
-    base.players     = Array.isArray(parsed.players)     ? parsed.players     : [];
+    if (Array.isArray(parsed.players)) {
+      let playersChanged = false;
+      base.players = parsed.players.map((player) => {
+        const normalized = withPlayerColors(player);
+        if (normalized.changed) playersChanged = true;
+        return normalized.player;
+      });
+      if (playersChanged) {
+        parsed.players = base.players;
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+      }
+    } else {
+      base.players = [];
+    }
     base.flexActions = Array.isArray(parsed.flexActions) ? parsed.flexActions : [];
     base.gameHistory = Array.isArray(parsed.gameHistory) ? parsed.gameHistory : [];
     base.matchups    = Array.isArray(parsed.matchups)    ? parsed.matchups    : [];
@@ -2056,6 +2123,9 @@ card.innerHTML = `
 
 
     // ---------- NORMAL PLAYERS ----------
+    const primaryColor = normalizePlayerColor(p.primaryColor, DEFAULT_PRIMARY_COLOR);
+    const secondaryColor = normalizePlayerColor(p.secondaryColor, DEFAULT_SECONDARY_COLOR);
+
     if (editingPlayerId === p.id) {
       const playerImageUrl = p.imageId ? getCachedImageUrl(p.imageId) : "";
       // Edit mode
@@ -2171,6 +2241,24 @@ card.innerHTML = `
                 value="${escapeHtmlAttr(p.style || "")}"
               />
             </div>
+            <div>
+              <label class="opacity-70 block mb-1">Primary color</label>
+              <input
+                data-field="primaryColor"
+                type="color"
+                class="w-full h-10 px-1 py-1 rounded-xl border"
+                value="${escapeHtmlAttr(primaryColor)}"
+              />
+            </div>
+            <div>
+              <label class="opacity-70 block mb-1">Secondary color</label>
+              <input
+                data-field="secondaryColor"
+                type="color"
+                class="w-full h-10 px-1 py-1 rounded-xl border"
+                value="${escapeHtmlAttr(secondaryColor)}"
+              />
+            </div>
           </div>
 
           <div>
@@ -2248,6 +2336,11 @@ card.innerHTML = `
       </div>
 
       <div class="flex-1 min-w-0 ${!isActive ? "player-inactive-text" : ""}">
+        <div class="player-color-swatches" aria-label="Player colors">
+          <span class="player-color-swatch" title="Primary color ${escapeHtmlAttr(primaryColor)}" style="background:${escapeHtmlAttr(primaryColor)};"></span>
+          <span class="player-color-swatch" title="Secondary color ${escapeHtmlAttr(secondaryColor)}" style="background:${escapeHtmlAttr(secondaryColor)};"></span>
+        </div>
+
         <div class="text-xs opacity-80 leading-[1.0] space-y-[2px]">
           <p>Record: ${recordText}</p>
           <p>PPD: ${avgPpd}</p>
@@ -2261,6 +2354,8 @@ card.innerHTML = `
               : "—"
           }</p>
           <p>Style: ${escapeHtml(p.style || "—")}</p>
+          <p>Primary Color: ${escapeHtml(primaryColor)}</p>
+          <p>Secondary Color: ${escapeHtml(secondaryColor)}</p>
         </div>
 
         <p class="mt-2 text-sm opacity-80 italic">
@@ -2446,6 +2541,8 @@ card.innerHTML = `
   const momentumInput  = card.querySelector('input[data-field="momentum"]');
   const riskyInput     = card.querySelector('input[data-field="risky"]');
   const styleInput     = card.querySelector('input[data-field="style"]');
+  const primaryColorInput = card.querySelector('input[data-field="primaryColor"]');
+  const secondaryColorInput = card.querySelector('input[data-field="secondaryColor"]');
 
         const player = state.players.find(p => p.id === id);
         if (!player) return;
@@ -2484,6 +2581,14 @@ card.innerHTML = `
   const style = styleInput
     ? (styleInput.value || "").trim()
     : (player.style || "");
+  const primaryColor = normalizePlayerColor(
+    primaryColorInput ? primaryColorInput.value : player.primaryColor,
+    DEFAULT_PRIMARY_COLOR
+  );
+  const secondaryColor = normalizePlayerColor(
+    secondaryColorInput ? secondaryColorInput.value : player.secondaryColor,
+    DEFAULT_SECONDARY_COLOR
+  );
 
   const applyUpdate = async (imageData) => {
     player.name = newName;
@@ -2496,7 +2601,8 @@ card.innerHTML = `
     player.momentum = isNaN(momentum) ? 50 : momentum;
     player.risky    = isNaN(risky) ? 3 : risky;
     player.style    = style || "balanced";
-
+    player.primaryColor = primaryColor;
+    player.secondaryColor = secondaryColor;
 
     if (imageData){
       const nextImageId = await saveImageFromDataUrl(imageData, player.imageId);
@@ -2558,7 +2664,8 @@ $("createPlayerForm").addEventListener("submit", (e)=>{
   const risky = riskyInputRaw / 10;
 
   const style = ($("playerStyle").value || "").trim();
-
+  const primaryColor = normalizePlayerColor($("playerPrimaryColor").value, DEFAULT_PRIMARY_COLOR);
+  const secondaryColor = normalizePlayerColor($("playerSecondaryColor").value, DEFAULT_SECONDARY_COLOR);
 
   if (!name){
     alert("Player name is required.");
@@ -2584,7 +2691,9 @@ $("createPlayerForm").addEventListener("submit", (e)=>{
       // Default Risky = 3.0 (i.e. user sees 30)
       risky: isNaN(risky) ? 3 : risky,
 
-      style: style || "balanced"
+      style: style || "balanced",
+      primaryColor,
+      secondaryColor
 
     });
     refreshScheduleAfterRosterChange();
@@ -2598,6 +2707,8 @@ $("createPlayerForm").addEventListener("submit", (e)=>{
     $("playerMomentum").value = "50";
     $("playerRisky").value = "30";
     $("playerStyle").value = "";
+    $("playerPrimaryColor").value = DEFAULT_PRIMARY_COLOR;
+    $("playerSecondaryColor").value = DEFAULT_SECONDARY_COLOR;
     $("playerActive").checked = true;
     renderPlayers();
   };
