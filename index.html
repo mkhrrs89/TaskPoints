@@ -1353,6 +1353,7 @@ function initHabitSortControl(){
 
 let editingTaskId = null;
 let expandedTaskId = null;
+const taskGroupExpandedState = Object.create(null);
 let taskActionSheetTaskId = null;
 let taskActionSheetTrigger = null;
 let editingHabitId = null;
@@ -1361,6 +1362,18 @@ let lastFlexCompletion = null;
 let habitViceWeekOffsetDays = 0; // 0 = this week, -7 = last week
 let weekSwapInFlight = false;
 const TASK_COMPACT_VIEW_KEY = 'tp_tasks_compact_view_v1';
+
+function taskGroupDefaultExpanded(bucket, todayIso){
+  const isFutureBucket = (bucket.key === 'later') || (Boolean(bucket.date) && dateKey(bucket.date) > todayIso);
+  return !isFutureBucket;
+}
+
+function isTaskGroupExpanded(bucket, todayIso){
+  if (Object.prototype.hasOwnProperty.call(taskGroupExpandedState, bucket.key)) {
+    return Boolean(taskGroupExpandedState[bucket.key]);
+  }
+  return taskGroupDefaultExpanded(bucket, todayIso);
+}
 
 function habitViceBaseDate() {
   const base = new Date();
@@ -5636,22 +5649,39 @@ function renderTasks(){
   const fragment = document.createDocumentFragment();
   for(const b of order){
     if(b.items.length===0) continue;
-    const div=document.createElement('div');
-    if (b.key === 'overdue') {
-      div.innerHTML = `
-        <div class="sectionDivider flex items-center justify-between gap-2">
-          <span>${b.label}</span>
-          <button class="btn btn-ghost btn-task md:hidden" data-task-action="postpone-all-overdue" data-task-id="__all_overdue__">Postpone all</button>
-        </div>
-      `;
-    } else {
-      div.innerHTML=`<div class="sectionDivider">${b.label}</div>`;
-    }
-    fragment.appendChild(div);
+    const isExpanded = isTaskGroupExpanded(b, todayIso);
+
+    const group=document.createElement('section');
+    group.className='task-date-group';
+    group.dataset.groupKey = b.key;
+    if (b.date) group.dataset.groupDate = dateKey(b.date);
+
+    const header=document.createElement('div');
+    header.className='sectionDivider task-date-group-header';
+    header.dataset.taskGroupToggle = b.key;
+    header.setAttribute('role','button');
+    header.setAttribute('tabindex','0');
+    header.setAttribute('aria-expanded', isExpanded ? 'true' : 'false');
+    header.innerHTML = `
+      <span class="task-date-group-label-wrap">
+        <span class="task-date-group-indicator" aria-hidden="true">${isExpanded ? '▾' : '▸'}</span>
+        <span>${b.label}</span>
+      </span>
+      ${b.key === 'overdue'
+        ? '<button class="btn btn-ghost btn-task md:hidden" data-task-action="postpone-all-overdue" data-task-id="__all_overdue__">Postpone all</button>'
+        : ''}
+    `;
+    group.appendChild(header);
+
+    const body = document.createElement('div');
+    body.className = `task-date-group-body ${isExpanded ? '' : 'hidden'}`;
+    body.dataset.taskGroupBody = b.key;
+    group.appendChild(body);
+    fragment.appendChild(group);
 
     b.items.forEach(t=>{
       const isOverdue = t.dueDateISO && t.dueDateISO < todayIso;
-      const isExpanded = expandedTaskId === t.id;
+      const isTaskExpanded = expandedTaskId === t.id;
       const tags = Array.isArray(t.tags) ? t.tags : [];
       const tagsHtml = tags.length ? `<div class="task-tags">${tags.map(tag => `<span class="tag bg-zinc-700/40">${escapeHtml(tag)}</span>`).join('')}</div>` : '';
 
@@ -5660,7 +5690,7 @@ function renderTasks(){
       const cardClasses = ['glass'];
       if (t.importance === 'Critical') cardClasses.push('critical-card');
       else if (t.importance === 'High') cardClasses.push('high-card');
-      if (isExpanded) cardClasses.push('task-card-expanded');
+      if (isTaskExpanded) cardClasses.push('task-card-expanded');
       card.className = cardClasses.join(' ');
 
       if (editingTaskId === t.id) {
@@ -5731,7 +5761,7 @@ function renderTasks(){
           </div>
         `;
 
-        fragment.appendChild(card);
+        body.appendChild(card);
 
         const dueInput = card.querySelector('input[data-field="due"]');
         if (dueInput) {
@@ -5751,7 +5781,7 @@ function renderTasks(){
         }
       } else {
         card.innerHTML = `
-          <div class="task-card-shell" data-task-card-body="${t.id}" tabindex="0" role="button" aria-expanded="${isExpanded ? 'true' : 'false'}" aria-label="${isExpanded ? 'Collapse' : 'Expand'} ${escapeHtml(t.title)}">
+          <div class="task-card-shell" data-task-card-body="${t.id}" tabindex="0" role="button" aria-expanded="${isTaskExpanded ? 'true' : 'false'}" aria-label="${isTaskExpanded ? 'Collapse' : 'Expand'} ${escapeHtml(t.title)}">
             <div class="task-card-header">
               <div class="taskPoints flex flex-col items-center justify-center">
                 <div class="taskPointsNumber">${t.points}</div>
@@ -5768,7 +5798,7 @@ function renderTasks(){
               </div>
             </div>
           </div>
-          <div class="task-expanded ${isExpanded ? '' : 'hidden'}" data-task-expanded="${t.id}">
+          <div class="task-expanded ${isTaskExpanded ? '' : 'hidden'}" data-task-expanded="${t.id}">
             ${tagsHtml}
             <div class="task-expanded-actions">
               ${isOverdue?`<button class="btn btn-ghost btn-task" data-task-action="postpone" data-task-id="${t.id}">Postpone</button>`:''}
@@ -5779,7 +5809,7 @@ function renderTasks(){
               <button class="btn btn-delete btn-task" data-task-action="delete" data-task-id="${t.id}">Delete</button>
             </div>
           </div>`;
-        fragment.appendChild(card);
+        body.appendChild(card);
       }
     });
   }
@@ -5868,6 +5898,23 @@ function initTaskListDelegation(){
   const handleTaskAction = (e) => {
     if (!(e.target instanceof Element)) return;
 
+    const groupToggle = e.target.closest('[data-task-group-toggle]');
+    if (groupToggle && !e.target.closest('[data-task-action]')) {
+      const groupKey = groupToggle.getAttribute('data-task-group-toggle');
+      if (groupKey) {
+        const group = list.querySelector(`[data-group-key="${groupKey}"]`);
+        if (!group) return;
+        const groupDate = group.getAttribute('data-group-date') || null;
+        const bucketMeta = {
+          key: groupKey,
+          date: groupDate ? fromKey(groupDate) : null,
+        };
+        taskGroupExpandedState[groupKey] = !isTaskGroupExpanded(bucketMeta, todayKey());
+        renderTasks();
+      }
+      return;
+    }
+
     const bodyTarget = e.target.closest('[data-task-card-body]');
     if (bodyTarget && !e.target.closest('[data-task-action]')) {
       const now = Date.now();
@@ -5945,6 +5992,24 @@ function initTaskListDelegation(){
   list.addEventListener('click', handleTaskAction);
   list.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter' && e.key !== ' ') return;
+
+    const groupToggle = e.target.closest('[data-task-group-toggle]');
+    if (groupToggle) {
+      e.preventDefault();
+      const groupKey = groupToggle.getAttribute('data-task-group-toggle');
+      if (!groupKey) return;
+      const group = list.querySelector(`[data-group-key="${groupKey}"]`);
+      if (!group) return;
+      const groupDate = group.getAttribute('data-group-date') || null;
+      const bucketMeta = {
+        key: groupKey,
+        date: groupDate ? fromKey(groupDate) : null,
+      };
+      taskGroupExpandedState[groupKey] = !isTaskGroupExpanded(bucketMeta, todayKey());
+      renderTasks();
+      return;
+    }
+
     const bodyTarget = e.target.closest('[data-task-card-body]');
     if (!bodyTarget) return;
     e.preventDefault();
