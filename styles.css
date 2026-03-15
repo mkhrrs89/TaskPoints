@@ -1059,6 +1059,30 @@ body {
 
 .sectionDivider{margin:18px 0 8px;border-top:1px dashed var(--border);padding-top:8px;font-weight:700;opacity:.9}
 
+.task-date-group-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:.5rem;
+  cursor:pointer;
+}
+
+.task-date-group-label-wrap{
+  display:inline-flex;
+  align-items:center;
+  gap:.35rem;
+}
+
+.task-date-group-indicator{
+  width:1ch;
+  opacity:.85;
+}
+
+.task-date-group-body{
+  display:grid;
+  gap:.5rem;
+}
+
 
 /* =========================
    SECTION 3 — APP CHROME (HEADER / TOOLBAR / NAV / DROPDOWNS)
