@@ -989,6 +989,12 @@ body {
   letter-spacing: 0.02em;
 }
 
+#openAddTaskBtn{
+  min-width: 34px;
+  padding-inline: 8px;
+  text-align: center;
+}
+
 .tasksSortSelectCompact {
   flex: 0 1 220px;
   min-width: 0;
