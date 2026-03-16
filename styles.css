@@ -883,6 +883,14 @@ body {
   margin-bottom: 10px;
 }
 
+.sectionCard--teal .sectionHeader--teal{
+  background: var(--tp-btn-teal-grad);
+  margin: -16px -16px 10px -16px;
+  padding: 16px;
+  border-top-left-radius: 20px;
+  border-top-right-radius: 20px;
+}
+
 .sectionTitleRow {
   display: flex;
   align-items: center;
@@ -897,11 +905,17 @@ body {
   letter-spacing: 0.02em;
 }
 
-.habitsInlineTitle,
-.vicesInlineTitle{
+.sectionTitle--inline{
   margin: 0;
   flex: 0 0 auto;
   line-height: 1;
+}
+
+.sectionHeaderControls{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
 }
 
 .habitsControlsRow,
@@ -969,21 +983,6 @@ body {
   justify-content: center;
 }
 
-.habits-card .sectionHeader{
-  background: var(--tp-btn-teal-grad);
-  margin: -16px -16px 10px -16px;
-  padding: 16px;
-  border-top-left-radius: 20px;
-  border-top-right-radius: 20px;
-}
-
-
-.tasksInlineTitle{
-  margin: 0;
-  flex: 0 0 auto;
-  line-height: 1;
-}
-
 #openAddTaskBtn,
 #sortSelect{
   font-family: 'Teko', 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -1000,41 +999,6 @@ body {
   border-radius: 12px;
   text-overflow: ellipsis;
   margin-left: auto;
-}
-
-.tasks-card .sectionHeader{
-  background: var(--tp-btn-teal-grad);
-  margin: -16px -16px 10px -16px;
-  padding: 16px;
-  border-top-left-radius: 20px;
-  border-top-right-radius: 20px;
-}
-
-.flex-card .sectionHeader{
-  background: var(--tp-btn-teal-grad);
-  margin: -16px -16px 10px -16px;
-  padding: 16px;
-  border-top-left-radius: 20px;
-  border-top-right-radius: 20px;
-}
-
-.records-card .sectionHeader{
-  background: var(--tp-btn-teal-grad);
-  margin: -16px -16px 10px -16px;
-  padding: 16px;
-  border-top-left-radius: 20px;
-  border-top-right-radius: 20px;
-}
-
-.recordsInlineTitle{
-  margin: 0;
-  line-height: 1;
-}
-
-.flexInlineTitle{
-  margin: 0;
-  flex: 0 0 auto;
-  line-height: 1;
 }
 
 .flexControlsRow .recent-toggle{
