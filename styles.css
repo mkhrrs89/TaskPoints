@@ -906,7 +906,8 @@ body {
 
 .habitsControlsRow,
 .vicesControlsRow,
-.tasksControlsRow {
+.tasksControlsRow,
+.flexControlsRow {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -914,7 +915,8 @@ body {
 }
 
 .vicesControlsRow--withTitle,
-.tasksControlsRow--withTitle{
+.tasksControlsRow--withTitle,
+.flexControlsRow--withTitle{
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1006,6 +1008,24 @@ body {
   padding: 16px;
   border-top-left-radius: 20px;
   border-top-right-radius: 20px;
+}
+
+.flex-card .sectionHeader{
+  background: var(--tp-btn-teal-grad);
+  margin: -16px -16px 10px -16px;
+  padding: 16px;
+  border-top-left-radius: 20px;
+  border-top-right-radius: 20px;
+}
+
+.flexInlineTitle{
+  margin: 0;
+  flex: 0 0 auto;
+  line-height: 1;
+}
+
+.flexControlsRow .recent-toggle{
+  margin-left: auto;
 }
 
 @media (max-width: 640px){
