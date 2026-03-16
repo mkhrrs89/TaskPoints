@@ -255,13 +255,13 @@ body {
 
 /* Work button (powder blue gradient like the Work chips) */
 .btn-work{
-  background: linear-gradient(180deg, rgba(147, 197, 253, 0.5), rgba(59, 130, 246, 0.35));
+  background: linear-gradient(180deg, rgba(143, 191, 209, 0.5), rgba(111, 163, 181, 0.35));
   color: #f8fbff;
   border: none;
 }
 
 .btn-work:hover{
-  background: linear-gradient(180deg, rgba(147, 197, 253, 0.65), rgba(59, 130, 246, 0.45));
+  background: linear-gradient(180deg, rgba(143, 191, 209, 0.65), rgba(111, 163, 181, 0.45));
 }
 
 
@@ -2654,7 +2654,7 @@ header,
 
 /* Work: today card */
 .work-today-card{
-  background: linear-gradient(180deg, rgba(147, 197, 253, 0.5), rgba(59, 130, 246, 0.35));
+  background: linear-gradient(180deg, rgba(143, 191, 209, 0.5), rgba(111, 163, 181, 0.35));
   border: none !important;
   border-radius: 16px;
   color: #e3f2ff;
@@ -2677,7 +2677,7 @@ header,
 
 /* Work: recent-day chip */
 .work-chip{
-  background: linear-gradient(180deg, rgba(147, 197, 253, 0.5), rgba(59, 130, 246, 0.35));
+  background: linear-gradient(180deg, rgba(143, 191, 209, 0.5), rgba(111, 163, 181, 0.35));
   border: none !important;
   border-radius: 12px;
 
@@ -3390,7 +3390,7 @@ header,
   }
 
 .work-today-card .stat-mobile-header{
-  background: linear-gradient(180deg, rgba(147, 197, 253, 0.5), rgba(59, 130, 246, 0.35));
+  background: linear-gradient(180deg, rgba(143, 191, 209, 0.5), rgba(111, 163, 181, 0.35));
   color: #eaf2ff;
 }
 
