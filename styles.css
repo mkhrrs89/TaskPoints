@@ -3901,6 +3901,13 @@ header,
 */
 
 
+
+.inertiaPanelLeft{
+  background: var(--tp-teal-grad);
+  border-radius: 12px;
+  min-height: 100%;
+}
+
 /* INDEX: desktop-only layout for Inertia card + Daily trend chart */
 .inertiaTrendRow{
   grid-template-columns: 1fr; /* mobile stays stacked */
