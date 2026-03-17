@@ -59,6 +59,7 @@ Nothing visible on the page is built here. === -->
     html.tp-boot-pending #appRoot,
     html.tp-boot-pending #bottomToolbarMount,
     html.tp-boot-pending #mobileBottomNav,
+    html.tp-boot-pending #mobileAddTaskFab,
     html.tp-boot-pending #goToTasksFab,
     html.tp-boot-pending #bottomToolbarMount:empty::before {
       opacity:0 !important;
@@ -8860,6 +8861,17 @@ function tpPerfMark(label) {
 </button>
 
 <button
+  id="mobileAddTaskFab"
+  class="md:hidden tp-floating-island btn btn-teal rounded-full shadow-lg px-4 py-2 text-sm font-semibold flex items-center justify-center gap-1"
+  type="button"
+  aria-label="Add task"
+  onclick="openAddTaskModal()"
+>
+  <span aria-hidden="true">+</span>
+  <span>Add Task</span>
+</button>
+
+<button
   id="goToTasksFab"
   class="hidden md:hidden tp-floating-island btn btn-teal rounded-full shadow-lg px-4 py-2 text-sm font-semibold flex items-center justify-center"
   type="button"
@@ -8873,6 +8885,7 @@ function tpPerfMark(label) {
 <script>
   (() => {
     const fab = document.getElementById('goToTasksFab');
+    const addTaskFab = document.getElementById('mobileAddTaskFab');
     const tasksSection = document.getElementById('tasksSection') || document.getElementById('tasksAnchor');
     if (!fab || !tasksSection) return;
 
@@ -8885,9 +8898,17 @@ function tpPerfMark(label) {
       fab.classList.add('is-pressed');
     };
 
+    const pressAddFab = () => {
+      if (!addTaskFab) return;
+      addTaskFab.classList.remove('is-pressed');
+      void addTaskFab.offsetWidth;
+      addTaskFab.classList.add('is-pressed');
+    };
+
     const updateFabVisibility = () => {
       const shouldShow = mobileQuery.matches && !tasksInView;
       fab.classList.toggle('hidden', !shouldShow);
+      if (addTaskFab) addTaskFab.classList.toggle('hidden', !mobileQuery.matches);
     };
 
     const wireFallbackVisibility = () => {
@@ -8925,6 +8946,12 @@ function tpPerfMark(label) {
       window.setTimeout(() => window.scrollBy(0, -12), 220);
     });
     fab.addEventListener('animationend', () => fab.classList.remove('is-pressed'));
+
+    if (addTaskFab) {
+      addTaskFab.addEventListener('pointerdown', pressAddFab);
+      addTaskFab.addEventListener('click', pressAddFab);
+      addTaskFab.addEventListener('animationend', () => addTaskFab.classList.remove('is-pressed'));
+    }
 
     updateFabVisibility();
 

@@ -1176,6 +1176,29 @@ body {
 }
 
 
+
+#mobileAddTaskFab{
+  right: 0.75rem;
+  bottom: calc(var(--tp-toolbar-height) + var(--tp-safe-bottom) + 4.1rem);
+  min-height: 50px;
+  min-width: 132px;
+  border-radius: 18px;
+  z-index: calc(var(--tp-z-floating) + 1) !important;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  transition: transform 170ms ease, opacity 170ms ease;
+}
+
+#mobileAddTaskFab:hover{
+  transform: translateY(-1px);
+}
+
+#mobileAddTaskFab:active,
+#mobileAddTaskFab.is-pressed{
+  animation: tpFabPress 180ms cubic-bezier(.34,1.56,.64,1);
+}
+
+
 #goToTasksFab{
   right: 0.75rem;
   bottom: calc(var(--tp-toolbar-height) + var(--tp-safe-bottom) + 0.4rem - 4px);
@@ -1204,10 +1227,12 @@ body {
 }
 
 @media (min-width: 768px){
+  #mobileAddTaskFab,
   #goToTasksFab{ display: none !important; }
 }
 
 
+body.mobile-toolbar-expanded #mobileAddTaskFab,
 body.mobile-toolbar-expanded #goToTasksFab{
   pointer-events: none;
   opacity: 0;
