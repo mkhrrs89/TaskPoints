@@ -3927,10 +3927,16 @@ header,
 
 
 
+.inertiaSplitCard{
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
 .inertiaPanelLeft{
-  background: var(--tp-teal-grad);
-  border-radius: 12px;
+  background: var(--tp-btn-teal-grad);
   min-height: 100%;
+  padding: 16px;
 }
 
 /* INDEX: desktop-only layout for Inertia card + Daily trend chart */
