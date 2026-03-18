@@ -5630,6 +5630,7 @@ function showTrashToast(taskId){
 
 function renderTasks(){
   const container=$('taskList'), empty=$('emptyList'); container.innerHTML='';
+  window.updateUndatedReminderIsland?.();
   const active=state.tasks.filter(t=>!t.completedAtISO && !t.hidden && !isTaskTrashed(t) && getTaskStatus(t)!=='wontdo');
   if(!active.length){ empty.classList.remove('hidden'); } else empty.classList.add('hidden');
 
@@ -8863,6 +8864,56 @@ function tpPerfMark(label) {
 </button>
 
 <button
+  id="mobileReminderIsland"
+  class="hidden md:hidden fixed z-40 btn btn-teal tp-reminder-island tp-reminder-island--shake rounded-full shadow-lg px-3 py-2 text-sm font-semibold items-center gap-2"
+  type="button"
+  aria-label="Open undated task reminder"
+>
+  <span class="tp-reminder-island__icon" aria-hidden="true">!</span>
+  <span class="tp-reminder-island__label">Reminder</span>
+</button>
+
+<div
+  id="undatedReminderModal"
+  class="fixed inset-0 z-40 hidden items-center justify-center bg-black/60"
+  aria-hidden="true"
+>
+  <div
+    class="w-full max-w-sm mx-3 rounded-2xl px-4 pb-5 pt-8 relative bg-zinc-900 text-zinc-100 text-sm undated-reminder-modal-panel"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="undatedReminderTitle"
+    onclick="event.stopPropagation();"
+  >
+    <button
+      type="button"
+      class="absolute top-3 right-3 btn btn-secondary text-[11px] px-3 py-1 rounded-md"
+      onclick="closeUndatedReminderModal()"
+      aria-label="Close reminder"
+    >
+      ✕
+    </button>
+
+    <div class="flex items-start justify-between gap-3 mb-4">
+      <div>
+        <div class="muted text-[11px] uppercase tracking-wide">Undated reminder</div>
+        <div id="undatedReminderTitle" class="text-base font-semibold leading-tight">Don’t forget about this task!</div>
+      </div>
+      <div class="text-2xl" aria-hidden="true">🔔</div>
+    </div>
+
+    <div class="glass undated-reminder-modal-card">
+      <div id="undatedReminderTaskTitle" class="text-base font-semibold leading-tight">—</div>
+      <div id="undatedReminderTaskMeta" class="muted text-xs mt-2 hidden"></div>
+    </div>
+
+    <div class="flex justify-end gap-2 mt-6">
+      <button type="button" class="btn btn-secondary" onclick="closeUndatedReminderModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<button
   id="mobileAddTaskFab"
   class="md:hidden tp-floating-island btn btn-teal rounded-full shadow-lg px-4 py-2 text-sm font-semibold flex items-center justify-center gap-1"
   type="button"
@@ -8887,11 +8938,63 @@ function tpPerfMark(label) {
   (() => {
     const fab = document.getElementById('goToTasksFab');
     const addTaskFab = document.getElementById('mobileAddTaskFab');
+    const reminderFab = document.getElementById('mobileReminderIsland');
+    const reminderModal = document.getElementById('undatedReminderModal');
+    const reminderTaskTitle = document.getElementById('undatedReminderTaskTitle');
+    const reminderTaskMeta = document.getElementById('undatedReminderTaskMeta');
     const tasksSection = document.getElementById('tasksSection') || document.getElementById('tasksAnchor');
     if (!fab || !tasksSection) return;
 
     const mobileQuery = window.matchMedia('(max-width: 767px)');
     let tasksInView = false;
+    let reminderDismissed = false;
+    let reminderTaskId = null;
+
+    const getUndatedReminderTasks = () => (Array.isArray(state?.tasks) ? state.tasks : []).filter((task) => (
+      task
+      && !task.completedAtISO
+      && !task.hidden
+      && !isTaskTrashed(task)
+      && getTaskStatus(task) !== 'wontdo'
+      && !task.dueDateISO
+    ));
+
+    const pickRandomUndatedReminderTask = () => {
+      const undatedTasks = getUndatedReminderTasks();
+      if (!undatedTasks.length) return null;
+      const randomIndex = Math.floor(Math.random() * undatedTasks.length);
+      return undatedTasks[randomIndex] || null;
+    };
+
+    const getReminderTask = () => {
+      const undatedTasks = getUndatedReminderTasks();
+      if (!undatedTasks.length) {
+        reminderTaskId = null;
+        return null;
+      }
+
+      const existingTask = reminderTaskId
+        ? undatedTasks.find((task) => task.id === reminderTaskId)
+        : null;
+
+      if (existingTask) return existingTask;
+
+      const randomTask = pickRandomUndatedReminderTask();
+      reminderTaskId = randomTask?.id || null;
+      return randomTask;
+    };
+
+    const renderReminderContent = (task) => {
+      if (!task || !reminderTaskTitle) return;
+      reminderTaskTitle.textContent = task.title || 'Untitled task';
+      if (!reminderTaskMeta) return;
+
+      const meta = [];
+      if (task.importance) meta.push(task.importance);
+      if (Number.isFinite(Number(task.points)) && Number(task.points) !== 0) meta.push(`${Number(task.points)} pts`);
+      reminderTaskMeta.textContent = meta.join(' • ');
+      reminderTaskMeta.classList.toggle('hidden', meta.length === 0);
+    };
 
     const pressFab = () => {
       fab.classList.remove('is-pressed');
@@ -8906,11 +9009,45 @@ function tpPerfMark(label) {
       addTaskFab.classList.add('is-pressed');
     };
 
+    const hideReminderForSession = () => {
+      reminderDismissed = true;
+      if (reminderFab) reminderFab.classList.add('hidden');
+    };
+
+    const openReminderModal = () => {
+      const task = getReminderTask();
+      if (!task || !reminderModal) return;
+      renderReminderContent(task);
+      reminderModal.classList.remove('hidden');
+      reminderModal.classList.add('flex');
+      reminderModal.setAttribute('aria-hidden', 'false');
+      window.lockScrollForModal?.();
+    };
+
+    const closeReminderModal = () => {
+      if (!reminderModal) return;
+      reminderModal.classList.add('hidden');
+      reminderModal.classList.remove('flex');
+      reminderModal.setAttribute('aria-hidden', 'true');
+      window.unlockScrollForModal?.();
+      hideReminderForSession();
+    };
+
+    window.openUndatedReminderModal = openReminderModal;
+    window.closeUndatedReminderModal = closeReminderModal;
+
     const updateFabVisibility = () => {
       const shouldShow = mobileQuery.matches && !tasksInView;
       fab.classList.toggle('hidden', !shouldShow);
       if (addTaskFab) addTaskFab.classList.toggle('hidden', !mobileQuery.matches);
+      if (reminderFab) {
+        const hasReminderTask = Boolean(getReminderTask());
+        const showReminder = mobileQuery.matches && shouldShow && hasReminderTask && !reminderDismissed;
+        reminderFab.classList.toggle('hidden', !showReminder);
+      }
     };
+
+    window.updateUndatedReminderIsland = updateFabVisibility;
 
     const wireFallbackVisibility = () => {
       const onScroll = () => {
@@ -8953,6 +9090,20 @@ function tpPerfMark(label) {
       addTaskFab.addEventListener('click', pressAddFab);
       addTaskFab.addEventListener('animationend', () => addTaskFab.classList.remove('is-pressed'));
     }
+
+    reminderFab?.addEventListener('click', openReminderModal);
+    reminderFab?.addEventListener('pointerdown', () => {
+      reminderFab.classList.remove('is-pressed');
+      void reminderFab.offsetWidth;
+      reminderFab.classList.add('is-pressed');
+    });
+    reminderFab?.addEventListener('animationend', () => reminderFab.classList.remove('is-pressed'));
+    reminderModal?.addEventListener('click', (event) => {
+      if (event.target === reminderModal) closeReminderModal();
+    });
+    reminderModal?.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') closeReminderModal();
+    });
 
     updateFabVisibility();
 
