@@ -184,7 +184,7 @@ body {
    MOBILE UNDATED REMINDER ISLAND
    ========================= */
 .tp-reminder-island {
-  top: calc(env(safe-area-inset-top, 0px) + 4.5rem);
+  top: calc(env(safe-area-inset-top, 0px) + 3.85rem);
   right: 0.75rem;
   left: auto;
   min-height: 2.75rem;
