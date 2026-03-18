@@ -1565,6 +1565,22 @@ header,
   border-color: #4f1f23 !important;
 }
 
+.task-priority-card.task-priority-medium {
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.06),
+    rgba(255, 255, 255, 0.03)
+  );
+}
+
+.task-priority-card.task-priority-low {
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.052),
+    rgba(255, 255, 255, 0.024)
+  );
+}
+
 /* High priority card tint */
 .high-card {
   background: linear-gradient(
