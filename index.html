@@ -5705,8 +5705,10 @@ function renderTasks(){
 
       const card = document.createElement('div');
       card.dataset.taskId = t.id;
-      const cardClasses = ['glass'];
-      if (t.importance === 'Critical') cardClasses.push('critical-card');
+      const cardClasses = ['glass', 'task-priority-card'];
+      if (t.importance === 'Low') cardClasses.push('task-priority-low');
+      else if (t.importance === 'Medium') cardClasses.push('task-priority-medium');
+      else if (t.importance === 'Critical') cardClasses.push('critical-card');
       else if (t.importance === 'High') cardClasses.push('high-card');
       if (isTaskExpanded) cardClasses.push('task-card-expanded');
       card.className = cardClasses.join(' ');
