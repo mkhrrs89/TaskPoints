@@ -181,6 +181,72 @@ body {
 
 
 /* =========================
+   MOBILE UNDATED REMINDER ISLAND
+   ========================= */
+.tp-reminder-island {
+  top: calc(env(safe-area-inset-top, 0px) + 4.5rem);
+  right: 0.75rem;
+  left: auto;
+  min-height: 2.75rem;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(180deg, rgba(36, 83, 89, 0.98), rgba(26, 56, 59, 0.98));
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.28);
+}
+
+.tp-reminder-island__icon {
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.14);
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
+.tp-reminder-island__label {
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+}
+
+.tp-reminder-island--shake {
+  transform-origin: center;
+  animation: tpReminderShake 3.2s ease-in-out infinite;
+}
+
+@keyframes tpReminderShake {
+  0%, 100% { transform: translate3d(0, 0, 0) rotate(0deg); }
+  6% { transform: translate3d(-1px, 0, 0) rotate(-3deg); }
+  12% { transform: translate3d(1px, 0, 0) rotate(3deg); }
+  18% { transform: translate3d(-1px, 0, 0) rotate(-2deg); }
+  24% { transform: translate3d(1px, 0, 0) rotate(2deg); }
+  30% { transform: translate3d(0, 0, 0) rotate(0deg); }
+}
+
+.undated-reminder-modal-panel {
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4);
+}
+
+.undated-reminder-modal-card {
+  padding: 14px 16px;
+  border-radius: 18px;
+}
+
+@media (min-width: 768px) {
+  .tp-reminder-island,
+  #undatedReminderModal {
+    display: none !important;
+  }
+}
+
+
+
+/* =========================
    SECTION 2 — CORE UI ATOMS (BUTTONS)
    ========================= */
 /* =======================================================================
