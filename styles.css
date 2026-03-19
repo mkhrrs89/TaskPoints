@@ -184,34 +184,20 @@ body {
    MOBILE UNDATED REMINDER ISLAND
    ========================= */
 .tp-reminder-island {
-  top: calc(env(safe-area-inset-top, 0px) + 3.85rem);
+  top: calc(env(safe-area-inset-top, 0px) + 3.25rem);
   right: 0.75rem;
   left: auto;
+  min-width: 2.75rem;
   min-height: 2.75rem;
+  padding-inline: 0.75rem !important;
   border-radius: 999px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  line-height: 1;
   background: linear-gradient(180deg, rgba(36, 83, 89, 0.98), rgba(26, 56, 59, 0.98));
   border: 1px solid rgba(255, 255, 255, 0.12);
   box-shadow: 0 14px 30px rgba(0, 0, 0, 0.28);
-}
-
-.tp-reminder-island__icon {
-  width: 1.4rem;
-  height: 1.4rem;
-  border-radius: 999px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(255, 255, 255, 0.14);
-  font-size: 0.9rem;
-  line-height: 1;
-}
-
-.tp-reminder-island__label {
-  font-size: 0.75rem;
-  letter-spacing: 0.02em;
 }
 
 .tp-reminder-island--shake {
