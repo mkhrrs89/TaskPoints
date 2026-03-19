@@ -208,9 +208,19 @@ body {
   line-height: 1;
 }
 
+.tp-reminder-island > * {
+  transform: translateY(0.03em);
+}
+
+.tp-reminder-island-glyph {
+  display: block;
+  line-height: 1;
+  transform: translateY(0.04em);
+}
+
 .tp-reminder-island--shake {
   transform-origin: center;
-  animation: tpReminderShake 3.2s ease-in-out infinite;
+  animation: tpReminderShake 2.1s ease-in-out infinite;
 }
 
 @keyframes tpReminderShake {
