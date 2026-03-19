@@ -491,7 +491,20 @@ Nothing visible on the page is built here. === -->
     </div>
   </div>
 
+  <div class="home-mobile-tabs-shell md:hidden mb-4">
+    <div id="homeMobileTabs" class="home-mobile-tabs" role="tablist" aria-label="Home sections">
+      <button type="button" id="homeTabRecords" class="home-mobile-tab is-active" data-home-tab="records" role="tab" aria-selected="true" aria-controls="homePanelRecords">Records</button>
+      <button type="button" id="homeTabScwm" class="home-mobile-tab" data-home-tab="scwm" role="tab" aria-selected="false" aria-controls="homePanelScwm">SCWM</button>
+      <button type="button" id="homeTabHabits" class="home-mobile-tab" data-home-tab="habits" role="tab" aria-selected="false" aria-controls="homePanelHabits">Habits</button>
+      <button type="button" id="homeTabVices" class="home-mobile-tab" data-home-tab="vices" role="tab" aria-selected="false" aria-controls="homePanelVices">Vices</button>
+      <button type="button" id="homeTabFlex" class="home-mobile-tab" data-home-tab="flex" role="tab" aria-selected="false" aria-controls="homePanelFlex">Flex</button>
+      <button type="button" id="homeTabTasks" class="home-mobile-tab" data-home-tab="tasks" role="tab" aria-selected="false" aria-controls="homePanelTasks">Tasks</button>
+    </div>
+  </div>
+
+  <div id="homeTabbedPanels">
   
+  <section id="homePanelRecords" class="home-tab-panel is-active" data-home-panel="records" role="tabpanel" aria-labelledby="homeTabRecords">
   <!-- LEADERBOARDS -->
   <div class="grid sm:grid-cols-3 gap-3 mb-6">
     <!-- BEST DAYS -->
@@ -523,6 +536,9 @@ Nothing visible on the page is built here. === -->
     </div>
   </div>
   <!-- LEADERBOARDS END -->
+  </section>
+
+  <section id="homePanelScwm" class="home-tab-panel" data-home-panel="scwm" role="tabpanel" aria-labelledby="homeTabScwm">
 
   
 <!-- =================================== SLEEP + CALORIES ========================================= -->
@@ -816,6 +832,9 @@ Nothing visible on the page is built here. === -->
     <div class="scoreV2-recentGrid" id="scoreV2RecentGrid"></div>
   </div>
 </section>
+  </section>
+
+  <section id="homePanelHabits" class="home-tab-panel" data-home-panel="habits" role="tabpanel" aria-labelledby="homeTabHabits">
 
 
 
@@ -846,7 +865,10 @@ Nothing visible on the page is built here. === -->
   </div>
   <div id="habitsEmpty" class="text-sm muted hidden">No habits yet.</div>
 </div>
+  </section>
 
+  <section id="homePanelVices" class="home-tab-panel" data-home-panel="vices" role="tabpanel" aria-labelledby="homeTabVices">
+    
 <!-- VICES -->
 <div class="glass mb-6 habits-card sectionCard sectionCard--teal">
 <div class="sectionHeader sectionHeader--teal">
@@ -866,7 +888,10 @@ Nothing visible on the page is built here. === -->
   </div>
   <div id="vicesEmpty" class="text-sm muted hidden">No vices yet.</div>
 </div>
+  </section>
 
+  <section id="homePanelFlex" class="home-tab-panel" data-home-panel="flex" role="tabpanel" aria-labelledby="homeTabFlex">
+    
   <!-- FLEX ACTIONS -->
 <!-- FLEX ACTIONS (collapsible) -->
 <div class="glass mb-6 flex-card sectionCard sectionCard--teal">
@@ -894,6 +919,9 @@ Nothing visible on the page is built here. === -->
   </div>
 </div>
 
+      </section>
+
+  <section id="homePanelTasks" class="home-tab-panel" data-home-panel="tasks" role="tabpanel" aria-labelledby="homeTabTasks">
 
   <!-- TASKS grouped by day -->
   <div id="tasksSection" class="glass mb-6 tasks-card sectionCard sectionCard--teal">
@@ -915,6 +943,8 @@ Nothing visible on the page is built here. === -->
     </div>
     <div id="taskList" class="grid gap-2"></div>
     <div id="emptyList" class="text-sm muted hidden">No tasks yet.</div>
+  </div>
+  </section>
   </div>
 
   <footer class="mt-10 flex items-center justify-between">
@@ -1814,6 +1844,8 @@ function closeAddTaskModal() {
 }
 
 function openAddTaskModal() {
+  window.setHomeTab?.('tasks');
+
   const modal = $("addTaskModal");
   if (!modal) return;
 
@@ -7213,7 +7245,84 @@ function setDueToday(){
   $('dueDateInput').value = todayKey();
 }
 
+const HOME_TAB_HASH_TO_PANEL = {
+  dailyBoard: 'records',
+  weeklyBoard: 'records',
+  monthlyBoard: 'records',
+  sleepAnchor: 'scwm',
+  workAnchor: 'scwm',
+  moodAnchor: 'scwm',
+  habitsAnchor: 'habits',
+  vicesAnchor: 'vices',
+  flexAnchor: 'flex',
+  tasksAnchor: 'tasks',
+  tasksSection: 'tasks'
+};
+
+function homeTabsAreMobile(){
+  return !!(window.matchMedia && window.matchMedia('(max-width: 767px)').matches);
+}
+
+function syncHomeTabPanelVisibility(){
+  const isMobile = homeTabsAreMobile();
+  document.querySelectorAll('[data-home-panel]').forEach((panel) => {
+    const active = panel.classList.contains('is-active');
+    panel.hidden = isMobile ? !active : false;
+  });
+}
+
+function setHomeTab(tabKey){
+  let found = false;
+
+  document.querySelectorAll('[data-home-tab]').forEach((btn) => {
+    const active = btn.dataset.homeTab === tabKey;
+    btn.classList.toggle('is-active', active);
+    btn.setAttribute('aria-selected', active ? 'true' : 'false');
+    btn.tabIndex = active ? 0 : -1;
+    if (active) found = true;
+  });
+
+  document.querySelectorAll('[data-home-panel]').forEach((panel) => {
+    const active = panel.dataset.homePanel === tabKey;
+    panel.classList.toggle('is-active', active);
+  });
+
+  syncHomeTabPanelVisibility();
+  return found;
+}
+
+function initHomeTabs(){
+  const tabButtons = Array.from(document.querySelectorAll('[data-home-tab]'));
+  if (!tabButtons.length) return;
+
+  tabButtons.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      setHomeTab(btn.dataset.homeTab);
+    });
+  });
+
+  const hashId = String(window.location.hash || '').replace(/^#/, '');
+  const hashPanel = HOME_TAB_HASH_TO_PANEL[hashId];
+  if (hashPanel) {
+    setHomeTab(hashPanel);
+  } else {
+    const activeBtn = document.querySelector('[data-home-tab].is-active') || tabButtons[0];
+    if (activeBtn) setHomeTab(activeBtn.dataset.homeTab);
+  }
+
+  window.addEventListener('resize', syncHomeTabPanelVisibility);
+
+  if (hashId && hashPanel && homeTabsAreMobile()) {
+    requestAnimationFrame(() => {
+      document.getElementById(hashId)?.scrollIntoView({ behavior: 'auto', block: 'start' });
+    });
+  }
+}
+
+window.setHomeTab = setHomeTab;
+
 function scrollToTasks(){
+  window.setHomeTab?.('tasks');
   const el = $('tasksAnchor');
   if (el) {
     el.scrollIntoView({
@@ -8431,6 +8540,7 @@ document.addEventListener('DOMContentLoaded', () => {
   
   initCaloriesDatePicker();
   initHabitSortControl();
+  initHomeTabs();
   updateWeekToggleButtons();
   renderHabitWeekLabels();
   renderViceWeekLabels();
@@ -9079,8 +9189,12 @@ function tpPerfMark(label) {
     fab.addEventListener('pointerdown', pressFab);
     fab.addEventListener('click', () => {
       pressFab();
-      tasksSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      window.setTimeout(() => window.scrollBy(0, -12), 220);
+      if (typeof window.scrollToTasks === 'function') {
+        window.scrollToTasks();
+      } else {
+        tasksSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        window.setTimeout(() => window.scrollBy(0, -12), 220);
+      }
     });
     fab.addEventListener('animationend', () => fab.classList.remove('is-pressed'));
 
