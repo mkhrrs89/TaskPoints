@@ -195,8 +195,9 @@ body {
   align-items: center;
   justify-content: center;
   line-height: 1;
-  background: linear-gradient(180deg, rgba(36, 83, 89, 0.98), rgba(26, 56, 59, 0.98));
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: linear-gradient(180deg, #fdba74, #fb923c);
+  color: #111827;
+  border: 1px solid transparent;
   box-shadow: 0 14px 30px rgba(0, 0, 0, 0.28);
 }
 
