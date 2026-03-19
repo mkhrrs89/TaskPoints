@@ -344,6 +344,10 @@ function setupMobileTasksMenu() {
 
   goBtn?.addEventListener('click', () => {
     closeMenu();
+    if (typeof window.scrollToTasks === 'function') {
+      window.scrollToTasks();
+      return;
+    }
     const tasksAnchor = document.getElementById('tasksAnchor');
     if (tasksAnchor) {
       tasksAnchor.scrollIntoView({ behavior: 'smooth', block: 'start' });
