@@ -494,7 +494,7 @@ Nothing visible on the page is built here. === -->
   <div class="home-mobile-tabs-shell md:hidden mb-4">
 <div id="homeMobileTabs" class="home-mobile-tabs" role="tablist" aria-label="Home sections">
   <button type="button" id="homeTabTasks" class="home-mobile-tab is-active" data-home-tab="tasks" role="tab" aria-selected="true" aria-controls="homePanelTasks">Tasks</button>
-  <button type="button" id="homeTabRecords" class="home-mobile-tab" data-home-tab="records" role="tab" aria-selected="false" aria-controls="homePanelRecords">Records</button>
+  <button type="button" id="homeTabRecords" class="home-mobile-tab" data-home-tab="records" role="tab" aria-selected="false" aria-controls="homePanelRecords" aria-label="Records tab">Records<span id="homeTabRecordsBadge" class="home-mobile-tab-badge" aria-hidden="true" hidden></span><span id="homeTabRecordsBadgeText" class="sr-only" hidden>Current day or week is in the top 10 records.</span></button>
   <button type="button" id="homeTabScwm" class="home-mobile-tab" data-home-tab="scwm" role="tab" aria-selected="false" aria-controls="homePanelScwm">SCWM</button>
   <button type="button" id="homeTabHabits" class="home-mobile-tab" data-home-tab="habits" role="tab" aria-selected="false" aria-controls="homePanelHabits">Habits</button>
   <button type="button" id="homeTabVices" class="home-mobile-tab" data-home-tab="vices" role="tab" aria-selected="false" aria-controls="homePanelVices">Vices</button>
@@ -3683,10 +3683,12 @@ function renderStats(){
         ul.innerHTML = '';
         if (!entries.length) {
           ul.innerHTML = '<li class="muted">No data yet.</li>';
-          return;
+          return [];
         }
 
-        entries.slice(0, 10).forEach((row, i) => {
+        const topEntries = entries.slice(0, 10);
+
+        topEntries.forEach((row, i) => {
           const li = document.createElement('li');
           const labelClass = labelClassFn ? labelClassFn(row) : '';
 
@@ -3707,6 +3709,31 @@ function renderStats(){
           `;
           ul.appendChild(li);
         });
+
+        return topEntries;
+      }
+
+      function updateRecordsTabBadge(topBestDays = [], topBestWeeks = []){
+        const recordsTab = $('homeTabRecords');
+        const badge = $('homeTabRecordsBadge');
+        const badgeText = $('homeTabRecordsBadgeText');
+        if (!recordsTab || !badge || !badgeText) return;
+
+        const todayRecordKey = todayKey();
+        const thisWeekRecordKey = isoWeekKey(new Date());
+        const hasTopDay = topBestDays.some((row) => row && row.key === todayRecordKey);
+        const hasTopWeek = topBestWeeks.some((row) => row && row.key === thisWeekRecordKey);
+        const showBadge = hasTopDay || hasTopWeek;
+
+        badge.hidden = !showBadge;
+        badgeText.hidden = !showBadge;
+        recordsTab.classList.toggle('has-records-badge', showBadge);
+        recordsTab.setAttribute(
+          'aria-label',
+          showBadge
+            ? 'Records tab, current day or week is in the top 10'
+            : 'Records tab'
+        );
       }
 
       // Build “with inertia” totals (daily -> weekly/monthly)
@@ -3761,9 +3788,10 @@ function renderStats(){
       const monthlyDateClass = (row) => (isYear2025(row.key) ? 'leaderboard-year-2025' : '');
 
       // Labels with NO "(Today / This Week / This Month)" text
-      fillBoard('dailyBoard', bestDays, r => niceDate(fromKey(r.key)), dailyDateClass);
-      fillBoard('weeklyBoard', bestWeeks, r => `${niceDate(r.start)} – ${niceDate(r.end)}`, weeklyDateClass);
+      const topBestDays = fillBoard('dailyBoard', bestDays, r => niceDate(fromKey(r.key)), dailyDateClass);
+      const topBestWeeks = fillBoard('weeklyBoard', bestWeeks, r => `${niceDate(r.start)} – ${niceDate(r.end)}`, weeklyDateClass);
       fillBoard('monthlyBoard', bestMonths, r => formatMonthKey(r.key), monthlyDateClass);
+      updateRecordsTabBadge(topBestDays, topBestWeeks);
 
       // Highlight current day/week/month in orange if they appear
       [
