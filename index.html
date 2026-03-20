@@ -900,14 +900,13 @@ Nothing visible on the page is built here. === -->
       <h2 id="flexAnchor" class="sectionTitle sectionTitle--inline">Flex Actions</h2>
 
       <!-- Reuses the existing .recent-toggle JS on this page -->
-      <button class="recent-toggle" type="button" data-target="flexWrap" aria-expanded="false">
-        Show
+      <button class="recent-toggle" type="button" data-target="flexWrap" aria-expanded="true">
+        Hide
       </button>
     </div>
   </div>
 
-  <!-- Collapsed by default -->
-  <div id="flexWrap" class="hidden">
+  <div id="flexWrap">
     <div class="flex gap-2 flex-wrap mb-3">
       <input id="flexName" class="input w-48" placeholder="Flex action">
       <input id="flexPts"  class="input w-28" type="number" step="any" placeholder="Pts/use">
