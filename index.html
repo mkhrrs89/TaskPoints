@@ -1398,6 +1398,17 @@ function initHabitSortControl(){
 
 let editingTaskId = null;
 let expandedTaskId = null;
+const taskCompletionAnimations = new Map();
+const TASK_DUST_ANIMATION_MS = 580;
+const TASK_DUST_REDUCED_MS = 180;
+const TASK_DUST_COLORS = [
+  'rgba(148, 163, 184, 0.34)',
+  'rgba(125, 211, 252, 0.22)',
+  'rgba(45, 212, 191, 0.20)',
+  'rgba(251, 146, 60, 0.18)',
+  'rgba(245, 245, 244, 0.22)',
+  'rgba(161, 161, 170, 0.28)'
+];
 const taskGroupExpandedState = Object.create(null);
 let taskActionSheetTaskId = null;
 let taskActionSheetTrigger = null;
@@ -7407,49 +7418,116 @@ function wontDoMain(id){
   window.updateCriticalTasksIsland?.();
 }
 
+function prefersReducedTaskMotion(){
+  return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+}
+
+function cleanupTaskCompletionAnimation(id, card){
+  const active = taskCompletionAnimations.get(id);
+  if (active?.timeoutId) clearTimeout(active.timeoutId);
+  const host = card || active?.card || document.querySelector(`.glass[data-task-id="${CSS.escape(id)}"]`);
+  if (host) {
+    host.classList.remove('task-completion-animating', 'task-dusting', 'task-dusting-leaving');
+    host.removeAttribute('aria-hidden');
+    host.querySelectorAll('.task-dust-layer').forEach(node => node.remove());
+  }
+  taskCompletionAnimations.delete(id);
+}
+
+function animateTaskCompletion(id, onDone){
+  const card = document.querySelector(`.glass[data-task-id="${CSS.escape(id)}"]`);
+  const reducedMotion = prefersReducedTaskMotion();
+  const duration = reducedMotion ? TASK_DUST_REDUCED_MS : TASK_DUST_ANIMATION_MS;
+
+  cleanupTaskCompletionAnimation(id, card);
+
+  if (!card) {
+    onDone?.();
+    return;
+  }
+
+  card.classList.add('task-completion-animating', 'task-dusting');
+  card.setAttribute('aria-hidden', 'true');
+
+  if (!reducedMotion) {
+    const shell = card.querySelector('.task-card-shell') || card;
+    const layer = document.createElement('span');
+    layer.className = 'task-dust-layer';
+    const particleCount = 10 + Math.floor(Math.random() * 7);
+    for (let i = 0; i < particleCount; i += 1) {
+      const particle = document.createElement('span');
+      particle.className = 'task-dust-particle';
+      const originX = 18 + Math.random() * 64;
+      const originY = 28 + Math.random() * 44;
+      const dx = (Math.random() - 0.5) * 64;
+      const dy = -14 - Math.random() * 38;
+      const size = 4 + Math.random() * 7;
+      particle.style.setProperty('--dust-x', `${originX}%`);
+      particle.style.setProperty('--dust-y', `${originY}%`);
+      particle.style.setProperty('--dust-dx', `${dx.toFixed(1)}px`);
+      particle.style.setProperty('--dust-dy', `${dy.toFixed(1)}px`);
+      particle.style.setProperty('--dust-size', `${size.toFixed(1)}px`);
+      particle.style.setProperty('--dust-color', TASK_DUST_COLORS[i % TASK_DUST_COLORS.length]);
+      particle.style.setProperty('--dust-delay', `${Math.round(Math.random() * 70)}ms`);
+      particle.style.setProperty('--dust-duration', `${470 + Math.round(Math.random() * 150)}ms`);
+      layer.appendChild(particle);
+    }
+    shell.appendChild(layer);
+  }
+
+  const timeoutId = window.setTimeout(() => {
+    card.classList.add('task-dusting-leaving');
+    cleanupTaskCompletionAnimation(id, card);
+    onDone?.();
+  }, duration);
+
+  taskCompletionAnimations.set(id, { timeoutId, card });
+}
+
 function completeTask(id){
   return tpPerfTime('completeTask total', () => {
     const t = state.tasks.find(x => x.id === id);
-    if (!t) return;
+    if (!t || taskCompletionAnimations.has(id)) return;
 
     const now = new Date().toISOString();
     const completedDayKey = dateKey(now);
 
-    // Prevent duplicate completion same day (for non-recurring)
     const alreadyCompletedToday = Array.isArray(state.completions)
       ? state.completions.some(c => c && c.taskId === id && dateKey(c.completedAtISO) === completedDayKey)
       : false;
 
     if (alreadyCompletedToday) return;
 
-    // always log the completion
-    addCompletion({
-      id: crypto.randomUUID(),
-      taskId: id,
-      title: t.title,
-      points: t.points,
-      completedAtISO: now
+    animateTaskCompletion(id, () => {
+      const liveTask = state.tasks.find(x => x.id === id);
+      if (!liveTask) return;
+
+      addCompletion({
+        id: crypto.randomUUID(),
+        taskId: id,
+        title: liveTask.title,
+        points: liveTask.points,
+        completedAtISO: now
+      });
+
+      const rec = liveTask.recurrence || {};
+      const mode = rec.mode || 'none';
+
+      if (mode === 'none') {
+        liveTask.completedAtISO = now;
+        liveTask.status = 'done';
+      } else {
+        const nextKey = computeNextDueDate(liveTask);
+        if (nextKey) liveTask.dueDateISO = nextKey;
+        liveTask.completedAtISO = null;
+      }
+
+      liveTask.updatedAtISO = now;
+      removeTaskFromTodayView(id, completedDayKey);
+      save();
+      window.updateCriticalTasksIsland?.();
+      scheduleRender(renderAll);
     });
-
-    const rec = t.recurrence || {};
-    const mode = rec.mode || 'none';
-
-    if (mode === 'none') {
-      // one-off task → mark completed and hide from list
-      t.completedAtISO = now;
-      t.status = 'done';
-    } else {
-      // repeating task → move due date forward, keep it active
-      const nextKey = computeNextDueDate(t);
-      if (nextKey) t.dueDateISO = nextKey;
-      t.completedAtISO = null; // keep it in the active list
-    }
-
-    t.updatedAtISO = now;
-    removeTaskFromTodayView(id, completedDayKey);
-    save();
-    window.updateCriticalTasksIsland?.();
-    scheduleRender(renderAll);
   });
 }
 
