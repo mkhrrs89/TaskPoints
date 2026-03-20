@@ -1813,6 +1813,76 @@ header,
 .task-expanded-actions{display:flex;gap:8px;flex-wrap:wrap}
 .task-tags{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
 
+.task-completion-animating{
+  position:relative;
+  overflow:visible;
+  will-change:transform,opacity,filter;
+}
+
+.task-completion-animating.task-dusting{
+  pointer-events:none;
+}
+
+.task-completion-animating.task-dusting .task-card-shell,
+.task-completion-animating.task-dusting .task-expanded{
+  animation:taskDustCard .58s cubic-bezier(.2,.72,.16,1) forwards;
+  transform-origin:center center;
+}
+
+.task-completion-animating.task-dusting-leaving{
+  opacity:0;
+}
+
+.task-dust-layer{
+  position:absolute;
+  inset:-6px;
+  pointer-events:none;
+  overflow:visible;
+  z-index:4;
+}
+
+.task-dust-particle{
+  position:absolute;
+  left:var(--dust-x,50%);
+  top:var(--dust-y,50%);
+  width:var(--dust-size,8px);
+  height:var(--dust-size,8px);
+  border-radius:999px;
+  background:var(--dust-color,rgba(148,163,184,.38));
+  opacity:0;
+  filter:blur(.4px);
+  transform:translate3d(-50%,-50%,0) scale(.72);
+  animation:taskDustParticle var(--dust-duration,560ms) cubic-bezier(.18,.7,.2,1) forwards;
+  animation-delay:var(--dust-delay,0ms);
+}
+
+@keyframes taskDustCard{
+  0%{transform:translateZ(0) scale(1);opacity:1;filter:blur(0)}
+  22%{transform:translateZ(0) scale(.985)}
+  55%{transform:translate3d(0,0,0) scale(.965);opacity:.88;filter:blur(.6px)}
+  100%{transform:translate3d(0,-4px,0) scale(.94);opacity:0;filter:blur(2.5px)}
+}
+
+@keyframes taskDustParticle{
+  0%{opacity:0;transform:translate3d(-50%,-50%,0) scale(.72)}
+  18%{opacity:.82}
+  100%{opacity:0;transform:translate3d(calc(-50% + var(--dust-dx,0px)),calc(-50% + var(--dust-dy,-18px)),0) scale(.32)}
+}
+
+@media (prefers-reduced-motion: reduce){
+  .task-completion-animating.task-dusting .task-card-shell,
+  .task-completion-animating.task-dusting .task-expanded{
+    animation:taskDustCardReduced .18s ease-out forwards;
+  }
+
+  .task-dust-layer{display:none !important}
+}
+
+@keyframes taskDustCardReduced{
+  from{opacity:1;transform:none;filter:none}
+  to{opacity:0;transform:scale(.985);filter:none}
+}
+
 .task-action-sheet{
   position:fixed;
   inset:0;
