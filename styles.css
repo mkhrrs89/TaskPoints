@@ -241,6 +241,48 @@ body {
   border-radius: 18px;
 }
 
+.undated-reminder-modal-card--button {
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 140ms ease, box-shadow 180ms ease, border-color 180ms ease;
+}
+
+.undated-reminder-modal-card--button:hover,
+.undated-reminder-modal-card--button:focus-visible {
+  border-color: rgba(94, 234, 212, 0.4);
+  box-shadow: 0 0 0 1px rgba(94, 234, 212, 0.24), 0 14px 28px rgba(249, 115, 22, 0.16);
+}
+
+.undated-reminder-modal-card--button:focus-visible {
+  outline: 2px solid rgba(94, 234, 212, 0.9);
+  outline-offset: 3px;
+}
+
+.undated-reminder-modal-card--button:active,
+.undated-reminder-modal-card--button.is-pressed {
+  transform: scale(0.985);
+}
+
+.task-reminder-jump-target {
+  animation: taskReminderJumpGlow 1.7s ease-out;
+}
+
+@keyframes taskReminderJumpGlow {
+  0% {
+    box-shadow: 0 0 0 0 rgba(251, 146, 60, 0), 0 0 0 0 rgba(45, 212, 191, 0);
+  }
+  18% {
+    box-shadow: 0 0 0 2px rgba(251, 146, 60, 0.75), 0 0 24px 8px rgba(45, 212, 191, 0.22);
+  }
+  55% {
+    box-shadow: 0 0 0 2px rgba(251, 146, 60, 0.42), 0 0 16px 4px rgba(45, 212, 191, 0.14);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(251, 146, 60, 0), 0 0 0 0 rgba(45, 212, 191, 0);
+  }
+}
+
 @media (min-width: 768px) {
   .tp-reminder-island,
   #undatedReminderModal {
