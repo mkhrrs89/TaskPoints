@@ -1832,7 +1832,8 @@ header,
   color:var(--muted);
 }
 
-.task-card-shell{cursor:pointer}
+.task-priority-card.task-card-expanded{position:relative;isolation:isolate}
+.task-card-shell{cursor:pointer;position:relative;z-index:1}
 .task-card-shell:focus-visible{outline:2px solid #22d3ee;outline-offset:2px;border-radius:12px}
 .task-card-header{
   display:flex;
@@ -1851,8 +1852,9 @@ header,
 }
 
 .task-more-btn{min-width:34px;padding-inline:10px}
-.task-expanded{margin-top:10px}
-.task-expanded-actions{display:flex;gap:8px;flex-wrap:wrap}
+.task-expanded{margin-top:10px;position:relative;z-index:2}
+.task-expanded-actions{display:flex;gap:8px;flex-wrap:wrap;position:relative;z-index:3}
+.task-expanded-actions .btn-task{position:relative;z-index:4}
 .task-tags{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
 
 .task-completion-animating{
@@ -2472,6 +2474,11 @@ header,
     font-size:10px;
     min-height: 38px;
     touch-action: manipulation;
+  }
+
+  #taskList .task-expanded-actions,
+  #archiveList .task-expanded-actions{
+    padding-left: 2px;
   }
 
   /* Give the tiny “+1d” bump button a minimum hitbox width */
