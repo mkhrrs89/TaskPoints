@@ -9089,10 +9089,15 @@ function tpPerfMark(label) {
       <div class="text-2xl" aria-hidden="true">🔔</div>
     </div>
 
-    <div class="glass undated-reminder-modal-card">
+    <button
+      id="undatedReminderTaskCard"
+      type="button"
+      class="glass undated-reminder-modal-card undated-reminder-modal-card--button"
+      aria-label="Open reminder task"
+    >
       <div id="undatedReminderTaskTitle" class="text-base font-semibold leading-tight">—</div>
       <div id="undatedReminderTaskMeta" class="muted text-xs mt-2 hidden"></div>
-    </div>
+    </button>
 
     <div class="flex justify-end gap-2 mt-6">
       <button type="button" class="btn btn-secondary" onclick="closeUndatedReminderModal()">Close</button>
@@ -9127,6 +9132,7 @@ function tpPerfMark(label) {
     const addTaskFab = document.getElementById('mobileAddTaskFab');
     const reminderFab = document.getElementById('mobileReminderIsland');
     const reminderModal = document.getElementById('undatedReminderModal');
+    const reminderTaskCard = document.getElementById('undatedReminderTaskCard');
     const reminderTaskTitle = document.getElementById('undatedReminderTaskTitle');
     const reminderTaskMeta = document.getElementById('undatedReminderTaskMeta');
     const tasksSection = document.getElementById('tasksSection') || document.getElementById('tasksAnchor');
@@ -9173,7 +9179,9 @@ function tpPerfMark(label) {
 
     const renderReminderContent = (task) => {
       if (!task || !reminderTaskTitle) return;
-      reminderTaskTitle.textContent = task.title || 'Untitled task';
+      const taskTitle = task.title || 'Untitled task';
+      reminderTaskTitle.textContent = taskTitle;
+      reminderTaskCard?.setAttribute('aria-label', `Open task: ${taskTitle}`);
       if (!reminderTaskMeta) return;
 
       const meta = [];
@@ -9181,6 +9189,87 @@ function tpPerfMark(label) {
       if (Number.isFinite(Number(task.points)) && Number(task.points) !== 0) meta.push(`${Number(task.points)} pts`);
       reminderTaskMeta.textContent = meta.join(' • ');
       reminderTaskMeta.classList.toggle('hidden', meta.length === 0);
+    };
+
+    const escapeTaskSelector = (value) => {
+      const raw = String(value ?? '');
+      if (window.CSS?.escape) return window.CSS.escape(raw);
+      return raw.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    };
+
+    const findTaskCardById = (taskId) => {
+      if (!taskId) return null;
+      const escapedId = escapeTaskSelector(taskId);
+      try {
+        return document.querySelector(`.glass[data-task-id="${escapedId}"]`);
+      } catch (_error) {
+        return null;
+      }
+    };
+
+    const expandTaskGroupForCard = (card) => {
+      const group = card?.closest('[data-group-key]');
+      const body = card?.closest('[data-task-group-body]');
+      if (!group || !body || !body.hidden) return false;
+      const groupKey = group.getAttribute('data-group-key');
+      if (!groupKey) return false;
+      const groupDate = group.getAttribute('data-group-date') || null;
+      const bucketMeta = {
+        key: groupKey,
+        date: groupDate ? fromKey(groupDate) : null,
+      };
+      taskGroupExpandedState[groupKey] = true;
+      renderTasks();
+      return true;
+    };
+
+    const scrollToTasksFallback = () => {
+      const fallback = document.getElementById('tasksAnchor') || document.getElementById('tasksSection') || tasksSection;
+      fallback?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+      window.setTimeout(() => window.scrollBy?.(0, -12), 220);
+    };
+
+    let reminderJumpHighlightTimeout = null;
+
+    const jumpToReminderTask = () => {
+      const task = getReminderTask();
+      if (!task) {
+        closeReminderModal();
+        scrollToTasksFallback();
+        return;
+      }
+
+      closeReminderModal();
+      window.setHomeTab?.('tasks');
+
+      window.requestAnimationFrame(() => {
+        renderTasks();
+
+        let card = findTaskCardById(task.id);
+        if (!card) {
+          scrollToTasksFallback();
+          return;
+        }
+
+        if (expandTaskGroupForCard(card)) {
+          card = findTaskCardById(task.id);
+        }
+
+        if (!card) {
+          scrollToTasksFallback();
+          return;
+        }
+
+        card.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+        card.classList.remove('task-reminder-jump-target');
+        void card.offsetWidth;
+        card.classList.add('task-reminder-jump-target');
+        if (reminderJumpHighlightTimeout) clearTimeout(reminderJumpHighlightTimeout);
+        reminderJumpHighlightTimeout = window.setTimeout(() => {
+          card.classList.remove('task-reminder-jump-target');
+          reminderJumpHighlightTimeout = null;
+        }, 1700);
+      });
     };
 
     const pressFab = () => {
@@ -9283,6 +9372,7 @@ function tpPerfMark(label) {
     }
 
     reminderFab?.addEventListener('click', openReminderModal);
+    reminderTaskCard?.addEventListener('click', jumpToReminderTask);
     reminderFab?.addEventListener('pointerdown', () => {
       reminderFab.classList.remove('is-pressed');
       void reminderFab.offsetWidth;
