@@ -264,6 +264,16 @@ body {
   transform: scale(0.985);
 }
 
+.undated-reminder-modal-actions {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.undated-reminder-modal-action {
+  flex: 1 1 0;
+  justify-content: center;
+}
+
 .task-reminder-jump-target {
   animation: taskReminderJumpGlow 1.7s ease-out;
 }
