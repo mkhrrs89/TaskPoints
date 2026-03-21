@@ -822,13 +822,7 @@ Nothing visible on the page is built here. === -->
 <section id="score-dashboard-v2">
   <div class="scoreV2-row" id="scoreV2Row"></div>
 
-  <div class="scoreV2-toggleRow">
-    <button class="scoreV2-toggleBtn" id="scoreV2ToggleBtn" type="button">
-      Display recent scores
-    </button>
-  </div>
-
-  <div class="scoreV2-recentWrap" id="scoreV2RecentWrap" aria-hidden="true">
+  <div class="scoreV2-recentWrap is-open" id="scoreV2RecentWrap" aria-hidden="false">
     <div class="scoreV2-recentGrid" id="scoreV2RecentGrid"></div>
   </div>
 </section>
@@ -8204,7 +8198,7 @@ if (key === "mood") {
   }
 }
 
-let scoreV2RecentOpen = false;
+let scoreV2RecentOpen = true;
 
 function refreshScoreV2UI(){
   try { renderScoreDashboardV2_Skeleton(); } catch(e){}
@@ -8212,21 +8206,13 @@ function refreshScoreV2UI(){
 }
   
 function initScoreV2Toggle(){
-  const btn = document.getElementById("scoreV2ToggleBtn");
   const wrap = document.getElementById("scoreV2RecentWrap");
-  if (!btn || !wrap) return;
+  if (!wrap) return;
 
-  btn.onclick = () => {
-    scoreV2RecentOpen = !scoreV2RecentOpen;
-
-    wrap.classList.toggle("is-open", scoreV2RecentOpen);
-    wrap.setAttribute("aria-hidden", String(!scoreV2RecentOpen));
-    btn.textContent = scoreV2RecentOpen ? "Hide recent scores" : "Display recent scores";
-
-    // Later: when opening, render recent grid
-  if (scoreV2RecentOpen) renderScoreV2RecentGrid();
-    
-  };
+  scoreV2RecentOpen = true;
+  wrap.classList.add("is-open");
+  wrap.setAttribute("aria-hidden", "false");
+  renderScoreV2RecentGrid();
 }
 
   function renderScoreV2RecentGrid(){
