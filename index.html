@@ -9245,84 +9245,24 @@ function tpPerfMark(label) {
       reminderTaskMeta.classList.toggle('hidden', meta.length === 0);
     };
 
-    const escapeTaskSelector = (value) => {
-      const raw = String(value ?? '');
-      if (window.CSS?.escape) return window.CSS.escape(raw);
-      return raw.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-    };
-
-    const findTaskCardById = (taskId) => {
-      if (!taskId) return null;
-      const escapedId = escapeTaskSelector(taskId);
-      try {
-        return document.querySelector(`.glass[data-task-id="${escapedId}"]`);
-      } catch (_error) {
-        return null;
-      }
-    };
-
-    const expandTaskGroupForCard = (card) => {
-      const group = card?.closest('[data-group-key]');
-      const body = card?.closest('[data-task-group-body]');
-      if (!group || !body || !body.hidden) return false;
-      const groupKey = group.getAttribute('data-group-key');
-      if (!groupKey) return false;
-      const groupDate = group.getAttribute('data-group-date') || null;
-      const bucketMeta = {
-        key: groupKey,
-        date: groupDate ? fromKey(groupDate) : null,
-      };
-      taskGroupExpandedState[groupKey] = true;
-      renderTasks();
-      return true;
-    };
-
-    const scrollToTasksFallback = () => {
-      const fallback = document.getElementById('tasksAnchor') || document.getElementById('tasksSection') || tasksSection;
-      fallback?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
-      window.setTimeout(() => window.scrollBy?.(0, -12), 220);
-    };
-
-    let reminderJumpHighlightTimeout = null;
-
-    const jumpToReminderTask = () => {
+    const openReminderTaskEditor = () => {
       const task = getReminderTask();
+      closeReminderModal();
       if (!task) {
-        closeReminderModal();
-        scrollToTasksFallback();
+        console.warn('Undated reminder task was not found.');
         return;
       }
 
-      closeReminderModal();
       window.setHomeTab?.('tasks');
-
       window.requestAnimationFrame(() => {
-        renderTasks();
-
-        let card = findTaskCardById(task.id);
-        if (!card) {
-          scrollToTasksFallback();
+        const currentTask = Array.isArray(state?.tasks)
+          ? state.tasks.find((item) => item?.id === task.id)
+          : null;
+        if (!currentTask) {
+          console.warn(`Unable to open editor for reminder task: ${task.id}`);
           return;
         }
-
-        if (expandTaskGroupForCard(card)) {
-          card = findTaskCardById(task.id);
-        }
-
-        if (!card) {
-          scrollToTasksFallback();
-          return;
-        }
-
-        card.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
-        card.classList.remove('task-reminder-jump-target');
-        void card.offsetWidth;
-        card.classList.add('task-reminder-jump-target');
-        if (reminderJumpHighlightTimeout) clearTimeout(reminderJumpHighlightTimeout);
-        reminderJumpHighlightTimeout = window.setTimeout(() => {
-          card.classList.remove('task-reminder-jump-target');
-          reminderJumpHighlightTimeout = null;
-        }, 1700);
+        editTask(currentTask.id);
       });
     };
 
@@ -9432,7 +9372,7 @@ function tpPerfMark(label) {
     }
 
     reminderFab?.addEventListener('click', openReminderModal);
-    reminderTaskCard?.addEventListener('click', jumpToReminderTask);
+    reminderTaskCard?.addEventListener('click', openReminderTaskEditor);
     reminderFab?.addEventListener('pointerdown', () => {
       reminderFab.classList.remove('is-pressed');
       void reminderFab.offsetWidth;
