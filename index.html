@@ -9130,8 +9130,9 @@ function tpPerfMark(label) {
       <div id="undatedReminderTaskMeta" class="muted text-xs mt-2 hidden"></div>
     </button>
 
-    <div class="flex justify-end gap-2 mt-6">
-      <button type="button" class="btn btn-secondary" onclick="closeUndatedReminderModal()">Close</button>
+    <div class="undated-reminder-modal-actions mt-6">
+      <button type="button" class="btn btn-secondary undated-reminder-modal-action" onclick="dismissUndatedReminderForSession()">Dismiss</button>
+      <button type="button" class="btn btn-secondary undated-reminder-modal-action" onclick="closeUndatedReminderModal()">Close</button>
     </div>
   </div>
 </div>
@@ -9170,9 +9171,31 @@ function tpPerfMark(label) {
     if (!fab || !tasksSection) return;
 
     const mobileQuery = window.matchMedia('(max-width: 767px)');
+    const reminderDismissStorageKey = 'tpUndatedReminderDismissed';
     let tasksInView = false;
     let reminderDismissed = false;
     let reminderTaskId = null;
+
+    const readReminderDismissedState = () => {
+      try {
+        return window.sessionStorage?.getItem(reminderDismissStorageKey) === '1';
+      } catch (_error) {
+        return false;
+      }
+    };
+
+    const writeReminderDismissedState = (dismissed) => {
+      try {
+        if (!window.sessionStorage) return;
+        if (dismissed) {
+          window.sessionStorage.setItem(reminderDismissStorageKey, '1');
+        } else {
+          window.sessionStorage.removeItem(reminderDismissStorageKey);
+        }
+      } catch (_error) {}
+    };
+
+    reminderDismissed = readReminderDismissedState();
 
     const getUndatedReminderTasks = () => (Array.isArray(state?.tasks) ? state.tasks : []).filter((task) => (
       task
@@ -9318,6 +9341,7 @@ function tpPerfMark(label) {
 
     const hideReminderForSession = () => {
       reminderDismissed = true;
+      writeReminderDismissedState(true);
       if (reminderFab) reminderFab.classList.add('hidden');
     };
 
@@ -9337,18 +9361,23 @@ function tpPerfMark(label) {
       reminderModal.classList.remove('flex');
       reminderModal.setAttribute('aria-hidden', 'true');
       window.unlockScrollForModal?.();
+    };
+
+    const dismissReminderForSession = () => {
       hideReminderForSession();
+      closeReminderModal();
     };
 
     window.openUndatedReminderModal = openReminderModal;
     window.closeUndatedReminderModal = closeReminderModal;
+    window.dismissUndatedReminderForSession = dismissReminderForSession;
 
     const updateFabVisibility = () => {
       const shouldShow = mobileQuery.matches && !tasksInView;
+      const hasReminderTask = Boolean(getReminderTask());
       fab.classList.toggle('hidden', !shouldShow);
       if (addTaskFab) addTaskFab.classList.toggle('hidden', !mobileQuery.matches);
       if (reminderFab) {
-        const hasReminderTask = Boolean(getReminderTask());
         const showReminder = mobileQuery.matches && shouldShow && hasReminderTask && !reminderDismissed;
         reminderFab.classList.toggle('hidden', !showReminder);
       }
