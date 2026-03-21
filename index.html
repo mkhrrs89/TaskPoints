@@ -5792,39 +5792,43 @@ function renderTasks(){
 
         card.innerHTML = `
           <div class="flex flex-col gap-3">
-            <div class="grid gap-2 sm:grid-cols-2">
+            <div class="grid gap-2">
               <div class="sm:col-span-2">
                 <label class="text-xs muted">Title</label>
                 <input class="input mt-1" data-field="title" value="${escapeHtml(t.title)}">
               </div>
-              <div>
-                <label class="text-xs muted">Importance</label>
-                <select class="input mt-1" data-field="importance">
-                  <option ${t.importance==='Low'?'selected':''}>Low</option>
-                  <option ${t.importance==='Medium'?'selected':''}>Medium</option>
-                  <option ${t.importance==='High'?'selected':''}>High</option>
-                  <option ${t.importance==='Critical'?'selected':''}>Critical</option>
-                </select>
+              <div class="task-edit-paired-row sm:col-span-2">
+                <div>
+                  <label class="text-xs muted">Importance</label>
+                  <select class="input mt-1" data-field="importance">
+                    <option ${t.importance==='Low'?'selected':''}>Low</option>
+                    <option ${t.importance==='Medium'?'selected':''}>Medium</option>
+                    <option ${t.importance==='High'?'selected':''}>High</option>
+                    <option ${t.importance==='Critical'?'selected':''}>Critical</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="text-xs muted">Due Date</label>
+                  <input class="input mt-1" type="date" data-field="due" value="">
+                </div>
               </div>
-              <div>
-                <label class="text-xs muted">Due Date</label>
-                <input class="input mt-1" type="date" data-field="due" value="">
-              </div>
-              <div>
-                <label class="text-xs muted">Points</label>
-                <input class="input mt-1" type="number" data-field="points" value="${t.points||0}">
-              </div>
-              <div>
-                <label class="text-xs muted">Repeat</label>
-                <select class="input mt-1" data-field="repeat">
-                  <option value="none" ${recMode==='none'?'selected':''}>Does not repeat</option>
-                  <option value="daily" ${recMode==='daily'?'selected':''}>Daily</option>
-                  <option value="everyWeekday" ${recMode==='everyWeekday'?'selected':''}>Every Weekday</option>
-                  <option value="weekly" ${recMode==='weekly'?'selected':''}>Weekly</option>
-                  <option value="monthly" ${recMode==='monthly'?'selected':''}>Monthly</option>
-                  <option value="yearly" ${recMode==='yearly'?'selected':''}>Yearly</option>
-                  <option value="custom" ${recMode==='custom'?'selected':''}>Custom...</option>
-                </select>
+              <div class="task-edit-paired-row sm:col-span-2">
+                <div>
+                  <label class="text-xs muted">Points</label>
+                  <input class="input mt-1" type="number" data-field="points" value="${t.points||0}">
+                </div>
+                <div>
+                  <label class="text-xs muted">Repeat</label>
+                  <select class="input mt-1" data-field="repeat">
+                    <option value="none" ${recMode==='none'?'selected':''}>Does not repeat</option>
+                    <option value="daily" ${recMode==='daily'?'selected':''}>Daily</option>
+                    <option value="everyWeekday" ${recMode==='everyWeekday'?'selected':''}>Every Weekday</option>
+                    <option value="weekly" ${recMode==='weekly'?'selected':''}>Weekly</option>
+                    <option value="monthly" ${recMode==='monthly'?'selected':''}>Monthly</option>
+                    <option value="yearly" ${recMode==='yearly'?'selected':''}>Yearly</option>
+                    <option value="custom" ${recMode==='custom'?'selected':''}>Custom...</option>
+                  </select>
+                </div>
               </div>
               <div class="repeat-custom-row sm:col-span-2 ${recMode==='custom'?'':'hidden'}">
                 <label class="text-xs muted">Custom Repeat</label>
