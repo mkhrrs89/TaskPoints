@@ -4439,26 +4439,6 @@ header,
   );
 }
 
-.scoreV2-toggleRow{
-  margin-top: 10px;
-  display: flex;
-  justify-content: center;
-}
-
-.scoreV2-toggleBtn{
-  background: transparent;
-  border: none;
-  color: rgba(255,255,255,0.7);
-  font-size: 12px;
-  letter-spacing: .04em;
-  padding: 8px 10px;
-  cursor: pointer;
-}
-
-.scoreV2-toggleBtn:active{
-  transform: scale(0.98);
-}
-
 .scoreV2-recentWrap{
   overflow: hidden;
   max-height: 0;
