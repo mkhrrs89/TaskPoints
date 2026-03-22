@@ -377,6 +377,10 @@ Nothing visible on the page is built here. === -->
           <div class="scoreboard-side">
             <div id="matchupYourName" class="scoreboard-name">You</div>
             <div id="matchupYourScore" class="scoreboard-score">—</div>
+            <div id="matchupYourSwatches" class="scoreboard-color-swatches" aria-label="Your player colors">
+              <span id="matchupYourPrimarySwatch" class="scoreboard-color-swatch" title="Primary color"></span>
+              <span id="matchupYourSecondarySwatch" class="scoreboard-color-swatch" title="Secondary color"></span>
+            </div>
             <div id="matchupYourRecord" class="scoreboard-record">Record: 0-0</div>
             <div id="matchupYourAverages" class="scoreboard-meta">Daily Avg: — · PPD: —</div>
           </div>
@@ -393,6 +397,10 @@ Nothing visible on the page is built here. === -->
           <div class="scoreboard-side text-right">
             <div id="matchupOpponent" class="scoreboard-name text-right">—</div>
             <div id="matchupOpponentScore" class="scoreboard-score">—</div>
+            <div id="matchupOpponentSwatches" class="scoreboard-color-swatches scoreboard-color-swatches-right" aria-label="Opponent player colors">
+              <span id="matchupOpponentPrimarySwatch" class="scoreboard-color-swatch" title="Primary color"></span>
+              <span id="matchupOpponentSecondarySwatch" class="scoreboard-color-swatch" title="Secondary color"></span>
+            </div>
             <div id="matchupOpponentRecord" class="scoreboard-record">Record: 0-0</div>
             <div id="matchupOpponentAverages" class="scoreboard-meta text-right">Daily Avg: — · PPD: —</div>
           </div>
@@ -3818,8 +3826,30 @@ function renderTodaysMatchup(todayKeyStr, yourScore){
   const yourNameEl = $('matchupYourName');
   const yourAvgEl = $('matchupYourAverages');
   const oppAvgEl = $('matchupOpponentAverages');
+  const yourPrimarySwatchEl = $('matchupYourPrimarySwatch');
+  const yourSecondarySwatchEl = $('matchupYourSecondarySwatch');
+  const oppPrimarySwatchEl = $('matchupOpponentPrimarySwatch');
+  const oppSecondarySwatchEl = $('matchupOpponentSecondarySwatch');
 
   if (!oppNameEl || !oppScoreEl || !yourScoreEl || !diffEl || !diffValueEl || !oppRecordEl || !yourRecordEl) return;
+
+  const DEFAULT_MATCHUP_PRIMARY_COLOR = '#1a383b';
+  const DEFAULT_MATCHUP_SECONDARY_COLOR = '#254c52';
+
+  const setMatchupSwatches = (primaryEl, secondaryEl, colors = {}) => {
+    if (primaryEl) {
+      const primary = normalizeHexColor(colors.primaryColor) || DEFAULT_MATCHUP_PRIMARY_COLOR;
+      primaryEl.style.background = primary;
+      primaryEl.title = `Primary color ${primary}`;
+    }
+    if (secondaryEl) {
+      const secondary = normalizeHexColor(colors.secondaryColor) || DEFAULT_MATCHUP_SECONDARY_COLOR;
+      secondaryEl.style.background = secondary;
+      secondaryEl.title = `Secondary color ${secondary}`;
+    }
+  };
+
+  setMatchupSwatches(yourPrimarySwatchEl, yourSecondarySwatchEl);
 
 const updateTodayScoreIsland = (value) => {
   const islandValueEl = $('todayScoreIslandValue');
@@ -3865,6 +3895,7 @@ const updateTodayScoreIsland = (value) => {
     oppRecordEl.textContent = 'Record: —';
     yourRecordEl.textContent = `Record: ${getYourRecordText()}`;
     oppNameEl.textContent = '—';
+    setMatchupSwatches(oppPrimarySwatchEl, oppSecondarySwatchEl);
     setOpponentAverages(null);
     return;
   }
@@ -3883,6 +3914,9 @@ const updateTodayScoreIsland = (value) => {
   const visibleOppScore = oppId
     ? visibleOpponentScoreForMatchup(todayKeyStr, oppId, safeOppScore)
     : safeOppScore;
+
+  const opponent = getPlayerById(oppId);
+  setMatchupSwatches(oppPrimarySwatchEl, oppSecondarySwatchEl, opponent || {});
 
   oppNameEl.textContent = getPlayerNameById(oppId);
   oppScoreEl.textContent = visibleOppScore.toFixed(1);
