@@ -1914,6 +1914,8 @@ header,
 
 .task-completion-animating.task-dusting{
   pointer-events:none;
+  animation:taskDustCard .68s cubic-bezier(.2,.72,.16,1) forwards;
+  transform-origin:center center;
 }
 
 .task-completion-animating.task-dusting::after{
@@ -1931,12 +1933,6 @@ header,
   mix-blend-mode:screen;
   opacity:0;
   animation:taskDustFlash .68s cubic-bezier(.2,.72,.16,1) forwards;
-}
-
-.task-completion-animating.task-dusting .task-card-shell,
-.task-completion-animating.task-dusting .task-expanded{
-  animation:taskDustCard .68s cubic-bezier(.2,.72,.16,1) forwards;
-  transform-origin:center center;
 }
 
 .task-completion-animating.task-dusting-leaving{
@@ -1990,13 +1986,12 @@ header,
 }
 
 @media (prefers-reduced-motion: reduce){
-  .task-completion-animating.task-dusting::after{
-    animation:taskDustFlashReduced .26s ease-out forwards;
+  .task-completion-animating.task-dusting{
+    animation:taskDustCardReduced .26s ease-out forwards;
   }
 
-  .task-completion-animating.task-dusting .task-card-shell,
-  .task-completion-animating.task-dusting .task-expanded{
-    animation:taskDustCardReduced .26s ease-out forwards;
+  .task-completion-animating.task-dusting::after{
+    animation:taskDustFlashReduced .26s ease-out forwards;
   }
 
   .task-dust-layer{display:none !important}

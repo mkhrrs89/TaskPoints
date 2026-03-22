@@ -7528,7 +7528,6 @@ function animateTaskCompletion(id, onDone){
   card.setAttribute('aria-hidden', 'true');
 
   if (!reducedMotion) {
-    const shell = card.querySelector('.task-card-shell') || card;
     const layer = document.createElement('span');
     layer.className = 'task-dust-layer';
     const particleCount = 14 + Math.floor(Math.random() * 7);
@@ -7551,7 +7550,7 @@ function animateTaskCompletion(id, onDone){
       particle.style.setProperty('--dust-duration', `${520 + Math.round(Math.random() * 170)}ms`);
       layer.appendChild(particle);
     }
-    shell.appendChild(layer);
+    card.appendChild(layer);
   }
 
   const timeoutId = window.setTimeout(() => {
