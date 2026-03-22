@@ -1879,9 +1879,26 @@ header,
   pointer-events:none;
 }
 
+.task-completion-animating.task-dusting::after{
+  content:"";
+  position:absolute;
+  inset:-3px;
+  border-radius:18px;
+  pointer-events:none;
+  background:
+    radial-gradient(circle at 50% 38%, rgba(255,255,255,.38), rgba(255,255,255,0) 42%),
+    linear-gradient(135deg, rgba(45,212,191,.20), rgba(125,211,252,.10) 55%, rgba(255,255,255,0));
+  box-shadow:
+    0 0 0 1px rgba(186,230,253,.18) inset,
+    0 0 26px rgba(34,211,238,.18);
+  mix-blend-mode:screen;
+  opacity:0;
+  animation:taskDustFlash .68s cubic-bezier(.2,.72,.16,1) forwards;
+}
+
 .task-completion-animating.task-dusting .task-card-shell,
 .task-completion-animating.task-dusting .task-expanded{
-  animation:taskDustCard .58s cubic-bezier(.2,.72,.16,1) forwards;
+  animation:taskDustCard .68s cubic-bezier(.2,.72,.16,1) forwards;
   transform-origin:center center;
 }
 
@@ -1906,37 +1923,58 @@ header,
   border-radius:999px;
   background:var(--dust-color,rgba(148,163,184,.38));
   opacity:0;
-  filter:blur(.4px);
-  transform:translate3d(-50%,-50%,0) scale(.72);
+  box-shadow:0 0 14px rgba(186,230,253,.28);
+  filter:blur(.6px);
+  transform:translate3d(-50%,-50%,0) scale(.68);
   animation:taskDustParticle var(--dust-duration,560ms) cubic-bezier(.18,.7,.2,1) forwards;
   animation-delay:var(--dust-delay,0ms);
 }
 
 @keyframes taskDustCard{
   0%{transform:translateZ(0) scale(1);opacity:1;filter:blur(0)}
-  22%{transform:translateZ(0) scale(.985)}
-  55%{transform:translate3d(0,0,0) scale(.965);opacity:.88;filter:blur(.6px)}
-  100%{transform:translate3d(0,-4px,0) scale(.94);opacity:0;filter:blur(2.5px)}
+  14%{transform:translate3d(0,-1px,0) scale(1.028);opacity:1;filter:brightness(1.08) blur(0)}
+  34%{transform:translate3d(0,0,0) scale(.978);opacity:.96;filter:brightness(1.03) blur(.15px)}
+  62%{transform:translate3d(0,-2px,0) scale(.925);opacity:.68;filter:brightness(.98) blur(1.2px)}
+  100%{transform:translate3d(0,-8px,0) scale(.84);opacity:0;filter:blur(5px)}
+}
+
+@keyframes taskDustFlash{
+  0%{opacity:0;transform:scale(.98)}
+  16%{opacity:.95;transform:scale(1.01)}
+  46%{opacity:.34;transform:scale(1)}
+  100%{opacity:0;transform:scale(.96)}
 }
 
 @keyframes taskDustParticle{
-  0%{opacity:0;transform:translate3d(-50%,-50%,0) scale(.72)}
-  18%{opacity:.82}
-  100%{opacity:0;transform:translate3d(calc(-50% + var(--dust-dx,0px)),calc(-50% + var(--dust-dy,-18px)),0) scale(.32)}
+  0%{opacity:0;filter:blur(.3px);transform:translate3d(-50%,-50%,0) scale(.68)}
+  16%{opacity:.96;filter:blur(.35px);transform:translate3d(calc(-50% + var(--dust-dx,0px) * .08),calc(-50% + var(--dust-dy,-18px) * .08),0) scale(1)}
+  58%{opacity:.6;filter:blur(.8px)}
+  100%{opacity:0;filter:blur(1.8px);transform:translate3d(calc(-50% + var(--dust-dx,0px)),calc(-50% + var(--dust-dy,-18px)),0) scale(.24)}
 }
 
 @media (prefers-reduced-motion: reduce){
+  .task-completion-animating.task-dusting::after{
+    animation:taskDustFlashReduced .26s ease-out forwards;
+  }
+
   .task-completion-animating.task-dusting .task-card-shell,
   .task-completion-animating.task-dusting .task-expanded{
-    animation:taskDustCardReduced .18s ease-out forwards;
+    animation:taskDustCardReduced .26s ease-out forwards;
   }
 
   .task-dust-layer{display:none !important}
 }
 
 @keyframes taskDustCardReduced{
-  from{opacity:1;transform:none;filter:none}
-  to{opacity:0;transform:scale(.985);filter:none}
+  0%{opacity:1;transform:scale(1);filter:none}
+  35%{opacity:1;transform:scale(1.02);filter:brightness(1.06)}
+  100%{opacity:0;transform:scale(.93);filter:none}
+}
+
+@keyframes taskDustFlashReduced{
+  0%{opacity:0}
+  35%{opacity:.9}
+  100%{opacity:0}
 }
 
 .task-action-sheet{

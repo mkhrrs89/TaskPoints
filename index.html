@@ -1387,8 +1387,8 @@ function initHabitSortControl(){
 let editingTaskId = null;
 let expandedTaskId = null;
 const taskCompletionAnimations = new Map();
-const TASK_DUST_ANIMATION_MS = 580;
-const TASK_DUST_REDUCED_MS = 180;
+const TASK_DUST_ANIMATION_MS = 680;
+const TASK_DUST_REDUCED_MS = 260;
 const TASK_DUST_COLORS = [
   'rgba(148, 163, 184, 0.34)',
   'rgba(125, 211, 252, 0.22)',
@@ -7473,23 +7473,24 @@ function animateTaskCompletion(id, onDone){
     const shell = card.querySelector('.task-card-shell') || card;
     const layer = document.createElement('span');
     layer.className = 'task-dust-layer';
-    const particleCount = 10 + Math.floor(Math.random() * 7);
+    const particleCount = 14 + Math.floor(Math.random() * 7);
     for (let i = 0; i < particleCount; i += 1) {
       const particle = document.createElement('span');
       particle.className = 'task-dust-particle';
       const originX = 18 + Math.random() * 64;
       const originY = 28 + Math.random() * 44;
-      const dx = (Math.random() - 0.5) * 64;
-      const dy = -14 - Math.random() * 38;
-      const size = 4 + Math.random() * 7;
+      const spread = 74 + Math.random() * 18;
+      const dx = (Math.random() - 0.5) * spread;
+      const dy = -18 - Math.random() * 48;
+      const size = 5 + Math.random() * 9;
       particle.style.setProperty('--dust-x', `${originX}%`);
       particle.style.setProperty('--dust-y', `${originY}%`);
       particle.style.setProperty('--dust-dx', `${dx.toFixed(1)}px`);
       particle.style.setProperty('--dust-dy', `${dy.toFixed(1)}px`);
       particle.style.setProperty('--dust-size', `${size.toFixed(1)}px`);
       particle.style.setProperty('--dust-color', TASK_DUST_COLORS[i % TASK_DUST_COLORS.length]);
-      particle.style.setProperty('--dust-delay', `${Math.round(Math.random() * 70)}ms`);
-      particle.style.setProperty('--dust-duration', `${470 + Math.round(Math.random() * 150)}ms`);
+      particle.style.setProperty('--dust-delay', `${Math.round(Math.random() * 55)}ms`);
+      particle.style.setProperty('--dust-duration', `${520 + Math.round(Math.random() * 170)}ms`);
       layer.appendChild(particle);
     }
     shell.appendChild(layer);
