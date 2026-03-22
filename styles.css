@@ -1191,10 +1191,6 @@ body {
     flex: 0 1 168px;
   }
 
-  .task-compact-toggle{
-    font-size: 11px;
-    gap: 4px;
-  }
 }
 
 /* =========================
@@ -1847,14 +1843,6 @@ header,
 
 /* Default (desktop + general) */
 .task-title{word-break:break-word;overflow-wrap:anywhere}
-
-.task-compact-toggle{
-  display:inline-flex;
-  align-items:center;
-  gap:6px;
-  font-size:12px;
-  color:var(--muted);
-}
 
 .task-priority-card.task-card-expanded{position:relative;isolation:isolate}
 .task-card-shell{cursor:pointer;position:relative;z-index:1}
