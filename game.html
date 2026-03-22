@@ -148,16 +148,6 @@
   }
 }
 
-/* Desktop & mobile: hide content + rotate chevron when collapsed */
-.mobile-collapsible[data-collapsed="true"] .mobile-collapsible-body {
-  display: none;
-}
-
-.mobile-collapsible[data-collapsed="true"] .mobile-collapsible-chevron {
-  transform: rotate(-90deg);
-}
-
-
 /* Mobile tweaks */
 @media (max-width: 640px) {
   /* 2-column card view grid on mobile */
@@ -166,7 +156,7 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  /* Collapsible cards (Create Player + Stats Guide) */
+  /* Collapsible card (Stats Guide only) */
   .mobile-collapsible-header {
     display: flex;
     align-items: center;
@@ -259,6 +249,88 @@
   border-radius:999px;
 }
 
+.create-player-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.create-player-trigger-copy {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.create-player-trigger-subtitle {
+  font-size: 0.85rem;
+  opacity: 0.7;
+}
+
+.create-player-trigger-icon {
+  flex: 0 0 auto;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(113, 113, 122, 0.4);
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 1.125rem;
+  line-height: 1;
+}
+
+.create-player-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.68);
+}
+
+.create-player-modal.is-open {
+  display: flex;
+}
+
+.create-player-modal-panel {
+  width: min(100%, 720px);
+  max-height: min(90vh, 1000px);
+  overflow: auto;
+  position: relative;
+  padding: 20px;
+}
+
+@media (max-width: 640px) {
+  .create-player-modal {
+    align-items: flex-end;
+    padding: 10px;
+    padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .create-player-modal-panel {
+    width: 100%;
+    max-height: min(88vh, 1000px);
+    padding: 18px 16px 16px;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  .create-player-trigger-icon {
+    border-color: rgba(161, 161, 170, 0.5);
+    background: rgba(255, 255, 255, 0.06);
+  }
+}
+
     /* Make form fields readable in both light & dark */
     input, select, textarea{
       background: rgba(255,255,255,0.95);
@@ -348,13 +420,50 @@
 <div class="grid gap-6 md:grid-cols-2 mb-6">
 
 <!-- LEFT: Create player -->
-<section class="card mb-6 mobile-collapsible" data-collapsed="false">
-  <button type="button" class="mobile-collapsible-header">
-    <h2 class="font-semibold text-lg mb-2">Create Player</h2>
-    <span class="mobile-collapsible-chevron">▾</span>
+<section class="card mb-6">
+  <button
+    type="button"
+    class="create-player-trigger"
+    id="openCreatePlayerModalBtn"
+    aria-haspopup="dialog"
+    aria-controls="createPlayerModal"
+    aria-expanded="false"
+  >
+    <span class="create-player-trigger-copy">
+      <span class="font-semibold text-lg leading-tight">Create Player</span>
+      <span class="create-player-trigger-subtitle">Open the player form in a popup.</span>
+    </span>
+    <span class="create-player-trigger-icon" aria-hidden="true">＋</span>
   </button>
+</section>
 
-  <div class="mobile-collapsible-body">
+<div
+  id="createPlayerModal"
+  class="create-player-modal"
+  aria-hidden="true"
+>
+  <div
+    class="card create-player-modal-panel"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="createPlayerModalTitle"
+    tabindex="-1"
+    onclick="event.stopPropagation();"
+  >
+    <button
+      type="button"
+      class="absolute top-3 right-3 btn btn-secondary text-[11px] px-3 py-1 rounded-md"
+      id="closeCreatePlayerModalBtn"
+      aria-label="Close create player modal"
+    >
+      Close
+    </button>
+
+    <div class="pr-16 mb-4">
+      <div class="muted text-[11px] uppercase tracking-wide">Game</div>
+      <h2 id="createPlayerModalTitle" class="font-semibold text-lg">Create Player</h2>
+    </div>
+
     <form id="createPlayerForm" class="space-y-3">
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
@@ -435,7 +544,7 @@
       </div>
     </form>
   </div>
-</section>
+</div>
 
   <!-- RIGHT: Simulate Today -->
   <section class="card mb-6">
@@ -2730,6 +2839,7 @@ $("createPlayerForm").addEventListener("submit", (e)=>{
     $("playerSecondaryColor").value = DEFAULT_SECONDARY_COLOR;
     $("playerActive").checked = true;
     renderPlayers();
+    window.closeCreatePlayerModal?.();
   };
 
   if (file){
@@ -2887,9 +2997,48 @@ galleryOrientationQuery.addEventListener("change", () => {
 updateViewToggleUI();
 updateGroupToggleUI();
 
-// ----- Collapsible panels (Create Player + Player Stats Guide) -----
+// ----- Create Player modal -----
+function setupCreatePlayerModal() {
+  const modal = $("createPlayerModal");
+  const openBtn = $("openCreatePlayerModalBtn");
+  const closeBtn = $("closeCreatePlayerModalBtn");
+  const panel = modal?.querySelector(".create-player-modal-panel");
+  const firstInput = $("playerName");
+  if (!modal || !openBtn || !closeBtn || modal.dataset.init === "true") return;
+
+  const openModal = () => {
+    modal.classList.add("is-open");
+    modal.setAttribute("aria-hidden", "false");
+    openBtn.setAttribute("aria-expanded", "true");
+    window.lockScrollForModal?.();
+    window.requestAnimationFrame(() => {
+      (firstInput || panel)?.focus?.({ preventScroll: true });
+    });
+  };
+
+  const closeModal = () => {
+    modal.classList.remove("is-open");
+    modal.setAttribute("aria-hidden", "true");
+    openBtn.setAttribute("aria-expanded", "false");
+    window.unlockScrollForModal?.();
+    openBtn.focus({ preventScroll: true });
+  };
+
+  openBtn.addEventListener("click", openModal);
+  closeBtn.addEventListener("click", closeModal);
+  modal.addEventListener("click", closeModal);
+  modal.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeModal();
+  });
+
+  window.openCreatePlayerModal = openModal;
+  window.closeCreatePlayerModal = closeModal;
+  modal.dataset.init = "true";
+}
+
+// ----- Collapsible panel (Player Stats Guide) -----
 function setupMobileCollapsibles() {
-  const sections = document.querySelectorAll(".mobile-collapsible");
+  const sections = document.querySelectorAll("#playerStatsGuide.mobile-collapsible");
 
   function syncForViewport() {
     const isMobile = window.matchMedia("(max-width: 640px)").matches;
@@ -2911,8 +3060,8 @@ function setupMobileCollapsibles() {
       const isStatsGuide = sec.id === "playerStatsGuide";
 
       // Default per viewport:
-      // mobile → collapsed for all
-      // desktop → Stats Guide collapsed, others expanded
+      // mobile → collapsed
+      // desktop → collapsed
       if (isMobile) {
         sec.dataset.collapsed = "true";
       } else {
@@ -2926,6 +3075,7 @@ function setupMobileCollapsibles() {
 }
 
 
+setupCreatePlayerModal();
 setupMobileCollapsibles();
 
 
