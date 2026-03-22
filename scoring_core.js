@@ -461,9 +461,13 @@
 
   function normalizeHabit(habit) {
     if (!habit || typeof habit !== 'object') return habit;
+    const normalizedDaysPerCompleteWeek = Number(habit.daysPerCompleteWeek);
     return {
       ...habit,
-      tag: typeof habit.tag === 'string' ? habit.tag.trim() : ''
+      tag: typeof habit.tag === 'string' ? habit.tag.trim() : '',
+      ...(Number.isFinite(normalizedDaysPerCompleteWeek)
+        ? { daysPerCompleteWeek: Math.max(0, Math.min(7, Math.round(normalizedDaysPerCompleteWeek))) }
+        : {})
     };
   }
 

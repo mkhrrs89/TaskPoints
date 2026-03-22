@@ -1306,9 +1306,13 @@ function normalizeHabitTagColors(value) {
 
 function normalizeHabit(habit) {
   if (!habit || typeof habit !== 'object') return habit;
+  const normalizedDaysPerCompleteWeek = Number(habit.daysPerCompleteWeek);
   return {
     ...habit,
-    tag: typeof habit.tag === 'string' ? habit.tag.trim() : ''
+    tag: typeof habit.tag === 'string' ? habit.tag.trim() : '',
+    ...(Number.isFinite(normalizedDaysPerCompleteWeek)
+      ? { daysPerCompleteWeek: Math.max(0, Math.min(7, Math.round(normalizedDaysPerCompleteWeek))) }
+      : {})
   };
 }
 
@@ -4507,6 +4511,10 @@ const daysHtml = days.map(d => {
         <input class="input" data-field="name" value="${escapeHtml(h.name)}">
         <input class="input" data-field="points" type="number" value="${h.pointsPerDay||0}">
         <input class="input" data-field="tag" value="${escapeHtml(h.tag || '')}" placeholder="Tag">
+        <label class="text-xs muted flex flex-col gap-1">
+          <span>Week complete at</span>
+          <input class="input" data-field="days-per-complete-week" type="number" min="0" max="7" step="1" value="${Number.isFinite(Number(h.daysPerCompleteWeek)) ? Number(h.daysPerCompleteWeek) : ''}" placeholder="Days for complete week">
+        </label>
         <select class="input" data-field="category">
           <option value="habit" ${category==='habit'?'selected':''}>Habit</option>
           <option value="vice"  ${category==='vice'?'selected':''}>Vice</option>
@@ -4766,6 +4774,10 @@ const daysHtml = days.map(d => {
           <input class="input" data-field="name" value="${escapeHtml(h.name)}">
           <input class="input" data-field="points" type="number" value="${h.pointsPerDay||0}">
           <input class="input" data-field="tag" value="${escapeHtml(h.tag || '')}" placeholder="Tag">
+          <label class="text-xs muted flex flex-col gap-1">
+            <span>Week complete at</span>
+            <input class="input" data-field="days-per-complete-week" type="number" min="0" max="7" step="1" value="${Number.isFinite(Number(h.daysPerCompleteWeek)) ? Number(h.daysPerCompleteWeek) : ''}" placeholder="Days for complete week">
+          </label>
           <div class="flex gap-2 flex-wrap">
             <button class="btn btn-success" data-act="habit-save">Save</button>
             <button class="btn btn-ghost" data-act="habit-cancel">Cancel</button>
@@ -5014,6 +5026,7 @@ function saveHabitEdit(id,row){
   const nameInput=row.querySelector('input[data-field="name"]');
   const ptsInput=row.querySelector('input[data-field="points"]');
   const tagInput=row.querySelector('input[data-field="tag"]');
+  const completeWeekInput = row.querySelector('input[data-field="days-per-complete-week"]');
   const catInput=row.querySelector('[data-field="category"]');
 
   const oldPoints = h.pointsPerDay || 0;
@@ -5021,6 +5034,17 @@ function saveHabitEdit(id,row){
   h.name = nameInput.value.trim() || h.name;
   h.pointsPerDay = Number(ptsInput.value)||0;
   if (tagInput) h.tag = tagInput.value.trim();
+  if (completeWeekInput) {
+    const rawDaysPerCompleteWeek = completeWeekInput.value.trim();
+    if (rawDaysPerCompleteWeek === '') {
+      delete h.daysPerCompleteWeek;
+    } else {
+      const parsedDaysPerCompleteWeek = Math.max(0, Math.min(7, Math.round(Number(rawDaysPerCompleteWeek))));
+      if (Number.isFinite(parsedDaysPerCompleteWeek)) {
+        h.daysPerCompleteWeek = parsedDaysPerCompleteWeek;
+      }
+    }
+  }
   h.category = catInput ? (catInput.value || 'habit') : (h.category || 'habit');
   h.updatedAtISO = new Date().toISOString();
 
