@@ -4694,7 +4694,7 @@ header,
 .home-mobile-tab-badge{
   position: absolute;
   top: 4px;
-  right: 5px;
+  left: 5px;
   width: 10px;
   height: 10px;
   border-radius: 999px;
@@ -4706,7 +4706,7 @@ header,
 }
 
 .home-mobile-tab.has-records-badge{
-  padding-right: 18px;
+  padding-left: 18px;
 }
 
 .home-tab-panel{
