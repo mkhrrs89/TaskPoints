@@ -921,10 +921,6 @@ Nothing visible on the page is built here. === -->
       <div class="tasksControlsRow sectionHeaderControls tasksControlsRow--withTitle">
         <h2 id="tasksAnchor" class="sectionTitle sectionTitle--inline">Your Tasks</h2>
         <button id="openAddTaskBtn" class="btn btn-primary btn-compact">+</button>
-        <label for="compactTasksToggle" class="task-compact-toggle shrink-0">
-          <input id="compactTasksToggle" type="checkbox">
-          <span>Compact view</span>
-        </label>
         <select id="sortSelect" class="input tasksSortSelectCompact">
           <option value="due">Sort by Due Date</option>
           <option value="importance">Sort by Importance</option>
@@ -8505,24 +8501,13 @@ defer(() => {
 
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#039;'}[m])); }
 
-function setTaskCompactView(isCompact){
-  const enabled = !!isCompact;
-  document.body.classList.toggle('task-compact-view', enabled);
-  const toggle = $('compactTasksToggle');
-  if (toggle) toggle.checked = enabled;
-  try { localStorage.setItem(TASK_COMPACT_VIEW_KEY, enabled ? '1' : '0'); } catch (e) {}
+function setTaskCompactView(){
+  document.body.classList.add('task-compact-view');
+  try { localStorage.setItem(TASK_COMPACT_VIEW_KEY, '1'); } catch (e) {}
 }
 
 function initTaskCompactToggle(){
-  const toggle = $('compactTasksToggle');
-  if (!toggle) return;
-  let saved = '0';
-  try { saved = localStorage.getItem(TASK_COMPACT_VIEW_KEY) || '0'; } catch (e) {}
-  setTaskCompactView(saved === '1');
-  toggle.addEventListener('change', () => {
-    setTaskCompactView(toggle.checked);
-    renderTasks();
-  });
+  setTaskCompactView();
 }
 
 function capitalizeWords(value) {
