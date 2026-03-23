@@ -127,7 +127,13 @@
           <div class="matchup-scoreboard">
             <div class="scoreboard-side">
               <div class="scoreboard-identity flex items-center gap-2 mt-1">
-                <div id="matchupYouAvatar" class="shrink-0"></div>
+                <div class="scoreboard-portrait-stack shrink-0">
+                  <div id="matchupYouAvatar" class="shrink-0"></div>
+                  <div id="matchupYourSwatches" class="scoreboard-color-swatches scoreboard-color-swatches-centered" aria-label="Your player colors">
+                    <span id="matchupYourPrimarySwatch" class="scoreboard-color-swatch" title="Primary color"></span>
+                    <span id="matchupYourSecondarySwatch" class="scoreboard-color-swatch" title="Secondary color"></span>
+                  </div>
+                </div>
                 <div class="min-w-0">
                   <button type="button" id="matchupYourName" class="scoreboard-name truncate player-name-link">You</button>
                   <div id="matchupYourRecord" class="scoreboard-record">Record: —</div>
@@ -155,7 +161,13 @@
                   <div id="matchupOppDailyAvg" class="scoreboard-meta">Daily Avg: —</div>
                   <div id="matchupOppPPD" class="scoreboard-meta">PPD: —</div>
                 </div>
-                <div id="matchupOppAvatar" class="shrink-0"></div>
+                <div class="scoreboard-portrait-stack shrink-0">
+                  <div id="matchupOppAvatar" class="shrink-0"></div>
+                  <div id="matchupOppSwatches" class="scoreboard-color-swatches scoreboard-color-swatches-centered" aria-label="Opponent player colors">
+                    <span id="matchupOppPrimarySwatch" class="scoreboard-color-swatch" title="Primary color"></span>
+                    <span id="matchupOppSecondarySwatch" class="scoreboard-color-swatch" title="Secondary color"></span>
+                  </div>
+                </div>
               </div>
               <div id="matchupOppScore" class="scoreboard-score mt-2">—</div>
             </div>
@@ -463,6 +475,13 @@
     if (id === 'YOU') return { id:'YOU', name:getYouName(state), isYou:true, imageId: state.youImageId || null };
     const ps = Array.isArray(state.players) ? state.players : [];
     return ps.find(x => x && x.id === id) || null;
+  }
+
+  function normalizeHexColor(value){
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    const normalized = raw.startsWith('#') ? raw : `#${raw}`;
+    return /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(normalized) ? normalized : '';
   }
 
   function getPlayerImageId(state, id){
@@ -1244,11 +1263,32 @@ function placeHTML(rankIndex, total){
 
     const youRankIdx = standings.findIndex(r => r.id === 'YOU');
     const oppRankIdx = standings.findIndex(r => r.id === oppId);
+    const youPrimarySwatchEl = $('matchupYourPrimarySwatch');
+    const youSecondarySwatchEl = $('matchupYourSecondarySwatch');
+    const oppPrimarySwatchEl = $('matchupOppPrimarySwatch');
+    const oppSecondarySwatchEl = $('matchupOppSecondarySwatch');
+    const DEFAULT_MATCHUP_PRIMARY_COLOR = '#1a383b';
+    const DEFAULT_MATCHUP_SECONDARY_COLOR = '#254c52';
+
+    const setMatchupSwatches = (primaryEl, secondaryEl, colors = {}) => {
+      if (primaryEl) {
+        const primary = normalizeHexColor(colors.primaryColor) || DEFAULT_MATCHUP_PRIMARY_COLOR;
+        primaryEl.style.background = primary;
+        primaryEl.title = `Primary color ${primary}`;
+      }
+      if (secondaryEl) {
+        const secondary = normalizeHexColor(colors.secondaryColor) || DEFAULT_MATCHUP_SECONDARY_COLOR;
+        secondaryEl.style.background = secondary;
+        secondaryEl.title = `Secondary color ${secondary}`;
+      }
+    };
 
     // avatars
     const avatarSize = matchupAvatarSize();
     renderAvatarInto($('matchupYouAvatar'), { name: getYouName(state), imageId: getPlayerImageId(state, 'YOU'), size: avatarSize, frame: true });
     renderAvatarInto($('matchupOppAvatar'), { name: oppName, imageId: getPlayerImageId(state, oppId), size: avatarSize, frame: true });
+    setMatchupSwatches(youPrimarySwatchEl, youSecondarySwatchEl, getPlayerById(state, 'YOU') || {});
+    setMatchupSwatches(oppPrimarySwatchEl, oppSecondarySwatchEl, getPlayerById(state, oppId) || {});
 
     // names
     const youNameBtn = $('matchupYourName');

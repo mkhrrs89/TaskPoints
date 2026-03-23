@@ -715,6 +715,13 @@ body {
   gap: 10px;
 }
 
+.gamehub-page .matchup-scoreboard .scoreboard-portrait-stack {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
 .gamehub-page .matchup-scoreboard .scoreboard-name {
   font-size: 1.35rem;
   color: #e9f1fb;
@@ -742,6 +749,13 @@ body {
 .gamehub-page .matchup-scoreboard .scoreboard-score {
   font-size: clamp(3.4rem, 6.4vw, 4.9rem);
   color: #f1f5f9;
+}
+
+.gamehub-page .matchup-scoreboard .scoreboard-color-swatches-centered {
+  align-self: center;
+  justify-content: center;
+  margin-top: 0;
+  margin-bottom: 0;
 }
 
 .gamehub-page .matchup-scoreboard .scoreboard-diff {
@@ -971,6 +985,14 @@ body {
     gap: 6px;
     margin-top: -4px;
     margin-bottom: 0;
+  }
+
+  .gamehub-page .matchup-scoreboard .scoreboard-portrait-stack {
+    gap: 8px;
+  }
+
+  .gamehub-page .matchup-scoreboard .scoreboard-color-swatches-centered {
+    margin-top: -2px;
   }
 
   .scoreboard-color-swatch {
