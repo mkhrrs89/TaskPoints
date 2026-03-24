@@ -148,6 +148,45 @@
   }
 }
 
+.player-edit-color-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.player-edit-color-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.player-edit-color-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.player-edit-color-pill {
+  width: 40px;
+  height: 18px;
+  border-radius: 7px;
+  border: 1px solid rgba(17, 24, 39, 0.32);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.32),
+    0 1px 2px rgba(17, 24, 39, 0.12);
+}
+
+@media (prefers-color-scheme: dark) {
+  .player-edit-color-pill {
+    border-color: rgba(255, 255, 255, 0.28);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.18),
+      0 1px 2px rgba(0, 0, 0, 0.35);
+  }
+}
+
 /* Mobile tweaks */
 @media (max-width: 640px) {
   /* 2-column card view grid on mobile */
@@ -750,7 +789,9 @@ function loadState() {
     schedule: [],
     opponentDripSchedules: [],
     youImageId: "",
-    youName: ""
+    youName: "",
+    youPrimaryColor: DEFAULT_PRIMARY_COLOR,
+    youSecondaryColor: DEFAULT_SECONDARY_COLOR
   };
 
   try {
@@ -785,6 +826,8 @@ function loadState() {
       : [];
     base.youImageId = typeof parsed.youImageId === "string" ? parsed.youImageId : "";
     base.youName = typeof parsed.youName === "string" ? parsed.youName : "";
+    base.youPrimaryColor = normalizePlayerColor(parsed.youPrimaryColor, DEFAULT_PRIMARY_COLOR);
+    base.youSecondaryColor = normalizePlayerColor(parsed.youSecondaryColor, DEFAULT_SECONDARY_COLOR);
   } catch (e) {
     console.error("Failed to load state in game.html", e);
   }
@@ -835,6 +878,8 @@ function normalizeState(s) {
     opponentDripSchedules: Array.isArray(s.opponentDripSchedules) ? s.opponentDripSchedules : [],
     youImageId:  typeof s.youImageId === "string" ? s.youImageId : "",
     youName: typeof s.youName === "string" ? s.youName : "",
+    youPrimaryColor: normalizePlayerColor(s.youPrimaryColor, DEFAULT_PRIMARY_COLOR),
+    youSecondaryColor: normalizePlayerColor(s.youSecondaryColor, DEFAULT_SECONDARY_COLOR),
     notes: typeof s.notes === "string" ? s.notes : "",
     habitTagColors: normalizeHabitTagColors(s.habitTagColors)
   };
@@ -872,6 +917,13 @@ function getYouName(currentState = state) {
     ? currentState.youName.trim()
     : "";
   return name || "You";
+}
+
+function getYouPlayerColors(currentState = state) {
+  return {
+    primaryColor: normalizePlayerColor(currentState?.youPrimaryColor, DEFAULT_PRIMARY_COLOR),
+    secondaryColor: normalizePlayerColor(currentState?.youSecondaryColor, DEFAULT_SECONDARY_COLOR)
+  };
 }
 
 function syncStateWithMatchups(baseState) {
@@ -2025,11 +2077,14 @@ async function renderPlayers() {
 
   // --- special virtual avatar player ---
   const youName = getYouName();
+  const youColors = getYouPlayerColors();
   const youPlayer = {
     id: "YOU",
     name: youName,
     imageId: state.youImageId || "",
     todayPoints: todayPoints.toFixed(1),
+    primaryColor: youColors.primaryColor,
+    secondaryColor: youColors.secondaryColor,
     isYou: true
   };
 
@@ -2244,6 +2299,49 @@ async function renderPlayers() {
           <p class="text-[11px] opacity-70">Leave blank to keep “You”.</p>
         </div>
 
+        <div class="player-edit-color-row text-xs">
+          <div class="player-edit-color-control">
+            <label class="opacity-70" for="youPrimaryColorInput">Primary color</label>
+            <input
+              id="youPrimaryColorInput"
+              data-field="you-primaryColor"
+              type="color"
+              class="player-edit-color-input"
+              value="${escapeHtmlAttr(normalizePlayerColor(p.primaryColor, DEFAULT_PRIMARY_COLOR))}"
+            />
+            <button
+              type="button"
+              data-act="open-color"
+              data-id="YOU"
+              data-target-id="youPrimaryColorInput"
+              class="player-edit-color-pill"
+              aria-label="Edit primary color"
+              title="Primary color ${escapeHtmlAttr(normalizePlayerColor(p.primaryColor, DEFAULT_PRIMARY_COLOR))}"
+              style="background:${escapeHtmlAttr(normalizePlayerColor(p.primaryColor, DEFAULT_PRIMARY_COLOR))};"
+            ></button>
+          </div>
+          <div class="player-edit-color-control">
+            <label class="opacity-70" for="youSecondaryColorInput">Secondary color</label>
+            <input
+              id="youSecondaryColorInput"
+              data-field="you-secondaryColor"
+              type="color"
+              class="player-edit-color-input"
+              value="${escapeHtmlAttr(normalizePlayerColor(p.secondaryColor, DEFAULT_SECONDARY_COLOR))}"
+            />
+            <button
+              type="button"
+              data-act="open-color"
+              data-id="YOU"
+              data-target-id="youSecondaryColorInput"
+              class="player-edit-color-pill"
+              aria-label="Edit secondary color"
+              title="Secondary color ${escapeHtmlAttr(normalizePlayerColor(p.secondaryColor, DEFAULT_SECONDARY_COLOR))}"
+              style="background:${escapeHtmlAttr(normalizePlayerColor(p.secondaryColor, DEFAULT_SECONDARY_COLOR))};"
+            ></button>
+          </div>
+        </div>
+
         <div class="text-xs opacity-80 leading-[1.0] space-y-[2px] mt-1">
           <p>Record: ${youStats.record}</p>
           <p>PPD: ${youStats.avgPPD.toFixed(1)}</p>
@@ -2279,6 +2377,10 @@ card.innerHTML = `
       </div>
 
       <div class="flex-1 min-w-0">
+        <div class="player-color-swatches" aria-label="Your colors">
+          <span class="player-color-swatch" title="Primary color ${escapeHtmlAttr(normalizePlayerColor(p.primaryColor, DEFAULT_PRIMARY_COLOR))}" style="background:${escapeHtmlAttr(normalizePlayerColor(p.primaryColor, DEFAULT_PRIMARY_COLOR))};"></span>
+          <span class="player-color-swatch" title="Secondary color ${escapeHtmlAttr(normalizePlayerColor(p.secondaryColor, DEFAULT_SECONDARY_COLOR))}" style="background:${escapeHtmlAttr(normalizePlayerColor(p.secondaryColor, DEFAULT_SECONDARY_COLOR))};"></span>
+        </div>
         <div class="text-xs opacity-80 leading-[1.0] space-y-[2px] mt-1">
           <p>Record: ${youStats.record}</p>
           <p>PPD: ${youStats.avgPPD.toFixed(1)}</p>
@@ -2420,23 +2522,49 @@ card.innerHTML = `
                 value="${escapeHtmlAttr(p.style || "")}"
               />
             </div>
-            <div>
-              <label class="opacity-70 block mb-1">Primary color</label>
-              <input
-                data-field="primaryColor"
-                type="color"
-                class="w-full h-10 px-1 py-1 rounded-xl border"
-                value="${escapeHtmlAttr(primaryColor)}"
-              />
-            </div>
-            <div>
-              <label class="opacity-70 block mb-1">Secondary color</label>
-              <input
-                data-field="secondaryColor"
-                type="color"
-                class="w-full h-10 px-1 py-1 rounded-xl border"
-                value="${escapeHtmlAttr(secondaryColor)}"
-              />
+            <div class="md:col-span-4">
+              <div class="player-edit-color-row text-xs">
+                <div class="player-edit-color-control">
+                  <label class="opacity-70" for="playerPrimaryColor-${p.id}">Primary color</label>
+                  <input
+                    id="playerPrimaryColor-${p.id}"
+                    data-field="primaryColor"
+                    type="color"
+                    class="player-edit-color-input"
+                    value="${escapeHtmlAttr(primaryColor)}"
+                  />
+                  <button
+                    type="button"
+                    data-act="open-color"
+                    data-id="${p.id}"
+                    data-target-id="playerPrimaryColor-${p.id}"
+                    class="player-edit-color-pill"
+                    aria-label="Edit primary color"
+                    title="Primary color ${escapeHtmlAttr(primaryColor)}"
+                    style="background:${escapeHtmlAttr(primaryColor)};"
+                  ></button>
+                </div>
+                <div class="player-edit-color-control">
+                  <label class="opacity-70" for="playerSecondaryColor-${p.id}">Secondary color</label>
+                  <input
+                    id="playerSecondaryColor-${p.id}"
+                    data-field="secondaryColor"
+                    type="color"
+                    class="player-edit-color-input"
+                    value="${escapeHtmlAttr(secondaryColor)}"
+                  />
+                  <button
+                    type="button"
+                    data-act="open-color"
+                    data-id="${p.id}"
+                    data-target-id="playerSecondaryColor-${p.id}"
+                    class="player-edit-color-pill"
+                    aria-label="Edit secondary color"
+                    title="Secondary color ${escapeHtmlAttr(secondaryColor)}"
+                    style="background:${escapeHtmlAttr(secondaryColor)};"
+                  ></button>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -2587,7 +2715,22 @@ card.innerHTML = `
   container.querySelectorAll("button[data-act]").forEach(btn => {
     btn.addEventListener("click", handlePlayerAction);
   });
+  wirePlayerColorEditors(container);
 
+}
+function wirePlayerColorEditors(root = document) {
+  root.querySelectorAll(".player-edit-color-input").forEach((input) => {
+    input.addEventListener("input", () => {
+      const control = input.closest(".player-edit-color-control");
+      const pill = control ? control.querySelector(".player-edit-color-pill") : null;
+      if (!pill) return;
+      const nextColor = normalizePlayerColor(input.value, DEFAULT_PRIMARY_COLOR);
+      pill.style.background = nextColor;
+      const isSecondary = String(input.dataset.field || "").toLowerCase().includes("secondary");
+      const label = isSecondary ? "Secondary color" : "Primary color";
+      pill.title = `${label} ${nextColor}`;
+    });
+  });
 }
     async function handlePlayerAction(e){
       const btn = e.currentTarget;
@@ -2604,6 +2747,15 @@ card.innerHTML = `
       if (act === "cancel"){
         editingPlayerId = null;
         renderPlayers();
+        return;
+      }
+
+      if (act === "open-color"){
+        const card = btn.closest(".playerCard") || document;
+        const targetId = btn.getAttribute("data-target-id");
+        const input = targetId ? document.getElementById(targetId) : null;
+        if (input && card && !card.contains(input)) return;
+        if (input) input.click();
         return;
       }
 
@@ -2697,9 +2849,16 @@ card.innerHTML = `
   if (act === "done-you") {
     const card = btn.closest(".playerCard");
     const nameInput = card ? card.querySelector('input[data-field="you-name"]') : null;
+    const primaryColorInput = card ? card.querySelector('input[data-field="you-primaryColor"]') : null;
+    const secondaryColorInput = card ? card.querySelector('input[data-field="you-secondaryColor"]') : null;
     const nextName = nameInput ? (nameInput.value || "").trim() : "";
+    const youColors = getYouPlayerColors();
+    const nextPrimaryColor = normalizePlayerColor(primaryColorInput ? primaryColorInput.value : youColors.primaryColor, DEFAULT_PRIMARY_COLOR);
+    const nextSecondaryColor = normalizePlayerColor(secondaryColorInput ? secondaryColorInput.value : youColors.secondaryColor, DEFAULT_SECONDARY_COLOR);
     state.youName = nextName;
-    state = saveState(state, { allowStickyOverwriteKeys: ["youImageId", "youName"] });
+    state.youPrimaryColor = nextPrimaryColor;
+    state.youSecondaryColor = nextSecondaryColor;
+    state = saveState(state, { allowStickyOverwriteKeys: ["youImageId", "youName", "youPrimaryColor", "youSecondaryColor"] });
     editingPlayerId = null;
     renderPlayers();
     return;

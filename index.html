@@ -2184,6 +2184,8 @@ function load() {
         projects:     loadProjectsFromStorage(),
         youImageId:   "",
         youName:      "",
+        youPrimaryColor: "#1a383b",
+        youSecondaryColor: "#254c52",
         habitTagColors: {},
         scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
           ? TaskPointsCore.normalizeScoringSettings({})
@@ -2207,6 +2209,8 @@ function load() {
       projects:     Array.isArray(p.projects)     ? p.projects     : storedProjects,
       youImageId:   typeof p.youImageId === "string" ? p.youImageId : "",
       youName:      typeof p.youName === "string" ? p.youName : "",
+      youPrimaryColor: normalizeHexColor(p.youPrimaryColor) || "#1a383b",
+      youSecondaryColor: normalizeHexColor(p.youSecondaryColor) || "#254c52",
       habitTagColors: normalizeHabitTagColors(p.habitTagColors),
       scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
         ? TaskPointsCore.normalizeScoringSettings(p.scoringSettings || {})
@@ -2227,6 +2231,8 @@ function load() {
       projects:     loadProjectsFromStorage(),
       youImageId:   "",
       youName:      "",
+      youPrimaryColor: "#1a383b",
+      youSecondaryColor: "#254c52",
       habitTagColors: {},
       scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
         ? TaskPointsCore.normalizeScoringSettings({})
@@ -2292,7 +2298,15 @@ function getPlayerNameById(id) {
 }
 
 function getPlayerById(id) {
-  if (!id || id === 'YOU') return null;
+  if (!id) return null;
+  if (id === 'YOU') {
+    return {
+      id: 'YOU',
+      name: getYouName(),
+      primaryColor: normalizeHexColor(state.youPrimaryColor) || '#1a383b',
+      secondaryColor: normalizeHexColor(state.youSecondaryColor) || '#254c52'
+    };
+  }
 
   const players = Array.isArray(state.players) ? state.players : [];
   return players.find(p => p && p.id === id) || null;
@@ -3073,6 +3087,8 @@ function normalizeState(s) {
     opponentDripSchedules: Array.isArray(s.opponentDripSchedules) ? s.opponentDripSchedules : [],
     youImageId:  typeof s.youImageId === "string" ? s.youImageId : "",
     youName: typeof s.youName === "string" ? s.youName : "",
+    youPrimaryColor: normalizeHexColor(s.youPrimaryColor) || "#1a383b",
+    youSecondaryColor: normalizeHexColor(s.youSecondaryColor) || "#254c52",
     projects:    Array.isArray(s.projects)    ? s.projects    : loadProjectsFromStorage(),
     notes: typeof s.notes === "string" ? s.notes : "",
     habitTagColors: normalizeHabitTagColors(s.habitTagColors),
@@ -7921,6 +7937,8 @@ async function applyImportedState(root){
     opponentDripSchedules: Array.isArray(root.opponentDripSchedules) ? root.opponentDripSchedules : [],
     youImageId:  typeof root.youImageId === "string" ? root.youImageId : "",
     youName:     typeof root.youName === "string" ? root.youName : "",
+    youPrimaryColor: normalizeHexColor(root.youPrimaryColor) || "#1a383b",
+    youSecondaryColor: normalizeHexColor(root.youSecondaryColor) || "#254c52",
     notes: typeof root.notes === "string" ? root.notes : "",
 
     // ✅ bring over Settings → Habit tag/group colors + scoring settings

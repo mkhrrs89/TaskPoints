@@ -485,6 +485,8 @@
       workHistory: Array.isArray(s?.workHistory) ? s.workHistory : [],
       youImageId:  typeof s?.youImageId === "string" ? s.youImageId : "",
       youName: typeof s?.youName === "string" ? s.youName : "",
+      youPrimaryColor: normalizeHexColor(s?.youPrimaryColor) || "#1a383b",
+      youSecondaryColor: normalizeHexColor(s?.youSecondaryColor) || "#254c52",
       projects:    Array.isArray(s?.projects)    ? s.projects    : [],
       notes: typeof s?.notes === "string" ? s.notes : "",
       habitTagColors: normalizeHabitTagColors(s?.habitTagColors),
@@ -622,7 +624,7 @@
     return host === 'localhost' || host === '127.0.0.1';
   }
 
-  const STICKY_KEYS = ['youImageId', 'youName', 'habitTagColors'];
+  const STICKY_KEYS = ['youImageId', 'youName', 'youPrimaryColor', 'youSecondaryColor', 'habitTagColors'];
 
   function shouldAllowStickyOverwrite(key, options = {}) {
     if (key === 'scoringSettings') return Boolean(options.allowScoringSettingsOverwrite);
@@ -641,6 +643,9 @@
     if (key === 'youName') {
       if (typeof value !== 'string') return true;
       return value.trim() === '';
+    }
+    if (key === 'youPrimaryColor' || key === 'youSecondaryColor') {
+      return !normalizeHexColor(value);
     }
     if (key === 'habitTagColors' || key === 'scoringSettings') {
       if (!isPlainObject(value)) return true;
@@ -919,6 +924,8 @@ function fastEnsureStateShape(s) {
     notes: typeof src.notes === 'string' ? src.notes : '',
     youImageId: typeof src.youImageId === 'string' ? src.youImageId : '',
     youName: typeof src.youName === 'string' ? src.youName : '',
+    youPrimaryColor: normalizeHexColor(src.youPrimaryColor) || '#1a383b',
+    youSecondaryColor: normalizeHexColor(src.youSecondaryColor) || '#254c52',
     habitTagColors: isPlainObject(src.habitTagColors) ? src.habitTagColors : {},
     scoringSettings: isPlainObject(src.scoringSettings)
       ? src.scoringSettings
@@ -990,6 +997,26 @@ function fastEnsureStateShape(s) {
         mergedSnapshot.youName = existing?.youName || '';
       } else if (typeof incoming === 'string') {
         mergedSnapshot.youName = incoming;
+      }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(nextState || {}, 'youPrimaryColor')) {
+      const allowOverwrite = shouldAllowStickyOverwrite('youPrimaryColor', options);
+      const incoming = normalizeHexColor(nextState?.youPrimaryColor);
+      if (!allowOverwrite && isStickyEmptyValue('youPrimaryColor', incoming)) {
+        mergedSnapshot.youPrimaryColor = normalizeHexColor(existing?.youPrimaryColor) || '#1a383b';
+      } else if (incoming) {
+        mergedSnapshot.youPrimaryColor = incoming;
+      }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(nextState || {}, 'youSecondaryColor')) {
+      const allowOverwrite = shouldAllowStickyOverwrite('youSecondaryColor', options);
+      const incoming = normalizeHexColor(nextState?.youSecondaryColor);
+      if (!allowOverwrite && isStickyEmptyValue('youSecondaryColor', incoming)) {
+        mergedSnapshot.youSecondaryColor = normalizeHexColor(existing?.youSecondaryColor) || '#254c52';
+      } else if (incoming) {
+        mergedSnapshot.youSecondaryColor = incoming;
       }
     }
 
