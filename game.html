@@ -2301,10 +2301,10 @@ async function renderPlayers() {
 
         <div class="player-edit-color-row text-xs">
           <div class="player-edit-color-control">
-            <label class="opacity-70" for="youPrimaryColorInput">Primary color</label>
+            <label class="opacity-70" for="playerPrimaryColor-${p.id}">Primary color</label>
             <input
-              id="youPrimaryColorInput"
-              data-field="you-primaryColor"
+              id="playerPrimaryColor-${p.id}"
+              data-field="primaryColor"
               type="color"
               class="player-edit-color-input"
               value="${escapeHtmlAttr(normalizePlayerColor(p.primaryColor, DEFAULT_PRIMARY_COLOR))}"
@@ -2313,7 +2313,7 @@ async function renderPlayers() {
               type="button"
               data-act="open-color"
               data-id="YOU"
-              data-target-id="youPrimaryColorInput"
+              data-target-id="playerPrimaryColor-${p.id}"
               class="player-edit-color-pill"
               aria-label="Edit primary color"
               title="Primary color ${escapeHtmlAttr(normalizePlayerColor(p.primaryColor, DEFAULT_PRIMARY_COLOR))}"
@@ -2321,10 +2321,10 @@ async function renderPlayers() {
             ></button>
           </div>
           <div class="player-edit-color-control">
-            <label class="opacity-70" for="youSecondaryColorInput">Secondary color</label>
+            <label class="opacity-70" for="playerSecondaryColor-${p.id}">Secondary color</label>
             <input
-              id="youSecondaryColorInput"
-              data-field="you-secondaryColor"
+              id="playerSecondaryColor-${p.id}"
+              data-field="secondaryColor"
               type="color"
               class="player-edit-color-input"
               value="${escapeHtmlAttr(normalizePlayerColor(p.secondaryColor, DEFAULT_SECONDARY_COLOR))}"
@@ -2333,7 +2333,7 @@ async function renderPlayers() {
               type="button"
               data-act="open-color"
               data-id="YOU"
-              data-target-id="youSecondaryColorInput"
+              data-target-id="playerSecondaryColor-${p.id}"
               class="player-edit-color-pill"
               aria-label="Edit secondary color"
               title="Secondary color ${escapeHtmlAttr(normalizePlayerColor(p.secondaryColor, DEFAULT_SECONDARY_COLOR))}"
@@ -2849,8 +2849,8 @@ function wirePlayerColorEditors(root = document) {
   if (act === "done-you") {
     const card = btn.closest(".playerCard");
     const nameInput = card ? card.querySelector('input[data-field="you-name"]') : null;
-    const primaryColorInput = card ? card.querySelector('input[data-field="you-primaryColor"]') : null;
-    const secondaryColorInput = card ? card.querySelector('input[data-field="you-secondaryColor"]') : null;
+    const primaryColorInput = card ? card.querySelector('input[data-field="primaryColor"]') : null;
+    const secondaryColorInput = card ? card.querySelector('input[data-field="secondaryColor"]') : null;
     const nextName = nameInput ? (nameInput.value || "").trim() : "";
     const youColors = getYouPlayerColors();
     const nextPrimaryColor = normalizePlayerColor(primaryColorInput ? primaryColorInput.value : youColors.primaryColor, DEFAULT_PRIMARY_COLOR);
