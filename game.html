@@ -2312,6 +2312,7 @@ async function renderPlayers() {
             <button
               type="button"
               data-act="open-color"
+              data-id="YOU"
               data-target-id="youPrimaryColorInput"
               class="player-edit-color-pill"
               aria-label="Edit primary color"
@@ -2331,6 +2332,7 @@ async function renderPlayers() {
             <button
               type="button"
               data-act="open-color"
+              data-id="YOU"
               data-target-id="youSecondaryColorInput"
               class="player-edit-color-pill"
               aria-label="Edit secondary color"
@@ -2534,6 +2536,7 @@ card.innerHTML = `
                   <button
                     type="button"
                     data-act="open-color"
+                    data-id="${p.id}"
                     data-target-id="playerPrimaryColor-${p.id}"
                     class="player-edit-color-pill"
                     aria-label="Edit primary color"
@@ -2553,6 +2556,7 @@ card.innerHTML = `
                   <button
                     type="button"
                     data-act="open-color"
+                    data-id="${p.id}"
                     data-target-id="playerSecondaryColor-${p.id}"
                     class="player-edit-color-pill"
                     aria-label="Edit secondary color"
