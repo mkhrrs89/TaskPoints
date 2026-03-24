@@ -472,7 +472,16 @@
   }
 
   function getPlayerById(state, id){
-    if (id === 'YOU') return { id:'YOU', name:getYouName(state), isYou:true, imageId: state.youImageId || null };
+    if (id === 'YOU') {
+      return {
+        id:'YOU',
+        name:getYouName(state),
+        isYou:true,
+        imageId: state.youImageId || null,
+        primaryColor: normalizeHexColor(state?.youPrimaryColor) || '#1a383b',
+        secondaryColor: normalizeHexColor(state?.youSecondaryColor) || '#254c52'
+      };
+    }
     const ps = Array.isArray(state.players) ? state.players : [];
     return ps.find(x => x && x.id === id) || null;
   }
