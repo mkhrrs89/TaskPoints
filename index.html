@@ -7057,6 +7057,72 @@ setTodayWorkEditable(workImpactBelow);
   });
 }
 
+function getMoodScoreValue(entry) {
+  if (!entry) return NaN;
+  const raw = String(entry.title || "").match(/\(([-\d.]+)\)/)?.[1];
+  const num = Number(raw);
+  return Number.isFinite(num) ? num : NaN;
+}
+
+function getMoodNotesValue(entry) {
+  if (!entry) return "";
+  return typeof entry.moodNotes === 'string' ? entry.moodNotes : "";
+}
+
+let moodEditContext = null;
+
+function openMoodEditModal({ entry = null, score = '', notes = '', onSave = null } = {}) {
+  const modal = $('moodEditModal');
+  const scoreInput = $('moodEditScoreInput');
+  const notesInput = $('moodEditNotesInput');
+  if (!modal || !scoreInput || !notesInput) return;
+
+  moodEditContext = { entry, onSave };
+
+  $('moodEditDateLabel').textContent = entry?.completedAtISO
+    ? new Date(entry.completedAtISO).toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' })
+    : 'Today';
+
+  scoreInput.value = score === '' ? '' : String(score);
+  notesInput.value = notes || '';
+
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+
+  setTimeout(() => {
+    scoreInput.focus();
+    scoreInput.select?.();
+  }, 0);
+}
+
+function closeMoodEditModal() {
+  const modal = $('moodEditModal');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+  moodEditContext = null;
+}
+
+function submitMoodEditModal() {
+  const scoreInput = $('moodEditScoreInput');
+  const notesInput = $('moodEditNotesInput');
+  if (!scoreInput || !notesInput || !moodEditContext) return;
+
+  const rawText = String(scoreInput.value || '').trim();
+  if (rawText === '') return alert('Enter your mood score.');
+
+  const num = Number(rawText);
+  if (!Number.isFinite(num)) return alert('Invalid mood score.');
+
+  const notes = String(notesInput.value || '');
+  const { entry, onSave } = moodEditContext;
+  closeMoodEditModal();
+
+  if (typeof onSave === 'function') {
+    onSave({ score: num, notes, entry });
+  }
+}
+
   function getTodayMoodEntry() {
   const todayKeyStr = dateKey(new Date());
   for (const c of state.completions) {
@@ -7071,38 +7137,32 @@ function editTodayMood() {
   const entry = getTodayMoodEntry();
   if (!entry) return alert("You haven't entered today's mood score yet.");
 
-  const current = entry.title.match(/\((.+)\)/)?.[1] ?? "";
-  const newVal = prompt("Edit today's mood score:", String(current));
-  if (newVal === null) return;
+  openMoodEditModal({
+    entry,
+    score: getMoodScoreValue(entry),
+    notes: getMoodNotesValue(entry),
+    onSave: ({ score, notes }) => {
+      const d = new Date();
+      d.setHours(12, 0, 0, 0);
 
-  const num = Number(String(newVal).trim());
-  if (Number.isNaN(num)) return alert("Invalid mood score.");
+      const oldPts = Number(entry.points) || 0;
+      const newPts = moodPoints(score);
+      entry.title = `Mood Score (${score})`;
+      entry.points = newPts;
+      entry.moodNotes = notes;
+      toastPointsDeltaTodayAware(newPts, oldPts, d);
+      entry.completedAtISO = d.toISOString();
+      entry.source = 'metric';
 
-  const d = new Date();
-  d.setHours(12, 0, 0, 0);
-
-  const oldPts = Number(entry.points) || 0;
-  const newPts = moodPoints(num);
-  entry.title = `Mood Score (${num})`;
-  entry.points = newPts;
-  toastPointsDeltaTodayAware(newPts, oldPts, d);
-  entry.completedAtISO = d.toISOString();
-  entry.source = 'metric';
-
-  markCompletionsDirty();
-  
-  save();
-  scheduleRender(renderAll);
+      markCompletionsDirty();
+      save();
+      scheduleRender(renderAll);
+    }
+  });
 }
 
 function saveMoodScore() {
   const rawStr = $('moodScoreInput').value.trim();
-  if (rawStr === '') return alert("Enter your mood score.");
-
-  const raw = Number(rawStr);
-  if (Number.isNaN(raw)) return alert("Mood Score must be a number.");
-
-  const pts = moodPoints(raw);
 
   const d = new Date();
   d.setHours(12, 0, 0, 0);
@@ -7115,29 +7175,44 @@ function saveMoodScore() {
     const cd = new Date(c.completedAtISO);
     if (dateKey(cd) === key) { existing = c; break; }
   }
-  const oldPts = existing ? (Number(existing.points) || 0) : 0;
 
-  if (existing) {
-    existing.title = `Mood Score (${raw})`;
-    existing.points = pts;
-    existing.completedAtISO = whenISO;
-    existing.source = 'metric';
-  } else {
-    state.completions.unshift({
-      id: crypto.randomUUID(),
-      title: `Mood Score (${raw})`,
-      points: pts,
-      completedAtISO: whenISO,
-      source: "metric"
-    });
-  }
+  const initialScore = rawStr !== ''
+    ? rawStr
+    : (existing ? String(getMoodScoreValue(existing)) : '');
 
-  toastPointsDeltaTodayAware(pts, oldPts, key);
-  markCompletionsDirty();
-  
-  $('moodScoreInput').value = "";
-  save();
-  scheduleRender(renderAll);
+  openMoodEditModal({
+    entry: existing,
+    score: initialScore,
+    notes: getMoodNotesValue(existing),
+    onSave: ({ score, notes }) => {
+      const pts = moodPoints(score);
+      const oldPts = existing ? (Number(existing.points) || 0) : 0;
+
+      if (existing) {
+        existing.title = `Mood Score (${score})`;
+        existing.points = pts;
+        existing.moodNotes = notes;
+        existing.completedAtISO = whenISO;
+        existing.source = 'metric';
+      } else {
+        state.completions.unshift({
+          id: crypto.randomUUID(),
+          title: `Mood Score (${score})`,
+          points: pts,
+          moodNotes: notes,
+          completedAtISO: whenISO,
+          source: "metric"
+        });
+      }
+
+      toastPointsDeltaTodayAware(pts, oldPts, key);
+      markCompletionsDirty();
+
+      $('moodScoreInput').value = "";
+      save();
+      scheduleRender(renderAll);
+    }
+  });
 }
 
 function renderMoodHistory() {
@@ -7250,23 +7325,25 @@ setTodayMoodEditable(moodImpactBelow);
     `;
 
 block.onclick = () => {
-  const newVal = prompt("Edit mood score:", val);
-  if (newVal === null) return;
+  openMoodEditModal({
+    entry,
+    score: getMoodScoreValue(entry),
+    notes: getMoodNotesValue(entry),
+    onSave: ({ score, notes }) => {
+      const target = entry;
+      const oldPts = Number(target.points) || 0;
+      const newPts = moodPoints(score);
 
-  const num = Number(String(newVal).trim());
-  if (!Number.isFinite(num)) return alert("Invalid number.");
+      target.title = `Mood Score (${score})`;
+      target.points = newPts;
+      target.moodNotes = notes;
 
-  const target = entry;
-  const oldPts = Number(target.points) || 0;
-  const newPts = moodPoints(num);
-
-  target.title = `Mood Score (${num})`;
-  target.points = newPts;
-
-  toastPointsDeltaTodayAware(newPts, oldPts, target);
-  markCompletionsDirty();
-  save();
-  scheduleRender(renderAll);
+      toastPointsDeltaTodayAware(newPts, oldPts, target);
+      markCompletionsDirty();
+      save();
+      scheduleRender(renderAll);
+    }
+  });
 };
 
         container.appendChild(block);
@@ -8222,27 +8299,26 @@ if (key === "mood") {
   const e = (typeof getTodayMoodEntry === "function") ? getTodayMoodEntry() : null;
   const entry = e || ensureTodayScoreEntry("mood");
 
-  // Use the same prompt flow you already use for Mood edits
-  const current = String(entry.title || "").match(/\(([-\d.]+)\)/)?.[1] || "";
-  const newVal = prompt("Mood score for today:", String(current));
-  if (newVal === null) return;
+  openMoodEditModal({
+    entry,
+    score: getMoodScoreValue(entry),
+    notes: getMoodNotesValue(entry),
+    onSave: ({ score, notes }) => {
+      const oldPts = Number(entry.points) || 0;
+      const newPts = moodPoints(score);
 
-  const num = Number(String(newVal).trim());
-  if (!Number.isFinite(num)) return alert("Invalid mood score.");
+      entry.title  = `Mood Score (${score})`;
+      entry.points = newPts;
+      entry.moodNotes = notes;
+      toastPointsDeltaTodayAware(newPts, oldPts, entry);
 
-  const oldPts = Number(entry.points) || 0;
-  const newPts = moodPoints(num);
+      markCompletionsDirty();
+      save();
 
-  entry.title  = `Mood Score (${num})`;
-  entry.points = newPts;
-  toastPointsDeltaTodayAware(newPts, oldPts, entry);
-
-  markCompletionsDirty();
-  save();
-
-  // refresh instantly
-  try { renderScoreDashboardV2_Skeleton(); } catch(e){}
-  try { if (scoreV2RecentOpen) renderScoreV2RecentGrid(); } catch(e){}
+      try { renderScoreDashboardV2_Skeleton(); } catch(e){}
+      try { if (scoreV2RecentOpen) renderScoreV2RecentGrid(); } catch(e){}
+    }
+  });
 
   return;
 }
@@ -8493,19 +8569,18 @@ return;
     }
 
     if (cat === "mood") {
-      const current = entry.title.match(/\(([-\d.]+)\)/)?.[1] || "";
-      const newVal = prompt("Edit mood score for this day:", String(current));
-      if (newVal === null) return;
+      openMoodEditModal({
+        entry,
+        score: getMoodScoreValue(entry),
+        notes: getMoodNotesValue(entry),
+        onSave: ({ score, notes }) => {
+          const oldPts = Number(entry.points) || 0;
+          const newPts = moodPoints(score);
 
-      const num = Number(String(newVal).trim());
-      if (!Number.isFinite(num)) return alert("Invalid mood score.");
-
-      const oldPts = Number(entry.points) || 0;
-      const newPts = moodPoints(num);
-
-      entry.title  = `Mood Score (${num})`;
-      entry.points = newPts;
-      toastPointsDeltaTodayAware(newPts, oldPts, entry);
+          entry.title  = `Mood Score (${score})`;
+          entry.points = newPts;
+          entry.moodNotes = notes;
+          toastPointsDeltaTodayAware(newPts, oldPts, entry);
 
 markCompletionsDirty();
 save();
@@ -8513,6 +8588,8 @@ scheduleRender(renderAll);
 
 try { if (scoreV2RecentOpen) renderScoreV2RecentGrid(); } catch(e){}
 try { renderScoreDashboardV2_Skeleton(); } catch(e){}
+        }
+      });
 
 return;
 
@@ -8806,6 +8883,50 @@ function tpPerfMark(label) {
 
   
 </script>
+
+<!-- EDIT MOOD ENTRY MODAL -->
+<div
+  id="moodEditModal"
+  class="fixed inset-0 z-40 hidden items-center justify-center bg-black/60"
+  onclick="closeMoodEditModal()"
+>
+  <div
+    id="moodEditModalBody"
+    class="w-full max-w-sm mx-3 rounded-2xl px-4 pb-5 pt-8 relative bg-zinc-900 text-zinc-100 text-sm"
+    onclick="event.stopPropagation();"
+  >
+    <button
+      type="button"
+      class="absolute top-3 right-3 btn btn-secondary text-[11px] px-3 py-1 rounded-md"
+      onclick="closeMoodEditModal()"
+    >
+      Close
+    </button>
+
+    <div class="flex items-start justify-between gap-3 mb-4">
+      <div>
+        <div class="muted text-[11px] uppercase tracking-wide">Edit Mood</div>
+        <div id="moodEditDateLabel" class="text-base font-semibold leading-tight"></div>
+      </div>
+      <div class="text-2xl">🙂</div>
+    </div>
+
+    <label class="grid gap-1 text-sm font-medium">
+      Mood score
+      <input id="moodEditScoreInput" type="number" class="input" placeholder="e.g., 8">
+    </label>
+
+    <label class="grid gap-1 text-sm font-medium mt-3">
+      Notes
+      <textarea id="moodEditNotesInput" class="input min-h-[92px] resize-y" placeholder="Optional notes"></textarea>
+    </label>
+
+    <div class="flex justify-end gap-2 mt-6">
+      <button type="button" class="btn btn-secondary" onclick="closeMoodEditModal()">Cancel</button>
+      <button type="button" id="moodEditSaveBtn" class="btn btn-primary" onclick="submitMoodEditModal()">Save</button>
+    </div>
+  </div>
+</div>
 
 <!-- EDIT SLEEP ENTRY MODAL -->
   <div
