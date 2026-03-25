@@ -2807,27 +2807,34 @@ function wirePlayerColorEditors(root = document) {
       }
 
   // --- Change YOU photo ---
-  if (act === "change-you-photo") {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = "image/png,image/jpeg,image/jpg,image/gif";
+if (act === "change-you-photo") {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "image/png,image/jpeg,image/jpg,image/gif";
 
-    input.onchange = async () => {
-      const file = input.files[0];
-      if (!file) return;
+  input.onchange = async () => {
+    const file = input.files[0];
+    if (!file) return;
 
-      openImageCropperFromFile(file, async (dataUrl) => {
-        if (!dataUrl) return;
-        const nextImageId = await saveImageFromDataUrl(dataUrl, state.youImageId);
-        state.youImageId = nextImageId || "";
-        state = saveState(state, { allowStickyOverwriteKeys: ["youImageId"] });
-        renderPlayers();
-      });
-    };
+    openImageCropperFromFile(file, async (dataUrl) => {
+      if (!dataUrl) return;
 
-    input.click();
-    return;
-  }
+      const nextImageId = await saveImageFromDataUrl(dataUrl, state.youImageId);
+      state.youImageId = nextImageId || "";
+      state = saveState(state, { allowStickyOverwriteKeys: ["youImageId"] });
+
+      if (state.youImageId) {
+        await loadImageUrl(state.youImageId);
+      }
+
+      editingPlayerId = null;
+      await renderPlayers();
+    });
+  };
+
+  input.click();
+  return;
+}
 
   // --- Clear YOU photo ---
   if (act === "clear-you-photo") {
