@@ -9426,7 +9426,10 @@ let reminderTaskId = null;
 
 const hideReminderForSession = () => {
   reminderDismissed = true;
-  if (reminderFab) reminderFab.classList.add('hidden');
+  if (reminderFab) {
+    reminderFab.style.display = 'none';
+    reminderFab.classList.add('hidden');
+  }
 };
 
     const openReminderModal = () => {
@@ -9448,12 +9451,7 @@ const hideReminderForSession = () => {
     };
 
 const dismissReminderForSession = () => {
-  alert('DISMISS CLICKED');
-  reminderDismissed = true;
-  if (reminderFab) {
-    reminderFab.style.display = 'none';
-    reminderFab.classList.add('hidden');
-  }
+  hideReminderForSession();
   closeReminderModal();
 };
 
