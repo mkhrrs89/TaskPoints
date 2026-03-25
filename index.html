@@ -9447,10 +9447,11 @@ const hideReminderForSession = () => {
       window.unlockScrollForModal?.();
     };
 
-    const dismissReminderForSession = () => {
-      hideReminderForSession();
-      closeReminderModal();
-    };
+const dismissReminderForSession = () => {
+  alert('DISMISS CLICKED');
+  hideReminderForSession();
+  closeReminderModal();
+};
 
     window.openUndatedReminderModal = openReminderModal;
     window.closeUndatedReminderModal = closeReminderModal;
