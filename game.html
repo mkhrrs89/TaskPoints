@@ -155,20 +155,15 @@
 }
 
 .player-edit-color-control {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.player-edit-color-input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-  pointer-events: none;
-}
-
 .player-edit-color-pill {
+  position: relative;
+  display: inline-block;
   width: 40px;
   height: 18px;
   border-radius: 7px;
@@ -176,6 +171,20 @@
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.32),
     0 1px 2px rgba(17, 24, 39, 0.12);
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.player-edit-color-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  pointer-events: auto;
+  border: 0;
+  padding: 0;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -2299,47 +2308,42 @@ async function renderPlayers() {
           <p class="text-[11px] opacity-70">Leave blank to keep “You”.</p>
         </div>
 
-        <div class="player-edit-color-row text-xs">
-          <div class="player-edit-color-control">
-            <label class="opacity-70" for="playerPrimaryColor-${p.id}">Primary color</label>
-            <input
-              id="playerPrimaryColor-${p.id}"
-              data-field="primaryColor"
-              type="color"
-              class="player-edit-color-input"
-              value="${escapeHtmlAttr(normalizePlayerColor(p.primaryColor, DEFAULT_PRIMARY_COLOR))}"
-            />
-            <button
-              type="button"
-              data-act="open-color"
-              data-id="YOU"
-              data-target-id="playerPrimaryColor-${p.id}"
-              class="player-edit-color-pill"
-              aria-label="Edit primary color"
-              title="Primary color ${escapeHtmlAttr(normalizePlayerColor(p.primaryColor, DEFAULT_PRIMARY_COLOR))}"
-              style="background:${escapeHtmlAttr(normalizePlayerColor(p.primaryColor, DEFAULT_PRIMARY_COLOR))};"
-            ></button>
-          </div>
-          <div class="player-edit-color-control">
-            <label class="opacity-70" for="playerSecondaryColor-${p.id}">Secondary color</label>
-            <input
-              id="playerSecondaryColor-${p.id}"
-              data-field="secondaryColor"
-              type="color"
-              class="player-edit-color-input"
-              value="${escapeHtmlAttr(normalizePlayerColor(p.secondaryColor, DEFAULT_SECONDARY_COLOR))}"
-            />
-            <button
-              type="button"
-              data-act="open-color"
-              data-id="YOU"
-              data-target-id="playerSecondaryColor-${p.id}"
-              class="player-edit-color-pill"
-              aria-label="Edit secondary color"
-              title="Secondary color ${escapeHtmlAttr(normalizePlayerColor(p.secondaryColor, DEFAULT_SECONDARY_COLOR))}"
-              style="background:${escapeHtmlAttr(normalizePlayerColor(p.secondaryColor, DEFAULT_SECONDARY_COLOR))};"
-            ></button>
-          </div>
+<div class="player-edit-color-control">
+  <label class="opacity-70" for="playerPrimaryColor-${p.id}">Primary color</label>
+  <label
+    class="player-edit-color-pill"
+    aria-label="Edit primary color"
+    title="Primary color ${escapeHtmlAttr(normalizePlayerColor(p.primaryColor, DEFAULT_PRIMARY_COLOR))}"
+    style="background:${escapeHtmlAttr(normalizePlayerColor(p.primaryColor, DEFAULT_PRIMARY_COLOR))};"
+  >
+    <input
+      id="playerPrimaryColor-${p.id}"
+      data-field="primaryColor"
+      type="color"
+      class="player-edit-color-input"
+      value="${escapeHtmlAttr(normalizePlayerColor(p.primaryColor, DEFAULT_PRIMARY_COLOR))}"
+    />
+  </label>
+</div>
+          
+<div class="player-edit-color-control">
+  <label class="opacity-70" for="playerSecondaryColor-${p.id}">Secondary color</label>
+  <label
+    class="player-edit-color-pill"
+    aria-label="Edit secondary color"
+    title="Secondary color ${escapeHtmlAttr(normalizePlayerColor(p.secondaryColor, DEFAULT_SECONDARY_COLOR))}"
+    style="background:${escapeHtmlAttr(normalizePlayerColor(p.secondaryColor, DEFAULT_SECONDARY_COLOR))};"
+  >
+    <input
+      id="playerSecondaryColor-${p.id}"
+      data-field="secondaryColor"
+      type="color"
+      class="player-edit-color-input"
+      value="${escapeHtmlAttr(normalizePlayerColor(p.secondaryColor, DEFAULT_SECONDARY_COLOR))}"
+    />
+  </label>
+</div>
+          
         </div>
 
         <div class="text-xs opacity-80 leading-[1.0] space-y-[2px] mt-1">
@@ -2524,46 +2528,42 @@ card.innerHTML = `
             </div>
             <div class="md:col-span-4">
               <div class="player-edit-color-row text-xs">
-                <div class="player-edit-color-control">
-                  <label class="opacity-70" for="playerPrimaryColor-${p.id}">Primary color</label>
-                  <input
-                    id="playerPrimaryColor-${p.id}"
-                    data-field="primaryColor"
-                    type="color"
-                    class="player-edit-color-input"
-                    value="${escapeHtmlAttr(primaryColor)}"
-                  />
-                  <button
-                    type="button"
-                    data-act="open-color"
-                    data-id="${p.id}"
-                    data-target-id="playerPrimaryColor-${p.id}"
-                    class="player-edit-color-pill"
-                    aria-label="Edit primary color"
-                    title="Primary color ${escapeHtmlAttr(primaryColor)}"
-                    style="background:${escapeHtmlAttr(primaryColor)};"
-                  ></button>
-                </div>
-                <div class="player-edit-color-control">
-                  <label class="opacity-70" for="playerSecondaryColor-${p.id}">Secondary color</label>
-                  <input
-                    id="playerSecondaryColor-${p.id}"
-                    data-field="secondaryColor"
-                    type="color"
-                    class="player-edit-color-input"
-                    value="${escapeHtmlAttr(secondaryColor)}"
-                  />
-                  <button
-                    type="button"
-                    data-act="open-color"
-                    data-id="${p.id}"
-                    data-target-id="playerSecondaryColor-${p.id}"
-                    class="player-edit-color-pill"
-                    aria-label="Edit secondary color"
-                    title="Secondary color ${escapeHtmlAttr(secondaryColor)}"
-                    style="background:${escapeHtmlAttr(secondaryColor)};"
-                  ></button>
-                </div>
+              
+<div class="player-edit-color-control">
+  <label class="opacity-70" for="playerPrimaryColor-${p.id}">Primary color</label>
+  <label
+    class="player-edit-color-pill"
+    aria-label="Edit primary color"
+    title="Primary color ${escapeHtmlAttr(primaryColor)}"
+    style="background:${escapeHtmlAttr(primaryColor)};"
+  >
+    <input
+      id="playerPrimaryColor-${p.id}"
+      data-field="primaryColor"
+      type="color"
+      class="player-edit-color-input"
+      value="${escapeHtmlAttr(primaryColor)}"
+    />
+  </label>
+</div>
+
+<div class="player-edit-color-control">
+  <label class="opacity-70" for="playerSecondaryColor-${p.id}">Secondary color</label>
+  <label
+    class="player-edit-color-pill"
+    aria-label="Edit secondary color"
+    title="Secondary color ${escapeHtmlAttr(secondaryColor)}"
+    style="background:${escapeHtmlAttr(secondaryColor)};"
+  >
+    <input
+      id="playerSecondaryColor-${p.id}"
+      data-field="secondaryColor"
+      type="color"
+      class="player-edit-color-input"
+      value="${escapeHtmlAttr(secondaryColor)}"
+    />
+  </label>
+</div>
               </div>
             </div>
           </div>
@@ -2750,14 +2750,7 @@ function wirePlayerColorEditors(root = document) {
         return;
       }
 
-      if (act === "open-color"){
-        const card = btn.closest(".playerCard") || document;
-        const targetId = btn.getAttribute("data-target-id");
-        const input = targetId ? document.getElementById(targetId) : null;
-        if (input && card && !card.contains(input)) return;
-        if (input) input.click();
-        return;
-      }
+
 
       if (act === "delete"){
         const player = state.players.find(p => p.id === id);
