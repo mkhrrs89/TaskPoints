@@ -9449,7 +9449,11 @@ const hideReminderForSession = () => {
 
 const dismissReminderForSession = () => {
   alert('DISMISS CLICKED');
-  hideReminderForSession();
+  reminderDismissed = true;
+  if (reminderFab) {
+    reminderFab.style.display = 'none';
+    reminderFab.classList.add('hidden');
+  }
   closeReminderModal();
 };
 
