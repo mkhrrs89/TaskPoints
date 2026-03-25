@@ -2819,12 +2819,19 @@ if (act === "change-you-photo") {
     openImageCropperFromFile(file, async (dataUrl) => {
       if (!dataUrl) return;
 
-      const nextImageId = await saveImageFromDataUrl(dataUrl, state.youImageId);
+      const previousImageId = state.youImageId || "";
+      const nextImageId = await saveImageFromDataUrl(dataUrl, previousImageId);
+
       state.youImageId = nextImageId || "";
       state = saveState(state, { allowStickyOverwriteKeys: ["youImageId"] });
 
-      if (state.youImageId) {
-        await loadImageUrl(state.youImageId);
+      if (nextImageId) {
+        imageUrlCache.set(nextImageId, dataUrl);
+        imageLoadPromises.delete(nextImageId);
+      }
+
+      if (previousImageId && previousImageId !== nextImageId) {
+        revokeImageUrl(previousImageId);
       }
 
       editingPlayerId = null;
