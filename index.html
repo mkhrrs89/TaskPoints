@@ -9337,32 +9337,10 @@ function tpPerfMark(label) {
     const tasksSection = document.getElementById('tasksSection') || document.getElementById('tasksAnchor');
     if (!fab || !tasksSection) return;
 
-    const mobileQuery = window.matchMedia('(max-width: 767px)');
-    const reminderDismissStorageKey = 'tpUndatedReminderDismissed';
-    let tasksInView = false;
-    let reminderDismissed = false;
-    let reminderTaskId = null;
-
-    const readReminderDismissedState = () => {
-      try {
-        return window.sessionStorage?.getItem(reminderDismissStorageKey) === '1';
-      } catch (_error) {
-        return false;
-      }
-    };
-
-    const writeReminderDismissedState = (dismissed) => {
-      try {
-        if (!window.sessionStorage) return;
-        if (dismissed) {
-          window.sessionStorage.setItem(reminderDismissStorageKey, '1');
-        } else {
-          window.sessionStorage.removeItem(reminderDismissStorageKey);
-        }
-      } catch (_error) {}
-    };
-
-    reminderDismissed = readReminderDismissedState();
+const mobileQuery = window.matchMedia('(max-width: 767px)');
+let tasksInView = false;
+let reminderDismissed = false;
+let reminderTaskId = null;
 
     const getUndatedReminderTasks = () => (Array.isArray(state?.tasks) ? state.tasks : []).filter((task) => (
       task
@@ -9446,11 +9424,10 @@ function tpPerfMark(label) {
       addTaskFab.classList.add('is-pressed');
     };
 
-    const hideReminderForSession = () => {
-      reminderDismissed = true;
-      writeReminderDismissedState(true);
-      if (reminderFab) reminderFab.classList.add('hidden');
-    };
+const hideReminderForSession = () => {
+  reminderDismissed = true;
+  if (reminderFab) reminderFab.classList.add('hidden');
+};
 
     const openReminderModal = () => {
       const task = getReminderTask();
