@@ -1258,12 +1258,22 @@ migrateLegacyImagesIfNeeded();
 function normalizeTask(task){
   if(!task || typeof task !== 'object') return task;
   const t = { ...task };
+
   if (typeof t.postponedDays !== 'number' || Number.isNaN(t.postponedDays)) {
     t.postponedDays = 0;
   }
+
   if (!t.originalDueDateISO && t.dueDateISO) {
     t.originalDueDateISO = t.dueDateISO;
   }
+
+  t.skills = Array.isArray(t.skills)
+    ? t.skills.map((row) => ({
+        skill: typeof row?.skill === 'string' ? row.skill : '',
+        pts: row?.pts == null ? '' : String(row.pts)
+      }))
+    : [];
+
   return t;
 }
 
@@ -5761,6 +5771,102 @@ function showTrashToast(taskId){
   setTimeout(close, 4500);
 }
 
+function getTaskSkillsForEditor(task){
+  const rows = Array.isArray(task?.skills)
+    ? task.skills.map((row) => ({
+        skill: typeof row?.skill === 'string' ? row.skill : '',
+        pts: row?.pts == null ? '' : String(row.pts)
+      }))
+    : [];
+
+  while (rows.length < 2) {
+    rows.push({ skill: '', pts: '' });
+  }
+
+  return rows;
+}
+
+function renderTaskSkillRow(row){
+  const skill = typeof row?.skill === 'string' ? row.skill : '';
+  const pts = row?.pts == null ? '' : String(row.pts);
+
+  return `
+    <div class="task-skill-row" data-task-skill-row style="display:grid; grid-template-columns:minmax(0,3fr) minmax(84px,1fr); gap:8px;">
+      <input
+        class="input"
+        data-task-skill-field="skill"
+        placeholder="Skill"
+        value="${escapeHtml(skill)}"
+      >
+      <input
+        class="input"
+        data-task-skill-field="pts"
+        placeholder="Pts"
+        value="${escapeHtml(pts)}"
+      >
+    </div>
+  `;
+}
+
+function readTaskSkillsFromCard(card){
+  return Array.from(card.querySelectorAll('[data-task-skill-row]')).map((row) => {
+    const skillInput = row.querySelector('[data-task-skill-field="skill"]');
+    const ptsInput = row.querySelector('[data-task-skill-field="pts"]');
+
+    return {
+      skill: (skillInput?.value || '').trim(),
+      pts: (ptsInput?.value || '').trim()
+    };
+  });
+}
+
+function saveTaskSkillsFromCard(taskId, card){
+  const task = state.tasks.find((x) => x.id === taskId);
+  if (!task || !card) return;
+
+  task.skills = readTaskSkillsFromCard(card);
+  task.updatedAtISO = new Date().toISOString();
+  save();
+}
+
+function queueTaskSkillsAutosave(taskId, card){
+  if (!card) return;
+  clearTimeout(card.__taskSkillsAutosaveTimer);
+  card.__taskSkillsAutosaveTimer = setTimeout(() => {
+    saveTaskSkillsFromCard(taskId, card);
+  }, 150);
+}
+
+function wireTaskSkillEditor(card, taskId){
+  if (!card || !taskId) return;
+
+  card.querySelectorAll('[data-task-skill-field]').forEach((input) => {
+    if (input.dataset.skillBound === '1') return;
+    input.dataset.skillBound = '1';
+
+    input.addEventListener('input', () => {
+      queueTaskSkillsAutosave(taskId, card);
+    });
+
+    input.addEventListener('change', () => {
+      saveTaskSkillsFromCard(taskId, card);
+    });
+  });
+
+  const addBtn = card.querySelector('[data-task-skill-add]');
+  if (addBtn && addBtn.dataset.skillAddBound !== '1') {
+    addBtn.dataset.skillAddBound = '1';
+    addBtn.addEventListener('click', () => {
+      const rowsWrap = card.querySelector('[data-task-skills-rows]');
+      if (!rowsWrap) return;
+
+      rowsWrap.insertAdjacentHTML('beforeend', renderTaskSkillRow({ skill: '', pts: '' }));
+      wireTaskSkillEditor(card, taskId);
+      saveTaskSkillsFromCard(taskId, card);
+    });
+  }
+}
+  
 function renderTasks(){
   const container=$('taskList'), empty=$('emptyList'); container.innerHTML='';
   window.updateUndatedReminderIsland?.();
@@ -5852,7 +5958,8 @@ function renderTasks(){
         const recMode = rec.mode || 'none';
         const recCount = Number.isFinite(rec.customCount) && rec.customCount > 0 ? rec.customCount : 1;
         const recUnit  = rec.customUnit || 'day';
-
+        const skillRows = getTaskSkillsForEditor(t).map(renderTaskSkillRow).join('');
+        
         card.innerHTML = `
           <div class="flex flex-col gap-3">
             <div class="grid gap-2">
@@ -5906,10 +6013,37 @@ function renderTasks(){
                   </select>
                 </div>
               </div>
-              <div class="sm:col-span-2">
-                <label class="text-xs muted">Tags</label>
-                <input class="input mt-1" data-field="tags" value="${(Array.isArray(t.tags) ? t.tags : []).join(', ')}">
-              </div>
+
+              
+<div class="sm:col-span-2">
+  <label class="text-xs muted">Tags</label>
+  <input class="input mt-1" data-field="tags" value="${(Array.isArray(t.tags) ? t.tags : []).join(', ')}">
+</div>
+
+<div class="sm:col-span-2">
+  <label class="text-xs muted block">Skills</label>
+
+  <div class="mt-2 grid gap-2">
+    <div style="display:grid; grid-template-columns:minmax(0,3fr) minmax(84px,1fr); gap:8px;" class="text-[11px] muted uppercase tracking-wide">
+      <div>Skill</div>
+      <div>Pts</div>
+    </div>
+
+    <div data-task-skills-rows class="grid gap-2">
+      ${skillRows}
+    </div>
+
+    <div>
+      <button
+        type="button"
+        class="btn btn-ghost btn-task"
+        data-task-skill-add="1"
+      >
+        Add
+      </button>
+    </div>
+  </div>
+</div>
             </div>
             <div class="flex gap-2 flex-wrap justify-end">
               <button class="btn btn-success" data-task-action="task-save" data-task-id="${t.id}">Save</button>
@@ -5937,6 +6071,9 @@ function renderTasks(){
           repSel.addEventListener('change', toggle);
           toggle();
         }
+        
+wireTaskSkillEditor(card, t.id);
+        
       } else {
         card.innerHTML = `
           <div class="task-card-shell" data-task-card-body="${t.id}" tabindex="0" role="button" aria-expanded="${isTaskExpanded ? 'true' : 'false'}" aria-label="${isTaskExpanded ? 'Collapse' : 'Expand'} ${escapeHtml(t.title)}">
@@ -7391,26 +7528,27 @@ function addTask(){
     rec.customUnit = unit;
   }
 
-  const task = {
-    id: crypto.randomUUID(),
-    title,
-    importance: $('importanceInput').value,
-    dueDateISO: $('dueDateInput').value || null,
-    originalDueDateISO: $('dueDateInput').value || null,
-    points: Number($('pointsInput').value)||0,
-    recurrence: rec,
-    tags,                // ⬅ new
-    skipDates: [],
-    hidden: false,
-    status: 'active',
-    deletedAt: null,
-    deletedFrom: null,
-    prevStatus: null,
-    completedAtISO: null,
-    createdAtISO: new Date().toISOString(),
-    updatedAtISO: new Date().toISOString(),
-    postponedDays: 0
-  };
+const task = {
+  id: crypto.randomUUID(),
+  title,
+  importance: $('importanceInput').value,
+  dueDateISO: $('dueDateInput').value || null,
+  originalDueDateISO: $('dueDateInput').value || null,
+  points: Number($('pointsInput').value)||0,
+  recurrence: rec,
+  tags,
+  skills: [],
+  skipDates: [],
+  hidden: false,
+  status: 'active',
+  deletedAt: null,
+  deletedFrom: null,
+  prevStatus: null,
+  completedAtISO: null,
+  createdAtISO: new Date().toISOString(),
+  updatedAtISO: new Date().toISOString(),
+  postponedDays: 0
+};
 
 
   state.tasks.unshift(task);
@@ -7713,7 +7851,7 @@ function saveTaskEdit(id,card){
   const impSel=card.querySelector('select[data-field="importance"]');
   const repSel=card.querySelector('select[data-field="repeat"]');
   const tagsInput=card.querySelector('input[data-field="tags"]');
-
+const skillRows = readTaskSkillsFromCard(card);
 
   t.title = titleInput.value.trim() || t.title;
   t.points = Number(ptsInput.value)||0;
@@ -7733,6 +7871,8 @@ function saveTaskEdit(id,card){
       .filter(s => s.length > 0);
   }
 
+t.skills = skillRows;
+  
 if (repSel) {
   const mode = repSel.value || 'none';
   t.recurrence = t.recurrence || {};
