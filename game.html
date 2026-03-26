@@ -965,6 +965,7 @@ console.log("state.players =", state.players, "count =", (state.players || []).l
 const imageUrlCache = new Map();
 const imageLoadPromises = new Map();
 let renderPlayersNonce = 0;
+let youImagePreviewUrl = "";
 
 function dataUrlToBlobFallback(dataUrl) {
   if (typeof dataUrl !== "string") return null;
@@ -1016,6 +1017,10 @@ async function loadImageUrl(imageId) {
     if (!blob) return "";
     const url = URL.createObjectURL(blob);
     imageUrlCache.set(imageId, url);
+if (imageId === state.youImageId) {
+  youImagePreviewUrl = "";
+}
+    
     return url;
   })();
 
@@ -2262,7 +2267,7 @@ async function renderPlayers() {
 
   // 🔹 EDIT MODE for YOU (photo-only)
   if (editingPlayerId === "YOU") {
-    const youImageUrl = p.imageId ? getCachedImageUrl(p.imageId) : "";
+    const youImageUrl = youImagePreviewUrl || (p.imageId ? getCachedImageUrl(p.imageId) : "");
     card.innerHTML = `
       <div class="w-full md:w-44 aspect-[3/4] player-img-frame">
         <div class="player-img-inner w-full h-full">
@@ -2359,7 +2364,7 @@ async function renderPlayers() {
   }
 
 // 🔹 VIEW MODE for YOU – matches other cards
-const youImageUrl = p.imageId ? getCachedImageUrl(p.imageId) : "";
+const youImageUrl = youImagePreviewUrl || (p.imageId ? getCachedImageUrl(p.imageId) : "");
 card.innerHTML = `
   <div class="flex flex-col gap-3 w-full">
     <div class="flex items-start justify-between gap-3">
@@ -2820,18 +2825,16 @@ if (act === "change-you-photo") {
       if (!dataUrl) return;
 
       const previousImageId = state.youImageId || "";
-      const nextImageId = await saveImageFromDataUrl(dataUrl, previousImageId);
 
+      youImagePreviewUrl = dataUrl;
+
+      const nextImageId = await saveImageFromDataUrl(dataUrl, previousImageId);
       state.youImageId = nextImageId || "";
       state = saveState(state, { allowStickyOverwriteKeys: ["youImageId"] });
 
       if (nextImageId) {
         imageUrlCache.set(nextImageId, dataUrl);
         imageLoadPromises.delete(nextImageId);
-      }
-
-      if (previousImageId && previousImageId !== nextImageId) {
-        revokeImageUrl(previousImageId);
       }
 
       editingPlayerId = null;
@@ -2844,13 +2847,14 @@ if (act === "change-you-photo") {
 }
 
   // --- Clear YOU photo ---
-  if (act === "clear-you-photo") {
-    await deleteImageById(state.youImageId);
-    state.youImageId = "";
-    state = saveState(state, { allowStickyOverwriteKeys: ["youImageId"] });
-    renderPlayers();
-    return;
-  }
+if (act === "clear-you-photo") {
+  await deleteImageById(state.youImageId);
+  state.youImageId = "";
+  youImagePreviewUrl = "";
+  state = saveState(state, { allowStickyOverwriteKeys: ["youImageId"] });
+  renderPlayers();
+  return;
+}
 
   // --- Done editing YOU ---
   if (act === "done-you") {
