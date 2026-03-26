@@ -8815,6 +8815,22 @@ console.log('TaskPoints main state summary:', {
   gameHistory: Array.isArray(state.gameHistory) ? state.gameHistory.length : 'no array'
 });
 
+function refreshMainPageFromStorage() {
+  storageCache.raw = null;
+  storageCache.parsed = null;
+  state = normalizeState(load());
+  state = syncStateWithMatchups(state);
+  scheduleRender(renderAll);
+}
+
+window.addEventListener('pageshow', () => {
+  refreshMainPageFromStorage();
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) refreshMainPageFromStorage();
+});
+  
   startOpponentDripTicker();
   initTaskListDelegation();
 
