@@ -2286,10 +2286,18 @@ async function renderPlayers() {
         <div class="flex flex-wrap items-center justify-between gap-2">
           <h3 class="font-semibold text-base md:text-lg break-words">${escapeHtml(youName)}</h3>
           <div class="flex gap-2 flex-wrap">
-            <button data-act="change-you-photo" data-id="YOU"
-              class="rounded-xl border px-3 py-1.5 text-sm">
-              Add / Change Photo
-            </button>
+          
+<label
+  class="rounded-xl border px-3 py-1.5 text-sm cursor-pointer relative overflow-hidden inline-flex items-center justify-center">
+  Add / Change Photo
+  <input
+    data-field="you-image"
+    type="file"
+    accept="image/*"
+    style="position:absolute; inset:0; opacity:0; cursor:pointer;"
+  />
+</label>
+
             <button data-act="clear-you-photo" data-id="YOU"
               class="rounded-xl border px-3 py-1.5 text-sm">
               Remove Photo
@@ -2725,6 +2733,9 @@ card.innerHTML = `
 }
 function wirePlayerColorEditors(root = document) {
   root.querySelectorAll(".player-edit-color-input").forEach((input) => {
+    if (input.dataset.boundColor === "1") return;
+    input.dataset.boundColor = "1";
+
     input.addEventListener("input", () => {
       const control = input.closest(".player-edit-color-control");
       const pill = control ? control.querySelector(".player-edit-color-pill") : null;
@@ -2734,6 +2745,31 @@ function wirePlayerColorEditors(root = document) {
       const isSecondary = String(input.dataset.field || "").toLowerCase().includes("secondary");
       const label = isSecondary ? "Secondary color" : "Primary color";
       pill.title = `${label} ${nextColor}`;
+    });
+  });
+
+  root.querySelectorAll('input[data-field="you-image"]').forEach((input) => {
+    if (input.dataset.boundYouImage === "1") return;
+    input.dataset.boundYouImage = "1";
+
+    input.addEventListener("change", () => {
+      const file = input.files && input.files[0];
+      if (!file) return;
+
+      openImageCropperFromFile(file, async (dataUrl) => {
+        input.value = "";
+        if (!dataUrl) return;
+
+        const previousImageId = state.youImageId || "";
+        youImagePreviewUrl = dataUrl;
+
+        const nextImageId = await saveImageFromDataUrl(dataUrl, previousImageId);
+        state.youImageId = nextImageId || "";
+        state = saveState(state, { allowStickyOverwriteKeys: ["youImageId"] });
+
+        editingPlayerId = null;
+        renderPlayers();
+      });
     });
   });
 }
@@ -2809,42 +2845,7 @@ function wirePlayerColorEditors(root = document) {
         state = saveState(state);
         renderPlayers();
         return;
-      }
-
-  // --- Change YOU photo ---
-if (act === "change-you-photo") {
-  const input = document.createElement("input");
-  input.type = "file";
-  input.accept = "image/png,image/jpeg,image/jpg,image/gif";
-
-  input.onchange = async () => {
-    const file = input.files[0];
-    if (!file) return;
-
-    openImageCropperFromFile(file, async (dataUrl) => {
-      if (!dataUrl) return;
-
-      const previousImageId = state.youImageId || "";
-
-      youImagePreviewUrl = dataUrl;
-
-      const nextImageId = await saveImageFromDataUrl(dataUrl, previousImageId);
-      state.youImageId = nextImageId || "";
-      state = saveState(state, { allowStickyOverwriteKeys: ["youImageId"] });
-
-      if (nextImageId) {
-        imageUrlCache.set(nextImageId, dataUrl);
-        imageLoadPromises.delete(nextImageId);
-      }
-
-      editingPlayerId = null;
-      await renderPlayers();
-    });
-  };
-
-  input.click();
-  return;
-}
+      } 
 
   // --- Clear YOU photo ---
 if (act === "clear-you-photo") {
