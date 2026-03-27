@@ -3296,13 +3296,28 @@ function computeHabitStreak(h){
   // Normalize "today"
   const today = new Date();
   today.setHours(0,0,0,0);
+  const todayKeyStr = dateKey(today);
 
   const mostRecent = new Date(dates[0].getTime());
   mostRecent.setHours(0,0,0,0);
 
   const diffToToday = Math.round((today - mostRecent) / 86400000);
-  if (diffToToday > 0) {
-    // Last completion wasn't today → streak broken
+  const doneKeys = Array.isArray(h.doneKeys) ? h.doneKeys : [];
+  const failedKeys = Array.isArray(h.failedKeys) ? h.failedKeys : [];
+  const isMarkedToday = doneKeys.includes(todayKeyStr) || failedKeys.includes(todayKeyStr);
+
+  if (diffToToday > 1) {
+    // Last completion is too old to be an active streak
+    return 0;
+  }
+
+  if (diffToToday === 1 && isMarkedToday) {
+    // Today is already marked (for vices this can be "failed"), so yesterday's streak is no longer active
+    return 0;
+  }
+
+  if (diffToToday < 0) {
+    // Ignore any accidental future-dated completion
     return 0;
   }
 
