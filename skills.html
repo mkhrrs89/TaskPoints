@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>TaskPoints — Skills</title>
+
+  <script src="scoring_core.js"></script>
+  <link rel="stylesheet" href="assets/tailwind.css">
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="preload" href="toolbar.js" as="script">
+  <script src="toolbar.js" defer></script>
+</head>
+
+<body class="min-h-screen">
+  <div class="mx-auto max-w-6xl p-3 sm:p-4 pb-16 md:pb-5">
+    <div class="flex items-center justify-between gap-3 mb-3 md:hidden">
+      <a href="index.html" class="flex items-center gap-3">
+        <img src="assets/taskpoints-logo.png" alt="TaskPoints logo" class="w-10 h-10 rounded-2xl object-cover shrink-0 shadow-sm">
+        <h1 class="text-2xl font-extrabold tracking-tight leading-tight">
+          <span style="color:#fb923c;">Task</span><span style="color:#1e666d;">Points</span>
+        </h1>
+      </a>
+      <div class="flex items-center gap-2">
+        <button type="button" class="btn btn-ghost btn-toolbar" data-export-button>Export</button>
+        <label class="btn btn-ghost btn-toolbar cursor-pointer">
+          <span>Import</span>
+          <input type="file" accept="application/json" class="hidden" data-import-input/>
+        </label>
+      </div>
+    </div>
+
+    <header class="mb-3">
+      <div class="row items-center gap-3 sm:gap-4">
+        <div class="flex items-center gap-3 flex-1 min-w-0">
+          <div class="hidden md:block p-2 rounded-2xl bg-slate-900/50 border border-slate-700/60 shadow-inner">
+            <img src="assets/taskpoints-logo.png" alt="TaskPoints logo" class="w-10 h-10 rounded-2xl object-cover shrink-0">
+          </div>
+          <div class="min-w-0">
+            <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight flex items-center gap-2 page-title">Skills</h1>
+            <p class="muted text-sm">Unique skill names gathered from every task.</p>
+          </div>
+        </div>
+
+        <div class="toolbar header-nav mt-3 sm:mt-0">
+          <a href="index.html" class="btn btn-teal btn-toolbar nav-btn">Main</a>
+          <a href="today.html" class="btn btn-teal btn-toolbar nav-btn mobile-hide-header-today">Today</a>
+          <a href="daily_sources.html" class="btn btn-teal btn-toolbar nav-btn">Sources</a>
+          <a href="log.html" class="btn btn-teal btn-toolbar nav-btn">Log</a>
+          <a href="week.html" class="btn btn-teal btn-toolbar nav-btn">Week</a>
+
+          <div class="dropdown hidden md:block">
+            <button type="button" class="btn btn-teal btn-toolbar dropdown-toggle nav-btn" data-dropdown-toggle aria-expanded="false">
+              Game <span class="caret">▾</span>
+            </button>
+            <div class="dropdown-menu">
+              <a href="gamehub.html" class="btn btn-teal btn-toolbar nav-btn">Game Hub</a>
+              <a href="game.html" class="btn btn-teal btn-toolbar nav-btn">Players</a>
+              <a href="standings.html" class="btn btn-teal btn-toolbar nav-btn">Standings</a>
+              <a href="matchups.html" class="btn btn-teal btn-toolbar nav-btn">Matchups</a>
+              <a href="schedule.html" class="btn btn-teal btn-toolbar nav-btn">Schedule</a>
+              <a href="game_ratings.html" class="btn btn-teal btn-toolbar nav-btn">Ratings</a>
+              <a href="records.html" class="btn btn-teal btn-toolbar nav-btn">Records</a>
+            </div>
+          </div>
+
+          <a href="projects.html" class="btn btn-teal btn-toolbar nav-btn">Projects</a>
+          <a href="notes.html" class="btn btn-teal btn-toolbar nav-btn">Notes</a>
+          <a href="skills.html" class="btn btn-teal btn-toolbar nav-btn active">Skills</a>
+          <a href="settings.html" class="btn btn-teal btn-toolbar nav-btn">Settings</a>
+        </div>
+      </div>
+    </header>
+
+    <section class="glass">
+      <div class="flex items-center justify-between gap-2 mb-2">
+        <h2 class="text-lg font-semibold">All Skills</h2>
+        <span id="skillsCount" class="text-xs muted"></span>
+      </div>
+      <ul id="skillsList" class="grid gap-2"></ul>
+      <p id="skillsEmpty" class="muted text-sm hidden">No skills found yet. Add skills on tasks to populate this list.</p>
+    </section>
+  </div>
+
+  <script>
+    const STORAGE_KEY = "taskpoints_v1";
+
+    function loadState() {
+      if (window.TaskPointsCore?.loadAppState) {
+        return TaskPointsCore.loadAppState({ syncDerived: false, persistSync: false }).state || {};
+      }
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        return raw ? (JSON.parse(raw) || {}) : {};
+      } catch (err) {
+        console.error("Failed to load TaskPoints state", err);
+        return {};
+      }
+    }
+
+    function collectUniqueSkills(tasks) {
+      const seen = new Set();
+      const unique = [];
+
+      (Array.isArray(tasks) ? tasks : []).forEach((task) => {
+        const rows = Array.isArray(task?.skills) ? task.skills : [];
+        rows.forEach((row) => {
+          const rawSkill = typeof row?.skill === 'string' ? row.skill : '';
+          const cleanedSkill = rawSkill.trim();
+          if (!cleanedSkill) return;
+
+          const dedupeKey = cleanedSkill.toLocaleLowerCase();
+          if (seen.has(dedupeKey)) return;
+
+          seen.add(dedupeKey);
+          unique.push(cleanedSkill);
+        });
+      });
+
+      unique.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+      return unique;
+    }
+
+    function renderSkills() {
+      const state = loadState();
+      const skills = collectUniqueSkills(state.tasks);
+
+      const list = document.getElementById('skillsList');
+      const empty = document.getElementById('skillsEmpty');
+      const count = document.getElementById('skillsCount');
+
+      if (!list || !empty || !count) return;
+
+      if (!skills.length) {
+        list.innerHTML = '';
+        empty.classList.remove('hidden');
+        count.textContent = '0 skills';
+        return;
+      }
+
+      empty.classList.add('hidden');
+      count.textContent = `${skills.length} skill${skills.length === 1 ? '' : 's'}`;
+      list.innerHTML = skills
+        .map((skill) => `<li class="rounded-xl border border-slate-700/70 bg-slate-900/35 px-3 py-2 font-medium">${skill}</li>`)
+        .join('');
+    }
+
+    renderSkills();
+  </script>
+</body>
+</html>
