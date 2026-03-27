@@ -6242,6 +6242,7 @@ function initTaskListDelegation(){
     if (!btn) return;
     e.preventDefault();
     e.stopPropagation();
+    e.stopImmediatePropagation();
 
     const action = btn.getAttribute('data-task-action');
     const id = btn.getAttribute('data-task-id');
