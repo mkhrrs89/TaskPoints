@@ -73,9 +73,17 @@
     </header>
 
     <section class="glass">
-      <div class="flex items-center justify-between gap-2 mb-2">
+      <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
         <h2 class="text-lg font-semibold">All Skills</h2>
-        <span id="skillsCount" class="text-xs muted"></span>
+        <div class="flex items-center gap-2">
+          <label for="skillsSort" class="text-xs muted">Sort</label>
+          <select id="skillsSort" class="input text-xs py-1.5 pr-8">
+            <option value="alpha">Alphabetical (A–Z)</option>
+            <option value="count-desc">Count (High to Low)</option>
+            <option value="count-asc">Count (Low to High)</option>
+          </select>
+          <span id="skillsCount" class="text-xs muted"></span>
+        </div>
       </div>
       <div class="rounded-xl border border-slate-700/70 bg-slate-900/35 overflow-hidden">
         <table class="w-full text-left">
@@ -94,6 +102,9 @@
 
   <script>
     const STORAGE_KEY = "taskpoints_v1";
+    const DEFAULT_SORT_MODE = 'alpha';
+    let sortMode = DEFAULT_SORT_MODE;
+    let aggregatedSkills = [];
 
     function loadState() {
       if (window.TaskPointsCore?.loadAppState) {
@@ -174,9 +185,21 @@
       );
     }
 
+    function sortSkillTotals(skills, mode) {
+      const alphabetical = (a, b) =>
+        a.display.localeCompare(b.display, undefined, { sensitivity: 'base' });
+
+      const byCount = (a, b) => {
+        if (a.count === b.count) return alphabetical(a, b);
+        return mode === 'count-asc' ? a.count - b.count : b.count - a.count;
+      };
+
+      const sorter = mode === 'count-desc' || mode === 'count-asc' ? byCount : alphabetical;
+      return [...skills].sort(sorter);
+    }
+
     function renderSkills() {
-      const state = loadState();
-      const skills = collectSkillTotals(state);
+      const skills = sortSkillTotals(aggregatedSkills, sortMode);
 
       const list = document.getElementById('skillsList');
       const empty = document.getElementById('skillsEmpty');
@@ -205,7 +228,23 @@
         .join('');
     }
 
-    renderSkills();
+    function initSkillsPage() {
+      const state = loadState();
+      aggregatedSkills = collectSkillTotals(state);
+
+      const sortSelect = document.getElementById('skillsSort');
+      if (sortSelect) {
+        sortSelect.value = sortMode;
+        sortSelect.addEventListener('change', (event) => {
+          sortMode = event.target.value || DEFAULT_SORT_MODE;
+          renderSkills();
+        });
+      }
+
+      renderSkills();
+    }
+
+    initSkillsPage();
   </script>
 </body>
 </html>
