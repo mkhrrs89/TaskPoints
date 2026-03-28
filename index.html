@@ -36,7 +36,8 @@ Nothing visible on the page is built here. === -->
   <meta name="apple-mobile-web-app-capable" content="yes"/>
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
   <meta name="apple-mobile-web-app-title" content="TaskPoints"/>
-
+  <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='256' height='256'><rect width='256' height='256' fill='%230b0d10'/><text x='128' y='160' text-anchor='middle' font-size='150' fill='white'>TP</text></svg>">
+  
   <!-- Favicon -->
   <link 
     rel="icon" 
@@ -178,12 +179,10 @@ Nothing visible on the page is built here. === -->
   </style>
 
   <!-- External libraries / fonts -->
-    <link
-    rel="stylesheet" 
-    href="https://fonts.googleapis.com/css2?family=Teko:wght@500;600;700&display=swap">
-
+  <!-- removed 3/28/26 -->
+  
   <!-- Your app scripts + CSS -->
-  <script src="scoring_core.js"></script><link rel="stylesheet" href="assets/tailwind.css">
+  <link rel="stylesheet" href="assets/tailwind.css">
 
 <link rel="stylesheet" href="styles.css">
   <style>
@@ -949,6 +948,7 @@ Nothing visible on the page is built here. === -->
   </footer>
 </div>
 
+<script src="scoring_core.js"></script>  
 <script>
 const STORAGE_KEY="taskpoints_v1";
 const OLD_PLAYERS_KEY="taskpoints_players";
