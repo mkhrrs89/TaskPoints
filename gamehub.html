@@ -16,7 +16,7 @@
 <link rel="stylesheet" href="styles.css">
   <link rel="preload" href="toolbar.js" as="script">
   <script src="toolbar.js" defer></script>
-  <script src="scoring_core.js"></script>
+  
 </head>
 <body class="min-h-screen gamehub-page">
   <div class="mx-auto max-w-6xl p-4 sm:p-6 pb-24">
@@ -364,6 +364,7 @@
     </div>
   </div>
 
+<script src="scoring_core.js"></script>
 <script>
 (function(){
   const $ = (id) => document.getElementById(id);
@@ -393,18 +394,18 @@
     console.warn('gamehub saveState skipped localStorage write; TaskPointsCore missing.');
   }
 
-  function loadState(){
-    if (window.TaskPointsCore && typeof TaskPointsCore.loadAppState === 'function') {
-      const loaded = TaskPointsCore.loadAppState();
-      return loaded && loaded.state ? loaded.state : {};
-    }
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      return raw ? JSON.parse(raw) : {};
-    } catch {
-      return {};
-    }
+function loadState(){
+  if (window.TaskPointsCore && typeof TaskPointsCore.loadAppState === 'function') {
+    const loaded = TaskPointsCore.loadAppState({ syncDerived: false, persistSync: false });
+    return loaded && loaded.state ? loaded.state : {};
   }
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
 
   function getNormalizedRisky(value){
     const num = Number(value);
@@ -1238,7 +1239,7 @@ function placeHTML(rankIndex, total){
 
 
   
-  function renderTodaysMatchup(state){
+  function renderTodaysMatchup(state, standings){
     const dateLbl = $('matchupDateLabel');
     if (dateLbl) dateLbl.textContent = todayKey();
 
@@ -1267,11 +1268,11 @@ function placeHTML(rankIndex, total){
     const oppId = (m.playerAId === 'YOU') ? m.playerBId : m.playerAId;
     const oppName = safeNameForId(state, oppId);
 
-    const standings = buildStandings(state);
-    const totalPlayers = standings.length;
+const standingsRows = Array.isArray(standings) ? standings : buildStandings(state);
+const totalPlayers = standingsRows.length;
 
-    const youRankIdx = standings.findIndex(r => r.id === 'YOU');
-    const oppRankIdx = standings.findIndex(r => r.id === oppId);
+const youRankIdx = standingsRows.findIndex(r => r.id === 'YOU');
+const oppRankIdx = standingsRows.findIndex(r => r.id === oppId);
     const youPrimarySwatchEl = $('matchupYourPrimarySwatch');
     const youSecondarySwatchEl = $('matchupYourSecondarySwatch');
     const oppPrimarySwatchEl = $('matchupOppPrimarySwatch');
@@ -1312,9 +1313,9 @@ function placeHTML(rankIndex, total){
     }
 
     // record + averages (3 fixed rows so both sides align)
-    const youStats = computeYouStats(state);
-    const oppP = getPlayerById(state, oppId);
-    const oppStats = oppP ? computePlayerStats(state, oppP) : null;
+const youStats = standingsRows.find(r => r.id === 'YOU') || computeYouStats(state);
+const oppP = getPlayerById(state, oppId);
+const oppStats = standingsRows.find(r => r.id === oppId) || (oppP ? computePlayerStats(state, oppP) : null);
 
     $('matchupYourRecord').textContent =
       (youStats.wins != null && youStats.losses != null) ? `Record: ${youStats.wins}-${youStats.losses}` : 'Record: —';
@@ -1539,11 +1540,11 @@ function setHTML(id, html){
       if (changed) saveState(state);
       currentState = state;
 
-      const { standings } = renderStandings(state);
-      renderBestWorstStats(state, standings);
-      renderRatingsLeaderboards(state, standings);
-      renderSurprisesBusts(state, standings);
-      renderTodaysMatchup(state);
+const { standings } = renderStandings(state);
+renderBestWorstStats(state, standings);
+renderRatingsLeaderboards(state, standings);
+renderSurprisesBusts(state, standings);
+renderTodaysMatchup(state, standings);
     } finally {
       if (perfLabel) console.timeEnd(perfLabel);
     }
