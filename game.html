@@ -13,7 +13,7 @@
   <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='256' height='256'><rect width='256' height='256' fill='%230b0d10'/><text x='128' y='160' text-anchor='middle' font-size='150' fill='white'>TP</text></svg>">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='%230b0d10'/><text x='50' y='62' font-size='60' text-anchor='middle' fill='white'>TP</text></svg>">
 
-    <script src="scoring_core.js"></script><link rel="stylesheet" href="assets/tailwind.css">
+    <link rel="stylesheet" href="assets/tailwind.css">
 
 <link rel="stylesheet" href="styles.css">
   <link rel="preload" href="toolbar.js" as="script">
@@ -759,7 +759,8 @@
     </div>
   </div>
 
-  <script>
+<script src="scoring_core.js"></script>
+<script>
 const STORAGE_KEY = "taskpoints_v1";
 const DEFAULT_PRIMARY_COLOR = "#1a383b";
 const DEFAULT_SECONDARY_COLOR = "#254c52";
@@ -2113,9 +2114,28 @@ async function renderPlayers() {
   const imageIds = players
     .map((player) => player?.imageId)
     .filter(Boolean);
+
   const renderToken = ++renderPlayersNonce;
-  await preloadImageUrls(imageIds);
-  if (renderToken !== renderPlayersNonce) return;
+
+  const missingImageIds = Array.from(new Set(
+    imageIds.filter((imageId) =>
+      imageId &&
+      !imageUrlCache.has(imageId) &&
+      !imageLoadPromises.has(imageId)
+    )
+  ));
+
+  if (missingImageIds.length) {
+    Promise.all(missingImageIds.map((imageId) => loadImageUrl(imageId)))
+      .then(() => {
+        if (renderToken === renderPlayersNonce) {
+          renderPlayers();
+        }
+      })
+      .catch((err) => {
+        console.error("Failed to preload player images", err);
+      });
+  }
 
   // Update count (does NOT count YOU as a player)
   $("playerCount").textContent =
@@ -3104,10 +3124,6 @@ try {
 } catch (e) {
   console.error("Auto-sim failed; leaving UI rendered", e);
 }
-
-// If auto-sim succeeded, it already calls renderPlayers() internally,
-// but calling again is harmless:
-renderPlayers();
 
 
 // ----- View mode toggle (Card vs Gallery) -----
