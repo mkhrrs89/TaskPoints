@@ -521,14 +521,14 @@ body {
 }
 
 .scoreboard-color-swatches-compact {
-  gap: 5px;
+  gap: 4px;
   margin-top: 0;
   margin-bottom: 0;
 }
 
 .scoreboard-color-swatch-compact {
-  width: 18px;
-  height: 8px;
+  width: 14px;
+  height: 6px;
   border-radius: 999px;
 }
 
@@ -1011,6 +1011,15 @@ body {
     width: 30px;
     height: 12px;
     border-radius: 5px;
+  }
+
+  .scoreboard-color-swatches-compact {
+    gap: 3px;
+  }
+
+  .scoreboard-color-swatch-compact {
+    width: 12px;
+    height: 5px;
   }
 
   /* shrink the DIFF block */
