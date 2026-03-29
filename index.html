@@ -459,11 +459,23 @@ Nothing visible on the page is built here. === -->
         <div class="flex flex-col justify-center gap-1.5 border-l border-white/10 px-4 py-4">
           <div class="muted font-semibold uppercase tracking-wide text-[10px]">Yesterday’s Results</div>
           <div class="flex items-center justify-between text-[11px]">
-            <span class="muted">You</span>
+            <span class="inline-flex items-center gap-1.5 min-w-0">
+              <span class="muted">You</span>
+              <span id="yesterdayYourSwatches" class="scoreboard-color-swatches scoreboard-color-swatches-compact" aria-label="Your saved player colors from yesterday's matchup">
+                <span id="yesterdayYourPrimarySwatch" class="scoreboard-color-swatch scoreboard-color-swatch-compact" title="Primary color"></span>
+                <span id="yesterdayYourSecondarySwatch" class="scoreboard-color-swatch scoreboard-color-swatch-compact" title="Secondary color"></span>
+              </span>
+            </span>
             <span id="yesterdayYourScore" class="font-semibold">—</span>
           </div>
           <div class="flex items-center justify-between text-[11px]">
-            <span id="yesterdayOpponent" class="font-semibold">Opponent</span>
+            <span class="inline-flex items-center gap-1.5 min-w-0">
+              <span id="yesterdayOpponent" class="font-semibold truncate">Opponent</span>
+              <span id="yesterdayOpponentSwatches" class="scoreboard-color-swatches scoreboard-color-swatches-compact" aria-label="Opponent saved player colors from yesterday's matchup">
+                <span id="yesterdayOpponentPrimarySwatch" class="scoreboard-color-swatch scoreboard-color-swatch-compact" title="Primary color"></span>
+                <span id="yesterdayOpponentSecondarySwatch" class="scoreboard-color-swatch scoreboard-color-swatch-compact" title="Secondary color"></span>
+              </span>
+            </span>
             <span id="yesterdayOpponentScore" class="font-semibold">—</span>
           </div>
           <div class="flex items-center justify-between text-[11px]">
@@ -3860,6 +3872,22 @@ function renderStats(){
 }
 
 
+const DEFAULT_MATCHUP_PRIMARY_COLOR = '#1a383b';
+const DEFAULT_MATCHUP_SECONDARY_COLOR = '#254c52';
+
+function setPlayerColorSwatches(primaryEl, secondaryEl, colors = {}) {
+  if (primaryEl) {
+    const primary = normalizeHexColor(colors.primaryColor) || DEFAULT_MATCHUP_PRIMARY_COLOR;
+    primaryEl.style.background = primary;
+    primaryEl.title = `Primary color ${primary}`;
+  }
+  if (secondaryEl) {
+    const secondary = normalizeHexColor(colors.secondaryColor) || DEFAULT_MATCHUP_SECONDARY_COLOR;
+    secondaryEl.style.background = secondary;
+    secondaryEl.title = `Secondary color ${secondary}`;
+  }
+}
+
 function renderTodaysMatchup(todayKeyStr, yourScore){
   const oppNameEl = $('matchupOpponent');
   const oppScoreEl= $('matchupOpponentScore');
@@ -3878,23 +3906,7 @@ function renderTodaysMatchup(todayKeyStr, yourScore){
 
   if (!oppNameEl || !oppScoreEl || !yourScoreEl || !diffEl || !diffValueEl || !oppRecordEl || !yourRecordEl) return;
 
-  const DEFAULT_MATCHUP_PRIMARY_COLOR = '#1a383b';
-  const DEFAULT_MATCHUP_SECONDARY_COLOR = '#254c52';
-
-  const setMatchupSwatches = (primaryEl, secondaryEl, colors = {}) => {
-    if (primaryEl) {
-      const primary = normalizeHexColor(colors.primaryColor) || DEFAULT_MATCHUP_PRIMARY_COLOR;
-      primaryEl.style.background = primary;
-      primaryEl.title = `Primary color ${primary}`;
-    }
-    if (secondaryEl) {
-      const secondary = normalizeHexColor(colors.secondaryColor) || DEFAULT_MATCHUP_SECONDARY_COLOR;
-      secondaryEl.style.background = secondary;
-      secondaryEl.title = `Secondary color ${secondary}`;
-    }
-  };
-
-  setMatchupSwatches(yourPrimarySwatchEl, yourSecondarySwatchEl, getPlayerById('YOU') || {});
+  setPlayerColorSwatches(yourPrimarySwatchEl, yourSecondarySwatchEl, getPlayerById('YOU') || {});
 
 const updateTodayScoreIsland = (value) => {
   const islandValueEl = $('todayScoreIslandValue');
@@ -3940,7 +3952,7 @@ const updateTodayScoreIsland = (value) => {
     oppRecordEl.textContent = 'Record: —';
     yourRecordEl.textContent = `Record: ${getYourRecordText()}`;
     oppNameEl.textContent = '—';
-    setMatchupSwatches(oppPrimarySwatchEl, oppSecondarySwatchEl);
+    setPlayerColorSwatches(oppPrimarySwatchEl, oppSecondarySwatchEl);
     setOpponentAverages(null);
     return;
   }
@@ -3961,7 +3973,7 @@ const updateTodayScoreIsland = (value) => {
     : safeOppScore;
 
   const opponent = getPlayerById(oppId);
-  setMatchupSwatches(oppPrimarySwatchEl, oppSecondarySwatchEl, opponent || {});
+  setPlayerColorSwatches(oppPrimarySwatchEl, oppSecondarySwatchEl, opponent || {});
 
   oppNameEl.textContent = getPlayerNameById(oppId);
   oppScoreEl.textContent = visibleOppScore.toFixed(1);
@@ -3995,6 +4007,10 @@ function renderYesterdaysResult(dailyTotals){
   const oppNameEl = $('yesterdayOpponent');
   const oppScoreEl = $('yesterdayOpponentScore');
   const resultEl = $('yesterdayResult');
+  const yourPrimarySwatchEl = $('yesterdayYourPrimarySwatch');
+  const yourSecondarySwatchEl = $('yesterdayYourSecondarySwatch');
+  const oppPrimarySwatchEl = $('yesterdayOpponentPrimarySwatch');
+  const oppSecondarySwatchEl = $('yesterdayOpponentSecondarySwatch');
 
   if (!yourScoreEl || !oppNameEl || !oppScoreEl || !resultEl) return;
 
@@ -4019,6 +4035,8 @@ function renderYesterdaysResult(dailyTotals){
     oppNameEl.textContent = 'Opponent';
     oppScoreEl.textContent = '—';
     resultEl.textContent = '—';
+    setPlayerColorSwatches(yourPrimarySwatchEl, yourSecondarySwatchEl, getPlayerById('YOU') || {});
+    setPlayerColorSwatches(oppPrimarySwatchEl, oppSecondarySwatchEl);
     return;
   }
 
@@ -4037,6 +4055,8 @@ function renderYesterdaysResult(dailyTotals){
     ? visibleOpponentScoreForMatchup(yesterdayKey, oppId, safeOppScore)
     : safeOppScore;
 
+  setPlayerColorSwatches(yourPrimarySwatchEl, yourSecondarySwatchEl, getPlayerById('YOU') || {});
+  setPlayerColorSwatches(oppPrimarySwatchEl, oppSecondarySwatchEl, getPlayerById(oppId) || {});
   oppNameEl.textContent = getPlayerNameById(oppId);
   yourScoreEl.textContent = safeYourScore.toFixed(1);
   oppScoreEl.textContent = visibleOppScore.toFixed(1);
