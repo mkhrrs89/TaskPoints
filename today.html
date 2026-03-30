@@ -14,7 +14,7 @@
 
 <link rel="stylesheet" href="styles.css">
   <link rel="preload" href="toolbar.js" as="script">
-  <script src="scoring_core.js"></script>
+  
   <script src="toolbar.js" defer></script>
 
   <style>
@@ -279,7 +279,8 @@
 
   </div>
 
-  <script>
+  <script src="scoring_core.js"></script>
+<script>
     (function () {
       const STORAGE_KEY = window.TaskPointsCore?.STORAGE_KEY || 'taskpoints_v1';
       const TODAY_STORE_KEY = 'taskpoints_today_view_v1';
@@ -364,7 +365,6 @@ function saveTodayStore(store = todayStore) {
   db.orderByDay[dayKey] = Array.isArray(store.order) ? store.order : [];
   localStorage.setItem(TODAY_STORE_KEY, JSON.stringify(db));
 }
-
 
       function escapeHtml(str) {
         return String(str)

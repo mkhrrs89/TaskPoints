@@ -13,7 +13,7 @@
   <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='256' height='256'><rect width='256' height='256' fill='%230b0d10'/><text x='128' y='160' text-anchor='middle' font-size='150' fill='white'>TP</text></svg>">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='%230b0d10'/><text x='50' y='62' font-size='60' text-anchor='middle' fill='white'>TP</text></svg>">
 
-    <script src="scoring_core.js"></script><link rel="stylesheet" href="assets/tailwind.css">
+    <link rel="stylesheet" href="assets/tailwind.css">
 
 <link rel="stylesheet" href="styles.css">
   <link rel="preload" href="toolbar.js" as="script">
@@ -171,7 +171,8 @@
     </footer>
   </div>
 
-  <script>
+  <script src="scoring_core.js"></script>
+<script>
     const STORAGE_KEY = "taskpoints_v1";
     const $ = id => document.getElementById(id);
 
@@ -325,7 +326,6 @@ function computeYouStats() {
 
   return { games: dailyTotals.length, wins, losses, winPct, avgPPD, ppd, totalPoints };
 }
-
 
     let players = loadPlayers();
 
