@@ -527,9 +527,22 @@ body {
 }
 
 .scoreboard-color-swatch-compact {
-  width: 14px;
-  height: 6px;
+  width: 16px;
+  height: 7px;
   border-radius: 999px;
+}
+
+.yesterday-result-player {
+  align-items: center;
+  line-height: 1.2;
+}
+
+#yesterdayYourSwatches,
+#yesterdayOpponentSwatches {
+  margin-top: 0;
+  margin-bottom: 0;
+  align-self: center;
+  vertical-align: middle;
 }
 
 
@@ -1018,8 +1031,8 @@ body {
   }
 
   .scoreboard-color-swatch-compact {
-    width: 12px;
-    height: 5px;
+    width: 14px;
+    height: 6px;
   }
 
   /* shrink the DIFF block */
