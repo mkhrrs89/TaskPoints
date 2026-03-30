@@ -381,6 +381,9 @@
   };
 
   let currentState = null;
+  let gameHubBootStarted = false;
+  let gameHubBootFinished = false;
+  let gameHubBootScheduled = false;
 
   function saveState(state){
     if (window.TaskPointsCore?.saveAppState) {
@@ -1514,6 +1517,14 @@ function setHTML(id, html){
     setModalOpen(false);
   }
 
+  function renderGameHubFromState(state){
+    const { standings } = renderStandings(state);
+    renderBestWorstStats(state, standings);
+    renderRatingsLeaderboards(state, standings);
+    renderSurprisesBusts(state, standings);
+    renderTodaysMatchup(state, standings);
+  }
+
   function renderAll(){
     const perfLabel = window.TP_DEBUG_PERF ? 'renderGameHub' : null;
     if (perfLabel) console.time(perfLabel);
@@ -1539,15 +1550,65 @@ function setHTML(id, html){
 
       if (changed) saveState(state);
       currentState = state;
-
-const { standings } = renderStandings(state);
-renderBestWorstStats(state, standings);
-renderRatingsLeaderboards(state, standings);
-renderSurprisesBusts(state, standings);
-renderTodaysMatchup(state, standings);
+      gameHubBootStarted = true;
+      gameHubBootFinished = true;
+      renderGameHubFromState(state);
     } finally {
       if (perfLabel) console.timeEnd(perfLabel);
     }
+  }
+
+  function runGameHubBoot(){
+    if (gameHubBootStarted || gameHubBootFinished) return;
+    gameHubBootStarted = true;
+
+    let state = currentState || loadState();
+    let changed = false;
+
+    if (window.TaskPointsCore && typeof TaskPointsCore.normalizeState === 'function') {
+      state = TaskPointsCore.normalizeState(state || {});
+    }
+
+    if (window.TaskPointsCore && typeof TaskPointsCore.syncDerivedPoints === 'function') {
+      const res = TaskPointsCore.syncDerivedPoints(state);
+      state = res.state;
+      changed = changed || !!res.changed;
+    }
+
+    if (window.TaskPointsCore && typeof TaskPointsCore.syncYouMatchups === 'function') {
+      const res2 = TaskPointsCore.syncYouMatchups(state);
+      state = res2.state;
+      changed = changed || !!res2.changed;
+    }
+
+    if (changed) saveState(state);
+    currentState = state;
+    gameHubBootFinished = true;
+    renderGameHubFromState(state);
+  }
+
+  function scheduleGameHubBoot(){
+    if (gameHubBootScheduled || gameHubBootFinished) return;
+    gameHubBootScheduled = true;
+
+    requestAnimationFrame(() => {
+      const run = () => runGameHubBoot();
+      if (typeof window.requestIdleCallback === 'function') {
+        window.requestIdleCallback(run, { timeout: 1200 });
+      } else {
+        setTimeout(run, 0);
+      }
+    });
+  }
+
+  function renderInitialGameHub(){
+    let state = loadState();
+    if (window.TaskPointsCore && typeof TaskPointsCore.normalizeState === 'function') {
+      state = TaskPointsCore.normalizeState(state || {});
+    }
+    currentState = state;
+    renderGameHubFromState(state);
+    scheduleGameHubBoot();
   }
 
   $('refreshGameHub')?.addEventListener('click', () => scheduleRender(renderAll));
@@ -1608,7 +1669,9 @@ renderTodaysMatchup(state, standings);
     imageUrlCache.clear();
   });
 
-  document.addEventListener('DOMContentLoaded', () => scheduleRender(renderAll));
+  document.addEventListener('DOMContentLoaded', () => {
+    scheduleRender(renderInitialGameHub);
+  });
 })();
 </script>
   <div id="bottomToolbarMount"></div>
