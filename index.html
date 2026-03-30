@@ -388,7 +388,6 @@ Nothing visible on the page is built here. === -->
           <div class="scoreboard-diff text-center">
             <div class="muted text-[11px] uppercase tracking-wide">The Diff</div>
             <div id="matchupDiffValue" class="scoreboard-diff-value">—</div>
-            <div id="matchupDiff" class="muted text-xs mt-1">—</div>
           </div>
        
 
@@ -3892,7 +3891,6 @@ function renderTodaysMatchup(todayKeyStr, yourScore){
   const oppNameEl = $('matchupOpponent');
   const oppScoreEl= $('matchupOpponentScore');
   const yourScoreEl = $('matchupYourScore');
-  const diffEl    = $('matchupDiff');
   const diffValueEl = $('matchupDiffValue');
   const oppRecordEl = $('matchupOpponentRecord');
   const yourRecordEl = $('matchupYourRecord');
@@ -3904,7 +3902,7 @@ function renderTodaysMatchup(todayKeyStr, yourScore){
   const oppPrimarySwatchEl = $('matchupOpponentPrimarySwatch');
   const oppSecondarySwatchEl = $('matchupOpponentSecondarySwatch');
 
-  if (!oppNameEl || !oppScoreEl || !yourScoreEl || !diffEl || !diffValueEl || !oppRecordEl || !yourRecordEl) return;
+  if (!oppNameEl || !oppScoreEl || !yourScoreEl || !diffValueEl || !oppRecordEl || !yourRecordEl) return;
 
   setPlayerColorSwatches(yourPrimarySwatchEl, yourSecondarySwatchEl, getPlayerById('YOU') || {});
 
@@ -3942,7 +3940,6 @@ const updateTodayScoreIsland = (value) => {
   const matchup = matchups.find(m => m && matchupDateKey(m) === todayKeyStr && (m.playerAId === 'YOU' || m.playerBId === 'YOU'));
 
   if (!matchup) {
-    diffEl.textContent = 'No matchup today';
     diffValueEl.textContent = '—';
     oppScoreEl.textContent = '—';
     const yourNum = Number(yourScore);
@@ -3983,7 +3980,6 @@ const updateTodayScoreIsland = (value) => {
   yourRecordEl.textContent = `Record: ${getYourRecordText()}`;
   setOpponentAverages(oppId);
 
-  diffEl.className = 'muted text-xs mt-1';
   const diff = Number((safeYourScore - visibleOppScore).toFixed(1));
 
   diffValueEl.textContent = `${diff > 0 ? '+' : ''}${diff.toFixed(1)}`;
@@ -3991,13 +3987,10 @@ const updateTodayScoreIsland = (value) => {
   diffValueEl.classList.remove('diff-positive', 'diff-negative', 'diff-neutral');
 
   if (diff > 0) {
-    diffEl.textContent = `Winning by ${diff.toFixed(1)} pts`;
     diffValueEl.classList.add('diff-positive');
   } else if (diff < 0) {
-    diffEl.textContent = `Losing by ${Math.abs(diff).toFixed(1)} pts`;
     diffValueEl.classList.add('diff-negative');
   } else {
-    diffEl.textContent = 'Tied right now';
     diffValueEl.classList.add('diff-neutral');
   }
 }
