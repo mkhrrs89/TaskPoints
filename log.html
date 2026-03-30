@@ -7,7 +7,6 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='%230b0d10'/><text x='50' y='62' font-size='60' text-anchor='middle' fill='white'>TP</text></svg>"><link rel="stylesheet" href="assets/tailwind.css">
 
 <link rel="stylesheet" href="styles.css">
-<script src="scoring_core.js"></script>
   <link rel="preload" href="toolbar.js" as="script">
 <script src="toolbar.js" defer></script>
 
@@ -197,7 +196,7 @@
 
     <footer class="mt-10 text-xs muted text-right">v0.24.3 — 2025-11-25 12:35</footer>
   </div>
-
+<script src="scoring_core.js"></script>
 <script>
 const STORAGE_KEY="taskpoints_v1";
 const $=id=>document.getElementById(id);
@@ -503,10 +502,11 @@ function getCompletionPoints(entry) {
   return Number(entry?.points) || 0;
 }
 
-function buildInertiaLogEntries(completions) {
+function buildVisibleInertiaEntries(completions, pageKeys) {
+  if (!Array.isArray(pageKeys) || pageKeys.length === 0) return [];
   if (!window.TaskPointsCore?.aggregateCompletionsByDate) return [];
   const { dailyTotals } = TaskPointsCore.aggregateCompletionsByDate(completions, state);
-  return Object.keys(dailyTotals).flatMap(dateKeyStr => {
+  return pageKeys.flatMap(dateKeyStr => {
     const { inertia, average } = TaskPointsCore.computeInertia(dailyTotals, dateKeyStr, state);
     if (!Number.isFinite(inertia) || Math.abs(inertia) < 0.0001) return [];
     const date = fromKey(dateKeyStr);
@@ -524,14 +524,6 @@ function buildInertiaLogEntries(completions) {
       category: 'inertia'
     }];
   });
-}
-
-function buildLogEntries(completions) {
-  console.time('log:buildLogEntries');
-  const base = Array.isArray(completions) ? completions.slice() : [];
-  const result = base.concat(buildInertiaLogEntries(base));
-  console.timeEnd('log:buildLogEntries');
-  return result;
 }
 
 function syncDerivedPointsIfNeeded() {
@@ -638,20 +630,20 @@ function render(){
   list.innerHTML='';
   if (pagination) pagination.innerHTML = '';
 
-  const entries = buildLogEntries(state.completions || []);
-  if(!entries.length){
+  const baseCompletions = Array.isArray(state.completions) ? state.completions.slice() : [];
+  if(!baseCompletions.length){
     empty.style.display='block';
     if (pagination) pagination.style.display = 'none';
     return;
   }
 
-  console.time('log:sortGroup');
-  const sortedEntries = entries
+  console.time('log:pageScope');
+  const sortedBase = baseCompletions
     .slice()
     .sort((a,b)=> new Date(b.completedAtISO)-new Date(a.completedAtISO));
 
   const dayKeys = [];
-  const withDates = sortedEntries.map(entry => {
+  const withDates = sortedBase.map(entry => {
     const dateObj = new Date(entry.completedAtISO);
     const key = dateKey(dateObj);
     if (key && dayKeys[dayKeys.length - 1] !== key) dayKeys.push(key);
@@ -662,9 +654,17 @@ function render(){
   currentLogPage = Math.min(Math.max(currentLogPage, 0), Math.max(totalPages - 1, 0));
   const pageStart = currentLogPage * DAYS_PER_PAGE;
   const pageEnd = pageStart + DAYS_PER_PAGE;
-  const pageKeys = new Set(dayKeys.slice(pageStart, pageEnd));
-  const visibleRows = withDates.filter(item => !item.dayKey || pageKeys.has(item.dayKey));
-  console.timeEnd('log:sortGroup');
+  const pageKeys = dayKeys.slice(pageStart, pageEnd);
+  const pageKeySet = new Set(pageKeys);
+  const visibleBaseRows = withDates.filter(item => !item.dayKey || pageKeySet.has(item.dayKey));
+  const visibleInertiaRows = buildVisibleInertiaEntries(baseCompletions, pageKeys).map(entry => {
+    const dateObj = new Date(entry.completedAtISO);
+    return { entry, dateObj, dayKey: dateKey(dateObj) };
+  });
+  const visibleRows = visibleBaseRows
+    .concat(visibleInertiaRows)
+    .sort((a,b)=> new Date(b.entry.completedAtISO)-new Date(a.entry.completedAtISO));
+  console.timeEnd('log:pageScope');
 
   console.time('log:domRender');
   try {
@@ -1002,18 +1002,34 @@ function editSleepScore(id){
 }
 
 
-render();
+let logBootStarted = false;
+let logBootScheduled = false;
 
-requestAnimationFrame(() => {
-  setTimeout(() => {
-    const didMigrateSleep = !!migrateSleepEntriesForBonus();
-    const didMigrateWork = !!migrateWorkEntriesForHours();
-    const didSyncDerived = !!syncDerivedPointsIfNeeded();
-    if (didMigrateSleep || didMigrateWork || didSyncDerived) {
-      render();
+function runLogBoot() {
+  if (logBootStarted) return;
+  logBootStarted = true;
+  render();
+  const didMigrateSleep = !!migrateSleepEntriesForBonus();
+  const didMigrateWork = !!migrateWorkEntriesForHours();
+  const didSyncDerived = !!syncDerivedPointsIfNeeded();
+  if (didMigrateSleep || didMigrateWork || didSyncDerived) {
+    render();
+  }
+}
+
+function scheduleLogBoot() {
+  if (logBootScheduled) return;
+  logBootScheduled = true;
+  requestAnimationFrame(() => {
+    if (typeof requestIdleCallback === 'function') {
+      requestIdleCallback(() => runLogBoot(), { timeout: 1200 });
+    } else {
+      setTimeout(() => runLogBoot(), 0);
     }
-  }, 0);
-});
+  });
+}
+
+scheduleLogBoot();
 
 </script>
 
