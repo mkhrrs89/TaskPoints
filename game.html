@@ -2155,25 +2155,24 @@ async function renderPlayers() {
 
   const renderToken = ++renderPlayersNonce;
 
-  const missingImageIds = Array.from(new Set(
-    imageIds.filter((imageId) =>
-      imageId &&
-      !imageUrlCache.has(imageId) &&
-      !imageLoadPromises.has(imageId)
-    )
-  ));
+const unresolvedImageIds = Array.from(new Set(
+  imageIds.filter((imageId) =>
+    imageId &&
+    !imageUrlCache.has(imageId)
+  )
+));
 
-  if (missingImageIds.length) {
-    Promise.all(missingImageIds.map((imageId) => loadImageUrl(imageId)))
-      .then(() => {
-        if (renderToken === renderPlayersNonce) {
-          renderPlayers();
-        }
-      })
-      .catch((err) => {
-        console.error("Failed to preload player images", err);
-      });
-  }
+if (unresolvedImageIds.length) {
+  Promise.all(unresolvedImageIds.map((imageId) => loadImageUrl(imageId)))
+    .then(() => {
+      if (renderToken <= renderPlayersNonce) {
+        renderPlayers();
+      }
+    })
+    .catch((err) => {
+      console.error("Failed to preload player images", err);
+    });
+}
 
   // Update count (does NOT count YOU as a player)
   $("playerCount").textContent =
