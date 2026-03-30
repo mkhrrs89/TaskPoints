@@ -7,10 +7,9 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='%230b0d10'/><text x='50' y='62' font-size='60' text-anchor='middle' fill='white'>TP</text></svg>"><link rel="stylesheet" href="assets/tailwind.css">
 
 <link rel="stylesheet" href="styles.css">
-<script src="scoring_core.js"></script>
+
   <link rel="preload" href="toolbar.js" as="script">
 <script src="toolbar.js" defer></script>
-
 
   <style>
     :root{--bg:#0b0d10;--border:#202830;--muted:#8b98a5}
@@ -154,7 +153,6 @@
       }
     }
 
-
     .habitRow{display:grid;grid-template-columns:1fr repeat(7,40px);gap:.65rem;align-items:center}
     .habitScroll{overflow-x:auto;padding-bottom:8px}
     .habitScroll .habitRow{min-width:560px}
@@ -238,10 +236,8 @@
     <a href="projects.html" class="btn btn-teal btn-toolbar nav-btn">Projects</a>
     <a href="settings.html" class="btn btn-teal btn-toolbar nav-btn">Settings</a>
 
-
   </div>
 </header>
-
 
       <!-- Tasks -->
       <div id="weekTasksSection" class="glass mb-6">
@@ -382,13 +378,13 @@
   <div id="moodWeekEmpty" class="muted text-sm">No mood scores yet this week.</div>
 </div>
 
-
     <footer class="mt-10 text-xs muted flex items-center justify-between">
       <span>Use Previous/Next to browse habit history. Click a habit day to toggle; postpone moves overdue tasks to today; “Won’t do” drops just that instance for repeaters.</span>
       <span>v0.24.0 — 2025-11-13 11:15</span>
     </footer>
   </div>
 
+<script src="scoring_core.js"></script>
 <script>
 const STORAGE_KEY="taskpoints_v1";
 const $=id=>document.getElementById(id);
@@ -439,7 +435,6 @@ function load() {
     };
   }
 }
-
 
 let state = load();
 let currentBaseDate = new Date();
@@ -1091,7 +1086,6 @@ function deleteTask(id){
   renderAll(currentBaseDate);
 }
 
-
 function completeTask(id){
   let st = load();
   const t = st.tasks.find(x => x.id === id);
@@ -1128,7 +1122,6 @@ function completeTask(id){
   state = st;
   renderAll(currentBaseDate);
 }
-
 
 function renderFlexWeek(baseDate){
   state = load();
