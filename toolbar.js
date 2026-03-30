@@ -742,6 +742,65 @@ if (document.readyState === 'loading') {
 const STORAGE_KEY_FALLBACK = (window.TaskPointsCore && TaskPointsCore.STORAGE_KEY) || 'taskpoints_v1';
 const PROJECTS_STORAGE_KEY_FALLBACK = (window.TaskPointsCore && TaskPointsCore.PROJECTS_STORAGE_KEY) || 'tp_projects_v1';
 
+function installToolbarStorageBridge() {
+  if (window.__tpToolbarStorageBridgeInstalled) return;
+  const StorageCtor = window.Storage;
+  if (!StorageCtor || !StorageCtor.prototype) return;
+
+  const storageProto = StorageCtor.prototype;
+  const originalSetItem = storageProto.setItem;
+  const originalRemoveItem = storageProto.removeItem;
+  const originalClear = storageProto.clear;
+  const originalGetItem = storageProto.getItem;
+
+  if (typeof originalSetItem !== 'function' || typeof originalRemoveItem !== 'function' || typeof originalClear !== 'function') return;
+
+  const dispatchChange = (detail) => {
+    window.dispatchEvent(new CustomEvent('tp:local-storage-change', { detail }));
+  };
+
+  storageProto.setItem = function setItemPatched(key, value) {
+    let oldValue = null;
+    const normalizedKey = String(key);
+    if (this === window.localStorage) {
+      try {
+        oldValue = originalGetItem.call(this, normalizedKey);
+      } catch (e) {}
+    }
+    const result = originalSetItem.apply(this, arguments);
+    if (this === window.localStorage) {
+      const nextValue = String(value);
+      dispatchChange({ key: normalizedKey, oldValue, newValue: nextValue });
+    }
+    return result;
+  };
+
+  storageProto.removeItem = function removeItemPatched(key) {
+    let oldValue = null;
+    const normalizedKey = String(key);
+    if (this === window.localStorage) {
+      try {
+        oldValue = originalGetItem.call(this, normalizedKey);
+      } catch (e) {}
+    }
+    const result = originalRemoveItem.apply(this, arguments);
+    if (this === window.localStorage) {
+      dispatchChange({ key: normalizedKey, oldValue, newValue: null });
+    }
+    return result;
+  };
+
+  storageProto.clear = function clearPatched() {
+    const result = originalClear.apply(this, arguments);
+    if (this === window.localStorage) {
+      dispatchChange({ key: null, oldValue: null, newValue: null });
+    }
+    return result;
+  };
+
+  window.__tpToolbarStorageBridgeInstalled = true;
+}
+
 const TP_PERSIST_DEBOUNCE_MS = 900;
 
 function setupDebouncedPersistence() {
@@ -2359,16 +2418,30 @@ document.addEventListener('DOMContentLoaded', () => {
       try { v = localStorage.getItem(key); } catch (e) {}
       valueEl.textContent = (v == null || v === '') ? '—' : v;
     };
+    let syncQueued = false;
+    const queueSync = () => {
+      if (syncQueued) return;
+      syncQueued = true;
+      requestAnimationFrame(() => {
+        syncQueued = false;
+        sync();
+      });
+    };
 
     sync();
 
     // Other tabs/pages update
     window.addEventListener('storage', (e) => {
-      if (e && e.key === key) sync();
+      if (e && e.key === key) queueSync();
     });
 
-    // Same-page updates
-    setInterval(sync, 750);
+    window.addEventListener('tp:local-storage-change', (e) => {
+      if (e && e.detail && e.detail.key === key) queueSync();
+    });
+    window.addEventListener('pageshow', queueSync);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') queueSync();
+    });
   }
 
   function ensureCriticalTasksIsland() {
@@ -2416,11 +2489,27 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     updateCriticalTasksIsland();
+    let criticalRefreshQueued = false;
+    const queueCriticalRefresh = () => {
+      if (criticalRefreshQueued) return;
+      criticalRefreshQueued = true;
+      requestAnimationFrame(() => {
+        criticalRefreshQueued = false;
+        updateCriticalTasksIsland();
+      });
+    };
     window.addEventListener('load', updateCriticalTasksIsland);
     window.addEventListener('storage', (e) => {
-      if (e && e.key === STORAGE_KEY_FALLBACK) updateCriticalTasksIsland();
+      if (e && e.key === STORAGE_KEY_FALLBACK) queueCriticalRefresh();
     });
-    setInterval(updateCriticalTasksIsland, 750);
+    window.addEventListener('tp:local-storage-change', (e) => {
+      const changedKey = e && e.detail ? e.detail.key : undefined;
+      if (changedKey === STORAGE_KEY_FALLBACK || changedKey === null) queueCriticalRefresh();
+    });
+    window.addEventListener('pageshow', queueCriticalRefresh);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') queueCriticalRefresh();
+    });
   }
 
   function getCriticalDueList() {
@@ -2486,14 +2575,16 @@ function updateCritIslandStacking() {
     const visibleCount = Math.min(count, 5);
     mark.textContent = '!'.repeat(visibleCount) + (count > 5 ? '+' : '');
 
-    console.log('[crit-island] showing, counted:', list.map((t) => ({
-      title: t.title,
-      importance: t.importance,
-      due: t.dueDateISO,
-      completedAtISO: t.completedAtISO,
-      hidden: t.hidden,
-      deletedAtISO: t.deletedAtISO,
-    })));
+    if (window.TP_DEBUG_PERF) {
+      console.log('[crit-island] showing, counted:', list.map((t) => ({
+        title: t.title,
+        importance: t.importance,
+        due: t.dueDateISO,
+        completedAtISO: t.completedAtISO,
+        hidden: t.hidden,
+        deletedAtISO: t.deletedAtISO,
+      })));
+    }
 
     updateCritIslandStacking();
     window.tpUpdateToastAnchor?.();
@@ -2502,6 +2593,7 @@ function updateCritIslandStacking() {
   window.tpUpdateCriticalIsland = updateCriticalTasksIsland;
   window.updateCriticalTasksIsland = updateCriticalTasksIsland;
 
+  installToolbarStorageBridge();
   ensureTodayScoreIsland();
   ensureCriticalTasksIsland();
 
