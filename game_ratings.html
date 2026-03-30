@@ -16,7 +16,7 @@
 <link rel="stylesheet" href="styles.css">
   <link rel="preload" href="toolbar.js" as="script">
   <script src="toolbar.js" defer></script>
-  <script src="scoring_core.js"></script>
+  
 
   <style>
     body{
@@ -175,7 +175,8 @@
     </footer>
   </div>
 
-  <script>
+  <script src="scoring_core.js"></script>
+<script>
 const STORAGE_KEY = "taskpoints_v1";
 const $ = id => document.getElementById(id);
 
@@ -312,7 +313,6 @@ function computeYouStatsFromCompletions() {
   };
 }
 
-
 // existing helper
 function getNormalizedRisky(rawRisky) {
   let n = Number(rawRisky);
@@ -339,7 +339,6 @@ const youRow = {
 };
 
 players = [youRow, ...players];
-
 
 // NEW: pull gameHistory off the last-loaded state
 let gameHistory =
@@ -444,7 +443,6 @@ function renderTable() {
 
     const stats = computePlayerStats(p);
 
-
     tr.innerHTML = `
       <td class="pr-4">${escapeHtml(p.name || "—")}</td>
       <td>${baseline != null ? baseline : "—"}</td>
@@ -537,7 +535,6 @@ function computePlayerStats(p) {
 }
 
 
-
 function getSortValue(p, key) {
   const stats = computePlayerStats(p);
 
@@ -557,7 +554,6 @@ function getSortValue(p, key) {
     default:          return 0;
   }
 }
-
 
     function updateSortIndicators() {
       const indicators = document.querySelectorAll("[data-indicator]");
