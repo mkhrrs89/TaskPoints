@@ -235,6 +235,21 @@ function safeCompletionDateKey(completion){
   return dateKey(when);
 }
 
+function getCompletionDateKey(entry) {
+  const iso = typeof entry?.completedAtISO === 'string' ? entry.completedAtISO : '';
+  if (iso) {
+    const d = new Date(iso);
+    if (!Number.isNaN(d.getTime())) {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    }
+  }
+  if (typeof entry?.dayKey === 'string' && entry.dayKey) return entry.dayKey;
+  return '';
+}
+
 function computePreviousDueDate(task, completionKey){
   if(!task) return null;
   const rec = task.recurrence || {};
@@ -630,25 +645,18 @@ function render(){
   list.innerHTML='';
   if (pagination) pagination.innerHTML = '';
 
-  const baseCompletions = Array.isArray(state.completions) ? state.completions.slice() : [];
-  if(!baseCompletions.length){
+  const baseRows = (state.completions || [])
+    .slice()
+    .filter(Boolean)
+    .sort((a,b)=> new Date(b.completedAtISO)-new Date(a.completedAtISO));
+  if(!baseRows.length){
     empty.style.display='block';
     if (pagination) pagination.style.display = 'none';
     return;
   }
 
   console.time('log:pageScope');
-  const sortedBase = baseCompletions
-    .slice()
-    .sort((a,b)=> new Date(b.completedAtISO)-new Date(a.completedAtISO));
-
-  const dayKeys = [];
-  const withDates = sortedBase.map(entry => {
-    const dateObj = new Date(entry.completedAtISO);
-    const key = dateKey(dateObj);
-    if (key && dayKeys[dayKeys.length - 1] !== key) dayKeys.push(key);
-    return { entry, dateObj, dayKey: key };
-  });
+  const dayKeys = Array.from(new Set(baseRows.map(getCompletionDateKey).filter(Boolean)));
   const totalPages = Math.max(1, Math.ceil(Math.max(dayKeys.length, 1) / DAYS_PER_PAGE));
   if (!Number.isFinite(currentLogPage)) currentLogPage = 0;
   currentLogPage = Math.min(Math.max(currentLogPage, 0), Math.max(totalPages - 1, 0));
@@ -656,14 +664,28 @@ function render(){
   const pageEnd = pageStart + DAYS_PER_PAGE;
   const pageKeys = dayKeys.slice(pageStart, pageEnd);
   const pageKeySet = new Set(pageKeys);
-  const visibleBaseRows = withDates.filter(item => !item.dayKey || pageKeySet.has(item.dayKey));
-  const visibleInertiaRows = buildVisibleInertiaEntries(baseCompletions, pageKeys).map(entry => {
-    const dateObj = new Date(entry.completedAtISO);
-    return { entry, dateObj, dayKey: dateKey(dateObj) };
-  });
-  const visibleRows = visibleBaseRows
-    .concat(visibleInertiaRows)
-    .sort((a,b)=> new Date(b.entry.completedAtISO)-new Date(a.entry.completedAtISO));
+  const visibleBaseRows = baseRows.filter((entry) => pageKeySet.has(getCompletionDateKey(entry)));
+  const visibleInertiaRows = buildVisibleInertiaEntries(baseRows, pageKeys);
+  const visibleRows = [...visibleBaseRows, ...visibleInertiaRows]
+    .sort((a,b)=> new Date(b.completedAtISO)-new Date(a.completedAtISO));
+
+  if (window.TP_DEBUG_PERF) {
+    console.log('[log:pageScope]', {
+      completions: Array.isArray(state.completions) ? state.completions.length : 0,
+      baseRows: baseRows.length,
+      dayKeys: dayKeys.length,
+      currentPage: currentLogPage + 1,
+      pageKeys: pageKeys.length,
+      visibleBaseRows: visibleBaseRows.length,
+      visibleInertiaRows: visibleInertiaRows.length
+    });
+  }
+
+  if (baseRows.length > 0 && visibleRows.length === 0 && currentLogPage !== 0) {
+    currentLogPage = 0;
+    console.timeEnd('log:pageScope');
+    return render();
+  }
   console.timeEnd('log:pageScope');
 
   console.time('log:domRender');
@@ -672,7 +694,9 @@ function render(){
     let lastDayKey = null;
     const listFrag = document.createDocumentFragment();
 
-    visibleRows.forEach(({ entry: c, dateObj: completionDate, dayKey: completionKey })=>{
+    visibleRows.forEach((c)=>{
+      const completionDate = new Date(c.completedAtISO);
+      const completionKey = getCompletionDateKey(c);
       if (completionKey && completionKey !== lastDayKey) {
         const divider = document.createElement('div');
         divider.className = 'day-divider';
