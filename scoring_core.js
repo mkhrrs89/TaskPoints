@@ -1786,24 +1786,94 @@ return { state: merged, storageKey };
     return dateKeyStr < today;
   }
 
-  function youDailyTotalsWithInertia(state, options = {}){
+  function computeInertiaForExtraDayKey(dayKey, totalsWithInertiaMap, settings){
+    const keyDate = fromKey(dayKey);
+    if (!keyDate || isNaN(keyDate.getTime())) return { inertia: 0, average: 0 };
+
+    const scoring = getScoringSettings(settings);
+    const inertiaSettings = scoring.inertia;
+    let sum = 0;
+    let count = 0;
+
+    for (let i = 1; i <= inertiaSettings.windowDays; i++) {
+      const d = new Date(keyDate);
+      d.setDate(keyDate.getDate() - i);
+      const prevKey = dateKey(d);
+      const total = totalsWithInertiaMap.get(prevKey);
+      if (Number.isFinite(total)) {
+        sum += total;
+        count++;
+      }
+    }
+
+    const average = count ? sum / count : 0;
+    const inertia = count ? average * inertiaSettings.multiplier : 0;
+    return { inertia, average };
+  }
+
+  function buildYouDayScoreMap(state, options = {}){
     // Invariant: options.normalized is only set when state already passed through normalizeState().
     const normalized = options.normalized ? (state || {}) : normalizeState(state || {});
-    const { dailyTotals } = aggregateCompletionsByDate(normalized.completions, normalized);
+    const perfEnabled = !!global.TP_DEBUG_PERF;
+    const t0 = perfEnabled && global.performance && typeof global.performance.now === 'function'
+      ? global.performance.now()
+      : 0;
+    let aggregateCalls = 0;
 
-    const keys = new Set([
+    const aggregated = (() => {
+      aggregateCalls += 1;
+      return aggregateCompletionsByDate(normalized.completions, normalized);
+    })();
+    const dailyTotals = aggregated.dailyTotals || {};
+    const dayKeys = Array.from(new Set([
       ...Object.keys(dailyTotals),
-      ...normalized.matchups
+      ...(normalized.matchups || [])
         .map(matchupDateKey)
         .filter(Boolean),
-    ]);
+    ]));
 
+    const { inertiaMap: baseInertiaMap, totalsWithInertia } = computeInertiaMaps(dailyTotals, normalized);
+    const dayScoreMap = new Map();
+    const dailyKeySet = new Set(Object.keys(dailyTotals));
+
+    dayKeys.forEach((key) => {
+      const base = Number(dailyTotals[key]) || 0;
+      const sourceInertia = dailyKeySet.has(key)
+        ? (baseInertiaMap.get(key) || { inertia: 0, average: 0 })
+        : computeInertiaForExtraDayKey(key, totalsWithInertia, normalized);
+      const inertia = Number.isFinite(sourceInertia.inertia) ? sourceInertia.inertia : 0;
+      const average = Number.isFinite(sourceInertia.average) ? sourceInertia.average : 0;
+      const total = roundPoints(addPoints(base, inertia), 2);
+      const finalTotal = roundPoints(total, 1);
+
+      dayScoreMap.set(key, {
+        total,
+        baseTotal: base,
+        inertia,
+        average,
+        finalTotal
+      });
+    });
+
+    if (perfEnabled) {
+      const t1 = global.performance && typeof global.performance.now === 'function'
+        ? global.performance.now()
+        : t0;
+      console.debug('[TP_DEBUG_PERF] buildYouDayScoreMap', {
+        aggregateCompletionsByDateCalls: aggregateCalls,
+        dayCount: dayScoreMap.size,
+        elapsedMs: Math.round((t1 - t0) * 100) / 100
+      });
+    }
+
+    return { dayScoreMap, dailyTotals };
+  }
+
+  function youDailyTotalsWithInertia(state, options = {}){
     const totals = {};
-
-    keys.forEach(key => {
-      const snapshot = buildDaySnapshot(key, normalized);
-      const totalsForDay = computeDayTotals(snapshot);
-      totals[key] = roundPoints(totalsForDay.total, 1);
+    const { dayScoreMap } = buildYouDayScoreMap(state, options);
+    dayScoreMap.forEach((entry, key) => {
+      totals[key] = entry.finalTotal;
     });
 
     return totals;
@@ -1973,9 +2043,9 @@ return { state: merged, storageKey };
   function syncYouMatchups(state, options = {}){
     // Invariant: options.normalized is only set when state already passed through normalizeState().
     const normalized = options.normalized ? (state || {}) : normalizeState(state || {});
-    const youTotals = youDailyTotalsWithInertia(normalized, { normalized: true });
+    const { dayScoreMap } = buildYouDayScoreMap(normalized, { normalized: true });
 
-    if (!Object.keys(youTotals).length) {
+    if (!dayScoreMap.size) {
       return { state: normalized, changed: false };
     }
 
@@ -1983,7 +2053,8 @@ return { state: merged, storageKey };
 
     const updated = (normalized.matchups || []).map(m => {
       const key = matchupDateKey(m);
-      const youScore = youTotals[key];
+      const scoreEntry = dayScoreMap.get(key);
+      const youScore = scoreEntry ? scoreEntry.finalTotal : undefined;
       const aIsYou = m && m.playerAId === 'YOU';
       const bIsYou = m && m.playerBId === 'YOU';
 
