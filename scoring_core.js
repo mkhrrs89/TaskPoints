@@ -1837,21 +1837,53 @@ return { state: merged, storageKey };
     const dailyKeySet = new Set(Object.keys(dailyTotals));
 
     dayKeys.forEach((key) => {
-      const base = Number(dailyTotals[key]) || 0;
+      const rawBaseTotal = Number(dailyTotals[key]) || 0;
       const sourceInertia = dailyKeySet.has(key)
         ? (baseInertiaMap.get(key) || { inertia: 0, average: 0 })
         : computeInertiaForExtraDayKey(key, totalsWithInertia, normalized);
-      const inertia = Number.isFinite(sourceInertia.inertia) ? sourceInertia.inertia : 0;
-      const average = Number.isFinite(sourceInertia.average) ? sourceInertia.average : 0;
-      const total = roundPoints(addPoints(base, inertia), 2);
-      const finalTotal = roundPoints(total, 1);
+      const rawInertia = Number.isFinite(sourceInertia.inertia) ? sourceInertia.inertia : 0;
+      const rawAverage = Number.isFinite(sourceInertia.average) ? sourceInertia.average : 0;
+      const roundedInertia = roundPoints(rawInertia, 2);
+      const rawFinalTotal = rawBaseTotal + rawInertia;
+      const roundedFinalTotal = roundPoints(rawFinalTotal, 2);
+
+      if (perfEnabled) {
+        console.debug('[TP_DEBUG_PERF] day-score', {
+          dayKey: key,
+          path: dailyKeySet.has(key) ? 'precomputed-existing-day' : 'precomputed-extra-day',
+          rawBaseTotal,
+          rawInertia,
+          roundedInertia,
+          rawFinalTotal,
+          roundedFinalTotal
+        });
+
+        const legacyInertiaInfo = computeInertia(dailyTotals, key, normalized);
+        const legacyInertia = Number.isFinite(legacyInertiaInfo.inertia) ? legacyInertiaInfo.inertia : 0;
+        const legacyRoundedFinalTotal = roundPoints(rawBaseTotal + legacyInertia, 2);
+        if (Math.abs(legacyRoundedFinalTotal - roundedFinalTotal) > 1e-9) {
+          console.warn('[TP_DEBUG_PERF] parity-mismatch', {
+            dayKey: key,
+            path: 'precomputed-vs-legacy',
+            legacyRoundedFinalTotal,
+            roundedFinalTotal,
+            rawBaseTotal,
+            rawInertia,
+            legacyInertia
+          });
+        }
+      }
 
       dayScoreMap.set(key, {
-        total,
-        baseTotal: base,
-        inertia,
-        average,
-        finalTotal
+        total: roundedFinalTotal,
+        baseTotal: rawBaseTotal,
+        inertia: rawInertia,
+        average: rawAverage,
+        finalTotal: roundedFinalTotal,
+        rawBaseTotal,
+        rawInertia,
+        rawAverage,
+        rawFinalTotal
       });
     });
 
