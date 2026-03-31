@@ -114,12 +114,23 @@
 <script>
     const STORAGE_KEY = "taskpoints_v1";
     const $ = (id) => document.getElementById(id);
+    let pageStateCache = null;
+    let pageStateCacheDirty = true;
+    let pageStateFreshReadCount = 0;
 
-function loadState() {
+function invalidatePageStateCache() {
+  pageStateCacheDirty = true;
+}
+
+function readPageStateFresh() {
+  pageStateFreshReadCount += 1;
+  if (window.TP_DEBUG_PERF) {
+    console.debug('[TP_DEBUG_PERF][schedule] fresh storage parse #' + pageStateFreshReadCount);
+  }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) {
-      return {
+      pageStateCache = {
         tasks: [],
         completions: [],
         players: [],
@@ -131,10 +142,12 @@ function loadState() {
         opponentDripSchedules: [],
         youName: ""
       };
+      pageStateCacheDirty = false;
+      return pageStateCache;
     }
 
     const parsed = JSON.parse(raw) || {};
-    return {
+    pageStateCache = {
       tasks:       Array.isArray(parsed.tasks)       ? parsed.tasks       : [],
       completions: Array.isArray(parsed.completions) ? parsed.completions : [],
       players:     Array.isArray(parsed.players)     ? parsed.players     : [],
@@ -148,8 +161,14 @@ function loadState() {
     };
   } catch (e) {
     console.error("Failed to load TaskPoints state", e);
-    return { tasks: [], completions: [], players: [], habits: [], flexActions: [], gameHistory: [], matchups: [], schedule: [], opponentDripSchedules: [], youName: "" };
+    pageStateCache = { tasks: [], completions: [], players: [], habits: [], flexActions: [], gameHistory: [], matchups: [], schedule: [], opponentDripSchedules: [], youName: "" };
   }
+  pageStateCacheDirty = false;
+  return pageStateCache;
+}
+
+function loadState() {
+  return pageStateCacheDirty ? readPageStateFresh() : pageStateCache;
 }
 
     function getYouName(state) {
@@ -212,18 +231,26 @@ function normalizeState(s) {
 
 function saveState(nextState) {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    const existing = raw ? (JSON.parse(raw) || {}) : {};
+    const existing = loadState() || {};
     if (window.TaskPointsCore?.saveAppState) {
-      return TaskPointsCore.saveAppState({ ...existing, ...nextState }, { storageKey: STORAGE_KEY }).state;
+      const saved = TaskPointsCore.saveAppState({ ...existing, ...nextState }, { storageKey: STORAGE_KEY }).state;
+      pageStateCache = saved;
+      pageStateCacheDirty = false;
+      return saved;
     }
     if (window.TaskPointsCore?.mergeAndSaveState) {
-      return TaskPointsCore.mergeAndSaveState({ ...existing, ...nextState }, { storageKey: STORAGE_KEY }).state;
+      const saved = TaskPointsCore.mergeAndSaveState({ ...existing, ...nextState }, { storageKey: STORAGE_KEY }).state;
+      pageStateCache = saved;
+      pageStateCacheDirty = false;
+      return saved;
     }
     const merged = { ...existing, ...nextState };
+    pageStateCache = merged;
+    pageStateCacheDirty = false;
     console.warn("schedule saveState skipped localStorage write; TaskPointsCore missing.");
     return merged;
   } catch (e) {
+    invalidatePageStateCache();
     console.error("Failed to save schedule", e);
     return nextState;
   }
