@@ -199,6 +199,9 @@
 <script src="scoring_core.js"></script>
 <script>
 const STORAGE_KEY="taskpoints_v1";
+let pageStateCache = null;
+let pageStateCacheDirty = true;
+let pageStateFreshReadCount = 0;
 const $=id=>document.getElementById(id);
 const DAYS_PER_PAGE = 15;
 let currentLogPage = 0;
@@ -363,13 +366,21 @@ function workPoints(score, hours = 0) {
 }
 
 
-function load(){ 
+function invalidatePageStateCache() {
+  pageStateCacheDirty = true;
+}
+
+function readPageStateFresh(){
+  pageStateFreshReadCount += 1;
+  if (window.TP_DEBUG_PERF) {
+    console.debug('[TP_DEBUG_PERF][log] fresh storage parse #' + pageStateFreshReadCount);
+  }
   console.time('log:load');
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
 
     if (!raw) {
-      return {
+      pageStateCache = {
         tasks: [],
         completions: [],
         players: [],
@@ -388,10 +399,12 @@ function load(){
           ? TaskPointsCore.normalizeScoringSettings({})
           : {}
       };
+      pageStateCacheDirty = false;
+      return pageStateCache;
     }
 
     const p = JSON.parse(raw);
-    return {
+    pageStateCache = {
       tasks:       Array.isArray(p.tasks)       ? p.tasks       : [],
       completions: Array.isArray(p.completions) ? p.completions : [],
       players:     Array.isArray(p.players)     ? p.players     : [],
@@ -410,8 +423,10 @@ function load(){
         ? TaskPointsCore.normalizeScoringSettings(p.scoringSettings || {})
         : (p.scoringSettings || {})
     };
+    pageStateCacheDirty = false;
+    return pageStateCache;
   } catch {
-    return {
+    pageStateCache = {
       tasks: [],
       completions: [],
       players: [],
@@ -430,11 +445,20 @@ function load(){
         ? TaskPointsCore.normalizeScoringSettings({})
         : {}
     };
+    pageStateCacheDirty = false;
+    return pageStateCache;
   } finally {
     console.timeEnd('log:load');
   }
 }
 
+function getPageState() {
+  return pageStateCacheDirty ? readPageStateFresh() : pageStateCache;
+}
+
+function load(){
+  return getPageState();
+}
 
 let state = normalizeState(load());
   
@@ -489,21 +513,26 @@ function normalizeState(s) {
 
 function saveMerged(partial) {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    const existing = raw ? (JSON.parse(raw) || {}) : {};
+    const existing = getPageState() || {};
 
     // Merge top-level keys so we don't wipe fields this page didn't load
     const merged = { ...existing, ...partial };
 
     // IMPORTANT: snapshot-save (no union merge), so deletions stick
     if (window.TaskPointsCore?.saveStateSnapshot) {
-      return TaskPointsCore.saveStateSnapshot(merged, { storageKey: STORAGE_KEY }).state;
+      const nextState = TaskPointsCore.saveStateSnapshot(merged, { storageKey: STORAGE_KEY }).state;
+      pageStateCache = nextState;
+      pageStateCacheDirty = false;
+      return nextState;
     }
 
     // Fallback if snapshot saver isn't available
     localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+    pageStateCache = merged;
+    pageStateCacheDirty = false;
     return merged;
   } catch (e) {
+    invalidatePageStateCache();
     console.error("saveMerged failed", e);
     return partial;
   }

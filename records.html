@@ -206,8 +206,19 @@
 ------------------------------*/
 const STORAGE_KEY = "taskpoints_v1";
 const $ = (id) => document.getElementById(id);
+let pageStateCache = null;
+let pageStateCacheDirty = true;
+let pageStateFreshReadCount = 0;
 
-function loadState(){
+function invalidatePageStateCache(){
+  pageStateCacheDirty = true;
+}
+
+function readPageStateFresh(){
+  pageStateFreshReadCount += 1;
+  if (window.TP_DEBUG_PERF) {
+    console.debug('[TP_DEBUG_PERF][records] fresh storage parse #' + pageStateFreshReadCount);
+  }
   const base = {
     tasks: [], completions: [], habits: [],
     players: [], flexActions: [],
@@ -216,13 +227,23 @@ function loadState(){
   };
   try{
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return base;
+    if (!raw) {
+      pageStateCache = base;
+      pageStateCacheDirty = false;
+      return pageStateCache;
+    }
     const parsed = JSON.parse(raw);
-    return Object.assign(base, parsed || {});
+    pageStateCache = Object.assign(base, parsed || {});
   }catch(e){
     console.error("records loadState error", e);
-    return base;
+    pageStateCache = base;
   }
+  pageStateCacheDirty = false;
+  return pageStateCache;
+}
+
+function loadState(){
+  return pageStateCacheDirty ? readPageStateFresh() : pageStateCache;
 }
 
 function getYouName(state) {

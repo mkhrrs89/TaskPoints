@@ -765,6 +765,9 @@ const STORAGE_KEY = "taskpoints_v1";
 const DEFAULT_PRIMARY_COLOR = "#1a383b";
 const DEFAULT_SECONDARY_COLOR = "#254c52";
 const $ = (id) => document.getElementById(id);
+let pageStateCache = null;
+let pageStateCacheDirty = true;
+let pageStateFreshReadCount = 0;
 
 function normalizePlayerColor(value, fallback) {
   return normalizeHexColor(value) || fallback;
@@ -786,9 +789,8 @@ function withPlayerColors(player) {
   };
 }
 
-function loadState() {
-  // Base shape with all the shared keys we care about
-  let base = {
+function buildBaseState() {
+  return {
     tasks: [],
     completions: [],
     habits: [],
@@ -803,10 +805,27 @@ function loadState() {
     youPrimaryColor: DEFAULT_PRIMARY_COLOR,
     youSecondaryColor: DEFAULT_SECONDARY_COLOR
   };
+}
+
+function invalidatePageStateCache() {
+  pageStateCacheDirty = true;
+}
+
+function readPageStateFresh() {
+  pageStateFreshReadCount += 1;
+  if (window.TP_DEBUG_PERF) {
+    console.debug('[TP_DEBUG_PERF][game] fresh storage parse #' + pageStateFreshReadCount);
+  }
+  // Base shape with all the shared keys we care about
+  let base = buildBaseState();
 
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return base;
+    if (!raw) {
+      pageStateCache = base;
+      pageStateCacheDirty = false;
+      return pageStateCache;
+    }
 
     const parsed = JSON.parse(raw) || {};
 
@@ -842,7 +861,17 @@ function loadState() {
     console.error("Failed to load state in game.html", e);
   }
 
-  return base;
+  pageStateCache = base;
+  pageStateCacheDirty = false;
+  return pageStateCache;
+}
+
+function getPageState() {
+  return pageStateCacheDirty ? readPageStateFresh() : pageStateCache;
+}
+
+function loadState() {
+  return getPageState();
 }
 
 function normalizeHexColor(value) {
@@ -902,6 +931,8 @@ function saveState(nextState, options = {}) {
       if (trimmed) {
         console.warn('Storage nearing capacity. Older history items were trimmed to keep saves working.');
       }
+      pageStateCache = merged;
+      pageStateCacheDirty = false;
       return merged;
     }
     if (window.TaskPointsCore?.mergeAndSaveState) {
@@ -909,14 +940,18 @@ function saveState(nextState, options = {}) {
       if (trimmed) {
         console.warn('Storage nearing capacity. Older history items were trimmed to keep saves working.');
       }
+      pageStateCache = merged;
+      pageStateCacheDirty = false;
       return merged;
     }
-    const raw = localStorage.getItem(STORAGE_KEY);
-    const existing = raw ? (JSON.parse(raw) || {}) : {};
+    const existing = getPageState() || {};
     const merged = { ...existing, ...nextState };
+    pageStateCache = merged;
+    pageStateCacheDirty = false;
     console.warn("game saveState skipped localStorage write; TaskPointsCore missing.");
     return merged;
   } catch (e) {
+    invalidatePageStateCache();
     console.error("Failed to save state in game.html", e);
     return nextState;
   }

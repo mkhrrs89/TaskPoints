@@ -381,33 +381,61 @@
   };
 
   let currentState = null;
+  let pageStateCache = null;
+  let pageStateCacheDirty = true;
+  let pageStateFreshReadCount = 0;
   let gameHubBootStarted = false;
   let gameHubBootFinished = false;
   let gameHubBootScheduled = false;
 
+  function invalidatePageStateCache(){
+    pageStateCacheDirty = true;
+  }
+
+  function readPageStateFresh(){
+    pageStateFreshReadCount += 1;
+    if (window.TP_DEBUG_PERF) {
+      console.debug('[TP_DEBUG_PERF][gamehub] fresh storage parse #' + pageStateFreshReadCount);
+    }
+    if (window.TaskPointsCore && typeof TaskPointsCore.loadAppState === 'function') {
+      const loaded = TaskPointsCore.loadAppState({ syncDerived: false, persistSync: false });
+      pageStateCache = loaded && loaded.state ? loaded.state : {};
+      pageStateCacheDirty = false;
+      return pageStateCache;
+    }
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      pageStateCache = raw ? JSON.parse(raw) : {};
+    } catch {
+      pageStateCache = {};
+    }
+    pageStateCacheDirty = false;
+    return pageStateCache;
+  }
+
+  function getPageState(){
+    return pageStateCacheDirty ? readPageStateFresh() : pageStateCache;
+  }
+
   function saveState(state){
     if (window.TaskPointsCore?.saveAppState) {
       TaskPointsCore.saveAppState(state, { storageKey: STORAGE_KEY });
+      pageStateCache = state;
+      pageStateCacheDirty = false;
       return;
     }
     if (window.TaskPointsCore?.mergeAndSaveState) {
       TaskPointsCore.mergeAndSaveState(state, { storageKey: STORAGE_KEY });
+      pageStateCache = state;
+      pageStateCacheDirty = false;
       return;
     }
+    invalidatePageStateCache();
     console.warn('gamehub saveState skipped localStorage write; TaskPointsCore missing.');
   }
 
 function loadState(){
-  if (window.TaskPointsCore && typeof TaskPointsCore.loadAppState === 'function') {
-    const loaded = TaskPointsCore.loadAppState({ syncDerived: false, persistSync: false });
-    return loaded && loaded.state ? loaded.state : {};
-  }
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
+  return getPageState();
 }
 
   function getNormalizedRisky(value){

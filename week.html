@@ -388,12 +388,23 @@
 <script>
 const STORAGE_KEY="taskpoints_v1";
 const $=id=>document.getElementById(id);
+let pageStateCache = null;
+let pageStateCacheDirty = true;
+let pageStateFreshReadCount = 0;
 
-function load() {
+function invalidatePageStateCache() {
+  pageStateCacheDirty = true;
+}
+
+function readPageStateFresh() {
+  pageStateFreshReadCount += 1;
+  if (window.TP_DEBUG_PERF) {
+    console.debug('[TP_DEBUG_PERF][week] fresh storage parse #' + pageStateFreshReadCount);
+  }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) {
-      return {
+      pageStateCache = {
         tasks:       [],
         completions: [],
         players:     [],
@@ -404,10 +415,12 @@ function load() {
         workHistory: [],
         schedule:    []
       };
+      pageStateCacheDirty = false;
+      return pageStateCache;
     }
 
     const p = JSON.parse(raw) || {};
-    return {
+    pageStateCache = {
       tasks:       Array.isArray(p.tasks)       ? p.tasks       : [],
       completions: Array.isArray(p.completions) ? p.completions : [],
       players:     Array.isArray(p.players)     ? p.players     : [],
@@ -421,7 +434,7 @@ function load() {
     };
   } catch (e) {
     console.error("week load error", e);
-    return {
+    pageStateCache = {
       tasks:       [],
       completions: [],
       players:     [],
@@ -434,6 +447,12 @@ function load() {
       opponentDripSchedules: []
     };
   }
+  pageStateCacheDirty = false;
+  return pageStateCache;
+}
+
+function load() {
+  return pageStateCacheDirty ? readPageStateFresh() : pageStateCache;
 }
 
 let state = load();
@@ -492,24 +511,32 @@ syncDerivedPointsIfNeeded();
 
 function saveMerged(partial, opts = {}) {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    const existing = raw ? (JSON.parse(raw) || {}) : {};
+    const existing = load() || {};
     if (window.TaskPointsCore?.saveAppState) {
-      return TaskPointsCore.saveAppState(
+      const saved = TaskPointsCore.saveAppState(
         { ...existing, ...partial },
         { storageKey: STORAGE_KEY, immediateWrite: !!opts.immediateWrite }
       ).state;
+      pageStateCache = saved;
+      pageStateCacheDirty = false;
+      return saved;
     }
     if (window.TaskPointsCore?.mergeAndSaveState) {
-      return TaskPointsCore.mergeAndSaveState(
+      const saved = TaskPointsCore.mergeAndSaveState(
         { ...existing, ...partial },
         { storageKey: STORAGE_KEY, immediateWrite: !!opts.immediateWrite }
       ).state;
+      pageStateCache = saved;
+      pageStateCacheDirty = false;
+      return saved;
     }
     const merged = { ...existing, ...partial };
+    pageStateCache = merged;
+    pageStateCacheDirty = false;
     console.warn("week saveMerged skipped localStorage write; TaskPointsCore missing.");
     return merged;
   } catch (e) {
+    invalidatePageStateCache();
     console.error("saveMerged failed", e);
     return partial;
   }
