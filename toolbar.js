@@ -2466,24 +2466,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (!island.dataset.bound) {
       island.addEventListener('click', () => {
-        const sectionTarget = document.getElementById('tasksAnchor')
-          || document.getElementById('weekTasksSection')
-          || document.getElementById('weekGrid')
-          || document.getElementById('taskList');
-        sectionTarget?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-
         const matchingIds = getCriticalDueList().map((t) => String(t.id));
-        if (!matchingIds.length) return;
+        if (isMainPagePathname(window.location.pathname)) {
+          revealCriticalTasksOnHome(matchingIds);
+          return;
+        }
 
-        document.querySelectorAll('.tp-task-critical-pulse').forEach((el) => el.classList.remove('tp-task-critical-pulse'));
-
-        const nodes = document.querySelectorAll('[data-task-id]');
-        nodes.forEach((node) => {
-          if (!(node instanceof HTMLElement)) return;
-          if (!matchingIds.includes(node.getAttribute('data-task-id'))) return;
-          node.classList.add('tp-task-critical-pulse');
-          setTimeout(() => node.classList.remove('tp-task-critical-pulse'), 2000);
-        });
+        persistCriticalIslandNavigationIntent(matchingIds);
+        window.location.href = 'index.html';
       });
       island.dataset.bound = '1';
     }
@@ -2529,6 +2519,81 @@ document.addEventListener('DOMContentLoaded', () => {
       if (due <= todayKey) list.push(t);
     }
     return list;
+  }
+
+  const CRITICAL_ISLAND_NAV_INTENT_KEY = 'tp_critical_island_nav_intent_v1';
+
+  function getCriticalTasksSectionTarget() {
+    return document.getElementById('tasksAnchor')
+      || document.getElementById('weekTasksSection')
+      || document.getElementById('weekGrid')
+      || document.getElementById('taskList');
+  }
+
+  function pulseTaskCardsByIds(taskIds) {
+    if (!Array.isArray(taskIds) || !taskIds.length) return 0;
+    const wantedIds = new Set(taskIds.map((id) => String(id)));
+    let pulsed = 0;
+
+    document.querySelectorAll('.tp-task-critical-pulse').forEach((el) => el.classList.remove('tp-task-critical-pulse'));
+    document.querySelectorAll('[data-task-id]').forEach((node) => {
+      if (!(node instanceof HTMLElement)) return;
+      const nodeTaskId = node.getAttribute('data-task-id');
+      if (!wantedIds.has(String(nodeTaskId || ''))) return;
+      node.classList.add('tp-task-critical-pulse');
+      setTimeout(() => node.classList.remove('tp-task-critical-pulse'), 2000);
+      pulsed += 1;
+    });
+
+    return pulsed;
+  }
+
+  function revealCriticalTasksOnHome(taskIds = []) {
+    const ids = Array.isArray(taskIds) && taskIds.length
+      ? taskIds.map((id) => String(id))
+      : getCriticalDueList().map((t) => String(t.id));
+
+    const maxAttempts = 18;
+    let attempts = 0;
+
+    const run = () => {
+      attempts += 1;
+      const sectionTarget = getCriticalTasksSectionTarget();
+      if (sectionTarget) sectionTarget.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+      const pulsed = pulseTaskCardsByIds(ids);
+      const done = !!sectionTarget && (ids.length === 0 || pulsed > 0);
+      if (done || attempts >= maxAttempts) return;
+      setTimeout(run, 120);
+    };
+
+    run();
+  }
+
+  function persistCriticalIslandNavigationIntent(taskIds) {
+    const payload = {
+      createdAt: Date.now(),
+      taskIds: Array.isArray(taskIds) ? taskIds.map((id) => String(id)) : [],
+    };
+    try {
+      sessionStorage.setItem(CRITICAL_ISLAND_NAV_INTENT_KEY, JSON.stringify(payload));
+    } catch (_) {}
+  }
+
+  function consumeCriticalIslandNavigationIntent() {
+    if (!isMainPagePathname(window.location.pathname)) return;
+    let payload = null;
+    try {
+      const raw = sessionStorage.getItem(CRITICAL_ISLAND_NAV_INTENT_KEY);
+      if (!raw) return;
+      sessionStorage.removeItem(CRITICAL_ISLAND_NAV_INTENT_KEY);
+      payload = JSON.parse(raw);
+    } catch (_) {
+      return;
+    }
+
+    if (!payload || !Array.isArray(payload.taskIds)) return;
+    revealCriticalTasksOnHome(payload.taskIds);
   }
 
 function updateCritIslandStacking() {
@@ -2596,6 +2661,11 @@ function updateCritIslandStacking() {
   installToolbarStorageBridge();
   ensureTodayScoreIsland();
   ensureCriticalTasksIsland();
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', consumeCriticalIslandNavigationIntent, { once: true });
+  } else {
+    consumeCriticalIslandNavigationIntent();
+  }
 
   requestAnimationFrame(() => updateCriticalTasksIsland());
   setTimeout(updateCriticalTasksIsland, 50);
