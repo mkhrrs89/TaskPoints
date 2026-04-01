@@ -1642,7 +1642,26 @@ function submitSleepEditModal() {
     return;
   }
 
-const target = resolveCompletionRef(sleepEditContext, "Sleep Score") || sleepEditContext;
+let target = resolveCompletionRef(sleepEditContext, "Sleep Score");
+if (!target) {
+  const d = new Date(sleepEditContext.completedAtISO || new Date());
+  d.setHours(12, 0, 0, 0);
+  const key = dateKey(d);
+  target = (state.completions || []).find(c => {
+    if (!c?.title?.startsWith("Sleep Score")) return false;
+    return dateKey(new Date(c.completedAtISO)) === key;
+  }) || null;
+}
+if (!target) {
+  target = {
+    id: crypto.randomUUID(),
+    title: "Sleep Score (0) — Rest 0",
+    points: 0,
+    completedAtISO: new Date(sleepEditContext?.completedAtISO || new Date()).toISOString(),
+    source: "metric",
+  };
+  state.completions.unshift(target);
+}
 const oldPts = Number(target.points) || 0;
 
 target.title = `Sleep Score (${scoreVal}) — Rest ${restVal}`;
@@ -1650,6 +1669,7 @@ const newPts = sleepPoints(scoreVal, restVal);
 target.points = newPts;
 toastPointsDeltaTodayAware(newPts, oldPts, target);
 target.sleepRested = restVal;
+target.source = "metric";
 
 
   markCompletionsDirty();
@@ -1733,22 +1753,49 @@ function submitWorkEditModal() {
 
   const d = new Date(workEditContext.completedAtISO);
   d.setHours(12, 0, 0, 0);
+  const targetDate = workEditOptions?.pinToToday
+    ? (() => {
+      const today = new Date();
+      today.setHours(12, 0, 0, 0);
+      return today;
+    })()
+    : d;
+  const targetKey = dateKey(targetDate);
+
+  let target = resolveCompletionRef(workEditContext, "Work Score");
+  if (!target) {
+    target = (state.completions || []).find(c => {
+      if (!c?.title?.startsWith("Work Score")) return false;
+      return dateKey(new Date(c.completedAtISO)) === targetKey;
+    }) || null;
+  }
+  if (!target) {
+    target = {
+      id: crypto.randomUUID(),
+      title: "Work Score (0) — Hours 0",
+      points: 0,
+      completedAtISO: targetDate.toISOString(),
+      workHours: 0,
+      source: "work",
+    };
+    state.completions.unshift(target);
+  }
 
   if (workEditOptions?.pinToToday) {
     const today = new Date();
     today.setHours(12, 0, 0, 0);
-    workEditContext.completedAtISO = today.toISOString();
+    target.completedAtISO = today.toISOString();
   } else {
-    workEditContext.completedAtISO = d.toISOString();
+    target.completedAtISO = d.toISOString();
   }
 
-  workEditContext.title = `Work Score (${scoreVal}) — Hours ${safeHours}`;
-  const oldPts = Number(workEditContext.points) || 0;
+  target.title = `Work Score (${scoreVal}) — Hours ${safeHours}`;
+  const oldPts = Number(target.points) || 0;
   const newPts = workPoints(scoreVal, safeHours);
-  workEditContext.points = newPts;
-  toastPointsDeltaTodayAware(newPts, oldPts, workEditContext);
-  workEditContext.workHours = safeHours;
-  workEditContext.source = 'work';
+  target.points = newPts;
+  toastPointsDeltaTodayAware(newPts, oldPts, target);
+  target.workHours = safeHours;
+  target.source = 'work';
 
   markCompletionsDirty();
   save();
@@ -8300,23 +8347,39 @@ function ensureScoreEntryForDate(cat, dk){
   const dt = fromKey(dk);
   dt.setHours(12,0,0,0);
 
-  const entry = {
-    id: `v2_${dk}_${cat}_${Math.random().toString(16).slice(2)}`,
+  return {
+    id: `v2_draft_${dk}_${cat}_${Math.random().toString(16).slice(2)}`,
     title: defaults[cat],
     points: 0,
     dateKey: dk,
     completedAtISO: dt.toISOString(),
+    __tpDraft: true,
+    source: cat === "work" ? "work" : "metric",
   };
-
-  state.completions.push(entry);
-  markCompletionsDirty();
-  save();
-
-  return entry;
 }
 
 function ensureTodayScoreEntry(cat){
   return ensureScoreEntryForDate(cat, dateKey(new Date()));
+}
+
+function isUnsavedScorePlaceholder(entry, cat = ""){
+  if (!entry || typeof entry !== "object") return false;
+  const t = String(entry.title || "").trim();
+  const pts = Number(entry.points);
+  const isZero = Number.isFinite(pts) && Math.abs(pts) < 1e-9;
+  const isDraftId = typeof entry.id === "string" && entry.id.startsWith("v2_draft_");
+  const noTaskId = !entry.taskId;
+  const noSource = !entry.source;
+
+  if (entry.__tpDraft) return true;
+
+  if (cat === "work") {
+    const looksLikeBuggyTitle = t === "Work Score (0) (Hours 0)";
+    const missingWorkFields = !Number.isFinite(Number(entry.workHours)) || noSource;
+    return isZero && noTaskId && (isDraftId || looksLikeBuggyTitle) && missingWorkFields;
+  }
+
+  return isZero && noTaskId && noSource && isDraftId;
 }
 
 function getScoreV2DisplayPoints(catKey, entry, dateOrKey){
@@ -8466,11 +8529,50 @@ if (key === "work") {
 }
 
 if (key === "calories") {
-  // Ensure today's calories entry exists so editTodayCalories() won't bail
   const e = (typeof getTodayCaloriesEntry === "function") ? getTodayCaloriesEntry() : null;
-  if (!e) ensureTodayScoreEntry("calories");
+  const target = e || ensureTodayScoreEntry("calories");
+  const current = String(target?.title || "").match(/\((\d+)\)/)?.[1] ?? "";
+  const newVal = prompt("Edit today's calories:", String(current));
+  if (newVal === null) return;
 
-  if (typeof editTodayCalories === "function") editTodayCalories();
+  const raw = Number(String(newVal).trim());
+  if (!Number.isFinite(raw) || raw < 0) return alert("Invalid calories.");
+
+  const d = new Date(target?.completedAtISO || new Date());
+  d.setHours(12, 0, 0, 0);
+  const key = dateKey(d);
+  const whenISO = d.toISOString();
+  let existing = (typeof resolveCompletionRef === "function")
+    ? resolveCompletionRef(target, "Calories")
+    : null;
+  if (!existing) {
+    existing = (state.completions || []).find(c => {
+      if (!c?.title?.startsWith("Calories")) return false;
+      return dateKey(new Date(c.completedAtISO)) === key;
+    }) || null;
+  }
+  const oldPts = existing ? (Number(existing.points) || 0) : 0;
+  const newPts = caloriesToPoints(raw);
+
+  if (existing) {
+    existing.title = `Calories (${raw})`;
+    existing.points = newPts;
+    existing.completedAtISO = whenISO;
+    existing.source = "metric";
+  } else {
+    state.completions.unshift({
+      id: crypto.randomUUID(),
+      title: `Calories (${raw})`,
+      points: newPts,
+      completedAtISO: whenISO,
+      source: "metric",
+    });
+  }
+
+  toastPointsDeltaTodayAware(newPts, oldPts, key);
+  markCompletionsDirty();
+  save();
+  scheduleRender(renderAll);
 
   // instant refresh after the prompt saves
   setTimeout(() => {
@@ -8490,13 +8592,35 @@ if (key === "mood") {
     score: getMoodScoreValue(entry),
     notes: getMoodNotesValue(entry),
     onSave: ({ score, notes }) => {
-      const oldPts = Number(entry.points) || 0;
+      const d = new Date(entry?.completedAtISO || new Date());
+      d.setHours(12, 0, 0, 0);
+      const key = dateKey(d);
+      let target = resolveCompletionRef(entry, "Mood Score");
+      if (!target) {
+        target = (state.completions || []).find(c => {
+          if (!c?.title?.startsWith("Mood Score")) return false;
+          return dateKey(new Date(c.completedAtISO)) === key;
+        }) || null;
+      }
+      if (!target) {
+        target = {
+          id: crypto.randomUUID(),
+          title: "Mood Score (0)",
+          points: 0,
+          completedAtISO: d.toISOString(),
+          source: "metric",
+        };
+        state.completions.unshift(target);
+      }
+
+      const oldPts = Number(target.points) || 0;
       const newPts = moodPoints(score);
 
-      entry.title  = `Mood Score (${score})`;
-      entry.points = newPts;
-      entry.moodNotes = notes;
-      toastPointsDeltaTodayAware(newPts, oldPts, entry);
+      target.title  = `Mood Score (${score})`;
+      target.points = newPts;
+      target.moodNotes = notes;
+      target.source = "metric";
+      toastPointsDeltaTodayAware(newPts, oldPts, target);
 
       markCompletionsDirty();
       save();
@@ -8568,6 +8692,7 @@ function getEntryForDate(key, dateObj){
 
   for (const entry of state.completions || []) {
     if (!entry?.title?.startsWith(prefix)) continue;
+    if (isUnsavedScorePlaceholder(entry, key)) continue;
     const d = new Date(entry.completedAtISO);
     if (dateKey(d) === targetKey) return entry;
   }
@@ -8638,37 +8763,27 @@ if (!grid.__boundScoreV2Clicks) {
 
 let entry = grid.__entryMap?.[`${dk}|${cat}`];
 
-// If missing, create a placeholder completion for that day so the same edit UI can open
+// If missing, open the same edit UI with an in-memory draft only (no immediate persistence).
 if (!entry) {
-  // Convert dk ("YYYY-MM-DD") to a stable ISO timestamp (noon local time)
-  const iso = `${dk}T12:00:00`;
-
-const make = (title) => {
-  const obj = {
-    id: `v2_${dk}_${cat}_${Math.random().toString(16).slice(2)}`, // unique-ish id
-    title,
-    points: 0,
-    dateKey: dk,                       // <-- IMPORTANT
-    completedAtISO: `${dk}T12:00:00`,  // <-- IMPORTANT
+  const makeDraft = (title) => {
+    const dt = fromKey(dk);
+    dt.setHours(12,0,0,0);
+    const obj = {
+      id: `v2_draft_${dk}_${cat}_${Math.random().toString(16).slice(2)}`,
+      title,
+      points: 0,
+      dateKey: dk,
+      completedAtISO: dt.toISOString(),
+      __tpDraft: true,
+      source: cat === "work" ? "work" : "metric",
+    };
+    return obj;
   };
-  return obj;
-};
 
-
-  if (cat === "sleep")    entry = make("Sleep Score (0) + Rested (0)");
-  if (cat === "calories") entry = make("Calories (0)");
-  if (cat === "work")     entry = make("Work Score (0) (Hours 0)");
-  if (cat === "mood")     entry = make("Mood Score (0)");
-
-  // IMPORTANT: add to state so your existing modals/edit logic can mutate/save it
-state.completions = Array.isArray(state.completions) ? state.completions : [];
-state.completions.push(entry);
-  
-  // keep the map in sync so subsequent clicks work immediately
-grid.__entryMap[`${dk}|${cat}`] = entry;
-
-  markCompletionsDirty();
-  save();
+  if (cat === "sleep")    entry = makeDraft("Sleep Score (0) + Rested (0)");
+  if (cat === "calories") entry = makeDraft("Calories (0)");
+  if (cat === "work")     entry = makeDraft("Work Score (0) (Hours 0)");
+  if (cat === "mood")     entry = makeDraft("Mood Score (0)");
 }
 
 
@@ -8729,19 +8844,42 @@ if (cat === "work" && typeof promptEditWorkEntry === "function") {
 
 
     if (cat === "calories") {
-      const current = entry.title.match(/\((\d+)\)/)?.[1] || "";
+      const current = String(entry?.title || "").match(/\((\d+)\)/)?.[1] || "";
       const newVal = prompt("Edit calories for this day:", String(current));
       if (newVal === null) return;
 
       const raw = Number(String(newVal).trim());
       if (!Number.isFinite(raw) || raw < 0) return alert("Invalid calories.");
 
-      const oldPts = Number(entry.points) || 0;
+      const d = new Date(entry?.completedAtISO || `${dk}T12:00:00`);
+      d.setHours(12,0,0,0);
+      const targetKey = dateKey(d);
+      let target = resolveCompletionRef(entry, "Calories");
+      if (!target) {
+        target = (state.completions || []).find(c => {
+          if (!c?.title?.startsWith("Calories")) return false;
+          return dateKey(new Date(c.completedAtISO)) === targetKey;
+        }) || null;
+      }
       const newPts = caloriesToPoints(raw);
+      const oldPts = target ? (Number(target.points) || 0) : 0;
 
-      entry.title  = `Calories (${raw})`;
-      entry.points = newPts;
-      toastPointsDeltaTodayAware(newPts, oldPts, entry);
+      if (target) {
+        target.title  = `Calories (${raw})`;
+        target.points = newPts;
+        target.completedAtISO = d.toISOString();
+        target.source = "metric";
+      } else {
+        target = {
+          id: crypto.randomUUID(),
+          title: `Calories (${raw})`,
+          points: newPts,
+          completedAtISO: d.toISOString(),
+          source: "metric",
+        };
+        state.completions.unshift(target);
+      }
+      toastPointsDeltaTodayAware(newPts, oldPts, target);
 
 markCompletionsDirty();
 save();
@@ -8760,13 +8898,35 @@ return;
         score: getMoodScoreValue(entry),
         notes: getMoodNotesValue(entry),
         onSave: ({ score, notes }) => {
-          const oldPts = Number(entry.points) || 0;
+          const d = new Date(entry?.completedAtISO || `${dk}T12:00:00`);
+          d.setHours(12,0,0,0);
+          const targetKey = dateKey(d);
+          let target = resolveCompletionRef(entry, "Mood Score");
+          if (!target) {
+            target = (state.completions || []).find(c => {
+              if (!c?.title?.startsWith("Mood Score")) return false;
+              return dateKey(new Date(c.completedAtISO)) === targetKey;
+            }) || null;
+          }
+          if (!target) {
+            target = {
+              id: crypto.randomUUID(),
+              title: "Mood Score (0)",
+              points: 0,
+              completedAtISO: d.toISOString(),
+              source: "metric",
+            };
+            state.completions.unshift(target);
+          }
+
+          const oldPts = Number(target.points) || 0;
           const newPts = moodPoints(score);
 
-          entry.title  = `Mood Score (${score})`;
-          entry.points = newPts;
-          entry.moodNotes = notes;
-          toastPointsDeltaTodayAware(newPts, oldPts, entry);
+          target.title  = `Mood Score (${score})`;
+          target.points = newPts;
+          target.moodNotes = notes;
+          target.source = "metric";
+          toastPointsDeltaTodayAware(newPts, oldPts, target);
 
 markCompletionsDirty();
 save();
