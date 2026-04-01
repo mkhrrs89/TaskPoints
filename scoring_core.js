@@ -1058,21 +1058,62 @@ return { state: merged, storageKey };
   }
 
   function saveStateSnapshot(state, options = {}) {
+    const debugEnabled = Boolean(global && global.TP_DEBUG_PERF);
+    const summarizeStateSizes = (snapshot) => ({
+      completions: Array.isArray(snapshot?.completions) ? snapshot.completions.length : 0,
+      gameHistory: Array.isArray(snapshot?.gameHistory) ? snapshot.gameHistory.length : 0,
+      matchups: Array.isArray(snapshot?.matchups) ? snapshot.matchups.length : 0,
+      workHistory: Array.isArray(snapshot?.workHistory) ? snapshot.workHistory.length : 0,
+      schedule: Array.isArray(snapshot?.schedule) ? snapshot.schedule.length : 0
+    });
+    const savePath = options.savePath || options.source || options.reason || options.caller || 'unknown';
+    const callsite = debugEnabled ? (new Error().stack || '').split('\n').slice(2, 4).map(line => line.trim()).join(' <- ') : '';
+    const beforeSummary = summarizeStateSizes(state);
+    const logStage = (stage, snapshot) => {
+      if (!debugEnabled) return;
+      const size = summarizeStateSizes(snapshot);
+      console.log(`[TP saveStateSnapshot] stage=${stage} completions=${size.completions} gameHistory=${size.gameHistory} matchups=${size.matchups} workHistory=${size.workHistory} schedule=${size.schedule}`);
+    };
+    const setQuotaTrimMarker = (stage, afterSummary, trimmed) => {
+      if (!global || !global.window || !trimmed) return;
+      global.window.__tpLastQuotaTrim = {
+        time: new Date().toISOString(),
+        stage,
+        before: beforeSummary,
+        after: afterSummary,
+        trimmed: true
+      };
+    };
+
     const storageKey = options.storageKey || STORAGE_KEY;
-    const attemptSave = (candidate, trimmed) => {
+    const attemptSave = (candidate, trimmed, stage = 'initial') => {
       localStorage.setItem(storageKey, JSON.stringify(candidate));
+      if (debugEnabled) {
+        const size = summarizeStateSizes(candidate);
+        console.log(`[TP saveStateSnapshot] success stage=${stage} trimmed=${trimmed} savePath=${savePath} storageKey=${storageKey} completions=${size.completions} gameHistory=${size.gameHistory} matchups=${size.matchups} workHistory=${size.workHistory} schedule=${size.schedule}`);
+      }
+      setQuotaTrimMarker(stage, summarizeStateSizes(candidate), trimmed);
       return { state: candidate, trimmed };
     };
 
-    try {
-      return attemptSave(state, false);
-    } catch (err) {
-      if (!isQuotaError(err)) throw err;
+    if (debugEnabled) {
+      console.log(`[TP saveStateSnapshot] start savePath=${savePath} storageKey=${storageKey} completionsBeforeFirstSave=${beforeSummary.completions}${callsite ? ` callsite=${callsite}` : ''}`);
     }
 
-    const trimmed = pruneStateForStorage(state, options.limits);
     try {
-      return attemptSave(trimmed, true);
+      return attemptSave(state, false, 'initial');
+    } catch (err) {
+      if (!isQuotaError(err)) throw err;
+      if (debugEnabled) {
+        console.log(`[TP saveStateSnapshot] firstSaveQuotaError=true savePath=${savePath} storageKey=${storageKey}`);
+      }
+    }
+
+    logStage('initial pruneStateForStorage(state, options.limits)', state);
+    const trimmed = pruneStateForStorage(state, options.limits);
+    logStage('initial-pruned', trimmed);
+    try {
+      return attemptSave(trimmed, true, 'initial-pruned');
     } catch (err) {
       if (!isQuotaError(err)) throw err;
     }
@@ -1086,7 +1127,8 @@ return { state: merged, storageKey };
       { maxCompletions: 500, maxGameHistory: 250, maxMatchups: 250, maxWorkHistory: 250 }
     ];
 
-    for (const limits of imagePreservingLimitSets) {
+    for (let i = 0; i < imagePreservingLimitSets.length; i += 1) {
+      const limits = imagePreservingLimitSets[i];
       const tightenedLimits = {
         ...options.limits,
         maxCompletions: capLimit(options.limits?.maxCompletions, limits.maxCompletions),
@@ -1096,16 +1138,18 @@ return { state: merged, storageKey };
         stripImages: false
       };
       const tightened = pruneStateForStorage(state, tightenedLimits);
+      logStage(`imagePreserving[${i}]`, tightened);
       try {
-        return attemptSave(tightened, true);
+        return attemptSave(tightened, true, `imagePreserving[${i}]`);
       } catch (err) {
         if (!isQuotaError(err)) throw err;
       }
     }
 
     const stripped = pruneStateForStorage(trimmed, { ...options.limits, stripImages: true });
+    logStage('stripImages', stripped);
     try {
-      return attemptSave(stripped, true);
+      return attemptSave(stripped, true, 'stripImages');
     } catch (err) {
       if (!isQuotaError(err)) throw err;
     }
@@ -1119,8 +1163,9 @@ return { state: merged, storageKey };
       stripImages: true
     };
     const aggressive = pruneStateForStorage(stripped, aggressiveLimits);
+    logStage('aggressive', aggressive);
     try {
-      return attemptSave(aggressive, true);
+      return attemptSave(aggressive, true, 'aggressive');
     } catch (err) {
       if (!isQuotaError(err)) throw err;
     }
@@ -1132,7 +1177,8 @@ return { state: merged, storageKey };
       { maxCompletions: 100, maxGameHistory: 50, maxMatchups: 50, maxWorkHistory: 50 }
     ];
 
-    for (const limits of fallbackLimitSets) {
+    for (let i = 0; i < fallbackLimitSets.length; i += 1) {
+      const limits = fallbackLimitSets[i];
       const tightenedLimits = {
         ...options.limits,
         maxCompletions: capLimit(options.limits?.maxCompletions, limits.maxCompletions),
@@ -1142,8 +1188,9 @@ return { state: merged, storageKey };
         stripImages: true
       };
       const tightened = pruneStateForStorage(aggressive, tightenedLimits);
+      logStage(`fallback[${i}]`, tightened);
       try {
-        return attemptSave(tightened, true);
+        return attemptSave(tightened, true, `fallback[${i}]`);
       } catch (err) {
         if (!isQuotaError(err)) throw err;
       }
@@ -1158,8 +1205,9 @@ return { state: merged, storageKey };
       opponentDripSchedules: [],
       workHistory: []
     };
+    logStage('emergency', emergency);
 
-    return attemptSave(emergency, true);
+    return attemptSave(emergency, true, 'emergency');
   }
 
   function mergeAndSaveState(nextState, options = {}) {

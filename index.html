@@ -1139,6 +1139,10 @@ let state = (() => {
   if (__TP_PERF_BOOT) console.time('LOAD: normalizeState(load())');
   const s = normalizeState(load());
   if (__TP_PERF_BOOT) console.timeEnd('LOAD: normalizeState(load())');
+  if (window.TP_DEBUG_PERF) {
+    const completions = Array.isArray(s?.completions) ? s.completions.length : 0;
+    console.log(`[TP home boot] initial loaded completions=${completions}`);
+  }
   return s;
 })();
 
@@ -1830,8 +1834,20 @@ function migrateSleepEntriesForBonus() {
   });
 
   if (changed) {
+    if (window.TP_DEBUG_PERF) {
+      const completionsBefore = Array.isArray(state?.completions) ? state.completions.length : 0;
+      console.log(`[TP home boot] migrateSleepEntriesForBonus changed=true completionsBefore=${completionsBefore}`);
+    }
     markCompletionsDirty();
-    save();
+    save('homeBoot:migrateSleepEntriesForBonus');
+    if (window.TP_DEBUG_PERF) {
+      const completionsAfter = Array.isArray(state?.completions) ? state.completions.length : 0;
+      console.log(`[TP home boot] migrateSleepEntriesForBonus saved=true completionsAfter=${completionsAfter}`);
+    }
+  }
+  else if (window.TP_DEBUG_PERF) {
+    const completionsBefore = Array.isArray(state?.completions) ? state.completions.length : 0;
+    console.log(`[TP home boot] migrateSleepEntriesForBonus changed=false completionsBefore=${completionsBefore}`);
   }
 }
 
@@ -1875,8 +1891,20 @@ function migrateWorkEntriesForHours() {
   });
 
   if (changed) {
+    if (window.TP_DEBUG_PERF) {
+      const completionsBefore = Array.isArray(state?.completions) ? state.completions.length : 0;
+      console.log(`[TP home boot] migrateWorkEntriesForHours changed=true completionsBefore=${completionsBefore}`);
+    }
     markCompletionsDirty();
-    save();
+    save('homeBoot:migrateWorkEntriesForHours');
+    if (window.TP_DEBUG_PERF) {
+      const completionsAfter = Array.isArray(state?.completions) ? state.completions.length : 0;
+      console.log(`[TP home boot] migrateWorkEntriesForHours saved=true completionsAfter=${completionsAfter}`);
+    }
+  }
+  else if (window.TP_DEBUG_PERF) {
+    const completionsBefore = Array.isArray(state?.completions) ? state.completions.length : 0;
+    console.log(`[TP home boot] migrateWorkEntriesForHours changed=false completionsBefore=${completionsBefore}`);
   }
 }
 
@@ -2312,6 +2340,7 @@ function load() {
 function syncStateWithMatchups(current){
   let nextState = current;
   let changed = false;
+  const completionsBefore = Array.isArray(current?.completions) ? current.completions.length : 0;
 
   if (window.TaskPointsCore?.syncDerivedPoints) {
     const derivedSync = TaskPointsCore.syncDerivedPoints(nextState);
@@ -2326,23 +2355,40 @@ function syncStateWithMatchups(current){
   }
 
   if (changed) {
+    if (window.TP_DEBUG_PERF) {
+      console.log(`[TP home boot] syncStateWithMatchups changed=true completionsBefore=${completionsBefore}`);
+    }
     try {
       if (window.TaskPointsCore?.saveAppState) {
-        const merged = TaskPointsCore.saveAppState(nextState).state;
+        const merged = TaskPointsCore.saveAppState(nextState, { savePath: 'homeBoot:syncStateWithMatchups' }).state;
+        if (window.TP_DEBUG_PERF) {
+          const completionsAfter = Array.isArray(merged?.completions) ? merged.completions.length : 0;
+          console.log(`[TP home boot] syncStateWithMatchups persisted=true path=saveAppState completionsAfter=${completionsAfter}`);
+        }
         storageCache.parsed = merged;
         storageCache.raw = null;
         return merged;
       }
       if (window.TaskPointsCore?.mergeAndSaveState) {
-        const merged = TaskPointsCore.mergeAndSaveState(nextState).state;
+        const merged = TaskPointsCore.mergeAndSaveState(nextState, { savePath: 'homeBoot:syncStateWithMatchups' }).state;
+        if (window.TP_DEBUG_PERF) {
+          const completionsAfter = Array.isArray(merged?.completions) ? merged.completions.length : 0;
+          console.log(`[TP home boot] syncStateWithMatchups persisted=true path=mergeAndSaveState completionsAfter=${completionsAfter}`);
+        }
         storageCache.parsed = merged;
         storageCache.raw = null;
         return merged;
+      }
+      if (window.TP_DEBUG_PERF) {
+        console.log(`[TP home boot] syncStateWithMatchups persisted=true path=writeCachedStorageState`);
       }
       writeCachedStorageState(nextState);
     } catch (e) {
       console.error('Failed to persist synced matchups', e);
     }
+  }
+  else if (window.TP_DEBUG_PERF) {
+    console.log(`[TP home boot] syncStateWithMatchups changed=false completionsBefore=${completionsBefore}`);
   }
   return nextState;
 }
@@ -3166,10 +3212,13 @@ function normalizeState(s) {
   };
 }
 
-function save() {
+function save(savePath) {
   try {
     if (window.TaskPointsCore?.saveAppState) {
-      const { state: merged, trimmed } = TaskPointsCore.saveAppState(state);
+      const saveOptions = savePath ? { savePath } : undefined;
+      const { state: merged, trimmed } = saveOptions
+        ? TaskPointsCore.saveAppState(state, saveOptions)
+        : TaskPointsCore.saveAppState(state);
       if (trimmed) {
         console.warn('Storage nearing capacity. Older history items were trimmed to keep saves working.');
       }
@@ -3179,7 +3228,10 @@ function save() {
       return;
     }
     if (window.TaskPointsCore?.mergeAndSaveState) {
-      const { state: merged, trimmed } = TaskPointsCore.mergeAndSaveState(state);
+      const saveOptions = savePath ? { savePath } : undefined;
+      const { state: merged, trimmed } = saveOptions
+        ? TaskPointsCore.mergeAndSaveState(state, saveOptions)
+        : TaskPointsCore.mergeAndSaveState(state);
       if (trimmed) {
         console.warn('Storage nearing capacity. Older history items were trimmed to keep saves working.');
       }
@@ -7092,7 +7144,15 @@ const entries = getDerived().workEntries;
     });
 
     markCompletionsDirty();
-    save();
+    if (window.TP_DEBUG_PERF) {
+      const completionsBefore = Array.isArray(state?.completions) ? state.completions.length : 0;
+      console.log(`[TP home boot] weekendWorkDefault created=true completionsBefore=${completionsBefore}`);
+    }
+    save('homeBoot:renderWorkHistory:weekendWorkDefault');
+    if (window.TP_DEBUG_PERF) {
+      const completionsAfter = Array.isArray(state?.completions) ? state.completions.length : 0;
+      console.log(`[TP home boot] weekendWorkDefault saved=true completionsAfter=${completionsAfter}`);
+    }
     window.updateCriticalTasksIsland?.();
     scheduleRender(renderAll);
     return true;
@@ -9123,11 +9183,19 @@ requestAnimationFrame(() => {
   if (window.requestIdleCallback) {
     requestIdleCallback(() => {
       state = syncStateWithMatchups(state);
+      if (window.TP_DEBUG_PERF) {
+        const completions = Array.isArray(state?.completions) ? state.completions.length : 0;
+        console.log(`[TP home boot] post-sync completions=${completions}`);
+      }
       scheduleRender(renderAll);
     }, { timeout: 800 });
   } else {
     setTimeout(() => {
       state = syncStateWithMatchups(state);
+      if (window.TP_DEBUG_PERF) {
+        const completions = Array.isArray(state?.completions) ? state.completions.length : 0;
+        console.log(`[TP home boot] post-sync completions=${completions}`);
+      }
       scheduleRender(renderAll);
     }, 0);
   }
