@@ -1664,23 +1664,49 @@ return { state: merged, storageKey };
     return { todayPoints, inertia, average, base: todayBase };
   }
 
-  function buildDailyBreakdowns(state){
-    const normalized = normalizeState(state || {});
-    const comps = Array.isArray(normalized.completions) ? normalized.completions : [];
-    const keys = Array.from(new Set(comps
-      .map(c => (c && c.completedAtISO ? dateKey(c.completedAtISO) : null))
-      .filter(Boolean)));
+function buildDailyBreakdowns(state){
+  const normalized = normalizeState(state || {});
+  const comps = Array.isArray(normalized.completions) ? normalized.completions : [];
 
-    return keys.reduce((acc, key) => {
-      const snapshot = buildDaySnapshot(key, normalized);
-      const totals = computeDayTotals(snapshot);
-      acc[key] = {
-        total: totals.total,
-        categories: { ...totals.byCategory }
-      };
-      return acc;
-    }, {});
+  const loggedKeys = Array.from(new Set(
+    comps
+      .map(c => (c && c.completedAtISO ? dateKey(c.completedAtISO) : null))
+      .filter(Boolean)
+  ))
+    .filter(k => {
+      const d = fromKey(k);
+      return d && !isNaN(d.getTime());
+    })
+    .sort((a, b) => fromKey(a) - fromKey(b));
+
+  if (!loggedKeys.length) return {};
+
+  const start = fromKey(loggedKeys[0]);
+  const latestLogged = fromKey(loggedKeys[loggedKeys.length - 1]);
+  const today = fromKey(todayKey());
+  const end = latestLogged > today ? latestLogged : today;
+
+  const out = {};
+
+  for (const cursor = new Date(start); cursor <= end; cursor.setDate(cursor.getDate() + 1)) {
+    const key = dateKey(cursor);
+    const snapshot = buildDaySnapshot(key, normalized);
+    const totals = computeDayTotals(snapshot);
+
+    const hasItems = Array.isArray(snapshot.items) && snapshot.items.length > 0;
+    const hasInertia = Math.abs(Number(snapshot.inertia) || 0) > 0.01;
+    const hasTotal = Math.abs(Number(totals.total) || 0) > 0.01;
+
+    if (!hasItems && !hasInertia && !hasTotal) continue;
+
+    out[key] = {
+      total: totals.total,
+      categories: { ...totals.byCategory }
+    };
   }
+
+  return out;
+}
 
   function buildRollups(state){
     const normalized = normalizeState(state || {});
