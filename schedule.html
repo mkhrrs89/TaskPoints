@@ -256,13 +256,22 @@ function saveState(nextState) {
   }
 }
 
-    function syncStateWithMatchups(baseState) {
+    function logBootReadOnlySkip(pathName) {
+      if (window.TP_DEBUG_PERF) {
+        console.debug(`[TP boot readonly] skipped auto-save path: ${pathName}`);
+      }
+    }
+
+    function syncStateWithMatchups(baseState, { persist = false, pathName = 'syncStateWithMatchups' } = {}) {
       if (!window.TaskPointsCore || typeof TaskPointsCore.syncYouMatchups !== "function") {
         return baseState;
       }
       const { state: nextState, changed } = TaskPointsCore.syncYouMatchups(baseState);
-      if (changed) {
+      if (changed && persist) {
         return saveState(nextState);
+      }
+      if (changed) {
+        logBootReadOnlySkip(pathName);
       }
       return nextState;
     }
@@ -419,12 +428,12 @@ function saveState(nextState) {
       return `${weekday}, ${month} ${ordinal(d)}, ${y}`;
     }
 
-    let state = syncStateWithMatchups(loadState());
+    let state = syncStateWithMatchups(loadState(), { persist: false, pathName: 'boot:syncStateWithMatchups' });
 
     function renderSchedule() {
-      state = syncStateWithMatchups(loadState());
+      state = syncStateWithMatchups(loadState(), { persist: false, pathName: 'renderSchedule:syncStateWithMatchups' });
       const changed = ensureUpcomingSchedule(state);
-      if (changed) state = saveState(state);
+      if (changed) logBootReadOnlySkip('renderSchedule:ensureUpcomingSchedule');
 
       const intro = $("scheduleIntro");
       if (intro) {
