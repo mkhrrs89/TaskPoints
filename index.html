@@ -1256,7 +1256,7 @@ async function migrateLegacyImagesIfNeeded() {
     const result = await TaskPointsCore.migrateLegacyImagesInStorage();
     if (result?.migrated) {
       state = syncStateWithMatchups(result.state || state);
-      save();
+      logHomeBootReadOnlySkip('migrateLegacyImagesIfNeeded');
       scheduleRender(renderAll);
       renderHabits();
       renderHabitWeekLabels();
@@ -1268,7 +1268,7 @@ async function migrateLegacyImagesIfNeeded() {
   }
 }
 
-migrateLegacyImagesIfNeeded();
+logHomeBootReadOnlySkip('migrateLegacyImagesIfNeeded');
 
 function normalizeTask(task){
   if(!task || typeof task !== 'object') return task;
@@ -1807,6 +1807,12 @@ function submitWorkEditModal() {
   closeWorkEditModal();
 }
 
+function logHomeBootReadOnlySkip(pathName) {
+  if (window.TP_DEBUG_PERF) {
+    console.debug(`[TP boot readonly] skipped auto-save path: ${pathName}`);
+  }
+}
+
 function migrateSleepEntriesForBonus() {
   if (!state || !Array.isArray(state.completions)) return;
 
@@ -1839,10 +1845,10 @@ function migrateSleepEntriesForBonus() {
       console.log(`[TP home boot] migrateSleepEntriesForBonus changed=true completionsBefore=${completionsBefore}`);
     }
     markCompletionsDirty();
-    save('homeBoot:migrateSleepEntriesForBonus');
+    logHomeBootReadOnlySkip('migrateSleepEntriesForBonus');
     if (window.TP_DEBUG_PERF) {
       const completionsAfter = Array.isArray(state?.completions) ? state.completions.length : 0;
-      console.log(`[TP home boot] migrateSleepEntriesForBonus saved=true completionsAfter=${completionsAfter}`);
+      console.log(`[TP home boot] migrateSleepEntriesForBonus changedInMemory=true completionsAfter=${completionsAfter}`);
     }
   }
   else if (window.TP_DEBUG_PERF) {
@@ -1896,10 +1902,10 @@ function migrateWorkEntriesForHours() {
       console.log(`[TP home boot] migrateWorkEntriesForHours changed=true completionsBefore=${completionsBefore}`);
     }
     markCompletionsDirty();
-    save('homeBoot:migrateWorkEntriesForHours');
+    logHomeBootReadOnlySkip('migrateWorkEntriesForHours');
     if (window.TP_DEBUG_PERF) {
       const completionsAfter = Array.isArray(state?.completions) ? state.completions.length : 0;
-      console.log(`[TP home boot] migrateWorkEntriesForHours saved=true completionsAfter=${completionsAfter}`);
+      console.log(`[TP home boot] migrateWorkEntriesForHours changedInMemory=true completionsAfter=${completionsAfter}`);
     }
   }
   else if (window.TP_DEBUG_PERF) {
@@ -2358,34 +2364,9 @@ function syncStateWithMatchups(current){
     if (window.TP_DEBUG_PERF) {
       console.log(`[TP home boot] syncStateWithMatchups changed=true completionsBefore=${completionsBefore}`);
     }
-    try {
-      if (window.TaskPointsCore?.saveAppState) {
-        const merged = TaskPointsCore.saveAppState(nextState, { savePath: 'homeBoot:syncStateWithMatchups' }).state;
-        if (window.TP_DEBUG_PERF) {
-          const completionsAfter = Array.isArray(merged?.completions) ? merged.completions.length : 0;
-          console.log(`[TP home boot] syncStateWithMatchups persisted=true path=saveAppState completionsAfter=${completionsAfter}`);
-        }
-        storageCache.parsed = merged;
-        storageCache.raw = null;
-        return merged;
-      }
-      if (window.TaskPointsCore?.mergeAndSaveState) {
-        const merged = TaskPointsCore.mergeAndSaveState(nextState, { savePath: 'homeBoot:syncStateWithMatchups' }).state;
-        if (window.TP_DEBUG_PERF) {
-          const completionsAfter = Array.isArray(merged?.completions) ? merged.completions.length : 0;
-          console.log(`[TP home boot] syncStateWithMatchups persisted=true path=mergeAndSaveState completionsAfter=${completionsAfter}`);
-        }
-        storageCache.parsed = merged;
-        storageCache.raw = null;
-        return merged;
-      }
-      if (window.TP_DEBUG_PERF) {
-        console.log(`[TP home boot] syncStateWithMatchups persisted=true path=writeCachedStorageState`);
-      }
-      writeCachedStorageState(nextState);
-    } catch (e) {
-      console.error('Failed to persist synced matchups', e);
-    }
+    logHomeBootReadOnlySkip('syncStateWithMatchups');
+    storageCache.parsed = nextState;
+    storageCache.raw = null;
   }
   else if (window.TP_DEBUG_PERF) {
     console.log(`[TP home boot] syncStateWithMatchups changed=false completionsBefore=${completionsBefore}`);
@@ -7146,12 +7127,12 @@ const entries = getDerived().workEntries;
     markCompletionsDirty();
     if (window.TP_DEBUG_PERF) {
       const completionsBefore = Array.isArray(state?.completions) ? state.completions.length : 0;
-      console.log(`[TP home boot] weekendWorkDefault created=true completionsBefore=${completionsBefore}`);
+      console.log(`[TP home boot] weekendWorkDefault createdInMemory=true completionsBefore=${completionsBefore}`);
     }
-    save('homeBoot:renderWorkHistory:weekendWorkDefault');
+    logHomeBootReadOnlySkip('renderWorkHistory:weekendWorkDefault');
     if (window.TP_DEBUG_PERF) {
       const completionsAfter = Array.isArray(state?.completions) ? state.completions.length : 0;
-      console.log(`[TP home boot] weekendWorkDefault saved=true completionsAfter=${completionsAfter}`);
+      console.log(`[TP home boot] weekendWorkDefault changedInMemory=true completionsAfter=${completionsAfter}`);
     }
     window.updateCriticalTasksIsland?.();
     scheduleRender(renderAll);
@@ -9168,7 +9149,7 @@ document.addEventListener('DOMContentLoaded', () => {
   renderVices();
   renderFlexActions();
 
-maybeAutoSimToday();
+logHomeBootReadOnlySkip('maybeAutoSimToday');
 
 // paint ASAP
 scheduleRender(renderAll);
@@ -9178,6 +9159,7 @@ scheduleRender(renderAll);
   await bootAnimDone;
 })();
 
+// Boot must remain read-only to avoid unintended persistence/pruning on mobile.
 // then do the heavier sync after paint / idle
 requestAnimationFrame(() => {
   if (window.requestIdleCallback) {

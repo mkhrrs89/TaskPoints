@@ -216,14 +216,22 @@ function load() {
       return !!player && player.active !== false;
     }
 
-    function syncYouMatchupsWithCompletions(state) {
+    function logBootReadOnlySkip(pathName) {
+      if (window.TP_DEBUG_PERF) {
+        console.debug(`[TP boot readonly] skipped auto-save path: ${pathName}`);
+      }
+    }
+
+    function syncYouMatchupsWithCompletions(state, { persist = false, pathName = 'syncYouMatchupsWithCompletions' } = {}) {
       if (!window.TaskPointsCore || typeof TaskPointsCore.syncYouMatchups !== "function") {
         return state;
       }
 
       const { state: nextState, changed } = TaskPointsCore.syncYouMatchups(state);
-      if (changed) {
+      if (changed && persist) {
         save(nextState);
+      } else if (changed) {
+        logBootReadOnlySkip(pathName);
       }
       return nextState;
     }
@@ -499,7 +507,7 @@ function load() {
       state = load();
 
 // sync may write back; keep local state updated
-state = syncYouMatchupsWithCompletions(state);
+state = syncYouMatchupsWithCompletions(state, { persist: false, pathName: 'renderMatchups:syncYouMatchupsWithCompletions' });
 
       const chronoContainer = $("matchupsChronological");
       const playerContainer = $("matchupsByPlayer");
@@ -553,7 +561,7 @@ state = syncYouMatchupsWithCompletions(state);
 
       function generateRetroMatchupsForDate(dateKeyStr) {
         let nextState = load();
-        nextState = syncYouMatchupsWithCompletions(nextState);
+        nextState = syncYouMatchupsWithCompletions(nextState, { persist: true, pathName: 'generateRetroMatchupsForDate:syncYouMatchupsWithCompletions' });
 
         const missingIds = missingIdsForDate(dateKeyStr, nextState);
         if (missingIds.length < 2) {

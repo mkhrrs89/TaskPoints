@@ -440,7 +440,7 @@
 
   function debugBootReadOnlySkip(path, details = {}){
     if (!window.TP_DEBUG_PERF) return;
-    console.debug('[TP_DEBUG_PERF][gamehub] boot read-only: skipped persistence', { path, ...details });
+    console.debug(`[TP boot readonly] skipped auto-save path: ${path}`, details);
   }
 
   function getNormalizedRisky(value){

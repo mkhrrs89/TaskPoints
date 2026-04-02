@@ -260,18 +260,18 @@ function getCompletionPoints(entry) {
   return Number(entry?.points) || 0;
 }
 
+function logBootReadOnlySkip(pathName) {
+  if (window.TP_DEBUG_PERF) {
+    console.debug(`[TP boot readonly] skipped auto-save path: ${pathName}`);
+  }
+}
+
 function syncDerivedPointsIfNeeded(state) {
   if (!window.TaskPointsCore?.syncDerivedPoints) return state;
   const derivedSync = TaskPointsCore.syncDerivedPoints(state);
   let nextState = derivedSync.state;
   if (derivedSync.changed) {
-    if (window.TaskPointsCore?.saveAppState) {
-      nextState = TaskPointsCore.saveAppState(nextState).state;
-    } else if (window.TaskPointsCore?.mergeAndSaveState) {
-      nextState = TaskPointsCore.mergeAndSaveState(nextState).state;
-    } else {
-      console.warn("records syncDerivedPoints skipped save; TaskPointsCore missing.");
-    }
+    logBootReadOnlySkip('syncDerivedPointsIfNeeded');
   }
   return nextState;
 }
