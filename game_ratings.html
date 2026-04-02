@@ -589,7 +589,14 @@ function wireEditorEvents(editorEl) {
     }
   });
   editorEl.addEventListener("blur", () => {
-    saveCurrentEdit();
+    const blurPlayerId = editingState.playerId;
+    const blurField = editingState.field;
+    window.setTimeout(() => {
+      if (editingState.playerId !== blurPlayerId || editingState.field !== blurField) return;
+      const active = document.activeElement;
+      if (active && active.dataset && active.dataset.editor === "true") return;
+      saveCurrentEdit();
+    }, 0);
   });
   editorEl.addEventListener("pointerdown", (event) => {
     event.stopPropagation();
@@ -605,6 +612,7 @@ function getRawFieldValue(player, field) {
 
 function beginEdit(playerId, field) {
   if (!playerId || !field) return;
+  if (editingState.playerId === playerId && editingState.field === field) return;
   if (editingState.playerId && (editingState.playerId !== playerId || editingState.field !== field)) {
     saveCurrentEdit();
   }
@@ -837,10 +845,24 @@ function getSortValue(p, key) {
 
       const tbody = $("playersTableBody");
       if (tbody) {
-        tbody.addEventListener("pointerdown", (event) => {
+        let lastPointerActivationAt = 0;
+        const activateEditableCell = (event) => {
           const cell = event.target.closest("td.editable-cell");
           if (!cell) return;
+          if (event.target.closest("[data-editor='true']")) return;
           beginEdit(cell.dataset.playerId, cell.dataset.field);
+        };
+
+        tbody.addEventListener("pointerdown", (event) => {
+          if (event.button != null && event.button !== 0) return;
+          lastPointerActivationAt = event.timeStamp || Date.now();
+          activateEditableCell(event);
+        });
+
+        tbody.addEventListener("click", (event) => {
+          const ts = event.timeStamp || Date.now();
+          if (ts - lastPointerActivationAt < 400) return;
+          activateEditableCell(event);
         });
       }
 
