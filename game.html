@@ -839,9 +839,8 @@ function readPageStateFresh() {
         if (normalized.changed) playersChanged = true;
         return normalized.player;
       });
-      if (playersChanged) {
-        parsed.players = base.players;
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+      if (playersChanged && window.TP_DEBUG_PERF) {
+        console.debug("[game boot] skipped persistence path: normalize player colors during state read");
       }
     } else {
       base.players = [];
@@ -1002,39 +1001,10 @@ const imageUrlCache = new Map();
 const imageLoadPromises = new Map();
 let renderPlayersNonce = 0;
 let youImagePreviewUrl = "";
-let gameBootSyncStarted = false;
-let gameBootSyncFinished = false;
-let gameBootSyncScheduled = false;
-let gameBootScheduleRenderNonce = 0;
-
-function runGameBootSync() {
-  if (gameBootSyncStarted) return;
-  gameBootSyncStarted = true;
-
-  // Keep page-entry boot read-only to avoid unintended persistence/pruning on mobile.
-  const syncedState = syncStateWithMatchups(state, { persist: false });
-  state = syncedState || state;
-  gameBootSyncFinished = true;
-
-  if (renderPlayersNonce <= gameBootScheduleRenderNonce) {
-    renderPlayers();
+function logBootPersistenceSkip(pathName) {
+  if (window.TP_DEBUG_PERF) {
+    console.debug(`[game boot] skipped persistence path: ${pathName}`);
   }
-
-}
-
-function scheduleGameBootSync() {
-  if (gameBootSyncScheduled) return;
-  gameBootSyncScheduled = true;
-  gameBootScheduleRenderNonce = renderPlayersNonce;
-
-  requestAnimationFrame(() => {
-    const idleRunner = () => runGameBootSync();
-    if (typeof requestIdleCallback === "function") {
-      requestIdleCallback(idleRunner);
-    } else {
-      setTimeout(idleRunner, 0);
-    }
-  });
 }
 
 function dataUrlToBlobFallback(dataUrl) {
@@ -1151,6 +1121,7 @@ async function migrateLegacyImagesIfNeeded() {
 
 if (rebuildGameHistoryFromMatchupsIfNeeded()) {
   // Boot is intentionally read-only: do not persist rebuilds on page load.
+  logBootPersistenceSkip("rebuildGameHistoryFromMatchupsIfNeeded");
 }
     
 let editingPlayerId = null;
@@ -1222,9 +1193,13 @@ function persistSortMode(mode) {
 
 if (ensureUpcomingSchedule()) {
   // Boot is intentionally read-only: do not persist schedule adjustments on page load.
+  logBootPersistenceSkip("ensureUpcomingSchedule");
 }
 
-migrateLegacyImagesIfNeeded();
+// Players page boot must remain read-only to avoid unintended persistence/pruning on mobile.
+logBootPersistenceSkip("syncStateWithMatchups");
+logBootPersistenceSkip("maybeAutoSimToday");
+logBootPersistenceSkip("migrateLegacyImagesIfNeeded");
 
 
 
@@ -3186,7 +3161,6 @@ if (playerSortSelect) {
 
 // Auto-sim once per day after 8am, then render
 renderPlayers(); // always render even if auto-sim dies
-scheduleGameBootSync();
 
 
 // ----- View mode toggle (Card vs Gallery) -----
