@@ -1172,7 +1172,7 @@ function matchupAvatarSize(){
     };
   }
 
-  function ensureOpponentDripSchedule(state, dateKeyStr, playerId, totalPoints){
+  function ensureOpponentDripSchedule(state, dateKeyStr, playerId, totalPoints, { allowPersist = true } = {}){
     if (!dateKeyStr || !playerId) return null;
 
     const schedules = getOpponentDripSchedules(state);
@@ -1190,8 +1190,12 @@ function matchupAvatarSize(){
     const updated = schedules.filter(s => !(s && s.date === dateKeyStr && s.playerId === playerId));
     updated.push(next);
 
-    state.opponentDripSchedules = updated;
-    saveState(state);
+    if (allowPersist) {
+      state.opponentDripSchedules = updated;
+      saveState(state);
+    } else if (window.TP_DEBUG_PERF) {
+      console.debug('[TP_DEBUG_PERF][gamehub] boot read-only: skipped opponent drip schedule save', { dateKey: dateKeyStr, playerId });
+    }
 
     return next;
   }
@@ -1225,8 +1229,8 @@ function matchupAvatarSize(){
     return Math.max(0, capped / 10);
   }
 
-  function visibleOpponentScoreForMatchup(state, dateKeyStr, playerId, targetTotal){
-    const schedule = ensureOpponentDripSchedule(state, dateKeyStr, playerId, targetTotal);
+  function visibleOpponentScoreForMatchup(state, dateKeyStr, playerId, targetTotal, { allowPersist = true } = {}){
+    const schedule = ensureOpponentDripSchedule(state, dateKeyStr, playerId, targetTotal, { allowPersist });
     return schedule ? accruedOpponentPoints(schedule, new Date()) : Math.max(0, Number(targetTotal) || 0);
   }
 
@@ -1270,7 +1274,7 @@ function placeHTML(rankIndex, total){
 
 
   
-  function renderTodaysMatchup(state, standings){
+  function renderTodaysMatchup(state, standings, { allowPersist = true } = {}){
     const dateLbl = $('matchupDateLabel');
     if (dateLbl) dateLbl.textContent = todayKey();
 
@@ -1376,7 +1380,7 @@ const oppStats = standingsRows.find(r => r.id === oppId) || (oppP ? computePlaye
     const youToday = computeYouTodayScore(state, key);
     const oppTarget = (m.playerAId === oppId) ? Number(m.scoreA) : Number(m.scoreB);
     const oppToday = Number.isFinite(oppTarget)
-      ? visibleOpponentScoreForMatchup(state, key, oppId, oppTarget)
+      ? visibleOpponentScoreForMatchup(state, key, oppId, oppTarget, { allowPersist })
       : oppTarget;
 
     $('matchupYourScore').textContent = (youToday != null) ? fmt1(youToday) : '—';
@@ -1545,12 +1549,12 @@ function setHTML(id, html){
     setModalOpen(false);
   }
 
-  function renderGameHubFromState(state){
+  function renderGameHubFromState(state, { allowPersist = true } = {}){
     const { standings } = renderStandings(state);
     renderBestWorstStats(state, standings);
     renderRatingsLeaderboards(state, standings);
     renderSurprisesBusts(state, standings);
-    renderTodaysMatchup(state, standings);
+    renderTodaysMatchup(state, standings, { allowPersist });
   }
 
   function renderAll(){
@@ -1576,11 +1580,11 @@ function setHTML(id, html){
       changed = changed || !!res2.changed;
     }
 
-      if (changed) saveState(state);
-      currentState = state;
-      gameHubBootStarted = true;
-      gameHubBootFinished = true;
-      renderGameHubFromState(state);
+    if (changed) saveState(state);
+    currentState = state;
+    gameHubBootStarted = true;
+    gameHubBootFinished = true;
+    renderGameHubFromState(state);
     } finally {
       if (perfLabel) console.timeEnd(perfLabel);
     }
@@ -1609,10 +1613,16 @@ function setHTML(id, html){
       changed = changed || !!res2.changed;
     }
 
-    if (changed) saveState(state);
+    // Boot must remain read-only to avoid unintended persistence/pruning on mobile.
+    if (window.TP_DEBUG_PERF) {
+      console.debug('[TP_DEBUG_PERF][gamehub] boot sync result', { wouldMutateState: changed });
+    }
+    if (changed && window.TP_DEBUG_PERF) {
+      console.debug('[TP_DEBUG_PERF][gamehub] boot read-only: skipped persistence for derived sync changes');
+    }
     currentState = state;
     gameHubBootFinished = true;
-    renderGameHubFromState(state);
+    renderGameHubFromState(state, { allowPersist: false });
   }
 
   function scheduleGameHubBoot(){
@@ -1635,7 +1645,7 @@ function setHTML(id, html){
       state = TaskPointsCore.normalizeState(state || {});
     }
     currentState = state;
-    renderGameHubFromState(state);
+    renderGameHubFromState(state, { allowPersist: false });
     scheduleGameHubBoot();
   }
 
