@@ -4637,10 +4637,8 @@ header,
 }
 
 
-@media (max-width: 700px){
-  #score-dashboard-v1{
-    display: none !important;
-  }
+#score-dashboard-v1{
+  display: none !important;
 }
 
 .bootSplash{
