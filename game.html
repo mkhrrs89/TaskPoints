@@ -971,7 +971,7 @@ function getYouPlayerColors(currentState = state) {
   };
 }
 
-function syncStateWithMatchups(baseState) {
+function syncStateWithMatchups(baseState, { persist = true } = {}) {
   let nextState = baseState;
   let changed = false;
 
@@ -987,7 +987,7 @@ function syncStateWithMatchups(baseState) {
     changed = changed || matchupSync.changed;
   }
 
-  if (changed) {
+  if (changed && persist) {
     return saveState(nextState);
   }
   return nextState;
@@ -1011,7 +1011,8 @@ function runGameBootSync() {
   if (gameBootSyncStarted) return;
   gameBootSyncStarted = true;
 
-  const syncedState = syncStateWithMatchups(state);
+  // Keep page-entry boot read-only to avoid unintended persistence/pruning on mobile.
+  const syncedState = syncStateWithMatchups(state, { persist: false });
   state = syncedState || state;
   gameBootSyncFinished = true;
 
@@ -1019,11 +1020,6 @@ function runGameBootSync() {
     renderPlayers();
   }
 
-  try {
-    maybeAutoSimToday();
-  } catch (e) {
-    console.error("Deferred auto-sim failed; leaving UI rendered", e);
-  }
 }
 
 function scheduleGameBootSync() {
@@ -1145,7 +1141,7 @@ async function migrateLegacyImagesIfNeeded() {
   try {
     const result = await TaskPointsCore.migrateLegacyImagesInStorage();
     if (result?.migrated) {
-      state = syncStateWithMatchups(result.state || state);
+      state = syncStateWithMatchups(result.state || state, { persist: false });
       renderPlayers();
     }
   } catch (e) {
@@ -1154,7 +1150,7 @@ async function migrateLegacyImagesIfNeeded() {
 }
 
 if (rebuildGameHistoryFromMatchupsIfNeeded()) {
-  state = saveState(state);
+  // Boot is intentionally read-only: do not persist rebuilds on page load.
 }
     
 let editingPlayerId = null;
@@ -1225,7 +1221,7 @@ function persistSortMode(mode) {
 }
 
 if (ensureUpcomingSchedule()) {
-  state = saveState(state);
+  // Boot is intentionally read-only: do not persist schedule adjustments on page load.
 }
 
 migrateLegacyImagesIfNeeded();
