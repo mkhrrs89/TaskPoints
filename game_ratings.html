@@ -83,6 +83,39 @@
       opacity:0.8;
       margin-left:4px;
     }
+
+    td.editable-cell{
+      cursor:text;
+      position:relative;
+      border-radius:8px;
+    }
+    td.editable-cell .editable-display{
+      text-decoration: underline dotted rgba(148,163,184,0.65);
+      text-underline-offset: 3px;
+    }
+    td.editable-cell.is-editing{
+      background: rgba(30,102,109,0.14);
+      box-shadow: inset 0 0 0 1px rgba(30,102,109,0.45);
+    }
+    .cell-editor{
+      width:100%;
+      min-width:72px;
+      box-sizing:border-box;
+      border:1px solid rgba(148,163,184,0.6);
+      border-radius:6px;
+      padding:4px 6px;
+      background: rgba(255,255,255,0.92);
+      color:#111827;
+      font-size:13px;
+      line-height:1.2;
+    }
+    @media (prefers-color-scheme: dark){
+      .cell-editor{
+        background: rgba(24,24,27,0.96);
+        color:#fafafa;
+        border-color: rgba(113,113,122,0.75);
+      }
+    }
   </style>
 </head>
 <body class="min-h-screen">
@@ -171,7 +204,7 @@
     </section>
 
     <footer class="mt-8 text-xs opacity-70">
-      <p>TaskPoints — Player ratings view. Read-only; edit players on the main Game page.</p>
+      <p>TaskPoints — Player ratings view. Click/tap editable cells to update ratings inline.</p>
     </footer>
   </div>
 
@@ -348,6 +381,14 @@ let gameHistory =
 
 let sortKey = "name";
 let sortDir = "asc"; // "asc" or "desc"
+const STYLE_OPTIONS = ["", "scorer", "sharpshooter", "playmaker", "slasher", "post"];
+const EDITABLE_FIELDS = ["baseline", "variance", "varianceTilt", "momentum", "risky", "style"];
+const editingState = {
+  playerId: null,
+  field: null,
+  draft: "",
+  original: ""
+};
 
 function getSortedPlayers() {
   return [...players].sort((a, b) => {
@@ -443,15 +484,13 @@ function renderTable() {
 
     const stats = computePlayerStats(p);
 
-    tr.innerHTML = `
-      <td class="pr-4">${escapeHtml(p.name || "—")}</td>
-      <td>${baseline != null ? baseline : "—"}</td>
-      <td>${variance != null ? variance : "—"}</td>
-      <td>${varianceTilt != null ? `${varianceTilt}%` : "—"}</td>
-      <td>${momentum != null ? momentum : "—"}</td>
-      <td>${riskyNorm != null ? riskyNorm.toFixed(1) : "—"}</td>
-      <td>${escapeHtml(style || "—")}</td>
-    `;
+    tr.appendChild(makePlainCell(p.name || "—", "pr-4"));
+    tr.appendChild(makeEditableCell(p, "baseline", baseline != null ? String(baseline) : "—"));
+    tr.appendChild(makeEditableCell(p, "variance", variance != null ? String(variance) : "—"));
+    tr.appendChild(makeEditableCell(p, "varianceTilt", varianceTilt != null ? `${varianceTilt}%` : "—"));
+    tr.appendChild(makeEditableCell(p, "momentum", momentum != null ? String(momentum) : "—"));
+    tr.appendChild(makeEditableCell(p, "risky", riskyNorm != null ? riskyNorm.toFixed(1) : "—"));
+    tr.appendChild(makeEditableCell(p, "style", escapeHtml(style || "—"), true));
 
     tbody.appendChild(tr);
   });
@@ -466,6 +505,199 @@ function renderTable() {
   }
 
   updateSortIndicators();
+}
+
+function makePlainCell(value, className = "") {
+  const td = document.createElement("td");
+  if (className) td.className = className;
+  td.textContent = value;
+  return td;
+}
+
+function makeEditableCell(player, field, displayValue, isHtml = false) {
+  const td = document.createElement("td");
+  const isYouRow = player.id === "YOU" || player.isYou;
+  const isEditable = EDITABLE_FIELDS.includes(field) && !isYouRow;
+  if (!isEditable) {
+    if (isHtml) td.innerHTML = displayValue;
+    else td.textContent = displayValue;
+    return td;
+  }
+
+  const isEditing = editingState.playerId === player.id && editingState.field === field;
+  td.className = `editable-cell${isEditing ? " is-editing" : ""}`;
+  td.dataset.playerId = player.id;
+  td.dataset.field = field;
+
+  if (isEditing) {
+    td.appendChild(buildEditor(player, field));
+  } else {
+    const span = document.createElement("span");
+    span.className = "editable-display";
+    if (isHtml) span.innerHTML = displayValue;
+    else span.textContent = displayValue;
+    td.appendChild(span);
+  }
+
+  return td;
+}
+
+function buildEditor(player, field) {
+  if (field === "style") {
+    const select = document.createElement("select");
+    select.className = "cell-editor";
+    select.dataset.editor = "true";
+    const current = String(editingState.draft || "");
+    const options = STYLE_OPTIONS.includes(current) ? STYLE_OPTIONS : [...STYLE_OPTIONS, current];
+    options.forEach(opt => {
+      const option = document.createElement("option");
+      option.value = opt;
+      option.textContent = opt ? opt : "balanced";
+      select.appendChild(option);
+    });
+    select.value = current;
+    wireEditorEvents(select);
+    return select;
+  }
+
+  const input = document.createElement("input");
+  input.type = "number";
+  input.inputMode = "decimal";
+  input.className = "cell-editor";
+  input.dataset.editor = "true";
+  input.value = String(editingState.draft ?? "");
+  if (field === "variance") input.min = "0";
+  if (field === "risky") {
+    input.min = "0";
+    input.max = "10";
+    input.step = "0.1";
+  } else {
+    input.step = "any";
+  }
+  wireEditorEvents(input);
+  return input;
+}
+
+function wireEditorEvents(editorEl) {
+  editorEl.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      saveCurrentEdit();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      cancelCurrentEdit();
+    }
+  });
+  editorEl.addEventListener("blur", () => {
+    saveCurrentEdit();
+  });
+  editorEl.addEventListener("pointerdown", (event) => {
+    event.stopPropagation();
+  });
+}
+
+function getRawFieldValue(player, field) {
+  if (!player) return "";
+  if (field === "risky") return String(getNormalizedRisky(player.risky));
+  if (field === "style") return String(player.style || "");
+  return player[field] == null ? "" : String(player[field]);
+}
+
+function beginEdit(playerId, field) {
+  if (!playerId || !field) return;
+  if (editingState.playerId && (editingState.playerId !== playerId || editingState.field !== field)) {
+    saveCurrentEdit();
+  }
+  const player = players.find(p => p.id === playerId);
+  if (!player || player.id === "YOU" || player.isYou) return;
+  editingState.playerId = playerId;
+  editingState.field = field;
+  editingState.original = getRawFieldValue(player, field);
+  editingState.draft = editingState.original;
+  renderTable();
+  const editor = document.querySelector("[data-editor='true']");
+  if (editor) {
+    editor.focus();
+    if (editor.select) editor.select();
+  }
+}
+
+function clearEditState() {
+  editingState.playerId = null;
+  editingState.field = null;
+  editingState.original = "";
+  editingState.draft = "";
+}
+
+function cancelCurrentEdit() {
+  if (!editingState.playerId) return;
+  clearEditState();
+  renderTable();
+}
+
+function validateAndNormalizeValue(field, rawValue) {
+  const text = String(rawValue ?? "").trim();
+  if (field === "style") return { valid: true, value: text };
+  const numeric = Number(text);
+  if (!Number.isFinite(numeric)) return { valid: false, message: "Please enter a valid number." };
+  if (field === "variance" && numeric < 0) return { valid: false, message: "Variance must be non-negative." };
+  if (field === "varianceTilt") {
+    const normalizedTilt = numeric >= 0 && numeric <= 1 ? numeric * 100 : numeric;
+    return { valid: true, value: normalizedTilt };
+  }
+  if (field === "risky") {
+    let normalizedRisky = numeric;
+    if (normalizedRisky > 10) normalizedRisky = normalizedRisky / 10;
+    if (normalizedRisky < 0) return { valid: false, message: "Risky cannot be negative." };
+    if (normalizedRisky > 10) normalizedRisky = 10;
+    return { valid: true, value: normalizedRisky };
+  }
+  return { valid: true, value: numeric };
+}
+
+function persistPlayersToStorage() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    const actualPlayers = players.filter(p => !(p.id === "YOU" || p.isYou));
+    parsed.players = actualPlayers;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+    latestState = parsed;
+    gameHistory = Array.isArray(parsed.gameHistory) ? parsed.gameHistory : gameHistory;
+    return true;
+  } catch (error) {
+    console.error("Failed to save players", error);
+    return false;
+  }
+}
+
+function saveCurrentEdit() {
+  if (!editingState.playerId || !editingState.field) return;
+  const editor = document.querySelector("[data-editor='true']");
+  if (!editor) return;
+  const { playerId, field } = editingState;
+  const result = validateAndNormalizeValue(field, editor.value);
+  if (!result.valid) {
+    editor.setCustomValidity(result.message || "Invalid value");
+    editor.reportValidity();
+    editor.focus();
+    return;
+  }
+  editor.setCustomValidity("");
+
+  const player = players.find(p => p.id === playerId);
+  if (!player) {
+    clearEditState();
+    renderTable();
+    return;
+  }
+  player[field] = result.value;
+  clearEditState();
+  if (!persistPlayersToStorage()) {
+    renderTable();
+    return;
+  }
+  renderTable();
 }
 
 function computePlayerStats(p) {
@@ -602,6 +834,15 @@ function getSortValue(p, key) {
           renderTable();
         });
       });
+
+      const tbody = $("playersTableBody");
+      if (tbody) {
+        tbody.addEventListener("pointerdown", (event) => {
+          const cell = event.target.closest("td.editable-cell");
+          if (!cell) return;
+          beginEdit(cell.dataset.playerId, cell.dataset.field);
+        });
+      }
 
       renderTable();
     });
