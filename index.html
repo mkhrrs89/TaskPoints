@@ -9076,11 +9076,9 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
     // Mobile: remove V1 dashboard entirely so it can't bind listeners / conflict
-  try {
-    if (window.matchMedia && window.matchMedia('(max-width: 700px)').matches) {
-      document.getElementById('score-dashboard-v1')?.remove();
-    }
-  } catch (e) {}
+try {
+  document.getElementById('score-dashboard-v1')?.remove();
+} catch (e) {}
   $('addBtn')?.addEventListener('click', addTask);
   $('openAddTaskBtn')?.addEventListener('click', openAddTaskModal);
   $('sortSelect')?.addEventListener('change', renderTasks);
