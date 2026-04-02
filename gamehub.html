@@ -434,9 +434,14 @@
     console.warn('gamehub saveState skipped localStorage write; TaskPointsCore missing.');
   }
 
-function loadState(){
+  function loadState(){
   return getPageState();
 }
+
+  function debugBootReadOnlySkip(path, details = {}){
+    if (!window.TP_DEBUG_PERF) return;
+    console.debug('[TP_DEBUG_PERF][gamehub] boot read-only: skipped persistence', { path, ...details });
+  }
 
   function getNormalizedRisky(value){
     const num = Number(value);
@@ -1590,36 +1595,42 @@ function setHTML(id, html){
     }
   }
 
+  function syncStateForDisplayOnly(state, { phase = 'boot' } = {}){
+    let nextState = state || {};
+    let changed = false;
+
+    if (window.TaskPointsCore && typeof TaskPointsCore.normalizeState === 'function') {
+      nextState = TaskPointsCore.normalizeState(nextState);
+    }
+
+    if (window.TaskPointsCore && typeof TaskPointsCore.syncDerivedPoints === 'function') {
+      const res = TaskPointsCore.syncDerivedPoints(nextState);
+      nextState = res.state;
+      changed = changed || !!res.changed;
+      if (res.changed) debugBootReadOnlySkip('TaskPointsCore.syncDerivedPoints', { phase });
+    }
+
+    if (window.TaskPointsCore && typeof TaskPointsCore.syncYouMatchups === 'function') {
+      const res2 = TaskPointsCore.syncYouMatchups(nextState);
+      nextState = res2.state;
+      changed = changed || !!res2.changed;
+      if (res2.changed) debugBootReadOnlySkip('TaskPointsCore.syncYouMatchups', { phase });
+    }
+
+    return { state: nextState, changed };
+  }
+
   function runGameHubBoot(){
     if (gameHubBootStarted || gameHubBootFinished) return;
     gameHubBootStarted = true;
 
-    let state = currentState || loadState();
-    let changed = false;
-
-    if (window.TaskPointsCore && typeof TaskPointsCore.normalizeState === 'function') {
-      state = TaskPointsCore.normalizeState(state || {});
-    }
-
-    if (window.TaskPointsCore && typeof TaskPointsCore.syncDerivedPoints === 'function') {
-      const res = TaskPointsCore.syncDerivedPoints(state);
-      state = res.state;
-      changed = changed || !!res.changed;
-    }
-
-    if (window.TaskPointsCore && typeof TaskPointsCore.syncYouMatchups === 'function') {
-      const res2 = TaskPointsCore.syncYouMatchups(state);
-      state = res2.state;
-      changed = changed || !!res2.changed;
-    }
-
     // Boot must remain read-only to avoid unintended persistence/pruning on mobile.
+    const bootSync = syncStateForDisplayOnly(currentState || loadState(), { phase: 'deferred-boot' });
+    const state = bootSync.state;
     if (window.TP_DEBUG_PERF) {
-      console.debug('[TP_DEBUG_PERF][gamehub] boot sync result', { wouldMutateState: changed });
+      console.debug('[TP_DEBUG_PERF][gamehub] boot sync result', { wouldMutateState: bootSync.changed });
     }
-    if (changed && window.TP_DEBUG_PERF) {
-      console.debug('[TP_DEBUG_PERF][gamehub] boot read-only: skipped persistence for derived sync changes');
-    }
+    if (bootSync.changed) debugBootReadOnlySkip('saveState', { phase: 'deferred-boot', reason: 'derived sync changes' });
     currentState = state;
     gameHubBootFinished = true;
     renderGameHubFromState(state, { allowPersist: false });
@@ -1640,9 +1651,10 @@ function setHTML(id, html){
   }
 
   function renderInitialGameHub(){
-    let state = loadState();
-    if (window.TaskPointsCore && typeof TaskPointsCore.normalizeState === 'function') {
-      state = TaskPointsCore.normalizeState(state || {});
+    const initialSync = syncStateForDisplayOnly(loadState(), { phase: 'initial-boot-render' });
+    const state = initialSync.state;
+    if (initialSync.changed) {
+      debugBootReadOnlySkip('saveState', { phase: 'initial-boot-render', reason: 'derived sync changes' });
     }
     currentState = state;
     renderGameHubFromState(state, { allowPersist: false });
