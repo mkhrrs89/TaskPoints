@@ -872,6 +872,11 @@ body {
   z-index: 2;
 }
 
+.gamehub-page .gamehub-stat-avatar-thumb {
+  border-radius: 10px;
+  object-fit: cover;
+}
+
 .gamehub-page .matchup-details {
   display: grid;
   border-radius: 10px;
