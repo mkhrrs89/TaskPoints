@@ -966,10 +966,14 @@ const normalizeStateFallback = (s) => {
     schedule: Array.isArray(src.schedule) ? src.schedule : [],
     opponentDripSchedules: Array.isArray(src.opponentDripSchedules) ? src.opponentDripSchedules : [],
     workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
-    youImageId: typeof src.youImageId === 'string' ? src.youImageId : '',
-    projects: Array.isArray(src.projects) ? src.projects : [],
-    notes: typeof src.notes === 'string' ? src.notes : '',
-    habitTagColors: normalizeHabitTagColorsFallback(src.habitTagColors)
+youImageId: typeof src.youImageId === 'string' ? src.youImageId : '',
+youName: typeof src.youName === 'string' ? src.youName : '',
+youPrimaryColor: normalizeHexColorFallback(src.youPrimaryColor) || '#1a383b',
+youSecondaryColor: normalizeHexColorFallback(src.youSecondaryColor) || '#254c52',
+projects: Array.isArray(src.projects) ? src.projects : [],
+notes: typeof src.notes === 'string' ? src.notes : '',
+habitTagColors: normalizeHabitTagColorsFallback(src.habitTagColors),
+scoringSettings: (src.scoringSettings && typeof src.scoringSettings === 'object') ? src.scoringSettings : {}
   };
 };
 
@@ -2121,12 +2125,15 @@ async function applyImportedStateFallback(root) {
     matchups: Array.isArray(root?.matchups) ? root.matchups : [],
     schedule: Array.isArray(root?.schedule) ? root.schedule : [],
     opponentDripSchedules: Array.isArray(root?.opponentDripSchedules) ? root.opponentDripSchedules : [],
-    workHistory: Array.isArray(root?.workHistory) ? root.workHistory : [],
-    youImageId: typeof root?.youImageId === 'string' ? root.youImageId : '',
-    projects: Array.isArray(root?.projects) ? root.projects : loadProjectsFromStorageFallback(),
-    notes: typeof root?.notes === 'string' ? root.notes : '',
-    habitTagColors: root?.habitTagColors ?? {},
-    scoringSettings: root?.scoringSettings ?? {}
+workHistory: Array.isArray(root?.workHistory) ? root.workHistory : [],
+youImageId: typeof root?.youImageId === 'string' ? root.youImageId : '',
+youName: typeof root?.youName === 'string' ? root.youName : '',
+youPrimaryColor: normalizeHexColorFallback(root?.youPrimaryColor) || '#1a383b',
+youSecondaryColor: normalizeHexColorFallback(root?.youSecondaryColor) || '#254c52',
+projects: Array.isArray(root?.projects) ? root.projects : loadProjectsFromStorageFallback(),
+notes: typeof root?.notes === 'string' ? root.notes : '',
+habitTagColors: root?.habitTagColors ?? {},
+scoringSettings: root?.scoringSettings ?? {}
   });
 
 
