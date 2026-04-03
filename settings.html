@@ -620,9 +620,11 @@
         matchups:    Array.isArray(s.matchups)    ? s.matchups    : [],
         schedule:    Array.isArray(s.schedule)    ? s.schedule    : [],
         workHistory: Array.isArray(s.workHistory) ? s.workHistory : [],
-        youImageId:  typeof s.youImageId === "string" ? s.youImageId : "",
-        youName: typeof s.youName === "string" ? s.youName : "",
-        notes: typeof s.notes === "string" ? s.notes : "",
+youImageId:  typeof s.youImageId === "string" ? s.youImageId : "",
+youName: typeof s.youName === "string" ? s.youName : "",
+youPrimaryColor: normalizeHexColor(s.youPrimaryColor) || "#1a383b",
+youSecondaryColor: normalizeHexColor(s.youSecondaryColor) || "#254c52",
+notes: typeof s.notes === "string" ? s.notes : "",
         habitTagColors: normalizeHabitTagColors(s.habitTagColors),
         scoringSettings: (window.TaskPointsCore?.normalizeScoringSettings)
           ? TaskPointsCore.normalizeScoringSettings(s.scoringSettings || {})
@@ -712,7 +714,7 @@
           storageKey: SETTINGS_STORAGE_KEY,
           allowScoringSettingsOverwrite: false,
           allowHabitTagColorReset: true,
-          allowStickyOverwriteKeys: ["youImageId", "habitTagColors"],
+          allowStickyOverwriteKeys: ["youImageId", "youName", "youPrimaryColor", "youSecondaryColor", "habitTagColors"],
           immediateWrite: true
         });
       } else if (window.TaskPointsCore?.mergeAndSaveState) {
@@ -720,7 +722,7 @@
           storageKey: SETTINGS_STORAGE_KEY,
           allowScoringSettingsOverwrite: false,
           allowHabitTagColorReset: true,
-          allowStickyOverwriteKeys: ["youImageId", "habitTagColors"],
+          allowStickyOverwriteKeys: ["youImageId", "youName", "youPrimaryColor", "youSecondaryColor", "habitTagColors"],
           immediateWrite: true
         });
       } else {
