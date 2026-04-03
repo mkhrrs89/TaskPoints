@@ -1625,9 +1625,6 @@ function generateOpponentDripSchedule(dateKeyStr, playerId, totalPoints){
     }
   }
 
-  if (remaining > 0 && pointUnits.length) {
-    pointUnits[pointUnits.length - 1] += remaining;
-  }
 
   const times = pointUnits.map(() => pickTime()).sort((a, b) => a - b);
   const sizedUnits = pointUnits.slice().sort((a, b) => b - a);
