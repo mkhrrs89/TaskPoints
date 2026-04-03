@@ -2142,6 +2142,13 @@ async function applyImportedStateFallback(root) {
   }
 
   saveProjectsToStorageFallback(normalized.projects || []);
+
+  try {
+    localStorage.removeItem(STORAGE_KEY_FALLBACK);
+  } catch (e) {
+    console.warn('Could not clear existing TaskPoints storage before import', e);
+  }
+
   saveStateSnapshotFallback(normalized);
   window.location.reload();
 }
