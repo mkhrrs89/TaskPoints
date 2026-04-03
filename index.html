@@ -3619,7 +3619,9 @@ function deriveTodayWithInertia(dailyTotals, todayK){
   }
   const { inertia, average } = computeInertia(dailyTotals, todayK);
   const todayBase = Number(dailyTotals[todayK]) || 0;
-  const todayPoints = Math.round((todayBase + inertia) * 10) / 10;
+  const todayPoints = window.TaskPointsCore?.roundPoints
+  ? TaskPointsCore.roundPoints(todayBase + inertia, 2)
+  : Math.round((todayBase + inertia + Number.EPSILON) * 100) / 100;
 
   return { todayPoints, inertia, average, base: todayBase };
 }
