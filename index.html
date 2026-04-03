@@ -2688,10 +2688,6 @@ function generateOpponentDripSchedule(dateKeyStr, playerId, totalPoints){
     }
   }
 
-  // If rounding left stragglers, tack them onto the last bucket
-  if (remaining > 0 && pointUnits.length) {
-    pointUnits[pointUnits.length - 1] += remaining;
-  }
 
   const times = pointUnits.map(() => pickTime()).sort((a, b) => a - b);
   const sizedUnits = pointUnits.slice().sort((a, b) => b - a);
