@@ -547,28 +547,52 @@
       || err.code === 1014;
   }
 
-  function pruneStateForStorage(state, limits = {}) {
-    const normalized = normalizeState(state || {});
-    const merged = { ...(state || {}), ...normalized };
-    const maxCompletions = Number.isFinite(limits.maxCompletions) ? limits.maxCompletions : 10000;
-    const maxGameHistory = Number.isFinite(limits.maxGameHistory) ? limits.maxGameHistory : 2500;
-    const maxMatchups = Number.isFinite(limits.maxMatchups) ? limits.maxMatchups : 2500;
-    const maxWorkHistory = Number.isFinite(limits.maxWorkHistory) ? limits.maxWorkHistory : 2500;
-    if (merged.completions.length > maxCompletions) {
-      merged.completions = merged.completions.slice(0, maxCompletions);
-    }
-    if (merged.gameHistory.length > maxGameHistory) {
-      merged.gameHistory = merged.gameHistory.slice(-maxGameHistory);
-    }
-    if (merged.matchups.length > maxMatchups) {
-      merged.matchups = merged.matchups.slice(-maxMatchups);
-    }
-    if (merged.workHistory.length > maxWorkHistory) {
-      merged.workHistory = merged.workHistory.slice(-maxWorkHistory);
-    }
+function pruneStateForStorage(state, limits = {}) {
+  const normalized = normalizeState(state || {});
+  const merged = { ...(state || {}), ...normalized };
 
-    return merged;
+  const maxCompletions = Number.isFinite(limits.maxCompletions) ? limits.maxCompletions : 10000;
+  const maxGameHistory = Number.isFinite(limits.maxGameHistory) ? limits.maxGameHistory : 2500;
+  const maxMatchups = Number.isFinite(limits.maxMatchups) ? limits.maxMatchups : 2500;
+  const maxWorkHistory = Number.isFinite(limits.maxWorkHistory) ? limits.maxWorkHistory : 2500;
+  const maxOpponentDripSchedules = Number.isFinite(limits.maxOpponentDripSchedules)
+    ? limits.maxOpponentDripSchedules
+    : 60;
+
+  merged.completions = Array.isArray(merged.completions)
+    ? merged.completions
+        .slice()
+        .sort((a, b) => isoToMs(b?.completedAtISO) - isoToMs(a?.completedAtISO))
+    : [];
+
+  merged.gameHistory = Array.isArray(merged.gameHistory) ? merged.gameHistory : [];
+  merged.matchups = Array.isArray(merged.matchups) ? merged.matchups : [];
+  merged.workHistory = Array.isArray(merged.workHistory) ? merged.workHistory : [];
+
+  merged.opponentDripSchedules = Array.isArray(merged.opponentDripSchedules)
+    ? merged.opponentDripSchedules
+        .slice()
+        .sort((a, b) => String(b?.date || '').localeCompare(String(a?.date || '')))
+    : [];
+
+  if (merged.completions.length > maxCompletions) {
+    merged.completions = merged.completions.slice(0, maxCompletions);
   }
+  if (merged.gameHistory.length > maxGameHistory) {
+    merged.gameHistory = merged.gameHistory.slice(-maxGameHistory);
+  }
+  if (merged.matchups.length > maxMatchups) {
+    merged.matchups = merged.matchups.slice(-maxMatchups);
+  }
+  if (merged.workHistory.length > maxWorkHistory) {
+    merged.workHistory = merged.workHistory.slice(-maxWorkHistory);
+  }
+  if (merged.opponentDripSchedules.length > maxOpponentDripSchedules) {
+    merged.opponentDripSchedules = merged.opponentDripSchedules.slice(0, maxOpponentDripSchedules);
+  }
+
+  return merged;
+}
 
   function capLimit(current, cap) {
     if (Number.isFinite(current)) return Math.min(current, cap);
