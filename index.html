@@ -8191,6 +8191,7 @@ async function applyImportedState(root){
     matchups:    Array.isArray(root.matchups)    ? root.matchups    : [],
     schedule:    Array.isArray(root.schedule)    ? root.schedule    : [],
     opponentDripSchedules: Array.isArray(root.opponentDripSchedules) ? root.opponentDripSchedules : [],
+    workHistory: Array.isArray(root.workHistory) ? root.workHistory : [],
     youImageId:  typeof root.youImageId === "string" ? root.youImageId : "",
     youName:     typeof root.youName === "string" ? root.youName : "",
     youPrimaryColor: normalizeHexColor(root.youPrimaryColor) || "#1a383b",
@@ -8211,6 +8212,14 @@ async function applyImportedState(root){
   editingFlexId = null;
 
   saveProjectsToStorage(state.projects);
+
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch (e) {
+    console.warn("Could not clear existing TaskPoints storage before import", e);
+  }
+  storageCache.raw = null;
+  storageCache.parsed = null;
 
   save();
   window.TaskPointsCore?.flushPendingSaves?.();
