@@ -670,9 +670,9 @@
         return TaskPointsCore.dateKey(c.completedAtISO) === dateKey;
       });
 
-      const baseActual = Number(rollups.dailyTotals[dateKey]) || 0;
-      const { inertia } = TaskPointsCore.computeInertia(rollups.dailyTotals, dateKey);
-      const actualTotal = Math.round((baseActual + (Number.isFinite(inertia) ? inertia : 0)) * 10) / 10;
+const { todayPoints: derivedActualTotal, inertia } =
+  TaskPointsCore.deriveTodayWithInertia(rollups.dailyTotals, dateKey, state);
+const actualTotal = round2(Number(derivedActualTotal) || 0);
 
       const dayBreak = dayBreakdowns[dateKey] || { total: 0, categories: {} };
 
