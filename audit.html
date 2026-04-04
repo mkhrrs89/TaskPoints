@@ -585,6 +585,203 @@
 
     const WORK_HOURS_AUDIT_DAYS = 14;
     const WORK_HOURS_SUSPICIOUS_THRESHOLD = 24;
+    const AUDIT_PAGE_ADAPTERS = [
+      {
+        id: 'log',
+        page: 'log.html',
+        run(state) {
+          return runAdapterPipeline(state, ['normalize', 'syncDerivedPoints']);
+        }
+      },
+      {
+        id: 'settings',
+        page: 'settings.html',
+        run(state) {
+          return runAdapterPipeline(state, ['normalize']);
+        }
+      },
+      {
+        id: 'daily',
+        page: 'daily.html',
+        run(state) {
+          return runAdapterPipeline(state, ['normalize', 'syncDerivedPoints']);
+        }
+      },
+      {
+        id: 'week',
+        page: 'week.html',
+        run(state) {
+          return runAdapterPipeline(state, ['normalize', 'syncDerivedPoints']);
+        }
+      },
+      {
+        id: 'gamehub',
+        page: 'gamehub.html',
+        run(state) {
+          return runAdapterPipeline(state, ['normalize', 'syncDerivedPoints', 'syncYouMatchups']);
+        }
+      },
+      {
+        id: 'matchups',
+        page: 'matchups.html',
+        run(state) {
+          return runAdapterPipeline(state, ['normalize', 'syncYouMatchups']);
+        }
+      }
+    ];
+    const STICKY_FIELDS = [
+      'youName',
+      'youImageId',
+      'youPrimaryColor',
+      'youSecondaryColor',
+      'scoringSettings',
+      'habitTagColors',
+      'workHistory'
+    ];
+    const NO_OP_DIFF_EXCLUDED_KEYS = new Set(['__auditRuntime']);
+
+    function cloneAuditState(value) {
+      if (typeof structuredClone === 'function') return structuredClone(value);
+      return JSON.parse(JSON.stringify(value));
+    }
+
+    function stableNormalizeForDiff(value) {
+      if (Array.isArray(value)) return value.map(stableNormalizeForDiff);
+      if (!value || typeof value !== 'object') return value;
+      const out = {};
+      Object.keys(value).sort().forEach(key => {
+        out[key] = stableNormalizeForDiff(value[key]);
+      });
+      return out;
+    }
+
+    function runAdapterPipeline(state, steps = []) {
+      let next = cloneAuditState(state || {});
+      steps.forEach(step => {
+        if (step === 'normalize' && window.TaskPointsCore?.normalizeState) {
+          next = TaskPointsCore.normalizeState(next || {});
+          return;
+        }
+        if (step === 'syncDerivedPoints' && window.TaskPointsCore?.syncDerivedPoints) {
+          const result = TaskPointsCore.syncDerivedPoints(next, { normalized: true });
+          next = (result && result.state) ? result.state : next;
+          return;
+        }
+        if (step === 'syncYouMatchups' && window.TaskPointsCore?.syncYouMatchups) {
+          const result = TaskPointsCore.syncYouMatchups(next, { normalized: true });
+          next = (result && result.state) ? result.state : next;
+        }
+      });
+      return cloneAuditState(next || {});
+    }
+
+    function summarizeNoOpStateDiff(beforeState, afterState) {
+      const before = stableNormalizeForDiff(beforeState || {});
+      const after = stableNormalizeForDiff(afterState || {});
+      const keySet = new Set([...Object.keys(before), ...Object.keys(after)]);
+      const changes = [];
+      keySet.forEach(key => {
+        if (NO_OP_DIFF_EXCLUDED_KEYS.has(key)) return;
+        const hadBefore = Object.prototype.hasOwnProperty.call(before, key);
+        const hasAfter = Object.prototype.hasOwnProperty.call(after, key);
+        if (!hadBefore && hasAfter) {
+          changes.push({ type: 'added', key, before: undefined, after: after[key] });
+          return;
+        }
+        if (hadBefore && !hasAfter) {
+          changes.push({ type: 'dropped', key, before: before[key], after: undefined });
+          return;
+        }
+        const left = JSON.stringify(before[key]);
+        const right = JSON.stringify(after[key]);
+        if (left !== right) {
+          changes.push({ type: 'changed', key, before: before[key], after: after[key] });
+        }
+      });
+      return changes;
+    }
+
+    function summarizeValueShapeChange(beforeVal, afterVal) {
+      const isArrBefore = Array.isArray(beforeVal);
+      const isArrAfter = Array.isArray(afterVal);
+      if (isArrBefore && isArrAfter) return `array ${beforeVal.length}→${afterVal.length}`;
+      if (beforeVal && afterVal && typeof beforeVal === 'object' && typeof afterVal === 'object') {
+        const beforeKeys = Object.keys(beforeVal).length;
+        const afterKeys = Object.keys(afterVal).length;
+        return `object keys ${beforeKeys}→${afterKeys}`;
+      }
+      return `${formatVal(beforeVal)}→${formatVal(afterVal)}`;
+    }
+
+    function runNoOpPageVisitAudit(state) {
+      const results = AUDIT_PAGE_ADAPTERS.map(adapter => {
+        const baseline = cloneAuditState(state || {});
+        const next = adapter.run(cloneAuditState(baseline));
+        const diffs = summarizeNoOpStateDiff(baseline, next);
+        return { adapter, diffs };
+      });
+      const failed = results.filter(r => r.diffs.length);
+      const details = [];
+      failed.forEach(r => {
+        const summary = r.diffs.slice(0, 3).map(d => {
+          if (d.type === 'dropped') return `${d.key} dropped`;
+          if (d.type === 'added') return `${d.key} added`;
+          return `${d.key} ${summarizeValueShapeChange(d.before, d.after)}`;
+        }).join('; ');
+        details.push(`${r.adapter.page}: ${summary}${r.diffs.length > 3 ? '…' : ''}`);
+      });
+      return {
+        status: failed.length ? 'FAIL' : 'PASS',
+        expected: 'No important state mutations during page visit simulation',
+        actual: failed.length ? `${failed.length}/${results.length} page adapters mutated state` : `${results.length}/${results.length} page adapters remained read-only`,
+        details
+      };
+    }
+
+    function buildStickySentinelState(state) {
+      const seeded = cloneAuditState(state || {});
+      seeded.youName = 'Audit Sentinel User';
+      seeded.youImageId = 'audit-image-id';
+      seeded.youPrimaryColor = '#112233';
+      seeded.youSecondaryColor = '#334455';
+      seeded.scoringSettings = {
+        sleep: { enabled: true, baseDivisor: 100, baseMultiplier: 0.2 },
+        work: { enabled: true, baseMultiplier: 0.1, hoursMultiplier: 0.4 },
+        calories: { enabled: true, target: 2200, pointsPer100: 0.5 },
+        mood: { enabled: true, multiplier: 2 },
+        inertia: { enabled: true, multiplier: 0.2, windowDays: 3 }
+      };
+      seeded.habitTagColors = {
+        health: '#00aa11',
+        work: '#aa00cc'
+      };
+      seeded.workHistory = [
+        { dayKey: '2026-03-31', hours: 7.5 },
+        { dayKey: '2026-04-01', hours: 8 }
+      ];
+      return seeded;
+    }
+
+    function runStickyFieldPreservationAudit(state) {
+      const seeded = buildStickySentinelState(state);
+      const failures = [];
+      AUDIT_PAGE_ADAPTERS.forEach(adapter => {
+        const next = adapter.run(cloneAuditState(seeded));
+        STICKY_FIELDS.forEach(field => {
+          const expected = JSON.stringify(stableNormalizeForDiff(seeded[field]));
+          const actual = JSON.stringify(stableNormalizeForDiff(next[field]));
+          if (expected !== actual) {
+            failures.push(`${adapter.page}: ${field} changed or dropped`);
+          }
+        });
+      });
+      return {
+        status: failures.length ? 'FAIL' : 'PASS',
+        expected: `Sticky fields preserved across ${AUDIT_PAGE_ADAPTERS.length} page adapters`,
+        actual: failures.length ? `${failures.length} sticky field issue(s)` : 'All sticky fields preserved',
+        details: failures
+      };
+    }
 
     function auditWorkHoursLast14Days(state, endDateKey = TaskPointsCore.todayKey()) {
       const issues = [];
@@ -1557,6 +1754,30 @@ const actualTotal = round2(Number(derivedActualTotal) || 0);
         actual: integrityProblems.length ? integrityProblems.length + ' issue(s)' : 'No issues',
         details: integrityProblems,
         trace: 'Snapshot validation'
+      });
+
+      const noOpVisitAudit = runNoOpPageVisitAudit(state);
+      checks.push({
+        id: 'page-visit-read-only',
+        title: 'Page visit is read-only',
+        status: noOpVisitAudit.status,
+        expected: noOpVisitAudit.expected,
+        actual: noOpVisitAudit.actual,
+        details: noOpVisitAudit.details,
+        trace: 'per-page normalize/save simulation (in-memory adapters)',
+        tips: 'Investigate adapter/page normalize-save paths that mutate cloned state without user actions.'
+      });
+
+      const stickyFieldAudit = runStickyFieldPreservationAudit(state);
+      checks.push({
+        id: 'sticky-fields-preserved',
+        title: 'Sticky fields survive page save paths',
+        status: stickyFieldAudit.status,
+        expected: stickyFieldAudit.expected,
+        actual: stickyFieldAudit.actual,
+        details: stickyFieldAudit.details,
+        trace: 'critical keys preserved across page adapters',
+        tips: 'Ensure page-level normalize/save logic preserves sticky profile and settings fields.'
       });
 
       // New: Audit self-check (verifies other checks are wired correctly)
