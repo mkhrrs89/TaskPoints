@@ -585,6 +585,522 @@
 
     const WORK_HOURS_AUDIT_DAYS = 14;
     const WORK_HOURS_SUSPICIOUS_THRESHOLD = 24;
+    const STICKY_FIELDS = [
+      'youName',
+      'youImageId',
+      'youPrimaryColor',
+      'youSecondaryColor',
+      'scoringSettings',
+      'habitTagColors',
+      'workHistory'
+    ];
+    const NO_OP_DIFF_EXCLUDED_KEYS = new Set(['__auditRuntime']);
+    const DEFAULT_BY_KEY = {
+      youName: '',
+      youImageId: '',
+      youPrimaryColor: '#1a383b',
+      youSecondaryColor: '#254c52',
+      habitTagColors: {}
+    };
+
+    function cloneAuditState(value) {
+      if (typeof structuredClone === 'function') return structuredClone(value);
+      return JSON.parse(JSON.stringify(value));
+    }
+
+    function stableNormalizeForDiff(value) {
+      if (Array.isArray(value)) return value.map(stableNormalizeForDiff);
+      if (!value || typeof value !== 'object') return value;
+      const out = {};
+      Object.keys(value).sort().forEach(key => {
+        out[key] = stableNormalizeForDiff(value[key]);
+      });
+      return out;
+    }
+
+    function stableStringify(value) {
+      return JSON.stringify(stableNormalizeForDiff(value));
+    }
+
+    function auditNormalizeHexColor(value) {
+      if (!value) return null;
+      let hex = String(value).trim();
+      if (!hex) return null;
+      if (!hex.startsWith('#')) hex = `#${hex}`;
+      if (!/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(hex)) return null;
+      if (hex.length === 4) {
+        hex = `#${hex.slice(1).split('').map((c) => c + c).join('')}`;
+      }
+      return hex.toLowerCase();
+    }
+
+    function auditNormalizeHabitTagColors(value, { trimTag = false } = {}) {
+      if (!value || typeof value !== 'object') return {};
+      const next = {};
+      Object.entries(value).forEach(([tag, color]) => {
+        const key = trimTag ? String(tag ?? '').trim() : String(tag);
+        if (!key) return;
+        const normalized = auditNormalizeHexColor(color);
+        if (normalized) next[key] = normalized;
+      });
+      return next;
+    }
+
+    function auditNormalizeHabit(habit) {
+      if (!habit || typeof habit !== 'object') return habit;
+      return {
+        ...habit,
+        tag: typeof habit.tag === 'string' ? habit.tag.trim() : ''
+      };
+    }
+
+    function runSyncDerived(state) {
+      if (!window.TaskPointsCore?.syncDerivedPoints) return { state, changed: false };
+      const res = TaskPointsCore.syncDerivedPoints(state);
+      return { state: (res && res.state) ? res.state : state, changed: !!(res && res.changed) };
+    }
+
+    function runSyncYouMatchups(state) {
+      if (!window.TaskPointsCore?.syncYouMatchups) return { state, changed: false };
+      const res = TaskPointsCore.syncYouMatchups(state);
+      return { state: (res && res.state) ? res.state : state, changed: !!(res && res.changed) };
+    }
+
+    function buildLogLoadShape(rawState) {
+      const p = rawState || {};
+      return {
+        tasks: Array.isArray(p.tasks) ? p.tasks : [],
+        completions: Array.isArray(p.completions) ? p.completions : [],
+        players: Array.isArray(p.players) ? p.players : [],
+        habits: Array.isArray(p.habits) ? p.habits : [],
+        flexActions: Array.isArray(p.flexActions) ? p.flexActions : [],
+        matchups: Array.isArray(p.matchups) ? p.matchups : [],
+        gameHistory: Array.isArray(p.gameHistory) ? p.gameHistory : [],
+        schedule: Array.isArray(p.schedule) ? p.schedule : [],
+        opponentDripSchedules: Array.isArray(p.opponentDripSchedules) ? p.opponentDripSchedules : [],
+        workHistory: Array.isArray(p.workHistory) ? p.workHistory : [],
+        youImageId: typeof p.youImageId === 'string' ? p.youImageId : '',
+        youName: typeof p.youName === 'string' ? p.youName : '',
+        youPrimaryColor: auditNormalizeHexColor(p.youPrimaryColor) || '#1a383b',
+        youSecondaryColor: auditNormalizeHexColor(p.youSecondaryColor) || '#254c52',
+        notes: typeof p.notes === 'string' ? p.notes : '',
+        habitTagColors: auditNormalizeHabitTagColors(p.habitTagColors),
+        scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
+          ? TaskPointsCore.normalizeScoringSettings(p.scoringSettings || {})
+          : (p.scoringSettings || {})
+      };
+    }
+
+    function buildLogNormalizeShape(state) {
+      const s = state || {};
+      return {
+        tasks: Array.isArray(s.tasks) ? s.tasks : [],
+        completions: Array.isArray(s.completions) ? s.completions : [],
+        players: Array.isArray(s.players) ? s.players : [],
+        habits: Array.isArray(s.habits) ? s.habits.map(auditNormalizeHabit) : [],
+        flexActions: Array.isArray(s.flexActions) ? s.flexActions : [],
+        gameHistory: Array.isArray(s.gameHistory) ? s.gameHistory : [],
+        matchups: Array.isArray(s.matchups) ? s.matchups : [],
+        schedule: Array.isArray(s.schedule) ? s.schedule : [],
+        opponentDripSchedules: Array.isArray(s.opponentDripSchedules) ? s.opponentDripSchedules : [],
+        workHistory: Array.isArray(s.workHistory) ? s.workHistory : [],
+        youImageId: typeof s.youImageId === 'string' ? s.youImageId : '',
+        youName: typeof s.youName === 'string' ? s.youName : '',
+        youPrimaryColor: auditNormalizeHexColor(s.youPrimaryColor) || '#1a383b',
+        youSecondaryColor: auditNormalizeHexColor(s.youSecondaryColor) || '#254c52',
+        notes: typeof s.notes === 'string' ? s.notes : '',
+        habitTagColors: auditNormalizeHabitTagColors(s.habitTagColors)
+      };
+    }
+
+    function buildDailyLoadShape(rawState) {
+      const p = rawState || {};
+      return {
+        tasks: Array.isArray(p.tasks) ? p.tasks : [],
+        completions: Array.isArray(p.completions) ? p.completions : [],
+        players: Array.isArray(p.players) ? p.players : [],
+        habits: Array.isArray(p.habits) ? p.habits : [],
+        flexActions: Array.isArray(p.flexActions) ? p.flexActions : [],
+        gameHistory: Array.isArray(p.gameHistory) ? p.gameHistory : [],
+        matchups: Array.isArray(p.matchups) ? p.matchups : [],
+        schedule: Array.isArray(p.schedule) ? p.schedule : [],
+        opponentDripSchedules: Array.isArray(p.opponentDripSchedules) ? p.opponentDripSchedules : [],
+        scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
+          ? TaskPointsCore.normalizeScoringSettings(p.scoringSettings || {})
+          : (p.scoringSettings || {})
+      };
+    }
+
+    function buildDailyNormalizeShape(state) {
+      const s = state || {};
+      return {
+        tasks: Array.isArray(s.tasks) ? s.tasks : [],
+        completions: Array.isArray(s.completions) ? s.completions : [],
+        players: Array.isArray(s.players) ? s.players : [],
+        habits: Array.isArray(s.habits) ? s.habits.map(auditNormalizeHabit) : [],
+        flexActions: Array.isArray(s.flexActions) ? s.flexActions : [],
+        gameHistory: Array.isArray(s.gameHistory) ? s.gameHistory : [],
+        matchups: Array.isArray(s.matchups) ? s.matchups : [],
+        schedule: Array.isArray(s.schedule) ? s.schedule : [],
+        opponentDripSchedules: Array.isArray(s.opponentDripSchedules) ? s.opponentDripSchedules : [],
+        workHistory: Array.isArray(s.workHistory) ? s.workHistory : [],
+        youImageId: typeof s.youImageId === 'string' ? s.youImageId : '',
+        youName: typeof s.youName === 'string' ? s.youName : '',
+        notes: typeof s.notes === 'string' ? s.notes : '',
+        habitTagColors: auditNormalizeHabitTagColors(s.habitTagColors),
+        scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
+          ? TaskPointsCore.normalizeScoringSettings(s.scoringSettings || {})
+          : (s.scoringSettings || {})
+      };
+    }
+
+    function buildWeekLoadShape(rawState) {
+      const p = rawState || {};
+      return {
+        tasks: Array.isArray(p.tasks) ? p.tasks : [],
+        completions: Array.isArray(p.completions) ? p.completions : [],
+        players: Array.isArray(p.players) ? p.players : [],
+        habits: Array.isArray(p.habits) ? p.habits : [],
+        flexActions: Array.isArray(p.flexActions) ? p.flexActions : [],
+        matchups: Array.isArray(p.matchups) ? p.matchups : [],
+        gameHistory: Array.isArray(p.gameHistory) ? p.gameHistory : [],
+        workHistory: Array.isArray(p.workHistory) ? p.workHistory : [],
+        schedule: Array.isArray(p.schedule) ? p.schedule : [],
+        opponentDripSchedules: Array.isArray(p.opponentDripSchedules) ? p.opponentDripSchedules : []
+      };
+    }
+
+    function buildWeekNormalizeShape(state) {
+      const s = state || {};
+      return {
+        tasks: Array.isArray(s.tasks) ? s.tasks : [],
+        completions: Array.isArray(s.completions) ? s.completions : [],
+        players: Array.isArray(s.players) ? s.players : [],
+        habits: Array.isArray(s.habits) ? s.habits.map(auditNormalizeHabit) : [],
+        flexActions: Array.isArray(s.flexActions) ? s.flexActions : [],
+        gameHistory: Array.isArray(s.gameHistory) ? s.gameHistory : [],
+        matchups: Array.isArray(s.matchups) ? s.matchups : [],
+        schedule: Array.isArray(s.schedule) ? s.schedule : [],
+        opponentDripSchedules: Array.isArray(s.opponentDripSchedules) ? s.opponentDripSchedules : [],
+        workHistory: Array.isArray(s.workHistory) ? s.workHistory : [],
+        youImageId: typeof s.youImageId === 'string' ? s.youImageId : '',
+        youName: typeof s.youName === 'string' ? s.youName : '',
+        notes: typeof s.notes === 'string' ? s.notes : '',
+        habitTagColors: auditNormalizeHabitTagColors(s.habitTagColors)
+      };
+    }
+
+    function buildMatchupsLoadShape(rawState) {
+      const p = rawState || {};
+      return {
+        tasks: Array.isArray(p.tasks) ? p.tasks : [],
+        completions: Array.isArray(p.completions) ? p.completions : [],
+        players: Array.isArray(p.players) ? p.players : [],
+        habits: Array.isArray(p.habits) ? p.habits : [],
+        flexActions: Array.isArray(p.flexActions) ? p.flexActions : [],
+        gameHistory: Array.isArray(p.gameHistory) ? p.gameHistory : [],
+        matchups: Array.isArray(p.matchups) ? p.matchups : [],
+        schedule: Array.isArray(p.schedule) ? p.schedule : [],
+        opponentDripSchedules: Array.isArray(p.opponentDripSchedules) ? p.opponentDripSchedules : [],
+        youName: typeof p.youName === 'string' ? p.youName : ''
+      };
+    }
+
+    function buildMatchupsNormalizeShape(state) {
+      const s = state || {};
+      return {
+        tasks: Array.isArray(s.tasks) ? s.tasks : [],
+        completions: Array.isArray(s.completions) ? s.completions : [],
+        players: Array.isArray(s.players) ? s.players : [],
+        habits: Array.isArray(s.habits) ? s.habits.map(auditNormalizeHabit) : [],
+        flexActions: Array.isArray(s.flexActions) ? s.flexActions : [],
+        gameHistory: Array.isArray(s.gameHistory) ? s.gameHistory : [],
+        matchups: Array.isArray(s.matchups) ? s.matchups : [],
+        schedule: Array.isArray(s.schedule) ? s.schedule : [],
+        opponentDripSchedules: Array.isArray(s.opponentDripSchedules) ? s.opponentDripSchedules : [],
+        notes: typeof s.notes === 'string' ? s.notes : '',
+        habitTagColors: auditNormalizeHabitTagColors(s.habitTagColors)
+      };
+    }
+
+    function applySleepAndWorkMigrations(state) {
+      const next = cloneAuditState(state || {});
+      const completions = Array.isArray(next.completions) ? next.completions : [];
+      let changed = false;
+
+      completions.forEach(entry => {
+        if (!entry || typeof entry.title !== 'string') return;
+
+        if (entry.title.startsWith('Sleep Score')) {
+          const scoreMatch = entry.title.match(/\(([-+]?\d+(?:\.\d+)?)\)/);
+          const restedMatch = entry.title.match(/Rested\s+([-+]?\d+(?:\.\d+)?)/i);
+          const score = scoreMatch ? Number(scoreMatch[1]) : NaN;
+          const rested = restedMatch ? Number(restedMatch[1]) : Number(entry.sleepRested);
+          if (Number.isFinite(score)) {
+            const safeRested = Number.isFinite(rested) ? rested : 0;
+            const nextPts = window.TaskPointsCore?.sleepPoints
+              ? TaskPointsCore.sleepPoints(score, safeRested, next)
+              : (score / 10) + safeRested;
+            if (!Number.isFinite(entry.sleepRested)) {
+              entry.sleepRested = safeRested;
+              changed = true;
+            }
+            if (Math.abs((Number(entry.points) || 0) - Number(nextPts || 0)) > 0.0001) {
+              entry.points = Number(nextPts) || 0;
+              changed = true;
+            }
+          }
+        }
+
+        if (entry.title.startsWith('Work Score')) {
+          const scoreMatch = entry.title.match(/\(([-+]?\d+(?:\.\d+)?)\)/);
+          const hoursMatch = entry.title.match(/Hours\s+([-+]?\d+(?:\.\d+)?)/i);
+          const score = scoreMatch ? Number(scoreMatch[1]) : NaN;
+          const hours = hoursMatch ? Number(hoursMatch[1]) : Number(entry.workHours);
+          const safeHours = Number.isFinite(hours) ? Math.max(0, hours) : 0;
+          const safeScore = Number.isFinite(score) ? score : (Number(entry.points) || 0);
+          const nextPts = window.TaskPointsCore?.workPoints
+            ? TaskPointsCore.workPoints(safeScore, safeHours, next)
+            : safeScore + safeHours;
+          if (!Number.isFinite(entry.workHours) || Number(entry.workHours) !== safeHours) {
+            entry.workHours = safeHours;
+            changed = true;
+          }
+          if (entry.source !== 'work') {
+            entry.source = 'work';
+            changed = true;
+          }
+          const desiredTitle = Number.isFinite(score) ? `Work Score (${score}) — Hours ${safeHours}` : entry.title;
+          if (desiredTitle !== entry.title) {
+            entry.title = desiredTitle;
+            changed = true;
+          }
+          if (Math.abs((Number(entry.points) || 0) - Number(nextPts || 0)) > 0.0001) {
+            entry.points = Number(nextPts) || 0;
+            changed = true;
+          }
+        }
+      });
+
+      return { state: next, changed };
+    }
+
+    function adapterLog(rawInput) {
+      const storageState = cloneAuditState(rawInput || {});
+      const loaded = buildLogLoadShape(storageState);
+      let state = buildLogNormalizeShape(loaded);
+      const migration = applySleepAndWorkMigrations(state);
+      if (migration.changed) {
+        state = buildLogNormalizeShape(migration.state);
+        state = { ...loaded, ...state };
+      }
+      const derived = runSyncDerived(state);
+      if (derived.changed) {
+        state = { ...loaded, ...buildLogNormalizeShape(derived.state) };
+      } else {
+        state = { ...loaded, ...state };
+      }
+      return { state: cloneAuditState(state), mode: 'audit-mirror', logic: 'log load() + normalizeState() + migrateSleep/work + syncDerivedPointsIfNeeded/saveMerged merge' };
+    }
+
+    function adapterSettings(rawInput) {
+      const parsed = cloneAuditState(rawInput || {});
+      const state = window.TaskPointsCore?.normalizeState
+        ? TaskPointsCore.normalizeState(parsed)
+        : {
+            tasks: Array.isArray(parsed.tasks) ? parsed.tasks : [],
+            completions: Array.isArray(parsed.completions) ? parsed.completions : [],
+            players: Array.isArray(parsed.players) ? parsed.players : [],
+            habits: Array.isArray(parsed.habits) ? parsed.habits.map(auditNormalizeHabit) : [],
+            flexActions: Array.isArray(parsed.flexActions) ? parsed.flexActions : [],
+            gameHistory: Array.isArray(parsed.gameHistory) ? parsed.gameHistory : [],
+            matchups: Array.isArray(parsed.matchups) ? parsed.matchups : [],
+            schedule: Array.isArray(parsed.schedule) ? parsed.schedule : [],
+            workHistory: Array.isArray(parsed.workHistory) ? parsed.workHistory : [],
+            youImageId: typeof parsed.youImageId === 'string' ? parsed.youImageId : '',
+            youName: typeof parsed.youName === 'string' ? parsed.youName : '',
+            youPrimaryColor: auditNormalizeHexColor(parsed.youPrimaryColor) || '#1a383b',
+            youSecondaryColor: auditNormalizeHexColor(parsed.youSecondaryColor) || '#254c52',
+            notes: typeof parsed.notes === 'string' ? parsed.notes : '',
+            habitTagColors: auditNormalizeHabitTagColors(parsed.habitTagColors, { trimTag: true }),
+            scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
+              ? TaskPointsCore.normalizeScoringSettings(parsed.scoringSettings || {})
+              : (parsed.scoringSettings || {})
+          };
+      return { state: cloneAuditState(state), mode: window.TaskPointsCore?.normalizeState ? 'direct-core-helper' : 'audit-mirror', logic: 'settings loadSettingsState() normalize path (TaskPointsCore.normalizeState fallback normalizeSettingsState)' };
+    }
+
+    function adapterDaily(rawInput) {
+      const storageState = cloneAuditState(rawInput || {});
+      const loaded = buildDailyLoadShape(storageState);
+      let state = cloneAuditState(loaded);
+      const migration = applySleepAndWorkMigrations(state);
+      if (migration.changed) {
+        state = { ...loaded, ...buildDailyNormalizeShape(migration.state) };
+      }
+      const derived = runSyncDerived(state);
+      if (derived.changed) {
+        state = { ...loaded, ...buildDailyNormalizeShape(derived.state) };
+      }
+      return { state: cloneAuditState(state), mode: 'audit-mirror', logic: 'daily load() + migrateWork/migrateSleep + syncDerivedPointsIfNeeded + saveMerged(existing, partial)' };
+    }
+
+    function adapterWeek(rawInput) {
+      const loaded = buildWeekLoadShape(rawInput || {});
+      let state = cloneAuditState(loaded);
+      const derived = runSyncDerived(state);
+      if (derived.changed) {
+        state = { ...loaded, ...buildWeekNormalizeShape(derived.state) };
+      }
+      return { state: cloneAuditState(state), mode: 'audit-mirror', logic: 'week load() + syncDerivedPointsIfNeeded + saveMerged(existing, partial)' };
+    }
+
+    function adapterGamehub(rawInput) {
+      const loaded = cloneAuditState(rawInput || {});
+      let state = loaded;
+      if (window.TaskPointsCore?.normalizeState) {
+        state = TaskPointsCore.normalizeState(state || {});
+      }
+      const d = runSyncDerived(state);
+      state = d.state;
+      const m = runSyncYouMatchups(state);
+      state = m.state;
+      return { state: cloneAuditState(state), mode: 'direct-page-helper', logic: 'gamehub syncStateForDisplayOnly() (normalize + syncDerived + syncYouMatchups, read-only)' };
+    }
+
+    function adapterMatchups(rawInput) {
+      const loaded = buildMatchupsLoadShape(rawInput || {});
+      let state = cloneAuditState(loaded);
+      const synced = runSyncYouMatchups(state);
+      if (synced.changed) {
+        state = { ...loaded, ...buildMatchupsNormalizeShape(synced.state) };
+      }
+      return { state: cloneAuditState(state), mode: 'audit-mirror', logic: 'matchups load() + syncYouMatchupsWithCompletions(persist:false) + normalize/save shape' };
+    }
+
+    const AUDIT_PAGE_ADAPTERS = [
+      { id: 'log', page: 'log.html', run: adapterLog },
+      { id: 'settings', page: 'settings.html', run: adapterSettings },
+      { id: 'daily', page: 'daily.html', run: adapterDaily },
+      { id: 'week', page: 'week.html', run: adapterWeek },
+      { id: 'gamehub', page: 'gamehub.html', run: adapterGamehub },
+      { id: 'matchups', page: 'matchups.html', run: adapterMatchups }
+    ];
+
+    function summarizeNoOpStateDiff(beforeState, afterState) {
+      const before = stableNormalizeForDiff(beforeState || {});
+      const after = stableNormalizeForDiff(afterState || {});
+      const keySet = new Set([...Object.keys(before), ...Object.keys(after)]);
+      const changes = [];
+      keySet.forEach(key => {
+        if (NO_OP_DIFF_EXCLUDED_KEYS.has(key)) return;
+        const hadBefore = Object.prototype.hasOwnProperty.call(before, key);
+        const hasAfter = Object.prototype.hasOwnProperty.call(after, key);
+        if (!hadBefore && hasAfter) {
+          changes.push({ type: 'added', key, before: undefined, after: after[key] });
+          return;
+        }
+        if (hadBefore && !hasAfter) {
+          changes.push({ type: 'dropped', key, before: before[key], after: undefined });
+          return;
+        }
+        if (stableStringify(before[key]) !== stableStringify(after[key])) {
+          changes.push({ type: 'changed', key, before: before[key], after: after[key] });
+        }
+      });
+      return changes;
+    }
+
+    function summarizeValueShapeChange(beforeVal, afterVal) {
+      const isArrBefore = Array.isArray(beforeVal);
+      const isArrAfter = Array.isArray(afterVal);
+      if (isArrBefore && isArrAfter) return `array ${beforeVal.length}→${afterVal.length}`;
+      if (beforeVal && afterVal && typeof beforeVal === 'object' && typeof afterVal === 'object') {
+        const beforeKeys = Object.keys(beforeVal).length;
+        const afterKeys = Object.keys(afterVal).length;
+        return `object keys ${beforeKeys}→${afterKeys}`;
+      }
+      return `${formatVal(beforeVal)}→${formatVal(afterVal)}`;
+    }
+
+    function runNoOpPageVisitAudit(state) {
+      const results = AUDIT_PAGE_ADAPTERS.map(adapter => {
+        const baseline = cloneAuditState(state || {});
+        const runResult = adapter.run(cloneAuditState(baseline));
+        const next = runResult && runResult.state ? runResult.state : runResult;
+        const diffs = summarizeNoOpStateDiff(baseline, next);
+        return { adapter, diffs, runResult };
+      });
+      const failed = results.filter(r => r.diffs.length);
+      const details = [];
+      failed.forEach(r => {
+        const changedKeys = r.diffs.filter(d => d.type === 'changed').map(d => d.key);
+        const droppedKeys = r.diffs.filter(d => d.type === 'dropped').map(d => d.key);
+        const addedKeys = r.diffs.filter(d => d.type === 'added').map(d => d.key);
+        const defaultedKeys = r.diffs
+          .filter(d => d.type === 'changed' && Object.prototype.hasOwnProperty.call(DEFAULT_BY_KEY, d.key))
+          .filter(d => stableStringify(d.after) === stableStringify(DEFAULT_BY_KEY[d.key]))
+          .map(d => d.key);
+        const shapeHints = r.diffs.slice(0, 2).map(d => `${d.key} ${summarizeValueShapeChange(d.before, d.after)}`);
+        details.push(`${r.adapter.page} [${r.runResult?.mode || 'audit-mirror'}]: changed=${changedKeys.join(',') || '—'} dropped=${droppedKeys.join(',') || '—'} added=${addedKeys.join(',') || '—'} defaulted=${defaultedKeys.join(',') || '—'}${shapeHints.length ? ` (${shapeHints.join('; ')})` : ''}`);
+      });
+      return {
+        status: failed.length ? 'FAIL' : 'PASS',
+        expected: 'No important state mutations during page visit simulation',
+        actual: failed.length ? `${failed.length}/${results.length} page adapters mutated state` : `${results.length}/${results.length} page adapters remained read-only`,
+        details: failed.length ? details : results.map(r => `${r.adapter.page} [${r.runResult?.mode || 'audit-mirror'}]: no-op safe`)
+      };
+    }
+
+    function buildStickySentinelState(state) {
+      const seeded = cloneAuditState(state || {});
+      seeded.youName = 'Audit Sentinel User';
+      seeded.youImageId = 'audit-image-id';
+      seeded.youPrimaryColor = '#112233';
+      seeded.youSecondaryColor = '#334455';
+      seeded.scoringSettings = {
+        sleep: { enabled: true, baseDivisor: 100, baseMultiplier: 0.2 },
+        work: { enabled: true, baseMultiplier: 0.1, hoursMultiplier: 0.4 },
+        calories: { enabled: true, target: 2200, pointsPer100: 0.5 },
+        mood: { enabled: true, multiplier: 2 },
+        inertia: { enabled: true, multiplier: 0.2, windowDays: 3 }
+      };
+      seeded.habitTagColors = {
+        health: '#00aa11',
+        work: '#aa00cc'
+      };
+      seeded.workHistory = [
+        { dayKey: '2026-03-31', hours: 7.5 },
+        { dayKey: '2026-04-01', hours: 8 }
+      ];
+      return seeded;
+    }
+
+    function runStickyFieldPreservationAudit(state) {
+      const seeded = buildStickySentinelState(state);
+      const failures = [];
+      AUDIT_PAGE_ADAPTERS.forEach(adapter => {
+        const runResult = adapter.run(cloneAuditState(seeded));
+        const next = runResult && runResult.state ? runResult.state : runResult;
+        const fieldIssues = [];
+        STICKY_FIELDS.forEach(field => {
+          const expected = stableStringify(seeded[field]);
+          const actual = stableStringify(next[field]);
+          if (expected !== actual) {
+            fieldIssues.push(field);
+          }
+        });
+        if (fieldIssues.length) {
+          failures.push(`${adapter.page} [${runResult?.mode || 'audit-mirror'}]: ${fieldIssues.join(', ')}`);
+        }
+      });
+      return {
+        status: failures.length ? 'FAIL' : 'PASS',
+        expected: `Sticky fields preserved across ${AUDIT_PAGE_ADAPTERS.length} page adapters`,
+        actual: failures.length ? `${failures.length} page adapter(s) failed sticky checks` : 'All sticky fields preserved',
+        details: failures
+      };
+    }
 
     function auditWorkHoursLast14Days(state, endDateKey = TaskPointsCore.todayKey()) {
       const issues = [];
@@ -1557,6 +2073,30 @@ const actualTotal = round2(Number(derivedActualTotal) || 0);
         actual: integrityProblems.length ? integrityProblems.length + ' issue(s)' : 'No issues',
         details: integrityProblems,
         trace: 'Snapshot validation'
+      });
+
+      const noOpVisitAudit = runNoOpPageVisitAudit(state);
+      checks.push({
+        id: 'page-visit-read-only',
+        title: 'Page visit is read-only',
+        status: noOpVisitAudit.status,
+        expected: noOpVisitAudit.expected,
+        actual: noOpVisitAudit.actual,
+        details: noOpVisitAudit.details,
+        trace: 'per-page normalize/save simulation (in-memory adapters)',
+        tips: 'Investigate adapter/page normalize-save paths that mutate cloned state without user actions.'
+      });
+
+      const stickyFieldAudit = runStickyFieldPreservationAudit(state);
+      checks.push({
+        id: 'sticky-fields-preserved',
+        title: 'Sticky fields survive page save paths',
+        status: stickyFieldAudit.status,
+        expected: stickyFieldAudit.expected,
+        actual: stickyFieldAudit.actual,
+        details: stickyFieldAudit.details,
+        trace: 'critical keys preserved across page adapters',
+        tips: 'Ensure page-level normalize/save logic preserves sticky profile and settings fields.'
       });
 
       // New: Audit self-check (verifies other checks are wired correctly)
