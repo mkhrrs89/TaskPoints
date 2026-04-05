@@ -764,40 +764,56 @@
     }
 
     function buildWeekLoadShape(rawState) {
-      const p = rawState || {};
-      return {
-        tasks: Array.isArray(p.tasks) ? p.tasks : [],
-        completions: Array.isArray(p.completions) ? p.completions : [],
-        players: Array.isArray(p.players) ? p.players : [],
-        habits: Array.isArray(p.habits) ? p.habits : [],
-        flexActions: Array.isArray(p.flexActions) ? p.flexActions : [],
-        matchups: Array.isArray(p.matchups) ? p.matchups : [],
-        gameHistory: Array.isArray(p.gameHistory) ? p.gameHistory : [],
-        workHistory: Array.isArray(p.workHistory) ? p.workHistory : [],
-        schedule: Array.isArray(p.schedule) ? p.schedule : [],
-        opponentDripSchedules: Array.isArray(p.opponentDripSchedules) ? p.opponentDripSchedules : []
-      };
-    }
+  const p = rawState || {};
+  return {
+    tasks: Array.isArray(p.tasks) ? p.tasks : [],
+    completions: Array.isArray(p.completions) ? p.completions : [],
+    players: Array.isArray(p.players) ? p.players : [],
+    habits: Array.isArray(p.habits) ? p.habits : [],
+    flexActions: Array.isArray(p.flexActions) ? p.flexActions : [],
+    matchups: Array.isArray(p.matchups) ? p.matchups : [],
+    gameHistory: Array.isArray(p.gameHistory) ? p.gameHistory : [],
+    workHistory: Array.isArray(p.workHistory) ? p.workHistory : [],
+    schedule: Array.isArray(p.schedule) ? p.schedule : [],
+    opponentDripSchedules: Array.isArray(p.opponentDripSchedules) ? p.opponentDripSchedules : [],
+    youImageId: typeof p.youImageId === 'string' ? p.youImageId : '',
+    youName: typeof p.youName === 'string' ? p.youName : '',
+    youPrimaryColor: auditNormalizeHexColor(p.youPrimaryColor) || '#1a383b',
+    youSecondaryColor: auditNormalizeHexColor(p.youSecondaryColor) || '#254c52',
+    projects: Array.isArray(p.projects) ? p.projects : [],
+    notes: typeof p.notes === 'string' ? p.notes : '',
+    habitTagColors: auditNormalizeHabitTagColors(p.habitTagColors),
+    scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
+      ? TaskPointsCore.normalizeScoringSettings(p.scoringSettings || {})
+      : (p.scoringSettings || {})
+  };
+}
 
     function buildWeekNormalizeShape(state) {
-      const s = state || {};
-      return {
-        tasks: Array.isArray(s.tasks) ? s.tasks : [],
-        completions: Array.isArray(s.completions) ? s.completions : [],
-        players: Array.isArray(s.players) ? s.players : [],
-        habits: Array.isArray(s.habits) ? s.habits.map(auditNormalizeHabit) : [],
-        flexActions: Array.isArray(s.flexActions) ? s.flexActions : [],
-        gameHistory: Array.isArray(s.gameHistory) ? s.gameHistory : [],
-        matchups: Array.isArray(s.matchups) ? s.matchups : [],
-        schedule: Array.isArray(s.schedule) ? s.schedule : [],
-        opponentDripSchedules: Array.isArray(s.opponentDripSchedules) ? s.opponentDripSchedules : [],
-        workHistory: Array.isArray(s.workHistory) ? s.workHistory : [],
-        youImageId: typeof s.youImageId === 'string' ? s.youImageId : '',
-        youName: typeof s.youName === 'string' ? s.youName : '',
-        notes: typeof s.notes === 'string' ? s.notes : '',
-        habitTagColors: auditNormalizeHabitTagColors(s.habitTagColors)
-      };
-    }
+  const s = state || {};
+  return {
+    tasks: Array.isArray(s.tasks) ? s.tasks : [],
+    completions: Array.isArray(s.completions) ? s.completions : [],
+    players: Array.isArray(s.players) ? s.players : [],
+    habits: Array.isArray(s.habits) ? s.habits.map(auditNormalizeHabit) : [],
+    flexActions: Array.isArray(s.flexActions) ? s.flexActions : [],
+    gameHistory: Array.isArray(s.gameHistory) ? s.gameHistory : [],
+    matchups: Array.isArray(s.matchups) ? s.matchups : [],
+    schedule: Array.isArray(s.schedule) ? s.schedule : [],
+    opponentDripSchedules: Array.isArray(s.opponentDripSchedules) ? s.opponentDripSchedules : [],
+    workHistory: Array.isArray(s.workHistory) ? s.workHistory : [],
+    youImageId: typeof s.youImageId === 'string' ? s.youImageId : '',
+    youName: typeof s.youName === 'string' ? s.youName : '',
+    youPrimaryColor: auditNormalizeHexColor(s.youPrimaryColor) || '#1a383b',
+    youSecondaryColor: auditNormalizeHexColor(s.youSecondaryColor) || '#254c52',
+    projects: Array.isArray(s.projects) ? s.projects : [],
+    notes: typeof s.notes === 'string' ? s.notes : '',
+    habitTagColors: auditNormalizeHabitTagColors(s.habitTagColors),
+    scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
+      ? TaskPointsCore.normalizeScoringSettings(s.scoringSettings || {})
+      : (s.scoringSettings || {})
+  };
+}
 
     function buildMatchupsLoadShape(rawState) {
       const p = rawState || {};
