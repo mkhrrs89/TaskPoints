@@ -627,12 +627,12 @@
       return value || {};
     }
 
-    function auditStickyFieldEqual(key, beforeValue, afterValue) {
-      if (key === 'scoringSettings') {
-        return JSON.stringify(auditCanonicalScoringSettings(beforeValue)) ===
-          JSON.stringify(auditCanonicalScoringSettings(afterValue));
+    function auditStickyFieldEqual(field, beforeValue, afterValue) {
+      if (field === 'scoringSettings') {
+        return stableStringify(auditCanonicalScoringSettings(beforeValue)) ===
+               stableStringify(auditCanonicalScoringSettings(afterValue));
       }
-      return JSON.stringify(beforeValue) === JSON.stringify(afterValue);
+      return stableStringify(beforeValue) === stableStringify(afterValue);
     }
 
     function auditNormalizeHexColor(value) {
@@ -1143,9 +1143,9 @@
         const next = runResult && runResult.state ? runResult.state : runResult;
         const fieldIssues = [];
         STICKY_FIELDS.forEach(field => {
-          const expected = seeded[field];
-          const actual = next[field];
-          if (!auditStickyFieldEqual(field, expected, actual)) {
+          const beforeValue = seeded[field];
+          const afterValue = next[field];
+          if (!auditStickyFieldEqual(field, beforeValue, afterValue)) {
             fieldIssues.push(field);
           }
         });
