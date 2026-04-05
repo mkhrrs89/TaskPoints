@@ -405,15 +405,26 @@ function readPageStateFresh() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) {
       pageStateCache = {
-        tasks:       [],
+        tasks: [],
         completions: [],
-        players:     [],
-        habits:      [],
+        players: [],
+        habits: [],
         flexActions: [],
-        matchups:    [],
+        matchups: [],
         gameHistory: [],
         workHistory: [],
-        schedule:    []
+        schedule: [],
+        opponentDripSchedules: [],
+        youImageId: "",
+        youName: "",
+        youPrimaryColor: "#1a383b",
+        youSecondaryColor: "#254c52",
+        projects: [],
+        notes: "",
+        habitTagColors: {},
+        scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
+          ? TaskPointsCore.normalizeScoringSettings({})
+          : {}
       };
       pageStateCacheDirty = false;
       return pageStateCache;
@@ -421,30 +432,50 @@ function readPageStateFresh() {
 
     const p = JSON.parse(raw) || {};
     pageStateCache = {
-      tasks:       Array.isArray(p.tasks)       ? p.tasks       : [],
+      tasks: Array.isArray(p.tasks) ? p.tasks : [],
       completions: Array.isArray(p.completions) ? p.completions : [],
-      players:     Array.isArray(p.players)     ? p.players     : [],
-      habits:      Array.isArray(p.habits)      ? p.habits      : [],
+      players: Array.isArray(p.players) ? p.players : [],
+      habits: Array.isArray(p.habits) ? p.habits : [],
       flexActions: Array.isArray(p.flexActions) ? p.flexActions : [],
-      matchups:    Array.isArray(p.matchups)    ? p.matchups    : [],
+      matchups: Array.isArray(p.matchups) ? p.matchups : [],
       gameHistory: Array.isArray(p.gameHistory) ? p.gameHistory : [],
       workHistory: Array.isArray(p.workHistory) ? p.workHistory : [],
-      schedule:    Array.isArray(p.schedule)    ? p.schedule    : [],
-      opponentDripSchedules: Array.isArray(p.opponentDripSchedules) ? p.opponentDripSchedules : []
+      schedule: Array.isArray(p.schedule) ? p.schedule : [],
+      opponentDripSchedules: Array.isArray(p.opponentDripSchedules) ? p.opponentDripSchedules : [],
+      youImageId: typeof p.youImageId === "string" ? p.youImageId : "",
+      youName: typeof p.youName === "string" ? p.youName : "",
+      youPrimaryColor: normalizeHexColor(p.youPrimaryColor) || "#1a383b",
+      youSecondaryColor: normalizeHexColor(p.youSecondaryColor) || "#254c52",
+      projects: Array.isArray(p.projects) ? p.projects : [],
+      notes: typeof p.notes === "string" ? p.notes : "",
+      habitTagColors: normalizeHabitTagColors(p.habitTagColors),
+      scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
+        ? TaskPointsCore.normalizeScoringSettings(p.scoringSettings || {})
+        : (p.scoringSettings || {})
     };
   } catch (e) {
     console.error("week load error", e);
     pageStateCache = {
-      tasks:       [],
+      tasks: [],
       completions: [],
-      players:     [],
-      habits:      [],
+      players: [],
+      habits: [],
       flexActions: [],
-      matchups:    [],
+      matchups: [],
       gameHistory: [],
       workHistory: [],
-      schedule:    [],
-      opponentDripSchedules: []
+      schedule: [],
+      opponentDripSchedules: [],
+      youImageId: "",
+      youName: "",
+      youPrimaryColor: "#1a383b",
+      youSecondaryColor: "#254c52",
+      projects: [],
+      notes: "",
+      habitTagColors: {},
+      scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
+        ? TaskPointsCore.normalizeScoringSettings({})
+        : {}
     };
   }
   pageStateCacheDirty = false;
@@ -492,20 +523,26 @@ syncDerivedPointsIfNeeded();
 
   function normalizeState(s) {
   return {
-    tasks:       Array.isArray(s.tasks)       ? s.tasks       : [],
+    tasks: Array.isArray(s.tasks) ? s.tasks : [],
     completions: Array.isArray(s.completions) ? s.completions : [],
-    players:     Array.isArray(s.players)     ? s.players     : [],
-    habits:      Array.isArray(s.habits)      ? s.habits.map(normalizeHabit)      : [],
+    players: Array.isArray(s.players) ? s.players : [],
+    habits: Array.isArray(s.habits) ? s.habits.map(normalizeHabit) : [],
     flexActions: Array.isArray(s.flexActions) ? s.flexActions : [],
     gameHistory: Array.isArray(s.gameHistory) ? s.gameHistory : [],
-    matchups:    Array.isArray(s.matchups)    ? s.matchups    : [],
-    schedule:    Array.isArray(s.schedule)    ? s.schedule    : [],
+    matchups: Array.isArray(s.matchups) ? s.matchups : [],
+    schedule: Array.isArray(s.schedule) ? s.schedule : [],
     opponentDripSchedules: Array.isArray(s.opponentDripSchedules) ? s.opponentDripSchedules : [],
     workHistory: Array.isArray(s.workHistory) ? s.workHistory : [],
-    youImageId:  typeof s.youImageId === "string" ? s.youImageId : "",
+    youImageId: typeof s.youImageId === "string" ? s.youImageId : "",
     youName: typeof s.youName === "string" ? s.youName : "",
+    youPrimaryColor: normalizeHexColor(s.youPrimaryColor) || "#1a383b",
+    youSecondaryColor: normalizeHexColor(s.youSecondaryColor) || "#254c52",
+    projects: Array.isArray(s.projects) ? s.projects : [],
     notes: typeof s.notes === "string" ? s.notes : "",
-    habitTagColors: normalizeHabitTagColors(s.habitTagColors)
+    habitTagColors: normalizeHabitTagColors(s.habitTagColors),
+    scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
+      ? TaskPointsCore.normalizeScoringSettings(s.scoringSettings || {})
+      : (s.scoringSettings || {})
   };
 }
 
