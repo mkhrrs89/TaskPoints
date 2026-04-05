@@ -620,6 +620,21 @@
       return JSON.stringify(stableNormalizeForDiff(value));
     }
 
+    function auditCanonicalScoringSettings(value) {
+      if (window.TaskPointsCore?.normalizeScoringSettings) {
+        return TaskPointsCore.normalizeScoringSettings(value || {});
+      }
+      return value || {};
+    }
+
+    function auditStickyFieldEqual(key, beforeValue, afterValue) {
+      if (key === 'scoringSettings') {
+        return JSON.stringify(auditCanonicalScoringSettings(beforeValue)) ===
+          JSON.stringify(auditCanonicalScoringSettings(afterValue));
+      }
+      return JSON.stringify(beforeValue) === JSON.stringify(afterValue);
+    }
+
     function auditNormalizeHexColor(value) {
       if (!value) return null;
       let hex = String(value).trim();
@@ -1128,9 +1143,9 @@
         const next = runResult && runResult.state ? runResult.state : runResult;
         const fieldIssues = [];
         STICKY_FIELDS.forEach(field => {
-          const expected = stableStringify(seeded[field]);
-          const actual = stableStringify(next[field]);
-          if (expected !== actual) {
+          const expected = seeded[field];
+          const actual = next[field];
+          if (!auditStickyFieldEqual(field, expected, actual)) {
             fieldIssues.push(field);
           }
         });
