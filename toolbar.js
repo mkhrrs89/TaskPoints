@@ -277,6 +277,11 @@ function renderBottomToolbar() {
             <span class="uppercase tracking-wide text-[10px]">Skills</span>
           </a>
 
+          <a href="tournament.html" class="mobile-bottom-nav-btn flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
+            <span class="tp-nav-icon flex items-center justify-center rounded-full border border-slate-400/60 text-slate-100 text-base leading-none">🏆</span>
+            <span class="uppercase tracking-wide text-[10px]">Tourney</span>
+          </a>
+
           <div class="mobile-bottom-nav-slot-spacer" aria-hidden="true"></div>
         </div>
       </div>
