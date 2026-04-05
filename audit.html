@@ -176,9 +176,7 @@
     const $ = (id) => document.getElementById(id);
 
     function defaultAuditDate() {
-      const d = new Date();
-      d.setDate(d.getDate() - 1);
-      return TaskPointsCore.dateKey(d);
+      return TaskPointsCore.todayKey();
     }
 
     function setStatus(label, tone = 'idle') {
