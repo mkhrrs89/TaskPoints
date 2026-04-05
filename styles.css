@@ -1444,7 +1444,7 @@ body {
 
 #mobileAddTaskFab{
   right: 0.75rem;
-  bottom: calc(var(--tp-toolbar-height) + var(--tp-safe-bottom) + 4.1rem);
+  bottom: calc(var(--tp-toolbar-height) + var(--tp-safe-bottom) + 0.4rem - 4px);
   min-height: 50px;
   min-width: 132px;
   border-radius: 18px;
@@ -1464,27 +1464,6 @@ body {
 }
 
 
-#goToTasksFab{
-  right: 0.75rem;
-  bottom: calc(var(--tp-toolbar-height) + var(--tp-safe-bottom) + 0.4rem - 4px);
-  min-height: 52px;
-  min-width: 144px;
-  border-radius: 18px;
-  z-index: calc(var(--tp-z-floating) + 1) !important;
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-  transition: transform 170ms ease, opacity 170ms ease;
-}
-
-#goToTasksFab:hover{
-  transform: translateY(-1px);
-}
-
-#goToTasksFab:active,
-#goToTasksFab.is-pressed{
-  animation: tpFabPress 180ms cubic-bezier(.34,1.56,.64,1);
-}
-
 @keyframes tpFabPress{
   0% { transform: translateY(0) scale(1); }
   50% { transform: translateY(1px) scale(0.96); }
@@ -1492,13 +1471,11 @@ body {
 }
 
 @media (min-width: 768px){
-  #mobileAddTaskFab,
-  #goToTasksFab{ display: none !important; }
+  #mobileAddTaskFab{ display: none !important; }
 }
 
 
-body.mobile-toolbar-expanded #mobileAddTaskFab,
-body.mobile-toolbar-expanded #goToTasksFab{
+body.mobile-toolbar-expanded #mobileAddTaskFab{
   pointer-events: none;
   opacity: 0;
 }
