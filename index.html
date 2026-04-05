@@ -61,7 +61,6 @@ Nothing visible on the page is built here. === -->
     html.tp-boot-pending #bottomToolbarMount,
     html.tp-boot-pending #mobileBottomNav,
     html.tp-boot-pending #mobileAddTaskFab,
-    html.tp-boot-pending #goToTasksFab,
     html.tp-boot-pending #bottomToolbarMount:empty::before {
       opacity:0 !important;
       visibility:hidden !important;
@@ -9713,20 +9712,10 @@ function tpPerfMark(label) {
   <span>Add Task</span>
 </button>
 
-<button
-  id="goToTasksFab"
-  class="hidden md:hidden tp-floating-island btn btn-teal rounded-full shadow-lg px-4 py-2 text-sm font-semibold flex items-center justify-center"
-  type="button"
-  aria-label="Go to tasks section"
->
-  Go To Tasks
-</button>
-
 <div id="bottomToolbarMount"></div>
 
 <script>
   (() => {
-    const fab = document.getElementById('goToTasksFab');
     const addTaskFab = document.getElementById('mobileAddTaskFab');
     const reminderFab = document.getElementById('mobileReminderIsland');
     const reminderModal = document.getElementById('undatedReminderModal');
@@ -9734,7 +9723,7 @@ function tpPerfMark(label) {
     const reminderTaskTitle = document.getElementById('undatedReminderTaskTitle');
     const reminderTaskMeta = document.getElementById('undatedReminderTaskMeta');
     const tasksSection = document.getElementById('tasksSection') || document.getElementById('tasksAnchor');
-    if (!fab || !tasksSection) return;
+    if (!tasksSection) return;
 
 const mobileQuery = window.matchMedia('(max-width: 767px)');
 let tasksInView = false;
@@ -9810,12 +9799,6 @@ let reminderTaskId = null;
       });
     };
 
-    const pressFab = () => {
-      fab.classList.remove('is-pressed');
-      void fab.offsetWidth;
-      fab.classList.add('is-pressed');
-    };
-
     const pressAddFab = () => {
       if (!addTaskFab) return;
       addTaskFab.classList.remove('is-pressed');
@@ -9861,7 +9844,6 @@ const dismissReminderForSession = () => {
     const updateFabVisibility = () => {
       const shouldShow = mobileQuery.matches && !tasksInView;
       const hasReminderTask = Boolean(getReminderTask());
-      fab.classList.toggle('hidden', !shouldShow);
       if (addTaskFab) addTaskFab.classList.toggle('hidden', !mobileQuery.matches);
       if (reminderFab) {
         const showReminder = mobileQuery.matches && shouldShow && hasReminderTask && !reminderDismissed;
@@ -9899,17 +9881,6 @@ const dismissReminderForSession = () => {
     }
 
     mobileQuery.addEventListener('change', updateFabVisibility);
-    fab.addEventListener('pointerdown', pressFab);
-    fab.addEventListener('click', () => {
-      pressFab();
-      if (typeof window.scrollToTasks === 'function') {
-        window.scrollToTasks();
-      } else {
-        tasksSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        window.setTimeout(() => window.scrollBy(0, -12), 220);
-      }
-    });
-    fab.addEventListener('animationend', () => fab.classList.remove('is-pressed'));
 
     if (addTaskFab) {
       addTaskFab.addEventListener('pointerdown', pressAddFab);
