@@ -268,9 +268,9 @@
     const workHoursMin = Object.prototype.hasOwnProperty.call(workInput, 'hoursMin')
       ? toFiniteNumber(workInput.hoursMin)
       : null;
-    const workHoursMax = Object.prototype.hasOwnProperty.call(workInput, 'hoursMax')
-      ? toFiniteNumber(workInput.hoursMax)
-      : null;
+const workHoursMax = Object.prototype.hasOwnProperty.call(workInput, 'hoursMax')
+  ? (workInput.hoursMax === null ? null : toFiniteNumber(workInput.hoursMax))
+  : null;
 
     const caloriesTarget = toFiniteNumber(caloriesInput.target);
     const caloriesPointsPer100 = toFiniteNumber(caloriesInput.pointsPer100);
