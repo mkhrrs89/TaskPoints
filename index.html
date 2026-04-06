@@ -3427,6 +3427,113 @@ function computeHabitStreak(h){
   return streak;
 }
 
+function computeHabitFailedStreak(h){
+  const doneKeys = Array.isArray(h?.doneKeys) ? h.doneKeys : [];
+  const failedKeys = Array.isArray(h?.failedKeys) ? h.failedKeys : [];
+  const category = (h?.category || 'habit');
+
+  if (computeHabitStreak(h) > 0) return 0;
+
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  const todayKeyStr = dateKey(today);
+
+  if (category === 'vice') {
+    const dates = failedKeys
+      .map(k => fromKey(k))
+      .filter(d => d && !isNaN(d))
+      .map(d => {
+        const x = new Date(d.getTime());
+        x.setHours(0,0,0,0);
+        return x;
+      })
+      .filter(d => d <= today)
+      .sort((a, b) => b - a);
+
+    if (!dates.length) return 0;
+
+    const mostRecent = dates[0];
+    const diffToToday = Math.round((today - mostRecent) / 86400000);
+    const isMarkedToday = doneKeys.includes(todayKeyStr) || failedKeys.includes(todayKeyStr);
+
+    if (diffToToday > 1) return 0;
+    if (diffToToday === 1 && isMarkedToday) return 0;
+    if (diffToToday < 0) return 0;
+
+    let streak = 1;
+    let prev = mostRecent;
+
+    for (let i = 1; i < dates.length; i++) {
+      const diffDays = Math.round((prev - dates[i]) / 86400000);
+      if (diffDays === 1) {
+        streak++;
+        prev = dates[i];
+      } else {
+        break;
+      }
+    }
+    return streak;
+  }
+
+  const doneSet = new Set(
+    doneKeys
+      .map(k => fromKey(k))
+      .filter(d => d && !isNaN(d))
+      .map(d => {
+        const x = new Date(d.getTime());
+        x.setHours(0,0,0,0);
+        return dateKey(x);
+      })
+  );
+
+  if (doneSet.has(todayKeyStr)) return 0;
+
+  let start = null;
+
+  if (h?.createdAtISO) {
+    const d = new Date(h.createdAtISO);
+    if (!isNaN(d)) {
+      d.setHours(0,0,0,0);
+      start = d;
+    }
+  }
+
+  if (!start) {
+    const earliestDone = doneKeys
+      .map(k => fromKey(k))
+      .filter(d => d && !isNaN(d))
+      .sort((a, b) => a - b)[0];
+    if (earliestDone) {
+      const d = new Date(earliestDone.getTime());
+      d.setHours(0,0,0,0);
+      start = d;
+    }
+  }
+
+  if (!start) {
+    const earliestFailed = failedKeys
+      .map(k => fromKey(k))
+      .filter(d => d && !isNaN(d))
+      .sort((a, b) => a - b)[0];
+    if (earliestFailed) {
+      const d = new Date(earliestFailed.getTime());
+      d.setHours(0,0,0,0);
+      start = d;
+    }
+  }
+
+  if (!start) return 0;
+  if (start > today) return 0;
+
+  let streak = 0;
+  for (let cursor = new Date(today.getTime()); cursor >= start; cursor = addDays(cursor, -1)) {
+    if (doneSet.has(dateKey(cursor))) break;
+    streak++;
+  }
+
+  return streak;
+}
+
 function computeHabitCompletion(h){
   if (!h) return 0;
 
@@ -4614,6 +4721,7 @@ function renderHabitRow(h, days, wrap, options = {}) {
   h.doneKeys = Array.isArray(h.doneKeys) ? h.doneKeys : [];
 
   const streak     = Number(h.__streak || 0);
+  const failedStreak = Number(h.__failedStreak || 0);
   const completion = Number(h.__completion || 0);
 
   const row = document.createElement('div');
@@ -4683,7 +4791,11 @@ const daysHtml = days.map(d => {
       <div class="tag streak-pill">
         ${streak}d
       </div>
-    ` : ''}
+    ` : (failedStreak > 0 ? `
+      <div class="tag streak-pill failed-streak-pill">
+        ${failedStreak}d
+      </div>
+    ` : '')}
       <div class="tag bg-zinc-200/60 dark:bg-zinc-700/60 text-orange-400">
         ${completion}%
       </div>
@@ -4727,7 +4839,9 @@ function renderHabits(){
   // Precompute streak + completion once so sorting is stable + fast
   habits.forEach(h => {
     h.doneKeys = Array.isArray(h.doneKeys) ? h.doneKeys : [];
+    h.failedKeys = Array.isArray(h.failedKeys) ? h.failedKeys : [];
     h.__streak = computeHabitStreak(h);
+    h.__failedStreak = computeHabitFailedStreak(h);
     h.__completion = computeHabitCompletion(h);
   });
 
@@ -4877,8 +4991,9 @@ function renderVices(){
   habits.forEach(h => {
     h.doneKeys = Array.isArray(h.doneKeys) ? h.doneKeys : [];
     h.failedKeys = Array.isArray(h.failedKeys) ? h.failedKeys : [];
-    const streak     = computeHabitStreak(h);
-    const completion = computeHabitCompletion(h);
+    const streak       = computeHabitStreak(h);
+    const failedStreak = computeHabitFailedStreak(h);
+    const completion   = computeHabitCompletion(h);
     const row = document.createElement('div');
 
     row.className = 'habitRow';
@@ -4947,7 +5062,11 @@ const nameHtml = `
     <div class="tag streak-pill">
       ${streak}d
     </div>
-  ` : ''}
+  ` : (failedStreak > 0 ? `
+    <div class="tag streak-pill failed-streak-pill">
+      ${failedStreak}d
+    </div>
+  ` : '')}
     <div class="tag bg-zinc-200/60 dark:bg-zinc-700/60 text-orange-400">
       ${completion}%
     </div>
