@@ -843,28 +843,19 @@ function getSortValue(p, key) {
         });
       });
 
-      const tbody = $("playersTableBody");
-      if (tbody) {
-        let lastPointerActivationAt = 0;
-        const activateEditableCell = (event) => {
-          const cell = event.target.closest("td.editable-cell");
-          if (!cell) return;
-          if (event.target.closest("[data-editor='true']")) return;
-          beginEdit(cell.dataset.playerId, cell.dataset.field);
-        };
+const tbody = $("playersTableBody");
+if (tbody) {
+  const activateEditableCell = (event) => {
+    const cell = event.target.closest("td.editable-cell");
+    if (!cell) return;
+    if (event.target.closest("[data-editor='true']")) return;
+    beginEdit(cell.dataset.playerId, cell.dataset.field);
+  };
 
-        tbody.addEventListener("pointerdown", (event) => {
-          if (event.button != null && event.button !== 0) return;
-          lastPointerActivationAt = event.timeStamp || Date.now();
-          activateEditableCell(event);
-        });
-
-        tbody.addEventListener("click", (event) => {
-          const ts = event.timeStamp || Date.now();
-          if (ts - lastPointerActivationAt < 400) return;
-          activateEditableCell(event);
-        });
-      }
+  tbody.addEventListener("click", (event) => {
+    activateEditableCell(event);
+  });
+}
 
       renderTable();
     });
