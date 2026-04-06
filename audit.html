@@ -1140,57 +1140,35 @@ function buildLogNormalizeShape(state) {
       return seeded;
     }
 
-    function runStickyFieldPreservationAudit(state) {
-      const seeded = buildStickySentinelState(state);
-      const failures = [];
-      AUDIT_PAGE_ADAPTERS.forEach(adapter => {
-        const runResult = adapter.run(cloneAuditState(seeded));
-        const next = runResult && runResult.state ? runResult.state : runResult;
-        const fieldIssues = [];
-        STICKY_FIELDS.forEach(field => {
-          const beforeValue = seeded[field];
-          const afterValue = next[field];
-          if (!auditStickyFieldEqual(field, beforeValue, afterValue)) {
-            fieldIssues.push(field);
-          }
-        });
-        if (fieldIssues.length) {
-          failures.push(`${adapter.page} [${runResult?.mode || 'audit-mirror'}]: ${fieldIssues.join(', ')}`);
-          if (fieldIssues.includes('scoringSettings')) {
-            const scoringBeforeRaw = seeded.scoringSettings;
-            const scoringAfterRaw = next.scoringSettings;
-            const scoringBeforeCanonical = auditCanonicalScoringSettings(scoringBeforeRaw);
-            const scoringAfterCanonical = auditCanonicalScoringSettings(scoringAfterRaw);
-            const scoringBeforeStable = stableStringify(scoringBeforeCanonical);
-            const scoringAfterStable = stableStringify(scoringAfterCanonical);
-            const scoringHelperPresent = !!window.TaskPointsCore?.normalizeScoringSettings;
+function runStickyFieldPreservationAudit(state) {
+  const seeded = buildStickySentinelState(state);
+  const failures = [];
 
-            failures.push(`${adapter.page}: scoringSettings helperPresent=${scoringHelperPresent}`);
-            failures.push(`${adapter.page}: scoringSettings raw before=${stableStringify(scoringBeforeRaw)}`);
-            failures.push(`${adapter.page}: scoringSettings raw after=${stableStringify(scoringAfterRaw)}`);
-            failures.push(`${adapter.page}: scoringSettings canonical before=${scoringBeforeStable}`);
-            failures.push(`${adapter.page}: scoringSettings canonical after=${scoringAfterStable}`);
+  AUDIT_PAGE_ADAPTERS.forEach(adapter => {
+    const runResult = adapter.run(cloneAuditState(seeded));
+    const next = runResult && runResult.state ? runResult.state : runResult;
+    const fieldIssues = [];
 
-            console.log('[AUDIT scoringSettings mismatch]', {
-              adapter: adapter.page,
-              helperPresent: scoringHelperPresent,
-              beforeRaw: scoringBeforeRaw,
-              afterRaw: scoringAfterRaw,
-              beforeCanonical: scoringBeforeCanonical,
-              afterCanonical: scoringAfterCanonical,
-              beforeStable: scoringBeforeStable,
-              afterStable: scoringAfterStable
-            });
-          }
-        }
-      });
-      return {
-        status: failures.length ? 'FAIL' : 'PASS',
-        expected: `Sticky fields preserved across ${AUDIT_PAGE_ADAPTERS.length} page adapters`,
-        actual: failures.length ? `${failures.length} page adapter(s) failed sticky checks` : 'All sticky fields preserved',
-        details: failures
-      };
+    STICKY_FIELDS.forEach(field => {
+      const beforeValue = seeded[field];
+      const afterValue = next[field];
+      if (!auditStickyFieldEqual(field, beforeValue, afterValue)) {
+        fieldIssues.push(field);
+      }
+    });
+
+    if (fieldIssues.length) {
+      failures.push(`${adapter.page} [${runResult?.mode || 'audit-mirror'}]: ${fieldIssues.join(', ')}`);
     }
+  });
+
+  return {
+    status: failures.length ? 'FAIL' : 'PASS',
+    expected: `Sticky fields preserved across ${AUDIT_PAGE_ADAPTERS.length} page adapters`,
+    actual: failures.length ? `${failures.length} page adapter(s) failed sticky checks` : 'All sticky fields preserved',
+    details: failures
+  };
+}
 
     function auditWorkHoursLast14Days(state, endDateKey = TaskPointsCore.todayKey()) {
       const issues = [];
