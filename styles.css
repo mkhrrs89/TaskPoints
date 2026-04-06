@@ -2356,6 +2356,10 @@ header,
   border-radius: 0 !important;
 }
 
+.habitRow .tag.streak-pill.failed-streak-pill{
+  color:#ef4444;
+}
+
     .habitName{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 
