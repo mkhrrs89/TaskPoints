@@ -210,6 +210,7 @@ function buildMobileBottomNavLinks() {
         <a href="matchups.html" class="btn btn-teal btn-toolbar nav-btn">Matchups</a>
         <a href="schedule.html" class="btn btn-teal btn-toolbar nav-btn">Schedule</a>
         <a href="standings.html" class="btn btn-teal btn-toolbar nav-btn">Standings</a>
+        <a href="rankings.html" class="btn btn-teal btn-toolbar nav-btn">Rankings</a>
       </div>
     </div>
 
