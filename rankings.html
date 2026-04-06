@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+  <title>TaskPoints — Rankings</title>
+
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="TaskPoints" />
+
+  <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='256' height='256'><rect width='256' height='256' fill='%230b0d10'/><text x='128' y='160' text-anchor='middle' font-size='150' fill='white'>TP</text></svg>">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='%230b0d10'/><text x='50' y='62' font-size='60' text-anchor='middle' fill='white'>TP</text></svg>">
+
+  <link rel="stylesheet" href="assets/tailwind.css">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="preload" href="toolbar.js" as="script">
+  <script src="toolbar.js" defer></script>
+
+  <style>
+    body { background:#0a0a0a; color:#fafafa; }
+
+    .rankings-shell {
+      border:1px solid rgba(63,63,70,0.9);
+      background:rgba(24,24,27,0.92);
+      border-radius:18px;
+      padding:16px;
+      box-shadow:0 14px 34px rgba(0,0,0,0.35);
+    }
+
+    .rankings-list { display:flex; flex-direction:column; gap:12px; }
+
+    .ranking-row {
+      display:grid;
+      grid-template-columns: minmax(48px,72px) 64px minmax(0,1fr);
+      align-items:center;
+      gap:12px;
+      border:1px solid rgba(63,63,70,0.95);
+      background:rgba(9,9,11,0.92);
+      border-radius:16px;
+      padding:14px;
+      min-height:94px;
+    }
+
+    .ranking-index {
+      font-size:2rem;
+      line-height:1;
+      font-weight:900;
+      color:#22d3ee;
+      letter-spacing:-0.02em;
+      text-align:center;
+    }
+
+    .ranking-avatar {
+      width:64px;
+      height:64px;
+      border-radius:9999px;
+      object-fit:cover;
+      border:2px solid rgba(82,82,91,0.9);
+      background:rgba(39,39,42,0.95);
+      overflow:hidden;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-size:11px;
+      color:rgba(228,228,231,0.8);
+      text-transform:uppercase;
+      letter-spacing:0.05em;
+    }
+
+    .ranking-name { font-size:1.08rem; font-weight:700; line-height:1.2; }
+    .ranking-record { font-size:0.9rem; color:rgba(212,212,216,0.9); }
+    .ranking-ratings { font-size:0.82rem; color:rgba(161,161,170,1); }
+
+    @media (max-width: 520px) {
+      .ranking-row {
+        grid-template-columns: 48px 56px minmax(0,1fr);
+        gap:10px;
+        padding:12px;
+      }
+      .ranking-index { font-size:1.6rem; }
+      .ranking-avatar { width:56px; height:56px; }
+    }
+  </style>
+</head>
+
+<body class="min-h-screen">
+  <div class="mx-auto max-w-6xl p-4 sm:p-6">
+    <div class="flex items-center justify-between gap-3 mb-3 md:hidden">
+      <a href="index.html" class="flex items-center gap-3">
+        <img src="assets/taskpoints-logo.png" alt="TaskPoints logo" class="w-10 h-10 rounded-2xl object-cover shrink-0 shadow-sm">
+        <h1 class="text-2xl font-extrabold tracking-tight leading-tight">
+          <span style="color:#fb923c;">Task</span><span style="color:#1e666d;">Points</span>
+        </h1>
+      </a>
+      <div class="flex items-center gap-2">
+        <button type="button" class="btn btn-ghost btn-toolbar" data-export-button>Export</button>
+        <label class="btn btn-ghost btn-toolbar cursor-pointer">
+          <span>Import</span>
+          <input type="file" accept="application/json" class="hidden" data-import-input/>
+        </label>
+      </div>
+    </div>
+
+    <header class="flex flex-wrap items-center justify-between gap-3 mb-4">
+      <a href="index.html" class="hidden md:flex items-center gap-3">
+        <img src="assets/taskpoints-logo.svg" alt="TaskPoints logo" class="w-9 h-9 rounded-2xl object-cover shadow-sm">
+        <div>
+          <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight">TaskPoints</h1>
+          <p class="text-xs opacity-70">Game — Rankings</p>
+        </div>
+      </a>
+
+      <div class="toolbar header-nav">
+        <a href="index.html" class="btn btn-teal btn-toolbar nav-btn">Main</a>
+        <a href="today.html" class="btn btn-teal btn-toolbar nav-btn mobile-hide-header-today">Today</a>
+        <a href="daily_sources.html" class="btn btn-teal btn-toolbar nav-btn">Sources</a>
+        <a href="log.html" class="btn btn-teal btn-toolbar nav-btn">Log</a>
+        <a href="week.html" class="btn btn-teal btn-toolbar nav-btn">Week</a>
+
+        <div class="dropdown hidden md:block">
+          <button type="button" class="btn btn-teal btn-toolbar nav-btn dropdown-toggle active" data-dropdown-toggle aria-expanded="false">Game <span class="caret">▾</span></button>
+          <div class="dropdown-menu">
+            <a href="gamehub.html" class="btn btn-teal btn-toolbar nav-btn">Game Hub</a>
+            <a href="game.html" class="btn btn-teal btn-toolbar nav-btn">Players</a>
+            <a href="standings.html" class="btn btn-teal btn-toolbar nav-btn">Standings</a>
+            <a href="rankings.html" class="btn btn-teal btn-toolbar nav-btn active" aria-current="page">Rankings</a>
+            <a href="matchups.html" class="btn btn-teal btn-toolbar nav-btn">Matchups</a>
+            <a href="schedule.html" class="btn btn-teal btn-toolbar nav-btn">Schedule</a>
+            <a href="game_ratings.html" class="btn btn-teal btn-toolbar nav-btn">Ratings</a>
+            <a href="records.html" class="btn btn-teal btn-toolbar nav-btn">Records</a>
+          </div>
+        </div>
+
+        <a href="projects.html" class="btn btn-teal btn-toolbar nav-btn">Projects</a>
+        <a href="settings.html" class="btn btn-teal btn-toolbar nav-btn">Settings</a>
+      </div>
+    </header>
+
+    <section class="rankings-shell mb-6">
+      <h2 class="text-2xl font-extrabold tracking-wide">POWER RANKINGS</h2>
+      <p class="text-sm opacity-75 mt-1 mb-4">Ranked by winning percentage.</p>
+      <div id="rankingsList" class="rankings-list"></div>
+      <p id="emptyState" class="hidden text-sm opacity-75">No players available yet.</p>
+    </section>
+  </div>
+
+  <script src="scoring_core.js"></script>
+  <script>
+    const STORAGE_KEY = (window.TaskPointsCore && TaskPointsCore.STORAGE_KEY) || 'taskpoints_v1';
+    const imageUrlCache = new Map();
+
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>\"']/g, (ch) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+      }[ch]));
+    }
+
+    function readState() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return null;
+        let state = JSON.parse(raw);
+
+        if (window.TaskPointsCore?.syncDerivedPoints) {
+          state = TaskPointsCore.syncDerivedPoints(state).state;
+        }
+        if (window.TaskPointsCore?.syncYouMatchups) {
+          state = TaskPointsCore.syncYouMatchups(state).state;
+        }
+        return state;
+      } catch (error) {
+        console.error('Failed to load rankings state', error);
+        return null;
+      }
+    }
+
+    function safeNumber(value) {
+      const n = Number(value);
+      return Number.isFinite(n) ? n : null;
+    }
+
+    function formatWinPct(wins, games) {
+      if (!games) return '—';
+      return `${((wins / games) * 100).toFixed(1)}%`;
+    }
+
+    function formatRating(value, fallback = '—') {
+      const n = safeNumber(value);
+      if (n === null) return fallback;
+      return Number.isInteger(n) ? String(n) : n.toFixed(1);
+    }
+
+    function formatRisky(value) {
+      const risky = safeNumber(value);
+      if (risky === null) return '—';
+      const normalized = risky > 10 ? (risky / 10) : risky;
+      return normalized.toFixed(1);
+    }
+
+    function ratingSummary(player) {
+      const baseline = formatRating(player?.baseline);
+      const variance = formatRating(player?.variance);
+      const tilt = safeNumber(player?.varianceTilt);
+      const momentum = formatRating(player?.momentum);
+      const risky = formatRisky(player?.risky);
+      const style = (typeof player?.style === 'string' && player.style.trim()) ? player.style.trim() : '—';
+      const tiltText = tilt === null ? '—' : `${Math.max(0, Math.min(100, tilt)).toFixed(0)}%`;
+      return `B ${baseline} • V ${variance} • Tilt ${tiltText} • M ${momentum} • R ${risky} • ${style}`;
+    }
+
+    function buildPlayerPool(state) {
+      return Array.isArray(state?.players)
+        ? state.players.filter((p) => p && p.active !== false)
+        : [];
+    }
+
+    function enrichPlayer(state, player) {
+      const record = window.TaskPointsCore?.computeRecord
+        ? TaskPointsCore.computeRecord(state, player.id, { includeToday: false })
+        : { wins: 0, losses: 0, games: 0 };
+
+      const wins = safeNumber(record?.wins) || 0;
+      const losses = safeNumber(record?.losses) || 0;
+      const games = safeNumber(record?.games) || 0;
+      const winPct = games > 0 ? (wins / games) : -1;
+
+      return {
+        ...player,
+        wins,
+        losses,
+        games,
+        winPct,
+        hasGames: games > 0,
+        winPctLabel: formatWinPct(wins, games),
+        ratingsText: ratingSummary(player)
+      };
+    }
+
+    function sortRankings(a, b) {
+      if (a.hasGames !== b.hasGames) return a.hasGames ? -1 : 1;
+      if (b.winPct !== a.winPct) return b.winPct - a.winPct;
+      if (b.wins !== a.wins) return b.wins - a.wins;
+      return a.name.localeCompare(b.name);
+    }
+
+    async function loadImageUrl(imageId) {
+      if (!imageId || !window.TaskPointsCore?.getImageBlob) return '';
+      if (imageUrlCache.has(imageId)) return imageUrlCache.get(imageId);
+      try {
+        const blob = await TaskPointsCore.getImageBlob(imageId);
+        if (!blob) return '';
+        const url = URL.createObjectURL(blob);
+        imageUrlCache.set(imageId, url);
+        return url;
+      } catch (error) {
+        console.warn('Failed to load player image', error);
+        return '';
+      }
+    }
+
+    function renderRow(player, rank, imageUrl) {
+      const photo = imageUrl
+        ? `<img class="ranking-avatar" src="${escapeHtml(imageUrl)}" alt="${escapeHtml(player.name)} photo">`
+        : `<div class="ranking-avatar" aria-hidden="true">No photo</div>`;
+
+      return `
+        <article class="ranking-row">
+          <div class="ranking-index">${rank}</div>
+          ${photo}
+          <div class="min-w-0">
+            <p class="ranking-name truncate">${escapeHtml(player.name)}</p>
+            <p class="ranking-record">Record: ${player.wins}-${player.losses} • Win%: ${player.winPctLabel}</p>
+            <p class="ranking-ratings truncate" title="${escapeHtml(player.ratingsText)}">${escapeHtml(player.ratingsText)}</p>
+          </div>
+        </article>
+      `;
+    }
+
+    async function renderRankings() {
+      const state = readState();
+      const listEl = document.getElementById('rankingsList');
+      const emptyEl = document.getElementById('emptyState');
+
+      if (!state) {
+        listEl.innerHTML = '';
+        emptyEl.classList.remove('hidden');
+        return;
+      }
+
+      const ranked = buildPlayerPool(state)
+        .map((player) => enrichPlayer(state, player))
+        .sort(sortRankings);
+
+      if (!ranked.length) {
+        listEl.innerHTML = '';
+        emptyEl.classList.remove('hidden');
+        return;
+      }
+
+      const imageUrls = await Promise.all(ranked.map((player) => loadImageUrl(player.imageId)));
+      listEl.innerHTML = ranked.map((player, index) => renderRow(player, index + 1, imageUrls[index])).join('');
+      emptyEl.classList.add('hidden');
+    }
+
+    window.addEventListener('DOMContentLoaded', renderRankings);
+    window.addEventListener('beforeunload', () => {
+      imageUrlCache.forEach((url) => URL.revokeObjectURL(url));
+      imageUrlCache.clear();
+    });
+  </script>
+</body>
+</html>
