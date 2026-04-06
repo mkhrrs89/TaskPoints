@@ -1151,6 +1151,32 @@
         });
         if (fieldIssues.length) {
           failures.push(`${adapter.page} [${runResult?.mode || 'audit-mirror'}]: ${fieldIssues.join(', ')}`);
+          if (fieldIssues.includes('scoringSettings')) {
+            const scoringBeforeRaw = seeded.scoringSettings;
+            const scoringAfterRaw = next.scoringSettings;
+            const scoringBeforeCanonical = auditCanonicalScoringSettings(scoringBeforeRaw);
+            const scoringAfterCanonical = auditCanonicalScoringSettings(scoringAfterRaw);
+            const scoringBeforeStable = stableStringify(scoringBeforeCanonical);
+            const scoringAfterStable = stableStringify(scoringAfterCanonical);
+            const scoringHelperPresent = !!window.TaskPointsCore?.normalizeScoringSettings;
+
+            failures.push(`${adapter.page}: scoringSettings helperPresent=${scoringHelperPresent}`);
+            failures.push(`${adapter.page}: scoringSettings raw before=${stableStringify(scoringBeforeRaw)}`);
+            failures.push(`${adapter.page}: scoringSettings raw after=${stableStringify(scoringAfterRaw)}`);
+            failures.push(`${adapter.page}: scoringSettings canonical before=${scoringBeforeStable}`);
+            failures.push(`${adapter.page}: scoringSettings canonical after=${scoringAfterStable}`);
+
+            console.log('[AUDIT scoringSettings mismatch]', {
+              adapter: adapter.page,
+              helperPresent: scoringHelperPresent,
+              beforeRaw: scoringBeforeRaw,
+              afterRaw: scoringAfterRaw,
+              beforeCanonical: scoringBeforeCanonical,
+              afterCanonical: scoringAfterCanonical,
+              beforeStable: scoringBeforeStable,
+              afterStable: scoringAfterStable
+            });
+          }
         }
       });
       return {
