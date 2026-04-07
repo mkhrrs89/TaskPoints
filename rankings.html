@@ -234,10 +234,28 @@
       return `B ${baseline} • V ${variance} • Tilt ${tiltText} • M ${momentum} • R ${risky} • ${style}`;
     }
 
+    function getYouName(state) {
+      const name = state && typeof state.youName === 'string'
+        ? state.youName.trim()
+        : '';
+      return name || 'You';
+    }
+
     function buildPlayerPool(state) {
-      return Array.isArray(state?.players)
-        ? state.players.filter((p) => p && p.active !== false)
+      const normalPlayers = Array.isArray(state?.players)
+        ? state.players.filter((p) => p && p.active !== false && p.id !== 'YOU')
         : [];
+
+      const youPlayer = {
+        id: 'YOU',
+        name: getYouName(state),
+        imageId: state?.youImageId || '',
+        primaryColor: state?.youPrimaryColor || '#1a383b',
+        secondaryColor: state?.youSecondaryColor || '#254c52',
+        isYou: true
+      };
+
+      return [youPlayer, ...normalPlayers];
     }
 
     function enrichPlayer(state, player) {
