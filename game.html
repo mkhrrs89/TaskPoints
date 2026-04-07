@@ -727,8 +727,8 @@
 
 
   <!-- Image cropping modal -->
-  <div id="cropModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 hidden">
-    <div class="bg-zinc-900 text-zinc-50 rounded-2xl shadow-xl w-full max-w-md mx-4 p-4 sm:p-5">
+  <div id="cropModal" class="fixed inset-0 bg-black/70 flex items-start sm:items-center justify-center z-50 hidden overflow-y-auto px-3 pt-4 pb-24 sm:px-4 sm:py-6">
+    <div class="bg-zinc-900 text-zinc-50 rounded-2xl shadow-xl w-full max-w-sm sm:max-w-md p-3 sm:p-5 max-h-[calc(100svh-8rem)] overflow-y-auto overscroll-contain">
       <h2 class="text-base sm:text-lg font-semibold mb-3">Crop player photo</h2>
       <div class="w-full border border-zinc-700 rounded-xl overflow-hidden bg-black mb-3">
         <canvas id="cropCanvas" class="block w-full"></canvas>
@@ -746,7 +746,7 @@
         </div>
         <input id="cropZoom" type="range" min="100" max="150" value="100" class="w-full">
       </div>
-      <p class="text-[11px] opacity-70 mb-3">
+      <p class="text-[10px] sm:text-[11px] opacity-70 mb-3">
         Drag the image to reposition it inside the frame. Use the zoom slider to adjust how close it is. The result will be saved and used as the player photo.
       </p>
       <div class="flex justify-end gap-2">
@@ -1360,10 +1360,10 @@ logBootPersistenceSkip("migrateLegacyImagesIfNeeded");
 
       cropState.aspectRatio = ratio;
 
-// smaller base size
-const baseWidth = 260; // or even 220 if you want to be aggressive
-const width = baseWidth;
-const height = Math.round(baseWidth / ratio);
+      const isMobileCrop = window.matchMedia("(max-width: 640px)").matches;
+      const baseWidth = isMobileCrop ? 220 : 260;
+      const width = baseWidth;
+      const height = Math.round(baseWidth / ratio);
 
       cropCanvasEl.width = width;
       cropCanvasEl.height = height;
