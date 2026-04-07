@@ -32,18 +32,18 @@
 
     .ranking-row {
       display:grid;
-      grid-template-columns: minmax(64px,92px) 72px minmax(0,1fr);
+      grid-template-columns: 58px 72px minmax(0,1fr);
       align-items:center;
-      gap:14px;
+      gap:10px;
       border:1px solid rgba(63,63,70,0.95);
       background:rgba(9,9,11,0.92);
       border-radius:16px;
-      padding:16px;
-      min-height:118px;
+      padding:12px 14px;
+      min-height:94px;
     }
 
     .ranking-index {
-      font-size:2.8rem;
+      font-size:2.6rem;
       line-height:1;
       font-weight:900;
       color:#22d3ee;
@@ -53,7 +53,7 @@
 
     .ranking-avatar {
       width:72px;
-      height:96px;
+      height:88px;
       border-radius:10px;
       object-fit:cover;
       border:2px solid rgba(82,82,91,0.9);
@@ -74,12 +74,13 @@
 
     @media (max-width: 520px) {
       .ranking-row {
-        grid-template-columns: 48px 56px minmax(0,1fr);
+        grid-template-columns: 54px 64px minmax(0,1fr);
         gap:10px;
         padding:12px;
+        min-height:94px;
       }
-      .ranking-index { font-size:1.6rem; }
-      .ranking-avatar { width:50px; height:68px; }
+      .ranking-index { font-size:2.2rem; }
+      .ranking-avatar { width:64px; height:80px; }
     }
   </style>
 </head>
