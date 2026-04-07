@@ -1639,14 +1639,20 @@ header,
 .mobile-bottom-nav-secondary{
   --tp-bottom-nav-pad-top: 0.5rem;
   --tp-bottom-nav-mini-divider-bottom: 5px;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  width: 100%;
 }
 
 .mobile-bottom-nav-secondary > * + *{
   border-left: 1px solid rgba(15,23,42,0.7);
 }
 
-.mobile-bottom-nav-slot-spacer{
-  min-height: 1px;
+.mobile-bottom-nav-secondary .mobile-bottom-nav-btn{
+  width: 100%;
+  min-width: 0;
+  justify-self: stretch;
+  align-self: stretch;
 }
 
 @keyframes mobile-bottom-nav-press{
