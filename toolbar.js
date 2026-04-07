@@ -282,8 +282,6 @@ function renderBottomToolbar() {
             <span class="tp-nav-icon flex items-center justify-center rounded-full border border-slate-400/60 text-slate-100 text-base leading-none">🏆</span>
             <span class="uppercase tracking-wide text-[10px]">Tourney</span>
           </a>
-
-          <div class="mobile-bottom-nav-slot-spacer" aria-hidden="true"></div>
         </div>
       </div>
     </nav>
