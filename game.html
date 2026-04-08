@@ -353,7 +353,11 @@
 .create-player-modal-panel {
   width: min(100%, 720px);
   max-height: min(90vh, 1000px);
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  scroll-padding-bottom: calc(var(--tp-toolbar-stack-height) + 20px);
   position: relative;
   padding: 20px;
 }
@@ -365,11 +369,11 @@
     padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
   }
 
-  .create-player-modal-panel {
-    width: 100%;
-    max-height: min(88vh, 1000px);
-    padding: 18px 16px 16px;
-  }
+.create-player-modal-panel {
+  width: 100%;
+  max-height: min(88vh, 1000px);
+  padding: 18px 16px calc(16px + var(--tp-toolbar-stack-height) + 12px);
+}
 }
 
 @media (prefers-color-scheme: dark) {
