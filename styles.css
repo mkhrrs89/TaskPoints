@@ -1824,9 +1824,10 @@ header,
 .task-priority-card.task-priority-low {
   background: linear-gradient(
     180deg,
-    rgba(255, 255, 255, 0.052),
-    rgba(255, 255, 255, 0.024)
-  );
+    rgba(255, 255, 255, 0.028),
+    rgba(255, 255, 255, 0.010)
+  ) !important;
+  border-color: rgba(63, 63, 70, 0.75) !important;
 }
 
 /* High priority card tint */
