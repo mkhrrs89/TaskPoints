@@ -7826,6 +7826,19 @@ function setDueToday(){
   $('dueDateInput').value = todayKey();
 }
 
+function getTomorrowLocalDateInputValue() {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function setDueTomorrow(){
+  $('dueDateInput').value = getTomorrowLocalDateInputValue();
+}
+
 const HOME_TAB_HASH_TO_PANEL = {
   dailyBoard: 'records',
   weeklyBoard: 'records',
@@ -9703,7 +9716,7 @@ function tpPerfMark(label) {
       <!-- Row 1: task title -->
       <input id="titleInput" class="input" placeholder="e.g., 30-min treadmill walk">
 
-      <!-- Row 2: priority + due date + Today -->
+      <!-- Row 2: priority + due date -->
       <div id="addTaskRow2" class="flex flex-wrap gap-2 mt-1">
         <select id="importanceInput" class="input flex-1 min-w-[120px]">
           <option>Low</option>
@@ -9714,7 +9727,10 @@ function tpPerfMark(label) {
 
         <input id="dueDateInput" type="date" class="input flex-1 min-w-[120px]">
 
-        <button class="addTaskTodayBtn btn btn-ghost text-xs px-2" onclick="setDueToday()">Today</button>
+      </div>
+      <div id="addTaskQuickDueRow" class="flex items-center gap-2 mt-1">
+        <button type="button" class="addTaskTodayBtn btn btn-ghost text-xs px-2" onclick="setDueToday()">Today</button>
+        <button type="button" id="quickDueTomorrowBtn" class="addTaskTodayBtn btn btn-ghost text-xs px-2" onclick="setDueTomorrow()">Tomorrow</button>
       </div>
 
       <!-- Row 3: points + repeat rule -->
