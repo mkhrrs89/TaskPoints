@@ -1973,6 +1973,7 @@ function openAddTaskModal() {
   // ✅ add this
   const rep = $("repeatInput");
   syncCustomRepeatUI(rep);
+  ensureCreateTaskSkillRows();
 }
 
 
@@ -6045,6 +6046,33 @@ function readTaskSkillsFromCard(card){
   });
 }
 
+function ensureCreateTaskSkillRows(){
+  const rowsWrap = $('createTaskSkillsRows');
+  if (!rowsWrap) return;
+  if (rowsWrap.querySelector('[data-task-skill-row]')) return;
+  rowsWrap.innerHTML = getTaskSkillsForEditor({ skills: [] }).map(renderTaskSkillRow).join('');
+}
+
+function readCreateTaskSkills(){
+  const editor = $('createTaskSkillsEditor');
+  if (!editor) return [];
+  return readTaskSkillsFromCard(editor);
+}
+
+function bindCreateTaskSkillsEditor(){
+  const editor = $('createTaskSkillsEditor');
+  if (!editor || editor.dataset.skillEditorBound === '1') return;
+  editor.dataset.skillEditorBound = '1';
+
+  editor.addEventListener('click', (event) => {
+    const addBtn = event.target.closest('[data-task-skill-add]');
+    if (!addBtn) return;
+    const rowsWrap = editor.querySelector('[data-task-skills-rows]');
+    if (!rowsWrap) return;
+    rowsWrap.insertAdjacentHTML('beforeend', renderTaskSkillRow({ skill: '', pts: '' }));
+  });
+}
+
 function saveTaskSkillsFromCard(taskId, card){
   const task = state.tasks.find((x) => x.id === taskId);
   if (!task || !card) return;
@@ -7770,7 +7798,7 @@ const task = {
   points: Number($('pointsInput').value)||0,
   recurrence: rec,
   tags,
-  skills: [],
+  skills: readCreateTaskSkills(),
   skipDates: [],
   hidden: false,
   status: 'active',
@@ -7894,6 +7922,10 @@ function clearForm(){
   if ($('repeatCustomCount')) $('repeatCustomCount').value='1';
   if ($('repeatCustomUnit')) $('repeatCustomUnit').value='day';
   if ($('tagsInput')) $('tagsInput').value='';          // ⬅ new
+  const createSkillRows = $('createTaskSkillsRows');
+  if (createSkillRows) {
+    createSkillRows.innerHTML = getTaskSkillsForEditor({ skills: [] }).map(renderTaskSkillRow).join('');
+  }
   if (repeatCustomRow) repeatCustomRow.classList.add('hidden');
 }
 
@@ -9261,6 +9293,8 @@ try {
   rep?.addEventListener("change", () => syncCustomRepeatUI(rep));
   rep?.addEventListener("input",  () => syncCustomRepeatUI(rep)); // extra iOS safety
   syncCustomRepeatUI(rep); // sync once at load
+  bindCreateTaskSkillsEditor();
+  ensureCreateTaskSkillRows();
   initTaskCompactToggle();
   
   initCaloriesDatePicker();
@@ -9716,6 +9750,29 @@ function tpPerfMark(label) {
         class="input"
         placeholder="Tags (e.g., work, coding, creative)"
       >
+
+      <div id="createTaskSkillsEditor">
+        <label class="text-xs muted block">Skills</label>
+
+        <div class="mt-2 grid gap-2">
+          <div style="display:grid; grid-template-columns:minmax(0,3fr) minmax(84px,1fr); gap:8px;" class="text-[11px] muted uppercase tracking-wide">
+            <div>Skill</div>
+            <div>Pts</div>
+          </div>
+
+          <div id="createTaskSkillsRows" data-task-skills-rows class="grid gap-2"></div>
+
+          <div>
+            <button
+              type="button"
+              class="btn btn-ghost btn-task"
+              data-task-skill-add="1"
+            >
+              Add
+            </button>
+          </div>
+        </div>
+      </div>
 
       <button id="addBtn" class="btn btn-primary">Add Task</button>
     </div>
