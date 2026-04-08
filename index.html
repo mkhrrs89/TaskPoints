@@ -3933,6 +3933,9 @@ function renderStats(){
           // Store the key on the <li> so we can highlight the current one later
           li.dataset.key = row.key;
           li.className = 'flex items-center justify-between';
+          if (row.isCurrentMonth || row.isOnTrack) {
+            li.classList.add('leaderboard-current');
+          }
 
           const formattedTotal = Number(row.total).toLocaleString(undefined, {
             maximumFractionDigits: 1,
@@ -4009,8 +4012,23 @@ function renderStats(){
         .sort((a, b) => b.total - a.total);
 
       const bestMonths = Object.entries(monthlyTotalsWithInertia)
-        .map(([k, v]) => ({ key: k, total: v }))
-        .sort((a, b) => b.total - a.total);
+        .map(([k, v]) => ({ key: k, total: v }));
+
+      const currentMonthEntry = bestMonths.find((row) => row.key === thisMonthK);
+      const currentDayOfMonth = today.getDate();
+      const totalDaysInCurrentMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+      if (currentMonthEntry && currentDayOfMonth > 0 && Number.isFinite(totalDaysInCurrentMonth) && totalDaysInCurrentMonth > 0) {
+        const projectedTotal = (Number(currentMonthEntry.total) / currentDayOfMonth) * totalDaysInCurrentMonth;
+        bestMonths.push({
+          key: thisMonthK,
+          total: projectedTotal,
+          displayLabel: `${formatMonthKey(thisMonthK)} (on-track)`,
+          isCurrentMonth: true,
+          isOnTrack: true,
+        });
+      }
+
+      bestMonths.sort((a, b) => b.total - a.total);
 
       const isYear2025 = (value) => {
         if (!value) return false;
@@ -4028,7 +4046,7 @@ function renderStats(){
       // Labels with NO "(Today / This Week / This Month)" text
       const topBestDays = fillBoard('dailyBoard', bestDays, r => niceDate(fromKey(r.key)), dailyDateClass);
       const topBestWeeks = fillBoard('weeklyBoard', bestWeeks, r => `${niceDate(r.start)} – ${niceDate(r.end)}`, weeklyDateClass);
-      fillBoard('monthlyBoard', bestMonths, r => formatMonthKey(r.key), monthlyDateClass);
+      fillBoard('monthlyBoard', bestMonths, r => r.displayLabel || formatMonthKey(r.key), monthlyDateClass);
       updateRecordsTabBadge(topBestDays, topBestWeeks);
 
       // Highlight current day/week/month in orange if they appear
