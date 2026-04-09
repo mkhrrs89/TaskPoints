@@ -218,6 +218,12 @@
       return `${((wins / games) * 100).toFixed(1)}%`;
     }
 
+    function formatPPD(value) {
+      const n = safeNumber(value);
+      if (n === null) return '—';
+      return n.toFixed(1);
+    }
+
     function formatRating(value, fallback = '—') {
       const n = safeNumber(value);
       if (n === null) return fallback;
@@ -249,6 +255,75 @@
       return name || 'You';
     }
 
+    function getMatchupDateKey(matchup) {
+      if (!matchup) return '';
+      if (matchup.dateKey) return matchup.dateKey;
+      if (matchup.date) return matchup.date;
+      if (matchup.dateISO && window.TaskPointsCore?.dateKey) return TaskPointsCore.dateKey(matchup.dateISO);
+      return '';
+    }
+
+    function isMatchupRevealed(matchup) {
+      const key = getMatchupDateKey(matchup);
+      if (window.TaskPointsCore?.isMatchupRevealed) {
+        return TaskPointsCore.isMatchupRevealed(key, { includeToday: false });
+      }
+      if (!key) return false;
+      const today = window.TaskPointsCore?.todayKey ? TaskPointsCore.todayKey() : '';
+      return key < today;
+    }
+
+    function computeAvgPPD(state, player, record) {
+      if (!state || !player) return null;
+
+      if (record?.source === 'matchups') {
+        const matchups = Array.isArray(state.matchups) ? state.matchups : [];
+        const activeIds = new Set([
+          'YOU',
+          ...(Array.isArray(state.players) ? state.players.filter((p) => p && p.active !== false).map((p) => p.id) : [])
+        ]);
+        let games = 0;
+        let totalPoints = 0;
+
+        for (const m of matchups) {
+          if (!m || (m.playerAId !== player.id && m.playerBId !== player.id)) continue;
+          if (!activeIds.has(m.playerAId) || !activeIds.has(m.playerBId)) continue;
+          if (!isMatchupRevealed(m)) continue;
+          const a = Number(m.scoreA);
+          const b = Number(m.scoreB);
+          if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+          totalPoints += (m.playerAId === player.id) ? a : b;
+          games++;
+        }
+
+        return games ? (totalPoints / games) : null;
+      }
+
+      if (player.id === 'YOU' || player.isYou) {
+        const comps = Array.isArray(state.completions) ? state.completions : [];
+        const dayMap = {};
+        for (const c of comps) {
+          const day = window.TaskPointsCore?.dateKey
+            ? TaskPointsCore.dateKey(c.completedAtISO || c.dateKey)
+            : (c.dateKey || '');
+          if (!day) continue;
+          const pts = window.TaskPointsCore?.pointsForCompletion
+            ? TaskPointsCore.pointsForCompletion(c)
+            : Number(c.points || 0);
+          dayMap[day] = (dayMap[day] || 0) + pts;
+        }
+        const dailyTotals = Object.values(dayMap);
+        if (!dailyTotals.length) return null;
+        return dailyTotals.reduce((sum, val) => sum + val, 0) / dailyTotals.length;
+      }
+
+      const history = Array.isArray(state.gameHistory) ? state.gameHistory : [];
+      const entries = history.filter((h) => h && h.playerId === player.id && Number.isFinite(Number(h.points)));
+      if (!entries.length) return null;
+      const totalPoints = entries.reduce((sum, h) => sum + Number(h.points), 0);
+      return totalPoints / entries.length;
+    }
+
     function buildPlayerPool(state) {
       const normalPlayers = Array.isArray(state?.players)
         ? state.players.filter((p) => p && p.active !== false && p.id !== 'YOU')
@@ -275,6 +350,7 @@
       const losses = safeNumber(record?.losses) || 0;
       const games = safeNumber(record?.games) || 0;
       const winPct = games > 0 ? (wins / games) : -1;
+      const avgPPD = computeAvgPPD(state, player, record);
 
       return {
         ...player,
@@ -282,8 +358,10 @@
         losses,
         games,
         winPct,
+        avgPPD,
         hasGames: games > 0,
         winPctLabel: formatWinPct(wins, games),
+        ppdLabel: formatPPD(avgPPD),
         ratingsText: ratingSummary(player)
       };
     }
@@ -291,6 +369,9 @@
     function sortRankings(a, b) {
       if (a.hasGames !== b.hasGames) return a.hasGames ? -1 : 1;
       if (b.winPct !== a.winPct) return b.winPct - a.winPct;
+      const aPpd = Number.isFinite(a.avgPPD) ? a.avgPPD : -1e9;
+      const bPpd = Number.isFinite(b.avgPPD) ? b.avgPPD : -1e9;
+      if (bPpd !== aPpd) return bPpd - aPpd;
       if (b.wins !== a.wins) return b.wins - a.wins;
       return a.name.localeCompare(b.name);
     }
@@ -321,7 +402,7 @@
           ${photo}
           <div class="ranking-meta min-w-0">
             <p class="ranking-name truncate">${escapeHtml(player.name)}</p>
-            <p class="ranking-record">${player.wins}-${player.losses} • ${player.winPctLabel}</p>
+            <p class="ranking-record">${player.wins}-${player.losses} • ${player.winPctLabel} • PPD ${player.ppdLabel}</p>
             <p class="ranking-ratings truncate" title="${escapeHtml(player.ratingsText)}">${escapeHtml(player.ratingsText)}</p>
           </div>
         </article>
