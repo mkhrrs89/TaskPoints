@@ -83,6 +83,11 @@
     .ranking-name { font-size:1.08rem; font-weight:700; line-height:1.2; }
     .ranking-record { font-size:0.9rem; color:rgba(212,212,216,0.9); }
     .ranking-ratings { font-size:0.82rem; color:rgba(161,161,170,1); }
+    .ranking-meta {
+      align-self: stretch;
+      padding-top: 8px;
+      padding-bottom: 6px;
+    }
 
     @media (max-width: 520px) {
       .ranking-row {
@@ -314,7 +319,7 @@
         <article class="ranking-row">
           <div class="ranking-index">${rank}</div>
           ${photo}
-          <div class="min-w-0">
+          <div class="ranking-meta min-w-0">
             <p class="ranking-name truncate">${escapeHtml(player.name)}</p>
             <p class="ranking-record">${player.wins}-${player.losses} • ${player.winPctLabel}</p>
             <p class="ranking-ratings truncate" title="${escapeHtml(player.ratingsText)}">${escapeHtml(player.ratingsText)}</p>
