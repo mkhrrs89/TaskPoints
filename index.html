@@ -4504,6 +4504,23 @@ if (maPoints.length > 1) {
   ctx.lineTo(last.x, last.y);
   ctx.stroke();
 }
+
+// Draw actual raw plot points on top so they remain visible above the trendline
+const pointRadius = n > 120 ? 1.4 : n > 60 ? 1.8 : 2.2;
+
+ctx.save();
+ctx.fillStyle = '#5FC4CF';
+ctx.strokeStyle = 'rgba(11, 13, 16, 0.85)';
+ctx.lineWidth = 1;
+
+points.forEach((pt) => {
+  ctx.beginPath();
+  ctx.arc(pt.x, pt.y, pointRadius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+});
+
+ctx.restore();
 }
 
 function bumpOneDay(task){
