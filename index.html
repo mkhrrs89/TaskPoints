@@ -6230,12 +6230,16 @@ function renderTasks(){
     b.items.forEach(t=>{
       const isOverdue = t.dueDateISO && t.dueDateISO < todayIso;
       const isTaskExpanded = expandedTaskId === t.id;
-      const tags = Array.isArray(t.tags) ? t.tags : [];
-      const tagsHtml = tags.length ? `<div class="task-tags">${tags.map(tag => `<span class="tag bg-zinc-700/40">${escapeHtml(tag)}</span>`).join('')}</div>` : '';
+      
+const tags = Array.isArray(t.tags) ? t.tags : [];
+const hasWorkTag = tags.some(tag => String(tag || '').trim().toLowerCase() === 'work');
+const tagsHtml = tags.length ? `<div class="task-tags">${tags.map(tag => `<span class="tag bg-zinc-700/40">${escapeHtml(tag)}</span>`).join('')}</div>` : '';
 
-      const card = document.createElement('div');
-      card.dataset.taskId = t.id;
-      const cardClasses = ['glass', 'task-priority-card'];
+const card = document.createElement('div');
+card.dataset.taskId = t.id;
+const cardClasses = ['glass', 'task-priority-card'];
+if (hasWorkTag) cardClasses.push('task-work-tagged');
+      
       if (t.importance === 'Low') cardClasses.push('task-priority-low');
       else if (t.importance === 'Medium') cardClasses.push('task-priority-medium');
       else if (t.importance === 'Critical') cardClasses.push('critical-card');
