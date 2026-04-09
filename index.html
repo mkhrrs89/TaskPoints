@@ -10011,61 +10011,66 @@ let reminderTaskId = null;
 
 const openReminderTaskEditor = () => {
   const task = getReminderTask();
+  const targetTaskId = task?.id || null;
+
   closeReminderModal();
 
-  if (!task) {
+  if (!targetTaskId) {
     console.warn('Undated reminder task was not found.');
     return;
   }
 
-  const currentTask = Array.isArray(state?.tasks)
-    ? state.tasks.find((item) => item?.id === task.id)
-    : null;
+  // Wait until unlockScrollForModal() finishes restoring scroll.
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const currentTask = Array.isArray(state?.tasks)
+          ? state.tasks.find((item) => item?.id === targetTaskId)
+          : null;
 
-  if (!currentTask) {
-    console.warn(`Unable to open editor for reminder task: ${task.id}`);
-    return;
-  }
+        if (!currentTask) {
+          console.warn(`Unable to open editor for reminder task: ${targetTaskId}`);
+          return;
+        }
 
-  window.setHomeTab?.('tasks');
+        window.setHomeTab?.('tasks');
 
-  // Undated reminder tasks live in the "No due date" bucket.
-  // Force that bucket open so the task actually exists in the DOM.
-  taskGroupExpandedState.nodue = true;
+        // Undated reminder tasks always live in the No due date bucket.
+        taskGroupExpandedState.nodue = true;
 
-  // Open the real inline editor for this exact task.
-  editingTaskId = currentTask.id;
-  expandedTaskId = null;
-  renderTasks();
+        expandedTaskId = null;
+        editingTaskId = currentTask.id;
+        renderTasks();
 
-  window.requestAnimationFrame(() => {
-    const taskCard = Array.from(document.querySelectorAll('[data-task-id]'))
-      .find((el) => el.getAttribute('data-task-id') === currentTask.id);
+        requestAnimationFrame(() => {
+          const taskCard = Array.from(document.querySelectorAll('[data-task-id]'))
+            .find((el) => el.getAttribute('data-task-id') === currentTask.id);
 
-    if (!taskCard) {
-      console.warn(`Unable to locate rendered card for reminder task: ${currentTask.id}`);
-      return;
-    }
+          if (!taskCard) {
+            console.warn(`Unable to locate rendered card for reminder task: ${currentTask.id}`);
+            return;
+          }
 
-    taskCard.classList.remove('task-reminder-jump-target');
-    void taskCard.offsetWidth;
-    taskCard.classList.add('task-reminder-jump-target');
+          taskCard.classList.remove('task-reminder-jump-target');
+          void taskCard.offsetWidth;
+          taskCard.classList.add('task-reminder-jump-target');
 
-    taskCard.scrollIntoView({
-      behavior: 'smooth',
-      block: 'center'
+          taskCard.scrollIntoView({
+            behavior: 'smooth',
+            block: 'center'
+          });
+
+          const titleInput = taskCard.querySelector('input[data-field="title"]');
+          if (titleInput && typeof titleInput.focus === 'function') {
+            titleInput.focus({ preventScroll: true });
+          }
+
+          window.setTimeout(() => {
+            taskCard.classList.remove('task-reminder-jump-target');
+          }, 1800);
+        });
+      });
     });
-
-    const firstInput = taskCard.querySelector(
-      'input[data-field="title"], input, select, textarea, button'
-    );
-    if (firstInput && typeof firstInput.focus === 'function') {
-      firstInput.focus({ preventScroll: true });
-    }
-
-    window.setTimeout(() => {
-      taskCard.classList.remove('task-reminder-jump-target');
-    }, 1800);
   });
 };
 
