@@ -1924,7 +1924,10 @@ header,
 
 /* Default (desktop + general) */
 .task-title{word-break:break-word;overflow-wrap:anywhere}
-
+.task-priority-card.task-work-tagged .taskPointsNumber,
+.task-priority-card.task-work-tagged .task-title{
+  color:#bfdcff;
+}
 .task-priority-card.task-card-expanded{position:relative;isolation:isolate}
 .task-card-shell{cursor:pointer;position:relative;z-index:1}
 .task-card-shell:focus-visible{outline:2px solid #22d3ee;outline-offset:2px;border-radius:12px}
