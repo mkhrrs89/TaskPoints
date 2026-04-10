@@ -2255,13 +2255,13 @@ function getCachedStorageState() {
 
 function writeCachedStorageState(nextState) {
   if (window.TaskPointsCore?.saveAppState) {
-    const res = TaskPointsCore.saveAppState(nextState, { storageKey: STORAGE_KEY });
+    const res = TaskPointsCore.saveStateSnapshot(nextState, { storageKey: STORAGE_KEY });
     storageCache.raw = null;          // don't stringify here (too expensive)
     storageCache.parsed = res.state;
     return res.state;
   }
   if (window.TaskPointsCore?.mergeAndSaveState) {
-    const res = TaskPointsCore.mergeAndSaveState(nextState, { storageKey: STORAGE_KEY });
+    const res = TaskPointsCore.saveStateSnapshot(nextState, { storageKey: STORAGE_KEY });
     storageCache.raw = null;          // don't stringify here (too expensive)
     storageCache.parsed = res.state;
     return res.state;
@@ -3249,8 +3249,8 @@ function save(savePath) {
     if (window.TaskPointsCore?.saveAppState) {
       const saveOptions = savePath ? { savePath } : undefined;
       const { state: merged, trimmed } = saveOptions
-        ? TaskPointsCore.saveAppState(state, saveOptions)
-        : TaskPointsCore.saveAppState(state);
+        ? TaskPointsCore.saveStateSnapshot(state, saveOptions)
+        : TaskPointsCore.saveStateSnapshot(state);
       if (trimmed) {
         console.warn('Storage nearing capacity. Older history items were trimmed to keep saves working.');
       }
@@ -3262,8 +3262,8 @@ function save(savePath) {
     if (window.TaskPointsCore?.mergeAndSaveState) {
       const saveOptions = savePath ? { savePath } : undefined;
       const { state: merged, trimmed } = saveOptions
-        ? TaskPointsCore.mergeAndSaveState(state, saveOptions)
-        : TaskPointsCore.mergeAndSaveState(state);
+        ? TaskPointsCore.saveStateSnapshot(state, saveOptions)
+        : TaskPointsCore.saveStateSnapshot(state);
       if (trimmed) {
         console.warn('Storage nearing capacity. Older history items were trimmed to keep saves working.');
       }

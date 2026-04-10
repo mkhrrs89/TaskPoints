@@ -592,9 +592,9 @@ function syncDerivedPointsIfNeeded() {
   state = derivedSync.state;
   if (!derivedSync.changed) return false;
   if (window.TaskPointsCore?.saveAppState) {
-    state = TaskPointsCore.saveAppState(state).state;
+    state = TaskPointsCore.saveStateSnapshot(state).state;
   } else if (window.TaskPointsCore?.mergeAndSaveState) {
-    state = TaskPointsCore.mergeAndSaveState(state).state;
+    state = TaskPointsCore.saveStateSnapshot(state).state;
   } else {
     state = saveMerged(state);
   }

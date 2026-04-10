@@ -551,7 +551,7 @@ function saveMerged(partial, opts = {}) {
   try {
     const existing = load() || {};
     if (window.TaskPointsCore?.saveAppState) {
-      const saved = TaskPointsCore.saveAppState(
+      const saved = TaskPointsCore.saveStateSnapshot(
         { ...existing, ...partial },
         { storageKey: STORAGE_KEY, immediateWrite: !!opts.immediateWrite }
       ).state;
@@ -560,7 +560,7 @@ function saveMerged(partial, opts = {}) {
       return saved;
     }
     if (window.TaskPointsCore?.mergeAndSaveState) {
-      const saved = TaskPointsCore.mergeAndSaveState(
+      const saved = TaskPointsCore.saveStateSnapshot(
         { ...existing, ...partial },
         { storageKey: STORAGE_KEY, immediateWrite: !!opts.immediateWrite }
       ).state;
@@ -593,9 +593,9 @@ function syncDerivedPointsIfNeeded() {
   state = derivedSync.state;
   if (!derivedSync.changed) return;
   if (window.TaskPointsCore?.saveAppState) {
-    state = TaskPointsCore.saveAppState(state).state;
+    state = TaskPointsCore.saveStateSnapshot(state).state;
   } else if (window.TaskPointsCore?.mergeAndSaveState) {
-    state = TaskPointsCore.mergeAndSaveState(state).state;
+    state = TaskPointsCore.saveStateSnapshot(state).state;
   } else {
     state = saveMerged(state);
   }

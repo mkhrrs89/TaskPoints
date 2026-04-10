@@ -2354,9 +2354,9 @@ const actualTotal = round2(Number(derivedActualTotal) || 0);
       }
 
       if (window.TaskPointsCore?.saveAppState) {
-        TaskPointsCore.saveAppState(nextState);
+        TaskPointsCore.saveStateSnapshot(nextState);
       } else if (window.TaskPointsCore?.mergeAndSaveState) {
-        TaskPointsCore.mergeAndSaveState(nextState);
+        TaskPointsCore.saveStateSnapshot(nextState);
       } else {
         console.warn("audit save skipped; TaskPointsCore missing.");
       }

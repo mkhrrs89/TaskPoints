@@ -1331,14 +1331,14 @@ function ensureUpcomingScheduleFallback(state, days = 7) {
 function saveStateSnapshotFallback(next) {
   try {
     if (window.TaskPointsCore?.saveAppState) {
-      const { trimmed } = TaskPointsCore.saveAppState(next, { storageKey: STORAGE_KEY_FALLBACK, immediateWrite: true });
+      const { trimmed } = TaskPointsCore.saveStateSnapshot(next, { storageKey: STORAGE_KEY_FALLBACK, immediateWrite: true });
       if (trimmed) {
         console.warn('Storage nearing capacity. Older history items were trimmed to keep saves working.');
       }
       return;
     }
     if (window.TaskPointsCore?.mergeAndSaveState) {
-      const { trimmed } = TaskPointsCore.mergeAndSaveState(next, { storageKey: STORAGE_KEY_FALLBACK, immediateWrite: true });
+      const { trimmed } = TaskPointsCore.saveStateSnapshot(next, { storageKey: STORAGE_KEY_FALLBACK, immediateWrite: true });
       if (trimmed) {
         console.warn('Storage nearing capacity. Older history items were trimmed to keep saves working.');
       }

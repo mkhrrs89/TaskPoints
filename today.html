@@ -317,10 +317,10 @@
       }
       function saveApp(nextState) {
         if (window.TaskPointsCore?.saveAppState) {
-          const res = TaskPointsCore.saveAppState(nextState, { storageKey: STORAGE_KEY });
+          const res = TaskPointsCore.saveStateSnapshot(nextState, { storageKey: STORAGE_KEY });
           appState = res.state;
         } else if (window.TaskPointsCore?.mergeAndSaveState) {
-          const res = TaskPointsCore.mergeAndSaveState(nextState, { storageKey: STORAGE_KEY });
+          const res = TaskPointsCore.saveStateSnapshot(nextState, { storageKey: STORAGE_KEY });
           appState = res.state;
         } else {
           console.warn("today saveApp skipped localStorage write; TaskPointsCore missing.");

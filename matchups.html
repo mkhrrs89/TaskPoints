@@ -1030,13 +1030,13 @@ function save(nextState) {
   try {
     const existing = load() || {};
     if (window.TaskPointsCore?.saveAppState) {
-      const saved = TaskPointsCore.saveAppState({ ...existing, ...nextState }, { storageKey: STORAGE_KEY }).state;
+      const saved = TaskPointsCore.saveStateSnapshot({ ...existing, ...nextState }, { storageKey: STORAGE_KEY }).state;
       pageStateCache = saved;
       pageStateCacheDirty = false;
       return saved;
     }
     if (window.TaskPointsCore?.mergeAndSaveState) {
-      const saved = TaskPointsCore.mergeAndSaveState({ ...existing, ...nextState }, { storageKey: STORAGE_KEY }).state;
+      const saved = TaskPointsCore.saveStateSnapshot({ ...existing, ...nextState }, { storageKey: STORAGE_KEY }).state;
       pageStateCache = saved;
       pageStateCacheDirty = false;
       return saved;
