@@ -382,8 +382,9 @@ Nothing visible on the page is built here. === -->
               <span id="matchupYourPrimarySwatch" class="scoreboard-color-swatch" title="Primary color"></span>
               <span id="matchupYourSecondarySwatch" class="scoreboard-color-swatch" title="Secondary color"></span>
             </div>
+            <div id="matchupYourRank" class="scoreboard-meta">Rank: —</div>
             <div id="matchupYourRecord" class="scoreboard-record">Record: 0-0</div>
-            <div id="matchupYourAverages" class="scoreboard-meta">Daily Avg: — · PPD: —</div>
+            <div id="matchupYourAverages" class="scoreboard-meta">PPD: —</div>
           </div>
 
        <!-- MIDDLE: DIFF -->
@@ -401,8 +402,9 @@ Nothing visible on the page is built here. === -->
               <span id="matchupOpponentPrimarySwatch" class="scoreboard-color-swatch" title="Primary color"></span>
               <span id="matchupOpponentSecondarySwatch" class="scoreboard-color-swatch" title="Secondary color"></span>
             </div>
+            <div id="matchupOpponentRank" class="scoreboard-meta text-right">Rank: —</div>
             <div id="matchupOpponentRecord" class="scoreboard-record">Record: 0-0</div>
-            <div id="matchupOpponentAverages" class="scoreboard-meta text-right">Daily Avg: — · PPD: —</div>
+            <div id="matchupOpponentAverages" class="scoreboard-meta text-right">PPD: —</div>
           </div>
        <!-- RIGHT SIDE: OPPONENT (END) -->
           
@@ -2572,9 +2574,9 @@ function computePlayerDailyAverages(playerId){
   return { dailyAvg: rounded, ppd: rounded, hasData: true };
 }
 
-function formatAverageLine(avg, ppd){
+function formatPpdLine(ppd){
   const formatVal = (v) => Number.isFinite(v) ? v.toFixed(1) : '—';
-  return `Daily Avg: ${formatVal(avg)} · PPD: ${formatVal(ppd)}`;
+  return `PPD: ${formatVal(ppd)}`;
 }
 
 
@@ -2795,6 +2797,56 @@ function getAllParticipantIds(){
     if (p && p.id && isPlayerActive(p)) ids.push(p.id);
   });
   return ids;
+}
+
+function buildHomepageRankingRows(){
+  const participantIds = getAllParticipantIds();
+  const rows = participantIds.map((playerId) => {
+    const record = window.TaskPointsCore?.computeRecord
+      ? TaskPointsCore.computeRecord(state, playerId, { includeToday: false })
+      : { wins: 0, losses: 0, ties: 0, games: 0 };
+    const wins = Number(record?.wins) || 0;
+    const losses = Number(record?.losses) || 0;
+    const ties = Number(record?.ties) || 0;
+    const games = Number(record?.games) || 0;
+    const winPct = games > 0 ? wins / games : 0;
+    const averages = playerId === 'YOU'
+      ? computeYouDailyAverages()
+      : computePlayerDailyAverages(playerId);
+    const avgPPD = Number.isFinite(averages?.ppd) ? averages.ppd : 0;
+    const playerName = getPlayerNameById(playerId);
+
+    return {
+      id: playerId,
+      name: playerName,
+      wins,
+      losses,
+      ties,
+      games,
+      winPct,
+      avgPPD
+    };
+  });
+
+  rows.sort((a, b) => {
+    const aHasGames = a.games > 0 ? 1 : 0;
+    const bHasGames = b.games > 0 ? 1 : 0;
+    if (bHasGames !== aHasGames) return bHasGames - aHasGames;
+    if (b.winPct !== a.winPct) return b.winPct - a.winPct;
+    if (b.avgPPD !== a.avgPPD) return b.avgPPD - a.avgPPD;
+    if (b.wins !== a.wins) return b.wins - a.wins;
+    return a.name.localeCompare(b.name);
+  });
+
+  return rows;
+}
+
+function getHomepageRankText(playerId){
+  if (!playerId) return 'Rank: —';
+  const rows = buildHomepageRankingRows();
+  const rankIdx = rows.findIndex((row) => row.id === playerId);
+  if (rankIdx === -1) return 'Rank: —';
+  return `Rank: ${rankIdx + 1}`;
 }
 
 function participantSignature(ids){
@@ -4100,6 +4152,8 @@ function renderTodaysMatchup(todayKeyStr, yourScore){
   const diffValueEl = $('matchupDiffValue');
   const oppRecordEl = $('matchupOpponentRecord');
   const yourRecordEl = $('matchupYourRecord');
+  const yourRankEl = $('matchupYourRank');
+  const oppRankEl = $('matchupOpponentRank');
   const yourNameEl = $('matchupYourName');
   const yourAvgEl = $('matchupYourAverages');
   const oppAvgEl = $('matchupOpponentAverages');
@@ -4119,21 +4173,25 @@ const updateTodayScoreIsland = (value) => {
 
 
   if (yourNameEl) yourNameEl.textContent = getYouName();
+  if (yourRankEl) yourRankEl.textContent = getHomepageRankText('YOU');
   const youAverages = computeYouDailyAverages();
   if (yourAvgEl) {
-    const youAvgVal = youAverages.hasData ? youAverages.dailyAvg : null;
     const youPpdVal = youAverages.hasData ? youAverages.ppd : null;
-    yourAvgEl.textContent = formatAverageLine(youAvgVal, youPpdVal);
+    yourAvgEl.textContent = formatPpdLine(youPpdVal);
   }
-  if (oppAvgEl) oppAvgEl.textContent = formatAverageLine(null, null);
-
-  const setOpponentAverages = (playerId) => {
+  const setOpponentScoreboardMeta = (playerId) => {
+    if (oppRankEl) oppRankEl.textContent = playerId ? getHomepageRankText(playerId) : 'Rank: —';
     if (!oppAvgEl) return;
+    if (!playerId) {
+      oppAvgEl.textContent = formatPpdLine(null);
+      return;
+    }
     const oppAverages = computePlayerDailyAverages(playerId);
-    const avgVal = oppAverages.hasData ? oppAverages.dailyAvg : null;
     const ppdVal = oppAverages.hasData ? oppAverages.ppd : null;
-    oppAvgEl.textContent = formatAverageLine(avgVal, ppdVal);
+    oppAvgEl.textContent = formatPpdLine(ppdVal);
   };
+
+  setOpponentScoreboardMeta(null);
 
   const matchups = Array.isArray(state.matchups) ? state.matchups : [];
   const matchupDateKey = (m) => {
@@ -4156,7 +4214,7 @@ const updateTodayScoreIsland = (value) => {
     yourRecordEl.textContent = `Record: ${getYourRecordText()}`;
     oppNameEl.textContent = '—';
     setPlayerColorSwatches(oppPrimarySwatchEl, oppSecondarySwatchEl);
-    setOpponentAverages(null);
+    setOpponentScoreboardMeta(null);
     return;
   }
 
@@ -4184,7 +4242,7 @@ const updateTodayScoreIsland = (value) => {
   updateTodayScoreIsland(safeYourScore.toFixed(1));
   oppRecordEl.textContent = `Record: ${getPlayerRecordText(oppId)}`;
   yourRecordEl.textContent = `Record: ${getYourRecordText()}`;
-  setOpponentAverages(oppId);
+  setOpponentScoreboardMeta(oppId);
 
   const diff = Number((safeYourScore - visibleOppScore).toFixed(1));
 
