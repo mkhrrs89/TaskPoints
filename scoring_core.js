@@ -1395,18 +1395,22 @@ return { state: merged, storageKey };
     return { score, hours };
   }
 
-  function workHoursBonus(hours = 0, settings) {
-    const scoring = getScoringSettings(settings);
-    const work = scoring.work;
-    let hoursValue = Number.isFinite(hours) ? hours : 0;
-    if (Number.isFinite(work.hoursMin)) {
-      hoursValue = Math.max(work.hoursMin, hoursValue);
-    }
-    if (Number.isFinite(work.hoursMax)) {
-      hoursValue = Math.min(work.hoursMax, hoursValue);
-    }
-    return (hoursValue * work.hoursMultiplier) + work.hoursOffset;
+function workHoursBonus(hours = 0, settings) {
+  const scoring = getScoringSettings(settings);
+  const work = scoring.work;
+
+  let rawHours = Number.isFinite(hours) ? hours : 0;
+  rawHours = Math.max(0, rawHours);
+
+  if (Number.isFinite(work.hoursMax)) {
+    rawHours = Math.min(work.hoursMax, rawHours);
   }
+
+  const threshold = Number.isFinite(work.hoursMin) ? work.hoursMin : 0;
+  const countedHours = Math.max(0, rawHours - threshold);
+
+  return (countedHours * work.hoursMultiplier) + work.hoursOffset;
+}
 
   function workPoints(score, hours = 0, settings) {
     if (!Number.isFinite(score)) return 0;
