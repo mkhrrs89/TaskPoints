@@ -850,8 +850,10 @@ const flushKey = (storageKey) => {
 
   pendingByKey.delete(storageKey);
 
-// SAFETY: merge with the latest localStorage at flush-time so stale tabs can't overwrite newer data.
-originalMergeAndSave(pending.state, { ...pending.options, storageKey, immediateWrite: true });
+// Flush the latest queued full-state snapshot to localStorage.
+// This uses a direct snapshot write so deletions persist correctly;
+// stale-tab protection must be handled separately from this flush step.
+core.saveStateSnapshot(pending.state, { ...pending.options, storageKey, immediateWrite: true });
 };
 
 
