@@ -671,6 +671,17 @@ body {
     /* Was 2 lines reserved; shrink it for mobile so names sit higher */
     --scoreboard-name-height: calc(1.1em * 1.5);
   }
+
+  .home-scoreboard-card .scoreboard-record,
+  .home-scoreboard-card .scoreboard-meta{
+    line-height: 1.05;
+  }
+
+  .home-scoreboard-card .scoreboard-record + .scoreboard-meta,
+  .home-scoreboard-card .scoreboard-meta + .scoreboard-record,
+  .home-scoreboard-card .scoreboard-meta + .scoreboard-meta{
+    margin-top: -4px;
+  }
 }
 
 
