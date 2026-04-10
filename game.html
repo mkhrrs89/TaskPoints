@@ -357,9 +357,14 @@
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
-  scroll-padding-bottom: calc(var(--tp-toolbar-stack-height) + 20px);
+  scroll-padding-bottom: calc(var(--tp-toolbar-stack-height) + 24px);
   position: relative;
   padding: 20px;
+}
+
+.create-player-submit-row {
+  display: flex;
+  justify-content: flex-end;
 }
 
 @media (max-width: 640px) {
@@ -372,7 +377,19 @@
 .create-player-modal-panel {
   width: 100%;
   max-height: min(88vh, 1000px);
-  padding: 18px 16px calc(16px + var(--tp-toolbar-stack-height) + 12px);
+  padding: 18px 16px calc(var(--tp-toolbar-stack-height) + env(safe-area-inset-bottom, 0px) + 96px);
+}
+
+.create-player-submit-row {
+  position: sticky;
+  bottom: calc(var(--tp-toolbar-stack-height) + env(safe-area-inset-bottom, 0px) + 10px);
+  z-index: 2;
+  padding-top: 10px;
+  background: linear-gradient(
+    to top,
+    rgba(17, 22, 28, 0.98) 70%,
+    rgba(17, 22, 28, 0)
+  );
 }
 }
 
@@ -592,7 +609,7 @@
         <label for="playerActive" class="opacity-80">Active</label>
       </div>
 
-      <div class="flex justify-end">
+      <div class="create-player-submit-row">
         <button class="btn btn-success" type="submit">Add player</button>
       </div>
     </form>
