@@ -682,10 +682,10 @@ notes: typeof s.notes === "string" ? s.notes : "",
 
       try {
         if (window.TaskPointsCore?.saveAppState) {
-          TaskPointsCore.saveAppState(nextState, { storageKey: SETTINGS_STORAGE_KEY, immediateWrite: true });
+          TaskPointsCore.saveStateSnapshot(nextState, { storageKey: SETTINGS_STORAGE_KEY, immediateWrite: true });
           alert("Game stats before today have been reset. Reload any open TaskPoints tabs to see the changes.");
         } else if (window.TaskPointsCore?.mergeAndSaveState) {
-          TaskPointsCore.mergeAndSaveState(nextState, { storageKey: SETTINGS_STORAGE_KEY, immediateWrite: true });
+          TaskPointsCore.saveStateSnapshot(nextState, { storageKey: SETTINGS_STORAGE_KEY, immediateWrite: true });
           alert("Game stats before today have been reset. Reload any open TaskPoints tabs to see the changes.");
         } else {
           console.warn("settings reset skipped localStorage write; TaskPointsCore missing.");
@@ -711,7 +711,7 @@ notes: typeof s.notes === "string" ? s.notes : "",
   delete normalized.scoringSettings;
 }
       if (window.TaskPointsCore?.saveAppState) {
-        TaskPointsCore.saveAppState(normalized, {
+        TaskPointsCore.saveStateSnapshot(normalized, {
           storageKey: SETTINGS_STORAGE_KEY,
           allowScoringSettingsOverwrite: false,
           allowHabitTagColorReset: true,
@@ -719,7 +719,7 @@ notes: typeof s.notes === "string" ? s.notes : "",
           immediateWrite: true
         });
       } else if (window.TaskPointsCore?.mergeAndSaveState) {
-        TaskPointsCore.mergeAndSaveState(normalized, {
+        TaskPointsCore.saveStateSnapshot(normalized, {
           storageKey: SETTINGS_STORAGE_KEY,
           allowScoringSettingsOverwrite: false,
           allowHabitTagColorReset: true,
@@ -910,7 +910,7 @@ notes: typeof s.notes === "string" ? s.notes : "",
           const allowScoringSettingsOverwrite = Boolean(options.allowScoringSettingsOverwrite);
           const allowStickyOverwriteKeys = options.allowStickyOverwriteKeys;
           const immediateWrite = Boolean(options.immediateWrite);
-          const { state: merged } = TaskPointsCore.saveAppState(nextState, {
+          const { state: merged } = TaskPointsCore.saveStateSnapshot(nextState, {
             storageKey: SETTINGS_STORAGE_KEY,
             allowHabitTagColorReset,
             allowScoringSettingsOverwrite,
@@ -924,7 +924,7 @@ notes: typeof s.notes === "string" ? s.notes : "",
           const allowScoringSettingsOverwrite = Boolean(options.allowScoringSettingsOverwrite);
           const allowStickyOverwriteKeys = options.allowStickyOverwriteKeys;
           const immediateWrite = Boolean(options.immediateWrite);
-          const { state: merged } = TaskPointsCore.mergeAndSaveState(nextState, {
+          const { state: merged } = TaskPointsCore.saveStateSnapshot(nextState, {
             storageKey: SETTINGS_STORAGE_KEY,
             allowHabitTagColorReset,
             allowScoringSettingsOverwrite,

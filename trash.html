@@ -41,7 +41,7 @@ function loadState() {
 
 function saveState(nextState) {
   if (window.TaskPointsCore?.mergeAndSaveState) {
-    const res = TaskPointsCore.mergeAndSaveState(nextState, { storageKey: STORAGE_KEY, immediateWrite: true });
+    const res = TaskPointsCore.saveStateSnapshot(nextState, { storageKey: STORAGE_KEY, immediateWrite: true });
     appState = res.state;
     return;
   }

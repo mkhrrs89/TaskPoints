@@ -948,7 +948,7 @@ function normalizeState(s) {
 function saveState(nextState, options = {}) {
   try {
     if (window.TaskPointsCore?.saveAppState) {
-      const { state: merged, trimmed } = TaskPointsCore.saveAppState(nextState, options);
+      const { state: merged, trimmed } = TaskPointsCore.saveStateSnapshot(nextState, options);
       if (trimmed) {
         console.warn('Storage nearing capacity. Older history items were trimmed to keep saves working.');
       }
@@ -957,7 +957,7 @@ function saveState(nextState, options = {}) {
       return merged;
     }
     if (window.TaskPointsCore?.mergeAndSaveState) {
-      const { state: merged, trimmed } = TaskPointsCore.mergeAndSaveState(nextState, options);
+      const { state: merged, trimmed } = TaskPointsCore.saveStateSnapshot(nextState, options);
       if (trimmed) {
         console.warn('Storage nearing capacity. Older history items were trimmed to keep saves working.');
       }

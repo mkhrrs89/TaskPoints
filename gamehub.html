@@ -420,13 +420,13 @@
 
   function saveState(state){
     if (window.TaskPointsCore?.saveAppState) {
-      TaskPointsCore.saveAppState(state, { storageKey: STORAGE_KEY });
+      TaskPointsCore.saveStateSnapshot(state, { storageKey: STORAGE_KEY });
       pageStateCache = state;
       pageStateCacheDirty = false;
       return;
     }
     if (window.TaskPointsCore?.mergeAndSaveState) {
-      TaskPointsCore.mergeAndSaveState(state, { storageKey: STORAGE_KEY });
+      TaskPointsCore.saveStateSnapshot(state, { storageKey: STORAGE_KEY });
       pageStateCache = state;
       pageStateCacheDirty = false;
       return;
