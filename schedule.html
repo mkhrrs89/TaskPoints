@@ -128,24 +128,23 @@ function readPageStateFresh() {
   if (window.TP_DEBUG_PERF) {
     console.debug('[TP_DEBUG_PERF][schedule] fresh storage parse #' + pageStateFreshReadCount);
   }
+
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      pageStateCache = {
-        tasks: [],
-        completions: [],
-        players: [],
-        habits: [],
-        flexActions: [],
-        gameHistory: [],
-        matchups: [],
-        schedule: [],
-        opponentDripSchedules: [],
-        youName: ""
-      };
-      pageStateCacheDirty = false;
-      return pageStateCache;
+    if (window.TaskPointsCore?.loadAppState) {
+      const loaded = TaskPointsCore.loadAppState({ syncDerived: false, persistSync: false });
+      pageStateCache = loaded && loaded.state ? loaded.state : {};
+    } else {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      pageStateCache = raw ? (JSON.parse(raw) || {}) : {};
     }
+  } catch (e) {
+    console.error("Failed to load TaskPoints state", e);
+    pageStateCache = {};
+  }
+
+  pageStateCacheDirty = false;
+  return pageStateCache;
+}
 
     const parsed = JSON.parse(raw) || {};
     pageStateCache = {
