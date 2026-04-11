@@ -132,14 +132,14 @@ function readPageStateFresh() {
   try {
     if (window.TaskPointsCore?.loadAppState) {
       const loaded = TaskPointsCore.loadAppState({ syncDerived: false, persistSync: false });
-      pageStateCache = loaded && loaded.state ? loaded.state : {};
+      pageStateCache = normalizeState(loaded && loaded.state ? loaded.state : {});
     } else {
       const raw = localStorage.getItem(STORAGE_KEY);
-      pageStateCache = raw ? (JSON.parse(raw) || {}) : {};
+      pageStateCache = normalizeState(raw ? (JSON.parse(raw) || {}) : {});
     }
   } catch (e) {
     console.error("Failed to load TaskPoints state", e);
-    pageStateCache = {};
+    pageStateCache = normalizeState({});
   }
 
   pageStateCacheDirty = false;
@@ -420,13 +420,19 @@ function saveState(nextState) {
       return n + (s[(v - 20) % 10] || s[v] || s[0]);
     }
 
-    function formatLongDate(key) {
-      const [y, m, d] = key.split("-").map((x) => parseInt(x, 10));
-      const dt = new Date(y, m - 1, d);
-      const weekday = dt.toLocaleDateString(undefined, { weekday: "long" });
-      const month = dt.toLocaleDateString(undefined, { month: "short" });
-      return `${weekday}, ${month} ${ordinal(d)}, ${y}`;
-    }
+function formatLongDate(key) {
+  if (typeof key !== "string" || !key.includes("-")) return "Unknown date";
+
+  const [y, m, d] = key.split("-").map((x) => parseInt(x, 10));
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) {
+    return "Unknown date";
+  }
+
+  const dt = new Date(y, m - 1, d);
+  const weekday = dt.toLocaleDateString(undefined, { weekday: "long" });
+  const month = dt.toLocaleDateString(undefined, { month: "short" });
+  return `${weekday}, ${month} ${ordinal(d)}, ${y}`;
+}
 
     let state = syncStateWithMatchups(loadState(), { persist: false, pathName: 'boot:syncStateWithMatchups' });
 
@@ -443,7 +449,9 @@ function saveState(nextState) {
       const container = $("scheduleContainer");
       container.innerHTML = "";
 
-      const schedule = Array.isArray(state.schedule) ? state.schedule : [];
+      const schedule = Array.isArray(state.schedule)
+  ? state.schedule.filter((day) => day && typeof day.date === "string")
+  : [];
       if (!schedule.length) {
         const empty = document.createElement("section");
         empty.className = "glass";
