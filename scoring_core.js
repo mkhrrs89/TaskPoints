@@ -1402,14 +1402,14 @@ function workHoursBonus(hours = 0, settings) {
   let rawHours = Number.isFinite(hours) ? hours : 0;
   rawHours = Math.max(0, rawHours);
 
+  const threshold = Number.isFinite(work.hoursMin) ? work.hoursMin : 0;
+  let overtimeHours = Math.max(0, rawHours - threshold);
+
   if (Number.isFinite(work.hoursMax)) {
-    rawHours = Math.min(work.hoursMax, rawHours);
+    overtimeHours = Math.min(overtimeHours, work.hoursMax);
   }
 
-  const threshold = Number.isFinite(work.hoursMin) ? work.hoursMin : 0;
-  const countedHours = Math.max(0, rawHours - threshold);
-
-  return (countedHours * work.hoursMultiplier) + work.hoursOffset;
+  return (overtimeHours * work.hoursMultiplier) + work.hoursOffset;
 }
 
   function workPoints(score, hours = 0, settings) {
