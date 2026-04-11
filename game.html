@@ -822,10 +822,17 @@ function buildBaseState() {
     matchups: [],
     schedule: [],
     opponentDripSchedules: [],
+    workHistory: [],
     youImageId: "",
     youName: "",
     youPrimaryColor: DEFAULT_PRIMARY_COLOR,
-    youSecondaryColor: DEFAULT_SECONDARY_COLOR
+    youSecondaryColor: DEFAULT_SECONDARY_COLOR,
+    projects: [],
+    notes: "",
+    habitTagColors: {},
+    scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
+      ? TaskPointsCore.normalizeScoringSettings({})
+      : {}
   };
 }
 
@@ -878,6 +885,13 @@ function readPageStateFresh() {
     base.youName = typeof parsed.youName === "string" ? parsed.youName : "";
     base.youPrimaryColor = normalizePlayerColor(parsed.youPrimaryColor, DEFAULT_PRIMARY_COLOR);
     base.youSecondaryColor = normalizePlayerColor(parsed.youSecondaryColor, DEFAULT_SECONDARY_COLOR);
+    base.workHistory = Array.isArray(parsed.workHistory) ? parsed.workHistory : [];
+base.projects = Array.isArray(parsed.projects) ? parsed.projects : [];
+base.notes = typeof parsed.notes === "string" ? parsed.notes : "";
+base.habitTagColors = normalizeHabitTagColors(parsed.habitTagColors);
+base.scoringSettings = window.TaskPointsCore?.normalizeScoringSettings
+  ? TaskPointsCore.normalizeScoringSettings(parsed.scoringSettings || {})
+  : (parsed.scoringSettings || {});
   } catch (e) {
     console.error("Failed to load state in game.html", e);
   }
@@ -947,24 +961,23 @@ function normalizeState(s) {
 
 function saveState(nextState, options = {}) {
   try {
-    if (window.TaskPointsCore?.saveAppState) {
-      const { state: merged, trimmed } = TaskPointsCore.saveStateSnapshot(nextState, options);
+    const saveFn = window.TaskPointsCore?.saveAppState || window.TaskPointsCore?.mergeAndSaveState;
+
+    if (saveFn) {
+      const { state: merged, trimmed } = saveFn(nextState, {
+        storageKey: STORAGE_KEY,
+        ...options
+      });
+
       if (trimmed) {
         console.warn('Storage nearing capacity. Older history items were trimmed to keep saves working.');
       }
+
       pageStateCache = merged;
       pageStateCacheDirty = false;
       return merged;
     }
-    if (window.TaskPointsCore?.mergeAndSaveState) {
-      const { state: merged, trimmed } = TaskPointsCore.saveStateSnapshot(nextState, options);
-      if (trimmed) {
-        console.warn('Storage nearing capacity. Older history items were trimmed to keep saves working.');
-      }
-      pageStateCache = merged;
-      pageStateCacheDirty = false;
-      return merged;
-    }
+
     const existing = getPageState() || {};
     const merged = { ...existing, ...nextState };
     pageStateCache = merged;
