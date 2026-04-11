@@ -910,7 +910,7 @@ notes: typeof s.notes === "string" ? s.notes : "",
           const allowScoringSettingsOverwrite = Boolean(options.allowScoringSettingsOverwrite);
           const allowStickyOverwriteKeys = options.allowStickyOverwriteKeys;
           const immediateWrite = Boolean(options.immediateWrite);
-          const { state: merged } = TaskPointsCore.saveStateSnapshot(nextState, {
+          const { state: merged } = TaskPointsCore.saveAppState(nextState, {
             storageKey: SETTINGS_STORAGE_KEY,
             allowHabitTagColorReset,
             allowScoringSettingsOverwrite,
@@ -924,7 +924,7 @@ notes: typeof s.notes === "string" ? s.notes : "",
           const allowScoringSettingsOverwrite = Boolean(options.allowScoringSettingsOverwrite);
           const allowStickyOverwriteKeys = options.allowStickyOverwriteKeys;
           const immediateWrite = Boolean(options.immediateWrite);
-          const { state: merged } = TaskPointsCore.saveStateSnapshot(nextState, {
+          const { state: merged } = TaskPointsCore.mergeAndSaveState(nextState, {
             storageKey: SETTINGS_STORAGE_KEY,
             allowHabitTagColorReset,
             allowScoringSettingsOverwrite,
