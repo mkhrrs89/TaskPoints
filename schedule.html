@@ -146,27 +146,6 @@ function readPageStateFresh() {
   return pageStateCache;
 }
 
-    const parsed = JSON.parse(raw) || {};
-    pageStateCache = {
-      tasks:       Array.isArray(parsed.tasks)       ? parsed.tasks       : [],
-      completions: Array.isArray(parsed.completions) ? parsed.completions : [],
-      players:     Array.isArray(parsed.players)     ? parsed.players     : [],
-      habits:      Array.isArray(parsed.habits)      ? parsed.habits      : [],
-      flexActions: Array.isArray(parsed.flexActions) ? parsed.flexActions : [],
-      gameHistory: Array.isArray(parsed.gameHistory) ? parsed.gameHistory : [],
-      matchups:    Array.isArray(parsed.matchups)    ? parsed.matchups    : [],
-      schedule:    Array.isArray(parsed.schedule)    ? parsed.schedule    : [],
-      opponentDripSchedules: Array.isArray(parsed.opponentDripSchedules) ? parsed.opponentDripSchedules : [],
-      youName: typeof parsed.youName === "string" ? parsed.youName : ""
-    };
-  } catch (e) {
-    console.error("Failed to load TaskPoints state", e);
-    pageStateCache = { tasks: [], completions: [], players: [], habits: [], flexActions: [], gameHistory: [], matchups: [], schedule: [], opponentDripSchedules: [], youName: "" };
-  }
-  pageStateCacheDirty = false;
-  return pageStateCache;
-}
-
 function loadState() {
   return pageStateCacheDirty ? readPageStateFresh() : pageStateCache;
 }
@@ -225,6 +204,7 @@ function normalizeState(s) {
     schedule:    Array.isArray(s.schedule)    ? s.schedule    : [],
     opponentDripSchedules: Array.isArray(s.opponentDripSchedules) ? s.opponentDripSchedules : [],
     notes: typeof s.notes === "string" ? s.notes : "",
+    youName: typeof s.youName === "string" ? s.youName : "",
     habitTagColors: normalizeHabitTagColors(s.habitTagColors)
   };
 }
