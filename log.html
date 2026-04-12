@@ -1059,11 +1059,15 @@ function editCompletionDate(id){
   // Update completion timestamp (normalized to noon for safety)
   entry.completedAtISO = newDate.toISOString();
 
-  // If linked to a task, keep that task's completedAtISO in sync
+  // If linked to a task, only sync completedAtISO for non-repeating tasks.
+  // Repeating tasks should keep their recurrence and next due date intact.
   if (entry.taskId) {
     const t = state.tasks.find(t => t.id === entry.taskId);
     if (t) {
-      t.completedAtISO = entry.completedAtISO;
+      const mode = (t.recurrence && t.recurrence.mode) || 'none';
+      if (mode === 'none') {
+        t.completedAtISO = entry.completedAtISO;
+      }
     }
   }
 
