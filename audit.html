@@ -425,6 +425,81 @@
       return { wins: w, losses: l, source: 'gameHistory' };
     }
 
+    const RANKING_PPD_TOLERANCE = 0.01;
+
+    function formatAuditPpd(value) {
+      return Number.isFinite(value) ? value.toFixed(1) : '—';
+    }
+
+    function buildRankingReasonContext(state) {
+      const rows = window.TaskPointsCore?.computeRankings
+        ? TaskPointsCore.computeRankings(state, { includeToday: false })
+        : [];
+      const byId = new Map(rows.map((row) => [row.id, row]));
+      return { byId };
+    }
+
+    function detectRankingMismatchReason(playerId, homeRow, rankingsRow, context) {
+      if (!homeRow || !rankingsRow) {
+        return 'Player excluded from one list due to active/filtering differences.';
+      }
+      if (playerId === 'YOU') {
+        return 'YOU special-case path differs (Home uses completion daily totals; Rankings may use matchup/fallback record path).';
+      }
+
+      const rankingsMeta = context.byId.get(playerId);
+      if (rankingsMeta?.recordSource === 'matchups') {
+        return 'Home uses gameHistory score average, Rankings uses revealed matchup average.';
+      }
+      if (rankingsMeta?.recordSource === 'gameHistory') {
+        return 'PPD source differs between pages (gameHistory score vs gameHistory points/score fallback).';
+      }
+      return 'Tie/order/filtering or source path differs between Home and Rankings.';
+    }
+
+    function compareHomeVsRankingsConsistency(state) {
+      const homeRows = window.TaskPointsCore?.computeHomeScoreboardRankings
+        ? TaskPointsCore.computeHomeScoreboardRankings(state)
+        : [];
+      const rankingsRows = window.TaskPointsCore?.computeRankingsPageRows
+        ? TaskPointsCore.computeRankingsPageRows(state)
+        : [];
+      const context = buildRankingReasonContext(state);
+
+      const homeById = new Map(homeRows.map((row) => [row.id, row]));
+      const rankingsById = new Map(rankingsRows.map((row) => [row.id, row]));
+      const allIds = new Set([...homeById.keys(), ...rankingsById.keys()]);
+      const mismatches = [];
+
+      allIds.forEach((playerId) => {
+        const homeRow = homeById.get(playerId);
+        const rankingsRow = rankingsById.get(playerId);
+        const rankMismatch = !homeRow || !rankingsRow || homeRow.rank !== rankingsRow.rank;
+        const homePpd = homeRow?.ppdDisplay;
+        const rankingsPpd = rankingsRow?.ppdDisplay;
+        const ppdMismatch = (!Number.isFinite(homePpd) && Number.isFinite(rankingsPpd))
+          || (Number.isFinite(homePpd) && !Number.isFinite(rankingsPpd))
+          || (Number.isFinite(homePpd) && Number.isFinite(rankingsPpd) && Math.abs(homePpd - rankingsPpd) > RANKING_PPD_TOLERANCE);
+
+        if (!rankMismatch && !ppdMismatch) return;
+
+        const name = homeRow?.name || rankingsRow?.name || (playerId === 'YOU' ? getYouName(state) : playerId);
+        mismatches.push({
+          name,
+          playerId,
+          homeRank: homeRow?.rank ?? null,
+          rankingsRank: rankingsRow?.rank ?? null,
+          homePpd: Number.isFinite(homePpd) ? homePpd : null,
+          rankingsPpd: Number.isFinite(rankingsPpd) ? rankingsPpd : null,
+          homePpdRaw: Number.isFinite(homeRow?.ppdRaw) ? homeRow.ppdRaw : null,
+          rankingsPpdRaw: Number.isFinite(rankingsRow?.ppdRaw) ? rankingsRow.ppdRaw : null,
+          reason: detectRankingMismatchReason(playerId, homeRow, rankingsRow, context)
+        });
+      });
+
+      return { homeRows, rankingsRows, mismatches };
+    }
+
     // More reliable tap handling on mobile: fire on pointerdown and
     // ignore the synthetic click that follows.
     function bindPress(id, handler) {
@@ -1891,6 +1966,23 @@ const actualTotal = round2(Number(derivedActualTotal) || 0);
         details: [...standingsRecordIssues, ...standingsRecordWarnings],
         trace: 'standings.html computePlayerStats vs TaskPointsCore.computeMatchupRecord',
         tips: 'If standings show fallback records, sync matchups so standings and matchup logs reflect the same win/losses.'
+      });
+
+      const rankingConsistency = compareHomeVsRankingsConsistency(state);
+      const rankingMismatchDetails = rankingConsistency.mismatches.map((mismatch) => {
+        return `${mismatch.name} (${mismatch.playerId}): Home rank ${mismatch.homeRank ?? '—'} vs Rankings rank ${mismatch.rankingsRank ?? '—'}; Home PPD ${formatAuditPpd(mismatch.homePpd)} vs Rankings PPD ${formatAuditPpd(mismatch.rankingsPpd)} (raw ${mismatch.homePpdRaw == null ? '—' : mismatch.homePpdRaw.toFixed(3)} vs ${mismatch.rankingsPpdRaw == null ? '—' : mismatch.rankingsPpdRaw.toFixed(3)}). Reason: ${mismatch.reason}`;
+      });
+      checks.push({
+        id: 'home-rankings-consistency',
+        title: 'Home vs Rankings consistency',
+        status: rankingConsistency.mismatches.length ? 'WARN' : 'PASS',
+        expected: 'Same rank and displayed PPD for each player on Home scoreboard and Rankings page',
+        actual: rankingConsistency.mismatches.length
+          ? `${rankingConsistency.mismatches.length} ranking inconsistency(ies) found between Home and Rankings`
+          : 'No rank/PPD mismatches found',
+        details: rankingMismatchDetails,
+        trace: 'TaskPointsCore.computeHomeScoreboardRankings vs TaskPointsCore.computeRankingsPageRows',
+        tips: 'This audit compares display-level rank + PPD values without changing Home/Rankings behavior.'
       });
 
       // New: verify your matchup scores match recomputed daily totals (with inertia)
