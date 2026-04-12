@@ -2427,6 +2427,112 @@ function buildDailyBreakdowns(state){
     return computeGameHistoryRecord(state, playerId);
   }
 
+  function rankablePlayers(state){
+    const players = Array.isArray(state?.players) ? state.players : [];
+    const youName = (typeof state?.youName === 'string' && state.youName.trim())
+      ? state.youName.trim()
+      : 'You';
+    const active = players.filter((player) => player && isPlayerActive(player) && player.id && player.id !== 'YOU');
+    return [{ id: 'YOU', name: youName, isYou: true }, ...active];
+  }
+
+  function computeRankingAvgPPD(state, playerId, record, options = {}){
+    if (!state || !playerId) return null;
+    const includeToday = options.includeToday === true;
+
+    if (record?.source === 'matchups') {
+      const matchups = Array.isArray(state.matchups) ? state.matchups : [];
+      const activeIds = activePlayerIds(state);
+      let games = 0;
+      let totalPoints = 0;
+
+      matchups.forEach((matchup) => {
+        if (!matchup || (matchup.playerAId !== playerId && matchup.playerBId !== playerId)) return;
+        if (!activeIds.has(matchup.playerAId) || !activeIds.has(matchup.playerBId)) return;
+        if (!isMatchupRevealed(matchupDateKey(matchup), { includeToday })) return;
+        const scoreA = Number(matchup.scoreA);
+        const scoreB = Number(matchup.scoreB);
+        if (!Number.isFinite(scoreA) || !Number.isFinite(scoreB)) return;
+
+        totalPoints += matchup.playerAId === playerId ? scoreA : scoreB;
+        games++;
+      });
+
+      return games ? (totalPoints / games) : null;
+    }
+
+    if (playerId === 'YOU') {
+      const comps = Array.isArray(state.completions) ? state.completions : [];
+      const dayMap = {};
+
+      comps.forEach((completion) => {
+        if (!completion) return;
+        const day = dateKey(completion.completedAtISO || completion.dateKey);
+        if (!day) return;
+        const points = pointsForCompletion(completion, state);
+        dayMap[day] = (dayMap[day] || 0) + points;
+      });
+
+      const totals = Object.values(dayMap).map(Number).filter(Number.isFinite);
+      if (!totals.length) return null;
+      return totals.reduce((sum, value) => sum + value, 0) / totals.length;
+    }
+
+    const history = Array.isArray(state.gameHistory) ? state.gameHistory : [];
+    const entries = history.filter((item) => {
+      if (!item || item.playerId !== playerId) return false;
+      const points = Number(item.points);
+      const score = Number(item.score);
+      return Number.isFinite(points) || Number.isFinite(score);
+    });
+    if (!entries.length) return null;
+    const totalPoints = entries.reduce((sum, item) => {
+      const points = Number(item.points);
+      if (Number.isFinite(points)) return sum + points;
+      const score = Number(item.score);
+      return Number.isFinite(score) ? (sum + score) : sum;
+    }, 0);
+    return totalPoints / entries.length;
+  }
+
+  function computeRankings(state, options = {}){
+    const includeToday = options.includeToday === true;
+    const allowFallback = options.allowFallback !== false;
+    const rows = rankablePlayers(state).map((player) => {
+      const record = computeRecord(state, player.id, { includeToday, allowFallback });
+      const wins = Number(record?.wins) || 0;
+      const losses = Number(record?.losses) || 0;
+      const ties = Number(record?.ties) || 0;
+      const games = Number(record?.games) || 0;
+      const winPct = games > 0 ? (wins / games) : -1;
+      const avgPPD = computeRankingAvgPPD(state, player.id, record, { includeToday });
+
+      return {
+        ...player,
+        wins,
+        losses,
+        ties,
+        games,
+        winPct,
+        avgPPD,
+        hasGames: games > 0,
+        recordSource: record?.source || 'unknown'
+      };
+    });
+
+    rows.sort((a, b) => {
+      if (a.hasGames !== b.hasGames) return a.hasGames ? -1 : 1;
+      if (b.winPct !== a.winPct) return b.winPct - a.winPct;
+      const aPpd = Number.isFinite(a.avgPPD) ? a.avgPPD : -1e9;
+      const bPpd = Number.isFinite(b.avgPPD) ? b.avgPPD : -1e9;
+      if (bPpd !== aPpd) return bPpd - aPpd;
+      if (b.wins !== a.wins) return b.wins - a.wins;
+      return String(a.name || '').localeCompare(String(b.name || ''));
+    });
+
+    return rows;
+  }
+
   function syncYouMatchups(state, options = {}){
     // Invariant: options.normalized is only set when state already passed through normalizeState().
     const normalized = options.normalized ? (state || {}) : normalizeState(state || {});
@@ -2536,6 +2642,7 @@ function buildDailyBreakdowns(state){
     computeCompletionRecord,
     computeGameHistoryRecord,
     computeRecord,
+    computeRankings,
     caloriesToPoints,
     computeCalLogBonusPoints,
     CAL_LOG_BONUS_POINTS,

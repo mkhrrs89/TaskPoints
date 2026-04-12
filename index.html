@@ -2799,51 +2799,9 @@ function getAllParticipantIds(){
   return ids;
 }
 
-function buildHomepageRankingRows(){
-  const participantIds = getAllParticipantIds();
-  const rows = participantIds.map((playerId) => {
-    const record = window.TaskPointsCore?.computeRecord
-      ? TaskPointsCore.computeRecord(state, playerId, { includeToday: false })
-      : { wins: 0, losses: 0, ties: 0, games: 0 };
-    const wins = Number(record?.wins) || 0;
-    const losses = Number(record?.losses) || 0;
-    const ties = Number(record?.ties) || 0;
-    const games = Number(record?.games) || 0;
-    const winPct = games > 0 ? wins / games : 0;
-    const averages = playerId === 'YOU'
-      ? computeYouDailyAverages()
-      : computePlayerDailyAverages(playerId);
-    const avgPPD = Number.isFinite(averages?.ppd) ? averages.ppd : 0;
-    const playerName = getPlayerNameById(playerId);
-
-    return {
-      id: playerId,
-      name: playerName,
-      wins,
-      losses,
-      ties,
-      games,
-      winPct,
-      avgPPD
-    };
-  });
-
-  rows.sort((a, b) => {
-    const aHasGames = a.games > 0 ? 1 : 0;
-    const bHasGames = b.games > 0 ? 1 : 0;
-    if (bHasGames !== aHasGames) return bHasGames - aHasGames;
-    if (b.winPct !== a.winPct) return b.winPct - a.winPct;
-    if (b.avgPPD !== a.avgPPD) return b.avgPPD - a.avgPPD;
-    if (b.wins !== a.wins) return b.wins - a.wins;
-    return a.name.localeCompare(b.name);
-  });
-
-  return rows;
-}
-
 function getHomepageRankText(playerId){
-  if (!playerId) return 'Rank: —';
-  const rows = buildHomepageRankingRows();
+  if (!playerId || !window.TaskPointsCore?.computeRankings) return 'Rank: —';
+  const rows = TaskPointsCore.computeRankings(state, { includeToday: false });
   const rankIdx = rows.findIndex((row) => row.id === playerId);
   if (rankIdx === -1) return 'Rank: —';
   return `Rank: ${rankIdx + 1}`;
