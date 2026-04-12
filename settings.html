@@ -681,10 +681,15 @@ notes: typeof s.notes === "string" ? s.notes : "",
       };
 
       try {
-        if (window.TaskPointsCore?.saveAppState) {
-          TaskPointsCore.saveStateSnapshot(nextState, { storageKey: SETTINGS_STORAGE_KEY, immediateWrite: true });
+        if (window.TaskPointsCore?.saveValidatedSnapshot) {
+          TaskPointsCore.saveValidatedSnapshot(nextState, {
+            storageKey: SETTINGS_STORAGE_KEY,
+            immediateWrite: true,
+            allowDestructiveOverwrite: true,
+            source: "settings-game-reset"
+          });
           alert("Game stats before today have been reset. Reload any open TaskPoints tabs to see the changes.");
-        } else if (window.TaskPointsCore?.mergeAndSaveState) {
+        } else if (window.TaskPointsCore?.saveStateSnapshot) {
           TaskPointsCore.saveStateSnapshot(nextState, { storageKey: SETTINGS_STORAGE_KEY, immediateWrite: true });
           alert("Game stats before today have been reset. Reload any open TaskPoints tabs to see the changes.");
         } else {
@@ -710,15 +715,17 @@ notes: typeof s.notes === "string" ? s.notes : "",
       if (!Object.prototype.hasOwnProperty.call(root, "scoringSettings")) {
   delete normalized.scoringSettings;
 }
-      if (window.TaskPointsCore?.saveAppState) {
-        TaskPointsCore.saveStateSnapshot(normalized, {
+      if (window.TaskPointsCore?.saveValidatedSnapshot) {
+        TaskPointsCore.saveValidatedSnapshot(normalized, {
           storageKey: SETTINGS_STORAGE_KEY,
           allowScoringSettingsOverwrite: false,
           allowHabitTagColorReset: true,
           allowStickyOverwriteKeys: ["youImageId", "youName", "youPrimaryColor", "youSecondaryColor", "habitTagColors"],
+          allowDestructiveOverwrite: true,
+          source: "settings-import",
           immediateWrite: true
         });
-      } else if (window.TaskPointsCore?.mergeAndSaveState) {
+      } else if (window.TaskPointsCore?.saveStateSnapshot) {
         TaskPointsCore.saveStateSnapshot(normalized, {
           storageKey: SETTINGS_STORAGE_KEY,
           allowScoringSettingsOverwrite: false,

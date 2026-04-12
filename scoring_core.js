@@ -3,6 +3,13 @@
   const PROJECTS_STORAGE_KEY = "tp_projects_v1";
   const IMAGE_DB_NAME = "taskpoints";
   const IMAGE_STORE_NAME = "images";
+  const QUARANTINE_SNAPSHOT_KEY = "taskpoints_quarantined_snapshot";
+  const BACKUP_SLOT_KEYS = [
+    "taskpoints_backup_latest",
+    "taskpoints_backup_prev1",
+    "taskpoints_backup_prev2",
+    "taskpoints_backup_prev3"
+  ];
 
   if (!global.scheduleRender) {
     const queue = new Set();
@@ -1081,6 +1088,168 @@ return { state: merged, storageKey };
 
   }
 
+  function summarizeSnapshotCounts(snapshot) {
+    const safe = snapshot && typeof snapshot === 'object' ? snapshot : {};
+    return {
+      tasks: Array.isArray(safe.tasks) ? safe.tasks.length : 0,
+      completions: Array.isArray(safe.completions) ? safe.completions.length : 0,
+      habits: Array.isArray(safe.habits) ? safe.habits.length : 0,
+      players: Array.isArray(safe.players) ? safe.players.length : 0,
+      flexActions: Array.isArray(safe.flexActions) ? safe.flexActions.length : 0,
+      gameHistory: Array.isArray(safe.gameHistory) ? safe.gameHistory.length : 0,
+      matchups: Array.isArray(safe.matchups) ? safe.matchups.length : 0,
+      schedule: Array.isArray(safe.schedule) ? safe.schedule.length : 0,
+      opponentDripSchedules: Array.isArray(safe.opponentDripSchedules) ? safe.opponentDripSchedules.length : 0,
+      workHistory: Array.isArray(safe.workHistory) ? safe.workHistory.length : 0,
+      projects: Array.isArray(safe.projects) ? safe.projects.length : 0
+    };
+  }
+
+  function readStoredStateRaw(storageKey) {
+    try {
+      const raw = localStorage.getItem(storageKey);
+      return raw ? (JSON.parse(raw) || {}) : {};
+    } catch (e) {
+      console.warn('Failed to parse existing TaskPoints snapshot for validation.', e);
+      return {};
+    }
+  }
+
+  function validateSnapshotShape(snapshot) {
+    if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
+      return { ok: false, reason: 'Incoming snapshot must be an object.' };
+    }
+    const requiredArrayKeys = [
+      'tasks',
+      'completions',
+      'habits',
+      'players',
+      'flexActions',
+      'gameHistory',
+      'matchups',
+      'schedule',
+      'opponentDripSchedules'
+    ];
+
+    const missingRequired = requiredArrayKeys.filter((key) => !Object.prototype.hasOwnProperty.call(snapshot, key));
+    if (missingRequired.length > 0) {
+      return { ok: false, reason: `Incoming snapshot missing required domains: ${missingRequired.join(', ')}` };
+    }
+
+    const wrongArrayTypes = requiredArrayKeys.filter((key) => !Array.isArray(snapshot[key]));
+    if (wrongArrayTypes.length > 0) {
+      return { ok: false, reason: `Expected array domains with wrong type: ${wrongArrayTypes.join(', ')}` };
+    }
+
+    const objectLikeChecks = ['scoringSettings', 'habitTagColors'];
+    const wrongObjectTypes = objectLikeChecks.filter((key) =>
+      Object.prototype.hasOwnProperty.call(snapshot, key)
+      && snapshot[key] != null
+      && (typeof snapshot[key] !== 'object' || Array.isArray(snapshot[key]))
+    );
+    if (wrongObjectTypes.length > 0) {
+      return { ok: false, reason: `Expected object domains with wrong type: ${wrongObjectTypes.join(', ')}` };
+    }
+
+    const keys = Object.keys(snapshot);
+    if (keys.length < 8) {
+      return { ok: false, reason: `Incoming snapshot has too few top-level keys (${keys.length}).` };
+    }
+
+    const majorCollectionPresence = requiredArrayKeys.reduce((acc, key) => {
+      if (Array.isArray(snapshot[key])) acc += 1;
+      return acc;
+    }, 0);
+    if (majorCollectionPresence < 8) {
+      return { ok: false, reason: 'Incoming snapshot appears partial; major collection domains are missing.' };
+    }
+
+    return { ok: true };
+  }
+
+  function detectSuspiciousDrop(nextSnapshot, storedSnapshot) {
+    const next = summarizeSnapshotCounts(nextSnapshot);
+    const current = summarizeSnapshotCounts(storedSnapshot);
+    const trackedKeys = ['tasks', 'completions', 'habits', 'players', 'matchups', 'schedule', 'gameHistory'];
+
+    let currentTotal = 0;
+    let nextTotal = 0;
+    let majorDrops = 0;
+    const droppedDomains = [];
+    trackedKeys.forEach((key) => {
+      const before = Number(current[key]) || 0;
+      const after = Number(next[key]) || 0;
+      currentTotal += before;
+      nextTotal += after;
+      if (before < 12) return;
+      const ratio = before === 0 ? 1 : (after / before);
+      if (ratio <= 0.2) {
+        majorDrops += 1;
+        droppedDomains.push(`${key}:${before}->${after}`);
+      }
+    });
+
+    if (currentTotal < 80) return { suspicious: false };
+    if (majorDrops >= 2) {
+      return {
+        suspicious: true,
+        reason: `Suspicious multi-domain drop detected (${droppedDomains.join(', ')})`
+      };
+    }
+    if (currentTotal >= 250 && nextTotal <= Math.floor(currentTotal * 0.2)) {
+      return {
+        suspicious: true,
+        reason: `Incoming snapshot shrank too aggressively (${currentTotal} -> ${nextTotal} tracked items).`
+      };
+    }
+    return { suspicious: false };
+  }
+
+  function quarantineRejectedSnapshot(payload, reason, options = {}) {
+    const quarantined = {
+      timestamp: new Date().toISOString(),
+      reason,
+      source: options.source || options.savePath || options.reason || options.caller || 'unknown',
+      saveMode: options.saveMode || 'snapshot',
+      summary: summarizeSnapshotCounts(payload),
+      payload
+    };
+    try {
+      localStorage.setItem(QUARANTINE_SNAPSHOT_KEY, JSON.stringify(quarantined));
+    } catch (e) {
+      console.warn('Failed to persist quarantined TaskPoints snapshot.', e);
+    }
+  }
+
+  function storeRollingBackup(storageKey, options = {}) {
+    const currentRaw = localStorage.getItem(storageKey);
+    if (!currentRaw) return;
+    let parsedCurrent = {};
+    try {
+      parsedCurrent = JSON.parse(currentRaw) || {};
+    } catch (e) {
+      return;
+    }
+    const backupRecord = {
+      timestamp: new Date().toISOString(),
+      reason: options.source || options.savePath || options.reason || options.caller || 'snapshot-save',
+      storageKey,
+      summary: summarizeSnapshotCounts(parsedCurrent),
+      state: parsedCurrent
+    };
+    try {
+      for (let i = BACKUP_SLOT_KEYS.length - 1; i > 0; i -= 1) {
+        const prev = localStorage.getItem(BACKUP_SLOT_KEYS[i - 1]);
+        if (prev != null) {
+          localStorage.setItem(BACKUP_SLOT_KEYS[i], prev);
+        }
+      }
+      localStorage.setItem(BACKUP_SLOT_KEYS[0], JSON.stringify(backupRecord));
+    } catch (e) {
+      console.warn('Failed to rotate TaskPoints backups.', e);
+    }
+  }
+
   function saveStateSnapshot(state, options = {}) {
     const debugEnabled = Boolean(global && global.TP_DEBUG_PERF);
     const summarizeStateSizes = (snapshot) => ({
@@ -1232,6 +1401,90 @@ return { state: merged, storageKey };
     logStage('emergency', emergency);
 
     return attemptSave(emergency, true, 'emergency');
+  }
+
+  // Full snapshot writes are potentially destructive. Use this helper for replace-all flows:
+  // imports, explicit resets, and restore operations. Patch/merge saves should keep using
+  // mergeAndSaveState/saveAppState and should not go through this guard.
+  function saveValidatedSnapshot(state, options = {}) {
+    const storageKey = options.storageKey || STORAGE_KEY;
+    const shapeCheck = validateSnapshotShape(state);
+    if (!shapeCheck.ok) {
+      quarantineRejectedSnapshot(state, shapeCheck.reason, options);
+      console.warn(`[TaskPoints] Blocked full snapshot write (shape validation failed): ${shapeCheck.reason}`);
+      return { state: readStoredStateRaw(storageKey), blocked: true, reason: shapeCheck.reason, trimmed: false };
+    }
+
+    const storedState = readStoredStateRaw(storageKey);
+    if (!options.allowDestructiveOverwrite) {
+      const dropCheck = detectSuspiciousDrop(state, storedState);
+      if (dropCheck.suspicious) {
+        quarantineRejectedSnapshot(state, dropCheck.reason, options);
+        console.warn(`[TaskPoints] Blocked full snapshot write (suspicious drop): ${dropCheck.reason}`);
+        return { state: storedState, blocked: true, reason: dropCheck.reason, trimmed: false };
+      }
+    }
+
+    storeRollingBackup(storageKey, options);
+    return saveStateSnapshot(state, options);
+  }
+
+  function getRecoveryCandidate(options = {}) {
+    const storageKey = options.storageKey || STORAGE_KEY;
+    const current = readStoredStateRaw(storageKey);
+    const currentShape = validateSnapshotShape(current);
+    const currentSummary = summarizeSnapshotCounts(current);
+
+    const currentTotal =
+      currentSummary.tasks + currentSummary.completions + currentSummary.habits + currentSummary.players
+      + currentSummary.matchups + currentSummary.schedule + currentSummary.gameHistory;
+    if (currentShape.ok && currentTotal >= 30) return null;
+
+    for (let i = 0; i < BACKUP_SLOT_KEYS.length; i += 1) {
+      const slotKey = BACKUP_SLOT_KEYS[i];
+      let parsed = null;
+      try {
+        const raw = localStorage.getItem(slotKey);
+        parsed = raw ? (JSON.parse(raw) || null) : null;
+      } catch (e) {
+        parsed = null;
+      }
+      if (!parsed || !parsed.state) continue;
+      const backupShape = validateSnapshotShape(parsed.state);
+      if (!backupShape.ok) continue;
+      const summary = summarizeSnapshotCounts(parsed.state);
+      const backupTotal =
+        summary.tasks + summary.completions + summary.habits + summary.players
+        + summary.matchups + summary.schedule + summary.gameHistory;
+      if (backupTotal > Math.max(40, currentTotal + 20)) {
+        return {
+          slotKey,
+          timestamp: parsed.timestamp || '',
+          reason: parsed.reason || '',
+          summary,
+          state: parsed.state
+        };
+      }
+    }
+    return null;
+  }
+
+  function restoreBackupSlot(slotKey, options = {}) {
+    if (!slotKey) return { restored: false, reason: 'Missing backup slot key.' };
+    let parsed = null;
+    try {
+      const raw = localStorage.getItem(slotKey);
+      parsed = raw ? (JSON.parse(raw) || null) : null;
+    } catch (e) {
+      return { restored: false, reason: 'Backup slot is unreadable.' };
+    }
+    if (!parsed?.state) return { restored: false, reason: 'Backup slot is empty.' };
+    const result = saveValidatedSnapshot(parsed.state, {
+      ...options,
+      allowDestructiveOverwrite: true,
+      source: options.source || `backup-restore:${slotKey}`
+    });
+    return { restored: !result?.blocked, result, slotKey };
   }
 
   function mergeAndSaveState(nextState, options = {}) {
@@ -2242,6 +2495,8 @@ function buildDailyBreakdowns(state){
   global.TaskPointsCore = {
     STORAGE_KEY,
     PROJECTS_STORAGE_KEY,
+    QUARANTINE_SNAPSHOT_KEY,
+    BACKUP_SLOT_KEYS,
     IMAGE_DB_NAME,
     IMAGE_STORE_NAME,
     CATEGORY_DEFS,
@@ -2254,8 +2509,11 @@ function buildDailyBreakdowns(state){
     pruneStateForStorage,
     mergeState,
     saveStateSnapshot,
+    saveValidatedSnapshot,
     mergeAndSaveState,
     saveAppState,
+    getRecoveryCandidate,
+    restoreBackupSlot,
     dateKey,
     todayKey,
     fromKey,

@@ -1180,6 +1180,61 @@ function loadRawStateFallback() {
   }
 }
 
+function maybeShowStartupRecoveryPrompt() {
+  const core = window.TaskPointsCore;
+  if (!core || typeof core.getRecoveryCandidate !== 'function') return;
+  const candidate = core.getRecoveryCandidate({ storageKey: STORAGE_KEY_FALLBACK });
+  if (!candidate || !candidate.state) return;
+  if (sessionStorage.getItem('tpRecoveryPromptDismissed') === '1') return;
+
+  const existing = document.getElementById('tpRecoveryPrompt');
+  if (existing) return;
+
+  const wrap = document.createElement('div');
+  wrap.id = 'tpRecoveryPrompt';
+  wrap.style.position = 'fixed';
+  wrap.style.left = '1rem';
+  wrap.style.right = '1rem';
+  wrap.style.bottom = '1rem';
+  wrap.style.zIndex = '9999';
+  wrap.innerHTML = `
+    <div class="rounded-xl border border-yellow-300 bg-yellow-50 text-slate-900 p-3 shadow-xl">
+      <div class="font-semibold text-sm">TaskPoints recovery available</div>
+      <div class="text-xs mt-1">
+        Current saved state looks incomplete. A richer backup from ${candidate.timestamp || 'an earlier save'} is available.
+      </div>
+      <div class="mt-2 flex flex-wrap gap-2">
+        <button type="button" class="btn btn-teal btn-toolbar text-xs" data-recovery-restore>Restore latest backup</button>
+        <button type="button" class="btn btn-ghost btn-toolbar text-xs" data-recovery-continue>Continue anyway</button>
+        <button type="button" class="btn btn-ghost btn-toolbar text-xs" data-recovery-dismiss>Dismiss</button>
+      </div>
+    </div>
+  `;
+
+  const closePrompt = (remember = false) => {
+    if (remember) {
+      sessionStorage.setItem('tpRecoveryPromptDismissed', '1');
+    }
+    wrap.remove();
+  };
+
+  wrap.querySelector('[data-recovery-restore]')?.addEventListener('click', () => {
+    const restore = typeof core.restoreBackupSlot === 'function'
+      ? core.restoreBackupSlot(candidate.slotKey, { storageKey: STORAGE_KEY_FALLBACK, source: 'startup-recovery' })
+      : { restored: false };
+    if (restore?.restored) {
+      closePrompt(true);
+      window.location.reload();
+      return;
+    }
+    alert(`Backup restore failed: ${restore?.reason || 'Unknown error'}`);
+  });
+  wrap.querySelector('[data-recovery-continue]')?.addEventListener('click', () => closePrompt(true));
+  wrap.querySelector('[data-recovery-dismiss]')?.addEventListener('click', () => closePrompt(false));
+
+  document.body.appendChild(wrap);
+}
+
 function dateKeyFallback(dateLike) {
   if (window.TaskPointsCore?.dateKey) return TaskPointsCore.dateKey(dateLike);
   const d = new Date(dateLike);
@@ -1328,9 +1383,23 @@ function ensureUpcomingScheduleFallback(state, days = 7) {
   return changed;
 }
 
-function saveStateSnapshotFallback(next) {
+function saveStateSnapshotFallback(next, options = {}) {
   try {
-    if (window.TaskPointsCore?.saveAppState) {
+    if (window.TaskPointsCore?.saveValidatedSnapshot) {
+      const { trimmed, blocked, reason } = TaskPointsCore.saveValidatedSnapshot(next, {
+        storageKey: STORAGE_KEY_FALLBACK,
+        immediateWrite: true,
+        source: options.source || 'toolbar-full-snapshot',
+        allowDestructiveOverwrite: Boolean(options.allowDestructiveOverwrite)
+      });
+      if (blocked) {
+        console.warn(`Snapshot write blocked by validation guard (toolbar.js): ${reason || 'unknown reason'}`);
+      } else if (trimmed) {
+        console.warn('Storage nearing capacity. Older history items were trimmed to keep saves working.');
+      }
+      return;
+    }
+    if (window.TaskPointsCore?.saveStateSnapshot) {
       const { trimmed } = TaskPointsCore.saveStateSnapshot(next, { storageKey: STORAGE_KEY_FALLBACK, immediateWrite: true });
       if (trimmed) {
         console.warn('Storage nearing capacity. Older history items were trimmed to keep saves working.');
@@ -2162,7 +2231,7 @@ scoringSettings: root?.scoringSettings ?? {}
     console.warn('Could not clear existing TaskPoints storage before import', e);
   }
 
-  saveStateSnapshotFallback(normalized);
+  saveStateSnapshotFallback(normalized, { allowDestructiveOverwrite: true, source: 'toolbar-import' });
   window.location.reload();
 }
 
@@ -2292,6 +2361,7 @@ if (typeof window.exportBackupWithImages !== 'function') {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  maybeShowStartupRecoveryPrompt();
   const fileHandler = importFileFallback;
   const pasteHandler = importPasteFallback;
 
