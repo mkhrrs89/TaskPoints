@@ -311,16 +311,16 @@
           .map((player) => [player.id, player]))
       ]);
 
-      const ranked = (window.TaskPointsCore?.computeRankings
-        ? TaskPointsCore.computeRankings(state, { includeToday: false })
+      const ranked = (window.TaskPointsCore?.computeCanonicalRankings
+        ? TaskPointsCore.computeCanonicalRankings(state)
         : [])
         .map((row) => {
-          const player = playerById.get(row.id) || { id: row.id, name: row.name || row.id };
+          const player = playerById.get(row.playerId) || { id: row.playerId, name: row.name || row.playerId };
           return {
             ...player,
             ...row,
             winPctLabel: formatWinPct(row.wins, row.games),
-            ppdLabel: formatPPD(row.avgPPD),
+            ppdLabel: formatPPD(row.ppd),
             ratingsText: ratingSummary(player)
           };
         });
