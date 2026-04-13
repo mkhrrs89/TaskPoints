@@ -2579,6 +2579,14 @@ function formatPpdLine(ppd){
   return `PPD: ${formatVal(ppd)}`;
 }
 
+  function getHomepagePpdValue(playerId){
+  if (!playerId) return null;
+
+  const rankingMap = getCanonicalRankingMap();
+  const row = rankingMap.get(playerId);
+
+  return row ? row.ppd : null;
+}
 
 /* ---------- OPPONENT DRIP SCHEDULE ---------- */
 function validateOpponentDripSchedule(schedule, expectedTotal){
@@ -2799,12 +2807,27 @@ function getAllParticipantIds(){
   return ids;
 }
 
+function getCanonicalRankingMap(){
+  if (!window.TaskPointsCore?.computeCanonicalRankings) return new Map();
+
+  const rows = TaskPointsCore.computeCanonicalRankings(state);
+  const byId = new Map();
+
+  rows.forEach((row) => {
+    byId.set(row.playerId, row);
+  });
+
+  return byId;
+}
+  
 function getHomepageRankText(playerId){
-  if (!playerId || !window.TaskPointsCore?.computeRankings) return 'Rank: —';
-  const rows = TaskPointsCore.computeRankings(state, { includeToday: false });
-  const rankIdx = rows.findIndex((row) => row.id === playerId);
-  if (rankIdx === -1) return 'Rank: —';
-  return `Rank: ${rankIdx + 1}`;
+  if (!playerId) return 'Rank: —';
+
+  const rankingMap = getCanonicalRankingMap();
+  const row = rankingMap.get(playerId);
+
+  if (!row) return 'Rank: —';
+  return `Rank: ${row.rank}`;
 }
 
 function participantSignature(ids){
@@ -4132,9 +4155,8 @@ const updateTodayScoreIsland = (value) => {
 
   if (yourNameEl) yourNameEl.textContent = getYouName();
   if (yourRankEl) yourRankEl.textContent = getHomepageRankText('YOU');
-  const youAverages = computeYouDailyAverages();
   if (yourAvgEl) {
-    const youPpdVal = youAverages.hasData ? youAverages.ppd : null;
+    const youPpdVal = getHomepagePpdValue('YOU');
     yourAvgEl.textContent = formatPpdLine(youPpdVal);
   }
   const setOpponentScoreboardMeta = (playerId) => {
@@ -4144,8 +4166,7 @@ const updateTodayScoreIsland = (value) => {
       oppAvgEl.textContent = formatPpdLine(null);
       return;
     }
-    const oppAverages = computePlayerDailyAverages(playerId);
-    const ppdVal = oppAverages.hasData ? oppAverages.ppd : null;
+    const ppdVal = getHomepagePpdValue(playerId);
     oppAvgEl.textContent = formatPpdLine(ppdVal);
   };
 
