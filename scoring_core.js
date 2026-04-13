@@ -2649,6 +2649,95 @@ function buildDailyBreakdowns(state){
     return { state: normalized, changed };
   }
 
+function computeCanonicalRankings(state) {
+  if (!state) state = {};
+
+  const rows = [];
+  const players = Array.isArray(state.players) ? state.players.filter(p => p && p.active !== false) : [];
+
+  const youRow = computeCanonicalRankingRow(state, null, true);
+  rows.push(youRow);
+
+  players.forEach((player) => {
+    rows.push(computeCanonicalRankingRow(state, player, false));
+  });
+
+  rows.sort((a, b) => {
+    if ((b.winPct || 0) !== (a.winPct || 0)) return (b.winPct || 0) - (a.winPct || 0);
+    if ((b.ppd || 0) !== (a.ppd || 0)) return (b.ppd || 0) - (a.ppd || 0);
+    return String(a.name || "").localeCompare(String(b.name || ""));
+  });
+
+  rows.forEach((row, idx) => {
+    row.rank = idx + 1;
+  });
+
+  return rows;
+}
+
+function computeCanonicalRankingRow(state, player, isYou) {
+  const playerId = isYou ? "YOU" : player?.id;
+  const name = isYou
+    ? ((typeof state.youName === "string" && state.youName.trim()) ? state.youName.trim() : "You")
+    : (player?.name || "Unnamed");
+
+  const matchupStats = computeCanonicalMatchupStats(state, playerId);
+
+  return {
+    id: playerId,
+    playerId,
+    name,
+    isYou,
+    wins: matchupStats.wins,
+    losses: matchupStats.losses,
+    games: matchupStats.games,
+    winPct: matchupStats.games ? matchupStats.wins / matchupStats.games : 0,
+    ppd: matchupStats.ppd,
+    rawPpd: matchupStats.rawPpd
+  };
+}
+
+function computeCanonicalMatchupStats(state, playerId) {
+  const matchups = Array.isArray(state.matchups) ? state.matchups : [];
+
+  let wins = 0;
+  let losses = 0;
+  let totalScore = 0;
+  let scoredGames = 0;
+
+  matchups.forEach((m) => {
+    if (!m) return;
+
+    const isA = m.playerAId === playerId;
+    const isB = m.playerBId === playerId;
+    if (!isA && !isB) return;
+
+    const score = isA ? m.scoreA : m.scoreB;
+    const oppScore = isA ? m.scoreB : m.scoreA;
+
+    const hasOwnScore = Number.isFinite(score);
+    const hasOppScore = Number.isFinite(oppScore);
+
+    if (hasOwnScore) {
+      totalScore += score;
+      scoredGames += 1;
+    }
+
+    if (hasOwnScore && hasOppScore) {
+      if (score > oppScore) wins += 1;
+      else if (score < oppScore) losses += 1;
+    }
+  });
+
+  return {
+    wins,
+    losses,
+    games: wins + losses,
+    rawPpd: scoredGames ? totalScore / scoredGames : 0,
+    ppd: scoredGames ? Number((totalScore / scoredGames).toFixed(1)) : 0
+  };
+}
+  
   global.TaskPointsCore = {
     STORAGE_KEY,
     PROJECTS_STORAGE_KEY,
@@ -2708,6 +2797,9 @@ function buildDailyBreakdowns(state){
     buildDailyBreakdowns,
     buildRollups,
     computeLeaderboards,
+    computeCanonicalRankings,
+    computeCanonicalRankingRow,
+    computeCanonicalMatchupStats,
     buildDaySnapshot,
     computeDayTotals,
     youDailyTotalsWithInertia,
