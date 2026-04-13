@@ -2539,50 +2539,27 @@ function buildDailyBreakdowns(state){
     return Number(num.toFixed(1));
   }
 
-  function computeHomeScoreboardRankings(state){
-    const ranked = computeRankings(state, { includeToday: false });
-    const history = Array.isArray(state?.gameHistory) ? state.gameHistory : [];
-    const comps = Array.isArray(state?.completions) ? state.completions : [];
-    const dailyTotals = aggregateCompletionsByDate(comps, state).dailyTotals || {};
-    const youTotals = Object.values(dailyTotals).map(Number).filter(Number.isFinite);
-    const youAvgRaw = youTotals.length
-      ? (youTotals.reduce((sum, total) => sum + total, 0) / youTotals.length)
-      : null;
+function computeHomeScoreboardRankings(state){
+  const ranked = computeCanonicalRankings(state || {});
+  return ranked.map((row) => ({
+    id: row.playerId,
+    name: row.name,
+    rank: row.rank,
+    ppdRaw: Number.isFinite(row.rawPpd) ? row.rawPpd : null,
+    ppdDisplay: Number.isFinite(row.ppd) ? row.ppd : null
+  }));
+}
 
-    return ranked.map((row, index) => {
-      let ppdRaw = null;
-      if (row.id === 'YOU') {
-        ppdRaw = youAvgRaw;
-      } else {
-        const scores = history
-          .filter(item => item && item.playerId === row.id)
-          .map(item => Number(item.score))
-          .filter(Number.isFinite);
-        if (scores.length) {
-          ppdRaw = scores.reduce((sum, score) => sum + score, 0) / scores.length;
-        }
-      }
-      const ppdDisplay = roundDisplayPpd(ppdRaw);
-      return {
-        id: row.id,
-        name: row.name,
-        rank: index + 1,
-        ppdRaw,
-        ppdDisplay
-      };
-    });
-  }
-
-  function computeRankingsPageRows(state){
-    const ranked = computeRankings(state, { includeToday: false });
-    return ranked.map((row, index) => ({
-      id: row.id,
-      name: row.name,
-      rank: index + 1,
-      ppdRaw: Number.isFinite(row.avgPPD) ? row.avgPPD : null,
-      ppdDisplay: roundDisplayPpd(row.avgPPD)
-    }));
-  }
+function computeRankingsPageRows(state){
+  const ranked = computeCanonicalRankings(state || {});
+  return ranked.map((row) => ({
+    id: row.playerId,
+    name: row.name,
+    rank: row.rank,
+    ppdRaw: Number.isFinite(row.rawPpd) ? row.rawPpd : null,
+    ppdDisplay: Number.isFinite(row.ppd) ? row.ppd : null
+  }));
+}
 
   function syncYouMatchups(state, options = {}){
     // Invariant: options.normalized is only set when state already passed through normalizeState().
