@@ -1715,6 +1715,138 @@ function workHoursBonus(hours = 0, settings) {
     return { score };
   }
 
+  function parseOptionalNumber(value) {
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+  }
+
+  function parseSleepRestedFromTitle(title) {
+    if (typeof title !== 'string') return null;
+    const match = title.match(/rest(?:ed)?[^0-9-]*([-0-9]+(?:\.\d+)?)/i);
+    return match ? parseOptionalNumber(match[1]) : null;
+  }
+
+  function parseWorkHoursFromTitle(title) {
+    if (typeof title !== 'string') return null;
+    const match = title.match(/hours?[^0-9-]*([-0-9]+(?:\.\d+)?)/i);
+    return match ? parseOptionalNumber(match[1]) : null;
+  }
+
+  function classifyPersonalMetricCompletion(entry) {
+    if (!entry || typeof entry !== 'object') return null;
+    const sleep = getSleepInfo(entry);
+    if (Number.isFinite(sleep.score)) {
+      const explicitRested = Object.prototype.hasOwnProperty.call(entry, 'sleepRested')
+        ? parseOptionalNumber(entry.sleepRested)
+        : null;
+      return {
+        type: 'sleep',
+        rawValue: sleep.score,
+        secondaryValue: explicitRested ?? parseSleepRestedFromTitle(entry.title)
+      };
+    }
+
+    const work = getWorkInfo(entry);
+    if (Number.isFinite(work.score)) {
+      const explicitHours = Object.prototype.hasOwnProperty.call(entry, 'workHours')
+        ? parseOptionalNumber(entry.workHours)
+        : null;
+      return {
+        type: 'work',
+        rawValue: work.score,
+        secondaryValue: explicitHours ?? parseWorkHoursFromTitle(entry.title)
+      };
+    }
+
+    const calories = Object.prototype.hasOwnProperty.call(entry, 'calories')
+      ? parseOptionalNumber(entry.calories)
+      : parseCaloriesFromTitle(entry.title);
+    if (Number.isFinite(calories)) {
+      return { type: 'calories', rawValue: calories, secondaryValue: null };
+    }
+
+    const mood = getMoodInfo(entry);
+    if (Number.isFinite(mood.score)) {
+      return { type: 'mood', rawValue: mood.score, secondaryValue: null };
+    }
+
+    return null;
+  }
+
+  function buildPersonalScoreHistoryRows(inputState) {
+    const state = normalizeState(inputState || {});
+    const completions = Array.isArray(state?.completions) ? state.completions : [];
+    const rows = [];
+
+    completions.forEach((entry) => {
+      const parsed = classifyPersonalMetricCompletion(entry);
+      if (!parsed) return;
+
+      const completedAtISO = typeof entry?.completedAtISO === 'string'
+        ? entry.completedAtISO
+        : (typeof entry?.completedAt === 'string' ? entry.completedAt : '');
+      const date = completedAtISO ? dateKey(completedAtISO) : dateKey(entry?.dateKey);
+      const safeDate = date === 'invalid' ? '' : date;
+      const points = parseOptionalNumber(entry?.points);
+
+      rows.push({
+        completion_id: entry?.id || '',
+        date: safeDate,
+        type: parsed.type,
+        raw_value: parsed.rawValue,
+        secondary_value: parsed.secondaryValue,
+        points: points == null ? '' : points,
+        title: typeof entry?.title === 'string' ? entry.title : '',
+        completed_at_iso: completedAtISO || '',
+        source: typeof entry?.source === 'string' ? entry.source : ''
+      });
+    });
+
+    return rows.sort((a, b) => {
+      const dateCmp = String(a.date || '').localeCompare(String(b.date || ''));
+      if (dateCmp !== 0) return dateCmp;
+      const isoCmp = String(a.completed_at_iso || '').localeCompare(String(b.completed_at_iso || ''));
+      if (isoCmp !== 0) return isoCmp;
+      return String(a.completion_id || '').localeCompare(String(b.completion_id || ''));
+    });
+  }
+
+  function buildCsvTextFromRows(rows, headers) {
+    const list = Array.isArray(rows) ? rows : [];
+    const cols = Array.isArray(headers) && headers.length ? headers : [];
+    const escapeCell = (value) => {
+      if (value == null) return '';
+      const str = String(value);
+      return /[",\n\r]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+    };
+    const lines = [];
+    lines.push(cols.join(','));
+    list.forEach((row) => {
+      lines.push(cols.map((col) => escapeCell(row?.[col])).join(','));
+    });
+    return `\uFEFF${lines.join('\n')}`;
+  }
+
+  function buildPersonalScoreHistoryCsv(inputState) {
+    const headers = [
+      'completion_id',
+      'date',
+      'type',
+      'raw_value',
+      'secondary_value',
+      'points',
+      'title',
+      'completed_at_iso',
+      'source'
+    ];
+    const rows = buildPersonalScoreHistoryRows(inputState);
+    return {
+      headers,
+      rows,
+      csvText: buildCsvTextFromRows(rows, headers)
+    };
+  }
+
   function moodPoints(score, settings) {
     if (!Number.isFinite(score)) return 0;
     const scoring = getScoringSettings(settings);
@@ -2751,6 +2883,9 @@ function computeCanonicalMatchupStats(state, playerId) {
     getWorkInfo,
     workHoursBonus,
     workPoints,
+    classifyPersonalMetricCompletion,
+    buildPersonalScoreHistoryRows,
+    buildPersonalScoreHistoryCsv,
     roundPoints,
     deriveCompletionPoints,
     pointsForCompletion,
