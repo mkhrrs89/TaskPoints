@@ -108,6 +108,9 @@
             <button id="settingsExportMatchupsBtn" class="btn btn-ghost btn-toolbar nav-btn" type="button">
               Export Matchups + Player History (CSV)
             </button>
+            <button id="settingsExportPersonalScoresBtn" class="btn btn-ghost btn-toolbar nav-btn" type="button">
+              Export Personal Score History (CSV)
+            </button>
             <button id="settingsResetGameStatsBtn" class="btn btn-warn btn-toolbar nav-btn" type="button">Reset Game Stats</button>
           </div>
           <p class="muted text-xs">Imports replace your current device data with the contents of the backup.</p>
@@ -2796,6 +2799,28 @@ normalizeSvgTickText(svg);
       downloadCsv(`taskpoints-matchups-players-${stamp}.csv`, rows);
     }
 
+    function exportPersonalScoreHistoryCsv() {
+      const state = loadSettingsState();
+      const core = window.TaskPointsCore;
+      if (!core || typeof core.buildPersonalScoreHistoryCsv !== 'function') {
+        alert("Personal score export is unavailable right now.");
+        return;
+      }
+
+      const payload = core.buildPersonalScoreHistoryCsv(state);
+      const blob = new Blob([payload.csvText], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const now = new Date();
+      const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `taskpoints_personal_score_history_${stamp}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    }
+
     function downloadSimulationCsv(results) {
       const rows = [];
       rows.push(["Scores by Day"]);
@@ -2858,6 +2883,7 @@ normalizeSvgTickText(svg);
       document.getElementById('settingsResetGameStatsBtn')?.addEventListener('click', handleSettingsResetGameStats);
       document.getElementById('settingsResetBtn')?.addEventListener('click', handleSettingsReset);
       document.getElementById('settingsExportMatchupsBtn')?.addEventListener('click', exportMatchupsAndHistoryCsv);
+      document.getElementById('settingsExportPersonalScoresBtn')?.addEventListener('click', exportPersonalScoreHistoryCsv);
       document.getElementById('categoryReportBtn')?.addEventListener('click', generateCategoryReport);
       document.getElementById('scwmTrendBtn')?.addEventListener('click', generateScwmTrendReport);
       document.getElementById('habitCalendarReportBtn')?.addEventListener('click', generateHabitCalendarReport);
