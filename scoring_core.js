@@ -2758,17 +2758,18 @@ function computeRankingsPageRows(state){
     return { state: normalized, changed };
   }
 
-function computeCanonicalRankings(state) {
+function computeCanonicalRankings(state, options = {}) {
   if (!state) state = {};
+  const includeToday = options.includeToday === true;
 
   const rows = [];
   const players = Array.isArray(state.players) ? state.players.filter(p => p && p.active !== false) : [];
 
-  const youRow = computeCanonicalRankingRow(state, null, true);
+  const youRow = computeCanonicalRankingRow(state, null, true, { includeToday });
   rows.push(youRow);
 
   players.forEach((player) => {
-    rows.push(computeCanonicalRankingRow(state, player, false));
+    rows.push(computeCanonicalRankingRow(state, player, false, { includeToday }));
   });
 
   rows.sort((a, b) => {
@@ -2784,13 +2785,14 @@ function computeCanonicalRankings(state) {
   return rows;
 }
 
-function computeCanonicalRankingRow(state, player, isYou) {
+function computeCanonicalRankingRow(state, player, isYou, options = {}) {
+  const includeToday = options.includeToday === true;
   const playerId = isYou ? "YOU" : player?.id;
   const name = isYou
     ? ((typeof state.youName === "string" && state.youName.trim()) ? state.youName.trim() : "You")
     : (player?.name || "Unnamed");
 
-  const matchupStats = computeCanonicalMatchupStats(state, playerId);
+  const matchupStats = computeCanonicalMatchupStats(state, playerId, { includeToday });
 
   return {
     id: playerId,
@@ -2806,8 +2808,10 @@ function computeCanonicalRankingRow(state, player, isYou) {
   };
 }
 
-function computeCanonicalMatchupStats(state, playerId) {
+function computeCanonicalMatchupStats(state, playerId, options = {}) {
+  const includeToday = options.includeToday === true;
   const matchups = Array.isArray(state.matchups) ? state.matchups : [];
+  const today = dateKey(new Date());
 
   let wins = 0;
   let losses = 0;
@@ -2816,6 +2820,8 @@ function computeCanonicalMatchupStats(state, playerId) {
 
   matchups.forEach((m) => {
     if (!m) return;
+    const matchupDay = matchupDateKey(m);
+    if (!includeToday && matchupDay === today) return;
 
     const isA = m.playerAId === playerId;
     const isB = m.playerBId === playerId;
