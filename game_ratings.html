@@ -116,6 +116,21 @@
         border-color: rgba(113,113,122,0.75);
       }
     }
+
+    .ratings-filter-toggle{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      font-size:12px;
+      opacity:0.85;
+      white-space:nowrap;
+    }
+    .ratings-filter-toggle input{
+      width:14px;
+      height:14px;
+      accent-color:#1e666d;
+      cursor:pointer;
+    }
   </style>
 </head>
 <body class="min-h-screen">
@@ -172,7 +187,11 @@
     <section class="card mb-6">
       <div class="flex items-center justify-between mb-3">
         <h2 class="font-semibold text-lg">Player Ratings Table</h2>
-        <div class="flex items-center gap-3">
+        <div class="flex items-center gap-3 flex-wrap justify-end">
+          <label class="ratings-filter-toggle">
+            <input type="checkbox" id="showInactiveToggle" />
+            <span>Show inactive players</span>
+          </label>
           <button type="button" class="btn btn-ghost btn-toolbar text-xs" data-export-ratings>
             Export Ratings (CSV)
           </button>
@@ -212,6 +231,7 @@
   <script src="scoring_core.js"></script>
 <script>
 const STORAGE_KEY = "taskpoints_v1";
+const RATINGS_SHOW_INACTIVE_KEY = "taskpoints_ratings_show_inactive";
 const $ = id => document.getElementById(id);
 
 let latestState = null;  // <- new
@@ -379,6 +399,7 @@ let gameHistory =
   latestState && Array.isArray(latestState.gameHistory)
     ? latestState.gameHistory
     : [];
+let showInactivePlayers = localStorage.getItem(RATINGS_SHOW_INACTIVE_KEY) === "1";
 
 let sortKey = "name";
 let sortDir = "asc"; // "asc" or "desc"
@@ -392,7 +413,7 @@ const editingState = {
 };
 
 function getSortedPlayers() {
-  return [...players].sort((a, b) => {
+  return [...getDisplayedPlayers()].sort((a, b) => {
     const ak = getSortValue(a, sortKey);
     const bk = getSortValue(b, sortKey);
 
@@ -410,6 +431,11 @@ function getSortedPlayers() {
     if (as > bs) return sortDir === "asc" ? 1 : -1;
     return 0;
   });
+}
+
+function getDisplayedPlayers() {
+  if (showInactivePlayers) return players;
+  return players.filter(player => player && player.active !== false);
 }
 
 function downloadCsv(filename, rows) {
@@ -498,8 +524,8 @@ function renderTable() {
 
   const countLabel = $("playerCount");
   if (countLabel) {
-    if (players.length) {
-      countLabel.textContent = `${players.length} player${players.length === 1 ? "" : "s"}`;
+    if (sorted.length) {
+      countLabel.textContent = `${sorted.length} player${sorted.length === 1 ? "" : "s"}`;
     } else {
       countLabel.textContent = "No players found";
     }
@@ -824,6 +850,16 @@ function getSortValue(p, key) {
       const exportButton = document.querySelector("[data-export-ratings]");
       if (exportButton) {
         exportButton.addEventListener("click", exportRatingsCsv);
+      }
+
+      const showInactiveToggle = $("showInactiveToggle");
+      if (showInactiveToggle) {
+        showInactiveToggle.checked = showInactivePlayers;
+        showInactiveToggle.addEventListener("change", () => {
+          showInactivePlayers = showInactiveToggle.checked;
+          localStorage.setItem(RATINGS_SHOW_INACTIVE_KEY, showInactivePlayers ? "1" : "0");
+          renderTable();
+        });
       }
 
       const headers = document.querySelectorAll("th[data-sort]");
