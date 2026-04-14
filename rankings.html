@@ -82,7 +82,16 @@
 
     .ranking-name { font-size:1.08rem; font-weight:700; line-height:1.2; }
     .ranking-record { font-size:0.9rem; color:rgba(212,212,216,0.9); }
-    .ranking-ratings { font-size:0.82rem; color:rgba(161,161,170,1); }
+    .ranking-ratings {
+      font-size:0.82rem;
+      color:rgba(161,161,170,1);
+      white-space:normal;
+      overflow:visible;
+      text-overflow:clip;
+      word-break:break-word;
+      line-height:1.3;
+      margin-top:2px;
+    }
     .ranking-meta {
       align-self: stretch;
       padding-top: 8px;
@@ -282,7 +291,7 @@
           <div class="ranking-meta min-w-0">
             <p class="ranking-name truncate">${escapeHtml(player.name)}</p>
             <p class="ranking-record">${player.wins}-${player.losses} • ${player.winPctLabel} • PPD ${player.ppdLabel}</p>
-            <p class="ranking-ratings truncate" title="${escapeHtml(player.ratingsText)}">${escapeHtml(player.ratingsText)}</p>
+            <p class="ranking-ratings" title="${escapeHtml(player.ratingsText)}">${escapeHtml(player.ratingsText)}</p>
           </div>
         </article>
       `;
