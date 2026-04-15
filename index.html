@@ -3178,7 +3178,7 @@ function maybeAutoSimToday(){
   const now = new Date();
   const todayKey = getGameDayKey(now);
 
-  if (now.getHours() < 8) return false;
+  if (now.getHours() < 5) return false;
   if (!Array.isArray(state.players) || state.players.length === 0) return false;
 
   state.gameHistory = state.gameHistory || [];
