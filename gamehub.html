@@ -894,7 +894,12 @@ function matchupAvatarSize(){
 
       tbody.appendChild(tr);
 
-      renderAvatarInto(avatarSlot, { name: r.name, imageId: getPlayerImageId(state, r.id), size: 32 });
+      renderAvatarInto(avatarSlot, {
+  name: r.name,
+  imageId: getPlayerImageId(state, r.id),
+  size: { width: 28, height: 36 },
+  thumbClass: 'gamehub-standings-avatar-thumb'
+});
       applyNameButton(nameText, r.id);
     }
 
