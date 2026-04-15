@@ -567,11 +567,6 @@ body.create-player-modal-open #mobileBottomNav {
         </div>
       </div>
 
-      <div>
-        <label class="text-xs muted">Notes</label>
-        <textarea id="playerNotes" class="input mt-1 h-20" placeholder="Optional notes"></textarea>
-      </div>
-
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div>
           <label class="text-xs muted">Baseline</label>
@@ -598,16 +593,16 @@ body.create-player-modal-open #mobileBottomNav {
         </div>
       </div>
 
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div>
-          <label class="text-xs muted">Primary color</label>
-          <input id="playerPrimaryColor" type="color" class="input mt-1 h-10 p-1" value="#1a383b">
-        </div>
-        <div>
-          <label class="text-xs muted">Secondary color</label>
-          <input id="playerSecondaryColor" type="color" class="input mt-1 h-10 p-1" value="#254c52">
-        </div>
-      </div>
+<div class="grid grid-cols-2 gap-3">
+  <div>
+    <label class="text-xs muted">Primary color</label>
+    <input id="playerPrimaryColor" type="color" class="input mt-1 h-10 p-1" value="#1a383b">
+  </div>
+  <div>
+    <label class="text-xs muted">Secondary color</label>
+    <input id="playerSecondaryColor" type="color" class="input mt-1 h-10 p-1" value="#254c52">
+  </div>
+</div>
 
       <div>
         <label class="text-xs muted">Photo (optional)</label>
@@ -622,6 +617,11 @@ body.create-player-modal-open #mobileBottomNav {
         <label for="playerActive" class="opacity-80">Active</label>
       </div>
 
+      <div>
+        <label class="text-xs muted">Notes</label>
+        <textarea id="playerNotes" class="input mt-1 h-20" placeholder="Optional notes"></textarea>
+      </div>
+      
       <div class="create-player-submit-row">
         <button class="btn btn-success" type="submit">Add player</button>
       </div>
