@@ -31,6 +31,18 @@
       }
     }
 
+.create-player-two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 480px) {
+  .create-player-two-col {
+    grid-template-columns: 1fr;
+  }
+}
+    
 /* MOBILE ONLY: 2-column player cards in Card View */
 @media (max-width: 640px) {
   #playersList.card-view,
