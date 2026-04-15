@@ -42,6 +42,27 @@
     grid-template-columns: 1fr;
   }
 }
+
+.create-player-three-col {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.create-player-three-col > div {
+  min-width: 0;
+}
+
+.create-player-three-col-helper {
+  margin-top: 4px;
+  margin-bottom: 12px;
+}
+
+.create-player-active-slot {
+  display: flex;
+  align-items: center;
+  height: 40px;
+}
     
 /* MOBILE ONLY: 2-column player cards in Card View */
 @media (max-width: 640px) {
@@ -579,7 +600,7 @@ body.create-player-modal-open #mobileBottomNav {
         </div>
       </div>
 
-<div class="grid grid-cols-3 gap-3">
+<div class="create-player-three-col">
   <div>
     <label class="text-xs muted">Baseline</label>
     <input id="playerBaseline" type="number" class="input mt-1" value="60">
@@ -594,7 +615,7 @@ body.create-player-modal-open #mobileBottomNav {
   </div>
 </div>
 
-<p class="text-[11px] opacity-60 mt-1">
+<p class="text-[11px] opacity-60 create-player-three-col-helper">
   Percent of swings that land <em>above</em> baseline.
 </p>
 
@@ -607,12 +628,12 @@ body.create-player-modal-open #mobileBottomNav {
     <label class="text-xs muted">Risky (0–100)</label>
     <input id="playerRisky" type="number" class="input mt-1" value="30">
   </div>
-  <div>
-    <label class="text-xs muted">Active</label>
-    <div class="mt-1 h-10 flex items-center">
-      <input id="playerActive" type="checkbox" class="toggle-switch" checked>
-    </div>
+<div>
+  <label class="text-xs muted">Active</label>
+  <div class="create-player-active-slot mt-1">
+    <input id="playerActive" type="checkbox" class="toggle-switch" checked>
   </div>
+</div>
 </div>
 
 <div class="grid grid-cols-2 gap-3">
