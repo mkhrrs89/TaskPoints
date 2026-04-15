@@ -579,31 +579,41 @@ body.create-player-modal-open #mobileBottomNav {
         </div>
       </div>
 
-      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div>
-          <label class="text-xs muted">Baseline</label>
-          <input id="playerBaseline" type="number" class="input mt-1" value="60">
-        </div>
-        <div>
-          <label class="text-xs muted">Variance</label>
-          <input id="playerVariance" type="number" class="input mt-1" value="40">
-        </div>
-        <div>
-          <label class="text-xs muted">Variance Tilt (0–100)</label>
-          <input id="playerVarianceTilt" type="number" min="0" max="100" class="input mt-1" value="50">
-          <p class="text-[11px] opacity-60 mt-1">
-            Percent of swings that land <em>above</em> baseline.
-          </p>
-        </div>
-        <div>
-          <label class="text-xs muted">Momentum</label>
-          <input id="playerMomentum" type="number" class="input mt-1" value="50">
-        </div>
-        <div>
-          <label class="text-xs muted">Risky (0–100)</label>
-          <input id="playerRisky" type="number" class="input mt-1" value="30">
-        </div>
-      </div>
+<div class="grid grid-cols-3 gap-3">
+  <div>
+    <label class="text-xs muted">Baseline</label>
+    <input id="playerBaseline" type="number" class="input mt-1" value="60">
+  </div>
+  <div>
+    <label class="text-xs muted">Variance</label>
+    <input id="playerVariance" type="number" class="input mt-1" value="40">
+  </div>
+  <div>
+    <label class="text-xs muted">Variance Tilt (0–100)</label>
+    <input id="playerVarianceTilt" type="number" min="0" max="100" class="input mt-1" value="50">
+  </div>
+</div>
+
+<p class="text-[11px] opacity-60 mt-1">
+  Percent of swings that land <em>above</em> baseline.
+</p>
+
+<div class="grid grid-cols-3 gap-3 items-end">
+  <div>
+    <label class="text-xs muted">Momentum</label>
+    <input id="playerMomentum" type="number" class="input mt-1" value="50">
+  </div>
+  <div>
+    <label class="text-xs muted">Risky (0–100)</label>
+    <input id="playerRisky" type="number" class="input mt-1" value="30">
+  </div>
+  <div>
+    <label class="text-xs muted">Active</label>
+    <div class="mt-1 h-10 flex items-center">
+      <input id="playerActive" type="checkbox" class="toggle-switch" checked>
+    </div>
+  </div>
+</div>
 
 <div class="grid grid-cols-2 gap-3">
   <div>
@@ -622,11 +632,6 @@ body.create-player-modal-open #mobileBottomNav {
         <p class="text-[11px] opacity-60 mt-1">
           You’ll be able to crop this after selecting.
         </p>
-      </div>
-
-      <div class="flex items-center gap-2 text-xs">
-        <input id="playerActive" type="checkbox" class="toggle-switch" checked>
-        <label for="playerActive" class="opacity-80">Active</label>
       </div>
 
       <div>
