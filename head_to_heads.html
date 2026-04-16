@@ -53,6 +53,8 @@
     }
 
     .h2h-matrix{
+      --matrix-cell-size: 72px;
+      --matrix-name-col-width: 150px;
       border-collapse:separate;
       border-spacing:0;
       min-width:max-content;
@@ -64,9 +66,9 @@
     .h2h-matrix td{
       border-right:1px solid rgba(148,163,184,0.25);
       border-bottom:1px solid rgba(148,163,184,0.25);
-      min-width:72px;
-      width:72px;
-      height:72px;
+      min-width:var(--matrix-cell-size);
+      width:var(--matrix-cell-size);
+      height:var(--matrix-cell-size);
       padding:8px;
       text-align:center;
       vertical-align:middle;
@@ -88,8 +90,9 @@
       z-index:1;
       background:rgba(37,76,82,0.12);
       text-align:left;
-      min-width:150px;
-      width:150px;
+      min-width:var(--matrix-name-col-width);
+      width:var(--matrix-name-col-width);
+      max-width:var(--matrix-name-col-width);
       font-size:12px;
       font-weight:700;
     }
@@ -99,13 +102,22 @@
       top:0;
       left:0;
       z-index:3;
-      min-width:150px;
-      width:150px;
+      min-width:var(--matrix-name-col-width);
+      width:var(--matrix-name-col-width);
+      max-width:var(--matrix-name-col-width);
       text-align:left;
       background:rgba(37,76,82,0.22);
       font-size:11px;
       text-transform:uppercase;
       letter-spacing:0.06em;
+    }
+
+    .h2h-matrix .row-header .player-name,
+    .h2h-matrix .corner-cell .column-label{
+      display:block;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
     }
 
     .h2h-matrix td.diagonal,
@@ -123,6 +135,12 @@
       .h2h-matrix .corner-cell{ background: rgba(30,102,109,0.45); }
       .h2h-matrix td.diagonal,
       .h2h-matrix td.empty{ background: rgba(15,23,42,0.6); }
+    }
+
+    @media (max-width: 640px){
+      .h2h-matrix{
+        --matrix-name-col-width: 96px;
+      }
     }
   </style>
 </head>
@@ -377,7 +395,7 @@
 
         return `
           <tr>
-            <th scope="row" class="row-header">${rowLabel}</th>
+            <th scope="row" class="row-header" title="${rowLabel}"><span class="player-name">${rowLabel}</span></th>
             ${cells}
           </tr>
         `;
@@ -387,7 +405,7 @@
         <table class="h2h-matrix" aria-label="Head-to-head matchup records matrix">
           <thead>
             <tr>
-              <th class="corner-cell" scope="col">Player</th>
+              <th class="corner-cell" scope="col"><span class="column-label">Player</span></th>
               ${headerCells}
             </tr>
           </thead>
