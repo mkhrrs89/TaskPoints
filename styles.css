@@ -622,8 +622,9 @@ body {
     BlinkMacSystemFont, 'Segoe UI', sans-serif;
   letter-spacing: 0.3px;
 
-  -webkit-text-stroke: 0.6px rgba(255, 255, 255, 0.85);
+  -webkit-text-stroke: 0.4px rgba(255, 255, 255, 0.85);
   paint-order: stroke fill;
+   text-shadow: 0 0 1px rgba(255,255,255,0.25);
 }
 /* --- Diff value (END) -------------------------------------------------- */
 
