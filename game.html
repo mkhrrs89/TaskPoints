@@ -446,16 +446,20 @@ body.create-player-modal-open #mobileBottomNav {
 }
 
     /* Make form fields readable in both light & dark */
-    input, select, textarea{
-      background: rgba(255,255,255,0.95);
-      color:#111827;
-    }
-    @media (prefers-color-scheme: dark) {
-      input, select, textarea{
-        background: rgba(39,39,42,0.95);
-        color:#fafafa;
-      }
-    }
+input:not([type="checkbox"]):not([type="color"]):not([type="file"]),
+select,
+textarea{
+  background: rgba(255,255,255,0.95);
+  color:#111827;
+}
+@media (prefers-color-scheme: dark) {
+  input:not([type="checkbox"]):not([type="color"]):not([type="file"]),
+  select,
+  textarea{
+    background: rgba(39,39,42,0.95);
+    color:#fafafa;
+  }
+}
 
     .create-player-modal-header {
   display: flex;
@@ -579,10 +583,10 @@ body.create-player-modal-open #mobileBottomNav {
     font-size: 14px;
   }
 
-  .create-player-form input,
-  .create-player-form select {
-    min-height: 38px;
-  }
+.create-player-form input:not([type="checkbox"]):not([type="color"]):not([type="file"]),
+.create-player-form select {
+  min-height: 38px;
+}
 
   .create-player-form label {
     font-size: 11px;
