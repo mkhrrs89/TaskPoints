@@ -1033,8 +1033,8 @@ textarea{
 <script src="scoring_core.js"></script>
 <script>
 const STORAGE_KEY = "taskpoints_v1";
-const DEFAULT_PRIMARY_COLOR = "#1a383b";
-const DEFAULT_SECONDARY_COLOR = "#254c52";
+const DEFAULT_PRIMARY_COLOR = "#FFFFFF";
+const DEFAULT_SECONDARY_COLOR = "#808080";
 const $ = (id) => document.getElementById(id);
 let pageStateCache = null;
 let pageStateCacheDirty = true;
@@ -3395,11 +3395,11 @@ $("createPlayerForm").addEventListener("submit", (e)=>{
     $("playerName").value = "";
     $("playerNotes").value = "";
     $("playerImage").value = "";
-    $("playerBaseline").value = "60";
-    $("playerVariance").value = "40";
+    $("playerBaseline").value = "50";
+    $("playerVariance").value = "15";
     $("playerVarianceTilt").value = "50";
-    $("playerMomentum").value = "50";
-    $("playerRisky").value = "30";
+    $("playerMomentum").value = "15";
+    $("playerRisky").value = "15";
     $("playerStyle").value = "";
     $("playerPrimaryColor").value = DEFAULT_PRIMARY_COLOR;
     $("playerSecondaryColor").value = DEFAULT_SECONDARY_COLOR;
