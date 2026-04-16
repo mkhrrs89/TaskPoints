@@ -3377,13 +3377,13 @@ $("createPlayerForm").addEventListener("submit", (e)=>{
       createdAtISO: new Date().toISOString(),
       active: isActive,
 
-      baseline: isNaN(baseline) ? 35 : baseline,
-      variance: isNaN(variance) ? 9 : variance,
+      baseline: isNaN(baseline) ? 50 : baseline,
+      variance: isNaN(variance) ? 15 : variance,
       varianceTilt: Math.min(100, Math.max(0, isNaN(varianceTilt) ? 50 : varianceTilt)),
-      momentum: isNaN(momentum) ? 5 : momentum,
+      momentum: isNaN(momentum) ? 15 : momentum,
 
       // Default Risky = 3.0 (i.e. user sees 30)
-      risky: isNaN(risky) ? 3 : risky,
+      risky: isNaN(risky) ? 1.5 : risky,
 
       style: style || "balanced",
       primaryColor,
