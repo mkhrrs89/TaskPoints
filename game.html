@@ -456,6 +456,192 @@ body.create-player-modal-open #mobileBottomNav {
         color:#fafafa;
       }
     }
+
+    .create-player-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-right: 72px;
+  margin-bottom: 14px;
+}
+
+.create-player-modal-title-wrap {
+  min-width: 0;
+}
+
+.create-player-submit-btn-top {
+  display: none;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.create-player-close-btn {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  font-size: 11px;
+  padding: 6px 10px;
+  border-radius: 10px;
+}
+
+.create-player-top-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.create-player-three-col,
+.create-player-stats-row-bottom {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
+.create-player-color-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.create-player-photo-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 10px;
+  align-items: center;
+}
+
+.create-player-photo-label {
+  margin: 0;
+  white-space: nowrap;
+}
+
+.create-player-file-input {
+  margin-top: 0 !important;
+  min-width: 0;
+}
+
+.create-player-photo-help {
+  grid-column: 1 / -1;
+}
+
+.create-player-active-slot {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+}
+
+@media (max-width: 640px) {
+  .create-player-modal-panel {
+    width: 100%;
+    min-height: 100svh;
+    max-height: 100svh;
+    border-radius: 0;
+    padding:
+      calc(env(safe-area-inset-top, 0px) + 10px)
+      12px
+      calc(env(safe-area-inset-bottom, 0px) + 12px);
+  }
+
+  .create-player-modal-header {
+    margin-bottom: 10px;
+    gap: 10px;
+    padding-right: 58px;
+  }
+
+  .create-player-modal-kicker {
+    display: none;
+  }
+
+  .create-player-modal-title {
+    font-size: 1.05rem;
+    line-height: 1.15;
+    margin: 0;
+  }
+
+  .create-player-close-btn {
+    top: calc(env(safe-area-inset-top, 0px) + 8px);
+    right: 12px;
+    padding: 5px 9px;
+    font-size: 10px;
+    border-radius: 10px;
+  }
+
+  .create-player-form {
+    gap: 10px;
+  }
+
+  .create-player-form .input,
+  .create-player-form input,
+  .create-player-form select,
+  .create-player-form textarea {
+    font-size: 14px;
+  }
+
+  .create-player-form input,
+  .create-player-form select {
+    min-height: 38px;
+  }
+
+  .create-player-form label {
+    font-size: 11px;
+    line-height: 1.1;
+  }
+
+  .create-player-top-fields {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .create-player-three-col,
+  .create-player-stats-row-bottom {
+    gap: 8px;
+  }
+
+  .create-player-three-col-helper {
+    margin-top: -2px;
+    font-size: 10px;
+    line-height: 1.15;
+  }
+
+  .create-player-color-row {
+    gap: 8px;
+  }
+
+  .create-player-photo-row {
+    grid-template-columns: auto 1fr;
+    gap: 6px 8px;
+  }
+
+  .create-player-file-input {
+    font-size: 11px;
+  }
+
+  .create-player-photo-help {
+    display: none;
+  }
+
+  #playerNotes {
+    height: 66px !important;
+    min-height: 66px !important;
+  }
+
+  .create-player-submit-btn-top {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 38px;
+    padding: 0 12px;
+    font-size: 13px;
+    border-radius: 10px;
+  }
+
+  .create-player-submit-row {
+    display: none;
+  }
+}
+    
   </style>
 </head>
 <body class="min-h-screen">
@@ -566,22 +752,29 @@ body.create-player-modal-open #mobileBottomNav {
     tabindex="-1"
     onclick="event.stopPropagation();"
   >
-    <button
-      type="button"
-      class="absolute top-3 right-3 btn btn-secondary text-[11px] px-3 py-1 rounded-md"
-      id="closeCreatePlayerModalBtn"
-      aria-label="Close create player modal"
-    >
-      Close
-    </button>
+<button
+  type="button"
+  class="create-player-close-btn btn btn-secondary"
+  id="closeCreatePlayerModalBtn"
+  aria-label="Close create player modal"
+>
+  Close
+</button>
 
-    <div class="pr-16 mb-4">
-      <div class="muted text-[11px] uppercase tracking-wide">Game</div>
-      <h2 id="createPlayerModalTitle" class="font-semibold text-lg">Create Player</h2>
-    </div>
+<div class="create-player-modal-header">
+  <div class="create-player-modal-title-wrap">
+    <div class="muted text-[11px] uppercase tracking-wide create-player-modal-kicker">Game</div>
+    <h2 id="createPlayerModalTitle" class="font-semibold text-lg create-player-modal-title">Create Player</h2>
+  </div>
 
-    <form id="createPlayerForm" class="space-y-3">
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+  <button class="btn btn-success create-player-submit-btn-top" type="submit" form="createPlayerForm">
+    Add Player
+  </button>
+</div>
+
+<form id="createPlayerForm" class="space-y-3 create-player-form">
+      
+      <div class="create-player-top-fields">
         <div>
           <label class="text-xs muted">Name</label>
           <input id="playerName" class="input mt-1" placeholder="Player name">
@@ -620,7 +813,7 @@ body.create-player-modal-open #mobileBottomNav {
   Percent of swings that land <em>above</em> baseline.
 </p>
 
-<div class="grid grid-cols-3 gap-3 items-end">
+<div class="create-player-stats-row create-player-stats-row-bottom">
   <div>
     <label class="text-xs muted">Momentum</label>
     <input id="playerMomentum" type="number" class="input mt-1" value="50">
@@ -637,7 +830,7 @@ body.create-player-modal-open #mobileBottomNav {
 </div>
 </div>
 
-<div class="grid grid-cols-2 gap-3">
+<div class="create-player-color-row">
   <div>
     <label class="text-xs muted">Primary color</label>
     <input id="playerPrimaryColor" type="color" class="input mt-1 h-10 p-1" value="#1a383b">
@@ -648,13 +841,13 @@ body.create-player-modal-open #mobileBottomNav {
   </div>
 </div>
 
-      <div>
-        <label class="text-xs muted">Photo (optional)</label>
-        <input id="playerImage" type="file" accept="image/*" class="mt-1 text-xs">
-        <p class="text-[11px] opacity-60 mt-1">
-          You’ll be able to crop this after selecting.
-        </p>
-      </div>
+<div class="create-player-photo-row">
+  <label class="text-xs muted create-player-photo-label">Photo (optional)</label>
+  <input id="playerImage" type="file" accept="image/*" class="create-player-file-input text-xs">
+  <p class="text-[11px] opacity-60 mt-1 create-player-photo-help">
+    You’ll be able to crop this after selecting.
+  </p>
+</div>
 
       <div>
         <label class="text-xs muted">Notes</label>
