@@ -622,9 +622,27 @@ body {
     BlinkMacSystemFont, 'Segoe UI', sans-serif;
   letter-spacing: 0.3px;
 
-  -webkit-text-stroke: 0.4px rgba(255, 255, 255, 0.85);
-  paint-order: stroke fill;
-   text-shadow: 0 0 1px rgba(255,255,255,0.25);
+  /* remove the old thin border look */
+  -webkit-text-stroke: 0 transparent;
+  paint-order: normal;
+
+  /* white outline + blocky white 3D extrusion */
+  text-shadow:
+    /* outline */
+    -1px 0 0 #ffffff,
+     1px 0 0 #ffffff,
+     0 -1px 0 #ffffff,
+     0  1px 0 #ffffff,
+    -1px -1px 0 #ffffff,
+     1px -1px 0 #ffffff,
+    -1px  1px 0 #ffffff,
+     1px  1px 0 #ffffff,
+
+    /* block extrusion */
+     2px  2px 0 #ffffff,
+     3px  3px 0 #ffffff,
+     4px  4px 0 #ffffff,
+     5px  5px 0 #ffffff;
 }
 /* --- Diff value (END) -------------------------------------------------- */
 
