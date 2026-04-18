@@ -1170,6 +1170,21 @@ function markCompletionsDirty(){
   _derived.rev++;
 }
 
+function commitCompletionsAndRefreshDerivedUI() {
+  // 1) update in-memory derived revision marker
+  markCompletionsDirty();
+
+  // 2) persist state snapshot
+  save();
+
+  // 3) recompute derived totals from current in-memory state now
+  //    (ensures subsequent UI reads are immediately consistent)
+  getDerived();
+
+  // 4) rerender all dependent UI (today island, Today score, scoreboard/diff, SCWM summaries)
+  scheduleRender(renderAll);
+}
+
   function resolveCompletionRef(ref, startsWith = "") {
   if (!ref) return null;
 
@@ -7647,9 +7662,7 @@ function editTodayMood() {
       entry.completedAtISO = d.toISOString();
       entry.source = 'metric';
 
-      markCompletionsDirty();
-      save();
-      scheduleRender(renderAll);
+      commitCompletionsAndRefreshDerivedUI();
     }
   });
 }
@@ -7699,11 +7712,8 @@ function saveMoodScore() {
       }
 
       toastPointsDeltaTodayAware(pts, oldPts, key);
-      markCompletionsDirty();
-
       $('moodScoreInput').value = "";
-      save();
-      scheduleRender(renderAll);
+      commitCompletionsAndRefreshDerivedUI();
     }
   });
 }
@@ -8913,8 +8923,7 @@ if (key === "mood") {
       target.source = "metric";
       toastPointsDeltaTodayAware(newPts, oldPts, target);
 
-      markCompletionsDirty();
-      save();
+      commitCompletionsAndRefreshDerivedUI();
 
       try { renderScoreDashboardV2_Skeleton(); } catch(e){}
       try { if (scoreV2RecentOpen) renderScoreV2RecentGrid(); } catch(e){}
@@ -9219,9 +9228,7 @@ return;
           target.source = "metric";
           toastPointsDeltaTodayAware(newPts, oldPts, target);
 
-markCompletionsDirty();
-save();
-scheduleRender(renderAll);
+commitCompletionsAndRefreshDerivedUI();
 
 try { if (scoreV2RecentOpen) renderScoreV2RecentGrid(); } catch(e){}
 try { renderScoreDashboardV2_Skeleton(); } catch(e){}
