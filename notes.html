@@ -16,6 +16,32 @@
       min-height: 60vh;
       resize: vertical;
     }
+    .notes-tab-row{
+      display:flex;
+      gap:.5rem;
+      flex-wrap:wrap;
+      margin-bottom:.75rem;
+    }
+    .notes-tab-button[aria-selected="true"]{
+      border-color: rgba(45, 212, 191, .45);
+      box-shadow: inset 0 0 0 1px rgba(45, 212, 191, .35);
+      background: rgba(15, 118, 110, .28);
+      color: #ccfbf1;
+    }
+    .notes-tab-panel[hidden]{
+      display:none !important;
+    }
+    .mood-notes-list{
+      min-height: 60vh;
+      border: 1px solid rgba(148, 163, 184, .25);
+      border-radius: 14px;
+      background: rgba(15, 23, 42, .22);
+      padding: .9rem;
+      font-size: .95rem;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
   </style>
 </head>
 
@@ -81,14 +107,39 @@
     </header>
 
     <section class="glass">
-      <div class="flex items-center justify-between gap-2 mb-2">
-        <label for="notesInput" class="font-semibold">Notes</label>
-        <span id="notesStatus" class="text-xs muted">Saved</span>
+      <div class="notes-tab-row" role="tablist" aria-label="Notes tabs">
+        <button
+          id="generalNotesTab"
+          type="button"
+          class="btn btn-ghost btn-toolbar notes-tab-button"
+          role="tab"
+          aria-selected="true"
+          aria-controls="generalNotesPanel"
+          data-notes-tab="general">General Notes</button>
+        <button
+          id="moodNotesTab"
+          type="button"
+          class="btn btn-ghost btn-toolbar notes-tab-button"
+          role="tab"
+          aria-selected="false"
+          aria-controls="moodNotesPanel"
+          data-notes-tab="mood">Mood Notes</button>
       </div>
-      <textarea
-        id="notesInput"
-        class="input w-full notes-textarea"
-        placeholder="Start typing your notes, bullet points, or outlines here..."></textarea>
+
+      <div id="generalNotesPanel" class="notes-tab-panel" role="tabpanel" aria-labelledby="generalNotesTab">
+        <div class="flex items-center justify-between gap-2 mb-2">
+          <label for="notesInput" class="font-semibold">Notes</label>
+          <span id="notesStatus" class="text-xs muted">Saved</span>
+        </div>
+        <textarea
+          id="notesInput"
+          class="input w-full notes-textarea"
+          placeholder="Start typing your notes, bullet points, or outlines here..."></textarea>
+      </div>
+      <div id="moodNotesPanel" class="notes-tab-panel" role="tabpanel" aria-labelledby="moodNotesTab" hidden>
+        <label for="moodNotesList" class="font-semibold block mb-2">Mood Notes</label>
+        <div id="moodNotesList" class="mood-notes-list" aria-live="polite">No mood notes yet.</div>
+      </div>
     </section>
   </div>
 
@@ -98,6 +149,11 @@
     const NOTES_STORAGE_KEY = "taskpoints_notes_v1";
     const notesInput = document.getElementById("notesInput");
     const notesStatus = document.getElementById("notesStatus");
+    const generalNotesTab = document.getElementById("generalNotesTab");
+    const moodNotesTab = document.getElementById("moodNotesTab");
+    const generalNotesPanel = document.getElementById("generalNotesPanel");
+    const moodNotesPanel = document.getElementById("moodNotesPanel");
+    const moodNotesList = document.getElementById("moodNotesList");
     let saveTimer = null;
 
     function getStoredState() {
@@ -179,7 +235,62 @@
       }
     }
 
+    function formatCompactDate(date) {
+      return `${date.getMonth() + 1}/${date.getDate()}/${String(date.getFullYear()).slice(-2)}`;
+    }
+
+    function buildMoodNotesText() {
+      const state = getStoredState();
+      const completions = Array.isArray(state.completions) ? state.completions : [];
+      const moodEntries = completions
+        .filter((entry) => entry && typeof entry === "object")
+        .filter((entry) => typeof entry.title === "string" && entry.title.startsWith("Mood Score"))
+        .map((entry) => {
+          const rawNote = typeof entry.moodNotes === "string" ? entry.moodNotes.trim() : "";
+          const completedDate = new Date(entry.completedAtISO);
+          return {
+            note: rawNote,
+            completedDate,
+            completedAtISO: entry.completedAtISO
+          };
+        })
+        .filter((entry) => entry.note && !Number.isNaN(entry.completedDate.getTime()))
+        .sort((a, b) => b.completedDate.getTime() - a.completedDate.getTime());
+
+      if (!moodEntries.length) return "No mood notes yet.";
+
+      const lines = [];
+      let currentDateKey = "";
+      moodEntries.forEach((entry) => {
+        const dateKey = formatCompactDate(entry.completedDate);
+        if (dateKey !== currentDateKey) {
+          if (lines.length) lines.push("");
+          lines.push(dateKey);
+          currentDateKey = dateKey;
+        }
+        lines.push(`- ${entry.note}`);
+      });
+      return lines.join("\n");
+    }
+
+    function renderMoodNotes() {
+      if (!moodNotesList) return;
+      moodNotesList.textContent = buildMoodNotesText();
+    }
+
+    function setActiveTab(tab) {
+      const showGeneral = tab !== "mood";
+      if (generalNotesPanel) generalNotesPanel.hidden = !showGeneral;
+      if (moodNotesPanel) moodNotesPanel.hidden = showGeneral;
+      if (generalNotesTab) generalNotesTab.setAttribute("aria-selected", showGeneral ? "true" : "false");
+      if (moodNotesTab) moodNotesTab.setAttribute("aria-selected", showGeneral ? "false" : "true");
+      if (!showGeneral) renderMoodNotes();
+    }
+
     loadNotes();
+    setActiveTab("general");
+    generalNotesTab?.addEventListener("click", () => setActiveTab("general"));
+    moodNotesTab?.addEventListener("click", () => setActiveTab("mood"));
     notesInput?.addEventListener("input", scheduleSave);
     notesInput?.addEventListener("change", () => saveNotes(true));
     window.addEventListener("beforeunload", () => saveNotes(true));
