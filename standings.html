@@ -155,6 +155,7 @@
               <th data-sort="wins">W <span class="sort-indicator" data-indicator="wins"></span></th>
               <th data-sort="losses">L <span class="sort-indicator" data-indicator="losses"></span></th>
               <th data-sort="winPct">Win% <span class="sort-indicator" data-indicator="winPct"></span></th>
+              <th data-sort="mov">MOV <span class="sort-indicator" data-indicator="mov"></span></th>
               <th data-sort="ppd">BASEΔ <span class="sort-indicator" data-indicator="ppd"></span></th>
               <th data-sort="avgPpd">PPD <span class="sort-indicator" data-indicator="avgPpd"></span></th>
               <th data-sort="lifetimePoints">Lifetime PTS <span class="sort-indicator" data-indicator="lifetimePoints"></span></th>
@@ -263,6 +264,7 @@ function computeYouStats() {
     const mh = s && Array.isArray(s.matchups) ? s.matchups : [];
     let games = 0;
     let totalPoints = 0;
+    let totalMargin = 0;
 
     for (const m of mh) {
       if (!m || (m.playerAId !== "YOU" && m.playerBId !== "YOU")) continue;
@@ -272,24 +274,27 @@ function computeYouStats() {
       const bScore = Number(m.scoreB);
       if (!Number.isFinite(aScore) || !Number.isFinite(bScore)) continue;
       const youScore = (m.playerAId === "YOU") ? aScore : bScore;
+      const oppScore = (m.playerAId === "YOU") ? bScore : aScore;
       totalPoints += youScore;
+      totalMargin += (youScore - oppScore);
       games++;
     }
 
     if (!games) {
-      return { games:0, wins:0, losses:0, winPct:null, avgPPD:null, ppd:null, totalPoints:0 };
+      return { games:0, wins:0, losses:0, winPct:null, mov:null, avgPPD:null, ppd:null, totalPoints:0 };
     }
 
     const avgPPD = totalPoints / games;
+    const mov = totalMargin / games;
     const winPct = (record.wins + record.losses) ? (record.wins / (record.wins + record.losses)) * 100 : null;
     const ppd = null;
 
-    return { games, wins: record.wins, losses: record.losses, winPct, avgPPD, ppd, totalPoints };
+    return { games, wins: record.wins, losses: record.losses, winPct, mov, avgPPD, ppd, totalPoints };
   }
 
   // 2) Fallback: completions-based calc (your old behavior)
   if (!s || !Array.isArray(s.completions) || !s.completions.length) {
-    return { games:0, wins:0, losses:0, winPct:null, avgPPD:null, ppd:null, totalPoints:0 };
+    return { games:0, wins:0, losses:0, winPct:null, mov:null, avgPPD:null, ppd:null, totalPoints:0 };
   }
 
   const dayMap = {};
@@ -309,7 +314,7 @@ function computeYouStats() {
 
   const dailyTotals = Object.values(dayMap);
   if (!dailyTotals.length) {
-    return { games:0, wins:0, losses:0, winPct:null, avgPPD:null, ppd:null, totalPoints:0 };
+    return { games:0, wins:0, losses:0, winPct:null, mov:null, avgPPD:null, ppd:null, totalPoints:0 };
   }
 
   const avgPPD = dailyTotals.reduce((sum, v) => sum + v, 0) / dailyTotals.length;
@@ -323,7 +328,7 @@ function computeYouStats() {
   const winPct = (wins + losses) ? (wins / (wins + losses)) * 100 : null;
   const ppd = null;
 
-  return { games: dailyTotals.length, wins, losses, winPct, avgPPD, ppd, totalPoints };
+  return { games: dailyTotals.length, wins, losses, winPct, mov:null, avgPPD, ppd, totalPoints };
 }
 
     let players = loadPlayers();
@@ -366,6 +371,7 @@ function computeYouStats() {
       if (record.source === "matchups") {
         let games = 0;
         let totalPoints = 0;
+        let totalMargin = 0;
 
         for (const m of matchups) {
           if (!m) continue;
@@ -384,10 +390,12 @@ function computeYouStats() {
 
           games++;
           totalPoints += playerScore;
+          totalMargin += (playerScore - oppScore);
         }
 
         if (games) {
           const avgPPD = totalPoints / games;
+          const mov = totalMargin / games;
           const winPct = (record.wins + record.losses)
             ? (record.wins / (record.wins + record.losses)) * 100
             : null;
@@ -396,14 +404,14 @@ function computeYouStats() {
             : (Number(p?.baseline) || null);
           const ppd = Number.isFinite(baseline) ? (avgPPD - baseline) : null;
 
-          return { games, wins: record.wins, losses: record.losses, winPct, avgPPD, ppd, totalPoints };
+          return { games, wins: record.wins, losses: record.losses, winPct, mov, avgPPD, ppd, totalPoints };
         }
-        return { games:0, wins:0, losses:0, winPct:null, avgPPD:null, ppd:null, totalPoints:0 };
+        return { games:0, wins:0, losses:0, winPct:null, mov:null, avgPPD:null, ppd:null, totalPoints:0 };
       }
 
       // 2) Fallback: legacy gameHistory vs baseline model
       if (!Array.isArray(gameHistory) || !gameHistory.length) {
-        return { games:0, wins:0, losses:0, winPct:null, avgPPD:null, ppd:null, totalPoints:0 };
+        return { games:0, wins:0, losses:0, winPct:null, mov:null, avgPPD:null, ppd:null, totalPoints:0 };
       }
 
       let games = 0;
@@ -428,14 +436,14 @@ function computeYouStats() {
       }
 
       if (!games) {
-        return { games:0, wins:0, losses:0, winPct:null, avgPPD:null, ppd:null, totalPoints:0 };
+        return { games:0, wins:0, losses:0, winPct:null, mov:null, avgPPD:null, ppd:null, totalPoints:0 };
       }
 
       const avgPPD = totalPoints / games;
       const winPct = (wins + losses) ? (wins / (wins + losses)) * 100 : null;
       const ppd = baseline ? (avgPPD - baseline) : null;
 
-      return { games, wins: record.wins || wins, losses: record.losses || losses, winPct, avgPPD, ppd, totalPoints };
+      return { games, wins: record.wins || wins, losses: record.losses || losses, winPct, mov:null, avgPPD, ppd, totalPoints };
     }
 
     function getSortValue(p, key) {
@@ -445,6 +453,7 @@ function computeYouStats() {
         case "wins":   return stats.wins || 0;
         case "losses": return stats.losses || 0;
         case "winPct": return stats.winPct || 0;
+        case "mov":    return (stats.mov == null) ? Number.NEGATIVE_INFINITY : stats.mov;
         case "ppd":    return stats.ppd || 0;
         case "avgPpd": return stats.avgPPD || 0;
         case "lifetimePoints": return stats.totalPoints || 0;
@@ -507,6 +516,9 @@ function computeYouStats() {
         const isYou = p && (p.id === "YOU" || p.isYou);
 
         const winPctDisplay = (stats.winPct == null) ? "—" : stats.winPct.toFixed(1) + "%";
+        const movDisplay = (stats.mov == null)
+          ? "-"
+          : `${stats.mov > 0 ? "+" : ""}${stats.mov.toFixed(1)}`;
         const ppdDisplay    = isYou ? "-" : ((stats.ppd == null) ? "—" : stats.ppd.toFixed(1));
         const avgPpdDisplay = (stats.avgPPD == null) ? "—" : stats.avgPPD.toFixed(1);
         const lifetimeDisplay = (stats.totalPoints == null) ? "—" : stats.totalPoints.toFixed(1);
@@ -516,6 +528,7 @@ function computeYouStats() {
           <td>${stats.wins}</td>
           <td>${stats.losses}</td>
           <td>${winPctDisplay}</td>
+          <td>${movDisplay}</td>
           <td>${ppdDisplay}</td>
           <td>${avgPpdDisplay}</td>
           <td>${lifetimeDisplay}</td>
