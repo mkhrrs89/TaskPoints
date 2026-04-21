@@ -4816,3 +4816,82 @@ header,
   object-fit: cover;
   border-radius: 6px;
 }
+
+/* Tournament bracket scaffold */
+.tournament-bracket-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 4px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.tournament-bracket {
+  --slot-size: 58px;
+  --slot-gap: 10px;
+  --matchup-gap: 22px;
+  --round-gap: 16px;
+  --seed-width: 22px;
+
+  display: flex;
+  align-items: flex-start;
+  gap: var(--round-gap);
+  min-width: max-content;
+  padding-right: 10px;
+}
+
+.tournament-round {
+  display: flex;
+  flex-direction: column;
+}
+
+.tournament-round-1 {
+  gap: var(--matchup-gap);
+}
+
+.tournament-round-2 {
+  gap: calc((var(--slot-size) * 2) + var(--slot-gap) + var(--matchup-gap));
+  margin-top: calc((var(--slot-size) + var(--slot-gap)) / 2);
+}
+
+.tournament-round-3 {
+  gap: calc(
+    (var(--slot-size) * 4) + (var(--slot-gap) * 3) + (var(--matchup-gap) * 2)
+  );
+  margin-top: calc(
+    ((var(--slot-size) * 2) + var(--slot-gap) + var(--matchup-gap)) / 2
+  );
+}
+
+.tournament-matchup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--slot-gap);
+}
+
+.tournament-slot-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tournament-slot {
+  width: var(--slot-size);
+  height: var(--slot-size);
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03)),
+    rgba(15, 23, 42, 0.55);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 6px 16px rgba(0, 0, 0, 0.22);
+}
+
+.tournament-seed {
+  width: var(--seed-width);
+  text-align: right;
+  font-size: 1.2rem;
+  font-weight: 800;
+  line-height: 1;
+  color: #e2e8f0;
+}
