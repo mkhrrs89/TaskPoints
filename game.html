@@ -663,6 +663,34 @@ textarea{
     background: transparent !important;
   }
 }
+
+/* MOBILE ONLY: Remove borders and containers in Gallery view */
+@media (max-width: 640px) {
+  /* Remove card container styling in gallery view */
+  #playersList.gallery-view .playerCard,
+  .players-grid.gallery-view .playerCard {
+    padding: 0;
+    border: none !important;
+    border-radius: 0;
+    background: none !important;
+    box-shadow: none !important;
+  }
+
+  /* Remove gradient/padding around player photos in gallery view */
+  #playersList.gallery-view .player-img-frame,
+  .players-grid.gallery-view .player-img-frame {
+    padding: 0;
+    margin: 0 0 4px;
+    background: none !important;
+  }
+
+  /* Remove inner padding/background on the photo itself */
+  #playersList.gallery-view .player-img-inner,
+  .players-grid.gallery-view .player-img-inner {
+    padding: 0;
+    background: none !important;
+  }
+}
     
   </style>
 </head>
