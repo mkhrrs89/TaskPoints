@@ -645,6 +645,24 @@ textarea{
     display: none;
   }
 }
+
+/* MOBILE ONLY: remove player card borders in Gallery view */
+@media (max-width: 640px) {
+  /* Remove the glass border and shadow when gallery view is active */
+  #playersList.gallery-view .glass,
+  .players-grid.gallery-view .glass {
+    border: none !important;
+    box-shadow: none !important;
+  }
+
+  /* Remove the gradient frame around photos in gallery view */
+  #playersList.gallery-view .player-img-frame,
+  .players-grid.gallery-view .player-img-frame {
+    padding: 0;
+    margin: 0 0 8px;
+    background: transparent !important;
+  }
+}
     
   </style>
 </head>
