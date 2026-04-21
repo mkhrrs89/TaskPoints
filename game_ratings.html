@@ -208,6 +208,7 @@
           <thead>
 <tr>
   <th data-sort="name">Name</th>
+  <th data-sort="ovr">OVR</th>
   <th data-sort="baseline">BASE</th>
   <th data-sort="variance">VAR</th>
   <th data-sort="varianceTilt">Tilt</th>
@@ -462,7 +463,7 @@ function downloadCsv(filename, rows) {
 }
 
 function exportRatingsCsv() {
-  const rows = [["Name", "Baseline", "Variance", "Variance Tilt (%)", "Momentum", "Risky", "Style"]];
+  const rows = [["Name", "OVR", "Baseline", "Variance", "Variance Tilt (%)", "Momentum", "Risky", "Style"]];
 
   getSortedPlayers().forEach(p => {
     const baseline = typeof p.baseline === "number" ? p.baseline : Number(p.baseline);
@@ -473,6 +474,7 @@ function exportRatingsCsv() {
 
     rows.push([
       p.name || "—",
+      "",
       Number.isFinite(baseline) ? baseline : "",
       Number.isFinite(variance) ? variance : "",
       Number.isFinite(varianceTilt) ? varianceTilt : "",
@@ -513,6 +515,7 @@ function renderTable() {
     const stats = computePlayerStats(p);
 
     tr.appendChild(makePlainCell(p.name || "—", "pr-4"));
+    tr.appendChild(makePlainCell("—"));
     tr.appendChild(makeEditableCell(p, "baseline", baseline != null ? String(baseline) : "—"));
     tr.appendChild(makeEditableCell(p, "variance", variance != null ? String(variance) : "—"));
     tr.appendChild(makeEditableCell(p, "varianceTilt", varianceTilt != null ? `${varianceTilt}%` : "—"));
@@ -808,6 +811,7 @@ function getSortValue(p, key) {
 
   switch (key) {
     case "name":      return (p.name || "").toLowerCase();
+    case "ovr":       return 0;
     case "baseline":  return Number(p.baseline) || 0;
     case "variance":  return Number(p.variance) || 0;
     case "varianceTilt": return Number(p.varianceTilt) || 0;
