@@ -513,6 +513,17 @@ Nothing visible on the page is built here. === -->
     </div>
   </div>
 
+  <div id="remindersSection" class="glass mb-6 reminders-card sectionCard sectionCard--teal">
+    <div class="sectionHeader sectionHeader--teal">
+      <div class="sectionHeaderControls">
+        <h2 class="sectionTitle sectionTitle--inline">Reminders</h2>
+        <button id="addReminderBtn" class="btn btn-primary btn-compact" type="button">+</button>
+      </div>
+    </div>
+    <div id="remindersList" class="text-sm space-y-1"></div>
+    <div id="remindersEmpty" class="text-sm muted hidden">No reminders yet.</div>
+  </div>
+
   <div class="home-mobile-tabs-shell md:hidden mb-4">
 <div id="homeMobileTabs" class="home-mobile-tabs" role="tablist" aria-label="Home sections">
   <button type="button" id="homeTabTasks" class="home-mobile-tab is-active" data-home-tab="tasks" role="tab" aria-selected="true" aria-controls="homePanelTasks">Tasks</button>
@@ -3220,6 +3231,7 @@ function maybeAutoSimToday(){
 function normalizeState(s) {
   return {
     tasks:       Array.isArray(s.tasks)       ? s.tasks.map(normalizeTask)       : [],
+    reminders:   Array.isArray(s.reminders)   ? s.reminders   : [],
     completions: Array.isArray(s.completions) ? s.completions.map(normalizeCompletion) : [],
     players:     Array.isArray(s.players)     ? s.players     : [],
     habits:      Array.isArray(s.habits)      ? s.habits.map(normalizeHabit)      : [],
@@ -6461,6 +6473,42 @@ wireTaskSkillEditor(card, t.id);
   window.updateCriticalTasksIsland?.();
 }
 
+function renderReminders(){
+  const list = $('remindersList');
+  const empty = $('remindersEmpty');
+  if (!list || !empty) return;
+  list.innerHTML = '';
+
+  const reminders = Array.isArray(state.reminders) ? state.reminders : [];
+  if (!reminders.length) {
+    empty.classList.remove('hidden');
+    return;
+  }
+
+  empty.classList.add('hidden');
+  reminders.forEach((reminder) => {
+    const row = document.createElement('div');
+    row.className = 'text-sm py-1 border-b border-white/10 last:border-b-0 truncate';
+    row.textContent = typeof reminder?.text === 'string' ? reminder.text : '';
+    list.appendChild(row);
+  });
+}
+
+function addReminder(){
+  const raw = prompt('Enter reminder text');
+  if (raw === null) return;
+  const text = raw.trim();
+  if (!text) return;
+  if (!Array.isArray(state.reminders)) state.reminders = [];
+  state.reminders.unshift({
+    id: (window.crypto?.randomUUID && window.crypto.randomUUID()) || String(Date.now()),
+    text,
+    createdAtISO: new Date().toISOString()
+  });
+  save();
+  renderReminders();
+}
+
 function getTaskActionSheetFocusable(){
   const sheet = $('taskActionSheet');
   if (!sheet) return [];
@@ -8434,6 +8482,7 @@ function getTaskPointsExportSnapshot() {
 async function applyImportedState(root){
   let normalized = normalizeState({
     tasks:       Array.isArray(root.tasks)       ? root.tasks       : [],
+    reminders:   Array.isArray(root.reminders)   ? root.reminders   : [],
     completions: Array.isArray(root.completions) ? root.completions : [],
     players:     Array.isArray(root.players)     ? root.players     : [],
     habits:      Array.isArray(root.habits)      ? root.habits      : [],
@@ -9252,6 +9301,7 @@ function renderAll() {
     try {
 try { tpPerfTime('renderStats (call)', () => renderStats()); } catch (e) { console.error('renderStats error:', e); }
 try { tpPerfTime('renderTasks', () => renderTasks()); } catch (e) { console.error('renderTasks error:', e); }
+try { tpPerfTime('renderReminders', () => renderReminders()); } catch (e) { console.error('renderReminders error:', e); }
 try { tpPerfTime('renderScoreDashboardV2_Skeleton', () => renderScoreDashboardV2_Skeleton()); } catch (e) { console.error('renderScoreDashboardV2_Skeleton error:', e); }
 try { tpPerfTime('initScoreV2Toggle', () => initScoreV2Toggle()); } catch (e) { console.error('initScoreV2Toggle error:', e); }
 
@@ -9338,6 +9388,7 @@ try {
 } catch (e) {}
   $('addBtn')?.addEventListener('click', addTask);
   $('openAddTaskBtn')?.addEventListener('click', openAddTaskModal);
+  $('addReminderBtn')?.addEventListener('click', addReminder);
   $('sortSelect')?.addEventListener('change', renderTasks);
   $('resetBtn')?.addEventListener('click', resetAll);
   $('addHabitBtn')?.addEventListener('click', openHabitModal);
