@@ -199,7 +199,10 @@
     </header>
 
     <section class="card mb-4">
-      <h2 class="font-semibold text-lg mb-1">Head to Heads</h2>
+      <div class="flex items-center gap-2 mb-1">
+        <h2 class="font-semibold text-lg">Head to Heads</h2>
+        <button type="button" class="btn btn-primary btn-toolbar" id="refreshHeadToHeadsBtn">Refresh</button>
+      </div>
       <p class="text-sm opacity-80">Read-only matrix of revealed matchup records. Rows are the player record versus the column player.</p>
     </section>
 
@@ -416,6 +419,19 @@
       `;
     }
 
+    function refreshHeadToHeads() {
+      const emptyState = document.getElementById('emptyState');
+      const matrixWrap = document.getElementById('matrixWrap');
+      const matrixMeta = document.getElementById('matrixMeta');
+
+      matrixWrap.innerHTML = '';
+      matrixWrap.classList.add('hidden');
+      emptyState.classList.add('hidden');
+      matrixMeta.textContent = '';
+
+      renderMatrix();
+    }
+
     function escapeHtml(value) {
       return String(value)
         .replace(/&/g, '&amp;')
@@ -425,7 +441,13 @@
         .replace(/'/g, '&#39;');
     }
 
-    document.addEventListener('DOMContentLoaded', renderMatrix);
+    document.addEventListener('DOMContentLoaded', () => {
+      const refreshButton = document.getElementById('refreshHeadToHeadsBtn');
+      if (refreshButton) {
+        refreshButton.addEventListener('click', refreshHeadToHeads);
+      }
+      renderMatrix();
+    });
   </script>
 </body>
 </html>
