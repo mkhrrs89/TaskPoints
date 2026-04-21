@@ -481,6 +481,7 @@ const workHoursMax = Object.prototype.hasOwnProperty.call(workInput, 'hoursMax')
   function normalizeState(s) {
     return {
       tasks:       Array.isArray(s?.tasks)       ? s.tasks.map(normalizeTask)       : [],
+      reminders:   Array.isArray(s?.reminders)   ? s.reminders   : [],
       completions: Array.isArray(s?.completions) ? s.completions.map(normalizeCompletion) : [],
       players:     Array.isArray(s?.players)     ? s.players     : [],
       habits:      Array.isArray(s?.habits)      ? s.habits.map(normalizeHabit)      : [],
@@ -942,6 +943,7 @@ function fastEnsureStateShape(s) {
   return {
     ...src,
     tasks: Array.isArray(src.tasks) ? src.tasks : [],
+    reminders: Array.isArray(src.reminders) ? src.reminders : [],
     completions: Array.isArray(src.completions) ? src.completions : [],
     habits: Array.isArray(src.habits) ? src.habits : [],
     players: Array.isArray(src.players) ? src.players : [],
