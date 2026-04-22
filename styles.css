@@ -124,6 +124,7 @@ body {
   );
   border-radius: 18px;
   padding: 16px;
+  overflow: hidden;
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.06) inset,
     0 10px 30px rgba(0, 0, 0, 0.25);
@@ -1194,8 +1195,8 @@ body {
   background: var(--tp-btn-teal-grad);
   margin: -16px -16px 10px -16px;
   padding: 16px;
-  border-top-left-radius: 20px;
-  border-top-right-radius: 20px;
+  border-top-left-radius: 18px;
+  border-top-right-radius: 18px;
 }
 
 .sectionTitleRow {
