@@ -839,7 +839,7 @@ textarea{
 <option value="hot_streak">Hot streak</option>
 <option value="grinder">Grinder</option>
 <option value="chaotic">Chaotic</option>
-            <option value="post">Post scorer</option>
+        
           </select>
         </div>
       </div>
@@ -872,12 +872,20 @@ textarea{
     <label class="text-xs muted">Risky (0–100)</label>
     <input id="playerRisky" type="number" class="input mt-1" value="15">
   </div>
-<div>
-  <label class="text-xs muted">Active</label>
-  <div class="create-player-active-slot mt-1">
-    <input id="playerActive" type="checkbox" class="toggle-switch" checked>
+  <div>
+    <label class="text-xs muted">INT (0–100)</label>
+    <input id="playerIntimidation" type="number" min="0" max="100" class="input mt-1" value="0">
   </div>
-</div>
+  <div>
+    <label class="text-xs muted">Poise (0–100)</label>
+    <input id="playerPoise" type="number" min="0" max="100" class="input mt-1" value="0">
+  </div>
+  <div>
+    <label class="text-xs muted">Active</label>
+    <div class="create-player-active-slot mt-1">
+      <input id="playerActive" type="checkbox" class="toggle-switch" checked>
+    </div>
+  </div>
 </div>
 
 <div class="create-player-color-row">
@@ -2907,21 +2915,44 @@ card.innerHTML = `
               />
             </div>
             <div>
-              <label class="opacity-70 block mb-1">Risky</label>
-              <input
-                data-field="risky"
-                type="number"
-                min="0"
-                max="100"
-                class="w-full px-3 py-2 rounded-xl border text-sm"
-                value="${
-                  typeof p.risky === "number"
-                    ? (p.risky <= 10 ? (p.risky * 10).toFixed(0) : p.risky.toFixed(0))
-                    : 30
-                }"
-              />
-            </div>
-            <div class="md:col-span-4">
+<div>
+  <label class="opacity-70 block mb-1">Risky</label>
+  <input
+    data-field="risky"
+    type="number"
+    min="0"
+    max="100"
+    class="w-full px-3 py-2 rounded-xl border text-sm"
+    value="${
+      typeof p.risky === "number"
+        ? (p.risky <= 10 ? (p.risky * 10).toFixed(0) : p.risky.toFixed(0))
+        : 30
+    }"
+  />
+</div>
+<div>
+  <label class="opacity-70 block mb-1">INT</label>
+  <input
+    data-field="intimidation"
+    type="number"
+    min="0"
+    max="100"
+    class="w-full px-3 py-2 rounded-xl border text-sm"
+    value="${typeof p.intimidation === "number" ? p.intimidation : 0}"
+  />
+</div>
+<div>
+  <label class="opacity-70 block mb-1">Poise</label>
+  <input
+    data-field="poise"
+    type="number"
+    min="0"
+    max="100"
+    class="w-full px-3 py-2 rounded-xl border text-sm"
+    value="${typeof p.poise === "number" ? p.poise : 0}"
+  />
+</div>
+<div class="md:col-span-4">
               <label class="opacity-70 block mb-1">Style</label>
               <input
                 data-field="style"
@@ -3275,12 +3306,14 @@ if (act === "clear-you-photo") {
         const notesInput = card.querySelector('textarea[data-field="notes"]');
         const fileInput = card.querySelector('input[data-field="image"]');
         const activeInput = card.querySelector('input[data-field="active"]');
-  const baselineInput  = card.querySelector('input[data-field="baseline"]');
-  const varianceInput  = card.querySelector('input[data-field="variance"]');
-  const varianceTiltInput = card.querySelector('input[data-field="varianceTilt"]');
-  const momentumInput  = card.querySelector('input[data-field="momentum"]');
-  const riskyInput     = card.querySelector('input[data-field="risky"]');
-  const styleInput     = card.querySelector('input[data-field="style"]');
+const baselineInput  = card.querySelector('input[data-field="baseline"]');
+const varianceInput  = card.querySelector('input[data-field="variance"]');
+const varianceTiltInput = card.querySelector('input[data-field="varianceTilt"]');
+const momentumInput  = card.querySelector('input[data-field="momentum"]');
+const riskyInput     = card.querySelector('input[data-field="risky"]');
+const intimidationInput = card.querySelector('input[data-field="intimidation"]');
+const poiseInput     = card.querySelector('input[data-field="poise"]');
+const styleInput     = card.querySelector('input[data-field="style"]');
   const primaryColorInput = card.querySelector('input[data-field="primaryColor"]');
   const secondaryColorInput = card.querySelector('input[data-field="secondaryColor"]');
 
@@ -3314,9 +3347,13 @@ if (act === "clear-you-photo") {
     : (typeof player.momentum === "number" ? player.momentum : 50);
 
   // Risky: always treat input as whole number, store as /10
-  const risky = riskyInput
-    ? Number(riskyInput.value || 30) / 10
-    : (typeof player.risky === "number" ? player.risky : 3);
+const intimidation = intimidationInput
+  ? Number(intimidationInput.value || 0)
+  : (typeof player.intimidation === "number" ? player.intimidation : 0);
+
+const poise = poiseInput
+  ? Number(poiseInput.value || 0)
+  : (typeof player.poise === "number" ? player.poise : 0);
 
   const style = styleInput
     ? (styleInput.value || "").trim()
@@ -3335,12 +3372,14 @@ if (act === "clear-you-photo") {
     player.notes = newNotes;
     player.active = nextActive;
 
-    player.baseline = isNaN(baseline) ? 60 : baseline;
-    player.variance = isNaN(variance) ? 40 : variance;
-    player.varianceTilt = Math.min(100, Math.max(0, isNaN(varianceTilt) ? 50 : varianceTilt));
-    player.momentum = isNaN(momentum) ? 50 : momentum;
-    player.risky    = isNaN(risky) ? 3 : risky;
-    player.style    = style || "balanced";
+player.baseline = isNaN(baseline) ? 60 : baseline;
+player.variance = isNaN(variance) ? 40 : variance;
+player.varianceTilt = Math.min(100, Math.max(0, isNaN(varianceTilt) ? 50 : varianceTilt));
+player.momentum = isNaN(momentum) ? 50 : momentum;
+player.risky    = isNaN(risky) ? 3 : risky;
+player.intimidation = Math.min(100, Math.max(0, isNaN(intimidation) ? 0 : intimidation));
+player.poise = Math.min(100, Math.max(0, isNaN(poise) ? 0 : poise));
+player.style    = style || "balanced";
     player.primaryColor = primaryColor;
     player.secondaryColor = secondaryColor;
 
@@ -3394,14 +3433,17 @@ $("createPlayerForm").addEventListener("submit", (e)=>{
   const file = $("playerImage").files && $("playerImage").files[0];
   const isActive = $("playerActive").checked;
 
-  const baseline = Number($("playerBaseline").value || 60);
-  const variance = Number($("playerVariance").value || 40);
-  const varianceTilt = Number($("playerVarianceTilt").value || 50);
-  const momentum = Number($("playerMomentum").value || 50);
+const baseline = Number($("playerBaseline").value || 60);
+const variance = Number($("playerVariance").value || 40);
+const varianceTilt = Number($("playerVarianceTilt").value || 50);
+const momentum = Number($("playerMomentum").value || 50);
 
-  // NEW: Risky is stored as decimal (input / 10)
-  const riskyInputRaw = Number($("playerRisky").value || 30);
-  const risky = riskyInputRaw / 10;
+// NEW: Risky is stored as decimal (input / 10)
+const riskyInputRaw = Number($("playerRisky").value || 30);
+const risky = riskyInputRaw / 10;
+
+const intimidation = Number($("playerIntimidation").value || 0);
+const poise = Number($("playerPoise").value || 0);
 
   const style = ($("playerStyle").value || "").trim();
   const primaryColor = normalizePlayerColor($("playerPrimaryColor").value, DEFAULT_PRIMARY_COLOR);
@@ -3423,17 +3465,20 @@ $("createPlayerForm").addEventListener("submit", (e)=>{
       createdAtISO: new Date().toISOString(),
       active: isActive,
 
-      baseline: isNaN(baseline) ? 50 : baseline,
-      variance: isNaN(variance) ? 15 : variance,
-      varianceTilt: Math.min(100, Math.max(0, isNaN(varianceTilt) ? 50 : varianceTilt)),
-      momentum: isNaN(momentum) ? 15 : momentum,
+baseline: isNaN(baseline) ? 50 : baseline,
+variance: isNaN(variance) ? 15 : variance,
+varianceTilt: Math.min(100, Math.max(0, isNaN(varianceTilt) ? 50 : varianceTilt)),
+momentum: isNaN(momentum) ? 15 : momentum,
 
-      // Default Risky = 3.0 (i.e. user sees 30)
-      risky: isNaN(risky) ? 1.5 : risky,
+// Default Risky = 3.0 (i.e. user sees 30)
+risky: isNaN(risky) ? 1.5 : risky,
 
-      style: style || "balanced",
-      primaryColor,
-      secondaryColor
+intimidation: Math.min(100, Math.max(0, isNaN(intimidation) ? 0 : intimidation)),
+poise: Math.min(100, Math.max(0, isNaN(poise) ? 0 : poise)),
+
+style: style || "balanced",
+primaryColor,
+secondaryColor
 
     });
     refreshScheduleAfterRosterChange();
@@ -3441,12 +3486,14 @@ $("createPlayerForm").addEventListener("submit", (e)=>{
     $("playerName").value = "";
     $("playerNotes").value = "";
     $("playerImage").value = "";
-    $("playerBaseline").value = "50";
-    $("playerVariance").value = "15";
-    $("playerVarianceTilt").value = "50";
-    $("playerMomentum").value = "15";
-    $("playerRisky").value = "15";
-    $("playerStyle").value = "";
+$("playerBaseline").value = "50";
+$("playerVariance").value = "15";
+$("playerVarianceTilt").value = "50";
+$("playerMomentum").value = "15";
+$("playerRisky").value = "15";
+$("playerIntimidation").value = "0";
+$("playerPoise").value = "0";
+$("playerStyle").value = "";
     $("playerPrimaryColor").value = DEFAULT_PRIMARY_COLOR;
     $("playerSecondaryColor").value = DEFAULT_SECONDARY_COLOR;
     $("playerActive").checked = true;
