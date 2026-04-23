@@ -375,7 +375,7 @@ function load() {
       return Number(total.toFixed(1));
     }
 
-    function simulateAiScoreForPlayer(player, dateKeyStr, state){
+    function simulateAiScoreForPlayer(player, dateKeyStr, state, context = {}){
       if (!player || !player.baseline) return 0;
 
       const baseline = Number(player.baseline);
