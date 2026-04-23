@@ -683,7 +683,7 @@ function cancelCurrentEdit() {
 function validateAndNormalizeValue(field, rawValue) {
   const text = String(rawValue ?? "").trim();
   if (field === "style") return { valid: true, value: text };
-  const numeric = Number(text);
+  let numeric = Number(text);
   if (!Number.isFinite(numeric)) return { valid: false, message: "Please enter a valid number." };
   if (field === "variance" && numeric < 0) return { valid: false, message: "Variance must be non-negative." };
   if (field === "varianceTilt") {
