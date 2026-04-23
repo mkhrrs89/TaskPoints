@@ -1375,108 +1375,232 @@ notes: typeof s.notes === "string" ? s.notes : "",
       });
     }
 
-    function normalizeSimPlayer(player) {
-      const baseline = Number.isFinite(player?.baseline) ? player.baseline : 60;
-      const variance = Number.isFinite(player?.variance) ? player.variance : 40;
-      const varianceTilt = Number.isFinite(player?.varianceTilt) ? player.varianceTilt : 50;
-      const momentum = Number.isFinite(player?.momentum) ? player.momentum : 50;
-      const risky = Number.isFinite(player?.risky) ? player.risky : 3;
+function normalizeSimPlayer(player) {
+  const baseline = Number.isFinite(player?.baseline) ? player.baseline : 60;
+  const variance = Number.isFinite(player?.variance) ? player.variance : 40;
+  const varianceTilt = Number.isFinite(player?.varianceTilt) ? player.varianceTilt : 50;
+  const momentum = Number.isFinite(player?.momentum) ? player.momentum : 50;
+  const risky = Number.isFinite(player?.risky) ? player.risky : 3;
+  const intimidation = Number.isFinite(player?.intimidation) ? player.intimidation : 0;
+  const poise = Number.isFinite(player?.poise) ? player.poise : 0;
 
-      return {
-        ...player,
-        baseline,
-        variance,
-        varianceTilt: Math.min(100, Math.max(0, varianceTilt)),
-        momentum,
-        risky
-      };
-    }
+  return {
+    ...player,
+    baseline,
+    variance,
+    varianceTilt: Math.min(100, Math.max(0, varianceTilt)),
+    momentum,
+    risky,
+    intimidation: Math.min(100, Math.max(0, intimidation)),
+    poise: Math.min(100, Math.max(0, poise))
+  };
+}
 
-    function getNormalizedRisky(riskyRating) {
-      let risky = Number(riskyRating);
-      if (!Number.isFinite(risky)) risky = 0;
-      return risky > 10 ? risky / 10 : risky;
-    }
+function getNormalizedRisky(riskyRating) {
+  let risky = Number(riskyRating);
+  if (!Number.isFinite(risky)) risky = 0;
+  return risky > 10 ? risky / 10 : risky;
+}
 
-    function simulateScoreForPlayer(player, prevScore) {
-      const baseline = player.baseline;
-      const variance = player.variance;
-      const varianceTilt = Math.min(100, Math.max(0, player.varianceTilt)) / 100;
-      const momentum = player.momentum;
-      const riskyNormalized = getNormalizedRisky(player.risky);
+function shuffleSimulationArray(arr) {
+  for (let i = arr.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+}
 
-      const variationMagnitude = Math.random() * variance;
-      const variationSign = Math.random() < varianceTilt ? 1 : -1;
-      const variation = variationMagnitude * variationSign;
+function buildSimulationRankingMap(state, players) {
+  const byId = new Map();
+  const playerIds = new Set((players || []).map(p => p?.id).filter(Boolean));
 
-      let momentumBonus = 0;
-      if (momentum && Number.isFinite(prevScore)) {
-        momentumBonus = (prevScore * (momentum / 100)) * 0.1;
-      }
+  const ranked = window.TaskPointsCore?.computeCanonicalRankings
+    ? TaskPointsCore.computeCanonicalRankings(state || {})
+    : [];
 
-      let riskyMod = 0;
-      let riskyTriggered = false;
-      if (Math.random() < riskyNormalized / 10) {
-        riskyTriggered = true;
-        const boom = Math.random() < 0.5;
-        const riskyScale = 0.5 + Math.random() * 2.5;
-        riskyMod = boom
-          ? variance * riskyScale
-          : -variance * riskyScale;
-      }
-
-      const score = baseline + variation + momentumBonus + riskyMod;
-      return {
-        score: Number(score.toFixed(1)),
-        riskyTriggered
-      };
-    }
-
-    function runSimulation(days) {
-      const state = loadSettingsState();
-      const players = Array.isArray(state.players)
-        ? state.players.filter(p => p && typeof p === "object")
-        : [];
-
-      if (!players.length) {
-        return {
-          players: [],
-          days,
-          scoresByPlayer: new Map(),
-          dayLabels: []
-        };
-      }
-
-      const normalizedPlayers = players.map(normalizeSimPlayer);
-      const scoresByPlayer = new Map();
-      const riskyTriggersByPlayer = new Map();
-      normalizedPlayers.forEach(player => scoresByPlayer.set(player.id, []));
-      normalizedPlayers.forEach(player => riskyTriggersByPlayer.set(player.id, 0));
-
-      const dayLabels = [];
-      for (let i = 0; i < days; i++) {
-        dayLabels.push(`Day ${i + 1}`);
-        normalizedPlayers.forEach(player => {
-          const scores = scoresByPlayer.get(player.id) || [];
-          const prevScore = scores.length ? scores[scores.length - 1] : null;
-          const result = simulateScoreForPlayer(player, prevScore);
-          scores.push(result.score);
-          scoresByPlayer.set(player.id, scores);
-          if (result.riskyTriggered) {
-            const riskyCount = riskyTriggersByPlayer.get(player.id) || 0;
-            riskyTriggersByPlayer.set(player.id, riskyCount + 1);
-          }
+  if (Array.isArray(ranked)) {
+    ranked
+      .filter(row => row && playerIds.has(row.playerId))
+      .sort((a, b) => (a.rank ?? Infinity) - (b.rank ?? Infinity))
+      .forEach(row => {
+        byId.set(row.playerId, {
+          playerId: row.playerId,
+          rank: row.rank
         });
-      }
+      });
+  }
 
-      return {
-        players: normalizedPlayers,
-        days,
-        scoresByPlayer,
-        dayLabels,
-        riskyTriggersByPlayer
-      };
+  const unranked = (players || [])
+    .filter(player => player?.id && !byId.has(player.id))
+    .slice()
+    .sort((a, b) => {
+      const baselineDiff = (Number(b?.baseline) || 0) - (Number(a?.baseline) || 0);
+      if (baselineDiff !== 0) return baselineDiff;
+      return String(a?.name || "").localeCompare(String(b?.name || ""));
+    });
+
+  let nextRank = byId.size + 1;
+  unranked.forEach(player => {
+    byId.set(player.id, {
+      playerId: player.id,
+      rank: nextRank
+    });
+    nextRank += 1;
+  });
+
+  return byId;
+}
+
+function buildSimulationOpponentMap(players) {
+  const pool = (players || []).filter(player => player && player.id).slice();
+  shuffleSimulationArray(pool);
+
+  const opponentMap = new Map();
+  pool.forEach(player => opponentMap.set(player.id, null));
+
+  for (let i = 0; i + 1 < pool.length; i += 2) {
+    const a = pool[i];
+    const b = pool[i + 1];
+    opponentMap.set(a.id, b);
+    opponentMap.set(b.id, a);
+  }
+
+  return opponentMap;
+}
+
+function simulateScoreForPlayer(player, prevScore, context = {}) {
+  const baseline = player.baseline;
+  const variance = player.variance;
+  const varianceTilt = Math.min(100, Math.max(0, player.varianceTilt)) / 100;
+  const momentum = player.momentum;
+  const riskyNormalized = getNormalizedRisky(player.risky);
+
+  const variationMagnitude = Math.random() * variance;
+  const variationSign = Math.random() < varianceTilt ? 1 : -1;
+  const variation = variationMagnitude * variationSign;
+
+  let momentumBonus = 0;
+  if (momentum && Number.isFinite(prevScore)) {
+    momentumBonus = (prevScore * (momentum / 100)) * 0.18;
+  }
+
+  let riskyMod = 0;
+  let riskyTriggered = false;
+  if (Math.random() < riskyNormalized / 10) {
+    riskyTriggered = true;
+    const boom = Math.random() < 0.5;
+    const riskyScale = 0.5 + Math.random() * 2.5;
+    riskyMod = boom
+      ? variance * riskyScale
+      : -variance * riskyScale;
+  }
+
+  const rawScore = baseline + variation + momentumBonus + riskyMod;
+  const originalUpside = Math.max(0, rawScore - baseline);
+  let finalUpside = originalUpside;
+  let intimidationApplied = false;
+
+  const opponent = context.opponent || null;
+  const rankingMap = context.rankingMap instanceof Map ? context.rankingMap : new Map();
+
+  const playerId = player?.id || null;
+  const opponentId = opponent?.id || null;
+  const isNpcVsNpc = Boolean(playerId && opponentId && playerId !== "YOU" && opponentId !== "YOU");
+
+  if (isNpcVsNpc && originalUpside > 0) {
+    const opponentInt = Math.min(100, Math.max(0, Number(opponent.intimidation) || 0));
+    const intimidationChance = opponentInt / 100;
+    const intimidationStrength = opponentInt * 0.005;
+
+    if (opponentInt > 0 && Math.random() < intimidationChance) {
+      finalUpside = originalUpside * (1 - intimidationStrength);
+      intimidationApplied = true;
     }
+
+    const playerRank = rankingMap.get(playerId)?.rank ?? null;
+    const opponentRank = rankingMap.get(opponentId)?.rank ?? null;
+
+    if (Number.isFinite(playerRank) && Number.isFinite(opponentRank) && playerRank > 1) {
+      const poiseThreshold = Math.ceil(playerRank / 2);
+      const qualifiesForPoise = opponentRank <= poiseThreshold;
+
+      if (qualifiesForPoise) {
+        const poiseRating = Math.min(100, Math.max(0, Number(player.poise) || 0));
+        const poiseChance = poiseRating / 100;
+        const poiseStrength = poiseRating * 0.005;
+
+        if (poiseRating > 0 && Math.random() < poiseChance) {
+          finalUpside = intimidationApplied ? originalUpside : finalUpside;
+          finalUpside = finalUpside * (1 + poiseStrength);
+        }
+      }
+    }
+  }
+
+  const score = baseline + finalUpside + Math.min(0, rawScore - baseline);
+
+  return {
+    score: Number(Math.max(0, score).toFixed(1)),
+    riskyTriggered
+  };
+}
+
+function runSimulation(days) {
+  const state = loadSettingsState();
+  const players = Array.isArray(state.players)
+    ? state.players.filter(p => p && typeof p === "object")
+    : [];
+
+  if (!players.length) {
+    return {
+      players: [],
+      days,
+      scoresByPlayer: new Map(),
+      dayLabels: []
+    };
+  }
+
+  const normalizedPlayers = players.map(normalizeSimPlayer);
+  const rankingMap = buildSimulationRankingMap(state, normalizedPlayers);
+  const scoresByPlayer = new Map();
+  const riskyTriggersByPlayer = new Map();
+
+  normalizedPlayers.forEach(player => scoresByPlayer.set(player.id, []));
+  normalizedPlayers.forEach(player => riskyTriggersByPlayer.set(player.id, 0));
+
+  const dayLabels = [];
+  for (let i = 0; i < days; i += 1) {
+    dayLabels.push(`Day ${i + 1}`);
+    const opponentMap = buildSimulationOpponentMap(normalizedPlayers);
+
+    normalizedPlayers.forEach(player => {
+      const scores = scoresByPlayer.get(player.id) || [];
+      const prevScore = scores.length ? scores[scores.length - 1] : null;
+      const opponent = opponentMap.get(player.id) || null;
+
+      const result = simulateScoreForPlayer(player, prevScore, {
+        opponent,
+        rankingMap
+      });
+
+      scores.push(result.score);
+      scoresByPlayer.set(player.id, scores);
+
+      if (result.riskyTriggered) {
+        const riskyCount = riskyTriggersByPlayer.get(player.id) || 0;
+        riskyTriggersByPlayer.set(player.id, riskyCount + 1);
+      }
+    });
+  }
+
+  return {
+    players: normalizedPlayers,
+    days,
+    scoresByPlayer,
+    dayLabels,
+    riskyTriggersByPlayer,
+    rankingMap
+  };
+}
 
     function formatNumber(value) {
       if (!Number.isFinite(value)) return "—";
@@ -2157,21 +2281,23 @@ notes: typeof s.notes === "string" ? s.notes : "",
         const belowBaseline = scores.filter(score => score < baseline).length;
         const total = scores.length || 1;
         const riskyTriggered = results.riskyTriggersByPlayer?.get(player.id) || 0;
-        return {
-          id: player.id,
-          name: player.name || "—",
-          avg: average(scores),
-          baseline,
-          variance: player.variance,
-          varianceTilt: player.varianceTilt,
-          momentum: player.momentum,
-          risky: getNormalizedRisky(player.risky),
-          high,
-          low,
-          aboveBaselinePct: (aboveBaseline / total) * 100,
-          belowBaselinePct: (belowBaseline / total) * 100,
-          riskyTriggered
-        };
+return {
+  id: player.id,
+  name: player.name || "—",
+  avg: average(scores),
+  baseline,
+  variance: player.variance,
+  varianceTilt: player.varianceTilt,
+  momentum: player.momentum,
+  risky: getNormalizedRisky(player.risky),
+  intimidation: Number(player.intimidation) || 0,
+  poise: Number(player.poise) || 0,
+  high,
+  low,
+  aboveBaselinePct: (aboveBaseline / total) * 100,
+  belowBaselinePct: (belowBaseline / total) * 100,
+  riskyTriggered
+};
       });
     }
 
@@ -2266,20 +2392,22 @@ notes: typeof s.notes === "string" ? s.notes : "",
       const tbody = table.querySelector("tbody");
       if (!thead || !tbody) return;
 
-      const headers = [
-        { label: "Player", key: "name" },
-        { label: "PPD", key: "avg" },
-        { label: "Baseline", key: "baseline" },
-        { label: "Variance", key: "variance" },
-        { label: "Variance Tilt", key: "varianceTilt" },
-        { label: "Momentum", key: "momentum" },
-        { label: "Risky", key: "risky" },
-        { label: "High", key: "high" },
-        { label: "Low", key: "low" },
-        { label: "Above Baseline", key: "aboveBaselinePct" },
-        { label: "Below Baseline", key: "belowBaselinePct" },
-        { label: "Risky Days", key: "riskyTriggered" }
-      ];
+const headers = [
+  { label: "Player", key: "name" },
+  { label: "PPD", key: "avg" },
+  { label: "Baseline", key: "baseline" },
+  { label: "Variance", key: "variance" },
+  { label: "Variance Tilt", key: "varianceTilt" },
+  { label: "Momentum", key: "momentum" },
+  { label: "Risky", key: "risky" },
+  { label: "INT", key: "intimidation" },
+  { label: "Poise", key: "poise" },
+  { label: "High", key: "high" },
+  { label: "Low", key: "low" },
+  { label: "Above Baseline", key: "aboveBaselinePct" },
+  { label: "Below Baseline", key: "belowBaselinePct" },
+  { label: "Risky Days", key: "riskyTriggered" }
+];
 
       thead.innerHTML = `
         <tr>
@@ -2324,9 +2452,11 @@ notes: typeof s.notes === "string" ? s.notes : "",
             <td class="pr-4 py-2">${formatNumber(row.baseline)}</td>
             <td class="pr-4 py-2">${formatNumber(row.variance)}</td>
             <td class="pr-4 py-2">${formatNumber(row.varianceTilt)}%</td>
-            <td class="pr-4 py-2">${formatNumber(row.momentum)}</td>
-            <td class="pr-4 py-2">${formatNumber(row.risky)}</td>
-            <td class="pr-4 py-2">${formatNumber(row.high)}</td>
+<td class="pr-4 py-2">${formatNumber(row.momentum)}</td>
+<td class="pr-4 py-2">${formatNumber(row.risky)}</td>
+<td class="pr-4 py-2">${formatNumber(row.intimidation)}</td>
+<td class="pr-4 py-2">${formatNumber(row.poise)}</td>
+<td class="pr-4 py-2">${formatNumber(row.high)}</td>
             <td class="pr-4 py-2">${formatNumber(row.low)}</td>
             <td class="pr-4 py-2">${formatPercent(row.aboveBaselinePct)}</td>
             <td class="pr-4 py-2">${formatPercent(row.belowBaselinePct)}</td>
@@ -2492,7 +2622,7 @@ function normalizeSvgTickText(svg) {
           <div class="flex items-center justify-between gap-2 flex-wrap">
             <div class="font-semibold">${escapeHtml(player.name || "—")}</div>
             <div class="text-xs muted">
-              Baseline ${formatNumber(baseline)} • Variance ±${formatNumber(variance)} • Variance Tilt ${formatNumber(varianceTilt)}% • Risky ${formatNumber(riskyScore)}
+              Baseline ${formatNumber(baseline)} • Variance ±${formatNumber(variance)} • Variance Tilt ${formatNumber(varianceTilt)}% • Risky ${formatNumber(riskyScore)} • INT ${formatNumber(player.intimidation ?? 0)} • Poise ${formatNumber(player.poise ?? 0)}
             </div>
           </div>
           <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" class="w-full h-40 rounded-xl bg-black/20 border border-white/5">
@@ -2832,20 +2962,22 @@ normalizeSvgTickText(svg);
       });
       rows.push([]);
       rows.push(["PPD + Ratings"]);
-      rows.push([
-        "Player",
-        "PPD",
-        "Baseline",
-        "Variance",
-        "Variance Tilt",
-        "Momentum",
-        "Risky",
-        "High",
-        "Low",
-        "Above Baseline %",
-        "Below Baseline %",
-        "Risky Days"
-      ]);
+rows.push([
+  "Player",
+  "PPD",
+  "Baseline",
+  "Variance",
+  "Variance Tilt",
+  "Momentum",
+  "Risky",
+  "INT",
+  "Poise",
+  "High",
+  "Low",
+  "Above Baseline %",
+  "Below Baseline %",
+  "Risky Days"
+]);
       results.players.forEach(player => {
         const scores = results.scoresByPlayer.get(player.id) || [];
         const baseline = player.baseline;
@@ -2855,20 +2987,22 @@ normalizeSvgTickText(svg);
         const belowBaseline = scores.filter(score => score < baseline).length;
         const total = scores.length || 1;
         const riskyTriggered = results.riskyTriggersByPlayer?.get(player.id) || 0;
-        rows.push([
-          player.name || "—",
-          formatNumber(average(scores)),
-          formatNumber(player.baseline),
-          formatNumber(player.variance),
-          `${formatNumber(player.varianceTilt)}%`,
-          formatNumber(player.momentum),
-          formatNumber(getNormalizedRisky(player.risky)),
-          formatNumber(high),
-          formatNumber(low),
-          formatPercent((aboveBaseline / total) * 100),
-          formatPercent((belowBaseline / total) * 100),
-          formatCount(riskyTriggered)
-        ]);
+rows.push([
+  player.name || "—",
+  formatNumber(average(scores)),
+  formatNumber(player.baseline),
+  formatNumber(player.variance),
+  `${formatNumber(player.varianceTilt)}%`,
+  formatNumber(player.momentum),
+  formatNumber(getNormalizedRisky(player.risky)),
+  formatNumber(player.intimidation ?? 0),
+  formatNumber(player.poise ?? 0),
+  formatNumber(high),
+  formatNumber(low),
+  formatPercent((aboveBaseline / total) * 100),
+  formatPercent((belowBaseline / total) * 100),
+  formatCount(riskyTriggered)
+]);
       });
 
       const now = new Date();
