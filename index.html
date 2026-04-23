@@ -2957,7 +2957,6 @@ function computeTodayPoints() {
 }
 
 function simulateAiScoreForPlayer(player, todayKey, context = {}){
-function simulateAiScoreForPlayer(player, todayKey, context = {}){
   if (!player || !player.baseline) return 0;
 
   const baseline = Number(player.baseline);
@@ -3089,20 +3088,29 @@ function simulateToday() {
     scoresById['YOU'] = youScore;
   }
 
-  participantIds.forEach(id => {
-    if (id === 'YOU') return;
-    const player = playerMap.get(id);
-    if (!player) return;
-    const score = simulateAiScoreForPlayer(player, todayKey);
-    scoresById[id] = score;
-    ensureOpponentDripSchedule(todayKey, id, score);
-    state.gameHistory.push({
-      id: makeId(),
-      date: todayKey,
-      playerId: id,
-      score
-    });
+participantIds.forEach(id => {
+  if (id === 'YOU') return;
+  const player = playerMap.get(id);
+  if (!player) return;
+
+  const todaysPair = todaysPairs.find(pair =>
+    pair && (pair.playerAId === id || pair.playerBId === id)
+  );
+  const opponentId = todaysPair
+    ? (todaysPair.playerAId === id ? todaysPair.playerBId : todaysPair.playerAId)
+    : null;
+  const opponent = opponentId === 'YOU' ? null : playerMap.get(opponentId);
+
+  const score = simulateAiScoreForPlayer(player, todayKey, { opponent });
+  scoresById[id] = score;
+  ensureOpponentDripSchedule(todayKey, id, score);
+  state.gameHistory.push({
+    id: makeId(),
+    date: todayKey,
+    playerId: id,
+    score
   });
+});
 
   todaysPairs.forEach(pair => {
     const matchup = {
@@ -3205,18 +3213,28 @@ function ensureTodayMatchupsFromHistory(){
       }
     }
 
-    let score = existingScore;
-    if (!Number.isFinite(score)) {
-      const player = playerMap.get(id);
-      score = player ? simulateAiScoreForPlayer(player, todayKey) : 0;
-      // If we had to simulate, also add history so other pages stay consistent
-      state.gameHistory.push({
-        id: makeId(),
-        date: todayKey,
-        playerId: id,
-        score
-      });
-    }
+let score = existingScore;
+if (!Number.isFinite(score)) {
+  const player = playerMap.get(id);
+
+  const todaysPair = todaysPairs.find(pair =>
+    pair && (pair.playerAId === id || pair.playerBId === id)
+  );
+  const opponentId = todaysPair
+    ? (todaysPair.playerAId === id ? todaysPair.playerBId : todaysPair.playerAId)
+    : null;
+  const opponent = opponentId === 'YOU' ? null : playerMap.get(opponentId);
+
+  score = player ? simulateAiScoreForPlayer(player, todayKey, { opponent }) : 0;
+
+  // If we had to simulate, also add history so other pages stay consistent
+  state.gameHistory.push({
+    id: makeId(),
+    date: todayKey,
+    playerId: id,
+    score
+  });
+}
 
     scoresById[id] = Number(score.toFixed(1));
     ensureOpponentDripSchedule(todayKey, id, scoresById[id]);
