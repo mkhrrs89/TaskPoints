@@ -764,6 +764,8 @@ textarea{
       <li><strong>Risky</strong>: How much they chase boom-or-bust lines.</li>
       <li><strong>Variance Tilt</strong>: What % of their swings land <em>above</em> baseline (0% = always below, 100% = always above).</li>
       <li><strong>Style</strong>: Just flavor text for now (can inform future sim tweaks).</li>
+      <li><strong>INT</strong>: Suppresses an opponent’s positive roll ceiling in NPC vs NPC matchups.</li>
+      <li><strong>Poise</strong>: Lets a player resist pressure and play up against significantly higher-ranked opponents.</li>
     </ul>
   </div>
 </section>
@@ -3136,16 +3138,18 @@ card.innerHTML = `
         <div class="text-xs opacity-80 leading-[1.0] space-y-[2px]">
           <p>Record: ${recordText}</p>
           <p>PPD: ${avgPpd}</p>
-          <p>Baseline: ${p.baseline ?? "—"}</p>
-          <p>Variance: ${p.variance ?? "—"}</p>
-          <p>Momentum: ${p.momentum ?? "—"}</p>
-          <p>Variance Tilt: ${Number.isFinite(p.varianceTilt) ? `${p.varianceTilt}%` : "50%"}</p>
-          <p>Risky: ${
-            typeof p.risky === "number"
-              ? (p.risky <= 10 ? p.risky.toFixed(1) : (p.risky / 10).toFixed(1))
-              : "—"
-          }</p>
-          <p>Style: ${escapeHtml(p.style || "—")}</p>
+<p>Baseline: ${p.baseline ?? "—"}</p>
+<p>Variance: ${p.variance ?? "—"}</p>
+<p>Momentum: ${p.momentum ?? "—"}</p>
+<p>Variance Tilt: ${Number.isFinite(p.varianceTilt) ? `${p.varianceTilt}%` : "50%"}</p>
+<p>Risky: ${
+  typeof p.risky === "number"
+    ? (p.risky <= 10 ? p.risky.toFixed(1) : (p.risky / 10).toFixed(1))
+    : "—"
+}</p>
+<p>INT: ${typeof p.intimidation === "number" ? `${p.intimidation}%` : "0%"}</p>
+<p>Poise: ${typeof p.poise === "number" ? `${p.poise}%` : "0%"}</p>
+<p>Style: ${escapeHtml(p.style || "—")}</p>
           <p>Primary Color: ${escapeHtml(primaryColor)}</p>
           <p>Secondary Color: ${escapeHtml(secondaryColor)}</p>
         </div>
