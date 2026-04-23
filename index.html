@@ -2956,7 +2956,8 @@ function computeTodayPoints() {
   return Number(total.toFixed(1));
 }
 
-function simulateAiScoreForPlayer(player, todayKey){
+function simulateAiScoreForPlayer(player, todayKey, context = {}){
+function simulateAiScoreForPlayer(player, todayKey, context = {}){
   if (!player || !player.baseline) return 0;
 
   const baseline = Number(player.baseline);
@@ -2995,10 +2996,50 @@ function simulateAiScoreForPlayer(player, todayKey){
       : -variance * riskyScale;
   }
 
-  const score = baseline + variation + momentumBonus + riskyMod;
+  const rawScore = baseline + variation + momentumBonus + riskyMod;
+  const originalUpside = Math.max(0, rawScore - baseline);
+  let finalUpside = originalUpside;
+  let intimidationApplied = false;
+
+  const opponent = context.opponent || null;
+  const playerId = player?.id || null;
+  const opponentId = opponent?.id || null;
+  const isNpcVsNpc = Boolean(playerId && opponentId && playerId !== "YOU" && opponentId !== "YOU");
+
+  if (isNpcVsNpc && originalUpside > 0) {
+    const opponentInt = Math.min(100, Math.max(0, Number(opponent.intimidation) || 0));
+    const intimidationChance = opponentInt / 100;
+    const intimidationStrength = opponentInt * 0.005;
+
+    if (opponentInt > 0 && Math.random() < intimidationChance) {
+      finalUpside = originalUpside * (1 - intimidationStrength);
+      intimidationApplied = true;
+    }
+
+    const rankingMap = getCanonicalRankingMap();
+    const playerRank = rankingMap.get(playerId)?.rank ?? null;
+    const opponentRank = rankingMap.get(opponentId)?.rank ?? null;
+
+    if (Number.isFinite(playerRank) && Number.isFinite(opponentRank) && playerRank > 1) {
+      const poiseThreshold = Math.ceil(playerRank / 2);
+      const qualifiesForPoise = opponentRank <= poiseThreshold;
+
+      if (qualifiesForPoise) {
+        const poiseRating = Math.min(100, Math.max(0, Number(player.poise) || 0));
+        const poiseChance = poiseRating / 100;
+        const poiseStrength = poiseRating * 0.005;
+
+        if (poiseRating > 0 && Math.random() < poiseChance) {
+          finalUpside = intimidationApplied ? originalUpside : finalUpside;
+          finalUpside = finalUpside * (1 + poiseStrength);
+        }
+      }
+    }
+  }
+
+  const score = baseline + finalUpside + Math.min(0, rawScore - baseline);
   return Number(score.toFixed(1));
 }
-
 function makeId() {
   if (window.crypto && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
