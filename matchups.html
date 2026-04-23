@@ -376,49 +376,93 @@ function load() {
     }
 
     function simulateAiScoreForPlayer(player, dateKeyStr, state, context = {}){
-      if (!player || !player.baseline) return 0;
+  function simulateAiScoreForPlayer(player, dateKeyStr, state, context = {}){
+  if (!player || !player.baseline) return 0;
 
-      const baseline = Number(player.baseline);
-      const variance = Number(player.variance);
-      const varianceTiltRaw = Number(
-        typeof player.varianceTilt === "number" ? player.varianceTilt : (player.varianceTilt || 50)
-      );
-      const varianceTilt = Math.min(100, Math.max(0, varianceTiltRaw)) / 100;
-      const momentum = Number(player.momentum);
+  const baseline = Number(player.baseline);
+  const variance = Number(player.variance);
+  const varianceTiltRaw = Number(
+    typeof player.varianceTilt === "number" ? player.varianceTilt : (player.varianceTilt || 50)
+  );
+  const varianceTilt = Math.min(100, Math.max(0, varianceTiltRaw)) / 100;
+  const momentum = Number(player.momentum);
 
-      let riskyRating = Number(player.risky);
-      if (isNaN(riskyRating)) riskyRating = 0;
-      const riskyNormalized = riskyRating > 10 ? riskyRating / 10 : riskyRating;
+  let riskyRating = Number(player.risky);
+  if (isNaN(riskyRating)) riskyRating = 0;
+  const riskyNormalized = riskyRating > 10 ? riskyRating / 10 : riskyRating;
 
-      const variationMagnitude = Math.random() * variance;
-      const variationSign = Math.random() < varianceTilt ? 1 : -1;
-      const variation = variationMagnitude * variationSign;
+  const variationMagnitude = Math.random() * variance;
+  const variationSign = Math.random() < varianceTilt ? 1 : -1;
+  const variation = variationMagnitude * variationSign;
 
-      let momentumBonus = 0;
-      if (momentum && Array.isArray(state?.gameHistory) && state.gameHistory.length) {
-        const prev = state.gameHistory
-          .filter(g => g.playerId === player.id)
-          .sort((a,b) => b.date.localeCompare(a.date))[0];
+  let momentumBonus = 0;
+  if (momentum && Array.isArray(state?.gameHistory) && state.gameHistory.length) {
+    const prev = state.gameHistory
+      .filter(g => g.playerId === player.id)
+      .sort((a,b) => b.date.localeCompare(a.date))[0];
 
-        if (prev && prev.date !== dateKeyStr) {
-          momentumBonus = (prev.score * (momentum / 100)) * 0.18;
-        }
-      }
+    if (prev && prev.date !== dateKeyStr) {
+      momentumBonus = (prev.score * (momentum / 100)) * 0.18;
+    }
+  }
 
-      let riskyMod = 0;
-      if (Math.random() < riskyNormalized / 10) {
-        const boom = Math.random() < 0.5;
-        const riskyScale = 0.5 + Math.random() * 2.5;
-        riskyMod = boom
-          ? variance * riskyScale
-          : -variance * riskyScale;
-      }
+  let riskyMod = 0;
+  if (Math.random() < riskyNormalized / 10) {
+    const boom = Math.random() < 0.5;
+    const riskyScale = 0.5 + Math.random() * 2.5;
+    riskyMod = boom
+      ? variance * riskyScale
+      : -variance * riskyScale;
+  }
 
-      const score = baseline + variation + momentumBonus + riskyMod;
-      const roundedScore = Number(score.toFixed(1));
-      return Math.max(0, roundedScore);
+  const rawScore = baseline + variation + momentumBonus + riskyMod;
+  const originalUpside = Math.max(0, rawScore - baseline);
+  let finalUpside = originalUpside;
+  let intimidationApplied = false;
+
+  const opponent = context.opponent || null;
+  const playerId = player?.id || null;
+  const opponentId = opponent?.id || null;
+  const isNpcVsNpc = Boolean(playerId && opponentId && playerId !== "YOU" && opponentId !== "YOU");
+
+  if (isNpcVsNpc && originalUpside > 0) {
+    const opponentInt = Math.min(100, Math.max(0, Number(opponent.intimidation) || 0));
+    const intimidationChance = opponentInt / 100;
+    const intimidationStrength = opponentInt * 0.005;
+
+    if (opponentInt > 0 && Math.random() < intimidationChance) {
+      finalUpside = originalUpside * (1 - intimidationStrength);
+      intimidationApplied = true;
     }
 
+    const ranked = window.TaskPointsCore?.computeCanonicalRankings
+      ? TaskPointsCore.computeCanonicalRankings(state)
+      : [];
+    const rankingMap = new Map(ranked.map(row => [row.playerId, row]));
+    const playerRank = rankingMap.get(playerId)?.rank ?? null;
+    const opponentRank = rankingMap.get(opponentId)?.rank ?? null;
+
+    if (Number.isFinite(playerRank) && Number.isFinite(opponentRank) && playerRank > 1) {
+      const poiseThreshold = Math.ceil(playerRank / 2);
+      const qualifiesForPoise = opponentRank <= poiseThreshold;
+
+      if (qualifiesForPoise) {
+        const poiseRating = Math.min(100, Math.max(0, Number(player.poise) || 0));
+        const poiseChance = poiseRating / 100;
+        const poiseStrength = poiseRating * 0.005;
+
+        if (poiseRating > 0 && Math.random() < poiseChance) {
+          finalUpside = intimidationApplied ? originalUpside : finalUpside;
+          finalUpside = finalUpside * (1 + poiseStrength);
+        }
+      }
+    }
+  }
+
+  const score = baseline + finalUpside + Math.min(0, rawScore - baseline);
+  const roundedScore = Number(score.toFixed(1));
+  return Math.max(0, roundedScore);
+}
     function generateOpponentDripSchedule(dateKeyStr, playerId, totalPoints){
       const totalRounded = Math.max(0, Math.round((Number(totalPoints) || 0) * 10) / 10);
       const totalUnits   = Math.round(totalRounded * 10);
@@ -638,7 +682,7 @@ state = syncYouMatchupsWithCompletions(state, { persist: false, pathName: 'rende
 
         const history = Array.isArray(nextState.gameHistory) ? nextState.gameHistory : [];
 
-        function scoreForPlayer(playerId) {
+        function scoreForPlayer(playerId, opponentId = null) {
           if (playerId === "YOU") {
             return computeYouScoreForDate(dateKeyStr, nextState);
           }
@@ -648,29 +692,30 @@ state = syncYouMatchupsWithCompletions(state, { persist: false, pathName: 'rende
             ensureOpponentDripSchedule(nextState, dateKeyStr, playerId, score);
             return score;
           }
-          const player = playerMap.get(playerId);
-          const score = simulateAiScoreForPlayer(player, dateKeyStr, nextState);
-          upsertGameHistoryEntry(nextState, dateKeyStr, playerId, score);
-          ensureOpponentDripSchedule(nextState, dateKeyStr, playerId, score);
-          return score;
+const player = playerMap.get(playerId);
+const opponent = opponentId === 'YOU' ? null : playerMap.get(opponentId);
+const score = simulateAiScoreForPlayer(player, dateKeyStr, nextState, { opponent });
+upsertGameHistoryEntry(nextState, dateKeyStr, playerId, score);
+ensureOpponentDripSchedule(nextState, dateKeyStr, playerId, score);
+return score;
         }
 
-        for (let i = 0; i + 1 < pool.length; i += 2) {
-          const aId = pool[i];
-          const bId = pool[i + 1];
-          const matchup = {
-            id: makeId(),
-            date: dateKeyStr,
-            playerAId: aId,
-            playerBId: bId,
-            playerAName: namesById[aId] || "Unknown",
-            playerBName: namesById[bId] || "Unknown",
-            scoreA: scoreForPlayer(aId),
-            scoreB: scoreForPlayer(bId)
-          };
-          nextState.matchups = Array.isArray(nextState.matchups) ? nextState.matchups : [];
-          nextState.matchups.push(matchup);
-        }
+for (let i = 0; i + 1 < pool.length; i += 2) {
+  const aId = pool[i];
+  const bId = pool[i + 1];
+  const matchup = {
+    id: makeId(),
+    date: dateKeyStr,
+    playerAId: aId,
+    playerBId: bId,
+    playerAName: namesById[aId] || "Unknown",
+    playerBName: namesById[bId] || "Unknown",
+    scoreA: scoreForPlayer(aId, bId),
+    scoreB: scoreForPlayer(bId, aId)
+  };
+  nextState.matchups = Array.isArray(nextState.matchups) ? nextState.matchups : [];
+  nextState.matchups.push(matchup);
+}
 
         if (byeId) {
           // Leave byeId without matchup for the day.
