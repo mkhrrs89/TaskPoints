@@ -214,6 +214,8 @@
   <th data-sort="varianceTilt">Tilt</th>
   <th data-sort="momentum">MOMEN</th>
   <th data-sort="risky">Risky</th>
+  <th data-sort="intimidation">INT</th>
+  <th data-sort="poise">Poise</th>
   <th data-sort="style">Style</th>
 </tr>
 
@@ -406,7 +408,7 @@ let showInactivePlayers = localStorage.getItem(RATINGS_SHOW_INACTIVE_KEY) === "1
 let sortKey = "name";
 let sortDir = "asc"; // "asc" or "desc"
 const STYLE_OPTIONS = ["", "scorer", "sharpshooter", "playmaker", "slasher", "post"];
-const EDITABLE_FIELDS = ["baseline", "variance", "varianceTilt", "momentum", "risky", "style"];
+const EDITABLE_FIELDS = ["baseline", "variance", "varianceTilt", "momentum", "risky", "intimidation", "poise", "style"];
 const editingState = {
   playerId: null,
   field: null,
@@ -463,7 +465,7 @@ function downloadCsv(filename, rows) {
 }
 
 function exportRatingsCsv() {
-  const rows = [["Name", "OVR", "Baseline", "Variance", "Variance Tilt (%)", "Momentum", "Risky", "Style"]];
+  const rows = [["Name", "OVR", "Baseline", "Variance", "Variance Tilt (%)", "Momentum", "Risky", "Intimidation", "Poise", "Style"]];
 
   getSortedPlayers().forEach(p => {
     const baseline = typeof p.baseline === "number" ? p.baseline : Number(p.baseline);
@@ -472,16 +474,18 @@ function exportRatingsCsv() {
     const momentum = typeof p.momentum === "number" ? p.momentum : Number(p.momentum);
     const riskyNorm = getNormalizedRisky(p.risky);
 
-    rows.push([
-      p.name || "—",
-      "",
-      Number.isFinite(baseline) ? baseline : "",
-      Number.isFinite(variance) ? variance : "",
-      Number.isFinite(varianceTilt) ? varianceTilt : "",
-      Number.isFinite(momentum) ? momentum : "",
-      Number.isFinite(riskyNorm) ? riskyNorm.toFixed(1) : "",
-      p.style || ""
-    ]);
+rows.push([
+  p.name || "—",
+  "",
+  Number.isFinite(baseline) ? baseline : "",
+  Number.isFinite(variance) ? variance : "",
+  Number.isFinite(varianceTilt) ? varianceTilt : "",
+  Number.isFinite(momentum) ? momentum : "",
+  Number.isFinite(riskyNorm) ? riskyNorm.toFixed(1) : "",
+  Number.isFinite(Number(p.intimidation)) ? Number(p.intimidation) : "",
+  Number.isFinite(Number(p.poise)) ? Number(p.poise) : "",
+  p.style || ""
+]);
   });
 
   const now = new Date();
@@ -514,14 +518,16 @@ function renderTable() {
 
     const stats = computePlayerStats(p);
 
-    tr.appendChild(makePlainCell(p.name || "—", "pr-4"));
-    tr.appendChild(makePlainCell("—"));
-    tr.appendChild(makeEditableCell(p, "baseline", baseline != null ? String(baseline) : "—"));
-    tr.appendChild(makeEditableCell(p, "variance", variance != null ? String(variance) : "—"));
-    tr.appendChild(makeEditableCell(p, "varianceTilt", varianceTilt != null ? `${varianceTilt}%` : "—"));
-    tr.appendChild(makeEditableCell(p, "momentum", momentum != null ? String(momentum) : "—"));
-    tr.appendChild(makeEditableCell(p, "risky", riskyNorm != null ? riskyNorm.toFixed(1) : "—"));
-    tr.appendChild(makeEditableCell(p, "style", escapeHtml(style || "—"), true));
+tr.appendChild(makePlainCell(p.name || "—", "pr-4"));
+tr.appendChild(makePlainCell("—"));
+tr.appendChild(makeEditableCell(p, "baseline", baseline != null ? String(baseline) : "—"));
+tr.appendChild(makeEditableCell(p, "variance", variance != null ? String(variance) : "—"));
+tr.appendChild(makeEditableCell(p, "varianceTilt", varianceTilt != null ? `${varianceTilt}%` : "—"));
+tr.appendChild(makeEditableCell(p, "momentum", momentum != null ? String(momentum) : "—"));
+tr.appendChild(makeEditableCell(p, "risky", riskyNorm != null ? riskyNorm.toFixed(1) : "—"));
+tr.appendChild(makeEditableCell(p, "intimidation", Number.isFinite(Number(p.intimidation)) ? String(Number(p.intimidation)) : "—"));
+tr.appendChild(makeEditableCell(p, "poise", Number.isFinite(Number(p.poise)) ? String(Number(p.poise)) : "—"));
+tr.appendChild(makeEditableCell(p, "style", escapeHtml(style || "—"), true));
 
     tbody.appendChild(tr);
   });
@@ -691,6 +697,11 @@ function validateAndNormalizeValue(field, rawValue) {
     if (normalizedRisky > 10) normalizedRisky = 10;
     return { valid: true, value: normalizedRisky };
   }
+  if (field === "intimidation" || field === "poise") {
+  if (numeric < 0) return { valid: false, message: `${field === "intimidation" ? "Intimidation" : "Poise"} cannot be negative.` };
+  if (numeric > 100) numeric = 100;
+  return { valid: true, value: numeric };
+}
   return { valid: true, value: numeric };
 }
 
@@ -817,6 +828,8 @@ function getSortValue(p, key) {
     case "varianceTilt": return Number(p.varianceTilt) || 0;
     case "momentum":  return Number(p.momentum) || 0;
     case "risky":     return getNormalizedRisky(p.risky);
+    case "intimidation": return Number(p.intimidation) || 0;
+    case "poise":     return Number(p.poise) || 0;
     case "style":     return (p.style || "").toLowerCase();
     case "wins":      return stats.wins || 0;
     case "losses":    return stats.losses || 0;
