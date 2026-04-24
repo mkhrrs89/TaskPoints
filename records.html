@@ -213,8 +213,16 @@ let pageStateCache = null;
 let pageStateCacheDirty = true;
 let pageStateFreshReadCount = 0;
 
+let recordsCache = null;
+let recordsCacheDirty = true;
+let activeIdsCache = null;
+let activeGameHistoryCountCache = 0;
+let totalDaysYouCache = 0;
+const formattedDateCache = new Map();
+
 function invalidatePageStateCache(){
   pageStateCacheDirty = true;
+  recordsCacheDirty = true;
 }
 
 function readPageStateFresh(){
@@ -289,14 +297,19 @@ function dateKey(d){
 }
 
 function fmtDate(key){
-  // key: YYYY-MM-DD
+  if (formattedDateCache.has(key)) return formattedDateCache.get(key);
+
+  let out = key;
   try{
     const [y,m,d] = key.split("-").map(Number);
     const dt = new Date(y, m-1, d);
-    return dt.toLocaleDateString(undefined, { month:"short", day:"2-digit", year:"numeric" });
+    out = dt.toLocaleDateString(undefined, { month:"short", day:"2-digit", year:"numeric" });
   }catch{
-    return key;
+    out = key;
   }
+
+  formattedDateCache.set(key, out);
+  return out;
 }
 
 function esc(s){
@@ -380,6 +393,48 @@ function buildRecords(state){
   return records;
 }
 
+function ensureRecordsCache(state){
+  if (!recordsCacheDirty && Array.isArray(recordsCache)) {
+    return {
+      records: recordsCache,
+      activeIds: activeIdsCache,
+      activeGameHistoryCount: activeGameHistoryCountCache,
+      totalDaysYou: totalDaysYouCache
+    };
+  }
+
+  const activeIds = activePlayerIds(state);
+
+  const records = buildRecords(state);
+
+records.sort((a,b) => {
+  if (b.score !== a.score) return b.score - a.score;
+  return String(b.date).localeCompare(String(a.date));
+});
+  
+  const activeGameHistoryCount = (Array.isArray(state.gameHistory) ? state.gameHistory : [])
+    .filter(entry => entry && activeIds.has(entry.playerId)).length;
+
+  const totalDaysYou = new Set(
+    (Array.isArray(state.completions) ? state.completions : [])
+      .filter(c => c?.completedAtISO)
+      .map(c => dateKey(c.completedAtISO))
+  ).size;
+
+  recordsCache = records;
+  activeIdsCache = activeIds;
+  activeGameHistoryCountCache = activeGameHistoryCount;
+  totalDaysYouCache = totalDaysYou;
+  recordsCacheDirty = false;
+
+  return {
+    records,
+    activeIds,
+    activeGameHistoryCount,
+    totalDaysYou
+  };
+}
+  
 /* -----------------------------
    UI rendering
 ------------------------------*/
@@ -404,18 +459,11 @@ function filteredSortedTop(records){
     out = out.filter(r => (r.playerName || "").toLowerCase().includes(q));
   }
 
-  out.sort((a,b) => {
-    if (b.score !== a.score) return b.score - a.score;
-    // tie-breaker: more recent date first
-    return String(b.date).localeCompare(String(a.date));
-  });
-
   return out.slice(0, ui.topN);
 }
 
 function render(){
-  let state = loadState();
-  state = syncDerivedPointsIfNeeded(state);
+const state = loadState();
   const youName = getYouName(state);
   const intro = $("recordsIntro");
   if (intro) {
@@ -429,27 +477,19 @@ function render(){
   if (includeYouOption) {
     includeYouOption.textContent = `${youName} only`;
   }
-  const all = buildRecords(state);
-  const activeIds = activePlayerIds(state);
-  const activeGameHistoryCount = (Array.isArray(state.gameHistory) ? state.gameHistory : [])
-    .filter(entry => entry && activeIds.has(entry.playerId)).length;
+  
+const { records: all, activeGameHistoryCount, totalDaysYou } = ensureRecordsCache(state);
+const top = filteredSortedTop(all);
 
-  const top = filteredSortedTop(all);
+const tbody = $("tbody");
+const empty = $("emptyState");
+const wrap = $("tableWrap");
+const meta = $("metaLine");
+const sub = $("subtitleLine");
 
-  const tbody = $("tbody");
-  const empty = $("emptyState");
-  const wrap = $("tableWrap");
-  const meta = $("metaLine");
-  const sub = $("subtitleLine");
+meta.textContent = `Saved: ${all.length.toLocaleString()} records · ${youName} days: ${totalDaysYou.toLocaleString()} · Players games: ${activeGameHistoryCount.toLocaleString()}`;
 
-  const totalDaysYou = new Set(
-    (Array.isArray(state.completions) ? state.completions : [])
-      .filter(c => c?.completedAtISO)
-      .map(c => dateKey(c.completedAtISO))
-  ).size;
-
-  meta.textContent = `Saved: ${all.length.toLocaleString()} records · ${youName} days: ${totalDaysYou.toLocaleString()} · Players games: ${activeGameHistoryCount.toLocaleString()}`;
-
+  
   if (!top.length){
     empty.classList.remove("hidden");
     wrap.classList.add("hidden");
@@ -540,8 +580,16 @@ document.addEventListener("click", (e) => {
 /* Controls */
 $("includeSelect").addEventListener("change", (e) => { ui.include = e.target.value; render(); });
 $("topSelect").addEventListener("change", (e) => { ui.topN = Number(e.target.value || 50); render(); });
-$("searchInput").addEventListener("input", (e) => { ui.search = e.target.value || ""; render(); });
-$("refreshBtn").addEventListener("click", render);
+let searchTimer = null;
+$("searchInput").addEventListener("input", (e) => {
+  ui.search = e.target.value || "";
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => render(), 120);
+});
+$("refreshBtn").addEventListener("click", () => {
+  invalidatePageStateCache();
+  render();
+});
 $("copyBtn").addEventListener("click", copyList);
 
 /* Initial */
