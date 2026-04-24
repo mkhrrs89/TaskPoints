@@ -885,7 +885,7 @@ textarea{
   <div>
     <label class="text-xs muted">Active</label>
     <div class="create-player-active-slot mt-1">
-      <input id="playerActive" type="checkbox" class="toggle-switch" checked>
+      <input id="playerActive" type="checkbox" class="toggle-switch">
     </div>
   </div>
 </div>
@@ -3559,7 +3559,7 @@ $("playerPoise").value = "0";
 $("playerStyle").value = "";
     $("playerPrimaryColor").value = DEFAULT_PRIMARY_COLOR;
     $("playerSecondaryColor").value = DEFAULT_SECONDARY_COLOR;
-    $("playerActive").checked = true;
+    $("playerActive").checked = false;
     renderPlayers();
     window.closeCreatePlayerModal?.();
   };
