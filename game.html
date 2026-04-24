@@ -3397,11 +3397,19 @@ const styleInput     = card.querySelector('input[data-field="style"]');
     ? Number(varianceTiltInput.value || 50)
     : (typeof player.varianceTilt === "number" ? player.varianceTilt : 50);
 
-  const momentum = momentumInput
-    ? Number(momentumInput.value || 50)
-    : (typeof player.momentum === "number" ? player.momentum : 50);
+const momentum = momentumInput
+  ? Number(momentumInput.value || 50)
+  : (typeof player.momentum === "number" ? player.momentum : 50);
 
-  // Risky: always treat input as whole number, store as /10
+// Risky: always treat input as whole number, store as /10
+const riskyInputRaw = riskyInput
+  ? Number(riskyInput.value || 30)
+  : (typeof player.risky === "number"
+      ? (player.risky <= 10 ? player.risky * 10 : player.risky)
+      : 30);
+
+const risky = riskyInputRaw / 10;
+
 const intimidation = intimidationInput
   ? Number(intimidationInput.value || 0)
   : (typeof player.intimidation === "number" ? player.intimidation : 0);
@@ -3453,9 +3461,9 @@ player.style    = style || "balanced";
 
         const file = fileInput.files && fileInput.files[0];
         if (file){
-          openImageCropperFromFile(file, (dataUrl) => {
-            applyUpdate(dataUrl);
-          });
+openImageCropperFromFile(file, async (dataUrl) => {
+  await applyUpdate(dataUrl);
+});
         } else {
           applyUpdate(undefined);
         }
