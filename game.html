@@ -383,6 +383,115 @@
   display: flex;
 }
 
+.player-editor-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 140;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 14px;
+  background: rgba(0, 0, 0, 0.82);
+}
+
+.player-editor-modal.is-open {
+  display: flex;
+}
+
+.player-editor-modal-panel {
+  width: min(100%, 520px);
+  max-height: calc(100svh - 28px);
+  overflow: hidden;
+  border-radius: 18px;
+  background: #18181b !important;
+  backdrop-filter: none !important;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  position: relative;
+}
+
+.player-editor-header {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.player-editor-thumb {
+  width: 68px;
+  height: 86px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #000;
+  border: 1px solid rgba(113, 113, 122, 0.7);
+}
+
+.player-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 8px;
+}
+
+.player-editor-field label {
+  display: block;
+  font-size: 11px;
+  line-height: 1.1;
+  margin-bottom: 3px;
+  opacity: 0.76;
+}
+
+.player-editor-field input,
+.player-editor-field textarea {
+  width: 100%;
+  border-radius: 10px;
+  font-size: 13px;
+  padding: 7px 8px;
+}
+
+.player-editor-colors {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.player-editor-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.player-editor-actions button {
+  flex: 1 1 0;
+}
+
+@media (max-width: 640px) {
+  .player-editor-modal {
+    align-items: flex-start;
+    padding:
+      calc(env(safe-area-inset-top, 0px) + 8px)
+      10px
+      calc(env(safe-area-inset-bottom, 0px) + 10px);
+  }
+
+  .player-editor-modal-panel {
+    width: 100%;
+    max-height: calc(100svh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 18px);
+    padding: 10px;
+    gap: 7px;
+  }
+
+  .player-editor-header {
+    grid-template-columns: 60px minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .player-editor-thumb {
+    width: 60px;
+    height: 76px;
+  }
+}
+
 .create-player-modal-panel {
   width: min(100%, 720px);
   max-height: min(90vh, 1000px);
@@ -1051,6 +1160,19 @@ textarea{
       </div>
     </section>
 
+
+  <div id="playerEditorModal" class="player-editor-modal" aria-hidden="true">
+    <div
+      id="playerEditorPanel"
+      class="card player-editor-modal-panel"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="playerEditorTitle"
+      tabindex="-1"
+    >
+      <div id="playerEditorContent"></div>
+    </div>
+  </div>
 
   <!-- Image cropping modal -->
   <div id="cropModal" class="fixed inset-0 bg-black/70 flex items-start sm:items-center justify-center z-50 hidden overflow-y-auto px-3 pt-4 pb-24 sm:px-4 sm:py-6">
@@ -2680,28 +2802,12 @@ if (unresolvedImageIds.length) {
         </p>
       `;
 
-      // NEW: clicking the image in gallery view opens edit mode for that player
+      // clicking the image in gallery view opens modal editor for that player
       const imgArea = card.querySelector(".player-img-inner");
       if (imgArea) {
         imgArea.style.cursor = "pointer";
         imgArea.addEventListener("click", () => {
-          viewMode = "card";
-          editingPlayerId = p.id;          // same as hitting the Edit button
-
-          renderPlayers();
-          if (typeof updateViewToggleUI === "function") {
-            updateViewToggleUI();
-          }
-
-          // After re-render, scroll their card into view
-          requestAnimationFrame(() => {
-            const target = document.querySelector(
-              `.playerCard[data-player-id="${p.id}"]`
-            );
-            if (target) {
-              target.scrollIntoView({ behavior: "smooth", block: "center" });
-            }
-          });
+          openPlayerEditor(p.id);
         });
       }
 
@@ -2875,226 +2981,6 @@ card.innerHTML = `
     const primaryColor = normalizePlayerColor(p.primaryColor, DEFAULT_PRIMARY_COLOR);
     const secondaryColor = normalizePlayerColor(p.secondaryColor, DEFAULT_SECONDARY_COLOR);
 
-    if (editingPlayerId === p.id) {
-      const playerImageUrl = p.imageId ? getCachedImageUrl(p.imageId) : "";
-      // Edit mode
-      card.innerHTML = `
-        <div class="w-full md:w-56 flex flex-col items-center gap-2">
-          <div class="w-full flex items-center justify-center bg-black/40 rounded-2xl overflow-hidden border border-zinc-700">
-            ${
-              playerImageUrl
-                ? `<img src="${escapeHtml(playerImageUrl)}" alt="${escapeHtml(p.name)} photo"
-                       class="max-h-56 w-full object-contain bg-black">`
-                : `<div class="text-xs opacity-70 p-4 text-center">No photo</div>`
-            }
-          </div>
-          ${
-            playerImageUrl
-              ? `
-                <button data-act="recrop" data-id="${p.id}"
-                  class="mt-1 rounded-xl border border-zinc-500 px-3 py-1 text-xs">
-                  Re-crop current photo
-                </button>
-              `
-              : ``
-          }
-        </div>
-        <div class="flex-1 space-y-3">
-          <input
-            data-field="name"
-            class="w-full px-3 py-2 rounded-xl border"
-            value="${escapeHtmlAttr(p.name)}"
-          />
-          <textarea
-            data-field="notes"
-            class="w-full px-3 py-2 rounded-xl border"
-            rows="3"
-          >${escapeHtml(p.notes || "")}</textarea>
-
-          <div class="flex items-center gap-2 text-xs">
-            <input
-              data-field="active"
-              type="checkbox"
-              class="toggle-switch"
-              ${isActive ? "checked" : ""}
-            />
-            <span class="opacity-80">Active</span>
-          </div>
-
-          <!-- New: editable stats -->
-          <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-            <div>
-              <label class="opacity-70 block mb-1">Baseline</label>
-              <input
-                data-field="baseline"
-                type="number"
-                min="0"
-                max="100"
-                class="w-full px-3 py-2 rounded-xl border text-sm"
-                value="${typeof p.baseline === "number" ? p.baseline : 60}"
-              />
-            </div>
-            <div>
-              <label class="opacity-70 block mb-1">Variance</label>
-              <input
-                data-field="variance"
-                type="number"
-                min="0"
-                max="100"
-                class="w-full px-3 py-2 rounded-xl border text-sm"
-                value="${typeof p.variance === "number" ? p.variance : 40}"
-              />
-            </div>
-            <div>
-              <label class="opacity-70 block mb-1">Variance Tilt (0–100)</label>
-              <input
-                data-field="varianceTilt"
-                type="number"
-                min="0"
-                max="100"
-                class="w-full px-3 py-2 rounded-xl border text-sm"
-                value="${Number.isFinite(p.varianceTilt) ? p.varianceTilt : 50}"
-              />
-            </div>
-            <div>
-              <label class="opacity-70 block mb-1">Momentum</label>
-              <input
-                data-field="momentum"
-                type="number"
-                min="0"
-                max="100"
-                class="w-full px-3 py-2 rounded-xl border text-sm"
-                value="${typeof p.momentum === "number" ? p.momentum : 50}"
-              />
-            </div>
-            <div>
-<div>
-  <label class="opacity-70 block mb-1">Risky</label>
-  <input
-    data-field="risky"
-    type="number"
-    min="0"
-    max="100"
-    class="w-full px-3 py-2 rounded-xl border text-sm"
-    value="${
-      typeof p.risky === "number"
-        ? (p.risky <= 10 ? (p.risky * 10).toFixed(0) : p.risky.toFixed(0))
-        : 30
-    }"
-  />
-</div>
-<div>
-  <label class="opacity-70 block mb-1">INT</label>
-  <input
-    data-field="intimidation"
-    type="number"
-    min="0"
-    max="100"
-    class="w-full px-3 py-2 rounded-xl border text-sm"
-    value="${typeof p.intimidation === "number" ? p.intimidation : 0}"
-  />
-</div>
-<div>
-  <label class="opacity-70 block mb-1">Poise</label>
-  <input
-    data-field="poise"
-    type="number"
-    min="0"
-    max="100"
-    class="w-full px-3 py-2 rounded-xl border text-sm"
-    value="${typeof p.poise === "number" ? p.poise : 0}"
-  />
-</div>
-<div class="md:col-span-4">
-              <label class="opacity-70 block mb-1">Style</label>
-              <input
-                data-field="style"
-                class="w-full px-3 py-2 rounded-xl border text-sm"
-                value="${escapeHtmlAttr(p.style || "")}"
-              />
-            </div>
-            <div class="md:col-span-4">
-              <div class="player-edit-color-row text-xs">
-              
-<div class="player-edit-color-control">
-  <label class="opacity-70" for="playerPrimaryColor-${p.id}">Primary color</label>
-  <label
-    class="player-edit-color-pill"
-    aria-label="Edit primary color"
-    title="Primary color ${escapeHtmlAttr(primaryColor)}"
-    style="background:${escapeHtmlAttr(primaryColor)};"
-  >
-    <input
-      id="playerPrimaryColor-${p.id}"
-      data-field="primaryColor"
-      type="color"
-      class="player-edit-color-input"
-      value="${escapeHtmlAttr(primaryColor)}"
-    />
-  </label>
-</div>
-
-<div class="player-edit-color-control">
-  <label class="opacity-70" for="playerSecondaryColor-${p.id}">Secondary color</label>
-  <label
-    class="player-edit-color-pill"
-    aria-label="Edit secondary color"
-    title="Secondary color ${escapeHtmlAttr(secondaryColor)}"
-    style="background:${escapeHtmlAttr(secondaryColor)};"
-  >
-    <input
-      id="playerSecondaryColor-${p.id}"
-      data-field="secondaryColor"
-      type="color"
-      class="player-edit-color-input"
-      value="${escapeHtmlAttr(secondaryColor)}"
-    />
-  </label>
-</div>
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <label class="text-xs opacity-70 block mb-1">Change photo (optional)</label>
-            <input
-              data-field="image"
-              type="file"
-              accept="image/png,image/jpeg,image/jpg,image/gif"
-              class="w-full text-sm"
-            />
-          </div>
-
-          <div class="flex flex-wrap gap-2">
-            <button data-act="save" data-id="${p.id}"
-              class="rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-sm px-3 py-1.5">
-              Save
-            </button>
-            <button data-act="cancel" data-id="${p.id}"
-              class="rounded-xl border text-sm px-3 py-1.5">
-              Cancel
-            </button>
-          </div>
-
-          <div class="flex flex-wrap gap-2 mt-3">
-            <button class="rounded-xl border px-3 py-1.5 text-sm"
-                    data-act="clear-photo"
-                    data-id="${p.id}">
-              Remove photo
-            </button>
-
-            <button class="rounded-xl border px-3 py-1.5 text-sm bg-red-600 text-white"
-                    data-act="delete"
-                    data-id="${p.id}">
-              Delete
-            </button>
-          </div>
-
-
-
-        </div>
-      `;
-    } else {
       // View mode
 
       const stats = historyStats.get(p.id) || { games: 0, totalPoints: 0, scores: [] };
@@ -3168,7 +3054,6 @@ card.innerHTML = `
     </div>
   </div>
 `;
-    }
 
     targetContainer.appendChild(card);
   };
@@ -3205,8 +3090,164 @@ card.innerHTML = `
     btn.addEventListener("click", handlePlayerAction);
   });
   wirePlayerColorEditors(container);
+  syncPlayerEditorModalState();
 
 }
+function buildPlayerEditorContent(player) {
+  const isActive = isPlayerActive(player);
+  const primaryColor = normalizePlayerColor(player.primaryColor, DEFAULT_PRIMARY_COLOR);
+  const secondaryColor = normalizePlayerColor(player.secondaryColor, DEFAULT_SECONDARY_COLOR);
+  const playerImageUrl = player.imageId ? getCachedImageUrl(player.imageId) : "";
+
+  return `
+    <div class="flex items-start justify-between gap-2">
+      <div class="text-[11px] uppercase tracking-wide opacity-60">Player editor</div>
+      <button type="button" data-act="cancel" data-id="${player.id}" class="rounded-lg border border-zinc-500 px-2 py-1 text-xs">✕</button>
+    </div>
+    <div class="player-editor-header">
+      <div class="player-editor-thumb">
+        ${
+          playerImageUrl
+            ? `<img src="${escapeHtml(playerImageUrl)}" alt="${escapeHtml(player.name || "Player")} photo" class="w-full h-full object-cover">`
+            : `<div class="text-[10px] opacity-70 h-full w-full flex items-center justify-center">No photo</div>`
+        }
+      </div>
+      <div class="min-w-0">
+        <h3 id="playerEditorTitle" class="font-semibold text-sm leading-tight truncate">${escapeHtml(player.name || "Player")}</h3>
+        <div class="player-editor-field mt-1">
+          <label>Name</label>
+          <input data-field="name" value="${escapeHtmlAttr(player.name || "")}" />
+        </div>
+        <label class="flex items-center gap-2 text-xs mt-1">
+          <input data-field="active" type="checkbox" class="toggle-switch" ${isActive ? "checked" : ""}/>
+          <span class="opacity-80">Active</span>
+        </label>
+      </div>
+    </div>
+
+    <div class="player-editor-grid">
+      <div class="player-editor-field">
+        <label>Baseline</label>
+        <input data-field="baseline" type="number" min="0" max="100" value="${typeof player.baseline === "number" ? player.baseline : 60}" />
+      </div>
+      <div class="player-editor-field">
+        <label>Variance</label>
+        <input data-field="variance" type="number" min="0" max="100" value="${typeof player.variance === "number" ? player.variance : 40}" />
+      </div>
+      <div class="player-editor-field">
+        <label>Variance Tilt</label>
+        <input data-field="varianceTilt" type="number" min="0" max="100" value="${Number.isFinite(player.varianceTilt) ? player.varianceTilt : 50}" />
+      </div>
+      <div class="player-editor-field">
+        <label>Momentum</label>
+        <input data-field="momentum" type="number" min="0" max="100" value="${typeof player.momentum === "number" ? player.momentum : 50}" />
+      </div>
+      <div class="player-editor-field">
+        <label>Risky</label>
+        <input data-field="risky" type="number" min="0" max="100" value="${typeof player.risky === "number" ? (player.risky <= 10 ? (player.risky * 10).toFixed(0) : player.risky.toFixed(0)) : 30}" />
+      </div>
+      <div class="player-editor-field">
+        <label>INT</label>
+        <input data-field="intimidation" type="number" min="0" max="100" value="${typeof player.intimidation === "number" ? player.intimidation : 0}" />
+      </div>
+      <div class="player-editor-field">
+        <label>Poise</label>
+        <input data-field="poise" type="number" min="0" max="100" value="${typeof player.poise === "number" ? player.poise : 0}" />
+      </div>
+      <div class="player-editor-field">
+        <label>Style</label>
+        <input data-field="style" value="${escapeHtmlAttr(player.style || "")}" />
+      </div>
+    </div>
+
+    <div class="player-editor-colors">
+      <div class="player-edit-color-control text-xs">
+        <label class="opacity-70" for="modalPrimaryColor-${player.id}">Primary</label>
+        <label class="player-edit-color-pill" style="background:${escapeHtmlAttr(primaryColor)};" title="Primary color ${escapeHtmlAttr(primaryColor)}">
+          <input id="modalPrimaryColor-${player.id}" data-field="primaryColor" type="color" class="player-edit-color-input" value="${escapeHtmlAttr(primaryColor)}" />
+        </label>
+      </div>
+      <div class="player-edit-color-control text-xs">
+        <label class="opacity-70" for="modalSecondaryColor-${player.id}">Secondary</label>
+        <label class="player-edit-color-pill" style="background:${escapeHtmlAttr(secondaryColor)};" title="Secondary color ${escapeHtmlAttr(secondaryColor)}">
+          <input id="modalSecondaryColor-${player.id}" data-field="secondaryColor" type="color" class="player-edit-color-input" value="${escapeHtmlAttr(secondaryColor)}" />
+        </label>
+      </div>
+    </div>
+
+    <div class="player-editor-field">
+      <label>Change photo (optional)</label>
+      <input data-field="image" type="file" accept="image/png,image/jpeg,image/jpg,image/gif" class="text-xs" />
+      ${playerImageUrl ? `<button data-act="recrop" data-id="${player.id}" class="mt-1 rounded-lg border border-zinc-500 px-2 py-1 text-xs">Re-crop current photo</button>` : ``}
+    </div>
+
+    <div class="player-editor-field">
+      <label>Notes</label>
+      <textarea data-field="notes" rows="2">${escapeHtml(player.notes || "")}</textarea>
+    </div>
+
+    <div class="player-editor-actions">
+      <button data-act="save" data-id="${player.id}" class="rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-sm px-3 py-1.5">Save</button>
+      <button data-act="cancel" data-id="${player.id}" class="rounded-xl border text-sm px-3 py-1.5">Cancel</button>
+    </div>
+
+    <div class="flex gap-2">
+      <button data-act="clear-photo" data-id="${player.id}" class="rounded-xl border px-3 py-1.5 text-xs">Remove photo</button>
+      <button data-act="delete" data-id="${player.id}" class="rounded-xl border px-3 py-1.5 text-xs bg-red-600 text-white">Delete</button>
+    </div>
+  `;
+}
+
+function syncPlayerEditorModalState() {
+  const modal = $("playerEditorModal");
+  if (!modal) return;
+  if (!editingPlayerId || editingPlayerId === "YOU") {
+    const wasOpen = modal.classList.contains("is-open");
+    modal.classList.remove("is-open");
+    modal.setAttribute("aria-hidden", "true");
+    if (wasOpen) window.unlockScrollForModal?.();
+  }
+}
+
+function openPlayerEditor(playerId) {
+  const player = state.players.find((p) => p.id === playerId);
+  const modal = $("playerEditorModal");
+  const panel = $("playerEditorPanel");
+  const content = $("playerEditorContent");
+  if (!player || !modal || !panel || !content) return;
+
+  editingPlayerId = playerId;
+  content.innerHTML = buildPlayerEditorContent(player);
+  content.querySelectorAll("button[data-act]").forEach((btn) => {
+    btn.addEventListener("click", handlePlayerAction);
+  });
+  wirePlayerColorEditors(content);
+  modal.classList.add("is-open");
+  modal.setAttribute("aria-hidden", "false");
+  window.lockScrollForModal?.();
+  window.requestAnimationFrame(() => {
+    content.querySelector('input[data-field="name"]')?.focus?.({ preventScroll: true });
+  });
+}
+
+function closePlayerEditor({ keepEditingState = false } = {}) {
+  if (cropState) return;
+  const modal = $("playerEditorModal");
+  if (!modal) return;
+  modal.classList.remove("is-open");
+  modal.setAttribute("aria-hidden", "true");
+  if (!keepEditingState) editingPlayerId = null;
+  window.unlockScrollForModal?.();
+}
+
+function resolveEditRoot(btn, id) {
+  const modal = $("playerEditorModal");
+  if (id && id !== "YOU" && modal?.classList.contains("is-open") && editingPlayerId === id) {
+    return $("playerEditorContent");
+  }
+  return btn.closest(".playerCard");
+}
+
 function wirePlayerColorEditors(root = document) {
   root.querySelectorAll(".player-edit-color-input").forEach((input) => {
     if (input.dataset.boundColor === "1") return;
@@ -3256,14 +3297,22 @@ function wirePlayerColorEditors(root = document) {
       if (!id || !act) return;
 
       if (act === "edit"){
-        editingPlayerId = id;
-        renderPlayers();
+        if (id === "YOU") {
+          editingPlayerId = id;
+          renderPlayers();
+        } else {
+          openPlayerEditor(id);
+        }
         return;
       }
 
       if (act === "cancel"){
-        editingPlayerId = null;
-        renderPlayers();
+        if (id !== "YOU" && $("playerEditorModal")?.classList.contains("is-open")) {
+          closePlayerEditor();
+        } else {
+          editingPlayerId = null;
+          renderPlayers();
+        }
         return;
       }
 
@@ -3305,6 +3354,9 @@ function wirePlayerColorEditors(root = document) {
             player.imageId = nextImageId || "";
             state = saveState(state);
           }
+          if (editingPlayerId === id) {
+            openPlayerEditor(id);
+          }
           renderPlayers();
         });
         return;
@@ -3319,6 +3371,9 @@ function wirePlayerColorEditors(root = document) {
         await deleteImageById(player.imageId);
         player.imageId = "";
         state = saveState(state);
+        if (editingPlayerId === id) {
+          openPlayerEditor(id);
+        }
         renderPlayers();
         return;
       } 
@@ -3355,7 +3410,7 @@ if (act === "clear-you-photo") {
 
 
       if (act === "save"){
-        const card = btn.closest(".playerCard");
+        const card = resolveEditRoot(btn, id);
         if (!card) return;
         const nameInput = card.querySelector('input[data-field="name"]');
         const notesInput = card.querySelector('textarea[data-field="notes"]');
@@ -3454,6 +3509,9 @@ player.style    = style || "balanced";
       refreshScheduleAfterRosterChange();
     }
     state = saveState(state);
+    if (id !== "YOU") {
+      closePlayerEditor({ keepEditingState: true });
+    }
     editingPlayerId = null;
     renderPlayers();
   };
@@ -3710,6 +3768,19 @@ updateViewToggleUI();
 updateGroupToggleUI();
 
 // ----- Create Player modal -----
+function setupPlayerEditorModal() {
+  const modal = $("playerEditorModal");
+  const panel = $("playerEditorPanel");
+  if (!modal || modal.dataset.init === "true") return;
+
+  modal.addEventListener("click", () => closePlayerEditor());
+  panel?.addEventListener("click", (event) => event.stopPropagation());
+  modal.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closePlayerEditor();
+  });
+  modal.dataset.init = "true";
+}
+
 function setupCreatePlayerModal() {
   const modal = $("createPlayerModal");
   const openBtn = $("openCreatePlayerModalBtn");
@@ -3845,6 +3916,7 @@ function setupMobileCollapsibles() {
 }
 
 
+setupPlayerEditorModal();
 setupCreatePlayerModal();
 setupSimulationConfirmModal();
 setupMobileCollapsibles();
