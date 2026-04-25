@@ -88,7 +88,7 @@
       position:sticky;
       left:0;
       z-index:1;
-      background:rgba(37,76,82,0.12);
+      background:rgb(37,76,82);
       text-align:left;
       min-width:var(--matrix-name-col-width);
       width:var(--matrix-name-col-width);
@@ -106,7 +106,7 @@
       width:var(--matrix-name-col-width);
       max-width:var(--matrix-name-col-width);
       text-align:left;
-      background:rgba(37,76,82,0.22);
+      background:rgb(37,76,82);
       font-size:11px;
       text-transform:uppercase;
       letter-spacing:0.06em;
@@ -120,10 +120,13 @@
       text-overflow:ellipsis;
     }
 
-    .h2h-matrix td.diagonal,
-    .h2h-matrix td.empty{
+    .h2h-matrix td.diagonal{
       color:rgba(148,163,184,0.9);
       background:rgba(148,163,184,0.1);
+    }
+
+    .h2h-matrix td.empty{
+      background:transparent;
     }
 
     @media (prefers-color-scheme: dark){
@@ -131,10 +134,10 @@
       .h2h-matrix th,
       .h2h-matrix td{ border-color: rgba(51,65,85,0.7); }
       .h2h-matrix thead th{ background: rgba(30,102,109,0.38); }
-      .h2h-matrix .row-header{ background: rgba(30,102,109,0.32); }
-      .h2h-matrix .corner-cell{ background: rgba(30,102,109,0.45); }
-      .h2h-matrix td.diagonal,
-      .h2h-matrix td.empty{ background: rgba(15,23,42,0.6); }
+      .h2h-matrix .row-header{ background: rgb(30,102,109); }
+      .h2h-matrix .corner-cell{ background: rgb(30,102,109); }
+      .h2h-matrix td.diagonal{ background: rgba(15,23,42,0.6); }
+      .h2h-matrix td.empty{ background: transparent; }
     }
 
     @media (max-width: 640px){
