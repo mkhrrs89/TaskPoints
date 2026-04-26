@@ -2267,6 +2267,96 @@ function buildDailyBreakdowns(state){
       || (matchup.dateISO ? dateKey(matchup.dateISO) : '');
   }
 
+  function addDaysToDateKey(baseKey, days = 1){
+    const baseDate = fromKey(baseKey);
+    if (!baseDate || isNaN(baseDate.getTime())) return '';
+    const next = new Date(baseDate);
+    next.setDate(next.getDate() + (Number(days) || 0));
+    return dateKey(next);
+  }
+
+  function normalizePairIds(aId, bId){
+    const a = String(aId || '');
+    const b = String(bId || '');
+    return a <= b ? [a, b] : [b, a];
+  }
+
+  function auditTodayScheduleVsMatchups(state, options = {}){
+    const normalized = options.normalized ? (state || {}) : normalizeState(state || {});
+    const today = options.todayKey || todayKey();
+
+    const scheduleDay = (normalized.schedule || []).find((day) => (
+      day && (day.date === today || day.dateKey === today)
+    ));
+    const schedulePairsRaw = Array.isArray(scheduleDay?.matchups) ? scheduleDay.matchups : [];
+    const matchupPairsRaw = (normalized.matchups || []).filter((m) => matchupDateKey(m) === today);
+
+    const toPairKey = (aId, bId) => normalizePairIds(aId, bId).join('|');
+    const toPairList = (pairs) => pairs.map((m) => {
+      const [playerAId, playerBId] = normalizePairIds(m?.playerAId, m?.playerBId);
+      return { playerAId, playerBId, key: toPairKey(playerAId, playerBId) };
+    });
+
+    const schedulePairs = toPairList(schedulePairsRaw);
+    const matchupPairs = toPairList(matchupPairsRaw);
+
+    const countKeys = (pairs) => {
+      const map = new Map();
+      pairs.forEach((pair) => {
+        map.set(pair.key, (map.get(pair.key) || 0) + 1);
+      });
+      return map;
+    };
+
+    const scheduleCounts = countKeys(schedulePairs);
+    const matchupCounts = countKeys(matchupPairs);
+
+    const toDuplicateList = (counts) => Array.from(counts.entries())
+      .filter(([, count]) => count > 1)
+      .map(([key, count]) => {
+        const [playerAId, playerBId] = key.split('|');
+        return { playerAId, playerBId, count };
+      });
+
+    const allKeys = new Set([
+      ...Array.from(scheduleCounts.keys()),
+      ...Array.from(matchupCounts.keys())
+    ]);
+
+    const missingInSchedule = [];
+    const missingInMatchups = [];
+
+    allKeys.forEach((key) => {
+      const scheduleCount = scheduleCounts.get(key) || 0;
+      const matchupCount = matchupCounts.get(key) || 0;
+      const [playerAId, playerBId] = key.split('|');
+      if (scheduleCount > matchupCount) {
+        missingInMatchups.push({ playerAId, playerBId, count: scheduleCount - matchupCount });
+      } else if (matchupCount > scheduleCount) {
+        missingInSchedule.push({ playerAId, playerBId, count: matchupCount - scheduleCount });
+      }
+    });
+
+    const duplicateSchedulePairs = toDuplicateList(scheduleCounts);
+    const duplicateMatchupPairs = toDuplicateList(matchupCounts);
+    const countsMatch = schedulePairs.length === matchupPairs.length;
+
+    return {
+      ok: countsMatch
+        && !missingInSchedule.length
+        && !missingInMatchups.length
+        && !duplicateSchedulePairs.length
+        && !duplicateMatchupPairs.length,
+      todayKey: today,
+      schedulePairs,
+      matchupPairs,
+      missingInSchedule,
+      missingInMatchups,
+      duplicateSchedulePairs,
+      duplicateMatchupPairs
+    };
+  }
+
   function isMatchupRevealed(dateKeyStr, options = {}){
     if (!dateKeyStr) return false;
     const includeToday = options.includeToday === true;
@@ -2879,6 +2969,7 @@ function computeCanonicalMatchupStats(state, playerId, options = {}) {
     restoreBackupSlot,
     dateKey,
     todayKey,
+    addDaysToDateKey,
     fromKey,
     niceDate,
     monthKey,
@@ -2922,6 +3013,7 @@ function computeCanonicalMatchupStats(state, playerId, options = {}) {
     computeCanonicalMatchupStats,
     buildDaySnapshot,
     computeDayTotals,
+    auditTodayScheduleVsMatchups,
     youDailyTotalsWithInertia,
     syncYouMatchups,
     isMatchupRevealed,

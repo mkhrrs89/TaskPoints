@@ -107,6 +107,10 @@
       <p class="text-sm muted" id="scheduleIntro">
         The next seven days of scheduled matchups, including you. The list updates automatically whenever players are added or removed.
       </p>
+      <div class="mt-3 flex flex-wrap items-center gap-2">
+        <button id="auditTodayScheduleBtn" type="button" class="btn btn-ghost btn-toolbar">Audit Today Schedule</button>
+        <span id="auditTodayScheduleStatus" class="text-xs muted"></span>
+      </div>
     </section>
 
     <section id="scheduleContainer" class="space-y-4"></section>
@@ -289,6 +293,17 @@ function saveState(nextState) {
       return ids.slice().sort().join("|");
     }
 
+    function tomorrowDateKey(baseKey = (window.TaskPointsCore?.todayKey ? TaskPointsCore.todayKey() : dateKey(new Date()))) {
+      if (window.TaskPointsCore?.addDaysToDateKey) {
+        return TaskPointsCore.addDaysToDateKey(baseKey, 1);
+      }
+      const baseDate = new Date(baseKey);
+      if (!baseDate || Number.isNaN(baseDate.getTime())) return "";
+      baseDate.setHours(0, 0, 0, 0);
+      baseDate.setDate(baseDate.getDate() + 1);
+      return dateKey(baseDate);
+    }
+
     function buildDailySchedule(dateKeyStr, participantIds, signature) {
       const pool = participantIds.slice();
       shuffle(pool);
@@ -336,24 +351,18 @@ function saveState(nextState) {
       };
     }
 
-    function ensureUpcomingSchedule(state, days = 7) {
+    function ensureUpcomingSchedule(state, days = 7, startDateKey = null, forceRebuildFromStart = false) {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       const todayKey = dateKey(today);
+      const regenFromKey = startDateKey || todayKey;
 
       const participants = getAllParticipantIds(state);
       const signature = participantSignature(participants);
-      const participantSet = new Set(participants);
-
       let schedule = Array.isArray(state.schedule)
-        ? state.schedule.filter((d) => d && d.date >= todayKey)
+        ? state.schedule.filter((d) => d && typeof d.date === "string")
         : [];
       let changed = false;
-
-      if (!schedule.every((d) => d.participantSignature === signature)) {
-        schedule = [];
-        changed = true;
-      }
 
       const neededDates = [];
       for (let i = 0; i < days; i++) {
@@ -361,6 +370,7 @@ function saveState(nextState) {
         dt.setDate(dt.getDate() + i);
         neededDates.push(dateKey(dt));
       }
+      const neededDateSet = new Set(neededDates);
 
       const byDate = new Map();
       schedule.forEach((d) => {
@@ -370,30 +380,64 @@ function saveState(nextState) {
       const existingMatchupsByDate = new Map();
       (state.matchups || []).forEach((m) => {
         if (!m) return;
-        const aId = m.playerAId;
-        const bId = m.playerBId;
-        if (!participantSet.has(aId) && !participantSet.has(bId)) return;
         const key = matchupDateKey(m);
         if (!key) return;
         if (!existingMatchupsByDate.has(key)) existingMatchupsByDate.set(key, []);
-        existingMatchupsByDate.get(key).push({ playerAId: aId, playerBId: bId });
+        existingMatchupsByDate.get(key).push({ playerAId: m.playerAId, playerBId: m.playerBId });
       });
 
       const rebuilt = neededDates.map((key) => {
         const existing = byDate.get(key);
-        if (existing) return existing;
-        const syncedFromMatchups = existingMatchupsByDate.get(key);
+
+        if (existing && key < regenFromKey) return existing;
+
+        if (key === todayKey && key < regenFromKey) {
+          const todaysMatchups = existingMatchupsByDate.get(todayKey);
+          if (todaysMatchups && todaysMatchups.length) {
+            changed = true;
+            return buildDayFromExisting(todayKey, participants, signature, todaysMatchups);
+          }
+        }
+
+        if (key < regenFromKey) {
+          if (existing) return existing;
+          changed = true;
+          return buildDailySchedule(key, participants, signature);
+        }
+
+        if (!forceRebuildFromStart && existing && existing.participantSignature === signature) {
+          return existing;
+        }
+
+        const syncedFromMatchups = key === todayKey ? existingMatchupsByDate.get(key) : null;
         if (syncedFromMatchups && syncedFromMatchups.length) {
+          changed = true;
           return buildDayFromExisting(key, participants, signature, syncedFromMatchups);
         }
+
         changed = true;
         return buildDailySchedule(key, participants, signature);
       });
 
-      if (rebuilt.length !== schedule.length) changed = true;
-
-      state.schedule = rebuilt;
+      const outsideWindow = schedule.filter((day) => !neededDateSet.has(day.date));
+      state.schedule = [...outsideWindow, ...rebuilt]
+        .sort((a, b) => String(a.date).localeCompare(String(b.date)));
       return changed;
+    }
+
+    function runTodayScheduleAudit() {
+      const auditState = loadState();
+      const result = window.TaskPointsCore?.auditTodayScheduleVsMatchups
+        ? TaskPointsCore.auditTodayScheduleVsMatchups(auditState)
+        : { ok: false, todayKey: dateKey(new Date()), error: "TaskPointsCore.auditTodayScheduleVsMatchups unavailable." };
+      const statusEl = $("auditTodayScheduleStatus");
+      if (statusEl) {
+        statusEl.textContent = result.ok
+          ? `OK — Schedule and Matchups agree for ${result.todayKey}.`
+          : `Mismatch detected for ${result.todayKey} (see console).`;
+      }
+      console.log("[TaskPoints] Today schedule audit", result);
+      return result;
     }
 
     function ordinal(n) {
@@ -419,7 +463,7 @@ function formatLongDate(key) {
 
     function renderSchedule() {
       state = syncStateWithMatchups(loadState(), { persist: false, pathName: 'renderSchedule:syncStateWithMatchups' });
-      const changed = ensureUpcomingSchedule(state);
+      const changed = ensureUpcomingSchedule(state, 7, tomorrowDateKey(), false);
       if (changed) logBootReadOnlySkip('renderSchedule:ensureUpcomingSchedule');
 
       const intro = $("scheduleIntro");
@@ -493,6 +537,13 @@ function formatLongDate(key) {
     }
 
     document.addEventListener("DOMContentLoaded", renderSchedule);
+    document.addEventListener("DOMContentLoaded", () => {
+      const auditBtn = $("auditTodayScheduleBtn");
+      if (auditBtn) {
+        auditBtn.addEventListener("click", runTodayScheduleAudit);
+      }
+      window.auditTodaySchedule = runTodayScheduleAudit;
+    });
     window.addEventListener("storage", (e) => {
       if (e.key === STORAGE_KEY) {
         renderSchedule();
