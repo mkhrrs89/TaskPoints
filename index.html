@@ -194,6 +194,85 @@ Nothing visible on the page is built here. === -->
     .weekSwapDisabled {
       pointer-events: none;
     }
+
+    .homeGraphWidget {
+      width: 100%;
+      min-height: 120px;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
+    .homeGraphViewport {
+      width: 100%;
+      overflow-x: auto;
+      overflow-y: hidden;
+      scroll-snap-type: x mandatory;
+      scroll-behavior: smooth;
+      -webkit-overflow-scrolling: touch;
+      border-radius: 0.75rem;
+      touch-action: pan-x pan-y;
+      scrollbar-width: none;
+    }
+
+    .homeGraphViewport::-webkit-scrollbar {
+      display: none;
+    }
+
+    .homeGraphTrack {
+      display: flex;
+      width: 100%;
+    }
+
+    .homeGraphPanel {
+      min-width: 100%;
+      scroll-snap-align: start;
+      height: 96px;
+      position: relative;
+      background: transparent;
+      border: 0;
+      padding: 0;
+    }
+
+    .homeGraphTitle {
+      position: absolute;
+      top: 4px;
+      left: 8px;
+      font-size: 10px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: rgba(226,232,240,0.75);
+      pointer-events: none;
+    }
+
+    .homeGraphHint {
+      position: absolute;
+      bottom: 6px;
+      right: 8px;
+      font-size: 10px;
+      color: rgba(226,232,240,0.75);
+      pointer-events: none;
+    }
+
+    .homeGraphDots {
+      display: flex;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    .homeGraphDot {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: rgba(148,163,184,0.45);
+      transition: background-color .2s ease, transform .2s ease;
+    }
+
+    .homeGraphDot.is-active {
+      background: rgba(95,196,207,0.95);
+      transform: scale(1.12);
+    }
   </style>
   <link rel="preload" href="toolbar.js" as="script">
   <script src="toolbar.js" defer></script>
@@ -492,7 +571,31 @@ Nothing visible on the page is built here. === -->
       
       <!-- DAILY LINE GRAPH -->
 <div class="glass flex items-end lg:col-span-2">
-  <canvas id="dailyTrend" class="w-full h-24"></canvas>
+  <div id="homeGraphWidget" class="homeGraphWidget">
+    <div id="homeGraphViewport" class="homeGraphViewport" aria-label="Home graph stack">
+      <div class="homeGraphTrack">
+        <div class="homeGraphPanel" data-graph-panel="0">
+          <div class="homeGraphTitle">Score Trend</div>
+          <canvas id="dailyTrend" class="w-full h-24"></canvas>
+        </div>
+        <button
+          id="weightGraphPanel"
+          type="button"
+          class="homeGraphPanel text-left"
+          data-graph-panel="1"
+          aria-label="Weight graph. Tap to log weight."
+        >
+          <div class="homeGraphTitle">Weight</div>
+          <canvas id="weightTrend" class="w-full h-24"></canvas>
+          <span id="weightGraphHint" class="homeGraphHint hidden">Tap to log weight</span>
+        </button>
+      </div>
+    </div>
+    <div id="homeGraphDots" class="homeGraphDots" aria-hidden="true">
+      <span class="homeGraphDot is-active"></span>
+      <span class="homeGraphDot"></span>
+    </div>
+  </div>
 </div>
     </div>
     <!--------------------------- SECOND ROW (END) --------------------------------->
@@ -2311,6 +2414,7 @@ function load() {
         players:      [],
         habits:       [],
         flexActions:  [],
+        weightHistory: [],
         gameHistory:  [],
         matchups:     [],
         schedule:     [],
@@ -2336,6 +2440,16 @@ function load() {
       players:      Array.isArray(p.players)      ? p.players      : [],
       habits:       Array.isArray(p.habits)       ? p.habits       : [],
       flexActions:  Array.isArray(p.flexActions)  ? p.flexActions  : [],
+      weightHistory: Array.isArray(p.weightHistory)
+        ? p.weightHistory
+            .map((entry) => {
+              const date = typeof entry?.date === 'string' ? entry.date.trim() : '';
+              const weight = Number(entry?.weight);
+              if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(weight)) return null;
+              return { date, weight };
+            })
+            .filter(Boolean)
+        : [],
       gameHistory:  Array.isArray(p.gameHistory)  ? p.gameHistory  : [],
       matchups:     Array.isArray(p.matchups)     ? p.matchups     : [],
       schedule:     Array.isArray(p.schedule)     ? p.schedule     : [],
@@ -2358,6 +2472,7 @@ function load() {
       players:      [],
       habits:       [],
       flexActions:  [],
+      weightHistory: [],
       gameHistory:  [],
       matchups:     [],
       schedule:     [],
@@ -3295,6 +3410,16 @@ function normalizeState(s) {
     players:     Array.isArray(s.players)     ? s.players     : [],
     habits:      Array.isArray(s.habits)      ? s.habits.map(normalizeHabit)      : [],
     flexActions: Array.isArray(s.flexActions) ? s.flexActions : [],
+    weightHistory: Array.isArray(s.weightHistory)
+      ? s.weightHistory
+          .map((entry) => {
+            const date = typeof entry?.date === 'string' ? entry.date.trim() : '';
+            const weight = Number(entry?.weight);
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(weight)) return null;
+            return { date, weight };
+          })
+          .filter(Boolean)
+      : [],
     gameHistory: Array.isArray(s.gameHistory) ? s.gameHistory : [],
     matchups:    Array.isArray(s.matchups)    ? s.matchups    : [],
     schedule:    Array.isArray(s.schedule)    ? s.schedule    : [],
@@ -4004,6 +4129,8 @@ function renderStats(){
 
       // Draw daily trend line
       tpPerfTime('renderStats: drawDailyTrend', () => drawDailyTrend(dailyTotals));
+      tpPerfTime('renderStats: drawWeightTrend', () => drawWeightTrend(getWeightHistorySorted()));
+      bindHomeGraphInteractions();
 
       // Today / this week / this month keys
       const today = new Date();
@@ -4516,6 +4643,102 @@ if (titleStr.startsWith('Sleep Score (')) {
 }
 
 
+let homeGraphPanelIndex = 0;
+let homeGraphScrollRaf = null;
+let homeGraphPointerDownAt = null;
+
+function getWeightHistorySorted() {
+  const list = Array.isArray(state?.weightHistory) ? state.weightHistory : [];
+  return list
+    .map((entry) => {
+      const date = typeof entry?.date === 'string' ? entry.date.trim() : '';
+      const weight = Number(entry?.weight);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(weight)) return null;
+      return { date, weight };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function updateHomeGraphDots(nextIndex = 0) {
+  homeGraphPanelIndex = nextIndex === 1 ? 1 : 0;
+  const dots = document.querySelectorAll('#homeGraphDots .homeGraphDot');
+  dots.forEach((dot, idx) => dot.classList.toggle('is-active', idx === homeGraphPanelIndex));
+}
+
+function bindHomeGraphInteractions() {
+  const viewport = $('homeGraphViewport');
+  const weightPanel = $('weightGraphPanel');
+  if (!viewport || !weightPanel || viewport.dataset.bound === '1') return;
+  viewport.dataset.bound = '1';
+
+  viewport.addEventListener('scroll', () => {
+    if (homeGraphScrollRaf) return;
+    homeGraphScrollRaf = window.requestAnimationFrame(() => {
+      homeGraphScrollRaf = null;
+      const width = viewport.clientWidth || 1;
+      const nextIndex = Math.round(viewport.scrollLeft / width);
+      updateHomeGraphDots(nextIndex);
+    });
+  }, { passive: true });
+
+  weightPanel.addEventListener('pointerdown', (event) => {
+    homeGraphPointerDownAt = { x: event.clientX, y: event.clientY };
+  }, { passive: true });
+
+  weightPanel.addEventListener('click', (event) => {
+    const start = homeGraphPointerDownAt;
+    homeGraphPointerDownAt = null;
+    if (start) {
+      const deltaX = Math.abs(event.clientX - start.x);
+      const deltaY = Math.abs(event.clientY - start.y);
+      if (deltaX > 10 || deltaY > 10) return;
+    }
+    openWeightModal();
+  });
+}
+
+function openWeightModal() {
+  const modal = $('weightEntryModal');
+  const dateInput = $('weightDateInput');
+  const weightInput = $('weightValueInput');
+  if (!modal || !dateInput || !weightInput) return;
+  dateInput.value = dateKey(new Date());
+  weightInput.value = '';
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+  window.lockScrollForModal?.();
+  setTimeout(() => dateInput.focus(), 0);
+}
+
+function closeWeightModal() {
+  const modal = $('weightEntryModal');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+  window.unlockScrollForModal?.();
+}
+
+function submitWeightEntry() {
+  const dateInput = $('weightDateInput');
+  const weightInput = $('weightValueInput');
+  if (!dateInput || !weightInput) return;
+  const date = String(dateInput.value || '').trim();
+  const weight = Number(weightInput.value);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return alert('Please enter a valid date.');
+  if (!Number.isFinite(weight)) return alert('Please enter a valid weight.');
+
+  const history = getWeightHistorySorted();
+  const next = history.filter((entry) => entry.date !== date);
+  next.push({ date, weight });
+  next.sort((a, b) => a.date.localeCompare(b.date));
+
+  state.weightHistory = next;
+  save();
+  drawWeightTrend(next);
+  closeWeightModal();
+}
+
 function drawDailyTrend(dailyTotals){
   const canvas = $('dailyTrend');
   if (!canvas || !canvas.getContext) return;
@@ -4645,6 +4868,71 @@ points.forEach((pt) => {
 });
 
 ctx.restore();
+}
+
+function drawWeightTrend(weightHistoryInput){
+  const canvas = $('weightTrend');
+  const hint = $('weightGraphHint');
+  if (!canvas || !canvas.getContext) return;
+
+  const ctx = canvas.getContext('2d');
+  const width  = canvas.clientWidth  || 320;
+  const height = canvas.clientHeight || 80;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width  = Math.round(width  * dpr);
+  canvas.height = Math.round(height * dpr);
+  canvas.style.width  = width  + 'px';
+  canvas.style.height = height + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+
+  const entries = Array.isArray(weightHistoryInput) ? weightHistoryInput : getWeightHistorySorted();
+  const n = entries.length;
+
+  if (!n) {
+    if (hint) hint.classList.remove('hidden');
+    ctx.strokeStyle = 'rgba(148,163,184,0.3)';
+    ctx.beginPath();
+    ctx.moveTo(0, height - 4);
+    ctx.lineTo(width, height - 4);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(226,232,240,0.8)';
+    ctx.font = '12px system-ui, -apple-system, sans-serif';
+    ctx.fillText('No weight entries yet', 8, 24);
+    return;
+  }
+
+  if (hint) hint.classList.add('hidden');
+  const minVal = Math.min(...entries.map((r) => r.weight));
+  const maxVal = Math.max(...entries.map((r) => r.weight));
+  const range = (maxVal - minVal) || 1;
+  const paddingX = 6;
+  const paddingY = 6;
+  const w = width - paddingX * 2;
+  const h = height - paddingY * 2;
+
+  const points = entries.map((row, i) => {
+    const x = paddingX + (n === 1 ? w / 2 : (w * i / (n - 1)));
+    const norm = (row.weight - minVal) / range;
+    const y = paddingY + h - norm * h;
+    return { x, y };
+  });
+
+  ctx.strokeStyle = '#1f5b63';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  points.forEach((pt, i) => i === 0 ? ctx.moveTo(pt.x, pt.y) : ctx.lineTo(pt.x, pt.y));
+  ctx.stroke();
+
+  ctx.fillStyle = '#7dd3fc';
+  ctx.strokeStyle = 'rgba(11,13,16,0.85)';
+  ctx.lineWidth = 1;
+  points.forEach((pt) => {
+    ctx.beginPath();
+    ctx.arc(pt.x, pt.y, 2.1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  });
 }
 
 function bumpOneDay(task){
@@ -9663,6 +9951,35 @@ function tpPerfMark(label) {
 
   
 </script>
+
+<!-- ADD WEIGHT ENTRY MODAL -->
+<div
+  id="weightEntryModal"
+  class="fixed inset-0 z-40 hidden items-center justify-center bg-black/60"
+  onclick="closeWeightModal()"
+>
+  <div
+    class="w-full max-w-sm mx-3 rounded-2xl px-4 pb-5 pt-6 relative bg-zinc-900 text-zinc-100 text-sm"
+    onclick="event.stopPropagation();"
+  >
+    <div class="muted text-[11px] uppercase tracking-wide mb-3">Log Weight</div>
+
+    <label class="grid gap-1 text-sm font-medium">
+      Date
+      <input id="weightDateInput" type="date" class="input">
+    </label>
+
+    <label class="grid gap-1 text-sm font-medium mt-3">
+      Weight
+      <input id="weightValueInput" type="number" step="0.1" class="input" placeholder="e.g., 182.4">
+    </label>
+
+    <div class="flex justify-end gap-2 mt-6">
+      <button type="button" class="btn btn-secondary" onclick="closeWeightModal()">Cancel</button>
+      <button type="button" class="btn btn-primary" onclick="submitWeightEntry()">Save</button>
+    </div>
+  </div>
+</div>
 
 <!-- EDIT MOOD ENTRY MODAL -->
 <div
