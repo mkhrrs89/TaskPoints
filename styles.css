@@ -2584,7 +2584,7 @@ header,
     width: 8px;
     height: 8px;
     border-radius: 999px;
-    background: var(--tp-teal);
+    background: #14b48c;
     box-shadow: 0 0 0 1px rgba(15, 77, 77, 0.35);
     transform: scale(1);
     transform-origin: center;
