@@ -1753,7 +1753,7 @@ logBootPersistenceSkip("migrateLegacyImagesIfNeeded");
       window.addEventListener("touchend", pointerUp);
     }
 
-    function openImageCropperFromFile(file, callback){
+    function openImageCropperFromFile(file, callback, options){
       initCropperElements();
       if (!file){
         callback(undefined);
@@ -1763,14 +1763,14 @@ logBootPersistenceSkip("migrateLegacyImagesIfNeeded");
       reader.onload = () => {
         const img = new Image();
         img.onload = () => {
-          startCropSession(img, callback);
+          startCropSession(img, callback, undefined, options);
         };
         img.src = reader.result;
       };
       reader.readAsDataURL(file);
     }
 
-    function openImageCropperFromUrl(url, callback, cleanup){
+    function openImageCropperFromUrl(url, callback, cleanup, options){
       initCropperElements();
       if (!url){
         callback(undefined);
@@ -1778,26 +1778,28 @@ logBootPersistenceSkip("migrateLegacyImagesIfNeeded");
       }
       const img = new Image();
       img.onload = () => {
-        startCropSession(img, callback, cleanup);
+        startCropSession(img, callback, cleanup, options);
       };
       img.src = url;
     }
 
-    function openImageCropperFromBlob(blob, callback){
+    function openImageCropperFromBlob(blob, callback, options){
       if (!blob) {
         callback(undefined);
         return;
       }
       const url = URL.createObjectURL(blob);
-      openImageCropperFromUrl(url, callback, () => URL.revokeObjectURL(url));
+      openImageCropperFromUrl(url, callback, () => URL.revokeObjectURL(url), options);
     }
 
-    function startCropSession(img, callback, cleanup){
+    function startCropSession(img, callback, cleanup, options = {}){
       initCropperElements();
+      if (typeof options.onOpen === "function") options.onOpen();
       cropState = {
         img,
         callback,
         cleanup,
+        onClose: typeof options.onClose === "function" ? options.onClose : null,
         aspectValue: "3:4",
         aspectRatio: 3/4,
         scale: 1,
@@ -1894,6 +1896,7 @@ cropZoomEl.max = String(Math.round(minScale * 150)); // caps at 150% of minScale
       if (!cropModalEl) return;
       cropModalEl.classList.add("hidden");
       if (cropState?.cleanup) cropState.cleanup();
+      if (cropState?.onClose) cropState.onClose();
       cropState = null;
       window.unlockScrollForModal?.();
     }
@@ -3293,6 +3296,23 @@ function closePlayerEditor({ keepEditingState = false } = {}) {
   window.unlockScrollForModal?.();
 }
 
+function suspendPlayerEditorForCrop() {
+  const modal = $("playerEditorModal");
+  if (!modal || !modal.classList.contains("is-open")) return false;
+  modal.classList.remove("is-open");
+  modal.setAttribute("aria-hidden", "true");
+  modal.dataset.suspendedForCrop = "1";
+  return true;
+}
+
+function resumePlayerEditorAfterCrop() {
+  const modal = $("playerEditorModal");
+  if (!modal || modal.dataset.suspendedForCrop !== "1") return;
+  modal.dataset.suspendedForCrop = "0";
+  modal.classList.add("is-open");
+  modal.setAttribute("aria-hidden", "false");
+}
+
 function resolveEditRoot(btn, id) {
   const modal = $("playerEditorModal");
   if (id && id !== "YOU" && modal?.classList.contains("is-open") && editingPlayerId === id) {
@@ -3411,6 +3431,9 @@ function wirePlayerColorEditors(root = document) {
             openPlayerEditor(id);
           }
           renderPlayers();
+        }, {
+          onOpen: suspendPlayerEditorForCrop,
+          onClose: resumePlayerEditorAfterCrop
         });
         return;
       }
@@ -3574,6 +3597,9 @@ player.style    = style || "balanced";
         if (file){
 openImageCropperFromFile(file, async (dataUrl) => {
   await applyUpdate(dataUrl);
+}, {
+  onOpen: suspendPlayerEditorForCrop,
+  onClose: resumePlayerEditorAfterCrop
 });
         } else {
           applyUpdate(undefined);
