@@ -154,6 +154,7 @@
               <th data-sort="name">Name <span class="sort-indicator" data-indicator="name"></span></th>
               <th data-sort="wins">W <span class="sort-indicator" data-indicator="wins"></span></th>
               <th data-sort="losses">L <span class="sort-indicator" data-indicator="losses"></span></th>
+              <th>M</th>
               <th data-sort="winPct">Win% <span class="sort-indicator" data-indicator="winPct"></span></th>
               <th data-sort="mov">MOV <span class="sort-indicator" data-indicator="mov"></span></th>
               <th data-sort="oppAvg">Opp AVG <span class="sort-indicator" data-indicator="oppAvg"></span></th>
@@ -522,6 +523,9 @@ function computeYouStats() {
         const tr = document.createElement("tr");
         const stats = computePlayerStats(p);
         const isYou = p && (p.id === "YOU" || p.isYou);
+        const wins = stats.wins || 0;
+        const losses = stats.losses || 0;
+        const matchups = (wins || 0) + (losses || 0);
 
         const winPctDisplay = (stats.winPct == null) ? "—" : stats.winPct.toFixed(1) + "%";
         const movDisplay = (stats.mov == null)
@@ -534,8 +538,9 @@ function computeYouStats() {
 
         tr.innerHTML = `
           <td class="pr-4">${escapeHtml(p.name || "—")}</td>
-          <td>${stats.wins}</td>
-          <td>${stats.losses}</td>
+          <td>${wins}</td>
+          <td>${losses}</td>
+          <td>${matchups}</td>
           <td>${winPctDisplay}</td>
           <td>${movDisplay}</td>
           <td>${oppAvgDisplay}</td>
