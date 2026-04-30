@@ -4724,7 +4724,9 @@ function submitWeightEntry() {
   const weightInput = $('weightValueInput');
   if (!dateInput || !weightInput) return;
   const date = String(dateInput.value || '').trim();
-  const weight = Number(weightInput.value);
+  const weightRaw = String(weightInput.value || '').trim();
+  if (!weightRaw) return alert('Please enter a valid weight.');
+  const weight = Number(weightRaw);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return alert('Please enter a valid date.');
   if (!Number.isFinite(weight)) return alert('Please enter a valid weight.');
 
@@ -8837,6 +8839,17 @@ function getTaskPointsExportSnapshot() {
 }
 
 async function applyImportedState(root){
+  const importedWeightHistory = Array.isArray(root.weightHistory)
+    ? root.weightHistory
+        .map((entry) => {
+          const date = typeof entry?.date === "string" ? entry.date.trim() : "";
+          const weight = Number(entry?.weight);
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(weight)) return null;
+          return { date, weight };
+        })
+        .filter(Boolean)
+    : [];
+
   let normalized = normalizeState({
     tasks:       Array.isArray(root.tasks)       ? root.tasks       : [],
     reminders:   Array.isArray(root.reminders)   ? root.reminders   : [],
@@ -8844,6 +8857,7 @@ async function applyImportedState(root){
     players:     Array.isArray(root.players)     ? root.players     : [],
     habits:      Array.isArray(root.habits)      ? root.habits      : [],
     flexActions: Array.isArray(root.flexActions) ? root.flexActions : [],
+    weightHistory: importedWeightHistory,
     gameHistory: Array.isArray(root.gameHistory) ? root.gameHistory : [],
     matchups:    Array.isArray(root.matchups)    ? root.matchups    : [],
     schedule:    Array.isArray(root.schedule)    ? root.schedule    : [],
