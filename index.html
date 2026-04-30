@@ -4723,8 +4723,12 @@ function submitWeightEntry() {
   const dateInput = $('weightDateInput');
   const weightInput = $('weightValueInput');
   if (!dateInput || !weightInput) return;
+  
   const date = String(dateInput.value || '').trim();
-  const weight = Number(weightInput.value);
+  const weightRaw = String(weightInput.value || '').trim();
+  if (!weightRaw) return alert('Please enter a valid weight.');
+  const weight = Number(weightRaw);
+  
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return alert('Please enter a valid date.');
   if (!Number.isFinite(weight)) return alert('Please enter a valid weight.');
 
@@ -8844,6 +8848,7 @@ async function applyImportedState(root){
     players:     Array.isArray(root.players)     ? root.players     : [],
     habits:      Array.isArray(root.habits)      ? root.habits      : [],
     flexActions: Array.isArray(root.flexActions) ? root.flexActions : [],
+    weightHistory: Array.isArray(root.weightHistory) ? root.weightHistory : [],
     gameHistory: Array.isArray(root.gameHistory) ? root.gameHistory : [],
     matchups:    Array.isArray(root.matchups)    ? root.matchups    : [],
     schedule:    Array.isArray(root.schedule)    ? root.schedule    : [],
