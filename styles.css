@@ -2299,8 +2299,31 @@ header,
 }
 
 .habitDay.week-complete{
-  border: 2px solid #fb923c;
-  color: #fb923c;
+  border: 2px solid #fb923c !important;
+  color: #fb923c !important;
+  background: rgba(251, 146, 60, 0.08) !important;
+}
+
+.habitRow.week-complete-row .habitDay.week-complete{
+  z-index: 1;
+}
+
+.habitRow.week-complete-row .habitDay.week-complete::after{
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: calc(100% - 2px);
+  width: calc(100% + 0.5rem - 8px);
+  height: 2px;
+  background: #fb923c;
+  transform: translateY(-50%);
+  pointer-events: none;
+  z-index: -1;
+  opacity: 0.95;
+}
+
+.habitRow.week-complete-row .habitDay.week-complete:last-child::after{
+  content: none;
 }
 
 .habitDay.past-incomplete{

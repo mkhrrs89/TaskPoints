@@ -855,11 +855,22 @@ function renderHabitSection(section, days, baseDate){
     const row = document.createElement('div');
     row.className = 'habitRow';
 
+    const weeklyThresholdRaw = Number(
+      h.weeklyThreshold ?? h.weeklyTarget ?? h.weeklyGoal ?? h.weekGoal ?? h.targetPerWeek ?? h.timesPerWeek
+    );
+    const hasWeeklyThreshold = Number.isFinite(weeklyThresholdRaw) && weeklyThresholdRaw > 0;
+    const completedInVisibleWeek = days.reduce((count, d) => count + (h.doneKeys.includes(d.key) ? 1 : 0), 0);
+    const isWeeklyComplete = hasWeeklyThreshold && completedInVisibleWeek >= weeklyThresholdRaw;
+    if (isWeeklyComplete) row.classList.add('week-complete-row');
+
     const daysHtml = days.map(d=>{
       const on = h.doneKeys.includes(d.key);
       const failed = h.failedKeys.includes(d.key);
       const status = on ? 'on' : (failed ? 'failed' : 'off');
-      const className = section.title === 'vice' ? `habitDay viceDay ${status}` : `habitDay ${status}`;
+      const weekCompleteClass = isWeeklyComplete ? 'week-complete' : '';
+      const className = section.title === 'vice'
+        ? `habitDay viceDay ${status} ${weekCompleteClass}`.trim()
+        : `habitDay ${status} ${weekCompleteClass}`.trim();
       const styleAttr = getHabitBubbleStyleAttr(h.tag, status);
       return `<div class="${className}"${styleAttr} data-habit="${h.id}" data-day="${d.key}">${d.date.getDate()}</div>`;
     }).join('');
