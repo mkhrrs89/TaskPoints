@@ -2315,27 +2315,30 @@ header,
 .habitDaysRow.week-complete-row::before{
   content: '';
   position: absolute;
-  left: 24px;
-  right: 24px;
   top: 50%;
-  height: 4px;
+  left: 14px;
+  right: 14px;
+  height: 8px;
   border-radius: 999px;
   background: #fb923c;
   transform: translateY(-50%);
   z-index: 0;
   pointer-events: none;
+  box-shadow:
+    0 0 0 1px rgba(251,146,60,0.18),
+    0 0 8px rgba(251,146,60,0.12);
 }
 
-.habitDaysRow.week-complete-row .habitDay.week-complete{
+.habitDaysRow.week-complete-row .habitDay{
   position: relative;
   z-index: 1;
 }
 
 @media (max-width: 900px){
   .habitDaysRow.week-complete-row::before{
-    left: 20px;
-    right: 20px;
-    height: 3px;
+    left: 10px;
+    right: 10px;
+    height: 7px;
   }
 }
 
