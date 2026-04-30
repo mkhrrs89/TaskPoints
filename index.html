@@ -5206,7 +5206,8 @@ const daysHtml = days.map(d => {
   </div>`;
 }).join('');
 
-  const daysRowHtml = `<div class="habitDaysRow">${daysHtml}</div>`;
+  const daysRowClass = `habitDaysRow${isWeeklyCompleteForVisibleWeek ? ' week-complete-row' : ''}`;
+  const daysRowHtml = `<div class="${daysRowClass}">${daysHtml}</div>`;
 
   if (editingHabitId === h.id) {
     const category = h.category || 'habit';
