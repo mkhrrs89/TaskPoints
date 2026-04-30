@@ -861,7 +861,7 @@ function renderHabitSection(section, days, baseDate){
     const hasWeeklyThreshold = Number.isFinite(weeklyThresholdRaw) && weeklyThresholdRaw > 0;
     const completedInVisibleWeek = days.reduce((count, d) => count + (h.doneKeys.includes(d.key) ? 1 : 0), 0);
     const isWeeklyComplete = hasWeeklyThreshold && completedInVisibleWeek >= weeklyThresholdRaw;
-    if (isWeeklyComplete) row.classList.add('week-complete-row');
+
 
     const daysHtml = days.map(d=>{
       const on = h.doneKeys.includes(d.key);
@@ -874,7 +874,9 @@ function renderHabitSection(section, days, baseDate){
       const styleAttr = getHabitBubbleStyleAttr(h.tag, status);
       return `<div class="${className}"${styleAttr} data-habit="${h.id}" data-day="${d.key}">${d.date.getDate()}</div>`;
     }).join('');
-
+      const daysRowClass = `habitDaysRow${isWeeklyComplete ? ' week-complete-row' : ''}`;
+      const daysRowHtml = `<div class="${daysRowClass}">${daysHtml}</div>`;
+    
     row.innerHTML = `
       <div class="font-semibold truncate" title="${escapeHtml(h.name)}">
         ${escapeHtml(h.name)}
@@ -885,7 +887,7 @@ function renderHabitSection(section, days, baseDate){
           ${h.retired ? 'Unretire' : 'Retire'}
         </button>
       </div>
-      ${daysHtml}
+      ${daysRowHtml}
     `;
 
     list.appendChild(row);
