@@ -2307,26 +2307,42 @@ header,
   background: rgba(251, 146, 60, 0.08) !important;
 }
 
-.habitRow.week-complete-row .habitDay.week-complete{
-  z-index: 1;
+.habitRow.week-complete-row{
+  --week-complete-gap: 0.65rem;
 }
 
-.habitRow.week-complete-row .habitDay.week-complete::after{
+@media (max-width: 900px){
+  .habitRow.week-complete-row{
+    --week-complete-gap: 0.5rem;
+  }
+}
+
+.habitRow.week-complete-row .habitDay.week-complete{
+  z-index: 1;
+  overflow: visible;
+  isolation: isolate;
+}
+
+.habitRow.week-complete-row .habitDay.week-complete::before{
   content: '';
   position: absolute;
   top: 50%;
-  left: calc(100% - 2px);
-  width: calc(100% + 0.5rem - 8px);
-  height: 2px;
+  left: calc(var(--week-complete-gap) / -2);
+  width: calc(100% + var(--week-complete-gap));
+  height: 3px;
   background: #fb923c;
   transform: translateY(-50%);
   pointer-events: none;
   z-index: -1;
-  opacity: 0.95;
 }
 
-.habitRow.week-complete-row .habitDay.week-complete:last-child::after{
-  content: none;
+.habitRow.week-complete-row .habitDay.week-complete:first-child::before{
+  left: 50%;
+  width: calc(50% + var(--week-complete-gap) / 2);
+}
+
+.habitRow.week-complete-row .habitDay.week-complete:last-child::before{
+  width: calc(50% + var(--week-complete-gap) / 2);
 }
 
 .habitDay.past-incomplete{
