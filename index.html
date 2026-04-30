@@ -5170,6 +5170,16 @@ function renderHabitRow(h, days, wrap, options = {}) {
   const isGrouped = options.isGrouped ?? false;
 
   h.doneKeys = Array.isArray(h.doneKeys) ? h.doneKeys : [];
+  const weeklyThresholdRaw = Number(h.daysPerCompleteWeek);
+  const hasValidWeeklyThreshold = Number.isFinite(weeklyThresholdRaw)
+    && weeklyThresholdRaw > 0
+    && weeklyThresholdRaw <= 7;
+  const weeklyThreshold = hasValidWeeklyThreshold ? Math.round(weeklyThresholdRaw) : 0;
+  const completedCountForVisibleWeek = days.reduce((count, d) => (
+    h.doneKeys.includes(d.key) ? count + 1 : count
+  ), 0);
+  const isWeeklyCompleteForVisibleWeek = hasValidWeeklyThreshold
+    && completedCountForVisibleWeek >= weeklyThreshold;
 
   const streak     = Number(h.__streak || 0);
   const failedStreak = Number(h.__failedStreak || 0);
@@ -5187,7 +5197,7 @@ const daysHtml = days.map(d => {
   const status = on ? 'on' : 'off';
   const isPastIncomplete = !on && d.key < dateKey(new Date());
   const styleAttr = getHabitBubbleStyleAttr(h.tag, status);
-  return `<div class="habitDay ${status}${isIcy ? ' icy' : ''}${isPastIncomplete ? ' past-incomplete' : ''}"${styleAttr} data-habit="${h.id}" data-day="${d.key}">
+  return `<div class="habitDay ${status}${isIcy ? ' icy' : ''}${isPastIncomplete ? ' past-incomplete' : ''}${isWeeklyCompleteForVisibleWeek ? ' week-complete' : ''}"${styleAttr} data-habit="${h.id}" data-day="${d.key}">
     ${d.date.getDate()}
   </div>`;
 }).join('');

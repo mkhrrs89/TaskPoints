@@ -2298,6 +2298,11 @@ header,
   font-weight: 800;
 }
 
+.habitDay.week-complete{
+  border: 2px solid #fb923c;
+  color: #fb923c;
+}
+
 .habitDay.past-incomplete{
   color: rgba(255,255,255,0.18);
 }
