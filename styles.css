@@ -2301,6 +2301,9 @@ header,
 .habitDay.week-complete{
   border: 2px solid #fb923c !important;
   color: #fb923c !important;
+}
+
+.habitDay.week-complete:not(.on):not(.failed){
   background: rgba(251, 146, 60, 0.08) !important;
 }
 
