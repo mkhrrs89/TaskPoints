@@ -2301,6 +2301,10 @@ header,
 
 .habitDay.week-complete{
   border: 2px solid #fb923c !important;
+}
+
+/* Default weekly-complete text color for unstyled bubbles */
+.habitDay.week-complete:not([style]){
   color: #fb923c !important;
 }
 
@@ -2331,11 +2335,21 @@ header,
   color: #fb923c !important;
 }
 
+/* If the bubble already has an inline custom tag style, let its contrast-picked text color win */
+.habitDaysRow.week-complete-row .habitDay.week-complete[style]{
+  color: inherit !important;
+}
+
 /* Completed/failed weekly-complete days stay above the slab and keep their own fill */
 .habitDaysRow.week-complete-row .habitDay.week-complete.on,
 .habitDaysRow.week-complete-row .habitDay.week-complete.failed{
   z-index: 2;
   border: 2px solid #fb923c !important;
+}
+
+/* For completed/failed bubbles without custom tag styles, keep orange text */
+.habitDaysRow.week-complete-row .habitDay.week-complete.on:not([style]),
+.habitDaysRow.week-complete-row .habitDay.week-complete.failed:not([style]){
   color: #fb923c !important;
 }
 
