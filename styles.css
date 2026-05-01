@@ -2298,6 +2298,7 @@ header,
   font-weight: 800;
 }
 
+
 .habitDay.week-complete{
   border: 2px solid #fb923c !important;
   color: #fb923c !important;
@@ -2312,7 +2313,7 @@ header,
   content: '';
   position: absolute;
   inset: 0;
-  border-radius: 12px;
+  border-radius: 16px;
   background: #fb923c;
   z-index: 0;
   pointer-events: none;
@@ -2323,14 +2324,21 @@ header,
   z-index: 1;
 }
 
+/* Incomplete weekly-complete days should still look like actual bubbles */
+.habitDaysRow.week-complete-row .habitDay.week-complete:not(.on):not(.failed){
+  background: #0f1419 !important;
+  border: 2px solid #fb923c !important;
+  color: #fb923c !important;
+}
+
+/* Completed/failed weekly-complete days stay above the slab and keep their own fill */
 .habitDaysRow.week-complete-row .habitDay.week-complete.on,
 .habitDaysRow.week-complete-row .habitDay.week-complete.failed{
   z-index: 2;
+  border: 2px solid #fb923c !important;
+  color: #fb923c !important;
 }
 
-.habitDaysRow.week-complete-row .habitDay.week-complete:not(.on):not(.failed){
-  background: transparent !important;
-}
 
 .habitDay.past-incomplete{
   color: rgba(255,255,255,0.18);
