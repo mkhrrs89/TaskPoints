@@ -2303,10 +2303,6 @@ header,
   color: #fb923c !important;
 }
 
-.habitDay.week-complete:not(.on):not(.failed){
-  background: rgba(251, 146, 60, 0.08) !important;
-}
-
 .habitDaysRow.week-complete-row{
   position: relative;
   isolation: isolate;
@@ -2315,18 +2311,11 @@ header,
 .habitDaysRow.week-complete-row::before{
   content: '';
   position: absolute;
-  top: 50%;
-  left: 14px;
-  right: 14px;
-  height: 8px;
-  border-radius: 999px;
+  inset: 0;
+  border-radius: 12px;
   background: #fb923c;
-  transform: translateY(-50%);
   z-index: 0;
   pointer-events: none;
-  box-shadow:
-    0 0 0 1px rgba(251,146,60,0.18),
-    0 0 8px rgba(251,146,60,0.12);
 }
 
 .habitDaysRow.week-complete-row .habitDay{
@@ -2334,12 +2323,13 @@ header,
   z-index: 1;
 }
 
-@media (max-width: 900px){
-  .habitDaysRow.week-complete-row::before{
-    left: 10px;
-    right: 10px;
-    height: 7px;
-  }
+.habitDaysRow.week-complete-row .habitDay.week-complete.on,
+.habitDaysRow.week-complete-row .habitDay.week-complete.failed{
+  z-index: 2;
+}
+
+.habitDaysRow.week-complete-row .habitDay.week-complete:not(.on):not(.failed){
+  background: transparent !important;
 }
 
 .habitDay.past-incomplete{
