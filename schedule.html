@@ -386,38 +386,50 @@ function saveState(nextState) {
         existingMatchupsByDate.get(key).push({ playerAId: m.playerAId, playerBId: m.playerBId });
       });
 
-      const rebuilt = neededDates.map((key) => {
-        const existing = byDate.get(key);
+const rebuilt = neededDates.map((key) => {
+  const existing = byDate.get(key);
 
-        if (existing && key < regenFromKey) return existing;
-
-        if (key === todayKey && key < regenFromKey) {
-          const todaysMatchups = existingMatchupsByDate.get(todayKey);
-          if (todaysMatchups && todaysMatchups.length) {
-            changed = true;
-            return buildDayFromExisting(todayKey, participants, signature, todaysMatchups);
-          }
-        }
-
-        if (key < regenFromKey) {
-          if (existing) return existing;
-          changed = true;
-          return buildDailySchedule(key, participants, signature);
-        }
-
-        if (!forceRebuildFromStart && existing && existing.participantSignature === signature) {
-          return existing;
-        }
-
-        const syncedFromMatchups = key === todayKey ? existingMatchupsByDate.get(key) : null;
-        if (syncedFromMatchups && syncedFromMatchups.length) {
-          changed = true;
-          return buildDayFromExisting(key, participants, signature, syncedFromMatchups);
-        }
-
-        changed = true;
-        return buildDailySchedule(key, participants, signature);
+  if (key === todayKey && key < regenFromKey) {
+    const todaysMatchups = existingMatchupsByDate.get(todayKey);
+    if (todaysMatchups && todaysMatchups.length) {
+      const used = new Set();
+      todaysMatchups.forEach((m) => {
+        if (m.playerAId) used.add(m.playerAId);
+        if (m.playerBId) used.add(m.playerBId);
       });
+
+      const preservedByeIds = Array.isArray(existing?.byeIds)
+        ? existing.byeIds.filter((id) => id && !used.has(id))
+        : [];
+
+      changed = true;
+      return {
+        date: todayKey,
+        matchups: todaysMatchups.map((m) => ({
+          playerAId: m.playerAId,
+          playerBId: m.playerBId
+        })),
+        byeIds: preservedByeIds,
+        participantSignature: signature
+      };
+    }
+  }
+
+  if (existing && key < regenFromKey) return existing;
+
+  if (key < regenFromKey) {
+    if (existing) return existing;
+    changed = true;
+    return buildDailySchedule(key, participants, signature);
+  }
+
+  if (!forceRebuildFromStart && existing && existing.participantSignature === signature) {
+    return existing;
+  }
+
+  changed = true;
+  return buildDailySchedule(key, participants, signature);
+});
 
       const outsideWindow = schedule.filter((day) => !neededDateSet.has(day.date));
       state.schedule = [...outsideWindow, ...rebuilt]
@@ -426,7 +438,7 @@ function saveState(nextState) {
     }
 
     function runTodayScheduleAudit() {
-      const auditState = loadState();
+      const auditState = state && typeof state === "object" ? state : loadState();
       const result = window.TaskPointsCore?.auditTodayScheduleVsMatchups
         ? TaskPointsCore.auditTodayScheduleVsMatchups(auditState)
         : { ok: false, todayKey: dateKey(new Date()), error: "TaskPointsCore.auditTodayScheduleVsMatchups unavailable." };
