@@ -1022,12 +1022,14 @@ Nothing visible on the page is built here. === -->
 
   <section id="homePanelFlex" class="home-tab-panel" data-home-panel="flex" role="tabpanel" aria-labelledby="homeTabFlex">
     
-  <!-- FLEX ACTIONS -->
+<!-- FLEX ACTIONS -->
 <!-- FLEX ACTIONS (collapsible) -->
 <div class="glass mb-6 flex-card sectionCard sectionCard--teal">
   <div class="sectionHeader sectionHeader--teal">
     <div class="flexControlsRow sectionHeaderControls flexControlsRow--withTitle">
       <h2 id="flexAnchor" class="sectionTitle sectionTitle--inline">Flex Actions</h2>
+
+      <button id="addFlexBtn" class="btn btn-primary btn-compact" type="button">+</button>
 
       <!-- Reuses the existing .recent-toggle JS on this page -->
       <button class="recent-toggle" type="button" data-target="flexWrap" aria-expanded="true">
@@ -1037,12 +1039,6 @@ Nothing visible on the page is built here. === -->
   </div>
 
   <div id="flexWrap">
-    <div class="flex gap-2 flex-wrap mb-3">
-      <input id="flexName" class="input w-48" placeholder="Flex action">
-      <input id="flexPts"  class="input w-28" type="number" step="any" placeholder="Pts/use">
-      <button id="addFlexBtn" class="btn btn-primary">Add</button>
-    </div>
-
     <div id="flexList" class="grid gap-2 text-sm"></div>
     <div id="flexEmpty" class="text-sm muted hidden">No flex actions yet.</div>
   </div>
@@ -5737,6 +5733,21 @@ function closeViceModal() {
   modal.classList.remove('flex');
 }
 
+  function openFlexModal() {
+  const modal = $('addFlexModal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+  $('flexName')?.focus();
+}
+
+function closeFlexModal() {
+  const modal = $('addFlexModal');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+}
+
 function addHabit(){
   const name = $('habitName')?.value.trim() || '';
   const tag  = $('habitTag')?.value.trim() || '';
@@ -6417,18 +6428,30 @@ function renderFlexActions(){
 function addFlexAction(){
   const nameEl = $('flexName');
   const ptsEl  = $('flexPts');
+  if (!nameEl || !ptsEl) return;
+
   const name = nameEl.value.trim();
   const pts = parseFloat(ptsEl.value);
   const safePts = Number.isFinite(pts) ? pts : 0;
-  if(!name) return;
+
+  if(!name) {
+    alert('Enter a flex action name');
+    return;
+  }
+
   if(!Array.isArray(state.flexActions)) state.flexActions = [];
+
   state.flexActions.push({
     id: crypto.randomUUID(),
     name,
     points: safePts
   });
+
   nameEl.value = '';
   ptsEl.value = '';
+
+  closeFlexModal();
+
   save();
   renderFlexActions();
   renderStats();
@@ -9888,7 +9911,7 @@ try {
   const b2 = document.getElementById('weekBackBtnVices');
   if (b1) b1.onclick = toggleHabitViceWeek;
   if (b2) b2.onclick = toggleHabitViceWeek;
-  $('addFlexBtn')?.addEventListener('click', addFlexAction);
+  $('addFlexBtn')?.addEventListener('click', openFlexModal);
   $('saveSleepScoreBtn')?.addEventListener('click', saveSleepScore);
   $('addHabitModal')?.addEventListener('keydown', e => {
     if (e.key === 'Escape') closeHabitModal();
@@ -9906,6 +9929,16 @@ try {
       if (e.key === 'Enter') addVice();
     });
   });
+
+  $('addFlexModal')?.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeFlexModal();
+});
+['flexName', 'flexPts'].forEach(id => {
+  $(id)?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') addFlexAction();
+  });
+});
+  
   $('sleepEditModal')?.addEventListener('keydown', e => {
     if (e.key === 'Escape') closeSleepEditModal();
   });
@@ -10353,6 +10386,49 @@ function tpPerfMark(label) {
   </div>
 </div>
 
+<!-- ADD FLEX ACTION MODAL -->
+<div
+  id="addFlexModal"
+  class="fixed inset-0 z-40 hidden items-center justify-center bg-black/60"
+  onclick="closeFlexModal()"
+>
+  <div
+    class="w-full max-w-sm mx-3 rounded-2xl px-4 pb-5 pt-8 relative bg-zinc-900 text-zinc-100 text-sm"
+    onclick="event.stopPropagation();"
+  >
+    <button
+      type="button"
+      class="absolute top-3 right-3 btn btn-secondary text-[11px] px-3 py-1 rounded-md"
+      onclick="closeFlexModal()"
+    >
+      Close
+    </button>
+
+    <div class="flex items-start justify-between gap-3 mb-4">
+      <div>
+        <div class="muted text-[11px] uppercase tracking-wide">New Flex Action</div>
+        <div class="text-base font-semibold leading-tight">Create a flex action</div>
+      </div>
+      <div class="text-2xl">➕</div>
+    </div>
+
+    <label class="grid gap-1 text-sm font-medium">
+      Flex action
+      <input id="flexName" class="input" placeholder="Flex action">
+    </label>
+
+    <label class="grid gap-1 text-sm font-medium mt-3">
+      Points per use
+      <input id="flexPts" class="input" type="number" step="any" placeholder="Pts/use">
+    </label>
+
+    <div class="flex justify-end gap-2 mt-6">
+      <button type="button" class="btn btn-secondary" onclick="closeFlexModal()">Cancel</button>
+      <button type="button" id="confirmFlexBtn" class="btn btn-primary" onclick="addFlexAction()">Confirm</button>
+    </div>
+  </div>
+</div>
+  
 <!-- DESKTOP-ONLY ADD TASK MODAL -->
 <div
   id="addTaskModal"
