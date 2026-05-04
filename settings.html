@@ -213,6 +213,7 @@
                 <option value="work">Work</option>
                 <option value="mood">Mood</option>
                 <option value="sleep">Sleep</option>
+                <option value="flex">Flex</option>
               </select>
             </label>
             <label class="text-sm" data-missing-score-field="calories">
@@ -238,6 +239,10 @@
             <label class="text-sm" data-missing-score-field="sleep">
               <span class="block muted text-xs">Rested bonus</span>
               <input id="missingSleepRested" type="number" step="0.1" class="input w-28" placeholder="0" />
+            </label>
+            <label class="text-sm hidden" data-missing-score-field="flex">
+              <span class="block muted text-xs">Flex item</span>
+              <select id="missingFlexAction" class="input w-52"></select>
             </label>
             <button id="missingScoreSaveBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Save Score</button>
           </div>
@@ -972,6 +977,42 @@ notes: typeof s.notes === "string" ? s.notes : "",
           field.classList.add("hidden");
         }
       });
+      const saveBtn = document.getElementById("missingScoreSaveBtn");
+      if (type === "flex") {
+        populateMissingFlexOptions();
+      } else if (saveBtn) {
+        saveBtn.disabled = false;
+      }
+    }
+
+    function populateMissingFlexOptions() {
+      const select = document.getElementById("missingFlexAction");
+      if (!(select instanceof HTMLSelectElement)) return;
+      const state = loadSettingsState();
+      const actions = (Array.isArray(state.flexActions) ? state.flexActions : []).filter(action => action && !action.retired);
+      const previous = select.value;
+      select.innerHTML = "";
+      const placeholder = document.createElement("option");
+      placeholder.value = "";
+      placeholder.textContent = actions.length ? "Select a flex item" : "No active flex items";
+      select.appendChild(placeholder);
+      for (const action of actions) {
+        const option = document.createElement("option");
+        option.value = String(action.id || "");
+        const points = Number(action.points);
+        const pointsLabel = Number.isFinite(points) ? ` (${points} pts)` : "";
+        option.textContent = `${action.name || "Untitled flex"}${pointsLabel}`;
+        select.appendChild(option);
+      }
+      if (actions.some(action => String(action.id || "") === previous)) {
+        select.value = previous;
+      }
+      select.disabled = actions.length === 0;
+      const saveBtn = document.getElementById("missingScoreSaveBtn");
+      const type = document.getElementById("missingScoreType")?.value;
+      if (saveBtn && type === "flex") {
+        saveBtn.disabled = actions.length === 0;
+      }
     }
 
     function readNumberInput(id) {
@@ -1070,7 +1111,7 @@ notes: typeof s.notes === "string" ? s.notes : "",
         points = TaskPointsCore.moodPoints(score, state);
         title = `Mood Score (${score})`;
         label = "Mood score";
-      } else {
+      } else if (type !== "flex") {
         setMissingScoreStatus("Select a valid metric to save.", "error");
         return;
       }
@@ -1082,7 +1123,33 @@ notes: typeof s.notes === "string" ? s.notes : "",
         mood: "Mood Score"
       };
 
-      const existing = findEntry(entryPrefixMap[type]);
+      let existing = null;
+      if (type === "flex") {
+        const flexId = document.getElementById("missingFlexAction")?.value?.trim();
+        if (!flexId) {
+          setMissingScoreStatus("Select a flex item first.", "error");
+          return;
+        }
+        const flexAction = (Array.isArray(state.flexActions) ? state.flexActions : []).find(action => action && String(action.id) === flexId);
+        if (!flexAction || flexAction.retired) {
+          setMissingScoreStatus("Select an active flex item.", "error");
+          return;
+        }
+        const flexPoints = Number(flexAction.points);
+        points = Number.isFinite(flexPoints) ? flexPoints : 0;
+        title = `[Flex] ${flexAction.name || "Flex action"}`;
+        label = "Flex completion";
+        source = "flex";
+        extraFields = { flexId };
+        existing = state.completions.find(c => {
+          if (c?.source !== "flex") return false;
+          if (String(c?.flexId || "") !== flexId) return false;
+          const entryDate = c.completedAtISO ? dateKey(new Date(c.completedAtISO)) : null;
+          return entryDate === entryKey;
+        });
+      } else {
+        existing = findEntry(entryPrefixMap[type]);
+      }
       if (existing) {
         existing.title = title;
         existing.points = points;
@@ -1130,6 +1197,10 @@ notes: typeof s.notes === "string" ? s.notes : "",
         const restField = document.getElementById("missingSleepRested");
         if (scoreField) scoreField.value = "";
         if (restField) restField.value = "";
+      }
+      if (type === "flex") {
+        const flexField = document.getElementById("missingFlexAction");
+        if (flexField) flexField.value = "";
       }
     }
 
@@ -3030,6 +3101,7 @@ rows.push([
         missingScoreDateInput.addEventListener("change", () => setMissingScoreStatus(""));
       }
       if (missingScoreTypeSelect) {
+        populateMissingFlexOptions();
         setMissingScoreFieldVisibility(missingScoreTypeSelect.value);
         missingScoreTypeSelect.addEventListener("change", () => {
           setMissingScoreFieldVisibility(missingScoreTypeSelect.value);
