@@ -1846,10 +1846,10 @@ header,
 .critical-card {
   background: linear-gradient(
     180deg,
-    rgba(110, 32, 36, 0.26),
-    rgba(78, 20, 24, 0.18)
+    rgba(153, 27, 27, 0.34),
+    rgba(88, 28, 28, 0.24)
   ) !important;
-  border-color: #4f1f23 !important;
+  border-color: rgba(248, 113, 113, 0.55) !important;
 }
 
 .task-priority-card.task-priority-medium {
