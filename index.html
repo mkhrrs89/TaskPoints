@@ -5318,16 +5318,22 @@ const daysHtml = days.map(d => {
     </div>
   `;
 
-  const controlsHtml = `
-    <div class="habitControls flex items-center gap-2 flex-wrap text-xs sm:text-sm">
-      ${showMoveButtons ? `
-        <button class="btn btn-ghost" style="padding:2px 6px;font-size:11px"
-                data-act="habit-up" data-id="${h.id}">▲</button>
-        <button class="btn btn-ghost" style="padding:2px 6px;font-size:11px"
-                data-act="habit-down" data-id="${h.id}">▼</button>
-      ` : ``}
-    </div>
-  `;
+const moveUpAct = options.groupMoveTag ? 'habit-group-item-up' : 'habit-up';
+const moveDownAct = options.groupMoveTag ? 'habit-group-item-down' : 'habit-down';
+const groupTagAttr = options.groupMoveTag
+  ? ` data-group-tag="${escapeHtml(options.groupMoveTag)}"`
+  : '';
+
+const controlsHtml = `
+  <div class="habitControls flex items-center gap-2 flex-wrap text-xs sm:text-sm">
+    ${showMoveButtons ? `
+      <button class="btn btn-ghost" style="padding:2px 6px;font-size:11px"
+              data-act="${moveUpAct}" data-id="${h.id}"${groupTagAttr}>▲</button>
+      <button class="btn btn-ghost" style="padding:2px 6px;font-size:11px"
+              data-act="${moveDownAct}" data-id="${h.id}"${groupTagAttr}>▼</button>
+    ` : ``}
+  </div>
+`;
 
   row.innerHTML = nameHtml + controlsHtml + daysRowHtml;
   wrap.appendChild(row);
@@ -5393,7 +5399,12 @@ function renderHabits(){
 
       const body = document.createElement('div');
       body.className = 'habitGroupBody';
-      entry.habits.forEach(h => renderHabitRow(h, days, body, { showMoveButtons: false, showTag: false, isGrouped: true }));
+      entry.habits.forEach(h => renderHabitRow(h, days, body, {
+  showMoveButtons: sortMode === 'custom',
+  showTag: false,
+  isGrouped: true,
+  groupMoveTag: entry.tag
+}));
       groupWrap.appendChild(body);
       wrap.appendChild(groupWrap);
       return;
@@ -5415,18 +5426,32 @@ function renderHabits(){
   });
 
   // ⬆️⬇️ reorder habits + habit groups in custom mode
-  wrap.querySelectorAll('[data-act="habit-up"]').forEach(btn => {
-    btn.onclick = () => moveHabit(btn.getAttribute('data-id'), -1);
-  });
-  wrap.querySelectorAll('[data-act="habit-down"]').forEach(btn => {
-    btn.onclick = () => moveHabit(btn.getAttribute('data-id'), +1);
-  });
-  wrap.querySelectorAll('[data-act="habit-group-up"]').forEach(btn => {
-    btn.onclick = () => moveHabitGroup(btn.getAttribute('data-tag'), -1);
-  });
-  wrap.querySelectorAll('[data-act="habit-group-down"]').forEach(btn => {
-    btn.onclick = () => moveHabitGroup(btn.getAttribute('data-tag'), +1);
-  });
+wrap.querySelectorAll('[data-act="habit-up"]').forEach(btn => {
+  btn.onclick = () => moveHabit(btn.getAttribute('data-id'), -1);
+});
+wrap.querySelectorAll('[data-act="habit-down"]').forEach(btn => {
+  btn.onclick = () => moveHabit(btn.getAttribute('data-id'), +1);
+});
+wrap.querySelectorAll('[data-act="habit-group-item-up"]').forEach(btn => {
+  btn.onclick = () => moveHabitWithinGroup(
+    btn.getAttribute('data-id'),
+    btn.getAttribute('data-group-tag'),
+    -1
+  );
+});
+wrap.querySelectorAll('[data-act="habit-group-item-down"]').forEach(btn => {
+  btn.onclick = () => moveHabitWithinGroup(
+    btn.getAttribute('data-id'),
+    btn.getAttribute('data-group-tag'),
+    +1
+  );
+});
+wrap.querySelectorAll('[data-act="habit-group-up"]').forEach(btn => {
+  btn.onclick = () => moveHabitGroup(btn.getAttribute('data-tag'), -1);
+});
+wrap.querySelectorAll('[data-act="habit-group-down"]').forEach(btn => {
+  btn.onclick = () => moveHabitGroup(btn.getAttribute('data-tag'), +1);
+});
 
 if (!habitTapHandlerBound) {
   habitTapHandlerBound = true;
@@ -5893,6 +5918,59 @@ function moveHabit(id, delta){
   renderVices();
 }
 
+function moveHabitWithinGroup(id, tag, delta) {
+  const groupTag = (tag || '').trim();
+  if (!id || !groupTag) return;
+
+  const h = state.habits.find(x => x.id === id);
+  if (!h || h.retired) return;
+
+  const category = h.category || 'habit';
+  const currentTag = (h.tag || '').trim();
+
+  if (category === 'vice') return;
+  if (currentTag !== groupTag) return;
+
+  const siblings = state.habits
+    .filter(x =>
+      !x.retired &&
+      (x.category || 'habit') !== 'vice' &&
+      (x.tag || '').trim() === groupTag
+    )
+    .slice()
+    .sort((a,b) => {
+      const ao = (typeof a.order === 'number') ? a.order : 0;
+      const bo = (typeof b.order === 'number') ? b.order : 0;
+      if (ao !== bo) return ao - bo;
+
+      const ac = a.createdAtISO || '';
+      const bc = b.createdAtISO || '';
+      return ac.localeCompare(bc);
+    });
+
+  if (siblings.length < 2) return;
+
+  const idx = siblings.findIndex(x => x.id === id);
+  if (idx === -1) return;
+
+  const newIdx = idx + delta;
+  if (newIdx < 0 || newIdx >= siblings.length) return;
+
+  const a = siblings[idx];
+  const b = siblings[newIdx];
+
+  const tmp = a.order;
+  a.order = b.order;
+  b.order = tmp;
+
+  a.updatedAtISO = new Date().toISOString();
+  b.updatedAtISO = new Date().toISOString();
+
+  save();
+  renderHabits();
+  renderVices();
+}
+  
 function moveHabitGroup(tag, delta) {
   const groupTag = (tag || '').trim();
   if (!groupTag) return;
