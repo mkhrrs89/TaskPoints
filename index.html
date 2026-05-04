@@ -6321,7 +6321,17 @@ function renderFlexActions(){
   if (!list || !empty) return;
   list.innerHTML = '';
 
-  const items = (Array.isArray(state.flexActions) ? state.flexActions : []).filter(f => !f.retired);
+  const items = (Array.isArray(state.flexActions) ? state.flexActions : [])
+  .filter(f => !f.retired)
+  .sort((a, b) => {
+    const ao = (typeof a.order === 'number') ? a.order : 0;
+    const bo = (typeof b.order === 'number') ? b.order : 0;
+    if (ao !== bo) return ao - bo;
+
+    const ac = a.createdAtISO || '';
+    const bc = b.createdAtISO || '';
+    return ac.localeCompare(bc);
+  });
   const todayKeyStr = dateKey(new Date());
   const flexUseCounts = new Map();
   let appliedAnimation = false;
@@ -6393,10 +6403,14 @@ function renderFlexActions(){
             ${usageDots}
           </div>
         </div>
-        <div class="flex gap-2 flex-wrap flex-action-buttons">
-          <button class="btn btn-ghost btn-task" data-act="flex-edit" data-id="${f.id}">Edit</button>
-          <button class="btn btn-success btn-task btn-check" data-act="flex-do" data-id="${f.id}" aria-label="Done">✓</button>
-        </div>
+<div class="flex gap-2 flex-wrap flex-action-buttons">
+  <button class="btn btn-ghost" style="padding:2px 6px;font-size:11px"
+          data-act="flex-up" data-id="${f.id}">▲</button>
+  <button class="btn btn-ghost" style="padding:2px 6px;font-size:11px"
+          data-act="flex-down" data-id="${f.id}">▼</button>
+  <button class="btn btn-ghost btn-task" data-act="flex-edit" data-id="${f.id}">Edit</button>
+  <button class="btn btn-success btn-task btn-check" data-act="flex-do" data-id="${f.id}" aria-label="Done">✓</button>
+</div>
       `;
       list.appendChild(row);
       if (shouldAnimate) appliedAnimation = true;
@@ -6407,6 +6421,12 @@ function renderFlexActions(){
   }
 
   // Wire normal-mode buttons
+  list.querySelectorAll('[data-act="flex-up"]').forEach(btn => {
+  btn.onclick = () => moveFlexAction(btn.getAttribute('data-id'), -1);
+});
+list.querySelectorAll('[data-act="flex-down"]').forEach(btn => {
+  btn.onclick = () => moveFlexAction(btn.getAttribute('data-id'), +1);
+});
   list.querySelectorAll('[data-act="flex-do"]').forEach(btn => {
     btn.onclick = () => logFlexCompletion(btn.getAttribute('data-id'));
   });
@@ -6424,6 +6444,55 @@ function renderFlexActions(){
   });
 }
 
+function normalizeFlexActionOrder() {
+  if (!Array.isArray(state.flexActions)) state.flexActions = [];
+
+  const active = state.flexActions
+    .filter(f => !f.retired)
+    .sort((a, b) => {
+      const ao = (typeof a.order === 'number') ? a.order : 0;
+      const bo = (typeof b.order === 'number') ? b.order : 0;
+      if (ao !== bo) return ao - bo;
+
+      const ac = a.createdAtISO || '';
+      const bc = b.createdAtISO || '';
+      return ac.localeCompare(bc);
+    });
+
+  active.forEach((f, index) => {
+    f.order = index + 1;
+  });
+}
+
+function moveFlexAction(id, delta) {
+  if (!Array.isArray(state.flexActions)) state.flexActions = [];
+  if (!id) return;
+
+  normalizeFlexActionOrder();
+
+  const active = state.flexActions
+    .filter(f => !f.retired)
+    .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+
+  const idx = active.findIndex(f => f.id === id);
+  if (idx === -1) return;
+
+  const newIdx = idx + delta;
+  if (newIdx < 0 || newIdx >= active.length) return;
+
+  const a = active[idx];
+  const b = active[newIdx];
+
+  const tmp = a.order;
+  a.order = b.order;
+  b.order = tmp;
+
+  a.updatedAtISO = new Date().toISOString();
+  b.updatedAtISO = new Date().toISOString();
+
+  save();
+  renderFlexActions();
+}
 
 function addFlexAction(){
   const nameEl = $('flexName');
@@ -6441,11 +6510,19 @@ function addFlexAction(){
 
   if(!Array.isArray(state.flexActions)) state.flexActions = [];
 
-  state.flexActions.push({
-    id: crypto.randomUUID(),
-    name,
-    points: safePts
-  });
+normalizeFlexActionOrder();
+
+const nextOrder = state.flexActions
+  .filter(f => !f.retired)
+  .reduce((max, f) => Math.max(max, Number(f.order) || 0), 0) + 1;
+
+state.flexActions.push({
+  id: crypto.randomUUID(),
+  name,
+  points: safePts,
+  order: nextOrder,
+  createdAtISO: new Date().toISOString()
+});
 
   nameEl.value = '';
   ptsEl.value = '';
