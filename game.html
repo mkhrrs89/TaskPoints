@@ -2486,30 +2486,50 @@ function ensureUpcomingSchedule(days = 7, startDateKey = null, forceRebuildFromS
     existingMatchupsByDate.get(key).push({ playerAId: m.playerAId, playerBId: m.playerBId });
   });
 
-  const rebuiltNeeded = neededDates.map((key) => {
-    const existing = existingByDate.get(key);
-    if (existing && key < regenFromKey) return existing;
+const rebuiltNeeded = neededDates.map((key) => {
+  const existing = existingByDate.get(key);
 
-    if (key === todayKey && key < regenFromKey) {
-      const todaysStoredMatchups = existingMatchupsByDate.get(todayKey);
-      if (todaysStoredMatchups && todaysStoredMatchups.length) {
-        changed = true;
-        return buildDayFromExisting(todayKey, participants, signature, todaysStoredMatchups);
-      }
-    }
+  if (key === todayKey && key < regenFromKey) {
+    const todaysStoredMatchups = existingMatchupsByDate.get(todayKey);
+    if (todaysStoredMatchups && todaysStoredMatchups.length) {
+      const used = new Set();
+      todaysStoredMatchups.forEach((m) => {
+        if (m.playerAId) used.add(m.playerAId);
+        if (m.playerBId) used.add(m.playerBId);
+      });
 
-    if (key < regenFromKey) {
-      if (existing) return existing;
+      const preservedByeIds = Array.isArray(existing?.byeIds)
+        ? existing.byeIds.filter((id) => id && !used.has(id))
+        : [];
+
       changed = true;
-      return buildDailySchedule(key, participants, signature);
+      return {
+        date: todayKey,
+        matchups: todaysStoredMatchups.map((m) => ({
+          playerAId: m.playerAId,
+          playerBId: m.playerBId
+        })),
+        byeIds: preservedByeIds,
+        participantSignature: signature
+      };
     }
+  }
 
-    if (!forceRebuildFromStart && existing && existing.participantSignature === signature) {
-      return existing;
-    }
+  if (existing && key < regenFromKey) return existing;
+
+  if (key < regenFromKey) {
+    if (existing) return existing;
     changed = true;
     return buildDailySchedule(key, participants, signature);
-  });
+  }
+
+  if (!forceRebuildFromStart && existing && existing.participantSignature === signature) {
+    return existing;
+  }
+
+  changed = true;
+  return buildDailySchedule(key, participants, signature);
+});
 
   const untouchedOutsideWindow = existingSchedule.filter((day) => !neededDateSet.has(day.date));
   state.schedule = [...untouchedOutsideWindow, ...rebuiltNeeded]
