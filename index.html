@@ -3010,13 +3010,11 @@ function ensureUpcomingSchedule(days = 7){
   const participants = getAllParticipantIds();
   const signature = participantSignature(participants);
 
-  let schedule = Array.isArray(state.schedule) ? state.schedule.filter(d => d && d.date >= todayKey) : [];
-  let changed = false;
+  const existingSchedule = Array.isArray(state.schedule)
+    ? state.schedule.filter(d => d && typeof d.date === "string" && d.date >= todayKey)
+    : [];
 
-  if (!schedule.every(d => d.participantSignature === signature)) {
-    schedule = [];
-    changed = true;
-  }
+  let changed = false;
 
   const neededDates = [];
   for (let i = 0; i < days; i++) {
@@ -3026,18 +3024,70 @@ function ensureUpcomingSchedule(days = 7){
   }
 
   const byDate = new Map();
-  schedule.forEach((d) => {
+  existingSchedule.forEach((d) => {
     if (d && d.date) byDate.set(d.date, d);
   });
 
+  const existingMatchupsByDate = new Map();
+  (state.matchups || []).forEach((m) => {
+    const key = getMatchupDateKeyLocal(m);
+    if (!key) return;
+    if (!existingMatchupsByDate.has(key)) existingMatchupsByDate.set(key, []);
+    existingMatchupsByDate.get(key).push({
+      playerAId: m.playerAId,
+      playerBId: m.playerBId
+    });
+  });
+
+  function buildTodayFromStoredMatchups(existing, pairs) {
+    const safePairs = pairs
+      .map((m) => ({
+        playerAId: m.playerAId,
+        playerBId: m.playerBId
+      }))
+      .filter((m) => m.playerAId && m.playerBId);
+
+    const used = new Set();
+    safePairs.forEach((m) => {
+      used.add(m.playerAId);
+      used.add(m.playerBId);
+    });
+
+    const preservedByeIds = Array.isArray(existing?.byeIds)
+      ? existing.byeIds.filter((id) => id && !used.has(id))
+      : [];
+
+    return {
+      date: todayKey,
+      matchups: safePairs,
+      byeIds: preservedByeIds,
+      participantSignature: signature
+    };
+  }
+
   const rebuilt = neededDates.map((key) => {
     const existing = byDate.get(key);
-    if (existing) return existing;
+
+    if (key === todayKey) {
+      const todaysStoredMatchups = existingMatchupsByDate.get(todayKey);
+      if (todaysStoredMatchups && todaysStoredMatchups.length) {
+        const frozenToday = buildTodayFromStoredMatchups(existing, todaysStoredMatchups);
+        if (JSON.stringify(existing || {}) !== JSON.stringify(frozenToday)) changed = true;
+        return frozenToday;
+      }
+
+      if (existing) return existing;
+    }
+
+    if (existing && existing.participantSignature === signature) {
+      return existing;
+    }
+
     changed = true;
     return buildDailySchedule(key, participants, signature);
   });
 
-  if (rebuilt.length !== schedule.length) changed = true;
+  if (rebuilt.length !== existingSchedule.length) changed = true;
 
   state.schedule = rebuilt;
   return changed;
