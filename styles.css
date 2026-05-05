@@ -4762,7 +4762,7 @@ header,
 
 /* Mobile: make the Reminders card shorter without shrinking text */
 #remindersSection{
-  margin-top: 0 !important;
+  margin-top: -8px !important;
   margin-bottom: 16px !important;
   padding: 10px 16px 12px !important;
 }
