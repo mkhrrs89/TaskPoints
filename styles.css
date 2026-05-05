@@ -2534,6 +2534,33 @@ header,
     grid-area:days;
   }
 
+/* Grouped habit items: use the same mobile grid layout as single habits */
+.habitGroupBody .habitRow{
+  display:grid;
+  grid-template-columns:minmax(0, 1fr) auto;
+  grid-template-areas:
+    "meta controls"
+    "days days";
+  row-gap:0.35rem;
+  column-gap:0.5rem;
+  align-items:center;
+}
+
+.habitGroupBody .habitRow .habitLeft{
+  grid-area:meta;
+  min-width:0;
+}
+
+.habitGroupBody .habitRow .habitControls{
+  grid-area:controls;
+  margin-left:0;
+  justify-self:end;
+}
+
+.habitGroupBody .habitRow .habitDaysRow{
+  grid-area:days;
+}
+   
   /* On mobile, keep controls left-aligned (don't push them right) */
   .habitControls{
     margin-left:0;
