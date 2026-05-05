@@ -4760,6 +4760,28 @@ header,
   display: none !important;
 }
 
+/* Mobile: make the Reminders card shorter without shrinking text */
+#remindersSection{
+  margin-top: 0 !important;
+  margin-bottom: 16px !important;
+  padding: 10px 16px 12px !important;
+}
+
+#remindersSection .sectionHeader{
+  margin-bottom: 6px;
+}
+
+#remindersSection .sectionHeader--teal{
+  margin: -10px -16px 8px -16px;
+  padding: 12px 16px;
+}
+
+#remindersList,
+#remindersEmpty{
+  margin: 0;
+  line-height: 1.25;
+}
+
 .bootSplash{
   position: fixed;
   inset: 0;
