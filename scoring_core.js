@@ -489,8 +489,18 @@ const workHoursMax = Object.prototype.hasOwnProperty.call(workInput, 'hoursMax')
       gameHistory: Array.isArray(s?.gameHistory) ? s.gameHistory : [],
       matchups:    Array.isArray(s?.matchups)    ? s.matchups    : [],
       schedule:    Array.isArray(s?.schedule)    ? s.schedule    : [],
-      opponentDripSchedules: Array.isArray(s?.opponentDripSchedules) ? s.opponentDripSchedules : [],
-      workHistory: Array.isArray(s?.workHistory) ? s.workHistory : [],
+opponentDripSchedules: Array.isArray(s?.opponentDripSchedules) ? s.opponentDripSchedules : [],
+weightHistory: Array.isArray(s?.weightHistory)
+  ? s.weightHistory
+      .map((entry) => {
+        const date = typeof entry?.date === 'string' ? entry.date.trim() : '';
+        const weight = Number(entry?.weight);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(weight)) return null;
+        return { date, weight };
+      })
+      .filter(Boolean)
+  : [],
+workHistory: Array.isArray(s?.workHistory) ? s.workHistory : [],
       youImageId:  typeof s?.youImageId === "string" ? s.youImageId : "",
       youName: typeof s?.youName === "string" ? s.youName : "",
       youPrimaryColor: normalizeHexColor(s?.youPrimaryColor) || "#1a383b",
@@ -952,6 +962,7 @@ function fastEnsureStateShape(s) {
     matchups: Array.isArray(src.matchups) ? src.matchups : [],
     schedule: Array.isArray(src.schedule) ? src.schedule : [],
     opponentDripSchedules: Array.isArray(src.opponentDripSchedules) ? src.opponentDripSchedules : [],
+    weightHistory: Array.isArray(src.weightHistory) ? src.weightHistory : [],
     workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
     projects: Array.isArray(src.projects) ? src.projects : [],
     notes: typeof src.notes === 'string' ? src.notes : '',
