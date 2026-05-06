@@ -4772,11 +4772,16 @@ function submitWeightEntry() {
   
   const date = String(dateInput.value || '').trim();
   const weightRaw = String(weightInput.value || '').trim();
+
   if (!weightRaw) return alert('Please enter a valid weight.');
+
   const weight = Number(weightRaw);
   
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return alert('Please enter a valid date.');
   if (!Number.isFinite(weight)) return alert('Please enter a valid weight.');
+
+  // Prevent any old queued save from writing stale data over the new weight entry.
+  window.TaskPointsCore?.flushPendingSaves?.();
 
   const history = getWeightHistorySorted();
   const next = history.filter((entry) => entry.date !== date);
@@ -4784,9 +4789,45 @@ function submitWeightEntry() {
   next.sort((a, b) => a.date.localeCompare(b.date));
 
   state.weightHistory = next;
-  save();
-  drawWeightTrend(next);
+
+  const nextState = {
+    ...state,
+    weightHistory: next
+  };
+
+  try {
+    if (window.TaskPointsCore?.saveStateSnapshot) {
+      const { state: savedState } = TaskPointsCore.saveStateSnapshot(nextState, {
+        storageKey: STORAGE_KEY,
+        immediateWrite: true,
+        savePath: 'weight-entry'
+      });
+
+      state = normalizeState(savedState);
+      storageCache.raw = null;
+      storageCache.parsed = state;
+    } else {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
+      state = normalizeState(nextState);
+      storageCache.raw = null;
+      storageCache.parsed = state;
+    }
+  } catch (e) {
+    console.error('Failed to save weight entry', e);
+    alert('Weight entry failed to save. Check console for details.');
+    return;
+  }
+
+  drawWeightTrend(getWeightHistorySorted());
   closeWeightModal();
+
+  // Confirm in console that it actually stuck in localStorage.
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+    console.log('Saved weightHistory:', saved.weightHistory);
+  } catch (e) {
+    console.warn('Could not verify saved weightHistory.', e);
+  }
 }
 
 function drawDailyTrend(dailyTotals){
