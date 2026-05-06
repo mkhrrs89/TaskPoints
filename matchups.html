@@ -475,9 +475,12 @@ function load() {
       const hourBuckets = [];
       for (let h = startHour; h <= endHour; h++) {
         let weight = 1;
-        if (h >= 6 && h <= 11) weight += 1.6;
-        if (h >= 12 && h <= 15) weight += 0.6;
-        if (h >= 18 && h <= 23) weight -= 0.2;
+        // Slightly favor earlier hours, but less aggressively than before.
+        // Goal: still make NPCs score earlier in the day, just not dump almost everything by noon.
+        if (h >= 6 && h <= 11) weight += 0.7;   // morning: still favored, but reduced
+        if (h >= 12 && h <= 15) weight += 0.45; // early afternoon: solid activity
+        if (h >= 16 && h <= 17) weight += 0.25; // late afternoon: small boost
+        if (h >= 18 && h <= 23) weight += 0.15; // evening/night: no longer penalized
         if (Math.random() < 0.15) weight *= 0.4;
         hourBuckets.push({ hour: h, weight: Math.max(0.2, weight) });
       }
@@ -525,7 +528,12 @@ function load() {
 
 
       const times = pointUnits.map(() => pickTime()).sort((a, b) => a - b);
-      const sizedUnits = pointUnits.slice().sort((a, b) => b - a);
+      // Keep the point chunks randomized instead of pairing the biggest chunks
+  // with the earliest times. This makes the drip feel more balanced while
+  // still respecting the weighted hour schedule above.
+  const sizedUnits = pointUnits
+    .slice()
+    .sort(() => Math.random() - 0.5);
 
       const events = sizedUnits
         .map((units, idx) => ({ t: times[idx].toISOString(), pts: units / 10 }))
