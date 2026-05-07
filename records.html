@@ -29,11 +29,11 @@
       background: linear-gradient(180deg, rgba(251,146,60,.28), rgba(234,179,8,.18));
       color: #ffe9d6;
     }
-    .pill-blue{
-      border-color: rgba(96,165,250,.35);
-      background: linear-gradient(180deg, rgba(59,130,246,.22), rgba(15,23,42,.22));
-      color:#dbeafe;
-    }
+.pill-blue{
+  border-color: rgba(30,102,109,.65);
+  background: linear-gradient(180deg, rgba(37,76,82,.55), rgba(26,56,59,.45));
+  color:#d8fbff;
+}
     .tableWrap{
       overflow:auto;
       -webkit-overflow-scrolling: touch;
@@ -562,10 +562,9 @@ meta.textContent = `Saved: ${all.length.toLocaleString()} records · ${youName} 
         <td class="rankCell num font-extrabold">${i+1}</td>
         <td class="scoreCell num font-extrabold">${r.score.toFixed(1)}</td>
         <td class="dateCell num">${esc(fmtDate(r.date))}</td>
-        <td class="playerCell">
-          <div class="font-semibold">${esc(r.playerName || "Unknown")}</div>
-          <div class="muted text-xs">ID: ${esc(r.playerId)}</div>
-        </td>
+<td class="playerCell">
+  <div class="font-semibold">${esc(r.playerName || "Unknown")}</div>
+</td>
         <td class="srcCell">${srcPill}</td>
       </tr>
     `;
