@@ -82,10 +82,48 @@
     tr:hover td{ background: rgba(255,255,255,.03); }
     .num{ font-variant-numeric: tabular-nums; }
     .rankCell{ width: 72px; }
-    .scoreCell{ width: 140px; }
-    .dateCell{ width: 160px; }
-    .playerCell{ width: 260px; }
-    .srcCell{ width: 140px; }
+.scoreCell{ width: 140px; }
+.imageCell{
+  width: 72px;
+  min-width: 72px;
+  max-width: 72px;
+  padding: 0 !important;
+  position: relative;
+  overflow: hidden;
+}
+tbody td.imageCell{
+  height: 52px;
+}
+.recordPhotoSlot{
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: 0;
+  background: linear-gradient(180deg, rgba(37,76,82,.85), rgba(13,24,28,.95));
+}
+.recordPhoto{
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 0;
+}
+.recordPhotoFallback{
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #d8fbff;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .02em;
+}
+.dateCell{ width: 160px; }
+.playerCell{ width: 260px; }
+.srcCell{ width: 140px; }
   </style>
 </head>
 
@@ -207,6 +245,7 @@
             <tr>
 <th class="rankCell">Rank</th>
 <th class="scoreCell">Score</th>
+<th class="imageCell"></th>
 <th class="playerCell">Player</th>
 <th class="dateCell">Date</th>
 <th class="srcCell">Source</th>
@@ -240,6 +279,8 @@ let lastBuildTotalDaysYou = 0;
 
 const formattedDateCache = new Map();
 const dateKeyCache = new Map();
+const recordImageUrlCache = new Map();
+const recordImageLoadPromises = new Map();
 
 function invalidatePageStateCache(){
   pageStateCacheDirty = true;
@@ -372,6 +413,101 @@ function esc(s){
     .replaceAll("'","&#39;");
 }
 
+function getInitials(name){
+  const parts = String(name || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  if (!parts.length) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+
+  return `${parts[0][0] || ""}${parts[parts.length - 1][0] || ""}`.toUpperCase();
+}
+
+async function loadRecordImageUrl(imageId){
+  if (!imageId) return "";
+  if (recordImageUrlCache.has(imageId)) return recordImageUrlCache.get(imageId);
+  if (recordImageLoadPromises.has(imageId)) return recordImageLoadPromises.get(imageId);
+
+  const promise = (async () => {
+    try {
+      if (!window.TaskPointsCore?.getImageBlob) return "";
+
+      const blob = await TaskPointsCore.getImageBlob(imageId);
+      if (!blob) return "";
+
+      const url = URL.createObjectURL(blob);
+      recordImageUrlCache.set(imageId, url);
+      return url;
+    } catch (err) {
+      console.warn("Failed to load record player image", err);
+      return "";
+    } finally {
+      recordImageLoadPromises.delete(imageId);
+    }
+  })();
+
+  recordImageLoadPromises.set(imageId, promise);
+  return promise;
+}
+
+function recordPhotoHtml(record){
+  const imageId = record?.imageId || "";
+  const name = record?.playerName || "Unknown";
+  const cachedUrl = imageId ? recordImageUrlCache.get(imageId) : "";
+
+  if (cachedUrl) {
+    return `
+      <div class="recordPhotoSlot" data-image-id="${esc(imageId)}">
+        <img class="recordPhoto" src="${esc(cachedUrl)}" alt="${esc(name)} photo">
+      </div>
+    `;
+  }
+
+  return `
+    <div class="recordPhotoSlot" ${imageId ? `data-image-id="${esc(imageId)}"` : ""}>
+      <img class="recordPhoto hidden" alt="${esc(name)} photo">
+      <div class="recordPhotoFallback">${esc(getInitials(name))}</div>
+    </div>
+  `;
+}
+
+function applyLoadedRecordImages(){
+  document.querySelectorAll(".recordPhotoSlot[data-image-id]").forEach(slot => {
+    const imageId = slot.getAttribute("data-image-id") || "";
+    const url = recordImageUrlCache.get(imageId);
+    if (!url) return;
+
+    const img = slot.querySelector("img.recordPhoto");
+    const fallback = slot.querySelector(".recordPhotoFallback");
+
+    if (img) {
+      img.src = url;
+      img.classList.remove("hidden");
+    }
+
+    if (fallback) {
+      fallback.classList.add("hidden");
+    }
+  });
+}
+
+async function hydrateRecordImages(records){
+  const imageIds = Array.from(
+    new Set(
+      (Array.isArray(records) ? records : [])
+        .map(record => record?.imageId)
+        .filter(Boolean)
+    )
+  );
+
+  if (!imageIds.length) return;
+
+  await Promise.all(imageIds.map(imageId => loadRecordImageUrl(imageId)));
+  applyLoadedRecordImages();
+}
+  
 function num(n){
   const x = Number(n);
   if (Number.isNaN(x)) return 0;
@@ -399,10 +535,15 @@ function buildRecords(state, activeIds = activePlayerIds(state)){
   lastBuildTotalDaysYou = 0;
 
   // Map playerId -> name
-  const playerMap = new Map();
-  (Array.isArray(state.players) ? state.players : []).filter(isPlayerActive).forEach(p => {
-    if (p && p.id) playerMap.set(p.id, p.name || "");
-  });
+const playerMap = new Map();
+const playerImageMap = new Map();
+
+(Array.isArray(state.players) ? state.players : []).filter(isPlayerActive).forEach(p => {
+  if (p && p.id) {
+    playerMap.set(p.id, p.name || "");
+    playerImageMap.set(p.id, p.imageId || "");
+  }
+});
 
   // 1) YOU daily totals from completions
   const comps = Array.isArray(state.completions) ? state.completions : [];
@@ -421,13 +562,14 @@ function buildRecords(state, activeIds = activePlayerIds(state)){
 
   const youName = getYouName(state);
   for (const [dk, score] of sums.entries()){
-    records.push({
-      date: dk,
-      playerId: "YOU",
-      playerName: youName,
-      score: Number(score.toFixed(1)),
-      source: `${youName} (daily)`
-    });
+records.push({
+  date: dk,
+  playerId: "YOU",
+  playerName: youName,
+  imageId: state.youImageId || "",
+  score: Number(score.toFixed(1)),
+  source: `${youName} (daily)`
+});
   }
 
   // 2) AI player day scores from gameHistory
@@ -445,13 +587,16 @@ function buildRecords(state, activeIds = activePlayerIds(state)){
       ? youName
       : (playerMap.get(g.playerId) || "Unknown Player");
 
-    records.push({
-      date: gDate,
-      playerId: g.playerId,
-      playerName: name,
-      score: Number(num(g.score).toFixed(1)),
-      source: "Player (game)"
-    });
+records.push({
+  date: gDate,
+  playerId: g.playerId,
+  playerName: name,
+  imageId: g.playerId === "YOU"
+    ? (state.youImageId || "")
+    : (playerImageMap.get(g.playerId) || ""),
+  score: Number(num(g.score).toFixed(1)),
+  source: "Player (game)"
+});
   }
 
   return records;
@@ -577,8 +722,9 @@ meta.textContent = `Saved: ${all.length.toLocaleString()} records · ${youName} 
 
     return `
       <tr>
-        <td class="rankCell num font-extrabold">${i+1}</td>
+<td class="rankCell num font-extrabold">${i+1}</td>
 <td class="scoreCell num font-extrabold">${r.score.toFixed(1)}</td>
+<td class="imageCell">${recordPhotoHtml(r)}</td>
 <td class="playerCell">
   <div class="font-semibold">${esc(r.playerName || "Unknown")}</div>
 </td>
@@ -588,6 +734,8 @@ meta.textContent = `Saved: ${all.length.toLocaleString()} records · ${youName} 
     `;
   }).join("");
 
+  hydrateRecordImages(top);
+  
   // Cache last rendered list for copy
   window.__lastTopRecords = top;
 }
