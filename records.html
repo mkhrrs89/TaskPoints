@@ -218,7 +218,11 @@ let recordsCacheDirty = true;
 let activeIdsCache = null;
 let activeGameHistoryCountCache = 0;
 let totalDaysYouCache = 0;
+let lastBuildActiveGameHistoryCount = 0;
+let lastBuildTotalDaysYou = 0;
+
 const formattedDateCache = new Map();
+const dateKeyCache = new Map();
 
 function invalidatePageStateCache(){
   pageStateCacheDirty = true;
@@ -288,12 +292,42 @@ function syncDerivedPointsIfNeeded(state) {
 }
 
 function dateKey(d){
-  // supports Date or ISO string
-  const dt = (d instanceof Date) ? d : new Date(d);
-  const y = dt.getFullYear();
-  const m = String(dt.getMonth()+1).padStart(2,"0");
-  const day = String(dt.getDate()).padStart(2,"0");
-  return `${y}-${m}-${day}`;
+  if (!d) return "";
+
+  if (d instanceof Date) {
+    if (Number.isNaN(d.getTime())) return "";
+    const y = d.getFullYear();
+    const m = String(d.getMonth()+1).padStart(2,"0");
+    const day = String(d.getDate()).padStart(2,"0");
+    return `${y}-${m}-${day}`;
+  }
+
+  const raw = String(d);
+  if (dateKeyCache.has(raw)) return dateKeyCache.get(raw);
+
+  let out = "";
+  try {
+    const dt = new Date(raw);
+    if (!Number.isNaN(dt.getTime())) {
+      const y = dt.getFullYear();
+      const m = String(dt.getMonth()+1).padStart(2,"0");
+      const day = String(dt.getDate()).padStart(2,"0");
+      out = `${y}-${m}-${day}`;
+    }
+  } catch {
+    out = "";
+  }
+
+  dateKeyCache.set(raw, out);
+  return out;
+}
+
+function completionDateKey(c){
+  const stored = c?.dayKey;
+  if (typeof stored === "string" && /^\d{4}-\d{2}-\d{2}$/.test(stored)) {
+    return stored;
+  }
+  return dateKey(c?.completedAtISO || c?.dateISO || c?.date);
 }
 
 function fmtDate(key){
@@ -342,9 +376,10 @@ function activePlayerIds(state) {
 /* -----------------------------
    Build record candidates
 ------------------------------*/
-function buildRecords(state){
+function buildRecords(state, activeIds = activePlayerIds(state)){
   const records = [];
-  const activeIds = activePlayerIds(state);
+  lastBuildActiveGameHistoryCount = 0;
+  lastBuildTotalDaysYou = 0;
 
   // Map playerId -> name
   const playerMap = new Map();
@@ -352,14 +387,20 @@ function buildRecords(state){
     if (p && p.id) playerMap.set(p.id, p.name || "");
   });
 
-  // 1) YOU daily totals from completions (sum points by day)
+  // 1) YOU daily totals from completions
   const comps = Array.isArray(state.completions) ? state.completions : [];
-  const sums = new Map(); // dateKey -> score
+  const sums = new Map();
+
   for (const c of comps){
-    if (!c || !c.completedAtISO) continue;
-    const dk = dateKey(c.completedAtISO);
+    if (!c) continue;
+
+    const dk = completionDateKey(c);
+    if (!dk) continue;
+
     sums.set(dk, (sums.get(dk) || 0) + getCompletionPoints(c));
   }
+
+  lastBuildTotalDaysYou = sums.size;
 
   const youName = getYouName(state);
   for (const [dk, score] of sums.entries()){
@@ -375,14 +416,20 @@ function buildRecords(state){
   // 2) AI player day scores from gameHistory
   const gh = Array.isArray(state.gameHistory) ? state.gameHistory : [];
   for (const g of gh){
-    if (!g || !g.date || !g.playerId) continue;
+    if (!g || !g.playerId) continue;
     if (!activeIds.has(g.playerId)) continue;
+
+    const gDate = typeof g.date === "string" ? g.date : dateKey(g.date);
+    if (!gDate) continue;
+
+    lastBuildActiveGameHistoryCount += 1;
+
     const name = g.playerId === "YOU"
       ? youName
       : (playerMap.get(g.playerId) || "Unknown Player");
 
     records.push({
-      date: g.date,
+      date: gDate,
       playerId: g.playerId,
       playerName: name,
       score: Number(num(g.score).toFixed(1)),
@@ -403,23 +450,25 @@ function ensureRecordsCache(state){
     };
   }
 
-  const activeIds = activePlayerIds(state);
+const activeIds = activePlayerIds(state);
 
-  const records = buildRecords(state);
+const records = buildRecords(state, activeIds);
 
 records.sort((a,b) => {
   if (b.score !== a.score) return b.score - a.score;
   return String(b.date).localeCompare(String(a.date));
 });
-  
-  const activeGameHistoryCount = (Array.isArray(state.gameHistory) ? state.gameHistory : [])
-    .filter(entry => entry && activeIds.has(entry.playerId)).length;
 
-  const totalDaysYou = new Set(
-    (Array.isArray(state.completions) ? state.completions : [])
-      .filter(c => c?.completedAtISO)
-      .map(c => dateKey(c.completedAtISO))
-  ).size;
+const activeGameHistoryCount = lastBuildActiveGameHistoryCount;
+const totalDaysYou = lastBuildTotalDaysYou;
+
+if (window.TP_DEBUG_PERF) {
+  console.debug("[TP_DEBUG_PERF][records] cache built", {
+    records: records.length,
+    totalDaysYou,
+    activeGameHistoryCount
+  });
+}
 
   recordsCache = records;
   activeIdsCache = activeIds;
@@ -592,8 +641,30 @@ $("refreshBtn").addEventListener("click", () => {
 });
 $("copyBtn").addEventListener("click", copyList);
 
+function bootRender(){
+  const meta = $("metaLine");
+  const sub = $("subtitleLine");
+  const empty = $("emptyState");
+  const wrap = $("tableWrap");
+
+  if (meta) meta.textContent = "Loading records…";
+  if (sub) sub.textContent = "Building records…";
+  if (empty) empty.classList.add("hidden");
+  if (wrap) wrap.classList.add("hidden");
+
+  const run = () => render();
+
+  requestAnimationFrame(() => {
+    if (typeof window.requestIdleCallback === "function") {
+      window.requestIdleCallback(run, { timeout: 700 });
+    } else {
+      setTimeout(run, 0);
+    }
+  });
+}
+
 /* Initial */
-render();
+bootRender();
 </script>
 
   <button
