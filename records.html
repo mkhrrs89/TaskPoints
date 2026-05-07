@@ -170,6 +170,44 @@ tbody td.imageCell{
 .recordsControlsCard:not(.collapsed) .recordsControlsChevron{
   transform: rotate(180deg);
 }
+
+.recordsTitleRow{
+  align-items: flex-start;
+}
+
+.recordsTitle{
+  font-size: 20px;
+  line-height: 1.15;
+}
+
+#subtitleLine{
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+#copyBtn{
+  font-size: 15px;
+  padding: 10px 14px;
+  min-height: 44px;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px){
+  .recordsTitle{
+    font-size: 18px;
+  }
+
+  #subtitleLine{
+    font-size: 14px;
+    line-height: 1.3;
+  }
+
+  #copyBtn{
+    font-size: 14px;
+    padding: 8px 12px;
+    min-height: 40px;
+  }
+}
     
   </style>
 </head>
@@ -283,14 +321,14 @@ tbody td.imageCell{
 
     <!-- Records table -->
     <section class="glass">
-      <div class="flex items-center justify-between gap-3 mb-3">
-        <div>
-          <div class="text-lg font-extrabold">Top Single‑Day Scores</div>
-          <div class="muted" id="subtitleLine">—</div>
-        </div>
+<div class="flex justify-between gap-3 mb-3 recordsTitleRow">
+  <div>
+    <div class="font-extrabold recordsTitle">Top Single-Day Scores</div>
+    <div class="muted" id="subtitleLine">—</div>
+  </div>
 
-        <button id="copyBtn" class="btn btn-ghost">Copy list</button>
-      </div>
+  <button id="copyBtn" class="btn btn-ghost">Copy list</button>
+</div>
 
       <div id="emptyState" class="muted hidden">No records found. (Either no gameHistory yet, or no completions saved.)</div>
 
