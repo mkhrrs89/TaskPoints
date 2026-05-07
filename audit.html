@@ -759,6 +759,7 @@
 function buildLogLoadShape(rawState) {
   const p = rawState || {};
   return {
+    ...p,
     tasks: Array.isArray(p.tasks) ? p.tasks : [],
     completions: Array.isArray(p.completions) ? p.completions : [],
     players: Array.isArray(p.players) ? p.players : [],
@@ -769,6 +770,7 @@ function buildLogLoadShape(rawState) {
     schedule: Array.isArray(p.schedule) ? p.schedule : [],
     opponentDripSchedules: Array.isArray(p.opponentDripSchedules) ? p.opponentDripSchedules : [],
     workHistory: Array.isArray(p.workHistory) ? p.workHistory : [],
+    weightHistory: Array.isArray(p.weightHistory) ? p.weightHistory : [],
     reminders: Array.isArray(p.reminders) ? p.reminders : [],
     youImageId: typeof p.youImageId === 'string' ? p.youImageId : '',
     youName: typeof p.youName === 'string' ? p.youName : '',
@@ -786,6 +788,7 @@ function buildLogLoadShape(rawState) {
 function buildLogNormalizeShape(state) {
   const s = state || {};
   return {
+    ...s,
     tasks: Array.isArray(s.tasks) ? s.tasks : [],
     completions: Array.isArray(s.completions) ? s.completions : [],
     players: Array.isArray(s.players) ? s.players : [],
@@ -796,6 +799,7 @@ function buildLogNormalizeShape(state) {
     schedule: Array.isArray(s.schedule) ? s.schedule : [],
     opponentDripSchedules: Array.isArray(s.opponentDripSchedules) ? s.opponentDripSchedules : [],
     workHistory: Array.isArray(s.workHistory) ? s.workHistory : [],
+    weightHistory: Array.isArray(s.weightHistory) ? s.weightHistory : [],
     reminders: Array.isArray(s.reminders) ? s.reminders : [],
     youImageId: typeof s.youImageId === 'string' ? s.youImageId : '',
     youName: typeof s.youName === 'string' ? s.youName : '',
@@ -823,6 +827,7 @@ function buildLogNormalizeShape(state) {
         schedule: Array.isArray(p.schedule) ? p.schedule : [],
         opponentDripSchedules: Array.isArray(p.opponentDripSchedules) ? p.opponentDripSchedules : [],
         workHistory: Array.isArray(p.workHistory) ? p.workHistory : [],
+        weightHistory: Array.isArray(p.weightHistory) ? p.weightHistory : [],
         reminders: Array.isArray(p.reminders) ? p.reminders : [],
         youImageId: typeof p.youImageId === 'string' ? p.youImageId : '',
         youName: typeof p.youName === 'string' ? p.youName : '',
@@ -850,6 +855,7 @@ function buildLogNormalizeShape(state) {
         schedule: Array.isArray(s.schedule) ? s.schedule : [],
         opponentDripSchedules: Array.isArray(s.opponentDripSchedules) ? s.opponentDripSchedules : [],
         workHistory: Array.isArray(s.workHistory) ? s.workHistory : [],
+        weightHistory: Array.isArray(s.weightHistory) ? s.weightHistory : [],
         reminders: Array.isArray(s.reminders) ? s.reminders : [],
         youImageId: typeof s.youImageId === 'string' ? s.youImageId : '',
         youName: typeof s.youName === 'string' ? s.youName : '',
@@ -867,6 +873,7 @@ function buildLogNormalizeShape(state) {
     function buildWeekLoadShape(rawState) {
   const p = rawState || {};
   return {
+    ...p,
     tasks: Array.isArray(p.tasks) ? p.tasks : [],
     completions: Array.isArray(p.completions) ? p.completions : [],
     players: Array.isArray(p.players) ? p.players : [],
@@ -875,6 +882,7 @@ function buildLogNormalizeShape(state) {
     matchups: Array.isArray(p.matchups) ? p.matchups : [],
     gameHistory: Array.isArray(p.gameHistory) ? p.gameHistory : [],
     workHistory: Array.isArray(p.workHistory) ? p.workHistory : [],
+    weightHistory: Array.isArray(p.weightHistory) ? p.weightHistory : [],
     schedule: Array.isArray(p.schedule) ? p.schedule : [],
     opponentDripSchedules: Array.isArray(p.opponentDripSchedules) ? p.opponentDripSchedules : [],
     reminders: Array.isArray(p.reminders) ? p.reminders : [],
@@ -894,6 +902,7 @@ function buildLogNormalizeShape(state) {
     function buildWeekNormalizeShape(state) {
   const s = state || {};
   return {
+    ...s,
     tasks: Array.isArray(s.tasks) ? s.tasks : [],
     completions: Array.isArray(s.completions) ? s.completions : [],
     players: Array.isArray(s.players) ? s.players : [],
@@ -904,6 +913,7 @@ function buildLogNormalizeShape(state) {
     schedule: Array.isArray(s.schedule) ? s.schedule : [],
     opponentDripSchedules: Array.isArray(s.opponentDripSchedules) ? s.opponentDripSchedules : [],
     workHistory: Array.isArray(s.workHistory) ? s.workHistory : [],
+    weightHistory: Array.isArray(s.weightHistory) ? s.weightHistory : [],
     reminders: Array.isArray(s.reminders) ? s.reminders : [],
     youImageId: typeof s.youImageId === 'string' ? s.youImageId : '',
     youName: typeof s.youName === 'string' ? s.youName : '',
@@ -921,6 +931,7 @@ function buildLogNormalizeShape(state) {
     function buildMatchupsLoadShape(rawState) {
       const p = rawState || {};
       return {
+        ...p,
         tasks: Array.isArray(p.tasks) ? p.tasks : [],
         completions: Array.isArray(p.completions) ? p.completions : [],
         players: Array.isArray(p.players) ? p.players : [],
@@ -931,6 +942,7 @@ function buildLogNormalizeShape(state) {
         schedule: Array.isArray(p.schedule) ? p.schedule : [],
         opponentDripSchedules: Array.isArray(p.opponentDripSchedules) ? p.opponentDripSchedules : [],
         workHistory: Array.isArray(p.workHistory) ? p.workHistory : [],
+        weightHistory: Array.isArray(p.weightHistory) ? p.weightHistory : [],
         reminders: Array.isArray(p.reminders) ? p.reminders : [],
         youImageId: typeof p.youImageId === 'string' ? p.youImageId : '',
         youName: typeof p.youName === 'string' ? p.youName : '',
@@ -948,6 +960,7 @@ function buildLogNormalizeShape(state) {
     function buildMatchupsNormalizeShape(state) {
       const s = state || {};
       return {
+        ...s,
         tasks: Array.isArray(s.tasks) ? s.tasks : [],
         completions: Array.isArray(s.completions) ? s.completions : [],
         players: Array.isArray(s.players) ? s.players : [],
@@ -958,6 +971,7 @@ function buildLogNormalizeShape(state) {
         schedule: Array.isArray(s.schedule) ? s.schedule : [],
         opponentDripSchedules: Array.isArray(s.opponentDripSchedules) ? s.opponentDripSchedules : [],
         workHistory: Array.isArray(s.workHistory) ? s.workHistory : [],
+        weightHistory: Array.isArray(s.weightHistory) ? s.weightHistory : [],
         reminders: Array.isArray(s.reminders) ? s.reminders : [],
         youImageId: typeof s.youImageId === 'string' ? s.youImageId : '',
         youName: typeof s.youName === 'string' ? s.youName : '',
