@@ -205,11 +205,11 @@
         <table>
           <thead>
             <tr>
-              <th class="rankCell">Rank</th>
-              <th class="scoreCell">Score</th>
-              <th class="dateCell">Date</th>
-              <th class="playerCell">Player</th>
-              <th class="srcCell">Source</th>
+<th class="rankCell">Rank</th>
+<th class="scoreCell">Score</th>
+<th class="playerCell">Player</th>
+<th class="dateCell">Date</th>
+<th class="srcCell">Source</th>
             </tr>
           </thead>
           <tbody id="tbody"></tbody>
@@ -578,12 +578,12 @@ meta.textContent = `Saved: ${all.length.toLocaleString()} records · ${youName} 
     return `
       <tr>
         <td class="rankCell num font-extrabold">${i+1}</td>
-        <td class="scoreCell num font-extrabold">${r.score.toFixed(1)}</td>
-        <td class="dateCell num">${esc(fmtDate(r.date))}</td>
+<td class="scoreCell num font-extrabold">${r.score.toFixed(1)}</td>
 <td class="playerCell">
   <div class="font-semibold">${esc(r.playerName || "Unknown")}</div>
 </td>
-        <td class="srcCell">${srcPill}</td>
+<td class="dateCell num">${esc(fmtDate(r.date))}</td>
+<td class="srcCell">${srcPill}</td>
       </tr>
     `;
   }).join("");
