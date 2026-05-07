@@ -124,6 +124,53 @@ tbody td.imageCell{
 .dateCell{ width: 160px; }
 .playerCell{ width: 260px; }
 .srcCell{ width: 140px; }
+
+    .recordsControlsCard{
+  padding: 0;
+  overflow: hidden;
+}
+
+.recordsControlsToggle{
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  padding: 14px 16px;
+  color: #e6edf6;
+  font-weight: 800;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.recordsControlsSummary{
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.recordsControlsChevron{
+  color: #fb923c;
+  font-size: 16px;
+  transition: transform .18s ease;
+}
+
+.recordsControlsBody{
+  padding: 0 16px 16px;
+}
+
+.recordsControlsCard.collapsed .recordsControlsBody{
+  display: none;
+}
+
+.recordsControlsCard:not(.collapsed) .recordsControlsChevron{
+  transform: rotate(180deg);
+}
+    
   </style>
 </head>
 
@@ -187,8 +234,15 @@ tbody td.imageCell{
       </div>
     </header>
 
-    <!-- Controls -->
-    <section class="glass mb-4">
+<!-- Controls -->
+<section class="glass mb-4 recordsControlsCard collapsed" id="recordsControlsCard">
+  <button type="button" class="recordsControlsToggle" id="recordsControlsToggle" aria-expanded="false">
+    <span>Filters</span>
+    <span class="recordsControlsSummary" id="recordsControlsSummary">All · Top 50</span>
+    <span class="recordsControlsChevron">▾</span>
+  </button>
+
+  <div class="recordsControlsBody" id="recordsControlsBody">
       <div class="grid gap-3 sm:grid-cols-12 sm:items-end">
         <div class="sm:col-span-4">
           <label class="muted">Search player</label>
@@ -224,7 +278,8 @@ tbody td.imageCell{
         <span class="pill pill-blue">Players: simulated gameHistory scores</span>
         <span class="muted sm:ml-auto" id="metaLine">—</span>
       </div>
-    </section>
+  </div>
+</section>
 
     <!-- Records table -->
     <section class="glass">
@@ -655,6 +710,33 @@ const ui = {
   search: ""
 };
 
+function updateRecordsControlsSummary(){
+  const summary = $("recordsControlsSummary");
+  if (!summary) return;
+
+  const includeLabel =
+    ui.include === "you" ? "Miggy only" :
+    ui.include === "players" ? "Players only" :
+    "All";
+
+  const searchLabel = ui.search.trim()
+    ? `Search: ${ui.search.trim()}`
+    : "";
+
+  summary.textContent = [includeLabel, `Top ${ui.topN}`, searchLabel]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function setRecordsControlsCollapsed(collapsed){
+  const card = $("recordsControlsCard");
+  const toggle = $("recordsControlsToggle");
+  if (!card || !toggle) return;
+
+  card.classList.toggle("collapsed", collapsed);
+  toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+}
+  
 function filteredSortedTop(records){
   const q = ui.search.trim().toLowerCase();
 
@@ -791,11 +873,26 @@ document.addEventListener("click", (e) => {
 });
 
 /* Controls */
-$("includeSelect").addEventListener("change", (e) => { ui.include = e.target.value; render(); });
-$("topSelect").addEventListener("change", (e) => { ui.topN = Number(e.target.value || 50); render(); });
+$("recordsControlsToggle").addEventListener("click", () => {
+  const card = $("recordsControlsCard");
+  setRecordsControlsCollapsed(!card.classList.contains("collapsed"));
+});
+
+$("includeSelect").addEventListener("change", (e) => {
+  ui.include = e.target.value;
+  updateRecordsControlsSummary();
+  render();
+});
+
+$("topSelect").addEventListener("change", (e) => {
+  ui.topN = Number(e.target.value || 50);
+  updateRecordsControlsSummary();
+  render();
+});
 let searchTimer = null;
 $("searchInput").addEventListener("input", (e) => {
   ui.search = e.target.value || "";
+  updateRecordsControlsSummary();
   clearTimeout(searchTimer);
   searchTimer = setTimeout(() => render(), 120);
 });
@@ -828,6 +925,8 @@ function bootRender(){
 }
 
 /* Initial */
+updateRecordsControlsSummary();
+setRecordsControlsCollapsed(true);
 bootRender();
 </script>
 
