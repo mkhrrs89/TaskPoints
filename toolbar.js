@@ -2814,9 +2814,21 @@ function updateCritIslandStacking() {
     });
   }
 
-  const migrate =
-    window.TaskPointsCore?.migrateLegacyImagesInStorage || migrateLegacyImagesInStorageFallback;
-  if (typeof migrate === 'function') {
-    migrate();
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_FALLBACK);
+    const needsLegacyImageMigration =
+      typeof raw === 'string' &&
+      (raw.includes('"imageData"') || raw.includes('"youImage"'));
+
+    if (needsLegacyImageMigration) {
+      const migrate =
+        window.TaskPointsCore?.migrateLegacyImagesInStorage || migrateLegacyImagesInStorageFallback;
+
+      if (typeof migrate === 'function') {
+        migrate();
+      }
+    }
+  } catch (e) {
+    console.warn('Skipped legacy image migration check', e);
   }
 });
