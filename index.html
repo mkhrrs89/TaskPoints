@@ -8881,6 +8881,7 @@ function completeTask(id){
       } else {
         const nextKey = computeNextDueDate(liveTask);
         if (nextKey) liveTask.dueDateISO = nextKey;
+        liveTask.postponedDays = 0;
         liveTask.completedAtISO = null;
       }
 
