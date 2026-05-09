@@ -546,6 +546,27 @@ body {
   border-radius: 999px;
 }
 
+
+.yesterdayResultsPanel {
+  background: transparent;
+}
+
+.yesterdayResultsPanel.yesterday-win {
+  background: var(--tp-btn-teal-grad);
+}
+
+.yesterdayResultsPanel .yesterdayWinner,
+.yesterdayResultsPanel .yesterdayWinnerScore {
+  color: #f8fafc !important;
+  font-weight: 800;
+}
+
+.yesterdayResultsPanel .yesterdayLoser,
+.yesterdayResultsPanel .yesterdayLoserScore {
+  color: var(--muted) !important;
+  font-weight: 600;
+}
+
 .yesterday-result-player {
   align-items: center;
   line-height: 1.2;
