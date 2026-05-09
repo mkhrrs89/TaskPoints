@@ -372,6 +372,7 @@ function completeTask(id){
   } else {
     const nextKey = computeNextDueDate(t);
     if (nextKey) t.dueDateISO = nextKey;
+    t.postponedDays = 0;
     t.completedAtISO = null;
   }
 
