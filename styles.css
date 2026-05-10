@@ -1575,7 +1575,7 @@ header,
 }
 
 .mobile-bottom-nav{
-  --tp-bottom-nav-pad-top: 0.75rem; /* matches toolbar.js: py-3 */
+  --tp-bottom-nav-pad-top: 0.5rem; /* matches toolbar.js: py-2 */
   --tp-bottom-nav-mini-divider-width: 52px;
   --tp-bottom-nav-mini-divider-bottom: 6px;
   padding-bottom: calc(var(--tp-safe-bottom) + 0.25rem);
