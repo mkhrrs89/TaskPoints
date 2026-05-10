@@ -255,11 +255,11 @@ function renderBottomToolbar() {
       class="mobile-bottom-nav-shell fixed inset-x-0 bottom-0 z-40 md:hidden border-t border-slate-800 text-slate-100 drop-shadow-sm"
       style="background: linear-gradient(180deg, #254C52, #1A383B);"
     >
-      <div class="max-w-6xl mx-auto flex justify-center py-3 pb-4 text-[11px] mobile-bottom-nav">
+      <div class="max-w-6xl mx-auto flex justify-center py-2 pb-2 text-[11px] mobile-bottom-nav">
         ${buildMobileBottomNavLinks()}
       </div>
       <div class="mobile-bottom-nav-expanded">
-        <div class="max-w-6xl mx-auto flex justify-center pt-1 pb-4 text-[11px] mobile-bottom-nav mobile-bottom-nav-secondary" aria-label="Expanded toolbar links">
+        <div class="max-w-6xl mx-auto flex justify-center pt-0 pb-2 text-[11px] mobile-bottom-nav mobile-bottom-nav-secondary" aria-label="Expanded toolbar links">
           <a href="projects.html" class="mobile-bottom-nav-btn flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
             <img src="assets/projects.png" class="tp-nav-icon" alt="" aria-hidden="true">
             <span class="uppercase tracking-wide text-[10px]">Projects</span>
