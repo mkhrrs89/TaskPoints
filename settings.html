@@ -1541,18 +1541,26 @@ function buildSimulationOpponentMap(players) {
 function simulateScoreForPlayer(player, prevScore, context = {}) {
   const baseline = player.baseline;
   const variance = player.variance;
-  const varianceTilt = Math.min(100, Math.max(0, player.varianceTilt)) / 100;
+  const varianceTiltRaw = Number.isFinite(Number(player.varianceTilt))
+    ? Number(player.varianceTilt)
+    : 50;
   const momentum = player.momentum;
   const riskyNormalized = getNormalizedRisky(player.risky);
+
+  const momentumEffects = TaskPointsCore.computeMomentumEffects({
+    prevScore,
+    baseline,
+    variance,
+    varianceTiltRaw,
+    momentum
+  });
+
+  const varianceTilt = momentumEffects.effectiveVarianceTilt;
+  const momentumBonus = momentumEffects.momentumBonus;
 
   const variationMagnitude = Math.random() * variance;
   const variationSign = Math.random() < varianceTilt ? 1 : -1;
   const variation = variationMagnitude * variationSign;
-
-  let momentumBonus = 0;
-  if (momentum && Number.isFinite(prevScore)) {
-    momentumBonus = (prevScore * (momentum / 100)) * 0.18;
-  }
 
   let riskyMod = 0;
   let riskyTriggered = false;
