@@ -3132,27 +3132,40 @@ function simulateAiScoreForPlayer(player, todayKey, context = {}){
   const varianceTiltRaw = Number(
     typeof player.varianceTilt === "number" ? player.varianceTilt : (player.varianceTilt || 50)
   );
-  const varianceTilt = Math.min(100, Math.max(0, varianceTiltRaw)) / 100;
   const momentum = Number(player.momentum);
 
   let riskyRating = Number(player.risky);
   if (isNaN(riskyRating)) riskyRating = 0;
   const riskyNormalized = riskyRating > 10 ? riskyRating / 10 : riskyRating;
 
-  const variationMagnitude = Math.random() * variance;
-  const variationSign = Math.random() < varianceTilt ? 1 : -1;
-  const variation = variationMagnitude * variationSign;
-
-  let momentumBonus = 0;
-  if (momentum && state.gameHistory.length) {
+  let previousScore = null;
+  if (momentum && Array.isArray(state?.gameHistory) && state.gameHistory.length) {
     const prev = state.gameHistory
       .filter(g => g.playerId === player.id)
       .sort((a,b) => b.date.localeCompare(a.date))[0];
 
     if (prev && prev.date !== todayKey) {
-      momentumBonus = (prev.score * (momentum / 100)) * 0.18;
+      const parsedPrevScore = Number(prev.score);
+      if (Number.isFinite(parsedPrevScore)) {
+        previousScore = parsedPrevScore;
+      }
     }
   }
+
+  const momentumEffects = TaskPointsCore.computeMomentumEffects({
+    prevScore: previousScore,
+    baseline,
+    variance,
+    varianceTiltRaw,
+    momentum
+  });
+
+  const varianceTilt = momentumEffects.effectiveVarianceTilt;
+  const momentumBonus = momentumEffects.momentumBonus;
+
+  const variationMagnitude = Math.random() * variance;
+  const variationSign = Math.random() < varianceTilt ? 1 : -1;
+  const variation = variationMagnitude * variationSign;
 
   let riskyMod = 0;
   if (Math.random() < riskyNormalized / 10) {
