@@ -1686,6 +1686,91 @@ function workHoursBonus(hours = 0, settings) {
     return base + workHoursBonus(hours, scoring);
   }
 
+function computeMomentumEffects(options = {}) {
+  const baseline = Number(options.baseline);
+  const variance = Number(options.variance);
+  const varianceTiltRaw = Number(options.varianceTiltRaw);
+  const momentum = Number(options.momentum);
+  const prevScore = Number(options.prevScore);
+
+  const safeBaseline = Number.isFinite(baseline) ? baseline : 0;
+  const safeVariance = Math.max(1, Math.abs(Number.isFinite(variance) ? variance : 0));
+  const baseTiltRaw = Math.min(
+    100,
+    Math.max(0, Number.isFinite(varianceTiltRaw) ? varianceTiltRaw : 50)
+  );
+
+  const momentumStrength = Math.min(
+    100,
+    Math.max(0, Number.isFinite(momentum) ? momentum : 0)
+  ) / 100;
+
+  // A previous score has to be meaningfully above/below baseline to start a streak.
+  const deadZone = Number.isFinite(Number(options.deadZone))
+    ? Number(options.deadZone)
+    : 5;
+
+  // How much previous performance affects today's raw score.
+  const scoreMultiplier = Number.isFinite(Number(options.scoreMultiplier))
+    ? Number(options.scoreMultiplier)
+    : 0.35;
+
+  // Maximum temporary Tilt shift in either direction.
+  const maxTiltShift = Number.isFinite(Number(options.maxTiltShift))
+    ? Number(options.maxTiltShift)
+    : 15;
+
+  // Prevent one absurd score from creating an infinite heater/slump.
+  const maxDeltaVarianceMultiplier = Number.isFinite(Number(options.maxDeltaVarianceMultiplier))
+    ? Number(options.maxDeltaVarianceMultiplier)
+    : 2;
+
+  const maxDelta = Math.max(
+    deadZone + safeVariance,
+    safeVariance * maxDeltaVarianceMultiplier
+  );
+
+  let momentumBonus = 0;
+  let momentumTiltShift = 0;
+  let prevDelta = null;
+  let streakActive = false;
+
+  if (momentumStrength > 0 && Number.isFinite(prevScore)) {
+    prevDelta = prevScore - safeBaseline;
+    const absDelta = Math.abs(prevDelta);
+
+    if (absDelta > deadZone) {
+      const cappedDelta = Math.max(-maxDelta, Math.min(maxDelta, prevDelta));
+      const absCappedDelta = Math.abs(cappedDelta);
+      const direction = cappedDelta > 0 ? 1 : -1;
+
+      const streakSeverity = Math.min(
+        1,
+        Math.max(0, (absCappedDelta - deadZone) / safeVariance)
+      );
+
+      momentumBonus = cappedDelta * momentumStrength * scoreMultiplier;
+      momentumTiltShift = direction * streakSeverity * momentumStrength * maxTiltShift;
+      streakActive = true;
+    }
+  }
+
+  const effectiveVarianceTiltRaw = Math.min(
+    100,
+    Math.max(0, baseTiltRaw + momentumTiltShift)
+  );
+
+  return {
+    momentumBonus,
+    momentumTiltShift,
+    effectiveVarianceTiltRaw,
+    effectiveVarianceTilt: effectiveVarianceTiltRaw / 100,
+    baseVarianceTiltRaw: baseTiltRaw,
+    prevDelta,
+    streakActive
+  };
+}
+  
   function roundPoints(value, decimals = 2) {
     const num = Number(value);
     if (!Number.isFinite(num)) return 0;
@@ -2997,6 +3082,7 @@ function computeCanonicalMatchupStats(state, playerId, options = {}) {
     buildPersonalScoreHistoryRows,
     buildPersonalScoreHistoryCsv,
     roundPoints,
+    computeMomentumEffects,
     deriveCompletionPoints,
     pointsForCompletion,
     syncDerivedPoints,
