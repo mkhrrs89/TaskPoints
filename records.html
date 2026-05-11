@@ -701,16 +701,21 @@ const playerImageMap = new Map();
   lastBuildTotalDaysYou = sums.size;
 
   const youName = getYouName(state);
-  for (const [dk, score] of sums.entries()){
-records.push({
-  date: dk,
-  playerId: "YOU",
-  playerName: youName,
-  imageId: state.youImageId || "",
-  score: Number(score.toFixed(1)),
-  source: `${youName} (daily)`
-});
-  }
+  const dailyTotalsObj = Object.fromEntries(sums.entries());
+  const dailyTotalsWithInertia = window.TaskPointsCore?.computeDailyTotalsWithInertia
+    ? TaskPointsCore.computeDailyTotalsWithInertia(dailyTotalsObj, state)
+    : dailyTotalsObj;
+
+  Object.entries(dailyTotalsWithInertia).forEach(([dk, score]) => {
+    records.push({
+      date: dk,
+      playerId: "YOU",
+      playerName: youName,
+      imageId: state.youImageId || "",
+      score: Number(num(score).toFixed(1)),
+      source: `${youName} (daily)`
+    });
+  });
 
   // 2) AI player day scores from gameHistory
   const gh = Array.isArray(state.gameHistory) ? state.gameHistory : [];
@@ -752,9 +757,12 @@ function ensureRecordsCache(state){
     };
   }
 
-const activeIds = activePlayerIds(state);
+  // Ensure derived completions are included before building records.
+  const safeState = syncDerivedPointsIfNeeded(state);
 
-const records = buildRecords(state, activeIds);
+const activeIds = activePlayerIds(safeState);
+
+const records = buildRecords(safeState, activeIds);
 
 records.sort((a,b) => {
   if (b.score !== a.score) return b.score - a.score;
