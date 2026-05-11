@@ -687,21 +687,30 @@ const playerImageMap = new Map();
 
   // 1) YOU daily totals from completions
   const comps = Array.isArray(state.completions) ? state.completions : [];
-  const sums = new Map();
+  const aggregated = window.TaskPointsCore?.aggregateCompletionsByDate
+    ? TaskPointsCore.aggregateCompletionsByDate(comps, state)
+    : null;
 
-  for (const c of comps){
-    if (!c) continue;
+  let dailyTotalsObj = aggregated?.dailyTotals || null;
 
-    const dk = completionDateKey(c);
-    if (!dk) continue;
+  if (!dailyTotalsObj) {
+    const sums = new Map();
 
-    sums.set(dk, (sums.get(dk) || 0) + getCompletionPoints(c));
+    for (const c of comps){
+      if (!c) continue;
+
+      const dk = completionDateKey(c);
+      if (!dk) continue;
+
+      sums.set(dk, (sums.get(dk) || 0) + getCompletionPoints(c));
+    }
+
+    dailyTotalsObj = Object.fromEntries(sums.entries());
   }
 
-  lastBuildTotalDaysYou = sums.size;
+  lastBuildTotalDaysYou = Object.keys(dailyTotalsObj).length;
 
   const youName = getYouName(state);
-  const dailyTotalsObj = Object.fromEntries(sums.entries());
   const dailyTotalsWithInertia = window.TaskPointsCore?.computeDailyTotalsWithInertia
     ? TaskPointsCore.computeDailyTotalsWithInertia(dailyTotalsObj, state)
     : dailyTotalsObj;
