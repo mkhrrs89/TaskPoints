@@ -84,6 +84,11 @@
       margin-left:4px;
     }
 
+.ovr-cell{
+  font-weight:700;
+  font-variant-numeric: tabular-nums;
+}
+    
     td.editable-cell{
       cursor:text;
       position:relative;
@@ -381,6 +386,61 @@ function getNormalizedRisky(rawRisky) {
   return n;
 }
 
+  function clampNumber(value, min, max) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return min;
+  return Math.max(min, Math.min(max, n));
+}
+
+function computePlayerOverall(player) {
+  if (!player || player.id === "YOU" || player.isYou) return null;
+
+  const baseline = Number(player.baseline);
+  const variance = Number(player.variance);
+  const tilt = Number(player.varianceTilt);
+  const momentum = Number(player.momentum);
+  const riskyRaw = Number(player.risky);
+  const intimidation = Number(player.intimidation ?? player.int ?? 0);
+  const poise = Number(player.poise);
+
+  // If a player is missing the core scoring fields, don't fake an OVR.
+  if (!Number.isFinite(baseline)) return null;
+
+  const safeVariance = Number.isFinite(variance) ? Math.max(0, variance) : 0;
+  const safeTilt = Number.isFinite(tilt) ? clampNumber(tilt, 0, 100) : 50;
+  const safeMomentum = Number.isFinite(momentum) ? clampNumber(momentum, 0, 100) : 0;
+  const safeIntimidation = Number.isFinite(intimidation) ? clampNumber(intimidation, 0, 100) : 0;
+  const safePoise = Number.isFinite(poise) ? clampNumber(poise, 0, 100) : 0;
+
+  // getNormalizedRisky returns 0–10, so divide by 10 to get chance-like 0–1.
+  const riskyNormalized = getNormalizedRisky(riskyRaw);
+  const riskChance = clampNumber(riskyNormalized / 10, 0, 1);
+
+  const tiltedVarianceValue =
+    safeVariance * ((safeTilt - 50) / 100);
+
+  const momentumStreakValue =
+    8 * (safeMomentum / 100) * ((safeTilt - 50) / 50);
+
+  const riskyCeilingValue =
+    0.15 * safeVariance * riskChance;
+
+  const intimidationValue =
+    0.08 * safeIntimidation;
+
+  const poiseValue =
+    0.07 * safePoise;
+
+  const rawOverall =
+    baseline
+    + tiltedVarianceValue
+    + momentumStreakValue
+    + riskyCeilingValue
+    + intimidationValue
+    + poiseValue;
+
+  return Math.max(0, Math.min(99, Math.round(rawOverall)));
+}
 let players = loadPlayers();
 
 // Inject a special "You" row into the ratings table.
@@ -472,11 +532,12 @@ function exportRatingsCsv() {
     const variance = typeof p.variance === "number" ? p.variance : Number(p.variance);
     const varianceTilt = typeof p.varianceTilt === "number" ? p.varianceTilt : Number(p.varianceTilt);
     const momentum = typeof p.momentum === "number" ? p.momentum : Number(p.momentum);
-    const riskyNorm = getNormalizedRisky(p.risky);
+const riskyNorm = getNormalizedRisky(p.risky);
+const overall = computePlayerOverall(p);
 
 rows.push([
   p.name || "—",
-  "",
+  overall != null ? overall : "",
   Number.isFinite(baseline) ? baseline : "",
   Number.isFinite(variance) ? variance : "",
   Number.isFinite(varianceTilt) ? varianceTilt : "",
@@ -516,10 +577,11 @@ function renderTable() {
     const riskyNorm = getNormalizedRisky(p.risky);
     const style = p.style || "";
 
-    const stats = computePlayerStats(p);
+const stats = computePlayerStats(p);
+const overall = computePlayerOverall(p);
 
 tr.appendChild(makePlainCell(p.name || "—", "pr-4"));
-tr.appendChild(makePlainCell("—"));
+tr.appendChild(makePlainCell(overall != null ? String(overall) : "—", "ovr-cell"));
 tr.appendChild(makeEditableCell(p, "baseline", baseline != null ? String(baseline) : "—"));
 tr.appendChild(makeEditableCell(p, "variance", variance != null ? String(variance) : "—"));
 tr.appendChild(makeEditableCell(p, "varianceTilt", varianceTilt != null ? `${varianceTilt}%` : "—"));
@@ -822,7 +884,7 @@ function getSortValue(p, key) {
 
   switch (key) {
     case "name":      return (p.name || "").toLowerCase();
-    case "ovr":       return 0;
+    case "ovr":       return computePlayerOverall(p) ?? -1;
     case "baseline":  return Number(p.baseline) || 0;
     case "variance":  return Number(p.variance) || 0;
     case "varianceTilt": return Number(p.varianceTilt) || 0;
