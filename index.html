@@ -471,6 +471,7 @@ Nothing visible on the page is built here. === -->
           <div class="scoreboard-diff text-center">
             <div class="muted text-[11px] uppercase tracking-wide">The Diff</div>
             <div id="matchupDiffValue" class="scoreboard-diff-value">—</div>
+            <div id="matchupHeadToHeadRecord" class="matchupHeadToHeadRecord">H2H: —</div>
           </div>
        
 
@@ -2660,6 +2661,58 @@ function computeYourMatchupRecord(){
   return { wins, losses, ties, games, source: 'matchups' };
 }
 
+function computeHeadToHeadRecordVsOpponent(opponentId){
+  const result = {
+    youWins: 0,
+    opponentWins: 0,
+    ties: 0,
+    games: 0
+  };
+
+  if (!opponentId) return result;
+
+  const matchups = Array.isArray(state.matchups) ? state.matchups : [];
+  const todayKey = getGameDayKey(new Date());
+
+  matchups.forEach((m) => {
+    if (!m) return;
+
+    const aId = m.playerAId;
+    const bId = m.playerBId;
+    const isYouVsOpponent =
+      (aId === 'YOU' && bId === opponentId) ||
+      (aId === opponentId && bId === 'YOU');
+
+    if (!isYouVsOpponent) return;
+
+    const dateKeyVal = getMatchupDateKeyLocal(m);
+    if (!dateKeyVal || dateKeyVal > todayKey) return;
+
+    const aScore = Number(m.scoreA);
+    const bScore = Number(m.scoreB);
+    if (!Number.isFinite(aScore) || !Number.isFinite(bScore)) return;
+
+    result.games += 1;
+
+    const youScore = aId === 'YOU' ? aScore : bScore;
+    const opponentScore = aId === 'YOU' ? bScore : aScore;
+
+    if (youScore > opponentScore) result.youWins += 1;
+    else if (youScore < opponentScore) result.opponentWins += 1;
+    else result.ties += 1;
+  });
+
+  return result;
+}
+
+function formatHeadToHeadRecord(opponentId){
+  const h2h = computeHeadToHeadRecordVsOpponent(opponentId);
+
+  if (!h2h.games) return 'H2H: 0–0';
+  if (h2h.ties > 0) return `H2H: ${h2h.youWins}–${h2h.opponentWins}–${h2h.ties}`;
+  return `H2H: ${h2h.youWins}–${h2h.opponentWins}`;
+}
+
 function computeYourCompletionRecord(){
   const derived = getDerived();
   const dailyTotals = derived?.agg?.dailyTotals || {};
@@ -4422,6 +4475,7 @@ function renderTodaysMatchup(todayKeyStr, yourScore){
   const yourSecondarySwatchEl = $('matchupYourSecondarySwatch');
   const oppPrimarySwatchEl = $('matchupOpponentPrimarySwatch');
   const oppSecondarySwatchEl = $('matchupOpponentSecondarySwatch');
+  const h2hEl = $('matchupHeadToHeadRecord');
 
   if (!oppNameEl || !oppScoreEl || !yourScoreEl || !diffValueEl || !oppRecordEl || !yourRecordEl) return;
 
@@ -4476,6 +4530,7 @@ const updateTodayScoreIsland = (value) => {
     oppNameEl.textContent = '—';
     setPlayerColorSwatches(oppPrimarySwatchEl, oppSecondarySwatchEl);
     setOpponentScoreboardMeta(null);
+    if (h2hEl) h2hEl.textContent = 'H2H: —';
     return;
   }
 
@@ -4504,6 +4559,7 @@ const updateTodayScoreIsland = (value) => {
   oppRecordEl.textContent = `Record: ${getPlayerRecordText(oppId)}`;
   yourRecordEl.textContent = `Record: ${getYourRecordText()}`;
   setOpponentScoreboardMeta(oppId);
+  if (h2hEl) h2hEl.textContent = formatHeadToHeadRecord(oppId);
 
   const diff = Number((safeYourScore - visibleOppScore).toFixed(1));
 
