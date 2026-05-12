@@ -1514,12 +1514,25 @@ function getHabitTagColor(tag) {
 
 function getHabitBubbleStyleAttr(tag, status) {
   if (!tag) return '';
-  if (status !== 'on' && status !== 'failed') return '';
+  if (status !== 'on' && status !== 'failed' && status !== 'half') return '';
   const color = getHabitTagColor(tag);
   if (!color) return '';
   const dark = darkenHex(color, 0.35) || color;
   const textColor = getContrastText(color);
+  if (status === 'half') {
+    return ` style="background:linear-gradient(135deg, ${color} 0%, ${color} 50%, transparent 50%, transparent 100%);border-color:${dark};color:${textColor};"`;
+  }
   return ` style="background:linear-gradient(135deg, ${color} 0%, ${dark} 100%);border-color:${dark};color:${textColor};"`;
+}
+function getHabitCompletionFraction(completion) {
+  const raw = Number(completion?.completionFraction);
+  if (raw === 0.5) return 0.5;
+  if (raw === 1) return 1;
+  return 1; // backwards-compat: old habit completions were full
+}
+function isShowerHabit(habit) {
+  const name = String(habit?.name || habit?.title || '').trim().toLowerCase();
+  return name === 'shower';
 }
 
 function getHabitGroupStyleAttr(tag) {
@@ -5373,9 +5386,13 @@ function renderHabitRow(h, days, wrap, options = {}) {
     && weeklyThresholdRaw > 0
     && weeklyThresholdRaw <= 7;
   const weeklyThreshold = hasValidWeeklyThreshold ? Math.round(weeklyThresholdRaw) : 0;
-  const completedCountForVisibleWeek = days.reduce((count, d) => (
-    h.doneKeys.includes(d.key) ? count + 1 : count
-  ), 0);
+  const completedCountForVisibleWeek = days.reduce((count, d) => {
+    const completion = Array.isArray(state.completions)
+      ? state.completions.find(c => c?.source === 'habit' && c?.habitId === h.id && c?.dayKey === d.key)
+      : null;
+    if (!completion || !h.doneKeys.includes(d.key)) return count;
+    return count + getHabitCompletionFraction(completion);
+  }, 0);
   const isWeeklyCompleteForVisibleWeek = hasValidWeeklyThreshold
     && completedCountForVisibleWeek >= weeklyThreshold;
 
@@ -5391,8 +5408,12 @@ function renderHabitRow(h, days, wrap, options = {}) {
 
 const daysHtml = days.map(d => {
   const on = h.doneKeys.includes(d.key);
+  const completion = Array.isArray(state.completions)
+    ? state.completions.find(c => c?.source === 'habit' && c?.habitId === h.id && c?.dayKey === d.key)
+    : null;
+  const fraction = completion ? getHabitCompletionFraction(completion) : 0;
   const isIcy = on && Array.isArray(h.iceKeys) && h.iceKeys.includes(d.key);
-  const status = on ? 'on' : 'off';
+  const status = on ? (fraction === 0.5 ? 'half' : 'on') : 'off';
   const isPastIncomplete = !on && d.key < dateKey(new Date());
   const styleAttr = getHabitBubbleStyleAttr(h.tag, status);
   return `<div class="habitDay ${status}${isIcy ? ' icy' : ''}${isPastIncomplete ? ' past-incomplete' : ''}${isWeeklyCompleteForVisibleWeek ? ' week-complete' : ''}"${styleAttr} data-habit="${h.id}" data-day="${d.key}">
@@ -6320,26 +6341,46 @@ function applyHabitDayToggle(h, dayKey) {
       removeCompletionForDay();
     }
   } else {
-    const isShower = String(h.name || '').trim().toLowerCase() === 'shower';
+    const isShower = isShowerHabit(h);
     h.doneKeys = Array.isArray(h.doneKeys) ? h.doneKeys : [];
     h.iceKeys  = Array.isArray(h.iceKeys)  ? h.iceKeys  : [];
 
     if (!isShower) {
-      // Habits keep simple toggle behavior
+      // Normal habits: incomplete -> half -> full -> incomplete
       const idx = h.doneKeys.indexOf(dayKey);
-      if (idx === -1) {
-        h.doneKeys.push(dayKey);
-        const iso = new Date(fromKey(dayKey).getTime() + 12 * 3600 * 1000).toISOString();
+      const existing = Array.isArray(state.completions)
+        ? state.completions.find(c => c?.source === 'habit' && c?.habitId === habitId && c?.dayKey === dayKey)
+        : null;
+      const existingFraction = existing ? getHabitCompletionFraction(existing) : 0;
+      const basePoints = Number(h.pointsPerDay) || 0;
+      const iso = new Date(fromKey(dayKey).getTime() + 12 * 3600 * 1000).toISOString();
+
+      if (idx === -1 || existingFraction <= 0) {
+        if (idx === -1) h.doneKeys.push(dayKey);
         removeCompletionForDay();
         addCompletion({
           id: `habit:${habitId}:${dayKey}`,
           taskId: `habit:${habitId}:${dayKey}`,
           title: `[${tagLabel}] ${h.name} (${dayKey})`,
-          points: h.pointsPerDay || 0,
+          points: basePoints * 0.5,
           completedAtISO: iso,
           source,
           habitId: habitId,
-          dayKey: dayKey
+          dayKey: dayKey,
+          completionFraction: 0.5
+        });
+      } else if (existingFraction === 0.5) {
+        removeCompletionForDay();
+        addCompletion({
+          id: `habit:${habitId}:${dayKey}`,
+          taskId: `habit:${habitId}:${dayKey}`,
+          title: `[${tagLabel}] ${h.name} (${dayKey})`,
+          points: basePoints,
+          completedAtISO: iso,
+          source,
+          habitId: habitId,
+          dayKey: dayKey,
+          completionFraction: 1
         });
       } else {
         h.doneKeys.splice(idx, 1);
