@@ -2320,6 +2320,19 @@ header,
 }
 
 
+.habitDay.habit-half{
+  background:
+    linear-gradient(#0f1419, #0f1419) padding-box,
+    var(--tp-btn-teal-grad) border-box !important;
+  border: 4px solid transparent !important;
+  border-radius: 10px;
+  box-shadow:
+    0 0 0 1px rgba(45, 212, 191, 0.20),
+    0 0 14px rgba(45, 212, 191, 0.35);
+  color: #d7f4f1;
+}
+
+
 .habitDay.week-complete{
   border: 2px solid #fb923c !important;
 }
@@ -2350,13 +2363,13 @@ header,
 }
 
 /* Incomplete weekly-complete days should still look like actual bubbles */
-.habitDaysRow.week-complete-row .habitDay.week-complete:not(.on):not(.failed){
+.habitDaysRow.week-complete-row .habitDay.week-complete:not(.on):not(.failed):not(.habit-half){
   background: #0f1419 !important;
   border: 2px solid #fb923c !important;
 }
 
 /* For incomplete weekly-complete bubbles without custom tag styles, keep orange text */
-.habitDaysRow.week-complete-row .habitDay.week-complete:not(.on):not(.failed):not([style]){
+.habitDaysRow.week-complete-row .habitDay.week-complete:not(.on):not(.failed):not(.habit-half):not([style]){
   color: #fb923c !important;
 }
 

@@ -5414,9 +5414,10 @@ const daysHtml = days.map(d => {
   const fraction = completion ? getHabitCompletionFraction(completion) : 0;
   const isIcy = on && Array.isArray(h.iceKeys) && h.iceKeys.includes(d.key);
   const status = on ? (fraction === 0.5 ? 'half' : 'on') : 'off';
+  const isHalfCompleteNormalHabit = status === 'half' && !isShowerHabit(h);
   const isPastIncomplete = !on && d.key < dateKey(new Date());
   const styleAttr = getHabitBubbleStyleAttr(h.tag, status);
-  return `<div class="habitDay ${status}${isIcy ? ' icy' : ''}${isPastIncomplete ? ' past-incomplete' : ''}${isWeeklyCompleteForVisibleWeek ? ' week-complete' : ''}"${styleAttr} data-habit="${h.id}" data-day="${d.key}">
+  return `<div class="habitDay ${status}${isHalfCompleteNormalHabit ? ' habit-half' : ''}${isIcy ? ' icy' : ''}${isPastIncomplete ? ' past-incomplete' : ''}${isWeeklyCompleteForVisibleWeek ? ' week-complete' : ''}"${styleAttr} data-habit="${h.id}" data-day="${d.key}">
     ${d.date.getDate()}
   </div>`;
 }).join('');
