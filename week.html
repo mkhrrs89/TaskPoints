@@ -162,6 +162,7 @@
     }
     .habitDay{width:40px;height:38px;border-radius:10px;border:1px solid var(--border);display:grid;place-items:center;font-size:12px;cursor:pointer;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none;touch-action:manipulation}
     .habitDay.on{background:#3D1C0B;border-color:#fb923c}
+    .habitDay.half{background:linear-gradient(135deg,#3D1C0B 0%,#3D1C0B 50%,transparent 50%,transparent 100%);border-color:#fb923c}
 
     .week-tasks-header{
       display:flex;
@@ -661,12 +662,25 @@ function getHabitTagColor(tag) {
 
 function getHabitBubbleStyleAttr(tag, status) {
   if (!tag) return '';
-  if (status !== 'on' && status !== 'failed') return '';
+  if (status !== 'on' && status !== 'failed' && status !== 'half') return '';
   const color = getHabitTagColor(tag);
   if (!color) return '';
   const dark = darkenHex(color, 0.35) || color;
   const textColor = getContrastText(color);
+  if (status === 'half') {
+    return ` style="background:linear-gradient(135deg, ${color} 0%, ${color} 50%, transparent 50%, transparent 100%);border-color:${dark};color:${textColor};"`;
+  }
   return ` style="background:linear-gradient(135deg, ${color} 0%, ${dark} 100%);border-color:${dark};color:${textColor};"`;
+}
+function getHabitCompletionFraction(completion) {
+  const raw = Number(completion?.completionFraction);
+  if (raw === 0.5) return 0.5;
+  if (raw === 1) return 1;
+  return 1;
+}
+function isShowerHabit(habit) {
+  const name = String(habit?.name || habit?.title || '').trim().toLowerCase();
+  return name === 'shower';
 }
 function dayDiff(fromKey,toKey){
   if(!fromKey || !toKey) return 0;
@@ -860,14 +874,24 @@ function renderHabitSection(section, days, baseDate){
       h.weeklyThreshold ?? h.weeklyTarget ?? h.weeklyGoal ?? h.weekGoal ?? h.targetPerWeek ?? h.timesPerWeek
     );
     const hasWeeklyThreshold = Number.isFinite(weeklyThresholdRaw) && weeklyThresholdRaw > 0;
-    const completedInVisibleWeek = days.reduce((count, d) => count + (h.doneKeys.includes(d.key) ? 1 : 0), 0);
+    const completedInVisibleWeek = days.reduce((count, d) => {
+      const completion = Array.isArray(state.completions)
+        ? state.completions.find(c => c?.source === 'habit' && c?.habitId === h.id && c?.dayKey === d.key)
+        : null;
+      if (!completion || !h.doneKeys.includes(d.key)) return count;
+      return count + getHabitCompletionFraction(completion);
+    }, 0);
     const isWeeklyComplete = hasWeeklyThreshold && completedInVisibleWeek >= weeklyThresholdRaw;
 
 
     const daysHtml = days.map(d=>{
       const on = h.doneKeys.includes(d.key);
       const failed = h.failedKeys.includes(d.key);
-      const status = on ? 'on' : (failed ? 'failed' : 'off');
+      const completion = Array.isArray(state.completions)
+        ? state.completions.find(c => c?.source === 'habit' && c?.habitId === h.id && c?.dayKey === d.key)
+        : null;
+      const fraction = completion ? getHabitCompletionFraction(completion) : 0;
+      const status = on ? (fraction === 0.5 ? 'half' : 'on') : (failed ? 'failed' : 'off');
       const weekCompleteClass = isWeeklyComplete ? 'week-complete' : '';
       const className = section.title === 'vice'
         ? `habitDay viceDay ${status} ${weekCompleteClass}`.trim()
@@ -985,24 +1009,64 @@ function toggleHabitDay(habitId, dayKey, baseDate){
       removeCompletionForDay();
     }
   } else {
+    const isShower = isShowerHabit(h);
     const idx = h.doneKeys.indexOf(dayKey);
-    if (idx === -1) {
-      h.doneKeys.push(dayKey);
-      const iso = new Date(fromKey(dayKey).getTime() + 12*3600*1000).toISOString();
-      removeCompletionForDay();
-      state.completions.unshift({
-        id: `habit:${habitId}:${dayKey}`,
-        taskId: `habit:${habitId}:${dayKey}`,
-        title: `[${tagLabel}] ${h.name} (${dayKey})`,
-        points: h.pointsPerDay || 0,
-        completedAtISO: iso,
-        source,
-        habitId: habitId,
-        dayKey: dayKey
-      });
+    const existing = Array.isArray(state.completions)
+      ? state.completions.find(c => c?.source === 'habit' && c?.habitId === habitId && c?.dayKey === dayKey)
+      : null;
+    const existingFraction = existing ? getHabitCompletionFraction(existing) : 0;
+    const basePoints = Number(h.pointsPerDay) || 0;
+    const iso = new Date(fromKey(dayKey).getTime() + 12*3600*1000).toISOString();
+    if (!isShower) {
+      if (idx === -1 || existingFraction <= 0) {
+        if (idx === -1) h.doneKeys.push(dayKey);
+        removeCompletionForDay();
+        state.completions.unshift({
+          id: `habit:${habitId}:${dayKey}`,
+          taskId: `habit:${habitId}:${dayKey}`,
+          title: `[${tagLabel}] ${h.name} (${dayKey})`,
+          points: basePoints * 0.5,
+          completedAtISO: iso,
+          source,
+          habitId: habitId,
+          dayKey: dayKey,
+          completionFraction: 0.5
+        });
+      } else if (existingFraction === 0.5) {
+        removeCompletionForDay();
+        state.completions.unshift({
+          id: `habit:${habitId}:${dayKey}`,
+          taskId: `habit:${habitId}:${dayKey}`,
+          title: `[${tagLabel}] ${h.name} (${dayKey})`,
+          points: basePoints,
+          completedAtISO: iso,
+          source,
+          habitId: habitId,
+          dayKey: dayKey,
+          completionFraction: 1
+        });
+      } else {
+        h.doneKeys.splice(idx,1);
+        removeCompletionForDay();
+      }
     } else {
-      h.doneKeys.splice(idx,1);
-      removeCompletionForDay();
+      if (idx === -1) {
+        h.doneKeys.push(dayKey);
+        removeCompletionForDay();
+        state.completions.unshift({
+          id: `habit:${habitId}:${dayKey}`,
+          taskId: `habit:${habitId}:${dayKey}`,
+          title: `[${tagLabel}] ${h.name} (${dayKey})`,
+          points: basePoints,
+          completedAtISO: iso,
+          source,
+          habitId: habitId,
+          dayKey: dayKey
+        });
+      } else {
+        h.doneKeys.splice(idx,1);
+        removeCompletionForDay();
+      }
     }
 
     const failedIdx = h.failedKeys.indexOf(dayKey);
