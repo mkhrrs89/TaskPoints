@@ -1144,6 +1144,7 @@ textarea{
             <option value="name-asc">Name (A → Z)</option>
             <option value="name-desc">Name (Z → A)</option>
             <option value="avg-desc">PPD (high → low)</option>
+            <option value="overall-desc">Overall Rating (high → low)</option>
             <option value="baseline-desc">Baseline (high → low)</option>
             <option value="created-desc">Recently added</option>
             <option value="created-asc">Oldest first</option>
@@ -1596,6 +1597,7 @@ const PLAYER_SORT_OPTIONS = [
   "name-asc",
   "name-desc",
   "avg-desc",
+  "overall-desc",
   "baseline-desc",
   "created-desc",
   "created-asc"
@@ -2814,6 +2816,59 @@ if (unresolvedImageIds.length) {
     return Number.isFinite(ts) ? ts : 0;
   };
 
+  const clampNumber = (value, min, max) => {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return min;
+    return Math.max(min, Math.min(max, n));
+  };
+
+  const getNormalizedRisky = (rawRisky) => {
+    let n = Number(rawRisky);
+    if (Number.isNaN(n)) return 0;
+    if (n > 10) n = n / 10;
+    if (n < 0) n = 0;
+    if (n > 10) n = 10;
+    return n;
+  };
+
+  const getPlayerOverallRating = (player) => {
+    if (!player || player.id === "YOU" || player.isYou) return -Infinity;
+    const baseline = Number(player.baseline);
+    if (!Number.isFinite(baseline)) return -Infinity;
+
+    const variance = Number(player.variance);
+    const tilt = Number(player.varianceTilt);
+    const momentum = Number(player.momentum);
+    const riskyRaw = Number(player.risky);
+    const intimidation = Number(player.intimidation ?? player.int ?? 0);
+    const poise = Number(player.poise);
+
+    const safeVariance = Number.isFinite(variance) ? Math.max(0, variance) : 0;
+    const safeTilt = Number.isFinite(tilt) ? clampNumber(tilt, 0, 100) : 50;
+    const safeMomentum = Number.isFinite(momentum) ? clampNumber(momentum, 0, 100) : 0;
+    const safeIntimidation = Number.isFinite(intimidation) ? clampNumber(intimidation, 0, 100) : 0;
+    const safePoise = Number.isFinite(poise) ? clampNumber(poise, 0, 100) : 0;
+
+    const riskyNormalized = getNormalizedRisky(riskyRaw);
+    const riskChance = clampNumber(riskyNormalized / 10, 0, 1);
+
+    const tiltedVarianceValue = safeVariance * ((safeTilt - 50) / 100);
+    const momentumStreakValue = 8 * (safeMomentum / 100) * ((safeTilt - 50) / 50);
+    const riskyCeilingValue = 0.15 * safeVariance * riskChance;
+    const intimidationValue = 0.08 * safeIntimidation;
+    const poiseValue = 0.07 * safePoise;
+
+    const rawOverall =
+      baseline
+      + tiltedVarianceValue
+      + momentumStreakValue
+      + riskyCeilingValue
+      + intimidationValue
+      + poiseValue;
+
+    return Math.max(0, Math.min(99, Math.round(rawOverall)));
+  };
+
   const comparePlayers = (a, b) => {
     const youPriorityModes = new Set(["baseline-desc", "created-asc"]);
     if (youPriorityModes.has(playerSortMode)) {
@@ -2844,6 +2899,12 @@ if (unresolvedImageIds.length) {
         const aVal = Number.isFinite(avgA) ? avgA : -Infinity;
         const bVal = Number.isFinite(avgB) ? avgB : -Infinity;
         if (aVal !== bVal) return bVal - aVal;
+        break;
+      }
+      case "overall-desc": {
+        const overallA = getPlayerOverallRating(a);
+        const overallB = getPlayerOverallRating(b);
+        if (overallA !== overallB) return overallB - overallA;
         break;
       }
       case "baseline-desc": {
