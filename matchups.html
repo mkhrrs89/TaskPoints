@@ -989,6 +989,11 @@ for (let i = 0; i + 1 < pool.length; i += 2) {
       });
 
       const playerIds = Array.from(playerGroups.keys()).sort((a,b) => {
+        const aIsYou = a === "YOU";
+        const bIsYou = b === "YOU";
+        if (aIsYou && !bIsYou) return -1;
+        if (!aIsYou && bIsYou) return 1;
+
         const nameA = getName(a);
         const nameB = getName(b);
         return nameA.localeCompare(nameB);
