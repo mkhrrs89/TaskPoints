@@ -5407,13 +5407,9 @@ function renderHabitRow(h, days, wrap, options = {}) {
   }
 
 const daysHtml = days.map(d => {
-  const on = h.doneKeys.includes(d.key);
-  const completion = Array.isArray(state.completions)
-    ? state.completions.find(c => c?.source === 'habit' && c?.habitId === h.id && c?.dayKey === d.key)
-    : null;
-  const fraction = completion ? getHabitCompletionFraction(completion) : 0;
-  const isIcy = on && Array.isArray(h.iceKeys) && h.iceKeys.includes(d.key);
-  const status = on ? (fraction === 0.5 ? 'half' : 'on') : 'off';
+  const status = getHabitBubbleStatusClass(h, d.key);
+  const on = status !== 'off';
+  const isIcy = status === 'on' && Array.isArray(h.iceKeys) && h.iceKeys.includes(d.key);
   const isHalfCompleteNormalHabit = status === 'half' && !isShowerHabit(h);
   const isPastIncomplete = !on && d.key < dateKey(new Date());
   const styleAttr = getHabitBubbleStyleAttr(h.tag, status);
@@ -6278,6 +6274,23 @@ function scheduleHabitRerender() {
   }, 150);
 }
 
+function getHabitBubbleStatusClass(h, dayKey) {
+  const isDone = Array.isArray(h?.doneKeys) && h.doneKeys.includes(dayKey);
+  if (!isDone) return 'off';
+
+  const isHabit = (h?.category || 'habit') !== 'vice';
+  if (isHabit && !isShowerHabit(h)) {
+    const completion = Array.isArray(state.completions)
+      ? state.completions.find(c => c?.source === 'habit' && c?.habitId === h.id && c?.dayKey === dayKey)
+      : null;
+    if (completion && getHabitCompletionFraction(completion) === 0.5) {
+      return 'half';
+    }
+  }
+
+  return 'on';
+}
+
 function applyHabitBubbleStyle(el, habit, statusClass) {
   const styleAttr = getHabitBubbleStyleAttr(habit.tag, statusClass);
   if (styleAttr) {
@@ -6460,9 +6473,8 @@ function applyHabitDayToggle(h, dayKey) {
   
   h.updatedAtISO = new Date().toISOString();
   
-  if (h.doneKeys.includes(dayKey)) return 'on';
   if (h.failedKeys.includes(dayKey)) return 'failed';
-  return 'off';
+  return getHabitBubbleStatusClass(h, dayKey);
 }
 
 function handleHabitBubbleTap(bubbleEl) {
@@ -6480,8 +6492,9 @@ function handleHabitBubbleTap(bubbleEl) {
   }
 
   const statusClass = applyHabitDayToggle(h, dayKey);
-  bubbleEl.classList.remove('on', 'off', 'failed');
+  bubbleEl.classList.remove('on', 'off', 'failed', 'habit-half');
   bubbleEl.classList.add(statusClass);
+  bubbleEl.classList.toggle('habit-half', statusClass === 'half' && !isShowerHabit(h));
   const isIcyNow = statusClass === 'on'
     && Array.isArray(h.iceKeys)
     && h.iceKeys.includes(dayKey);
