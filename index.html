@@ -2699,7 +2699,7 @@ function computeHeadToHeadRecordVsOpponent(opponentId){
     if (!isYouVsOpponent) return;
 
     const dateKeyVal = getMatchupDateKeyLocal(m);
-    if (!dateKeyVal || dateKeyVal > todayKey) return;
+    if (!dateKeyVal || dateKeyVal >= todayKey) return;
 
     const aScore = Number(m.scoreA);
     const bScore = Number(m.scoreB);
