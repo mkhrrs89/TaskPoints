@@ -2959,6 +2959,9 @@ function ensureOpponentDripSchedule(dateKeyStr, playerId, totalPoints){
   updated.push(next);
 
   state.opponentDripSchedules = updated;
+  if (window.TaskPointsCore?.cleanupOpponentDripSchedules) {
+    state = TaskPointsCore.cleanupOpponentDripSchedules(state);
+  }
   save();
 
   return next;
@@ -3535,7 +3538,7 @@ function maybeAutoSimToday(){
 
 
 function normalizeState(s) {
-  return {
+  const normalized = {
     tasks:       Array.isArray(s.tasks)       ? s.tasks.map(normalizeTask)       : [],
     reminders:   Array.isArray(s.reminders)   ? s.reminders   : [],
     completions: Array.isArray(s.completions) ? s.completions.map(normalizeCompletion) : [],
@@ -3567,6 +3570,10 @@ function normalizeState(s) {
       ? TaskPointsCore.normalizeScoringSettings(s.scoringSettings || {})
       : (s.scoringSettings || {})
   };
+  if (window.TaskPointsCore?.cleanupOpponentDripSchedules) {
+    return TaskPointsCore.cleanupOpponentDripSchedules(normalized);
+  }
+  return normalized;
 }
 
 function save(savePath) {

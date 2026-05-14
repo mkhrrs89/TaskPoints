@@ -1368,7 +1368,7 @@ function normalizeHabit(habit) {
 }
 
 function normalizeState(s) {
-  return {
+  const normalized = {
     tasks:       Array.isArray(s.tasks)       ? s.tasks       : [],
     completions: Array.isArray(s.completions) ? s.completions : [],
     habits:      Array.isArray(s.habits)      ? s.habits.map(normalizeHabit)      : [],
@@ -1385,6 +1385,10 @@ function normalizeState(s) {
     notes: typeof s.notes === "string" ? s.notes : "",
     habitTagColors: normalizeHabitTagColors(s.habitTagColors)
   };
+  if (window.TaskPointsCore?.cleanupOpponentDripSchedules) {
+    return TaskPointsCore.cleanupOpponentDripSchedules(normalized);
+  }
+  return normalized;
 }
 
 function saveState(nextState, options = {}) {
@@ -2191,6 +2195,9 @@ function ensureOpponentDripSchedule(dateKeyStr, playerId, totalPoints){
   updated.push(next);
 
   state.opponentDripSchedules = updated;
+  if (window.TaskPointsCore?.cleanupOpponentDripSchedules) {
+    state = TaskPointsCore.cleanupOpponentDripSchedules(state);
+  }
   state = saveState(state);
   return next;
 }

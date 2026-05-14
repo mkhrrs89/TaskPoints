@@ -580,6 +580,9 @@ function load() {
       updated.push(next);
 
       state.opponentDripSchedules = updated;
+      if (window.TaskPointsCore?.cleanupOpponentDripSchedules) {
+        state = TaskPointsCore.cleanupOpponentDripSchedules(state);
+      }
       return next;
     }
 
@@ -1073,7 +1076,7 @@ function normalizeHabit(habit) {
 }
 
 function normalizeState(s) {
-  return {
+  const normalized = {
     tasks: Array.isArray(s.tasks) ? s.tasks : [],
     completions: Array.isArray(s.completions) ? s.completions : [],
     players: Array.isArray(s.players) ? s.players : [],
@@ -1097,6 +1100,10 @@ function normalizeState(s) {
       ? TaskPointsCore.normalizeScoringSettings(s.scoringSettings || {})
       : (s.scoringSettings || {})
   };
+  if (window.TaskPointsCore?.cleanupOpponentDripSchedules) {
+    return TaskPointsCore.cleanupOpponentDripSchedules(normalized);
+  }
+  return normalized;
 }
 
 function save(nextState) {
