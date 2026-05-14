@@ -1752,6 +1752,33 @@ const actualTotal = round2(Number(derivedActualTotal) || 0);
         tips: 'If you changed scoring settings over time, older entries may legitimately differ from today’s formulas.'
       });
 
+      const completionPruneWarning = state.lastCompletionPruneWarning;
+      checks.push({
+        id: 'completion-history-prune-warning',
+        title: 'Completion history has not been pruned',
+        status: completionPruneWarning ? 'FAIL' : 'PASS',
+        expected: 'No completion pruning warning markers exist',
+        actual: completionPruneWarning
+          ? 'Completion history was pruned. Historical records may be incomplete. Restore from backup if available.'
+          : 'No completion prune warning found',
+        details: completionPruneWarning ? [JSON.stringify(completionPruneWarning)] : [],
+        trace: 'state.lastCompletionPruneWarning'
+      });
+
+      const quotaWarnings = (Array.isArray(state.storageWarnings) ? state.storageWarnings : [])
+        .filter(entry => entry && entry.type === 'storage-quota-save-failed');
+      checks.push({
+        id: 'storage-quota-save-warning',
+        title: 'Storage quota health',
+        status: quotaWarnings.length ? 'WARN' : 'PASS',
+        expected: 'No storage quota save failure warnings are present',
+        actual: quotaWarnings.length
+          ? 'Browser storage quota was hit. Completion history was preserved, but saves may fail until storage is reduced.'
+          : 'No storage quota save warnings found',
+        details: quotaWarnings.map(entry => `${entry.atISO || 'unknown'}: ${entry.message || 'storage-quota-save-failed'}`),
+        trace: 'state.storageWarnings[type="storage-quota-save-failed"]'
+      });
+
       // New: Last 7 days (excluding today) have mood/calories/work entries
       const requiredRecentMetrics = ['mood', 'calories', 'work'];
       const recentMetricDays = new Map();
