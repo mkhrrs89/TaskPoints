@@ -1214,6 +1214,9 @@ function matchupAvatarSize(){
 
     if (allowPersist) {
       state.opponentDripSchedules = updated;
+      if (window.TaskPointsCore?.cleanupOpponentDripSchedules) {
+        state = TaskPointsCore.cleanupOpponentDripSchedules(state);
+      }
       saveState(state);
     } else if (window.TP_DEBUG_PERF) {
       console.debug('[TP_DEBUG_PERF][gamehub] boot read-only: skipped opponent drip schedule save', { dateKey: dateKeyStr, playerId });

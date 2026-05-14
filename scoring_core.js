@@ -478,8 +478,71 @@ const workHoursMax = Object.prototype.hasOwnProperty.call(workInput, 'hoursMax')
     };
   }
 
-  function normalizeState(s) {
+  function getOpponentDripScheduleCleanupSummary(state, options = {}) {
+    const source = state && typeof state === 'object' ? state : {};
+    const beforeCount = Array.isArray(source.opponentDripSchedules) ? source.opponentDripSchedules.length : 0;
+    const cleaned = cleanupOpponentDripSchedules(state, options);
+    const afterCount = Array.isArray(cleaned.opponentDripSchedules) ? cleaned.opponentDripSchedules.length : 0;
+    const today = options.todayKey || dateKey(new Date());
+    const yesterday = addDaysToDateKey(today, -1);
+    const tomorrow = addDaysToDateKey(today, 1);
+    const validKey = /^\d{4}-\d{2}-\d{2}$/;
+    const protectedCount = (cleaned.opponentDripSchedules || []).filter((item) => {
+      const d = typeof item?.date === 'string' ? item.date : '';
+      return d === today || d === yesterday || d === tomorrow || (validKey.test(d) && d > tomorrow);
+    }).length;
     return {
+      beforeCount,
+      afterCount,
+      removedCount: beforeCount - afterCount,
+      protectedCount
+    };
+  }
+
+  function cleanupOpponentDripSchedules(state, options = {}) {
+    const source = state && typeof state === 'object' ? state : {};
+    const schedules = Array.isArray(source.opponentDripSchedules) ? source.opponentDripSchedules : [];
+    const maxEntries = Number.isFinite(options.maxEntries) ? options.maxEntries : 120;
+    const today = options.todayKey || dateKey(new Date());
+    const yesterday = addDaysToDateKey(today, -1);
+    const tomorrow = addDaysToDateKey(today, 1);
+    const validKey = /^\d{4}-\d{2}-\d{2}$/;
+    const gameHistory = Array.isArray(source.gameHistory) ? source.gameHistory : [];
+    const finalScoreSet = new Set(gameHistory.map((g) => `${String(g?.date || '')}|${String(g?.playerId || '')}`));
+    const isProtected = (item) => {
+      const d = typeof item?.date === 'string' ? item.date : '';
+      return d === today || d === yesterday || d === tomorrow || (validKey.test(d) && d > tomorrow);
+    };
+    const isRecoveryCandidate = (item) => {
+      const d = typeof item?.date === 'string' ? item.date : '';
+      const p = item?.playerId;
+      return validKey.test(d) && p != null && !finalScoreSet.has(`${d}|${String(p)}`);
+    };
+    const sorted = schedules.slice().sort((a, b) => {
+      const d = String(b?.date || '').localeCompare(String(a?.date || ''));
+      if (d) return d;
+      return String(a?.playerId || '').localeCompare(String(b?.playerId || ''));
+    });
+    const protectedSchedules = [];
+    const recoverableOld = [];
+    const removableOld = [];
+    sorted.forEach((item) => {
+      const d = typeof item?.date === 'string' ? item.date : '';
+      if (isProtected(item)) protectedSchedules.push(item);
+      else if (isRecoveryCandidate(item)) recoverableOld.push(item);
+      else removableOld.push(item);
+    });
+    const base = protectedSchedules.concat(recoverableOld);
+    let finalSchedules = base;
+    if (finalSchedules.length > maxEntries) {
+      finalSchedules = finalSchedules.slice(0, maxEntries);
+    }
+    const cleanedState = { ...source, opponentDripSchedules: finalSchedules };
+    return cleanedState;
+  }
+
+  function normalizeState(s) {
+    const normalized = {
       tasks:       Array.isArray(s?.tasks)       ? s.tasks.map(normalizeTask)       : [],
       reminders:   Array.isArray(s?.reminders)   ? s.reminders   : [],
       completions: Array.isArray(s?.completions) ? s.completions.map(normalizeCompletion) : [],
@@ -510,6 +573,7 @@ workHistory: Array.isArray(s?.workHistory) ? s.workHistory : [],
       habitTagColors: normalizeHabitTagColors(s?.habitTagColors),
       scoringSettings: normalizeScoringSettings(s?.scoringSettings)
     };
+    return cleanupOpponentDripSchedules(normalized, { maxEntries: 120 });
   }
 
   function loadAppState(options = {}) {
@@ -575,7 +639,7 @@ function pruneStateForStorage(state, limits = {}) {
   const maxWorkHistory = Number.isFinite(limits.maxWorkHistory) ? limits.maxWorkHistory : 2500;
   const maxOpponentDripSchedules = Number.isFinite(limits.maxOpponentDripSchedules)
     ? limits.maxOpponentDripSchedules
-    : 60;
+    : 120;
   const allowCompletionPrune = limits.allowCompletionPrune === true;
 
   merged.completions = Array.isArray(merged.completions)
@@ -588,11 +652,7 @@ function pruneStateForStorage(state, limits = {}) {
   merged.matchups = Array.isArray(merged.matchups) ? merged.matchups : [];
   merged.workHistory = Array.isArray(merged.workHistory) ? merged.workHistory : [];
 
-  merged.opponentDripSchedules = Array.isArray(merged.opponentDripSchedules)
-    ? merged.opponentDripSchedules
-        .slice()
-        .sort((a, b) => String(b?.date || '').localeCompare(String(a?.date || '')))
-    : [];
+  merged.opponentDripSchedules = cleanupOpponentDripSchedules(merged, { maxEntries: maxOpponentDripSchedules }).opponentDripSchedules;
 
   if (allowCompletionPrune && merged.completions.length > maxCompletions) {
     const beforeCompletions = merged.completions.length;
@@ -1325,8 +1385,11 @@ return { state: merged, storageKey };
       console.log(`[TP saveStateSnapshot] start savePath=${savePath} storageKey=${storageKey} completionsBeforeFirstSave=${beforeSummary.completions}${callsite ? ` callsite=${callsite}` : ''}`);
     }
 
+    const initialCandidate = cleanupOpponentDripSchedules(state, {
+      maxEntries: Number.isFinite(options?.limits?.maxOpponentDripSchedules) ? options.limits.maxOpponentDripSchedules : 120
+    });
     try {
-      return attemptSave(state, false, 'initial');
+      return attemptSave(initialCandidate, false, 'initial');
     } catch (err) {
       if (!isQuotaError(err)) throw err;
       lastQuotaError = err;
@@ -3093,6 +3156,8 @@ function computeCanonicalMatchupStats(state, playerId, options = {}) {
     normalizeScoringSettings,
     getScoringSettings,
     normalizeState,
+    cleanupOpponentDripSchedules,
+    getOpponentDripScheduleCleanupSummary,
     loadAppState,
     pruneStateForStorage,
     mergeState,
