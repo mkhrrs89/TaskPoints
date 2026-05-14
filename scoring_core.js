@@ -576,6 +576,7 @@ function pruneStateForStorage(state, limits = {}) {
   const maxOpponentDripSchedules = Number.isFinite(limits.maxOpponentDripSchedules)
     ? limits.maxOpponentDripSchedules
     : 60;
+  const allowCompletionPrune = limits.allowCompletionPrune === true;
 
   merged.completions = Array.isArray(merged.completions)
     ? merged.completions
@@ -593,8 +594,19 @@ function pruneStateForStorage(state, limits = {}) {
         .sort((a, b) => String(b?.date || '').localeCompare(String(a?.date || '')))
     : [];
 
-  if (merged.completions.length > maxCompletions) {
+  if (allowCompletionPrune && merged.completions.length > maxCompletions) {
+    const beforeCompletions = merged.completions.length;
+    const beforeOldest = merged.completions[merged.completions.length - 1]?.completedAtISO || null;
     merged.completions = merged.completions.slice(0, maxCompletions);
+    const afterOldest = merged.completions[merged.completions.length - 1]?.completedAtISO || null;
+    merged.lastCompletionPruneWarning = {
+      type: 'completion-history-pruned',
+      atISO: new Date().toISOString(),
+      beforeCompletions,
+      afterCompletions: merged.completions.length,
+      firstBeforeDate: beforeOldest,
+      firstAfterDate: afterOldest
+    };
   }
   if (merged.gameHistory.length > maxGameHistory) {
     merged.gameHistory = merged.gameHistory.slice(-maxGameHistory);
@@ -1273,6 +1285,7 @@ return { state: merged, storageKey };
       schedule: Array.isArray(snapshot?.schedule) ? snapshot.schedule.length : 0
     });
     const savePath = options.savePath || options.source || options.reason || options.caller || 'unknown';
+    let lastQuotaError = null;
     const callsite = debugEnabled ? (new Error().stack || '').split('\n').slice(2, 4).map(line => line.trim()).join(' <- ') : '';
     const beforeSummary = summarizeStateSizes(state);
     const logStage = (stage, snapshot) => {
@@ -1292,6 +1305,12 @@ return { state: merged, storageKey };
     };
 
     const storageKey = options.storageKey || STORAGE_KEY;
+    const appendStorageWarning = (snapshot, warning) => {
+      const base = snapshot && typeof snapshot === 'object' ? snapshot : {};
+      const warnings = Array.isArray(base.storageWarnings) ? base.storageWarnings.slice() : [];
+      warnings.push(warning);
+      return { ...base, storageWarnings: warnings };
+    };
     const attemptSave = (candidate, trimmed, stage = 'initial') => {
       localStorage.setItem(storageKey, JSON.stringify(candidate));
       if (debugEnabled) {
@@ -1310,6 +1329,7 @@ return { state: merged, storageKey };
       return attemptSave(state, false, 'initial');
     } catch (err) {
       if (!isQuotaError(err)) throw err;
+      lastQuotaError = err;
       if (debugEnabled) {
         console.log(`[TP saveStateSnapshot] firstSaveQuotaError=true savePath=${savePath} storageKey=${storageKey}`);
       }
@@ -1322,22 +1342,22 @@ return { state: merged, storageKey };
       return attemptSave(trimmed, true, 'initial-pruned');
     } catch (err) {
       if (!isQuotaError(err)) throw err;
+      lastQuotaError = err;
     }
 
     const imagePreservingLimitSets = [
-      { maxCompletions: 8000, maxGameHistory: 2000, maxMatchups: 2000, maxWorkHistory: 2000 },
-      { maxCompletions: 5000, maxGameHistory: 1500, maxMatchups: 1500, maxWorkHistory: 1500 },
-      { maxCompletions: 3000, maxGameHistory: 1000, maxMatchups: 1000, maxWorkHistory: 1000 },
-      { maxCompletions: 2000, maxGameHistory: 800, maxMatchups: 800, maxWorkHistory: 800 },
-      { maxCompletions: 1000, maxGameHistory: 500, maxMatchups: 500, maxWorkHistory: 500 },
-      { maxCompletions: 500, maxGameHistory: 250, maxMatchups: 250, maxWorkHistory: 250 }
+      { maxGameHistory: 2000, maxMatchups: 2000, maxWorkHistory: 2000 },
+      { maxGameHistory: 1500, maxMatchups: 1500, maxWorkHistory: 1500 },
+      { maxGameHistory: 1000, maxMatchups: 1000, maxWorkHistory: 1000 },
+      { maxGameHistory: 800, maxMatchups: 800, maxWorkHistory: 800 },
+      { maxGameHistory: 500, maxMatchups: 500, maxWorkHistory: 500 },
+      { maxGameHistory: 250, maxMatchups: 250, maxWorkHistory: 250 }
     ];
 
     for (let i = 0; i < imagePreservingLimitSets.length; i += 1) {
       const limits = imagePreservingLimitSets[i];
       const tightenedLimits = {
         ...options.limits,
-        maxCompletions: capLimit(options.limits?.maxCompletions, limits.maxCompletions),
         maxGameHistory: capLimit(options.limits?.maxGameHistory, limits.maxGameHistory),
         maxMatchups: capLimit(options.limits?.maxMatchups, limits.maxMatchups),
         maxWorkHistory: capLimit(options.limits?.maxWorkHistory, limits.maxWorkHistory),
@@ -1349,6 +1369,7 @@ return { state: merged, storageKey };
         return attemptSave(tightened, true, `imagePreserving[${i}]`);
       } catch (err) {
         if (!isQuotaError(err)) throw err;
+        lastQuotaError = err;
       }
     }
 
@@ -1358,11 +1379,11 @@ return { state: merged, storageKey };
       return attemptSave(stripped, true, 'stripImages');
     } catch (err) {
       if (!isQuotaError(err)) throw err;
+      lastQuotaError = err;
     }
 
     const aggressiveLimits = {
       ...options.limits,
-      maxCompletions: capLimit(options.limits?.maxCompletions, 2000),
       maxGameHistory: capLimit(options.limits?.maxGameHistory, 1000),
       maxMatchups: capLimit(options.limits?.maxMatchups, 1000),
       maxWorkHistory: capLimit(options.limits?.maxWorkHistory, 1000),
@@ -1374,20 +1395,20 @@ return { state: merged, storageKey };
       return attemptSave(aggressive, true, 'aggressive');
     } catch (err) {
       if (!isQuotaError(err)) throw err;
+      lastQuotaError = err;
     }
 
     const fallbackLimitSets = [
-      { maxCompletions: 1000, maxGameHistory: 500, maxMatchups: 500, maxWorkHistory: 500 },
-      { maxCompletions: 500, maxGameHistory: 250, maxMatchups: 250, maxWorkHistory: 250 },
-      { maxCompletions: 250, maxGameHistory: 125, maxMatchups: 125, maxWorkHistory: 125 },
-      { maxCompletions: 100, maxGameHistory: 50, maxMatchups: 50, maxWorkHistory: 50 }
+      { maxGameHistory: 500, maxMatchups: 500, maxWorkHistory: 500 },
+      { maxGameHistory: 250, maxMatchups: 250, maxWorkHistory: 250 },
+      { maxGameHistory: 125, maxMatchups: 125, maxWorkHistory: 125 },
+      { maxGameHistory: 50, maxMatchups: 50, maxWorkHistory: 50 }
     ];
 
     for (let i = 0; i < fallbackLimitSets.length; i += 1) {
       const limits = fallbackLimitSets[i];
       const tightenedLimits = {
         ...options.limits,
-        maxCompletions: capLimit(options.limits?.maxCompletions, limits.maxCompletions),
         maxGameHistory: capLimit(options.limits?.maxGameHistory, limits.maxGameHistory),
         maxMatchups: capLimit(options.limits?.maxMatchups, limits.maxMatchups),
         maxWorkHistory: capLimit(options.limits?.maxWorkHistory, limits.maxWorkHistory),
@@ -1399,12 +1420,12 @@ return { state: merged, storageKey };
         return attemptSave(tightened, true, `fallback[${i}]`);
       } catch (err) {
         if (!isQuotaError(err)) throw err;
+        lastQuotaError = err;
       }
     }
 
     const emergency = {
       ...aggressive,
-      completions: aggressive.completions.slice(0, 50),
       gameHistory: [],
       matchups: [],
       schedule: [],
@@ -1412,8 +1433,26 @@ return { state: merged, storageKey };
       workHistory: []
     };
     logStage('emergency', emergency);
+    try {
+      return attemptSave(emergency, true, 'emergency');
+    } catch (err) {
+      if (!isQuotaError(err)) throw err;
+      lastQuotaError = err;
+    }
 
-    return attemptSave(emergency, true, 'emergency');
+    const quotaWarning = {
+      type: 'storage-quota-save-failed',
+      atISO: new Date().toISOString(),
+      message: 'Save failed because browser storage is full. Completion history was preserved. Export a backup or reduce large stored assets.'
+    };
+    const warningState = appendStorageWarning(state, quotaWarning);
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(warningState));
+    } catch (warningErr) {
+      console.warn('TaskPointsCore: unable to persist storage warning after quota failure.', warningErr);
+    }
+    console.error('TaskPointsCore: save failed due to browser storage quota. Completion history was preserved.', lastQuotaError || new Error('Quota exceeded'));
+    throw lastQuotaError || new Error('TaskPointsCore save failed: browser storage quota exceeded');
   }
 
   // Full snapshot writes are potentially destructive. Use this helper for replace-all flows:
