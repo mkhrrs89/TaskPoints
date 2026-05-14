@@ -119,6 +119,21 @@
         </div>
       </details>
 
+      <details class="glass space-y-3" id="storageHealthSection">
+        <summary class="flex items-center justify-between gap-3 flex-wrap cursor-pointer">
+          <div>
+            <div class="text-lg font-semibold">Storage Health</div>
+            <div class="muted text-sm">Monitor localStorage and browser/origin storage usage.</div>
+          </div>
+        </summary>
+        <div class="space-y-3 pt-4">
+          <div class="flex items-center justify-end">
+            <button id="storageHealthRefreshBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Refresh</button>
+          </div>
+          <div id="storageHealthOutput" class="space-y-3 text-sm"></div>
+        </div>
+      </details>
+
 <div class="glass space-y-3" id="briefToolsSection">
   <div>
     <div class="text-lg font-semibold">Daily Brief + GitHub</div>
@@ -3089,6 +3104,139 @@ rows.push([
       downloadCsv(`taskpoints-simulation-${stamp}.csv`, rows);
     }
 
+    function getUtf8SizeBytes(value) {
+      const str = typeof value === "string" ? value : "";
+      try {
+        if (typeof TextEncoder !== "undefined") return new TextEncoder().encode(str).length;
+      } catch (_) {}
+      return str.length * 2;
+    }
+
+    function formatStorageUnits(bytes) {
+      const safe = Number.isFinite(bytes) && bytes > 0 ? bytes : 0;
+      return { bytes: safe, kib: safe / 1024, mib: safe / (1024 * 1024) };
+    }
+
+    function getTaskPointsStorageStatus(mib) {
+      if (mib >= 4.75) return { label: "Backup/export now", cls: "btn-deny" };
+      if (mib >= 4.25) return { label: "Danger", cls: "btn-deny" };
+      if (mib >= 3.5) return { label: "Warning", cls: "btn-warn" };
+      if (mib >= 2.5) return { label: "Watch", cls: "btn-ghost" };
+      return { label: "Good", cls: "btn-teal" };
+    }
+
+    function getLocalStorageSizeReport() {
+      const entries = [];
+      let totalBytes = 0;
+      try {
+        for (let i = 0; i < localStorage.length; i += 1) {
+          const key = localStorage.key(i);
+          if (!key) continue;
+          const value = localStorage.getItem(key) || "";
+          const bytes = getUtf8SizeBytes(value);
+          totalBytes += bytes;
+          entries.push({ key, ...formatStorageUnits(bytes) });
+        }
+      } catch (err) {
+        console.warn("Storage Health localStorage scan failed", err);
+      }
+      entries.sort((a, b) => b.bytes - a.bytes);
+      return { total: formatStorageUnits(totalBytes), entries };
+    }
+
+    async function getBrowserStorageEstimate() {
+      try {
+        if (!navigator.storage || typeof navigator.storage.estimate !== "function") return null;
+        const result = await navigator.storage.estimate();
+        const usage = Number(result?.usage || 0);
+        const quota = Number(result?.quota || 0);
+        return { usage: formatStorageUnits(usage), quota: formatStorageUnits(quota), percent: quota > 0 ? (usage / quota) * 100 : 0 };
+      } catch (err) {
+        console.warn("Storage Health browser estimate unavailable", err);
+        return null;
+      }
+    }
+
+    async function getTaskPointsImageCount() {
+      try {
+        const core = window.TaskPointsCore || {};
+        if (!window.indexedDB) return { count: 0, available: false };
+        const dbName = core.IMAGE_DB_NAME || "taskpoints";
+        const storeName = core.IMAGE_STORE_NAME || "images";
+        const db = await new Promise((resolve, reject) => {
+          const req = indexedDB.open(dbName, 1);
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => reject(req.error);
+        });
+        const count = await new Promise((resolve, reject) => {
+          const tx = db.transaction(storeName, "readonly");
+          const req = tx.objectStore(storeName).count();
+          req.onsuccess = () => resolve(Number(req.result || 0));
+          req.onerror = () => reject(req.error);
+        });
+        db.close();
+        return { count, available: true };
+      } catch (_) {
+        return { count: 0, available: false };
+      }
+    }
+
+    async function renderStorageHealthPanel() {
+      const output = document.getElementById("storageHealthOutput");
+      if (!output) return;
+      output.innerHTML = '<div class="muted text-xs">Refreshing…</div>';
+      const report = getLocalStorageSizeReport();
+      const mainEntry = report.entries.find((entry) => entry.key === "taskpoints_v1") || { key: "taskpoints_v1", ...formatStorageUnits(0) };
+      const mainStatus = getTaskPointsStorageStatus(mainEntry.mib);
+      let parsedState = null;
+      try {
+        const raw = localStorage.getItem("taskpoints_v1");
+        parsedState = raw ? JSON.parse(raw) : null;
+      } catch (_) {}
+      const browserEstimate = await getBrowserStorageEstimate();
+      const persisted = await (async () => {
+        try {
+          if (!navigator.storage || typeof navigator.storage.persisted !== "function") return "Not available";
+          return (await navigator.storage.persisted()) ? "Yes" : "No";
+        } catch (_) { return "Not available"; }
+      })();
+      const imageInfo = await getTaskPointsImageCount();
+      const backupEntries = report.entries.filter((entry) => {
+        const lower = entry.key.toLowerCase();
+        return lower.includes("backup") || lower.includes("before") || lower.includes("snapshot") || lower.startsWith("taskpoints_v1_before");
+      });
+      const counts = parsedState && typeof parsedState === "object" ? {
+        tasks: Array.isArray(parsedState.tasks) ? parsedState.tasks.length : 0,
+        completions: Array.isArray(parsedState.completions) ? parsedState.completions.length : 0,
+        players: Array.isArray(parsedState.players) ? parsedState.players.length : 0,
+        habits: Array.isArray(parsedState.habits) ? parsedState.habits.length : 0,
+        gameHistory: Array.isArray(parsedState.gameHistory) ? parsedState.gameHistory.length : 0,
+        matchups: Array.isArray(parsedState.matchups) ? parsedState.matchups.length : 0,
+        opponentDripSchedules: parsedState.opponentDripSchedules && typeof parsedState.opponentDripSchedules === "object" ? Object.keys(parsedState.opponentDripSchedules).length : 0
+      } : null;
+      output.innerHTML = `
+        <div><strong>Main State:</strong> taskpoints_v1: <strong>${mainEntry.mib.toFixed(2)} MiB</strong> <span class="btn ${mainStatus.cls} btn-toolbar">${mainStatus.label}</span></div>
+        <div class="muted">LocalStorage Total: ${report.total.mib.toFixed(2)} MiB across ${report.entries.length} keys</div>
+        <div class="muted">Browser Storage Estimate (origin): ${browserEstimate ? `${browserEstimate.usage.mib.toFixed(2)} MiB of ${browserEstimate.quota.mib.toFixed(2)} MiB (${browserEstimate.percent.toFixed(2)}%)` : "Not available"}</div>
+        <div class="muted">Persistent Storage: ${persisted}</div>
+        <div class="muted">Images: ${imageInfo.available ? `${imageInfo.count} in IndexedDB` : "Not available"} (size estimate unavailable)</div>
+        <div class="overflow-x-auto">
+          <div class="text-xs font-semibold mb-1">Largest localStorage keys</div>
+          <table class="w-full text-xs"><thead><tr><th class="text-left">key</th><th class="text-right">bytes</th><th class="text-right">KiB</th><th class="text-right">MiB</th></tr></thead><tbody>
+            ${report.entries.slice(0, 12).map((entry) => {
+              const flagged = entry.bytes >= 500 * 1024 || /taskpoints_v1|backup|before|snapshot/i.test(entry.key);
+              return `<tr><td class="pr-2 break-all">${escapeHtml(entry.key)}${flagged ? ' <span class="muted">(large)</span>' : ''}</td><td class="text-right">${entry.bytes}</td><td class="text-right">${entry.kib.toFixed(2)}</td><td class="text-right">${entry.mib.toFixed(3)}</td></tr>`;
+            }).join("")}
+          </tbody></table>
+        </div>
+        <div>
+          <div class="text-xs font-semibold mb-1">Local backup keys</div>
+          <div class="text-xs">${backupEntries.length ? backupEntries.map((entry) => `${escapeHtml(entry.key)} — ${entry.mib.toFixed(3)} MiB`).join("<br/>") : "None detected"}</div>
+          ${backupEntries.reduce((sum, entry) => sum + entry.bytes, 0) > 1024 * 1024 ? '<div class="muted text-xs mt-1">Backup-like keys are using significant localStorage space.</div>' : ''}
+        </div>
+        <div class="text-xs">${counts ? `Data counts: tasks ${counts.tasks}, completions ${counts.completions}, players ${counts.players}, habits ${counts.habits}, gameHistory ${counts.gameHistory}, matchups ${counts.matchups}, opponentDripSchedules ${counts.opponentDripSchedules}` : "Data counts unavailable (missing or invalid taskpoints_v1 JSON)."}</div>`;
+    }
+
     let latestSimulation = null;
 
     document.addEventListener('DOMContentLoaded', () => {
@@ -3101,6 +3249,7 @@ rows.push([
       document.getElementById('categoryReportBtn')?.addEventListener('click', generateCategoryReport);
       document.getElementById('scwmTrendBtn')?.addEventListener('click', generateScwmTrendReport);
       document.getElementById('habitCalendarReportBtn')?.addEventListener('click', generateHabitCalendarReport);
+      document.getElementById('storageHealthRefreshBtn')?.addEventListener('click', renderStorageHealthPanel);
       const missingScoreDateInput = document.getElementById("missingScoreDate");
       const missingScoreTypeSelect = document.getElementById("missingScoreType");
       const missingScoreSaveBtn = document.getElementById("missingScoreSaveBtn");
@@ -3120,6 +3269,7 @@ rows.push([
       scheduleRender(renderScoringSettings);
       scheduleRender(renderHabitTagColors);
       scheduleRender(renderHabitCalendarSelector);
+      scheduleRender(renderStorageHealthPanel);
 
       const scoringInputIds = [
         'sleepBaseDivisor',
