@@ -2323,13 +2323,13 @@ header,
 .habitDay.habit-half{
   background:
     linear-gradient(#0f1419, #0f1419) padding-box,
-    var(--tp-btn-teal-grad) border-box !important;
+    linear-gradient(180deg, var(--habit-half-color, #2dd4bf), var(--habit-half-color, #2dd4bf)) border-box !important;
   border: 4px solid transparent !important;
   border-radius: 10px;
   box-shadow:
-    0 0 0 1px rgba(45, 212, 191, 0.20),
-    0 0 14px rgba(45, 212, 191, 0.35);
-  color: #d7f4f1;
+    0 0 0 1px var(--habit-half-glow, rgba(45, 212, 191, 0.40)),
+    0 0 14px var(--habit-half-glow, rgba(45, 212, 191, 0.35));
+  color: #f8fafc !important;
 }
 
 

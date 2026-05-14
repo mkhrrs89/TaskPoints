@@ -1520,7 +1520,7 @@ function getHabitBubbleStyleAttr(tag, status) {
   const dark = darkenHex(color, 0.35) || color;
   const textColor = getContrastText(color);
   if (status === 'half') {
-    return ` style="background:linear-gradient(135deg, ${color} 0%, ${color} 50%, transparent 50%, transparent 100%);border-color:${dark};color:${textColor};"`;
+    return ` style="--habit-half-color:${color};--habit-half-glow:${color};"`;
   }
   return ` style="background:linear-gradient(135deg, ${color} 0%, ${dark} 100%);border-color:${dark};color:${textColor};"`;
 }
