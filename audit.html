@@ -667,7 +667,8 @@
       'youSecondaryColor',
       'scoringSettings',
       'habitTagColors',
-      'workHistory'
+      'workHistory',
+      'weightHistory'
     ];
     const NO_OP_DIFF_EXCLUDED_KEYS = new Set(['__auditRuntime']);
     const DEFAULT_BY_KEY = {
@@ -1265,6 +1266,35 @@ function runStickyFieldPreservationAudit(state) {
     status: failures.length ? 'FAIL' : 'PASS',
     expected: `Sticky fields preserved across ${AUDIT_PAGE_ADAPTERS.length} page adapters`,
     actual: failures.length ? `${failures.length} page adapter(s) failed sticky checks` : 'All sticky fields preserved',
+    details: failures
+  };
+}
+
+function runWeightHistorySavePathAudit(state) {
+  const seeded = cloneAuditState(state || {});
+  const sentinel = {
+    id: `audit-weight-${Date.now()}`,
+    dateKey: '2026-05-14',
+    date: '2026-05-14',
+    loggedAtISO: new Date().toISOString(),
+    weight: 212.4
+  };
+  const baseHistory = Array.isArray(seeded.weightHistory) ? seeded.weightHistory.slice() : [];
+  baseHistory.push(sentinel);
+  seeded.weightHistory = baseHistory;
+
+  const failures = [];
+  AUDIT_PAGE_ADAPTERS.forEach(adapter => {
+    const runResult = adapter.run(cloneAuditState(seeded));
+    const next = runResult && runResult.state ? runResult.state : runResult;
+    const after = Array.isArray(next?.weightHistory) ? next.weightHistory : [];
+    const kept = after.some(entry => entry && typeof entry === 'object' && entry.id === sentinel.id && Number(entry.weight) === sentinel.weight);
+    if (!kept) failures.push(`${adapter.page} [${runResult?.mode || 'audit-mirror'}]: dropped sentinel weight entry`);
+  });
+  return {
+    status: failures.length ? 'FAIL' : 'PASS',
+    expected: 'Weight history survives page save paths',
+    actual: failures.length ? `${failures.length} page adapter(s) dropped weightHistory` : 'All page adapters preserved weightHistory',
     details: failures
   };
 }
@@ -2308,6 +2338,18 @@ const actualTotal = round2(Number(derivedActualTotal) || 0);
         details: stickyFieldAudit.details,
         trace: 'critical keys preserved across page adapters',
         tips: 'Ensure page-level normalize/save logic preserves sticky profile and settings fields.'
+      });
+
+      const weightHistoryAudit = runWeightHistorySavePathAudit(state);
+      checks.push({
+        id: 'weight-history-preserved',
+        title: 'Weight history survives page save paths',
+        status: weightHistoryAudit.status,
+        expected: weightHistoryAudit.expected,
+        actual: weightHistoryAudit.actual,
+        details: weightHistoryAudit.details,
+        trace: 'weightHistory sentinel preserved across page adapters',
+        tips: 'Ensure all normalize/save adapters keep state.weightHistory as a top-level sticky array.'
       });
 
       // New: Audit self-check (verifies other checks are wired correctly)

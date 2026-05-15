@@ -964,6 +964,7 @@ const normalizeHabitFallback = (habit) => {
 const normalizeStateFallback = (s) => {
   const src = s && typeof s === 'object' ? s : {};
   return {
+    ...src,
     tasks: Array.isArray(src.tasks) ? src.tasks : [],
     completions: Array.isArray(src.completions) ? src.completions : [],
     players: Array.isArray(src.players) ? src.players : [],
@@ -972,6 +973,7 @@ const normalizeStateFallback = (s) => {
     gameHistory: Array.isArray(src.gameHistory) ? src.gameHistory : [],
     matchups: Array.isArray(src.matchups) ? src.matchups : [],
     schedule: Array.isArray(src.schedule) ? src.schedule : [],
+    weightHistory: Array.isArray(src.weightHistory) ? src.weightHistory : [],
     opponentDripSchedules: Array.isArray(src.opponentDripSchedules) ? src.opponentDripSchedules : [],
     workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
 youImageId: typeof src.youImageId === 'string' ? src.youImageId : '',

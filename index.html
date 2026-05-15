@@ -4824,10 +4824,19 @@ function getWeightHistorySorted() {
   const list = Array.isArray(state?.weightHistory) ? state.weightHistory : [];
   return list
     .map((entry) => {
-      const date = typeof entry?.date === 'string' ? entry.date.trim() : '';
+      const date = typeof entry?.date === 'string' && entry.date.trim()
+        ? entry.date.trim()
+        : (typeof entry?.dateKey === 'string' ? entry.dateKey.trim() : '');
       const weight = Number(entry?.weight);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(weight)) return null;
-      return { date, weight };
+      return {
+        ...entry,
+        date,
+        dateKey: date,
+        loggedAtISO: typeof entry?.loggedAtISO === 'string' ? entry.loggedAtISO : null,
+        id: typeof entry?.id === 'string' ? entry.id : null,
+        weight
+      };
     })
     .filter(Boolean)
     .sort((a, b) => a.date.localeCompare(b.date));
@@ -4910,17 +4919,42 @@ function submitWeightEntry() {
   // Prevent any old queued save from writing stale data over the new weight entry.
   window.TaskPointsCore?.flushPendingSaves?.();
 
-  const history = getWeightHistorySorted();
-  const next = history.filter((entry) => entry.date !== date);
-  next.push({ date, weight });
+  const latest = normalizeState(load());
+  const history = Array.isArray(latest?.weightHistory) ? latest.weightHistory.slice() : [];
+  const next = history
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') return null;
+      const entryDate = typeof entry.date === 'string' && entry.date.trim()
+        ? entry.date.trim()
+        : (typeof entry.dateKey === 'string' ? entry.dateKey.trim() : '');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(entryDate)) return null;
+      return {
+        ...entry,
+        date: entryDate,
+        dateKey: entryDate,
+        loggedAtISO: typeof entry.loggedAtISO === 'string' ? entry.loggedAtISO : new Date().toISOString(),
+        id: typeof entry.id === 'string' ? entry.id : (crypto.randomUUID ? crypto.randomUUID() : `weight-${Date.now()}-${Math.random().toString(16).slice(2)}`)
+      };
+    })
+    .filter(Boolean)
+    .filter((entry) => entry.date !== date);
+  const entry = {
+    id: crypto.randomUUID ? crypto.randomUUID() : `weight-${Date.now()}`,
+    date,
+    dateKey: date,
+    loggedAtISO: new Date().toISOString(),
+    weight
+  };
+  next.push(entry);
   next.sort((a, b) => a.date.localeCompare(b.date));
 
-  state.weightHistory = next;
-
   const nextState = {
-    ...state,
+    ...latest,
     weightHistory: next
   };
+  if (window.TP_DEBUG_WEIGHT || window.TP_DEBUG_PERF) {
+    console.debug('[weight] saving', { source: 'submitWeightEntry', before: history.length, after: next.length, first: next[0] || null, last: next[next.length - 1] || null, entry });
+  }
 
   try {
     if (window.TaskPointsCore?.saveStateSnapshot) {
@@ -4946,6 +4980,11 @@ function submitWeightEntry() {
   }
 
   drawWeightTrend(getWeightHistorySorted());
+  if (window.TP_DEBUG_WEIGHT || window.TP_DEBUG_PERF) {
+    const reloaded = normalizeState(load());
+    const reloadedWeight = Array.isArray(reloaded.weightHistory) ? reloaded.weightHistory : [];
+    console.debug('[weight] saved', { source: 'submitWeightEntry', afterSave: reloadedWeight.length, first: reloadedWeight[0] || null, last: reloadedWeight[reloadedWeight.length - 1] || null });
+  }
   closeWeightModal();
 
   // Confirm in console that it actually stuck in localStorage.
