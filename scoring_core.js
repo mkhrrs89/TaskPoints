@@ -641,6 +641,7 @@ function pruneStateForStorage(state, limits = {}) {
     ? limits.maxOpponentDripSchedules
     : 120;
   const allowCompletionPrune = limits.allowCompletionPrune === true;
+  const allowHistoryPrune = limits.allowHistoryPrune === true;
 
   merged.completions = Array.isArray(merged.completions)
     ? merged.completions
@@ -668,11 +669,25 @@ function pruneStateForStorage(state, limits = {}) {
       firstAfterDate: afterOldest
     };
   }
-  if (merged.gameHistory.length > maxGameHistory) {
+  if (allowHistoryPrune && merged.gameHistory.length > maxGameHistory) {
+    const beforeGameHistory = merged.gameHistory.length;
     merged.gameHistory = merged.gameHistory.slice(-maxGameHistory);
+    merged.lastGameHistoryPruneWarning = {
+      type: 'game-history-pruned',
+      atISO: new Date().toISOString(),
+      beforeGameHistory,
+      afterGameHistory: merged.gameHistory.length
+    };
   }
-  if (merged.matchups.length > maxMatchups) {
+  if (allowHistoryPrune && merged.matchups.length > maxMatchups) {
+    const beforeMatchups = merged.matchups.length;
     merged.matchups = merged.matchups.slice(-maxMatchups);
+    merged.lastMatchupPruneWarning = {
+      type: 'matchup-history-pruned',
+      atISO: new Date().toISOString(),
+      beforeMatchups,
+      afterMatchups: merged.matchups.length
+    };
   }
   if (merged.workHistory.length > maxWorkHistory) {
     merged.workHistory = merged.workHistory.slice(-maxWorkHistory);
@@ -1409,20 +1424,18 @@ return { state: merged, storageKey };
     }
 
     const imagePreservingLimitSets = [
-      { maxGameHistory: 2000, maxMatchups: 2000, maxWorkHistory: 2000 },
-      { maxGameHistory: 1500, maxMatchups: 1500, maxWorkHistory: 1500 },
-      { maxGameHistory: 1000, maxMatchups: 1000, maxWorkHistory: 1000 },
-      { maxGameHistory: 800, maxMatchups: 800, maxWorkHistory: 800 },
-      { maxGameHistory: 500, maxMatchups: 500, maxWorkHistory: 500 },
-      { maxGameHistory: 250, maxMatchups: 250, maxWorkHistory: 250 }
+      { maxWorkHistory: 2000 },
+      { maxWorkHistory: 1500 },
+      { maxWorkHistory: 1000 },
+      { maxWorkHistory: 800 },
+      { maxWorkHistory: 500 },
+      { maxWorkHistory: 250 }
     ];
 
     for (let i = 0; i < imagePreservingLimitSets.length; i += 1) {
       const limits = imagePreservingLimitSets[i];
       const tightenedLimits = {
         ...options.limits,
-        maxGameHistory: capLimit(options.limits?.maxGameHistory, limits.maxGameHistory),
-        maxMatchups: capLimit(options.limits?.maxMatchups, limits.maxMatchups),
         maxWorkHistory: capLimit(options.limits?.maxWorkHistory, limits.maxWorkHistory),
         stripImages: false
       };
@@ -1447,8 +1460,6 @@ return { state: merged, storageKey };
 
     const aggressiveLimits = {
       ...options.limits,
-      maxGameHistory: capLimit(options.limits?.maxGameHistory, 1000),
-      maxMatchups: capLimit(options.limits?.maxMatchups, 1000),
       maxWorkHistory: capLimit(options.limits?.maxWorkHistory, 1000),
       stripImages: true
     };
@@ -1462,18 +1473,16 @@ return { state: merged, storageKey };
     }
 
     const fallbackLimitSets = [
-      { maxGameHistory: 500, maxMatchups: 500, maxWorkHistory: 500 },
-      { maxGameHistory: 250, maxMatchups: 250, maxWorkHistory: 250 },
-      { maxGameHistory: 125, maxMatchups: 125, maxWorkHistory: 125 },
-      { maxGameHistory: 50, maxMatchups: 50, maxWorkHistory: 50 }
+      { maxWorkHistory: 500 },
+      { maxWorkHistory: 250 },
+      { maxWorkHistory: 125 },
+      { maxWorkHistory: 50 }
     ];
 
     for (let i = 0; i < fallbackLimitSets.length; i += 1) {
       const limits = fallbackLimitSets[i];
       const tightenedLimits = {
         ...options.limits,
-        maxGameHistory: capLimit(options.limits?.maxGameHistory, limits.maxGameHistory),
-        maxMatchups: capLimit(options.limits?.maxMatchups, limits.maxMatchups),
         maxWorkHistory: capLimit(options.limits?.maxWorkHistory, limits.maxWorkHistory),
         stripImages: true
       };
@@ -1489,8 +1498,6 @@ return { state: merged, storageKey };
 
     const emergency = {
       ...aggressive,
-      gameHistory: [],
-      matchups: [],
       schedule: [],
       opponentDripSchedules: [],
       workHistory: []
@@ -1506,7 +1513,7 @@ return { state: merged, storageKey };
     const quotaWarning = {
       type: 'storage-quota-save-failed',
       atISO: new Date().toISOString(),
-      message: 'Save failed because browser storage is full. Completion history was preserved. Export a backup or reduce large stored assets.'
+      message: 'Browser storage is full. Save failed. Historical completions, matchups, game history, and weight history were preserved. Export a backup or reduce storage before continuing.'
     };
     const warningState = appendStorageWarning(state, quotaWarning);
     try {
@@ -1514,7 +1521,10 @@ return { state: merged, storageKey };
     } catch (warningErr) {
       console.warn('TaskPointsCore: unable to persist storage warning after quota failure.', warningErr);
     }
-    console.error('TaskPointsCore: save failed due to browser storage quota. Completion history was preserved.', lastQuotaError || new Error('Quota exceeded'));
+    console.error('TaskPointsCore: save failed due to browser storage quota. Critical historical data was preserved and not pruned.', lastQuotaError || new Error('Quota exceeded'));
+    if (typeof alert === 'function') {
+      alert('Browser storage is full. Save failed. Historical completions, matchups, game history, and weight history were preserved. Export a backup or reduce storage before continuing.');
+    }
     throw lastQuotaError || new Error('TaskPointsCore save failed: browser storage quota exceeded');
   }
 

@@ -1795,6 +1795,36 @@ const actualTotal = round2(Number(derivedActualTotal) || 0);
         trace: 'state.lastCompletionPruneWarning'
       });
 
+
+      const pruneMarkers = [state.lastCompletionPruneWarning, state.lastMatchupPruneWarning, state.lastGameHistoryPruneWarning].filter(Boolean);
+      const destructiveStorageWarnings = (Array.isArray(state.storageWarnings) ? state.storageWarnings : [])
+        .filter(entry => entry && /prun|destruct/i.test(String(entry.type || '') + ' ' + String(entry.message || '')));
+      checks.push({
+        id: 'history-prune-markers',
+        title: 'No destructive history prune markers',
+        status: (pruneMarkers.length || destructiveStorageWarnings.length) ? 'FAIL' : 'PASS',
+        expected: 'No completion/matchup/gameHistory prune markers or destructive prune warnings are present',
+        actual: (pruneMarkers.length || destructiveStorageWarnings.length)
+          ? `Detected ${pruneMarkers.length} prune marker(s) and ${destructiveStorageWarnings.length} destructive warning(s)`
+          : 'No destructive prune markers found',
+        details: [
+          ...pruneMarkers.map(marker => JSON.stringify(marker)),
+          ...destructiveStorageWarnings.map(entry => `${entry.atISO || 'unknown'}: ${entry.message || entry.type || 'destructive prune warning'}`)
+        ],
+        trace: 'state.lastCompletionPruneWarning/state.lastMatchupPruneWarning/state.lastGameHistoryPruneWarning/state.storageWarnings'
+      });
+
+      const requiredHistoryArrays = ['completions', 'gameHistory', 'matchups', 'weightHistory'];
+      const missingHistoryArrays = requiredHistoryArrays.filter((key) => !Array.isArray(state[key]));
+      checks.push({
+        id: 'history-arrays-presence',
+        title: 'Critical history arrays exist',
+        status: missingHistoryArrays.length ? 'FAIL' : 'PASS',
+        expected: 'completions, gameHistory, matchups, and weightHistory exist as arrays',
+        actual: missingHistoryArrays.length ? `Missing/non-array: ${missingHistoryArrays.join(', ')}` : 'All required history arrays are present',
+        details: missingHistoryArrays,
+        trace: 'state.completions/state.gameHistory/state.matchups/state.weightHistory'
+      });
       const quotaWarnings = (Array.isArray(state.storageWarnings) ? state.storageWarnings : [])
         .filter(entry => entry && entry.type === 'storage-quota-save-failed');
       checks.push({
