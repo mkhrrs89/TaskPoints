@@ -197,7 +197,7 @@ Nothing visible on the page is built here. === -->
 
     .homeMiniStatsGrid {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: 0.9fr 0.72fr 1.38fr;
       overflow: hidden;
     }
 
@@ -205,9 +205,35 @@ Nothing visible on the page is built here. === -->
       min-width: 0;
     }
 
+    .inertiaPanelLeft {
+      min-width: 0;
+      padding-left: 10px;
+      padding-right: 10px;
+    }
+
     .matchupStreakPanel {
       border-left: 1px solid rgba(255,255,255,.10);
       border-right: 1px solid rgba(255,255,255,.10);
+      min-width: 0;
+      padding-left: 6px;
+      padding-right: 6px;
+    }
+
+    .yesterdayResultsPanel {
+      min-width: 0;
+      padding-left: 10px;
+      padding-right: 10px;
+    }
+
+    .yesterdayResultsPanel .yesterday-result-player {
+      min-width: 0;
+      flex: 1 1 auto;
+    }
+
+    #yesterdayOpponent {
+      min-width: 0;
+      max-width: none;
+      flex: 1 1 auto;
     }
 
     .matchupCurrentStreak {
@@ -234,8 +260,14 @@ Nothing visible on the page is built here. === -->
     }
 
     @media (max-width: 640px) {
+      .inertiaPanelLeft {
+        padding-left: 8px;
+        padding-right: 8px;
+      }
+
       .matchupStreakPanel {
-        padding: 12px 6px;
+        padding-left: 4px;
+        padding-right: 4px;
       }
 
       .matchupCurrentStreak {
