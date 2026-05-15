@@ -105,6 +105,9 @@
               <input id="settingsImportInput" type="file" accept="application/json,application/zip,.zip" class="hidden" />
             </label>
             <button id="settingsImportPasteBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Paste JSON</button>
+            <label class="btn btn-teal btn-toolbar nav-btn cursor-pointer">Merge Backup
+              <input id="settingsMergeBackupInput" type="file" accept="application/json,application/zip,.zip" class="hidden" />
+            </label>
             <button type="button" class="btn btn-ghost btn-toolbar nav-btn" data-export-images>Backup + Images</button>
             <button id="settingsExportMatchupsBtn" class="btn btn-ghost btn-toolbar nav-btn" type="button">
               Export Matchups + Player History (CSV)
@@ -898,6 +901,87 @@ notes: typeof s.notes === "string" ? s.notes : "",
       } catch (err) {
         console.error("Paste import failed", err);
         alert("The text is not valid JSON. Please try again.");
+      }
+    }
+
+
+    function extractImportRoot(data) {
+      return (data && Array.isArray(data.tasks) && Array.isArray(data.completions)) ? data
+        : (data && data.state && Array.isArray(data.state.tasks) && Array.isArray(data.state.completions)) ? data.state
+        : null;
+    }
+
+    function keyForEntry(entry, type) {
+      if (!entry || typeof entry !== 'object') return '';
+      if (entry.id) return `id:${entry.id}`;
+      if (type === 'completions') return ['completedAtISO','title','points','type','source','habitId','taskId'].map(k => entry[k] ?? '').join('|');
+      if (type === 'matchups') return [entry.date || entry.dateKey || '', entry.playerAId || '', entry.playerBId || '', entry.scoreA ?? '', entry.scoreB ?? ''].join('|');
+      if (type === 'gameHistory') return [entry.date || '', entry.playerId || '', entry.opponentId || '', entry.score ?? ''].join('|');
+      if (type === 'weightHistory') return [entry.dateKey || entry.loggedAtISO || '', entry.weight ?? ''].join('|');
+      return JSON.stringify(entry);
+    }
+
+    function mergeHistoryArray(current, backup, type) {
+      const existing = new Set((Array.isArray(current) ? current : []).map(e => keyForEntry(e, type)));
+      const out = Array.isArray(current) ? current.slice() : [];
+      let added = 0;
+      (Array.isArray(backup) ? backup : []).forEach((entry) => {
+        const key = keyForEntry(entry, type);
+        if (!key || existing.has(key)) return;
+        out.push(entry);
+        existing.add(key);
+        added += 1;
+      });
+      return { merged: out, added };
+    }
+
+    function sortHistoryForDisplay(state) {
+      state.completions = (state.completions || []).slice().sort((a,b)=> new Date(a?.completedAtISO||0)-new Date(b?.completedAtISO||0));
+      state.matchups = (state.matchups || []).slice().sort((a,b)=> new Date((a?.date||a?.dateKey||0)) - new Date((b?.date||b?.dateKey||0)));
+      state.gameHistory = (state.gameHistory || []).slice().sort((a,b)=> new Date(a?.date||0)-new Date(b?.date||0));
+      state.weightHistory = (state.weightHistory || []).slice().sort((a,b)=> new Date((a?.loggedAtISO||a?.dateKey||0))-new Date((b?.loggedAtISO||b?.dateKey||0)));
+      return state;
+    }
+
+    async function handleMergeBackupFile(ev) {
+      const file = ev.target.files?.[0];
+      if (!file) return;
+      try {
+        alert('Before merge: export your current data as a safety backup.');
+        const raw = isZipFile(file) ? await importBackupZip(file) : JSON.parse(await file.text());
+        const backupRoot = extractImportRoot(raw);
+        if (!backupRoot) throw new Error('Backup format is invalid for merge.');
+        const currentState = loadSettingsState();
+        const merged = normalizeSettingsState(currentState);
+        const summary = {};
+        ['completions','gameHistory','matchups','weightHistory'].forEach((key) => {
+          const res = mergeHistoryArray(currentState[key], backupRoot[key], key);
+          merged[key] = res.merged;
+          summary[key] = { before: Array.isArray(currentState[key]) ? currentState[key].length : 0, added: res.added, after: res.merged.length };
+        });
+        sortHistoryForDisplay(merged);
+        const earliestCompletion = merged.completions[0]?.completedAtISO || 'n/a';
+        const earliestMatchup = (merged.matchups[0]?.date || merged.matchups[0]?.dateKey || 'n/a');
+        const earliestGameHistory = (merged.gameHistory[0]?.date || 'n/a');
+        const summaryText = `Completions: ${summary.completions.before} +${summary.completions.added} => ${summary.completions.after}
+GameHistory: ${summary.gameHistory.before} +${summary.gameHistory.added} => ${summary.gameHistory.after}
+Matchups: ${summary.matchups.before} +${summary.matchups.added} => ${summary.matchups.after}
+WeightHistory: ${summary.weightHistory.before} +${summary.weightHistory.added} => ${summary.weightHistory.after}
+Earliest completion: ${earliestCompletion}
+Earliest matchup: ${earliestMatchup}
+Earliest gameHistory: ${earliestGameHistory}`;
+        if (!confirm(`Merge missing historical data from this backup into your current save? This will not delete current data.
+
+${summaryText}`)) return;
+        applyImportedState({ ...currentState, ...merged });
+        alert(`Backup merge complete.
+
+${summaryText}`);
+      } catch (err) {
+        console.error('Merge backup failed', err);
+        alert('Merge backup failed. Please confirm the file is a valid TaskPoints backup JSON/zip.');
+      } finally {
+        ev.target.value = '';
       }
     }
 
@@ -3242,6 +3326,7 @@ rows.push([
     document.addEventListener('DOMContentLoaded', () => {
       document.getElementById('settingsImportInput')?.addEventListener('change', handleSettingsFile);
       document.getElementById('settingsImportPasteBtn')?.addEventListener('click', handleSettingsPaste);
+      document.getElementById('settingsMergeBackupInput')?.addEventListener('change', handleMergeBackupFile);
       document.getElementById('settingsResetGameStatsBtn')?.addEventListener('click', handleSettingsResetGameStats);
       document.getElementById('settingsResetBtn')?.addEventListener('click', handleSettingsReset);
       document.getElementById('settingsExportMatchupsBtn')?.addEventListener('click', exportMatchupsAndHistoryCsv);
