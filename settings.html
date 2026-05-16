@@ -911,12 +911,71 @@ notes: typeof s.notes === "string" ? s.notes : "",
         : null;
     }
 
+    function normalizeMergedMatchup(entry) {
+      if (!entry || typeof entry !== 'object') return entry;
+      const date = entry.date || entry.dateKey || (entry.dateISO ? String(entry.dateISO).slice(0, 10) : '') || '';
+      const scoreA = Number(entry.scoreA);
+      const scoreB = Number(entry.scoreB);
+      return {
+        ...entry,
+        date,
+        dateKey: entry.dateKey || date,
+        playerAId: entry.playerAId || entry.aId || entry.homePlayerId || '',
+        playerBId: entry.playerBId || entry.bId || entry.awayPlayerId || '',
+        scoreA: Number.isFinite(scoreA) ? scoreA : entry.scoreA,
+        scoreB: Number.isFinite(scoreB) ? scoreB : entry.scoreB
+      };
+    }
+
+    function normalizeMergedGameHistory(entry) {
+      if (!entry || typeof entry !== 'object') return entry;
+      const date = entry.date || entry.dateKey || (entry.dateISO ? String(entry.dateISO).slice(0, 10) : '') || '';
+      const score = Number(entry.score);
+      return {
+        ...entry,
+        date,
+        dateKey: entry.dateKey || date,
+        playerId: entry.playerId || '',
+        opponentId: entry.opponentId || '',
+        score: Number.isFinite(score) ? score : entry.score
+      };
+    }
+
+    function matchupMergeKey(entry) {
+      if (!entry || typeof entry !== 'object') return '';
+      if (entry.id) return `id:${entry.id}`;
+      const m = normalizeMergedMatchup(entry);
+      const date = m.date || m.dateKey || '';
+      const a = m.playerAId || '';
+      const b = m.playerBId || '';
+      const sa = String(m.scoreA ?? '');
+      const sb = String(m.scoreB ?? '');
+      const pairForward = `${a}:${sa}|${b}:${sb}`;
+      const pairReverse = `${b}:${sb}|${a}:${sa}`;
+      return ['matchup', date, [pairForward, pairReverse].sort()[0]].join('|');
+    }
+
+    function gameHistoryMergeKey(entry) {
+      if (!entry || typeof entry !== 'object') return '';
+      if (entry.id) return `id:${entry.id}`;
+      const g = normalizeMergedGameHistory(entry);
+      return [
+        'gameHistory',
+        g.date || g.dateKey || '',
+        g.playerId || '',
+        g.opponentId || '',
+        String(g.score ?? ''),
+        String(g.opponentScore ?? ''),
+        String(g.result ?? '')
+      ].join('|');
+    }
+
     function keyForEntry(entry, type) {
       if (!entry || typeof entry !== 'object') return '';
       if (entry.id) return `id:${entry.id}`;
       if (type === 'completions') return ['completedAtISO','title','points','type','source','habitId','taskId'].map(k => entry[k] ?? '').join('|');
-      if (type === 'matchups') return [entry.date || entry.dateKey || '', entry.playerAId || '', entry.playerBId || '', entry.scoreA ?? '', entry.scoreB ?? ''].join('|');
-      if (type === 'gameHistory') return [entry.date || '', entry.playerId || '', entry.opponentId || '', entry.score ?? ''].join('|');
+      if (type === 'matchups') return matchupMergeKey(entry);
+      if (type === 'gameHistory') return gameHistoryMergeKey(entry);
       if (type === 'weightHistory') return [entry.dateKey || entry.loggedAtISO || '', entry.weight ?? ''].join('|');
       return JSON.stringify(entry);
     }
@@ -926,13 +985,37 @@ notes: typeof s.notes === "string" ? s.notes : "",
       const out = Array.isArray(current) ? current.slice() : [];
       let added = 0;
       (Array.isArray(backup) ? backup : []).forEach((entry) => {
-        const key = keyForEntry(entry, type);
+        const normalizedEntry = type === 'matchups'
+          ? normalizeMergedMatchup(entry)
+          : type === 'gameHistory'
+            ? normalizeMergedGameHistory(entry)
+            : entry;
+        const key = keyForEntry(normalizedEntry, type);
         if (!key || existing.has(key)) return;
-        out.push(entry);
+        out.push(normalizedEntry);
         existing.add(key);
         added += 1;
       });
       return { merged: out, added };
+    }
+
+    function summarizeMergeVerification(state) {
+      const matchups = Array.isArray(state?.matchups) ? state.matchups : [];
+      const gameHistory = Array.isArray(state?.gameHistory) ? state.gameHistory : [];
+      const earliestMatchup = matchups.reduce((min, m) => {
+        const d = m?.date || m?.dateKey || '';
+        return !d || (min && d >= min) ? min : d;
+      }, '');
+      const earliestGameHistory = gameHistory.reduce((min, g) => {
+        const d = g?.date || g?.dateKey || '';
+        return !d || (min && d >= min) ? min : d;
+      }, '');
+      return {
+        earliestMatchup: earliestMatchup || 'n/a',
+        earliestGameHistory: earliestGameHistory || 'n/a',
+        preApr28Matchups: matchups.filter((m) => (m?.date || m?.dateKey || '') && (m.date || m.dateKey) < '2026-04-28').length,
+        preApr28GameHistory: gameHistory.filter((g) => (g?.date || g?.dateKey || '') && (g.date || g.dateKey) < '2026-04-28').length
+      };
     }
 
     function sortHistoryForDisplay(state) {
@@ -973,10 +1056,48 @@ Earliest gameHistory: ${earliestGameHistory}`;
         if (!confirm(`Merge missing historical data from this backup into your current save? This will not delete current data.
 
 ${summaryText}`)) return;
-        applyImportedState({ ...currentState, ...merged });
-        alert(`Backup merge complete.
+        const mergedState = { ...currentState, ...merged, lastBackupMerge: new Date().toISOString() };
+        if (window.TaskPointsCore?.saveStateSnapshot) {
+          TaskPointsCore.saveStateSnapshot(mergedState, {
+            storageKey: SETTINGS_STORAGE_KEY,
+            immediateWrite: true,
+            source: 'settings-merge-backup',
+            limits: { allowHistoryPrune: false, allowCompletionPrune: false }
+          });
+        } else {
+          localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(mergedState));
+        }
 
-${summaryText}`);
+        const saved = JSON.parse(localStorage.getItem('taskpoints_v1') || '{}');
+        console.debug('[merge backup] after save verification', {
+          expectedMatchups: mergedState.matchups?.length,
+          savedMatchups: saved.matchups?.length,
+          expectedGameHistory: mergedState.gameHistory?.length,
+          savedGameHistory: saved.gameHistory?.length,
+          expectedCompletions: mergedState.completions?.length,
+          savedCompletions: saved.completions?.length,
+          expectedWeightHistory: mergedState.weightHistory?.length,
+          savedWeightHistory: saved.weightHistory?.length,
+          lastBackupMerge: saved.lastBackupMerge
+        });
+
+        const savedSummary = summarizeMergeVerification(saved);
+        const expectedSummary = summarizeMergeVerification(mergedState);
+        const countsMatch =
+          (saved.matchups?.length || 0) === (mergedState.matchups?.length || 0)
+          && (saved.gameHistory?.length || 0) === (mergedState.gameHistory?.length || 0)
+          && (saved.completions?.length || 0) === (mergedState.completions?.length || 0)
+          && (saved.weightHistory?.length || 0) === (mergedState.weightHistory?.length || 0);
+        const verificationPassed = countsMatch
+          && savedSummary.earliestMatchup === expectedSummary.earliestMatchup
+          && savedSummary.earliestGameHistory === expectedSummary.earliestGameHistory;
+        if (!verificationPassed) {
+          alert('Merge failed verification: restored rows were not saved. No success message will be shown.');
+          return;
+        }
+
+        alert(`Merge complete: added ${summary.matchups.added} matchups and ${summary.gameHistory.added} game history entries. Earliest matchup is now ${savedSummary.earliestMatchup}. Reloading to refresh restored history.`);
+        window.location.reload();
       } catch (err) {
         console.error('Merge backup failed', err);
         alert('Merge backup failed. Please confirm the file is a valid TaskPoints backup JSON/zip.');
