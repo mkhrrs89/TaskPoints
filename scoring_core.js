@@ -553,16 +553,7 @@ const workHoursMax = Object.prototype.hasOwnProperty.call(workInput, 'hoursMax')
       matchups:    Array.isArray(s?.matchups)    ? s.matchups    : [],
       schedule:    Array.isArray(s?.schedule)    ? s.schedule    : [],
 opponentDripSchedules: Array.isArray(s?.opponentDripSchedules) ? s.opponentDripSchedules : [],
-weightHistory: Array.isArray(s?.weightHistory)
-  ? s.weightHistory
-      .map((entry) => {
-        const date = typeof entry?.date === 'string' ? entry.date.trim() : '';
-        const weight = Number(entry?.weight);
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(weight)) return null;
-        return { date, weight };
-      })
-      .filter(Boolean)
-  : [],
+weightHistory: Array.isArray(s?.weightHistory) ? s.weightHistory : [],
 workHistory: Array.isArray(s?.workHistory) ? s.workHistory : [],
       youImageId:  typeof s?.youImageId === "string" ? s.youImageId : "",
       youName: typeof s?.youName === "string" ? s.youName : "",
