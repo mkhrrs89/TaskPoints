@@ -638,25 +638,28 @@
     }
 
     function normalizeSettingsState(s) {
+      const src = (s && typeof s === 'object') ? s : {};
       return {
-        tasks:       Array.isArray(s.tasks)       ? s.tasks       : [],
-        completions: Array.isArray(s.completions) ? s.completions : [],
-        players:     Array.isArray(s.players)     ? s.players     : [],
-        habits:      Array.isArray(s.habits)      ? s.habits.map(normalizeHabit)      : [],
-        flexActions: Array.isArray(s.flexActions) ? s.flexActions : [],
-        gameHistory: Array.isArray(s.gameHistory) ? s.gameHistory : [],
-        matchups:    Array.isArray(s.matchups)    ? s.matchups    : [],
-        schedule:    Array.isArray(s.schedule)    ? s.schedule    : [],
-        workHistory: Array.isArray(s.workHistory) ? s.workHistory : [],
-youImageId:  typeof s.youImageId === "string" ? s.youImageId : "",
-youName: typeof s.youName === "string" ? s.youName : "",
-youPrimaryColor: normalizeHexColor(s.youPrimaryColor) || "#1a383b",
-youSecondaryColor: normalizeHexColor(s.youSecondaryColor) || "#254c52",
-notes: typeof s.notes === "string" ? s.notes : "",
-        habitTagColors: normalizeHabitTagColors(s.habitTagColors),
+        ...src,
+        tasks:       Array.isArray(src.tasks)       ? src.tasks       : [],
+        completions: Array.isArray(src.completions) ? src.completions : [],
+        players:     Array.isArray(src.players)     ? src.players     : [],
+        habits:      Array.isArray(src.habits)      ? src.habits.map(normalizeHabit)      : [],
+        flexActions: Array.isArray(src.flexActions) ? src.flexActions : [],
+        gameHistory: Array.isArray(src.gameHistory) ? src.gameHistory : [],
+        matchups:    Array.isArray(src.matchups)    ? src.matchups    : [],
+        schedule:    Array.isArray(src.schedule)    ? src.schedule    : [],
+        weightHistory: Array.isArray(src.weightHistory) ? src.weightHistory : [],
+        workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
+        youImageId:  typeof src.youImageId === "string" ? src.youImageId : "",
+        youName: typeof src.youName === "string" ? src.youName : "",
+        youPrimaryColor: normalizeHexColor(src.youPrimaryColor) || "#1a383b",
+        youSecondaryColor: normalizeHexColor(src.youSecondaryColor) || "#254c52",
+        notes: typeof src.notes === "string" ? src.notes : "",
+        habitTagColors: normalizeHabitTagColors(src.habitTagColors),
         scoringSettings: (window.TaskPointsCore?.normalizeScoringSettings)
-          ? TaskPointsCore.normalizeScoringSettings(s.scoringSettings || {})
-          : (s.scoringSettings || {})
+          ? TaskPointsCore.normalizeScoringSettings(src.scoringSettings || {})
+          : (src.scoringSettings || {})
       };
     }
 
