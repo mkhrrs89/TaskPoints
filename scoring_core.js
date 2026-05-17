@@ -1548,10 +1548,22 @@ return { state: merged, storageKey };
       lastQuotaError = err;
     }
 
+    const largestKeysSummary = (() => {
+      try {
+        const report = getLocalStorageSizeReport();
+        return report.entries.slice(0, 3).map((entry) => `${entry.key} ${(entry.bytes / (1024 * 1024)).toFixed(2)} MiB`).join(', ');
+      } catch (_) {
+        return '';
+      }
+    })();
+    const quarantineHint = localStorage.getItem(QUARANTINE_SNAPSHOT_KEY)
+      ? ' Tip: delete taskpoints_quarantined_snapshot from Settings → Storage Health.'
+      : '';
+    const quotaMessage = `Browser storage is full. Save failed. Biggest localStorage keys: ${largestKeysSummary || 'unavailable'}. Historical completions, matchups, game history, weight history, and VO2 Max history were preserved.${quarantineHint}`;
     const quotaWarning = {
       type: 'storage-quota-save-failed',
       atISO: new Date().toISOString(),
-      message: 'Browser storage is full. Save failed. Historical completions, matchups, game history, and weight history were preserved. Export a backup or reduce storage before continuing.'
+      message: quotaMessage
     };
     const warningState = appendStorageWarning(state, quotaWarning);
     try {
@@ -1561,7 +1573,7 @@ return { state: merged, storageKey };
     }
     console.error('TaskPointsCore: save failed due to browser storage quota. Critical historical data was preserved and not pruned.', lastQuotaError || new Error('Quota exceeded'));
     if (typeof alert === 'function') {
-      alert('Browser storage is full. Save failed. Historical completions, matchups, game history, and weight history were preserved. Export a backup or reduce storage before continuing.');
+      alert(quotaMessage);
     }
     logQuotaDebug();
     throw lastQuotaError || new Error('TaskPointsCore save failed: browser storage quota exceeded');

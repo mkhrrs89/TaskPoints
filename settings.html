@@ -733,8 +733,10 @@
     }
 
     function applyImportedState(data) {
+      const isFullBackup = data && data.exportType === "taskpoints_full_backup" && data.state;
       const root =
         (data && Array.isArray(data.tasks) && Array.isArray(data.completions)) ? data :
+        (isFullBackup && Array.isArray(data.state.tasks) && Array.isArray(data.state.completions)) ? data.state :
         (data && data.state && Array.isArray(data.state.tasks) && Array.isArray(data.state.completions)) ? data.state :
         null;
 
@@ -743,6 +745,14 @@
       }
 
       const normalized = normalizeSettingsState(root);
+      const currentState = loadSettingsState();
+      const currentWeightCount = Array.isArray(currentState.weightHistory) ? currentState.weightHistory.length : 0;
+      const currentVo2Count = Array.isArray(currentState.vo2MaxHistory) ? currentState.vo2MaxHistory.length : 0;
+      const incomingWeightCount = Array.isArray(root.weightHistory) ? root.weightHistory.length : 0;
+      const incomingVo2Count = Array.isArray(root.vo2MaxHistory) ? root.vo2MaxHistory.length : 0;
+      if (currentWeightCount > 0 && incomingWeightCount === 0 && !confirm(`Imported backup has no Weight entries, but this device has ${currentWeightCount}. Replace anyway?`)) return;
+      if (currentVo2Count > 0 && incomingVo2Count === 0 && !confirm(`Imported backup has no VO2 Max entries, but this device has ${currentVo2Count}. Replace anyway?`)) return;
+      if (!confirm("This will replace current device data. Use Merge Backup if you only want to restore missing history. Continue with full import?")) return;
       if (!Object.prototype.hasOwnProperty.call(root, "scoringSettings")) {
   delete normalized.scoringSettings;
 }
@@ -766,6 +776,19 @@
         });
       } else {
         console.warn("settings import skipped localStorage write; TaskPointsCore missing.");
+      }
+      if (isFullBackup && data.aux && Object.prototype.hasOwnProperty.call(data.aux, "taskpoints_notes_v1")) {
+        const incomingNotes = typeof data.aux.taskpoints_notes_v1 === "string" ? data.aux.taskpoints_notes_v1 : "";
+        const existingNotes = localStorage.getItem("taskpoints_notes_v1") || "";
+        if (!existingNotes.trim() || confirm("Replace current Notes with Notes from backup?")) {
+          localStorage.setItem("taskpoints_notes_v1", incomingNotes);
+        }
+      }
+      if (isFullBackup && data.aux && Object.prototype.hasOwnProperty.call(data.aux, "tp_projects_v1")) {
+        const incomingProjects = data.aux.tp_projects_v1;
+        if (typeof incomingProjects === "string") {
+          localStorage.setItem("tp_projects_v1", incomingProjects);
+        }
       }
       alert("Import complete! Reload any open TaskPoints tabs to see the changes.");
     }
@@ -1064,6 +1087,18 @@ Earliest gameHistory: ${earliestGameHistory}`;
 
 ${summaryText}`)) return;
         const mergedState = { ...currentState, ...merged, lastBackupMerge: new Date().toISOString() };
+        const backupAux = raw && raw.exportType === "taskpoints_full_backup" && raw.aux ? raw.aux : null;
+        if (backupAux && Object.prototype.hasOwnProperty.call(backupAux, "taskpoints_notes_v1")) {
+          const incomingNotes = typeof backupAux.taskpoints_notes_v1 === "string" ? backupAux.taskpoints_notes_v1 : "";
+          const choice = prompt("Backup contains notes. Type: skip (default), append, or replace.", "skip");
+          const mode = String(choice || "skip").trim().toLowerCase();
+          if (mode === "replace") {
+            localStorage.setItem("taskpoints_notes_v1", incomingNotes);
+          } else if (mode === "append") {
+            const existingNotes = localStorage.getItem("taskpoints_notes_v1") || "";
+            localStorage.setItem("taskpoints_notes_v1", [existingNotes, incomingNotes].filter(Boolean).join("\n\n"));
+          }
+        }
         if (window.TaskPointsCore?.saveStateSnapshot) {
           TaskPointsCore.saveStateSnapshot(mergedState, {
             storageKey: SETTINGS_STORAGE_KEY,
@@ -3406,6 +3441,7 @@ rows.push([
       output.innerHTML = '<div class="muted text-xs">Refreshing…</div>';
       const report = getLocalStorageSizeReport();
       const mainEntry = report.entries.find((entry) => entry.key === "taskpoints_v1") || { key: "taskpoints_v1", ...formatStorageUnits(0) };
+      const notesEntry = report.entries.find((entry) => entry.key === "taskpoints_notes_v1") || { key: "taskpoints_notes_v1", ...formatStorageUnits(0) };
       const quarantinedEntry = report.entries.find((entry) => entry.key === "taskpoints_quarantined_snapshot") || null;
       const mainStatus = getTaskPointsStorageStatus(mainEntry.mib);
       let parsedState = null;
@@ -3437,6 +3473,7 @@ rows.push([
       } : null;
       output.innerHTML = `
         <div><strong>Main State:</strong> taskpoints_v1: <strong>${mainEntry.mib.toFixed(2)} MiB</strong> <span class="btn ${mainStatus.cls} btn-toolbar">${mainStatus.label}</span></div>
+        <div class="muted">Notes key taskpoints_notes_v1: <strong>${notesEntry.mib.toFixed(3)} MiB</strong></div>
         <div class="muted">Active app data (excluding quarantined snapshot): ${(activeDataBytes / (1024 * 1024)).toFixed(2)} MiB</div>
         <div class="muted">LocalStorage Total: ${report.total.mib.toFixed(2)} MiB across ${report.entries.length} keys</div>
         ${quarantinedEntry ? `<div class="${quarantinedEntry.bytes > 500 * 1024 ? 'text-amber-300' : 'muted'}">Quarantined snapshot: <strong>${quarantinedEntry.mib.toFixed(2)} MiB</strong>${quarantinedEntry.bytes > 500 * 1024 ? ' — Quarantined snapshot is using ' + quarantinedEntry.mib.toFixed(2) + ' MiB. Export it if needed, then delete it to free localStorage.' : ''}</div>` : '<div class="muted">Quarantined snapshot: none</div>'}
@@ -3467,10 +3504,12 @@ rows.push([
         renderStorageHealthPanel();
         return;
       }
+      const beforeBytes = getUtf8SizeBytes(localStorage.getItem(key) || "");
       const ok = confirm("Delete quarantined snapshot? This removes the temporary quarantined backup copy from this browser and does not affect your current TaskPoints save.");
       if (!ok) return;
       localStorage.removeItem(key);
-      alert("Quarantined snapshot deleted.");
+      const afterBytes = getUtf8SizeBytes(localStorage.getItem(key) || "");
+      alert(`Quarantined snapshot deleted. Before: ${(beforeBytes / 1024).toFixed(2)} KiB, after: ${(afterBytes / 1024).toFixed(2)} KiB.`);
       renderStorageHealthPanel();
     }
 
