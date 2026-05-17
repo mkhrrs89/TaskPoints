@@ -197,7 +197,7 @@ Nothing visible on the page is built here. === -->
 
     .homeMiniStatsGrid {
       display: grid;
-      grid-template-columns: 0.9fr 0.72fr 1.38fr;
+      grid-template-columns: 1fr 1fr 2fr;
       overflow: hidden;
     }
 
@@ -209,6 +209,11 @@ Nothing visible on the page is built here. === -->
       min-width: 0;
       padding-left: 10px;
       padding-right: 10px;
+    }
+
+    #inertiaValue {
+      font-size: clamp(2.35rem, 3.4vw, 2.7rem);
+      line-height: 1;
     }
 
     .matchupStreakPanel {
@@ -228,6 +233,22 @@ Nothing visible on the page is built here. === -->
     .yesterdayResultsPanel .yesterday-result-player {
       min-width: 0;
       flex: 1 1 auto;
+    }
+
+    .yesterdayResultRow {
+      min-width: 0;
+      gap: 6px;
+    }
+
+    .yesterdayResultIdentity {
+      min-width: 0;
+      flex: 1 1 auto;
+    }
+
+    .yesterdayResultScore {
+      flex: 0 0 auto;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
     }
 
     #yesterdayOpponent {
@@ -268,6 +289,10 @@ Nothing visible on the page is built here. === -->
       .matchupStreakPanel {
         padding-left: 4px;
         padding-right: 4px;
+      }
+
+      #inertiaValue {
+        font-size: clamp(2.1rem, 7.2vw, 2.35rem);
       }
 
       .matchupCurrentStreak {
@@ -620,7 +645,7 @@ Nothing visible on the page is built here. === -->
            └─────────────────────────────────┘ -->
       <div class="glass inertiaSplitCard homeMiniStatsGrid lg:col-span-1">
         <div class="inertiaPanelLeft flex flex-col items-center justify-center text-center gap-1.5">
-          <div class="muted font-semibold uppercase tracking-wide text-[10px]">Inertia Score</div>
+          <div class="muted font-semibold uppercase tracking-wide text-[10px]">Inertia</div>
           <div class="scoreboard-score" id="inertiaValue">0.0</div>
           <div class="muted text-[11px] leading-tight" id="inertiaAverage">7-day avg: 0.0</div>
         </div>
@@ -630,29 +655,29 @@ Nothing visible on the page is built here. === -->
           <div class="muted font-semibold uppercase tracking-wide text-[10px] mt-1">Last 10</div>
           <div id="matchupLastTenRecord" class="matchupLastTenRecord">0–0</div>
         </div>
-        <div id="yesterdayResultsPanel" class="yesterdayResultsPanel flex flex-col justify-center gap-1.5 border-l border-white/10 px-4 py-4">
+        <div id="yesterdayResultsPanel" class="yesterdayResultsPanel flex flex-col justify-center gap-1.5 px-4 py-4">
           <div class="muted font-semibold uppercase tracking-wide text-[10px]">Yesterday’s Results</div>
-          <div class="flex items-center justify-between text-[11px]">
-            <span class="yesterday-result-player inline-flex items-center gap-1.5 min-w-0">
+          <div class="yesterdayResultRow flex items-center justify-between text-[11px]">
+            <span class="yesterdayResultIdentity yesterday-result-player inline-flex items-center gap-1.5 min-w-0">
               <span id="yesterdayYouName" class="muted">You</span>
               <span id="yesterdayYourSwatches" class="scoreboard-color-swatches scoreboard-color-swatches-compact" aria-label="Your saved player colors from yesterday's matchup">
                 <span id="yesterdayYourPrimarySwatch" class="scoreboard-color-swatch scoreboard-color-swatch-compact" title="Primary color"></span>
                 <span id="yesterdayYourSecondarySwatch" class="scoreboard-color-swatch scoreboard-color-swatch-compact" title="Secondary color"></span>
               </span>
             </span>
-            <span id="yesterdayYourScore" class="font-semibold">—</span>
+            <span id="yesterdayYourScore" class="yesterdayResultScore font-semibold">—</span>
           </div>
-          <div class="flex items-center justify-between text-[11px]">
-            <span class="yesterday-result-player inline-flex items-center gap-1.5 min-w-0">
+          <div class="yesterdayResultRow flex items-center justify-between text-[11px]">
+            <span class="yesterdayResultIdentity yesterday-result-player inline-flex items-center gap-1.5 min-w-0">
               <span id="yesterdayOpponent" class="font-semibold truncate">Opponent</span>
               <span id="yesterdayOpponentSwatches" class="scoreboard-color-swatches scoreboard-color-swatches-compact" aria-label="Opponent saved player colors from yesterday's matchup">
                 <span id="yesterdayOpponentPrimarySwatch" class="scoreboard-color-swatch scoreboard-color-swatch-compact" title="Primary color"></span>
                 <span id="yesterdayOpponentSecondarySwatch" class="scoreboard-color-swatch scoreboard-color-swatch-compact" title="Secondary color"></span>
               </span>
             </span>
-            <span id="yesterdayOpponentScore" class="font-semibold">—</span>
+            <span id="yesterdayOpponentScore" class="yesterdayResultScore font-semibold">—</span>
           </div>
-          <div class="flex items-center justify-between text-[11px]">
+          <div class="yesterdayResultRow flex items-center justify-between text-[11px]">
             <span class="muted">Result</span>
             <span id="yesterdayResult" class="font-semibold">—</span>
           </div>
