@@ -1176,6 +1176,28 @@ body {
    ========================= */
 
 .input,select,textarea{border:1px solid var(--border);background:#0f1419;color:#e6edf6;border-radius:12px;padding:10px 12px;width:100%}
+/* Metric log modals: date/value inputs should visually match one another */
+.metricLogInput,
+.metricLogDateInput,
+.metricLogValueInput{
+  width:100%;
+  height:44px;
+  min-height:44px;
+  box-sizing:border-box;
+  border-radius:12px;
+  padding:10px 12px;
+  border:1px solid var(--border);
+  background:#0f1419;
+  color:#e6edf6;
+  font-size:16px;
+  line-height:1;
+  font-weight:400;
+}
+.metricLogDateInput{
+  -webkit-appearance:none;
+  appearance:none;
+  text-align:center;
+}
 /* iOS Safari: prevent focus auto-zoom on form controls inside modals/popups. */
 @media (pointer: coarse) {
   input,
