@@ -9769,7 +9769,19 @@ function exportData(){
 function getTaskPointsExportSnapshot() {
   const scheduleChanged = ensureUpcomingSchedule();
   if (scheduleChanged) save();
-  return stripLegacyImageFields({ ...state, projects: loadProjectsFromStorage() });
+  const normalizedState = stripLegacyImageFields({ ...state, projects: loadProjectsFromStorage() });
+  const notesRaw = localStorage.getItem("taskpoints_notes_v1");
+  const projectsRaw = localStorage.getItem("tp_projects_v1");
+  return {
+    exportType: "taskpoints_full_backup",
+    version: 2,
+    exportedAtISO: new Date().toISOString(),
+    state: normalizedState,
+    aux: {
+      ...(typeof notesRaw === "string" ? { taskpoints_notes_v1: notesRaw } : {}),
+      ...(typeof projectsRaw === "string" ? { tp_projects_v1: projectsRaw } : {})
+    }
+  };
 }
 
 async function applyImportedState(root){
