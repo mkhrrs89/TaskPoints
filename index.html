@@ -728,15 +728,17 @@ Nothing visible on the page is built here. === -->
           <canvas id="weightTrend" class="w-full h-24"></canvas>
           <span id="weightGraphHint" class="homeGraphHint hidden">Tap to log weight</span>
         </button>
-        <div
+        <button
           id="vo2MaxGraphPanel"
-          class="homeGraphPanel"
+          type="button"
+          class="homeGraphPanel text-left"
           data-graph-panel="2"
+          aria-label="VO2 Max graph. Tap to log VO2 Max."
         >
           <div class="homeGraphTitle">VO2 Max</div>
           <canvas id="vo2MaxTrend" class="w-full h-24"></canvas>
-          <span id="vo2MaxGraphHint" class="homeGraphHint hidden">No VO2 Max entries yet</span>
-        </div>
+          <span id="vo2MaxGraphHint" class="homeGraphHint hidden">Tap to log VO2 Max</span>
+        </button>
       </div>
     </div>
     <div id="homeGraphDots" class="homeGraphDots" aria-hidden="true">
@@ -5121,7 +5123,8 @@ function updateHomeGraphDots(nextIndex = 0) {
 function bindHomeGraphInteractions() {
   const viewport = $('homeGraphViewport');
   const weightPanel = $('weightGraphPanel');
-  if (!viewport || !weightPanel || viewport.dataset.bound === '1') return;
+  const vo2MaxPanel = $('vo2MaxGraphPanel');
+  if (!viewport || !weightPanel || !vo2MaxPanel || viewport.dataset.bound === '1') return;
   viewport.dataset.bound = '1';
 
   viewport.addEventListener('scroll', () => {
@@ -5148,7 +5151,22 @@ function bindHomeGraphInteractions() {
     }
     openWeightModal();
   });
+  vo2MaxPanel.addEventListener('pointerdown', (event) => {
+    homeGraphPointerDownAt = { x: event.clientX, y: event.clientY };
+  }, { passive: true });
+
+  vo2MaxPanel.addEventListener('click', (event) => {
+    const start = homeGraphPointerDownAt;
+    homeGraphPointerDownAt = null;
+    if (start) {
+      const deltaX = Math.abs(event.clientX - start.x);
+      const deltaY = Math.abs(event.clientY - start.y);
+      if (deltaX > 10 || deltaY > 10) return;
+    }
+    openVo2MaxModal();
+  });
 }
+
 
 function openWeightModal() {
   const modal = $('weightEntryModal');
@@ -5264,6 +5282,107 @@ function submitWeightEntry() {
   } catch (e) {
     console.warn('Could not verify saved weightHistory.', e);
   }
+}
+
+
+function openVo2MaxModal() {
+  const modal = $('vo2MaxEntryModal');
+  const dateInput = $('vo2MaxDateInput');
+  const valueInput = $('vo2MaxValueInput');
+  if (!modal || !dateInput || !valueInput) return;
+  dateInput.value = dateKey(new Date());
+  valueInput.value = '';
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+  window.lockScrollForModal?.();
+  setTimeout(() => dateInput.focus(), 0);
+}
+
+function closeVo2MaxModal() {
+  const modal = $('vo2MaxEntryModal');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+  window.unlockScrollForModal?.();
+}
+
+function submitVo2MaxEntry() {
+  const dateInput = $('vo2MaxDateInput');
+  const valueInput = $('vo2MaxValueInput');
+  if (!dateInput || !valueInput) return;
+
+  const date = String(dateInput.value || '').trim();
+  const valueRaw = String(valueInput.value || '').trim();
+
+  if (!valueRaw) return alert('Please enter a valid VO2 Max value.');
+
+  const value = Number(valueRaw);
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return alert('Please enter a valid date.');
+  if (!Number.isFinite(value)) return alert('Please enter a valid VO2 Max value.');
+
+  window.TaskPointsCore?.flushPendingSaves?.();
+
+  const latest = normalizeState(load());
+  const history = Array.isArray(latest?.vo2MaxHistory) ? latest.vo2MaxHistory.slice() : [];
+  const next = history
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') return null;
+      const entryDate = typeof entry.date === 'string' && entry.date.trim()
+        ? entry.date.trim()
+        : (typeof entry.dateKey === 'string' ? entry.dateKey.trim() : '');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(entryDate)) return null;
+      return {
+        ...entry,
+        date: entryDate,
+        dateKey: entryDate,
+        loggedAtISO: typeof entry.loggedAtISO === 'string' ? entry.loggedAtISO : new Date().toISOString(),
+        id: typeof entry.id === 'string' ? entry.id : (crypto.randomUUID ? crypto.randomUUID() : `vo2-${Date.now()}-${Math.random().toString(16).slice(2)}`),
+        value: Number(entry.value)
+      };
+    })
+    .filter(Boolean)
+    .filter((entry) => entry.date !== date);
+
+  next.push({
+    id: crypto.randomUUID ? crypto.randomUUID() : `vo2-${Date.now()}`,
+    date,
+    dateKey: date,
+    loggedAtISO: new Date().toISOString(),
+    value
+  });
+  next.sort((a, b) => a.date.localeCompare(b.date));
+
+  const nextState = {
+    ...latest,
+    vo2MaxHistory: next
+  };
+
+  try {
+    if (window.TaskPointsCore?.saveStateSnapshot) {
+      const { state: savedState } = TaskPointsCore.saveStateSnapshot(nextState, {
+        storageKey: STORAGE_KEY,
+        immediateWrite: true,
+        savePath: 'vo2max-entry'
+      });
+
+      state = normalizeState(savedState);
+      storageCache.raw = null;
+      storageCache.parsed = state;
+    } else {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
+      state = normalizeState(nextState);
+      storageCache.raw = null;
+      storageCache.parsed = state;
+    }
+  } catch (e) {
+    console.error('Failed to save VO2 Max entry', e);
+    alert('VO2 Max entry failed to save. Check console for details.');
+    return;
+  }
+
+  drawVo2MaxTrend(getVo2MaxHistorySorted());
+  closeVo2MaxModal();
 }
 
 function drawDailyTrend(dailyTotals){
@@ -10816,6 +10935,35 @@ function tpPerfMark(label) {
     <div class="flex justify-end gap-2 mt-6">
       <button type="button" class="btn btn-secondary" onclick="closeWeightModal()">Cancel</button>
       <button type="button" class="btn btn-primary" onclick="submitWeightEntry()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ADD VO2 MAX ENTRY MODAL -->
+<div
+  id="vo2MaxEntryModal"
+  class="fixed inset-0 z-40 hidden items-center justify-center bg-black/60"
+  onclick="closeVo2MaxModal()"
+>
+  <div
+    class="w-full max-w-sm mx-3 rounded-2xl px-4 pb-5 pt-6 relative bg-zinc-900 text-zinc-100 text-sm"
+    onclick="event.stopPropagation();"
+  >
+    <div class="muted text-[11px] uppercase tracking-wide mb-3">Log VO2 Max</div>
+
+    <label class="grid gap-1 text-sm font-medium">
+      Date
+      <input id="vo2MaxDateInput" type="date" class="input">
+    </label>
+
+    <label class="grid gap-1 text-sm font-medium mt-3">
+      VO2 Max
+      <input id="vo2MaxValueInput" type="number" step="0.1" class="input" placeholder="e.g., 45.2">
+    </label>
+
+    <div class="flex justify-end gap-2 mt-6">
+      <button type="button" class="btn btn-secondary" onclick="closeVo2MaxModal()">Cancel</button>
+      <button type="button" class="btn btn-primary" onclick="submitVo2MaxEntry()">Save</button>
     </div>
   </div>
 </div>
