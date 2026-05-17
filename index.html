@@ -705,10 +705,20 @@ Nothing visible on the page is built here. === -->
           <canvas id="weightTrend" class="w-full h-24"></canvas>
           <span id="weightGraphHint" class="homeGraphHint hidden">Tap to log weight</span>
         </button>
+        <div
+          id="vo2MaxGraphPanel"
+          class="homeGraphPanel"
+          data-graph-panel="2"
+        >
+          <div class="homeGraphTitle">VO2 Max</div>
+          <canvas id="vo2MaxTrend" class="w-full h-24"></canvas>
+          <span id="vo2MaxGraphHint" class="homeGraphHint hidden">No VO2 Max entries yet</span>
+        </div>
       </div>
     </div>
     <div id="homeGraphDots" class="homeGraphDots" aria-hidden="true">
       <span class="homeGraphDot is-active"></span>
+      <span class="homeGraphDot"></span>
       <span class="homeGraphDot"></span>
     </div>
   </div>
@@ -2540,6 +2550,7 @@ function load() {
         habits:       [],
         flexActions:  [],
         weightHistory: [],
+        vo2MaxHistory: [],
         gameHistory:  [],
         matchups:     [],
         schedule:     [],
@@ -2575,6 +2586,7 @@ function load() {
             })
             .filter(Boolean)
         : [],
+      vo2MaxHistory: Array.isArray(p.vo2MaxHistory) ? p.vo2MaxHistory : [],
       gameHistory:  Array.isArray(p.gameHistory)  ? p.gameHistory  : [],
       matchups:     Array.isArray(p.matchups)     ? p.matchups     : [],
       schedule:     Array.isArray(p.schedule)     ? p.schedule     : [],
@@ -2598,6 +2610,7 @@ function load() {
       habits:       [],
       flexActions:  [],
       weightHistory: [],
+      vo2MaxHistory: [],
       gameHistory:  [],
       matchups:     [],
       schedule:     [],
@@ -3670,6 +3683,7 @@ function normalizeState(s) {
           })
           .filter(Boolean)
       : [],
+    vo2MaxHistory: Array.isArray(s.vo2MaxHistory) ? s.vo2MaxHistory : [],
     gameHistory: Array.isArray(s.gameHistory) ? s.gameHistory : [],
     matchups:    Array.isArray(s.matchups)    ? s.matchups    : [],
     schedule:    Array.isArray(s.schedule)    ? s.schedule    : [],
@@ -4384,6 +4398,7 @@ function renderStats(){
       // Draw daily trend line
       tpPerfTime('renderStats: drawDailyTrend', () => drawDailyTrend(dailyTotals));
       tpPerfTime('renderStats: drawWeightTrend', () => drawWeightTrend(getWeightHistorySorted()));
+      tpPerfTime('renderStats: drawVo2MaxTrend', () => drawVo2MaxTrend(getVo2MaxHistorySorted()));
       bindHomeGraphInteractions();
 
       // Today / this week / this month keys
@@ -5051,8 +5066,31 @@ function getWeightHistorySorted() {
     .sort((a, b) => a.date.localeCompare(b.date));
 }
 
+
+
+function getVo2MaxHistorySorted() {
+  const list = Array.isArray(state?.vo2MaxHistory) ? state.vo2MaxHistory : [];
+  return list
+    .map((entry) => {
+      const dateKeyValue = typeof entry?.dateKey === 'string' && entry.dateKey.trim()
+        ? entry.dateKey.trim()
+        : (typeof entry?.date === 'string' ? entry.date.trim() : '');
+      const value = Number(entry?.value);
+      if (!Number.isFinite(value)) return null;
+      return {
+        ...entry,
+        dateKey: dateKeyValue,
+        loggedAtISO: typeof entry?.loggedAtISO === 'string' ? entry.loggedAtISO : '',
+        value
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => String(a.dateKey || a.loggedAtISO || '').localeCompare(String(b.dateKey || b.loggedAtISO || '')));
+}
+
 function updateHomeGraphDots(nextIndex = 0) {
-  homeGraphPanelIndex = nextIndex === 1 ? 1 : 0;
+  const total = document.querySelectorAll('#homeGraphDots .homeGraphDot').length || 1;
+  homeGraphPanelIndex = Math.max(0, Math.min(total - 1, Number(nextIndex) || 0));
   const dots = document.querySelectorAll('#homeGraphDots .homeGraphDot');
   dots.forEach((dot, idx) => dot.classList.toggle('is-active', idx === homeGraphPanelIndex));
 }
@@ -5380,6 +5418,70 @@ function drawWeightTrend(weightHistoryInput){
   const points = entries.map((row, i) => {
     const x = paddingX + (n === 1 ? w / 2 : (w * i / (n - 1)));
     const norm = (row.weight - minVal) / range;
+    const y = paddingY + h - norm * h;
+    return { x, y };
+  });
+
+  ctx.strokeStyle = '#1f5b63';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  points.forEach((pt, i) => i === 0 ? ctx.moveTo(pt.x, pt.y) : ctx.lineTo(pt.x, pt.y));
+  ctx.stroke();
+
+  ctx.fillStyle = '#7dd3fc';
+  ctx.strokeStyle = 'rgba(11,13,16,0.85)';
+  ctx.lineWidth = 1;
+  points.forEach((pt) => {
+    ctx.beginPath();
+    ctx.arc(pt.x, pt.y, 2.1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  });
+}
+
+
+
+function drawVo2MaxTrend(vo2MaxHistoryInput){
+  const canvas = $('vo2MaxTrend');
+  const hint = $('vo2MaxGraphHint');
+  if (!canvas || !canvas.getContext) return;
+
+  const ctx = canvas.getContext('2d');
+  const width  = canvas.clientWidth  || 320;
+  const height = canvas.clientHeight || 80;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width  = Math.round(width  * dpr);
+  canvas.height = Math.round(height * dpr);
+  canvas.style.width  = width  + 'px';
+  canvas.style.height = height + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+
+  const entries = Array.isArray(vo2MaxHistoryInput) ? vo2MaxHistoryInput : getVo2MaxHistorySorted();
+  const n = entries.length;
+
+  if (!n) {
+    if (hint) hint.classList.remove('hidden');
+    ctx.strokeStyle = 'rgba(148,163,184,0.3)';
+    ctx.beginPath();
+    ctx.moveTo(0, height - 4);
+    ctx.lineTo(width, height - 4);
+    ctx.stroke();
+    return;
+  }
+
+  if (hint) hint.classList.add('hidden');
+  const minVal = Math.min(...entries.map((r) => r.value));
+  const maxVal = Math.max(...entries.map((r) => r.value));
+  const range = (maxVal - minVal) || 1;
+  const paddingX = 6;
+  const paddingY = 6;
+  const w = width - paddingX * 2;
+  const h = height - paddingY * 2;
+
+  const points = entries.map((row, i) => {
+    const x = paddingX + (n === 1 ? w / 2 : (w * i / (n - 1)));
+    const norm = (row.value - minVal) / range;
     const y = paddingY + h - norm * h;
     return { x, y };
   });
@@ -9537,6 +9639,7 @@ async function applyImportedState(root){
     habits:      Array.isArray(root.habits)      ? root.habits      : [],
     flexActions: Array.isArray(root.flexActions) ? root.flexActions : [],
     weightHistory: Array.isArray(root.weightHistory) ? root.weightHistory : [],
+    vo2MaxHistory: Array.isArray(root.vo2MaxHistory) ? root.vo2MaxHistory : [],
     gameHistory: Array.isArray(root.gameHistory) ? root.gameHistory : [],
     matchups:    Array.isArray(root.matchups)    ? root.matchups    : [],
     schedule:    Array.isArray(root.schedule)    ? root.schedule    : [],
