@@ -230,9 +230,12 @@ Nothing visible on the page is built here. === -->
       padding-right: 10px;
     }
 
-    .yesterdayResultsPanel .yesterday-result-player {
+    .yesterdayResultRow {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
       min-width: 0;
-      flex: 1 1 auto;
     }
 
     .yesterdayResultRow {
@@ -253,8 +256,22 @@ Nothing visible on the page is built here. === -->
 
     #yesterdayOpponent {
       min-width: 0;
-      max-width: none;
       flex: 1 1 auto;
+      line-height: 1.2;
+    }
+
+    .yesterdayResultIdentity #yesterdayYouName,
+    .yesterdayResultIdentity #yesterdayOpponent {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .yesterdayResultScore {
+      flex: 0 0 auto;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
     }
 
     .matchupCurrentStreak {

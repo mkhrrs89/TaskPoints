@@ -576,6 +576,7 @@ body {
 #yesterdayOpponentSwatches {
   margin-top: 0;
   margin-bottom: 0;
+  margin-left: 0;
   align-self: center;
   vertical-align: middle;
 }
