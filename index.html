@@ -236,42 +236,48 @@ Nothing visible on the page is built here. === -->
       justify-content: space-between;
       gap: 6px;
       min-width: 0;
-    }
-
-    .yesterdayResultRow {
-      min-width: 0;
-      gap: 6px;
+      width: 100%;
     }
 
     .yesterdayResultIdentity {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
       min-width: 0;
       flex: 1 1 auto;
+      justify-content: flex-start;
     }
 
     .yesterdayResultScore {
       flex: 0 0 auto;
       text-align: right;
       font-variant-numeric: tabular-nums;
+      margin-left: 6px;
     }
 
+    #yesterdayYouName,
     #yesterdayOpponent {
-      min-width: 0;
-      flex: 1 1 auto;
-      line-height: 1.2;
-    }
-
-    .yesterdayResultIdentity #yesterdayYouName,
-    .yesterdayResultIdentity #yesterdayOpponent {
       min-width: 0;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+      line-height: 1.2;
     }
 
-    .yesterdayResultScore {
+    #yesterdayYourSwatches,
+    #yesterdayOpponentSwatches,
+    .scoreboard-color-swatches-compact {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
       flex: 0 0 auto;
-      text-align: right;
-      font-variant-numeric: tabular-nums;
+      margin-left: 0 !important;
+      margin-right: 0 !important;
+    }
+
+    #yesterdayOpponentSwatches {
+      margin-left: 0 !important;
+      justify-content: flex-start;
     }
 
     .matchupCurrentStreak {
