@@ -130,7 +130,8 @@
           </div>
         </summary>
         <div class="space-y-3 pt-4">
-          <div class="flex items-center justify-end">
+          <div class="flex items-center justify-end gap-2">
+            <button id="storageHealthDeleteQuarantineBtn" class="btn btn-warn btn-toolbar nav-btn" type="button">Delete quarantined snapshot</button>
             <button id="storageHealthRefreshBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Refresh</button>
           </div>
           <div id="storageHealthOutput" class="space-y-3 text-sm"></div>
@@ -1105,6 +1106,10 @@ ${summaryText}`)) return;
           return;
         }
 
+        const quarantinedKey = "taskpoints_quarantined_snapshot";
+        if (localStorage.getItem(quarantinedKey) && confirm("Delete temporary quarantined snapshot now to free storage?")) {
+          localStorage.removeItem(quarantinedKey);
+        }
         alert(`Merge complete: added ${summary.matchups.added} matchups and ${summary.gameHistory.added} game history entries. Earliest matchup is now ${savedSummary.earliestMatchup}. Reloading to refresh restored history.`);
         window.location.reload();
       } catch (err) {
@@ -3401,6 +3406,7 @@ rows.push([
       output.innerHTML = '<div class="muted text-xs">Refreshing…</div>';
       const report = getLocalStorageSizeReport();
       const mainEntry = report.entries.find((entry) => entry.key === "taskpoints_v1") || { key: "taskpoints_v1", ...formatStorageUnits(0) };
+      const quarantinedEntry = report.entries.find((entry) => entry.key === "taskpoints_quarantined_snapshot") || null;
       const mainStatus = getTaskPointsStorageStatus(mainEntry.mib);
       let parsedState = null;
       try {
@@ -3419,6 +3425,7 @@ rows.push([
         const lower = entry.key.toLowerCase();
         return lower.includes("backup") || lower.includes("before") || lower.includes("snapshot") || lower.startsWith("taskpoints_v1_before");
       });
+      const activeDataBytes = Math.max(0, report.total.bytes - (quarantinedEntry?.bytes || 0));
       const counts = parsedState && typeof parsedState === "object" ? {
         tasks: Array.isArray(parsedState.tasks) ? parsedState.tasks.length : 0,
         completions: Array.isArray(parsedState.completions) ? parsedState.completions.length : 0,
@@ -3430,7 +3437,9 @@ rows.push([
       } : null;
       output.innerHTML = `
         <div><strong>Main State:</strong> taskpoints_v1: <strong>${mainEntry.mib.toFixed(2)} MiB</strong> <span class="btn ${mainStatus.cls} btn-toolbar">${mainStatus.label}</span></div>
+        <div class="muted">Active app data (excluding quarantined snapshot): ${(activeDataBytes / (1024 * 1024)).toFixed(2)} MiB</div>
         <div class="muted">LocalStorage Total: ${report.total.mib.toFixed(2)} MiB across ${report.entries.length} keys</div>
+        ${quarantinedEntry ? `<div class="${quarantinedEntry.bytes > 500 * 1024 ? 'text-amber-300' : 'muted'}">Quarantined snapshot: <strong>${quarantinedEntry.mib.toFixed(2)} MiB</strong>${quarantinedEntry.bytes > 500 * 1024 ? ' — Quarantined snapshot is using ' + quarantinedEntry.mib.toFixed(2) + ' MiB. Export it if needed, then delete it to free localStorage.' : ''}</div>` : '<div class="muted">Quarantined snapshot: none</div>'}
         <div class="muted">Browser Storage Estimate (origin): ${browserEstimate ? `${browserEstimate.usage.mib.toFixed(2)} MiB of ${browserEstimate.quota.mib.toFixed(2)} MiB (${browserEstimate.percent.toFixed(2)}%)` : "Not available"}</div>
         <div class="muted">Persistent Storage: ${persisted}</div>
         <div class="muted">Images: ${imageInfo.available ? `${imageInfo.count} in IndexedDB` : "Not available"} (size estimate unavailable)</div>
@@ -3451,6 +3460,20 @@ rows.push([
         <div class="text-xs">${counts ? `Data counts: tasks ${counts.tasks}, completions ${counts.completions}, players ${counts.players}, habits ${counts.habits}, gameHistory ${counts.gameHistory}, matchups ${counts.matchups}, opponentDripSchedules ${counts.opponentDripSchedules}` : "Data counts unavailable (missing or invalid taskpoints_v1 JSON)."}</div>`;
     }
 
+    function handleDeleteQuarantinedSnapshot() {
+      const key = "taskpoints_quarantined_snapshot";
+      if (!localStorage.getItem(key)) {
+        alert("No quarantined snapshot found.");
+        renderStorageHealthPanel();
+        return;
+      }
+      const ok = confirm("Delete quarantined snapshot? This removes the temporary quarantined backup copy from this browser and does not affect your current TaskPoints save.");
+      if (!ok) return;
+      localStorage.removeItem(key);
+      alert("Quarantined snapshot deleted.");
+      renderStorageHealthPanel();
+    }
+
     let latestSimulation = null;
 
     document.addEventListener('DOMContentLoaded', () => {
@@ -3465,6 +3488,7 @@ rows.push([
       document.getElementById('scwmTrendBtn')?.addEventListener('click', generateScwmTrendReport);
       document.getElementById('habitCalendarReportBtn')?.addEventListener('click', generateHabitCalendarReport);
       document.getElementById('storageHealthRefreshBtn')?.addEventListener('click', renderStorageHealthPanel);
+      document.getElementById('storageHealthDeleteQuarantineBtn')?.addEventListener('click', handleDeleteQuarantinedSnapshot);
       const missingScoreDateInput = document.getElementById("missingScoreDate");
       const missingScoreTypeSelect = document.getElementById("missingScoreType");
       const missingScoreSaveBtn = document.getElementById("missingScoreSaveBtn");

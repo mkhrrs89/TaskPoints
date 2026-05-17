@@ -4,6 +4,7 @@
   const IMAGE_DB_NAME = "taskpoints";
   const IMAGE_STORE_NAME = "images";
   const QUARANTINE_SNAPSHOT_KEY = "taskpoints_quarantined_snapshot";
+  const QUARANTINE_INLINE_MAX_BYTES = 200 * 1024;
   const BACKUP_SLOT_KEYS = [
     "taskpoints_backup_latest",
     "taskpoints_backup_prev1",
@@ -1299,19 +1300,45 @@ return { state: merged, storageKey };
   }
 
   function quarantineRejectedSnapshot(payload, reason, options = {}) {
+    const payloadJson = (() => {
+      try { return JSON.stringify(payload); } catch (_) { return ''; }
+    })();
+    const payloadBytes = payloadJson ? payloadJson.length * 2 : 0;
     const quarantined = {
       timestamp: new Date().toISOString(),
       reason,
       source: options.source || options.savePath || options.reason || options.caller || 'unknown',
       saveMode: options.saveMode || 'snapshot',
       summary: summarizeSnapshotCounts(payload),
-      payload
+      payloadBytes,
+      payloadOmitted: payloadBytes > QUARANTINE_INLINE_MAX_BYTES
     };
+    if (payloadBytes <= QUARANTINE_INLINE_MAX_BYTES) {
+      quarantined.payload = payload;
+    }
     try {
       localStorage.setItem(QUARANTINE_SNAPSHOT_KEY, JSON.stringify(quarantined));
+      if (payloadBytes > QUARANTINE_INLINE_MAX_BYTES) {
+        console.warn(`[TaskPoints] Quarantined snapshot payload is large (${(payloadBytes / (1024 * 1024)).toFixed(2)} MiB). Export a backup if needed; localStorage now stores metadata only.`);
+      }
     } catch (e) {
       console.warn('Failed to persist quarantined TaskPoints snapshot.', e);
     }
+  }
+
+  function getLocalStorageSizeReport() {
+    const entries = [];
+    let totalBytes = 0;
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (!key) continue;
+      const value = localStorage.getItem(key) || '';
+      const bytes = (key.length + value.length) * 2;
+      totalBytes += bytes;
+      entries.push({ key, bytes });
+    }
+    entries.sort((a, b) => b.bytes - a.bytes);
+    return { totalBytes, entries };
   }
 
   function storeRollingBackup(storageKey, options = {}) {
@@ -1373,6 +1400,24 @@ return { state: merged, storageKey };
     };
 
     const storageKey = options.storageKey || STORAGE_KEY;
+    const logQuotaDebug = () => {
+      try {
+        const report = getLocalStorageSizeReport();
+        const keySizeBytes = (key) => {
+          const raw = localStorage.getItem(key);
+          return raw ? (key.length + raw.length) * 2 : 0;
+        };
+        console.warn('[TaskPoints] saveStateSnapshot quota debug', {
+          storageKey,
+          taskpoints_v1_bytes: keySizeBytes(STORAGE_KEY),
+          taskpoints_quarantined_snapshot_bytes: keySizeBytes(QUARANTINE_SNAPSHOT_KEY),
+          localStorage_total_bytes: report.totalBytes,
+          largest_keys: report.entries.slice(0, 8)
+        });
+      } catch (e) {
+        console.warn('[TaskPoints] quota debug logging failed', e);
+      }
+    };
     const appendStorageWarning = (snapshot, warning) => {
       const base = snapshot && typeof snapshot === 'object' ? snapshot : {};
       const warnings = Array.isArray(base.storageWarnings) ? base.storageWarnings.slice() : [];
@@ -1518,6 +1563,7 @@ return { state: merged, storageKey };
     if (typeof alert === 'function') {
       alert('Browser storage is full. Save failed. Historical completions, matchups, game history, and weight history were preserved. Export a backup or reduce storage before continuing.');
     }
+    logQuotaDebug();
     throw lastQuotaError || new Error('TaskPointsCore save failed: browser storage quota exceeded');
   }
 
@@ -3150,6 +3196,7 @@ function computeCanonicalMatchupStats(state, playerId, options = {}) {
     STORAGE_KEY,
     PROJECTS_STORAGE_KEY,
     QUARANTINE_SNAPSHOT_KEY,
+    QUARANTINE_INLINE_MAX_BYTES,
     BACKUP_SLOT_KEYS,
     IMAGE_DB_NAME,
     IMAGE_STORE_NAME,
@@ -3170,6 +3217,7 @@ function computeCanonicalMatchupStats(state, playerId, options = {}) {
     saveAppState,
     getRecoveryCandidate,
     restoreBackupSlot,
+    getLocalStorageSizeReport,
     dateKey,
     todayKey,
     addDaysToDateKey,
