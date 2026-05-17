@@ -980,6 +980,7 @@
       if (type === 'matchups') return matchupMergeKey(entry);
       if (type === 'gameHistory') return gameHistoryMergeKey(entry);
       if (type === 'weightHistory') return [entry.dateKey || entry.loggedAtISO || '', entry.weight ?? ''].join('|');
+      if (type === 'vo2MaxHistory') return [entry.dateKey || entry.loggedAtISO || entry.dateISO || entry.date || '', entry.value ?? ''].join('|');
       return JSON.stringify(entry);
     }
 
@@ -1026,6 +1027,7 @@
       state.matchups = (state.matchups || []).slice().sort((a,b)=> new Date((a?.date||a?.dateKey||0)) - new Date((b?.date||b?.dateKey||0)));
       state.gameHistory = (state.gameHistory || []).slice().sort((a,b)=> new Date(a?.date||0)-new Date(b?.date||0));
       state.weightHistory = (state.weightHistory || []).slice().sort((a,b)=> new Date((a?.loggedAtISO||a?.dateKey||0))-new Date((b?.loggedAtISO||b?.dateKey||0)));
+      state.vo2MaxHistory = (state.vo2MaxHistory || []).slice().sort((a,b)=> new Date((a?.loggedAtISO||a?.dateKey||a?.dateISO||a?.date||0))-new Date((b?.loggedAtISO||b?.dateKey||b?.dateISO||b?.date||0)));
       return state;
     }
 
@@ -1040,7 +1042,7 @@
         const currentState = loadSettingsState();
         const merged = normalizeSettingsState(currentState);
         const summary = {};
-        ['completions','gameHistory','matchups','weightHistory'].forEach((key) => {
+        ['completions','gameHistory','matchups','weightHistory','vo2MaxHistory'].forEach((key) => {
           const res = mergeHistoryArray(currentState[key], backupRoot[key], key);
           merged[key] = res.merged;
           summary[key] = { before: Array.isArray(currentState[key]) ? currentState[key].length : 0, added: res.added, after: res.merged.length };
@@ -1053,6 +1055,7 @@
 GameHistory: ${summary.gameHistory.before} +${summary.gameHistory.added} => ${summary.gameHistory.after}
 Matchups: ${summary.matchups.before} +${summary.matchups.added} => ${summary.matchups.after}
 WeightHistory: ${summary.weightHistory.before} +${summary.weightHistory.added} => ${summary.weightHistory.after}
+VO2MaxHistory: ${summary.vo2MaxHistory.before} +${summary.vo2MaxHistory.added} => ${summary.vo2MaxHistory.after}
 Earliest completion: ${earliestCompletion}
 Earliest matchup: ${earliestMatchup}
 Earliest gameHistory: ${earliestGameHistory}`;
@@ -1081,6 +1084,8 @@ ${summaryText}`)) return;
           savedCompletions: saved.completions?.length,
           expectedWeightHistory: mergedState.weightHistory?.length,
           savedWeightHistory: saved.weightHistory?.length,
+          expectedVo2MaxHistory: mergedState.vo2MaxHistory?.length,
+          savedVo2MaxHistory: saved.vo2MaxHistory?.length,
           lastBackupMerge: saved.lastBackupMerge
         });
 
@@ -1090,7 +1095,8 @@ ${summaryText}`)) return;
           (saved.matchups?.length || 0) === (mergedState.matchups?.length || 0)
           && (saved.gameHistory?.length || 0) === (mergedState.gameHistory?.length || 0)
           && (saved.completions?.length || 0) === (mergedState.completions?.length || 0)
-          && (saved.weightHistory?.length || 0) === (mergedState.weightHistory?.length || 0);
+          && (saved.weightHistory?.length || 0) === (mergedState.weightHistory?.length || 0)
+          && (saved.vo2MaxHistory?.length || 0) === (mergedState.vo2MaxHistory?.length || 0);
         const verificationPassed = countsMatch
           && savedSummary.earliestMatchup === expectedSummary.earliestMatchup
           && savedSummary.earliestGameHistory === expectedSummary.earliestGameHistory;
