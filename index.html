@@ -9778,7 +9778,7 @@ function getTaskPointsExportSnapshot() {
     exportedAtISO: new Date().toISOString(),
     state: normalizedState,
     aux: {
-      ...(typeof notesRaw === "string" ? { taskpoints_notes_v1: notesRaw } : {}),
+      taskpoints_notes_v1: typeof notesRaw === "string" ? notesRaw : "",
       ...(typeof projectsRaw === "string" ? { tp_projects_v1: projectsRaw } : {})
     }
   };
