@@ -732,6 +732,96 @@
       }
     }
 
+
+    function readNotesPayloadFromBackup(parsedBackup) {
+      if (!parsedBackup || typeof parsedBackup !== "object") return null;
+
+      const hasOwn = (obj, key) => !!obj && Object.prototype.hasOwnProperty.call(obj, key);
+      if (hasOwn(parsedBackup.aux, "taskpoints_notes_v1")) return parsedBackup.aux.taskpoints_notes_v1;
+      if (hasOwn(parsedBackup, "taskpoints_notes_v1")) return parsedBackup.taskpoints_notes_v1;
+      if (hasOwn(parsedBackup.notesBackup, "taskpoints_notes_v1")) return parsedBackup.notesBackup.taskpoints_notes_v1;
+      if (hasOwn(parsedBackup.state, "notes")) {
+        return JSON.stringify(parsedBackup.state.notes);
+      }
+      return null;
+    }
+
+    function normalizeNotesPayload(payload) {
+      if (typeof payload === "string") return payload;
+      if (payload == null) return "";
+      try { return JSON.stringify(payload); } catch (_) { return String(payload); }
+    }
+
+    function getStorageSizeKiB(value) {
+      const raw = typeof value === "string" ? value : "";
+      return new Blob([raw]).size / 1024;
+    }
+
+    function tryParseJsonNotes(value) {
+      if (typeof value !== "string") return null;
+      const trimmed = value.trim();
+      if (!trimmed || !(/^[\[{]/.test(trimmed))) return null;
+      try {
+        const parsed = JSON.parse(trimmed);
+        return parsed && typeof parsed === "object" ? parsed : null;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function mergeNotesObjects(currentObj, backupObj) {
+      const merged = { ...(currentObj || {}) };
+      const appendText = (a, b) => {
+        const at = typeof a === "string" ? a.trim() : "";
+        const bt = typeof b === "string" ? b.trim() : "";
+        if (!at) return b;
+        if (!bt || at === bt) return a;
+        return `${a}
+
+${b}`;
+      };
+      Object.keys(backupObj || {}).forEach((key) => {
+        const cur = merged[key];
+        const bak = backupObj[key];
+        if (cur == null || cur === "") {
+          merged[key] = bak;
+          return;
+        }
+        if (typeof cur === "string" && typeof bak === "string") {
+          merged[key] = appendText(cur, bak);
+          return;
+        }
+        if (cur && bak && typeof cur === "object" && typeof bak === "object" && !Array.isArray(cur) && !Array.isArray(bak)) {
+          merged[key] = mergeNotesObjects(cur, bak);
+          return;
+        }
+      });
+      return merged;
+    }
+
+    function applyNotesRestore(mode, incomingNotesRaw) {
+      const incomingNotes = normalizeNotesPayload(incomingNotesRaw);
+      const existingNotes = localStorage.getItem("taskpoints_notes_v1") || "";
+      if (!incomingNotes.trim() || mode === "skip") return false;
+      if (mode === "replace") {
+        localStorage.setItem("taskpoints_notes_v1", incomingNotes);
+        return true;
+      }
+      if (mode === "append") {
+        localStorage.setItem("taskpoints_notes_v1", [existingNotes, incomingNotes].filter(Boolean).join("\n\n"));
+        return true;
+      }
+      if (mode === "merge") {
+        const currentObj = tryParseJsonNotes(existingNotes);
+        const backupObj = tryParseJsonNotes(incomingNotes);
+        if (currentObj && backupObj) {
+          localStorage.setItem("taskpoints_notes_v1", JSON.stringify(mergeNotesObjects(currentObj, backupObj)));
+          return true;
+        }
+      }
+      return false;
+    }
+
     function applyImportedState(data) {
       const isFullBackup = data && data.exportType === "taskpoints_full_backup" && data.state;
       const root =
@@ -777,11 +867,16 @@
       } else {
         console.warn("settings import skipped localStorage write; TaskPointsCore missing.");
       }
-      if (isFullBackup && data.aux && Object.prototype.hasOwnProperty.call(data.aux, "taskpoints_notes_v1")) {
-        const incomingNotes = typeof data.aux.taskpoints_notes_v1 === "string" ? data.aux.taskpoints_notes_v1 : "";
+      const importedNotesPayload = readNotesPayloadFromBackup(data);
+      if (isFullBackup && importedNotesPayload != null) {
+        const incomingNotes = normalizeNotesPayload(importedNotesPayload);
         const existingNotes = localStorage.getItem("taskpoints_notes_v1") || "";
-        if (!existingNotes.trim() || confirm("Replace current Notes with Notes from backup?")) {
-          localStorage.setItem("taskpoints_notes_v1", incomingNotes);
+        if (incomingNotes.trim()) {
+          if (!existingNotes.trim()) {
+            if (confirm("Restore notes from backup?")) applyNotesRestore("replace", incomingNotes);
+          } else if (confirm("Backup contains Notes. Replace current Notes with backup Notes? Click Cancel to keep current Notes.")) {
+            applyNotesRestore("replace", incomingNotes);
+          }
         }
       }
       if (isFullBackup && data.aux && Object.prototype.hasOwnProperty.call(data.aux, "tp_projects_v1")) {
@@ -1083,21 +1178,32 @@ VO2MaxHistory: ${summary.vo2MaxHistory.before} +${summary.vo2MaxHistory.added} =
 Earliest completion: ${earliestCompletion}
 Earliest matchup: ${earliestMatchup}
 Earliest gameHistory: ${earliestGameHistory}`;
+        const mergedState = { ...currentState, ...merged, lastBackupMerge: new Date().toISOString() };
+        const backupNotesPayloadRaw = readNotesPayloadFromBackup(raw);
+        const backupNotes = normalizeNotesPayload(backupNotesPayloadRaw);
+        const currentNotes = localStorage.getItem("taskpoints_notes_v1") || "";
+        const currentNotesKiB = getStorageSizeKiB(currentNotes).toFixed(1);
+        const backupNotesKiB = getStorageSizeKiB(backupNotes).toFixed(1);
+        const backupHasNotes = !!backupNotes.trim();
+        const notesStatus = backupHasNotes ? "non-empty" : "empty";
+        const summaryWithNotes = `${summaryText}
+Notes: current ${currentNotesKiB} KiB, backup ${backupNotesKiB} KiB (${notesStatus})${backupHasNotes ? ", action available" : ""}`;
         if (!confirm(`Merge missing historical data from this backup into your current save? This will not delete current data.
 
-${summaryText}`)) return;
-        const mergedState = { ...currentState, ...merged, lastBackupMerge: new Date().toISOString() };
-        const backupAux = raw && raw.exportType === "taskpoints_full_backup" && raw.aux ? raw.aux : null;
-        if (backupAux && Object.prototype.hasOwnProperty.call(backupAux, "taskpoints_notes_v1")) {
-          const incomingNotes = typeof backupAux.taskpoints_notes_v1 === "string" ? backupAux.taskpoints_notes_v1 : "";
-          const choice = prompt("Backup contains notes. Type: skip (default), append, or replace.", "skip");
-          const mode = String(choice || "skip").trim().toLowerCase();
-          if (mode === "replace") {
-            localStorage.setItem("taskpoints_notes_v1", incomingNotes);
-          } else if (mode === "append") {
-            const existingNotes = localStorage.getItem("taskpoints_notes_v1") || "";
-            localStorage.setItem("taskpoints_notes_v1", [existingNotes, incomingNotes].filter(Boolean).join("\n\n"));
+${summaryWithNotes}`)) return;
+        let notesRestored = false;
+        if (backupHasNotes) {
+          let mode = "skip";
+          if (!currentNotes.trim()) {
+            if (confirm("Current notes are empty and backup notes are available. Restore notes from backup?")) mode = "replace";
+          } else {
+            const choice = prompt("Backup contains notes. Type: skip (default), append, merge, or replace.", "skip");
+            mode = String(choice || "skip").trim().toLowerCase();
+            if (mode === "replace" && !confirm("Replace current notes with backup notes? This cannot be undone except by restoring another backup.")) {
+              mode = "skip";
+            }
           }
+          notesRestored = applyNotesRestore(mode, backupNotes);
         }
         if (window.TaskPointsCore?.saveStateSnapshot) {
           TaskPointsCore.saveStateSnapshot(mergedState, {
@@ -1145,7 +1251,8 @@ ${summaryText}`)) return;
         if (localStorage.getItem(quarantinedKey) && confirm("Delete temporary quarantined snapshot now to free storage?")) {
           localStorage.removeItem(quarantinedKey);
         }
-        alert(`Merge complete: added ${summary.matchups.added} matchups and ${summary.gameHistory.added} game history entries. Earliest matchup is now ${savedSummary.earliestMatchup}. Reloading to refresh restored history.`);
+        window.dispatchEvent(new CustomEvent("taskpoints-notes-updated", { detail: { source: "settings-merge-backup" } }));
+        alert(`Merge complete: added ${summary.matchups.added} matchups and ${summary.gameHistory.added} game history entries. Earliest matchup is now ${savedSummary.earliestMatchup}.${notesRestored ? " Notes restored from backup." : ""} Reloading to refresh restored history.`);
         window.location.reload();
       } catch (err) {
         console.error('Merge backup failed', err);
