@@ -1559,7 +1559,11 @@ return { state: merged, storageKey };
     const quarantineHint = localStorage.getItem(QUARANTINE_SNAPSHOT_KEY)
       ? ' Tip: delete taskpoints_quarantined_snapshot from Settings → Storage Health.'
       : '';
-    const quotaMessage = `Browser storage is full. Save failed. Biggest localStorage keys: ${largestKeysSummary || 'unavailable'}. Historical completions, matchups, game history, weight history, and VO2 Max history were preserved.${quarantineHint}`;
+    const latestBackupRaw = localStorage.getItem('taskpoints_backup_latest');
+    const latestBackupHint = latestBackupRaw
+      ? ` taskpoints_backup_latest is using ${(getUtf8SizeBytes(latestBackupRaw) / (1024 * 1024)).toFixed(2)} MiB. Delete it from Storage Health to free space.`
+      : '';
+    const quotaMessage = `Browser storage is full. Save failed. Biggest localStorage keys: ${largestKeysSummary || 'unavailable'}.${latestBackupHint} Historical completions, matchups, game history, weight history, and VO2 Max history were preserved.${quarantineHint}`;
     const quotaWarning = {
       type: 'storage-quota-save-failed',
       atISO: new Date().toISOString(),
