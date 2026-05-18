@@ -138,6 +138,24 @@
         </div>
       </details>
 
+      <details class="glass space-y-3" id="notesRecoverySection">
+        <summary class="flex items-center justify-between gap-3 flex-wrap cursor-pointer">
+          <div>
+            <div class="text-lg font-semibold">Notes Recovery</div>
+            <div class="muted text-sm">Scan this device for note-like localStorage data and restore it if found.</div>
+          </div>
+        </summary>
+        <div class="space-y-3 pt-4">
+          <div class="flex flex-wrap gap-2 items-center">
+            <button id="notesRecoveryScanBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Scan for Notes</button>
+            <button id="notesRecoveryRestoreBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Restore Selected Notes</button>
+            <button id="notesRecoveryCopyBtn" class="btn btn-ghost btn-toolbar nav-btn" type="button">Copy Selected Notes to Clipboard</button>
+          </div>
+          <div id="notesRecoveryStatus" class="muted text-xs">Run a scan to view note-like localStorage candidates.</div>
+          <div id="notesRecoveryOutput" class="space-y-2 text-sm"></div>
+        </div>
+      </details>
+
 <div class="glass space-y-3" id="briefToolsSection">
   <div>
     <div class="text-lg font-semibold">Daily Brief + GitHub</div>
@@ -3641,6 +3659,144 @@ rows.push([
       renderStorageHealthPanel();
     }
 
+    const NOTES_RECOVERY_TARGET_KEY = "taskpoints_notes_v1";
+    let notesRecoveryCandidates = [];
+
+    function looksLikeLongFreeformText(value) {
+      if (typeof value !== "string") return false;
+      const trimmed = value.trim();
+      if (trimmed.length < 120) return false;
+      const newlineCount = (trimmed.match(/\n/g) || []).length;
+      const wordCount = trimmed.split(/\s+/).filter(Boolean).length;
+      return newlineCount >= 2 || wordCount >= 20;
+    }
+
+    function analyzeNotesCandidate(key, value) {
+      const raw = typeof value === "string" ? value : "";
+      const lowerKey = String(key || "").toLowerCase();
+      const lowerValue = raw.toLowerCase();
+      const keyHints = ["note", "notes", "mood", "journal", "brain", "dump", "outline", "general"];
+      const valueHints = ["general notes", "mood notes", "\"note\"", "\"notes\"", "\"mood\"", "\"general\""];
+      const keyMatch = keyHints.some((hint) => lowerKey.includes(hint));
+      const valueMatch = valueHints.some((hint) => lowerValue.includes(hint));
+      const newlineHeavy = (raw.match(/\n/g) || []).length >= 3;
+      const longFreeform = looksLikeLongFreeformText(raw);
+      const json = tryParseJsonNotes(raw);
+      const jsonHint = !!(json && JSON.stringify(json).toLowerCase().match(/note|notes|mood|general/));
+      const isCandidate = keyMatch || valueMatch || newlineHeavy || longFreeform || jsonHint;
+      if (!isCandidate) return null;
+      const pretty = json ? JSON.stringify(json, null, 2) : raw;
+      return {
+        key,
+        value: raw,
+        bytes: getUtf8SizeBytes(raw),
+        kind: json ? "JSON" : "Plain text",
+        preview: pretty.slice(0, 300),
+        isJson: !!json
+      };
+    }
+
+    function renderNotesRecoveryCandidates() {
+      const output = document.getElementById("notesRecoveryOutput");
+      const status = document.getElementById("notesRecoveryStatus");
+      if (!output || !status) return;
+      if (!notesRecoveryCandidates.length) {
+        output.innerHTML = "";
+        status.textContent = "No note-like localStorage candidates found on this device.";
+        return;
+      }
+      status.textContent = `Found ${notesRecoveryCandidates.length} note-like localStorage candidate${notesRecoveryCandidates.length === 1 ? "" : "s"}.`;
+      output.innerHTML = notesRecoveryCandidates.map((entry, idx) => {
+        const sizeKiB = (entry.bytes / 1024).toFixed(2);
+        return `<label class="block border border-white/10 rounded-lg p-3">
+          <div class="flex items-center gap-2 mb-1">
+            <input type="radio" name="notesRecoveryCandidate" value="${idx}" ${idx === 0 ? "checked" : ""} />
+            <div class="font-semibold break-all">Key: ${escapeHtml(entry.key)}</div>
+          </div>
+          <div class="muted text-xs">Size: ${sizeKiB} KiB • Type: ${entry.kind}</div>
+          <pre class="text-xs whitespace-pre-wrap break-words mt-2">${escapeHtml(entry.preview || "")}${entry.value.length > 300 ? "\n…" : ""}</pre>
+        </label>`;
+      }).join("");
+    }
+
+    function getSelectedNotesRecoveryCandidate() {
+      const selected = document.querySelector('input[name="notesRecoveryCandidate"]:checked');
+      if (!selected) return null;
+      const idx = Number(selected.value);
+      if (!Number.isFinite(idx)) return null;
+      return notesRecoveryCandidates[idx] || null;
+    }
+
+    function scanForRecoverableNotes() {
+      notesRecoveryCandidates = [];
+      for (let i = 0; i < localStorage.length; i += 1) {
+        const key = localStorage.key(i);
+        if (!key) continue;
+        const value = localStorage.getItem(key);
+        const entry = analyzeNotesCandidate(key, value);
+        if (entry) notesRecoveryCandidates.push(entry);
+      }
+      notesRecoveryCandidates.sort((a, b) => b.bytes - a.bytes);
+      renderNotesRecoveryCandidates();
+    }
+
+    function mergeNotesForRecovery(existingNotes, incomingNotes, sourceKey) {
+      const currentObj = tryParseJsonNotes(existingNotes);
+      const incomingObj = tryParseJsonNotes(incomingNotes);
+      if (currentObj && incomingObj) {
+        return JSON.stringify({
+          ...mergeNotesObjects(currentObj, incomingObj),
+          recovered: { sourceKey, recoveredAtISO: new Date().toISOString(), payload: incomingObj }
+        });
+      }
+      const divider = `--- Recovered notes from ${sourceKey} at ${new Date().toISOString()} ---`;
+      return [existingNotes, divider, incomingNotes].filter(Boolean).join("\n\n");
+    }
+
+    function restoreSelectedNotesCandidate() {
+      const selected = getSelectedNotesRecoveryCandidate();
+      if (!selected) {
+        alert("Select a notes candidate first.");
+        return;
+      }
+      const existingNotes = localStorage.getItem(NOTES_RECOVERY_TARGET_KEY) || "";
+      if (!confirm(`Restore notes from localStorage key "${selected.key}" into ${NOTES_RECOVERY_TARGET_KEY}?`)) return;
+      if (!existingNotes.trim()) {
+        localStorage.setItem(NOTES_RECOVERY_TARGET_KEY, selected.value);
+      } else {
+        const choice = (prompt("Current notes are not empty. Type: append (default), replace, or cancel.", "append") || "append").trim().toLowerCase();
+        if (choice === "replace") {
+          if (!confirm("Replace current notes with selected notes?")) return;
+          localStorage.setItem(NOTES_RECOVERY_TARGET_KEY, selected.value);
+        } else if (choice === "append" || choice === "") {
+          localStorage.setItem(NOTES_RECOVERY_TARGET_KEY, mergeNotesForRecovery(existingNotes, selected.value, selected.key));
+        } else {
+          return;
+        }
+      }
+      window.dispatchEvent(new CustomEvent("taskpoints-notes-updated", { detail: { source: "settings-notes-recovery" } }));
+      alert(`Notes restored to ${NOTES_RECOVERY_TARGET_KEY}. Open the Notes page to verify.`);
+    }
+
+    async function copySelectedNotesCandidate() {
+      const selected = getSelectedNotesRecoveryCandidate();
+      if (!selected) {
+        alert("Select a notes candidate first.");
+        return;
+      }
+      if (!navigator.clipboard?.writeText) {
+        alert("Clipboard copy is not available in this browser.");
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(selected.value || "");
+        alert(`Copied notes payload from "${selected.key}" to clipboard.`);
+      } catch (err) {
+        console.error("Failed to copy notes candidate", err);
+        alert("Failed to copy notes candidate to clipboard.");
+      }
+    }
+
     let latestSimulation = null;
 
     document.addEventListener('DOMContentLoaded', () => {
@@ -3656,6 +3812,9 @@ rows.push([
       document.getElementById('habitCalendarReportBtn')?.addEventListener('click', generateHabitCalendarReport);
       document.getElementById('storageHealthRefreshBtn')?.addEventListener('click', renderStorageHealthPanel);
       document.getElementById('storageHealthDeleteQuarantineBtn')?.addEventListener('click', handleDeleteQuarantinedSnapshot);
+      document.getElementById('notesRecoveryScanBtn')?.addEventListener('click', scanForRecoverableNotes);
+      document.getElementById('notesRecoveryRestoreBtn')?.addEventListener('click', restoreSelectedNotesCandidate);
+      document.getElementById('notesRecoveryCopyBtn')?.addEventListener('click', copySelectedNotesCandidate);
       document.getElementById('storageHealthOutput')?.addEventListener('click', (event) => {
         const target = event.target;
         if (target && target.id === 'storageHealthDeleteLatestBackupBtn') {

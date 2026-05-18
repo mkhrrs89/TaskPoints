@@ -1430,7 +1430,19 @@ function exportDataFallback() {
   if (scheduleChanged) {
     saveStateSnapshotFallback(snapshot);
   }
-  const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' });
+  const notesRaw = localStorage.getItem('taskpoints_notes_v1');
+  const projectsRaw = localStorage.getItem('tp_projects_v1');
+  const exportPayload = {
+    exportType: 'taskpoints_full_backup',
+    version: 2,
+    exportedAtISO: new Date().toISOString(),
+    state: snapshot,
+    aux: {
+      taskpoints_notes_v1: typeof notesRaw === 'string' ? notesRaw : '',
+      ...(typeof projectsRaw === 'string' ? { tp_projects_v1: projectsRaw } : {})
+    }
+  };
+  const blob = new Blob([JSON.stringify(exportPayload, null, 2)], { type: 'application/json' });
   const now = new Date();
 
   const y = now.getFullYear();
@@ -2160,8 +2172,20 @@ async function exportBackupWithImagesFallback() {
     });
   }
 
+  const notesRaw = localStorage.getItem('taskpoints_notes_v1');
+  const projectsRaw = localStorage.getItem('tp_projects_v1');
+  const exportPayload = {
+    exportType: 'taskpoints_full_backup',
+    version: 2,
+    exportedAtISO: new Date().toISOString(),
+    state: snapshot,
+    aux: {
+      taskpoints_notes_v1: typeof notesRaw === 'string' ? notesRaw : '',
+      ...(typeof projectsRaw === 'string' ? { tp_projects_v1: projectsRaw } : {})
+    }
+  };
   const files = [
-    { path: 'manifest.json', blob: new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' }) }
+    { path: 'manifest.json', blob: new Blob([JSON.stringify(exportPayload, null, 2)], { type: 'application/json' }) }
   ];
 
   const getImageBlob = window.TaskPointsCore?.getImageBlob || getImageBlobFallback;
