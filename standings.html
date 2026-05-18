@@ -154,7 +154,7 @@
               <th data-sort="name">Name <span class="sort-indicator" data-indicator="name"></span></th>
               <th data-sort="wins">W <span class="sort-indicator" data-indicator="wins"></span></th>
               <th data-sort="losses">L <span class="sort-indicator" data-indicator="losses"></span></th>
-              <th>M</th>
+              <th data-sort="matchups">M <span class="sort-indicator" data-indicator="matchups"></span></th>
               <th data-sort="winPct">Win% <span class="sort-indicator" data-indicator="winPct"></span></th>
               <th data-sort="mov">MOV <span class="sort-indicator" data-indicator="mov"></span></th>
               <th data-sort="oppAvg">Opp AVG <span class="sort-indicator" data-indicator="oppAvg"></span></th>
@@ -460,6 +460,7 @@ function computeYouStats() {
         case "name":   return (p.name || "").toLowerCase();
         case "wins":   return stats.wins || 0;
         case "losses": return stats.losses || 0;
+        case "matchups": return (stats.wins || 0) + (stats.losses || 0);
         case "winPct": return stats.winPct || 0;
         case "mov":    return (stats.mov == null) ? Number.NEGATIVE_INFINITY : stats.mov;
         case "oppAvg": return (stats.oppAvg == null) ? Number.NEGATIVE_INFINITY : stats.oppAvg;
