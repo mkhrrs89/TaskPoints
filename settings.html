@@ -148,7 +148,9 @@
         <div class="space-y-3 pt-4">
           <div class="flex flex-wrap gap-2 items-center">
             <button id="notesRecoveryScanBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Scan for Notes</button>
+            <button id="notesRecoveryScanAllBtn" class="btn btn-ghost btn-toolbar nav-btn" type="button">Scan all localStorage keys</button>
             <button id="notesRecoveryRestoreBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Restore Selected Notes</button>
+            <button id="notesRecoveryAppendBtn" class="btn btn-ghost btn-toolbar nav-btn" type="button">Append Selected into Current Notes</button>
             <button id="notesRecoveryCopyBtn" class="btn btn-ghost btn-toolbar nav-btn" type="button">Copy Selected Notes to Clipboard</button>
           </div>
           <div id="notesRecoveryStatus" class="muted text-xs">Run a scan to view note-like localStorage candidates.</div>
@@ -3661,6 +3663,10 @@ rows.push([
 
     const NOTES_RECOVERY_TARGET_KEY = "taskpoints_notes_v1";
     let notesRecoveryCandidates = [];
+    const NOTES_RECOVERY_SKIP_KEY_PATTERNS = [
+      /image/i, /blob/i, /cache/i, /thumb/i, /screenshot/i, /base64/i, /dataurl/i, /avatar/i
+    ];
+    const NOTES_RECOVERY_KEYWORDS = ["task", "idea", "note", "mood", "plan", "outline", "brain", "todo", "project"];
 
     function looksLikeLongFreeformText(value) {
       if (typeof value !== "string") return false;
@@ -3696,25 +3702,93 @@ rows.push([
       };
     }
 
+    function analyzeJsonLongStringFields(parsed) {
+      if (!parsed || typeof parsed !== "object") return false;
+      const queue = [parsed];
+      while (queue.length) {
+        const current = queue.shift();
+        if (!current || typeof current !== "object") continue;
+        for (const fieldValue of Object.values(current)) {
+          if (typeof fieldValue === "string" && fieldValue.trim().length > 100) return true;
+          if (fieldValue && typeof fieldValue === "object") queue.push(fieldValue);
+        }
+      }
+      return false;
+    }
+
+    function shouldSkipLargeBlobLikeEntry(key, value, bytes) {
+      const lowerKey = String(key || "").toLowerCase();
+      if (NOTES_RECOVERY_SKIP_KEY_PATTERNS.some((pattern) => pattern.test(lowerKey)) && bytes > 20 * 1024) return true;
+      const raw = typeof value === "string" ? value : "";
+      if (bytes > 400 * 1024) return true;
+      if (raw.startsWith("data:image/") || raw.startsWith("blob:")) return true;
+      return false;
+    }
+
+    function analyzeLocalStorageEntry(key, value) {
+      const raw = typeof value === "string" ? value : "";
+      const bytes = getUtf8SizeBytes(raw);
+      if (!raw.trim()) return null;
+      if (shouldSkipLargeBlobLikeEntry(key, raw, bytes)) return null;
+      const parsed = tryParseJsonNotes(raw);
+      const looksJson = !!parsed;
+      const containsNewline = raw.includes("\n");
+      const lower = raw.toLowerCase();
+      const containsKeyword = NOTES_RECOVERY_KEYWORDS.some((word) => lower.includes(word));
+      const plainTextLong = !looksJson && raw.trim().length > 100;
+      const longFreeform = looksLikeLongFreeformText(raw);
+      const hasJsonLongStringFields = analyzeJsonLongStringFields(parsed);
+      const isCandidate = plainTextLong || containsNewline || containsKeyword || hasJsonLongStringFields || longFreeform;
+      const preview = raw.slice(0, 300);
+      return {
+        key,
+        value: raw,
+        bytes,
+        preview,
+        isJson: looksJson,
+        kind: looksJson ? "JSON" : "Plain text",
+        flags: {
+          plainTextLong,
+          containsNewline,
+          containsKeyword,
+          hasJsonLongStringFields,
+          longFreeform
+        },
+        isCandidate,
+        expanded: false
+      };
+    }
+
     function renderNotesRecoveryCandidates() {
       const output = document.getElementById("notesRecoveryOutput");
       const status = document.getElementById("notesRecoveryStatus");
       if (!output || !status) return;
       if (!notesRecoveryCandidates.length) {
         output.innerHTML = "";
-        status.textContent = "No note-like localStorage candidates found on this device.";
+        status.textContent = "No recoverable localStorage candidates found on this device.";
         return;
       }
-      status.textContent = `Found ${notesRecoveryCandidates.length} note-like localStorage candidate${notesRecoveryCandidates.length === 1 ? "" : "s"}.`;
+      const candidateCount = notesRecoveryCandidates.filter((entry) => entry.isCandidate).length;
+      status.textContent = `Found ${notesRecoveryCandidates.length} non-empty localStorage entr${notesRecoveryCandidates.length === 1 ? "y" : "ies"} (${candidateCount} highlighted candidate${candidateCount === 1 ? "" : "s"}).`;
       output.innerHTML = notesRecoveryCandidates.map((entry, idx) => {
         const sizeKiB = (entry.bytes / 1024).toFixed(2);
+        const flagList = [];
+        if (entry.flags.plainTextLong) flagList.push(">100 chars plain text");
+        if (entry.flags.containsNewline) flagList.push("contains newlines");
+        if (entry.flags.containsKeyword) flagList.push("keyword match");
+        if (entry.flags.hasJsonLongStringFields) flagList.push("JSON long string fields");
+        if (entry.flags.longFreeform) flagList.push("long freeform");
+        const previewLimit = entry.expanded ? 2000 : 300;
+        const preview = (entry.value || "").slice(0, previewLimit);
         return `<label class="block border border-white/10 rounded-lg p-3">
           <div class="flex items-center gap-2 mb-1">
             <input type="radio" name="notesRecoveryCandidate" value="${idx}" ${idx === 0 ? "checked" : ""} />
             <div class="font-semibold break-all">Key: ${escapeHtml(entry.key)}</div>
           </div>
-          <div class="muted text-xs">Size: ${sizeKiB} KiB • Type: ${entry.kind}</div>
-          <pre class="text-xs whitespace-pre-wrap break-words mt-2">${escapeHtml(entry.preview || "")}${entry.value.length > 300 ? "\n…" : ""}</pre>
+          <div class="muted text-xs">Size: ${sizeKiB} KiB • Type: ${entry.kind} • Looks like JSON: ${entry.isJson ? "yes" : "no"} • Long freeform text: ${entry.flags.longFreeform ? "yes" : "no"}</div>
+          ${flagList.length ? `<div class="text-[11px] text-amber-300 mt-1">Highlighted: ${escapeHtml(flagList.join(" • "))}</div>` : `<div class="text-[11px] muted mt-1">No candidate highlights.</div>`}
+          <pre class="text-xs whitespace-pre-wrap break-words mt-2">${escapeHtml(preview || "")}${entry.value.length > previewLimit ? "\n…" : ""}</pre>
+          <button type="button" class="btn btn-ghost btn-toolbar nav-btn mt-2" data-notes-recovery-expand="${idx}">${entry.expanded ? "Collapse preview" : "Expand preview"}</button>
         </label>`;
       }).join("");
     }
@@ -3740,6 +3814,22 @@ rows.push([
       renderNotesRecoveryCandidates();
     }
 
+    function scanAllLocalStorageKeys() {
+      notesRecoveryCandidates = [];
+      for (let i = 0; i < localStorage.length; i += 1) {
+        const key = localStorage.key(i);
+        if (!key) continue;
+        const value = localStorage.getItem(key);
+        const entry = analyzeLocalStorageEntry(key, value);
+        if (entry) notesRecoveryCandidates.push(entry);
+      }
+      notesRecoveryCandidates.sort((a, b) => {
+        if (a.isCandidate !== b.isCandidate) return a.isCandidate ? -1 : 1;
+        return b.bytes - a.bytes;
+      });
+      renderNotesRecoveryCandidates();
+    }
+
     function mergeNotesForRecovery(existingNotes, incomingNotes, sourceKey) {
       const currentObj = tryParseJsonNotes(existingNotes);
       const incomingObj = tryParseJsonNotes(incomingNotes);
@@ -3760,8 +3850,13 @@ rows.push([
         return;
       }
       const existingNotes = localStorage.getItem(NOTES_RECOVERY_TARGET_KEY) || "";
-      if (!confirm(`Restore notes from localStorage key "${selected.key}" into ${NOTES_RECOVERY_TARGET_KEY}?`)) return;
+      if (!confirm(`Restore notes from localStorage key "${selected.key}" into ${NOTES_RECOVERY_TARGET_KEY}? This does not delete the source key.`)) return;
       if (!existingNotes.trim()) {
+        if (!selected.value.trim()) {
+          alert("Selected key is empty; nothing to restore.");
+          return;
+        }
+        if (!confirm("Current notes are empty. Confirm restore into taskpoints_notes_v1.")) return;
         localStorage.setItem(NOTES_RECOVERY_TARGET_KEY, selected.value);
       } else {
         const choice = (prompt("Current notes are not empty. Type: append (default), replace, or cancel.", "append") || "append").trim().toLowerCase();
@@ -3776,6 +3871,19 @@ rows.push([
       }
       window.dispatchEvent(new CustomEvent("taskpoints-notes-updated", { detail: { source: "settings-notes-recovery" } }));
       alert(`Notes restored to ${NOTES_RECOVERY_TARGET_KEY}. Open the Notes page to verify.`);
+    }
+
+    function appendSelectedNotesCandidate() {
+      const selected = getSelectedNotesRecoveryCandidate();
+      if (!selected) {
+        alert("Select a notes candidate first.");
+        return;
+      }
+      const existingNotes = localStorage.getItem(NOTES_RECOVERY_TARGET_KEY) || "";
+      if (!confirm(`Append value from "${selected.key}" into ${NOTES_RECOVERY_TARGET_KEY}?`)) return;
+      localStorage.setItem(NOTES_RECOVERY_TARGET_KEY, mergeNotesForRecovery(existingNotes, selected.value, selected.key));
+      window.dispatchEvent(new CustomEvent("taskpoints-notes-updated", { detail: { source: "settings-notes-recovery-append" } }));
+      alert(`Selected value appended into ${NOTES_RECOVERY_TARGET_KEY}.`);
     }
 
     async function copySelectedNotesCandidate() {
@@ -3813,12 +3921,25 @@ rows.push([
       document.getElementById('storageHealthRefreshBtn')?.addEventListener('click', renderStorageHealthPanel);
       document.getElementById('storageHealthDeleteQuarantineBtn')?.addEventListener('click', handleDeleteQuarantinedSnapshot);
       document.getElementById('notesRecoveryScanBtn')?.addEventListener('click', scanForRecoverableNotes);
+      document.getElementById('notesRecoveryScanAllBtn')?.addEventListener('click', scanAllLocalStorageKeys);
       document.getElementById('notesRecoveryRestoreBtn')?.addEventListener('click', restoreSelectedNotesCandidate);
+      document.getElementById('notesRecoveryAppendBtn')?.addEventListener('click', appendSelectedNotesCandidate);
       document.getElementById('notesRecoveryCopyBtn')?.addEventListener('click', copySelectedNotesCandidate);
       document.getElementById('storageHealthOutput')?.addEventListener('click', (event) => {
         const target = event.target;
         if (target && target.id === 'storageHealthDeleteLatestBackupBtn') {
           handleDeleteLatestLocalBackup();
+        }
+      });
+      document.getElementById('notesRecoveryOutput')?.addEventListener('click', (event) => {
+        const target = event.target;
+        const expandIdx = target?.getAttribute?.('data-notes-recovery-expand');
+        if (expandIdx != null) {
+          const idx = Number(expandIdx);
+          if (Number.isFinite(idx) && notesRecoveryCandidates[idx]) {
+            notesRecoveryCandidates[idx].expanded = !notesRecoveryCandidates[idx].expanded;
+            renderNotesRecoveryCandidates();
+          }
         }
       });
       const missingScoreDateInput = document.getElementById("missingScoreDate");
