@@ -2690,6 +2690,16 @@ header,
     margin-top: -4px;               /* optional: pulls row up slightly */
   }
 
+
+  /* Keep weekly-complete orange slab vertically centered around mobile bubbles */
+  .habitDaysRow.week-complete-row{
+    margin-top: 0;
+    padding-top: 3px;
+    padding-bottom: 3px;
+    align-items: center;
+    box-sizing: border-box;
+  }
+
   /* Mobile: show the 4 recent sleep cards in one tidy row */
   #sleepHistory{
     display:grid;                         /* override the flex class */
