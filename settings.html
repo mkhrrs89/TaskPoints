@@ -3550,6 +3550,7 @@ rows.push([
       const mainEntry = report.entries.find((entry) => entry.key === "taskpoints_v1") || { key: "taskpoints_v1", ...formatStorageUnits(0) };
       const notesEntry = report.entries.find((entry) => entry.key === "taskpoints_notes_v1") || { key: "taskpoints_notes_v1", ...formatStorageUnits(0) };
       const quarantinedEntry = report.entries.find((entry) => entry.key === "taskpoints_quarantined_snapshot") || null;
+      const latestBackupEntry = report.entries.find((entry) => entry.key === "taskpoints_backup_latest") || null;
       const mainStatus = getTaskPointsStorageStatus(mainEntry.mib);
       let parsedState = null;
       try {
@@ -3584,6 +3585,7 @@ rows.push([
         <div class="muted">Active app data (excluding quarantined snapshot): ${(activeDataBytes / (1024 * 1024)).toFixed(2)} MiB</div>
         <div class="muted">LocalStorage Total: ${report.total.mib.toFixed(2)} MiB across ${report.entries.length} keys</div>
         ${quarantinedEntry ? `<div class="${quarantinedEntry.bytes > 500 * 1024 ? 'text-amber-300' : 'muted'}">Quarantined snapshot: <strong>${quarantinedEntry.mib.toFixed(2)} MiB</strong>${quarantinedEntry.bytes > 500 * 1024 ? ' — Quarantined snapshot is using ' + quarantinedEntry.mib.toFixed(2) + ' MiB. Export it if needed, then delete it to free localStorage.' : ''}</div>` : '<div class="muted">Quarantined snapshot: none</div>'}
+        ${latestBackupEntry ? `<div class="space-y-2"><div class="text-amber-300">Latest local backup (taskpoints_backup_latest): <strong>${latestBackupEntry.mib.toFixed(2)} MiB</strong></div><button id="storageHealthDeleteLatestBackupBtn" class="btn btn-warn btn-toolbar nav-btn" type="button">Delete latest local backup</button></div>` : '<div class="muted">Latest local backup (taskpoints_backup_latest): none</div>'}
         <div class="muted">Browser Storage Estimate (origin): ${browserEstimate ? `${browserEstimate.usage.mib.toFixed(2)} MiB of ${browserEstimate.quota.mib.toFixed(2)} MiB (${browserEstimate.percent.toFixed(2)}%)` : "Not available"}</div>
         <div class="muted">Persistent Storage: ${persisted}</div>
         <div class="muted">Images: ${imageInfo.available ? `${imageInfo.count} in IndexedDB` : "Not available"} (size estimate unavailable)</div>
@@ -3602,6 +3604,25 @@ rows.push([
           ${backupEntries.reduce((sum, entry) => sum + entry.bytes, 0) > 1024 * 1024 ? '<div class="muted text-xs mt-1">Backup-like keys are using significant localStorage space.</div>' : ''}
         </div>
         <div class="text-xs">${counts ? `Data counts: tasks ${counts.tasks}, completions ${counts.completions}, players ${counts.players}, habits ${counts.habits}, gameHistory ${counts.gameHistory}, matchups ${counts.matchups}, opponentDripSchedules ${counts.opponentDripSchedules}` : "Data counts unavailable (missing or invalid taskpoints_v1 JSON)."}</div>`;
+    }
+
+
+    function handleDeleteLatestLocalBackup() {
+      const key = "taskpoints_backup_latest";
+      const existing = localStorage.getItem(key);
+      if (!existing) {
+        alert("No latest local backup found.");
+        renderStorageHealthPanel();
+        return;
+      }
+      const beforeTotal = getLocalStorageSizeReport().total.bytes;
+      const backupBytes = getUtf8SizeBytes(existing);
+      const ok = confirm("Delete latest local backup from this device? Your current TaskPoints save will not be affected.");
+      if (!ok) return;
+      localStorage.removeItem(key);
+      const afterTotal = getLocalStorageSizeReport().total.bytes;
+      alert(`Latest local backup deleted. Freed ${(backupBytes / (1024 * 1024)).toFixed(2)} MiB. localStorage total before: ${(beforeTotal / (1024 * 1024)).toFixed(2)} MiB, after: ${(afterTotal / (1024 * 1024)).toFixed(2)} MiB.`);
+      renderStorageHealthPanel();
     }
 
     function handleDeleteQuarantinedSnapshot() {
@@ -3635,6 +3656,12 @@ rows.push([
       document.getElementById('habitCalendarReportBtn')?.addEventListener('click', generateHabitCalendarReport);
       document.getElementById('storageHealthRefreshBtn')?.addEventListener('click', renderStorageHealthPanel);
       document.getElementById('storageHealthDeleteQuarantineBtn')?.addEventListener('click', handleDeleteQuarantinedSnapshot);
+      document.getElementById('storageHealthOutput')?.addEventListener('click', (event) => {
+        const target = event.target;
+        if (target && target.id === 'storageHealthDeleteLatestBackupBtn') {
+          handleDeleteLatestLocalBackup();
+        }
+      });
       const missingScoreDateInput = document.getElementById("missingScoreDate");
       const missingScoreTypeSelect = document.getElementById("missingScoreType");
       const missingScoreSaveBtn = document.getElementById("missingScoreSaveBtn");
