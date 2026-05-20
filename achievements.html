@@ -152,18 +152,44 @@
   }
 
   function getActivePlayersForBadges(){
-    const players = Array.isArray(window.state?.players) ? window.state.players : [];
-    return players
-      .filter((player) => player && player.active !== false && player.archived !== true && player.retired !== true && player.inactive !== true)
-      .sort((a, b) => String(a.name || a.displayName || '').localeCompare(String(b.name || b.displayName || '')));
+    const sourcePlayers =
+      Array.isArray(state?.players) ? state.players :
+      Array.isArray(window.state?.players) ? window.state.players :
+      [];
+
+    return sourcePlayers
+      .filter((player) => {
+        if (!player) return false;
+        if (player.archived === true) return false;
+        if (player.retired === true) return false;
+        if (player.deleted === true) return false;
+        if (player.hidden === true) return false;
+        if (player.inactive === true) return false;
+
+        const status = String(player.status || player.state || '').toLowerCase();
+        if (['archived', 'retired', 'deleted', 'hidden', 'inactive'].includes(status)) {
+          return false;
+        }
+
+        return true;
+      })
+      .sort((a, b) => {
+        const an = String(a.name || a.displayName || a.nickname || '');
+        const bn = String(b.name || b.displayName || b.nickname || '');
+        return an.localeCompare(bn);
+      });
   }
 
   function getPlayerBadges(player){
-    if (Array.isArray(player?.badges)) return player.badges;
-    if (Array.isArray(player?.earnedBadges)) return player.earnedBadges;
-    const playerId = player?.id;
-    if (playerId && window.state?.playerBadges && Array.isArray(window.state.playerBadges[playerId])) {
-      return window.state.playerBadges[playerId];
+    if (!player) return [];
+    if (Array.isArray(player.badges)) return player.badges;
+    if (Array.isArray(player.earnedBadges)) return player.earnedBadges;
+    if (Array.isArray(player.trophies)) return player.trophies;
+
+    const playerId = player.id || player.playerId;
+    const badgeMap = state?.playerBadges || window.state?.playerBadges;
+    if (playerId && badgeMap && Array.isArray(badgeMap[playerId])) {
+      return badgeMap[playerId];
     }
     return [];
   }
