@@ -739,10 +739,21 @@ Nothing visible on the page is built here. === -->
           <canvas id="vo2MaxTrend" class="w-full h-24"></canvas>
           <span id="vo2MaxGraphHint" class="homeGraphHint hidden">Tap to log VO2 Max</span>
         </button>
+        <div
+          id="liveDiffGraphSlide"
+          class="homeGraphPanel text-left"
+          data-graph-panel="3"
+          aria-label="Live Diff graph."
+        >
+          <div class="homeGraphTitle">Live Diff</div>
+          <canvas id="liveDiffGraphCanvas" class="w-full h-24"></canvas>
+          <span id="liveDiffEmptyState" class="homeGraphHint hidden">No Live Diff points yet</span>
+        </div>
       </div>
     </div>
     <div id="homeGraphDots" class="homeGraphDots" aria-hidden="true">
       <span class="homeGraphDot is-active"></span>
+      <span class="homeGraphDot"></span>
       <span class="homeGraphDot"></span>
       <span class="homeGraphDot"></span>
     </div>
@@ -2577,6 +2588,7 @@ function load() {
         flexActions:  [],
         weightHistory: [],
         vo2MaxHistory: [],
+        liveDiffHistory: {},
         gameHistory:  [],
         matchups:     [],
         schedule:     [],
@@ -2613,6 +2625,7 @@ function load() {
             .filter(Boolean)
         : [],
       vo2MaxHistory: Array.isArray(p.vo2MaxHistory) ? p.vo2MaxHistory : [],
+      liveDiffHistory: p.liveDiffHistory && typeof p.liveDiffHistory === "object" ? p.liveDiffHistory : {},
       gameHistory:  Array.isArray(p.gameHistory)  ? p.gameHistory  : [],
       matchups:     Array.isArray(p.matchups)     ? p.matchups     : [],
       schedule:     Array.isArray(p.schedule)     ? p.schedule     : [],
@@ -2637,6 +2650,7 @@ function load() {
       flexActions:  [],
       weightHistory: [],
       vo2MaxHistory: [],
+      liveDiffHistory: {},
       gameHistory:  [],
       matchups:     [],
       schedule:     [],
@@ -3710,6 +3724,7 @@ function normalizeState(s) {
           .filter(Boolean)
       : [],
     vo2MaxHistory: Array.isArray(s.vo2MaxHistory) ? s.vo2MaxHistory : [],
+    liveDiffHistory: s.liveDiffHistory && typeof s.liveDiffHistory === "object" ? s.liveDiffHistory : {},
     gameHistory: Array.isArray(s.gameHistory) ? s.gameHistory : [],
     matchups:    Array.isArray(s.matchups)    ? s.matchups    : [],
     schedule:    Array.isArray(s.schedule)    ? s.schedule    : [],
@@ -4147,6 +4162,13 @@ function getGameDayKey(now = new Date()){
   return dateKey(dt);
 }
 
+function getCurrentTaskPointsDayKey(now = new Date()){
+  const shifted = new Date(now);
+  if (shifted.getHours() < 5) shifted.setDate(shifted.getDate() - 1);
+  shifted.setHours(0,0,0,0);
+  return dateKey(shifted);
+}
+
 function dateKey(d){
   // Accept either a Date or something parseable
   if (!(d instanceof Date)) d = new Date(d);
@@ -4425,6 +4447,9 @@ function renderStats(){
       tpPerfTime('renderStats: drawDailyTrend', () => drawDailyTrend(dailyTotals));
       tpPerfTime('renderStats: drawWeightTrend', () => drawWeightTrend(getWeightHistorySorted()));
       tpPerfTime('renderStats: drawVo2MaxTrend', () => drawVo2MaxTrend(getVo2MaxHistorySorted()));
+      state = cleanupLiveDiffHistory(state);
+      captureLiveDiffPoint();
+      tpPerfTime('renderStats: drawLiveDiffGraph', () => drawLiveDiffGraph());
       bindHomeGraphInteractions();
 
       // Today / this week / this month keys
@@ -5069,6 +5094,7 @@ if (titleStr.startsWith('Sleep Score (')) {
 let homeGraphPanelIndex = 0;
 let homeGraphScrollRaf = null;
 let homeGraphPointerDownAt = null;
+let liveDiffCaptureIntervalId = null;
 
 function getWeightHistorySorted() {
   const list = Array.isArray(state?.weightHistory) ? state.weightHistory : [];
@@ -5114,6 +5140,144 @@ function getVo2MaxHistorySorted() {
     .sort((a, b) => String(a.dateKey || a.loggedAtISO || '').localeCompare(String(b.dateKey || b.loggedAtISO || '')));
 }
 
+function getLiveDiffSlotForNow(now = new Date()){
+  const minutes = now.getHours() * 60 + now.getMinutes();
+  const start = 5 * 60;
+  const end = 24 * 60;
+  if (minutes < start || minutes > end) return null;
+  if (minutes === end) return '24:00';
+  const slotMinutes = Math.floor((minutes - start) / 30) * 30 + start;
+  const hh = Math.floor(slotMinutes / 60);
+  const mm = slotMinutes % 60;
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+}
+
+function liveDiffSlotToIndex(slot){
+  if (slot === '24:00') return 38;
+  const [hRaw, mRaw] = String(slot || '').split(':');
+  const h = Number(hRaw);
+  const m = Number(mRaw);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return -1;
+  return Math.round(((h * 60 + m) - 300) / 30);
+}
+
+function getTodayVisibleMatchupScores(){
+  const todayKey = getGameDayKey(new Date());
+  const matchup = (Array.isArray(state.matchups) ? state.matchups : []).find(m => m && getMatchupDateKeyLocal(m) === todayKey && (m.playerAId === 'YOU' || m.playerBId === 'YOU'));
+  if (!matchup) return null;
+  const youAreA = matchup.playerAId === 'YOU';
+  const oppId = youAreA ? matchup.playerBId : matchup.playerAId;
+  const youScore = Number(youAreA ? matchup.scoreA : matchup.scoreB);
+  const oppScoreRaw = Number(youAreA ? matchup.scoreB : matchup.scoreA);
+  const visibleOpponentScore = oppId ? visibleOpponentScoreForMatchup(todayKey, oppId, Number.isFinite(oppScoreRaw) ? oppScoreRaw : 0) : oppScoreRaw;
+  return {
+    youScore: Number.isFinite(youScore) ? youScore : 0,
+    opponentScore: Number.isFinite(visibleOpponentScore) ? visibleOpponentScore : 0,
+    opponentId: oppId || null
+  };
+}
+
+function cleanupLiveDiffHistory(nextState){
+  const next = { ...nextState };
+  const history = next.liveDiffHistory && typeof next.liveDiffHistory === 'object' ? next.liveDiffHistory : {};
+  const currentDayKey = getCurrentTaskPointsDayKey();
+  const prior = fromKey(currentDayKey);
+  prior.setDate(prior.getDate() - 1);
+  const yesterdayKey = dateKey(prior);
+  next.liveDiffHistory = Object.fromEntries(Object.entries(history).filter(([dayKey]) => dayKey === currentDayKey || dayKey === yesterdayKey));
+  return next;
+}
+
+function captureLiveDiffPoint(){
+  const dayKey = getCurrentTaskPointsDayKey();
+  const slot = getLiveDiffSlotForNow();
+  if (!slot) return;
+  const latest = normalizeState(load());
+  state = latest;
+  const scores = getTodayVisibleMatchupScores();
+  if (!scores) return;
+  const diff = Number((scores.youScore - scores.opponentScore).toFixed(2));
+  const history = latest.liveDiffHistory && typeof latest.liveDiffHistory === 'object' ? { ...latest.liveDiffHistory } : {};
+  const rows = Array.isArray(history[dayKey]) ? history[dayKey].slice() : [];
+  const point = { slot, loggedAtISO: new Date().toISOString(), youScore: scores.youScore, opponentScore: scores.opponentScore, diff };
+  const index = rows.findIndex((row) => row && row.slot === slot);
+  if (index >= 0) rows[index] = point;
+  else rows.push(point);
+  rows.sort((a, b) => liveDiffSlotToIndex(a.slot) - liveDiffSlotToIndex(b.slot));
+  history[dayKey] = rows;
+  state = cleanupLiveDiffHistory({ ...latest, liveDiffHistory: history });
+  save();
+  drawLiveDiffGraph();
+}
+
+function getTodayOpponentPrimaryColor(){
+  const scores = getTodayVisibleMatchupScores();
+  const opponent = scores?.opponentId ? getPlayerById(scores.opponentId) : null;
+  return normalizeHexColor(opponent?.primaryColor || opponent?.colorPrimary || opponent?.mainColor || opponent?.colors?.primary || opponent?.colors?.[0]) || '#f97316';
+}
+
+function hexToRgba(hex, alpha){
+  const normalized = normalizeHexColor(hex);
+  if (!normalized) return `rgba(30, 102, 109, ${alpha})`;
+  const raw = normalized.slice(1);
+  const r = parseInt(raw.slice(0, 2), 16);
+  const g = parseInt(raw.slice(2, 4), 16);
+  const b = parseInt(raw.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function drawLiveDiffGraph(){
+  const canvas = $('liveDiffGraphCanvas');
+  const hint = $('liveDiffEmptyState');
+  if (!canvas || !canvas.getContext) return;
+  const ctx = canvas.getContext('2d');
+  const width = canvas.clientWidth || 320;
+  const height = canvas.clientHeight || 80;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(width * dpr);
+  canvas.height = Math.round(height * dpr);
+  canvas.style.width = width + 'px';
+  canvas.style.height = height + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+  const todayKey = getCurrentTaskPointsDayKey();
+  const rows = Array.isArray(state?.liveDiffHistory?.[todayKey]) ? state.liveDiffHistory[todayKey] : [];
+  const pointsRaw = rows.map((row) => ({ i: liveDiffSlotToIndex(row.slot), diff: Number(row.diff) })).filter((row) => row.i >= 0 && Number.isFinite(row.diff)).sort((a, b) => a.i - b.i);
+  if (!pointsRaw.length) {
+    if (hint) hint.classList.remove('hidden');
+    return;
+  }
+  if (hint) hint.classList.add('hidden');
+  const maxAbs = Math.max(5, ...pointsRaw.map((p) => Math.abs(p.diff)));
+  const paddingX = 8;
+  const paddingY = 8;
+  const plotW = width - paddingX * 2;
+  const plotH = height - paddingY * 2;
+  const zeroY = paddingY + plotH / 2;
+  const toX = (slotIndex) => paddingX + (plotW * slotIndex / 38);
+  const toY = (diff) => zeroY - (diff / maxAbs) * (plotH / 2);
+  const points = pointsRaw.map((p) => ({ ...p, x: toX(p.i), y: toY(p.diff) }));
+  const teal = normalizeHexColor(state?.youPrimaryColor) || '#1a383b';
+  const opp = getTodayOpponentPrimaryColor();
+  ctx.setLineDash([4, 4]);
+  ctx.strokeStyle = 'rgba(255,255,255,.32)';
+  ctx.beginPath(); ctx.moveTo(paddingX, zeroY); ctx.lineTo(width - paddingX, zeroY); ctx.stroke();
+  ctx.setLineDash([]);
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i], b = points[i + 1];
+    const crosses = (a.diff > 0 && b.diff < 0) || (a.diff < 0 && b.diff > 0);
+    const segs = crosses ? (() => { const t = Math.abs(a.diff) / (Math.abs(a.diff) + Math.abs(b.diff)); const x = a.x + (b.x - a.x) * t; return [[a, { x, y: zeroY, diff: 0 }], [{ x, y: zeroY, diff: 0 }, b]]; })() : [[a, b]];
+    segs.forEach(([p1, p2]) => {
+      const positive = (p1.diff + p2.diff) / 2 >= 0;
+      const lineColor = positive ? teal : opp;
+      const fillColor = positive ? hexToRgba(teal, 0.22) : hexToRgba(opp, 0.22);
+      ctx.fillStyle = fillColor;
+      ctx.beginPath(); ctx.moveTo(p1.x, zeroY); ctx.lineTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p2.x, zeroY); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = lineColor; ctx.lineWidth = 1.8; ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
+    });
+  }
+}
+
 function updateHomeGraphDots(nextIndex = 0) {
   const total = document.querySelectorAll('#homeGraphDots .homeGraphDot').length || 1;
   homeGraphPanelIndex = Math.max(0, Math.min(total - 1, Number(nextIndex) || 0));
@@ -5135,6 +5299,9 @@ function bindHomeGraphInteractions() {
       const width = viewport.clientWidth || 1;
       const nextIndex = Math.round(viewport.scrollLeft / width);
       updateHomeGraphDots(nextIndex);
+      if (nextIndex === 3) {
+        captureLiveDiffPoint();
+      }
     });
   }, { passive: true });
 
@@ -5166,6 +5333,12 @@ function bindHomeGraphInteractions() {
     }
     openVo2MaxModal();
   });
+
+  if (!liveDiffCaptureIntervalId) {
+    liveDiffCaptureIntervalId = window.setInterval(() => {
+      captureLiveDiffPoint();
+    }, 5 * 60 * 1000);
+  }
 }
 
 
