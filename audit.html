@@ -772,6 +772,7 @@ function buildLogLoadShape(rawState) {
     opponentDripSchedules: Array.isArray(p.opponentDripSchedules) ? p.opponentDripSchedules : [],
     workHistory: Array.isArray(p.workHistory) ? p.workHistory : [],
     weightHistory: Array.isArray(p.weightHistory) ? p.weightHistory : [],
+    vo2MaxHistory: Array.isArray(p.vo2MaxHistory) ? p.vo2MaxHistory : [],
     reminders: Array.isArray(p.reminders) ? p.reminders : [],
     youImageId: typeof p.youImageId === 'string' ? p.youImageId : '',
     youName: typeof p.youName === 'string' ? p.youName : '',
@@ -801,6 +802,7 @@ function buildLogNormalizeShape(state) {
     opponentDripSchedules: Array.isArray(s.opponentDripSchedules) ? s.opponentDripSchedules : [],
     workHistory: Array.isArray(s.workHistory) ? s.workHistory : [],
     weightHistory: Array.isArray(s.weightHistory) ? s.weightHistory : [],
+    vo2MaxHistory: Array.isArray(s.vo2MaxHistory) ? s.vo2MaxHistory : [],
     reminders: Array.isArray(s.reminders) ? s.reminders : [],
     youImageId: typeof s.youImageId === 'string' ? s.youImageId : '',
     youName: typeof s.youName === 'string' ? s.youName : '',
@@ -829,6 +831,7 @@ function buildLogNormalizeShape(state) {
         opponentDripSchedules: Array.isArray(p.opponentDripSchedules) ? p.opponentDripSchedules : [],
         workHistory: Array.isArray(p.workHistory) ? p.workHistory : [],
         weightHistory: Array.isArray(p.weightHistory) ? p.weightHistory : [],
+        vo2MaxHistory: Array.isArray(p.vo2MaxHistory) ? p.vo2MaxHistory : [],
         reminders: Array.isArray(p.reminders) ? p.reminders : [],
         youImageId: typeof p.youImageId === 'string' ? p.youImageId : '',
         youName: typeof p.youName === 'string' ? p.youName : '',
@@ -857,6 +860,7 @@ function buildLogNormalizeShape(state) {
         opponentDripSchedules: Array.isArray(s.opponentDripSchedules) ? s.opponentDripSchedules : [],
         workHistory: Array.isArray(s.workHistory) ? s.workHistory : [],
         weightHistory: Array.isArray(s.weightHistory) ? s.weightHistory : [],
+        vo2MaxHistory: Array.isArray(s.vo2MaxHistory) ? s.vo2MaxHistory : [],
         reminders: Array.isArray(s.reminders) ? s.reminders : [],
         youImageId: typeof s.youImageId === 'string' ? s.youImageId : '',
         youName: typeof s.youName === 'string' ? s.youName : '',
@@ -915,6 +919,7 @@ function buildLogNormalizeShape(state) {
     opponentDripSchedules: Array.isArray(s.opponentDripSchedules) ? s.opponentDripSchedules : [],
     workHistory: Array.isArray(s.workHistory) ? s.workHistory : [],
     weightHistory: Array.isArray(s.weightHistory) ? s.weightHistory : [],
+    vo2MaxHistory: Array.isArray(s.vo2MaxHistory) ? s.vo2MaxHistory : [],
     reminders: Array.isArray(s.reminders) ? s.reminders : [],
     youImageId: typeof s.youImageId === 'string' ? s.youImageId : '',
     youName: typeof s.youName === 'string' ? s.youName : '',
@@ -944,6 +949,7 @@ function buildLogNormalizeShape(state) {
         opponentDripSchedules: Array.isArray(p.opponentDripSchedules) ? p.opponentDripSchedules : [],
         workHistory: Array.isArray(p.workHistory) ? p.workHistory : [],
         weightHistory: Array.isArray(p.weightHistory) ? p.weightHistory : [],
+        vo2MaxHistory: Array.isArray(p.vo2MaxHistory) ? p.vo2MaxHistory : [],
         reminders: Array.isArray(p.reminders) ? p.reminders : [],
         youImageId: typeof p.youImageId === 'string' ? p.youImageId : '',
         youName: typeof p.youName === 'string' ? p.youName : '',
@@ -973,6 +979,7 @@ function buildLogNormalizeShape(state) {
         opponentDripSchedules: Array.isArray(s.opponentDripSchedules) ? s.opponentDripSchedules : [],
         workHistory: Array.isArray(s.workHistory) ? s.workHistory : [],
         weightHistory: Array.isArray(s.weightHistory) ? s.weightHistory : [],
+        vo2MaxHistory: Array.isArray(s.vo2MaxHistory) ? s.vo2MaxHistory : [],
         reminders: Array.isArray(s.reminders) ? s.reminders : [],
         youImageId: typeof s.youImageId === 'string' ? s.youImageId : '',
         youName: typeof s.youName === 'string' ? s.youName : '',
@@ -1081,6 +1088,8 @@ function buildLogNormalizeShape(state) {
             matchups: Array.isArray(parsed.matchups) ? parsed.matchups : [],
             schedule: Array.isArray(parsed.schedule) ? parsed.schedule : [],
             workHistory: Array.isArray(parsed.workHistory) ? parsed.workHistory : [],
+            weightHistory: Array.isArray(parsed.weightHistory) ? parsed.weightHistory : [],
+            vo2MaxHistory: Array.isArray(parsed.vo2MaxHistory) ? parsed.vo2MaxHistory : [],
             reminders: Array.isArray(parsed.reminders) ? parsed.reminders : [],
             youImageId: typeof parsed.youImageId === 'string' ? parsed.youImageId : '',
             youName: typeof parsed.youName === 'string' ? parsed.youName : '',
@@ -1144,11 +1153,15 @@ function buildLogNormalizeShape(state) {
     }
 
     const AUDIT_PAGE_ADAPTERS = [
+      { id: 'index', page: 'index.html', run: adapterDaily },
       { id: 'log', page: 'log.html', run: adapterLog },
       { id: 'settings', page: 'settings.html', run: adapterSettings },
       { id: 'week', page: 'week.html', run: adapterWeek },
       { id: 'gamehub', page: 'gamehub.html', run: adapterGamehub },
-      { id: 'matchups', page: 'matchups.html', run: adapterMatchups }
+      { id: 'matchups', page: 'matchups.html', run: adapterMatchups },
+      { id: 'records', page: 'records.html', run: adapterDaily },
+      { id: 'achievements', page: 'achievements.html', run: adapterDaily },
+      { id: 'notes', page: 'notes.html', run: adapterDaily }
     ];
 
     function summarizeNoOpStateDiff(beforeState, afterState) {
@@ -1270,33 +1283,24 @@ function runStickyFieldPreservationAudit(state) {
   };
 }
 
-function runWeightHistorySavePathAudit(state) {
+function runWeightVo2HistorySavePathAudit(state) {
   const seeded = cloneAuditState(state || {});
-  const sentinel = {
-    id: `audit-weight-${Date.now()}`,
-    dateKey: '2026-05-14',
-    date: '2026-05-14',
-    loggedAtISO: new Date().toISOString(),
-    weight: 212.4
-  };
-  const baseHistory = Array.isArray(seeded.weightHistory) ? seeded.weightHistory.slice() : [];
-  baseHistory.push(sentinel);
-  seeded.weightHistory = baseHistory;
-
+  const weightSentinel = { id: '__audit_weight_sentinel__', dateKey: '2099-01-01', loggedAtISO: '2099-01-01T12:00:00.000Z', weight: 999.9 };
+  const vo2Sentinel = { id: '__audit_vo2_sentinel__', dateKey: '2099-01-01', loggedAtISO: '2099-01-01T12:00:00.000Z', value: 99.9 };
+  seeded.weightHistory = (Array.isArray(seeded.weightHistory) ? seeded.weightHistory.slice() : []).concat([weightSentinel]);
+  seeded.vo2MaxHistory = (Array.isArray(seeded.vo2MaxHistory) ? seeded.vo2MaxHistory.slice() : []).concat([vo2Sentinel]);
   const failures = [];
   AUDIT_PAGE_ADAPTERS.forEach(adapter => {
     const runResult = adapter.run(cloneAuditState(seeded));
     const next = runResult && runResult.state ? runResult.state : runResult;
-    const after = Array.isArray(next?.weightHistory) ? next.weightHistory : [];
-    const kept = after.some(entry => entry && typeof entry === 'object' && entry.id === sentinel.id && Number(entry.weight) === sentinel.weight);
-    if (!kept) failures.push(`${adapter.page} [${runResult?.mode || 'audit-mirror'}]: dropped sentinel weight entry`);
+    const afterWeight = Array.isArray(next?.weightHistory) ? next.weightHistory : [];
+    const afterVo2 = Array.isArray(next?.vo2MaxHistory) ? next.vo2MaxHistory : [];
+    const dropped = [];
+    if (!afterWeight.some(e => e?.id === weightSentinel.id)) dropped.push('dropped weightHistory sentinel');
+    if (!afterVo2.some(e => e?.id === vo2Sentinel.id)) dropped.push('dropped vo2MaxHistory sentinel');
+    if (dropped.length) failures.push(`${adapter.page} [${runResult?.mode || 'audit-mirror'}]: ${dropped.join(', ')}`);
   });
-  return {
-    status: failures.length ? 'FAIL' : 'PASS',
-    expected: 'Weight history survives page save paths',
-    actual: failures.length ? `${failures.length} page adapter(s) dropped weightHistory` : 'All page adapters preserved weightHistory',
-    details: failures
-  };
+  return { status: failures.length ? 'FAIL' : 'PASS', expected: 'Weight and VO2 Max histories survive page save paths', actual: failures.length ? `${failures.length} page adapter(s) dropped sentinel history` : 'All page adapters preserved weightHistory and vo2MaxHistory', details: failures };
 }
 
     function auditWorkHoursLast14Days(state, endDateKey = TaskPointsCore.todayKey()) {
@@ -1814,16 +1818,16 @@ const actualTotal = round2(Number(derivedActualTotal) || 0);
         trace: 'state.lastCompletionPruneWarning/state.lastMatchupPruneWarning/state.lastGameHistoryPruneWarning/state.storageWarnings'
       });
 
-      const requiredHistoryArrays = ['completions', 'gameHistory', 'matchups', 'weightHistory'];
+      const requiredHistoryArrays = ['completions', 'gameHistory', 'matchups', 'weightHistory', 'vo2MaxHistory'];
       const missingHistoryArrays = requiredHistoryArrays.filter((key) => !Array.isArray(state[key]));
       checks.push({
         id: 'history-arrays-presence',
         title: 'Critical history arrays exist',
         status: missingHistoryArrays.length ? 'FAIL' : 'PASS',
-        expected: 'completions, gameHistory, matchups, and weightHistory exist as arrays',
+        expected: 'completions, gameHistory, matchups, weightHistory, and vo2MaxHistory exist as arrays',
         actual: missingHistoryArrays.length ? `Missing/non-array: ${missingHistoryArrays.join(', ')}` : 'All required history arrays are present',
         details: missingHistoryArrays,
-        trace: 'state.completions/state.gameHistory/state.matchups/state.weightHistory'
+        trace: 'state.completions/state.gameHistory/state.matchups/state.weightHistory/state.vo2MaxHistory'
       });
       const quotaWarnings = (Array.isArray(state.storageWarnings) ? state.storageWarnings : [])
         .filter(entry => entry && entry.type === 'storage-quota-save-failed');
@@ -2370,16 +2374,16 @@ const actualTotal = round2(Number(derivedActualTotal) || 0);
         tips: 'Ensure page-level normalize/save logic preserves sticky profile and settings fields.'
       });
 
-      const weightHistoryAudit = runWeightHistorySavePathAudit(state);
+      const weightHistoryAudit = runWeightVo2HistorySavePathAudit(state);
       checks.push({
-        id: 'weight-history-preserved',
-        title: 'Weight history survives page save paths',
+        id: 'weight-vo2-history-preserved',
+        title: 'Weight and VO2 Max histories survive page save paths',
         status: weightHistoryAudit.status,
         expected: weightHistoryAudit.expected,
         actual: weightHistoryAudit.actual,
         details: weightHistoryAudit.details,
-        trace: 'weightHistory sentinel preserved across page adapters',
-        tips: 'Ensure all normalize/save adapters keep state.weightHistory as a top-level sticky array.'
+        trace: 'weightHistory + vo2MaxHistory sentinels preserved across page adapters',
+        tips: 'Ensure all normalize/save adapters keep state.weightHistory and state.vo2MaxHistory as top-level sticky arrays.'
       });
 
       // New: Audit self-check (verifies other checks are wired correctly)

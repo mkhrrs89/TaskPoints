@@ -671,6 +671,7 @@
         matchups:    Array.isArray(src.matchups)    ? src.matchups    : [],
         schedule:    Array.isArray(src.schedule)    ? src.schedule    : [],
         weightHistory: Array.isArray(src.weightHistory) ? src.weightHistory : [],
+        vo2MaxHistory: Array.isArray(src.vo2MaxHistory) ? src.vo2MaxHistory : [],
         workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
         youImageId:  typeof src.youImageId === "string" ? src.youImageId : "",
         youName: typeof src.youName === "string" ? src.youName : "",
@@ -860,8 +861,10 @@ ${b}`;
       const currentVo2Count = Array.isArray(currentState.vo2MaxHistory) ? currentState.vo2MaxHistory.length : 0;
       const incomingWeightCount = Array.isArray(root.weightHistory) ? root.weightHistory.length : 0;
       const incomingVo2Count = Array.isArray(root.vo2MaxHistory) ? root.vo2MaxHistory.length : 0;
-      if (currentWeightCount > 0 && incomingWeightCount === 0 && !confirm(`Imported backup has no Weight entries, but this device has ${currentWeightCount}. Replace anyway?`)) return;
-      if (currentVo2Count > 0 && incomingVo2Count === 0 && !confirm(`Imported backup has no VO2 Max entries, but this device has ${currentVo2Count}. Replace anyway?`)) return;
+      const preserveWeight = currentWeightCount > 0 && incomingWeightCount === 0 && !confirm(`Imported backup has no Weight entries, but this device has existing Weight entries (${currentWeightCount}). Replace anyway?`);
+      const preserveVo2 = currentVo2Count > 0 && incomingVo2Count === 0 && !confirm(`Imported backup has no VO2 Max entries, but this device has existing VO2 Max entries (${currentVo2Count}). Replace anyway?`);
+      if (preserveWeight) normalized.weightHistory = Array.isArray(currentState.weightHistory) ? currentState.weightHistory : [];
+      if (preserveVo2) normalized.vo2MaxHistory = Array.isArray(currentState.vo2MaxHistory) ? currentState.vo2MaxHistory : [];
       if (!confirm("This will replace current device data. Use Merge Backup if you only want to restore missing history. Continue with full import?")) return;
       if (!Object.prototype.hasOwnProperty.call(root, "scoringSettings")) {
   delete normalized.scoringSettings;
