@@ -151,15 +151,37 @@
       .replaceAll("'", '&#039;');
   }
 
+  function getAchievementsPageState(){
+    try {
+      if (window.TaskPointsCore && typeof TaskPointsCore.loadAppState === 'function') {
+        const loaded = TaskPointsCore.loadAppState({
+          syncDerived: false,
+          persistSync: false
+        });
+        if (loaded && loaded.state) return loaded.state;
+      }
+    } catch (err) {
+      console.warn('[badges] TaskPointsCore.loadAppState failed', err);
+    }
+
+    try {
+      const raw = localStorage.getItem('taskpoints_v1');
+      return raw ? JSON.parse(raw) : {};
+    } catch (err) {
+      console.warn('[badges] failed to parse taskpoints_v1', err);
+      return {};
+    }
+  }
+
   function getActivePlayersForBadges(){
-    const sourcePlayers =
-      Array.isArray(state?.players) ? state.players :
-      Array.isArray(window.state?.players) ? window.state.players :
-      [];
+    const currentState = getAchievementsPageState();
+    const sourcePlayers = Array.isArray(currentState.players) ? currentState.players : [];
 
     return sourcePlayers
       .filter((player) => {
         if (!player) return false;
+
+        if (player.active === false) return false;
         if (player.archived === true) return false;
         if (player.retired === true) return false;
         if (player.deleted === true) return false;
@@ -170,6 +192,9 @@
         if (['archived', 'retired', 'deleted', 'hidden', 'inactive'].includes(status)) {
           return false;
         }
+
+        const name = player.name || player.displayName || player.nickname;
+        if (!name) return false;
 
         return true;
       })
@@ -182,15 +207,19 @@
 
   function getPlayerBadges(player){
     if (!player) return [];
+
     if (Array.isArray(player.badges)) return player.badges;
     if (Array.isArray(player.earnedBadges)) return player.earnedBadges;
     if (Array.isArray(player.trophies)) return player.trophies;
 
+    const currentState = getAchievementsPageState();
     const playerId = player.id || player.playerId;
-    const badgeMap = state?.playerBadges || window.state?.playerBadges;
+    const badgeMap = currentState.playerBadges || {};
+
     if (playerId && badgeMap && Array.isArray(badgeMap[playerId])) {
       return badgeMap[playerId];
     }
+
     return [];
   }
 
@@ -205,18 +234,45 @@
 
   function renderBadgesTab(){
     const rowsEl = document.getElementById('badgesRows');
-    if (!rowsEl) return;
+    if (!rowsEl) {
+      console.warn('[badges] missing #badgesRows container');
+      return;
+    }
+
+    const currentState = getAchievementsPageState();
+    const allPlayers = Array.isArray(currentState.players) ? currentState.players : [];
     const players = getActivePlayersForBadges();
+
+    console.debug('[badges] render', {
+      allPlayers: allPlayers.length,
+      activePlayers: players.length,
+      sample: allPlayers.slice(0, 5).map((p) => ({
+        id: p?.id || p?.playerId,
+        name: p?.name || p?.displayName || p?.nickname,
+        active: p?.active,
+        archived: p?.archived,
+        retired: p?.retired,
+        inactive: p?.inactive,
+        status: p?.status
+      }))
+    });
+
     if (!players.length) {
       rowsEl.innerHTML = '<div class="badgesRow"><div class="muted">No active players found.</div><div>—</div></div>';
       return;
     }
-    rowsEl.innerHTML = players.map((player) => `
-      <div class="badgesRow">
-        <div class="badgesPlayerName">${escapeHtml(player.name || player.displayName || 'Unnamed Player')}</div>
-        <div class="badgesEarned">${escapeHtml(formatPlayerBadges(player))}</div>
-      </div>
-    `).join('');
+
+    rowsEl.innerHTML = players.map((player) => {
+      const name = escapeHtml(player.name || player.displayName || player.nickname || 'Unnamed Player');
+      const badges = escapeHtml(formatPlayerBadges(player));
+
+      return `
+        <div class="badgesRow">
+          <div class="badgesPlayerName">${name}</div>
+          <div class="badgesEarned">${badges}</div>
+        </div>
+      `;
+    }).join('');
   }
 
   function setTrophyPageTab(tab){
@@ -236,6 +292,7 @@
   document.getElementById('achievementsTabBtn')?.addEventListener('click', () => setTrophyPageTab('achievements'));
   document.getElementById('badgesTabBtn')?.addEventListener('click', () => setTrophyPageTab('badges'));
   setTrophyPageTab('achievements');
+  renderBadgesTab();
 </script>
 
 </body>
