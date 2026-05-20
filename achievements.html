@@ -10,6 +10,53 @@
   <link rel="stylesheet" href="styles.css" />
   <link rel="preload" href="toolbar.js" as="script">
   <script src="toolbar.js" defer></script>
+
+  <style>
+    .achievementTabs{
+      display:flex;
+      gap:10px;
+      margin-bottom:16px;
+      flex-wrap:wrap;
+    }
+    .achievementTab{
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      background: rgba(8, 14, 22, 0.7);
+      color: #e5edf5;
+      border-radius: 999px;
+      padding: 9px 14px;
+      font-weight: 800;
+    }
+    .achievementTab.active{
+      background: linear-gradient(180deg, #ffbd68, #ff8a3d);
+      color: #111827;
+      border-color: rgba(255, 189, 104, 0.75);
+    }
+    .badgesTable{
+      display:flex;
+      flex-direction:column;
+      border:1px solid rgba(148, 163, 184, 0.16);
+      border-radius:16px;
+      overflow:hidden;
+      background: rgba(8, 14, 22, 0.45);
+    }
+    .badgesHeader,.badgesRow{
+      display:grid;
+      grid-template-columns:minmax(120px,1fr) minmax(140px,2fr);
+      gap:12px;
+      align-items:center;
+      padding:12px 14px;
+    }
+    .badgesHeader{
+      color:#9fb2c8;font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;background:rgba(255,255,255,.04);
+    }
+    .badgesRow{border-top:1px solid rgba(148, 163, 184, 0.12);}
+    .badgesPlayerName{text-align:left;font-weight:900;color:#f8fafc;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .badgesEarned{text-align:left;color:#cbd5e1;min-width:0;}
+    @media (max-width:640px){
+      .badgesHeader,.badgesRow{grid-template-columns:minmax(95px,.9fr) minmax(120px,1.4fr);padding:10px 12px;gap:8px;}
+    }
+  </style>
+
 </head>
 
 <body class="min-h-screen">
@@ -72,10 +119,98 @@
     </header>
 
     <section class="glass achievements-card">
-      <h2 class="text-xl font-semibold mb-1">Achievements</h2>
-      <p class="muted text-sm">Coming soon.</p>
+      <div class="achievementTabs" role="tablist" aria-label="Achievements and badges">
+        <button id="achievementsTabBtn" class="achievementTab active" type="button" role="tab" aria-selected="true">Achievements</button>
+        <button id="badgesTabBtn" class="achievementTab" type="button" role="tab" aria-selected="false">Badges</button>
+      </div>
+
+      <section id="achievementsTabPanel">
+        <h2 class="text-xl font-semibold mb-1">Achievements</h2>
+        <p class="muted text-sm">Coming soon.</p>
+      </section>
+
+      <section id="badgesTabPanel" hidden>
+        <div class="badgesTable">
+          <div class="badgesHeader">
+            <div>Player</div>
+            <div>Badges</div>
+          </div>
+          <div id="badgesRows"></div>
+        </div>
+      </section>
     </section>
   </div>
 <script src="scoring_core.js"></script>
+<script>
+  function escapeHtml(value){
+    return String(value ?? '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#039;');
+  }
+
+  function getActivePlayersForBadges(){
+    const players = Array.isArray(window.state?.players) ? window.state.players : [];
+    return players
+      .filter((player) => player && player.active !== false && player.archived !== true && player.retired !== true && player.inactive !== true)
+      .sort((a, b) => String(a.name || a.displayName || '').localeCompare(String(b.name || b.displayName || '')));
+  }
+
+  function getPlayerBadges(player){
+    if (Array.isArray(player?.badges)) return player.badges;
+    if (Array.isArray(player?.earnedBadges)) return player.earnedBadges;
+    const playerId = player?.id;
+    if (playerId && window.state?.playerBadges && Array.isArray(window.state.playerBadges[playerId])) {
+      return window.state.playerBadges[playerId];
+    }
+    return [];
+  }
+
+  function formatPlayerBadges(player){
+    const badges = getPlayerBadges(player);
+    if (!badges.length) return '—';
+    return badges.map((badge) => {
+      if (typeof badge === 'string') return badge;
+      return badge?.label || badge?.name || badge?.title || 'Badge';
+    }).join(', ');
+  }
+
+  function renderBadgesTab(){
+    const rowsEl = document.getElementById('badgesRows');
+    if (!rowsEl) return;
+    const players = getActivePlayersForBadges();
+    if (!players.length) {
+      rowsEl.innerHTML = '<div class="badgesRow"><div class="muted">No active players found.</div><div>—</div></div>';
+      return;
+    }
+    rowsEl.innerHTML = players.map((player) => `
+      <div class="badgesRow">
+        <div class="badgesPlayerName">${escapeHtml(player.name || player.displayName || 'Unnamed Player')}</div>
+        <div class="badgesEarned">${escapeHtml(formatPlayerBadges(player))}</div>
+      </div>
+    `).join('');
+  }
+
+  function setTrophyPageTab(tab){
+    const isAchievements = tab === 'achievements';
+    document.getElementById('achievementsTabBtn')?.classList.toggle('active', isAchievements);
+    document.getElementById('badgesTabBtn')?.classList.toggle('active', !isAchievements);
+    document.getElementById('achievementsTabBtn')?.setAttribute('aria-selected', String(isAchievements));
+    document.getElementById('badgesTabBtn')?.setAttribute('aria-selected', String(!isAchievements));
+
+    const achievementsPanel = document.getElementById('achievementsTabPanel');
+    const badgesPanel = document.getElementById('badgesTabPanel');
+    if (achievementsPanel) achievementsPanel.hidden = !isAchievements;
+    if (badgesPanel) badgesPanel.hidden = isAchievements;
+    if (!isAchievements) renderBadgesTab();
+  }
+
+  document.getElementById('achievementsTabBtn')?.addEventListener('click', () => setTrophyPageTab('achievements'));
+  document.getElementById('badgesTabBtn')?.addEventListener('click', () => setTrophyPageTab('badges'));
+  setTrophyPageTab('achievements');
+</script>
+
 </body>
 </html>
