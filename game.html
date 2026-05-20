@@ -1363,7 +1363,8 @@ function normalizeHabit(habit) {
   if (!habit || typeof habit !== 'object') return habit;
   return {
     ...habit,
-    tag: typeof habit.tag === 'string' ? habit.tag.trim() : ''
+    tag: typeof habit.tag === 'string' ? habit.tag.trim() : '',
+    halfPointEnabled: habit.halfPointEnabled !== false
   };
 }
 
