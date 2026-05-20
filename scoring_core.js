@@ -564,7 +564,8 @@ workHistory: Array.isArray(s?.workHistory) ? s.workHistory : [],
       projects:    Array.isArray(s?.projects)    ? s.projects    : [],
       notes: typeof s?.notes === "string" ? s.notes : "",
       habitTagColors: normalizeHabitTagColors(s?.habitTagColors),
-      scoringSettings: normalizeScoringSettings(s?.scoringSettings)
+      scoringSettings: normalizeScoringSettings(s?.scoringSettings),
+      playerBadges: s?.playerBadges && typeof s.playerBadges === 'object' && !Array.isArray(s.playerBadges) ? s.playerBadges : {}
     };
     return cleanupOpponentDripSchedules(normalized, { maxEntries: 120 });
   }
@@ -1382,6 +1383,7 @@ return { state: merged, storageKey };
       'tasks', 'completions', 'habits', 'players', 'flexActions',
       'gameHistory', 'matchups', 'schedule', 'weightHistory', 'vo2MaxHistory'
     ];
+    const stickyObjectFields = ['playerBadges'];
     stickyArrayFields.forEach((key) => {
       if (Array.isArray(next[key])) return;
       if (latest && Array.isArray(latest[key])) {
@@ -1389,6 +1391,14 @@ return { state: merged, storageKey };
         return;
       }
       next[key] = [];
+    });
+    stickyObjectFields.forEach((key) => {
+      if (next[key] && typeof next[key] === 'object' && !Array.isArray(next[key])) return;
+      if (latest && latest[key] && typeof latest[key] === 'object' && !Array.isArray(latest[key])) {
+        next[key] = latest[key];
+        return;
+      }
+      next[key] = {};
     });
     return next;
   }
