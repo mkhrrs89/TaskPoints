@@ -1616,6 +1616,7 @@ function normalizeHabit(habit) {
   return {
     ...habit,
     tag: typeof habit.tag === 'string' ? habit.tag.trim() : '',
+    halfPointEnabled: habit.halfPointEnabled !== false,
     ...(Number.isFinite(normalizedDaysPerCompleteWeek)
       ? { daysPerCompleteWeek: Math.max(0, Math.min(7, Math.round(normalizedDaysPerCompleteWeek))) }
       : {})
@@ -5931,6 +5932,13 @@ const daysHtml = days.map(d => {
           <span>Week complete at</span>
           <input class="input" data-field="days-per-complete-week" type="number" min="0" max="7" step="1" value="${Number.isFinite(Number(h.daysPerCompleteWeek)) ? Number(h.daysPerCompleteWeek) : ''}" placeholder="Days for complete week">
         </label>
+        <label class="text-xs muted flex items-start gap-2">
+          <input type="checkbox" data-field="half-point-enabled" ${h.halfPointEnabled !== false ? 'checked' : ''} ${isShowerHabit(h) ? 'disabled' : ''}>
+          <span>
+            <strong>Enable 1/2 point toggle</strong><br>
+            <small>${isShowerHabit(h) ? 'Shower uses custom tap rules.' : 'When on, first tap gives half points and second tap completes the habit.'}</small>
+          </span>
+        </label>
         <select class="input" data-field="category">
           <option value="habit" ${category==='habit'?'selected':''}>Habit</option>
           <option value="vice"  ${category==='vice'?'selected':''}>Vice</option>
@@ -6373,6 +6381,7 @@ function openHabitModal() {
   if (!modal) return;
   modal.classList.remove('hidden');
   modal.classList.add('flex');
+  if ($('habitHalfPointEnabledInput')) $('habitHalfPointEnabledInput').checked = true;
   $('habitName')?.focus();
 }
 
@@ -6417,6 +6426,7 @@ function addHabit(){
   const name = $('habitName')?.value.trim() || '';
   const tag  = $('habitTag')?.value.trim() || '';
   const pts  = Number($('habitPts')?.value)||0;
+  const halfPointEnabled = $('habitHalfPointEnabledInput')?.checked !== false;
   if(!name) return alert('Enter a habit name');
 
   // Find the current max order among non-retired HABITS
@@ -6436,13 +6446,15 @@ function addHabit(){
     updatedAtISO: new Date().toISOString(),
     category: 'habit',
     tag,
-    order: maxOrder + 1
+    order: maxOrder + 1,
+    halfPointEnabled
   };
 
 
   state.habits.push(h);
   save();
   $('habitName').value=''; $('habitPts').value=''; if ($('habitTag')) $('habitTag').value='';
+  if ($('habitHalfPointEnabledInput')) $('habitHalfPointEnabledInput').checked = true;
   closeHabitModal();
 
   renderHabits();
@@ -6494,6 +6506,7 @@ function saveHabitEdit(id,row){
   const ptsInput=row.querySelector('input[data-field="points"]');
   const tagInput=row.querySelector('input[data-field="tag"]');
   const completeWeekInput = row.querySelector('input[data-field="days-per-complete-week"]');
+  const halfPointEnabledInput = row.querySelector('input[data-field="half-point-enabled"]');
   const catInput=row.querySelector('[data-field="category"]');
 
   const oldPoints = h.pointsPerDay || 0;
@@ -6513,6 +6526,7 @@ function saveHabitEdit(id,row){
     }
   }
   h.category = catInput ? (catInput.value || 'habit') : (h.category || 'habit');
+  if (halfPointEnabledInput) h.halfPointEnabled = halfPointEnabledInput.checked !== false;
   h.updatedAtISO = new Date().toISOString();
 
   // update existing log entries
@@ -6859,7 +6873,8 @@ function applyHabitDayToggle(h, dayKey) {
     h.iceKeys  = Array.isArray(h.iceKeys)  ? h.iceKeys  : [];
 
     if (!isShower) {
-      // Normal habits: incomplete -> half -> full -> incomplete
+      // Normal habits: configurable incomplete -> half -> full -> incomplete OR incomplete -> full -> incomplete
+      const usesHalfPoints = h.halfPointEnabled !== false;
       const idx = h.doneKeys.indexOf(dayKey);
       const existing = Array.isArray(state.completions)
         ? state.completions.find(c => c?.source === 'habit' && c?.habitId === habitId && c?.dayKey === dayKey)
@@ -6868,7 +6883,26 @@ function applyHabitDayToggle(h, dayKey) {
       const basePoints = Number(h.pointsPerDay) || 0;
       const iso = new Date(fromKey(dayKey).getTime() + 12 * 3600 * 1000).toISOString();
 
-      if (idx === -1 || existingFraction <= 0) {
+      if (!usesHalfPoints) {
+        if (idx !== -1 && existingFraction >= 1) {
+          h.doneKeys.splice(idx, 1);
+          removeCompletionForDay();
+        } else {
+          if (idx === -1) h.doneKeys.push(dayKey);
+          removeCompletionForDay();
+          addCompletion({
+            id: `habit:${habitId}:${dayKey}`,
+            taskId: `habit:${habitId}:${dayKey}`,
+            title: `[${tagLabel}] ${h.name} (${dayKey})`,
+            points: basePoints,
+            completedAtISO: iso,
+            source,
+            habitId: habitId,
+            dayKey: dayKey,
+            completionFraction: 1
+          });
+        }
+      } else if (idx === -1 || existingFraction <= 0) {
         if (idx === -1) h.doneKeys.push(dayKey);
         removeCompletionForDay();
         addCompletion({
@@ -11150,6 +11184,13 @@ function tpPerfMark(label) {
     <label class="grid gap-1 text-sm font-medium mt-3">
       Points
       <input id="habitPts" class="input" type="number" placeholder="Pts">
+    </label>
+    <label class="mt-3 flex items-start gap-2 text-sm">
+      <input id="habitHalfPointEnabledInput" type="checkbox" checked>
+      <span>
+        <strong>Enable 1/2 point toggle</strong><br>
+        <small class="muted">When on, first tap gives half points and second tap completes the habit.</small>
+      </span>
     </label>
 
     <div class="flex justify-end gap-2 mt-6">
