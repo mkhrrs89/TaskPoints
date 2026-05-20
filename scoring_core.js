@@ -1370,6 +1370,29 @@ return { state: merged, storageKey };
     }
   }
 
+  function preserveStickyFieldsBeforeSave(candidateState, storageKey = STORAGE_KEY) {
+    const next = candidateState && typeof candidateState === 'object' ? { ...candidateState } : {};
+    let latest = null;
+    try {
+      latest = JSON.parse(localStorage.getItem(storageKey) || '{}');
+    } catch (_) {
+      latest = null;
+    }
+    const stickyArrayFields = [
+      'tasks', 'completions', 'habits', 'players', 'flexActions',
+      'gameHistory', 'matchups', 'schedule', 'weightHistory', 'vo2MaxHistory'
+    ];
+    stickyArrayFields.forEach((key) => {
+      if (Array.isArray(next[key])) return;
+      if (latest && Array.isArray(latest[key])) {
+        next[key] = latest[key];
+        return;
+      }
+      next[key] = [];
+    });
+    return next;
+  }
+
   function saveStateSnapshot(state, options = {}) {
     const debugEnabled = Boolean(global && global.TP_DEBUG_PERF);
     const summarizeStateSizes = (snapshot) => ({
@@ -1425,13 +1448,28 @@ return { state: merged, storageKey };
       return { ...base, storageWarnings: warnings };
     };
     const attemptSave = (candidate, trimmed, stage = 'initial') => {
-      localStorage.setItem(storageKey, JSON.stringify(candidate));
+      const candidateWithSticky = preserveStickyFieldsBeforeSave(candidate, storageKey);
+      localStorage.setItem(storageKey, JSON.stringify(candidateWithSticky));
+      const savedRaw = localStorage.getItem(storageKey);
+      const saved = savedRaw ? (JSON.parse(savedRaw) || {}) : {};
+      const criticalArrays = ['completions', 'matchups', 'gameHistory', 'weightHistory', 'vo2MaxHistory'];
+      const failed = criticalArrays.filter((key) => (
+        Array.isArray(candidateWithSticky[key])
+        && candidateWithSticky[key].length > 0
+        && (!Array.isArray(saved[key]) || saved[key].length < candidateWithSticky[key].length)
+      ));
+      if (failed.length) {
+        if (typeof alert === 'function') {
+          alert('Save verification failed: weightHistory or vo2MaxHistory was not preserved.');
+        }
+        throw new Error(`Save verification failed: weightHistory or vo2MaxHistory was not preserved. Failed keys: ${failed.join(', ')}`);
+      }
       if (debugEnabled) {
-        const size = summarizeStateSizes(candidate);
+        const size = summarizeStateSizes(candidateWithSticky);
         console.log(`[TP saveStateSnapshot] success stage=${stage} trimmed=${trimmed} savePath=${savePath} storageKey=${storageKey} completions=${size.completions} gameHistory=${size.gameHistory} matchups=${size.matchups} workHistory=${size.workHistory} schedule=${size.schedule}`);
       }
-      setQuotaTrimMarker(stage, summarizeStateSizes(candidate), trimmed);
-      return { state: candidate, trimmed };
+      setQuotaTrimMarker(stage, summarizeStateSizes(candidateWithSticky), trimmed);
+      return { state: candidateWithSticky, trimmed };
     };
 
     if (debugEnabled) {
