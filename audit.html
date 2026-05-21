@@ -821,6 +821,7 @@ function buildLogNormalizeShape(state) {
     function buildDailyLoadShape(rawState) {
       const p = rawState || {};
       return {
+        ...p,
         tasks: Array.isArray(p.tasks) ? p.tasks : [],
         completions: Array.isArray(p.completions) ? p.completions : [],
         players: Array.isArray(p.players) ? p.players : [],
@@ -843,13 +844,15 @@ function buildLogNormalizeShape(state) {
         habitTagColors: auditNormalizeHabitTagColors(p.habitTagColors),
         scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
           ? TaskPointsCore.normalizeScoringSettings(p.scoringSettings || {})
-          : (p.scoringSettings || {})
+          : (p.scoringSettings || {}),
+        playerBadges: p.playerBadges && typeof p.playerBadges === 'object' && !Array.isArray(p.playerBadges) ? p.playerBadges : {}
       };
     }
 
     function buildDailyNormalizeShape(state) {
       const s = state || {};
       return {
+        ...s,
         tasks: Array.isArray(s.tasks) ? s.tasks : [],
         completions: Array.isArray(s.completions) ? s.completions : [],
         players: Array.isArray(s.players) ? s.players : [],
@@ -872,7 +875,8 @@ function buildLogNormalizeShape(state) {
         habitTagColors: auditNormalizeHabitTagColors(s.habitTagColors),
         scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
           ? TaskPointsCore.normalizeScoringSettings(s.scoringSettings || {})
-          : (s.scoringSettings || {})
+          : (s.scoringSettings || {}),
+        playerBadges: s.playerBadges && typeof s.playerBadges === 'object' && !Array.isArray(s.playerBadges) ? s.playerBadges : {}
       };
     }
 
