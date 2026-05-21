@@ -3452,8 +3452,23 @@ function simulateAiScoreForPlayerCore(player, dateKey, options = {}) {
     }
   }
 
-  const score = baseline + finalUpside + Math.min(0, rawScore - baseline);
-  return Number(score.toFixed(1));
+const score = baseline + finalUpside + Math.min(0, rawScore - baseline);
+
+// Soft-cap only very high NPC scores.
+// Scores at or below 70 are unchanged.
+// Scores above 70 still rise, but increasingly slowly.
+// The absolute ceiling approaches 85 without making every big game exactly 85.
+const SOFT_CAP_START = 70;
+const SOFT_CAP_MAX = 85;
+
+let cappedScore = score;
+
+if (score > SOFT_CAP_START) {
+  const over = score - SOFT_CAP_START;
+  cappedScore = SOFT_CAP_START + (SOFT_CAP_MAX - SOFT_CAP_START) * (over / (over + (SOFT_CAP_MAX - SOFT_CAP_START)));
+}
+
+return Number(cappedScore.toFixed(1));
 }
 
   global.TaskPointsCore = {
