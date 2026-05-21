@@ -375,14 +375,24 @@ function load() {
       return Number(total.toFixed(1));
     }
 
+  // Compatibility wrapper. Final NPC scoring is centralized in scoring_core.js.
   function simulateAiScoreForPlayer(player, dateKeyStr, state, context = {}){
+  if (typeof TaskPointsCore?.simulateAiScoreForPlayerCore !== "function") {
+    console.error("simulateAiScoreForPlayerCore is missing. Check scoring_core.js script order.");
+    return 0;
+  }
   return TaskPointsCore.simulateAiScoreForPlayerCore(player, dateKeyStr, {
     state,
     context
   });
 }
 
+// Compatibility wrapper. NPC drip schedule generation is centralized in scoring_core.js.
 function generateOpponentDripSchedule(dateKeyStr, playerId, totalPoints){
+  if (typeof TaskPointsCore?.generateOpponentDripScheduleCore !== "function") {
+    console.error("generateOpponentDripScheduleCore is missing. Check scoring_core.js script order.");
+    return { date: dateKeyStr, playerId, total: Math.max(0, Math.round((Number(totalPoints) || 0) * 10) / 10), events: [] };
+  }
   return TaskPointsCore.generateOpponentDripScheduleCore(totalPoints, dateKeyStr, { playerId });
 }
 
