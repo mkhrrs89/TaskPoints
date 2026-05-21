@@ -1105,7 +1105,12 @@ function matchupAvatarSize(){
     return Array.isArray(state.opponentDripSchedules) ? state.opponentDripSchedules : [];
   }
 
+  // Compatibility wrapper. NPC drip schedule generation is centralized in scoring_core.js.
   function generateOpponentDripSchedule(dateKeyStr, playerId, totalPoints){
+  if (typeof TaskPointsCore?.generateOpponentDripScheduleCore !== "function") {
+    console.error("generateOpponentDripScheduleCore is missing. Check scoring_core.js script order.");
+    return { date: dateKeyStr, playerId, total: Math.max(0, Math.round((Number(totalPoints) || 0) * 10) / 10), events: [] };
+  }
   return TaskPointsCore.generateOpponentDripScheduleCore(totalPoints, dateKeyStr, { playerId });
 }
 

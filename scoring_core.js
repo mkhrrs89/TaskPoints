@@ -3257,7 +3257,10 @@ function computeCanonicalMatchupStats(state, playerId, options = {}) {
 }
 
 // Centralized NPC drip/reveal schedule generator.
-// Page-level generateOpponentDripSchedule wrappers should call this function.
+// This is the canonical implementation for opponent drip timing/reveal math.
+// Page-level generateOpponentDripSchedule functions in index/game/matchups/gamehub
+// should remain thin compatibility wrappers only (signature/state plumbing + return).
+// Future drip behavior changes must be made here in scoring_core.js, not copied into pages.
 function generateOpponentDripScheduleCore(finalScore, dateKey, options = {}) {
   const playerId = options.playerId;
   const totalRounded = Math.max(0, Math.round((Number(finalScore) || 0) * 10) / 10);
@@ -3345,7 +3348,11 @@ function generateOpponentDripScheduleCore(finalScore, dateKey, options = {}) {
 }
   
 
-// Centralized final NPC scoring; page-level simulateAiScoreForPlayer wrappers should call this.
+// Centralized final NPC scoring implementation.
+// This is the single source of truth for NPC final score math.
+// Page-level simulateAiScoreForPlayer functions should remain thin compatibility
+// wrappers only (signature/state/context forwarding + return).
+// Future scoring behavior changes must be made here in scoring_core.js, not copied into pages.
 function simulateAiScoreForPlayerCore(player, dateKey, options = {}) {
   if (!player || !player.baseline) return 0;
 
