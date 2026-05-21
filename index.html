@@ -1417,7 +1417,7 @@ let state = (() => {
   const s = normalizeState(load());
   if (__TP_PERF_BOOT) console.timeEnd('LOAD: normalizeState(load())');
   if (window.TP_DEBUG_PERF) {
-    const completions = Array.isArray(s?.completions) ? s.completions.length : 0;
+    const completions = Array.isArray(s?.completions) ? src.completions.length : 0;
     console.log(`[TP home boot] initial loaded completions=${completions}`);
   }
   return s;
@@ -3541,15 +3541,17 @@ function maybeAutoSimToday(){
 
 
 function normalizeState(s) {
+  const src = (s && typeof s === "object") ? s : {};
   const normalized = {
-    tasks:       Array.isArray(s.tasks)       ? s.tasks.map(normalizeTask)       : [],
-    reminders:   Array.isArray(s.reminders)   ? s.reminders   : [],
-    completions: Array.isArray(s.completions) ? s.completions.map(normalizeCompletion) : [],
-    players:     Array.isArray(s.players)     ? s.players     : [],
-    habits:      Array.isArray(s.habits)      ? s.habits.map(normalizeHabit)      : [],
-    flexActions: Array.isArray(s.flexActions) ? s.flexActions : [],
-    weightHistory: Array.isArray(s.weightHistory)
-      ? s.weightHistory
+    ...src,
+    tasks:       Array.isArray(src.tasks)       ? src.tasks.map(normalizeTask)       : [],
+    reminders:   Array.isArray(src.reminders)   ? src.reminders   : [],
+    completions: Array.isArray(src.completions) ? src.completions.map(normalizeCompletion) : [],
+    players:     Array.isArray(src.players)     ? src.players     : [],
+    habits:      Array.isArray(src.habits)      ? src.habits.map(normalizeHabit)      : [],
+    flexActions: Array.isArray(src.flexActions) ? src.flexActions : [],
+    weightHistory: Array.isArray(src.weightHistory)
+      ? src.weightHistory
           .map((entry) => {
             const date = typeof entry?.date === 'string' ? entry.date.trim() : '';
             const weight = Number(entry?.weight);
@@ -3558,22 +3560,25 @@ function normalizeState(s) {
           })
           .filter(Boolean)
       : [],
-    vo2MaxHistory: Array.isArray(s.vo2MaxHistory) ? s.vo2MaxHistory : [],
-    liveDiffHistory: s.liveDiffHistory && typeof s.liveDiffHistory === "object" ? s.liveDiffHistory : {},
-    gameHistory: Array.isArray(s.gameHistory) ? s.gameHistory : [],
-    matchups:    Array.isArray(s.matchups)    ? s.matchups    : [],
-    schedule:    Array.isArray(s.schedule)    ? s.schedule    : [],
-    opponentDripSchedules: Array.isArray(s.opponentDripSchedules) ? s.opponentDripSchedules : [],
-    youImageId:  typeof s.youImageId === "string" ? s.youImageId : "",
-    youName: typeof s.youName === "string" ? s.youName : "",
-    youPrimaryColor: normalizeHexColor(s.youPrimaryColor) || "#1a383b",
-    youSecondaryColor: normalizeHexColor(s.youSecondaryColor) || "#254c52",
-    projects:    Array.isArray(s.projects)    ? s.projects    : loadProjectsFromStorage(),
-    notes: typeof s.notes === "string" ? s.notes : "",
-    habitTagColors: normalizeHabitTagColors(s.habitTagColors),
+    vo2MaxHistory: Array.isArray(src.vo2MaxHistory) ? src.vo2MaxHistory : [],
+    liveDiffHistory: src.liveDiffHistory && typeof src.liveDiffHistory === "object" ? src.liveDiffHistory : {},
+    gameHistory: Array.isArray(src.gameHistory) ? src.gameHistory : [],
+    matchups:    Array.isArray(src.matchups)    ? src.matchups    : [],
+    schedule:    Array.isArray(src.schedule)    ? src.schedule    : [],
+    opponentDripSchedules: Array.isArray(src.opponentDripSchedules) ? src.opponentDripSchedules : [],
+    youImageId:  typeof src.youImageId === "string" ? src.youImageId : "",
+    youName: typeof src.youName === "string" ? src.youName : "",
+    youPrimaryColor: normalizeHexColor(src.youPrimaryColor) || "#1a383b",
+    youSecondaryColor: normalizeHexColor(src.youSecondaryColor) || "#254c52",
+    projects:    Array.isArray(src.projects)    ? src.projects    : loadProjectsFromStorage(),
+    notes: typeof src.notes === "string" ? src.notes : "",
+    habitTagColors: normalizeHabitTagColors(src.habitTagColors),
     scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
-      ? TaskPointsCore.normalizeScoringSettings(s.scoringSettings || {})
-      : (s.scoringSettings || {})
+      ? TaskPointsCore.normalizeScoringSettings(src.scoringSettings || {})
+      : (src.scoringSettings || {}),
+    playerBadges: src.playerBadges && typeof src.playerBadges === "object" && !Array.isArray(src.playerBadges)
+      ? src.playerBadges
+      : {}
   };
   if (window.TaskPointsCore?.cleanupOpponentDripSchedules) {
     return TaskPointsCore.cleanupOpponentDripSchedules(normalized);
@@ -4842,7 +4847,7 @@ if (titleStr.startsWith('Sleep Score (')) {
 
     // Habits / Vices / Flux based on source
     if (c.source === 'habit') {
-      totals.habits += pts;
+      totalsrc.habits += pts;
       return;
     }
     if (c.source === 'vice') {
