@@ -3255,6 +3255,94 @@ function computeCanonicalMatchupStats(state, playerId, options = {}) {
     ppd: scoredGames ? Number((totalScore / scoredGames).toFixed(1)) : 0
   };
 }
+
+// Centralized NPC drip/reveal schedule generator.
+// Page-level generateOpponentDripSchedule wrappers should call this function.
+function generateOpponentDripScheduleCore(finalScore, dateKey, options = {}) {
+  const playerId = options.playerId;
+  const totalRounded = Math.max(0, Math.round((Number(finalScore) || 0) * 10) / 10);
+  const totalUnits = Math.round(totalRounded * 10);
+
+  const startHour = 6;
+  const endHour = 23;
+  const count = Math.max(12, Math.min(40, Math.round(Math.random() * 20) + 15));
+
+  const baseDate = new Date(`${dateKey}T00:00:00`);
+
+  const hourBuckets = [];
+  for (let h = startHour; h <= endHour; h++) {
+    let weight = 1;
+
+    // Slightly favor earlier hours, but less aggressively than before.
+    // Goal: still make NPCs score earlier in the day, just not dump almost everything by noon.
+    if (h >= 6 && h <= 11) weight += 0.7;
+    if (h >= 12 && h <= 15) weight += 0.45;
+    if (h >= 16 && h <= 17) weight += 0.25;
+    if (h >= 18 && h <= 23) weight += 0.15;
+
+    if (Math.random() < 0.15) weight *= 0.4;
+
+    hourBuckets.push({ hour: h, weight: Math.max(0.2, weight) });
+  }
+
+  const totalHourWeight = hourBuckets.reduce((s, h) => s + h.weight, 0) || 1;
+
+  function pickTime() {
+    let r = Math.random() * totalHourWeight;
+    let chosenHour = startHour;
+    for (const h of hourBuckets) {
+      if (r <= h.weight) { chosenHour = h.hour; break; }
+      r -= h.weight;
+    }
+
+    const m = Math.floor(Math.random() * 60);
+    const s = Math.floor(Math.random() * 60);
+    const d = new Date(baseDate.getTime());
+    d.setHours(chosenHour, m, s, 0);
+    return d;
+  }
+
+  const weights = [];
+  for (let i = 0; i < count; i++) {
+    const base = Math.pow(Math.random(), 1.4);
+    const burst = Math.random() < 0.35 ? Math.random() * 1.2 : 0;
+    weights.push(base + burst);
+  }
+
+  const weightSum = weights.reduce((s, n) => s + n, 0) || 1;
+
+  let remaining = totalUnits;
+  const pointUnits = [];
+  for (let i = 0; i < count; i++) {
+    if (i === count - 1) {
+      pointUnits.push(Math.max(0, remaining));
+    } else {
+      const share = Math.min(
+        remaining,
+        Math.max(0, Math.round((weights[i] / weightSum) * totalUnits))
+      );
+      pointUnits.push(share);
+      remaining -= share;
+    }
+  }
+
+  const times = pointUnits.map(() => pickTime()).sort((a, b) => a - b);
+  const sizedUnits = pointUnits
+    .slice()
+    .sort(() => Math.random() - 0.5);
+
+  const events = sizedUnits
+    .map((units, idx) => ({ t: times[idx].toISOString(), pts: units / 10 }))
+    .filter(e => e.pts > 0)
+    .sort((a, b) => new Date(a.t) - new Date(b.t));
+
+  return {
+    date: dateKey,
+    playerId,
+    total: totalRounded,
+    events
+  };
+}
   
 
 // Centralized final NPC scoring; page-level simulateAiScoreForPlayer wrappers should call this.
@@ -3407,6 +3495,7 @@ function simulateAiScoreForPlayerCore(player, dateKey, options = {}) {
     buildPersonalScoreHistoryCsv,
     roundPoints,
     computeMomentumEffects,
+    generateOpponentDripScheduleCore,
     simulateAiScoreForPlayerCore,
     deriveCompletionPoints,
     pointsForCompletion,
