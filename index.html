@@ -2589,6 +2589,7 @@ function load() {
         weightHistory: [],
         vo2MaxHistory: [],
         liveDiffHistory: {},
+        liveDiffSnapshots: {},
         gameHistory:  [],
         matchups:     [],
         schedule:     [],
@@ -2626,6 +2627,7 @@ function load() {
         : [],
       vo2MaxHistory: Array.isArray(p.vo2MaxHistory) ? p.vo2MaxHistory : [],
       liveDiffHistory: p.liveDiffHistory && typeof p.liveDiffHistory === "object" ? p.liveDiffHistory : {},
+      liveDiffSnapshots: p.liveDiffSnapshots && typeof p.liveDiffSnapshots === "object" ? p.liveDiffSnapshots : {},
       gameHistory:  Array.isArray(p.gameHistory)  ? p.gameHistory  : [],
       matchups:     Array.isArray(p.matchups)     ? p.matchups     : [],
       schedule:     Array.isArray(p.schedule)     ? p.schedule     : [],
@@ -2651,6 +2653,7 @@ function load() {
       weightHistory: [],
       vo2MaxHistory: [],
       liveDiffHistory: {},
+      liveDiffSnapshots: {},
       gameHistory:  [],
       matchups:     [],
       schedule:     [],
@@ -3562,6 +3565,7 @@ function normalizeState(s) {
       : [],
     vo2MaxHistory: Array.isArray(src.vo2MaxHistory) ? src.vo2MaxHistory : [],
     liveDiffHistory: src.liveDiffHistory && typeof src.liveDiffHistory === "object" ? src.liveDiffHistory : {},
+    liveDiffSnapshots: src.liveDiffSnapshots && typeof src.liveDiffSnapshots === "object" ? src.liveDiffSnapshots : {},
     gameHistory: Array.isArray(src.gameHistory) ? src.gameHistory : [],
     matchups:    Array.isArray(src.matchups)    ? src.matchups    : [],
     schedule:    Array.isArray(src.schedule)    ? src.schedule    : [],
@@ -5019,12 +5023,15 @@ function getTodayVisibleMatchupScores(){
 
 function cleanupLiveDiffHistory(nextState){
   const next = { ...nextState };
+  const snapshots = next.liveDiffSnapshots && typeof next.liveDiffSnapshots === 'object' ? next.liveDiffSnapshots : {};
   const history = next.liveDiffHistory && typeof next.liveDiffHistory === 'object' ? next.liveDiffHistory : {};
   const currentDayKey = getCurrentTaskPointsDayKey();
   const prior = fromKey(currentDayKey);
   prior.setDate(prior.getDate() - 1);
   const yesterdayKey = dateKey(prior);
-  next.liveDiffHistory = Object.fromEntries(Object.entries(history).filter(([dayKey]) => dayKey === currentDayKey || dayKey === yesterdayKey));
+  const keep = ([dayKey]) => dayKey === currentDayKey || dayKey === yesterdayKey;
+  next.liveDiffSnapshots = Object.fromEntries(Object.entries(snapshots).filter(keep));
+  next.liveDiffHistory = Object.fromEntries(Object.entries(history).filter(keep));
   return next;
 }
 
@@ -5037,15 +5044,21 @@ function captureLiveDiffPoint(){
   const scores = getTodayVisibleMatchupScores();
   if (!scores) return;
   const diff = Number((scores.youScore - scores.opponentScore).toFixed(2));
-  const history = latest.liveDiffHistory && typeof latest.liveDiffHistory === 'object' ? { ...latest.liveDiffHistory } : {};
-  const rows = Array.isArray(history[dayKey]) ? history[dayKey].slice() : [];
+  const snapshots = latest.liveDiffSnapshots && typeof latest.liveDiffSnapshots === 'object' ? { ...latest.liveDiffSnapshots } : {};
+  const daySnapshots = snapshots[dayKey] && typeof snapshots[dayKey] === 'object' ? { ...snapshots[dayKey] } : {};
   const point = { slot, loggedAtISO: new Date().toISOString(), youScore: scores.youScore, opponentScore: scores.opponentScore, diff };
-  const index = rows.findIndex((row) => row && row.slot === slot);
-  if (index >= 0) rows[index] = point;
-  else rows.push(point);
-  rows.sort((a, b) => liveDiffSlotToIndex(a.slot) - liveDiffSlotToIndex(b.slot));
+  daySnapshots[slot] = point;
+  snapshots[dayKey] = daySnapshots;
+
+  const history = latest.liveDiffHistory && typeof latest.liveDiffHistory === 'object' ? { ...latest.liveDiffHistory } : {};
+  const rows = Object.values(daySnapshots).filter((row) => row && row.slot).sort((a, b) => liveDiffSlotToIndex(a.slot) - liveDiffSlotToIndex(b.slot));
   history[dayKey] = rows;
-  state = cleanupLiveDiffHistory({ ...latest, liveDiffHistory: history });
+
+  const nextState = cleanupLiveDiffHistory({ ...latest, liveDiffSnapshots: snapshots, liveDiffHistory: history });
+  state = nextState;
+  if (window.TP_DEBUG_PERF) {
+    console.log('[TP liveDiff]', { dayKey, slot, diff, pointsToday: Object.keys(daySnapshots).length, cleanupRan: true });
+  }
   save();
   drawLiveDiffGraph();
 }
@@ -5081,7 +5094,12 @@ function drawLiveDiffGraph(){
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, width, height);
   const todayKey = getCurrentTaskPointsDayKey();
-  const rows = Array.isArray(state?.liveDiffHistory?.[todayKey]) ? state.liveDiffHistory[todayKey] : [];
+  const daySnapshots = state?.liveDiffSnapshots?.[todayKey] && typeof state.liveDiffSnapshots[todayKey] === 'object'
+    ? state.liveDiffSnapshots[todayKey]
+    : null;
+  const rows = daySnapshots
+    ? Object.values(daySnapshots)
+    : (Array.isArray(state?.liveDiffHistory?.[todayKey]) ? state.liveDiffHistory[todayKey] : []);
   const pointsRaw = rows.map((row) => ({ i: liveDiffSlotToIndex(row.slot), diff: Number(row.diff) })).filter((row) => row.i >= 0 && Number.isFinite(row.diff)).sort((a, b) => a.i - b.i);
   if (!pointsRaw.length) {
     if (hint) hint.classList.remove('hidden');
