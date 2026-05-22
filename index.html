@@ -405,6 +405,19 @@ Nothing visible on the page is built here. === -->
       background: rgba(95,196,207,0.95);
       transform: scale(1.12);
     }
+
+    .metricEntriesManager{
+      border:1px solid rgba(148,163,184,0.2);
+      border-radius:12px;
+      padding:10px;
+      background:rgba(8,14,22,0.5);
+    }
+    .metricEntryRow{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid rgba(148,163,184,0.14)}
+    .metricEntryRow:last-child{border-bottom:0}
+    .metricEntryActions{display:flex;gap:6px;flex-shrink:0}
+    .metricEntryEdit{display:grid;grid-template-columns:1fr 1fr auto;gap:6px;align-items:center;width:100%}
+    .metricEntryStatus{font-size:11px;color:#fca5a5;margin-top:6px}
+    @media (max-width: 640px) { .metricEntryEdit{grid-template-columns:1fr 1fr} .metricEntryEdit .metricEntryActions{grid-column:1 / -1;justify-content:flex-end} }
   </style>
   <link rel="preload" href="toolbar.js" as="script">
   <script src="toolbar.js" defer></script>
@@ -756,6 +769,11 @@ Nothing visible on the page is built here. === -->
       <span class="homeGraphDot"></span>
       <span class="homeGraphDot"></span>
       <span class="homeGraphDot"></span>
+    </div>
+    <div id="metricEntriesManager" class="metricEntriesManager text-sm">
+      <div id="metricEntriesTitle" class="text-xs uppercase tracking-wide muted mb-1">Manage Entries</div>
+      <div id="metricEntriesList"></div>
+      <div id="metricEntriesStatus" class="metricEntryStatus hidden"></div>
     </div>
   </div>
 </div>
@@ -4291,6 +4309,7 @@ function renderStats(){
       tpPerfTime('renderStats: drawDailyTrend', () => drawDailyTrend(dailyTotals));
       tpPerfTime('renderStats: drawWeightTrend', () => drawWeightTrend(getWeightHistorySorted()));
       tpPerfTime('renderStats: drawVo2MaxTrend', () => drawVo2MaxTrend(getVo2MaxHistorySorted()));
+      renderMetricEntriesManager();
       state = cleanupLiveDiffHistory(state);
       captureLiveDiffPoint();
       tpPerfTime('renderStats: drawLiveDiffGraph', () => drawLiveDiffGraph());
@@ -4939,6 +4958,7 @@ let homeGraphPanelIndex = 0;
 let homeGraphScrollRaf = null;
 let homeGraphPointerDownAt = null;
 let liveDiffCaptureIntervalId = null;
+let metricEntryEditState = null;
 
 function getWeightHistorySorted() {
   const list = Array.isArray(state?.weightHistory) ? state.weightHistory : [];
@@ -5141,6 +5161,93 @@ function updateHomeGraphDots(nextIndex = 0) {
   homeGraphPanelIndex = Math.max(0, Math.min(total - 1, Number(nextIndex) || 0));
   const dots = document.querySelectorAll('#homeGraphDots .homeGraphDot');
   dots.forEach((dot, idx) => dot.classList.toggle('is-active', idx === homeGraphPanelIndex));
+  renderMetricEntriesManager();
+}
+
+function formatMetricEntryDate(dateStr){
+  const date = new Date(`${dateStr}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? dateStr : date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function persistMetricHistory(nextState, savePath){
+  if (window.TaskPointsCore?.saveStateSnapshot) {
+    const { state: savedState } = TaskPointsCore.saveStateSnapshot(nextState, { storageKey: STORAGE_KEY, immediateWrite: true, savePath });
+    state = normalizeState(savedState);
+  } else {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
+    state = normalizeState(nextState);
+  }
+  storageCache.raw = null;
+  storageCache.parsed = state;
+}
+
+function renderMetricEntriesManager(){
+  const titleEl = $('metricEntriesTitle');
+  const listEl = $('metricEntriesList');
+  if (!titleEl || !listEl) return;
+  const mode = homeGraphPanelIndex === 2 ? 'vo2' : 'weight';
+  const isWeight = mode === 'weight';
+  const label = isWeight ? 'Weight Entries' : 'VO2 Max Entries';
+  titleEl.textContent = label;
+  const list = (isWeight ? getWeightHistorySorted() : getVo2MaxHistorySorted()).slice().sort((a,b)=> (b.dateKey||b.date||'').localeCompare(a.dateKey||a.date||''));
+  if (!list.length) { listEl.innerHTML = `<div class="muted text-xs">No ${isWeight ? 'Weight' : 'VO2 Max'} entries yet.</div>`; return; }
+  listEl.innerHTML = list.map((entry) => {
+    const entryKey = entry.id || `${entry.dateKey}-${isWeight ? entry.weight : entry.value}`;
+    const date = entry.dateKey || entry.date;
+    if (metricEntryEditState && metricEntryEditState.mode === mode && metricEntryEditState.entryKey === entryKey) {
+      return `<div class="metricEntryRow"><div class="metricEntryEdit">
+        <input id="metricEditDateInput" type="date" class="input metricLogInput metricLogDateInput" value="${date || ''}">
+        <input id="metricEditValueInput" type="number" step="0.1" class="input metricLogInput metricLogValueInput" value="${isWeight ? entry.weight : entry.value}">
+        <div class="metricEntryActions"><button class="btn btn-primary btn-compact" onclick="saveMetricEntryEdit()">Save</button><button class="btn btn-secondary btn-compact" onclick="cancelMetricEntryEdit()">Cancel</button></div>
+      </div></div>`;
+    }
+    return `<div class="metricEntryRow">
+      <div>${formatMetricEntryDate(date)} — ${(isWeight ? Number(entry.weight).toFixed(1) + ' lb' : Number(entry.value).toFixed(1))}</div>
+      <div class="metricEntryActions"><button class="btn btn-secondary btn-compact" onclick="startMetricEntryEdit('${mode}','${entryKey}')">Edit</button><button class="btn btn-secondary btn-compact" onclick="deleteMetricEntry('${mode}','${entryKey}')">Delete</button></div>
+    </div>`;
+  }).join('');
+}
+
+function setMetricEntriesStatus(message=''){
+  const el = $('metricEntriesStatus'); if (!el) return;
+  el.textContent = message; el.classList.toggle('hidden', !message);
+}
+function startMetricEntryEdit(mode, entryKey){ metricEntryEditState = { mode, entryKey }; setMetricEntriesStatus(''); renderMetricEntriesManager(); }
+function cancelMetricEntryEdit(){ metricEntryEditState = null; setMetricEntriesStatus(''); renderMetricEntriesManager(); }
+function saveMetricEntryEdit(){
+  if (!metricEntryEditState) return;
+  const date = String($('metricEditDateInput')?.value || '').trim();
+  const value = Number(String($('metricEditValueInput')?.value || '').trim());
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return setMetricEntriesStatus('Please enter a valid date.');
+  if (!Number.isFinite(value)) return setMetricEntriesStatus('Please enter a valid number.');
+  const isWeight = metricEntryEditState.mode === 'weight';
+  const historyKey = isWeight ? 'weightHistory' : 'vo2MaxHistory';
+  const list = (isWeight ? getWeightHistorySorted() : getVo2MaxHistorySorted()).slice();
+  const target = list.find((e) => (e.id || `${e.dateKey}-${isWeight ? e.weight : e.value}`) === metricEntryEditState.entryKey);
+  if (!target) return cancelMetricEntryEdit();
+  const duplicate = list.find((e) => e !== target && (e.dateKey || e.date) === date);
+  if (duplicate) return setMetricEntriesStatus('An entry for that date already exists.');
+  const normalized = list.map((e) => {
+    if (e !== target) return e;
+    return { ...e, date, dateKey: date, loggedAtISO: new Date().toISOString(), weight: isWeight ? value : e.weight, value: isWeight ? e.value : value };
+  }).sort((a,b)=> (a.dateKey||a.date).localeCompare(b.dateKey||b.date));
+  const latest = normalizeState(load());
+  persistMetricHistory({ ...latest, [historyKey]: normalized }, isWeight ? 'weight-entry-edit' : 'vo2max-entry-edit');
+  metricEntryEditState = null; setMetricEntriesStatus('');
+  if (isWeight) drawWeightTrend(getWeightHistorySorted()); else drawVo2MaxTrend(getVo2MaxHistorySorted());
+  renderMetricEntriesManager();
+}
+function deleteMetricEntry(mode, entryKey){
+  const isWeight = mode === 'weight';
+  if (!confirm(`Delete this ${isWeight ? 'Weight' : 'VO2 Max'} entry?`)) return;
+  const historyKey = isWeight ? 'weightHistory' : 'vo2MaxHistory';
+  const list = (isWeight ? getWeightHistorySorted() : getVo2MaxHistorySorted()).slice();
+  const next = list.filter((e)=> (e.id || `${e.dateKey}-${isWeight ? e.weight : e.value}`) !== entryKey);
+  const latest = normalizeState(load());
+  persistMetricHistory({ ...latest, [historyKey]: next }, isWeight ? 'weight-entry-delete' : 'vo2max-entry-delete');
+  metricEntryEditState = null; setMetricEntriesStatus('');
+  if (isWeight) drawWeightTrend(getWeightHistorySorted()); else drawVo2MaxTrend(getVo2MaxHistorySorted());
+  renderMetricEntriesManager();
 }
 
 function bindHomeGraphInteractions() {
@@ -5300,6 +5407,7 @@ function submitWeightEntry() {
   }
 
   drawWeightTrend(getWeightHistorySorted());
+  renderMetricEntriesManager();
   if (window.TP_DEBUG_WEIGHT || window.TP_DEBUG_PERF) {
     const reloaded = normalizeState(load());
     const reloadedWeight = Array.isArray(reloaded.weightHistory) ? reloaded.weightHistory : [];
@@ -5414,6 +5522,7 @@ function submitVo2MaxEntry() {
   }
 
   drawVo2MaxTrend(getVo2MaxHistorySorted());
+  renderMetricEntriesManager();
   closeVo2MaxModal();
 }
 
