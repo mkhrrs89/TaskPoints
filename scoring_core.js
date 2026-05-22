@@ -557,6 +557,8 @@ opponentDripSchedules: Array.isArray(s?.opponentDripSchedules) ? s.opponentDripS
 weightHistory: Array.isArray(s?.weightHistory) ? s.weightHistory : [],
 vo2MaxHistory: Array.isArray(s?.vo2MaxHistory) ? s.vo2MaxHistory : [],
 workHistory: Array.isArray(s?.workHistory) ? s.workHistory : [],
+      liveDiffHistory: s?.liveDiffHistory && typeof s.liveDiffHistory === 'object' ? s.liveDiffHistory : {},
+      liveDiffSnapshots: s?.liveDiffSnapshots && typeof s.liveDiffSnapshots === 'object' ? s.liveDiffSnapshots : {},
       youImageId:  typeof s?.youImageId === "string" ? s.youImageId : "",
       youName: typeof s?.youName === "string" ? s.youName : "",
       youPrimaryColor: normalizeHexColor(s?.youPrimaryColor) || "#1a383b",

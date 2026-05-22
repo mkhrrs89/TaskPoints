@@ -668,7 +668,8 @@
       'scoringSettings',
       'habitTagColors',
       'workHistory',
-      'weightHistory'
+      'weightHistory',
+      'liveDiffSnapshots'
     ];
     const NO_OP_DIFF_EXCLUDED_KEYS = new Set(['__auditRuntime']);
     const DEFAULT_BY_KEY = {
@@ -1255,6 +1256,11 @@ function buildLogNormalizeShape(state) {
         { dayKey: '2026-03-31', hours: 7.5 },
         { dayKey: '2026-04-01', hours: 8 }
       ];
+      seeded.liveDiffSnapshots = {
+        '2026-04-01': {
+          '05:00': { slot: '05:00', diff: 1.5, youScore: 12, opponentScore: 10.5, loggedAtISO: '2026-04-01T05:05:00.000Z' }
+        }
+      };
       return seeded;
     }
 
