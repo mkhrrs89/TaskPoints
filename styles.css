@@ -2400,7 +2400,7 @@ header,
 }
 
 /* Keep half-point ring visible above the weekly-complete slab/outline */
-.habitDaysRow.week-complete-row .habitDay.week-complete.habit-half{
+.habitDaysRow.week-complete-row .habitDay.habit-half{
   z-index: 3;
   background:
     linear-gradient(#0f1419, #0f1419) padding-box,
