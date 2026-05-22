@@ -2367,6 +2367,10 @@ header,
 .habitDaysRow.week-complete-row{
   position: relative;
   isolation: isolate;
+  border: none;
+  -webkit-clip-path: var(--tp-octagon-shape);
+  clip-path: var(--tp-octagon-shape);
+  pointer-events: none;
 }
 
 .habitDaysRow.week-complete-row::before{
@@ -2376,11 +2380,7 @@ header,
   border-radius: 0;
   -webkit-clip-path: var(--tp-octagon-shape);
   clip-path: var(--tp-octagon-shape);
-  background: var(--tp-brushed-base);
-  border: 1px solid var(--tp-brushed-border);
-  box-shadow:
-    inset 0 1px 0 rgba(255,255,255,0.12),
-    inset 0 -1px 0 rgba(0,0,0,0.2);
+  background: var(--tp-brushed-border);
   z-index: 0;
   pointer-events: none;
 }
@@ -2388,12 +2388,16 @@ header,
 .habitDaysRow.week-complete-row::after{
   content: '';
   position: absolute;
-  inset: 0;
+  inset: 1px;
   border-radius: 0;
   -webkit-clip-path: var(--tp-octagon-shape);
   clip-path: var(--tp-octagon-shape);
-  background: var(--tp-brushed-overlay);
-  opacity: 0.4;
+  background:
+    var(--tp-brushed-overlay),
+    var(--tp-brushed-base);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.12),
+    inset 0 -1px 0 rgba(0,0,0,0.2);
   z-index: 0;
   pointer-events: none;
 }
@@ -2401,6 +2405,7 @@ header,
 .habitDaysRow.week-complete-row .habitDay{
   position: relative;
   z-index: 1;
+  pointer-events: auto;
 }
 
 /* Incomplete day bubbles inside a completed week should blend into the slab. */
