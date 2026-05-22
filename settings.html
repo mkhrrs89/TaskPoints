@@ -138,6 +138,26 @@
         </div>
       </details>
 
+      <details class="glass space-y-3" id="healthDataManagerSection">
+        <summary class="flex items-center justify-between gap-3 flex-wrap cursor-pointer">
+          <div>
+            <div class="text-lg font-semibold">Health Data Manager</div>
+            <div class="muted text-sm">Edit or delete saved Weight and VO2 Max entries.</div>
+          </div>
+        </summary>
+        <div class="space-y-3 pt-4">
+          <div id="healthDataManagerStatus" class="metricEntryStatus hidden"></div>
+          <div class="space-y-2">
+            <div class="text-xs uppercase tracking-wide muted">Weight Entries</div>
+            <div id="settingsWeightEntriesList" class="space-y-1"></div>
+          </div>
+          <div class="space-y-2">
+            <div class="text-xs uppercase tracking-wide muted">VO2 Max Entries</div>
+            <div id="settingsVo2EntriesList" class="space-y-1"></div>
+          </div>
+        </div>
+      </details>
+
       <details class="glass space-y-3" id="notesRecoverySection">
         <summary class="flex items-center justify-between gap-3 flex-wrap cursor-pointer">
           <div>
@@ -3908,6 +3928,100 @@ rows.push([
       }
     }
 
+    let healthMetricEntryEditState = null;
+
+    function formatHealthMetricDate(dateStr) {
+      const date = new Date(`${dateStr}T00:00:00`);
+      return Number.isNaN(date.getTime()) ? dateStr : date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    }
+
+    function getHealthMetricSortedEntries(mode) {
+      const current = normalizeSettingsState(loadSettingsState());
+      const list = mode === 'weight' ? current.weightHistory : current.vo2MaxHistory;
+      return (Array.isArray(list) ? list : [])
+        .map((entry) => {
+          const date = String(entry?.date || entry?.dateKey || '').trim();
+          const value = Number(mode === 'weight' ? entry?.weight : entry?.value);
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(value)) return null;
+          return { ...entry, date, dateKey: date, [mode === 'weight' ? 'weight' : 'value']: value };
+        })
+        .filter(Boolean)
+        .sort((a, b) => (b.dateKey || '').localeCompare(a.dateKey || ''));
+    }
+
+    function setHealthDataManagerStatus(message = '') {
+      const el = document.getElementById('healthDataManagerStatus');
+      if (!el) return;
+      el.textContent = message;
+      el.classList.toggle('hidden', !message);
+    }
+
+    function renderHealthDataManager() {
+      const weightEl = document.getElementById('settingsWeightEntriesList');
+      const vo2El = document.getElementById('settingsVo2EntriesList');
+      if (!weightEl || !vo2El) return;
+
+      const renderList = (mode, targetEl) => {
+        const isWeight = mode === 'weight';
+        const entries = getHealthMetricSortedEntries(mode);
+        if (!entries.length) {
+          targetEl.innerHTML = `<div class="muted text-xs">No ${isWeight ? 'Weight' : 'VO2 Max'} entries yet.</div>`;
+          return;
+        }
+        targetEl.innerHTML = entries.map((entry) => {
+          const entryKey = entry.id || `${entry.dateKey}-${isWeight ? entry.weight : entry.value}`;
+          const isEditing = healthMetricEntryEditState && healthMetricEntryEditState.mode === mode && healthMetricEntryEditState.entryKey === entryKey;
+          if (isEditing) {
+            return `<div class="metricEntryRow"><div class="metricEntryEdit">
+              <input type="date" class="input metricLogInput metricLogDateInput" data-health-metric-input="date" value="${entry.dateKey || ''}">
+              <input type="number" step="0.1" class="input metricLogInput metricLogValueInput" data-health-metric-input="value" value="${isWeight ? entry.weight : entry.value}">
+              <div class="metricEntryActions">
+                <button class="btn btn-primary btn-compact" type="button" data-health-metric-action="save" data-mode="${mode}" data-entry-key="${entryKey}">Save</button>
+                <button class="btn btn-secondary btn-compact" type="button" data-health-metric-action="cancel">Cancel</button>
+              </div>
+            </div></div>`;
+          }
+          return `<div class="metricEntryRow">
+            <div>${formatHealthMetricDate(entry.dateKey)} — ${isWeight ? `${Number(entry.weight).toFixed(1)} lb` : Number(entry.value).toFixed(1)}</div>
+            <div class="metricEntryActions">
+              <button class="btn btn-secondary btn-compact" type="button" data-health-metric-action="edit" data-mode="${mode}" data-entry-key="${entryKey}">Edit</button>
+              <button class="btn btn-secondary btn-compact" type="button" data-health-metric-action="delete" data-mode="${mode}" data-entry-key="${entryKey}">Delete</button>
+            </div>
+          </div>`;
+        }).join('');
+      };
+
+      renderList('weight', weightEl);
+      renderList('vo2', vo2El);
+    }
+
+    function updateHealthMetricEntry(mode, entryKey, date, value) {
+      const isWeight = mode === 'weight';
+      const historyKey = isWeight ? 'weightHistory' : 'vo2MaxHistory';
+      const current = normalizeSettingsState(loadSettingsState());
+      const list = getHealthMetricSortedEntries(mode).slice();
+      const target = list.find((entry) => (entry.id || `${entry.dateKey}-${isWeight ? entry.weight : entry.value}`) === entryKey);
+      if (!target) return false;
+      const duplicate = list.find((entry) => entry !== target && (entry.dateKey || entry.date) === date);
+      if (duplicate) {
+        setHealthDataManagerStatus('An entry for that date already exists.');
+        return false;
+      }
+      const next = list.map((entry) => {
+        if (entry !== target) return entry;
+        return {
+          ...entry,
+          date,
+          dateKey: date,
+          loggedAtISO: new Date().toISOString(),
+          weight: isWeight ? value : entry.weight,
+          value: isWeight ? entry.value : value
+        };
+      }).sort((a, b) => (a.dateKey || '').localeCompare(b.dateKey || ''));
+      saveSettingsState({ ...current, [historyKey]: next });
+      return true;
+    }
+
     let latestSimulation = null;
 
     document.addEventListener('DOMContentLoaded', () => {
@@ -3928,6 +4042,50 @@ rows.push([
       document.getElementById('notesRecoveryRestoreBtn')?.addEventListener('click', restoreSelectedNotesCandidate);
       document.getElementById('notesRecoveryAppendBtn')?.addEventListener('click', appendSelectedNotesCandidate);
       document.getElementById('notesRecoveryCopyBtn')?.addEventListener('click', copySelectedNotesCandidate);
+      document.getElementById('healthDataManagerSection')?.addEventListener('click', (event) => {
+        const target = event.target?.closest?.('[data-health-metric-action]');
+        if (!target) return;
+        const action = target.getAttribute('data-health-metric-action');
+        const mode = target.getAttribute('data-mode');
+        const entryKey = target.getAttribute('data-entry-key');
+        if (action === 'cancel') {
+          healthMetricEntryEditState = null;
+          setHealthDataManagerStatus('');
+          renderHealthDataManager();
+          return;
+        }
+        if (action === 'edit' && mode && entryKey) {
+          healthMetricEntryEditState = { mode, entryKey };
+          setHealthDataManagerStatus('');
+          renderHealthDataManager();
+          return;
+        }
+        if (action === 'save' && mode && entryKey) {
+          const row = target.closest('.metricEntryEdit');
+          const date = String(row?.querySelector('[data-health-metric-input="date"]')?.value || '').trim();
+          const value = Number(String(row?.querySelector('[data-health-metric-input="value"]')?.value || '').trim());
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return setHealthDataManagerStatus('Please enter a valid date.');
+          if (!Number.isFinite(value)) return setHealthDataManagerStatus('Please enter a valid number.');
+          if (updateHealthMetricEntry(mode, entryKey, date, value)) {
+            healthMetricEntryEditState = null;
+            setHealthDataManagerStatus('');
+            renderHealthDataManager();
+          }
+          return;
+        }
+        if (action === 'delete' && mode && entryKey) {
+          const isWeight = mode === 'weight';
+          if (!confirm(`Delete this ${isWeight ? 'Weight' : 'VO2 Max'} entry?`)) return;
+          const historyKey = isWeight ? 'weightHistory' : 'vo2MaxHistory';
+          const current = normalizeSettingsState(loadSettingsState());
+          const list = getHealthMetricSortedEntries(mode);
+          const next = list.filter((entry) => (entry.id || `${entry.dateKey}-${isWeight ? entry.weight : entry.value}`) !== entryKey);
+          saveSettingsState({ ...current, [historyKey]: next });
+          healthMetricEntryEditState = null;
+          setHealthDataManagerStatus('');
+          renderHealthDataManager();
+        }
+      });
       document.getElementById('storageHealthOutput')?.addEventListener('click', (event) => {
         const target = event.target;
         if (target && target.id === 'storageHealthDeleteLatestBackupBtn') {
@@ -3965,6 +4123,7 @@ rows.push([
       scheduleRender(renderHabitTagColors);
       scheduleRender(renderHabitCalendarSelector);
       scheduleRender(renderStorageHealthPanel);
+      scheduleRender(renderHealthDataManager);
 
       const scoringInputIds = [
         'sleepBaseDivisor',
