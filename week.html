@@ -892,10 +892,9 @@ function renderHabitSection(section, days, baseDate){
         : null;
       const fraction = completion ? getHabitCompletionFraction(completion) : 0;
       const status = on ? (fraction === 0.5 ? 'half' : 'on') : (failed ? 'failed' : 'off');
-      const weekCompleteClass = isWeeklyComplete ? 'week-complete' : '';
       const className = section.title === 'vice'
-        ? `habitDay viceDay ${status} ${weekCompleteClass}`.trim()
-        : `habitDay ${status} ${weekCompleteClass}`.trim();
+        ? `habitDay viceDay ${status}`.trim()
+        : `habitDay ${status}`.trim();
       const styleAttr = getHabitBubbleStyleAttr(h.tag, status);
       return `<div class="${className}"${styleAttr} data-habit="${h.id}" data-day="${d.key}">${d.date.getDate()}</div>`;
     }).join('');
