@@ -974,6 +974,7 @@ const normalizeStateFallback = (s) => {
     matchups: Array.isArray(src.matchups) ? src.matchups : [],
     schedule: Array.isArray(src.schedule) ? src.schedule : [],
     weightHistory: Array.isArray(src.weightHistory) ? src.weightHistory : [],
+    vo2MaxHistory: Array.isArray(src.vo2MaxHistory) ? src.vo2MaxHistory : [],
     opponentDripSchedules: Array.isArray(src.opponentDripSchedules) ? src.opponentDripSchedules : [],
     workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
 youImageId: typeof src.youImageId === 'string' ? src.youImageId : '',
