@@ -5042,38 +5042,40 @@ header,
   --slot-width: 54px;
   --slot-height: 72px;
   --slot-gap: 10px;
-  --matchup-gap: 22px;
   --round-gap: 16px;
   --seed-width: 22px;
+  --bracket-row-gap: 10px;
+  --bracket-row-size: calc(var(--slot-height) + var(--bracket-row-gap));
 
-  display: flex;
-  align-items: flex-start;
+  display: grid;
+  grid-template-columns: repeat(3, max-content);
+  align-items: start;
   gap: var(--round-gap);
   min-width: max-content;
   padding-right: 10px;
 }
 
 .tournament-round {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: repeat(8, var(--bracket-row-size));
+  align-items: center;
 }
 
 .tournament-round-1 {
-  gap: var(--matchup-gap);
+  gap: 0;
 }
 
-.tournament-round-2 {
-  gap: calc((var(--slot-height) * 2) + var(--slot-gap) + var(--matchup-gap));
-  margin-top: calc((var(--slot-height) + var(--slot-gap)) / 2);
+.tournament-round-1 .tournament-matchup {
+  display: contents;
 }
 
+.tournament-round-2,
 .tournament-round-3 {
-  gap: calc(
-    (var(--slot-height) * 4) + (var(--slot-gap) * 3) + (var(--matchup-gap) * 2)
-  );
-  margin-top: calc(
-    ((var(--slot-height) * 2) + var(--slot-gap) + var(--matchup-gap)) / 2
-  );
+  min-width: var(--slot-width);
+}
+
+.tournament-round-2 .tournament-matchup {
+  display: contents;
 }
 
 .tournament-matchup {
@@ -5081,6 +5083,15 @@ header,
   flex-direction: column;
   gap: var(--slot-gap);
 }
+
+.bracket-row-1 { grid-row: 1; }
+.bracket-row-2 { grid-row: 2; }
+.bracket-row-3 { grid-row: 3; }
+.bracket-row-4 { grid-row: 4; }
+.bracket-row-5 { grid-row: 5; }
+.bracket-row-6 { grid-row: 6; }
+.bracket-row-7 { grid-row: 7; }
+.bracket-row-8 { grid-row: 8; }
 
 .tournament-slot-row {
   display: flex;
