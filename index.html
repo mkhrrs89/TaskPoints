@@ -381,7 +381,6 @@ Nothing visible on the page is built here. === -->
 .homeGraphPanel canvas {
   display: block;
   box-sizing: border-box;
-  padding-top: 30px;
 }
     
     .homeGraphHint {
@@ -5127,10 +5126,11 @@ function drawLiveDiffGraph(){
   if (hint) hint.classList.add('hidden');
   const maxAbs = Math.max(5, ...pointsRaw.map((p) => Math.abs(p.diff)));
   const paddingX = 8;
-  const paddingY = 8;
+  const paddingTop = 22;
+  const paddingBottom = 8;
   const plotW = width - paddingX * 2;
-  const plotH = height - paddingY * 2;
-  const zeroY = paddingY + plotH / 2;
+  const plotH = height - paddingTop - paddingBottom;
+  const zeroY = paddingTop + plotH / 2;
   const toX = (slotIndex) => paddingX + (plotW * slotIndex / 38);
   const toY = (diff) => zeroY - (diff / maxAbs) * (plotH / 2);
   const points = pointsRaw.map((p) => ({ ...p, x: toX(p.i), y: toY(p.diff) }));
@@ -5483,23 +5483,24 @@ if (entries.length > MAX_POINTS) {
   const range  = (maxVal - minVal) || 1;
 
   const paddingX = 6;
-  const paddingY = 6;
+  const paddingTop = 22;
+  const paddingBottom = 6;
   const w = width  - paddingX * 2;
-  const h = height - paddingY * 2;
+  const h = height - paddingTop - paddingBottom;
 
   // Baseline
   ctx.strokeStyle = 'rgba(15,23,42,0.7)';
   ctx.lineWidth   = 1;
   ctx.beginPath();
-  ctx.moveTo(paddingX, paddingY + h);
-  ctx.lineTo(paddingX + w, paddingY + h);
+  ctx.moveTo(paddingX, paddingTop + h);
+  ctx.lineTo(paddingX + w, paddingTop + h);
   ctx.stroke();
 
 // Build chart points for the raw daily line
 const points = entries.map((row, i) => {
   const x = paddingX + (n === 1 ? w / 2 : (w * i / (n - 1)));
   const norm = (row.total - minVal) / range;
-  const y = paddingY + h - norm * h;
+  const y = paddingTop + h - norm * h;
   return { x, y, total: row.total };
 });
 
@@ -5524,7 +5525,7 @@ const maPoints = points.map((pt, i) => {
   const slice = points.slice(start, i + 1);
   const avg = slice.reduce((sum, p) => sum + p.total, 0) / slice.length;
   const norm = (avg - minVal) / range;
-  const y = paddingY + h - norm * h;
+  const y = paddingTop + h - norm * h;
   return { x: pt.x, y };
 });
 
@@ -5604,14 +5605,15 @@ function drawWeightTrend(weightHistoryInput){
   const maxVal = Math.max(...entries.map((r) => r.weight));
   const range = (maxVal - minVal) || 1;
   const paddingX = 6;
-  const paddingY = 6;
+  const paddingTop = 22;
+  const paddingBottom = 6;
   const w = width - paddingX * 2;
-  const h = height - paddingY * 2;
+  const h = height - paddingTop - paddingBottom;
 
   const points = entries.map((row, i) => {
     const x = paddingX + (n === 1 ? w / 2 : (w * i / (n - 1)));
     const norm = (row.weight - minVal) / range;
-    const y = paddingY + h - norm * h;
+    const y = paddingTop + h - norm * h;
     return { x, y };
   });
 
@@ -5668,14 +5670,15 @@ function drawVo2MaxTrend(vo2MaxHistoryInput){
   const maxVal = Math.max(...entries.map((r) => r.value));
   const range = (maxVal - minVal) || 1;
   const paddingX = 6;
-  const paddingY = 6;
+  const paddingTop = 22;
+  const paddingBottom = 6;
   const w = width - paddingX * 2;
-  const h = height - paddingY * 2;
+  const h = height - paddingTop - paddingBottom;
 
   const points = entries.map((row, i) => {
     const x = paddingX + (n === 1 ? w / 2 : (w * i / (n - 1)));
     const norm = (row.value - minVal) / range;
-    const y = paddingY + h - norm * h;
+    const y = paddingTop + h - norm * h;
     return { x, y };
   });
 
