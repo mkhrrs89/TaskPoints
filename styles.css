@@ -2535,6 +2535,18 @@ header,
   color:#ef4444;
 }
 
+/* Habits/Vices reorder arrows: remove faint outer ring from base .btn styles */
+.habitControls button[data-act="habit-up"],
+.habitControls button[data-act="habit-down"],
+.habitControls button[data-act="habit-group-item-up"],
+.habitControls button[data-act="habit-group-item-down"],
+.habitGroupControls button[data-act="habit-group-up"],
+.habitGroupControls button[data-act="habit-group-down"]{
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
     .habitName{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 
