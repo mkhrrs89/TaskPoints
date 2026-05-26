@@ -327,14 +327,15 @@ Nothing visible on the page is built here. === -->
       }
     }
 
-    .homeGraphWidget {
-      width: 100%;
-      min-height: 120px;
-      display: flex;
-      flex-direction: column;
-      justify-content: flex-end;
-      gap: 8px;
-    }
+.homeGraphWidget {
+  width: 100%;
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 8px;
+  padding-top: 4px;
+}
 
     .homeGraphViewport {
       width: 100%;
@@ -722,7 +723,7 @@ Nothing visible on the page is built here. === -->
 
       
       <!-- DAILY LINE GRAPH -->
-<div class="glass flex items-end lg:col-span-2">
+<div class="glass flex items-start lg:col-span-2">
   <div id="homeGraphWidget" class="homeGraphWidget">
     <div id="homeGraphViewport" class="homeGraphViewport" aria-label="Home graph stack">
       <div class="homeGraphTrack">
