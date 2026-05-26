@@ -5039,7 +5039,8 @@ header,
 }
 
 .tournament-bracket {
-  --slot-size: 58px;
+  --slot-width: 54px;
+  --slot-height: 72px;
   --slot-gap: 10px;
   --matchup-gap: 22px;
   --round-gap: 16px;
@@ -5062,16 +5063,16 @@ header,
 }
 
 .tournament-round-2 {
-  gap: calc((var(--slot-size) * 2) + var(--slot-gap) + var(--matchup-gap));
-  margin-top: calc((var(--slot-size) + var(--slot-gap)) / 2);
+  gap: calc((var(--slot-height) * 2) + var(--slot-gap) + var(--matchup-gap));
+  margin-top: calc((var(--slot-height) + var(--slot-gap)) / 2);
 }
 
 .tournament-round-3 {
   gap: calc(
-    (var(--slot-size) * 4) + (var(--slot-gap) * 3) + (var(--matchup-gap) * 2)
+    (var(--slot-height) * 4) + (var(--slot-gap) * 3) + (var(--matchup-gap) * 2)
   );
   margin-top: calc(
-    ((var(--slot-size) * 2) + var(--slot-gap) + var(--matchup-gap)) / 2
+    ((var(--slot-height) * 2) + var(--slot-gap) + var(--matchup-gap)) / 2
   );
 }
 
@@ -5088,8 +5089,9 @@ header,
 }
 
 .tournament-slot {
-  width: var(--slot-size);
-  height: var(--slot-size);
+  width: var(--slot-width);
+  aspect-ratio: 3 / 4;
+  min-height: var(--slot-height);
   border-radius: 12px;
   border: 1px solid rgba(148, 163, 184, 0.35);
   background:
@@ -5098,6 +5100,15 @@ header,
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.08),
     0 6px 16px rgba(0, 0, 0, 0.22);
+}
+
+
+.tournament-slot img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+  display: block;
 }
 
 .tournament-seed {
