@@ -5042,17 +5042,25 @@ header,
   --slot-width: 50px;
   --slot-height: 67px;
   --slot-gap: 10px;
-  --round-gap: 12px;
+  --info-col-width: 40px;
   --seed-width: 22px;
   --bracket-row-gap: 10px;
   --bracket-row-size: calc(var(--slot-height) + var(--bracket-row-gap));
 
   display: grid;
-  grid-template-columns: repeat(5, max-content);
+  grid-template-columns: repeat(9, max-content);
   align-items: start;
-  gap: var(--round-gap);
+  column-gap: 0;
+  row-gap: 0;
   min-width: max-content;
   padding-right: 10px;
+}
+
+.tournament-info-col {
+  width: var(--info-col-width);
+  display: grid;
+  grid-template-rows: repeat(16, var(--bracket-row-size));
+  align-items: center;
 }
 
 .tournament-round {
@@ -5074,6 +5082,12 @@ header,
 .tournament-round-4,
 .tournament-round-5 {
   min-width: var(--slot-width);
+}
+
+@media (min-width: 768px) {
+  .tournament-bracket {
+    --info-col-width: 64px;
+  }
 }
 
 .tournament-round-2 .tournament-matchup {
