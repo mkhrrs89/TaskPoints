@@ -5048,7 +5048,7 @@ header,
   --bracket-row-size: calc(var(--slot-height) + var(--bracket-row-gap));
 
   display: grid;
-  grid-template-columns: repeat(4, max-content);
+  grid-template-columns: repeat(5, max-content);
   align-items: start;
   gap: var(--round-gap);
   min-width: max-content;
@@ -5071,7 +5071,8 @@ header,
 
 .tournament-round-2,
 .tournament-round-3,
-.tournament-round-4 {
+.tournament-round-4,
+.tournament-round-5 {
   min-width: var(--slot-width);
 }
 
@@ -5102,13 +5103,12 @@ header,
 .bracket-row-15 { grid-row: 15; }
 .bracket-row-16 { grid-row: 16; }
 
-.tournament-round-4 {
+.tournament-round-5 {
   position: relative;
 }
 
 .tournament-slot-champion {
   z-index: 1;
-  margin-top: calc(var(--slot-height) + var(--slot-gap));
 }
 
 .tournament-slot-row {
