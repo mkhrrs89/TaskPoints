@@ -2600,6 +2600,7 @@ function load() {
       // nothing saved yet on this device
       return {
         tasks:        [],
+        reminders:    [],
         completions:  [],
         players:      [],
         habits:       [],
@@ -2629,6 +2630,7 @@ function load() {
 
     return {
       tasks:        Array.isArray(p.tasks)        ? p.tasks        : [],
+      reminders:    Array.isArray(p.reminders)    ? p.reminders    : [],
       completions:  Array.isArray(p.completions)  ? p.completions  : [],
       players:      Array.isArray(p.players)      ? p.players      : [],
       habits:       Array.isArray(p.habits)       ? p.habits       : [],
@@ -3608,11 +3610,11 @@ function normalizeState(s) {
   return normalized;
 }
 
-function save(savePath) {
+function save(savePath, extraOptions = {}) {
   try {
     if (window.TaskPointsCore?.saveAppState) {
-      const saveOptions = savePath ? { savePath } : undefined;
-      const { state: merged, trimmed } = saveOptions
+      const saveOptions = { ...extraOptions, ...(savePath ? { savePath } : {}) };
+      const { state: merged, trimmed } = Object.keys(saveOptions).length
         ? TaskPointsCore.saveStateSnapshot(state, saveOptions)
         : TaskPointsCore.saveStateSnapshot(state);
       if (trimmed) {
@@ -3624,8 +3626,8 @@ function save(savePath) {
       return;
     }
     if (window.TaskPointsCore?.mergeAndSaveState) {
-      const saveOptions = savePath ? { savePath } : undefined;
-      const { state: merged, trimmed } = saveOptions
+      const saveOptions = { ...extraOptions, ...(savePath ? { savePath } : {}) };
+      const { state: merged, trimmed } = Object.keys(saveOptions).length
         ? TaskPointsCore.saveStateSnapshot(state, saveOptions)
         : TaskPointsCore.saveStateSnapshot(state);
       if (trimmed) {
@@ -7867,10 +7869,28 @@ function renderReminders(){
   empty.classList.add('hidden');
   reminders.forEach((reminder) => {
     const row = document.createElement('div');
-    row.className = 'text-sm py-1 border-b border-white/10 last:border-b-0 truncate';
-    row.textContent = typeof reminder?.text === 'string' ? reminder.text : '';
+    row.className = 'text-sm py-1 border-b border-white/10 last:border-b-0 flex items-center gap-2';
+    const text = document.createElement('span');
+    text.className = 'min-w-0 flex-1 truncate';
+    text.textContent = typeof reminder?.text === 'string' ? reminder.text : '';
+    row.appendChild(text);
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'btn btn-secondary btn-compact text-xs shrink-0';
+    deleteBtn.textContent = 'Delete';
+    deleteBtn.setAttribute('aria-label', `Delete reminder: ${text.textContent || 'untitled reminder'}`);
+    deleteBtn.addEventListener('click', () => deleteReminder(reminder?.id));
+    row.appendChild(deleteBtn);
+
     list.appendChild(row);
   });
+}
+
+function saveReminders(savePath, extraOptions = {}) {
+  window.TaskPointsCore?.flushPendingSaves?.();
+  save(savePath, { ...extraOptions, immediateWrite: true });
+  window.TaskPointsCore?.flushPendingSaves?.();
 }
 
 function addReminder(){
@@ -7878,13 +7898,27 @@ function addReminder(){
   if (raw === null) return;
   const text = raw.trim();
   if (!text) return;
+  window.TaskPointsCore?.flushPendingSaves?.();
   if (!Array.isArray(state.reminders)) state.reminders = [];
   state.reminders.unshift({
-    id: (window.crypto?.randomUUID && window.crypto.randomUUID()) || String(Date.now()),
+    id: makeId(),
     text,
     createdAtISO: new Date().toISOString()
   });
-  save();
+  saveReminders('reminders-add');
+  renderReminders();
+}
+
+function deleteReminder(reminderId){
+  if (reminderId == null) return;
+  const id = String(reminderId);
+  const reminders = Array.isArray(state.reminders) ? state.reminders : [];
+  const target = reminders.find((reminder) => reminder && String(reminder.id) === id);
+  if (!target) return;
+  if (typeof confirm === 'function' && !confirm('Delete this reminder?')) return;
+  window.TaskPointsCore?.flushPendingSaves?.();
+  state.reminders = reminders.filter((reminder) => !reminder || String(reminder.id) !== id);
+  saveReminders('reminders-delete', { deletedReminderIds: [id] });
   renderReminders();
 }
 
@@ -9874,7 +9908,7 @@ function getTaskPointsExportSnapshot() {
 async function applyImportedState(root){
   let normalized = normalizeState({
     tasks:       Array.isArray(root.tasks)       ? root.tasks       : [],
-    reminders:   Array.isArray(root.reminders)   ? root.reminders   : [],
+    reminders:   Array.isArray(root.reminders)   ? root.reminders   : (Array.isArray(state?.reminders) ? state.reminders : []),
     completions: Array.isArray(root.completions) ? root.completions : [],
     players:     Array.isArray(root.players)     ? root.players     : [],
     habits:      Array.isArray(root.habits)      ? root.habits      : [],

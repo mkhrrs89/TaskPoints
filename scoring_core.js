@@ -648,6 +648,7 @@ function pruneStateForStorage(state, limits = {}) {
   merged.gameHistory = Array.isArray(merged.gameHistory) ? merged.gameHistory : [];
   merged.matchups = Array.isArray(merged.matchups) ? merged.matchups : [];
   merged.workHistory = Array.isArray(merged.workHistory) ? merged.workHistory : [];
+  merged.reminders = Array.isArray(merged.reminders) ? merged.reminders : [];
 
   merged.opponentDripSchedules = cleanupOpponentDripSchedules(merged, { maxEntries: maxOpponentDripSchedules }).opponentDripSchedules;
 
@@ -1198,7 +1199,8 @@ return { state: merged, storageKey };
       schedule: Array.isArray(safe.schedule) ? safe.schedule.length : 0,
       opponentDripSchedules: Array.isArray(safe.opponentDripSchedules) ? safe.opponentDripSchedules.length : 0,
       workHistory: Array.isArray(safe.workHistory) ? safe.workHistory.length : 0,
-      projects: Array.isArray(safe.projects) ? safe.projects.length : 0
+      projects: Array.isArray(safe.projects) ? safe.projects.length : 0,
+      reminders: Array.isArray(safe.reminders) ? safe.reminders.length : 0
     };
   }
 
@@ -1218,6 +1220,7 @@ return { state: merged, storageKey };
     }
     const requiredArrayKeys = [
       'tasks',
+      'reminders',
       'completions',
       'habits',
       'players',
@@ -1267,7 +1270,7 @@ return { state: merged, storageKey };
   function detectSuspiciousDrop(nextSnapshot, storedSnapshot) {
     const next = summarizeSnapshotCounts(nextSnapshot);
     const current = summarizeSnapshotCounts(storedSnapshot);
-    const trackedKeys = ['tasks', 'completions', 'habits', 'players', 'matchups', 'schedule', 'gameHistory'];
+    const trackedKeys = ['tasks', 'reminders', 'completions', 'habits', 'players', 'matchups', 'schedule', 'gameHistory'];
 
     let currentTotal = 0;
     let nextTotal = 0;
@@ -1373,7 +1376,7 @@ return { state: merged, storageKey };
     }
   }
 
-  function preserveStickyFieldsBeforeSave(candidateState, storageKey = STORAGE_KEY) {
+  function preserveStickyFieldsBeforeSave(candidateState, storageKey = STORAGE_KEY, options = {}) {
     const next = candidateState && typeof candidateState === 'object' ? { ...candidateState } : {};
     let latest = null;
     try {
@@ -1383,9 +1386,10 @@ return { state: merged, storageKey };
     }
     const stickyArrayFields = [
       'tasks', 'completions', 'habits', 'players', 'flexActions',
-      'gameHistory', 'matchups', 'schedule', 'weightHistory', 'vo2MaxHistory'
+      'gameHistory', 'matchups', 'schedule', 'weightHistory', 'vo2MaxHistory', 'reminders'
     ];
     const stickyObjectFields = ['playerBadges'];
+    const deletedReminderIds = new Set(Array.isArray(options.deletedReminderIds) ? options.deletedReminderIds.map(String) : []);
     stickyArrayFields.forEach((key) => {
       if (Array.isArray(next[key])) return;
       if (latest && Array.isArray(latest[key])) {
@@ -1394,6 +1398,31 @@ return { state: merged, storageKey };
       }
       next[key] = [];
     });
+    if (!options.allowDestructiveOverwrite && Array.isArray(latest?.reminders)) {
+      const currentReminders = Array.isArray(next.reminders) ? next.reminders : [];
+      const seen = new Set();
+      const reminderKey = (reminder) => {
+        if (!reminder || typeof reminder !== 'object') return '';
+        if (reminder.id != null) return `id:${String(reminder.id)}`;
+        const text = typeof reminder.text === 'string' ? reminder.text.trim() : '';
+        return text ? `text:${text}|created:${String(reminder.createdAtISO || '')}` : '';
+      };
+      const mergedReminders = [];
+      currentReminders.forEach((reminder) => {
+        const key = reminderKey(reminder);
+        if (!key || seen.has(key)) return;
+        seen.add(key);
+        mergedReminders.push(reminder);
+      });
+      latest.reminders.forEach((reminder) => {
+        const key = reminderKey(reminder);
+        const id = reminder && reminder.id != null ? String(reminder.id) : '';
+        if (!key || seen.has(key) || (id && deletedReminderIds.has(id))) return;
+        seen.add(key);
+        mergedReminders.push(reminder);
+      });
+      next.reminders = mergedReminders;
+    }
     stickyObjectFields.forEach((key) => {
       if (next[key] && typeof next[key] === 'object' && !Array.isArray(next[key])) return;
       if (latest && latest[key] && typeof latest[key] === 'object' && !Array.isArray(latest[key])) {
@@ -1460,11 +1489,11 @@ return { state: merged, storageKey };
       return { ...base, storageWarnings: warnings };
     };
     const attemptSave = (candidate, trimmed, stage = 'initial') => {
-      const candidateWithSticky = preserveStickyFieldsBeforeSave(candidate, storageKey);
+      const candidateWithSticky = preserveStickyFieldsBeforeSave(candidate, storageKey, options);
       localStorage.setItem(storageKey, JSON.stringify(candidateWithSticky));
       const savedRaw = localStorage.getItem(storageKey);
       const saved = savedRaw ? (JSON.parse(savedRaw) || {}) : {};
-      const criticalArrays = ['completions', 'matchups', 'gameHistory', 'weightHistory', 'vo2MaxHistory'];
+      const criticalArrays = ['completions', 'matchups', 'gameHistory', 'weightHistory', 'vo2MaxHistory', 'reminders'];
       const failed = criticalArrays.filter((key) => (
         Array.isArray(candidateWithSticky[key])
         && candidateWithSticky[key].length > 0
@@ -1472,9 +1501,9 @@ return { state: merged, storageKey };
       ));
       if (failed.length) {
         if (typeof alert === 'function') {
-          alert('Save verification failed: weightHistory or vo2MaxHistory was not preserved.');
+          alert('Save verification failed: reminders, weightHistory, or vo2MaxHistory were not preserved.');
         }
-        throw new Error(`Save verification failed: weightHistory or vo2MaxHistory was not preserved. Failed keys: ${failed.join(', ')}`);
+        throw new Error(`Save verification failed: reminders, weightHistory, or vo2MaxHistory were not preserved. Failed keys: ${failed.join(', ')}`);
       }
       if (debugEnabled) {
         const size = summarizeStateSizes(candidateWithSticky);

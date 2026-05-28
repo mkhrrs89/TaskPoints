@@ -668,6 +668,7 @@
       'scoringSettings',
       'habitTagColors',
       'workHistory',
+      'reminders',
       'weightHistory',
       'liveDiffSnapshots'
     ];
@@ -677,7 +678,8 @@
       youImageId: '',
       youPrimaryColor: '#1a383b',
       youSecondaryColor: '#254c52',
-      habitTagColors: {}
+      habitTagColors: {},
+      reminders: []
     };
 
     function cloneAuditState(value) {
@@ -1256,6 +1258,9 @@ function buildLogNormalizeShape(state) {
         { dayKey: '2026-03-31', hours: 7.5 },
         { dayKey: '2026-04-01', hours: 8 }
       ];
+      seeded.reminders = (Array.isArray(seeded.reminders) ? seeded.reminders.slice() : []).concat([
+        { id: '__audit_reminder_sentinel__', text: 'Persistent audit reminder sentinel', createdAtISO: '2099-01-01T12:00:00.000Z' }
+      ]);
       seeded.liveDiffSnapshots = {
         '2026-04-01': {
           '05:00': { slot: '05:00', diff: 1.5, youScore: 12, opponentScore: 10.5, loggedAtISO: '2026-04-01T05:05:00.000Z' }
@@ -1297,21 +1302,25 @@ function runStickyFieldPreservationAudit(state) {
 function runWeightVo2HistorySavePathAudit(state) {
   const seeded = cloneAuditState(state || {});
   const weightSentinel = { id: '__audit_weight_sentinel__', dateKey: '2099-01-01', loggedAtISO: '2099-01-01T12:00:00.000Z', weight: 999.9 };
+  const reminderSentinel = { id: '__audit_reminder_save_path_sentinel__', text: 'Reminder save path sentinel', createdAtISO: '2099-01-01T12:00:00.000Z' };
   const vo2Sentinel = { id: '__audit_vo2_sentinel__', dateKey: '2099-01-01', loggedAtISO: '2099-01-01T12:00:00.000Z', value: 99.9 };
   seeded.weightHistory = (Array.isArray(seeded.weightHistory) ? seeded.weightHistory.slice() : []).concat([weightSentinel]);
+  seeded.reminders = (Array.isArray(seeded.reminders) ? seeded.reminders.slice() : []).concat([reminderSentinel]);
   seeded.vo2MaxHistory = (Array.isArray(seeded.vo2MaxHistory) ? seeded.vo2MaxHistory.slice() : []).concat([vo2Sentinel]);
   const failures = [];
   AUDIT_PAGE_ADAPTERS.forEach(adapter => {
     const runResult = adapter.run(cloneAuditState(seeded));
     const next = runResult && runResult.state ? runResult.state : runResult;
     const afterWeight = Array.isArray(next?.weightHistory) ? next.weightHistory : [];
+    const afterReminders = Array.isArray(next?.reminders) ? next.reminders : [];
     const afterVo2 = Array.isArray(next?.vo2MaxHistory) ? next.vo2MaxHistory : [];
     const dropped = [];
     if (!afterWeight.some(e => e?.id === weightSentinel.id)) dropped.push('dropped weightHistory sentinel');
+    if (!afterReminders.some(e => e?.id === reminderSentinel.id)) dropped.push('dropped reminders sentinel');
     if (!afterVo2.some(e => e?.id === vo2Sentinel.id)) dropped.push('dropped vo2MaxHistory sentinel');
     if (dropped.length) failures.push(`${adapter.page} [${runResult?.mode || 'audit-mirror'}]: ${dropped.join(', ')}`);
   });
-  return { status: failures.length ? 'FAIL' : 'PASS', expected: 'Weight and VO2 Max histories survive page save paths', actual: failures.length ? `${failures.length} page adapter(s) dropped sentinel history` : 'All page adapters preserved weightHistory and vo2MaxHistory', details: failures };
+  return { status: failures.length ? 'FAIL' : 'PASS', expected: 'Reminders, Weight, and VO2 Max histories survive page save paths', actual: failures.length ? `${failures.length} page adapter(s) dropped sentinel history` : 'All page adapters preserved reminders, weightHistory, and vo2MaxHistory', details: failures };
 }
 
     function auditWorkHoursLast14Days(state, endDateKey = TaskPointsCore.todayKey()) {
@@ -1829,16 +1838,16 @@ const actualTotal = round2(Number(derivedActualTotal) || 0);
         trace: 'state.lastCompletionPruneWarning/state.lastMatchupPruneWarning/state.lastGameHistoryPruneWarning/state.storageWarnings'
       });
 
-      const requiredHistoryArrays = ['completions', 'gameHistory', 'matchups', 'weightHistory', 'vo2MaxHistory'];
+      const requiredHistoryArrays = ['completions', 'gameHistory', 'matchups', 'weightHistory', 'vo2MaxHistory', 'reminders'];
       const missingHistoryArrays = requiredHistoryArrays.filter((key) => !Array.isArray(state[key]));
       checks.push({
         id: 'history-arrays-presence',
         title: 'Critical history arrays exist',
         status: missingHistoryArrays.length ? 'FAIL' : 'PASS',
-        expected: 'completions, gameHistory, matchups, weightHistory, and vo2MaxHistory exist as arrays',
+        expected: 'completions, gameHistory, matchups, weightHistory, vo2MaxHistory, and reminders exist as arrays',
         actual: missingHistoryArrays.length ? `Missing/non-array: ${missingHistoryArrays.join(', ')}` : 'All required history arrays are present',
         details: missingHistoryArrays,
-        trace: 'state.completions/state.gameHistory/state.matchups/state.weightHistory/state.vo2MaxHistory'
+        trace: 'state.completions/state.gameHistory/state.matchups/state.weightHistory/state.vo2MaxHistory/state.reminders'
       });
       const quotaWarnings = (Array.isArray(state.storageWarnings) ? state.storageWarnings : [])
         .filter(entry => entry && entry.type === 'storage-quota-save-failed');
@@ -2387,14 +2396,14 @@ const actualTotal = round2(Number(derivedActualTotal) || 0);
 
       const weightHistoryAudit = runWeightVo2HistorySavePathAudit(state);
       checks.push({
-        id: 'weight-vo2-history-preserved',
-        title: 'Weight and VO2 Max histories survive page save paths',
+        id: 'reminders-weight-vo2-history-preserved',
+        title: 'Reminders, Weight, and VO2 Max histories survive page save paths',
         status: weightHistoryAudit.status,
         expected: weightHistoryAudit.expected,
         actual: weightHistoryAudit.actual,
         details: weightHistoryAudit.details,
-        trace: 'weightHistory + vo2MaxHistory sentinels preserved across page adapters',
-        tips: 'Ensure all normalize/save adapters keep state.weightHistory and state.vo2MaxHistory as top-level sticky arrays.'
+        trace: 'reminders + weightHistory + vo2MaxHistory sentinels preserved across page adapters',
+        tips: 'Ensure all normalize/save adapters keep state.reminders, state.weightHistory, and state.vo2MaxHistory as top-level sticky arrays.'
       });
 
       // New: Audit self-check (verifies other checks are wired correctly)
