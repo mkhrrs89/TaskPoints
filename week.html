@@ -1018,21 +1018,29 @@ function toggleHabitDay(habitId, dayKey, baseDate){
     const basePoints = Number(h.pointsPerDay) || 0;
     const iso = new Date(fromKey(dayKey).getTime() + 12*3600*1000).toISOString();
     if (!isShower) {
-      if (idx === -1 || existingFraction <= 0) {
+      const usesHalfPoints = h.halfPointEnabled !== false;
+
+      if (!usesHalfPoints) {
+        if (idx !== -1 && existingFraction >= 1) {
+          h.doneKeys.splice(idx,1);
+          removeCompletionForDay();
+        } else {
+          if (idx === -1) h.doneKeys.push(dayKey);
+          removeCompletionForDay();
+          state.completions.unshift({
+            id: `habit:${habitId}:${dayKey}`,
+            taskId: `habit:${habitId}:${dayKey}`,
+            title: `[${tagLabel}] ${h.name} (${dayKey})`,
+            points: basePoints,
+            completedAtISO: iso,
+            source,
+            habitId: habitId,
+            dayKey: dayKey,
+            completionFraction: 1
+          });
+        }
+      } else if (idx === -1 || existingFraction <= 0) {
         if (idx === -1) h.doneKeys.push(dayKey);
-        removeCompletionForDay();
-        state.completions.unshift({
-          id: `habit:${habitId}:${dayKey}`,
-          taskId: `habit:${habitId}:${dayKey}`,
-          title: `[${tagLabel}] ${h.name} (${dayKey})`,
-          points: basePoints * 0.5,
-          completedAtISO: iso,
-          source,
-          habitId: habitId,
-          dayKey: dayKey,
-          completionFraction: 0.5
-        });
-      } else if (existingFraction === 0.5) {
         removeCompletionForDay();
         state.completions.unshift({
           id: `habit:${habitId}:${dayKey}`,
@@ -1044,6 +1052,19 @@ function toggleHabitDay(habitId, dayKey, baseDate){
           habitId: habitId,
           dayKey: dayKey,
           completionFraction: 1
+        });
+      } else if (existingFraction >= 1) {
+        removeCompletionForDay();
+        state.completions.unshift({
+          id: `habit:${habitId}:${dayKey}`,
+          taskId: `habit:${habitId}:${dayKey}`,
+          title: `[${tagLabel}] ${h.name} (${dayKey})`,
+          points: basePoints * 0.5,
+          completedAtISO: iso,
+          source,
+          habitId: habitId,
+          dayKey: dayKey,
+          completionFraction: 0.5
         });
       } else {
         h.doneKeys.splice(idx,1);

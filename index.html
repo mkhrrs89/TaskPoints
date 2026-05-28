@@ -5989,7 +5989,7 @@ const daysHtml = days.map(d => {
           <input type="checkbox" data-field="half-point-enabled" ${h.halfPointEnabled !== false ? 'checked' : ''} ${isShowerHabit(h) ? 'disabled' : ''}>
           <span>
             <strong>Enable 1/2 point toggle</strong><br>
-            <small>${isShowerHabit(h) ? 'Shower uses custom tap rules.' : 'When on, first tap gives half points and second tap completes the habit.'}</small>
+            <small>${isShowerHabit(h) ? 'Shower uses custom tap rules.' : 'When on, first tap completes the habit and second tap gives half points.'}</small>
           </span>
         </label>
         <select class="input" data-field="category">
@@ -6926,7 +6926,7 @@ function applyHabitDayToggle(h, dayKey) {
     h.iceKeys  = Array.isArray(h.iceKeys)  ? h.iceKeys  : [];
 
     if (!isShower) {
-      // Normal habits: configurable incomplete -> half -> full -> incomplete OR incomplete -> full -> incomplete
+      // Normal habits: configurable incomplete -> full -> half -> incomplete OR incomplete -> full -> incomplete
       const usesHalfPoints = h.halfPointEnabled !== false;
       const idx = h.doneKeys.indexOf(dayKey);
       const existing = Array.isArray(state.completions)
@@ -6962,25 +6962,25 @@ function applyHabitDayToggle(h, dayKey) {
           id: `habit:${habitId}:${dayKey}`,
           taskId: `habit:${habitId}:${dayKey}`,
           title: `[${tagLabel}] ${h.name} (${dayKey})`,
-          points: basePoints * 0.5,
-          completedAtISO: iso,
-          source,
-          habitId: habitId,
-          dayKey: dayKey,
-          completionFraction: 0.5
-        });
-      } else if (existingFraction === 0.5) {
-        removeCompletionForDay();
-        addCompletion({
-          id: `habit:${habitId}:${dayKey}`,
-          taskId: `habit:${habitId}:${dayKey}`,
-          title: `[${tagLabel}] ${h.name} (${dayKey})`,
           points: basePoints,
           completedAtISO: iso,
           source,
           habitId: habitId,
           dayKey: dayKey,
           completionFraction: 1
+        });
+      } else if (existingFraction >= 1) {
+        removeCompletionForDay();
+        addCompletion({
+          id: `habit:${habitId}:${dayKey}`,
+          taskId: `habit:${habitId}:${dayKey}`,
+          title: `[${tagLabel}] ${h.name} (${dayKey})`,
+          points: basePoints * 0.5,
+          completedAtISO: iso,
+          source,
+          habitId: habitId,
+          dayKey: dayKey,
+          completionFraction: 0.5
         });
       } else {
         h.doneKeys.splice(idx, 1);
@@ -11242,7 +11242,7 @@ function tpPerfMark(label) {
       <input id="habitHalfPointEnabledInput" type="checkbox" checked>
       <span>
         <strong>Enable 1/2 point toggle</strong><br>
-        <small class="muted">When on, first tap gives half points and second tap completes the habit.</small>
+        <small class="muted">When on, first tap completes the habit and second tap gives half points.</small>
       </span>
     </label>
 
