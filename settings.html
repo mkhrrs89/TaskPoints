@@ -683,6 +683,7 @@
       return {
         ...src,
         tasks:       Array.isArray(src.tasks)       ? src.tasks       : [],
+        reminders:   Array.isArray(src.reminders)   ? src.reminders   : [],
         completions: Array.isArray(src.completions) ? src.completions : [],
         players:     Array.isArray(src.players)     ? src.players     : [],
         habits:      Array.isArray(src.habits)      ? src.habits.map(normalizeHabit)      : [],
@@ -878,12 +879,16 @@ ${b}`;
       const normalized = normalizeSettingsState(root);
       const currentState = loadSettingsState();
       const currentWeightCount = Array.isArray(currentState.weightHistory) ? currentState.weightHistory.length : 0;
+      const currentReminderCount = Array.isArray(currentState.reminders) ? currentState.reminders.length : 0;
       const currentVo2Count = Array.isArray(currentState.vo2MaxHistory) ? currentState.vo2MaxHistory.length : 0;
       const incomingWeightCount = Array.isArray(root.weightHistory) ? root.weightHistory.length : 0;
+      const incomingReminderCount = Array.isArray(root.reminders) ? root.reminders.length : 0;
       const incomingVo2Count = Array.isArray(root.vo2MaxHistory) ? root.vo2MaxHistory.length : 0;
       const preserveWeight = currentWeightCount > 0 && incomingWeightCount === 0 && !confirm(`Imported backup has no Weight entries, but this device has existing Weight entries (${currentWeightCount}). Replace anyway?`);
+      const preserveReminders = currentReminderCount > 0 && incomingReminderCount === 0 && !confirm(`Imported backup has no reminders, but this device has existing reminders (${currentReminderCount}). Replace anyway?`);
       const preserveVo2 = currentVo2Count > 0 && incomingVo2Count === 0 && !confirm(`Imported backup has no VO2 Max entries, but this device has existing VO2 Max entries (${currentVo2Count}). Replace anyway?`);
       if (preserveWeight) normalized.weightHistory = Array.isArray(currentState.weightHistory) ? currentState.weightHistory : [];
+      if (preserveReminders) normalized.reminders = Array.isArray(currentState.reminders) ? currentState.reminders : [];
       if (preserveVo2) normalized.vo2MaxHistory = Array.isArray(currentState.vo2MaxHistory) ? currentState.vo2MaxHistory : [];
       if (!confirm("This will replace current device data. Use Merge Backup if you only want to restore missing history. Continue with full import?")) return;
       if (!Object.prototype.hasOwnProperty.call(root, "scoringSettings")) {
@@ -1143,6 +1148,7 @@ ${b}`;
       if (type === 'gameHistory') return gameHistoryMergeKey(entry);
       if (type === 'weightHistory') return [entry.dateKey || entry.loggedAtISO || '', entry.weight ?? ''].join('|');
       if (type === 'vo2MaxHistory') return [entry.dateKey || entry.loggedAtISO || entry.dateISO || entry.date || '', entry.value ?? ''].join('|');
+      if (type === 'reminders') return [entry.text || entry.title || entry.body || entry.note || '', entry.createdAtISO || entry.createdAt || ''].join('|');
       return JSON.stringify(entry);
     }
 
@@ -1204,7 +1210,7 @@ ${b}`;
         const currentState = loadSettingsState();
         const merged = normalizeSettingsState(currentState);
         const summary = {};
-        ['completions','gameHistory','matchups','weightHistory','vo2MaxHistory'].forEach((key) => {
+        ['completions','gameHistory','matchups','weightHistory','vo2MaxHistory','reminders'].forEach((key) => {
           const res = mergeHistoryArray(currentState[key], backupRoot[key], key);
           merged[key] = res.merged;
           summary[key] = { before: Array.isArray(currentState[key]) ? currentState[key].length : 0, added: res.added, after: res.merged.length };
@@ -1218,6 +1224,7 @@ GameHistory: ${summary.gameHistory.before} +${summary.gameHistory.added} => ${su
 Matchups: ${summary.matchups.before} +${summary.matchups.added} => ${summary.matchups.after}
 WeightHistory: ${summary.weightHistory.before} +${summary.weightHistory.added} => ${summary.weightHistory.after}
 VO2MaxHistory: ${summary.vo2MaxHistory.before} +${summary.vo2MaxHistory.added} => ${summary.vo2MaxHistory.after}
+Reminders: ${summary.reminders.before} +${summary.reminders.added} => ${summary.reminders.after}
 Earliest completion: ${earliestCompletion}
 Earliest matchup: ${earliestMatchup}
 Earliest gameHistory: ${earliestGameHistory}`;
@@ -1271,6 +1278,8 @@ ${summaryWithNotes}`)) return;
           savedWeightHistory: saved.weightHistory?.length,
           expectedVo2MaxHistory: mergedState.vo2MaxHistory?.length,
           savedVo2MaxHistory: saved.vo2MaxHistory?.length,
+          expectedReminders: mergedState.reminders?.length,
+          savedReminders: saved.reminders?.length,
           lastBackupMerge: saved.lastBackupMerge
         });
 
@@ -1281,7 +1290,8 @@ ${summaryWithNotes}`)) return;
           && (saved.gameHistory?.length || 0) === (mergedState.gameHistory?.length || 0)
           && (saved.completions?.length || 0) === (mergedState.completions?.length || 0)
           && (saved.weightHistory?.length || 0) === (mergedState.weightHistory?.length || 0)
-          && (saved.vo2MaxHistory?.length || 0) === (mergedState.vo2MaxHistory?.length || 0);
+          && (saved.vo2MaxHistory?.length || 0) === (mergedState.vo2MaxHistory?.length || 0)
+          && (saved.reminders?.length || 0) === (mergedState.reminders?.length || 0);
         const verificationPassed = countsMatch
           && savedSummary.earliestMatchup === expectedSummary.earliestMatchup
           && savedSummary.earliestGameHistory === expectedSummary.earliestGameHistory;
@@ -3287,6 +3297,44 @@ normalizeSvgTickText(svg);
       }[m]));
     }
 
+
+    function summarizeReminderStorageKey(key) {
+      let parsed = null;
+      try {
+        const raw = localStorage.getItem(key);
+        parsed = raw ? JSON.parse(raw) : null;
+      } catch (_) {
+        parsed = null;
+      }
+      const state = parsed && typeof parsed === "object" && parsed.state && typeof parsed.state === "object"
+        ? parsed.state
+        : parsed;
+      const reminders = Array.isArray(state?.reminders) ? state.reminders : [];
+      const samples = reminders
+        .map((reminder) => {
+          if (!reminder || typeof reminder !== "object") return "";
+          const text = [reminder.text, reminder.title, reminder.body, reminder.note]
+            .find((value) => typeof value === "string" && value.trim());
+          return text ? text.trim() : "";
+        })
+        .filter(Boolean)
+        .slice(0, 3);
+      return { key, count: reminders.length, samples };
+    }
+
+    function getReminderRecoverySummaries(reportEntries) {
+      const keys = new Set(["taskpoints_v1", "taskpoints_backup_latest", "taskpoints_backup_prev1", "taskpoints_backup_prev2", "taskpoints_backup_prev3"]);
+      (reportEntries || []).forEach((entry) => {
+        if (/taskpoints|backup|snapshot|before/i.test(entry.key)) keys.add(entry.key);
+      });
+      return Array.from(keys)
+        .filter((key) => {
+          try { return localStorage.getItem(key) != null; } catch (_) { return false; }
+        })
+        .map(summarizeReminderStorageKey)
+        .filter((entry) => entry.count > 0);
+    }
+
     function downloadCsv(filename, rows) {
       const csvRows = rows.map(row => row.map(value => {
         if (value == null) return "";
@@ -3608,6 +3656,7 @@ rows.push([
         } catch (_) { return "Not available"; }
       })();
       const imageInfo = await getTaskPointsImageCount();
+      const reminderRecoverySummaries = getReminderRecoverySummaries(report.entries);
       const backupEntries = report.entries.filter((entry) => {
         const lower = entry.key.toLowerCase();
         return lower.includes("backup") || lower.includes("before") || lower.includes("snapshot") || lower.startsWith("taskpoints_v1_before");
@@ -3615,6 +3664,7 @@ rows.push([
       const activeDataBytes = Math.max(0, report.total.bytes - (quarantinedEntry?.bytes || 0));
       const counts = parsedState && typeof parsedState === "object" ? {
         tasks: Array.isArray(parsedState.tasks) ? parsedState.tasks.length : 0,
+        reminders: Array.isArray(parsedState.reminders) ? parsedState.reminders.length : 0,
         completions: Array.isArray(parsedState.completions) ? parsedState.completions.length : 0,
         players: Array.isArray(parsedState.players) ? parsedState.players.length : 0,
         habits: Array.isArray(parsedState.habits) ? parsedState.habits.length : 0,
@@ -3632,6 +3682,7 @@ rows.push([
         <div class="muted">Browser Storage Estimate (origin): ${browserEstimate ? `${browserEstimate.usage.mib.toFixed(2)} MiB of ${browserEstimate.quota.mib.toFixed(2)} MiB (${browserEstimate.percent.toFixed(2)}%)` : "Not available"}</div>
         <div class="muted">Persistent Storage: ${persisted}</div>
         <div class="muted">Images: ${imageInfo.available ? `${imageInfo.count} in IndexedDB` : "Not available"} (size estimate unavailable)</div>
+        <div class="text-xs"><strong>Reminder recovery scan:</strong> ${reminderRecoverySummaries.length ? reminderRecoverySummaries.map((entry) => `${escapeHtml(entry.key)} — ${entry.count} reminder${entry.count === 1 ? "" : "s"}${entry.samples.length ? ` (${entry.samples.map(escapeHtml).join("; ")})` : ""}`).join("<br/>") : "No reminders found in current/backup localStorage keys."}</div>
         <div class="overflow-x-auto">
           <div class="text-xs font-semibold mb-1">Largest localStorage keys</div>
           <table class="w-full text-xs"><thead><tr><th class="text-left">key</th><th class="text-right">bytes</th><th class="text-right">KiB</th><th class="text-right">MiB</th></tr></thead><tbody>
@@ -3646,7 +3697,7 @@ rows.push([
           <div class="text-xs">${backupEntries.length ? backupEntries.map((entry) => `${escapeHtml(entry.key)} — ${entry.mib.toFixed(3)} MiB`).join("<br/>") : "None detected"}</div>
           ${backupEntries.reduce((sum, entry) => sum + entry.bytes, 0) > 1024 * 1024 ? '<div class="muted text-xs mt-1">Backup-like keys are using significant localStorage space.</div>' : ''}
         </div>
-        <div class="text-xs">${counts ? `Data counts: tasks ${counts.tasks}, completions ${counts.completions}, players ${counts.players}, habits ${counts.habits}, gameHistory ${counts.gameHistory}, matchups ${counts.matchups}, opponentDripSchedules ${counts.opponentDripSchedules}` : "Data counts unavailable (missing or invalid taskpoints_v1 JSON)."}</div>`;
+        <div class="text-xs">${counts ? `Data counts: tasks ${counts.tasks}, reminders ${counts.reminders}, completions ${counts.completions}, players ${counts.players}, habits ${counts.habits}, gameHistory ${counts.gameHistory}, matchups ${counts.matchups}, opponentDripSchedules ${counts.opponentDripSchedules}` : "Data counts unavailable (missing or invalid taskpoints_v1 JSON)."}</div>`;
     }
 
 

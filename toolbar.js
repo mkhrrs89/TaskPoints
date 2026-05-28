@@ -966,6 +966,7 @@ const normalizeStateFallback = (s) => {
   return {
     ...src,
     tasks: Array.isArray(src.tasks) ? src.tasks : [],
+    reminders: Array.isArray(src.reminders) ? src.reminders : [],
     completions: Array.isArray(src.completions) ? src.completions : [],
     players: Array.isArray(src.players) ? src.players : [],
     habits: Array.isArray(src.habits) ? src.habits.map(normalizeHabitFallback) : [],
@@ -2219,8 +2220,10 @@ async function exportBackupWithImagesFallback() {
 }
 
 async function applyImportedStateFallback(root) {
+  const currentState = loadRawStateFallback();
   let normalized = normalizeStateGlobal({
     tasks: Array.isArray(root?.tasks) ? root.tasks : [],
+    reminders: Array.isArray(root?.reminders) ? root.reminders : (Array.isArray(currentState?.reminders) ? currentState.reminders : []),
     completions: Array.isArray(root?.completions) ? root.completions : [],
     players: Array.isArray(root?.players) ? root.players : [],
     habits: Array.isArray(root?.habits) ? root.habits : [],
@@ -2247,6 +2250,7 @@ scoringSettings: root?.scoringSettings ?? {}
     if (migrated?.migrated) {
       normalized = stripLegacyImageFields(normalizeStateGlobal({
         ...migrated.state,
+        reminders: Array.isArray(migrated.state?.reminders) ? migrated.state.reminders : normalized.reminders,
         projects: normalized.projects
       }));
     }
