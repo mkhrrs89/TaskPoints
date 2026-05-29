@@ -5320,3 +5320,235 @@ header,
     flex-direction: column;
   }
 }
+
+/* Season 1 preview mode */
+.season-subtitle {
+  color: #cbd5e1;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.season-projection-note,
+.season-manual-banner,
+.season-warning-card {
+  border: 1px solid rgba(251, 146, 60, 0.34);
+  background: linear-gradient(135deg, rgba(251, 146, 60, 0.14), rgba(15, 23, 42, 0.46));
+  border-radius: 16px;
+  color: #fed7aa;
+  padding: 12px 14px;
+}
+
+.season-manual-banner {
+  border-color: rgba(45, 212, 191, 0.38);
+  background: linear-gradient(135deg, rgba(20, 184, 166, 0.14), rgba(15, 23, 42, 0.5));
+  color: #99f6e4;
+  font-size: 0.92rem;
+  font-weight: 800;
+}
+
+.season-warning-card {
+  border-color: rgba(250, 204, 21, 0.42);
+  background: linear-gradient(135deg, rgba(250, 204, 21, 0.14), rgba(15, 23, 42, 0.52));
+  color: #fef3c7;
+}
+
+.season-warning-details {
+  color: #fde68a;
+  font-size: 0.88rem;
+  margin-top: 8px;
+}
+
+.season-warning-details summary {
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.season-card-header,
+.season-bracket-round-header {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.season-rebuild-panel {
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(15, 23, 42, 0.52);
+  border-radius: 14px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.season-rebuild-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.season-seed-list,
+.season-bracket-stack {
+  display: grid;
+  gap: 8px;
+}
+
+.season-seed-row {
+  align-items: center;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(15, 23, 42, 0.44);
+  border-radius: 14px;
+  cursor: grab;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  padding: 10px;
+  transition: border-color 0.15s ease, transform 0.15s ease, background 0.15s ease;
+}
+
+.season-seed-row.is-dragging {
+  opacity: 0.62;
+}
+
+.season-seed-row.is-drag-over {
+  border-color: rgba(45, 212, 191, 0.7);
+  background: rgba(20, 184, 166, 0.13);
+  transform: translateY(-1px);
+}
+
+.season-seed-number,
+.season-bracket-seed {
+  align-items: center;
+  background: rgba(251, 146, 60, 0.16);
+  border: 1px solid rgba(251, 146, 60, 0.36);
+  border-radius: 999px;
+  color: #fed7aa;
+  display: inline-flex;
+  font-size: 0.82rem;
+  font-weight: 900;
+  height: 32px;
+  justify-content: center;
+  min-width: 32px;
+  padding: 0 8px;
+}
+
+.season-seed-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.season-seed-main strong,
+.season-bracket-round h4 {
+  color: #f8fafc;
+  font-weight: 900;
+}
+
+.season-seed-main span,
+.season-seed-stats {
+  color: #cbd5e1;
+  font-size: 0.82rem;
+}
+
+.season-seed-stats {
+  display: grid;
+  gap: 2px;
+  justify-items: end;
+  white-space: nowrap;
+}
+
+.season-seed-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.season-bracket-round {
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(15, 23, 42, 0.38);
+  border-radius: 16px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.season-bracket-round-header span {
+  border: 1px solid rgba(45, 212, 191, 0.28);
+  background: rgba(20, 184, 166, 0.12);
+  border-radius: 999px;
+  color: #99f6e4;
+  font-size: 0.72rem;
+  font-weight: 900;
+  padding: 4px 8px;
+  text-transform: uppercase;
+}
+
+.season-bracket-match-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.season-bracket-match {
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(2, 6, 23, 0.28);
+  border-radius: 14px;
+  display: grid;
+  gap: 7px;
+  padding: 10px;
+}
+
+.season-bracket-match-name {
+  color: #94a3b8;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.season-bracket-slot {
+  align-items: center;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(15, 23, 42, 0.5);
+  border-radius: 12px;
+  color: #e2e8f0;
+  display: flex;
+  gap: 8px;
+  min-height: 38px;
+  padding: 7px 9px;
+}
+
+.season-bracket-player {
+  font-size: 0.9rem;
+  font-weight: 800;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.season-bracket-placeholder {
+  color: #93c5fd;
+  white-space: normal;
+}
+
+@media (max-width: 720px) {
+  .season-card-header,
+  .season-bracket-round-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .season-seed-row {
+    align-items: start;
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .season-seed-stats,
+  .season-seed-actions {
+    grid-column: 2;
+    justify-items: start;
+  }
+
+  .season-seed-actions {
+    flex-wrap: wrap;
+  }
+}
