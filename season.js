@@ -190,7 +190,16 @@
 
   function loadSeasonState() {
     if (typeof core.loadAppState === 'function') {
-      return core.loadAppState({ syncDerived: false, persistSync: false });
+      try {
+        const loaded = core.loadAppState({ syncDerived: false, persistSync: false });
+        if (loaded && typeof loaded === 'object' && loaded.state && typeof loaded.state === 'object') {
+          return loaded.state;
+        }
+        return loaded || {};
+      } catch (error) {
+        console.error('Failed to load Season state', error);
+        return {};
+      }
     }
     return normalizeSeasonViewState({});
   }
@@ -210,6 +219,7 @@
     getSeasonStatusLabel,
     getSeasonTabTitle,
     getSeasonSummaryLine,
+    loadSeasonState,
     renderSeasonView,
     mountSeasonView
   };

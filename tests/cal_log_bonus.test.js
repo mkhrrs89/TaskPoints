@@ -219,3 +219,63 @@ test('season UI helpers render current season and trophy case states defensively
   assert.match(archivedHtml, /Trophy Case/);
   assert.match(archivedHtml, /Champion Bot/);
 });
+
+test('season load path unwraps loadAppState state wrapper for current season', () => {
+  const originalLoadAppState = core.loadAppState;
+  const currentSeason = core.createEmptySeasonDraft({
+    nowISO: '2026-05-29T00:00:00.000Z',
+    status: 'active'
+  });
+
+  core.loadAppState = () => ({
+    state: core.normalizeState({ currentSeason }),
+    storageKeysFound: [core.STORAGE_KEY]
+  });
+
+  try {
+    const loaded = seasonUi.loadSeasonState();
+    assert.equal(loaded.currentSeason.id, currentSeason.id);
+    const html = seasonUi.renderSeasonView(loaded);
+    assert.match(html, /Current Season/);
+    assert.match(html, /Active/);
+  } finally {
+    core.loadAppState = originalLoadAppState;
+  }
+});
+
+test('season load path unwraps loadAppState state wrapper for trophy case history', () => {
+  const originalLoadAppState = core.loadAppState;
+  const archivedSeason = core.createEmptySeasonDraft({
+    nowISO: '2026-05-29T00:00:00.000Z',
+    status: 'finalized',
+    championSummary: { name: 'Archive Champ' }
+  });
+
+  core.loadAppState = () => ({
+    state: core.normalizeState({ seasonHistory: [archivedSeason] }),
+    storageKeysFound: [core.STORAGE_KEY]
+  });
+
+  try {
+    const loaded = seasonUi.loadSeasonState();
+    assert.equal(loaded.seasonHistory.length, 1);
+    const html = seasonUi.renderSeasonView(loaded);
+    assert.match(html, /Trophy Case/);
+    assert.match(html, /Archive Champ/);
+  } finally {
+    core.loadAppState = originalLoadAppState;
+  }
+});
+
+test('season load path still accepts raw state objects defensively', () => {
+  const originalLoadAppState = core.loadAppState;
+  const currentSeason = core.createEmptySeasonDraft({ nowISO: '2026-05-29T00:00:00.000Z' });
+  core.loadAppState = () => core.normalizeState({ currentSeason });
+
+  try {
+    const loaded = seasonUi.loadSeasonState();
+    assert.equal(loaded.currentSeason.id, currentSeason.id);
+  } finally {
+    core.loadAppState = originalLoadAppState;
+  }
+});
