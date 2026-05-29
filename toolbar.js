@@ -213,6 +213,7 @@ function buildMobileBottomNavLinks() {
   <a href="standings.html" class="btn btn-teal btn-toolbar nav-btn">Standings</a>
   <a href="rankings.html" class="btn btn-teal btn-toolbar nav-btn">Rankings</a>
   <a href="records.html" class="btn btn-teal btn-toolbar nav-btn">Records</a>
+  <a href="season.html" class="btn btn-teal btn-toolbar nav-btn">Season</a>
 </div>
     </div>
 
@@ -283,6 +284,11 @@ function renderBottomToolbar() {
           <a href="tournament.html" class="mobile-bottom-nav-btn flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
             <img src="assets/tourney.png" class="tp-nav-icon" alt="" aria-hidden="true">
             <span class="uppercase tracking-wide text-[10px]">Tourney</span>
+          </a>
+
+          <a href="season.html" class="mobile-bottom-nav-btn flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
+            <img src="assets/trophies.png" class="tp-nav-icon" alt="" aria-hidden="true">
+            <span class="uppercase tracking-wide text-[10px]">Season</span>
           </a>
         </div>
       </div>
