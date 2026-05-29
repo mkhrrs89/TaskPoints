@@ -300,6 +300,15 @@
     };
   }
 
+
+
+  function lockCurrentPreviewToOfficialBracket(state, options = {}) {
+    if (typeof core.lockSeasonPreviewToOfficialBracket === 'function') {
+      return core.lockSeasonPreviewToOfficialBracket(state || {}, options);
+    }
+    return state;
+  }
+
   function prepareSeasonStateForPreview(state, options = {}) {
     const normalized = normalizeSeasonViewState(state || {});
     const before = semanticSeasonSnapshot(normalized.currentSeason);
@@ -498,12 +507,96 @@
         <p class="season-eyebrow">Season 1 Preview</p>
         <h2 class="season-title">Season 1 Preview</h2>
         <p class="season-subtitle">${escapeHtml(season?.label || SEASON_ONE_LABEL)}</p>
-        <p class="season-projection-note">Seeds and bracket are projected from current standings. Official bracket locks June 1 at 5am.</p>
+        <p class="season-projection-note">Seeds and bracket are projected from current standings. No official series are created until you create the official bracket.</p>
+        <div class="season-rebuild-actions mt-4">
+          <button type="button" class="btn btn-success btn-toolbar" data-season-action="create-official-bracket">Create Official Bracket</button>
+        </div>
+        <p class="muted text-sm mt-3">After creating the official bracket, seeds will no longer auto-update. You can still edit later through Admin Mode in a future update.</p>
       </section>
       ${season?.seedMode === MANUAL_SEED_MODE ? '<section class="season-manual-banner">Manual seed order active — standings updates will not change seeds.</section>' : ''}
       ${renderWarningPanel(season)}
       ${renderSeedList(season)}
       ${renderProjectedBracket(season)}
+    `;
+  }
+
+
+  function officialSeriesEntries(season) {
+    return Object.values(season?.series || {}).sort((a, b) => {
+      const ar = Number(a?.roundIndex) || 0;
+      const br = Number(b?.roundIndex) || 0;
+      if (ar !== br) return ar - br;
+      return (Number(a?.seriesIndex) || 0) - (Number(b?.seriesIndex) || 0);
+    });
+  }
+
+  function renderSeriesSide(series, slot) {
+    const prefix = slot === 'B' ? 'B' : 'A';
+    const seed = series?.[`player${prefix}Seed`];
+    const name = series?.[`player${prefix}Name`] || series?.[`player${prefix}Id`];
+    const placeholder = series?.[`placeholder${prefix}`];
+    if (name) return `<span class="season-bracket-seed">#${escapeHtml(seed || '—')}</span><span class="season-bracket-player">${escapeHtml(name)}</span>`;
+    return `<span class="season-bracket-player season-bracket-placeholder">${escapeHtml(placeholder || 'Awaiting winner')}</span>`;
+  }
+
+  function getSeriesStatusLine(series) {
+    if (typeof core.getSeriesStatusText === 'function') return core.getSeriesStatusText(series);
+    return `${Number(series?.winsA) || 0}–${Number(series?.winsB) || 0}`;
+  }
+
+  function getWinnerFacesLine(season, series) {
+    if (typeof core.getWinnerFacesText === 'function') return core.getWinnerFacesText(season, series);
+    return 'Winner faces: TBD';
+  }
+
+  function renderOfficialSeriesCard(season, series) {
+    const results = Array.isArray(series?.gameResults) ? series.gameResults : [];
+    return `
+      <details class="season-bracket-match season-series-card">
+        <summary>
+          <span class="season-bracket-match-name">${escapeHtml(series?.roundName || 'Series')} ${escapeHtml(series?.seriesIndex || '')}</span>
+          <span class="season-bracket-slot">${renderSeriesSide(series, 'A')}</span>
+          <span class="season-bracket-slot">${renderSeriesSide(series, 'B')}</span>
+          <span class="muted text-sm">${escapeHtml(getSeriesStatusLine(series))}</span>
+        </summary>
+        <div class="season-series-details">
+          <p class="muted text-sm">Best-of-${escapeHtml(series?.bestOf || '—')} • ${escapeHtml(series?.status || 'pending')}</p>
+          <p class="muted text-sm">${escapeHtml(getWinnerFacesLine(season, series))}</p>
+          ${results.length ? `
+            <ol class="season-bullet-list">
+              ${results.map((result, index) => `<li>Game ${index + 1}: ${escapeHtml(result.winnerId || 'Winner TBD')} defeated ${escapeHtml(result.loserId || 'Loser TBD')} ${result.dateKey ? `on ${escapeHtml(result.dateKey)}` : ''}</li>`).join('')}
+            </ol>
+          ` : '<p class="muted text-sm">No game results recorded yet.</p>'}
+        </div>
+      </details>
+    `;
+  }
+
+  function renderOfficialBracket(season) {
+    const grouped = new Map();
+    officialSeriesEntries(season).forEach((series) => {
+      const key = series.roundId || 'unknown';
+      if (!grouped.has(key)) grouped.set(key, { name: series.roundName || key, series: [] });
+      grouped.get(key).series.push(series);
+    });
+    return `
+      <section class="glass season-card">
+        <h3 class="season-section-title">Official Bracket</h3>
+        <p class="muted text-sm">Official dormant series are locked from the preview seed order. Daily tournament games are not generated yet.</p>
+        <div class="season-bracket-stack">
+          ${Array.from(grouped.values()).map((round) => `
+            <section class="season-bracket-round">
+              <div class="season-bracket-round-header">
+                <h4>${escapeHtml(round.name)}</h4>
+                <span>${escapeHtml(round.series.length)} series</span>
+              </div>
+              <div class="season-bracket-match-grid">
+                ${round.series.map((series) => renderOfficialSeriesCard(season, series)).join('')}
+              </div>
+            </section>
+          `).join('') || '<p class="muted text-sm">No official series have been created yet.</p>'}
+        </div>
+      </section>
     `;
   }
 
@@ -528,8 +621,9 @@
           <div><dt>Start</dt><dd>${escapeHtml(start)}</dd></div>
           <div><dt>End</dt><dd>${escapeHtml(end)}</dd></div>
         </dl>
-        <p class="muted text-sm mt-4">Season tools will appear here in the next update.</p>
+        <p class="muted text-sm mt-4">Seeds are locked. Admin Mode editing can be added in a future update.</p>
       </section>
+      ${Object.keys(season?.series || {}).length ? renderOfficialBracket(season) : '<section class="glass season-card"><p class="muted text-sm">Season tools will appear here in the next update.</p></section>'}
     `;
   }
 
@@ -697,6 +791,14 @@
           ? rebuildPreviewFromStandings(state, state.currentSeason)
           : rebuildPreviewFromManualOrder(state.currentSeason);
         saveAndRenderSeason({ ...state, currentSeason: season }, action === 'rebuild-standings' ? 'season-rebuild-standings' : 'season-rebuild-manual');
+        return;
+      }
+      if (action === 'create-official-bracket') {
+        const message = 'After creating the official bracket, seeds will no longer auto-update. You can still edit later through Admin Mode in a future update.';
+        if (typeof global.confirm === 'function' && !global.confirm(message)) return;
+        const state = currentMountedState();
+        const nextState = lockCurrentPreviewToOfficialBracket(state, { nowISO: nowIso() });
+        saveAndRenderSeason(nextState, 'season-create-official-bracket');
       }
     });
   }
@@ -727,6 +829,7 @@
     applyManualSeedReorder,
     rebuildPreviewFromStandings,
     rebuildPreviewFromManualOrder,
+    lockCurrentPreviewToOfficialBracket,
     loadSeasonState,
     renderSeasonView,
     mountSeasonView

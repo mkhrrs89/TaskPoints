@@ -394,3 +394,153 @@ test('season load path still accepts raw state objects defensively', () => {
     core.loadAppState = originalLoadAppState;
   }
 });
+
+function makeOfficialSeasonSeedList(count = 34) {
+  return Array.from({ length: count }, (_, index) => ({
+    seed: index + 1,
+    playerId: `P${index + 1}`,
+    playerName: `Player ${index + 1}`,
+    wins: 0,
+    losses: 0,
+    winPct: 0,
+    totalPoints: 0,
+    averageScore: 0,
+    marginOfVictory: null,
+    warningFlags: []
+  }));
+}
+
+test('official season bracket creation from 34 seeds creates Play-In, Round of 32, and later placeholders', () => {
+  const seeds = makeOfficialSeasonSeedList();
+  const bracket = core.buildOfficialSeasonBracketFromSeeds(seeds, { seasonId: 'season_1_june_2026', nowISO: '2026-05-31T12:00:00.000Z' });
+  const series = core.createOfficialSeasonSeriesFromSeeds(seeds, { seasonId: 'season_1_june_2026', nowISO: '2026-05-31T12:00:00.000Z' });
+  const byRound = (roundId) => Object.values(series).filter((item) => item.roundId === roundId);
+
+  assert.equal(bracket.type, 'official_34_player_championship');
+  assert.equal(byRound('play_in').length, 2);
+  assert.equal(byRound('round_of_32').length, 16);
+  assert.equal(byRound('sweet_16').length, 8);
+  assert.equal(byRound('quarterfinals').length, 4);
+  assert.equal(byRound('semifinals').length, 2);
+  assert.equal(byRound('finals').length, 1);
+  assert.equal(byRound('round_of_32').sort((a, b) => a.seriesIndex - b.seriesIndex)[0].placeholderB, 'Lowest Play-In winner');
+  assert.equal(byRound('round_of_32').sort((a, b) => a.seriesIndex - b.seriesIndex)[8].placeholderB, 'Other Play-In winner');
+  assert.match(byRound('sweet_16')[0].placeholderA, /Winner of Series/);
+});
+
+test('locking a season preview creates official series while preserving normal matchups', () => {
+  const matchups = [{ id: 'normal-matchup', dateKey: '2026-05-20', playerAId: 'P1', playerBId: 'P2' }];
+  const preview = core.createEmptySeasonDraft({
+    id: 'season_1_june_2026',
+    status: 'preview',
+    seedMode: 'manual',
+    seeds: makeOfficialSeasonSeedList(),
+    warnings: [{ code: 'keep_me', message: 'Preserve warning' }],
+    meta: { seedSource: 'test' }
+  });
+  const lockedState = core.lockSeasonPreviewToOfficialBracket(core.normalizeState({ currentSeason: preview, matchups }), { nowISO: '2026-05-31T12:00:00.000Z' });
+
+  assert.equal(lockedState.currentSeason.status, 'locked');
+  assert.equal(lockedState.currentSeason.seedMode, 'manual');
+  assert.equal(lockedState.currentSeason.warnings[0].code, 'keep_me');
+  assert.equal(lockedState.currentSeason.meta.seedSource, 'test');
+  assert.equal(lockedState.currentSeason.meta.seedsLocked, true);
+  assert.equal(Object.keys(lockedState.currentSeason.series).length, 33);
+  assert.deepEqual(lockedState.matchups, matchups);
+});
+
+test('Play-In winner resolution uses NBA-style protection for seeds 31 and 33', () => {
+  let season = core.createEmptySeasonDraft({
+    id: 'season_1_june_2026',
+    status: 'locked',
+    seeds: makeOfficialSeasonSeedList(),
+    series: core.createOfficialSeasonSeriesFromSeeds(makeOfficialSeasonSeedList(), { seasonId: 'season_1_june_2026' })
+  });
+  const playIn = Object.values(season.series).filter((item) => item.roundId === 'play_in').sort((a, b) => a.seriesIndex - b.seriesIndex);
+  for (let i = 0; i < 2; i += 1) {
+    const result = core.recordSeasonSeriesGameResult(season, playIn[0].id, { dateKey: `2026-06-0${i + 1}`, matchupId: `pi1-${i}`, winnerId: 'P31', loserId: 'P34', source: 'manual' });
+    assert.equal(result.ok, true);
+    season = result.season;
+  }
+  for (let i = 0; i < 2; i += 1) {
+    const result = core.recordSeasonSeriesGameResult(season, playIn[1].id, { dateKey: `2026-06-0${i + 1}`, matchupId: `pi2-${i}`, winnerId: 'P33', loserId: 'P32', source: 'manual' });
+    assert.equal(result.ok, true);
+    season = result.season;
+  }
+  const resolved = core.resolvePlayInWinnersIntoRoundOf32(season, { nowISO: '2026-06-03T12:00:00.000Z' });
+  assert.equal(resolved.ok, true);
+  const roundOf32 = Object.values(resolved.season.series).filter((item) => item.roundId === 'round_of_32').sort((a, b) => a.seriesIndex - b.seriesIndex);
+  assert.equal(roundOf32[0].playerASeed, 1);
+  assert.equal(roundOf32[0].playerBSeed, 33);
+  assert.equal(roundOf32[8].playerASeed, 2);
+  assert.equal(roundOf32[8].playerBSeed, 31);
+});
+
+test('season series game recording increments wins, rejects duplicates, and completes best-of lengths', () => {
+  let season = core.createEmptySeasonDraft({
+    id: 'season_1_june_2026',
+    status: 'locked',
+    seeds: makeOfficialSeasonSeedList(),
+    series: core.createOfficialSeasonSeriesFromSeeds(makeOfficialSeasonSeedList(), { seasonId: 'season_1_june_2026' })
+  });
+  const playIn = Object.values(season.series).find((item) => item.roundId === 'play_in' && item.seriesIndex === 1);
+  let result = core.recordSeasonSeriesGameResult(season, playIn.id, { dateKey: '2026-06-01', matchupId: 'dupe', winnerId: 'P31', loserId: 'P34', playerAScore: 90, playerBScore: 80, source: 'manual' });
+  assert.equal(result.ok, true);
+  assert.equal(result.series.winsA, 1);
+  assert.equal(result.series.winsB, 0);
+  const duplicate = core.recordSeasonSeriesGameResult(result.season, playIn.id, { dateKey: '2026-06-01', matchupId: 'dupe', winnerId: 'P31', loserId: 'P34', source: 'manual' });
+  assert.equal(duplicate.ok, false);
+  assert.equal(duplicate.error, 'duplicate_game_result');
+  result = core.recordSeasonSeriesGameResult(result.season, playIn.id, { dateKey: '2026-06-02', matchupId: 'g2', winnerId: 'P31', loserId: 'P34', source: 'manual' });
+  assert.equal(result.ok, true);
+  assert.equal(result.series.status, 'complete');
+  assert.equal(result.series.winnerId, 'P31');
+  assert.equal(result.series.loserId, 'P34');
+  assert.equal(core.isSeasonSeriesComplete(result.series), true);
+
+  season = result.season;
+  const bestOfFive = Object.values(season.series).find((item) => item.roundId === 'round_of_32' && item.seriesIndex === 2);
+  for (let i = 0; i < 2; i += 1) {
+    result = core.recordSeasonSeriesGameResult(season, bestOfFive.id, { dateKey: `2026-06-0${i + 4}`, matchupId: `r32-${i}`, winnerId: 'P16', loserId: 'P17', source: 'manual' });
+    assert.equal(result.ok, true);
+    season = result.season;
+    assert.notEqual(result.series.status, 'complete');
+  }
+  result = core.recordSeasonSeriesGameResult(season, bestOfFive.id, { dateKey: '2026-06-06', matchupId: 'r32-2', winnerId: 'P16', loserId: 'P17', source: 'manual' });
+  assert.equal(result.series.status, 'complete');
+  assert.equal(result.series.winnerId, 'P16');
+});
+
+test('Round of 32 advancement fills Sweet 16 placeholders', () => {
+  let season = core.createEmptySeasonDraft({
+    id: 'season_1_june_2026',
+    status: 'locked',
+    seeds: makeOfficialSeasonSeedList(),
+    series: core.createOfficialSeasonSeriesFromSeeds(makeOfficialSeasonSeedList(), { seasonId: 'season_1_june_2026' })
+  });
+  const r32 = Object.values(season.series).find((item) => item.roundId === 'round_of_32' && item.seriesIndex === 2);
+  for (let i = 0; i < 3; i += 1) {
+    const result = core.recordSeasonSeriesGameResult(season, r32.id, { dateKey: `2026-06-0${i + 4}`, matchupId: `advance-${i}`, winnerId: 'P16', loserId: 'P17', source: 'manual' });
+    assert.equal(result.ok, true);
+    season = result.season;
+  }
+  const advanced = core.advanceSeasonSeriesWinner(season, r32.id, { nowISO: '2026-06-08T12:00:00.000Z' });
+  assert.equal(advanced.ok, true);
+  assert.equal(advanced.nextSeries.roundId, 'sweet_16');
+  assert.equal(advanced.nextSeries.playerBId, 'P16');
+  assert.equal(advanced.nextSeries.placeholderB, '');
+});
+
+test('official season helpers remain dormant and do not generate daily tournament matchups', () => {
+  const state = core.normalizeState({
+    matchups: [{ id: 'normal-matchup', dateKey: '2026-06-04', playerAId: 'P1', playerBId: 'P2' }],
+    currentSeason: core.createEmptySeasonDraft({ id: 'season_1_june_2026', status: 'preview', seeds: makeOfficialSeasonSeedList() })
+  });
+  const beforeMatchups = JSON.stringify(state.matchups);
+  const lockedState = core.lockSeasonPreviewToOfficialBracket(state, { nowISO: '2026-05-31T12:00:00.000Z' });
+
+  assert.equal(JSON.stringify(lockedState.matchups), beforeMatchups);
+  assert.equal(Object.keys(lockedState.currentSeason.dailyTournamentResults).length, 0);
+  assert.equal(lockedState.currentSeason.series[Object.keys(lockedState.currentSeason.series)[0]].gameResults.length, 0);
+  assert.equal(core.getActiveSeasonSeriesForDate(lockedState.currentSeason, '2026-06-04').length, 0);
+});
