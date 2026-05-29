@@ -186,6 +186,250 @@
   const CAL_LOG_BONUS_POINTS = 2;
   const CAL_LOG_BONUS_SOURCE = 'cal_log_bonus';
 
+
+  const SEASON_STATUSES = ['preview', 'locked', 'active', 'champion_crowned', 'finalized'];
+  const JUNE_2026_SEASON_DATE_WINDOWS = [
+    { id: 'play_in', startDate: '2026-06-01', endDate: '2026-06-03', displayName: 'Play-In', bestOf: 3 },
+    { id: 'round_of_32', startDate: '2026-06-04', endDate: '2026-06-08', displayName: 'Round of 32', bestOf: 5 },
+    { id: 'sweet_16', startDate: '2026-06-09', endDate: '2026-06-13', displayName: 'Sweet 16', bestOf: 5 },
+    { id: 'quarterfinals', startDate: '2026-06-14', endDate: '2026-06-18', displayName: 'Quarterfinals', bestOf: 5 },
+    { id: 'semifinals', startDate: '2026-06-19', endDate: '2026-06-23', displayName: 'Semifinals', bestOf: 5 },
+    { id: 'finals', startDate: '2026-06-24', endDate: '2026-06-30', displayName: 'Finals', bestOf: 7 }
+  ];
+  const DEFAULT_SEASON_NAME = 'June 2026 TaskPoints Championship';
+  const DEFAULT_SEASON_MONTH_KEY = '2026-06';
+
+  function isSeasonObject(value) {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+  }
+
+  function normalizeSeasonArray(value) {
+    return Array.isArray(value) ? value.slice() : [];
+  }
+
+  function normalizeSeasonObjectMap(value) {
+    return isSeasonObject(value) ? { ...value } : {};
+  }
+
+  function normalizeSeasonState(season) {
+    if (!isSeasonObject(season)) return null;
+    const month = typeof season.monthKey === 'string' && season.monthKey.trim()
+      ? season.monthKey.trim()
+      : DEFAULT_SEASON_MONTH_KEY;
+    const name = typeof season.name === 'string' && season.name.trim()
+      ? season.name.trim()
+      : DEFAULT_SEASON_NAME;
+    const id = typeof season.id === 'string' && season.id.trim()
+      ? season.id.trim()
+      : buildSeasonId(name, month);
+    const status = SEASON_STATUSES.includes(season.status) ? season.status : 'preview';
+
+    return {
+      ...season,
+      id,
+      name,
+      label: typeof season.label === 'string' ? season.label : name,
+      monthKey: month,
+      startDate: typeof season.startDate === 'string' ? season.startDate : '2026-06-01',
+      endDate: typeof season.endDate === 'string' ? season.endDate : '2026-06-30',
+      status,
+      createdAtISO: typeof season.createdAtISO === 'string' ? season.createdAtISO : '',
+      updatedAtISO: typeof season.updatedAtISO === 'string' ? season.updatedAtISO : '',
+      playerPool: normalizeSeasonArray(season.playerPool),
+      seedMode: typeof season.seedMode === 'string' ? season.seedMode : 'standings',
+      seeds: normalizeSeasonArray(season.seeds),
+      bracket: normalizeSeasonObjectMap(season.bracket),
+      series: normalizeSeasonObjectMap(season.series),
+      dailyTournamentResults: normalizeSeasonObjectMap(season.dailyTournamentResults),
+      championSummary: isSeasonObject(season.championSummary) ? { ...season.championSummary } : null,
+      finalPlacements: normalizeSeasonArray(season.finalPlacements),
+      warnings: normalizeSeasonArray(season.warnings),
+      meta: normalizeSeasonObjectMap(season.meta)
+    };
+  }
+
+  function normalizeSeasonHistory(history) {
+    if (!Array.isArray(history)) return [];
+    return history.map(normalizeSeasonState).filter(Boolean);
+  }
+
+  function normalizeCurrentSeason(season) {
+    return normalizeSeasonState(season);
+  }
+
+  function getSeasonRoundDefs() {
+    return JUNE_2026_SEASON_DATE_WINDOWS.map((round) => ({ ...round }));
+  }
+
+  function getSeasonDateWindows() {
+    return getSeasonRoundDefs();
+  }
+
+  function getSeasonRoundForDate(dateKey) {
+    if (typeof dateKey !== 'string') return null;
+    return JUNE_2026_SEASON_DATE_WINDOWS.find((round) => dateKey >= round.startDate && dateKey <= round.endDate) || null;
+  }
+
+  function getSeasonSeriesLength(roundId) {
+    const round = JUNE_2026_SEASON_DATE_WINDOWS.find((item) => item.id === roundId);
+    return round ? round.bestOf : null;
+  }
+
+  function getSeasonDisplayName(roundId) {
+    const round = JUNE_2026_SEASON_DATE_WINDOWS.find((item) => item.id === roundId);
+    return round ? round.displayName : '';
+  }
+
+  function isSeasonDate(dateKey) {
+    return Boolean(getSeasonRoundForDate(dateKey));
+  }
+
+  function isJuneSeasonDate(dateKey) {
+    return isSeasonDate(dateKey);
+  }
+
+  function buildSeasonId(name, monthKey) {
+    const slug = String(name || 'season')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'season';
+    const month = String(monthKey || '').trim().replace(/[^0-9-]/g, '') || DEFAULT_SEASON_MONTH_KEY;
+    return `${month}-${slug}`;
+  }
+
+  function createEmptySeasonDraft(options = {}) {
+    const nowISO = typeof options.nowISO === 'string' ? options.nowISO : new Date().toISOString();
+    const name = typeof options.name === 'string' && options.name.trim() ? options.name.trim() : DEFAULT_SEASON_NAME;
+    const monthKey = typeof options.monthKey === 'string' && options.monthKey.trim() ? options.monthKey.trim() : DEFAULT_SEASON_MONTH_KEY;
+    const draft = {
+      id: typeof options.id === 'string' && options.id.trim() ? options.id.trim() : buildSeasonId(name, monthKey),
+      name,
+      label: typeof options.label === 'string' ? options.label : name,
+      monthKey,
+      startDate: typeof options.startDate === 'string' ? options.startDate : '2026-06-01',
+      endDate: typeof options.endDate === 'string' ? options.endDate : '2026-06-30',
+      status: SEASON_STATUSES.includes(options.status) ? options.status : 'preview',
+      createdAtISO: typeof options.createdAtISO === 'string' ? options.createdAtISO : nowISO,
+      updatedAtISO: typeof options.updatedAtISO === 'string' ? options.updatedAtISO : nowISO,
+      playerPool: Array.isArray(options.playerPool) ? options.playerPool.slice() : [],
+      seedMode: typeof options.seedMode === 'string' ? options.seedMode : 'standings',
+      seeds: Array.isArray(options.seeds) ? options.seeds.slice() : [],
+      bracket: isSeasonObject(options.bracket) ? { ...options.bracket } : {},
+      series: isSeasonObject(options.series) ? { ...options.series } : {},
+      dailyTournamentResults: isSeasonObject(options.dailyTournamentResults) ? { ...options.dailyTournamentResults } : {},
+      championSummary: isSeasonObject(options.championSummary) ? { ...options.championSummary } : null,
+      finalPlacements: Array.isArray(options.finalPlacements) ? options.finalPlacements.slice() : [],
+      warnings: Array.isArray(options.warnings) ? options.warnings.slice() : [],
+      meta: isSeasonObject(options.meta) ? { ...options.meta } : {}
+    };
+    return normalizeSeasonState(draft);
+  }
+
+  function getActiveSeasonPlayerPool(state) {
+    try {
+      return rankablePlayers(state || {}).map((player) => ({ ...player }));
+    } catch (e) {
+      const youName = (typeof state?.youName === 'string' && state.youName.trim()) ? state.youName.trim() : 'You';
+      const players = Array.isArray(state?.players) ? state.players : [];
+      return [{ id: 'YOU', name: youName, isYou: true }]
+        .concat(players.filter((player) => player && player.active !== false && player.id && player.id !== 'YOU'));
+    }
+  }
+
+  function computeSeedPointsFromMatchups(state, playerId) {
+    const matchups = Array.isArray(state?.matchups) ? state.matchups : [];
+    let totalPoints = 0;
+    let games = 0;
+    let marginTotal = 0;
+    matchups.forEach((matchup) => {
+      if (!matchup || (matchup.playerAId !== playerId && matchup.playerBId !== playerId)) return;
+      if (!isMatchupRevealed(matchupDateKey(matchup), { includeToday: false })) return;
+      const scoreA = Number(matchup.scoreA);
+      const scoreB = Number(matchup.scoreB);
+      if (!Number.isFinite(scoreA) || !Number.isFinite(scoreB)) return;
+      const score = matchup.playerAId === playerId ? scoreA : scoreB;
+      const oppScore = matchup.playerAId === playerId ? scoreB : scoreA;
+      totalPoints += score;
+      marginTotal += score - oppScore;
+      games += 1;
+    });
+    return {
+      totalPoints,
+      averageScore: games ? totalPoints / games : null,
+      marginOfVictory: games ? marginTotal / games : null
+    };
+  }
+
+  function getSeasonSeedSourceRows(state) {
+    const warnings = [];
+    const rows = [];
+    const pool = getActiveSeasonPlayerPool(state || {});
+    if (!pool.length) warnings.push({ code: 'no_players', message: 'No active season player pool could be found.' });
+
+    let rankings = [];
+    try {
+      rankings = computeRankings(state || {}, { includeToday: false, allowFallback: true });
+    } catch (e) {
+      warnings.push({ code: 'rankings_unavailable', message: 'Ranking data could not be computed for season seeding.' });
+      rankings = [];
+    }
+    const rankingMap = new Map(rankings.map((row) => [row.playerId || row.id, row]));
+
+    pool.forEach((player) => {
+      const playerId = player?.id || player?.playerId;
+      if (!playerId) return;
+      const ranking = rankingMap.get(playerId) || {};
+      let record = null;
+      try {
+        record = computeRecord(state || {}, playerId, { includeToday: false, allowFallback: true });
+      } catch (e) {
+        warnings.push({ code: 'record_unavailable', playerId, message: `Record data could not be computed for ${playerId}.` });
+      }
+      const wins = Number(record?.wins ?? ranking.wins) || 0;
+      const losses = Number(record?.losses ?? ranking.losses) || 0;
+      const ties = Number(record?.ties ?? ranking.ties) || 0;
+      const games = Number(record?.games ?? ranking.games) || 0;
+      const seedStats = computeSeedPointsFromMatchups(state || {}, playerId);
+      const averageScore = Number.isFinite(seedStats.averageScore)
+        ? seedStats.averageScore
+        : (Number.isFinite(ranking.avgPPD) ? ranking.avgPPD : null);
+      rows.push({
+        playerId,
+        id: playerId,
+        name: player.name || (playerId === 'YOU' ? 'You' : 'Unnamed'),
+        isYou: playerId === 'YOU' || player.isYou === true,
+        wins,
+        losses,
+        ties,
+        games,
+        winPct: games ? wins / games : null,
+        totalPoints: seedStats.totalPoints,
+        averageScore,
+        marginOfVictory: seedStats.marginOfVictory,
+        rank: Number.isFinite(ranking.rank) ? ranking.rank : null,
+        recordSource: record?.source || ranking.recordSource || 'unknown',
+        warnings: []
+      });
+    });
+
+    rows.sort((a, b) => {
+      const awp = Number.isFinite(a.winPct) ? a.winPct : -1;
+      const bwp = Number.isFinite(b.winPct) ? b.winPct : -1;
+      if (bwp !== awp) return bwp - awp;
+      if (b.wins !== a.wins) return b.wins - a.wins;
+      if (b.totalPoints !== a.totalPoints) return b.totalPoints - a.totalPoints;
+      const avgA = Number.isFinite(a.averageScore) ? a.averageScore : -1;
+      const avgB = Number.isFinite(b.averageScore) ? b.averageScore : -1;
+      if (avgB !== avgA) return avgB - avgA;
+      const movA = Number.isFinite(a.marginOfVictory) ? a.marginOfVictory : -1e9;
+      const movB = Number.isFinite(b.marginOfVictory) ? b.marginOfVictory : -1e9;
+      if (movB !== movA) return movB - movA;
+      return String(a.name || '').localeCompare(String(b.name || ''));
+    });
+
+    return { rows, warnings };
+  }
+
   const CATEGORY_DEFS = [
     { key: "sleep",    label: "Sleep",    match: c => typeof c?.title === "string" && c.title.startsWith("Sleep Score (") },
     { key: "calories", label: "Calories", match: c => typeof c?.title === "string" && c.title.toLowerCase().startsWith("calories") },
@@ -567,7 +811,10 @@ workHistory: Array.isArray(s?.workHistory) ? s.workHistory : [],
       notes: typeof s?.notes === "string" ? s.notes : "",
       habitTagColors: normalizeHabitTagColors(s?.habitTagColors),
       scoringSettings: normalizeScoringSettings(s?.scoringSettings),
-      playerBadges: s?.playerBadges && typeof s.playerBadges === 'object' && !Array.isArray(s.playerBadges) ? s.playerBadges : {}
+      playerBadges: s?.playerBadges && typeof s.playerBadges === 'object' && !Array.isArray(s.playerBadges) ? s.playerBadges : {},
+      currentSeason: normalizeCurrentSeason(s?.currentSeason),
+      latestSeasonId: typeof s?.latestSeasonId === 'string' ? s.latestSeasonId : '',
+      seasonHistory: normalizeSeasonHistory(s?.seasonHistory)
     };
     return cleanupOpponentDripSchedules(normalized, { maxEntries: 120 });
   }
@@ -1058,7 +1305,10 @@ function fastEnsureStateShape(s) {
     habitTagColors: isPlainObject(src.habitTagColors) ? src.habitTagColors : {},
     scoringSettings: isPlainObject(src.scoringSettings)
       ? src.scoringSettings
-      : normalizeScoringSettings(src.scoringSettings)
+      : normalizeScoringSettings(src.scoringSettings),
+    currentSeason: normalizeCurrentSeason(src.currentSeason),
+    latestSeasonId: typeof src.latestSeasonId === 'string' ? src.latestSeasonId : '',
+    seasonHistory: normalizeSeasonHistory(src.seasonHistory)
   };
 }
 
@@ -1200,7 +1450,8 @@ return { state: merged, storageKey };
       opponentDripSchedules: Array.isArray(safe.opponentDripSchedules) ? safe.opponentDripSchedules.length : 0,
       workHistory: Array.isArray(safe.workHistory) ? safe.workHistory.length : 0,
       projects: Array.isArray(safe.projects) ? safe.projects.length : 0,
-      reminders: Array.isArray(safe.reminders) ? safe.reminders.length : 0
+      reminders: Array.isArray(safe.reminders) ? safe.reminders.length : 0,
+      seasonHistory: Array.isArray(safe.seasonHistory) ? safe.seasonHistory.length : 0
     };
   }
 
@@ -1386,7 +1637,7 @@ return { state: merged, storageKey };
     }
     const stickyArrayFields = [
       'tasks', 'completions', 'habits', 'players', 'flexActions',
-      'gameHistory', 'matchups', 'schedule', 'weightHistory', 'vo2MaxHistory', 'reminders'
+      'gameHistory', 'matchups', 'schedule', 'weightHistory', 'vo2MaxHistory', 'reminders', 'seasonHistory'
     ];
     const stickyObjectFields = ['playerBadges'];
     const deletedReminderIds = new Set(Array.isArray(options.deletedReminderIds) ? options.deletedReminderIds.map(String) : []);
@@ -1398,6 +1649,16 @@ return { state: merged, storageKey };
       }
       next[key] = [];
     });
+    if (!options.allowDestructiveOverwrite && Array.isArray(latest?.seasonHistory) && latest.seasonHistory.length && (!Array.isArray(next.seasonHistory) || next.seasonHistory.length === 0)) {
+      next.seasonHistory = latest.seasonHistory;
+    }
+    if (!options.allowDestructiveOverwrite && isSeasonObject(latest?.currentSeason) && !isSeasonObject(next.currentSeason)) {
+      next.currentSeason = latest.currentSeason;
+    }
+    if (!options.allowDestructiveOverwrite && typeof latest?.latestSeasonId === 'string' && latest.latestSeasonId && (typeof next.latestSeasonId !== 'string' || !next.latestSeasonId)) {
+      next.latestSeasonId = latest.latestSeasonId;
+    }
+
     if (!options.allowDestructiveOverwrite && Array.isArray(latest?.reminders)) {
       const currentReminders = Array.isArray(next.reminders) ? next.reminders : [];
       const seen = new Set();
@@ -3516,6 +3777,20 @@ return Number(cappedScore.toFixed(1));
     normalizeScoringSettings,
     getScoringSettings,
     normalizeState,
+    normalizeSeasonState,
+    normalizeSeasonHistory,
+    normalizeCurrentSeason,
+    getSeasonRoundDefs,
+    getSeasonRoundForDate,
+    getSeasonSeriesLength,
+    getSeasonDisplayName,
+    getSeasonDateWindows,
+    isSeasonDate,
+    isJuneSeasonDate,
+    buildSeasonId,
+    createEmptySeasonDraft,
+    getActiveSeasonPlayerPool,
+    getSeasonSeedSourceRows,
     cleanupOpponentDripSchedules,
     getOpponentDripScheduleCleanupSummary,
     loadAppState,
