@@ -185,3 +185,97 @@ test('saveStateSnapshot preserves existing season fields from stale snapshots', 
   assert.equal(saved.latestSeasonId, 'season-1');
   assert.equal(saved.seasonHistory.length, 1);
 });
+
+require('../season.js');
+const seasonUi = global.TaskPointsSeason;
+
+test('season UI helpers render safe shell without creating a current season', () => {
+  storage.clear();
+  const before = storage.get(core.STORAGE_KEY);
+  const html = seasonUi.renderSeasonView(core.normalizeState({}));
+  const after = storage.get(core.STORAGE_KEY);
+
+  assert.equal(before, after);
+  assert.match(html, /Season 1/);
+  assert.match(html, /June 2026 TaskPoints Championship/);
+  assert.match(html, /Preview and bracket tools coming next/);
+  assert.match(html, /Best-of-7 Finals/);
+});
+
+test('season UI helpers render current season and trophy case states defensively', () => {
+  const currentSeason = core.createEmptySeasonDraft({
+    nowISO: '2026-05-29T00:00:00.000Z',
+    status: 'active'
+  });
+  const currentHtml = seasonUi.renderSeasonView(core.normalizeState({ currentSeason }));
+  assert.match(currentHtml, /Current Season/);
+  assert.match(currentHtml, /Active/);
+  assert.match(currentHtml, /2026-06/);
+  assert.match(currentHtml, /Season tools will appear here in the next update/);
+
+  const archivedHtml = seasonUi.renderSeasonView(core.normalizeState({
+    seasonHistory: [{ ...currentSeason, currentSeason: null, championSummary: { name: 'Champion Bot' } }]
+  }));
+  assert.match(archivedHtml, /Trophy Case/);
+  assert.match(archivedHtml, /Champion Bot/);
+});
+
+test('season load path unwraps loadAppState state wrapper for current season', () => {
+  const originalLoadAppState = core.loadAppState;
+  const currentSeason = core.createEmptySeasonDraft({
+    nowISO: '2026-05-29T00:00:00.000Z',
+    status: 'active'
+  });
+
+  core.loadAppState = () => ({
+    state: core.normalizeState({ currentSeason }),
+    storageKeysFound: [core.STORAGE_KEY]
+  });
+
+  try {
+    const loaded = seasonUi.loadSeasonState();
+    assert.equal(loaded.currentSeason.id, currentSeason.id);
+    const html = seasonUi.renderSeasonView(loaded);
+    assert.match(html, /Current Season/);
+    assert.match(html, /Active/);
+  } finally {
+    core.loadAppState = originalLoadAppState;
+  }
+});
+
+test('season load path unwraps loadAppState state wrapper for trophy case history', () => {
+  const originalLoadAppState = core.loadAppState;
+  const archivedSeason = core.createEmptySeasonDraft({
+    nowISO: '2026-05-29T00:00:00.000Z',
+    status: 'finalized',
+    championSummary: { name: 'Archive Champ' }
+  });
+
+  core.loadAppState = () => ({
+    state: core.normalizeState({ seasonHistory: [archivedSeason] }),
+    storageKeysFound: [core.STORAGE_KEY]
+  });
+
+  try {
+    const loaded = seasonUi.loadSeasonState();
+    assert.equal(loaded.seasonHistory.length, 1);
+    const html = seasonUi.renderSeasonView(loaded);
+    assert.match(html, /Trophy Case/);
+    assert.match(html, /Archive Champ/);
+  } finally {
+    core.loadAppState = originalLoadAppState;
+  }
+});
+
+test('season load path still accepts raw state objects defensively', () => {
+  const originalLoadAppState = core.loadAppState;
+  const currentSeason = core.createEmptySeasonDraft({ nowISO: '2026-05-29T00:00:00.000Z' });
+  core.loadAppState = () => core.normalizeState({ currentSeason });
+
+  try {
+    const loaded = seasonUi.loadSeasonState();
+    assert.equal(loaded.currentSeason.id, currentSeason.id);
+  } finally {
+    core.loadAppState = originalLoadAppState;
+  }
+});
