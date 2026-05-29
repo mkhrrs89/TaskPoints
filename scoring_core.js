@@ -325,6 +325,343 @@
     return normalizeSeasonState(draft);
   }
 
+
+  const OFFICIAL_SEASON_ROUND_COUNTS = {
+    play_in: 2,
+    round_of_32: 16,
+    sweet_16: 8,
+    quarterfinals: 4,
+    semifinals: 2,
+    finals: 1
+  };
+  const OFFICIAL_ROUND_OF_32_PAIRINGS = [
+    [1, 'play_in_lowest'], [16, 17], [8, 25], [9, 24],
+    [4, 29], [13, 20], [5, 28], [12, 21],
+    [2, 'play_in_other'], [15, 18], [7, 26], [10, 23],
+    [3, 30], [14, 19], [6, 27], [11, 22]
+  ];
+  const OFFICIAL_SEASON_ROUND_ORDER = ['play_in', 'round_of_32', 'sweet_16', 'quarterfinals', 'semifinals', 'finals'];
+
+  function seasonNowISO(options = {}) {
+    return typeof options.nowISO === 'string' ? options.nowISO : new Date().toISOString();
+  }
+
+  function sanitizeOfficialSeasonId(options = {}) {
+    return typeof options.seasonId === 'string' && options.seasonId.trim()
+      ? options.seasonId.trim()
+      : buildSeasonId(options.name || DEFAULT_SEASON_NAME, options.monthKey || DEFAULT_SEASON_MONTH_KEY);
+  }
+
+  function seedEntryForOfficial(seeds, seedNumber) {
+    const row = (Array.isArray(seeds) ? seeds : []).find((seed) => Number(seed?.seed) === Number(seedNumber));
+    if (!row) return null;
+    const playerId = row.playerId || row.id || '';
+    return {
+      playerId,
+      playerName: row.playerName || row.name || playerId || `Seed ${seedNumber}`,
+      seed: Number(seedNumber)
+    };
+  }
+
+  function officialRoundDef(roundId) {
+    return JUNE_2026_SEASON_DATE_WINDOWS.find((round) => round.id === roundId) || { id: roundId, displayName: getSeasonDisplayName(roundId) || roundId, bestOf: 5 };
+  }
+
+  function officialSeriesId(seasonId, roundId, seriesIndex) {
+    return `${seasonId}_${roundId}_${seriesIndex}`;
+  }
+
+  function createOfficialSeries(options) {
+    const round = officialRoundDef(options.roundId);
+    const bestOf = Number(options.bestOf || round.bestOf || 5);
+    const now = options.nowISO || seasonNowISO(options);
+    const playerA = options.playerA || null;
+    const playerB = options.playerB || null;
+    return {
+      id: options.id,
+      seasonId: options.seasonId,
+      roundId: options.roundId,
+      roundName: round.displayName || getSeasonDisplayName(options.roundId) || options.roundId,
+      roundIndex: Number(options.roundIndex) || 0,
+      seriesIndex: Number(options.seriesIndex) || 1,
+      bestOf,
+      winsNeeded: Math.floor(bestOf / 2) + 1,
+      status: options.status || (playerA?.playerId && playerB?.playerId ? 'active' : 'pending'),
+      playerAId: playerA?.playerId || '',
+      playerBId: playerB?.playerId || '',
+      playerASeed: Number.isFinite(Number(playerA?.seed)) ? Number(playerA.seed) : null,
+      playerBSeed: Number.isFinite(Number(playerB?.seed)) ? Number(playerB.seed) : null,
+      playerAName: playerA?.playerName || '',
+      playerBName: playerB?.playerName || '',
+      placeholderA: options.placeholderA || '',
+      placeholderB: options.placeholderB || '',
+      winsA: 0,
+      winsB: 0,
+      winnerId: '',
+      loserId: '',
+      gameResults: [],
+      nextSeriesId: options.nextSeriesId || '',
+      nextSlot: options.nextSlot === 'B' ? 'B' : (options.nextSlot === 'A' ? 'A' : ''),
+      createdAtISO: now,
+      updatedAtISO: now
+    };
+  }
+
+  function setSeriesSlot(series, slot, player, options = {}) {
+    if (!series || !player) return series;
+    const next = { ...series };
+    const prefix = slot === 'B' ? 'B' : 'A';
+    next[`player${prefix}Id`] = player.playerId || player.id || '';
+    next[`player${prefix}Seed`] = Number.isFinite(Number(player.seed)) ? Number(player.seed) : null;
+    next[`player${prefix}Name`] = player.playerName || player.name || player.playerId || player.id || '';
+    next[`placeholder${prefix}`] = '';
+    next.updatedAtISO = seasonNowISO(options);
+    if (next.playerAId && next.playerBId && next.status === 'pending') next.status = 'active';
+    return next;
+  }
+
+  function buildOfficialSeasonBracketFromSeeds(seeds, options = {}) {
+    const seasonId = sanitizeOfficialSeasonId(options);
+    const now = seasonNowISO(options);
+    const rounds = OFFICIAL_SEASON_ROUND_ORDER.map((roundId, roundIndex) => {
+      const round = officialRoundDef(roundId);
+      return {
+        id: roundId,
+        displayName: round.displayName,
+        roundIndex,
+        bestOf: round.bestOf,
+        seriesIds: Array.from({ length: OFFICIAL_SEASON_ROUND_COUNTS[roundId] || 0 }, (_, index) => officialSeriesId(seasonId, roundId, index + 1))
+      };
+    });
+    return {
+      type: 'official_34_player_championship',
+      seasonId,
+      lockedAtISO: now,
+      generatedAtISO: now,
+      roundOrder: OFFICIAL_SEASON_ROUND_ORDER.slice(),
+      rounds,
+      playInProtection: 'lowest_remaining_play_in_winner_faces_seed_1',
+      roundOf32Pairings: OFFICIAL_ROUND_OF_32_PAIRINGS.map((pair) => pair.slice())
+    };
+  }
+
+  function createOfficialSeasonSeriesFromSeeds(seeds, options = {}) {
+    const seasonId = sanitizeOfficialSeasonId(options);
+    const now = seasonNowISO(options);
+    const series = {};
+    const add = (entry) => { series[entry.id] = entry; return entry; };
+    const nextFor = (roundId, index) => {
+      const nextRoundMap = { round_of_32: 'sweet_16', sweet_16: 'quarterfinals', quarterfinals: 'semifinals', semifinals: 'finals' };
+      const nextRoundId = nextRoundMap[roundId];
+      if (!nextRoundId) return { nextSeriesId: '', nextSlot: '' };
+      const nextIndex = Math.ceil(index / 2);
+      return { nextSeriesId: officialSeriesId(seasonId, nextRoundId, nextIndex), nextSlot: index % 2 === 1 ? 'A' : 'B' };
+    };
+
+    [[31, 34], [32, 33]].forEach((pair, index) => {
+      add(createOfficialSeries({
+        id: officialSeriesId(seasonId, 'play_in', index + 1), seasonId, roundId: 'play_in', roundIndex: 0, seriesIndex: index + 1,
+        bestOf: 3, status: 'active', playerA: seedEntryForOfficial(seeds, pair[0]), playerB: seedEntryForOfficial(seeds, pair[1]), nowISO: now
+      }));
+    });
+
+    OFFICIAL_ROUND_OF_32_PAIRINGS.forEach((pair, index) => {
+      const next = nextFor('round_of_32', index + 1);
+      const playerA = typeof pair[0] === 'number' ? seedEntryForOfficial(seeds, pair[0]) : null;
+      const playerB = typeof pair[1] === 'number' ? seedEntryForOfficial(seeds, pair[1]) : null;
+      add(createOfficialSeries({
+        id: officialSeriesId(seasonId, 'round_of_32', index + 1), seasonId, roundId: 'round_of_32', roundIndex: 1, seriesIndex: index + 1,
+        bestOf: 5, status: 'pending', playerA, playerB, placeholderA: playerA ? '' : 'Awaiting winner',
+        placeholderB: pair[1] === 'play_in_lowest' ? 'Lowest Play-In winner' : (pair[1] === 'play_in_other' ? 'Other Play-In winner' : (playerB ? '' : 'Awaiting winner')),
+        nowISO: now, ...next
+      }));
+    });
+
+    ['sweet_16', 'quarterfinals', 'semifinals', 'finals'].forEach((roundId, roundOffset) => {
+      const count = OFFICIAL_SEASON_ROUND_COUNTS[roundId];
+      for (let index = 1; index <= count; index += 1) {
+        const next = nextFor(roundId, index);
+        const priorRound = roundId === 'sweet_16' ? 'round_of_32' : roundId === 'quarterfinals' ? 'sweet_16' : roundId === 'semifinals' ? 'quarterfinals' : 'semifinals';
+        const priorA = officialSeriesId(seasonId, priorRound, index * 2 - 1);
+        const priorB = officialSeriesId(seasonId, priorRound, index * 2);
+        add(createOfficialSeries({
+          id: officialSeriesId(seasonId, roundId, index), seasonId, roundId, roundIndex: roundOffset + 2, seriesIndex: index,
+          bestOf: roundId === 'finals' ? 7 : 5, status: 'pending', placeholderA: `Winner of Series ${priorA}`, placeholderB: `Winner of Series ${priorB}`,
+          nowISO: now, ...next
+        }));
+      }
+    });
+    return series;
+  }
+
+  function lockSeasonPreviewToOfficialBracket(state, options = {}) {
+    const normalized = normalizeState(state || {});
+    const currentSeason = normalizeSeasonState(normalized.currentSeason || createEmptySeasonDraft(options));
+    const seasonId = currentSeason.id || sanitizeOfficialSeasonId(options);
+    const now = seasonNowISO(options);
+    const seeds = Array.isArray(currentSeason.seeds) ? currentSeason.seeds.map((seed, index) => ({ ...seed, seed: index + 1 })) : [];
+    const bracket = buildOfficialSeasonBracketFromSeeds(seeds, { ...options, seasonId, name: currentSeason.name, monthKey: currentSeason.monthKey, nowISO: now });
+    const series = createOfficialSeasonSeriesFromSeeds(seeds, { ...options, seasonId, name: currentSeason.name, monthKey: currentSeason.monthKey, nowISO: now });
+    const nextSeason = normalizeSeasonState({
+      ...currentSeason,
+      status: 'locked',
+      seeds,
+      bracket,
+      series,
+      seedMode: currentSeason.seedMode,
+      warnings: Array.isArray(currentSeason.warnings) ? currentSeason.warnings.slice() : [],
+      updatedAtISO: now,
+      meta: { ...(currentSeason.meta || {}), previewOnly: false, officialBracketCreatedAtISO: now, seedsLocked: true }
+    });
+    return normalizeState({ ...normalized, currentSeason: nextSeason, latestSeasonId: nextSeason.id || normalized.latestSeasonId || '' });
+  }
+
+  function getSeasonSeriesWinner(series) {
+    if (!series || typeof series !== 'object') return null;
+    if (series.winnerId) return series.winnerId;
+    const winsNeeded = Number(series.winsNeeded) || (Math.floor((Number(series.bestOf) || 1) / 2) + 1);
+    if ((Number(series.winsA) || 0) >= winsNeeded) return series.playerAId || null;
+    if ((Number(series.winsB) || 0) >= winsNeeded) return series.playerBId || null;
+    return null;
+  }
+
+  function isSeasonSeriesComplete(series) {
+    return Boolean(getSeasonSeriesWinner(series)) || series?.status === 'complete';
+  }
+
+  function seasonSeriesCompetitor(series, slot) {
+    const prefix = slot === 'B' ? 'B' : 'A';
+    return {
+      playerId: series?.[`player${prefix}Id`] || '',
+      playerName: series?.[`player${prefix}Name`] || '',
+      seed: series?.[`player${prefix}Seed`]
+    };
+  }
+
+  function recordSeasonSeriesGameResult(season, seriesId, gameResult, options = {}) {
+    const nextSeason = normalizeSeasonState(season);
+    if (!nextSeason) return { ok: false, error: 'invalid_season', season };
+    const series = nextSeason.series?.[seriesId];
+    if (!series) return { ok: false, error: 'series_not_found', season: nextSeason };
+    if (series.status === 'complete') return { ok: false, error: 'series_already_complete', season: nextSeason, series };
+    const winnerId = gameResult?.winnerId;
+    if (!winnerId || (winnerId !== series.playerAId && winnerId !== series.playerBId)) return { ok: false, error: 'invalid_or_ambiguous_winner', season: nextSeason, series };
+    const loserId = winnerId === series.playerAId ? series.playerBId : series.playerAId;
+    if (!loserId || (gameResult?.loserId && gameResult.loserId !== loserId)) return { ok: false, error: 'invalid_or_ambiguous_loser', season: nextSeason, series };
+    const results = Array.isArray(series.gameResults) ? series.gameResults.slice() : [];
+    const matchupId = typeof gameResult?.matchupId === 'string' ? gameResult.matchupId : '';
+    const dateKey = typeof gameResult?.dateKey === 'string' ? gameResult.dateKey : '';
+    const duplicate = results.some((result) => (matchupId && result.matchupId === matchupId) || (!matchupId && dateKey && result.dateKey === dateKey));
+    if (duplicate) return { ok: false, error: 'duplicate_game_result', season: nextSeason, series };
+    const now = seasonNowISO(options);
+    const nextSeries = {
+      ...series,
+      winsA: (Number(series.winsA) || 0) + (winnerId === series.playerAId ? 1 : 0),
+      winsB: (Number(series.winsB) || 0) + (winnerId === series.playerBId ? 1 : 0),
+      gameResults: results.concat({
+        dateKey,
+        matchupId,
+        winnerId,
+        loserId,
+        playerAScore: gameResult?.playerAScore,
+        playerBScore: gameResult?.playerBScore,
+        source: gameResult?.source === 'matchup' ? 'matchup' : 'manual',
+        recordedAtISO: now
+      }),
+      updatedAtISO: now
+    };
+    const winner = getSeasonSeriesWinner(nextSeries);
+    if (winner) {
+      nextSeries.status = 'complete';
+      nextSeries.winnerId = winner;
+      nextSeries.loserId = winner === nextSeries.playerAId ? nextSeries.playerBId : nextSeries.playerAId;
+    }
+    nextSeason.series = { ...(nextSeason.series || {}), [seriesId]: nextSeries };
+    nextSeason.updatedAtISO = now;
+    return { ok: true, season: nextSeason, series: nextSeries, complete: nextSeries.status === 'complete' };
+  }
+
+  function resolvePlayInWinnersIntoRoundOf32(season, options = {}) {
+    const nextSeason = normalizeSeasonState(season);
+    if (!nextSeason) return { ok: false, error: 'invalid_season', season };
+    const allSeries = nextSeason.series || {};
+    const playIn = Object.values(allSeries).filter((series) => series?.roundId === 'play_in').sort((a, b) => (a.seriesIndex || 0) - (b.seriesIndex || 0));
+    if (playIn.length < 2 || playIn.some((series) => !getSeasonSeriesWinner(series))) return { ok: false, error: 'play_in_not_complete', season: nextSeason };
+    const winners = playIn.map((series) => seasonSeriesCompetitor(series, getSeasonSeriesWinner(series) === series.playerAId ? 'A' : 'B'));
+    winners.sort((a, b) => (Number(b.seed) || 0) - (Number(a.seed) || 0));
+    const worseSeedWinner = winners[0];
+    const otherWinner = winners[1];
+    const r32 = Object.values(allSeries).filter((series) => series?.roundId === 'round_of_32').sort((a, b) => (a.seriesIndex || 0) - (b.seriesIndex || 0));
+    if (!r32[0] || !r32[8]) return { ok: false, error: 'round_of_32_slots_missing', season: nextSeason };
+    const now = seasonNowISO(options);
+    const nextSeries = { ...allSeries };
+    nextSeries[r32[0].id] = setSeriesSlot(r32[0], 'B', worseSeedWinner, { nowISO: now });
+    nextSeries[r32[8].id] = setSeriesSlot(r32[8], 'B', otherWinner, { nowISO: now });
+    nextSeason.series = nextSeries;
+    nextSeason.updatedAtISO = now;
+    return { ok: true, season: nextSeason, seed1Opponent: worseSeedWinner, seed2Opponent: otherWinner };
+  }
+
+  function advanceSeasonSeriesWinner(season, seriesId, options = {}) {
+    let nextSeason = normalizeSeasonState(season);
+    if (!nextSeason) return { ok: false, error: 'invalid_season', season };
+    const series = nextSeason.series?.[seriesId];
+    if (!series) return { ok: false, error: 'series_not_found', season: nextSeason };
+    const winnerId = getSeasonSeriesWinner(series);
+    if (!winnerId) return { ok: false, error: 'series_not_complete', season: nextSeason, series };
+    if (series.roundId === 'play_in') return resolvePlayInWinnersIntoRoundOf32(nextSeason, options);
+    const slot = series.nextSlot;
+    const nextSeriesId = series.nextSeriesId;
+    if (!nextSeriesId || !slot) {
+      if (series.roundId === 'finals') {
+        const winner = seasonSeriesCompetitor(series, winnerId === series.playerAId ? 'A' : 'B');
+        nextSeason.championSummary = { playerId: winner.playerId, playerName: winner.playerName, seed: winner.seed, sourceSeriesId: series.id };
+        return { ok: true, season: nextSeason, champion: winner };
+      }
+      return { ok: true, season: nextSeason, advanced: false };
+    }
+    const target = nextSeason.series?.[nextSeriesId];
+    if (!target) return { ok: false, error: 'next_series_not_found', season: nextSeason, series };
+    const winner = seasonSeriesCompetitor(series, winnerId === series.playerAId ? 'A' : 'B');
+    nextSeason.series = { ...(nextSeason.series || {}), [nextSeriesId]: setSeriesSlot(target, slot, winner, options) };
+    nextSeason.updatedAtISO = seasonNowISO(options);
+    return { ok: true, season: nextSeason, advanced: true, nextSeries: nextSeason.series[nextSeriesId] };
+  }
+
+  function getCurrentSeasonRoundIdForDate(dateKey) {
+    return getSeasonRoundForDate(dateKey)?.id || '';
+  }
+
+  function getActiveSeasonSeriesForDate(season, dateKey) {
+    const roundId = getCurrentSeasonRoundIdForDate(dateKey);
+    if (!roundId || !season?.series) return [];
+    return Object.values(season.series).filter((series) => series?.roundId === roundId && series.status === 'active');
+  }
+
+  function getSeriesStatusText(series) {
+    if (!series) return 'Series unavailable';
+    if (series.status === 'complete') {
+      const winnerName = series.winnerId === series.playerAId ? series.playerAName : series.winnerId === series.playerBId ? series.playerBName : 'Winner';
+      return `${winnerName || 'Winner'} wins series ${Number(series.winsA) || 0}–${Number(series.winsB) || 0}`;
+    }
+    const a = Number(series.winsA) || 0;
+    const b = Number(series.winsB) || 0;
+    if (a === b) return a === 0 ? `Series tied 0–0` : `Series tied ${a}–${b}`;
+    const leader = a > b ? (series.playerAName || 'Player A') : (series.playerBName || 'Player B');
+    return `${leader} leads series ${Math.max(a, b)}–${Math.min(a, b)}`;
+  }
+
+  function getWinnerFacesText(season, series) {
+    if (!series) return 'Winner faces: TBD';
+    if (series.roundId === 'play_in') return 'Winner enters Round of 32 with Play-In protection';
+    if (!series.nextSeriesId || !series.nextSlot) return series.roundId === 'finals' ? 'Winner becomes champion candidate' : 'Winner faces: TBD';
+    const next = season?.series?.[series.nextSeriesId];
+    if (!next) return 'Winner faces: TBD';
+    const oppositeSlot = series.nextSlot === 'A' ? 'B' : 'A';
+    const name = next[`player${oppositeSlot}Name`] || next[`placeholder${oppositeSlot}`] || 'TBD';
+    return `Winner faces: ${name}`;
+  }
+
   function getActiveSeasonPlayerPool(state) {
     try {
       return rankablePlayers(state || {}).map((player) => ({ ...player }));
@@ -3795,6 +4132,18 @@ return Number(cappedScore.toFixed(1));
     createEmptySeasonDraft,
     getActiveSeasonPlayerPool,
     getSeasonSeedSourceRows,
+    buildOfficialSeasonBracketFromSeeds,
+    createOfficialSeasonSeriesFromSeeds,
+    lockSeasonPreviewToOfficialBracket,
+    recordSeasonSeriesGameResult,
+    getSeasonSeriesWinner,
+    isSeasonSeriesComplete,
+    advanceSeasonSeriesWinner,
+    resolvePlayInWinnersIntoRoundOf32,
+    getActiveSeasonSeriesForDate,
+    getCurrentSeasonRoundIdForDate,
+    getSeriesStatusText,
+    getWinnerFacesText,
     cleanupOpponentDripSchedules,
     getOpponentDripScheduleCleanupSummary,
     loadAppState,
