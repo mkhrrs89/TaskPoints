@@ -1146,6 +1146,7 @@ textarea{
             <option value="name-desc">Name (Z → A)</option>
             <option value="avg-desc">PPD (high → low)</option>
             <option value="overall-desc">Overall Rating (high → low)</option>
+            <option value="ranking-asc">Ranking</option>
             <option value="baseline-desc">Baseline (high → low)</option>
             <option value="created-desc">Recently added</option>
             <option value="created-asc">Oldest first</option>
@@ -1609,6 +1610,7 @@ const PLAYER_SORT_OPTIONS = [
   "name-desc",
   "avg-desc",
   "overall-desc",
+  "ranking-asc",
   "baseline-desc",
   "created-desc",
   "created-asc"
@@ -2665,6 +2667,18 @@ if (unresolvedImageIds.length) {
     return Number.isFinite(ts) ? ts : 0;
   };
 
+  const rankingByPlayerId = new Map(
+    (window.TaskPointsCore?.computeCanonicalRankings
+      ? TaskPointsCore.computeCanonicalRankings(state)
+      : []
+    ).map((row) => [row.playerId || row.id, row.rank])
+  );
+
+  const getRankingForPlayer = (player) => {
+    const rank = rankingByPlayerId.get(player?.id);
+    return Number.isFinite(rank) ? rank : Infinity;
+  };
+
   const clampNumber = (value, min, max) => {
     const n = Number(value);
     if (!Number.isFinite(n)) return min;
@@ -2754,6 +2768,12 @@ if (unresolvedImageIds.length) {
         const overallA = getPlayerOverallRating(a);
         const overallB = getPlayerOverallRating(b);
         if (overallA !== overallB) return overallB - overallA;
+        break;
+      }
+      case "ranking-asc": {
+        const rankA = getRankingForPlayer(a);
+        const rankB = getRankingForPlayer(b);
+        if (rankA !== rankB) return rankA - rankB;
         break;
       }
       case "baseline-desc": {
