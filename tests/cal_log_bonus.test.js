@@ -829,3 +829,112 @@ test('matchups grouping helper remains inactive for normal non-Season days', () 
   const featured = core.getFeaturedSeasonMatchup(season, '2026-07-02', { matchups: [{ dateKey: '2026-07-02', playerAId: 'YOU', playerBId: 'P1' }] });
   assert.equal(featured, null);
 });
+
+test('season admin helpers handle missing series and manual winner edits defensively', () => {
+  const season = core.createEmptySeasonDraft({ status: 'active', series: {
+    pending: { id: 'pending', roundId: 'sweet_16', roundName: 'Sweet 16', roundIndex: 2, seriesIndex: 1, bestOf: 5, winsNeeded: 3, status: 'pending', placeholderA: 'Winner A', placeholderB: 'Winner B', gameResults: [] },
+    finals: { id: 'finals', roundId: 'finals', roundName: 'Finals', roundIndex: 5, seriesIndex: 1, bestOf: 7, winsNeeded: 4, status: 'active', playerAId: 'P1', playerAName: 'One', playerASeed: 1, playerBId: 'P2', playerBName: 'Two', playerBSeed: 2, winsA: 3, winsB: 2, gameResults: [] }
+  } });
+
+  assert.equal(core.updateSeasonSeriesManualResult(season, 'missing', { winsA: 1 }).ok, false);
+  const edited = core.updateSeasonSeriesManualResult(season, 'finals', { winsA: 4, winsB: 2, winnerId: 'P1' });
+  assert.equal(edited.ok, true);
+  assert.equal(edited.series.status, 'complete');
+  assert.equal(edited.series.winnerId, 'P1');
+
+  const cleared = core.updateSeasonSeriesManualResult(edited.season, 'finals', { clear: true });
+  assert.equal(cleared.ok, true);
+  assert.equal(cleared.series.winnerId, '');
+  assert.equal(cleared.series.status, 'active');
+
+  const reassigned = core.assignSeasonBracketSlot(season, 'pending', 'A', 'P1');
+  assert.equal(reassigned.ok, true);
+  assert.equal(reassigned.series.playerAId, 'P1');
+});
+
+test('season result sync repair helper can be triggered safely', () => {
+  const seeds = makeOfficialSeasonSeedList();
+  let season = core.createEmptySeasonDraft({
+    id: 'season_1_june_2026',
+    status: 'locked',
+    seeds,
+    series: core.createOfficialSeasonSeriesFromSeeds(seeds, { seasonId: 'season_1_june_2026' }),
+    meta: { seasonMatchupControlEnabled: true }
+  });
+  const playIn = Object.values(season.series).find((item) => item.roundId === 'play_in' && item.seriesIndex === 1);
+  const state = core.normalizeState({ currentSeason: season, players: makeSeasonPlayers(), matchups: [{
+    id: 'sync-game', dateKey: '2026-06-01', matchupType: 'tournament', seasonId: season.id, seriesId: playIn.id,
+    playerAId: playIn.playerAId, playerBId: playIn.playerBId, playerAName: playIn.playerAName, playerBName: playIn.playerBName, scoreA: 11, scoreB: 8
+  }] });
+  const synced = core.syncSeasonResultsFromDailyMatchups(state, '2026-06-01');
+  assert.equal(synced.ok, true);
+  assert.equal(synced.changed, true);
+  assert.equal(synced.updatedSeason.series[playIn.id].winsA, 1);
+});
+
+test('season finalization archives completed Finals and clears currentSeason', () => {
+  const seeds = makeOfficialSeasonSeedList(2);
+  const season = core.createEmptySeasonDraft({
+    id: 'final-season',
+    name: 'Final Season',
+    status: 'champion_crowned',
+    seeds,
+    series: {
+      f: { id: 'f', roundId: 'finals', roundName: 'Finals', roundIndex: 5, seriesIndex: 1, bestOf: 7, winsNeeded: 4, status: 'complete', playerAId: 'P1', playerAName: 'Player 1', playerASeed: 1, playerBId: 'P2', playerBName: 'Player 2', playerBSeed: 2, winsA: 4, winsB: 1, winnerId: 'P1', loserId: 'P2', gameResults: [
+        { dateKey: '2026-06-24', winnerId: 'P1', loserId: 'P2', playerAScore: 10, playerBScore: 8, matchupId: 'f1' }
+      ] }
+    }
+  });
+  const incomplete = { ...season, series: { f: { ...season.series.f, status: 'active', winnerId: '', loserId: '', winsA: 2 } } };
+  assert.equal(core.canFinalizeSeason(incomplete, {}, '2026-06-30'), false);
+  assert.equal(core.canFinalizeSeason(season, {}, '2026-06-30'), true);
+
+  const state = core.normalizeState({ currentSeason: season, latestSeasonId: season.id, matchups: [{ id: 'f1', dateKey: '2026-06-24', matchupType: 'tournament', seasonId: season.id, seriesId: 'f', scoreA: 10, scoreB: 8 }] });
+  const finalized = core.finalizeCurrentSeason(state, { dateKey: '2026-06-30' });
+  assert.equal(finalized.ok, true);
+  assert.equal(finalized.state.currentSeason, null);
+  assert.equal(finalized.state.latestSeasonId, 'final-season');
+  assert.equal(finalized.state.seasonHistory.length, 1);
+  const archive = finalized.archiveEntry;
+  assert.equal(archive.championSummary.championName, 'Player 1');
+  assert.equal(archive.runnerUpName, 'Player 2');
+  assert.match(archive.finalsResult, /Player 1 defeats Player 2/);
+  assert.equal(archive.originalSeeds.length, 2);
+  assert.equal(archive.seriesResults.length, 1);
+  assert.equal(archive.finalPlacements[0].playerId, 'P1');
+  assert.equal(archive.tournamentMatchupResults.length, 1);
+});
+
+test('Trophy Case rendering handles archived seasons with full season details defensively', () => {
+  const archived = core.createEmptySeasonDraft({
+    id: 'archive-1',
+    name: 'Archive One',
+    status: 'finalized',
+    championSummary: { championName: 'Trophy Champ', runnerUpName: 'Runner Bot', finalsResult: 'Trophy Champ defeats Runner Bot, 4–3', record: '4–3' },
+    finalPlacements: [{ playerId: 'P1', playerName: 'Trophy Champ', seed: 1, finish: 'Champion', wins: 4, losses: 3, averageScore: 11 }],
+    seriesResults: [{ id: 'f', roundId: 'finals', roundName: 'Finals', playerAName: 'Trophy Champ', playerBName: 'Runner Bot', winnerName: 'Trophy Champ', resultText: 'Trophy Champ wins series 4–3' }]
+  });
+  const html = seasonUi.renderSeasonView(core.normalizeState({ seasonHistory: [archived] }));
+  assert.match(html, /Trophy Case/);
+  assert.match(html, /Create New Season/);
+  assert.match(html, /Trophy Champ/);
+  assert.match(html, /Full Season/);
+  assert.match(html, /Final Placements/);
+});
+
+test('Create New Season shell supports 34 players and warns on non-34 player count', () => {
+  const state34 = core.normalizeState({ players: makeSeasonPlayers(33) });
+  const manual34 = seasonUi.buildManualSeasonPreview(state34, { name: 'Manual 34', startDate: '2026-07-01', endDate: '2026-07-31' });
+  assert.equal(manual34.seeds.length, 34);
+  assert.equal(manual34.meta.canCreateOfficialBracket, true);
+  assert.equal(manual34.warnings.some((warning) => warning.code === 'non_34_player_pool'), false);
+
+  const stateSmall = core.normalizeState({ players: makeSeasonPlayers(10) });
+  const manualSmall = seasonUi.buildManualSeasonPreview(stateSmall, { name: 'Manual Small', startDate: '2026-07-01', endDate: '2026-07-31' });
+  assert.equal(manualSmall.seeds.length, 11);
+  assert.equal(manualSmall.meta.canCreateOfficialBracket, false);
+  assert.equal(manualSmall.warnings.some((warning) => warning.code === 'non_34_player_pool'), true);
+
+  const html = seasonUi.renderSeasonView(core.normalizeState({ seasonHistory: [core.createEmptySeasonDraft({ status: 'finalized', championSummary: { championName: 'Past Champ' } })], players: makeSeasonPlayers(10) }));
+  assert.match(html, /This format was designed for 34 players/);
+});

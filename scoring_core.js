@@ -616,6 +616,8 @@
       if (series.roundId === 'finals') {
         const winner = seasonSeriesCompetitor(series, winnerId === series.playerAId ? 'A' : 'B');
         nextSeason.championSummary = { playerId: winner.playerId, playerName: winner.playerName, seed: winner.seed, sourceSeriesId: series.id };
+        nextSeason.status = 'champion_crowned';
+        nextSeason.updatedAtISO = seasonNowISO(options);
         return { ok: true, season: nextSeason, champion: winner };
       }
       return { ok: true, season: nextSeason, advanced: false };
@@ -943,6 +945,226 @@
       });
     return { championId, championName, runnerUpId, runnerUpName, finalsResult: `${championName} defeats ${runnerUpName}, ${Number(finals.winsA) || 0}–${Number(finals.winsB) || 0}`, record: `${stats.wins}–${stats.losses}`, ...stats, path };
   }
+
+  function getSeasonChampionFromFinals(season) {
+    const finals = getSeasonSeriesEntries(season).find((series) => series?.roundId === 'finals' && isSeasonSeriesComplete(series));
+    if (!finals) return null;
+    const championId = getSeasonSeriesWinner(finals) || finals.winnerId || '';
+    if (!championId) return null;
+    const slot = championId === finals.playerAId ? 'A' : championId === finals.playerBId ? 'B' : '';
+    return {
+      playerId: championId,
+      playerName: slot ? finals[`player${slot}Name`] || championId : championId,
+      seed: slot ? finals[`player${slot}Seed`] : null,
+      seriesId: finals.id,
+      finals
+    };
+  }
+
+  function getSeasonFinalPlacements(season, state = {}) {
+    return getFinalPlacements(season, state);
+  }
+
+  function getSeasonFinalsSeries(season) {
+    return getSeasonSeriesEntries(season).find((series) => series?.roundId === 'finals') || null;
+  }
+
+  function canFinalizeSeason(season, state = {}, dateKeyStr = '') {
+    const normalized = normalizeSeasonState(season);
+    if (!normalized) return false;
+    const finals = getSeasonFinalsSeries(normalized);
+    if (!finals || !isSeasonSeriesComplete(finals)) return false;
+    return Boolean(getSeasonChampionFromFinals(normalized));
+  }
+
+  function buildSeriesArchiveResult(series) {
+    if (!series) return null;
+    const winnerSlot = series.winnerId === series.playerAId ? 'A' : series.winnerId === series.playerBId ? 'B' : '';
+    const loserSlot = series.loserId === series.playerAId ? 'A' : series.loserId === series.playerBId ? 'B' : '';
+    return {
+      id: series.id || '',
+      roundId: series.roundId || '',
+      roundName: series.roundName || getSeasonDisplayName(series.roundId) || series.roundId || '',
+      roundIndex: Number(series.roundIndex) || 0,
+      seriesIndex: Number(series.seriesIndex) || 0,
+      bestOf: Number(series.bestOf) || null,
+      winsA: Number(series.winsA) || 0,
+      winsB: Number(series.winsB) || 0,
+      status: series.status || '',
+      playerAId: series.playerAId || '',
+      playerAName: series.playerAName || '',
+      playerASeed: series.playerASeed ?? null,
+      playerBId: series.playerBId || '',
+      playerBName: series.playerBName || '',
+      playerBSeed: series.playerBSeed ?? null,
+      winnerId: series.winnerId || '',
+      winnerName: winnerSlot ? series[`player${winnerSlot}Name`] || series.winnerId || '' : '',
+      loserId: series.loserId || '',
+      loserName: loserSlot ? series[`player${loserSlot}Name`] || series.loserId || '' : '',
+      resultText: series.winnerId ? getSeriesStatusText(series) : `${Number(series.winsA) || 0}–${Number(series.winsB) || 0}`,
+      gameResults: Array.isArray(series.gameResults) ? series.gameResults.map((result) => ({ ...result })) : []
+    };
+  }
+
+  function collectTournamentMatchupResults(state, season) {
+    const seasonId = season?.id || '';
+    return (Array.isArray(state?.matchups) ? state.matchups : [])
+      .filter((matchup) => matchup?.seasonId === seasonId && matchup?.matchupType === 'tournament')
+      .map((matchup) => ({ ...matchup }));
+  }
+
+  function buildSeasonArchiveEntry(season, state = {}) {
+    const normalized = normalizeSeasonState(season);
+    if (!normalized) return null;
+    const summary = getChampionSummary(normalized, { ...(state || {}), currentSeason: normalized });
+    const finals = getSeasonFinalsSeries(normalized);
+    const placements = getSeasonFinalPlacements(normalized, { ...(state || {}), currentSeason: normalized });
+    const seriesResults = getSeasonSeriesEntries(normalized).map(buildSeriesArchiveResult).filter(Boolean);
+    const tournamentMatchupResults = collectTournamentMatchupResults(state || {}, normalized);
+    const nowISO = seasonNowISO({});
+    return normalizeSeasonState({
+      ...normalized,
+      status: 'finalized',
+      archivedAtISO: nowISO,
+      finalizedAtISO: nowISO,
+      championSummary: summary,
+      championId: summary.championId || '',
+      championName: summary.championName || '',
+      runnerUpId: summary.runnerUpId || '',
+      runnerUpName: summary.runnerUpName || '',
+      finalsResult: summary.finalsResult || '',
+      finalsSeries: finals ? buildSeriesArchiveResult(finals) : null,
+      seriesResults,
+      originalSeeds: Array.isArray(normalized.seeds) ? normalized.seeds.map((seed) => ({ ...seed })) : [],
+      finalPlacements: placements,
+      tournamentStats: placements,
+      tournamentMatchupResults,
+      dailyTournamentResults: isSeasonObject(normalized.dailyTournamentResults) ? { ...normalized.dailyTournamentResults } : {}
+    });
+  }
+
+  function finalizeCurrentSeason(state, options = {}) {
+    const normalized = normalizeState(state || {});
+    const season = normalizeSeasonState(normalized.currentSeason);
+    if (!season) return { ok: false, error: 'no_current_season', state: normalized, archiveEntry: null };
+    const dateKeyStr = typeof options.dateKey === 'string' ? options.dateKey : (typeof todayKey === 'function' ? todayKey() : '');
+    if (!options.force && !canFinalizeSeason(season, normalized, dateKeyStr)) {
+      return { ok: false, error: 'finals_not_complete', state: normalized, archiveEntry: null };
+    }
+    const archiveEntry = buildSeasonArchiveEntry(season, normalized);
+    if (!archiveEntry) return { ok: false, error: 'archive_failed', state: normalized, archiveEntry: null };
+    const history = normalizeSeasonHistory(normalized.seasonHistory)
+      .filter((entry) => entry.id !== archiveEntry.id)
+      .concat(archiveEntry);
+    const nextState = normalizeState({
+      ...normalized,
+      currentSeason: null,
+      latestSeasonId: archiveEntry.id,
+      seasonHistory: history
+    });
+    return { ok: true, state: nextState, archiveEntry };
+  }
+
+  function updateSeasonSeriesManualResult(season, seriesId, patch = {}, options = {}) {
+    const nextSeason = normalizeSeasonState(season);
+    if (!nextSeason) return { ok: false, error: 'invalid_season', season };
+    const series = nextSeason.series?.[seriesId];
+    if (!series) return { ok: false, error: 'series_not_found', season: nextSeason };
+    if (patch.clear === true) {
+      const cleared = { ...series, winsA: 0, winsB: 0, winnerId: '', loserId: '', status: series.playerAId && series.playerBId ? 'active' : 'pending', updatedAtISO: seasonNowISO(options) };
+      nextSeason.series = { ...(nextSeason.series || {}), [seriesId]: cleared };
+      nextSeason.updatedAtISO = seasonNowISO(options);
+      return { ok: true, season: nextSeason, series: cleared };
+    }
+    if (patch.recalculate === true) {
+      const recalculated = recalculateSeasonSeriesFromGameResults(series, options);
+      nextSeason.series = { ...(nextSeason.series || {}), [seriesId]: recalculated };
+      nextSeason.updatedAtISO = seasonNowISO(options);
+      return { ok: true, season: nextSeason, series: recalculated };
+    }
+    const winsA = Number.isFinite(Number(patch.winsA)) ? Math.max(0, Math.floor(Number(patch.winsA))) : (Number(series.winsA) || 0);
+    const winsB = Number.isFinite(Number(patch.winsB)) ? Math.max(0, Math.floor(Number(patch.winsB))) : (Number(series.winsB) || 0);
+    const winsNeeded = Number(series.winsNeeded) || Math.floor((Number(series.bestOf) || 1) / 2) + 1;
+    let winnerId = typeof patch.winnerId === 'string' ? patch.winnerId : (series.winnerId || '');
+    if (winnerId && winnerId !== series.playerAId && winnerId !== series.playerBId) winnerId = '';
+    if (!winnerId && (winsA >= winsNeeded || winsB >= winsNeeded)) winnerId = winsA >= winsNeeded ? series.playerAId : series.playerBId;
+    let status = series.playerAId && series.playerBId ? 'active' : 'pending';
+    let loserId = '';
+    if (winnerId) {
+      status = 'complete';
+      loserId = winnerId === series.playerAId ? series.playerBId : series.playerAId;
+    }
+    const updated = { ...series, winsA, winsB, winnerId, loserId, status, updatedAtISO: seasonNowISO(options) };
+    nextSeason.series = { ...(nextSeason.series || {}), [seriesId]: updated };
+    nextSeason.updatedAtISO = seasonNowISO(options);
+    let advanced = null;
+    if (patch.advance === true && winnerId) {
+      advanced = advanceSeasonSeriesWinner(nextSeason, seriesId, options);
+      if (advanced.ok) return { ok: true, season: advanced.season, series: advanced.season.series?.[seriesId] || updated, advanced };
+    }
+    return { ok: true, season: nextSeason, series: updated, advanced };
+  }
+
+  function assignSeasonBracketSlot(season, targetSeriesId, slot, playerId, options = {}) {
+    const nextSeason = normalizeSeasonState(season);
+    if (!nextSeason) return { ok: false, error: 'invalid_season', season };
+    const target = nextSeason.series?.[targetSeriesId];
+    if (!target) return { ok: false, error: 'series_not_found', season: nextSeason };
+    const prefix = slot === 'B' ? 'B' : 'A';
+    if (!playerId) {
+      const cleared = { ...target, [`player${prefix}Id`]: '', [`player${prefix}Name`]: '', [`player${prefix}Seed`]: null, [`placeholder${prefix}`]: 'Awaiting winner', updatedAtISO: seasonNowISO(options) };
+      if (!cleared.playerAId || !cleared.playerBId) cleared.status = 'pending';
+      nextSeason.series = { ...(nextSeason.series || {}), [targetSeriesId]: cleared };
+      nextSeason.updatedAtISO = seasonNowISO(options);
+      return { ok: true, season: nextSeason, series: cleared };
+    }
+    const seed = (Array.isArray(nextSeason.seeds) ? nextSeason.seeds : []).find((entry) => (entry?.playerId || entry?.id) === playerId) || {};
+    const poolPlayer = (Array.isArray(nextSeason.playerPool) ? nextSeason.playerPool : []).find((entry) => (entry?.id || entry?.playerId) === playerId) || {};
+    const player = { playerId, playerName: seed.playerName || seed.name || poolPlayer.name || playerId, seed: seed.seed ?? null };
+    const assigned = setSeriesSlot(target, prefix, player, options);
+    nextSeason.series = { ...(nextSeason.series || {}), [targetSeriesId]: assigned };
+    nextSeason.updatedAtISO = seasonNowISO(options);
+    return { ok: true, season: nextSeason, series: assigned };
+  }
+
+  function recalculateAllSeasonSeriesFromGameResults(season, options = {}) {
+    const nextSeason = normalizeSeasonState(season);
+    if (!nextSeason) return { ok: false, error: 'invalid_season', season };
+    const nextSeries = {};
+    let changed = false;
+    Object.entries(nextSeason.series || {}).forEach(([id, series]) => {
+      if (!series) return;
+      const recalculated = recalculateSeasonSeriesFromGameResults(series, options);
+      nextSeries[id] = recalculated;
+      if (JSON.stringify(recalculated) !== JSON.stringify(series)) changed = true;
+    });
+    nextSeason.series = nextSeries;
+    nextSeason.updatedAtISO = seasonNowISO(options);
+    return { ok: true, changed, season: nextSeason };
+  }
+
+  function repairSeasonChampionshipData(state, options = {}) {
+    const normalized = normalizeState(state || {});
+    const cleanSeriesMap = (seriesMap) => {
+      const cleaned = {};
+      Object.entries(isSeasonObject(seriesMap) ? seriesMap : {}).forEach(([id, series]) => {
+        if (!series || typeof series !== 'object') return;
+        const seriesId = series.id || id;
+        if (!seriesId || (!series.roundId && !series.playerAId && !series.playerBId && !series.placeholderA && !series.placeholderB)) return;
+        cleaned[seriesId] = { ...series, id: seriesId };
+      });
+      return cleaned;
+    };
+    const repairSeason = (season) => {
+      const fixed = normalizeSeasonState(season);
+      if (!fixed) return null;
+      return normalizeSeasonState({ ...fixed, series: cleanSeriesMap(fixed.series) });
+    };
+    const currentSeason = repairSeason(normalized.currentSeason);
+    const seasonHistory = normalizeSeasonHistory(normalized.seasonHistory).map(repairSeason).filter(Boolean);
+    return { ok: true, state: normalizeState({ ...normalized, currentSeason, seasonHistory }) };
+  }
+
 
 
 
@@ -4824,6 +5046,16 @@ return Number(cappedScore.toFixed(1));
     getEliminatedPlayers,
     getFinalPlacements,
     getChampionSummary,
+    repairSeasonChampionshipData,
+    recalculateAllSeasonSeriesFromGameResults,
+    recalculateSeasonSeriesFromGameResults,
+    assignSeasonBracketSlot,
+    updateSeasonSeriesManualResult,
+    finalizeCurrentSeason,
+    buildSeasonArchiveEntry,
+    canFinalizeSeason,
+    getSeasonFinalPlacements,
+    getSeasonChampionFromFinals,
     shouldUseSeasonMatchupControl,
     buildSeasonDailySlate,
     getPairingKey,

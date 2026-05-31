@@ -301,12 +301,83 @@
   }
 
 
+  function applyManualSeasonSeedReorderWithoutBracket(season, fromIndex, toIndex, options = {}) {
+    const seeds = Array.isArray(season?.seeds) ? season.seeds.slice() : [];
+    const from = Number(fromIndex);
+    const to = Number(toIndex);
+    if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to < 0 || from >= seeds.length || to >= seeds.length || from === to) return season;
+    const [moved] = seeds.splice(from, 1);
+    seeds.splice(to, 0, moved);
+    const renumbered = seeds.map((seed, index) => ({ ...seed, seed: index + 1 }));
+    return { ...(season || {}), seedMode: MANUAL_SEED_MODE, seeds: renumbered, updatedAtISO: nowIso(options) };
+  }
+
+  function buildManualSeasonPreview(state, options = {}) {
+    const activePool = getPlayerPool(state || {});
+    const includedIds = Array.isArray(options.playerIds) && options.playerIds.length
+      ? new Set(options.playerIds)
+      : new Set(activePool.map((player) => player.id || player.playerId).filter(Boolean));
+    const playerPool = activePool.filter((player) => includedIds.has(player.id || player.playerId));
+    const startDate = typeof options.startDate === 'string' && options.startDate ? options.startDate : getDateKey(new Date());
+    const endDate = typeof options.endDate === 'string' && options.endDate ? options.endDate : startDate;
+    const monthKey = startDate.slice(0, 7);
+    const name = typeof options.name === 'string' && options.name.trim() ? options.name.trim() : 'Manual Season Championship';
+    const projected = generateProjectedSeeds({ ...(state || {}), players: playerPool.filter((player) => (player.id || player.playerId) !== 'YOU') });
+    const seeds = playerPool.map((player, index) => {
+      const playerId = player.id || player.playerId;
+      const projectedRow = projected.seeds.find((seed) => seed.playerId === playerId) || {};
+      return {
+        ...projectedRow,
+        seed: index + 1,
+        playerId,
+        id: playerId,
+        playerName: player.name || projectedRow.playerName || playerId,
+        name: player.name || projectedRow.name || playerId,
+        wins: projectedRow.wins || 0,
+        losses: projectedRow.losses || 0,
+        winPct: projectedRow.winPct || 0,
+        totalPoints: projectedRow.totalPoints || 0,
+        averageScore: projectedRow.averageScore || 0,
+        marginOfVictory: projectedRow.marginOfVictory ?? null,
+        warningFlags: Array.isArray(projectedRow.warningFlags) ? projectedRow.warningFlags : []
+      };
+    });
+    const warnings = [];
+    if (seeds.length !== 34) warnings.push({ code: 'non_34_player_pool', message: 'This format was designed for 34 players.' });
+    const canCreateOfficialBracket = seeds.length === 34;
+    const draftOptions = {
+      name,
+      label: name,
+      monthKey,
+      startDate,
+      endDate,
+      status: 'preview',
+      seedMode: MANUAL_SEED_MODE,
+      playerPool,
+      seeds,
+      bracket: canCreateOfficialBracket ? buildProjectedBracket(seeds) : { type: 'manual_preview_shell', rounds: [] },
+      warnings: warnings.concat(projected.warnings || []),
+      meta: { manualSeason: true, canCreateOfficialBracket, autoAdaptedBracketAvailable: false, previewOnly: !canCreateOfficialBracket }
+    };
+    if (typeof core.createEmptySeasonDraft === 'function') return core.createEmptySeasonDraft(draftOptions);
+    return draftOptions;
+  }
+
+
 
   function lockCurrentPreviewToOfficialBracket(state, options = {}) {
     if (typeof core.lockSeasonPreviewToOfficialBracket === 'function') {
       return core.lockSeasonPreviewToOfficialBracket(state || {}, options);
     }
     return state;
+  }
+
+  function applyChampionCrownedStatus(season, options = {}) {
+    if (!season || ['preview', 'finalized', 'champion_crowned'].includes(season.status)) return season;
+    const champion = typeof core.getSeasonChampionFromFinals === 'function' ? core.getSeasonChampionFromFinals(season) : null;
+    if (!champion) return season;
+    const summary = typeof core.getChampionSummary === 'function' ? core.getChampionSummary(season, { currentSeason: season }) : season.championSummary;
+    return { ...season, status: 'champion_crowned', championSummary: summary || season.championSummary, updatedAtISO: nowIso(options) };
   }
 
   function prepareSeasonStateForPreview(state, options = {}) {
@@ -326,6 +397,8 @@
         : rebuildPreviewFromManualOrder({ ...currentSeason, seedMode: MANUAL_SEED_MODE }, options);
       changed = before !== semanticSeasonSnapshot(currentSeason);
     }
+
+    currentSeason = applyChampionCrownedStatus(currentSeason, options);
 
     const nextState = {
       ...normalized,
@@ -730,6 +803,131 @@
     `;
   }
 
+  function playerPoolOptions(season, selectedId = '') {
+    const players = Array.isArray(season?.seeds) && season.seeds.length
+      ? season.seeds.map((seed) => ({ id: seed.playerId || seed.id, name: seed.playerName || seed.name || seed.playerId, seed: seed.seed }))
+      : (Array.isArray(season?.playerPool) ? season.playerPool : []).map((player, index) => ({ id: player.id || player.playerId, name: player.name || player.playerName || player.id, seed: index + 1 }));
+    return ['<option value="">Clear / TBD</option>'].concat(players.filter((player) => player.id).map((player) => `<option value="${escapeHtml(player.id)}" ${player.id === selectedId ? 'selected' : ''}>${player.seed ? `#${escapeHtml(player.seed)} ` : ''}${escapeHtml(player.name || player.id)}</option>`)).join('');
+  }
+
+  function renderAdminSeedsPanel(season) {
+    const seeds = Array.isArray(season?.seeds) ? season.seeds : [];
+    return `
+      <section class="glass season-card season-admin-panel">
+        <h3 class="season-section-title">Admin: Seeds</h3>
+        <p class="muted text-sm">Changing seeds after official bracket creation can affect bracket structure. Rebuild the bracket only when you explicitly choose to.</p>
+        <div class="season-rebuild-actions mt-3">
+          <button type="button" class="btn btn-warn btn-toolbar" data-season-action="admin-rebuild-official-bracket">Rebuild bracket from current seeds</button>
+        </div>
+        <div class="season-seed-list mt-3" data-season-admin-seed-list>
+          ${seeds.map((seed, index) => `
+            <article class="season-seed-row" draggable="true" data-admin-seed-index="${index}">
+              <span class="season-seed-number">${escapeHtml(seed.seed)}</span>
+              <div class="season-seed-main"><strong>${escapeHtml(seed.playerName || seed.name || seed.playerId)}</strong><span>${escapeHtml(seed.playerId || seed.id || '')}</span></div>
+              <div class="season-seed-actions">
+                <button type="button" class="btn btn-ghost btn-toolbar" data-season-action="admin-seed-up" data-seed-index="${index}" ${index === 0 ? 'disabled' : ''}>↑</button>
+                <button type="button" class="btn btn-ghost btn-toolbar" data-season-action="admin-seed-down" data-seed-index="${index}" ${index === seeds.length - 1 ? 'disabled' : ''}>↓</button>
+              </div>
+            </article>`).join('') || '<p class="muted text-sm">No seeds available.</p>'}
+        </div>
+      </section>`;
+  }
+
+  function renderAdminSeriesPanel(season) {
+    const series = officialSeriesEntries(season);
+    return `
+      <section class="glass season-card season-admin-panel">
+        <h3 class="season-section-title">Admin: Series scores and winners</h3>
+        <p class="muted text-sm">Set wins or winners defensively. Recalculate from game results when daily scores are the source of truth.</p>
+        <div class="season-admin-series-list">
+          ${series.map((item) => `
+            <article class="season-history-item season-admin-series-row">
+              <div>
+                <strong>${escapeHtml(item.roundName || getRoundName(item.roundId))}: ${escapeHtml(getSeriesCompactTitle(item))}</strong>
+                <p class="muted text-xs">${escapeHtml(item.id || '')} • ${escapeHtml(getSeriesStatusLine(item))}</p>
+                <div class="season-rebuild-actions mt-2">
+                  <label class="muted text-xs">A wins <input class="season-admin-input" type="number" min="0" max="7" value="${escapeHtml(Number(item.winsA) || 0)}" data-admin-series-wins-a="${escapeHtml(item.id)}"></label>
+                  <label class="muted text-xs">B wins <input class="season-admin-input" type="number" min="0" max="7" value="${escapeHtml(Number(item.winsB) || 0)}" data-admin-series-wins-b="${escapeHtml(item.id)}"></label>
+                  <label class="muted text-xs">Winner <select class="season-admin-select" data-admin-series-winner="${escapeHtml(item.id)}"><option value="">No winner</option><option value="${escapeHtml(item.playerAId || '')}" ${item.winnerId === item.playerAId ? 'selected' : ''}>${escapeHtml(item.playerAName || item.playerAId || 'Player A')}</option><option value="${escapeHtml(item.playerBId || '')}" ${item.winnerId === item.playerBId ? 'selected' : ''}>${escapeHtml(item.playerBName || item.playerBId || 'Player B')}</option></select></label>
+                </div>
+              </div>
+              <div class="season-rebuild-actions">
+                <button type="button" class="btn btn-success btn-toolbar" data-season-action="admin-save-series" data-series-id="${escapeHtml(item.id)}">Save</button>
+                <button type="button" class="btn btn-ghost btn-toolbar" data-season-action="admin-recalc-series" data-series-id="${escapeHtml(item.id)}">Recalculate from game results</button>
+                <button type="button" class="btn btn-ghost btn-toolbar" data-season-action="admin-complete-series" data-series-id="${escapeHtml(item.id)}">Mark series complete</button>
+                <button type="button" class="btn btn-warn btn-toolbar" data-season-action="admin-clear-series" data-series-id="${escapeHtml(item.id)}">Clear series result</button>
+              </div>
+            </article>`).join('') || '<p class="muted text-sm">No official series available.</p>'}
+        </div>
+      </section>`;
+  }
+
+  function renderAdminBracketPathsPanel(season) {
+    const series = officialSeriesEntries(season);
+    return `
+      <section class="glass season-card season-admin-panel">
+        <h3 class="season-section-title">Admin: Bracket paths</h3>
+        <p class="muted text-sm">Assign or clear a player in a next-series slot if advancement broke. Placeholders are safe.</p>
+        <div class="season-admin-series-list">
+          ${series.filter((item) => item.roundId !== 'play_in').map((item) => `
+            <article class="season-history-item">
+              <div><strong>${escapeHtml(item.roundName || getRoundName(item.roundId))} ${escapeHtml(item.seriesIndex || '')}</strong><p class="muted text-xs">${escapeHtml(renderSeriesSide(item, 'A').replace(/<[^>]+>/g, ' '))} vs ${escapeHtml(renderSeriesSide(item, 'B').replace(/<[^>]+>/g, ' '))}</p></div>
+              <div class="season-rebuild-actions">
+                <label class="muted text-xs">Slot A <select class="season-admin-select" data-admin-slot-player="${escapeHtml(item.id)}" data-slot="A">${playerPoolOptions(season, item.playerAId)}</select></label>
+                <button type="button" class="btn btn-ghost btn-toolbar" data-season-action="admin-assign-slot" data-series-id="${escapeHtml(item.id)}" data-slot="A">Assign A</button>
+                <label class="muted text-xs">Slot B <select class="season-admin-select" data-admin-slot-player="${escapeHtml(item.id)}" data-slot="B">${playerPoolOptions(season, item.playerBId)}</select></label>
+                <button type="button" class="btn btn-ghost btn-toolbar" data-season-action="admin-assign-slot" data-series-id="${escapeHtml(item.id)}" data-slot="B">Assign B</button>
+              </div>
+            </article>`).join('') || '<p class="muted text-sm">No bracket paths available yet.</p>'}
+        </div>
+      </section>`;
+  }
+
+  function renderAdminDailyRepairPanel(season, dateKey) {
+    const enabled = season?.meta?.seasonMatchupControlEnabled === true;
+    const todaySlate = (typeof core.loadAppState === 'function' ? (core.loadAppState({ syncDerived: false, persistSync: false }).state || {}) : {}).matchups || [];
+    const seasonMatchups = todaySlate.filter((matchup) => matchup?.dateKey === dateKey && matchup?.seasonId === season?.id);
+    return `
+      <section class="glass season-card season-admin-panel">
+        <h3 class="season-section-title">Admin: Daily tournament matchup repair</h3>
+        <p class="muted text-sm">Today: ${escapeHtml(dateKey)} • Season matchup control: <strong>${enabled ? 'Enabled' : 'Disabled'}</strong></p>
+        <div class="season-history-list mt-3">
+          ${seasonMatchups.map((matchup) => `<article class="season-history-item"><div><strong>${escapeHtml(matchup.seasonMatchupLabel || matchup.roundName || matchup.matchupType || 'Season matchup')}</strong><p class="muted text-xs">${escapeHtml(matchup.playerAName || matchup.playerAId)} vs ${escapeHtml(matchup.playerBName || matchup.playerBId)}${Number.isFinite(Number(matchup.scoreA)) && Number.isFinite(Number(matchup.scoreB)) ? ` • ${escapeHtml(matchup.scoreA)}–${escapeHtml(matchup.scoreB)}` : ''}</p></div><span class="season-champion-pill">${escapeHtml(matchup.matchupType || '')}</span></article>`).join('') || '<p class="muted text-sm">No Season matchups found for today.</p>'}
+        </div>
+        <div class="season-rebuild-actions mt-3">
+          <button type="button" class="btn btn-warn btn-toolbar" data-season-action="admin-regenerate-slate" ${enabled ? '' : 'disabled'}>Regenerate today’s Season slate</button>
+          <button type="button" class="btn btn-success btn-toolbar" data-season-action="admin-resync-results">Re-sync tournament results from daily matchups</button>
+        </div>
+        <p class="muted text-xs mt-2">Regeneration may replace unsaved/unplayed matchups for this date. Completed/synced scores require confirmation.</p>
+      </section>`;
+  }
+
+  function renderAdminFinalizePanel(season) {
+    const canFinalize = typeof core.canFinalizeSeason === 'function' ? core.canFinalizeSeason(season, { currentSeason: season }, getEffectiveDateKey()) : false;
+    return `
+      <section class="glass season-card season-admin-panel">
+        <h3 class="season-section-title">Admin: Finalize / archive</h3>
+        <p class="muted text-sm">Finalizing archives the full season, moves it to Trophy Case history, sets latestSeasonId, and clears currentSeason.</p>
+        <button type="button" class="btn btn-success btn-toolbar" data-season-action="admin-finalize-season" ${canFinalize ? '' : 'disabled'}>Finalize and archive current Season</button>
+        ${canFinalize ? '' : '<p class="muted text-xs mt-2">Finals must be complete before manual finalization is available.</p>'}
+      </section>`;
+  }
+
+  function renderSeasonAdminTools(season, dateKey) {
+    return `
+      <section class="glass season-card season-admin-banner">
+        <h3 class="season-section-title">Admin Mode</h3>
+        <p class="muted text-sm">Bracket, series, matchup, and sync repair tools are visible. Admin edits do not require reasons and do not write an audit log.</p>
+      </section>
+      ${renderAdminSeedsPanel(season)}
+      ${renderAdminSeriesPanel(season)}
+      ${renderAdminBracketPathsPanel(season)}
+      ${renderAdminDailyRepairPanel(season, dateKey)}
+      ${renderAdminFinalizePanel(season)}
+    `;
+  }
+
+
 
 
 
@@ -761,12 +959,18 @@
     const currentRound = getRoundForToday(season, dateKey);
     const controlEnabled = season?.meta?.seasonMatchupControlEnabled === true;
     const hasSeries = Object.keys(season?.series || {}).length > 0;
+    const adminMode = season?.meta?.adminMode === true;
     return `
       ${renderChampionSummary(season)}
       <section class="glass season-hero-card">
-        <p class="season-eyebrow">Current Season</p>
-        <h2 class="season-title">${escapeHtml(name)}</h2>
-        <p class="muted text-sm">${escapeHtml(getSeasonSummaryLine(season))}</p>
+        <div class="season-card-header">
+          <div>
+            <p class="season-eyebrow">Current Season</p>
+            <h2 class="season-title">${escapeHtml(name)}</h2>
+            <p class="muted text-sm">${escapeHtml(getSeasonSummaryLine(season))}</p>
+          </div>
+          <button type="button" class="btn ${adminMode ? 'btn-warn' : 'btn-ghost'} btn-toolbar" data-season-action="toggle-admin-mode">${adminMode ? 'Exit Admin Mode' : 'Admin Mode'}</button>
+        </div>
       </section>
       <section class="glass season-card season-header-card">
         <h3 class="season-section-title">Season Header</h3>
@@ -779,6 +983,7 @@
         </dl>
         <p class="muted text-sm mt-4">Seeds are locked. This presentation layer does not change scoring, drip schedules, matchup generation rules, or the Season matchup control gate.</p>
       </section>
+      ${adminMode ? renderSeasonAdminTools(season, dateKey) : ''}
       ${renderSeasonMatchupControl(season)}
       ${hasSeries ? renderCurrentRoundSection(season, dateKey) : ''}
       ${hasSeries ? renderOfficialBracket(season, { dateKey }) : '<section class="glass season-card"><p class="muted text-sm">Season tools will appear here in the next update.</p></section>'}
@@ -789,33 +994,106 @@
 
   function getChampionLabel(season) {
     const summary = season?.championSummary || {};
-    return summary.name || summary.playerName || summary.championName || season?.championName || season?.champion || 'Champion TBD';
+    return summary.championName || summary.name || summary.playerName || season?.championName || season?.champion || 'Champion TBD';
   }
 
-  function renderTrophyCase(history) {
+  function getRunnerUpLabel(season) {
+    const summary = season?.championSummary || {};
+    return summary.runnerUpName || season?.runnerUpName || 'Runner-up TBD';
+  }
+
+  function getFinalsResultLabel(season) {
+    return season?.finalsResult || season?.championSummary?.finalsResult || season?.finalsSeries?.resultText || 'Finals result TBD';
+  }
+
+  function renderArchiveSeriesResults(season) {
+    const series = Array.isArray(season?.seriesResults) ? season.seriesResults : officialSeriesEntries(season).map((item) => ({ ...item, resultText: getSeriesStatusLine(item) }));
+    const byRound = getRoundDefs().map((round) => ({ round, rows: series.filter((item) => item.roundId === round.id) }));
+    return byRound.map(({ round, rows }) => `
+      <section class="season-bracket-round">
+        <div class="season-bracket-round-header"><h4>${escapeHtml(round.displayName)}</h4><span>${escapeHtml(rows.length)} series</span></div>
+        <div class="season-history-list">
+          ${rows.map((item) => `<article class="season-history-item"><div><strong>${escapeHtml(item.playerAName || item.playerAId || 'TBD')} vs ${escapeHtml(item.playerBName || item.playerBId || 'TBD')}</strong><p class="muted text-xs">${escapeHtml(item.resultText || `${item.winsA || 0}–${item.winsB || 0}`)}</p></div><span class="season-champion-pill">${escapeHtml(item.winnerName || item.winnerId || 'TBD')}</span></article>`).join('') || '<p class="muted text-sm">No archived results for this round.</p>'}
+        </div>
+      </section>`).join('');
+  }
+
+  function renderArchivePlacements(season) {
+    const placements = Array.isArray(season?.finalPlacements) ? season.finalPlacements : [];
+    return `<div class="season-placement-list">${placements.map((player, index) => `<article class="season-placement-row"><strong>${index + 1}. ${player.seed ? `#${escapeHtml(player.seed)} ` : ''}${escapeHtml(player.playerName || player.playerId)}</strong><span>${escapeHtml(player.finish || '—')}</span><span>${escapeHtml(player.wins ?? 0)}–${escapeHtml(player.losses ?? 0)} • Avg ${escapeHtml(formatStat(player.averageScore))}</span></article>`).join('') || '<p class="muted text-sm">No placement list archived.</p>'}</div>`;
+  }
+
+  function renderCreateSeasonShell(state) {
+    const pool = getPlayerPool(state || {});
+    const count = pool.length;
+    return `
+      <section class="glass season-card season-create-shell">
+        <div class="season-card-header">
+          <div>
+            <h3 class="season-section-title">Create New Season</h3>
+            <p class="muted text-sm">Future seasons are manual only and use the established playoff format.</p>
+          </div>
+          <button type="button" class="btn btn-success btn-toolbar" data-season-action="show-create-season">Create New Season</button>
+        </div>
+        <div data-create-season-panel hidden>
+          <div class="season-rebuild-actions mt-3">
+            <label class="muted text-xs">Season name <input class="season-admin-input" type="text" data-create-season-name value="Manual Season Championship"></label>
+            <label class="muted text-xs">Start date <input class="season-admin-input" type="date" data-create-season-start value="${escapeHtml(getDateKey(new Date()))}"></label>
+            <label class="muted text-xs">End date <input class="season-admin-input" type="date" data-create-season-end value="${escapeHtml(getDateKey(new Date()))}"></label>
+          </div>
+          <p class="muted text-sm mt-3">Player pool review: all active players are included by default (${escapeHtml(count)} active players).</p>
+          ${count !== 34 ? '<p class="season-manual-banner">This format was designed for 34 players. Review/edit the player pool to 34 players, or create a preview shell with warning; invalid official brackets will not be created.</p>' : ''}
+          <div class="season-history-list mt-3 season-player-pool-review">
+            ${pool.map((player) => `<label class="season-history-item"><span>${escapeHtml(player.name || player.id || player.playerId)}</span><input type="checkbox" data-create-season-player value="${escapeHtml(player.id || player.playerId)}" checked></label>`).join('') || '<p class="muted text-sm">No active players available.</p>'}
+          </div>
+          <div class="season-rebuild-actions mt-3">
+            <button type="button" class="btn btn-success btn-toolbar" data-season-action="create-manual-season-preview">Create preview</button>
+            <button type="button" class="btn btn-ghost btn-toolbar" data-season-action="hide-create-season">Cancel</button>
+          </div>
+        </div>
+      </section>`;
+  }
+
+  function renderTrophyCase(history, state = {}) {
     const seasons = Array.isArray(history) ? history : [];
     return `
-      <section class="glass season-hero-card">
-        <p class="season-eyebrow">Season Archive</p>
+      <section class="glass season-hero-card season-trophy-hero">
+        <p class="season-eyebrow">🏆 Season Archive</p>
         <h2 class="season-title">Trophy Case</h2>
-        <p class="muted text-sm">Archived Season Championship results will collect here.</p>
+        <p class="muted text-sm">Archived Season Championship results collect here as trophy cards.</p>
       </section>
-      <section class="glass season-card">
-        <h3 class="season-section-title">Archived Seasons</h3>
-        <div class="season-history-list">
-          ${seasons.map((season) => `
-            <article class="season-history-item">
+      ${renderCreateSeasonShell(state)}
+      <section class="season-trophy-grid">
+        ${seasons.map((season) => `
+          <details class="glass season-card season-trophy-card">
+            <summary>
               <div>
-                <h4>${escapeHtml(season?.name || season?.label || 'Season')}</h4>
-                <p class="muted text-sm">${escapeHtml(getSeasonSummaryLine(season))}</p>
+                <p class="season-eyebrow">🏆 Champion</p>
+                <h3 class="season-section-title">${escapeHtml(season?.name || season?.label || 'Season')}</h3>
+                <p class="muted text-sm">${escapeHtml(formatSeasonDate(season?.startDate))} – ${escapeHtml(formatSeasonDate(season?.endDate))}</p>
               </div>
               <span class="season-champion-pill">${escapeHtml(getChampionLabel(season))}</span>
-            </article>
-          `).join('') || '<p class="muted text-sm">No archived seasons yet.</p>'}
-        </div>
+            </summary>
+            <div class="season-series-details">
+              <dl class="season-detail-grid">
+                <div><dt>Champion</dt><dd>${escapeHtml(getChampionLabel(season))}</dd></div>
+                <div><dt>Runner-up</dt><dd>${escapeHtml(getRunnerUpLabel(season))}</dd></div>
+                <div><dt>Finals</dt><dd>${escapeHtml(getFinalsResultLabel(season))}</dd></div>
+                <div><dt>Champion record</dt><dd>${escapeHtml(season?.championSummary?.record || '—')}</dd></div>
+              </dl>
+              <h4 class="season-section-title mt-4">Full Season</h4>
+              ${season?.championSummary ? `<p class="muted text-sm">${escapeHtml(season.championSummary.championName || 'Champion')} defeated ${escapeHtml(season.championSummary.runnerUpName || 'runner-up')} in the Finals.</p>` : ''}
+              <div class="season-bracket-stack mt-3">${renderArchiveSeriesResults(season)}</div>
+              <h4 class="season-section-title mt-4">Final Placements</h4>
+              ${renderArchivePlacements(season)}
+              <h4 class="season-section-title mt-4">Archived Tournament Stats</h4>
+              ${renderArchivePlacements({ finalPlacements: season?.tournamentStats || season?.finalPlacements || [] })}
+            </div>
+          </details>`).join('') || '<section class="glass season-card"><p class="muted text-sm">No archived seasons yet.</p></section>'}
       </section>
     `;
   }
+
 
   function normalizeSeasonViewState(state) {
     if (typeof core.normalizeState === 'function') return core.normalizeState(state || {});
@@ -833,7 +1111,7 @@
     const title = getSeasonTabTitle(normalized);
     const body = currentSeason
       ? renderCurrentSeason(currentSeason)
-      : (history.length ? renderTrophyCase(history) : renderSeasonSetupShell());
+      : (history.length ? renderTrophyCase(history, normalized) : renderSeasonSetupShell());
 
     return `
       <div class="season-page-stack" data-season-title="${escapeHtml(title)}">
@@ -883,15 +1161,32 @@
     saveAndRenderSeason({ ...state, currentSeason: season }, 'season-manual-seed-reorder');
   }
 
+
+  function handleAdminSeedMove(fromIndex, toIndex) {
+    const state = currentMountedState();
+    const season = applyManualSeasonSeedReorderWithoutBracket(state.currentSeason, fromIndex, toIndex);
+    if (season === state.currentSeason) return;
+    saveAndRenderSeason({ ...state, currentSeason: season }, 'season-admin-seed-reorder');
+  }
+
+  function replaceTodaySeasonMatchups(state, dateKey, slate) {
+    const existing = Array.isArray(state.matchups) ? state.matchups : [];
+    return existing.filter((matchup) => !(matchup?.dateKey === dateKey && matchup?.seasonId === state.currentSeason?.id)).concat(slate.allMatchups || []);
+  }
+
+  function matchupHasCompletedScore(matchup) {
+    return Number.isFinite(Number(matchup?.scoreA)) && Number.isFinite(Number(matchup?.scoreB));
+  }
+
   function attachSeasonInteractions(root) {
     if (!root || root.__seasonInteractionsAttached) return;
     root.__seasonInteractionsAttached = true;
     let dragFrom = null;
 
     root.addEventListener('dragstart', (event) => {
-      const row = event.target?.closest?.('[data-seed-index]');
+      const row = event.target?.closest?.('[data-seed-index],[data-admin-seed-index]');
       if (!row) return;
-      dragFrom = Number(row.dataset.seedIndex);
+      dragFrom = Number(row.dataset.seedIndex ?? row.dataset.adminSeedIndex);
       row.classList.add('is-dragging');
       if (event.dataTransfer) {
         event.dataTransfer.effectAllowed = 'move';
@@ -900,14 +1195,14 @@
     });
 
     root.addEventListener('dragover', (event) => {
-      const row = event.target?.closest?.('[data-seed-index]');
+      const row = event.target?.closest?.('[data-seed-index],[data-admin-seed-index]');
       if (!row) return;
       event.preventDefault();
       row.classList.add('is-drag-over');
     });
 
     root.addEventListener('dragleave', (event) => {
-      const row = event.target?.closest?.('[data-seed-index]');
+      const row = event.target?.closest?.('[data-seed-index],[data-admin-seed-index]');
       row?.classList.remove('is-drag-over');
     });
 
@@ -917,7 +1212,7 @@
     });
 
     root.addEventListener('drop', (event) => {
-      const row = event.target?.closest?.('[data-seed-index]');
+      const row = event.target?.closest?.('[data-seed-index],[data-admin-seed-index]');
       if (!row) return;
       event.preventDefault();
       const from = dragFrom ?? Number(event.dataTransfer?.getData('text/plain'));
@@ -961,6 +1256,108 @@
         saveAndRenderSeason(nextState, 'season-create-official-bracket');
         return;
       }
+      if (action === 'toggle-admin-mode') {
+        const state = currentMountedState();
+        const currentSeason = state.currentSeason || null;
+        if (!currentSeason) return;
+        const nextSeason = { ...currentSeason, updatedAtISO: nowIso(), meta: { ...(currentSeason.meta || {}), adminMode: currentSeason?.meta?.adminMode !== true } };
+        saveAndRenderSeason({ ...state, currentSeason: nextSeason }, 'season-admin-mode-toggle');
+        return;
+      }
+      if (action === 'admin-seed-up' || action === 'admin-seed-down') {
+        const index = Number(button.dataset.seedIndex);
+        handleAdminSeedMove(index, action === 'admin-seed-up' ? index - 1 : index + 1);
+        return;
+      }
+      if (action === 'admin-rebuild-official-bracket') {
+        if (typeof global.confirm === 'function' && !global.confirm('Changing seeds after official bracket creation can affect bracket structure. Rebuild bracket from current seeds now?')) return;
+        const state = currentMountedState();
+        const currentSeason = state.currentSeason || null;
+        if (!currentSeason) return;
+        const series = typeof core.createOfficialSeasonSeriesFromSeeds === 'function' ? core.createOfficialSeasonSeriesFromSeeds(currentSeason.seeds || [], { seasonId: currentSeason.id, nowISO: nowIso() }) : currentSeason.series;
+        const bracket = typeof core.buildOfficialSeasonBracketFromSeeds === 'function' ? core.buildOfficialSeasonBracketFromSeeds(currentSeason.seeds || [], { seasonId: currentSeason.id, nowISO: nowIso() }) : currentSeason.bracket;
+        saveAndRenderSeason({ ...state, currentSeason: { ...currentSeason, series, bracket, updatedAtISO: nowIso() } }, 'season-admin-rebuild-official-bracket');
+        return;
+      }
+      if (action === 'admin-save-series' || action === 'admin-complete-series' || action === 'admin-recalc-series' || action === 'admin-clear-series') {
+        const state = currentMountedState();
+        const seriesId = button.dataset.seriesId;
+        const winsA = root.querySelector(`[data-admin-series-wins-a="${CSS.escape(seriesId)}"]`)?.value;
+        const winsB = root.querySelector(`[data-admin-series-wins-b="${CSS.escape(seriesId)}"]`)?.value;
+        const winnerId = root.querySelector(`[data-admin-series-winner="${CSS.escape(seriesId)}"]`)?.value || '';
+        let patch = { winsA, winsB, winnerId };
+        if (action === 'admin-recalc-series') patch = { recalculate: true };
+        if (action === 'admin-clear-series') patch = { clear: true };
+        if (action === 'admin-complete-series' && !winnerId) { alert('Choose a winner before marking the series complete.'); return; }
+        if (action === 'admin-clear-series' && typeof global.confirm === 'function' && !global.confirm('Clear this series result? Game results are kept, but wins/winner/status are reset.')) return;
+        const result = typeof core.updateSeasonSeriesManualResult === 'function' ? core.updateSeasonSeriesManualResult(state.currentSeason, seriesId, patch, { nowISO: nowIso() }) : { ok: false, error: 'helper_unavailable' };
+        if (!result.ok) { alert(`Series update failed: ${result.error || 'unknown error'}`); return; }
+        saveAndRenderSeason({ ...state, currentSeason: result.season }, 'season-admin-series-update');
+        return;
+      }
+      if (action === 'admin-assign-slot') {
+        const state = currentMountedState();
+        const seriesId = button.dataset.seriesId;
+        const slot = button.dataset.slot === 'B' ? 'B' : 'A';
+        const playerId = root.querySelector(`[data-admin-slot-player="${CSS.escape(seriesId)}"][data-slot="${slot}"]`)?.value || '';
+        const result = typeof core.assignSeasonBracketSlot === 'function' ? core.assignSeasonBracketSlot(state.currentSeason, seriesId, slot, playerId, { nowISO: nowIso() }) : { ok: false, error: 'helper_unavailable' };
+        if (!result.ok) { alert(`Slot assignment failed: ${result.error || 'unknown error'}`); return; }
+        saveAndRenderSeason({ ...state, currentSeason: result.season }, 'season-admin-assign-slot');
+        return;
+      }
+      if (action === 'admin-regenerate-slate') {
+        const state = currentMountedState();
+        const dateKey = getDateKey(new Date());
+        const existing = (Array.isArray(state.matchups) ? state.matchups : []).filter((matchup) => matchup?.dateKey === dateKey && matchup?.seasonId === state.currentSeason?.id);
+        const hasScores = existing.some(matchupHasCompletedScore);
+        const message = hasScores ? 'This date has completed/synced scores. Regenerate anyway? This may replace unsaved/unplayed matchups for this date.' : 'This may replace unsaved/unplayed matchups for this date.';
+        if (typeof global.confirm === 'function' && !global.confirm(message)) return;
+        const slate = typeof core.buildSeasonDailySlate === 'function' ? core.buildSeasonDailySlate(state, dateKey, { nowISO: nowIso() }) : { ok: false, errors: ['helper unavailable'] };
+        if (!slate.ok) { alert(`Slate regeneration failed: ${(slate.errors || []).join('; ') || 'unknown error'}`); return; }
+        const nextState = { ...state, currentSeason: slate.updatedSeason || state.currentSeason, matchups: replaceTodaySeasonMatchups(state, dateKey, slate) };
+        saveAndRenderSeason(nextState, 'season-admin-regenerate-slate');
+        alert(`Regenerated ${slate.allMatchups.length} Season matchups. ${(slate.warnings || []).join(' ')}`);
+        return;
+      }
+      if (action === 'admin-resync-results') {
+        const state = currentMountedState();
+        const dateKey = getDateKey(new Date());
+        const result = typeof core.syncSeasonResultsFromDailyMatchups === 'function' ? core.syncSeasonResultsFromDailyMatchups(state, dateKey, { nowISO: nowIso() }) : { ok: false, errors: ['helper unavailable'] };
+        if (!result.ok && (result.errors || []).length) alert(`Re-sync warnings/errors: ${(result.errors || []).concat(result.warnings || []).join('; ')}`);
+        saveAndRenderSeason(result.state || state, 'season-admin-resync-results');
+        if (result.ok) alert(`Re-sync complete. Changed: ${result.changed ? 'yes' : 'no'}. ${(result.warnings || []).join(' ')}`);
+        return;
+      }
+      if (action === 'admin-finalize-season') {
+        if (typeof global.confirm === 'function' && !global.confirm('Finalize and archive this Season Championship? This moves currentSeason to seasonHistory and clears currentSeason.')) return;
+        const state = currentMountedState();
+        const result = typeof core.finalizeCurrentSeason === 'function' ? core.finalizeCurrentSeason(state, { dateKey: getDateKey(new Date()) }) : { ok: false, error: 'helper_unavailable' };
+        if (!result.ok) { alert(`Finalize failed: ${result.error || 'unknown error'}`); return; }
+        saveAndRenderSeason(result.state, 'season-admin-finalize');
+        return;
+      }
+      if (action === 'show-create-season' || action === 'hide-create-season') {
+        const createPanel = root.querySelector('[data-create-season-panel]');
+        if (createPanel) createPanel.hidden = action === 'hide-create-season';
+        return;
+      }
+      if (action === 'create-manual-season-preview') {
+        const state = currentMountedState();
+        const playerIds = Array.from(root.querySelectorAll('[data-create-season-player]:checked')).map((input) => input.value).filter(Boolean);
+        const count = playerIds.length;
+        if (count !== 34) {
+          const msg = 'This format was designed for 34 players. Auto-adapted bracket is not implemented yet. Create a preview shell with warning instead?';
+          if (typeof global.confirm === 'function' && !global.confirm(msg)) return;
+        }
+        const season = buildManualSeasonPreview(state, {
+          name: root.querySelector('[data-create-season-name]')?.value,
+          startDate: root.querySelector('[data-create-season-start]')?.value,
+          endDate: root.querySelector('[data-create-season-end]')?.value,
+          playerIds
+        });
+        saveAndRenderSeason({ ...state, currentSeason: season, latestSeasonId: season.id }, 'season-create-manual-preview');
+        return;
+      }
       if (action === 'enable-matchup-control' || action === 'disable-matchup-control') {
         const state = currentMountedState();
         const currentSeason = state.currentSeason || null;
@@ -1000,6 +1397,9 @@
     createSeasonOnePreview,
     prepareSeasonStateForPreview,
     applyManualSeedReorder,
+    applyManualSeasonSeedReorderWithoutBracket,
+    buildManualSeasonPreview,
+    applyChampionCrownedStatus,
     rebuildPreviewFromStandings,
     rebuildPreviewFromManualOrder,
     lockCurrentPreviewToOfficialBracket,
