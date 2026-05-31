@@ -603,7 +603,7 @@
         </div>
         <div class="season-seed-list" data-season-seed-list>
           ${seeds.map((seed, index) => {
-            const player = { ...seed, imageId: seed.imageId || getPlayerImageId(state, seed.playerId || seed.id) };
+            const player = { ...seed, imageId: getPlayerImageId(state, seed.playerId || seed.id) || seed.imageId || '' };
             return `
             <article class="season-seed-row" draggable="true" data-seed-index="${index}" aria-label="Seed ${escapeHtml(seed.seed)} ${escapeHtml(seed.playerName || seed.name)}">
               <span class="season-seed-number season-preview-seed-number">${escapeHtml(seed.seed)}</span>
@@ -631,7 +631,7 @@
   function renderCompetitor(competitor, state = {}) {
     if (!competitor) return '<span class="season-bracket-player muted">TBD</span>';
     if (competitor.type === 'placeholder') return `<span class="season-bracket-player season-bracket-placeholder">${escapeHtml(competitor.label)}</span>`;
-    const player = { ...competitor, imageId: competitor.imageId || getPlayerImageId(state, competitor.playerId) };
+    const player = { ...competitor, imageId: getPlayerImageId(state, competitor.playerId) || competitor.imageId || '' };
     return `<span class="season-bracket-seed season-preview-seed-number">${escapeHtml(competitor.seed)}</span>${renderSeasonPlayerPhoto(player, 'bracket')}<span class="season-bracket-player">${escapeHtml(competitor.playerName || `Seed ${competitor.seed}`)}</span>`;
   }
 
