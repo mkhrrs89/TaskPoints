@@ -36,16 +36,6 @@
       .replace(/'/g, '&#39;');
   }
 
-  function getInitials(value) {
-    const parts = String(value || '')
-      .trim()
-      .split(/\s+/)
-      .filter(Boolean);
-    if (!parts.length) return '?';
-    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-    return `${parts[0][0] || ''}${parts[parts.length - 1][0] || ''}`.toUpperCase();
-  }
-
   function getPlayerImageId(state, playerId) {
     const id = String(playerId || '');
     if (!id) return '';
@@ -100,7 +90,6 @@
     return `
       <span class="season-player-photo-slot${variantClass}" ${imageId ? `data-season-image-id="${escapeHtml(imageId)}"` : ''}>
         <img class="season-player-photo hidden" alt="${escapeHtml(name)} photo">
-        <span class="season-player-photo-fallback">${escapeHtml(getInitials(name))}</span>
       </span>
     `;
   }
@@ -115,12 +104,10 @@
       const url = seasonImageUrlCache.get(imageId);
       if (!url) return;
       const img = slot.querySelector('img.season-player-photo');
-      const fallback = slot.querySelector('.season-player-photo-fallback');
       if (img) {
         img.src = url;
         img.classList.remove('hidden');
       }
-      if (fallback) fallback.classList.add('hidden');
     });
   }
 
@@ -605,20 +592,11 @@
           ${seeds.map((seed, index) => {
             const player = { ...seed, imageId: getPlayerImageId(state, seed.playerId || seed.id) || seed.imageId || '' };
             return `
-            <article class="season-seed-row" draggable="true" data-seed-index="${index}" aria-label="Seed ${escapeHtml(seed.seed)} ${escapeHtml(seed.playerName || seed.name)}">
+            <article class="season-seed-row season-preview-seed-row" draggable="true" data-seed-index="${index}" aria-label="Seed ${escapeHtml(seed.seed)} ${escapeHtml(seed.playerName || seed.name)}">
               <span class="season-seed-number season-preview-seed-number">${escapeHtml(seed.seed)}</span>
               ${renderSeasonPlayerPhoto(player, 'seed')}
-              <div class="season-seed-main">
+              <div class="season-seed-main season-preview-seed-main">
                 <strong>${escapeHtml(seed.playerName || seed.name || seed.playerId)}</strong>
-                <span>${escapeHtml(seed.wins)}-${escapeHtml(seed.losses)} • Win pct ${escapeHtml(formatWinPct(seed.winPct))} • Avg ${escapeHtml(formatStat(seed.averageScore))}</span>
-              </div>
-              <div class="season-seed-stats">
-                <span>${escapeHtml(formatStat(seed.totalPoints, 0))} pts</span>
-                <span>MOV ${escapeHtml(formatStat(seed.marginOfVictory))}</span>
-              </div>
-              <div class="season-seed-actions" aria-label="Manual seed controls">
-                <button type="button" class="btn btn-ghost btn-toolbar" data-season-action="seed-up" data-seed-index="${index}" ${index === 0 ? 'disabled' : ''}>↑</button>
-                <button type="button" class="btn btn-ghost btn-toolbar" data-season-action="seed-down" data-seed-index="${index}" ${index === seeds.length - 1 ? 'disabled' : ''}>↓</button>
               </div>
             </article>
           `;
