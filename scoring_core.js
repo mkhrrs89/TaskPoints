@@ -706,6 +706,7 @@
 
   function getSeriesStatusText(series) {
     if (!series) return 'Series unavailable';
+    if (!series.playerAId || !series.playerBId) return 'Awaiting opponent';
     if (series.status === 'complete') {
       const winnerName = series.winnerId === series.playerAId ? series.playerAName : series.winnerId === series.playerBId ? series.playerBName : 'Winner';
       return `${winnerName || 'Winner'} wins series ${Number(series.winsA) || 0}–${Number(series.winsB) || 0}`;
@@ -727,6 +728,222 @@
     const name = next[`player${oppositeSlot}Name`] || next[`placeholder${oppositeSlot}`] || 'TBD';
     return `Winner faces: ${name}`;
   }
+
+  function normalizeSeasonPlayerId(playerId) {
+    return String(playerId || '').trim();
+  }
+
+  function getSeasonPlayerDisplayName(state, playerId) {
+    const id = normalizeSeasonPlayerId(playerId);
+    if (!id) return 'TBD';
+    const normalized = normalizeState(state || {});
+    if (id === 'YOU') return normalized.youName || 'Miggy';
+    const seed = (normalized.currentSeason?.seeds || []).find((entry) => (entry?.playerId || entry?.id) === id);
+    if (seed?.playerName || seed?.name) return seed.playerName || seed.name;
+    const player = (normalized.players || []).find((entry) => entry?.id === id || entry?.playerId === id);
+    return player?.name || id;
+  }
+
+  function getSeriesPlayerLabel(series, slot) {
+    const prefix = slot === 'B' ? 'B' : 'A';
+    const seed = series?.[`player${prefix}Seed`];
+    const name = series?.[`player${prefix}Name`] || series?.[`player${prefix}Id`];
+    if (name) return `${Number.isFinite(Number(seed)) ? `#${Number(seed)} ` : ''}${name}`;
+    return series?.[`placeholder${prefix}`] || 'Awaiting opponent';
+  }
+
+  function getSeriesCompactTitle(series) {
+    if (!series) return 'Series unavailable';
+    return `${getSeriesPlayerLabel(series, 'A')} vs ${getSeriesPlayerLabel(series, 'B')}`;
+  }
+
+  function getSeriesGameNumber(series, dateKeyStr) {
+    if (!series) return null;
+    const results = Array.isArray(series.gameResults) ? series.gameResults : [];
+    const sameDate = typeof dateKeyStr === 'string' && dateKeyStr
+      ? results.find((result) => result?.dateKey === dateKeyStr)
+      : null;
+    if (sameDate) {
+      const index = results.indexOf(sameDate);
+      return index >= 0 ? index + 1 : null;
+    }
+    if (isSeasonSeriesComplete(series)) return null;
+    const next = results.length + 1;
+    const bestOf = Number(series.bestOf) || 1;
+    return next <= bestOf ? next : null;
+  }
+
+  function isSeasonEliminationGame(series) {
+    if (!series || isSeasonSeriesComplete(series) || !series.playerAId || !series.playerBId) return false;
+    const winsNeeded = Number(series.winsNeeded) || Math.floor((Number(series.bestOf) || 1) / 2) + 1;
+    return (Number(series.winsA) || 0) === winsNeeded - 1 || (Number(series.winsB) || 0) === winsNeeded - 1;
+  }
+
+  function getSeasonSeriesEntries(season) {
+    return Object.values(season?.series || {}).filter(Boolean).sort((a, b) => {
+      const ar = Number(a?.roundIndex) || 0;
+      const br = Number(b?.roundIndex) || 0;
+      if (ar !== br) return ar - br;
+      return (Number(a?.seriesIndex) || 0) - (Number(b?.seriesIndex) || 0);
+    });
+  }
+
+  function getFeaturedSeasonMatchup(season, dateKeyStr, state = {}) {
+    const entries = getSeasonSeriesEntries(season).filter((series) => series && !isSeasonSeriesComplete(series) && series.playerAId && series.playerBId);
+    if (!entries.length) return null;
+    const activeRoundId = getCurrentSeasonRoundIdForDate(dateKeyStr) || '';
+    const todayMatchups = (Array.isArray(state?.matchups) ? state.matchups : []).filter((matchup) => matchup?.matchupType === 'tournament' && matchup?.dateKey === dateKeyStr && matchup?.seriesId);
+    const todaySeriesIds = new Set(todayMatchups.map((matchup) => matchup.seriesId));
+    const candidates = entries.map((series) => ({
+      series,
+      today: todaySeriesIds.has(series.id) || (!!activeRoundId && series.roundId === activeRoundId),
+      seedSum: (Number(series.playerASeed) || 99) + (Number(series.playerBSeed) || 99),
+      upsetThreat: Math.abs((Number(series.playerASeed) || 99) - (Number(series.playerBSeed) || 99)),
+      tied: (Number(series.winsA) || 0) === (Number(series.winsB) || 0) && ((Number(series.winsA) || 0) + (Number(series.winsB) || 0) > 0),
+      elimination: isSeasonEliminationGame(series)
+    }));
+    const byOrder = (a, b) => {
+      if (a.today !== b.today) return a.today ? -1 : 1;
+      if (a.series.roundId === 'finals' && b.series.roundId !== 'finals') return -1;
+      if (b.series.roundId === 'finals' && a.series.roundId !== 'finals') return 1;
+      if (a.series.roundIndex !== b.series.roundIndex) return (Number(b.series.roundIndex) || 0) - (Number(a.series.roundIndex) || 0);
+      return (Number(a.series.seriesIndex) || 0) - (Number(b.series.seriesIndex) || 0);
+    };
+    const priorityGroups = [
+      (item) => item.series.roundId === 'finals' && item.today,
+      (item) => item.elimination && item.today,
+      (item) => item.tied && item.today,
+      (item) => item.today,
+      (item) => true
+    ];
+    for (let i = 0; i < priorityGroups.length; i += 1) {
+      let group = candidates.filter(priorityGroups[i]);
+      if (!group.length) continue;
+      if (i === 3) group = group.sort((a, b) => b.upsetThreat - a.upsetThreat || a.seedSum - b.seedSum || byOrder(a, b));
+      else if (i === 4) group = group.sort((a, b) => a.seedSum - b.seedSum || byOrder(a, b));
+      else group = group.sort(byOrder);
+      const chosen = group[0];
+      return {
+        series: chosen.series,
+        title: getSeriesCompactTitle(chosen.series),
+        roundName: chosen.series.roundName || getSeasonDisplayName(chosen.series.roundId),
+        statusText: getSeriesStatusText(chosen.series),
+        gameNumber: getSeriesGameNumber(chosen.series, dateKeyStr),
+        isEliminationGame: isSeasonEliminationGame(chosen.series)
+      };
+    }
+    return null;
+  }
+
+  function findUserSeasonPlayerId(state) {
+    const normalized = normalizeState(state || {});
+    if ((normalized.currentSeason?.seeds || []).some((seed) => seed?.playerId === 'YOU')) return 'YOU';
+    const miggySeed = (normalized.currentSeason?.seeds || []).find((seed) => String(seed?.playerName || seed?.name || '').toLowerCase() === 'miggy');
+    if (miggySeed?.playerId) return miggySeed.playerId;
+    const miggyPlayer = (normalized.players || []).find((player) => String(player?.name || '').toLowerCase() === 'miggy');
+    if (miggyPlayer?.id) return miggyPlayer.id;
+    return 'YOU';
+  }
+
+  function getUserSeasonStatus(season, dateKeyStr, state = {}) {
+    if (!season) return { playerId: '', playerName: 'You', statusText: 'No active Season Championship.' };
+    const normalized = normalizeState({ ...(state || {}), currentSeason: season });
+    const playerId = findUserSeasonPlayerId(normalized);
+    const playerName = getSeasonPlayerDisplayName(normalized, playerId);
+    const entries = getSeasonSeriesEntries(season);
+    const active = entries.find((series) => !isSeasonSeriesComplete(series) && series.playerAId && series.playerBId && (series.playerAId === playerId || series.playerBId === playerId));
+    if (active) {
+      const gameNumber = getSeriesGameNumber(active, dateKeyStr);
+      const title = getSeriesCompactTitle(active).replace(/^#\d+\s+/, '').replace(/ vs #\d+\s+/g, ' vs ');
+      return { playerId, playerName, series: active, statusText: `${title} — ${active.roundName || getSeasonDisplayName(active.roundId)}${gameNumber ? `, Game ${gameNumber}` : ''}`, detailText: getSeriesStatusText(active) };
+    }
+    const lost = entries.find((series) => isSeasonSeriesComplete(series) && series.loserId === playerId);
+    if (lost) {
+      const winnerName = lost.winnerId === lost.playerAId ? lost.playerAName : lost.playerBName;
+      return { playerId, playerName, series: lost, eliminated: true, statusText: `${playerName} is eliminated — lost in ${lost.roundName || getSeasonDisplayName(lost.roundId)} to ${winnerName || 'TBD'}`, detailText: getSeriesStatusText(lost) };
+    }
+    const awaiting = entries.find((series) => !isSeasonSeriesComplete(series) && (series.playerAId === playerId || series.playerBId === playerId || series.placeholderA || series.placeholderB));
+    if (awaiting && (awaiting.playerAId === playerId || awaiting.playerBId === playerId)) {
+      return { playerId, playerName, series: awaiting, awaiting: true, statusText: `${playerName} is awaiting opponent`, detailText: getWinnerFacesText(season, awaiting) };
+    }
+    const exhibition = (Array.isArray(normalized.matchups) ? normalized.matchups : []).find((matchup) => matchup?.dateKey === dateKeyStr && matchup?.matchupType === 'exhibition' && (matchup.playerAId === playerId || matchup.playerBId === playerId));
+    if (exhibition) {
+      const opponentId = exhibition.playerAId === playerId ? exhibition.playerBId : exhibition.playerAId;
+      return { playerId, playerName, matchup: exhibition, exhibition: true, statusText: `Today: exhibition matchup vs ${getSeasonPlayerDisplayName(normalized, opponentId)}` };
+    }
+    return { playerId, playerName, statusText: `${playerName} has no tournament game today.`, detailText: '' };
+  }
+
+  function getEliminatedPlayers(season) {
+    return getSeasonSeriesEntries(season)
+      .filter((series) => isSeasonSeriesComplete(series) && series.loserId)
+      .map((series) => {
+        const loserSlot = series.loserId === series.playerAId ? 'A' : 'B';
+        const winnerSlot = loserSlot === 'A' ? 'B' : 'A';
+        return {
+          playerId: series.loserId,
+          playerName: series[`player${loserSlot}Name`] || series.loserId,
+          seed: series[`player${loserSlot}Seed`],
+          eliminatedById: series.winnerId,
+          eliminatedByName: series[`player${winnerSlot}Name`] || series.winnerId || 'TBD',
+          roundLost: series.roundName || getSeasonDisplayName(series.roundId) || series.roundId,
+          seriesScore: `${Number(series.winsA) || 0}–${Number(series.winsB) || 0}`,
+          roundIndex: Number(series.roundIndex) || 0
+        };
+      })
+      .sort((a, b) => b.roundIndex - a.roundIndex || (Number(a.seed) || 99) - (Number(b.seed) || 99));
+  }
+
+  function getTournamentStatsForPlayer(season, state, playerId) {
+    let wins = 0;
+    let losses = 0;
+    let totalPoints = 0;
+    let games = 0;
+    getSeasonSeriesEntries(season).forEach((series) => {
+      (Array.isArray(series.gameResults) ? series.gameResults : []).forEach((result) => {
+        const involved = series.playerAId === playerId || series.playerBId === playerId || result.winnerId === playerId || result.loserId === playerId;
+        if (!involved) return;
+        games += 1;
+        if (result.winnerId === playerId) wins += 1;
+        if (result.loserId === playerId) losses += 1;
+        const score = series.playerAId === playerId ? Number(result.playerAScore) : series.playerBId === playerId ? Number(result.playerBScore) : NaN;
+        if (Number.isFinite(score)) totalPoints += score;
+      });
+    });
+    return { wins, losses, games, winPct: games ? wins / games : 0, totalPoints, averageScore: games ? totalPoints / games : null };
+  }
+
+  function getFinalPlacements(season, state = {}) {
+    const seeds = Array.isArray(season?.seeds) ? season.seeds : [];
+    const eliminated = new Map(getEliminatedPlayers(season).map((entry) => [entry.playerId, entry]));
+    const champion = getChampionSummary(season, state).championId || '';
+    return seeds.map((seed) => {
+      const playerId = seed.playerId || seed.id || '';
+      const stats = getTournamentStatsForPlayer(season, state, playerId);
+      const elim = eliminated.get(playerId);
+      const finishTier = champion && playerId === champion ? 0 : elim ? (10 - Number(elim.roundIndex || 0)) : 9;
+      return { playerId, playerName: seed.playerName || seed.name || playerId, seed: seed.seed, finishTier, finish: champion && playerId === champion ? 'Champion' : (elim ? `Lost in ${elim.roundLost}` : 'Pending'), ...stats };
+    }).sort((a, b) => a.finishTier - b.finishTier || b.winPct - a.winPct || b.wins - a.wins || (Number(b.averageScore) || 0) - (Number(a.averageScore) || 0) || (Number(b.totalPoints) || 0) - (Number(a.totalPoints) || 0) || (Number(a.seed) || 999) - (Number(b.seed) || 999));
+  }
+
+  function getChampionSummary(season, state = {}) {
+    const finals = getSeasonSeriesEntries(season).find((series) => series?.roundId === 'finals' && isSeasonSeriesComplete(series));
+    if (!finals) return { championId: '', championName: '', runnerUpId: '', runnerUpName: '', finalsResult: 'Finals pending', path: [] };
+    const championId = getSeasonSeriesWinner(finals) || finals.winnerId || '';
+    const runnerUpId = finals.loserId || (championId === finals.playerAId ? finals.playerBId : finals.playerAId) || '';
+    const championName = championId === finals.playerAId ? finals.playerAName : championId === finals.playerBId ? finals.playerBName : championId || 'Champion';
+    const runnerUpName = runnerUpId === finals.playerAId ? finals.playerAName : runnerUpId === finals.playerBId ? finals.playerBName : runnerUpId || 'Runner-up';
+    const stats = getTournamentStatsForPlayer(season, state, championId);
+    const path = getSeasonSeriesEntries(season)
+      .filter((series) => isSeasonSeriesComplete(series) && series.winnerId === championId)
+      .map((series) => {
+        const loserId = series.loserId || (championId === series.playerAId ? series.playerBId : series.playerAId);
+        const opponentName = loserId === series.playerAId ? series.playerAName : loserId === series.playerBId ? series.playerBName : loserId || 'TBD';
+        return { roundName: series.roundName || getSeasonDisplayName(series.roundId), opponentName, score: `${Number(series.winsA) || 0}–${Number(series.winsB) || 0}` };
+      });
+    return { championId, championName, runnerUpId, runnerUpName, finalsResult: `${championName} defeats ${runnerUpName}, ${Number(finals.winsA) || 0}–${Number(finals.winsB) || 0}`, record: `${stats.wins}–${stats.losses}`, ...stats, path };
+  }
+
 
 
 
@@ -4598,6 +4815,15 @@ return Number(cappedScore.toFixed(1));
     getCurrentSeasonRoundIdForDate,
     getSeriesStatusText,
     getWinnerFacesText,
+    getSeasonPlayerDisplayName,
+    getSeriesCompactTitle,
+    getSeriesGameNumber,
+    isSeasonEliminationGame,
+    getFeaturedSeasonMatchup,
+    getUserSeasonStatus,
+    getEliminatedPlayers,
+    getFinalPlacements,
+    getChampionSummary,
     shouldUseSeasonMatchupControl,
     buildSeasonDailySlate,
     getPairingKey,
