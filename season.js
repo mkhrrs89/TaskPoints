@@ -600,6 +600,25 @@
     `;
   }
 
+
+
+  function renderSeasonMatchupControl(season) {
+    const hasOfficial = Object.keys(season?.series || {}).length > 0;
+    const canToggle = hasOfficial && ['locked', 'active'].includes(season?.status);
+    if (!canToggle) return '';
+    const enabled = season?.meta?.seasonMatchupControlEnabled === true;
+    return `
+      <section class="glass season-card">
+        <h3 class="season-section-title">Season Matchup Control</h3>
+        <p class="muted text-sm">When enabled during June 2026, the Season system will create the full daily matchup slate: tournament games first, then exhibition matchups for everyone else.</p>
+        <p class="muted text-sm mt-2">Current setting: <strong>${enabled ? 'Enabled' : 'Disabled'}</strong></p>
+        <div class="season-rebuild-actions mt-4">
+          <button type="button" class="btn ${enabled ? 'btn-ghost' : 'btn-success'} btn-toolbar" data-season-action="${enabled ? 'disable-matchup-control' : 'enable-matchup-control'}">${enabled ? 'Disable Season Matchup Control' : 'Enable Season Matchup Control'}</button>
+        </div>
+      </section>
+    `;
+  }
+
   function renderCurrentSeason(season) {
     if (season?.status === 'preview') return renderPreviewSeason(season);
     const name = season?.name || season?.label || 'Season 1';
@@ -623,6 +642,7 @@
         </dl>
         <p class="muted text-sm mt-4">Seeds are locked. Admin Mode editing can be added in a future update.</p>
       </section>
+      ${renderSeasonMatchupControl(season)}
       ${Object.keys(season?.series || {}).length ? renderOfficialBracket(season) : '<section class="glass season-card"><p class="muted text-sm">Season tools will appear here in the next update.</p></section>'}
     `;
   }
@@ -799,6 +819,19 @@
         const state = currentMountedState();
         const nextState = lockCurrentPreviewToOfficialBracket(state, { nowISO: nowIso() });
         saveAndRenderSeason(nextState, 'season-create-official-bracket');
+        return;
+      }
+      if (action === 'enable-matchup-control' || action === 'disable-matchup-control') {
+        const state = currentMountedState();
+        const currentSeason = state.currentSeason || null;
+        if (!currentSeason) return;
+        const enabled = action === 'enable-matchup-control';
+        const nextSeason = {
+          ...currentSeason,
+          updatedAtISO: nowIso(),
+          meta: { ...(currentSeason.meta || {}), seasonMatchupControlEnabled: enabled }
+        };
+        saveAndRenderSeason({ ...state, currentSeason: nextSeason }, enabled ? 'season-enable-matchup-control' : 'season-disable-matchup-control');
       }
     });
   }

@@ -1285,7 +1285,24 @@ function participantSignatureFallback(ids) {
   return ids.slice().sort().join('|');
 }
 
-function buildDailyScheduleFallback(dateKeyStr, participantIds, signature) {
+function buildDailyScheduleFallback(dateKeyStr, participantIds, signature, state) {
+  if (window.TaskPointsCore?.shouldUseSeasonMatchupControl && TaskPointsCore.shouldUseSeasonMatchupControl(state, dateKeyStr) && typeof TaskPointsCore.buildSeasonDailySlate === 'function') {
+    const seasonSlate = TaskPointsCore.buildSeasonDailySlate(state, dateKeyStr);
+    if (seasonSlate.ok) {
+      if (seasonSlate.updatedSeason) state.currentSeason = seasonSlate.updatedSeason;
+      return {
+        date: dateKeyStr,
+        matchups: seasonSlate.allMatchups,
+        byeIds: [],
+        participantSignature: signature,
+        seasonMatchupControl: true,
+        seasonScheduleSignature: window.TaskPointsCore?.getSeasonScheduleSignature ? TaskPointsCore.getSeasonScheduleSignature(state, dateKeyStr) : '',
+        seasonWarnings: seasonSlate.warnings || []
+      };
+    }
+    console.warn('Season matchup control fell back to toolbar normal generator', seasonSlate.errors || seasonSlate.warnings || []);
+  }
+
   const pool = participantIds.slice();
   shuffleFallback(pool);
 
@@ -1380,13 +1397,16 @@ function ensureUpcomingScheduleFallback(state, days = 7) {
 
   const rebuilt = neededDates.map((key) => {
     const existing = byDate.get(key);
-    if (existing) return existing;
+    if (existing) {
+      const seasonControlApplies = window.TaskPointsCore?.shouldUseSeasonMatchupControl && TaskPointsCore.shouldUseSeasonMatchupControl(state, key);
+      if (!seasonControlApplies || (window.TaskPointsCore?.isValidSeasonControlledScheduleDay && TaskPointsCore.isValidSeasonControlledScheduleDay(state, key, existing))) return existing;
+    }
     const syncedFromMatchups = existingMatchupsByDate.get(key);
     if (syncedFromMatchups && syncedFromMatchups.length) {
       return buildDayFromExistingFallback(key, participants, signature, syncedFromMatchups);
     }
     changed = true;
-    return buildDailyScheduleFallback(key, participants, signature);
+    return buildDailyScheduleFallback(key, participants, signature, state);
   });
 
   if (rebuilt.length !== schedule.length) changed = true;

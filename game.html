@@ -1391,7 +1391,10 @@ function normalizeState(s) {
     youSecondaryColor: normalizePlayerColor(s.youSecondaryColor, DEFAULT_SECONDARY_COLOR),
     projects: Array.isArray(s.projects) ? s.projects : [],
     notes: typeof s.notes === "string" ? s.notes : "",
-    habitTagColors: normalizeHabitTagColors(s.habitTagColors)
+    habitTagColors: normalizeHabitTagColors(s.habitTagColors),
+    currentSeason: s.currentSeason || null,
+    latestSeasonId: typeof s.latestSeasonId === "string" ? s.latestSeasonId : "",
+    seasonHistory: Array.isArray(s.seasonHistory) ? s.seasonHistory : []
   };
   if (window.TaskPointsCore?.cleanupOpponentDripSchedules) {
     return TaskPointsCore.cleanupOpponentDripSchedules(normalized);
@@ -2131,8 +2134,10 @@ participantIds.forEach(id => {
 
   todaysPairs.forEach(pair => {
     const matchup = {
-      id: makeId(),
+      ...pair,
+      id: pair.id || makeId(),
       date: todayKey,
+      dateKey: pair.dateKey || todayKey,
       playerAId: pair.playerAId,
       playerBId: pair.playerBId,
       playerAName: namesById[pair.playerAId] || "Unknown",
@@ -2144,6 +2149,13 @@ participantIds.forEach(id => {
     state.matchups.push(matchup);
     todaysMatchups.push(matchup);
   });
+
+  if (window.TaskPointsCore?.syncSeasonResultsFromDailyMatchups) {
+    const seasonSync = TaskPointsCore.syncSeasonResultsFromDailyMatchups(state, todayKey);
+    if (seasonSync.changed) state = seasonSync.state;
+    (seasonSync.warnings || []).forEach((warning) => console.warn('Season result sync warning:', warning));
+    (seasonSync.errors || []).forEach((error) => console.warn('Season result sync error:', error));
+  }
 
   state = saveState(state);
 
@@ -2283,6 +2295,23 @@ function tomorrowDateKey(baseKey = getGameDayKey(new Date())) {
 }
 
 function buildDailySchedule(dateKeyStr, participantIds, signature){
+  if (window.TaskPointsCore?.shouldUseSeasonMatchupControl && TaskPointsCore.shouldUseSeasonMatchupControl(state, dateKeyStr) && typeof TaskPointsCore.buildSeasonDailySlate === "function") {
+    const seasonSlate = TaskPointsCore.buildSeasonDailySlate(state, dateKeyStr);
+    if (seasonSlate.ok) {
+      if (seasonSlate.updatedSeason) state.currentSeason = seasonSlate.updatedSeason;
+      return {
+        date: dateKeyStr,
+        matchups: seasonSlate.allMatchups,
+        byeIds: [],
+        participantSignature: signature,
+        seasonMatchupControl: true,
+        seasonScheduleSignature: window.TaskPointsCore?.getSeasonScheduleSignature ? TaskPointsCore.getSeasonScheduleSignature(state, dateKeyStr) : '',
+        seasonWarnings: seasonSlate.warnings || []
+      };
+    }
+    console.warn('Season matchup control fell back to normal generator', seasonSlate.errors || seasonSlate.warnings || []);
+  }
+
   const pool = participantIds.slice();
   shuffle(pool);
 
@@ -2389,16 +2418,21 @@ const rebuiltNeeded = neededDates.map((key) => {
     }
   }
 
-  if (existing && key < regenFromKey) return existing;
+  const seasonControlApplies = window.TaskPointsCore?.shouldUseSeasonMatchupControl && TaskPointsCore.shouldUseSeasonMatchupControl(state, key);
+  const existingSeasonControlledValid = seasonControlApplies && window.TaskPointsCore?.isValidSeasonControlledScheduleDay && TaskPointsCore.isValidSeasonControlledScheduleDay(state, key, existing);
+
+  if (existing && key < regenFromKey) {
+    if (!seasonControlApplies || existingSeasonControlledValid) return existing;
+  }
 
   if (key < regenFromKey) {
-    if (existing) return existing;
+    if (existing && (!seasonControlApplies || existingSeasonControlledValid)) return existing;
     changed = true;
     return buildDailySchedule(key, participants, signature);
   }
 
   if (!forceRebuildFromStart && existing && existing.participantSignature === signature) {
-    return existing;
+    if (!seasonControlApplies || existingSeasonControlledValid) return existing;
   }
 
   changed = true;
