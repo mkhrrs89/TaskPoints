@@ -123,6 +123,27 @@
         </div>
       </details>
 
+
+
+      <details class="glass space-y-3" id="seasonChampionshipRepairSection">
+        <summary class="flex items-center justify-between gap-3 flex-wrap cursor-pointer">
+          <div>
+            <div class="text-lg font-semibold">Season Championship Repair</div>
+            <div class="muted text-sm">Defensive reset, archive export, and repair tools for Season Championship data.</div>
+          </div>
+        </summary>
+        <div class="space-y-3 pt-4">
+          <div class="flex flex-wrap gap-2 items-center">
+            <button id="settingsSeasonResetBtn" class="btn btn-deny btn-toolbar nav-btn" type="button">Reset current Season Championship</button>
+            <button id="settingsSeasonRebuildBtn" class="btn btn-warn btn-toolbar nav-btn" type="button">Rebuild current Season from saved results</button>
+            <button id="settingsSeasonExportArchiveBtn" class="btn btn-ghost btn-toolbar nav-btn" type="button">Export current Season archive data</button>
+            <button id="settingsSeasonRepairBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Repair missing/corrupt Season data</button>
+          </div>
+          <p class="muted text-xs">Normal full-app export/import remains the main backup system. Season data remains in currentSeason, latestSeasonId, and seasonHistory.</p>
+          <div id="settingsSeasonRepairStatus" class="muted text-xs">No Season repair action has run yet.</div>
+        </div>
+      </details>
+
       <details class="glass space-y-3" id="storageHealthSection">
         <summary class="flex items-center justify-between gap-3 flex-wrap cursor-pointer">
           <div>
@@ -1356,11 +1377,13 @@ ${summaryWithNotes}`)) return;
           const allowScoringSettingsOverwrite = Boolean(options.allowScoringSettingsOverwrite);
           const allowStickyOverwriteKeys = options.allowStickyOverwriteKeys;
           const immediateWrite = Boolean(options.immediateWrite);
+          const allowDestructiveOverwrite = Boolean(options.allowDestructiveOverwrite);
           const { state: merged } = TaskPointsCore.saveAppState(nextState, {
             storageKey: SETTINGS_STORAGE_KEY,
             allowHabitTagColorReset,
             allowScoringSettingsOverwrite,
             allowStickyOverwriteKeys,
+            allowDestructiveOverwrite,
             immediateWrite
           });
           return merged;
@@ -1370,11 +1393,13 @@ ${summaryWithNotes}`)) return;
           const allowScoringSettingsOverwrite = Boolean(options.allowScoringSettingsOverwrite);
           const allowStickyOverwriteKeys = options.allowStickyOverwriteKeys;
           const immediateWrite = Boolean(options.immediateWrite);
+          const allowDestructiveOverwrite = Boolean(options.allowDestructiveOverwrite);
           const { state: merged } = TaskPointsCore.mergeAndSaveState(nextState, {
             storageKey: SETTINGS_STORAGE_KEY,
             allowHabitTagColorReset,
             allowScoringSettingsOverwrite,
             allowStickyOverwriteKeys,
+            allowDestructiveOverwrite,
             immediateWrite
           });
           return merged;
@@ -4074,6 +4099,74 @@ rows.push([
       return true;
     }
 
+
+    function setSeasonRepairStatus(message) {
+      const el = document.getElementById('settingsSeasonRepairStatus');
+      if (el) el.textContent = message || '';
+    }
+
+    function downloadJsonFile(filename, data) {
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 500);
+    }
+
+    function handleSeasonResetCurrent() {
+      const state = normalizeSettingsState(loadSettingsState());
+      if (!state.currentSeason) { setSeasonRepairStatus('No current Season Championship to reset.'); return; }
+      const msg = 'Strong confirmation: reset current Season Championship? This clears currentSeason only and does not touch seasonHistory.';
+      if (!confirm(msg)) return;
+      const next = saveSettingsState({ ...state, currentSeason: null }, { immediateWrite: true, allowDestructiveOverwrite: true });
+      setSeasonRepairStatus(`Current Season Championship reset. seasonHistory preserved (${(next.seasonHistory || []).length} archived season(s)).`);
+    }
+
+    function handleSeasonRebuildFromSavedResults() {
+      const state = normalizeSettingsState(loadSettingsState());
+      if (!state.currentSeason) { setSeasonRepairStatus('No current Season Championship to rebuild.'); return; }
+      if (!window.TaskPointsCore?.recalculateAllSeasonSeriesFromGameResults) {
+        setSeasonRepairStatus('Unable to rebuild automatically: Season recalculation helper is unavailable. No data was changed.');
+        return;
+      }
+      if (!confirm('Rebuild current Season series wins/winners from saved series gameResults? This does not guess missing results.')) return;
+      const result = TaskPointsCore.recalculateAllSeasonSeriesFromGameResults(state.currentSeason, { nowISO: new Date().toISOString() });
+      if (!result.ok) { setSeasonRepairStatus(`Rebuild failed: ${result.error || 'unknown error'}. No destructive changes were made.`); return; }
+      saveSettingsState({ ...state, currentSeason: result.season }, { immediateWrite: true });
+      setSeasonRepairStatus(`Rebuild complete. Changed: ${result.changed ? 'yes' : 'no'}.`);
+    }
+
+    function handleSeasonExportArchiveData() {
+      const state = normalizeSettingsState(loadSettingsState());
+      const payload = {
+        exportType: 'taskpoints_season_archive_data',
+        exportedAtISO: new Date().toISOString(),
+        note: 'Convenience Season-only archive export. Normal full-app export/import remains the main backup system.',
+        currentSeason: state.currentSeason || null,
+        latestSeasonId: state.latestSeasonId || '',
+        seasonHistory: Array.isArray(state.seasonHistory) ? state.seasonHistory : []
+      };
+      downloadJsonFile(`taskpoints-season-archive-${dateKey(new Date())}.json`, payload);
+      setSeasonRepairStatus('Season archive JSON downloaded. Full-app export/import remains the primary backup path.');
+    }
+
+    function handleSeasonRepairData() {
+      const state = normalizeSettingsState(loadSettingsState());
+      if (!window.TaskPointsCore?.repairSeasonChampionshipData) {
+        setSeasonRepairStatus('Repair unavailable: helper is missing. No data was changed.');
+        return;
+      }
+      if (!confirm('Normalize currentSeason and seasonHistory and remove safely invalid empty series entries? Good data will be preserved.')) return;
+      const result = TaskPointsCore.repairSeasonChampionshipData(state, { nowISO: new Date().toISOString() });
+      if (!result.ok) { setSeasonRepairStatus(`Repair failed: ${result.error || 'unknown error'}.`); return; }
+      saveSettingsState(result.state, { immediateWrite: true });
+      setSeasonRepairStatus(`Season data repaired. currentSeason: ${result.state.currentSeason ? 'present' : 'none'}; archives: ${(result.state.seasonHistory || []).length}.`);
+    }
+
     let latestSimulation = null;
 
     document.addEventListener('DOMContentLoaded', () => {
@@ -4082,6 +4175,10 @@ rows.push([
       document.getElementById('settingsMergeBackupInput')?.addEventListener('change', handleMergeBackupFile);
       document.getElementById('settingsResetGameStatsBtn')?.addEventListener('click', handleSettingsResetGameStats);
       document.getElementById('settingsResetBtn')?.addEventListener('click', handleSettingsReset);
+      document.getElementById('settingsSeasonResetBtn')?.addEventListener('click', handleSeasonResetCurrent);
+      document.getElementById('settingsSeasonRebuildBtn')?.addEventListener('click', handleSeasonRebuildFromSavedResults);
+      document.getElementById('settingsSeasonExportArchiveBtn')?.addEventListener('click', handleSeasonExportArchiveData);
+      document.getElementById('settingsSeasonRepairBtn')?.addEventListener('click', handleSeasonRepairData);
       document.getElementById('settingsExportMatchupsBtn')?.addEventListener('click', exportMatchupsAndHistoryCsv);
       document.getElementById('settingsExportPersonalScoresBtn')?.addEventListener('click', exportPersonalScoreHistoryCsv);
       document.getElementById('categoryReportBtn')?.addEventListener('click', generateCategoryReport);
