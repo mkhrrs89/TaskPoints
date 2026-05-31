@@ -544,3 +544,103 @@ test('official season helpers remain dormant and do not generate daily tournamen
   assert.equal(lockedState.currentSeason.series[Object.keys(lockedState.currentSeason.series)[0]].gameResults.length, 0);
   assert.equal(core.getActiveSeasonSeriesForDate(lockedState.currentSeason, '2026-06-04').length, 0);
 });
+
+function makeSeasonPlayers(count = 33) {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `P${index + 1}`,
+    name: `Player ${index + 1}`,
+    active: true
+  }));
+}
+
+function makeLockedSeasonWithControl(enabled = true) {
+  const seeds = [{ seed: 1, playerId: 'YOU', playerName: 'You' }].concat(makeOfficialSeasonSeedList(33).map((seed, index) => ({ ...seed, seed: index + 2 })));
+  return core.createEmptySeasonDraft({
+    id: 'season_1_june_2026',
+    status: 'locked',
+    seeds,
+    series: core.createOfficialSeasonSeriesFromSeeds(seeds, { seasonId: 'season_1_june_2026' }),
+    meta: { seasonMatchupControlEnabled: enabled }
+  });
+}
+
+test('Season matchup control gate requires feature flag, June 2026, valid status, official series, and players', () => {
+  const baseState = core.normalizeState({ players: makeSeasonPlayers(), currentSeason: makeLockedSeasonWithControl(false) });
+  assert.equal(core.shouldUseSeasonMatchupControl(baseState, '2026-06-01'), false);
+  assert.equal(core.shouldUseSeasonMatchupControl({ ...baseState, currentSeason: makeLockedSeasonWithControl(true) }, '2026-07-01'), false);
+  assert.equal(core.shouldUseSeasonMatchupControl({ ...baseState, players: [], currentSeason: makeLockedSeasonWithControl(true) }, '2026-06-01'), false);
+  assert.equal(core.shouldUseSeasonMatchupControl({ ...baseState, currentSeason: { ...makeLockedSeasonWithControl(true), status: 'preview' } }, '2026-06-01'), false);
+  assert.equal(core.shouldUseSeasonMatchupControl({ ...baseState, currentSeason: makeLockedSeasonWithControl(true) }, '2026-06-01'), true);
+});
+
+test('Season daily slate creates tournament games first and exhibitions without duplicate players', () => {
+  const state = core.normalizeState({ players: makeSeasonPlayers(), currentSeason: makeLockedSeasonWithControl(true) });
+  const slate = core.buildSeasonDailySlate(state, '2026-06-01', { random: () => 0.42 });
+  assert.equal(slate.ok, true);
+  assert.equal(slate.tournamentMatchups.length, 2);
+  assert.equal(slate.exhibitionMatchups.length, 15);
+  assert.equal(slate.allMatchups.length, 17);
+  assert.ok(slate.allMatchups.slice(0, 2).every((matchup) => matchup.matchupType === 'tournament'));
+  const participants = slate.allMatchups.flatMap((matchup) => [matchup.playerAId, matchup.playerBId]);
+  assert.equal(new Set(participants).size, participants.length);
+});
+
+test('Season daily slate skips completed series and returns early-complete players to exhibitions later', () => {
+  let season = makeLockedSeasonWithControl(true);
+  const playIn = Object.values(season.series).find((item) => item.roundId === 'play_in' && item.seriesIndex === 1);
+  let result = core.recordSeasonSeriesGameResult(season, playIn.id, { dateKey: '2026-06-01', matchupId: 'g1', winnerId: playIn.playerAId, loserId: playIn.playerBId, source: 'manual' });
+  season = result.season;
+  result = core.recordSeasonSeriesGameResult(season, playIn.id, { dateKey: '2026-06-02', matchupId: 'g2', winnerId: playIn.playerAId, loserId: playIn.playerBId, source: 'manual' });
+  season = result.season;
+  const state = core.normalizeState({ players: makeSeasonPlayers(), currentSeason: season });
+  const slate = core.buildSeasonDailySlate(state, '2026-06-03', { random: () => 0.12 });
+  assert.equal(slate.ok, true);
+  assert.equal(slate.tournamentMatchups.some((matchup) => matchup.seriesId === playIn.id), false);
+  assert.equal(slate.exhibitionMatchups.some((matchup) => matchup.playerAId === playIn.playerAId || matchup.playerBId === playIn.playerAId), true);
+  assert.equal(slate.exhibitionMatchups.some((matchup) => matchup.playerAId === playIn.playerBId || matchup.playerBId === playIn.playerBId), true);
+});
+
+test('Season exhibition pairing avoids previous June pairings and falls back to least-recent repeat', () => {
+  const history = new Map([
+    [core.getPairingKey('A', 'B'), { lastDateKey: '2026-06-01' }],
+    [core.getPairingKey('A', 'C'), { lastDateKey: '2026-06-03' }],
+    [core.getPairingKey('A', 'D'), { lastDateKey: '2026-06-02' }],
+    [core.getPairingKey('B', 'C'), { lastDateKey: '2026-06-04' }],
+    [core.getPairingKey('B', 'D'), { lastDateKey: '2026-06-05' }],
+    [core.getPairingKey('C', 'D'), { lastDateKey: '2026-06-06' }]
+  ]);
+  const fallback = core.generateRandomNonRepeatPairs(['A', 'B', 'C', 'D'], history, { random: () => 0 });
+  assert.equal(fallback.ok, true);
+  assert.equal(fallback.relaxedRepeatCount, 2);
+  assert.equal(fallback.pairs.some((pair) => core.getPairingKey(pair.playerAId, pair.playerBId) === core.getPairingKey('A', 'B')), true);
+
+  const avoid = core.generateRandomNonRepeatPairs(['A', 'B', 'C', 'D'], new Map([[core.getPairingKey('A', 'B'), { lastDateKey: '2026-06-01' }]]), { random: () => 0.1 });
+  assert.equal(avoid.ok, true);
+  assert.equal(avoid.pairs.some((pair) => core.getPairingKey(pair.playerAId, pair.playerBId) === core.getPairingKey('A', 'B')), false);
+});
+
+test('Season result sync records tournament results once, ignores exhibitions, and advances completed Play-In', () => {
+  const season = makeLockedSeasonWithControl(true);
+  const playIn = Object.values(season.series).find((item) => item.roundId === 'play_in' && item.seriesIndex === 1);
+  let state = core.normalizeState({
+    players: makeSeasonPlayers(),
+    currentSeason: season,
+    matchups: [
+      { id: 't1', dateKey: '2026-06-01', seasonId: season.id, seriesId: playIn.id, matchupType: 'tournament', playerAId: playIn.playerAId, playerBId: playIn.playerBId, scoreA: 90, scoreB: 80 },
+      { id: 'ex1', dateKey: '2026-06-01', seasonId: season.id, matchupType: 'exhibition', playerAId: 'P1', playerBId: 'P2', scoreA: 1, scoreB: 2 }
+    ]
+  });
+  let synced = core.syncSeasonResultsFromDailyMatchups(state, '2026-06-01');
+  assert.equal(synced.changed, true);
+  assert.equal(synced.updatedSeason.series[playIn.id].gameResults.length, 1);
+  synced = core.syncSeasonResultsFromDailyMatchups(synced.state, '2026-06-01');
+  assert.equal(synced.updatedSeason.series[playIn.id].gameResults.length, 1);
+
+  state = core.normalizeState({
+    ...synced.state,
+    matchups: synced.state.matchups.concat({ id: 't2', dateKey: '2026-06-02', seasonId: season.id, seriesId: playIn.id, matchupType: 'tournament', playerAId: playIn.playerAId, playerBId: playIn.playerBId, scoreA: 95, scoreB: 70 })
+  });
+  synced = core.syncSeasonResultsFromDailyMatchups(state, '2026-06-02');
+  assert.equal(synced.updatedSeason.series[playIn.id].status, 'complete');
+  assert.equal(synced.updatedSeason.series[playIn.id].winnerId, playIn.playerAId);
+});

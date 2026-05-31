@@ -1285,7 +1285,23 @@ function participantSignatureFallback(ids) {
   return ids.slice().sort().join('|');
 }
 
-function buildDailyScheduleFallback(dateKeyStr, participantIds, signature) {
+function buildDailyScheduleFallback(dateKeyStr, participantIds, signature, state) {
+  if (window.TaskPointsCore?.shouldUseSeasonMatchupControl && TaskPointsCore.shouldUseSeasonMatchupControl(state, dateKeyStr) && typeof TaskPointsCore.buildSeasonDailySlate === 'function') {
+    const seasonSlate = TaskPointsCore.buildSeasonDailySlate(state, dateKeyStr);
+    if (seasonSlate.ok) {
+      if (seasonSlate.updatedSeason) state.currentSeason = seasonSlate.updatedSeason;
+      return {
+        date: dateKeyStr,
+        matchups: seasonSlate.allMatchups,
+        byeIds: [],
+        participantSignature: signature,
+        seasonMatchupControl: true,
+        seasonWarnings: seasonSlate.warnings || []
+      };
+    }
+    console.warn('Season matchup control fell back to toolbar normal generator', seasonSlate.errors || seasonSlate.warnings || []);
+  }
+
   const pool = participantIds.slice();
   shuffleFallback(pool);
 
@@ -1386,7 +1402,7 @@ function ensureUpcomingScheduleFallback(state, days = 7) {
       return buildDayFromExistingFallback(key, participants, signature, syncedFromMatchups);
     }
     changed = true;
-    return buildDailyScheduleFallback(key, participants, signature);
+    return buildDailyScheduleFallback(key, participants, signature, state);
   });
 
   if (rebuilt.length !== schedule.length) changed = true;

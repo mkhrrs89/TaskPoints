@@ -244,7 +244,7 @@
       championSummary: isSeasonObject(season.championSummary) ? { ...season.championSummary } : null,
       finalPlacements: normalizeSeasonArray(season.finalPlacements),
       warnings: normalizeSeasonArray(season.warnings),
-      meta: normalizeSeasonObjectMap(season.meta)
+      meta: { seasonMatchupControlEnabled: false, ...normalizeSeasonObjectMap(season.meta) }
     };
   }
 
@@ -320,7 +320,7 @@
       championSummary: isSeasonObject(options.championSummary) ? { ...options.championSummary } : null,
       finalPlacements: Array.isArray(options.finalPlacements) ? options.finalPlacements.slice() : [],
       warnings: Array.isArray(options.warnings) ? options.warnings.slice() : [],
-      meta: isSeasonObject(options.meta) ? { ...options.meta } : {}
+      meta: { seasonMatchupControlEnabled: false, ...(isSeasonObject(options.meta) ? options.meta : {}) }
     };
     return normalizeSeasonState(draft);
   }
@@ -660,6 +660,276 @@
     const oppositeSlot = series.nextSlot === 'A' ? 'B' : 'A';
     const name = next[`player${oppositeSlot}Name`] || next[`placeholder${oppositeSlot}`] || 'TBD';
     return `Winner faces: ${name}`;
+  }
+
+
+
+  function isSeasonOneJune2026Compatible(season) {
+    if (!season) return false;
+    const id = String(season.id || '').toLowerCase();
+    return season.monthKey === DEFAULT_SEASON_MONTH_KEY
+      || id === 'season_1_june_2026'
+      || id.includes('june_2026')
+      || id.includes('2026-06');
+  }
+
+  function shouldUseSeasonMatchupControl(state, dateKeyStr) {
+    const normalized = normalizeState(state || {});
+    const season = normalized.currentSeason;
+    const seriesEntries = Object.values(season?.series || {});
+    const playerPool = getActiveSeasonPlayerPool(normalized);
+    return Boolean(
+      season
+      && isSeasonOneJune2026Compatible(season)
+      && ['locked', 'active', 'champion_crowned'].includes(season.status)
+      && season.meta?.seasonMatchupControlEnabled === true
+      && isJuneSeasonDate(dateKeyStr)
+      && seriesEntries.length > 0
+      && playerPool.length >= 2
+    );
+  }
+
+  function getPairingKey(playerAId, playerBId) {
+    return normalizePairIds(playerAId, playerBId).join('|');
+  }
+
+  function getJunePairingHistory(state, season, beforeDateKey) {
+    const normalized = normalizeState(state || {});
+    const start = season?.startDate || '2026-06-01';
+    const end = season?.endDate || '2026-06-30';
+    const history = new Map();
+    (normalized.matchups || []).forEach((matchup) => {
+      const key = matchupDateKey(matchup);
+      if (!key || key < start || key > end || (beforeDateKey && key >= beforeDateKey)) return;
+      if (!matchup?.playerAId || !matchup?.playerBId) return;
+      const pairingKey = getPairingKey(matchup.playerAId, matchup.playerBId);
+      const existing = history.get(pairingKey);
+      const entry = {
+        key: pairingKey,
+        playerAId: normalizePairIds(matchup.playerAId, matchup.playerBId)[0],
+        playerBId: normalizePairIds(matchup.playerAId, matchup.playerBId)[1],
+        firstDateKey: existing?.firstDateKey && existing.firstDateKey < key ? existing.firstDateKey : key,
+        lastDateKey: existing?.lastDateKey && existing.lastDateKey > key ? existing.lastDateKey : key,
+        count: (existing?.count || 0) + 1,
+        matchups: (existing?.matchups || []).concat(matchup.id || '')
+      };
+      history.set(pairingKey, entry);
+    });
+    return history;
+  }
+
+  function hasJunePairingOccurred(history, playerAId, playerBId) {
+    if (!history) return false;
+    return history.has(getPairingKey(playerAId, playerBId));
+  }
+
+  function generateRandomNonRepeatPairs(pool, history, options = {}) {
+    const ids = (Array.isArray(pool) ? pool : []).map((item) => typeof item === 'string' ? item : item?.id || item?.playerId).filter(Boolean);
+    const warnings = [];
+    const errors = [];
+    if (ids.length % 2 === 1) {
+      errors.push(`Odd player pool (${ids.length}) cannot be fully paired.`);
+      return { ok: false, pairs: [], warnings, errors, relaxedRepeatCount: 0 };
+    }
+
+    const random = typeof options.random === 'function' ? options.random : Math.random;
+    const attempts = Math.max(25, Number(options.attempts) || 200);
+    const shuffleWithRandom = (arr) => {
+      const next = arr.slice();
+      for (let i = next.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(random() * (i + 1));
+        [next[i], next[j]] = [next[j], next[i]];
+      }
+      return next;
+    };
+
+    function backtrack(remaining, pairs) {
+      if (!remaining.length) return pairs;
+      const [first, ...rest] = remaining;
+      const candidates = shuffleWithRandom(rest).filter((candidate) => !hasJunePairingOccurred(history, first, candidate));
+      for (const candidate of candidates) {
+        const nextRest = rest.filter((id) => id !== candidate);
+        const result = backtrack(nextRest, pairs.concat({ playerAId: first, playerBId: candidate, repeated: false }));
+        if (result) return result;
+      }
+      return null;
+    }
+
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      const result = backtrack(shuffleWithRandom(ids), []);
+      if (result) return { ok: true, pairs: result, warnings, errors, relaxedRepeatCount: 0 };
+    }
+
+    const remaining = shuffleWithRandom(ids);
+    const fallbackPairs = [];
+    let relaxedRepeatCount = 0;
+    while (remaining.length) {
+      const first = remaining.shift();
+      let bestIndex = -1;
+      let bestRank = null;
+      remaining.forEach((candidate, index) => {
+        const occurred = hasJunePairingOccurred(history, first, candidate);
+        const entry = history?.get(getPairingKey(first, candidate));
+        const rank = occurred ? (entry?.lastDateKey || '0000-00-00') : '';
+        if (bestIndex === -1) {
+          bestIndex = index; bestRank = rank; return;
+        }
+        if (!occurred && bestRank) { bestIndex = index; bestRank = rank; return; }
+        if (occurred === Boolean(bestRank) && rank < bestRank) { bestIndex = index; bestRank = rank; }
+      });
+      if (bestIndex < 0) break;
+      const [second] = remaining.splice(bestIndex, 1);
+      const repeated = hasJunePairingOccurred(history, first, second);
+      if (repeated) relaxedRepeatCount += 1;
+      fallbackPairs.push({ playerAId: first, playerBId: second, repeated });
+    }
+    if (fallbackPairs.length * 2 !== ids.length) {
+      errors.push('Unable to create a full fallback pairing slate.');
+      return { ok: false, pairs: fallbackPairs, warnings, errors, relaxedRepeatCount };
+    }
+    if (relaxedRepeatCount) warnings.push(`No-repeat June pairing rule relaxed for ${relaxedRepeatCount} matchup(s).`);
+    return { ok: true, pairs: fallbackPairs, warnings, errors, relaxedRepeatCount };
+  }
+
+  function buildSeasonDailySlate(state, dateKeyStr, options = {}) {
+    const warnings = [];
+    const errors = [];
+    const normalized = normalizeState(state || {});
+    const season = normalizeSeasonState(normalized.currentSeason);
+    if (!shouldUseSeasonMatchupControl(normalized, dateKeyStr)) {
+      errors.push('Season matchup control gate is closed.');
+      return { ok: false, dateKey: dateKeyStr, tournamentMatchups: [], exhibitionMatchups: [], allMatchups: [], warnings, errors, updatedSeason: season };
+    }
+
+    const playerPool = getActiveSeasonPlayerPool(normalized);
+    const playerById = new Map(playerPool.map((player) => [player.id || player.playerId, player]));
+    const activeSeries = getActiveSeasonSeriesForDate(season, dateKeyStr)
+      .filter((series) => series && !isSeasonSeriesComplete(series) && series.playerAId && series.playerBId)
+      .sort((a, b) => (Number(a.roundIndex) || 0) - (Number(b.roundIndex) || 0) || (Number(a.seriesIndex) || 0) - (Number(b.seriesIndex) || 0));
+
+    const used = new Set();
+    const tournamentMatchups = [];
+    activeSeries.forEach((series) => {
+      const seriesGameNumber = (Array.isArray(series.gameResults) ? series.gameResults.length : 0) + 1;
+      if (seriesGameNumber > (Number(series.bestOf) || 1)) return;
+      if (used.has(series.playerAId) || used.has(series.playerBId)) {
+        warnings.push(`Skipped tournament series ${series.id} because a player was already assigned today.`);
+        return;
+      }
+      used.add(series.playerAId);
+      used.add(series.playerBId);
+      const roundName = series.roundName || getSeasonDisplayName(series.roundId) || series.roundId;
+      tournamentMatchups.push({
+        id: `${dateKeyStr}_${series.id}_g${seriesGameNumber}`,
+        date: dateKeyStr,
+        dateKey: dateKeyStr,
+        playerAId: series.playerAId,
+        playerBId: series.playerBId,
+        playerAName: series.playerAName || playerById.get(series.playerAId)?.name || series.playerAId,
+        playerBName: series.playerBName || playerById.get(series.playerBId)?.name || series.playerBId,
+        seasonId: season.id,
+        seriesId: series.id,
+        roundId: series.roundId,
+        roundName,
+        seriesGameNumber,
+        bestOf: Number(series.bestOf) || null,
+        winsNeeded: Number(series.winsNeeded) || Math.floor((Number(series.bestOf) || 1) / 2) + 1,
+        matchupType: 'tournament',
+        seasonMatchupLabel: `${roundName}, Game ${seriesGameNumber}`
+      });
+    });
+
+    const exhibitionPool = playerPool
+      .map((player) => player.id || player.playerId)
+      .filter((id) => id && !used.has(id));
+    if (exhibitionPool.length % 2 === 1) {
+      errors.push(`Odd exhibition player pool (${exhibitionPool.length}) cannot be fully paired.`);
+      return { ok: false, dateKey: dateKeyStr, tournamentMatchups, exhibitionMatchups: [], allMatchups: tournamentMatchups, warnings, errors, updatedSeason: season };
+    }
+    const history = getJunePairingHistory(normalized, season, dateKeyStr);
+    tournamentMatchups.forEach((matchup) => {
+      history.set(getPairingKey(matchup.playerAId, matchup.playerBId), {
+        key: getPairingKey(matchup.playerAId, matchup.playerBId),
+        firstDateKey: dateKeyStr,
+        lastDateKey: dateKeyStr,
+        count: 1,
+        matchups: [matchup.id]
+      });
+    });
+    const generated = generateRandomNonRepeatPairs(exhibitionPool, history, options);
+    warnings.push(...generated.warnings);
+    errors.push(...generated.errors);
+    if (!generated.ok) return { ok: false, dateKey: dateKeyStr, tournamentMatchups, exhibitionMatchups: [], allMatchups: tournamentMatchups, warnings, errors, updatedSeason: season };
+
+    const exhibitionMatchups = generated.pairs.map((pair, index) => ({
+      id: `${dateKeyStr}_exhibition_${index + 1}_${pair.playerAId}_${pair.playerBId}`,
+      date: dateKeyStr,
+      dateKey: dateKeyStr,
+      playerAId: pair.playerAId,
+      playerBId: pair.playerBId,
+      playerAName: playerById.get(pair.playerAId)?.name || pair.playerAId,
+      playerBName: playerById.get(pair.playerBId)?.name || pair.playerBId,
+      seasonId: season.id,
+      matchupType: 'exhibition',
+      seasonMatchupLabel: 'Exhibition'
+    }));
+
+    const allMatchups = tournamentMatchups.concat(exhibitionMatchups);
+    const sameDayPlayers = new Set();
+    for (const matchup of allMatchups) {
+      if (sameDayPlayers.has(matchup.playerAId) || sameDayPlayers.has(matchup.playerBId)) {
+        errors.push('Duplicate player detected in Season daily slate.');
+        return { ok: false, dateKey: dateKeyStr, tournamentMatchups, exhibitionMatchups, allMatchups, warnings, errors, updatedSeason: season };
+      }
+      sameDayPlayers.add(matchup.playerAId);
+      sameDayPlayers.add(matchup.playerBId);
+    }
+
+    return { ok: true, dateKey: dateKeyStr, tournamentMatchups, exhibitionMatchups, allMatchups, warnings, errors, updatedSeason: season };
+  }
+
+  function getMatchupWinnerIds(matchup) {
+    const scoreA = Number(matchup?.scoreA);
+    const scoreB = Number(matchup?.scoreB);
+    if (!Number.isFinite(scoreA) || !Number.isFinite(scoreB) || scoreA === scoreB) return null;
+    return scoreA > scoreB
+      ? { winnerId: matchup.playerAId, loserId: matchup.playerBId, playerAScore: scoreA, playerBScore: scoreB }
+      : { winnerId: matchup.playerBId, loserId: matchup.playerAId, playerAScore: scoreA, playerBScore: scoreB };
+  }
+
+  function syncSeasonResultsFromDailyMatchups(state, dateKeyStr, options = {}) {
+    const normalized = normalizeState(state || {});
+    let season = normalizeSeasonState(normalized.currentSeason);
+    const warnings = [];
+    const errors = [];
+    if (!season) return { ok: false, state: normalized, updatedSeason: season, changed: false, warnings, errors: ['No current season.'] };
+    const dayMatchups = (normalized.matchups || []).filter((matchup) => matchupDateKey(matchup) === dateKeyStr && matchup?.seasonId === season.id && matchup?.seriesId && matchup?.matchupType === 'tournament');
+    let changed = false;
+    dayMatchups.forEach((matchup) => {
+      const winner = getMatchupWinnerIds(matchup);
+      if (!winner) { warnings.push(`Tournament matchup ${matchup.id || matchup.seriesId} has no unambiguous winner yet.`); return; }
+      const record = recordSeasonSeriesGameResult(season, matchup.seriesId, {
+        dateKey: dateKeyStr,
+        matchupId: matchup.id || `${dateKeyStr}_${matchup.seriesId}`,
+        ...winner,
+        source: 'matchup'
+      }, options);
+      if (!record.ok) {
+        if (record.error === 'duplicate_game_result' || record.error === 'series_already_complete') warnings.push(`Skipped duplicate/already complete tournament result for ${matchup.seriesId}.`);
+        else errors.push(record.error || `Unable to record result for ${matchup.seriesId}.`);
+        season = record.season || season;
+        return;
+      }
+      changed = true;
+      season = record.season;
+      if (record.complete) {
+        const advanced = advanceSeasonSeriesWinner(season, matchup.seriesId, options);
+        if (advanced.ok) { season = advanced.season; changed = true; }
+        else warnings.push(`Series ${matchup.seriesId} complete but advancement is pending: ${advanced.error || 'unknown'}.`);
+      }
+    });
+    const nextState = changed ? normalizeState({ ...normalized, currentSeason: season, latestSeasonId: season?.id || normalized.latestSeasonId || '' }) : normalized;
+    return { ok: errors.length === 0, state: nextState, updatedSeason: season, changed, warnings, errors };
   }
 
   function getActiveSeasonPlayerPool(state) {
@@ -4144,6 +4414,13 @@ return Number(cappedScore.toFixed(1));
     getCurrentSeasonRoundIdForDate,
     getSeriesStatusText,
     getWinnerFacesText,
+    shouldUseSeasonMatchupControl,
+    buildSeasonDailySlate,
+    getPairingKey,
+    getJunePairingHistory,
+    hasJunePairingOccurred,
+    generateRandomNonRepeatPairs,
+    syncSeasonResultsFromDailyMatchups,
     cleanupOpponentDripSchedules,
     getOpponentDripScheduleCleanupSummary,
     loadAppState,

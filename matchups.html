@@ -65,6 +65,33 @@
       background: rgba(34,197,94,0.15);
       border-color: rgba(34,197,94,0.55);
     }
+
+    .matchup-item.tournament {
+      background: rgba(251,146,60,0.16);
+      border-color: rgba(251,146,60,0.65);
+    }
+
+    .matchup-section-label {
+      font-size: 0.82rem;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      margin: 0.65rem 0 0.35rem;
+      color: #fb923c;
+    }
+
+    .matchup-badge {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 0.08rem 0.45rem;
+      margin-right: 0.4rem;
+      font-size: 0.72rem;
+      font-weight: 700;
+      background: rgba(251,146,60,0.24);
+      color: #fed7aa;
+      border: 1px solid rgba(251,146,60,0.45);
+    }
   </style>
 </head>
 <body class="min-h-screen">
@@ -207,7 +234,10 @@ function readPageStateFresh() {
       habitTagColors: normalizeHabitTagColors(p.habitTagColors),
       scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
         ? TaskPointsCore.normalizeScoringSettings(p.scoringSettings || {})
-        : (p.scoringSettings || {})
+        : (p.scoringSettings || {}),
+      currentSeason: p.currentSeason || null,
+      latestSeasonId: typeof p.latestSeasonId === "string" ? p.latestSeasonId : "",
+      seasonHistory: Array.isArray(p.seasonHistory) ? p.seasonHistory : []
     };
 
   } catch (e) {
@@ -622,6 +652,13 @@ for (let i = 0; i + 1 < pool.length; i += 2) {
           removeOpponentDripSchedule(state, key, update.playerId);
         });
 
+        if (window.TaskPointsCore?.syncSeasonResultsFromDailyMatchups) {
+          const seasonSync = TaskPointsCore.syncSeasonResultsFromDailyMatchups(state, key);
+          if (seasonSync.changed) state = seasonSync.state;
+          (seasonSync.warnings || []).forEach((warning) => console.warn('Season result sync warning:', warning));
+          (seasonSync.errors || []).forEach((error) => console.warn('Season result sync error:', error));
+        }
+
         state = save(state);
         renderMatchups();
       }
@@ -741,21 +778,45 @@ for (let i = 0; i + 1 < pool.length; i += 2) {
         heading.textContent = formatLongDate(key);
         section.appendChild(heading);
 
-        const list = document.createElement("ul");
-        list.className = "space-y-1";
-
-        groups.get(key)
-          .slice()
-          .sort((a,b) => (a.id || "").localeCompare(b.id || ""))
-          .forEach(m => {
+        const dayMatchups = groups.get(key).slice().sort((a,b) => {
+          const at = a.matchupType === "tournament" ? 0 : 1;
+          const bt = b.matchupType === "tournament" ? 0 : 1;
+          if (at !== bt) return at - bt;
+          return (a.id || "").localeCompare(b.id || "");
+        });
+        const hasSeasonSections = dayMatchups.some(m => m.matchupType === "tournament" || m.matchupType === "exhibition");
+        const renderList = (items, label) => {
+          if (!items.length) return;
+          if (hasSeasonSections && label) {
+            const labelEl = document.createElement("div");
+            labelEl.className = "matchup-section-label";
+            labelEl.textContent = label;
+            section.appendChild(labelEl);
+          }
+          const list = document.createElement("ul");
+          list.className = "space-y-1";
+          items.forEach(m => {
             const li = document.createElement("li");
             li.className = "matchup-item flex items-center justify-between gap-3";
+            if (m.matchupType === "tournament") li.classList.add("tournament");
             if (m.playerAId === "YOU" || m.playerBId === "YOU") {
               li.classList.add("you");
             }
             const summary = document.createElement("span");
             summary.className = "flex-1";
-            summary.textContent = describeMatchup(m);
+            if (m.matchupType === "tournament") {
+              const badge = document.createElement("span");
+              badge.className = "matchup-badge";
+              badge.textContent = m.seasonMatchupLabel || "Tournament";
+              summary.appendChild(badge);
+              summary.append(document.createTextNode(describeMatchup(m)));
+              if (m.seriesId && window.TaskPointsCore?.getSeriesStatusText) {
+                const series = state.currentSeason?.series?.[m.seriesId];
+                if (series) summary.append(document.createTextNode(` • ${TaskPointsCore.getSeriesStatusText(series)}`));
+              }
+            } else {
+              summary.textContent = describeMatchup(m);
+            }
             li.appendChild(summary);
 
             if (m.playerAId !== "YOU" || m.playerBId !== "YOU") {
@@ -768,8 +829,15 @@ for (let i = 0; i + 1 < pool.length; i += 2) {
             }
             list.appendChild(li);
           });
+          section.appendChild(list);
+        };
 
-        section.appendChild(list);
+        if (hasSeasonSections) {
+          renderList(dayMatchups.filter(m => m.matchupType === "tournament"), "June Championship Games");
+          renderList(dayMatchups.filter(m => m.matchupType !== "tournament"), "Exhibition Games");
+        } else {
+          renderList(dayMatchups, "");
+        }
 
         const missingIds = missingIdsForDate(key, state);
         if (missingIds.length) {
@@ -936,7 +1004,10 @@ function normalizeState(s) {
     habitTagColors: normalizeHabitTagColors(s.habitTagColors),
     scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
       ? TaskPointsCore.normalizeScoringSettings(s.scoringSettings || {})
-      : (s.scoringSettings || {})
+      : (s.scoringSettings || {}),
+    currentSeason: s.currentSeason || null,
+    latestSeasonId: typeof s.latestSeasonId === "string" ? s.latestSeasonId : "",
+    seasonHistory: Array.isArray(s.seasonHistory) ? s.seasonHistory : []
   };
   if (window.TaskPointsCore?.cleanupOpponentDripSchedules) {
     return TaskPointsCore.cleanupOpponentDripSchedules(normalized);

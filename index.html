@@ -2622,7 +2622,10 @@ function load() {
         habitTagColors: {},
         scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
           ? TaskPointsCore.normalizeScoringSettings({})
-          : {}
+          : {},
+        currentSeason: null,
+        latestSeasonId: "",
+        seasonHistory: []
       };
     }
 
@@ -2661,7 +2664,10 @@ function load() {
       habitTagColors: normalizeHabitTagColors(p.habitTagColors),
       scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
         ? TaskPointsCore.normalizeScoringSettings(p.scoringSettings || {})
-        : (p.scoringSettings || {})
+        : (p.scoringSettings || {}),
+      currentSeason: p.currentSeason || null,
+      latestSeasonId: typeof p.latestSeasonId === "string" ? p.latestSeasonId : "",
+      seasonHistory: Array.isArray(p.seasonHistory) ? p.seasonHistory : []
     };
   } catch (e) {
     console.error('Failed to load TaskPoints state on main page', e);
@@ -3160,6 +3166,22 @@ function participantSignature(ids){
 }
 
 function buildDailySchedule(dateKeyStr, participantIds, signature){
+  if (window.TaskPointsCore?.shouldUseSeasonMatchupControl && TaskPointsCore.shouldUseSeasonMatchupControl(state, dateKeyStr) && typeof TaskPointsCore.buildSeasonDailySlate === "function") {
+    const seasonSlate = TaskPointsCore.buildSeasonDailySlate(state, dateKeyStr);
+    if (seasonSlate.ok) {
+      if (seasonSlate.updatedSeason) state.currentSeason = seasonSlate.updatedSeason;
+      return {
+        date: dateKeyStr,
+        matchups: seasonSlate.allMatchups,
+        byeIds: [],
+        participantSignature: signature,
+        seasonMatchupControl: true,
+        seasonWarnings: seasonSlate.warnings || []
+      };
+    }
+    console.warn('Season matchup control fell back to normal generator', seasonSlate.errors || seasonSlate.warnings || []);
+  }
+
   const pool = participantIds.slice();
   shuffle(pool);
 
@@ -3391,8 +3413,10 @@ participantIds.forEach(id => {
 
   todaysPairs.forEach(pair => {
     const matchup = {
-      id: makeId(),
+      ...pair,
+      id: pair.id || makeId(),
       date: todayKey,
+      dateKey: pair.dateKey || todayKey,
       playerAId: pair.playerAId,
       playerBId: pair.playerBId,
       playerAName: namesById[pair.playerAId] || "Unknown",
@@ -3403,6 +3427,13 @@ participantIds.forEach(id => {
 
     state.matchups.push(matchup);
   });
+
+  if (window.TaskPointsCore?.syncSeasonResultsFromDailyMatchups) {
+    const seasonSync = TaskPointsCore.syncSeasonResultsFromDailyMatchups(state, todayKey);
+    if (seasonSync.changed) state = seasonSync.state;
+    (seasonSync.warnings || []).forEach((warning) => console.warn('Season result sync warning:', warning));
+    (seasonSync.errors || []).forEach((error) => console.warn('Season result sync error:', error));
+  }
 
   save();
 }
@@ -3522,8 +3553,10 @@ if (!Number.isFinite(score)) {
     if (!pair || !pair.playerAId || !pair.playerBId) return;
 
     state.matchups.push({
-      id: makeId(),
+      ...pair,
+      id: pair.id || makeId(),
       date: todayKey,
+      dateKey: pair.dateKey || todayKey,
       playerAId: pair.playerAId,
       playerBId: pair.playerBId,
       playerAName: namesById[pair.playerAId] || "Unknown",
@@ -3533,6 +3566,10 @@ if (!Number.isFinite(score)) {
     });
   });
 
+  if (window.TaskPointsCore?.syncSeasonResultsFromDailyMatchups) {
+    const seasonSync = TaskPointsCore.syncSeasonResultsFromDailyMatchups(state, todayKey);
+    if (seasonSync.changed) state = seasonSync.state;
+  }
   save();
   return true;
 }
