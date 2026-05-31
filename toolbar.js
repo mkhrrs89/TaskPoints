@@ -1296,6 +1296,7 @@ function buildDailyScheduleFallback(dateKeyStr, participantIds, signature, state
         byeIds: [],
         participantSignature: signature,
         seasonMatchupControl: true,
+        seasonScheduleSignature: window.TaskPointsCore?.getSeasonScheduleSignature ? TaskPointsCore.getSeasonScheduleSignature(state, dateKeyStr) : '',
         seasonWarnings: seasonSlate.warnings || []
       };
     }
@@ -1396,7 +1397,10 @@ function ensureUpcomingScheduleFallback(state, days = 7) {
 
   const rebuilt = neededDates.map((key) => {
     const existing = byDate.get(key);
-    if (existing) return existing;
+    if (existing) {
+      const seasonControlApplies = window.TaskPointsCore?.shouldUseSeasonMatchupControl && TaskPointsCore.shouldUseSeasonMatchupControl(state, key);
+      if (!seasonControlApplies || (window.TaskPointsCore?.isValidSeasonControlledScheduleDay && TaskPointsCore.isValidSeasonControlledScheduleDay(state, key, existing))) return existing;
+    }
     const syncedFromMatchups = existingMatchupsByDate.get(key);
     if (syncedFromMatchups && syncedFromMatchups.length) {
       return buildDayFromExistingFallback(key, participants, signature, syncedFromMatchups);

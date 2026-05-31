@@ -3176,6 +3176,7 @@ function buildDailySchedule(dateKeyStr, participantIds, signature){
         byeIds: [],
         participantSignature: signature,
         seasonMatchupControl: true,
+        seasonScheduleSignature: window.TaskPointsCore?.getSeasonScheduleSignature ? TaskPointsCore.getSeasonScheduleSignature(state, dateKeyStr) : '',
         seasonWarnings: seasonSlate.warnings || []
       };
     }
@@ -3281,11 +3282,16 @@ function ensureUpcomingSchedule(days = 7){
         return frozenToday;
       }
 
-      if (existing) return existing;
+      if (existing) {
+        const seasonControlApplies = window.TaskPointsCore?.shouldUseSeasonMatchupControl && TaskPointsCore.shouldUseSeasonMatchupControl(state, key);
+        if (!seasonControlApplies || (window.TaskPointsCore?.isValidSeasonControlledScheduleDay && TaskPointsCore.isValidSeasonControlledScheduleDay(state, key, existing))) return existing;
+      }
     }
 
+    const seasonControlApplies = window.TaskPointsCore?.shouldUseSeasonMatchupControl && TaskPointsCore.shouldUseSeasonMatchupControl(state, key);
     if (existing && existing.participantSignature === signature) {
-      return existing;
+      if (!seasonControlApplies) return existing;
+      if (window.TaskPointsCore?.isValidSeasonControlledScheduleDay && TaskPointsCore.isValidSeasonControlledScheduleDay(state, key, existing)) return existing;
     }
 
     changed = true;

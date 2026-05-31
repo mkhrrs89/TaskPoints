@@ -644,3 +644,113 @@ test('Season result sync records tournament results once, ignores exhibitions, a
   assert.equal(synced.updatedSeason.series[playIn.id].status, 'complete');
   assert.equal(synced.updatedSeason.series[playIn.id].winnerId, playIn.playerAId);
 });
+
+test('Round of 32 slate activates all ready fixed series after Play-In resolves', () => {
+  let season = makeLockedSeasonWithControl(true);
+  const playIn = Object.values(season.series).filter((item) => item.roundId === 'play_in').sort((a, b) => a.seriesIndex - b.seriesIndex);
+  playIn.forEach((series, index) => {
+    for (let game = 1; game <= 2; game += 1) {
+      const result = core.recordSeasonSeriesGameResult(season, series.id, {
+        dateKey: `2026-06-0${game}`,
+        matchupId: `pi-${index}-${game}`,
+        winnerId: series.playerAId,
+        loserId: series.playerBId,
+        source: 'manual'
+      });
+      assert.equal(result.ok, true);
+      season = result.season;
+    }
+  });
+  const resolved = core.resolvePlayInWinnersIntoRoundOf32(season, { nowISO: '2026-06-03T12:00:00.000Z' });
+  assert.equal(resolved.ok, true);
+  season = { ...resolved.season, meta: { ...resolved.season.meta, seasonMatchupControlEnabled: true } };
+  const state = core.normalizeState({ players: makeSeasonPlayers(), currentSeason: season });
+  const slate = core.buildSeasonDailySlate(state, '2026-06-04', { random: () => 0.2 });
+  assert.equal(slate.ok, true);
+  assert.equal(slate.tournamentMatchups.length, 16);
+  assert.equal(slate.exhibitionMatchups.length, 1);
+  assert.equal(slate.allMatchups.length, 17);
+  assert.equal(slate.updatedSeason.series[slate.tournamentMatchups.find((matchup) => matchup.playerAId === 'P15' && matchup.playerBId === 'P16').seriesId].status, 'active');
+});
+
+test('Season schedule cache validity invalidates stale June normal schedules only when control applies', () => {
+  const enabledState = core.normalizeState({ players: makeSeasonPlayers(), currentSeason: makeLockedSeasonWithControl(true) });
+  const cachedNormalJune = {
+    date: '2026-06-01',
+    participantSignature: 'unchanged',
+    matchups: [{ playerAId: 'YOU', playerBId: 'P1' }]
+  };
+  assert.equal(core.shouldRegenerateScheduleDayForSeasonControl(enabledState, '2026-06-01', cachedNormalJune), true);
+
+  const slate = core.buildSeasonDailySlate(enabledState, '2026-06-01', { random: () => 0.3 });
+  const validSeasonDay = {
+    date: '2026-06-01',
+    participantSignature: 'unchanged',
+    seasonMatchupControl: true,
+    seasonScheduleSignature: core.getSeasonScheduleSignature({ ...enabledState, currentSeason: slate.updatedSeason }, '2026-06-01'),
+    matchups: slate.allMatchups
+  };
+  assert.equal(core.isValidSeasonControlledScheduleDay({ ...enabledState, currentSeason: slate.updatedSeason }, '2026-06-01', validSeasonDay), true);
+  assert.equal(core.shouldRegenerateScheduleDayForSeasonControl({ ...enabledState, currentSeason: slate.updatedSeason }, '2026-06-01', validSeasonDay), false);
+
+  assert.equal(core.shouldRegenerateScheduleDayForSeasonControl(enabledState, '2026-07-01', { date: '2026-07-01', matchups: [] }), false);
+  const disabledState = core.normalizeState({ players: makeSeasonPlayers(), currentSeason: makeLockedSeasonWithControl(false) });
+  assert.equal(core.shouldRegenerateScheduleDayForSeasonControl(disabledState, '2026-06-01', cachedNormalJune), false);
+});
+
+test('edited tournament result sync updates existing result and recalculates series wins', () => {
+  const season = makeLockedSeasonWithControl(true);
+  const playIn = Object.values(season.series).find((item) => item.roundId === 'play_in' && item.seriesIndex === 1);
+  let state = core.normalizeState({
+    players: makeSeasonPlayers(),
+    currentSeason: season,
+    matchups: [{ id: 'edit-one', dateKey: '2026-06-01', seasonId: season.id, seriesId: playIn.id, matchupType: 'tournament', playerAId: playIn.playerAId, playerBId: playIn.playerBId, scoreA: 90, scoreB: 80 }]
+  });
+  let synced = core.syncSeasonResultsFromDailyMatchups(state, '2026-06-01');
+  assert.equal(synced.changed, true);
+  state = core.normalizeState({
+    ...synced.state,
+    matchups: [{ ...synced.state.matchups[0], scoreA: 70, scoreB: 95 }]
+  });
+  synced = core.syncSeasonResultsFromDailyMatchups(state, '2026-06-01');
+  assert.equal(synced.changed, true);
+  const updated = synced.updatedSeason.series[playIn.id];
+  assert.equal(updated.gameResults.length, 1);
+  assert.equal(updated.gameResults[0].winnerId, playIn.playerBId);
+  assert.equal(updated.winsA, 0);
+  assert.equal(updated.winsB, 1);
+});
+
+test('unchanged duplicate sync is no-op but winner-changing edits warn safely', () => {
+  const season = makeLockedSeasonWithControl(true);
+  const playIn = Object.values(season.series).find((item) => item.roundId === 'play_in' && item.seriesIndex === 1);
+  let state = core.normalizeState({
+    players: makeSeasonPlayers(),
+    currentSeason: season,
+    matchups: [
+      { id: 'winner-change-1', dateKey: '2026-06-01', seasonId: season.id, seriesId: playIn.id, matchupType: 'tournament', playerAId: playIn.playerAId, playerBId: playIn.playerBId, scoreA: 90, scoreB: 80 },
+      { id: 'winner-change-2', dateKey: '2026-06-02', seasonId: season.id, seriesId: playIn.id, matchupType: 'tournament', playerAId: playIn.playerAId, playerBId: playIn.playerBId, scoreA: 70, scoreB: 85 },
+      { id: 'winner-change-3', dateKey: '2026-06-03', seasonId: season.id, seriesId: playIn.id, matchupType: 'tournament', playerAId: playIn.playerAId, playerBId: playIn.playerBId, scoreA: 88, scoreB: 81 }
+    ]
+  });
+  ['2026-06-01', '2026-06-02', '2026-06-03'].forEach((dateKey) => {
+    const synced = core.syncSeasonResultsFromDailyMatchups(state, dateKey);
+    state = synced.state;
+  });
+  let series = state.currentSeason.series[playIn.id];
+  assert.equal(series.winnerId, playIn.playerAId);
+  const duplicate = core.syncSeasonResultsFromDailyMatchups(state, '2026-06-03');
+  assert.equal(duplicate.changed, false);
+
+  state = core.normalizeState({
+    ...state,
+    matchups: state.matchups.map((matchup) => matchup.id === 'winner-change-3' ? { ...matchup, scoreA: 75, scoreB: 92 } : matchup)
+  });
+  const edited = core.syncSeasonResultsFromDailyMatchups(state, '2026-06-03');
+  assert.equal(edited.changed, true);
+  assert.equal(edited.warnings.some((warning) => /manual admin repair/.test(warning)), true);
+  series = edited.updatedSeason.series[playIn.id];
+  assert.equal(series.winnerId, playIn.playerBId);
+  assert.equal(series.winsA, 1);
+  assert.equal(series.winsB, 2);
+});
