@@ -676,6 +676,8 @@ Nothing visible on the page is built here. === -->
       
     </div>
 
+    <div id="homeSeasonChampionshipMount" class="hidden mb-3"></div>
+
   <!-- ========================================================================== -->  
   <!-- ==  SECOND ROW (START) Inertia card (left) + daily trend chart (right)  == -->
   <!-- ========================================================================== -->   
@@ -10765,6 +10767,59 @@ return;
 
 
 
+
+function renderHomeSeasonChampionshipCard(){
+  const mount = $('homeSeasonChampionshipMount');
+  if (!mount) return;
+  const season = state?.currentSeason;
+  const todayKeyStr = dateKey(new Date());
+  const isJuneChampionship = Boolean(
+    season
+    && ['locked', 'active', 'champion_crowned'].includes(season.status)
+    && todayKeyStr >= '2026-06-01'
+    && todayKeyStr <= '2026-06-30'
+  );
+  if (!isJuneChampionship || !window.TaskPointsCore) {
+    mount.classList.add('hidden');
+    mount.innerHTML = '';
+    return;
+  }
+  const userStatus = TaskPointsCore.getUserSeasonStatus
+    ? TaskPointsCore.getUserSeasonStatus(season, todayKeyStr, state)
+    : { statusText: 'Season Championship is active.', detailText: '' };
+  const featured = TaskPointsCore.getFeaturedSeasonMatchup
+    ? TaskPointsCore.getFeaturedSeasonMatchup(season, todayKeyStr, state)
+    : null;
+  const featuredLine = featured
+    ? `${featured.title || 'Featured matchup'} — ${featured.roundName || 'Round'}${featured.gameNumber ? `, Game ${featured.gameNumber}` : ''}`
+    : 'Featured matchup will appear when tournament games are available.';
+  const featuredDetail = featured
+    ? `${featured.statusText || ''}${featured.isEliminationGame ? ' • Elimination game' : ''}`
+    : '';
+  mount.classList.remove('hidden');
+  mount.innerHTML = `
+    <section class="glass home-season-card" aria-label="June Championship summary">
+      <div class="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <p class="season-eyebrow">Season Championship</p>
+          <h2>June Championship</h2>
+        </div>
+        <a href="season.html" class="btn btn-teal btn-toolbar">Open Season Tab</a>
+      </div>
+      <div class="home-season-block">
+        <span class="home-season-label">Your Status</span>
+        <strong>${escapeHtml(userStatus.statusText || 'Status unavailable')}</strong>
+        ${userStatus.detailText ? `<span class="muted text-sm">${escapeHtml(userStatus.detailText)}</span>` : ''}
+      </div>
+      <div class="home-season-block">
+        <span class="home-season-label">Featured Matchup</span>
+        <strong>${escapeHtml(featuredLine)}</strong>
+        ${featuredDetail ? `<span class="muted text-sm">${escapeHtml(featuredDetail)}</span>` : ''}
+      </div>
+    </section>
+  `;
+}
+
 /* ---------- RENDER/WIRE ---------- */
 function renderAll() {
   return tpPerfTime('renderAll', () => {
@@ -10775,6 +10830,7 @@ try { tpPerfTime('renderStats (call)', () => renderStats()); } catch (e) { conso
 try { tpPerfTime('renderTasks', () => renderTasks()); } catch (e) { console.error('renderTasks error:', e); }
 try { tpPerfTime('renderReminders', () => renderReminders()); } catch (e) { console.error('renderReminders error:', e); }
 try { tpPerfTime('renderScoreDashboardV2_Skeleton', () => renderScoreDashboardV2_Skeleton()); } catch (e) { console.error('renderScoreDashboardV2_Skeleton error:', e); }
+try { tpPerfTime('renderHomeSeasonChampionshipCard', () => renderHomeSeasonChampionshipCard()); } catch (e) { console.error('renderHomeSeasonChampionshipCard error:', e); }
 try { tpPerfTime('initScoreV2Toggle', () => initScoreV2Toggle()); } catch (e) { console.error('initScoreV2Toggle error:', e); }
 
 

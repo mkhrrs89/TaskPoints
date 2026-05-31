@@ -549,22 +549,77 @@
     return 'Winner faces: TBD';
   }
 
-  function renderOfficialSeriesCard(season, series) {
+  function getRoundName(roundId) {
+    return getRoundDefs().find((round) => round.id === roundId)?.displayName || roundId || 'Round';
+  }
+
+  function getRoundForToday(season, dateKey = getEffectiveDateKey()) {
+    if (typeof core.getSeasonRoundForDate === 'function') return core.getSeasonRoundForDate(dateKey);
+    return getRoundDefs().find((round) => dateKey >= round.startDate && dateKey <= round.endDate) || null;
+  }
+
+  function getSeriesCompactTitle(series) {
+    if (typeof core.getSeriesCompactTitle === 'function') return core.getSeriesCompactTitle(series);
+    const a = series?.playerAName ? `${series.playerASeed ? `#${series.playerASeed} ` : ''}${series.playerAName}` : (series?.placeholderA || 'Awaiting opponent');
+    const b = series?.playerBName ? `${series.playerBSeed ? `#${series.playerBSeed} ` : ''}${series.playerBName}` : (series?.placeholderB || 'Awaiting opponent');
+    return `${a} vs ${b}`;
+  }
+
+  function getSeriesGameNumber(series, dateKey) {
+    if (typeof core.getSeriesGameNumber === 'function') return core.getSeriesGameNumber(series, dateKey);
+    return (Array.isArray(series?.gameResults) ? series.gameResults.length : 0) + 1;
+  }
+
+  function getPlayerNameFromSeries(series, playerId) {
+    if (!playerId) return 'TBD';
+    if (playerId === series?.playerAId) return series.playerAName || playerId;
+    if (playerId === series?.playerBId) return series.playerBName || playerId;
+    return playerId;
+  }
+
+  function renderGameResult(series, result, index) {
+    const winner = getPlayerNameFromSeries(series, result?.winnerId);
+    const loser = getPlayerNameFromSeries(series, result?.loserId);
+    const score = Number.isFinite(Number(result?.playerAScore)) && Number.isFinite(Number(result?.playerBScore))
+      ? ` • ${Number(result.playerAScore).toFixed(1)}–${Number(result.playerBScore).toFixed(1)}`
+      : '';
+    return `<li><span>Game ${index + 1} — ${escapeHtml(winner)} defeated ${escapeHtml(loser)}</span>${result?.dateKey ? `<small>${escapeHtml(result.dateKey)}</small>` : ''}${score ? `<small>${escapeHtml(score.replace(/^ • /, ''))}</small>` : ''}${result?.matchupId ? `<small class="season-debug-id">${escapeHtml(result.matchupId)}</small>` : ''}</li>`;
+  }
+
+  function seriesHasTodayGame(series, dateKey) {
+    if (!series || !dateKey || series.status === 'complete') return false;
+    const currentRound = getRoundForToday(null, dateKey);
+    if (series.roundId !== currentRound?.id) return false;
+    return Boolean(series.playerAId && series.playerBId);
+  }
+
+  function renderOfficialSeriesCard(season, series, options = {}) {
+    const dateKey = options.dateKey || getEffectiveDateKey();
     const results = Array.isArray(series?.gameResults) ? series.gameResults : [];
+    const bestOf = Number(series?.bestOf) || '—';
+    const winsNeeded = Number(series?.winsNeeded) || (Number.isFinite(Number(bestOf)) ? Math.floor(Number(bestOf) / 2) + 1 : '—');
+    const statusText = getSeriesStatusLine(series);
+    const winnerFaces = getWinnerFacesLine(season, series);
+    const todayGameNumber = seriesHasTodayGame(series, dateKey) ? getSeriesGameNumber(series, dateKey) : null;
+    const pending = !series?.playerAId || !series?.playerBId;
     return `
-      <details class="season-bracket-match season-series-card">
+      <details class="season-bracket-match season-series-card ${pending ? 'is-pending' : ''}">
         <summary>
-          <span class="season-bracket-match-name">${escapeHtml(series?.roundName || 'Series')} ${escapeHtml(series?.seriesIndex || '')}</span>
-          <span class="season-bracket-slot">${renderSeriesSide(series, 'A')}</span>
-          <span class="season-bracket-slot">${renderSeriesSide(series, 'B')}</span>
-          <span class="muted text-sm">${escapeHtml(getSeriesStatusLine(series))}</span>
+          <span class="season-bracket-match-name">${escapeHtml(getSeriesCompactTitle(series))}</span>
+          <span class="season-series-meta-row">
+            <span>${escapeHtml(series?.roundName || getRoundName(series?.roundId))}</span>
+            <span>Best of ${escapeHtml(bestOf)}</span>
+          </span>
+          <span class="season-series-status">${escapeHtml(statusText)}</span>
+          ${todayGameNumber ? `<span class="season-series-today">Game ${escapeHtml(todayGameNumber)} today</span>` : ''}
+          <span class="muted text-sm">${escapeHtml(winnerFaces)}</span>
         </summary>
         <div class="season-series-details">
-          <p class="muted text-sm">Best-of-${escapeHtml(series?.bestOf || '—')} • ${escapeHtml(series?.status || 'pending')}</p>
-          <p class="muted text-sm">${escapeHtml(getWinnerFacesLine(season, series))}</p>
+          <p class="muted text-sm">Best of ${escapeHtml(bestOf)} • First to ${escapeHtml(winsNeeded)} wins</p>
+          <p class="muted text-sm">${escapeHtml(winnerFaces)}</p>
           ${results.length ? `
-            <ol class="season-bullet-list">
-              ${results.map((result, index) => `<li>Game ${index + 1}: ${escapeHtml(result.winnerId || 'Winner TBD')} defeated ${escapeHtml(result.loserId || 'Loser TBD')} ${result.dateKey ? `on ${escapeHtml(result.dateKey)}` : ''}</li>`).join('')}
+            <ol class="season-game-results">
+              ${results.map((result, index) => renderGameResult(series, result, index)).join('')}
             </ol>
           ` : '<p class="muted text-sm">No game results recorded yet.</p>'}
         </div>
@@ -572,33 +627,109 @@
     `;
   }
 
-  function renderOfficialBracket(season) {
-    const grouped = new Map();
-    officialSeriesEntries(season).forEach((series) => {
-      const key = series.roundId || 'unknown';
-      if (!grouped.has(key)) grouped.set(key, { name: series.roundName || key, series: [] });
-      grouped.get(key).series.push(series);
-    });
+  function renderRoundSection(season, round, options = {}) {
+    const all = officialSeriesEntries(season).filter((series) => series?.roundId === round.id);
+    const dateKey = options.dateKey || getEffectiveDateKey();
+    const activeRound = getRoundForToday(season, dateKey);
+    const isCurrent = activeRound?.id === round.id;
     return `
-      <section class="glass season-card">
-        <h3 class="season-section-title">Official Bracket</h3>
-        <p class="muted text-sm">Official dormant series are locked from the preview seed order. Daily tournament games are not generated yet.</p>
-        <div class="season-bracket-stack">
-          ${Array.from(grouped.values()).map((round) => `
-            <section class="season-bracket-round">
-              <div class="season-bracket-round-header">
-                <h4>${escapeHtml(round.name)}</h4>
-                <span>${escapeHtml(round.series.length)} series</span>
-              </div>
-              <div class="season-bracket-match-grid">
-                ${round.series.map((series) => renderOfficialSeriesCard(season, series)).join('')}
-              </div>
-            </section>
-          `).join('') || '<p class="muted text-sm">No official series have been created yet.</p>'}
+      <section class="season-bracket-round ${isCurrent ? 'is-current' : ''}">
+        <div class="season-bracket-round-header">
+          <div>
+            <h4>${escapeHtml(round.displayName || round.id)}</h4>
+            <p class="muted text-sm">${isCurrent ? 'Current round' : (all.some((series) => series?.playerAId && series?.playerBId) ? 'Series ready or in progress' : 'Pending / awaiting winners')}</p>
+          </div>
+          <span>${escapeHtml(all.length)} series</span>
+        </div>
+        <div class="season-bracket-match-grid">
+          ${all.length ? all.map((series) => renderOfficialSeriesCard(season, series, { dateKey })).join('') : '<p class="muted text-sm">Pending / awaiting winners.</p>'}
         </div>
       </section>
     `;
   }
+
+  function renderCurrentRoundSection(season, dateKey) {
+    const round = getRoundForToday(season, dateKey);
+    if (!round) return '';
+    const hasSeries = officialSeriesEntries(season).some((series) => series?.roundId === round.id);
+    if (!hasSeries) return '';
+    return `
+      <section class="glass season-card">
+        <h3 class="season-section-title">Current Round</h3>
+        ${renderRoundSection(season, round, { dateKey })}
+      </section>
+    `;
+  }
+
+  function renderOfficialBracket(season, options = {}) {
+    const dateKey = options.dateKey || getEffectiveDateKey();
+    const activeRoundId = getRoundForToday(season, dateKey)?.id || '';
+    const rounds = getRoundDefs();
+    return `
+      <section class="glass season-card">
+        <h3 class="season-section-title">Round-by-Round Championship</h3>
+        <p class="muted text-sm">Series are shown as compact cards. Tap a series to expand results, dates, and advancement details.</p>
+        <div class="season-bracket-stack">
+          ${rounds.map((round) => renderRoundSection(season, round, { dateKey, activeRoundId })).join('')}
+        </div>
+      </section>
+    `;
+  }
+
+  function renderEliminatedPlayers(season) {
+    const players = typeof core.getEliminatedPlayers === 'function' ? core.getEliminatedPlayers(season) : [];
+    return `
+      <section class="glass season-card">
+        <h3 class="season-section-title">Eliminated Players</h3>
+        <div class="season-placement-list">
+          ${players.length ? players.map((player) => `
+            <article class="season-placement-row">
+              <strong>${player.seed ? `#${escapeHtml(player.seed)} ` : ''}${escapeHtml(player.playerName || player.playerId)}</strong>
+              <span>Lost in ${escapeHtml(player.roundLost || 'TBD')} to ${escapeHtml(player.eliminatedByName || 'TBD')}</span>
+              <span>${escapeHtml(player.seriesScore || 'Series score TBD')}</span>
+            </article>
+          `).join('') : '<p class="muted text-sm">No players have been eliminated yet.</p>'}
+        </div>
+      </section>
+    `;
+  }
+
+  function renderFinalPlacements(season) {
+    if (!['champion_crowned', 'finalized'].includes(season?.status)) return '';
+    const placements = typeof core.getFinalPlacements === 'function' ? core.getFinalPlacements(season, { currentSeason: season }) : [];
+    return `
+      <section class="glass season-card">
+        <h3 class="season-section-title">Final Placement</h3>
+        <div class="season-placement-list">
+          ${placements.length ? placements.map((player, index) => `
+            <article class="season-placement-row">
+              <strong>${index + 1}. ${player.seed ? `#${escapeHtml(player.seed)} ` : ''}${escapeHtml(player.playerName || player.playerId)}</strong>
+              <span>${escapeHtml(player.finish || 'Pending')}</span>
+              <span>${escapeHtml(player.wins ?? 0)}–${escapeHtml(player.losses ?? 0)} • Avg ${escapeHtml(formatStat(player.averageScore))}</span>
+            </article>
+          `).join('') : '<p class="muted text-sm">Final placement data will appear after tournament results are complete.</p>'}
+        </div>
+      </section>
+    `;
+  }
+
+  function renderChampionSummary(season) {
+    const summary = typeof core.getChampionSummary === 'function' ? core.getChampionSummary(season, { currentSeason: season }) : null;
+    if (!summary?.championId) return '';
+    return `
+      <section class="glass season-champion-summary season-card">
+        <p class="season-eyebrow">Champion Summary</p>
+        <h2 class="season-title">Season 1 Champion: ${escapeHtml(summary.championName || 'Champion TBD')}</h2>
+        <p class="muted text-sm">Runner-up: ${escapeHtml(summary.runnerUpName || 'Runner-up TBD')}</p>
+        <p class="season-series-status">Finals result: ${escapeHtml(summary.finalsResult || 'Finals complete')}</p>
+        <p class="muted text-sm">Tournament record: ${escapeHtml(summary.record || '—')} • Points: ${escapeHtml(formatStat(summary.totalPoints, 0))} • Avg: ${escapeHtml(formatStat(summary.averageScore))}</p>
+        <div class="season-path-list">
+          ${(summary.path || []).map((step) => `<p>${escapeHtml(step.roundName || 'Round')}: defeated ${escapeHtml(step.opponentName || 'TBD')}, ${escapeHtml(step.score || '—')}</p>`).join('') || '<p class="muted text-sm">Bracket path will appear as completed series are synced.</p>'}
+        </div>
+      </section>
+    `;
+  }
+
 
 
 
@@ -621,29 +752,38 @@
 
   function renderCurrentSeason(season) {
     if (season?.status === 'preview') return renderPreviewSeason(season);
-    const name = season?.name || season?.label || 'Season 1';
+    const name = season?.label || season?.name || 'Season 1';
     const status = getSeasonStatusLabel(season?.status);
     const monthKey = season?.monthKey || '—';
     const start = formatSeasonDate(season?.startDate) || '—';
     const end = formatSeasonDate(season?.endDate) || '—';
+    const dateKey = getEffectiveDateKey();
+    const currentRound = getRoundForToday(season, dateKey);
+    const controlEnabled = season?.meta?.seasonMatchupControlEnabled === true;
+    const hasSeries = Object.keys(season?.series || {}).length > 0;
     return `
+      ${renderChampionSummary(season)}
       <section class="glass season-hero-card">
         <p class="season-eyebrow">Current Season</p>
         <h2 class="season-title">${escapeHtml(name)}</h2>
         <p class="muted text-sm">${escapeHtml(getSeasonSummaryLine(season))}</p>
       </section>
-      <section class="glass season-card">
-        <h3 class="season-section-title">Season Snapshot</h3>
+      <section class="glass season-card season-header-card">
+        <h3 class="season-section-title">Season Header</h3>
         <dl class="season-detail-grid">
           <div><dt>Status</dt><dd>${escapeHtml(status)}</dd></div>
+          <div><dt>Current Round</dt><dd>${escapeHtml(currentRound?.displayName || 'Outside tournament dates')}</dd></div>
+          <div><dt>Matchup Control</dt><dd>${controlEnabled ? 'Enabled' : 'Disabled'}</dd></div>
+          <div><dt>Date Range</dt><dd>${escapeHtml(start)} – ${escapeHtml(end)}</dd></div>
           <div><dt>Month</dt><dd>${escapeHtml(monthKey)}</dd></div>
-          <div><dt>Start</dt><dd>${escapeHtml(start)}</dd></div>
-          <div><dt>End</dt><dd>${escapeHtml(end)}</dd></div>
         </dl>
-        <p class="muted text-sm mt-4">Seeds are locked. Admin Mode editing can be added in a future update.</p>
+        <p class="muted text-sm mt-4">Seeds are locked. This presentation layer does not change scoring, drip schedules, matchup generation rules, or the Season matchup control gate.</p>
       </section>
       ${renderSeasonMatchupControl(season)}
-      ${Object.keys(season?.series || {}).length ? renderOfficialBracket(season) : '<section class="glass season-card"><p class="muted text-sm">Season tools will appear here in the next update.</p></section>'}
+      ${hasSeries ? renderCurrentRoundSection(season, dateKey) : ''}
+      ${hasSeries ? renderOfficialBracket(season, { dateKey }) : '<section class="glass season-card"><p class="muted text-sm">Season tools will appear here in the next update.</p></section>'}
+      ${['locked', 'active', 'champion_crowned'].includes(season?.status) ? renderEliminatedPlayers(season) : ''}
+      ${renderFinalPlacements(season)}
     `;
   }
 

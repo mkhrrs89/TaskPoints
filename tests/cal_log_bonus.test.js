@@ -754,3 +754,78 @@ test('unchanged duplicate sync is no-op but winner-changing edits warn safely', 
   assert.equal(series.winsA, 1);
   assert.equal(series.winsB, 2);
 });
+
+test('season series presentation helpers render status and placeholders defensively', () => {
+  const pending = { roundName: 'Round of 32', bestOf: 5, placeholderA: 'Winner of A', playerBName: 'Rocco', playerBSeed: 29 };
+  assert.equal(core.getSeriesStatusText(pending), 'Awaiting opponent');
+  assert.match(core.getSeriesCompactTitle(pending), /Winner of A vs #29 Rocco/);
+
+  const active = { playerAId: 'P1', playerAName: 'Miggy', playerASeed: 4, playerBId: 'P2', playerBName: 'Rocco', playerBSeed: 29, winsA: 2, winsB: 1, bestOf: 5, winsNeeded: 3, status: 'active' };
+  assert.equal(core.getSeriesStatusText(active), 'Miggy leads series 2–1');
+  assert.equal(core.getSeriesGameNumber({ ...active, gameResults: [{ winnerId: 'P1' }, { winnerId: 'P2' }, { winnerId: 'P1' }] }, '2026-06-07'), 4);
+  assert.equal(core.isSeasonEliminationGame(active), true);
+});
+
+test('expanded season series details render with missing placeholders', () => {
+  const season = core.createEmptySeasonDraft({ status: 'active' });
+  const html = seasonUi.renderSeasonView(core.normalizeState({ currentSeason: { ...season, series: {
+    s1: { id: 's1', roundId: 'round_of_32', roundName: 'Round of 32', roundIndex: 1, seriesIndex: 1, bestOf: 5, winsNeeded: 3, status: 'pending', placeholderA: 'Winner of Play-In', placeholderB: 'Awaiting opponent', gameResults: [] }
+  } } }));
+  assert.match(html, /Winner of Play-In vs Awaiting opponent/);
+  assert.match(html, /No game results recorded yet/);
+});
+
+test('eliminated players are derived from completed series', () => {
+  const season = { series: {
+    s1: { id: 's1', roundId: 'sweet_16', roundName: 'Sweet 16', roundIndex: 2, playerAId: 'P1', playerAName: 'Miggy', playerASeed: 4, playerBId: 'P2', playerBName: 'Rocco', playerBSeed: 29, winsA: 3, winsB: 1, winnerId: 'P1', loserId: 'P2', status: 'complete' }
+  } };
+  const eliminated = core.getEliminatedPlayers(season);
+  assert.equal(eliminated.length, 1);
+  assert.equal(eliminated[0].playerName, 'Rocco');
+  assert.equal(eliminated[0].eliminatedByName, 'Miggy');
+  assert.equal(eliminated[0].roundLost, 'Sweet 16');
+});
+
+test('featured matchup priority prefers finals, elimination, tied, then seed quality', () => {
+  const season = { series: {
+    a: { id: 'a', roundId: 'round_of_32', roundName: 'Round of 32', roundIndex: 1, seriesIndex: 1, playerAId: 'P1', playerAName: 'One', playerASeed: 1, playerBId: 'P32', playerBName: 'Thirty Two', playerBSeed: 32, winsA: 2, winsB: 0, bestOf: 5, winsNeeded: 3, status: 'active' },
+    b: { id: 'b', roundId: 'finals', roundName: 'Finals', roundIndex: 5, seriesIndex: 1, playerAId: 'P2', playerAName: 'Two', playerASeed: 2, playerBId: 'P3', playerBName: 'Three', playerBSeed: 3, winsA: 1, winsB: 1, bestOf: 7, winsNeeded: 4, status: 'active' }
+  } };
+  const featured = core.getFeaturedSeasonMatchup(season, '2026-06-24', { matchups: [{ dateKey: '2026-06-24', matchupType: 'tournament', seriesId: 'b' }] });
+  assert.equal(featured.series.id, 'b');
+  assert.match(featured.title, /#2 Two vs #3 Three/);
+});
+
+test('user season status handles active, eliminated, awaiting fallback, and exhibition', () => {
+  const base = core.normalizeState({ youName: 'Miggy', currentSeason: { seeds: [{ playerId: 'YOU', playerName: 'Miggy', seed: 4 }], series: {} } });
+  const activeSeason = { seeds: base.currentSeason.seeds, series: { s: { id: 's', roundId: 'quarterfinals', roundName: 'Quarterfinals', playerAId: 'YOU', playerAName: 'Miggy', playerBId: 'R', playerBName: 'Rick', winsA: 2, winsB: 1, bestOf: 5, winsNeeded: 3, status: 'active', gameResults: [{}, {}, {}] } } };
+  assert.match(core.getUserSeasonStatus(activeSeason, '2026-06-16', { ...base, currentSeason: activeSeason }).statusText, /Miggy vs Rick — Quarterfinals, Game 4/);
+
+  const eliminatedSeason = { seeds: base.currentSeason.seeds, series: { s: { id: 's', roundId: 'sweet_16', roundName: 'Sweet 16', playerAId: 'YOU', playerAName: 'Miggy', playerBId: 'D', playerBName: 'Delilah', winsA: 1, winsB: 3, winnerId: 'D', loserId: 'YOU', status: 'complete', bestOf: 5, winsNeeded: 3 } } };
+  assert.match(core.getUserSeasonStatus(eliminatedSeason, '2026-06-12', { ...base, currentSeason: eliminatedSeason }).statusText, /Miggy is eliminated/);
+
+  const awaitingSeason = { seeds: base.currentSeason.seeds, series: { s: { id: 's', roundId: 'semifinals', roundName: 'Semifinals', playerAId: 'YOU', playerAName: 'Miggy', placeholderB: 'Winner of Jax vs Poppy', bestOf: 5, winsNeeded: 3, status: 'pending' } } };
+  assert.match(core.getUserSeasonStatus(awaitingSeason, '2026-06-20', { ...base, currentSeason: awaitingSeason }).statusText, /Miggy is awaiting opponent/);
+
+  const exhibition = core.getUserSeasonStatus({ seeds: base.currentSeason.seeds, series: {} }, '2026-06-10', { ...base, matchups: [{ dateKey: '2026-06-10', matchupType: 'exhibition', playerAId: 'YOU', playerBId: 'C', playerBName: 'Cooper' }], players: [{ id: 'C', name: 'Cooper' }] });
+  assert.match(exhibition.statusText, /Today: exhibition matchup vs Cooper/);
+
+  const none = core.getUserSeasonStatus({ seeds: base.currentSeason.seeds, series: {} }, '2026-06-10', base);
+  assert.match(none.statusText, /no tournament game today/);
+});
+
+test('champion summary helper handles completed Finals', () => {
+  const season = { series: {
+    f: { id: 'f', roundId: 'finals', roundName: 'Finals', roundIndex: 5, playerAId: 'P1', playerAName: 'Miggy', playerBId: 'P2', playerBName: 'Rick', winsA: 4, winsB: 2, winnerId: 'P1', loserId: 'P2', status: 'complete', gameResults: [{ winnerId: 'P1', loserId: 'P2', playerAScore: 10, playerBScore: 8 }] }
+  } };
+  const summary = core.getChampionSummary(season, {});
+  assert.equal(summary.championName, 'Miggy');
+  assert.match(summary.finalsResult, /Miggy defeats Rick, 4–2/);
+  assert.equal(summary.record, '1–0');
+});
+
+test('matchups grouping helper remains inactive for normal non-Season days', () => {
+  const season = core.createEmptySeasonDraft({ status: 'active' });
+  const featured = core.getFeaturedSeasonMatchup(season, '2026-07-02', { matchups: [{ dateKey: '2026-07-02', playerAId: 'YOU', playerBId: 'P1' }] });
+  assert.equal(featured, null);
+});

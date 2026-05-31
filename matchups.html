@@ -812,7 +812,11 @@ for (let i = 0; i + 1 < pool.length; i += 2) {
               summary.append(document.createTextNode(describeMatchup(m)));
               if (m.seriesId && window.TaskPointsCore?.getSeriesStatusText) {
                 const series = state.currentSeason?.series?.[m.seriesId];
-                if (series) summary.append(document.createTextNode(` • ${TaskPointsCore.getSeriesStatusText(series)}`));
+                if (series) {
+                  const parts = [TaskPointsCore.getSeriesStatusText(series)];
+                  if (window.TaskPointsCore?.isSeasonEliminationGame && TaskPointsCore.isSeasonEliminationGame(series)) parts.push('Elimination game');
+                  summary.append(document.createTextNode(` • ${parts.filter(Boolean).join(' • ')}`));
+                }
               }
             } else {
               summary.textContent = describeMatchup(m);
