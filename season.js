@@ -9,6 +9,8 @@
   const SEASON_ONE_END_DATE = '2026-06-30';
   const AUTO_SEED_MODE = 'auto';
   const MANUAL_SEED_MODE = 'manual';
+  const seasonImageUrlCache = new Map();
+  const seasonImageLoadPromises = new Map();
 
   const STATUS_LABELS = {
     preview: 'Preview',
@@ -32,6 +34,94 @@
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#39;');
+  }
+
+  function getInitials(value) {
+    const parts = String(value || '')
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+    if (!parts.length) return '?';
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return `${parts[0][0] || ''}${parts[parts.length - 1][0] || ''}`.toUpperCase();
+  }
+
+  function getPlayerImageId(state, playerId) {
+    const id = String(playerId || '');
+    if (!id) return '';
+    if (id === 'YOU') return state?.youImageId || '';
+    const player = (Array.isArray(state?.players) ? state.players : [])
+      .find((item) => (item?.id || item?.playerId) === id);
+    if (player?.imageId) return player.imageId;
+    const poolPlayer = (Array.isArray(state?.currentSeason?.playerPool) ? state.currentSeason.playerPool : [])
+      .find((item) => (item?.id || item?.playerId) === id);
+    return poolPlayer?.imageId || '';
+  }
+
+  async function loadSeasonImageUrl(imageId) {
+    if (!imageId) return '';
+    if (seasonImageUrlCache.has(imageId)) return seasonImageUrlCache.get(imageId);
+    if (seasonImageLoadPromises.has(imageId)) return seasonImageLoadPromises.get(imageId);
+
+    const promise = (async () => {
+      try {
+        if (typeof core.getImageBlob !== 'function') return '';
+        const blob = await core.getImageBlob(imageId);
+        if (!blob) return '';
+        const url = URL.createObjectURL(blob);
+        seasonImageUrlCache.set(imageId, url);
+        return url;
+      } catch (error) {
+        console.warn('Failed to load Season player image', error);
+        return '';
+      } finally {
+        seasonImageLoadPromises.delete(imageId);
+      }
+    })();
+
+    seasonImageLoadPromises.set(imageId, promise);
+    return promise;
+  }
+
+  function renderSeasonPlayerPhoto(playerLike, variant = 'bracket') {
+    const imageId = playerLike?.imageId || '';
+    const name = playerLike?.playerName || playerLike?.name || playerLike?.playerId || 'Player';
+    const cachedUrl = imageId ? seasonImageUrlCache.get(imageId) : '';
+    const variantClass = variant ? ` season-player-photo-slot--${escapeHtml(variant)}` : '';
+
+    if (cachedUrl) {
+      return `
+        <span class="season-player-photo-slot${variantClass}" data-season-image-id="${escapeHtml(imageId)}">
+          <img class="season-player-photo" src="${escapeHtml(cachedUrl)}" alt="${escapeHtml(name)} photo">
+        </span>
+      `;
+    }
+
+    return `
+      <span class="season-player-photo-slot${variantClass}" ${imageId ? `data-season-image-id="${escapeHtml(imageId)}"` : ''}>
+        <img class="season-player-photo hidden" alt="${escapeHtml(name)} photo">
+        <span class="season-player-photo-fallback">${escapeHtml(getInitials(name))}</span>
+      </span>
+    `;
+  }
+
+  async function hydrateSeasonImages(root) {
+    const slots = Array.from(root?.querySelectorAll?.('.season-player-photo-slot[data-season-image-id]') || []);
+    const imageIds = Array.from(new Set(slots.map((slot) => slot.getAttribute('data-season-image-id') || '').filter(Boolean)));
+    if (!imageIds.length) return;
+    await Promise.all(imageIds.map((imageId) => loadSeasonImageUrl(imageId)));
+    slots.forEach((slot) => {
+      const imageId = slot.getAttribute('data-season-image-id') || '';
+      const url = seasonImageUrlCache.get(imageId);
+      if (!url) return;
+      const img = slot.querySelector('img.season-player-photo');
+      const fallback = slot.querySelector('.season-player-photo-fallback');
+      if (img) {
+        img.src = url;
+        img.classList.remove('hidden');
+      }
+      if (fallback) fallback.classList.add('hidden');
+    });
   }
 
   function clone(value) {
@@ -154,6 +244,7 @@
         id: row.playerId || row.id || `player_${index + 1}`,
         playerName: row.name || row.playerName || row.id || `Player ${index + 1}`,
         name: row.name || row.playerName || row.id || `Player ${index + 1}`,
+        imageId: row.imageId || getPlayerImageId(state || {}, row.playerId || row.id),
         wins: Number.isFinite(wins) ? wins : 0,
         losses: Number.isFinite(losses) ? losses : 0,
         winPct: Number.isFinite(winPct) ? winPct : 0,
@@ -179,7 +270,7 @@
 
   function seedByNumber(seeds, seedNumber) {
     const row = (Array.isArray(seeds) ? seeds : []).find((seed) => Number(seed.seed) === Number(seedNumber));
-    if (row) return { type: 'seed', seed: row.seed, playerId: row.playerId, playerName: row.playerName || row.name || row.playerId };
+    if (row) return { type: 'seed', seed: row.seed, playerId: row.playerId, playerName: row.playerName || row.name || row.playerId, imageId: row.imageId || '' };
     return { type: 'seed', seed: seedNumber, playerId: null, playerName: `Seed ${seedNumber}` };
   }
 
@@ -333,6 +424,7 @@
         id: playerId,
         playerName: player.name || projectedRow.playerName || playerId,
         name: player.name || projectedRow.name || playerId,
+        imageId: player.imageId || projectedRow.imageId || getPlayerImageId(state || {}, playerId),
         wins: projectedRow.wins || 0,
         losses: projectedRow.losses || 0,
         winPct: projectedRow.winPct || 0,
@@ -490,7 +582,7 @@
     `;
   }
 
-  function renderSeedList(season) {
+  function renderSeedList(season, state = {}) {
     const seeds = Array.isArray(season?.seeds) ? season.seeds : [];
     return `
       <section class="glass season-card">
@@ -510,9 +602,12 @@
           </div>
         </div>
         <div class="season-seed-list" data-season-seed-list>
-          ${seeds.map((seed, index) => `
+          ${seeds.map((seed, index) => {
+            const player = { ...seed, imageId: seed.imageId || getPlayerImageId(state, seed.playerId || seed.id) };
+            return `
             <article class="season-seed-row" draggable="true" data-seed-index="${index}" aria-label="Seed ${escapeHtml(seed.seed)} ${escapeHtml(seed.playerName || seed.name)}">
-              <span class="season-seed-number">${escapeHtml(seed.seed)}</span>
+              <span class="season-seed-number season-preview-seed-number">${escapeHtml(seed.seed)}</span>
+              ${renderSeasonPlayerPhoto(player, 'seed')}
               <div class="season-seed-main">
                 <strong>${escapeHtml(seed.playerName || seed.name || seed.playerId)}</strong>
                 <span>${escapeHtml(seed.wins)}-${escapeHtml(seed.losses)} • Win pct ${escapeHtml(formatWinPct(seed.winPct))} • Avg ${escapeHtml(formatStat(seed.averageScore))}</span>
@@ -526,19 +621,21 @@
                 <button type="button" class="btn btn-ghost btn-toolbar" data-season-action="seed-down" data-seed-index="${index}" ${index === seeds.length - 1 ? 'disabled' : ''}>↓</button>
               </div>
             </article>
-          `).join('') || '<p class="muted text-sm">No active players found for seeding yet.</p>'}
+          `;
+          }).join('') || '<p class="muted text-sm">No active players found for seeding yet.</p>'}
         </div>
       </section>
     `;
   }
 
-  function renderCompetitor(competitor) {
+  function renderCompetitor(competitor, state = {}) {
     if (!competitor) return '<span class="season-bracket-player muted">TBD</span>';
     if (competitor.type === 'placeholder') return `<span class="season-bracket-player season-bracket-placeholder">${escapeHtml(competitor.label)}</span>`;
-    return `<span class="season-bracket-seed">${escapeHtml(competitor.seed)}</span><span class="season-bracket-player">${escapeHtml(competitor.playerName || `Seed ${competitor.seed}`)}</span>`;
+    const player = { ...competitor, imageId: competitor.imageId || getPlayerImageId(state, competitor.playerId) };
+    return `<span class="season-bracket-seed season-preview-seed-number">${escapeHtml(competitor.seed)}</span>${renderSeasonPlayerPhoto(player, 'bracket')}<span class="season-bracket-player">${escapeHtml(competitor.playerName || `Seed ${competitor.seed}`)}</span>`;
   }
 
-  function renderBracketRound(round) {
+  function renderBracketRound(round, state = {}) {
     const matches = Array.isArray(round?.matches) ? round.matches : [];
     return `
       <section class="season-bracket-round">
@@ -551,8 +648,8 @@
             ${matches.map((match) => `
               <article class="season-bracket-match">
                 <p class="season-bracket-match-name">${escapeHtml(match.name || 'Match')}</p>
-                <div class="season-bracket-slot">${renderCompetitor(match.competitors?.[0])}</div>
-                <div class="season-bracket-slot">${renderCompetitor(match.competitors?.[1])}</div>
+                <div class="season-bracket-slot">${renderCompetitor(match.competitors?.[0], state)}</div>
+                <div class="season-bracket-slot">${renderCompetitor(match.competitors?.[1], state)}</div>
               </article>
             `).join('')}
           </div>
@@ -561,20 +658,20 @@
     `;
   }
 
-  function renderProjectedBracket(season) {
+  function renderProjectedBracket(season, state = {}) {
     const rounds = Array.isArray(season?.bracket?.rounds) ? season.bracket.rounds : buildProjectedBracket(season?.seeds || []).rounds;
     return `
       <section class="glass season-card">
         <h3 class="season-section-title">Projected Bracket</h3>
         <p class="muted text-sm">Play-In winners use protected placeholders: the lowest remaining Play-In winner faces Seed 1, and the other winner faces Seed 2.</p>
         <div class="season-bracket-stack">
-          ${rounds.map(renderBracketRound).join('')}
+          ${rounds.map((round) => renderBracketRound(round, state)).join('')}
         </div>
       </section>
     `;
   }
 
-  function renderPreviewSeason(season) {
+  function renderPreviewSeason(season, state = {}) {
     return `
       <section class="glass season-hero-card">
         <p class="season-eyebrow">Season 1 Preview</p>
@@ -588,8 +685,8 @@
       </section>
       ${season?.seedMode === MANUAL_SEED_MODE ? '<section class="season-manual-banner">Manual seed order active — standings updates will not change seeds.</section>' : ''}
       ${renderWarningPanel(season)}
-      ${renderSeedList(season)}
-      ${renderProjectedBracket(season)}
+      ${renderSeedList(season, state)}
+      ${renderProjectedBracket(season, state)}
     `;
   }
 
@@ -948,8 +1045,8 @@
     `;
   }
 
-  function renderCurrentSeason(season) {
-    if (season?.status === 'preview') return renderPreviewSeason(season);
+  function renderCurrentSeason(season, state = {}) {
+    if (season?.status === 'preview') return renderPreviewSeason(season, state);
     const name = season?.label || season?.name || 'Season 1';
     const status = getSeasonStatusLabel(season?.status);
     const monthKey = season?.monthKey || '—';
@@ -1110,7 +1207,7 @@
     const history = Array.isArray(normalized.seasonHistory) ? normalized.seasonHistory : [];
     const title = getSeasonTabTitle(normalized);
     const body = currentSeason
-      ? renderCurrentSeason(currentSeason)
+      ? renderCurrentSeason(currentSeason, normalized)
       : (history.length ? renderTrophyCase(history, normalized) : renderSeasonSetupShell());
 
     return `
@@ -1147,6 +1244,7 @@
     const mount = global.document?.getElementById('seasonView');
     if (mount) mount.innerHTML = renderSeasonView(saved);
     attachSeasonInteractions(mount);
+    hydrateSeasonImages(mount);
     return saved;
   }
 
@@ -1383,6 +1481,7 @@
       mount.innerHTML = renderSeasonView({});
     }
     attachSeasonInteractions(mount);
+    hydrateSeasonImages(mount);
   }
 
   global.TaskPointsSeason = {
@@ -1405,6 +1504,7 @@
     lockCurrentPreviewToOfficialBracket,
     loadSeasonState,
     renderSeasonView,
+    hydrateSeasonImages,
     mountSeasonView
   };
 
