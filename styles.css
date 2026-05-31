@@ -5405,6 +5405,14 @@ header,
   transition: border-color 0.15s ease, transform 0.15s ease, background 0.15s ease;
 }
 
+.season-preview-seed-row {
+  border-radius: 8px;
+  gap: 8px;
+  grid-template-columns: 24px 56px minmax(0, 1fr);
+  min-height: 40px;
+  padding: 0 8px;
+}
+
 .season-seed-row.is-dragging {
   opacity: 0.62;
 }
@@ -5450,7 +5458,7 @@ header,
   align-self: center;
   background: linear-gradient(180deg, rgba(37, 76, 82, 0.85), rgba(13, 24, 28, 0.95));
   border: 1px solid rgba(148, 163, 184, 0.18);
-  border-radius: 4px;
+  border-radius: 0;
   display: inline-flex;
   flex: 0 0 auto;
   height: 30px;
@@ -5460,8 +5468,9 @@ header,
 }
 
 .season-player-photo-slot--seed {
-  height: 38px;
-  width: 52px;
+  border-radius: 0;
+  height: 40px;
+  width: 56px;
 }
 
 .season-player-photo {
@@ -5471,22 +5480,21 @@ header,
   width: 100%;
 }
 
-.season-player-photo-fallback {
-  align-items: center;
-  color: #d8fbff;
-  display: flex;
-  font-size: 0.68rem;
-  font-weight: 900;
-  height: 100%;
-  justify-content: center;
-  letter-spacing: 0.02em;
-  width: 100%;
-}
-
 .season-seed-main {
   display: grid;
   gap: 2px;
   min-width: 0;
+}
+
+.season-preview-seed-main {
+  display: flex;
+  align-items: center;
+}
+
+.season-preview-seed-main strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .season-seed-main strong,
@@ -5589,9 +5597,9 @@ header,
     flex-direction: column;
   }
 
-  .season-seed-row {
-    align-items: center;
-    grid-template-columns: auto auto minmax(0, 1fr);
+  .season-preview-seed-row {
+    grid-template-columns: 22px 48px minmax(0, 1fr);
+    min-height: 36px;
   }
 
   .season-seed-stats,
@@ -5605,8 +5613,8 @@ header,
   }
 
   .season-player-photo-slot--seed {
-    height: 34px;
-    width: 46px;
+    height: 36px;
+    width: 48px;
   }
 
   .season-bracket-slot {
