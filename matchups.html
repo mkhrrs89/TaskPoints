@@ -197,6 +197,10 @@ function readPageStateFresh() {
         schedule: [],
         opponentDripSchedules: [],
         workHistory: [],
+        weightHistory: [],
+        vo2MaxHistory: [],
+        liveDiffHistory: {},
+        liveDiffSnapshots: {},
         youImageId: "",
         youName: "",
         youPrimaryColor: "#1a383b",
@@ -225,6 +229,10 @@ function readPageStateFresh() {
       schedule: Array.isArray(p.schedule) ? p.schedule : [],
       opponentDripSchedules: Array.isArray(p.opponentDripSchedules) ? p.opponentDripSchedules : [],
       workHistory: Array.isArray(p.workHistory) ? p.workHistory : [],
+      weightHistory: Array.isArray(p.weightHistory) ? p.weightHistory : [],
+      vo2MaxHistory: Array.isArray(p.vo2MaxHistory) ? p.vo2MaxHistory : [],
+      liveDiffHistory: p.liveDiffHistory && typeof p.liveDiffHistory === "object" ? p.liveDiffHistory : {},
+      liveDiffSnapshots: p.liveDiffSnapshots && typeof p.liveDiffSnapshots === "object" ? p.liveDiffSnapshots : {},
       youImageId: typeof p.youImageId === "string" ? p.youImageId : "",
       youName: typeof p.youName === "string" ? p.youName : "",
       youPrimaryColor: normalizeHexColor(p.youPrimaryColor) || "#1a383b",
@@ -253,6 +261,10 @@ function readPageStateFresh() {
       schedule: [],
       opponentDripSchedules: [],
       workHistory: [],
+      weightHistory: [],
+      vo2MaxHistory: [],
+      liveDiffHistory: {},
+      liveDiffSnapshots: {},
       youImageId: "",
       youName: "",
       youPrimaryColor: "#1a383b",
@@ -314,7 +326,7 @@ function load() {
 
       const { state: nextState, changed } = TaskPointsCore.syncYouMatchups(state);
       if (changed && persist) {
-        save(nextState);
+        save(nextState, pathName);
       } else if (changed) {
         logBootReadOnlySkip(pathName);
       }
@@ -610,7 +622,7 @@ for (let i = 0; i + 1 < pool.length; i += 2) {
           // Leave byeId without matchup for the day.
         }
 
-        nextState = save(nextState);
+        nextState = save(nextState, 'matchups-generate-retro');
         renderMatchups();
       }
 
@@ -659,7 +671,7 @@ for (let i = 0; i + 1 < pool.length; i += 2) {
           (seasonSync.errors || []).forEach((error) => console.warn('Season result sync error:', error));
         }
 
-        state = save(state);
+        state = save(state, 'matchups-edit-result');
         renderMatchups();
       }
 
@@ -996,6 +1008,8 @@ function normalizeState(s) {
     schedule: Array.isArray(s.schedule) ? s.schedule : [],
     weightHistory: Array.isArray(s.weightHistory) ? s.weightHistory : [],
     vo2MaxHistory: Array.isArray(s.vo2MaxHistory) ? s.vo2MaxHistory : [],
+    liveDiffHistory: s.liveDiffHistory && typeof s.liveDiffHistory === "object" ? s.liveDiffHistory : {},
+    liveDiffSnapshots: s.liveDiffSnapshots && typeof s.liveDiffSnapshots === "object" ? s.liveDiffSnapshots : {},
     opponentDripSchedules: Array.isArray(s.opponentDripSchedules) ? s.opponentDripSchedules : [],
     workHistory: Array.isArray(s.workHistory) ? s.workHistory : [],
     reminders: Array.isArray(s.reminders) ? s.reminders : [],
@@ -1019,17 +1033,21 @@ function normalizeState(s) {
   return normalized;
 }
 
-function save(nextState) {
+function save(nextState, savePath = 'matchups-save') {
   try {
     const existing = load() || {};
-    if (window.TaskPointsCore?.saveAppState) {
-      const saved = TaskPointsCore.saveStateSnapshot({ ...existing, ...nextState }, { storageKey: STORAGE_KEY }).state;
+    const fullState = { ...existing, ...(nextState || {}) };
+    if (window.TaskPointsCore?.mergeAndSaveState) {
+      // Matchups only edits matchup/game-history domains. Always merge with the
+      // latest full app snapshot so Home-only histories (weight, VO2, live H2H
+      // differential samples) cannot be replaced by this page's partial state.
+      const saved = TaskPointsCore.mergeAndSaveState(fullState, { storageKey: STORAGE_KEY, savePath }).state;
       pageStateCache = saved;
       pageStateCacheDirty = false;
       return saved;
     }
-    if (window.TaskPointsCore?.mergeAndSaveState) {
-      const saved = TaskPointsCore.saveStateSnapshot({ ...existing, ...nextState }, { storageKey: STORAGE_KEY }).state;
+    if (window.TaskPointsCore?.saveStateSnapshot) {
+      const saved = TaskPointsCore.saveStateSnapshot(fullState, { storageKey: STORAGE_KEY, savePath }).state;
       pageStateCache = saved;
       pageStateCacheDirty = false;
       return saved;

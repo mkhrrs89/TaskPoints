@@ -2223,7 +2223,8 @@ function pruneStateForStorage(state, limits = {}) {
     return host === 'localhost' || host === '127.0.0.1';
   }
 
-  const STICKY_KEYS = ['youImageId', 'youName', 'youPrimaryColor', 'youSecondaryColor', 'habitTagColors'];
+  const PROTECTED_HISTORY_KEYS = ['weightHistory', 'vo2MaxHistory', 'liveDiffHistory', 'liveDiffSnapshots'];
+  const STICKY_KEYS = ['youImageId', 'youName', 'youPrimaryColor', 'youSecondaryColor', 'habitTagColors', ...PROTECTED_HISTORY_KEYS];
 
   function shouldAllowStickyOverwrite(key, options = {}) {
     if (key === 'scoringSettings') return Boolean(options.allowScoringSettingsOverwrite);
@@ -2246,11 +2247,57 @@ function pruneStateForStorage(state, limits = {}) {
     if (key === 'youPrimaryColor' || key === 'youSecondaryColor') {
       return !normalizeHexColor(value);
     }
-    if (key === 'habitTagColors' || key === 'scoringSettings') {
+    if (key === 'weightHistory' || key === 'vo2MaxHistory') {
+      if (!Array.isArray(value)) return true;
+      return value.length === 0;
+    }
+    if (key === 'liveDiffHistory' || key === 'liveDiffSnapshots' || key === 'habitTagColors' || key === 'scoringSettings') {
       if (!isPlainObject(value)) return true;
       return Object.keys(value).length === 0;
     }
     return false;
+  }
+
+  function shouldAllowProtectedHistoryOverwrite(key, options = {}) {
+    if (!PROTECTED_HISTORY_KEYS.includes(key)) return false;
+    if (options.allowProtectedHistoryOverwrite === true) return true;
+    if (options.allowDestructiveOverwrite === true) return true;
+    const allowKeys = options.allowProtectedHistoryOverwriteKeys;
+    if (allowKeys && allowKeys[key]) return true;
+    if (Array.isArray(allowKeys) && allowKeys.includes(key)) return true;
+    return shouldAllowStickyOverwrite(key, options);
+  }
+
+  function protectedHistorySize(key, value) {
+    if (key === 'weightHistory' || key === 'vo2MaxHistory') {
+      return Array.isArray(value) ? value.length : 0;
+    }
+    if (key === 'liveDiffHistory') {
+      if (!isPlainObject(value)) return 0;
+      return Object.values(value).reduce((sum, samples) => sum + (Array.isArray(samples) ? samples.length : 0), 0);
+    }
+    if (key === 'liveDiffSnapshots') {
+      if (!isPlainObject(value)) return 0;
+      return Object.values(value).reduce((sum, snapshots) => {
+        if (!isPlainObject(snapshots)) return sum;
+        return sum + Object.keys(snapshots).length;
+      }, 0);
+    }
+    return 0;
+  }
+
+  function warnProtectedHistoryWipe(key, existing, incoming, options = {}, storageKey = STORAGE_KEY) {
+    const before = protectedHistorySize(key, existing?.[key]);
+    const after = protectedHistorySize(key, incoming?.[key]);
+    const hasIncoming = Object.prototype.hasOwnProperty.call(incoming || {}, key);
+    if (!hasIncoming || before <= 0 || after !== 0 || shouldAllowProtectedHistoryOverwrite(key, options)) return;
+    console.warn(`TaskPointsCore: prevented protected history "${key}" from being wiped`, {
+      storageKey,
+      savePath: options.savePath || options.source || options.reason || options.caller || 'unknown',
+      before,
+      after,
+      hint: 'Pass allowProtectedHistoryOverwriteKeys for explicit history delete/reset actions only.'
+    });
   }
 
   function getDefaultScoringSettings() {
@@ -2293,7 +2340,8 @@ function pruneStateForStorage(state, limits = {}) {
     if (!nextState || typeof nextState !== 'object') return;
     STICKY_KEYS.forEach((key) => {
       const allowOverwrite = shouldAllowStickyOverwrite(key, options)
-        || (key === 'habitTagColors' && options.allowHabitTagColorReset);
+        || (key === 'habitTagColors' && options.allowHabitTagColorReset)
+        || shouldAllowProtectedHistoryOverwrite(key, options);
       if (allowOverwrite) return;
       if (!Object.prototype.hasOwnProperty.call(nextState, key)) return;
 
@@ -2301,6 +2349,7 @@ function pruneStateForStorage(state, limits = {}) {
       const shouldPreserve = isStickyEmptyValue(key, incoming);
       if (!shouldPreserve) return;
 
+      warnProtectedHistoryWipe(key, existing, nextState, options, storageKey);
       if (isDevMode(options)) {
         console.warn(`TaskPointsCore: prevented sticky key "${key}" from being wiped`, {
           storageKey,
@@ -2521,6 +2570,8 @@ function fastEnsureStateShape(s) {
     opponentDripSchedules: Array.isArray(src.opponentDripSchedules) ? src.opponentDripSchedules : [],
     weightHistory: Array.isArray(src.weightHistory) ? src.weightHistory : [],
     vo2MaxHistory: Array.isArray(src.vo2MaxHistory) ? src.vo2MaxHistory : [],
+    liveDiffHistory: isPlainObject(src.liveDiffHistory) ? src.liveDiffHistory : {},
+    liveDiffSnapshots: isPlainObject(src.liveDiffSnapshots) ? src.liveDiffSnapshots : {},
     workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
     projects: Array.isArray(src.projects) ? src.projects : [],
     notes: typeof src.notes === 'string' ? src.notes : '',
@@ -2557,6 +2608,19 @@ function fastEnsureStateShape(s) {
 
     const mergedSnapshot = deepMerge(existing, nextState || {});
     applyStickyKeyGuard({ existing, nextState, mergedSnapshot, options, storageKey });
+
+    // Protected Home histories are sticky across unrelated page saves. Matchups and
+    // other feature pages often send partial state snapshots; those must never empty
+    // weight/VO2/live-diff history unless the history-owning action passes an
+    // explicit allowProtectedHistoryOverwrite flag/key.
+    PROTECTED_HISTORY_KEYS.forEach((key) => {
+      if (!Object.prototype.hasOwnProperty.call(nextState || {}, key)) return;
+      if (shouldAllowProtectedHistoryOverwrite(key, options)) return;
+      if (protectedHistorySize(key, existing?.[key]) > 0 && protectedHistorySize(key, nextState?.[key]) === 0) {
+        mergedSnapshot[key] = existing[key];
+      }
+    });
+
     if (Object.prototype.hasOwnProperty.call(nextState || {}, 'habitTagColors')) {
       const existingColors = normalizeHabitTagColors(existing?.habitTagColors);
       const existingHasColors = Object.keys(existingColors).length > 0;
@@ -2865,10 +2929,19 @@ return { state: merged, storageKey };
       'tasks', 'completions', 'habits', 'players', 'flexActions',
       'gameHistory', 'matchups', 'schedule', 'weightHistory', 'vo2MaxHistory', 'reminders', 'seasonHistory'
     ];
-    const stickyObjectFields = ['playerBadges'];
+    const stickyObjectFields = ['playerBadges', 'liveDiffHistory', 'liveDiffSnapshots'];
     const deletedReminderIds = new Set(Array.isArray(options.deletedReminderIds) ? options.deletedReminderIds.map(String) : []);
     stickyArrayFields.forEach((key) => {
-      if (Array.isArray(next[key])) return;
+      if (Array.isArray(next[key])) {
+        if (!shouldAllowProtectedHistoryOverwrite(key, options) && Array.isArray(latest?.[key]) && latest[key].length > 0 && next[key].length === 0) {
+          // Defensive data-loss guard: partial saves from pages like Matchups may
+          // carry default empty Home histories. Preserve non-empty saved history
+          // unless a history-owning delete/reset explicitly opts in.
+          warnProtectedHistoryWipe(key, latest, next, options, storageKey);
+          next[key] = latest[key];
+        }
+        return;
+      }
       if (latest && Array.isArray(latest[key])) {
         next[key] = latest[key];
         return;
@@ -2911,7 +2984,16 @@ return { state: merged, storageKey };
       next.reminders = mergedReminders;
     }
     stickyObjectFields.forEach((key) => {
-      if (next[key] && typeof next[key] === 'object' && !Array.isArray(next[key])) return;
+      if (next[key] && typeof next[key] === 'object' && !Array.isArray(next[key])) {
+        if (!shouldAllowProtectedHistoryOverwrite(key, options) && protectedHistorySize(key, latest?.[key]) > 0 && protectedHistorySize(key, next[key]) === 0) {
+          // Keep live H2H differential samples/snapshots sticky across unrelated
+          // saves; graph code can still intentionally reset at its 5 AM boundary
+          // by passing an explicit allowProtectedHistoryOverwrite key.
+          warnProtectedHistoryWipe(key, latest, next, options, storageKey);
+          next[key] = latest[key];
+        }
+        return;
+      }
       if (latest && latest[key] && typeof latest[key] === 'object' && !Array.isArray(latest[key])) {
         next[key] = latest[key];
         return;
@@ -2986,11 +3068,16 @@ return { state: merged, storageKey };
         && candidateWithSticky[key].length > 0
         && (!Array.isArray(saved[key]) || saved[key].length < candidateWithSticky[key].length)
       ));
+      ['liveDiffHistory', 'liveDiffSnapshots'].forEach((key) => {
+        if (protectedHistorySize(key, candidateWithSticky[key]) > 0 && protectedHistorySize(key, saved[key]) < protectedHistorySize(key, candidateWithSticky[key])) {
+          failed.push(key);
+        }
+      });
       if (failed.length) {
         if (typeof alert === 'function') {
-          alert('Save verification failed: reminders, weightHistory, or vo2MaxHistory were not preserved.');
+          alert('Save verification failed: reminders, weightHistory, vo2MaxHistory, or live diff history were not preserved.');
         }
-        throw new Error(`Save verification failed: reminders, weightHistory, or vo2MaxHistory were not preserved. Failed keys: ${failed.join(', ')}`);
+        throw new Error(`Save verification failed: reminders, weightHistory, vo2MaxHistory, or live diff history were not preserved. Failed keys: ${failed.join(', ')}`);
       }
       if (debugEnabled) {
         const size = summarizeStateSizes(candidateWithSticky);

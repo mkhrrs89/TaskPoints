@@ -938,3 +938,80 @@ test('Create New Season shell supports 34 players and warns on non-34 player cou
   const html = seasonUi.renderSeasonView(core.normalizeState({ seasonHistory: [core.createEmptySeasonDraft({ status: 'finalized', championSummary: { championName: 'Past Champ' } })], players: makeSeasonPlayers(10) }));
   assert.match(html, /This format was designed for 34 players/);
 });
+
+test('saveStateSnapshot preserves protected Home histories from stale Matchups-style snapshots', () => {
+  storage.clear();
+  const existing = core.normalizeState({
+    tasks: [],
+    reminders: [],
+    completions: [],
+    players: [],
+    habits: [],
+    flexActions: [],
+    gameHistory: [{ id: 'game-1', date: '2026-05-31', playerId: 'npc-1', score: 8 }],
+    matchups: [{ id: 'match-1', date: '2026-05-31', playerAId: 'npc-1', playerBId: 'npc-2', scoreA: 8, scoreB: 7 }],
+    schedule: [],
+    opponentDripSchedules: [],
+    weightHistory: [{ id: 'w-1', date: '2026-05-01', dateKey: '2026-05-01', weight: 180 }],
+    vo2MaxHistory: [{ id: 'v-1', date: '2026-05-01', dateKey: '2026-05-01', value: 45 }],
+    liveDiffHistory: { '2026-06-01': [{ slot: '05:00', diff: 1.5 }] },
+    liveDiffSnapshots: { '2026-06-01': { '05:00': { slot: '05:00', diff: 1.5 } } }
+  });
+  global.localStorage.setItem(core.STORAGE_KEY, JSON.stringify(existing));
+
+  const staleMatchupsSave = core.normalizeState({
+    tasks: [],
+    reminders: [],
+    completions: [],
+    players: [],
+    habits: [],
+    flexActions: [],
+    gameHistory: [{ id: 'game-1', date: '2026-05-31', playerId: 'npc-1', score: 9 }],
+    matchups: [{ id: 'match-1', date: '2026-05-31', playerAId: 'npc-1', playerBId: 'npc-2', scoreA: 9, scoreB: 7 }],
+    schedule: [],
+    opponentDripSchedules: [],
+    weightHistory: [],
+    vo2MaxHistory: [],
+    liveDiffHistory: {},
+    liveDiffSnapshots: {}
+  });
+
+  core.saveStateSnapshot(staleMatchupsSave, { storageKey: core.STORAGE_KEY, savePath: 'matchups-edit-result' });
+  const saved = JSON.parse(global.localStorage.getItem(core.STORAGE_KEY));
+  assert.equal(saved.weightHistory.length, 1);
+  assert.equal(saved.weightHistory[0].id, 'w-1');
+  assert.equal(saved.vo2MaxHistory.length, 1);
+  assert.equal(saved.vo2MaxHistory[0].id, 'v-1');
+  assert.equal(saved.liveDiffHistory['2026-06-01'].length, 1);
+  assert.equal(saved.liveDiffSnapshots['2026-06-01']['05:00'].diff, 1.5);
+  assert.equal(saved.matchups[0].scoreA, 9);
+  assert.equal(saved.gameHistory[0].score, 9);
+});
+
+test('protected Home histories can be explicitly reset with allowProtectedHistoryOverwriteKeys', () => {
+  storage.clear();
+  const existing = core.normalizeState({
+    tasks: [],
+    reminders: [],
+    completions: [],
+    players: [],
+    habits: [],
+    flexActions: [],
+    gameHistory: [],
+    matchups: [],
+    schedule: [],
+    opponentDripSchedules: [],
+    weightHistory: [{ id: 'w-1', date: '2026-05-01', dateKey: '2026-05-01', weight: 180 }],
+    vo2MaxHistory: [{ id: 'v-1', date: '2026-05-01', dateKey: '2026-05-01', value: 45 }]
+  });
+  global.localStorage.setItem(core.STORAGE_KEY, JSON.stringify(existing));
+
+  core.saveStateSnapshot({ ...existing, weightHistory: [], vo2MaxHistory: [] }, {
+    storageKey: core.STORAGE_KEY,
+    savePath: 'metrics-explicit-reset',
+    allowProtectedHistoryOverwriteKeys: ['weightHistory', 'vo2MaxHistory']
+  });
+  const saved = JSON.parse(global.localStorage.getItem(core.STORAGE_KEY));
+  assert.deepEqual(saved.weightHistory, []);
+  assert.deepEqual(saved.vo2MaxHistory, []);
+});
