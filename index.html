@@ -10916,9 +10916,6 @@ function renderHomeSeasonChampionshipCard(){
     mount.innerHTML = '';
     return;
   }
-  const userStatus = TaskPointsCore.getUserSeasonStatus
-    ? TaskPointsCore.getUserSeasonStatus(season, todayKeyStr, state)
-    : { statusText: 'Season Championship is active.', detailText: '' };
   const featured = TaskPointsCore.getFeaturedSeasonMatchup
     ? TaskPointsCore.getFeaturedSeasonMatchup(season, todayKeyStr, state)
     : null;
@@ -10930,24 +10927,10 @@ function renderHomeSeasonChampionshipCard(){
     : '';
   mount.classList.remove('hidden');
   mount.innerHTML = `
-    <section class="glass home-season-card" aria-label="June Championship summary">
-      <div class="flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <p class="season-eyebrow">Season Championship</p>
-          <h2>June Championship</h2>
-        </div>
-        <a href="season.html" class="btn btn-teal btn-toolbar">Open Season Tab</a>
-      </div>
-      <div class="home-season-block">
-        <span class="home-season-label">Your Status</span>
-        <strong>${escapeHtml(userStatus.statusText || 'Status unavailable')}</strong>
-        ${userStatus.detailText ? `<span class="muted text-sm">${escapeHtml(userStatus.detailText)}</span>` : ''}
-      </div>
-      <div class="home-season-block">
-        <span class="home-season-label">Featured Matchup</span>
-        <strong>${escapeHtml(featuredLine)}</strong>
-        ${featuredDetail ? `<span class="muted text-sm">${escapeHtml(featuredDetail)}</span>` : ''}
-      </div>
+    <section class="home-season-featured" aria-label="Featured Season Championship matchup">
+      <span class="home-season-label">Featured Matchup</span>
+      <strong>${escapeHtml(featuredLine)}</strong>
+      ${featuredDetail ? `<span class="muted text-sm">${escapeHtml(featuredDetail)}</span>` : ''}
     </section>
   `;
 }
