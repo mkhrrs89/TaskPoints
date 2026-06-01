@@ -478,6 +478,7 @@ body {
   grid-template-columns: 1fr auto 1fr;
   align-items: start;
   gap: clamp(10px, 2vw, 18px);
+  position: relative;
   --scoreboard-name-height: calc(1.1em * 2);
 }
 /* --- Main scoreboard grid (END) ---------------------------------------- */
@@ -504,16 +505,22 @@ body {
 }
 
 .home-matchup-type-label {
-  color: #f97316;
+  color: #fb923c;
   font-size: clamp(0.62rem, 1.6vw, 0.72rem);
   font-weight: 700;
+  left: 50%;
   letter-spacing: 0.11em;
   line-height: 1.05;
-  max-width: 8.5rem;
+  max-width: min(9rem, 34vw);
   overflow-wrap: anywhere;
+  pointer-events: none;
+  position: absolute;
   text-align: center;
+  text-shadow: 0 0 14px rgba(251, 146, 60, 0.35);
   text-transform: uppercase;
-  text-shadow: 0 0 14px rgba(249, 115, 22, 0.35);
+  top: 0;
+  transform: translateX(-50%);
+  z-index: 1;
 }
 
 .home-matchup-type-label[hidden] {
