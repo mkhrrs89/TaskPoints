@@ -8,6 +8,32 @@
   
   <link rel="stylesheet" href="assets/tailwind.css">
   <link rel="stylesheet" href="styles.css" />
+  <style>
+    .skill-bar-cell {
+      position: relative;
+      overflow: hidden;
+    }
+
+    .skill-bar-fill {
+      position: absolute;
+      inset: 0 auto 0 0;
+      opacity: 0.42;
+      z-index: 0;
+      pointer-events: none;
+    }
+
+    .skill-bar-label {
+      position: relative;
+      z-index: 1;
+    }
+
+    .skills-bar-color-input {
+      width: 44px;
+      min-width: 44px;
+      height: 36px;
+      padding: 3px;
+    }
+  </style>
   <link rel="preload" href="toolbar.js" as="script">
   <script src="toolbar.js" defer></script>
 </head>
@@ -81,13 +107,17 @@
           <h2 class="text-lg font-semibold">All Skills</h2>
           <button id="addManualSkillBtn" type="button" class="btn btn-primary btn-compact">+</button>
         </div>
-        <div class="flex items-center gap-2">
+        <div class="flex flex-wrap items-center gap-2">
           <label for="skillsSort" class="text-xs muted">Sort</label>
           <select id="skillsSort" class="input text-xs py-1.5 pr-8">
             <option value="alpha">Alphabetical (A–Z)</option>
             <option value="count-desc">Count (High to Low)</option>
             <option value="count-asc">Count (Low to High)</option>
           </select>
+          <label for="skillsBarMaxInput" class="text-xs muted">Bar Max</label>
+          <input id="skillsBarMaxInput" class="input text-xs py-1.5 w-20" type="number" min="1" step="1" value="10">
+          <label for="skillsBarColorInput" class="text-xs muted">Bar Color</label>
+          <input id="skillsBarColorInput" class="input skills-bar-color-input" type="color" value="#1e666d">
           <span id="skillsCount" class="text-xs muted"></span>
         </div>
       </div>
@@ -111,8 +141,14 @@
 <script>
     const STORAGE_KEY = "taskpoints_v1";
     const DEFAULT_SORT_MODE = 'count-desc';
+    const SKILLS_BAR_MAX_KEY = 'taskpoints_skills_bar_max';
+    const SKILLS_BAR_COLOR_KEY = 'taskpoints_skills_bar_color';
+    const DEFAULT_SKILLS_BAR_MAX = 10;
+    const DEFAULT_SKILLS_BAR_COLOR = '#1e666d';
     let sortMode = DEFAULT_SORT_MODE;
     let aggregatedSkills = [];
+    let skillsBarMax = DEFAULT_SKILLS_BAR_MAX;
+    let skillsBarColor = DEFAULT_SKILLS_BAR_COLOR;
 
     function loadState() {
       if (window.TaskPointsCore?.loadAppState) {
@@ -144,6 +180,18 @@
         key: cleanedSkill.toLocaleLowerCase(),
         display: cleanedSkill,
       };
+    }
+
+    function normalizePositiveNumber(value, fallback = DEFAULT_SKILLS_BAR_MAX) {
+      const num = Number(value);
+      if (!Number.isFinite(num) || num <= 0) return fallback;
+      return num;
+    }
+
+    function normalizeColor(value, fallback = DEFAULT_SKILLS_BAR_COLOR) {
+      const str = typeof value === 'string' ? value.trim() : '';
+      if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(str)) return str;
+      return fallback;
     }
 
     function escapeHtml(value) {
@@ -269,17 +317,22 @@
       empty.classList.add('hidden');
       count.textContent = `${skills.length} skill${skills.length === 1 ? '' : 's'}`;
       list.innerHTML = skills
-        .map(
-          (skill) => `
+        .map((skill) => {
+          const fillPct = Math.max(0, Math.min(100, ((Number(skill.count) || 0) / skillsBarMax) * 100));
+
+          return `
             <tr class="border-b border-slate-700/50 last:border-b-0">
-              <td class="px-3 py-2 font-medium">${escapeHtml(skill.display)}</td>
+              <td class="px-3 py-2 font-medium skill-bar-cell">
+                <div class="skill-bar-fill" style="width:${fillPct}%; background:${skillsBarColor};"></div>
+                <span class="skill-bar-label">${escapeHtml(skill.display)}</span>
+              </td>
               <td class="px-3 py-2 text-right tabular-nums">${skill.count}</td>
               <td class="px-3 py-2 text-right">
                 ${skill.manual ? `<button type="button" class="btn btn-ghost btn-toolbar text-xs" data-delete-manual-skill="${escapeHtml(skill.manualId)}">Delete</button>` : '<span class="muted text-xs">Auto</span>'}
               </td>
             </tr>
-          `
-        )
+          `;
+        })
         .join('');
 
       list.querySelectorAll('[data-delete-manual-skill]').forEach((button) => {
@@ -359,12 +412,34 @@
     function initSkillsPage() {
       const state = loadState();
       aggregatedSkills = collectSkillTotals(state);
+      skillsBarMax = normalizePositiveNumber(localStorage.getItem(SKILLS_BAR_MAX_KEY), DEFAULT_SKILLS_BAR_MAX);
+      skillsBarColor = normalizeColor(localStorage.getItem(SKILLS_BAR_COLOR_KEY), DEFAULT_SKILLS_BAR_COLOR);
 
       const sortSelect = document.getElementById('skillsSort');
       if (sortSelect) {
         sortSelect.value = sortMode;
         sortSelect.addEventListener('change', (event) => {
           sortMode = event.target.value || DEFAULT_SORT_MODE;
+          renderSkills();
+        });
+      }
+
+      const barMaxInput = document.getElementById('skillsBarMaxInput');
+      if (barMaxInput) {
+        barMaxInput.value = String(skillsBarMax);
+        barMaxInput.addEventListener('input', (event) => {
+          skillsBarMax = normalizePositiveNumber(event.target.value, DEFAULT_SKILLS_BAR_MAX);
+          localStorage.setItem(SKILLS_BAR_MAX_KEY, String(skillsBarMax));
+          renderSkills();
+        });
+      }
+
+      const barColorInput = document.getElementById('skillsBarColorInput');
+      if (barColorInput) {
+        barColorInput.value = skillsBarColor;
+        barColorInput.addEventListener('input', (event) => {
+          skillsBarColor = normalizeColor(event.target.value, DEFAULT_SKILLS_BAR_COLOR);
+          localStorage.setItem(SKILLS_BAR_COLOR_KEY, skillsBarColor);
           renderSkills();
         });
       }
