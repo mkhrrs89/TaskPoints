@@ -282,7 +282,12 @@
         return;
       }
 
+      let previousSection = '';
       list.innerHTML = checks.map(c => {
+        const sectionHeader = c.section && c.section !== previousSection
+          ? `<div class="pt-4 first:pt-0"><div class="text-xs uppercase tracking-[0.2em] text-teal-200/80 font-semibold">${c.section}</div></div>`
+          : '';
+        if (c.section) previousSection = c.section;
         const icon = c.status === 'PASS' ? '✅' : c.status === 'WARN' ? '⚠️' : '❌';
         const trace = c.trace ? `<div class="muted text-[11px]">${c.trace}</div>` : '';
         const delta = Number.isFinite(c.delta) ? `<div class="muted text-[11px]">Δ ${c.delta.toFixed(2)}</div>` : '';
@@ -299,6 +304,7 @@
           : '';
 
         return `
+          ${sectionHeader}
           <div class="border border-zinc-800/70 rounded-xl p-3 bg-white/5 dark:bg-zinc-900/50">
             <div class="flex items-center justify-between gap-3">
               <div class="flex items-center gap-2">
@@ -1323,6 +1329,361 @@ function runWeightVo2HistorySavePathAudit(state) {
   });
   return { status: failures.length ? 'FAIL' : 'PASS', expected: 'Reminders, Weight, and VO2 Max histories survive page save paths', actual: failures.length ? `${failures.length} page adapter(s) dropped sentinel history` : 'All page adapters preserved reminders, weightHistory, and vo2MaxHistory', details: failures };
 }
+
+    const SEASON_AUDIT_SECTION = 'Season Championship Audits';
+    const SEASON_AUDIT_EXPECTED_SEED_COUNT = 34;
+    const SEASON_AUDIT_ROUND_ORDER = ['play_in', 'round_of_32', 'sweet_16', 'quarterfinals', 'semifinals', 'finals'];
+
+    function getCurrentSeasonForAudit(state) {
+      const season = state?.currentSeason;
+      return season && typeof season === 'object' && !Array.isArray(season) ? season : null;
+    }
+
+    function getSeasonSeriesListForAudit(season) {
+      const raw = season?.series;
+      if (Array.isArray(raw)) return raw.filter(Boolean);
+      if (raw && typeof raw === 'object' && Object.keys(raw).length) return Object.values(raw).filter(Boolean);
+      const rounds = Array.isArray(season?.bracket?.rounds) ? season.bracket.rounds : [];
+      return rounds.flatMap(round => Array.isArray(round?.matches) ? round.matches.map(match => ({ ...match, roundId: match.roundId || round.id, roundName: match.roundName || round.displayName })) : []);
+    }
+
+    function getSeriesDisplayNameForAudit(series) {
+      return String(series?.name || series?.displayName || series?.label || series?.id || 'Unnamed series');
+    }
+
+    function getSeriesPlayerIdsForAudit(series) {
+      const competitorA = Array.isArray(series?.competitors) ? series.competitors[0] : null;
+      const competitorB = Array.isArray(series?.competitors) ? series.competitors[1] : null;
+      return {
+        playerAId: String(series?.playerAId || competitorA?.playerId || competitorA?.id || '').trim(),
+        playerBId: String(series?.playerBId || competitorB?.playerId || competitorB?.id || '').trim()
+      };
+    }
+
+    function getSeasonSeedNumberForPlayerForAudit(season, playerId) {
+      const id = String(playerId || '').trim();
+      if (!id) return null;
+      const entry = (Array.isArray(season?.seeds) ? season.seeds : []).find(seed => String(seed?.playerId || seed?.id || '').trim() === id);
+      const seedNumber = Number(entry?.seed);
+      return Number.isInteger(seedNumber) ? seedNumber : null;
+    }
+
+    function auditIntegerOrNull(value) {
+      if (value === null || value === undefined || value === '') return null;
+      const numberValue = Number(value);
+      return Number.isInteger(numberValue) ? numberValue : null;
+    }
+
+    function getSeriesSeedPairForAudit(series, season) {
+      const competitorA = Array.isArray(series?.competitors) ? series.competitors[0] : null;
+      const competitorB = Array.isArray(series?.competitors) ? series.competitors[1] : null;
+      const ids = getSeriesPlayerIdsForAudit(series);
+      const seedA = auditIntegerOrNull(series?.playerASeed) ?? auditIntegerOrNull(competitorA?.seed) ?? getSeasonSeedNumberForPlayerForAudit(season, ids.playerAId);
+      const seedB = auditIntegerOrNull(series?.playerBSeed) ?? auditIntegerOrNull(competitorB?.seed) ?? getSeasonSeedNumberForPlayerForAudit(season, ids.playerBId);
+      return [auditIntegerOrNull(seedA), auditIntegerOrNull(seedB)];
+    }
+
+    function getTodayGameDayKeyForAudit() {
+      try {
+        if (window.TaskPointsCore?.todayKey) return TaskPointsCore.todayKey();
+      } catch (error) { /* fall through */ }
+      return TaskPointsCore.dateKey(new Date());
+    }
+
+    function getTodayMatchupsForAudit(state, dateKeyStr = getTodayGameDayKeyForAudit()) {
+      return (Array.isArray(state?.matchups) ? state.matchups : []).filter(matchup => matchup && matchupDateKey(matchup) === dateKeyStr);
+    }
+
+    function getAuditPairKey(playerAId, playerBId) {
+      const ids = [String(playerAId || '').trim(), String(playerBId || '').trim()].filter(Boolean).sort();
+      return ids.length === 2 ? ids.join('::') : '';
+    }
+
+    function isSeriesCompleteForAudit(series) {
+      if (!series) return false;
+      const winsNeeded = getWinsNeededForAudit(series);
+      return String(series.status || '').toLowerCase() === 'complete'
+        || Boolean(series.winnerId)
+        || (Number(series.winsA) || 0) >= winsNeeded
+        || (Number(series.winsB) || 0) >= winsNeeded;
+    }
+
+    function inferSeasonSeriesFromPlayerPairForAudit(state, matchup, dateKeyStr = getTodayGameDayKeyForAudit()) {
+      const season = getCurrentSeasonForAudit(state);
+      const pairKey = getAuditPairKey(matchup?.playerAId, matchup?.playerBId);
+      if (!season || !pairKey) return null;
+      const currentRoundId = window.TaskPointsCore?.getSeasonRoundForDate ? TaskPointsCore.getSeasonRoundForDate(dateKeyStr)?.id : '';
+      const matches = getSeasonSeriesListForAudit(season).filter(series => {
+        const ids = getSeriesPlayerIdsForAudit(series);
+        if (getAuditPairKey(ids.playerAId, ids.playerBId) !== pairKey) return false;
+        if (currentRoundId && series.roundId && series.roundId !== currentRoundId) return false;
+        return !isSeriesCompleteForAudit(series);
+      });
+      return matches.length === 1 ? matches[0] : null;
+    }
+
+    function isTournamentMatchupForAudit(state, matchup, dateKeyStr = getTodayGameDayKeyForAudit()) {
+      if (!matchup) return false;
+      const season = getCurrentSeasonForAudit(state);
+      const seriesId = matchup.seasonSeriesId || matchup.seriesId || matchup.seasonSeriesID || matchup.seriesID;
+      if (String(matchup.matchupType || '').toLowerCase() === 'tournament') return true;
+      if (seriesId && season?.series && season.series[seriesId]) return true;
+      if (seriesId && getSeasonSeriesListForAudit(season).some(series => series?.id === seriesId)) return true;
+      return Boolean(inferSeasonSeriesFromPlayerPairForAudit(state, matchup, dateKeyStr));
+    }
+
+    function getRoundOrderIndexForAudit(roundId) {
+      const normalized = String(roundId || '').toLowerCase();
+      const aliases = { round_1: 'round_of_32', round_2: 'sweet_16', round_3: 'quarterfinals', semi_finals: 'semifinals', championship: 'finals' };
+      return SEASON_AUDIT_ROUND_ORDER.indexOf(aliases[normalized] || normalized);
+    }
+
+    function getRoundLabelForAudit(roundId) {
+      const normalized = String(roundId || '').toLowerCase();
+      const labels = {
+        play_in: 'Play-In Match',
+        round_of_32: 'Round 1 Match',
+        sweet_16: 'Round 2 Match',
+        quarterfinals: 'Round 3 Match',
+        semifinals: 'Semi-Finals Match',
+        finals: 'Championship Match'
+      };
+      return labels[normalized] || (window.TaskPointsCore?.getSeasonDisplayName ? `${TaskPointsCore.getSeasonDisplayName(normalized) || 'Tournament'} Match` : 'Tournament Match');
+    }
+
+    function getWinsNeededForAudit(series) {
+      const explicit = Number(series?.winsNeeded);
+      if (Number.isFinite(explicit) && explicit > 0) return Math.floor(explicit);
+      const bestOf = Number(series?.bestOf);
+      if (bestOf === 3) return 2;
+      if (bestOf === 5) return 3;
+      if (bestOf === 7) return 4;
+      return Math.floor((Number.isFinite(bestOf) && bestOf > 0 ? bestOf : 1) / 2) + 1;
+    }
+
+    function getPlayerNameForAudit(state, playerId) {
+      const id = String(playerId || '').trim();
+      if (!id) return 'missing player';
+      if (id === 'YOU') return state?.youName || 'YOU';
+      const player = (Array.isArray(state?.players) ? state.players : []).find(p => String(p?.id || p?.playerId || '').trim() === id);
+      return player?.name || player?.playerName || id;
+    }
+
+    function getSeasonSeedNameForAudit(state, season, seedEntry) {
+      return seedEntry?.playerName || seedEntry?.name || getPlayerNameForAudit(state, seedEntry?.playerId || seedEntry?.id);
+    }
+
+    function countSeriesResultsForAudit(state, season, series) {
+      const ids = getSeriesPlayerIdsForAudit(series);
+      const counted = { winsA: 0, winsB: 0, sources: [] };
+      (Array.isArray(series?.gameResults) ? series.gameResults : []).forEach(result => {
+        const winnerId = String(result?.winnerId || result?.winningPlayerId || '').trim();
+        if (winnerId === ids.playerAId) counted.winsA += 1;
+        else if (winnerId === ids.playerBId) counted.winsB += 1;
+        if (winnerId) counted.sources.push(result?.matchupId || result?.id || result?.dateKey || 'series.gameResults');
+      });
+      const seriesId = series?.id;
+      (Array.isArray(state?.matchups) ? state.matchups : []).forEach(matchup => {
+        const matchupSeriesId = matchup?.seasonSeriesId || matchup?.seriesId || matchup?.seasonSeriesID || matchup?.seriesID;
+        if (!seriesId || matchupSeriesId !== seriesId) return;
+        const matchupId = matchup?.id || matchup?.dateKey || matchupDateKey(matchup) || 'state.matchups';
+        if (counted.sources.includes(matchupId)) return;
+        const scoreA = Number(matchup?.scoreA);
+        const scoreB = Number(matchup?.scoreB);
+        let winnerId = String(matchup?.winnerId || matchup?.winningPlayerId || '').trim();
+        if (!winnerId && Number.isFinite(scoreA) && Number.isFinite(scoreB) && scoreA !== scoreB) {
+          winnerId = scoreA > scoreB ? matchup.playerAId : matchup.playerBId;
+        }
+        if (winnerId === ids.playerAId) counted.winsA += 1;
+        else if (winnerId === ids.playerBId) counted.winsB += 1;
+        if (winnerId) counted.sources.push(matchupId);
+      });
+      return counted;
+    }
+
+    function buildSeasonChampionshipAuditChecks(state, selectedDateKey) {
+      const season = getCurrentSeasonForAudit(state);
+      const seeds = Array.isArray(season?.seeds) ? season.seeds : [];
+      const seriesList = getSeasonSeriesListForAudit(season);
+      const officialStatuses = new Set(['locked', 'active', 'champion_crowned', 'finalized']);
+      const inactiveSeason = !season || !officialStatuses.has(String(season.status || '').toLowerCase());
+      const base = { section: SEASON_AUDIT_SECTION };
+      const checks = [];
+
+      checks.push({
+        ...base,
+        id: 'season-seed-count-34',
+        title: 'Season seed count matches 34-player format',
+        status: !season || inactiveSeason ? 'WARN' : (seeds.length === SEASON_AUDIT_EXPECTED_SEED_COUNT ? 'PASS' : 'FAIL'),
+        expected: 'Current Season has exactly 34 seeded players',
+        actual: !season ? 'No current season found' : inactiveSeason ? `Current Season status is ${season.status || 'unknown'}; found ${seeds.length} seed(s)` : `Found ${seeds.length} seeded player(s)`,
+        trace: 'state.currentSeason.seeds.length'
+      });
+
+      const seedNumberCounts = new Map();
+      const nonNumericSeeds = [];
+      seeds.forEach((entry, idx) => {
+        const n = Number(entry?.seed);
+        if (!Number.isInteger(n)) { nonNumericSeeds.push(`row ${idx + 1}: ${entry?.seed ?? 'missing'}`); return; }
+        seedNumberCounts.set(n, (seedNumberCounts.get(n) || 0) + 1);
+      });
+      const duplicateSeeds = [...seedNumberCounts.entries()].filter(([, count]) => count > 1).map(([seedNum, count]) => `${seedNum} (${count}x)`);
+      const missingSeeds = Array.from({ length: SEASON_AUDIT_EXPECTED_SEED_COUNT }, (_, i) => i + 1).filter(n => !seedNumberCounts.has(n));
+      const outOfRangeSeeds = [...seedNumberCounts.keys()].filter(n => n < 1 || n > SEASON_AUDIT_EXPECTED_SEED_COUNT);
+      const seedContinuityIssues = [];
+      if (duplicateSeeds.length) seedContinuityIssues.push(`Duplicate seeds: ${duplicateSeeds.join(', ')}`);
+      if (missingSeeds.length) seedContinuityIssues.push(`Missing seeds: ${missingSeeds.join(', ')}`);
+      if (nonNumericSeeds.length) seedContinuityIssues.push(`Nonnumeric seeds: ${nonNumericSeeds.join(', ')}`);
+      if (outOfRangeSeeds.length) seedContinuityIssues.push(`Out-of-range seeds: ${outOfRangeSeeds.join(', ')}`);
+      checks.push({ ...base, id: 'season-seeds-continuous', title: 'Season seeds are unique and continuous', status: !season ? 'WARN' : (seedContinuityIssues.length ? 'FAIL' : 'PASS'), expected: 'Seeds are numbered 1 through 34 with no duplicates or gaps', actual: !season ? 'No current season found' : (seedContinuityIssues.length ? seedContinuityIssues.join(' • ') : 'Seeds 1–34 each appear once'), details: seedContinuityIssues, trace: 'state.currentSeason.seeds[].seed' });
+
+      const playerIdCounts = new Map();
+      const missingPlayerSeedNumbers = [];
+      seeds.forEach((entry, idx) => {
+        const playerId = String(entry?.playerId || entry?.id || '').trim();
+        const seedLabel = Number.isFinite(Number(entry?.seed)) ? `Seed ${Number(entry.seed)}` : `row ${idx + 1}`;
+        if (!playerId) { missingPlayerSeedNumbers.push(seedLabel); return; }
+        playerIdCounts.set(playerId, (playerIdCounts.get(playerId) || 0) + 1);
+      });
+      const duplicatePlayers = [...playerIdCounts.entries()].filter(([, count]) => count > 1).map(([playerId, count]) => `${getPlayerNameForAudit(state, playerId)} (${playerId}, ${count}x)`);
+      const playerIssues = [];
+      if (duplicatePlayers.length) playerIssues.push(`Duplicate player ids: ${duplicatePlayers.join(', ')}`);
+      if (missingPlayerSeedNumbers.length) playerIssues.push(`Missing player id on: ${missingPlayerSeedNumbers.join(', ')}`);
+      checks.push({ ...base, id: 'season-seeded-players-unique', title: 'Season seeded players are unique', status: !season ? 'WARN' : (playerIssues.length ? 'FAIL' : 'PASS'), expected: 'Each seeded player appears exactly once', actual: !season ? 'No current season found' : (playerIssues.length ? playerIssues.join(' • ') : 'Every seeded player id appears once'), details: playerIssues, trace: 'state.currentSeason.seeds[].playerId/id' });
+
+      const playInSeries = seriesList.filter(series => String(series?.roundId || series?.round || '').toLowerCase() === 'play_in' || /play[-\s]?in/i.test(getSeriesDisplayNameForAudit(series)));
+      const playInPairs = playInSeries.map(series => getSeriesSeedPairForAudit(series, season).filter(seedNum => seedNum != null).sort((a, b) => a - b));
+      const detectedPairText = playInPairs.length ? playInPairs.map(pair => pair.length === 2 ? `${pair[0]} vs ${pair[1]}` : pair.join(' vs ') || 'missing').join('; ') : 'No Play-In pairings detected';
+      const expectedPairKeys = new Set(['31-34', '32-33']);
+      const detectedPairKeys = playInPairs.map(pair => pair.join('-'));
+      const playInIssues = [];
+      if (playInPairs.length !== 2) playInIssues.push(`Expected 2 Play-In pairings, found ${playInPairs.length}`);
+      detectedPairKeys.forEach(pair => { if (!expectedPairKeys.has(pair)) playInIssues.push(`Unexpected Play-In pairing ${pair || 'missing seeds'}`); });
+      expectedPairKeys.forEach(pair => { if (!detectedPairKeys.includes(pair)) playInIssues.push(`Missing Play-In pairing ${pair.replace('-', ' vs ')}`); });
+      checks.push({ ...base, id: 'season-play-in-pairings', title: 'Play-In pairings match 34-player format', status: !season ? 'WARN' : (playInIssues.length ? (inactiveSeason ? 'WARN' : 'FAIL') : 'PASS'), expected: 'Play-In games are Seed 31 vs Seed 34 and Seed 32 vs Seed 33', actual: `${detectedPairText}${inactiveSeason && season ? ` (season status ${season.status || 'unknown'})` : ''}`, details: playInIssues, trace: 'currentSeason.series/bracket play_in seed pairs' });
+
+      const todayKey = selectedDateKey || getTodayGameDayKeyForAudit();
+      const todayMatchups = getTodayMatchupsForAudit(state, todayKey);
+      const tournamentPlayers = new Set();
+      const exhibitionPlayers = new Set();
+      todayMatchups.forEach(matchup => {
+        const target = isTournamentMatchupForAudit(state, matchup, todayKey) ? tournamentPlayers : exhibitionPlayers;
+        [matchup.playerAId, matchup.playerBId].forEach(id => { if (id) target.add(String(id)); });
+      });
+      const conflictPlayers = [...tournamentPlayers].filter(id => exhibitionPlayers.has(id));
+      checks.push({ ...base, id: 'season-tournament-exhibition-conflicts', title: 'Tournament players are not also scheduled for exhibitions today', status: conflictPlayers.length ? 'FAIL' : 'PASS', expected: 'Players in today’s tournament series appear only in tournament matchups', actual: conflictPlayers.length ? conflictPlayers.map(id => `${getPlayerNameForAudit(state, id)} (${id})`).join(', ') : `No tournament/exhibition overlap across ${todayMatchups.length} matchup(s) on ${todayKey}`, details: conflictPlayers.map(id => `${getPlayerNameForAudit(state, id)} (${id}) appears in both tournament and exhibition matchups`), trace: 'state.matchups today + currentSeason.series participant inference' });
+
+      const scoreMismatches = [];
+      let scoreWarnCount = 0;
+      seriesList.forEach(series => {
+        const counted = countSeriesResultsForAudit(state, season, series);
+        const storedA = Number(series?.winsA) || 0;
+        const storedB = Number(series?.winsB) || 0;
+        if (!counted.sources.length && storedA === 0 && storedB === 0) { scoreWarnCount += 1; return; }
+        if (counted.winsA !== storedA || counted.winsB !== storedB) scoreMismatches.push(`${getSeriesDisplayNameForAudit(series)}: expected ${counted.winsA}–${counted.winsB} from results, stored ${storedA}–${storedB}`);
+      });
+      checks.push({ ...base, id: 'season-series-scores-match-results', title: 'Season series scores match recorded game results', status: !season ? 'WARN' : (scoreMismatches.length ? 'FAIL' : (scoreWarnCount ? 'WARN' : 'PASS')), expected: 'Each series score matches its recorded game results', actual: !season ? 'No current season found' : (scoreMismatches.length ? `${scoreMismatches.length} mismatch(es)` : (scoreWarnCount ? `${scoreWarnCount} unplayed 0–0 series have no game results` : 'All series scores match recorded results')), details: scoreMismatches, trace: 'currentSeason.series[].gameResults + state.matchups seriesId results' });
+
+      const invalidCompleted = [];
+      const completedSeries = [];
+      seriesList.forEach(series => {
+        const ids = getSeriesPlayerIdsForAudit(series);
+        const winsA = Number(series?.winsA) || 0;
+        const winsB = Number(series?.winsB) || 0;
+        const winsNeeded = getWinsNeededForAudit(series);
+        const winnerId = String(series?.winnerId || '').trim() || (winsA >= winsNeeded && winsA > winsB ? ids.playerAId : winsB >= winsNeeded && winsB > winsA ? ids.playerBId : '');
+        const checkable = String(series?.status || '').toLowerCase() === 'complete' || Boolean(series?.winnerId) || winsA >= winsNeeded || winsB >= winsNeeded;
+        if (!checkable) return;
+        completedSeries.push(series);
+        const winnerWins = winnerId === ids.playerAId ? winsA : winnerId === ids.playerBId ? winsB : 0;
+        const loserWins = winnerId === ids.playerAId ? winsB : winnerId === ids.playerBId ? winsA : Math.max(winsA, winsB);
+        if (!winnerId) invalidCompleted.push(`${getSeriesDisplayNameForAudit(series)}: completed/enough wins but winnerId is missing`);
+        else if (winnerId !== ids.playerAId && winnerId !== ids.playerBId) invalidCompleted.push(`${getSeriesDisplayNameForAudit(series)}: winner ${winnerId} is not a participant`);
+        else if (winnerWins < winsNeeded) invalidCompleted.push(`${getSeriesDisplayNameForAudit(series)}: winner ${winnerId} has ${winnerWins}, needs ${winsNeeded}`);
+        else if (loserWins >= winsNeeded) invalidCompleted.push(`${getSeriesDisplayNameForAudit(series)}: both sides reached ${winsNeeded}+ wins (${winsA}–${winsB})`);
+      });
+      checks.push({ ...base, id: 'season-completed-series-valid-winners', title: 'Completed Season series have valid winners', status: !season ? 'WARN' : (invalidCompleted.length ? 'FAIL' : 'PASS'), expected: 'Completed series winners are valid participants and reached required wins', actual: !season ? 'No current season found' : (invalidCompleted.length ? `${invalidCompleted.length} invalid completed series` : `${completedSeries.length} completed/checkable series valid`), details: invalidCompleted, trace: 'currentSeason.series status/winnerId/winsNeeded/winsA/winsB' });
+
+      const advancementIssues = [];
+      let advancementCheckable = 0;
+      completedSeries.forEach(series => {
+        const nextSeriesId = series?.nextSeriesId || series?.advancesTo?.seriesId || series?.advancesToSeriesId || '';
+        const nextSlot = String(series?.nextSlot || series?.advancesTo?.slot || series?.advancesToSlot || '').toUpperCase();
+        if (!nextSeriesId || !['A', 'B'].includes(nextSlot)) return;
+        advancementCheckable += 1;
+        const target = seriesList.find(item => item?.id === nextSeriesId) || season?.series?.[nextSeriesId];
+        const winnerId = String(series?.winnerId || '').trim();
+        const actualId = nextSlot === 'B' ? target?.playerBId : target?.playerAId;
+        const loserId = winnerId === series.playerAId ? series.playerBId : winnerId === series.playerBId ? series.playerAId : '';
+        if (!target) advancementIssues.push(`${getSeriesDisplayNameForAudit(series)}: target ${nextSeriesId} slot ${nextSlot} missing`);
+        else if (actualId !== winnerId) advancementIssues.push(`${getSeriesDisplayNameForAudit(series)}: winner ${winnerId || 'missing'} expected in ${nextSeriesId} slot ${nextSlot}, actual ${actualId || 'empty'}${actualId && actualId === loserId ? ' (loser advanced)' : ''}`);
+      });
+      checks.push({ ...base, id: 'season-winners-advanced-correctly', title: 'Completed series winners advanced correctly', status: !season ? 'WARN' : (advancementIssues.length ? 'FAIL' : (advancementCheckable ? 'PASS' : 'WARN')), expected: 'Every completed series winner appears in the expected next-round slot', actual: !season ? 'No current season found' : (advancementIssues.length ? `${advancementIssues.length} advancement issue(s)` : (advancementCheckable ? `${advancementCheckable} advancement target(s) correct` : 'No completed series have advancement metadata to check')), details: advancementIssues, trace: 'currentSeason.series nextSeriesId/nextSlot/advancesTo' });
+
+      const eliminatedIssues = [];
+      completedSeries.forEach(series => {
+        const ids = getSeriesPlayerIdsForAudit(series);
+        const winnerId = String(series?.winnerId || '').trim();
+        const loserId = winnerId === ids.playerAId ? ids.playerBId : winnerId === ids.playerBId ? ids.playerAId : String(series?.loserId || '').trim();
+        if (!loserId) return;
+        const roundIndex = getRoundOrderIndexForAudit(series.roundId);
+        if (roundIndex < 0) return;
+        seriesList.forEach(later => {
+          if (getRoundOrderIndexForAudit(later?.roundId) <= roundIndex) return;
+          const laterIds = getSeriesPlayerIdsForAudit(later);
+          if (laterIds.playerAId === loserId || laterIds.playerBId === loserId) eliminatedIssues.push(`${getPlayerNameForAudit(state, loserId)} (${loserId}) lost ${getSeriesDisplayNameForAudit(series)} but reappears in ${getSeriesDisplayNameForAudit(later)} (${later.roundId || 'later round'})`);
+        });
+      });
+      checks.push({ ...base, id: 'season-eliminated-players-not-later', title: 'Eliminated players do not appear in later rounds', status: !season ? 'WARN' : (eliminatedIssues.length ? 'FAIL' : (completedSeries.length ? 'PASS' : 'WARN')), expected: 'Once a player loses a series, they do not appear in later tournament rounds', actual: !season ? 'No current season found' : (eliminatedIssues.length ? `${eliminatedIssues.length} eliminated-player reappearance(s)` : (completedSeries.length ? 'No eliminated players found in later rounds' : 'No completed series exist yet')), details: eliminatedIssues, trace: 'currentSeason.series loserId/winnerId by round order' });
+
+      const userMatchup = todayMatchups.find(matchup => matchup && (matchup.playerAId === 'YOU' || matchup.playerBId === 'YOU'));
+      let homeExpectedLabel = '';
+      let homeComputedLabel = '';
+      let labelStatus = 'WARN';
+      let labelActual = `No user matchup today (${todayKey})`;
+      if (userMatchup) {
+        const directSeriesId = userMatchup.seasonSeriesId || userMatchup.seriesId || userMatchup.seasonSeriesID || userMatchup.seriesID;
+        const directSeries = directSeriesId ? (season?.series?.[directSeriesId] || seriesList.find(item => item?.id === directSeriesId)) : null;
+        const inferredSeries = directSeries || inferSeasonSeriesFromPlayerPairForAudit(state, userMatchup, todayKey);
+        const inSeasonContext = Boolean(season) && (!window.TaskPointsCore?.isSeasonDate || TaskPointsCore.isSeasonDate(todayKey));
+        homeExpectedLabel = inferredSeries ? getRoundLabelForAudit(inferredSeries.roundId || userMatchup.roundId) : (inSeasonContext ? 'Exhibition Match' : '');
+        const matchupType = String(userMatchup.matchupType || '').toLowerCase();
+        homeComputedLabel = inferredSeries ? getRoundLabelForAudit(inferredSeries.roundId || userMatchup.roundId) : (matchupType === 'tournament' ? getRoundLabelForAudit(userMatchup.roundId) : (inSeasonContext ? 'Exhibition Match' : ''));
+        const falseExhibition = inferredSeries && homeComputedLabel === 'Exhibition Match';
+        const falseTournament = !inferredSeries && homeComputedLabel && homeComputedLabel !== 'Exhibition Match';
+        labelStatus = (homeExpectedLabel === homeComputedLabel && !falseExhibition && !falseTournament) ? 'PASS' : 'FAIL';
+        labelActual = `Expected label: ${homeExpectedLabel || 'blank/no label'}; detected/computed label: ${homeComputedLabel || 'blank/no label'}`;
+      }
+      checks.push({ ...base, id: 'season-home-matchup-type-label', title: 'Home matchup type label matches today’s matchup', status: labelStatus, expected: 'Home label reflects whether today’s user matchup is tournament or exhibition', actual: labelActual, trace: 'index.html getHomeMatchupTypeLabel mirror: seriesId first, then unordered player-pair inference' });
+
+      const protectedKeys = ['weightHistory', 'vo2MaxHistory', 'liveDiffHistory', 'liveDiffSnapshots', 'reminders'];
+      if (Object.prototype.hasOwnProperty.call(state || {}, 'notes')) protectedKeys.push('notes');
+      const shapeIssues = [];
+      const emptyWarnings = [];
+      protectedKeys.forEach(key => {
+        const value = state?.[key];
+        const present = Object.prototype.hasOwnProperty.call(state || {}, key);
+        if (!present) { emptyWarnings.push(`${key} missing (app can tolerate default/empty value)`); return; }
+        if (key === 'liveDiffHistory' || key === 'liveDiffSnapshots') {
+          if (value && typeof value === 'object' && !Array.isArray(value)) {
+            if (!Object.keys(value).length) emptyWarnings.push(`${key} is empty and no previous snapshot is available`);
+          } else shapeIssues.push(`${key} should be an object map`);
+        } else if (key === 'notes') {
+          if (!(typeof value === 'string' || Array.isArray(value))) shapeIssues.push('notes should be a string or array when present');
+          else if ((typeof value === 'string' && !value.trim()) || (Array.isArray(value) && !value.length)) emptyWarnings.push('notes is empty and no previous snapshot is available');
+        } else if (!Array.isArray(value)) {
+          shapeIssues.push(`${key} should be an array`);
+        } else if (!value.length) {
+          emptyWarnings.push(`${key} is empty and no previous snapshot is available`);
+        }
+      });
+      const savePathAudit = runWeightVo2HistorySavePathAudit(state);
+      const protectedDetails = [...shapeIssues, ...emptyWarnings];
+      if (savePathAudit.status === 'FAIL') protectedDetails.push(...(savePathAudit.details || []));
+      checks.push({ ...base, id: 'season-protected-histories-preserved', title: 'Season saves preserved protected histories', status: shapeIssues.length || savePathAudit.status === 'FAIL' ? 'FAIL' : (emptyWarnings.length ? 'WARN' : 'PASS'), expected: 'Season and matchup saves do not wipe protected Home histories', actual: shapeIssues.length ? `${shapeIssues.length} invalid protected shape(s)` : (emptyWarnings.length ? `${emptyWarnings.length} protected key warning(s); current values empty/missing and no previous snapshot is available` : 'Protected history keys are present with valid shape'), details: protectedDetails, trace: 'weightHistory/vo2MaxHistory/liveDiffHistory/liveDiffSnapshots/reminders/notes + save-path sentinel audit' });
+
+      return checks;
+    }
 
     function auditWorkHoursLast14Days(state, todayDateKey = TaskPointsCore.todayKey()) {
       const issues = [];
@@ -2372,6 +2733,8 @@ const actualTotal = round2(Number(derivedActualTotal) || 0);
         details: integrityProblems,
         trace: 'Snapshot validation'
       });
+
+      checks.push(...buildSeasonChampionshipAuditChecks(state, dateKey));
 
       const noOpVisitAudit = runNoOpPageVisitAudit(state);
       checks.push({
