@@ -620,6 +620,7 @@ Nothing visible on the page is built here. === -->
 
        <!-- MIDDLE: DIFF -->
           <div class="scoreboard-diff text-center">
+            <div id="homeMatchupTypeLabel" class="home-matchup-type-label" hidden></div>
             <div class="muted text-[11px] uppercase tracking-wide">The Diff</div>
             <div id="matchupDiffValue" class="scoreboard-diff-value">—</div>
             <div id="matchupHeadToHeadRecord" class="matchupHeadToHeadRecord">H2H: —</div>
@@ -4571,6 +4572,78 @@ function setPlayerColorSwatches(primaryEl, secondaryEl, colors = {}) {
   }
 }
 
+function isHomeSeasonContextActive(stateArg, dateKeyStr) {
+  const seasonControlActive = window.TaskPointsCore?.shouldUseSeasonMatchupControl
+    ? TaskPointsCore.shouldUseSeasonMatchupControl(stateArg, dateKeyStr)
+    : false;
+  if (seasonControlActive) return true;
+
+  const season = stateArg?.currentSeason;
+  const status = String(season?.status || '');
+  const startDate = String(season?.startDate || '');
+  const endDate = String(season?.endDate || '');
+  const hasSeries = Object.keys(season?.series || {}).length > 0;
+
+  return Boolean(
+    season
+    && ['locked', 'active', 'champion_crowned'].includes(status)
+    && hasSeries
+    && (!startDate || dateKeyStr >= startDate)
+    && (!endDate || dateKeyStr <= endDate)
+  );
+}
+
+function getHomeSeasonSeriesForMatchup(stateArg, matchup) {
+  const season = stateArg?.currentSeason;
+  const seriesId = matchup?.seasonSeriesId || matchup?.seriesId || matchup?.seasonSeriesID || matchup?.seriesID;
+  if (!season || !seriesId) return null;
+
+  return season.series?.[seriesId] || null;
+}
+
+function getHomeMatchupRoundLabel(matchup, series) {
+  const roundId = String(series?.roundId || matchup?.roundId || '').toLowerCase();
+  const roundName = String(series?.roundName || matchup?.roundName || '').trim();
+  const normalizedRoundName = roundName.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+
+  const labelsByRound = {
+    play_in: 'Play-In Match',
+    round_of_32: 'Round 1 Match',
+    round_1: 'Round 1 Match',
+    sweet_16: 'Round 2 Match',
+    round_2: 'Round 2 Match',
+    quarterfinals: 'Round 3 Match',
+    quarter_finals: 'Round 3 Match',
+    round_3: 'Round 3 Match',
+    semifinals: 'Semi-Finals Match',
+    semi_finals: 'Semi-Finals Match',
+    finals: 'Championship Match',
+    championship: 'Championship Match'
+  };
+
+  return labelsByRound[roundId]
+    || labelsByRound[normalizedRoundName]
+    || (roundName ? `${roundName} Match` : 'Tournament Match');
+}
+
+function getHomeMatchupTypeLabel(stateArg, matchup, dateKeyStr) {
+  if (!matchup || !isHomeSeasonContextActive(stateArg, dateKeyStr)) return '';
+
+  const series = getHomeSeasonSeriesForMatchup(stateArg, matchup);
+  if (!series) return 'Exhibition Match';
+
+  return getHomeMatchupRoundLabel(matchup, series);
+}
+
+function setHomeMatchupTypeLabel(label) {
+  const labelEl = $('homeMatchupTypeLabel');
+  if (!labelEl) return;
+
+  const safeLabel = String(label || '').trim();
+  labelEl.textContent = safeLabel;
+  labelEl.hidden = !safeLabel;
+}
+
 function renderTodaysMatchup(todayKeyStr, yourScore){
   const oppNameEl = $('matchupOpponent');
   const oppScoreEl= $('matchupOpponentScore');
@@ -4629,7 +4702,9 @@ const updateTodayScoreIsland = (value) => {
   const matchup = matchups.find(m => m && matchupDateKey(m) === todayKeyStr && (m.playerAId === 'YOU' || m.playerBId === 'YOU'));
 
   if (!matchup) {
-    if (panelEl) panelEl.classList.remove('yesterday-win');
+    setHomeMatchupTypeLabel('');
+    const yesterdayPanelEl = $('yesterdayResultsPanel');
+    if (yesterdayPanelEl) yesterdayPanelEl.classList.remove('yesterday-win');
     clearYesterdayResultClasses();
     diffValueEl.textContent = '—';
     oppScoreEl.textContent = '—';
@@ -4645,6 +4720,8 @@ const updateTodayScoreIsland = (value) => {
     if (h2hEl) h2hEl.textContent = 'H2H: —';
     return;
   }
+
+  setHomeMatchupTypeLabel(getHomeMatchupTypeLabel(state, matchup, todayKeyStr));
 
   const youAreA = matchup.playerAId === 'YOU';
   const oppId = youAreA ? matchup.playerBId : matchup.playerAId;
