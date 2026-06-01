@@ -77,7 +77,10 @@
 
     <section class="glass">
       <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
-        <h2 class="text-lg font-semibold">All Skills</h2>
+        <div class="flex items-center gap-2">
+          <h2 class="text-lg font-semibold">All Skills</h2>
+          <button id="addManualSkillBtn" type="button" class="btn btn-primary btn-compact">+</button>
+        </div>
         <div class="flex items-center gap-2">
           <label for="skillsSort" class="text-xs muted">Sort</label>
           <select id="skillsSort" class="input text-xs py-1.5 pr-8">
@@ -94,6 +97,7 @@
             <tr class="border-b border-slate-700/70 bg-slate-900/55">
               <th scope="col" class="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-300">Skill</th>
               <th scope="col" class="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-300 text-right">Count</th>
+              <th scope="col" class="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-300 text-right">Manual</th>
             </tr>
           </thead>
           <tbody id="skillsList"></tbody>
@@ -123,6 +127,16 @@
       }
     }
 
+    function saveState(nextState, savePath = 'skills-manual-save') {
+      if (window.TaskPointsCore?.saveStateSnapshot) {
+        const saved = TaskPointsCore.saveStateSnapshot(nextState, { savePath });
+        return saved?.state || nextState;
+      }
+
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
+      return nextState;
+    }
+
     function normalizeSkillName(rawSkill) {
       const cleanedSkill = typeof rawSkill === 'string' ? rawSkill.trim() : '';
       if (!cleanedSkill) return null;
@@ -130,6 +144,16 @@
         key: cleanedSkill.toLocaleLowerCase(),
         display: cleanedSkill,
       };
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>'"]/g, (character) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        "'": '&#39;',
+        '"': '&quot;',
+      }[character]));
     }
 
     function gatherSkillRowCollections(state) {
@@ -178,9 +202,33 @@
           }
 
           totals.set(normalized.key, {
+            key: normalized.key,
             display: normalized.display,
             count: 1,
+            manual: false,
           });
+        });
+      });
+
+      const manualSkills = Array.isArray(state?.manualSkills) ? state.manualSkills : [];
+      manualSkills.forEach((skill) => {
+        const normalized = normalizeSkillName(skill?.name || skill?.display || skill?.skill);
+        if (!normalized) return;
+
+        const manualId = skill?.id || normalized.key;
+        const existing = totals.get(normalized.key);
+        if (existing) {
+          existing.manual = true;
+          existing.manualId = manualId;
+          return;
+        }
+
+        totals.set(normalized.key, {
+          key: normalized.key,
+          display: normalized.display,
+          count: 0,
+          manual: true,
+          manualId,
         });
       });
 
@@ -224,12 +272,88 @@
         .map(
           (skill) => `
             <tr class="border-b border-slate-700/50 last:border-b-0">
-              <td class="px-3 py-2 font-medium">${skill.display}</td>
+              <td class="px-3 py-2 font-medium">${escapeHtml(skill.display)}</td>
               <td class="px-3 py-2 text-right tabular-nums">${skill.count}</td>
+              <td class="px-3 py-2 text-right">
+                ${skill.manual ? `<button type="button" class="btn btn-ghost btn-toolbar text-xs" data-delete-manual-skill="${escapeHtml(skill.manualId)}">Delete</button>` : '<span class="muted text-xs">Auto</span>'}
+              </td>
             </tr>
           `
         )
         .join('');
+
+      list.querySelectorAll('[data-delete-manual-skill]').forEach((button) => {
+        button.addEventListener('click', () => {
+          deleteManualSkill(button.dataset.deleteManualSkill);
+        });
+      });
+    }
+
+    function addManualSkill() {
+      const name = prompt('Add a new skill name:');
+      if (name === null) return;
+
+      const normalized = normalizeSkillName(name);
+      if (!normalized) {
+        alert('Please enter a valid skill name.');
+        return;
+      }
+
+      const state = loadState();
+      const manualSkills = Array.isArray(state?.manualSkills) ? state.manualSkills : [];
+      const duplicate = manualSkills.some((skill) => {
+        const existing = normalizeSkillName(skill?.name || skill?.display || skill?.skill);
+        return existing?.key === normalized.key;
+      });
+
+      if (duplicate) {
+        alert('That skill is already manually added.');
+        return;
+      }
+
+      const nextManualSkills = [
+        ...manualSkills,
+        {
+          id: window.crypto?.randomUUID ? window.crypto.randomUUID() : `manual_skill_${Date.now()}`,
+          name: normalized.display,
+          createdAtISO: new Date().toISOString(),
+        },
+      ];
+      const currentState = saveState(
+        {
+          ...state,
+          manualSkills: nextManualSkills,
+        },
+        'skills-add-manual-skill'
+      );
+
+      aggregatedSkills = collectSkillTotals(currentState);
+      renderSkills();
+    }
+
+    function deleteManualSkill(skillId) {
+      if (!skillId) return;
+      if (!confirm('Delete this manually added skill? This will not remove any real task history.')) return;
+
+      const state = loadState();
+      const manualSkills = Array.isArray(state?.manualSkills) ? state.manualSkills : [];
+      const nextManualSkills = manualSkills.filter((skill) => {
+        if (skill?.id) return skill.id !== skillId;
+
+        const normalized = normalizeSkillName(skill?.name || skill?.display || skill?.skill);
+        return normalized?.key !== skillId;
+      });
+
+      const currentState = saveState(
+        {
+          ...state,
+          manualSkills: nextManualSkills,
+        },
+        'skills-delete-manual-skill'
+      );
+
+      aggregatedSkills = collectSkillTotals(currentState);
+      renderSkills();
     }
 
     function initSkillsPage() {
@@ -243,6 +367,11 @@
           sortMode = event.target.value || DEFAULT_SORT_MODE;
           renderSkills();
         });
+      }
+
+      const addButton = document.getElementById('addManualSkillBtn');
+      if (addButton) {
+        addButton.addEventListener('click', addManualSkill);
       }
 
       renderSkills();
