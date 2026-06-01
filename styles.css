@@ -504,6 +504,10 @@ body {
   margin-top: calc(var(--scoreboard-name-height) + 8px);
 }
 
+.home-scoreboard-card .scoreboard-diff {
+  min-width: min(9.5rem, 36vw);
+}
+
 .home-matchup-type-label {
   color: #fb923c;
   font-size: clamp(0.62rem, 1.6vw, 0.72rem);
@@ -511,15 +515,16 @@ body {
   left: 50%;
   letter-spacing: 0.11em;
   line-height: 1.05;
-  max-width: min(9rem, 34vw);
-  overflow-wrap: anywhere;
+  max-width: min(9.5rem, 36vw);
+  overflow-wrap: normal;
   pointer-events: none;
   position: absolute;
   text-align: center;
   text-shadow: 0 0 14px rgba(251, 146, 60, 0.35);
   text-transform: uppercase;
-  top: 0;
-  transform: translateX(-50%);
+  top: calc(var(--scoreboard-name-height) - 0.52rem);
+  transform: translate(-50%, -50%);
+  white-space: normal;
   z-index: 1;
 }
 
@@ -740,6 +745,16 @@ body {
   .home-scoreboard-card .matchup-scoreboard {
     /* Was 2 lines reserved; shrink it for mobile so names sit higher */
     --scoreboard-name-height: calc(1.1em * 1.5);
+  }
+
+  .home-scoreboard-card .scoreboard-diff {
+    min-width: min(8.8rem, 35vw);
+  }
+
+  .home-scoreboard-card .home-matchup-type-label {
+    font-size: clamp(0.54rem, 2.5vw, 0.62rem);
+    letter-spacing: 0.07em;
+    max-width: min(8.8rem, 35vw);
   }
 
   .home-scoreboard-card .scoreboard-record,
