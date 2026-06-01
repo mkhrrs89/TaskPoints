@@ -502,6 +502,23 @@ body {
   align-items: center;
   margin-top: calc(var(--scoreboard-name-height) + 8px);
 }
+
+.home-matchup-type-label {
+  color: #f97316;
+  font-size: clamp(0.62rem, 1.6vw, 0.72rem);
+  font-weight: 700;
+  letter-spacing: 0.11em;
+  line-height: 1.05;
+  max-width: 8.5rem;
+  overflow-wrap: anywhere;
+  text-align: center;
+  text-transform: uppercase;
+  text-shadow: 0 0 14px rgba(249, 115, 22, 0.35);
+}
+
+.home-matchup-type-label[hidden] {
+  display: none !important;
+}
 /* --- Middle diff stack (END) ------------------------------------------- */
 
 
