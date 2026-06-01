@@ -509,7 +509,7 @@ body {
 }
 
 .home-matchup-type-label {
-  color: #fb923c;
+  color: #fdba74;
   font-size: clamp(0.62rem, 1.6vw, 0.72rem);
   font-weight: 700;
   left: 50%;
@@ -520,9 +520,9 @@ body {
   pointer-events: none;
   position: absolute;
   text-align: center;
-  text-shadow: 0 0 14px rgba(251, 146, 60, 0.35);
+  text-shadow: 0 0 14px rgba(253, 186, 116, 0.35);
   text-transform: uppercase;
-  top: calc(var(--scoreboard-name-height) - 0.52rem);
+  top: calc(var(--scoreboard-name-height) + 0.16rem);
   transform: translate(-50%, -50%);
   white-space: normal;
   z-index: 1;
@@ -755,6 +755,7 @@ body {
     font-size: clamp(0.54rem, 2.5vw, 0.62rem);
     letter-spacing: 0.07em;
     max-width: min(8.8rem, 35vw);
+    top: calc(var(--scoreboard-name-height) + 0.2rem);
   }
 
   .home-scoreboard-card .scoreboard-record,
