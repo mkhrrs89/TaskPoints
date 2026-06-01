@@ -1324,12 +1324,14 @@ function runWeightVo2HistorySavePathAudit(state) {
   return { status: failures.length ? 'FAIL' : 'PASS', expected: 'Reminders, Weight, and VO2 Max histories survive page save paths', actual: failures.length ? `${failures.length} page adapter(s) dropped sentinel history` : 'All page adapters preserved reminders, weightHistory, and vo2MaxHistory', details: failures };
 }
 
-    function auditWorkHoursLast14Days(state, endDateKey = TaskPointsCore.todayKey()) {
+    function auditWorkHoursLast14Days(state, todayDateKey = TaskPointsCore.todayKey()) {
       const issues = [];
       const completions = Array.isArray(state?.completions) ? state.completions : [];
       const scoringSettings = TaskPointsCore.getScoringSettings(state);
 
-      const endDate = TaskPointsCore.fromKey(endDateKey);
+      const todayDate = TaskPointsCore.fromKey(todayDateKey);
+      const endDate = new Date(todayDate);
+      endDate.setDate(endDate.getDate() - 1);
       const recentDayKeys = Array.from({ length: WORK_HOURS_AUDIT_DAYS }, (_, idx) => {
         const d = new Date(endDate);
         d.setDate(d.getDate() - idx);
@@ -1913,12 +1915,12 @@ const actualTotal = round2(Number(derivedActualTotal) || 0);
         tips: 'Log a daily mood score, calorie entry, and work score for each day.'
       });
 
-      const workHoursAudit = auditWorkHoursLast14Days(state, dateKey);
+      const workHoursAudit = auditWorkHoursLast14Days(state);
       checks.push({
         id: 'work-hours-last-14-days',
-        title: 'Work Hours entries are valid over the last 14 days',
+        title: 'Work Hours entries are valid over the last 14 completed days',
         status: workHoursAudit.issues.length ? 'WARN' : 'PASS',
-        expected: `Each of the last ${workHoursAudit.days} days has a numeric Work Hours value between 0 and ${workHoursAudit.threshold}`,
+        expected: `Each of the last ${workHoursAudit.days} completed days has a numeric Work Hours value between 0 and ${workHoursAudit.threshold}`,
         actual: workHoursAudit.issues.length
           ? `${workHoursAudit.issues.length} issue(s)`
           : 'All Work Hours entries look valid',
