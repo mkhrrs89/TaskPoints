@@ -423,6 +423,73 @@ Nothing visible on the page is built here. === -->
     .metricEntryEdit{display:grid;grid-template-columns:1fr 1fr auto;gap:6px;align-items:center;width:100%}
     .metricEntryStatus{font-size:11px;color:#fca5a5;margin-top:6px}
     @media (max-width: 640px) { .metricEntryEdit{grid-template-columns:1fr 1fr} .metricEntryEdit .metricEntryActions{grid-column:1 / -1;justify-content:flex-end} }
+    .home-season-featured {
+      width: 100%;
+      display: grid;
+      justify-items: center;
+      text-align: center;
+      gap: 10px;
+      padding: 20px 16px;
+      background: transparent;
+    }
+
+    .home-season-featured-kicker {
+      color: #ffb56b;
+      font-size: 0.78rem;
+      font-weight: 900;
+      letter-spacing: 0.16em;
+      line-height: 1.2;
+      text-transform: uppercase;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      text-align: center;
+    }
+
+    .home-season-featured-divider {
+      opacity: 0.72;
+    }
+
+    .home-season-featured-title {
+      color: #f8fafc;
+      font-size: clamp(1.35rem, 4.5vw, 2rem);
+      font-weight: 900;
+      line-height: 1.18;
+      text-align: center;
+      max-width: 100%;
+    }
+
+    .home-season-featured-status {
+      color: #94a3b8;
+      font-size: 1.05rem;
+      font-weight: 600;
+      line-height: 1.25;
+      text-align: center;
+    }
+
+    @media (max-width: 640px) {
+      .home-season-featured {
+        padding: 18px 12px;
+        gap: 9px;
+      }
+
+      .home-season-featured-kicker {
+        font-size: 0.72rem;
+        letter-spacing: 0.13em;
+        gap: 6px;
+      }
+
+      .home-season-featured-title {
+        font-size: 1.35rem;
+      }
+
+      .home-season-featured-status {
+        font-size: 1rem;
+      }
+    }
+    
   </style>
   <link rel="preload" href="toolbar.js" as="script">
   <script src="toolbar.js" defer></script>
@@ -10919,18 +10986,29 @@ function renderHomeSeasonChampionshipCard(){
   const featured = TaskPointsCore.getFeaturedSeasonMatchup
     ? TaskPointsCore.getFeaturedSeasonMatchup(season, todayKeyStr, state)
     : null;
-  const featuredLine = featured
-    ? `${featured.title || 'Featured matchup'} — ${featured.roundName || 'Round'}${featured.gameNumber ? `, Game ${featured.gameNumber}` : ''}`
+    const featuredTitle = featured
+    ? (featured.title || 'Featured matchup')
     : 'Featured matchup will appear when tournament games are available.';
+
+  const featuredRoundLine = featured
+    ? `${featured.roundName || 'Round'}${featured.gameNumber ? `, Gm ${featured.gameNumber}` : ''}`
+    : '';
+
   const featuredDetail = featured
     ? `${featured.statusText || ''}${featured.isEliminationGame ? ' • Elimination game' : ''}`
     : '';
+
   mount.classList.remove('hidden');
   mount.innerHTML = `
     <section class="home-season-featured" aria-label="Featured Season Championship matchup">
-      <span class="home-season-label">Featured Matchup</span>
-      <strong>${escapeHtml(featuredLine)}</strong>
-      ${featuredDetail ? `<span class="muted text-sm">${escapeHtml(featuredDetail)}</span>` : ''}
+      <div class="home-season-featured-kicker">
+        <span>Featured Matchup</span>
+        ${featuredRoundLine ? `<span class="home-season-featured-divider">|</span><span>${escapeHtml(featuredRoundLine)}</span>` : ''}
+      </div>
+
+      <strong class="home-season-featured-title">${escapeHtml(featuredTitle)}</strong>
+
+      ${featuredDetail ? `<span class="home-season-featured-status">${escapeHtml(featuredDetail)}</span>` : ''}
     </section>
   `;
 }
