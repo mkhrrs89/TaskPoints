@@ -6800,6 +6800,52 @@ function addVice(){
 }
 
 
+function updateHistoricalHabitViceCompletionPointsForEditedItem(item, newPoints) {
+  if (!item || !Array.isArray(state.completions)) return 0;
+
+  const itemId = item.id;
+  const iceKeys = Array.isArray(item.iceKeys) ? item.iceKeys : [];
+
+  let changed = 0;
+
+  state.completions.forEach((c) => {
+    if (!c || c.habitId !== itemId) return;
+    if (c.source !== 'habit' && c.source !== 'vice') return;
+
+    const oldPts = Number(c.points) || 0;
+    let nextPts = Number(newPoints) || 0;
+
+    if (c.source === 'habit') {
+      const fraction = getHabitCompletionFraction(c);
+      if (fraction === 0.5) {
+        nextPts = nextPts * 0.5;
+      }
+
+      const isIcyDay = !!c.dayKey && iceKeys.includes(c.dayKey);
+      if (isIcyDay) {
+        nextPts = (Number(newPoints) || 0) + 0.5;
+      }
+    }
+
+    if (c.source === 'vice') {
+      // Current vice completions in this app are positive points when completed.
+      // Failed vice days appear to be stored in failedKeys and remove completions.
+      // So keep vice completion points positive using newPoints.
+      nextPts = Number(newPoints) || 0;
+    }
+
+    nextPts = Math.round((nextPts + Number.EPSILON) * 100) / 100;
+
+    if (Math.abs(oldPts - nextPts) > 0.0001) {
+      c.points = nextPts;
+      changed += 1;
+    }
+  });
+
+  if (changed) markCompletionsDirty();
+  return changed;
+}
+
 function saveHabitEdit(id,row){
   const h=state.habits.find(x=>x.id===id); if(!h) return;
   const nameInput=row.querySelector('input[data-field="name"]');
@@ -6809,10 +6855,28 @@ function saveHabitEdit(id,row){
   const halfPointEnabledInput = row.querySelector('input[data-field="half-point-enabled"]');
   const catInput=row.querySelector('[data-field="category"]');
 
-  const oldPoints = h.pointsPerDay || 0;
+  const oldPoints = Number(h.pointsPerDay) || 0;
+  const newPoints = Number(ptsInput?.value) || 0;
+  const pointsChanged = newPoints !== oldPoints;
+  const oldCategory = h.category || 'habit';
+  const newCategory = catInput ? (catInput.value || 'habit') : oldCategory;
+  const isHabitOrVice = newCategory === 'habit' || newCategory === 'vice' || oldCategory === 'habit' || oldCategory === 'vice';
 
-  h.name = nameInput.value.trim() || h.name;
-  h.pointsPerDay = Number(ptsInput.value)||0;
+  let retroactiveChoice = 'none';
+  if (pointsChanged && isHabitOrVice) {
+    const applyRetroactive = confirm('The point value changed. Do you want to retroactively update all past completions for this Habit/Vice to use the new point value?');
+
+    if (applyRetroactive) {
+      retroactiveChoice = 'yes';
+    } else {
+      const futureOnly = confirm('Keep past completions at their original point values and save only future completions?');
+      if (!futureOnly) return;
+      retroactiveChoice = 'no';
+    }
+  }
+
+  h.name = nameInput?.value.trim() || h.name;
+  h.pointsPerDay = newPoints;
   if (tagInput) h.tag = tagInput.value.trim();
   if (completeWeekInput) {
     const rawDaysPerCompleteWeek = completeWeekInput.value.trim();
@@ -6825,24 +6889,27 @@ function saveHabitEdit(id,row){
       }
     }
   }
-  h.category = catInput ? (catInput.value || 'habit') : (h.category || 'habit');
+  h.category = newCategory;
   if (halfPointEnabledInput) h.halfPointEnabled = halfPointEnabledInput.checked !== false;
   h.updatedAtISO = new Date().toISOString();
 
-  // update existing log entries
-  if (h.pointsPerDay !== oldPoints) {
-    const iceKeys = Array.isArray(h.iceKeys) ? h.iceKeys : [];
-    state.completions.forEach(c => {
-      if (c.source === 'habit' && c.habitId === id) {
-        const isIcyDay = !!c.dayKey && iceKeys.includes(c.dayKey);
-        c.points = isIcyDay ? (h.pointsPerDay + 0.5) : h.pointsPerDay;
-      }
-    });
+  if (retroactiveChoice === 'yes') {
+    updateHistoricalHabitViceCompletionPointsForEditedItem(h, newPoints);
   }
 
+  const category = h.category || 'habit';
+  let savePath;
+  if (pointsChanged && retroactiveChoice === 'yes') {
+    savePath = category === 'vice' ? 'vice-edit-points-retroactive' : 'habit-edit-points-retroactive';
+  } else if (pointsChanged && retroactiveChoice === 'no') {
+    savePath = category === 'vice' ? 'vice-edit-points-future-only' : 'habit-edit-points-future-only';
+  } else {
+    savePath = category === 'vice' ? 'vice-edit' : 'habit-edit';
+  }
+
+  save(savePath);
   editingHabitId=null;
-  save(); 
-  renderHabits(); 
+  renderHabits();
   renderVices();
   renderStats();
 }
