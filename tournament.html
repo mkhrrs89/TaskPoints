@@ -77,7 +77,7 @@
 
     <section class="glass">
       <h2 class="text-lg font-semibold mb-1">Tournament</h2>
-      <p class="muted text-sm mb-4">Blank skeleton page for future tournament bracket features.</p>
+      <p class="muted text-sm mb-4">Current Season tournament bracket view.</p>
 
       <div class="tournament-bracket-scroll" aria-label="Tournament bracket skeleton" role="region">
         <div class="tournament-bracket">
@@ -156,5 +156,280 @@
   </div>
 
   <script src="scoring_core.js"></script>
+  <script>
+(function(){
+  const STORAGE_KEY = (window.TaskPointsCore && TaskPointsCore.STORAGE_KEY) || 'taskpoints_v1';
+  const tournamentImageUrlCache = new Map();
+  const tournamentImageLoadPromises = new Map();
+
+  function escapeHtml(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function loadTournamentState() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      if (window.TaskPointsCore && typeof TaskPointsCore.normalizeState === 'function') {
+        return TaskPointsCore.normalizeState(parsed || {});
+      }
+      return parsed || {};
+    } catch (error) {
+      console.warn('Failed to load tournament state', error);
+      return {};
+    }
+  }
+
+  function getTournamentPlayerImageId(state, playerId) {
+    if (!playerId) return '';
+    if (playerId === 'YOU') return typeof state?.youImageId === 'string' ? state.youImageId : '';
+    const players = Array.isArray(state?.players) ? state.players : [];
+    const player = players.find((entry) => entry?.id === playerId);
+    if (typeof player?.imageId === 'string' && player.imageId) return player.imageId;
+
+    const seeds = Array.isArray(state?.currentSeason?.seeds) ? state.currentSeason.seeds : [];
+    const seed = seeds.find((entry) => (entry?.playerId || entry?.id) === playerId);
+    if (typeof seed?.imageId === 'string') return seed.imageId;
+
+    const series = getSeriesEntries(state?.currentSeason || {});
+    for (const entry of series) {
+      if (entry?.playerAId === playerId && typeof entry.playerAImageId === 'string') return entry.playerAImageId;
+      if (entry?.playerBId === playerId && typeof entry.playerBImageId === 'string') return entry.playerBImageId;
+    }
+    return '';
+  }
+
+  function getSeasonSeedPlayerIdForTournament(state, seedNumber) {
+    const seeds = Array.isArray(state?.currentSeason?.seeds) ? state.currentSeason.seeds : [];
+    const row = seeds.find((seed) => Number(seed.seed) === Number(seedNumber));
+    return row?.playerId || row?.id || '';
+  }
+
+  async function loadTournamentImageUrl(imageId) {
+    if (!imageId) return '';
+    if (tournamentImageUrlCache.has(imageId)) return tournamentImageUrlCache.get(imageId);
+    if (tournamentImageLoadPromises.has(imageId)) return tournamentImageLoadPromises.get(imageId);
+
+    const promise = (async () => {
+      try {
+        if (!window.TaskPointsCore?.getImageBlob) return '';
+        const blob = await TaskPointsCore.getImageBlob(imageId);
+        if (!blob) return '';
+        const url = URL.createObjectURL(blob);
+        tournamentImageUrlCache.set(imageId, url);
+        return url;
+      } catch (error) {
+        console.warn('Failed to load tournament player image', error);
+        return '';
+      } finally {
+        tournamentImageLoadPromises.delete(imageId);
+      }
+    })();
+
+    tournamentImageLoadPromises.set(imageId, promise);
+    return promise;
+  }
+
+  async function hydrateTournamentImages(root = document) {
+    const slots = Array.from(root.querySelectorAll('.tourney-player-image-slot[data-tourney-image-id]'));
+    const imageIds = Array.from(new Set(slots.map((slot) => slot.getAttribute('data-tourney-image-id') || '').filter(Boolean)));
+
+    await Promise.all(imageIds.map((imageId) => loadTournamentImageUrl(imageId)));
+
+    slots.forEach((slot) => {
+      const imageId = slot.getAttribute('data-tourney-image-id') || '';
+      const url = tournamentImageUrlCache.get(imageId);
+      if (!url) return;
+
+      const img = slot.querySelector('img.tourney-player-image');
+      if (!img) return;
+
+      img.src = url;
+      img.classList.remove('hidden');
+    });
+  }
+
+  function getSeriesEntries(season) {
+    const series = season?.series;
+    if (Array.isArray(series)) return series.filter(Boolean);
+    if (series && typeof series === 'object') return Object.values(series).filter(Boolean);
+    return [];
+  }
+
+  function seriesSortValue(series, index) {
+    const candidates = [series?.sortOrder, series?.bracketIndex, series?.matchupIndex, series?.gameIndex, series?.slotIndex, series?.seriesIndex];
+    const numeric = candidates.map(Number).find((value) => Number.isFinite(value));
+    return Number.isFinite(numeric) ? numeric : index + 1;
+  }
+
+  function getSeriesEntriesForRound(season, roundId) {
+    return getSeriesEntries(season)
+      .filter((series) => series?.roundId === roundId)
+      .map((series, index) => ({ series, order: seriesSortValue(series, index), id: String(series?.id || '') }))
+      .sort((a, b) => (a.order - b.order) || a.id.localeCompare(b.id))
+      .map((entry) => entry.series);
+  }
+
+  function getSeriesByRoundAndIndex(season, roundId, seriesIndex) {
+    return getSeriesEntriesForRound(season, roundId).find((series) => Number(series.seriesIndex) === Number(seriesIndex))
+      || getSeriesEntriesForRound(season, roundId)[Number(seriesIndex) - 1]
+      || null;
+  }
+
+  function getPlayerIdForSeriesSlot(series, slot) {
+    const prefix = slot === 'B' ? 'B' : 'A';
+    return series?.[`player${prefix}Id`] || '';
+  }
+
+  function getSeriesSeedForSlot(series, slot) {
+    const prefix = slot === 'B' ? 'B' : 'A';
+    const seed = Number(series?.[`player${prefix}Seed`]);
+    return Number.isFinite(seed) ? seed : null;
+  }
+
+  function hasOfficialSeasonSeriesData(season) {
+    return getSeriesEntries(season).some((series) => series?.roundId && (series.playerAId || series.playerBId || series.placeholderA || series.placeholderB));
+  }
+
+  function getSeedNumberFromTournamentSlot(slot) {
+    const seedText = slot.closest('.tournament-slot-row')?.querySelector('.tournament-seed')?.textContent || '';
+    const seedNumber = Number(seedText.trim());
+    return Number.isFinite(seedNumber) && seedNumber > 0 ? seedNumber : null;
+  }
+
+  function findRoundOf32SeriesForVisualMatch(season, matchup) {
+    const topSlot = matchup?.querySelector?.('.tournament-slot') || null;
+    const topSeed = getSeedNumberFromTournamentSlot(topSlot);
+    const roundOf32 = getSeriesEntriesForRound(season, 'round_of_32');
+    if (!roundOf32.length) return null;
+    if (topSeed != null) {
+      const bySeed = roundOf32.find((series) => getSeriesSeedForSlot(series, 'A') === topSeed || getSeriesSeedForSlot(series, 'B') === topSeed);
+      if (bySeed) return bySeed;
+    }
+    const matchups = Array.from(matchup?.parentElement?.querySelectorAll?.('.tournament-matchup') || []);
+    const matchupIndex = Math.max(0, matchups.indexOf(matchup));
+    return roundOf32[matchupIndex] || null;
+  }
+
+  function getTournamentSlotSeriesMapping(state, slot, roundElement, index) {
+    const season = state?.currentSeason || null;
+    if (!season || !hasOfficialSeasonSeriesData(season)) return null;
+
+    if (roundElement?.classList.contains('tournament-round-1')) {
+      const matchup = slot.closest('.tournament-matchup');
+      const series = findRoundOf32SeriesForVisualMatch(season, matchup);
+      if (!series) return null;
+      const matchupSlots = Array.from(matchup?.querySelectorAll?.('.tournament-slot') || []);
+      const topSeed = getSeedNumberFromTournamentSlot(matchupSlots[0]);
+      const topSlot = topSeed === getSeriesSeedForSlot(series, 'B') ? 'B' : 'A';
+      const slotIndex = Math.max(0, matchupSlots.indexOf(slot));
+      const competitorSlot = slotIndex === 0 ? topSlot : (topSlot === 'A' ? 'B' : 'A');
+      return { series, competitorSlot, blocksSeedFallback: true };
+    }
+
+    if (roundElement?.classList.contains('tournament-round-2')) {
+      const series = getSeriesByRoundAndIndex(season, 'sweet_16', Math.floor(index / 2) + 1);
+      if (!series) return null;
+      return { series, competitorSlot: index % 2 === 0 ? 'A' : 'B', blocksSeedFallback: true };
+    }
+
+    if (roundElement?.classList.contains('tournament-round-3')) {
+      const series = getSeriesByRoundAndIndex(season, 'quarterfinals', Math.floor(index / 2) + 1);
+      if (!series) return null;
+      return { series, competitorSlot: index % 2 === 0 ? 'A' : 'B', blocksSeedFallback: true };
+    }
+
+    if (roundElement?.classList.contains('tournament-round-4')) {
+      const series = getSeriesByRoundAndIndex(season, 'semifinals', Math.floor(index / 2) + 1);
+      if (!series) return null;
+      return { series, competitorSlot: index % 2 === 0 ? 'A' : 'B', blocksSeedFallback: true };
+    }
+
+    if (roundElement?.classList.contains('tournament-round-5')) {
+      const finals = getSeriesByRoundAndIndex(season, 'finals', 1);
+      if (!finals) return null;
+      return { series: finals, competitorSlot: finals.winnerId === finals.playerBId ? 'B' : 'A', championOnly: true, blocksSeedFallback: true };
+    }
+
+    return null;
+  }
+
+  function applyTournamentSeriesSlotMetadata(slot, mapping) {
+    if (!mapping?.series) return;
+    slot.setAttribute('data-season-series-id', mapping.series.id || '');
+    slot.setAttribute('data-season-round-id', mapping.series.roundId || '');
+    slot.setAttribute('data-series-index', String(mapping.series.seriesIndex || ''));
+    slot.setAttribute('data-competitor-slot', mapping.competitorSlot || '');
+  }
+
+  function resolveTournamentSlotPlayerIdFromSeasonSeries(state, slot, roundElement, index) {
+    const mapping = getTournamentSlotSeriesMapping(state, slot, roundElement, index);
+    if (!mapping) return { mapped: false, playerId: '' };
+    applyTournamentSeriesSlotMetadata(slot, mapping);
+    if (mapping.championOnly) return { mapped: true, playerId: mapping.series?.winnerId || '' };
+    return { mapped: true, playerId: getPlayerIdForSeriesSlot(mapping.series, mapping.competitorSlot) };
+  }
+
+  function resolveTournamentSlotPlayerId(state, slot, roundElement, index) {
+    const live = resolveTournamentSlotPlayerIdFromSeasonSeries(state, slot, roundElement, index);
+    if (live.mapped) return live.playerId || '';
+
+    const seedNumber = getSeedNumberFromTournamentSlot(slot);
+    if (seedNumber != null) return getSeasonSeedPlayerIdForTournament(state, seedNumber);
+
+    return '';
+  }
+
+  function applyTournamentImageSlot(slot, state, playerId) {
+    slot.removeAttribute('data-tourney-player-id');
+    slot.removeAttribute('data-player-id');
+    slot.removeAttribute('data-tourney-image-id');
+    slot.removeAttribute('data-image-id');
+    slot.innerHTML = '';
+
+    if (!playerId) {
+      slot.setAttribute('aria-hidden', 'true');
+      return;
+    }
+
+    slot.setAttribute('data-tourney-player-id', playerId);
+    slot.setAttribute('data-player-id', playerId);
+    slot.setAttribute('aria-hidden', 'false');
+
+    const imageId = getTournamentPlayerImageId(state, playerId);
+    if (!imageId) return;
+
+    slot.setAttribute('data-tourney-image-id', imageId);
+    slot.setAttribute('data-image-id', imageId);
+    slot.innerHTML = `<div class="tourney-player-image-slot" data-tourney-player-id="${escapeHtml(playerId)}" data-tourney-image-id="${escapeHtml(imageId)}"><img class="tourney-player-image hidden" alt=""></div>`;
+  }
+
+  function renderTournamentImages() {
+    const state = loadTournamentState();
+    if (!state?.currentSeason) return;
+
+    document.querySelectorAll('.tournament-round').forEach((roundElement) => {
+      const slots = Array.from(roundElement.querySelectorAll('.tournament-slot'));
+      slots.forEach((slot, index) => {
+        const playerId = resolveTournamentSlotPlayerId(state, slot, roundElement, index);
+        applyTournamentImageSlot(slot, state, playerId);
+      });
+    });
+
+    hydrateTournamentImages(document);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', renderTournamentImages);
+  } else {
+    renderTournamentImages();
+  }
+})();
+  </script>
 </body>
 </html>
