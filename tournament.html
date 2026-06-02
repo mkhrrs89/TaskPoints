@@ -37,7 +37,7 @@
           </div>
           <div class="min-w-0">
             <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight flex items-center gap-2 page-title">Tournament</h1>
-            <p class="muted text-sm">Tournament brackets and tournament views will live here.</p>
+            <p class="muted text-sm">Season Championship bracket view.</p>
           </div>
         </div>
 
@@ -79,78 +79,8 @@
       <h2 class="text-lg font-semibold mb-1">Tournament</h2>
       <p class="muted text-sm mb-4">Current Season tournament bracket view.</p>
 
-      <div class="tournament-bracket-scroll" aria-label="Tournament bracket skeleton" role="region">
-        <div class="tournament-bracket">
-          <div class="tournament-round tournament-round-1" aria-label="Round 1">
-            <div class="tournament-matchup">
-              <div class="tournament-slot-row bracket-row-1"><span class="tournament-seed">1</span><div class="tournament-slot" aria-hidden="true"></div></div>
-              <div class="tournament-slot-row bracket-row-2"><span class="tournament-seed">16</span><div class="tournament-slot" aria-hidden="true"></div></div>
-            </div>
-            <div class="tournament-matchup">
-              <div class="tournament-slot-row bracket-row-3"><span class="tournament-seed">8</span><div class="tournament-slot" aria-hidden="true"></div></div>
-              <div class="tournament-slot-row bracket-row-4"><span class="tournament-seed">9</span><div class="tournament-slot" aria-hidden="true"></div></div>
-            </div>
-            <div class="tournament-matchup">
-              <div class="tournament-slot-row bracket-row-5"><span class="tournament-seed">4</span><div class="tournament-slot" aria-hidden="true"></div></div>
-              <div class="tournament-slot-row bracket-row-6"><span class="tournament-seed">13</span><div class="tournament-slot" aria-hidden="true"></div></div>
-            </div>
-            <div class="tournament-matchup">
-              <div class="tournament-slot-row bracket-row-7"><span class="tournament-seed">5</span><div class="tournament-slot" aria-hidden="true"></div></div>
-              <div class="tournament-slot-row bracket-row-8"><span class="tournament-seed">12</span><div class="tournament-slot" aria-hidden="true"></div></div>
-            </div>
-            <div class="tournament-matchup">
-              <div class="tournament-slot-row bracket-row-9"><span class="tournament-seed">3</span><div class="tournament-slot" aria-hidden="true"></div></div>
-              <div class="tournament-slot-row bracket-row-10"><span class="tournament-seed">14</span><div class="tournament-slot" aria-hidden="true"></div></div>
-            </div>
-            <div class="tournament-matchup">
-              <div class="tournament-slot-row bracket-row-11"><span class="tournament-seed">6</span><div class="tournament-slot" aria-hidden="true"></div></div>
-              <div class="tournament-slot-row bracket-row-12"><span class="tournament-seed">11</span><div class="tournament-slot" aria-hidden="true"></div></div>
-            </div>
-            <div class="tournament-matchup">
-              <div class="tournament-slot-row bracket-row-13"><span class="tournament-seed">2</span><div class="tournament-slot" aria-hidden="true"></div></div>
-              <div class="tournament-slot-row bracket-row-14"><span class="tournament-seed">15</span><div class="tournament-slot" aria-hidden="true"></div></div>
-            </div>
-            <div class="tournament-matchup">
-              <div class="tournament-slot-row bracket-row-15"><span class="tournament-seed">7</span><div class="tournament-slot" aria-hidden="true"></div></div>
-              <div class="tournament-slot-row bracket-row-16"><span class="tournament-seed">10</span><div class="tournament-slot" aria-hidden="true"></div></div>
-            </div>
-          </div>
-
-          <div class="tournament-info-col" data-info-column="1" data-round-info="round-1-to-round-2" aria-hidden="true"></div>
-
-          <div class="tournament-round tournament-round-2" aria-label="Round 2">
-            <div class="tournament-slot bracket-row-2" aria-hidden="true"></div>
-            <div class="tournament-slot bracket-row-4" aria-hidden="true"></div>
-            <div class="tournament-slot bracket-row-6" aria-hidden="true"></div>
-            <div class="tournament-slot bracket-row-8" aria-hidden="true"></div>
-            <div class="tournament-slot bracket-row-10" aria-hidden="true"></div>
-            <div class="tournament-slot bracket-row-12" aria-hidden="true"></div>
-            <div class="tournament-slot bracket-row-14" aria-hidden="true"></div>
-            <div class="tournament-slot bracket-row-16" aria-hidden="true"></div>
-          </div>
-
-          <div class="tournament-info-col" data-info-column="2" data-round-info="round-2-to-round-3" aria-hidden="true"></div>
-
-          <div class="tournament-round tournament-round-3" aria-label="Round 3">
-            <div class="tournament-slot bracket-row-3" aria-hidden="true"></div>
-            <div class="tournament-slot bracket-row-7" aria-hidden="true"></div>
-            <div class="tournament-slot bracket-row-11" aria-hidden="true"></div>
-            <div class="tournament-slot bracket-row-15" aria-hidden="true"></div>
-          </div>
-
-          <div class="tournament-info-col" data-info-column="3" data-round-info="round-3-to-finals" aria-hidden="true"></div>
-
-          <div class="tournament-round tournament-round-4" aria-label="Finals">
-            <div class="tournament-slot bracket-row-6" aria-hidden="true"></div>
-            <div class="tournament-slot bracket-row-10" aria-hidden="true"></div>
-          </div>
-
-          <div class="tournament-info-col" data-info-column="4" data-round-info="finals-to-champion" aria-hidden="true"></div>
-
-          <div class="tournament-round tournament-round-5" aria-label="Champion">
-            <div class="tournament-slot tournament-slot-champion bracket-row-8" aria-hidden="true"></div>
-          </div>
-        </div>
+      <div class="tournament-bracket-scroll" aria-label="Season Championship bracket" role="region">
+        <div class="tournament-bracket" id="tournamentBracket" data-bracket-format="official_34_player_championship"></div>
       </div>
     </section>
   </div>
@@ -161,6 +91,173 @@
   const STORAGE_KEY = (window.TaskPointsCore && TaskPointsCore.STORAGE_KEY) || 'taskpoints_v1';
   const tournamentImageUrlCache = new Map();
   const tournamentImageLoadPromises = new Map();
+
+  const TOURNAMENT_PLAY_IN_PAIRINGS = [
+    [31, 34],
+    [32, 33],
+  ];
+
+  const TOURNAMENT_ROUND_OF_32_PAIRINGS = [
+    [1, 'play_in_low'],
+    [16, 17],
+    [8, 25],
+    [9, 24],
+    [4, 29],
+    [13, 20],
+    [5, 28],
+    [12, 21],
+    [2, 'play_in_other'],
+    [15, 18],
+    [7, 26],
+    [10, 23],
+    [3, 30],
+    [14, 19],
+    [6, 27],
+    [11, 22],
+  ];
+
+  const TOURNAMENT_PLACEHOLDER_LABELS = {
+    play_in_low: 'PI',
+    play_in_other: 'PI',
+  };
+
+  const TOURNAMENT_FUTURE_ROUNDS = [
+    { roundId: 'sweet_16', label: 'Sweet 16', className: 'tournament-round-3', seriesCount: 8, rows: [2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32] },
+    { roundId: 'quarterfinals', label: 'Quarterfinals', className: 'tournament-round-4', seriesCount: 4, rows: [4, 8, 12, 16, 20, 24, 28, 32] },
+    { roundId: 'semifinals', label: 'Semifinals', className: 'tournament-round-5', seriesCount: 2, rows: [8, 16, 24, 32] },
+    { roundId: 'finals', label: 'Finals', className: 'tournament-round-6', seriesCount: 1, rows: [16, 24] },
+  ];
+
+  function createTournamentElement(tagName, attributes = {}, classNames = []) {
+    const element = document.createElement(tagName);
+    classNames.filter(Boolean).forEach((className) => element.classList.add(className));
+    Object.entries(attributes).forEach(([key, value]) => {
+      if (value == null || value === '') return;
+      element.setAttribute(key, String(value));
+    });
+    return element;
+  }
+
+  function createTournamentInfoColumn(index, label) {
+    return createTournamentElement('div', {
+      'data-info-column': index,
+      'data-round-info': label,
+      'aria-hidden': 'true',
+    }, ['tournament-info-col']);
+  }
+
+  function createTournamentSlot({ roundId, seriesIndex, competitorSlot, row, seed = null, placeholderKey = '', champion = false }) {
+    const attrs = {
+      'aria-hidden': 'true',
+      'data-round-id': roundId,
+      'data-series-index': seriesIndex,
+      'data-competitor-slot': competitorSlot,
+    };
+    if (seed != null) attrs['data-seed'] = seed;
+    if (placeholderKey) attrs['data-placeholder-key'] = placeholderKey;
+    const slot = createTournamentElement('div', attrs, ['tournament-slot', `bracket-row-${row}`]);
+    if (champion) slot.classList.add('tournament-slot-champion');
+    return slot;
+  }
+
+  function createTournamentSlotRow(slotOptions) {
+    const row = createTournamentElement('div', {}, ['tournament-slot-row', `bracket-row-${slotOptions.row}`]);
+    const label = slotOptions.seed != null ? String(slotOptions.seed) : (TOURNAMENT_PLACEHOLDER_LABELS[slotOptions.placeholderKey] || '');
+    row.appendChild(createTournamentElement('span', {}, ['tournament-seed']));
+    row.querySelector('.tournament-seed').textContent = label;
+    row.appendChild(createTournamentSlot(slotOptions));
+    return row;
+  }
+
+  function createTournamentRound(roundId, label, className) {
+    return createTournamentElement('div', { 'aria-label': label, 'data-round-id': roundId }, ['tournament-round', className]);
+  }
+
+  function renderPlayInRound() {
+    const round = createTournamentRound('play_in', 'Play-In', 'tournament-round-play-in');
+    TOURNAMENT_PLAY_IN_PAIRINGS.forEach((pair, index) => {
+      const matchup = createTournamentElement('div', { 'data-series-index': index + 1 }, ['tournament-matchup', 'tournament-play-in-matchup']);
+      const baseRow = index === 0 ? 1 : 17;
+      pair.forEach((seed, slotIndex) => {
+        matchup.appendChild(createTournamentSlotRow({
+          roundId: 'play_in',
+          seriesIndex: index + 1,
+          competitorSlot: slotIndex === 0 ? 'A' : 'B',
+          row: baseRow + slotIndex,
+          seed,
+        }));
+      });
+      round.appendChild(matchup);
+    });
+    return round;
+  }
+
+  function renderRoundOf32() {
+    const round = createTournamentRound('round_of_32', 'Round of 32', 'tournament-round-2');
+    TOURNAMENT_ROUND_OF_32_PAIRINGS.forEach((pair, index) => {
+      const matchup = createTournamentElement('div', { 'data-series-index': index + 1 }, ['tournament-matchup']);
+      pair.forEach((competitor, slotIndex) => {
+        const fixedSeed = typeof competitor === 'number' ? competitor : null;
+        const placeholderKey = typeof competitor === 'string' ? competitor : '';
+        matchup.appendChild(createTournamentSlotRow({
+          roundId: 'round_of_32',
+          seriesIndex: index + 1,
+          competitorSlot: slotIndex === 0 ? 'A' : 'B',
+          row: index * 2 + slotIndex + 1,
+          seed: fixedSeed,
+          placeholderKey,
+        }));
+      });
+      round.appendChild(matchup);
+    });
+    return round;
+  }
+
+  function renderFutureTournamentRound(config) {
+    const round = createTournamentRound(config.roundId, config.label, config.className);
+    for (let seriesIndex = 1; seriesIndex <= config.seriesCount; seriesIndex += 1) {
+      ['A', 'B'].forEach((competitorSlot, slotOffset) => {
+        const row = config.rows[(seriesIndex - 1) * 2 + slotOffset];
+        round.appendChild(createTournamentSlot({
+          roundId: config.roundId,
+          seriesIndex,
+          competitorSlot,
+          row,
+        }));
+      });
+    }
+    return round;
+  }
+
+  function renderChampionRound() {
+    const round = createTournamentRound('champion', 'Champion', 'tournament-round-7');
+    round.appendChild(createTournamentSlot({
+      roundId: 'champion',
+      seriesIndex: 1,
+      competitorSlot: 'winner',
+      row: 20,
+      champion: true,
+    }));
+    return round;
+  }
+
+  function renderTournamentBracket() {
+    const bracket = document.getElementById('tournamentBracket');
+    if (!bracket) return;
+
+    bracket.innerHTML = '';
+    bracket.appendChild(renderPlayInRound());
+    bracket.appendChild(createTournamentInfoColumn(1, 'play-in-to-round-of-32'));
+    bracket.appendChild(renderRoundOf32());
+
+    TOURNAMENT_FUTURE_ROUNDS.forEach((roundConfig, index) => {
+      bracket.appendChild(createTournamentInfoColumn(index + 2, `${index === 0 ? 'round-of-32' : TOURNAMENT_FUTURE_ROUNDS[index - 1].roundId}-to-${roundConfig.roundId}`));
+      bracket.appendChild(renderFutureTournamentRound(roundConfig));
+    });
+
+    bracket.appendChild(createTournamentInfoColumn(6, 'finals-to-champion'));
+    bracket.appendChild(renderChampionRound());
+  }
 
   function escapeHtml(value) {
     return String(value ?? '')
@@ -297,66 +394,35 @@
   }
 
   function getSeedNumberFromTournamentSlot(slot) {
+    const dataSeed = Number(slot?.getAttribute?.('data-seed'));
+    if (Number.isFinite(dataSeed) && dataSeed > 0) return dataSeed;
+
     const seedText = slot.closest('.tournament-slot-row')?.querySelector('.tournament-seed')?.textContent || '';
     const seedNumber = Number(seedText.trim());
     return Number.isFinite(seedNumber) && seedNumber > 0 ? seedNumber : null;
   }
 
-  function findRoundOf32SeriesForVisualMatch(season, matchup) {
-    const topSlot = matchup?.querySelector?.('.tournament-slot') || null;
-    const topSeed = getSeedNumberFromTournamentSlot(topSlot);
-    const roundOf32 = getSeriesEntriesForRound(season, 'round_of_32');
-    if (!roundOf32.length) return null;
-    if (topSeed != null) {
-      const bySeed = roundOf32.find((series) => getSeriesSeedForSlot(series, 'A') === topSeed || getSeriesSeedForSlot(series, 'B') === topSeed);
-      if (bySeed) return bySeed;
-    }
-    const matchups = Array.from(matchup?.parentElement?.querySelectorAll?.('.tournament-matchup') || []);
-    const matchupIndex = Math.max(0, matchups.indexOf(matchup));
-    return roundOf32[matchupIndex] || null;
-  }
-
-  function getTournamentSlotSeriesMapping(state, slot, roundElement, index) {
+  function getTournamentSlotSeriesMapping(state, slot) {
     const season = state?.currentSeason || null;
     if (!season || !hasOfficialSeasonSeriesData(season)) return null;
 
-    if (roundElement?.classList.contains('tournament-round-1')) {
-      const matchup = slot.closest('.tournament-matchup');
-      const series = findRoundOf32SeriesForVisualMatch(season, matchup);
-      if (!series) return null;
-      const matchupSlots = Array.from(matchup?.querySelectorAll?.('.tournament-slot') || []);
-      const topSeed = getSeedNumberFromTournamentSlot(matchupSlots[0]);
-      const topSlot = topSeed === getSeriesSeedForSlot(series, 'B') ? 'B' : 'A';
-      const slotIndex = Math.max(0, matchupSlots.indexOf(slot));
-      const competitorSlot = slotIndex === 0 ? topSlot : (topSlot === 'A' ? 'B' : 'A');
-      return { series, competitorSlot, blocksSeedFallback: true };
-    }
+    const roundId = slot?.getAttribute?.('data-round-id') || '';
+    const seriesIndex = Number(slot?.getAttribute?.('data-series-index')) || 0;
+    const competitorSlot = slot?.getAttribute?.('data-competitor-slot') || '';
 
-    if (roundElement?.classList.contains('tournament-round-2')) {
-      const series = getSeriesByRoundAndIndex(season, 'sweet_16', Math.floor(index / 2) + 1);
-      if (!series) return null;
-      return { series, competitorSlot: index % 2 === 0 ? 'A' : 'B', blocksSeedFallback: true };
-    }
-
-    if (roundElement?.classList.contains('tournament-round-3')) {
-      const series = getSeriesByRoundAndIndex(season, 'quarterfinals', Math.floor(index / 2) + 1);
-      if (!series) return null;
-      return { series, competitorSlot: index % 2 === 0 ? 'A' : 'B', blocksSeedFallback: true };
-    }
-
-    if (roundElement?.classList.contains('tournament-round-4')) {
-      const series = getSeriesByRoundAndIndex(season, 'semifinals', Math.floor(index / 2) + 1);
-      if (!series) return null;
-      return { series, competitorSlot: index % 2 === 0 ? 'A' : 'B', blocksSeedFallback: true };
-    }
-
-    if (roundElement?.classList.contains('tournament-round-5')) {
+    if (roundId === 'champion') {
       const finals = getSeriesByRoundAndIndex(season, 'finals', 1);
       if (!finals) return null;
-      return { series: finals, competitorSlot: finals.winnerId === finals.playerBId ? 'B' : 'A', championOnly: true, blocksSeedFallback: true };
+      const winnerSlot = finals.winnerId === finals.playerBId ? 'B' : 'A';
+      return { series: finals, competitorSlot: winnerSlot, championOnly: true, blocksSeedFallback: true };
     }
 
-    return null;
+    if (!roundId || !seriesIndex || !['A', 'B'].includes(competitorSlot)) return null;
+
+    const series = getSeriesByRoundAndIndex(season, roundId, seriesIndex);
+    if (!series) return null;
+
+    return { series, competitorSlot, blocksSeedFallback: true };
   }
 
   function applyTournamentSeriesSlotMetadata(slot, mapping) {
@@ -367,16 +433,16 @@
     slot.setAttribute('data-competitor-slot', mapping.competitorSlot || '');
   }
 
-  function resolveTournamentSlotPlayerIdFromSeasonSeries(state, slot, roundElement, index) {
-    const mapping = getTournamentSlotSeriesMapping(state, slot, roundElement, index);
+  function resolveTournamentSlotPlayerIdFromSeasonSeries(state, slot) {
+    const mapping = getTournamentSlotSeriesMapping(state, slot);
     if (!mapping) return { mapped: false, playerId: '' };
     applyTournamentSeriesSlotMetadata(slot, mapping);
     if (mapping.championOnly) return { mapped: true, playerId: mapping.series?.winnerId || '' };
     return { mapped: true, playerId: getPlayerIdForSeriesSlot(mapping.series, mapping.competitorSlot) };
   }
 
-  function resolveTournamentSlotPlayerId(state, slot, roundElement, index) {
-    const live = resolveTournamentSlotPlayerIdFromSeasonSeries(state, slot, roundElement, index);
+  function resolveTournamentSlotPlayerId(state, slot) {
+    const live = resolveTournamentSlotPlayerIdFromSeasonSeries(state, slot);
     if (live.mapped) return live.playerId || '';
 
     const seedNumber = getSeedNumberFromTournamentSlot(slot);
@@ -416,7 +482,7 @@
     document.querySelectorAll('.tournament-round').forEach((roundElement) => {
       const slots = Array.from(roundElement.querySelectorAll('.tournament-slot'));
       slots.forEach((slot, index) => {
-        const playerId = resolveTournamentSlotPlayerId(state, slot, roundElement, index);
+        const playerId = resolveTournamentSlotPlayerId(state, slot);
         applyTournamentImageSlot(slot, state, playerId);
       });
     });
@@ -424,10 +490,15 @@
     hydrateTournamentImages(document);
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', renderTournamentImages);
-  } else {
+  function initializeTournamentPage() {
+    renderTournamentBracket();
     renderTournamentImages();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initializeTournamentPage);
+  } else {
+    initializeTournamentPage();
   }
 })();
   </script>
