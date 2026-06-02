@@ -9,17 +9,39 @@
   <link rel="stylesheet" href="assets/tailwind.css">
   <link rel="stylesheet" href="styles.css" />
   <style>
-    .skill-bar-cell {
-      position: relative;
-      overflow: hidden;
+    .skills-table-wrap {
+      border-color: rgba(148, 163, 184, 0.28) !important;
     }
 
-    .skill-bar-fill {
-      position: absolute;
-      inset: 0 auto 0 0;
-      opacity: 0.42;
-      z-index: 0;
-      pointer-events: none;
+    .skills-table thead tr,
+    .skills-table tbody tr {
+      border-color: rgba(148, 163, 184, 0.22) !important;
+    }
+
+    .skills-table th,
+    .skills-table td {
+      border-color: rgba(148, 163, 184, 0.18) !important;
+      background: transparent;
+    }
+
+    .skills-table th + th,
+    .skills-table td + td {
+      border-left: 1px solid rgba(148, 163, 184, 0.18);
+    }
+
+    .skill-row {
+      cursor: pointer;
+      background-clip: padding-box;
+    }
+
+    .skill-row:hover td,
+    .skill-row:focus-visible td {
+      box-shadow: inset 0 0 0 9999px rgba(255, 255, 255, 0.025);
+    }
+
+    .skill-row:focus-visible {
+      outline: 2px solid rgba(45, 212, 191, 0.7);
+      outline-offset: -2px;
     }
 
     .skill-bar-label {
@@ -127,8 +149,8 @@
           <span id="skillsCount" class="text-xs muted"></span>
         </div>
       </div>
-      <div class="rounded-xl border border-slate-700/70 bg-slate-900/35 overflow-hidden">
-        <table class="w-full text-left">
+      <div class="skills-table-wrap rounded-xl border border-slate-700/70 bg-slate-900/35 overflow-hidden">
+        <table class="skills-table w-full text-left">
           <thead>
             <tr class="border-b border-slate-700/70 bg-slate-900/55">
               <th scope="col" class="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-300">Skill</th>
@@ -216,6 +238,47 @@
       };
     }
 
+    function hexToRgba(hex, alpha = 0.42) {
+      const normalized = normalizeColor(hex, DEFAULT_SKILLS_BAR_COLOR);
+      let raw = normalized.slice(1);
+      if (raw.length === 3) raw = raw.split('').map((character) => character + character).join('');
+      const red = parseInt(raw.slice(0, 2), 16);
+      const green = parseInt(raw.slice(2, 4), 16);
+      const blue = parseInt(raw.slice(4, 6), 16);
+      return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+    }
+
+    function getManualSkillOverrides(state) {
+      return state?.manualSkillOverrides &&
+        typeof state.manualSkillOverrides === 'object' &&
+        !Array.isArray(state.manualSkillOverrides)
+        ? state.manualSkillOverrides
+        : {};
+    }
+
+    function getSkillOverride(state, key) {
+      const overrides = getManualSkillOverrides(state);
+      return overrides[key] && typeof overrides[key] === 'object' ? overrides[key] : null;
+    }
+
+    function getDisplayedSkillCount(skill) {
+      const overrideCount = Number(skill?.override?.countOverride);
+      if (Number.isFinite(overrideCount) && overrideCount >= 0) return overrideCount;
+      return Math.max(0, Number(skill?.count) || 0);
+    }
+
+    function getDisplayedSkillLevel(skill, displayedCount = getDisplayedSkillCount(skill)) {
+      const overrideLevel = Number(skill?.override?.levelOverride);
+      if (Number.isFinite(overrideLevel) && overrideLevel >= 1) return Math.floor(overrideLevel);
+      return getSkillLevelInfo(displayedCount, skillsBarMax).level;
+    }
+
+    function getSkillKindLabel(skill) {
+      if (skill?.manual && skill?.auto) return 'Manual + Auto';
+      if (skill?.manual) return 'Manual';
+      return 'Auto';
+    }
+
     function escapeHtml(value) {
       return String(value ?? '').replace(/[&<>'"]/g, (character) => ({
         '&': '&amp;',
@@ -259,6 +322,7 @@
     function collectSkillTotals(state) {
       const totals = new Map();
       const skillCollections = gatherSkillRowCollections(state);
+      const overrides = getManualSkillOverrides(state);
 
       skillCollections.forEach((rows) => {
         rows.forEach((row) => {
@@ -268,13 +332,16 @@
           const existing = totals.get(normalized.key);
           if (existing) {
             existing.count += 1;
+            existing.auto = true;
             return;
           }
 
           totals.set(normalized.key, {
             key: normalized.key,
             display: normalized.display,
+            originalDisplay: normalized.display,
             count: 1,
+            auto: true,
             manual: false,
           });
         });
@@ -296,13 +363,41 @@
         totals.set(normalized.key, {
           key: normalized.key,
           display: normalized.display,
+          originalDisplay: normalized.display,
           count: 0,
+          auto: false,
           manual: true,
           manualId,
         });
       });
 
-      return [...totals.values()].sort((a, b) =>
+      Object.entries(overrides).forEach(([key, override]) => {
+        if (!override || typeof override !== 'object') return;
+        const normalizedKey = normalizeSkillName(key);
+        if (!normalizedKey) return;
+        const existing = totals.get(normalizedKey.key);
+        if (existing) return;
+
+        const normalizedName = normalizeSkillName(override.name);
+        totals.set(normalizedKey.key, {
+          key: normalizedKey.key,
+          display: normalizedName?.display || normalizedKey.display,
+          originalDisplay: normalizedName?.display || normalizedKey.display,
+          count: 0,
+          auto: false,
+          manual: false,
+        });
+      });
+
+      return [...totals.values()].map((skill) => {
+        const override = getSkillOverride(state, skill.key);
+        const overrideName = normalizeSkillName(override?.name);
+        return {
+          ...skill,
+          display: overrideName?.display || skill.display,
+          override,
+        };
+      }).sort((a, b) =>
         a.display.localeCompare(b.display, undefined, { sensitivity: 'base' })
       );
     }
@@ -312,8 +407,10 @@
         a.display.localeCompare(b.display, undefined, { sensitivity: 'base' });
 
       const byCount = (a, b) => {
-        if (a.count === b.count) return alphabetical(a, b);
-        return mode === 'count-asc' ? a.count - b.count : b.count - a.count;
+        const countA = getDisplayedSkillCount(a);
+        const countB = getDisplayedSkillCount(b);
+        if (countA === countB) return alphabetical(a, b);
+        return mode === 'count-asc' ? countA - countB : countB - countA;
       };
 
       const sorter = mode === 'count-desc' || mode === 'count-asc' ? byCount : alphabetical;
@@ -338,20 +435,24 @@
 
       empty.classList.add('hidden');
       count.textContent = `${skills.length} skill${skills.length === 1 ? '' : 's'}`;
+      const barColorRgba = hexToRgba(skillsBarColor, 0.42);
       list.innerHTML = skills
         .map((skill) => {
-          const levelInfo = getSkillLevelInfo(skill.count, skillsBarMax);
+          const displayedCount = getDisplayedSkillCount(skill);
+          const levelInfo = getSkillLevelInfo(displayedCount, skillsBarMax);
+          const displayedLevel = getDisplayedSkillLevel(skill, displayedCount);
           const fillPct = levelInfo.fillPct;
           const levelTitle = escapeHtml(`${levelInfo.progressCount} / ${levelInfo.maxPerLevel} toward next level`);
+          const rowStyle = escapeHtml(`background: linear-gradient(90deg, ${barColorRgba} 0%, ${barColorRgba} ${fillPct}%, transparent ${fillPct}%, transparent 100%);`);
+          const manualLabel = escapeHtml(getSkillKindLabel(skill));
 
           return `
-            <tr class="border-b border-slate-700/50 last:border-b-0">
-              <td class="px-3 py-2 font-medium skill-bar-cell">
-                <div class="skill-bar-fill" style="width:${fillPct}%; background:${skillsBarColor};"></div>
+            <tr class="skill-row border-b border-slate-700/50 last:border-b-0" style="${rowStyle}" data-skill-key="${escapeHtml(skill.key)}" tabindex="0" title="Click to edit ${escapeHtml(skill.display)} (${manualLabel})">
+              <td class="px-3 py-2 font-medium">
                 <span class="skill-bar-label">${escapeHtml(skill.display)}</span>
               </td>
-              <td class="px-3 py-2 text-right tabular-nums skill-level-cell" title="${levelTitle}">Lv. ${levelInfo.level}</td>
-              <td class="px-3 py-2 text-right tabular-nums">${skill.count}</td>
+              <td class="px-3 py-2 text-right tabular-nums skill-level-cell" title="${levelTitle}">Lv. ${displayedLevel}</td>
+              <td class="px-3 py-2 text-right tabular-nums">${displayedCount}</td>
               <td class="px-3 py-2 text-right">
                 ${skill.manual ? `<button type="button" class="btn btn-ghost btn-toolbar text-xs" data-delete-manual-skill="${escapeHtml(skill.manualId)}">Delete</button>` : '<span class="muted text-xs">Auto</span>'}
               </td>
@@ -360,11 +461,171 @@
         })
         .join('');
 
+      list.querySelectorAll('[data-skill-key]').forEach((row) => {
+        row.addEventListener('click', () => {
+          editSkill(row.dataset.skillKey);
+        });
+        row.addEventListener('keydown', (event) => {
+          if (event.key !== 'Enter') return;
+          event.preventDefault();
+          editSkill(row.dataset.skillKey);
+        });
+      });
+
       list.querySelectorAll('[data-delete-manual-skill]').forEach((button) => {
-        button.addEventListener('click', () => {
+        button.addEventListener('click', (event) => {
+          event.stopPropagation();
           deleteManualSkill(button.dataset.deleteManualSkill);
         });
       });
+    }
+
+    function editSkill(skillKey) {
+      if (!skillKey) return;
+
+      const stateAtOpen = loadState();
+      const skill = collectSkillTotals(stateAtOpen).find((row) => row.key === skillKey);
+      if (!skill) return;
+
+      const displayedCount = getDisplayedSkillCount(skill);
+      const displayedLevel = getDisplayedSkillLevel(skill, displayedCount);
+      const currentName = skill.display;
+      const kindLabel = getSkillKindLabel(skill);
+
+      const nextNameRaw = prompt(
+        `Edit skill (${kindLabel})\nCurrent count: ${displayedCount}\nCurrent level: ${displayedLevel}\n\nSkill name:`,
+        currentName
+      );
+      if (nextNameRaw === null) return;
+
+      const nextName = normalizeSkillName(nextNameRaw);
+      if (!nextName) {
+        alert('Please enter a valid skill name.');
+        return;
+      }
+
+      const existingOverride = getSkillOverride(stateAtOpen, skillKey) || {};
+      const countPromptDefault = Number.isFinite(Number(existingOverride.countOverride))
+        ? String(existingOverride.countOverride)
+        : String(displayedCount);
+      const nextCountRaw = prompt(
+        'Manual count override. Leave blank to clear count override. Cancel keeps existing values:',
+        countPromptDefault
+      );
+      if (nextCountRaw === null) return;
+
+      let nextCountOverride = null;
+      if (String(nextCountRaw).trim() !== '') {
+        const parsedCount = Number(nextCountRaw);
+        if (!Number.isFinite(parsedCount) || parsedCount < 0) {
+          alert('Count override must be a number 0 or higher.');
+          return;
+        }
+        nextCountOverride = parsedCount;
+      }
+
+      const levelPromptDefault = Number.isFinite(Number(existingOverride.levelOverride))
+        ? String(existingOverride.levelOverride)
+        : String(displayedLevel);
+      const nextLevelRaw = prompt(
+        'Manual level override. Leave blank to clear level override. Cancel keeps existing values:',
+        levelPromptDefault
+      );
+      if (nextLevelRaw === null) return;
+
+      let nextLevelOverride = null;
+      if (String(nextLevelRaw).trim() !== '') {
+        const parsedLevel = Number(nextLevelRaw);
+        if (!Number.isFinite(parsedLevel) || parsedLevel < 1) {
+          alert('Level override must be 1 or higher.');
+          return;
+        }
+        nextLevelOverride = Math.floor(parsedLevel);
+      }
+
+      const latestState = loadState();
+      const latestSkills = collectSkillTotals(latestState);
+      const latestSkill = latestSkills.find((row) => row.key === skillKey) || skill;
+      const latestManualSkills = Array.isArray(latestState?.manualSkills) ? latestState.manualSkills : [];
+      const latestOverrides = { ...getManualSkillOverrides(latestState) };
+      const isManualOnly = latestSkill.manual && !latestSkill.auto;
+      let targetKey = skillKey;
+      let nextManualSkills = latestManualSkills;
+
+      if (isManualOnly) {
+        if (nextName.key !== skillKey) {
+          const duplicate = latestSkills.some((row) => row.key !== skillKey && row.key === nextName.key);
+          if (duplicate) {
+            alert('A skill with that name already exists. Choose a different name before renaming this manual skill.');
+            return;
+          }
+
+          targetKey = nextName.key;
+        }
+
+        nextManualSkills = latestManualSkills.map((manualSkill) => {
+          const normalized = normalizeSkillName(manualSkill?.name || manualSkill?.display || manualSkill?.skill);
+          const matchesId = latestSkill.manualId && manualSkill?.id === latestSkill.manualId;
+          const matchesKey = normalized?.key === skillKey;
+          if (!matchesId && !matchesKey) return manualSkill;
+          return {
+            ...manualSkill,
+            name: nextName.display,
+            updatedAtISO: new Date().toISOString(),
+          };
+        });
+
+        if (targetKey !== skillKey && latestOverrides[skillKey]) {
+          latestOverrides[targetKey] = {
+            ...latestOverrides[skillKey],
+            ...latestOverrides[targetKey],
+          };
+          delete latestOverrides[skillKey];
+        }
+      }
+
+      const baseOverride = latestOverrides[targetKey] && typeof latestOverrides[targetKey] === 'object'
+        ? latestOverrides[targetKey]
+        : {};
+      const nextOverride = {
+        ...baseOverride,
+        name: nextName.display,
+        updatedAtISO: new Date().toISOString(),
+      };
+
+      if (nextCountOverride === null) {
+        delete nextOverride.countOverride;
+      } else {
+        nextOverride.countOverride = nextCountOverride;
+      }
+
+      if (nextLevelOverride === null) {
+        delete nextOverride.levelOverride;
+      } else {
+        nextOverride.levelOverride = nextLevelOverride;
+      }
+
+      const nameMatchesBase = nextName.display === (isManualOnly ? nextName.display : latestSkill.originalDisplay);
+      const hasCountOverride = Object.prototype.hasOwnProperty.call(nextOverride, 'countOverride');
+      const hasLevelOverride = Object.prototype.hasOwnProperty.call(nextOverride, 'levelOverride');
+
+      if (nameMatchesBase && !hasCountOverride && !hasLevelOverride) {
+        delete latestOverrides[targetKey];
+      } else {
+        latestOverrides[targetKey] = nextOverride;
+      }
+
+      const currentState = saveState(
+        {
+          ...latestState,
+          manualSkills: nextManualSkills,
+          manualSkillOverrides: latestOverrides,
+        },
+        'skills-edit-skill'
+      );
+
+      aggregatedSkills = collectSkillTotals(currentState);
+      renderSkills();
     }
 
     function addManualSkill() {
