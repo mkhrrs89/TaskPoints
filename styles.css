@@ -5088,7 +5088,7 @@ header,
   --bracket-row-size: calc(var(--slot-height) + var(--bracket-row-gap));
 
   display: grid;
-  grid-template-columns: repeat(9, max-content);
+  grid-template-columns: repeat(13, max-content);
   align-items: start;
   column-gap: 0;
   row-gap: 0;
@@ -5099,28 +5099,33 @@ header,
 .tournament-info-col {
   width: var(--info-col-width);
   display: grid;
-  grid-template-rows: repeat(16, var(--bracket-row-size));
+  grid-template-rows: repeat(32, var(--bracket-row-size));
   align-items: center;
 }
 
 .tournament-round {
   display: grid;
-  grid-template-rows: repeat(16, var(--bracket-row-size));
+  grid-template-rows: repeat(32, var(--bracket-row-size));
   align-items: center;
 }
 
-.tournament-round-1 {
+.tournament-round-play-in,
+.tournament-round-2 {
   gap: 0;
 }
 
-.tournament-round-1 .tournament-matchup {
+.tournament-round-play-in .tournament-matchup,
+.tournament-round-2 .tournament-matchup {
   display: contents;
 }
 
+.tournament-round-play-in,
 .tournament-round-2,
 .tournament-round-3,
 .tournament-round-4,
-.tournament-round-5 {
+.tournament-round-5,
+.tournament-round-6,
+.tournament-round-7 {
   min-width: var(--slot-width);
 }
 
@@ -5128,10 +5133,6 @@ header,
   .tournament-bracket {
     --info-col-width: 64px;
   }
-}
-
-.tournament-round-2 .tournament-matchup {
-  display: contents;
 }
 
 .tournament-matchup {
@@ -5156,9 +5157,33 @@ header,
 .bracket-row-14 { grid-row: 14; }
 .bracket-row-15 { grid-row: 15; }
 .bracket-row-16 { grid-row: 16; }
+.bracket-row-17 { grid-row: 17; }
+.bracket-row-18 { grid-row: 18; }
+.bracket-row-19 { grid-row: 19; }
+.bracket-row-20 { grid-row: 20; }
+.bracket-row-21 { grid-row: 21; }
+.bracket-row-22 { grid-row: 22; }
+.bracket-row-23 { grid-row: 23; }
+.bracket-row-24 { grid-row: 24; }
+.bracket-row-25 { grid-row: 25; }
+.bracket-row-26 { grid-row: 26; }
+.bracket-row-27 { grid-row: 27; }
+.bracket-row-28 { grid-row: 28; }
+.bracket-row-29 { grid-row: 29; }
+.bracket-row-30 { grid-row: 30; }
+.bracket-row-31 { grid-row: 31; }
+.bracket-row-32 { grid-row: 32; }
 
-.tournament-round-5 {
+.tournament-round-7 {
   position: relative;
+}
+
+.tournament-play-in-matchup .tournament-slot {
+  border-color: rgba(251, 146, 60, 0.55);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 0 0 1px rgba(251, 146, 60, 0.15),
+    0 6px 16px rgba(0, 0, 0, 0.22);
 }
 
 .tournament-slot-champion {
