@@ -138,6 +138,16 @@
     return element;
   }
 
+  function createTournamentSvgElement(tagName, attributes = {}, classNames = []) {
+    const element = document.createElementNS('http://www.w3.org/2000/svg', tagName);
+    classNames.filter(Boolean).forEach((className) => element.classList.add(className));
+    Object.entries(attributes).forEach(([key, value]) => {
+      if (value == null || value === '') return;
+      element.setAttribute(key, String(value));
+    });
+    return element;
+  }
+
   function createTournamentInfoColumn(index, label) {
     return createTournamentElement('div', {
       'data-info-column': index,
@@ -248,7 +258,7 @@
     if (!bracket) return;
 
     bracket.innerHTML = '';
-    bracket.appendChild(createTournamentElement('svg', { 'aria-hidden': 'true' }, ['tournament-connector-layer']));
+    bracket.appendChild(createTournamentSvgElement('svg', { 'aria-hidden': 'true' }, ['tournament-connector-layer']));
     bracket.appendChild(renderPlayInRound());
     bracket.appendChild(createTournamentInfoColumn(1, 'play-in-to-round-of-32'));
     bracket.appendChild(renderRoundOf32());
@@ -349,6 +359,7 @@
       const img = slot.querySelector('img.tourney-player-image');
       if (!img) return;
 
+      img.addEventListener('load', scheduleTournamentConnectorDraws, { once: true });
       img.src = url;
       img.classList.remove('hidden');
     });
@@ -490,29 +501,33 @@
       });
     });
 
-    hydrateTournamentImages(document).finally(() => requestTournamentConnectorDraw());
-    requestTournamentConnectorDraw();
+    hydrateTournamentImages(document).finally(() => scheduleTournamentConnectorDraws());
+    scheduleTournamentConnectorDraws();
   }
 
   function getTournamentConnectorLayer(bracket) {
     if (!bracket) return null;
     let layer = bracket.querySelector(':scope > .tournament-connector-layer');
     if (!layer) {
-      layer = createTournamentElement('svg', { 'aria-hidden': 'true' }, ['tournament-connector-layer']);
+      layer = createTournamentSvgElement('svg', { 'aria-hidden': 'true' }, ['tournament-connector-layer']);
       bracket.insertBefore(layer, bracket.firstChild);
     }
     return layer;
   }
 
-  function getTournamentSlotCenter(slot, bracketRect) {
-    if (!slot || !bracketRect) return null;
+  function getTournamentSlotCenter(slot, bracket, bracketRect) {
+    if (!slot || !bracket || !bracketRect) return null;
     const rect = slot.getBoundingClientRect();
     if (!rect.width || !rect.height) return null;
+    const x = rect.left - bracketRect.left + bracket.scrollLeft;
+    const y = rect.top - bracketRect.top + bracket.scrollTop;
     return {
-      left: rect.left - bracketRect.left,
-      right: rect.right - bracketRect.left,
-      centerX: rect.left - bracketRect.left + rect.width / 2,
-      centerY: rect.top - bracketRect.top + rect.height / 2,
+      left: x,
+      right: x + rect.width,
+      centerX: x + rect.width / 2,
+      centerY: y + rect.height / 2,
+      width: rect.width,
+      height: rect.height,
     };
   }
 
@@ -617,34 +632,47 @@
       groups.get(key).slots[slot.getAttribute('data-competitor-slot') || ''] = slot;
     });
 
+    let pairCount = 0;
+    let pathCount = 0;
+
     groups.forEach((group) => {
       const slotA = group.slots.A;
       const slotB = group.slots.B;
       if (!slotA || !slotB) return;
 
-      const a = getTournamentSlotCenter(slotA, bracketRect);
-      const b = getTournamentSlotCenter(slotB, bracketRect);
+      const a = getTournamentSlotCenter(slotA, bracket, bracketRect);
+      const b = getTournamentSlotCenter(slotB, bracket, bracketRect);
       if (!a || !b) return;
 
-      const stubLength = Math.min(24, Math.max(10, Math.abs(b.centerY - a.centerY) / 3));
-      const pairJoinX = Math.max(a.right, b.right) + stubLength;
+      pairCount += 1;
+      const pairJoinX = Math.max(a.right, b.right) + 28;
       const pairMidY = (a.centerY + b.centerY) / 2;
-      const topY = Math.min(a.centerY, b.centerY);
-      const bottomY = Math.max(a.centerY, b.centerY);
 
-      addTournamentConnectorPath(layer, `M ${a.right} ${a.centerY} H ${pairJoinX} M ${b.right} ${b.centerY} H ${pairJoinX} M ${pairJoinX} ${topY} V ${bottomY}`);
+      addTournamentConnectorPath(layer, `M ${a.right} ${a.centerY} H ${pairJoinX}`);
+      addTournamentConnectorPath(layer, `M ${b.right} ${b.centerY} H ${pairJoinX}`);
+      addTournamentConnectorPath(layer, `M ${pairJoinX} ${a.centerY} V ${b.centerY}`);
+      pathCount += 3;
 
       const targetSlot = findTournamentAdvancementTarget(bracket, state, slotA);
-      const target = getTournamentSlotCenter(targetSlot, bracketRect);
+      const target = getTournamentSlotCenter(targetSlot, bracket, bracketRect);
       if (!target || target.left <= pairJoinX) return;
 
       const midX = pairJoinX + (target.left - pairJoinX) / 2;
       addTournamentConnectorPath(layer, `M ${pairJoinX} ${pairMidY} H ${midX} V ${target.centerY} H ${target.left}`);
+      pathCount += 1;
     });
+
+    console.debug('[Tournament connectors]', { pairCount, pathCount });
   }
 
   function requestTournamentConnectorDraw() {
     window.requestAnimationFrame(() => drawTournamentConnectors());
+  }
+
+  function scheduleTournamentConnectorDraws() {
+    requestTournamentConnectorDraw();
+    window.setTimeout(drawTournamentConnectors, 100);
+    window.setTimeout(drawTournamentConnectors, 350);
   }
 
   function debounceTournamentConnectorDraw(delay = 100) {
@@ -658,13 +686,13 @@
   function initializeTournamentPage() {
     renderTournamentBracket();
     renderTournamentImages();
-    requestTournamentConnectorDraw();
+    scheduleTournamentConnectorDraws();
   }
 
   window.drawTournamentConnectors = drawTournamentConnectors;
-  window.addEventListener('load', requestTournamentConnectorDraw);
+  window.addEventListener('load', scheduleTournamentConnectorDraws);
   window.addEventListener('resize', debounceTournamentConnectorDraw(100));
-  window.addEventListener('orientationchange', () => window.setTimeout(requestTournamentConnectorDraw, 250));
+  window.addEventListener('orientationchange', () => window.setTimeout(scheduleTournamentConnectorDraws, 250));
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initializeTournamentPage);
