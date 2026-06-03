@@ -1334,6 +1334,42 @@ function runWeightVo2HistorySavePathAudit(state) {
     const SEASON_AUDIT_EXPECTED_SEED_COUNT = 34;
     const SEASON_AUDIT_ROUND_ORDER = ['play_in', 'round_of_32', 'sweet_16', 'quarterfinals', 'semifinals', 'finals'];
 
+    const NOTES_PAGE_CACHE_KEY_FOR_AUDIT = "taskpoints_notes_v1";
+
+    function hasMeaningfulNoteValueForAudit(value) {
+      if (typeof value === 'string') return value.trim().length > 0;
+      if (Array.isArray(value)) return value.some(item => hasMeaningfulNoteValueForAudit(item));
+      if (value && typeof value === 'object') {
+        return Object.values(value).some(item => hasMeaningfulNoteValueForAudit(item));
+      }
+      return false;
+    }
+
+    function getCachedGeneralNotesForAudit() {
+      try {
+        return typeof localStorage !== 'undefined' ? localStorage.getItem(NOTES_PAGE_CACHE_KEY_FOR_AUDIT) : null;
+      } catch (err) {
+        return null;
+      }
+    }
+
+    function hasAnyNotesForAudit(state) {
+      const safeState = state && typeof state === 'object' ? state : {};
+      const candidateValues = [
+        safeState.notes,
+        getCachedGeneralNotesForAudit()
+      ];
+
+      const completions = Array.isArray(safeState.completions) ? safeState.completions : [];
+      completions.forEach(entry => {
+        if (!entry || typeof entry !== 'object') return;
+        const title = typeof entry.title === 'string' ? entry.title : '';
+        if (title.startsWith('Mood Score')) candidateValues.push(entry.moodNotes);
+      });
+
+      return candidateValues.some(value => hasMeaningfulNoteValueForAudit(value));
+    }
+
     function getCurrentSeasonForAudit(state) {
       const season = state?.currentSeason;
       return season && typeof season === 'object' && !Array.isArray(season) ? season : null;
@@ -1810,7 +1846,6 @@ function runWeightVo2HistorySavePathAudit(state) {
       checks.push({ ...base, id: 'season-home-matchup-type-label', title: 'Home matchup type label matches today’s matchup', status: labelStatus, expected: 'Home label reflects whether today’s user matchup is tournament or exhibition', actual: labelActual, trace: 'index.html getHomeMatchupTypeLabel mirror: seriesId first, then unordered player-pair inference' });
 
       const protectedKeys = ['weightHistory', 'vo2MaxHistory', 'liveDiffHistory', 'liveDiffSnapshots', 'reminders'];
-      if (Object.prototype.hasOwnProperty.call(state || {}, 'notes')) protectedKeys.push('notes');
       const shapeIssues = [];
       const emptyWarnings = [];
       protectedKeys.forEach(key => {
@@ -1821,19 +1856,19 @@ function runWeightVo2HistorySavePathAudit(state) {
           if (value && typeof value === 'object' && !Array.isArray(value)) {
             if (!Object.keys(value).length) emptyWarnings.push(`${key} is empty and no previous snapshot is available`);
           } else shapeIssues.push(`${key} should be an object map`);
-        } else if (key === 'notes') {
-          if (!(typeof value === 'string' || Array.isArray(value))) shapeIssues.push('notes should be a string or array when present');
-          else if ((typeof value === 'string' && !value.trim()) || (Array.isArray(value) && !value.length)) emptyWarnings.push('notes is empty and no previous snapshot is available');
         } else if (!Array.isArray(value)) {
           shapeIssues.push(`${key} should be an array`);
         } else if (!value.length) {
           emptyWarnings.push(`${key} is empty and no previous snapshot is available`);
         }
       });
+      if (!hasAnyNotesForAudit(state)) {
+        emptyWarnings.push('Notes page content is empty and no previous snapshot is available');
+      }
       const savePathAudit = runWeightVo2HistorySavePathAudit(state);
       const protectedDetails = [...shapeIssues, ...emptyWarnings];
       if (savePathAudit.status === 'FAIL') protectedDetails.push(...(savePathAudit.details || []));
-      checks.push({ ...base, id: 'season-protected-histories-preserved', title: 'Season saves preserved protected histories', status: shapeIssues.length || savePathAudit.status === 'FAIL' ? 'FAIL' : (emptyWarnings.length ? 'WARN' : 'PASS'), expected: 'Season and matchup saves do not wipe protected Home histories', actual: shapeIssues.length ? `${shapeIssues.length} invalid protected shape(s)` : (emptyWarnings.length ? `${emptyWarnings.length} protected key warning(s); current values empty/missing and no previous snapshot is available` : 'Protected history keys are present with valid shape'), details: protectedDetails, trace: 'weightHistory/vo2MaxHistory/liveDiffHistory/liveDiffSnapshots/reminders/notes + save-path sentinel audit' });
+      checks.push({ ...base, id: 'season-protected-histories-preserved', title: 'Season saves preserved protected histories', status: shapeIssues.length || savePathAudit.status === 'FAIL' ? 'FAIL' : (emptyWarnings.length ? 'WARN' : 'PASS'), expected: 'Season and matchup saves do not wipe protected Home histories and Notes page content', actual: shapeIssues.length ? `${shapeIssues.length} invalid protected shape(s)` : (emptyWarnings.length ? `${emptyWarnings.length} protected key warning(s); current values empty/missing and no previous snapshot is available` : 'Protected history keys and Notes page content are present with valid shape'), details: protectedDetails, trace: 'weightHistory/vo2MaxHistory/liveDiffHistory/liveDiffSnapshots/reminders/Notes page content (notes + taskpoints_notes_v1 cache + completions[].moodNotes) + save-path sentinel audit' });
 
       return checks;
     }
