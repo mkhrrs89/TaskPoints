@@ -152,6 +152,8 @@
       'data-round-id': roundId,
       'data-series-index': seriesIndex,
       'data-competitor-slot': competitorSlot,
+      'data-row-position': row,
+      'data-slot-kind': seed != null ? 'player' : 'placeholder',
     };
     if (seed != null) attrs['data-seed'] = seed;
     if (placeholderKey) attrs['data-placeholder-key'] = placeholderKey;
@@ -246,6 +248,7 @@
     if (!bracket) return;
 
     bracket.innerHTML = '';
+    bracket.appendChild(createTournamentElement('svg', { 'aria-hidden': 'true' }, ['tournament-connector-layer']));
     bracket.appendChild(renderPlayInRound());
     bracket.appendChild(createTournamentInfoColumn(1, 'play-in-to-round-of-32'));
     bracket.appendChild(renderRoundOf32());
@@ -487,13 +490,181 @@
       });
     });
 
-    hydrateTournamentImages(document);
+    hydrateTournamentImages(document).finally(() => requestTournamentConnectorDraw());
+    requestTournamentConnectorDraw();
+  }
+
+  function getTournamentConnectorLayer(bracket) {
+    if (!bracket) return null;
+    let layer = bracket.querySelector(':scope > .tournament-connector-layer');
+    if (!layer) {
+      layer = createTournamentElement('svg', { 'aria-hidden': 'true' }, ['tournament-connector-layer']);
+      bracket.insertBefore(layer, bracket.firstChild);
+    }
+    return layer;
+  }
+
+  function getTournamentSlotCenter(slot, bracketRect) {
+    if (!slot || !bracketRect) return null;
+    const rect = slot.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    return {
+      left: rect.left - bracketRect.left,
+      right: rect.right - bracketRect.left,
+      centerX: rect.left - bracketRect.left + rect.width / 2,
+      centerY: rect.top - bracketRect.top + rect.height / 2,
+    };
+  }
+
+  function addTournamentConnectorPath(layer, commands) {
+    if (!layer || !commands) return;
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('class', 'tournament-connector-line');
+    path.setAttribute('d', commands);
+    layer.appendChild(path);
+  }
+
+  function getAdvancementFields(series) {
+    if (!series || typeof series !== 'object') return null;
+    const targetSeriesId = series.nextSeriesId || series.advancesToSeriesId || series.advancesTo || '';
+    const targetSlot = series.nextSlot || series.advancesToSlot || '';
+    if (!targetSeriesId && !targetSlot) return null;
+    return { targetSeriesId: String(targetSeriesId || ''), targetSlot: String(targetSlot || '') };
+  }
+
+  function escapeTournamentSelectorValue(value) {
+    if (window.CSS?.escape) return CSS.escape(value);
+    return String(value).replace(/[^a-zA-Z0-9_-]/g, (character) => `\\${character}`);
+  }
+
+  function findTournamentTargetFromSeasonMetadata(bracket, state, sourceSlot) {
+    const season = state?.currentSeason || null;
+    const sourceSeriesId = sourceSlot?.getAttribute?.('data-season-series-id') || '';
+    const roundId = sourceSlot?.getAttribute?.('data-round-id') || '';
+    const seriesIndex = Number(sourceSlot?.getAttribute?.('data-series-index')) || 0;
+    const sourceSeries = getSeriesEntries(season).find((series) => String(series?.id || '') === sourceSeriesId)
+      || getSeriesByRoundAndIndex(season, roundId, seriesIndex);
+    const advancement = getAdvancementFields(sourceSeries);
+    if (!advancement) return null;
+
+    if (advancement.targetSeriesId.toLowerCase() === 'champion' || advancement.targetSlot.toLowerCase() === 'champion') {
+      return bracket.querySelector('.tournament-slot[data-round-id="champion"]');
+    }
+
+    const targetSeriesSelector = advancement.targetSeriesId ? `[data-season-series-id="${escapeTournamentSelectorValue(advancement.targetSeriesId)}"]` : '';
+    const targetSlotSelector = ['A', 'B'].includes(advancement.targetSlot) ? `[data-competitor-slot="${advancement.targetSlot}"]` : '';
+    if (targetSeriesSelector) {
+      return bracket.querySelector(`.tournament-slot${targetSeriesSelector}${targetSlotSelector}`)
+        || bracket.querySelector(`.tournament-slot${targetSeriesSelector}`);
+    }
+    return null;
+  }
+
+  function findTournamentTargetByVisualMapping(bracket, roundId, seriesIndex) {
+    const roundOrder = ['play_in', 'round_of_32', 'sweet_16', 'quarterfinals', 'semifinals', 'finals', 'champion'];
+    if (roundId === 'play_in') {
+      const targetSeriesIndex = Number(seriesIndex) === 1 ? 1 : 9;
+      return bracket.querySelector(`.tournament-slot[data-round-id="round_of_32"][data-series-index="${targetSeriesIndex}"][data-competitor-slot="B"]`);
+    }
+    if (roundId === 'finals') {
+      return bracket.querySelector('.tournament-slot[data-round-id="champion"]');
+    }
+
+    const roundPosition = roundOrder.indexOf(roundId);
+    if (roundPosition < 0 || roundPosition >= roundOrder.length - 2) return null;
+
+    const targetRoundId = roundOrder[roundPosition + 1];
+    const targetSeriesIndex = Math.ceil(Number(seriesIndex) / 2);
+    const targetSlot = Number(seriesIndex) % 2 === 1 ? 'A' : 'B';
+    return bracket.querySelector(`.tournament-slot[data-round-id="${targetRoundId}"][data-series-index="${targetSeriesIndex}"][data-competitor-slot="${targetSlot}"]`);
+  }
+
+  function findTournamentAdvancementTarget(bracket, state, slotA) {
+    const metadataTarget = findTournamentTargetFromSeasonMetadata(bracket, state, slotA);
+    if (metadataTarget) return metadataTarget;
+    const roundId = slotA?.getAttribute?.('data-round-id') || '';
+    const seriesIndex = Number(slotA?.getAttribute?.('data-series-index')) || 0;
+    return findTournamentTargetByVisualMapping(bracket, roundId, seriesIndex);
+  }
+
+  function drawTournamentConnectors() {
+    const bracket = document.getElementById('tournamentBracket');
+    if (!bracket) return;
+
+    const layer = getTournamentConnectorLayer(bracket);
+    if (!layer) return;
+    layer.replaceChildren();
+
+    const bracketRect = bracket.getBoundingClientRect();
+    const width = Math.max(bracket.scrollWidth, bracketRect.width || 0);
+    const height = Math.max(bracket.scrollHeight, bracketRect.height || 0);
+    if (!width || !height) return;
+
+    layer.setAttribute('viewBox', `0 0 ${width} ${height}`);
+    layer.setAttribute('width', String(width));
+    layer.setAttribute('height', String(height));
+
+    const state = loadTournamentState();
+    const slots = Array.from(bracket.querySelectorAll('.tournament-slot[data-round-id][data-series-index]'));
+    const groups = new Map();
+    slots.forEach((slot) => {
+      const roundId = slot.getAttribute('data-round-id') || '';
+      if (!roundId || roundId === 'champion') return;
+      const seriesIndex = slot.getAttribute('data-series-index') || '';
+      if (!seriesIndex) return;
+      const key = `${roundId}:${seriesIndex}`;
+      if (!groups.has(key)) groups.set(key, { roundId, seriesIndex, slots: {} });
+      groups.get(key).slots[slot.getAttribute('data-competitor-slot') || ''] = slot;
+    });
+
+    groups.forEach((group) => {
+      const slotA = group.slots.A;
+      const slotB = group.slots.B;
+      if (!slotA || !slotB) return;
+
+      const a = getTournamentSlotCenter(slotA, bracketRect);
+      const b = getTournamentSlotCenter(slotB, bracketRect);
+      if (!a || !b) return;
+
+      const stubLength = Math.min(24, Math.max(10, Math.abs(b.centerY - a.centerY) / 3));
+      const pairJoinX = Math.max(a.right, b.right) + stubLength;
+      const pairMidY = (a.centerY + b.centerY) / 2;
+      const topY = Math.min(a.centerY, b.centerY);
+      const bottomY = Math.max(a.centerY, b.centerY);
+
+      addTournamentConnectorPath(layer, `M ${a.right} ${a.centerY} H ${pairJoinX} M ${b.right} ${b.centerY} H ${pairJoinX} M ${pairJoinX} ${topY} V ${bottomY}`);
+
+      const targetSlot = findTournamentAdvancementTarget(bracket, state, slotA);
+      const target = getTournamentSlotCenter(targetSlot, bracketRect);
+      if (!target || target.left <= pairJoinX) return;
+
+      const midX = pairJoinX + (target.left - pairJoinX) / 2;
+      addTournamentConnectorPath(layer, `M ${pairJoinX} ${pairMidY} H ${midX} V ${target.centerY} H ${target.left}`);
+    });
+  }
+
+  function requestTournamentConnectorDraw() {
+    window.requestAnimationFrame(() => drawTournamentConnectors());
+  }
+
+  function debounceTournamentConnectorDraw(delay = 100) {
+    let timerId = 0;
+    return () => {
+      window.clearTimeout(timerId);
+      timerId = window.setTimeout(requestTournamentConnectorDraw, delay);
+    };
   }
 
   function initializeTournamentPage() {
     renderTournamentBracket();
     renderTournamentImages();
+    requestTournamentConnectorDraw();
   }
+
+  window.drawTournamentConnectors = drawTournamentConnectors;
+  window.addEventListener('load', requestTournamentConnectorDraw);
+  window.addEventListener('resize', debounceTournamentConnectorDraw(100));
+  window.addEventListener('orientationchange', () => window.setTimeout(requestTournamentConnectorDraw, 250));
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initializeTournamentPage);

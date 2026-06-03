@@ -5087,6 +5087,7 @@ header,
   --bracket-row-gap: 10px;
   --bracket-row-size: calc(var(--slot-height) + var(--bracket-row-gap));
 
+  position: relative;
   display: grid;
   grid-template-columns: repeat(13, max-content);
   align-items: start;
@@ -5096,7 +5097,27 @@ header,
   padding-right: 10px;
 }
 
+.tournament-connector-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.tournament-connector-line {
+  fill: none;
+  stroke: rgba(94, 234, 212, 0.28);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .tournament-info-col {
+  position: relative;
+  z-index: 1;
   width: var(--info-col-width);
   display: grid;
   grid-template-rows: repeat(32, var(--bracket-row-size));
@@ -5104,6 +5125,8 @@ header,
 }
 
 .tournament-round {
+  position: relative;
+  z-index: 1;
   display: grid;
   grid-template-rows: repeat(32, var(--bracket-row-size));
   align-items: center;
@@ -5198,6 +5221,7 @@ header,
 
 .tournament-slot {
   position: relative;
+  z-index: 1;
   overflow: hidden;
   width: var(--slot-width);
   aspect-ratio: 3 / 4;
