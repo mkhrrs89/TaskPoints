@@ -775,6 +775,25 @@
     return next <= bestOf ? next : null;
   }
 
+  function getCurrentSeriesGameNumberForHome(series, dateKeyStr) {
+    if (!series) return 1;
+    const hasWinsA = series.winsA !== undefined && series.winsA !== null && series.winsA !== '';
+    const hasWinsB = series.winsB !== undefined && series.winsB !== null && series.winsB !== '';
+    const winsA = Number(series.winsA);
+    const winsB = Number(series.winsB);
+    if (hasWinsA && hasWinsB && Number.isFinite(winsA) && Number.isFinite(winsB) && winsA >= 0 && winsB >= 0) {
+      const derivedGameNumber = Math.floor(winsA) + Math.floor(winsB) + 1;
+      if (Number.isFinite(derivedGameNumber) && derivedGameNumber >= 1) return derivedGameNumber;
+    }
+
+    const fallback = Number(series.gameNumber)
+      || Number(series.currentGameNumber)
+      || Number(series.seriesGameNumber)
+      || Number(getSeriesGameNumber(series, dateKeyStr))
+      || 1;
+    return Math.max(1, fallback);
+  }
+
   function isSeasonEliminationGame(series) {
     if (!series || isSeasonSeriesComplete(series) || !series.playerAId || !series.playerBId) return false;
     const winsNeeded = Number(series.winsNeeded) || Math.floor((Number(series.bestOf) || 1) / 2) + 1;
@@ -830,7 +849,7 @@
         title: getSeriesCompactTitle(chosen.series),
         roundName: chosen.series.roundName || getSeasonDisplayName(chosen.series.roundId),
         statusText: getSeriesStatusText(chosen.series),
-        gameNumber: getSeriesGameNumber(chosen.series, dateKeyStr),
+        gameNumber: getCurrentSeriesGameNumberForHome(chosen.series, dateKeyStr),
         isEliminationGame: isSeasonEliminationGame(chosen.series)
       };
     }
@@ -855,7 +874,7 @@
     const entries = getSeasonSeriesEntries(season);
     const active = entries.find((series) => !isSeasonSeriesComplete(series) && series.playerAId && series.playerBId && (series.playerAId === playerId || series.playerBId === playerId));
     if (active) {
-      const gameNumber = getSeriesGameNumber(active, dateKeyStr);
+      const gameNumber = getCurrentSeriesGameNumberForHome(active, dateKeyStr);
       const title = getSeriesCompactTitle(active).replace(/^#\d+\s+/, '').replace(/ vs #\d+\s+/g, ' vs ');
       return { playerId, playerName, series: active, statusText: `${title} — ${active.roundName || getSeasonDisplayName(active.roundId)}${gameNumber ? `, Game ${gameNumber}` : ''}`, detailText: getSeriesStatusText(active) };
     }
@@ -5127,6 +5146,7 @@ return Number(cappedScore.toFixed(1));
     getSeasonPlayerDisplayName,
     getSeriesCompactTitle,
     getSeriesGameNumber,
+    getCurrentSeriesGameNumberForHome,
     isSeasonEliminationGame,
     getFeaturedSeasonMatchup,
     getUserSeasonStatus,
