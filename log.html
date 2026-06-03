@@ -95,10 +95,11 @@
 .logScroll{
   width: 100%;
   overflow-x: auto;
-  overflow-y: hidden;
+  overflow-y: visible;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-x: contain;
-  touch-action: pan-x;
+  /* Keep horizontal table scrolling without blocking normal vertical page swipes on mobile. */
+  touch-action: pan-x pan-y;
 }
 
 .logInner{
