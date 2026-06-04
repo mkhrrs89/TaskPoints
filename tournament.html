@@ -285,7 +285,13 @@
     if (window.TaskPointsCore && typeof TaskPointsCore.loadAppState === 'function') {
       try {
         const loaded = TaskPointsCore.loadAppState({ syncDerived: false, persistSync: false });
-        if (loaded && loaded.state && typeof loaded.state === 'object') return loaded.state;
+        if (loaded && loaded.state && typeof loaded.state === 'object') {
+          if (typeof TaskPointsCore.repairSeasonChampionshipData === 'function') {
+            const repaired = TaskPointsCore.repairSeasonChampionshipData(loaded.state);
+            if (repaired?.ok && repaired.state) return repaired.state;
+          }
+          return loaded.state;
+        }
       } catch (error) {
         console.warn('Failed to load tournament state from TaskPointsCore', error);
       }
@@ -295,7 +301,12 @@
       const raw = localStorage.getItem(STORAGE_KEY);
       const parsed = raw ? JSON.parse(raw) : {};
       if (window.TaskPointsCore && typeof TaskPointsCore.normalizeState === 'function') {
-        return TaskPointsCore.normalizeState(parsed || {});
+        const normalized = TaskPointsCore.normalizeState(parsed || {});
+        if (typeof TaskPointsCore.repairSeasonChampionshipData === 'function') {
+          const repaired = TaskPointsCore.repairSeasonChampionshipData(normalized);
+          if (repaired?.ok && repaired.state) return repaired.state;
+        }
+        return normalized;
       }
       return parsed || {};
     } catch (error) {
