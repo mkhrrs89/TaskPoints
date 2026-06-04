@@ -282,6 +282,15 @@
   }
 
   function loadTournamentState() {
+    if (window.TaskPointsCore && typeof TaskPointsCore.loadAppState === 'function') {
+      try {
+        const loaded = TaskPointsCore.loadAppState({ syncDerived: false, persistSync: false });
+        if (loaded && loaded.state && typeof loaded.state === 'object') return loaded.state;
+      } catch (error) {
+        console.warn('Failed to load tournament state from TaskPointsCore', error);
+      }
+    }
+
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       const parsed = raw ? JSON.parse(raw) : {};
@@ -365,6 +374,55 @@
     });
   }
 
+  function getTournamentSeason(state) {
+    return state?.currentSeason && typeof state.currentSeason === 'object' ? state.currentSeason : null;
+  }
+
+  function getTournamentSeasonSeries(state) {
+    const season = getTournamentSeason(state);
+    const series = season?.series;
+    if (Array.isArray(series)) return series.filter(Boolean);
+    if (series && typeof series === 'object') return Object.values(series).filter(Boolean);
+    return [];
+  }
+
+  function normalizeTournamentRoundId(value) {
+    return String(value || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, '_')
+      .replace(/-/g, '_');
+  }
+
+  function getTournamentSeriesRoundId(series) {
+    return normalizeTournamentRoundId(series?.roundId || series?.round || series?.roundName || series?.name);
+  }
+
+  function getTournamentSeriesSortValue(series, fallbackIndex) {
+    const candidates = [
+      series?.sortOrder,
+      series?.bracketIndex,
+      series?.seriesIndex,
+      series?.matchupIndex,
+      series?.order,
+      series?.slotIndex,
+    ];
+    for (const value of candidates) {
+      const num = Number(value);
+      if (Number.isFinite(num)) return num;
+    }
+    return fallbackIndex;
+  }
+
+  function getTournamentSeriesByRound(state, roundId) {
+    const normalized = normalizeTournamentRoundId(roundId);
+    return getTournamentSeasonSeries(state)
+      .map((series, index) => ({ series, index }))
+      .filter(({ series }) => getTournamentSeriesRoundId(series) === normalized)
+      .sort((a, b) => getTournamentSeriesSortValue(a.series, a.index) - getTournamentSeriesSortValue(b.series, b.index))
+      .map(({ series }) => series);
+  }
+
   function getSeriesEntries(season) {
     const series = season?.series;
     if (Array.isArray(series)) return series.filter(Boolean);
@@ -372,39 +430,25 @@
     return [];
   }
 
-  function seriesSortValue(series, index) {
-    const candidates = [series?.sortOrder, series?.bracketIndex, series?.matchupIndex, series?.gameIndex, series?.slotIndex, series?.seriesIndex];
-    const numeric = candidates.map(Number).find((value) => Number.isFinite(value));
-    return Number.isFinite(numeric) ? numeric : index + 1;
-  }
-
   function getSeriesEntriesForRound(season, roundId) {
-    return getSeriesEntries(season)
-      .filter((series) => series?.roundId === roundId)
-      .map((series, index) => ({ series, order: seriesSortValue(series, index), id: String(series?.id || '') }))
-      .sort((a, b) => (a.order - b.order) || a.id.localeCompare(b.id))
-      .map((entry) => entry.series);
+    return getTournamentSeriesByRound({ currentSeason: season }, roundId);
   }
 
   function getSeriesByRoundAndIndex(season, roundId, seriesIndex) {
-    return getSeriesEntriesForRound(season, roundId).find((series) => Number(series.seriesIndex) === Number(seriesIndex))
-      || getSeriesEntriesForRound(season, roundId)[Number(seriesIndex) - 1]
+    const roundSeries = getSeriesEntriesForRound(season, roundId);
+    return roundSeries.find((series) => Number(series.seriesIndex) === Number(seriesIndex))
+      || roundSeries[Number(seriesIndex) - 1]
+      || roundSeries[Number(seriesIndex)]
       || null;
   }
 
   function getPlayerIdForSeriesSlot(series, slot) {
     const prefix = slot === 'B' ? 'B' : 'A';
-    return series?.[`player${prefix}Id`] || '';
+    return series?.[`player${prefix}Id`] || series?.[`player${prefix}`]?.id || series?.[`competitor${prefix}Id`] || '';
   }
 
-  function getSeriesSeedForSlot(series, slot) {
-    const prefix = slot === 'B' ? 'B' : 'A';
-    const seed = Number(series?.[`player${prefix}Seed`]);
-    return Number.isFinite(seed) ? seed : null;
-  }
-
-  function hasOfficialSeasonSeriesData(season) {
-    return getSeriesEntries(season).some((series) => series?.roundId && (series.playerAId || series.playerBId || series.placeholderA || series.placeholderB));
+  function hasOfficialSeasonSeriesData(state) {
+    return getTournamentSeasonSeries(state).length > 0;
   }
 
   function getSeedNumberFromTournamentSlot(slot) {
@@ -416,51 +460,79 @@
     return Number.isFinite(seedNumber) && seedNumber > 0 ? seedNumber : null;
   }
 
-  function getTournamentSlotSeriesMapping(state, slot) {
-    const season = state?.currentSeason || null;
-    if (!season || !hasOfficialSeasonSeriesData(season)) return null;
+  function isFixedSeedSlot(slot) {
+    return !!slot?.getAttribute?.('data-seed') && !slot?.getAttribute?.('data-placeholder-key');
+  }
 
-    const roundId = slot?.getAttribute?.('data-round-id') || '';
-    const seriesIndex = Number(slot?.getAttribute?.('data-series-index')) || 0;
-    const competitorSlot = slot?.getAttribute?.('data-competitor-slot') || '';
+  function getTournamentSeriesIndexCandidates(slot) {
+    const raw = slot?.getAttribute?.('data-series-index') || slot?.closest?.('[data-series-index]')?.getAttribute?.('data-series-index') || '';
+    const numeric = Number(raw);
+    if (!Number.isFinite(numeric)) return [];
+    return Array.from(new Set([numeric - 1, numeric])).filter((value) => value >= 0);
+  }
 
-    if (roundId === 'champion') {
-      const finals = getSeriesByRoundAndIndex(season, 'finals', 1);
-      if (!finals) return null;
-      const winnerSlot = finals.winnerId === finals.playerBId ? 'B' : 'A';
-      return { series: finals, competitorSlot: winnerSlot, championOnly: true, blocksSeedFallback: true };
+  function findTournamentSeriesForVisualSlot(state, roundId, slot) {
+    const seriesList = getTournamentSeriesByRound(state, roundId);
+    const rawIndex = Number(slot?.getAttribute?.('data-series-index') || slot?.closest?.('[data-series-index]')?.getAttribute?.('data-series-index'));
+    if (Number.isFinite(rawIndex)) {
+      const explicit = seriesList.find((series) => Number(series?.seriesIndex) === rawIndex);
+      if (explicit) return explicit;
+      for (const candidateIndex of getTournamentSeriesIndexCandidates(slot)) {
+        if (seriesList[candidateIndex]) return seriesList[candidateIndex];
+      }
+    }
+    return null;
+  }
+
+  function applyTournamentSeriesSlotMetadata(slot, series, competitorSlot) {
+    if (!series) return;
+    slot.setAttribute('data-season-series-id', series.id || '');
+    slot.setAttribute('data-season-round-id', series.roundId || getTournamentSeriesRoundId(series) || '');
+    if (series.seriesIndex != null && series.seriesIndex !== '') slot.setAttribute('data-season-series-index', String(series.seriesIndex));
+    slot.setAttribute('data-competitor-slot', competitorSlot || '');
+  }
+
+  function clearTournamentSeriesSlotMetadata(slot) {
+    slot.removeAttribute('data-season-series-id');
+    slot.removeAttribute('data-season-round-id');
+    slot.removeAttribute('data-season-series-index');
+  }
+
+  function resolveTournamentSlotPlayerIdFromSeasonSeries(state, slot, roundElement = null) {
+    const seriesCount = getTournamentSeasonSeries(state).length;
+    if (!seriesCount) return { mapped: false, playerId: '' };
+
+    const roundId = slot?.getAttribute?.('data-round-id') || roundElement?.getAttribute?.('data-round-id') || '';
+    let competitorSlot = String(slot?.getAttribute?.('data-competitor-slot') || '').toUpperCase();
+
+    if (normalizeTournamentRoundId(roundId) === 'champion') {
+      const finals = getTournamentSeriesByRound(state, 'finals')[0] || null;
+      if (!finals) return { mapped: true, playerId: '' };
+      applyTournamentSeriesSlotMetadata(slot, finals, 'winner');
+      return { mapped: true, playerId: finals.winnerId || '' };
     }
 
-    if (!roundId || !seriesIndex || !['A', 'B'].includes(competitorSlot)) return null;
+    if (!roundId || !['A', 'B'].includes(competitorSlot)) return { mapped: false, playerId: '' };
 
-    const series = getSeriesByRoundAndIndex(season, roundId, seriesIndex);
-    if (!series) return null;
+    const series = findTournamentSeriesForVisualSlot(state, roundId, slot);
+    if (!series) return { mapped: true, playerId: '' };
 
-    return { series, competitorSlot, blocksSeedFallback: true };
+    applyTournamentSeriesSlotMetadata(slot, series, competitorSlot);
+    return { mapped: true, playerId: getPlayerIdForSeriesSlot(series, competitorSlot) };
   }
 
-  function applyTournamentSeriesSlotMetadata(slot, mapping) {
-    if (!mapping?.series) return;
-    slot.setAttribute('data-season-series-id', mapping.series.id || '');
-    slot.setAttribute('data-season-round-id', mapping.series.roundId || '');
-    slot.setAttribute('data-series-index', String(mapping.series.seriesIndex || ''));
-    slot.setAttribute('data-competitor-slot', mapping.competitorSlot || '');
-  }
+  function resolveTournamentSlotPlayerId(state, slot, roundElement = null) {
+    clearTournamentSeriesSlotMetadata(slot);
+    const live = resolveTournamentSlotPlayerIdFromSeasonSeries(state, slot, roundElement);
+    if (live.playerId) return live.playerId;
 
-  function resolveTournamentSlotPlayerIdFromSeasonSeries(state, slot) {
-    const mapping = getTournamentSlotSeriesMapping(state, slot);
-    if (!mapping) return { mapped: false, playerId: '' };
-    applyTournamentSeriesSlotMetadata(slot, mapping);
-    if (mapping.championOnly) return { mapped: true, playerId: mapping.series?.winnerId || '' };
-    return { mapped: true, playerId: getPlayerIdForSeriesSlot(mapping.series, mapping.competitorSlot) };
-  }
-
-  function resolveTournamentSlotPlayerId(state, slot) {
-    const live = resolveTournamentSlotPlayerIdFromSeasonSeries(state, slot);
-    if (live.mapped) return live.playerId || '';
+    const hasOfficialSeries = hasOfficialSeasonSeriesData(state);
+    if (hasOfficialSeries && live.mapped && !isFixedSeedSlot(slot)) return '';
 
     const seedNumber = getSeedNumberFromTournamentSlot(slot);
-    if (seedNumber != null) return getSeasonSeedPlayerIdForTournament(state, seedNumber);
+    if (seedNumber != null && (!hasOfficialSeries || isFixedSeedSlot(slot))) {
+      return getSeasonSeedPlayerIdForTournament(state, seedNumber);
+    }
 
     return '';
   }
@@ -496,7 +568,7 @@
     document.querySelectorAll('.tournament-round').forEach((roundElement) => {
       const slots = Array.from(roundElement.querySelectorAll('.tournament-slot'));
       slots.forEach((slot, index) => {
-        const playerId = resolveTournamentSlotPlayerId(state, slot);
+        const playerId = resolveTournamentSlotPlayerId(state, slot, roundElement);
         applyTournamentImageSlot(slot, state, playerId);
       });
     });
@@ -683,14 +755,23 @@
     };
   }
 
-  function initializeTournamentPage() {
+  function renderTournamentPage() {
     renderTournamentBracket();
     renderTournamentImages();
     scheduleTournamentConnectorDraws();
   }
 
+  function initializeTournamentPage() {
+    renderTournamentPage();
+  }
+
   window.drawTournamentConnectors = drawTournamentConnectors;
+  window.renderTournamentPage = renderTournamentPage;
   window.addEventListener('load', scheduleTournamentConnectorDraws);
+  window.addEventListener('pageshow', () => renderTournamentPage());
+  window.addEventListener('storage', (event) => {
+    if (!event.key || event.key === STORAGE_KEY) renderTournamentPage();
+  });
   window.addEventListener('resize', debounceTournamentConnectorDraw(100));
   window.addEventListener('orientationchange', () => window.setTimeout(scheduleTournamentConnectorDraws, 250));
 
