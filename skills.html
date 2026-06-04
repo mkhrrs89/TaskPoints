@@ -56,6 +56,39 @@
       padding: 3px;
     }
 
+    .skills-level-settings {
+      margin-top: 12px;
+      padding: 12px;
+      border: 1px solid rgba(148, 163, 184, 0.28);
+      border-radius: 14px;
+      background: rgba(15, 23, 42, 0.35);
+    }
+
+    .skills-level-settings-grid {
+      display: grid;
+      gap: 8px;
+    }
+
+    .skills-level-row {
+      display: grid;
+      grid-template-columns: minmax(70px, auto) minmax(90px, 1fr) 48px;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .skills-level-color-input {
+      width: 44px;
+      min-width: 44px;
+      height: 36px;
+      padding: 3px;
+    }
+
+    @media (max-width: 640px) {
+      .skills-level-row {
+        grid-template-columns: 1fr;
+      }
+    }
+
     .skill-level-cell {
       color: #f8fafc;
       font-weight: 800;
@@ -139,14 +172,32 @@
           <label for="skillsSort" class="text-xs muted">Sort</label>
           <select id="skillsSort" class="input text-xs py-1.5 pr-8">
             <option value="alpha">Alphabetical (A–Z)</option>
-            <option value="count-desc">Count (High to Low)</option>
-            <option value="count-asc">Count (Low to High)</option>
+            <option value="count-desc">Points (High to Low)</option>
+            <option value="count-asc">Points (Low to High)</option>
           </select>
           <label for="skillsBarMaxInput" class="text-xs muted">Bar Max</label>
-          <input id="skillsBarMaxInput" class="input text-xs py-1.5 w-20" type="number" min="1" step="1" value="10">
+          <input id="skillsBarMaxInput" class="input text-xs py-1.5 w-20" type="number" min="1" step="1" value="15">
           <label for="skillsBarColorInput" class="text-xs muted">Bar Color</label>
           <input id="skillsBarColorInput" class="input skills-bar-color-input" type="color" value="#1e666d">
+          <button id="skillsLevelSettingsToggle" type="button" class="btn btn-ghost btn-toolbar">Level Settings</button>
           <span id="skillsCount" class="text-xs muted"></span>
+        </div>
+      </div>
+      <div id="skillsLevelSettingsPanel" class="skills-level-settings hidden">
+        <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+          <div>
+            <h3 class="font-semibold">Level Settings</h3>
+            <p class="muted text-xs">Points are earned from the previous level. The final configured level is treated as max level.</p>
+          </div>
+          <label class="flex items-center gap-2 text-xs muted" for="skillsLevelCountInput">
+            <span>Number of Levels</span>
+            <input id="skillsLevelCountInput" class="input text-xs py-1.5 w-20" type="number" min="1" max="50" step="1" value="10">
+          </label>
+        </div>
+        <div id="skillsLevelRows" class="skills-level-settings-grid"></div>
+        <div class="flex flex-wrap items-center gap-2 mt-3">
+          <button id="skillsLevelSettingsSave" type="button" class="btn btn-primary btn-toolbar">Save Level Settings</button>
+          <button id="skillsLevelSettingsReset" type="button" class="btn btn-ghost btn-toolbar">Reset Defaults</button>
         </div>
       </div>
       <div class="skills-table-wrap rounded-xl border border-slate-700/70 bg-slate-900/35 overflow-hidden">
@@ -155,7 +206,7 @@
             <tr class="border-b border-slate-700/70 bg-slate-900/55">
               <th scope="col" class="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-300">Skill</th>
               <th scope="col" class="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-300 text-right">Level</th>
-              <th scope="col" class="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-300 text-right">Count</th>
+              <th scope="col" class="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-300 text-right">Points</th>
               <th scope="col" class="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-300 text-right">Manual</th>
             </tr>
           </thead>
@@ -172,12 +223,28 @@
     const DEFAULT_SORT_MODE = 'count-desc';
     const SKILLS_BAR_MAX_KEY = 'taskpoints_skills_bar_max';
     const SKILLS_BAR_COLOR_KEY = 'taskpoints_skills_bar_color';
-    const DEFAULT_SKILLS_BAR_MAX = 10;
+    const SKILLS_LEVEL_CONFIG_KEY = 'taskpoints_skills_level_config';
+    const DEFAULT_SKILLS_POINTS_PER_LEVEL = 15;
+    const DEFAULT_SKILLS_BAR_MAX = DEFAULT_SKILLS_POINTS_PER_LEVEL;
     const DEFAULT_SKILLS_BAR_COLOR = '#1e666d';
+    const DEFAULT_SKILLS_LEVEL_COUNT = 10;
+    const DEFAULT_SKILLS_LEVEL_COLORS = [
+      '#1e666d',
+      '#6b7280',
+      '#a3b18a',
+      '#fb923c',
+      '#14b8a6',
+      '#8b5cf6',
+      '#f59e0b',
+      '#ef4444',
+      '#ec4899',
+      '#e5e7eb',
+    ];
     let sortMode = DEFAULT_SORT_MODE;
     let aggregatedSkills = [];
     let skillsBarMax = DEFAULT_SKILLS_BAR_MAX;
     let skillsBarColor = DEFAULT_SKILLS_BAR_COLOR;
+    let skillsLevelConfig = getDefaultSkillsLevelConfig();
 
     function loadState() {
       if (window.TaskPointsCore?.loadAppState) {
@@ -223,18 +290,123 @@
       return fallback;
     }
 
-    function getSkillLevelInfo(count, maxPerLevel) {
-      const safeCount = Math.max(0, Number(count) || 0);
-      const safeMax = Math.max(1, Number(maxPerLevel) || DEFAULT_SKILLS_BAR_MAX);
-      const level = Math.floor(safeCount / safeMax) + 1;
-      const progressCount = safeCount % safeMax;
-      const fillPct = Math.max(0, Math.min(100, (progressCount / safeMax) * 100));
+    function getDefaultSkillsLevelConfig() {
+      return {
+        levelCount: DEFAULT_SKILLS_LEVEL_COUNT,
+        levels: Array.from({ length: DEFAULT_SKILLS_LEVEL_COUNT }, (_, index) => ({
+          level: index + 1,
+          pointsToNext: DEFAULT_SKILLS_POINTS_PER_LEVEL,
+          color: DEFAULT_SKILLS_LEVEL_COLORS[index % DEFAULT_SKILLS_LEVEL_COLORS.length],
+        })),
+      };
+    }
+
+    function getLegacySkillsLevelConfig() {
+      const fallback = getDefaultSkillsLevelConfig();
+      const legacyMax = normalizePositiveNumber(localStorage.getItem(SKILLS_BAR_MAX_KEY), DEFAULT_SKILLS_POINTS_PER_LEVEL);
+      const legacyColor = normalizeColor(localStorage.getItem(SKILLS_BAR_COLOR_KEY), DEFAULT_SKILLS_LEVEL_COLORS[0]);
+      return {
+        levelCount: fallback.levelCount,
+        levels: fallback.levels.map((level, index) => ({
+          ...level,
+          pointsToNext: legacyMax,
+          color: index === 0 ? legacyColor : level.color,
+        })),
+      };
+    }
+
+    function normalizeSkillsLevelConfig(rawConfig) {
+      const fallback = getDefaultSkillsLevelConfig();
+      const source = rawConfig && typeof rawConfig === 'object' ? rawConfig : fallback;
+      const levelCount = Math.min(50, Math.max(1, Math.floor(Number(source.levelCount) || DEFAULT_SKILLS_LEVEL_COUNT)));
+      const sourceLevels = Array.isArray(source.levels) ? source.levels : [];
+
+      const levels = Array.from({ length: levelCount }, (_, index) => {
+        const sourceLevel = sourceLevels[index] || {};
+        const pointsToNext = Math.max(1, Number(sourceLevel.pointsToNext) || DEFAULT_SKILLS_POINTS_PER_LEVEL);
+        const color = normalizeColor(sourceLevel.color, DEFAULT_SKILLS_LEVEL_COLORS[index % DEFAULT_SKILLS_LEVEL_COLORS.length]);
+
+        return {
+          level: index + 1,
+          pointsToNext,
+          color,
+        };
+      });
 
       return {
-        level,
-        progressCount,
-        fillPct,
-        maxPerLevel: safeMax,
+        levelCount,
+        levels,
+      };
+    }
+
+    function loadSkillsLevelConfig() {
+      try {
+        const raw = localStorage.getItem(SKILLS_LEVEL_CONFIG_KEY);
+        if (!raw) return normalizeSkillsLevelConfig(getLegacySkillsLevelConfig());
+        return normalizeSkillsLevelConfig(JSON.parse(raw));
+      } catch (error) {
+        console.warn('Failed to load skills level config', error);
+        return getDefaultSkillsLevelConfig();
+      }
+    }
+
+    function saveSkillsLevelConfig(config) {
+      const normalized = normalizeSkillsLevelConfig(config);
+      skillsLevelConfig = normalized;
+      localStorage.setItem(SKILLS_LEVEL_CONFIG_KEY, JSON.stringify(normalized));
+      return normalized;
+    }
+
+    function getSkillLevelInfo(totalPoints, config = skillsLevelConfig) {
+      const safePoints = Math.max(0, Number(totalPoints) || 0);
+      const safeConfig = normalizeSkillsLevelConfig(config);
+      const levels = safeConfig.levels;
+      let remaining = safePoints;
+
+      for (let index = 0; index < levels.length; index += 1) {
+        const level = levels[index];
+        const pointsToNext = Math.max(1, Number(level.pointsToNext) || DEFAULT_SKILLS_POINTS_PER_LEVEL);
+        const isLastLevel = index === levels.length - 1;
+
+        if (isLastLevel) {
+          return {
+            level: level.level,
+            progressCount: pointsToNext,
+            maxPerLevel: pointsToNext,
+            fillPct: 100,
+            color: level.color,
+            isMaxLevel: true,
+            pointsIntoLevel: Math.max(0, remaining),
+            pointsToNext,
+          };
+        }
+
+        if (remaining < pointsToNext) {
+          return {
+            level: level.level,
+            progressCount: remaining,
+            maxPerLevel: pointsToNext,
+            fillPct: Math.max(0, Math.min(100, (remaining / pointsToNext) * 100)),
+            color: level.color,
+            isMaxLevel: false,
+            pointsIntoLevel: remaining,
+            pointsToNext,
+          };
+        }
+
+        remaining -= pointsToNext;
+      }
+
+      const finalLevel = levels[levels.length - 1] || { level: 1, pointsToNext: 15, color: '#1e666d' };
+      return {
+        level: finalLevel.level,
+        progressCount: finalLevel.pointsToNext,
+        maxPerLevel: finalLevel.pointsToNext,
+        fillPct: 100,
+        color: finalLevel.color,
+        isMaxLevel: true,
+        pointsIntoLevel: remaining,
+        pointsToNext: finalLevel.pointsToNext,
       };
     }
 
@@ -246,6 +418,12 @@
       const green = parseInt(raw.slice(2, 4), 16);
       const blue = parseInt(raw.slice(4, 6), 16);
       return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+    }
+
+    function getSkillRowPointValue(row) {
+      const value = Number(row?.pts);
+      if (Number.isFinite(value)) return value;
+      return 1;
     }
 
     function getManualSkillOverrides(state) {
@@ -270,7 +448,7 @@
     function getDisplayedSkillLevel(skill, displayedCount = getDisplayedSkillCount(skill)) {
       const overrideLevel = Number(skill?.override?.levelOverride);
       if (Number.isFinite(overrideLevel) && overrideLevel >= 1) return Math.floor(overrideLevel);
-      return getSkillLevelInfo(displayedCount, skillsBarMax).level;
+      return getSkillLevelInfo(displayedCount, skillsLevelConfig).level;
     }
 
     function getSkillKindLabel(skill) {
@@ -298,8 +476,7 @@
             value.some((entry) =>
               entry &&
               typeof entry === 'object' &&
-              Object.prototype.hasOwnProperty.call(entry, 'skill') &&
-              Object.prototype.hasOwnProperty.call(entry, 'pts')
+              Object.prototype.hasOwnProperty.call(entry, 'skill')
             )
           ) {
             collections.push(value);
@@ -329,9 +506,10 @@
           const normalized = normalizeSkillName(row?.skill);
           if (!normalized) return;
 
+          const points = Math.max(0, getSkillRowPointValue(row));
           const existing = totals.get(normalized.key);
           if (existing) {
-            existing.count += 1;
+            existing.count += points;
             existing.auto = true;
             return;
           }
@@ -340,7 +518,7 @@
             key: normalized.key,
             display: normalized.display,
             originalDisplay: normalized.display,
-            count: 1,
+            count: points,
             auto: true,
             manual: false,
           });
@@ -435,14 +613,19 @@
 
       empty.classList.add('hidden');
       count.textContent = `${skills.length} skill${skills.length === 1 ? '' : 's'}`;
-      const barColorRgba = hexToRgba(skillsBarColor, 0.42);
       list.innerHTML = skills
         .map((skill) => {
           const displayedCount = getDisplayedSkillCount(skill);
-          const levelInfo = getSkillLevelInfo(displayedCount, skillsBarMax);
+          const levelInfo = getSkillLevelInfo(displayedCount, skillsLevelConfig);
           const displayedLevel = getDisplayedSkillLevel(skill, displayedCount);
           const fillPct = levelInfo.fillPct;
-          const levelTitle = escapeHtml(`${levelInfo.progressCount} / ${levelInfo.maxPerLevel} toward next level`);
+          const barColor = levelInfo.color || skillsBarColor;
+          const barColorRgba = hexToRgba(barColor, 0.42);
+          const nextLevel = Math.min(levelInfo.level + 1, skillsLevelConfig.levelCount);
+          const levelTitle = escapeHtml(levelInfo.isMaxLevel
+            ? 'Max configured level'
+            : `${levelInfo.progressCount} / ${levelInfo.maxPerLevel} pts toward Lv. ${nextLevel}`);
+          const levelText = escapeHtml(`Lv. ${displayedLevel}${levelInfo.isMaxLevel && displayedLevel === levelInfo.level ? ' Max' : ''}`);
           const rowStyle = escapeHtml(`background: linear-gradient(90deg, ${barColorRgba} 0%, ${barColorRgba} ${fillPct}%, transparent ${fillPct}%, transparent 100%);`);
           const manualLabel = escapeHtml(getSkillKindLabel(skill));
 
@@ -451,7 +634,7 @@
               <td class="px-3 py-2 font-medium">
                 <span class="skill-bar-label">${escapeHtml(skill.display)}</span>
               </td>
-              <td class="px-3 py-2 text-right tabular-nums skill-level-cell" title="${levelTitle}">Lv. ${displayedLevel}</td>
+              <td class="px-3 py-2 text-right tabular-nums skill-level-cell" title="${levelTitle}">${levelText}</td>
               <td class="px-3 py-2 text-right tabular-nums">${displayedCount}</td>
               <td class="px-3 py-2 text-right">
                 ${skill.manual ? `<button type="button" class="btn btn-ghost btn-toolbar text-xs" data-delete-manual-skill="${escapeHtml(skill.manualId)}">Delete</button>` : '<span class="muted text-xs">Auto</span>'}
@@ -695,11 +878,94 @@
       renderSkills();
     }
 
+    function renderSkillsLevelSettingsRows(config = skillsLevelConfig) {
+      const normalized = normalizeSkillsLevelConfig(config);
+      const countInput = document.getElementById('skillsLevelCountInput');
+      const rowsContainer = document.getElementById('skillsLevelRows');
+      if (countInput) countInput.value = String(normalized.levelCount);
+      if (!rowsContainer) return;
+
+      rowsContainer.innerHTML = normalized.levels.map((level, index) => {
+        const label = index === normalized.levels.length - 1 ? 'Pts to next / max marker' : 'Pts to next';
+        return `
+          <div class="skills-level-row">
+            <div class="text-sm font-semibold">Level ${level.level}</div>
+            <label class="text-xs muted">
+              <span>${label}</span>
+              <input class="input text-xs py-1.5 w-full" type="number" min="1" step="1" data-skill-level-points data-level-index="${index}" value="${escapeHtml(level.pointsToNext)}">
+            </label>
+            <label class="text-xs muted">
+              <span class="sr-only">Level ${level.level} color</span>
+              <input class="input skills-level-color-input" type="color" data-skill-level-color data-level-index="${index}" value="${escapeHtml(level.color)}">
+            </label>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function getSkillsLevelSettingsDraft() {
+      const countInput = document.getElementById('skillsLevelCountInput');
+      const levelCount = Math.min(50, Math.max(1, Math.floor(Number(countInput?.value) || DEFAULT_SKILLS_LEVEL_COUNT)));
+      const currentLevels = Array.isArray(skillsLevelConfig.levels) ? skillsLevelConfig.levels : [];
+      const levels = Array.from({ length: levelCount }, (_, index) => {
+        const existing = currentLevels[index] || {};
+        const pointsInput = document.querySelector(`[data-skill-level-points][data-level-index="${index}"]`);
+        const colorInput = document.querySelector(`[data-skill-level-color][data-level-index="${index}"]`);
+        return {
+          level: index + 1,
+          pointsToNext: Math.max(1, Number(pointsInput?.value ?? existing.pointsToNext) || DEFAULT_SKILLS_POINTS_PER_LEVEL),
+          color: normalizeColor(colorInput?.value ?? existing.color, DEFAULT_SKILLS_LEVEL_COLORS[index % DEFAULT_SKILLS_LEVEL_COLORS.length]),
+        };
+      });
+
+      return normalizeSkillsLevelConfig({ levelCount, levels });
+    }
+
+    function bindSkillsLevelSettings() {
+      const toggle = document.getElementById('skillsLevelSettingsToggle');
+      const panel = document.getElementById('skillsLevelSettingsPanel');
+      const countInput = document.getElementById('skillsLevelCountInput');
+      const saveButton = document.getElementById('skillsLevelSettingsSave');
+      const resetButton = document.getElementById('skillsLevelSettingsReset');
+
+      renderSkillsLevelSettingsRows(skillsLevelConfig);
+
+      if (toggle && panel) {
+        toggle.addEventListener('click', () => {
+          panel.classList.toggle('hidden');
+          renderSkillsLevelSettingsRows(skillsLevelConfig);
+        });
+      }
+
+      if (countInput) {
+        countInput.addEventListener('input', () => {
+          renderSkillsLevelSettingsRows(getSkillsLevelSettingsDraft());
+        });
+      }
+
+      if (saveButton) {
+        saveButton.addEventListener('click', () => {
+          saveSkillsLevelConfig(getSkillsLevelSettingsDraft());
+          renderSkillsLevelSettingsRows(skillsLevelConfig);
+          renderSkills();
+        });
+      }
+
+      if (resetButton) {
+        resetButton.addEventListener('click', () => {
+          saveSkillsLevelConfig(getDefaultSkillsLevelConfig());
+          renderSkillsLevelSettingsRows(skillsLevelConfig);
+          renderSkills();
+        });
+      }
+    }
+
     function initSkillsPage() {
       const state = loadState();
       aggregatedSkills = collectSkillTotals(state);
       skillsBarMax = normalizePositiveNumber(localStorage.getItem(SKILLS_BAR_MAX_KEY), DEFAULT_SKILLS_BAR_MAX);
       skillsBarColor = normalizeColor(localStorage.getItem(SKILLS_BAR_COLOR_KEY), DEFAULT_SKILLS_BAR_COLOR);
+      skillsLevelConfig = loadSkillsLevelConfig();
 
       const sortSelect = document.getElementById('skillsSort');
       if (sortSelect) {
@@ -716,6 +982,14 @@
         barMaxInput.addEventListener('input', (event) => {
           skillsBarMax = normalizePositiveNumber(event.target.value, DEFAULT_SKILLS_BAR_MAX);
           localStorage.setItem(SKILLS_BAR_MAX_KEY, String(skillsBarMax));
+          saveSkillsLevelConfig({
+            ...skillsLevelConfig,
+            levels: skillsLevelConfig.levels.map((level) => ({
+              ...level,
+              pointsToNext: skillsBarMax,
+            })),
+          });
+          renderSkillsLevelSettingsRows(skillsLevelConfig);
           renderSkills();
         });
       }
@@ -726,6 +1000,14 @@
         barColorInput.addEventListener('input', (event) => {
           skillsBarColor = normalizeColor(event.target.value, DEFAULT_SKILLS_BAR_COLOR);
           localStorage.setItem(SKILLS_BAR_COLOR_KEY, skillsBarColor);
+          saveSkillsLevelConfig({
+            ...skillsLevelConfig,
+            levels: skillsLevelConfig.levels.map((level, index) => index === 0 ? {
+              ...level,
+              color: skillsBarColor,
+            } : level),
+          });
+          renderSkillsLevelSettingsRows(skillsLevelConfig);
           renderSkills();
         });
       }
@@ -734,6 +1016,8 @@
       if (addButton) {
         addButton.addEventListener('click', addManualSkill);
       }
+
+      bindSkillsLevelSettings();
 
       renderSkills();
     }
