@@ -479,11 +479,26 @@
 
     currentSeason = applyChampionCrownedStatus(currentSeason, options);
 
-    const nextState = {
+    let nextState = {
       ...normalized,
       currentSeason,
       latestSeasonId: currentSeason?.id || normalized.latestSeasonId || ''
     };
+
+    if (typeof core.repairSeasonChampionshipData === 'function') {
+      const repaired = core.repairSeasonChampionshipData(nextState, options);
+      if (repaired?.ok && repaired.state) {
+        changed = changed || semanticSeasonSnapshot(repaired.state.currentSeason) !== semanticSeasonSnapshot(nextState.currentSeason);
+        nextState = repaired.state;
+      }
+    } else if (typeof core.repairPlayInAdvancementForCurrentSeason === 'function') {
+      const repaired = core.repairPlayInAdvancementForCurrentSeason(nextState, options);
+      if (repaired?.state) {
+        changed = changed || Boolean(repaired.changed);
+        nextState = repaired.state;
+      }
+    }
+
     return { state: normalizeSeasonViewState(nextState), changed };
   }
 

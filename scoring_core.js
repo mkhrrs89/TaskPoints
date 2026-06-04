@@ -211,11 +211,58 @@
     return isSeasonObject(value) ? { ...value } : {};
   }
 
+  function isSeasonMonthKey(value) {
+    return typeof value === 'string' && /^\d{4}-\d{2}$/.test(value.trim());
+  }
+
+  function dateFromLocalDateKey(dateKeyStr) {
+    const parts = String(dateKeyStr || '').split('-').map(Number);
+    if (parts.length < 3 || parts.some((part) => !Number.isFinite(part))) return new Date(NaN);
+    const [year, month, day] = parts;
+    return new Date(year, month - 1, day);
+  }
+
+  function getLocalMonthEndDateKey(monthKeyStr) {
+    if (!isSeasonMonthKey(monthKeyStr)) return '';
+    const [year, month] = String(monthKeyStr).split('-').map(Number);
+    return dateKey(new Date(year, month, 0));
+  }
+
+  function getSeasonMonthBoundaryKeys(monthKeyStr) {
+    const month = isSeasonMonthKey(monthKeyStr) ? String(monthKeyStr).trim() : DEFAULT_SEASON_MONTH_KEY;
+    return { startDate: `${month}-01`, endDate: getLocalMonthEndDateKey(month) || `${month}-30` };
+  }
+
+  function adjacentLocalDateKey(dateKeyStr, offsetDays) {
+    const date = dateFromLocalDateKey(dateKeyStr);
+    if (!date || Number.isNaN(date.getTime())) return '';
+    date.setDate(date.getDate() + Number(offsetDays || 0));
+    return dateKey(date);
+  }
+
+  function shouldRepairSeasonBoundary(existing, expected, kind) {
+    if (typeof existing !== 'string' || !existing) return true;
+    if (existing === expected) return false;
+    if (kind === 'start' && existing === adjacentLocalDateKey(expected, -1)) return true;
+    if (kind === 'end' && existing === adjacentLocalDateKey(expected, -1)) return true;
+    return false;
+  }
+
+  function normalizeSeasonDateFields(season, monthKeyStr) {
+    const bounds = getSeasonMonthBoundaryKeys(monthKeyStr);
+    const startDate = shouldRepairSeasonBoundary(season?.startDate, bounds.startDate, 'start') ? bounds.startDate : season.startDate;
+    const endDate = shouldRepairSeasonBoundary(season?.endDate, bounds.endDate, 'end') ? bounds.endDate : season.endDate;
+    const startDateKey = shouldRepairSeasonBoundary(season?.startDateKey, bounds.startDate, 'start') ? bounds.startDate : season.startDateKey;
+    const endDateKey = shouldRepairSeasonBoundary(season?.endDateKey, bounds.endDate, 'end') ? bounds.endDate : season.endDateKey;
+    return { startDate, endDate, startDateKey, endDateKey };
+  }
+
   function normalizeSeasonState(season) {
     if (!isSeasonObject(season)) return null;
-    const month = typeof season.monthKey === 'string' && season.monthKey.trim()
+    const month = isSeasonMonthKey(season.monthKey)
       ? season.monthKey.trim()
-      : DEFAULT_SEASON_MONTH_KEY;
+      : (isSeasonMonthKey(season.month) ? season.month.trim() : DEFAULT_SEASON_MONTH_KEY);
+    const dateFields = normalizeSeasonDateFields(season, month);
     const name = typeof season.name === 'string' && season.name.trim()
       ? season.name.trim()
       : DEFAULT_SEASON_NAME;
@@ -230,8 +277,11 @@
       name,
       label: typeof season.label === 'string' ? season.label : name,
       monthKey: month,
-      startDate: typeof season.startDate === 'string' ? season.startDate : '2026-06-01',
-      endDate: typeof season.endDate === 'string' ? season.endDate : '2026-06-30',
+      month: typeof season.month === 'string' ? season.month : month,
+      startDate: dateFields.startDate,
+      endDate: dateFields.endDate,
+      startDateKey: dateFields.startDateKey,
+      endDateKey: dateFields.endDateKey,
       status,
       createdAtISO: typeof season.createdAtISO === 'string' ? season.createdAtISO : '',
       updatedAtISO: typeof season.updatedAtISO === 'string' ? season.updatedAtISO : '',
@@ -300,14 +350,18 @@
   function createEmptySeasonDraft(options = {}) {
     const nowISO = typeof options.nowISO === 'string' ? options.nowISO : new Date().toISOString();
     const name = typeof options.name === 'string' && options.name.trim() ? options.name.trim() : DEFAULT_SEASON_NAME;
-    const monthKey = typeof options.monthKey === 'string' && options.monthKey.trim() ? options.monthKey.trim() : DEFAULT_SEASON_MONTH_KEY;
+    const monthKey = isSeasonMonthKey(options.monthKey) ? options.monthKey.trim() : DEFAULT_SEASON_MONTH_KEY;
+    const dateBounds = getSeasonMonthBoundaryKeys(monthKey);
     const draft = {
       id: typeof options.id === 'string' && options.id.trim() ? options.id.trim() : buildSeasonId(name, monthKey),
       name,
       label: typeof options.label === 'string' ? options.label : name,
       monthKey,
-      startDate: typeof options.startDate === 'string' ? options.startDate : '2026-06-01',
-      endDate: typeof options.endDate === 'string' ? options.endDate : '2026-06-30',
+      month: typeof options.month === 'string' ? options.month : monthKey,
+      startDate: typeof options.startDate === 'string' ? options.startDate : dateBounds.startDate,
+      endDate: typeof options.endDate === 'string' ? options.endDate : dateBounds.endDate,
+      startDateKey: typeof options.startDateKey === 'string' ? options.startDateKey : (typeof options.startDate === 'string' ? options.startDate : dateBounds.startDate),
+      endDateKey: typeof options.endDateKey === 'string' ? options.endDateKey : (typeof options.endDate === 'string' ? options.endDate : dateBounds.endDate),
       status: SEASON_STATUSES.includes(options.status) ? options.status : 'preview',
       createdAtISO: typeof options.createdAtISO === 'string' ? options.createdAtISO : nowISO,
       updatedAtISO: typeof options.updatedAtISO === 'string' ? options.updatedAtISO : nowISO,
@@ -581,25 +635,114 @@
     return { ok: true, season: nextSeason, series: nextSeries, complete: nextSeries.status === 'complete' };
   }
 
-  function resolvePlayInWinnersIntoRoundOf32(season, options = {}) {
+  function findSeasonSeedEntryByPlayerId(season, playerId) {
+    return (Array.isArray(season?.seeds) ? season.seeds : []).find((seed) => (seed?.playerId || seed?.id) === playerId) || null;
+  }
+
+  function withSeasonSeedFallback(season, competitor) {
+    const seedRow = findSeasonSeedEntryByPlayerId(season, competitor?.playerId);
+    return {
+      playerId: competitor?.playerId || seedRow?.playerId || seedRow?.id || '',
+      playerName: competitor?.playerName || seedRow?.playerName || seedRow?.name || competitor?.playerId || '',
+      seed: Number.isFinite(Number(competitor?.seed)) ? Number(competitor.seed) : (Number.isFinite(Number(seedRow?.seed)) ? Number(seedRow.seed) : null)
+    };
+  }
+
+  function findRoundOf32ProtectedSeries(season, seedNumber, fallbackIndex) {
+    const playerId = (Array.isArray(season?.seeds) ? season.seeds : []).find((seed) => Number(seed?.seed) === Number(seedNumber))?.playerId || '';
+    const r32 = Object.values(season?.series || {}).filter((series) => series?.roundId === 'round_of_32');
+    return r32.find((series) => Number(series?.playerASeed) === Number(seedNumber) || Number(series?.playerBSeed) === Number(seedNumber) || (playerId && (series?.playerAId === playerId || series?.playerBId === playerId)))
+      || r32.sort((a, b) => (Number(a.seriesIndex) || 0) - (Number(b.seriesIndex) || 0))[fallbackIndex]
+      || null;
+  }
+
+  function setProtectedPlayInOpponent(series, protectedSeedNumber, player, options = {}) {
+    if (!series || !player?.playerId) return series;
+    const slot = Number(series.playerASeed) === Number(protectedSeedNumber) ? 'B' : (Number(series.playerBSeed) === Number(protectedSeedNumber) ? 'A' : 'B');
+    return setSeriesSlot(series, slot, player, options);
+  }
+
+  function repairPlayInAdvancementForSeason(season, options = {}) {
     const nextSeason = normalizeSeasonState(season);
     if (!nextSeason) return { ok: false, error: 'invalid_season', season };
     const allSeries = nextSeason.series || {};
-    const playIn = Object.values(allSeries).filter((series) => series?.roundId === 'play_in').sort((a, b) => (a.seriesIndex || 0) - (b.seriesIndex || 0));
-    if (playIn.length < 2 || playIn.some((series) => !getSeasonSeriesWinner(series))) return { ok: false, error: 'play_in_not_complete', season: nextSeason };
-    const winners = playIn.map((series) => seasonSeriesCompetitor(series, getSeasonSeriesWinner(series) === series.playerAId ? 'A' : 'B'));
+    const nextSeries = { ...allSeries };
+    let changed = false;
+    const playIn = Object.values(allSeries).filter((series) => series?.roundId === 'play_in').sort((a, b) => (Number(a.seriesIndex) || 0) - (Number(b.seriesIndex) || 0));
+    if (playIn.length < 2) return { ok: false, error: 'play_in_series_missing', season: nextSeason };
+
+    const winners = [];
+    playIn.forEach((series) => {
+      const recalculatedRaw = Array.isArray(series?.gameResults) && series.gameResults.length ? recalculateSeasonSeriesFromGameResults(series, options) : series;
+      const recalculated = (Number(recalculatedRaw?.winsA) || 0) === (Number(series?.winsA) || 0)
+        && (Number(recalculatedRaw?.winsB) || 0) === (Number(series?.winsB) || 0)
+        && String(recalculatedRaw?.winnerId || '') === String(series?.winnerId || '')
+        && String(recalculatedRaw?.loserId || '') === String(series?.loserId || '')
+        && String(recalculatedRaw?.status || '') === String(series?.status || '')
+        ? series
+        : recalculatedRaw;
+      const winnerId = getSeasonSeriesWinner(recalculated);
+      let repairedSeries = recalculated;
+      if (winnerId && (recalculated.winnerId !== winnerId || recalculated.status !== 'complete')) {
+        repairedSeries = {
+          ...recalculated,
+          winnerId,
+          loserId: winnerId === recalculated.playerAId ? recalculated.playerBId : recalculated.playerAId,
+          status: 'complete',
+          updatedAtISO: seasonNowISO(options)
+        };
+      }
+      if (JSON.stringify(repairedSeries) !== JSON.stringify(series)) {
+        nextSeries[series.id] = repairedSeries;
+        changed = true;
+      }
+      if (winnerId) {
+        const slot = winnerId === repairedSeries.playerAId ? 'A' : 'B';
+        const competitor = withSeasonSeedFallback(nextSeason, seasonSeriesCompetitor(repairedSeries, slot));
+        if (competitor.playerId && Number.isFinite(Number(competitor.seed))) winners.push(competitor);
+      }
+    });
+
+    if (winners.length < 2) {
+      nextSeason.series = nextSeries;
+      if (changed) nextSeason.updatedAtISO = seasonNowISO(options);
+      return { ok: false, error: 'play_in_not_complete', season: nextSeason, changed };
+    }
+
     winners.sort((a, b) => (Number(b.seed) || 0) - (Number(a.seed) || 0));
     const worseSeedWinner = winners[0];
     const otherWinner = winners[1];
-    const r32 = Object.values(allSeries).filter((series) => series?.roundId === 'round_of_32').sort((a, b) => (a.seriesIndex || 0) - (b.seriesIndex || 0));
-    if (!r32[0] || !r32[8]) return { ok: false, error: 'round_of_32_slots_missing', season: nextSeason };
+    const seed1Series = findRoundOf32ProtectedSeries({ ...nextSeason, series: nextSeries }, 1, 0);
+    const seed2Series = findRoundOf32ProtectedSeries({ ...nextSeason, series: nextSeries }, 2, 8);
+    if (!seed1Series || !seed2Series) return { ok: false, error: 'round_of_32_slots_missing', season: nextSeason, changed };
+
     const now = seasonNowISO(options);
-    const nextSeries = { ...allSeries };
-    nextSeries[r32[0].id] = setSeriesSlot(r32[0], 'B', worseSeedWinner, { nowISO: now });
-    nextSeries[r32[8].id] = setSeriesSlot(r32[8], 'B', otherWinner, { nowISO: now });
+    const repairedSeed1 = setProtectedPlayInOpponent(seed1Series, 1, worseSeedWinner, { nowISO: now });
+    const repairedSeed2 = setProtectedPlayInOpponent(seed2Series, 2, otherWinner, { nowISO: now });
+    if (JSON.stringify(repairedSeed1) !== JSON.stringify(seed1Series)) { nextSeries[seed1Series.id] = repairedSeed1; changed = true; }
+    if (JSON.stringify(repairedSeed2) !== JSON.stringify(seed2Series)) { nextSeries[seed2Series.id] = repairedSeed2; changed = true; }
     nextSeason.series = nextSeries;
-    nextSeason.updatedAtISO = now;
-    return { ok: true, season: nextSeason, seed1Opponent: worseSeedWinner, seed2Opponent: otherWinner };
+    if (changed) nextSeason.updatedAtISO = now;
+    if (changed && global.console && typeof global.console.info === 'function') {
+      console.info('[Season repair] Resolved Play-In winners into Round of 32', { seed1Opponent: worseSeedWinner, seed2Opponent: otherWinner });
+    }
+    return { ok: true, season: nextSeason, changed, seed1Opponent: worseSeedWinner, seed2Opponent: otherWinner };
+  }
+
+  function resolvePlayInWinnersIntoRoundOf32(season, options = {}) {
+    return repairPlayInAdvancementForSeason(season, options);
+  }
+
+  function repairPlayInAdvancementForCurrentSeason(state, options = {}) {
+    const normalized = normalizeState(state || {});
+    const repaired = repairPlayInAdvancementForSeason(normalized.currentSeason, options);
+    if (!repaired.season) return { ok: false, state: normalized, changed: false, error: repaired.error || 'invalid_season' };
+    const changed = Boolean(repaired.changed);
+    return {
+      ...repaired,
+      state: changed ? normalizeState({ ...normalized, currentSeason: repaired.season, latestSeasonId: repaired.season.id || normalized.latestSeasonId || '' }) : normalized,
+      changed
+    };
   }
 
   function advanceSeasonSeriesWinner(season, seriesId, options = {}) {
@@ -1162,6 +1305,22 @@
     return { ok: true, changed, season: nextSeason };
   }
 
+  function repairSeasonDateRange(state, options = {}) {
+    const normalized = normalizeState(state || {});
+    let changed = false;
+    const repairSeason = (season) => {
+      const before = normalizeSeasonState(season);
+      if (!before) return null;
+      const after = normalizeSeasonState(before);
+      if (JSON.stringify(after) !== JSON.stringify(before)) changed = true;
+      return after;
+    };
+    const currentSeason = repairSeason(normalized.currentSeason);
+    const seasonHistory = normalizeSeasonHistory(normalized.seasonHistory).map(repairSeason).filter(Boolean);
+    const nextState = changed ? normalizeState({ ...normalized, currentSeason, seasonHistory }) : normalized;
+    return { ok: true, state: nextState, changed };
+  }
+
   function repairSeasonChampionshipData(state, options = {}) {
     const normalized = normalizeState(state || {});
     const cleanSeriesMap = (seriesMap) => {
@@ -1177,7 +1336,10 @@
     const repairSeason = (season) => {
       const fixed = normalizeSeasonState(season);
       if (!fixed) return null;
-      return normalizeSeasonState({ ...fixed, series: cleanSeriesMap(fixed.series) });
+      let repaired = normalizeSeasonState({ ...fixed, series: cleanSeriesMap(fixed.series) });
+      const playInRepair = repairPlayInAdvancementForSeason(repaired, options);
+      if (playInRepair.season) repaired = playInRepair.season;
+      return normalizeSeasonState(repaired);
     };
     const currentSeason = repairSeason(normalized.currentSeason);
     const seasonHistory = normalizeSeasonHistory(normalized.seasonHistory).map(repairSeason).filter(Boolean);
@@ -1566,6 +1728,12 @@
         else warnings.push(`Series ${matchup.seriesId} complete but advancement is pending: ${advanced.error || 'unknown'}.`);
       }
     });
+    const playInRepair = repairPlayInAdvancementForSeason(season, options);
+    if (playInRepair.season) {
+      season = playInRepair.season;
+      if (playInRepair.changed) changed = true;
+      else if (!playInRepair.ok && playInRepair.error && playInRepair.error !== 'play_in_not_complete') warnings.push(`Play-In repair pending: ${playInRepair.error}.`);
+    }
     const nextState = changed ? normalizeState({ ...normalized, currentSeason: season, latestSeasonId: season?.id || normalized.latestSeasonId || '' }) : normalized;
     return { ok: errors.length === 0, state: nextState, updatedSeason: season, changed, warnings, errors };
   }
@@ -2100,6 +2268,13 @@ workHistory: Array.isArray(s?.workHistory) ? s.workHistory : [],
       const matchupSync = syncYouMatchups(state, { normalized: true });
       state = matchupSync.state;
       changed = changed || matchupSync.changed;
+
+      const seasonRepair = repairSeasonChampionshipData(state, options);
+      if (seasonRepair.ok) {
+        const beforeSeasonRepair = JSON.stringify(state.currentSeason || null);
+        state = seasonRepair.state;
+        changed = changed || beforeSeasonRepair !== JSON.stringify(state.currentSeason || null);
+      }
     }
 
     if (changed && shouldPersist) {
@@ -3394,7 +3569,8 @@ return { state: merged, storageKey };
   }
 
   function niceDate(d){
-    if (!(d instanceof Date)) d = new Date(d);
+    if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) d = fromKey(d);
+    else if (!(d instanceof Date)) d = new Date(d);
     if (!d || isNaN(d.getTime())) return 'Invalid date';
     return d.toLocaleDateString(undefined,{
       year:'numeric',
@@ -5135,6 +5311,10 @@ return Number(cappedScore.toFixed(1));
     isSeasonSeriesComplete,
     advanceSeasonSeriesWinner,
     resolvePlayInWinnersIntoRoundOf32,
+    getLocalMonthEndDateKey,
+    dateFromLocalDateKey,
+    repairPlayInAdvancementForCurrentSeason,
+    repairSeasonDateRange,
     getActiveSeasonSeriesForDate,
     prepareSeasonForDailySlate,
     getSeasonScheduleSignature,
