@@ -329,6 +329,88 @@
     return row?.playerId || row?.id || '';
   }
 
+  function getTournamentSeedNumberForPlayer(state, playerId) {
+    const seeds = Array.isArray(state?.currentSeason?.seeds) ? state.currentSeason.seeds : [];
+    const row = seeds.find((seed) => (seed?.playerId || seed?.id) === playerId);
+    const seedNumber = Number(row?.seed);
+    return Number.isFinite(seedNumber) ? seedNumber : null;
+  }
+
+  function getTournamentPlayInSeries(state) {
+    const series = getTournamentSeasonSeries(state);
+    return series.filter((s) => {
+      const roundText = String(s?.roundId || s?.round || s?.roundName || '').toLowerCase();
+      return roundText.includes('play') && roundText.includes('in');
+    });
+  }
+
+  function getTournamentSeriesWinnerId(series) {
+    if (!series) return '';
+    if (series.winnerId) return series.winnerId;
+
+    const winsA = Number(series.winsA) || 0;
+    const winsB = Number(series.winsB) || 0;
+    const bestOf = Number(series.bestOf) || 3;
+    const winsNeeded = Number(series.winsNeeded) || Math.floor(bestOf / 2) + 1;
+
+    if (winsA >= winsNeeded && winsA > winsB) {
+      return series.playerAId || series.playerA?.id || series.competitorAId || '';
+    }
+
+    if (winsB >= winsNeeded && winsB > winsA) {
+      return series.playerBId || series.playerB?.id || series.competitorBId || '';
+    }
+
+    return '';
+  }
+
+  function resolveTournamentPlayInPlaceholderPlayerId(state, placeholderKey) {
+    if (!placeholderKey) return '';
+
+    const normalizedKey = String(placeholderKey).trim().toLowerCase();
+    const seed1PlaceholderKeys = new Set(['play_in_low', 'play_in_lowest']);
+    if (!seed1PlaceholderKeys.has(normalizedKey) && normalizedKey !== 'play_in_other') return '';
+
+    const playInSeries = getTournamentPlayInSeries(state);
+    const winnerEntries = playInSeries
+      .map((series) => {
+        const winnerId = getTournamentSeriesWinnerId(series);
+        const winnerSeed = getTournamentSeedNumberForPlayer(state, winnerId);
+        return { winnerId, winnerSeed };
+      })
+      .filter((entry) => entry.winnerId && Number.isFinite(entry.winnerSeed));
+
+    if (winnerEntries.length < 2) {
+      console.debug('[Tourney PI resolver]', {
+        playInSeriesCount: playInSeries.length,
+        winnerEntries,
+        placeholderKey,
+        resolvedPlayInPlayerId: '',
+      });
+      return '';
+    }
+
+    // IMPORTANT: descending seed order, matching production Play-In resolver.
+    const sortedWinners = winnerEntries
+      .slice()
+      .sort((a, b) => b.winnerSeed - a.winnerSeed);
+
+    const seed1Opponent = sortedWinners[0]; // worse/higher numeric seed
+    const seed2Opponent = sortedWinners[1]; // other/lower numeric seed
+    const resolvedPlayInPlayerId = seed1PlaceholderKeys.has(normalizedKey)
+      ? seed1Opponent?.winnerId || ''
+      : seed2Opponent?.winnerId || '';
+
+    console.debug('[Tourney PI resolver]', {
+      playInSeriesCount: playInSeries.length,
+      winnerEntries,
+      placeholderKey,
+      resolvedPlayInPlayerId,
+    });
+
+    return resolvedPlayInPlayerId;
+  }
+
   async function loadTournamentImageUrl(imageId) {
     if (!imageId) return '';
     if (tournamentImageUrlCache.has(imageId)) return tournamentImageUrlCache.get(imageId);
@@ -525,6 +607,10 @@
     clearTournamentSeriesSlotMetadata(slot);
     const live = resolveTournamentSlotPlayerIdFromSeasonSeries(state, slot, roundElement);
     if (live.playerId) return live.playerId;
+
+    const placeholderKey = slot?.getAttribute?.('data-placeholder-key') || '';
+    const resolvedPlayInPlayerId = resolveTournamentPlayInPlaceholderPlayerId(state, placeholderKey);
+    if (resolvedPlayInPlayerId) return resolvedPlayInPlayerId;
 
     const hasOfficialSeries = hasOfficialSeasonSeriesData(state);
     if (hasOfficialSeries && live.mapped && !isFixedSeedSlot(slot)) return '';
