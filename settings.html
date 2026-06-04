@@ -596,6 +596,21 @@
       <div class="glass space-y-3">
         <div class="flex items-center justify-between gap-3 flex-wrap">
           <div>
+            <div class="text-lg font-semibold">Skills Data</div>
+            <div class="muted text-sm">Clear skills-only data while keeping tasks, completions, and scores.</div>
+          </div>
+        </div>
+        <div class="rounded-xl border border-rose-500/30 bg-rose-950/20 p-4 space-y-3">
+          <div class="flex flex-wrap gap-2 items-center">
+            <button id="settingsClearAllSkillsBtn" class="btn btn-deny btn-toolbar nav-btn" type="button">Clear All Skills</button>
+          </div>
+          <p class="muted text-xs">Removes manually added skills and clears skill fields from tasks. Does not delete tasks or completions.</p>
+        </div>
+      </div>
+
+      <div class="glass space-y-3">
+        <div class="flex items-center justify-between gap-3 flex-wrap">
+          <div>
             <div class="text-lg font-semibold">Reset All Data</div>
             <div class="muted text-sm">Permanently remove everything stored on this device.</div>
           </div>
@@ -794,6 +809,104 @@
         console.error("Failed to save game stat reset", err);
         alert("The game stats could not be reset due to a storage error.");
       }
+    }
+
+
+    function loadLatestSettingsStateForSkillsClear() {
+      try {
+        const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+        const parsed = raw ? (JSON.parse(raw) || {}) : {};
+        if (window.TaskPointsCore?.loadAppState) {
+          const loaded = TaskPointsCore.loadAppState({ syncDerived: false, persistSync: false }).state || {};
+          return { ...parsed, ...loaded };
+        }
+        if (window.TaskPointsCore?.normalizeState) {
+          return { ...parsed, ...TaskPointsCore.normalizeState(parsed) };
+        }
+        return normalizeSettingsState(parsed);
+      } catch (err) {
+        console.error("Failed to load TaskPoints data for skills clear", err);
+        throw err;
+      }
+    }
+
+    function clearSkillFieldsDeep(value, seen = new WeakSet()) {
+      if (!value || typeof value !== 'object') return 0;
+      if (seen.has(value)) return 0;
+      seen.add(value);
+
+      let changed = 0;
+
+      if (Array.isArray(value)) {
+        value.forEach((entry) => {
+          changed += clearSkillFieldsDeep(entry, seen);
+        });
+        return changed;
+      }
+
+      if (Object.prototype.hasOwnProperty.call(value, 'skill')) {
+        if (typeof value.skill === 'string' && value.skill.trim()) {
+          value.skill = '';
+          changed += 1;
+        } else if (value.skill != null && value.skill !== '') {
+          value.skill = '';
+          changed += 1;
+        }
+      }
+
+      Object.values(value).forEach((child) => {
+        changed += clearSkillFieldsDeep(child, seen);
+      });
+
+      return changed;
+    }
+
+    function saveSkillsClearedState(nextState) {
+      if (window.TaskPointsCore?.saveStateSnapshot) {
+        const saved = TaskPointsCore.saveStateSnapshot(nextState, {
+          storageKey: SETTINGS_STORAGE_KEY,
+          savePath: 'settings-clear-all-skills',
+          immediateWrite: true,
+          limits: { allowHistoryPrune: false, allowCompletionPrune: false }
+        });
+        return saved?.state || nextState;
+      }
+
+      localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(nextState));
+      return nextState;
+    }
+
+    function handleClearAllSkills() {
+      const firstMessage = 'Clear all skills? This will remove manually added skills and erase skill fields from tasks. Tasks, completions, scores, and other app data will remain untouched.';
+      if (!confirm(firstMessage)) return;
+
+      const secondMessage = 'Are you absolutely sure? This cannot be undone except by importing a backup.';
+      if (!confirm(secondMessage)) return;
+
+      let state;
+      try {
+        state = loadLatestSettingsStateForSkillsClear();
+      } catch (err) {
+        alert('Could not read your saved TaskPoints data. No changes were made.');
+        return;
+      }
+
+      state.manualSkills = [];
+      state.manualSkillOverrides = {};
+      const clearedSkillFields = clearSkillFieldsDeep(state);
+
+      try {
+        saveSkillsClearedState(state);
+      } catch (err) {
+        console.error('Failed to save skills clear', err);
+        alert('The skills could not be cleared due to a storage error. No success message will be shown.');
+        return;
+      }
+
+      const fieldText = clearedSkillFields === 1
+        ? '1 skill field was cleared.'
+        : `${clearedSkillFields} skill fields were cleared.`;
+      alert(`Skills cleared. ${fieldText} Tasks and scores were left untouched.`);
     }
 
 
@@ -4174,6 +4287,7 @@ rows.push([
       document.getElementById('settingsImportPasteBtn')?.addEventListener('click', handleSettingsPaste);
       document.getElementById('settingsMergeBackupInput')?.addEventListener('change', handleMergeBackupFile);
       document.getElementById('settingsResetGameStatsBtn')?.addEventListener('click', handleSettingsResetGameStats);
+      document.getElementById('settingsClearAllSkillsBtn')?.addEventListener('click', handleClearAllSkills);
       document.getElementById('settingsResetBtn')?.addEventListener('click', handleSettingsReset);
       document.getElementById('settingsSeasonResetBtn')?.addEventListener('click', handleSeasonResetCurrent);
       document.getElementById('settingsSeasonRebuildBtn')?.addEventListener('click', handleSeasonRebuildFromSavedResults);
