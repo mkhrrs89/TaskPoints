@@ -172,11 +172,11 @@
           <label for="skillsSort" class="text-xs muted">Sort</label>
           <select id="skillsSort" class="input text-xs py-1.5 pr-8">
             <option value="alpha">Alphabetical (A–Z)</option>
-            <option value="count-desc">Count (High to Low)</option>
-            <option value="count-asc">Count (Low to High)</option>
+            <option value="count-desc">Points (High to Low)</option>
+            <option value="count-asc">Points (Low to High)</option>
           </select>
           <label for="skillsBarMaxInput" class="text-xs muted">Bar Max</label>
-          <input id="skillsBarMaxInput" class="input text-xs py-1.5 w-20" type="number" min="1" step="1" value="10">
+          <input id="skillsBarMaxInput" class="input text-xs py-1.5 w-20" type="number" min="1" step="1" value="15">
           <label for="skillsBarColorInput" class="text-xs muted">Bar Color</label>
           <input id="skillsBarColorInput" class="input skills-bar-color-input" type="color" value="#1e666d">
           <button id="skillsLevelSettingsToggle" type="button" class="btn btn-ghost btn-toolbar">Level Settings</button>
@@ -224,10 +224,10 @@
     const SKILLS_BAR_MAX_KEY = 'taskpoints_skills_bar_max';
     const SKILLS_BAR_COLOR_KEY = 'taskpoints_skills_bar_color';
     const SKILLS_LEVEL_CONFIG_KEY = 'taskpoints_skills_level_config';
-    const DEFAULT_SKILLS_BAR_MAX = 10;
+    const DEFAULT_SKILLS_POINTS_PER_LEVEL = 15;
+    const DEFAULT_SKILLS_BAR_MAX = DEFAULT_SKILLS_POINTS_PER_LEVEL;
     const DEFAULT_SKILLS_BAR_COLOR = '#1e666d';
     const DEFAULT_SKILLS_LEVEL_COUNT = 10;
-    const DEFAULT_SKILLS_POINTS_PER_LEVEL = 15;
     const DEFAULT_SKILLS_LEVEL_COLORS = [
       '#1e666d',
       '#6b7280',
@@ -420,6 +420,12 @@
       return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
     }
 
+    function getSkillRowPointValue(row) {
+      const value = Number(row?.pts);
+      if (Number.isFinite(value)) return value;
+      return 1;
+    }
+
     function getManualSkillOverrides(state) {
       return state?.manualSkillOverrides &&
         typeof state.manualSkillOverrides === 'object' &&
@@ -470,8 +476,7 @@
             value.some((entry) =>
               entry &&
               typeof entry === 'object' &&
-              Object.prototype.hasOwnProperty.call(entry, 'skill') &&
-              Object.prototype.hasOwnProperty.call(entry, 'pts')
+              Object.prototype.hasOwnProperty.call(entry, 'skill')
             )
           ) {
             collections.push(value);
@@ -501,9 +506,10 @@
           const normalized = normalizeSkillName(row?.skill);
           if (!normalized) return;
 
+          const points = Math.max(0, getSkillRowPointValue(row));
           const existing = totals.get(normalized.key);
           if (existing) {
-            existing.count += 1;
+            existing.count += points;
             existing.auto = true;
             return;
           }
@@ -512,7 +518,7 @@
             key: normalized.key,
             display: normalized.display,
             originalDisplay: normalized.display,
-            count: 1,
+            count: points,
             auto: true,
             manual: false,
           });
