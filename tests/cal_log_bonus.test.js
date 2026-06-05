@@ -724,6 +724,68 @@ test('Season inference does not count or repair plain exhibitions that share a u
   assert.deepEqual(synced.state.matchups[0], exhibition);
 });
 
+test('Season cleanup preserves inferable in-season tournament rows missing series ids and strips invalid lookalikes', () => {
+  const season = makeLockedSeasonWithControl(true);
+  const playIn = Object.values(season.series).find((item) => item.roundId === 'play_in' && item.seriesIndex === 1);
+  const inferable = {
+    id: 'inferable-tournament-no-series-id',
+    dateKey: '2026-06-02',
+    playerAId: playIn.playerAId,
+    playerBId: playIn.playerBId,
+    matchupType: 'tournament',
+    seasonId: season.id,
+    roundId: 'play_in',
+    seasonMatchupLabel: 'Play-In Game 1',
+    scoreA: 88,
+    scoreB: 80
+  };
+  const pollutedMay = {
+    id: 'polluted-may-no-series-id',
+    dateKey: '2026-05-20',
+    playerAId: playIn.playerAId,
+    playerBId: playIn.playerBId,
+    matchupType: 'tournament',
+    seasonId: season.id,
+    roundId: 'play_in',
+    seasonMatchupLabel: 'Play-In Game 1',
+    scoreA: 88,
+    scoreB: 80
+  };
+  const exhibition = {
+    id: 'plain-exhibition-same-pair',
+    dateKey: '2026-06-02',
+    playerAId: playIn.playerAId,
+    playerBId: playIn.playerBId,
+    matchupType: 'exhibition',
+    scoreA: 99,
+    scoreB: 1
+  };
+  const state = core.normalizeState({
+    players: makeSeasonPlayers(),
+    currentSeason: season,
+    matchups: [inferable, pollutedMay, exhibition]
+  });
+
+  const synced = core.syncCurrentSeasonSeriesFromRecordedResults(state, { nowISO: '2026-06-05T12:00:00.000Z' });
+  const repaired = synced.state.matchups.find((matchup) => matchup.id === inferable.id);
+  assert.equal(repaired.seasonId, season.id);
+  assert.equal(repaired.seriesId, playIn.id);
+  assert.equal(repaired.seasonSeriesId, playIn.id);
+  assert.equal(repaired.matchupType, 'tournament');
+  assert.equal(repaired.roundId, 'play_in');
+  assert.equal(synced.updatedSeason.series[playIn.id].winsA, 1);
+  assert.equal(synced.updatedSeason.series[playIn.id].gameResults.length, 1);
+
+  const cleanedMay = synced.state.matchups.find((matchup) => matchup.id === pollutedMay.id);
+  assert.equal(cleanedMay.seasonId, undefined);
+  assert.equal(cleanedMay.seriesId, undefined);
+  assert.equal(cleanedMay.matchupType, undefined);
+  assert.equal(cleanedMay.roundId, undefined);
+
+  const untouchedExhibition = synced.state.matchups.find((matchup) => matchup.id === exhibition.id);
+  assert.deepEqual(untouchedExhibition, exhibition);
+});
+
 test('Season sync allows explicit valid Season series ids on exhibition-typed records', () => {
   const season = makeLockedSeasonWithControl(true);
   const playIn = Object.values(season.series).find((item) => item.roundId === 'play_in' && item.seriesIndex === 1);
@@ -1003,6 +1065,51 @@ test('season admin helpers handle missing series and manual winner edits defensi
   const reassigned = core.assignSeasonBracketSlot(season, 'pending', 'A', 'P1');
   assert.equal(reassigned.ok, true);
   assert.equal(reassigned.series.playerAId, 'P1');
+});
+
+test('season sync preserves manual-only series results until real recorded results supersede them', () => {
+  const state = buildJuneSeason();
+  const series = state.currentSeason.series.season_1_june_2026_play_in_1;
+  const edited = core.updateSeasonSeriesManualResult(state.currentSeason, series.id, {
+    winsA: 2,
+    winsB: 1,
+    winnerId: series.playerAId
+  }, { nowISO: '2026-06-05T12:00:00.000Z' });
+
+  assert.equal(edited.ok, true);
+  assert.equal(edited.series.manualResult, true);
+  assert.equal(edited.series.resultSource, 'manual');
+  assert.deepEqual(edited.series.gameResults, []);
+
+  const emptySync = core.syncCurrentSeasonSeriesFromRecordedResults({
+    ...state,
+    currentSeason: edited.season,
+    matchups: []
+  }, { nowISO: '2026-06-06T12:00:00.000Z' });
+  const preserved = emptySync.updatedSeason.series[series.id];
+  assert.equal(preserved.winsA, 2);
+  assert.equal(preserved.winsB, 1);
+  assert.equal(preserved.winnerId, series.playerAId);
+  assert.equal(preserved.loserId, series.playerBId);
+  assert.equal(preserved.status, 'complete');
+  assert.deepEqual(preserved.gameResults, []);
+
+  const recorded = [
+    resultFor(series, '2026-06-01', series.playerBId, { suffix: 'recorded-a' }),
+    resultFor(series, '2026-06-02', series.playerBId, { suffix: 'recorded-b' })
+  ];
+  const recordedSync = core.syncCurrentSeasonSeriesFromRecordedResults({
+    ...state,
+    currentSeason: edited.season,
+    matchups: recorded
+  }, { nowISO: '2026-06-06T12:00:00.000Z' });
+  const superseded = recordedSync.updatedSeason.series[series.id];
+  assert.equal(superseded.winsA, 0);
+  assert.equal(superseded.winsB, 2);
+  assert.equal(superseded.winnerId, series.playerBId);
+  assert.equal(superseded.loserId, series.playerAId);
+  assert.equal(superseded.status, 'complete');
+  assert.equal(superseded.gameResults.length, 2);
 });
 
 test('season result sync repair helper can be triggered safely', () => {
