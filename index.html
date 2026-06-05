@@ -691,6 +691,7 @@ Nothing visible on the page is built here. === -->
             <div class="muted text-[11px] uppercase tracking-wide">The Diff</div>
             <div id="matchupDiffValue" class="scoreboard-diff-value">—</div>
             <div id="matchupHeadToHeadRecord" class="matchupHeadToHeadRecord">H2H: —</div>
+            <div id="homeSeriesRecordLabel" class="home-series-record-label" hidden></div>
           </div>
        
 
@@ -4660,6 +4661,39 @@ function isHomeSeasonContextActive(stateArg, dateKeyStr) {
   );
 }
 
+function getHomeSeasonParticipantId(series, side) {
+  if (!series) return '';
+
+  const sideKey = String(side || '').toUpperCase();
+  const directKey = sideKey === 'A' ? 'playerAId' : 'playerBId';
+  const playerKey = sideKey === 'A' ? 'playerA' : 'playerB';
+  const competitorKey = sideKey === 'A' ? 'competitorAId' : 'competitorBId';
+  const competitorObjectKey = sideKey === 'A' ? 'competitorA' : 'competitorB';
+  const seedKey = sideKey === 'A' ? 'seedA' : 'seedB';
+
+  const nestedCandidates = [
+    series[playerKey],
+    series[competitorObjectKey],
+    series[seedKey]
+  ];
+
+  const candidates = [
+    series[directKey],
+    series[competitorKey],
+    ...nestedCandidates.flatMap((candidate) => [
+      candidate?.id,
+      candidate?.playerId,
+      candidate?.player?.id,
+      candidate?.competitorId,
+      candidate?.competitor?.id,
+      candidate?.seed?.playerId,
+      candidate?.seed?.player?.id
+    ])
+  ];
+
+  return String(candidates.find((candidate) => String(candidate || '').trim()) || '').trim();
+}
+
 function getHomeSeasonSeriesPairKey(playerAId, playerBId) {
   const first = String(playerAId || '').trim();
   const second = String(playerBId || '').trim();
@@ -4679,7 +4713,7 @@ function isHomeSeasonSeriesComplete(series) {
 }
 
 function isHomeSeasonSeriesCurrentForMatchup(series, dateKeyStr) {
-  if (!series?.playerAId || !series?.playerBId) return false;
+  if (!getHomeSeasonParticipantId(series, 'A') || !getHomeSeasonParticipantId(series, 'B')) return false;
   if (isHomeSeasonSeriesComplete(series)) return false;
 
   const status = String(series.status || '').toLowerCase();
@@ -4701,7 +4735,10 @@ function inferHomeSeasonSeriesFromPlayerPair(stateArg, matchup, dateKeyStr) {
   const matches = Object.values(season.series)
     .filter((series) => {
       if (!isHomeSeasonSeriesCurrentForMatchup(series, dateKeyStr)) return false;
-      return getHomeSeasonSeriesPairKey(series.playerAId, series.playerBId) === matchupPairKey;
+      return getHomeSeasonSeriesPairKey(
+        getHomeSeasonParticipantId(series, 'A'),
+        getHomeSeasonParticipantId(series, 'B')
+      ) === matchupPairKey;
     });
 
   if (matches.length === 1) return { series: matches[0], ambiguous: false };
@@ -4755,6 +4792,34 @@ function getHomeMatchupTypeLabel(stateArg, matchup, dateKeyStr) {
   if (resolvedSeries.ambiguous) return '';
 
   return 'Exhibition Match';
+}
+
+function getHomeSeriesRecordLabel(stateArg, matchup, dateKeyStr) {
+  if (!matchup || !isHomeSeasonContextActive(stateArg, dateKeyStr)) return '';
+
+  const resolvedSeries = getHomeSeasonSeriesForMatchup(stateArg, matchup, dateKeyStr);
+  const series = resolvedSeries?.series || null;
+  if (!series) return '';
+
+  const userId = 'YOU';
+  const playerAId = getHomeSeasonParticipantId(series, 'A');
+  const playerBId = getHomeSeasonParticipantId(series, 'B');
+  const winsA = Number(series.winsA) || 0;
+  const winsB = Number(series.winsB) || 0;
+
+  if (playerAId === userId) return `Series: ${winsA}–${winsB}`;
+  if (playerBId === userId) return `Series: ${winsB}–${winsA}`;
+
+  return '';
+}
+
+function setHomeSeriesRecordLabel(label) {
+  const labelEl = $('homeSeriesRecordLabel');
+  if (!labelEl) return;
+
+  const safeLabel = String(label || '').trim();
+  labelEl.textContent = safeLabel;
+  labelEl.hidden = !safeLabel;
 }
 
 function setHomeMatchupTypeLabel(label) {
@@ -4825,6 +4890,7 @@ const updateTodayScoreIsland = (value) => {
 
   if (!matchup) {
     setHomeMatchupTypeLabel('');
+    setHomeSeriesRecordLabel('');
     const yesterdayPanelEl = $('yesterdayResultsPanel');
     if (yesterdayPanelEl) yesterdayPanelEl.classList.remove('yesterday-win');
     clearYesterdayResultClasses();
@@ -4844,6 +4910,7 @@ const updateTodayScoreIsland = (value) => {
   }
 
   setHomeMatchupTypeLabel(getHomeMatchupTypeLabel(state, matchup, todayKeyStr));
+  setHomeSeriesRecordLabel(getHomeSeriesRecordLabel(state, matchup, todayKeyStr));
 
   const youAreA = matchup.playerAId === 'YOU';
   const oppId = youAreA ? matchup.playerBId : matchup.playerAId;

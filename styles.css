@@ -5288,9 +5288,32 @@ header,
   white-space: nowrap;
 }
 
+.home-series-record-label {
+  margin-top: 2px;
+  color: #fdba74;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  line-height: 1.1;
+  text-align: center;
+  text-shadow: 0 0 14px rgba(253, 186, 116, 0.35);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.home-series-record-label[hidden] {
+  display: none !important;
+}
+
 @media (max-width: 640px){
   .matchupHeadToHeadRecord{
     font-size: 10px;
+    margin-top: 1px;
+  }
+
+  .home-series-record-label {
+    font-size: 0.62rem;
+    letter-spacing: 0.08em;
     margin-top: 1px;
   }
 }
