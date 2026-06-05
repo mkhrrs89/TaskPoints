@@ -843,16 +843,19 @@
     const prepared = prepareSeasonForDailySlate(normalized.currentSeason, dateKeyStr);
     const season = prepared.season || normalized.currentSeason;
     const roundId = getCurrentSeasonRoundIdForDate(dateKeyStr);
-    const seriesRevision = Object.values(season?.series || {})
-      .filter((series) => series?.roundId === roundId)
+    const activeSeries = getActiveSeasonSeriesForDate(season, dateKeyStr);
+    const seriesRevision = activeSeries
       .sort((a, b) => String(a.id || '').localeCompare(String(b.id || '')))
       .map((series) => [
         series.id,
+        series.roundId || '',
         series.status,
         series.playerAId,
         series.playerBId,
         Number(series.winsA) || 0,
         Number(series.winsB) || 0,
+        Number(series.bestOf) || 0,
+        Number(series.winsNeeded) || 0,
         series.winnerId || '',
         Array.isArray(series.gameResults) ? series.gameResults.map((result) => `${result.matchupId || ''}:${result.dateKey || ''}:${result.winnerId || ''}:${result.playerAScore ?? ''}:${result.playerBScore ?? ''}`).join(',') : ''
       ].join('~'))
@@ -869,7 +872,16 @@
     const matchups = Array.isArray(scheduleDay.matchups) ? scheduleDay.matchups : [];
     if (!matchups.length) return false;
     const seasonId = normalized.currentSeason?.id || '';
-    return matchups.every((matchup) => matchup && matchup.seasonId === seasonId && matchup.dateKey === dateKeyStr && (matchup.matchupType === 'tournament' || matchup.matchupType === 'exhibition'));
+    const validMatchupRows = matchups.every((matchup) => matchup && matchup.seasonId === seasonId && matchup.dateKey === dateKeyStr && (matchup.matchupType === 'tournament' || matchup.matchupType === 'exhibition'));
+    if (!validMatchupRows) return false;
+    const tournamentSeriesIds = new Set(matchups
+      .filter((matchup) => matchup?.matchupType === 'tournament' || matchup?.matchupType === 'season')
+      .map((matchup) => getRecordedSeriesId(matchup))
+      .filter(Boolean));
+    const prepared = prepareSeasonForDailySlate(normalized.currentSeason, dateKeyStr);
+    const season = prepared.season || normalized.currentSeason;
+    return getActiveSeasonSeriesForDate(season, dateKeyStr)
+      .every((series) => tournamentSeriesIds.has(series.id));
   }
 
 
@@ -1762,6 +1774,11 @@
   }
 
   function withInferredSeasonMatchupMetadata(state, season, record, options = {}) {
+    const type = String(record?.matchupType || '').toLowerCase();
+    const explicitSeriesId = getRecordedSeriesId(record);
+    const hasExplicitValidSeries = Boolean(explicitSeriesId && season?.series?.[explicitSeriesId]);
+    if (type === 'exhibition' && !hasExplicitValidSeries) return record;
+
     const seriesId = inferSeasonSeriesIdFromRecord(state, season, record, options);
     if (!seriesId || !season?.series?.[seriesId]) return record;
 
@@ -1848,19 +1865,31 @@
     };
 
     (Array.isArray(state?.matchups) ? state.matchups : []).forEach((matchup, index) => {
-      const seriesId = inferSeasonSeriesIdFromRecord(state, season, matchup, options);
-      if (!seriesId) return;
-
       const type = String(matchup?.matchupType || '').toLowerCase();
-      const hasValidSeries = Boolean(season?.series?.[seriesId]);
-      const inferredSeasonMatchup = !getRecordedSeriesId(matchup) && hasValidSeries;
+      const explicitSeriesId = getRecordedSeriesId(matchup);
+      const hasExplicitValidSeries = Boolean(explicitSeriesId && season?.series?.[explicitSeriesId]);
+
+      if (type === 'exhibition' && !hasExplicitValidSeries) return;
+
+      const canInfer =
+        !explicitSeriesId
+        && (!type || type === 'tournament' || type === 'season')
+        && (!matchup?.seasonId || matchup.seasonId === season?.id);
+
+      const seriesId = hasExplicitValidSeries
+        ? explicitSeriesId
+        : canInfer
+          ? inferSeasonSeriesIdFromRecord(state, season, matchup, options)
+          : '';
+
+      if (!seriesId || !season?.series?.[seriesId]) return;
 
       const isSeasonMatchup =
         matchup?.seasonId === season?.id
         || type === 'tournament'
         || type === 'season'
-        || hasValidSeries
-        || inferredSeasonMatchup;
+        || hasExplicitValidSeries
+        || canInfer;
 
       if (!isSeasonMatchup) return;
 

@@ -700,38 +700,54 @@ test('Season result sync infers stripped Play-In matchups, repairs metadata, com
   assert.equal(roundOf32[8].placeholderB, '');
 });
 
-test('Season inference does not count ambiguous plain exhibition matchups as tournament results', () => {
+test('Season inference does not count or repair plain exhibitions that share a unique Season series pairing', () => {
   const season = makeLockedSeasonWithControl(true);
   const playIn = Object.values(season.series).find((item) => item.roundId === 'play_in' && item.seriesIndex === 1);
-  const duplicateSeries = {
-    ...playIn,
-    id: 'duplicate-pair-series',
-    roundId: '',
-    roundName: 'Duplicate',
-    status: 'active',
-    winsA: 0,
-    winsB: 0,
-    winnerId: '',
-    loserId: '',
-    gameResults: []
+  const exhibition = {
+    id: 'plain-exhibition',
+    dateKey: '2026-06-01',
+    matchupType: 'exhibition',
+    playerAId: playIn.playerAId,
+    playerBId: playIn.playerBId,
+    scoreA: 100,
+    scoreB: 50
   };
-  const ambiguousSeason = core.normalizeSeasonState({
-    ...season,
-    series: {
-      ...season.series,
-      [duplicateSeries.id]: duplicateSeries
-    }
-  });
   const state = core.normalizeState({
     players: makeSeasonPlayers(),
-    currentSeason: ambiguousSeason,
-    matchups: [{ id: 'plain-exhibition', playerAId: playIn.playerAId, playerBId: playIn.playerBId, scoreA: 100, scoreB: 50 }]
+    currentSeason: season,
+    matchups: [exhibition]
   });
 
   const synced = core.syncCurrentSeasonSeriesFromRecordedResults(state, { nowISO: '2026-06-05T12:00:00.000Z' });
   assert.equal(synced.changed, false);
   assert.equal(synced.updatedSeason.series[playIn.id].gameResults.length, 0);
-  assert.equal(synced.updatedSeason.series[duplicateSeries.id].gameResults.length, 0);
+  assert.deepEqual(synced.state.matchups[0], exhibition);
+});
+
+test('Season sync allows explicit valid Season series ids on exhibition-typed records', () => {
+  const season = makeLockedSeasonWithControl(true);
+  const playIn = Object.values(season.series).find((item) => item.roundId === 'play_in' && item.seriesIndex === 1);
+  const state = core.normalizeState({
+    players: makeSeasonPlayers(),
+    currentSeason: season,
+    matchups: [{
+      id: 'explicit-exhibition-series',
+      dateKey: '2026-06-01',
+      matchupType: 'exhibition',
+      seriesId: playIn.id,
+      playerAId: playIn.playerAId,
+      playerBId: playIn.playerBId,
+      scoreA: 100,
+      scoreB: 50
+    }]
+  });
+
+  const synced = core.syncCurrentSeasonSeriesFromRecordedResults(state, { nowISO: '2026-06-05T12:00:00.000Z' });
+  assert.equal(synced.changed, true);
+  assert.equal(synced.updatedSeason.series[playIn.id].gameResults.length, 1);
+  assert.equal(synced.updatedSeason.series[playIn.id].winsA, 1);
+  assert.equal(synced.state.matchups[0].seasonSeriesId, playIn.id);
+  assert.equal(synced.state.matchups[0].matchupType, 'exhibition');
 });
 
 test('getActiveSeasonSeriesForDate includes overdue active prior rounds only when Season Matchup Control is enabled', () => {
@@ -743,6 +759,38 @@ test('getActiveSeasonSeriesForDate includes overdue active prior rounds only whe
   const disabledSeason = makeLockedSeasonWithControl(false);
   const disabledActive = core.getActiveSeasonSeriesForDate(disabledSeason, '2026-06-05');
   assert.equal(disabledActive.some((series) => series.roundId === 'play_in'), false);
+});
+
+test('Season schedule signature includes overdue active prior-round series on later-round dates', () => {
+  const state = core.normalizeState({ players: makeSeasonPlayers(), currentSeason: makeLockedSeasonWithControl(true) });
+  const overduePlayIn = Object.values(state.currentSeason.series).find((item) => item.roundId === 'play_in' && item.seriesIndex === 1);
+  const signature = core.getSeasonScheduleSignature(state, '2026-06-05');
+
+  assert.match(signature, new RegExp(`${overduePlayIn.id}~play_in~active`));
+});
+
+test('Season schedule validation rejects days missing an overdue prior-round tournament matchup', () => {
+  const state = core.normalizeState({ players: makeSeasonPlayers(), currentSeason: makeLockedSeasonWithControl(true) });
+  const overduePlayIn = Object.values(state.currentSeason.series).find((item) => item.roundId === 'play_in' && item.seriesIndex === 1);
+  const validSignature = core.getSeasonScheduleSignature(state, '2026-06-05');
+  const staleDay = {
+    date: '2026-06-05',
+    participantSignature: 'unchanged',
+    seasonMatchupControl: true,
+    seasonScheduleSignature: validSignature,
+    matchups: [{
+      id: 'missing-overdue-exhibition',
+      dateKey: '2026-06-05',
+      seasonId: state.currentSeason.id,
+      matchupType: 'exhibition',
+      playerAId: 'P1',
+      playerBId: 'P2'
+    }]
+  };
+
+  assert.equal(core.getActiveSeasonSeriesForDate(state.currentSeason, '2026-06-05').some((series) => series.id === overduePlayIn.id), true);
+  assert.equal(core.isValidSeasonControlledScheduleDay(state, '2026-06-05', staleDay), false);
+  assert.equal(core.shouldRegenerateScheduleDayForSeasonControl(state, '2026-06-05', staleDay), true);
 });
 
 test('Round of 32 slate activates all ready fixed series after Play-In resolves', () => {
