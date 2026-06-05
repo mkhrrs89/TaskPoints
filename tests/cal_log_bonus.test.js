@@ -1103,19 +1103,21 @@ test('season admin helpers handle missing series and manual winner edits defensi
   assert.equal(reassigned.series.playerAId, 'P1');
 });
 
-test('season sync preserves manual-only series results until real recorded results supersede them', () => {
+test('season sync preserves durable manual series results alongside recorded results', () => {
   const state = buildJuneSeason();
   const series = state.currentSeason.series.season_1_june_2026_play_in_1;
   const edited = core.updateSeasonSeriesManualResult(state.currentSeason, series.id, {
     winsA: 2,
-    winsB: 1,
+    winsB: 0,
     winnerId: series.playerAId
   }, { nowISO: '2026-06-05T12:00:00.000Z' });
 
   assert.equal(edited.ok, true);
   assert.equal(edited.series.manualResult, true);
   assert.equal(edited.series.resultSource, 'manual');
-  assert.deepEqual(edited.series.gameResults, []);
+  assert.equal(edited.series.gameResults.length, 2);
+  assert.equal(edited.series.gameResults[1].source, 'admin_manual');
+  assert.equal(edited.series.gameResults[1].manualResult, true);
 
   const emptySync = core.syncCurrentSeasonSeriesFromRecordedResults({
     ...state,
@@ -1124,11 +1126,12 @@ test('season sync preserves manual-only series results until real recorded resul
   }, { nowISO: '2026-06-06T12:00:00.000Z' });
   const preserved = emptySync.updatedSeason.series[series.id];
   assert.equal(preserved.winsA, 2);
-  assert.equal(preserved.winsB, 1);
+  assert.equal(preserved.winsB, 0);
   assert.equal(preserved.winnerId, series.playerAId);
   assert.equal(preserved.loserId, series.playerBId);
   assert.equal(preserved.status, 'complete');
-  assert.deepEqual(preserved.gameResults, []);
+  assert.equal(preserved.gameResults.length, 2);
+  assert.equal(preserved.gameResults[1].source, 'admin_manual');
 
   const recorded = [
     resultFor(series, '2026-06-01', series.playerBId, { suffix: 'recorded-a' }),
@@ -1140,12 +1143,12 @@ test('season sync preserves manual-only series results until real recorded resul
     matchups: recorded
   }, { nowISO: '2026-06-06T12:00:00.000Z' });
   const superseded = recordedSync.updatedSeason.series[series.id];
-  assert.equal(superseded.winsA, 0);
-  assert.equal(superseded.winsB, 2);
-  assert.equal(superseded.winnerId, series.playerBId);
-  assert.equal(superseded.loserId, series.playerAId);
+  assert.equal(superseded.winsA, 2);
+  assert.equal(superseded.winsB, 0);
+  assert.equal(superseded.winnerId, series.playerAId);
+  assert.equal(superseded.loserId, series.playerBId);
   assert.equal(superseded.status, 'complete');
-  assert.equal(superseded.gameResults.length, 2);
+  assert.equal(superseded.gameResults.some((result) => result.source === 'admin_manual'), true);
 });
 
 test('season result sync repair helper can be triggered safely', () => {
@@ -1374,6 +1377,122 @@ function resultFor(series, dateKey, winnerId, extra = {}) {
     ...extra
   };
 }
+
+test('manual Play-In Game 3 result survives current-season sync', () => {
+  const state = buildJuneSeason();
+  const series = state.currentSeason.series.season_1_june_2026_play_in_1;
+  const tied = {
+    ...series,
+    winsA: 1,
+    winsB: 1,
+    status: 'active',
+    gameResults: [
+      resultFor(series, '2026-06-01', series.playerAId, { suffix: 'g1', gameNumber: 1, source: 'matchup' }),
+      resultFor(series, '2026-06-02', series.playerBId, { suffix: 'g2', gameNumber: 2, source: 'matchup' })
+    ]
+  };
+  const currentSeason = { ...state.currentSeason, series: { ...state.currentSeason.series, [series.id]: tied } };
+  const edited = core.updateSeasonSeriesManualResult(currentSeason, series.id, {
+    winsA: 1,
+    winsB: 2,
+    winnerId: series.playerBId
+  }, { nowISO: '2026-06-05T12:00:00.000Z' });
+
+  assert.equal(edited.ok, true);
+  assert.equal(edited.series.gameResults.length, 3);
+  assert.equal(edited.series.gameResults[2].gameNumber, 3);
+  assert.equal(edited.series.gameResults[2].dateKey, '2026-06-03');
+  assert.equal(edited.series.gameResults[2].winnerId, series.playerBId);
+  assert.equal(edited.series.gameResults[2].source, 'admin_manual');
+  assert.equal(edited.series.gameResults[2].manualResult, true);
+  assert.equal(edited.series.winsA, 1);
+  assert.equal(edited.series.winsB, 2);
+  assert.equal(edited.series.winnerId, series.playerBId);
+  assert.equal(edited.series.status, 'complete');
+
+  const synced = core.syncCurrentSeasonSeriesFromRecordedResults({ ...state, currentSeason: edited.season, matchups: [] }, { nowISO: '2026-06-06T12:00:00.000Z' });
+  const preserved = synced.updatedSeason.series[series.id];
+  assert.equal(preserved.winsA, 1);
+  assert.equal(preserved.winsB, 2);
+  assert.equal(preserved.winnerId, series.playerBId);
+  assert.equal(preserved.status, 'complete');
+  assert.equal(preserved.gameResults.some((result) => result.source === 'admin_manual' && result.gameNumber === 3), true);
+});
+
+test('manual Round of 32 catch-up results survive sync without forcing a winner', () => {
+  const state = buildJuneSeason();
+  const series = state.currentSeason.series.season_1_june_2026_round_of_32_1;
+  const assigned = { ...series, playerBId: 'seed34', playerBName: 'Mildred', playerBSeed: 34, placeholderB: '', status: 'active', winsA: 0, winsB: 0, gameResults: [] };
+  const currentSeason = { ...state.currentSeason, series: { ...state.currentSeason.series, [series.id]: assigned } };
+  const edited = core.updateSeasonSeriesManualResult(currentSeason, series.id, {
+    winsA: 2,
+    winsB: 0,
+    winnerId: ''
+  }, { nowISO: '2026-06-05T12:00:00.000Z' });
+
+  assert.equal(edited.ok, true);
+  assert.equal(edited.series.gameResults.length, 2);
+  assert.deepEqual(edited.series.gameResults.map((result) => result.dateKey), ['2026-06-04', '2026-06-05']);
+  assert.deepEqual(edited.series.gameResults.map((result) => result.gameNumber), [1, 2]);
+  assert.equal(edited.series.gameResults.every((result) => result.source === 'admin_manual' && result.manualResult === true), true);
+  assert.equal(edited.series.winsA, 2);
+  assert.equal(edited.series.winsB, 0);
+  assert.equal(edited.series.winnerId, '');
+  assert.equal(edited.series.status, 'active');
+
+  const synced = core.syncCurrentSeasonSeriesFromRecordedResults({ ...state, currentSeason: edited.season, matchups: [] }, { nowISO: '2026-06-06T12:00:00.000Z' });
+  const preserved = synced.updatedSeason.series[series.id];
+  assert.equal(preserved.winsA, 2);
+  assert.equal(preserved.winsB, 0);
+  assert.equal(preserved.winnerId, '');
+  assert.equal(preserved.status, 'active');
+  assert.equal(preserved.gameResults.length, 2);
+});
+
+test('manual Play-In winners advance into protected Round of 32 slots', () => {
+  const state = buildJuneSeason();
+  const pi1 = state.currentSeason.series.season_1_june_2026_play_in_1;
+  const pi2 = state.currentSeason.series.season_1_june_2026_play_in_2;
+  const first = core.updateSeasonSeriesManualResult(state.currentSeason, pi1.id, { winsA: 1, winsB: 2, winnerId: pi1.playerBId }, { nowISO: '2026-06-05T12:00:00.000Z' });
+  const second = core.updateSeasonSeriesManualResult(first.season, pi2.id, { winsA: 2, winsB: 1, winnerId: pi2.playerAId }, { nowISO: '2026-06-05T12:01:00.000Z' });
+  const synced = core.syncCurrentSeasonSeriesFromRecordedResults({ ...state, currentSeason: second.season, matchups: [] }, { nowISO: '2026-06-06T12:00:00.000Z' });
+
+  const seed1Protected = synced.updatedSeason.series.season_1_june_2026_round_of_32_1;
+  const seed2Protected = synced.updatedSeason.series.season_1_june_2026_round_of_32_9;
+  assert.equal(seed1Protected.playerBId, pi1.playerBId);
+  assert.equal(seed2Protected.playerBId, pi2.playerAId);
+});
+
+test('clearing a manual season result removes admin_manual game results', () => {
+  const state = buildJuneSeason();
+  const series = state.currentSeason.series.season_1_june_2026_round_of_32_1;
+  const assigned = { ...series, playerBId: 'seed34', playerBName: 'Mildred', playerBSeed: 34, placeholderB: '', status: 'active' };
+  const currentSeason = { ...state.currentSeason, series: { ...state.currentSeason.series, [series.id]: assigned } };
+  const edited = core.updateSeasonSeriesManualResult(currentSeason, series.id, { winsA: 2, winsB: 0 }, { nowISO: '2026-06-05T12:00:00.000Z' });
+  const cleared = core.updateSeasonSeriesManualResult(edited.season, series.id, { clear: true }, { nowISO: '2026-06-05T12:05:00.000Z' });
+
+  assert.equal(cleared.ok, true);
+  assert.equal(cleared.series.gameResults.some((result) => result.source === 'admin_manual' || result.manualResult === true), false);
+  assert.equal(cleared.series.winsA, 0);
+  assert.equal(cleared.series.winsB, 0);
+  assert.equal(cleared.series.winnerId, '');
+  assert.equal(cleared.series.loserId, '');
+  assert.equal(cleared.series.status, 'active');
+});
+
+test('recalculate from game results keeps admin_manual game results', () => {
+  const state = buildJuneSeason();
+  const series = state.currentSeason.series.season_1_june_2026_play_in_1;
+  const edited = core.updateSeasonSeriesManualResult(state.currentSeason, series.id, { winsA: 2, winsB: 1, winnerId: series.playerAId }, { nowISO: '2026-06-05T12:00:00.000Z' });
+  const recalculated = core.updateSeasonSeriesManualResult(edited.season, series.id, { recalculate: true }, { nowISO: '2026-06-05T12:05:00.000Z' });
+
+  assert.equal(recalculated.ok, true);
+  assert.equal(recalculated.series.gameResults.some((result) => result.source === 'admin_manual'), true);
+  assert.equal(recalculated.series.winsA, 2);
+  assert.equal(recalculated.series.winsB, 1);
+  assert.equal(recalculated.series.winnerId, series.playerAId);
+  assert.equal(recalculated.series.status, 'complete');
+});
 
 test('season sync rejects and cleans pre-season matchups while preserving true June split Play-In results', () => {
   const state = buildJuneSeason();
