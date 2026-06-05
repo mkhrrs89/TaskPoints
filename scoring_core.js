@@ -1302,7 +1302,7 @@
     const series = nextSeason.series?.[seriesId];
     if (!series) return { ok: false, error: 'series_not_found', season: nextSeason };
     if (patch.clear === true) {
-      const cleared = { ...series, winsA: 0, winsB: 0, winnerId: '', loserId: '', status: series.playerAId && series.playerBId ? 'active' : 'pending', updatedAtISO: seasonNowISO(options) };
+      const cleared = { ...series, winsA: 0, winsB: 0, winnerId: '', loserId: '', status: series.playerAId && series.playerBId ? 'active' : 'pending', manualResult: false, resultSource: '', updatedAtISO: seasonNowISO(options) };
       nextSeason.series = { ...(nextSeason.series || {}), [seriesId]: cleared };
       nextSeason.updatedAtISO = seasonNowISO(options);
       return { ok: true, season: nextSeason, series: cleared };
@@ -1325,7 +1325,7 @@
       status = 'complete';
       loserId = winnerId === series.playerAId ? series.playerBId : series.playerAId;
     }
-    const updated = { ...series, winsA, winsB, winnerId, loserId, status, updatedAtISO: seasonNowISO(options) };
+    const updated = { ...series, winsA, winsB, winnerId, loserId, status, manualResult: true, resultSource: 'manual', updatedAtISO: seasonNowISO(options) };
     nextSeason.series = { ...(nextSeason.series || {}), [seriesId]: updated };
     nextSeason.updatedAtISO = seasonNowISO(options);
     let advanced = null;
@@ -1838,9 +1838,23 @@
     return isRecordInSeasonControlledScheduleDay(state, record, date, series?.id || '');
   }
 
-  function stripInvalidSeasonMetadataFromMatchup(matchup, season) {
-    const seriesId = getRecordedSeriesId(matchup);
-    const series = seriesId ? season?.series?.[seriesId] : null;
+  function getValidSeasonSeriesForRecord(state, season, record, options = {}) {
+    const explicitSeriesId = getRecordedSeriesId(record);
+    if (explicitSeriesId && season?.series?.[explicitSeriesId]) {
+      const series = season.series[explicitSeriesId];
+      return isValidSeasonResultDateForSeries(season, series, record, options) ? series : null;
+    }
+
+    const inferredSeriesId = inferSeasonSeriesIdFromRecord(state, season, record, options);
+    if (inferredSeriesId && season?.series?.[inferredSeriesId]) {
+      const series = season.series[inferredSeriesId];
+      return isValidSeasonResultDateForSeries(season, series, record, options) ? series : null;
+    }
+
+    return null;
+  }
+
+  function stripInvalidSeasonMetadataFromMatchup(matchup, season, state = {}, options = {}) {
     const type = String(matchup?.matchupType || '').toLowerCase();
     const hasSeasonMetadata =
       matchup?.seasonId === season?.id
@@ -1848,13 +1862,14 @@
       || Boolean(matchup?.seasonSeriesId)
       || Boolean(matchup?.seasonSeriesID)
       || Boolean(matchup?.seriesID)
+      || Boolean(matchup?.roundId)
       || type === 'tournament'
       || type === 'season';
 
     if (!hasSeasonMetadata) return matchup;
 
-    const valid = series && isValidSeasonResultDateForSeries(season, series, matchup);
-    if (valid) return matchup;
+    const validSeries = getValidSeasonSeriesForRecord(state, season, matchup, options);
+    if (validSeries) return withInferredSeasonMatchupMetadata(state, season, matchup, options);
 
     const cleaned = { ...matchup };
     delete cleaned.seasonId;
@@ -1912,17 +1927,20 @@
     const series = season.series[seriesId];
     if (!isValidSeasonResultDateForSeries(season, series, record, options)) return record;
 
-    return {
+    const repaired = {
       ...record,
-      seasonId: record?.seasonId || season.id || '',
-      seriesId: record?.seriesId || seriesId,
-      seasonSeriesId: record?.seasonSeriesId || seriesId,
-      roundId: record?.roundId || series.roundId || '',
-      roundName: record?.roundName || series.roundName || getSeasonDisplayName(series.roundId) || '',
+      seasonId: season.id || record?.seasonId || '',
+      seriesId,
+      seasonSeriesId: seriesId,
+      roundId: series.roundId || record?.roundId || '',
+      roundName: series.roundName || record?.roundName || getSeasonDisplayName(series.roundId) || '',
       matchupType: record?.matchupType || 'tournament',
-      bestOf: record?.bestOf || series.bestOf || null,
-      winsNeeded: record?.winsNeeded || series.winsNeeded || getSeasonSeriesWinsNeeded(series)
+      bestOf: series.bestOf || record?.bestOf || null,
+      winsNeeded: series.winsNeeded || record?.winsNeeded || getSeasonSeriesWinsNeeded(series)
     };
+    delete repaired.seriesID;
+    delete repaired.seasonSeriesID;
+    return repaired;
   }
 
   function getRecordedResultWinner(record) {
@@ -2043,6 +2061,21 @@
     return candidatesBySeries;
   }
 
+  function hasManualSeasonSeriesResult(series) {
+    if (!series) return false;
+    if (series.manualResult === true) return true;
+    const source = String(series.resultSource || series.source || '').toLowerCase();
+    if (source === 'manual' || source === 'admin') return true;
+    const hasPersistedGames = Array.isArray(series.gameResults) && series.gameResults.length > 0;
+    if (hasPersistedGames) return false;
+    const winsA = Number(series.winsA) || 0;
+    const winsB = Number(series.winsB) || 0;
+    const winnerId = String(series.winnerId || '');
+    const loserId = String(series.loserId || '');
+    if (winsA > 0 || winsB > 0 || winnerId || loserId) return true;
+    return false;
+  }
+
   function rebuildSeasonSeriesFromRecordedResults(series, rawResults, options = {}) {
     const byKey = new Map();
     rawResults.forEach((result, index) => {
@@ -2105,7 +2138,7 @@
     if (!season) return { ok: false, state: normalized, updatedSeason: season, changed: false, warnings, errors: ['No current season.'] };
     let changed = false;
     const strippedMatchups = (Array.isArray(normalized.matchups) ? normalized.matchups : [])
-      .map((matchup) => stripInvalidSeasonMetadataFromMatchup(matchup, season));
+      .map((matchup) => stripInvalidSeasonMetadataFromMatchup(matchup, season, normalized, options));
     const strippedState = { ...normalized, matchups: strippedMatchups };
     if (JSON.stringify(strippedMatchups) !== JSON.stringify(normalized.matchups || [])) changed = true;
 
@@ -2116,13 +2149,10 @@
     Object.entries(beforeSeries).forEach(([seriesId, series]) => {
       const rawResults = candidates.get(seriesId) || [];
       resultCount += rawResults.length;
+      const hasManualResultToPreserve = rawResults.length === 0 && hasManualSeasonSeriesResult(series);
       const shouldRebuild = rawResults.length
-        || (Array.isArray(series?.gameResults) && series.gameResults.length)
-        || Number(series?.winsA)
-        || Number(series?.winsB)
-        || series?.winnerId
-        || series?.loserId
-        || (series?.status === 'complete' && !getSeasonSeriesWinner(series));
+        || (!hasManualResultToPreserve && Array.isArray(series?.gameResults) && series.gameResults.length)
+        || (!hasManualResultToPreserve && series?.status === 'complete' && !getSeasonSeriesWinner(series));
       if (!shouldRebuild) {
         nextSeries[seriesId] = series;
         return;
@@ -5787,6 +5817,7 @@ return Number(cappedScore.toFixed(1));
     shouldUseSeasonMatchupControl,
     buildSeasonDailySlate,
     getPairingKey,
+    getRecordedSeriesId,
     inferSeasonSeriesIdFromRecord,
     withInferredSeasonMatchupMetadata,
     getJunePairingHistory,
