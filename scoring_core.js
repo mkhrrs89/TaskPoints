@@ -782,7 +782,27 @@
   function getActiveSeasonSeriesForDate(season, dateKey) {
     const roundId = getCurrentSeasonRoundIdForDate(dateKey);
     if (!roundId || !season?.series) return [];
-    return Object.values(season.series).filter((series) => series?.roundId === roundId && series.status === 'active');
+
+    const currentRoundIndex = OFFICIAL_SEASON_ROUND_ORDER.indexOf(roundId);
+    const seasonControlEnabled = season?.meta?.seasonMatchupControlEnabled === true;
+
+    return Object.values(season.series)
+      .filter((series) => {
+        if (!series || series.status !== 'active' || isSeasonSeriesComplete(series)) return false;
+        if (!series.playerAId || !series.playerBId) return false;
+
+        if (series.roundId === roundId) return true;
+
+        const seriesRoundIndex = OFFICIAL_SEASON_ROUND_ORDER.indexOf(series.roundId);
+        return seasonControlEnabled
+          && currentRoundIndex >= 0
+          && seriesRoundIndex >= 0
+          && seriesRoundIndex < currentRoundIndex;
+      })
+      .sort((a, b) =>
+        (Number(a.roundIndex) || 0) - (Number(b.roundIndex) || 0)
+        || (Number(a.seriesIndex) || 0) - (Number(b.seriesIndex) || 0)
+      );
   }
 
 
@@ -794,10 +814,18 @@
     const now = seasonNowISO(options);
     const nextSeries = { ...(normalized.series || {}) };
     const activatedSeriesIds = [];
+    const currentRoundIndex = OFFICIAL_SEASON_ROUND_ORDER.indexOf(roundId);
+    const seasonControlEnabled = normalized?.meta?.seasonMatchupControlEnabled === true;
     Object.values(normalized.series || {}).forEach((series) => {
-      if (!series || series.roundId !== roundId) return;
-      if (series.status !== 'pending') return;
+      if (!series || series.status !== 'pending') return;
       if (!series.playerAId || !series.playerBId) return;
+      const seriesRoundIndex = OFFICIAL_SEASON_ROUND_ORDER.indexOf(series.roundId);
+      const isCurrentRound = series.roundId === roundId;
+      const isOverduePriorRound = seasonControlEnabled
+        && currentRoundIndex >= 0
+        && seriesRoundIndex >= 0
+        && seriesRoundIndex < currentRoundIndex;
+      if (!isCurrentRound && !isOverduePriorRound) return;
       nextSeries[series.id] = { ...series, status: 'active', updatedAtISO: now };
       activatedSeriesIds.push(series.id);
     });
@@ -1707,6 +1735,51 @@
     return String(record?.seasonSeriesId || record?.seriesId || record?.seasonSeriesID || record?.seriesID || '').trim();
   }
 
+  function inferSeasonSeriesIdFromRecord(state, season, record, options = {}) {
+    const explicit = getRecordedSeriesId(record);
+    if (explicit && season?.series?.[explicit]) return explicit;
+    if (!season?.series || !record?.playerAId || !record?.playerBId) return '';
+
+    const recordDate = getRecordedResultDateKey(record) || options.dateKey || '';
+    const recordRoundId = record?.roundId || (recordDate && getSeasonRoundForDate(recordDate)?.id) || '';
+    const pairKey = getPairingKey(record.playerAId, record.playerBId);
+
+    const entries = Object.values(season.series || {}).filter((series) => {
+      if (!series?.playerAId || !series?.playerBId) return false;
+      if (getPairingKey(series.playerAId, series.playerBId) !== pairKey) return false;
+      if (recordRoundId && series.roundId && series.roundId !== recordRoundId) return false;
+      return true;
+    });
+
+    if (entries.length === 1) return entries[0].id || '';
+
+    if (!recordRoundId) {
+      const activeOrIncomplete = entries.filter((series) => !isSeasonSeriesComplete(series));
+      if (activeOrIncomplete.length === 1) return activeOrIncomplete[0].id || '';
+    }
+
+    return '';
+  }
+
+  function withInferredSeasonMatchupMetadata(state, season, record, options = {}) {
+    const seriesId = inferSeasonSeriesIdFromRecord(state, season, record, options);
+    if (!seriesId || !season?.series?.[seriesId]) return record;
+
+    const series = season.series[seriesId];
+
+    return {
+      ...record,
+      seasonId: record?.seasonId || season.id || '',
+      seriesId: record?.seriesId || seriesId,
+      seasonSeriesId: record?.seasonSeriesId || seriesId,
+      roundId: record?.roundId || series.roundId || '',
+      roundName: record?.roundName || series.roundName || getSeasonDisplayName(series.roundId) || '',
+      matchupType: record?.matchupType || 'tournament',
+      bestOf: record?.bestOf || series.bestOf || null,
+      winsNeeded: record?.winsNeeded || series.winsNeeded || getSeasonSeriesWinsNeeded(series)
+    };
+  }
+
   function getRecordedResultWinner(record) {
     let winnerId = String(record?.winnerId || record?.winningPlayerId || record?.winner?.playerId || record?.winner?.id || record?.result?.winnerId || record?.result?.winningPlayerId || record?.result?.winner?.playerId || record?.result?.winner?.id || '').trim();
     let loserId = String(record?.loserId || record?.losingPlayerId || record?.loser?.playerId || record?.loser?.id || record?.result?.loserId || record?.result?.losingPlayerId || record?.result?.loser?.playerId || record?.result?.loser?.id || '').trim();
@@ -1775,12 +1848,23 @@
     };
 
     (Array.isArray(state?.matchups) ? state.matchups : []).forEach((matchup, index) => {
-      const seriesId = getRecordedSeriesId(matchup);
+      const seriesId = inferSeasonSeriesIdFromRecord(state, season, matchup, options);
       if (!seriesId) return;
+
       const type = String(matchup?.matchupType || '').toLowerCase();
-      const isSeasonMatchup = matchup?.seasonId === season?.id || type === 'tournament' || type === 'season';
+      const hasValidSeries = Boolean(season?.series?.[seriesId]);
+      const inferredSeasonMatchup = !getRecordedSeriesId(matchup) && hasValidSeries;
+
+      const isSeasonMatchup =
+        matchup?.seasonId === season?.id
+        || type === 'tournament'
+        || type === 'season'
+        || hasValidSeries
+        || inferredSeasonMatchup;
+
       if (!isSeasonMatchup) return;
-      add(seriesId, matchup, 'matchup', index);
+
+      add(seriesId, withInferredSeasonMatchupMetadata(state, season, matchup, options), 'matchup', index);
     });
 
     Object.entries(season?.series || {}).forEach(([seriesId, series]) => {
@@ -1890,6 +1974,11 @@
       if (playInRepair.changed) changed = true;
       else if (!playInRepair.ok && playInRepair.error && playInRepair.error !== 'play_in_not_complete') warnings.push(`Play-In repair pending: ${playInRepair.error}.`);
     }
+    const repairedMatchups = (Array.isArray(normalized.matchups) ? normalized.matchups : [])
+      .map((matchup) => withInferredSeasonMatchupMetadata(normalized, season, matchup, options));
+    const matchupsChanged = JSON.stringify(repairedMatchups) !== JSON.stringify(normalized.matchups || []);
+    if (matchupsChanged) changed = true;
+
     const completedCount = Object.values(season?.series || {}).filter((series) => isSeasonSeriesComplete(series)).length;
     const playInCompletedCount = Object.values(season?.series || {}).filter((series) => series?.roundId === 'play_in' && isSeasonSeriesComplete(series)).length;
     if (typeof console !== 'undefined' && typeof console.info === 'function') {
@@ -1901,7 +1990,12 @@
         changed
       });
     }
-    const nextState = changed ? normalizeState({ ...normalized, currentSeason: season, latestSeasonId: season?.id || normalized.latestSeasonId || '' }) : normalized;
+    const nextState = changed ? normalizeState({
+      ...normalized,
+      currentSeason: season,
+      matchups: repairedMatchups,
+      latestSeasonId: season?.id || normalized.latestSeasonId || ''
+    }) : normalized;
     return { ok: errors.length === 0, state: nextState, updatedSeason: season, changed, warnings, errors };
   }
 
@@ -5517,6 +5611,8 @@ return Number(cappedScore.toFixed(1));
     shouldUseSeasonMatchupControl,
     buildSeasonDailySlate,
     getPairingKey,
+    inferSeasonSeriesIdFromRecord,
+    withInferredSeasonMatchupMetadata,
     getJunePairingHistory,
     hasJunePairingOccurred,
     generateRandomNonRepeatPairs,

@@ -645,6 +645,106 @@ test('Season result sync records tournament results once, ignores exhibitions, a
   assert.equal(synced.updatedSeason.series[playIn.id].winnerId, playIn.playerAId);
 });
 
+
+
+test('schedule rebuild code preserves full stored matchup metadata instead of stripping to player ids', () => {
+  const indexHtml = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'index.html'), 'utf8');
+  const gameHtml = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'game.html'), 'utf8');
+  const toolbarJs = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'toolbar.js'), 'utf8');
+
+  assert.match(indexHtml, /existingMatchupsByDate\.get\(key\)\.push\(\{ \.\.\.m \}\)/);
+  assert.match(indexHtml, /\.map\(\(m\) => \(\{ \.\.\.m, playerAId: m\.playerAId, playerBId: m\.playerBId \}\)\)/);
+  assert.match(gameHtml, /existingMatchupsByDate\.get\(key\)\.push\(\{ \.\.\.m \}\)/);
+  assert.match(gameHtml, /todaysStoredMatchups\.map\(\(m\) => \(\{ \.\.\.m, playerAId: m\.playerAId, playerBId: m\.playerBId \}\)\)/);
+  assert.match(toolbarJs, /existingMatchupsByDate\.get\(key\)\.push\(\{ \.\.\.m, playerAId: aId, playerBId: bId \}\)/);
+  assert.match(toolbarJs, /\.map\(\(m\) => \(\{ \.\.\.m, playerAId: m\.playerAId, playerBId: m\.playerBId \}\)\)/);
+});
+
+test('Season result sync infers stripped Play-In matchups, repairs metadata, completes best-of-3, and advances protected Round of 32 slots', () => {
+  const season = makeLockedSeasonWithControl(true);
+  const playIn = Object.values(season.series).filter((item) => item.roundId === 'play_in').sort((a, b) => a.seriesIndex - b.seriesIndex);
+  const state = core.normalizeState({
+    players: makeSeasonPlayers(),
+    currentSeason: season,
+    matchups: [
+      { id: 'stripped-pi1-g1', dateKey: '2026-06-01', playerAId: playIn[0].playerAId, playerBId: playIn[0].playerBId, scoreA: 91, scoreB: 80 },
+      { id: 'stripped-pi1-g2', dateKey: '2026-06-02', playerAId: playIn[0].playerAId, playerBId: playIn[0].playerBId, scoreA: 89, scoreB: 70 },
+      { id: 'stripped-pi2-g1', dateKey: '2026-06-01', playerAId: playIn[1].playerAId, playerBId: playIn[1].playerBId, scoreA: 75, scoreB: 86 },
+      { id: 'stripped-pi2-g2', dateKey: '2026-06-02', playerAId: playIn[1].playerAId, playerBId: playIn[1].playerBId, scoreA: 77, scoreB: 90 }
+    ]
+  });
+
+  const synced = core.syncCurrentSeasonSeriesFromRecordedResults(state, { nowISO: '2026-06-05T12:00:00.000Z' });
+  assert.equal(synced.ok, true);
+  assert.equal(synced.changed, true);
+  assert.equal(synced.updatedSeason.series[playIn[0].id].status, 'complete');
+  assert.equal(synced.updatedSeason.series[playIn[0].id].winnerId, playIn[0].playerAId);
+  assert.equal(synced.updatedSeason.series[playIn[0].id].winsA, 2);
+  assert.equal(synced.updatedSeason.series[playIn[1].id].status, 'complete');
+  assert.equal(synced.updatedSeason.series[playIn[1].id].winnerId, playIn[1].playerBId);
+  assert.equal(synced.updatedSeason.series[playIn[1].id].winsB, 2);
+
+  const repaired = synced.state.matchups.find((matchup) => matchup.id === 'stripped-pi1-g1');
+  assert.equal(repaired.seasonId, season.id);
+  assert.equal(repaired.seriesId, playIn[0].id);
+  assert.equal(repaired.seasonSeriesId, playIn[0].id);
+  assert.equal(repaired.matchupType, 'tournament');
+  assert.equal(repaired.roundId, 'play_in');
+  assert.equal(repaired.bestOf, 3);
+  assert.equal(repaired.winsNeeded, 2);
+
+  const roundOf32 = Object.values(synced.updatedSeason.series).filter((item) => item.roundId === 'round_of_32').sort((a, b) => a.seriesIndex - b.seriesIndex);
+  assert.equal(roundOf32[0].playerBId, playIn[1].playerBId);
+  assert.equal(roundOf32[0].placeholderB, '');
+  assert.equal(roundOf32[8].playerBId, playIn[0].playerAId);
+  assert.equal(roundOf32[8].placeholderB, '');
+});
+
+test('Season inference does not count ambiguous plain exhibition matchups as tournament results', () => {
+  const season = makeLockedSeasonWithControl(true);
+  const playIn = Object.values(season.series).find((item) => item.roundId === 'play_in' && item.seriesIndex === 1);
+  const duplicateSeries = {
+    ...playIn,
+    id: 'duplicate-pair-series',
+    roundId: '',
+    roundName: 'Duplicate',
+    status: 'active',
+    winsA: 0,
+    winsB: 0,
+    winnerId: '',
+    loserId: '',
+    gameResults: []
+  };
+  const ambiguousSeason = core.normalizeSeasonState({
+    ...season,
+    series: {
+      ...season.series,
+      [duplicateSeries.id]: duplicateSeries
+    }
+  });
+  const state = core.normalizeState({
+    players: makeSeasonPlayers(),
+    currentSeason: ambiguousSeason,
+    matchups: [{ id: 'plain-exhibition', playerAId: playIn.playerAId, playerBId: playIn.playerBId, scoreA: 100, scoreB: 50 }]
+  });
+
+  const synced = core.syncCurrentSeasonSeriesFromRecordedResults(state, { nowISO: '2026-06-05T12:00:00.000Z' });
+  assert.equal(synced.changed, false);
+  assert.equal(synced.updatedSeason.series[playIn.id].gameResults.length, 0);
+  assert.equal(synced.updatedSeason.series[duplicateSeries.id].gameResults.length, 0);
+});
+
+test('getActiveSeasonSeriesForDate includes overdue active prior rounds only when Season Matchup Control is enabled', () => {
+  const enabledSeason = makeLockedSeasonWithControl(true);
+  const overduePlayIn = Object.values(enabledSeason.series).find((item) => item.roundId === 'play_in' && item.seriesIndex === 1);
+  const enabledActive = core.getActiveSeasonSeriesForDate(enabledSeason, '2026-06-05');
+  assert.equal(enabledActive.some((series) => series.id === overduePlayIn.id), true);
+
+  const disabledSeason = makeLockedSeasonWithControl(false);
+  const disabledActive = core.getActiveSeasonSeriesForDate(disabledSeason, '2026-06-05');
+  assert.equal(disabledActive.some((series) => series.roundId === 'play_in'), false);
+});
+
 test('Round of 32 slate activates all ready fixed series after Play-In resolves', () => {
   let season = makeLockedSeasonWithControl(true);
   const playIn = Object.values(season.series).filter((item) => item.roundId === 'play_in').sort((a, b) => a.seriesIndex - b.seriesIndex);
