@@ -2338,10 +2338,7 @@ function buildDailySchedule(dateKeyStr, participantIds, signature){
 }
 
 function buildDayFromExisting(dateKeyStr, participantIds, signature, matchups){
-  const safeMatchups = (matchups || []).map(m => ({
-    playerAId: m.playerAId,
-    playerBId: m.playerBId
-  }));
+  const safeMatchups = (matchups || []).map(m => ({ ...m, playerAId: m.playerAId, playerBId: m.playerBId }));
   const used = new Set();
   safeMatchups.forEach(m => {
     if (m.playerAId) used.add(m.playerAId);
@@ -2386,7 +2383,7 @@ function ensureUpcomingSchedule(days = 7, startDateKey = null, forceRebuildFromS
     const key = getMatchupDateKey(m);
     if (!key) return;
     if (!existingMatchupsByDate.has(key)) existingMatchupsByDate.set(key, []);
-    existingMatchupsByDate.get(key).push({ playerAId: m.playerAId, playerBId: m.playerBId });
+    existingMatchupsByDate.get(key).push({ ...m });
   });
 
 const rebuiltNeeded = neededDates.map((key) => {
@@ -2408,10 +2405,7 @@ const rebuiltNeeded = neededDates.map((key) => {
       changed = true;
       return {
         date: todayKey,
-        matchups: todaysStoredMatchups.map((m) => ({
-          playerAId: m.playerAId,
-          playerBId: m.playerBId
-        })),
+        matchups: todaysStoredMatchups.map((m) => ({ ...m, playerAId: m.playerAId, playerBId: m.playerBId })),
         byeIds: preservedByeIds,
         participantSignature: signature
       };

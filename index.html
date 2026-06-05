@@ -3310,18 +3310,12 @@ function ensureUpcomingSchedule(days = 7){
     const key = getMatchupDateKeyLocal(m);
     if (!key) return;
     if (!existingMatchupsByDate.has(key)) existingMatchupsByDate.set(key, []);
-    existingMatchupsByDate.get(key).push({
-      playerAId: m.playerAId,
-      playerBId: m.playerBId
-    });
+    existingMatchupsByDate.get(key).push({ ...m });
   });
 
   function buildTodayFromStoredMatchups(existing, pairs) {
     const safePairs = pairs
-      .map((m) => ({
-        playerAId: m.playerAId,
-        playerBId: m.playerBId
-      }))
+      .map((m) => ({ ...m, playerAId: m.playerAId, playerBId: m.playerBId }))
       .filter((m) => m.playerAId && m.playerBId);
 
     const used = new Set();

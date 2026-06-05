@@ -1326,10 +1326,7 @@ function buildDailyScheduleFallback(dateKeyStr, participantIds, signature, state
 }
 
 function buildDayFromExistingFallback(dateKeyStr, participantIds, signature, matchups) {
-  const safeMatchups = (matchups || []).map((m) => ({
-    playerAId: m.playerAId,
-    playerBId: m.playerBId
-  }));
+  const safeMatchups = (matchups || []).map((m) => ({ ...m, playerAId: m.playerAId, playerBId: m.playerBId }));
   const used = new Set();
   safeMatchups.forEach((m) => {
     if (m.playerAId) used.add(m.playerAId);
@@ -1392,7 +1389,7 @@ function ensureUpcomingScheduleFallback(state, days = 7) {
     const key = matchupDateKeyFallback(m);
     if (!key) return;
     if (!existingMatchupsByDate.has(key)) existingMatchupsByDate.set(key, []);
-    existingMatchupsByDate.get(key).push({ playerAId: aId, playerBId: bId });
+    existingMatchupsByDate.get(key).push({ ...m, playerAId: aId, playerBId: bId });
   });
 
   const rebuilt = neededDates.map((key) => {

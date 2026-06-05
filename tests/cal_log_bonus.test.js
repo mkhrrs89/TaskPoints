@@ -645,6 +645,159 @@ test('Season result sync records tournament results once, ignores exhibitions, a
   assert.equal(synced.updatedSeason.series[playIn.id].winnerId, playIn.playerAId);
 });
 
+
+
+test('schedule rebuild code preserves full stored matchup metadata instead of stripping to player ids', () => {
+  const indexHtml = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'index.html'), 'utf8');
+  const gameHtml = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'game.html'), 'utf8');
+  const toolbarJs = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'toolbar.js'), 'utf8');
+
+  assert.match(indexHtml, /existingMatchupsByDate\.get\(key\)\.push\(\{ \.\.\.m \}\)/);
+  assert.match(indexHtml, /\.map\(\(m\) => \(\{ \.\.\.m, playerAId: m\.playerAId, playerBId: m\.playerBId \}\)\)/);
+  assert.match(gameHtml, /existingMatchupsByDate\.get\(key\)\.push\(\{ \.\.\.m \}\)/);
+  assert.match(gameHtml, /todaysStoredMatchups\.map\(\(m\) => \(\{ \.\.\.m, playerAId: m\.playerAId, playerBId: m\.playerBId \}\)\)/);
+  assert.match(toolbarJs, /existingMatchupsByDate\.get\(key\)\.push\(\{ \.\.\.m, playerAId: aId, playerBId: bId \}\)/);
+  assert.match(toolbarJs, /\.map\(\(m\) => \(\{ \.\.\.m, playerAId: m\.playerAId, playerBId: m\.playerBId \}\)\)/);
+});
+
+test('Season result sync infers stripped Play-In matchups, repairs metadata, completes best-of-3, and advances protected Round of 32 slots', () => {
+  const season = makeLockedSeasonWithControl(true);
+  const playIn = Object.values(season.series).filter((item) => item.roundId === 'play_in').sort((a, b) => a.seriesIndex - b.seriesIndex);
+  const state = core.normalizeState({
+    players: makeSeasonPlayers(),
+    currentSeason: season,
+    matchups: [
+      { id: 'stripped-pi1-g1', dateKey: '2026-06-01', playerAId: playIn[0].playerAId, playerBId: playIn[0].playerBId, scoreA: 91, scoreB: 80 },
+      { id: 'stripped-pi1-g2', dateKey: '2026-06-02', playerAId: playIn[0].playerAId, playerBId: playIn[0].playerBId, scoreA: 89, scoreB: 70 },
+      { id: 'stripped-pi2-g1', dateKey: '2026-06-01', playerAId: playIn[1].playerAId, playerBId: playIn[1].playerBId, scoreA: 75, scoreB: 86 },
+      { id: 'stripped-pi2-g2', dateKey: '2026-06-02', playerAId: playIn[1].playerAId, playerBId: playIn[1].playerBId, scoreA: 77, scoreB: 90 }
+    ]
+  });
+
+  const synced = core.syncCurrentSeasonSeriesFromRecordedResults(state, { nowISO: '2026-06-05T12:00:00.000Z' });
+  assert.equal(synced.ok, true);
+  assert.equal(synced.changed, true);
+  assert.equal(synced.updatedSeason.series[playIn[0].id].status, 'complete');
+  assert.equal(synced.updatedSeason.series[playIn[0].id].winnerId, playIn[0].playerAId);
+  assert.equal(synced.updatedSeason.series[playIn[0].id].winsA, 2);
+  assert.equal(synced.updatedSeason.series[playIn[1].id].status, 'complete');
+  assert.equal(synced.updatedSeason.series[playIn[1].id].winnerId, playIn[1].playerBId);
+  assert.equal(synced.updatedSeason.series[playIn[1].id].winsB, 2);
+
+  const repaired = synced.state.matchups.find((matchup) => matchup.id === 'stripped-pi1-g1');
+  assert.equal(repaired.seasonId, season.id);
+  assert.equal(repaired.seriesId, playIn[0].id);
+  assert.equal(repaired.seasonSeriesId, playIn[0].id);
+  assert.equal(repaired.matchupType, 'tournament');
+  assert.equal(repaired.roundId, 'play_in');
+  assert.equal(repaired.bestOf, 3);
+  assert.equal(repaired.winsNeeded, 2);
+
+  const roundOf32 = Object.values(synced.updatedSeason.series).filter((item) => item.roundId === 'round_of_32').sort((a, b) => a.seriesIndex - b.seriesIndex);
+  assert.equal(roundOf32[0].playerBId, playIn[1].playerBId);
+  assert.equal(roundOf32[0].placeholderB, '');
+  assert.equal(roundOf32[8].playerBId, playIn[0].playerAId);
+  assert.equal(roundOf32[8].placeholderB, '');
+});
+
+test('Season inference does not count or repair plain exhibitions that share a unique Season series pairing', () => {
+  const season = makeLockedSeasonWithControl(true);
+  const playIn = Object.values(season.series).find((item) => item.roundId === 'play_in' && item.seriesIndex === 1);
+  const exhibition = {
+    id: 'plain-exhibition',
+    dateKey: '2026-06-01',
+    matchupType: 'exhibition',
+    playerAId: playIn.playerAId,
+    playerBId: playIn.playerBId,
+    scoreA: 100,
+    scoreB: 50
+  };
+  const state = core.normalizeState({
+    players: makeSeasonPlayers(),
+    currentSeason: season,
+    matchups: [exhibition]
+  });
+
+  const synced = core.syncCurrentSeasonSeriesFromRecordedResults(state, { nowISO: '2026-06-05T12:00:00.000Z' });
+  assert.equal(synced.changed, false);
+  assert.equal(synced.updatedSeason.series[playIn.id].gameResults.length, 0);
+  assert.deepEqual(synced.state.matchups[0], exhibition);
+});
+
+test('Season sync allows explicit valid Season series ids on exhibition-typed records', () => {
+  const season = makeLockedSeasonWithControl(true);
+  const playIn = Object.values(season.series).find((item) => item.roundId === 'play_in' && item.seriesIndex === 1);
+  const state = core.normalizeState({
+    players: makeSeasonPlayers(),
+    currentSeason: season,
+    matchups: [{
+      id: 'explicit-exhibition-series',
+      dateKey: '2026-06-01',
+      matchupType: 'exhibition',
+      seriesId: playIn.id,
+      playerAId: playIn.playerAId,
+      playerBId: playIn.playerBId,
+      scoreA: 100,
+      scoreB: 50
+    }]
+  });
+
+  const synced = core.syncCurrentSeasonSeriesFromRecordedResults(state, { nowISO: '2026-06-05T12:00:00.000Z' });
+  assert.equal(synced.changed, true);
+  assert.equal(synced.updatedSeason.series[playIn.id].gameResults.length, 1);
+  assert.equal(synced.updatedSeason.series[playIn.id].winsA, 1);
+  assert.equal(synced.state.matchups[0].seasonSeriesId, playIn.id);
+  assert.equal(synced.state.matchups[0].matchupType, 'exhibition');
+});
+
+test('getActiveSeasonSeriesForDate includes overdue active prior rounds only when Season Matchup Control is enabled', () => {
+  const enabledSeason = makeLockedSeasonWithControl(true);
+  const overduePlayIn = Object.values(enabledSeason.series).find((item) => item.roundId === 'play_in' && item.seriesIndex === 1);
+  const enabledActive = core.getActiveSeasonSeriesForDate(enabledSeason, '2026-06-05');
+  assert.equal(enabledActive.some((series) => series.id === overduePlayIn.id), true);
+
+  const disabledSeason = makeLockedSeasonWithControl(false);
+  const disabledActive = core.getActiveSeasonSeriesForDate(disabledSeason, '2026-06-05');
+  assert.equal(disabledActive.some((series) => series.roundId === 'play_in'), false);
+});
+
+test('Season schedule signature includes overdue active prior-round series on later-round dates', () => {
+  const state = core.normalizeState({ players: makeSeasonPlayers(), currentSeason: makeLockedSeasonWithControl(true) });
+  const season = state.currentSeason;
+  const overduePlayIn = Object.values(season.series).find((item) => item.roundId === 'play_in' && item.seriesIndex === 1);
+  const activeSeries = core.getActiveSeasonSeriesForDate(season, '2026-06-05');
+  const stateSignature = core.getSeasonScheduleSignature(state, '2026-06-05');
+  const seasonSignature = core.getSeasonScheduleSignature(season, '2026-06-05');
+
+  assert.equal(activeSeries.some((series) => series.id === overduePlayIn.id), true);
+  assert.match(stateSignature, new RegExp(`${overduePlayIn.id}~play_in~active`));
+  assert.match(seasonSignature, new RegExp(`${overduePlayIn.id}~play_in~active`));
+});
+
+test('Season schedule validation rejects days missing an overdue prior-round tournament matchup', () => {
+  const state = core.normalizeState({ players: makeSeasonPlayers(), currentSeason: makeLockedSeasonWithControl(true) });
+  const overduePlayIn = Object.values(state.currentSeason.series).find((item) => item.roundId === 'play_in' && item.seriesIndex === 1);
+  const validSignature = core.getSeasonScheduleSignature(state, '2026-06-05');
+  const staleDay = {
+    date: '2026-06-05',
+    participantSignature: 'unchanged',
+    seasonMatchupControl: true,
+    seasonScheduleSignature: validSignature,
+    matchups: [{
+      id: 'missing-overdue-exhibition',
+      dateKey: '2026-06-05',
+      seasonId: state.currentSeason.id,
+      matchupType: 'exhibition',
+      playerAId: 'P1',
+      playerBId: 'P2'
+    }]
+  };
+
+  assert.equal(core.getActiveSeasonSeriesForDate(state.currentSeason, '2026-06-05').some((series) => series.id === overduePlayIn.id), true);
+  assert.equal(core.isValidSeasonControlledScheduleDay(state, '2026-06-05', staleDay), false);
+  assert.equal(core.shouldRegenerateScheduleDayForSeasonControl(state, '2026-06-05', staleDay), true);
+});
+
 test('Round of 32 slate activates all ready fixed series after Play-In resolves', () => {
   let season = makeLockedSeasonWithControl(true);
   const playIn = Object.values(season.series).filter((item) => item.roundId === 'play_in').sort((a, b) => a.seriesIndex - b.seriesIndex);
