@@ -574,8 +574,10 @@
     if (!series || typeof series !== 'object') return null;
     if (series.winnerId) return series.winnerId;
     const winsNeeded = Number(series.winsNeeded) || (Math.floor((Number(series.bestOf) || 1) / 2) + 1);
-    if ((Number(series.winsA) || 0) >= winsNeeded) return series.playerAId || null;
-    if ((Number(series.winsB) || 0) >= winsNeeded) return series.playerBId || null;
+    const winsA = Number(series.winsA) || 0;
+    const winsB = Number(series.winsB) || 0;
+    if (winsA >= winsNeeded && winsA > winsB) return series.playerAId || null;
+    if (winsB >= winsNeeded && winsB > winsA) return series.playerBId || null;
     return null;
   }
 
@@ -1619,9 +1621,13 @@
     let winnerId = '';
     let loserId = '';
     let status = (series.playerAId && series.playerBId) ? 'active' : 'pending';
-    if (winsA >= winsNeeded || winsB >= winsNeeded) {
-      winnerId = winsA >= winsNeeded ? series.playerAId : series.playerBId;
-      loserId = winnerId === series.playerAId ? series.playerBId : series.playerAId;
+    if (winsA >= winsNeeded && winsA > winsB) {
+      winnerId = series.playerAId;
+      loserId = series.playerBId;
+      status = 'complete';
+    } else if (winsB >= winsNeeded && winsB > winsA) {
+      winnerId = series.playerBId;
+      loserId = series.playerAId;
       status = 'complete';
     }
     return {
@@ -1681,61 +1687,226 @@
     };
   }
 
-  function syncSeasonResultsFromDailyMatchups(state, dateKeyStr, options = {}) {
+  function getSeasonSeriesWinsNeeded(series) {
+    const explicit = Number(series?.winsNeeded);
+    if (Number.isFinite(explicit) && explicit > 0) return Math.floor(explicit);
+    const bestOf = Number(series?.bestOf);
+    if (Number.isFinite(bestOf) && bestOf > 0) return Math.floor(bestOf / 2) + 1;
+    return series?.roundId === 'play_in' ? 2 : (series?.roundId === 'round_of_32' ? 3 : 1);
+  }
+
+  function getRecordedResultDateKey(record) {
+    return record?.dateKey || record?.dayKey || record?.date || (record?.dateISO ? dateKey(record.dateISO) : '') || (record?.completedAtISO ? dateKey(record.completedAtISO) : '');
+  }
+
+  function getRecordedResultTime(record) {
+    return record?.completedAtISO || record?.updatedAtISO || record?.recordedAtISO || record?.dateISO || record?.createdAtISO || '';
+  }
+
+  function getRecordedSeriesId(record) {
+    return String(record?.seasonSeriesId || record?.seriesId || record?.seasonSeriesID || record?.seriesID || '').trim();
+  }
+
+  function getRecordedResultWinner(record) {
+    let winnerId = String(record?.winnerId || record?.winningPlayerId || record?.winner?.playerId || record?.winner?.id || record?.result?.winnerId || record?.result?.winningPlayerId || record?.result?.winner?.playerId || record?.result?.winner?.id || '').trim();
+    let loserId = String(record?.loserId || record?.losingPlayerId || record?.loser?.playerId || record?.loser?.id || record?.result?.loserId || record?.result?.losingPlayerId || record?.result?.loser?.playerId || record?.result?.loser?.id || '').trim();
+    const scoreA = Number(record?.scoreA ?? record?.playerAScore ?? record?.aScore ?? record?.result?.scoreA ?? record?.result?.playerAScore);
+    const scoreB = Number(record?.scoreB ?? record?.playerBScore ?? record?.bScore ?? record?.result?.scoreB ?? record?.result?.playerBScore);
+    if (!winnerId && Number.isFinite(scoreA) && Number.isFinite(scoreB) && scoreA !== scoreB) {
+      winnerId = scoreA > scoreB ? String(record?.playerAId || '').trim() : String(record?.playerBId || '').trim();
+      loserId = scoreA > scoreB ? String(record?.playerBId || '').trim() : String(record?.playerAId || '').trim();
+    }
+    return {
+      winnerId,
+      loserId,
+      playerAScore: Number.isFinite(scoreA) ? scoreA : undefined,
+      playerBScore: Number.isFinite(scoreB) ? scoreB : undefined
+    };
+  }
+
+  function getSeasonResultDedupeKey(record, seriesId, fallbackIndex = 0) {
+    const directId = record?.matchupId || record?.gameId || record?.id || record?.completionId;
+    if (directId) return `id:${directId}`;
+    const date = getRecordedResultDateKey(record);
+    const gameNumber = record?.gameNumber || record?.seriesGameNumber || record?.game || '';
+    const winnerId = record?.winnerId || record?.winningPlayerId || '';
+    const scoreA = record?.playerAScore ?? record?.scoreA ?? '';
+    const scoreB = record?.playerBScore ?? record?.scoreB ?? '';
+    if (date || gameNumber || winnerId) return `cmp:${date}:${seriesId}:${gameNumber}:${winnerId}:${scoreA}:${scoreB}`;
+    return `fallback:${seriesId}:${fallbackIndex}`;
+  }
+
+  function normalizeSeasonResultRecord(raw, series, source, fallbackIndex = 0) {
+    if (!raw || !series) return null;
+    const seriesId = getRecordedSeriesId(raw) || series.id || '';
+    if (seriesId && series.id && seriesId !== series.id) return null;
+    const winner = getRecordedResultWinner(raw);
+    if (!winner.winnerId || (winner.winnerId !== series.playerAId && winner.winnerId !== series.playerBId)) return null;
+    const loserId = winner.winnerId === series.playerAId ? series.playerBId : series.playerAId;
+    if (!loserId || (winner.loserId && winner.loserId !== loserId)) return null;
+    const date = getRecordedResultDateKey(raw);
+    const matchupId = raw.matchupId || raw.id || raw.gameId || (date ? `${date}_${series.id}_${raw.gameNumber || raw.seriesGameNumber || ''}` : '');
+    return {
+      dateKey: date,
+      matchupId: String(matchupId || ''),
+      gameNumber: raw.gameNumber || raw.seriesGameNumber || raw.game || null,
+      winnerId: winner.winnerId,
+      loserId,
+      playerAScore: winner.playerAScore,
+      playerBScore: winner.playerBScore,
+      source: raw.source || source || 'matchup',
+      _containerSource: source || '',
+      recordedAtISO: raw.recordedAtISO || raw.completedAtISO || raw.dateISO || raw.createdAtISO || '',
+      updatedAtISO: raw.updatedAtISO || '',
+      _dedupeKey: getSeasonResultDedupeKey({ ...raw, matchupId }, series.id, fallbackIndex),
+      _sortKey: getRecordedResultTime(raw) || date || ''
+    };
+  }
+
+  function collectSeasonResultCandidates(state, season, options = {}) {
+    const candidatesBySeries = new Map();
+    const add = (seriesId, raw, source, index, includeRegardlessOfDate = false) => {
+      if (!seriesId || !season?.series?.[seriesId]) return;
+      const normalized = normalizeSeasonResultRecord(raw, season.series[seriesId], source, index);
+      if (!normalized) return;
+      if (!includeRegardlessOfDate && options.dateKey && normalized.dateKey && normalized.dateKey !== options.dateKey) return;
+      if (!candidatesBySeries.has(seriesId)) candidatesBySeries.set(seriesId, []);
+      candidatesBySeries.get(seriesId).push(normalized);
+    };
+
+    (Array.isArray(state?.matchups) ? state.matchups : []).forEach((matchup, index) => {
+      const seriesId = getRecordedSeriesId(matchup);
+      if (!seriesId) return;
+      const type = String(matchup?.matchupType || '').toLowerCase();
+      const isSeasonMatchup = matchup?.seasonId === season?.id || type === 'tournament' || type === 'season';
+      if (!isSeasonMatchup) return;
+      add(seriesId, matchup, 'matchup', index);
+    });
+
+    Object.entries(season?.series || {}).forEach(([seriesId, series]) => {
+      (Array.isArray(series?.gameResults) ? series.gameResults : []).forEach((result, index) => {
+        add(seriesId, { ...result, seriesId, seasonSeriesId: seriesId }, 'series.gameResults', index, true);
+      });
+    });
+
+    const scanResultContainer = (container, source) => {
+      if (Array.isArray(container)) {
+        container.forEach((entry, index) => add(getRecordedSeriesId(entry), entry, source, index));
+      } else if (container && typeof container === 'object') {
+        Object.entries(container).forEach(([key, value], outerIndex) => {
+          if (Array.isArray(value)) value.forEach((entry, index) => add(getRecordedSeriesId(entry) || key, { ...entry, seriesId: getRecordedSeriesId(entry) || key }, source, index));
+          else if (value && typeof value === 'object') add(getRecordedSeriesId(value) || key, { ...value, seriesId: getRecordedSeriesId(value) || key }, source, outerIndex);
+        });
+      }
+    };
+    scanResultContainer(season?.gameResults, 'season.gameResults');
+    scanResultContainer(season?.dailyTournamentResults, 'season.dailyTournamentResults');
+    scanResultContainer(state?.gameHistory, 'gameHistory');
+
+    return candidatesBySeries;
+  }
+
+  function rebuildSeasonSeriesFromRecordedResults(series, rawResults, options = {}) {
+    const byKey = new Map();
+    rawResults.forEach((result, index) => {
+      const key = result._dedupeKey || getSeasonResultDedupeKey(result, series.id, index);
+      const existing = byKey.get(key);
+      const resultSource = String(result._containerSource || result.source || '');
+      const existingSource = String(existing?._containerSource || existing?.source || '');
+      if (existing && resultSource.includes('series.gameResults') && !existingSource.includes('series.gameResults')) return;
+      byKey.set(key, result);
+    });
+    const gameResults = Array.from(byKey.values()).sort((a, b) => String(a._sortKey || a.dateKey || '').localeCompare(String(b._sortKey || b.dateKey || '')));
+    let winsA = 0;
+    let winsB = 0;
+    gameResults.forEach((result) => {
+      if (result.winnerId === series.playerAId) winsA += 1;
+      else if (result.winnerId === series.playerBId) winsB += 1;
+    });
+    const winsNeeded = getSeasonSeriesWinsNeeded(series);
+    let winnerId = '';
+    let loserId = '';
+    let status = series.playerAId && series.playerBId ? (series.status === 'pending' ? 'active' : (series.status || 'active')) : 'pending';
+    if (winsA >= winsNeeded && winsA > winsB) {
+      winnerId = series.playerAId;
+      loserId = series.playerBId;
+      status = 'complete';
+    } else if (winsB >= winsNeeded && winsB > winsA) {
+      winnerId = series.playerBId;
+      loserId = series.playerAId;
+      status = 'complete';
+    } else if (series.status === 'complete' || series.winnerId || series.loserId) {
+      status = series.playerAId && series.playerBId ? 'active' : 'pending';
+    }
+    const latest = gameResults.map((result) => result._sortKey || result.recordedAtISO || result.dateKey || '').filter(Boolean).sort().pop() || '';
+    return {
+      ...series,
+      winsA,
+      winsB,
+      winnerId,
+      loserId,
+      status,
+      gameResults: gameResults.map(({ _dedupeKey, _sortKey, _containerSource, ...result }) => result),
+      completedAtISO: winnerId ? (latest || series.completedAtISO || seasonNowISO(options)) : '',
+      updatedAtISO: seasonNowISO(options)
+    };
+  }
+
+  function syncCurrentSeasonSeriesFromRecordedResults(state, options = {}) {
     const normalized = normalizeState(state || {});
     let season = normalizeSeasonState(normalized.currentSeason);
     const warnings = [];
     const errors = [];
     if (!season) return { ok: false, state: normalized, updatedSeason: season, changed: false, warnings, errors: ['No current season.'] };
-    const dayMatchups = (normalized.matchups || []).filter((matchup) => matchupDateKey(matchup) === dateKeyStr && matchup?.seasonId === season.id && matchup?.seriesId && matchup?.matchupType === 'tournament');
+    const beforeSeries = season.series || {};
+    const candidates = collectSeasonResultCandidates(normalized, season, options);
+    const nextSeries = { ...beforeSeries };
+    let resultCount = 0;
     let changed = false;
-    dayMatchups.forEach((matchup) => {
-      const winner = getMatchupWinnerIds(matchup);
-      if (!winner) { warnings.push(`Tournament matchup ${matchup.id || matchup.seriesId} has no unambiguous winner yet.`); return; }
-      const payload = buildSeasonGameResultPayload(matchup, dateKeyStr, winner);
-      const record = recordSeasonSeriesGameResult(season, matchup.seriesId, payload, options);
-      if (!record.ok) {
-        if (record.error === 'duplicate_game_result' || record.error === 'series_already_complete') {
-          const replacement = replaceSeasonSeriesGameResult(season, matchup.seriesId, payload, options);
-          if (!replacement.ok) {
-            errors.push(replacement.error || `Unable to replace existing result for ${matchup.seriesId}.`);
-            season = replacement.season || season;
-            return;
-          }
-          season = replacement.season || season;
-          if (!replacement.changed) return;
-          changed = true;
-          if (replacement.winnerChanged) {
-            warnings.push(`Edited result changed the winner of ${matchup.seriesId}; bracket advancement may need manual admin repair.`);
-            return;
-          }
-          if (!replacement.beforeWinnerId && replacement.afterWinnerId) {
-            const advanced = advanceSeasonSeriesWinner(season, matchup.seriesId, options);
-            if (advanced.ok) { season = advanced.season; changed = true; }
-            else warnings.push(`Series ${matchup.seriesId} complete but advancement is pending: ${advanced.error || 'unknown'}.`);
-          }
-          return;
-        }
-        errors.push(record.error || `Unable to record result for ${matchup.seriesId}.`);
-        season = record.season || season;
+    Object.entries(beforeSeries).forEach(([seriesId, series]) => {
+      const rawResults = candidates.get(seriesId) || [];
+      resultCount += rawResults.length;
+      if (!rawResults.length) return;
+      const beforeWinnerId = getSeasonSeriesWinner(series) || '';
+      const repaired = rebuildSeasonSeriesFromRecordedResults(series, rawResults, options);
+      const afterWinnerId = getSeasonSeriesWinner(repaired) || '';
+      if (beforeWinnerId && afterWinnerId && beforeWinnerId !== afterWinnerId) {
+        warnings.push(`Edited result changed the winner of ${seriesId}; bracket advancement may need manual admin repair.`);
+      }
+      const stableRepaired = { ...repaired, updatedAtISO: series.updatedAtISO };
+      if (JSON.stringify(stableRepaired) === JSON.stringify(series)) {
+        nextSeries[seriesId] = series;
         return;
       }
-      changed = true;
-      season = record.season;
-      if (record.complete) {
-        const advanced = advanceSeasonSeriesWinner(season, matchup.seriesId, options);
-        if (advanced.ok) { season = advanced.season; changed = true; }
-        else warnings.push(`Series ${matchup.seriesId} complete but advancement is pending: ${advanced.error || 'unknown'}.`);
+      if (JSON.stringify(repaired) !== JSON.stringify(series)) {
+        nextSeries[seriesId] = repaired;
+        changed = true;
       }
     });
+    season = normalizeSeasonState({ ...season, series: nextSeries, updatedAtISO: changed ? seasonNowISO(options) : season.updatedAtISO });
     const playInRepair = repairPlayInAdvancementForSeason(season, options);
     if (playInRepair.season) {
       season = playInRepair.season;
       if (playInRepair.changed) changed = true;
       else if (!playInRepair.ok && playInRepair.error && playInRepair.error !== 'play_in_not_complete') warnings.push(`Play-In repair pending: ${playInRepair.error}.`);
     }
+    const completedCount = Object.values(season?.series || {}).filter((series) => isSeasonSeriesComplete(series)).length;
+    const playInCompletedCount = Object.values(season?.series || {}).filter((series) => series?.roundId === 'play_in' && isSeasonSeriesComplete(series)).length;
+    if (typeof console !== 'undefined' && typeof console.info === 'function') {
+      console.info('[Season result sync]', {
+        seriesCount: Object.keys(season?.series || {}).length,
+        resultCount,
+        completedCount,
+        playInCompletedCount,
+        changed
+      });
+    }
     const nextState = changed ? normalizeState({ ...normalized, currentSeason: season, latestSeasonId: season?.id || normalized.latestSeasonId || '' }) : normalized;
     return { ok: errors.length === 0, state: nextState, updatedSeason: season, changed, warnings, errors };
+  }
+
+  function syncSeasonResultsFromDailyMatchups(state, dateKeyStr, options = {}) {
+    return syncCurrentSeasonSeriesFromRecordedResults(state, { ...options, dateKey: dateKeyStr || options.dateKey || '' });
   }
 
   function getActiveSeasonPlayerPool(state) {
@@ -5350,6 +5521,7 @@ return Number(cappedScore.toFixed(1));
     hasJunePairingOccurred,
     generateRandomNonRepeatPairs,
     syncSeasonResultsFromDailyMatchups,
+    syncCurrentSeasonSeriesFromRecordedResults,
     cleanupOpponentDripSchedules,
     getOpponentDripScheduleCleanupSummary,
     loadAppState,

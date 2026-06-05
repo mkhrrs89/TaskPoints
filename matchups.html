@@ -664,8 +664,10 @@ for (let i = 0; i + 1 < pool.length; i += 2) {
           removeOpponentDripSchedule(state, key, update.playerId);
         });
 
-        if (window.TaskPointsCore?.syncSeasonResultsFromDailyMatchups) {
-          const seasonSync = TaskPointsCore.syncSeasonResultsFromDailyMatchups(state, key);
+        if (window.TaskPointsCore?.syncCurrentSeasonSeriesFromRecordedResults || window.TaskPointsCore?.syncSeasonResultsFromDailyMatchups) {
+          const seasonSync = window.TaskPointsCore?.syncCurrentSeasonSeriesFromRecordedResults
+            ? TaskPointsCore.syncCurrentSeasonSeriesFromRecordedResults(state)
+            : TaskPointsCore.syncSeasonResultsFromDailyMatchups(state, key);
           if (seasonSync.changed) state = seasonSync.state;
           (seasonSync.warnings || []).forEach((warning) => console.warn('Season result sync warning:', warning));
           (seasonSync.errors || []).forEach((error) => console.warn('Season result sync error:', error));

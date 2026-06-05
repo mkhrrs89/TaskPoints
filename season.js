@@ -485,6 +485,14 @@
       latestSeasonId: currentSeason?.id || normalized.latestSeasonId || ''
     };
 
+    if (typeof core.syncCurrentSeasonSeriesFromRecordedResults === 'function') {
+      const synced = core.syncCurrentSeasonSeriesFromRecordedResults(nextState, options);
+      if (synced?.state) {
+        changed = changed || Boolean(synced.changed);
+        nextState = synced.state;
+      }
+    }
+
     if (typeof core.repairSeasonChampionshipData === 'function') {
       const repaired = core.repairSeasonChampionshipData(nextState, options);
       if (repaired?.ok && repaired.state) {
@@ -1228,7 +1236,7 @@
 
   function loadSeasonState(options = {}) {
     const prepared = prepareSeasonStateForPreview(loadRawSeasonState(), options);
-    if (prepared.changed) return persistSeasonState(prepared.state, 'season-preview-load');
+    if (prepared.changed) return persistSeasonState(prepared.state, 'season-result-resync');
     return prepared.state;
   }
 
@@ -1413,7 +1421,7 @@
       if (action === 'admin-resync-results') {
         const state = currentMountedState();
         const dateKey = getDateKey(new Date());
-        const result = typeof core.syncSeasonResultsFromDailyMatchups === 'function' ? core.syncSeasonResultsFromDailyMatchups(state, dateKey, { nowISO: nowIso() }) : { ok: false, errors: ['helper unavailable'] };
+        const result = typeof core.syncCurrentSeasonSeriesFromRecordedResults === 'function' ? core.syncCurrentSeasonSeriesFromRecordedResults(state, { nowISO: nowIso() }) : (typeof core.syncSeasonResultsFromDailyMatchups === 'function' ? core.syncSeasonResultsFromDailyMatchups(state, dateKey, { nowISO: nowIso() }) : { ok: false, errors: ['helper unavailable'] });
         if (!result.ok && (result.errors || []).length) alert(`Re-sync warnings/errors: ${(result.errors || []).concat(result.warnings || []).join('; ')}`);
         saveAndRenderSeason(result.state || state, 'season-admin-resync-results');
         if (result.ok) alert(`Re-sync complete. Changed: ${result.changed ? 'yes' : 'no'}. ${(result.warnings || []).join(' ')}`);

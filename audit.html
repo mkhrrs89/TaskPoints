@@ -1948,7 +1948,19 @@ function runWeightVo2HistorySavePathAudit(state) {
       const selected = dateInput?.value || defaultAuditDate();
       const dateKey = TaskPointsCore.dateKey(selected);
 
-      const { state, storageKeysFound } = TaskPointsCore.loadAppState();
+      const loadedState = TaskPointsCore.loadAppState();
+      let state = loadedState.state;
+      const storageKeysFound = loadedState.storageKeysFound || [];
+      if (window.TaskPointsCore?.syncCurrentSeasonSeriesFromRecordedResults) {
+        const synced = TaskPointsCore.syncCurrentSeasonSeriesFromRecordedResults(state);
+        if (synced?.state) {
+          state = synced.state;
+          if (synced.changed && window.TaskPointsCore?.saveStateSnapshot) {
+            const saved = TaskPointsCore.saveStateSnapshot(state, { savePath: 'season-repair-sync-results' });
+            state = saved?.state || saved || state;
+          }
+        }
+      }
       const snapshot = TaskPointsCore.buildDaySnapshot(dateKey, state);
       const totals = TaskPointsCore.computeDayTotals(snapshot);
       const rollups = TaskPointsCore.buildRollups(state);
@@ -3141,15 +3153,21 @@ const actualTotal = round2(Number(derivedActualTotal) || 0);
         changed = changed || matchupSync.changed;
       }
 
+      if (window.TaskPointsCore?.syncCurrentSeasonSeriesFromRecordedResults) {
+        const seasonSync = TaskPointsCore.syncCurrentSeasonSeriesFromRecordedResults(nextState);
+        nextState = seasonSync.state || nextState;
+        changed = changed || Boolean(seasonSync.changed);
+      }
+
       if (!changed) {
         alert('Matchups already synced.');
         return;
       }
 
       if (window.TaskPointsCore?.saveAppState) {
-        TaskPointsCore.saveStateSnapshot(nextState);
+        TaskPointsCore.saveStateSnapshot(nextState, { savePath: 'season-result-resync' });
       } else if (window.TaskPointsCore?.mergeAndSaveState) {
-        TaskPointsCore.saveStateSnapshot(nextState);
+        TaskPointsCore.saveStateSnapshot(nextState, { savePath: 'season-result-resync' });
       } else {
         console.warn("audit save skipped; TaskPointsCore missing.");
       }
