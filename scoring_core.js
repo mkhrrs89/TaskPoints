@@ -572,7 +572,7 @@
 
   function getSeasonSeriesWinner(series) {
     if (!series || typeof series !== 'object') return null;
-    if (series.winnerId) return series.winnerId;
+    if (series.winnerId && (series.winnerId === series.playerAId || series.winnerId === series.playerBId)) return series.winnerId;
     const winsNeeded = Number(series.winsNeeded) || (Math.floor((Number(series.bestOf) || 1) / 2) + 1);
     const winsA = Number(series.winsA) || 0;
     const winsB = Number(series.winsB) || 0;
@@ -582,7 +582,7 @@
   }
 
   function isSeasonSeriesComplete(series) {
-    return Boolean(getSeasonSeriesWinner(series)) || series?.status === 'complete';
+    return Boolean(getSeasonSeriesWinner(series));
   }
 
   function seasonSeriesCompetitor(series, slot) {
@@ -773,6 +773,26 @@
     nextSeason.series = { ...(nextSeason.series || {}), [nextSeriesId]: setSeriesSlot(target, slot, winner, options) };
     nextSeason.updatedAtISO = seasonNowISO(options);
     return { ok: true, season: nextSeason, advanced: true, nextSeries: nextSeason.series[nextSeriesId] };
+  }
+
+  function repairCompletedSeasonAdvancementForSeason(season, options = {}) {
+    let nextSeason = normalizeSeasonState(season);
+    if (!nextSeason) return { ok: false, error: 'invalid_season', season, changed: false };
+    let changed = false;
+    OFFICIAL_SEASON_ROUND_ORDER.forEach((roundId) => {
+      const entries = Object.values(nextSeason.series || {})
+        .filter((series) => series?.roundId === roundId && getSeasonSeriesWinner(series))
+        .sort((a, b) => (Number(a.seriesIndex) || 0) - (Number(b.seriesIndex) || 0));
+      entries.forEach((series) => {
+        const before = JSON.stringify(nextSeason);
+        const advanced = advanceSeasonSeriesWinner(nextSeason, series.id, options);
+        if (advanced?.season) {
+          nextSeason = advanced.season;
+          if (JSON.stringify(nextSeason) !== before) changed = true;
+        }
+      });
+    });
+    return { ok: true, season: nextSeason, changed };
   }
 
   function getCurrentSeasonRoundIdForDate(dateKey) {
@@ -1754,30 +1774,130 @@
     return String(record?.seasonSeriesId || record?.seriesId || record?.seasonSeriesID || record?.seriesID || '').trim();
   }
 
+  function getSeasonStartDateKey(season) {
+    return season?.startDateKey || season?.startDate || '';
+  }
+
+  function getSeasonEndDateKey(season) {
+    return season?.endDateKey || season?.endDate || '';
+  }
+
+  function isDateWithinSeasonBounds(season, dateKeyStr) {
+    const date = String(dateKeyStr || '');
+    const start = getSeasonStartDateKey(season);
+    const end = getSeasonEndDateKey(season);
+    return Boolean(date && start && end && date >= start && date <= end);
+  }
+
+  function isValidSeasonResultDateForSeries(season, series, raw, options = {}) {
+    const date = getRecordedResultDateKey(raw) || options.dateKey || '';
+    if (!date || !isDateWithinSeasonBounds(season, date)) return false;
+
+    const dateRound = getSeasonRoundForDate(date)?.id || '';
+    if (!dateRound) return false;
+
+    if (series?.roundId === dateRound) return true;
+
+    const type = String(raw?.matchupType || '').toLowerCase();
+    const explicitSeriesId = getRecordedSeriesId(raw);
+    const hasExplicitSeries = Boolean(explicitSeriesId && explicitSeriesId === series?.id);
+    const currentRoundIndex = OFFICIAL_SEASON_ROUND_ORDER.indexOf(dateRound);
+    const seriesRoundIndex = OFFICIAL_SEASON_ROUND_ORDER.indexOf(series?.roundId);
+    const isOverduePriorRound =
+      currentRoundIndex >= 0
+      && seriesRoundIndex >= 0
+      && seriesRoundIndex < currentRoundIndex
+      && series?.status === 'active'
+      && !isSeasonSeriesComplete(series);
+
+    return isOverduePriorRound && hasExplicitSeries && (type === 'tournament' || type === 'season');
+  }
+
+  function isRecordInSeasonControlledScheduleDay(state, record, dateKeyStr, seriesId) {
+    const schedules = Array.isArray(state?.schedule) ? state.schedule : [];
+    const recordIds = [record?.id, record?.matchupId, record?.gameId].map((id) => String(id || '')).filter(Boolean);
+    return schedules.some((day) => {
+      if (!day || day.dateKey !== dateKeyStr || day.seasonMatchupControl !== true) return false;
+      return (Array.isArray(day.matchups) ? day.matchups : []).some((matchup) => {
+        if (!matchup) return false;
+        const daySeriesId = getRecordedSeriesId(matchup);
+        const matchupIds = [matchup.id, matchup.matchupId, matchup.gameId].map((id) => String(id || '')).filter(Boolean);
+        if (seriesId && daySeriesId === seriesId && getPairingKey(matchup.playerAId, matchup.playerBId) === getPairingKey(record?.playerAId, record?.playerBId)) return true;
+        return recordIds.length > 0 && recordIds.some((id) => matchupIds.includes(id));
+      });
+    });
+  }
+
+  function hasStrippedSeasonTournamentEvidence(state, season, record, series, options = {}) {
+    const type = String(record?.matchupType || '').toLowerCase();
+    if (type === 'tournament' || type === 'season') return true;
+    if (type) return false;
+    const idText = [record?.id, record?.matchupId, record?.gameId].map((id) => String(id || '')).join(' ');
+    if (series?.id && idText.includes(series.id)) return true;
+    const date = getRecordedResultDateKey(record) || options.dateKey || '';
+    return isRecordInSeasonControlledScheduleDay(state, record, date, series?.id || '');
+  }
+
+  function stripInvalidSeasonMetadataFromMatchup(matchup, season) {
+    const seriesId = getRecordedSeriesId(matchup);
+    const series = seriesId ? season?.series?.[seriesId] : null;
+    const type = String(matchup?.matchupType || '').toLowerCase();
+    const hasSeasonMetadata =
+      matchup?.seasonId === season?.id
+      || Boolean(matchup?.seriesId)
+      || Boolean(matchup?.seasonSeriesId)
+      || Boolean(matchup?.seasonSeriesID)
+      || Boolean(matchup?.seriesID)
+      || type === 'tournament'
+      || type === 'season';
+
+    if (!hasSeasonMetadata) return matchup;
+
+    const valid = series && isValidSeasonResultDateForSeries(season, series, matchup);
+    if (valid) return matchup;
+
+    const cleaned = { ...matchup };
+    delete cleaned.seasonId;
+    delete cleaned.seriesId;
+    delete cleaned.seasonSeriesId;
+    delete cleaned.seasonSeriesID;
+    delete cleaned.seriesID;
+    delete cleaned.roundId;
+    delete cleaned.roundName;
+    delete cleaned.seriesGameNumber;
+    delete cleaned.bestOf;
+    delete cleaned.winsNeeded;
+    delete cleaned.seasonMatchupLabel;
+
+    if (type === 'tournament' || type === 'season') delete cleaned.matchupType;
+
+    return cleaned;
+  }
+
   function inferSeasonSeriesIdFromRecord(state, season, record, options = {}) {
     const explicit = getRecordedSeriesId(record);
-    if (explicit && season?.series?.[explicit]) return explicit;
+    if (explicit && season?.series?.[explicit]) {
+      const explicitSeries = season.series[explicit];
+      return isValidSeasonResultDateForSeries(season, explicitSeries, record, options) ? explicit : '';
+    }
     if (!season?.series || !record?.playerAId || !record?.playerBId) return '';
 
     const recordDate = getRecordedResultDateKey(record) || options.dateKey || '';
-    const recordRoundId = record?.roundId || (recordDate && getSeasonRoundForDate(recordDate)?.id) || '';
-    const pairKey = getPairingKey(record.playerAId, record.playerBId);
+    if (!recordDate || !isDateWithinSeasonBounds(season, recordDate)) return '';
 
-    const entries = Object.values(season.series || {}).filter((series) => {
+    const type = String(record?.matchupType || '').toLowerCase();
+    if (type === 'exhibition') return '';
+
+    const pairKey = getPairingKey(record.playerAId, record.playerBId);
+    const validPairMatches = Object.values(season.series || {}).filter((series) => {
       if (!series?.playerAId || !series?.playerBId) return false;
       if (getPairingKey(series.playerAId, series.playerBId) !== pairKey) return false;
-      if (recordRoundId && series.roundId && series.roundId !== recordRoundId) return false;
+      if (!isValidSeasonResultDateForSeries(season, series, record, options)) return false;
+      if (!hasStrippedSeasonTournamentEvidence(state, season, record, series, options)) return false;
       return true;
     });
 
-    if (entries.length === 1) return entries[0].id || '';
-
-    if (!recordRoundId) {
-      const activeOrIncomplete = entries.filter((series) => !isSeasonSeriesComplete(series));
-      if (activeOrIncomplete.length === 1) return activeOrIncomplete[0].id || '';
-    }
-
-    return '';
+    return validPairMatches.length === 1 ? (validPairMatches[0].id || '') : '';
   }
 
   function withInferredSeasonMatchupMetadata(state, season, record, options = {}) {
@@ -1790,6 +1910,7 @@
     if (!seriesId || !season?.series?.[seriesId]) return record;
 
     const series = season.series[seriesId];
+    if (!isValidSeasonResultDateForSeries(season, series, record, options)) return record;
 
     return {
       ...record,
@@ -1864,7 +1985,9 @@
     const candidatesBySeries = new Map();
     const add = (seriesId, raw, source, index, includeRegardlessOfDate = false) => {
       if (!seriesId || !season?.series?.[seriesId]) return;
-      const normalized = normalizeSeasonResultRecord(raw, season.series[seriesId], source, index);
+      const series = season.series[seriesId];
+      if (!isValidSeasonResultDateForSeries(season, series, raw, options)) return;
+      const normalized = normalizeSeasonResultRecord(raw, series, source, index);
       if (!normalized) return;
       if (!includeRegardlessOfDate && options.dateKey && normalized.dateKey && normalized.dateKey !== options.dateKey) return;
       if (!candidatesBySeries.has(seriesId)) candidatesBySeries.set(seriesId, []);
@@ -1890,17 +2013,11 @@
           : '';
 
       if (!seriesId || !season?.series?.[seriesId]) return;
+      if (!isValidSeasonResultDateForSeries(season, season.series[seriesId], matchup, options)) return;
 
-      const isSeasonMatchup =
-        matchup?.seasonId === season?.id
-        || type === 'tournament'
-        || type === 'season'
-        || hasExplicitValidSeries
-        || canInfer;
-
-      if (!isSeasonMatchup) return;
-
-      add(seriesId, withInferredSeasonMatchupMetadata(state, season, matchup, options), 'matchup', index);
+      const repaired = withInferredSeasonMatchupMetadata(state, season, matchup, options);
+      if (repaired === matchup && !hasExplicitValidSeries && !type) return;
+      add(seriesId, repaired, 'matchup', index);
     });
 
     Object.entries(season?.series || {}).forEach(([seriesId, series]) => {
@@ -1936,14 +2053,22 @@
       if (existing && resultSource.includes('series.gameResults') && !existingSource.includes('series.gameResults')) return;
       byKey.set(key, result);
     });
-    const gameResults = Array.from(byKey.values()).sort((a, b) => String(a._sortKey || a.dateKey || '').localeCompare(String(b._sortKey || b.dateKey || '')));
+    const orderedGameResults = Array.from(byKey.values()).sort((a, b) => String(a._sortKey || a.dateKey || '').localeCompare(String(b._sortKey || b.dateKey || '')));
+    const winsNeeded = getSeasonSeriesWinsNeeded(series);
+    const countedResults = [];
     let winsA = 0;
     let winsB = 0;
-    gameResults.forEach((result) => {
-      if (result.winnerId === series.playerAId) winsA += 1;
-      else if (result.winnerId === series.playerBId) winsB += 1;
+    orderedGameResults.forEach((result) => {
+      if (winsA >= winsNeeded || winsB >= winsNeeded) return;
+      if (result.winnerId === series.playerAId) {
+        winsA += 1;
+        countedResults.push(result);
+      } else if (result.winnerId === series.playerBId) {
+        winsB += 1;
+        countedResults.push(result);
+      }
     });
-    const winsNeeded = getSeasonSeriesWinsNeeded(series);
+    const gameResults = countedResults;
     let winnerId = '';
     let loserId = '';
     let status = series.playerAId && series.playerBId ? (series.status === 'pending' ? 'active' : (series.status || 'active')) : 'pending';
@@ -1978,15 +2103,30 @@
     const warnings = [];
     const errors = [];
     if (!season) return { ok: false, state: normalized, updatedSeason: season, changed: false, warnings, errors: ['No current season.'] };
+    let changed = false;
+    const strippedMatchups = (Array.isArray(normalized.matchups) ? normalized.matchups : [])
+      .map((matchup) => stripInvalidSeasonMetadataFromMatchup(matchup, season));
+    const strippedState = { ...normalized, matchups: strippedMatchups };
+    if (JSON.stringify(strippedMatchups) !== JSON.stringify(normalized.matchups || [])) changed = true;
+
     const beforeSeries = season.series || {};
-    const candidates = collectSeasonResultCandidates(normalized, season, options);
+    const candidates = collectSeasonResultCandidates(strippedState, season, options);
     const nextSeries = { ...beforeSeries };
     let resultCount = 0;
-    let changed = false;
     Object.entries(beforeSeries).forEach(([seriesId, series]) => {
       const rawResults = candidates.get(seriesId) || [];
       resultCount += rawResults.length;
-      if (!rawResults.length) return;
+      const shouldRebuild = rawResults.length
+        || (Array.isArray(series?.gameResults) && series.gameResults.length)
+        || Number(series?.winsA)
+        || Number(series?.winsB)
+        || series?.winnerId
+        || series?.loserId
+        || (series?.status === 'complete' && !getSeasonSeriesWinner(series));
+      if (!shouldRebuild) {
+        nextSeries[seriesId] = series;
+        return;
+      }
       const beforeWinnerId = getSeasonSeriesWinner(series) || '';
       const repaired = rebuildSeasonSeriesFromRecordedResults(series, rawResults, options);
       const afterWinnerId = getSeasonSeriesWinner(repaired) || '';
@@ -2004,14 +2144,14 @@
       }
     });
     season = normalizeSeasonState({ ...season, series: nextSeries, updatedAtISO: changed ? seasonNowISO(options) : season.updatedAtISO });
-    const playInRepair = repairPlayInAdvancementForSeason(season, options);
-    if (playInRepair.season) {
-      season = playInRepair.season;
-      if (playInRepair.changed) changed = true;
-      else if (!playInRepair.ok && playInRepair.error && playInRepair.error !== 'play_in_not_complete') warnings.push(`Play-In repair pending: ${playInRepair.error}.`);
+    const advancementRepair = repairCompletedSeasonAdvancementForSeason(season, options);
+    if (advancementRepair.season) {
+      season = advancementRepair.season;
+      if (advancementRepair.changed) changed = true;
+      else if (!advancementRepair.ok && advancementRepair.error) warnings.push(`Advancement repair pending: ${advancementRepair.error}.`);
     }
-    const repairedMatchups = (Array.isArray(normalized.matchups) ? normalized.matchups : [])
-      .map((matchup) => withInferredSeasonMatchupMetadata(normalized, season, matchup, options));
+    const repairedMatchups = strippedMatchups
+      .map((matchup) => withInferredSeasonMatchupMetadata(strippedState, season, matchup, options));
     const matchupsChanged = JSON.stringify(repairedMatchups) !== JSON.stringify(normalized.matchups || []);
     if (matchupsChanged) changed = true;
 

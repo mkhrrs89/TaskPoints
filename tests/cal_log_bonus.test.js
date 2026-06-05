@@ -667,10 +667,10 @@ test('Season result sync infers stripped Play-In matchups, repairs metadata, com
     players: makeSeasonPlayers(),
     currentSeason: season,
     matchups: [
-      { id: 'stripped-pi1-g1', dateKey: '2026-06-01', playerAId: playIn[0].playerAId, playerBId: playIn[0].playerBId, scoreA: 91, scoreB: 80 },
-      { id: 'stripped-pi1-g2', dateKey: '2026-06-02', playerAId: playIn[0].playerAId, playerBId: playIn[0].playerBId, scoreA: 89, scoreB: 70 },
-      { id: 'stripped-pi2-g1', dateKey: '2026-06-01', playerAId: playIn[1].playerAId, playerBId: playIn[1].playerBId, scoreA: 75, scoreB: 86 },
-      { id: 'stripped-pi2-g2', dateKey: '2026-06-02', playerAId: playIn[1].playerAId, playerBId: playIn[1].playerBId, scoreA: 77, scoreB: 90 }
+      { id: `${playIn[0].id}_stripped-pi1-g1`, dateKey: '2026-06-01', playerAId: playIn[0].playerAId, playerBId: playIn[0].playerBId, scoreA: 91, scoreB: 80 },
+      { id: `${playIn[0].id}_stripped-pi1-g2`, dateKey: '2026-06-02', playerAId: playIn[0].playerAId, playerBId: playIn[0].playerBId, scoreA: 89, scoreB: 70 },
+      { id: `${playIn[1].id}_stripped-pi2-g1`, dateKey: '2026-06-01', playerAId: playIn[1].playerAId, playerBId: playIn[1].playerBId, scoreA: 75, scoreB: 86 },
+      { id: `${playIn[1].id}_stripped-pi2-g2`, dateKey: '2026-06-02', playerAId: playIn[1].playerAId, playerBId: playIn[1].playerBId, scoreA: 77, scoreB: 90 }
     ]
   });
 
@@ -684,7 +684,7 @@ test('Season result sync infers stripped Play-In matchups, repairs metadata, com
   assert.equal(synced.updatedSeason.series[playIn[1].id].winnerId, playIn[1].playerBId);
   assert.equal(synced.updatedSeason.series[playIn[1].id].winsB, 2);
 
-  const repaired = synced.state.matchups.find((matchup) => matchup.id === 'stripped-pi1-g1');
+  const repaired = synced.state.matchups.find((matchup) => matchup.id === `${playIn[0].id}_stripped-pi1-g1`);
   assert.equal(repaired.seasonId, season.id);
   assert.equal(repaired.seriesId, playIn[0].id);
   assert.equal(repaired.seasonSeriesId, playIn[0].id);
@@ -1167,4 +1167,226 @@ test('protected Home histories can be explicitly reset with allowProtectedHistor
   const saved = JSON.parse(global.localStorage.getItem(core.STORAGE_KEY));
   assert.deepEqual(saved.weightHistory, []);
   assert.deepEqual(saved.vo2MaxHistory, []);
+});
+
+function buildJuneSeason(overrides = {}) {
+  const seasonId = 'season_1_june_2026';
+  const seeds = Array.from({ length: 34 }, (_, index) => ({
+    seed: index + 1,
+    playerId: `seed${index + 1}`,
+    playerName: `Seed ${index + 1}`
+  }));
+  seeds[0].playerName = 'Lily';
+  seeds[30].playerName = 'Edward';
+  seeds[31].playerName = 'Rico';
+  seeds[32].playerName = 'Kylan';
+  seeds[33].playerName = 'Mildred';
+  const series = core.createOfficialSeasonSeriesFromSeeds(seeds, {
+    seasonId,
+    nowISO: '2026-06-01T00:00:00.000Z'
+  });
+  return core.normalizeState({
+    players: seeds.map((seed) => ({ id: seed.playerId, name: seed.playerName, active: true })),
+    matchups: [],
+    schedule: [],
+    gameHistory: [],
+    currentSeason: core.normalizeState({}).currentSeason || {
+      id: seasonId,
+      name: 'June 2026 TaskPoints Championship',
+      label: 'June 2026 TaskPoints Championship',
+      monthKey: '2026-06',
+      month: '2026-06',
+      startDate: '2026-06-01',
+      endDate: '2026-06-30',
+      startDateKey: '2026-06-01',
+      endDateKey: '2026-06-30',
+      status: 'active',
+      playerPool: seeds,
+      seeds,
+      bracket: core.buildOfficialSeasonBracketFromSeeds(seeds, { seasonId }),
+      series,
+      meta: { seasonMatchupControlEnabled: true },
+      ...overrides.currentSeason
+    },
+    latestSeasonId: seasonId,
+    ...overrides
+  });
+}
+
+function resultFor(series, dateKey, winnerId, extra = {}) {
+  return {
+    id: `${dateKey}_${series.id}_${winnerId}_${extra.suffix || 'game'}`,
+    date: dateKey,
+    dateKey,
+    playerAId: series.playerAId,
+    playerBId: series.playerBId,
+    scoreA: winnerId === series.playerAId ? 40 : 25,
+    scoreB: winnerId === series.playerBId ? 40 : 25,
+    winnerId,
+    matchupType: 'tournament',
+    seasonId: series.seasonId,
+    seriesId: series.id,
+    seasonSeriesId: series.id,
+    roundId: series.roundId,
+    ...extra
+  };
+}
+
+test('season sync rejects and cleans pre-season matchups while preserving true June split Play-In results', () => {
+  const state = buildJuneSeason();
+  const playIn = state.currentSeason.series.season_1_june_2026_play_in_1;
+  const pollutedMay = {
+    id: '1b499437-fe3e-4302-8322-0fcf03ac11c6',
+    date: '2026-05-13',
+    dateKey: '2026-05-13',
+    playerAId: playIn.playerAId,
+    playerBId: playIn.playerBId,
+    scoreA: 24.3,
+    scoreB: 32.2,
+    seasonId: 'season_1_june_2026',
+    seriesId: playIn.id,
+    seasonSeriesId: playIn.id,
+    matchupType: 'tournament',
+    roundId: 'play_in'
+  };
+  const plainMay = {
+    id: 'plain-may-edward-mildred',
+    date: '2026-05-24',
+    dateKey: '2026-05-24',
+    playerAId: playIn.playerBId,
+    playerBId: playIn.playerAId,
+    scoreA: 31,
+    scoreB: 29
+  };
+  const juneA = resultFor(playIn, '2026-06-02', playIn.playerAId, { suffix: 'a' });
+  const juneB = resultFor(playIn, '2026-06-03', playIn.playerBId, { suffix: 'b' });
+  const pollutedSeries = {
+    ...playIn,
+    winsA: 2,
+    winsB: 2,
+    gameResults: [
+      { ...pollutedMay, matchupId: pollutedMay.id },
+      { ...plainMay, matchupId: plainMay.id, seriesId: playIn.id, seasonSeriesId: playIn.id },
+      { ...juneA, matchupId: juneA.id },
+      { ...juneB, matchupId: juneB.id }
+    ]
+  };
+  const sync = core.syncCurrentSeasonSeriesFromRecordedResults({
+    ...state,
+    matchups: [pollutedMay, plainMay, juneA, juneB],
+    currentSeason: {
+      ...state.currentSeason,
+      series: { ...state.currentSeason.series, [playIn.id]: pollutedSeries }
+    }
+  });
+
+  assert.equal(core.inferSeasonSeriesIdFromRecord(state, state.currentSeason, plainMay), '');
+  const cleanedMay = sync.state.matchups.find((matchup) => matchup.id === pollutedMay.id);
+  assert.equal(cleanedMay.seasonId, undefined);
+  assert.equal(cleanedMay.seriesId, undefined);
+  assert.equal(cleanedMay.matchupType, undefined);
+  const syncedPlayIn = sync.updatedSeason.series[playIn.id];
+  assert.equal(syncedPlayIn.winsA, 1);
+  assert.equal(syncedPlayIn.winsB, 1);
+  assert.equal(syncedPlayIn.winnerId, '');
+  assert.equal(syncedPlayIn.loserId, '');
+  assert.equal(syncedPlayIn.status, 'active');
+  assert.deepEqual(syncedPlayIn.gameResults.map((result) => result.dateKey), ['2026-06-02', '2026-06-03']);
+  assert.equal(core.withInferredSeasonMatchupMetadata(state, state.currentSeason, plainMay), plainMay);
+});
+
+test('season sync caps best-of-3 results at the valid winner instead of creating 2-2 series', () => {
+  const state = buildJuneSeason();
+  const series = state.currentSeason.series.season_1_june_2026_play_in_1;
+  const matchups = [
+    resultFor(series, '2026-06-01', series.playerAId, { suffix: '1' }),
+    resultFor(series, '2026-06-02', series.playerBId, { suffix: '2' }),
+    resultFor(series, '2026-06-03', series.playerAId, { suffix: '3' }),
+    resultFor(series, '2026-06-03', series.playerBId, { suffix: '4', id: 'late-extra' })
+  ];
+  const sync = core.syncCurrentSeasonSeriesFromRecordedResults({ ...state, matchups });
+  const repaired = sync.updatedSeason.series[series.id];
+  assert.equal(repaired.winsA, 2);
+  assert.equal(repaired.winsB, 1);
+  assert.equal(repaired.winnerId, series.playerAId);
+  assert.equal(repaired.status, 'complete');
+  assert.equal(repaired.gameResults.length, 3);
+  assert.notDeepEqual([repaired.winsA, repaired.winsB], [2, 2]);
+});
+
+test('overdue active Play-In appears in June 5 slate and schedule validation rejects missing tournament matchups', () => {
+  const state = buildJuneSeason();
+  const playIn1 = { ...state.currentSeason.series.season_1_june_2026_play_in_1, winsA: 1, winsB: 1, status: 'active' };
+  const playIn2 = { ...state.currentSeason.series.season_1_june_2026_play_in_2, winsA: 1, winsB: 1, status: 'active' };
+  const currentSeason = {
+    ...state.currentSeason,
+    series: { ...state.currentSeason.series, [playIn1.id]: playIn1, [playIn2.id]: playIn2 },
+    meta: { ...state.currentSeason.meta, seasonMatchupControlEnabled: true }
+  };
+  const slateState = { ...state, currentSeason, players: state.players.filter((player) => [playIn1.playerAId, playIn1.playerBId, playIn2.playerAId, playIn2.playerBId].includes(player.id)) };
+  const activeIds = core.getActiveSeasonSeriesForDate(currentSeason, '2026-06-05').map((series) => series.id);
+  assert.ok(activeIds.includes(playIn1.id));
+  assert.ok(activeIds.includes(playIn2.id));
+  const slate = core.buildSeasonDailySlate(slateState, '2026-06-05');
+  assert.deepEqual(slate.tournamentMatchups.map((matchup) => matchup.seriesId).slice(0, 2), [playIn1.id, playIn2.id]);
+  assert.equal(core.isValidSeasonControlledScheduleDay(slateState, '2026-06-05', {
+    dateKey: '2026-06-05',
+    seasonMatchupControl: true,
+    seasonScheduleSignature: core.getSeasonScheduleSignature(slateState, '2026-06-05'),
+    matchups: slate.tournamentMatchups.slice(0, 1)
+  }), false);
+});
+
+test('valid explicit overdue tournament result counts for an active prior-round series', () => {
+  const state = buildJuneSeason();
+  const series = state.currentSeason.series.season_1_june_2026_play_in_1;
+  const overdue = resultFor(series, '2026-06-05', series.playerAId, { suffix: 'overdue' });
+  const sync = core.syncCurrentSeasonSeriesFromRecordedResults({ ...state, matchups: [overdue] });
+  const repaired = sync.updatedSeason.series[series.id];
+  assert.equal(repaired.winsA, 1);
+  assert.equal(repaired.gameResults[0].dateKey, '2026-06-05');
+});
+
+test('status complete alone does not make a Season series complete', () => {
+  assert.equal(core.isSeasonSeriesComplete({
+    playerAId: 'a',
+    playerBId: 'b',
+    winsA: 1,
+    winsB: 1,
+    winsNeeded: 2,
+    winnerId: '',
+    status: 'complete'
+  }), false);
+  assert.equal(core.getSeasonSeriesWinner({
+    playerAId: 'a',
+    playerBId: 'b',
+    winsA: 1,
+    winsB: 0,
+    winsNeeded: 2,
+    winnerId: 'not-a-player',
+    status: 'complete'
+  }), null);
+});
+
+test('completed Play-In and Round of 32 series advance valid winners during sync', () => {
+  const state = buildJuneSeason();
+  const pi1 = state.currentSeason.series.season_1_june_2026_play_in_1;
+  const pi2 = state.currentSeason.series.season_1_june_2026_play_in_2;
+  const r32 = state.currentSeason.series.season_1_june_2026_round_of_32_2;
+  const matchups = [
+    resultFor(pi1, '2026-06-01', pi1.playerAId, { suffix: 'pi1a' }),
+    resultFor(pi1, '2026-06-02', pi1.playerAId, { suffix: 'pi1b' }),
+    resultFor(pi2, '2026-06-01', pi2.playerBId, { suffix: 'pi2a' }),
+    resultFor(pi2, '2026-06-02', pi2.playerBId, { suffix: 'pi2b' }),
+    resultFor(r32, '2026-06-04', r32.playerAId, { suffix: 'r32a' }),
+    resultFor(r32, '2026-06-05', r32.playerAId, { suffix: 'r32b' }),
+    resultFor(r32, '2026-06-06', r32.playerAId, { suffix: 'r32c' })
+  ];
+  const sync = core.syncCurrentSeasonSeriesFromRecordedResults({ ...state, matchups });
+  const seed1Protected = sync.updatedSeason.series.season_1_june_2026_round_of_32_1;
+  const seed2Protected = sync.updatedSeason.series.season_1_june_2026_round_of_32_9;
+  const sweet16 = sync.updatedSeason.series.season_1_june_2026_sweet_16_1;
+  assert.equal(seed1Protected.playerBId, pi2.playerBId);
+  assert.equal(seed2Protected.playerBId, pi1.playerAId);
+  assert.equal(sweet16.playerBId, r32.playerAId);
 });
