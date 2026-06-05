@@ -1927,17 +1927,20 @@
     const series = season.series[seriesId];
     if (!isValidSeasonResultDateForSeries(season, series, record, options)) return record;
 
-    return {
+    const repaired = {
       ...record,
-      seasonId: record?.seasonId || season.id || '',
-      seriesId: record?.seriesId || seriesId,
-      seasonSeriesId: record?.seasonSeriesId || seriesId,
-      roundId: record?.roundId || series.roundId || '',
-      roundName: record?.roundName || series.roundName || getSeasonDisplayName(series.roundId) || '',
+      seasonId: season.id || record?.seasonId || '',
+      seriesId,
+      seasonSeriesId: seriesId,
+      roundId: series.roundId || record?.roundId || '',
+      roundName: series.roundName || record?.roundName || getSeasonDisplayName(series.roundId) || '',
       matchupType: record?.matchupType || 'tournament',
-      bestOf: record?.bestOf || series.bestOf || null,
-      winsNeeded: record?.winsNeeded || series.winsNeeded || getSeasonSeriesWinsNeeded(series)
+      bestOf: series.bestOf || record?.bestOf || null,
+      winsNeeded: series.winsNeeded || record?.winsNeeded || getSeasonSeriesWinsNeeded(series)
     };
+    delete repaired.seriesID;
+    delete repaired.seasonSeriesID;
+    return repaired;
   }
 
   function getRecordedResultWinner(record) {
@@ -5814,6 +5817,7 @@ return Number(cappedScore.toFixed(1));
     shouldUseSeasonMatchupControl,
     buildSeasonDailySlate,
     getPairingKey,
+    getRecordedSeriesId,
     inferSeasonSeriesIdFromRecord,
     withInferredSeasonMatchupMetadata,
     getJunePairingHistory,

@@ -786,6 +786,42 @@ test('Season cleanup preserves inferable in-season tournament rows missing serie
   assert.deepEqual(untouchedExhibition, exhibition);
 });
 
+
+test('Season repair overwrites stale series identifier variants after inference', () => {
+  const season = makeLockedSeasonWithControl(true);
+  const playIn = Object.values(season.series).find((item) => item.roundId === 'play_in' && item.seriesIndex === 1);
+  const stale = {
+    id: 'stale-season-series-id-tournament',
+    dateKey: '2026-06-02',
+    playerAId: playIn.playerAId,
+    playerBId: playIn.playerBId,
+    matchupType: 'tournament',
+    seasonId: season.id,
+    seriesId: 'old_missing_series_id',
+    seasonSeriesId: 'old_missing_season_series_id',
+    seriesID: 'legacy_missing_series_id',
+    seasonSeriesID: 'legacy_missing_season_series_id',
+    roundId: 'play_in',
+    scoreA: 77,
+    scoreB: 70
+  };
+  const state = core.normalizeState({
+    players: makeSeasonPlayers(),
+    currentSeason: season,
+    matchups: [stale]
+  });
+
+  const synced = core.syncCurrentSeasonSeriesFromRecordedResults(state, { nowISO: '2026-06-05T12:00:00.000Z' });
+  const repaired = synced.state.matchups.find((matchup) => matchup.id === stale.id);
+  assert.equal(repaired.seriesId, playIn.id);
+  assert.equal(repaired.seasonSeriesId, playIn.id);
+  assert.equal(repaired.seriesID, undefined);
+  assert.equal(repaired.seasonSeriesID, undefined);
+  assert.equal(core.getRecordedSeriesId(repaired), playIn.id);
+  assert.equal(synced.updatedSeason.series[playIn.id].gameResults.length, 1);
+  assert.equal(synced.updatedSeason.series[playIn.id].winsA, 1);
+});
+
 test('Season sync allows explicit valid Season series ids on exhibition-typed records', () => {
   const season = makeLockedSeasonWithControl(true);
   const playIn = Object.values(season.series).find((item) => item.roundId === 'play_in' && item.seriesIndex === 1);
