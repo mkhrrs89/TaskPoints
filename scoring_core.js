@@ -837,12 +837,19 @@
     };
   }
 
-  function getSeasonScheduleSignature(state, dateKeyStr) {
-    const normalized = normalizeState(state || {});
-    if (!shouldUseSeasonMatchupControl(normalized, dateKeyStr)) return '';
-    const prepared = prepareSeasonForDailySlate(normalized.currentSeason, dateKeyStr);
-    const season = prepared.season || normalized.currentSeason;
-    const roundId = getCurrentSeasonRoundIdForDate(dateKeyStr);
+  function getSeasonScheduleSignature(stateOrSeason, dateKeyStr) {
+    if (!dateKeyStr) return '';
+    const directSeason = stateOrSeason?.series && !stateOrSeason?.currentSeason
+      ? normalizeSeasonState(stateOrSeason)
+      : null;
+    const normalized = directSeason ? null : normalizeState(stateOrSeason || {});
+    const seasonGateOpen = directSeason
+      ? directSeason.meta?.seasonMatchupControlEnabled === true && isJuneSeasonDate(dateKeyStr)
+      : shouldUseSeasonMatchupControl(normalized, dateKeyStr);
+    if (!seasonGateOpen) return '';
+
+    const prepared = prepareSeasonForDailySlate(directSeason || normalized.currentSeason, dateKeyStr);
+    const season = prepared.season || directSeason || normalized.currentSeason;
     const activeSeries = getActiveSeasonSeriesForDate(season, dateKeyStr);
     const seriesRevision = activeSeries
       .sort((a, b) => String(a.id || '').localeCompare(String(b.id || '')))
@@ -860,7 +867,7 @@
         Array.isArray(series.gameResults) ? series.gameResults.map((result) => `${result.matchupId || ''}:${result.dateKey || ''}:${result.winnerId || ''}:${result.playerAScore ?? ''}:${result.playerBScore ?? ''}`).join(',') : ''
       ].join('~'))
       .join('|');
-    return [season?.id || '', roundId, season?.meta?.seasonMatchupControlEnabled === true ? 'on' : 'off', seriesRevision].join('::');
+    return [season?.id || '', getCurrentSeasonRoundIdForDate(dateKeyStr), season?.meta?.seasonMatchupControlEnabled === true ? 'on' : 'off', seriesRevision].join('::');
   }
 
   function isValidSeasonControlledScheduleDay(state, dateKeyStr, scheduleDay) {

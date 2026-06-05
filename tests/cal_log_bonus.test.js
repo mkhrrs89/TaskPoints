@@ -763,10 +763,15 @@ test('getActiveSeasonSeriesForDate includes overdue active prior rounds only whe
 
 test('Season schedule signature includes overdue active prior-round series on later-round dates', () => {
   const state = core.normalizeState({ players: makeSeasonPlayers(), currentSeason: makeLockedSeasonWithControl(true) });
-  const overduePlayIn = Object.values(state.currentSeason.series).find((item) => item.roundId === 'play_in' && item.seriesIndex === 1);
-  const signature = core.getSeasonScheduleSignature(state, '2026-06-05');
+  const season = state.currentSeason;
+  const overduePlayIn = Object.values(season.series).find((item) => item.roundId === 'play_in' && item.seriesIndex === 1);
+  const activeSeries = core.getActiveSeasonSeriesForDate(season, '2026-06-05');
+  const stateSignature = core.getSeasonScheduleSignature(state, '2026-06-05');
+  const seasonSignature = core.getSeasonScheduleSignature(season, '2026-06-05');
 
-  assert.match(signature, new RegExp(`${overduePlayIn.id}~play_in~active`));
+  assert.equal(activeSeries.some((series) => series.id === overduePlayIn.id), true);
+  assert.match(stateSignature, new RegExp(`${overduePlayIn.id}~play_in~active`));
+  assert.match(seasonSignature, new RegExp(`${overduePlayIn.id}~play_in~active`));
 });
 
 test('Season schedule validation rejects days missing an overdue prior-round tournament matchup', () => {
