@@ -1296,13 +1296,109 @@
     return { ok: true, state: nextState, archiveEntry };
   }
 
+
+  function getSeasonManualResultDateKey(series, gameNumber) {
+    const round = JUNE_2026_SEASON_DATE_WINDOWS.find((item) => item.id === series?.roundId);
+    if (!round) return '';
+    const offset = Math.max(0, Math.floor(Number(gameNumber) || 1) - 1);
+    const candidate = adjacentLocalDateKey(round.startDate, offset);
+    return candidate && candidate <= round.endDate ? candidate : round.endDate;
+  }
+
+  function isAdminManualSeasonGameResult(result) {
+    const source = String(result?.source || '').toLowerCase();
+    return result?.manualResult === true || source === 'admin_manual' || source === 'admin' || source === 'manual';
+  }
+
+  function reconcileManualSeasonSeriesGameResults(series, patch = {}, options = {}) {
+    if (!series) return series;
+    const desiredWinsA = Number.isFinite(Number(patch.winsA)) ? Math.max(0, Math.floor(Number(patch.winsA))) : (Number(series.winsA) || 0);
+    const desiredWinsB = Number.isFinite(Number(patch.winsB)) ? Math.max(0, Math.floor(Number(patch.winsB))) : (Number(series.winsB) || 0);
+    const now = seasonNowISO(options);
+    const existingResults = (Array.isArray(series.gameResults) ? series.gameResults : [])
+      .filter((result) => result && (result.winnerId === series.playerAId || result.winnerId === series.playerBId))
+      .map((result, index) => ({ ...result, _originalIndex: index }))
+      .sort((a, b) => {
+        const aGame = Number(a.gameNumber || a.seriesGameNumber || a.game);
+        const bGame = Number(b.gameNumber || b.seriesGameNumber || b.game);
+        if (Number.isFinite(aGame) && Number.isFinite(bGame) && aGame !== bGame) return aGame - bGame;
+        return String(a.dateKey || a.recordedAtISO || a._originalIndex).localeCompare(String(b.dateKey || b.recordedAtISO || b._originalIndex));
+      });
+    const preserved = [];
+    let winsA = 0;
+    let winsB = 0;
+    existingResults.filter((result) => !isAdminManualSeasonGameResult(result)).forEach((result) => {
+      if (result.winnerId === series.playerAId) winsA += 1;
+      else if (result.winnerId === series.playerBId) winsB += 1;
+      preserved.push(result);
+    });
+    const neededA = Math.max(0, desiredWinsA - winsA);
+    const neededB = Math.max(0, desiredWinsB - winsB);
+    let keptManualA = 0;
+    let keptManualB = 0;
+    existingResults.filter(isAdminManualSeasonGameResult).forEach((result) => {
+      if (result.winnerId === series.playerAId && keptManualA < neededA) {
+        keptManualA += 1;
+        preserved.push(result);
+      } else if (result.winnerId === series.playerBId && keptManualB < neededB) {
+        keptManualB += 1;
+        preserved.push(result);
+      }
+    });
+    const usedGameNumbers = new Set(preserved.map((result) => Number(result.gameNumber || result.seriesGameNumber || result.game)).filter((value) => Number.isFinite(value) && value > 0));
+    const nextGameNumber = () => {
+      let gameNumber = 1;
+      while (usedGameNumbers.has(gameNumber)) gameNumber += 1;
+      usedGameNumbers.add(gameNumber);
+      return gameNumber;
+    };
+    const addManual = (winnerId) => {
+      const gameNumber = nextGameNumber();
+      const loserId = winnerId === series.playerAId ? series.playerBId : series.playerAId;
+      const dateKey = getSeasonManualResultDateKey(series, gameNumber);
+      preserved.push({
+        dateKey,
+        gameNumber,
+        matchupId: `${series.id}_admin_manual_game_${gameNumber}`,
+        seriesId: series.id,
+        seasonSeriesId: series.id,
+        winnerId,
+        loserId,
+        source: 'admin_manual',
+        manualResult: true,
+        recordedAtISO: now,
+        updatedAtISO: now
+      });
+    };
+    for (let index = keptManualA; index < neededA; index += 1) addManual(series.playerAId);
+    for (let index = keptManualB; index < neededB; index += 1) addManual(series.playerBId);
+    const gameResults = preserved
+      .map(({ _originalIndex, ...result }) => ({
+        ...result,
+        seriesId: result.seriesId || series.id,
+        seasonSeriesId: result.seasonSeriesId || series.id,
+        loserId: result.loserId || (result.winnerId === series.playerAId ? series.playerBId : series.playerAId)
+      }))
+      .sort((a, b) => {
+        const aGame = Number(a.gameNumber || a.seriesGameNumber || a.game);
+        const bGame = Number(b.gameNumber || b.seriesGameNumber || b.game);
+        if (Number.isFinite(aGame) && Number.isFinite(bGame) && aGame !== bGame) return aGame - bGame;
+        return String(a.dateKey || a.recordedAtISO || '').localeCompare(String(b.dateKey || b.recordedAtISO || ''));
+      });
+    return recalculateSeasonSeriesFromGameResults({ ...series, gameResults, manualResult: true, resultSource: 'manual' }, options);
+  }
+
   function updateSeasonSeriesManualResult(season, seriesId, patch = {}, options = {}) {
     const nextSeason = normalizeSeasonState(season);
     if (!nextSeason) return { ok: false, error: 'invalid_season', season };
     const series = nextSeason.series?.[seriesId];
     if (!series) return { ok: false, error: 'series_not_found', season: nextSeason };
     if (patch.clear === true) {
-      const cleared = { ...series, winsA: 0, winsB: 0, winnerId: '', loserId: '', status: series.playerAId && series.playerBId ? 'active' : 'pending', manualResult: false, resultSource: '', updatedAtISO: seasonNowISO(options) };
+      const retainedResults = (Array.isArray(series.gameResults) ? series.gameResults : []).filter((result) => !isAdminManualSeasonGameResult(result));
+      const clearedBase = { ...series, gameResults: retainedResults, manualResult: false, resultSource: '' };
+      const cleared = retainedResults.length
+        ? recalculateSeasonSeriesFromGameResults(clearedBase, options)
+        : { ...clearedBase, winsA: 0, winsB: 0, winnerId: '', loserId: '', status: series.playerAId && series.playerBId ? 'active' : 'pending', updatedAtISO: seasonNowISO(options) };
       nextSeason.series = { ...(nextSeason.series || {}), [seriesId]: cleared };
       nextSeason.updatedAtISO = seasonNowISO(options);
       return { ok: true, season: nextSeason, series: cleared };
@@ -1325,11 +1421,20 @@
       status = 'complete';
       loserId = winnerId === series.playerAId ? series.playerBId : series.playerAId;
     }
-    const updated = { ...series, winsA, winsB, winnerId, loserId, status, manualResult: true, resultSource: 'manual', updatedAtISO: seasonNowISO(options) };
+    const reconciled = reconcileManualSeasonSeriesGameResults(series, { ...patch, winsA, winsB, winnerId }, options);
+    const updated = {
+      ...reconciled,
+      winnerId: winnerId || reconciled.winnerId || '',
+      loserId: (winnerId || reconciled.winnerId) ? ((winnerId || reconciled.winnerId) === series.playerAId ? series.playerBId : series.playerAId) : (reconciled.loserId || ''),
+      status: (winnerId || reconciled.winnerId) ? 'complete' : reconciled.status,
+      manualResult: true,
+      resultSource: 'manual',
+      updatedAtISO: seasonNowISO(options)
+    };
     nextSeason.series = { ...(nextSeason.series || {}), [seriesId]: updated };
     nextSeason.updatedAtISO = seasonNowISO(options);
     let advanced = null;
-    if (patch.advance === true && winnerId) {
+    if ((patch.advance === true || updated.status === 'complete') && (winnerId || updated.winnerId)) {
       advanced = advanceSeasonSeriesWinner(nextSeason, seriesId, options);
       if (advanced.ok) return { ok: true, season: advanced.season, series: advanced.season.series?.[seriesId] || updated, advanced };
     }
@@ -1986,11 +2091,14 @@
       dateKey: date,
       matchupId: String(matchupId || ''),
       gameNumber: raw.gameNumber || raw.seriesGameNumber || raw.game || null,
+      seriesId,
+      seasonSeriesId: seriesId,
       winnerId: winner.winnerId,
       loserId,
       playerAScore: winner.playerAScore,
       playerBScore: winner.playerBScore,
       source: raw.source || source || 'matchup',
+      manualResult: raw.manualResult === true,
       _containerSource: source || '',
       recordedAtISO: raw.recordedAtISO || raw.completedAtISO || raw.dateISO || raw.createdAtISO || '',
       updatedAtISO: raw.updatedAtISO || '',
@@ -2083,10 +2191,27 @@
       const existing = byKey.get(key);
       const resultSource = String(result._containerSource || result.source || '');
       const existingSource = String(existing?._containerSource || existing?.source || '');
-      if (existing && resultSource.includes('series.gameResults') && !existingSource.includes('series.gameResults')) return;
+      const resultIsManual = isAdminManualSeasonGameResult(result);
+      const existingIsManual = isAdminManualSeasonGameResult(existing);
+      if (existing && resultSource.includes('series.gameResults') && !existingSource.includes('series.gameResults') && !resultIsManual) return;
+      if (existing && existingIsManual && !resultIsManual) return;
       byKey.set(key, result);
     });
-    const orderedGameResults = Array.from(byKey.values()).sort((a, b) => String(a._sortKey || a.dateKey || '').localeCompare(String(b._sortKey || b.dateKey || '')));
+    const allResults = Array.from(byKey.values());
+    const manualSlots = new Set(allResults.filter(isAdminManualSeasonGameResult).map((result) => `${result.dateKey || ''}:${result.gameNumber || result.seriesGameNumber || result.game || ''}`).filter((key) => key !== ':'));
+    const manualDates = new Set(allResults.filter(isAdminManualSeasonGameResult).map((result) => result.dateKey || '').filter(Boolean));
+    const resultsForOrdering = allResults.filter((result) => isAdminManualSeasonGameResult(result)
+      || (!manualSlots.has(`${result.dateKey || ''}:${result.gameNumber || result.seriesGameNumber || result.game || ''}`) && !(result.dateKey && manualDates.has(result.dateKey))));
+    const orderedGameResults = resultsForOrdering.sort((a, b) => {
+      const aGame = Number(a.gameNumber || a.seriesGameNumber || a.game);
+      const bGame = Number(b.gameNumber || b.seriesGameNumber || b.game);
+      if (Number.isFinite(aGame) && Number.isFinite(bGame) && aGame !== bGame) return aGame - bGame;
+      const dateCompare = String(a.dateKey || a._sortKey || '').localeCompare(String(b.dateKey || b._sortKey || ''));
+      if (dateCompare !== 0) return dateCompare;
+      if (isAdminManualSeasonGameResult(a) && !isAdminManualSeasonGameResult(b)) return -1;
+      if (!isAdminManualSeasonGameResult(a) && isAdminManualSeasonGameResult(b)) return 1;
+      return 0;
+    });
     const winsNeeded = getSeasonSeriesWinsNeeded(series);
     const countedResults = [];
     let winsA = 0;
