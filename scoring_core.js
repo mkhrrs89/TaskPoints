@@ -793,6 +793,60 @@
     };
   }
 
+
+  function isPlayInProtectedSlotRepairResult(result) {
+    if (!result) return false;
+    const idText = [result.id, result.matchupId, result.gameId].map((id) => String(id || '')).join(' ').toLowerCase();
+    const source = String(result.source || '').toLowerCase();
+    return result.playInProtectedSlotRepair === true
+      || idText.includes('_protected_slot_repair_game_')
+      || (source === 'admin_manual' && result.catchUpResult === true && result.roundId === 'play_in');
+  }
+
+  function collectPlayInRepairResultCandidates(season, series, options = {}) {
+    const state = options.state || options.currentState || null;
+    if (state) {
+      const candidates = collectSeasonResultCandidates({ ...state, currentSeason: season }, season, options);
+      return (candidates.get(series.id) || []).slice();
+    }
+    return (Array.isArray(series?.gameResults) ? series.gameResults : [])
+      .map((result, index) => normalizeSeasonResultRecord({ ...result, seriesId: series.id, seasonSeriesId: series.id }, series, 'series.gameResults', index))
+      .filter(Boolean);
+  }
+
+  function normalizePlayInProtectedSlotRepairResults(season, series, rawResults, protectedWinnerId, options = {}) {
+    const seenRepairSlots = new Set();
+    return (Array.isArray(rawResults) ? rawResults : []).reduce((results, result) => {
+      if (!isPlayInProtectedSlotRepairResult(result)) {
+        results.push(result);
+        return results;
+      }
+      if (result.winnerId !== protectedWinnerId) return results;
+      const gameNumber = Number(result.gameNumber || result.seriesGameNumber || result.game);
+      if (!Number.isFinite(gameNumber) || gameNumber <= 0) return results;
+      const slotKey = `${gameNumber}:${protectedWinnerId}`;
+      if (seenRepairSlots.has(slotKey)) return results;
+      seenRepairSlots.add(slotKey);
+      results.push({
+        ...buildPlayInProtectedSlotRepairGameResult(season, series, protectedWinnerId, gameNumber, options),
+        recordedAtISO: result.recordedAtISO || result.completedAtISO || result.dateISO || seasonNowISO(options),
+        updatedAtISO: result.updatedAtISO || result.recordedAtISO || seasonNowISO(options),
+        _containerSource: result._containerSource || 'series.gameResults',
+        _sortKey: result._sortKey || getRecordedResultTime(result) || result.dateKey || ''
+      });
+      return results;
+    }, []);
+  }
+
+  function sameSeasonSeriesRepairPayload(a, b) {
+    const strip = (series) => {
+      if (!series) return series;
+      const { updatedAtISO, completedAtISO, ...rest } = series;
+      return rest;
+    };
+    return JSON.stringify(strip(a)) === JSON.stringify(strip(b));
+  }
+
   function repairPlayInSeriesFromProtectedRoundOf32Slots(season, options = {}) {
     let nextSeason = normalizeSeasonState(season);
     if (!nextSeason) return { ok: false, error: 'invalid_season', season, changed: false, repairedSeriesIds: [] };
@@ -849,15 +903,17 @@
       const originalSeries = winner.originalSeries;
       const currentSeries = nextSeries[originalSeries.id] || originalSeries;
       const existingWinner = getSeasonSeriesWinner(currentSeries);
-      if (existingWinner && existingWinner === winner.playerId) return;
       if (existingWinner && existingWinner !== winner.playerId && options.force !== true) return;
       if (winner.playerId !== currentSeries.playerAId && winner.playerId !== currentSeries.playerBId) return;
 
       const winsNeeded = getSeasonSeriesWinsNeeded(currentSeries);
-      let gameResults = Array.isArray(currentSeries.gameResults) ? currentSeries.gameResults.slice() : [];
+      let gameResults = collectPlayInRepairResultCandidates(nextSeason, currentSeries, options);
+      gameResults = normalizePlayInProtectedSlotRepairResults(nextSeason, currentSeries, gameResults, winner.playerId, options);
       let recalculated = gameResults.length ? rebuildSeasonSeriesFromRecordedResults(currentSeries, gameResults, options) : currentSeries;
       let winsForWinner = winner.playerId === currentSeries.playerAId ? (Number(recalculated.winsA) || 0) : (Number(recalculated.winsB) || 0);
-      const usedGameNumbers = new Set(gameResults.map((result) => Number(result.gameNumber || result.seriesGameNumber || result.game)).filter((value) => Number.isFinite(value) && value > 0));
+      const usedGameNumbers = new Set((Array.isArray(recalculated.gameResults) ? recalculated.gameResults : gameResults)
+        .map((result) => Number(result.gameNumber || result.seriesGameNumber || result.game))
+        .filter((value) => Number.isFinite(value) && value > 0));
       let nextGameNumber = 1;
       while (winsForWinner < winsNeeded) {
         while (usedGameNumbers.has(nextGameNumber)) nextGameNumber += 1;
@@ -877,10 +933,10 @@
         winnerId: winner.playerId,
         loserId: winner.playerId === repaired.playerAId ? repaired.playerBId : repaired.playerAId,
         status: 'complete',
-        updatedAtISO: seasonNowISO(options)
+        updatedAtISO: sameSeasonSeriesRepairPayload(repaired, currentSeries) ? currentSeries.updatedAtISO : seasonNowISO(options)
       } : repaired;
-      if (JSON.stringify(finalized) !== JSON.stringify(currentSeries)) {
-        nextSeries[currentSeries.id] = finalized;
+      if (!sameSeasonSeriesRepairPayload(finalized, currentSeries) || String(finalized.updatedAtISO || '') !== String(currentSeries.updatedAtISO || '')) {
+        nextSeries[currentSeries.id] = sameSeasonSeriesRepairPayload(finalized, currentSeries) ? { ...finalized, updatedAtISO: currentSeries.updatedAtISO, completedAtISO: currentSeries.completedAtISO } : finalized;
         repairedSeriesIds.push(currentSeries.id);
         changed = true;
       }
@@ -897,7 +953,7 @@
 
   function repairPlayInSeriesFromProtectedRoundOf32SlotsForCurrentSeason(state, options = {}) {
     const normalized = normalizeState(state || {});
-    const repaired = repairPlayInSeriesFromProtectedRoundOf32Slots(normalized.currentSeason, options);
+    const repaired = repairPlayInSeriesFromProtectedRoundOf32Slots(normalized.currentSeason, { ...options, state: normalized });
     if (!repaired.season) return { ...repaired, ok: false, state: normalized, changed: false, error: repaired.error || 'invalid_season', repairedSeriesIds: [] };
     const changed = Boolean(repaired.changed);
     return {
@@ -1552,8 +1608,22 @@
         updatedAtISO: now
       });
     };
-    for (let index = keptManualA; index < neededA; index += 1) addManual(series.playerAId);
-    for (let index = keptManualB; index < neededB; index += 1) addManual(series.playerBId);
+    const manualWinnerSequence = [];
+    const winsNeeded = getSeasonSeriesWinsNeeded(series);
+    const finalWinnerId = patch.winnerId || (desiredWinsA >= winsNeeded && desiredWinsA > desiredWinsB ? series.playerAId : (desiredWinsB >= winsNeeded && desiredWinsB > desiredWinsA ? series.playerBId : ''));
+    if (finalWinnerId === series.playerAId && neededA > 0) {
+      for (let index = keptManualA; index < neededA - 1; index += 1) manualWinnerSequence.push(series.playerAId);
+      for (let index = keptManualB; index < neededB; index += 1) manualWinnerSequence.push(series.playerBId);
+      manualWinnerSequence.push(series.playerAId);
+    } else if (finalWinnerId === series.playerBId && neededB > 0) {
+      for (let index = keptManualB; index < neededB - 1; index += 1) manualWinnerSequence.push(series.playerBId);
+      for (let index = keptManualA; index < neededA; index += 1) manualWinnerSequence.push(series.playerAId);
+      manualWinnerSequence.push(series.playerBId);
+    } else {
+      for (let index = keptManualA; index < neededA; index += 1) manualWinnerSequence.push(series.playerAId);
+      for (let index = keptManualB; index < neededB; index += 1) manualWinnerSequence.push(series.playerBId);
+    }
+    manualWinnerSequence.forEach(addManual);
     const gameResults = preserved
       .map(({ _originalIndex, ...result }) => ({
         ...result,
@@ -1976,9 +2046,16 @@
     const winsNeeded = Number(series.winsNeeded) || Math.floor((Number(series.bestOf) || 1) / 2) + 1;
     let winsA = 0;
     let winsB = 0;
+    const countedGameResults = [];
     (Array.isArray(series.gameResults) ? series.gameResults : []).forEach((result) => {
-      if (result?.winnerId === series.playerAId) winsA += 1;
-      else if (result?.winnerId === series.playerBId) winsB += 1;
+      if (winsA >= winsNeeded || winsB >= winsNeeded) return;
+      if (result?.winnerId === series.playerAId) {
+        winsA += 1;
+        countedGameResults.push(result);
+      } else if (result?.winnerId === series.playerBId) {
+        winsB += 1;
+        countedGameResults.push(result);
+      }
     });
     let winnerId = '';
     let loserId = '';
@@ -1999,6 +2076,7 @@
       winnerId,
       loserId,
       status,
+      gameResults: countedGameResults,
       updatedAtISO: seasonNowISO(options)
     };
   }
@@ -2405,9 +2483,20 @@
     };
   }
 
+  function getSeasonResultLogicalDedupeKey(record, seriesId) {
+    const date = getRecordedResultDateKey(record);
+    const gameNumber = record?.gameNumber || record?.seriesGameNumber || record?.game || '';
+    const winnerId = record?.winnerId || record?.winningPlayerId || '';
+    if (date && gameNumber && winnerId) return `game:${date}:${seriesId}:${gameNumber}:${winnerId}`;
+    if (date && record?.playerAId && record?.playerBId && winnerId) return `pair:${date}:${getPairingKey(record.playerAId, record.playerBId)}:${winnerId}`;
+    return '';
+  }
+
   function getSeasonResultDedupeKey(record, seriesId, fallbackIndex = 0) {
     const directId = record?.matchupId || record?.gameId || record?.id || record?.completionId;
     if (directId) return `id:${directId}`;
+    const logical = getSeasonResultLogicalDedupeKey(record, seriesId);
+    if (logical) return logical;
     const date = getRecordedResultDateKey(record);
     const gameNumber = record?.gameNumber || record?.seriesGameNumber || record?.game || '';
     const winnerId = record?.winnerId || record?.winningPlayerId || '';
@@ -2530,16 +2619,21 @@
 
   function rebuildSeasonSeriesFromRecordedResults(series, rawResults, options = {}) {
     const byKey = new Map();
+    const keyByLogical = new Map();
     rawResults.forEach((result, index) => {
       const key = result._dedupeKey || getSeasonResultDedupeKey(result, series.id, index);
-      const existing = byKey.get(key);
+      const logicalKey = getSeasonResultLogicalDedupeKey(result, series.id);
+      const existingKey = (logicalKey && keyByLogical.get(logicalKey)) || key;
+      const existing = byKey.get(existingKey);
       const resultSource = String(result._containerSource || result.source || '');
       const existingSource = String(existing?._containerSource || existing?.source || '');
       const resultIsManual = isAdminManualSeasonGameResult(result);
       const existingIsManual = isAdminManualSeasonGameResult(existing);
       if (existing && resultSource.includes('series.gameResults') && !existingSource.includes('series.gameResults') && !resultIsManual) return;
       if (existing && existingIsManual && !resultIsManual) return;
+      if (existing && existingKey !== key) byKey.delete(existingKey);
       byKey.set(key, result);
+      if (logicalKey) keyByLogical.set(logicalKey, key);
     });
     const allResults = Array.from(byKey.values());
     const manualSlots = new Set(allResults.filter(isAdminManualSeasonGameResult).map((result) => `${result.dateKey || ''}:${result.gameNumber || result.seriesGameNumber || result.game || ''}`).filter((key) => key !== ':'));
