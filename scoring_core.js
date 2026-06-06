@@ -2482,12 +2482,12 @@
       if (catchUpRepair.changed) {
         changed = true;
         warnings.push(`Backfilled ${catchUpRepair.backfilledCount} late Play-In Round of 32 game result${catchUpRepair.backfilledCount === 1 ? '' : 's'}.`);
-        const postCatchUpAdvancementRepair = repairCompletedSeasonAdvancementForSeason(season, options);
-        if (postCatchUpAdvancementRepair.season) {
-          season = postCatchUpAdvancementRepair.season;
-          if (postCatchUpAdvancementRepair.changed) changed = true;
-          else if (!postCatchUpAdvancementRepair.ok && postCatchUpAdvancementRepair.error) warnings.push(`Post-catch-up advancement repair pending: ${postCatchUpAdvancementRepair.error}.`);
-        }
+      }
+      const postCatchUpAdvancementRepair = repairCompletedSeasonAdvancementForSeason(season, options);
+      if (postCatchUpAdvancementRepair.season) {
+        season = postCatchUpAdvancementRepair.season;
+        if (postCatchUpAdvancementRepair.changed) changed = true;
+        else if (!postCatchUpAdvancementRepair.ok && postCatchUpAdvancementRepair.error) warnings.push(`Post-catch-up advancement repair pending: ${postCatchUpAdvancementRepair.error}.`);
       }
     }
 

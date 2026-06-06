@@ -1644,10 +1644,14 @@ test('late Play-In Round of 32 catch-up does not let a reused game number block 
 test('sync advances a Round of 32 winner completed by late Play-In catch-up in the same pass', () => {
   const state = buildLateBoundRoundOf32State();
   const series = state.currentSeason.series.season_1_june_2026_round_of_32_1;
+  assert.equal(state.currentSeason.series.season_1_june_2026_sweet_16_1.playerAId, '');
+
   const synced = core.syncCurrentSeasonSeriesFromRecordedResults(state, { nowISO: '2026-06-08T12:00:00.000Z' });
   const repaired = synced.updatedSeason.series[series.id];
   const sweet16 = synced.updatedSeason.series.season_1_june_2026_sweet_16_1;
 
+  assert.equal(synced.changed, true);
+  assert.deepEqual(repaired.gameResults.map((result) => result.dateKey), ['2026-06-04', '2026-06-05', '2026-06-06']);
   assert.equal(repaired.status, 'complete');
   assert.equal(repaired.winnerId, series.playerAId);
   assert.equal(repaired.winsA, 3);
