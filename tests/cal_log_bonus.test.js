@@ -1528,6 +1528,140 @@ function buildLateBoundRoundOf32State() {
   };
 }
 
+
+test('repairs incomplete Play-In winners from protected Round of 32 slots', () => {
+  const state = buildLateBoundRoundOf32State();
+  const pi1 = state.currentSeason.series.season_1_june_2026_play_in_1;
+  const pi2 = state.currentSeason.series.season_1_june_2026_play_in_2;
+  const tiedPi1 = core.recalculateSeasonSeriesFromGameResults({
+    ...pi1,
+    status: 'active',
+    gameResults: [
+      resultFor(pi1, '2026-06-01', pi1.playerAId, { suffix: 'pi1-g1', gameNumber: 1, source: 'matchup' }),
+      resultFor(pi1, '2026-06-02', pi1.playerBId, { suffix: 'pi1-g2', gameNumber: 2, source: 'matchup' })
+    ]
+  }, { nowISO: '2026-06-02T23:00:00.000Z' });
+  const tiedPi2 = core.recalculateSeasonSeriesFromGameResults({
+    ...pi2,
+    status: 'active',
+    gameResults: [
+      resultFor(pi2, '2026-06-01', pi2.playerBId, { suffix: 'pi2-g1', gameNumber: 1, source: 'matchup' }),
+      resultFor(pi2, '2026-06-02', pi2.playerAId, { suffix: 'pi2-g2', gameNumber: 2, source: 'matchup' })
+    ]
+  }, { nowISO: '2026-06-02T23:00:00.000Z' });
+  const season = { ...state.currentSeason, series: { ...state.currentSeason.series, [pi1.id]: tiedPi1, [pi2.id]: tiedPi2 } };
+
+  const repair = core.repairPlayInSeriesFromProtectedRoundOf32Slots(season, { nowISO: '2026-06-06T12:00:00.000Z' });
+
+  assert.equal(repair.ok, true);
+  assert.equal(repair.changed, true);
+  const repairedPi1 = repair.season.series[pi1.id];
+  const repairedPi2 = repair.season.series[pi2.id];
+  assert.equal(repairedPi1.winnerId, 'seed34');
+  assert.equal(repairedPi1.loserId, 'seed31');
+  assert.equal(repairedPi1.status, 'complete');
+  assert.equal(repairedPi1.winsA, 1);
+  assert.equal(repairedPi1.winsB, 2);
+  assert.equal(repairedPi2.winnerId, 'seed32');
+  assert.equal(repairedPi2.loserId, 'seed33');
+  assert.equal(repairedPi2.status, 'complete');
+  assert.equal(repairedPi2.winsA, 2);
+  assert.equal(repairedPi2.winsB, 1);
+
+  [repairedPi1, repairedPi2].forEach((series) => {
+    const repairResults = series.gameResults.filter((result) => result.playInProtectedSlotRepair === true);
+    assert.equal(repairResults.length, 1);
+    const result = repairResults[0];
+    assert.equal(result.id, `${series.id}_protected_slot_repair_game_3`);
+    assert.equal(result.seasonId, 'season_1_june_2026');
+    assert.equal(result.seriesId, series.id);
+    assert.equal(result.seasonSeriesId, series.id);
+    assert.equal(result.roundId, 'play_in');
+    assert.equal(result.dateKey, '2026-06-03');
+    assert.equal(result.gameNumber, 3);
+    assert.equal(result.seriesGameNumber, 3);
+    assert.equal(result.matchupType, 'tournament');
+    assert.equal(result.source, 'admin_manual');
+    assert.equal(result.manualResult, true);
+    assert.equal(result.catchUpResult, true);
+    assert.ok([series.playerAId, series.playerBId].includes(result.winnerId));
+    assert.ok([series.playerAId, series.playerBId].includes(result.loserId));
+  });
+});
+
+test('protected-slot Play-In repair is idempotent', () => {
+  const state = buildLateBoundRoundOf32State();
+  const pi1 = state.currentSeason.series.season_1_june_2026_play_in_1;
+  const pi2 = state.currentSeason.series.season_1_june_2026_play_in_2;
+  const season = {
+    ...state.currentSeason,
+    series: {
+      ...state.currentSeason.series,
+      [pi1.id]: core.recalculateSeasonSeriesFromGameResults({ ...pi1, gameResults: [resultFor(pi1, '2026-06-01', pi1.playerAId, { gameNumber: 1 }), resultFor(pi1, '2026-06-02', pi1.playerBId, { gameNumber: 2 })] }),
+      [pi2.id]: core.recalculateSeasonSeriesFromGameResults({ ...pi2, gameResults: [resultFor(pi2, '2026-06-01', pi2.playerBId, { gameNumber: 1 }), resultFor(pi2, '2026-06-02', pi2.playerAId, { gameNumber: 2 })] })
+    }
+  };
+  const first = core.repairPlayInSeriesFromProtectedRoundOf32Slots(season, { nowISO: '2026-06-06T12:00:00.000Z' });
+  const second = core.repairPlayInSeriesFromProtectedRoundOf32Slots(first.season, { nowISO: '2026-06-06T12:30:00.000Z' });
+
+  assert.equal(second.changed, false);
+  [pi1.id, pi2.id].forEach((seriesId) => {
+    const series = second.season.series[seriesId];
+    assert.equal(series.gameResults.filter((result) => result.playInProtectedSlotRepair === true).length, 1);
+    assert.equal(series.winsA + series.winsB, 3);
+  });
+});
+
+test('protected-slot Play-In repair does not fabricate ambiguous winners', () => {
+  const state = buildJuneSeason();
+  const emptyRepair = core.repairPlayInSeriesFromProtectedRoundOf32Slots(state.currentSeason, { nowISO: '2026-06-06T12:00:00.000Z' });
+  assert.equal(emptyRepair.ok, false);
+  assert.equal(emptyRepair.changed, false);
+  const pi1 = emptyRepair.season.series.season_1_june_2026_play_in_1;
+  assert.equal(pi1.gameResults.length, 0);
+  assert.equal(pi1.winnerId, '');
+
+  const r32 = state.currentSeason.series.season_1_june_2026_round_of_32_1;
+  const nonPlayInSeason = {
+    ...state.currentSeason,
+    series: {
+      ...state.currentSeason.series,
+      [r32.id]: { ...r32, playerBId: 'seed30', playerBName: 'Seed 30', playerBSeed: 30, placeholderB: '' }
+    }
+  };
+  const nonPlayInRepair = core.repairPlayInSeriesFromProtectedRoundOf32Slots(nonPlayInSeason, { nowISO: '2026-06-06T12:00:00.000Z' });
+  assert.equal(nonPlayInRepair.ok, false);
+  assert.equal(nonPlayInRepair.changed, false);
+});
+
+test('protected-slot Play-In repair does not override existing complete valid winners', () => {
+  const state = buildLateBoundRoundOf32State();
+  const pi1 = state.currentSeason.series.season_1_june_2026_play_in_1;
+  const completePi1 = core.updateSeasonSeriesManualResult(state.currentSeason, pi1.id, { winsA: 2, winsB: 0, winnerId: pi1.playerAId }, { nowISO: '2026-06-03T12:00:00.000Z' }).series;
+  const season = { ...state.currentSeason, series: { ...state.currentSeason.series, [pi1.id]: completePi1 } };
+
+  const repair = core.repairPlayInSeriesFromProtectedRoundOf32Slots(season, { nowISO: '2026-06-06T12:00:00.000Z' });
+
+  assert.equal(repair.ok, true);
+  assert.equal(repair.season.series[pi1.id].winnerId, pi1.playerAId);
+  assert.equal(repair.season.series[pi1.id].winsA, 2);
+  assert.equal(repair.season.series[pi1.id].winsB, 0);
+});
+
+test('repaired Play-In winners keep protected Round of 32 advancement checkable', () => {
+  const state = buildLateBoundRoundOf32State();
+  const repair = core.repairPlayInSeriesFromProtectedRoundOf32Slots(state.currentSeason, { nowISO: '2026-06-06T12:00:00.000Z' });
+  const advancement = core.resolvePlayInWinnersIntoRoundOf32(repair.season, { nowISO: '2026-06-06T12:05:00.000Z' });
+
+  assert.equal(repair.ok, true);
+  assert.equal(advancement.ok, true);
+  assert.equal(advancement.error, undefined);
+  assert.equal(advancement.season.series.season_1_june_2026_play_in_1.winnerId, 'seed34');
+  assert.equal(advancement.season.series.season_1_june_2026_play_in_2.winnerId, 'seed32');
+  assert.equal(advancement.season.series.season_1_june_2026_round_of_32_1.playerBId, 'seed34');
+  assert.equal(advancement.season.series.season_1_june_2026_round_of_32_9.playerBId, 'seed32');
+});
+
 test('late Play-In Round of 32 series catch-up backfills missed games through yesterday', () => {
   const state = buildLateBoundRoundOf32State();
   const repair = core.backfillLateBoundSeasonSeriesResults(state, state.currentSeason, { nowISO: '2026-06-06T12:00:00.000Z' });

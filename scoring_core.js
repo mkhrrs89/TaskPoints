@@ -465,12 +465,20 @@
     if (!series || !player) return series;
     const next = { ...series };
     const prefix = slot === 'B' ? 'B' : 'A';
-    next[`player${prefix}Id`] = player.playerId || player.id || '';
-    next[`player${prefix}Seed`] = Number.isFinite(Number(player.seed)) ? Number(player.seed) : null;
-    next[`player${prefix}Name`] = player.playerName || player.name || player.playerId || player.id || '';
+    const playerId = player.playerId || player.id || '';
+    const playerSeed = Number.isFinite(Number(player.seed)) ? Number(player.seed) : null;
+    const playerName = player.playerName || player.name || player.playerId || player.id || '';
+    const beforeStatus = next.status;
+    const changed = String(next[`player${prefix}Id`] || '') !== String(playerId || '')
+      || String(next[`player${prefix}Name`] || '') !== String(playerName || '')
+      || String(next[`placeholder${prefix}`] || '') !== ''
+      || (Number.isFinite(Number(next[`player${prefix}Seed`])) ? Number(next[`player${prefix}Seed`]) : null) !== playerSeed;
+    next[`player${prefix}Id`] = playerId;
+    next[`player${prefix}Seed`] = playerSeed;
+    next[`player${prefix}Name`] = playerName;
     next[`placeholder${prefix}`] = '';
-    next.updatedAtISO = seasonNowISO(options);
     if (next.playerAId && next.playerBId && next.status === 'pending') next.status = 'active';
+    if (changed || beforeStatus !== next.status) next.updatedAtISO = seasonNowISO(options);
     return next;
   }
 
@@ -734,6 +742,157 @@
       console.info('[Season repair] Resolved Play-In winners into Round of 32', { seed1Opponent: worseSeedWinner, seed2Opponent: otherWinner });
     }
     return { ok: true, season: nextSeason, changed, seed1Opponent: worseSeedWinner, seed2Opponent: otherWinner };
+  }
+
+
+
+  function getProtectedRoundOf32PlayInAssignment(season, protectedSeedNumber, fallbackIndex) {
+    const series = findRoundOf32ProtectedSeries(season, protectedSeedNumber, fallbackIndex);
+    if (!series) return null;
+    const protectedSlot = Number(series.playerASeed) === Number(protectedSeedNumber) ? 'A'
+      : (Number(series.playerBSeed) === Number(protectedSeedNumber) ? 'B' : 'A');
+    const playInSlot = protectedSlot === 'A' ? 'B' : 'A';
+    const assigned = withSeasonSeedFallback(season, seasonSeriesCompetitor(series, playInSlot));
+    return { series, protectedSlot, playInSlot, assigned };
+  }
+
+  function stablePlayInProtectedSlotRepairResultId(series, gameNumber) {
+    return `${series?.id || 'play_in'}_protected_slot_repair_game_${gameNumber}`;
+  }
+
+  function buildPlayInProtectedSlotRepairGameResult(season, series, winnerId, gameNumber, options = {}) {
+    const loserId = winnerId === series.playerAId ? series.playerBId : series.playerAId;
+    const winnerIsA = winnerId === series.playerAId;
+    const dateKeyStr = getSeasonManualResultDateKey(series, gameNumber) || '2026-06-03';
+    const stableId = stablePlayInProtectedSlotRepairResultId(series, gameNumber);
+    const now = seasonNowISO(options);
+    return {
+      id: stableId,
+      seasonId: season?.id || series.seasonId || '',
+      seriesId: series.id,
+      seasonSeriesId: series.id,
+      roundId: series.roundId,
+      dateKey: dateKeyStr,
+      gameNumber,
+      seriesGameNumber: gameNumber,
+      game: gameNumber,
+      matchupType: 'tournament',
+      matchupId: stableId,
+      playerAId: series.playerAId,
+      playerBId: series.playerBId,
+      winnerId,
+      loserId,
+      playerAScore: winnerIsA ? 40 : 25,
+      playerBScore: winnerIsA ? 25 : 40,
+      source: 'admin_manual',
+      manualResult: true,
+      catchUpResult: true,
+      playInProtectedSlotRepair: true,
+      recordedAtISO: now,
+      updatedAtISO: now
+    };
+  }
+
+  function repairPlayInSeriesFromProtectedRoundOf32Slots(season, options = {}) {
+    let nextSeason = normalizeSeasonState(season);
+    if (!nextSeason) return { ok: false, error: 'invalid_season', season, changed: false, repairedSeriesIds: [] };
+    const allSeries = nextSeason.series || {};
+    const playIn = Object.values(allSeries)
+      .filter((series) => series?.roundId === 'play_in')
+      .sort((a, b) => (Number(a.seriesIndex) || 0) - (Number(b.seriesIndex) || 0));
+    if (playIn.length < 2) return { ok: false, error: 'play_in_series_missing', season: nextSeason, changed: false, repairedSeriesIds: [] };
+
+    const participantIds = new Set();
+    const playInByParticipant = new Map();
+    playIn.forEach((series) => {
+      [series.playerAId, series.playerBId].filter(Boolean).forEach((playerId) => {
+        participantIds.add(playerId);
+        playInByParticipant.set(playerId, series);
+      });
+    });
+
+    const seed1Assignment = getProtectedRoundOf32PlayInAssignment(nextSeason, 1, 0);
+    const seed2Assignment = getProtectedRoundOf32PlayInAssignment(nextSeason, 2, 8);
+    const assigned = [seed1Assignment?.assigned, seed2Assignment?.assigned];
+    if (!seed1Assignment?.assigned?.playerId || !seed2Assignment?.assigned?.playerId) {
+      return { ok: false, error: 'protected_slots_empty_or_ambiguous', season: nextSeason, changed: false, repairedSeriesIds: [] };
+    }
+    if (!assigned.every((player) => participantIds.has(player.playerId))) {
+      return { ok: false, error: 'protected_slot_non_play_in_participant', season: nextSeason, changed: false, repairedSeriesIds: [] };
+    }
+    if (assigned[0].playerId === assigned[1].playerId) {
+      return { ok: false, error: 'protected_slots_duplicate_winner', season: nextSeason, changed: false, repairedSeriesIds: [] };
+    }
+
+    const sortedByWorstSeed = assigned.slice().sort((a, b) => (Number(b.seed) || 0) - (Number(a.seed) || 0));
+    if (sortedByWorstSeed[0].playerId !== seed1Assignment.assigned.playerId || sortedByWorstSeed[1].playerId !== seed2Assignment.assigned.playerId) {
+      return { ok: false, error: 'protected_slots_do_not_match_play_in_protection', season: nextSeason, changed: false, repairedSeriesIds: [] };
+    }
+
+    const nextSeries = { ...allSeries };
+    const repairedSeriesIds = [];
+    let changed = false;
+    assigned.forEach((winner) => {
+      const originalSeries = playInByParticipant.get(winner.playerId);
+      if (!originalSeries) return;
+      const currentSeries = nextSeries[originalSeries.id] || originalSeries;
+      const existingWinner = getSeasonSeriesWinner(currentSeries);
+      if (existingWinner && existingWinner === winner.playerId) return;
+      if (existingWinner && existingWinner !== winner.playerId && options.force !== true) return;
+      if (winner.playerId !== currentSeries.playerAId && winner.playerId !== currentSeries.playerBId) return;
+
+      const winsNeeded = getSeasonSeriesWinsNeeded(currentSeries);
+      let gameResults = Array.isArray(currentSeries.gameResults) ? currentSeries.gameResults.slice() : [];
+      let recalculated = gameResults.length ? rebuildSeasonSeriesFromRecordedResults(currentSeries, gameResults, options) : currentSeries;
+      let winsForWinner = winner.playerId === currentSeries.playerAId ? (Number(recalculated.winsA) || 0) : (Number(recalculated.winsB) || 0);
+      const usedGameNumbers = new Set(gameResults.map((result) => Number(result.gameNumber || result.seriesGameNumber || result.game)).filter((value) => Number.isFinite(value) && value > 0));
+      let nextGameNumber = 1;
+      while (winsForWinner < winsNeeded) {
+        while (usedGameNumbers.has(nextGameNumber)) nextGameNumber += 1;
+        const stableId = stablePlayInProtectedSlotRepairResultId(currentSeries, nextGameNumber);
+        const alreadyHasStable = gameResults.some((result) => result?.id === stableId || result?.matchupId === stableId);
+        usedGameNumbers.add(nextGameNumber);
+        if (!alreadyHasStable) {
+          gameResults.push(buildPlayInProtectedSlotRepairGameResult(nextSeason, currentSeries, winner.playerId, nextGameNumber, options));
+        }
+        winsForWinner += 1;
+      }
+
+      const repaired = rebuildSeasonSeriesFromRecordedResults({ ...currentSeries, gameResults }, gameResults, options);
+      const complete = getSeasonSeriesWinner(repaired) === winner.playerId;
+      const finalized = complete ? {
+        ...repaired,
+        winnerId: winner.playerId,
+        loserId: winner.playerId === repaired.playerAId ? repaired.playerBId : repaired.playerAId,
+        status: 'complete',
+        updatedAtISO: seasonNowISO(options)
+      } : repaired;
+      if (JSON.stringify(finalized) !== JSON.stringify(currentSeries)) {
+        nextSeries[currentSeries.id] = finalized;
+        repairedSeriesIds.push(currentSeries.id);
+        changed = true;
+      }
+    });
+
+    nextSeason = normalizeSeasonState({ ...nextSeason, series: nextSeries, updatedAtISO: changed ? seasonNowISO(options) : nextSeason.updatedAtISO });
+    const advancementRepair = repairPlayInAdvancementForSeason(nextSeason, options);
+    if (advancementRepair.season) {
+      if (advancementRepair.changed) changed = true;
+      nextSeason = advancementRepair.season;
+    }
+    return { ok: true, season: nextSeason, changed, repairedSeriesIds, seed1Opponent: seed1Assignment.assigned, seed2Opponent: seed2Assignment.assigned };
+  }
+
+  function repairPlayInSeriesFromProtectedRoundOf32SlotsForCurrentSeason(state, options = {}) {
+    const normalized = normalizeState(state || {});
+    const repaired = repairPlayInSeriesFromProtectedRoundOf32Slots(normalized.currentSeason, options);
+    if (!repaired.season) return { ok: false, state: normalized, changed: false, error: repaired.error || 'invalid_season', repairedSeriesIds: [] };
+    const changed = Boolean(repaired.changed);
+    return {
+      ...repaired,
+      state: changed ? normalizeState({ ...normalized, currentSeason: repaired.season, latestSeasonId: repaired.season.id || normalized.latestSeasonId || '' }) : normalized,
+      changed
+    };
   }
 
   function resolvePlayInWinnersIntoRoundOf32(season, options = {}) {
@@ -1528,6 +1687,8 @@
       const fixed = normalizeSeasonState(season);
       if (!fixed) return null;
       let repaired = normalizeSeasonState({ ...fixed, series: cleanSeriesMap(fixed.series) });
+      const upstreamPlayInRepair = repairPlayInSeriesFromProtectedRoundOf32Slots(repaired, options);
+      if (upstreamPlayInRepair.season && (upstreamPlayInRepair.ok || upstreamPlayInRepair.changed)) repaired = upstreamPlayInRepair.season;
       const playInRepair = repairPlayInAdvancementForSeason(repaired, options);
       if (playInRepair.season) repaired = playInRepair.season;
       return normalizeSeasonState(repaired);
@@ -6096,6 +6257,8 @@ return Number(cappedScore.toFixed(1));
     getLocalMonthEndDateKey,
     dateFromLocalDateKey,
     repairPlayInAdvancementForCurrentSeason,
+    repairPlayInSeriesFromProtectedRoundOf32Slots,
+    repairPlayInSeriesFromProtectedRoundOf32SlotsForCurrentSeason,
     backfillLateBoundSeasonSeriesResults,
     repairSeasonDateRange,
     getActiveSeasonSeriesForDate,
