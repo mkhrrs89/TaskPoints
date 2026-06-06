@@ -1569,8 +1569,34 @@ function runWeightVo2HistorySavePathAudit(state) {
 
       if (!playInSeries.length) return { checkable, warnings, issues: [], details: ['No Play-In series found to validate.'] };
       if (!completedPlayIn.length) {
-        warnings.push('No Play-In series are complete yet; protected Round of 32 placement is not checkable.');
-        return { checkable, warnings, issues: [], details: warnings.slice() };
+        const seed1Series = findRoundOf32SeriesForSeedForAudit(seriesList, season, 1);
+        const seed2Series = findRoundOf32SeriesForSeedForAudit(seriesList, season, 2);
+        const seed1Actual = seed1Series ? getSeriesOpponentOfSeedForAudit(seed1Series, season, 1) : null;
+        const seed2Actual = seed2Series ? getSeriesOpponentOfSeedForAudit(seed2Series, season, 2) : null;
+        const seed1ActualSeed = Number(seed1Actual?.seed ?? getSeasonSeedNumberForPlayerForAudit(season, seed1Actual?.playerId));
+        const seed2ActualSeed = Number(seed2Actual?.seed ?? getSeasonSeedNumberForPlayerForAudit(season, seed2Actual?.playerId));
+        const filledWithPlayInParticipants = seed1Actual?.playerId && seed2Actual?.playerId
+          && Number.isInteger(seed1ActualSeed) && seed1ActualSeed >= 31 && seed1ActualSeed <= 34
+          && Number.isInteger(seed2ActualSeed) && seed2ActualSeed >= 31 && seed2ActualSeed <= 34;
+        if (filledWithPlayInParticipants) {
+          const playInByParticipant = new Map();
+          playInSeries.forEach(series => {
+            const ids = getSeriesPlayerIdsForAudit(series);
+            [ids.playerAId, ids.playerBId].filter(Boolean).forEach(playerId => playInByParticipant.set(playerId, series));
+          });
+          const mappedSeriesIds = [seed1Actual.playerId, seed2Actual.playerId]
+            .map(playerId => playInByParticipant.get(playerId)?.id || '');
+          if (mappedSeriesIds[0] && mappedSeriesIds[1] && mappedSeriesIds[0] === mappedSeriesIds[1]) {
+            const msg = 'Protected slots are ambiguous: both assigned Play-In winners map to the same Play-In series; Admin repair is blocked until one protected slot is corrected.';
+            details.push(`Repair-blocking protected-slot state: Seed 1 opponent is ${formatAuditSeedPlayer(seed1ActualSeed, seed1Actual.playerId, state)}; Seed 2 opponent is ${formatAuditSeedPlayer(seed2ActualSeed, seed2Actual.playerId, state)}; both map to ${mappedSeriesIds[0]}.`);
+            return { checkable, warnings, issues: [msg], details: details.concat(msg) };
+          }
+          warnings.push('Protected Round of 32 slots contain Play-In participants, but no Play-In series are complete yet; run Admin Mode “Repair Play-In winners from protected Round of 32 slots”.');
+          details.push(`Repairable protected-slot state: Seed 1 opponent is ${formatAuditSeedPlayer(seed1ActualSeed, seed1Actual.playerId, state)}; Seed 2 opponent is ${formatAuditSeedPlayer(seed2ActualSeed, seed2Actual.playerId, state)}.`);
+        } else {
+          warnings.push('No Play-In series are complete yet; protected Round of 32 placement is not checkable.');
+        }
+        return { checkable, warnings, issues: [], details: details.length ? details.concat(warnings) : warnings.slice() };
       }
       if (completedPlayIn.length < playInSeries.length || completedPlayIn.length < 2) {
         const msg = `Only ${completedPlayIn.length}/${playInSeries.length} Play-In series complete; waiting for both Play-In winners before validating protected slots.`;

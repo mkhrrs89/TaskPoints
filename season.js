@@ -996,6 +996,7 @@
           <button type="button" class="btn btn-warn btn-toolbar" data-season-action="admin-regenerate-slate" ${enabled ? '' : 'disabled'}>Regenerate today’s Season slate</button>
           <button type="button" class="btn btn-success btn-toolbar" data-season-action="admin-resync-results">Re-sync tournament results from daily matchups</button>
           <button type="button" class="btn btn-warn btn-toolbar" data-season-action="admin-catch-up-play-in-r32">Catch up Play-In Round of 32 games</button>
+          <button type="button" class="btn btn-success btn-toolbar" data-season-action="admin-repair-play-in-from-protected-slots">Repair Play-In winners from protected Round of 32 slots</button>
         </div>
         <p class="muted text-xs mt-2">Regeneration may replace unsaved/unplayed matchups for this date. Completed/synced scores require confirmation.</p>
       </section>`;
@@ -1437,6 +1438,17 @@
         if (!result.ok && (result.errors || []).length) alert(`Catch-up failed: ${(result.errors || []).join('; ')}`);
         saveAndRenderSeason(result.state || state, 'season-admin-catch-up-play-in-r32');
         if (result.ok) alert(`Catch-up complete. Backfilled ${result.backfilledCount || 0} game result${(result.backfilledCount || 0) === 1 ? '' : 's'}.`);
+        return;
+      }
+      if (action === 'admin-repair-play-in-from-protected-slots') {
+        if (typeof global.confirm === 'function' && !global.confirm('Repair upstream Play-In winners from the protected #1/#2 Round of 32 slots? This is idempotent and will only use valid Play-In participants already assigned downstream.')) return;
+        const state = currentMountedState();
+        const result = typeof core.repairPlayInSeriesFromProtectedRoundOf32SlotsForCurrentSeason === 'function'
+          ? core.repairPlayInSeriesFromProtectedRoundOf32SlotsForCurrentSeason(state, { nowISO: nowIso() })
+          : { ok: false, error: 'helper_unavailable', repairedSeriesIds: [] };
+        if (!result.ok) { alert(`Play-In protected-slot repair failed: ${result.reason || result.message || result.error || 'unknown error'}`); return; }
+        saveAndRenderSeason(result.state || state, 'season-admin-repair-play-in-from-protected-slots');
+        alert(`Play-In protected-slot repair complete. Changed: ${result.changed ? 'yes' : 'no'}. Repaired ${result.repairedSeriesIds?.length || 0} Play-In series.`);
         return;
       }
       if (action === 'admin-finalize-season') {
