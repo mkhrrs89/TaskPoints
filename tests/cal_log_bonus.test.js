@@ -1612,6 +1612,45 @@ test('protected-slot Play-In repair is idempotent', () => {
   });
 });
 
+
+
+test('protected-slot Play-In repair rejects two winners from the same Play-In series', () => {
+  const state = buildLateBoundRoundOf32State();
+  const r32Seed2 = state.currentSeason.series.season_1_june_2026_round_of_32_9;
+  const invalidSeason = {
+    ...state.currentSeason,
+    series: {
+      ...state.currentSeason.series,
+      [r32Seed2.id]: {
+        ...r32Seed2,
+        playerAId: 'seed2',
+        playerAName: 'Verrick/Jax',
+        playerASeed: 2,
+        playerBId: 'seed31',
+        playerBName: 'Edward',
+        playerBSeed: 31,
+        placeholderB: '',
+        status: 'active'
+      }
+    }
+  };
+  const beforePi1 = JSON.stringify(invalidSeason.series.season_1_june_2026_play_in_1);
+  const beforePi2 = JSON.stringify(invalidSeason.series.season_1_june_2026_play_in_2);
+
+  const repair = core.repairPlayInSeriesFromProtectedRoundOf32Slots(invalidSeason, { nowISO: '2026-06-06T12:00:00.000Z' });
+
+  assert.equal(repair.ok, false);
+  assert.equal(repair.changed, false);
+  assert.equal(repair.error, 'protected_slots_same_play_in_series');
+  assert.match(repair.reason, /same Play-In series/);
+  assert.equal(JSON.stringify(repair.season.series.season_1_june_2026_play_in_1), beforePi1);
+  assert.equal(JSON.stringify(repair.season.series.season_1_june_2026_play_in_2), beforePi2);
+  assert.equal(repair.season.series.season_1_june_2026_play_in_1.gameResults.length, 0);
+  assert.equal(repair.season.series.season_1_june_2026_play_in_2.gameResults.length, 0);
+  assert.equal(repair.season.series.season_1_june_2026_play_in_1.winnerId, '');
+  assert.equal(repair.season.series.season_1_june_2026_play_in_2.winnerId, '');
+});
+
 test('protected-slot Play-In repair does not fabricate ambiguous winners', () => {
   const state = buildJuneSeason();
   const emptyRepair = core.repairPlayInSeriesFromProtectedRoundOf32Slots(state.currentSeason, { nowISO: '2026-06-06T12:00:00.000Z' });

@@ -821,7 +821,20 @@
       return { ok: false, error: 'protected_slot_non_play_in_participant', season: nextSeason, changed: false, repairedSeriesIds: [] };
     }
     if (assigned[0].playerId === assigned[1].playerId) {
-      return { ok: false, error: 'protected_slots_duplicate_winner', season: nextSeason, changed: false, repairedSeriesIds: [] };
+      return { ok: false, error: 'protected_slots_duplicate_winner', reason: 'Protected slots are ambiguous: both protected slots contain the same Play-In player.', season: nextSeason, changed: false, repairedSeriesIds: [] };
+    }
+
+    const mappedAssignments = assigned.map((winner) => ({
+      ...winner,
+      originalSeries: playInByParticipant.get(winner.playerId) || null
+    }));
+    const missingSeries = mappedAssignments.filter((item) => !item.originalSeries);
+    if (missingSeries.length) {
+      return { ok: false, error: 'protected_slot_play_in_series_missing', reason: 'Protected slots include player(s) that do not map to a Play-In series.', season: nextSeason, changed: false, repairedSeriesIds: [] };
+    }
+    const distinctSeriesIds = new Set(mappedAssignments.map((item) => item.originalSeries.id));
+    if (distinctSeriesIds.size !== mappedAssignments.length) {
+      return { ok: false, error: 'protected_slots_same_play_in_series', reason: 'Protected slots are ambiguous: both assigned Play-In winners map to the same Play-In series.', season: nextSeason, changed: false, repairedSeriesIds: [] };
     }
 
     const sortedByWorstSeed = assigned.slice().sort((a, b) => (Number(b.seed) || 0) - (Number(a.seed) || 0));
@@ -832,9 +845,8 @@
     const nextSeries = { ...allSeries };
     const repairedSeriesIds = [];
     let changed = false;
-    assigned.forEach((winner) => {
-      const originalSeries = playInByParticipant.get(winner.playerId);
-      if (!originalSeries) return;
+    mappedAssignments.forEach((winner) => {
+      const originalSeries = winner.originalSeries;
       const currentSeries = nextSeries[originalSeries.id] || originalSeries;
       const existingWinner = getSeasonSeriesWinner(currentSeries);
       if (existingWinner && existingWinner === winner.playerId) return;
@@ -886,7 +898,7 @@
   function repairPlayInSeriesFromProtectedRoundOf32SlotsForCurrentSeason(state, options = {}) {
     const normalized = normalizeState(state || {});
     const repaired = repairPlayInSeriesFromProtectedRoundOf32Slots(normalized.currentSeason, options);
-    if (!repaired.season) return { ok: false, state: normalized, changed: false, error: repaired.error || 'invalid_season', repairedSeriesIds: [] };
+    if (!repaired.season) return { ...repaired, ok: false, state: normalized, changed: false, error: repaired.error || 'invalid_season', repairedSeriesIds: [] };
     const changed = Boolean(repaired.changed);
     return {
       ...repaired,

@@ -1446,7 +1446,7 @@
         const result = typeof core.repairPlayInSeriesFromProtectedRoundOf32SlotsForCurrentSeason === 'function'
           ? core.repairPlayInSeriesFromProtectedRoundOf32SlotsForCurrentSeason(state, { nowISO: nowIso() })
           : { ok: false, error: 'helper_unavailable', repairedSeriesIds: [] };
-        if (!result.ok) { alert(`Play-In protected-slot repair failed: ${result.error || 'unknown error'}`); return; }
+        if (!result.ok) { alert(`Play-In protected-slot repair failed: ${result.reason || result.message || result.error || 'unknown error'}`); return; }
         saveAndRenderSeason(result.state || state, 'season-admin-repair-play-in-from-protected-slots');
         alert(`Play-In protected-slot repair complete. Changed: ${result.changed ? 'yes' : 'no'}. Repaired ${result.repairedSeriesIds?.length || 0} Play-In series.`);
         return;

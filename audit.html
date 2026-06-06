@@ -1579,6 +1579,18 @@ function runWeightVo2HistorySavePathAudit(state) {
           && Number.isInteger(seed1ActualSeed) && seed1ActualSeed >= 31 && seed1ActualSeed <= 34
           && Number.isInteger(seed2ActualSeed) && seed2ActualSeed >= 31 && seed2ActualSeed <= 34;
         if (filledWithPlayInParticipants) {
+          const playInByParticipant = new Map();
+          playInSeries.forEach(series => {
+            const ids = getSeriesPlayerIdsForAudit(series);
+            [ids.playerAId, ids.playerBId].filter(Boolean).forEach(playerId => playInByParticipant.set(playerId, series));
+          });
+          const mappedSeriesIds = [seed1Actual.playerId, seed2Actual.playerId]
+            .map(playerId => playInByParticipant.get(playerId)?.id || '');
+          if (mappedSeriesIds[0] && mappedSeriesIds[1] && mappedSeriesIds[0] === mappedSeriesIds[1]) {
+            const msg = 'Protected slots are ambiguous: both assigned Play-In winners map to the same Play-In series; Admin repair is blocked until one protected slot is corrected.';
+            details.push(`Repair-blocking protected-slot state: Seed 1 opponent is ${formatAuditSeedPlayer(seed1ActualSeed, seed1Actual.playerId, state)}; Seed 2 opponent is ${formatAuditSeedPlayer(seed2ActualSeed, seed2Actual.playerId, state)}; both map to ${mappedSeriesIds[0]}.`);
+            return { checkable, warnings, issues: [msg], details: details.concat(msg) };
+          }
           warnings.push('Protected Round of 32 slots contain Play-In participants, but no Play-In series are complete yet; run Admin Mode “Repair Play-In winners from protected Round of 32 slots”.');
           details.push(`Repairable protected-slot state: Seed 1 opponent is ${formatAuditSeedPlayer(seed1ActualSeed, seed1Actual.playerId, state)}; Seed 2 opponent is ${formatAuditSeedPlayer(seed2ActualSeed, seed2Actual.playerId, state)}.`);
         } else {
