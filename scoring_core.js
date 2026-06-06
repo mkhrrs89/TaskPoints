@@ -665,7 +665,7 @@
   }
 
   function repairPlayInAdvancementForSeason(season, options = {}) {
-    const nextSeason = normalizeSeasonState(season);
+    let nextSeason = normalizeSeasonState(season);
     if (!nextSeason) return { ok: false, error: 'invalid_season', season };
     const allSeries = nextSeason.series || {};
     const nextSeries = { ...allSeries };
@@ -725,6 +725,11 @@
     if (JSON.stringify(repairedSeed2) !== JSON.stringify(seed2Series)) { nextSeries[seed2Series.id] = repairedSeed2; changed = true; }
     nextSeason.series = nextSeries;
     if (changed) nextSeason.updatedAtISO = now;
+    const catchUpRepair = backfillLateBoundSeasonSeriesResults({ currentSeason: nextSeason }, nextSeason, options);
+    if (catchUpRepair.updatedSeason) {
+      nextSeason = catchUpRepair.updatedSeason;
+      if (catchUpRepair.changed) changed = true;
+    }
     if (changed && global.console && typeof global.console.info === 'function') {
       console.info('[Season repair] Resolved Play-In winners into Round of 32', { seed1Opponent: worseSeedWinner, seed2Opponent: otherWinner });
     }
@@ -1307,7 +1312,13 @@
 
   function isAdminManualSeasonGameResult(result) {
     const source = String(result?.source || '').toLowerCase();
-    return result?.manualResult === true || source === 'admin_manual' || source === 'admin' || source === 'manual';
+    return result?.manualResult === true
+      || result?.catchUpResult === true
+      || result?.lateBoundSeriesCatchUp === true
+      || source === 'admin_manual'
+      || source === 'admin_catch_up'
+      || source === 'admin'
+      || source === 'manual';
   }
 
   function reconcileManualSeasonSeriesGameResults(series, patch = {}, options = {}) {
@@ -1460,6 +1471,12 @@
     const assigned = setSeriesSlot(target, prefix, player, options);
     nextSeason.series = { ...(nextSeason.series || {}), [targetSeriesId]: assigned };
     nextSeason.updatedAtISO = seasonNowISO(options);
+    if (assigned.roundId === 'round_of_32' && isLateBoundRoundOf32PlayInSeries(assigned)) {
+      const catchUpRepair = backfillLateBoundSeasonSeriesResults({ currentSeason: nextSeason }, nextSeason, options);
+      if (catchUpRepair.updatedSeason) {
+        return { ok: true, season: catchUpRepair.updatedSeason, series: catchUpRepair.updatedSeason.series?.[targetSeriesId] || assigned, catchUp: catchUpRepair };
+      }
+    }
     return { ok: true, season: nextSeason, series: assigned };
   }
 
@@ -1813,6 +1830,136 @@
     };
   }
 
+  function isLateBoundRoundOf32PlayInSeries(series) {
+    if (!series || series.roundId !== 'round_of_32') return false;
+    const index = Number(series.seriesIndex);
+    if (index === 1 || index === 9) return true;
+    const placeholderText = `${series.placeholderA || ''} ${series.placeholderB || ''}`.toLowerCase();
+    if (placeholderText.includes('play-in') || placeholderText.includes('play in')) return true;
+    return Number(series.playerASeed) === 1 || Number(series.playerBSeed) === 1 || Number(series.playerASeed) === 2 || Number(series.playerBSeed) === 2;
+  }
+
+  function getSeasonRoundPlayedDatesBefore(roundId, todayDateKey) {
+    const round = JUNE_2026_SEASON_DATE_WINDOWS.find((item) => item.id === roundId);
+    if (!round || !todayDateKey || todayDateKey <= round.startDate) return [];
+    const endExclusive = todayDateKey <= round.endDate ? todayDateKey : adjacentLocalDateKey(round.endDate, 1);
+    const dates = [];
+    let current = round.startDate;
+    while (current && current < endExclusive && current <= round.endDate) {
+      dates.push(current);
+      current = adjacentLocalDateKey(current, 1);
+    }
+    return dates;
+  }
+
+  function stableCatchUpResultId(seasonId, seriesId, dateKeyStr) {
+    return `${seasonId || 'season'}_${seriesId || 'series'}_catchup_${String(dateKeyStr || '').replace(/-/g, '_')}`;
+  }
+
+  function findRecordedTournamentResultForSeriesDate(state, season, series, dateKeyStr) {
+    const containers = [];
+    if (Array.isArray(state?.matchups)) containers.push(...state.matchups);
+    if (Array.isArray(state?.gameHistory)) containers.push(...state.gameHistory);
+    const daily = season?.dailyTournamentResults;
+    if (Array.isArray(daily)) containers.push(...daily);
+    else if (daily && typeof daily === 'object') Object.values(daily).forEach((value) => Array.isArray(value) ? containers.push(...value) : (value && typeof value === 'object' ? containers.push(value) : null));
+    return containers.find((record) => {
+      if (!record || getRecordedResultDateKey(record) !== dateKeyStr) return false;
+      const seriesId = getRecordedSeriesId(record);
+      if (seriesId && seriesId !== series.id) return false;
+      if (!seriesId && getPairingKey(record.playerAId, record.playerBId) !== getPairingKey(series.playerAId, series.playerBId)) return false;
+      const type = String(record.matchupType || '').toLowerCase();
+      if (type && type !== 'tournament' && type !== 'season') return false;
+      const winner = getRecordedResultWinner(record);
+      return Boolean(winner.winnerId && (winner.winnerId === series.playerAId || winner.winnerId === series.playerBId));
+    }) || null;
+  }
+
+  function buildDeterministicCatchUpWinner(series, dateKeyStr, gameNumber) {
+    const seedA = Number.isFinite(Number(series.playerASeed)) ? Number(series.playerASeed) : 99;
+    const seedB = Number.isFinite(Number(series.playerBSeed)) ? Number(series.playerBSeed) : 99;
+    const text = `${series.id}|${dateKeyStr}|${gameNumber}|${series.playerAId}|${series.playerBId}`;
+    let hash = 0;
+    for (let i = 0; i < text.length; i += 1) hash = ((hash * 31) + text.charCodeAt(i)) >>> 0;
+    const seedBiasA = Math.max(0, seedB - seedA);
+    const seedBiasB = Math.max(0, seedA - seedB);
+    const ratingA = 50 + seedBiasA * 2 + (hash % 17);
+    const ratingB = 50 + seedBiasB * 2 + ((hash >>> 5) % 17);
+    const aWins = ratingA >= ratingB;
+    const winnerId = aWins ? series.playerAId : series.playerBId;
+    return {
+      winnerId,
+      loserId: aWins ? series.playerBId : series.playerAId,
+      playerAScore: Number((aWins ? Math.max(ratingA, ratingB + 1) : ratingA).toFixed(1)),
+      playerBScore: Number((aWins ? ratingB : Math.max(ratingB, ratingA + 1)).toFixed(1))
+    };
+  }
+
+  function buildLateBoundCatchUpGameResult(state, season, series, dateKeyStr, gameNumber, options = {}) {
+    const recorded = findRecordedTournamentResultForSeriesDate(state, season, series, dateKeyStr);
+    const winner = recorded ? getRecordedResultWinner(recorded) : buildDeterministicCatchUpWinner(series, dateKeyStr, gameNumber);
+    const matchupId = recorded?.id || recorded?.matchupId || stableCatchUpResultId(season?.id || series.seasonId, series.id, dateKeyStr);
+    const now = seasonNowISO(options);
+    return {
+      id: stableCatchUpResultId(season?.id || series.seasonId, series.id, dateKeyStr),
+      seasonId: season?.id || series.seasonId || '',
+      seriesId: series.id,
+      seasonSeriesId: series.id,
+      roundId: series.roundId,
+      gameNumber,
+      dateKey: dateKeyStr,
+      matchupType: 'tournament',
+      matchupId,
+      playerAId: series.playerAId,
+      playerBId: series.playerBId,
+      winnerId: winner.winnerId,
+      loserId: winner.loserId || (winner.winnerId === series.playerAId ? series.playerBId : series.playerAId),
+      playerAScore: winner.playerAScore,
+      playerBScore: winner.playerBScore,
+      source: 'admin_catch_up',
+      manualResult: true,
+      catchUpResult: true,
+      lateBoundSeriesCatchUp: true,
+      recordedAtISO: recorded?.recordedAtISO || recorded?.completedAtISO || now,
+      updatedAtISO: now
+    };
+  }
+
+  function backfillLateBoundSeasonSeriesResults(state, seasonArg, options = {}) {
+    const normalizedState = normalizeState(state || {});
+    let season = normalizeSeasonState(seasonArg || normalizedState.currentSeason);
+    if (!season) return { ok: false, state: normalizedState, season, updatedSeason: season, changed: false, backfilledCount: 0, seriesIds: [], errors: ['No current season.'] };
+    const today = options.dateKey || (options.nowISO ? dateKey(options.nowISO) : dateKey(new Date()));
+    const missedDates = getSeasonRoundPlayedDatesBefore('round_of_32', today);
+    if (!missedDates.length) return { ok: true, state: normalizedState, season, updatedSeason: season, changed: false, backfilledCount: 0, seriesIds: [] };
+    const nextSeries = { ...(season.series || {}) };
+    const changedSeriesIds = [];
+    let backfilledCount = 0;
+    Object.entries(season.series || {}).forEach(([seriesId, series]) => {
+      if (!series || series.roundId !== 'round_of_32') return;
+      if (!isLateBoundRoundOf32PlayInSeries(series)) return;
+      if (!series.playerAId || !series.playerBId || isSeasonSeriesComplete(series)) return;
+      const existingResults = Array.isArray(series.gameResults) ? series.gameResults.slice() : [];
+      const existingDates = new Set(existingResults.map((result) => result?.dateKey).filter(Boolean));
+      const existingGames = new Set(existingResults.map((result) => Number(result?.gameNumber || result?.seriesGameNumber || result?.game)).filter(Number.isFinite));
+      const additions = [];
+      missedDates.forEach((missedDate, index) => {
+        const gameNumber = index + 1;
+        if (existingDates.has(missedDate) || existingGames.has(gameNumber)) return;
+        additions.push(buildLateBoundCatchUpGameResult(normalizedState, season, series, missedDate, gameNumber, options));
+      });
+      if (!additions.length) return;
+      const repaired = rebuildSeasonSeriesFromRecordedResults(series, existingResults.concat(additions), options);
+      nextSeries[seriesId] = repaired;
+      changedSeriesIds.push(seriesId);
+      backfilledCount += additions.length;
+    });
+    if (!backfilledCount) return { ok: true, state: normalizedState, season, updatedSeason: season, changed: false, backfilledCount: 0, seriesIds: [] };
+    season = normalizeSeasonState({ ...season, series: nextSeries, updatedAtISO: seasonNowISO(options) });
+    const nextState = normalizeState({ ...normalizedState, currentSeason: season, latestSeasonId: season.id || normalizedState.latestSeasonId || '' });
+    return { ok: true, state: nextState, season, updatedSeason: season, changed: true, backfilledCount, seriesIds: changedSeriesIds };
+  }
+
   function replaceSeasonSeriesGameResult(season, seriesId, gameResult, options = {}) {
     const nextSeason = normalizeSeasonState(season);
     if (!nextSeason) return { ok: false, error: 'invalid_season', season };
@@ -2099,6 +2246,10 @@
       playerBScore: winner.playerBScore,
       source: raw.source || source || 'matchup',
       manualResult: raw.manualResult === true,
+      catchUpResult: raw.catchUpResult === true,
+      lateBoundSeriesCatchUp: raw.lateBoundSeriesCatchUp === true,
+      matchupType: raw.matchupType || 'tournament',
+      roundId: raw.roundId || series.roundId || '',
       _containerSource: source || '',
       recordedAtISO: raw.recordedAtISO || raw.completedAtISO || raw.dateISO || raw.createdAtISO || '',
       updatedAtISO: raw.updatedAtISO || '',
@@ -2305,6 +2456,15 @@
       if (advancementRepair.changed) changed = true;
       else if (!advancementRepair.ok && advancementRepair.error) warnings.push(`Advancement repair pending: ${advancementRepair.error}.`);
     }
+    const catchUpRepair = backfillLateBoundSeasonSeriesResults({ ...strippedState, currentSeason: season }, season, options);
+    if (catchUpRepair.updatedSeason) {
+      season = catchUpRepair.updatedSeason;
+      if (catchUpRepair.changed) {
+        changed = true;
+        warnings.push(`Backfilled ${catchUpRepair.backfilledCount} late Play-In Round of 32 game result${catchUpRepair.backfilledCount === 1 ? '' : 's'}.`);
+      }
+    }
+
     const repairedMatchups = strippedMatchups
       .map((matchup) => withInferredSeasonMatchupMetadata(strippedState, season, matchup, options));
     const matchupsChanged = JSON.stringify(repairedMatchups) !== JSON.stringify(normalized.matchups || []);
@@ -5910,6 +6070,7 @@ return Number(cappedScore.toFixed(1));
     getLocalMonthEndDateKey,
     dateFromLocalDateKey,
     repairPlayInAdvancementForCurrentSeason,
+    backfillLateBoundSeasonSeriesResults,
     repairSeasonDateRange,
     getActiveSeasonSeriesForDate,
     prepareSeasonForDailySlate,

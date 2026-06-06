@@ -995,6 +995,7 @@
         <div class="season-rebuild-actions mt-3">
           <button type="button" class="btn btn-warn btn-toolbar" data-season-action="admin-regenerate-slate" ${enabled ? '' : 'disabled'}>Regenerate today’s Season slate</button>
           <button type="button" class="btn btn-success btn-toolbar" data-season-action="admin-resync-results">Re-sync tournament results from daily matchups</button>
+          <button type="button" class="btn btn-warn btn-toolbar" data-season-action="admin-catch-up-play-in-r32">Catch up Play-In Round of 32 games</button>
         </div>
         <p class="muted text-xs mt-2">Regeneration may replace unsaved/unplayed matchups for this date. Completed/synced scores require confirmation.</p>
       </section>`;
@@ -1425,6 +1426,17 @@
         if (!result.ok && (result.errors || []).length) alert(`Re-sync warnings/errors: ${(result.errors || []).concat(result.warnings || []).join('; ')}`);
         saveAndRenderSeason(result.state || state, 'season-admin-resync-results');
         if (result.ok) alert(`Re-sync complete. Changed: ${result.changed ? 'yes' : 'no'}. ${(result.warnings || []).join(' ')}`);
+        return;
+      }
+      if (action === 'admin-catch-up-play-in-r32') {
+        if (typeof global.confirm === 'function' && !global.confirm('Catch up only late-filled Play-In Round of 32 series through yesterday? This is safe to run more than once and will not touch unrelated series.')) return;
+        const state = currentMountedState();
+        const result = typeof core.backfillLateBoundSeasonSeriesResults === 'function'
+          ? core.backfillLateBoundSeasonSeriesResults(state, state.currentSeason, { nowISO: nowIso() })
+          : { ok: false, errors: ['helper unavailable'] };
+        if (!result.ok && (result.errors || []).length) alert(`Catch-up failed: ${(result.errors || []).join('; ')}`);
+        saveAndRenderSeason(result.state || state, 'season-admin-catch-up-play-in-r32');
+        if (result.ok) alert(`Catch-up complete. Backfilled ${result.backfilledCount || 0} game result${(result.backfilledCount || 0) === 1 ? '' : 's'}.`);
         return;
       }
       if (action === 'admin-finalize-season') {
