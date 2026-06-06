@@ -1463,6 +1463,202 @@ test('manual Play-In winners advance into protected Round of 32 slots', () => {
   assert.equal(seed2Protected.playerBId, pi2.playerAId);
 });
 
+function buildLateBoundRoundOf32State() {
+  const state = buildJuneSeason();
+  const r32Seed1 = state.currentSeason.series.season_1_june_2026_round_of_32_1;
+  const r32Seed2 = state.currentSeason.series.season_1_june_2026_round_of_32_9;
+  const r32ExistingA = state.currentSeason.series.season_1_june_2026_round_of_32_2;
+  const r32ExistingB = state.currentSeason.series.season_1_june_2026_round_of_32_3;
+  const assignedSeed1 = {
+    ...r32Seed1,
+    playerAId: 'seed1',
+    playerAName: 'Lily',
+    playerASeed: 1,
+    playerBId: 'seed34',
+    playerBName: 'Mildred',
+    playerBSeed: 34,
+    placeholderB: '',
+    status: 'active',
+    winsA: 0,
+    winsB: 0,
+    gameResults: []
+  };
+  const assignedSeed2 = {
+    ...r32Seed2,
+    playerAId: 'seed2',
+    playerAName: 'Verrick/Jax',
+    playerASeed: 2,
+    playerBId: 'seed32',
+    playerBName: 'Rico',
+    playerBSeed: 32,
+    placeholderB: '',
+    status: 'active',
+    winsA: 0,
+    winsB: 0,
+    gameResults: []
+  };
+  const existingA = core.recalculateSeasonSeriesFromGameResults({
+    ...r32ExistingA,
+    status: 'active',
+    gameResults: [
+      resultFor(r32ExistingA, '2026-06-04', r32ExistingA.playerAId, { suffix: 'existing-a-1', gameNumber: 1, source: 'matchup' }),
+      resultFor(r32ExistingA, '2026-06-05', r32ExistingA.playerBId, { suffix: 'existing-a-2', gameNumber: 2, source: 'matchup' })
+    ]
+  }, { nowISO: '2026-06-05T23:00:00.000Z' });
+  const existingB = core.recalculateSeasonSeriesFromGameResults({
+    ...r32ExistingB,
+    status: 'active',
+    gameResults: [
+      resultFor(r32ExistingB, '2026-06-04', r32ExistingB.playerAId, { suffix: 'existing-b-1', gameNumber: 1, source: 'matchup' }),
+      resultFor(r32ExistingB, '2026-06-05', r32ExistingB.playerAId, { suffix: 'existing-b-2', gameNumber: 2, source: 'matchup' })
+    ]
+  }, { nowISO: '2026-06-05T23:00:00.000Z' });
+  return {
+    ...state,
+    currentSeason: {
+      ...state.currentSeason,
+      series: {
+        ...state.currentSeason.series,
+        [assignedSeed1.id]: assignedSeed1,
+        [assignedSeed2.id]: assignedSeed2,
+        [existingA.id]: existingA,
+        [existingB.id]: existingB
+      }
+    }
+  };
+}
+
+test('late Play-In Round of 32 series catch-up backfills missed games through yesterday', () => {
+  const state = buildLateBoundRoundOf32State();
+  const repair = core.backfillLateBoundSeasonSeriesResults(state, state.currentSeason, { nowISO: '2026-06-06T12:00:00.000Z' });
+
+  assert.equal(repair.ok, true);
+  assert.equal(repair.backfilledCount, 4);
+  ['season_1_june_2026_round_of_32_1', 'season_1_june_2026_round_of_32_9'].forEach((seriesId) => {
+    const series = repair.updatedSeason.series[seriesId];
+    assert.deepEqual(series.gameResults.map((result) => result.dateKey), ['2026-06-04', '2026-06-05']);
+    assert.deepEqual(series.gameResults.map((result) => result.gameNumber), [1, 2]);
+    series.gameResults.forEach((result) => {
+      assert.equal(result.seasonId, 'season_1_june_2026');
+      assert.equal(result.seriesId, seriesId);
+      assert.equal(result.seasonSeriesId, seriesId);
+      assert.equal(result.roundId, 'round_of_32');
+      assert.equal(result.matchupType, 'tournament');
+      assert.equal(result.source, 'admin_catch_up');
+      assert.equal(result.manualResult, true);
+      assert.equal(result.catchUpResult, true);
+      assert.equal(result.lateBoundSeriesCatchUp, true);
+    });
+    assert.equal(series.winsA + series.winsB, 2);
+    assert.equal(series.status, 'active');
+    assert.equal(core.getSeriesGameNumber(series, '2026-06-06'), 3);
+  });
+});
+
+test('late Play-In Round of 32 catch-up is idempotent', () => {
+  const state = buildLateBoundRoundOf32State();
+  const first = core.backfillLateBoundSeasonSeriesResults(state, state.currentSeason, { nowISO: '2026-06-06T12:00:00.000Z' });
+  const second = core.backfillLateBoundSeasonSeriesResults(first.state, first.updatedSeason, { nowISO: '2026-06-06T12:30:00.000Z' });
+  const series = second.updatedSeason.series.season_1_june_2026_round_of_32_1;
+
+  assert.equal(second.changed, false);
+  assert.equal(second.backfilledCount, 0);
+  assert.deepEqual(series.gameResults.map((result) => result.dateKey), ['2026-06-04', '2026-06-05']);
+  assert.equal(series.winsA + series.winsB, 2);
+});
+
+test('late Play-In Round of 32 catch-up does not touch unrelated Round of 32 series', () => {
+  const state = buildLateBoundRoundOf32State();
+  const beforeA = JSON.stringify(state.currentSeason.series.season_1_june_2026_round_of_32_2.gameResults);
+  const beforeB = JSON.stringify(state.currentSeason.series.season_1_june_2026_round_of_32_3.gameResults);
+  const repair = core.backfillLateBoundSeasonSeriesResults(state, state.currentSeason, { nowISO: '2026-06-06T12:00:00.000Z' });
+
+  assert.equal(JSON.stringify(repair.updatedSeason.series.season_1_june_2026_round_of_32_2.gameResults), beforeA);
+  assert.equal(JSON.stringify(repair.updatedSeason.series.season_1_june_2026_round_of_32_3.gameResults), beforeB);
+});
+
+test('late Play-In Round of 32 catch-up does not create current-day or future results', () => {
+  const state = buildLateBoundRoundOf32State();
+  const repair = core.backfillLateBoundSeasonSeriesResults(state, state.currentSeason, { nowISO: '2026-06-06T12:00:00.000Z' });
+  const dates = repair.updatedSeason.series.season_1_june_2026_round_of_32_1.gameResults.map((result) => result.dateKey);
+
+  assert.deepEqual(dates, ['2026-06-04', '2026-06-05']);
+  assert.equal(dates.includes('2026-06-06'), false);
+});
+
+test('sync preserves late Play-In Round of 32 catch-up results', () => {
+  const state = buildLateBoundRoundOf32State();
+  const repair = core.backfillLateBoundSeasonSeriesResults(state, state.currentSeason, { nowISO: '2026-06-06T12:00:00.000Z' });
+  const synced = core.syncCurrentSeasonSeriesFromRecordedResults(repair.state, { nowISO: '2026-06-06T13:00:00.000Z' });
+  const series = synced.updatedSeason.series.season_1_june_2026_round_of_32_1;
+
+  assert.equal(series.gameResults.length, 2);
+  assert.equal(series.gameResults.every((result) => result.source === 'admin_catch_up' && result.catchUpResult === true), true);
+  assert.equal(series.winsA + series.winsB, 2);
+  assert.notEqual(`${series.winsA}-${series.winsB}`, '0-0');
+});
+
+test('late Play-In Round of 32 catch-up does not let a reused game number block an earlier missed date', () => {
+  const state = buildLateBoundRoundOf32State();
+  const series = state.currentSeason.series.season_1_june_2026_round_of_32_1;
+  const existingLateGame = {
+    id: 'late-generated-r32-1-2026-06-05',
+    matchupId: 'late-generated-r32-1-2026-06-05',
+    seasonId: state.currentSeason.id,
+    seriesId: series.id,
+    seasonSeriesId: series.id,
+    roundId: 'round_of_32',
+    dateKey: '2026-06-05',
+    matchupType: 'tournament',
+    gameNumber: 1,
+    seriesGameNumber: 1,
+    game: 1,
+    playerAId: series.playerAId,
+    playerBId: series.playerBId,
+    winnerId: series.playerAId,
+    loserId: series.playerBId,
+    playerAScore: 42,
+    playerBScore: 31,
+    source: 'matchup'
+  };
+  const currentSeason = {
+    ...state.currentSeason,
+    series: {
+      ...state.currentSeason.series,
+      [series.id]: { ...series, winsA: 1, winsB: 0, gameResults: [existingLateGame] }
+    }
+  };
+
+  const repair = core.backfillLateBoundSeasonSeriesResults({ ...state, currentSeason }, currentSeason, { nowISO: '2026-06-06T12:00:00.000Z' });
+  const repaired = repair.updatedSeason.series[series.id];
+
+  assert.deepEqual(repaired.gameResults.map((result) => result.dateKey), ['2026-06-04', '2026-06-05']);
+  assert.deepEqual(repaired.gameResults.map((result) => result.gameNumber), [1, 2]);
+  assert.deepEqual(repaired.gameResults.map((result) => result.seriesGameNumber), [1, 2]);
+  assert.deepEqual(repaired.gameResults.map((result) => result.game), [1, 2]);
+  assert.equal(repaired.gameResults[0].source, 'admin_catch_up');
+  assert.equal(repaired.gameResults[1].id, existingLateGame.id);
+  assert.equal(repaired.gameResults[1].source, 'matchup');
+});
+
+test('sync advances a Round of 32 winner completed by late Play-In catch-up in the same pass', () => {
+  const state = buildLateBoundRoundOf32State();
+  const series = state.currentSeason.series.season_1_june_2026_round_of_32_1;
+  assert.equal(state.currentSeason.series.season_1_june_2026_sweet_16_1.playerAId, '');
+
+  const synced = core.syncCurrentSeasonSeriesFromRecordedResults(state, { nowISO: '2026-06-08T12:00:00.000Z' });
+  const repaired = synced.updatedSeason.series[series.id];
+  const sweet16 = synced.updatedSeason.series.season_1_june_2026_sweet_16_1;
+
+  assert.equal(synced.changed, true);
+  assert.deepEqual(repaired.gameResults.map((result) => result.dateKey), ['2026-06-04', '2026-06-05', '2026-06-06']);
+  assert.equal(repaired.status, 'complete');
+  assert.equal(repaired.winnerId, series.playerAId);
+  assert.equal(repaired.winsA, 3);
+  assert.equal(sweet16.playerAId, series.playerAId);
+  assert.equal(sweet16.playerAName, series.playerAName);
+});
+
 test('clearing a manual season result removes admin_manual game results', () => {
   const state = buildJuneSeason();
   const series = state.currentSeason.series.season_1_june_2026_round_of_32_1;
