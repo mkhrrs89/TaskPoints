@@ -1925,6 +1925,25 @@
     };
   }
 
+  function normalizeSeasonSeriesGameResultOrder(results) {
+    return (Array.isArray(results) ? results : [])
+      .slice()
+      .sort((a, b) => {
+        const dateCompare = String(getRecordedResultDateKey(a) || a?._sortKey || '').localeCompare(String(getRecordedResultDateKey(b) || b?._sortKey || ''));
+        if (dateCompare !== 0) return dateCompare;
+        const aGame = Number(a?.gameNumber || a?.seriesGameNumber || a?.game);
+        const bGame = Number(b?.gameNumber || b?.seriesGameNumber || b?.game);
+        if (Number.isFinite(aGame) && Number.isFinite(bGame) && aGame !== bGame) return aGame - bGame;
+        return String(a?.matchupId || a?.id || '').localeCompare(String(b?.matchupId || b?.id || ''));
+      })
+      .map((result, index) => ({
+        ...result,
+        gameNumber: index + 1,
+        seriesGameNumber: index + 1,
+        game: index + 1
+      }));
+  }
+
   function backfillLateBoundSeasonSeriesResults(state, seasonArg, options = {}) {
     const normalizedState = normalizeState(state || {});
     let season = normalizeSeasonState(seasonArg || normalizedState.currentSeason);
@@ -1940,16 +1959,17 @@
       if (!isLateBoundRoundOf32PlayInSeries(series)) return;
       if (!series.playerAId || !series.playerBId || isSeasonSeriesComplete(series)) return;
       const existingResults = Array.isArray(series.gameResults) ? series.gameResults.slice() : [];
-      const existingDates = new Set(existingResults.map((result) => result?.dateKey).filter(Boolean));
-      const existingGames = new Set(existingResults.map((result) => Number(result?.gameNumber || result?.seriesGameNumber || result?.game)).filter(Number.isFinite));
       const additions = [];
       missedDates.forEach((missedDate, index) => {
-        const gameNumber = index + 1;
-        if (existingDates.has(missedDate) || existingGames.has(gameNumber)) return;
-        additions.push(buildLateBoundCatchUpGameResult(normalizedState, season, series, missedDate, gameNumber, options));
+        const stableId = stableCatchUpResultId(season?.id || series.seasonId, series.id, missedDate);
+        const alreadyHasDate = existingResults.some((result) => getRecordedResultDateKey(result) === missedDate);
+        const alreadyHasStableId = existingResults.some((result) => result?.id === stableId || result?.matchupId === stableId || result?.gameId === stableId || result?.completionId === stableId);
+        if (alreadyHasDate || alreadyHasStableId) return;
+        additions.push(buildLateBoundCatchUpGameResult(normalizedState, season, series, missedDate, index + 1, options));
       });
       if (!additions.length) return;
-      const repaired = rebuildSeasonSeriesFromRecordedResults(series, existingResults.concat(additions), options);
+      const orderedResults = normalizeSeasonSeriesGameResultOrder(existingResults.concat(additions));
+      const repaired = rebuildSeasonSeriesFromRecordedResults(series, orderedResults, options);
       nextSeries[seriesId] = repaired;
       changedSeriesIds.push(seriesId);
       backfilledCount += additions.length;
@@ -2462,6 +2482,12 @@
       if (catchUpRepair.changed) {
         changed = true;
         warnings.push(`Backfilled ${catchUpRepair.backfilledCount} late Play-In Round of 32 game result${catchUpRepair.backfilledCount === 1 ? '' : 's'}.`);
+        const postCatchUpAdvancementRepair = repairCompletedSeasonAdvancementForSeason(season, options);
+        if (postCatchUpAdvancementRepair.season) {
+          season = postCatchUpAdvancementRepair.season;
+          if (postCatchUpAdvancementRepair.changed) changed = true;
+          else if (!postCatchUpAdvancementRepair.ok && postCatchUpAdvancementRepair.error) warnings.push(`Post-catch-up advancement repair pending: ${postCatchUpAdvancementRepair.error}.`);
+        }
       }
     }
 

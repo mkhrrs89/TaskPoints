@@ -1598,6 +1598,63 @@ test('sync preserves late Play-In Round of 32 catch-up results', () => {
   assert.notEqual(`${series.winsA}-${series.winsB}`, '0-0');
 });
 
+test('late Play-In Round of 32 catch-up does not let a reused game number block an earlier missed date', () => {
+  const state = buildLateBoundRoundOf32State();
+  const series = state.currentSeason.series.season_1_june_2026_round_of_32_1;
+  const existingLateGame = {
+    id: 'late-generated-r32-1-2026-06-05',
+    matchupId: 'late-generated-r32-1-2026-06-05',
+    seasonId: state.currentSeason.id,
+    seriesId: series.id,
+    seasonSeriesId: series.id,
+    roundId: 'round_of_32',
+    dateKey: '2026-06-05',
+    matchupType: 'tournament',
+    gameNumber: 1,
+    seriesGameNumber: 1,
+    game: 1,
+    playerAId: series.playerAId,
+    playerBId: series.playerBId,
+    winnerId: series.playerAId,
+    loserId: series.playerBId,
+    playerAScore: 42,
+    playerBScore: 31,
+    source: 'matchup'
+  };
+  const currentSeason = {
+    ...state.currentSeason,
+    series: {
+      ...state.currentSeason.series,
+      [series.id]: { ...series, winsA: 1, winsB: 0, gameResults: [existingLateGame] }
+    }
+  };
+
+  const repair = core.backfillLateBoundSeasonSeriesResults({ ...state, currentSeason }, currentSeason, { nowISO: '2026-06-06T12:00:00.000Z' });
+  const repaired = repair.updatedSeason.series[series.id];
+
+  assert.deepEqual(repaired.gameResults.map((result) => result.dateKey), ['2026-06-04', '2026-06-05']);
+  assert.deepEqual(repaired.gameResults.map((result) => result.gameNumber), [1, 2]);
+  assert.deepEqual(repaired.gameResults.map((result) => result.seriesGameNumber), [1, 2]);
+  assert.deepEqual(repaired.gameResults.map((result) => result.game), [1, 2]);
+  assert.equal(repaired.gameResults[0].source, 'admin_catch_up');
+  assert.equal(repaired.gameResults[1].id, existingLateGame.id);
+  assert.equal(repaired.gameResults[1].source, 'matchup');
+});
+
+test('sync advances a Round of 32 winner completed by late Play-In catch-up in the same pass', () => {
+  const state = buildLateBoundRoundOf32State();
+  const series = state.currentSeason.series.season_1_june_2026_round_of_32_1;
+  const synced = core.syncCurrentSeasonSeriesFromRecordedResults(state, { nowISO: '2026-06-08T12:00:00.000Z' });
+  const repaired = synced.updatedSeason.series[series.id];
+  const sweet16 = synced.updatedSeason.series.season_1_june_2026_sweet_16_1;
+
+  assert.equal(repaired.status, 'complete');
+  assert.equal(repaired.winnerId, series.playerAId);
+  assert.equal(repaired.winsA, 3);
+  assert.equal(sweet16.playerAId, series.playerAId);
+  assert.equal(sweet16.playerAName, series.playerAName);
+});
+
 test('clearing a manual season result removes admin_manual game results', () => {
   const state = buildJuneSeason();
   const series = state.currentSeason.series.season_1_june_2026_round_of_32_1;
