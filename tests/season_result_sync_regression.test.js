@@ -246,3 +246,105 @@ test('audit-safe result summary matches core counting and does not double-count 
   assert.equal(summary2.winsB, 1);
   assert.equal(summary2.gameResults.length, 3);
 });
+
+test('same-day true admin manual override is preserved while same-day live matchup is excluded', () => {
+  const series = makeRoundSeries({
+    id: 'same_day_admin_override',
+    seriesIndex: 3,
+    playerASeed: 10,
+    playerBSeed: 23,
+    playerAId: 'adminA',
+    playerBId: 'adminB',
+    gameResults: [result({
+      id: 'same_day_admin_manual_g1',
+      seriesId: 'same_day_admin_override',
+      dateKey: '2026-06-06',
+      gameNumber: 1,
+      playerAId: 'adminA',
+      playerBId: 'adminB',
+      winnerId: 'adminA',
+      source: 'admin_manual',
+      extra: { manualResult: true }
+    })]
+  });
+  const state = {
+    currentSeason: { id: 'season_1_june_2026', monthKey: '2026-06', status: 'active', series: { [series.id]: series } },
+    matchups: [result({
+      id: 'same_day_live_matchup_g1',
+      seriesId: series.id,
+      dateKey: '2026-06-06',
+      gameNumber: 1,
+      playerAId: 'adminA',
+      playerBId: 'adminB',
+      winnerId: 'adminB'
+    })]
+  };
+
+  const synced = core.syncCurrentSeasonSeriesFromRecordedResults(state, { nowISO: '2026-06-06T22:08:00.000Z' });
+  const repaired = synced.state.currentSeason.series[series.id];
+
+  assert.equal(repaired.winsA, 1);
+  assert.equal(repaired.winsB, 0);
+  assert.equal(repaired.gameResults.length, 1);
+  assert.equal(repaired.gameResults[0].winnerId, 'adminA');
+  assert.equal(repaired.gameResults[0].source, 'admin_manual');
+});
+
+test('same-day synthetic repair result does not bypass normal current-day guard', () => {
+  const series = makeRoundSeries({
+    id: 'same_day_synthetic_guard',
+    seriesIndex: 4,
+    playerASeed: 11,
+    playerBSeed: 22,
+    playerAId: 'synA',
+    playerBId: 'synB',
+    gameResults: [result({
+      id: 'same_day_synthetic_g1',
+      seriesId: 'same_day_synthetic_guard',
+      dateKey: '2026-06-06',
+      gameNumber: 1,
+      playerAId: 'synA',
+      playerBId: 'synB',
+      winnerId: 'synA',
+      source: 'admin_catch_up',
+      extra: { manualResult: true, catchUpResult: true, lateBoundSeriesCatchUp: true, playInProtectedSlotRepair: true }
+    })]
+  });
+  const state = {
+    currentSeason: { id: 'season_1_june_2026', monthKey: '2026-06', status: 'active', series: { [series.id]: series } },
+    matchups: []
+  };
+
+  const synced = core.syncCurrentSeasonSeriesFromRecordedResults(state, { nowISO: '2026-06-06T22:08:00.000Z' });
+  const repaired = synced.state.currentSeason.series[series.id];
+
+  assert.equal(repaired.winsA, 0);
+  assert.equal(repaired.winsB, 0);
+  assert.equal(repaired.gameResults.length, 0);
+});
+
+test('forced current-day sync includes same-day non-manual matchup results', () => {
+  const series = makeRoundSeries({ id: 'forced_current_day', seriesIndex: 5, playerASeed: 12, playerBSeed: 21, playerAId: 'forceA', playerBId: 'forceB' });
+  const state = {
+    currentSeason: { id: 'season_1_june_2026', monthKey: '2026-06', status: 'active', series: { [series.id]: series } },
+    matchups: [result({
+      id: 'forced_current_day_live_g1',
+      seriesId: series.id,
+      dateKey: '2026-06-06',
+      gameNumber: 1,
+      playerAId: 'forceA',
+      playerBId: 'forceB',
+      winnerId: 'forceB'
+    })]
+  };
+
+  const normal = core.syncCurrentSeasonSeriesFromRecordedResults(state, { nowISO: '2026-06-06T22:08:00.000Z' });
+  assert.equal(normal.state.currentSeason.series[series.id].winsB, 0);
+
+  const forced = core.syncCurrentSeasonSeriesFromRecordedResults(state, { nowISO: '2026-06-06T22:08:00.000Z', includeCurrentDayResults: true });
+  const repaired = forced.state.currentSeason.series[series.id];
+  assert.equal(repaired.winsA, 0);
+  assert.equal(repaired.winsB, 1);
+  assert.equal(repaired.gameResults.length, 1);
+  assert.equal(repaired.gameResults[0].winnerId, 'forceB');
+});

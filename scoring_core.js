@@ -1556,6 +1556,7 @@
     if (isSyntheticSeasonRepairResult(result)) return false;
     const source = String(result?.source || '').toLowerCase();
     return result?.manualResult === true
+      || result?.adminManual === true
       || source === 'admin_manual'
       || source === 'admin'
       || source === 'manual';
@@ -2582,6 +2583,7 @@
       playerBScore: winner.playerBScore,
       source: raw.source || source || 'matchup',
       manualResult: raw.manualResult === true,
+      adminManual: raw.adminManual === true,
       catchUpResult: raw.catchUpResult === true,
       lateBoundSeriesCatchUp: raw.lateBoundSeriesCatchUp === true,
       matchupType: raw.matchupType || 'tournament',
@@ -2602,7 +2604,8 @@
       if (!isValidSeasonResultDateForSeries(season, series, raw, options)) return;
       const normalized = normalizeSeasonResultRecord(raw, series, source, index);
       if (!normalized) return;
-      if (!isRecordedSeasonResultBeforeToday(normalized, options)) return;
+      const isManualOverride = isTrueManualSeasonOverrideResult(normalized);
+      if (!isManualOverride && !isRecordedSeasonResultBeforeToday(normalized, options)) return;
       if (!includeRegardlessOfDate && options.dateKey && normalized.dateKey && normalized.dateKey !== options.dateKey) return;
       if (!candidatesBySeries.has(seriesId)) candidatesBySeries.set(seriesId, []);
       candidatesBySeries.get(seriesId).push(normalized);
