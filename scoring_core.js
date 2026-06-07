@@ -1537,15 +1537,33 @@
     return candidate && candidate <= round.endDate ? candidate : round.endDate;
   }
 
-  function isAdminManualSeasonGameResult(result) {
+  function isSyntheticSeasonRepairResult(result) {
+    if (!result) return false;
+    const source = String(result?.source || '').toLowerCase();
+    const idText = [result?.id, result?.matchupId, result?.gameId]
+      .map((value) => String(value || '').toLowerCase())
+      .join(' ');
+    return result?.playInProtectedSlotRepair === true
+      || result?.lateBoundSeriesCatchUp === true
+      || result?.catchUpResult === true
+      || source === 'admin_catch_up'
+      || idText.includes('_protected_slot_repair_game_')
+      || idText.includes('_catch_up_');
+  }
+
+  function isTrueManualSeasonOverrideResult(result) {
+    if (!result) return false;
+    if (isSyntheticSeasonRepairResult(result)) return false;
     const source = String(result?.source || '').toLowerCase();
     return result?.manualResult === true
-      || result?.catchUpResult === true
-      || result?.lateBoundSeriesCatchUp === true
+      || result?.adminManual === true
       || source === 'admin_manual'
-      || source === 'admin_catch_up'
       || source === 'admin'
       || source === 'manual';
+  }
+
+  function isAdminManualSeasonGameResult(result) {
+    return isTrueManualSeasonOverrideResult(result) || isSyntheticSeasonRepairResult(result);
   }
 
   function reconcileManualSeasonSeriesGameResults(series, patch = {}, options = {}) {
@@ -1769,7 +1787,12 @@
       const fixed = normalizeSeasonState(season);
       if (!fixed) return null;
       let repaired = normalizeSeasonState({ ...fixed, series: cleanSeriesMap(fixed.series) });
-      const upstreamPlayInRepair = repairPlayInSeriesFromProtectedRoundOf32Slots(repaired, options);
+      const repairState = normalizeState({ ...normalized, currentSeason: repaired });
+      const upstreamPlayInRepair = repairPlayInSeriesFromProtectedRoundOf32Slots(repaired, {
+        ...options,
+        state: repairState,
+        currentState: repairState
+      });
       if (upstreamPlayInRepair.season && (upstreamPlayInRepair.ok || upstreamPlayInRepair.changed)) repaired = upstreamPlayInRepair.season;
       const playInRepair = repairPlayInAdvancementForSeason(repaired, options);
       if (playInRepair.season) repaired = playInRepair.season;
@@ -2506,6 +2529,38 @@
     return `fallback:${seriesId}:${fallbackIndex}`;
   }
 
+
+  function getSeasonResultConflictDedupeKey(record, seriesId, fallbackIndex = 0) {
+    const date = getRecordedResultDateKey(record) || record?.dateKey || '';
+    const gameNumber = record?.gameNumber || record?.seriesGameNumber || record?.game || '';
+    if (date && gameNumber) return `slot:${seriesId}:${date}:${gameNumber}`;
+    if (date && record?.playerAId && record?.playerBId) return `pairdate:${seriesId}:${date}:${getPairingKey(record.playerAId, record.playerBId)}`;
+    const directId = record?.matchupId || record?.gameId || record?.id || record?.completionId;
+    if (directId) return `id:${directId}`;
+    return getSeasonResultDedupeKey(record, seriesId, fallbackIndex);
+  }
+
+  function getSeasonResultPriority(result) {
+    if (isTrueManualSeasonOverrideResult(result)) return 3;
+    if (isSyntheticSeasonRepairResult(result)) return 1;
+    return 2;
+  }
+
+  function getSeasonResultActiveTodayKey(options = {}) {
+    const explicit = String(options.todayDateKey || '').trim();
+    if (explicit) return explicit;
+    return dateKey(options.nowISO || new Date());
+  }
+
+  function isRecordedSeasonResultBeforeToday(result, options = {}) {
+    if (options.includeCurrentDayResults === true) return true;
+    const resultDate = getRecordedResultDateKey(result) || result?.dateKey || '';
+    if (!resultDate) return true;
+    const todayDateKey = getSeasonResultActiveTodayKey(options);
+    if (!todayDateKey || todayDateKey === 'invalid') return true;
+    return String(resultDate) < String(todayDateKey);
+  }
+
   function normalizeSeasonResultRecord(raw, series, source, fallbackIndex = 0) {
     if (!raw || !series) return null;
     const seriesId = getRecordedSeriesId(raw) || series.id || '';
@@ -2528,6 +2583,7 @@
       playerBScore: winner.playerBScore,
       source: raw.source || source || 'matchup',
       manualResult: raw.manualResult === true,
+      adminManual: raw.adminManual === true,
       catchUpResult: raw.catchUpResult === true,
       lateBoundSeriesCatchUp: raw.lateBoundSeriesCatchUp === true,
       matchupType: raw.matchupType || 'tournament',
@@ -2548,6 +2604,8 @@
       if (!isValidSeasonResultDateForSeries(season, series, raw, options)) return;
       const normalized = normalizeSeasonResultRecord(raw, series, source, index);
       if (!normalized) return;
+      const isManualOverride = isTrueManualSeasonOverrideResult(normalized);
+      if (!isManualOverride && !isRecordedSeasonResultBeforeToday(normalized, options)) return;
       if (!includeRegardlessOfDate && options.dateKey && normalized.dateKey && normalized.dateKey !== options.dateKey) return;
       if (!candidatesBySeries.has(seriesId)) candidatesBySeries.set(seriesId, []);
       candidatesBySeries.get(seriesId).push(normalized);
@@ -2619,26 +2677,38 @@
 
   function rebuildSeasonSeriesFromRecordedResults(series, rawResults, options = {}) {
     const byKey = new Map();
-    const keyByLogical = new Map();
+    const keyByConflict = new Map();
     rawResults.forEach((result, index) => {
       const key = result._dedupeKey || getSeasonResultDedupeKey(result, series.id, index);
-      const logicalKey = getSeasonResultLogicalDedupeKey(result, series.id);
-      const existingKey = (logicalKey && keyByLogical.get(logicalKey)) || key;
+      const conflictKey = getSeasonResultConflictDedupeKey(result, series.id, index);
+      const existingKey = (conflictKey && keyByConflict.get(conflictKey)) || key;
       const existing = byKey.get(existingKey);
+      const resultPriority = getSeasonResultPriority(result);
+      const existingPriority = getSeasonResultPriority(existing);
       const resultSource = String(result._containerSource || result.source || '');
       const existingSource = String(existing?._containerSource || existing?.source || '');
-      const resultIsManual = isAdminManualSeasonGameResult(result);
-      const existingIsManual = isAdminManualSeasonGameResult(existing);
-      if (existing && resultSource.includes('series.gameResults') && !existingSource.includes('series.gameResults') && !resultIsManual) return;
-      if (existing && existingIsManual && !resultIsManual) return;
-      if (existing && existingKey !== key) byKey.delete(existingKey);
+
+      if (existing) {
+        if (existingPriority > resultPriority) return;
+        if (existingPriority === resultPriority) {
+          const resultIsPersistedSeries = resultSource.includes('series.gameResults');
+          const existingIsPersistedSeries = existingSource.includes('series.gameResults');
+          const resultIsRealMatchup = resultPriority === 2 && !resultIsPersistedSeries;
+          const existingIsRealMatchup = existingPriority === 2 && !existingIsPersistedSeries;
+          if (existingIsRealMatchup && !resultIsRealMatchup) return;
+          if (existingIsPersistedSeries && !resultIsPersistedSeries && resultPriority !== 2) return;
+        }
+        if (existingKey !== key) byKey.delete(existingKey);
+      }
+
       byKey.set(key, result);
-      if (logicalKey) keyByLogical.set(logicalKey, key);
+      if (conflictKey) keyByConflict.set(conflictKey, key);
     });
+
     const allResults = Array.from(byKey.values());
-    const manualSlots = new Set(allResults.filter(isAdminManualSeasonGameResult).map((result) => `${result.dateKey || ''}:${result.gameNumber || result.seriesGameNumber || result.game || ''}`).filter((key) => key !== ':'));
-    const manualDates = new Set(allResults.filter(isAdminManualSeasonGameResult).map((result) => result.dateKey || '').filter(Boolean));
-    const resultsForOrdering = allResults.filter((result) => isAdminManualSeasonGameResult(result)
+    const manualSlots = new Set(allResults.filter(isTrueManualSeasonOverrideResult).map((result) => `${result.dateKey || ''}:${result.gameNumber || result.seriesGameNumber || result.game || ''}`).filter((key) => key !== ':'));
+    const manualDates = new Set(allResults.filter(isTrueManualSeasonOverrideResult).map((result) => result.dateKey || '').filter(Boolean));
+    const resultsForOrdering = allResults.filter((result) => isTrueManualSeasonOverrideResult(result)
       || (!manualSlots.has(`${result.dateKey || ''}:${result.gameNumber || result.seriesGameNumber || result.game || ''}`) && !(result.dateKey && manualDates.has(result.dateKey))));
     const orderedGameResults = resultsForOrdering.sort((a, b) => {
       const aGame = Number(a.gameNumber || a.seriesGameNumber || a.game);
@@ -2646,8 +2716,8 @@
       if (Number.isFinite(aGame) && Number.isFinite(bGame) && aGame !== bGame) return aGame - bGame;
       const dateCompare = String(a.dateKey || a._sortKey || '').localeCompare(String(b.dateKey || b._sortKey || ''));
       if (dateCompare !== 0) return dateCompare;
-      if (isAdminManualSeasonGameResult(a) && !isAdminManualSeasonGameResult(b)) return -1;
-      if (!isAdminManualSeasonGameResult(a) && isAdminManualSeasonGameResult(b)) return 1;
+      const priorityCompare = getSeasonResultPriority(b) - getSeasonResultPriority(a);
+      if (priorityCompare !== 0) return priorityCompare;
       return 0;
     });
     const winsNeeded = getSeasonSeriesWinsNeeded(series);
@@ -2690,6 +2760,22 @@
       gameResults: gameResults.map(({ _dedupeKey, _sortKey, _containerSource, ...result }) => result),
       completedAtISO: winnerId ? (latest || series.completedAtISO || seasonNowISO(options)) : '',
       updatedAtISO: seasonNowISO(options)
+    };
+  }
+
+  function getSeasonSeriesRecordedResultSummary(state, season, series, options = {}) {
+    const normalizedSeason = normalizeSeasonState(season);
+    if (!normalizedSeason || !series?.id) return { winsA: 0, winsB: 0, sources: [], gameResults: [] };
+    const seriesForRebuild = normalizedSeason.series?.[series.id] || series;
+    const candidates = collectSeasonResultCandidates({ ...(state || {}), currentSeason: normalizedSeason }, normalizedSeason, options);
+    const rawResults = candidates.get(series.id) || [];
+    const rebuilt = rebuildSeasonSeriesFromRecordedResults(seriesForRebuild, rawResults, options);
+    const gameResults = Array.isArray(rebuilt.gameResults) ? rebuilt.gameResults : [];
+    return {
+      winsA: Number(rebuilt.winsA) || 0,
+      winsB: Number(rebuilt.winsB) || 0,
+      sources: gameResults.map((result) => result.matchupId || result.id || result.dateKey || result.source || 'recorded-result'),
+      gameResults
     };
   }
 
@@ -6406,6 +6492,7 @@ return Number(cappedScore.toFixed(1));
     generateRandomNonRepeatPairs,
     syncSeasonResultsFromDailyMatchups,
     syncCurrentSeasonSeriesFromRecordedResults,
+    getSeasonSeriesRecordedResultSummary,
     cleanupOpponentDripSchedules,
     getOpponentDripScheduleCleanupSummary,
     loadAppState,
