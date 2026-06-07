@@ -739,7 +739,19 @@
         habitTagColors: normalizeHabitTagColors(src.habitTagColors),
         scoringSettings: (window.TaskPointsCore?.normalizeScoringSettings)
           ? TaskPointsCore.normalizeScoringSettings(src.scoringSettings || {})
-          : (src.scoringSettings || {})
+          : (src.scoringSettings || {}),
+        projects: Array.isArray(src.projects) ? src.projects : [],
+        opponentDripSchedules: Array.isArray(src.opponentDripSchedules) ? src.opponentDripSchedules : [],
+        liveDiffHistory: src.liveDiffHistory && typeof src.liveDiffHistory === "object" && !Array.isArray(src.liveDiffHistory) ? src.liveDiffHistory : {},
+        liveDiffSnapshots: src.liveDiffSnapshots && typeof src.liveDiffSnapshots === "object" && !Array.isArray(src.liveDiffSnapshots) ? src.liveDiffSnapshots : {},
+        playerBadges: src.playerBadges && typeof src.playerBadges === "object" && !Array.isArray(src.playerBadges) ? src.playerBadges : {},
+        currentSeason: window.TaskPointsCore?.normalizeCurrentSeason
+          ? TaskPointsCore.normalizeCurrentSeason(src.currentSeason)
+          : (src.currentSeason && typeof src.currentSeason === "object" ? src.currentSeason : null),
+        latestSeasonId: typeof src.latestSeasonId === "string" ? src.latestSeasonId : "",
+        seasonHistory: window.TaskPointsCore?.normalizeSeasonHistory
+          ? TaskPointsCore.normalizeSeasonHistory(src.seasonHistory)
+          : (Array.isArray(src.seasonHistory) ? src.seasonHistory : [])
       };
     }
 
@@ -1011,8 +1023,14 @@ ${b}`;
         throw new Error("Root object missing tasks/completions arrays");
       }
 
-      const normalized = normalizeSettingsState(root);
       const currentState = loadSettingsState();
+      const normalized = window.TaskPointsCore?.normalizeImportedFullBackupState
+        ? TaskPointsCore.normalizeImportedFullBackupState(root, currentState)
+        : normalizeSettingsState({
+            ...(root && typeof root === "object" ? root : {}),
+            reminders: Array.isArray(root?.reminders) ? root.reminders : currentState.reminders,
+            projects: Array.isArray(root?.projects) ? root.projects : currentState.projects
+          });
       const currentWeightCount = Array.isArray(currentState.weightHistory) ? currentState.weightHistory.length : 0;
       const currentReminderCount = Array.isArray(currentState.reminders) ? currentState.reminders.length : 0;
       const currentVo2Count = Array.isArray(currentState.vo2MaxHistory) ? currentState.vo2MaxHistory.length : 0;

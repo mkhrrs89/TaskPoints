@@ -991,7 +991,13 @@ youSecondaryColor: normalizeHexColorFallback(src.youSecondaryColor) || '#254c52'
 projects: Array.isArray(src.projects) ? src.projects : [],
 notes: typeof src.notes === 'string' ? src.notes : '',
 habitTagColors: normalizeHabitTagColorsFallback(src.habitTagColors),
-scoringSettings: (src.scoringSettings && typeof src.scoringSettings === 'object') ? src.scoringSettings : {}
+scoringSettings: (src.scoringSettings && typeof src.scoringSettings === 'object') ? src.scoringSettings : {},
+playerBadges: (src.playerBadges && typeof src.playerBadges === 'object' && !Array.isArray(src.playerBadges)) ? src.playerBadges : {},
+liveDiffHistory: (src.liveDiffHistory && typeof src.liveDiffHistory === 'object' && !Array.isArray(src.liveDiffHistory)) ? src.liveDiffHistory : {},
+liveDiffSnapshots: (src.liveDiffSnapshots && typeof src.liveDiffSnapshots === 'object' && !Array.isArray(src.liveDiffSnapshots)) ? src.liveDiffSnapshots : {},
+currentSeason: window.TaskPointsCore?.normalizeCurrentSeason ? TaskPointsCore.normalizeCurrentSeason(src.currentSeason) : ((src.currentSeason && typeof src.currentSeason === 'object') ? src.currentSeason : null),
+latestSeasonId: typeof src.latestSeasonId === 'string' ? src.latestSeasonId : '',
+seasonHistory: window.TaskPointsCore?.normalizeSeasonHistory ? TaskPointsCore.normalizeSeasonHistory(src.seasonHistory) : (Array.isArray(src.seasonHistory) ? src.seasonHistory : [])
   };
 };
 
@@ -2243,28 +2249,14 @@ async function exportBackupWithImagesFallback() {
 }
 
 async function applyImportedStateFallback(root) {
-  const currentState = loadRawStateFallback();
-  let normalized = normalizeStateGlobal({
-    tasks: Array.isArray(root?.tasks) ? root.tasks : [],
-    reminders: Array.isArray(root?.reminders) ? root.reminders : (Array.isArray(currentState?.reminders) ? currentState.reminders : []),
-    completions: Array.isArray(root?.completions) ? root.completions : [],
-    players: Array.isArray(root?.players) ? root.players : [],
-    habits: Array.isArray(root?.habits) ? root.habits : [],
-    flexActions: Array.isArray(root?.flexActions) ? root.flexActions : [],
-    gameHistory: Array.isArray(root?.gameHistory) ? root.gameHistory : [],
-    matchups: Array.isArray(root?.matchups) ? root.matchups : [],
-    schedule: Array.isArray(root?.schedule) ? root.schedule : [],
-    opponentDripSchedules: Array.isArray(root?.opponentDripSchedules) ? root.opponentDripSchedules : [],
-workHistory: Array.isArray(root?.workHistory) ? root.workHistory : [],
-youImageId: typeof root?.youImageId === 'string' ? root.youImageId : '',
-youName: typeof root?.youName === 'string' ? root.youName : '',
-youPrimaryColor: normalizeHexColorFallback(root?.youPrimaryColor) || '#1a383b',
-youSecondaryColor: normalizeHexColorFallback(root?.youSecondaryColor) || '#254c52',
-projects: Array.isArray(root?.projects) ? root.projects : loadProjectsFromStorageFallback(),
-notes: typeof root?.notes === 'string' ? root.notes : '',
-habitTagColors: root?.habitTagColors ?? {},
-scoringSettings: root?.scoringSettings ?? {}
-  });
+  const currentState = { ...loadRawStateFallback(), projects: loadProjectsFromStorageFallback() };
+  let normalized = window.TaskPointsCore?.normalizeImportedFullBackupState
+    ? TaskPointsCore.normalizeImportedFullBackupState(root, currentState)
+    : normalizeStateGlobal({
+        ...(root && typeof root === 'object' ? root : {}),
+        reminders: Array.isArray(root?.reminders) ? root.reminders : (Array.isArray(currentState?.reminders) ? currentState.reminders : []),
+        projects: Array.isArray(root?.projects) ? root.projects : currentState.projects
+      });
 
 
   const migrate = window.TaskPointsCore?.migrateLegacyImages || migrateLegacyImagesFromStateFallback;
