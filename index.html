@@ -3243,6 +3243,7 @@ function buildDailySchedule(dateKeyStr, participantIds, signature){
       if (seasonSlate.updatedSeason) state.currentSeason = seasonSlate.updatedSeason;
       return {
         date: dateKeyStr,
+        dateKey: dateKeyStr,
         matchups: seasonSlate.allMatchups,
         byeIds: [],
         participantSignature: signature,
@@ -3273,6 +3274,7 @@ function buildDailySchedule(dateKeyStr, participantIds, signature){
 
   return {
     date: dateKeyStr,
+    dateKey: dateKeyStr,
     matchups,
     byeIds,
     participantSignature: signature
@@ -3314,8 +3316,12 @@ function ensureUpcomingSchedule(days = 7){
   });
 
   function buildTodayFromStoredMatchups(existing, pairs) {
+    const seasonControlApplies = window.TaskPointsCore?.shouldUseSeasonMatchupControl && TaskPointsCore.shouldUseSeasonMatchupControl(state, todayKey);
     const safePairs = pairs
-      .map((m) => ({ ...m, playerAId: m.playerAId, playerBId: m.playerBId }))
+      .map((m) => ({ ...m, playerAId: m.playerAId, playerBId: m.playerBId, dateKey: m.dateKey || todayKey }))
+      .map((m) => seasonControlApplies && window.TaskPointsCore?.sanitizeSeasonMatchupMetadataForDate
+        ? TaskPointsCore.sanitizeSeasonMatchupMetadataForDate(state, m, todayKey)
+        : m)
       .filter((m) => m.playerAId && m.playerBId);
 
     const used = new Set();
@@ -3330,9 +3336,12 @@ function ensureUpcomingSchedule(days = 7){
 
     return {
       date: todayKey,
+      dateKey: todayKey,
       matchups: safePairs,
       byeIds: preservedByeIds,
-      participantSignature: signature
+      participantSignature: signature,
+      seasonMatchupControl: seasonControlApplies || undefined,
+      seasonScheduleSignature: seasonControlApplies && window.TaskPointsCore?.getSeasonScheduleSignature ? TaskPointsCore.getSeasonScheduleSignature(state, todayKey) : undefined
     };
   }
 
@@ -4741,13 +4750,23 @@ function inferHomeSeasonSeriesFromPlayerPair(stateArg, matchup, dateKeyStr) {
 }
 
 function getHomeSeasonSeriesForMatchup(stateArg, matchup, dateKeyStr) {
+  if (window.TaskPointsCore?.resolveHomeSeasonSeriesForMatchup) {
+    return TaskPointsCore.resolveHomeSeasonSeriesForMatchup(stateArg, matchup, dateKeyStr);
+  }
+
   const season = stateArg?.currentSeason;
   const seriesId = matchup?.seasonSeriesId || matchup?.seriesId || matchup?.seasonSeriesID || matchup?.seriesID;
   if (!season) return { series: null, ambiguous: true };
 
+  if (String(matchup?.matchupType || '').toLowerCase() === 'exhibition') {
+    return { series: null, ambiguous: false };
+  }
+
   if (seriesId) {
     const directSeries = season.series?.[seriesId] || null;
-    return { series: directSeries, ambiguous: !directSeries };
+    if (!directSeries) return { series: null, ambiguous: true };
+    if (!isHomeSeasonSeriesCurrentForMatchup(directSeries, dateKeyStr)) return { series: null, ambiguous: false };
+    return { series: directSeries, ambiguous: false };
   }
 
   return inferHomeSeasonSeriesFromPlayerPair(stateArg, matchup, dateKeyStr);

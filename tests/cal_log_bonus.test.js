@@ -653,7 +653,7 @@ test('schedule rebuild code preserves full stored matchup metadata instead of st
   const toolbarJs = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'toolbar.js'), 'utf8');
 
   assert.match(indexHtml, /existingMatchupsByDate\.get\(key\)\.push\(\{ \.\.\.m \}\)/);
-  assert.match(indexHtml, /\.map\(\(m\) => \(\{ \.\.\.m, playerAId: m\.playerAId, playerBId: m\.playerBId \}\)\)/);
+  assert.match(indexHtml, /\.map\(\(m\) => \(\{ \.\.\.m, playerAId: m\.playerAId, playerBId: m\.playerBId/);
   assert.match(gameHtml, /existingMatchupsByDate\.get\(key\)\.push\(\{ \.\.\.m \}\)/);
   assert.match(gameHtml, /todaysStoredMatchups\.map\(\(m\) => \(\{ \.\.\.m, playerAId: m\.playerAId, playerBId: m\.playerBId \}\)\)/);
   assert.match(toolbarJs, /existingMatchupsByDate\.get\(key\)\.push\(\{ \.\.\.m, playerAId: aId, playerBId: bId \}\)/);
@@ -822,7 +822,7 @@ test('Season repair overwrites stale series identifier variants after inference'
   assert.equal(synced.updatedSeason.series[playIn.id].winsA, 1);
 });
 
-test('Season sync allows explicit valid Season series ids on exhibition-typed records', () => {
+test('Season sync does not count explicit exhibition records toward Season series', () => {
   const season = makeLockedSeasonWithControl(true);
   const playIn = Object.values(season.series).find((item) => item.roundId === 'play_in' && item.seriesIndex === 1);
   const state = core.normalizeState({
@@ -841,10 +841,8 @@ test('Season sync allows explicit valid Season series ids on exhibition-typed re
   });
 
   const synced = core.syncCurrentSeasonSeriesFromRecordedResults(state, { nowISO: '2026-06-05T12:00:00.000Z' });
-  assert.equal(synced.changed, true);
-  assert.equal(synced.updatedSeason.series[playIn.id].gameResults.length, 1);
-  assert.equal(synced.updatedSeason.series[playIn.id].winsA, 1);
-  assert.equal(synced.state.matchups[0].seasonSeriesId, playIn.id);
+  assert.equal(synced.updatedSeason.series[playIn.id].gameResults.length, 0);
+  assert.equal(synced.updatedSeason.series[playIn.id].winsA, 0);
   assert.equal(synced.state.matchups[0].matchupType, 'exhibition');
 });
 

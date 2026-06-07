@@ -1143,6 +1143,85 @@
       .every((series) => tournamentSeriesIds.has(series.id));
   }
 
+  function isSeasonSeriesCurrentForMatchupDate(season, series, dateKeyStr) {
+    if (!season || !series || !dateKeyStr) return false;
+    if (!series.playerAId || !series.playerBId) return false;
+    if (series.status !== 'active' || isSeasonSeriesComplete(series)) return false;
+    const prepared = prepareSeasonForDailySlate(season, dateKeyStr);
+    const slateSeason = prepared.season || season;
+    return getActiveSeasonSeriesForDate(slateSeason, dateKeyStr).some((activeSeries) => activeSeries?.id === series.id);
+  }
+
+  function isTournamentSeasonMatchupType(matchup) {
+    const type = String(matchup?.matchupType || '').toLowerCase();
+    return !type || type === 'tournament' || type === 'season';
+  }
+
+  function resolveHomeSeasonSeriesForMatchup(state, matchup, dateKeyStr) {
+    const normalized = normalizeState(state || {});
+    const season = normalized.currentSeason;
+    if (!season) return { series: null, ambiguous: true, isExhibition: false };
+
+    const type = String(matchup?.matchupType || '').toLowerCase();
+    if (type === 'exhibition') return { series: null, ambiguous: false, isExhibition: true };
+
+    const pairKey = getPairingKey(matchup?.playerAId, matchup?.playerBId);
+    const seriesId = getRecordedSeriesId(matchup);
+    if (seriesId) {
+      const directSeries = season.series?.[seriesId] || null;
+      const validDirect = Boolean(
+        directSeries
+        && isTournamentSeasonMatchupType(matchup)
+        && isSeasonSeriesCurrentForMatchupDate(season, directSeries, dateKeyStr)
+        && pairKey === getPairingKey(directSeries.playerAId, directSeries.playerBId)
+      );
+      return { series: validDirect ? directSeries : null, ambiguous: !directSeries, isExhibition: !validDirect && Boolean(directSeries) };
+    }
+
+    if (!pairKey) return { series: null, ambiguous: true, isExhibition: false };
+    const matches = Object.values(season.series || {}).filter((series) => (
+      isSeasonSeriesCurrentForMatchupDate(season, series, dateKeyStr)
+      && pairKey === getPairingKey(series.playerAId, series.playerBId)
+    ));
+    if (matches.length === 1) return { series: matches[0], ambiguous: false, isExhibition: false };
+    if (matches.length > 1) return { series: null, ambiguous: true, isExhibition: false };
+    return { series: null, ambiguous: false, isExhibition: true };
+  }
+
+  function sanitizeSeasonMatchupMetadataForDate(state, matchup, dateKeyStr) {
+    if (!matchup || typeof matchup !== 'object') return matchup;
+    const type = String(matchup.matchupType || '').toLowerCase();
+    const hasSeasonEvidence = Boolean(
+      getRecordedSeriesId(matchup)
+      || matchup.roundId
+      || matchup.roundName
+      || matchup.seriesGameNumber
+      || matchup.bestOf
+      || matchup.winsNeeded
+      || matchup.seasonMatchupLabel
+      || type === 'tournament'
+      || type === 'season'
+    );
+    if (!hasSeasonEvidence && type !== 'exhibition') return matchup;
+
+    const resolved = resolveHomeSeasonSeriesForMatchup(state, matchup, dateKeyStr);
+    if (resolved.series && type !== 'exhibition') return matchup;
+
+    const sanitized = { ...matchup };
+    delete sanitized.seriesId;
+    delete sanitized.seasonSeriesId;
+    delete sanitized.seasonSeriesID;
+    delete sanitized.seriesID;
+    delete sanitized.roundId;
+    delete sanitized.roundName;
+    delete sanitized.seriesGameNumber;
+    delete sanitized.bestOf;
+    delete sanitized.winsNeeded;
+    sanitized.matchupType = 'exhibition';
+    sanitized.seasonMatchupLabel = 'Exhibition';
+    return sanitized;
+  }
+
 
   function shouldRegenerateScheduleDayForSeasonControl(state, dateKeyStr, scheduleDay) {
     const normalized = normalizeState(state || {});
@@ -1841,23 +1920,43 @@
     const start = season?.startDate || '2026-06-01';
     const end = season?.endDate || '2026-06-30';
     const history = new Map();
-    (normalized.matchups || []).forEach((matchup) => {
-      const key = matchupDateKey(matchup);
+
+    const addHistory = (playerAId, playerBId, key, source = 'matchup', id = '') => {
       if (!key || key < start || key > end || (beforeDateKey && key >= beforeDateKey)) return;
-      if (!matchup?.playerAId || !matchup?.playerBId) return;
-      const pairingKey = getPairingKey(matchup.playerAId, matchup.playerBId);
+      if (!playerAId || !playerBId) return;
+      const pairingKey = getPairingKey(playerAId, playerBId);
       const existing = history.get(pairingKey);
+      const [normalizedA, normalizedB] = normalizePairIds(playerAId, playerBId);
+      const isTournament = source === 'tournament' || source === 'season';
       const entry = {
         key: pairingKey,
-        playerAId: normalizePairIds(matchup.playerAId, matchup.playerBId)[0],
-        playerBId: normalizePairIds(matchup.playerAId, matchup.playerBId)[1],
+        playerAId: normalizedA,
+        playerBId: normalizedB,
         firstDateKey: existing?.firstDateKey && existing.firstDateKey < key ? existing.firstDateKey : key,
         lastDateKey: existing?.lastDateKey && existing.lastDateKey > key ? existing.lastDateKey : key,
+        tournamentLastDateKey: isTournament && (!existing?.tournamentLastDateKey || existing.tournamentLastDateKey < key) ? key : (existing?.tournamentLastDateKey || ''),
+        exhibitionLastDateKey: !isTournament && (!existing?.exhibitionLastDateKey || existing.exhibitionLastDateKey < key) ? key : (existing?.exhibitionLastDateKey || ''),
         count: (existing?.count || 0) + 1,
-        matchups: (existing?.matchups || []).concat(matchup.id || '')
+        tournamentCount: (existing?.tournamentCount || 0) + (isTournament ? 1 : 0),
+        exhibitionCount: (existing?.exhibitionCount || 0) + (isTournament ? 0 : 1),
+        matchups: (existing?.matchups || []).concat(id || '')
       };
       history.set(pairingKey, entry);
+    };
+
+    (normalized.matchups || []).forEach((matchup) => {
+      const key = matchupDateKey(matchup);
+      const type = String(matchup?.matchupType || '').toLowerCase();
+      addHistory(matchup?.playerAId, matchup?.playerBId, key, type === 'tournament' || type === 'season' || getRecordedSeriesId(matchup) ? 'tournament' : 'exhibition', matchup?.id || '');
     });
+
+    Object.values(season?.series || {}).forEach((series) => {
+      if (!series?.playerAId || !series?.playerBId) return;
+      (Array.isArray(series.gameResults) ? series.gameResults : []).forEach((result) => {
+        addHistory(series.playerAId, series.playerBId, result?.dateKey || '', 'tournament', result?.matchupId || series.id || '');
+      });
+    });
+
     return history;
   }
 
@@ -1903,34 +2002,52 @@
       if (result) return { ok: true, pairs: result, warnings, errors, relaxedRepeatCount: 0 };
     }
 
+    const currentDateKey = String(options.dateKey || options.beforeDateKey || '2026-06-30');
+    const daysAgo = (dateKey) => {
+      if (!dateKey) return 999;
+      const current = Date.parse(`${currentDateKey}T00:00:00Z`);
+      const prior = Date.parse(`${dateKey}T00:00:00Z`);
+      if (!Number.isFinite(current) || !Number.isFinite(prior)) return 999;
+      return Math.max(0, Math.round((current - prior) / 86400000));
+    };
+    const fallbackPenalty = (first, candidate) => {
+      const entry = history?.get(getPairingKey(first, candidate));
+      if (!entry) return 0;
+      const recentTournamentPenalty = entry.tournamentLastDateKey ? Math.max(0, 500 - daysAgo(entry.tournamentLastDateKey) * 25) : 0;
+      const recentOverallPenalty = entry.lastDateKey ? Math.max(0, 120 - daysAgo(entry.lastDateKey) * 8) : 0;
+      return 1000 + recentTournamentPenalty + recentOverallPenalty + (Number(entry.count) || 0) + (entry.lastDateKey ? Number(String(entry.lastDateKey).replace(/-/g, '')) / 100000 : 0);
+    };
+
     const remaining = shuffleWithRandom(ids);
     const fallbackPairs = [];
     let relaxedRepeatCount = 0;
+    const relaxedDetails = [];
     while (remaining.length) {
       const first = remaining.shift();
       let bestIndex = -1;
-      let bestRank = null;
+      let bestPenalty = Infinity;
       remaining.forEach((candidate, index) => {
-        const occurred = hasJunePairingOccurred(history, first, candidate);
-        const entry = history?.get(getPairingKey(first, candidate));
-        const rank = occurred ? (entry?.lastDateKey || '0000-00-00') : '';
-        if (bestIndex === -1) {
-          bestIndex = index; bestRank = rank; return;
+        const penalty = fallbackPenalty(first, candidate);
+        if (bestIndex === -1 || penalty < bestPenalty) {
+          bestIndex = index;
+          bestPenalty = penalty;
         }
-        if (!occurred && bestRank) { bestIndex = index; bestRank = rank; return; }
-        if (occurred === Boolean(bestRank) && rank < bestRank) { bestIndex = index; bestRank = rank; }
       });
       if (bestIndex < 0) break;
       const [second] = remaining.splice(bestIndex, 1);
       const repeated = hasJunePairingOccurred(history, first, second);
-      if (repeated) relaxedRepeatCount += 1;
+      if (repeated) {
+        relaxedRepeatCount += 1;
+        const entry = history?.get(getPairingKey(first, second));
+        relaxedDetails.push(`${first}-${second}${entry?.lastDateKey ? ` last played ${entry.lastDateKey}` : ''}`);
+      }
       fallbackPairs.push({ playerAId: first, playerBId: second, repeated });
     }
     if (fallbackPairs.length * 2 !== ids.length) {
       errors.push('Unable to create a full fallback pairing slate.');
       return { ok: false, pairs: fallbackPairs, warnings, errors, relaxedRepeatCount };
     }
-    if (relaxedRepeatCount) warnings.push(`No-repeat June pairing rule relaxed for ${relaxedRepeatCount} matchup(s).`);
+    if (relaxedRepeatCount) warnings.push(`No-repeat June pairing rule relaxed for ${relaxedRepeatCount} matchup(s): ${relaxedDetails.join('; ')}.`);
     return { ok: true, pairs: fallbackPairs, warnings, errors, relaxedRepeatCount };
   }
 
@@ -2003,7 +2120,7 @@
         matchups: [matchup.id]
       });
     });
-    const generated = generateRandomNonRepeatPairs(exhibitionPool, history, options);
+    const generated = generateRandomNonRepeatPairs(exhibitionPool, history, { ...options, dateKey: dateKeyStr });
     warnings.push(...generated.warnings);
     errors.push(...generated.errors);
     if (!generated.ok) return { ok: false, dateKey: dateKeyStr, tournamentMatchups, exhibitionMatchups: [], allMatchups: tournamentMatchups, warnings, errors, updatedSeason: slateSeason };
@@ -2338,13 +2455,14 @@
   function isValidSeasonResultDateForSeries(season, series, raw, options = {}) {
     const date = getRecordedResultDateKey(raw) || options.dateKey || '';
     if (!date || !isDateWithinSeasonBounds(season, date)) return false;
+    const type = String(raw?.matchupType || '').toLowerCase();
+    if (type === 'exhibition') return false;
 
     const dateRound = getSeasonRoundForDate(date)?.id || '';
     if (!dateRound) return false;
 
     if (series?.roundId === dateRound) return true;
 
-    const type = String(raw?.matchupType || '').toLowerCase();
     const explicitSeriesId = getRecordedSeriesId(raw);
     const hasExplicitSeries = Boolean(explicitSeriesId && explicitSeriesId === series?.id);
     const currentRoundIndex = OFFICIAL_SEASON_ROUND_ORDER.indexOf(dateRound);
@@ -6456,6 +6574,9 @@ return Number(cappedScore.toFixed(1));
     getActiveSeasonSeriesForDate,
     prepareSeasonForDailySlate,
     getSeasonScheduleSignature,
+    isSeasonSeriesCurrentForMatchupDate,
+    resolveHomeSeasonSeriesForMatchup,
+    sanitizeSeasonMatchupMetadataForDate,
     isValidSeasonControlledScheduleDay,
     shouldRegenerateScheduleDayForSeasonControl,
     getCurrentSeasonRoundIdForDate,
