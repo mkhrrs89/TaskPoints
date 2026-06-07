@@ -1670,29 +1670,25 @@ function runWeightVo2HistorySavePathAudit(state) {
     }
 
     function countSeriesResultsForAudit(state, season, series) {
+      if (window.TaskPointsCore?.getSeasonSeriesRecordedResultSummary) {
+        return TaskPointsCore.getSeasonSeriesRecordedResultSummary(state, season, series, {
+          todayDateKey: getTodayGameDayKeyForAudit()
+        });
+      }
       const ids = getSeriesPlayerIdsForAudit(series);
-      const counted = { winsA: 0, winsB: 0, sources: [] };
+      const counted = { winsA: 0, winsB: 0, sources: [], gameResults: [] };
+      const seen = new Set();
       (Array.isArray(series?.gameResults) ? series.gameResults : []).forEach(result => {
+        const key = result?.matchupId || result?.id || `${result?.dateKey || ''}:${result?.gameNumber || result?.seriesGameNumber || ''}`;
+        if (seen.has(key)) return;
+        seen.add(key);
         const winnerId = String(result?.winnerId || result?.winningPlayerId || '').trim();
         if (winnerId === ids.playerAId) counted.winsA += 1;
         else if (winnerId === ids.playerBId) counted.winsB += 1;
-        if (winnerId) counted.sources.push(result?.matchupId || result?.id || result?.dateKey || 'series.gameResults');
-      });
-      const seriesId = series?.id;
-      (Array.isArray(state?.matchups) ? state.matchups : []).forEach(matchup => {
-        const matchupSeriesId = matchup?.seasonSeriesId || matchup?.seriesId || matchup?.seasonSeriesID || matchup?.seriesID;
-        if (!seriesId || matchupSeriesId !== seriesId) return;
-        const matchupId = matchup?.id || matchup?.dateKey || matchupDateKey(matchup) || 'state.matchups';
-        if (counted.sources.includes(matchupId)) return;
-        const scoreA = Number(matchup?.scoreA);
-        const scoreB = Number(matchup?.scoreB);
-        let winnerId = String(matchup?.winnerId || matchup?.winningPlayerId || '').trim();
-        if (!winnerId && Number.isFinite(scoreA) && Number.isFinite(scoreB) && scoreA !== scoreB) {
-          winnerId = scoreA > scoreB ? matchup.playerAId : matchup.playerBId;
+        if (winnerId) {
+          counted.sources.push(key || 'series.gameResults');
+          counted.gameResults.push(result);
         }
-        if (winnerId === ids.playerAId) counted.winsA += 1;
-        else if (winnerId === ids.playerBId) counted.winsB += 1;
-        if (winnerId) counted.sources.push(matchupId);
       });
       return counted;
     }
