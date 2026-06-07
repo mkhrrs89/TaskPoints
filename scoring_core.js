@@ -3453,36 +3453,62 @@ const workHoursMax = Object.prototype.hasOwnProperty.call(workInput, 'hoursMax')
   }
 
   function normalizeState(s) {
+    const src = (s && typeof s === 'object') ? s : {};
     const normalized = {
-      tasks:       Array.isArray(s?.tasks)       ? s.tasks.map(normalizeTask)       : [],
-      reminders:   Array.isArray(s?.reminders)   ? s.reminders   : [],
-      completions: Array.isArray(s?.completions) ? s.completions.map(normalizeCompletion) : [],
-      players:     Array.isArray(s?.players)     ? s.players     : [],
-      habits:      Array.isArray(s?.habits)      ? s.habits.map(normalizeHabit)      : [],
-      flexActions: Array.isArray(s?.flexActions) ? s.flexActions : [],
-      gameHistory: Array.isArray(s?.gameHistory) ? s.gameHistory : [],
-      matchups:    Array.isArray(s?.matchups)    ? s.matchups    : [],
-      schedule:    Array.isArray(s?.schedule)    ? s.schedule    : [],
-opponentDripSchedules: Array.isArray(s?.opponentDripSchedules) ? s.opponentDripSchedules : [],
-weightHistory: Array.isArray(s?.weightHistory) ? s.weightHistory : [],
-vo2MaxHistory: Array.isArray(s?.vo2MaxHistory) ? s.vo2MaxHistory : [],
-workHistory: Array.isArray(s?.workHistory) ? s.workHistory : [],
-      liveDiffHistory: s?.liveDiffHistory && typeof s.liveDiffHistory === 'object' ? s.liveDiffHistory : {},
-      liveDiffSnapshots: s?.liveDiffSnapshots && typeof s.liveDiffSnapshots === 'object' ? s.liveDiffSnapshots : {},
-      youImageId:  typeof s?.youImageId === "string" ? s.youImageId : "",
-      youName: typeof s?.youName === "string" ? s.youName : "",
-      youPrimaryColor: normalizeHexColor(s?.youPrimaryColor) || "#1a383b",
-      youSecondaryColor: normalizeHexColor(s?.youSecondaryColor) || "#254c52",
-      projects:    Array.isArray(s?.projects)    ? s.projects    : [],
-      notes: typeof s?.notes === "string" ? s.notes : "",
-      habitTagColors: normalizeHabitTagColors(s?.habitTagColors),
-      scoringSettings: normalizeScoringSettings(s?.scoringSettings),
-      playerBadges: s?.playerBadges && typeof s.playerBadges === 'object' && !Array.isArray(s.playerBadges) ? s.playerBadges : {},
-      currentSeason: normalizeCurrentSeason(s?.currentSeason),
-      latestSeasonId: typeof s?.latestSeasonId === 'string' ? s.latestSeasonId : '',
-      seasonHistory: normalizeSeasonHistory(s?.seasonHistory)
+      ...src,
+      tasks:       Array.isArray(src.tasks)       ? src.tasks.map(normalizeTask)       : [],
+      reminders:   Array.isArray(src.reminders)   ? src.reminders   : [],
+      completions: Array.isArray(src.completions) ? src.completions.map(normalizeCompletion) : [],
+      players:     Array.isArray(src.players)     ? src.players     : [],
+      habits:      Array.isArray(src.habits)      ? src.habits.map(normalizeHabit)      : [],
+      flexActions: Array.isArray(src.flexActions) ? src.flexActions : [],
+      gameHistory: Array.isArray(src.gameHistory) ? src.gameHistory : [],
+      matchups:    Array.isArray(src.matchups)    ? src.matchups    : [],
+      schedule:    Array.isArray(src.schedule)    ? src.schedule    : [],
+opponentDripSchedules: Array.isArray(src.opponentDripSchedules) ? src.opponentDripSchedules : [],
+weightHistory: Array.isArray(src.weightHistory) ? src.weightHistory : [],
+vo2MaxHistory: Array.isArray(src.vo2MaxHistory) ? src.vo2MaxHistory : [],
+workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
+      liveDiffHistory: src.liveDiffHistory && typeof src.liveDiffHistory === 'object' ? src.liveDiffHistory : {},
+      liveDiffSnapshots: src.liveDiffSnapshots && typeof src.liveDiffSnapshots === 'object' ? src.liveDiffSnapshots : {},
+      youImageId:  typeof src.youImageId === "string" ? src.youImageId : "",
+      youName: typeof src.youName === "string" ? src.youName : "",
+      youPrimaryColor: normalizeHexColor(src.youPrimaryColor) || "#1a383b",
+      youSecondaryColor: normalizeHexColor(src.youSecondaryColor) || "#254c52",
+      projects:    Array.isArray(src.projects)    ? src.projects    : [],
+      notes: typeof src.notes === "string" ? src.notes : "",
+      habitTagColors: normalizeHabitTagColors(src.habitTagColors),
+      scoringSettings: normalizeScoringSettings(src.scoringSettings),
+      playerBadges: src.playerBadges && typeof src.playerBadges === 'object' && !Array.isArray(src.playerBadges) ? src.playerBadges : {},
+      currentSeason: normalizeCurrentSeason(src.currentSeason),
+      latestSeasonId: typeof src.latestSeasonId === 'string' ? src.latestSeasonId : '',
+      seasonHistory: normalizeSeasonHistory(src.seasonHistory)
     };
     return cleanupOpponentDripSchedules(normalized, { maxEntries: 120 });
+  }
+
+
+  function extractImportStateRoot(data) {
+    if (data && Array.isArray(data.tasks) && Array.isArray(data.completions)) return data;
+    if (data && data.state && Array.isArray(data.state.tasks) && Array.isArray(data.state.completions)) return data.state;
+    return null;
+  }
+
+  function normalizeImportedFullBackupState(root, currentState = {}, options = {}) {
+    const src = extractImportStateRoot(root) || ((root && typeof root === 'object') ? root : {});
+    const current = (currentState && typeof currentState === 'object') ? currentState : {};
+    const preserveMissingReminders = options.preserveMissingReminders !== false;
+    const preserveMissingProjects = options.preserveMissingProjects !== false;
+    const hasImportedReminders = Array.isArray(src.reminders);
+    const hasImportedProjects = Array.isArray(src.projects);
+    return normalizeState({
+      ...src,
+      reminders: hasImportedReminders ? src.reminders : (preserveMissingReminders ? current.reminders : []),
+      projects: hasImportedProjects ? src.projects : (preserveMissingProjects ? current.projects : []),
+      currentSeason: Object.prototype.hasOwnProperty.call(src, 'currentSeason') ? src.currentSeason : null,
+      latestSeasonId: typeof src.latestSeasonId === 'string' ? src.latestSeasonId : '',
+      seasonHistory: Array.isArray(src.seasonHistory) ? src.seasonHistory : []
+    });
   }
 
   function loadAppState(options = {}) {
@@ -6542,6 +6568,8 @@ return Number(cappedScore.toFixed(1));
     normalizeScoringSettings,
     getScoringSettings,
     normalizeState,
+    extractImportStateRoot,
+    normalizeImportedFullBackupState,
     normalizeSeasonState,
     normalizeSeasonHistory,
     normalizeCurrentSeason,

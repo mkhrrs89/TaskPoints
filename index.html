@@ -3720,7 +3720,14 @@ function normalizeState(s) {
       : (src.scoringSettings || {}),
     playerBadges: src.playerBadges && typeof src.playerBadges === "object" && !Array.isArray(src.playerBadges)
       ? src.playerBadges
-      : {}
+      : {},
+    currentSeason: window.TaskPointsCore?.normalizeCurrentSeason
+      ? TaskPointsCore.normalizeCurrentSeason(src.currentSeason)
+      : (src.currentSeason && typeof src.currentSeason === "object" ? src.currentSeason : null),
+    latestSeasonId: typeof src.latestSeasonId === "string" ? src.latestSeasonId : "",
+    seasonHistory: window.TaskPointsCore?.normalizeSeasonHistory
+      ? TaskPointsCore.normalizeSeasonHistory(src.seasonHistory)
+      : (Array.isArray(src.seasonHistory) ? src.seasonHistory : [])
   };
   if (window.TaskPointsCore?.cleanupOpponentDripSchedules) {
     return TaskPointsCore.cleanupOpponentDripSchedules(normalized);
@@ -10298,33 +10305,14 @@ function getTaskPointsExportSnapshot() {
 }
 
 async function applyImportedState(root){
-  let normalized = normalizeState({
-    tasks:       Array.isArray(root.tasks)       ? root.tasks       : [],
-    reminders:   Array.isArray(root.reminders)   ? root.reminders   : (Array.isArray(state?.reminders) ? state.reminders : []),
-    completions: Array.isArray(root.completions) ? root.completions : [],
-    players:     Array.isArray(root.players)     ? root.players     : [],
-    habits:      Array.isArray(root.habits)      ? root.habits      : [],
-    flexActions: Array.isArray(root.flexActions) ? root.flexActions : [],
-    weightHistory: Array.isArray(root.weightHistory) ? root.weightHistory : [],
-    vo2MaxHistory: Array.isArray(root.vo2MaxHistory) ? root.vo2MaxHistory : [],
-    gameHistory: Array.isArray(root.gameHistory) ? root.gameHistory : [],
-    matchups:    Array.isArray(root.matchups)    ? root.matchups    : [],
-    schedule:    Array.isArray(root.schedule)    ? root.schedule    : [],
-    opponentDripSchedules: Array.isArray(root.opponentDripSchedules) ? root.opponentDripSchedules : [],
-    workHistory: Array.isArray(root.workHistory) ? root.workHistory : [],
-    youImageId:  typeof root.youImageId === "string" ? root.youImageId : "",
-    youName:     typeof root.youName === "string" ? root.youName : "",
-    youPrimaryColor: normalizeHexColor(root.youPrimaryColor) || "#1a383b",
-    youSecondaryColor: normalizeHexColor(root.youSecondaryColor) || "#254c52",
-    notes: typeof root.notes === "string" ? root.notes : "",
-
-    // ✅ bring over Settings → Habit tag/group colors + scoring settings
-    habitTagColors: root.habitTagColors,
-    scoringSettings: root.scoringSettings
-  });
-
-
-  normalized.projects = Array.isArray(root.projects) ? root.projects : loadProjectsFromStorage();
+  const currentState = { ...(state || {}), projects: loadProjectsFromStorage() };
+  let normalized = window.TaskPointsCore?.normalizeImportedFullBackupState
+    ? TaskPointsCore.normalizeImportedFullBackupState(root, currentState)
+    : normalizeState({
+        ...(root && typeof root === "object" ? root : {}),
+        reminders: Array.isArray(root?.reminders) ? root.reminders : (Array.isArray(currentState.reminders) ? currentState.reminders : []),
+        projects: Array.isArray(root?.projects) ? root.projects : currentState.projects
+      });
   state = normalized;
 
   editingTaskId = null;
