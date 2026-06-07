@@ -3494,13 +3494,17 @@ workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
     return null;
   }
 
-  function normalizeImportedFullBackupState(root, currentState = {}) {
+  function normalizeImportedFullBackupState(root, currentState = {}, options = {}) {
     const src = extractImportStateRoot(root) || ((root && typeof root === 'object') ? root : {});
     const current = (currentState && typeof currentState === 'object') ? currentState : {};
+    const preserveMissingReminders = options.preserveMissingReminders !== false;
+    const preserveMissingProjects = options.preserveMissingProjects !== false;
+    const hasImportedReminders = Array.isArray(src.reminders);
+    const hasImportedProjects = Array.isArray(src.projects);
     return normalizeState({
       ...src,
-      reminders: Array.isArray(src.reminders) ? src.reminders : current.reminders,
-      projects: Array.isArray(src.projects) ? src.projects : current.projects,
+      reminders: hasImportedReminders ? src.reminders : (preserveMissingReminders ? current.reminders : []),
+      projects: hasImportedProjects ? src.projects : (preserveMissingProjects ? current.projects : []),
       currentSeason: Object.prototype.hasOwnProperty.call(src, 'currentSeason') ? src.currentSeason : null,
       latestSeasonId: typeof src.latestSeasonId === 'string' ? src.latestSeasonId : '',
       seasonHistory: Array.isArray(src.seasonHistory) ? src.seasonHistory : []

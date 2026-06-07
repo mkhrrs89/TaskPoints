@@ -1025,20 +1025,19 @@ ${b}`;
 
       const currentState = loadSettingsState();
       const normalized = window.TaskPointsCore?.normalizeImportedFullBackupState
-        ? TaskPointsCore.normalizeImportedFullBackupState(root, currentState)
-        : normalizeSettingsState({
-            ...(root && typeof root === "object" ? root : {}),
-            reminders: Array.isArray(root?.reminders) ? root.reminders : currentState.reminders,
-            projects: Array.isArray(root?.projects) ? root.projects : currentState.projects
-          });
+        ? TaskPointsCore.normalizeImportedFullBackupState(root, currentState, {
+            preserveMissingReminders: false,
+            preserveMissingProjects: false
+          })
+        : normalizeSettingsState(root);
       const currentWeightCount = Array.isArray(currentState.weightHistory) ? currentState.weightHistory.length : 0;
       const currentReminderCount = Array.isArray(currentState.reminders) ? currentState.reminders.length : 0;
       const currentVo2Count = Array.isArray(currentState.vo2MaxHistory) ? currentState.vo2MaxHistory.length : 0;
+      const hasImportedReminders = Array.isArray(root.reminders);
       const incomingWeightCount = Array.isArray(root.weightHistory) ? root.weightHistory.length : 0;
-      const incomingReminderCount = Array.isArray(root.reminders) ? root.reminders.length : 0;
       const incomingVo2Count = Array.isArray(root.vo2MaxHistory) ? root.vo2MaxHistory.length : 0;
       const preserveWeight = currentWeightCount > 0 && incomingWeightCount === 0 && !confirm(`Imported backup has no Weight entries, but this device has existing Weight entries (${currentWeightCount}). Replace anyway?`);
-      const preserveReminders = currentReminderCount > 0 && incomingReminderCount === 0 && !confirm(`Imported backup has no reminders, but this device has existing reminders (${currentReminderCount}). Replace anyway?`);
+      const preserveReminders = currentReminderCount > 0 && !hasImportedReminders && !confirm(`Imported backup has no reminders, but this device has existing reminders (${currentReminderCount}). Replace anyway?`);
       const preserveVo2 = currentVo2Count > 0 && incomingVo2Count === 0 && !confirm(`Imported backup has no VO2 Max entries, but this device has existing VO2 Max entries (${currentVo2Count}). Replace anyway?`);
       if (preserveWeight) normalized.weightHistory = Array.isArray(currentState.weightHistory) ? currentState.weightHistory : [];
       if (preserveReminders) normalized.reminders = Array.isArray(currentState.reminders) ? currentState.reminders : [];

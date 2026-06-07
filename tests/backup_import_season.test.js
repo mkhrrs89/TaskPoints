@@ -90,3 +90,71 @@ test('full backup import preserves durable and future top-level fields', () => {
   assert.deepEqual(imported.workHistory, [{ id: 'work_1', dateKey: '2026-06-07', hours: 2 }]);
   assert.deepEqual(imported.futureTopLevelField, { ok: true });
 });
+
+function normalizeSettingsImportForReminderChoice(root, currentState, { preserveMissingReminders = false } = {}) {
+  const normalized = core.normalizeImportedFullBackupState(root, currentState, {
+    preserveMissingReminders: false,
+    preserveMissingProjects: false
+  });
+  const currentReminderCount = Array.isArray(currentState.reminders) ? currentState.reminders.length : 0;
+  const hasImportedReminders = Array.isArray(root.reminders);
+  const shouldPreserveReminders = currentReminderCount > 0 && !hasImportedReminders && preserveMissingReminders;
+  if (shouldPreserveReminders) normalized.reminders = Array.isArray(currentState.reminders) ? currentState.reminders : [];
+  return normalized;
+}
+
+test('settings import with missing reminders can clear existing reminders', () => {
+  const currentState = { reminders: [{ id: 'current-reminder', text: 'Keep only if user cancels replace' }] };
+  const importedRoot = makeSeasonState();
+  delete importedRoot.reminders;
+
+  const imported = normalizeSettingsImportForReminderChoice(importedRoot, currentState, { preserveMissingReminders: false });
+
+  assert.deepEqual(imported.reminders, []);
+  assertSeasonPreserved(imported);
+});
+
+test('settings import with missing reminders can preserve existing reminders', () => {
+  const currentState = { reminders: [{ id: 'current-reminder', text: 'Preserve me' }] };
+  const importedRoot = makeSeasonState();
+  delete importedRoot.reminders;
+
+  const imported = normalizeSettingsImportForReminderChoice(importedRoot, currentState, { preserveMissingReminders: true });
+
+  assert.deepEqual(imported.reminders, currentState.reminders);
+  assertSeasonPreserved(imported);
+});
+
+test('settings import with explicit reminders uses backup reminders', () => {
+  const currentState = { reminders: [{ id: 'current-reminder', text: 'Do not keep me' }] };
+  const backupReminders = [{ id: 'backup-reminder', text: 'Use me' }];
+  const importedRoot = makeSeasonState({ reminders: backupReminders });
+
+  const imported = normalizeSettingsImportForReminderChoice(importedRoot, currentState, { preserveMissingReminders: true });
+
+  assert.deepEqual(imported.reminders, backupReminders);
+  assertSeasonPreserved(imported);
+});
+
+test('settings import with explicit empty reminders uses backup empty reminders', () => {
+  const currentState = { reminders: [{ id: 'current-reminder', text: 'Do not keep me' }] };
+  const importedRoot = makeSeasonState({ reminders: [] });
+
+  const imported = normalizeSettingsImportForReminderChoice(importedRoot, currentState, { preserveMissingReminders: true });
+
+  assert.deepEqual(imported.reminders, []);
+  assertSeasonPreserved(imported);
+});
+
+test('settings import preserves season data whether reminders are missing or present', () => {
+  const currentState = { reminders: [{ id: 'current-reminder', text: 'Existing' }] };
+  const missingReminderRoot = makeSeasonState();
+  delete missingReminderRoot.reminders;
+  const explicitReminderRoot = makeSeasonState({ reminders: [{ id: 'backup-reminder', text: 'Backup' }] });
+
+  const missingReminderImport = normalizeSettingsImportForReminderChoice(missingReminderRoot, currentState, { preserveMissingReminders: false });
+  const explicitReminderImport = normalizeSettingsImportForReminderChoice(explicitReminderRoot, currentState, { preserveMissingReminders: false });
+
+  assertSeasonPreserved(missingReminderImport);
+  assertSeasonPreserved(explicitReminderImport);
+});
