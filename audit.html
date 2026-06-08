@@ -1772,7 +1772,10 @@ function runWeightVo2HistorySavePathAudit(state) {
       if (hasStoredWins) return { checkable: true, skipFuture: false, reason: 'stored wins' };
       if (startedStatus) return { checkable: true, skipFuture: false, reason: 'started/completed status' };
       if (hasWinner) return { checkable: true, skipFuture: false, reason: 'winnerId' };
-      if (hasLinkedMatchups) return { checkable: true, skipFuture: false, reason: hasPastOrScheduledMatchup ? 'linked matchup' : 'scheduled linked matchup' };
+      if (hasLinkedMatchups && hasPastOrScheduledMatchup) return { checkable: true, skipFuture: false, reason: 'linked matchup' };
+      if (hasLinkedMatchups && !hasPastOrScheduledMatchup && storedA === 0 && storedB === 0 && futureStatus) {
+        return { checkable: false, skipFuture: true, reason: 'future linked matchup' };
+      }
       if (currentOrPastRound && !dependsOnFutureWinners) return { checkable: true, skipFuture: false, reason: 'current/past round' };
       if (storedA === 0 && storedB === 0 && futureStatus && (!roundStart || !auditDateKey || auditDateKey < roundStart || dependsOnFutureWinners)) {
         return { checkable: false, skipFuture: true, reason: 'future/unstarted bracket series' };

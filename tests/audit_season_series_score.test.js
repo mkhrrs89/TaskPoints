@@ -69,6 +69,19 @@ function gameResult(series, winnerId, index) {
   };
 }
 
+function linkedMatchup(series, dateKey, extra = {}) {
+  return {
+    id: `${series.id}_${dateKey}`,
+    seasonSeriesId: series.id,
+    seriesId: series.id,
+    matchupType: 'tournament',
+    dateKey,
+    playerAId: series.playerAId,
+    playerBId: series.playerBId,
+    ...extra
+  };
+}
+
 function series(overrides = {}) {
   return {
     id: 'series_1',
@@ -153,4 +166,58 @@ test('unplayed current/future placeholder series remains skipped', () => {
   assert.equal(result.status, 'PASS');
   assert.equal(result.actual, 'All played/checkable series scores match recorded results');
   assert.ok(result.details.includes('1 future unplayed series skipped'));
+});
+
+test('future-only linked matchup is skipped until the audit date reaches it', () => {
+  const buildScoreAudit = loadScoreAuditHelper();
+  const futureLinked = series({ id: 'sweet_16_future_linked', name: 'Future linked Sweet 16', roundId: 'sweet_16', status: 'pending' });
+
+  const result = buildScoreAudit(
+    { matchups: [linkedMatchup(futureLinked, '2026-06-09')] },
+    { id: 'season_1_june_2026' },
+    [futureLinked],
+    '2026-06-08'
+  );
+
+  assert.equal(result.status, 'PASS');
+  assert.equal(result.actual, 'All played/checkable series scores match recorded results');
+  assert.ok(result.details.includes('1 future unplayed series skipped'));
+});
+
+test('today or past linked matchup is checkable when results are missing', () => {
+  const buildScoreAudit = loadScoreAuditHelper();
+  const todayLinked = series({ id: 'sweet_16_today_linked', name: 'Today linked Sweet 16', roundId: 'sweet_16', status: 'pending' });
+
+  const result = buildScoreAudit(
+    { matchups: [linkedMatchup(todayLinked, '2026-06-08')] },
+    { id: 'season_1_june_2026' },
+    [todayLinked],
+    '2026-06-08'
+  );
+
+  assert.equal(result.status, 'WARN');
+  assert.equal(result.actual, '1 checkable unplayed 0–0 series have no game results');
+});
+
+test('future linked matchup with stored wins is still checkable', () => {
+  const buildScoreAudit = loadScoreAuditHelper();
+  const futureLinkedWithWins = series({
+    id: 'sweet_16_future_linked_with_wins',
+    name: 'Future linked Sweet 16 with wins',
+    roundId: 'sweet_16',
+    status: 'pending',
+    winsA: 1,
+    winsB: 0
+  });
+
+  const result = buildScoreAudit(
+    { matchups: [linkedMatchup(futureLinkedWithWins, '2026-06-09')] },
+    { id: 'season_1_june_2026' },
+    [futureLinkedWithWins],
+    '2026-06-08'
+  );
+
+  assert.equal(result.status, 'FAIL');
+  assert.equal(result.actual, '1 mismatch(es)');
+  assert.match(result.details[0], /expected 0–0 from results, stored 1–0/);
 });
