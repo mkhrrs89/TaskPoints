@@ -184,7 +184,7 @@ test('future-only linked matchup is skipped until the audit date reaches it', ()
   assert.ok(result.details.includes('1 future unplayed series skipped'));
 });
 
-test('today or past linked matchup is checkable when results are missing', () => {
+test('same-day linked 0–0 no-result series is skipped during normal audit', () => {
   const buildScoreAudit = loadScoreAuditHelper();
   const todayLinked = series({ id: 'sweet_16_today_linked', name: 'Today linked Sweet 16', roundId: 'sweet_16', status: 'pending' });
 
@@ -192,6 +192,38 @@ test('today or past linked matchup is checkable when results are missing', () =>
     { matchups: [linkedMatchup(todayLinked, '2026-06-08')] },
     { id: 'season_1_june_2026' },
     [todayLinked],
+    '2026-06-08'
+  );
+
+  assert.equal(result.status, 'PASS');
+  assert.equal(result.actual, 'All played/checkable series scores match recorded results');
+  assert.ok(result.details.includes('1 same-day unplayed/live series skipped'));
+});
+
+test('same-day linked 0–0 no-result series is checkable when current-day inclusion is forced', () => {
+  const buildScoreAudit = loadScoreAuditHelper();
+  const todayLinked = series({ id: 'sweet_16_today_forced_linked', name: 'Today forced linked Sweet 16', roundId: 'sweet_16', status: 'pending' });
+
+  const result = buildScoreAudit(
+    { matchups: [linkedMatchup(todayLinked, '2026-06-08')] },
+    { id: 'season_1_june_2026' },
+    [todayLinked],
+    '2026-06-08',
+    { includeCurrentDayResults: true }
+  );
+
+  assert.equal(result.status, 'WARN');
+  assert.equal(result.actual, '1 checkable unplayed 0–0 series have no game results');
+});
+
+test('past linked 0–0 no-result series still warns', () => {
+  const buildScoreAudit = loadScoreAuditHelper();
+  const pastLinked = series({ id: 'sweet_16_past_linked', name: 'Past linked Sweet 16', roundId: 'sweet_16', status: 'pending' });
+
+  const result = buildScoreAudit(
+    { matchups: [linkedMatchup(pastLinked, '2026-06-07')] },
+    { id: 'season_1_june_2026' },
+    [pastLinked],
     '2026-06-08'
   );
 
