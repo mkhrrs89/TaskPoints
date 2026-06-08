@@ -5711,6 +5711,44 @@ header,
   padding: 7px 9px;
 }
 
+
+.bracket-player-meta {
+  align-items: center;
+  align-self: center;
+  color: #f8fafc;
+  display: inline-flex;
+  flex: 0 0 22px;
+  flex-direction: column;
+  font-weight: 900;
+  justify-content: center;
+  line-height: 1;
+  min-width: 22px;
+  text-align: right;
+}
+
+.bracket-player-meta-seed {
+  color: #f8fafc;
+  font-size: 0.92rem;
+  text-shadow: 0 0 12px rgba(248, 250, 252, 0.22);
+}
+
+.bracket-player-meta-wins {
+  color: #fdba74;
+  font-size: 0.74rem;
+  margin-top: 3px;
+  text-shadow: 0 0 10px rgba(253, 186, 116, 0.28);
+}
+
+.season-series-participants {
+  display: grid;
+  gap: 6px;
+}
+
+.season-champion-player {
+  justify-self: start;
+  max-width: min(100%, 360px);
+}
+
 .season-bracket-player {
   font-size: 0.9rem;
   font-weight: 800;
@@ -5760,6 +5798,19 @@ header,
   .season-player-photo-slot--bracket {
     height: 28px;
     width: 38px;
+  }
+
+  .bracket-player-meta {
+    flex-basis: 20px;
+    min-width: 20px;
+  }
+
+  .bracket-player-meta-seed {
+    font-size: 0.84rem;
+  }
+
+  .bracket-player-meta-wins {
+    font-size: 0.68rem;
   }
 
   .season-admin-panel .season-seed-row {

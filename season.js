@@ -629,11 +629,83 @@
     `;
   }
 
+  function normalizeBracketParticipantId(participant) {
+    const candidates = [
+      participant?.playerId,
+      participant?.id,
+      participant?.participantId,
+      participant?.competitorId,
+      participant?.player?.id,
+      participant?.competitor?.id,
+      participant?.seed?.playerId,
+      participant?.seed?.player?.id
+    ];
+    return String(candidates.find((candidate) => String(candidate || '').trim()) || '').trim();
+  }
+
+  function getTournamentSeedForParticipant(participant, series = null, side = '') {
+    const sideKey = String(side || '').toUpperCase();
+    const seriesSeed = sideKey === 'A'
+      ? series?.playerASeed
+      : (sideKey === 'B' ? series?.playerBSeed : null);
+    const candidates = [
+      participant?.seed?.seed,
+      participant?.seed?.seedNumber,
+      participant?.seed,
+      participant?.playerSeed,
+      participant?.seedNumber,
+      participant?.tournamentSeed,
+      seriesSeed
+    ];
+    const seed = candidates.find((candidate) => candidate == null || typeof candidate === 'object' ? false : String(candidate).trim() !== '');
+    return seed == null ? '' : String(seed).trim();
+  }
+
+  function getSeriesWinsForParticipant(series = null, participant = null, side = '') {
+    if (!series) return 0;
+    const sideKey = String(side || '').toUpperCase();
+    if (sideKey === 'A') return Number(series?.winsA) || 0;
+    if (sideKey === 'B') return Number(series?.winsB) || 0;
+
+    const participantId = normalizeBracketParticipantId(participant);
+    if (participantId && participantId === String(series?.playerAId || '').trim()) return Number(series?.winsA) || 0;
+    if (participantId && participantId === String(series?.playerBId || '').trim()) return Number(series?.winsB) || 0;
+    return 0;
+  }
+
+  function getBracketPlayerMeta(participant, series = null, side = '') {
+    if (!participant || participant?.type === 'placeholder') return null;
+    const seed = getTournamentSeedForParticipant(participant, series, side);
+    if (!seed) return null;
+    return {
+      seed,
+      wins: getSeriesWinsForParticipant(series, participant, side)
+    };
+  }
+
+  function renderBracketPlayerMeta(participant, series = null, side = '') {
+    const meta = getBracketPlayerMeta(participant, series, side);
+    if (!meta) return '';
+    return `
+      <span class="bracket-player-meta" aria-label="Seed ${escapeHtml(meta.seed)}, ${escapeHtml(meta.wins)} series wins">
+        <span class="bracket-player-meta-seed">${escapeHtml(meta.seed)}</span>
+        <span class="bracket-player-meta-wins">${escapeHtml(meta.wins)}</span>
+      </span>
+    `;
+  }
+
+  function renderBracketParticipant(participant, series = null, side = '', state = {}) {
+    if (!participant) return '<span class="season-bracket-player muted">TBD</span>';
+    if (participant.type === 'placeholder') return `<span class="season-bracket-player season-bracket-placeholder">${escapeHtml(participant.label || 'Awaiting winner')}</span>`;
+    const playerId = normalizeBracketParticipantId(participant);
+    const player = { ...participant, playerId, imageId: getPlayerImageId(state, playerId) || participant.imageId || '' };
+    const seed = getTournamentSeedForParticipant(participant, series, side);
+    const fallbackName = seed ? `Seed ${seed}` : 'Player';
+    return `${renderBracketPlayerMeta(participant, series, side)}${renderSeasonPlayerPhoto(player, 'bracket')}<span class="season-bracket-player">${escapeHtml(participant.playerName || participant.name || fallbackName)}</span>`;
+  }
+
   function renderCompetitor(competitor, state = {}) {
-    if (!competitor) return '<span class="season-bracket-player muted">TBD</span>';
-    if (competitor.type === 'placeholder') return `<span class="season-bracket-player season-bracket-placeholder">${escapeHtml(competitor.label)}</span>`;
-    const player = { ...competitor, imageId: getPlayerImageId(state, competitor.playerId) || competitor.imageId || '' };
-    return `<span class="season-bracket-seed season-preview-seed-number">${escapeHtml(competitor.seed)}</span>${renderSeasonPlayerPhoto(player, 'bracket')}<span class="season-bracket-player">${escapeHtml(competitor.playerName || `Seed ${competitor.seed}`)}</span>`;
+    return renderBracketParticipant(competitor, null, '', state);
   }
 
   function renderBracketRound(round, state = {}) {
@@ -701,12 +773,17 @@
     });
   }
 
-  function renderSeriesSide(series, slot) {
+  function renderSeriesSide(series, slot, state = {}) {
     const prefix = slot === 'B' ? 'B' : 'A';
-    const seed = series?.[`player${prefix}Seed`];
-    const name = series?.[`player${prefix}Name`] || series?.[`player${prefix}Id`];
+    const participant = {
+      playerId: series?.[`player${prefix}Id`],
+      playerName: series?.[`player${prefix}Name`],
+      seed: series?.[`player${prefix}Seed`],
+      imageId: getPlayerImageId(state, series?.[`player${prefix}Id`]) || ''
+    };
+    const name = participant.playerName || participant.playerId;
     const placeholder = series?.[`placeholder${prefix}`];
-    if (name) return `<span class="season-bracket-seed">#${escapeHtml(seed || '—')}</span><span class="season-bracket-player">${escapeHtml(name)}</span>`;
+    if (name) return renderBracketParticipant(participant, series, prefix, state);
     return `<span class="season-bracket-player season-bracket-placeholder">${escapeHtml(placeholder || 'Awaiting winner')}</span>`;
   }
 
@@ -777,6 +854,10 @@
       <details class="season-bracket-match season-series-card ${pending ? 'is-pending' : ''}">
         <summary>
           <span class="season-bracket-match-name">${escapeHtml(getSeriesCompactTitle(series))}</span>
+          <span class="season-series-participants">
+            <span class="season-bracket-slot">${renderSeriesSide(series, 'A', options.state || {})}</span>
+            <span class="season-bracket-slot">${renderSeriesSide(series, 'B', options.state || {})}</span>
+          </span>
           <span class="season-series-meta-row">
             <span>${escapeHtml(series?.roundName || getRoundName(series?.roundId))}</span>
             <span>Best of ${escapeHtml(bestOf)}</span>
@@ -813,13 +894,13 @@
           <span>${escapeHtml(all.length)} series</span>
         </div>
         <div class="season-bracket-match-grid">
-          ${all.length ? all.map((series) => renderOfficialSeriesCard(season, series, { dateKey })).join('') : '<p class="muted text-sm">Pending / awaiting winners.</p>'}
+          ${all.length ? all.map((series) => renderOfficialSeriesCard(season, series, { dateKey, state: options.state || {} })).join('') : '<p class="muted text-sm">Pending / awaiting winners.</p>'}
         </div>
       </section>
     `;
   }
 
-  function renderCurrentRoundSection(season, dateKey) {
+  function renderCurrentRoundSection(season, dateKey, state = {}) {
     const round = getRoundForToday(season, dateKey);
     if (!round) return '';
     const hasSeries = officialSeriesEntries(season).some((series) => series?.roundId === round.id);
@@ -827,7 +908,7 @@
     return `
       <section class="glass season-card">
         <h3 class="season-section-title">Current Round</h3>
-        ${renderRoundSection(season, round, { dateKey })}
+        ${renderRoundSection(season, round, { dateKey, state })}
       </section>
     `;
   }
@@ -841,7 +922,7 @@
         <h3 class="season-section-title">Round-by-Round Championship</h3>
         <p class="muted text-sm">Series are shown as compact cards. Tap a series to expand results, dates, and advancement details.</p>
         <div class="season-bracket-stack">
-          ${rounds.map((round) => renderRoundSection(season, round, { dateKey, activeRoundId })).join('')}
+          ${rounds.map((round) => renderRoundSection(season, round, { dateKey, activeRoundId, state: options.state || {} })).join('')}
         </div>
       </section>
     `;
@@ -884,12 +965,21 @@
     `;
   }
 
-  function renderChampionSummary(season) {
+  function renderChampionSummary(season, state = {}) {
     const summary = typeof core.getChampionSummary === 'function' ? core.getChampionSummary(season, { currentSeason: season }) : null;
     if (!summary?.championId) return '';
+    const finals = officialSeriesEntries(season).find((series) => series?.roundId === 'finals' && (series?.winnerId === summary.championId || series?.playerAId === summary.championId || series?.playerBId === summary.championId));
+    const championSide = summary.championId === finals?.playerBId ? 'B' : 'A';
+    const championParticipant = finals ? {
+      playerId: summary.championId,
+      playerName: summary.championName,
+      seed: championSide === 'B' ? finals.playerBSeed : finals.playerASeed,
+      imageId: getPlayerImageId(state, summary.championId) || ''
+    } : null;
     return `
       <section class="glass season-champion-summary season-card">
         <p class="season-eyebrow">Champion Summary</p>
+        ${championParticipant ? `<div class="season-bracket-slot season-champion-player">${renderBracketParticipant(championParticipant, finals, championSide, state)}</div>` : ''}
         <h2 class="season-title">Season 1 Champion: ${escapeHtml(summary.championName || 'Champion TBD')}</h2>
         <p class="muted text-sm">Runner-up: ${escapeHtml(summary.runnerUpName || 'Runner-up TBD')}</p>
         <p class="season-series-status">Finals result: ${escapeHtml(summary.finalsResult || 'Finals complete')}</p>
@@ -1061,7 +1151,7 @@
     const hasSeries = Object.keys(season?.series || {}).length > 0;
     const adminMode = season?.meta?.adminMode === true;
     return `
-      ${renderChampionSummary(season)}
+      ${renderChampionSummary(season, state)}
       <section class="glass season-hero-card">
         <div class="season-card-header">
           <div>
@@ -1085,8 +1175,8 @@
       </section>
       ${adminMode ? renderSeasonAdminTools(season, dateKey) : ''}
       ${renderSeasonMatchupControl(season)}
-      ${hasSeries ? renderCurrentRoundSection(season, dateKey) : ''}
-      ${hasSeries ? renderOfficialBracket(season, { dateKey }) : '<section class="glass season-card"><p class="muted text-sm">Season tools will appear here in the next update.</p></section>'}
+      ${hasSeries ? renderCurrentRoundSection(season, dateKey, state) : ''}
+      ${hasSeries ? renderOfficialBracket(season, { dateKey, state }) : '<section class="glass season-card"><p class="muted text-sm">Season tools will appear here in the next update.</p></section>'}
       ${['locked', 'active', 'champion_crowned'].includes(season?.status) ? renderEliminatedPlayers(season) : ''}
       ${renderFinalPlacements(season)}
     `;
@@ -1530,7 +1620,9 @@
     loadSeasonState,
     renderSeasonView,
     hydrateSeasonImages,
-    mountSeasonView
+    mountSeasonView,
+    getBracketPlayerMeta,
+    renderBracketPlayerMeta
   };
 
   if (global.document) {
