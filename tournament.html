@@ -174,9 +174,6 @@
 
   function createTournamentSlotRow(slotOptions) {
     const row = createTournamentElement('div', {}, ['tournament-slot-row', `bracket-row-${slotOptions.row}`]);
-    const label = slotOptions.seed != null ? String(slotOptions.seed) : (TOURNAMENT_PLACEHOLDER_LABELS[slotOptions.placeholderKey] || '');
-    row.appendChild(createTournamentElement('span', {}, ['tournament-seed']));
-    row.querySelector('.tournament-seed').textContent = label;
     row.appendChild(createTournamentSlot(slotOptions));
     return row;
   }
@@ -372,6 +369,72 @@
     const row = seeds.find((seed) => (seed?.playerId || seed?.id) === playerId);
     const seedNumber = Number(row?.seed);
     return Number.isFinite(seedNumber) ? seedNumber : null;
+  }
+
+  function getTournamentSeedForPlayerNode(state, playerId, series = null, side = '', slot = null) {
+    const sideKey = String(side || '').toUpperCase();
+    const seriesSeed = sideKey === 'A'
+      ? series?.playerASeed
+      : (sideKey === 'B' ? series?.playerBSeed : null);
+    const seedFromPlayer = getTournamentSeedNumberForPlayer(state, playerId);
+    const fixedSeed = getSeedNumberFromTournamentSlot(slot);
+    const candidates = [seedFromPlayer, seriesSeed, fixedSeed];
+    const seed = candidates.find((value) => value != null && String(value).trim() !== '' && Number.isFinite(Number(value)));
+    return seed == null ? '' : String(seed).trim();
+  }
+
+  function getTournamentSeriesWinsForPlayer(series = null, playerId = '', side = '') {
+    if (!series) return 0;
+    const sideKey = String(side || '').toUpperCase();
+    if (sideKey === 'A') return Number(series?.winsA) || 0;
+    if (sideKey === 'B') return Number(series?.winsB) || 0;
+
+    const id = String(playerId || '').trim();
+    if (id && id === String(series?.playerAId || series?.playerA?.id || series?.competitorAId || '').trim()) return Number(series?.winsA) || 0;
+    if (id && id === String(series?.playerBId || series?.playerB?.id || series?.competitorBId || '').trim()) return Number(series?.winsB) || 0;
+    if (id && id === String(series?.winnerId || '').trim()) {
+      const winnerSide = id === String(series?.playerBId || series?.playerB?.id || series?.competitorBId || '').trim() ? 'B' : 'A';
+      return winnerSide === 'B' ? (Number(series?.winsB) || 0) : (Number(series?.winsA) || 0);
+    }
+    return 0;
+  }
+
+  function getTournamentSeriesForSlot(state, slot, playerId = '') {
+    const roundId = slot?.getAttribute?.('data-round-id') || '';
+    if (normalizeTournamentRoundId(roundId) === 'champion') return getTournamentSeriesByRound(state, 'finals')[0] || null;
+    const seriesId = slot?.getAttribute?.('data-season-series-id') || '';
+    if (seriesId) {
+      const byId = getTournamentSeasonSeries(state).find((series) => String(series?.id || '') === seriesId);
+      if (byId) return byId;
+    }
+    return findTournamentSeriesForVisualSlot(state, roundId, slot);
+  }
+
+  function getTournamentSideForPlayerNode(series = null, playerId = '', slot = null) {
+    const slotSide = String(slot?.getAttribute?.('data-competitor-slot') || '').toUpperCase();
+    if (slotSide === 'A' || slotSide === 'B') return slotSide;
+    const id = String(playerId || '').trim();
+    if (id && id === String(series?.playerBId || series?.playerB?.id || series?.competitorBId || '').trim()) return 'B';
+    if (id && id === String(series?.playerAId || series?.playerA?.id || series?.competitorAId || '').trim()) return 'A';
+    return '';
+  }
+
+  function renderTournamentPlayerNodeHTML({ state, playerId, imageId, series = null, side = '', slot = null }) {
+    if (!playerId || !imageId) return '';
+    const seed = getTournamentSeedForPlayerNode(state, playerId, series, side, slot);
+    const wins = getTournamentSeriesWinsForPlayer(series, playerId, side);
+    const metaHtml = seed ? `
+      <div class="tourney-player-meta" aria-label="Seed ${escapeHtml(seed)}, ${escapeHtml(wins)} series wins">
+        <div class="tourney-player-seed">${escapeHtml(seed)}</div>
+        <div class="tourney-player-wins">${escapeHtml(wins)}</div>
+      </div>` : '';
+    return `
+      <div class="tourney-player-node">
+        ${metaHtml}
+        <div class="tourney-player-image-slot" data-tourney-player-id="${escapeHtml(playerId)}" data-tourney-image-id="${escapeHtml(imageId)}">
+          <img class="tourney-player-image hidden" alt="">
+        </div>
+      </div>`;
   }
 
   function getTournamentPlayInSeries(state) {
@@ -666,6 +729,7 @@
     slot.removeAttribute('data-player-id');
     slot.removeAttribute('data-tourney-image-id');
     slot.removeAttribute('data-image-id');
+    slot.classList.remove('has-tourney-player-node');
     slot.innerHTML = '';
 
     if (!playerId) {
@@ -680,9 +744,12 @@
     const imageId = getTournamentPlayerImageId(state, playerId);
     if (!imageId) return;
 
+    const series = getTournamentSeriesForSlot(state, slot, playerId);
+    const side = getTournamentSideForPlayerNode(series, playerId, slot);
     slot.setAttribute('data-tourney-image-id', imageId);
     slot.setAttribute('data-image-id', imageId);
-    slot.innerHTML = `<div class="tourney-player-image-slot" data-tourney-player-id="${escapeHtml(playerId)}" data-tourney-image-id="${escapeHtml(imageId)}"><img class="tourney-player-image hidden" alt=""></div>`;
+    slot.classList.add('has-tourney-player-node');
+    slot.innerHTML = renderTournamentPlayerNodeHTML({ state, playerId, imageId, series, side, slot });
   }
 
   function renderTournamentImages() {
@@ -713,7 +780,8 @@
 
   function getTournamentSlotCenter(slot, bracket, bracketRect) {
     if (!slot || !bracket || !bracketRect) return null;
-    const rect = slot.getBoundingClientRect();
+    const visualSlot = slot.querySelector?.('.tourney-player-image-slot') || slot;
+    const rect = visualSlot.getBoundingClientRect();
     if (!rect.width || !rect.height) return null;
     const x = rect.left - bracketRect.left + bracket.scrollLeft;
     const y = rect.top - bracketRect.top + bracket.scrollTop;
