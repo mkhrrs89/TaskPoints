@@ -1274,10 +1274,14 @@
     return [season?.id || '', getCurrentSeasonRoundIdForDate(dateKeyStr), season?.meta?.seasonMatchupControlEnabled === true ? 'on' : 'off', seriesRevision].join('::');
   }
 
+  function getScheduleDayDateKey(day) {
+    return String(day?.dateKey || day?.date || day?.dayKey || '').slice(0, 10);
+  }
+
   function isValidSeasonControlledScheduleDay(state, dateKeyStr, scheduleDay) {
     const normalized = normalizeState(state || {});
     if (!shouldUseSeasonMatchupControl(normalized, dateKeyStr)) return false;
-    if (!scheduleDay || scheduleDay.seasonMatchupControl !== true) return false;
+    if (!scheduleDay || getScheduleDayDateKey(scheduleDay) !== dateKeyStr || scheduleDay.seasonMatchupControl !== true) return false;
     const expectedSignature = getSeasonScheduleSignature(normalized, dateKeyStr);
     if (!expectedSignature || scheduleDay.seasonScheduleSignature !== expectedSignature) return false;
     const matchups = Array.isArray(scheduleDay.matchups) ? scheduleDay.matchups : [];
@@ -2865,11 +2869,11 @@
     const recordPairKey = getPairingKey(record.playerAId, record.playerBId);
     const recordSeriesId = getRecordedSeriesId(record);
     return schedules.some((day) => {
-      if (!day || day.dateKey !== dateKeyStr || day.seasonMatchupControl !== true) return false;
+      if (!day || getScheduleDayDateKey(day) !== dateKeyStr || day.seasonMatchupControl !== true) return false;
       return (Array.isArray(day.matchups) ? day.matchups : []).some((matchup) => {
         if (!matchup) return false;
-        const scheduleType = String(matchup.matchupType || '').toLowerCase();
-        if (scheduleType !== 'tournament' && scheduleType !== 'season') return false;
+        const matchupType = String(matchup.matchupType || '').toLowerCase();
+        if (matchupType && matchupType !== 'tournament' && matchupType !== 'season') return false;
         if (getPairingKey(matchup.playerAId, matchup.playerBId) !== recordPairKey) return false;
 
         const scheduleSeasonId = String(matchup.seasonId || '').trim();

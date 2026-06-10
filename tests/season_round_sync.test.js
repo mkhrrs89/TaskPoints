@@ -417,6 +417,71 @@ test('automatic alignment accepts stripped prior-day result with season-controll
   assert.equal(repair.updatedSeason.series[series.id].gameResults[0].seriesId, series.id);
 });
 
+
+test('Season sync accepts stripped prior-day tournament result when schedule day uses date instead of dateKey', () => {
+  const season = makeSeason({ readyCount: 8, status: 'active' });
+  const series = Object.values(season.series)[0];
+
+  const strippedResult = {
+    id: 'stripped_sweet16_game1',
+    dateKey: '2026-06-09',
+    playerAId: series.playerAId,
+    playerBId: series.playerBId,
+    scoreA: 50,
+    scoreB: 40
+  };
+
+  const state = makeState(season, [strippedResult]);
+  state.schedule = [{
+    date: '2026-06-09',
+    seasonMatchupControl: true,
+    matchups: [{
+      id: 'scheduled_sweet16_game1',
+      dateKey: '2026-06-09',
+      seasonId: season.id,
+      seriesId: series.id,
+      seasonSeriesId: series.id,
+      roundId: series.roundId,
+      matchupType: 'tournament',
+      playerAId: series.playerAId,
+      playerBId: series.playerBId
+    }]
+  }];
+
+  const synced = core.syncCurrentSeasonSeriesFromRecordedResults(state, {
+    nowISO: '2026-06-10T12:00:00.000Z'
+  });
+
+  assert.equal(synced.changed, true);
+  assert.equal(synced.updatedSeason.series[series.id].winsA, 1);
+  assert.equal(synced.updatedSeason.series[series.id].winsB, 0);
+  assert.equal(synced.updatedSeason.series[series.id].gameResults.length, 1);
+});
+
+test('Season sync still ignores stripped same-pair result without season-controlled schedule evidence', () => {
+  const season = makeSeason({ readyCount: 8, status: 'active' });
+  const series = Object.values(season.series)[0];
+
+  const ordinaryResult = {
+    id: 'ordinary_same_pair',
+    dateKey: '2026-06-09',
+    playerAId: series.playerAId,
+    playerBId: series.playerBId,
+    scoreA: 50,
+    scoreB: 40
+  };
+
+  const state = makeState(season, [ordinaryResult]);
+
+  const synced = core.syncCurrentSeasonSeriesFromRecordedResults(state, {
+    nowISO: '2026-06-10T12:00:00.000Z'
+  });
+
+  assert.equal(synced.updatedSeason.series[series.id].winsA, 0);
+  assert.equal(synced.updatedSeason.series[series.id].winsB, 0);
+  assert.equal(synced.updatedSeason.series[series.id].gameResults.length, 0);
+});
+
 test('automatic alignment ignores stripped prior-day result without season-controlled evidence', () => {
   const season = makeSeason({ readyCount: 8, status: 'active' });
   const entries = Object.values(season.series);

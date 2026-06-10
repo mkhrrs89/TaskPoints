@@ -1299,6 +1299,7 @@ function buildDailyScheduleFallback(dateKeyStr, participantIds, signature, state
       if (seasonSlate.updatedSeason) state.currentSeason = seasonSlate.updatedSeason;
       return {
         date: dateKeyStr,
+        dateKey: dateKeyStr,
         matchups: seasonSlate.allMatchups,
         byeIds: [],
         participantSignature: signature,
