@@ -374,3 +374,113 @@ test('automatic alignment accepts explicit unlinked tournament evidence for the 
   assert.equal(repair.updatedSeason.series[entries[1].id].winsB, 1);
   assert.equal(repair.updatedSeason.series[entries[1].id].gameResults[0].id, 'explicit_tournament_sweet16_game1');
 });
+
+test('automatic alignment accepts stripped prior-day result with season-controlled schedule evidence', () => {
+  const season = makeSeason({ readyCount: 8, status: 'active' });
+  const entries = Object.values(season.series);
+  const series = entries[2];
+  const stripped = {
+    id: 'stripped_scheduled_sweet16_game1',
+    matchupId: 'stripped_scheduled_sweet16_game1',
+    dateKey: '2026-06-09',
+    playerAId: series.playerAId,
+    playerBId: series.playerBId,
+    playerAScore: 55,
+    playerBScore: 44,
+    winnerId: series.playerAId
+  };
+  const state = makeState(season, [stripped]);
+  state.schedule = [{
+    dateKey: '2026-06-09',
+    seasonMatchupControl: true,
+    matchups: [{
+      id: 'stripped_scheduled_sweet16_game1',
+      matchupId: 'stripped_scheduled_sweet16_game1',
+      seasonId: season.id,
+      seriesId: series.id,
+      seasonSeriesId: series.id,
+      matchupType: 'tournament',
+      playerAId: series.playerAId,
+      playerBId: series.playerBId
+    }]
+  }];
+
+  const repair = core.repairCurrentRoundSeriesGameAlignment(state, {
+    dateKey: '2026-06-10',
+    nowISO: '2026-06-10T12:00:00.000Z',
+    requireRecordedResultForAlignment: true
+  });
+
+  assert.equal(repair.changed, true);
+  assert.equal(repair.repairedCount, 1);
+  assert.equal(repair.updatedSeason.series[series.id].winsA, 1);
+  assert.equal(repair.updatedSeason.series[series.id].gameResults[0].seriesId, series.id);
+});
+
+test('automatic alignment ignores stripped prior-day result without season-controlled evidence', () => {
+  const season = makeSeason({ readyCount: 8, status: 'active' });
+  const entries = Object.values(season.series);
+  const series = entries[2];
+  const stripped = {
+    id: 'stripped_unscheduled_sweet16_game1',
+    matchupId: 'stripped_unscheduled_sweet16_game1',
+    dateKey: '2026-06-09',
+    playerAId: series.playerAId,
+    playerBId: series.playerBId,
+    playerAScore: 55,
+    playerBScore: 44,
+    winnerId: series.playerAId
+  };
+
+  const repair = core.repairCurrentRoundSeriesGameAlignment(makeState(season, [stripped]), {
+    dateKey: '2026-06-10',
+    nowISO: '2026-06-10T12:00:00.000Z',
+    requireRecordedResultForAlignment: true
+  });
+
+  assert.equal(repair.changed, false);
+  assert.equal(repair.repairedCount, 0);
+  assert.equal(repair.updatedSeason.series[series.id].winsA, 0);
+  assert.equal(repair.updatedSeason.series[series.id].gameResults.length, 0);
+});
+
+test('current-day tournament result is accepted only when includeCurrentDayResults is true', () => {
+  const season = makeSeason({ readyCount: 8, status: 'active', meta: { roundStartDateKeys: { sweet_16: '2026-06-09' } } });
+  const [series] = Object.values(season.series);
+  const currentDayResult = makeResult(series, '2026-06-10', 2, series.playerBId);
+
+  const defaultSync = core.syncCurrentSeasonSeriesFromRecordedResults(makeState(season, [currentDayResult]), {
+    nowISO: '2026-06-10T12:00:00.000Z'
+  });
+  assert.equal(defaultSync.updatedSeason.series[series.id].winsB, 0);
+  assert.equal(defaultSync.updatedSeason.series[series.id].gameResults.length, 0);
+
+  const includeSync = core.syncCurrentSeasonSeriesFromRecordedResults(makeState(season, [currentDayResult]), {
+    nowISO: '2026-06-10T12:00:00.000Z',
+    includeCurrentDayResults: true
+  });
+  assert.equal(includeSync.updatedSeason.series[series.id].winsB, 1);
+  assert.equal(includeSync.updatedSeason.series[series.id].gameResults.length, 1);
+});
+
+test('round start inference ignores stripped same-pair daily matchup without season evidence', () => {
+  const season = makeSeason({ readyCount: 8, status: 'active' });
+  const entries = Object.values(season.series);
+  const ordinaryDaily = {
+    id: 'ordinary_prior_day_for_round_start',
+    matchupId: 'ordinary_prior_day_for_round_start',
+    dateKey: '2026-06-09',
+    playerAId: entries[3].playerAId,
+    playerBId: entries[3].playerBId,
+    playerAScore: 51,
+    playerBScore: 40,
+    winnerId: entries[3].playerAId
+  };
+
+  const slate = core.buildSeasonDailySlate(makeState(season, [ordinaryDaily]), '2026-06-10', {
+    nowISO: '2026-06-10T12:00:00.000Z'
+  });
+
+  assert.equal(slate.updatedSeason.meta.roundStartDateKeys.sweet_16, '2026-06-10');
+  assert.deepEqual(new Set(slate.tournamentMatchups.map((matchup) => matchup.seriesGameNumber)), new Set([1]));
+});
