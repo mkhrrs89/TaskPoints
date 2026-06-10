@@ -257,3 +257,64 @@ test('real recorded results beat synthetic catch-up during alignment repair', ()
   assert.equal(repaired.catchUpResult, undefined);
   assert.equal(repaired.winnerId, entries[2].playerBId);
 });
+
+test('automatic alignment can use unlinked real prior-day matchups without inventing missing results', () => {
+  const season = makeSeason({ readyCount: 8, status: 'active' });
+  const entries = Object.values(season.series);
+  entries[0].gameResults = [makeResult(entries[0], '2026-06-09', 1, entries[0].playerAId)];
+  entries[0].winsA = 1;
+
+  const unlinkedReal = makeResult(entries[1], '2026-06-09', 1, entries[1].playerBId, {
+    id: 'unlinked_real_sweet16_game1',
+    matchupId: 'unlinked_real_sweet16_game1',
+    seriesId: '',
+    seasonSeriesId: ''
+  });
+
+  const repair = core.repairCurrentRoundSeriesGameAlignment(makeState(season, [unlinkedReal]), {
+    dateKey: '2026-06-10',
+    nowISO: '2026-06-10T12:00:00.000Z',
+    requireRecordedResultForAlignment: true
+  });
+
+  assert.equal(repair.changed, true);
+  assert.equal(repair.repairedCount, 1);
+  assert.equal(repair.updatedSeason.series[entries[1].id].winsB, 1);
+  assert.equal(repair.updatedSeason.series[entries[1].id].gameResults[0].id, 'unlinked_real_sweet16_game1');
+  assert.equal(repair.updatedSeason.series[entries[2].id].gameResults.length, 0);
+});
+
+test('automatic alignment infers a round start from real prior-day matchup evidence', () => {
+  const season = makeSeason({ readyCount: 8, status: 'active' });
+  const entries = Object.values(season.series);
+  const realResults = entries.map((series) => makeResult(series, '2026-06-09', 1, series.playerAId, {
+    seriesId: '',
+    seasonSeriesId: ''
+  }));
+
+  const repair = core.repairCurrentRoundSeriesGameAlignment(makeState(season, realResults), {
+    dateKey: '2026-06-10',
+    nowISO: '2026-06-10T12:00:00.000Z',
+    requireRecordedResultForAlignment: true
+  });
+
+  assert.equal(repair.changed, true);
+  assert.equal(repair.repairedCount, 8);
+  assert.equal(repair.updatedSeason.meta.roundStartDateKeys.sweet_16, '2026-06-09');
+  assert.equal(Object.values(repair.updatedSeason.series).every((series) => series.winsA === 1 && series.gameResults.length === 1), true);
+});
+
+test('current-day tournament results are not counted by default during sync', () => {
+  const season = makeSeason({ readyCount: 8, status: 'active', meta: { roundStartDateKeys: { sweet_16: '2026-06-09' } } });
+  season.startDateKey = '2026-06-01';
+  season.endDateKey = '2026-06-30';
+  const [series] = Object.values(season.series);
+  const currentDayResult = makeResult(series, '2026-06-10', 2, series.playerAId);
+
+  const synced = core.syncCurrentSeasonSeriesFromRecordedResults(makeState(season, [currentDayResult]), {
+    nowISO: '2026-06-10T12:00:00.000Z'
+  });
+
+  assert.equal(synced.updatedSeason.series[series.id].winsA, 0);
+  assert.equal(synced.updatedSeason.series[series.id].gameResults.length, 0);
+});

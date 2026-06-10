@@ -486,11 +486,25 @@
     };
 
     if (typeof core.syncCurrentSeasonSeriesFromRecordedResults === 'function') {
-      const syncOptions = { ...options, includeCurrentDayResults: options.includeCurrentDayResults !== false };
-const synced = core.syncCurrentSeasonSeriesFromRecordedResults(nextState, syncOptions);
+      const synced = core.syncCurrentSeasonSeriesFromRecordedResults(nextState, {
+        ...options,
+        includeCurrentDayResults: options.includeCurrentDayResults === true
+      });
       if (synced?.state) {
         changed = changed || Boolean(synced.changed);
         nextState = synced.state;
+      }
+    }
+
+    if (typeof core.repairCurrentRoundSeriesGameAlignment === 'function') {
+      const aligned = core.repairCurrentRoundSeriesGameAlignment(nextState, {
+        ...options,
+        dateKey: effectiveDateKey,
+        requireRecordedResultForAlignment: true
+      });
+      if (aligned?.state) {
+        changed = changed || Boolean(aligned.changed);
+        nextState = aligned.state;
       }
     }
 
@@ -1516,7 +1530,28 @@ const synced = core.syncCurrentSeasonSeriesFromRecordedResults(nextState, syncOp
       if (action === 'admin-resync-results') {
         const state = currentMountedState();
         const dateKey = getDateKey(new Date());
-        const result = typeof core.syncCurrentSeasonSeriesFromRecordedResults === 'function' ? core.syncCurrentSeasonSeriesFromRecordedResults(state, { nowISO: nowIso(), includeCurrentDayResults: true }) : (typeof core.syncSeasonResultsFromDailyMatchups === 'function' ? core.syncSeasonResultsFromDailyMatchups(state, dateKey, { nowISO: nowIso(), includeCurrentDayResults: true }) : { ok: false, errors: ['helper unavailable'] });
+        const now = nowIso();
+        const syncResult = typeof core.syncCurrentSeasonSeriesFromRecordedResults === 'function'
+          ? core.syncCurrentSeasonSeriesFromRecordedResults(state, { nowISO: now })
+          : (typeof core.syncSeasonResultsFromDailyMatchups === 'function'
+            ? core.syncSeasonResultsFromDailyMatchups(state, dateKey, { nowISO: now })
+            : { ok: false, state, errors: ['helper unavailable'] });
+
+        const aligned = syncResult.state && typeof core.repairCurrentRoundSeriesGameAlignment === 'function'
+          ? core.repairCurrentRoundSeriesGameAlignment(syncResult.state, {
+              nowISO: now,
+              dateKey,
+              requireRecordedResultForAlignment: true
+            })
+          : { ok: true, state: syncResult.state || state, changed: false, warnings: [] };
+
+        const result = {
+          ok: syncResult.ok !== false && aligned.ok !== false,
+          state: aligned.state || syncResult.state || state,
+          changed: Boolean(syncResult.changed || aligned.changed),
+          warnings: (syncResult.warnings || []).concat(aligned.warnings || []),
+          errors: (syncResult.errors || []).concat(aligned.errors || [])
+        };
         if (!result.ok && (result.errors || []).length) alert(`Re-sync warnings/errors: ${(result.errors || []).concat(result.warnings || []).join('; ')}`);
         saveAndRenderSeason(result.state || state, 'season-admin-resync-results');
         if (result.ok) alert(`Re-sync complete. Changed: ${result.changed ? 'yes' : 'no'}. ${(result.warnings || []).join(' ')}`);

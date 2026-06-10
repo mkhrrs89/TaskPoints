@@ -2568,8 +2568,45 @@
     if (!roundId) return { ok: false, state: normalizedState, season, updatedSeason: season, changed: false, repairedCount: 0, seriesIds: [], errors: ['No current round for repair date.'], warnings };
     const roundSeries = Object.values(season.series || {}).filter((series) => series?.roundId === roundId && series.playerAId && series.playerBId);
     if (!roundSeries.length) return { ok: true, state: normalizedState, season, updatedSeason: season, changed: false, repairedCount: 0, seriesIds: [], warnings };
+
+    const roundSeriesIds = new Set(roundSeries.map((series) => series?.id).filter(Boolean));
+    const roundPairKeys = new Set(roundSeries.map((series) => getPairingKey(series.playerAId, series.playerBId)).filter(Boolean));
+    const recordedEvidenceDates = [];
+    const addRecordedEvidenceDates = (records) => {
+      (Array.isArray(records) ? records : []).forEach((record) => {
+        const resultDate = getRecordedResultDateKey(record);
+        if (!resultDate || resultDate >= today) return;
+
+        const type = String(record?.matchupType || '').toLowerCase();
+        if (type && type !== 'tournament' && type !== 'season') return;
+
+        const winner = getRecordedResultWinner(record);
+        if (!winner.winnerId) return;
+
+        const seriesId = getRecordedSeriesId(record);
+        const hasRoundSeries = seriesId && roundSeriesIds.has(seriesId);
+        const hasRoundPair = !seriesId && roundPairKeys.has(getPairingKey(record?.playerAId, record?.playerBId));
+
+        if (hasRoundSeries || hasRoundPair) recordedEvidenceDates.push(resultDate);
+      });
+    };
+
+    addRecordedEvidenceDates(normalizedState.matchups);
+    addRecordedEvidenceDates(normalizedState.gameHistory);
+
+    const daily = season?.dailyTournamentResults;
+    if (Array.isArray(daily)) {
+      addRecordedEvidenceDates(daily);
+    } else if (daily && typeof daily === 'object') {
+      Object.values(daily).forEach((value) => {
+        if (Array.isArray(value)) addRecordedEvidenceDates(value);
+        else if (value && typeof value === 'object') addRecordedEvidenceDates([value]);
+      });
+    }
+
     const earliestStartedDate = roundSeries
       .flatMap((series) => (Array.isArray(series.gameResults) ? series.gameResults : []).map((result) => getRecordedResultDateKey(result)).filter(Boolean))
+      .concat(recordedEvidenceDates)
       .sort()[0] || getSeasonRoundActualStartDateKey(season, roundId) || today;
     const targetGameNumber = Math.max(1, (daysBetweenDateKeys(earliestStartedDate, today) || 0) + 1);
     const missingGameCount = Math.max(0, targetGameNumber - 1);
@@ -2596,6 +2633,8 @@
         const alreadyHasGame = existingResults.concat(additions).some((result) => Number(result?.gameNumber || result?.seriesGameNumber || result?.game) === gameNumber);
         const alreadyHasStableId = existingResults.concat(additions).some((result) => result?.id === stableId || result?.matchupId === stableId || result?.gameId === stableId || result?.completionId === stableId);
         if (alreadyHasDate || alreadyHasGame || alreadyHasStableId) return;
+        const recorded = findRecordedTournamentResultForSeriesDate(normalizedState, season, series, repairDate);
+        if (options.requireRecordedResultForAlignment === true && !recorded) return;
         additions.push(buildRoundAlignmentRepairGameResult(normalizedState, season, series, repairDate, gameNumber, options));
       });
       if (!additions.length) return;
