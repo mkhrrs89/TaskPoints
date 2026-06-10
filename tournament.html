@@ -280,27 +280,62 @@
       .replace(/'/g, '&#39;');
   }
 
+  function getTournamentTodayDateKey() {
+    if (window.TaskPointsCore && typeof TaskPointsCore.dateKey === 'function') return TaskPointsCore.dateKey(new Date());
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  function syncTournamentSeasonState(state) {
+    let nextState = state || {};
+    let changed = false;
+    const todayKey = getTournamentTodayDateKey();
+    const nowISO = new Date().toISOString();
+
+    if (window.TaskPointsCore && typeof TaskPointsCore.syncCurrentSeasonSeriesFromRecordedResults === 'function') {
+      const synced = TaskPointsCore.syncCurrentSeasonSeriesFromRecordedResults(nextState, { nowISO });
+      if (synced?.state) {
+        nextState = synced.state;
+        changed = changed || Boolean(synced.changed);
+      }
+    }
+
+    if (window.TaskPointsCore && typeof TaskPointsCore.repairCurrentRoundSeriesGameAlignment === 'function') {
+      const aligned = TaskPointsCore.repairCurrentRoundSeriesGameAlignment(nextState, {
+        nowISO,
+        dateKey: todayKey,
+        requireRecordedResultForAlignment: true
+      });
+      if (aligned?.state) {
+        nextState = aligned.state;
+        changed = changed || Boolean(aligned.changed);
+      }
+    }
+
+    if (window.TaskPointsCore && typeof TaskPointsCore.repairSeasonChampionshipData === 'function') {
+      const beforeRepair = JSON.stringify(nextState.currentSeason || null);
+      const repaired = TaskPointsCore.repairSeasonChampionshipData(nextState, { nowISO });
+      if (repaired?.ok && repaired.state) {
+        nextState = repaired.state;
+        changed = changed || JSON.stringify(nextState.currentSeason || null) !== beforeRepair;
+      }
+    }
+
+    return { state: nextState, changed };
+  }
+
   function loadTournamentState() {
     if (window.TaskPointsCore && typeof TaskPointsCore.loadAppState === 'function') {
       try {
         const loaded = TaskPointsCore.loadAppState({ syncDerived: false, persistSync: false });
         if (loaded && loaded.state && typeof loaded.state === 'object') {
-          let nextState = loaded.state;
-          let changed = false;
-          if (typeof TaskPointsCore.syncCurrentSeasonSeriesFromRecordedResults === 'function') {
-            const synced = TaskPointsCore.syncCurrentSeasonSeriesFromRecordedResults(nextState);
-            if (synced?.state) { nextState = synced.state; changed = changed || Boolean(synced.changed); }
-          }
-          if (typeof TaskPointsCore.repairSeasonChampionshipData === 'function') {
-            const beforeRepair = JSON.stringify(nextState.currentSeason || null);
-            const repaired = TaskPointsCore.repairSeasonChampionshipData(nextState);
-            if (repaired?.ok && repaired.state) {
-              nextState = repaired.state;
-              changed = changed || JSON.stringify(nextState.currentSeason || null) !== beforeRepair;
-            }
-          }
-          if (changed && typeof TaskPointsCore.saveStateSnapshot === 'function') {
-            const saved = TaskPointsCore.saveStateSnapshot(nextState, { savePath: 'season-play-in-advancement-repair' });
+          const synced = syncTournamentSeasonState(loaded.state);
+          let nextState = synced.state || loaded.state;
+          if (synced.changed && typeof TaskPointsCore.saveStateSnapshot === 'function') {
+            const saved = TaskPointsCore.saveStateSnapshot(nextState, { savePath: 'tournament-season-result-resync' });
             nextState = saved?.state || saved || nextState;
           }
           return nextState;
@@ -314,25 +349,14 @@
       const raw = localStorage.getItem(STORAGE_KEY);
       const parsed = raw ? JSON.parse(raw) : {};
       if (window.TaskPointsCore && typeof TaskPointsCore.normalizeState === 'function') {
-        let normalized = TaskPointsCore.normalizeState(parsed || {});
-        let changed = false;
-        if (typeof TaskPointsCore.syncCurrentSeasonSeriesFromRecordedResults === 'function') {
-          const synced = TaskPointsCore.syncCurrentSeasonSeriesFromRecordedResults(normalized);
-          if (synced?.state) { normalized = synced.state; changed = changed || Boolean(synced.changed); }
+        const normalized = TaskPointsCore.normalizeState(parsed || {});
+        const synced = syncTournamentSeasonState(normalized);
+        let nextState = synced.state || normalized;
+        if (synced.changed && typeof TaskPointsCore.saveStateSnapshot === 'function') {
+          const saved = TaskPointsCore.saveStateSnapshot(nextState, { savePath: 'tournament-season-result-resync' });
+          nextState = saved?.state || saved || nextState;
         }
-        if (typeof TaskPointsCore.repairSeasonChampionshipData === 'function') {
-          const beforeRepair = JSON.stringify(normalized.currentSeason || null);
-          const repaired = TaskPointsCore.repairSeasonChampionshipData(normalized);
-          if (repaired?.ok && repaired.state) {
-            normalized = repaired.state;
-            changed = changed || JSON.stringify(normalized.currentSeason || null) !== beforeRepair;
-          }
-        }
-        if (changed && typeof TaskPointsCore.saveStateSnapshot === 'function') {
-          const saved = TaskPointsCore.saveStateSnapshot(normalized, { savePath: 'season-play-in-advancement-repair' });
-          normalized = saved?.state || saved || normalized;
-        }
-        return normalized;
+        return nextState;
       }
       return parsed || {};
     } catch (error) {
