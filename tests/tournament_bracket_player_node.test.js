@@ -12,7 +12,8 @@ test('live Tourney image renderer uses the shared player node with seed and wins
   assert.match(tournamentHtml, /class="tourney-player-meta"/);
   assert.match(tournamentHtml, /class="tourney-player-seed"/);
   assert.match(tournamentHtml, /class="tourney-player-wins"/);
-  assert.match(tournamentHtml, /slot\.innerHTML\s*=\s*renderTournamentPlayerNodeHTML/);
+  assert.match(tournamentHtml, /function\s+ensureTournamentImageElement/);
+  assert.match(tournamentHtml, /function\s+updateTournamentPlayerMeta/);
 });
 
 test('live Tourney Round of 32 scaffold no longer creates standalone seed labels', () => {

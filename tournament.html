@@ -253,8 +253,10 @@
   function renderTournamentBracket() {
     const bracket = document.getElementById('tournamentBracket');
     if (!bracket) return;
+    if (bracket.getAttribute('data-tournament-bracket-rendered') === 'true' && bracket.querySelector('.tournament-slot')) return;
 
-    bracket.innerHTML = '';
+    bracket.replaceChildren();
+    bracket.setAttribute('data-tournament-bracket-rendered', 'true');
     bracket.appendChild(createTournamentSvgElement('svg', { 'aria-hidden': 'true' }, ['tournament-connector-layer']));
     bracket.appendChild(renderPlayInRound());
     bracket.appendChild(createTournamentInfoColumn(1, 'play-in-to-round-of-32'));
@@ -419,20 +421,25 @@
     return '';
   }
 
-  function renderTournamentPlayerNodeHTML({ state, playerId, imageId, series = null, side = '', slot = null }) {
-    if (!playerId || !imageId) return '';
+  function renderTournamentPlayerMetaHTML({ state, playerId, series = null, side = '', slot = null }) {
+    if (!playerId) return '';
     const seed = getTournamentSeedForPlayerNode(state, playerId, series, side, slot);
+    if (!seed) return '';
     const wins = getTournamentSeriesWinsForPlayer(series, playerId, side);
-    const metaHtml = seed ? `
+    return `
       <div class="tourney-player-meta" aria-label="Seed ${escapeHtml(seed)}, ${escapeHtml(wins)} series wins">
         <div class="tourney-player-seed">${escapeHtml(seed)}</div>
         <div class="tourney-player-wins">${escapeHtml(wins)}</div>
-      </div>` : '';
+      </div>`;
+  }
+
+  function renderTournamentPlayerNodeHTML({ state, playerId, imageId, series = null, side = '', slot = null }) {
+    if (!playerId || !imageId) return '';
     return `
       <div class="tourney-player-node">
-        ${metaHtml}
+        ${renderTournamentPlayerMetaHTML({ state, playerId, series, side, slot })}
         <div class="tourney-player-image-slot" data-tourney-player-id="${escapeHtml(playerId)}" data-tourney-image-id="${escapeHtml(imageId)}">
-          <img class="tourney-player-image hidden" alt="">
+          <img class="tourney-player-image" alt="" decoding="async" loading="eager">
         </div>
       </div>`;
   }
@@ -539,22 +546,24 @@
 
   async function hydrateTournamentImages(root = document) {
     const slots = Array.from(root.querySelectorAll('.tourney-player-image-slot[data-tourney-image-id]'));
-    const imageIds = Array.from(new Set(slots.map((slot) => slot.getAttribute('data-tourney-image-id') || '').filter(Boolean)));
-
-    await Promise.all(imageIds.map((imageId) => loadTournamentImageUrl(imageId)));
-
-    slots.forEach((slot) => {
+    const hydrations = slots.map((slot) => {
       const imageId = slot.getAttribute('data-tourney-image-id') || '';
-      const url = tournamentImageUrlCache.get(imageId);
-      if (!url) return;
-
       const img = slot.querySelector('img.tourney-player-image');
-      if (!img) return;
+      if (!imageId || !img) return Promise.resolve();
 
-      img.addEventListener('load', scheduleTournamentConnectorDraws, { once: true });
-      img.src = url;
-      img.classList.remove('hidden');
+      return loadTournamentImageUrl(imageId).then((url) => {
+        if (!url) return;
+        if (slot.getAttribute('data-tourney-image-id') !== imageId) return;
+        if (!slot.contains(img)) return;
+
+        img.addEventListener('load', scheduleTournamentConnectorDraws, { once: true });
+        if (img.src !== url) img.src = url;
+        img.classList.remove('hidden');
+        scheduleTournamentConnectorDraws();
+      });
     });
+
+    await Promise.allSettled(hydrations);
   }
 
   function getTournamentSeason(state) {
@@ -724,15 +733,87 @@
     return '';
   }
 
-  function applyTournamentImageSlot(slot, state, playerId) {
+  function clearTournamentImageSlot(slot) {
     slot.removeAttribute('data-tourney-player-id');
     slot.removeAttribute('data-player-id');
     slot.removeAttribute('data-tourney-image-id');
     slot.removeAttribute('data-image-id');
     slot.classList.remove('has-tourney-player-node');
-    slot.innerHTML = '';
+    if (slot.childNodes.length) slot.replaceChildren();
+  }
+
+  function updateTournamentPlayerMeta(node, state, playerId, series = null, side = '', slot = null) {
+    const metaHtml = renderTournamentPlayerMetaHTML({ state, playerId, series, side, slot }).trim();
+    let meta = node.querySelector(':scope > .tourney-player-meta');
+    if (!metaHtml) {
+      if (meta) meta.remove();
+      return;
+    }
+
+    if (!meta) {
+      const template = document.createElement('template');
+      template.innerHTML = metaHtml;
+      meta = template.content.firstElementChild;
+      node.insertBefore(meta, node.firstChild);
+      return;
+    }
+
+    const template = document.createElement('template');
+    template.innerHTML = metaHtml;
+    const nextMeta = template.content.firstElementChild;
+    if (nextMeta && meta.outerHTML !== nextMeta.outerHTML) meta.replaceWith(nextMeta);
+  }
+
+  function ensureTournamentImageElement(slot, playerId, imageId, { state = null, series = null, side = '' } = {}) {
+    let node = slot.querySelector(':scope > .tourney-player-node');
+    if (!node) {
+      node = createTournamentElement('div', {}, ['tourney-player-node']);
+      slot.appendChild(node);
+    }
+
+    updateTournamentPlayerMeta(node, state, playerId, series, side, slot);
+
+    let wrapper = node.querySelector(':scope > .tourney-player-image-slot') || slot.querySelector('.tourney-player-image-slot');
+    if (!wrapper) {
+      wrapper = createTournamentElement('div', {}, ['tourney-player-image-slot']);
+      node.appendChild(wrapper);
+    } else if (wrapper.parentElement !== node) {
+      node.appendChild(wrapper);
+    }
+
+    let img = wrapper.querySelector('img.tourney-player-image');
+    if (!img) {
+      img = document.createElement('img');
+      img.className = 'tourney-player-image';
+      img.alt = '';
+      img.decoding = 'async';
+      img.loading = 'eager';
+      wrapper.appendChild(img);
+    } else {
+      img.classList.remove('hidden');
+      img.decoding = 'async';
+      img.loading = 'eager';
+      if (!img.hasAttribute('alt')) img.alt = '';
+    }
+
+    wrapper.setAttribute('data-tourney-player-id', playerId);
+    wrapper.setAttribute('data-tourney-image-id', imageId);
+    slot.setAttribute('data-tourney-player-id', playerId);
+    slot.setAttribute('data-player-id', playerId);
+    slot.setAttribute('data-tourney-image-id', imageId);
+    slot.setAttribute('data-image-id', imageId);
+    slot.setAttribute('aria-hidden', 'false');
+    slot.classList.add('has-tourney-player-node');
+    return img;
+  }
+
+  function applyTournamentImageSlot(slot, state, playerId) {
+    const previousPlayerId = slot.getAttribute('data-tourney-player-id') || '';
+    const previousImageId = slot.getAttribute('data-tourney-image-id') || '';
+    const nextImageId = getTournamentPlayerImageId(state, playerId);
 
     if (!playerId) {
+      if (previousPlayerId || previousImageId || slot.childNodes.length) clearTournamentImageSlot(slot);
       slot.setAttribute('aria-hidden', 'true');
       return;
     }
@@ -741,15 +822,26 @@
     slot.setAttribute('data-player-id', playerId);
     slot.setAttribute('aria-hidden', 'false');
 
-    const imageId = getTournamentPlayerImageId(state, playerId);
-    if (!imageId) return;
+    if (!nextImageId) {
+      slot.removeAttribute('data-tourney-image-id');
+      slot.removeAttribute('data-image-id');
+      slot.classList.remove('has-tourney-player-node');
+      if (slot.childNodes.length) slot.replaceChildren();
+      return;
+    }
 
     const series = getTournamentSeriesForSlot(state, slot, playerId);
     const side = getTournamentSideForPlayerNode(series, playerId, slot);
-    slot.setAttribute('data-tourney-image-id', imageId);
-    slot.setAttribute('data-image-id', imageId);
-    slot.classList.add('has-tourney-player-node');
-    slot.innerHTML = renderTournamentPlayerNodeHTML({ state, playerId, imageId, series, side, slot });
+    const existingImg = slot.querySelector('img.tourney-player-image');
+    if (previousPlayerId === playerId && previousImageId === nextImageId && existingImg) {
+      const node = slot.querySelector(':scope > .tourney-player-node');
+      if (node) updateTournamentPlayerMeta(node, state, playerId, series, side, slot);
+      slot.classList.add('has-tourney-player-node');
+      return;
+    }
+
+    const img = ensureTournamentImageElement(slot, playerId, nextImageId, { state, series, side });
+    if (previousImageId && previousImageId !== nextImageId) img.removeAttribute('src');
   }
 
   function renderTournamentImages() {
