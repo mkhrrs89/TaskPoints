@@ -813,8 +813,8 @@
     return `${a} vs ${b}`;
   }
 
-  function getSeriesGameNumber(series, dateKey) {
-    if (typeof core.getSeriesGameNumber === 'function') return core.getSeriesGameNumber(series, dateKey);
+  function getSeriesGameNumber(series, dateKey, season = null) {
+    if (typeof core.getSeriesGameNumber === 'function') return core.getSeriesGameNumber(series, dateKey, season);
     return (Array.isArray(series?.gameResults) ? series.gameResults.length : 0) + 1;
   }
 
@@ -834,11 +834,13 @@
     return `<li><span>Game ${index + 1} — ${escapeHtml(winner)} defeated ${escapeHtml(loser)}</span>${result?.dateKey ? `<small>${escapeHtml(result.dateKey)}</small>` : ''}${score ? `<small>${escapeHtml(score.replace(/^ • /, ''))}</small>` : ''}${result?.matchupId ? `<small class="season-debug-id">${escapeHtml(result.matchupId)}</small>` : ''}</li>`;
   }
 
-  function seriesHasTodayGame(series, dateKey) {
+  function seriesHasTodayGame(series, dateKey, season = null) {
     if (!series || !dateKey || series.status === 'complete') return false;
-    const currentRound = getRoundForToday(null, dateKey);
+    const currentRound = getRoundForToday(season, dateKey);
     if (series.roundId !== currentRound?.id) return false;
-    return Boolean(series.playerAId && series.playerBId);
+    if (!series.playerAId || !series.playerBId) return false;
+    if (typeof core.getSeriesGameNumber === 'function') return Boolean(core.getSeriesGameNumber(series, dateKey, season));
+    return true;
   }
 
   function renderOfficialSeriesCard(season, series, options = {}) {
@@ -848,7 +850,7 @@
     const winsNeeded = Number(series?.winsNeeded) || (Number.isFinite(Number(bestOf)) ? Math.floor(Number(bestOf) / 2) + 1 : '—');
     const statusText = getSeriesStatusLine(series);
     const winnerFaces = getWinnerFacesLine(season, series);
-    const todayGameNumber = seriesHasTodayGame(series, dateKey) ? getSeriesGameNumber(series, dateKey) : null;
+    const todayGameNumber = seriesHasTodayGame(series, dateKey, season) ? getSeriesGameNumber(series, dateKey, season) : null;
     const pending = !series?.playerAId || !series?.playerBId;
     return `
       <details class="season-bracket-match season-series-card ${pending ? 'is-pending' : ''}">
