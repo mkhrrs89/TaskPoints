@@ -367,11 +367,6 @@
     if (isValidSeasonRoundStartDateKey(roundId, existingStart)) return existingStart;
 
     const roundSeries = Object.values(season.series || {}).filter((series) => series?.roundId === roundId);
-    const roundSeriesIds = new Set(roundSeries.map((series) => series?.id).filter(Boolean));
-    const roundPairKeys = new Set(roundSeries
-      .filter((series) => series?.playerAId && series?.playerBId)
-      .map((series) => getPairingKey(series.playerAId, series.playerBId)));
-
     const evidenceDates = [];
     const addEvidenceDate = (rawDate) => {
       const key = normalizeSeasonEvidenceDateKey(rawDate);
@@ -385,18 +380,34 @@
     });
 
     const state = options.state || options.currentState || null;
-    const matchups = Array.isArray(state?.matchups) ? state.matchups : [];
-    matchups.forEach((matchup) => {
-      if (!matchup) return;
-      const type = String(matchup.matchupType || '').toLowerCase();
-      if (type && type !== 'tournament' && type !== 'season') return;
-      const seriesId = getRecordedSeriesId(matchup);
-      const hasLinkedSeries = seriesId && roundSeriesIds.has(seriesId);
-      const pairKey = getPairingKey(matchup.playerAId, matchup.playerBId);
-      const hasRoundPair = !seriesId && pairKey && roundPairKeys.has(pairKey);
-      if (!hasLinkedSeries && !hasRoundPair) return;
-      addEvidenceDate(getRecordedResultDateKey(matchup));
-    });
+    const scanSafeEvidence = (records) => {
+      (Array.isArray(records) ? records : []).forEach((record) => {
+        const recordDate = getRecordedResultDateKey(record);
+        if (!recordDate) return;
+        const safeMatches = roundSeries
+          .map((series) => getSafeSeasonTournamentEvidenceRecord(state, season, series, record, { ...options, dateKey: recordDate }))
+          .filter(Boolean);
+        if (safeMatches.length === 1) addEvidenceDate(recordDate);
+      });
+    };
+
+    scanSafeEvidence(state?.matchups);
+    scanSafeEvidence(state?.gameHistory);
+
+    const daily = season?.dailyTournamentResults;
+    if (Array.isArray(daily)) {
+      scanSafeEvidence(daily);
+    } else if (daily && typeof daily === 'object') {
+      Object.entries(daily).forEach(([key, value]) => {
+        const decorate = (entry) => {
+          if (!entry || typeof entry !== 'object') return entry;
+          if (!season?.series?.[key] || getRecordedSeriesId(entry)) return entry;
+          return { ...entry, seriesId: key, seasonSeriesId: key };
+        };
+        if (Array.isArray(value)) scanSafeEvidence(value.map(decorate));
+        else if (value && typeof value === 'object') scanSafeEvidence([decorate(value)]);
+      });
+    }
 
     const earliestEvidence = evidenceDates.sort()[0] || '';
     if (earliestEvidence) {
@@ -2403,48 +2414,69 @@
     const recordDate = getRecordedResultDateKey(record) || options.dateKey || '';
     if (!recordDate || !isDateWithinSeasonBounds(season, recordDate)) return null;
 
-    const explicitSeriesId = getRecordedSeriesId(record);
-    if (explicitSeriesId && explicitSeriesId !== series.id) return null;
+    if (options.includeCurrentDayResults !== true) {
+      const today = options.todayDateKey || options.dateKeyToday || dateKey(options.nowISO || new Date());
+      if (today && today !== 'invalid' && recordDate >= today) return null;
+    }
 
-    const type = String(record?.matchupType || '').toLowerCase();
-    if (type === 'exhibition') return null;
-    if (type && type !== 'tournament' && type !== 'season') return null;
-
-    if (getPairingKey(record?.playerAId, record?.playerBId) !== getPairingKey(series.playerAId, series.playerBId)) return null;
+    if (!record.playerAId || !record.playerBId || !series.playerAId || !series.playerBId) return null;
+    const pairKey = getPairingKey(record.playerAId, record.playerBId);
+    if (!pairKey || pairKey !== getPairingKey(series.playerAId, series.playerBId)) return null;
 
     const winner = getRecordedResultWinner(record);
     if (!winner.winnerId || (winner.winnerId !== series.playerAId && winner.winnerId !== series.playerBId)) return null;
 
-    if (explicitSeriesId === series.id) {
-      return isValidSeasonResultDateForSeries(season, series, record, options) ? record : null;
+    const type = String(record.matchupType || '').toLowerCase();
+    const explicitSeriesId = getRecordedSeriesId(record);
+
+    if (type === 'exhibition' && explicitSeriesId !== series.id) return null;
+    if (type && type !== 'tournament' && type !== 'season' && explicitSeriesId !== series.id) return null;
+
+    if (explicitSeriesId) {
+      if (explicitSeriesId !== series.id) return null;
+      const explicitRecord = {
+        ...record,
+        seriesId: series.id,
+        seasonSeriesId: series.id,
+        matchupType: type === 'exhibition' ? 'tournament' : (record.matchupType || 'tournament')
+      };
+      if (!isValidSeasonResultDateForSeries(season, series, explicitRecord, options)) return null;
+      return withInferredSeasonMatchupMetadata(state, season, explicitRecord, options);
     }
 
     const repaired = withInferredSeasonMatchupMetadata(state, season, record, options);
-    const inferredSeriesId = getRecordedSeriesId(repaired);
+    if (getRecordedSeriesId(repaired) === series.id && isValidSeasonResultDateForSeries(season, series, repaired, options)) {
+      return repaired;
+    }
 
-    if (inferredSeriesId !== series.id) return null;
-    if (!isValidSeasonResultDateForSeries(season, series, repaired, options)) return null;
+    if (type === 'tournament' || type === 'season' || hasStrippedSeasonTournamentEvidence(state, season, record, series, options)) {
+      const decorated = {
+        ...record,
+        seasonId: season.id || record.seasonId || '',
+        seriesId: series.id,
+        seasonSeriesId: series.id,
+        roundId: series.roundId || record.roundId || '',
+        roundName: series.roundName || record.roundName || getSeasonDisplayName(series.roundId) || '',
+        matchupType: type || 'tournament',
+        bestOf: series.bestOf || record.bestOf || null,
+        winsNeeded: series.winsNeeded || record.winsNeeded || getSeasonSeriesWinsNeeded(series)
+      };
+      if (!isValidSeasonResultDateForSeries(season, series, decorated, options)) return null;
+      return decorated;
+    }
 
-    const hasExplicitTournamentEvidence =
-      type === 'tournament'
-      || type === 'season'
-      || repaired !== record
-      || hasStrippedSeasonTournamentEvidence(state, season, record, series, options)
-      || isRecordInSeasonControlledScheduleDay(state, record, recordDate, series.id);
-
-    if (!hasExplicitTournamentEvidence) return null;
-
-    return repaired;
+    return null;
   }
 
-  function findRecordedTournamentResultForSeriesDate(state, season, series, dateKeyStr) {
-    const containers = [];
-    if (Array.isArray(state?.matchups)) containers.push(...state.matchups);
-    if (Array.isArray(state?.gameHistory)) containers.push(...state.gameHistory);
+  function findRecordedTournamentResultForSeriesDate(state, season, series, dateKeyStr, options = {}) {
+    const records = [];
+
+    if (Array.isArray(state?.matchups)) records.push(...state.matchups);
+    if (Array.isArray(state?.gameHistory)) records.push(...state.gameHistory);
 
     const daily = season?.dailyTournamentResults;
     if (Array.isArray(daily)) {
-      containers.push(...daily);
+      records.push(...daily);
     } else if (daily && typeof daily === 'object') {
       Object.entries(daily).forEach(([key, value]) => {
         const decorate = (entry) => {
@@ -2452,16 +2484,18 @@
           if (!season?.series?.[key] || getRecordedSeriesId(entry)) return entry;
           return { ...entry, seriesId: key, seasonSeriesId: key };
         };
-
-        if (Array.isArray(value)) value.forEach((entry) => containers.push(decorate(entry)));
-        else if (value && typeof value === 'object') containers.push(decorate(value));
+        if (Array.isArray(value)) records.push(...value.map(decorate));
+        else if (value && typeof value === 'object') records.push(decorate(value));
       });
     }
 
-    for (const record of containers) {
+    for (const record of records) {
       if (!record || getRecordedResultDateKey(record) !== dateKeyStr) continue;
-      const safeRecord = getSafeSeasonTournamentEvidenceRecord(state, season, series, record, { dateKey: dateKeyStr });
-      if (safeRecord) return safeRecord;
+      const safe = getSafeSeasonTournamentEvidenceRecord(state, season, series, record, {
+        ...options,
+        dateKey: dateKeyStr
+      });
+      if (safe) return safe;
     }
 
     return null;
@@ -2488,7 +2522,7 @@
   }
 
   function buildLateBoundCatchUpGameResult(state, season, series, dateKeyStr, gameNumber, options = {}) {
-    const recorded = findRecordedTournamentResultForSeriesDate(state, season, series, dateKeyStr);
+    const recorded = findRecordedTournamentResultForSeriesDate(state, season, series, dateKeyStr, options);
     const winner = recorded ? getRecordedResultWinner(recorded) : buildDeterministicCatchUpWinner(series, dateKeyStr, gameNumber);
     const matchupId = recorded?.id || recorded?.matchupId || stableCatchUpResultId(season?.id || series.seasonId, series.id, dateKeyStr);
     const now = seasonNowISO(options);
@@ -2574,7 +2608,7 @@
 
 
   function buildRoundAlignmentRepairGameResult(state, season, series, dateKeyStr, gameNumber, options = {}) {
-    const recorded = findRecordedTournamentResultForSeriesDate(state, season, series, dateKeyStr);
+    const recorded = findRecordedTournamentResultForSeriesDate(state, season, series, dateKeyStr, options);
     const winner = recorded ? getRecordedResultWinner(recorded) : buildDeterministicCatchUpWinner(series, dateKeyStr, gameNumber);
     const now = seasonNowISO(options);
     if (recorded) {
@@ -2694,7 +2728,7 @@
         const alreadyHasGame = existingResults.concat(additions).some((result) => Number(result?.gameNumber || result?.seriesGameNumber || result?.game) === gameNumber);
         const alreadyHasStableId = existingResults.concat(additions).some((result) => result?.id === stableId || result?.matchupId === stableId || result?.gameId === stableId || result?.completionId === stableId);
         if (alreadyHasDate || alreadyHasGame || alreadyHasStableId) return;
-        const recorded = findRecordedTournamentResultForSeriesDate(normalizedState, season, series, repairDate);
+        const recorded = findRecordedTournamentResultForSeriesDate(normalizedState, season, series, repairDate, options);
         if (options.requireRecordedResultForAlignment === true && !recorded) return;
         additions.push(buildRoundAlignmentRepairGameResult(normalizedState, season, series, repairDate, gameNumber, options));
       });
@@ -2827,14 +2861,30 @@
   function isRecordInSeasonControlledScheduleDay(state, record, dateKeyStr, seriesId) {
     const schedules = Array.isArray(state?.schedule) ? state.schedule : [];
     const recordIds = [record?.id, record?.matchupId, record?.gameId].map((id) => String(id || '')).filter(Boolean);
+    if (!record?.playerAId || !record?.playerBId) return false;
+    const recordPairKey = getPairingKey(record.playerAId, record.playerBId);
+    const recordSeriesId = getRecordedSeriesId(record);
     return schedules.some((day) => {
       if (!day || day.dateKey !== dateKeyStr || day.seasonMatchupControl !== true) return false;
       return (Array.isArray(day.matchups) ? day.matchups : []).some((matchup) => {
         if (!matchup) return false;
-        const daySeriesId = getRecordedSeriesId(matchup);
+        const scheduleType = String(matchup.matchupType || '').toLowerCase();
+        if (scheduleType !== 'tournament' && scheduleType !== 'season') return false;
+        if (getPairingKey(matchup.playerAId, matchup.playerBId) !== recordPairKey) return false;
+
+        const scheduleSeasonId = String(matchup.seasonId || '').trim();
+        const recordSeasonId = String(record?.seasonId || '').trim();
+        if (scheduleSeasonId && recordSeasonId && scheduleSeasonId !== recordSeasonId) return false;
+
+        const scheduleSeriesId = getRecordedSeriesId(matchup);
+        if (seriesId && scheduleSeriesId && scheduleSeriesId !== seriesId) return false;
+        if (recordSeriesId && scheduleSeriesId && scheduleSeriesId !== recordSeriesId) return false;
+
         const matchupIds = [matchup.id, matchup.matchupId, matchup.gameId].map((id) => String(id || '')).filter(Boolean);
-        if (seriesId && daySeriesId === seriesId && getPairingKey(matchup.playerAId, matchup.playerBId) === getPairingKey(record?.playerAId, record?.playerBId)) return true;
-        return recordIds.length > 0 && recordIds.some((id) => matchupIds.includes(id));
+        const idsOverlap = recordIds.length > 0 && matchupIds.some((id) => recordIds.includes(id));
+        if (idsOverlap) return true;
+        if (seriesId && scheduleSeriesId === seriesId) return true;
+        return Boolean(recordSeriesId && scheduleSeriesId === recordSeriesId);
       });
     });
   }

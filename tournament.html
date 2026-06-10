@@ -296,7 +296,10 @@
     const nowISO = new Date().toISOString();
 
     if (window.TaskPointsCore && typeof TaskPointsCore.syncCurrentSeasonSeriesFromRecordedResults === 'function') {
-      const synced = TaskPointsCore.syncCurrentSeasonSeriesFromRecordedResults(nextState, { nowISO });
+      const synced = TaskPointsCore.syncCurrentSeasonSeriesFromRecordedResults(nextState, {
+        nowISO,
+        includeCurrentDayResults: false
+      });
       if (synced?.state) {
         nextState = synced.state;
         changed = changed || Boolean(synced.changed);
