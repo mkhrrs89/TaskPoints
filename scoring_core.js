@@ -342,6 +342,75 @@
     return gameNumber <= round.bestOf ? gameNumber : null;
   }
 
+
+  function normalizeSeasonEvidenceDateKey(value) {
+    const text = String(value || '').trim();
+    if (!text) return '';
+    const key = /^\d{4}-\d{2}-\d{2}/.test(text) ? text.slice(0, 10) : '';
+    if (!key) return '';
+    const date = dateFromLocalDateKey(key);
+    return date && !Number.isNaN(date.getTime()) ? key : '';
+  }
+
+  function isValidSeasonRoundStartDateKey(roundId, dateKeyStr) {
+    const key = normalizeSeasonEvidenceDateKey(dateKeyStr);
+    if (!key) return false;
+    const round = JUNE_2026_SEASON_DATE_WINDOWS.find((item) => item.id === roundId);
+    return Boolean(round && key >= round.startDate && key <= round.endDate);
+  }
+
+  function inferSeasonRoundActualStartDateKey(season, roundId, options = {}) {
+    const round = JUNE_2026_SEASON_DATE_WINDOWS.find((item) => item.id === roundId);
+    if (!round || !season?.series) return '';
+
+    const existingStart = normalizeSeasonEvidenceDateKey(season?.meta?.roundStartDateKeys?.[roundId]);
+    if (isValidSeasonRoundStartDateKey(roundId, existingStart)) return existingStart;
+
+    const roundSeries = Object.values(season.series || {}).filter((series) => series?.roundId === roundId);
+    const roundSeriesIds = new Set(roundSeries.map((series) => series?.id).filter(Boolean));
+    const roundPairKeys = new Set(roundSeries
+      .filter((series) => series?.playerAId && series?.playerBId)
+      .map((series) => getPairingKey(series.playerAId, series.playerBId)));
+
+    const evidenceDates = [];
+    const addEvidenceDate = (rawDate) => {
+      const key = normalizeSeasonEvidenceDateKey(rawDate);
+      if (key && key >= round.startDate && key <= round.endDate) evidenceDates.push(key);
+    };
+
+    roundSeries.forEach((series) => {
+      (Array.isArray(series?.gameResults) ? series.gameResults : []).forEach((result) => {
+        addEvidenceDate(getRecordedResultDateKey(result));
+      });
+    });
+
+    const state = options.state || options.currentState || null;
+    const matchups = Array.isArray(state?.matchups) ? state.matchups : [];
+    matchups.forEach((matchup) => {
+      if (!matchup) return;
+      const type = String(matchup.matchupType || '').toLowerCase();
+      if (type && type !== 'tournament' && type !== 'season') return;
+      const seriesId = getRecordedSeriesId(matchup);
+      const hasLinkedSeries = seriesId && roundSeriesIds.has(seriesId);
+      const pairKey = getPairingKey(matchup.playerAId, matchup.playerBId);
+      const hasRoundPair = !seriesId && pairKey && roundPairKeys.has(pairKey);
+      if (!hasLinkedSeries && !hasRoundPair) return;
+      addEvidenceDate(getRecordedResultDateKey(matchup));
+    });
+
+    const earliestEvidence = evidenceDates.sort()[0] || '';
+    if (earliestEvidence) {
+      return round.startDate && round.startDate <= earliestEvidence ? round.startDate : earliestEvidence;
+    }
+
+    const fallback = normalizeSeasonEvidenceDateKey(options.fallbackDateKey);
+    if (options.allowFallbackTodayOnlyWhenNoPriorEvidence === true && fallback && fallback >= round.startDate && fallback <= round.endDate) {
+      return fallback;
+    }
+
+    return '';
+  }
+
   function getSeasonRoundDefs() {
     return JUNE_2026_SEASON_DATE_WINDOWS.map((round) => ({ ...round }));
   }
@@ -1134,9 +1203,18 @@
 
     const roundHasActiveSeries = Object.values(nextSeries).some((series) => series?.roundId === roundId && series?.status === 'active' && series?.playerAId && series?.playerBId);
     if (canActivateCurrentRound && roundHasActiveSeries && !getSeasonRoundActualStartDateKey(normalized, roundId)) {
-      normalized.meta = normalizeSeasonObjectMap(normalized.meta);
-      normalized.meta.roundStartDateKeys = { ...(normalized.meta.roundStartDateKeys || {}), [roundId]: dateKeyStr };
-      changed = true;
+      const inferredStart = inferSeasonRoundActualStartDateKey({ ...normalized, series: nextSeries }, roundId, {
+        ...options,
+        state: options.state || options.currentState,
+        currentState: options.currentState || options.state,
+        fallbackDateKey: dateKeyStr,
+        allowFallbackTodayOnlyWhenNoPriorEvidence: true
+      });
+      if (inferredStart) {
+        normalized.meta = normalizeSeasonObjectMap(normalized.meta);
+        normalized.meta.roundStartDateKeys = { ...(normalized.meta.roundStartDateKeys || {}), [roundId]: inferredStart };
+        changed = true;
+      }
     }
 
     if (!changed) return { season: normalized, changed: false, activatedSeriesIds, warnings };
@@ -1163,7 +1241,7 @@
       : shouldUseSeasonMatchupControl(normalized, dateKeyStr);
     if (!seasonGateOpen) return '';
 
-    const prepared = prepareSeasonForDailySlate(directSeason || normalized.currentSeason, dateKeyStr);
+    const prepared = prepareSeasonForDailySlate(directSeason || normalized.currentSeason, dateKeyStr, normalized ? { state: normalized, currentState: normalized } : {});
     const season = prepared.season || directSeason || normalized.currentSeason;
     const activeSeries = getActiveSeasonSeriesForDate(season, dateKeyStr);
     const seriesRevision = activeSeries
@@ -1200,7 +1278,7 @@
       .filter((matchup) => matchup?.matchupType === 'tournament' || matchup?.matchupType === 'season')
       .map((matchup) => getRecordedSeriesId(matchup))
       .filter(Boolean));
-    const prepared = prepareSeasonForDailySlate(normalized.currentSeason, dateKeyStr);
+    const prepared = prepareSeasonForDailySlate(normalized.currentSeason, dateKeyStr, { state: normalized, currentState: normalized });
     const season = prepared.season || normalized.currentSeason;
     return getActiveSeasonSeriesForDate(season, dateKeyStr)
       .every((series) => tournamentSeriesIds.has(series.id));
@@ -2130,7 +2208,7 @@
       return { ok: false, dateKey: dateKeyStr, tournamentMatchups: [], exhibitionMatchups: [], allMatchups: [], warnings, errors, updatedSeason: season };
     }
 
-    const preparedSeason = prepareSeasonForDailySlate(season, dateKeyStr, options);
+    const preparedSeason = prepareSeasonForDailySlate(season, dateKeyStr, { ...options, state: normalized, currentState: normalized });
     const slateSeason = preparedSeason.season || season;
     if (preparedSeason.changed && preparedSeason.activatedSeriesIds.length) warnings.push(`Activated ${preparedSeason.activatedSeriesIds.length} ready ${getSeasonDisplayName(getCurrentSeasonRoundIdForDate(dateKeyStr)) || 'Season'} series for slate generation.`);
     if (Array.isArray(preparedSeason.warnings)) warnings.push(...preparedSeason.warnings);
@@ -6747,6 +6825,7 @@ return Number(cappedScore.toFixed(1));
     daysBetweenDateKeys,
     isSeasonRoundFullyReady,
     getRoundScheduledGameNumberForDate,
+    inferSeasonRoundActualStartDateKey,
     getSeasonSeriesLength,
     getSeasonDisplayName,
     getSeasonDateWindows,

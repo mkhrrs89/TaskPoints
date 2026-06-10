@@ -120,6 +120,61 @@ test('fully ready round starts together', () => {
   assert.equal(slate.updatedSeason.meta.roundStartDateKeys.sweet_16, '2026-06-09');
 });
 
+
+test('already-active round infers start from existing gameResults', () => {
+  const season = makeSeason({ readyCount: 8, status: 'active' });
+  Object.values(season.series).forEach((series) => {
+    series.gameResults = [makeResult(series, '2026-06-09', 1, series.playerAId)];
+    series.winsA = 1;
+  });
+
+  const slate = core.buildSeasonDailySlate(makeState(season), '2026-06-10', { nowISO: '2026-06-10T12:00:00.000Z' });
+
+  assert.equal(slate.updatedSeason.meta.roundStartDateKeys.sweet_16, '2026-06-09');
+  assert.equal(slate.tournamentMatchups.length, 8);
+  assert.deepEqual(new Set(slate.tournamentMatchups.map((matchup) => matchup.seriesGameNumber)), new Set([2]));
+});
+
+test('already-active round infers start from linked matchups', () => {
+  const season = makeSeason({ readyCount: 8, status: 'active' });
+  const matchups = Object.values(season.series).map((series) => makeResult(series, '2026-06-09', 1, series.playerAId));
+
+  const slate = core.buildSeasonDailySlate(makeState(season, matchups), '2026-06-10', { nowISO: '2026-06-10T12:00:00.000Z' });
+
+  assert.equal(slate.updatedSeason.meta.roundStartDateKeys.sweet_16, '2026-06-09');
+  assert.equal(slate.tournamentMatchups.length, 8);
+  assert.deepEqual(new Set(slate.tournamentMatchups.map((matchup) => matchup.seriesGameNumber)), new Set([2]));
+});
+
+test('new fully-ready round stamps today when no prior evidence exists', () => {
+  const season = makeSeason({ readyCount: 8, status: 'pending' });
+
+  const slate = core.buildSeasonDailySlate(makeState(season), '2026-06-10', { nowISO: '2026-06-10T12:00:00.000Z' });
+
+  assert.equal(slate.updatedSeason.meta.roundStartDateKeys.sweet_16, '2026-06-10');
+  assert.equal(slate.tournamentMatchups.length, 8);
+  assert.deepEqual(new Set(slate.tournamentMatchups.map((matchup) => matchup.seriesGameNumber)), new Set([1]));
+});
+
+test('existing round start date is preserved during slate generation', () => {
+  const season = makeSeason({ readyCount: 8, status: 'active', meta: { roundStartDateKeys: { sweet_16: '2026-06-09' } } });
+  Object.values(season.series).forEach((series) => {
+    series.gameResults = [makeResult(series, '2026-06-09', 1, series.playerAId)];
+    series.winsA = 1;
+  });
+
+  const slate = core.buildSeasonDailySlate(makeState(season), '2026-06-10', { nowISO: '2026-06-10T12:00:00.000Z' });
+
+  assert.equal(slate.updatedSeason.meta.roundStartDateKeys.sweet_16, '2026-06-09');
+  assert.deepEqual(new Set(slate.tournamentMatchups.map((matchup) => matchup.seriesGameNumber)), new Set([2]));
+});
+
+test('round game number calculation uses preserved start date', () => {
+  const season = makeSeason({ readyCount: 8, status: 'active', meta: { roundStartDateKeys: { sweet_16: '2026-06-09' } } });
+
+  assert.equal(core.getRoundScheduledGameNumberForDate(season, 'sweet_16', '2026-06-10'), 2);
+});
+
 test('game number stays round-synchronized', () => {
   const season = makeSeason({ readyCount: 8, status: 'active', meta: { roundStartDateKeys: { sweet_16: '2026-06-09' } } });
   Object.values(season.series).forEach((series) => {
