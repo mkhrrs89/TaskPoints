@@ -83,6 +83,8 @@ function makeSeason({ readyCount = 8, status = 'pending', meta = {} } = {}) {
   return {
     id: 'season_1_june_2026',
     monthKey: '2026-06',
+    startDateKey: '2026-06-01',
+    endDateKey: '2026-06-30',
     status: 'active',
     meta: { seasonMatchupControlEnabled: true, ...meta },
     series
@@ -317,4 +319,58 @@ test('current-day tournament results are not counted by default during sync', ()
 
   assert.equal(synced.updatedSeason.series[series.id].winsA, 0);
   assert.equal(synced.updatedSeason.series[series.id].gameResults.length, 0);
+});
+
+test('automatic alignment ignores ordinary same-pair daily matchups without season evidence', () => {
+  const season = makeSeason({ readyCount: 8, status: 'active' });
+  const entries = Object.values(season.series);
+
+  const ordinaryDailyMatchup = {
+    id: 'ordinary_daily_same_pair',
+    matchupId: 'ordinary_daily_same_pair',
+    dateKey: '2026-06-09',
+    playerAId: entries[1].playerAId,
+    playerBId: entries[1].playerBId,
+    playerAScore: 50,
+    playerBScore: 40,
+    winnerId: entries[1].playerAId
+  };
+
+  const repair = core.repairCurrentRoundSeriesGameAlignment(makeState(season, [ordinaryDailyMatchup]), {
+    dateKey: '2026-06-10',
+    nowISO: '2026-06-10T12:00:00.000Z',
+    requireRecordedResultForAlignment: true
+  });
+
+  assert.equal(repair.changed, false);
+  assert.equal(repair.repairedCount, 0);
+  assert.equal(repair.updatedSeason.series[entries[1].id].gameResults.length, 0);
+  assert.equal(repair.updatedSeason.series[entries[1].id].winsA, 0);
+  assert.equal(repair.updatedSeason.series[entries[1].id].winsB, 0);
+});
+
+test('automatic alignment accepts explicit unlinked tournament evidence for the current round', () => {
+  const season = makeSeason({ readyCount: 8, status: 'active' });
+  const entries = Object.values(season.series);
+
+  const tournamentEvidence = makeResult(entries[1], '2026-06-09', 1, entries[1].playerBId, {
+    id: 'explicit_tournament_sweet16_game1',
+    matchupId: 'explicit_tournament_sweet16_game1',
+    seriesId: '',
+    seasonSeriesId: '',
+    matchupType: 'tournament',
+    roundId: entries[1].roundId,
+    seasonId: season.id
+  });
+
+  const repair = core.repairCurrentRoundSeriesGameAlignment(makeState(season, [tournamentEvidence]), {
+    dateKey: '2026-06-10',
+    nowISO: '2026-06-10T12:00:00.000Z',
+    requireRecordedResultForAlignment: true
+  });
+
+  assert.equal(repair.changed, true);
+  assert.equal(repair.repairedCount, 1);
+  assert.equal(repair.updatedSeason.series[entries[1].id].winsB, 1);
+  assert.equal(repair.updatedSeason.series[entries[1].id].gameResults[0].id, 'explicit_tournament_sweet16_game1');
 });

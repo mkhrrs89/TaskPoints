@@ -2397,23 +2397,74 @@
     return `${seasonId || 'season'}_${seriesId || 'series'}_catchup_${String(dateKeyStr || '').replace(/-/g, '_')}`;
   }
 
+  function getSafeSeasonTournamentEvidenceRecord(state, season, series, record, options = {}) {
+    if (!record || !season || !series) return null;
+
+    const recordDate = getRecordedResultDateKey(record) || options.dateKey || '';
+    if (!recordDate || !isDateWithinSeasonBounds(season, recordDate)) return null;
+
+    const explicitSeriesId = getRecordedSeriesId(record);
+    if (explicitSeriesId && explicitSeriesId !== series.id) return null;
+
+    const type = String(record?.matchupType || '').toLowerCase();
+    if (type === 'exhibition') return null;
+    if (type && type !== 'tournament' && type !== 'season') return null;
+
+    if (getPairingKey(record?.playerAId, record?.playerBId) !== getPairingKey(series.playerAId, series.playerBId)) return null;
+
+    const winner = getRecordedResultWinner(record);
+    if (!winner.winnerId || (winner.winnerId !== series.playerAId && winner.winnerId !== series.playerBId)) return null;
+
+    if (explicitSeriesId === series.id) {
+      return isValidSeasonResultDateForSeries(season, series, record, options) ? record : null;
+    }
+
+    const repaired = withInferredSeasonMatchupMetadata(state, season, record, options);
+    const inferredSeriesId = getRecordedSeriesId(repaired);
+
+    if (inferredSeriesId !== series.id) return null;
+    if (!isValidSeasonResultDateForSeries(season, series, repaired, options)) return null;
+
+    const hasExplicitTournamentEvidence =
+      type === 'tournament'
+      || type === 'season'
+      || repaired !== record
+      || hasStrippedSeasonTournamentEvidence(state, season, record, series, options)
+      || isRecordInSeasonControlledScheduleDay(state, record, recordDate, series.id);
+
+    if (!hasExplicitTournamentEvidence) return null;
+
+    return repaired;
+  }
+
   function findRecordedTournamentResultForSeriesDate(state, season, series, dateKeyStr) {
     const containers = [];
     if (Array.isArray(state?.matchups)) containers.push(...state.matchups);
     if (Array.isArray(state?.gameHistory)) containers.push(...state.gameHistory);
+
     const daily = season?.dailyTournamentResults;
-    if (Array.isArray(daily)) containers.push(...daily);
-    else if (daily && typeof daily === 'object') Object.values(daily).forEach((value) => Array.isArray(value) ? containers.push(...value) : (value && typeof value === 'object' ? containers.push(value) : null));
-    return containers.find((record) => {
-      if (!record || getRecordedResultDateKey(record) !== dateKeyStr) return false;
-      const seriesId = getRecordedSeriesId(record);
-      if (seriesId && seriesId !== series.id) return false;
-      if (!seriesId && getPairingKey(record.playerAId, record.playerBId) !== getPairingKey(series.playerAId, series.playerBId)) return false;
-      const type = String(record.matchupType || '').toLowerCase();
-      if (type && type !== 'tournament' && type !== 'season') return false;
-      const winner = getRecordedResultWinner(record);
-      return Boolean(winner.winnerId && (winner.winnerId === series.playerAId || winner.winnerId === series.playerBId));
-    }) || null;
+    if (Array.isArray(daily)) {
+      containers.push(...daily);
+    } else if (daily && typeof daily === 'object') {
+      Object.entries(daily).forEach(([key, value]) => {
+        const decorate = (entry) => {
+          if (!entry || typeof entry !== 'object') return entry;
+          if (!season?.series?.[key] || getRecordedSeriesId(entry)) return entry;
+          return { ...entry, seriesId: key, seasonSeriesId: key };
+        };
+
+        if (Array.isArray(value)) value.forEach((entry) => containers.push(decorate(entry)));
+        else if (value && typeof value === 'object') containers.push(decorate(value));
+      });
+    }
+
+    for (const record of containers) {
+      if (!record || getRecordedResultDateKey(record) !== dateKeyStr) continue;
+      const safeRecord = getSafeSeasonTournamentEvidenceRecord(state, season, series, record, { dateKey: dateKeyStr });
+      if (safeRecord) return safeRecord;
+    }
+
+    return null;
   }
 
   function buildDeterministicCatchUpWinner(series, dateKeyStr, gameNumber) {
@@ -2569,25 +2620,29 @@
     const roundSeries = Object.values(season.series || {}).filter((series) => series?.roundId === roundId && series.playerAId && series.playerBId);
     if (!roundSeries.length) return { ok: true, state: normalizedState, season, updatedSeason: season, changed: false, repairedCount: 0, seriesIds: [], warnings };
 
-    const roundSeriesIds = new Set(roundSeries.map((series) => series?.id).filter(Boolean));
-    const roundPairKeys = new Set(roundSeries.map((series) => getPairingKey(series.playerAId, series.playerBId)).filter(Boolean));
     const recordedEvidenceDates = [];
     const addRecordedEvidenceDates = (records) => {
       (Array.isArray(records) ? records : []).forEach((record) => {
         const resultDate = getRecordedResultDateKey(record);
         if (!resultDate || resultDate >= today) return;
 
-        const type = String(record?.matchupType || '').toLowerCase();
-        if (type && type !== 'tournament' && type !== 'season') return;
-
         const winner = getRecordedResultWinner(record);
         if (!winner.winnerId) return;
 
-        const seriesId = getRecordedSeriesId(record);
-        const hasRoundSeries = seriesId && roundSeriesIds.has(seriesId);
-        const hasRoundPair = !seriesId && roundPairKeys.has(getPairingKey(record?.playerAId, record?.playerBId));
+        const explicitSeriesId = getRecordedSeriesId(record);
+        if (explicitSeriesId) {
+          const series = roundSeries.find((item) => item?.id === explicitSeriesId);
+          if (!series) return;
+          const safeRecord = getSafeSeasonTournamentEvidenceRecord(normalizedState, season, series, record, { ...options, dateKey: resultDate });
+          if (safeRecord) recordedEvidenceDates.push(resultDate);
+          return;
+        }
 
-        if (hasRoundSeries || hasRoundPair) recordedEvidenceDates.push(resultDate);
+        const safeMatches = roundSeries
+          .map((series) => getSafeSeasonTournamentEvidenceRecord(normalizedState, season, series, record, { ...options, dateKey: resultDate }))
+          .filter(Boolean);
+
+        if (safeMatches.length === 1) recordedEvidenceDates.push(resultDate);
       });
     };
 
@@ -2598,9 +2653,15 @@
     if (Array.isArray(daily)) {
       addRecordedEvidenceDates(daily);
     } else if (daily && typeof daily === 'object') {
-      Object.values(daily).forEach((value) => {
-        if (Array.isArray(value)) addRecordedEvidenceDates(value);
-        else if (value && typeof value === 'object') addRecordedEvidenceDates([value]);
+      Object.entries(daily).forEach(([key, value]) => {
+        const decorate = (entry) => {
+          if (!entry || typeof entry !== 'object') return entry;
+          if (!season?.series?.[key] || getRecordedSeriesId(entry)) return entry;
+          return { ...entry, seriesId: key, seasonSeriesId: key };
+        };
+
+        if (Array.isArray(value)) addRecordedEvidenceDates(value.map(decorate));
+        else if (value && typeof value === 'object') addRecordedEvidenceDates([decorate(value)]);
       });
     }
 
