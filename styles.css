@@ -5094,6 +5094,7 @@ header,
   column-gap: 0;
   row-gap: 0;
   min-width: max-content;
+  min-height: calc(32 * var(--bracket-row-size));
   padding-right: 10px;
 }
 
