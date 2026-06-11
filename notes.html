@@ -299,6 +299,14 @@
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "hidden") saveNotes(true);
     });
+    window.addEventListener("taskpoints-notes-updated", () => {
+      if (saveTimer) {
+        window.clearTimeout(saveTimer);
+        saveTimer = null;
+      }
+      loadNotes();
+      setStatus("Updated from import");
+    });
   </script>
 </body>
 </html>

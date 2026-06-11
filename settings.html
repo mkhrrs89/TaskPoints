@@ -923,23 +923,55 @@
     }
 
 
-    function readNotesPayloadFromBackup(parsedBackup) {
+    function readNotesPayloadFromBackupPayload(parsedBackup) {
       if (!parsedBackup || typeof parsedBackup !== "object") return null;
 
       const hasOwn = (obj, key) => !!obj && Object.prototype.hasOwnProperty.call(obj, key);
       if (hasOwn(parsedBackup.aux, "taskpoints_notes_v1")) return parsedBackup.aux.taskpoints_notes_v1;
       if (hasOwn(parsedBackup, "taskpoints_notes_v1")) return parsedBackup.taskpoints_notes_v1;
       if (hasOwn(parsedBackup.notesBackup, "taskpoints_notes_v1")) return parsedBackup.notesBackup.taskpoints_notes_v1;
-      if (hasOwn(parsedBackup.state, "notes")) {
-        return JSON.stringify(parsedBackup.state.notes);
-      }
+      if (hasOwn(parsedBackup.state, "notes")) return parsedBackup.state.notes;
+      if (hasOwn(parsedBackup, "notes")) return parsedBackup.notes;
       return null;
+    }
+
+    function readNotesPayloadFromBackup(parsedBackup) {
+      return readNotesPayloadFromBackupPayload(parsedBackup);
     }
 
     function normalizeNotesPayload(payload) {
       if (typeof payload === "string") return payload;
       if (payload == null) return "";
       try { return JSON.stringify(payload); } catch (_) { return String(payload); }
+    }
+
+    function applyImportedNotesPayload(notesPayload, options = {}) {
+      if (notesPayload == null) return false;
+
+      const notesText = normalizeNotesPayload(notesPayload);
+      const allowEmptyReplace = options.allowEmptyReplace === true;
+      if (!notesText.trim() && !allowEmptyReplace) return false;
+
+      try {
+        localStorage.setItem("taskpoints_notes_v1", notesText);
+      } catch (error) {
+        console.error("Failed to write imported notes cache", error);
+      }
+
+      try {
+        const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+        const savedState = raw ? JSON.parse(raw) : {};
+        savedState.notes = notesText;
+        localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(savedState));
+      } catch (error) {
+        console.error("Failed to write imported notes into main state", error);
+      }
+
+      window.dispatchEvent(new CustomEvent("taskpoints-notes-updated", {
+        detail: { source: options.source || "notes-import" }
+      }));
+
+      return true;
     }
 
     function getStorageSizeKiB(value) {
@@ -994,19 +1026,25 @@ ${b}`;
       const existingNotes = localStorage.getItem("taskpoints_notes_v1") || "";
       if (!incomingNotes.trim() || mode === "skip") return false;
       if (mode === "replace") {
-        localStorage.setItem("taskpoints_notes_v1", incomingNotes);
-        return true;
+        return applyImportedNotesPayload(incomingNotes, {
+          source: "settings-merge-notes-replace",
+          allowEmptyReplace: true
+        });
       }
       if (mode === "append") {
-        localStorage.setItem("taskpoints_notes_v1", [existingNotes, incomingNotes].filter(Boolean).join("\n\n"));
-        return true;
+        return applyImportedNotesPayload([existingNotes, incomingNotes].filter(Boolean).join("\n\n"), {
+          source: "settings-merge-notes-append",
+          allowEmptyReplace: true
+        });
       }
       if (mode === "merge") {
         const currentObj = tryParseJsonNotes(existingNotes);
         const backupObj = tryParseJsonNotes(incomingNotes);
         if (currentObj && backupObj) {
-          localStorage.setItem("taskpoints_notes_v1", JSON.stringify(mergeNotesObjects(currentObj, backupObj)));
-          return true;
+          return applyImportedNotesPayload(JSON.stringify(mergeNotesObjects(currentObj, backupObj)), {
+            source: "settings-merge-notes-merge",
+            allowEmptyReplace: true
+          });
         }
       }
       return false;
@@ -1024,6 +1062,7 @@ ${b}`;
         throw new Error("Root object missing tasks/completions arrays");
       }
 
+      const importedNotesPayload = readNotesPayloadFromBackupPayload(data);
       const currentState = loadSettingsState();
       const normalized = window.TaskPointsCore?.normalizeImportedFullBackupState
         ? TaskPointsCore.normalizeImportedFullBackupState(root, currentState, {
@@ -1043,6 +1082,9 @@ ${b}`;
       if (preserveWeight) normalized.weightHistory = Array.isArray(currentState.weightHistory) ? currentState.weightHistory : [];
       if (preserveReminders) normalized.reminders = Array.isArray(currentState.reminders) ? currentState.reminders : [];
       if (preserveVo2) normalized.vo2MaxHistory = Array.isArray(currentState.vo2MaxHistory) ? currentState.vo2MaxHistory : [];
+      if (importedNotesPayload != null) {
+        normalized.notes = normalizeNotesPayload(importedNotesPayload);
+      }
       if (!confirm("This will replace current device data. Use Merge Backup if you only want to restore missing history. Continue with full import?")) return;
       if (!Object.prototype.hasOwnProperty.call(root, "scoringSettings")) {
   delete normalized.scoringSettings;
@@ -1068,17 +1110,11 @@ ${b}`;
       } else {
         console.warn("settings import skipped localStorage write; TaskPointsCore missing.");
       }
-      const importedNotesPayload = readNotesPayloadFromBackup(data);
-      if (isFullBackup && importedNotesPayload != null) {
-        const incomingNotes = normalizeNotesPayload(importedNotesPayload);
-        const existingNotes = localStorage.getItem("taskpoints_notes_v1") || "";
-        if (incomingNotes.trim()) {
-          if (!existingNotes.trim()) {
-            if (confirm("Restore notes from backup?")) applyNotesRestore("replace", incomingNotes);
-          } else if (confirm("Backup contains Notes. Replace current Notes with backup Notes? Click Cancel to keep current Notes.")) {
-            applyNotesRestore("replace", incomingNotes);
-          }
-        }
+      if (importedNotesPayload != null) {
+        applyImportedNotesPayload(importedNotesPayload, {
+          source: "settings-full-import",
+          allowEmptyReplace: true
+        });
       }
       if (isFullBackup && data.aux && Object.prototype.hasOwnProperty.call(data.aux, "tp_projects_v1")) {
         const incomingProjects = data.aux.tp_projects_v1;
@@ -1382,7 +1418,7 @@ Earliest completion: ${earliestCompletion}
 Earliest matchup: ${earliestMatchup}
 Earliest gameHistory: ${earliestGameHistory}`;
         const mergedState = { ...currentState, ...merged, lastBackupMerge: new Date().toISOString() };
-        const backupNotesPayloadRaw = readNotesPayloadFromBackup(raw);
+        const backupNotesPayloadRaw = readNotesPayloadFromBackupPayload(raw);
         const backupNotes = normalizeNotesPayload(backupNotesPayloadRaw);
         const currentNotes = localStorage.getItem("taskpoints_notes_v1") || "";
         const currentNotesKiB = getStorageSizeKiB(currentNotes).toFixed(1);
@@ -1417,6 +1453,12 @@ ${summaryWithNotes}`)) return;
           });
         } else {
           localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(mergedState));
+        }
+        if (notesRestored) {
+          applyImportedNotesPayload(localStorage.getItem("taskpoints_notes_v1") || "", {
+            source: "settings-merge-backup",
+            allowEmptyReplace: true
+          });
         }
 
         const saved = JSON.parse(localStorage.getItem('taskpoints_v1') || '{}');

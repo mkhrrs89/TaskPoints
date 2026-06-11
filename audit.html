@@ -1354,6 +1354,77 @@ function runWeightVo2HistorySavePathAudit(state) {
       }
     }
 
+    function readNotesPayloadFromBackupPayloadForAudit(payload) {
+      if (!payload || typeof payload !== 'object') return null;
+
+      const hasOwn = (obj, key) => !!obj && Object.prototype.hasOwnProperty.call(obj, key);
+      if (hasOwn(payload.aux, NOTES_PAGE_CACHE_KEY_FOR_AUDIT)) return payload.aux[NOTES_PAGE_CACHE_KEY_FOR_AUDIT];
+      if (hasOwn(payload, NOTES_PAGE_CACHE_KEY_FOR_AUDIT)) return payload[NOTES_PAGE_CACHE_KEY_FOR_AUDIT];
+      if (hasOwn(payload.notesBackup, NOTES_PAGE_CACHE_KEY_FOR_AUDIT)) return payload.notesBackup[NOTES_PAGE_CACHE_KEY_FOR_AUDIT];
+      if (hasOwn(payload.state, 'notes')) return payload.state.notes;
+      if (hasOwn(payload, 'notes')) return payload.notes;
+
+      return null;
+    }
+
+    function normalizeNotesPayloadForAudit(payload) {
+      if (typeof payload === 'string') return payload;
+      if (payload == null) return '';
+      try { return JSON.stringify(payload); } catch (_) { return String(payload); }
+    }
+
+    function getCurrentNotesForExportForAudit(state = null) {
+      const cached = getCachedGeneralNotesForAudit() || '';
+      const stateNotes = typeof state?.notes === 'string' ? state.notes : '';
+      return typeof cached === 'string' && cached.length ? cached : stateNotes;
+    }
+
+    function runNotesBackupImportAudit(state) {
+      const safeState = state && typeof state === 'object' ? state : {};
+      const cachedRaw = getCachedGeneralNotesForAudit();
+      const cached = typeof cachedRaw === 'string' ? cachedRaw : '';
+      const stateNotes = typeof safeState.notes === 'string' ? safeState.notes : '';
+      const exportSnapshot = { ...safeState };
+      const notesText = getCurrentNotesForExportForAudit(exportSnapshot);
+      exportSnapshot.notes = notesText;
+      const exportPayload = {
+        exportType: 'taskpoints_full_backup',
+        version: 2,
+        exportedAtISO: new Date().toISOString(),
+        state: exportSnapshot,
+        aux: { [NOTES_PAGE_CACHE_KEY_FOR_AUDIT]: notesText }
+      };
+      const importedFromAux = readNotesPayloadFromBackupPayloadForAudit({
+        exportType: 'taskpoints_full_backup',
+        state: { ...exportSnapshot, notes: '' },
+        aux: { [NOTES_PAGE_CACHE_KEY_FOR_AUDIT]: notesText }
+      });
+
+      const details = [];
+      if (cachedRaw == null && !stateNotes.trim()) {
+        details.push('Notes cache key is missing and state.notes is empty; this is OK only when the user intentionally has no Notes.');
+      }
+      if ((cached.trim() || stateNotes.trim()) && cached !== stateNotes) {
+        details.push('taskpoints_v1.notes and taskpoints_notes_v1 differ while at least one contains content.');
+      }
+      if (exportPayload.state.notes !== notesText) {
+        details.push('Export snapshot state.notes does not contain the selected notes text.');
+      }
+      if (exportPayload.aux?.[NOTES_PAGE_CACHE_KEY_FOR_AUDIT] !== notesText) {
+        details.push('Export snapshot aux.taskpoints_notes_v1 does not contain the selected notes text.');
+      }
+      if (importedFromAux !== notesText) {
+        details.push('Full backup notes reader did not recover aux.taskpoints_notes_v1.');
+      }
+
+      return {
+        status: details.length ? 'WARN' : 'PASS',
+        expected: 'Notes cache and state stay synchronized, exports include Notes in state and aux, and imports read aux.taskpoints_notes_v1',
+        actual: details.length ? details.join(' ') : 'Notes cache/state and backup note paths are consistent',
+        details
+      };
+    }
+
     function hasAnyNotesForAudit(state) {
       const safeState = state && typeof state === 'object' ? state : {};
       const candidateValues = [
@@ -3129,6 +3200,18 @@ const actualTotal = round2(Number(derivedActualTotal) || 0);
         details: weightHistoryAudit.details,
         trace: 'reminders + weightHistory + vo2MaxHistory sentinels preserved across page adapters',
         tips: 'Ensure all normalize/save adapters keep state.reminders, state.weightHistory, and state.vo2MaxHistory as top-level sticky arrays.'
+      });
+
+      const notesBackupAudit = runNotesBackupImportAudit(state);
+      checks.push({
+        id: 'notes-backup-import-sync',
+        title: 'Notes backup/export/import paths are synchronized',
+        status: notesBackupAudit.status,
+        expected: notesBackupAudit.expected,
+        actual: notesBackupAudit.actual,
+        details: notesBackupAudit.details,
+        trace: 'taskpoints_v1.notes + taskpoints_notes_v1 + full backup state.notes/aux.taskpoints_notes_v1 reader',
+        tips: 'If this fails, open Notes once or re-import a full backup so both Notes storage locations match.'
       });
 
       // New: Audit self-check (verifies other checks are wired correctly)
