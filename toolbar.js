@@ -1462,6 +1462,87 @@ function saveStateSnapshotFallback(next, options = {}) {
   }
 }
 
+function getCurrentNotesForExportFallback(snapshot = null) {
+  let cached = '';
+  try {
+    cached = localStorage.getItem('taskpoints_notes_v1') || '';
+  } catch (_) {}
+
+  const stateNotes = typeof snapshot?.notes === 'string' ? snapshot.notes : '';
+  return typeof cached === 'string' && cached.length ? cached : stateNotes;
+}
+
+function readNotesPayloadFromBackupPayloadFallback(payload) {
+  if (!payload || typeof payload !== 'object') return null;
+
+  const hasOwn = (obj, key) => !!obj && Object.prototype.hasOwnProperty.call(obj, key);
+  const candidates = [];
+
+  const addCandidate = (value) => {
+    if (value == null) return;
+    candidates.push(value);
+  };
+
+  if (hasOwn(payload.aux, 'taskpoints_notes_v1')) addCandidate(payload.aux.taskpoints_notes_v1);
+  if (hasOwn(payload, 'taskpoints_notes_v1')) addCandidate(payload.taskpoints_notes_v1);
+  if (hasOwn(payload.notesBackup, 'taskpoints_notes_v1')) addCandidate(payload.notesBackup.taskpoints_notes_v1);
+  if (hasOwn(payload.state, 'notes')) addCandidate(payload.state.notes);
+  if (hasOwn(payload, 'notes')) addCandidate(payload.notes);
+
+  if (!candidates.length) return null;
+
+  const toText = (value) => {
+    if (typeof value === 'string') return value;
+    try {
+      return JSON.stringify(value);
+    } catch (_) {
+      return String(value ?? '');
+    }
+  };
+
+  const nonEmpty = candidates.find((value) => toText(value).trim().length > 0);
+  return nonEmpty != null ? nonEmpty : candidates[0];
+}
+
+function normalizeNotesPayloadFallback(payload) {
+  if (typeof payload === 'string') return payload;
+  if (payload == null) return '';
+  try {
+    return JSON.stringify(payload);
+  } catch (_) {
+    return String(payload);
+  }
+}
+
+function applyImportedNotesPayloadFallback(notesPayload, options = {}) {
+  if (notesPayload == null) return false;
+
+  const notesText = normalizeNotesPayloadFallback(notesPayload);
+  const allowEmptyReplace = options.allowEmptyReplace === true;
+  if (!notesText.trim() && !allowEmptyReplace) return false;
+
+  try {
+    localStorage.setItem('taskpoints_notes_v1', notesText);
+  } catch (error) {
+    console.error('Failed to write imported notes cache', error);
+  }
+
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_FALLBACK);
+    const savedState = raw ? JSON.parse(raw) : {};
+    savedState.notes = notesText;
+    localStorage.setItem(STORAGE_KEY_FALLBACK, JSON.stringify(savedState));
+  } catch (error) {
+    console.error('Failed to write imported notes into main state', error);
+  }
+
+  window.dispatchEvent(new CustomEvent('taskpoints-notes-updated', {
+    detail: { source: options.source || 'notes-import' }
+  }));
+
+  return true;
+}
+
 function exportDataFallback() {
   window.TaskPointsCore?.flushPendingSaves?.();
   const snapshot = stripLegacyImageFields(normalizeStateGlobal({ ...loadRawStateFallback(), projects: loadProjectsFromStorageFallback() }));
@@ -1469,7 +1550,8 @@ function exportDataFallback() {
   if (scheduleChanged) {
     saveStateSnapshotFallback(snapshot);
   }
-  const notesRaw = localStorage.getItem('taskpoints_notes_v1');
+  const notesText = getCurrentNotesForExportFallback(snapshot);
+  snapshot.notes = notesText;
   const projectsRaw = localStorage.getItem('tp_projects_v1');
   const exportPayload = {
     exportType: 'taskpoints_full_backup',
@@ -1477,7 +1559,7 @@ function exportDataFallback() {
     exportedAtISO: new Date().toISOString(),
     state: snapshot,
     aux: {
-      taskpoints_notes_v1: typeof notesRaw === 'string' ? notesRaw : '',
+      taskpoints_notes_v1: notesText,
       ...(typeof projectsRaw === 'string' ? { tp_projects_v1: projectsRaw } : {})
     }
   };
@@ -2211,7 +2293,8 @@ async function exportBackupWithImagesFallback() {
     });
   }
 
-  const notesRaw = localStorage.getItem('taskpoints_notes_v1');
+  const notesText = getCurrentNotesForExportFallback(snapshot);
+  snapshot.notes = notesText;
   const projectsRaw = localStorage.getItem('tp_projects_v1');
   const exportPayload = {
     exportType: 'taskpoints_full_backup',
@@ -2219,7 +2302,7 @@ async function exportBackupWithImagesFallback() {
     exportedAtISO: new Date().toISOString(),
     state: snapshot,
     aux: {
-      taskpoints_notes_v1: typeof notesRaw === 'string' ? notesRaw : '',
+      taskpoints_notes_v1: notesText,
       ...(typeof projectsRaw === 'string' ? { tp_projects_v1: projectsRaw } : {})
     }
   };
@@ -2256,7 +2339,10 @@ async function exportBackupWithImagesFallback() {
   URL.revokeObjectURL(url);
 }
 
-async function applyImportedStateFallback(root) {
+async function applyImportedStateFallback(rootOrPayload) {
+  const fullPayload = rootOrPayload?.exportType === 'taskpoints_full_backup' && rootOrPayload?.state ? rootOrPayload : null;
+  const root = fullPayload?.state || rootOrPayload;
+  const importedNotesPayload = fullPayload ? readNotesPayloadFromBackupPayloadFallback(fullPayload) : readNotesPayloadFromBackupPayloadFallback(rootOrPayload);
   const currentState = { ...loadRawStateFallback(), projects: loadProjectsFromStorageFallback() };
   let normalized = window.TaskPointsCore?.normalizeImportedFullBackupState
     ? TaskPointsCore.normalizeImportedFullBackupState(root, currentState)
@@ -2265,6 +2351,9 @@ async function applyImportedStateFallback(root) {
         reminders: Array.isArray(root?.reminders) ? root.reminders : (Array.isArray(currentState?.reminders) ? currentState.reminders : []),
         projects: Array.isArray(root?.projects) ? root.projects : currentState.projects
       });
+  if (importedNotesPayload != null) {
+    normalized.notes = normalizeNotesPayloadFallback(importedNotesPayload);
+  }
 
 
   const migrate = window.TaskPointsCore?.migrateLegacyImages || migrateLegacyImagesFromStateFallback;
@@ -2276,6 +2365,9 @@ async function applyImportedStateFallback(root) {
         reminders: Array.isArray(migrated.state?.reminders) ? migrated.state.reminders : normalized.reminders,
         projects: normalized.projects
       }));
+      if (importedNotesPayload != null) {
+        normalized.notes = normalizeNotesPayloadFallback(importedNotesPayload);
+      }
     }
   }
 
@@ -2288,6 +2380,12 @@ async function applyImportedStateFallback(root) {
   }
 
   saveStateSnapshotFallback(normalized, { allowDestructiveOverwrite: true, source: 'toolbar-import' });
+  if (importedNotesPayload != null) {
+    applyImportedNotesPayloadFallback(importedNotesPayload, {
+      source: 'toolbar-full-import',
+      allowEmptyReplace: true
+    });
+  }
   window.location.reload();
 }
 
@@ -2307,7 +2405,7 @@ async function importFileFallback(ev) {
         throw new Error('Root object missing tasks/completions arrays');
       }
 
-      await applyImportedStateFallback(root);
+      await applyImportedStateFallback(manifest?.exportType === 'taskpoints_full_backup' ? manifest : root);
     } catch (err) {
       console.error('Failed to import zip backup', err);
       alert('Import failed. Make sure the zip was exported from TaskPoints.');
@@ -2339,7 +2437,7 @@ async function importFileFallback(ev) {
         throw new Error('Root object missing tasks/completions arrays');
       }
 
-      applyImportedStateFallback(root).catch((err) => {
+      applyImportedStateFallback(data?.exportType === 'taskpoints_full_backup' ? data : root).catch((err) => {
         console.error('Failed to apply imported state (file)', err);
         alert('Failed to apply imported data. Check console for details.');
       });
@@ -2377,7 +2475,7 @@ function importPasteFallback() {
       throw new Error('Root object missing tasks/completions arrays');
     }
 
-    applyImportedStateFallback(root).catch((err) => {
+    applyImportedStateFallback(data?.exportType === 'taskpoints_full_backup' ? data : root).catch((err) => {
       console.error('Failed to apply imported state (paste)', err);
       alert('Failed to apply imported data. Check console for details.');
     });

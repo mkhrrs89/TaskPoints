@@ -10286,12 +10286,94 @@ function exportData(){
   URL.revokeObjectURL(url);
 }
 
+function getCurrentNotesForExport(snapshot = null) {
+  let cached = "";
+  try {
+    cached = localStorage.getItem("taskpoints_notes_v1") || "";
+  } catch (_) {}
+
+  const stateNotes = typeof snapshot?.notes === "string" ? snapshot.notes : "";
+  return typeof cached === "string" && cached.length ? cached : stateNotes;
+}
+
+function readNotesPayloadFromBackupPayload(payload) {
+  if (!payload || typeof payload !== "object") return null;
+
+  const hasOwn = (obj, key) => !!obj && Object.prototype.hasOwnProperty.call(obj, key);
+  const candidates = [];
+
+  const addCandidate = (value) => {
+    if (value == null) return;
+    candidates.push(value);
+  };
+
+  if (hasOwn(payload.aux, "taskpoints_notes_v1")) addCandidate(payload.aux.taskpoints_notes_v1);
+  if (hasOwn(payload, "taskpoints_notes_v1")) addCandidate(payload.taskpoints_notes_v1);
+  if (hasOwn(payload.notesBackup, "taskpoints_notes_v1")) addCandidate(payload.notesBackup.taskpoints_notes_v1);
+  if (hasOwn(payload.state, "notes")) addCandidate(payload.state.notes);
+  if (hasOwn(payload, "notes")) addCandidate(payload.notes);
+
+  if (!candidates.length) return null;
+
+  const toText = (value) => {
+    if (typeof value === "string") return value;
+    try {
+      return JSON.stringify(value);
+    } catch (_) {
+      return String(value ?? "");
+    }
+  };
+
+  const nonEmpty = candidates.find((value) => toText(value).trim().length > 0);
+  return nonEmpty != null ? nonEmpty : candidates[0];
+}
+
+function normalizeNotesPayload(payload) {
+  if (typeof payload === "string") return payload;
+  if (payload == null) return "";
+  try {
+    return JSON.stringify(payload);
+  } catch (_) {
+    return String(payload);
+  }
+}
+
+function applyImportedNotesPayload(notesPayload, options = {}) {
+  if (notesPayload == null) return false;
+
+  const notesText = normalizeNotesPayload(notesPayload);
+  const allowEmptyReplace = options.allowEmptyReplace === true;
+  if (!notesText.trim() && !allowEmptyReplace) return false;
+
+  try {
+    localStorage.setItem("taskpoints_notes_v1", notesText);
+  } catch (error) {
+    console.error("Failed to write imported notes cache", error);
+  }
+
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    const savedState = raw ? JSON.parse(raw) : {};
+    savedState.notes = notesText;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(savedState));
+  } catch (error) {
+    console.error("Failed to write imported notes into main state", error);
+  }
+
+  window.dispatchEvent(new CustomEvent("taskpoints-notes-updated", {
+    detail: { source: options.source || "notes-import" }
+  }));
+
+  return true;
+}
+
 // Shared snapshot helper for brief export (uses same state as JSON export).
 function getTaskPointsExportSnapshot() {
   const scheduleChanged = ensureUpcomingSchedule();
   if (scheduleChanged) save();
   const normalizedState = stripLegacyImageFields({ ...state, projects: loadProjectsFromStorage() });
-  const notesRaw = localStorage.getItem("taskpoints_notes_v1");
+  const notesText = getCurrentNotesForExport(normalizedState);
+  normalizedState.notes = notesText;
   const projectsRaw = localStorage.getItem("tp_projects_v1");
   return {
     exportType: "taskpoints_full_backup",
@@ -10299,13 +10381,16 @@ function getTaskPointsExportSnapshot() {
     exportedAtISO: new Date().toISOString(),
     state: normalizedState,
     aux: {
-      taskpoints_notes_v1: typeof notesRaw === "string" ? notesRaw : "",
+      taskpoints_notes_v1: notesText,
       ...(typeof projectsRaw === "string" ? { tp_projects_v1: projectsRaw } : {})
     }
   };
 }
 
-async function applyImportedState(root){
+async function applyImportedState(rootOrPayload){
+  const fullPayload = rootOrPayload?.exportType === "taskpoints_full_backup" && rootOrPayload?.state ? rootOrPayload : null;
+  const root = fullPayload?.state || rootOrPayload;
+  const importedNotesPayload = fullPayload ? readNotesPayloadFromBackupPayload(fullPayload) : readNotesPayloadFromBackupPayload(rootOrPayload);
   const currentState = { ...(state || {}), projects: loadProjectsFromStorage() };
   let normalized = window.TaskPointsCore?.normalizeImportedFullBackupState
     ? TaskPointsCore.normalizeImportedFullBackupState(root, currentState)
@@ -10314,6 +10399,9 @@ async function applyImportedState(root){
         reminders: Array.isArray(root?.reminders) ? root.reminders : (Array.isArray(currentState.reminders) ? currentState.reminders : []),
         projects: Array.isArray(root?.projects) ? root.projects : currentState.projects
       });
+  if (importedNotesPayload != null) {
+    normalized.notes = normalizeNotesPayload(importedNotesPayload);
+  }
   state = normalized;
 
   editingTaskId = null;
@@ -10337,9 +10425,17 @@ async function applyImportedState(root){
     const migrated = await TaskPointsCore.migrateLegacyImages(root);
     if (migrated?.migrated) {
       state = normalizeState(stripLegacyImageFields({ ...migrated.state, projects: normalized.projects }));
+      if (importedNotesPayload != null) state.notes = normalizeNotesPayload(importedNotesPayload);
       save();
       window.TaskPointsCore?.flushPendingSaves?.();
     }
+  }
+  if (importedNotesPayload != null) {
+    state.notes = normalizeNotesPayload(importedNotesPayload);
+    applyImportedNotesPayload(importedNotesPayload, {
+      source: "index-full-import",
+      allowEmptyReplace: true
+    });
   }
   scheduleRender(renderAll);
   renderHabits();
@@ -10365,7 +10461,7 @@ function importFile(ev){
         throw new Error("Root object missing tasks/completions arrays");
       }
 
-      applyImportedState(root).catch((err) => {
+      applyImportedState(manifest?.exportType === "taskpoints_full_backup" ? manifest : root).catch((err) => {
         console.error("Failed to apply imported state (zip):", err);
         alert("Failed to apply imported data. Check console for details.");
       });
@@ -10403,7 +10499,7 @@ function importFile(ev){
         throw new Error("Root object missing tasks/completions arrays");
       }
 
-      applyImportedState(root).catch((err) => {
+      applyImportedState(data?.exportType === "taskpoints_full_backup" ? data : root).catch((err) => {
         console.error("Failed to apply imported state (file):", err);
         alert("Failed to apply imported data. Check console for details.");
       });
@@ -10443,7 +10539,7 @@ function importPaste(){
       throw new Error("Root object missing tasks/completions arrays");
     }
 
-    applyImportedState(root).catch((err) => {
+    applyImportedState(data?.exportType === "taskpoints_full_backup" ? data : root).catch((err) => {
       console.error("Failed to apply imported state (paste):", err);
       alert("Failed to apply imported data. Check console for details.");
     });
