@@ -91,6 +91,55 @@
   const STORAGE_KEY = (window.TaskPointsCore && TaskPointsCore.STORAGE_KEY) || 'taskpoints_v1';
   const tournamentImageUrlCache = new Map();
   const tournamentImageLoadPromises = new Map();
+  let tournamentStateCache = null;
+  let tournamentStateCacheRaw = '';
+  let tournamentStateSaveQueued = false;
+
+  function getTournamentStorageRaw() {
+    try {
+      return localStorage.getItem(STORAGE_KEY) || '';
+    } catch (error) {
+      console.warn('Failed to read tournament storage raw state', error);
+      return '';
+    }
+  }
+
+  function setTournamentStateCache(state, raw = getTournamentStorageRaw()) {
+    tournamentStateCache = state || {};
+    tournamentStateCacheRaw = raw || '';
+    return tournamentStateCache;
+  }
+
+  function clearTournamentStateCache() {
+    tournamentStateCache = null;
+    tournamentStateCacheRaw = '';
+  }
+
+  function queueTournamentStateSave(nextState) {
+    if (!nextState || tournamentStateSaveQueued) return;
+    if (!window.TaskPointsCore || typeof TaskPointsCore.saveStateSnapshot !== 'function') return;
+
+    tournamentStateSaveQueued = true;
+
+    const runSave = () => {
+      tournamentStateSaveQueued = false;
+      try {
+        const saved = TaskPointsCore.saveStateSnapshot(nextState, {
+          savePath: 'tournament-season-result-resync'
+        });
+        const savedState = saved?.state || saved || nextState;
+        setTournamentStateCache(savedState);
+      } catch (error) {
+        console.warn('Failed to save tournament synced state', error);
+      }
+    };
+
+    if (typeof window.requestIdleCallback === 'function') {
+      window.requestIdleCallback(runSave, { timeout: 1000 });
+    } else {
+      window.setTimeout(runSave, 0);
+    }
+  }
 
   const TOURNAMENT_PLAY_IN_PAIRINGS = [
     [31, 34],
@@ -330,43 +379,57 @@
     return { state: nextState, changed };
   }
 
-  function loadTournamentState() {
+  function loadTournamentState(options = {}) {
+    const allowSync = options.sync !== false;
+    const allowPersist = options.persist !== false;
+    const raw = getTournamentStorageRaw();
+
+    if (tournamentStateCache && raw === tournamentStateCacheRaw) {
+      return tournamentStateCache;
+    }
+
+    let baseState = {};
+
     if (window.TaskPointsCore && typeof TaskPointsCore.loadAppState === 'function') {
       try {
-        const loaded = TaskPointsCore.loadAppState({ syncDerived: false, persistSync: false });
+        const loaded = TaskPointsCore.loadAppState({
+          syncDerived: false,
+          persistSync: false
+        });
         if (loaded && loaded.state && typeof loaded.state === 'object') {
-          const synced = syncTournamentSeasonState(loaded.state);
-          let nextState = synced.state || loaded.state;
-          if (synced.changed && typeof TaskPointsCore.saveStateSnapshot === 'function') {
-            const saved = TaskPointsCore.saveStateSnapshot(nextState, { savePath: 'tournament-season-result-resync' });
-            nextState = saved?.state || saved || nextState;
-          }
-          return nextState;
+          baseState = loaded.state;
         }
       } catch (error) {
         console.warn('Failed to load tournament state from TaskPointsCore', error);
       }
     }
 
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      const parsed = raw ? JSON.parse(raw) : {};
-      if (window.TaskPointsCore && typeof TaskPointsCore.normalizeState === 'function') {
-        const normalized = TaskPointsCore.normalizeState(parsed || {});
-        const synced = syncTournamentSeasonState(normalized);
-        let nextState = synced.state || normalized;
-        if (synced.changed && typeof TaskPointsCore.saveStateSnapshot === 'function') {
-          const saved = TaskPointsCore.saveStateSnapshot(nextState, { savePath: 'tournament-season-result-resync' });
-          nextState = saved?.state || saved || nextState;
-        }
-        return nextState;
+    if (!baseState || !Object.keys(baseState).length) {
+      try {
+        const parsed = raw ? JSON.parse(raw) : {};
+        baseState = window.TaskPointsCore && typeof TaskPointsCore.normalizeState === 'function'
+          ? TaskPointsCore.normalizeState(parsed || {})
+          : (parsed || {});
+      } catch (error) {
+        console.warn('Failed to load tournament state', error);
+        baseState = {};
       }
-      return parsed || {};
-    } catch (error) {
-      console.warn('Failed to load tournament state', error);
-      return {};
     }
+
+    let nextState = baseState;
+
+    if (allowSync) {
+      const synced = syncTournamentSeasonState(baseState);
+      nextState = synced.state || baseState;
+
+      if (synced.changed && allowPersist) {
+        queueTournamentStateSave(nextState);
+      }
+    }
+
+    return setTournamentStateCache(nextState, raw);
   }
+
 
   function getTournamentPlayerImageId(state, playerId) {
     if (!playerId) return '';
@@ -466,7 +529,7 @@
       <div class="tourney-player-node">
         ${renderTournamentPlayerMetaHTML({ state, playerId, series, side, slot })}
         <div class="tourney-player-image-slot" data-tourney-player-id="${escapeHtml(playerId)}" data-tourney-image-id="${escapeHtml(imageId)}">
-          <img class="tourney-player-image" alt="" decoding="async" loading="eager">
+          <img class="tourney-player-image" alt="" decoding="async" loading="lazy">
         </div>
       </div>`;
   }
@@ -571,9 +634,10 @@
     return promise;
   }
 
-  async function hydrateTournamentImages(root = document) {
+  async function hydrateTournamentImages(root = document, state = null) {
     const slots = Array.from(root.querySelectorAll('.tourney-player-image-slot[data-tourney-image-id]'));
-    const hydrations = slots.map((slot) => {
+    const batchSize = 10;
+    const hydrations = slots.map((slot) => () => {
       const imageId = slot.getAttribute('data-tourney-image-id') || '';
       const img = slot.querySelector('img.tourney-player-image');
       if (!imageId || !img) return Promise.resolve();
@@ -583,15 +647,20 @@
         if (slot.getAttribute('data-tourney-image-id') !== imageId) return;
         if (!slot.contains(img)) return;
 
-        img.addEventListener('load', scheduleTournamentConnectorDraws, { once: true });
+        img.addEventListener('load', () => scheduleTournamentConnectorDraws(state || tournamentStateCache), { once: true });
         if (img.src !== url) img.src = url;
         img.classList.remove('hidden');
-        scheduleTournamentConnectorDraws();
       });
     });
 
-    await Promise.allSettled(hydrations);
+    for (let i = 0; i < hydrations.length; i += batchSize) {
+      await Promise.allSettled(hydrations.slice(i, i + batchSize).map((hydrateSlot) => hydrateSlot()));
+      if (i + batchSize < hydrations.length) {
+        await new Promise((resolve) => window.requestAnimationFrame(resolve));
+      }
+    }
   }
+
 
   function getTournamentSeason(state) {
     return state?.currentSeason && typeof state.currentSeason === 'object' ? state.currentSeason : null;
@@ -814,12 +883,12 @@
       img.className = 'tourney-player-image';
       img.alt = '';
       img.decoding = 'async';
-      img.loading = 'eager';
+      img.loading = 'lazy';
       wrapper.appendChild(img);
     } else {
       img.classList.remove('hidden');
       img.decoding = 'async';
-      img.loading = 'eager';
+      img.loading = 'lazy';
       if (!img.hasAttribute('alt')) img.alt = '';
     }
 
@@ -871,8 +940,7 @@
     if (previousImageId && previousImageId !== nextImageId) img.removeAttribute('src');
   }
 
-  function renderTournamentImages() {
-    const state = loadTournamentState();
+  function renderTournamentImages(state = loadTournamentState()) {
     if (!state?.currentSeason) return;
 
     document.querySelectorAll('.tournament-round').forEach((roundElement) => {
@@ -883,8 +951,8 @@
       });
     });
 
-    hydrateTournamentImages(document).finally(() => scheduleTournamentConnectorDraws());
-    scheduleTournamentConnectorDraws();
+    hydrateTournamentImages(document, state).finally(() => scheduleTournamentConnectorDraws(state));
+    scheduleTournamentConnectorDraws(state);
   }
 
   function getTournamentConnectorLayer(bracket) {
@@ -985,7 +1053,7 @@
     return findTournamentTargetByVisualMapping(bracket, roundId, seriesIndex);
   }
 
-  function drawTournamentConnectors() {
+  function drawTournamentConnectors(stateOverride = null) {
     const bracket = document.getElementById('tournamentBracket');
     if (!bracket) return;
 
@@ -1002,7 +1070,7 @@
     layer.setAttribute('width', String(width));
     layer.setAttribute('height', String(height));
 
-    const state = loadTournamentState();
+    const state = stateOverride || tournamentStateCache || loadTournamentState({ sync: false, persist: false });
     const slots = Array.from(bracket.querySelectorAll('.tournament-slot[data-round-id][data-series-index]'));
     const groups = new Map();
     slots.forEach((slot) => {
@@ -1045,17 +1113,16 @@
       pathCount += 1;
     });
 
-    console.debug('[Tournament connectors]', { pairCount, pathCount });
   }
 
-  function requestTournamentConnectorDraw() {
-    window.requestAnimationFrame(() => drawTournamentConnectors());
+  function requestTournamentConnectorDraw(stateOverride = null) {
+    window.requestAnimationFrame(() => drawTournamentConnectors(stateOverride));
   }
 
-  function scheduleTournamentConnectorDraws() {
-    requestTournamentConnectorDraw();
-    window.setTimeout(drawTournamentConnectors, 100);
-    window.setTimeout(drawTournamentConnectors, 350);
+  function scheduleTournamentConnectorDraws(stateOverride = null) {
+    requestTournamentConnectorDraw(stateOverride);
+    window.setTimeout(() => drawTournamentConnectors(stateOverride), 100);
+    window.setTimeout(() => drawTournamentConnectors(stateOverride), 350);
   }
 
   function debounceTournamentConnectorDraw(delay = 100) {
@@ -1067,9 +1134,10 @@
   }
 
   function renderTournamentPage() {
+    const state = loadTournamentState();
     renderTournamentBracket();
-    renderTournamentImages();
-    scheduleTournamentConnectorDraws();
+    renderTournamentImages(state);
+    scheduleTournamentConnectorDraws(state);
   }
 
   function initializeTournamentPage() {
@@ -1081,7 +1149,10 @@
   window.addEventListener('load', scheduleTournamentConnectorDraws);
   window.addEventListener('pageshow', () => renderTournamentPage());
   window.addEventListener('storage', (event) => {
-    if (!event.key || event.key === STORAGE_KEY) renderTournamentPage();
+    if (!event.key || event.key === STORAGE_KEY) {
+      clearTournamentStateCache();
+      renderTournamentPage();
+    }
   });
   window.addEventListener('resize', debounceTournamentConnectorDraw(100));
   window.addEventListener('orientationchange', () => window.setTimeout(scheduleTournamentConnectorDraws, 250));
