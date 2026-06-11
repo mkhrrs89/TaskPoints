@@ -2359,6 +2359,13 @@ function ensureUpcomingSchedule(days = 7, startDateKey = null, forceRebuildFromS
   today.setHours(0,0,0,0);
   const todayKey = dateKey(today);
   const regenFromKey = startDateKey || todayKey;
+  let changed = false;
+
+  if (window.TaskPointsCore?.repairSeasonControlledScheduleFromSyncedSeason) {
+    const repaired = TaskPointsCore.repairSeasonControlledScheduleFromSyncedSeason(state, { todayDateKey: todayKey, nowISO: `${todayKey}T12:00:00.000Z` });
+    if (repaired?.state) state = repaired.state;
+    if (repaired?.changed) changed = true;
+  }
 
   const participants = getAllParticipantIds();
   const signature = participantSignature(participants);
@@ -2369,7 +2376,6 @@ function ensureUpcomingSchedule(days = 7, startDateKey = null, forceRebuildFromS
   existingSchedule.forEach((day) => {
     if (day && day.date) existingByDate.set(day.date, day);
   });
-  let changed = false;
 
   const neededDates = [];
   for (let i = 0; i < days; i++) {

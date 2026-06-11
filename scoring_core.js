@@ -2213,10 +2213,120 @@
     return { ok: true, pairs: fallbackPairs, warnings, errors, relaxedRepeatCount };
   }
 
+  function prepareSeasonStateForScheduling(state, dateKeyStr, options = {}) {
+    const warnings = [];
+    const errors = [];
+    let normalized = normalizeState(state || {});
+    let changed = false;
+    const scheduleDateKey = String(dateKeyStr || options.todayDateKey || options.dateKey || '').slice(0, 10);
+    const nowISO = options.nowISO || (scheduleDateKey ? `${scheduleDateKey}T12:00:00.000Z` : seasonNowISO(options));
+
+    const { dateKey: _ignoredDateKey, ...syncOptions } = options || {};
+    if (typeof syncCurrentSeasonSeriesFromRecordedResults === 'function') {
+      const synced = syncCurrentSeasonSeriesFromRecordedResults(normalized, {
+        ...syncOptions,
+        nowISO,
+        todayDateKey: scheduleDateKey,
+        includeCurrentDayResults: options.includeCurrentDayResults === true
+      });
+      if (synced?.state) {
+        normalized = synced.state;
+        changed = changed || Boolean(synced.changed);
+        if (Array.isArray(synced.warnings)) warnings.push(...synced.warnings);
+        if (Array.isArray(synced.errors)) errors.push(...synced.errors);
+      }
+    }
+
+    if (typeof repairCurrentRoundSeriesGameAlignment === 'function') {
+      const aligned = repairCurrentRoundSeriesGameAlignment(normalized, {
+        ...options,
+        nowISO,
+        dateKey: scheduleDateKey,
+        todayDateKey: scheduleDateKey,
+        includeCurrentDayResults: options.includeCurrentDayResults === true,
+        requireRecordedResultForAlignment: true
+      });
+      if (aligned?.state) {
+        normalized = aligned.state;
+        changed = changed || Boolean(aligned.changed);
+        if (Array.isArray(aligned.warnings)) warnings.push(...aligned.warnings);
+        if (Array.isArray(aligned.errors)) errors.push(...aligned.errors);
+      }
+    }
+
+    if (typeof repairSeasonChampionshipData === 'function') {
+      const beforeRepairSnapshot = JSON.stringify(normalized.currentSeason || null);
+      const repaired = repairSeasonChampionshipData(normalized, { ...options, nowISO, dateKey: scheduleDateKey });
+      if (repaired?.state) {
+        normalized = repaired.state;
+        changed = changed || Boolean(repaired.changed) || JSON.stringify(normalized.currentSeason || null) !== beforeRepairSnapshot;
+        if (Array.isArray(repaired.warnings)) warnings.push(...repaired.warnings);
+        if (Array.isArray(repaired.errors)) errors.push(...repaired.errors);
+      }
+    }
+
+    return { state: normalized, changed, warnings, errors };
+  }
+
+  function scheduleRowHasRecordedScore(row) {
+    const matchups = Array.isArray(row?.matchups) ? row.matchups : [];
+    return matchups.some((matchup) => {
+      const a = Number(matchup?.scoreA ?? matchup?.playerAScore);
+      const b = Number(matchup?.scoreB ?? matchup?.playerBScore);
+      return Number.isFinite(a) || Number.isFinite(b) || Boolean(matchup?.result || matchup?.winnerId || matchup?.completedAtISO);
+    });
+  }
+
+  function repairSeasonControlledScheduleFromSyncedSeason(state, options = {}) {
+    let normalized = normalizeState(state || {});
+    const today = String(options.todayDateKey || options.dateKey || (options.nowISO ? dateKey(options.nowISO) : dateKey(new Date())) || '').slice(0, 10);
+    const prepared = prepareSeasonStateForScheduling(normalized, today, options);
+    if (prepared?.state) normalized = prepared.state;
+    let changed = Boolean(prepared?.changed);
+    const repairedDates = [];
+    const schedule = Array.isArray(normalized.schedule) ? normalized.schedule : [];
+    if (!today || !schedule.length) return { state: normalized, changed, repairedDates };
+
+    const nextSchedule = schedule.map((day) => {
+      const dayKey = getScheduleDayDateKey(day);
+      if (!dayKey || dayKey < today || day?.seasonMatchupControl !== true) return day;
+      if (dayKey === today && scheduleRowHasRecordedScore(day)) return day;
+      if (!shouldUseSeasonMatchupControl(normalized, dayKey)) return day;
+
+      const expectedSignature = getSeasonScheduleSignature(normalized, dayKey);
+      if (expectedSignature && day.seasonScheduleSignature === expectedSignature && isValidSeasonControlledScheduleDay(normalized, dayKey, day)) return day;
+
+      const slate = buildSeasonDailySlate(normalized, dayKey, options);
+      if (!slate?.ok) return day;
+      if (slate.updatedSeason) {
+        normalized = normalizeState({ ...normalized, currentSeason: slate.updatedSeason, latestSeasonId: slate.updatedSeason.id || normalized.latestSeasonId || '' });
+      }
+      repairedDates.push(dayKey);
+      changed = true;
+      return {
+        ...day,
+        date: dayKey,
+        dateKey: dayKey,
+        matchups: slate.allMatchups,
+        byeIds: [],
+        seasonMatchupControl: true,
+        seasonScheduleSignature: getSeasonScheduleSignature(normalized, dayKey),
+        seasonWarnings: slate.warnings || []
+      };
+    });
+
+    if (changed) normalized = normalizeState({ ...normalized, schedule: nextSchedule });
+    return { state: normalized, changed, repairedDates };
+  }
+
   function buildSeasonDailySlate(state, dateKeyStr, options = {}) {
     const warnings = [];
     const errors = [];
-    const normalized = normalizeState(state || {});
+    let normalized = normalizeState(state || {});
+    const preparedForScheduling = prepareSeasonStateForScheduling(normalized, dateKeyStr, options);
+    if (preparedForScheduling?.state) normalized = preparedForScheduling.state;
+    if (Array.isArray(preparedForScheduling?.warnings)) warnings.push(...preparedForScheduling.warnings);
+    if (Array.isArray(preparedForScheduling?.errors)) errors.push(...preparedForScheduling.errors);
     const season = normalizeSeasonState(normalized.currentSeason);
     if (!shouldUseSeasonMatchupControl(normalized, dateKeyStr)) {
       errors.push('Season matchup control gate is closed.');
@@ -2237,10 +2347,13 @@
     const used = new Set();
     const tournamentMatchups = [];
     activeSeries.forEach((series) => {
+      const playedCount = Array.isArray(series.gameResults) ? series.gameResults.length : 0;
       const roundGameNumber = getRoundScheduledGameNumberForDate(slateSeason, series.roundId, dateKeyStr);
-      const seriesGameNumber = roundGameNumber || ((Array.isArray(series.gameResults) ? series.gameResults.length : 0) + 1);
+      const seriesGameNumber = options.forceCalendarGameNumbers === true
+        ? (roundGameNumber || playedCount + 1)
+        : playedCount + 1;
       if (seriesGameNumber > (Number(series.bestOf) || 1)) return;
-      if ((Array.isArray(series.gameResults) ? series.gameResults.length : 0) >= seriesGameNumber) return;
+      if (playedCount >= seriesGameNumber) return;
       if (used.has(series.playerAId) || used.has(series.playerBId)) {
         warnings.push(`Skipped tournament series ${series.id} because a player was already assigned today.`);
         return;
@@ -7007,6 +7120,8 @@ return Number(cappedScore.toFixed(1));
     repairSeasonDateRange,
     getActiveSeasonSeriesForDate,
     prepareSeasonForDailySlate,
+    prepareSeasonStateForScheduling,
+    repairSeasonControlledScheduleFromSyncedSeason,
     getSeasonScheduleSignature,
     isSeasonSeriesCurrentForMatchupDate,
     resolveHomeSeasonSeriesForMatchup,
