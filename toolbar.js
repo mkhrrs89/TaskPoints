@@ -1361,6 +1361,14 @@ function matchupDateKeyFallback(matchup) {
 
 function ensureUpcomingScheduleFallback(state, days = 7) {
   const todayKey = todayKeyFallback();
+  let changed = false;
+
+  if (window.TaskPointsCore?.repairSeasonControlledScheduleFromSyncedSeason) {
+    const repaired = TaskPointsCore.repairSeasonControlledScheduleFromSyncedSeason(state, { todayDateKey: todayKey, nowISO: `${todayKey}T12:00:00.000Z` });
+    if (repaired?.state) Object.assign(state, repaired.state);
+    if (repaired?.changed) changed = true;
+  }
+
   const participants = getAllParticipantIdsFallback(state);
   const signature = participantSignatureFallback(participants);
   const participantSet = new Set(participants);
@@ -1368,8 +1376,6 @@ function ensureUpcomingScheduleFallback(state, days = 7) {
   let schedule = Array.isArray(state.schedule)
     ? state.schedule.filter((d) => d && d.date >= todayKey)
     : [];
-  let changed = false;
-
   if (!schedule.every((d) => d.participantSignature === signature)) {
     schedule = [];
     changed = true;

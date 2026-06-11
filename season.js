@@ -485,26 +485,38 @@
       latestSeasonId: currentSeason?.id || normalized.latestSeasonId || ''
     };
 
-    if (typeof core.syncCurrentSeasonSeriesFromRecordedResults === 'function') {
-      const synced = core.syncCurrentSeasonSeriesFromRecordedResults(nextState, {
+    if (typeof core.prepareSeasonStateForScheduling === 'function') {
+      const preparedForScheduling = core.prepareSeasonStateForScheduling(nextState, effectiveDateKey, {
         ...options,
         includeCurrentDayResults: options.includeCurrentDayResults === true
       });
-      if (synced?.state) {
-        changed = changed || Boolean(synced.changed);
-        nextState = synced.state;
+      if (preparedForScheduling?.state) {
+        changed = changed || Boolean(preparedForScheduling.changed);
+        nextState = preparedForScheduling.state;
       }
-    }
+    } else {
+      if (typeof core.syncCurrentSeasonSeriesFromRecordedResults === 'function') {
+        const synced = core.syncCurrentSeasonSeriesFromRecordedResults(nextState, {
+          ...options,
+          todayDateKey: effectiveDateKey,
+          includeCurrentDayResults: options.includeCurrentDayResults === true
+        });
+        if (synced?.state) {
+          changed = changed || Boolean(synced.changed);
+          nextState = synced.state;
+        }
+      }
 
-    if (typeof core.repairCurrentRoundSeriesGameAlignment === 'function') {
-      const aligned = core.repairCurrentRoundSeriesGameAlignment(nextState, {
-        ...options,
-        dateKey: effectiveDateKey,
-        requireRecordedResultForAlignment: true
-      });
-      if (aligned?.state) {
-        changed = changed || Boolean(aligned.changed);
-        nextState = aligned.state;
+      if (typeof core.repairCurrentRoundSeriesGameAlignment === 'function') {
+        const aligned = core.repairCurrentRoundSeriesGameAlignment(nextState, {
+          ...options,
+          dateKey: effectiveDateKey,
+          requireRecordedResultForAlignment: true
+        });
+        if (aligned?.state) {
+          changed = changed || Boolean(aligned.changed);
+          nextState = aligned.state;
+        }
       }
     }
 
@@ -1345,8 +1357,22 @@
 
   function loadSeasonState(options = {}) {
     const prepared = prepareSeasonStateForPreview(loadRawSeasonState(), options);
-    if (prepared.changed) return persistSeasonState(prepared.state, 'season-result-resync');
-    return prepared.state;
+    let nextState = prepared.state;
+    let changed = Boolean(prepared.changed);
+    if (typeof core.repairSeasonControlledScheduleFromSyncedSeason === 'function') {
+      const effectiveDateKey = getEffectiveDateKey(options);
+      const repaired = core.repairSeasonControlledScheduleFromSyncedSeason(nextState, {
+        ...options,
+        todayDateKey: effectiveDateKey,
+        nowISO: options.nowISO || `${effectiveDateKey}T12:00:00.000Z`
+      });
+      if (repaired?.state) {
+        nextState = repaired.state;
+        changed = changed || Boolean(repaired.changed);
+      }
+    }
+    if (changed) return persistSeasonState(nextState, 'season-result-resync');
+    return nextState;
   }
 
   function saveAndRenderSeason(nextState, savePath = 'season-preview-action') {

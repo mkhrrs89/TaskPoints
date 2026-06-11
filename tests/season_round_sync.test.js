@@ -549,3 +549,123 @@ test('round start inference ignores stripped same-pair daily matchup without sea
   assert.equal(slate.updatedSeason.meta.roundStartDateKeys.sweet_16, '2026-06-10');
   assert.deepEqual(new Set(slate.tournamentMatchups.map((matchup) => matchup.seriesGameNumber)), new Set([1]));
 });
+
+test('daily slate syncs prior-day tournament results before scheduling today', () => {
+  const season = makeSeason({ readyCount: 8, status: 'active', meta: { roundStartDateKeys: { sweet_16: '2026-06-09' } } });
+  const [series] = Object.values(season.series);
+  const priorDayResult = makeResult(series, '2026-06-10', 1, series.playerAId);
+
+  const slate = core.buildSeasonDailySlate(makeState(season, [priorDayResult]), '2026-06-11', {
+    nowISO: '2026-06-11T12:00:00.000Z'
+  });
+
+  assert.equal(slate.updatedSeason.series[series.id].winsA, 1);
+  assert.equal(slate.updatedSeason.series[series.id].gameResults.length, 1);
+  const matchup = slate.tournamentMatchups.find((row) => row.seriesId === series.id);
+  assert.equal(matchup.seriesGameNumber, 2);
+});
+
+test('daily slate uses actual series next game instead of round calendar day', () => {
+  const season = makeSeason({ readyCount: 8, status: 'active', meta: { roundStartDateKeys: { sweet_16: '2026-06-09' } } });
+  const [series] = Object.values(season.series);
+  series.gameResults = [makeResult(series, '2026-06-09', 1, series.playerAId)];
+  series.winsA = 1;
+
+  const slate = core.buildSeasonDailySlate(makeState(season), '2026-06-11', {
+    nowISO: '2026-06-11T12:00:00.000Z'
+  });
+
+  const matchup = slate.tournamentMatchups.find((row) => row.seriesId === series.id);
+  assert.equal(core.getRoundScheduledGameNumberForDate(slate.updatedSeason, 'sweet_16', '2026-06-11'), 3);
+  assert.equal(matchup.seriesGameNumber, 2);
+  assert.equal(matchup.seasonMatchupLabel, 'Sweet 16, Game 2');
+});
+
+test('daily slate does not count current-day live tournament results during normal scheduling', () => {
+  const season = makeSeason({ readyCount: 8, status: 'active', meta: { roundStartDateKeys: { sweet_16: '2026-06-11' } } });
+  const [series] = Object.values(season.series);
+  const currentDayResult = makeResult(series, '2026-06-11', 1, series.playerAId);
+
+  const slate = core.buildSeasonDailySlate(makeState(season, [currentDayResult]), '2026-06-11', {
+    nowISO: '2026-06-11T12:00:00.000Z'
+  });
+
+  assert.equal(slate.updatedSeason.series[series.id].winsA, 0);
+  assert.equal(slate.updatedSeason.series[series.id].gameResults.length, 0);
+  const matchup = slate.tournamentMatchups.find((row) => row.seriesId === series.id);
+  assert.equal(matchup.seriesGameNumber, 1);
+});
+
+test('future stale season-controlled schedule rows rebuild after season sync changes currentSeason', () => {
+  const season = makeSeason({ readyCount: 8, status: 'active', meta: { roundStartDateKeys: { sweet_16: '2026-06-09' } } });
+  Object.values(season.series).forEach((item, index) => {
+    const a = index === 0 ? 'YOU' : `p${index * 2}`;
+    const b = `p${index * 2 + 1}`;
+    item.playerAId = a;
+    item.playerAName = a === 'YOU' ? 'You' : `Player ${index * 2}`;
+    item.playerBId = b;
+    item.playerBName = `Player ${index * 2 + 1}`;
+  });
+  const [series] = Object.values(season.series);
+  const priorDayResult = makeResult(series, '2026-06-10', 1, series.playerAId);
+  const staleFutureMatchup = {
+    id: 'stale_future_game3',
+    date: '2026-06-12',
+    dateKey: '2026-06-12',
+    playerAId: series.playerAId,
+    playerBId: series.playerBId,
+    seasonId: season.id,
+    seriesId: series.id,
+    seasonSeriesId: series.id,
+    roundId: 'sweet_16',
+    roundName: 'Sweet 16',
+    seriesGameNumber: 3,
+    matchupType: 'tournament',
+    seasonMatchupLabel: 'Sweet 16, Game 3'
+  };
+  const state = makeState(season, [priorDayResult]);
+  state.players = Array.from({ length: 15 }, (_, i) => ({ id: `p${i + 1}`, name: `Player ${i + 1}`, active: true }));
+  state.schedule = [{
+    date: '2026-06-12',
+    dateKey: '2026-06-12',
+    matchups: [staleFutureMatchup],
+    byeIds: [],
+    participantSignature: 'stale',
+    seasonMatchupControl: true,
+    seasonScheduleSignature: 'stale-signature'
+  }];
+
+  const repaired = core.repairSeasonControlledScheduleFromSyncedSeason(state, {
+    todayDateKey: '2026-06-11',
+    nowISO: '2026-06-11T12:00:00.000Z'
+  });
+
+  assert.equal(repaired.changed, true);
+  assert.deepEqual(repaired.repairedDates, ['2026-06-12']);
+  assert.equal(repaired.state.currentSeason.series[series.id].winsA, 1);
+  const rebuilt = repaired.state.schedule.find((day) => day.date === '2026-06-12').matchups.find((row) => row.seriesId === series.id);
+  assert.equal(rebuilt.seriesGameNumber, 2);
+  assert.equal(rebuilt.seasonMatchupLabel, 'Sweet 16, Game 2');
+});
+
+test('ordinary same-pair daily matchup cannot become a Season result during scheduling preparation', () => {
+  const season = makeSeason({ readyCount: 8, status: 'active' });
+  const [series] = Object.values(season.series);
+  const ordinaryDaily = {
+    id: 'ordinary_same_pair_daily_not_season',
+    dateKey: '2026-06-10',
+    playerAId: series.playerAId,
+    playerBId: series.playerBId,
+    scoreA: 60,
+    scoreB: 40,
+    winnerId: series.playerAId,
+    matchupType: 'exhibition'
+  };
+
+  const prepared = core.prepareSeasonStateForScheduling(makeState(season, [ordinaryDaily]), '2026-06-11', {
+    nowISO: '2026-06-11T12:00:00.000Z'
+  });
+
+  assert.equal(prepared.state.currentSeason.series[series.id].winsA, 0);
+  assert.equal(prepared.state.currentSeason.series[series.id].gameResults.length, 0);
+});
