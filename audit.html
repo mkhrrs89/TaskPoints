@@ -1358,13 +1358,32 @@ function runWeightVo2HistorySavePathAudit(state) {
       if (!payload || typeof payload !== 'object') return null;
 
       const hasOwn = (obj, key) => !!obj && Object.prototype.hasOwnProperty.call(obj, key);
-      if (hasOwn(payload.aux, NOTES_PAGE_CACHE_KEY_FOR_AUDIT)) return payload.aux[NOTES_PAGE_CACHE_KEY_FOR_AUDIT];
-      if (hasOwn(payload, NOTES_PAGE_CACHE_KEY_FOR_AUDIT)) return payload[NOTES_PAGE_CACHE_KEY_FOR_AUDIT];
-      if (hasOwn(payload.notesBackup, NOTES_PAGE_CACHE_KEY_FOR_AUDIT)) return payload.notesBackup[NOTES_PAGE_CACHE_KEY_FOR_AUDIT];
-      if (hasOwn(payload.state, 'notes')) return payload.state.notes;
-      if (hasOwn(payload, 'notes')) return payload.notes;
+      const candidates = [];
 
-      return null;
+      const addCandidate = (value) => {
+        if (value == null) return;
+        candidates.push(value);
+      };
+
+      if (hasOwn(payload.aux, NOTES_PAGE_CACHE_KEY_FOR_AUDIT)) addCandidate(payload.aux[NOTES_PAGE_CACHE_KEY_FOR_AUDIT]);
+      if (hasOwn(payload, NOTES_PAGE_CACHE_KEY_FOR_AUDIT)) addCandidate(payload[NOTES_PAGE_CACHE_KEY_FOR_AUDIT]);
+      if (hasOwn(payload.notesBackup, NOTES_PAGE_CACHE_KEY_FOR_AUDIT)) addCandidate(payload.notesBackup[NOTES_PAGE_CACHE_KEY_FOR_AUDIT]);
+      if (hasOwn(payload.state, 'notes')) addCandidate(payload.state.notes);
+      if (hasOwn(payload, 'notes')) addCandidate(payload.notes);
+
+      if (!candidates.length) return null;
+
+      const toText = (value) => {
+        if (typeof value === 'string') return value;
+        try {
+          return JSON.stringify(value);
+        } catch (_) {
+          return String(value ?? '');
+        }
+      };
+
+      const nonEmpty = candidates.find((value) => toText(value).trim().length > 0);
+      return nonEmpty != null ? nonEmpty : candidates[0];
     }
 
     function normalizeNotesPayloadForAudit(payload) {

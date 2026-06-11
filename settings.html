@@ -927,12 +927,32 @@
       if (!parsedBackup || typeof parsedBackup !== "object") return null;
 
       const hasOwn = (obj, key) => !!obj && Object.prototype.hasOwnProperty.call(obj, key);
-      if (hasOwn(parsedBackup.aux, "taskpoints_notes_v1")) return parsedBackup.aux.taskpoints_notes_v1;
-      if (hasOwn(parsedBackup, "taskpoints_notes_v1")) return parsedBackup.taskpoints_notes_v1;
-      if (hasOwn(parsedBackup.notesBackup, "taskpoints_notes_v1")) return parsedBackup.notesBackup.taskpoints_notes_v1;
-      if (hasOwn(parsedBackup.state, "notes")) return parsedBackup.state.notes;
-      if (hasOwn(parsedBackup, "notes")) return parsedBackup.notes;
-      return null;
+      const candidates = [];
+
+      const addCandidate = (value) => {
+        if (value == null) return;
+        candidates.push(value);
+      };
+
+      if (hasOwn(parsedBackup.aux, "taskpoints_notes_v1")) addCandidate(parsedBackup.aux.taskpoints_notes_v1);
+      if (hasOwn(parsedBackup, "taskpoints_notes_v1")) addCandidate(parsedBackup.taskpoints_notes_v1);
+      if (hasOwn(parsedBackup.notesBackup, "taskpoints_notes_v1")) addCandidate(parsedBackup.notesBackup.taskpoints_notes_v1);
+      if (hasOwn(parsedBackup.state, "notes")) addCandidate(parsedBackup.state.notes);
+      if (hasOwn(parsedBackup, "notes")) addCandidate(parsedBackup.notes);
+
+      if (!candidates.length) return null;
+
+      const toText = (value) => {
+        if (typeof value === "string") return value;
+        try {
+          return JSON.stringify(value);
+        } catch (_) {
+          return String(value ?? "");
+        }
+      };
+
+      const nonEmpty = candidates.find((value) => toText(value).trim().length > 0);
+      return nonEmpty != null ? nonEmpty : candidates[0];
     }
 
     function readNotesPayloadFromBackup(parsedBackup) {
