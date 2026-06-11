@@ -119,10 +119,19 @@
     if (!nextState || tournamentStateSaveQueued) return;
     if (!window.TaskPointsCore || typeof TaskPointsCore.saveStateSnapshot !== 'function') return;
 
+    const queuedRaw = getTournamentStorageRaw();
     tournamentStateSaveQueued = true;
 
     const runSave = () => {
       tournamentStateSaveQueued = false;
+
+      const currentRaw = getTournamentStorageRaw();
+      if (currentRaw !== queuedRaw) {
+        console.warn('Skipped deferred tournament state save because storage changed before the save ran');
+        clearTournamentStateCache();
+        return;
+      }
+
       try {
         const saved = TaskPointsCore.saveStateSnapshot(nextState, {
           savePath: 'tournament-season-result-resync'
