@@ -329,7 +329,7 @@
             <button id="missingScoreSaveBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Save Score</button>
           </div>
 
-          <p class="muted text-xs">Scores update an existing entry for that date if one already exists.</p>
+          <p class="muted text-xs">Sleep, calories, work, and mood update an existing entry for that date. Flex adds a new completion each time.</p>
           <p id="missingScoreStatus" class="text-xs muted"></p>
         </div>
       </details>
@@ -1788,13 +1788,13 @@ ${summaryWithNotes}`)) return;
         title = `[Flex] ${flexAction.name || "Flex action"}`;
         label = "Flex completion";
         source = "flex";
-        extraFields = { flexId };
-        existing = state.completions.find(c => {
-          if (c?.source !== "flex") return false;
-          if (String(c?.flexId || "") !== flexId) return false;
-          const entryDate = c.completedAtISO ? dateKey(new Date(c.completedAtISO)) : null;
-          return entryDate === entryKey;
-        });
+        extraFields = {
+          taskId: null,
+          flexId,
+          backfilled: true,
+          backfilledAtISO: new Date().toISOString()
+        };
+        existing = null;
       } else {
         existing = findEntry(entryPrefixMap[type]);
       }
@@ -1824,7 +1824,7 @@ ${summaryWithNotes}`)) return;
       }
 
       saveSettingsState(nextState, { immediateWrite: true });
-      setMissingScoreStatus(`${label} saved for ${entryKey}.`, "success");
+      setMissingScoreStatus(`${label} ${type === "flex" ? "added" : "saved"} for ${entryKey}.`, "success");
 
       if (type === "calories") {
         const field = document.getElementById("missingCaloriesValue");
