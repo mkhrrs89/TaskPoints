@@ -3188,12 +3188,34 @@
     return Number.isFinite(number) ? number : null;
   }
 
-  function getSeasonRecordScorePair(record) {
+  function firstFiniteSeasonScore(...values) {
+    for (const value of values) {
+      const score = toFiniteSeasonScore(value);
+      if (score != null) return score;
+    }
+    return null;
+  }
+
+  function getCanonicalSeasonScorePair(record) {
     const result = record?.result || {};
+    const scoreA = firstFiniteSeasonScore(record?.scoreA, result.scoreA);
+    const scoreB = firstFiniteSeasonScore(record?.scoreB, result.scoreB);
+    if (scoreA != null && scoreB != null) {
+      return { playerAScore: scoreA, playerBScore: scoreB, source: 'scoreA_scoreB' };
+    }
+
+    const playerAScore = firstFiniteSeasonScore(record?.playerAScore, record?.aScore, record?.playerA?.score, result.playerAScore, result.aScore, result.playerA?.score);
+    const playerBScore = firstFiniteSeasonScore(record?.playerBScore, record?.bScore, record?.playerB?.score, result.playerBScore, result.bScore, result.playerB?.score);
     return {
-      playerAScore: toFiniteSeasonScore(record?.playerAScore ?? record?.scoreA ?? record?.aScore ?? record?.playerA?.score ?? result.playerAScore ?? result.scoreA ?? result.aScore ?? result.playerA?.score),
-      playerBScore: toFiniteSeasonScore(record?.playerBScore ?? record?.scoreB ?? record?.bScore ?? record?.playerB?.score ?? result.playerBScore ?? result.scoreB ?? result.bScore ?? result.playerB?.score)
+      playerAScore,
+      playerBScore,
+      source: playerAScore != null && playerBScore != null ? 'playerAScore_playerBScore' : 'incomplete'
     };
+  }
+
+  function getSeasonRecordScorePair(record) {
+    const { playerAScore, playerBScore } = getCanonicalSeasonScorePair(record);
+    return { playerAScore, playerBScore };
   }
 
   function getRecordedResultWinner(record) {
@@ -3320,13 +3342,30 @@
     return dateKey(options.nowISO || new Date());
   }
 
-  function isRecordedSeasonResultBeforeToday(result, options = {}) {
-    if (options.includeCurrentDayResults === true) return true;
+  function hasExplicitCompletedSeasonResult(record) {
+    if (!record || typeof record !== 'object') return false;
+    if (record.resultFinal === true || record.final === true || record.isFinal === true || record.completed === true) return true;
+    if (record.completedAtISO || record.finalizedAtISO || record.resultFinalAtISO) return true;
+    const status = String(record.status || record.resultStatus || record.state || '').toLowerCase();
+    if (['complete', 'completed', 'final', 'finalized', 'finished'].includes(status)) return true;
+    const winnerId = String(record.winnerId || record.winningPlayerId || record?.result?.winnerId || record?.result?.winningPlayerId || '').trim();
+    return Boolean(winnerId);
+  }
+
+  function isRecordedSeasonResultCountableForDate(result, options = {}) {
     const resultDate = getRecordedResultDateKey(result) || result?.dateKey || '';
     if (!resultDate) return true;
     const todayDateKey = getSeasonResultActiveTodayKey(options);
     if (!todayDateKey || todayDateKey === 'invalid') return true;
-    return String(resultDate) < String(todayDateKey);
+    if (String(resultDate) < String(todayDateKey)) return true;
+    if (options.includeCurrentDayResults === true && String(resultDate) === String(todayDateKey)) {
+      return hasExplicitCompletedSeasonResult(result);
+    }
+    return false;
+  }
+
+  function isRecordedSeasonResultBeforeToday(result, options = {}) {
+    return isRecordedSeasonResultCountableForDate(result, options);
   }
 
   function normalizeSeasonResultRecord(raw, series, source, fallbackIndex = 0) {
@@ -3370,10 +3409,10 @@
       if (!seriesId || !season?.series?.[seriesId]) return;
       const series = season.series[seriesId];
       if (!isValidSeasonResultDateForSeries(season, series, raw, options)) return;
+      if (!isRecordedSeasonResultBeforeToday(raw, options)) return;
       const normalized = normalizeSeasonResultRecord(raw, series, source, index);
       if (!normalized) return;
-      const isManualOverride = isTrueManualSeasonOverrideResult(normalized);
-      if (!isManualOverride && !isRecordedSeasonResultBeforeToday(normalized, options)) return;
+      if (!isRecordedSeasonResultBeforeToday(normalized, options)) return;
       if (!includeRegardlessOfDate && options.dateKey && normalized.dateKey && normalized.dateKey !== options.dateKey) return;
       if (!candidatesBySeries.has(seriesId)) candidatesBySeries.set(seriesId, []);
       candidatesBySeries.get(seriesId).push(normalized);
@@ -7282,6 +7321,7 @@ return Number(cappedScore.toFixed(1));
     repairSeasonChampionshipData,
     repairSeasonSeriesResultWinnerIds,
     getSeasonResultWinnerForSeries,
+    getCanonicalSeasonScorePair,
     recalculateAllSeasonSeriesFromGameResults,
     recalculateSeasonSeriesFromGameResults,
     assignSeasonBracketSlot,
