@@ -1831,7 +1831,47 @@ function runWeightVo2HistorySavePathAudit(state) {
     }
 
     function getSeasonSeriesLinkedMatchupsForAudit(state, series) {
-      return (Array.isArray(state?.matchups) ? state.matchups : []).filter(matchup => isMatchupLinkedToSeasonSeriesForAudit(matchup, series));
+      const linkedRows = [];
+      (Array.isArray(state?.matchups) ? state.matchups : []).forEach(matchup => {
+        if (isMatchupLinkedToSeasonSeriesForAudit(matchup, series)) linkedRows.push(matchup);
+      });
+      (Array.isArray(state?.gameHistory) ? state.gameHistory : []).forEach(entry => {
+        if (isMatchupLinkedToSeasonSeriesForAudit(entry, series)) linkedRows.push(entry);
+      });
+      return linkedRows;
+    }
+
+    function isSeasonSeriesCompletedStatusForAudit(status) {
+      const normalized = String(status || '').toLowerCase().replace(/[-\s]+/g, '_');
+      return ['complete', 'completed', 'champion_crowned', 'finalized', 'finished'].includes(normalized);
+    }
+
+    function getSeasonSeriesRoundOrderIndexForAudit(roundId) {
+      const normalized = String(roundId || '').toLowerCase();
+      const aliases = { round_1: 'round_of_32', round_2: 'sweet_16', round_3: 'quarterfinals', semi_finals: 'semifinals', championship: 'finals' };
+      const orderedRoundIds = ['play_in', 'round_of_32', 'sweet_16', 'quarterfinals', 'semifinals', 'finals'];
+      return orderedRoundIds.indexOf(aliases[normalized] || normalized);
+    }
+
+    function getLatestSeasonScheduledOrRecordedRoundIndexForAudit(state, season, auditDateKey) {
+      let latestRoundIndex = -1;
+      const rows = [
+        ...(Array.isArray(state?.matchups) ? state.matchups : []),
+        ...(Array.isArray(state?.gameHistory) ? state.gameHistory : [])
+      ];
+      const seriesList = getSeasonSeriesListForAudit(season);
+      rows.forEach(row => {
+        const rowDateKey = String(matchupDateKey(row) || '').trim();
+        if (auditDateKey && rowDateKey && rowDateKey > auditDateKey) return;
+        const rowSeriesId = String(row?.seasonSeriesId || row?.seriesId || row?.seasonSeriesID || row?.seriesID || '').trim();
+        const linkedSeries = seriesList.find(series => {
+          if (rowSeriesId && String(series?.id || '').trim() === rowSeriesId) return true;
+          return isMatchupLinkedToSeasonSeriesForAudit(row, series);
+        });
+        const roundIndex = getSeasonSeriesRoundOrderIndexForAudit(linkedSeries?.roundId);
+        if (roundIndex > latestRoundIndex) latestRoundIndex = roundIndex;
+      });
+      return latestRoundIndex;
     }
 
     function getSeasonSeriesScoreCheckabilityForAudit(state, season, series, counted, auditDateKey, options) {
@@ -1854,15 +1894,30 @@ function runWeightVo2HistorySavePathAudit(state) {
       const currentOrPastRound = Boolean(auditDateKey && roundStart && auditDateKey >= roundStart);
       const completedRoundWindow = Boolean(auditDateKey && roundEnd && auditDateKey > roundEnd);
       const startedStatus = isSeasonSeriesStartedStatusForAudit(status);
+      const completedStatus = isSeasonSeriesCompletedStatusForAudit(status);
       const futureStatus = isSeasonSeriesFutureStatusForAudit(status);
       const hasParticipants = Boolean(getSeriesPlayerIdsForAudit(series).playerAId && getSeriesPlayerIdsForAudit(series).playerBId);
       const hasFuturePlaceholders = Boolean(String(series?.placeholderA || series?.placeholderB || '').trim())
         || (Array.isArray(series?.competitors) && series.competitors.some(competitor => String(competitor?.placeholder || competitor?.label || '').trim()));
       const dependsOnFutureWinners = !hasParticipants || hasFuturePlaceholders || Boolean(series?.sourceSeriesAId || series?.sourceSeriesBId || series?.sourceAId || series?.sourceBId);
+      const seriesRoundIndex = getSeasonSeriesRoundOrderIndexForAudit(roundId);
+      const latestScheduledOrRecordedRoundIndex = getLatestSeasonScheduledOrRecordedRoundIndexForAudit(state, season, auditDateKey);
+      const laterThanScheduledOrRecordedRound = seriesRoundIndex >= 0
+        && latestScheduledOrRecordedRoundIndex >= 0
+        && seriesRoundIndex > latestScheduledOrRecordedRoundIndex;
+      const emptyParticipantSeries = hasParticipants
+        && storedA === 0
+        && storedB === 0
+        && !hasCountedResultSources
+        && !hasWinner
+        && !hasLinkedMatchups;
 
       if (hasStoredWins) return { checkable: true, skipFuture: false, skipType: '', reason: 'stored wins' };
-      if (startedStatus) return { checkable: true, skipFuture: false, skipType: '', reason: 'started/completed status' };
       if (hasWinner) return { checkable: true, skipFuture: false, skipType: '', reason: 'winnerId' };
+      if (emptyParticipantSeries && !completedStatus && (!currentOrPastRound || laterThanScheduledOrRecordedRound)) {
+        return { checkable: false, skipFuture: true, skipType: 'future', reason: 'future filled bracket series with no scheduled games' };
+      }
+      if (startedStatus) return { checkable: true, skipFuture: false, skipType: '', reason: 'started/completed status' };
       if (hasCountedResultSources) return { checkable: true, skipFuture: false, skipType: '', reason: 'recorded results' };
       if (hasPastLinkedMatchup) return { checkable: true, skipFuture: false, skipType: '', reason: 'past linked matchup' };
       if (hasTodayLinkedMatchup && options.includeCurrentDayResults === true) {
