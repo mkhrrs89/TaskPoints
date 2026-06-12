@@ -33,6 +33,11 @@ function loadScoreAuditHelper() {
     'isSeasonSeriesFutureStatusForAudit',
     'isMatchupLinkedToSeasonSeriesForAudit',
     'getSeasonSeriesLinkedMatchupsForAudit',
+    'getSeasonRowSeriesIdForAudit',
+    'isSeasonRowForExactSeriesIdForAudit',
+    'getSeasonSeriesExactScheduledRowsForAudit',
+    'getSeasonSeriesExactRecordedRowsForAudit',
+    'hasSeasonRoundGeneratedExactMatchupForAudit',
     'isSeasonSeriesCompletedStatusForAudit',
     'getSeasonSeriesRoundOrderIndexForAudit',
     'getLatestSeasonScheduledOrRecordedRoundIndexForAudit',
@@ -163,6 +168,68 @@ test('filled active quarterfinal series without scheduled games are skipped as f
   assert.equal(result.status, 'PASS');
   assert.equal(result.actual, 'All played/checkable series scores match recorded results');
   assert.ok(result.details.includes('3 future unplayed series skipped'));
+});
+
+test('filled active current-round series is skipped before that round generates its first matchup', () => {
+  const buildScoreAudit = loadScoreAuditHelper();
+  const sweet16 = series({
+    id: 'sweet_16_1',
+    name: 'Sweet 16 1',
+    roundId: 'sweet_16',
+    status: 'complete',
+    winsA: 2,
+    winsB: 0
+  });
+  sweet16.gameResults = [
+    gameResult(sweet16, sweet16.playerAId, 1),
+    gameResult(sweet16, sweet16.playerAId, 2)
+  ];
+  const quarterfinals = [
+    series({ id: 'season_1_june_2026_quarterfinals_1', name: 'Lily vs Lyria', roundId: 'quarterfinals', playerAId: 'lily', playerBId: 'lyria', status: 'active' }),
+    series({ id: 'season_1_june_2026_quarterfinals_2', name: 'Poppy vs Seraphine', roundId: 'quarterfinals', playerAId: 'poppy', playerBId: 'seraphine', status: 'active' }),
+    series({ id: 'season_1_june_2026_quarterfinals_3', name: 'Verrick vs YOU/Miggy', roundId: 'quarterfinals', playerAId: 'verrick', playerBId: 'you_miggy', status: 'active' })
+  ];
+
+  const result = buildScoreAudit(
+    { matchups: [linkedMatchup(sweet16, '2026-06-10')] },
+    { id: 'season_1_june_2026', series: { [sweet16.id]: sweet16, ...Object.fromEntries(quarterfinals.map(item => [item.id, item])) } },
+    [sweet16, ...quarterfinals],
+    '2026-06-15'
+  );
+
+  assert.equal(result.status, 'PASS');
+  assert.equal(result.actual, 'All played/checkable series scores match recorded results');
+  assert.ok(result.details.includes('3 future unplayed series skipped'));
+});
+
+test('unrelated same-pair rows do not make future filled series checkable', () => {
+  const buildScoreAudit = loadScoreAuditHelper();
+  const futureFilled = series({
+    id: 'season_1_june_2026_quarterfinals_1',
+    name: 'Lily vs Lyria',
+    roundId: 'quarterfinals',
+    playerAId: 'lily',
+    playerBId: 'lyria',
+    status: 'active'
+  });
+  const unrelatedSamePair = {
+    id: 'daily_lily_lyria_2026_06_11',
+    matchupType: 'daily',
+    dateKey: '2026-06-11',
+    playerAId: 'lily',
+    playerBId: 'lyria'
+  };
+
+  const result = buildScoreAudit(
+    { matchups: [unrelatedSamePair] },
+    { id: 'season_1_june_2026', series: { [futureFilled.id]: futureFilled } },
+    [futureFilled],
+    '2026-06-12'
+  );
+
+  assert.equal(result.status, 'PASS');
+  assert.equal(result.actual, 'All played/checkable series scores match recorded results');
+  assert.ok(result.details.includes('1 future unplayed series skipped'));
 });
 
 test('real mismatch still fails', () => {
