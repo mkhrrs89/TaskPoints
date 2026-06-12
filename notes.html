@@ -175,6 +175,59 @@
       notesStatus.textContent = message;
     }
 
+    function getBestNotesTextFromStorage() {
+      let stateNotes = "";
+      let cacheNotes = "";
+
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        const state = raw ? JSON.parse(raw) : {};
+        stateNotes = typeof state.notes === "string" ? state.notes : "";
+      } catch (_) {}
+
+      try {
+        cacheNotes = localStorage.getItem(NOTES_STORAGE_KEY) || "";
+      } catch (_) {}
+
+      if (cacheNotes.trim() && !stateNotes.trim()) return cacheNotes;
+      if (stateNotes.trim() && !cacheNotes.trim()) return stateNotes;
+      if (cacheNotes === stateNotes) return cacheNotes;
+
+      return cacheNotes.length >= stateNotes.length ? cacheNotes : stateNotes;
+    }
+
+    function syncNotesStorageLocations(source = "notes-storage-sync") {
+      const notesText = getBestNotesTextFromStorage();
+
+      try {
+        localStorage.setItem(NOTES_STORAGE_KEY, notesText);
+      } catch (error) {
+        console.warn("Failed to sync taskpoints_notes_v1", error);
+      }
+
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        const state = raw ? JSON.parse(raw) : {};
+        state.notes = notesText;
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      } catch (error) {
+        console.warn("Failed to sync taskpoints_v1.notes", error);
+      }
+
+      window.dispatchEvent(new CustomEvent("taskpoints-notes-updated", {
+        detail: { source }
+      }));
+
+      return notesText;
+    }
+
+    if (typeof window.getBestNotesTextFromStorage !== "function") {
+      window.getBestNotesTextFromStorage = getBestNotesTextFromStorage;
+    }
+    if (typeof window.syncNotesStorageLocations !== "function") {
+      window.syncNotesStorageLocations = syncNotesStorageLocations;
+    }
+
     function saveNotes(immediate = false) {
       if (!notesInput) return;
       const value = notesInput.value || "";
@@ -195,6 +248,9 @@
           console.error("Failed to save notes", err);
         }
       }
+      window.dispatchEvent(new CustomEvent("taskpoints-notes-updated", {
+        detail: { source: "notes-save" }
+      }));
       setStatus("Saved");
     }
 
@@ -212,28 +268,9 @@
     }
 
     function loadNotes() {
-      const state = getStoredState();
-      if (notesInput) {
-        const storedNotes = typeof state.notes === "string" ? state.notes : "";
-        if (storedNotes) {
-          notesInput.value = storedNotes;
-          return;
-        }
-        try {
-          const cached = localStorage.getItem(NOTES_STORAGE_KEY);
-          if (typeof cached === "string") {
-            notesInput.value = cached;
-            if (cached.trim()) {
-              saveNotes(true);
-            }
-          } else {
-            notesInput.value = "";
-          }
-        } catch (err) {
-          console.error("Failed to load cached notes", err);
-          notesInput.value = "";
-        }
-      }
+      if (!notesInput) return;
+      const notesText = syncNotesStorageLocations("notes-load-sync");
+      notesInput.value = notesText;
     }
 
     function formatCompactDate(date) {
@@ -299,7 +336,9 @@
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "hidden") saveNotes(true);
     });
-    window.addEventListener("taskpoints-notes-updated", () => {
+    window.addEventListener("taskpoints-notes-updated", (event) => {
+      const source = event?.detail?.source || "";
+      if (source === "notes-save" || source === "notes-load-sync") return;
       if (saveTimer) {
         window.clearTimeout(saveTimer);
         saveTimer = null;

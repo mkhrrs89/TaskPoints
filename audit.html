@@ -131,6 +131,7 @@
         </div>
         <div class="flex flex-wrap gap-2">
           <button id="syncMatchupsBtn" type="button" class="btn btn-ghost">Sync Matchups</button>
+          <button id="syncNotesBtn" type="button" class="btn btn-ghost">Sync Notes</button>
           <button id="copyReportBtn" type="button" class="btn btn-ghost" data-require-click="true">Copy Report</button>
           <button id="exportJsonBtn" type="button" class="btn btn-ghost">Export JSON</button>
         </div>
@@ -1392,10 +1393,18 @@ function runWeightVo2HistorySavePathAudit(state) {
       try { return JSON.stringify(payload); } catch (_) { return String(payload); }
     }
 
-    function getCurrentNotesForExportForAudit(state = null) {
+    function getBestNotesTextForAudit(state = null) {
       const cached = getCachedGeneralNotesForAudit() || '';
       const stateNotes = typeof state?.notes === 'string' ? state.notes : '';
-      return typeof cached === 'string' && cached.length ? cached : stateNotes;
+
+      if (cached.trim() && !stateNotes.trim()) return cached;
+      if (stateNotes.trim() && !cached.trim()) return stateNotes;
+      if (cached === stateNotes) return cached;
+      return cached.length >= stateNotes.length ? cached : stateNotes;
+    }
+
+    function getCurrentNotesForExportForAudit(state = null) {
+      return getBestNotesTextForAudit(state);
     }
 
     function runNotesBackupImportAudit(state) {
@@ -1420,11 +1429,8 @@ function runWeightVo2HistorySavePathAudit(state) {
       });
 
       const details = [];
-      if (cachedRaw == null && !stateNotes.trim()) {
-        details.push('Notes cache key is missing and state.notes is empty; this is OK only when the user intentionally has no Notes.');
-      }
-      if ((cached.trim() || stateNotes.trim()) && cached !== stateNotes) {
-        details.push('taskpoints_v1.notes and taskpoints_notes_v1 differ while at least one contains content.');
+      if (cached !== stateNotes) {
+        details.push('Open Notes once or run Notes sync to reconcile taskpoints_v1.notes and taskpoints_notes_v1.');
       }
       if (exportPayload.state.notes !== notesText) {
         details.push('Export snapshot state.notes does not contain the selected notes text.');
@@ -3595,6 +3601,16 @@ const actualTotal = round2(Number(derivedActualTotal) || 0);
       runAudit();
     }
 
+    function syncNotesFromAudit() {
+      if (typeof window.syncNotesStorageLocations !== 'function') {
+        alert('Notes sync helper is not available. Open Notes once to reconcile Notes storage.');
+        return;
+      }
+      window.syncNotesStorageLocations('audit-notes-sync');
+      alert('Notes storage synced. Re-running audit.');
+      runAudit();
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
       const dateInput = $('auditDate');
       if (dateInput) {
@@ -3603,6 +3619,7 @@ const actualTotal = round2(Number(derivedActualTotal) || 0);
       setAuditProgressState('idle');
       bindPress('runAuditBtn', runAudit);
       bindPress('syncMatchupsBtn', syncMatchups);
+      bindPress('syncNotesBtn', syncNotesFromAudit);
       bindPress('copyReportBtn', copyReport);
       bindPress('exportJsonBtn', exportJson);
 
