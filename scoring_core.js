@@ -723,10 +723,11 @@
     const series = nextSeason.series?.[seriesId];
     if (!series) return { ok: false, error: 'series_not_found', season: nextSeason };
     if (series.status === 'complete') return { ok: false, error: 'series_already_complete', season: nextSeason, series };
-    const winnerId = gameResult?.winnerId;
+    const resultWinner = getSeasonResultWinnerForSeries(gameResult, series);
+    const winnerId = resultWinner.winnerId;
     if (!winnerId || (winnerId !== series.playerAId && winnerId !== series.playerBId)) return { ok: false, error: 'invalid_or_ambiguous_winner', season: nextSeason, series };
-    const loserId = winnerId === series.playerAId ? series.playerBId : series.playerAId;
-    if (!loserId || (gameResult?.loserId && gameResult.loserId !== loserId)) return { ok: false, error: 'invalid_or_ambiguous_loser', season: nextSeason, series };
+    const loserId = resultWinner.loserId || (winnerId === series.playerAId ? series.playerBId : series.playerAId);
+    if (!loserId) return { ok: false, error: 'invalid_or_ambiguous_loser', season: nextSeason, series };
     const results = Array.isArray(series.gameResults) ? series.gameResults.slice() : [];
     const matchupId = typeof gameResult?.matchupId === 'string' ? gameResult.matchupId : '';
     const dateKey = typeof gameResult?.dateKey === 'string' ? gameResult.dateKey : '';
@@ -742,8 +743,8 @@
         matchupId,
         winnerId,
         loserId,
-        playerAScore: gameResult?.playerAScore,
-        playerBScore: gameResult?.playerBScore,
+        playerAScore: resultWinner.playerAScore ?? gameResult?.playerAScore,
+        playerBScore: resultWinner.playerBScore ?? gameResult?.playerBScore,
         source: gameResult?.source === 'matchup' ? 'matchup' : 'manual',
         recordedAtISO: now
       }),
@@ -2028,6 +2029,8 @@
       const fixed = normalizeSeasonState(season);
       if (!fixed) return null;
       let repaired = normalizeSeasonState({ ...fixed, series: cleanSeriesMap(fixed.series) });
+      const winnerIdRepair = repairSeasonSeriesResultWinnerIds({ ...normalized, currentSeason: repaired }, options);
+      if (winnerIdRepair?.state?.currentSeason) repaired = winnerIdRepair.state.currentSeason;
       const repairState = normalizeState({ ...normalized, currentSeason: repaired });
       const upstreamPlayInRepair = repairPlayInSeriesFromProtectedRoundOf32Slots(repaired, {
         ...options,
@@ -2041,7 +2044,8 @@
     };
     const currentSeason = repairSeason(normalized.currentSeason);
     const seasonHistory = normalizeSeasonHistory(normalized.seasonHistory).map(repairSeason).filter(Boolean);
-    return { ok: true, state: normalizeState({ ...normalized, currentSeason, seasonHistory }) };
+    const nextState = normalizeState({ ...normalized, currentSeason, seasonHistory });
+    return { ok: true, state: nextState, changed: JSON.stringify(nextState.currentSeason || null) !== JSON.stringify(normalized.currentSeason || null) || JSON.stringify(nextState.seasonHistory || []) !== JSON.stringify(normalized.seasonHistory || []) };
   }
 
 
@@ -2467,12 +2471,13 @@
     const countedGameResults = [];
     (Array.isArray(series.gameResults) ? series.gameResults : []).forEach((result) => {
       if (winsA >= winsNeeded || winsB >= winsNeeded) return;
-      if (result?.winnerId === series.playerAId) {
+      const normalized = normalizeSeasonResultWinnerForSeries(result, series).record;
+      if (normalized?.winnerId === series.playerAId) {
         winsA += 1;
-        countedGameResults.push(result);
-      } else if (result?.winnerId === series.playerBId) {
+        countedGameResults.push(normalized);
+      } else if (normalized?.winnerId === series.playerBId) {
         winsB += 1;
-        countedGameResults.push(result);
+        countedGameResults.push(normalized);
       }
     });
     let winnerId = '';
@@ -2497,6 +2502,59 @@
       gameResults: countedGameResults,
       updatedAtISO: seasonNowISO(options)
     };
+  }
+
+  function repairSeasonSeriesResultWinnerIds(state, options = {}) {
+    const normalized = normalizeState(state || {});
+    const repairSeason = (season) => {
+      const fixed = normalizeSeasonState(season);
+      if (!fixed) return { season: fixed, changed: false, repairedCount: 0, seriesIds: [] };
+      const nextSeries = { ...(fixed.series || {}) };
+      let changed = false;
+      let repairedCount = 0;
+      const seriesIds = [];
+
+      Object.entries(nextSeries).forEach(([seriesId, series]) => {
+        if (!series || !Array.isArray(series.gameResults) || !series.gameResults.length) return;
+        let seriesChanged = false;
+        const normalizedResults = series.gameResults.map((result) => {
+          const normalizedWinner = normalizeSeasonResultWinnerForSeries(result, series);
+          if (normalizedWinner.changed) {
+            repairedCount += 1;
+            seriesChanged = true;
+          }
+          return normalizedWinner.record;
+        });
+        const recalculated = recalculateSeasonSeriesFromGameResults({ ...series, gameResults: normalizedResults }, options);
+        if (seriesChanged || JSON.stringify(recalculated) !== JSON.stringify(series)) {
+          nextSeries[seriesId] = recalculated;
+          if (!seriesIds.includes(seriesId)) seriesIds.push(seriesId);
+          changed = true;
+        }
+      });
+
+      return {
+        season: changed ? normalizeSeasonState({ ...fixed, series: nextSeries, updatedAtISO: seasonNowISO(options) }) : fixed,
+        changed,
+        repairedCount,
+        seriesIds
+      };
+    };
+
+    const currentRepair = repairSeason(normalized.currentSeason);
+    const historyRepairs = normalizeSeasonHistory(normalized.seasonHistory).map(repairSeason);
+    const historyChanged = historyRepairs.some((repair) => repair.changed);
+    const changed = currentRepair.changed || historyChanged;
+    const repairedCount = currentRepair.repairedCount + historyRepairs.reduce((sum, repair) => sum + repair.repairedCount, 0);
+    const seriesIds = Array.from(new Set(currentRepair.seriesIds.concat(...historyRepairs.map((repair) => repair.seriesIds))));
+    const nextState = changed
+      ? normalizeState({
+          ...normalized,
+          currentSeason: currentRepair.season,
+          seasonHistory: historyRepairs.map((repair) => repair.season).filter(Boolean)
+        })
+      : normalized;
+    return { ok: true, state: nextState, changed, repairedCount, seriesIds };
   }
 
   function isLateBoundRoundOf32PlayInSeries(series) {
@@ -2540,7 +2598,7 @@
     const pairKey = getPairingKey(record.playerAId, record.playerBId);
     if (!pairKey || pairKey !== getPairingKey(series.playerAId, series.playerBId)) return null;
 
-    const winner = getRecordedResultWinner(record);
+    const winner = getSeasonResultWinnerForSeries(record, series);
     if (!winner.winnerId || (winner.winnerId !== series.playerAId && winner.winnerId !== series.playerBId)) return null;
 
     const type = String(record.matchupType || '').toLowerCase();
@@ -2640,7 +2698,7 @@
 
   function buildLateBoundCatchUpGameResult(state, season, series, dateKeyStr, gameNumber, options = {}) {
     const recorded = findRecordedTournamentResultForSeriesDate(state, season, series, dateKeyStr, options);
-    const winner = recorded ? getRecordedResultWinner(recorded) : buildDeterministicCatchUpWinner(series, dateKeyStr, gameNumber);
+    const winner = recorded ? getSeasonResultWinnerForSeries(recorded, series) : buildDeterministicCatchUpWinner(series, dateKeyStr, gameNumber);
     const matchupId = recorded?.id || recorded?.matchupId || stableCatchUpResultId(season?.id || series.seasonId, series.id, dateKeyStr);
     const now = seasonNowISO(options);
     return {
@@ -2726,7 +2784,7 @@
 
   function buildRoundAlignmentRepairGameResult(state, season, series, dateKeyStr, gameNumber, options = {}) {
     const recorded = findRecordedTournamentResultForSeriesDate(state, season, series, dateKeyStr, options);
-    const winner = recorded ? getRecordedResultWinner(recorded) : buildDeterministicCatchUpWinner(series, dateKeyStr, gameNumber);
+    const winner = recorded ? getSeasonResultWinnerForSeries(recorded, series) : buildDeterministicCatchUpWinner(series, dateKeyStr, gameNumber);
     const now = seasonNowISO(options);
     if (recorded) {
       return {
@@ -2777,10 +2835,11 @@
         const resultDate = getRecordedResultDateKey(record);
         if (!resultDate || resultDate >= today) return;
 
-        const winner = getRecordedResultWinner(record);
+        const explicitSeriesId = getRecordedSeriesId(record);
+        const seriesForWinner = explicitSeriesId ? roundSeries.find((item) => item?.id === explicitSeriesId) : null;
+        const winner = seriesForWinner ? getSeasonResultWinnerForSeries(record, seriesForWinner) : getRecordedResultWinner(record);
         if (!winner.winnerId) return;
 
-        const explicitSeriesId = getRecordedSeriesId(record);
         if (explicitSeriesId) {
           const series = roundSeries.find((item) => item?.id === explicitSeriesId);
           if (!series) return;
@@ -2879,9 +2938,10 @@
     const resultDateKey = typeof gameResult?.dateKey === 'string' ? gameResult.dateKey : '';
     const existingIndex = results.findIndex((result) => (matchupId && result.matchupId === matchupId) || (!matchupId && resultDateKey && result.dateKey === resultDateKey));
     if (existingIndex < 0) return { ok: false, error: 'game_result_not_found', season: nextSeason, series };
-    if (gameResult.winnerId !== series.playerAId && gameResult.winnerId !== series.playerBId) return { ok: false, error: 'invalid_or_ambiguous_winner', season: nextSeason, series };
-    const loserId = gameResult.winnerId === series.playerAId ? series.playerBId : series.playerAId;
-    if (!loserId || (gameResult.loserId && gameResult.loserId !== loserId)) return { ok: false, error: 'invalid_or_ambiguous_loser', season: nextSeason, series };
+    const winner = getSeasonResultWinnerForSeries(gameResult, series);
+    if (winner.winnerId !== series.playerAId && winner.winnerId !== series.playerBId) return { ok: false, error: 'invalid_or_ambiguous_winner', season: nextSeason, series };
+    const loserId = winner.loserId || (winner.winnerId === series.playerAId ? series.playerBId : series.playerAId);
+    if (!loserId) return { ok: false, error: 'invalid_or_ambiguous_loser', season: nextSeason, series };
     const existing = results[existingIndex];
     if (seasonGameResultsEqual(existing, { ...gameResult, loserId })) {
       return { ok: true, changed: false, season: nextSeason, series, unchanged: true };
@@ -2891,10 +2951,10 @@
       ...existing,
       dateKey: resultDateKey || existing.dateKey || '',
       matchupId: matchupId || existing.matchupId || '',
-      winnerId: gameResult.winnerId,
+      winnerId: winner.winnerId,
       loserId,
-      playerAScore: gameResult.playerAScore,
-      playerBScore: gameResult.playerBScore,
+      playerAScore: winner.playerAScore ?? gameResult.playerAScore,
+      playerBScore: winner.playerBScore ?? gameResult.playerBScore,
       source: 'matchup',
       recordedAtISO: existing.recordedAtISO || seasonNowISO(options),
       updatedAtISO: seasonNowISO(options)
@@ -3121,20 +3181,96 @@
     return repaired;
   }
 
+  function toFiniteSeasonScore(value) {
+    if (value == null) return null;
+    if (typeof value === 'string' && value.trim() === '') return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  }
+
+  function getSeasonRecordScorePair(record) {
+    const result = record?.result || {};
+    return {
+      playerAScore: toFiniteSeasonScore(record?.playerAScore ?? record?.scoreA ?? record?.aScore ?? record?.playerA?.score ?? result.playerAScore ?? result.scoreA ?? result.aScore ?? result.playerA?.score),
+      playerBScore: toFiniteSeasonScore(record?.playerBScore ?? record?.scoreB ?? record?.bScore ?? record?.playerB?.score ?? result.playerBScore ?? result.scoreB ?? result.bScore ?? result.playerB?.score)
+    };
+  }
+
   function getRecordedResultWinner(record) {
     let winnerId = String(record?.winnerId || record?.winningPlayerId || record?.winner?.playerId || record?.winner?.id || record?.result?.winnerId || record?.result?.winningPlayerId || record?.result?.winner?.playerId || record?.result?.winner?.id || '').trim();
     let loserId = String(record?.loserId || record?.losingPlayerId || record?.loser?.playerId || record?.loser?.id || record?.result?.loserId || record?.result?.losingPlayerId || record?.result?.loser?.playerId || record?.result?.loser?.id || '').trim();
-    const scoreA = Number(record?.scoreA ?? record?.playerAScore ?? record?.aScore ?? record?.result?.scoreA ?? record?.result?.playerAScore);
-    const scoreB = Number(record?.scoreB ?? record?.playerBScore ?? record?.bScore ?? record?.result?.scoreB ?? record?.result?.playerBScore);
-    if (!winnerId && Number.isFinite(scoreA) && Number.isFinite(scoreB) && scoreA !== scoreB) {
-      winnerId = scoreA > scoreB ? String(record?.playerAId || '').trim() : String(record?.playerBId || '').trim();
-      loserId = scoreA > scoreB ? String(record?.playerBId || '').trim() : String(record?.playerAId || '').trim();
+    const { playerAScore, playerBScore } = getSeasonRecordScorePair(record);
+    if (!winnerId && playerAScore != null && playerBScore != null && playerAScore !== playerBScore) {
+      winnerId = playerAScore > playerBScore ? String(record?.playerAId || '').trim() : String(record?.playerBId || '').trim();
+      loserId = playerAScore > playerBScore ? String(record?.playerBId || '').trim() : String(record?.playerAId || '').trim();
     }
     return {
       winnerId,
       loserId,
-      playerAScore: Number.isFinite(scoreA) ? scoreA : undefined,
-      playerBScore: Number.isFinite(scoreB) ? scoreB : undefined
+      playerAScore: playerAScore == null ? undefined : playerAScore,
+      playerBScore: playerBScore == null ? undefined : playerBScore
+    };
+  }
+
+  function getSeasonResultWinnerForSeries(record, series) {
+    const rawScores = getSeasonRecordScorePair(record);
+    let playerAScore = rawScores.playerAScore;
+    let playerBScore = rawScores.playerBScore;
+    if (!record || !series) return { winnerId: '', loserId: '', playerAScore, playerBScore, source: 'none' };
+
+    const playerAId = String(series.playerAId || '').trim();
+    const playerBId = String(series.playerBId || '').trim();
+    const recordPlayerAId = String(record?.playerAId || record?.result?.playerAId || '').trim();
+    const recordPlayerBId = String(record?.playerBId || record?.result?.playerBId || '').trim();
+    if (recordPlayerAId && recordPlayerBId && playerAId && playerBId) {
+      if (recordPlayerAId === playerBId && recordPlayerBId === playerAId) {
+        playerAScore = rawScores.playerBScore;
+        playerBScore = rawScores.playerAScore;
+      } else if (recordPlayerAId !== playerAId || recordPlayerBId !== playerBId) {
+        const scoreByPlayerId = new Map([[recordPlayerAId, rawScores.playerAScore], [recordPlayerBId, rawScores.playerBScore]]);
+        if (scoreByPlayerId.has(playerAId)) playerAScore = scoreByPlayerId.get(playerAId);
+        if (scoreByPlayerId.has(playerBId)) playerBScore = scoreByPlayerId.get(playerBId);
+      }
+    }
+
+    if (playerAScore != null && playerBScore != null && playerAScore !== playerBScore && playerAId && playerBId) {
+      const winnerId = playerAScore > playerBScore ? playerAId : playerBId;
+      const loserId = playerAScore > playerBScore ? playerBId : playerAId;
+      return { winnerId, loserId, playerAScore, playerBScore, source: 'scores' };
+    }
+
+    const fallback = getRecordedResultWinner(record);
+    const winnerId = String(fallback.winnerId || '').trim();
+    if (winnerId === playerAId || winnerId === playerBId) {
+      return {
+        winnerId,
+        loserId: winnerId === playerAId ? playerBId : playerAId,
+        playerAScore,
+        playerBScore,
+        source: 'winnerId'
+      };
+    }
+
+    return { winnerId: '', loserId: '', playerAScore, playerBScore, source: 'none' };
+  }
+
+  function normalizeSeasonResultWinnerForSeries(record, series) {
+    const winner = getSeasonResultWinnerForSeries(record, series);
+    if (!winner.winnerId) return { record, winner, changed: false };
+    const normalized = {
+      ...record,
+      winnerId: winner.winnerId,
+      loserId: winner.loserId
+    };
+    if (winner.playerAScore != null) normalized.playerAScore = winner.playerAScore;
+    if (winner.playerBScore != null) normalized.playerBScore = winner.playerBScore;
+    return {
+      record: normalized,
+      winner,
+      changed: String(record?.winnerId || '') !== winner.winnerId
+        || String(record?.loserId || '') !== winner.loserId
+        || (winner.playerAScore != null && Number(record?.playerAScore) !== winner.playerAScore)
+        || (winner.playerBScore != null && Number(record?.playerBScore) !== winner.playerBScore)
     };
   }
 
@@ -3197,10 +3333,10 @@
     if (!raw || !series) return null;
     const seriesId = getRecordedSeriesId(raw) || series.id || '';
     if (seriesId && series.id && seriesId !== series.id) return null;
-    const winner = getRecordedResultWinner(raw);
+    const winner = getSeasonResultWinnerForSeries(raw, series);
     if (!winner.winnerId || (winner.winnerId !== series.playerAId && winner.winnerId !== series.playerBId)) return null;
-    const loserId = winner.winnerId === series.playerAId ? series.playerBId : series.playerAId;
-    if (!loserId || (winner.loserId && winner.loserId !== loserId)) return null;
+    const loserId = winner.loserId || (winner.winnerId === series.playerAId ? series.playerBId : series.playerAId);
+    if (!loserId) return null;
     const date = getRecordedResultDateKey(raw);
     const matchupId = raw.matchupId || raw.id || raw.gameId || (date ? `${date}_${series.id}_${raw.gameNumber || raw.seriesGameNumber || ''}` : '');
     return {
@@ -3310,7 +3446,9 @@
   function rebuildSeasonSeriesFromRecordedResults(series, rawResults, options = {}) {
     const byKey = new Map();
     const keyByConflict = new Map();
-    rawResults.forEach((result, index) => {
+    rawResults.forEach((rawResult, index) => {
+      const normalizedWinner = normalizeSeasonResultWinnerForSeries(rawResult, series);
+      const result = normalizedWinner.record;
       const key = result._dedupeKey || getSeasonResultDedupeKey(result, series.id, index);
       const conflictKey = getSeasonResultConflictDedupeKey(result, series.id, index);
       const existingKey = (conflictKey && keyByConflict.get(conflictKey)) || key;
@@ -7142,6 +7280,8 @@ return Number(cappedScore.toFixed(1));
     getFinalPlacements,
     getChampionSummary,
     repairSeasonChampionshipData,
+    repairSeasonSeriesResultWinnerIds,
+    getSeasonResultWinnerForSeries,
     recalculateAllSeasonSeriesFromGameResults,
     recalculateSeasonSeriesFromGameResults,
     assignSeasonBracketSlot,

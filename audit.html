@@ -1927,6 +1927,30 @@ function runWeightVo2HistorySavePathAudit(state) {
       };
     }
 
+    function buildSeasonResultWinnerScoreAuditForAudit(season, seriesList) {
+      const issues = [];
+      (Array.isArray(seriesList) ? seriesList : []).forEach(series => {
+        (Array.isArray(series?.gameResults) ? series.gameResults : []).forEach((result, index) => {
+          const winner = window.TaskPointsCore?.getSeasonResultWinnerForSeries
+            ? TaskPointsCore.getSeasonResultWinnerForSeries(result, series)
+            : null;
+          if (!winner || winner.source !== 'scores' || !winner.winnerId) return;
+          const storedWinnerId = String(result?.winnerId || result?.winningPlayerId || '').trim();
+          if (storedWinnerId && storedWinnerId !== winner.winnerId) {
+            const date = result?.dateKey || result?.date || `game ${index + 1}`;
+            issues.push(`${getSeriesDisplayNameForAudit(series)} ${date}: Season game result winnerId disagrees with recorded scores (stored ${storedWinnerId}, score winner ${winner.winnerId}; ${winner.playerAScore}–${winner.playerBScore}).`);
+          }
+        });
+      });
+      return {
+        status: !season ? 'WARN' : (issues.length ? 'FAIL' : 'PASS'),
+        expected: 'Season game result winnerId agrees with clear player A/B scores',
+        actual: !season ? 'No current season found' : (issues.length ? `${issues.length} winnerId/score disagreement(s)` : 'All clear Season game scores agree with winnerId'),
+        details: issues,
+        trace: 'currentSeason.series[].gameResults winnerId/playerAScore/playerBScore'
+      };
+    }
+
     function buildSeasonChampionshipAuditChecks(state, selectedDateKey, options) {
       options = options || {};
       const season = getCurrentSeasonForAudit(state);
@@ -2002,6 +2026,9 @@ function runWeightVo2HistorySavePathAudit(state) {
 
       const scoreAudit = buildSeasonSeriesScoreAuditForAudit(state, season, seriesList, selectedDateKey, options);
       checks.push({ ...base, id: 'season-series-scores-match-results', title: 'Season series scores match recorded game results', ...scoreAudit });
+
+      const winnerScoreAudit = buildSeasonResultWinnerScoreAuditForAudit(season, seriesList);
+      checks.push({ ...base, id: 'season-game-result-winnerids-match-scores', title: 'Season game result winnerIds match scores', ...winnerScoreAudit });
 
       const invalidCompleted = [];
       const completedSeries = [];
@@ -3418,6 +3445,12 @@ const actualTotal = round2(Number(derivedActualTotal) || 0);
         const seasonSync = TaskPointsCore.syncCurrentSeasonSeriesFromRecordedResults(nextState);
         nextState = seasonSync.state || nextState;
         changed = changed || Boolean(seasonSync.changed);
+      }
+
+      if (window.TaskPointsCore?.repairSeasonSeriesResultWinnerIds) {
+        const winnerRepair = TaskPointsCore.repairSeasonSeriesResultWinnerIds(nextState);
+        nextState = winnerRepair.state || nextState;
+        changed = changed || Boolean(winnerRepair.changed);
       }
 
       if (!changed) {
