@@ -1462,14 +1462,65 @@ function saveStateSnapshotFallback(next, options = {}) {
   }
 }
 
-function getCurrentNotesForExportFallback(snapshot = null) {
-  let cached = '';
+function getBestNotesTextFromStorageFallback() {
+  let stateNotes = '';
+  let cacheNotes = '';
+
   try {
-    cached = localStorage.getItem('taskpoints_notes_v1') || '';
+    const raw = localStorage.getItem(STORAGE_KEY_FALLBACK);
+    const state = raw ? JSON.parse(raw) : {};
+    stateNotes = typeof state.notes === 'string' ? state.notes : '';
   } catch (_) {}
 
-  const stateNotes = typeof snapshot?.notes === 'string' ? snapshot.notes : '';
-  return typeof cached === 'string' && cached.length ? cached : stateNotes;
+  try {
+    cacheNotes = localStorage.getItem('taskpoints_notes_v1') || '';
+  } catch (_) {}
+
+  if (cacheNotes.trim() && !stateNotes.trim()) return cacheNotes;
+  if (stateNotes.trim() && !cacheNotes.trim()) return stateNotes;
+  if (cacheNotes === stateNotes) return cacheNotes;
+
+  return cacheNotes.length >= stateNotes.length ? cacheNotes : stateNotes;
+}
+
+function syncNotesStorageLocationsFallback(source = 'notes-storage-sync') {
+  const notesText = getBestNotesTextFromStorageFallback();
+
+  try {
+    localStorage.setItem('taskpoints_notes_v1', notesText);
+  } catch (error) {
+    console.warn('Failed to sync taskpoints_notes_v1', error);
+  }
+
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_FALLBACK);
+    const state = raw ? JSON.parse(raw) : {};
+    state.notes = notesText;
+    localStorage.setItem(STORAGE_KEY_FALLBACK, JSON.stringify(state));
+  } catch (error) {
+    console.warn('Failed to sync taskpoints_v1.notes', error);
+  }
+
+  window.dispatchEvent(new CustomEvent('taskpoints-notes-updated', {
+    detail: { source }
+  }));
+
+  return notesText;
+}
+
+if (typeof window.getBestNotesTextFromStorage !== 'function') {
+  window.getBestNotesTextFromStorage = getBestNotesTextFromStorageFallback;
+}
+if (typeof window.syncNotesStorageLocations !== 'function') {
+  window.syncNotesStorageLocations = syncNotesStorageLocationsFallback;
+}
+
+function getCurrentNotesForExportFallback(snapshot = null) {
+  if (typeof window.syncNotesStorageLocations === 'function') {
+    return window.syncNotesStorageLocations('notes-export-sync');
+  }
+  const notesText = syncNotesStorageLocationsFallback('notes-export-sync');
+  return notesText || (typeof snapshot?.notes === 'string' ? snapshot.notes : '');
 }
 
 function readNotesPayloadFromBackupPayloadFallback(payload) {

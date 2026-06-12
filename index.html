@@ -10287,13 +10287,36 @@ function exportData(){
 }
 
 function getCurrentNotesForExport(snapshot = null) {
-  let cached = "";
+  if (typeof window.syncNotesStorageLocations === "function") {
+    return window.syncNotesStorageLocations("index-export-sync");
+  }
+
+  let stateNotes = typeof snapshot?.notes === "string" ? snapshot.notes : "";
+  let cacheNotes = "";
   try {
-    cached = localStorage.getItem("taskpoints_notes_v1") || "";
+    cacheNotes = localStorage.getItem("taskpoints_notes_v1") || "";
   } catch (_) {}
 
-  const stateNotes = typeof snapshot?.notes === "string" ? snapshot.notes : "";
-  return typeof cached === "string" && cached.length ? cached : stateNotes;
+  let notesText = "";
+  if (cacheNotes.trim() && !stateNotes.trim()) notesText = cacheNotes;
+  else if (stateNotes.trim() && !cacheNotes.trim()) notesText = stateNotes;
+  else if (cacheNotes === stateNotes) notesText = cacheNotes;
+  else notesText = cacheNotes.length >= stateNotes.length ? cacheNotes : stateNotes;
+
+  try {
+    localStorage.setItem("taskpoints_notes_v1", notesText);
+  } catch (error) {
+    console.warn("Failed to sync taskpoints_notes_v1", error);
+  }
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    const savedState = raw ? JSON.parse(raw) : {};
+    savedState.notes = notesText;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(savedState));
+  } catch (error) {
+    console.warn("Failed to sync taskpoints_v1.notes", error);
+  }
+  return notesText;
 }
 
 function readNotesPayloadFromBackupPayload(payload) {

@@ -965,6 +965,26 @@
       try { return JSON.stringify(payload); } catch (_) { return String(payload); }
     }
 
+    function getCurrentNotesTextForSettings() {
+      if (typeof window.syncNotesStorageLocations === "function") {
+        return window.syncNotesStorageLocations("settings-notes-sync");
+      }
+      let stateNotes = "";
+      let cacheNotes = "";
+      try {
+        const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+        const savedState = raw ? JSON.parse(raw) : {};
+        stateNotes = typeof savedState.notes === "string" ? savedState.notes : "";
+      } catch (_) {}
+      try {
+        cacheNotes = localStorage.getItem("taskpoints_notes_v1") || "";
+      } catch (_) {}
+      if (cacheNotes.trim() && !stateNotes.trim()) return cacheNotes;
+      if (stateNotes.trim() && !cacheNotes.trim()) return stateNotes;
+      if (cacheNotes === stateNotes) return cacheNotes;
+      return cacheNotes.length >= stateNotes.length ? cacheNotes : stateNotes;
+    }
+
     function applyImportedNotesPayload(notesPayload, options = {}) {
       if (notesPayload == null) return false;
 
@@ -1043,7 +1063,7 @@ ${b}`;
 
     function applyNotesRestore(mode, incomingNotesRaw) {
       const incomingNotes = normalizeNotesPayload(incomingNotesRaw);
-      const existingNotes = localStorage.getItem("taskpoints_notes_v1") || "";
+      const existingNotes = getCurrentNotesTextForSettings();
       if (!incomingNotes.trim() || mode === "skip") return false;
       if (mode === "replace") {
         return applyImportedNotesPayload(incomingNotes, {
@@ -1440,7 +1460,7 @@ Earliest gameHistory: ${earliestGameHistory}`;
         const mergedState = { ...currentState, ...merged, lastBackupMerge: new Date().toISOString() };
         const backupNotesPayloadRaw = readNotesPayloadFromBackupPayload(raw);
         const backupNotes = normalizeNotesPayload(backupNotesPayloadRaw);
-        const currentNotes = localStorage.getItem("taskpoints_notes_v1") || "";
+        const currentNotes = getCurrentNotesTextForSettings();
         const currentNotesKiB = getStorageSizeKiB(currentNotes).toFixed(1);
         const backupNotesKiB = getStorageSizeKiB(backupNotes).toFixed(1);
         const backupHasNotes = !!backupNotes.trim();
@@ -4162,7 +4182,10 @@ rows.push([
           return;
         }
       }
-      window.dispatchEvent(new CustomEvent("taskpoints-notes-updated", { detail: { source: "settings-notes-recovery" } }));
+      applyImportedNotesPayload(localStorage.getItem(NOTES_RECOVERY_TARGET_KEY) || "", {
+        source: "settings-notes-recovery",
+        allowEmptyReplace: true
+      });
       alert(`Notes restored to ${NOTES_RECOVERY_TARGET_KEY}. Open the Notes page to verify.`);
     }
 
@@ -4175,7 +4198,10 @@ rows.push([
       const existingNotes = localStorage.getItem(NOTES_RECOVERY_TARGET_KEY) || "";
       if (!confirm(`Append value from "${selected.key}" into ${NOTES_RECOVERY_TARGET_KEY}?`)) return;
       localStorage.setItem(NOTES_RECOVERY_TARGET_KEY, mergeNotesForRecovery(existingNotes, selected.value, selected.key));
-      window.dispatchEvent(new CustomEvent("taskpoints-notes-updated", { detail: { source: "settings-notes-recovery-append" } }));
+      applyImportedNotesPayload(localStorage.getItem(NOTES_RECOVERY_TARGET_KEY) || "", {
+        source: "settings-notes-recovery-append",
+        allowEmptyReplace: true
+      });
       alert(`Selected value appended into ${NOTES_RECOVERY_TARGET_KEY}.`);
     }
 
