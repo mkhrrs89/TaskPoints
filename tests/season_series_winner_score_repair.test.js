@@ -71,6 +71,67 @@ test('Season winner helper maps matchup score fields onto the series participant
   assert.equal(winner.source, 'scores');
 });
 
+
+test('Season result winner repair treats blank score fields as missing', () => {
+  const series = sweet16Series({
+    gameResults: [
+      { matchupId: 'blank-a', dateKey: '2026-06-09', gameNumber: 1, winnerId: 'YOU', loserId: 'everly', playerAScore: '', playerBScore: '5', source: 'manual' }
+    ]
+  });
+
+  const repair = core.repairSeasonSeriesResultWinnerIds(stateWithSeries(series), { nowISO: '2026-06-12T12:00:00.000Z' });
+  const repairedSeries = repair.state.currentSeason.series[series.id];
+  const result = repairedSeries.gameResults[0];
+
+  assert.equal(result.winnerId, 'YOU');
+  assert.equal(result.loserId, 'everly');
+  assert.equal(repairedSeries.winsA, 1);
+  assert.equal(repairedSeries.winsB, 0);
+});
+
+test('Season result winner repair treats whitespace score fields as missing', () => {
+  const series = sweet16Series({
+    gameResults: [
+      { matchupId: 'whitespace-a', dateKey: '2026-06-09', gameNumber: 1, winnerId: 'YOU', loserId: 'everly', playerAScore: '   ', playerBScore: '5', source: 'manual' }
+    ]
+  });
+
+  const repair = core.repairSeasonSeriesResultWinnerIds(stateWithSeries(series), { nowISO: '2026-06-12T12:00:00.000Z' });
+  const repairedSeries = repair.state.currentSeason.series[series.id];
+  const result = repairedSeries.gameResults[0];
+
+  assert.equal(result.winnerId, 'YOU');
+  assert.equal(result.loserId, 'everly');
+  assert.equal(repairedSeries.winsA, 1);
+  assert.equal(repairedSeries.winsB, 0);
+});
+
+test('Season result winner repair still treats real zero scores as valid', () => {
+  const series = sweet16Series({
+    gameResults: [
+      { matchupId: 'zero-a', dateKey: '2026-06-09', gameNumber: 1, winnerId: 'YOU', loserId: 'everly', playerAScore: '0', playerBScore: '5', source: 'manual' }
+    ]
+  });
+
+  const repair = core.repairSeasonSeriesResultWinnerIds(stateWithSeries(series), { nowISO: '2026-06-12T12:00:00.000Z' });
+  const repairedSeries = repair.state.currentSeason.series[series.id];
+  const result = repairedSeries.gameResults[0];
+
+  assert.equal(result.winnerId, 'everly');
+  assert.equal(result.loserId, 'YOU');
+  assert.equal(repairedSeries.winsA, 0);
+  assert.equal(repairedSeries.winsB, 1);
+});
+
+test('Season result winner helper treats invalid score fields as missing and falls back to winnerId', () => {
+  const series = sweet16Series();
+  const winner = core.getSeasonResultWinnerForSeries({ winnerId: 'YOU', loserId: 'everly', playerAScore: 'abc', playerBScore: '5' }, series);
+
+  assert.equal(winner.winnerId, 'YOU');
+  assert.equal(winner.loserId, 'everly');
+  assert.equal(winner.source, 'winnerId');
+});
+
 test('Season repair corrects stale winnerId when Sweet 16 scores clearly pick player A', () => {
   const series = sweet16Series({
     gameResults: [
