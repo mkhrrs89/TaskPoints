@@ -247,7 +247,7 @@ test('audit-safe result summary matches core counting and does not double-count 
   assert.equal(summary2.gameResults.length, 3);
 });
 
-test('same-day true admin manual override is preserved while same-day live matchup is excluded', () => {
+test('same-day true admin manual override is excluded by normal current-day guard', () => {
   const series = makeRoundSeries({
     id: 'same_day_admin_override',
     seriesIndex: 3,
@@ -283,11 +283,9 @@ test('same-day true admin manual override is preserved while same-day live match
   const synced = core.syncCurrentSeasonSeriesFromRecordedResults(state, { nowISO: '2026-06-06T22:08:00.000Z' });
   const repaired = synced.state.currentSeason.series[series.id];
 
-  assert.equal(repaired.winsA, 1);
+  assert.equal(repaired.winsA, 0);
   assert.equal(repaired.winsB, 0);
-  assert.equal(repaired.gameResults.length, 1);
-  assert.equal(repaired.gameResults[0].winnerId, 'adminA');
-  assert.equal(repaired.gameResults[0].source, 'admin_manual');
+  assert.equal(repaired.gameResults.length, 0);
 });
 
 test('same-day synthetic repair result does not bypass normal current-day guard', () => {
@@ -347,4 +345,111 @@ test('forced current-day sync includes same-day non-manual matchup results', () 
   assert.equal(repaired.winsB, 1);
   assert.equal(repaired.gameResults.length, 1);
   assert.equal(repaired.gameResults[0].winnerId, 'forceB');
+});
+
+test('current-day live score-only tournament matchup is not counted even when current-day results are included', () => {
+  const series = makeRoundSeries({ id: 'current_day_live_score_only', seriesIndex: 6, playerASeed: 13, playerBSeed: 20, playerAId: 'liveA', playerBId: 'liveB' });
+  const state = {
+    currentSeason: { id: 'season_1_june_2026', monthKey: '2026-06', status: 'active', series: { [series.id]: series } },
+    matchups: [{
+      id: 'current_day_live_score_only_g1',
+      seriesId: series.id,
+      seasonSeriesId: series.id,
+      dateKey: '2026-06-06',
+      gameNumber: 1,
+      matchupType: 'tournament',
+      playerAId: 'liveA',
+      playerBId: 'liveB',
+      scoreA: 61.02,
+      scoreB: 34.2
+    }]
+  };
+
+  const synced = core.syncCurrentSeasonSeriesFromRecordedResults(state, { nowISO: '2026-06-06T22:08:00.000Z', includeCurrentDayResults: true });
+  const repaired = synced.state.currentSeason.series[series.id];
+
+  assert.equal(repaired.winsA, 0);
+  assert.equal(repaired.winsB, 0);
+  assert.equal(repaired.gameResults.length, 0);
+});
+
+test('prior-day completed score-only tournament matchup is counted from canonical scores', () => {
+  const series = makeRoundSeries({ id: 'prior_day_score_only', seriesIndex: 7, playerASeed: 14, playerBSeed: 19, playerAId: 'priorA', playerBId: 'priorB' });
+  const state = {
+    currentSeason: { id: 'season_1_june_2026', monthKey: '2026-06', status: 'active', series: { [series.id]: series } },
+    matchups: [{
+      id: 'prior_day_score_only_g1',
+      seriesId: series.id,
+      seasonSeriesId: series.id,
+      dateKey: '2026-06-05',
+      gameNumber: 1,
+      matchupType: 'tournament',
+      playerAId: 'priorA',
+      playerBId: 'priorB',
+      scoreA: 61.02,
+      scoreB: 34.2
+    }]
+  };
+
+  const synced = core.syncCurrentSeasonSeriesFromRecordedResults(state, { nowISO: '2026-06-06T22:08:00.000Z' });
+  const repaired = synced.state.currentSeason.series[series.id];
+
+  assert.equal(repaired.winsA, 1);
+  assert.equal(repaired.winsB, 0);
+  assert.equal(repaired.gameResults.length, 1);
+  assert.equal(repaired.gameResults[0].winnerId, 'priorA');
+  assert.equal(repaired.gameResults[0].playerAScore, 61.02);
+});
+
+test('existing stale series game result is refreshed from matching matchup canonical score fields', () => {
+  const series = makeRoundSeries({
+    id: 'refresh_stale_series_result',
+    seriesIndex: 8,
+    playerASeed: 15,
+    playerBSeed: 18,
+    playerAId: 'freshA',
+    playerBId: 'freshB',
+    gameResults: [{
+      matchupId: 'refresh_stale_g1',
+      dateKey: '2026-06-05',
+      gameNumber: 1,
+      seriesId: 'refresh_stale_series_result',
+      seasonSeriesId: 'refresh_stale_series_result',
+      winnerId: 'freshB',
+      loserId: 'freshA',
+      playerAScore: 8.67,
+      playerBScore: 34.2,
+      source: 'matchup'
+    }]
+  });
+  const state = {
+    currentSeason: { id: 'season_1_june_2026', monthKey: '2026-06', status: 'active', series: { [series.id]: series } },
+    matchups: [{
+      id: 'refresh_stale_g1',
+      matchupId: 'refresh_stale_g1',
+      seriesId: series.id,
+      seasonSeriesId: series.id,
+      dateKey: '2026-06-05',
+      gameNumber: 1,
+      matchupType: 'tournament',
+      playerAId: 'freshA',
+      playerBId: 'freshB',
+      scoreA: 61.02,
+      scoreB: 34.2,
+      playerAScore: 8.67,
+      playerBScore: 34.2,
+      winnerId: 'freshB'
+    }]
+  };
+
+  const synced = core.syncCurrentSeasonSeriesFromRecordedResults(state, { nowISO: '2026-06-06T22:08:00.000Z' });
+  const repaired = synced.state.currentSeason.series[series.id];
+
+  assert.equal(repaired.winsA, 1);
+  assert.equal(repaired.winsB, 0);
+  assert.equal(repaired.gameResults.length, 1);
+  assert.equal(repaired.gameResults[0].matchupId, 'refresh_stale_g1');
+  assert.equal(repaired.gameResults[0].winnerId, 'freshA');
+  assert.equal(repaired.gameResults[0].playerAScore, 61.02);
+  assert.equal(repaired.gameResults[0].playerBScore, 34.2);
 });

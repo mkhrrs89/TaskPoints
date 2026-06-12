@@ -1951,6 +1951,70 @@ function runWeightVo2HistorySavePathAudit(state) {
       };
     }
 
+
+    function toAuditFiniteSeasonScore(value) {
+      if (value == null) return null;
+      if (typeof value === 'string' && value.trim() === '') return null;
+      const number = Number(value);
+      return Number.isFinite(number) ? number : null;
+    }
+
+    function buildSeasonMatchupScoreFieldDivergenceAuditForAudit(state, season) {
+      const issues = [];
+      (Array.isArray(state?.matchups) ? state.matchups : []).forEach((matchup) => {
+        const type = String(matchup?.matchupType || '').toLowerCase();
+        if (type && type !== 'tournament' && type !== 'season') return;
+        const seriesId = window.TaskPointsCore?.getRecordedSeriesId ? TaskPointsCore.getRecordedSeriesId(matchup) : (matchup?.seriesId || matchup?.seasonSeriesId || '');
+        if (season?.id && matchup?.seasonId && matchup.seasonId !== season.id) return;
+        if (seriesId && !season?.series?.[seriesId]) return;
+        const scoreA = toAuditFiniteSeasonScore(matchup?.scoreA);
+        const scoreB = toAuditFiniteSeasonScore(matchup?.scoreB);
+        const playerAScore = toAuditFiniteSeasonScore(matchup?.playerAScore);
+        const playerBScore = toAuditFiniteSeasonScore(matchup?.playerBScore);
+        if (scoreA == null || scoreB == null || playerAScore == null || playerBScore == null) return;
+        if (scoreA !== playerAScore || scoreB !== playerBScore) {
+          const date = matchup?.dateKey || matchup?.date || 'undated';
+          issues.push(`${date} ${matchup?.id || matchup?.matchupId || 'matchup'}: scoreA/scoreB ${scoreA}–${scoreB} disagree with playerAScore/playerBScore ${playerAScore}–${playerBScore}.`);
+        }
+      });
+      return {
+        status: !season ? 'WARN' : (issues.length ? 'FAIL' : 'PASS'),
+        expected: 'Season tournament matchups keep scoreA/scoreB and playerAScore/playerBScore aligned when both pairs are present',
+        actual: !season ? 'No current season found' : (issues.length ? `${issues.length} matchup score field divergence(s)` : 'No Season tournament matchup score field divergence found'),
+        details: issues,
+        trace: 'state.matchups[] scoreA/scoreB/playerAScore/playerBScore'
+      };
+    }
+
+    function buildCurrentDaySeriesGameResultsAuditForAudit(season, seriesList, selectedDateKey, options) {
+      const todayKey = getAuditDateKeyForSeasonSeriesScores(selectedDateKey);
+      const issues = [];
+      if (options?.includeCurrentDayResults === true) {
+        return {
+          status: !season ? 'WARN' : 'PASS',
+          expected: 'Current-day Season gameResults are only audited in normal mode',
+          actual: !season ? 'No current season found' : 'Current-day inclusion was explicitly requested',
+          details: [],
+          trace: 'currentSeason.series[].gameResults dateKey'
+        };
+      }
+      (Array.isArray(seriesList) ? seriesList : []).forEach(series => {
+        (Array.isArray(series?.gameResults) ? series.gameResults : []).forEach((result, index) => {
+          const date = String(result?.dateKey || result?.date || '').trim();
+          if (todayKey && date && date >= todayKey) {
+            issues.push(`${getSeriesDisplayNameForAudit(series)} ${date || `game ${index + 1}`}: current/future gameResult is present during normal mode.`);
+          }
+        });
+      });
+      return {
+        status: !season ? 'WARN' : (issues.length ? 'FAIL' : 'PASS'),
+        expected: 'Normal Season rendering has no current-day or future rows in series.gameResults',
+        actual: !season ? 'No current season found' : (issues.length ? `${issues.length} current/future series.gameResults row(s)` : 'No normal-mode current/future gameResults found'),
+        details: issues,
+        trace: 'currentSeason.series[].gameResults dateKey'
+      };
+    }
+
     function buildSeasonChampionshipAuditChecks(state, selectedDateKey, options) {
       options = options || {};
       const season = getCurrentSeasonForAudit(state);
@@ -2029,6 +2093,12 @@ function runWeightVo2HistorySavePathAudit(state) {
 
       const winnerScoreAudit = buildSeasonResultWinnerScoreAuditForAudit(season, seriesList);
       checks.push({ ...base, id: 'season-game-result-winnerids-match-scores', title: 'Season game result winnerIds match scores', ...winnerScoreAudit });
+
+      const matchupScoreFieldAudit = buildSeasonMatchupScoreFieldDivergenceAuditForAudit(state, season);
+      checks.push({ ...base, id: 'season-matchup-score-fields-aligned', title: 'Season tournament matchup score fields stay aligned', ...matchupScoreFieldAudit });
+
+      const currentDayGameResultsAudit = buildCurrentDaySeriesGameResultsAuditForAudit(season, seriesList, selectedDateKey, options);
+      checks.push({ ...base, id: 'season-series-no-current-day-game-results-normal-mode', title: 'Normal Season gameResults exclude current-day live rows', ...currentDayGameResultsAudit });
 
       const invalidCompleted = [];
       const completedSeries = [];

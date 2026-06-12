@@ -253,3 +253,60 @@ test('future linked matchup with stored wins is still checkable', () => {
   assert.equal(result.actual, '1 mismatch(es)');
   assert.match(result.details[0], /expected 0–0 from results, stored 1–0/);
 });
+
+function loadAdditionalSeasonAuditHelpers() {
+  const auditHtml = fs.readFileSync(path.join(__dirname, '..', 'audit.html'), 'utf8');
+  const functionNames = [
+    'getSeriesDisplayNameForAudit',
+    'getAuditDateKeyForSeasonSeriesScores',
+    'toAuditFiniteSeasonScore',
+    'buildSeasonMatchupScoreFieldDivergenceAuditForAudit',
+    'buildCurrentDaySeriesGameResultsAuditForAudit'
+  ];
+  const context = {
+    TaskPointsCore: {
+      getRecordedSeriesId: (record) => record?.seriesId || record?.seasonSeriesId || ''
+    },
+    getTodayGameDayKeyForAudit: () => '2026-06-12'
+  };
+  context.window = context;
+  vm.createContext(context);
+  const source = functionNames.map((name) => extractFunction(auditHtml, name)).join('\n');
+  vm.runInContext(`${source}; this.buildSeasonMatchupScoreFieldDivergenceAuditForAudit = buildSeasonMatchupScoreFieldDivergenceAuditForAudit; this.buildCurrentDaySeriesGameResultsAuditForAudit = buildCurrentDaySeriesGameResultsAuditForAudit;`, context);
+  return context;
+}
+
+test('audit catches Season tournament matchup score field divergence', () => {
+  const helpers = loadAdditionalSeasonAuditHelpers();
+  const season = { id: 'season_1_june_2026', series: { s1: series({ id: 's1', roundId: 'sweet_16', playerAId: 'YOU', playerBId: 'everly' }) } };
+  const result = helpers.buildSeasonMatchupScoreFieldDivergenceAuditForAudit({
+    matchups: [{
+      id: 'you-everly-g3',
+      seasonId: season.id,
+      seriesId: 's1',
+      matchupType: 'tournament',
+      dateKey: '2026-06-11',
+      playerAId: 'YOU',
+      playerBId: 'everly',
+      scoreA: 61.02,
+      scoreB: 34.2,
+      playerAScore: 8.67,
+      playerBScore: 34.2,
+      winnerId: 'everly'
+    }]
+  }, season);
+
+  assert.equal(result.status, 'FAIL');
+  assert.match(result.details[0], /61\.02–34\.2 disagree with playerAScore\/playerBScore 8\.67–34\.2/);
+});
+
+test('audit catches current-day Season gameResults in normal mode', () => {
+  const helpers = loadAdditionalSeasonAuditHelpers();
+  const s = series({ id: 's_today', name: 'Today Series', roundId: 'sweet_16' });
+  s.gameResults = [{ matchupId: 'today-g4', dateKey: '2026-06-12', gameNumber: 4, winnerId: s.playerBId }];
+
+  const result = helpers.buildCurrentDaySeriesGameResultsAuditForAudit({ id: 'season_1_june_2026' }, [s], '2026-06-12', {});
+
+  assert.equal(result.status, 'FAIL');
+  assert.match(result.details[0], /2026-06-12: current\/future gameResult is present during normal mode/);
+});

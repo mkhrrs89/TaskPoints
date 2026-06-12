@@ -216,3 +216,51 @@ test('Season sync counts completed prior-day results but skips current-day resul
   assert.equal(synced.gameResults.length, 1);
   assert.equal(synced.gameResults[0].matchupId, 'jun11');
 });
+
+test('canonical Season score pair prefers scoreA/scoreB over stale playerAScore/playerBScore and winnerId', () => {
+  const series = sweet16Series({
+    gameResults: [
+      {
+        matchupId: 'everly-bad-jun11',
+        dateKey: '2026-06-11',
+        gameNumber: 3,
+        playerAId: 'YOU',
+        playerBId: 'everly',
+        scoreA: 61.02,
+        scoreB: 34.2,
+        playerAScore: 8.67,
+        playerBScore: 34.2,
+        winnerId: 'everly',
+        loserId: 'YOU',
+        source: 'matchup'
+      }
+    ]
+  });
+
+  const repair = core.repairSeasonSeriesResultWinnerIds(stateWithSeries(series), { nowISO: '2026-06-12T12:00:00.000Z' });
+  const result = repair.state.currentSeason.series[series.id].gameResults[0];
+
+  assert.equal(result.playerAScore, 61.02);
+  assert.equal(result.playerBScore, 34.2);
+  assert.equal(result.winnerId, 'YOU');
+  assert.equal(result.loserId, 'everly');
+  assert.equal(repair.state.currentSeason.series[series.id].winsA, 1);
+  assert.equal(repair.state.currentSeason.series[series.id].winsB, 0);
+});
+
+test('canonical Season score pair treats blank scoreA as missing and keeps fallback winnerId', () => {
+  const series = sweet16Series();
+  const winner = core.getSeasonResultWinnerForSeries({
+    playerAId: 'YOU',
+    playerBId: 'everly',
+    scoreA: '',
+    scoreB: '5',
+    winnerId: 'YOU'
+  }, series);
+
+  assert.equal(winner.winnerId, 'YOU');
+  assert.equal(winner.loserId, 'everly');
+  assert.equal(winner.playerAScore, null);
+  assert.equal(winner.playerBScore, null);
+  assert.equal(winner.source, 'winnerId');
+});
