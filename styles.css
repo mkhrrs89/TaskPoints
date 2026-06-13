@@ -6067,3 +6067,82 @@ header,
     grid-template-columns: 1fr;
   }
 }
+
+/* Season mobile round collapsibles */
+.season-round-toggle {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+  padding: 0;
+  text-align: left;
+  width: 100%;
+}
+
+.season-round-toggle-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.season-round-title {
+  color: #f8fafc;
+  font-weight: 900;
+}
+
+.season-round-summary {
+  border: 1px solid rgba(45, 212, 191, 0.28);
+  background: rgba(20, 184, 166, 0.12);
+  border-radius: 999px;
+  color: #99f6e4;
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+  font-weight: 900;
+  padding: 4px 8px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.season-round-chevron {
+  color: #99f6e4;
+  flex: 0 0 auto;
+  font-size: 1rem;
+  line-height: 1;
+  transition: transform 0.15s ease;
+}
+
+.season-round-section.is-collapsed .season-round-body {
+  display: none;
+}
+
+.season-round-section.is-collapsed .season-round-chevron {
+  transform: rotate(-90deg);
+}
+
+.season-mobile-round-controls {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  .season-mobile-round-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .season-round-toggle {
+    background: rgba(15, 23, 42, 0.32);
+    border: 1px solid rgba(148, 163, 184, 0.16);
+    border-radius: 14px;
+    min-height: 44px;
+    padding: 10px;
+  }
+
+  .season-round-summary {
+    white-space: normal;
+  }
+}

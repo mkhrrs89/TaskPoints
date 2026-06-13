@@ -824,6 +824,137 @@
     return 'Winner faces: TBD';
   }
 
+
+  const SEASON_ROUND_COLLAPSE_STORAGE_KEY = 'taskpoints_season_round_collapsed_v1';
+
+  function getSeasonRoundBodyId(seasonId, roundId, instanceId = '') {
+    const suffix = instanceId ? `-${String(instanceId).replace(/[^a-zA-Z0-9_-]/g, '_')}` : '';
+    return `season-round-body-${String(seasonId || 'season').replace(/[^a-zA-Z0-9_-]/g, '_')}-${String(roundId || 'round').replace(/[^a-zA-Z0-9_-]/g, '_')}${suffix}`;
+  }
+
+  function getSeasonRoundCollapseState(seasonId) {
+    try {
+      const raw = global.localStorage?.getItem(SEASON_ROUND_COLLAPSE_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      const state = parsed && typeof parsed === 'object' ? parsed[String(seasonId || '')] : null;
+      return state && typeof state === 'object' ? state : {};
+    } catch (error) {
+      console.warn('Failed to read Season round collapse state', error);
+      return {};
+    }
+  }
+
+  function setSeasonRoundCollapsed(seasonId, roundId, collapsed) {
+    try {
+      const raw = global.localStorage?.getItem(SEASON_ROUND_COLLAPSE_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      const store = parsed && typeof parsed === 'object' ? parsed : {};
+      const seasonKey = String(seasonId || 'season');
+      store[seasonKey] = store[seasonKey] && typeof store[seasonKey] === 'object' ? store[seasonKey] : {};
+      store[seasonKey][String(roundId || 'round')] = Boolean(collapsed);
+      global.localStorage?.setItem(SEASON_ROUND_COLLAPSE_STORAGE_KEY, JSON.stringify(store));
+    } catch (error) {
+      console.warn('Failed to save Season round collapse state', error);
+    }
+  }
+
+  function isMobileSeasonRoundViewport() {
+    try { return Boolean(global.matchMedia?.('(max-width: 767px)')?.matches); } catch (e) { return false; }
+  }
+
+  function seasonSeriesIncludesUser(series) {
+    return series?.playerAId === 'YOU' || series?.playerBId === 'YOU';
+  }
+
+  function isSeasonSeriesActive(series) {
+    return Boolean(series?.playerAId && series?.playerBId && series?.status !== 'complete');
+  }
+
+  function getSeasonRoundFacts(season, round, seriesList, dateKey, currentRoundId) {
+    const all = Array.isArray(seriesList) ? seriesList : [];
+    const activeCount = all.filter(isSeasonSeriesActive).length;
+    const todayCount = all.filter((series) => seriesHasTodayGame(series, dateKey, season)).length;
+    const userActiveCount = all.filter((series) => seasonSeriesIncludesUser(series) && isSeasonSeriesActive(series)).length;
+    const completed = all.length > 0 && all.every((series) => series?.status === 'complete');
+    const hasReadySeries = all.some((series) => series?.playerAId && series?.playerBId);
+    const isCurrent = currentRoundId === round?.id;
+    return { activeCount, todayCount, userActiveCount, completed, hasReadySeries, isCurrent };
+  }
+
+  function shouldSeasonRoundDefaultCollapsed(round, seriesList, currentRoundId, options = {}) {
+    if (!isMobileSeasonRoundViewport()) return false;
+    const facts = options.facts || getSeasonRoundFacts(options.season, round, seriesList, options.dateKey || getEffectiveDateKey(), currentRoundId);
+    if (facts.isCurrent || facts.todayCount > 0 || facts.userActiveCount > 0) return false;
+    if (facts.completed) return true;
+    if (!facts.hasReadySeries || facts.activeCount === 0) return true;
+    return round?.id !== currentRoundId;
+  }
+
+  function setSeasonRoundElementCollapsed(section, collapsed, persist = false) {
+    if (!section) return;
+    section.classList.toggle('is-collapsed', Boolean(collapsed));
+    const toggle = section.querySelector('.season-round-toggle');
+    const body = section.querySelector('.season-round-body');
+    if (toggle) toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    if (body) body.hidden = Boolean(collapsed);
+    if (persist) setSeasonRoundCollapsed(section.dataset.seasonId, section.dataset.roundId, collapsed);
+  }
+
+  function applySeasonRoundCollapseState(root) {
+    const sections = Array.from(root?.querySelectorAll?.('.season-round-section[data-season-id][data-round-id]') || []);
+    const cache = new Map();
+    sections.forEach((section) => {
+      const seasonId = section.dataset.seasonId || 'season';
+      if (!cache.has(seasonId)) cache.set(seasonId, getSeasonRoundCollapseState(seasonId));
+      const saved = cache.get(seasonId);
+      const roundId = section.dataset.roundId || '';
+      const collapsed = Object.prototype.hasOwnProperty.call(saved, roundId)
+        ? Boolean(saved[roundId])
+        : shouldSeasonRoundDefaultCollapsed({ id: roundId }, [], section.dataset.currentRoundId || '', { facts: {
+            isCurrent: section.dataset.isCurrent === 'true',
+            todayCount: Number(section.dataset.todayCount) || 0,
+            userActiveCount: Number(section.dataset.userActiveCount) || 0,
+            completed: section.dataset.completed === 'true',
+            hasReadySeries: section.dataset.hasReadySeries === 'true',
+            activeCount: Number(section.dataset.activeCount) || 0
+          } });
+      setSeasonRoundElementCollapsed(section, collapsed, false);
+    });
+  }
+
+  function renderSeasonRoundSection(season, round, seriesList, options = {}) {
+    const seasonId = season?.id || SEASON_ONE_ID;
+    const dateKey = options.dateKey || getEffectiveDateKey();
+    const currentRoundId = options.currentRoundId || options.activeRoundId || getRoundForToday(season, dateKey)?.id || '';
+    const facts = getSeasonRoundFacts(season, round, seriesList, dateKey, currentRoundId);
+    const bodyId = getSeasonRoundBodyId(seasonId, round?.id, options.instanceId || 'main');
+    const summaryParts = [`${seriesList.length} series`];
+    if (facts.activeCount) summaryParts.push(`${facts.activeCount} active`);
+    if (facts.todayCount) summaryParts.push(`${facts.todayCount} today`);
+    if (facts.userActiveCount) summaryParts.push('your matchup');
+    return `
+      <section class="season-bracket-round season-round-section ${facts.isCurrent ? 'is-current' : ''}"
+        data-season-id="${escapeHtml(seasonId)}"
+        data-round-id="${escapeHtml(round?.id || 'round')}"
+        data-current-round-id="${escapeHtml(currentRoundId)}"
+        data-is-current="${facts.isCurrent ? 'true' : 'false'}"
+        data-active-count="${escapeHtml(facts.activeCount)}"
+        data-today-count="${escapeHtml(facts.todayCount)}"
+        data-user-active-count="${escapeHtml(facts.userActiveCount)}"
+        data-completed="${facts.completed ? 'true' : 'false'}"
+        data-has-ready-series="${facts.hasReadySeries ? 'true' : 'false'}">
+        <button class="season-round-toggle" type="button" aria-expanded="true" aria-controls="${escapeHtml(bodyId)}">
+          <span class="season-round-toggle-main"><span class="season-round-title">${escapeHtml(round?.displayName || round?.id || 'Round')}</span><span class="muted text-sm">${escapeHtml(options.statusText || (facts.isCurrent ? 'Current round' : (facts.hasReadySeries ? 'Series ready or in progress' : 'Pending / awaiting winners')))}</span></span>
+          <span class="season-round-summary">${escapeHtml(summaryParts.join(' · '))}</span>
+          <span class="season-round-chevron" aria-hidden="true">▾</span>
+        </button>
+        <div id="${escapeHtml(bodyId)}" class="season-round-body">
+          ${options.bodyHtml || ''}
+        </div>
+      </section>
+    `;
+  }
+
   function getRoundName(roundId) {
     return getRoundDefs().find((round) => round.id === roundId)?.displayName || roundId || 'Round';
   }
@@ -911,22 +1042,13 @@
   function renderRoundSection(season, round, options = {}) {
     const all = officialSeriesEntries(season).filter((series) => series?.roundId === round.id);
     const dateKey = options.dateKey || getEffectiveDateKey();
-    const activeRound = getRoundForToday(season, dateKey);
-    const isCurrent = activeRound?.id === round.id;
-    return `
-      <section class="season-bracket-round ${isCurrent ? 'is-current' : ''}">
-        <div class="season-bracket-round-header">
-          <div>
-            <h4>${escapeHtml(round.displayName || round.id)}</h4>
-            <p class="muted text-sm">${isCurrent ? 'Current round' : (all.some((series) => series?.playerAId && series?.playerBId) ? 'Series ready or in progress' : 'Pending / awaiting winners')}</p>
-          </div>
-          <span>${escapeHtml(all.length)} series</span>
-        </div>
-        <div class="season-bracket-match-grid">
-          ${all.length ? all.map((series) => renderOfficialSeriesCard(season, series, { dateKey, state: options.state || {} })).join('') : '<p class="muted text-sm">Pending / awaiting winners.</p>'}
-        </div>
-      </section>
+    const currentRoundId = options.activeRoundId || getRoundForToday(season, dateKey)?.id || '';
+    const bodyHtml = `
+      <div class="season-bracket-match-grid">
+        ${all.length ? all.map((series) => renderOfficialSeriesCard(season, series, { dateKey, state: options.state || {} })).join('') : '<p class="muted text-sm">Pending / awaiting winners.</p>'}
+      </div>
     `;
+    return renderSeasonRoundSection(season, round, all, { dateKey, currentRoundId, state: options.state || {}, bodyHtml, instanceId: options.instanceId || 'official' });
   }
 
   function renderCurrentRoundSection(season, dateKey, state = {}) {
@@ -937,7 +1059,7 @@
     return `
       <section class="glass season-card">
         <h3 class="season-section-title">Current Round</h3>
-        ${renderRoundSection(season, round, { dateKey, state })}
+        ${renderRoundSection(season, round, { dateKey, state, instanceId: 'current' })}
       </section>
     `;
   }
@@ -950,6 +1072,10 @@
       <section class="glass season-card">
         <h3 class="season-section-title">Round-by-Round Championship</h3>
         <p class="muted text-sm">Series are shown as compact cards. Tap a series to expand results, dates, and advancement details.</p>
+        <div class="season-mobile-round-controls" aria-label="Season round display controls">
+          <button type="button" class="btn btn-ghost btn-toolbar" id="season-expand-all-rounds" data-season-round-control="expand-all">Expand all</button>
+          <button type="button" class="btn btn-ghost btn-toolbar" id="season-collapse-completed-rounds" data-season-round-control="collapse-completed">Collapse completed</button>
+        </div>
         <div class="season-bracket-stack">
           ${rounds.map((round) => renderRoundSection(season, round, { dateKey, activeRoundId, state: options.state || {} })).join('')}
         </div>
@@ -1228,13 +1354,15 @@
   function renderArchiveSeriesResults(season) {
     const series = Array.isArray(season?.seriesResults) ? season.seriesResults : officialSeriesEntries(season).map((item) => ({ ...item, resultText: getSeriesStatusLine(item) }));
     const byRound = getRoundDefs().map((round) => ({ round, rows: series.filter((item) => item.roundId === round.id) }));
-    return byRound.map(({ round, rows }) => `
-      <section class="season-bracket-round">
-        <div class="season-bracket-round-header"><h4>${escapeHtml(round.displayName)}</h4><span>${escapeHtml(rows.length)} series</span></div>
-        <div class="season-history-list">
-          ${rows.map((item) => `<article class="season-history-item"><div><strong>${escapeHtml(item.playerAName || item.playerAId || 'TBD')} vs ${escapeHtml(item.playerBName || item.playerBId || 'TBD')}</strong><p class="muted text-xs">${escapeHtml(item.resultText || `${item.winsA || 0}–${item.winsB || 0}`)}</p></div><span class="season-champion-pill">${escapeHtml(item.winnerName || item.winnerId || 'TBD')}</span></article>`).join('') || '<p class="muted text-sm">No archived results for this round.</p>'}
-        </div>
-      </section>`).join('');
+    return byRound.map(({ round, rows }) => renderSeasonRoundSection(season, round, rows, {
+      dateKey: season?.endDate || getEffectiveDateKey(),
+      currentRoundId: '',
+      statusText: rows.length ? 'Archived results' : 'No archived results',
+      instanceId: 'archive',
+      bodyHtml: `<div class="season-history-list">
+        ${rows.map((item) => `<article class="season-history-item"><div><strong>${escapeHtml(item.playerAName || item.playerAId || 'TBD')} vs ${escapeHtml(item.playerBName || item.playerBId || 'TBD')}</strong><p class="muted text-xs">${escapeHtml(item.resultText || `${item.winsA || 0}–${item.winsB || 0}`)}</p></div><span class="season-champion-pill">${escapeHtml(item.winnerName || item.winnerId || 'TBD')}</span></article>`).join('') || '<p class="muted text-sm">No archived results for this round.</p>'}
+      </div>`
+    })).join('');
   }
 
   function renderArchivePlacements(season) {
@@ -1378,7 +1506,10 @@
   function saveAndRenderSeason(nextState, savePath = 'season-preview-action') {
     const saved = persistSeasonState(nextState, savePath);
     const mount = global.document?.getElementById('seasonView');
-    if (mount) mount.innerHTML = renderSeasonView(saved);
+    if (mount) {
+      mount.innerHTML = renderSeasonView(saved);
+      applySeasonRoundCollapseState(mount);
+    }
     attachSeasonInteractions(mount);
     hydrateSeasonImages(mount);
     return saved;
@@ -1457,6 +1588,25 @@
     });
 
     root.addEventListener('click', (event) => {
+      const roundToggle = event.target?.closest?.('.season-round-toggle');
+      if (roundToggle) {
+        const section = roundToggle.closest('.season-round-section');
+        const collapsed = !section?.classList.contains('is-collapsed');
+        setSeasonRoundElementCollapsed(section, collapsed, true);
+        return;
+      }
+      const roundControl = event.target?.closest?.('[data-season-round-control]');
+      if (roundControl) {
+        const action = roundControl.dataset.seasonRoundControl;
+        const sections = Array.from(root.querySelectorAll('.season-round-section[data-season-id][data-round-id]'));
+        sections.forEach((section) => {
+          const collapse = action === 'collapse-completed'
+            ? (section.dataset.isCurrent !== 'true' && Number(section.dataset.todayCount || 0) === 0 && Number(section.dataset.userActiveCount || 0) === 0 && (section.dataset.completed === 'true' || section.dataset.hasReadySeries !== 'true'))
+            : false;
+          setSeasonRoundElementCollapsed(section, collapse, true);
+        });
+        return;
+      }
       const button = event.target?.closest?.('[data-season-action]');
       if (!button) return;
       const action = button.dataset.seasonAction;
@@ -1655,9 +1805,11 @@
     if (!mount) return;
     try {
       mount.innerHTML = renderSeasonView(loadSeasonState());
+      applySeasonRoundCollapseState(mount);
     } catch (error) {
       console.error('Failed to render Season view', error);
       mount.innerHTML = renderSeasonView({});
+      applySeasonRoundCollapseState(mount);
     }
     attachSeasonInteractions(mount);
     hydrateSeasonImages(mount);
