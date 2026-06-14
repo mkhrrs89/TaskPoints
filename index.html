@@ -3282,6 +3282,23 @@ function buildDailySchedule(dateKeyStr, participantIds, signature){
   };
 }
 
+function hasRecordedMatchupScore(matchup) {
+  if (!matchup) return false;
+
+  const hasWinner = Boolean(matchup.winnerId || matchup.result || matchup.completedAtISO || matchup.recordedAtISO);
+  const toFinite = (value) => {
+    if (value == null) return null;
+    if (typeof value === 'string' && value.trim() === '') return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  };
+
+  const scoreA = toFinite(matchup.scoreA ?? matchup.playerAScore);
+  const scoreB = toFinite(matchup.scoreB ?? matchup.playerBScore);
+
+  return hasWinner || (scoreA != null && scoreB != null);
+}
+
 function ensureUpcomingSchedule(days = 7){
   const today = new Date();
   today.setHours(0,0,0,0);
@@ -3359,6 +3376,16 @@ function ensureUpcomingSchedule(days = 7){
     const existing = byDate.get(key);
 
     if (key === todayKey) {
+      const todaysStoredMatchups = existingMatchupsByDate.get(todayKey);
+      const hasScoredStoredToday = Array.isArray(todaysStoredMatchups)
+        && todaysStoredMatchups.some(hasRecordedMatchupScore);
+
+      if (todaysStoredMatchups && todaysStoredMatchups.length && hasScoredStoredToday) {
+        const frozenToday = buildTodayFromStoredMatchups(existing, todaysStoredMatchups);
+        if (JSON.stringify(existing || {}) !== JSON.stringify(frozenToday)) changed = true;
+        return frozenToday;
+      }
+
       const seasonControlApplies = window.TaskPointsCore?.shouldUseSeasonMatchupControl
         && TaskPointsCore.shouldUseSeasonMatchupControl(state, key);
 
@@ -3371,7 +3398,6 @@ function ensureUpcomingSchedule(days = 7){
         return buildDailySchedule(key, participants, signature);
       }
 
-      const todaysStoredMatchups = existingMatchupsByDate.get(todayKey);
       if (todaysStoredMatchups && todaysStoredMatchups.length) {
         const frozenToday = buildTodayFromStoredMatchups(existing, todaysStoredMatchups);
         if (JSON.stringify(existing || {}) !== JSON.stringify(frozenToday)) changed = true;

@@ -2298,7 +2298,14 @@
     collectTournamentPlayers(normalized.matchups);
     (Array.isArray(normalized.schedule) ? normalized.schedule : []).forEach((day) => {
       const dayKey = getScheduleDayDateKey(day);
-      if (dayKey === targetDate) collectTournamentPlayers(day.matchups);
+      if (dayKey === targetDate) {
+        const datedMatchups = (Array.isArray(day.matchups) ? day.matchups : []).map((matchup) => ({
+          ...matchup,
+          date: matchup?.date || dayKey,
+          dateKey: matchup?.dateKey || dayKey
+        }));
+        collectTournamentPlayers(datedMatchups);
+      }
     });
 
     if (!tournamentPlayerIds.size) return { state: normalized, changed: false, removedCount: 0 };

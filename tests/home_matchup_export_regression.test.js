@@ -97,3 +97,37 @@ test('audit flags tournament participant exhibition overlap today', () => {
   assert.equal(result.ok, false);
   assert.deepEqual(result.tournamentExhibitionOverlaps, [{ playerAId: 'YOU', playerBId: 'REYNOLDS', matchupId: 'stale_exhibition' }]);
 });
+
+test('schedule-only cleanup carries parent dateKey onto undated child matchups', () => {
+  const state = {
+    players: [], tasks: [], completions: [], matchups: [],
+    schedule: [{
+      date: '2026-06-14',
+      dateKey: '2026-06-14',
+      matchups: [
+        { id: 'qf_game_1', matchupType: 'tournament', playerAId: 'VERRICK', playerBId: 'YOU' },
+        { id: 'stale_exhibition', matchupType: 'exhibition', playerAId: 'YOU', playerBId: 'REYNOLDS' },
+        { id: 'valid_exhibition', matchupType: 'exhibition', playerAId: 'ALPHA', playerBId: 'BRAVO' }
+      ]
+    }]
+  };
+
+  const repaired = core.removeInvalidExhibitionsForTournamentParticipants(state, '2026-06-14');
+  assert.equal(repaired.changed, true);
+  assert.equal(repaired.state.schedule[0].matchups.some((m) => m.id === 'qf_game_1'), true);
+  assert.equal(repaired.state.schedule[0].matchups.some((m) => m.id === 'stale_exhibition'), false);
+  assert.equal(repaired.state.schedule[0].matchups.some((m) => m.id === 'valid_exhibition'), true);
+});
+
+test('Home ensureUpcomingSchedule freezes scored same-day stored rows before rebuild branch', () => {
+  const fs = require('node:fs');
+  const indexHtml = fs.readFileSync(require.resolve('../index.html'), 'utf8');
+  assert.match(indexHtml, /function hasRecordedMatchupScore\(matchup\)/);
+  const todayBlockStart = indexHtml.indexOf('const hasScoredStoredToday = Array.isArray(todaysStoredMatchups)');
+  const freezeBranch = indexHtml.indexOf('hasScoredStoredToday) {', todayBlockStart);
+  const rebuildBranch = indexHtml.indexOf('if (seasonControlApplies && !existingSeasonControlledValid)', todayBlockStart);
+  assert.notEqual(todayBlockStart, -1);
+  assert.notEqual(freezeBranch, -1);
+  assert.notEqual(rebuildBranch, -1);
+  assert.ok(freezeBranch < rebuildBranch);
+});
