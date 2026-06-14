@@ -1199,6 +1199,18 @@ function loadRawStateFallback() {
   }
 }
 
+function loadFreshExportStateFallback() {
+  window.TaskPointsCore?.flushPendingSaves?.();
+  try {
+    if (window.TaskPointsCore?.loadAppState) {
+      return TaskPointsCore.loadAppState({ syncDerived: false, persistSync: false }).state || {};
+    }
+  } catch (error) {
+    console.warn('toolbar export failed to read state through TaskPointsCore; falling back to raw storage', error);
+  }
+  return loadRawStateFallback();
+}
+
 function maybeShowStartupRecoveryPrompt() {
   const core = window.TaskPointsCore;
   if (!core || typeof core.getRecoveryCandidate !== 'function') return;
@@ -1596,7 +1608,7 @@ function applyImportedNotesPayloadFallback(notesPayload, options = {}) {
 
 function exportDataFallback() {
   window.TaskPointsCore?.flushPendingSaves?.();
-  const snapshot = stripLegacyImageFields(normalizeStateGlobal({ ...loadRawStateFallback(), projects: loadProjectsFromStorageFallback() }));
+  const snapshot = stripLegacyImageFields(normalizeStateGlobal({ ...loadFreshExportStateFallback(), projects: loadProjectsFromStorageFallback() }));
   const scheduleChanged = ensureUpcomingScheduleFallback(snapshot);
   if (scheduleChanged) {
     saveStateSnapshotFallback(snapshot);
@@ -1642,7 +1654,7 @@ function getExportSnapshotForBrief() {
   if (typeof window.getTaskPointsExportSnapshot === 'function') {
     return window.getTaskPointsExportSnapshot();
   }
-  const snapshot = stripLegacyImageFields(normalizeStateGlobal({ ...loadRawStateFallback(), projects: loadProjectsFromStorageFallback() }));
+  const snapshot = stripLegacyImageFields(normalizeStateGlobal({ ...loadFreshExportStateFallback(), projects: loadProjectsFromStorageFallback() }));
   const scheduleChanged = ensureUpcomingScheduleFallback(snapshot);
   if (scheduleChanged) {
     saveStateSnapshotFallback(snapshot);
@@ -2331,7 +2343,7 @@ async function importBackupZipFallback(file) {
 
 async function exportBackupWithImagesFallback() {
   window.TaskPointsCore?.flushPendingSaves?.();
-  const snapshot = stripLegacyImageFields(normalizeStateGlobal({ ...loadRawStateFallback(), projects: loadProjectsFromStorageFallback() }));
+  const snapshot = stripLegacyImageFields(normalizeStateGlobal({ ...loadFreshExportStateFallback(), projects: loadProjectsFromStorageFallback() }));
   const scheduleChanged = ensureUpcomingScheduleFallback(snapshot);
   if (scheduleChanged) {
     saveStateSnapshotFallback(snapshot);

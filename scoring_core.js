@@ -2272,6 +2272,78 @@
     return { state: normalized, changed, warnings, errors };
   }
 
+  function isTournamentOrSeasonMatchup(matchup) {
+    const type = String(matchup?.matchupType || '').toLowerCase();
+    return type === 'tournament' || type === 'season';
+  }
+
+  function isExhibitionMatchup(matchup) {
+    return String(matchup?.matchupType || '').toLowerCase() === 'exhibition';
+  }
+
+  function removeInvalidExhibitionsForTournamentParticipants(state, dateKeyStr, options = {}) {
+    const normalized = options.normalized ? { ...(state || {}) } : normalizeState(state || {});
+    const targetDate = String(dateKeyStr || '').slice(0, 10);
+    if (!targetDate) return { state: normalized, changed: false, removedCount: 0 };
+
+    const tournamentPlayerIds = new Set();
+    const collectTournamentPlayers = (matchups) => {
+      (Array.isArray(matchups) ? matchups : []).forEach((matchup) => {
+        if (!matchup || matchupDateKey(matchup) !== targetDate || !isTournamentOrSeasonMatchup(matchup)) return;
+        if (matchup.playerAId) tournamentPlayerIds.add(String(matchup.playerAId));
+        if (matchup.playerBId) tournamentPlayerIds.add(String(matchup.playerBId));
+      });
+    };
+
+    collectTournamentPlayers(normalized.matchups);
+    (Array.isArray(normalized.schedule) ? normalized.schedule : []).forEach((day) => {
+      const dayKey = getScheduleDayDateKey(day);
+      if (dayKey === targetDate) {
+        const datedMatchups = (Array.isArray(day.matchups) ? day.matchups : []).map((matchup) => ({
+          ...matchup,
+          date: matchup?.date || dayKey,
+          dateKey: matchup?.dateKey || dayKey
+        }));
+        collectTournamentPlayers(datedMatchups);
+      }
+    });
+
+    if (!tournamentPlayerIds.size) return { state: normalized, changed: false, removedCount: 0 };
+
+    const isInvalidExhibition = (matchup) => {
+      if (!matchup || matchupDateKey(matchup) !== targetDate || !isExhibitionMatchup(matchup)) return false;
+      return tournamentPlayerIds.has(String(matchup.playerAId || '')) || tournamentPlayerIds.has(String(matchup.playerBId || ''));
+    };
+
+    let removedCount = 0;
+    const nextMatchups = (Array.isArray(normalized.matchups) ? normalized.matchups : []).filter((matchup) => {
+      const remove = isInvalidExhibition(matchup);
+      if (remove) removedCount += 1;
+      return !remove;
+    });
+
+    const nextSchedule = (Array.isArray(normalized.schedule) ? normalized.schedule : []).map((day) => {
+      const dayKey = getScheduleDayDateKey(day);
+      if (dayKey !== targetDate || !Array.isArray(day?.matchups)) return day;
+      let removedFromDay = 0;
+      const matchups = day.matchups.filter((matchup) => {
+        const remove = isInvalidExhibition({ ...matchup, dateKey: matchup.dateKey || dayKey, date: matchup.date || dayKey });
+        if (remove) removedFromDay += 1;
+        return !remove;
+      });
+      if (!removedFromDay) return day;
+      removedCount += removedFromDay;
+      return { ...day, matchups };
+    });
+
+    const changed = removedCount > 0;
+    return {
+      state: changed ? normalizeState({ ...normalized, matchups: nextMatchups, schedule: nextSchedule }) : normalized,
+      changed,
+      removedCount
+    };
+  }
+
   function scheduleRowHasRecordedScore(row) {
     const matchups = Array.isArray(row?.matchups) ? row.matchups : [];
     return matchups.some((matchup) => {
@@ -2287,6 +2359,16 @@
     const prepared = prepareSeasonStateForScheduling(normalized, today, options);
     if (prepared?.state) normalized = prepared.state;
     let changed = Boolean(prepared?.changed);
+    const repairDates = new Set([today]);
+    (Array.isArray(normalized.schedule) ? normalized.schedule : []).forEach((day) => {
+      const dayKey = getScheduleDayDateKey(day);
+      if (dayKey && dayKey >= today) repairDates.add(dayKey);
+    });
+    repairDates.forEach((dayKey) => {
+      const overlapRepair = removeInvalidExhibitionsForTournamentParticipants(normalized, dayKey, { normalized: true });
+      if (overlapRepair?.state) normalized = overlapRepair.state;
+      changed = changed || Boolean(overlapRepair?.changed);
+    });
     const repairedDates = [];
     const schedule = Array.isArray(normalized.schedule) ? normalized.schedule : [];
     if (!today || !schedule.length) return { state: normalized, changed, repairedDates };
@@ -6420,6 +6502,15 @@ function buildDailyBreakdowns(state){
 
     const duplicateSchedulePairs = toDuplicateList(scheduleCounts);
     const duplicateMatchupPairs = toDuplicateList(matchupCounts);
+    const tournamentPlayerIds = new Set();
+    matchupPairsRaw.forEach((matchup) => {
+      if (!isTournamentOrSeasonMatchup(matchup)) return;
+      if (matchup.playerAId) tournamentPlayerIds.add(String(matchup.playerAId));
+      if (matchup.playerBId) tournamentPlayerIds.add(String(matchup.playerBId));
+    });
+    const tournamentExhibitionOverlaps = matchupPairsRaw
+      .filter((matchup) => isExhibitionMatchup(matchup) && (tournamentPlayerIds.has(String(matchup.playerAId || '')) || tournamentPlayerIds.has(String(matchup.playerBId || ''))))
+      .map((matchup) => ({ playerAId: matchup.playerAId, playerBId: matchup.playerBId, matchupId: matchup.id || matchup.matchupId || '' }));
     const countsMatch = schedulePairs.length === matchupPairs.length;
 
     return {
@@ -6427,14 +6518,16 @@ function buildDailyBreakdowns(state){
         && !missingInSchedule.length
         && !missingInMatchups.length
         && !duplicateSchedulePairs.length
-        && !duplicateMatchupPairs.length,
+        && !duplicateMatchupPairs.length
+        && !tournamentExhibitionOverlaps.length,
       todayKey: today,
       schedulePairs,
       matchupPairs,
       missingInSchedule,
       missingInMatchups,
       duplicateSchedulePairs,
-      duplicateMatchupPairs
+      duplicateMatchupPairs,
+      tournamentExhibitionOverlaps
     };
   }
 
@@ -7299,6 +7392,7 @@ return Number(cappedScore.toFixed(1));
     prepareSeasonForDailySlate,
     prepareSeasonStateForScheduling,
     repairSeasonControlledScheduleFromSyncedSeason,
+    removeInvalidExhibitionsForTournamentParticipants,
     getSeasonScheduleSignature,
     isSeasonSeriesCurrentForMatchupDate,
     resolveHomeSeasonSeriesForMatchup,
