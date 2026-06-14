@@ -4889,6 +4889,59 @@ function chooseHomeUserMatchupForDate(matchups, dateKeyStr) {
     })[0] || null;
 }
 
+function getHomeMatchupDateKey(matchup) {
+  return matchup?.date || matchup?.dateKey || (matchup?.dateISO ? dateKey(matchup.dateISO) : '');
+}
+
+function getTodaySeasonMatchupsForHome(todayKeyStr) {
+  if (!window.TaskPointsCore?.buildSeasonDailySlate) return [];
+
+  try {
+    const slate = TaskPointsCore.buildSeasonDailySlate(state, todayKeyStr, {
+      nowISO: `${todayKeyStr}T12:00:00.000Z`
+    });
+
+    if (slate?.updatedSeason) {
+      state.currentSeason = slate.updatedSeason;
+    }
+
+    const slateMatchups = Array.isArray(slate?.tournamentMatchups)
+      ? slate.tournamentMatchups
+      : Array.isArray(slate?.allMatchups)
+        ? slate.allMatchups.filter((matchup) => {
+            const type = String(matchup?.matchupType || '').toLowerCase();
+            return type === 'tournament' || type === 'season';
+          })
+        : [];
+
+    return slateMatchups.map((matchup) => ({
+      ...matchup,
+      date: matchup.date || todayKeyStr,
+      dateKey: matchup.dateKey || todayKeyStr
+    }));
+  } catch (error) {
+    console.warn('Failed to build today Season slate for Home matchup selection', error);
+    return [];
+  }
+}
+
+function getHomeUserMatchupCandidatesForDate(storedMatchups, todayKeyStr) {
+  const todaySeasonMatchups = getTodaySeasonMatchupsForHome(todayKeyStr);
+  const userHasSeasonMatchupToday = todaySeasonMatchups.some((matchup) =>
+    matchup && (matchup.playerAId === 'YOU' || matchup.playerBId === 'YOU')
+  );
+  const safeStoredMatchups = Array.isArray(storedMatchups) ? storedMatchups : [];
+  const filteredStoredMatchups = userHasSeasonMatchupToday
+    ? safeStoredMatchups.filter((matchup) => {
+        const type = String(matchup?.matchupType || '').toLowerCase();
+        const isUserRow = matchup?.playerAId === 'YOU' || matchup?.playerBId === 'YOU';
+        return !(type === 'exhibition' && isUserRow && getHomeMatchupDateKey(matchup) === todayKeyStr);
+      })
+    : safeStoredMatchups;
+
+  return todaySeasonMatchups.concat(filteredStoredMatchups);
+}
+
 function getHomeSeriesRecordLabel(stateArg, matchup, dateKeyStr) {
   if (!matchup || !isHomeSeasonContextActive(stateArg, dateKeyStr)) return '';
 
@@ -4974,7 +5027,8 @@ const updateTodayScoreIsland = (value) => {
   setOpponentScoreboardMeta(null);
 
   const matchups = Array.isArray(state.matchups) ? state.matchups : [];
-  const matchup = chooseHomeUserMatchupForDate(matchups, todayKeyStr);
+  const matchupCandidates = getHomeUserMatchupCandidatesForDate(matchups, todayKeyStr);
+  const matchup = chooseHomeUserMatchupForDate(matchupCandidates, todayKeyStr);
 
   if (!matchup) {
     setHomeMatchupTypeLabel('');

@@ -37,6 +37,107 @@ function chooseHomeUserMatchupForDate(matchups, dateKeyStr) {
     })[0] || null;
 }
 
+function makeQuarterfinalSeries(index, overrides = {}) {
+  const playerAId = `P${index * 2 + 1}`;
+  const playerBId = `P${index * 2 + 2}`;
+  return {
+    id: `season_1_june_2026_quarterfinals_${index + 1}`,
+    seasonId: 'season_1_june_2026',
+    roundId: 'quarterfinals',
+    roundName: 'Quarterfinals',
+    roundIndex: 3,
+    seriesIndex: index,
+    bestOf: 5,
+    winsNeeded: 3,
+    status: 'active',
+    playerAId,
+    playerAName: playerAId,
+    playerBId,
+    playerBName: playerBId,
+    winsA: 0,
+    winsB: 0,
+    winnerId: '',
+    loserId: '',
+    gameResults: [],
+    ...overrides
+  };
+}
+
+function makeQuarterfinalState(matchups = []) {
+  const seriesRows = [
+    makeQuarterfinalSeries(0, {
+      id: 'season_1_june_2026_quarterfinals_2_7',
+      playerAId: 'VERRICK',
+      playerAName: 'Verrick',
+      playerBId: 'YOU',
+      playerBName: 'Miggy',
+      playerASeed: 2,
+      playerBSeed: 7
+    }),
+    makeQuarterfinalSeries(1),
+    makeQuarterfinalSeries(2),
+    makeQuarterfinalSeries(3)
+  ];
+  return core.normalizeState({
+    youName: 'Miggy',
+    currentSeason: {
+      id: 'season_1_june_2026',
+      monthKey: '2026-06',
+      status: 'active',
+      meta: {
+        seasonMatchupControlEnabled: true,
+        roundStartDateKeys: { quarterfinals: '2026-06-14' }
+      },
+      series: Object.fromEntries(seriesRows.map((series) => [series.id, series]))
+    },
+    players: [
+      { id: 'VERRICK', name: 'Verrick', active: true },
+      ...Array.from({ length: 6 }, (_, index) => ({ id: `P${index + 3}`, name: `Player ${index + 3}`, active: true }))
+    ],
+    matchups,
+    schedule: [],
+    completions: [],
+    tasks: []
+  });
+}
+
+function getHomeCandidatesFromSeasonSlate(state, dateKeyStr) {
+  const slate = core.buildSeasonDailySlate(state, dateKeyStr, {
+    nowISO: `${dateKeyStr}T12:00:00.000Z`
+  });
+  const todaySeasonMatchups = (Array.isArray(slate.tournamentMatchups) ? slate.tournamentMatchups : [])
+    .map((matchup) => ({
+      ...matchup,
+      date: matchup.date || dateKeyStr,
+      dateKey: matchup.dateKey || dateKeyStr
+    }));
+  const userHasSeasonMatchupToday = todaySeasonMatchups.some((matchup) =>
+    matchup && (matchup.playerAId === 'YOU' || matchup.playerBId === 'YOU')
+  );
+  const filteredStored = userHasSeasonMatchupToday
+    ? (state.matchups || []).filter((matchup) => {
+        const type = String(matchup?.matchupType || '').toLowerCase();
+        const isUserRow = matchup?.playerAId === 'YOU' || matchup?.playerBId === 'YOU';
+        const matchupKey = matchup?.date || matchup?.dateKey || (matchup?.dateISO ? core.dateKey(matchup.dateISO) : '');
+        return !(type === 'exhibition' && isUserRow && matchupKey === dateKeyStr);
+      })
+    : (state.matchups || []);
+  return todaySeasonMatchups.concat(filteredStored);
+}
+
+test('Home matchup candidates prefer active Season slate over stored stale exhibition', () => {
+  const state = makeQuarterfinalState([
+    { id: 'exhibition_reynolds', dateKey: '2026-06-14', matchupType: 'exhibition', playerAId: 'YOU', playerBId: 'REYNOLDS' }
+  ]);
+
+  const chosen = chooseHomeUserMatchupForDate(getHomeCandidatesFromSeasonSlate(state, '2026-06-14'), '2026-06-14');
+  assert.ok(chosen, 'expected Home to find a user matchup');
+  assert.equal(chosen.matchupType, 'tournament');
+  assert.equal(chosen.playerAId, 'VERRICK');
+  assert.equal(chosen.playerBId, 'YOU');
+  assert.equal(chosen.dateKey, '2026-06-14');
+});
+
 test('Home matchup selection chooses same-day tournament over stale exhibition', () => {
   const matchups = [
     { id: 'exhibition_reynolds', dateKey: '2026-06-14', matchupType: 'exhibition', playerAId: 'YOU', playerBId: 'REYNOLDS' },
@@ -55,6 +156,30 @@ test('Home matchup selection still chooses exhibition when it is the only user m
 
   const chosen = chooseHomeUserMatchupForDate(matchups, '2026-06-14');
   assert.equal(chosen.id, 'exhibition_reynolds');
+});
+
+test('Home candidate repair preserves scored same-day stored rows while selecting slate tournament', () => {
+  const scoredStoredRow = {
+    id: 'scored_tournament',
+    dateKey: '2026-06-14',
+    matchupType: 'tournament',
+    seriesId: 'season_1_june_2026_quarterfinals_2_7',
+    playerAId: 'VERRICK',
+    playerBId: 'YOU',
+    scoreA: 80,
+    scoreB: 75
+  };
+  const state = makeQuarterfinalState([scoredStoredRow]);
+
+  const candidates = getHomeCandidatesFromSeasonSlate(state, '2026-06-14');
+  assert.equal(state.matchups[0], scoredStoredRow);
+  assert.equal(state.matchups[0].scoreA, 80);
+  assert.equal(state.matchups[0].scoreB, 75);
+
+  const chosen = chooseHomeUserMatchupForDate(candidates, '2026-06-14');
+  assert.equal(chosen.matchupType, 'tournament');
+  assert.equal(chosen.playerAId, 'VERRICK');
+  assert.equal(chosen.playerBId, 'YOU');
 });
 
 test('schedule repair removes same-day exhibitions for tournament participants', () => {
@@ -130,4 +255,15 @@ test('Home ensureUpcomingSchedule freezes scored same-day stored rows before reb
   assert.notEqual(freezeBranch, -1);
   assert.notEqual(rebuildBranch, -1);
   assert.ok(freezeBranch < rebuildBranch);
+});
+
+test('Home render builds Season slate candidates before choosing stored matchup rows', () => {
+  const fs = require('node:fs');
+  const indexHtml = fs.readFileSync(require.resolve('../index.html'), 'utf8');
+  assert.match(indexHtml, /function getTodaySeasonMatchupsForHome\(todayKeyStr\)/);
+  assert.match(indexHtml, /TaskPointsCore\.buildSeasonDailySlate\(state, todayKeyStr, \{\s*nowISO: `\$\{todayKeyStr\}T12:00:00\.000Z`/);
+  assert.match(indexHtml, /function getHomeUserMatchupCandidatesForDate\(storedMatchups, todayKeyStr\)/);
+  assert.match(indexHtml, /todaySeasonMatchups\.concat\(filteredStoredMatchups\)/);
+  assert.match(indexHtml, /const matchupCandidates = getHomeUserMatchupCandidatesForDate\(matchups, todayKeyStr\);/);
+  assert.match(indexHtml, /const matchup = chooseHomeUserMatchupForDate\(matchupCandidates, todayKeyStr\);/);
 });
