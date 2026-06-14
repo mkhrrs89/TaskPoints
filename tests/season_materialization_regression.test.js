@@ -146,3 +146,84 @@ test('current-day materialization does not add gameResults or change series wins
   assert.equal(after.winsB, 0);
   assert.equal(after.gameResults.length, 0);
 });
+
+function makeFullQfState(extraMatchups = [], overrides = {}) {
+  const series = [1, 2, 3, 4].map((i) => qfSeries(i, i === 4 ? {
+    playerAId: 'SLOANE', playerAName: 'Sloane', playerBId: 'COOPER', playerBName: 'Cooper'
+  } : {}));
+  const tournamentIds = series.flatMap((s) => [s.playerAId, s.playerBId]);
+  const exhibitionIds = Array.from({ length: 25 }, (_, i) => `EX${i + 1}`);
+  const historicalIds = ['EVENCHIK'];
+  return {
+    currentSeason: {
+      id: 'season_1_june_2026',
+      monthKey: '2026-06',
+      status: 'active',
+      meta: { seasonMatchupControlEnabled: true, roundStartDateKeys: { quarterfinals: '2026-06-14' } },
+      series: Object.fromEntries(series.map((s) => [s.id, { ...s, ...(overrides.series?.[s.id] || {}) }]))
+    },
+    players: tournamentIds.concat(exhibitionIds, historicalIds).map((id) => ({ id, name: id, active: !historicalIds.includes(id), baseline: 40, variance: 5 })),
+    matchups: extraMatchups,
+    schedule: [{ date: '2026-06-14', dateKey: '2026-06-14', seasonMatchupControl: true, matchups: extraMatchups }],
+    completions: [], tasks: [], habits: [], flexActions: [], gameHistory: [], opponentDripSchedules: []
+  };
+}
+
+test('materialization removes stale same-day prior-round season-looking row when unreferenced', () => {
+  const stale = { id: '2026-06-14_season_1_june_2026_sweet_16_7_g5', dateKey: '2026-06-14', playerAId: 'SLOANE', playerBId: 'EVENCHIK', scoreA: 63.8, scoreB: 76.1 };
+  const result = core.materializeSeasonSlateMatchupsForDate(makeFullQfState([stale]), '2026-06-14', { nowISO: '2026-06-14T12:00:00.000Z' });
+  assert.equal(result.state.matchups.some((m) => m.id === stale.id), false);
+  assert.equal(result.removedStaleSeasonCount, 1);
+});
+
+test('materialization preserves same-day season-looking row referenced by current season results', () => {
+  const stale = { id: '2026-06-14_season_1_june_2026_sweet_16_7_g5', dateKey: '2026-06-14', playerAId: 'SLOANE', playerBId: 'EVENCHIK', scoreA: 63.8, scoreB: 76.1 };
+  const state = makeFullQfState([stale], { series: { season_1_june_2026_quarterfinals_4: { gameResults: [{ matchupId: stale.id, winnerId: 'EVENCHIK' }] } } });
+  const result = core.materializeSeasonSlateMatchupsForDate(state, '2026-06-14', { nowISO: '2026-06-14T12:00:00.000Z' });
+  assert.equal(result.state.matchups.some((m) => m.id === stale.id), true);
+});
+
+test('materialization removes same-day exhibition rows containing current tournament players', () => {
+  const exhibition = { id: 'bad_ex', dateKey: '2026-06-14', playerAId: 'SLOANE', playerBId: 'EX1', matchupType: 'exhibition' };
+  const result = core.materializeSeasonSlateMatchupsForDate(makeFullQfState([exhibition]), '2026-06-14', { nowISO: '2026-06-14T12:00:00.000Z' });
+  assert.equal(result.state.matchups.some((m) => m.id === exhibition.id), false);
+  assert.equal(result.removedExhibitionCount, 1);
+});
+
+test('materialization fills NPC-vs-NPC scores and preserves existing finite scores', () => {
+  const existing = { id: '2026-06-14_season_1_june_2026_quarterfinals_1_g1', dateKey: '2026-06-14', seriesId: 'season_1_june_2026_quarterfinals_1', playerAId: 'p1a', playerBId: 'p1b', matchupType: 'tournament', scoreA: 12, scoreB: 13 };
+  const result = core.materializeSeasonSlateMatchupsForDate(makeFullQfState([existing]), '2026-06-14', { nowISO: '2026-06-14T12:00:00.000Z' });
+  const qf1 = result.state.matchups.find((m) => m.id === existing.id);
+  const qf2 = result.state.matchups.find((m) => m.id === '2026-06-14_season_1_june_2026_quarterfinals_2_g1');
+  assert.equal(qf1.scoreA, 12);
+  assert.equal(qf1.scoreB, 13);
+  assert.equal(Number.isFinite(Number(qf2.scoreA)), true);
+  assert.equal(Number.isFinite(Number(qf2.scoreB)), true);
+});
+
+test('repairSeasonControlledScheduleFromSyncedSeason repairs today despite scored stale rows', () => {
+  const stale = { id: '2026-06-14_season_1_june_2026_sweet_16_7_g5', dateKey: '2026-06-14', playerAId: 'SLOANE', playerBId: 'EVENCHIK', scoreA: 63.8, scoreB: 76.1 };
+  const current = { id: '2026-06-14_season_1_june_2026_quarterfinals_4_g1', dateKey: '2026-06-14', seriesId: 'season_1_june_2026_quarterfinals_4', playerAId: 'SLOANE', playerBId: 'COOPER', matchupType: 'tournament', scoreA: 77, scoreB: 66 };
+  const result = core.repairSeasonControlledScheduleFromSyncedSeason(makeFullQfState([stale, current]), { todayDateKey: '2026-06-14', nowISO: '2026-06-14T12:00:00.000Z' });
+  const qf4 = result.state.matchups.find((m) => m.id === current.id);
+  assert.equal(result.state.matchups.some((m) => m.id === stale.id), false);
+  assert.equal(qf4.scoreA, 77);
+  assert.equal(qf4.scoreB, 66);
+});
+
+test('real same-day bug fixture materializes 17 rows without duplicate players or stale Sweet 16 row', () => {
+  const stale = { id: '2026-06-14_season_1_june_2026_sweet_16_7_g5', dateKey: '2026-06-14', playerAId: 'SLOANE', playerBId: 'EVENCHIK', scoreA: 63.8, scoreB: 76.1 };
+  const result = core.materializeSeasonSlateMatchupsForDate(makeFullQfState([stale]), '2026-06-14', { nowISO: '2026-06-14T12:00:00.000Z' });
+  const sameDay = result.state.matchups.filter((m) => m.dateKey === '2026-06-14');
+  const players = sameDay.flatMap((m) => [m.playerAId, m.playerBId]);
+  assert.equal(result.state.schedule.find((day) => day.dateKey === '2026-06-14').matchups.length, 17);
+  const scheduledIds = new Set(result.state.schedule.find((day) => day.dateKey === '2026-06-14').matchups.map((m) => m.id));
+  assert.equal(sameDay.filter((m) => scheduledIds.has(m.id)).length, 17);
+  assert.equal(new Set(players).size, players.length);
+  assert.equal(sameDay.some((m) => m.id === stale.id), false);
+  ['2026-06-14_season_1_june_2026_quarterfinals_1_g1', '2026-06-14_season_1_june_2026_quarterfinals_2_g1', '2026-06-14_season_1_june_2026_quarterfinals_4_g1'].forEach((id) => {
+    const row = sameDay.find((m) => m.id === id);
+    assert.equal(Number.isFinite(Number(row?.scoreA)), true);
+    assert.equal(Number.isFinite(Number(row?.scoreB)), true);
+  });
+  });
