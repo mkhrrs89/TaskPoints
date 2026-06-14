@@ -2516,6 +2516,174 @@
     return { ok: true, dateKey: dateKeyStr, tournamentMatchups, exhibitionMatchups, allMatchups, warnings, errors, updatedSeason: slateSeason };
   }
 
+
+  function getSeasonSlateTournamentMatchups(state, dateKeyStr, options = {}) {
+    const slate = buildSeasonDailySlate(state, dateKeyStr, options);
+    const matchups = Array.isArray(slate?.tournamentMatchups)
+      ? slate.tournamentMatchups
+      : (Array.isArray(slate?.allMatchups) ? slate.allMatchups.filter((matchup) => {
+          const type = String(matchup?.matchupType || '').toLowerCase();
+          return type === 'tournament' || type === 'season';
+        }) : []);
+    return { slate, matchups };
+  }
+
+  function matchupHasRecordedScoreOrResult(matchup) {
+    if (!matchup) return false;
+    const scoreA = Number(matchup.scoreA ?? matchup.playerAScore);
+    const scoreB = Number(matchup.scoreB ?? matchup.playerBScore);
+    return Number.isFinite(scoreA)
+      || Number.isFinite(scoreB)
+      || Boolean(matchup.result || matchup.winnerId || matchup.completedAtISO || matchup.completedAt || matchup.finalizedAtISO);
+  }
+
+  function getStoredMatchupDateKey(matchup) {
+    return String(matchup?.dateKey || matchup?.date || (matchup?.dateISO ? dateKey(matchup.dateISO) : '') || '').slice(0, 10);
+  }
+
+  function isSeasonTournamentMatchup(matchup) {
+    const type = String(matchup?.matchupType || '').toLowerCase();
+    return type === 'tournament' || type === 'season' || Boolean(matchup?.seriesId || matchup?.seasonSeriesId);
+  }
+
+  function normalizeMaterializedSeasonMatchup(matchup, dateKeyStr) {
+    const seriesId = matchup.seriesId || matchup.seasonSeriesId || '';
+    const gameNumber = Number(matchup.seriesGameNumber || matchup.gameNumber) || 1;
+    const id = matchup.id || matchup.matchupId || `${dateKeyStr}_${seriesId || `${matchup.playerAId}_${matchup.playerBId}`}_g${gameNumber}`;
+    const roundName = matchup.roundName || getSeasonDisplayName(matchup.roundId) || matchup.roundId || 'Season';
+    return {
+      ...matchup,
+      id,
+      matchupId: matchup.matchupId || id,
+      date: dateKeyStr,
+      dateKey: dateKeyStr,
+      seasonSeriesId: matchup.seasonSeriesId || seriesId,
+      seriesId,
+      roundName,
+      matchupType: String(matchup.matchupType || 'tournament').toLowerCase() === 'season' ? 'season' : 'tournament',
+      seriesGameNumber: gameNumber,
+      gameNumber,
+      seasonMatchupLabel: matchup.seasonMatchupLabel || `${roundName}, Game ${gameNumber}`
+    };
+  }
+
+  function mergeMaterializedSeasonMatchup(existing, next) {
+    if (!existing) return next;
+    const scored = matchupHasRecordedScoreOrResult(existing);
+    const merged = { ...existing };
+    ['id','matchupId','date','dateKey','playerAId','playerBId','playerAName','playerBName','seasonId','seriesId','seasonSeriesId','roundId','roundName','matchupType','seriesGameNumber','gameNumber','bestOf','winsNeeded','seasonMatchupLabel'].forEach((key) => {
+      if (next[key] !== undefined && next[key] !== null && next[key] !== '') merged[key] = next[key];
+    });
+    if (!scored) {
+      ['scoreA','scoreB','playerAScore','playerBScore','result','winnerId','completedAtISO','diff'].forEach((key) => {
+        if (next[key] !== undefined) merged[key] = next[key];
+      });
+    }
+    return merged;
+  }
+
+  function chooseUserMatchupForDate(state, dateKeyStr, userId = 'YOU', options = {}) {
+    const normalized = options.normalized ? (state || {}) : normalizeState(state || {});
+    return (Array.isArray(normalized.matchups) ? normalized.matchups : [])
+      .filter((matchup) => getStoredMatchupDateKey(matchup) === dateKeyStr && (matchup.playerAId === userId || matchup.playerBId === userId))
+      .sort((a, b) => {
+        const ap = isSeasonTournamentMatchup(a) ? 0 : String(a?.matchupType || '').toLowerCase() === 'exhibition' ? 2 : 1;
+        const bp = isSeasonTournamentMatchup(b) ? 0 : String(b?.matchupType || '').toLowerCase() === 'exhibition' ? 2 : 1;
+        if (ap !== bp) return ap - bp;
+        return String(a.id || a.matchupId || '').localeCompare(String(b.id || b.matchupId || ''));
+      })[0] || null;
+  }
+
+  function materializeSeasonSlateMatchupsForDate(state, dateKeyStr, options = {}) {
+    let normalized = normalizeState(state || {});
+    const key = String(dateKeyStr || '').slice(0, 10);
+    if (!key || typeof buildSeasonDailySlate !== 'function') return { state: normalized, changed: false, materializedCount: 0, removedExhibitionCount: 0 };
+    const { slate, matchups } = getSeasonSlateTournamentMatchups(normalized, key, options);
+    if (slate?.updatedSeason) normalized = normalizeState({ ...normalized, currentSeason: slate.updatedSeason, latestSeasonId: slate.updatedSeason.id || normalized.latestSeasonId || '' });
+    const playerById = new Map((Array.isArray(normalized.players) ? normalized.players : []).map((player) => [String(player?.id || player?.playerId || ''), player]));
+    const materialized = matchups
+      .map((matchup) => normalizeMaterializedSeasonMatchup(matchup, key))
+      .filter((m) => m.playerAId && m.playerBId)
+      .map((matchup) => {
+        const next = { ...matchup };
+        const aIsYou = next.playerAId === 'YOU';
+        const bIsYou = next.playerBId === 'YOU';
+        const opponentId = aIsYou ? next.playerBId : bIsYou ? next.playerAId : '';
+        if (opponentId) {
+          const opponentScoreKey = aIsYou ? 'scoreB' : 'scoreA';
+          const existingOpponentScore = Number(next[opponentScoreKey]);
+          if (!Number.isFinite(existingOpponentScore)) {
+            next[opponentScoreKey] = simulateAiScoreForPlayerCore(playerById.get(String(opponentId)), key, {
+              state: normalized,
+              context: { matchup: next, source: 'season-materialization' }
+            });
+          }
+        }
+        return next;
+      });
+    if (!materialized.length) return { state: normalized, changed: Boolean(slate?.updatedSeason), materializedCount: 0, removedExhibitionCount: 0 };
+
+    const tournamentPlayers = new Set();
+    materialized.forEach((m) => { tournamentPlayers.add(m.playerAId); tournamentPlayers.add(m.playerBId); });
+    let changed = Boolean(slate?.updatedSeason);
+    let removedExhibitionCount = 0;
+    const nextMatchups = [];
+    const byId = new Map();
+    (Array.isArray(normalized.matchups) ? normalized.matchups : []).forEach((existing) => {
+      const sameDay = getStoredMatchupDateKey(existing) === key;
+      const type = String(existing?.matchupType || '').toLowerCase();
+      if (sameDay && type === 'exhibition' && (tournamentPlayers.has(existing.playerAId) || tournamentPlayers.has(existing.playerBId))) {
+        removedExhibitionCount += 1;
+        changed = true;
+        return;
+      }
+      byId.set(String(existing?.id || existing?.matchupId || ''), nextMatchups.length);
+      nextMatchups.push(existing);
+    });
+
+    let materializedCount = 0;
+    materialized.forEach((next) => {
+      const candidates = [next.id, next.matchupId].filter(Boolean).map(String);
+      let index = candidates.map((id) => byId.get(id)).find((idx) => idx !== undefined);
+      if (index === undefined) {
+        index = nextMatchups.findIndex((existing) => getStoredMatchupDateKey(existing) === key && isSeasonTournamentMatchup(existing) && (existing.seriesId || existing.seasonSeriesId) === next.seriesId);
+      }
+      if (index >= 0) {
+        const merged = mergeMaterializedSeasonMatchup(nextMatchups[index], next);
+        if (JSON.stringify(merged) !== JSON.stringify(nextMatchups[index])) changed = true;
+        nextMatchups[index] = merged;
+      } else {
+        nextMatchups.push(next);
+        materializedCount += 1;
+        changed = true;
+      }
+    });
+
+    const schedule = Array.isArray(normalized.schedule) ? normalized.schedule.slice() : [];
+    let dayIndex = schedule.findIndex((day) => getScheduleDayDateKey(day) === key);
+    const upsertDay = dayIndex >= 0 ? { ...schedule[dayIndex] } : { date: key, dateKey: key, matchups: [] };
+    let dayMatchups = Array.isArray(upsertDay.matchups) ? upsertDay.matchups.slice() : [];
+    dayMatchups = dayMatchups.filter((existing) => !(String(existing?.matchupType || '').toLowerCase() === 'exhibition' && (tournamentPlayers.has(existing.playerAId) || tournamentPlayers.has(existing.playerBId))));
+    materialized.forEach((next) => {
+      const idx = dayMatchups.findIndex((existing) => String(existing?.id || existing?.matchupId || '') === String(next.id) || (isSeasonTournamentMatchup(existing) && (existing.seriesId || existing.seasonSeriesId) === next.seriesId));
+      if (idx >= 0) dayMatchups[idx] = mergeMaterializedSeasonMatchup(dayMatchups[idx], next);
+      else dayMatchups.push(next);
+    });
+    upsertDay.date = key;
+    upsertDay.dateKey = key;
+    upsertDay.matchups = dayMatchups;
+    upsertDay.seasonMatchupControl = true;
+    upsertDay.seasonScheduleSignature = getSeasonScheduleSignature(normalized, key);
+    if (dayIndex >= 0) schedule[dayIndex] = upsertDay;
+    else schedule.push(upsertDay);
+
+    if (changed || JSON.stringify(schedule) !== JSON.stringify(normalized.schedule || [])) {
+      changed = true;
+      normalized = normalizeState({ ...normalized, matchups: nextMatchups, schedule });
+    }
+    return { state: normalized, changed, materializedCount, removedExhibitionCount };
+  }
+
   function getMatchupWinnerIds(matchup) {
     const scoreA = Number(matchup?.scoreA);
     const scoreB = Number(matchup?.scoreB);
@@ -7427,6 +7595,8 @@ return Number(cappedScore.toFixed(1));
     getSeasonChampionFromFinals,
     shouldUseSeasonMatchupControl,
     buildSeasonDailySlate,
+    materializeSeasonSlateMatchupsForDate,
+    chooseUserMatchupForDate,
     getPairingKey,
     getRecordedSeriesId,
     inferSeasonSeriesIdFromRecord,

@@ -1225,9 +1225,20 @@ function placeHTML(rankIndex, total){
     const dateLbl = $('matchupDateLabel');
     if (dateLbl) dateLbl.textContent = todayKey();
 
-    const matchups = Array.isArray(state.matchups) ? state.matchups : [];
     const key = todayKey();
+    if (window.TaskPointsCore?.materializeSeasonSlateMatchupsForDate) {
+      try {
+        const materialized = TaskPointsCore.materializeSeasonSlateMatchupsForDate(state, key, {
+          nowISO: `${key}T12:00:00.000Z`
+        });
+        if (materialized?.state) state = materialized.state;
+        if (materialized?.changed && allowPersist) saveState(state);
+      } catch (error) {
+        console.warn('Failed to materialize today Season slate for GameHub matchup selection', error);
+      }
+    }
 
+    const matchups = Array.isArray(state.matchups) ? state.matchups : [];
     const matchupDateKey = (matchup) => {
       if (!matchup) return '';
       if (matchup.dateKey) return matchup.dateKey;
@@ -1236,9 +1247,9 @@ function placeHTML(rankIndex, total){
       return '';
     };
 
-    const m = matchups.find(x =>
-      x && matchupDateKey(x) === key && (x.playerAId === 'YOU' || x.playerBId === 'YOU')
-    );
+    const m = window.TaskPointsCore?.chooseUserMatchupForDate
+      ? TaskPointsCore.chooseUserMatchupForDate(state, key, 'YOU')
+      : matchups.find(x => x && matchupDateKey(x) === key && (x.playerAId === 'YOU' || x.playerBId === 'YOU'));
 
     const noNotice = $('noMatchupNotice');
     if (!m) {

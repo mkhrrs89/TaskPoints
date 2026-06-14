@@ -5026,9 +5026,22 @@ const updateTodayScoreIsland = (value) => {
 
   setOpponentScoreboardMeta(null);
 
+  if (window.TaskPointsCore?.materializeSeasonSlateMatchupsForDate) {
+    try {
+      const materialized = TaskPointsCore.materializeSeasonSlateMatchupsForDate(state, todayKeyStr, {
+        nowISO: `${todayKeyStr}T12:00:00.000Z`
+      });
+      if (materialized?.state) state = materialized.state;
+      if (materialized?.changed) save();
+    } catch (error) {
+      console.warn('Failed to materialize today Season slate for Home matchup selection', error);
+    }
+  }
+
   const matchups = Array.isArray(state.matchups) ? state.matchups : [];
-  const matchupCandidates = getHomeUserMatchupCandidatesForDate(matchups, todayKeyStr);
-  const matchup = chooseHomeUserMatchupForDate(matchupCandidates, todayKeyStr);
+  const matchup = window.TaskPointsCore?.chooseUserMatchupForDate
+    ? TaskPointsCore.chooseUserMatchupForDate(state, todayKeyStr, 'YOU')
+    : chooseHomeUserMatchupForDate(matchups, todayKeyStr);
 
   if (!matchup) {
     setHomeMatchupTypeLabel('');
