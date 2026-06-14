@@ -3287,14 +3287,23 @@ function ensureUpcomingSchedule(days = 7){
   today.setHours(0,0,0,0);
   const todayKey = dateKey(today);
 
+  let changed = false;
+
+  if (window.TaskPointsCore?.repairSeasonControlledScheduleFromSyncedSeason) {
+    const repaired = TaskPointsCore.repairSeasonControlledScheduleFromSyncedSeason(state, {
+      todayDateKey: todayKey,
+      nowISO: `${todayKey}T12:00:00.000Z`
+    });
+    if (repaired?.state) state = repaired.state;
+    if (repaired?.changed) changed = true;
+  }
+
   const participants = getAllParticipantIds();
   const signature = participantSignature(participants);
 
   const existingSchedule = Array.isArray(state.schedule)
     ? state.schedule.filter(d => d && typeof d.date === "string" && d.date >= todayKey)
     : [];
-
-  let changed = false;
 
   const neededDates = [];
   for (let i = 0; i < days; i++) {
@@ -3350,6 +3359,18 @@ function ensureUpcomingSchedule(days = 7){
     const existing = byDate.get(key);
 
     if (key === todayKey) {
+      const seasonControlApplies = window.TaskPointsCore?.shouldUseSeasonMatchupControl
+        && TaskPointsCore.shouldUseSeasonMatchupControl(state, key);
+
+      const existingSeasonControlledValid = seasonControlApplies
+        && window.TaskPointsCore?.isValidSeasonControlledScheduleDay
+        && TaskPointsCore.isValidSeasonControlledScheduleDay(state, key, existing);
+
+      if (seasonControlApplies && !existingSeasonControlledValid) {
+        changed = true;
+        return buildDailySchedule(key, participants, signature);
+      }
+
       const todaysStoredMatchups = existingMatchupsByDate.get(todayKey);
       if (todaysStoredMatchups && todaysStoredMatchups.length) {
         const frozenToday = buildTodayFromStoredMatchups(existing, todaysStoredMatchups);
@@ -3358,8 +3379,7 @@ function ensureUpcomingSchedule(days = 7){
       }
 
       if (existing) {
-        const seasonControlApplies = window.TaskPointsCore?.shouldUseSeasonMatchupControl && TaskPointsCore.shouldUseSeasonMatchupControl(state, key);
-        if (!seasonControlApplies || (window.TaskPointsCore?.isValidSeasonControlledScheduleDay && TaskPointsCore.isValidSeasonControlledScheduleDay(state, key, existing))) return existing;
+        if (!seasonControlApplies || existingSeasonControlledValid) return existing;
       }
     }
 
@@ -4815,6 +4835,34 @@ function getHomeMatchupTypeLabel(stateArg, matchup, dateKeyStr) {
   return 'Exhibition Match';
 }
 
+function getHomeMatchupDisplayPriority(matchup) {
+  const type = String(matchup?.matchupType || '').toLowerCase();
+  if (type === 'tournament' || type === 'season') return 0;
+  if (type === 'exhibition') return 2;
+  return 1;
+}
+
+function isHomeUserMatchupForDate(matchup, dateKeyStr) {
+  if (!matchup) return false;
+  const matchupKey = matchup.date || matchup.dateKey || (matchup.dateISO ? dateKey(matchup.dateISO) : '');
+  return matchupKey === dateKeyStr && (matchup.playerAId === 'YOU' || matchup.playerBId === 'YOU');
+}
+
+function chooseHomeUserMatchupForDate(matchups, dateKeyStr) {
+  return (Array.isArray(matchups) ? matchups : [])
+    .filter((matchup) => isHomeUserMatchupForDate(matchup, dateKeyStr))
+    .sort((a, b) => {
+      const byPriority = getHomeMatchupDisplayPriority(a) - getHomeMatchupDisplayPriority(b);
+      if (byPriority !== 0) return byPriority;
+
+      const aHasSeries = Boolean(a.seriesId || a.seasonSeriesId);
+      const bHasSeries = Boolean(b.seriesId || b.seasonSeriesId);
+      if (aHasSeries !== bHasSeries) return aHasSeries ? -1 : 1;
+
+      return String(a.id || a.matchupId || '').localeCompare(String(b.id || b.matchupId || ''));
+    })[0] || null;
+}
+
 function getHomeSeriesRecordLabel(stateArg, matchup, dateKeyStr) {
   if (!matchup || !isHomeSeasonContextActive(stateArg, dateKeyStr)) return '';
 
@@ -4900,14 +4948,7 @@ const updateTodayScoreIsland = (value) => {
   setOpponentScoreboardMeta(null);
 
   const matchups = Array.isArray(state.matchups) ? state.matchups : [];
-  const matchupDateKey = (m) => {
-    if (!m) return '';
-    if (m.date) return m.date;
-    if (m.dateKey) return m.dateKey;
-    if (m.dateISO) return dateKey(m.dateISO);
-    return '';
-  };
-  const matchup = matchups.find(m => m && matchupDateKey(m) === todayKeyStr && (m.playerAId === 'YOU' || m.playerBId === 'YOU'));
+  const matchup = chooseHomeUserMatchupForDate(matchups, todayKeyStr);
 
   if (!matchup) {
     setHomeMatchupTypeLabel('');
@@ -10394,7 +10435,28 @@ function applyImportedNotesPayload(notesPayload, options = {}) {
 function getTaskPointsExportSnapshot() {
   const scheduleChanged = ensureUpcomingSchedule();
   if (scheduleChanged) save();
-  const normalizedState = stripLegacyImageFields({ ...state, projects: loadProjectsFromStorage() });
+
+  window.TaskPointsCore?.flushPendingSaves?.();
+
+  let latestState = state || {};
+  try {
+    if (window.TaskPointsCore?.loadAppState) {
+      latestState = TaskPointsCore.loadAppState({
+        syncDerived: false,
+        persistSync: false
+      }).state || latestState;
+    } else {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      latestState = raw ? JSON.parse(raw) : latestState;
+    }
+  } catch (error) {
+    console.warn('Failed to read latest state for export; falling back to in-memory state', error);
+  }
+
+  const normalizedState = stripLegacyImageFields({ ...latestState, projects: loadProjectsFromStorage() });
+  if (!normalizedState.currentSeason && state?.currentSeason) normalizedState.currentSeason = state.currentSeason;
+  if (!normalizedState.latestSeasonId && state?.latestSeasonId) normalizedState.latestSeasonId = state.latestSeasonId;
+  if ((!Array.isArray(normalizedState.seasonHistory) || !normalizedState.seasonHistory.length) && Array.isArray(state?.seasonHistory)) normalizedState.seasonHistory = state.seasonHistory;
   const notesText = getCurrentNotesForExport(normalizedState);
   normalizedState.notes = notesText;
   const projectsRaw = localStorage.getItem("tp_projects_v1");
