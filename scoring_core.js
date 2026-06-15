@@ -2086,6 +2086,22 @@
     return normalizePairIds(playerAId, playerBId).join('|');
   }
 
+  function createSeasonSlateSeededRandom(seedInput) {
+    let seed = 2166136261;
+    const text = String(seedInput || 'taskpoints-season-slate');
+    for (let i = 0; i < text.length; i += 1) {
+      seed ^= text.charCodeAt(i);
+      seed = Math.imul(seed, 16777619) >>> 0;
+    }
+    return function seededSeasonSlateRandom() {
+      seed += 0x6D2B79F5;
+      let t = seed;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
   function getJunePairingHistory(state, season, beforeDateKey) {
     const normalized = normalizeState(state || {});
     const start = season?.startDate || '2026-06-01';
@@ -2380,7 +2396,7 @@
 
     const nextSchedule = schedule.map((day) => {
       const dayKey = getScheduleDayDateKey(day);
-      if (!dayKey || dayKey < today || day?.seasonMatchupControl !== true) return day;
+      if (!dayKey || dayKey < today) return day;
       if (dayKey === today && shouldUseSeasonMatchupControl(normalized, dayKey)) {
         const materialized = materializeSeasonSlateMatchupsForDate(normalized, dayKey, options);
         if (materialized?.state) normalized = materialized.state;
@@ -2390,8 +2406,9 @@
           const repairedDay = (Array.isArray(normalized.schedule) ? normalized.schedule : []).find((candidate) => getScheduleDayDateKey(candidate) === dayKey);
           if (repairedDay) return repairedDay;
         }
-        if (scheduleRowHasRecordedScore(day)) return day;
+        if (day?.seasonMatchupControl === true && scheduleRowHasRecordedScore(day)) return day;
       }
+      if (day?.seasonMatchupControl !== true) return day;
       if (!shouldUseSeasonMatchupControl(normalized, dayKey)) return day;
 
       const expectedSignature = getSeasonScheduleSignature(normalized, dayKey);
@@ -2499,7 +2516,10 @@
         matchups: [matchup.id]
       });
     });
-    const generated = generateRandomNonRepeatPairs(exhibitionPool, history, { ...options, dateKey: dateKeyStr });
+    const slateRandom = typeof options.random === 'function'
+      ? options.random
+      : createSeasonSlateSeededRandom(`${slateSeason.id || 'season'}:${dateKeyStr}:exhibitions`);
+    const generated = generateRandomNonRepeatPairs(exhibitionPool, history, { ...options, dateKey: dateKeyStr, random: slateRandom });
     warnings.push(...generated.warnings);
     errors.push(...generated.errors);
     if (!generated.ok) return { ok: false, dateKey: dateKeyStr, tournamentMatchups, exhibitionMatchups: [], allMatchups: tournamentMatchups, warnings, errors, updatedSeason: slateSeason };
@@ -2723,7 +2743,10 @@
       const referenced = referencedIds.has(id) || referencedIds.has(String(existing?.matchupId || ''));
       const seasonLooking = type === 'tournament' || type === 'season' || Boolean(seriesId) || (seasonId && id.includes(`${seasonId}_`));
       if (sameDay && seasonLooking && !expected && !referenced) { removedStaleSeasonCount += 1; changed = true; return; }
-      if (sameDay && type === 'exhibition' && (tournamentPlayers.has(String(existing.playerAId || '')) || tournamentPlayers.has(String(existing.playerBId || '')))) { removedExhibitionCount += 1; changed = true; return; }
+      if (sameDay && type === 'exhibition') {
+        const hasTournamentPlayer = tournamentPlayers.has(String(existing.playerAId || '')) || tournamentPlayers.has(String(existing.playerBId || ''));
+        if (!expected || hasTournamentPlayer) { removedExhibitionCount += 1; changed = true; return; }
+      }
       byId.set(id, nextMatchups.length);
       if (existing?.matchupId) byId.set(String(existing.matchupId), nextMatchups.length);
       nextMatchups.push(existing);
