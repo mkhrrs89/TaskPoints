@@ -4467,7 +4467,7 @@ const workHoursMax = Object.prototype.hasOwnProperty.call(workInput, 'hoursMax')
   }
 
   function normalizeState(s) {
-    const src = (s && typeof s === 'object') ? s : {};
+    const src = inflateRedundantFieldsFromStorage((s && typeof s === 'object') ? s : {});
     const normalized = {
       ...src,
       tasks:       Array.isArray(src.tasks)       ? src.tasks.map(normalizeTask)       : [],
@@ -5443,9 +5443,123 @@ return { state: merged, storageKey };
     return true;
   }
 
+  function getPlayerNameMapForStorage(state) {
+    const map = new Map();
+    (Array.isArray(state?.players) ? state.players : []).forEach((player) => {
+      if (!player || typeof player !== 'object') return;
+      const id = typeof player.id === 'string' ? player.id : '';
+      const name = typeof player.name === 'string' ? player.name : '';
+      if (id && name) map.set(id, name);
+    });
+    return map;
+  }
+
+  function stripRedundantFieldsForStorage(state) {
+    const source = state && typeof state === 'object' ? state : {};
+    const playerNames = getPlayerNameMapForStorage(source);
+    const compacted = { ...source };
+
+    if (Array.isArray(source.matchups)) {
+      compacted.matchups = source.matchups.map((matchup) => {
+        if (!matchup || typeof matchup !== 'object') return matchup;
+        const row = { ...matchup };
+        if (row.playerAId && row.playerAName && playerNames.get(row.playerAId) === row.playerAName) delete row.playerAName;
+        if (row.playerBId && row.playerBName && playerNames.get(row.playerBId) === row.playerBName) delete row.playerBName;
+        if (row.date && row.dateKey === row.date) delete row.dateKey;
+        if (row.id && row.matchupId === row.id) delete row.matchupId;
+        if (Number.isFinite(Number(row.scoreA)) && Number(row.playerAScore) === Number(row.scoreA)) delete row.playerAScore;
+        if (Number.isFinite(Number(row.scoreB)) && Number(row.playerBScore) === Number(row.scoreB)) delete row.playerBScore;
+        return row;
+      });
+    }
+
+    if (Array.isArray(source.gameHistory)) {
+      compacted.gameHistory = source.gameHistory.map((entry) => {
+        if (!entry || typeof entry !== 'object') return entry;
+        const row = { ...entry };
+        if (row.date && row.dateKey === row.date) delete row.dateKey;
+        if (row.opponentId === '') delete row.opponentId;
+        return row;
+      });
+    }
+
+    if (Array.isArray(source.tasks)) {
+      compacted.tasks = source.tasks.map((task) => {
+        if (!task || typeof task !== 'object') return task;
+        const row = { ...task };
+        if (row.originalDueDateISO && row.dueDateISO && row.originalDueDateISO === row.dueDateISO) delete row.originalDueDateISO;
+        if (row.recurrence && typeof row.recurrence === 'object' && row.recurrence.mode === 'none' && Object.keys(row.recurrence).length === 1) delete row.recurrence;
+        if (Array.isArray(row.tags) && row.tags.length === 0) delete row.tags;
+        if (Array.isArray(row.skipDates) && row.skipDates.length === 0) delete row.skipDates;
+        if (Array.isArray(row.skills) && row.skills.length === 2 && row.skills.every((slot) => slot && slot.skill === '' && slot.pts === '')) delete row.skills;
+        if (row.hidden === false) delete row.hidden;
+        ['deletedAt', 'deletedFrom', 'prevStatus', 'completedAtISO'].forEach((key) => {
+          if (row[key] == null) delete row[key];
+        });
+        if (Number(row.postponedDays) === 0) delete row.postponedDays;
+        return row;
+      });
+    }
+
+    return compacted;
+  }
+
+  function inflateRedundantFieldsFromStorage(state) {
+    const source = state && typeof state === 'object' ? state : {};
+    if (source.__storageCompactVersion !== 1) return source;
+    const playerNames = getPlayerNameMapForStorage(source);
+    const inflated = { ...source };
+    delete inflated.__storageCompactVersion;
+
+    if (Array.isArray(source.matchups)) {
+      inflated.matchups = source.matchups.map((matchup) => {
+        if (!matchup || typeof matchup !== 'object') return matchup;
+        const row = { ...matchup };
+        if (!row.playerAName && row.playerAId && playerNames.has(row.playerAId)) row.playerAName = playerNames.get(row.playerAId);
+        if (!row.playerBName && row.playerBId && playerNames.has(row.playerBId)) row.playerBName = playerNames.get(row.playerBId);
+        if (!row.dateKey && row.date) row.dateKey = row.date;
+        if (!row.date && row.dateKey) row.date = row.dateKey;
+        if (!row.matchupId && row.id && (row.seasonId || row.seriesId || row.seasonSeriesId || row.matchupType)) row.matchupId = row.id;
+        if (row.playerAScore == null && Number.isFinite(Number(row.scoreA))) row.playerAScore = Number(row.scoreA);
+        if (row.playerBScore == null && Number.isFinite(Number(row.scoreB))) row.playerBScore = Number(row.scoreB);
+        return row;
+      });
+    }
+
+    if (Array.isArray(source.gameHistory)) {
+      inflated.gameHistory = source.gameHistory.map((entry) => {
+        if (!entry || typeof entry !== 'object') return entry;
+        const row = { ...entry };
+        if (!row.dateKey && row.date) row.dateKey = row.date;
+        if (!row.date && row.dateKey) row.date = row.dateKey;
+        if (row.opponentId == null) row.opponentId = '';
+        return row;
+      });
+    }
+
+    if (Array.isArray(source.tasks)) {
+      inflated.tasks = source.tasks.map((task) => normalizeTask({
+        recurrence: { mode: 'none' },
+        tags: [],
+        skills: [{ skill: '', pts: '' }, { skill: '', pts: '' }],
+        skipDates: [],
+        hidden: false,
+        deletedAt: null,
+        deletedFrom: null,
+        prevStatus: null,
+        completedAtISO: null,
+        postponedDays: 0,
+        ...(task && typeof task === 'object' ? task : {})
+      }));
+    }
+
+    return inflated;
+  }
+
   function compactStateForLocalStorage(state, options = {}) {
     const source = state && typeof state === 'object' ? state : {};
-    const compacted = { ...source };
+    const compacted = stripRedundantFieldsForStorage({ ...source });
+    compacted.__storageCompactVersion = 1;
     compacted.schedule = [];
     compacted.opponentDripSchedules = [];
     compacted.storageWarnings = Array.isArray(source.storageWarnings)
@@ -5689,8 +5803,9 @@ return { state: merged, storageKey };
         const size = summarizeStateSizes(candidateWithSticky);
         console.log(`[TP saveStateSnapshot] success stage=${stage} trimmed=${trimmed} savePath=${savePath} storageKey=${storageKey} completions=${size.completions} gameHistory=${size.gameHistory} matchups=${size.matchups} workHistory=${size.workHistory} schedule=${size.schedule}`);
       }
-      setQuotaTrimMarker(stage, summarizeStateSizes(candidateWithSticky), trimmed);
-      return { state: candidateWithSticky, trimmed };
+      const returnedState = inflateRedundantFieldsFromStorage(candidateWithSticky);
+      setQuotaTrimMarker(stage, summarizeStateSizes(returnedState), trimmed);
+      return { state: returnedState, trimmed };
     };
 
     if (debugEnabled) {
