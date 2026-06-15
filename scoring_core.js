@@ -12,6 +12,11 @@
     "taskpoints_backup_prev3"
   ];
 
+  const TASKPOINTS_LARGE_SAVE_WARN_BYTES = 4.25 * 1024 * 1024;
+  const TASKPOINTS_QUOTA_ALERT_COOLDOWN_MS = 60 * 1000;
+  const TASKPOINTS_SAVE_BLOCK_COOLDOWN_MS = 15 * 1000;
+  const TASKPOINTS_STORAGE_WARNING_MAX = 5;
+  
   if (!global.scheduleRender) {
     const queue = new Set();
     let scheduled = false;
@@ -5370,6 +5375,89 @@ return { state: merged, storageKey };
     return { totalBytes, entries };
   }
 
+  function getRuntimeRoot() {
+    return (global && global.window) ? global.window : global;
+  }
+
+  function getJsonSizeBytes(value) {
+    try {
+      const json = JSON.stringify(value);
+      return json ? json.length * 2 : 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  function getStorageKeySizeBytes(key) {
+    try {
+      const value = localStorage.getItem(key);
+      return value == null ? 0 : (String(key || '').length + value.length) * 2;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  function getStateFieldSizeReport(snapshot) {
+    const safe = snapshot && typeof snapshot === 'object' ? snapshot : {};
+    const keys = [
+      'tasks', 'reminders', 'completions', 'habits', 'players', 'flexActions',
+      'gameHistory', 'matchups', 'schedule', 'opponentDripSchedules',
+      'weightHistory', 'vo2MaxHistory', 'liveDiffHistory', 'liveDiffSnapshots',
+      'workHistory', 'currentSeason', 'seasonHistory', 'storageWarnings',
+      'notes', 'projects', 'playerBadges'
+    ];
+    return keys
+      .map((key) => ({ key, bytes: getJsonSizeBytes(safe[key]) }))
+      .filter((entry) => entry.bytes > 0)
+      .sort((a, b) => b.bytes - a.bytes)
+      .slice(0, 10);
+  }
+
+  function recordQuotaFailureDiagnostics(info) {
+    const root = getRuntimeRoot();
+    const diagnostic = {
+      atISO: new Date().toISOString(),
+      savePath: info?.savePath || 'unknown',
+      stage: info?.stage || 'unknown',
+      storageKey: info?.storageKey || STORAGE_KEY,
+      storedBytes: Number(info?.storedBytes) || 0,
+      candidateBytes: Number(info?.candidateBytes) || 0,
+      localStorageTotalBytes: (() => {
+        try { return getLocalStorageSizeReport().totalBytes; } catch (_) { return 0; }
+      })(),
+      counts: summarizeSnapshotCounts(info?.snapshot || {}),
+      biggestFields: getStateFieldSizeReport(info?.snapshot || {})
+    };
+    if (root) root.__tpLastQuotaFailure = diagnostic;
+    console.warn('[TaskPoints] quota/save-size diagnostic', diagnostic);
+    return diagnostic;
+  }
+
+  function shouldShowQuotaAlertNow() {
+    const root = getRuntimeRoot();
+    if (!root) return true;
+    const now = Date.now();
+    const last = Number(root.__tpLastQuotaAlertAt || 0);
+    if (last && now - last < TASKPOINTS_QUOTA_ALERT_COOLDOWN_MS) return false;
+    root.__tpLastQuotaAlertAt = now;
+    return true;
+  }
+
+  function compactStateForLocalStorage(state, options = {}) {
+    const source = state && typeof state === 'object' ? state : {};
+    const compacted = { ...source };
+    compacted.schedule = [];
+    compacted.opponentDripSchedules = [];
+    compacted.storageWarnings = Array.isArray(source.storageWarnings)
+      ? source.storageWarnings.slice(-TASKPOINTS_STORAGE_WARNING_MAX)
+      : [];
+    delete compacted.lastCompletionPruneWarning;
+    delete compacted.lastGameHistoryPruneWarning;
+    delete compacted.lastMatchupPruneWarning;
+    if (options.clearWorkHistory === true) compacted.workHistory = [];
+    return compacted;
+  }
+  
   function storeRollingBackup(storageKey, options = {}) {
     const currentRaw = localStorage.getItem(storageKey);
     if (!currentRaw) return;
@@ -5407,10 +5495,14 @@ return { state: merged, storageKey };
     } catch (_) {
       latest = null;
     }
+    const allowGeneratedCacheClear = Boolean(options.allowGeneratedCacheClear || options.storageEmergencyCompaction);
     const stickyArrayFields = [
       'tasks', 'completions', 'habits', 'players', 'flexActions',
-      'gameHistory', 'matchups', 'schedule', 'weightHistory', 'vo2MaxHistory', 'reminders', 'seasonHistory'
+      'gameHistory', 'matchups', 'weightHistory', 'vo2MaxHistory', 'reminders', 'seasonHistory'
     ];
+    if (!allowGeneratedCacheClear) {
+      stickyArrayFields.push('schedule');
+    }
     const stickyObjectFields = ['playerBadges', 'liveDiffHistory', 'liveDiffSnapshots'];
     const deletedReminderIds = new Set(Array.isArray(options.deletedReminderIds) ? options.deletedReminderIds.map(String) : []);
     stickyArrayFields.forEach((key) => {
@@ -5430,6 +5522,12 @@ return { state: merged, storageKey };
       }
       next[key] = [];
     });
+    
+    if (allowGeneratedCacheClear) {
+      next.schedule = Array.isArray(next.schedule) ? next.schedule : [];
+      next.opponentDripSchedules = Array.isArray(next.opponentDripSchedules) ? next.opponentDripSchedules : [];
+    }
+    
     if (!options.allowDestructiveOverwrite && Array.isArray(latest?.seasonHistory) && latest.seasonHistory.length && (!Array.isArray(next.seasonHistory) || next.seasonHistory.length === 0)) {
       next.seasonHistory = latest.seasonHistory;
     }
@@ -5487,6 +5585,20 @@ return { state: merged, storageKey };
 
   function saveStateSnapshot(state, options = {}) {
     const debugEnabled = Boolean(global && global.TP_DEBUG_PERF);
+    const storageKey = options.storageKey || STORAGE_KEY;
+    const savePath = options.savePath || options.source || options.reason || options.caller || 'unknown';
+    const root = getRuntimeRoot();
+    const userInitiatedSave = Boolean(options.userInitiated || options.manualSave || options.immediateWrite);
+    const blockedUntil = Number(root?.__tpQuotaSaveBlockedUntil || 0);
+    if (!userInitiatedSave && blockedUntil > Date.now()) {
+      console.warn(`[TaskPoints] skipped automatic save during quota cooldown. savePath=${savePath}`);
+      return {
+        state: readStoredStateRaw(storageKey),
+        trimmed: false,
+        skipped: true,
+        blockedByQuotaCircuit: true
+      };
+    }
     const summarizeStateSizes = (snapshot) => ({
       completions: Array.isArray(snapshot?.completions) ? snapshot.completions.length : 0,
       gameHistory: Array.isArray(snapshot?.gameHistory) ? snapshot.gameHistory.length : 0,
@@ -5494,7 +5606,7 @@ return { state: merged, storageKey };
       workHistory: Array.isArray(snapshot?.workHistory) ? snapshot.workHistory.length : 0,
       schedule: Array.isArray(snapshot?.schedule) ? snapshot.schedule.length : 0
     });
-    const savePath = options.savePath || options.source || options.reason || options.caller || 'unknown';
+
     let lastQuotaError = null;
     const callsite = debugEnabled ? (new Error().stack || '').split('\n').slice(2, 4).map(line => line.trim()).join(' <- ') : '';
     const beforeSummary = summarizeStateSizes(state);
@@ -5514,7 +5626,7 @@ return { state: merged, storageKey };
       };
     };
 
-    const storageKey = options.storageKey || STORAGE_KEY;
+
     const logQuotaDebug = () => {
       try {
         const report = getLocalStorageSizeReport();
@@ -5536,12 +5648,24 @@ return { state: merged, storageKey };
     const appendStorageWarning = (snapshot, warning) => {
       const base = snapshot && typeof snapshot === 'object' ? snapshot : {};
       const warnings = Array.isArray(base.storageWarnings) ? base.storageWarnings.slice() : [];
-      warnings.push(warning);
-      return { ...base, storageWarnings: warnings };
+      const deduped = warnings.filter((entry) => !(entry && entry.type === warning.type && entry.message === warning.message));
+      deduped.push(warning);
+      return { ...base, storageWarnings: deduped.slice(-TASKPOINTS_STORAGE_WARNING_MAX) };
     };
-    const attemptSave = (candidate, trimmed, stage = 'initial') => {
-      const candidateWithSticky = preserveStickyFieldsBeforeSave(candidate, storageKey, options);
-      localStorage.setItem(storageKey, JSON.stringify(candidateWithSticky));
+    const attemptSave = (candidate, trimmed, stage = 'initial', attemptOptions = {}) => {
+      const stickyOptions = { ...options, ...attemptOptions };
+      const candidateWithSticky = preserveStickyFieldsBeforeSave(candidate, storageKey, stickyOptions);
+      const storedBytes = getStorageKeySizeBytes(storageKey);
+      const candidateBytes = getJsonSizeBytes(candidateWithSticky);
+      if (candidateBytes > TASKPOINTS_LARGE_SAVE_WARN_BYTES || (storedBytes > 0 && candidateBytes > storedBytes + (512 * 1024))) {
+        recordQuotaFailureDiagnostics({ savePath, stage, storageKey, storedBytes, candidateBytes, snapshot: candidateWithSticky });
+      }
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(candidateWithSticky));
+      } catch (err) {
+        recordQuotaFailureDiagnostics({ savePath, stage, storageKey, storedBytes, candidateBytes, snapshot: candidateWithSticky });
+        throw err;
+      }
       const savedRaw = localStorage.getItem(storageKey);
       const saved = savedRaw ? (JSON.parse(savedRaw) || {}) : {};
       const criticalArrays = ['completions', 'matchups', 'gameHistory', 'weightHistory', 'vo2MaxHistory', 'reminders'];
@@ -5573,17 +5697,35 @@ return { state: merged, storageKey };
       console.log(`[TP saveStateSnapshot] start savePath=${savePath} storageKey=${storageKey} completionsBeforeFirstSave=${beforeSummary.completions}${callsite ? ` callsite=${callsite}` : ''}`);
     }
 
-    const initialCandidate = cleanupOpponentDripSchedules(state, {
+    const cleanedInitialCandidate = cleanupOpponentDripSchedules(state, {
       maxEntries: Number.isFinite(options?.limits?.maxOpponentDripSchedules) ? options.limits.maxOpponentDripSchedules : 120
     });
+    const initialStoredBytes = getStorageKeySizeBytes(storageKey);
+    const initialCandidateBytes = getJsonSizeBytes(cleanedInitialCandidate);
+    const shouldPrecompactGenerated = initialCandidateBytes > TASKPOINTS_LARGE_SAVE_WARN_BYTES
+      || (initialStoredBytes > 0 && initialCandidateBytes > initialStoredBytes + (512 * 1024) && initialCandidateBytes > 3.5 * 1024 * 1024);
+    const initialCandidate = shouldPrecompactGenerated
+      ? compactStateForLocalStorage(cleanedInitialCandidate)
+      : cleanedInitialCandidate;
     try {
-      return attemptSave(initialCandidate, false, 'initial');
+      return attemptSave(initialCandidate, shouldPrecompactGenerated, shouldPrecompactGenerated ? 'initial-generated-compacted' : 'initial', {
+        allowGeneratedCacheClear: shouldPrecompactGenerated
+      });
     } catch (err) {
       if (!isQuotaError(err)) throw err;
       lastQuotaError = err;
       if (debugEnabled) {
         console.log(`[TP saveStateSnapshot] firstSaveQuotaError=true savePath=${savePath} storageKey=${storageKey}`);
       }
+    }
+
+    const generatedCompacted = compactStateForLocalStorage(initialCandidate);
+    logStage('generated-compacted', generatedCompacted);
+    try {
+      return attemptSave(generatedCompacted, true, 'generated-compacted', { allowGeneratedCacheClear: true });
+    } catch (err) {
+      if (!isQuotaError(err)) throw err;
+      lastQuotaError = err;
     }
 
     logStage('initial pruneStateForStorage(state, options.limits)', state);
@@ -5669,15 +5811,13 @@ return { state: merged, storageKey };
       }
     }
 
-    const emergency = {
-      ...aggressive,
-      schedule: [],
-      opponentDripSchedules: [],
-      workHistory: []
-    };
+    const emergency = compactStateForLocalStorage(aggressive, { clearWorkHistory: true });
     logStage('emergency', emergency);
     try {
-      return attemptSave(emergency, true, 'emergency');
+      return attemptSave(emergency, true, 'emergency', {
+        allowGeneratedCacheClear: true,
+        storageEmergencyCompaction: true
+      });
     } catch (err) {
       if (!isQuotaError(err)) throw err;
       lastQuotaError = err;
@@ -5704,14 +5844,19 @@ return { state: merged, storageKey };
       atISO: new Date().toISOString(),
       message: quotaMessage
     };
-    const warningState = appendStorageWarning(state, quotaWarning);
+    const warningState = appendStorageWarning(compactStateForLocalStorage(state), quotaWarning);
+    if (root) root.__tpQuotaSaveBlockedUntil = Date.now() + TASKPOINTS_SAVE_BLOCK_COOLDOWN_MS;
     try {
-      localStorage.setItem(storageKey, JSON.stringify(warningState));
+      localStorage.setItem(storageKey, JSON.stringify(preserveStickyFieldsBeforeSave(warningState, storageKey, {
+        ...options,
+        allowGeneratedCacheClear: true,
+        storageEmergencyCompaction: true
+      })));
     } catch (warningErr) {
       console.warn('TaskPointsCore: unable to persist storage warning after quota failure.', warningErr);
     }
     console.error('TaskPointsCore: save failed due to browser storage quota. Critical historical data was preserved and not pruned.', lastQuotaError || new Error('Quota exceeded'));
-    if (typeof alert === 'function') {
+    if (typeof alert === 'function' && shouldShowQuotaAlertNow()) {
       alert(quotaMessage);
     }
     logQuotaDebug();
@@ -7679,6 +7824,7 @@ return Number(cappedScore.toFixed(1));
     getOpponentDripScheduleCleanupSummary,
     loadAppState,
     pruneStateForStorage,
+    compactStateForLocalStorage,
     mergeState,
     saveStateSnapshot,
     saveValidatedSnapshot,
