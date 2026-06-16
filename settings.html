@@ -1902,9 +1902,15 @@ ${summaryWithNotes}`)) return;
 
       if (!confirm(msg)) return;
 
+      const nowISO = new Date().toISOString();
+
       const nextHabits = habits.map(habit => {
         if (String(habit?.tag || "").trim() !== key) return habit;
-        return { ...habit, tag: "" };
+        return {
+          ...habit,
+          tag: "",
+          updatedAtISO: nowISO
+        };
       });
 
       const nextHabitTagColors = { ...(state.habitTagColors || {}) };
@@ -1921,7 +1927,8 @@ ${summaryWithNotes}`)) return;
         {
           allowHabitTagColorReset: true,
           allowStickyOverwriteKeys: ["habitTagColors"],
-          immediateWrite: true
+          immediateWrite: true,
+          source: "settings-delete-habit-tag"
         }
       );
 
