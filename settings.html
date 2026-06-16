@@ -1907,33 +1907,48 @@ ${summaryWithNotes}`)) return;
         return { ...habit, tag: "" };
       });
 
-      const colorPatch = {};
-      colorPatch[key] = null;
+      const nextHabitTagColors = { ...(state.habitTagColors || {}) };
+      delete nextHabitTagColors[key];
+
+      const nextState = {
+        ...state,
+        habits: nextHabits,
+        habitTagColors: nextHabitTagColors
+      };
 
       saveSettingsState(
-        { habits: nextHabits, habitTagColors: colorPatch },
+        nextState,
         {
+          allowHabitTagColorReset: true,
           allowStickyOverwriteKeys: ["habitTagColors"],
           immediateWrite: true
         }
       );
 
-      scheduleRender(renderHabitTagColors);
+      renderHabitTagColors();
     }
 
     function updateHabitTagColor(tag, color) {
       const key = String(tag ?? "").trim();
       if (!key) return;
 
-      // PATCH: only write the one key we changed.
-      // - color = "#rrggbb" => set/update
-      // - color = null / "" => delete (handled in scoring_core mergeState patch logic)
-      const patch = {};
-      patch[key] = color;
+      const state = loadSettingsState();
+      const nextHabitTagColors = { ...(state.habitTagColors || {}) };
+      const normalized = normalizeHexColor(color);
+
+      if (normalized) {
+        nextHabitTagColors[key] = normalized;
+      } else {
+        delete nextHabitTagColors[key];
+      }
 
       saveSettingsState(
-        { habitTagColors: patch },
         {
+          ...state,
+          habitTagColors: nextHabitTagColors
+        },
+        {
+          allowHabitTagColorReset: true,
           allowStickyOverwriteKeys: ["habitTagColors"],
           immediateWrite: true
         }
