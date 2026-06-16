@@ -1876,7 +1876,49 @@ ${summaryWithNotes}`)) return;
       const tags = Array.isArray(state.habits)
         ? state.habits.map(h => (h?.tag || "").trim()).filter(Boolean)
         : [];
+
+      if (state?.habitTagColors && typeof state.habitTagColors === "object") {
+        Object.keys(state.habitTagColors).forEach(tag => {
+          const key = String(tag || "").trim();
+          if (key) tags.push(key);
+        });
+      }
+
       return Array.from(new Set(tags)).sort((a, b) => a.localeCompare(b));
+    }
+
+    function deleteHabitTag(tag) {
+      const key = String(tag ?? "").trim();
+      if (!key) return;
+
+      const state = loadSettingsState();
+      const habits = Array.isArray(state.habits) ? state.habits : [];
+      const affected = habits.filter(habit => String(habit?.tag || "").trim() === key);
+      const count = affected.length;
+
+      const msg = count > 0
+        ? `Delete the tag "${key}" from ${count} habit/vice item${count === 1 ? "" : "s"}?\n\nThis only clears the tag and removes its saved color. It does not delete the habits/vices themselves.`
+        : `Delete the saved color entry for the unused tag "${key}"?`;
+
+      if (!confirm(msg)) return;
+
+      const nextHabits = habits.map(habit => {
+        if (String(habit?.tag || "").trim() !== key) return habit;
+        return { ...habit, tag: "" };
+      });
+
+      const colorPatch = {};
+      colorPatch[key] = null;
+
+      saveSettingsState(
+        { habits: nextHabits, habitTagColors: colorPatch },
+        {
+          allowStickyOverwriteKeys: ["habitTagColors"],
+          immediateWrite: true
+        }
+      );
+
+      scheduleRender(renderHabitTagColors);
     }
 
     function updateHabitTagColor(tag, color) {
@@ -2083,6 +2125,7 @@ ${summaryWithNotes}`)) return;
           <div class="flex flex-wrap items-center gap-2">
             <input type="color" class="color-input" data-color-input="${escapeHtml(tag)}" value="${colorValue}">
             <input type="text" class="input w-32" data-hex-input="${escapeHtml(tag)}" placeholder="#RRGGBB" value="${storedColor || ''}">
+            <button type="button" class="btn btn-deny btn-toolbar nav-btn text-xs" data-delete-tag="${escapeHtml(tag)}">Delete tag</button>
           </div>
         `;
 
@@ -2090,6 +2133,11 @@ ${summaryWithNotes}`)) return;
 
         const colorInput = row.querySelector('input[data-color-input]');
         const hexInput = row.querySelector('input[data-hex-input]');
+        const deleteBtn = row.querySelector('button[data-delete-tag]');
+
+        deleteBtn?.addEventListener("click", () => {
+          deleteHabitTag(tag);
+        });
 
         if (colorInput && hexInput) {
           colorInput.addEventListener("input", () => {
