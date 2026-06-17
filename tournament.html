@@ -571,6 +571,182 @@
     return '';
   }
 
+  function getTournamentDateKey(value) {
+    if (!value) return '';
+    const raw = String(value || '');
+    const match = raw.match(/\d{4}-\d{2}-\d{2}/);
+    if (match) return match[0];
+
+    const date = value instanceof Date ? value : new Date(value);
+    if (!date || Number.isNaN(date.getTime())) return '';
+
+    if (window.TaskPointsCore?.dateKey) return TaskPointsCore.dateKey(date);
+
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  function getTournamentCurrentRevealDayKey(now = new Date()) {
+    const shifted = new Date(now);
+
+    // Match the app's 5 AM day rollover behavior:
+    // before 5 AM, yesterday's results are still considered "today" visually.
+    if (shifted.getHours() < 5) shifted.setDate(shifted.getDate() - 1);
+
+    shifted.setHours(0, 0, 0, 0);
+    return getTournamentDateKey(shifted);
+  }
+
+  function getTournamentSeriesPlayerIdBySide(series, side) {
+    const sideKey = String(side || '').toUpperCase();
+    if (sideKey === 'B') {
+      return series?.playerBId || series?.playerB?.id || series?.competitorBId || '';
+    }
+    return series?.playerAId || series?.playerA?.id || series?.competitorAId || '';
+  }
+
+  function getTournamentSeriesWinnerSide(series, winnerId = '') {
+    const winner = String(winnerId || getTournamentSeriesWinnerId(series) || '').trim();
+    if (!winner) return '';
+
+    const playerAId = String(getTournamentSeriesPlayerIdBySide(series, 'A') || '').trim();
+    const playerBId = String(getTournamentSeriesPlayerIdBySide(series, 'B') || '').trim();
+
+    if (winner && winner === playerAId) return 'A';
+    if (winner && winner === playerBId) return 'B';
+    return '';
+  }
+
+  function getTournamentSeriesClinchedDateKey(series) {
+    if (!series) return '';
+
+    const winnerId = String(getTournamentSeriesWinnerId(series) || '').trim();
+    if (!winnerId) return '';
+
+    const winnerSide = getTournamentSeriesWinnerSide(series, winnerId);
+    const winsNeeded = Number(series.winsNeeded) || Math.floor((Number(series.bestOf) || 3) / 2) + 1;
+
+    const playerAId = String(getTournamentSeriesPlayerIdBySide(series, 'A') || '').trim();
+    const playerBId = String(getTournamentSeriesPlayerIdBySide(series, 'B') || '').trim();
+
+    const results = Array.isArray(series.gameResults)
+      ? series.gameResults.slice()
+      : [];
+
+    results.sort((a, b) => {
+      const gameA = Number(a?.gameNumber ?? a?.seriesGameNumber ?? a?.game ?? 0);
+      const gameB = Number(b?.gameNumber ?? b?.seriesGameNumber ?? b?.game ?? 0);
+      if (gameA !== gameB) return gameA - gameB;
+      return getTournamentDateKey(a?.dateKey || a?.date || a?.dateISO || a?.recordedAtISO)
+        .localeCompare(getTournamentDateKey(b?.dateKey || b?.date || b?.dateISO || b?.recordedAtISO));
+    });
+
+    let winsA = 0;
+    let winsB = 0;
+
+    for (const result of results) {
+      const resultWinnerId = String(result?.winnerId || '').trim();
+      if (!resultWinnerId) continue;
+
+      if (resultWinnerId === playerAId) winsA += 1;
+      if (resultWinnerId === playerBId) winsB += 1;
+
+      const resultDateKey = getTournamentDateKey(
+        result?.dateKey ||
+        result?.date ||
+        result?.dateISO ||
+        result?.completedAtISO ||
+        result?.recordedAtISO ||
+        result?.updatedAtISO
+      );
+
+      if (winnerSide === 'A' && winsA >= winsNeeded && winsA > winsB) {
+        return resultDateKey;
+      }
+
+      if (winnerSide === 'B' && winsB >= winsNeeded && winsB > winsA) {
+        return resultDateKey;
+      }
+    }
+
+    return getTournamentDateKey(
+      series.completedDateKey ||
+      series.completedDate ||
+      series.winnerDateKey ||
+      series.winnerDate ||
+      series.completedAtISO
+    );
+  }
+
+  function isTournamentSeriesAdvancementRevealable(series) {
+    const clinchedDateKey = getTournamentSeriesClinchedDateKey(series);
+
+    // If we cannot prove the clinch happened today, do not hide it.
+    if (!clinchedDateKey) return true;
+
+    // Reveal only after the TaskPoints day has rolled over.
+    return clinchedDateKey < getTournamentCurrentRevealDayKey();
+  }
+
+  function getPreviousTournamentRoundId(roundId) {
+    const normalized = normalizeTournamentRoundId(roundId);
+    const order = ['play_in', 'round_of_32', 'sweet_16', 'quarterfinals', 'semifinals', 'finals', 'champion'];
+    const index = order.indexOf(normalized);
+    return index > 0 ? order[index - 1] : '';
+  }
+
+  function findTournamentSourceSeriesForTargetSlot(state, targetSeries, targetSlot) {
+    if (!state || !targetSeries) return null;
+
+    const targetSeriesId = String(targetSeries.id || '').trim();
+    const targetSlotKey = String(targetSlot || '').toUpperCase();
+    const allSeries = getTournamentSeasonSeries(state);
+
+    if (targetSeriesId && targetSlotKey) {
+      const metadataSource = allSeries.find((series) => {
+        const nextSeriesId = String(series?.nextSeriesId || series?.advancesToSeriesId || series?.advancesTo || '').trim();
+        const nextSlot = String(series?.nextSlot || series?.advancesToSlot || '').toUpperCase();
+        return nextSeriesId === targetSeriesId && nextSlot === targetSlotKey;
+      });
+
+      if (metadataSource) return metadataSource;
+    }
+
+    const targetRoundId = getTournamentSeriesRoundId(targetSeries);
+    const targetSeriesIndex = Number(targetSeries.seriesIndex ?? targetSeries.bracketIndex ?? targetSeries.sortOrder);
+    if (!Number.isFinite(targetSeriesIndex) || !targetSlotKey) return null;
+
+    // Special visual mapping for play-in winners entering the Round of 32.
+    if (targetRoundId === 'round_of_32' && targetSlotKey === 'B') {
+      if (targetSeriesIndex === 1) return getSeriesByRoundAndIndex(state.currentSeason, 'play_in', 1);
+      if (targetSeriesIndex === 9) return getSeriesByRoundAndIndex(state.currentSeason, 'play_in', 2);
+    }
+
+    const previousRoundId = getPreviousTournamentRoundId(targetRoundId);
+    if (!previousRoundId) return null;
+
+    const sourceSeriesIndex = targetSlotKey === 'B'
+      ? targetSeriesIndex * 2
+      : (targetSeriesIndex * 2) - 1;
+
+    return getSeriesByRoundAndIndex(state.currentSeason, previousRoundId, sourceSeriesIndex);
+  }
+
+  function shouldHideAdvancedTournamentPlayerUntilDayComplete(state, targetSeries, targetSlot, playerId) {
+    const player = String(playerId || '').trim();
+    if (!player) return false;
+
+    const sourceSeries = findTournamentSourceSeriesForTargetSlot(state, targetSeries, targetSlot);
+    if (!sourceSeries) return false;
+
+    const sourceWinnerId = String(getTournamentSeriesWinnerId(sourceSeries) || '').trim();
+    if (!sourceWinnerId || sourceWinnerId !== player) return false;
+
+    return !isTournamentSeriesAdvancementRevealable(sourceSeries);
+  }
+  
   function resolveTournamentPlayInPlaceholderPlayerId(state, placeholderKey) {
     if (!placeholderKey) return '';
 
@@ -805,8 +981,15 @@
     if (normalizeTournamentRoundId(roundId) === 'champion') {
       const finals = getTournamentSeriesByRound(state, 'finals')[0] || null;
       if (!finals) return { mapped: true, playerId: '' };
+
       applyTournamentSeriesSlotMetadata(slot, finals, 'winner');
-      return { mapped: true, playerId: finals.winnerId || '' };
+
+      const championId = getTournamentSeriesWinnerId(finals);
+      if (!championId || !isTournamentSeriesAdvancementRevealable(finals)) {
+        return { mapped: true, playerId: '' };
+      }
+
+      return { mapped: true, playerId: championId };
     }
 
     if (!roundId || !['A', 'B'].includes(competitorSlot)) return { mapped: false, playerId: '' };
@@ -815,7 +998,16 @@
     if (!series) return { mapped: true, playerId: '' };
 
     applyTournamentSeriesSlotMetadata(slot, series, competitorSlot);
-    return { mapped: true, playerId: getPlayerIdForSeriesSlot(series, competitorSlot) };
+
+    const playerId = getPlayerIdForSeriesSlot(series, competitorSlot);
+
+    if (shouldHideAdvancedTournamentPlayerUntilDayComplete(state, series, competitorSlot, playerId)) {
+      slot.setAttribute('data-advance-hidden-until-day-complete', 'true');
+      return { mapped: true, playerId: '' };
+    }
+
+    slot.removeAttribute('data-advance-hidden-until-day-complete');
+    return { mapped: true, playerId };
   }
 
   function resolveTournamentSlotPlayerId(state, slot, roundElement = null) {
