@@ -6193,7 +6193,7 @@ header,
   height: 3.9rem;
   padding: 0;
   border: 0;
-  border-radius: 0;
+  border-radius: 1rem;
   background: transparent;
   cursor: pointer;
   overflow: hidden;
@@ -6203,17 +6203,17 @@ header,
 .habitTagColorPicker::-webkit-color-swatch-wrapper {
   padding: 0;
   border: 0;
-  border-radius: 0;
+  border-radius: 1rem;
 }
 
 .habitTagColorPicker::-webkit-color-swatch {
   border: 0;
-  border-radius: 0;
+  border-radius: 1rem;
 }
 
 .habitTagColorPicker::-moz-color-swatch {
   border: 0;
-  border-radius: 0;
+  border-radius: 1rem;
 }
 
 .habitTagColorHex {
@@ -6245,11 +6245,11 @@ header,
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0.3rem 0.85rem;
-  min-height: 1.75rem;
+  padding: 0.38rem 0.9rem;
+  min-height: 1.9rem;
   border: 0;
-  border-radius: 0;
-  background: #ff1f1f;
+  border-radius: 999px;
+  background: #ef3030;
   color: #ffffff;
   font-size: 0.82rem;
   line-height: 1;
