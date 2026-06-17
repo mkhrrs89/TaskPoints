@@ -588,7 +588,7 @@
           </div>
         </summary>
         <div class="space-y-3 pt-3">
-          <div id="habitTagColorsList" class="grid gap-3"></div>
+          <div id="habitTagColorsList" class="habitTagColorGrid"></div>
           <div id="habitTagColorsEmpty" class="text-sm muted hidden">No habit or vice tags yet.</div>
           <p class="muted text-xs">The selected color is the brightest end of the bubble gradient.</p>
         </div>
@@ -2137,18 +2137,29 @@ ${summaryWithNotes}`)) return;
 
       tags.forEach(tag => {
         const row = document.createElement("div");
-        row.className = "flex flex-wrap items-center gap-3";
+        row.className = "habitTagColorCard";
 
         const storedColor = normalizeHexColor(state.habitTagColors?.[tag]);
         const colorValue = storedColor || "#ffffff";
 
         row.innerHTML = `
-          <div class="min-w-[140px] font-semibold text-sm">${escapeHtml(tag)}</div>
-          <div class="flex flex-wrap items-center gap-2">
-            <input type="color" class="color-input" data-color-input="${escapeHtml(tag)}" value="${colorValue}">
-            <input type="text" class="input w-32" data-hex-input="${escapeHtml(tag)}" placeholder="#RRGGBB" value="${storedColor || ''}">
-            <button type="button" class="btn btn-deny btn-toolbar nav-btn text-xs" data-delete-tag="${escapeHtml(tag)}">Delete tag</button>
-          </div>
+          <div class="habitTagColorName">${escapeHtml(tag)}</div>
+          <input
+            type="color"
+            class="habitTagColorPicker"
+            data-color-input="${escapeHtml(tag)}"
+            value="${colorValue}"
+            aria-label="Color for ${escapeHtml(tag)}"
+          >
+          <input
+            type="text"
+            class="habitTagColorHex"
+            data-hex-input="${escapeHtml(tag)}"
+            placeholder="#HEXCOD"
+            value="${storedColor || ''}"
+            aria-label="Hex color for ${escapeHtml(tag)}"
+          >
+          <button type="button" class="habitTagColorDelete" data-delete-tag="${escapeHtml(tag)}">Delete</button>
         `;
 
         list.appendChild(row);
