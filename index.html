@@ -4697,6 +4697,46 @@ function setPlayerColorSwatches(primaryEl, secondaryEl, colors = {}) {
   }
 }
 
+function hexToScoreboardRgba(hex, alpha = 0.35) {
+  const normalized = normalizeHexColor(hex);
+  if (!normalized) return `rgba(26, 56, 59, ${alpha})`;
+
+  const value = normalized.replace('#', '');
+  if (value.length !== 6) return `rgba(26, 56, 59, ${alpha})`;
+
+  const r = parseInt(value.slice(0, 2), 16);
+  const g = parseInt(value.slice(2, 4), 16);
+  const b = parseInt(value.slice(4, 6), 16);
+
+  if (![r, g, b].every(Number.isFinite)) return `rgba(26, 56, 59, ${alpha})`;
+
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function getScoreboardPrimaryColor(colors = {}) {
+  return normalizeHexColor(
+    colors.primaryColor ||
+    colors.colorPrimary ||
+    colors.mainColor ||
+    colors.colors?.primary ||
+    colors.colors?.[0]
+  ) || DEFAULT_MATCHUP_PRIMARY_COLOR;
+}
+
+function setHomeScoreboardGradientColors(yourColors = {}, opponentColors = {}) {
+  const card = document.querySelector('.home-scoreboard-card');
+  if (!card) return;
+
+  const yourPrimary = getScoreboardPrimaryColor(yourColors);
+  const opponentPrimary = getScoreboardPrimaryColor(opponentColors);
+
+  card.style.setProperty('--scoreboard-you-gradient-strong', hexToScoreboardRgba(yourPrimary, 0.44));
+  card.style.setProperty('--scoreboard-you-gradient-soft', hexToScoreboardRgba(yourPrimary, 0.18));
+
+  card.style.setProperty('--scoreboard-opp-gradient-strong', hexToScoreboardRgba(opponentPrimary, 0.44));
+  card.style.setProperty('--scoreboard-opp-gradient-soft', hexToScoreboardRgba(opponentPrimary, 0.18));
+}
+  
 function isHomeSeasonContextActive(stateArg, dateKeyStr) {
   const seasonControlActive = window.TaskPointsCore?.shouldUseSeasonMatchupControl
     ? TaskPointsCore.shouldUseSeasonMatchupControl(stateArg, dateKeyStr)
@@ -4999,7 +5039,9 @@ function renderTodaysMatchup(todayKeyStr, yourScore){
 
   if (!oppNameEl || !oppScoreEl || !yourScoreEl || !diffValueEl || !oppRecordEl || !yourRecordEl) return;
 
-  setPlayerColorSwatches(yourPrimarySwatchEl, yourSecondarySwatchEl, getPlayerById('YOU') || {});
+  const youPlayerColors = getPlayerById('YOU') || {};
+setPlayerColorSwatches(yourPrimarySwatchEl, yourSecondarySwatchEl, youPlayerColors);
+setHomeScoreboardGradientColors(youPlayerColors, {});
 
 const updateTodayScoreIsland = (value) => {
   const islandValueEl = $('todayScoreIslandValue');
@@ -5059,6 +5101,7 @@ const updateTodayScoreIsland = (value) => {
     yourRecordEl.textContent = `Record: ${getYourRecordText()}`;
     oppNameEl.textContent = '—';
     setPlayerColorSwatches(oppPrimarySwatchEl, oppSecondarySwatchEl);
+    setHomeScoreboardGradientColors(youPlayerColors, {});
     setOpponentScoreboardMeta(null);
     if (h2hEl) h2hEl.textContent = 'H2H: —';
     return;
@@ -5082,8 +5125,9 @@ const updateTodayScoreIsland = (value) => {
     ? visibleOpponentScoreForMatchup(todayKeyStr, oppId, safeOppScore)
     : safeOppScore;
 
-  const opponent = getPlayerById(oppId);
-  setPlayerColorSwatches(oppPrimarySwatchEl, oppSecondarySwatchEl, opponent || {});
+const opponent = getPlayerById(oppId);
+setPlayerColorSwatches(oppPrimarySwatchEl, oppSecondarySwatchEl, opponent || {});
+setHomeScoreboardGradientColors(youPlayerColors, opponent || {});
 
   oppNameEl.textContent = getPlayerNameById(oppId);
   oppScoreEl.textContent = visibleOppScore.toFixed(1);
