@@ -4730,10 +4730,10 @@ function setHomeScoreboardGradientColors(yourColors = {}, opponentColors = {}) {
   const yourPrimary = getScoreboardPrimaryColor(yourColors);
   const opponentPrimary = getScoreboardPrimaryColor(opponentColors);
 
-  card.style.setProperty('--scoreboard-you-gradient-strong', hexToScoreboardRgba(yourPrimary, 0.44));
+  card.style.setProperty('--scoreboard-you-gradient-strong', hexToScoreboardRgba(yourPrimary, 0.60));
   card.style.setProperty('--scoreboard-you-gradient-soft', hexToScoreboardRgba(yourPrimary, 0.18));
 
-  card.style.setProperty('--scoreboard-opp-gradient-strong', hexToScoreboardRgba(opponentPrimary, 0.44));
+  card.style.setProperty('--scoreboard-opp-gradient-strong', hexToScoreboardRgba(opponentPrimary, 0.60));
   card.style.setProperty('--scoreboard-opp-gradient-soft', hexToScoreboardRgba(opponentPrimary, 0.18));
 }
   
