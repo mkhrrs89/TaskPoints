@@ -481,6 +481,51 @@ body {
   position: relative;
   --scoreboard-name-height: calc(1.1em * 2);
 }
+/* Home main scoreboard: player-color side gradients */
+.home-scoreboard-card {
+  position: relative;
+  isolation: isolate;
+  --scoreboard-you-gradient-strong: rgba(26, 56, 59, 0.42);
+  --scoreboard-you-gradient-soft: rgba(26, 56, 59, 0.18);
+  --scoreboard-opp-gradient-strong: rgba(26, 56, 59, 0.42);
+  --scoreboard-opp-gradient-soft: rgba(26, 56, 59, 0.18);
+}
+
+.home-scoreboard-card::before,
+.home-scoreboard-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  border-radius: inherit;
+}
+
+.home-scoreboard-card::before {
+  background:
+    linear-gradient(
+      90deg,
+      var(--scoreboard-you-gradient-strong) 0%,
+      var(--scoreboard-you-gradient-soft) 28%,
+      transparent 53%
+    );
+}
+
+.home-scoreboard-card::after {
+  background:
+    linear-gradient(
+      270deg,
+      var(--scoreboard-opp-gradient-strong) 0%,
+      var(--scoreboard-opp-gradient-soft) 28%,
+      transparent 53%
+    );
+}
+
+.home-scoreboard-card .matchup-scoreboard {
+  position: relative;
+  z-index: 1;
+}
+
 /* --- Main scoreboard grid (END) ---------------------------------------- */
 
 
