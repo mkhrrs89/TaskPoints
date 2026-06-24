@@ -131,17 +131,10 @@
 
 .h2h-matrix td.h2h-record-cell{
   --h2h-cell-fill: rgba(148,163,184,0.10);
-  background-color: var(--h2h-cell-fill) !important;
-  background-image:
-    linear-gradient(
-      180deg,
-      rgba(255,255,255,0.08),
-      rgba(0,0,0,0.10)
-    ) !important;
+  background: var(--h2h-cell-fill) !important;
   color: #f8fafc;
   font-weight: 800;
   text-shadow: 0 1px 2px rgba(0,0,0,0.45);
-  box-shadow: inset 0 0 0 9999px var(--h2h-cell-fill);
 }
 
     
@@ -358,7 +351,8 @@ function getHeadToHeadCellStyle(record) {
 const fill = `rgba(${r}, ${g}, ${b}, 0.42)`;
 
 return ` style="--h2h-cell-fill:${fill};" data-win-pct="${Math.round(pct)}" title="Win%: ${pct.toFixed(1)}%"`;
-    
+}
+
     function ensurePairRecord(records, rowId, colId) {
       if (!records.has(rowId)) records.set(rowId, new Map());
       const rowMap = records.get(rowId);
@@ -462,7 +456,7 @@ const cells = orderedIds.map((colId) => {
   }
 
   const styleAttrs = getHeadToHeadCellStyle(value);
-  return `<td class="h2h-record-cell"${styleAttrs}>${text}</td>`;
+return `<td class="h2h-record-cell" ${styleAttrs.trim()}>${text}</td>`;
 }).join('');
 
         return `
