@@ -284,12 +284,33 @@
         return;
       }
 
-      let previousSection = '';
-      list.innerHTML = checks.map(c => {
-        const sectionHeader = c.section && c.section !== previousSection
-          ? `<div class="pt-4 first:pt-0"><div class="text-xs uppercase tracking-[0.2em] text-teal-200/80 font-semibold">${c.section}</div></div>`
+      const statusRank = {
+        FAIL: 0,
+        WARN: 1,
+        PASS: 2
+      };
+
+      const sortedChecks = checks
+        .map((check, originalIndex) => ({ check, originalIndex }))
+        .sort((a, b) => {
+          const statusA = statusRank[a.check?.status] ?? 99;
+          const statusB = statusRank[b.check?.status] ?? 99;
+          if (statusA !== statusB) return statusA - statusB;
+          return a.originalIndex - b.originalIndex;
+        })
+        .map(entry => entry.check);
+
+      let previousGroup = '';
+      list.innerHTML = sortedChecks.map(c => {
+        const groupKey = `${c.status || 'OTHER'}::${c.section || ''}`;
+        const sectionHeader = groupKey !== previousGroup
+          ? `<div class="pt-4 first:pt-0">
+              <div class="text-xs uppercase tracking-[0.2em] text-teal-200/80 font-semibold">
+                ${c.status === 'FAIL' ? 'Failed audits' : c.status === 'WARN' ? 'Warnings' : 'Passed audits'}${c.section ? ` · ${c.section}` : ''}
+              </div>
+            </div>`
           : '';
-        if (c.section) previousSection = c.section;
+        previousGroup = groupKey;
         const icon = c.status === 'PASS' ? '✅' : c.status === 'WARN' ? '⚠️' : '❌';
         const trace = c.trace ? `<div class="muted text-[11px]">${c.trace}</div>` : '';
         const delta = Number.isFinite(c.delta) ? `<div class="muted text-[11px]">Δ ${c.delta.toFixed(2)}</div>` : '';
