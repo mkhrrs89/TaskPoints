@@ -129,29 +129,21 @@
       background:transparent;
     }
 
-    .h2h-matrix td.h2h-record-cell{
-  --h2h-cell-bg: rgba(148,163,184,0.08);
-  --h2h-cell-border: rgba(148,163,184,0.25);
-  background:
+.h2h-matrix td.h2h-record-cell{
+  --h2h-cell-fill: rgba(148,163,184,0.10);
+  background-color: var(--h2h-cell-fill) !important;
+  background-image:
     linear-gradient(
       180deg,
-      rgba(255,255,255,0.10),
-      rgba(0,0,0,0.06)
-    ),
-    var(--h2h-cell-bg);
-  border-color: var(--h2h-cell-border);
+      rgba(255,255,255,0.08),
+      rgba(0,0,0,0.10)
+    ) !important;
   color: #f8fafc;
   font-weight: 800;
   text-shadow: 0 1px 2px rgba(0,0,0,0.45);
+  box-shadow: inset 0 0 0 9999px var(--h2h-cell-fill);
 }
 
-.h2h-matrix td.h2h-record-cell[data-win-pct="100"]{
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.10);
-}
-
-.h2h-matrix td.h2h-record-cell[data-win-pct="0"]{
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08);
-}
     
     @media (prefers-color-scheme: dark){
       .matrix-wrap{ border-color: rgba(51,65,85,0.8); }
@@ -162,9 +154,6 @@
       .h2h-matrix .corner-cell{ background: rgb(30,102,109); }
       .h2h-matrix td.diagonal{ background: rgba(15,23,42,0.6); }
       .h2h-matrix td.empty{ background: transparent; }
-      .h2h-matrix td.h2h-record-cell{background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(,0,0,0.10)),
-    var(--h2h-cell-bg);
-}
     }
 
     @media (max-width: 640px){
@@ -366,11 +355,9 @@ function getHeadToHeadCellStyle(record) {
   const g = mixColorChannel(orange.g, teal.g, t);
   const b = mixColorChannel(orange.b, teal.b, t);
 
-  const bg = `rgba(${r}, ${g}, ${b}, 0.78)`;
-  const border = `rgba(${r}, ${g}, ${b}, 0.95)`;
+const fill = `rgba(${r}, ${g}, ${b}, 0.42)`;
 
-  return ` style="--h2h-cell-bg:${bg}; --h2h-cell-border:${border};" data-win-pct="${Math.round(pct)}" title="Win%: ${pct.toFixed(1)}%"`;
-}
+return ` style="--h2h-cell-fill:${fill};" data-win-pct="${Math.round(pct)}" title="Win%: ${pct.toFixed(1)}%"`;
     
     function ensurePairRecord(records, rowId, colId) {
       if (!records.has(rowId)) records.set(rowId, new Map());
