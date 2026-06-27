@@ -643,7 +643,7 @@
       const issues = [];
       if (!Number.isFinite(youScore)) issues.push('Missing your score.');
       if (!Number.isFinite(oppTarget)) issues.push('Missing opponent target score.');
-      if (!oppResult.hasSchedule) issues.push('Opponent drip schedule missing.');
+      // Opponent drip schedules are optional. If missing, the app uses the full opponent target score.
 
       return {
         youScore,
@@ -680,7 +680,7 @@
       const issues = [];
       if (!Number.isFinite(youScore)) issues.push('Missing your score.');
       if (!Number.isFinite(oppTarget)) issues.push('Missing opponent target score.');
-      if (!oppResult.hasSchedule) issues.push('Opponent drip schedule missing.');
+      // Opponent drip schedules are optional. If missing, the app uses the full opponent target score.
 
       return {
         youScore,
@@ -3263,9 +3263,9 @@ const actualTotal = round2(Number(derivedActualTotal) || 0);
           ? Number(matchupForDrip.scoreA)
           : Number(matchupForDrip.scoreB);
         dripSchedule = findOpponentDripSchedule(state, dateKey, oppId, dripTotalTarget);
-        if (!dripSchedule) {
-          dripIssues.push('No matching opponent drip schedule found.');
-        }
+if (!dripSchedule) {
+  dripTrace = 'state.opponentDripSchedules optional; none found';
+}
       }
       if (dripSchedule) {
         dripTrace = `state.opponentDripSchedules → ${dripSchedule.id || 'schedule'}`;
