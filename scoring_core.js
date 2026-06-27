@@ -1540,7 +1540,7 @@ const seasonGateOpen = directSeason
   function getFeaturedSeasonMatchup(season, dateKeyStr, state = {}) {
     const entries = getSeasonSeriesEntries(season).filter((series) => series && !isSeasonSeriesComplete(series) && series.playerAId && series.playerBId);
     if (!entries.length) return null;
-    const activeRoundId = getCurrentSeasonRoundIdForDate(dateKeyStr) || '';
+    const activeRoundId = getCurrentSeasonRoundIdForDate(dateKeyStr, season) || '';
     const todayMatchups = (Array.isArray(state?.matchups) ? state.matchups : []).filter((matchup) => matchup?.matchupType === 'tournament' && matchup?.dateKey === dateKeyStr && matchup?.seriesId);
     const todaySeriesIds = new Set(todayMatchups.map((matchup) => matchup.seriesId));
     const candidates = entries.map((series) => ({
@@ -2491,7 +2491,7 @@ function shouldUseSeasonMatchupControl(state, dateKeyStr) {
 
     const preparedSeason = prepareSeasonForDailySlate(season, dateKeyStr, { ...options, state: normalized, currentState: normalized });
     const slateSeason = preparedSeason.season || season;
-    if (preparedSeason.changed && preparedSeason.activatedSeriesIds.length) warnings.push(`Activated ${preparedSeason.activatedSeriesIds.length} ready ${getSeasonDisplayName(getCurrentSeasonRoundIdForDate(dateKeyStr)) || 'Season'} series for slate generation.`);
+    if (preparedSeason.changed && preparedSeason.activatedSeriesIds.length) warnings.push(`Activated ${preparedSeason.activatedSeriesIds.length} ready ${getSeasonDisplayName(getCurrentSeasonRoundIdForDate(dateKeyStr, slateSeason), slateSeason) || 'Season'} series for slate generation.`);
     if (Array.isArray(preparedSeason.warnings)) warnings.push(...preparedSeason.warnings);
 
     const playerPool = getActiveSeasonPlayerPool(normalized);
@@ -3400,7 +3400,7 @@ function shouldUseSeasonMatchupControl(state, dateKeyStr) {
     const type = String(raw?.matchupType || '').toLowerCase();
     if (type === 'exhibition') return false;
 
-    const dateRound = getSeasonRoundForDate(date)?.id || '';
+    const dateRound = getSeasonRoundForDate(date, season)?.id || '';
     if (!dateRound) return false;
 
     if (series?.roundId === dateRound) return true;
