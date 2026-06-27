@@ -7,6 +7,21 @@
   const SEASON_ONE_MONTH_KEY = '2026-06';
   const SEASON_ONE_START_DATE = '2026-06-01';
   const SEASON_ONE_END_DATE = '2026-06-30';
+  const SEASON_TWO_ID = 'season_2_august_2026';
+const SEASON_TWO_NAME = 'Season 2';
+const SEASON_TWO_LABEL = 'August 2026 TaskPoints Championship';
+const SEASON_TWO_MONTH_KEY = '2026-08';
+const SEASON_TWO_START_DATE = '2026-08-01';
+const SEASON_TWO_END_DATE = '2026-08-31';
+
+const SEASON_TWO_DATE_WINDOWS = [
+  { id: 'play_in', startDate: '2026-08-01', endDate: '2026-08-03', displayName: 'Play-In', bestOf: 3 },
+  { id: 'round_of_32', startDate: '2026-08-04', endDate: '2026-08-08', displayName: 'Round of 32', bestOf: 5 },
+  { id: 'sweet_16', startDate: '2026-08-09', endDate: '2026-08-13', displayName: 'Sweet 16', bestOf: 5 },
+  { id: 'quarterfinals', startDate: '2026-08-14', endDate: '2026-08-18', displayName: 'Quarterfinals', bestOf: 5 },
+  { id: 'semifinals', startDate: '2026-08-19', endDate: '2026-08-23', displayName: 'Semifinals', bestOf: 5 },
+  { id: 'finals', startDate: '2026-08-25', endDate: '2026-08-31', displayName: 'Finals', bestOf: 7 }
+];
   const AUTO_SEED_MODE = 'auto';
   const MANUAL_SEED_MODE = 'manual';
   const seasonImageUrlCache = new Map();
@@ -424,20 +439,31 @@
     const warnings = [];
     if (seeds.length !== 34) warnings.push({ code: 'non_34_player_pool', message: 'This format was designed for 34 players.' });
     const canCreateOfficialBracket = seeds.length === 34;
-    const draftOptions = {
-      name,
-      label: name,
-      monthKey,
-      startDate,
-      endDate,
-      status: 'preview',
-      seedMode: MANUAL_SEED_MODE,
-      playerPool,
-      seeds,
-      bracket: canCreateOfficialBracket ? buildProjectedBracket(seeds) : { type: 'manual_preview_shell', rounds: [] },
-      warnings: warnings.concat(projected.warnings || []),
-      meta: { manualSeason: true, canCreateOfficialBracket, autoAdaptedBracketAvailable: false, previewOnly: !canCreateOfficialBracket }
-    };
+const isAugustSeasonTwo = monthKey === SEASON_TWO_MONTH_KEY;
+const dateWindows = isAugustSeasonTwo ? SEASON_TWO_DATE_WINDOWS.map((round) => ({ ...round })) : [];
+
+const draftOptions = {
+  id: isAugustSeasonTwo ? SEASON_TWO_ID : undefined,
+  name: isAugustSeasonTwo ? SEASON_TWO_NAME : name,
+  label: isAugustSeasonTwo ? SEASON_TWO_LABEL : name,
+  monthKey,
+  startDate,
+  endDate,
+  dateWindows,
+  status: 'preview',
+  seedMode: MANUAL_SEED_MODE,
+  playerPool,
+  seeds,
+  bracket: canCreateOfficialBracket ? buildProjectedBracket(seeds) : { type: 'manual_preview_shell', rounds: [] },
+  warnings: warnings.concat(projected.warnings || []),
+  meta: {
+    manualSeason: true,
+    canCreateOfficialBracket,
+    autoAdaptedBracketAvailable: false,
+    previewOnly: !canCreateOfficialBracket,
+    bufferDays: isAugustSeasonTwo ? ['2026-08-24'] : []
+  }
+};
     if (typeof core.createEmptySeasonDraft === 'function') return core.createEmptySeasonDraft(draftOptions);
     return draftOptions;
   }
@@ -1384,9 +1410,9 @@
         </div>
         <div data-create-season-panel hidden>
           <div class="season-rebuild-actions mt-3">
-            <label class="muted text-xs">Season name <input class="season-admin-input" type="text" data-create-season-name value="Manual Season Championship"></label>
-            <label class="muted text-xs">Start date <input class="season-admin-input" type="date" data-create-season-start value="${escapeHtml(getDateKey(new Date()))}"></label>
-            <label class="muted text-xs">End date <input class="season-admin-input" type="date" data-create-season-end value="${escapeHtml(getDateKey(new Date()))}"></label>
+<label class="muted text-xs">Season name <input class="season-admin-input" type="text" data-create-season-name value="Season 2"></label>
+<label class="muted text-xs">Start date <input class="season-admin-input" type="date" data-create-season-start value="2026-08-01"></label>
+<label class="muted text-xs">End date <input class="season-admin-input" type="date" data-create-season-end value="2026-08-31"></label>
           </div>
           <p class="muted text-sm mt-3">Player pool review: all active players are included by default (${escapeHtml(count)} active players).</p>
           ${count !== 34 ? '<p class="season-manual-banner">This format was designed for 34 players. Review/edit the player pool to 34 players, or create a preview shell with warning; invalid official brackets will not be created.</p>' : ''}
