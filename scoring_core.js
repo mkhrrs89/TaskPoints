@@ -325,6 +325,9 @@ function getSeasonDateWindowsForStateOrSeason(stateOrSeason) {
       championSummary: isSeasonObject(season.championSummary) ? { ...season.championSummary } : null,
       finalPlacements: normalizeSeasonArray(season.finalPlacements),
       warnings: normalizeSeasonArray(season.warnings),
+      dateWindows: Array.isArray(season.dateWindows)
+  ? season.dateWindows.map((round) => ({ ...round }))
+  : [],
       meta: { seasonMatchupControlEnabled: false, ...normalizeSeasonObjectMap(season.meta) }
     };
   }
@@ -1805,13 +1808,15 @@ function getCurrentSeasonRoundIdForDate(dateKey, seasonOrState = null) {
   }
 
 
-  function getSeasonManualResultDateKey(series, gameNumber) {
-    const round = JUNE_2026_SEASON_DATE_WINDOWS.find((item) => item.id === series?.roundId);
-    if (!round) return '';
-    const offset = Math.max(0, Math.floor(Number(gameNumber) || 1) - 1);
-    const candidate = adjacentLocalDateKey(round.startDate, offset);
-    return candidate && candidate <= round.endDate ? candidate : round.endDate;
-  }
+function getSeasonManualResultDateKey(series, gameNumber, season = null) {
+  const seasonRef = season || { id: series?.seasonId || '', monthKey: String(series?.seasonId || '').includes('august_2026') ? '2026-08' : DEFAULT_SEASON_MONTH_KEY };
+  const round = getSeasonDateWindowsForSeason(seasonRef).find((item) => item.id === series?.roundId);
+  if (!round) return '';
+
+  const offset = Math.max(0, Math.floor(Number(gameNumber) || 1) - 1);
+  const candidate = adjacentLocalDateKey(round.startDate, offset);
+  return candidate && candidate <= round.endDate ? candidate : round.endDate;
+}
 
   function isSyntheticSeasonRepairResult(result) {
     if (!result) return false;
