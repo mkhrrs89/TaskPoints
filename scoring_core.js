@@ -193,16 +193,42 @@
 
 
   const SEASON_STATUSES = ['preview', 'locked', 'active', 'champion_crowned', 'finalized'];
-  const JUNE_2026_SEASON_DATE_WINDOWS = [
-    { id: 'play_in', startDate: '2026-06-01', endDate: '2026-06-03', displayName: 'Play-In', bestOf: 3 },
-    { id: 'round_of_32', startDate: '2026-06-04', endDate: '2026-06-08', displayName: 'Round of 32', bestOf: 5 },
-    { id: 'sweet_16', startDate: '2026-06-09', endDate: '2026-06-13', displayName: 'Sweet 16', bestOf: 5 },
-    { id: 'quarterfinals', startDate: '2026-06-14', endDate: '2026-06-18', displayName: 'Quarterfinals', bestOf: 5 },
-    { id: 'semifinals', startDate: '2026-06-19', endDate: '2026-06-23', displayName: 'Semifinals', bestOf: 5 },
-    { id: 'finals', startDate: '2026-06-24', endDate: '2026-06-30', displayName: 'Finals', bestOf: 7 }
-  ];
-  const DEFAULT_SEASON_NAME = 'June 2026 TaskPoints Championship';
-  const DEFAULT_SEASON_MONTH_KEY = '2026-06';
+const JUNE_2026_SEASON_DATE_WINDOWS = [
+  { id: 'play_in', startDate: '2026-06-01', endDate: '2026-06-03', displayName: 'Play-In', bestOf: 3 },
+  { id: 'round_of_32', startDate: '2026-06-04', endDate: '2026-06-08', displayName: 'Round of 32', bestOf: 5 },
+  { id: 'sweet_16', startDate: '2026-06-09', endDate: '2026-06-13', displayName: 'Sweet 16', bestOf: 5 },
+  { id: 'quarterfinals', startDate: '2026-06-14', endDate: '2026-06-18', displayName: 'Quarterfinals', bestOf: 5 },
+  { id: 'semifinals', startDate: '2026-06-19', endDate: '2026-06-23', displayName: 'Semifinals', bestOf: 5 },
+  { id: 'finals', startDate: '2026-06-24', endDate: '2026-06-30', displayName: 'Finals', bestOf: 7 }
+];
+
+const AUGUST_2026_SEASON_DATE_WINDOWS = [
+  { id: 'play_in', startDate: '2026-08-01', endDate: '2026-08-03', displayName: 'Play-In', bestOf: 3 },
+  { id: 'round_of_32', startDate: '2026-08-04', endDate: '2026-08-08', displayName: 'Round of 32', bestOf: 5 },
+  { id: 'sweet_16', startDate: '2026-08-09', endDate: '2026-08-13', displayName: 'Sweet 16', bestOf: 5 },
+  { id: 'quarterfinals', startDate: '2026-08-14', endDate: '2026-08-18', displayName: 'Quarterfinals', bestOf: 5 },
+  { id: 'semifinals', startDate: '2026-08-19', endDate: '2026-08-23', displayName: 'Semifinals', bestOf: 5 },
+  { id: 'finals', startDate: '2026-08-25', endDate: '2026-08-31', displayName: 'Finals', bestOf: 7 }
+];
+
+const DEFAULT_SEASON_NAME = 'June 2026 TaskPoints Championship';
+const DEFAULT_SEASON_MONTH_KEY = '2026-06';
+
+  function getSeasonDateWindowsForSeason(season) {
+  const custom = Array.isArray(season?.dateWindows) ? season.dateWindows : [];
+  if (custom.length) return custom.map((round) => ({ ...round }));
+
+  if (season?.monthKey === '2026-08' || String(season?.id || '').includes('2026-08')) {
+    return AUGUST_2026_SEASON_DATE_WINDOWS.map((round) => ({ ...round }));
+  }
+
+  return JUNE_2026_SEASON_DATE_WINDOWS.map((round) => ({ ...round }));
+}
+
+function getSeasonDateWindowsForStateOrSeason(stateOrSeason) {
+  const season = stateOrSeason?.currentSeason || stateOrSeason || null;
+  return getSeasonDateWindowsForSeason(season);
+}
 
   function isSeasonObject(value) {
     return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -337,15 +363,15 @@
     return typeof stored === 'string' && stored ? stored : '';
   }
 
-  function getRoundScheduledGameNumberForDate(season, roundId, dateKeyStr) {
-    const round = JUNE_2026_SEASON_DATE_WINDOWS.find((item) => item.id === roundId);
-    const startDate = getSeasonRoundActualStartDateKey(season, roundId) || round?.startDate || '';
-    if (!round || !startDate || !dateKeyStr || dateKeyStr < startDate || dateKeyStr > round.endDate) return null;
-    const offset = daysBetweenDateKeys(startDate, dateKeyStr);
-    if (!Number.isFinite(offset) || offset < 0) return null;
-    const gameNumber = offset + 1;
-    return gameNumber <= round.bestOf ? gameNumber : null;
-  }
+function getRoundScheduledGameNumberForDate(season, roundId, dateKeyStr) {
+  const round = getSeasonDateWindowsForSeason(season).find((item) => item.id === roundId);
+  const startDate = getSeasonRoundActualStartDateKey(season, roundId) || round?.startDate || '';
+  if (!round || !startDate || !dateKeyStr || dateKeyStr < startDate || dateKeyStr > round.endDate) return null;
+  const offset = daysBetweenDateKeys(startDate, dateKeyStr);
+  if (!Number.isFinite(offset) || offset < 0) return null;
+  const gameNumber = offset + 1;
+  return gameNumber <= round.bestOf ? gameNumber : null;
+}
 
 
   function normalizeSeasonEvidenceDateKey(value) {
@@ -357,20 +383,19 @@
     return date && !Number.isNaN(date.getTime()) ? key : '';
   }
 
-  function isValidSeasonRoundStartDateKey(roundId, dateKeyStr) {
-    const key = normalizeSeasonEvidenceDateKey(dateKeyStr);
-    if (!key) return false;
-    const round = JUNE_2026_SEASON_DATE_WINDOWS.find((item) => item.id === roundId);
-    return Boolean(round && key >= round.startDate && key <= round.endDate);
-  }
+function isValidSeasonRoundStartDateKey(roundId, dateKeyStr, season = null) {
+  const key = normalizeSeasonEvidenceDateKey(dateKeyStr);
+  if (!key) return false;
+  const round = getSeasonDateWindowsForSeason(season).find((item) => item.id === roundId);
+  return Boolean(round && key >= round.startDate && key <= round.endDate);
+}
 
   function inferSeasonRoundActualStartDateKey(season, roundId, options = {}) {
-    const round = JUNE_2026_SEASON_DATE_WINDOWS.find((item) => item.id === roundId);
+    const round = getSeasonDateWindowsForSeason(season).find((item) => item.id === roundId);
     if (!round || !season?.series) return '';
 
     const existingStart = normalizeSeasonEvidenceDateKey(season?.meta?.roundStartDateKeys?.[roundId]);
-    if (isValidSeasonRoundStartDateKey(roundId, existingStart)) return existingStart;
-
+if (isValidSeasonRoundStartDateKey(roundId, existingStart, season)) return existingStart;
     const roundSeries = Object.values(season.series || {}).filter((series) => series?.roundId === roundId);
     const evidenceDates = [];
     const addEvidenceDate = (rawDate) => {
@@ -427,36 +452,37 @@
     return '';
   }
 
-  function getSeasonRoundDefs() {
-    return JUNE_2026_SEASON_DATE_WINDOWS.map((round) => ({ ...round }));
-  }
+function getSeasonRoundDefs(seasonOrState = null) {
+  return getSeasonDateWindowsForStateOrSeason(seasonOrState).map((round) => ({ ...round }));
+}
 
   function getSeasonDateWindows() {
     return getSeasonRoundDefs();
   }
 
-  function getSeasonRoundForDate(dateKey) {
-    if (typeof dateKey !== 'string') return null;
-    return JUNE_2026_SEASON_DATE_WINDOWS.find((round) => dateKey >= round.startDate && dateKey <= round.endDate) || null;
-  }
+function getSeasonRoundForDate(dateKey, seasonOrState = null) {
+  if (typeof dateKey !== 'string') return null;
+  return getSeasonDateWindowsForStateOrSeason(seasonOrState)
+    .find((round) => dateKey >= round.startDate && dateKey <= round.endDate) || null;
+}
 
-  function getSeasonSeriesLength(roundId) {
-    const round = JUNE_2026_SEASON_DATE_WINDOWS.find((item) => item.id === roundId);
-    return round ? round.bestOf : null;
-  }
+function getSeasonSeriesLength(roundId, seasonOrState = null) {
+  const round = getSeasonDateWindowsForStateOrSeason(seasonOrState).find((item) => item.id === roundId);
+  return round ? round.bestOf : null;
+}
 
-  function getSeasonDisplayName(roundId) {
-    const round = JUNE_2026_SEASON_DATE_WINDOWS.find((item) => item.id === roundId);
-    return round ? round.displayName : '';
-  }
+function getSeasonDisplayName(roundId, seasonOrState = null) {
+  const round = getSeasonDateWindowsForStateOrSeason(seasonOrState).find((item) => item.id === roundId);
+  return round ? round.displayName : '';
+}
 
-  function isSeasonDate(dateKey) {
-    return Boolean(getSeasonRoundForDate(dateKey));
-  }
+function isSeasonDate(dateKey, seasonOrState = null) {
+  return Boolean(getSeasonRoundForDate(dateKey, seasonOrState));
+}
 
-  function isJuneSeasonDate(dateKey) {
-    return isSeasonDate(dateKey);
-  }
+function isJuneSeasonDate(dateKey) {
+  return isSeasonDate(dateKey, { monthKey: DEFAULT_SEASON_MONTH_KEY });
+}
 
   function buildSeasonId(name, monthKey) {
     const slug = String(name || 'season')
@@ -494,7 +520,8 @@
       championSummary: isSeasonObject(options.championSummary) ? { ...options.championSummary } : null,
       finalPlacements: Array.isArray(options.finalPlacements) ? options.finalPlacements.slice() : [],
       warnings: Array.isArray(options.warnings) ? options.warnings.slice() : [],
-      meta: { seasonMatchupControlEnabled: false, ...(isSeasonObject(options.meta) ? options.meta : {}) }
+      dateWindows: Array.isArray(options.dateWindows) ? options.dateWindows.map((round) => ({ ...round })) : [],
+meta: { seasonMatchupControlEnabled: false, ...(isSeasonObject(options.meta) ? options.meta : {}) }
     };
     return normalizeSeasonState(draft);
   }
@@ -537,16 +564,18 @@
     };
   }
 
-  function officialRoundDef(roundId) {
-    return JUNE_2026_SEASON_DATE_WINDOWS.find((round) => round.id === roundId) || { id: roundId, displayName: getSeasonDisplayName(roundId) || roundId, bestOf: 5 };
-  }
+function officialRoundDef(roundId, seasonOrOptions = null) {
+  return getSeasonDateWindowsForStateOrSeason(seasonOrOptions)
+    .find((round) => round.id === roundId)
+    || { id: roundId, displayName: getSeasonDisplayName(roundId, seasonOrOptions) || roundId, bestOf: 5 };
+}
 
   function officialSeriesId(seasonId, roundId, seriesIndex) {
     return `${seasonId}_${roundId}_${seriesIndex}`;
   }
 
   function createOfficialSeries(options) {
-    const round = officialRoundDef(options.roundId);
+    const round = officialRoundDef(options.roundId, options);
     const bestOf = Number(options.bestOf || round.bestOf || 5);
     const now = options.nowISO || seasonNowISO(options);
     const playerA = options.playerA || null;
@@ -643,7 +672,7 @@
     [[31, 34], [32, 33]].forEach((pair, index) => {
       add(createOfficialSeries({
         id: officialSeriesId(seasonId, 'play_in', index + 1), seasonId, roundId: 'play_in', roundIndex: 0, seriesIndex: index + 1,
-        bestOf: 3, status: 'active', playerA: seedEntryForOfficial(seeds, pair[0]), playerB: seedEntryForOfficial(seeds, pair[1]), nowISO: now
+        bestOf: getSeasonSeriesLength('play_in', options) || 3, status: 'active', playerA: seedEntryForOfficial(seeds, pair[0]), playerB: seedEntryForOfficial(seeds, pair[1]), nowISO: now
       }));
     });
 
@@ -653,7 +682,7 @@
       const playerB = typeof pair[1] === 'number' ? seedEntryForOfficial(seeds, pair[1]) : null;
       add(createOfficialSeries({
         id: officialSeriesId(seasonId, 'round_of_32', index + 1), seasonId, roundId: 'round_of_32', roundIndex: 1, seriesIndex: index + 1,
-        bestOf: 5, status: 'pending', playerA, playerB, placeholderA: playerA ? '' : 'Awaiting winner',
+        bestOf: getSeasonSeriesLength('round_of_32', options) || 5, status: 'pending', playerA, playerB, placeholderA: playerA ? '' : 'Awaiting winner',
         placeholderB: pair[1] === 'play_in_lowest' ? 'Lowest Play-In winner' : (pair[1] === 'play_in_other' ? 'Other Play-In winner' : (playerB ? '' : 'Awaiting winner')),
         nowISO: now, ...next
       }));
@@ -668,7 +697,7 @@
         const priorB = officialSeriesId(seasonId, priorRound, index * 2);
         add(createOfficialSeries({
           id: officialSeriesId(seasonId, roundId, index), seasonId, roundId, roundIndex: roundOffset + 2, seriesIndex: index,
-          bestOf: roundId === 'finals' ? 7 : 5, status: 'pending', placeholderA: `Winner of Series ${priorA}`, placeholderB: `Winner of Series ${priorB}`,
+         bestOf: getSeasonSeriesLength(roundId, options) || (roundId === 'finals' ? 7 : 5), status: 'pending', placeholderA: `Winner of Series ${priorA}`, placeholderB: `Winner of Series ${priorB}`,
           nowISO: now, ...next
         }));
       }
@@ -1148,12 +1177,12 @@
     return { ok: true, season: nextSeason, changed };
   }
 
-  function getCurrentSeasonRoundIdForDate(dateKey) {
-    return getSeasonRoundForDate(dateKey)?.id || '';
-  }
+function getCurrentSeasonRoundIdForDate(dateKey, seasonOrState = null) {
+  return getSeasonRoundForDate(dateKey, seasonOrState)?.id || '';
+}
 
   function getActiveSeasonSeriesForDate(season, dateKey) {
-    const roundId = getCurrentSeasonRoundIdForDate(dateKey);
+    const roundId = getCurrentSeasonRoundIdForDate(dateKey, season);
     if (!roundId || !season?.series) return [];
 
     const currentRoundIndex = OFFICIAL_SEASON_ROUND_ORDER.indexOf(roundId);
@@ -2066,21 +2095,20 @@
       || id.includes('2026-06');
   }
 
-  function shouldUseSeasonMatchupControl(state, dateKeyStr) {
-    const normalized = normalizeState(state || {});
-    const season = normalized.currentSeason;
-    const seriesEntries = Object.values(season?.series || {});
-    const playerPool = getActiveSeasonPlayerPool(normalized);
-    return Boolean(
-      season
-      && isSeasonOneJune2026Compatible(season)
-      && ['locked', 'active', 'champion_crowned'].includes(season.status)
-      && season.meta?.seasonMatchupControlEnabled === true
-      && isJuneSeasonDate(dateKeyStr)
-      && seriesEntries.length > 0
-      && playerPool.length >= 2
-    );
-  }
+function shouldUseSeasonMatchupControl(state, dateKeyStr) {
+  const normalized = normalizeState(state || {});
+  const season = normalized.currentSeason;
+  const seriesEntries = Object.values(season?.series || {});
+  const playerPool = getActiveSeasonPlayerPool(normalized);
+  return Boolean(
+    season
+    && ['locked', 'active', 'champion_crowned'].includes(season.status)
+    && season.meta?.seasonMatchupControlEnabled === true
+    && isSeasonDate(dateKeyStr, season)
+    && seriesEntries.length > 0
+    && playerPool.length >= 2
+  );
+}
 
   function getPairingKey(playerAId, playerBId) {
     return normalizePairIds(playerAId, playerBId).join('|');
