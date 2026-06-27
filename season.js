@@ -575,8 +575,8 @@ const draftOptions = {
     return state;
   }
 
-  function renderFormatList() {
-    const rounds = getRoundDefs(season);
+function renderFormatList(season = null) {
+  const rounds = getRoundDefs(season);
     return `
       <div class="season-format-grid" aria-label="Planned Season Championship format">
         ${rounds.map((round) => `
@@ -1095,7 +1095,7 @@ function getRoundForToday(season, dateKey = getEffectiveDateKey()) {
   function renderOfficialBracket(season, options = {}) {
     const dateKey = options.dateKey || getEffectiveDateKey();
     const activeRoundId = getRoundForToday(season, dateKey)?.id || '';
-    const rounds = getRoundDefs();
+    const rounds = getRoundDefs(season);
     return `
       <section class="glass season-card">
         <h3 class="season-section-title">Round-by-Round Championship</h3>
