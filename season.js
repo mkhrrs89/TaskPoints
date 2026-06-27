@@ -201,17 +201,17 @@ const SEASON_TWO_DATE_WINDOWS = [
     return parts.join(' • ') || 'Season tools will appear here in the next update.';
   }
 
-  function getRoundDefs() {
-    if (typeof core.getSeasonRoundDefs === 'function') return core.getSeasonRoundDefs();
-    return [
-      { id: 'play_in', displayName: 'Play-In', bestOf: 3 },
-      { id: 'round_of_32', displayName: 'Round of 32', bestOf: 5 },
-      { id: 'sweet_16', displayName: 'Sweet 16', bestOf: 5 },
-      { id: 'quarterfinals', displayName: 'Quarterfinals', bestOf: 5 },
-      { id: 'semifinals', displayName: 'Semifinals', bestOf: 5 },
-      { id: 'finals', displayName: 'Finals', bestOf: 7 }
-    ];
-  }
+function getRoundDefs(season = null) {
+  if (typeof core.getSeasonRoundDefs === 'function') return core.getSeasonRoundDefs(season);
+  return [
+    { id: 'play_in', displayName: 'Play-In', bestOf: 3 },
+    { id: 'round_of_32', displayName: 'Round of 32', bestOf: 5 },
+    { id: 'sweet_16', displayName: 'Sweet 16', bestOf: 5 },
+    { id: 'quarterfinals', displayName: 'Quarterfinals', bestOf: 5 },
+    { id: 'semifinals', displayName: 'Semifinals', bestOf: 5 },
+    { id: 'finals', displayName: 'Finals', bestOf: 7 }
+  ];
+}
 
   function normalizeSeedSourceResult(state) {
     if (typeof core.getSeasonSeedSourceRows === 'function') {
@@ -576,7 +576,7 @@ const draftOptions = {
   }
 
   function renderFormatList() {
-    const rounds = getRoundDefs();
+    const rounds = getRoundDefs(season);
     return `
       <div class="season-format-grid" aria-label="Planned Season Championship format">
         ${rounds.map((round) => `
@@ -985,10 +985,12 @@ const draftOptions = {
     return getRoundDefs().find((round) => round.id === roundId)?.displayName || roundId || 'Round';
   }
 
-  function getRoundForToday(season, dateKey = getEffectiveDateKey()) {
-    if (typeof core.getSeasonRoundForDate === 'function') return core.getSeasonRoundForDate(dateKey);
-    return getRoundDefs().find((round) => dateKey >= round.startDate && dateKey <= round.endDate) || null;
+function getRoundForToday(season, dateKey = getEffectiveDateKey()) {
+  if (typeof core.getSeasonRoundForDate === 'function') {
+    return core.getSeasonRoundForDate(dateKey, season);
   }
+  return getRoundDefs(season).find((round) => dateKey >= round.startDate && dateKey <= round.endDate) || null;
+}
 
   function getSeriesCompactTitle(series) {
     if (typeof core.getSeriesCompactTitle === 'function') return core.getSeriesCompactTitle(series);
