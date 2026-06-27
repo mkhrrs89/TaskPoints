@@ -1212,7 +1212,7 @@ function getCurrentSeasonRoundIdForDate(dateKey, seasonOrState = null) {
   function prepareSeasonForDailySlate(season, dateKeyStr, options = {}) {
     const normalized = normalizeSeasonState(season);
     if (!normalized) return { season: normalized, changed: false, activatedSeriesIds: [], warnings: [] };
-    const roundId = getCurrentSeasonRoundIdForDate(dateKeyStr);
+    const roundId = getCurrentSeasonRoundIdForDate(dateKeyStr, normalized);
     if (!roundId || !normalized.series) return { season: normalized, changed: false, activatedSeriesIds: [], warnings: [] };
     const now = seasonNowISO(options);
     const nextSeries = { ...(normalized.series || {}) };
