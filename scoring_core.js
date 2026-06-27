@@ -1285,9 +1285,9 @@ function getCurrentSeasonRoundIdForDate(dateKey, seasonOrState = null) {
       ? normalizeSeasonState(stateOrSeason)
       : null;
     const normalized = directSeason ? null : normalizeState(stateOrSeason || {});
-    const seasonGateOpen = directSeason
-      ? directSeason.meta?.seasonMatchupControlEnabled === true && isJuneSeasonDate(dateKeyStr)
-      : shouldUseSeasonMatchupControl(normalized, dateKeyStr);
+const seasonGateOpen = directSeason
+  ? directSeason.meta?.seasonMatchupControlEnabled === true && isSeasonDate(dateKeyStr, directSeason)
+  : shouldUseSeasonMatchupControl(normalized, dateKeyStr);
     if (!seasonGateOpen) return '';
 
     const prepared = prepareSeasonForDailySlate(directSeason || normalized.currentSeason, dateKeyStr, normalized ? { state: normalized, currentState: normalized } : {});
@@ -1309,7 +1309,12 @@ function getCurrentSeasonRoundIdForDate(dateKey, seasonOrState = null) {
         Array.isArray(series.gameResults) ? series.gameResults.map((result) => `${result.matchupId || ''}:${result.dateKey || ''}:${result.winnerId || ''}:${result.playerAScore ?? ''}:${result.playerBScore ?? ''}`).join(',') : ''
       ].join('~'))
       .join('|');
-    return [season?.id || '', getCurrentSeasonRoundIdForDate(dateKeyStr, season), season?.meta?.seasonMatchupControlEnabled === true ? 'on' : 'off', seriesRevision].join('::');
+    return [
+  season?.id || '',
+  getCurrentSeasonRoundIdForDate(dateKeyStr, season),
+  season?.meta?.seasonMatchupControlEnabled === true ? 'on' : 'off',
+  seriesRevision
+].join('::');
   }
 
   function getScheduleDayDateKey(day) {
