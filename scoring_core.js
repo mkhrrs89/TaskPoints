@@ -1309,7 +1309,7 @@ function getCurrentSeasonRoundIdForDate(dateKey, seasonOrState = null) {
         Array.isArray(series.gameResults) ? series.gameResults.map((result) => `${result.matchupId || ''}:${result.dateKey || ''}:${result.winnerId || ''}:${result.playerAScore ?? ''}:${result.playerBScore ?? ''}`).join(',') : ''
       ].join('~'))
       .join('|');
-    return [season?.id || '', getCurrentSeasonRoundIdForDate(dateKeyStr), season?.meta?.seasonMatchupControlEnabled === true ? 'on' : 'off', seriesRevision].join('::');
+    return [season?.id || '', getCurrentSeasonRoundIdForDate(dateKeyStr, season), season?.meta?.seasonMatchupControlEnabled === true ? 'on' : 'off', seriesRevision].join('::');
   }
 
   function getScheduleDayDateKey(day) {
