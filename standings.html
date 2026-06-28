@@ -162,7 +162,8 @@
               <th data-sort="oppAvg">Opp AVG <span class="sort-indicator" data-indicator="oppAvg"></span></th>
               <th data-sort="ppd">BASEΔ <span class="sort-indicator" data-indicator="ppd"></span></th>
               <th data-sort="avgPpd">PPD <span class="sort-indicator" data-indicator="avgPpd"></span></th>
-              <th data-sort="lifetimePoints">Lifetime PTS <span class="sort-indicator" data-indicator="lifetimePoints"></span></th>
+             <th data-sort="lifetimePoints">Lifetime PTS <span class="sort-indicator" data-indicator="lifetimePoints"></span></th>
+<th data-sort="gold">Gold <span class="sort-indicator" data-indicator="gold"></span></th>
             </tr>
           </thead>
           <tbody id="playersTableBody"></tbody>
@@ -456,6 +457,19 @@ function computeYouStats() {
       return { games, wins: record.wins || wins, losses: record.losses || losses, winPct, mov:null, oppAvg:null, avgPPD, ppd, totalPoints };
     }
 
+function getGoldCount(p) {
+  const candidates = [
+    p?.gold,
+    p?.goldCount,
+    p?.goldMedals,
+    p?.medals?.gold,
+    p?.awards?.gold
+  ];
+
+  const value = candidates.find((item) => Number.isFinite(Number(item)));
+  return Number.isFinite(Number(value)) ? Number(value) : 0;
+}
+  
     function getSortValue(p, key) {
       const stats = computePlayerStats(p);
       switch (key) {
@@ -469,6 +483,7 @@ function computeYouStats() {
         case "ppd":    return stats.ppd || 0;
         case "avgPpd": return stats.avgPPD || 0;
         case "lifetimePoints": return stats.totalPoints || 0;
+          case "gold": return getGoldCount(p);
         default:       return 0;
       }
     }
@@ -538,6 +553,7 @@ function computeYouStats() {
         const ppdDisplay    = isYou ? "-" : ((stats.ppd == null) ? "—" : stats.ppd.toFixed(1));
         const avgPpdDisplay = (stats.avgPPD == null) ? "—" : stats.avgPPD.toFixed(1);
         const lifetimeDisplay = (stats.totalPoints == null) ? "—" : stats.totalPoints.toFixed(1);
+        const goldDisplay = getGoldCount(p);
 
         tr.innerHTML = `
           <td class="pr-4">${escapeHtml(p.name || "—")}</td>
@@ -548,8 +564,9 @@ function computeYouStats() {
           <td>${movDisplay}</td>
           <td>${oppAvgDisplay}</td>
           <td>${ppdDisplay}</td>
-          <td>${avgPpdDisplay}</td>
-          <td>${lifetimeDisplay}</td>
+<td>${avgPpdDisplay}</td>
+<td>${lifetimeDisplay}</td>
+<td>${goldDisplay}</td>
         `;
         tbody.appendChild(tr);
       });
