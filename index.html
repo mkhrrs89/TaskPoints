@@ -2579,12 +2579,18 @@ function openCaloriesEditModal(options = {}) {
     input.value = options.currentCalories || '';
     toggle.checked = options.currentBonusEnabled !== false;
 
-    modal.classList.remove('hidden');
-    setTimeout(() => input.focus(), 0);
+modal.classList.remove('hidden');
+modal.classList.add('flex');
+modal.setAttribute('aria-hidden', 'false');
+window.lockScrollForModal?.();
+setTimeout(() => input.focus(), 0);
 
     const cleanup = () => {
-      modal.classList.add('hidden');
-      saveBtn.removeEventListener('click', onSave);
+modal.classList.add('hidden');
+modal.classList.remove('flex');
+modal.setAttribute('aria-hidden', 'true');
+window.unlockScrollForModal?.();
+saveBtn.removeEventListener('click', onSave);
       cancelBtn.removeEventListener('click', onCancel);
       modal.removeEventListener('click', onBackdrop);
       document.removeEventListener('keydown', onKeydown);
@@ -12910,8 +12916,19 @@ const dismissReminderForSession = () => {
 })();
 </script>
 
-  <div id="caloriesEditModal" class="tp-modal hidden" role="dialog" aria-modal="true" aria-labelledby="caloriesEditTitle">
-  <div class="tp-modal-card calories-edit-modal-card">
+<div
+  id="caloriesEditModal"
+  class="fixed inset-0 z-40 hidden items-center justify-center bg-black/60"
+  role="dialog"
+  aria-modal="true"
+  aria-hidden="true"
+  aria-labelledby="caloriesEditTitle"
+>
+  <div
+    id="caloriesEditModalBody"
+    class="w-full max-w-sm mx-3 rounded-2xl px-4 pb-5 pt-8 relative bg-zinc-900 text-zinc-100 text-sm calories-edit-modal-card"
+    onclick="event.stopPropagation();"
+  >
     <h3 id="caloriesEditTitle">Edit Calories</h3>
 
     <label class="muted text-xs">Calories</label>
