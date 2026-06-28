@@ -9393,21 +9393,36 @@ if (calNum != null && !Number.isNaN(calNum)) {
 
 
     // allow editing a past day
-block.onclick = () => {
-  const newVal = prompt('Edit calories for this day:', cal);
-  if (newVal === null) return;
+block.onclick = async () => {
+  const target = entry;
 
-  const raw = Number(String(newVal).trim());
+  const result = await openCaloriesEditModal({
+    title: "Edit calories for this day",
+    currentCalories: cal,
+    currentBonusEnabled: isCalLogBonusEnabledForEntry(target)
+  });
+
+  if (!result) return;
+
+  const raw = Number(result.calories);
+  const calLogBonusEnabled = result.calLogBonusEnabled !== false;
+
   if (!Number.isFinite(raw) || raw < 0) return alert('Invalid calories.');
 
-  const target = entry;
-  const oldPts = Number(target.points) || 0;
+  const oldPts = (Number(target.points) || 0)
+    + (isCalLogBonusEnabledForEntry(target) ? getCalLogBonusAmount() : 0);
+
   const newPts = caloriesToPoints(raw);
+  const impactPts = caloriesTotalImpactPoints(raw, calLogBonusEnabled);
 
-  target.title  = `Calories (${raw})`;
+  target.title = `Calories (${raw})`;
+  target.calories = raw;
   target.points = newPts;
+  target.calLogBonusEnabled = calLogBonusEnabled;
+  target.calLogBonusDisabled = !calLogBonusEnabled;
+  target.source = "metric";
 
-  toastPointsDeltaTodayAware(newPts, oldPts, target);
+  toastPointsDeltaTodayAware(impactPts, oldPts, target);
   markCompletionsDirty();
   save();
   scheduleRender(renderAll);
@@ -11076,7 +11091,7 @@ ${hasPts
     if (!mount.__boundScoreV2TodayClicks) {
     mount.__boundScoreV2TodayClicks = true;
 
-    mount.addEventListener("click", (e) => {
+ mount.addEventListener("click", async (e) => {
       const card = e.target.closest(".scoreV2-card");
       if (!card || !mount.contains(card)) return;
 
@@ -11133,52 +11148,73 @@ if (key === "work") {
 }
 
 if (key === "calories") {
+if (key === "calories") {
   const e = (typeof getTodayCaloriesEntry === "function") ? getTodayCaloriesEntry() : null;
   const target = e || ensureTodayScoreEntry("calories");
   const current = String(target?.title || "").match(/\((\d+)\)/)?.[1] ?? "";
-  const newVal = prompt("Edit today's calories:", String(current));
-  if (newVal === null) return;
 
-  const raw = Number(String(newVal).trim());
+  const result = await openCaloriesEditModal({
+    title: "Edit today's calories",
+    currentCalories: current,
+    currentBonusEnabled: isCalLogBonusEnabledForEntry(target)
+  });
+
+  if (!result) return;
+
+  const raw = Number(result.calories);
+  const calLogBonusEnabled = result.calLogBonusEnabled !== false;
+
   if (!Number.isFinite(raw) || raw < 0) return alert("Invalid calories.");
 
   const d = new Date(target?.completedAtISO || new Date());
   d.setHours(12, 0, 0, 0);
-  const key = dateKey(d);
+  const dayKey = dateKey(d);
   const whenISO = d.toISOString();
+
   let existing = (typeof resolveCompletionRef === "function")
     ? resolveCompletionRef(target, "Calories")
     : null;
+
   if (!existing) {
     existing = (state.completions || []).find(c => {
       if (!c?.title?.startsWith("Calories")) return false;
-      return dateKey(new Date(c.completedAtISO)) === key;
+      return dateKey(new Date(c.completedAtISO)) === dayKey;
     }) || null;
   }
-  const oldPts = existing ? (Number(existing.points) || 0) : 0;
+
+  const oldPts = existing
+    ? ((Number(existing.points) || 0) + (isCalLogBonusEnabledForEntry(existing) ? getCalLogBonusAmount() : 0))
+    : 0;
+
   const newPts = caloriesToPoints(raw);
+  const impactPts = caloriesTotalImpactPoints(raw, calLogBonusEnabled);
 
   if (existing) {
     existing.title = `Calories (${raw})`;
+    existing.calories = raw;
     existing.points = newPts;
     existing.completedAtISO = whenISO;
     existing.source = "metric";
+    existing.calLogBonusEnabled = calLogBonusEnabled;
+    existing.calLogBonusDisabled = !calLogBonusEnabled;
   } else {
     state.completions.unshift({
       id: crypto.randomUUID(),
       title: `Calories (${raw})`,
+      calories: raw,
       points: newPts,
       completedAtISO: whenISO,
       source: "metric",
+      calLogBonusEnabled,
+      calLogBonusDisabled: !calLogBonusEnabled
     });
   }
 
-  toastPointsDeltaTodayAware(newPts, oldPts, key);
+  toastPointsDeltaTodayAware(impactPts, oldPts, dayKey);
   markCompletionsDirty();
   save();
   scheduleRender(renderAll);
 
-  // instant refresh after the prompt saves
   setTimeout(() => {
     try { renderScoreDashboardV2_Skeleton(); } catch(e){}
     try { if (scoreV2RecentOpen) renderScoreV2RecentGrid(); } catch(e){}
@@ -11357,7 +11393,7 @@ grid.__entryMap = entryMap;
 if (!grid.__boundScoreV2Clicks) {
   grid.__boundScoreV2Clicks = true;
 
-  grid.addEventListener("click", (e) => {
+  grid.addEventListener("click", async (e) => {
     const cell = e.target.closest(".scoreV2-cell");
     if (!cell || !grid.contains(cell)) return;
 
@@ -11446,47 +11482,69 @@ if (cat === "work" && typeof promptEditWorkEntry === "function") {
 
 
 
-    if (cat === "calories") {
-      const current = String(entry?.title || "").match(/\((\d+)\)/)?.[1] || "";
-      const newVal = prompt("Edit calories for this day:", String(current));
-      if (newVal === null) return;
+if (cat === "calories") {
+  const current = String(entry?.title || "").match(/\((\d+)\)/)?.[1] || "";
 
-      const raw = Number(String(newVal).trim());
-      if (!Number.isFinite(raw) || raw < 0) return alert("Invalid calories.");
+  const result = await openCaloriesEditModal({
+    title: "Edit calories for this day",
+    currentCalories: current,
+    currentBonusEnabled: isCalLogBonusEnabledForEntry(entry)
+  });
 
-      const d = new Date(entry?.completedAtISO || `${dk}T12:00:00`);
-      d.setHours(12,0,0,0);
-      const targetKey = dateKey(d);
-      let target = resolveCompletionRef(entry, "Calories");
-      if (!target) {
-        target = (state.completions || []).find(c => {
-          if (!c?.title?.startsWith("Calories")) return false;
-          return dateKey(new Date(c.completedAtISO)) === targetKey;
-        }) || null;
-      }
-      const newPts = caloriesToPoints(raw);
-      const oldPts = target ? (Number(target.points) || 0) : 0;
+  if (!result) return;
 
-      if (target) {
-        target.title  = `Calories (${raw})`;
-        target.points = newPts;
-        target.completedAtISO = d.toISOString();
-        target.source = "metric";
-      } else {
-        target = {
-          id: crypto.randomUUID(),
-          title: `Calories (${raw})`,
-          points: newPts,
-          completedAtISO: d.toISOString(),
-          source: "metric",
-        };
-        state.completions.unshift(target);
-      }
-      toastPointsDeltaTodayAware(newPts, oldPts, target);
+  const raw = Number(result.calories);
+  const calLogBonusEnabled = result.calLogBonusEnabled !== false;
 
-markCompletionsDirty();
-save();
-scheduleRender(renderAll);
+  if (!Number.isFinite(raw) || raw < 0) return alert("Invalid calories.");
+
+  const d = new Date(entry?.completedAtISO || `${dk}T12:00:00`);
+  d.setHours(12,0,0,0);
+  const targetKey = dateKey(d);
+
+  let target = resolveCompletionRef(entry, "Calories");
+
+  if (!target) {
+    target = (state.completions || []).find(c => {
+      if (!c?.title?.startsWith("Calories")) return false;
+      return dateKey(new Date(c.completedAtISO)) === targetKey;
+    }) || null;
+  }
+
+  const oldPts = target
+    ? ((Number(target.points) || 0) + (isCalLogBonusEnabledForEntry(target) ? getCalLogBonusAmount() : 0))
+    : 0;
+
+  const newPts = caloriesToPoints(raw);
+  const impactPts = caloriesTotalImpactPoints(raw, calLogBonusEnabled);
+
+  if (target) {
+    target.title = `Calories (${raw})`;
+    target.calories = raw;
+    target.points = newPts;
+    target.completedAtISO = d.toISOString();
+    target.source = "metric";
+    target.calLogBonusEnabled = calLogBonusEnabled;
+    target.calLogBonusDisabled = !calLogBonusEnabled;
+  } else {
+    target = {
+      id: crypto.randomUUID(),
+      title: `Calories (${raw})`,
+      calories: raw,
+      points: newPts,
+      completedAtISO: d.toISOString(),
+      source: "metric",
+      calLogBonusEnabled,
+      calLogBonusDisabled: !calLogBonusEnabled
+    };
+    state.completions.unshift(target);
+  }
+
+  toastPointsDeltaTodayAware(impactPts, oldPts, target);
+
+  markCompletionsDirty();
+  save();
+  scheduleRender(renderAll);
 
 try { if (scoreV2RecentOpen) renderScoreV2RecentGrid(); } catch(e){}
 try { renderScoreDashboardV2_Skeleton(); } catch(e){}
