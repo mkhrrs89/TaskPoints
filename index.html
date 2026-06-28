@@ -2544,6 +2544,25 @@ function parseCaloriesFromTitle(title) {
   return Number.isFinite(raw) ? raw : null;
 }
 
+function getCalLogBonusAmount(){
+  const configured = Number(state?.scoringSettings?.calories?.logBonus);
+  return Number.isFinite(configured) ? configured : 2;
+}
+
+function isCalLogBonusEnabledForEntry(entry){
+  if (!entry || typeof entry !== 'object') return true;
+  if (entry.calLogBonusEnabled === false) return false;
+  if (entry.calLogBonusDisabled === true) return false;
+  if (entry.skipCalLogBonus === true) return false;
+  return true;
+}
+
+function caloriesTotalImpactPoints(cal, bonusEnabled = true){
+  const base = caloriesToPoints(cal);
+  const bonus = bonusEnabled ? getCalLogBonusAmount() : 0;
+  return Math.round((base + bonus) * 10) / 10;
+}
+  
 function caloriesToPoints(cal){
   if (window.TaskPointsCore?.caloriesToPoints) {
     return TaskPointsCore.caloriesToPoints(cal, state);
@@ -8838,6 +8857,9 @@ function saveCalories(){
   if (Number.isNaN(raw) || raw < 0) return alert("Calories can’t be negative.");
 
   const pts = caloriesToPoints(raw);
+const bonusToggle = $('caloriesLogBonusToggle');
+const calLogBonusEnabled = bonusToggle ? bonusToggle.checked !== false : true;
+const impactPts = caloriesTotalImpactPoints(raw, calLogBonusEnabled);
 
   // 1) Figure out what date this entry is for (date picker or today)
   const dateStr = $('caloriesDate') ? $('caloriesDate').value : '';
@@ -8863,28 +8885,37 @@ function saveCalories(){
       break;
     }
   }
-  const oldPts = existing ? (Number(existing.points) || 0) : 0;
+  const oldPts = existing
+  ? ((Number(existing.points) || 0) + (isCalLogBonusEnabledForEntry(existing) ? getCalLogBonusAmount() : 0))
+  : 0;
 
   // 3) If we found one, UPDATE it; otherwise, create a new one
-  if (existing) {
-    existing.title = `Calories (${raw})`;
-    existing.points = pts;
-    existing.completedAtISO = whenISO;
-    existing.source = 'metric';
-  } else {
-    state.completions.unshift({
-      id: crypto.randomUUID(),
-      title: `Calories (${raw})`,
-      points: pts,
-      completedAtISO: whenISO,
-      source: "metric"
-    });
-  }
-
-  toastPointsDeltaTodayAware(pts, oldPts, key);
+if (existing) {
+  existing.title = `Calories (${raw})`;
+  existing.calories = raw;
+  existing.points = pts;
+  existing.completedAtISO = whenISO;
+  existing.source = 'metric';
+  existing.calLogBonusEnabled = calLogBonusEnabled;
+  existing.calLogBonusDisabled = !calLogBonusEnabled;
+} else {
+  state.completions.unshift({
+    id: crypto.randomUUID(),
+    title: `Calories (${raw})`,
+    calories: raw,
+    points: pts,
+    completedAtISO: whenISO,
+    source: "metric",
+    calLogBonusEnabled,
+    calLogBonusDisabled: !calLogBonusEnabled
+  });
+}
+  toastPointsDeltaTodayAware(impactPts, oldPts, key);
   markCompletionsDirty();
   
   $('caloriesInput').value = '';
+
+if ($('caloriesLogBonusToggle')) $('caloriesLogBonusToggle').checked = true;
   
   save();
   scheduleRender(renderAll);
