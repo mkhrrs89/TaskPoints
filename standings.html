@@ -163,7 +163,9 @@
               <th data-sort="ppd">BASEΔ <span class="sort-indicator" data-indicator="ppd"></span></th>
               <th data-sort="avgPpd">PPD <span class="sort-indicator" data-indicator="avgPpd"></span></th>
              <th data-sort="lifetimePoints">Lifetime PTS <span class="sort-indicator" data-indicator="lifetimePoints"></span></th>
-<th data-sort="gold">Gold <span class="sort-indicator" data-indicator="gold"></span></th>
+<th data-sort="gold" class="standings-gold-col">
+  Gold <span class="sort-indicator" data-indicator="gold"></span>
+</th>
             </tr>
           </thead>
           <tbody id="playersTableBody"></tbody>
@@ -597,7 +599,7 @@ function getGoldCount(p) {
           <td>${ppdDisplay}</td>
 <td>${avgPpdDisplay}</td>
 <td>${lifetimeDisplay}</td>
-<td>${goldDisplay}</td>
+<td class="standings-gold-col">${goldDisplay}</td>
         `;
         tbody.appendChild(tr);
       });
