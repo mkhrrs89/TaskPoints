@@ -6390,3 +6390,12 @@ header,
   border-color: rgba(249,115,22,0.45);
   background: rgba(249,115,22,0.12);
 }
+
+.standings-gold-col{
+  color: #fb923c;
+  font-weight: 900;
+}
+
+.standings-gold-col .sort-indicator{
+  color: #fb923c;
+}
