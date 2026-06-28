@@ -457,17 +457,48 @@ function computeYouStats() {
       return { games, wins: record.wins || wins, losses: record.losses || losses, winPct, mov:null, oppAvg:null, avgPPD, ppd, totalPoints };
     }
 
-function getGoldCount(p) {
-  const candidates = [
-    p?.gold,
-    p?.goldCount,
-    p?.goldMedals,
-    p?.medals?.gold,
-    p?.awards?.gold
-  ];
+const GOLD_START_DATE = "2026-07-01";
 
-  const value = candidates.find((item) => Number.isFinite(Number(item)));
-  return Number.isFinite(Number(value)) ? Number(value) : 0;
+function roundGoldValue(value) {
+  const n = Number(value) || 0;
+  return Math.round((n + Number.EPSILON) * 10) / 10;
+}
+
+function computeGoldForPlayerId(playerId) {
+  const id = String(playerId || '').trim();
+  if (!id) return 0;
+
+  const matchups = latestState && Array.isArray(latestState.matchups)
+    ? latestState.matchups
+    : [];
+
+  let gold = 0;
+
+  for (const m of matchups) {
+    if (!m) continue;
+
+    const dateKey = getMatchupDateKey(m);
+    if (!dateKey || dateKey < GOLD_START_DATE) continue;
+    if (!isMatchupRevealed(m, false)) continue;
+    if (!activeIds.has(m.playerAId) || !activeIds.has(m.playerBId)) continue;
+
+    const aScore = Number(m.scoreA);
+    const bScore = Number(m.scoreB);
+    if (!Number.isFinite(aScore) || !Number.isFinite(bScore)) continue;
+
+    if (m.playerAId === id && aScore > bScore) {
+      gold += (aScore - bScore) / 10;
+    } else if (m.playerBId === id && bScore > aScore) {
+      gold += (bScore - aScore) / 10;
+    }
+  }
+
+  return roundGoldValue(gold);
+}
+
+function getGoldCount(p) {
+  const id = p?.id || (p?.isYou ? 'YOU' : '');
+  return computeGoldForPlayerId(id);
 }
   
     function getSortValue(p, key) {
@@ -553,7 +584,7 @@ function getGoldCount(p) {
         const ppdDisplay    = isYou ? "-" : ((stats.ppd == null) ? "—" : stats.ppd.toFixed(1));
         const avgPpdDisplay = (stats.avgPPD == null) ? "—" : stats.avgPPD.toFixed(1);
         const lifetimeDisplay = (stats.totalPoints == null) ? "—" : stats.totalPoints.toFixed(1);
-        const goldDisplay = getGoldCount(p);
+        const goldDisplay = getGoldCount(p).toFixed(1);
 
         tr.innerHTML = `
           <td class="pr-4">${escapeHtml(p.name || "—")}</td>
