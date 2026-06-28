@@ -6356,3 +6356,37 @@ header,
     padding: 0.28rem 0.75rem;
   }
 }
+
+.calories-edit-modal-card{
+  width: min(92vw, 360px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cal-log-bonus-modal-toggle{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 14px;
+  background: rgba(255,255,255,0.05);
+  color: var(--text, #e5e7eb);
+  font-size: 0.9rem;
+  font-weight: 800;
+  user-select: none;
+}
+
+.cal-log-bonus-modal-toggle input{
+  width: 18px;
+  height: 18px;
+  accent-color: var(--teal, #1f7a7a);
+}
+
+.cal-log-bonus-modal-toggle:has(input:checked){
+  color: #f97316;
+  border-color: rgba(249,115,22,0.45);
+  background: rgba(249,115,22,0.12);
+}
