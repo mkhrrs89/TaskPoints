@@ -5434,14 +5434,22 @@ if (titleStr.startsWith('Sleep Score (')) {
         const configuredBonus = Number(state?.scoringSettings?.calories?.logBonus);
         const logBonus = Number.isFinite(configuredBonus) ? configuredBonus : 2;
         if (!logBonus) return 0;
-        const hasLoggedCalories = calorieEntries.some((entry) => {
-          const caloriesRaw = Object.prototype.hasOwnProperty.call(entry || {}, 'calories')
-            ? Number(entry.calories)
-            : parseCaloriesFromTitle(entry?.title);
-          const calories = Number.isFinite(caloriesRaw) ? caloriesRaw : 0;
-          return calories > 0;
-        });
-        return hasLoggedCalories ? logBonus : 0;
+const hasLoggedCalories = calorieEntries.some((entry) => {
+  const bonusEnabled =
+    entry?.calLogBonusEnabled !== false
+    && entry?.calLogBonusDisabled !== true
+    && entry?.skipCalLogBonus !== true;
+
+  if (!bonusEnabled) return false;
+
+  const caloriesRaw = Object.prototype.hasOwnProperty.call(entry || {}, 'calories')
+    ? Number(entry.calories)
+    : parseCaloriesFromTitle(entry?.title);
+
+  const calories = Number.isFinite(caloriesRaw) ? caloriesRaw : 0;
+  return calories > 0;
+});
+return hasLoggedCalories ? logBonus : 0;
       })();
   totals.calLogBonus = calLogBonus;
 
