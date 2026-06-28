@@ -12770,6 +12770,24 @@ const dismissReminderForSession = () => {
 })();
 </script>
 
+  <div id="caloriesEditModal" class="tp-modal hidden" role="dialog" aria-modal="true" aria-labelledby="caloriesEditTitle">
+  <div class="tp-modal-card calories-edit-modal-card">
+    <h3 id="caloriesEditTitle">Edit Calories</h3>
+
+    <label class="muted text-xs">Calories</label>
+    <input id="caloriesEditInput" class="input w-full" type="number" min="0" placeholder="0–3000">
+
+    <label class="cal-log-bonus-modal-toggle" title="Add the calorie logging bonus">
+      <input id="caloriesEditBonusToggle" type="checkbox" checked>
+      <span>Add +2 logging bonus</span>
+    </label>
+
+    <div class="flex gap-2 justify-end mt-4">
+      <button id="caloriesEditCancelBtn" type="button" class="btn btn-ghost">Cancel</button>
+      <button id="caloriesEditSaveBtn" type="button" class="btn btn-teal">Save</button>
+    </div>
+  </div>
+</div>
 
 
 </body>
