@@ -4600,7 +4600,33 @@ header,
   }
 }
 
+.cal-log-bonus-toggle{
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 36px;
+  padding: 0 8px;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 999px;
+  background: rgba(255,255,255,0.05);
+  color: var(--muted, #9ca3af);
+  font-size: 0.78rem;
+  font-weight: 800;
+  white-space: nowrap;
+  user-select: none;
+}
 
+.cal-log-bonus-toggle input{
+  width: 15px;
+  height: 15px;
+  accent-color: var(--teal, #1f7a7a);
+}
+
+.cal-log-bonus-toggle:has(input:checked){
+  color: #f97316;
+  border-color: rgba(249,115,22,0.45);
+  background: rgba(249,115,22,0.12);
+}
 
 /* If you have a “desktop but narrow” case where nowrap feels cramped,
    you can relax it below 900px like this:
