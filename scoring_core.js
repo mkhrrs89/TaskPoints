@@ -6414,21 +6414,31 @@ function computeMomentumEffects(options = {}) {
     return Number.isFinite(raw) ? raw : null;
   }
 
-  function computeCalLogBonusPoints(calorieEntries, settings) {
-    const scoring = getScoringSettings(settings);
-    const logBonus = Number(scoring?.calories?.logBonus) || 0;
-    if (!logBonus) return 0;
+function computeCalLogBonusPoints(calorieEntries, settings) {
+  const scoring = getScoringSettings(settings);
+  const logBonus = Number(scoring?.calories?.logBonus) || 0;
+  if (!logBonus) return 0;
 
-    const hasLoggedCalories = Array.isArray(calorieEntries) && calorieEntries.some((entry) => {
-      if (!entry || typeof entry !== 'object') return false;
-      const rawCalories = Object.prototype.hasOwnProperty.call(entry, 'calories')
-        ? Number(entry.calories)
-        : parseCaloriesFromTitle(entry.title);
-      const calories = Number.isFinite(rawCalories) ? rawCalories : 0;
-      return calories > 0;
-    });
-    return hasLoggedCalories ? logBonus : 0;
-  }
+  const hasLoggedCalories = Array.isArray(calorieEntries) && calorieEntries.some((entry) => {
+    if (!entry || typeof entry !== 'object') return false;
+
+    const bonusEnabled =
+      entry.calLogBonusEnabled !== false
+      && entry.calLogBonusDisabled !== true
+      && entry.skipCalLogBonus !== true;
+
+    if (!bonusEnabled) return false;
+
+    const rawCalories = Object.prototype.hasOwnProperty.call(entry, 'calories')
+      ? Number(entry.calories)
+      : parseCaloriesFromTitle(entry.title);
+
+    const calories = Number.isFinite(rawCalories) ? rawCalories : 0;
+    return calories > 0;
+  });
+
+  return hasLoggedCalories ? logBonus : 0;
+}
 
   function getMoodInfo(entry) {
     const title = typeof entry?.title === 'string' ? entry.title : '';
