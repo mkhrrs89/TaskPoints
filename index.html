@@ -1953,30 +1953,45 @@ function getTodayCaloriesEntry() {
   return null;
 }
 
-function editTodayCalories() {
+async function editTodayCalories() {
   const entry = getTodayCaloriesEntry();
   if (!entry) return alert("You haven't entered today's calories yet.");
 
   const current = entry.title.match(/\((\d+)\)/)?.[1] ?? '';
-  const newVal = prompt("Edit today's calories:", String(current));
-  if (newVal === null) return; // user cancelled
+  const result = await openCaloriesEditModal({
+    title: "Edit today's calories",
+    currentCalories: current,
+    currentBonusEnabled: isCalLogBonusEnabledForEntry(entry)
+  });
 
-  const raw = Number(String(newVal).trim());
-  if (Number.isNaN(raw) || raw < 0) return alert("Invalid calories.");
+  if (!result) return;
 
-  // keep it pinned to *today* so it stays a “today” entry
+  const raw = Number(result.calories);
+  const calLogBonusEnabled = result.calLogBonusEnabled !== false;
+
+  if (!Number.isFinite(raw) || raw < 0) return alert("Invalid calories.");
+
   const d = new Date();
   d.setHours(12, 0, 0, 0);
+  const key = dateKey(d);
 
-  const oldPts = Number(entry.points) || 0;
+  const oldPts = (Number(entry.points) || 0)
+    + (isCalLogBonusEnabledForEntry(entry) ? getCalLogBonusAmount() : 0);
+
   const newPts = caloriesToPoints(raw);
-  entry.title = `Calories (${raw})`;
-  entry.points = newPts;
-  toastPointsDeltaTodayAware(newPts, oldPts, d);
-  entry.completedAtISO = d.toISOString();
+  const impactPts = caloriesTotalImpactPoints(raw, calLogBonusEnabled);
 
+  entry.title = `Calories (${raw})`;
+  entry.calories = raw;
+  entry.points = newPts;
+  entry.calLogBonusEnabled = calLogBonusEnabled;
+  entry.calLogBonusDisabled = !calLogBonusEnabled;
+  entry.completedAtISO = d.toISOString();
+  entry.source = 'metric';
+
+  toastPointsDeltaTodayAware(impactPts, oldPts, key);
   markCompletionsDirty();
-  
+
   save();
   scheduleRender(renderAll);
 }
@@ -2544,6 +2559,74 @@ function parseCaloriesFromTitle(title) {
   return Number.isFinite(raw) ? raw : null;
 }
 
+function openCaloriesEditModal(options = {}) {
+  return new Promise((resolve) => {
+    const modal = $('caloriesEditModal');
+    const input = $('caloriesEditInput');
+    const toggle = $('caloriesEditBonusToggle');
+    const saveBtn = $('caloriesEditSaveBtn');
+    const cancelBtn = $('caloriesEditCancelBtn');
+
+    if (!modal || !input || !toggle || !saveBtn || !cancelBtn) {
+      const fallback = prompt(options.title || 'Edit calories:', String(options.currentCalories || ''));
+      if (fallback === null) return resolve(null);
+      return resolve({
+        calories: fallback,
+        calLogBonusEnabled: options.currentBonusEnabled !== false
+      });
+    }
+
+    input.value = options.currentCalories || '';
+    toggle.checked = options.currentBonusEnabled !== false;
+
+    modal.classList.remove('hidden');
+    setTimeout(() => input.focus(), 0);
+
+    const cleanup = () => {
+      modal.classList.add('hidden');
+      saveBtn.removeEventListener('click', onSave);
+      cancelBtn.removeEventListener('click', onCancel);
+      modal.removeEventListener('click', onBackdrop);
+      document.removeEventListener('keydown', onKeydown);
+    };
+
+    const onSave = () => {
+      const raw = Number(String(input.value || '').trim());
+      if (!Number.isFinite(raw) || raw < 0) {
+        alert('Invalid calories.');
+        return;
+      }
+
+      const result = {
+        calories: raw,
+        calLogBonusEnabled: toggle.checked !== false
+      };
+
+      cleanup();
+      resolve(result);
+    };
+
+    const onCancel = () => {
+      cleanup();
+      resolve(null);
+    };
+
+    const onBackdrop = (event) => {
+      if (event.target === modal) onCancel();
+    };
+
+    const onKeydown = (event) => {
+      if (event.key === 'Escape') onCancel();
+      if (event.key === 'Enter') onSave();
+    };
+
+    saveBtn.addEventListener('click', onSave);
+    cancelBtn.addEventListener('click', onCancel);
+    modal.addEventListener('click', onBackdrop);
+    document.addEventListener('keydown', onKeydown);
+  });
+}
+  
 function getCalLogBonusAmount(){
   const configured = Number(state?.scoringSettings?.calories?.logBonus);
   return Number.isFinite(configured) ? configured : 2;
