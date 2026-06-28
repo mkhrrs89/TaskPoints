@@ -11148,7 +11148,6 @@ if (key === "work") {
 }
 
 if (key === "calories") {
-if (key === "calories") {
   const e = (typeof getTodayCaloriesEntry === "function") ? getTodayCaloriesEntry() : null;
   const target = e || ensureTodayScoreEntry("calories");
   const current = String(target?.title || "").match(/\((\d+)\)/)?.[1] ?? "";
