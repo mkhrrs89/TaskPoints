@@ -179,8 +179,9 @@ th.standings-gold-col{
             <tr>
               <th data-sort="name">Name <span class="sort-indicator" data-indicator="name"></span></th>
               <th data-sort="wins">W <span class="sort-indicator" data-indicator="wins"></span></th>
-              <th data-sort="losses">L <span class="sort-indicator" data-indicator="losses"></span></th>
-              <th data-sort="matchups">M <span class="sort-indicator" data-indicator="matchups"></span></th>
+<th data-sort="losses">L <span class="sort-indicator" data-indicator="losses"></span></th>
+<th data-sort="ties">T <span class="sort-indicator" data-indicator="ties"></span></th>
+<th data-sort="matchups">M <span class="sort-indicator" data-indicator="matchups"></span></th>
               <th data-sort="winPct">Win% <span class="sort-indicator" data-indicator="winPct"></span></th>
               <th data-sort="mov">MOV <span class="sort-indicator" data-indicator="mov"></span></th>
 <th data-sort="oppAvg" class="standings-opp-avg-col">Opp AVG <span class="sort-indicator" data-indicator="oppAvg"></span></th>
@@ -323,7 +324,7 @@ function computeYouStats() {
     const winPct = (record.wins + record.losses) ? (record.wins / (record.wins + record.losses)) * 100 : null;
     const ppd = null;
 
-    return { games, wins: record.wins, losses: record.losses, winPct, mov, oppAvg, avgPPD, ppd, totalPoints };
+    return { games, wins: record.wins, losses: record.losses, ties: record.ties || 0, winPct, mov, oppAvg, avgPPD, ppd, totalPoints };
   }
 
   // 2) Fallback: completions-based calc (your old behavior)
@@ -362,7 +363,7 @@ function computeYouStats() {
   const winPct = (wins + losses) ? (wins / (wins + losses)) * 100 : null;
   const ppd = null;
 
-  return { games: dailyTotals.length, wins, losses, winPct, mov:null, oppAvg:null, avgPPD, ppd, totalPoints };
+  return { games: dailyTotals.length, wins, losses, ties: 0, winPct, mov:null, oppAvg:null, avgPPD, ppd, totalPoints };
 }
 
     let players = loadPlayers();
@@ -441,7 +442,7 @@ function computeYouStats() {
             : (Number(p?.baseline) || null);
           const ppd = Number.isFinite(baseline) ? (avgPPD - baseline) : null;
 
-          return { games, wins: record.wins, losses: record.losses, winPct, mov, oppAvg, avgPPD, ppd, totalPoints };
+          return { games, wins: record.wins, losses: record.losses, ties: record.ties || 0, winPct, mov, oppAvg, avgPPD, ppd, totalPoints };
         }
         return { games:0, wins:0, losses:0, winPct:null, mov:null, oppAvg:null, avgPPD:null, ppd:null, totalPoints:0 };
       }
@@ -480,7 +481,7 @@ function computeYouStats() {
       const winPct = (wins + losses) ? (wins / (wins + losses)) * 100 : null;
       const ppd = baseline ? (avgPPD - baseline) : null;
 
-      return { games, wins: record.wins || wins, losses: record.losses || losses, winPct, mov:null, oppAvg:null, avgPPD, ppd, totalPoints };
+      return { games, wins: record.wins || wins, losses: record.losses || losses, ties: record.ties || 0, winPct, mov:null, oppAvg:null, avgPPD, ppd, totalPoints };
     }
 
 const GOLD_START_DATE = "2026-07-01";
@@ -533,7 +534,8 @@ function getGoldCount(p) {
         case "name":   return (p.name || "").toLowerCase();
         case "wins":   return stats.wins || 0;
         case "losses": return stats.losses || 0;
-        case "matchups": return (stats.wins || 0) + (stats.losses || 0);
+case "ties": return stats.ties || 0;
+case "matchups": return (stats.wins || 0) + (stats.losses || 0) + (stats.ties || 0);
         case "winPct": return stats.winPct || 0;
         case "mov":    return (stats.mov == null) ? Number.NEGATIVE_INFINITY : stats.mov;
         case "oppAvg": return (stats.oppAvg == null) ? Number.NEGATIVE_INFINITY : stats.oppAvg;
@@ -608,9 +610,10 @@ function formatOneDecimalNumber(value) {
         const tr = document.createElement("tr");
         const stats = computePlayerStats(p);
         const isYou = p && (p.id === "YOU" || p.isYou);
-        const wins = stats.wins || 0;
-        const losses = stats.losses || 0;
-        const matchups = (wins || 0) + (losses || 0);
+const wins = stats.wins || 0;
+const losses = stats.losses || 0;
+const ties = stats.ties || 0;
+const matchups = (wins || 0) + (losses || 0) + (ties || 0);
 
         const winPctDisplay = (stats.winPct == null) ? "—" : stats.winPct.toFixed(1) + "%";
         const movDisplay = (stats.mov == null)
@@ -624,9 +627,10 @@ const goldDisplay = formatOneDecimalNumber(getGoldCount(p));
 
         tr.innerHTML = `
           <td class="pr-4">${escapeHtml(p.name || "—")}</td>
-          <td>${wins}</td>
-          <td>${losses}</td>
-          <td>${matchups}</td>
+<td>${wins}</td>
+<td>${losses}</td>
+<td>${ties}</td>
+<td>${matchups}</td>
           <td>${winPctDisplay}</td>
           <td>${movDisplay}</td>
 <td class="standings-opp-avg-col">${oppAvgDisplay}</td>
