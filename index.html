@@ -11627,12 +11627,21 @@ function renderHomeSeasonChampionshipCard(){
     mount.innerHTML = '';
     return;
   }
-  const featured = TaskPointsCore.getFeaturedSeasonMatchup
-    ? TaskPointsCore.getFeaturedSeasonMatchup(season, todayKeyStr, state)
-    : null;
-    const featuredTitle = featured
-    ? (featured.title || 'Featured matchup')
-    : 'Featured matchup will appear when tournament games are available.';
+const featured = TaskPointsCore.getFeaturedSeasonMatchup
+  ? TaskPointsCore.getFeaturedSeasonMatchup(season, todayKeyStr, state)
+  : null;
+
+if (!featured) {
+  mount.classList.remove('hidden');
+  mount.innerHTML = `
+    <section class="home-season-featured" aria-label="June 2026 tournament complete">
+      <strong class="home-season-featured-title">The June 2026 tournament is complete.</strong>
+    </section>
+  `;
+  return;
+}
+
+const featuredTitle = featured.title || 'Featured matchup';
 
   const featuredRoundLine = featured
     ? `${featured.roundName || 'Round'}${featured.gameNumber ? `, Gm ${featured.gameNumber}` : ''}`
