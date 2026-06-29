@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
-  <title>TaskPoints — Standings</title>
+  <title>TaskPoints — Standings &amp; Stats</title>
 
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
@@ -80,6 +80,30 @@
       opacity:0.8;
       margin-left:4px;
     }
+
+    .standings-lifetime-col,
+.standings-base-delta-col,
+.standings-gold-col{
+  text-align:right;
+}
+
+.standings-opp-avg-col{
+  text-align:center;
+}
+
+.standings-gold-col{
+  color:#fb923c;
+  font-weight:900;
+}
+
+th.standings-gold-col{
+  opacity:1;
+}
+
+.standings-gold-col .sort-indicator{
+  color:#fb923c;
+}
+    
   </style>
 </head>
 
@@ -108,7 +132,7 @@
         <img src="assets/taskpoints-logo.svg" alt="TaskPoints logo" class="w-9 h-9 rounded-2xl object-cover shadow-sm">
         <div>
           <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight">TaskPoints</h1>
-          <p class="text-xs opacity-70">Game — Standings</p>
+          <p class="text-xs opacity-70">Game — Standings &amp; Stats</p>
         </div>
       </a>
 
@@ -144,7 +168,7 @@
 
     <section class="card mb-6">
       <div class="flex items-center justify-between mb-3">
-        <h2 class="font-semibold text-lg">Standings</h2>
+        <h2 class="font-semibold text-lg">Standings &amp; Stats</h2>
         <span id="playerCount" class="text-xs opacity-70"></span>
       </div>
 
@@ -159,10 +183,10 @@
               <th data-sort="matchups">M <span class="sort-indicator" data-indicator="matchups"></span></th>
               <th data-sort="winPct">Win% <span class="sort-indicator" data-indicator="winPct"></span></th>
               <th data-sort="mov">MOV <span class="sort-indicator" data-indicator="mov"></span></th>
-              <th data-sort="oppAvg">Opp AVG <span class="sort-indicator" data-indicator="oppAvg"></span></th>
-              <th data-sort="ppd">BASEΔ <span class="sort-indicator" data-indicator="ppd"></span></th>
-              <th data-sort="avgPpd">PPD <span class="sort-indicator" data-indicator="avgPpd"></span></th>
-             <th data-sort="lifetimePoints">Lifetime PTS <span class="sort-indicator" data-indicator="lifetimePoints"></span></th>
+<th data-sort="oppAvg" class="standings-opp-avg-col">Opp AVG <span class="sort-indicator" data-indicator="oppAvg"></span></th>
+<th data-sort="ppd" class="standings-base-delta-col">BASEΔ <span class="sort-indicator" data-indicator="ppd"></span></th>
+<th data-sort="avgPpd">PPD <span class="sort-indicator" data-indicator="avgPpd"></span></th>
+<th data-sort="lifetimePoints" class="standings-lifetime-col">Lifetime PTS <span class="sort-indicator" data-indicator="lifetimePoints"></span></th>
 <th data-sort="gold" class="standings-gold-col">
   Gold <span class="sort-indicator" data-indicator="gold"></span>
 </th>
@@ -521,6 +545,16 @@ function getGoldCount(p) {
       }
     }
 
+function formatOneDecimalNumber(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "—";
+
+  return n.toLocaleString(undefined, {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1
+  });
+}
+  
     function escapeHtml(str) {
       if (!str && str !== 0) return "";
       return String(str).replace(/[&<>"']/g, m => ({
@@ -585,8 +619,8 @@ function getGoldCount(p) {
         const oppAvgDisplay = (stats.oppAvg == null) ? "-" : stats.oppAvg.toFixed(1);
         const ppdDisplay    = isYou ? "-" : ((stats.ppd == null) ? "—" : stats.ppd.toFixed(1));
         const avgPpdDisplay = (stats.avgPPD == null) ? "—" : stats.avgPPD.toFixed(1);
-        const lifetimeDisplay = (stats.totalPoints == null) ? "—" : stats.totalPoints.toFixed(1);
-        const goldDisplay = getGoldCount(p).toFixed(1);
+const lifetimeDisplay = formatOneDecimalNumber(stats.totalPoints);
+const goldDisplay = formatOneDecimalNumber(getGoldCount(p));
 
         tr.innerHTML = `
           <td class="pr-4">${escapeHtml(p.name || "—")}</td>
@@ -595,10 +629,10 @@ function getGoldCount(p) {
           <td>${matchups}</td>
           <td>${winPctDisplay}</td>
           <td>${movDisplay}</td>
-          <td>${oppAvgDisplay}</td>
-          <td>${ppdDisplay}</td>
+<td class="standings-opp-avg-col">${oppAvgDisplay}</td>
+<td class="standings-base-delta-col">${ppdDisplay}</td>
 <td>${avgPpdDisplay}</td>
-<td>${lifetimeDisplay}</td>
+<td class="standings-lifetime-col">${lifetimeDisplay}</td>
 <td class="standings-gold-col">${goldDisplay}</td>
         `;
         tbody.appendChild(tr);
