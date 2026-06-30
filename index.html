@@ -8352,15 +8352,27 @@ function renderTasks(){
     header.setAttribute('role','button');
     header.setAttribute('tabindex','0');
     header.setAttribute('aria-expanded', isExpanded ? 'true' : 'false');
-    header.innerHTML = `
-      <span class="task-date-group-label-wrap">
-        <span class="task-date-group-indicator" aria-hidden="true">${isExpanded ? '▾' : '▸'}</span>
-        <span>${b.label}</span>
-      </span>
-      ${b.key === 'overdue'
-        ? '<button class="btn btn-ghost btn-task md:hidden" data-task-action="postpone-all-overdue" data-task-id="__all_overdue__">Postpone all</button>'
-        : ''}
-    `;
+const taskCount = b.items.length;
+const taskCountLabel = `${taskCount} ${taskCount === 1 ? 'task' : 'tasks'}`;
+const postponeAllHtml = b.key === 'overdue'
+  ? '<button class="btn btn-ghost btn-task md:hidden" data-task-action="postpone-all-overdue" data-task-id="__all_overdue__">Postpone all</button>'
+  : '';
+
+header.innerHTML = `
+  <span class="task-date-group-label-wrap">
+    <span class="task-date-group-indicator" aria-hidden="true">${isExpanded ? '▾' : '▸'}</span>
+    <span>${b.label}</span>
+  </span>
+
+  <span class="task-date-group-right">
+    <span
+      class="task-date-group-count"
+      title="${taskCountLabel}"
+      aria-label="${taskCountLabel}"
+    >${taskCount}</span>
+    ${postponeAllHtml}
+  </span>
+`;
     group.appendChild(header);
 
     const body = document.createElement('div');
