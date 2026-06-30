@@ -1528,6 +1528,31 @@ body {
   gap:.5rem;
 }
 
+.task-date-group-right{
+  margin-left:auto;
+  display:inline-flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:.5rem;
+}
+
+.task-date-group-count{
+  min-width:2.25rem;
+  height:1.6rem;
+  padding:0 .55rem;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  border-radius:999px;
+  border:1px solid rgba(148,163,184,.28);
+  background:rgba(15,23,42,.38);
+  color:#cbd5e1;
+  font-size:.72rem;
+  font-weight:900;
+  line-height:1;
+  font-variant-numeric:tabular-nums;
+}
+
 
 /* =========================
    SECTION 3 — APP CHROME (HEADER / TOOLBAR / NAV / DROPDOWNS)
