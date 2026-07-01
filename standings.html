@@ -103,6 +103,32 @@ th.standings-gold-col{
 .standings-gold-col .sort-indicator{
   color:#fb923c;
 }
+
+.standingsScopeTabs{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+}
+
+.standingsScopeTab{
+  border:1px solid rgba(148,163,184,0.28);
+  background:rgba(26,56,59,0.9);
+  color:#e5e7eb;
+  border-radius:999px;
+  padding:7px 13px;
+  font-size:12px;
+  font-weight:900;
+  letter-spacing:0.04em;
+  text-transform:uppercase;
+  cursor:pointer;
+}
+
+.standingsScopeTab.is-active{
+  background:#fb923c;
+  border-color:#fb923c;
+  color:#111827;
+}
     
   </style>
 </head>
@@ -167,10 +193,16 @@ th.standings-gold-col{
     </header>
 
     <section class="card mb-6">
-      <div class="flex items-center justify-between mb-3">
-        <h2 class="font-semibold text-lg">Standings &amp; Stats</h2>
-        <span id="playerCount" class="text-xs opacity-70"></span>
-      </div>
+<div class="flex items-center justify-between mb-3">
+  <h2 class="font-semibold text-lg">Standings &amp; Stats</h2>
+  <span id="playerCount" class="text-xs opacity-70"></span>
+</div>
+
+<div class="standingsScopeTabs mb-3" role="tablist" aria-label="Standings scope">
+  <button type="button" class="standingsScopeTab" data-standings-scope="season2">Season 2</button>
+  <button type="button" class="standingsScopeTab" data-standings-scope="lifetime">Lifetime</button>
+  <button type="button" class="standingsScopeTab" data-standings-scope="season1">Season 1</button>
+</div>
 
 
       <div class="overflow-x-auto">
@@ -211,6 +243,129 @@ th.standings-gold-col{
     let latestState = null;
     let activeIds = new Set(["YOU"]);
 
+const STANDINGS_SCOPE_STORAGE_KEY = "taskpoints_standings_scope_v1";
+const STANDINGS_SEASON_TWO_START = "2026-07-01";
+
+const STANDINGS_SCOPE_LABELS = {
+  season2: "Season 2",
+  lifetime: "Lifetime",
+  season1: "Season 1"
+};
+
+let standingsScope = (() => {
+  try {
+    const saved = localStorage.getItem(STANDINGS_SCOPE_STORAGE_KEY);
+    if (saved === "season1" || saved === "season2" || saved === "lifetime") return saved;
+  } catch (e) {}
+
+  return "season2";
+})();
+
+function getSimpleDateKey(input) {
+  if (!input) return "";
+
+  if (typeof input === "string") {
+    if (/^\d{4}-\d{2}-\d{2}/.test(input)) return input.slice(0, 10);
+
+    const parsed = new Date(input);
+    if (!Number.isNaN(parsed.getTime())) return getSimpleDateKey(parsed);
+
+    return "";
+  }
+
+  const d = input instanceof Date ? input : new Date(input);
+  if (!d || Number.isNaN(d.getTime())) return "";
+
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+
+  return `${y}-${m}-${day}`;
+}
+
+function getCompletionDateKey(entry) {
+  if (!entry) return "";
+  if (entry.dateKey) return String(entry.dateKey).slice(0, 10);
+  if (entry.completedAtISO) return getSimpleDateKey(entry.completedAtISO);
+  if (entry.dateISO) return getSimpleDateKey(entry.dateISO);
+  if (entry.date) return getSimpleDateKey(entry.date);
+  return "";
+}
+
+function getGameHistoryDateKey(entry) {
+  if (!entry) return "";
+  if (entry.dateKey) return String(entry.dateKey).slice(0, 10);
+  if (entry.date) return String(entry.date).slice(0, 10);
+  if (entry.dateISO) return getSimpleDateKey(entry.dateISO);
+  if (entry.completedAtISO) return getSimpleDateKey(entry.completedAtISO);
+  return "";
+}
+
+function standingsScopeAllowsDate(dateKeyStr) {
+  const key = String(dateKeyStr || "").slice(0, 10);
+  if (!key) return false;
+
+  if (standingsScope === "lifetime") return true;
+  if (standingsScope === "season1") return key < STANDINGS_SEASON_TWO_START;
+  if (standingsScope === "season2") return key >= STANDINGS_SEASON_TWO_START;
+
+  return true;
+}
+
+function filterRowsForStandingsScope(rows, getKey) {
+  const list = Array.isArray(rows) ? rows : [];
+  if (standingsScope === "lifetime") return list;
+
+  return list.filter((row) => standingsScopeAllowsDate(getKey(row)));
+}
+
+function getScopedStandingsState() {
+  const s = latestState || {};
+
+  if (standingsScope === "lifetime") return s;
+
+  return {
+    ...s,
+    matchups: filterRowsForStandingsScope(s.matchups, getMatchupDateKey),
+    gameHistory: filterRowsForStandingsScope(s.gameHistory, getGameHistoryDateKey),
+    completions: filterRowsForStandingsScope(s.completions, getCompletionDateKey)
+  };
+}
+
+function updateStandingsScopeTabs() {
+  document.querySelectorAll("[data-standings-scope]").forEach((btn) => {
+    const scope = btn.getAttribute("data-standings-scope");
+    const active = scope === standingsScope;
+
+    btn.classList.toggle("is-active", active);
+    btn.setAttribute("aria-selected", active ? "true" : "false");
+  });
+}
+
+function initStandingsScopeTabs() {
+  document.querySelectorAll("[data-standings-scope]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const scope = btn.getAttribute("data-standings-scope");
+      if (!scope || scope === standingsScope) return;
+
+      standingsScope = scope;
+
+      try {
+        localStorage.setItem(STANDINGS_SCOPE_STORAGE_KEY, standingsScope);
+      } catch (e) {}
+
+      updateStandingsScopeTabs();
+      renderTable();
+    });
+  });
+
+  updateStandingsScopeTabs();
+}
+
+function getStandingsScopeLabel() {
+  return STANDINGS_SCOPE_LABELS[standingsScope] || "Standings";
+}
+  
     function getYouName() {
       const name = latestState && typeof latestState.youName === "string"
         ? latestState.youName.trim()
@@ -285,7 +440,7 @@ th.standings-gold-col{
     }
 
 function computeYouStats() {
-  const s = latestState;
+  const s = getScopedStandingsState();
 
   const record = window.TaskPointsCore?.computeRecord
     ? TaskPointsCore.computeRecord(s, "YOU", { includeToday: false, allowFallback: false })
@@ -389,19 +544,21 @@ function computeYouStats() {
     let sortKey = "winPct";
     let sortDir = "desc";
 
-    function computePlayerStats(p) {
-      if (p && (p.id === "YOU" || p.isYou)) {
-        return computeYouStats();
-      }
+function computePlayerStats(p) {
+  const s = getScopedStandingsState();
 
-      const record = window.TaskPointsCore?.computeRecord
-        ? TaskPointsCore.computeRecord(latestState, p.id, { includeToday: false, allowFallback: false })
-        : { wins: 0, losses: 0, games: 0, source: "unknown" };
+  if (p && (p.id === "YOU" || p.isYou)) {
+    return computeYouStats();
+  }
 
-      // 1) Prefer matchup-derived results (true W/L against opponents)
-      const matchups = latestState && Array.isArray(latestState.matchups)
-        ? latestState.matchups
-        : [];
+  const record = window.TaskPointsCore?.computeRecord
+    ? TaskPointsCore.computeRecord(s, p.id, { includeToday: false, allowFallback: false })
+    : { wins: 0, losses: 0, ties: 0, games: 0, source: "unknown" };
+
+  // 1) Prefer matchup-derived results (true W/L against opponents)
+  const matchups = s && Array.isArray(s.matchups)
+    ? s.matchups
+    : [];
 
       if (record.source === "matchups") {
         let games = 0;
@@ -447,10 +604,12 @@ function computeYouStats() {
         return { games:0, wins:0, losses:0, winPct:null, mov:null, oppAvg:null, avgPPD:null, ppd:null, totalPoints:0 };
       }
 
-      // 2) Fallback: legacy gameHistory vs baseline model
-      if (!Array.isArray(gameHistory) || !gameHistory.length) {
-        return { games:0, wins:0, losses:0, winPct:null, mov:null, oppAvg:null, avgPPD:null, ppd:null, totalPoints:0 };
-      }
+// 2) Fallback: legacy gameHistory vs baseline model
+const scopedGameHistory = Array.isArray(s.gameHistory) ? s.gameHistory : [];
+
+if (!scopedGameHistory.length) {
+  return { games:0, wins:0, losses:0, ties:0, winPct:null, mov:null, oppAvg:null, avgPPD:null, ppd:null, totalPoints:0 };
+}
 
       let games = 0;
       let totalPoints = 0;
@@ -459,7 +618,7 @@ function computeYouStats() {
 
       const baseline = (typeof p.baseline === "number") ? p.baseline : (Number(p.baseline) || 0);
 
-      for (const g of gameHistory) {
+      for (const g of scopedGameHistory) {
         if (!activeIds.has(g.playerId)) continue;
         if (g.playerId !== p.id) continue;
 
@@ -495,9 +654,10 @@ function computeGoldForPlayerId(playerId) {
   const id = String(playerId || '').trim();
   if (!id) return 0;
 
-  const matchups = latestState && Array.isArray(latestState.matchups)
-    ? latestState.matchups
-    : [];
+const scoped = getScopedStandingsState();
+const matchups = scoped && Array.isArray(scoped.matchups)
+  ? scoped.matchups
+  : [];
 
   let gold = 0;
 
@@ -642,12 +802,14 @@ const goldDisplay = formatOneDecimalNumber(getGoldCount(p));
         tbody.appendChild(tr);
       });
 
-      const countLabel = $("playerCount");
-      if (countLabel) {
-        countLabel.textContent = players.length
-          ? `${players.length} player${players.length === 1 ? "" : "s"}`
-          : "No players found";
-      }
+const countLabel = $("playerCount");
+if (countLabel) {
+  const scopeLabel = getStandingsScopeLabel();
+
+  countLabel.textContent = players.length
+    ? `${scopeLabel} • ${players.length} player${players.length === 1 ? "" : "s"}`
+    : `${scopeLabel} • No players found`;
+}
 
       updateSortIndicators();
     }
@@ -668,6 +830,7 @@ const goldDisplay = formatOneDecimalNumber(getGoldCount(p));
         });
       });
 
+      initStandingsScopeTabs();
       renderTable();
     });
   </script>
