@@ -563,17 +563,18 @@ const draftOptions = {
     return { state: normalizeSeasonViewState(nextState), changed };
   }
 
-  function persistSeasonState(state, savePath = 'season-preview') {
-    if (typeof core.saveStateSnapshot === 'function') {
-      try {
-        const saved = core.saveStateSnapshot(state, { savePath });
-        return saved?.state || saved || state;
-      } catch (error) {
-        console.error('Failed to save Season preview state', error);
-      }
+function persistSeasonState(state, savePath = 'season-preview', saveOptions = {}) {
+  if (typeof core.saveStateSnapshot === 'function') {
+    try {
+      const saved = core.saveStateSnapshot(state, { savePath, ...saveOptions });
+      return saved?.state || saved || state;
+    } catch (error) {
+      console.error('Failed to save Season state', error);
+      return null;
     }
-    return state;
   }
+  return state;
+}
 
 function renderFormatList(season = null) {
   const rounds = getRoundDefs(season);
@@ -1531,9 +1532,15 @@ function getRoundForToday(season, dateKey = getEffectiveDateKey()) {
     return nextState;
   }
 
-  function saveAndRenderSeason(nextState, savePath = 'season-preview-action') {
-    const saved = persistSeasonState(nextState, savePath);
-    const mount = global.document?.getElementById('seasonView');
+function saveAndRenderSeason(nextState, savePath = 'season-preview-action', saveOptions = {}) {
+  const saved = persistSeasonState(nextState, savePath, saveOptions);
+
+  if (!saved) {
+    alert('Save failed, so the Season page was not updated. Free browser storage or export a backup, then try again.');
+    return currentMountedState();
+  }
+
+  const mount = global.document?.getElementById('seasonView');
     if (mount) {
       mount.innerHTML = renderSeasonView(saved);
       applySeasonRoundCollapseState(mount);
@@ -1788,7 +1795,17 @@ function getRoundForToday(season, dateKey = getEffectiveDateKey()) {
         const state = currentMountedState();
         const result = typeof core.finalizeCurrentSeason === 'function' ? core.finalizeCurrentSeason(state, { dateKey: getDateKey(new Date()) }) : { ok: false, error: 'helper_unavailable' };
         if (!result.ok) { alert(`Finalize failed: ${result.error || 'unknown error'}`); return; }
-        saveAndRenderSeason(result.state, 'season-admin-finalize');
+        saveAndRenderSeason(result.state, 'season-admin-finalize', {
+  allowDestructiveOverwrite: true,
+  allowGeneratedCacheClear: true,
+  storageEmergencyCompaction: true,
+  userInitiated: true,
+  immediateWrite: true,
+  limits: {
+    maxOpponentDripSchedules: 30,
+    maxWorkHistory: 250
+  }
+});
         return;
       }
       if (action === 'show-create-season' || action === 'hide-create-season') {
