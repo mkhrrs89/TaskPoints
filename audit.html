@@ -2150,7 +2150,29 @@ function runWeightVo2HistorySavePathAudit(state) {
       const inactiveSeason = !season || !officialStatuses.has(String(season.status || '').toLowerCase());
       const base = { section: SEASON_AUDIT_SECTION };
       const checks = [];
+if (!season) {
+  const archivedSeasons = Array.isArray(state?.seasonHistory)
+    ? state.seasonHistory
+    : [];
 
+  const latestArchived = archivedSeasons[archivedSeasons.length - 1] || null;
+  const archivedName = latestArchived?.name || latestArchived?.id || 'archived Season';
+
+  checks.push({
+    ...base,
+    id: 'season-no-active-season-ok',
+    title: 'No active Season currently running',
+    status: 'PASS',
+    expected: 'After archiving a Season, state.currentSeason may be empty',
+    actual: latestArchived
+      ? `No current season found; ${archivedName} is stored in seasonHistory`
+      : 'No current season found',
+    details: [],
+    trace: 'state.currentSeason + state.seasonHistory'
+  });
+
+  return checks;
+}
       checks.push({
         ...base,
         id: 'season-seed-count-34',
