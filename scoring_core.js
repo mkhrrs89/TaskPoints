@@ -7696,9 +7696,40 @@ function generateOpponentDripScheduleCore(finalScore, dateKey, options = {}) {
   const totalRounded = Math.max(0, Math.round((Number(finalScore) || 0) * 10) / 10);
   const totalUnits = Math.round(totalRounded * 10);
 
+  // Stable seeded RNG:
+  // Same date + player + final score = same drip schedule every reload.
+  function hashStringToSeed(str) {
+    let h = 2166136261;
+    for (let i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return h >>> 0;
+  }
+
+  function makeSeededRandom(seed) {
+    let t = seed >>> 0;
+    return function seededRandom() {
+      t += 0x6D2B79F5;
+      let r = t;
+      r = Math.imul(r ^ (r >>> 15), r | 1);
+      r ^= r + Math.imul(r ^ (r >>> 7), r | 61);
+      return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  const seed = hashStringToSeed([
+    'opponent-drip-v2',
+    String(dateKey || ''),
+    String(playerId || ''),
+    totalRounded.toFixed(1)
+  ].join('|'));
+
+  const rng = makeSeededRandom(seed);
+
   const startHour = 6;
   const endHour = 23;
-  const count = Math.max(12, Math.min(40, Math.round(Math.random() * 20) + 15));
+  const count = Math.max(12, Math.min(40, Math.round(rng() * 20) + 15));
 
   const baseDate = new Date(`${dateKey}T00:00:00`);
 
@@ -7706,14 +7737,12 @@ function generateOpponentDripScheduleCore(finalScore, dateKey, options = {}) {
   for (let h = startHour; h <= endHour; h++) {
     let weight = 1;
 
-    // Slightly favor earlier hours, but less aggressively than before.
-    // Goal: still make NPCs score earlier in the day, just not dump almost everything by noon.
     if (h >= 6 && h <= 11) weight += 0.7;
     if (h >= 12 && h <= 15) weight += 0.45;
     if (h >= 16 && h <= 17) weight += 0.25;
     if (h >= 18 && h <= 23) weight += 0.15;
 
-    if (Math.random() < 0.15) weight *= 0.4;
+    if (rng() < 0.15) weight *= 0.4;
 
     hourBuckets.push({ hour: h, weight: Math.max(0.2, weight) });
   }
@@ -7721,15 +7750,19 @@ function generateOpponentDripScheduleCore(finalScore, dateKey, options = {}) {
   const totalHourWeight = hourBuckets.reduce((s, h) => s + h.weight, 0) || 1;
 
   function pickTime() {
-    let r = Math.random() * totalHourWeight;
+    let r = rng() * totalHourWeight;
     let chosenHour = startHour;
+
     for (const h of hourBuckets) {
-      if (r <= h.weight) { chosenHour = h.hour; break; }
+      if (r <= h.weight) {
+        chosenHour = h.hour;
+        break;
+      }
       r -= h.weight;
     }
 
-    const m = Math.floor(Math.random() * 60);
-    const s = Math.floor(Math.random() * 60);
+    const m = Math.floor(rng() * 60);
+    const s = Math.floor(rng() * 60);
     const d = new Date(baseDate.getTime());
     d.setHours(chosenHour, m, s, 0);
     return d;
@@ -7737,8 +7770,8 @@ function generateOpponentDripScheduleCore(finalScore, dateKey, options = {}) {
 
   const weights = [];
   for (let i = 0; i < count; i++) {
-    const base = Math.pow(Math.random(), 1.4);
-    const burst = Math.random() < 0.35 ? Math.random() * 1.2 : 0;
+    const base = Math.pow(rng(), 1.4);
+    const burst = rng() < 0.35 ? rng() * 1.2 : 0;
     weights.push(base + burst);
   }
 
@@ -7746,6 +7779,7 @@ function generateOpponentDripScheduleCore(finalScore, dateKey, options = {}) {
 
   let remaining = totalUnits;
   const pointUnits = [];
+
   for (let i = 0; i < count; i++) {
     if (i === count - 1) {
       pointUnits.push(Math.max(0, remaining));
@@ -7760,9 +7794,14 @@ function generateOpponentDripScheduleCore(finalScore, dateKey, options = {}) {
   }
 
   const times = pointUnits.map(() => pickTime()).sort((a, b) => a - b);
-  const sizedUnits = pointUnits
-    .slice()
-    .sort(() => Math.random() - 0.5);
+
+  const sizedUnits = pointUnits.slice();
+
+  // Deterministic shuffle, not Math.random().
+  for (let i = sizedUnits.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [sizedUnits[i], sizedUnits[j]] = [sizedUnits[j], sizedUnits[i]];
+  }
 
   const events = sizedUnits
     .map((units, idx) => ({ t: times[idx].toISOString(), pts: units / 10 }))
