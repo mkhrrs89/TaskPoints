@@ -1123,12 +1123,9 @@ function matchupAvatarSize(){
     const existingIdx = schedules.findIndex(s => s && s.date === dateKeyStr && s.playerId === playerId);
     const totalRounded = Math.max(0, Math.round((Number(totalPoints) || 0) * 10) / 10);
 
-    if (existingIdx !== -1) {
-      const existing = schedules[existingIdx];
-      if (existing && Math.abs((existing.total || 0) - totalRounded) < 0.001 && Array.isArray(existing.events) && existing.events.length) {
-        return existing;
-      }
-    }
+if (existingIdx !== -1) {
+  return schedules[existingIdx];
+}
 
     const next = generateOpponentDripSchedule(dateKeyStr, playerId, totalRounded);
     const updated = schedules.filter(s => !(s && s.date === dateKeyStr && s.playerId === playerId));
