@@ -170,6 +170,32 @@
         min-height:94px;
       }
     }
+
+    .rankingsScopeTabs{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+}
+
+.rankingsScopeTab{
+  border:1px solid rgba(148,163,184,0.28);
+  background:rgba(26,56,59,0.9);
+  color:#e5e7eb;
+  border-radius:999px;
+  padding:7px 13px;
+  font-size:12px;
+  font-weight:900;
+  letter-spacing:0.04em;
+  text-transform:uppercase;
+  cursor:pointer;
+}
+
+.rankingsScopeTab.is-active{
+  background:#fb923c;
+  border-color:#fb923c;
+  color:#111827;
+}
   </style>
 </head>
 
@@ -229,9 +255,16 @@
       </div>
     </header>
 
-    <section class="rankings-shell mb-6">
-      <h2 class="text-2xl font-extrabold tracking-wide">POWER RANKINGS</h2>
-      <div id="rankingsList" class="rankings-list"></div>
+<section class="rankings-shell mb-6">
+  <h2 class="text-2xl font-extrabold tracking-wide">POWER RANKINGS</h2>
+
+  <div class="rankingsScopeTabs mb-4 mt-3" role="tablist" aria-label="Rankings scope">
+    <button type="button" class="rankingsScopeTab" data-rankings-scope="season2">Season 2</button>
+    <button type="button" class="rankingsScopeTab" data-rankings-scope="overall">Overall</button>
+    <button type="button" class="rankingsScopeTab" data-rankings-scope="season1">Season 1</button>
+  </div>
+
+  <div id="rankingsList" class="rankings-list"></div>
       <p id="emptyState" class="hidden text-sm opacity-75">No players available yet.</p>
     </section>
   </div>
@@ -241,6 +274,87 @@
     const STORAGE_KEY = (window.TaskPointsCore && TaskPointsCore.STORAGE_KEY) || 'taskpoints_v1';
     const imageUrlCache = new Map();
 
+const RANKINGS_SCOPE_STORAGE_KEY = "taskpoints_rankings_scope_v1";
+const RANKINGS_SEASON_TWO_START = "2026-07-01";
+
+const RANKINGS_SCOPE_LABELS = {
+  season2: "Season 2",
+  overall: "Overall",
+  season1: "Season 1"
+};
+
+let rankingsScope = (() => {
+  try {
+    const saved = localStorage.getItem(RANKINGS_SCOPE_STORAGE_KEY);
+    if (saved === "season1" || saved === "season2" || saved === "overall") return saved;
+  } catch (e) {}
+
+  return "season2";
+})();
+
+function rankingsScopeAllowsDate(dateKeyStr) {
+  const key = String(dateKeyStr || "").slice(0, 10);
+  if (!key) return false;
+
+  if (rankingsScope === "overall") return true;
+  if (rankingsScope === "season1") return key < RANKINGS_SEASON_TWO_START;
+  if (rankingsScope === "season2") return key >= RANKINGS_SEASON_TWO_START;
+
+  return true;
+}
+
+function filterRowsForRankingsScope(rows, getKey) {
+  const list = Array.isArray(rows) ? rows : [];
+  if (rankingsScope === "overall") return list;
+
+  return list.filter((row) => rankingsScopeAllowsDate(getKey(row)));
+}
+
+function getScopedRankingsState(state) {
+  const s = state || {};
+
+  if (rankingsScope === "overall") return s;
+
+  return {
+    ...s,
+    matchups: filterRowsForRankingsScope(s.matchups, matchupDateKey)
+  };
+}
+
+function updateRankingsScopeTabs() {
+  document.querySelectorAll("[data-rankings-scope]").forEach((btn) => {
+    const scope = btn.getAttribute("data-rankings-scope");
+    const active = scope === rankingsScope;
+
+    btn.classList.toggle("is-active", active);
+    btn.setAttribute("aria-selected", active ? "true" : "false");
+  });
+}
+
+function initRankingsScopeTabs() {
+  document.querySelectorAll("[data-rankings-scope]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const scope = btn.getAttribute("data-rankings-scope");
+      if (!scope || scope === rankingsScope) return;
+
+      rankingsScope = scope;
+
+      try {
+        localStorage.setItem(RANKINGS_SCOPE_STORAGE_KEY, rankingsScope);
+      } catch (e) {}
+
+      updateRankingsScopeTabs();
+      renderRankings();
+    });
+  });
+
+  updateRankingsScopeTabs();
+}
+
+function getRankingsScopeLabel() {
+  return RANKINGS_SCOPE_LABELS[rankingsScope] || "Rankings";
+}
+    
     function escapeHtml(value) {
       return String(value ?? '').replace(/[&<>\"']/g, (ch) => ({
         '&': '&amp;',
@@ -411,9 +525,10 @@
     }
 
     async function renderRankings() {
-      const state = readState();
-      const listEl = document.getElementById('rankingsList');
-      const emptyEl = document.getElementById('emptyState');
+const state = readState();
+const scopedState = getScopedRankingsState(state);
+const listEl = document.getElementById('rankingsList');
+const emptyEl = document.getElementById('emptyState');
 
       if (!state) {
         listEl.innerHTML = '';
@@ -433,9 +548,9 @@
           .map((player) => [player.id, player]))
       ]);
 
-      const ranked = (window.TaskPointsCore?.computeCanonicalRankings
-        ? TaskPointsCore.computeCanonicalRankings(state)
-        : [])
+const ranked = (window.TaskPointsCore?.computeCanonicalRankings
+  ? TaskPointsCore.computeCanonicalRankings(scopedState)
+  : [])
         .map((row) => {
           const player = playerById.get(row.playerId) || { id: row.playerId, name: row.name || row.playerId };
           return {
@@ -446,7 +561,7 @@
             ratingsText: ratingSummary(player)
           };
         });
-      const priorRankByPlayerId = computePriorRankMap(state);
+      const priorRankByPlayerId = computePriorRankMap(scopedState);
       const rankDeltaByPlayerId = new Map(
         ranked.map((row) => {
           const yesterdayRank = priorRankByPlayerId.get(row.playerId);
@@ -469,7 +584,10 @@
       emptyEl.classList.add('hidden');
     }
 
-    window.addEventListener('DOMContentLoaded', renderRankings);
+  window.addEventListener('DOMContentLoaded', () => {
+  initRankingsScopeTabs();
+  renderRankings();
+});
     window.addEventListener('beforeunload', () => {
       imageUrlCache.forEach((url) => URL.revokeObjectURL(url));
       imageUrlCache.clear();
