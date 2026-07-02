@@ -1285,14 +1285,18 @@ Nothing visible on the page is built here. === -->
 <div class="glass mb-6 flex-card sectionCard sectionCard--teal">
   <div class="sectionHeader sectionHeader--teal">
     <div class="flexControlsRow sectionHeaderControls flexControlsRow--withTitle">
-      <h2 id="flexAnchor" class="sectionTitle sectionTitle--inline">Flex Actions</h2>
+<h2 id="flexAnchor" class="sectionTitle sectionTitle--inline">Flex Actions</h2>
 
-      <button id="addFlexBtn" class="btn btn-primary btn-compact" type="button">+</button>
+<button id="addFlexBtn" class="btn btn-primary btn-compact" type="button">+</button>
 
-      <!-- Reuses the existing .recent-toggle JS on this page -->
-      <button class="recent-toggle" type="button" data-target="flexWrap" aria-expanded="true">
-        Hide
-      </button>
+<button id="flexDayToggleBtn" class="btn btn-secondary btn-compact" type="button">
+  ◀︎ Yesterday
+</button>
+
+<!-- Reuses the existing .recent-toggle JS on this page -->
+<button class="recent-toggle" type="button" data-target="flexWrap" aria-expanded="true">
+  Hide
+</button>
     </div>
   </div>
 
@@ -1842,7 +1846,7 @@ let taskActionSheetTrigger = null;
 let editingHabitId = null;
 let editingFlexId = null;
 let lastFlexCompletion = null;
-let habitViceWeekOffsetDays = 0; // 0 = this week, -7 = last week
+let flexDayOffsetDays = 0; // 0 = today, -1 = yesterday
 let weekSwapInFlight = false;
 const TASK_COMPACT_VIEW_KEY = 'tp_tasks_compact_view_v1';
 
@@ -1868,6 +1872,31 @@ function isViewingLastWeek() {
   return habitViceWeekOffsetDays === -7;
 }
 
+ function flexBaseDate() {
+  const base = new Date();
+  base.setHours(0,0,0,0);
+  return addDays(base, flexDayOffsetDays);
+}
+
+function flexViewDateKey() {
+  return dateKey(flexBaseDate());
+}
+
+function isViewingFlexYesterday() {
+  return flexDayOffsetDays === -1;
+}
+
+function updateFlexDayToggleButton() {
+  const btn = $('flexDayToggleBtn');
+  if (!btn) return;
+  btn.textContent = isViewingFlexYesterday() ? 'Today ▶︎' : '◀︎ Yesterday';
+}
+
+function toggleFlexDayView() {
+  flexDayOffsetDays = isViewingFlexYesterday() ? 0 : -1;
+  updateFlexDayToggleButton();
+  renderFlexActions();
+} 
 
 function sleepBonus(score) {
   if (window.TaskPointsCore?.sleepBonus) {
@@ -7822,13 +7851,14 @@ function renderFlexActions(){
     const bc = b.createdAtISO || '';
     return ac.localeCompare(bc);
   });
-  const todayKeyStr = dateKey(new Date());
+  const flexDateKeyStr = flexViewDateKey();
+const flexDayLabel = isViewingFlexYesterday() ? 'yesterday' : 'today';
   const flexUseCounts = new Map();
   let appliedAnimation = false;
   const completions = Array.isArray(state.completions) ? state.completions : [];
   for (const entry of completions) {
     if (!entry?.flexId) continue;
-    if (dateKey(entry.completedAtISO) !== todayKeyStr) continue;
+    if (dateKey(entry.completedAtISO) !== flexDateKeyStr) continue;
     flexUseCounts.set(entry.flexId, (flexUseCounts.get(entry.flexId) || 0) + 1);
   }
 
@@ -7880,7 +7910,7 @@ function renderFlexActions(){
         && lastFlexCompletion.id === f.id
         && (Date.now() - lastFlexCompletion.at) < 2000;
       const usageDots = usageCount
-        ? `<span class="flex-action-dots" aria-label="${usageCount} time${usageCount === 1 ? '' : 's'} used today">${Array.from({ length: usageCount }, (_, index) => `<span class="flex-action-dot${shouldAnimate && index === usageCount - 1 ? ' flex-action-dot--pop' : ''}"></span>`).join('')}</span>`
+        ? `<span class="flex-action-dots" aria-label="${usageCount} time${usageCount === 1 ? '' : 's'} used ${flexDayLabel}">${Array.from({ length: usageCount }, (_, index) => `<span class="flex-action-dot${shouldAnimate && index === usageCount - 1 ? ' flex-action-dot--pop' : ''}"></span>`).join('')}</span>`
         : '';
       row.innerHTML = `
         <div class="min-w-0 flex-action-main">
@@ -8028,14 +8058,17 @@ function logFlexCompletion(id){
   if(!Array.isArray(state.flexActions)) state.flexActions = [];
   const f = state.flexActions.find(x=>x.id===id);
   if(!f || f.retired) return;
-  const now = new Date().toISOString();
+
+  const completionDate = flexBaseDate();
+  completionDate.setHours(12, 0, 0, 0);
+
   addCompletion({
     id: crypto.randomUUID(),
     taskId: null,
     flexId: id,
     title: `[Flex] ${f.name}`,
     points: f.points || 0,
-    completedAtISO: now,
+    completedAtISO: completionDate.toISOString(),
     source: 'flex'
   });
 
@@ -11784,6 +11817,7 @@ try {
   if (b1) b1.onclick = toggleHabitViceWeek;
   if (b2) b2.onclick = toggleHabitViceWeek;
   $('addFlexBtn')?.addEventListener('click', openFlexModal);
+  $('flexDayToggleBtn')?.addEventListener('click', toggleFlexDayView);
   $('saveSleepScoreBtn')?.addEventListener('click', saveSleepScore);
   $('addHabitModal')?.addEventListener('keydown', e => {
     if (e.key === 'Escape') closeHabitModal();
@@ -11846,12 +11880,13 @@ try {
   initCaloriesDatePicker();
   initHabitSortControl();
   initHomeTabs();
-  updateWeekToggleButtons();
-  renderHabitWeekLabels();
-  renderViceWeekLabels();
-  renderHabits();
-  renderVices();
-  renderFlexActions();
+updateWeekToggleButtons();
+updateFlexDayToggleButton();
+renderHabitWeekLabels();
+renderViceWeekLabels();
+renderHabits();
+renderVices();
+renderFlexActions();
 
 // paint ASAP
 scheduleRender(renderAll);
