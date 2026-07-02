@@ -126,16 +126,21 @@
 
     .ranking-name { font-size:1.08rem; font-weight:700; line-height:1.2; }
     .ranking-record { font-size:0.9rem; color:rgba(212,212,216,0.9); }
-    .ranking-ratings {
-      font-size:0.82rem;
-      color:rgba(161,161,170,1);
-      white-space:normal;
-      overflow:visible;
-      text-overflow:clip;
-      word-break:break-word;
-      line-height:1.3;
-      margin-top:2px;
-    }
+.ranking-ratings {
+  font-size:0.82rem;
+  color:rgba(161,161,170,1);
+  white-space:normal;
+  overflow:visible;
+  text-overflow:clip;
+  word-break:break-word;
+  line-height:1.3;
+  margin-top:2px;
+}
+
+.ranking-stat-gold{
+  color:#fb923c;
+  font-weight:900;
+}
     .ranking-meta {
       align-self: stretch;
       padding-top: 8px;
@@ -413,16 +418,98 @@ function getRankingsScopeLabel() {
       return normalized.toFixed(1);
     }
 
-    function ratingSummary(player) {
-      const baseline = formatRating(player?.baseline);
-      const variance = formatRating(player?.variance);
-      const tilt = safeNumber(player?.varianceTilt);
-      const momentum = formatRating(player?.momentum);
-      const risky = formatRisky(player?.risky);
-      const style = (typeof player?.style === 'string' && player.style.trim()) ? player.style.trim() : '—';
-      const tiltText = tilt === null ? '—' : `${Math.max(0, Math.min(100, tilt)).toFixed(0)}%`;
-      return `B ${baseline} • V ${variance} • Tilt ${tiltText} • M ${momentum} • R ${risky} • ${style}`;
+const RANKINGS_GOLD_START_DATE = "2026-07-01";
+
+function formatSignedOneDecimal(value) {
+  const n = safeNumber(value);
+  if (n === null) return "—";
+  return `${n > 0 ? "+" : ""}${n.toFixed(1)}`;
+}
+
+function formatOneDecimal(value) {
+  const n = safeNumber(value);
+  if (n === null) return "—";
+  return n.toFixed(1);
+}
+
+function getRankingsMetricState(state) {
+  return typeof getScopedRankingsState === "function"
+    ? getScopedRankingsState(state)
+    : state;
+}
+
+function isRankingMatchupCounted(matchup) {
+  const key = matchupDateKey(matchup);
+  if (!key) return false;
+
+  const today = toDateKey(new Date());
+  return key < today;
+}
+
+function computeRankingExtrasForPlayer(player, row, state) {
+  const playerId = String(row?.playerId || player?.id || "").trim();
+  if (!playerId) {
+    return { gold: 0, mov: null, baseDelta: null };
+  }
+
+  const scopedState = getRankingsMetricState(state);
+  const matchups = Array.isArray(scopedState?.matchups) ? scopedState.matchups : [];
+
+  let games = 0;
+  let totalMargin = 0;
+  let gold = 0;
+
+  for (const m of matchups) {
+    if (!m || !isRankingMatchupCounted(m)) continue;
+
+    const isA = m.playerAId === playerId;
+    const isB = m.playerBId === playerId;
+    if (!isA && !isB) continue;
+
+    const aScore = Number(m.scoreA);
+    const bScore = Number(m.scoreB);
+    if (!Number.isFinite(aScore) || !Number.isFinite(bScore)) continue;
+
+    const playerScore = isA ? aScore : bScore;
+    const oppScore = isA ? bScore : aScore;
+    const margin = playerScore - oppScore;
+
+    games += 1;
+    totalMargin += margin;
+
+    const key = matchupDateKey(m);
+    if (key >= RANKINGS_GOLD_START_DATE && margin > 0) {
+      gold += margin / 10;
     }
+  }
+
+  const mov = games ? totalMargin / games : null;
+
+  const baseline = playerId === "YOU"
+    ? null
+    : safeNumber(player?.baseline);
+
+  const ppd = safeNumber(row?.ppd);
+  const baseDelta = baseline === null || ppd === null
+    ? null
+    : ppd - baseline;
+
+  return {
+    gold: Math.round((gold + Number.EPSILON) * 10) / 10,
+    mov,
+    baseDelta
+  };
+}
+
+function rankingStatsHtml(player, row, state) {
+  const extras = computeRankingExtrasForPlayer(player, row, state);
+
+  return `
+    <span class="ranking-stat-gold">Gold ${formatOneDecimal(extras.gold)}</span>
+    <span>• MOV ${formatSignedOneDecimal(extras.mov)}</span>
+    <span>• B△ ${formatSignedOneDecimal(extras.baseDelta)}</span>
+  `;
+}
 
     function getYouName(state) {
       const name = state && typeof state.youName === 'string'
@@ -518,7 +605,7 @@ function getRankingsScopeLabel() {
           <div class="ranking-meta min-w-0">
             <p class="ranking-name truncate">${escapeHtml(player.name)}</p>
             <p class="ranking-record">${player.wins}-${player.losses} • ${player.winPctLabel} • PPD ${player.ppdLabel}</p>
-            <p class="ranking-ratings" title="${escapeHtml(player.ratingsText)}">${escapeHtml(player.ratingsText)}</p>
+            <p class="ranking-ratings">${player.rankingsStatsHtml}</p>
           </div>
         </article>
       `;
@@ -553,13 +640,13 @@ const ranked = (window.TaskPointsCore?.computeCanonicalRankings
   : [])
         .map((row) => {
           const player = playerById.get(row.playerId) || { id: row.playerId, name: row.name || row.playerId };
-          return {
-            ...player,
-            ...row,
-            winPctLabel: formatWinPct(row.wins, row.games),
-            ppdLabel: formatPPD(row.ppd),
-            ratingsText: ratingSummary(player)
-          };
+return {
+  ...player,
+  ...row,
+  winPctLabel: formatWinPct(row.wins, row.games),
+  ppdLabel: formatPPD(row.ppd),
+  rankingsStatsHtml: rankingStatsHtml(player, row, scopedState)
+};
         });
       const priorRankByPlayerId = computePriorRankMap(scopedState);
       const rankDeltaByPlayerId = new Map(
