@@ -8663,7 +8663,12 @@ function deleteReminder(reminderId){
   if (typeof confirm === 'function' && !confirm('Delete this reminder?')) return;
   window.TaskPointsCore?.flushPendingSaves?.();
   state.reminders = reminders.filter((reminder) => !reminder || String(reminder.id) !== id);
-  saveReminders('reminders-delete', { deletedReminderIds: [id] });
+  saveReminders('reminders-delete', {
+    deletedReminderIds: [id],
+    allowDestructiveOverwrite: true,
+    userInitiated: true,
+    immediateWrite: true
+  });
   renderReminders();
 }
 
