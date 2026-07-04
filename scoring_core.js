@@ -7926,9 +7926,9 @@ const score = baseline + finalUpside + Math.min(0, rawScore - baseline);
 // Soft-cap only very high NPC scores.
 // Scores at or below 70 are unchanged.
 // Scores above 70 still rise, but increasingly slowly.
-// The absolute ceiling approaches 85 without making every big game exactly 85.
+// The absolute ceiling approaches 87 without making every big game exactly 87.
 const SOFT_CAP_START = 70;
-const SOFT_CAP_MAX = 85;
+const SOFT_CAP_MAX = 87;
 
 let cappedScore = score;
 
