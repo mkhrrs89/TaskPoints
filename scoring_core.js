@@ -4488,22 +4488,31 @@ const workHoursMax = Object.prototype.hasOwnProperty.call(workInput, 'hoursMax')
   function cleanupOpponentDripSchedules(state, options = {}) {
     const source = state && typeof state === 'object' ? state : {};
     const schedules = Array.isArray(source.opponentDripSchedules) ? source.opponentDripSchedules : [];
-    const maxEntries = Number.isFinite(options.maxEntries) ? options.maxEntries : 120;
-    const today = options.todayKey || dateKey(new Date());
-    const yesterday = addDaysToDateKey(today, -1);
-    const tomorrow = addDaysToDateKey(today, 1);
+const hasMaxEntries = Number.isFinite(options.maxEntries) && options.maxEntries >= 0;
+const maxEntries = hasMaxEntries ? Math.floor(options.maxEntries) : null;
+const todayOnly = options.todayOnly !== false;
+const today = options.todayKey || dateKey(new Date());
+const yesterday = addDaysToDateKey(today, -1);
+const tomorrow = addDaysToDateKey(today, 1);
     const validKey = /^\d{4}-\d{2}-\d{2}$/;
     const gameHistory = Array.isArray(source.gameHistory) ? source.gameHistory : [];
     const finalScoreSet = new Set(gameHistory.map((g) => `${String(g?.date || '')}|${String(g?.playerId || '')}`));
-    const isProtected = (item) => {
-      const d = typeof item?.date === 'string' ? item.date : '';
-      return d === today || d === yesterday || d === tomorrow || (validKey.test(d) && d > tomorrow);
-    };
-    const isRecoveryCandidate = (item) => {
-      const d = typeof item?.date === 'string' ? item.date : '';
-      const p = item?.playerId;
-      return validKey.test(d) && p != null && !finalScoreSet.has(`${d}|${String(p)}`);
-    };
+const isProtected = (item) => {
+  const d = typeof item?.date === 'string' ? item.date : '';
+
+  if (todayOnly) {
+    return d === today;
+  }
+
+  return d === today || d === yesterday || d === tomorrow || (validKey.test(d) && d > tomorrow);
+};
+const isRecoveryCandidate = (item) => {
+  if (todayOnly) return false;
+
+  const d = typeof item?.date === 'string' ? item.date : '';
+  const p = item?.playerId;
+  return validKey.test(d) && p != null && !finalScoreSet.has(`${d}|${String(p)}`);
+};
     const sorted = schedules.slice().sort((a, b) => {
       const d = String(b?.date || '').localeCompare(String(a?.date || ''));
       if (d) return d;
@@ -4519,10 +4528,11 @@ const workHoursMax = Object.prototype.hasOwnProperty.call(workInput, 'hoursMax')
       else removableOld.push(item);
     });
     const base = protectedSchedules.concat(recoverableOld);
-    let finalSchedules = base;
-    if (finalSchedules.length > maxEntries) {
-      finalSchedules = finalSchedules.slice(0, maxEntries);
-    }
+let finalSchedules = base;
+
+if (maxEntries !== null && finalSchedules.length > maxEntries) {
+  finalSchedules = finalSchedules.slice(0, maxEntries);
+}
     const cleanedState = { ...source, opponentDripSchedules: finalSchedules };
     return cleanedState;
   }
@@ -4654,9 +4664,10 @@ function pruneStateForStorage(state, limits = {}) {
   const maxGameHistory = Number.isFinite(limits.maxGameHistory) ? limits.maxGameHistory : 2500;
   const maxMatchups = Number.isFinite(limits.maxMatchups) ? limits.maxMatchups : 2500;
   const maxWorkHistory = Number.isFinite(limits.maxWorkHistory) ? limits.maxWorkHistory : 2500;
-  const maxOpponentDripSchedules = Number.isFinite(limits.maxOpponentDripSchedules)
-    ? limits.maxOpponentDripSchedules
-    : 120;
+const hasOpponentDripScheduleLimit = Number.isFinite(limits.maxOpponentDripSchedules);
+const maxOpponentDripSchedules = hasOpponentDripScheduleLimit
+  ? limits.maxOpponentDripSchedules
+  : null;
   const allowCompletionPrune = limits.allowCompletionPrune === true;
   const allowHistoryPrune = limits.allowHistoryPrune === true;
 
@@ -4671,7 +4682,10 @@ function pruneStateForStorage(state, limits = {}) {
   merged.workHistory = Array.isArray(merged.workHistory) ? merged.workHistory : [];
   merged.reminders = Array.isArray(merged.reminders) ? merged.reminders : [];
 
-  merged.opponentDripSchedules = cleanupOpponentDripSchedules(merged, { maxEntries: maxOpponentDripSchedules }).opponentDripSchedules;
+  merged.opponentDripSchedules = cleanupOpponentDripSchedules(merged, {
+  todayOnly: limits.opponentDripSchedulesTodayOnly !== false,
+  ...(hasOpponentDripScheduleLimit ? { maxEntries: maxOpponentDripSchedules } : {})
+}).opponentDripSchedules;
 
   if (allowCompletionPrune && merged.completions.length > maxCompletions) {
     const beforeCompletions = merged.completions.length;
@@ -4710,9 +4724,12 @@ function pruneStateForStorage(state, limits = {}) {
   if (merged.workHistory.length > maxWorkHistory) {
     merged.workHistory = merged.workHistory.slice(-maxWorkHistory);
   }
-  if (merged.opponentDripSchedules.length > maxOpponentDripSchedules) {
-    merged.opponentDripSchedules = merged.opponentDripSchedules.slice(0, maxOpponentDripSchedules);
-  }
+if (
+  hasOpponentDripScheduleLimit
+  && merged.opponentDripSchedules.length > maxOpponentDripSchedules
+) {
+  merged.opponentDripSchedules = merged.opponentDripSchedules.slice(0, maxOpponentDripSchedules);
+}
 
   return merged;
 }
@@ -5873,9 +5890,14 @@ return { state: merged, storageKey };
       console.log(`[TP saveStateSnapshot] start savePath=${savePath} storageKey=${storageKey} completionsBeforeFirstSave=${beforeSummary.completions}${callsite ? ` callsite=${callsite}` : ''}`);
     }
 
-    const cleanedInitialCandidate = cleanupOpponentDripSchedules(state, {
-      maxEntries: Number.isFinite(options?.limits?.maxOpponentDripSchedules) ? options.limits.maxOpponentDripSchedules : 120
-    });
+const hasOpponentDripScheduleLimit = Number.isFinite(options?.limits?.maxOpponentDripSchedules);
+
+const cleanedInitialCandidate = cleanupOpponentDripSchedules(state, {
+  todayOnly: options?.limits?.opponentDripSchedulesTodayOnly !== false,
+  ...(hasOpponentDripScheduleLimit
+    ? { maxEntries: options.limits.maxOpponentDripSchedules }
+    : {})
+});
     const initialStoredBytes = getStorageKeySizeBytes(storageKey);
     const initialCandidateBytes = getJsonSizeBytes(cleanedInitialCandidate);
     const shouldPrecompactGenerated = initialCandidateBytes > TASKPOINTS_LARGE_SAVE_WARN_BYTES
