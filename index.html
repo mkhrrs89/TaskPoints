@@ -3253,6 +3253,25 @@ function getOpponentDripSchedules(){
   return Array.isArray(state.opponentDripSchedules) ? state.opponentDripSchedules : [];
 }
 
+function pruneOpponentDripSchedulesToTodayOnly(){
+  const todayK = todayKey();
+  const schedules = Array.isArray(state.opponentDripSchedules)
+    ? state.opponentDripSchedules
+    : [];
+
+  const filtered = schedules.filter((schedule) => {
+    const key = String(schedule?.date || schedule?.dateKey || '').slice(0, 10);
+    return key === todayK;
+  });
+
+  if (filtered.length !== schedules.length) {
+    state.opponentDripSchedules = filtered;
+    return true;
+  }
+
+  return false;
+}
+  
 // Compatibility wrapper. NPC drip schedule generation is centralized in scoring_core.js.
 function generateOpponentDripSchedule(dateKeyStr, playerId, totalPoints){
   if (typeof TaskPointsCore?.generateOpponentDripScheduleCore !== "function") {
@@ -3330,8 +3349,18 @@ function accruedOpponentPoints(schedule, now = new Date()){
 }
 
 function visibleOpponentScoreForMatchup(dateKeyStr, playerId, targetTotal){
-  const schedule = ensureOpponentDripSchedule(dateKeyStr, playerId, targetTotal);
-  return schedule ? accruedOpponentPoints(schedule, new Date()) : Math.max(0, Number(targetTotal) || 0);
+  const finalScore = Math.max(0, Number(targetTotal) || 0);
+  const key = String(dateKeyStr || '').slice(0, 10);
+  const todayK = todayKey();
+
+  // Only today gets a live drip animation.
+  // Past days should show the saved final score and should not regenerate old drip schedules.
+  if (!key || key !== todayK) {
+    return finalScore;
+  }
+
+  const schedule = ensureOpponentDripSchedule(key, playerId, finalScore);
+  return schedule ? accruedOpponentPoints(schedule, new Date()) : finalScore;
 }
 
 /* ---------- MATCHUP AUTO-SIM ---------- */
@@ -3962,13 +3991,29 @@ function normalizeState(s) {
   return normalized;
 }
 
+function buildHomeSaveOptions(savePath, extraOptions = {}) {
+  const extraLimits = extraOptions && typeof extraOptions.limits === 'object'
+    ? extraOptions.limits
+    : {};
+
+  return {
+    allowGeneratedCacheClear: true,
+    storageEmergencyCompaction: true,
+    ...extraOptions,
+    limits: {
+      maxWorkHistory: 250,
+      ...extraLimits
+    },
+    ...(savePath ? { savePath } : {})
+  };
+}
+  
 function save(savePath, extraOptions = {}) {
   try {
-    if (window.TaskPointsCore?.saveAppState) {
-      const saveOptions = { ...extraOptions, ...(savePath ? { savePath } : {}) };
-      const { state: merged, trimmed } = Object.keys(saveOptions).length
-        ? TaskPointsCore.saveStateSnapshot(state, saveOptions)
-        : TaskPointsCore.saveStateSnapshot(state);
+    pruneOpponentDripSchedulesToTodayOnly();
+if (window.TaskPointsCore?.saveAppState) {
+  const saveOptions = buildHomeSaveOptions(savePath, extraOptions);
+  const { state: merged, trimmed } = TaskPointsCore.saveStateSnapshot(state, saveOptions);
       if (trimmed) {
         console.warn('Storage nearing capacity. Older history items were trimmed to keep saves working.');
       }
@@ -3977,11 +4022,9 @@ function save(savePath, extraOptions = {}) {
       storageCache.raw = null;
       return;
     }
-    if (window.TaskPointsCore?.mergeAndSaveState) {
-      const saveOptions = { ...extraOptions, ...(savePath ? { savePath } : {}) };
-      const { state: merged, trimmed } = Object.keys(saveOptions).length
-        ? TaskPointsCore.saveStateSnapshot(state, saveOptions)
-        : TaskPointsCore.saveStateSnapshot(state);
+if (window.TaskPointsCore?.mergeAndSaveState) {
+  const saveOptions = buildHomeSaveOptions(savePath, extraOptions);
+  const { state: merged, trimmed } = TaskPointsCore.saveStateSnapshot(state, saveOptions);
       if (trimmed) {
         console.warn('Storage nearing capacity. Older history items were trimmed to keep saves working.');
       }
