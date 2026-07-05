@@ -2981,7 +2981,7 @@ function getPlayerRecordText(playerId) {
   if (!playerId || playerId === 'YOU') return '0-0';
 
   if (window.TaskPointsCore?.computeRecord) {
-    const record = TaskPointsCore.computeRecord(state, playerId, { includeToday: false, allowFallback: false });
+    const record = TaskPointsCore.computeRecord(getHomeScoreboardSeasonTwoState(), playerId, { includeToday: false, allowFallback: false });
     return record.games ? `${record.wins}-${record.losses}` : '0-0';
   }
 
@@ -2990,7 +2990,8 @@ function getPlayerRecordText(playerId) {
     ? player.baseline
     : null;
 
-  const history = Array.isArray(state.gameHistory) ? state.gameHistory : [];
+  const scopedState = getHomeScoreboardSeasonTwoState();
+  const history = Array.isArray(scopedState.gameHistory) ? scopedState.gameHistory : [];
 
   let wins = 0;
   let losses = 0;
@@ -3019,7 +3020,7 @@ function getYourRecordText() {
 
 function computeYourRecord(){
   if (window.TaskPointsCore?.computeRecord) {
-    return TaskPointsCore.computeRecord(state, 'YOU', { includeToday: false, allowFallback: false });
+    return TaskPointsCore.computeRecord(getHomeScoreboardSeasonTwoState(), 'YOU', { includeToday: false, allowFallback: false });
   }
   const matchupRecord = computeYourMatchupRecord();
   if (matchupRecord.games > 0) return matchupRecord;
@@ -3353,10 +3354,46 @@ function getAllParticipantIds(){
   return ids;
 }
 
+const HOME_SCOREBOARD_SEASON_TWO_START = "2026-07-01";
+
+function getHomeScoreboardDateKey(row) {
+  if (!row) return "";
+
+  if (row.dateKey) return String(row.dateKey).slice(0, 10);
+  if (row.date) return String(row.date).slice(0, 10);
+
+  if (row.dateISO) return dateKey(row.dateISO);
+  if (row.completedAtISO) return dateKey(row.completedAtISO);
+  if (row.createdAtISO) return dateKey(row.createdAtISO);
+
+  return "";
+}
+
+function getHomeScoreboardSeasonTwoRows(rows) {
+  const list = Array.isArray(rows) ? rows : [];
+
+  return list.filter((row) => {
+    const key = getHomeScoreboardDateKey(row);
+    return key && key >= HOME_SCOREBOARD_SEASON_TWO_START;
+  });
+}
+
+function getHomeScoreboardSeasonTwoState() {
+  const s = state || {};
+
+  return {
+    ...s,
+    matchups: getHomeScoreboardSeasonTwoRows(s.matchups),
+    gameHistory: getHomeScoreboardSeasonTwoRows(s.gameHistory),
+    completions: getHomeScoreboardSeasonTwoRows(s.completions)
+  };
+}
+
 function getCanonicalRankingMap(){
   if (!window.TaskPointsCore?.computeCanonicalRankings) return new Map();
 
-  const rows = TaskPointsCore.computeCanonicalRankings(state);
+  const scopedState = getHomeScoreboardSeasonTwoState();
+  const rows = TaskPointsCore.computeCanonicalRankings(scopedState);
   const byId = new Map();
 
   rows.forEach((row) => {
