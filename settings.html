@@ -153,7 +153,10 @@
           </div>
         </summary>
         <div class="space-y-3 pt-4">
-          <div class="flex items-center justify-end gap-2">
+          <div class="flex flex-wrap items-center justify-end gap-2">
+            <button id="clearTodayViewCacheBtn" class="btn btn-ghost btn-toolbar nav-btn" type="button">Clear Today View Cache</button>
+            <button id="clearLocalBackupsBtn" class="btn btn-warn btn-toolbar nav-btn" type="button">Clear Local Backups</button>
+            <button id="safeStorageCleanupBtn" class="btn btn-warn btn-toolbar nav-btn" type="button">Safe Storage Cleanup</button>
             <button id="storageHealthDeleteQuarantineBtn" class="btn btn-warn btn-toolbar nav-btn" type="button">Delete quarantined snapshot</button>
             <button id="storageHealthRefreshBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Refresh</button>
           </div>
@@ -4020,6 +4023,44 @@ rows.push([
         <div class="text-xs">${counts ? `Data counts: tasks ${counts.tasks}, reminders ${counts.reminders}, completions ${counts.completions}, players ${counts.players}, habits ${counts.habits}, gameHistory ${counts.gameHistory}, matchups ${counts.matchups}, opponentDripSchedules ${counts.opponentDripSchedules}` : "Data counts unavailable (missing or invalid taskpoints_v1 JSON)."}</div>`;
     }
 
+    function clearTodayViewCache() {
+      localStorage.removeItem("taskpoints_today_view_v1");
+      renderStorageHealthPanel();
+    }
+
+    function clearLocalBackups() {
+      const ok = confirm("Clear disposable storage caches/backups? Your main TaskPoints data will not be deleted.");
+      if (!ok) return;
+      [
+        "taskpoints_quarantined_snapshot",
+        "taskpoints_backup_latest",
+        "taskpoints_backup_prev1",
+        "taskpoints_backup_prev2",
+        "taskpoints_backup_prev3"
+      ].forEach((key) => localStorage.removeItem(key));
+
+      renderStorageHealthPanel();
+    }
+
+    function safeStorageCleanup() {
+      const ok = confirm("Clear disposable storage caches/backups? Your main TaskPoints data will not be deleted.");
+      if (!ok) return;
+      if (window.TaskPointsCore?.flushPendingSaves) {
+        TaskPointsCore.flushPendingSaves();
+      }
+
+      [
+        "taskpoints_today_view_v1",
+        "taskpoints_quarantined_snapshot",
+        "taskpoints_backup_latest",
+        "taskpoints_backup_prev1",
+        "taskpoints_backup_prev2",
+        "taskpoints_backup_prev3"
+      ].forEach((key) => localStorage.removeItem(key));
+
+      renderStorageHealthPanel();
+    }
+
 
     function handleDeleteLatestLocalBackup() {
       const key = "taskpoints_backup_latest";
@@ -4487,6 +4528,9 @@ rows.push([
       document.getElementById('habitCalendarReportBtn')?.addEventListener('click', generateHabitCalendarReport);
       document.getElementById('storageHealthRefreshBtn')?.addEventListener('click', renderStorageHealthPanel);
       document.getElementById('storageHealthDeleteQuarantineBtn')?.addEventListener('click', handleDeleteQuarantinedSnapshot);
+      document.getElementById('clearTodayViewCacheBtn')?.addEventListener('click', clearTodayViewCache);
+      document.getElementById('clearLocalBackupsBtn')?.addEventListener('click', clearLocalBackups);
+      document.getElementById('safeStorageCleanupBtn')?.addEventListener('click', safeStorageCleanup);
       document.getElementById('notesRecoveryScanBtn')?.addEventListener('click', scanForRecoverableNotes);
       document.getElementById('notesRecoveryScanAllBtn')?.addEventListener('click', scanAllLocalStorageKeys);
       document.getElementById('notesRecoveryRestoreBtn')?.addEventListener('click', restoreSelectedNotesCandidate);
