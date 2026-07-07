@@ -27,7 +27,7 @@
   const TASKPOINTS_STORAGE_ENCODING_LZ16_PACKED_V1 = "lz16-packed-v1";
   const TASKPOINTS_STORAGE_ENCODING_VERSION = 1;
   const TASKPOINTS_COMPRESSED_MIN_RATIO = 0.90;
-  const TASKPOINTS_ENABLE_COMPRESSED_STORAGE = true;
+  const TASKPOINTS_ENABLE_COMPRESSED_STORAGE = false;
 
   // UTF-16 localStorage-safe LZ compression derived from lz-string 1.4.4
   // (Pieroxy, MIT License): https://github.com/pieroxy/lz-string
@@ -338,24 +338,34 @@
     return unpackTaskPointsStorageState(JSON.parse(decodedRaw) || fallback);
   }
 
-  function buildOptimizedTaskPointsStorageRaw(state) {
-    const packedState = packTaskPointsStorageState(state);
-    const packedRawJson = JSON.stringify(packedState);
-    const compressedWrapperRaw = JSON.stringify(makeCompressedStorageWrapper(packedRawJson));
-    const useCompressed = TASKPOINTS_ENABLE_COMPRESSED_STORAGE && compressedWrapperRaw.length < packedRawJson.length * TASKPOINTS_COMPRESSED_MIN_RATIO;
-    const chosenRaw = useCompressed ? compressedWrapperRaw : packedRawJson;
-    return {
-      packedState,
-      packedRawJson,
-      compressedWrapperRaw,
-      chosenRaw,
-      chosenEncoding: useCompressed ? TASKPOINTS_STORAGE_ENCODING_LZ16_PACKED_V1 : (packedState?.__packedArrays ? 'packed-json' : 'plain-json'),
-      packedRawChars: packedRawJson.length,
-      compressedRawChars: compressedWrapperRaw.length,
-      chosenChars: chosenRaw.length,
-      chosenBytes: chosenRaw.length * 2
-    };
+function buildOptimizedTaskPointsStorageRaw(state) {
+  const packedState = packTaskPointsStorageState(state);
+  const packedRawJson = JSON.stringify(packedState);
+
+  let compressedWrapperRaw = '';
+  let useCompressed = false;
+
+  if (TASKPOINTS_ENABLE_COMPRESSED_STORAGE) {
+    compressedWrapperRaw = JSON.stringify(makeCompressedStorageWrapper(packedRawJson));
+    useCompressed = compressedWrapperRaw.length < packedRawJson.length * TASKPOINTS_COMPRESSED_MIN_RATIO;
   }
+
+  const chosenRaw = useCompressed ? compressedWrapperRaw : packedRawJson;
+
+  return {
+    packedState,
+    packedRawJson,
+    compressedWrapperRaw,
+    chosenRaw,
+    chosenEncoding: useCompressed
+      ? TASKPOINTS_STORAGE_ENCODING_LZ16_PACKED_V1
+      : (packedState?.__packedArrays ? 'packed-json' : 'plain-json'),
+    packedRawChars: packedRawJson.length,
+    compressedRawChars: compressedWrapperRaw.length,
+    chosenChars: chosenRaw.length,
+    chosenBytes: chosenRaw.length * 2
+  };
+}
 
 
   function isCompressedTaskPointsStorageRaw(raw) {
