@@ -22,6 +22,67 @@
     seasonHistory: []
   };
 
+
+  const TASKPOINTS_STORAGE_ENCODING_KEY = "__taskpointsStorageEncoding";
+  const TASKPOINTS_STORAGE_ENCODING_LZ16_PACKED_V1 = "lz16-packed-v1";
+  const TASKPOINTS_STORAGE_ENCODING_VERSION = 1;
+  const TASKPOINTS_COMPRESSED_MIN_RATIO = 0.90;
+
+  // UTF-16 localStorage-safe LZ compression derived from lz-string 1.4.4
+  // (Pieroxy, MIT License): https://github.com/pieroxy/lz-string
+  const TaskPointsLZString = (() => {
+    const f = String.fromCharCode;
+    function compress(uncompressed, bitsPerChar, getCharFromInt) {
+      if (uncompressed == null) return "";
+      let i; let value; const context_dictionary = {}; const context_dictionaryToCreate = {}; let context_c = ""; let context_wc = ""; let context_w = ""; let context_enlargeIn = 2; let context_dictSize = 3; let context_numBits = 2; const context_data = []; let context_data_val = 0; let context_data_position = 0;
+      for (let ii = 0; ii < uncompressed.length; ii += 1) {
+        context_c = uncompressed.charAt(ii);
+        if (!Object.prototype.hasOwnProperty.call(context_dictionary, context_c)) { context_dictionary[context_c] = context_dictSize++; context_dictionaryToCreate[context_c] = true; }
+        context_wc = context_w + context_c;
+        if (Object.prototype.hasOwnProperty.call(context_dictionary, context_wc)) { context_w = context_wc; } else {
+          if (Object.prototype.hasOwnProperty.call(context_dictionaryToCreate, context_w)) {
+            if (context_w.charCodeAt(0) < 256) { for (i = 0; i < context_numBits; i += 1) { context_data_val <<= 1; if (context_data_position == bitsPerChar - 1) { context_data_position = 0; context_data.push(getCharFromInt(context_data_val)); context_data_val = 0; } else context_data_position += 1; } value = context_w.charCodeAt(0); for (i = 0; i < 8; i += 1) { context_data_val = (context_data_val << 1) | (value & 1); if (context_data_position == bitsPerChar - 1) { context_data_position = 0; context_data.push(getCharFromInt(context_data_val)); context_data_val = 0; } else context_data_position += 1; value >>= 1; } }
+            else { value = 1; for (i = 0; i < context_numBits; i += 1) { context_data_val = (context_data_val << 1) | value; if (context_data_position == bitsPerChar - 1) { context_data_position = 0; context_data.push(getCharFromInt(context_data_val)); context_data_val = 0; } else context_data_position += 1; value = 0; } value = context_w.charCodeAt(0); for (i = 0; i < 16; i += 1) { context_data_val = (context_data_val << 1) | (value & 1); if (context_data_position == bitsPerChar - 1) { context_data_position = 0; context_data.push(getCharFromInt(context_data_val)); context_data_val = 0; } else context_data_position += 1; value >>= 1; } }
+            context_enlargeIn--; if (context_enlargeIn === 0) { context_enlargeIn = Math.pow(2, context_numBits); context_numBits++; } delete context_dictionaryToCreate[context_w];
+          } else { value = context_dictionary[context_w]; for (i = 0; i < context_numBits; i += 1) { context_data_val = (context_data_val << 1) | (value & 1); if (context_data_position == bitsPerChar - 1) { context_data_position = 0; context_data.push(getCharFromInt(context_data_val)); context_data_val = 0; } else context_data_position += 1; value >>= 1; } }
+          context_enlargeIn--; if (context_enlargeIn === 0) { context_enlargeIn = Math.pow(2, context_numBits); context_numBits++; } context_dictionary[context_wc] = context_dictSize++; context_w = String(context_c);
+        }
+      }
+      if (context_w !== "") {
+        if (Object.prototype.hasOwnProperty.call(context_dictionaryToCreate, context_w)) {
+          if (context_w.charCodeAt(0) < 256) { for (i = 0; i < context_numBits; i += 1) { context_data_val <<= 1; if (context_data_position == bitsPerChar - 1) { context_data_position = 0; context_data.push(getCharFromInt(context_data_val)); context_data_val = 0; } else context_data_position += 1; } value = context_w.charCodeAt(0); for (i = 0; i < 8; i += 1) { context_data_val = (context_data_val << 1) | (value & 1); if (context_data_position == bitsPerChar - 1) { context_data_position = 0; context_data.push(getCharFromInt(context_data_val)); context_data_val = 0; } else context_data_position += 1; value >>= 1; } }
+          else { value = 1; for (i = 0; i < context_numBits; i += 1) { context_data_val = (context_data_val << 1) | value; if (context_data_position == bitsPerChar - 1) { context_data_position = 0; context_data.push(getCharFromInt(context_data_val)); context_data_val = 0; } else context_data_position += 1; value = 0; } value = context_w.charCodeAt(0); for (i = 0; i < 16; i += 1) { context_data_val = (context_data_val << 1) | (value & 1); if (context_data_position == bitsPerChar - 1) { context_data_position = 0; context_data.push(getCharFromInt(context_data_val)); context_data_val = 0; } else context_data_position += 1; value >>= 1; } }
+          context_enlargeIn--; if (context_enlargeIn === 0) { context_enlargeIn = Math.pow(2, context_numBits); context_numBits++; } delete context_dictionaryToCreate[context_w];
+        } else { value = context_dictionary[context_w]; for (i = 0; i < context_numBits; i += 1) { context_data_val = (context_data_val << 1) | (value & 1); if (context_data_position == bitsPerChar - 1) { context_data_position = 0; context_data.push(getCharFromInt(context_data_val)); context_data_val = 0; } else context_data_position += 1; value >>= 1; } }
+        context_enlargeIn--; if (context_enlargeIn === 0) context_numBits++;
+      }
+      value = 2; for (i = 0; i < context_numBits; i += 1) { context_data_val = (context_data_val << 1) | (value & 1); if (context_data_position == bitsPerChar - 1) { context_data_position = 0; context_data.push(getCharFromInt(context_data_val)); context_data_val = 0; } else context_data_position += 1; value >>= 1; }
+      while (true) { context_data_val <<= 1; if (context_data_position == bitsPerChar - 1) { context_data.push(getCharFromInt(context_data_val)); break; } else context_data_position += 1; }
+      return context_data.join('');
+    }
+    function decompress(length, resetValue, getNextValue) {
+      const dictionary = []; let enlargeIn = 4; let dictSize = 4; let numBits = 3; let entry = ''; const result = []; let i; let w; let bits; let resb; let maxpower; let power; let c; const data = { val: getNextValue(0), position: resetValue, index: 1 };
+      for (i = 0; i < 3; i += 1) dictionary[i] = i;
+      bits = 0; maxpower = Math.pow(2, 2); power = 1; while (power !== maxpower) { resb = data.val & data.position; data.position >>= 1; if (data.position === 0) { data.position = resetValue; data.val = getNextValue(data.index++); } bits |= (resb > 0 ? 1 : 0) * power; power <<= 1; }
+      switch (bits) { case 0: bits = 0; maxpower = Math.pow(2, 8); power = 1; while (power !== maxpower) { resb = data.val & data.position; data.position >>= 1; if (data.position === 0) { data.position = resetValue; data.val = getNextValue(data.index++); } bits |= (resb > 0 ? 1 : 0) * power; power <<= 1; } c = f(bits); break; case 1: bits = 0; maxpower = Math.pow(2, 16); power = 1; while (power !== maxpower) { resb = data.val & data.position; data.position >>= 1; if (data.position === 0) { data.position = resetValue; data.val = getNextValue(data.index++); } bits |= (resb > 0 ? 1 : 0) * power; power <<= 1; } c = f(bits); break; case 2: return ''; default: c = ''; }
+      dictionary[3] = c; w = c; result.push(c);
+      while (true) {
+        if (data.index > length) return '';
+        bits = 0; maxpower = Math.pow(2, numBits); power = 1; while (power !== maxpower) { resb = data.val & data.position; data.position >>= 1; if (data.position === 0) { data.position = resetValue; data.val = getNextValue(data.index++); } bits |= (resb > 0 ? 1 : 0) * power; power <<= 1; }
+        c = bits;
+        switch (c) { case 0: bits = 0; maxpower = Math.pow(2, 8); power = 1; while (power !== maxpower) { resb = data.val & data.position; data.position >>= 1; if (data.position === 0) { data.position = resetValue; data.val = getNextValue(data.index++); } bits |= (resb > 0 ? 1 : 0) * power; power <<= 1; } dictionary[dictSize++] = f(bits); c = dictSize - 1; enlargeIn--; break; case 1: bits = 0; maxpower = Math.pow(2, 16); power = 1; while (power !== maxpower) { resb = data.val & data.position; data.position >>= 1; if (data.position === 0) { data.position = resetValue; data.val = getNextValue(data.index++); } bits |= (resb > 0 ? 1 : 0) * power; power <<= 1; } dictionary[dictSize++] = f(bits); c = dictSize - 1; enlargeIn--; break; case 2: return result.join(''); }
+        if (enlargeIn === 0) { enlargeIn = Math.pow(2, numBits); numBits++; }
+        if (dictionary[c]) entry = dictionary[c]; else if (c === dictSize) entry = w + w.charAt(0); else return null;
+        result.push(entry); dictionary[dictSize++] = w + entry.charAt(0); enlargeIn--; w = entry;
+        if (enlargeIn === 0) { enlargeIn = Math.pow(2, numBits); numBits++; }
+      }
+    }
+    return {
+      compressToUTF16(input) { if (input == null) return ''; return compress(input, 15, (a) => f(a + 32)) + ' '; },
+      decompressFromUTF16(compressed) { if (compressed == null) return ''; if (compressed === '') return null; return decompress(compressed.length, 16384, (index) => compressed.charCodeAt(index) - 32); }
+    };
+  })();
+
   const PACKED_ARRAY_MIN_SAVINGS_RATIO = 0.95;
   const SHORT_KEY_ALPHABET = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
 
@@ -185,9 +246,114 @@
     return unpacked;
   }
 
+  function compressStorageString(rawJson) {
+    return TaskPointsLZString.compressToUTF16(String(rawJson || ''));
+  }
+
+  function decompressStorageString(encoded) {
+    const decoded = TaskPointsLZString.decompressFromUTF16(String(encoded || ''));
+    if (typeof decoded !== 'string') throw new Error('TaskPoints storage decompression failed: invalid compressed payload.');
+    return decoded;
+  }
+
+  function isCompressedTaskPointsStorageWrapper(parsed) {
+    return Boolean(parsed
+      && typeof parsed === 'object'
+      && !Array.isArray(parsed)
+      && parsed[TASKPOINTS_STORAGE_ENCODING_KEY] === TASKPOINTS_STORAGE_ENCODING_LZ16_PACKED_V1);
+  }
+
+  function makeCompressedStorageWrapper(packedRawJson) {
+    return {
+      [TASKPOINTS_STORAGE_ENCODING_KEY]: TASKPOINTS_STORAGE_ENCODING_LZ16_PACKED_V1,
+      __taskpointsStorageVersion: TASKPOINTS_STORAGE_ENCODING_VERSION,
+      data: compressStorageString(packedRawJson)
+    };
+  }
+
+  function encodeTaskPointsStorageJson(rawJson) {
+    const packedRawJson = String(rawJson || '{}');
+    const compressedWrapperRaw = JSON.stringify(makeCompressedStorageWrapper(packedRawJson));
+    return compressedWrapperRaw.length < packedRawJson.length * TASKPOINTS_COMPRESSED_MIN_RATIO
+      ? compressedWrapperRaw
+      : packedRawJson;
+  }
+
+  function getTaskPointsStorageEncodingInfo(raw) {
+    const info = {
+      encoding: 'plain-json',
+      label: 'plain JSON',
+      packed: false,
+      compressed: false,
+      rawChars: raw ? String(raw).length : 0,
+      unpackedNormalJsonChars: 0,
+      packedRawChars: 0,
+      compressedRawChars: 0,
+      savingsChars: 0
+    };
+    if (!raw) return info;
+    try {
+      const parsed = JSON.parse(raw);
+      if (isCompressedTaskPointsStorageWrapper(parsed) && typeof parsed.data === 'string') {
+        const packedRaw = decompressStorageString(parsed.data);
+        const packedState = JSON.parse(packedRaw);
+        const unpacked = unpackTaskPointsStorageState(packedState);
+        info.encoding = TASKPOINTS_STORAGE_ENCODING_LZ16_PACKED_V1;
+        info.label = 'compressed packed JSON';
+        info.packed = Boolean(packedState?.__packedArrays && Object.keys(packedState.__packedArrays).length);
+        info.compressed = true;
+        info.compressedRawChars = raw.length;
+        info.packedRawChars = packedRaw.length;
+        info.unpackedNormalJsonChars = JSON.stringify(unpacked || {}).length;
+        info.savingsChars = Math.max(0, info.unpackedNormalJsonChars - raw.length);
+        return info;
+      }
+      info.packed = Boolean(parsed?.__packedArrays && Object.keys(parsed.__packedArrays).length);
+      info.encoding = info.packed ? 'packed-json' : 'plain-json';
+      info.label = info.packed ? 'packed JSON' : 'plain JSON';
+      const unpacked = unpackTaskPointsStorageState(parsed);
+      info.unpackedNormalJsonChars = JSON.stringify(unpacked || {}).length;
+      info.packedRawChars = info.packed ? raw.length : 0;
+      info.savingsChars = Math.max(0, info.unpackedNormalJsonChars - raw.length);
+    } catch (_) {}
+    return info;
+  }
+
+  function decodeTaskPointsStorageJson(raw) {
+    if (!raw) return raw;
+    const parsed = JSON.parse(raw);
+    if (!isCompressedTaskPointsStorageWrapper(parsed)) return raw;
+    if (typeof parsed.data !== 'string') throw new Error('TaskPoints compressed storage decode failed: wrapper data is missing or invalid.');
+    try {
+      return decompressStorageString(parsed.data);
+    } catch (error) {
+      throw new Error(`TaskPoints compressed storage decode failed: ${error && error.message ? error.message : error}`);
+    }
+  }
+
   function parseTaskPointsStorageJson(raw, fallback = {}) {
     if (!raw) return fallback;
-    return unpackTaskPointsStorageState(JSON.parse(raw) || fallback);
+    const decodedRaw = decodeTaskPointsStorageJson(raw);
+    return unpackTaskPointsStorageState(JSON.parse(decodedRaw) || fallback);
+  }
+
+  function buildOptimizedTaskPointsStorageRaw(state) {
+    const packedState = packTaskPointsStorageState(state);
+    const packedRawJson = JSON.stringify(packedState);
+    const compressedWrapperRaw = JSON.stringify(makeCompressedStorageWrapper(packedRawJson));
+    const useCompressed = compressedWrapperRaw.length < packedRawJson.length * TASKPOINTS_COMPRESSED_MIN_RATIO;
+    const chosenRaw = useCompressed ? compressedWrapperRaw : packedRawJson;
+    return {
+      packedState,
+      packedRawJson,
+      compressedWrapperRaw,
+      chosenRaw,
+      chosenEncoding: useCompressed ? TASKPOINTS_STORAGE_ENCODING_LZ16_PACKED_V1 : (packedState?.__packedArrays ? 'packed-json' : 'plain-json'),
+      packedRawChars: packedRawJson.length,
+      compressedRawChars: compressedWrapperRaw.length,
+      chosenChars: chosenRaw.length,
+      chosenBytes: chosenRaw.length * 2
+    };
   }
 
   function safeReplaceTaskPointsStorage(storageKey, serializedCandidate) {
@@ -5828,6 +5994,14 @@ return { state: merged, storageKey };
       storageKey: info?.storageKey || STORAGE_KEY,
       storedBytes: Number(info?.storedBytes) || 0,
       candidateBytes: Number(info?.candidateBytes) || 0,
+      unpackedCandidateBytes: Number(info?.unpackedCandidateBytes) || 0,
+      packedCandidateBytes: Number(info?.packedCandidateBytes) || 0,
+      compressedCandidateBytes: Number(info?.compressedCandidateBytes) || 0,
+      packedRawChars: Number(info?.packedRawChars) || 0,
+      compressedRawChars: Number(info?.compressedRawChars) || 0,
+      chosenStorageEncoding: info?.chosenStorageEncoding || 'unknown',
+      chosenStorageChars: Number(info?.chosenStorageChars) || 0,
+      chosenStorageBytes: Number(info?.chosenStorageBytes) || 0,
       localStorageTotalBytes: (() => {
         try { return getLocalStorageSizeReport().totalBytes; } catch (_) { return 0; }
       })(),
@@ -6188,16 +6362,32 @@ return { state: merged, storageKey };
       if (candidateBytes > TASKPOINTS_LARGE_SAVE_WARN_BYTES || (storedBytes > 0 && candidateBytes > storedBytes + (512 * 1024))) {
         recordQuotaFailureDiagnostics({ savePath, stage, storageKey, storedBytes, candidateBytes, snapshot: candidateWithSticky });
       }
-      const storageCandidate = packTaskPointsStorageState(candidateWithSticky);
-      const serializedCandidate = JSON.stringify(storageCandidate);
-      const packedCandidateBytes = serializedCandidate.length * 2;
-      if (packedCandidateBytes > TASKPOINTS_LARGE_SAVE_WARN_BYTES || (storedBytes > 0 && packedCandidateBytes > storedBytes + (512 * 1024))) {
-        recordQuotaFailureDiagnostics({ savePath, stage: `${stage}:packed`, storageKey, storedBytes, candidateBytes: packedCandidateBytes, snapshot: storageCandidate });
+      const storagePlan = buildOptimizedTaskPointsStorageRaw(candidateWithSticky);
+      const packedCandidateBytes = storagePlan.packedRawChars * 2;
+      const compressedCandidateBytes = storagePlan.compressedRawChars * 2;
+      const chosenStorageBytes = storagePlan.chosenChars * 2;
+      if (chosenStorageBytes > TASKPOINTS_LARGE_SAVE_WARN_BYTES || (storedBytes > 0 && chosenStorageBytes > storedBytes + (512 * 1024))) {
+        recordQuotaFailureDiagnostics({
+          savePath,
+          stage: `${stage}:${storagePlan.chosenEncoding}`,
+          storageKey,
+          storedBytes,
+          candidateBytes: chosenStorageBytes,
+          unpackedCandidateBytes: candidateBytes,
+          packedCandidateBytes,
+          compressedCandidateBytes,
+          packedRawChars: storagePlan.packedRawChars,
+          compressedRawChars: storagePlan.compressedRawChars,
+          chosenStorageEncoding: storagePlan.chosenEncoding,
+          chosenStorageChars: storagePlan.chosenChars,
+          chosenStorageBytes,
+          snapshot: storagePlan.packedState
+        });
       }
       try {
-        safeReplaceTaskPointsStorage(storageKey, serializedCandidate);
+        safeReplaceTaskPointsStorage(storageKey, storagePlan.chosenRaw);
       } catch (err) {
-        recordQuotaFailureDiagnostics({ savePath, stage, storageKey, storedBytes, candidateBytes, packedCandidateBytes, unpackedCandidateBytes: candidateBytes, snapshot: candidateWithSticky });
+        recordQuotaFailureDiagnostics({ savePath, stage, storageKey, storedBytes, candidateBytes: chosenStorageBytes, packedCandidateBytes, compressedCandidateBytes, unpackedCandidateBytes: candidateBytes, packedRawChars: storagePlan.packedRawChars, compressedRawChars: storagePlan.compressedRawChars, chosenStorageEncoding: storagePlan.chosenEncoding, chosenStorageChars: storagePlan.chosenChars, chosenStorageBytes, snapshot: candidateWithSticky });
         throw err;
       }
       const savedRaw = localStorage.getItem(storageKey);
@@ -8427,6 +8617,13 @@ return Number(cappedScore.toFixed(1));
     packTaskPointsStorageState,
     getTaskPointsPackDiagnostics,
     unpackTaskPointsStorageState,
+    compressStorageString,
+    decompressStorageString,
+    encodeTaskPointsStorageJson,
+    decodeTaskPointsStorageJson,
+    makeCompressedStorageWrapper,
+    buildOptimizedTaskPointsStorageRaw,
+    getTaskPointsStorageEncodingInfo,
     parseTaskPointsStorageJson,
     safeReplaceTaskPointsStorage,
     mergeState,

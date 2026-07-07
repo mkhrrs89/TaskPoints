@@ -157,7 +157,7 @@
             <button id="clearTodayViewCacheBtn" class="btn btn-ghost btn-toolbar nav-btn" type="button">Clear Today View Cache</button>
             <button id="clearLocalBackupsBtn" class="btn btn-warn btn-toolbar nav-btn" type="button">Clear Local Backups</button>
             <button id="safeStorageCleanupBtn" class="btn btn-warn btn-toolbar nav-btn" type="button">Safe Storage Cleanup</button>
-            <button id="packMainStateBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Pack Main State</button>
+            <button id="packMainStateBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Optimize Main State</button>
             <button id="storageHealthDeleteQuarantineBtn" class="btn btn-warn btn-toolbar nav-btn" type="button">Delete quarantined snapshot</button>
             <button id="storageHealthRefreshBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Refresh</button>
           </div>
@@ -3976,17 +3976,17 @@ rows.push([
       const mainStatus = getTaskPointsStorageStatus(mainEntry.mib);
       let parsedState = null;
       let packedStorageActive = false;
+      let storageEncodingInfo = { label: "plain JSON", compressed: false, rawChars: 0, unpackedNormalJsonChars: 0, compressedRawChars: 0, savingsChars: 0 };
       try {
         const raw = localStorage.getItem("taskpoints_v1");
         if (raw) {
-          const storedState = JSON.parse(raw);
-          parsedState = window.TaskPointsCore?.unpackTaskPointsStorageState
-            ? TaskPointsCore.unpackTaskPointsStorageState(storedState)
-            : storedState;
-          const packedArrays = storedState && storedState.__packedArrays && typeof storedState.__packedArrays === "object" && !Array.isArray(storedState.__packedArrays)
-            ? storedState.__packedArrays
-            : null;
-          packedStorageActive = Boolean(packedArrays && Object.keys(packedArrays).length && raw.length < JSON.stringify(parsedState).length);
+          storageEncodingInfo = window.TaskPointsCore?.getTaskPointsStorageEncodingInfo
+            ? TaskPointsCore.getTaskPointsStorageEncodingInfo(raw)
+            : storageEncodingInfo;
+          parsedState = window.TaskPointsCore?.parseTaskPointsStorageJson
+            ? TaskPointsCore.parseTaskPointsStorageJson(raw, {})
+            : JSON.parse(raw);
+          packedStorageActive = Boolean(storageEncodingInfo.packed);
         }
       } catch (_) {}
       const browserEstimate = await getBrowserStorageEstimate();
@@ -4017,6 +4017,8 @@ rows.push([
         <div><strong>Main State:</strong> taskpoints_v1: <strong>${mainEntry.mib.toFixed(2)} MiB</strong> <span class="btn ${mainStatus.cls} btn-toolbar">${mainStatus.label}</span></div>
         <div class="muted">LocalStorage string estimate: <strong>${mainEntry.stringUnits.mib.toFixed(2)} MiB</strong> for taskpoints_v1 (${report.stringTotal.mib.toFixed(2)} MiB across all keys)</div>
         <div class="muted">Packed storage: <strong>${packedStorageActive ? "active" : "not active"}</strong></div>
+        <div class="muted">Storage encoding: <strong>${escapeHtml(storageEncodingInfo.label || "plain JSON")}</strong></div>
+        ${storageEncodingInfo.compressed ? `<div class="muted">Compressed raw chars: <strong>${storageEncodingInfo.compressedRawChars.toLocaleString()}</strong>; unpacked normal JSON chars: <strong>${storageEncodingInfo.unpackedNormalJsonChars.toLocaleString()}</strong>; estimated savings: <strong>${storageEncodingInfo.savingsChars.toLocaleString()} chars</strong></div>` : ""}
         <div class="muted">Notes key taskpoints_notes_v1: <strong>${notesEntry.mib.toFixed(3)} MiB</strong></div>
         <div class="muted">Active app data (excluding quarantined snapshot): ${(activeDataBytes / (1024 * 1024)).toFixed(2)} MiB</div>
         <div class="muted">LocalStorage Total: ${report.total.mib.toFixed(2)} MiB across ${report.entries.length} keys</div>
@@ -4092,36 +4094,23 @@ rows.push([
         return;
       }
 
-      const oldRaw = raw;
-      const oldStringBytes = getLocalStorageStringSizeBytes(storageKey, raw);
-      console.log("Pack Main State: old raw length", raw.length);
-      console.log("Pack Main State: old localStorage string estimate", oldStringBytes);
-
-      let unpacked;
-      try {
-        if (typeof core.parseTaskPointsStorageJson === "function") {
-          unpacked = core.parseTaskPointsStorageJson(raw);
-        } else {
-          const parsed = JSON.parse(raw);
-          unpacked = typeof core.unpackTaskPointsStorageState === "function"
-            ? core.unpackTaskPointsStorageState(parsed)
-            : parsed;
-        }
-      } catch (error) {
-        console.error("Failed to parse taskpoints_v1 before packing", error);
-        alert("Could not parse taskpoints_v1, so packing was not attempted.");
+      if (typeof core.parseTaskPointsStorageJson !== "function" || typeof core.buildOptimizedTaskPointsStorageRaw !== "function") {
+        alert("Storage optimizer is unavailable. Reload the app and try again.");
         renderStorageHealthPanel();
         return;
       }
 
-      let packed;
+      const oldRaw = raw;
+      const oldStringBytes = getLocalStorageStringSizeBytes(storageKey, raw);
+      console.log("Optimize Main State: old raw length", raw.length);
+      console.log("Optimize Main State: old localStorage string estimate", oldStringBytes);
+
+      let unpacked;
       try {
-        packed = typeof core.packTaskPointsStorageState === "function"
-          ? core.packTaskPointsStorageState(unpacked)
-          : null;
+        unpacked = core.parseTaskPointsStorageJson(raw, {});
       } catch (error) {
-        console.error("Failed to pack taskpoints_v1", error);
-        alert("Packing failed before writing.");
+        console.error("Failed to parse taskpoints_v1 before optimizing", error);
+        alert("Could not parse taskpoints_v1, so optimization was not attempted.");
         renderStorageHealthPanel();
         return;
       }
@@ -4130,63 +4119,64 @@ rows.push([
         console.table(core.getTaskPointsPackDiagnostics(unpacked));
       }
 
-      const packedRaw = JSON.stringify(packed);
-      const newStringBytes = getLocalStorageStringSizeBytes(storageKey, packedRaw);
-      console.log("Pack Main State: new packed raw length", packedRaw.length);
-      console.log("Pack Main State: new localStorage string estimate", newStringBytes);
-      console.log("Pack Main State: packed arrays", packed && packed.__packedArrays ? Object.keys(packed.__packedArrays) : []);
+      let plan;
+      try {
+        plan = core.buildOptimizedTaskPointsStorageRaw(unpacked);
+      } catch (error) {
+        console.error("Failed to optimize taskpoints_v1", error);
+        alert("Optimization failed before writing.");
+        renderStorageHealthPanel();
+        return;
+      }
 
-      if (!packed || packedRaw.length >= oldRaw.length) {
-        alert("Packed version was not smaller. See console diagnostics.");
+      const newStringBytes = getLocalStorageStringSizeBytes(storageKey, plan.chosenRaw);
+      console.log("Optimize Main State: packed raw length", plan.packedRawChars);
+      console.log("Optimize Main State: compressed raw length", plan.compressedRawChars);
+      console.log("Optimize Main State: chosen encoding", plan.chosenEncoding);
+      console.log("Optimize Main State: new localStorage string estimate", newStringBytes);
+
+      if (!plan.chosenRaw || plan.chosenRaw.length >= oldRaw.length) {
+        alert(`Optimized version was not smaller. Current chars: ${oldRaw.length.toLocaleString()}; optimized chars: ${(plan.chosenRaw || "").length.toLocaleString()}. See console diagnostics.`);
         renderStorageHealthPanel();
         return;
       }
 
       // Important: remove-first write. iPhone may not have enough temp room to overwrite
-      // a 5.00 MiB string with a smaller value. Do not route this manual rescue through
+      // a large string with a smaller value. Do not route this manual rescue through
       // the normal app save/merge path; only change the raw storage representation.
       try {
         localStorage.removeItem(storageKey);
-        localStorage.setItem(storageKey, packedRaw);
+        localStorage.setItem(storageKey, plan.chosenRaw);
       } catch (writeError) {
-        console.error("Packed write failed; attempting rollback", writeError);
+        console.error("Optimized write failed; attempting rollback", writeError);
 
         try {
           localStorage.setItem(storageKey, oldRaw);
         } catch (rollbackError) {
-          console.error("Rollback after failed packed write also failed", rollbackError);
+          console.error("Rollback after failed optimized write also failed", rollbackError);
         }
 
-        alert("Packed write failed. Original data was preserved if rollback succeeded.");
+        alert("Optimized write failed. Original data was preserved if rollback succeeded.");
         renderStorageHealthPanel();
         return;
       }
 
       try {
         const verifyRaw = localStorage.getItem(storageKey);
-        const verifyParsed = JSON.parse(verifyRaw);
-        const packedStorageActive = Boolean(verifyParsed?.__packedStorageVersion && verifyParsed?.__packedArrays && Object.keys(verifyParsed.__packedArrays).length);
-        console.log("Pack Main State: packed storage active", packedStorageActive);
-        if (!packedStorageActive) {
-          throw new Error("Saved value is not packed.");
-        }
+        const verifyUnpacked = core.parseTaskPointsStorageJson(verifyRaw, {});
 
-        const verifyUnpacked = typeof core.unpackTaskPointsStorageState === "function"
-          ? core.unpackTaskPointsStorageState(verifyParsed)
-          : verifyParsed;
-
-        if (!Array.isArray(verifyUnpacked.completions)) throw new Error("Missing completions after unpack verification.");
-        if (!Array.isArray(verifyUnpacked.matchups)) throw new Error("Missing matchups after unpack verification.");
-        if (!Array.isArray(verifyUnpacked.gameHistory)) throw new Error("Missing gameHistory after unpack verification.");
-        if (!Array.isArray(verifyUnpacked.seasonHistory)) throw new Error("Missing seasonHistory after unpack verification.");
+        if (!Array.isArray(verifyUnpacked.completions)) throw new Error("Missing completions after optimization verification.");
+        if (!Array.isArray(verifyUnpacked.matchups)) throw new Error("Missing matchups after optimization verification.");
+        if (!Array.isArray(verifyUnpacked.gameHistory)) throw new Error("Missing gameHistory after optimization verification.");
+        if (!Array.isArray(verifyUnpacked.seasonHistory)) throw new Error("Missing seasonHistory after optimization verification.");
       } catch (verifyError) {
-        console.error("Packed verification failed", verifyError);
-        alert("Packed write verification failed. Check console before continuing.");
+        console.error("Optimized verification failed", verifyError);
+        alert("Optimized write verification failed. Check console before continuing.");
         renderStorageHealthPanel();
         return;
       }
 
-      alert(`Main state packed successfully. LocalStorage string estimate: ${(oldStringBytes / (1024 * 1024)).toFixed(2)} MiB → ${(newStringBytes / (1024 * 1024)).toFixed(2)} MiB.`);
+      alert(`Main state optimized successfully (${plan.chosenEncoding}). LocalStorage string estimate: ${(oldStringBytes / (1024 * 1024)).toFixed(2)} MiB → ${(newStringBytes / (1024 * 1024)).toFixed(2)} MiB.`);
       renderStorageHealthPanel();
     }
 

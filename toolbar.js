@@ -1508,7 +1508,7 @@ function syncNotesStorageLocationsFallback(source = 'notes-storage-sync') {
     const raw = localStorage.getItem(STORAGE_KEY_FALLBACK);
     const state = raw ? (window.TaskPointsCore?.parseTaskPointsStorageJson ? TaskPointsCore.parseTaskPointsStorageJson(raw, {}) : JSON.parse(raw)) : {};
     state.notes = notesText;
-    localStorage.setItem(STORAGE_KEY_FALLBACK, JSON.stringify(window.TaskPointsCore?.packTaskPointsStorageState ? TaskPointsCore.packTaskPointsStorageState(state) : state));
+    localStorage.setItem(STORAGE_KEY_FALLBACK, (window.TaskPointsCore?.buildOptimizedTaskPointsStorageRaw ? TaskPointsCore.buildOptimizedTaskPointsStorageRaw(state).chosenRaw : JSON.stringify(window.TaskPointsCore?.packTaskPointsStorageState ? TaskPointsCore.packTaskPointsStorageState(state) : state)));
   } catch (error) {
     console.warn('Failed to sync taskpoints_v1.notes', error);
   }
@@ -1594,7 +1594,7 @@ function applyImportedNotesPayloadFallback(notesPayload, options = {}) {
     const raw = localStorage.getItem(STORAGE_KEY_FALLBACK);
     const savedState = raw ? (window.TaskPointsCore?.parseTaskPointsStorageJson ? TaskPointsCore.parseTaskPointsStorageJson(raw, {}) : JSON.parse(raw)) : {};
     savedState.notes = notesText;
-    localStorage.setItem(STORAGE_KEY_FALLBACK, JSON.stringify(window.TaskPointsCore?.packTaskPointsStorageState ? TaskPointsCore.packTaskPointsStorageState(savedState) : savedState));
+    localStorage.setItem(STORAGE_KEY_FALLBACK, (window.TaskPointsCore?.buildOptimizedTaskPointsStorageRaw ? TaskPointsCore.buildOptimizedTaskPointsStorageRaw(savedState).chosenRaw : JSON.stringify(window.TaskPointsCore?.packTaskPointsStorageState ? TaskPointsCore.packTaskPointsStorageState(savedState) : savedState)));
   } catch (error) {
     console.error('Failed to write imported notes into main state', error);
   }

@@ -2075,3 +2075,35 @@ test('completed Play-In and Round of 32 series advance valid winners during sync
   assert.equal(seed2Protected.playerBId, pi1.playerAId);
   assert.equal(sweet16.playerBId, r32.playerAId);
 });
+
+test('TaskPoints storage parser accepts plain, packed, and compressed packed saves', () => {
+  const state = {
+    tasks: [{ id: 'task-1', title: 'Task One', points: 1 }],
+    completions: Array.from({ length: 80 }, (_, index) => ({
+      id: `completion-${index}`,
+      taskId: 'task-1',
+      title: 'Task One',
+      points: 1,
+      completedAtISO: `2026-01-${String((index % 28) + 1).padStart(2, '0')}T00:00:00.000Z`,
+      dateKey: `2026-01-${String((index % 28) + 1).padStart(2, '0')}`
+    })),
+    matchups: [{ id: 'm1', playerAId: 'p1', playerBId: 'p2', scoreA: 11, scoreB: 8 }],
+    gameHistory: [{ id: 'g1', playerId: 'p1', score: 11, dateKey: '2026-01-01' }],
+    seasonHistory: [{ id: 's1', tournamentMatchupResults: [{ id: 'tm1', scoreA: 1, scoreB: 0 }] }]
+  };
+
+  const plainRaw = JSON.stringify(state);
+  assert.equal(core.parseTaskPointsStorageJson(plainRaw).completions.length, 80);
+
+  const packedRaw = JSON.stringify(core.packTaskPointsStorageState(state));
+  const packedParsed = core.parseTaskPointsStorageJson(packedRaw);
+  assert.equal(packedParsed.matchups[0].scoreA, 11);
+  assert.ok(Array.isArray(packedParsed.gameHistory));
+
+  const compressedRaw = JSON.stringify(core.makeCompressedStorageWrapper(packedRaw));
+  const compressedParsed = core.parseTaskPointsStorageJson(compressedRaw);
+  assert.equal(compressedParsed.completions.length, 80);
+  assert.ok(Array.isArray(compressedParsed.matchups));
+  assert.ok(Array.isArray(compressedParsed.gameHistory));
+  assert.ok(Array.isArray(compressedParsed.seasonHistory));
+});
