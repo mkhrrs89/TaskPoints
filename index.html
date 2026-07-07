@@ -7088,11 +7088,20 @@ const daysHtml = days.map(d => {
           <input class="input" data-field="name" value="${escapeHtml(h.name)}">
           <input class="input" data-field="points" type="number" value="${h.pointsPerDay||0}">
           <input class="input" data-field="tag" value="${escapeHtml(h.tag || '')}" placeholder="Tag">
-          <label class="text-xs muted flex flex-col gap-1">
-            <span>Week complete at</span>
-            <input class="input" data-field="days-per-complete-week" type="number" min="0" max="7" step="1" value="${Number.isFinite(Number(h.daysPerCompleteWeek)) ? Number(h.daysPerCompleteWeek) : ''}" placeholder="Days for complete week">
-          </label>
-          <div class="flex gap-2 flex-wrap">
+<label class="text-xs muted flex flex-col gap-1">
+  <span>Week complete at</span>
+  <input class="input" data-field="days-per-complete-week" type="number" min="0" max="7" step="1" value="${Number.isFinite(Number(h.daysPerCompleteWeek)) ? Number(h.daysPerCompleteWeek) : ''}" placeholder="Days for complete week">
+</label>
+
+<label class="text-xs muted flex items-start gap-2">
+  <input type="checkbox" data-field="streak-multiplier-enabled" ${h.streakMultiplierEnabled === true ? 'checked' : ''}>
+  <span>
+    <strong>Enable streak multiplier</strong><br>
+    <small>Off by default. When switched on, scoring starts today onward but uses the real streak day.</small>
+  </span>
+</label>
+
+<div class="flex gap-2 flex-wrap">
             <button class="btn btn-success" data-act="habit-save">Save</button>
             <button class="btn btn-ghost" data-act="habit-cancel">Cancel</button>
             <button class="btn btn-ghost" data-act="habit-retire">Retire</button>
