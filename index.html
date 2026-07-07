@@ -2718,13 +2718,19 @@ function addCompletion(entry){
     ? String(entry.dayKey)
     : (entry?.completedAtISO ? dateKey(new Date(entry.completedAtISO)) : null);
 
+  const isHabitLike = entry?.source === 'habit' || entry?.source === 'vice';
+  if (isHabitLike) {
+    __tpQueueTodayScoreDeltaToast();
+    return;
+  }
+
   if (dayK && dayK !== todayKey()) {
     // Past day completion: do NOT toast pts, only queue Today-score delta toast.
     __tpQueueTodayScoreDeltaToast();
     return;
   }
 
-  // Today completion: normal toast
+  // Today non-habit completion: normal toast
   showPointsToast(pts);
 }
 
@@ -7721,14 +7727,15 @@ function scheduleHabitSave() {
       // quota cooldown does not silently skip and revert the UI state.
       save('habit-toggle', {
         immediateWrite: true,
-        userInitiated: true
+        userInitiated: true,
+        replaceCompletions: true
       });
 
       if (window.TP_DEBUG_PERF && perfStart !== null) {
         console.log(`[TP_PERF] tap->save ${Math.round(performance.now() - perfStart)}ms`);
       }
     });
-  }, 200);
+  }, 25);
 }
 
 function scheduleHabitRerender() {
@@ -7795,7 +7802,10 @@ function applyHabitDayToggle(h, dayKey) {
         changed = true;
       }
     }
-    if (changed) markCompletionsDirty();
+    if (changed) {
+      markCompletionsDirty();
+      __tpQueueTodayScoreDeltaToast();
+    }
   };
 
   if (category === 'vice') {
@@ -7835,10 +7845,19 @@ function applyHabitDayToggle(h, dayKey) {
     if (!isShower) {
       // Normal habits: configurable incomplete -> full -> half -> incomplete OR incomplete -> full -> incomplete
       const usesHalfPoints = h.halfPointEnabled !== false;
-      const idx = h.doneKeys.indexOf(dayKey);
       const existing = Array.isArray(state.completions)
         ? state.completions.find(c => c?.source === 'habit' && c?.habitId === habitId && c?.dayKey === dayKey)
         : null;
+
+      let idx = h.doneKeys.indexOf(dayKey);
+
+      // Safety sync: if a completion row exists but doneKeys is stale,
+      // treat the day as completed so the next click advances correctly.
+      if (existing && idx === -1) {
+        h.doneKeys.push(dayKey);
+        idx = h.doneKeys.indexOf(dayKey);
+      }
+
       const existingFraction = existing ? getHabitCompletionFraction(existing) : 0;
       const basePoints = Number(h.pointsPerDay) || 0;
       const iso = new Date(fromKey(dayKey).getTime() + 12 * 3600 * 1000).toISOString();
