@@ -157,6 +157,7 @@
             <button id="clearTodayViewCacheBtn" class="btn btn-ghost btn-toolbar nav-btn" type="button">Clear Today View Cache</button>
             <button id="clearLocalBackupsBtn" class="btn btn-warn btn-toolbar nav-btn" type="button">Clear Local Backups</button>
             <button id="safeStorageCleanupBtn" class="btn btn-warn btn-toolbar nav-btn" type="button">Safe Storage Cleanup</button>
+            <button id="packMainStateBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Pack Main State</button>
             <button id="storageHealthDeleteQuarantineBtn" class="btn btn-warn btn-toolbar nav-btn" type="button">Delete quarantined snapshot</button>
             <button id="storageHealthRefreshBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Refresh</button>
           </div>
@@ -3974,9 +3975,16 @@ rows.push([
       const latestBackupEntry = report.entries.find((entry) => entry.key === "taskpoints_backup_latest") || null;
       const mainStatus = getTaskPointsStorageStatus(mainEntry.mib);
       let parsedState = null;
+      let packedStorageActive = false;
       try {
         const raw = localStorage.getItem("taskpoints_v1");
-        parsedState = raw ? JSON.parse(raw) : null;
+        if (raw) {
+          const storedState = JSON.parse(raw);
+          packedStorageActive = Boolean(storedState && storedState.__packedArrays && typeof storedState.__packedArrays === "object");
+          parsedState = window.TaskPointsCore?.unpackTaskPointsStorageState
+            ? TaskPointsCore.unpackTaskPointsStorageState(storedState)
+            : storedState;
+        }
       } catch (_) {}
       const browserEstimate = await getBrowserStorageEstimate();
       const persisted = await (async () => {
@@ -4005,6 +4013,7 @@ rows.push([
       output.innerHTML = `
         <div><strong>Main State:</strong> taskpoints_v1: <strong>${mainEntry.mib.toFixed(2)} MiB</strong> <span class="btn ${mainStatus.cls} btn-toolbar">${mainStatus.label}</span></div>
         <div class="muted">LocalStorage string estimate: <strong>${mainEntry.stringUnits.mib.toFixed(2)} MiB</strong> for taskpoints_v1 (${report.stringTotal.mib.toFixed(2)} MiB across all keys)</div>
+        <div class="muted">Packed storage: <strong>${packedStorageActive ? "active" : "not active"}</strong></div>
         <div class="muted">Notes key taskpoints_notes_v1: <strong>${notesEntry.mib.toFixed(3)} MiB</strong></div>
         <div class="muted">Active app data (excluding quarantined snapshot): ${(activeDataBytes / (1024 * 1024)).toFixed(2)} MiB</div>
         <div class="muted">LocalStorage Total: ${report.total.mib.toFixed(2)} MiB across ${report.entries.length} keys</div>
@@ -4069,6 +4078,46 @@ rows.push([
       renderStorageHealthPanel();
     }
 
+    function packMainStateStorage() {
+      const core = window.TaskPointsCore || {};
+      if (typeof core.packTaskPointsStorageState !== "function" || typeof core.unpackTaskPointsStorageState !== "function") {
+        alert("Packed storage helpers are unavailable. Refresh the app and try again.");
+        return;
+      }
+      const key = "taskpoints_v1";
+      const raw = localStorage.getItem(key);
+      if (!raw) {
+        alert("No taskpoints_v1 save found to pack.");
+        renderStorageHealthPanel();
+        return;
+      }
+      try {
+        const beforeStringBytes = getLocalStorageStringSizeBytes(key, raw);
+        const parsed = core.unpackTaskPointsStorageState(JSON.parse(raw) || {});
+        const normalized = typeof core.normalizeState === "function" ? core.normalizeState(parsed) : parsed;
+        const packed = core.packTaskPointsStorageState(normalized);
+        const serialized = JSON.stringify(packed);
+        if (typeof core.safeReplaceTaskPointsStorage === "function") {
+          core.safeReplaceTaskPointsStorage(key, serialized);
+        } else {
+          const previousRaw = localStorage.getItem(key);
+          localStorage.removeItem(key);
+          try {
+            localStorage.setItem(key, serialized);
+          } catch (err) {
+            if (previousRaw != null) localStorage.setItem(key, previousRaw);
+            throw err;
+          }
+        }
+        const afterRaw = localStorage.getItem(key) || "";
+        const afterStringBytes = getLocalStorageStringSizeBytes(key, afterRaw);
+        alert(`Main state packed without deleting data. LocalStorage string estimate: ${(beforeStringBytes / (1024 * 1024)).toFixed(2)} MiB → ${(afterStringBytes / (1024 * 1024)).toFixed(2)} MiB.`);
+      } catch (err) {
+        console.error("Pack Main State failed", err);
+        alert("Pack Main State failed. Your existing save was preserved if the packed write could not complete.");
+      }
+      renderStorageHealthPanel();
+    }
 
     function handleDeleteLatestLocalBackup() {
       const key = "taskpoints_backup_latest";
@@ -4539,6 +4588,7 @@ rows.push([
       document.getElementById('clearTodayViewCacheBtn')?.addEventListener('click', clearTodayViewCache);
       document.getElementById('clearLocalBackupsBtn')?.addEventListener('click', clearLocalBackups);
       document.getElementById('safeStorageCleanupBtn')?.addEventListener('click', safeStorageCleanup);
+      document.getElementById('packMainStateBtn')?.addEventListener('click', packMainStateStorage);
       document.getElementById('notesRecoveryScanBtn')?.addEventListener('click', scanForRecoverableNotes);
       document.getElementById('notesRecoveryScanAllBtn')?.addEventListener('click', scanAllLocalStorageKeys);
       document.getElementById('notesRecoveryRestoreBtn')?.addEventListener('click', restoreSelectedNotesCandidate);

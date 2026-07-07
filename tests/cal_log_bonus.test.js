@@ -77,7 +77,7 @@ test('saveStateSnapshot preserves existing reminders from stale snapshots', () =
     opponentDripSchedules: []
   });
   core.saveStateSnapshot(stale, { storageKey: core.STORAGE_KEY });
-  const saved = JSON.parse(global.localStorage.getItem(core.STORAGE_KEY));
+  const saved = core.parseTaskPointsStorageJson(global.localStorage.getItem(core.STORAGE_KEY), {});
   assert.equal(saved.reminders.length, 1);
   assert.equal(saved.reminders[0].text, 'Do not drop me');
 });
@@ -103,7 +103,7 @@ test('saveStateSnapshot allows explicit reminder deletion by id', () => {
 
   const next = { ...existing, reminders: existing.reminders.filter((reminder) => reminder.id !== 'rem-delete') };
   core.saveStateSnapshot(next, { storageKey: core.STORAGE_KEY, deletedReminderIds: ['rem-delete'] });
-  const saved = JSON.parse(global.localStorage.getItem(core.STORAGE_KEY));
+  const saved = core.parseTaskPointsStorageJson(global.localStorage.getItem(core.STORAGE_KEY), {});
   assert.deepEqual(saved.reminders.map((reminder) => reminder.id), ['rem-keep']);
 });
 
@@ -180,7 +180,7 @@ test('saveStateSnapshot preserves existing season fields from stale snapshots', 
     opponentDripSchedules: []
   });
   core.saveStateSnapshot(stale, { storageKey: core.STORAGE_KEY });
-  const saved = JSON.parse(global.localStorage.getItem(core.STORAGE_KEY));
+  const saved = core.parseTaskPointsStorageJson(global.localStorage.getItem(core.STORAGE_KEY), {});
   assert.equal(saved.currentSeason.id, 'season-1');
   assert.equal(saved.latestSeasonId, 'season-1');
   assert.equal(saved.seasonHistory.length, 1);
@@ -1274,7 +1274,7 @@ test('saveStateSnapshot preserves protected Home histories from stale Matchups-s
   });
 
   core.saveStateSnapshot(staleMatchupsSave, { storageKey: core.STORAGE_KEY, savePath: 'matchups-edit-result' });
-  const saved = JSON.parse(global.localStorage.getItem(core.STORAGE_KEY));
+  const saved = core.parseTaskPointsStorageJson(global.localStorage.getItem(core.STORAGE_KEY), {});
   assert.equal(saved.weightHistory.length, 1);
   assert.equal(saved.weightHistory[0].id, 'w-1');
   assert.equal(saved.vo2MaxHistory.length, 1);
@@ -1308,7 +1308,7 @@ test('protected Home histories can be explicitly reset with allowProtectedHistor
     savePath: 'metrics-explicit-reset',
     allowProtectedHistoryOverwriteKeys: ['weightHistory', 'vo2MaxHistory']
   });
-  const saved = JSON.parse(global.localStorage.getItem(core.STORAGE_KEY));
+  const saved = core.parseTaskPointsStorageJson(global.localStorage.getItem(core.STORAGE_KEY), {});
   assert.deepEqual(saved.weightHistory, []);
   assert.deepEqual(saved.vo2MaxHistory, []);
 });
