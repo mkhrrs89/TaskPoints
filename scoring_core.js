@@ -6343,15 +6343,18 @@ return { state: merged, storageKey };
     const root = getRuntimeRoot();
     const userInitiatedSave = Boolean(options.userInitiated || options.manualSave || options.immediateWrite);
     const blockedUntil = Number(root?.__tpQuotaSaveBlockedUntil || 0);
-    if (!userInitiatedSave && blockedUntil > Date.now()) {
-      console.warn(`[TaskPoints] skipped automatic save during quota cooldown. savePath=${savePath}`);
-      return {
-        state: readStoredStateRaw(storageKey),
-        trimmed: false,
-        skipped: true,
-        blockedByQuotaCircuit: true
-      };
-    }
+if (!userInitiatedSave && blockedUntil > Date.now()) {
+  console.warn(`[TaskPoints] skipped automatic save during quota cooldown. savePath=${savePath}`);
+  return {
+    // Important: do NOT return the old stored snapshot here.
+    // Returning readStoredStateRaw(storageKey) can revert fresh in-memory UI changes,
+    // especially habit full/half/off cycling.
+    state,
+    trimmed: false,
+    skipped: true,
+    blockedByQuotaCircuit: true
+  };
+}
     const summarizeStateSizes = (snapshot) => ({
       completions: Array.isArray(snapshot?.completions) ? snapshot.completions.length : 0,
       gameHistory: Array.isArray(snapshot?.gameHistory) ? snapshot.gameHistory.length : 0,
