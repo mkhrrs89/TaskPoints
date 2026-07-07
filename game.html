@@ -2475,7 +2475,10 @@ function computeTodayPoints() {
 
     const dk = dateKey(c.completedAtISO);
     if (dk === todayKey) {
-      total += Number(c.points || 0);
+const pts = window.TaskPointsCore?.pointsForCompletion
+  ? TaskPointsCore.pointsForCompletion(c, state)
+  : Number(c.points || 0);
+total += pts;
     }
   }
 
