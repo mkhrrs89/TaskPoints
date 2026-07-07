@@ -2555,7 +2555,7 @@ function calcYouStats() {
     const day = dateKey(c.completedAtISO);
     if (!dayMap[day]) dayMap[day] = 0;
     const pts = window.TaskPointsCore?.pointsForCompletion
-      ? TaskPointsCore.pointsForCompletion(c)
+      ? TaskPointsCore.pointsForCompletion(c, state)
       : Number(c.points || 0);
     dayMap[day] += pts;
   }
