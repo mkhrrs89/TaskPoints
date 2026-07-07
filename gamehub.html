@@ -409,7 +409,7 @@
     }
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      pageStateCache = raw ? JSON.parse(raw) : {};
+      pageStateCache = raw ? TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY, {}) : {};
     } catch {
       pageStateCache = {};
     }

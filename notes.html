@@ -163,7 +163,7 @@
       }
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
-        return raw ? (JSON.parse(raw) || {}) : {};
+        return raw ? TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY, {}) : {};
       } catch (err) {
         console.error("Failed to load notes state", err);
         return {};
@@ -181,7 +181,7 @@
 
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
-        const state = raw ? JSON.parse(raw) : {};
+        const state = raw ? TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY, {}) : {};
         stateNotes = typeof state.notes === "string" ? state.notes : "";
       } catch (_) {}
 
@@ -207,9 +207,9 @@
 
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
-        const state = raw ? JSON.parse(raw) : {};
+        const state = raw ? TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY, {}) : {};
         state.notes = notesText;
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        TaskPointsCore.writeTaskPointsStoredState(state, { storageKey: STORAGE_KEY });
       } catch (error) {
         console.warn("Failed to sync taskpoints_v1.notes", error);
       }
@@ -243,7 +243,7 @@
         try {
           const existing = getStoredState();
           existing.notes = value;
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(existing));
+          TaskPointsCore.writeTaskPointsStoredState(existing, { storageKey: STORAGE_KEY });
         } catch (err) {
           console.error("Failed to save notes", err);
         }

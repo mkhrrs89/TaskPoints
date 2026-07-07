@@ -37,7 +37,7 @@ let appState = { tasks: [] };
 function loadState() {
   if (window.TaskPointsCore?.loadAppState) return TaskPointsCore.loadAppState().state;
   const raw = localStorage.getItem(STORAGE_KEY);
-  try { return raw ? JSON.parse(raw) : { tasks: [] }; } catch { return { tasks: [] }; }
+  try { return raw ? TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY, {}) : { tasks: [] }; } catch { return { tasks: [] }; }
 }
 
 function saveState(nextState) {
@@ -47,7 +47,7 @@ function saveState(nextState) {
     return;
   }
   appState = nextState;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
+  TaskPointsCore.writeTaskPointsStoredState(nextState, { storageKey: STORAGE_KEY });
 }
 
 function fmt(iso) {

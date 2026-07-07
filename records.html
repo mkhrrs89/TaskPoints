@@ -448,7 +448,7 @@ function readPageStateFresh(){
       pageStateCacheDirty = false;
       return pageStateCache;
     }
-    const parsed = JSON.parse(raw);
+    const parsed = TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY, {});
     pageStateCache = Object.assign(base, parsed || {});
   }catch(e){
     console.error("records loadState error", e);

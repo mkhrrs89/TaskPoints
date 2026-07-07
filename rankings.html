@@ -374,7 +374,7 @@ function getRankingsScopeLabel() {
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
         if (!raw) return null;
-        let state = JSON.parse(raw);
+        let state = TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY, {});
 
         if (window.TaskPointsCore?.syncDerivedPoints) {
           state = TaskPointsCore.syncDerivedPoints(state).state;

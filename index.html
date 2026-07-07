@@ -2780,9 +2780,7 @@ function getCachedStorageState() {
   if (!raw) return null;
 
   if (__TP_PERF_BOOT) console.time('LOAD: JSON.parse');
-  const parsed = window.TaskPointsCore?.unpackTaskPointsStorageState
-    ? TaskPointsCore.unpackTaskPointsStorageState(JSON.parse(raw))
-    : JSON.parse(raw);
+  const parsed = TaskPointsCore.parseTaskPointsStorageJson(raw, {});
   if (__TP_PERF_BOOT) console.timeEnd('LOAD: JSON.parse');
 
   storageCache.raw = raw;
@@ -6087,7 +6085,7 @@ function submitWeightEntry() {
       storageCache.raw = null;
       storageCache.parsed = state;
     } else {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
+      TaskPointsCore.writeTaskPointsStoredState(nextState, { storageKey: STORAGE_KEY });
       state = normalizeState(nextState);
       storageCache.raw = null;
       storageCache.parsed = state;
@@ -6108,7 +6106,7 @@ function submitWeightEntry() {
 
   // Confirm in console that it actually stuck in localStorage.
   try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+    const saved = TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY, {}) || {};
     console.log('Saved weightHistory:', saved.weightHistory);
   } catch (e) {
     console.warn('Could not verify saved weightHistory.', e);
@@ -6201,7 +6199,7 @@ function submitVo2MaxEntry() {
       storageCache.raw = null;
       storageCache.parsed = state;
     } else {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
+      TaskPointsCore.writeTaskPointsStoredState(nextState, { storageKey: STORAGE_KEY });
       state = normalizeState(nextState);
       storageCache.raw = null;
       storageCache.parsed = state;
@@ -10803,9 +10801,9 @@ function getCurrentNotesForExport(snapshot = null) {
   }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    const savedState = raw ? (window.TaskPointsCore?.parseTaskPointsStorageJson ? TaskPointsCore.parseTaskPointsStorageJson(raw, {}) : JSON.parse(raw)) : {};
+    const savedState = raw ? TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY, {}) : {};
     savedState.notes = notesText;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(window.TaskPointsCore?.packTaskPointsStorageState ? TaskPointsCore.packTaskPointsStorageState(savedState) : savedState));
+    TaskPointsCore.writeTaskPointsStoredState(savedState, { storageKey: STORAGE_KEY });
   } catch (error) {
     console.warn("Failed to sync taskpoints_v1.notes", error);
   }
@@ -10869,9 +10867,9 @@ function applyImportedNotesPayload(notesPayload, options = {}) {
 
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    const savedState = raw ? (window.TaskPointsCore?.parseTaskPointsStorageJson ? TaskPointsCore.parseTaskPointsStorageJson(raw, {}) : JSON.parse(raw)) : {};
+    const savedState = raw ? TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY, {}) : {};
     savedState.notes = notesText;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(window.TaskPointsCore?.packTaskPointsStorageState ? TaskPointsCore.packTaskPointsStorageState(savedState) : savedState));
+    TaskPointsCore.writeTaskPointsStoredState(savedState, { storageKey: STORAGE_KEY });
   } catch (error) {
     console.error("Failed to write imported notes into main state", error);
   }
@@ -10899,7 +10897,7 @@ function getTaskPointsExportSnapshot() {
       }).state || latestState;
     } else {
       const raw = localStorage.getItem(STORAGE_KEY);
-      latestState = raw ? (window.TaskPointsCore?.parseTaskPointsStorageJson ? TaskPointsCore.parseTaskPointsStorageJson(raw, latestState) : JSON.parse(raw)) : latestState;
+      latestState = raw ? TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY, latestState) : latestState;
     }
   } catch (error) {
     console.warn('Failed to read latest state for export; falling back to in-memory state', error);

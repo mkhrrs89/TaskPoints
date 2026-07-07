@@ -1287,7 +1287,7 @@ function readPageStateFresh() {
       return pageStateCache;
     }
 
-    const parsed = JSON.parse(raw) || {};
+    const parsed = TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY, {}) || {};
 
     base.tasks       = Array.isArray(parsed.tasks)       ? parsed.tasks       : [];
     base.completions = Array.isArray(parsed.completions) ? parsed.completions : [];

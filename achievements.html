@@ -179,7 +179,7 @@
 
     try {
       const raw = localStorage.getItem('taskpoints_v1');
-      const parsed = raw ? JSON.parse(raw) : {};
+      const parsed = raw ? TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY, {}) : {};
       parsed.playerBadges = parsed.playerBadges && typeof parsed.playerBadges === 'object' ? parsed.playerBadges : {};
       return parsed;
     } catch (err) {
@@ -238,7 +238,7 @@
     } catch (err) {
       console.warn('[badges] TaskPointsCore.saveStateSnapshot failed', err);
     }
-    localStorage.setItem('taskpoints_v1', JSON.stringify(nextState));
+    TaskPointsCore.writeTaskPointsStoredState(nextState, { storageKey: 'taskpoints_v1' });
   }
 
   function getPlayerIdForBadges(player){

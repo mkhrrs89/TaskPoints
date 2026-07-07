@@ -8,6 +8,7 @@
 
 <link rel="stylesheet" href="styles.css">
   <link rel="preload" href="toolbar.js" as="script">
+<script src="scoring_core.js"></script>
 <script src="toolbar.js" defer></script>
 </head>
 <body class="min-h-screen">
@@ -131,7 +132,7 @@ function normalizeState(s) {
 function saveMerged(partial) {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    const existing = raw ? (JSON.parse(raw) || {}) : {};
+    const existing = raw ? TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY, {}) : {};
     if (window.TaskPointsCore?.saveAppState) {
       return TaskPointsCore.saveStateSnapshot({ ...existing, ...partial }, { storageKey: STORAGE_KEY }).state;
     }
@@ -152,7 +153,7 @@ function load(){
   try{
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return {tasks:[], completions:[], schedule:[], opponentDripSchedules: []};
-    const st = JSON.parse(raw);
+    const st = TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY, {});
     if (!Array.isArray(st.tasks)) st.tasks = [];
     if (!Array.isArray(st.completions)) st.completions = [];
     if (!Array.isArray(st.schedule)) st.schedule = [];

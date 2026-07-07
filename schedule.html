@@ -142,7 +142,7 @@ function readPageStateFresh() {
       pageStateCache = normalizeState(loaded && loaded.state ? loaded.state : {});
     } else {
       const raw = localStorage.getItem(STORAGE_KEY);
-      pageStateCache = normalizeState(raw ? (JSON.parse(raw) || {}) : {});
+      pageStateCache = normalizeState(raw ? TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY, {}) : {});
     }
   } catch (e) {
     console.error("Failed to load TaskPoints state", e);
