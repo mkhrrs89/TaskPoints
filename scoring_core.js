@@ -5829,7 +5829,14 @@ function fastEnsureStateShape(s) {
     }
 
     mergedSnapshot.tasks = mergeById(existing?.tasks, (nextState || {})?.tasks, mergeTaskRecords);
-    mergedSnapshot.completions = mergeCompletions(existing?.completions, (nextState || {})?.completions);
+
+    const shouldReplaceCompletions = (options.replaceCompletions === true || options.exactCompletions === true)
+      && Array.isArray((nextState || {}).completions);
+
+    mergedSnapshot.completions = shouldReplaceCompletions
+      ? (nextState || {}).completions
+      : mergeCompletions(existing?.completions, (nextState || {})?.completions);
+
     mergedSnapshot.habits = mergeById(existing?.habits, (nextState || {})?.habits, mergeHabitRecords);
 
 
