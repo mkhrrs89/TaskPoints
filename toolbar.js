@@ -72,7 +72,7 @@ function auditDuplicateHabitCompletions(daysBack = 45) {
     const storageKey = (window.TaskPointsCore && TaskPointsCore.STORAGE_KEY) || STORAGE_KEY_FALLBACK || 'taskpoints_v1';
     const raw = localStorage.getItem(storageKey);
     if (!raw) return;
-    const st = JSON.parse(raw) || {};
+    const st = window.TaskPointsCore?.parseTaskPointsStorageJson ? TaskPointsCore.parseTaskPointsStorageJson(raw, {}) : (JSON.parse(raw) || {});
     const comps = Array.isArray(st.completions) ? st.completions : [];
     const habits = Array.isArray(st.habits) ? st.habits : [];
     const nameById = new Map(habits.map(h => [h.id, h.name || h.id]));
@@ -1141,7 +1141,7 @@ async function migrateLegacyImagesInStorageFallback() {
   let parsed = {};
   try {
     const raw = localStorage.getItem(STORAGE_KEY_FALLBACK);
-    parsed = raw ? (JSON.parse(raw) || {}) : {};
+    parsed = raw ? (window.TaskPointsCore?.parseTaskPointsStorageJson ? TaskPointsCore.parseTaskPointsStorageJson(raw, {}) : (JSON.parse(raw) || {})) : {};
   } catch (e) {
     console.error('Failed to parse stored state for image migration (toolbar.js)', e);
     parsed = {};
@@ -1192,7 +1192,7 @@ function saveProjectsToStorageFallback(list) {
 function loadRawStateFallback() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_FALLBACK);
-    return raw ? (JSON.parse(raw) || {}) : {};
+    return raw ? (window.TaskPointsCore?.parseTaskPointsStorageJson ? TaskPointsCore.parseTaskPointsStorageJson(raw, {}) : (JSON.parse(raw) || {})) : {};
   } catch (e) {
     console.error('Failed to load stored state (toolbar.js)', e);
     return {};
@@ -1480,7 +1480,7 @@ function getBestNotesTextFromStorageFallback() {
 
   try {
     const raw = localStorage.getItem(STORAGE_KEY_FALLBACK);
-    const state = raw ? JSON.parse(raw) : {};
+    const state = raw ? (window.TaskPointsCore?.parseTaskPointsStorageJson ? TaskPointsCore.parseTaskPointsStorageJson(raw, {}) : JSON.parse(raw)) : {};
     stateNotes = typeof state.notes === 'string' ? state.notes : '';
   } catch (_) {}
 
@@ -1506,9 +1506,9 @@ function syncNotesStorageLocationsFallback(source = 'notes-storage-sync') {
 
   try {
     const raw = localStorage.getItem(STORAGE_KEY_FALLBACK);
-    const state = raw ? JSON.parse(raw) : {};
+    const state = raw ? (window.TaskPointsCore?.parseTaskPointsStorageJson ? TaskPointsCore.parseTaskPointsStorageJson(raw, {}) : JSON.parse(raw)) : {};
     state.notes = notesText;
-    localStorage.setItem(STORAGE_KEY_FALLBACK, JSON.stringify(state));
+    localStorage.setItem(STORAGE_KEY_FALLBACK, JSON.stringify(window.TaskPointsCore?.packTaskPointsStorageState ? TaskPointsCore.packTaskPointsStorageState(state) : state));
   } catch (error) {
     console.warn('Failed to sync taskpoints_v1.notes', error);
   }
@@ -1592,9 +1592,9 @@ function applyImportedNotesPayloadFallback(notesPayload, options = {}) {
 
   try {
     const raw = localStorage.getItem(STORAGE_KEY_FALLBACK);
-    const savedState = raw ? JSON.parse(raw) : {};
+    const savedState = raw ? (window.TaskPointsCore?.parseTaskPointsStorageJson ? TaskPointsCore.parseTaskPointsStorageJson(raw, {}) : JSON.parse(raw)) : {};
     savedState.notes = notesText;
-    localStorage.setItem(STORAGE_KEY_FALLBACK, JSON.stringify(savedState));
+    localStorage.setItem(STORAGE_KEY_FALLBACK, JSON.stringify(window.TaskPointsCore?.packTaskPointsStorageState ? TaskPointsCore.packTaskPointsStorageState(savedState) : savedState));
   } catch (error) {
     console.error('Failed to write imported notes into main state', error);
   }

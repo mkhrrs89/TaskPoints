@@ -2780,7 +2780,9 @@ function getCachedStorageState() {
   if (!raw) return null;
 
   if (__TP_PERF_BOOT) console.time('LOAD: JSON.parse');
-  const parsed = JSON.parse(raw);
+  const parsed = window.TaskPointsCore?.unpackTaskPointsStorageState
+    ? TaskPointsCore.unpackTaskPointsStorageState(JSON.parse(raw))
+    : JSON.parse(raw);
   if (__TP_PERF_BOOT) console.timeEnd('LOAD: JSON.parse');
 
   storageCache.raw = raw;
@@ -10801,9 +10803,9 @@ function getCurrentNotesForExport(snapshot = null) {
   }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    const savedState = raw ? JSON.parse(raw) : {};
+    const savedState = raw ? (window.TaskPointsCore?.parseTaskPointsStorageJson ? TaskPointsCore.parseTaskPointsStorageJson(raw, {}) : JSON.parse(raw)) : {};
     savedState.notes = notesText;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(savedState));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(window.TaskPointsCore?.packTaskPointsStorageState ? TaskPointsCore.packTaskPointsStorageState(savedState) : savedState));
   } catch (error) {
     console.warn("Failed to sync taskpoints_v1.notes", error);
   }
@@ -10867,9 +10869,9 @@ function applyImportedNotesPayload(notesPayload, options = {}) {
 
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    const savedState = raw ? JSON.parse(raw) : {};
+    const savedState = raw ? (window.TaskPointsCore?.parseTaskPointsStorageJson ? TaskPointsCore.parseTaskPointsStorageJson(raw, {}) : JSON.parse(raw)) : {};
     savedState.notes = notesText;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(savedState));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(window.TaskPointsCore?.packTaskPointsStorageState ? TaskPointsCore.packTaskPointsStorageState(savedState) : savedState));
   } catch (error) {
     console.error("Failed to write imported notes into main state", error);
   }
@@ -10897,7 +10899,7 @@ function getTaskPointsExportSnapshot() {
       }).state || latestState;
     } else {
       const raw = localStorage.getItem(STORAGE_KEY);
-      latestState = raw ? JSON.parse(raw) : latestState;
+      latestState = raw ? (window.TaskPointsCore?.parseTaskPointsStorageJson ? TaskPointsCore.parseTaskPointsStorageJson(raw, latestState) : JSON.parse(raw)) : latestState;
     }
   } catch (error) {
     console.warn('Failed to read latest state for export; falling back to in-memory state', error);

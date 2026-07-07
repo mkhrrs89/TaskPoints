@@ -13,6 +13,93 @@
   ];
 
   const TASKPOINTS_LARGE_SAVE_WARN_BYTES = 4.25 * 1024 * 1024;
+
+  const TASKPOINTS_PACKED_STORAGE_VERSION = 1;
+  const PACKED_ARRAY_SCHEMAS = {
+    completions: ['id','taskId','habitId','viceId','flexId','projectId','title','points','completedAtISO','dateKey','source','kind','note','meta'],
+    matchups: ['id','matchupId','date','dateKey','playerAId','playerBId','scoreA','scoreB','playerAScore','playerBScore','winnerId','loserId','result','matchupType','seasonId','seriesId','seasonSeriesId','roundId','gameNumber','seriesGameNumber','bestOf','winsNeeded','completedAtISO','finalizedAtISO','source'],
+    gameHistory: ['id','date','dateKey','playerId','score','points','total','source','winnerId','loserId','matchupId','seasonId','seriesId','seasonSeriesId','roundId','gameNumber','completedAtISO','createdAtISO'],
+    seasonHistory: []
+  };
+
+  function packObjectArray(rows, preferredFields) {
+    const list = Array.isArray(rows) ? rows : [];
+    const fieldSet = new Set(preferredFields || []);
+    list.forEach((row) => {
+      if (!row || typeof row !== 'object' || Array.isArray(row)) return;
+      Object.keys(row).forEach((key) => fieldSet.add(key));
+    });
+    const fields = Array.from(fieldSet);
+    const packedRows = list.map((row) => {
+      if (!row || typeof row !== 'object' || Array.isArray(row)) return row;
+      return fields.map((field) => {
+        const value = row[field];
+        return value === undefined ? null : value;
+      });
+    });
+    return { fields, rows: packedRows };
+  }
+
+  function unpackObjectArray(packed) {
+    if (!packed || !Array.isArray(packed.fields) || !Array.isArray(packed.rows)) {
+      return Array.isArray(packed) ? packed : [];
+    }
+    return packed.rows.map((row) => {
+      if (!Array.isArray(row)) return row;
+      const obj = {};
+      packed.fields.forEach((field, index) => {
+        const value = row[index];
+        if (value !== null && value !== undefined) obj[field] = value;
+      });
+      return obj;
+    });
+  }
+
+  function packTaskPointsStorageState(state) {
+    if (!state || typeof state !== 'object' || Array.isArray(state)) return state;
+    const packed = { ...state };
+    packed.__packedStorageVersion = TASKPOINTS_PACKED_STORAGE_VERSION;
+    packed.__packedArrays = {};
+    Object.entries(PACKED_ARRAY_SCHEMAS).forEach(([key, fields]) => {
+      if (!Array.isArray(packed[key])) return;
+      packed.__packedArrays[key] = packObjectArray(packed[key], fields);
+      delete packed[key];
+    });
+    return packed;
+  }
+
+  function unpackTaskPointsStorageState(rawState) {
+    if (!rawState || typeof rawState !== 'object' || Array.isArray(rawState)) return rawState;
+    const packedArrays = rawState.__packedArrays;
+    if (!packedArrays || typeof packedArrays !== 'object' || Array.isArray(packedArrays)) return rawState;
+    const unpacked = { ...rawState };
+    Object.keys(packedArrays).forEach((key) => {
+      unpacked[key] = unpackObjectArray(packedArrays[key]);
+    });
+    delete unpacked.__packedArrays;
+    delete unpacked.__packedStorageVersion;
+    return unpacked;
+  }
+
+  function parseTaskPointsStorageJson(raw, fallback = {}) {
+    if (!raw) return fallback;
+    return unpackTaskPointsStorageState(JSON.parse(raw) || fallback);
+  }
+
+  function safeReplaceTaskPointsStorage(storageKey, serializedCandidate) {
+    const previousRaw = localStorage.getItem(storageKey);
+    if (previousRaw && serializedCandidate.length < previousRaw.length) {
+      localStorage.removeItem(storageKey);
+      try {
+        localStorage.setItem(storageKey, serializedCandidate);
+      } catch (err) {
+        try { localStorage.setItem(storageKey, previousRaw); } catch (restoreErr) { console.warn('TaskPointsCore: failed to restore previous storage after packed write failure.', restoreErr); }
+        throw err;
+      }
+      return;
+    }
+    localStorage.setItem(storageKey, serializedCandidate);
+  }
   const TASKPOINTS_QUOTA_ALERT_COOLDOWN_MS = 60 * 1000;
   const TASKPOINTS_SAVE_BLOCK_COOLDOWN_MS = 15 * 1000;
   const TASKPOINTS_STORAGE_WARNING_MAX = 5;
@@ -173,7 +260,7 @@
     let parsed = {};
     try {
       const raw = localStorage.getItem(storageKey);
-      parsed = raw ? (JSON.parse(raw) || {}) : {};
+      parsed = raw ? (parseTaskPointsStorageJson(raw, {}) || {}) : {};
     } catch (e) {
       console.error('Failed to parse stored state for image migration', e);
       parsed = {};
@@ -4490,7 +4577,7 @@ const workHoursMax = Object.prototype.hasOwnProperty.call(workInput, 'hoursMax')
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
-        const parsed = JSON.parse(raw) || {};
+        const parsed = parseTaskPointsStorageJson(raw, {}) || {};
         return normalizeScoringSettings(parsed.scoringSettings || {});
       }
     } catch (err) {
@@ -4719,7 +4806,7 @@ workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
     const preserveMissingProjects = options.preserveMissingProjects !== false;
     const hasImportedReminders = Array.isArray(src.reminders);
     const hasImportedProjects = Array.isArray(src.projects);
-    return normalizeState({
+    const normalized = normalizeState({
       ...src,
       reminders: hasImportedReminders ? src.reminders : (preserveMissingReminders ? current.reminders : []),
       projects: hasImportedProjects ? src.projects : (preserveMissingProjects ? current.projects : []),
@@ -4727,6 +4814,10 @@ workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
       latestSeasonId: typeof src.latestSeasonId === 'string' ? src.latestSeasonId : '',
       seasonHistory: Array.isArray(src.seasonHistory) ? src.seasonHistory : []
     });
+    if (Array.isArray(src.opponentDripSchedules)) {
+      normalized.opponentDripSchedules = src.opponentDripSchedules;
+    }
+    return normalized;
   }
 
   function loadAppState(options = {}) {
@@ -4735,7 +4826,7 @@ workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
-        parsed = JSON.parse(raw) || {};
+        parsed = parseTaskPointsStorageJson(raw, {}) || {};
         storageKeysFound.push(STORAGE_KEY);
       }
     } catch (e) {
@@ -5297,7 +5388,7 @@ function fastEnsureStateShape(s) {
     } else {
       try {
         const raw = options.raw ?? localStorage.getItem(storageKey);
-        existing = raw ? (JSON.parse(raw) || {}) : {};
+        existing = raw ? (parseTaskPointsStorageJson(raw, {}) || {}) : {};
       } catch (e) {
         console.warn('Failed to parse existing TaskPoints storage; saving fresh state.', e);
         existing = {};
@@ -5446,7 +5537,7 @@ return { state: merged, storageKey };
   function readStoredStateRaw(storageKey) {
     try {
       const raw = localStorage.getItem(storageKey);
-      return raw ? (JSON.parse(raw) || {}) : {};
+      return raw ? (parseTaskPointsStorageJson(raw, {}) || {}) : {};
     } catch (e) {
       console.warn('Failed to parse existing TaskPoints snapshot for validation.', e);
       return {};
@@ -5796,7 +5887,7 @@ return { state: merged, storageKey };
     if (!currentRaw) return;
     let parsedCurrent = {};
     try {
-      parsedCurrent = JSON.parse(currentRaw) || {};
+      parsedCurrent = parseTaskPointsStorageJson(currentRaw, {}) || {};
     } catch (e) {
       return;
     }
@@ -5824,7 +5915,7 @@ return { state: merged, storageKey };
     const next = candidateState && typeof candidateState === 'object' ? { ...candidateState } : {};
     let latest = null;
     try {
-      latest = JSON.parse(localStorage.getItem(storageKey) || '{}');
+      latest = parseTaskPointsStorageJson(localStorage.getItem(storageKey) || '{}', {});
     } catch (_) {
       latest = null;
     }
@@ -5993,14 +6084,20 @@ return { state: merged, storageKey };
       if (candidateBytes > TASKPOINTS_LARGE_SAVE_WARN_BYTES || (storedBytes > 0 && candidateBytes > storedBytes + (512 * 1024))) {
         recordQuotaFailureDiagnostics({ savePath, stage, storageKey, storedBytes, candidateBytes, snapshot: candidateWithSticky });
       }
+      const storageCandidate = packTaskPointsStorageState(candidateWithSticky);
+      const serializedCandidate = JSON.stringify(storageCandidate);
+      const packedCandidateBytes = serializedCandidate.length * 2;
+      if (packedCandidateBytes > TASKPOINTS_LARGE_SAVE_WARN_BYTES || (storedBytes > 0 && packedCandidateBytes > storedBytes + (512 * 1024))) {
+        recordQuotaFailureDiagnostics({ savePath, stage: `${stage}:packed`, storageKey, storedBytes, candidateBytes: packedCandidateBytes, snapshot: storageCandidate });
+      }
       try {
-        localStorage.setItem(storageKey, JSON.stringify(candidateWithSticky));
+        safeReplaceTaskPointsStorage(storageKey, serializedCandidate);
       } catch (err) {
-        recordQuotaFailureDiagnostics({ savePath, stage, storageKey, storedBytes, candidateBytes, snapshot: candidateWithSticky });
+        recordQuotaFailureDiagnostics({ savePath, stage, storageKey, storedBytes, candidateBytes, packedCandidateBytes, unpackedCandidateBytes: candidateBytes, snapshot: candidateWithSticky });
         throw err;
       }
       const savedRaw = localStorage.getItem(storageKey);
-      const saved = savedRaw ? (JSON.parse(savedRaw) || {}) : {};
+      const saved = savedRaw ? (parseTaskPointsStorageJson(savedRaw, {}) || {}) : {};
       const criticalArrays = ['completions', 'matchups', 'gameHistory', 'weightHistory', 'vo2MaxHistory', 'reminders'];
       const failed = criticalArrays.filter((key) => (
         Array.isArray(candidateWithSticky[key])
@@ -6190,11 +6287,11 @@ const cleanedInitialCandidate = cleanupOpponentDripSchedules(dedupedSaveState, {
     const warningState = appendStorageWarning(compactStateForLocalStorage(state), quotaWarning);
     if (root) root.__tpQuotaSaveBlockedUntil = Date.now() + TASKPOINTS_SAVE_BLOCK_COOLDOWN_MS;
     try {
-      localStorage.setItem(storageKey, JSON.stringify(preserveStickyFieldsBeforeSave(warningState, storageKey, {
+      safeReplaceTaskPointsStorage(storageKey, JSON.stringify(packTaskPointsStorageState(preserveStickyFieldsBeforeSave(warningState, storageKey, {
         ...options,
         allowGeneratedCacheClear: true,
         storageEmergencyCompaction: true
-      })));
+      }))));
     } catch (warningErr) {
       console.warn('TaskPointsCore: unable to persist storage warning after quota failure.', warningErr);
     }
@@ -6248,7 +6345,7 @@ const cleanedInitialCandidate = cleanupOpponentDripSchedules(dedupedSaveState, {
       let parsed = null;
       try {
         const raw = localStorage.getItem(slotKey);
-        parsed = raw ? (JSON.parse(raw) || null) : null;
+        parsed = raw ? (parseTaskPointsStorageJson(raw, null) || null) : null;
       } catch (e) {
         parsed = null;
       }
@@ -6277,7 +6374,7 @@ const cleanedInitialCandidate = cleanupOpponentDripSchedules(dedupedSaveState, {
     let parsed = null;
     try {
       const raw = localStorage.getItem(slotKey);
-      parsed = raw ? (JSON.parse(raw) || null) : null;
+      parsed = raw ? (parseTaskPointsStorageJson(raw, null) || null) : null;
     } catch (e) {
       return { restored: false, reason: 'Backup slot is unreadable.' };
     }
@@ -8221,6 +8318,12 @@ return Number(cappedScore.toFixed(1));
     loadAppState,
     pruneStateForStorage,
     compactStateForLocalStorage,
+    packObjectArray,
+    unpackObjectArray,
+    packTaskPointsStorageState,
+    unpackTaskPointsStorageState,
+    parseTaskPointsStorageJson,
+    safeReplaceTaskPointsStorage,
     mergeState,
     saveStateSnapshot,
     saveValidatedSnapshot,
