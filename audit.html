@@ -413,7 +413,7 @@
             : (c.dateKey || '');
           if (!day) return;
           const pts = window.TaskPointsCore?.pointsForCompletion
-            ? TaskPointsCore.pointsForCompletion(c)
+            ? TaskPointsCore.pointsForCompletion(c, state)
             : Number(c.points || 0);
           if (!dayMap[day]) dayMap[day] = 0;
           dayMap[day] += pts;
