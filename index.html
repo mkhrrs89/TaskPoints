@@ -4047,35 +4047,28 @@ function save(savePath, extraOptions = {}) {
     pruneOpponentDripSchedulesToTodayOnly();
 
     const saveOptions = buildHomeSaveOptions(savePath, extraOptions);
-    const shouldWriteNow = Boolean(
-      saveOptions.immediateWrite ||
-      saveOptions.userInitiated ||
-      saveOptions.manualSave
-    );
 
-    // Normal Home saves should be queued/debounced so SCWM and habit taps
-    // do not block the UI with a full storage write every time.
-    //
-    // Use queueStateSnapshot, not mergeAndSaveState, because habit un-toggles
-    // remove completion rows and mergeCompletions intentionally unions rows.
-    if (!shouldWriteNow && window.TaskPointsCore?.queueStateSnapshot) {
-      const result = TaskPointsCore.queueStateSnapshot(state, saveOptions);
+    if (window.TaskPointsCore?.saveStateSnapshot) {
+      const result = TaskPointsCore.saveStateSnapshot(state, saveOptions);
+
+      // If the core save was skipped because of quota cooldown,
+      // do NOT replace the current in-memory state with old localStorage.
+      if (result?.skipped || result?.blockedByQuotaCircuit) {
+        storageCache.parsed = state;
+        storageCache.raw = null;
+        return;
+      }
+
+      if (result?.trimmed) {
+        console.warn('Storage nearing capacity. Older history items were trimmed to keep saves working.');
+      }
+
       if (result?.state) {
         state = result.state;
         storageCache.parsed = state;
         storageCache.raw = null;
       }
-      return;
-    }
 
-    if (window.TaskPointsCore?.saveStateSnapshot) {
-      const { state: merged, trimmed } = TaskPointsCore.saveStateSnapshot(state, saveOptions);
-      if (trimmed) {
-        console.warn('Storage nearing capacity. Older history items were trimmed to keep saves working.');
-      }
-      state = merged;
-      storageCache.parsed = merged;
-      storageCache.raw = null;
       return;
     }
 
@@ -4083,6 +4076,8 @@ function save(savePath, extraOptions = {}) {
     const merged = { ...existing, ...state };
     writeCachedStorageState(merged);
     state = merged;
+    storageCache.parsed = merged;
+    storageCache.raw = null;
   } catch (e) {
     console.error("Failed to save state (index.html)", e);
 
@@ -7666,18 +7661,20 @@ function deferAfterPaint(fn) {
 function scheduleHabitSave() {
   if (habitSaveDebounceId) clearTimeout(habitSaveDebounceId);
   const perfStart = window.TP_DEBUG_PERF ? habitLastTapPerfStart : null;
+
   habitSaveDebounceId = setTimeout(() => {
     habitSaveDebounceId = null;
+
     deferAfterPaint(() => {
-if (window.TaskPointsCore?.queueStateSnapshot) {
-  TaskPointsCore.queueStateSnapshot(state, buildHomeSaveOptions('habit-toggle'));
-} else if (window.TaskPointsCore?.saveStateSnapshot) {
-  TaskPointsCore.saveStateSnapshot(state, buildHomeSaveOptions('habit-toggle', {
-    immediateWrite: true
-  }));
-} else {
-  save('habit-toggle', { immediateWrite: true });
-}
+      // Habit toggles intentionally remove/replace completion rows when cycling:
+      // off -> full -> half -> off.
+      // Save as a full current snapshot, but mark it as user/immediate so the
+      // quota cooldown does not silently skip and revert the UI state.
+      save('habit-toggle', {
+        immediateWrite: true,
+        userInitiated: true
+      });
+
       if (window.TP_DEBUG_PERF && perfStart !== null) {
         console.log(`[TP_PERF] tap->save ${Math.round(performance.now() - perfStart)}ms`);
       }
