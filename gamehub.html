@@ -709,7 +709,7 @@ function matchupAvatarSize(){
         : (c.dateKey || '');
       if (!day) continue;
       const pts = window.TaskPointsCore?.pointsForCompletion
-        ? TaskPointsCore.pointsForCompletion(c)
+        ? TaskPointsCore.pointsForCompletion(c, state)
         : Number(c.points || 0);
       dayMap[day] = (dayMap[day] || 0) + pts;
     }
