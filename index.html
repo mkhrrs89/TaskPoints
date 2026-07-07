@@ -1599,7 +1599,7 @@ function getDerived(){
   for (const c of comps){
     if (!c || !c.completedAtISO) continue;
 
-    _derived.lifetimePoints += Number(c.points) || 0;
+    _derived.lifetimePoints += getCompletionPoints(c);
     
     const d = new Date(c.completedAtISO);
     if (isNaN(d.getTime())) continue;
@@ -1724,10 +1724,17 @@ function normalizeHabitTagColors(value) {
 function normalizeHabit(habit) {
   if (!habit || typeof habit !== 'object') return habit;
   const normalizedDaysPerCompleteWeek = Number(habit.daysPerCompleteWeek);
+  const rawMultiplierStart = typeof habit.streakMultiplierStartDateKey === 'string'
+    ? habit.streakMultiplierStartDateKey.trim()
+    : '';
+  const validMultiplierStart = /^\d{4}-\d{2}-\d{2}$/.test(rawMultiplierStart) ? rawMultiplierStart : null;
+
   return {
     ...habit,
     tag: typeof habit.tag === 'string' ? habit.tag.trim() : '',
     halfPointEnabled: habit.halfPointEnabled !== false,
+    streakMultiplierEnabled: habit.streakMultiplierEnabled === true,
+    streakMultiplierStartDateKey: validMultiplierStart,
     ...(Number.isFinite(normalizedDaysPerCompleteWeek)
       ? { daysPerCompleteWeek: Math.max(0, Math.min(7, Math.round(normalizedDaysPerCompleteWeek))) }
       : {})
@@ -3029,7 +3036,7 @@ function computeYourRecord(){
 
 function getCompletionPoints(entry) {
   if (window.TaskPointsCore?.pointsForCompletion) {
-    return TaskPointsCore.pointsForCompletion(entry);
+    return TaskPointsCore.pointsForCompletion(entry, state);
   }
   const caloriesRaw = parseCaloriesFromTitle(entry?.title);
   if (Number.isFinite(caloriesRaw)) return caloriesToPoints(caloriesRaw);
@@ -6777,6 +6784,13 @@ const daysHtml = days.map(d => {
             <small>${isShowerHabit(h) ? 'Shower uses custom tap rules.' : 'When on, first tap completes the habit and second tap gives half points.'}</small>
           </span>
         </label>
+        <label class="text-xs muted flex items-start gap-2">
+          <input type="checkbox" data-field="streak-multiplier-enabled" ${h.streakMultiplierEnabled === true ? 'checked' : ''}>
+          <span>
+            <strong>Enable streak multiplier</strong><br>
+            <small>Off by default. When switched on, scoring starts today onward but uses the real streak day.</small>
+          </span>
+        </label>
         <select class="input" data-field="category">
           <option value="habit" ${category==='habit'?'selected':''}>Habit</option>
           <option value="vice"  ${category==='vice'?'selected':''}>Vice</option>
@@ -7220,6 +7234,7 @@ function openHabitModal() {
   modal.classList.remove('hidden');
   modal.classList.add('flex');
   if ($('habitHalfPointEnabledInput')) $('habitHalfPointEnabledInput').checked = true;
+  if ($('habitStreakMultiplierEnabledInput')) $('habitStreakMultiplierEnabledInput').checked = false;
   $('habitName')?.focus();
 }
 
@@ -7235,6 +7250,7 @@ function openViceModal() {
   if (!modal) return;
   modal.classList.remove('hidden');
   modal.classList.add('flex');
+  if ($('viceStreakMultiplierEnabledInput')) $('viceStreakMultiplierEnabledInput').checked = false;
   $('viceName')?.focus();
 }
 
@@ -7265,6 +7281,8 @@ function addHabit(){
   const tag  = $('habitTag')?.value.trim() || '';
   const pts  = Number($('habitPts')?.value)||0;
   const halfPointEnabled = $('habitHalfPointEnabledInput')?.checked !== false;
+  const streakMultiplierEnabled = $('habitStreakMultiplierEnabledInput')?.checked === true;
+  const streakMultiplierStartDateKey = streakMultiplierEnabled ? todayKey() : null;
   if(!name) return alert('Enter a habit name');
 
   // Find the current max order among non-retired HABITS
@@ -7285,14 +7303,16 @@ function addHabit(){
     category: 'habit',
     tag,
     order: maxOrder + 1,
-    halfPointEnabled
+    halfPointEnabled,
+    streakMultiplierEnabled,
+    streakMultiplierStartDateKey
   };
 
 
   state.habits.push(h);
   save();
   $('habitName').value=''; $('habitPts').value=''; if ($('habitTag')) $('habitTag').value='';
-  if ($('habitHalfPointEnabledInput')) $('habitHalfPointEnabledInput').checked = true;
+    if ($('habitStreakMultiplierEnabledInput')) $('habitStreakMultiplierEnabledInput').checked = false;
   closeHabitModal();
 
   renderHabits();
@@ -7304,6 +7324,8 @@ function addVice(){
   const name = $('viceName')?.value.trim() || '';
   const tag  = $('viceTag')?.value.trim() || '';
   const pts  = Number($('vicePts')?.value)||0;
+  const streakMultiplierEnabled = $('viceStreakMultiplierEnabledInput')?.checked === true;
+  const streakMultiplierStartDateKey = streakMultiplierEnabled ? todayKey() : null;
   if(!name) return alert('Enter a vice name');
 
   // Find the current max order among non-retired VICES
@@ -7323,13 +7345,15 @@ function addVice(){
     updatedAtISO: new Date().toISOString(),
     category: 'vice',
     tag,
-    order: maxOrder + 1
+    order: maxOrder + 1,
+    streakMultiplierEnabled,
+    streakMultiplierStartDateKey
   };
 
 
   state.habits.push(h);
   save();
-  $('viceName').value=''; $('vicePts').value=''; if ($('viceTag')) $('viceTag').value='';
+  if ($('viceStreakMultiplierEnabledInput')) $('viceStreakMultiplierEnabledInput').checked = false;
   closeViceModal();
 
   renderHabits();
@@ -7391,8 +7415,11 @@ function saveHabitEdit(id,row){
   const tagInput=row.querySelector('input[data-field="tag"]');
   const completeWeekInput = row.querySelector('input[data-field="days-per-complete-week"]');
   const halfPointEnabledInput = row.querySelector('input[data-field="half-point-enabled"]');
+  const streakMultiplierEnabledInput = row.querySelector('input[data-field="streak-multiplier-enabled"]');
   const catInput=row.querySelector('[data-field="category"]');
 
+  const oldStreakMultiplierEnabled = h.streakMultiplierEnabled === true;
+  const oldStreakMultiplierStartDateKey = typeof h.streakMultiplierStartDateKey === 'string' ? h.streakMultiplierStartDateKey : null;
   const oldPoints = Number(h.pointsPerDay) || 0;
   const newPoints = Number(ptsInput?.value) || 0;
   const pointsChanged = newPoints !== oldPoints;
@@ -7429,6 +7456,28 @@ function saveHabitEdit(id,row){
   }
   h.category = newCategory;
   if (halfPointEnabledInput) h.halfPointEnabled = halfPointEnabledInput.checked !== false;
+
+  if (streakMultiplierEnabledInput) {
+    const nextStreakMultiplierEnabled = streakMultiplierEnabledInput.checked === true;
+
+    h.streakMultiplierEnabled = nextStreakMultiplierEnabled;
+
+    // Turning it ON starts scoring today onward.
+    if (nextStreakMultiplierEnabled && oldStreakMultiplierEnabled !== true) {
+      h.streakMultiplierStartDateKey = todayKey();
+    } else if (!nextStreakMultiplierEnabled) {
+      h.streakMultiplierStartDateKey = null;
+    } else if (!/^\d{4}-\d{2}-\d{2}$/.test(String(h.streakMultiplierStartDateKey || ''))) {
+      h.streakMultiplierStartDateKey = todayKey();
+    }
+  }
+
+  const streakMultiplierChanged =
+    oldStreakMultiplierEnabled !== (h.streakMultiplierEnabled === true) ||
+    oldStreakMultiplierStartDateKey !== (typeof h.streakMultiplierStartDateKey === 'string' ? h.streakMultiplierStartDateKey : null);
+
+  if (streakMultiplierChanged) markCompletionsDirty();
+
   h.updatedAtISO = new Date().toISOString();
 
   if (retroactiveChoice === 'yes') {
@@ -12406,6 +12455,14 @@ function tpPerfMark(label) {
       </span>
     </label>
 
+    <label class="mt-3 flex items-start gap-2 text-sm">
+      <input id="habitStreakMultiplierEnabledInput" type="checkbox">
+      <span>
+        <strong>Enable streak multiplier</strong><br>
+        <small class="muted">Off by default. When switched on, scoring starts today onward but uses the real streak day.</small>
+      </span>
+    </label>
+
     <div class="flex justify-end gap-2 mt-6">
       <button type="button" class="btn btn-secondary" onclick="closeHabitModal()">Cancel</button>
       <button type="button" id="confirmHabitBtn" class="btn btn-primary" onclick="addHabit()">Confirm</button>
@@ -12451,6 +12508,14 @@ function tpPerfMark(label) {
     <label class="grid gap-1 text-sm font-medium mt-3">
       Points
       <input id="vicePts" class="input" type="number" placeholder="Pts">
+    </label>
+
+    <label class="mt-3 flex items-start gap-2 text-sm">
+      <input id="viceStreakMultiplierEnabledInput" type="checkbox">
+      <span>
+        <strong>Enable streak multiplier</strong><br>
+        <small class="muted">Off by default. When switched on, scoring starts today onward but uses the real streak day.</small>
+      </span>
     </label>
 
     <div class="flex justify-end gap-2 mt-6">
