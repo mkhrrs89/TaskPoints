@@ -3900,23 +3900,30 @@ rows.push([
       return { label: "Good", cls: "btn-teal" };
     }
 
+    function getLocalStorageStringSizeBytes(key, value) {
+      return (String(key || "").length + String(value || "").length) * 2;
+    }
+
     function getLocalStorageSizeReport() {
       const entries = [];
       let totalBytes = 0;
+      let totalStringBytes = 0;
       try {
         for (let i = 0; i < localStorage.length; i += 1) {
           const key = localStorage.key(i);
           if (!key) continue;
           const value = localStorage.getItem(key) || "";
           const bytes = getUtf8SizeBytes(value);
+          const stringBytes = getLocalStorageStringSizeBytes(key, value);
           totalBytes += bytes;
-          entries.push({ key, ...formatStorageUnits(bytes) });
+          totalStringBytes += stringBytes;
+          entries.push({ key, stringBytes, stringUnits: formatStorageUnits(stringBytes), ...formatStorageUnits(bytes) });
         }
       } catch (err) {
         console.warn("Storage Health localStorage scan failed", err);
       }
       entries.sort((a, b) => b.bytes - a.bytes);
-      return { total: formatStorageUnits(totalBytes), entries };
+      return { total: formatStorageUnits(totalBytes), stringTotal: formatStorageUnits(totalStringBytes), entries };
     }
 
     async function getBrowserStorageEstimate() {
@@ -3961,7 +3968,7 @@ rows.push([
       if (!output) return;
       output.innerHTML = '<div class="muted text-xs">Refreshing…</div>';
       const report = getLocalStorageSizeReport();
-      const mainEntry = report.entries.find((entry) => entry.key === "taskpoints_v1") || { key: "taskpoints_v1", ...formatStorageUnits(0) };
+      const mainEntry = report.entries.find((entry) => entry.key === "taskpoints_v1") || { key: "taskpoints_v1", stringBytes: 0, stringUnits: formatStorageUnits(0), ...formatStorageUnits(0) };
       const notesEntry = report.entries.find((entry) => entry.key === "taskpoints_notes_v1") || { key: "taskpoints_notes_v1", ...formatStorageUnits(0) };
       const quarantinedEntry = report.entries.find((entry) => entry.key === "taskpoints_quarantined_snapshot") || null;
       const latestBackupEntry = report.entries.find((entry) => entry.key === "taskpoints_backup_latest") || null;
@@ -3997,6 +4004,7 @@ rows.push([
       } : null;
       output.innerHTML = `
         <div><strong>Main State:</strong> taskpoints_v1: <strong>${mainEntry.mib.toFixed(2)} MiB</strong> <span class="btn ${mainStatus.cls} btn-toolbar">${mainStatus.label}</span></div>
+        <div class="muted">LocalStorage string estimate: <strong>${mainEntry.stringUnits.mib.toFixed(2)} MiB</strong> for taskpoints_v1 (${report.stringTotal.mib.toFixed(2)} MiB across all keys)</div>
         <div class="muted">Notes key taskpoints_notes_v1: <strong>${notesEntry.mib.toFixed(3)} MiB</strong></div>
         <div class="muted">Active app data (excluding quarantined snapshot): ${(activeDataBytes / (1024 * 1024)).toFixed(2)} MiB</div>
         <div class="muted">LocalStorage Total: ${report.total.mib.toFixed(2)} MiB across ${report.entries.length} keys</div>
