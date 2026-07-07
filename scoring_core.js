@@ -22,14 +22,32 @@
     seasonHistory: []
   };
 
-  function packObjectArray(rows, preferredFields) {
-    const list = Array.isArray(rows) ? rows : [];
+  const PACKED_ARRAY_MIN_SAVINGS_RATIO = 0.95;
+  const SHORT_KEY_ALPHABET = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+
+  function getShortKeyAlias(index) {
+    let value = index;
+    let alias = '';
+    do {
+      alias = SHORT_KEY_ALPHABET[value % SHORT_KEY_ALPHABET.length] + alias;
+      value = Math.floor(value / SHORT_KEY_ALPHABET.length) - 1;
+    } while (value >= 0);
+    return alias;
+  }
+
+  function getPackedArrayFields(rows, preferredFields) {
     const fieldSet = new Set(preferredFields || []);
+    const list = Array.isArray(rows) ? rows : [];
     list.forEach((row) => {
       if (!row || typeof row !== 'object' || Array.isArray(row)) return;
       Object.keys(row).forEach((key) => fieldSet.add(key));
     });
-    const fields = Array.from(fieldSet);
+    return Array.from(fieldSet);
+  }
+
+  function packObjectArray(rows, preferredFields) {
+    const list = Array.isArray(rows) ? rows : [];
+    const fields = getPackedArrayFields(list, preferredFields);
     const packedRows = list.map((row) => {
       if (!row || typeof row !== 'object' || Array.isArray(row)) return row;
       return fields.map((field) => {
@@ -40,10 +58,45 @@
     return { fields, rows: packedRows };
   }
 
+  function packObjectArrayShortKeys(rows, preferredFields) {
+    const list = Array.isArray(rows) ? rows : [];
+    const fields = getPackedArrayFields(list, preferredFields);
+    const aliases = {};
+    const fieldToAlias = {};
+    fields.forEach((field, index) => {
+      const alias = getShortKeyAlias(index);
+      aliases[alias] = field;
+      fieldToAlias[field] = alias;
+    });
+    const packedRows = list.map((row) => {
+      if (!row || typeof row !== 'object' || Array.isArray(row)) return row;
+      const packedRow = {};
+      Object.keys(row).forEach((field) => {
+        const value = row[field];
+        if (value === undefined) return;
+        packedRow[fieldToAlias[field] || field] = value;
+      });
+      return packedRow;
+    });
+    return { mode: 'shortKeys', aliases, rows: packedRows };
+  }
+
   function unpackObjectArray(packed) {
-    if (!packed || !Array.isArray(packed.fields) || !Array.isArray(packed.rows)) {
+    if (!packed || !Array.isArray(packed.rows)) {
       return Array.isArray(packed) ? packed : [];
     }
+    if (packed.mode === 'shortKeys' && packed.aliases && typeof packed.aliases === 'object' && !Array.isArray(packed.aliases)) {
+      return packed.rows.map((row) => {
+        if (!row || typeof row !== 'object' || Array.isArray(row)) return row;
+        const obj = {};
+        Object.entries(row).forEach(([key, value]) => {
+          if (value === undefined) return;
+          obj[packed.aliases[key] || key] = value;
+        });
+        return obj;
+      });
+    }
+    if (!Array.isArray(packed.fields)) return [];
     return packed.rows.map((row) => {
       if (!Array.isArray(row)) return row;
       const obj = {};
@@ -55,16 +108,67 @@
     });
   }
 
+  function getPackedArrayCandidate(rows, preferredFields) {
+    const originalRaw = JSON.stringify(Array.isArray(rows) ? rows : []);
+    const fixedPacked = packObjectArray(rows, preferredFields);
+    const shortKeyPacked = packObjectArrayShortKeys(rows, preferredFields);
+    const fixedRaw = JSON.stringify(fixedPacked);
+    const shortKeyRaw = JSON.stringify(shortKeyPacked);
+    const candidates = [
+      { mode: 'fixed', value: fixedPacked, chars: fixedRaw.length },
+      { mode: 'shortKeys', value: shortKeyPacked, chars: shortKeyRaw.length }
+    ];
+    const best = candidates.reduce((winner, candidate) => candidate.chars < winner.chars ? candidate : winner, candidates[0]);
+    const shouldPack = best.chars < originalRaw.length * PACKED_ARRAY_MIN_SAVINGS_RATIO;
+    return {
+      originalChars: originalRaw.length,
+      fixedPackedChars: fixedRaw.length,
+      shortKeyPackedChars: shortKeyRaw.length,
+      chosenMode: shouldPack ? best.mode : 'original',
+      chosenChars: shouldPack ? best.chars : originalRaw.length,
+      savedChars: shouldPack ? originalRaw.length - best.chars : 0,
+      savedPercent: shouldPack && originalRaw.length ? ((originalRaw.length - best.chars) / originalRaw.length) * 100 : 0,
+      packed: shouldPack,
+      value: shouldPack ? best.value : null
+    };
+  }
+
+  function getTaskPointsPackDiagnostics(state) {
+    if (!state || typeof state !== 'object' || Array.isArray(state)) return [];
+    return Object.entries(PACKED_ARRAY_SCHEMAS).filter(([key]) => Array.isArray(state[key])).map(([key, fields]) => {
+      const candidate = getPackedArrayCandidate(state[key], fields);
+      return {
+        array: key,
+        originalChars: candidate.originalChars,
+        fixedPackedChars: candidate.fixedPackedChars,
+        shortKeyPackedChars: candidate.shortKeyPackedChars,
+        chosenMode: candidate.chosenMode,
+        chosenChars: candidate.chosenChars,
+        savedChars: candidate.savedChars,
+        savedPercent: Number(candidate.savedPercent.toFixed(2)),
+        packed: candidate.packed
+      };
+    });
+  }
+
   function packTaskPointsStorageState(state) {
     if (!state || typeof state !== 'object' || Array.isArray(state)) return state;
     const packed = { ...state };
-    packed.__packedStorageVersion = TASKPOINTS_PACKED_STORAGE_VERSION;
-    packed.__packedArrays = {};
+    const packedArrays = {};
     Object.entries(PACKED_ARRAY_SCHEMAS).forEach(([key, fields]) => {
       if (!Array.isArray(packed[key])) return;
-      packed.__packedArrays[key] = packObjectArray(packed[key], fields);
+      const candidate = getPackedArrayCandidate(packed[key], fields);
+      if (!candidate.packed) return;
+      packedArrays[key] = candidate.value;
       delete packed[key];
     });
+    if (Object.keys(packedArrays).length) {
+      packed.__packedStorageVersion = TASKPOINTS_PACKED_STORAGE_VERSION;
+      packed.__packedArrays = packedArrays;
+    } else {
+      delete packed.__packedStorageVersion;
+      delete packed.__packedArrays;
+    }
     return packed;
   }
 
@@ -8321,6 +8425,7 @@ return Number(cappedScore.toFixed(1));
     packObjectArray,
     unpackObjectArray,
     packTaskPointsStorageState,
+    getTaskPointsPackDiagnostics,
     unpackTaskPointsStorageState,
     parseTaskPointsStorageJson,
     safeReplaceTaskPointsStorage,
