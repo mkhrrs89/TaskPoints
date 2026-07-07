@@ -589,7 +589,7 @@ function saveMerged(partial, opts = {}) {
 
 function getCompletionPoints(entry) {
   if (window.TaskPointsCore?.pointsForCompletion) {
-    return TaskPointsCore.pointsForCompletion(entry);
+    return TaskPointsCore.pointsForCompletion(entry, state);
   }
   return Number(entry?.points) || 0;
 }
