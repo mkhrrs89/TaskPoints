@@ -413,7 +413,10 @@ function load() {
         if (!c || !c.completedAtISO) return;
         const key = dateKey(c.completedAtISO);
         if (key === dateKeyStr) {
-          total += Number(c.points || 0);
+const pts = window.TaskPointsCore?.pointsForCompletion
+  ? TaskPointsCore.pointsForCompletion(c, state)
+  : Number(c.points || 0);
+total += pts;
         }
       });
       return Number(total.toFixed(1));
