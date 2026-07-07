@@ -427,7 +427,7 @@ function readPageStateFresh(){
       return pageStateCache;
     }
 
-    const p = JSON.parse(raw);
+    const p = TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY, {});
     pageStateCache = {
       tasks:       Array.isArray(p.tasks)       ? p.tasks       : [],
       completions: Array.isArray(p.completions) ? p.completions : [],
@@ -567,7 +567,7 @@ function saveMerged(partial) {
     }
 
     // Fallback if snapshot saver isn't available
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+    TaskPointsCore.writeTaskPointsStoredState(merged, { storageKey: STORAGE_KEY });
     pageStateCache = merged;
     pageStateCacheDirty = false;
     return merged;

@@ -862,7 +862,7 @@ function renderFormatList(season = null) {
   function getSeasonRoundCollapseState(seasonId) {
     try {
       const raw = global.localStorage?.getItem(SEASON_ROUND_COLLAPSE_STORAGE_KEY);
-      const parsed = raw ? JSON.parse(raw) : {};
+      const parsed = raw ? TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY, {}) : {};
       const state = parsed && typeof parsed === 'object' ? parsed[String(seasonId || '')] : null;
       return state && typeof state === 'object' ? state : {};
     } catch (error) {
@@ -874,7 +874,7 @@ function renderFormatList(season = null) {
   function setSeasonRoundCollapsed(seasonId, roundId, collapsed) {
     try {
       const raw = global.localStorage?.getItem(SEASON_ROUND_COLLAPSE_STORAGE_KEY);
-      const parsed = raw ? JSON.parse(raw) : {};
+      const parsed = raw ? TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY, {}) : {};
       const store = parsed && typeof parsed === 'object' ? parsed : {};
       const seasonKey = String(seasonId || 'season');
       store[seasonKey] = store[seasonKey] && typeof store[seasonKey] === 'object' ? store[seasonKey] : {};

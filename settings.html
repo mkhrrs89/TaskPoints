@@ -777,7 +777,7 @@
       let parsed;
       try {
         const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
-        parsed = raw ? (JSON.parse(raw) || {}) : {};
+        parsed = raw ? TaskPointsCore.readTaskPointsStoredState(SETTINGS_STORAGE_KEY, {}) : {};
       } catch (err) {
         console.error("Failed to load stored state for game reset", err);
         alert("Could not read your saved TaskPoints data. No changes were made.");
@@ -832,7 +832,7 @@
     function loadLatestSettingsStateForSkillsClear() {
       try {
         const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
-        const parsed = raw ? (JSON.parse(raw) || {}) : {};
+        const parsed = raw ? TaskPointsCore.readTaskPointsStoredState(SETTINGS_STORAGE_KEY, {}) : {};
         if (window.TaskPointsCore?.loadAppState) {
           const loaded = TaskPointsCore.loadAppState({ syncDerived: false, persistSync: false }).state || {};
           return { ...parsed, ...loaded };
@@ -889,7 +889,7 @@
         return saved?.state || nextState;
       }
 
-      localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(nextState));
+      TaskPointsCore.writeTaskPointsStoredState(nextState, { storageKey: SETTINGS_STORAGE_KEY });
       return nextState;
     }
 
@@ -977,7 +977,7 @@
       let cacheNotes = "";
       try {
         const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
-        const savedState = raw ? JSON.parse(raw) : {};
+        const savedState = raw ? TaskPointsCore.readTaskPointsStoredState(SETTINGS_STORAGE_KEY, {}) : {};
         stateNotes = typeof savedState.notes === "string" ? savedState.notes : "";
       } catch (_) {}
       try {
@@ -1004,9 +1004,9 @@
 
       try {
         const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
-        const savedState = raw ? JSON.parse(raw) : {};
+        const savedState = raw ? TaskPointsCore.readTaskPointsStoredState(SETTINGS_STORAGE_KEY, {}) : {};
         savedState.notes = notesText;
-        localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(savedState));
+        TaskPointsCore.writeTaskPointsStoredState(savedState, { storageKey: SETTINGS_STORAGE_KEY });
       } catch (error) {
         console.error("Failed to write imported notes into main state", error);
       }
@@ -1496,7 +1496,7 @@ ${summaryWithNotes}`)) return;
             limits: { allowHistoryPrune: false, allowCompletionPrune: false }
           });
         } else {
-          localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(mergedState));
+          TaskPointsCore.writeTaskPointsStoredState(mergedState, { storageKey: SETTINGS_STORAGE_KEY });
         }
         if (notesRestored) {
           applyImportedNotesPayload(localStorage.getItem("taskpoints_notes_v1") || "", {
@@ -1505,7 +1505,7 @@ ${summaryWithNotes}`)) return;
           });
         }
 
-        const saved = JSON.parse(localStorage.getItem('taskpoints_v1') || '{}');
+        const saved = TaskPointsCore.readTaskPointsStoredState(SETTINGS_STORAGE_KEY, {});
         console.debug('[merge backup] after save verification', {
           expectedMatchups: mergedState.matchups?.length,
           savedMatchups: saved.matchups?.length,
@@ -1576,7 +1576,7 @@ ${summaryWithNotes}`)) return;
     function loadSettingsState() {
       try {
         const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
-        const parsed = raw ? (JSON.parse(raw) || {}) : {};
+        const parsed = raw ? TaskPointsCore.readTaskPointsStoredState(SETTINGS_STORAGE_KEY, {}) : {};
         if (window.TaskPointsCore?.normalizeState) {
           return TaskPointsCore.normalizeState(parsed);
         }
@@ -3626,7 +3626,7 @@ normalizeSvgTickText(svg);
       let parsed = null;
       try {
         const raw = localStorage.getItem(key);
-        parsed = raw ? JSON.parse(raw) : null;
+        parsed = raw ? TaskPointsCore.readTaskPointsStoredState(SETTINGS_STORAGE_KEY, {}) : null;
       } catch (_) {
         parsed = null;
       }
@@ -3983,9 +3983,7 @@ rows.push([
           storageEncodingInfo = window.TaskPointsCore?.getTaskPointsStorageEncodingInfo
             ? TaskPointsCore.getTaskPointsStorageEncodingInfo(raw)
             : storageEncodingInfo;
-          parsedState = window.TaskPointsCore?.parseTaskPointsStorageJson
-            ? TaskPointsCore.parseTaskPointsStorageJson(raw, {})
-            : JSON.parse(raw);
+          parsedState = TaskPointsCore.readTaskPointsStoredState("taskpoints_v1", {});
           packedStorageActive = Boolean(storageEncodingInfo.packed);
         }
       } catch (_) {}

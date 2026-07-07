@@ -407,7 +407,7 @@ function getStandingsScopeLabel() {
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
         if (!raw) return [];
-        const parsed = JSON.parse(raw);
+        const parsed = TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY, {});
         latestState = parsed;
 
         let syncedState = parsed;

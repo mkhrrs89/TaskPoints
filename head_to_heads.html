@@ -242,7 +242,7 @@
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
         if (!raw) return { players: [], matchups: [], youName: "" };
-        const parsed = JSON.parse(raw) || {};
+        const parsed = TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY, {}) || {};
         return {
           players: Array.isArray(parsed.players) ? parsed.players : [],
           matchups: Array.isArray(parsed.matchups) ? parsed.matchups : [],

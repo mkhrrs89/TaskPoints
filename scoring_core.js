@@ -27,6 +27,7 @@
   const TASKPOINTS_STORAGE_ENCODING_LZ16_PACKED_V1 = "lz16-packed-v1";
   const TASKPOINTS_STORAGE_ENCODING_VERSION = 1;
   const TASKPOINTS_COMPRESSED_MIN_RATIO = 0.90;
+  const TASKPOINTS_ENABLE_COMPRESSED_STORAGE = true;
 
   // UTF-16 localStorage-safe LZ compression derived from lz-string 1.4.4
   // (Pieroxy, MIT License): https://github.com/pieroxy/lz-string
@@ -341,7 +342,7 @@
     const packedState = packTaskPointsStorageState(state);
     const packedRawJson = JSON.stringify(packedState);
     const compressedWrapperRaw = JSON.stringify(makeCompressedStorageWrapper(packedRawJson));
-    const useCompressed = compressedWrapperRaw.length < packedRawJson.length * TASKPOINTS_COMPRESSED_MIN_RATIO;
+    const useCompressed = TASKPOINTS_ENABLE_COMPRESSED_STORAGE && compressedWrapperRaw.length < packedRawJson.length * TASKPOINTS_COMPRESSED_MIN_RATIO;
     const chosenRaw = useCompressed ? compressedWrapperRaw : packedRawJson;
     return {
       packedState,
@@ -354,6 +355,46 @@
       chosenChars: chosenRaw.length,
       chosenBytes: chosenRaw.length * 2
     };
+  }
+
+
+  function isCompressedTaskPointsStorageRaw(raw) {
+    if (!raw) return false;
+    try {
+      const parsed = JSON.parse(raw);
+      return isCompressedTaskPointsStorageWrapper(parsed);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function assertTaskPointsParserAvailableForRaw(raw) {
+    if (!isCompressedTaskPointsStorageRaw(raw)) return;
+    const message = 'Compressed TaskPoints storage requires TaskPointsCore parser. Refusing to load partial state.';
+    console.error(message);
+    throw new Error(message);
+  }
+
+  function readTaskPointsStoredState(storageKey = STORAGE_KEY, fallback = null) {
+    const key = storageKey || STORAGE_KEY;
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    return parseTaskPointsStorageJson(raw, fallback || {});
+  }
+
+  function serializeTaskPointsStoredState(nextState, options = {}) {
+    if (typeof buildOptimizedTaskPointsStorageRaw === 'function') {
+      const built = buildOptimizedTaskPointsStorageRaw(nextState, options);
+      return typeof built === 'string' ? built : (built.chosenRaw || built.raw || JSON.stringify(nextState || {}));
+    }
+    return JSON.stringify(packTaskPointsStorageState ? packTaskPointsStorageState(nextState) : (nextState || {}));
+  }
+
+  function writeTaskPointsStoredState(nextState, options = {}) {
+    const storageKey = options.storageKey || STORAGE_KEY;
+    const raw = serializeTaskPointsStoredState(nextState, options);
+    safeReplaceTaskPointsStorage(storageKey, raw);
+    return raw;
   }
 
   function safeReplaceTaskPointsStorage(storageKey, serializedCandidate) {
@@ -8624,6 +8665,11 @@ return Number(cappedScore.toFixed(1));
     makeCompressedStorageWrapper,
     buildOptimizedTaskPointsStorageRaw,
     getTaskPointsStorageEncodingInfo,
+    isCompressedTaskPointsStorageRaw,
+    assertTaskPointsParserAvailableForRaw,
+    readTaskPointsStoredState,
+    serializeTaskPointsStoredState,
+    writeTaskPointsStoredState,
     parseTaskPointsStorageJson,
     safeReplaceTaskPointsStorage,
     mergeState,

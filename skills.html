@@ -252,7 +252,7 @@
       }
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
-        return raw ? (JSON.parse(raw) || {}) : {};
+        return raw ? TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY, {}) : {};
       } catch (err) {
         console.error("Failed to load TaskPoints state", err);
         return {};
@@ -265,7 +265,7 @@
         return saved?.state || nextState;
       }
 
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
+      TaskPointsCore.writeTaskPointsStoredState(nextState, { storageKey: STORAGE_KEY });
       return nextState;
     }
 

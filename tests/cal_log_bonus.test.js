@@ -2107,3 +2107,31 @@ test('TaskPoints storage parser accepts plain, packed, and compressed packed sav
   assert.ok(Array.isArray(compressedParsed.gameHistory));
   assert.ok(Array.isArray(compressedParsed.seasonHistory));
 });
+
+test('central TaskPoints storage read/write helpers preserve histories from compressed storage', () => {
+  const initial = core.normalizeState({
+    tasks: [{ id: 'task-preserve', title: 'Preserve Task', points: 2 }],
+    completions: [{ id: 'c-preserve', taskId: 'task-preserve', points: 2, completedAtISO: '2026-02-01T00:00:00.000Z', dateKey: '2026-02-01' }],
+    matchups: [{ id: 'm-preserve', playerAId: 'p1', playerBId: 'p2', scoreA: 21, scoreB: 19 }],
+    gameHistory: [{ id: 'g-preserve', playerId: 'p1', score: 21, dateKey: '2026-02-01' }],
+    seasonHistory: [{ id: 'season-preserve', tournamentMatchupResults: [{ id: 'tm-preserve', scoreA: 21, scoreB: 19 }] }],
+    notes: 'before'
+  });
+  const compressedRaw = JSON.stringify(core.makeCompressedStorageWrapper(JSON.stringify(core.packTaskPointsStorageState(initial))));
+  global.localStorage.setItem(core.STORAGE_KEY, compressedRaw);
+
+  const loaded = core.readTaskPointsStoredState(core.STORAGE_KEY, {});
+  assert.equal(loaded.completions.length, 1);
+  assert.equal(loaded.matchups.length, 1);
+  assert.equal(loaded.gameHistory.length, 1);
+  assert.equal(loaded.seasonHistory.length, 1);
+
+  core.writeTaskPointsStoredState({ ...loaded, notes: 'after' }, { storageKey: core.STORAGE_KEY });
+  const saved = core.parseTaskPointsStorageJson(global.localStorage.getItem(core.STORAGE_KEY), {});
+  assert.equal(saved.notes, 'after');
+  assert.equal(saved.completions.length, 1);
+  assert.equal(saved.matchups.length, 1);
+  assert.equal(saved.matchups[0].scoreA, 21);
+  assert.equal(saved.gameHistory.length, 1);
+  assert.equal(saved.seasonHistory.length, 1);
+});

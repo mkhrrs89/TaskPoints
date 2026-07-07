@@ -274,7 +274,7 @@ function loadPlayers() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
 
-    const parsed = JSON.parse(raw);
+    const parsed = TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY, {});
     latestState = parsed; // <- remember full state
 
     return Array.isArray(parsed.players) ? parsed.players : [];
@@ -772,10 +772,10 @@ function validateAndNormalizeValue(field, rawValue) {
 function persistPlayersToStorage() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : {};
+    const parsed = raw ? TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY, {}) : {};
     const actualPlayers = players.filter(p => !(p.id === "YOU" || p.isYou));
     parsed.players = actualPlayers;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+    TaskPointsCore.writeTaskPointsStoredState(parsed, { storageKey: STORAGE_KEY });
     latestState = parsed;
     gameHistory = Array.isArray(parsed.gameHistory) ? parsed.gameHistory : gameHistory;
     return true;

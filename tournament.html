@@ -415,7 +415,7 @@
 
     if (!baseState || !Object.keys(baseState).length) {
       try {
-        const parsed = raw ? JSON.parse(raw) : {};
+        const parsed = raw ? TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY, {}) : {};
         baseState = window.TaskPointsCore && typeof TaskPointsCore.normalizeState === 'function'
           ? TaskPointsCore.normalizeState(parsed || {})
           : (parsed || {});

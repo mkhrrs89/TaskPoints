@@ -335,7 +335,7 @@ function loadTodayDb() {
   const raw = localStorage.getItem(TODAY_STORE_KEY);
   if (!raw) return { version: 1, tasksByDay: {}, notesByDay: {}, selectedHabitIdsByDay: {}, orderByDay: {} };
   try {
-    const parsed = JSON.parse(raw);
+    const parsed = TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY, {});
     if (!parsed || typeof parsed !== 'object') throw new Error('bad');
     return {
       version: 1,
