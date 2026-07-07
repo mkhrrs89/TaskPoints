@@ -3690,9 +3690,6 @@ function simulateToday() {
 
   ensureUpcomingSchedule();
 
-  state.gameHistory = state.gameHistory.filter(g => getHistoryDateKey(g) !== todayKey);
-  state.matchups    = state.matchups.filter(m => getMatchupDateKeyLocal(m) !== todayKey);
-
   const todaysSchedule = state.schedule.find(d => d && d.date === todayKey);
   const todaysPairs = todaysSchedule && Array.isArray(todaysSchedule.matchups)
     ? todaysSchedule.matchups
@@ -3739,12 +3736,14 @@ participantIds.forEach(id => {
   const score = simulateAiScoreForPlayer(player, todayKey, { opponent });
   scoresById[id] = score;
   ensureOpponentDripSchedule(todayKey, id, score);
-  state.gameHistory.push({
-    id: makeId(),
-    date: todayKey,
-    playerId: id,
-    score
-  });
+  if (!state.gameHistory.some(g => getHistoryDateKey(g) === todayKey && String(g.playerId || '') === String(id))) {
+    state.gameHistory.push({
+      id: makeId(),
+      date: todayKey,
+      playerId: id,
+      score
+    });
+  }
 });
 
   todaysPairs.forEach(pair => {
@@ -3761,8 +3760,23 @@ participantIds.forEach(id => {
       scoreB: scoresById[pair.playerBId] ?? 0
     };
 
-    state.matchups.push(matchup);
+    const stableId = String(matchup.id || matchup.matchupId || '');
+    const existingIndex = state.matchups.findIndex(m => {
+      if (!m || getMatchupDateKeyLocal(m) !== todayKey) return false;
+      if (stableId && String(m.id || m.matchupId || '') === stableId) return true;
+      const a = String(m.playerAId || '');
+      const b = String(m.playerBId || '');
+      return [a, b].sort().join('|') === [String(matchup.playerAId), String(matchup.playerBId)].sort().join('|')
+        && String(m.matchupType || '') === String(matchup.matchupType || '');
+    });
+    if (existingIndex >= 0) state.matchups[existingIndex] = { ...matchup, ...state.matchups[existingIndex] };
+    else state.matchups.push(matchup);
   });
+
+  if (window.TaskPointsCore?.dedupeSameDayGeneratedSlateState) {
+    const deduped = TaskPointsCore.dedupeSameDayGeneratedSlateState(state, todayKey);
+    if (deduped?.state) state = deduped.state;
+  }
 
   if (window.TaskPointsCore?.syncSeasonResultsFromDailyMatchups) {
     const seasonSync = TaskPointsCore.syncSeasonResultsFromDailyMatchups(state, todayKey);
@@ -3872,12 +3886,14 @@ if (!Number.isFinite(score)) {
   score = player ? simulateAiScoreForPlayer(player, todayKey, { opponent }) : 0;
 
   // If we had to simulate, also add history so other pages stay consistent
-  state.gameHistory.push({
-    id: makeId(),
-    date: todayKey,
-    playerId: id,
-    score
-  });
+  if (!state.gameHistory.some(g => getHistoryDateKey(g) === todayKey && String(g.playerId || '') === String(id))) {
+    state.gameHistory.push({
+      id: makeId(),
+      date: todayKey,
+      playerId: id,
+      score
+    });
+  }
 }
 
     scoresById[id] = Number(score.toFixed(1));
@@ -3996,8 +4012,10 @@ function buildHomeSaveOptions(savePath, extraOptions = {}) {
     ? extraOptions.limits
     : {};
 
+  const saveDateKey = extraOptions.dedupeDateKey || (typeof getGameDayKey === 'function' ? getGameDayKey(new Date()) : undefined);
   return {
     allowGeneratedCacheClear: true,
+    ...(saveDateKey ? { dedupeDateKey: saveDateKey } : {}),
     storageEmergencyCompaction: true,
     ...extraOptions,
     limits: {

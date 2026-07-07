@@ -2619,6 +2619,134 @@ function shouldUseSeasonMatchupControl(state, dateKeyStr) {
     return type === 'tournament' || type === 'season' || Boolean(matchup?.seriesId || matchup?.seasonSeriesId);
   }
 
+
+
+  function finiteNumberValue(value) {
+    if (value == null || value === '') return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  }
+
+  function matchupStableIdentity(matchup, dateKeyStr = '') {
+    if (!matchup || typeof matchup !== 'object') return '';
+    const id = String(matchup.id || matchup.matchupId || '').trim();
+    if (id) return `id:${id}`;
+    const seriesId = String(matchup.seriesId || matchup.seasonSeriesId || matchup.seasonSeriesID || '').trim();
+    const gameNumber = String(matchup.gameNumber || matchup.game || matchup.roundGameNumber || '').trim();
+    const date = String(dateKeyStr || getStoredMatchupDateKey(matchup)).slice(0, 10);
+    if (seriesId && gameNumber) return `series:${seriesId}|${date}|${gameNumber}`;
+    const a = String(matchup.playerAId || matchup.playerA || matchup.aPlayerId || '').trim();
+    const b = String(matchup.playerBId || matchup.playerB || matchup.bPlayerId || '').trim();
+    if (!date || !a || !b) return '';
+    const pair = [a, b].sort().join('|');
+    const type = String(matchup.matchupType || matchup.type || '').trim().toLowerCase();
+    return `pair:${date}|${pair}|${type}`;
+  }
+
+  function matchupKeepScore(row) {
+    if (!row || typeof row !== 'object') return -1;
+    const scoreA = finiteNumberValue(row.scoreA ?? row.playerAScore);
+    const scoreB = finiteNumberValue(row.scoreB ?? row.playerBScore);
+    let score = 0;
+    if (scoreA != null || scoreB != null) score += 1000;
+    if (scoreA != null && scoreB != null) score += 1000;
+    if (row.result || row.winnerId || row.final === true || row.isFinal === true || row.completedAtISO || row.recordedAtISO || row.finalizedAtISO) score += 3000;
+    score += Object.keys(row).filter((key) => row[key] != null && row[key] !== '').length;
+    return score;
+  }
+
+  function mergePreferredMatchupRow(existing, incoming) {
+    const preferred = matchupKeepScore(incoming) > matchupKeepScore(existing) ? incoming : existing;
+    const other = preferred === incoming ? existing : incoming;
+    return { ...(other || {}), ...(preferred || {}) };
+  }
+
+  function compactScheduleMatchupRow(row) {
+    if (!row || typeof row !== 'object') return row;
+    const keep = ['id','matchupId','date','dateKey','playerAId','playerBId','scoreA','scoreB','playerAScore','playerBScore','matchupType','type','seasonId','seriesId','seasonSeriesId','gameNumber','roundGameNumber','result','winnerId','loserId','completedAtISO','recordedAtISO','finalizedAtISO','final','isFinal'];
+    const out = {};
+    keep.forEach((key) => { if (row[key] != null && row[key] !== '') out[key] = row[key]; });
+    if (out.date && !out.dateKey) out.dateKey = out.date;
+    if (out.dateKey && !out.date) out.date = out.dateKey;
+    return out;
+  }
+
+  function dedupeSameDayMatchups(state, dateKeyStr) {
+    const key = String(dateKeyStr || '').slice(0, 10);
+    if (!key || !Array.isArray(state?.matchups)) return { state, changed: false, removed: 0 };
+    const byIdentity = new Map();
+    const next = [];
+    let removed = 0;
+    state.matchups.forEach((row) => {
+      if (getStoredMatchupDateKey(row) !== key) { next.push(row); return; }
+      const identity = matchupStableIdentity(row, key);
+      if (!identity) { next.push(row); return; }
+      if (!byIdentity.has(identity)) {
+        byIdentity.set(identity, next.length);
+        next.push(row);
+        return;
+      }
+      const idx = byIdentity.get(identity);
+      next[idx] = mergePreferredMatchupRow(next[idx], row);
+      removed += 1;
+    });
+    return removed ? { state: { ...state, matchups: next }, changed: true, removed } : { state, changed: false, removed: 0 };
+  }
+
+  function gameHistoryKeepScore(row) {
+    const score = finiteNumberValue(row?.score ?? row?.points ?? row?.total);
+    let rank = score != null ? 1000 : 0;
+    if (row?.result || row?.winnerId || row?.final === true || row?.isFinal === true || row?.completedAtISO || row?.recordedAtISO || row?.finalizedAtISO) rank += 2000;
+    if (row && typeof row === 'object') rank += Object.keys(row).filter((key) => row[key] != null && row[key] !== '').length;
+    return rank;
+  }
+
+  function dedupeSameDayGameHistory(state, dateKeyStr) {
+    const key = String(dateKeyStr || '').slice(0, 10);
+    if (!key || !Array.isArray(state?.gameHistory)) return { state, changed: false, removed: 0 };
+    const byPlayer = new Map();
+    const next = [];
+    let removed = 0;
+    state.gameHistory.forEach((row) => {
+      const rowDate = String(row?.dateKey || row?.date || (row?.dateISO ? dateKey(row.dateISO) : '') || '').slice(0, 10);
+      const playerId = String(row?.playerId || '').trim();
+      if (rowDate !== key || !playerId) { next.push(row); return; }
+      const identity = `${key}|${playerId}`;
+      if (!byPlayer.has(identity)) { byPlayer.set(identity, next.length); next.push(row); return; }
+      const idx = byPlayer.get(identity);
+      next[idx] = gameHistoryKeepScore(row) > gameHistoryKeepScore(next[idx]) ? { ...next[idx], ...row } : { ...row, ...next[idx] };
+      removed += 1;
+    });
+    return removed ? { state: { ...state, gameHistory: next }, changed: true, removed } : { state, changed: false, removed: 0 };
+  }
+
+  function dedupeSameDayGeneratedSlateState(state, dateKeyStr) {
+    let next = state || {};
+    let changed = false;
+    let removedMatchups = 0;
+    let removedGameHistory = 0;
+    const m = dedupeSameDayMatchups(next, dateKeyStr);
+    if (m.changed) { next = m.state; changed = true; removedMatchups += m.removed; }
+    const g = dedupeSameDayGameHistory(next, dateKeyStr);
+    if (g.changed) { next = g.state; changed = true; removedGameHistory += g.removed; }
+    if (Array.isArray(next.schedule)) {
+      const schedule = next.schedule.map((day) => {
+        if (getScheduleDayDateKey(day) !== String(dateKeyStr).slice(0, 10) || !Array.isArray(day?.matchups)) return day;
+        const seen = new Map();
+        const rows = [];
+        day.matchups.forEach((row) => {
+          const compact = compactScheduleMatchupRow(row);
+          const id = matchupStableIdentity(compact, dateKeyStr);
+          if (!id || !seen.has(id)) { if (id) seen.set(id, rows.length); rows.push(compact); return; }
+          rows[seen.get(id)] = compactScheduleMatchupRow(mergePreferredMatchupRow(rows[seen.get(id)], compact));
+        });
+        return { ...day, matchups: rows };
+      });
+      if (JSON.stringify(schedule) !== JSON.stringify(next.schedule)) { next = { ...next, schedule }; changed = true; }
+    }
+    return { state: next, changed, removedMatchups, removedGameHistory };
+  }
+
   function normalizeMaterializedSeasonMatchup(matchup, dateKeyStr) {
     const seriesId = matchup.seriesId || matchup.seasonSeriesId || '';
     const gameNumber = Number(matchup.seriesGameNumber || matchup.gameNumber) || 1;
@@ -2805,7 +2933,7 @@ function shouldUseSeasonMatchupControl(state, dateKeyStr) {
     });
 
     const sameDayById = new Map(nextMatchups.filter((m) => getStoredMatchupDateKey(m) === key).map((m) => [String(m.id || m.matchupId || ''), m]));
-    const scheduleRows = filledRows.map((row) => sameDayById.get(String(row.id || row.matchupId || '')) || row);
+    const scheduleRows = filledRows.map((row) => compactScheduleMatchupRow(sameDayById.get(String(row.id || row.matchupId || '')) || row));
     const schedule = Array.isArray(normalized.schedule) ? normalized.schedule.slice() : [];
     let dayIndex = schedule.findIndex((day) => getScheduleDayDateKey(day) === key);
     const previousDay = dayIndex >= 0 ? schedule[dayIndex] : { date: key, dateKey: key };
@@ -2815,7 +2943,12 @@ function shouldUseSeasonMatchupControl(state, dateKeyStr) {
       normalized = normalizeState({ ...normalized, matchups: nextMatchups, schedule });
       changed = true;
     }
-    return { state: normalized, changed, materializedCount, removedExhibitionCount, removedStaleSeasonCount, warnings: slate.warnings || [], errors: slate.errors || [] };
+    const deduped = dedupeSameDayGeneratedSlateState(normalized, key);
+    if (deduped.changed) {
+      normalized = normalizeState(deduped.state);
+      changed = true;
+    }
+    return { state: normalized, changed, materializedCount, removedExhibitionCount, removedStaleSeasonCount, removedDuplicateMatchups: deduped.removedMatchups || 0, removedDuplicateGameHistory: deduped.removedGameHistory || 0, warnings: slate.warnings || [], errors: slate.errors || [] };
   }
 
   function getMatchupWinnerIds(matchup) {
@@ -5504,6 +5637,14 @@ return { state: merged, storageKey };
         try { return getLocalStorageSizeReport().totalBytes; } catch (_) { return 0; }
       })(),
       counts: summarizeSnapshotCounts(info?.snapshot || {}),
+      currentDateCounts: (() => {
+        const snapshot = info?.snapshot || {};
+        const currentDateKey = String(info?.dateKey || todayKey()).slice(0, 10);
+        const matchupsForDate = (Array.isArray(snapshot.matchups) ? snapshot.matchups : []).filter((row) => getStoredMatchupDateKey(row) === currentDateKey).length;
+        const gameHistoryForDate = (Array.isArray(snapshot.gameHistory) ? snapshot.gameHistory : []).filter((row) => String(row?.dateKey || row?.date || (row?.dateISO ? dateKey(row.dateISO) : '') || '').slice(0, 10) === currentDateKey).length;
+        const scheduleForDate = (Array.isArray(snapshot.schedule) ? snapshot.schedule : []).filter((row) => getScheduleDayDateKey(row) === currentDateKey).length;
+        return { dateKey: currentDateKey, matchups: matchupsForDate, gameHistory: gameHistoryForDate, schedule: scheduleForDate };
+      })(),
       biggestFields: getStateFieldSizeReport(info?.snapshot || {})
     };
     if (root) root.__tpLastQuotaFailure = diagnostic;
@@ -5892,7 +6033,11 @@ return { state: merged, storageKey };
 
 const hasOpponentDripScheduleLimit = Number.isFinite(options?.limits?.maxOpponentDripSchedules);
 
-const cleanedInitialCandidate = cleanupOpponentDripSchedules(state, {
+const saveDedupeDateKey = String(options.dedupeDateKey || options.todayDateKey || '').slice(0, 10);
+const dedupedSaveState = saveDedupeDateKey
+  ? dedupeSameDayGeneratedSlateState(state, saveDedupeDateKey).state
+  : state;
+const cleanedInitialCandidate = cleanupOpponentDripSchedules(dedupedSaveState, {
   todayOnly: options?.limits?.opponentDripSchedulesTodayOnly !== false,
   ...(hasOpponentDripScheduleLimit
     ? { maxEntries: options.limits.maxOpponentDripSchedules }
@@ -8056,6 +8201,10 @@ return Number(cappedScore.toFixed(1));
     shouldUseSeasonMatchupControl,
     buildSeasonDailySlate,
     materializeSeasonSlateMatchupsForDate,
+    dedupeSameDayGeneratedSlateState,
+    dedupeSameDayMatchups,
+    dedupeSameDayGameHistory,
+    compactScheduleMatchupRow,
     chooseUserMatchupForDate,
     getPairingKey,
     getRecordedSeriesId,
