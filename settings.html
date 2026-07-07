@@ -3980,10 +3980,13 @@ rows.push([
         const raw = localStorage.getItem("taskpoints_v1");
         if (raw) {
           const storedState = JSON.parse(raw);
-          packedStorageActive = Boolean(storedState && storedState.__packedArrays && typeof storedState.__packedArrays === "object");
           parsedState = window.TaskPointsCore?.unpackTaskPointsStorageState
             ? TaskPointsCore.unpackTaskPointsStorageState(storedState)
             : storedState;
+          const packedArrays = storedState && storedState.__packedArrays && typeof storedState.__packedArrays === "object" && !Array.isArray(storedState.__packedArrays)
+            ? storedState.__packedArrays
+            : null;
+          packedStorageActive = Boolean(packedArrays && Object.keys(packedArrays).length && raw.length < JSON.stringify(parsedState).length);
         }
       } catch (_) {}
       const browserEstimate = await getBrowserStorageEstimate();
@@ -4123,16 +4126,21 @@ rows.push([
         return;
       }
 
-      if (!packed || !packed.__packedStorageVersion || !packed.__packedArrays) {
-        alert("Packing did not produce packed storage data.");
-        renderStorageHealthPanel();
-        return;
+      if (typeof core.getTaskPointsPackDiagnostics === "function") {
+        console.table(core.getTaskPointsPackDiagnostics(unpacked));
       }
 
       const packedRaw = JSON.stringify(packed);
       const newStringBytes = getLocalStorageStringSizeBytes(storageKey, packedRaw);
       console.log("Pack Main State: new packed raw length", packedRaw.length);
       console.log("Pack Main State: new localStorage string estimate", newStringBytes);
+      console.log("Pack Main State: packed arrays", packed && packed.__packedArrays ? Object.keys(packed.__packedArrays) : []);
+
+      if (!packed || packedRaw.length >= oldRaw.length) {
+        alert("Packed version was not smaller. See console diagnostics.");
+        renderStorageHealthPanel();
+        return;
+      }
 
       // Important: remove-first write. iPhone may not have enough temp room to overwrite
       // a 5.00 MiB string with a smaller value. Do not route this manual rescue through
@@ -4157,7 +4165,7 @@ rows.push([
       try {
         const verifyRaw = localStorage.getItem(storageKey);
         const verifyParsed = JSON.parse(verifyRaw);
-        const packedStorageActive = Boolean(verifyParsed?.__packedStorageVersion && verifyParsed?.__packedArrays);
+        const packedStorageActive = Boolean(verifyParsed?.__packedStorageVersion && verifyParsed?.__packedArrays && Object.keys(verifyParsed.__packedArrays).length);
         console.log("Pack Main State: packed storage active", packedStorageActive);
         if (!packedStorageActive) {
           throw new Error("Saved value is not packed.");
