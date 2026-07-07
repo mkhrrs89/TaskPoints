@@ -28,7 +28,8 @@
   const TASKPOINTS_STORAGE_ENCODING_VERSION = 1;
   const TASKPOINTS_COMPRESSED_MIN_RATIO = 0.90;
   const TASKPOINTS_ENABLE_COMPRESSED_STORAGE = false;
-
+  const HABIT_STREAK_MULTIPLIER_RATE = 1.01;
+  
   // UTF-16 localStorage-safe LZ compression derived from lz-string 1.4.4
   // (Pieroxy, MIT License): https://github.com/pieroxy/lz-string
   const TaskPointsLZString = (() => {
@@ -4996,9 +4997,17 @@ const workHoursMax = Object.prototype.hasOwnProperty.call(workInput, 'hoursMax')
   function normalizeHabit(habit) {
     if (!habit || typeof habit !== 'object') return habit;
     const normalizedDaysPerCompleteWeek = Number(habit.daysPerCompleteWeek);
+    const rawMultiplierStart = typeof habit.streakMultiplierStartDateKey === 'string'
+      ? habit.streakMultiplierStartDateKey.trim()
+      : '';
+    const validMultiplierStart = /^\d{4}-\d{2}-\d{2}$/.test(rawMultiplierStart) ? rawMultiplierStart : null;
+
     return {
       ...habit,
       tag: typeof habit.tag === 'string' ? habit.tag.trim() : '',
+      halfPointEnabled: habit.halfPointEnabled !== false,
+      streakMultiplierEnabled: habit.streakMultiplierEnabled === true,
+      streakMultiplierStartDateKey: validMultiplierStart,
       ...(Number.isFinite(normalizedDaysPerCompleteWeek)
         ? { daysPerCompleteWeek: Math.max(0, Math.min(7, Math.round(normalizedDaysPerCompleteWeek))) }
         : {})
@@ -7269,9 +7278,86 @@ function computeCalLogBonusPoints(calorieEntries, settings) {
     return null;
   }
 
+  function getCompletionDayKey(entry) {
+    if (typeof entry?.dayKey === 'string' && entry.dayKey) return entry.dayKey;
+    if (typeof entry?.dateKey === 'string' && entry.dateKey) return entry.dateKey;
+    if (!entry?.completedAtISO) return '';
+    return dateKey(entry.completedAtISO);
+  }
+
+  function getHabitCompletionFraction(entry) {
+    const raw = Number(entry?.completionFraction);
+    if (raw === 0.5) return 0.5;
+    if (raw === 1) return 1;
+    return 1;
+  }
+
+  function getHabitForCompletion(entry, state) {
+    if (!entry || !state || !Array.isArray(state.habits)) return null;
+    if (entry.source !== 'habit' && entry.source !== 'vice') return null;
+
+    const habitId = entry.habitId || entry.viceId;
+    if (!habitId) return null;
+
+    return state.habits.find(h => h && h.id === habitId) || null;
+  }
+
+  function getHabitStreakDayForKey(habit, dayKeyStr) {
+    if (!habit || !dayKeyStr) return 0;
+
+    const doneKeys = Array.isArray(habit.doneKeys) ? habit.doneKeys : [];
+    if (!doneKeys.length) return 0;
+
+    const done = new Set(doneKeys);
+    let cursor = dayKeyStr;
+    let count = 0;
+
+    while (cursor && done.has(cursor)) {
+      count += 1;
+      if (count > 5000) break;
+      cursor = addDaysToDateKey(cursor, -1);
+    }
+
+    return count;
+  }
+
+  function getHabitStreakMultiplierPoints(entry, state) {
+    const habit = getHabitForCompletion(entry, state);
+    if (!habit || habit.streakMultiplierEnabled !== true) return null;
+
+    const startKey = typeof habit.streakMultiplierStartDateKey === 'string'
+      ? habit.streakMultiplierStartDateKey
+      : '';
+    const dayKeyStr = getCompletionDayKey(entry);
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startKey)) return null;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dayKeyStr)) return null;
+
+    // This is the important part: old days stay normal.
+    if (dayKeyStr < startKey) return null;
+
+    const streakDay = getHabitStreakDayForKey(habit, dayKeyStr);
+    if (streakDay <= 1) return null;
+
+    const storedPoints = Number(entry?.points);
+    const habitPoints = Number(habit.pointsPerDay);
+
+    // Use the stored completion points first so half-scores stay half-scores.
+    const basePoints = Number.isFinite(storedPoints)
+      ? storedPoints
+      : (Number.isFinite(habitPoints) ? habitPoints * getHabitCompletionFraction(entry) : 0);
+
+    const multiplier = Math.pow(HABIT_STREAK_MULTIPLIER_RATE, streakDay - 1);
+    return roundPoints(basePoints * multiplier);
+  }
+
   function pointsForCompletion(entry, settings) {
     const derived = deriveCompletionPoints(entry, settings);
     if (derived) return derived.points;
+
+    const streakPoints = getHabitStreakMultiplierPoints(entry, settings);
+    if (streakPoints != null) return streakPoints;
+
     return roundPoints(entry?.points);
   }
 
