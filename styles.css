@@ -2493,7 +2493,7 @@ header,
 .habitDaysRow.week-complete-row::before{
   content: '';
   position: absolute;
-  inset: 0;
+  inset: -4;
   border-radius: 0px;
   -webkit-clip-path: none;
   clip-path: none;
@@ -2505,7 +2505,7 @@ header,
 .habitDaysRow.week-complete-row::after{
   content: '';
   position: absolute;
-  inset: 1px;
+  inset: -4px;
   border-radius: 0px;
   -webkit-clip-path: none;
   clip-path: none;
