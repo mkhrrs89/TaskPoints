@@ -2492,6 +2492,10 @@ window.__tpLastRenderedTodayScore = window.__tpLastRenderedTodayScore ?? null;
 // the next render updates today's score (inertia recompute).
 let __tpPendingTodayToastOld = null;
 
+// Habit/vice taps compute their toast from the actual before/after score inside
+// handleHabitBubbleTap, so suppress the older queued-toast path during that tap.
+let __tpSuppressQueuedTodayScoreToast = false;
+
 function __tpNumberOrNull(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
@@ -2512,12 +2516,34 @@ function __tpGetLastRenderedTodayScore() {
 }
 
 function __tpQueueTodayScoreDeltaToast() {
+  if (__tpSuppressQueuedTodayScoreToast) return;
+
   // Keep the earliest “old” value in a burst so we toast the net change.
   if (__tpPendingTodayToastOld != null) return;
 
   const old = __tpGetLastRenderedTodayScore();
   if (old == null) return; // nothing to compare yet
   __tpPendingTodayToastOld = old;
+}
+
+function __tpGetCurrentTodayScoreForToast() {
+  try {
+    const n = Number(todaysPointsTotal());
+    if (Number.isFinite(n)) return Math.round(n * 10) / 10;
+  } catch (e) {}
+  return __tpGetLastRenderedTodayScore();
+}
+
+function __tpToastTodayScoreDeltaFromScores(newScore, oldScore) {
+  const next = Number(newScore);
+  const prev = Number(oldScore);
+  if (!Number.isFinite(next) || !Number.isFinite(prev)) return;
+
+  let delta = Math.round((next - prev) * 10) / 10;
+  if (Object.is(delta, -0)) delta = 0;
+  if (!delta) return;
+
+  showPointsToast(delta);
 }
 
 function __tpConsumeQueuedTodayScoreToast(newTodayPoints) {
@@ -2567,6 +2593,8 @@ function __tpGetAffectedDayKey(meta) {
 // - If the affected day is NOT today → suppress the direct toast and queue a
 //   Today-score delta toast (fires after next renderTodayPointsSummary).
 function toastPointsDeltaTodayAware(newPts, oldPts, meta) {
+  if (__tpSuppressQueuedTodayScoreToast) return;
+
   const a = Number(newPts) || 0;
   const b = Number(oldPts) || 0;
 
@@ -7974,11 +8002,11 @@ function applyHabitDayToggle(h, dayKey) {
           removeCompletionForDay();
           state.completions.unshift(entry);
           markCompletionsDirty();
-          if (dayKey === todayKey()) {
-            showPointsToast(0.5);
-          } else {
-            __tpQueueTodayScoreDeltaToast();
-          }
+if (dayKey === todayKey()) {
+  if (!__tpSuppressQueuedTodayScoreToast) showPointsToast(0.5);
+} else {
+  __tpQueueTodayScoreDeltaToast();
+}
         }
       } else {
         h.iceKeys.splice(icyIdx, 1);
@@ -8012,8 +8040,24 @@ function handleHabitBubbleTap(bubbleEl) {
     console.count('habitTap');
   }
 
-  const statusClass = applyHabitDayToggle(h, dayKey);
-  bubbleEl.classList.remove('on', 'off', 'failed', 'habit-half');
+// Use the actual current score before/after the tap for the toast.
+// The older queued-toast path can be off by 0.1 when the rendered island/localStorage
+// baseline is stale during save/rerender races.
+__tpPendingTodayToastOld = null;
+const oldTodayScoreForToast = __tpGetCurrentTodayScoreForToast();
+
+let statusClass;
+__tpSuppressQueuedTodayScoreToast = true;
+try {
+  statusClass = applyHabitDayToggle(h, dayKey);
+} finally {
+  __tpSuppressQueuedTodayScoreToast = false;
+}
+
+const newTodayScoreForToast = __tpGetCurrentTodayScoreForToast();
+__tpToastTodayScoreDeltaFromScores(newTodayScoreForToast, oldTodayScoreForToast);
+
+bubbleEl.classList.remove('on', 'off', 'failed', 'habit-half');
   bubbleEl.classList.add(statusClass);
   bubbleEl.classList.toggle('habit-half', statusClass === 'half' && !isShowerHabit(h));
   const isIcyNow = statusClass === 'on'
