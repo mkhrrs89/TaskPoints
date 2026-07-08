@@ -2485,7 +2485,7 @@ header,
   border: none;
   -webkit-clip-path: none;
   clip-path: none;
-  border-radius: 10px;
+  border-radius: 0px;
   overflow: hidden;
   pointer-events: none;
 }
@@ -2494,7 +2494,7 @@ header,
   content: '';
   position: absolute;
   inset: 0;
-  border-radius: 10px;
+  border-radius: 0px;
   -webkit-clip-path: none;
   clip-path: none;
   background: var(--tp-brushed-border);
@@ -2506,7 +2506,7 @@ header,
   content: '';
   position: absolute;
   inset: 1px;
-  border-radius: 9px;
+  border-radius: 0px;
   -webkit-clip-path: none;
   clip-path: none;
   background:
@@ -2827,14 +2827,33 @@ header,
   }
 
 
-  /* Keep weekly-complete orange slab vertically centered around mobile bubbles */
-  .habitDaysRow.week-complete-row{
-    margin-top: 0;
-    padding-top: 3px;
-    padding-bottom: 3px;
-    align-items: center;
-    box-sizing: border-box;
-  }
+/* Mobile: completed-week steel slab spans to the card/group borders */
+.habitRow--single .habitDaysRow.week-complete-row{
+  margin-top: 0;
+  margin-left: -16px;
+  margin-right: -16px;
+  width: calc(100% + 32px);
+  padding: 3px 16px;
+  align-items: center;
+  box-sizing: border-box;
+  border-radius: 0;
+}
+
+.habitGroupBody .habitRow .habitDaysRow.week-complete-row{
+  margin-top: 0;
+  margin-left: -8px;
+  margin-right: -8px;
+  width: calc(100% + 16px);
+  padding: 3px 8px;
+  align-items: center;
+  box-sizing: border-box;
+  border-radius: 0;
+}
+
+.habitDaysRow.week-complete-row::before,
+.habitDaysRow.week-complete-row::after{
+  border-radius: 0 !important;
+}
 
   /* Mobile: show the 4 recent sleep cards in one tidy row */
   #sleepHistory{
