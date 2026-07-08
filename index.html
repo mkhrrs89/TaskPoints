@@ -6754,6 +6754,30 @@ function buildHabitRenderEntries(habits, sortMode) {
   return { entries: [...singles, ...groupedEntries] };
 }
 
+function formatHabitStreakBonusAmount(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '';
+  const rounded = Math.round(n * 100) / 100;
+  if (!rounded) return '0';
+  return String(rounded).replace(/\.?0+$/, '');
+}
+
+function getHabitCurrentStreakBonusText(h, streak) {
+  if (!h || h.streakMultiplierEnabled !== true) return '';
+
+  const streakDay = Number(streak) || 0;
+  if (streakDay <= 1) return '';
+
+  const basePoints = Number(h.pointsPerDay) || 0;
+  if (!basePoints) return '';
+
+  const multiplier = Math.pow(1.01, streakDay - 1);
+  const bonus = basePoints * multiplier - basePoints;
+  const text = formatHabitStreakBonusAmount(bonus);
+
+  return text ? ` (${text})` : '';
+}
+  
 function renderHabitRow(h, days, wrap, options = {}) {
   const showMoveButtons = options.showMoveButtons ?? (getHabitSortMode() === 'custom');
   const showTag = options.showTag ?? true;
@@ -6778,6 +6802,7 @@ function renderHabitRow(h, days, wrap, options = {}) {
   const streak     = Number(h.__streak || 0);
   const failedStreak = Number(h.__failedStreak || 0);
   const completion = Number(h.__completion || 0);
+  const streakBonusText = getHabitCurrentStreakBonusText(h, streak);
 
   const row = document.createElement('div');
   row.className = 'habitRow';
@@ -6860,7 +6885,7 @@ const daysHtml = days.map(d => {
       ${showTag && h.tag ? `<div class="tag tag-clear">${escapeHtml(h.tag)}</div>` : ''}
     ${streak > 0 ? `
       <div class="tag streak-pill">
-        ${streak}d
+        ${streak}d${streakBonusText}
       </div>
     ` : (failedStreak > 0 ? `
       <div class="tag streak-pill failed-streak-pill">
@@ -7090,6 +7115,7 @@ function renderVices(){
     const streak       = computeHabitStreak(h);
     const failedStreak = computeHabitFailedStreak(h);
     const completion   = computeHabitCompletion(h);
+    const streakBonusText = getHabitCurrentStreakBonusText(h, streak);
     const row = document.createElement('div');
 
     row.className = 'habitRow';
@@ -7165,7 +7191,7 @@ const nameHtml = `
     ${h.tag ? `<div class="tag tag-clear">${escapeHtml(h.tag)}</div>` : ''}
   ${streak > 0 ? `
     <div class="tag streak-pill">
-      ${streak}d
+      ${streak}d${streakBonusText}
     </div>
   ` : (failedStreak > 0 ? `
     <div class="tag streak-pill failed-streak-pill">
