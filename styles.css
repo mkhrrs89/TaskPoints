@@ -2493,7 +2493,7 @@ header,
 .habitDaysRow.week-complete-row::before{
   content: '';
   position: absolute;
-  inset: -4;
+  inset: 0;
   border-radius: 0px;
   -webkit-clip-path: none;
   clip-path: none;
@@ -2505,7 +2505,7 @@ header,
 .habitDaysRow.week-complete-row::after{
   content: '';
   position: absolute;
-  inset: -4px;
+  inset: 1px;
   border-radius: 0px;
   -webkit-clip-path: none;
   clip-path: none;
@@ -6441,4 +6441,15 @@ header,
 
 .standings-gold-col .sort-indicator{
   color: #fb923c;
+}
+
+/* Visually thicken completed-week steel strip without moving layout */
+.habitDaysRow.week-complete-row{
+  overflow: visible;
+}
+
+.habitDaysRow.week-complete-row::before,
+.habitDaysRow.week-complete-row::after{
+  transform: scaleY(1.16);
+  transform-origin: center;
 }
