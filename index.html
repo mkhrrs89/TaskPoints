@@ -934,6 +934,49 @@ Nothing visible on the page is built here. === -->
       <ul id="monthlyBoard" class="text-xs space-y-1"></ul>
     </div>
   </div>
+
+      <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+    <!-- BEST TASK DAYS -->
+    <div class="glass records-card sectionCard sectionCard--teal">
+      <div class="sectionHeader sectionHeader--teal">
+        <div class="sectionTitleRow">
+          <h3 class="sectionTitle sectionTitle--inline">🏆 Best Task Days</h3>
+        </div>
+      </div>
+      <ul id="taskDaysBoard" class="text-xs space-y-1"></ul>
+    </div>
+
+    <!-- BEST SLEEP DAYS -->
+    <div class="glass records-card sectionCard sectionCard--teal">
+      <div class="sectionHeader sectionHeader--teal">
+        <div class="sectionTitleRow">
+          <h3 class="sectionTitle sectionTitle--inline">🏆 Best Sleep Days</h3>
+        </div>
+      </div>
+      <ul id="sleepDaysBoard" class="text-xs space-y-1"></ul>
+    </div>
+
+    <!-- BEST WORK DAYS -->
+    <div class="glass records-card sectionCard sectionCard--teal">
+      <div class="sectionHeader sectionHeader--teal">
+        <div class="sectionTitleRow">
+          <h3 class="sectionTitle sectionTitle--inline">🏆 Best Work Days</h3>
+        </div>
+      </div>
+      <ul id="workDaysBoard" class="text-xs space-y-1"></ul>
+    </div>
+
+    <!-- BEST MOOD DAYS -->
+    <div class="glass records-card sectionCard sectionCard--teal">
+      <div class="sectionHeader sectionHeader--teal">
+        <div class="sectionTitleRow">
+          <h3 class="sectionTitle sectionTitle--inline">🏆 Best Mood Days</h3>
+        </div>
+      </div>
+      <ul id="moodDaysBoard" class="text-xs space-y-1"></ul>
+    </div>
+  </div>
+    
   <!-- LEADERBOARDS END -->
   </section>
 
@@ -4870,6 +4913,81 @@ function renderStats(){
         return topEntries;
       }
 
+      function completionDateKeyForRecords(entry) {
+        if (entry?.dayKey) return String(entry.dayKey);
+        if (entry?.dateKey) return String(entry.dateKey);
+        if (!entry?.completedAtISO) return '';
+        return dateKey(new Date(entry.completedAtISO));
+      }
+
+      function isSleepCompletion(entry) {
+        const title = String(entry?.title || '');
+        return title.startsWith('Sleep Score');
+      }
+
+      function isWorkCompletion(entry) {
+        const title = String(entry?.title || '');
+        return entry?.source === 'work' || title.startsWith('Work Score');
+      }
+
+      function isMoodCompletion(entry) {
+        const title = String(entry?.title || '');
+        return title.startsWith('Mood Score');
+      }
+
+      function isNormalTaskCompletion(entry) {
+        if (!entry) return false;
+
+        const source = String(entry.source || '');
+        const taskId = String(entry.taskId || '');
+        const title = String(entry.title || '');
+
+        if (!taskId) return false;
+        if (taskId.startsWith('habit:')) return false;
+
+        if (
+          source === 'habit' ||
+          source === 'vice' ||
+          source === 'metric' ||
+          source === 'work' ||
+          source === 'flex'
+        ) {
+          return false;
+        }
+
+        if (
+          title.startsWith('Sleep Score') ||
+          title.startsWith('Mood Score') ||
+          title.startsWith('Work Score') ||
+          title.startsWith('Calories')
+        ) {
+          return false;
+        }
+
+        return true;
+      }
+
+      function buildDailyRecordBoard(filterFn) {
+        const totals = {};
+
+        const completions = Array.isArray(state.completions) ? state.completions : [];
+        completions.forEach((entry) => {
+          if (!entry || !filterFn(entry)) return;
+
+          const key = completionDateKeyForRecords(entry);
+          if (!key) return;
+
+          const pts = getCompletionPoints(entry);
+          if (!Number.isFinite(pts)) return;
+
+          totals[key] = (totals[key] || 0) + pts;
+        });
+
+        return Object.entries(totals)
+          .map(([key, total]) => ({ key, total }))
+          .sort((a, b) => b.total - a.total);
+      }
+      
       function updateRecordsTabBadge(topBestDays = [], topBestWeeks = []){
         const recordsTab = $('homeTabRecords');
         const badge = $('homeTabRecordsBadge');
@@ -4963,6 +5081,17 @@ function renderStats(){
       const topBestDays = fillBoard('dailyBoard', bestDays, r => niceDate(fromKey(r.key)), dailyDateClass);
       const topBestWeeks = fillBoard('weeklyBoard', bestWeeks, r => `${niceDate(r.start)} – ${niceDate(r.end)}`, weeklyDateClass);
       fillBoard('monthlyBoard', bestMonths, r => r.displayLabel || formatMonthKey(r.key), monthlyDateClass);
+
+      const bestTaskDays = buildDailyRecordBoard(isNormalTaskCompletion);
+      const bestSleepDays = buildDailyRecordBoard(isSleepCompletion);
+      const bestWorkDays = buildDailyRecordBoard(isWorkCompletion);
+      const bestMoodDays = buildDailyRecordBoard(isMoodCompletion);
+
+      fillBoard('taskDaysBoard', bestTaskDays, r => niceDate(fromKey(r.key)), dailyDateClass);
+      fillBoard('sleepDaysBoard', bestSleepDays, r => niceDate(fromKey(r.key)), dailyDateClass);
+      fillBoard('workDaysBoard', bestWorkDays, r => niceDate(fromKey(r.key)), dailyDateClass);
+      fillBoard('moodDaysBoard', bestMoodDays, r => niceDate(fromKey(r.key)), dailyDateClass);
+
       updateRecordsTabBadge(topBestDays, topBestWeeks);
 
       // Highlight current day/week/month in orange if they appear
