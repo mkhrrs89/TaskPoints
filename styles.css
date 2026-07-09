@@ -5049,6 +5049,38 @@ header,
   line-height: 1.25;
 }
 
+.home-reminders-row{
+  display: block;
+}
+
+.home-reminders-sidecar{
+  display: none;
+}
+
+@media (max-width: 767px){
+  .home-reminders-row{
+    display: grid;
+    grid-template-columns: minmax(0, 3fr) minmax(0, 1fr);
+    gap: 10px;
+    align-items: stretch;
+    margin-bottom: 16px !important;
+  }
+
+  .home-reminders-row #remindersSection{
+    margin-top: -8px !important;
+    margin-bottom: 0 !important;
+    min-width: 0;
+  }
+
+  .home-reminders-sidecar{
+    display: block;
+    margin-top: -8px;
+    min-width: 0;
+    min-height: 100%;
+    border-radius: 18px;
+  }
+}
+
 .bootSplash{
   position: fixed;
   inset: 0;
