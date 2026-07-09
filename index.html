@@ -881,7 +881,12 @@ Nothing visible on the page is built here. === -->
     <div id="remindersEmpty" class="text-sm muted hidden">No reminders yet.</div>
   </div>
 
-  <div id="homeReminderSidecar" class="glass home-reminders-sidecar" aria-hidden="true"></div>
+<div id="homeReminderSidecar" class="glass home-reminders-sidecar" aria-label="Today streak bonus">
+  <div class="home-streak-bonus-card">
+    <div class="home-streak-bonus-label">STREAK</div>
+    <div class="home-streak-bonus-label">BONUS</div>
+    <div id="homeStreakBonusValue" class="home-streak-bonus-value">+0</div>
+  </div>
 </div>
 
   <div class="home-mobile-tabs-shell md:hidden mb-4">
@@ -7814,9 +7819,10 @@ function scheduleHabitRerender() {
       if (window.TP_DEBUG_PERF && perfStart !== null) {
         console.log(`[TP_PERF] tap->rerender ${Math.round(performance.now() - perfStart)}ms`);
       }
-      renderHabits();
-      renderStats();
-      renderVices();
+renderHabits();
+renderStats();
+renderVices();
+renderHomeStreakBonusSidecar();
     });
   }, 150);
 }
@@ -8877,6 +8883,52 @@ wireTaskSkillEditor(card, t.id);
   window.updateCriticalTasksIsland?.();
 }
 
+function formatHomeStreakBonusValue(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || Math.abs(n) < 0.005) return '+0';
+
+  const rounded = Math.round((n + Number.EPSILON) * 100) / 100;
+  const text = rounded.toFixed(2).replace(/\.?0+$/, '');
+
+  return rounded > 0 ? `+${text}` : text;
+}
+
+function computeTodayStreakMultiplierBonusTotal() {
+  const todayK = todayKey();
+  const completions = Array.isArray(state.completions) ? state.completions : [];
+
+  let total = 0;
+
+  completions.forEach((entry) => {
+    if (!entry) return;
+    if (entry.source !== 'habit' && entry.source !== 'vice') return;
+
+    const dayK = entry.dayKey
+      ? String(entry.dayKey)
+      : (entry.dateKey ? String(entry.dateKey) : (entry.completedAtISO ? dateKey(new Date(entry.completedAtISO)) : ''));
+
+    if (dayK !== todayK) return;
+
+    const rawPoints = Number(entry.points) || 0;
+    const effectivePoints = getCompletionPoints(entry);
+    const bonus = effectivePoints - rawPoints;
+
+    if (Number.isFinite(bonus) && bonus > 0) {
+      total += bonus;
+    }
+  });
+
+  return Math.round((total + Number.EPSILON) * 100) / 100;
+}
+
+function renderHomeStreakBonusSidecar() {
+  const valueEl = $('homeStreakBonusValue');
+  if (!valueEl) return;
+
+  const bonus = computeTodayStreakMultiplierBonusTotal();
+  valueEl.textContent = formatHomeStreakBonusValue(bonus);
+}
+  
 function renderReminders(){
   const list = $('remindersList');
   const empty = $('remindersEmpty');
@@ -12005,6 +12057,7 @@ function renderAll() {
 try { tpPerfTime('renderStats (call)', () => renderStats()); } catch (e) { console.error('renderStats error:', e); }
 try { tpPerfTime('renderTasks', () => renderTasks()); } catch (e) { console.error('renderTasks error:', e); }
 try { tpPerfTime('renderReminders', () => renderReminders()); } catch (e) { console.error('renderReminders error:', e); }
+try { tpPerfTime('renderHomeStreakBonusSidecar', () => renderHomeStreakBonusSidecar()); } catch (e) { console.error('renderHomeStreakBonusSidecar error:', e); }
 try { tpPerfTime('renderScoreDashboardV2_Skeleton', () => renderScoreDashboardV2_Skeleton()); } catch (e) { console.error('renderScoreDashboardV2_Skeleton error:', e); }
 try { tpPerfTime('renderHomeSeasonChampionshipCard', () => renderHomeSeasonChampionshipCard()); } catch (e) { console.error('renderHomeSeasonChampionshipCard error:', e); }
 try { tpPerfTime('initScoreV2Toggle', () => initScoreV2Toggle()); } catch (e) { console.error('initScoreV2Toggle error:', e); }
