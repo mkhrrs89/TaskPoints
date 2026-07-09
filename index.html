@@ -8939,6 +8939,7 @@ function deleteReminder(reminderId){
   state.reminders = reminders.filter((reminder) => !reminder || String(reminder.id) !== id);
   saveReminders('reminders-delete', {
     deletedReminderIds: [id],
+    replaceReminders: true,
     allowDestructiveOverwrite: true,
     userInitiated: true,
     immediateWrite: true
