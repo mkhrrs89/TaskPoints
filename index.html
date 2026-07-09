@@ -8886,10 +8886,10 @@ wireTaskSkillEditor(card, t.id);
 
 function formatHomeStreakBonusValue(value) {
   const n = Number(value);
-  if (!Number.isFinite(n) || Math.abs(n) < 0.005) return '+0';
+  if (!Number.isFinite(n) || Math.abs(n) < 0.005) return '+0.00';
 
   const rounded = Math.round((n + Number.EPSILON) * 100) / 100;
-  const text = rounded.toFixed(2).replace(/\.?0+$/, '');
+  const text = rounded.toFixed(2);
 
   return rounded > 0 ? `+${text}` : text;
 }
