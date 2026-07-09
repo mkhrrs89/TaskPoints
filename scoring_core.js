@@ -6276,7 +6276,14 @@ return { state: merged, storageKey };
     const deletedReminderIds = new Set(Array.isArray(options.deletedReminderIds) ? options.deletedReminderIds.map(String) : []);
     stickyArrayFields.forEach((key) => {
       if (Array.isArray(next[key])) {
-        if (!shouldAllowProtectedHistoryOverwrite(key, options) && Array.isArray(latest?.[key]) && latest[key].length > 0 && next[key].length === 0) {
+        const allowExactReminderOverwrite = key === 'reminders' && (
+          options.replaceReminders === true
+          || options.exactReminders === true
+          || deletedReminderIds.size > 0
+        );
+        const allowEmptyArrayOverwrite = options.allowDestructiveOverwrite === true || allowExactReminderOverwrite;
+
+        if (!allowEmptyArrayOverwrite && !shouldAllowProtectedHistoryOverwrite(key, options) && Array.isArray(latest?.[key]) && latest[key].length > 0 && next[key].length === 0) {
           // Defensive data-loss guard: partial saves from pages like Matchups may
           // carry default empty Home histories. Preserve non-empty saved history
           // unless a history-owning delete/reset explicitly opts in.
