@@ -66,8 +66,13 @@
         <p class="muted text-xs mb-3">
           Each card shows a day's total points with a breakdown of where they came from.
         </p>
-        <div id="dailySummary" class="text-xs mb-2 muted"></div>
-        <div id="scoresList" class="text-xs max-h-[70vh] overflow-y-auto space-y-2"></div>
+<div id="dailySummary" class="text-xs mb-2 muted"></div>
+
+<div id="dailyPagination" class="flex items-center justify-between gap-2 mb-3 text-xs"></div>
+
+<div id="scoresList" class="text-xs max-h-[70vh] overflow-y-auto space-y-2"></div>
+
+<div id="dailyPaginationBottom" class="flex items-center justify-between gap-2 mt-3 text-xs"></div>
       </div>
     </main>
 
@@ -79,71 +84,127 @@
     const STORAGE_KEY = TaskPointsCore.STORAGE_KEY;
     const CATEGORY_DEFS = TaskPointsCore.CATEGORY_DEFS;
     let state = TaskPointsCore.loadAppState().state;
+const DAILY_SOURCES_PAGE_SIZE = 50;
+let dailySourcesPage = 1;
+  
+function renderDailySourcesPagination(totalPages, totalDays, startIndex, endIndex) {
+  const controls = [$("dailyPagination"), $("dailyPaginationBottom")].filter(Boolean);
 
-    function renderDailyBreakdowns() {
-      const listEl = $("scoresList");
-      const summaryEl = $("dailySummary");
-      if (!listEl) return;
-
-      const daily = TaskPointsCore.buildDailyBreakdowns(state);
-      const keys = Object.keys(daily).sort((a, b) => TaskPointsCore.fromKey(b) - TaskPointsCore.fromKey(a));
-
-      if (!keys.length) {
-        listEl.innerHTML = '<div class="muted">No days logged yet.</div>';
-        if (summaryEl) summaryEl.textContent = "";
-        return;
-      }
-
-      const totalDays = keys.length;
-      const totalPts = keys.reduce((sum, k) => sum + (daily[k].total || 0), 0);
-      const avg = totalPts / totalDays;
-
-      if (summaryEl) {
-        summaryEl.textContent = `${totalDays} days tracked • Average ${avg.toFixed(1)} pts/day`;
-      }
-
-      listEl.innerHTML = keys.map(k => {
-        const d = TaskPointsCore.fromKey(k);
-        const label = TaskPointsCore.niceDate(d);
-        const entry = daily[k];
-        const categories = entry.categories || {};
-
-        const parts = CATEGORY_DEFS
-          .map(def => ({ key: def.key, label: def.label, pts: categories[def.key] || 0 }))
-          .filter(p => p.pts > 0);
-
-        const inertiaPts = categories.inertia || 0;
-        if (inertiaPts > 0) {
-          parts.push({ key: "inertia", label: "Inertia", pts: inertiaPts });
-        }
-
-        const otherPts = categories.other || 0;
-        if (otherPts > 0) {
-          parts.push({ key: "other", label: "Other", pts: otherPts });
-        }
-
-        if (!parts.length) {
-          parts.push({ key: "none", label: "No points logged", pts: 0 });
-        }
-
-        const badges = parts.map(p => {
-          return `<span class="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-zinc-800/60 dark:bg-zinc-800 text-[11px]">
-            <span class="font-semibold">${p.label}</span>
-            <span class="font-mono">${p.pts.toFixed(1)}</span>
-          </span>`;
-        }).join(' ');
-
-        return `
-          <div class="border border-zinc-800/60 rounded-xl p-3 sm:p-4 bg-white/5 dark:bg-zinc-900/50">
-            <div class="flex items-center justify-between gap-4 flex-wrap mb-2">
-              <div class="font-semibold">${label}</div>
-              <div class="font-mono text-sm">Total ${entry.total.toFixed(1)} pts</div>
-            </div>
-            <div class="flex flex-wrap gap-2">${badges}</div>
-          </div>
-        `;
-      }).join("\n");
+  controls.forEach((el) => {
+    if (totalPages <= 1) {
+      el.innerHTML = "";
+      el.classList.add("hidden");
+      return;
     }
+
+    el.classList.remove("hidden");
+
+    el.innerHTML = `
+      <button type="button" class="btn btn-ghost btn-toolbar" data-daily-page-action="prev" ${dailySourcesPage <= 1 ? "disabled" : ""}>
+        Prev
+      </button>
+
+      <div class="muted text-center">
+        Page <strong>${dailySourcesPage}</strong> of <strong>${totalPages}</strong>
+        <span class="hidden sm:inline"> • Showing ${startIndex + 1}-${endIndex} of ${totalDays}</span>
+      </div>
+
+      <button type="button" class="btn btn-ghost btn-toolbar" data-daily-page-action="next" ${dailySourcesPage >= totalPages ? "disabled" : ""}>
+        Next
+      </button>
+    `;
+
+    el.querySelector('[data-daily-page-action="prev"]')?.addEventListener("click", () => {
+      if (dailySourcesPage <= 1) return;
+      dailySourcesPage -= 1;
+      renderDailyBreakdowns();
+      $("scoresList")?.scrollTo({ top: 0, behavior: "smooth" });
+    });
+
+    el.querySelector('[data-daily-page-action="next"]')?.addEventListener("click", () => {
+      if (dailySourcesPage >= totalPages) return;
+      dailySourcesPage += 1;
+      renderDailyBreakdowns();
+      $("scoresList")?.scrollTo({ top: 0, behavior: "smooth" });
+    });
+  });
+}
+
+function renderDailyBreakdowns() {
+  const listEl = $("scoresList");
+  const summaryEl = $("dailySummary");
+  if (!listEl) return;
+
+  const daily = TaskPointsCore.buildDailyBreakdowns(state);
+  const keys = Object.keys(daily).sort((a, b) => TaskPointsCore.fromKey(b) - TaskPointsCore.fromKey(a));
+
+  if (!keys.length) {
+    listEl.innerHTML = '<div class="muted">No days logged yet.</div>';
+    if (summaryEl) summaryEl.textContent = "";
+    renderDailySourcesPagination(0, 0, 0, 0);
+    return;
+  }
+
+  const totalDays = keys.length;
+  const totalPages = Math.max(1, Math.ceil(totalDays / DAILY_SOURCES_PAGE_SIZE));
+
+  dailySourcesPage = Math.max(1, Math.min(totalPages, dailySourcesPage));
+
+  const startIndex = (dailySourcesPage - 1) * DAILY_SOURCES_PAGE_SIZE;
+  const endIndex = Math.min(startIndex + DAILY_SOURCES_PAGE_SIZE, totalDays);
+  const pageKeys = keys.slice(startIndex, endIndex);
+
+  const totalPts = keys.reduce((sum, k) => sum + (daily[k].total || 0), 0);
+  const avg = totalPts / totalDays;
+
+  if (summaryEl) {
+    summaryEl.textContent = `${totalDays} days tracked • Average ${avg.toFixed(1)} pts/day • Showing ${startIndex + 1}-${endIndex}`;
+  }
+
+  renderDailySourcesPagination(totalPages, totalDays, startIndex, endIndex);
+
+  listEl.innerHTML = pageKeys.map(k => {
+    const d = TaskPointsCore.fromKey(k);
+    const label = TaskPointsCore.niceDate(d);
+    const entry = daily[k];
+    const categories = entry.categories || {};
+
+    const parts = CATEGORY_DEFS
+      .map(def => ({ key: def.key, label: def.label, pts: categories[def.key] || 0 }))
+      .filter(p => p.pts > 0);
+
+    const inertiaPts = categories.inertia || 0;
+    if (inertiaPts > 0) {
+      parts.push({ key: "inertia", label: "Inertia", pts: inertiaPts });
+    }
+
+    const otherPts = categories.other || 0;
+    if (otherPts > 0) {
+      parts.push({ key: "other", label: "Other", pts: otherPts });
+    }
+
+    if (!parts.length) {
+      parts.push({ key: "none", label: "No points logged", pts: 0 });
+    }
+
+    const badges = parts.map(p => {
+      return `<span class="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-zinc-800/60 dark:bg-zinc-800 text-[11px]">
+        <span class="font-semibold">${p.label}</span>
+        <span class="font-mono">${p.pts.toFixed(1)}</span>
+      </span>`;
+    }).join(' ');
+
+    return `
+      <div class="border border-zinc-800/60 rounded-xl p-3 sm:p-4 bg-white/5 dark:bg-zinc-900/50">
+        <div class="flex items-center justify-between gap-4 flex-wrap mb-2">
+          <div class="font-semibold">${label}</div>
+          <div class="font-mono text-sm">Total ${entry.total.toFixed(1)} pts</div>
+        </div>
+        <div class="flex flex-wrap gap-2">${badges}</div>
+      </div>
+    `;
+  }).join("\n");
+}
 
     renderDailyBreakdowns();
   </script>
