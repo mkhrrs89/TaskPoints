@@ -6513,3 +6513,59 @@ header,
   transform: scaleY(1.16);
   transform-origin: center;
 }
+
+.season-trophy-summary{
+  align-items: center;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  list-style: none;
+}
+
+.season-trophy-summary::-webkit-details-marker{
+  display: none;
+}
+
+.season-trophy-summary-main{
+  min-width: 0;
+}
+
+.season-trophy-summary-main .season-champion-pill{
+  margin-top: 8px;
+}
+
+.season-trophy-photo-wrap{
+  align-items: center;
+  display: flex;
+  justify-content: flex-end;
+  min-height: 96px;
+}
+
+.season-player-photo-slot--trophy{
+  border: 2px solid rgba(253, 186, 116, 0.55);
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,0.08),
+    0 12px 30px rgba(0,0,0,0.35);
+  height: 96px;
+  width: 96px;
+}
+
+.season-player-photo-slot--trophy .season-player-photo{
+  object-fit: cover;
+}
+
+@media (max-width: 640px){
+  .season-trophy-summary{
+    grid-template-columns: minmax(0, 1fr) 112px;
+    gap: 10px;
+  }
+
+  .season-trophy-photo-wrap{
+    min-height: 90px;
+  }
+
+  .season-player-photo-slot--trophy{
+    height: 90px;
+    width: 90px;
+  }
+}
