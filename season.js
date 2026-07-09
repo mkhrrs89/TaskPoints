@@ -1376,6 +1376,48 @@ function getRoundForToday(season, dateKey = getEffectiveDateKey()) {
     return summary.runnerUpName || season?.runnerUpName || 'Runner-up TBD';
   }
 
+  function getArchivedChampionPhotoPlayer(season, state = {}) {
+    const summary = season?.championSummary || {};
+    const championId = summary.championId || season?.championId || '';
+    const championName = summary.championName || season?.championName || getChampionLabel(season);
+    if (!championId && !championName) return null;
+
+    const pools = [
+      Array.isArray(season?.originalSeeds) ? season.originalSeeds : [],
+      Array.isArray(season?.seeds) ? season.seeds : [],
+      Array.isArray(season?.playerPool) ? season.playerPool : [],
+      Array.isArray(season?.finalPlacements) ? season.finalPlacements : [],
+      Array.isArray(season?.tournamentStats) ? season.tournamentStats : []
+    ];
+
+    const match = pools.flat().find((player) => {
+      const id = String(player?.playerId || player?.id || '');
+      const name = String(player?.playerName || player?.name || '');
+      return (championId && id === String(championId)) || (!championId && championName && name === String(championName));
+    }) || {};
+
+    return {
+      ...match,
+      playerId: championId || match.playerId || match.id || '',
+      id: championId || match.playerId || match.id || '',
+      playerName: championName || match.playerName || match.name || championId || 'Champion',
+      name: championName || match.playerName || match.name || championId || 'Champion',
+      seed: summary.seed || match.seed || null,
+      imageId: getPlayerImageId(state, championId || match.playerId || match.id) || match.imageId || ''
+    };
+  }
+
+  function renderArchiveChampionPhoto(season, state = {}) {
+    const champion = getArchivedChampionPhotoPlayer(season, state);
+    if (!champion) return '';
+
+    return `
+      <div class="season-trophy-photo-wrap" aria-label="${escapeHtml(champion.playerName || champion.name || 'Champion')} photo">
+        ${renderSeasonPlayerPhoto(champion, 'trophy')}
+      </div>
+    `;
+  }
+  
   function getFinalsResultLabel(season) {
     return season?.finalsResult || season?.championSummary?.finalsResult || season?.finalsSeries?.resultText || 'Finals result TBD';
   }
@@ -1442,13 +1484,14 @@ function getRoundForToday(season, dateKey = getEffectiveDateKey()) {
       <section class="season-trophy-grid">
         ${seasons.map((season) => `
           <details class="glass season-card season-trophy-card">
-            <summary>
-              <div>
+            <summary class="season-trophy-summary">
+              <div class="season-trophy-summary-main">
                 <p class="season-eyebrow">🏆 Champion</p>
                 <h3 class="season-section-title">${escapeHtml(season?.name || season?.label || 'Season')}</h3>
                 <p class="muted text-sm">${escapeHtml(formatSeasonDate(season?.startDate))} – ${escapeHtml(formatSeasonDate(season?.endDate))}</p>
+                <span class="season-champion-pill">${escapeHtml(getChampionLabel(season))}</span>
               </div>
-              <span class="season-champion-pill">${escapeHtml(getChampionLabel(season))}</span>
+              ${renderArchiveChampionPhoto(season, state)}
             </summary>
             <div class="season-series-details">
               <dl class="season-detail-grid">
