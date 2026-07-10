@@ -6520,7 +6520,7 @@ if (entries.length > MAX_POINTS) {
   ctx.lineTo(paddingX + w, paddingTop + h);
   ctx.stroke();
 
-// Build chart points for the raw daily line
+// Build chart points for daily score dots and trendline
 const points = entries.map((row, i) => {
   const x = paddingX + (n === 1 ? w / 2 : (w * i / (n - 1)));
   const norm = (row.total - minVal) / range;
@@ -6528,19 +6528,6 @@ const points = entries.map((row, i) => {
   return { x, y, total: row.total };
 });
 
-// Raw teal line
-ctx.lineJoin = 'round';
-ctx.lineCap  = 'round';
-ctx.strokeStyle = '#254C52';
-ctx.lineWidth   = 1;
-ctx.beginPath();
-
-points.forEach((pt, i) => {
-  if (i === 0) ctx.moveTo(pt.x, pt.y);
-  else ctx.lineTo(pt.x, pt.y);
-});
-
-ctx.stroke();
 
 // 7-day moving average values
 const maPeriod = 14;
