@@ -6514,11 +6514,20 @@ header,
   transform-origin: center;
 }
 
+
+/* Season trophy cards */
+.season-trophy-card{
+  overflow: hidden;
+}
+
 .season-trophy-summary{
-  align-items: center;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 14px;
+  position: relative;
+  display: block;
+  min-height: 132px;
+
+  margin: -16px;
+  padding: 16px 148px 16px 16px;
+
   list-style: none;
 }
 
@@ -6535,34 +6544,25 @@ header,
 }
 
 .season-trophy-photo-wrap{
-  align-items: center;
-  display: flex;
-  justify-content: flex-end;
-  min-height: 96px;
-}
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
 
-.season-trophy-card{
-  overflow: hidden;
-}
+  width: 132px;
+  margin: 0;
+  min-height: 0;
 
-.season-trophy-summary{
-  align-items: stretch;
-}
-
-.season-trophy-photo-wrap{
-  align-self: stretch;
-  margin-top: -16px;
-  margin-right: -16px;
-  margin-bottom: -18px;
-  min-height: calc(100% + 34px);
+  display: block;
 }
 
 .season-player-photo-slot--trophy{
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+
   border: 0;
   box-shadow: none;
-  height: 100%;
-  min-height: 128px;
-  width: 128px;
   border-radius: 0;
 }
 
@@ -6573,26 +6573,14 @@ header,
   border-radius: 0;
 }
 
-.season-player-photo-slot--trophy .season-player-photo{
-  object-fit: cover;
-}
-
 @media (max-width: 640px){
   .season-trophy-summary{
-    grid-template-columns: minmax(0, 1fr) 128px;
-    gap: 10px;
+    min-height: 132px;
+    margin: -16px;
+    padding: 16px 142px 16px 16px;
   }
 
   .season-trophy-photo-wrap{
-    margin-top: -16px;
-    margin-right: -16px;
-    margin-bottom: -18px;
-    min-height: calc(100% + 34px);
-  }
-
-  .season-player-photo-slot--trophy{
-    height: 100%;
-    min-height: 128px;
-    width: 128px;
+    width: 132px;
   }
 }
