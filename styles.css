@@ -6546,15 +6546,15 @@ header,
 }
 
 .season-trophy-summary{
-  padding-right: 0;
+  align-items: stretch;
 }
 
 .season-trophy-photo-wrap{
   align-self: stretch;
   margin-top: -16px;
   margin-right: -16px;
-  margin-bottom: -16px;
-  min-height: calc(100% + 32px);
+  margin-bottom: -18px;
+  min-height: calc(100% + 34px);
 }
 
 .season-player-photo-slot--trophy{
@@ -6586,8 +6586,8 @@ header,
   .season-trophy-photo-wrap{
     margin-top: -16px;
     margin-right: -16px;
-    margin-bottom: -16px;
-    min-height: calc(100% + 32px);
+    margin-bottom: -18px;
+    min-height: calc(100% + 34px);
   }
 
   .season-player-photo-slot--trophy{
