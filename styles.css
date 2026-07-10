@@ -6517,17 +6517,17 @@ header,
 
 /* Season trophy cards */
 .season-trophy-card{
+  position: relative;
   overflow: hidden;
+  padding: 0 !important;
 }
 
 .season-trophy-summary{
   position: relative;
   display: block;
-  min-height: 132px;
-
-  margin: -16px;
-  padding: 16px 148px 16px 16px;
-
+  min-height: 180px;
+  margin: 0;
+  padding: 24px 164px 24px 24px;
   list-style: none;
 }
 
@@ -6548,39 +6548,39 @@ header,
   top: 0;
   right: 0;
   bottom: 0;
-
-  width: 132px;
+  width: 148px;
   margin: 0;
   min-height: 0;
-
-  display: block;
 }
 
 .season-player-photo-slot--trophy{
   width: 100%;
   height: 100%;
   min-height: 0;
-
   border: 0;
   box-shadow: none;
   border-radius: 0;
 }
 
 .season-player-photo-slot--trophy .season-player-photo{
+  display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
+
+  /* Keeps more of the hair visible */
+  object-position: center top;
+
   border-radius: 0;
 }
 
 @media (max-width: 640px){
   .season-trophy-summary{
-    min-height: 132px;
-    margin: -16px;
-    padding: 16px 142px 16px 16px;
+    min-height: 180px;
+    padding: 24px 154px 24px 24px;
   }
 
   .season-trophy-photo-wrap{
-    width: 132px;
+    width: 140px;
   }
 }
