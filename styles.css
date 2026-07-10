@@ -6520,6 +6520,18 @@ header,
   position: relative;
   overflow: hidden;
   padding: 0 !important;
+  gap: 0;
+}
+
+.season-trophy-card:not([open]) > .season-series-details{
+  display: none;
+}
+
+.season-trophy-card[open] > .season-series-details{
+  display: grid;
+  margin: 0;
+  padding: 16px;
+  border-top: 1px solid rgba(148, 163, 184, 0.16);
 }
 
 .season-trophy-summary{
