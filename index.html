@@ -840,14 +840,25 @@ Nothing visible on the page is built here. === -->
           <canvas id="liveDiffGraphCanvas" class="w-full h-24"></canvas>
           <span id="liveDiffEmptyState" class="homeGraphHint hidden">No Live Diff points yet</span>
         </div>
+        <div
+  id="caloriesGraphPanel"
+  class="homeGraphPanel text-left"
+  data-graph-panel="4"
+  aria-label="Calories history graph."
+>
+  <div class="homeGraphTitle">Calories</div>
+  <canvas id="caloriesTrend" class="w-full h-24"></canvas>
+  <span id="caloriesGraphHint" class="homeGraphHint hidden">No calorie entries yet</span>
+</div>
       </div>
     </div>
-    <div id="homeGraphDots" class="homeGraphDots" aria-hidden="true">
-      <span class="homeGraphDot is-active"></span>
-      <span class="homeGraphDot"></span>
-      <span class="homeGraphDot"></span>
-      <span class="homeGraphDot"></span>
-    </div>
+<div id="homeGraphDots" class="homeGraphDots" aria-hidden="true">
+  <span class="homeGraphDot is-active"></span>
+  <span class="homeGraphDot"></span>
+  <span class="homeGraphDot"></span>
+  <span class="homeGraphDot"></span>
+  <span class="homeGraphDot"></span>
+</div>
   </div>
 </div>
     </div>
@@ -4833,10 +4844,27 @@ function renderStats(){
       }
 
       // Draw daily trend line
-      tpPerfTime('renderStats: drawDailyTrend', () => drawDailyTrend(dailyTotals));
-      tpPerfTime('renderStats: drawWeightTrend', () => drawWeightTrend(getWeightHistorySorted()));
-      tpPerfTime('renderStats: drawVo2MaxTrend', () => drawVo2MaxTrend(getVo2MaxHistorySorted()));
-      state = cleanupLiveDiffHistory(state);
+tpPerfTime(
+  'renderStats: drawDailyTrend',
+  () => drawDailyTrend(dailyTotals)
+);
+
+tpPerfTime(
+  'renderStats: drawWeightTrend',
+  () => drawWeightTrend(getWeightHistorySorted())
+);
+
+tpPerfTime(
+  'renderStats: drawVo2MaxTrend',
+  () => drawVo2MaxTrend(getVo2MaxHistorySorted())
+);
+
+tpPerfTime(
+  'renderStats: drawCaloriesTrend',
+  () => drawCaloriesTrend(getCaloriesHistorySorted())
+);
+
+state = cleanupLiveDiffHistory(state);
       captureLiveDiffPoint();
       tpPerfTime('renderStats: drawLiveDiffGraph', () => drawLiveDiffGraph());
       bindHomeGraphInteractions();
@@ -5940,7 +5968,43 @@ function getWeightHistorySorted() {
     .sort((a, b) => a.date.localeCompare(b.date));
 }
 
+function getCaloriesHistorySorted() {
+  const entries = Array.isArray(getDerived()?.caloriesEntries)
+    ? getDerived().caloriesEntries
+    : [];
 
+  return entries
+    .map((entry) => {
+      if (!entry) return null;
+
+      const caloriesRaw = Object.prototype.hasOwnProperty.call(entry, 'calories')
+        ? Number(entry.calories)
+        : parseCaloriesFromTitle(entry.title);
+
+      if (!Number.isFinite(caloriesRaw)) return null;
+
+      const key = typeof entry.dayKey === 'string' && entry.dayKey
+        ? entry.dayKey
+        : (
+            typeof entry.dateKey === 'string' && entry.dateKey
+              ? entry.dateKey
+              : (
+                  entry.completedAtISO
+                    ? dateKey(new Date(entry.completedAtISO))
+                    : ''
+                )
+          );
+
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return null;
+
+      return {
+        key,
+        calories: caloriesRaw
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.key.localeCompare(b.key));
+}
 
 function getVo2MaxHistorySorted() {
   const list = Array.isArray(state?.vo2MaxHistory) ? state.vo2MaxHistory : [];
@@ -6659,6 +6723,203 @@ function drawVo2MaxTrend(vo2MaxHistoryInput){
   });
 }
 
+function drawCaloriesTrend(caloriesHistoryInput) {
+  const canvas = $('caloriesTrend');
+  const hint = $('caloriesGraphHint');
+  if (!canvas || !canvas.getContext) return;
+
+  const ctx = canvas.getContext('2d');
+
+  const width = canvas.clientWidth || 320;
+  const height = canvas.clientHeight || 80;
+
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(width * dpr);
+  canvas.height = Math.round(height * dpr);
+  canvas.style.width = width + 'px';
+  canvas.style.height = height + 'px';
+
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+
+  let entries = Array.isArray(caloriesHistoryInput)
+    ? caloriesHistoryInput.slice()
+    : getCaloriesHistorySorted();
+
+  entries = entries
+    .filter((entry) => Number.isFinite(Number(entry?.calories)))
+    .sort((a, b) => String(a.key).localeCompare(String(b.key)));
+
+  // Keep the chart responsive if the history eventually gets huge.
+  const MAX_POINTS = 400;
+
+  if (entries.length > MAX_POINTS) {
+    const step = Math.ceil(entries.length / MAX_POINTS);
+
+    entries = entries.filter(
+      (_, index) =>
+        index % step === 0 ||
+        index === entries.length - 1
+    );
+  }
+
+  const n = entries.length;
+
+  if (!n) {
+    if (hint) hint.classList.remove('hidden');
+
+    ctx.strokeStyle = 'rgba(148,163,184,0.3)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, height - 4);
+    ctx.lineTo(width, height - 4);
+    ctx.stroke();
+
+    return;
+  }
+
+  if (hint) hint.classList.add('hidden');
+
+  const values = entries.map((entry) => Number(entry.calories));
+  const maxVal = Math.max(...values);
+  const minVal = Math.min(...values);
+  const range = (maxVal - minVal) || 1;
+
+  const paddingX = 6;
+  const paddingTop = 22;
+  const paddingBottom = 6;
+
+  const chartWidth = width - paddingX * 2;
+  const chartHeight = height - paddingTop - paddingBottom;
+
+  // Bottom baseline
+  ctx.strokeStyle = 'rgba(15,23,42,0.7)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(paddingX, paddingTop + chartHeight);
+  ctx.lineTo(paddingX + chartWidth, paddingTop + chartHeight);
+  ctx.stroke();
+
+  const points = entries.map((entry, index) => {
+    const x = paddingX + (
+      n === 1
+        ? chartWidth / 2
+        : chartWidth * index / (n - 1)
+    );
+
+    const normalized = (entry.calories - minVal) / range;
+    const y = paddingTop + chartHeight - normalized * chartHeight;
+
+    return {
+      x,
+      y,
+      value: entry.calories
+    };
+  });
+
+  // Raw teal calorie-history line
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = '#254C52';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+
+  points.forEach((point, index) => {
+    if (index === 0) {
+      ctx.moveTo(point.x, point.y);
+    } else {
+      ctx.lineTo(point.x, point.y);
+    }
+  });
+
+  ctx.stroke();
+
+  // 14-entry moving average, matching the Score Trend graph
+  const movingAveragePeriod = 14;
+
+  const movingAveragePoints = points.map((point, index) => {
+    const start = Math.max(0, index - movingAveragePeriod + 1);
+    const slice = points.slice(start, index + 1);
+
+    const average = slice.reduce(
+      (sum, current) => sum + current.value,
+      0
+    ) / slice.length;
+
+    const normalized = (average - minVal) / range;
+    const y = paddingTop + chartHeight - normalized * chartHeight;
+
+    return {
+      x: point.x,
+      y
+    };
+  });
+
+  // Orange smoothed moving-average trendline
+  if (movingAveragePoints.length > 1) {
+    ctx.beginPath();
+    ctx.strokeStyle = '#F59E0B';
+    ctx.lineWidth = 0.9;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+
+    ctx.moveTo(
+      movingAveragePoints[0].x,
+      movingAveragePoints[0].y
+    );
+
+    for (
+      let index = 1;
+      index < movingAveragePoints.length - 1;
+      index++
+    ) {
+      const current = movingAveragePoints[index];
+      const next = movingAveragePoints[index + 1];
+
+      const controlX = (current.x + next.x) / 2;
+      const controlY = (current.y + next.y) / 2;
+
+      ctx.quadraticCurveTo(
+        current.x,
+        current.y,
+        controlX,
+        controlY
+      );
+    }
+
+    const last = movingAveragePoints[movingAveragePoints.length - 1];
+
+    ctx.lineTo(last.x, last.y);
+    ctx.stroke();
+  }
+
+  // Raw calorie-entry dots
+  const pointRadius =
+    n > 120 ? 1.4 :
+    n > 60 ? 1.8 :
+    2.2;
+
+  ctx.save();
+  ctx.fillStyle = '#5FC4CF';
+  ctx.strokeStyle = 'rgba(11,13,16,0.85)';
+  ctx.lineWidth = 1;
+
+  points.forEach((point) => {
+    ctx.beginPath();
+    ctx.arc(
+      point.x,
+      point.y,
+      pointRadius,
+      0,
+      Math.PI * 2
+    );
+    ctx.fill();
+    ctx.stroke();
+  });
+
+  ctx.restore();
+}
+  
 function bumpOneDay(task){
   if (!task.dueDateISO) return;  // nothing to bump
   const d = new Date(task.dueDateISO + 'T00:00:00');
