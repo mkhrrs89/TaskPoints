@@ -1037,8 +1037,8 @@ renderAvatarInto(avatarSlot, {
       const top = sortedBy(def, 'desc').slice(0, 5);
       const bot = sortedBy(def, 'asc').slice(0, 5).reverse();
 
-      const card = document.createElement('div');
-      card.className = 'glass p-4';
+const card = document.createElement('section');
+card.className = 'gamehub-rating-category';
 
       const head = document.createElement('div');
       head.className = 'flex items-center justify-between mb-3';
@@ -1048,8 +1048,8 @@ renderAvatarInto(avatarSlot, {
       const cols = document.createElement('div');
       cols.className = 'grid grid-cols-1 sm:grid-cols-2 gap-3';
 
-      const topCol = document.createElement('div');
-      topCol.className = 'glass p-3';
+const topCol = document.createElement('div');
+topCol.className = 'gamehub-rating-column';
       topCol.innerHTML = `<div class="muted text-[11px] uppercase tracking-wide mb-2">Top 5</div>`;
       const topList = document.createElement('div');
       topList.className = 'space-y-2';
@@ -1057,8 +1057,8 @@ renderAvatarInto(avatarSlot, {
       if (!top.length) topList.appendChild(document.createTextNode('—'));
       topCol.appendChild(topList);
 
-      const botCol = document.createElement('div');
-      botCol.className = 'glass p-3';
+const botCol = document.createElement('div');
+botCol.className = 'gamehub-rating-column';
       botCol.innerHTML = `<div class="muted text-[11px] uppercase tracking-wide mb-2">Bottom 5</div>`;
       const botList = document.createElement('div');
       botList.className = 'space-y-2';
