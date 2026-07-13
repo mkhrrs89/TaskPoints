@@ -638,33 +638,33 @@ function matchupAvatarSize(){
     const name = p ? (p.name || safeNameForId(state, id)) : safeNameForId(state, id);
 
     const row = document.createElement('div');
-    row.className = 'flex items-center justify-between gap-3';
+row.className = 'gamehub-stat-leader-row';
 
-    const left = document.createElement('div');
-    left.className = 'flex items-center gap-2 min-w-0';
+const left = document.createElement('div');
+left.className = 'gamehub-stat-leader-left';
 
-    const avatarSlot = document.createElement('div');
-    avatarSlot.className = 'shrink-0';
+const avatarSlot = document.createElement('div');
+avatarSlot.className = 'gamehub-stat-leader-photo';
     left.appendChild(avatarSlot);
 
-    const nameEl = document.createElement('button');
-    nameEl.className = 'text-sm font-semibold truncate';
+const nameEl = document.createElement('button');
+nameEl.className = 'gamehub-stat-leader-name';
     nameEl.textContent = name;
     left.appendChild(nameEl);
 
-    const right = document.createElement('div');
-    right.className = 'text-sm font-extrabold tabular-nums';
+const right = document.createElement('div');
+right.className = 'gamehub-stat-leader-value';
     right.textContent = rightText;
 
     row.appendChild(left);
     row.appendChild(right);
 
-    renderAvatarInto(avatarSlot, {
-      name,
-      imageId: getPlayerImageId(state, id),
-      size: 32,
-      thumbClass: 'gamehub-stat-avatar-thumb'
-    });
+renderAvatarInto(avatarSlot, {
+  name,
+  imageId: getPlayerImageId(state, id),
+  size: { width: 86, height: 96 },
+  thumbClass: 'gamehub-stat-avatar-thumb'
+});
     applyNameButton(nameEl, id);
 
     return row;
