@@ -2706,12 +2706,23 @@ if (unresolvedImageIds.length) {
     return Number.isFinite(ts) ? ts : 0;
   };
 
-  const rankingByPlayerId = new Map(
-    (window.TaskPointsCore?.computeCanonicalRankings
-      ? TaskPointsCore.computeCanonicalRankings(state)
-      : []
-    ).map((row) => [row.playerId || row.id, row.rank])
-  );
+const canonicalRankingRows = window.TaskPointsCore?.computeCanonicalRankings
+  ? TaskPointsCore.computeCanonicalRankings(state)
+  : [];
+
+const canonicalStatsByPlayerId = new Map(
+  canonicalRankingRows.map((row) => [
+    String(row.playerId || row.id || ''),
+    row
+  ])
+);
+
+const rankingByPlayerId = new Map(
+  canonicalRankingRows.map((row) => [
+    String(row.playerId || row.id || ''),
+    row.rank
+  ])
+);
 
   const getRankingForPlayer = (player) => {
     const rank = rankingByPlayerId.get(player?.id);
@@ -3049,15 +3060,41 @@ card.innerHTML = `
 
       // View mode
 
-      const stats = historyStats.get(p.id) || { games: 0, totalPoints: 0, scores: [] };
-      const games = stats.games || 0;
-      const avgVal = games ? (stats.totalPoints / games) : null;
-      const avgPpd = Number.isFinite(avgVal) ? avgVal.toFixed(1) : "—";
-      const baselineVal = Number.isFinite(p.baseline) ? p.baseline : 0;
-      const wins = (stats.scores || []).filter(score => score >= baselineVal).length;
-      const losses = games ? Math.max(0, games - wins) : 0;
-      const recordText = games ? `${wins}-${losses}` : "0-0";
-      const playerImageUrl = p.imageId ? getCachedImageUrl(p.imageId) : "";
+const historyStat = historyStats.get(p.id) || {
+  games: 0,
+  totalPoints: 0,
+  scores: []
+};
+
+const canonicalStat = canonicalStatsByPlayerId.get(String(p.id)) || null;
+
+const wins = Number.isFinite(Number(canonicalStat?.wins))
+  ? Number(canonicalStat.wins)
+  : 0;
+
+const losses = Number.isFinite(Number(canonicalStat?.losses))
+  ? Number(canonicalStat.losses)
+  : 0;
+
+const games = Number.isFinite(Number(canonicalStat?.games))
+  ? Number(canonicalStat.games)
+  : wins + losses;
+
+const canonicalPpd = Number(canonicalStat?.ppd);
+const historyAvg = historyStat.games
+  ? historyStat.totalPoints / historyStat.games
+  : null;
+
+const avgVal = Number.isFinite(canonicalPpd)
+  ? canonicalPpd
+  : historyAvg;
+
+const avgPpd = Number.isFinite(avgVal)
+  ? avgVal.toFixed(1)
+  : "—";
+
+const recordText = `${wins}-${losses}`;
+const playerImageUrl = p.imageId ? getCachedImageUrl(p.imageId) : "";
 
 card.innerHTML = `
   <div class="flex flex-col gap-3 w-full">
