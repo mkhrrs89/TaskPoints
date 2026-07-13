@@ -20,6 +20,55 @@
   <script src="toolbar.js" defer></script>
 
   <style>
+
+    .matchup-collapsible-header{
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  text-align: left;
+  padding: 0;
+}
+
+.matchup-collapsible-header::after{
+  content: "▾";
+  font-size: 0.9rem;
+  color: var(--muted);
+  transition: transform 220ms ease;
+}
+
+.matchup-collapsible-header[aria-expanded="true"]::after{
+  transform: rotate(180deg);
+}
+
+.matchup-collapsible-body{
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 260ms ease,
+    opacity 180ms ease;
+}
+
+.matchup-collapsible-body.is-open{
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.matchup-collapsible-inner{
+  min-height: 0;
+  overflow: hidden;
+}
+
+.matchup-collapsible-inner > :first-child{
+  margin-top: 12px;
+}
+    
     /* Match game.html body style so everything feels unified  */
     body{
       background:#fafafa;
@@ -705,6 +754,43 @@ for (let i = 0; i + 1 < pool.length; i += 2) {
         button.addEventListener("click", invoke);
       }
 
+function makeCollapsibleSection(section, heading, bodyContent) {
+  const headerButton = document.createElement("button");
+  headerButton.type = "button";
+  headerButton.className = "matchup-collapsible-header";
+  headerButton.setAttribute("aria-expanded", "false");
+
+  heading.classList.add("matchup-collapsible-heading");
+  headerButton.appendChild(heading);
+
+  const body = document.createElement("div");
+  body.className = "matchup-collapsible-body";
+
+  const inner = document.createElement("div");
+  inner.className = "matchup-collapsible-inner";
+
+  if (bodyContent instanceof Node) {
+    inner.appendChild(bodyContent);
+  } else if (Array.isArray(bodyContent)) {
+    bodyContent.forEach((node) => {
+      if (node instanceof Node) inner.appendChild(node);
+    });
+  }
+
+  body.appendChild(inner);
+
+  headerButton.addEventListener("click", () => {
+    const isOpen = headerButton.getAttribute("aria-expanded") === "true";
+    headerButton.setAttribute("aria-expanded", String(!isOpen));
+    body.classList.toggle("is-open", !isOpen);
+  });
+
+  section.appendChild(headerButton);
+  section.appendChild(body);
+
+  return { headerButton, body, inner };
+}
+      
       function describeMatchup(m){
         if (!shouldRevealMatchup(m)) {
           const aName = getName(m.playerAId, m);
@@ -787,14 +873,15 @@ for (let i = 0; i + 1 < pool.length; i += 2) {
       // Sort dates descending
       const dateKeys = Array.from(groups.keys()).sort((a,b) => b.localeCompare(a));
 
-      dateKeys.forEach(key => {
-        const section = document.createElement("section");
-        section.className = "glass mb-4";
+dateKeys.forEach(key => {
+  const section = document.createElement("section");
+  section.className = "glass mb-4";
 
-        const heading = document.createElement("h2");
-        heading.className = "matchup-day";
-        heading.textContent = formatLongDate(key);
-        section.appendChild(heading);
+  const heading = document.createElement("h2");
+  heading.className = "matchup-day";
+  heading.textContent = formatLongDate(key);
+
+  const collapsibleContent = document.createElement("div");
 
         const dayMatchups = groups.get(key).slice().sort((a,b) => {
           const at = a.matchupType === "tournament" ? 0 : 1;
@@ -809,7 +896,7 @@ for (let i = 0; i + 1 < pool.length; i += 2) {
             const labelEl = document.createElement("div");
             labelEl.className = "matchup-section-label";
             labelEl.textContent = label;
-            section.appendChild(labelEl);
+            collapsibleContent.appendChild(labelEl);
           }
           const list = document.createElement("ul");
           list.className = "space-y-1";
@@ -851,7 +938,7 @@ for (let i = 0; i + 1 < pool.length; i += 2) {
             }
             list.appendChild(li);
           });
-          section.appendChild(list);
+          collapsibleContent.appendChild(list);
         };
 
         if (hasSeasonSections) {
@@ -903,8 +990,9 @@ for (let i = 0; i + 1 < pool.length; i += 2) {
           }
 
           missingWrap.appendChild(actionWrap);
-          section.appendChild(missingWrap);
+          collapsibleContent.appendChild(missingWrap);
         }
+  makeCollapsibleSection(section, heading, collapsibleContent);
         chronoContainer.appendChild(section);
       });
 
@@ -928,16 +1016,15 @@ for (let i = 0; i + 1 < pool.length; i += 2) {
         return nameA.localeCompare(nameB);
       });
 
-      playerIds.forEach(playerId => {
-        const section = document.createElement("section");
-        section.className = "glass mb-4";
+playerIds.forEach(playerId => {
+  const section = document.createElement("section");
+  section.className = "glass mb-4";
 
-        const heading = document.createElement("h2");
-        heading.className = "matchup-player";
-        heading.textContent = getName(playerId);
-        section.appendChild(heading);
+  const heading = document.createElement("h2");
+  heading.className = "matchup-player";
+  heading.textContent = getName(playerId);
 
-        const list = document.createElement("ul");
+  const list = document.createElement("ul");
         list.className = "space-y-1";
 
         playerGroups.get(playerId)
@@ -966,8 +1053,8 @@ for (let i = 0; i + 1 < pool.length; i += 2) {
             list.appendChild(li);
           });
 
-        section.appendChild(list);
-        playerContainer.appendChild(section);
+makeCollapsibleSection(section, heading, list);
+playerContainer.appendChild(section);
       });
     }
 
