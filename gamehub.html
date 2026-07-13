@@ -592,39 +592,72 @@ function matchupAvatarSize(){
   return { width: 150, height: 200 };   // desktop/tablet
 }
 
-  async function renderAvatarInto(el, { name, imageId, size = 32, frame = false, thumbClass = '' } = {}){
-    if (!el) return;
-    el.innerHTML = '';
+async function renderAvatarInto(
+  el,
+  {
+    name,
+    imageId,
+    size = 32,
+    frame = false,
+    thumbClass = ''
+  } = {}
+) {
+  if (!el) return;
 
-    const wrap = document.createElement('div');
-    wrap.className = frame ? 'relative avatar-frame' : 'relative';
-    const isObject = typeof size === 'object' && size !== null;
-    const width = isObject ? size.width : size;
-    const height = isObject ? size.height : size;
-    wrap.style.width = `${width}px`;
-    wrap.style.height = `${height}px`;
+  // Give this render a unique token. If another render begins before the
+  // image finishes loading, the older render is discarded.
+  const renderToken = String(
+    (Number(el.dataset.avatarRenderToken) || 0) + 1
+  );
 
-    const url = await getImageUrl(imageId);
-    if (url) {
-      const img = document.createElement('img');
-      img.src = url;
-      img.alt = name || 'Player';
-      img.className = frame
-        ? 'avatar-in-frame'
-        : `w-full h-full object-cover border border-slate-700/60 ${thumbClass || 'rounded-full'}`;
-      wrap.appendChild(img);
-    } else {
-      const fallback = document.createElement('div');
-      fallback.className = frame
-        ? 'avatar-in-frame avatar-fallback'
-        : `w-full h-full flex items-center justify-center text-[11px] font-bold border border-slate-700/60 ${thumbClass || 'rounded-full'}`;
-      fallback.style.background = 'linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02))';
-      fallback.textContent = initials(name);
-      wrap.appendChild(fallback);
-    }
+  el.dataset.avatarRenderToken = renderToken;
+  el.innerHTML = '';
 
-    el.appendChild(wrap);
+  const isObject = typeof size === 'object' && size !== null;
+  const width = isObject ? size.width : size;
+  const height = isObject ? size.height : size;
+
+  const url = await getImageUrl(imageId);
+
+  // A newer render started while this one was awaiting the image.
+  if (el.dataset.avatarRenderToken !== renderToken) return;
+
+  // Clear once more immediately before inserting the finished render.
+  el.innerHTML = '';
+
+  const wrap = document.createElement('div');
+  wrap.className = frame ? 'relative avatar-frame' : 'relative';
+  wrap.style.width = `${width}px`;
+  wrap.style.height = `${height}px`;
+
+  if (url) {
+    const img = document.createElement('img');
+    img.src = url;
+    img.alt = name || 'Player';
+    img.className = frame
+      ? 'avatar-in-frame'
+      : `w-full h-full object-cover border border-slate-700/60 ${
+          thumbClass || 'rounded-full'
+        }`;
+
+    wrap.appendChild(img);
+  } else {
+    const fallback = document.createElement('div');
+    fallback.className = frame
+      ? 'avatar-in-frame avatar-fallback'
+      : `w-full h-full flex items-center justify-center text-[11px] font-bold border border-slate-700/60 ${
+          thumbClass || 'rounded-full'
+        }`;
+
+    fallback.style.background =
+      'linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02))';
+
+    fallback.textContent = initials(name);
+    wrap.appendChild(fallback);
   }
+
+  el.appendChild(wrap);
+}
 
   function applyNameButton(nameEl, playerId){
     if (!nameEl) return;
@@ -942,7 +975,7 @@ renderAvatarInto(avatarSlot, {
 
       if (bestWrap) {
         const block = document.createElement('div');
-        block.className = 'glass p-3';
+        block.className = 'gamehub-stat-category';
 
         const title = document.createElement('div');
         title.className = 'muted text-[11px] uppercase tracking-wide mb-2';
@@ -958,7 +991,7 @@ renderAvatarInto(avatarSlot, {
 
       if (worstWrap) {
         const block = document.createElement('div');
-        block.className = 'glass p-3';
+        block.className = 'gamehub-stat-category';
 
         const title = document.createElement('div');
         title.className = 'muted text-[11px] uppercase tracking-wide mb-2';
