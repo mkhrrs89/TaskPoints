@@ -1330,6 +1330,31 @@ body {
   box-shadow: none;
 }
 
+.gamehub-page .gamehub-rating-category{
+  display: grid;
+  gap: 12px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.gamehub-page .gamehub-rating-category + .gamehub-rating-category{
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.gamehub-page .gamehub-rating-column{
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
 
 
 /* =======================================================================
