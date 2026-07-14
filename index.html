@@ -3899,8 +3899,26 @@ playerBEffects: effectsById[pair.playerBId] ?? null
       return [a, b].sort().join('|') === [String(matchup.playerAId), String(matchup.playerBId)].sort().join('|')
         && String(m.matchupType || '') === String(matchup.matchupType || '');
     });
-    if (existingIndex >= 0) state.matchups[existingIndex] = { ...matchup, ...state.matchups[existingIndex] };
-    else state.matchups.push(matchup);
+if (existingIndex >= 0) {
+  const existing = state.matchups[existingIndex];
+
+  state.matchups[existingIndex] = {
+    ...matchup,
+    ...existing,
+
+    playerAEffects:
+      existing.playerAEffects ??
+      matchup.playerAEffects ??
+      null,
+
+    playerBEffects:
+      existing.playerBEffects ??
+      matchup.playerBEffects ??
+      null
+  };
+} else {
+  state.matchups.push(matchup);
+}
   });
 
   if (window.TaskPointsCore?.dedupeSameDayGeneratedSlateState) {
