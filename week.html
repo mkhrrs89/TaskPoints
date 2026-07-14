@@ -873,18 +873,37 @@ function renderHabitSection(section, days, baseDate){
     const row = document.createElement('div');
     row.className = 'habitRow';
 
-    const weeklyThresholdRaw = Number(
-      h.weeklyThreshold ?? h.weeklyTarget ?? h.weeklyGoal ?? h.weekGoal ?? h.targetPerWeek ?? h.timesPerWeek
-    );
-    const hasWeeklyThreshold = Number.isFinite(weeklyThresholdRaw) && weeklyThresholdRaw > 0;
-    const completedInVisibleWeek = days.reduce((count, d) => {
-      const completion = Array.isArray(state.completions)
-        ? state.completions.find(c => c?.source === 'habit' && c?.habitId === h.id && c?.dayKey === d.key)
-        : null;
-      if (!completion || !h.doneKeys.includes(d.key)) return count;
-      return count + getHabitCompletionFraction(completion);
-    }, 0);
-    const isWeeklyComplete = hasWeeklyThreshold && completedInVisibleWeek >= weeklyThresholdRaw;
+const weeklyThresholdRaw = Number(
+  h.daysPerCompleteWeek
+  ?? h.weeklyThreshold
+  ?? h.weeklyTarget
+  ?? h.weeklyGoal
+  ?? h.weekGoal
+  ?? h.targetPerWeek
+  ?? h.timesPerWeek
+);
+
+const hasWeeklyThreshold = Number.isFinite(weeklyThresholdRaw)
+  && weeklyThresholdRaw > 0
+  && weeklyThresholdRaw <= 7;
+
+const weeklyThreshold = hasWeeklyThreshold
+  ? Math.round(weeklyThresholdRaw)
+  : 0;
+
+const completedInVisibleWeek = days.reduce((count, d) => {
+  if (!h.doneKeys.includes(d.key)) return count;
+
+  const completion = Array.isArray(state.completions)
+    ? state.completions.find(c => c?.source === 'habit' && c?.habitId === h.id && c?.dayKey === d.key)
+    : null;
+
+  // Keep the weekly display consistent with the visible habit bubbles.
+  return count + (completion ? getHabitCompletionFraction(completion) : 1);
+}, 0);
+
+const isWeeklyComplete =
+  hasWeeklyThreshold && completedInVisibleWeek >= weeklyThreshold;
 
 
     const daysHtml = days.map(d=>{
