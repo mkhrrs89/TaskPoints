@@ -3829,7 +3829,8 @@ function simulateToday() {
     todaysPairs.flatMap(m => [m.playerAId, m.playerBId])
   ));
 
-  const scoresById = {};
+const scoresById = {};
+const effectsById = {};
 
   const youScore = computeTodayPoints();
   if (participantIds.includes('YOU') && !isNaN(youScore)) {
@@ -3849,8 +3850,18 @@ participantIds.forEach(id => {
     : null;
   const opponent = opponentId === 'YOU' ? null : playerMap.get(opponentId);
 
-  const score = simulateAiScoreForPlayer(player, todayKey, { opponent });
-  scoresById[id] = score;
+let capturedEffects = null;
+
+const score = simulateAiScoreForPlayer(player, todayKey, {
+  opponent,
+
+  captureEffects(effects) {
+    capturedEffects = effects || null;
+  }
+});
+
+scoresById[id] = score;
+effectsById[id] = capturedEffects;
   ensureOpponentDripSchedule(todayKey, id, score);
   if (!state.gameHistory.some(g => getHistoryDateKey(g) === todayKey && String(g.playerId || '') === String(id))) {
     state.gameHistory.push({
@@ -3872,8 +3883,11 @@ participantIds.forEach(id => {
       playerBId: pair.playerBId,
       playerAName: namesById[pair.playerAId] || "Unknown",
       playerBName: namesById[pair.playerBId] || "Unknown",
-      scoreA: scoresById[pair.playerAId] ?? 0,
-      scoreB: scoresById[pair.playerBId] ?? 0
+scoreA: scoresById[pair.playerAId] ?? 0,
+scoreB: scoresById[pair.playerBId] ?? 0,
+
+playerAEffects: effectsById[pair.playerAId] ?? null,
+playerBEffects: effectsById[pair.playerBId] ?? null
     };
 
     const stableId = String(matchup.id || matchup.matchupId || '');
@@ -3962,7 +3976,8 @@ function ensureTodayMatchupsFromHistory(){
     todaysPairs.flatMap(m => [m.playerAId, m.playerBId]).filter(Boolean)
   ));
 
-  const scoresById = {};
+const scoresById = {};
+const effectsById = {};
 
   // YOU score (inertia-inclusive via TaskPointsCore snapshot path in computeTodayPoints)
   const youScore = computeTodayPoints();
