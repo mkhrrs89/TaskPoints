@@ -6702,3 +6702,21 @@ header,
     width: 140px;
   }
 }
+
+
+.matchup-export-controls{
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+@media (max-width: 640px){
+  .matchup-export-controls{
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .matchup-export-controls #exportMatchupsCsvBtn{
+    grid-column: 1 / -1;
+  }
+}
