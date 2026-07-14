@@ -4003,21 +4003,48 @@ const effectsById = {};
     }
 
 let score = existingScore;
+let capturedEffects = null;
+
 if (!Number.isFinite(score)) {
   const player = playerMap.get(id);
 
   const todaysPair = todaysPairs.find(pair =>
     pair && (pair.playerAId === id || pair.playerBId === id)
   );
+
   const opponentId = todaysPair
-    ? (todaysPair.playerAId === id ? todaysPair.playerBId : todaysPair.playerAId)
+    ? (
+        todaysPair.playerAId === id
+          ? todaysPair.playerBId
+          : todaysPair.playerAId
+      )
     : null;
-  const opponent = opponentId === 'YOU' ? null : playerMap.get(opponentId);
 
-  score = player ? simulateAiScoreForPlayer(player, todayKey, { opponent }) : 0;
+  const opponent =
+    opponentId === 'YOU'
+      ? null
+      : playerMap.get(opponentId);
 
-  // If we had to simulate, also add history so other pages stay consistent
-  if (!state.gameHistory.some(g => getHistoryDateKey(g) === todayKey && String(g.playerId || '') === String(id))) {
+  if (player) {
+    score = simulateAiScoreForPlayer(player, todayKey, {
+      opponent,
+
+      captureEffects(effects) {
+        capturedEffects = effects || null;
+      }
+    });
+  } else {
+    score = 0;
+  }
+
+  // If we had to simulate, also add history so other pages stay consistent.
+  if (
+    !state.gameHistory.some(
+      g =>
+        getHistoryDateKey(g) === todayKey &&
+        String(g.playerId || '') === String(id)
+    )
+  ) {
     state.gameHistory.push({
       id: makeId(),
       date: todayKey,
@@ -4027,8 +4054,14 @@ if (!Number.isFinite(score)) {
   }
 }
 
-    scoresById[id] = Number(score.toFixed(1));
-    ensureOpponentDripSchedule(todayKey, id, scoresById[id]);
+scoresById[id] = Number(score.toFixed(1));
+effectsById[id] = capturedEffects;
+
+ensureOpponentDripSchedule(
+  todayKey,
+  id,
+  scoresById[id]
+);
   }
 
   // Create matchups from schedule pairs
@@ -4044,8 +4077,11 @@ if (!Number.isFinite(score)) {
       playerBId: pair.playerBId,
       playerAName: namesById[pair.playerAId] || "Unknown",
       playerBName: namesById[pair.playerBId] || "Unknown",
-      scoreA: scoresById[pair.playerAId] ?? 0,
-      scoreB: scoresById[pair.playerBId] ?? 0
+scoreA: scoresById[pair.playerAId] ?? 0,
+scoreB: scoresById[pair.playerBId] ?? 0,
+
+playerAEffects: effectsById[pair.playerAId] ?? null,
+playerBEffects: effectsById[pair.playerBId] ?? null
     });
   });
 
