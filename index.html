@@ -7240,13 +7240,18 @@ function renderHabitRow(h, days, wrap, options = {}) {
     && weeklyThresholdRaw > 0
     && weeklyThresholdRaw <= 7;
   const weeklyThreshold = hasValidWeeklyThreshold ? Math.round(weeklyThresholdRaw) : 0;
-  const completedCountForVisibleWeek = days.reduce((count, d) => {
-    const completion = Array.isArray(state.completions)
-      ? state.completions.find(c => c?.source === 'habit' && c?.habitId === h.id && c?.dayKey === d.key)
-      : null;
-    if (!completion || !h.doneKeys.includes(d.key)) return count;
-    return count + getHabitCompletionFraction(completion);
-  }, 0);
+const completedCountForVisibleWeek = days.reduce((count, d) => {
+  if (!h.doneKeys.includes(d.key)) return count;
+
+  const completion = Array.isArray(state.completions)
+    ? state.completions.find(c => c?.source === 'habit' && c?.habitId === h.id && c?.dayKey === d.key)
+    : null;
+
+  // Older habit days may be marked complete in doneKeys without having
+  // a matching completion record. Since the bubble displays as fully
+  // complete, count it as one completed day for the weekly plate.
+  return count + (completion ? getHabitCompletionFraction(completion) : 1);
+}, 0);
   const isWeeklyCompleteForVisibleWeek = hasValidWeeklyThreshold
     && completedCountForVisibleWeek >= weeklyThreshold;
 
