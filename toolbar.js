@@ -672,7 +672,7 @@ nav.addEventListener('pointercancel', (event) => {
 }
 
 // ---------- Inbox auto-population ----------
-const TP_INBOX_UPSET_OVR_GAP = 10;
+const TP_INBOX_UPSET_OVR_GAP = 20;
 const TP_INBOX_ADVANCEMENT_ROUNDS = new Set(['quarterfinals', 'semifinals', 'finals']);
 
 function tpInboxDateKey(value) {
