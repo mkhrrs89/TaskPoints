@@ -3184,11 +3184,29 @@ function shouldUseSeasonMatchupControl(state, dateKeyStr) {
     ['id','matchupId','date','dateKey','playerAId','playerBId','playerAName','playerBName','seasonId','seriesId','seasonSeriesId','roundId','roundName','matchupType','seriesGameNumber','gameNumber','bestOf','winsNeeded','seasonMatchupLabel'].forEach((key) => {
       if (next[key] !== undefined && next[key] !== null && next[key] !== '') merged[key] = next[key];
     });
-    if (!scored) {
-      ['scoreA','scoreB','playerAScore','playerBScore','result','winnerId','completedAtISO','diff'].forEach((key) => {
-        if (next[key] !== undefined) merged[key] = next[key];
-      });
-    }
+if (!scored) {
+  [
+    'scoreA',
+    'scoreB',
+    'playerAScore',
+    'playerBScore',
+    'result',
+    'winnerId',
+    'completedAtISO',
+    'diff',
+    'playerAEffects',
+    'playerBEffects'
+  ].forEach((key) => {
+    if (next[key] !== undefined) merged[key] = next[key];
+  });
+}
+
+// Preserve effect telemetry if the existing row does not have it.
+['playerAEffects', 'playerBEffects'].forEach((key) => {
+  if (merged[key] == null && next[key] !== undefined) {
+    merged[key] = next[key];
+  }
+});
     return merged;
   }
 
@@ -3295,12 +3313,49 @@ function shouldUseSeasonMatchupControl(state, dateKeyStr) {
           next[scoreKey] = historyScore;
           return;
         }
-        const simulated = simulateAiScoreForPlayerCore(playerById.get(playerId), key, { state: normalized, context: { matchup: next, source: 'season-materialization' } });
-        if (Number.isFinite(Number(simulated))) {
-          next[scoreKey] = Number(simulated);
-          const ensured = ensureSameDayGameHistoryScore(normalized, key, playerId, next[scoreKey]);
-          if (ensured.changed) { normalized = normalizeState(ensured.state); historyChanged = true; changed = true; }
-        }
+const otherSide = side === 'A' ? 'B' : 'A';
+const opponentId = String(next[`player${otherSide}Id`] || '');
+const opponent = opponentId === 'YOU'
+  ? null
+  : playerById.get(opponentId);
+
+let capturedEffects = null;
+
+const simulated = simulateAiScoreForPlayerCore(
+  playerById.get(playerId),
+  key,
+  {
+    state: normalized,
+
+    context: {
+      matchup: next,
+      source: 'season-materialization',
+      opponent,
+
+      captureEffects(effects) {
+        capturedEffects = effects || null;
+      }
+    }
+  }
+);
+
+if (Number.isFinite(Number(simulated))) {
+  next[scoreKey] = Number(simulated);
+  next[`player${side}Effects`] = capturedEffects;
+
+  const ensured = ensureSameDayGameHistoryScore(
+    normalized,
+    key,
+    playerId,
+    next[scoreKey]
+  );
+
+  if (ensured.changed) {
+    normalized = normalizeState(ensured.state);
+    historyChanged = true;
+    changed = true;
+  }
+}
       });
       return next;
     });
