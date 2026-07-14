@@ -206,24 +206,130 @@
     <!-- Inbox placeholder -->
     <div class="flex items-start justify-between gap-3 flex-wrap mb-3">
       <div>
-        <h2 class="text-xl sm:text-2xl font-extrabold tracking-tight">
-          Inbox
-        </h2>
-
+        <h2 class="text-xl sm:text-2xl font-extrabold tracking-tight">Inbox</h2>
         <div class="muted text-xs">
-          Messages, reminders, and captured items will eventually live here.
+          New matchup and tournament results appear here after the 5:00 AM reveal rollover.
         </div>
       </div>
     </div>
 
-    <div class="glass p-4">
-      <div class="text-lg font-bold">Inbox</div>
+    <div id="inboxEmpty" class="glass p-4 hidden">
+      <div class="text-lg font-bold">Nothing new yet</div>
       <div class="muted text-sm mt-1">
-        This page is ready for Inbox features.
+        Results alerts will appear here the first time TaskPoints is opened after 5:00 AM.
       </div>
     </div>
+
+    <div id="inboxMessages" class="space-y-3"></div>
   </div>
 
   <div id="bottomToolbarMount"></div>
+
+<script>
+(() => {
+  const STORAGE_KEY = window.TaskPointsCore?.STORAGE_KEY || "taskpoints_v1";
+
+  function esc(value) {
+    return String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#39;");
+  }
+
+  function formatInboxDate(dateKey) {
+    const match = String(dateKey || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) return String(dateKey || "");
+    const [, year, month, day] = match;
+    return new Date(Number(year), Number(month) - 1, Number(day))
+      .toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+        year: "numeric"
+      });
+  }
+
+  function messageIcon(type) {
+    if (type === "record") return "🏆";
+    if (type === "series_advance") return "🏅";
+    if (type === "series_upset") return "⚡";
+    return "❗";
+  }
+
+  function loadInboxState() {
+    try {
+      if (window.TaskPointsCore?.readTaskPointsStoredState) {
+        return TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY, {}) || {};
+      }
+      const raw = localStorage.getItem(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch (error) {
+      console.warn("Inbox state could not be loaded", error);
+      return {};
+    }
+  }
+
+  function renderInbox() {
+    // This is duplicate-safe. It also covers the rare case where this page
+    // renders before the shared toolbar finishes its normal morning scan.
+    window.TaskPointsInbox?.populate?.();
+
+    const state = loadInboxState();
+    const messages = (Array.isArray(state.inboxMessages) ? state.inboxMessages : [])
+      .filter((message) => message && message.archived !== true)
+      .sort((a, b) => {
+        const dateCompare = String(b.eventDateKey || "")
+          .localeCompare(String(a.eventDateKey || ""));
+        if (dateCompare) return dateCompare;
+        return String(b.createdAtISO || "")
+          .localeCompare(String(a.createdAtISO || ""));
+      });
+
+    const empty = document.getElementById("inboxEmpty");
+    const list = document.getElementById("inboxMessages");
+    if (!empty || !list) return;
+
+    empty.classList.toggle("hidden", messages.length > 0);
+
+    list.innerHTML = messages.map((message) => {
+      const href = message.relatedPage || "#";
+      return `
+        <a href="${esc(href)}" class="glass p-4 block">
+          <div class="flex items-start gap-3">
+            <div class="text-2xl leading-none" aria-hidden="true">
+              ${messageIcon(message.type)}
+            </div>
+
+            <div class="min-w-0 flex-1">
+              <div class="flex items-start justify-between gap-3">
+                <div class="font-extrabold">${esc(message.title || "Inbox message")}</div>
+                <div class="muted text-xs whitespace-nowrap">
+                  ${esc(formatInboxDate(message.eventDateKey))}
+                </div>
+              </div>
+
+              <div class="text-sm mt-1 leading-relaxed">
+                ${esc(message.body || "")}
+              </div>
+            </div>
+          </div>
+        </a>
+      `;
+    }).join("");
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", renderInbox, { once: true });
+  } else {
+    renderInbox();
+  }
+
+  window.addEventListener("storage", (event) => {
+    if (event.key === STORAGE_KEY) renderInbox();
+  });
+})();
+</script>
+  
 </body>
 </html>
