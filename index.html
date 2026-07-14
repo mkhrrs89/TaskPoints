@@ -7260,11 +7260,16 @@ const completedCountForVisibleWeek = days.reduce((count, d) => {
   const completion = Number(h.__completion || 0);
   const streakBonusText = getHabitCurrentStreakBonusText(h, streak);
 
-  const row = document.createElement('div');
-  row.className = 'habitRow';
-  if (!isGrouped) {
-    row.classList.add('habitRow--single');
-  }
+const row = document.createElement('div');
+row.className = 'habitRow';
+
+if (!isGrouped) {
+  row.classList.add('habitRow--single');
+}
+
+if (isWeeklyCompleteForVisibleWeek) {
+  row.classList.add('habitRow--week-complete');
+}
 
 const daysHtml = days.map(d => {
   const status = getHabitBubbleStatusClass(h, d.key);
