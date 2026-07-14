@@ -208,6 +208,38 @@
       <button type="button" class="btn btn-ghost btn-toolbar" data-tab="player">By Player</button>
     </div>
 
+<section class="glass mb-4 matchup-export-panel">
+  <div class="text-sm font-semibold mb-2">Export Matchups</div>
+
+  <div class="matchup-export-controls">
+    <label class="text-xs muted">
+      Start date
+      <input
+        id="matchupExportStart"
+        class="input"
+        type="date"
+      >
+    </label>
+
+    <label class="text-xs muted">
+      End date
+      <input
+        id="matchupExportEnd"
+        class="input"
+        type="date"
+      >
+    </label>
+
+    <button
+      id="exportMatchupsCsvBtn"
+      type="button"
+      class="btn btn-teal"
+    >
+      Export CSV
+    </button>
+  </div>
+</section>
+    
     <!-- Where we render daily matchup groups -->
     <section id="matchupsChronological" class="space-y-4"></section>
     <section id="matchupsByPlayer" class="space-y-4 hidden"></section>
@@ -740,14 +772,18 @@ function buildMatchupExportRows(state, startDateKey, endDateKey) {
       playerAResult: resultA,
       playerARecordBefore: formatRecord(aBefore),
       playerARecordAfter: formatRecord(aAfter),
-      playerAIntimidated:
-        aEffects == null
-          ? "Unknown"
-          : matchupEffectLabel(aEffects.intimidationApplied),
-      playerAPoiseActivated:
-        aEffects == null
-          ? "Unknown"
-          : matchupEffectLabel(aEffects.poiseApplied),
+// A's intimidation affects B's score, so its activation is recorded
+// while Player B is being simulated.
+playerAIntimidationActivated:
+  bEffects == null
+    ? "Unknown"
+    : matchupEffectLabel(bEffects.intimidationApplied),
+
+// A's poise affects A's own score.
+playerAPoiseActivated:
+  aEffects == null
+    ? "Unknown"
+    : matchupEffectLabel(aEffects.poiseApplied),
 
       playerB: playerName(bId, matchup),
       playerBId: bId || "",
@@ -755,14 +791,18 @@ function buildMatchupExportRows(state, startDateKey, endDateKey) {
       playerBResult: resultB,
       playerBRecordBefore: formatRecord(bBefore),
       playerBRecordAfter: formatRecord(bAfter),
-      playerBIntimidated:
-        bEffects == null
-          ? "Unknown"
-          : matchupEffectLabel(bEffects.intimidationApplied),
-      playerBPoiseActivated:
-        bEffects == null
-          ? "Unknown"
-          : matchupEffectLabel(bEffects.poiseApplied)
+// B's intimidation affects A's score, so its activation is recorded
+// while Player A is being simulated.
+playerBIntimidationActivated:
+  aEffects == null
+    ? "Unknown"
+    : matchupEffectLabel(aEffects.intimidationApplied),
+
+// B's poise affects B's own score.
+playerBPoiseActivated:
+  bEffects == null
+    ? "Unknown"
+    : matchupEffectLabel(bEffects.poiseApplied)
     });
   });
 
@@ -818,8 +858,8 @@ function exportMatchupsForSelectedRange() {
     ["Player A Result", "playerAResult"],
     ["Player A Record Before", "playerARecordBefore"],
     ["Player A Record After", "playerARecordAfter"],
-    ["Player A Intimidated", "playerAIntimidated"],
-    ["Player A Poise Activated", "playerAPoiseActivated"],
+["Player A Intimidation Activated", "playerAIntimidationActivated"],
+["Player A Poise Activated", "playerAPoiseActivated"],
 
     ["Player B", "playerB"],
     ["Player B ID", "playerBId"],
@@ -827,8 +867,8 @@ function exportMatchupsForSelectedRange() {
     ["Player B Result", "playerBResult"],
     ["Player B Record Before", "playerBRecordBefore"],
     ["Player B Record After", "playerBRecordAfter"],
-    ["Player B Intimidated", "playerBIntimidated"],
-    ["Player B Poise Activated", "playerBPoiseActivated"]
+["Player B Intimidation Activated", "playerBIntimidationActivated"],
+["Player B Poise Activated", "playerBPoiseActivated"]
   ];
 
   const csvLines = [
