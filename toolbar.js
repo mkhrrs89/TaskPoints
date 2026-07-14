@@ -169,10 +169,10 @@ function buildMobileBottomNavLinks() {
       <span class="uppercase tracking-wide text-[10px]">Home</span>
     </a>
 
-    <a href="today.html" class="mobile-bottom-nav-btn flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
-      <img src="assets/today.png" class="tp-nav-icon" alt="" aria-hidden="true">
-      <span class="uppercase tracking-wide text-[10px]">Today</span>
-    </a>
+<a href="inbox.html" class="mobile-bottom-nav-btn flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
+  <span class="tp-nav-emoji" aria-hidden="true">✉️</span>
+  <span class="uppercase tracking-wide text-[10px]">Inbox</span>
+</a>
 
     <div class="mobile-task-dropdown">
       <button
@@ -291,6 +291,10 @@ function renderBottomToolbar() {
             <img src="assets/trophies.png" class="tp-nav-icon" alt="" aria-hidden="true">
             <span class="uppercase tracking-wide text-[10px]">Season</span>
           </a>
+          <a href="today.html" class="mobile-bottom-nav-btn flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
+  <img src="assets/today.png" class="tp-nav-icon" alt="" aria-hidden="true">
+  <span class="uppercase tracking-wide text-[10px]">Today</span>
+</a>
         </div>
       </div>
     </nav>
