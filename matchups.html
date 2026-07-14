@@ -549,6 +549,310 @@ function generateOpponentDripSchedule(dateKeyStr, playerId, totalPoints){
       }
     }
 
+function csvEscape(value) {
+  const text = value == null ? "" : String(value);
+
+  if (
+    text.includes(",") ||
+    text.includes('"') ||
+    text.includes("\n") ||
+    text.includes("\r")
+  ) {
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+
+  return text;
+}
+
+function downloadTextFile(filename, text, mimeType = "text/csv;charset=utf-8") {
+  const blob = new Blob([text], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function matchupEffectLabel(value) {
+  if (value === true) return "Yes";
+  if (value === false) return "No";
+  return "Unknown";
+}
+
+function resultForScores(ownScore, opponentScore) {
+  const own = Number(ownScore);
+  const opponent = Number(opponentScore);
+
+  if (!Number.isFinite(own) || !Number.isFinite(opponent)) return "";
+  if (own > opponent) return "W";
+  if (own < opponent) return "L";
+  return "T";
+}
+
+function emptyRecord() {
+  return { wins: 0, losses: 0, ties: 0 };
+}
+
+function copyRecord(record) {
+  return {
+    wins: Number(record?.wins) || 0,
+    losses: Number(record?.losses) || 0,
+    ties: Number(record?.ties) || 0
+  };
+}
+
+function formatRecord(record) {
+  const r = record || emptyRecord();
+
+  if (r.ties > 0) {
+    return `${r.wins}-${r.losses}-${r.ties}`;
+  }
+
+  return `${r.wins}-${r.losses}`;
+}
+
+function applyResultToRecord(record, result) {
+  if (result === "W") record.wins += 1;
+  else if (result === "L") record.losses += 1;
+  else if (result === "T") record.ties += 1;
+}
+
+function buildMatchupExportRows(state, startDateKey, endDateKey) {
+  const matchups = Array.isArray(state?.matchups)
+    ? state.matchups.slice()
+    : [];
+
+  const playerNameById = new Map(
+    (Array.isArray(state?.players) ? state.players : [])
+      .filter(player => player?.id)
+      .map(player => [
+        String(player.id),
+        player.name || "Unnamed"
+      ])
+  );
+
+  const youName =
+    typeof getYouName === "function"
+      ? getYouName(state)
+      : "You";
+
+  function playerName(id, matchup) {
+    if (id === "YOU") return youName;
+
+    const stored = playerNameById.get(String(id));
+    if (stored) return stored;
+
+    if (matchup?.playerAId === id && matchup.playerAName) {
+      return matchup.playerAName;
+    }
+
+    if (matchup?.playerBId === id && matchup.playerBName) {
+      return matchup.playerBName;
+    }
+
+    return "Unknown";
+  }
+
+  // Records must be processed from oldest to newest.
+  const chronological = matchups
+    .filter(matchup => {
+      const key =
+        typeof getMatchupDateKey === "function"
+          ? getMatchupDateKey(matchup)
+          : String(matchup?.dateKey || matchup?.date || "");
+
+      return key && key <= endDateKey;
+    })
+    .sort((a, b) => {
+      const aKey =
+        typeof getMatchupDateKey === "function"
+          ? getMatchupDateKey(a)
+          : String(a?.dateKey || a?.date || "");
+
+      const bKey =
+        typeof getMatchupDateKey === "function"
+          ? getMatchupDateKey(b)
+          : String(b?.dateKey || b?.date || "");
+
+      const dateCompare = aKey.localeCompare(bKey);
+      if (dateCompare !== 0) return dateCompare;
+
+      return String(a?.id || "").localeCompare(String(b?.id || ""));
+    });
+
+  const records = new Map();
+  const rows = [];
+
+  function getRecord(playerId) {
+    const key = String(playerId || "");
+
+    if (!records.has(key)) {
+      records.set(key, emptyRecord());
+    }
+
+    return records.get(key);
+  }
+
+  chronological.forEach(matchup => {
+    const dateKey =
+      typeof getMatchupDateKey === "function"
+        ? getMatchupDateKey(matchup)
+        : String(matchup?.dateKey || matchup?.date || "");
+
+    const aId = matchup.playerAId;
+    const bId = matchup.playerBId;
+
+    const scoreA = Number(matchup.scoreA);
+    const scoreB = Number(matchup.scoreB);
+
+    const resultA = resultForScores(scoreA, scoreB);
+    const resultB = resultForScores(scoreB, scoreA);
+
+    const aBefore = copyRecord(getRecord(aId));
+    const bBefore = copyRecord(getRecord(bId));
+
+    applyResultToRecord(getRecord(aId), resultA);
+    applyResultToRecord(getRecord(bId), resultB);
+
+    const aAfter = copyRecord(getRecord(aId));
+    const bAfter = copyRecord(getRecord(bId));
+
+    if (dateKey < startDateKey || dateKey > endDateKey) {
+      return;
+    }
+
+    const aEffects = matchup.playerAEffects;
+    const bEffects = matchup.playerBEffects;
+
+    rows.push({
+      date: dateKey,
+      matchupId: matchup.id || "",
+      matchupType: matchup.matchupType || "exhibition",
+
+      playerA: playerName(aId, matchup),
+      playerAId: aId || "",
+      playerAScore: Number.isFinite(scoreA) ? scoreA : "",
+      playerAResult: resultA,
+      playerARecordBefore: formatRecord(aBefore),
+      playerARecordAfter: formatRecord(aAfter),
+      playerAIntimidated:
+        aEffects == null
+          ? "Unknown"
+          : matchupEffectLabel(aEffects.intimidationApplied),
+      playerAPoiseActivated:
+        aEffects == null
+          ? "Unknown"
+          : matchupEffectLabel(aEffects.poiseApplied),
+
+      playerB: playerName(bId, matchup),
+      playerBId: bId || "",
+      playerBScore: Number.isFinite(scoreB) ? scoreB : "",
+      playerBResult: resultB,
+      playerBRecordBefore: formatRecord(bBefore),
+      playerBRecordAfter: formatRecord(bAfter),
+      playerBIntimidated:
+        bEffects == null
+          ? "Unknown"
+          : matchupEffectLabel(bEffects.intimidationApplied),
+      playerBPoiseActivated:
+        bEffects == null
+          ? "Unknown"
+          : matchupEffectLabel(bEffects.poiseApplied)
+    });
+  });
+
+  return rows;
+}
+
+function exportMatchupsForSelectedRange() {
+  const startInput = document.getElementById("matchupExportStart");
+  const endInput = document.getElementById("matchupExportEnd");
+
+  const startDateKey = String(startInput?.value || "");
+  const endDateKey = String(endInput?.value || "");
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDateKey)) {
+    alert("Choose a valid start date.");
+    return;
+  }
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(endDateKey)) {
+    alert("Choose a valid end date.");
+    return;
+  }
+
+  if (startDateKey > endDateKey) {
+    alert("The start date must be before or equal to the end date.");
+    return;
+  }
+
+  const latestState =
+    typeof load === "function"
+      ? load()
+      : state;
+
+  const rows = buildMatchupExportRows(
+    latestState,
+    startDateKey,
+    endDateKey
+  );
+
+  if (!rows.length) {
+    alert("No matchups were found in that date range.");
+    return;
+  }
+
+  const columns = [
+    ["Date", "date"],
+    ["Matchup ID", "matchupId"],
+    ["Matchup Type", "matchupType"],
+
+    ["Player A", "playerA"],
+    ["Player A ID", "playerAId"],
+    ["Player A Score", "playerAScore"],
+    ["Player A Result", "playerAResult"],
+    ["Player A Record Before", "playerARecordBefore"],
+    ["Player A Record After", "playerARecordAfter"],
+    ["Player A Intimidated", "playerAIntimidated"],
+    ["Player A Poise Activated", "playerAPoiseActivated"],
+
+    ["Player B", "playerB"],
+    ["Player B ID", "playerBId"],
+    ["Player B Score", "playerBScore"],
+    ["Player B Result", "playerBResult"],
+    ["Player B Record Before", "playerBRecordBefore"],
+    ["Player B Record After", "playerBRecordAfter"],
+    ["Player B Intimidated", "playerBIntimidated"],
+    ["Player B Poise Activated", "playerBPoiseActivated"]
+  ];
+
+  const csvLines = [
+    columns.map(([heading]) => csvEscape(heading)).join(","),
+    ...rows.map(row =>
+      columns
+        .map(([, key]) => csvEscape(row[key]))
+        .join(",")
+    )
+  ];
+
+  // BOM helps Excel recognize the text correctly.
+  const csvText = "\uFEFF" + csvLines.join("\r\n");
+
+  downloadTextFile(
+    `taskpoints-matchups-${startDateKey}-to-${endDateKey}.csv`,
+    csvText
+  );
+}
+
+document
+  .getElementById("exportMatchupsCsvBtn")
+  ?.addEventListener("click", exportMatchupsForSelectedRange);
+  
     function renderMatchups(){
       state = load();
 
