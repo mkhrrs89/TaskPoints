@@ -671,7 +671,493 @@ nav.addEventListener('pointercancel', (event) => {
   });
 }
 
+// ---------- Inbox auto-population ----------
+const TP_INBOX_UPSET_OVR_GAP = 10;
+const TP_INBOX_ADVANCEMENT_ROUNDS = new Set(['quarterfinals', 'semifinals', 'finals']);
+
+function tpInboxDateKey(value) {
+  if (!value) return '';
+  if (window.TaskPointsCore?.dateKey) return TaskPointsCore.dateKey(value);
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function tpInboxAddDays(dateKeyStr, amount) {
+  if (window.TaskPointsCore?.addDaysToDateKey) {
+    return TaskPointsCore.addDaysToDateKey(dateKeyStr, amount);
+  }
+  const [y, m, d] = String(dateKeyStr || '').split('-').map(Number);
+  if (![y, m, d].every(Number.isFinite)) return '';
+  const date = new Date(y, m - 1, d);
+  date.setDate(date.getDate() + Number(amount || 0));
+  return tpInboxDateKey(date);
+}
+
+function tpInboxRevealDayKey(now = new Date()) {
+  const shifted = new Date(now);
+  if (shifted.getHours() < 5) shifted.setDate(shifted.getDate() - 1);
+  shifted.setHours(0, 0, 0, 0);
+  return tpInboxDateKey(shifted);
+}
+
+function tpInboxIsResultRevealed(dateKeyStr, now = new Date()) {
+  const key = String(dateKeyStr || '').slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(key) && key < tpInboxRevealDayKey(now);
+}
+
+function tpInboxClamp(value, min, max) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return min;
+  return Math.max(min, Math.min(max, n));
+}
+
+function tpInboxNormalizedRisky(rawRisky) {
+  let n = Number(rawRisky);
+  if (!Number.isFinite(n)) return 0;
+  if (n > 10) n /= 10;
+  return tpInboxClamp(n, 0, 10);
+}
+
+function tpInboxPlayerOverall(player) {
+  if (!player || player.id === 'YOU' || player.isYou) return null;
+  const baseline = Number(player.baseline);
+  if (!Number.isFinite(baseline)) return null;
+
+  const variance = Math.max(0, Number(player.variance) || 0);
+  const rawTilt = Number(player.varianceTilt);
+  const tilt = Number.isFinite(rawTilt) ? tpInboxClamp(rawTilt, 0, 100) : 50;
+  const momentum = tpInboxClamp(Number(player.momentum), 0, 100);
+  const intimidation = tpInboxClamp(Number(player.intimidation ?? player.int ?? 0), 0, 100);
+  const poise = tpInboxClamp(Number(player.poise), 0, 100);
+  const riskChance = tpInboxClamp(tpInboxNormalizedRisky(player.risky) / 10, 0, 1);
+
+  const rawOverall =
+    baseline
+    + variance * ((tilt - 50) / 100)
+    + 8 * (momentum / 100) * ((tilt - 50) / 50)
+    + 0.15 * variance * riskChance
+    + 0.08 * intimidation
+    + 0.07 * poise;
+
+  return Math.max(0, Math.min(99, Math.round(rawOverall)));
+}
+
+function tpInboxMatchupDateKey(matchup) {
+  return String(
+    matchup?.dateKey
+    || matchup?.date
+    || (matchup?.dateISO ? tpInboxDateKey(matchup.dateISO) : '')
+    || ''
+  ).slice(0, 10);
+}
+
+function tpInboxMatchupId(matchup) {
+  return String(
+    matchup?.id
+    || matchup?.matchupId
+    || `${tpInboxMatchupDateKey(matchup)}:${matchup?.playerAId || ''}:${matchup?.playerBId || ''}`
+  );
+}
+
+function tpInboxPlayerName(state, playerId, fallback = '') {
+  if (playerId === 'YOU') return String(state?.youName || '').trim() || 'You';
+  const player = (Array.isArray(state?.players) ? state.players : [])
+    .find((item) => item?.id === playerId);
+  return String(player?.name || fallback || playerId || 'Unknown Player');
+}
+
+function tpInboxWinnerFromMatchup(matchup) {
+  const playerAId = String(matchup?.playerAId || '');
+  const playerBId = String(matchup?.playerBId || '');
+  const scoreA = Number(matchup?.scoreA ?? matchup?.playerAScore);
+  const scoreB = Number(matchup?.scoreB ?? matchup?.playerBScore);
+  if (!playerAId || !playerBId || !Number.isFinite(scoreA) || !Number.isFinite(scoreB) || scoreA === scoreB) {
+    return null;
+  }
+
+  const explicitWinnerId = String(matchup?.winnerId || '');
+  const winnerIsA = explicitWinnerId
+    ? explicitWinnerId === playerAId
+    : scoreA > scoreB;
+  const winnerId = winnerIsA ? playerAId : playerBId;
+  const loserId = winnerIsA ? playerBId : playerAId;
+
+  return {
+    winnerId,
+    loserId,
+    winnerScore: winnerIsA ? scoreA : scoreB,
+    loserScore: winnerIsA ? scoreB : scoreA
+  };
+}
+
+function tpInboxFormatScore(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '0';
+  return Number.isInteger(n) ? String(n) : n.toFixed(1);
+}
+
+function tpInboxOrdinal(value) {
+  const n = Math.max(1, Math.floor(Number(value) || 1));
+  const mod100 = n % 100;
+  if (mod100 >= 11 && mod100 <= 13) return `${n}th`;
+  if (n % 10 === 1) return `${n}st`;
+  if (n % 10 === 2) return `${n}nd`;
+  if (n % 10 === 3) return `${n}rd`;
+  return `${n}th`;
+}
+
+function tpInboxBuildRecordRows(state, now = new Date()) {
+  const rows = [];
+  const activeIds = new Set(['YOU']);
+  const playerMap = new Map();
+  (Array.isArray(state?.players) ? state.players : []).forEach((player) => {
+    if (!player?.id || player.active === false) return;
+    activeIds.add(player.id);
+    playerMap.set(player.id, player);
+  });
+
+  const aggregated = window.TaskPointsCore?.aggregateCompletionsByDate
+    ? TaskPointsCore.aggregateCompletionsByDate(state?.completions || [], state)
+    : { dailyTotals: {} };
+  const youTotals = window.TaskPointsCore?.computeDailyTotalsWithInertia
+    ? TaskPointsCore.computeDailyTotalsWithInertia(aggregated?.dailyTotals || {}, state)
+    : (aggregated?.dailyTotals || {});
+
+  Object.entries(youTotals).forEach(([date, score]) => {
+    const numericScore = Number(score);
+    if (!Number.isFinite(numericScore)) return;
+    rows.push({
+      date,
+      playerId: 'YOU',
+      playerName: tpInboxPlayerName(state, 'YOU'),
+      score: Number(numericScore.toFixed(1))
+    });
+  });
+
+  (Array.isArray(state?.gameHistory) ? state.gameHistory : []).forEach((entry) => {
+    if (!entry?.playerId || !activeIds.has(entry.playerId)) return;
+    const date = String(entry.dateKey || entry.date || '').slice(0, 10);
+    if (!tpInboxIsResultRevealed(date, now)) return;
+    const score = Number(entry.score ?? entry.points ?? entry.total);
+    if (!Number.isFinite(score)) return;
+    rows.push({
+      date,
+      playerId: entry.playerId,
+      playerName: tpInboxPlayerName(state, entry.playerId, playerMap.get(entry.playerId)?.name),
+      score: Number(score.toFixed(1))
+    });
+  });
+
+  rows.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return String(b.date).localeCompare(String(a.date));
+  });
+  return rows;
+}
+
+function tpInboxSeriesWinnerId(series) {
+  if (window.TaskPointsCore?.getSeasonSeriesWinner) {
+    return TaskPointsCore.getSeasonSeriesWinner(series) || '';
+  }
+  if (series?.winnerId) return series.winnerId;
+  const winsNeeded = Number(series?.winsNeeded) || Math.floor((Number(series?.bestOf) || 1) / 2) + 1;
+  const winsA = Number(series?.winsA) || 0;
+  const winsB = Number(series?.winsB) || 0;
+  if (winsA >= winsNeeded && winsA > winsB) return series?.playerAId || '';
+  if (winsB >= winsNeeded && winsB > winsA) return series?.playerBId || '';
+  return '';
+}
+
+function tpInboxSeriesClinchDateKey(series) {
+  const winnerId = String(tpInboxSeriesWinnerId(series) || '');
+  if (!winnerId) return '';
+  const playerAId = String(series?.playerAId || '');
+  const playerBId = String(series?.playerBId || '');
+  const winsNeeded = Number(series?.winsNeeded) || Math.floor((Number(series?.bestOf) || 1) / 2) + 1;
+  const results = (Array.isArray(series?.gameResults) ? series.gameResults : []).slice();
+
+  results.sort((a, b) => {
+    const gameA = Number(a?.gameNumber ?? a?.seriesGameNumber ?? a?.game ?? 0);
+    const gameB = Number(b?.gameNumber ?? b?.seriesGameNumber ?? b?.game ?? 0);
+    if (gameA !== gameB) return gameA - gameB;
+    const dateA = String(a?.dateKey || a?.date || '').slice(0, 10);
+    const dateB = String(b?.dateKey || b?.date || '').slice(0, 10);
+    return dateA.localeCompare(dateB);
+  });
+
+  let winsA = 0;
+  let winsB = 0;
+  for (const result of results) {
+    const resultWinnerId = String(result?.winnerId || '');
+    if (resultWinnerId === playerAId) winsA += 1;
+    if (resultWinnerId === playerBId) winsB += 1;
+    const resultDateKey = String(
+      result?.dateKey
+      || result?.date
+      || (result?.completedAtISO ? tpInboxDateKey(result.completedAtISO) : '')
+      || (result?.recordedAtISO ? tpInboxDateKey(result.recordedAtISO) : '')
+      || ''
+    ).slice(0, 10);
+    if (winnerId === playerAId && winsA >= winsNeeded && winsA > winsB) return resultDateKey;
+    if (winnerId === playerBId && winsB >= winsNeeded && winsB > winsA) return resultDateKey;
+  }
+
+  return String(
+    series?.completedDateKey
+    || series?.winnerDateKey
+    || (series?.completedAtISO ? tpInboxDateKey(series.completedAtISO) : '')
+    || ''
+  ).slice(0, 10);
+}
+
+function tpInboxCollectSeries(state) {
+  const seasons = [];
+  if (state?.currentSeason) seasons.push(state.currentSeason);
+  (Array.isArray(state?.seasonHistory) ? state.seasonHistory : []).forEach((season) => {
+    if (season) seasons.push(season);
+  });
+
+  const rows = [];
+  const seen = new Set();
+  seasons.forEach((season) => {
+    const seasonId = String(season?.id || season?.seasonId || 'season');
+    const seriesRows = [
+      ...Object.values(season?.series && typeof season.series === 'object' ? season.series : {}),
+      ...(Array.isArray(season?.seriesResults) ? season.seriesResults : [])
+    ];
+    seriesRows.forEach((series) => {
+      if (!series) return;
+      const seriesId = String(series.id || series.seriesId || '');
+      if (!seriesId) return;
+      const key = `${seasonId}:${seriesId}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      rows.push({ season, seasonId, series, seriesId });
+    });
+  });
+  return rows;
+}
+
+function tpInboxRoundName(series) {
+  return String(
+    series?.roundName
+    || window.TaskPointsCore?.getSeasonDisplayName?.(series?.roundId)
+    || series?.roundId
+    || 'Tournament series'
+  ).replaceAll('_', ' ');
+}
+
+function tpInboxAdvancementTitle(roundId) {
+  if (roundId === 'quarterfinals') return 'Advancing to the Semifinals';
+  if (roundId === 'semifinals') return 'Advancing to the Finals';
+  if (roundId === 'finals') return 'Tournament champion';
+  return 'Series clinched';
+}
+
+function tpGenerateInboxMessages(sourceState, options = {}) {
+  const state = sourceState && typeof sourceState === 'object' ? sourceState : {};
+  const now = options.now instanceof Date ? options.now : new Date();
+  const activeRevealDayKey = tpInboxRevealDayKey(now);
+  const latestRevealableDateKey = tpInboxAddDays(activeRevealDayKey, -1);
+  const existingMessages = Array.isArray(state.inboxMessages) ? state.inboxMessages.slice() : [];
+  const processed = state.inboxProcessedEventIds && typeof state.inboxProcessedEventIds === 'object' && !Array.isArray(state.inboxProcessedEventIds)
+    ? { ...state.inboxProcessedEventIds }
+    : {};
+  let startedDateKey = String(state.inboxStartedDateKey || '').slice(0, 10);
+  let changed = false;
+
+  // First installation processes only the most recently revealed day, not the entire history.
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startedDateKey)) {
+    startedDateKey = latestRevealableDateKey;
+    changed = true;
+  }
+
+  const playerById = new Map((Array.isArray(state.players) ? state.players : []).map((player) => [player?.id, player]));
+  const recordRows = tpInboxBuildRecordRows(state, now);
+  const addedMessages = [];
+  const nowISO = now.toISOString();
+
+  const dateIsEligible = (date) => (
+    /^\d{4}-\d{2}-\d{2}$/.test(date)
+    && date >= startedDateKey
+    && date <= latestRevealableDateKey
+  );
+
+  const markProcessed = (eventId) => {
+    if (processed[eventId]) return false;
+    processed[eventId] = true;
+    changed = true;
+    return true;
+  };
+
+  const addMessage = (message) => {
+    if (!message?.id || existingMessages.some((item) => item?.id === message.id)) return;
+    const complete = {
+      read: false,
+      archived: false,
+      createdAtISO: nowISO,
+      ...message
+    };
+    existingMessages.push(complete);
+    addedMessages.push(complete);
+    changed = true;
+  };
+
+  (Array.isArray(state.matchups) ? state.matchups : []).forEach((matchup) => {
+    const eventDateKey = tpInboxMatchupDateKey(matchup);
+    if (!dateIsEligible(eventDateKey)) return;
+    const matchupId = tpInboxMatchupId(matchup);
+    const winner = tpInboxWinnerFromMatchup(matchup);
+
+    const upsetEventId = `single-upset:${matchupId}`;
+    if (markProcessed(upsetEventId) && winner) {
+      const type = String(matchup?.matchupType || '').toLowerCase();
+      const isSeasonExhibition = type === 'exhibition' && Boolean(matchup?.seasonId);
+      const winnerPlayer = playerById.get(winner.winnerId);
+      const loserPlayer = playerById.get(winner.loserId);
+      const winnerOvr = tpInboxPlayerOverall(winnerPlayer);
+      const loserOvr = tpInboxPlayerOverall(loserPlayer);
+      const gap = Number.isFinite(winnerOvr) && Number.isFinite(loserOvr) ? loserOvr - winnerOvr : 0;
+
+      if (!isSeasonExhibition && gap >= TP_INBOX_UPSET_OVR_GAP) {
+        const winnerName = tpInboxPlayerName(state, winner.winnerId, matchup?.playerAName || matchup?.playerBName);
+        const loserName = tpInboxPlayerName(state, winner.loserId, matchup?.playerAName || matchup?.playerBName);
+        addMessage({
+          id: upsetEventId,
+          type: 'single_upset',
+          eventDateKey,
+          title: 'Single-game upset',
+          body: `${winnerName} (${winnerOvr} OVR) defeated ${loserName} (${loserOvr} OVR), ${tpInboxFormatScore(winner.winnerScore)}–${tpInboxFormatScore(winner.loserScore)}. The winner entered ${gap} OVR lower.`,
+          relatedPage: 'matchups.html'
+        });
+      }
+    }
+
+    const candidates = [
+      { playerId: matchup?.playerAId, score: Number(matchup?.scoreA ?? matchup?.playerAScore) },
+      { playerId: matchup?.playerBId, score: Number(matchup?.scoreB ?? matchup?.playerBScore) }
+    ];
+
+    candidates.forEach((candidate) => {
+      if (!candidate.playerId || !Number.isFinite(candidate.score)) return;
+      const recordEventId = `record:${eventDateKey}:${candidate.playerId}`;
+      if (!markProcessed(recordEventId)) return;
+      const normalizedScore = Number(candidate.score.toFixed(1));
+      const rankIndex = recordRows.findIndex((row) => (
+        row.playerId === candidate.playerId
+        && row.date === eventDateKey
+        && Math.abs(row.score - normalizedScore) < 0.001
+      ));
+      const rank = rankIndex + 1;
+      if (rank < 1 || rank > 50) return;
+      const playerName = tpInboxPlayerName(state, candidate.playerId);
+      addMessage({
+        id: recordEventId,
+        type: 'record',
+        eventDateKey,
+        title: 'Top-50 score',
+        body: `${playerName} scored ${tpInboxFormatScore(normalizedScore)}, the ${tpInboxOrdinal(rank)}-highest single-day score ever and No. ${rank} on the Records page.`,
+        relatedPage: 'records.html',
+        rank
+      });
+    });
+  });
+
+  tpInboxCollectSeries(state).forEach(({ seasonId, seriesId, series }) => {
+    const eventDateKey = tpInboxSeriesClinchDateKey(series);
+    if (!dateIsEligible(eventDateKey)) return;
+    const winnerId = String(tpInboxSeriesWinnerId(series) || '');
+    if (!winnerId) return;
+    const loserId = winnerId === series?.playerAId ? series?.playerBId : series?.playerAId;
+    const winnerIsA = winnerId === series?.playerAId;
+    const winnerWins = Number(winnerIsA ? series?.winsA : series?.winsB) || 0;
+    const loserWins = Number(winnerIsA ? series?.winsB : series?.winsA) || 0;
+    const winnerName = tpInboxPlayerName(state, winnerId, winnerIsA ? series?.playerAName : series?.playerBName);
+    const loserName = tpInboxPlayerName(state, loserId, winnerIsA ? series?.playerBName : series?.playerAName);
+    const roundId = String(series?.roundId || '').toLowerCase();
+    const roundName = tpInboxRoundName(series);
+
+    const upsetEventId = `series-upset:${seasonId}:${seriesId}`;
+    if (markProcessed(upsetEventId)) {
+      const winnerOvr = tpInboxPlayerOverall(playerById.get(winnerId));
+      const loserOvr = tpInboxPlayerOverall(playerById.get(loserId));
+      const gap = Number.isFinite(winnerOvr) && Number.isFinite(loserOvr) ? loserOvr - winnerOvr : 0;
+      if (gap >= TP_INBOX_UPSET_OVR_GAP) {
+        addMessage({
+          id: upsetEventId,
+          type: 'series_upset',
+          eventDateKey,
+          title: 'Tournament-series upset',
+          body: `${winnerName} (${winnerOvr} OVR) defeated ${loserName} (${loserOvr} OVR) in the ${roundName}, ${winnerWins}–${loserWins}. The winner entered ${gap} OVR lower.`,
+          relatedPage: 'tournament.html'
+        });
+      }
+    }
+
+    if (TP_INBOX_ADVANCEMENT_ROUNDS.has(roundId)) {
+      const advanceEventId = `series-advance:${seasonId}:${seriesId}`;
+      if (markProcessed(advanceEventId)) {
+        addMessage({
+          id: advanceEventId,
+          type: 'series_advance',
+          eventDateKey,
+          title: tpInboxAdvancementTitle(roundId),
+          body: `${winnerName} defeated ${loserName}, ${winnerWins}–${loserWins}, to clinch the ${roundName}${roundId === 'finals' ? ' and win the tournament' : ''}.`,
+          relatedPage: 'tournament.html'
+        });
+      }
+    }
+  });
+
+  return {
+    changed,
+    addedMessages,
+    state: {
+      ...state,
+      inboxMessages: existingMessages,
+      inboxProcessedEventIds: processed,
+      inboxStartedDateKey: startedDateKey
+    }
+  };
+}
+
+function autoPopulateTaskPointsInbox() {
+  if (!window.TaskPointsCore?.loadAppState || !window.TaskPointsCore?.mergeAndSaveState) return null;
+  try {
+    const loaded = TaskPointsCore.loadAppState({ syncDerived: true, persistSync: true });
+    const result = tpGenerateInboxMessages(loaded?.state || {});
+    if (result.changed) {
+      TaskPointsCore.mergeAndSaveState({
+        inboxMessages: result.state.inboxMessages,
+        inboxProcessedEventIds: result.state.inboxProcessedEventIds,
+        inboxStartedDateKey: result.state.inboxStartedDateKey
+      }, {
+        savePath: 'inbox-auto-populate',
+        immediateWrite: true,
+        assumeNormalized: true
+      });
+    }
+    return result;
+  } catch (error) {
+    console.warn('TaskPoints Inbox auto-population failed', error);
+    return null;
+  }
+}
+
+window.TaskPointsInbox = {
+  populate: autoPopulateTaskPointsInbox,
+  generate: tpGenerateInboxMessages,
+  revealDayKey: tpInboxRevealDayKey,
+  isResultRevealed: tpInboxIsResultRevealed,
+  upsetOverallGap: TP_INBOX_UPSET_OVR_GAP
+};
+
 function initToolbarNow() {
+  autoPopulateTaskPointsInbox();
   renderBottomToolbar();
   setupMobileTasksMenu();
   setupPopupMenuPressAnimation();
