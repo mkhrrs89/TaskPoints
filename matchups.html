@@ -632,7 +632,7 @@ state = syncYouMatchupsWithCompletions(state, { persist: false, pathName: 'rende
         }
 
         const history = Array.isArray(nextState.gameHistory) ? nextState.gameHistory : [];
-
+const generatedEffectsByPlayerId = new Map();
         function scoreForPlayer(playerId, opponentId = null) {
           if (playerId === "YOU") {
             return computeYouScoreForDate(dateKeyStr, nextState);
@@ -645,25 +645,47 @@ state = syncYouMatchupsWithCompletions(state, { persist: false, pathName: 'rende
           }
 const player = playerMap.get(playerId);
 const opponent = opponentId === 'YOU' ? null : playerMap.get(opponentId);
-const score = simulateAiScoreForPlayer(player, dateKeyStr, nextState, { opponent });
+let capturedEffects = null;
+
+const score = simulateAiScoreForPlayer(
+  player,
+  dateKeyStr,
+  nextState,
+  {
+    opponent,
+    captureEffects(effects) {
+      capturedEffects = effects || null;
+    }
+  }
+);
+
+generatedEffectsByPlayerId.set(playerId, capturedEffects);
+
 upsertGameHistoryEntry(nextState, dateKeyStr, playerId, score);
 ensureOpponentDripSchedule(nextState, dateKeyStr, playerId, score);
+
 return score;
         }
 
 for (let i = 0; i + 1 < pool.length; i += 2) {
   const aId = pool[i];
   const bId = pool[i + 1];
-  const matchup = {
-    id: makeId(),
-    date: dateKeyStr,
-    playerAId: aId,
-    playerBId: bId,
-    playerAName: namesById[aId] || "Unknown",
-    playerBName: namesById[bId] || "Unknown",
-    scoreA: scoreForPlayer(aId, bId),
-    scoreB: scoreForPlayer(bId, aId)
-  };
+const scoreA = scoreForPlayer(aId, bId);
+const scoreB = scoreForPlayer(bId, aId);
+
+const matchup = {
+  id: makeId(),
+  date: dateKeyStr,
+  playerAId: aId,
+  playerBId: bId,
+  playerAName: namesById[aId] || "Unknown",
+  playerBName: namesById[bId] || "Unknown",
+  scoreA,
+  scoreB,
+
+  playerAEffects: generatedEffectsByPlayerId.get(aId) ?? null,
+  playerBEffects: generatedEffectsByPlayerId.get(bId) ?? null
+};
   nextState.matchups = Array.isArray(nextState.matchups) ? nextState.matchups : [];
   nextState.matchups.push(matchup);
 }
