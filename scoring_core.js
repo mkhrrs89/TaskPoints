@@ -8591,8 +8591,9 @@ function simulateAiScoreForPlayerCore(player, dateKey, options = {}) {
 
   const rawScore = baseline + variation + momentumBonus + riskyMod;
   const originalUpside = Math.max(0, rawScore - baseline);
-  let finalUpside = originalUpside;
-  let intimidationApplied = false;
+let finalUpside = originalUpside;
+let intimidationApplied = false;
+let poiseApplied = false;
 
   const opponent = context.opponent || null;
   const playerId = player?.id || null;
@@ -8625,10 +8626,11 @@ function simulateAiScoreForPlayerCore(player, dateKey, options = {}) {
         const poiseChance = poiseRating / 100;
         const poiseStrength = poiseRating * 0.005;
 
-        if (poiseRating > 0 && Math.random() < poiseChance) {
-          finalUpside = intimidationApplied ? originalUpside : finalUpside;
-          finalUpside = finalUpside * (1 + poiseStrength);
-        }
+if (poiseRating > 0 && Math.random() < poiseChance) {
+  finalUpside = intimidationApplied ? originalUpside : finalUpside;
+  finalUpside = finalUpside * (1 + poiseStrength);
+  poiseApplied = true;
+}
       }
     }
   }
@@ -8649,6 +8651,19 @@ if (score > SOFT_CAP_START) {
   cappedScore = SOFT_CAP_START + (SOFT_CAP_MAX - SOFT_CAP_START) * (over / (over + (SOFT_CAP_MAX - SOFT_CAP_START)));
 }
 
+if (typeof context.captureEffects === "function") {
+  context.captureEffects({
+    intimidationApplied,
+    poiseApplied,
+
+    // The current player's score was affected by the opponent's intimidation.
+    intimidatedByPlayerId: intimidationApplied ? opponentId : null,
+
+    // The current player's own poise activated.
+    poisePlayerId: poiseApplied ? playerId : null
+  });
+}
+  
 return Number(cappedScore.toFixed(1));
 }
 
