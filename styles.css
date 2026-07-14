@@ -1907,6 +1907,16 @@ header,
   object-fit:contain;
 }
 
+.tp-nav-emoji{
+  width:28px;
+  height:28px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:24px;
+  line-height:1;
+}
+
 .mobile-bottom-nav-btn.is-pressed{
   animation: mobile-bottom-nav-press 240ms cubic-bezier(.34,1.56,.64,1);
 }
