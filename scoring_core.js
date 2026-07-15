@@ -8692,19 +8692,40 @@ if (poiseRating > 0 && Math.random() < poiseChance) {
 
 const score = baseline + finalUpside + Math.min(0, rawScore - baseline);
 
-// Soft-cap only very high NPC scores.
-// Scores at or below 70 are unchanged.
-// Scores above 70 still rise, but increasingly slowly.
-// The absolute ceiling approaches 87 without making every big game exactly 87.
-const SOFT_CAP_START = 70;
-const SOFT_CAP_MAX = 87;
+// Soft-curb extreme NPC scores at both ends.
+// Scores from 20 through 70 are unchanged.
+// Scores above 70 approach an absolute ceiling of 87.
+// Scores below 20 approach an absolute floor of 5.
+const HIGH_SOFT_CAP_START = 70;
+const HIGH_SOFT_CAP_MAX = 87;
+
+const LOW_SOFT_CAP_START = 20;
+const LOW_SOFT_CAP_MIN = 5;
 
 let cappedScore = score;
 
-if (score > SOFT_CAP_START) {
-  const over = score - SOFT_CAP_START;
-  cappedScore = SOFT_CAP_START + (SOFT_CAP_MAX - SOFT_CAP_START) * (over / (over + (SOFT_CAP_MAX - SOFT_CAP_START)));
+if (score > HIGH_SOFT_CAP_START) {
+  const over = score - HIGH_SOFT_CAP_START;
+  const highRange = HIGH_SOFT_CAP_MAX - HIGH_SOFT_CAP_START;
+
+  cappedScore =
+    HIGH_SOFT_CAP_START
+    + highRange * (over / (over + highRange));
+
+} else if (score < LOW_SOFT_CAP_START) {
+  const under = LOW_SOFT_CAP_START - score;
+  const lowRange = LOW_SOFT_CAP_START - LOW_SOFT_CAP_MIN;
+
+  cappedScore =
+    LOW_SOFT_CAP_START
+    - lowRange * (under / (under + lowRange));
 }
+
+// Final safety clamp: generated NPC scores can never leave the 5–87 range.
+cappedScore = Math.max(
+  LOW_SOFT_CAP_MIN,
+  Math.min(HIGH_SOFT_CAP_MAX, cappedScore)
+);
 
 if (typeof context.captureEffects === "function") {
   context.captureEffects({
