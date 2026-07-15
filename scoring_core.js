@@ -8696,7 +8696,7 @@ const score = baseline + finalUpside + Math.min(0, rawScore - baseline);
 // Scores from 20 through 70 are unchanged.
 // Scores above 70 approach an absolute ceiling of 87.
 // Scores below 20 approach an absolute floor of 5.
-const HIGH_SOFT_CAP_START = 70;
+const HIGH_SOFT_CAP_START = 65;
 const HIGH_SOFT_CAP_MAX = 87;
 
 const LOW_SOFT_CAP_START = 20;
