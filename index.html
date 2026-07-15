@@ -6836,10 +6836,15 @@ function drawCaloriesTrend(caloriesHistoryInput) {
 
   if (hint) hint.classList.add('hidden');
 
-  const values = entries.map((entry) => Number(entry.calories));
-  const maxVal = Math.max(...values);
-  const minVal = Math.min(...values);
-  const range = (maxVal - minVal) || 1;
+const values = entries.map((entry) => Number(entry.calories));
+
+const CALORIE_REFERENCE = 2600;
+
+// Keep 2600 inside the chart's vertical range so the reference line
+// remains visible even when every logged value is above or below it.
+const maxVal = Math.max(...values, CALORIE_REFERENCE);
+const minVal = Math.min(...values, CALORIE_REFERENCE);
+const range = (maxVal - minVal) || 1;
 
   const paddingX = 6;
   const paddingTop = 22;
@@ -6856,6 +6861,27 @@ function drawCaloriesTrend(caloriesHistoryInput) {
   ctx.lineTo(paddingX + chartWidth, paddingTop + chartHeight);
   ctx.stroke();
 
+// Faint 2600-calorie reference line
+const calorieReferenceNormalized =
+  (CALORIE_REFERENCE - minVal) / range;
+
+const calorieReferenceY =
+  paddingTop
+  + chartHeight
+  - calorieReferenceNormalized * chartHeight;
+
+ctx.save();
+ctx.strokeStyle = 'rgba(148, 163, 184, 0.38)';
+ctx.lineWidth = 1;
+ctx.setLineDash([4, 4]);
+
+ctx.beginPath();
+ctx.moveTo(paddingX, calorieReferenceY);
+ctx.lineTo(paddingX + chartWidth, calorieReferenceY);
+ctx.stroke();
+
+ctx.restore();
+  
   const points = entries.map((entry, index) => {
     const x = paddingX + (
       n === 1
