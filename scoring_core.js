@@ -8609,6 +8609,46 @@ function generateOpponentDripScheduleCore(finalScore, dateKey, options = {}) {
 // Page-level simulateAiScoreForPlayer functions should remain thin compatibility
 // wrappers only (signature/state/context forwarding + return).
 // Future scoring behavior changes must be made here in scoring_core.js, not copied into pages.
+
+const NPC_SCORE_HIGH_SOFT_CAP_START = 70;
+const NPC_SCORE_HIGH_SOFT_CAP_MAX = 87;
+
+const NPC_SCORE_LOW_SOFT_CAP_START = 20;
+const NPC_SCORE_LOW_SOFT_CAP_MIN = 5;
+
+function softCurbNpcScore(rawScore) {
+  const score = Number(rawScore);
+  if (!Number.isFinite(score)) return 0;
+
+  let cappedScore = score;
+
+  if (score > NPC_SCORE_HIGH_SOFT_CAP_START) {
+    const over = score - NPC_SCORE_HIGH_SOFT_CAP_START;
+    const highRange =
+      NPC_SCORE_HIGH_SOFT_CAP_MAX - NPC_SCORE_HIGH_SOFT_CAP_START;
+
+    cappedScore =
+      NPC_SCORE_HIGH_SOFT_CAP_START
+      + highRange * (over / (over + highRange));
+
+  } else if (score < NPC_SCORE_LOW_SOFT_CAP_START) {
+    const under = NPC_SCORE_LOW_SOFT_CAP_START - score;
+    const lowRange =
+      NPC_SCORE_LOW_SOFT_CAP_START - NPC_SCORE_LOW_SOFT_CAP_MIN;
+
+    cappedScore =
+      NPC_SCORE_LOW_SOFT_CAP_START
+      - lowRange * (under / (under + lowRange));
+  }
+
+  cappedScore = Math.max(
+    NPC_SCORE_LOW_SOFT_CAP_MIN,
+    Math.min(NPC_SCORE_HIGH_SOFT_CAP_MAX, cappedScore)
+  );
+
+  return Number(cappedScore.toFixed(1));
+}
+  
 function simulateAiScoreForPlayerCore(player, dateKey, options = {}) {
   if (!player || !player.baseline) return 0;
 
