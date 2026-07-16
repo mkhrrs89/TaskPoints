@@ -17,8 +17,8 @@
   const TASKPOINTS_PACKED_STORAGE_VERSION = 1;
   const PACKED_ARRAY_SCHEMAS = {
     completions: ['id','taskId','habitId','viceId','flexId','projectId','title','points','completedAtISO','dateKey','source','kind','note','meta'],
-    matchups: ['id','matchupId','date','dateKey','playerAId','playerBId','scoreA','scoreB','playerAScore','playerBScore','winnerId','loserId','result','matchupType','seasonId','seriesId','seasonSeriesId','roundId','gameNumber','seriesGameNumber','bestOf','winsNeeded','completedAtISO','finalizedAtISO','source'],
-    gameHistory: ['id','date','dateKey','playerId','score','points','total','source','winnerId','loserId','matchupId','seasonId','seriesId','seasonSeriesId','roundId','gameNumber','completedAtISO','createdAtISO'],
+    matchups: ['id','matchupId','date','dateKey','playerAId','playerBId','playerAEffects','playerBEffects','scoreA','scoreB','playerAScore','playerBScore','winnerId','loserId','result','matchupType','seasonId','seriesId','seasonSeriesId','roundId','gameNumber','seriesGameNumber','bestOf','winsNeeded','completedAtISO','finalizedAtISO','source'],
+    gameHistory: ['id','date','dateKey','playerId','score','effects','points','total','source','winnerId','loserId','matchupId','seasonId','seriesId','seasonSeriesId','roundId','gameNumber','completedAtISO','createdAtISO'],
     seasonHistory: []
   };
 
@@ -3234,11 +3234,15 @@ if (!scored) {
     return ids;
   }
 
-  function getSameDayPlayerScoreFromHistory(state, dateKeyStr, playerId) {
-    const row = (Array.isArray(state?.gameHistory) ? state.gameHistory : []).find((entry) => {
+  function getSameDayPlayerHistoryEntry(state, dateKeyStr, playerId) {
+    return (Array.isArray(state?.gameHistory) ? state.gameHistory : []).find((entry) => {
       const entryDate = String(entry?.dateKey || entry?.date || (entry?.dateISO ? dateKey(entry.dateISO) : '') || '').slice(0, 10);
       return entryDate === dateKeyStr && String(entry?.playerId || '') === String(playerId || '');
-    });
+    }) || null;
+  }
+
+  function getSameDayPlayerScoreFromHistory(state, dateKeyStr, playerId) {
+    const row = getSameDayPlayerHistoryEntry(state, dateKeyStr, playerId);
     const score = Number(row?.score ?? row?.points ?? row?.total);
     return Number.isFinite(score) ? score : null;
   }
@@ -3251,14 +3255,24 @@ if (!scored) {
       const entryDate = String(entry?.dateKey || entry?.date || (entry?.dateISO ? dateKey(entry.dateISO) : '') || '').slice(0, 10);
       return entryDate === dateKeyStr && String(entry?.playerId || '') === String(playerId);
     });
-    if (index >= 0) return { state, changed: false };
-    gameHistory.push({
+    const hasEffects = options.effects && typeof options.effects === 'object';
+    if (index >= 0) {
+      const existing = gameHistory[index];
+      if (hasEffects && !(existing.effects && typeof existing.effects === 'object')) {
+        gameHistory[index] = { ...existing, effects: options.effects };
+        return { state: { ...state, gameHistory }, changed: true };
+      }
+      return { state, changed: false };
+    }
+    const row = {
       date: dateKeyStr,
       dateKey: dateKeyStr,
       playerId: String(playerId),
       score: Math.round(numeric * 10) / 10,
       source: options.source || 'season-materialization'
-    });
+    };
+    if (hasEffects) row.effects = options.effects;
+    gameHistory.push(row);
     return { state: { ...state, gameHistory }, changed: true };
   }
 
@@ -3308,9 +3322,11 @@ if (!scored) {
           if (Number.isFinite(youScore)) next[scoreKey] = youScore;
           return;
         }
-        const historyScore = getSameDayPlayerScoreFromHistory(normalized, key, playerId);
+        const historyEntry = getSameDayPlayerHistoryEntry(normalized, key, playerId);
+        const historyScore = Number(historyEntry?.score ?? historyEntry?.points ?? historyEntry?.total);
         if (Number.isFinite(historyScore)) {
           next[scoreKey] = historyScore;
+          if (historyEntry?.effects && typeof historyEntry.effects === 'object') next[`player${side}Effects`] = historyEntry.effects;
           return;
         }
 const otherSide = side === 'A' ? 'B' : 'A';
@@ -3347,7 +3363,11 @@ if (Number.isFinite(Number(simulated))) {
     normalized,
     key,
     playerId,
-    next[scoreKey]
+    next[scoreKey],
+    {
+      source: 'season-materialization',
+      effects: capturedEffects
+    }
   );
 
   if (ensured.changed) {
