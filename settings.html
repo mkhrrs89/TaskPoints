@@ -2368,38 +2368,13 @@ function simulateScoreForPlayer(player, prevScore, context = {}) {
     }
   }
 
-const score = baseline + finalUpside + Math.min(0, rawScore - baseline);
+const score =
+  baseline
+  + finalUpside
+  + Math.min(0, rawScore - baseline);
 
-// Keep the Settings simulator aligned with the real NPC scoring engine.
-const HIGH_SOFT_CAP_START = 62;
-const HIGH_SOFT_CAP_MAX = 85;
-
-const LOW_SOFT_CAP_START = 20;
-const LOW_SOFT_CAP_MIN = 5;
-
-let cappedScore = score;
-
-if (score > HIGH_SOFT_CAP_START) {
-  const over = score - HIGH_SOFT_CAP_START;
-  const highRange = HIGH_SOFT_CAP_MAX - HIGH_SOFT_CAP_START;
-
-  cappedScore =
-    HIGH_SOFT_CAP_START
-    + highRange * (over / (over + highRange));
-
-} else if (score < LOW_SOFT_CAP_START) {
-  const under = LOW_SOFT_CAP_START - score;
-  const lowRange = LOW_SOFT_CAP_START - LOW_SOFT_CAP_MIN;
-
-  cappedScore =
-    LOW_SOFT_CAP_START
-    - lowRange * (under / (under + lowRange));
-}
-
-cappedScore = Math.max(
-  LOW_SOFT_CAP_MIN,
-  Math.min(HIGH_SOFT_CAP_MAX, cappedScore)
-);
+const cappedScore =
+  TaskPointsCore.softCurbNpcScore(score);
 
 return {
   score: Number(cappedScore.toFixed(1)),
