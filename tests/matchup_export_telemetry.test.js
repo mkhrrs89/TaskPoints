@@ -89,7 +89,8 @@ test('effect labels and fallback priority preserve blanks for missing NPC teleme
     matchups: [
       { id: 'direct', date: '2026-07-01', playerAId: 'A', playerBId: 'B', scoreA: 1, scoreB: 2, playerAEffects: matchupA, playerBEffects: matchupB },
       { id: 'hist', date: '2026-07-01', playerAId: 'A', playerBId: 'B', scoreA: 1, scoreB: 2, playerAEffects: null, playerBEffects: null },
-      { id: 'you', date: '2026-07-01', playerAId: 'YOU', playerBId: 'C', scoreA: 1, scoreB: 2 },
+      { id: 'you-a', date: '2026-07-01', playerAId: 'YOU', playerBId: 'C', scoreA: 1, scoreB: 2 },
+      { id: 'you-b', date: '2026-07-01', playerAId: 'C', playerBId: 'YOU', scoreA: 2, scoreB: 1 },
       { id: 'blank', date: '2026-07-01', playerAId: 'C', playerBId: 'A', scoreA: 1, scoreB: 2 }
     ]
   }, '2026-07-01', '2026-07-01');
@@ -103,9 +104,16 @@ test('effect labels and fallback priority preserve blanks for missing NPC teleme
   assert.equal(hist.playerAPoiseActivated, 'Yes');
   assert.equal(hist.playerBIntimidationActivated, 'No');
   assert.equal(hist.playerBPoiseActivated, 'No');
-  const you = rows.find((r) => r.playerA === 'You');
-  assert.equal(you.playerAPoiseActivated, 'No');
-  assert.equal(you.playerBIntimidationActivated, 'No');
+  const youAsA = rows.find((r) => r.playerA === 'You' && r.playerB === 'Gamma');
+  assert.equal(youAsA.playerAIntimidationActivated, 'No');
+  assert.equal(youAsA.playerBIntimidationActivated, 'No');
+  assert.equal(youAsA.playerAPoiseActivated, 'No');
+  assert.equal(youAsA.playerBPoiseActivated, '');
+  const youAsB = rows.find((r) => r.playerA === 'Gamma' && r.playerB === 'You');
+  assert.equal(youAsB.playerAIntimidationActivated, 'No');
+  assert.equal(youAsB.playerBIntimidationActivated, 'No');
+  assert.equal(youAsB.playerAPoiseActivated, '');
+  assert.equal(youAsB.playerBPoiseActivated, 'No');
   const blank = rows.find((r) => r.playerA === 'Gamma' && r.playerB === 'Alpha');
   assert.equal(blank.playerAPoiseActivated, '');
   assert.equal(blank.playerBIntimidationActivated, '');

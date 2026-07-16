@@ -773,6 +773,9 @@ function buildMatchupExportRows(state, startDateKey, endDateKey) {
 
     const aId = matchup.playerAId;
     const bId = matchup.playerBId;
+    const hasUserParticipant =
+      String(aId || "") === "YOU" ||
+      String(bId || "") === "YOU";
 
     const scoreA = Number(matchup.scoreA);
     const scoreB = Number(matchup.scoreB);
@@ -808,7 +811,9 @@ function buildMatchupExportRows(state, startDateKey, endDateKey) {
 // A's intimidation affects B's score, so its activation is recorded
 // while Player B is being simulated.
 playerAIntimidationActivated:
-  matchupEffectLabel(bEffects?.intimidationApplied),
+  hasUserParticipant
+    ? "No"
+    : matchupEffectLabel(bEffects?.intimidationApplied),
 
 // A's poise affects A's own score.
 playerAPoiseActivated:
@@ -822,7 +827,9 @@ playerAPoiseActivated:
 // B's intimidation affects A's score, so its activation is recorded
 // while Player A is being simulated.
 playerBIntimidationActivated:
-  matchupEffectLabel(aEffects?.intimidationApplied),
+  hasUserParticipant
+    ? "No"
+    : matchupEffectLabel(aEffects?.intimidationApplied),
 
 // B's poise affects B's own score.
 playerBPoiseActivated:
