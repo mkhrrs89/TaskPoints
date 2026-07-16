@@ -1977,7 +1977,7 @@ function makeId() {
     if (aId && aId !== "YOU" && Number.isFinite(aScore)) {
       const k = `${date}|${aId}`;
       if (!seen.has(k)) {
-        rebuilt.push({ id: makeId(), date, playerId: aId, score: aScore });
+        rebuilt.push({ id: makeId(), date, playerId: aId, score: aScore, effects: m.playerAEffects ?? null });
         seen.add(k);
       }
     }
@@ -1985,7 +1985,7 @@ function makeId() {
     if (bId && bId !== "YOU" && Number.isFinite(bScore)) {
       const k = `${date}|${bId}`;
       if (!seen.has(k)) {
-        rebuilt.push({ id: makeId(), date, playerId: bId, score: bScore });
+        rebuilt.push({ id: makeId(), date, playerId: bId, score: bScore, effects: m.playerBEffects ?? null });
         seen.add(k);
       }
     }
@@ -2101,6 +2101,7 @@ function simulateToday() {
   ));
 
   const scoresById = {};
+  const effectsById = {};
 
   const youScore = computeTodayPoints();
   if (participantIds.includes('YOU') && !isNaN(youScore)) {
@@ -2120,14 +2121,22 @@ participantIds.forEach(id => {
     : null;
   const opponent = opponentId === 'YOU' ? null : playerMap.get(opponentId);
 
-  const score = simulateAiScoreForPlayer(player, todayKey, { opponent });
+  let capturedEffects = null;
+  const score = simulateAiScoreForPlayer(player, todayKey, {
+    opponent,
+    captureEffects(effects) {
+      capturedEffects = effects || null;
+    }
+  });
   scoresById[id] = score;
+  effectsById[id] = capturedEffects;
   ensureOpponentDripSchedule(todayKey, id, score);
   state.gameHistory.push({
     id: makeId(),
     date: todayKey,
     playerId: id,
-    score
+    score,
+    effects: capturedEffects
   });
 });
 
@@ -2144,7 +2153,9 @@ participantIds.forEach(id => {
       playerAName: namesById[pair.playerAId] || "Unknown",
       playerBName: namesById[pair.playerBId] || "Unknown",
       scoreA: scoresById[pair.playerAId] ?? 0,
-      scoreB: scoresById[pair.playerBId] ?? 0
+      scoreB: scoresById[pair.playerBId] ?? 0,
+      playerAEffects: effectsById[pair.playerAId] ?? null,
+      playerBEffects: effectsById[pair.playerBId] ?? null
     };
 
     state.matchups.push(matchup);

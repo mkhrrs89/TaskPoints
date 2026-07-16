@@ -3863,12 +3863,16 @@ const score = simulateAiScoreForPlayer(player, todayKey, {
 scoresById[id] = score;
 effectsById[id] = capturedEffects;
   ensureOpponentDripSchedule(todayKey, id, score);
-  if (!state.gameHistory.some(g => getHistoryDateKey(g) === todayKey && String(g.playerId || '') === String(id))) {
+  const existingHistory = state.gameHistory.find(g => getHistoryDateKey(g) === todayKey && String(g.playerId || '') === String(id));
+  if (existingHistory) {
+    if (capturedEffects && typeof capturedEffects === 'object') existingHistory.effects = capturedEffects;
+  } else {
     state.gameHistory.push({
       id: makeId(),
       date: todayKey,
       playerId: id,
-      score
+      score,
+      effects: capturedEffects
     });
   }
 });
@@ -4007,6 +4011,7 @@ const effectsById = {};
   for (const id of participantIds) {
     if (id === "YOU") continue;
 
+    let existingHistoryEntry = null;
     let existingScore = null;
     for (let i = state.gameHistory.length - 1; i >= 0; i--) {
       const g = state.gameHistory[i];
@@ -4016,12 +4021,13 @@ const effectsById = {};
       const s = Number(g.score);
       if (Number.isFinite(s)) {
         existingScore = s;
+        existingHistoryEntry = g;
         break;
       }
     }
 
 let score = existingScore;
-let capturedEffects = null;
+let capturedEffects = existingHistoryEntry?.effects ?? null;
 
 if (!Number.isFinite(score)) {
   const player = playerMap.get(id);
@@ -4067,7 +4073,8 @@ if (!Number.isFinite(score)) {
       id: makeId(),
       date: todayKey,
       playerId: id,
-      score
+      score,
+      effects: capturedEffects
     });
   }
 }

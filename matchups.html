@@ -546,19 +546,23 @@ function generateOpponentDripSchedule(dateKeyStr, playerId, totalPoints){
       return next;
     }
 
-    function upsertGameHistoryEntry(state, dateKeyStr, playerId, score) {
+    function upsertGameHistoryEntry(state, dateKeyStr, playerId, score, effects = undefined) {
       if (!playerId || playerId === "YOU") return;
+      const hasEffects = effects && typeof effects === "object";
       const history = Array.isArray(state.gameHistory) ? state.gameHistory : [];
       const existing = history.find(entry => entry && entry.playerId === playerId && entry.date === dateKeyStr);
       if (existing) {
         existing.score = score;
+        if (hasEffects) existing.effects = effects;
       } else {
-        history.push({
+        const next = {
           id: makeId(),
           date: dateKeyStr,
           playerId,
           score
-        });
+        };
+        if (hasEffects) next.effects = effects;
+        history.push(next);
       }
       state.gameHistory = history;
     }
@@ -613,7 +617,7 @@ function downloadTextFile(filename, text, mimeType = "text/csv;charset=utf-8") {
 function matchupEffectLabel(value) {
   if (value === true) return "Yes";
   if (value === false) return "No";
-  return "Unknown";
+  return "";
 }
 
 function resultForScores(ownScore, opponentScore) {
@@ -646,6 +650,11 @@ function formatRecord(record) {
   }
 
   return `${r.wins}-${r.losses}`;
+}
+
+function formatRecordForSpreadsheet(record) {
+  const text = formatRecord(record);
+  return `="${text}"`;
 }
 
 function applyResultToRecord(record, result) {
@@ -717,6 +726,32 @@ function buildMatchupExportRows(state, startDateKey, endDateKey) {
       return String(a?.id || "").localeCompare(String(b?.id || ""));
     });
 
+  const NO_EFFECTS = {
+    intimidationApplied: false,
+    poiseApplied: false,
+    intimidatedByPlayerId: null,
+    poisePlayerId: null
+  };
+
+  const historyEffectsByPlayerDate = new Map();
+  (Array.isArray(state?.gameHistory) ? state.gameHistory : []).forEach(entry => {
+    const historyDate =
+      typeof getHistoryDateKey === "function"
+        ? getHistoryDateKey(entry)
+        : String(entry?.dateKey || entry?.date || entry?.dateISO || "").slice(0, 10);
+    const historyPlayerId = String(entry?.playerId || "");
+    if (historyDate && historyPlayerId && entry?.effects && typeof entry.effects === "object") {
+      historyEffectsByPlayerDate.set(`${historyDate}|${historyPlayerId}`, entry.effects);
+    }
+  });
+
+  function resolveEffects(matchup, dateKey, playerId, sideKey) {
+    const direct = matchup?.[sideKey];
+    if (direct && typeof direct === "object") return direct;
+    const id = String(playerId || "");
+    return historyEffectsByPlayerDate.get(`${dateKey}|${id}`) ?? (id === "YOU" ? NO_EFFECTS : null);
+  }
+
   const records = new Map();
   const rows = [];
 
@@ -758,51 +793,40 @@ function buildMatchupExportRows(state, startDateKey, endDateKey) {
       return;
     }
 
-    const aEffects = matchup.playerAEffects;
-    const bEffects = matchup.playerBEffects;
+    const aEffects = resolveEffects(matchup, dateKey, aId, "playerAEffects");
+    const bEffects = resolveEffects(matchup, dateKey, bId, "playerBEffects");
 
     rows.push({
       date: dateKey,
-      matchupId: matchup.id || "",
       matchupType: matchup.matchupType || "exhibition",
 
       playerA: playerName(aId, matchup),
-      playerAId: aId || "",
       playerAScore: Number.isFinite(scoreA) ? scoreA : "",
       playerAResult: resultA,
-      playerARecordBefore: formatRecord(aBefore),
-      playerARecordAfter: formatRecord(aAfter),
+      playerARecordBefore: formatRecordForSpreadsheet(aBefore),
+      playerARecordAfter: formatRecordForSpreadsheet(aAfter),
 // A's intimidation affects B's score, so its activation is recorded
 // while Player B is being simulated.
 playerAIntimidationActivated:
-  bEffects == null
-    ? "Unknown"
-    : matchupEffectLabel(bEffects.intimidationApplied),
+  matchupEffectLabel(bEffects?.intimidationApplied),
 
 // A's poise affects A's own score.
 playerAPoiseActivated:
-  aEffects == null
-    ? "Unknown"
-    : matchupEffectLabel(aEffects.poiseApplied),
+  matchupEffectLabel(aEffects?.poiseApplied),
 
       playerB: playerName(bId, matchup),
-      playerBId: bId || "",
       playerBScore: Number.isFinite(scoreB) ? scoreB : "",
       playerBResult: resultB,
-      playerBRecordBefore: formatRecord(bBefore),
-      playerBRecordAfter: formatRecord(bAfter),
+      playerBRecordBefore: formatRecordForSpreadsheet(bBefore),
+      playerBRecordAfter: formatRecordForSpreadsheet(bAfter),
 // B's intimidation affects A's score, so its activation is recorded
 // while Player A is being simulated.
 playerBIntimidationActivated:
-  aEffects == null
-    ? "Unknown"
-    : matchupEffectLabel(aEffects.intimidationApplied),
+  matchupEffectLabel(aEffects?.intimidationApplied),
 
 // B's poise affects B's own score.
 playerBPoiseActivated:
-  bEffects == null
-    ? "Unknown"
-    : matchupEffectLabel(bEffects.poiseApplied)
+  matchupEffectLabel(bEffects?.poiseApplied)
     });
   });
 
@@ -849,11 +873,9 @@ function exportMatchupsForSelectedRange() {
 
   const columns = [
     ["Date", "date"],
-    ["Matchup ID", "matchupId"],
     ["Matchup Type", "matchupType"],
 
     ["Player A", "playerA"],
-    ["Player A ID", "playerAId"],
     ["Player A Score", "playerAScore"],
     ["Player A Result", "playerAResult"],
     ["Player A Record Before", "playerARecordBefore"],
@@ -862,7 +884,6 @@ function exportMatchupsForSelectedRange() {
 ["Player A Poise Activated", "playerAPoiseActivated"],
 
     ["Player B", "playerB"],
-    ["Player B ID", "playerBId"],
     ["Player B Score", "playerBScore"],
     ["Player B Result", "playerBResult"],
     ["Player B Record Before", "playerBRecordBefore"],
@@ -985,6 +1006,7 @@ const generatedEffectsByPlayerId = new Map();
           if (existing && Number.isFinite(Number(existing.score))) {
             const score = Number(existing.score);
             ensureOpponentDripSchedule(nextState, dateKeyStr, playerId, score);
+            generatedEffectsByPlayerId.set(playerId, existing.effects ?? null);
             return score;
           }
 const player = playerMap.get(playerId);
@@ -1005,7 +1027,7 @@ const score = simulateAiScoreForPlayer(
 
 generatedEffectsByPlayerId.set(playerId, capturedEffects);
 
-upsertGameHistoryEntry(nextState, dateKeyStr, playerId, score);
+upsertGameHistoryEntry(nextState, dateKeyStr, playerId, score, capturedEffects);
 ensureOpponentDripSchedule(nextState, dateKeyStr, playerId, score);
 
 return score;
