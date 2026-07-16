@@ -8610,15 +8610,19 @@ function generateOpponentDripScheduleCore(finalScore, dateKey, options = {}) {
 // wrappers only (signature/state/context forwarding + return).
 // Future scoring behavior changes must be made here in scoring_core.js, not copied into pages.
 
-const NPC_SCORE_HIGH_SOFT_CAP_START = 70;
-const NPC_SCORE_HIGH_SOFT_CAP_MAX = 87;
+const NPC_SCORE_HIGH_SOFT_CAP_START = 62;
+const NPC_SCORE_HIGH_SOFT_CAP_MAX = 85;
 
 const NPC_SCORE_LOW_SOFT_CAP_START = 20;
 const NPC_SCORE_LOW_SOFT_CAP_MIN = 5;
 
 function softCurbNpcScore(rawScore) {
   const score = Number(rawScore);
-  if (!Number.isFinite(score)) return 0;
+
+  // Even malformed score input must respect the absolute floor.
+  if (!Number.isFinite(score)) {
+    return NPC_SCORE_LOW_SOFT_CAP_MIN;
+  }
 
   let cappedScore = score;
 
@@ -8650,12 +8654,18 @@ function softCurbNpcScore(rawScore) {
 }
   
 function simulateAiScoreForPlayerCore(player, dateKey, options = {}) {
-  if (!player || !player.baseline) return 0;
+  if (!player) {
+    return NPC_SCORE_LOW_SOFT_CAP_MIN;
+  }
+
+  const baseline = Number(player.baseline);
+
+  if (!Number.isFinite(baseline)) {
+    return NPC_SCORE_LOW_SOFT_CAP_MIN;
+  }
 
   const state = options.state || null;
   const context = options.context || {};
-
-  const baseline = Number(player.baseline);
   const variance = Number(player.variance);
   const varianceTiltRaw = Number(
     typeof player.varianceTilt === "number" ? player.varianceTilt : (player.varianceTilt || 50)
@@ -8752,40 +8762,210 @@ if (poiseRating > 0 && Math.random() < poiseChance) {
 
 const score = baseline + finalUpside + Math.min(0, rawScore - baseline);
 
-// Soft-curb extreme NPC scores at both ends.
-// Scores from 20 through 70 are unchanged.
-// Scores above 70 approach an absolute ceiling of 87.
-// Scores below 20 approach an absolute floor of 5.
-const HIGH_SOFT_CAP_START = 62;
-const HIGH_SOFT_CAP_MAX = 85;
+  const cappedScore = softCurbNpcScore(score);
 
-const LOW_SOFT_CAP_START = 20;
-const LOW_SOFT_CAP_MIN = 5;
+  function repairStoredNpcScoresBelowFloor(state) {
+  if (!state || typeof state !== "object") {
+    return {
+      state,
+      changed: false,
+      repairedCount: 0
+    };
+  }
 
-let cappedScore = score;
+  let changed = false;
+  let repairedCount = 0;
 
-if (score > HIGH_SOFT_CAP_START) {
-  const over = score - HIGH_SOFT_CAP_START;
-  const highRange = HIGH_SOFT_CAP_MAX - HIGH_SOFT_CAP_START;
+  // Used to keep an existing drip schedule synchronized with a repaired score.
+  const repairedScoresByDatePlayer = new Map();
 
-  cappedScore =
-    HIGH_SOFT_CAP_START
-    + highRange * (over / (over + highRange));
+  function getStoredDateKey(row) {
+    return String(
+      row?.dateKey
+      || row?.date
+      || (row?.dateISO ? dateKey(row.dateISO) : "")
+      || ""
+    ).slice(0, 10);
+  }
 
-} else if (score < LOW_SOFT_CAP_START) {
-  const under = LOW_SOFT_CAP_START - score;
-  const lowRange = LOW_SOFT_CAP_START - LOW_SOFT_CAP_MIN;
+  function repairNpcValue(playerId, value, storedDateKey = "") {
+    const id = String(playerId || "");
+    const numeric = Number(value);
 
-  cappedScore =
-    LOW_SOFT_CAP_START
-    - lowRange * (under / (under + lowRange));
+    if (
+      !id
+      || id === "YOU"
+      || !Number.isFinite(numeric)
+      || numeric >= NPC_SCORE_LOW_SOFT_CAP_MIN
+    ) {
+      return null;
+    }
+
+    const repaired = softCurbNpcScore(numeric);
+
+    if (Math.abs(repaired - numeric) < 0.001) {
+      return null;
+    }
+
+    changed = true;
+    repairedCount += 1;
+
+    if (storedDateKey) {
+      repairedScoresByDatePlayer.set(
+        `${storedDateKey}|${id}`,
+        repaired
+      );
+    }
+
+    return repaired;
+  }
+
+  const gameHistory = Array.isArray(state.gameHistory)
+    ? state.gameHistory.map((entry) => {
+        if (!entry || typeof entry !== "object") return entry;
+
+        const storedDateKey = getStoredDateKey(entry);
+        const originalValue =
+          entry.score
+          ?? entry.points
+          ?? entry.total;
+
+        const repaired = repairNpcValue(
+          entry.playerId,
+          originalValue,
+          storedDateKey
+        );
+
+        if (repaired == null) return entry;
+
+        const next = { ...entry };
+
+        if (
+          Object.prototype.hasOwnProperty.call(entry, "score")
+          || (
+            !Object.prototype.hasOwnProperty.call(entry, "points")
+            && !Object.prototype.hasOwnProperty.call(entry, "total")
+          )
+        ) {
+          next.score = repaired;
+        }
+
+        if (Object.prototype.hasOwnProperty.call(entry, "points")) {
+          next.points = repaired;
+        }
+
+        if (Object.prototype.hasOwnProperty.call(entry, "total")) {
+          next.total = repaired;
+        }
+
+        return next;
+      })
+    : state.gameHistory;
+
+  const matchups = Array.isArray(state.matchups)
+    ? state.matchups.map((matchup) => {
+        if (!matchup || typeof matchup !== "object") {
+          return matchup;
+        }
+
+        const storedDateKey = getStoredDateKey(matchup);
+        let next = matchup;
+
+        const repairSide = (side) => {
+          const playerId = matchup[`player${side}Id`];
+          const scoreKey = `score${side}`;
+          const alternateScoreKey = `player${side}Score`;
+
+          const originalValue =
+            matchup[scoreKey]
+            ?? matchup[alternateScoreKey];
+
+          const repaired = repairNpcValue(
+            playerId,
+            originalValue,
+            storedDateKey
+          );
+
+          if (repaired == null) return;
+
+          if (next === matchup) {
+            next = { ...matchup };
+          }
+
+          // scoreA/scoreB are the canonical matchup fields.
+          next[scoreKey] = repaired;
+
+          // Preserve compatibility when the alternate field exists too.
+          if (
+            Object.prototype.hasOwnProperty.call(
+              matchup,
+              alternateScoreKey
+            )
+          ) {
+            next[alternateScoreKey] = repaired;
+          }
+        };
+
+        repairSide("A");
+        repairSide("B");
+
+        return next;
+      })
+    : state.matchups;
+
+  const opponentDripSchedules =
+    Array.isArray(state.opponentDripSchedules)
+      ? state.opponentDripSchedules.map((schedule) => {
+          if (!schedule || typeof schedule !== "object") {
+            return schedule;
+          }
+
+          const storedDateKey = getStoredDateKey(schedule);
+          const playerId = String(schedule.playerId || "");
+
+          const repairedScore = repairedScoresByDatePlayer.get(
+            `${storedDateKey}|${playerId}`
+          );
+
+          if (!Number.isFinite(repairedScore)) {
+            return schedule;
+          }
+
+          // Rebuild the schedule so its total/events agree with the
+          // repaired gameHistory and matchup score.
+          const rebuilt = generateOpponentDripScheduleCore(
+            repairedScore,
+            storedDateKey,
+            { playerId }
+          );
+
+          return {
+            ...schedule,
+            ...rebuilt,
+            total: repairedScore
+          };
+        })
+      : state.opponentDripSchedules;
+
+  if (!changed) {
+    return {
+      state,
+      changed: false,
+      repairedCount: 0
+    };
+  }
+
+  return {
+    state: {
+      ...state,
+      gameHistory,
+      matchups,
+      opponentDripSchedules
+    },
+    changed: true,
+    repairedCount
+  };
 }
-
-// Final safety clamp: generated NPC scores can never leave the 5–87 range.
-cappedScore = Math.max(
-  LOW_SOFT_CAP_MIN,
-  Math.min(HIGH_SOFT_CAP_MAX, cappedScore)
-);
 
 if (typeof context.captureEffects === "function") {
   context.captureEffects({
@@ -8964,8 +9144,9 @@ return Number(cappedScore.toFixed(1));
     buildPersonalScoreHistoryCsv,
     roundPoints,
     computeMomentumEffects,
-    generateOpponentDripScheduleCore,
-    simulateAiScoreForPlayerCore,
+generateOpponentDripScheduleCore,
+softCurbNpcScore,
+simulateAiScoreForPlayerCore,
     deriveCompletionPoints,
     pointsForCompletion,
     syncDerivedPoints,
