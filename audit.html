@@ -177,6 +177,7 @@
   </button>
 
   <script src="scoring_core.js"></script>
+  <script src="audit_integrity.js"></script>
 <script>
     const $ = (id) => document.getElementById(id);
 
@@ -3442,6 +3443,32 @@ if (!dripSchedule) {
       });
 
       checks.push(...buildSeasonChampionshipAuditChecks(state, dateKey));
+
+      const integrityOptions = {
+        dateKey: value => TaskPointsCore.dateKey(value),
+        todayKey: TaskPointsCore.todayKey(),
+        selectedDateKey: dateKey,
+        npcScoreMin: TaskPointsCore.NPC_SCORE_ABSOLUTE_MIN ?? 5,
+        npcScoreMax: TaskPointsCore.NPC_SCORE_ABSOLUTE_MAX ?? 85,
+        detailLimit: 75
+      };
+      if (window.TaskPointsAuditIntegrity) {
+        checks.push(TaskPointsAuditIntegrity.buildNpcScoreHealthAudit(state, integrityOptions));
+        checks.push(TaskPointsAuditIntegrity.buildMatchupHistoryReconciliationAudit(state, integrityOptions));
+        checks.push(TaskPointsAuditIntegrity.buildHabitLedgerConsistencyAudit(state, integrityOptions));
+      } else {
+        checks.push({
+          id: 'audit-integrity-helper-load',
+          title: 'Audit integrity helper loaded',
+          section: 'Game Data Integrity',
+          status: 'FAIL',
+          expected: 'audit_integrity.js is available',
+          actual: 'TaskPointsAuditIntegrity is unavailable',
+          details: ['FAIL — The read-only integrity audit helper did not load.'],
+          trace: 'window.TaskPointsAuditIntegrity',
+          tips: 'Reload the Audit page and verify audit_integrity.js is deployed.'
+        });
+      }
 
       const noOpVisitAudit = runNoOpPageVisitAudit(state);
       checks.push({
