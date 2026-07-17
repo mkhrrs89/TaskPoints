@@ -867,11 +867,9 @@ function renderHabitSection(section, days, baseDate){
 
   const sorted = section.items.slice().sort((a,b)=>(b.pointsPerDay||0)-(a.pointsPerDay||0));
 
-  sorted.forEach(h=>{
+  const renderedRows = sorted.map(h=>{
     h.doneKeys   = Array.isArray(h.doneKeys)?h.doneKeys:[];
     h.failedKeys = Array.isArray(h.failedKeys)?h.failedKeys:[];
-    const row = document.createElement('div');
-    row.className = 'habitRow';
 
 const weeklyThresholdRaw = Number(
   h.daysPerCompleteWeek
@@ -905,6 +903,32 @@ const completedInVisibleWeek = days.reduce((count, d) => {
 const isWeeklyComplete =
   hasWeeklyThreshold && completedInVisibleWeek >= weeklyThreshold;
 
+    return { h, isWeeklyComplete };
+  });
+
+  renderedRows.forEach(({ h, isWeeklyComplete }, index)=>{
+    const previousIsWeeklyComplete = renderedRows[index - 1]?.isWeeklyComplete === true;
+    const nextIsWeeklyComplete = renderedRows[index + 1]?.isWeeklyComplete === true;
+    const rowClasses = ['habitRow', 'habitRow--week-page'];
+
+    if(isWeeklyComplete){
+      rowClasses.push('habitRow--week-complete');
+      if(previousIsWeeklyComplete) rowClasses.push('habitRow--week-complete-after');
+      if(nextIsWeeklyComplete) rowClasses.push('habitRow--week-complete-before');
+
+      if(previousIsWeeklyComplete && nextIsWeeklyComplete){
+        rowClasses.push('habitRow--week-complete-middle');
+      }else if(previousIsWeeklyComplete){
+        rowClasses.push('habitRow--week-complete-end');
+      }else if(nextIsWeeklyComplete){
+        rowClasses.push('habitRow--week-complete-start');
+      }else{
+        rowClasses.push('habitRow--week-complete-single');
+      }
+    }
+
+    const row = document.createElement('div');
+    row.className = rowClasses.join(' ');
 
     const daysHtml = days.map(d=>{
       const on = h.doneKeys.includes(d.key);

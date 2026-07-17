@@ -2941,9 +2941,27 @@ header,
 
 /* Mobile: completed-week steel slab wraps the entire habit row */
 .habitRow.habitRow--week-complete{
+  --habit-week-complete-join-gap: calc(0.5rem + 2px);
+  --habit-week-complete-top-radius: 0px;
+  --habit-week-complete-bottom-radius: 0px;
   position: relative;
   isolation: isolate;
   overflow: visible;
+}
+
+.habitRow.habitRow--week-complete-start,
+.habitRow.habitRow--week-complete-single{
+  --habit-week-complete-top-radius: 10px;
+}
+
+.habitRow.habitRow--week-complete-end,
+.habitRow.habitRow--week-complete-single{
+  --habit-week-complete-bottom-radius: 10px;
+}
+
+.habitRow.habitRow--week-complete-middle{
+  --habit-week-complete-top-radius: 0px;
+  --habit-week-complete-bottom-radius: 0px;
 }
 
 /* Outer brushed-metal border */
@@ -2951,7 +2969,9 @@ header,
   content: '';
   position: absolute;
   inset: 0;
-  border-radius: 0;
+  border-radius:
+    var(--habit-week-complete-top-radius) var(--habit-week-complete-top-radius)
+    var(--habit-week-complete-bottom-radius) var(--habit-week-complete-bottom-radius);
   background: var(--tp-brushed-border);
   z-index: 0;
   pointer-events: none;
@@ -2962,7 +2982,11 @@ header,
   content: '';
   position: absolute;
   inset: 1px;
-  border-radius: 0;
+  border-radius:
+    max(0px, calc(var(--habit-week-complete-top-radius) - 1px))
+    max(0px, calc(var(--habit-week-complete-top-radius) - 1px))
+    max(0px, calc(var(--habit-week-complete-bottom-radius) - 1px))
+    max(0px, calc(var(--habit-week-complete-bottom-radius) - 1px));
   background:
     var(--tp-brushed-overlay),
     var(--tp-brushed-base);
@@ -2979,8 +3003,31 @@ header,
   z-index: 1;
 }
 
+/* Extend both metal layers through the space between completed neighbors. */
+.habitRow.habitRow--week-complete-after::before{
+  top: calc(-1 * var(--habit-week-complete-join-gap));
+}
+
+.habitRow.habitRow--week-complete-after::after{
+  top: calc(1px - var(--habit-week-complete-join-gap));
+}
+
+.habitRow.habitRow--week-complete-before::before{
+  bottom: calc(-1 * var(--habit-week-complete-join-gap));
+}
+
+.habitRow.habitRow--week-complete-before::after{
+  bottom: calc(1px - var(--habit-week-complete-join-gap));
+}
+
+/* Keep the normal rhythm around a stack while reducing its internal gap. */
+.habitRow.habitRow--week-complete-before{
+  margin-bottom: var(--habit-week-complete-join-gap);
+}
+
 /* Standalone habits: stretch the entire completed row to the card edges */
-.habitRow--single.habitRow--week-complete{
+.habitRow--single.habitRow--week-complete,
+.habitRow--week-page.habitRow--week-complete{
   margin-left: -16px;
   margin-right: -16px;
   width: calc(100% + 32px);
