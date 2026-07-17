@@ -7526,7 +7526,7 @@ function renderHabits(){
       isWeeklyCompleteForVisibleWeek: isWeeklyComplete,
       previousIsWeeklyComplete: previousEntry?.type === 'single'
         && isHabitWeeklyCompleteForDays(previousEntry.habit, days),
-      nextIsWeeklyComplete: nextEntry?.type === 'habit'
+      nextIsWeeklyComplete: nextEntry?.type === 'single'
         && isHabitWeeklyCompleteForDays(nextEntry.habit, days)
     });
   });
