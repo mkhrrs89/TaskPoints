@@ -2,7 +2,11 @@
   'use strict';
 
   const DEFAULT_DETAIL_LIMIT = 75;
-  const populated = value => value !== null && value !== undefined && value !== '';
+  const populated = value => {
+    if (value === null || value === undefined) return false;
+    if (typeof value === 'string') return value.trim() !== '';
+    return true;
+  };
   const finiteValue = value => populated(value) && Number.isFinite(Number(value));
   const isYou = id => String(id || '').toUpperCase() === 'YOU';
 
@@ -175,12 +179,15 @@
       if (!found.score.valid) out.fail(`${found.label} has no usable score`);
       else if (Math.abs(expected.score - found.score.value) > 0.05) out.fail(`${key} matchup score ${expected.score} differs from history score ${found.score.value}`);
       const historyMatchupId = found.row.matchupId;
-      if (expected.matchupId && historyMatchupId && String(expected.matchupId) !== String(historyMatchupId)) out.fail(`${key} has conflicting matchup IDs ${expected.matchupId}/${historyMatchupId}`);
-      else if (expected.matchupId && !historyMatchupId) out.warn(`${found.label} lacks matchupId ${expected.matchupId}`);
+      const expectedMatchupIdPresent = populated(expected.matchupId);
+      const historyMatchupIdPresent = populated(historyMatchupId);
+      if (expectedMatchupIdPresent && historyMatchupIdPresent && String(expected.matchupId).trim() !== String(historyMatchupId).trim()) {
+        out.fail(`${key} has conflicting matchup IDs ${expected.matchupId}/${historyMatchupId}`);
+      }
     });
     history.forEach((found, key) => { if (!expectations.has(key)) out.warn(`${found.label} has no corresponding finalized matchup`); });
     const result = out.result(options);
-    return { id: 'matchup-history-reconciliation', title: 'Matchups and game history reconcile', section: 'Game Data Integrity', status: result.status, expected: 'Each finalized NPC matchup side has exactly one matching gameHistory row with the same date, player, score, and compatible matchup ID', actual: result.summary, details: result.details, trace: 'state.matchups ↔ state.gameHistory by dateKey + playerId', tips: 'Orphan legacy history is reported as a warning. No rows are created, removed, or changed.' };
+    return { id: 'matchup-history-reconciliation', title: 'Matchups and game history reconcile', section: 'Game Data Integrity', status: result.status, expected: 'Each finalized NPC matchup side has exactly one matching gameHistory row with the same date, player, and score; matchup IDs agree when both are present', actual: result.summary, details: result.details, trace: 'state.matchups ↔ state.gameHistory by dateKey + playerId', tips: 'Orphan legacy history is reported as a warning. No rows are created, removed, or changed.' };
   }
 
   function buildHabitLedgerConsistencyAudit(state, options = {}) {

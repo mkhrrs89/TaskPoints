@@ -26,11 +26,29 @@ test('NPC malformed score and alias conflict fail', () => {
 });
 test('NPC active baseline is required but zero is accepted', () => {
   assert.equal(audit.buildNpcScoreHealthAudit(npc({ players: [{ id: 'npc', active: true }] }), options).status, 'FAIL');
+  assert.equal(audit.buildNpcScoreHealthAudit(npc({ players: [{ id: 'npc', active: true, baseline: '   ' }] }), options).status, 'FAIL');
   assert.equal(audit.buildNpcScoreHealthAudit(npc({ players: [{ id: 'npc', active: true, baseline: 0 }] }), options).status, 'PASS');
+});
+test('NPC score aliases treat whitespace as missing and preserve numeric zero', () => {
+  const npcOnA = overrides => matchup({ playerAId: 'npc', playerBId: 'YOU', scoreB: 100, ...overrides });
+  assert.equal(audit.buildNpcScoreHealthAudit(npc({ matchups: [npcOnA({ scoreA: '   ', playerAScore: 30 })] }), options).status, 'PASS');
+  assert.equal(audit.buildNpcScoreHealthAudit(npc({ matchups: [npcOnA({ scoreA: '\t\n', playerAScore: 30 })] }), options).status, 'PASS');
+  assert.equal(audit.buildNpcScoreHealthAudit(npc({ matchups: [npcOnA({ scoreA: ' ', playerAScore: '\t' })] }), options).status, 'FAIL');
+  assert.equal(audit.buildNpcScoreHealthAudit(npc({ matchups: [npcOnA({ scoreA: 0 })] }), { ...options, npcScoreMin: 0 }).status, 'PASS');
 });
 
 test('reconciliation matching rows and explicit IDs pass', () => {
   assert.equal(audit.buildMatchupHistoryReconciliationAudit({ matchups: [matchup()], gameHistory: [history()] }, options).status, 'PASS');
+});
+test('reconciliation treats missing and whitespace matchup IDs as optional', () => {
+  const reconcile = (matchupId, historyMatchupId) => audit.buildMatchupHistoryReconciliationAudit({
+    matchups: [matchup({ id: matchupId, matchupId: '' })],
+    gameHistory: [history({ matchupId: historyMatchupId })]
+  }, options);
+  assert.equal(reconcile('m1', undefined).status, 'PASS');
+  assert.equal(reconcile('', 'm1').status, 'PASS');
+  assert.equal(reconcile('', undefined).status, 'PASS');
+  assert.equal(reconcile('   ', '\t').status, 'PASS');
 });
 test('reconciliation missing history and score mismatch fail', () => {
   assert.equal(audit.buildMatchupHistoryReconciliationAudit({ matchups: [matchup()], gameHistory: [] }, options).status, 'FAIL');
