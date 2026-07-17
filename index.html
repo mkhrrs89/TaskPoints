@@ -7524,7 +7524,7 @@ function renderHabits(){
       showMoveButtons: sortMode === 'custom',
       isGrouped: false,
       isWeeklyCompleteForVisibleWeek: isWeeklyComplete,
-      previousIsWeeklyComplete: previousEntry?.type === 'habit'
+      previousIsWeeklyComplete: previousEntry?.type === 'single'
         && isHabitWeeklyCompleteForDays(previousEntry.habit, days),
       nextIsWeeklyComplete: nextEntry?.type === 'habit'
         && isHabitWeeklyCompleteForDays(nextEntry.habit, days)
