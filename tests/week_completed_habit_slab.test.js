@@ -24,6 +24,7 @@ test('mobile steel slab CSS joins adjacent completed habit rows', () => {
   assert.match(stylesCss, /\.habitWeekCompleteStack::after\s*\{/);
   assert.match(stylesCss, /\.habitWeekCompleteStack::before\s*\{[\s\S]*?border-radius:\s*0;/);
   assert.match(stylesCss, /\.habitWeekCompleteStack::after\s*\{[\s\S]*?border-radius:\s*0;/);
+  assert.match(stylesCss, /\.habitScroll \.habitWeekCompleteStack\s*\{\s*min-width:\s*552px;/);
   assert.match(stylesCss, /\.habitWeekCompleteStack > \.habitRow\.habitRow--week-complete::before,[\s\S]*?\.habitWeekCompleteStack > \.habitRow\.habitRow--week-complete::after\s*\{\s*content:\s*none;/);
   assert.doesNotMatch(stylesCss, /habitRow--week-complete-single\s*\{\s*--habit-week-complete-(?:top|bottom)-radius:\s*10px;/);
   assert.match(stylesCss, /\.habitRow--single\.habitRow--week-complete\s*,/);
@@ -33,6 +34,13 @@ test('mobile steel slab CSS joins adjacent completed habit rows', () => {
   assert.match(stylesCss, /--habit-week-complete-join-gap:/);
   assert.match(stylesCss, /\.habitRow\.habitRow--week-complete-middle/);
   assert.match(stylesCss, /\.habitRow\.habitRow--week-complete-single/);
+});
+
+test('completed-run wrappers preserve desktop spacing', () => {
+  assert.match(
+    stylesCss,
+    /@media \(min-width:\s*641px\)\s*\{\s*\.habitWeekCompleteStack\s*\{[\s\S]*?display:\s*grid;[\s\S]*?gap:\s*0\.5rem;/
+  );
 });
 
 test('Home habit rows receive completion adjacency classes within their containers', () => {

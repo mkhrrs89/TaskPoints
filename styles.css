@@ -2808,6 +2808,14 @@ header,
    NOTE: Leaving this block here to preserve cascade order.
    ========================= */
 
+/* Wrapping completed runs must not remove the parent grid's desktop row gap. */
+@media (min-width: 641px) {
+  .habitWeekCompleteStack {
+    display: grid;
+    gap: 0.5rem;
+  }
+}
+
 @media (max-width:640px){
   header .row{display:block}
   .toolbar{justify-content:flex-start;margin-top:.5rem;overflow-x:auto}
@@ -2950,6 +2958,11 @@ header,
   padding: 10px 16px 8px;
   box-sizing: border-box;
   border-radius: 0;
+}
+
+/* Allow Week rows to keep their 520px content width inside padded plates. */
+.habitScroll .habitWeekCompleteStack{
+  min-width: 552px;
 }
 
 .habitWeekCompleteStack::before{
