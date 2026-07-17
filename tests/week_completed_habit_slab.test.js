@@ -18,6 +18,14 @@ test('week habit rows include completion and same-section adjacency classes', ()
 });
 
 test('mobile steel slab CSS joins adjacent completed habit rows', () => {
+  assert.match(indexHtml, /habitWeekCompleteStack/);
+  assert.match(weekHtml, /habitWeekCompleteStack/);
+  assert.match(stylesCss, /\.habitWeekCompleteStack::before\s*\{/);
+  assert.match(stylesCss, /\.habitWeekCompleteStack::after\s*\{/);
+  assert.match(stylesCss, /\.habitWeekCompleteStack::before\s*\{[\s\S]*?border-radius:\s*0;/);
+  assert.match(stylesCss, /\.habitWeekCompleteStack::after\s*\{[\s\S]*?border-radius:\s*0;/);
+  assert.match(stylesCss, /\.habitWeekCompleteStack > \.habitRow\.habitRow--week-complete::before,[\s\S]*?\.habitWeekCompleteStack > \.habitRow\.habitRow--week-complete::after\s*\{\s*content:\s*none;/);
+  assert.doesNotMatch(stylesCss, /habitRow--week-complete-single\s*\{\s*--habit-week-complete-(?:top|bottom)-radius:\s*10px;/);
   assert.match(stylesCss, /\.habitRow--single\.habitRow--week-complete\s*,/);
   assert.match(stylesCss, /\.habitRow--week-page\.habitRow--week-complete\s*\{/);
   assert.match(stylesCss, /\.habitRow\.habitRow--week-complete-after::before/);
