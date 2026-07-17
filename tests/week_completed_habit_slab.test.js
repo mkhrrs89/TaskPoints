@@ -8,7 +8,8 @@ const stylesCss = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf
 
 test('week habit rows include completion and same-section adjacency classes', () => {
   assert.match(weekHtml, /const renderedRows = sorted\.map/);
-  assert.match(weekHtml, /\['habitRow', 'habitRow--single'\]/);
+  assert.match(weekHtml, /\['habitRow', 'habitRow--week-page'\]/);
+  assert.doesNotMatch(weekHtml, /const rowClasses = \['habitRow', 'habitRow--single'\]/);
   assert.match(weekHtml, /rowClasses\.push\('habitRow--week-complete'\)/);
   assert.match(weekHtml, /rowClasses\.push\('habitRow--week-complete-after'\)/);
   assert.match(weekHtml, /rowClasses\.push\('habitRow--week-complete-before'\)/);
@@ -16,9 +17,16 @@ test('week habit rows include completion and same-section adjacency classes', ()
 });
 
 test('mobile steel slab CSS joins adjacent completed habit rows', () => {
+  assert.match(stylesCss, /\.habitRow--week-page\.habitRow--week-complete\s*\{/);
   assert.match(stylesCss, /\.habitRow\.habitRow--week-complete-after::before/);
   assert.match(stylesCss, /\.habitRow\.habitRow--week-complete-before::after/);
   assert.match(stylesCss, /--habit-week-complete-join-gap:/);
   assert.match(stylesCss, /\.habitRow\.habitRow--week-complete-middle/);
   assert.match(stylesCss, /\.habitRow\.habitRow--week-complete-single/);
+});
+
+test('shared single-habit mobile layout remains available outside the Week page', () => {
+  assert.match(stylesCss, /\.habitRow--single\s*\{[\s\S]*?grid-template-columns:/);
+  assert.match(stylesCss, /\.habitRow--single \.habitDaysRow\s*\{\s*grid-area:\s*days;/);
+  assert.doesNotMatch(stylesCss, /\.habitRow--week-page\s*\{[^}]*grid-(?:template-columns|template-areas|area):/);
 });

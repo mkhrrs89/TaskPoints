@@ -909,7 +909,7 @@ const isWeeklyComplete =
   renderedRows.forEach(({ h, isWeeklyComplete }, index)=>{
     const previousIsWeeklyComplete = renderedRows[index - 1]?.isWeeklyComplete === true;
     const nextIsWeeklyComplete = renderedRows[index + 1]?.isWeeklyComplete === true;
-    const rowClasses = ['habitRow', 'habitRow--single'];
+    const rowClasses = ['habitRow', 'habitRow--week-page'];
 
     if(isWeeklyComplete){
       rowClasses.push('habitRow--week-complete');
