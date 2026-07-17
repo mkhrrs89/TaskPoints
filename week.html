@@ -906,6 +906,21 @@ const isWeeklyComplete =
     return { h, isWeeklyComplete };
   });
 
+  let completedStack = null;
+  const appendHabitWeekRow = (row, isWeeklyComplete) => {
+    if(!isWeeklyComplete){
+      completedStack = null;
+      list.appendChild(row);
+      return;
+    }
+    if(!completedStack){
+      completedStack = document.createElement('div');
+      completedStack.className = 'habitWeekCompleteStack';
+      list.appendChild(completedStack);
+    }
+    completedStack.appendChild(row);
+  };
+
   renderedRows.forEach(({ h, isWeeklyComplete }, index)=>{
     const previousIsWeeklyComplete = renderedRows[index - 1]?.isWeeklyComplete === true;
     const nextIsWeeklyComplete = renderedRows[index + 1]?.isWeeklyComplete === true;
@@ -960,7 +975,7 @@ const isWeeklyComplete =
       ${daysRowHtml}
     `;
 
-    list.appendChild(row);
+    appendHabitWeekRow(row, isWeeklyComplete);
   });
 
   if(!list.dataset.habitHandlersBound){
