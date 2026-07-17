@@ -33,8 +33,8 @@ test('Home habit rows receive completion adjacency classes within their containe
   assert.match(indexHtml, /classList\.add\('habitRow--week-complete-before'\)/);
   assert.match(indexHtml, /classList\.add\('habitRow--week-complete-(?:start|middle|end|single)'\)/);
   assert.match(indexHtml, /const groupedRows = entry\.habits\.map/);
-  assert.match(indexHtml, /previousEntry\?\.type === 'habit'/);
-  assert.match(indexHtml, /nextEntry\?\.type === 'habit'/);
+assert.match(indexHtml, /previousEntry\?\.type === 'single'/);
+assert.match(indexHtml, /nextEntry\?\.type === 'single'/);
   assert.match(indexHtml, /const renderedViceRows = habits\.map/);
 });
 
