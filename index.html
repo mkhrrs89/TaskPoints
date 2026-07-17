@@ -7262,31 +7262,54 @@ function getHabitCurrentStreakBonusText(h, streak) {
   return text ? ` (${text})` : '';
 }
   
-function renderHabitRow(h, days, wrap, options = {}) {
-  const showMoveButtons = options.showMoveButtons ?? (getHabitSortMode() === 'custom');
-  const showTag = options.showTag ?? true;
-  const isGrouped = options.isGrouped ?? false;
-
+function isHabitWeeklyCompleteForDays(h, days) {
   h.doneKeys = Array.isArray(h.doneKeys) ? h.doneKeys : [];
   const weeklyThresholdRaw = Number(h.daysPerCompleteWeek);
   const hasValidWeeklyThreshold = Number.isFinite(weeklyThresholdRaw)
     && weeklyThresholdRaw > 0
     && weeklyThresholdRaw <= 7;
   const weeklyThreshold = hasValidWeeklyThreshold ? Math.round(weeklyThresholdRaw) : 0;
-const completedCountForVisibleWeek = days.reduce((count, d) => {
-  if (!h.doneKeys.includes(d.key)) return count;
+  const completedCountForVisibleWeek = days.reduce((count, d) => {
+    if (!h.doneKeys.includes(d.key)) return count;
 
-  const completion = Array.isArray(state.completions)
-    ? state.completions.find(c => c?.source === 'habit' && c?.habitId === h.id && c?.dayKey === d.key)
-    : null;
+    const completion = Array.isArray(state.completions)
+      ? state.completions.find(c => c?.source === 'habit' && c?.habitId === h.id && c?.dayKey === d.key)
+      : null;
 
-  // Older habit days may be marked complete in doneKeys without having
-  // a matching completion record. Since the bubble displays as fully
-  // complete, count it as one completed day for the weekly plate.
-  return count + (completion ? getHabitCompletionFraction(completion) : 1);
-}, 0);
-  const isWeeklyCompleteForVisibleWeek = hasValidWeeklyThreshold
-    && completedCountForVisibleWeek >= weeklyThreshold;
+    // Older habit days may be marked complete in doneKeys without having
+    // a matching completion record. Since the bubble displays as fully
+    // complete, count it as one completed day for the weekly plate.
+    return count + (completion ? getHabitCompletionFraction(completion) : 1);
+  }, 0);
+
+  return hasValidWeeklyThreshold && completedCountForVisibleWeek >= weeklyThreshold;
+}
+
+function addHabitWeeklyCompleteClasses(row, isWeeklyComplete, previousIsWeeklyComplete, nextIsWeeklyComplete) {
+  if (!isWeeklyComplete) return;
+
+  row.classList.add('habitRow--week-complete');
+  if (previousIsWeeklyComplete) row.classList.add('habitRow--week-complete-after');
+  if (nextIsWeeklyComplete) row.classList.add('habitRow--week-complete-before');
+
+  if (previousIsWeeklyComplete && nextIsWeeklyComplete) {
+    row.classList.add('habitRow--week-complete-middle');
+  } else if (previousIsWeeklyComplete) {
+    row.classList.add('habitRow--week-complete-end');
+  } else if (nextIsWeeklyComplete) {
+    row.classList.add('habitRow--week-complete-start');
+  } else {
+    row.classList.add('habitRow--week-complete-single');
+  }
+}
+
+function renderHabitRow(h, days, wrap, options = {}) {
+  const showMoveButtons = options.showMoveButtons ?? (getHabitSortMode() === 'custom');
+  const showTag = options.showTag ?? true;
+  const isGrouped = options.isGrouped ?? false;
+
+  const isWeeklyCompleteForVisibleWeek = options.isWeeklyCompleteForVisibleWeek
+    ?? isHabitWeeklyCompleteForDays(h, days);
 
   const streak     = Number(h.__streak || 0);
   const failedStreak = Number(h.__failedStreak || 0);
@@ -7300,9 +7323,12 @@ if (!isGrouped) {
   row.classList.add('habitRow--single');
 }
 
-if (isWeeklyCompleteForVisibleWeek) {
-  row.classList.add('habitRow--week-complete');
-}
+addHabitWeeklyCompleteClasses(
+  row,
+  isWeeklyCompleteForVisibleWeek,
+  options.previousIsWeeklyComplete === true,
+  options.nextIsWeeklyComplete === true
+);
 
 const daysHtml = days.map(d => {
   const status = getHabitBubbleStatusClass(h, d.key);
@@ -7449,7 +7475,7 @@ function renderHabits(){
 
   const { entries } = buildHabitRenderEntries(habits, sortMode);
 
-  entries.forEach(entry => {
+  entries.forEach((entry, entryIndex) => {
     if (entry.type === 'group') {
       const groupWrap = document.createElement('div');
       groupWrap.className = 'habitGroup';
@@ -7473,18 +7499,36 @@ function renderHabits(){
 
       const body = document.createElement('div');
       body.className = 'habitGroupBody';
-      entry.habits.forEach(h => renderHabitRow(h, days, body, {
+      const groupedRows = entry.habits.map(h => ({
+        h,
+        isWeeklyComplete: isHabitWeeklyCompleteForDays(h, days)
+      }));
+      groupedRows.forEach(({ h, isWeeklyComplete }, index) => renderHabitRow(h, days, body, {
   showMoveButtons: sortMode === 'custom',
   showTag: false,
   isGrouped: true,
-  groupMoveTag: entry.tag
+  groupMoveTag: entry.tag,
+  isWeeklyCompleteForVisibleWeek: isWeeklyComplete,
+  previousIsWeeklyComplete: groupedRows[index - 1]?.isWeeklyComplete === true,
+  nextIsWeeklyComplete: groupedRows[index + 1]?.isWeeklyComplete === true
 }));
       groupWrap.appendChild(body);
       wrap.appendChild(groupWrap);
       return;
     }
 
-    renderHabitRow(entry.habit, days, wrap, { showMoveButtons: sortMode === 'custom', isGrouped: false });
+    const isWeeklyComplete = isHabitWeeklyCompleteForDays(entry.habit, days);
+    const previousEntry = entries[entryIndex - 1];
+    const nextEntry = entries[entryIndex + 1];
+    renderHabitRow(entry.habit, days, wrap, {
+      showMoveButtons: sortMode === 'custom',
+      isGrouped: false,
+      isWeeklyCompleteForVisibleWeek: isWeeklyComplete,
+      previousIsWeeklyComplete: previousEntry?.type === 'habit'
+        && isHabitWeeklyCompleteForDays(previousEntry.habit, days),
+      nextIsWeeklyComplete: nextEntry?.type === 'habit'
+        && isHabitWeeklyCompleteForDays(nextEntry.habit, days)
+    });
   });
 
   // Edit / delete
@@ -7603,7 +7647,12 @@ function renderVices(){
   }
   empty.classList.add('hidden');
 
-  habits.forEach(h => {
+  const renderedViceRows = habits.map(h => ({
+    h,
+    isWeeklyComplete: isHabitWeeklyCompleteForDays(h, days)
+  }));
+
+  renderedViceRows.forEach(({ h, isWeeklyComplete }, index) => {
     h.doneKeys = Array.isArray(h.doneKeys) ? h.doneKeys : [];
     h.failedKeys = Array.isArray(h.failedKeys) ? h.failedKeys : [];
     const streak       = computeHabitStreak(h);
@@ -7614,6 +7663,12 @@ function renderVices(){
 
     row.className = 'habitRow';
     row.classList.add('habitRow--single');
+    addHabitWeeklyCompleteClasses(
+      row,
+      isWeeklyComplete,
+      renderedViceRows[index - 1]?.isWeeklyComplete === true,
+      renderedViceRows[index + 1]?.isWeeklyComplete === true
+    );
 
 const daysHtml = days.map(d => {
   const on = h.doneKeys.includes(d.key);
@@ -7627,7 +7682,8 @@ const daysHtml = days.map(d => {
   </div>`;
 }).join('');
 
-    const daysRowHtml = `<div class="habitDaysRow">${daysHtml}</div>`;
+    const daysRowClass = `habitDaysRow${isWeeklyComplete ? ' week-complete-row' : ''}`;
+    const daysRowHtml = `<div class="${daysRowClass}">${daysHtml}</div>`;
 
     if (editingHabitId === h.id) {
       // EDIT MODE

@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const weekHtml = fs.readFileSync(path.join(__dirname, '..', 'week.html'), 'utf8');
+const indexHtml = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const stylesCss = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
 
 test('week habit rows include completion and same-section adjacency classes', () => {
@@ -17,12 +18,24 @@ test('week habit rows include completion and same-section adjacency classes', ()
 });
 
 test('mobile steel slab CSS joins adjacent completed habit rows', () => {
+  assert.match(stylesCss, /\.habitRow--single\.habitRow--week-complete\s*,/);
   assert.match(stylesCss, /\.habitRow--week-page\.habitRow--week-complete\s*\{/);
   assert.match(stylesCss, /\.habitRow\.habitRow--week-complete-after::before/);
   assert.match(stylesCss, /\.habitRow\.habitRow--week-complete-before::after/);
   assert.match(stylesCss, /--habit-week-complete-join-gap:/);
   assert.match(stylesCss, /\.habitRow\.habitRow--week-complete-middle/);
   assert.match(stylesCss, /\.habitRow\.habitRow--week-complete-single/);
+});
+
+test('Home habit rows receive completion adjacency classes within their containers', () => {
+  assert.match(indexHtml, /function addHabitWeeklyCompleteClasses/);
+  assert.match(indexHtml, /classList\.add\('habitRow--week-complete-after'\)/);
+  assert.match(indexHtml, /classList\.add\('habitRow--week-complete-before'\)/);
+  assert.match(indexHtml, /classList\.add\('habitRow--week-complete-(?:start|middle|end|single)'\)/);
+  assert.match(indexHtml, /const groupedRows = entry\.habits\.map/);
+  assert.match(indexHtml, /previousEntry\?\.type === 'habit'/);
+  assert.match(indexHtml, /nextEntry\?\.type === 'habit'/);
+  assert.match(indexHtml, /const renderedViceRows = habits\.map/);
 });
 
 test('shared single-habit mobile layout remains available outside the Week page', () => {

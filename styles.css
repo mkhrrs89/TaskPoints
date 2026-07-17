@@ -3026,6 +3026,7 @@ header,
 }
 
 /* Standalone habits: stretch the entire completed row to the card edges */
+.habitRow--single.habitRow--week-complete,
 .habitRow--week-page.habitRow--week-complete{
   margin-left: -16px;
   margin-right: -16px;
