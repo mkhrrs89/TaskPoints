@@ -59,7 +59,7 @@ test('reconciliation detects duplicate IDs and date/player keys', () => {
   const result = audit.buildMatchupHistoryReconciliationAudit({ matchups: [matchup()], gameHistory: rows }, options);
   assert.equal(result.status, 'FAIL');
   assert.match(result.details.join(' '), /Duplicate gameHistory ID/);
-  assert.match(result.details.join(' '), /More than one gameHistory row/);
+  assert.match(result.details.join(' '), /Ambiguous historical matchup/);
 });
 test('reconciliation orphan legacy history warns', () => {
   assert.equal(audit.buildMatchupHistoryReconciliationAudit({ matchups: [], gameHistory: [history()] }, options).status, 'WARN');
@@ -103,6 +103,30 @@ test('habit current point mismatch fails while historical mismatch warns', () =>
   assert.equal(audit.buildHabitLedgerConsistencyAudit(habitState({}, { points: 3 }), options).status, 'FAIL');
   const old = '2026-07-16';
   assert.equal(audit.buildHabitLedgerConsistencyAudit(habitState({ doneKeys: [old] }, { dayKey: old, points: 3 }), options).status, 'WARN');
+});
+
+
+test('NPC historical range warnings are grouped and do not hide current failures', () => {
+  const oldRows = Array.from({ length: 90 }, (_, i) => history({ id: `long-history-${i}`, dateKey: '2026-07-16', score: -i - 1 }));
+  const result = audit.buildNpcScoreHealthAudit(npc({ players: [{ id: 'npc', name: 'Chester', active: true, baseline: 30 }], gameHistory: [...oldRows, history({ id: 'today', score: 99 })] }), { ...options, detailLimit: 3 });
+  assert.equal(result.status, 'FAIL'); assert.match(result.details[0], /Chester/); assert.match(result.details.join(' '), /90 historical NPC scores/); assert.equal(result.details.filter(detail => /historical NPC scores/.test(detail)).length, 1);
+});
+test('reconciliation distinguishes same-day matchups by ID, context, and score', () => {
+  const m2 = matchup({ id: 'm2', scoreB: 40 });
+  assert.equal(audit.buildMatchupHistoryReconciliationAudit({ matchups: [matchup(), m2], gameHistory: [history(), history({ id: 'g2', matchupId: 'm2', score: 40 })] }, options).status, 'PASS');
+  const contextM2 = matchup({ id: '', matchupId: '', scoreB: 40, seriesId: 'series', gameNumber: 2 });
+  const contextM1 = matchup({ id: '', matchupId: '', seriesId: 'series', gameNumber: 1 });
+  assert.equal(audit.buildMatchupHistoryReconciliationAudit({ matchups: [contextM1, contextM2], gameHistory: [history({ matchupId: '', seriesId: 'series', gameNumber: 1 }), history({ id: 'g2', matchupId: '', score: 40, seriesId: 'series', gameNumber: 2 })] }, options).status, 'PASS');
+  assert.equal(audit.buildMatchupHistoryReconciliationAudit({ matchups: [matchup({ id: '', matchupId: '' }), matchup({ id: '', matchupId: '', scoreB: 40 })], gameHistory: [history({ matchupId: '' }), history({ id: 'g2', matchupId: '', score: 40 })] }, options).status, 'PASS');
+});
+test('reconciliation ambiguous duplicates warn and groups orphan history', () => {
+  const result = audit.buildMatchupHistoryReconciliationAudit({ matchups: [matchup({ id: '', matchupId: '' }), matchup({ id: '', matchupId: '' })], gameHistory: [history({ matchupId: '' }), history({ id: 'g2', matchupId: '' }), history({ id: 'orphan-1', dateKey: '2026-07-16', matchupId: '' }), history({ id: 'orphan-2', dateKey: '2026-07-15', matchupId: '' })] }, options);
+  assert.equal(result.status, 'WARN'); assert.match(result.details.join(' '), /Ambiguous historical/); assert.match(result.details.join(' '), /2 legacy gameHistory rows/);
+});
+test('habit historical point drift is grouped and contradiction details lead with habit names', () => {
+  const old = ['2026-07-16', '2026-07-15']; const state = habitState({ title: 'Morning Dishes', doneKeys: [options.todayKey, ...old], failedKeys: [options.todayKey] });
+  state.completions.push(...old.map((day, i) => ({ id: `very-long-completion-id-${i}`, source: 'habit', habitId: 'h1', dayKey: day, points: 3, completionFraction: 1 })));
+  const result = audit.buildHabitLedgerConsistencyAudit(state, options); assert.equal(result.status, 'FAIL'); assert.match(result.details.join(' '), /Morning Dishes \(h1\) on 2026-07-17/); assert.match(result.details.join(' '), /2 historical point mismatches for Morning Dishes/); assert.equal(result.details.filter(detail => /historical point mismatches/.test(detail)).length, 1);
 });
 
 test('all audit builders leave input state unchanged', () => {

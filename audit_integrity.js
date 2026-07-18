@@ -2,271 +2,93 @@
   'use strict';
 
   const DEFAULT_DETAIL_LIMIT = 75;
-  const populated = value => {
-    if (value === null || value === undefined) return false;
-    if (typeof value === 'string') return value.trim() !== '';
-    return true;
-  };
+  const populated = value => value !== null && value !== undefined && (typeof value !== 'string' || value.trim() !== '');
   const finiteValue = value => populated(value) && Number.isFinite(Number(value));
   const isYou = id => String(id || '').toUpperCase() === 'YOU';
+  const shortId = id => populated(id) ? (String(id).trim().length > 12 ? `${String(id).trim().slice(0, 8)}…` : String(id).trim()) : '';
+  const formatDateLabel = dateKey => validLedgerKey(dateKey) ? dateKey : 'unknown date';
+  const formatScore = value => Number.isFinite(Number(value)) ? String(Number(Number(value).toFixed(2))) : String(value);
+  const getPlayerLabel = (state, playerId) => {
+    const player = (Array.isArray(state && state.players) ? state.players : []).find(item => item && String(item.id) === String(playerId));
+    const id = shortId(playerId);
+    return player && populated(player.name) ? `${player.name} (${id})` : id || 'unknown player';
+  };
+  const getHabitLabel = (habit, fallbackId) => {
+    const id = shortId((habit && habit.id) || fallbackId);
+    const name = habit && (habit.title || habit.name || habit.label);
+    return populated(name) ? `${name} (${id})` : `Habit ${id || 'unknown'}`;
+  };
 
   function limitDetails(details, options) {
     const requested = Number(options && options.detailLimit);
     const limit = Number.isInteger(requested) && requested >= 0 ? requested : DEFAULT_DETAIL_LIMIT;
-    if (details.length <= limit) return details;
-    return details.slice(0, limit).concat(`… ${details.length - limit} additional issue(s) omitted.`);
+    return details.length <= limit ? details : details.slice(0, limit).concat(`… ${details.length - limit} additional issue(s) omitted.`);
   }
-
   function issueCollector() {
-    const details = [];
-    let failures = 0;
-    let warnings = 0;
+    const buckets = [[], [], [], [], [], []]; let failures = 0; let warnings = 0;
     return {
-      fail(message) { failures += 1; details.push(`FAIL — ${message}`); },
-      warn(message) { warnings += 1; details.push(`WARN — ${message}`); },
-      result(options) {
-        return {
-          status: failures ? 'FAIL' : (warnings ? 'WARN' : 'PASS'),
-          summary: failures || warnings ? `${failures} failure(s), ${warnings} warning(s)` : 'No issues found',
-          details: limitDetails(details, options)
-        };
-      }
+      fail(message, priority = 0) { failures += 1; buckets[Math.max(0, Math.min(5, priority))].push(`FAIL — ${message}`); },
+      warn(message, priority = 4) { warnings += 1; buckets[Math.max(0, Math.min(5, priority))].push(`WARN — ${message}`); },
+      result(options) { const details = buckets.flat(); return { status: failures ? 'FAIL' : (warnings ? 'WARN' : 'PASS'), summary: failures || warnings ? `${failures} failure(s), ${warnings} warning(s)` : 'No issues found', details: limitDetails(details, options) }; }
     };
   }
-
-  function validLedgerKey(value) {
-    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-    const [year, month, day] = value.split('-').map(Number);
-    const date = new Date(Date.UTC(year, month - 1, day));
-    return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
-  }
-
-  function normalizeDate(values, options) {
-    for (const value of values) {
-      if (!populated(value)) continue;
-      try {
-        const key = options && typeof options.dateKey === 'function'
-          ? options.dateKey(value)
-          : (/^\d{4}-\d{2}-\d{2}$/.test(String(value)) ? String(value) : new Date(value).toISOString().slice(0, 10));
-        if (validLedgerKey(key)) return key;
-      } catch (_) { /* Invalid external date values are diagnostic data. */ }
-    }
-    return '';
-  }
-
-  function sideScore(matchup, side) {
-    const primaryName = side === 'A' ? 'scoreA' : 'scoreB';
-    const aliasName = side === 'A' ? 'playerAScore' : 'playerBScore';
-    const primary = matchup && matchup[primaryName];
-    const alias = matchup && matchup[aliasName];
-    const hasPrimary = populated(primary);
-    const hasAlias = populated(alias);
-    const primaryFinite = finiteValue(primary);
-    const aliasFinite = finiteValue(alias);
-    return {
-      primaryName, aliasName, hasPrimary, hasAlias, primaryFinite, aliasFinite,
-      conflict: hasPrimary && hasAlias && (!primaryFinite || !aliasFinite || Math.abs(Number(primary) - Number(alias)) > 0.05),
-      valid: primaryFinite || (!hasPrimary && aliasFinite),
-      value: primaryFinite ? Number(primary) : ((!hasPrimary && aliasFinite) ? Number(alias) : NaN)
-    };
-  }
-
-  function finalized(matchup) {
-    if (!matchup) return false;
-    if (populated(matchup.finalizedAtISO) || populated(matchup.completedAtISO) || populated(matchup.winnerId) || populated(matchup.loserId) || populated(matchup.result)) return true;
-    const a = sideScore(matchup, 'A');
-    const b = sideScore(matchup, 'B');
-    return a.valid && b.valid;
-  }
-
-  function historyScore(row) {
-    if (finiteValue(row && row.score)) return { valid: true, value: Number(row.score), fallback: false };
-    if (!populated(row && row.score)) {
-      if (finiteValue(row && row.points)) return { valid: true, value: Number(row.points), fallback: true, field: 'points' };
-      if (finiteValue(row && row.total)) return { valid: true, value: Number(row.total), fallback: true, field: 'total' };
-    }
-    return { valid: false, value: NaN, fallback: false };
-  }
+  function validLedgerKey(value) { if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false; const [y, m, d] = value.split('-').map(Number); const date = new Date(Date.UTC(y, m - 1, d)); return date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d; }
+  function normalizeDate(values, options) { for (const value of values) { if (!populated(value)) continue; try { const key = options && typeof options.dateKey === 'function' ? options.dateKey(value) : (/^\d{4}-\d{2}-\d{2}$/.test(String(value)) ? String(value) : new Date(value).toISOString().slice(0, 10)); if (validLedgerKey(key)) return key; } catch (_) { /* diagnostic input */ } } return ''; }
+  function sideScore(matchup, side) { const primaryName = side === 'A' ? 'scoreA' : 'scoreB'; const aliasName = side === 'A' ? 'playerAScore' : 'playerBScore'; const primary = matchup && matchup[primaryName]; const alias = matchup && matchup[aliasName]; const hasPrimary = populated(primary); const hasAlias = populated(alias); const primaryFinite = finiteValue(primary); const aliasFinite = finiteValue(alias); return { primaryName, aliasName, conflict: hasPrimary && hasAlias && (!primaryFinite || !aliasFinite || Math.abs(Number(primary) - Number(alias)) > 0.05), valid: primaryFinite || (!hasPrimary && aliasFinite), value: primaryFinite ? Number(primary) : ((!hasPrimary && aliasFinite) ? Number(alias) : NaN) }; }
+  function finalized(matchup) { if (!matchup) return false; if (populated(matchup.finalizedAtISO) || populated(matchup.completedAtISO) || populated(matchup.winnerId) || populated(matchup.loserId) || populated(matchup.result)) return true; const a = sideScore(matchup, 'A'); const b = sideScore(matchup, 'B'); return a.valid && b.valid; }
+  function historyScore(row) { if (finiteValue(row && row.score)) return { valid: true, value: Number(row.score), fallback: false }; if (!populated(row && row.score)) { if (finiteValue(row && row.points)) return { valid: true, value: Number(row.points), fallback: true, field: 'points' }; if (finiteValue(row && row.total)) return { valid: true, value: Number(row.total), fallback: true, field: 'total' }; } return { valid: false, value: NaN, fallback: false }; }
+  function matchupLabel(matchup, index) { const id = matchup && (matchup.id || matchup.matchupId); const context = matchup && [matchup.seasonId, matchup.seriesId || matchup.seasonSeriesId, matchup.roundId, matchup.gameNumber || matchup.seriesGameNumber, matchup.matchupType].filter(populated).join(' '); return `Matchup ${context || shortId(id) || `#${index + 1}`}`; }
 
   function buildNpcScoreHealthAudit(state, options = {}) {
-    const out = issueCollector();
-    const min = finiteValue(options.npcScoreMin) ? Number(options.npcScoreMin) : 5;
-    const max = finiteValue(options.npcScoreMax) ? Number(options.npcScoreMax) : 85;
-    const today = validLedgerKey(options.todayKey) ? options.todayKey : '';
-    const classifyRange = (value, date, label) => {
-      if (value >= min && value <= max) return;
-      if (date && today && date < today) out.warn(`${label} score ${value} is outside ${min}–${max} (historical)`);
-      else out.fail(`${label} score ${value} is outside ${min}–${max}`);
-    };
-
-    (Array.isArray(state && state.matchups) ? state.matchups : []).forEach((matchup, index) => {
-      const date = normalizeDate([matchup && matchup.dateKey, matchup && matchup.date, matchup && matchup.completedAtISO, matchup && matchup.finalizedAtISO], options);
-      ['A', 'B'].forEach(side => {
-        const playerId = matchup && matchup[`player${side}Id`];
-        if (!playerId || isYou(playerId)) return;
-        const score = sideScore(matchup, side);
-        const label = `Matchup ${matchup.id || matchup.matchupId || `#${index + 1}`} side ${side}`;
-        if (score.conflict) out.fail(`${label} has conflicting ${score.primaryName}/${score.aliasName} aliases`);
-        if (!finalized(matchup)) return;
-        if (!score.valid) out.fail(`${label} has a missing or nonfinite NPC score`);
-        else classifyRange(score.value, date, label);
-      });
-    });
-
-    (Array.isArray(state && state.gameHistory) ? state.gameHistory : []).forEach((row, index) => {
-      if (!row || !row.playerId || isYou(row.playerId)) return;
-      const label = `Game history ${row.id || `#${index + 1}`}`;
-      const score = historyScore(row);
-      if (!score.valid) out.fail(`${label} has a missing or nonfinite score`);
-      else {
-        if (score.fallback) out.warn(`${label} uses legacy ${score.field} instead of score`);
-        classifyRange(score.value, normalizeDate([row.dateKey, row.date, row.completedAtISO, row.createdAtISO], options), label);
-      }
-    });
-
-    (Array.isArray(state && state.opponentDripSchedules) ? state.opponentDripSchedules : []).forEach((schedule, index) => {
-      if (!schedule || !populated(schedule.total)) return;
-      const label = `Opponent drip schedule ${schedule.id || `#${index + 1}`}`;
-      if (!finiteValue(schedule.total)) out.fail(`${label} has a nonfinite total`);
-      else classifyRange(Number(schedule.total), normalizeDate([schedule.dateKey, schedule.date, schedule.completedAtISO, schedule.createdAtISO], options), label);
-    });
-
-    (Array.isArray(state && state.players) ? state.players : []).forEach((player, index) => {
-      if (!player || isYou(player.id) || player.active === false || player.inactive === true || player.archived === true) return;
-      if (!finiteValue(player.baseline)) out.fail(`Active NPC ${player.name || player.id || `#${index + 1}`} has an invalid baseline`);
-    });
-    const result = out.result(options);
-    return { id: 'npc-score-health', title: 'NPC score health', section: 'Game Data Integrity', status: result.status, expected: `NPC scores are finite and remain within ${min}–${max}; score aliases agree`, actual: result.summary, details: result.details, trace: 'state.matchups + state.gameHistory + state.opponentDripSchedules + state.players', tips: 'Historical problems are reported only. This audit never rewrites scores or matchup results.' };
+    const out = issueCollector(), min = finiteValue(options.npcScoreMin) ? Number(options.npcScoreMin) : 5, max = finiteValue(options.npcScoreMax) ? Number(options.npcScoreMax) : 85, today = validLedgerKey(options.todayKey) ? options.todayKey : '';
+    const historical = [], fallbacks = [];
+    const classify = (value, date, label) => { if (value >= min && value <= max) return; if (date && today && date < today) historical.push(`${label} score ${formatScore(value)}`); else out.fail(`${label} score ${formatScore(value)} is outside ${min}–${max}`, 0); };
+    (Array.isArray(state && state.matchups) ? state.matchups : []).forEach((matchup, index) => { const date = normalizeDate([matchup && matchup.dateKey, matchup && matchup.date, matchup && matchup.completedAtISO, matchup && matchup.finalizedAtISO], options); ['A', 'B'].forEach(side => { const playerId = matchup && matchup[`player${side}Id`]; if (!playerId || isYou(playerId)) return; const score = sideScore(matchup, side); const label = `${matchupLabel(matchup, index)} side ${side} (${getPlayerLabel(state, playerId)})`; if (score.conflict) out.fail(`${label} has conflicting ${score.primaryName}/${score.aliasName} aliases`, 2); if (finalized(matchup) && !score.valid) out.fail(`${label} has a missing or nonfinite NPC score`, 0); else if (finalized(matchup)) classify(score.value, date, label); }); });
+    (Array.isArray(state && state.gameHistory) ? state.gameHistory : []).forEach((row, index) => { if (!row || !row.playerId || isYou(row.playerId)) return; const label = `Game history ${shortId(row.id) || `#${index + 1}`} (${getPlayerLabel(state, row.playerId)})`; const score = historyScore(row); if (!score.valid) out.fail(`${label} has a missing or nonfinite score`, 0); else { if (score.fallback) fallbacks.push(`${label} uses legacy ${score.field}`); classify(score.value, normalizeDate([row.dateKey, row.date, row.completedAtISO, row.createdAtISO], options), label); } });
+    (Array.isArray(state && state.opponentDripSchedules) ? state.opponentDripSchedules : []).forEach((schedule, index) => { if (!schedule || !populated(schedule.total)) return; const label = `Opponent drip schedule ${shortId(schedule.id) || `#${index + 1}`}`; if (!finiteValue(schedule.total)) out.fail(`${label} has a nonfinite total`, 0); else classify(Number(schedule.total), normalizeDate([schedule.dateKey, schedule.date, schedule.completedAtISO, schedule.createdAtISO], options), label); });
+    (Array.isArray(state && state.players) ? state.players : []).forEach((player, index) => { if (!player || isYou(player.id) || player.active === false || player.inactive === true || player.archived === true) return; if (!finiteValue(player.baseline)) out.fail(`Active NPC ${getPlayerLabel(state, player.id || `#${index + 1}`)} has an invalid baseline`, 0); });
+    if (fallbacks.length) out.warn(fallbacks.length > 5 ? `${fallbacks.length} rows use legacy points/total score fallbacks. Sample: ${fallbacks.slice(0, 5).join('; ')}.` : fallbacks.join('; '), 4);
+    if (historical.length) out.warn(`${historical.length} historical NPC scores are outside ${min}–${max}. Historical out-of-range sample: ${historical.slice(0, 5).join('; ')}.`, 4);
+    const result = out.result(options); return { id: 'npc-score-health', title: 'NPC score health', section: 'Game Data Integrity', status: result.status, expected: `NPC scores are finite and remain within ${min}–${max}; score aliases agree`, actual: result.summary, details: result.details, trace: 'state.matchups + state.gameHistory + state.opponentDripSchedules + state.players', tips: 'Historical problems are reported only. This audit never rewrites scores or matchup results.' };
   }
-
+  function contextKey(item) { const row = item.row || item.matchup || {}; const fields = [row.seasonId, row.seriesId || row.seasonSeriesId, row.roundId, row.gameNumber || row.seriesGameNumber, row.matchupType]; return fields.some(populated) ? fields.map(value => populated(value) ? String(value).trim() : '').join('|') : ''; }
   function buildMatchupHistoryReconciliationAudit(state, options = {}) {
-    const out = issueCollector();
-    const expectations = new Map();
-    (Array.isArray(state && state.matchups) ? state.matchups : []).forEach((matchup, index) => {
-      if (!finalized(matchup)) return;
-      const date = normalizeDate([matchup.dateKey, matchup.date, matchup.completedAtISO, matchup.finalizedAtISO], options);
-      ['A', 'B'].forEach(side => {
-        const playerId = matchup[`player${side}Id`];
-        if (!playerId || isYou(playerId)) return;
-        const score = sideScore(matchup, side);
-        const label = `Matchup ${matchup.id || matchup.matchupId || `#${index + 1}`} side ${side}`;
-        if (!date || !score.valid) { out.fail(`${label} cannot be reconciled because its date or score is unusable`); return; }
-        const key = `${date}|${playerId}`;
-        const expected = { date, playerId, score: score.value, matchupId: matchup.id || matchup.matchupId || '', side, label };
-        if (expectations.has(key)) out.fail(`More than one finalized matchup exists for ${key}`);
-        else expectations.set(key, expected);
-      });
+    const out = issueCollector(), expectations = [], histories = [], ids = new Set();
+    (Array.isArray(state && state.matchups) ? state.matchups : []).forEach((matchup, index) => { if (!finalized(matchup)) return; const date = normalizeDate([matchup.dateKey, matchup.date, matchup.completedAtISO, matchup.finalizedAtISO], options); ['A', 'B'].forEach(side => { const playerId = matchup[`player${side}Id`]; if (!playerId || isYou(playerId)) return; const score = sideScore(matchup, side), label = `${matchupLabel(matchup, index)} side ${side} (${getPlayerLabel(state, playerId)})`; if (!date || !score.valid) out.fail(`${label} cannot be reconciled because its date or score is unusable`, 0); else expectations.push({ matchup, date, playerId: String(playerId), score: score.value, matchupId: populated(matchup.id || matchup.matchupId) ? String(matchup.id || matchup.matchupId).trim() : '', label }); }); });
+    (Array.isArray(state && state.gameHistory) ? state.gameHistory : []).forEach((row, index) => { const label = `Game history ${shortId(row && row.id) || `#${index + 1}`}`; if (row && populated(row.id)) { if (ids.has(row.id)) out.fail(`Duplicate gameHistory ID ${shortId(row.id)}`, 2); else ids.add(row.id); } if (!row || !populated(row.playerId)) { out.fail(`${label} is missing playerId`, 1); return; } const date = normalizeDate([row.dateKey, row.date, row.completedAtISO, row.createdAtISO], options); if (!date) { out.fail(`${label} is missing a usable date`, 1); return; } if (!isYou(row.playerId)) histories.push({ row, date, playerId: String(row.playerId), score: historyScore(row), matchupId: populated(row.matchupId) ? String(row.matchupId).trim() : '', label: `${label} (${getPlayerLabel(state, row.playerId)})` }); });
+    const unused = new Set(histories), base = item => `${item.date}|${item.playerId}`, scoreEqual = (expected, found) => found.score.valid && Math.abs(expected.score - found.score.value) <= 0.05;
+    const consume = (expected, found) => { unused.delete(found); if (found.score.fallback) out.warn(`${found.label} uses legacy ${found.score.field} instead of score`, 4); if (!found.score.valid) out.fail(`${found.label} has no usable score`, 0); else if (!scoreEqual(expected, found)) out.fail(`${formatDateLabel(expected.date)} ${getPlayerLabel(state, expected.playerId)} matchup score ${formatScore(expected.score)} differs from history score ${formatScore(found.score.value)}`, 0); };
+    const unresolved = [];
+    expectations.forEach(expected => {
+      const candidates = [...unused].filter(found => base(found) === base(expected));
+      const explicitConflict = expected.matchupId && candidates.some(found => found.matchupId && found.matchupId !== expected.matchupId);
+      const idMatches = expected.matchupId ? candidates.filter(found => found.matchupId === expected.matchupId) : [];
+      if (idMatches.length === 1) { consume(expected, idMatches[0]); return; }
+      if (explicitConflict && !idMatches.length) { out.fail(`${formatDateLabel(expected.date)} ${getPlayerLabel(state, expected.playerId)} has conflicting explicit matchup IDs ${shortId(expected.matchupId)}/${shortId(candidates.find(found => found.matchupId).matchupId)}`, 0); return; }
+      const context = contextKey(expected); const contextMatches = context ? candidates.filter(found => contextKey(found) === context) : [];
+      if (contextMatches.length === 1) { consume(expected, contextMatches[0]); return; }
+      const scoreMatches = candidates.filter(found => scoreEqual(expected, found));
+      if (scoreMatches.length === 1) { consume(expected, scoreMatches[0]); return; }
+      if (candidates.length === 1) { consume(expected, candidates[0]); return; }
+      unresolved.push({ expected, candidates });
     });
-
-    const ids = new Set();
-    const history = new Map();
-    (Array.isArray(state && state.gameHistory) ? state.gameHistory : []).forEach((row, index) => {
-      const label = `Game history ${row && (row.id || `#${index + 1}`)}`;
-      if (row && populated(row.id)) { if (ids.has(row.id)) out.fail(`Duplicate gameHistory ID ${row.id}`); else ids.add(row.id); }
-      if (!row || !populated(row.playerId)) { out.fail(`${label} is missing playerId`); return; }
-      const date = normalizeDate([row.dateKey, row.date, row.completedAtISO, row.createdAtISO], options);
-      if (!date) { out.fail(`${label} is missing a usable date`); return; }
-      if (isYou(row.playerId)) return;
-      const key = `${date}|${row.playerId}`;
-      if (history.has(key)) out.fail(`More than one gameHistory row exists for ${key}`);
-      else history.set(key, { row, label, score: historyScore(row) });
-    });
-
-    expectations.forEach((expected, key) => {
-      const found = history.get(key);
-      if (!found) { out.fail(`${expected.label} has no matching gameHistory row`); return; }
-      if (found.score.fallback) out.warn(`${found.label} uses legacy ${found.score.field} instead of score`);
-      if (!found.score.valid) out.fail(`${found.label} has no usable score`);
-      else if (Math.abs(expected.score - found.score.value) > 0.05) out.fail(`${key} matchup score ${expected.score} differs from history score ${found.score.value}`);
-      const historyMatchupId = found.row.matchupId;
-      const expectedMatchupIdPresent = populated(expected.matchupId);
-      const historyMatchupIdPresent = populated(historyMatchupId);
-      if (expectedMatchupIdPresent && historyMatchupIdPresent && String(expected.matchupId).trim() !== String(historyMatchupId).trim()) {
-        out.fail(`${key} has conflicting matchup IDs ${expected.matchupId}/${historyMatchupId}`);
-      }
-    });
-    history.forEach((found, key) => { if (!expectations.has(key)) out.warn(`${found.label} has no corresponding finalized matchup`); });
-    const result = out.result(options);
-    return { id: 'matchup-history-reconciliation', title: 'Matchups and game history reconcile', section: 'Game Data Integrity', status: result.status, expected: 'Each finalized NPC matchup side has exactly one matching gameHistory row with the same date, player, and score; matchup IDs agree when both are present', actual: result.summary, details: result.details, trace: 'state.matchups ↔ state.gameHistory by dateKey + playerId', tips: 'Orphan legacy history is reported as a warning. No rows are created, removed, or changed.' };
+    const ambiguous = new Map();
+    unresolved.forEach(({ expected, candidates }) => { const key = base(expected); if (candidates.length || expectations.filter(item => base(item) === key).length > 1) { if (!ambiguous.has(key)) ambiguous.set(key, { expected: 0, history: histories.filter(item => base(item) === key).length }); ambiguous.get(key).expected += 1; } else out.fail(`${expected.label} has no matching gameHistory row`, 0); });
+    ambiguous.forEach((counts, key) => out.warn(`Ambiguous historical matchup/history reconciliation for ${key}: ${counts.expected} finalized matchups and ${counts.history} history rows share the same player/date.`, 5));
+    const orphan = [...unused].filter(found => !ambiguous.has(base(found)));
+    if (orphan.length) out.warn(`${orphan.length} legacy gameHistory rows have no corresponding finalized matchup. Orphan sample: ${orphan.slice(0, 5).map(found => `${found.label} on ${formatDateLabel(found.date)}`).join('; ')}.`, 5);
+    const result = out.result(options); return { id: 'matchup-history-reconciliation', title: 'Matchups and game history reconcile', section: 'Game Data Integrity', status: result.status, expected: 'Finalized NPC matchup sides reconcile to gameHistory by ID, series/game context, or legacy date/player/score matching.', actual: result.summary, details: result.details, trace: 'state.matchups ↔ state.gameHistory by ID, context, and legacy keys', tips: 'Orphan legacy history is reported as a warning. No rows are created, removed, or changed.' };
   }
 
   function buildHabitLedgerConsistencyAudit(state, options = {}) {
-    const out = issueCollector();
-    const habits = Array.isArray(state && state.habits) ? state.habits : [];
-    const byId = new Map();
-    const ledgers = new Map();
-    habits.forEach((habit, index) => {
-      const label = `Habit ${habit && (habit.title || habit.id) || `#${index + 1}`}`;
-      if (!habit || !populated(habit.id)) out.fail(`${label} is missing id`);
-      else byId.set(String(habit.id), habit);
-      const arrays = {};
-      ['doneKeys', 'failedKeys', 'iceKeys'].forEach(name => {
-        const value = habit && habit[name];
-        if (populated(value) && !Array.isArray(value)) out.fail(`${label} ${name} is not an array`);
-        const safe = Array.isArray(value) ? value.slice() : [];
-        arrays[name] = safe;
-        const seen = new Set();
-        safe.forEach(key => {
-          if (!validLedgerKey(key)) out.fail(`${label} ${name} contains invalid date key ${String(key)}`);
-          if (seen.has(key)) out.warn(`${label} ${name} contains duplicate ${String(key)}`);
-          seen.add(key);
-        });
-      });
-      const done = new Set(arrays.doneKeys);
-      const failed = new Set(arrays.failedKeys);
-      arrays.doneKeys.forEach(key => { if (failed.has(key)) out.fail(`${label} marks ${key} both done and failed`); });
-      arrays.iceKeys.forEach(key => { if (!done.has(key)) out.fail(`${label} iceKey ${key} is not in doneKeys`); });
-      if (habit && habit.category === 'vice' && arrays.iceKeys.length) out.warn(`${label} is a vice with iceKeys`);
-      if (habit && populated(habit.id)) ledgers.set(String(habit.id), { habit, label, done, failed, ice: new Set(arrays.iceKeys) });
-    });
-
-    const completionIds = new Set();
-    const completionKeys = new Set();
-    (Array.isArray(state && state.completions) ? state.completions : []).forEach((completion, index) => {
-      if (!completion || (completion.source !== 'habit' && completion.source !== 'vice')) return;
-      const label = `Completion ${completion.id || `#${index + 1}`}`;
-      if (populated(completion.id)) { if (completionIds.has(completion.id)) out.fail(`Duplicate completion ID ${completion.id}`); else completionIds.add(completion.id); }
-      const habitId = completion.habitId || completion.viceId;
-      if (!completion.habitId && completion.viceId) out.warn(`${label} uses legacy viceId alias`);
-      if (!habitId) { out.fail(`${label} is missing a habit reference`); return; }
-      const ledger = ledgers.get(String(habitId));
-      if (!ledger) { out.fail(`${label} references nonexistent habit ${habitId}`); return; }
-      let day = completion.dayKey || completion.dateKey;
-      if (!validLedgerKey(day)) {
-        const fallback = normalizeDate([completion.completedAtISO], options);
-        if (fallback) { day = fallback; out.warn(`${label} derives ${day} from completedAtISO because dayKey is invalid`); }
-        else { out.fail(`${label} has no valid dayKey or completedAtISO`); return; }
-      }
-      const key = `${habitId}|${day}`;
-      if (completionKeys.has(key)) out.fail(`Duplicate habit/date completion ${key}`);
-      completionKeys.add(key);
-      const isVice = ledger.habit.category === 'vice';
-      if ((isVice ? 'vice' : 'habit') !== completion.source) out.fail(`${label} source ${completion.source} does not match habit category`);
-      if (ledger.failed.has(day)) out.fail(`${label} exists on failedKey ${day}`);
-      if (!ledger.done.has(day)) out.fail(`${label} exists without ${day} in doneKeys`);
-      const fractionPopulated = populated(completion.completionFraction);
-      const fraction = fractionPopulated ? Number(completion.completionFraction) : 1;
-      if (fractionPopulated && (fraction !== 0.5 && fraction !== 1)) out.fail(`${label} has invalid completionFraction ${completion.completionFraction}`);
-      if (isVice && fraction === 0.5) out.fail(`${label} is a half vice completion`);
-      if (!isVice && fraction === 0.5 && ledger.habit.halfPointEnabled === false) out.warn(`${label} is half-complete although half points are disabled`);
-      const pointsPerDay = ledger.habit.pointsPerDay;
-      if (!finiteValue(pointsPerDay)) out.fail(`${ledger.label} has malformed pointsPerDay`);
-      if (!finiteValue(completion.points)) out.fail(`${label} has nonfinite points`);
-      if (finiteValue(pointsPerDay) && finiteValue(completion.points) && (fraction === 0.5 || fraction === 1)) {
-        const base = Number(pointsPerDay);
-        const expected = ledger.ice.has(day) ? Number((base + 0.5).toFixed(1)) : (isVice ? base : base * fraction);
-        if (Math.abs(Number(completion.points) - expected) > 0.01) {
-          const message = `${label} has ${completion.points} points; expected ${expected}`;
-          if (day === options.todayKey) out.fail(message); else out.warn(`${message} (historical)`);
-        }
-      }
-    });
-    ledgers.forEach((ledger, habitId) => ledger.done.forEach(day => { if (validLedgerKey(day) && !completionKeys.has(`${habitId}|${day}`)) out.warn(`${ledger.label} doneKey ${day} has no completion row`); }));
-    const result = out.result(options);
-    return { id: 'habit-ledger-consistency', title: 'Habit ledger consistency', section: 'Habit Ledger Integrity', status: result.status, expected: 'Habit/Vice done, failed, ice, and completion records agree by habit and date', actual: result.summary, details: result.details, trace: 'state.habits doneKeys/failedKeys/iceKeys ↔ state.completions source/habitId/dayKey', tips: 'Legacy doneKeys without completion rows are warnings only. This audit does not create or delete completion entries.' };
+    const out = issueCollector(), habits = Array.isArray(state && state.habits) ? state.habits : [], byId = new Map(), ledgers = new Map(), historical = new Map();
+    habits.forEach((habit, index) => { const label = getHabitLabel(habit, `#${index + 1}`); if (!habit || !populated(habit.id)) out.fail(`${label} is missing id`, 1); else byId.set(String(habit.id), habit); const arrays = {}; ['doneKeys', 'failedKeys', 'iceKeys'].forEach(name => { const value = habit && habit[name]; if (populated(value) && !Array.isArray(value)) out.fail(`${label} ${name} is not an array`, 1); const safe = Array.isArray(value) ? value.slice() : []; arrays[name] = safe; const seen = new Set(); safe.forEach(key => { if (!validLedgerKey(key)) out.fail(`${label} ${name} contains invalid date key ${String(key)}`, 1); if (seen.has(key)) out.warn(`${label} ${name} contains duplicate ${String(key)}`, 3); seen.add(key); }); }); const done = new Set(arrays.doneKeys), failed = new Set(arrays.failedKeys); arrays.doneKeys.forEach(key => { if (failed.has(key)) out.fail(`${label} marks ${key} both done and failed`, 1); }); arrays.iceKeys.forEach(key => { if (!done.has(key)) out.fail(`${label} iceKey ${key} is not in doneKeys`, 1); }); if (habit && habit.category === 'vice' && arrays.iceKeys.length) out.warn(`${label} is a vice with iceKeys`, 3); if (habit && populated(habit.id)) ledgers.set(String(habit.id), { habit, label, done, failed, ice: new Set(arrays.iceKeys) }); });
+    const completionIds = new Set(), completionKeys = new Set();
+    (Array.isArray(state && state.completions) ? state.completions : []).forEach((completion, index) => { if (!completion || (completion.source !== 'habit' && completion.source !== 'vice')) return; const rawLabel = `Completion ${shortId(completion.id) || `#${index + 1}`}`; if (populated(completion.id)) { if (completionIds.has(completion.id)) out.fail(`Duplicate completion ID ${shortId(completion.id)}`, 2); else completionIds.add(completion.id); } const habitId = completion.habitId || completion.viceId; if (!completion.habitId && completion.viceId) out.warn(`${rawLabel} uses legacy viceId alias`, 4); if (!habitId) { out.fail(`${rawLabel} is missing a habit reference`, 1); return; } const ledger = ledgers.get(String(habitId)); if (!ledger) { out.fail(`${rawLabel} references nonexistent habit ${shortId(habitId)}`, 1); return; } let day = completion.dayKey || completion.dateKey; if (!validLedgerKey(day)) { const fallback = normalizeDate([completion.completedAtISO], options); if (fallback) { day = fallback; out.warn(`${ledger.label} completion ${shortId(completion.id)} derives ${day} from completedAtISO because dayKey is invalid`, 4); } else { out.fail(`${ledger.label} completion ${shortId(completion.id)} has no valid dayKey or completedAtISO`, 1); return; } } const label = `${ledger.label} on ${formatDateLabel(day)} (Completion ${shortId(completion.id) || `#${index + 1}`})`; const key = `${habitId}|${day}`; if (completionKeys.has(key)) out.fail(`Duplicate habit/date completion for ${ledger.label} on ${day}`, 2); completionKeys.add(key); const isVice = ledger.habit.category === 'vice'; if ((isVice ? 'vice' : 'habit') !== completion.source) out.fail(`${label} source ${completion.source} does not match habit category`, 1); if (ledger.failed.has(day)) out.fail(`${label} has a completion row but is marked failed`, 1); if (!ledger.done.has(day)) out.fail(`${label} has a completion row but is missing from doneKeys`, 1); const fractionPopulated = populated(completion.completionFraction), fraction = fractionPopulated ? Number(completion.completionFraction) : 1; if (fractionPopulated && fraction !== 0.5 && fraction !== 1) out.fail(`${label} has invalid completionFraction ${completion.completionFraction}`, 1); if (isVice && fraction === 0.5) out.fail(`${label} is a half vice completion`, 1); if (!isVice && fraction === 0.5 && ledger.habit.halfPointEnabled === false) out.warn(`${label} is half-complete although half points are disabled`, 3); const pointsPerDay = ledger.habit.pointsPerDay; if (!finiteValue(pointsPerDay)) out.fail(`${ledger.label} has malformed pointsPerDay`, 1); if (!finiteValue(completion.points)) out.fail(`${label} has nonfinite points`, 1); if (finiteValue(pointsPerDay) && finiteValue(completion.points) && (fraction === 0.5 || fraction === 1)) { const base = Number(pointsPerDay), expected = ledger.ice.has(day) ? Number((base + 0.5).toFixed(1)) : (isVice ? base : base * fraction); if (Math.abs(Number(completion.points) - expected) > 0.01) { if (day === options.todayKey) out.fail(`${label} has ${formatScore(completion.points)} points; expected ${formatScore(expected)}`, 0); else { const group = historical.get(String(habitId)) || { label: ledger.label, rows: [] }; group.rows.push(`${day} stored ${formatScore(completion.points)}, expected ${formatScore(expected)}`); historical.set(String(habitId), group); } } } });
+    historical.forEach(group => out.warn(`${group.rows.length} historical point mismatches for ${group.label} after current habit settings were applied. Sample: ${group.rows.slice(0, 5).join('; ')}.`, 4));
+    ledgers.forEach((ledger, habitId) => ledger.done.forEach(day => { if (validLedgerKey(day) && !completionKeys.has(`${habitId}|${day}`)) out.warn(`${ledger.label} doneKey ${day} has no completion row`, 4); }));
+    const result = out.result(options); return { id: 'habit-ledger-consistency', title: 'Habit ledger consistency', section: 'Habit Ledger Integrity', status: result.status, expected: 'Habit/Vice done, failed, ice, and completion records agree by habit and date', actual: result.summary, details: result.details, trace: 'state.habits doneKeys/failedKeys/iceKeys ↔ state.completions source/habitId/dayKey', tips: 'Legacy doneKeys without completion rows are warnings only. This audit does not create or delete completion entries.' };
   }
-
   const api = { buildNpcScoreHealthAudit, buildMatchupHistoryReconciliationAudit, buildHabitLedgerConsistencyAudit };
-  global.TaskPointsAuditIntegrity = api;
-  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+  global.TaskPointsAuditIntegrity = api; if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
