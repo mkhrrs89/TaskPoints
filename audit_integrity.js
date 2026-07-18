@@ -64,6 +64,7 @@
       const explicitConflict = expected.matchupId && candidates.some(found => found.matchupId && found.matchupId !== expected.matchupId);
       const idMatches = expected.matchupId ? candidates.filter(found => found.matchupId === expected.matchupId) : [];
       if (idMatches.length === 1) { consume(expected, idMatches[0]); return; }
+      if (idMatches.length > 1) { out.fail(`${expected.label} has ${idMatches.length} gameHistory rows with explicit matchup ID ${shortId(expected.matchupId)}`, 2); idMatches.forEach(found => unused.delete(found)); return; }
       if (explicitConflict && !idMatches.length) { out.fail(`${formatDateLabel(expected.date)} ${getPlayerLabel(state, expected.playerId)} has conflicting explicit matchup IDs ${shortId(expected.matchupId)}/${shortId(candidates.find(found => found.matchupId).matchupId)}`, 0); return; }
       const context = contextKey(expected); const contextMatches = context ? candidates.filter(found => contextKey(found) === context) : [];
       if (contextMatches.length === 1) { consume(expected, contextMatches[0]); return; }
@@ -73,7 +74,7 @@
       unresolved.push({ expected, candidates });
     });
     const ambiguous = new Map();
-    unresolved.forEach(({ expected, candidates }) => { const key = base(expected); if (candidates.length || expectations.filter(item => base(item) === key).length > 1) { if (!ambiguous.has(key)) ambiguous.set(key, { expected: 0, history: histories.filter(item => base(item) === key).length }); ambiguous.get(key).expected += 1; } else out.fail(`${expected.label} has no matching gameHistory row`, 0); });
+    unresolved.forEach(({ expected, candidates }) => { if (candidates.length === 0) { out.fail(`${expected.label} has no matching gameHistory row`, 0); return; } const key = base(expected); if (!ambiguous.has(key)) ambiguous.set(key, { expected: 0, history: histories.filter(item => base(item) === key).length }); ambiguous.get(key).expected += 1; });
     ambiguous.forEach((counts, key) => out.warn(`Ambiguous historical matchup/history reconciliation for ${key}: ${counts.expected} finalized matchups and ${counts.history} history rows share the same player/date.`, 5));
     const orphan = [...unused].filter(found => !ambiguous.has(base(found)));
     if (orphan.length) out.warn(`${orphan.length} legacy gameHistory rows have no corresponding finalized matchup. Orphan sample: ${orphan.slice(0, 5).map(found => `${found.label} on ${formatDateLabel(found.date)}`).join('; ')}.`, 5);

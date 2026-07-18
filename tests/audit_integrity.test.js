@@ -59,7 +59,7 @@ test('reconciliation detects duplicate IDs and date/player keys', () => {
   const result = audit.buildMatchupHistoryReconciliationAudit({ matchups: [matchup()], gameHistory: rows }, options);
   assert.equal(result.status, 'FAIL');
   assert.match(result.details.join(' '), /Duplicate gameHistory ID/);
-  assert.match(result.details.join(' '), /Ambiguous historical matchup/);
+  assert.match(result.details.join(' '), /2 gameHistory rows with explicit matchup ID m1/);
 });
 test('reconciliation orphan legacy history warns', () => {
   assert.equal(audit.buildMatchupHistoryReconciliationAudit({ matchups: [], gameHistory: [history()] }, options).status, 'WARN');
@@ -70,6 +70,19 @@ test('reconciliation skips YOU history expectation', () => {
 });
 test('reconciliation conflicting explicit IDs fail', () => {
   assert.equal(audit.buildMatchupHistoryReconciliationAudit({ matchups: [matchup()], gameHistory: [history({ matchupId: 'other' })] }, options).status, 'FAIL');
+});
+test('reconciliation consumed same-day match leaves a definite missing row', () => {
+  const m2 = matchup({ id: 'm2', scoreB: 40 });
+  const result = audit.buildMatchupHistoryReconciliationAudit({ matchups: [matchup(), m2], gameHistory: [history()] }, options);
+  assert.equal(result.status, 'FAIL');
+  assert.match(result.details.join(' '), /Matchup m2 side B .* has no matching gameHistory row/);
+  assert.doesNotMatch(result.details.join(' '), /Ambiguous historical/);
+});
+test('reconciliation duplicate explicit matchup IDs fail without orphan summary', () => {
+  const result = audit.buildMatchupHistoryReconciliationAudit({ matchups: [matchup()], gameHistory: [history(), history({ id: 'g2', matchupId: 'm1' })] }, options);
+  assert.equal(result.status, 'FAIL');
+  assert.match(result.details.join(' '), /2 gameHistory rows with explicit matchup ID m1/);
+  assert.doesNotMatch(result.details.join(' '), /legacy gameHistory rows have no corresponding finalized matchup/);
 });
 
 test('habit ledger accepts full, half, and vice completions', () => {
