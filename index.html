@@ -8490,6 +8490,7 @@ function toggleHabitDay(habitId, dayKey){
 }
 
 let habitSaveDebounceId = null;
+let habitSaveDeferred = false;
 let habitFullRerenderDebounceId = null;
 let habitStatsRerenderDebounceId = null;
 let habitFullRerenderAnimationFrameId = null;
@@ -8512,26 +8513,68 @@ function scheduleHabitSave() {
 
   habitSaveDebounceId = setTimeout(() => {
     habitSaveDebounceId = null;
-
+    habitSaveDeferred = true;
     deferAfterPaint(() => {
-      // Habit toggles intentionally remove/replace completion rows when cycling:
-      // off -> full -> half -> off.
-      // Save as a full current snapshot, but mark it as user/immediate so the
-      // quota cooldown does not silently skip and revert the UI state.
-      save('habit-toggle', {
-        immediateWrite: true,
-        userInitiated: true,
-        replaceCompletions: true,
-        interactive: true,
-        deferCompression: true
-      });
-
-      if (window.TP_DEBUG_PERF && perfStart !== null) {
-        console.log(`[TP_PERF] tap->save ${Math.round(performance.now() - perfStart)}ms`);
-      }
+      habitSaveDeferred = false;
+      savePendingHabitState(perfStart);
     });
   }, 25);
 }
+
+// Keep the interactive path fast, but use this exact same write when a page
+// transition or export cannot wait for the debounce/idle callback.
+function savePendingHabitState(perfStart = null) {
+  // Habit toggles intentionally remove/replace completion rows when cycling:
+  // off -> full -> half -> off. Save a full current snapshot so a visible tap
+  // can never be replaced by an older localStorage snapshot.
+  save('habit-toggle', {
+    immediateWrite: true,
+    userInitiated: true,
+    replaceCompletions: true,
+    interactive: true,
+    deferCompression: true
+  });
+
+  if (window.TP_DEBUG_PERF && perfStart !== null) {
+    console.log(`[TP_PERF] tap->save ${Math.round(performance.now() - perfStart)}ms`);
+  }
+}
+
+function flushPendingHabitSave(reason = 'manual') {
+  const hadPendingTimer = habitSaveDebounceId !== null;
+  const hadPendingSave = hadPendingTimer || habitSaveDeferred;
+  if (hadPendingTimer) {
+    clearTimeout(habitSaveDebounceId);
+    habitSaveDebounceId = null;
+  }
+
+  // A timer may already have handed work to deferAfterPaint. Writing again is
+  // safe and makes the current in-memory state durable before a transition.
+  if (hadPendingSave) {
+    habitSaveDeferred = false;
+    savePendingHabitState(window.TP_DEBUG_PERF ? habitLastTapPerfStart : null);
+  }
+
+  if (window.TP_DEBUG_PERF) {
+    console.log(`[TP_PERF] habitSaveFlush reason=${reason} pending=${hadPendingSave}`);
+  }
+  return hadPendingSave;
+}
+
+window.flushPendingHabitSave = flushPendingHabitSave;
+
+// Browser lifecycle events are not guaranteed to allow delayed callbacks to
+// run. Flush the current in-memory habit state while synchronous storage is
+// still available.
+window.addEventListener('pagehide', () => flushPendingHabitSave('pagehide'));
+window.addEventListener('beforeunload', () => flushPendingHabitSave('beforeunload'));
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) flushPendingHabitSave('visibilitychange');
+});
+document.addEventListener('click', (event) => {
+  const link = event.target.closest?.('.mobile-bottom-nav-btn[href]');
+  if (link) flushPendingHabitSave('before-navigation');
+}, { capture: true });
 
 function scheduleHabitRerender() {
   scheduleHabitFullRestackRerender();
@@ -11860,6 +11903,9 @@ function applyImportedNotesPayload(notesPayload, options = {}) {
 
 // Shared snapshot helper for brief export (uses same state as JSON export).
 function getTaskPointsExportSnapshot() {
+  // Do this before reading taskpoints_v1: a habit tap may have updated only
+  // the responsive in-memory UI when the export button is pressed.
+  flushPendingHabitSave('before-export');
   const scheduleChanged = ensureUpcomingSchedule();
   if (scheduleChanged) save();
 
