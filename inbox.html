@@ -263,7 +263,8 @@
         return TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY, {}) || {};
       }
       const raw = localStorage.getItem(STORAGE_KEY);
-      return raw ? JSON.parse(raw) : {};
+      if (!raw) return {};
+      throw new Error("TaskPointsCore storage parser is unavailable; refusing to load partial state.");
     } catch (error) {
       console.warn("Inbox state could not be loaded", error);
       return {};

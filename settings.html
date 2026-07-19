@@ -157,7 +157,7 @@
             <button id="clearTodayViewCacheBtn" class="btn btn-ghost btn-toolbar nav-btn" type="button">Clear Today View Cache</button>
             <button id="clearLocalBackupsBtn" class="btn btn-warn btn-toolbar nav-btn" type="button">Clear Local Backups</button>
             <button id="safeStorageCleanupBtn" class="btn btn-warn btn-toolbar nav-btn" type="button">Safe Storage Cleanup</button>
-            <button id="packMainStateBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Optimize Main State</button>
+            <button id="packMainStateBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Optimize / Compress Main State</button>
             <button id="storageHealthDeleteQuarantineBtn" class="btn btn-warn btn-toolbar nav-btn" type="button">Delete quarantined snapshot</button>
             <button id="storageHealthRefreshBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Refresh</button>
           </div>
@@ -4168,14 +4168,31 @@ rows.push([
       try {
         const verifyRaw = localStorage.getItem(storageKey);
         const verifyUnpacked = core.parseTaskPointsStorageJson(verifyRaw, {});
-
-        if (!Array.isArray(verifyUnpacked.completions)) throw new Error("Missing completions after optimization verification.");
-        if (!Array.isArray(verifyUnpacked.matchups)) throw new Error("Missing matchups after optimization verification.");
-        if (!Array.isArray(verifyUnpacked.gameHistory)) throw new Error("Missing gameHistory after optimization verification.");
-        if (!Array.isArray(verifyUnpacked.seasonHistory)) throw new Error("Missing seasonHistory after optimization verification.");
+        const protectedArrays = ["completions", "matchups", "gameHistory", "seasonHistory", "weightHistory", "vo2MaxHistory", "reminders"];
+        protectedArrays.forEach((key) => {
+          if (!Array.isArray(verifyUnpacked[key])) throw new Error(`Missing ${key} after optimization verification.`);
+          const beforeCount = Array.isArray(unpacked[key]) ? unpacked[key].length : 0;
+          if (verifyUnpacked[key].length < beforeCount) throw new Error(`${key} shrank after optimization verification.`);
+        });
+        ["players", "habits"].forEach((key) => {
+          if (!Array.isArray(verifyUnpacked[key])) throw new Error(`Missing ${key} after optimization verification.`);
+          const beforeCount = Array.isArray(unpacked[key]) ? unpacked[key].length : 0;
+          if (verifyUnpacked[key].length < beforeCount) throw new Error(`${key} count shrank after optimization verification.`);
+        });
+        if (typeof core.normalizeState === "function") core.normalizeState(verifyUnpacked);
       } catch (verifyError) {
         console.error("Optimized verification failed", verifyError);
-        alert("Optimized write verification failed. Check console before continuing.");
+        let restored = false;
+        try {
+          localStorage.removeItem(storageKey);
+          localStorage.setItem(storageKey, oldRaw);
+          restored = true;
+        } catch (rollbackError) {
+          console.error("Rollback after failed optimization verification also failed", rollbackError);
+        }
+        alert(restored
+          ? "Optimized write verification failed. Original data was restored."
+          : "Optimized write verification failed and restoring the original data also failed. Check console immediately.");
         renderStorageHealthPanel();
         return;
       }
