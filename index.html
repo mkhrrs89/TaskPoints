@@ -7387,12 +7387,38 @@ const habitWeekCompleteRowClasses = [
 function refreshHabitRowWeekCompleteVisual(row, habit, days) {
   if (!row || !habit || !Array.isArray(days)) return;
 
+  const isAffectedRowWeeklyComplete = isHabitWeeklyCompleteForDays(habit, days);
+  const stack = row.closest('.habitWeekCompleteStack');
+  if (!isAffectedRowWeeklyComplete && stack) {
+    const stackRows = Array.from(stack.children)
+      .filter(child => child.classList?.contains('habitRow'));
+    const stackRowIndex = stackRows.indexOf(row);
+
+    // A stale stack paints one shared steel slab behind all of its children.
+    // Re-home an incomplete row before the deferred restack so the old wrapper
+    // cannot leave it looking complete for the rest of the tap debounce.
+    stack.removeChild(row);
+    if (stackRowIndex <= 0) {
+      stack.before(row);
+    } else {
+      stack.after(row);
+    }
+    if (!stack.children.length) stack.remove();
+  }
+
   const directRows = Array.from(row.parentElement?.children || [])
     .filter(child => child.classList?.contains('habitRow'));
   const rowIndex = directRows.indexOf(row);
   const rowsToRefresh = rowIndex === -1
     ? [row]
     : directRows.slice(Math.max(0, rowIndex - 1), rowIndex + 2);
+  if (stack?.isConnected) {
+    Array.from(stack.children)
+      .filter(child => child.classList?.contains('habitRow'))
+      .forEach(stackRow => {
+        if (!rowsToRefresh.includes(stackRow)) rowsToRefresh.push(stackRow);
+      });
+  }
 
   const getRowHabit = (habitRow) => {
     if (habitRow === row) return habit;
@@ -7406,11 +7432,13 @@ function refreshHabitRowWeekCompleteVisual(row, habit, days) {
 
   rowsToRefresh.forEach((habitRow) => {
     const isWeeklyComplete = isRowWeeklyComplete(habitRow);
-    const adjacentIndex = directRows.indexOf(habitRow);
+    const siblingRows = Array.from(habitRow.parentElement?.children || [])
+      .filter(child => child.classList?.contains('habitRow'));
+    const adjacentIndex = siblingRows.indexOf(habitRow);
     const previousIsWeeklyComplete = adjacentIndex > 0
-      && isRowWeeklyComplete(directRows[adjacentIndex - 1]);
+      && isRowWeeklyComplete(siblingRows[adjacentIndex - 1]);
     const nextIsWeeklyComplete = adjacentIndex !== -1
-      && isRowWeeklyComplete(directRows[adjacentIndex + 1]);
+      && isRowWeeklyComplete(siblingRows[adjacentIndex + 1]);
 
     habitRow.classList.remove(...habitWeekCompleteRowClasses);
     habitRow.querySelector('.habitDaysRow')?.classList.toggle('week-complete-row', isWeeklyComplete);

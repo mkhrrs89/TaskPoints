@@ -165,6 +165,9 @@ test('habit tap rerenders defer full DOM work while preserving immediate weekly 
   assert.match(indexSource, /row\.dataset\.habitRowCategory\s*=\s*\(h\.category \|\| 'habit'\) === 'vice' \? 'vice' : 'habit';/);
   assert.match(indexSource, /row\.dataset\.habitRowCategory\s*=\s*'vice';/);
   assert.match(indexSource, /function refreshHabitRowWeekCompleteVisual\(row, habit, days\)[\s\S]*?habitWeekCompleteRowClasses[\s\S]*?week-complete-row[\s\S]*?addHabitWeeklyCompleteClasses/);
+  assert.match(indexSource, /const stack = row\.closest\('\.habitWeekCompleteStack'\);/);
+  assert.match(indexSource, /if \(!isAffectedRowWeeklyComplete && stack\) \{[\s\S]*?stack\.removeChild\(row\);[\s\S]*?stack\.(?:before|after)\(row\);[\s\S]*?if \(!stack\.children\.length\) stack\.remove\(\);/);
+  assert.match(indexSource, /if \(stack\?\.isConnected\) \{[\s\S]*?stack\.children[\s\S]*?rowsToRefresh\.push\(stackRow\)/);
 
   assert.match(indexSource, /function scheduleHabitFullRestackRerender\(\)[\s\S]*?renderHabits\(\);[\s\S]*?renderVices\(\);[\s\S]*?renderHomeStreakBonusSidecar\(\);[\s\S]*?\}, 750\);/);
   assert.match(indexSource, /function scheduleHabitStatsRefresh\(\)[\s\S]*?\}, 1200\);/);
