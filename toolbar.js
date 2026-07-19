@@ -1247,13 +1247,12 @@ const PROJECTS_STORAGE_KEY_FALLBACK = (window.TaskPointsCore && TaskPointsCore.P
 
 function parseTaskPointsRawFallback(raw, fallback = {}) {
   if (!raw) return fallback;
-  const parsed = JSON.parse(raw);
-  if (parsed && typeof parsed === 'object' && parsed.__taskpointsStorageEncoding) {
-    const message = 'Compressed TaskPoints storage requires TaskPointsCore parser. Refusing to load partial state.';
-    console.error(message);
-    throw new Error(message);
+  if (window.TaskPointsCore?.parseTaskPointsStorageJson) {
+    return TaskPointsCore.parseTaskPointsStorageJson(raw, fallback);
   }
-  return parsed || fallback;
+  const message = 'TaskPoints storage requires TaskPointsCore parser. Refusing to load partial state.';
+  console.error(message);
+  throw new Error(message);
 }
 
 function installToolbarStorageBridge() {

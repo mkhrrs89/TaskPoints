@@ -27,7 +27,9 @@
   const TASKPOINTS_STORAGE_ENCODING_LZ16_PACKED_V1 = "lz16-packed-v1";
   const TASKPOINTS_STORAGE_ENCODING_VERSION = 1;
   const TASKPOINTS_COMPRESSED_MIN_RATIO = 0.90;
-  const TASKPOINTS_ENABLE_COMPRESSED_STORAGE = false;
+  // Keep the synchronous, localStorage-safe representation compact on quota-limited
+  // browsers. Plain and packed JSON remain supported by the reader for older saves.
+  const TASKPOINTS_ENABLE_COMPRESSED_STORAGE = true;
   const HABIT_STREAK_MULTIPLIER_RATE = 1.01;
   
   // UTF-16 localStorage-safe LZ compression derived from lz-string 1.4.4
@@ -6733,11 +6735,12 @@ const cleanedInitialCandidate = cleanupOpponentDripSchedules(dedupedSaveState, {
     const warningState = appendStorageWarning(compactStateForLocalStorage(state), quotaWarning);
     if (root) root.__tpQuotaSaveBlockedUntil = Date.now() + TASKPOINTS_SAVE_BLOCK_COOLDOWN_MS;
     try {
-      safeReplaceTaskPointsStorage(storageKey, JSON.stringify(packTaskPointsStorageState(preserveStickyFieldsBeforeSave(warningState, storageKey, {
+      const warningRaw = buildOptimizedTaskPointsStorageRaw(preserveStickyFieldsBeforeSave(warningState, storageKey, {
         ...options,
         allowGeneratedCacheClear: true,
         storageEmergencyCompaction: true
-      }))));
+      })).chosenRaw;
+      safeReplaceTaskPointsStorage(storageKey, warningRaw);
     } catch (warningErr) {
       console.warn('TaskPointsCore: unable to persist storage warning after quota failure.', warningErr);
     }
