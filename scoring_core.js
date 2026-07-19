@@ -13,6 +13,11 @@
   ];
 
   const TASKPOINTS_LARGE_SAVE_WARN_BYTES = 4.25 * 1024 * 1024;
+  // This is deliberately below the localStorage danger zone.  A habit tap can
+  // write this packed form without doing LZ work on the input event path.
+  const TASKPOINTS_INTERACTIVE_PACKED_SAFE_BYTES = 3.75 * 1024 * 1024;
+  const TASKPOINTS_INTERACTIVE_RECOMPRESS_DELAY_MS = 2000;
+  const pendingInteractiveRecompresses = new Map();
 
   const TASKPOINTS_PACKED_STORAGE_VERSION = 1;
   const PACKED_ARRAY_SCHEMAS = {
@@ -423,6 +428,65 @@ function buildOptimizedTaskPointsStorageRaw(state) {
       return;
     }
     localStorage.setItem(storageKey, serializedCandidate);
+  }
+
+  function runPendingInteractiveRecompress(storageKey) {
+    const pending = pendingInteractiveRecompresses.get(storageKey);
+    if (!pending) return false;
+    pendingInteractiveRecompresses.delete(storageKey);
+    if (pending.timeoutId != null) clearTimeout(pending.timeoutId);
+    if (pending.idleId != null && typeof global.cancelIdleCallback === 'function') global.cancelIdleCallback(pending.idleId);
+    const started = Date.now();
+    try {
+      // Build from the newest snapshot, never the snapshot that started a burst.
+      const plan = buildOptimizedTaskPointsStorageRaw(pending.state);
+      safeReplaceTaskPointsStorage(storageKey, plan.chosenRaw);
+      if (global?.TP_DEBUG_PERF) console.debug('[TP_DEBUG_PERF] idle-recompress', { ms: Date.now() - started, encoding: plan.chosenEncoding, storageKey });
+      return true;
+    } catch (error) {
+      // The fast packed write remains authoritative if background compression fails.
+      console.warn('TaskPointsCore: deferred interactive recompress failed; retaining fast packed save.', error);
+      return false;
+    }
+  }
+
+  function scheduleInteractiveRecompress(storageKey, state) {
+    let pending = pendingInteractiveRecompresses.get(storageKey);
+    if (pending) {
+      pending.state = state;
+      if (pending.timeoutId != null) clearTimeout(pending.timeoutId);
+      if (pending.idleId != null && typeof global.cancelIdleCallback === 'function') global.cancelIdleCallback(pending.idleId);
+    } else {
+      pending = { state, timeoutId: null, idleId: null };
+      pendingInteractiveRecompresses.set(storageKey, pending);
+    }
+    const scheduleIdle = () => {
+      pending.timeoutId = null;
+      const run = () => runPendingInteractiveRecompress(storageKey);
+      pending.idleId = typeof global.requestIdleCallback === 'function'
+        ? global.requestIdleCallback(run, { timeout: 1000 })
+        : setTimeout(run, 0);
+    };
+    pending.timeoutId = setTimeout(scheduleIdle, TASKPOINTS_INTERACTIVE_RECOMPRESS_DELAY_MS);
+  }
+
+  function flushPendingInteractiveRecompresses() {
+    Array.from(pendingInteractiveRecompresses.keys()).forEach(runPendingInteractiveRecompress);
+  }
+
+  function cancelPendingInteractiveRecompress(storageKey) {
+    const pending = pendingInteractiveRecompresses.get(storageKey);
+    if (!pending) return;
+    pendingInteractiveRecompresses.delete(storageKey);
+    if (pending.timeoutId != null) clearTimeout(pending.timeoutId);
+    if (pending.idleId != null && typeof global.cancelIdleCallback === 'function') global.cancelIdleCallback(pending.idleId);
+  }
+
+  if (global?.addEventListener) {
+    global.addEventListener('pagehide', flushPendingInteractiveRecompresses);
+    global.addEventListener('visibilitychange', () => {
+      if (global.document?.visibilityState === 'hidden') flushPendingInteractiveRecompresses();
+    });
   }
   const TASKPOINTS_QUOTA_ALERT_COOLDOWN_MS = 60 * 1000;
   const TASKPOINTS_SAVE_BLOCK_COOLDOWN_MS = 15 * 1000;
@@ -6440,6 +6504,7 @@ return { state: merged, storageKey };
     const debugEnabled = Boolean(global && global.TP_DEBUG_PERF);
     const storageKey = options.storageKey || STORAGE_KEY;
     const savePath = options.savePath || options.source || options.reason || options.caller || 'unknown';
+    if (!(options.interactive === true && options.deferCompression === true)) cancelPendingInteractiveRecompress(storageKey);
     const root = getRuntimeRoot();
     const userInitiatedSave = Boolean(options.userInitiated || options.manualSave || options.immediateWrite);
     const blockedUntil = Number(root?.__tpQuotaSaveBlockedUntil || 0);
@@ -6516,7 +6581,24 @@ if (!userInitiatedSave && blockedUntil > Date.now()) {
       if (candidateBytes > TASKPOINTS_LARGE_SAVE_WARN_BYTES || (storedBytes > 0 && candidateBytes > storedBytes + (512 * 1024))) {
         recordQuotaFailureDiagnostics({ savePath, stage, storageKey, storedBytes, candidateBytes, snapshot: candidateWithSticky });
       }
-      const storagePlan = buildOptimizedTaskPointsStorageRaw(candidateWithSticky);
+      const interactiveFastSave = options.interactive === true && options.deferCompression === true;
+      const packedState = packTaskPointsStorageState(candidateWithSticky);
+      const packedRawJson = JSON.stringify(packedState);
+      // Do not invoke the LZ encoder for safe, small interactive writes.
+      const useFastPacked = interactiveFastSave && packedRawJson.length * 2 < TASKPOINTS_INTERACTIVE_PACKED_SAFE_BYTES;
+      const storagePlan = useFastPacked
+        ? {
+          packedState,
+          packedRawJson,
+          compressedWrapperRaw: '',
+          chosenRaw: packedRawJson,
+          chosenEncoding: packedState?.__packedArrays ? 'packed-json' : 'plain-json',
+          packedRawChars: packedRawJson.length,
+          compressedRawChars: 0,
+          chosenChars: packedRawJson.length,
+          chosenBytes: packedRawJson.length * 2
+        }
+        : buildOptimizedTaskPointsStorageRaw(candidateWithSticky);
       const packedCandidateBytes = storagePlan.packedRawChars * 2;
       const compressedCandidateBytes = storagePlan.compressedRawChars * 2;
       const chosenStorageBytes = storagePlan.chosenChars * 2;
@@ -6546,7 +6628,7 @@ if (!userInitiatedSave && blockedUntil > Date.now()) {
       }
       const savedRaw = localStorage.getItem(storageKey);
       const saved = savedRaw ? (parseTaskPointsStorageJson(savedRaw, {}) || {}) : {};
-      const criticalArrays = ['completions', 'matchups', 'gameHistory', 'weightHistory', 'vo2MaxHistory', 'reminders'];
+      const criticalArrays = ['completions', 'matchups', 'gameHistory', 'seasonHistory', 'weightHistory', 'vo2MaxHistory', 'reminders', 'players', 'habits'];
       const failed = criticalArrays.filter((key) => (
         Array.isArray(candidateWithSticky[key])
         && candidateWithSticky[key].length > 0
@@ -6569,7 +6651,15 @@ if (!userInitiatedSave && blockedUntil > Date.now()) {
       }
       const returnedState = inflateRedundantFieldsFromStorage(candidateWithSticky);
       setQuotaTrimMarker(stage, summarizeStateSizes(returnedState), trimmed);
-      return { state: returnedState, trimmed };
+      if (useFastPacked) scheduleInteractiveRecompress(storageKey, returnedState);
+      if (debugEnabled && interactiveFastSave) {
+        console.debug('[TP_DEBUG_PERF] interactive-save', {
+          serializationMs: Date.now() - interactiveSaveStarted,
+          encoding: storagePlan.chosenEncoding,
+          deferredCompression: useFastPacked
+        });
+      }
+      return { state: returnedState, trimmed, encoding: storagePlan.chosenEncoding, deferredCompression: useFastPacked };
     };
 
     if (debugEnabled) {
@@ -6588,6 +6678,7 @@ const cleanedInitialCandidate = cleanupOpponentDripSchedules(dedupedSaveState, {
     ? { maxEntries: options.limits.maxOpponentDripSchedules }
     : {})
 });
+    const interactiveSaveStarted = Date.now();
     const initialStoredBytes = getStorageKeySizeBytes(storageKey);
     const initialCandidateBytes = getJsonSizeBytes(cleanedInitialCandidate);
     const shouldPrecompactGenerated = initialCandidateBytes > TASKPOINTS_LARGE_SAVE_WARN_BYTES
@@ -8918,6 +9009,9 @@ return Number(cappedScore.toFixed(1));
     writeTaskPointsStoredState,
     parseTaskPointsStorageJson,
     safeReplaceTaskPointsStorage,
+    scheduleInteractiveRecompress,
+    flushPendingInteractiveRecompresses,
+    getPendingInteractiveRecompressCount: () => pendingInteractiveRecompresses.size,
     mergeState,
     saveStateSnapshot,
     saveValidatedSnapshot,

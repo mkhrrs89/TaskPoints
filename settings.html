@@ -4139,6 +4139,17 @@ rows.push([
       console.log("Optimize Main State: chosen encoding", plan.chosenEncoding);
       console.log("Optimize Main State: new localStorage string estimate", newStringBytes);
 
+      const currentEncoding = typeof core.getTaskPointsStorageEncodingInfo === "function"
+        ? core.getTaskPointsStorageEncodingInfo(oldRaw)
+        : { encoding: "unknown", label: "current encoding" };
+      const optimizedEncoding = typeof core.getTaskPointsStorageEncodingInfo === "function"
+        ? core.getTaskPointsStorageEncodingInfo(plan.chosenRaw)
+        : { encoding: plan.chosenEncoding, label: plan.chosenEncoding };
+      if (plan.chosenRaw && plan.chosenRaw.length === oldRaw.length && currentEncoding.encoding === optimizedEncoding.encoding) {
+        alert(`Main state is already optimized. Current encoding: ${currentEncoding.label}; size: ${oldRaw.length.toLocaleString()} chars.`);
+        renderStorageHealthPanel();
+        return;
+      }
       if (!plan.chosenRaw || plan.chosenRaw.length >= oldRaw.length) {
         alert(`Optimized version was not smaller. Current chars: ${oldRaw.length.toLocaleString()}; optimized chars: ${(plan.chosenRaw || "").length.toLocaleString()}. See console diagnostics.`);
         renderStorageHealthPanel();
