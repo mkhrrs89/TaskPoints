@@ -75,6 +75,60 @@ test('saveStateSnapshot writes compressed storage and preserves protected histor
   protectedFields.forEach((field) => assert.equal(saved[field].length, state[field].length, `${field} was preserved`));
 });
 
+test('interactive save writes fast packed JSON below the safe threshold and preserves protected histories', () => {
+  storage.clear();
+  const state = largeState();
+  const result = core.saveStateSnapshot(state, { storageKey: core.STORAGE_KEY, interactive: true, deferCompression: true, immediateWrite: true });
+  const raw = storage.get(core.STORAGE_KEY);
+  assert.equal(result.deferredCompression, true);
+  assert.equal(core.getTaskPointsStorageEncodingInfo(raw).label, 'packed JSON');
+  const saved = core.parseTaskPointsStorageJson(raw, {});
+  protectedFields.forEach((field) => assert.equal(saved[field].length, state[field].length, `${field} was preserved`));
+  core.flushPendingInteractiveRecompresses();
+  assert.equal(core.getTaskPointsStorageEncodingInfo(storage.get(core.STORAGE_KEY)).label, 'compressed packed JSON');
+});
+
+test('rapid interactive saves coalesce a latest-state idle recompress', () => {
+  storage.clear();
+  const first = largeState();
+  const second = largeState();
+  second.habits[0].name = 'latest habit value';
+  core.saveStateSnapshot(first, { storageKey: core.STORAGE_KEY, interactive: true, deferCompression: true, immediateWrite: true });
+  core.saveStateSnapshot(second, { storageKey: core.STORAGE_KEY, interactive: true, deferCompression: true, immediateWrite: true });
+  assert.equal(core.getPendingInteractiveRecompressCount(), 1);
+  core.flushPendingInteractiveRecompresses();
+  assert.equal(core.getPendingInteractiveRecompressCount(), 0);
+  assert.equal(core.parseTaskPointsStorageJson(storage.get(core.STORAGE_KEY), {}).habits[0].name, 'latest habit value');
+});
+
+test('failed idle recompress retains the fast packed save', () => {
+  storage.clear();
+  const originalSetItem = global.localStorage.setItem;
+  const state = largeState();
+  core.saveStateSnapshot(state, { storageKey: core.STORAGE_KEY, interactive: true, deferCompression: true, immediateWrite: true });
+  const fastRaw = storage.get(core.STORAGE_KEY);
+  global.localStorage.setItem = (key, value) => {
+    if (String(value).includes('__taskpointsStorageEncoding')) throw new Error('background compression write failed');
+    originalSetItem(key, value);
+  };
+  try {
+    assert.equal(core.flushPendingInteractiveRecompresses(), undefined);
+    assert.equal(storage.get(core.STORAGE_KEY), fastRaw);
+  } finally {
+    global.localStorage.setItem = originalSetItem;
+  }
+});
+
+test('interactive save falls back to compressed JSON above the packed safety threshold', () => {
+  storage.clear();
+  const state = largeState();
+  // Incompressible-ish unique task text makes the packed form exceed 3.75 MiB.
+  state.tasks = Array.from({ length: 4200 }, (_, index) => ({ id: `large-${index}`, title: `${index}-${'x'.repeat(1000)}` }));
+  const result = core.saveStateSnapshot(state, { storageKey: core.STORAGE_KEY, interactive: true, deferCompression: true, immediateWrite: true });
+  assert.equal(result.deferredCompression, false);
+  assert.equal(core.getTaskPointsStorageEncodingInfo(storage.get(core.STORAGE_KEY)).label, 'compressed packed JSON');
+});
+
 test('quota warning fallback is serialized through the optimized storage builder', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'scoring_core.js'), 'utf8');
   assert.match(source, /const warningRaw = buildOptimizedTaskPointsStorageRaw\([\s\S]*?\)\.chosenRaw;/);
@@ -89,4 +143,17 @@ test('TaskPoints storage uses compression and application readers do not directl
     const contents = fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
     assert.doesNotMatch(contents, /JSON\.parse\(\s*localStorage\.getItem\(\s*['"]taskpoints_v1['"]\s*\)\s*\)/, file);
   });
+});
+
+test('habit toggles use interactive deferred compression and Storage Health distinguishes already optimized state', () => {
+  const indexSource = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const settingsSource = fs.readFileSync(path.join(__dirname, '..', 'settings.html'), 'utf8');
+  assert.match(indexSource, /function scheduleHabitSave\(\)[\s\S]*?interactive:\s*true[\s\S]*?deferCompression:\s*true/);
+  assert.match(indexSource, /function handleHabitBubbleTap\([\s\S]*?applyHabitBubbleStyle[\s\S]*?scheduleHabitSave\(\)/);
+  assert.match(settingsSource, /Main state is already optimized\./);
+  assert.match(settingsSource, /Optimized version was not smaller\./);
+  const coreSource = fs.readFileSync(path.join(__dirname, '..', 'scoring_core.js'), 'utf8');
+  assert.match(coreSource, /addEventListener\('pagehide', flushPendingInteractiveRecompresses\)/);
+  assert.match(coreSource, /visibilityState === 'hidden'/);
+  assert.match(coreSource, /const criticalArrays = \['completions', 'matchups', 'gameHistory', 'seasonHistory', 'weightHistory', 'vo2MaxHistory', 'reminders', 'players', 'habits'\]/);
 });
