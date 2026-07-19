@@ -149,11 +149,36 @@ test('habit toggles use interactive deferred compression and Storage Health dist
   const indexSource = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
   const settingsSource = fs.readFileSync(path.join(__dirname, '..', 'settings.html'), 'utf8');
   assert.match(indexSource, /function scheduleHabitSave\(\)[\s\S]*?interactive:\s*true[\s\S]*?deferCompression:\s*true/);
-  assert.match(indexSource, /function handleHabitBubbleTap\([\s\S]*?applyHabitBubbleStyle[\s\S]*?scheduleHabitSave\(\)/);
+  assert.match(indexSource, /function handleHabitBubbleTap\([\s\S]*?applyHabitDayToggle[\s\S]*?applyHabitBubbleStyle[\s\S]*?refreshHabitRowWeekCompleteVisual\([\s\S]*?scheduleHabitSave\(\)[\s\S]*?scheduleHabitRerender\(\)/);
   assert.match(settingsSource, /Main state is already optimized\./);
   assert.match(settingsSource, /Optimized version was not smaller\./);
   const coreSource = fs.readFileSync(path.join(__dirname, '..', 'scoring_core.js'), 'utf8');
   assert.match(coreSource, /addEventListener\('pagehide', flushPendingInteractiveRecompresses\)/);
   assert.match(coreSource, /visibilityState === 'hidden'/);
   assert.match(coreSource, /const criticalArrays = \['completions', 'matchups', 'gameHistory', 'seasonHistory', 'weightHistory', 'vo2MaxHistory', 'reminders', 'players', 'habits'\]/);
+});
+
+test('habit tap rerenders defer full DOM work while preserving immediate weekly feedback', () => {
+  const indexSource = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+
+  assert.match(indexSource, /row\.dataset\.habitRowId\s*=\s*h\.id;/);
+  assert.match(indexSource, /row\.dataset\.habitRowCategory\s*=\s*\(h\.category \|\| 'habit'\) === 'vice' \? 'vice' : 'habit';/);
+  assert.match(indexSource, /row\.dataset\.habitRowCategory\s*=\s*'vice';/);
+  assert.match(indexSource, /function refreshHabitRowWeekCompleteVisual\(row, habit, days\)[\s\S]*?habitWeekCompleteRowClasses[\s\S]*?week-complete-row[\s\S]*?addHabitWeeklyCompleteClasses/);
+  assert.match(indexSource, /const stack = row\.closest\('\.habitWeekCompleteStack'\);/);
+  assert.match(indexSource, /if \(!isAffectedRowWeeklyComplete && stack\) \{[\s\S]*?stack\.removeChild\(row\);[\s\S]*?stack\.(?:before|after)\(row\);[\s\S]*?if \(!stack\.children\.length\) stack\.remove\(\);/);
+  assert.match(indexSource, /if \(stack\?\.isConnected\) \{[\s\S]*?stack\.children[\s\S]*?rowsToRefresh\.push\(stackRow\)/);
+
+  assert.match(indexSource, /function scheduleHabitFullRestackRerender\(\)[\s\S]*?renderHabits\(\);[\s\S]*?renderVices\(\);[\s\S]*?renderHomeStreakBonusSidecar\(\);[\s\S]*?\}, 750\);/);
+  assert.match(indexSource, /function scheduleHabitStatsRefresh\(\)[\s\S]*?\}, 1200\);/);
+  assert.match(indexSource, /function scheduleHabitStatsRefresh\([\s\S]*?renderStats\(\)/);
+  assert.doesNotMatch(indexSource, /function scheduleHabitFullRestackRerender\([\s\S]*?renderHabits\(\);\s*renderStats\(\);\s*renderVices\(\);/);
+  const scheduleHabitRerenderSource = indexSource.match(/function scheduleHabitRerender\(\) \{([\s\S]*?)\n\}/)?.[1] || '';
+  assert.match(scheduleHabitRerenderSource, /scheduleHabitFullRestackRerender\(\);/);
+  assert.match(scheduleHabitRerenderSource, /scheduleHabitStatsRefresh\(\);/);
+  assert.doesNotMatch(scheduleHabitRerenderSource, /render(?:Habits|Stats|Vices)\(/);
+  assert.match(indexSource, /tap->bubble[\s\S]*?tap->rowWeekVisual/);
+  assert.match(indexSource, /tap->save/);
+  assert.match(indexSource, /tap->fullHabitRerender/);
+  assert.match(indexSource, /tap->statsRefresh/);
 });

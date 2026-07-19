@@ -7371,6 +7371,86 @@ function addHabitWeeklyCompleteClasses(row, isWeeklyComplete, previousIsWeeklyCo
   }
 }
 
+const habitWeekCompleteRowClasses = [
+  'habitRow--week-complete',
+  'habitRow--week-complete-before',
+  'habitRow--week-complete-after',
+  'habitRow--week-complete-start',
+  'habitRow--week-complete-middle',
+  'habitRow--week-complete-end',
+  'habitRow--week-complete-single'
+];
+
+// Keep the tapped row responsive while the delayed render rebuilds its shared
+// week-complete stack. This intentionally only touches nearby existing rows;
+// renderHabits/renderVices will restore the precise wrapper structure later.
+function refreshHabitRowWeekCompleteVisual(row, habit, days) {
+  if (!row || !habit || !Array.isArray(days)) return;
+
+  const isAffectedRowWeeklyComplete = isHabitWeeklyCompleteForDays(habit, days);
+  const stack = row.closest('.habitWeekCompleteStack');
+  if (!isAffectedRowWeeklyComplete && stack) {
+    const stackRows = Array.from(stack.children)
+      .filter(child => child.classList?.contains('habitRow'));
+    const stackRowIndex = stackRows.indexOf(row);
+
+    // A stale stack paints one shared steel slab behind all of its children.
+    // Re-home an incomplete row before the deferred restack so the old wrapper
+    // cannot leave it looking complete for the rest of the tap debounce.
+    stack.removeChild(row);
+    if (stackRowIndex <= 0) {
+      stack.before(row);
+    } else {
+      stack.after(row);
+    }
+    if (!stack.children.length) stack.remove();
+  }
+
+  const directRows = Array.from(row.parentElement?.children || [])
+    .filter(child => child.classList?.contains('habitRow'));
+  const rowIndex = directRows.indexOf(row);
+  const rowsToRefresh = rowIndex === -1
+    ? [row]
+    : directRows.slice(Math.max(0, rowIndex - 1), rowIndex + 2);
+  if (stack?.isConnected) {
+    Array.from(stack.children)
+      .filter(child => child.classList?.contains('habitRow'))
+      .forEach(stackRow => {
+        if (!rowsToRefresh.includes(stackRow)) rowsToRefresh.push(stackRow);
+      });
+  }
+
+  const getRowHabit = (habitRow) => {
+    if (habitRow === row) return habit;
+    const rowHabitId = habitRow.dataset.habitRowId;
+    return state.habits.find(candidate => candidate.id === rowHabitId);
+  };
+  const isRowWeeklyComplete = (habitRow) => {
+    const rowHabit = getRowHabit(habitRow);
+    return Boolean(rowHabit && isHabitWeeklyCompleteForDays(rowHabit, days));
+  };
+
+  rowsToRefresh.forEach((habitRow) => {
+    const isWeeklyComplete = isRowWeeklyComplete(habitRow);
+    const siblingRows = Array.from(habitRow.parentElement?.children || [])
+      .filter(child => child.classList?.contains('habitRow'));
+    const adjacentIndex = siblingRows.indexOf(habitRow);
+    const previousIsWeeklyComplete = adjacentIndex > 0
+      && isRowWeeklyComplete(siblingRows[adjacentIndex - 1]);
+    const nextIsWeeklyComplete = adjacentIndex !== -1
+      && isRowWeeklyComplete(siblingRows[adjacentIndex + 1]);
+
+    habitRow.classList.remove(...habitWeekCompleteRowClasses);
+    habitRow.querySelector('.habitDaysRow')?.classList.toggle('week-complete-row', isWeeklyComplete);
+    addHabitWeeklyCompleteClasses(
+      habitRow,
+      isWeeklyComplete,
+      previousIsWeeklyComplete,
+      nextIsWeeklyComplete
+    );
+  });
+}
+
 function createHabitWeekCompleteAppender(container) {
   let completedStack = null;
   return (row, isWeeklyComplete) => {
@@ -7405,6 +7485,8 @@ function renderHabitRow(h, days, wrap, options = {}) {
 
 const row = document.createElement('div');
 row.className = 'habitRow';
+row.dataset.habitRowId = h.id;
+row.dataset.habitRowCategory = (h.category || 'habit') === 'vice' ? 'vice' : 'habit';
 
 if (!isGrouped) {
   row.classList.add('habitRow--single');
@@ -7755,6 +7837,8 @@ function renderVices(){
     const row = document.createElement('div');
 
     row.className = 'habitRow';
+    row.dataset.habitRowId = h.id;
+    row.dataset.habitRowCategory = 'vice';
     row.classList.add('habitRow--single');
     addHabitWeeklyCompleteClasses(
       row,
@@ -8406,7 +8490,10 @@ function toggleHabitDay(habitId, dayKey){
 }
 
 let habitSaveDebounceId = null;
-let habitRerenderDebounceId = null;
+let habitFullRerenderDebounceId = null;
+let habitStatsRerenderDebounceId = null;
+let habitFullRerenderAnimationFrameId = null;
+let habitStatsIdleCallbackId = null;
 let habitLastTapPerfStart = null;
 
 function deferAfterPaint(fn) {
@@ -8447,20 +8534,53 @@ function scheduleHabitSave() {
 }
 
 function scheduleHabitRerender() {
-  if (habitRerenderDebounceId) clearTimeout(habitRerenderDebounceId);
+  scheduleHabitFullRestackRerender();
+  scheduleHabitStatsRefresh();
+}
+
+function scheduleHabitFullRestackRerender() {
+  if (habitFullRerenderDebounceId) clearTimeout(habitFullRerenderDebounceId);
+  if (habitFullRerenderAnimationFrameId !== null) {
+    cancelAnimationFrame(habitFullRerenderAnimationFrameId);
+    habitFullRerenderAnimationFrameId = null;
+  }
   const perfStart = window.TP_DEBUG_PERF ? habitLastTapPerfStart : null;
-  habitRerenderDebounceId = setTimeout(() => {
-    habitRerenderDebounceId = null;
-    deferAfterPaint(() => {
+  habitFullRerenderDebounceId = setTimeout(() => {
+    habitFullRerenderDebounceId = null;
+    habitFullRerenderAnimationFrameId = requestAnimationFrame(() => {
+      habitFullRerenderAnimationFrameId = null;
       if (window.TP_DEBUG_PERF && perfStart !== null) {
-        console.log(`[TP_PERF] tap->rerender ${Math.round(performance.now() - perfStart)}ms`);
+        console.log(`[TP_PERF] tap->fullHabitRerender ${Math.round(performance.now() - perfStart)}ms`);
       }
-renderHabits();
-renderStats();
-renderVices();
-renderHomeStreakBonusSidecar();
+      renderHabits();
+      renderVices();
+      renderHomeStreakBonusSidecar();
     });
-  }, 150);
+  }, 750);
+}
+
+function scheduleHabitStatsRefresh() {
+  if (habitStatsRerenderDebounceId) clearTimeout(habitStatsRerenderDebounceId);
+  if (habitStatsIdleCallbackId !== null && window.cancelIdleCallback) {
+    cancelIdleCallback(habitStatsIdleCallbackId);
+    habitStatsIdleCallbackId = null;
+  }
+  const perfStart = window.TP_DEBUG_PERF ? habitLastTapPerfStart : null;
+  habitStatsRerenderDebounceId = setTimeout(() => {
+    habitStatsRerenderDebounceId = null;
+    const refreshStats = () => {
+      habitStatsIdleCallbackId = null;
+      if (window.TP_DEBUG_PERF && perfStart !== null) {
+        console.log(`[TP_PERF] tap->statsRefresh ${Math.round(performance.now() - perfStart)}ms`);
+      }
+      renderStats();
+    };
+    if (window.requestIdleCallback) {
+      habitStatsIdleCallbackId = requestIdleCallback(refreshStats, { timeout: 500 });
+    } else {
+      setTimeout(refreshStats, 0);
+    }
+  }, 1200);
 }
 
 function getHabitBubbleStatusClass(h, dayKey) {
@@ -8738,6 +8858,9 @@ bubbleEl.classList.remove('on', 'off', 'failed', 'habit-half');
   bubbleEl.classList.toggle('icy', isIcyNow);
   applyHabitBubbleStyle(bubbleEl, h, statusClass);
 
+  const row = bubbleEl.closest('.habitRow[data-habit-row-id]');
+  refreshHabitRowWeekCompleteVisual(row, h, weekDays(habitViceBaseDate()));
+
   if (window.TP_DEBUG_PERF) {
     console.log('[TP_PERF] habitToggle', {
       habitId,
@@ -8747,6 +8870,7 @@ bubbleEl.classList.remove('on', 'off', 'failed', 'habit-half');
       failedKeys: Array.isArray(h.failedKeys) ? [...h.failedKeys] : []
     });
     console.log(`[TP_PERF] tap->bubble ${Math.round(performance.now() - perfStart)}ms`);
+    console.log(`[TP_PERF] tap->rowWeekVisual ${Math.round(performance.now() - perfStart)}ms`);
   }
 
   scheduleHabitSave();
