@@ -675,13 +675,20 @@ Nothing visible on the page is built here. === -->
           
           <!-- LEFT SIDE: YOU -->
           <div class="scoreboard-side">
-            <div id="matchupYourName" class="scoreboard-name">You</div>
+            <div class="scoreboard-name-row scoreboard-name-row--you">
+              <div id="matchupYourName" class="scoreboard-name">You</div>
+              <div
+                id="matchupYourRank"
+                class="scoreboard-rank-inline"
+                aria-label="Your rank"
+              >—</div>
+            </div>
             <div id="matchupYourScore" class="scoreboard-score">—</div>
             <div id="matchupYourSwatches" class="scoreboard-color-swatches" aria-label="Your player colors">
               <span id="matchupYourPrimarySwatch" class="scoreboard-color-swatch" title="Primary color"></span>
               <span id="matchupYourSecondarySwatch" class="scoreboard-color-swatch" title="Secondary color"></span>
             </div>
-            <div id="matchupYourRank" class="scoreboard-meta">Rank: —</div>
+            <div id="matchupYourGold" class="scoreboard-meta scoreboard-gold">Gold: 0.0</div>
             <div id="matchupYourRecord" class="scoreboard-record">Record: 0-0</div>
             <div id="matchupYourAverages" class="scoreboard-meta">PPD: —</div>
           </div>
@@ -698,13 +705,20 @@ Nothing visible on the page is built here. === -->
 
           <!-- RIGHT SIDE: OPPONENT -->
           <div class="scoreboard-side text-right">
-            <div id="matchupOpponent" class="scoreboard-name text-right">—</div>
+            <div class="scoreboard-name-row scoreboard-name-row--opponent">
+              <div
+                id="matchupOpponentRank"
+                class="scoreboard-rank-inline"
+                aria-label="Opponent rank"
+              >—</div>
+              <div id="matchupOpponent" class="scoreboard-name text-right">—</div>
+            </div>
             <div id="matchupOpponentScore" class="scoreboard-score">—</div>
             <div id="matchupOpponentSwatches" class="scoreboard-color-swatches scoreboard-color-swatches-right" aria-label="Opponent player colors">
               <span id="matchupOpponentPrimarySwatch" class="scoreboard-color-swatch" title="Primary color"></span>
               <span id="matchupOpponentSecondarySwatch" class="scoreboard-color-swatch" title="Secondary color"></span>
             </div>
-            <div id="matchupOpponentRank" class="scoreboard-meta text-right">Rank: —</div>
+            <div id="matchupOpponentGold" class="scoreboard-meta scoreboard-gold text-right">Gold: —</div>
             <div id="matchupOpponentRecord" class="scoreboard-record">Record: 0-0</div>
             <div id="matchupOpponentAverages" class="scoreboard-meta text-right">PPD: —</div>
           </div>
@@ -3548,14 +3562,64 @@ function getCanonicalRankingMap(){
   return byId;
 }
   
-function getHomepageRankText(playerId){
-  if (!playerId) return 'Rank: —';
+function getHomepageRankValue(playerId) {
+  if (!playerId) return '—';
 
   const rankingMap = getCanonicalRankingMap();
   const row = rankingMap.get(playerId);
 
-  if (!row) return 'Rank: —';
-  return `Rank: ${row.rank}`;
+  return row && Number.isFinite(Number(row.rank))
+    ? String(row.rank)
+    : '—';
+}
+
+function getHomepageGoldValue(playerId) {
+  if (!playerId) return null;
+
+  const today = getGameDayKey(new Date());
+  const matchups = Array.isArray(state?.matchups)
+    ? state.matchups
+    : [];
+
+  let gold = 0;
+
+  for (const matchup of matchups) {
+    if (!matchup) continue;
+
+    const key = getHomeScoreboardDateKey(matchup);
+    if (
+      !key ||
+      key < HOME_SCOREBOARD_SEASON_TWO_START ||
+      key >= today
+    ) {
+      continue;
+    }
+
+    const isA = matchup.playerAId === playerId;
+    const isB = matchup.playerBId === playerId;
+    if (!isA && !isB) continue;
+
+    const scoreA = Number(matchup.scoreA);
+    const scoreB = Number(matchup.scoreB);
+    if (!Number.isFinite(scoreA) || !Number.isFinite(scoreB)) {
+      continue;
+    }
+
+    const playerScore = isA ? scoreA : scoreB;
+    const opponentScore = isA ? scoreB : scoreA;
+    const margin = playerScore - opponentScore;
+
+    if (margin > 0) {
+      gold += margin / 10;
+    }
+  }
+
+  return Math.round((gold + Number.EPSILON) * 10) / 10;
+}
+
+function formatHomepageGold(playerId) {
+  const gold = getHomepageGoldValue(playerId);
+  return gold === null ? 'Gold: —' : `Gold: ${gold.toFixed(1)}`;
 }
 
 function participantSignature(ids){
@@ -5571,6 +5635,8 @@ function renderTodaysMatchup(todayKeyStr, yourScore){
   const yourRecordEl = $('matchupYourRecord');
   const yourRankEl = $('matchupYourRank');
   const oppRankEl = $('matchupOpponentRank');
+  const yourGoldEl = $('matchupYourGold');
+  const oppGoldEl = $('matchupOpponentGold');
   const yourNameEl = $('matchupYourName');
   const yourAvgEl = $('matchupYourAverages');
   const oppAvgEl = $('matchupOpponentAverages');
@@ -5593,13 +5659,15 @@ const updateTodayScoreIsland = (value) => {
 
 
   if (yourNameEl) yourNameEl.textContent = getYouName();
-  if (yourRankEl) yourRankEl.textContent = getHomepageRankText('YOU');
+  if (yourRankEl) yourRankEl.textContent = getHomepageRankValue('YOU');
+  if (yourGoldEl) yourGoldEl.textContent = formatHomepageGold('YOU');
   if (yourAvgEl) {
     const youPpdVal = getHomepagePpdValue('YOU');
     yourAvgEl.textContent = formatPpdLine(youPpdVal);
   }
   const setOpponentScoreboardMeta = (playerId) => {
-    if (oppRankEl) oppRankEl.textContent = playerId ? getHomepageRankText(playerId) : 'Rank: —';
+    if (oppRankEl) oppRankEl.textContent = playerId ? getHomepageRankValue(playerId) : '—';
+    if (oppGoldEl) oppGoldEl.textContent = playerId ? formatHomepageGold(playerId) : 'Gold: —';
     if (!oppAvgEl) return;
     if (!playerId) {
       oppAvgEl.textContent = formatPpdLine(null);
