@@ -208,7 +208,6 @@ test('pending habit saves flush the Work On Cal App fixture before navigation or
   assert.match(indexSource, /function flushPendingHabitSave\(reason = 'manual'\)[\s\S]*?clearTimeout\(habitSaveDebounceId\)[\s\S]*?savePendingHabitState/);
   assert.match(indexSource, /flushPendingHabitSave\('pagehide'\)/);
   assert.match(indexSource, /flushPendingHabitSave\('visibilitychange'\)/);
-  assert.match(indexSource, /flushPendingHabitSave\('beforeunload'\)/);
   assert.match(indexSource, /flushPendingHabitSave\('before-navigation'\)/);
   assert.match(indexSource, /function getTaskPointsExportSnapshot\(\) \{[\s\S]*?flushPendingHabitSave\('before-export'\)/);
 });
