@@ -197,3 +197,13 @@ test('successful verification reports no mismatches and includes complete hash m
   assert.equal(result.verification.source.hashDetails.arrays.completions.canonicalLength > 0, true);
   assert.equal(result.verification.destination.hashDetails.values.canonicalLength > 0, true);
 });
+
+test('in-memory failed migration metadata is retained for diagnostic export when status rereading is not started', async () => {
+  const failed = { status: 'failed', sourceCounts: { completions: 2 }, destinationCounts: { completions: 2 }, verification: { countsMatch: true, hashesMatch: false, source: { counts: { completions: 2 }, hashes: { state: 'aaaa:1' }, hashDetails: { state: { hash: 'aaaa:1', canonicalLength: 1 }, arrays: {}, collections: {}, values: { hash: 'bbbb:1', canonicalLength: 1 } } }, destination: { counts: { completions: 2 }, hashes: { state: 'cccc:1' }, hashDetails: { state: { hash: 'cccc:1', canonicalLength: 1 }, arrays: {}, collections: {}, values: { hash: 'dddd:1', canonicalLength: 1 } } }, mismatches: [{ type: 'hash', field: 'overallState', sourceHash: 'aaaa:1', destinationHash: 'cccc:1' }], images: { total: 165, totalBytes: 4938619, referenced: 100, missingImageIds: [], unreferencedImageIds: [] } } };
+  let rereads = 0;
+  const selected = await core.resolveShadowMigrationDiagnosticMetadata(failed, async () => { rereads++; return { status: 'not_started' }; });
+  assert.equal(selected, failed); assert.equal(rereads, 0);
+  const report = core.shadowDiagnosticExport(selected);
+  assert.equal(report.status, 'failed'); assert.equal(report.verification.images.total, 165);
+  assert.equal(report.verification.mismatches[0].field, 'overallState');
+});

@@ -4667,7 +4667,9 @@ rows.push([
       setSeasonRepairStatus(`Season data repaired. currentSeason: ${result.state.currentSeason ? 'present' : 'none'}; archives: ${(result.state.seasonHistory || []).length}.`);
     }
 
+    let latestShadowMigrationMetadata = null;
     function renderShadowMigrationStatus(metadata) {
+      if (metadata && typeof metadata === 'object') latestShadowMigrationMetadata = metadata;
       const output = document.getElementById('shadowMigrationStatus');
       if (!output) return;
       const status = metadata?.status || 'not_started';
@@ -4682,7 +4684,10 @@ rows.push([
       diagnosticButton?.classList.toggle('hidden', !(status === 'failed' && verification));
     }
     async function downloadShadowMigrationDiagnostics() {
-      const metadata = await window.TaskPointsCore?.getShadowMigrationStatus?.();
+      const metadata = await window.TaskPointsCore?.resolveShadowMigrationDiagnosticMetadata?.(
+        latestShadowMigrationMetadata,
+        () => window.TaskPointsCore?.getShadowMigrationStatus?.()
+      );
       const report = window.TaskPointsCore?.shadowDiagnosticExport?.(metadata);
       if (!report) return;
       const url = URL.createObjectURL(new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' }));

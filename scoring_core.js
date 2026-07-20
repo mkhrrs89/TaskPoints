@@ -9094,7 +9094,12 @@ return Number(cappedScore.toFixed(1));
   function shadowDiagnosticExport(metadata = {}) {
     const verification = metadata.verification || {};
     const images = verification.images || {};
-    return { schemaVersion: metadata.schemaVersion, sourceFormat: metadata.sourceFormat, startedAt: metadata.startedAt, completionTime: metadata.completionTime, status: metadata.status, retries: metadata.retries, errors: metadata.errors || [], sourceCounts: metadata.sourceCounts || verification.source?.counts || {}, destinationCounts: metadata.destinationCounts || verification.destination?.counts || {}, verification: { countsMatch: verification.countsMatch, hashesMatch: verification.hashesMatch, source: verification.source || null, destination: verification.destination || null, mismatches: verification.mismatches || [], images: { available: images.available, total: images.total, totalBytes: images.totalBytes, referenced: images.referenced, missingReferenced: (images.missingImageIds || []).length, unreferenced: (images.unreferencedImageIds || []).length, error: images.error || null } } };
+    // This intentionally contains diagnostic measurements only. In particular,
+    // it excludes error strings, identifiers, and every user record/value.
+    return { schemaVersion: metadata.schemaVersion, status: metadata.status, sourceCounts: metadata.sourceCounts || verification.source?.counts || {}, destinationCounts: metadata.destinationCounts || verification.destination?.counts || {}, verification: { countsMatch: verification.countsMatch, hashesMatch: verification.hashesMatch, source: verification.source || null, destination: verification.destination || null, mismatches: verification.mismatches || [], images: { total: images.total, totalBytes: images.totalBytes, referenced: images.referenced, missingReferenced: (images.missingImageIds || []).length, unreferenced: (images.unreferencedImageIds || []).length } } };
+  }
+  async function resolveShadowMigrationDiagnosticMetadata(latestMetadata, readStatus) {
+    return latestMetadata || await readStatus();
   }
   function formatShadowMigrationDiagnostics(metadata = {}) {
     const verification = metadata.verification;
@@ -9246,6 +9251,7 @@ return Number(cappedScore.toFixed(1));
     shadowSourceSummary,
     shadowVerificationMismatches,
     shadowDiagnosticExport,
+    resolveShadowMigrationDiagnosticMetadata,
     formatShadowMigrationDiagnostics,
     referencedImageIds,
     getImageInventory,
