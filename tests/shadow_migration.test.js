@@ -143,3 +143,57 @@ test('full migration passes when legacy source omits known empty stores', async 
   assert.equal(Object.hasOwn(state, 'seasonHistory'), false); assert.equal(Object.hasOwn(state, 'matchups'), false);
   assert.equal((await fakeRows(idb._db(core.SHADOW_MIGRATION_DB_NAME), 'seasonHistory')).length, 0);
 });
+
+test('verification reports count mismatches with source and destination counts', () => {
+  const source = core.shadowSourceSummary(fixture());
+  const destinationState = fixture(); destinationState.completions.pop();
+  const destination = core.shadowSourceSummary(destinationState);
+  const mismatches = core.shadowVerificationMismatches(source, destination);
+  assert.deepEqual(mismatches.find(item => item.type === 'count' && item.field === 'completions'), { type: 'count', field: 'completions', sourceCount: 2, destinationCount: 1 });
+});
+
+test('verification reports per-collection hash mismatches and missing collections', () => {
+  const source = core.shadowSourceSummary(fixture());
+  const changed = fixture(); changed.futureRows[0].x = 2;
+  const mismatches = core.shadowVerificationMismatches(source, core.shadowSourceSummary(changed));
+  const rowMismatch = mismatches.find(item => item.type === 'hash' && item.field === 'futureRows');
+  assert.ok(rowMismatch); assert.notEqual(rowMismatch.sourceHash, rowMismatch.destinationHash);
+  assert.equal(typeof rowMismatch.sourceCanonicalLength, 'number');
+  const missing = fixture(); delete missing.futureRows;
+  assert.equal(core.shadowVerificationMismatches(source, core.shadowSourceSummary(missing)).some(item => item.type === 'missing_collection' && item.field === 'futureRows'), true);
+});
+
+test('verification reports an overall hash mismatch even when counts match', () => {
+  const source = core.shadowSourceSummary(fixture());
+  const changed = fixture(); changed.completions[0].points = 99;
+  const destination = core.shadowSourceSummary(changed);
+  assert.deepEqual(source.counts, destination.counts);
+  const mismatches = core.shadowVerificationMismatches(source, destination);
+  assert.ok(mismatches.some(item => item.type === 'hash' && item.field === 'overallState'));
+});
+
+test('diagnostic export contains metadata only, never raw records or sensitive values', () => {
+  const source = core.shadowSourceSummary(fixture());
+  const changed = fixture(); changed.completions[0].note = 'private note';
+  const destination = core.shadowSourceSummary(changed);
+  const report = core.shadowDiagnosticExport({ status: 'failed', sourceCounts: source.counts, destinationCounts: destination.counts, verification: { countsMatch: true, hashesMatch: false, source: { counts: source.counts, hashes: source.hashes, hashDetails: source.hashDetails }, destination: { counts: destination.counts, hashes: destination.hashes, hashDetails: destination.hashDetails }, mismatches: core.shadowVerificationMismatches(source, destination), images: { total: 2, totalBytes: 20, missingImageIds: ['secret-image'], unreferencedImageIds: ['other-image'] } } });
+  const serialized = JSON.stringify(report);
+  assert.equal(serialized.includes('private note'), false); assert.equal(serialized.includes('secret-image'), false);
+  assert.equal(serialized.includes('completions'), true); assert.equal(Object.hasOwn(report.verification, 'mismatches'), true);
+});
+
+test('diagnostic formatter identifies counts, overall hashes, and abbreviated hash mismatches', () => {
+  const text = core.formatShadowMigrationDiagnostics({ verification: { countsMatch: false, hashesMatch: false, mismatches: [{ type: 'count', field: 'completions', sourceCount: 5, destinationCount: 4 }, { type: 'hash', field: 'overallState', sourceHash: '12345678:10', destinationHash: 'abcdefgh:10' }] } });
+  assert.match(text, /Counts matched: no/); assert.match(text, /Overall hash matched: no/); assert.match(text, /completions \(5 source \/ 4 destination\)/); assert.match(text, /overallState \(12345678 \/ abcdefgh\)/);
+});
+
+test('successful verification reports no mismatches and includes complete hash metadata', async () => {
+  const idb = createFakeIndexedDb(); const state = fixture();
+  await openFakeDb(idb, core.IMAGE_DB_NAME, 1, db => db.createObjectStore(core.IMAGE_STORE_NAME));
+  const tx = idb._db(core.IMAGE_DB_NAME).transaction(core.IMAGE_STORE_NAME, 'readwrite');
+  ['profile-image', 'player-image', 'season-image'].forEach(id => tx.objectStore(core.IMAGE_STORE_NAME).put(new Blob(['ok']), id)); await new Promise(resolve => { tx.oncomplete = resolve; });
+  const result = await core.runShadowMigration({ state, indexedDB: idb, localStorage: { getItem: () => '' } });
+  assert.equal(result.status, 'passed_verification'); assert.deepEqual(result.verification.mismatches, []);
+  assert.equal(result.verification.source.hashDetails.arrays.completions.canonicalLength > 0, true);
+  assert.equal(result.verification.destination.hashDetails.values.canonicalLength > 0, true);
+});

@@ -9032,11 +9032,15 @@ return Number(cappedScore.toFixed(1));
     if (value && typeof value === 'object') return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${shadowCanonicalJson(value[key])}`).join(',')}}`;
     return JSON.stringify(value);
   }
-  function shadowHash(value) {
+  function shadowHashDetails(value) {
     const text = shadowCanonicalJson(value);
     let hash = 2166136261;
     for (let i = 0; i < text.length; i += 1) { hash ^= text.charCodeAt(i); hash = Math.imul(hash, 16777619); }
-    return `${(hash >>> 0).toString(16).padStart(8, '0')}:${text.length}`;
+    return { hash: `${(hash >>> 0).toString(16).padStart(8, '0')}:${text.length}`, canonicalLength: text.length };
+  }
+  function shadowHash(value) { return shadowHashDetails(value).hash; }
+  function shadowHashDetailsByField(values) {
+    return Object.fromEntries(Object.entries(values).map(([field, value]) => [field, shadowHashDetails(value)]));
   }
   function shadowSourceLayout(state) {
     const source = state && typeof state === 'object' ? state : {};
@@ -9059,7 +9063,48 @@ return Number(cappedScore.toFixed(1));
     // empty stores are canonicalized by shadowSourceLayout, so an old snapshot
     // that omitted (for example) seasonHistory verifies correctly after copy.
     const canonicalLayout = { arrays: layout.arrays, collections: layout.collections, values: layout.values };
-    return { counts, hashes: { state: shadowHash(canonicalLayout), arrays: Object.fromEntries(Object.entries(layout.arrays).map(([k, v]) => [k, shadowHash(v)])), collections: Object.fromEntries(Object.entries(layout.collections).map(([k, v]) => [k, shadowHash(v)])), values: shadowHash(layout.values) } };
+    const hashDetails = { state: shadowHashDetails(canonicalLayout), arrays: shadowHashDetailsByField(layout.arrays), collections: shadowHashDetailsByField(layout.collections), values: shadowHashDetails(layout.values) };
+    // Keep the compact hash strings for compatibility while retaining the
+    // canonical serialized length for every diagnostic hash.
+    return { counts, hashes: { state: hashDetails.state.hash, arrays: Object.fromEntries(Object.entries(hashDetails.arrays).map(([field, detail]) => [field, detail.hash])), collections: Object.fromEntries(Object.entries(hashDetails.collections).map(([field, detail]) => [field, detail.hash])), values: hashDetails.values.hash }, hashDetails };
+  }
+  function shadowVerificationMismatches(source, destination) {
+    const mismatches = [];
+    const countFields = new Set([...Object.keys(source.counts), ...Object.keys(destination.counts)]);
+    [...countFields].sort().forEach(field => {
+      if (source.counts[field] !== destination.counts[field]) mismatches.push({ type: 'count', field, sourceCount: source.counts[field] || 0, destinationCount: destination.counts[field] || 0 });
+    });
+    const addHashMismatch = (field, sourceDetail, destinationDetail, type = 'hash') => {
+      if (!sourceDetail || !destinationDetail || sourceDetail.hash === destinationDetail.hash) return;
+      mismatches.push({ type, field, sourceHash: sourceDetail.hash, destinationHash: destinationDetail.hash, sourceCanonicalLength: sourceDetail.canonicalLength, destinationCanonicalLength: destinationDetail.canonicalLength });
+    };
+    addHashMismatch('overallState', source.hashDetails.state, destination.hashDetails.state);
+    ['arrays', 'collections'].forEach(group => {
+      const fields = new Set([...Object.keys(source.hashDetails[group]), ...Object.keys(destination.hashDetails[group])]);
+      [...fields].sort().forEach(field => {
+        const sourceDetail = source.hashDetails[group][field], destinationDetail = destination.hashDetails[group][field];
+        if (group === 'collections' && !sourceDetail) mismatches.push({ type: 'unexpected_collection', field, sourceCount: 0, destinationCount: destination.counts[field] || 0, destinationHash: destinationDetail.hash, destinationCanonicalLength: destinationDetail.canonicalLength });
+        else if (group === 'collections' && !destinationDetail) mismatches.push({ type: 'missing_collection', field, sourceCount: source.counts[field] || 0, destinationCount: 0, sourceHash: sourceDetail.hash, sourceCanonicalLength: sourceDetail.canonicalLength });
+        else addHashMismatch(field, sourceDetail, destinationDetail);
+      });
+    });
+    addHashMismatch('topLevelValues', source.hashDetails.values, destination.hashDetails.values);
+    return mismatches;
+  }
+  function shadowDiagnosticExport(metadata = {}) {
+    const verification = metadata.verification || {};
+    const images = verification.images || {};
+    return { schemaVersion: metadata.schemaVersion, sourceFormat: metadata.sourceFormat, startedAt: metadata.startedAt, completionTime: metadata.completionTime, status: metadata.status, retries: metadata.retries, errors: metadata.errors || [], sourceCounts: metadata.sourceCounts || verification.source?.counts || {}, destinationCounts: metadata.destinationCounts || verification.destination?.counts || {}, verification: { countsMatch: verification.countsMatch, hashesMatch: verification.hashesMatch, source: verification.source || null, destination: verification.destination || null, mismatches: verification.mismatches || [], images: { available: images.available, total: images.total, totalBytes: images.totalBytes, referenced: images.referenced, missingReferenced: (images.missingImageIds || []).length, unreferenced: (images.unreferencedImageIds || []).length, error: images.error || null } } };
+  }
+  function formatShadowMigrationDiagnostics(metadata = {}) {
+    const verification = metadata.verification;
+    if (!verification) return '';
+    const summary = ` Counts matched: ${verification.countsMatch ? 'yes' : 'no'}. Overall hash matched: ${verification.hashesMatch ? 'yes' : 'no'}.`;
+    const details = (verification.mismatches || []).map(mismatch => {
+      if (mismatch.type === 'count') return `${mismatch.field} (${mismatch.sourceCount} source / ${mismatch.destinationCount} destination)`;
+      return `${mismatch.field} (${String(mismatch.sourceHash || 'missing').slice(0, 8)} / ${String(mismatch.destinationHash || 'missing').slice(0, 8)})`;
+    });
+    return `${summary}${details.length ? ` Mismatches: ${details.join('; ')}.` : ''}`;
   }
   function shadowRequest(request) { return new Promise((resolve, reject) => { request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error || new Error('IndexedDB request failed')); }); }
   function shadowTransaction(transaction) { return new Promise((resolve, reject) => { transaction.oncomplete = () => resolve(); transaction.onabort = () => reject(transaction.error || new Error('IndexedDB transaction aborted')); transaction.onerror = () => reject(transaction.error || new Error('IndexedDB transaction failed')); }); }
@@ -9160,7 +9205,8 @@ return Number(cappedScore.toFixed(1));
       collectionRows.forEach(row => { (rebuilt[row.field] ||= [])[row.index] = row.value; }); valuesRows.forEach(row => { rebuilt[row.field] = row.value; });
       const destinationSummary = shadowSourceSummary(rebuilt);
       const imageInventory = await getImageInventory(indexedDb); const imageSet = new Set(imageInventory.ids); const referenced = referencedImageIds(source); const missingImageIds = referenced.filter(id => !imageSet.has(id));
-      const verification = { countsMatch: shadowCanonicalJson(sourceSummary.counts) === shadowCanonicalJson(destinationSummary.counts), hashesMatch: sourceSummary.hashes.state === destinationSummary.hashes.state, images: { available: imageInventory.available, total: imageInventory.count, totalBytes: imageInventory.totalBytes, referenced: referenced.length, missingImageIds, unreferencedImageIds: imageInventory.ids.filter(id => !referenced.includes(id)).sort(), error: imageInventory.error || null } };
+      const mismatches = shadowVerificationMismatches(sourceSummary, destinationSummary);
+      const verification = { countsMatch: shadowCanonicalJson(sourceSummary.counts) === shadowCanonicalJson(destinationSummary.counts), hashesMatch: sourceSummary.hashes.state === destinationSummary.hashes.state, source: { counts: sourceSummary.counts, hashes: sourceSummary.hashes, hashDetails: sourceSummary.hashDetails }, destination: { counts: destinationSummary.counts, hashes: destinationSummary.hashes, hashDetails: destinationSummary.hashDetails }, mismatches, images: { available: imageInventory.available, total: imageInventory.count, totalBytes: imageInventory.totalBytes, referenced: referenced.length, missingImageIds, unreferencedImageIds: imageInventory.ids.filter(id => !referenced.includes(id)).sort(), error: imageInventory.error || null } };
       const status = verification.countsMatch && verification.hashesMatch && imageInventory.available && missingImageIds.length === 0 ? 'passed_verification' : 'failed';
       const metadata = { schemaVersion: SHADOW_MIGRATION_SCHEMA_VERSION, sourceFormat: getTaskPointsStorageEncodingInfo(storage?.getItem?.(options.storageKey || STORAGE_KEY) || '').label, startedAt, completionTime: new Date().toISOString(), status, errors: status === 'failed' ? ['Verification did not pass.'] : [], retries: (Number(previous.retries) || 0) + 1, sourceCounts: sourceSummary.counts, destinationCounts: destinationSummary.counts, verification };
       await shadowPutMetadata(db, metadata); return metadata;
@@ -9195,8 +9241,12 @@ return Number(cappedScore.toFixed(1));
     SHADOW_MIGRATION_SCHEMA_VERSION,
     shadowCanonicalJson,
     shadowHash,
+    shadowHashDetails,
     shadowSourceLayout,
     shadowSourceSummary,
+    shadowVerificationMismatches,
+    shadowDiagnosticExport,
+    formatShadowMigrationDiagnostics,
     referencedImageIds,
     getImageInventory,
     getShadowMigrationStatus,
