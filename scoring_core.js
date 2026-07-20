@@ -25,6 +25,9 @@
   // a synchronous crash-safe write-ahead journal; taskpoints_v1 remains the
   // canonical compressed snapshot after compaction.
   function habitDeltaId(delta) { return `${delta.source === 'vice' ? 'vice' : 'habit'}:${delta.habitId}:${delta.dayKey}`; }
+  // Completion IDs are intentionally category-independent for historical
+  // compatibility. Journal IDs may distinguish vice/habit for coalescing.
+  function habitCompletionId(habitId, dayKey) { return `habit:${habitId}:${dayKey}`; }
   function readPendingHabitDeltas(storageKey = PENDING_HABIT_DELTAS_KEY) {
     const raw = localStorage.getItem(storageKey);
     if (!raw) return [];
@@ -51,12 +54,12 @@
     return next;
   }
   function applyPendingHabitDeltas(state, deltas = readPendingHabitDeltas()) {
-    const started = Date.now(); let applied = 0;
+    const started = Date.now(); let applied = 0; const appliedDeltas = []; const skippedDeltas = [];
     state.habits = Array.isArray(state.habits) ? state.habits : [];
     state.completions = Array.isArray(state.completions) ? state.completions : [];
     for (const delta of deltas) {
       const habit = state.habits.find(h => h && h.id === delta.habitId);
-      if (!habit) continue;
+      if (!habit) { skippedDeltas.push(delta); continue; }
       habit.doneKeys = Array.isArray(habit.doneKeys) ? habit.doneKeys.filter(k => k !== delta.dayKey) : [];
       habit.failedKeys = Array.isArray(habit.failedKeys) ? habit.failedKeys.filter(k => k !== delta.dayKey) : [];
       habit.iceKeys = Array.isArray(habit.iceKeys) ? habit.iceKeys.filter(k => k !== delta.dayKey) : [];
@@ -68,13 +71,35 @@
         const fraction = delta.completionFraction == null ? (delta.status === 'half' ? .5 : 1) : Number(delta.completionFraction);
         if (delta.icy === true) habit.iceKeys.push(delta.dayKey);
         const points = Number.isFinite(Number(delta.completionPoints)) ? Number(delta.completionPoints) : (Number(habit.pointsPerDay) || 0) * fraction;
-        state.completions.unshift({ id: `habit:${habit.id}:${delta.dayKey}`, taskId: `habit:${habit.id}:${delta.dayKey}`, title: `[${delta.source === 'vice' ? 'Vice' : 'Habit'}] ${habit.name} (${delta.dayKey})`, points, completedAtISO: delta.updatedAtISO, source: delta.source, habitId: habit.id, dayKey: delta.dayKey, completionFraction: fraction });
+        const completionId = habitCompletionId(habit.id, delta.dayKey);
+        state.completions.unshift({ id: completionId, taskId: completionId, title: `[${delta.source === 'vice' ? 'Vice' : 'Habit'}] ${habit.name} (${delta.dayKey})`, points, completedAtISO: delta.updatedAtISO, source: delta.source, habitId: habit.id, dayKey: delta.dayKey, completionFraction: fraction });
       } else if (failed) habit.failedKeys.push(delta.dayKey);
       habit.updatedAtISO = delta.updatedAtISO || habit.updatedAtISO;
-      applied++;
+      applied++; appliedDeltas.push(delta);
     }
     if (global?.TP_DEBUG_PERF) console.debug('[TP_DEBUG_PERF] journal-replay', { ms: Date.now() - started, entries: applied });
-    return { state, applied, ms: Date.now() - started };
+    return { state, applied, appliedDeltas, skippedDeltas, ms: Date.now() - started };
+  }
+  function verifyPersistedHabitDeltas(persisted, candidates, appliedDeltas = candidates) {
+    const allowed = new Set((appliedDeltas || []).map(delta => delta.id));
+    const verified = [];
+    for (const delta of candidates || []) {
+      if (!allowed.has(delta.id)) continue;
+      const habit = persisted?.habits?.find(item => item?.id === delta.habitId);
+      if (!habit) continue;
+      const done = delta.done === true || delta.status === 'full' || delta.status === 'half';
+      const failed = delta.failed === true || delta.status === 'failed';
+      const has = (field) => Array.isArray(habit[field]) && habit[field].includes(delta.dayKey);
+      if (has('doneKeys') !== done || has('failedKeys') !== failed || has('iceKeys') !== (delta.icy === true)) continue;
+      if (delta.updatedAtISO && habit.updatedAtISO !== delta.updatedAtISO) continue;
+      const completion = persisted?.completions?.find(item => item?.id === habitCompletionId(delta.habitId, delta.dayKey) && item?.habitId === delta.habitId && item?.dayKey === delta.dayKey && item?.source === delta.source);
+      if (!done) { if (completion) continue; verified.push(delta); continue; }
+      if (!completion) continue;
+      if (Number.isFinite(Number(delta.completionPoints)) && Number(completion.points) !== Number(delta.completionPoints)) continue;
+      if (delta.completionFraction != null && Number(completion.completionFraction) !== Number(delta.completionFraction)) continue;
+      verified.push(delta);
+    }
+    return verified;
   }
   function clearCompactedHabitDeltas(compacted, storageKey = PENDING_HABIT_DELTAS_KEY) {
     const byId = new Map((compacted || []).map(d => [d.id, JSON.stringify(d)]));
@@ -94,9 +119,13 @@
       try { snapshot = readPendingHabitDeltas(); } catch (error) { console.warn('Pending habit journal compaction skipped:', error); return; }
       if (!snapshot.length) return;
       try {
+        const applyResult = applyPendingHabitDeltas(state, snapshot);
         const result = saveStateSnapshot(state, { storageKey, immediateWrite: true, userInitiated: true, replaceCompletions: true, interactive: true, deferCompression: true, savePath: 'habit-journal-startup-compaction' });
         if (result?.skipped || result?.blockedByQuotaCircuit || !result?.state) throw new Error('Habit journal compaction was not verified');
-        clearCompactedHabitDeltas(snapshot);
+        const raw = localStorage.getItem(storageKey);
+        const persisted = raw ? parseTaskPointsStorageJson(raw, {}) : null;
+        const verified = verifyPersistedHabitDeltas(persisted, snapshot, applyResult.appliedDeltas);
+        clearCompactedHabitDeltas(verified);
         if (global?.TP_DEBUG_PERF) console.debug('[TP_DEBUG_PERF] startup-journal-compaction', { entries: snapshot.length });
       } catch (error) { console.warn('Habit journal compaction failed; pending changes retained.', error); }
     };
@@ -8981,9 +9010,11 @@ return Number(cappedScore.toFixed(1));
     STORAGE_KEY,
     PENDING_HABIT_DELTAS_KEY,
     habitDeltaId,
+    habitCompletionId,
     readPendingHabitDeltas,
     writePendingHabitDelta,
     applyPendingHabitDeltas,
+    verifyPersistedHabitDeltas,
     clearCompactedHabitDeltas,
     schedulePendingHabitDeltaCompaction,
     PROJECTS_STORAGE_KEY,

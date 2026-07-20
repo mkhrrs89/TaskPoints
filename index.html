@@ -8538,7 +8538,11 @@ function savePendingHabitState(perfStart = null) {
     }));
     if (result?.skipped || result?.blockedByQuotaCircuit) throw new Error('Compaction save was skipped');
     if (result?.state) state = result.state;
-    const cleared = TaskPointsCore.clearCompactedHabitDeltas?.(journalSnapshot) || 0;
+    const raw = localStorage.getItem(STORAGE_KEY);
+    const persisted = raw ? TaskPointsCore.parseTaskPointsStorageJson(raw, {}) : null;
+    const applied = TaskPointsCore.applyPendingHabitDeltas({ habits: state.habits, completions: state.completions }, journalSnapshot).appliedDeltas;
+    const verified = TaskPointsCore.verifyPersistedHabitDeltas(persisted, journalSnapshot, applied);
+    const cleared = TaskPointsCore.clearCompactedHabitDeltas?.(verified) || 0;
     if (window.TP_DEBUG_PERF) console.debug('[TP_DEBUG_PERF] journal-compaction', { ms: Math.round(performance.now() - started), entries: journalSnapshot.length, cleared });
   } catch (error) {
     // Keep the journal intact: a reload will replay every pending tap.
@@ -8923,10 +8927,12 @@ try {
         interactive: true, deferCompression: true
       }));
       if (fallback?.skipped || fallback?.blockedByQuotaCircuit || !fallback?.state) throw new Error('Fallback save was not verified');
-      const persisted = TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY, {});
+      const raw = localStorage.getItem(STORAGE_KEY);
+      const persisted = raw ? TaskPointsCore.parseTaskPointsStorageJson(raw, {}) : {};
       const persistedHabit = persisted.habits?.find(item => item?.id === habitId);
-      const persistedCompletion = persisted.completions?.find(item => item?.id === journalDelta.id);
-      if (!persistedHabit || Boolean(persistedHabit.doneKeys?.includes(dayKey)) !== journalDelta.done || Boolean(persistedHabit.failedKeys?.includes(dayKey)) !== journalDelta.failed || Boolean(persistedHabit.iceKeys?.includes(dayKey)) !== journalDelta.icy || (journalDelta.done && !persistedCompletion)) throw new Error('Fallback save readback did not contain the habit change');
+      const completionId = TaskPointsCore.habitCompletionId(habitId, dayKey);
+      const persistedCompletion = persisted.completions?.find(item => item?.id === completionId && item?.habitId === habitId && item?.dayKey === dayKey && item?.source === journalDelta.source);
+      if (!persistedHabit || !TaskPointsCore.verifyPersistedHabitDeltas(persisted, [journalDelta], [journalDelta]).length || (journalDelta.done && !persistedCompletion)) throw new Error('Fallback save readback did not contain the habit change');
     } catch (saveError) {
       h.doneKeys = habitBeforeTap.doneKeys; h.failedKeys = habitBeforeTap.failedKeys;
       h.iceKeys = habitBeforeTap.iceKeys; h.updatedAtISO = habitBeforeTap.updatedAtISO;

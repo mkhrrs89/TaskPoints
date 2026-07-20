@@ -87,6 +87,21 @@ test('malformed journal is preserved and cannot be overwritten by a new delta', 
   storage.clear();
 });
 
+test('compaction clears only deltas applied and verified in main storage', async () => {
+  storage.clear();
+  const base = core.normalizeState({ habits: [{ id: 'present', name: 'Present', pointsPerDay: 3, doneKeys: [], failedKeys: [] }], completions: [] });
+  core.saveStateSnapshot(base, { immediateWrite: true });
+  core.writePendingHabitDelta({ habitId: 'present', dayKey: '2026-07-19', source: 'habit', status: 'full', done: true, completionFraction: 1, completionPoints: 3, updatedAtISO: '2026-07-19T12:00:00.000Z' });
+  core.writePendingHabitDelta({ habitId: 'missing', dayKey: '2026-07-19', source: 'habit', status: 'full', done: true, completionFraction: 1, completionPoints: 2, updatedAtISO: '2026-07-19T12:00:00.000Z' });
+  const loaded = core.loadAppState({ syncDerived: false, persistSync: false }).state;
+  core.schedulePendingHabitDeltaCompaction(loaded, { delayMs: 0 });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.deepEqual(core.readPendingHabitDeltas().map(delta => delta.habitId), ['missing']);
+  const raw = storage.get(core.STORAGE_KEY);
+  const persisted = core.parseTaskPointsStorageJson(raw, {});
+  assert.equal(persisted.completions.find(c => c.id === core.habitCompletionId('present', '2026-07-19')).points, 3);
+});
+
 test('optimized storage chooses and decodes compressed packed JSON without count loss', () => {
   const state = largeState();
   const plan = core.buildOptimizedTaskPointsStorageRaw(state);
@@ -214,6 +229,7 @@ test('pending habit journals recover and compact the Work On Cal App fixture thr
       halfPointEnabled: true,
       daysPerCompleteWeek: 5,
       tag: 'Vibe Coding',
+      pointsPerDay: 4,
       doneKeys: ['2026-07-13', '2026-07-14', '2026-07-15', '2026-07-16', '2026-07-17', '2026-07-18'],
       updatedAtISO: '2026-07-18T12:00:00.000Z'
     }],
@@ -232,18 +248,20 @@ test('pending habit journals recover and compact the Work On Cal App fixture thr
     interactive: true,
     deferCompression: true
   });
-  core.writePendingHabitDelta({ habitId, dayKey, source: 'habit', status: 'full', done: true, failed: false, icy: false, completionFraction: 1, completionPoints: 0, updatedAtISO: '2026-07-19T12:00:00.000Z' });
+  core.writePendingHabitDelta({ habitId, dayKey, source: 'habit', status: 'full', done: true, failed: false, icy: false, completionFraction: 1, completionPoints: 4, updatedAtISO: '2026-07-19T12:00:00.000Z' });
 
   const reloaded = core.loadAppState({ syncDerived: false, persistSync: false }).state;
   const savedHabit = reloaded.habits.find((item) => item.id === habitId);
   assert.ok(savedHabit.doneKeys.includes(dayKey));
   assert.equal(savedHabit.updatedAtISO, '2026-07-19T12:00:00.000Z');
   assert.ok(reloaded.completions.some((item) => item.id === `habit:${habitId}:${dayKey}`));
+  assert.equal(reloaded.completions.find((item) => item.id === `habit:${habitId}:${dayKey}`).points, 4);
   // The automatic startup scheduler can be invoked at zero delay in this test.
   core.schedulePendingHabitDeltaCompaction(reloaded, { delayMs: 0 });
   await new Promise(resolve => setTimeout(resolve, 10));
   const compacted = core.readTaskPointsStoredState(core.STORAGE_KEY, {});
   assert.ok(compacted.habits.find(item => item.id === habitId).doneKeys.includes(dayKey));
+  assert.equal(compacted.completions.find(item => item.id === `habit:${habitId}:${dayKey}`).points, 4);
   assert.equal(core.readPendingHabitDeltas().length, 0);
 
   const indexSource = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
