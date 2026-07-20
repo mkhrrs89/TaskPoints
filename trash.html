@@ -19,11 +19,20 @@
         <div class="toolbar header-nav">
           <a href="index.html" class="btn btn-teal btn-toolbar nav-btn">Main</a>
           <a href="season.html" class="btn btn-teal btn-toolbar nav-btn">Season</a>
-        <a href="settings.html" class="btn btn-teal btn-toolbar nav-btn">Settings</a>
+          <a href="settings.html" class="btn btn-teal btn-toolbar nav-btn">Settings</a>
+          <a href="storage_diagnostics.html" class="btn btn-teal btn-toolbar nav-btn">Storage Diagnostics</a>
           <a href="trash.html" class="btn btn-teal btn-toolbar nav-btn active" aria-current="page">Trash</a>
         </div>
       </div>
     </header>
+
+    <div class="glass p-4 mb-4 flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <div class="font-semibold">Storage Diagnostics</div>
+        <div class="text-xs muted">Run the read-only report for the IndexedDB migration using this device's existing TaskPoints data.</div>
+      </div>
+      <a href="storage_diagnostics.html" class="btn btn-teal btn-toolbar nav-btn">Open Storage Diagnostics</a>
+    </div>
 
     <div id="empty" class="glass p-4 hidden">Trash is empty.</div>
     <div id="trashList" class="space-y-3"></div>
