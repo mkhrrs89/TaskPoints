@@ -241,7 +241,7 @@ test('habit toggles use interactive deferred compression and Storage Health dist
   const indexSource = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
   const settingsSource = fs.readFileSync(path.join(__dirname, '..', 'settings.html'), 'utf8');
   assert.match(indexSource, /function scheduleHabitSave\(\)[\s\S]*?interactive:\s*true[\s\S]*?deferCompression:\s*true/);
-  assert.match(indexSource, /function handleHabitBubbleTap\([\s\S]*?applyHabitDayToggle[\s\S]*?applyHabitBubbleStyle[\s\S]*?refreshHabitRowWeekCompleteVisual\([\s\S]*?scheduleHabitSave\(\)[\s\S]*?scheduleHabitRerender\(\)/);
+  assert.match(indexSource, /function handleHabitBubbleTap\([\s\S]*?applyHabitDayToggle[\s\S]*?applyCanonicalHabitBubbleVisual[\s\S]*?refreshHabitRowWeekCompleteVisual\([\s\S]*?scheduleHabitSave\(\)[\s\S]*?scheduleHabitRerender\(\)/);
   assert.match(settingsSource, /Main state is already optimized\./);
   assert.match(settingsSource, /Optimized version was not smaller\./);
   const coreSource = fs.readFileSync(path.join(__dirname, '..', 'scoring_core.js'), 'utf8');

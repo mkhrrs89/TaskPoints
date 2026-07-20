@@ -7614,6 +7614,8 @@ const controlsHtml = `
 
 let habitTapHandlerBound = false;
 let viceTapHandlerBound = false;
+// A restack must never replace a bubble while its pointer gesture is live.
+let activeHabitPointerGesture = null;
 
 function renderHabits(){
   const wrap  = $('habitsList');
@@ -7750,23 +7752,21 @@ wrap.querySelectorAll('[data-act="habit-group-down"]').forEach(btn => {
 if (!habitTapHandlerBound) {
   habitTapHandlerBound = true;
 
-  let tap = null; // { id, startX, startY, startBubble, moved }
+  let tap = null; // { pointerId, habitId, dayKey, category, startX, startY, moved }
 
   wrap.addEventListener('pointerdown', (e) => {
     const bubble = e.target.closest('.habitDay[data-habit][data-day]');
     if (!bubble || !wrap.contains(bubble)) return;
 
     tap = {
-      id: e.pointerId,
-      startX: e.clientX,
-      startY: e.clientY,
-      startBubble: bubble,
-      moved: false
+      pointerId: e.pointerId, habitId: bubble.dataset.habit, dayKey: bubble.dataset.day,
+      category: 'habit', startX: e.clientX, startY: e.clientY, moved: false
     };
+    activeHabitPointerGesture = tap;
   }, { passive: true });
 
   wrap.addEventListener('pointermove', (e) => {
-    if (!tap || e.pointerId !== tap.id) return;
+    if (!tap || e.pointerId !== tap.pointerId) return;
 
     const dx = Math.abs(e.clientX - tap.startX);
     const dy = Math.abs(e.clientY - tap.startY);
@@ -7775,23 +7775,21 @@ if (!habitTapHandlerBound) {
   }, { passive: true });
 
   wrap.addEventListener('pointerup', (e) => {
-    const bubble = e.target.closest('.habitDay[data-habit][data-day]');
-    if (!bubble || !wrap.contains(bubble)) return;
-
-    // If this pointer became a drag OR ended on a different bubble, ignore.
-    if (tap && e.pointerId === tap.id) {
-      const moved = tap.moved;
-      const sameBubble = (bubble === tap.startBubble);
-      tap = null;
-
-      if (moved || !sameBubble) return;
+    if (!tap || e.pointerId !== tap.pointerId) return;
+    const gesture = tap;
+    tap = null; activeHabitPointerGesture = null;
+    // Compare stable identity, not a DOM node that a delayed render may replace.
+    const ended = e.target.closest('.habitDay[data-habit][data-day]');
+    if (gesture.moved || (ended && (ended.dataset.habit !== gesture.habitId || ended.dataset.day !== gesture.dayKey))) {
+      scheduleDeferredHabitRestack(); return;
     }
-
-    handleHabitBubbleTap(bubble);
+    const bubble = wrap.querySelector(`.habitDay[data-habit="${CSS.escape(gesture.habitId)}"][data-day="${CSS.escape(gesture.dayKey)}"]`);
+    if (bubble) handleHabitBubbleTap(bubble);
+    scheduleDeferredHabitRestack();
   }, { passive: true });
 
   wrap.addEventListener('pointercancel', (e) => {
-    if (tap && e.pointerId === tap.id) tap = null;
+    if (tap && e.pointerId === tap.pointerId) { tap = null; activeHabitPointerGesture = null; scheduleDeferredHabitRestack(); }
   }, { passive: true });
 }
 }
@@ -7953,7 +7951,7 @@ const nameHtml = `
   if (!viceTapHandlerBound) {
     viceTapHandlerBound = true;
 
-    let tap = null; // { id, startX, startY, startBubble, moved }
+    let tap = null; // { pointerId, habitId, dayKey, category, startX, startY, moved }
 
     const getViceBubble = (e) =>
       e.target.closest('.habitDay.viceDay[data-habit][data-day]');
@@ -7963,16 +7961,14 @@ const nameHtml = `
       if (!bubble || !wrap.contains(bubble)) return;
 
       tap = {
-        id: e.pointerId,
-        startX: e.clientX,
-        startY: e.clientY,
-        startBubble: bubble,
-        moved: false
+        pointerId: e.pointerId, habitId: bubble.dataset.habit, dayKey: bubble.dataset.day,
+        category: 'vice', startX: e.clientX, startY: e.clientY, moved: false
       };
+      activeHabitPointerGesture = tap;
     }, { passive: true });
 
     wrap.addEventListener('pointermove', (e) => {
-      if (!tap || e.pointerId !== tap.id) return;
+      if (!tap || e.pointerId !== tap.pointerId) return;
 
       const dx = Math.abs(e.clientX - tap.startX);
       const dy = Math.abs(e.clientY - tap.startY);
@@ -7982,23 +7978,20 @@ const nameHtml = `
     }, { passive: true });
 
     wrap.addEventListener('pointerup', (e) => {
-      const bubble = getViceBubble(e);
-      if (!bubble || !wrap.contains(bubble)) return;
-
-      if (tap && e.pointerId === tap.id) {
-        const moved = tap.moved;
-        const sameBubble = (bubble === tap.startBubble);
-        tap = null;
-
-        if (moved || !sameBubble) return; // ignore scroll / drift
+      if (!tap || e.pointerId !== tap.pointerId) return;
+      const gesture = tap;
+      tap = null; activeHabitPointerGesture = null;
+      const ended = getViceBubble(e);
+      if (gesture.moved || (ended && (ended.dataset.habit !== gesture.habitId || ended.dataset.day !== gesture.dayKey))) {
+        scheduleDeferredHabitRestack(); return;
       }
-
-      // vices use the same toggle pipeline as habits (category === 'vice' inside applyHabitDayToggle)
-      handleHabitBubbleTap(bubble);
+      const bubble = wrap.querySelector(`.habitDay.viceDay[data-habit="${CSS.escape(gesture.habitId)}"][data-day="${CSS.escape(gesture.dayKey)}"]`);
+      if (bubble) handleHabitBubbleTap(bubble);
+      scheduleDeferredHabitRestack();
     }, { passive: true });
 
     wrap.addEventListener('pointercancel', (e) => {
-      if (tap && e.pointerId === tap.id) tap = null;
+      if (tap && e.pointerId === tap.pointerId) { tap = null; activeHabitPointerGesture = null; scheduleDeferredHabitRestack(); }
     }, { passive: true });
   }
 
@@ -8537,10 +8530,21 @@ function savePendingHabitState(perfStart = null) {
       interactive: true, deferCompression: true
     }));
     if (result?.skipped || result?.blockedByQuotaCircuit) throw new Error('Compaction save was skipped');
-    if (result?.state) state = result.state;
+    if (result?.state && result.state !== state) {
+      state = result.state;
+      // A compaction may replace completion arrays; never retain derived data for the old object.
+      markCompletionsDirty();
+      storageCache.parsed = state;
+      storageCache.raw = null;
+      scheduleHabitTodayScoreReconciliation();
+    }
     const raw = localStorage.getItem(STORAGE_KEY);
     const persisted = raw ? TaskPointsCore.parseTaskPointsStorageJson(raw, {}) : null;
-    const applied = TaskPointsCore.applyPendingHabitDeltas({ habits: state.habits, completions: state.completions }, journalSnapshot).appliedDeltas;
+    // Verification must not mutate live arrays merely to learn which deltas persisted.
+    const verificationState = typeof structuredClone === 'function'
+      ? structuredClone({ habits: state.habits, completions: state.completions })
+      : JSON.parse(JSON.stringify({ habits: state.habits, completions: state.completions }));
+    const applied = TaskPointsCore.applyPendingHabitDeltas(verificationState, journalSnapshot).appliedDeltas;
     const verified = TaskPointsCore.verifyPersistedHabitDeltas(persisted, journalSnapshot, applied);
     const cleared = TaskPointsCore.clearCompactedHabitDeltas?.(verified) || 0;
     if (window.TP_DEBUG_PERF) console.debug('[TP_DEBUG_PERF] journal-compaction', { ms: Math.round(performance.now() - started), entries: journalSnapshot.length, cleared });
@@ -8586,9 +8590,24 @@ document.addEventListener('click', (event) => {
   if (link) flushPendingHabitSave('before-navigation');
 }, { capture: true });
 
+let habitTodayScoreReconcileId = null;
+function scheduleHabitTodayScoreReconciliation() {
+  if (habitTodayScoreReconcileId) return;
+  habitTodayScoreReconcileId = setTimeout(() => {
+    habitTodayScoreReconcileId = null;
+    const score = __tpGetCurrentTodayScoreForToast();
+    if (Number.isFinite(score)) renderTodayPointsSummary(score, 0, 0);
+  }, 0);
+}
+
 function scheduleHabitRerender() {
   scheduleHabitFullRestackRerender();
   scheduleHabitStatsRefresh();
+}
+
+function scheduleDeferredHabitRestack() {
+  if (activeHabitPointerGesture) return;
+  scheduleHabitFullRestackRerender();
 }
 
 function scheduleHabitFullRestackRerender() {
@@ -8602,6 +8621,7 @@ function scheduleHabitFullRestackRerender() {
     habitFullRerenderDebounceId = null;
     habitFullRerenderAnimationFrameId = requestAnimationFrame(() => {
       habitFullRerenderAnimationFrameId = null;
+      if (activeHabitPointerGesture) { scheduleDeferredHabitRestack(); return; }
       if (window.TP_DEBUG_PERF && perfStart !== null) {
         console.log(`[TP_PERF] tap->fullHabitRerender ${Math.round(performance.now() - perfStart)}ms`);
       }
@@ -8651,6 +8671,21 @@ function getHabitBubbleStatusClass(h, dayKey) {
   }
 
   return 'on';
+}
+
+function applyCanonicalHabitBubbleVisual(bubble, habit, dayKey, statusClass) {
+  // This is deliberately exhaustive: a bubble is a projection of canonical state,
+  // never an incremental collection of classes from previous taps.
+  bubble.classList.remove('on', 'off', 'half', 'failed', 'habit-half', 'icy', 'past-incomplete', 'past-failed');
+  const primary = ['on', 'off', 'half', 'failed'].includes(statusClass) ? statusClass : 'off';
+  bubble.classList.add(primary);
+  const isVice = (habit.category || 'habit') === 'vice';
+  const isPast = dayKey < todayKey();
+  bubble.classList.toggle('habit-half', primary === 'half' && !isVice && !isShowerHabit(habit));
+  bubble.classList.toggle('icy', primary === 'on' && isShowerHabit(habit) && Array.isArray(habit.iceKeys) && habit.iceKeys.includes(dayKey));
+  bubble.classList.toggle('past-incomplete', isPast && primary === 'off');
+  bubble.classList.toggle('past-failed', isPast && isVice && primary === 'failed');
+  applyHabitBubbleStyle(bubble, habit, primary);
 }
 
 function applyHabitBubbleStyle(el, habit, statusClass) {
@@ -8889,7 +8924,8 @@ function handleHabitBubbleTap(bubbleEl) {
 // The older queued-toast path can be off by 0.1 when the rendered island/localStorage
 // baseline is stale during save/rerender races.
 __tpPendingTodayToastOld = null;
-const oldTodayScoreForToast = __tpGetCurrentTodayScoreForToast();
+// The rendered/current optimistic value is only a score baseline, never habit state.
+const oldTodayScoreForToast = __tpGetLastRenderedTodayScore();
 const habitBeforeTap = { doneKeys: [...(h.doneKeys || [])], failedKeys: [...(h.failedKeys || [])], iceKeys: [...(h.iceKeys || [])], updatedAtISO: h.updatedAtISO, completions: state.completions.slice() };
 
 let statusClass;
@@ -8938,10 +8974,8 @@ try {
       h.iceKeys = habitBeforeTap.iceKeys; h.updatedAtISO = habitBeforeTap.updatedAtISO;
       state.completions = habitBeforeTap.completions;
       markCompletionsDirty();
-      bubbleEl.classList.remove('on', 'off', 'failed', 'habit-half', 'icy');
       const revertedStatus = getHabitBubbleStatusClass(h, dayKey);
-      bubbleEl.classList.add(revertedStatus);
-      applyHabitBubbleStyle(bubbleEl, h, revertedStatus);
+      applyCanonicalHabitBubbleVisual(bubbleEl, h, dayKey, revertedStatus);
       refreshHabitRowWeekCompleteVisual(bubbleEl.closest('.habitRow[data-habit-row-id]'), h, weekDays(habitViceBaseDate()));
       alert('This habit change could not be saved.');
       console.error('Habit journal and fallback save failed', journalError, saveError);
@@ -8949,20 +8983,24 @@ try {
     }
   }
 
-const newTodayScoreForToast = __tpGetCurrentTodayScoreForToast();
-__tpToastTodayScoreDeltaFromScores(newTodayScoreForToast, oldTodayScoreForToast);
-
-bubbleEl.classList.remove('on', 'off', 'failed', 'habit-half');
-  bubbleEl.classList.add(statusClass);
-  bubbleEl.classList.toggle('habit-half', statusClass === 'half' && !isShowerHabit(h));
-  const isIcyNow = statusClass === 'on'
-    && Array.isArray(h.iceKeys)
-    && h.iceKeys.includes(dayKey);
-  bubbleEl.classList.toggle('icy', isIcyNow);
-  applyHabitBubbleStyle(bubbleEl, h, statusClass);
+// Journal durability precedes the immediate canonical paint. Do not ask getDerived()
+// or serialize/compress before this projection and its weekly row update.
+applyCanonicalHabitBubbleVisual(bubbleEl, h, dayKey, statusClass);
 
   const row = bubbleEl.closest('.habitRow[data-habit-row-id]');
   refreshHabitRowWeekCompleteVisual(row, h, weekDays(habitViceBaseDate()));
+
+  // Today taps update the island synchronously after the input feedback. This
+  // reconciliation is intentionally after bubble/row painting, never before it.
+  if (dayKey === todayKey()) {
+    const newTodayScoreForToast = __tpGetCurrentTodayScoreForToast();
+    if (Number.isFinite(newTodayScoreForToast)) {
+      renderTodayPointsSummary(newTodayScoreForToast, 0, 0);
+      __tpToastTodayScoreDeltaFromScores(newTodayScoreForToast, oldTodayScoreForToast);
+    }
+  } else {
+    __tpQueueTodayScoreDeltaToast();
+  }
 
   if (window.TP_DEBUG_PERF) {
     console.log('[TP_PERF] habitToggle', {
