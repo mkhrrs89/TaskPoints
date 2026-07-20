@@ -102,6 +102,38 @@ test('compaction clears only deltas applied and verified in main storage', async
   assert.equal(persisted.completions.find(c => c.id === core.habitCompletionId('present', '2026-07-19')).points, 3);
 });
 
+test('vice full legacy fraction and vice failed/off states verify canonically', () => {
+  const habitId = 'vice-check'; const dayKey = '2026-07-19';
+  const full = { id: `vice:${habitId}:${dayKey}`, habitId, dayKey, source: 'vice', status: 'full', done: true, failed: false, icy: false, completionFraction: 1, completionPoints: -2, updatedAtISO: '2026-07-19T12:00:00.000Z' };
+  const persistedFull = { habits: [{ id: habitId, updatedAtISO: full.updatedAtISO, doneKeys: [dayKey], failedKeys: [], iceKeys: [] }], completions: [{ id: core.habitCompletionId(habitId, dayKey), habitId, dayKey, source: 'vice', points: -2 }] };
+  assert.equal(core.verifyPersistedHabitDeltas(persistedFull, [full], [full]).length, 1);
+  const failed = { ...full, status: 'failed', done: false, failed: true, completionPoints: null };
+  const persistedFailed = { habits: [{ id: habitId, updatedAtISO: full.updatedAtISO, doneKeys: [], failedKeys: [dayKey], iceKeys: [] }], completions: [] };
+  assert.equal(core.verifyPersistedHabitDeltas(persistedFailed, [failed], [failed]).length, 1);
+  const off = { ...full, status: 'off', done: false, failed: false, completionPoints: null };
+  const persistedOff = { habits: [{ id: habitId, updatedAtISO: full.updatedAtISO, doneKeys: [], failedKeys: [], iceKeys: [] }], completions: [] };
+  assert.equal(core.verifyPersistedHabitDeltas(persistedOff, [off], [off]).length, 1);
+});
+
+test('three same-habit journal days compact with newest timestamp and clear together', async () => {
+  storage.clear();
+  const habitId = 'many-days';
+  const state = core.normalizeState({ habits: [{ id: habitId, name: 'Many', pointsPerDay: 2, doneKeys: [], failedKeys: [] }], completions: [] });
+  core.saveStateSnapshot(state, { immediateWrite: true });
+  const days = ['2026-07-17', '2026-07-18', '2026-07-19'];
+  days.forEach((dayKey, index) => core.writePendingHabitDelta({ habitId, dayKey, source: 'habit', status: index === 1 ? 'half' : 'full', done: true, failed: false, icy: false, completionFraction: index === 1 ? .5 : 1, completionPoints: index === 1 ? 1 : 2, updatedAtISO: `2026-07-${17 + index}T12:00:00.000Z` }));
+  const loaded = core.loadAppState({ syncDerived: false, persistSync: false }).state;
+  core.schedulePendingHabitDeltaCompaction(loaded, { delayMs: 0 });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  const persisted = core.parseTaskPointsStorageJson(storage.get(core.STORAGE_KEY), {});
+  const habit = persisted.habits.find(item => item.id === habitId);
+  assert.deepEqual(habit.doneKeys.sort(), days);
+  assert.equal(habit.updatedAtISO, '2026-07-19T12:00:00.000Z');
+  assert.equal(persisted.completions.find(c => c.id === core.habitCompletionId(habitId, '2026-07-18')).points, 1);
+  assert.equal(core.readPendingHabitDeltas().length, 0);
+  assert.equal(core.loadAppState({ syncDerived: false, persistSync: false }).state.habits.find(item => item.id === habitId).updatedAtISO, '2026-07-19T12:00:00.000Z');
+});
+
 test('optimized storage chooses and decodes compressed packed JSON without count loss', () => {
   const state = largeState();
   const plan = core.buildOptimizedTaskPointsStorageRaw(state);

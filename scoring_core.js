@@ -57,7 +57,11 @@
     const started = Date.now(); let applied = 0; const appliedDeltas = []; const skippedDeltas = [];
     state.habits = Array.isArray(state.habits) ? state.habits : [];
     state.completions = Array.isArray(state.completions) ? state.completions : [];
-    for (const delta of deltas) {
+    // A habit owns one updatedAtISO. Apply older deltas first so the latest
+    // journal timestamp remains canonical even when entries were inserted out
+    // of chronological order.
+    const orderedDeltas = [...deltas].sort((a, b) => String(a?.updatedAtISO || '').localeCompare(String(b?.updatedAtISO || '')));
+    for (const delta of orderedDeltas) {
       const habit = state.habits.find(h => h && h.id === delta.habitId);
       if (!habit) { skippedDeltas.push(delta); continue; }
       habit.doneKeys = Array.isArray(habit.doneKeys) ? habit.doneKeys.filter(k => k !== delta.dayKey) : [];
@@ -82,6 +86,11 @@
   }
   function verifyPersistedHabitDeltas(persisted, candidates, appliedDeltas = candidates) {
     const allowed = new Set((appliedDeltas || []).map(delta => delta.id));
+    const newestByHabit = new Map();
+    for (const delta of appliedDeltas || []) {
+      const current = newestByHabit.get(delta.habitId);
+      if (!current || String(delta.updatedAtISO || '') > String(current.updatedAtISO || '')) newestByHabit.set(delta.habitId, delta);
+    }
     const verified = [];
     for (const delta of candidates || []) {
       if (!allowed.has(delta.id)) continue;
@@ -91,12 +100,17 @@
       const failed = delta.failed === true || delta.status === 'failed';
       const has = (field) => Array.isArray(habit[field]) && habit[field].includes(delta.dayKey);
       if (has('doneKeys') !== done || has('failedKeys') !== failed || has('iceKeys') !== (delta.icy === true)) continue;
-      if (delta.updatedAtISO && habit.updatedAtISO !== delta.updatedAtISO) continue;
+      // Older day deltas must not fail simply because a newer day correctly
+      // advanced this habit's single timestamp.
+      if (newestByHabit.get(delta.habitId) === delta && delta.updatedAtISO && habit.updatedAtISO !== delta.updatedAtISO) continue;
       const completion = persisted?.completions?.find(item => item?.id === habitCompletionId(delta.habitId, delta.dayKey) && item?.habitId === delta.habitId && item?.dayKey === delta.dayKey && item?.source === delta.source);
       if (!done) { if (completion) continue; verified.push(delta); continue; }
       if (!completion) continue;
       if (Number.isFinite(Number(delta.completionPoints)) && Number(completion.points) !== Number(delta.completionPoints)) continue;
-      if (delta.completionFraction != null && Number(completion.completionFraction) !== Number(delta.completionFraction)) continue;
+      // Legacy full completions omit the fraction; canonical semantics treat
+      // that omission as 1 while retaining strict half-point verification.
+      const persistedFraction = completion.completionFraction == null ? 1 : Number(completion.completionFraction);
+      if (delta.completionFraction != null && persistedFraction !== Number(delta.completionFraction)) continue;
       verified.push(delta);
     }
     return verified;
