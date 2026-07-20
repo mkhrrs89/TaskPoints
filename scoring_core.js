@@ -4,6 +4,13 @@
   const PROJECTS_STORAGE_KEY = "tp_projects_v1";
   const IMAGE_DB_NAME = "taskpoints";
   const IMAGE_STORE_NAME = "images";
+  // This database is deliberately separate from `taskpoints` (the live image
+  // database).  Phase 1 only writes a shadow copy and never reads app state
+  // from it.
+  const SHADOW_MIGRATION_DB_NAME = "taskpoints_shadow_state_v1";
+  const SHADOW_MIGRATION_DB_VERSION = 1;
+  const SHADOW_MIGRATION_SCHEMA_VERSION = 1;
+  const SHADOW_ARRAY_STORES = ["completions", "matchups", "gameHistory", "seasonHistory", "tasks", "habits", "players"];
   const QUARANTINE_SNAPSHOT_KEY = "taskpoints_quarantined_snapshot";
   const QUARANTINE_INLINE_MAX_BYTES = 200 * 1024;
   const BACKUP_SLOT_KEYS = [
@@ -9018,6 +9025,152 @@ if (typeof context.captureEffects === "function") {
 return Number(cappedScore.toFixed(1));
 }
 
+  // Stable serialization makes verification independent of object key order.
+  // The hash is a diagnostic integrity check, not a security primitive.
+  function shadowCanonicalJson(value) {
+    if (Array.isArray(value)) return `[${value.map(shadowCanonicalJson).join(',')}]`;
+    if (value && typeof value === 'object') return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${shadowCanonicalJson(value[key])}`).join(',')}}`;
+    return JSON.stringify(value);
+  }
+  function shadowHash(value) {
+    const text = shadowCanonicalJson(value);
+    let hash = 2166136261;
+    for (let i = 0; i < text.length; i += 1) { hash ^= text.charCodeAt(i); hash = Math.imul(hash, 16777619); }
+    return `${(hash >>> 0).toString(16).padStart(8, '0')}:${text.length}`;
+  }
+  function shadowSourceLayout(state) {
+    const source = state && typeof state === 'object' ? state : {};
+    const arrays = {}, values = {}, collections = {};
+    Object.keys(source).forEach((field) => {
+      if (SHADOW_ARRAY_STORES.includes(field) && Array.isArray(source[field])) arrays[field] = source[field];
+      else if (Array.isArray(source[field])) collections[field] = source[field];
+      else values[field] = source[field];
+    });
+    SHADOW_ARRAY_STORES.forEach(field => { if (!arrays[field]) arrays[field] = []; });
+    return { arrays, values, collections };
+  }
+  function shadowSourceSummary(state) {
+    const layout = shadowSourceLayout(state);
+    const counts = {};
+    Object.entries(layout.arrays).forEach(([field, records]) => { counts[field] = records.length; });
+    Object.entries(layout.collections).forEach(([field, records]) => { counts[field] = records.length; });
+    counts.topLevelValues = Object.keys(layout.values).length;
+    // Hash the migration representation, not the raw source object. Known
+    // empty stores are canonicalized by shadowSourceLayout, so an old snapshot
+    // that omitted (for example) seasonHistory verifies correctly after copy.
+    const canonicalLayout = { arrays: layout.arrays, collections: layout.collections, values: layout.values };
+    return { counts, hashes: { state: shadowHash(canonicalLayout), arrays: Object.fromEntries(Object.entries(layout.arrays).map(([k, v]) => [k, shadowHash(v)])), collections: Object.fromEntries(Object.entries(layout.collections).map(([k, v]) => [k, shadowHash(v)])), values: shadowHash(layout.values) } };
+  }
+  function shadowRequest(request) { return new Promise((resolve, reject) => { request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error || new Error('IndexedDB request failed')); }); }
+  function shadowTransaction(transaction) { return new Promise((resolve, reject) => { transaction.oncomplete = () => resolve(); transaction.onabort = () => reject(transaction.error || new Error('IndexedDB transaction aborted')); transaction.onerror = () => reject(transaction.error || new Error('IndexedDB transaction failed')); }); }
+  function openShadowMigrationDb(indexedDb = global.indexedDB) {
+    if (!indexedDb) return Promise.reject(new Error('IndexedDB is not available.'));
+    return new Promise((resolve, reject) => {
+      const request = indexedDb.open(SHADOW_MIGRATION_DB_NAME, SHADOW_MIGRATION_DB_VERSION);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        [...SHADOW_ARRAY_STORES, 'collections'].forEach(name => { if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: 'key' }); });
+        if (!db.objectStoreNames.contains('values')) db.createObjectStore('values', { keyPath: 'field' });
+        if (!db.objectStoreNames.contains('metadata')) db.createObjectStore('metadata', { keyPath: 'id' });
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error || new Error('Could not open shadow migration database.'));
+    });
+  }
+  async function shadowPutMetadata(db, metadata) {
+    const tx = db.transaction('metadata', 'readwrite'); tx.objectStore('metadata').put({ id: 'current', ...metadata }); await shadowTransaction(tx);
+  }
+  async function shadowReadMetadata(db) {
+    const tx = db.transaction('metadata', 'readonly');
+    return (await shadowRequest(tx.objectStore('metadata').get('current'))) || null;
+  }
+  async function indexedDbExists(indexedDb, name) {
+    // `databases()` lets read-only status/inventory checks avoid creating a DB.
+    if (typeof indexedDb?.databases !== 'function') return null;
+    return (await indexedDb.databases()).some(database => database.name === name);
+  }
+  async function getShadowMigrationStatus(options = {}) {
+    const indexedDb = options.indexedDB || global.indexedDB;
+    const exists = await indexedDbExists(indexedDb, SHADOW_MIGRATION_DB_NAME);
+    if (exists === false) return { status: 'not_started', schemaVersion: SHADOW_MIGRATION_SCHEMA_VERSION };
+    // On older browsers without databases(), do not risk creating a DB merely
+    // to render Settings; the user can explicitly start the migration instead.
+    if (exists === null) return { status: 'not_started', schemaVersion: SHADOW_MIGRATION_SCHEMA_VERSION, availability: 'unknown' };
+    const db = await openShadowMigrationDb(indexedDb);
+    try { return (await shadowReadMetadata(db)) || { status: 'not_started', schemaVersion: SHADOW_MIGRATION_SCHEMA_VERSION }; }
+    finally { db.close?.(); }
+  }
+  async function getImageInventory(indexedDb = global.indexedDB) {
+    if (!indexedDb) throw new Error('IndexedDB is not available.');
+    const exists = await indexedDbExists(indexedDb, IMAGE_DB_NAME);
+    if (exists === false) return { available: false, exists: false, count: 0, totalBytes: 0, ids: [], blobs: [] };
+    if (exists === null) return { available: false, exists: null, count: 0, totalBytes: 0, ids: [], blobs: [], error: 'IndexedDB database enumeration is unavailable.' };
+    // Never pass a version here: opening an existing database at its current
+    // version cannot upgrade/downgrade it, and the existence check prevents a
+    // missing image DB from being created.
+    const db = await new Promise((resolve, reject) => { const request = indexedDb.open(IMAGE_DB_NAME); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error || new Error('Could not inspect image database.')); });
+    try {
+      if (!db.objectStoreNames.contains(IMAGE_STORE_NAME)) return { available: false, exists: true, count: 0, totalBytes: 0, ids: [], blobs: [], error: 'Image store is missing.' };
+      const tx = db.transaction(IMAGE_STORE_NAME, 'readonly'); const store = tx.objectStore(IMAGE_STORE_NAME);
+      const [keys, blobs] = await Promise.all([shadowRequest(store.getAllKeys()), shadowRequest(store.getAll())]);
+      const rows = blobs.map((blob, index) => ({ id: String(keys[index]), blob, bytes: Number(blob?.size) || 0 }));
+      return { available: true, exists: true, count: rows.length, totalBytes: rows.reduce((sum, row) => sum + row.bytes, 0), ids: rows.map(row => row.id), blobs: rows };
+    }
+    finally { db.close?.(); }
+  }
+  function referencedImageIds(state) {
+    const ids = new Set(); if (state?.youImageId) ids.add(String(state.youImageId));
+    const addPlayerImage = player => { if (player?.imageId) ids.add(String(player.imageId)); };
+    (state?.players || []).forEach(addPlayerImage);
+    // The Season UI resolves image IDs from playerPool as a fallback when the
+    // top-level player row is absent or lacks an image.
+    (state?.currentSeason?.playerPool || []).forEach(addPlayerImage);
+    return [...ids].sort();
+  }
+  async function runShadowMigration(options = {}) {
+    const indexedDb = options.indexedDB || global.indexedDB;
+    const storage = options.localStorage || global.localStorage;
+    let source; let db = null;
+    try {
+      // Decode only. Do not normalize or save: localStorage remains byte-for-byte untouched.
+      source = options.state || readTaskPointsStoredState(options.storageKey || STORAGE_KEY, {});
+      db = await openShadowMigrationDb(indexedDb);
+      const previous = (await shadowReadMetadata(db).catch(() => ({}))) || {};
+      const startedAt = new Date().toISOString();
+      const sourceSummary = shadowSourceSummary(source);
+      await shadowPutMetadata(db, { schemaVersion: SHADOW_MIGRATION_SCHEMA_VERSION, sourceFormat: getTaskPointsStorageEncodingInfo(storage?.getItem?.(options.storageKey || STORAGE_KEY) || '').label, startedAt, completionTime: null, status: 'running', errors: [], retries: (Number(previous.retries) || 0) + 1, sourceCounts: sourceSummary.counts, destinationCounts: {}, verification: null });
+      const layout = shadowSourceLayout(source);
+      const stores = [...SHADOW_ARRAY_STORES, 'collections', 'values'];
+      const tx = db.transaction(stores, 'readwrite');
+      [...SHADOW_ARRAY_STORES, 'collections'].forEach(name => tx.objectStore(name).clear()); tx.objectStore('values').clear();
+      Object.entries(layout.arrays).forEach(([field, rows]) => rows.forEach((value, index) => tx.objectStore(field).put({ key: index, value })));
+      Object.entries(layout.collections).forEach(([field, rows]) => rows.forEach((value, index) => tx.objectStore('collections').put({ key: `${field}:${index}`, field, index, value })));
+      Object.entries(layout.values).forEach(([field, value]) => tx.objectStore('values').put({ field, value }));
+      await shadowTransaction(tx);
+      const readTx = db.transaction(stores, 'readonly');
+      // Create every request before awaiting any: some Safari implementations
+      // deactivate an IndexedDB transaction between awaited continuations.
+      const arrayReads = Object.fromEntries(SHADOW_ARRAY_STORES.map(field => [field, shadowRequest(readTx.objectStore(field).getAll())]));
+      const collectionRead = shadowRequest(readTx.objectStore('collections').getAll());
+      const valuesRead = shadowRequest(readTx.objectStore('values').getAll());
+      const [arrayRows, collectionRows, valuesRows] = await Promise.all([Promise.all(SHADOW_ARRAY_STORES.map(field => arrayReads[field])), collectionRead, valuesRead]);
+      const destination = {};
+      SHADOW_ARRAY_STORES.forEach((field, index) => { destination[field] = arrayRows[index].sort((a,b) => a.key - b.key).map(row => row.value); });
+      const rebuilt = {}; Object.entries(destination).forEach(([field, value]) => { rebuilt[field] = value; });
+      collectionRows.forEach(row => { (rebuilt[row.field] ||= [])[row.index] = row.value; }); valuesRows.forEach(row => { rebuilt[row.field] = row.value; });
+      const destinationSummary = shadowSourceSummary(rebuilt);
+      const imageInventory = await getImageInventory(indexedDb); const imageSet = new Set(imageInventory.ids); const referenced = referencedImageIds(source); const missingImageIds = referenced.filter(id => !imageSet.has(id));
+      const verification = { countsMatch: shadowCanonicalJson(sourceSummary.counts) === shadowCanonicalJson(destinationSummary.counts), hashesMatch: sourceSummary.hashes.state === destinationSummary.hashes.state, images: { available: imageInventory.available, total: imageInventory.count, totalBytes: imageInventory.totalBytes, referenced: referenced.length, missingImageIds, unreferencedImageIds: imageInventory.ids.filter(id => !referenced.includes(id)).sort(), error: imageInventory.error || null } };
+      const status = verification.countsMatch && verification.hashesMatch && imageInventory.available && missingImageIds.length === 0 ? 'passed_verification' : 'failed';
+      const metadata = { schemaVersion: SHADOW_MIGRATION_SCHEMA_VERSION, sourceFormat: getTaskPointsStorageEncodingInfo(storage?.getItem?.(options.storageKey || STORAGE_KEY) || '').label, startedAt, completionTime: new Date().toISOString(), status, errors: status === 'failed' ? ['Verification did not pass.'] : [], retries: (Number(previous.retries) || 0) + 1, sourceCounts: sourceSummary.counts, destinationCounts: destinationSummary.counts, verification };
+      await shadowPutMetadata(db, metadata); return metadata;
+    } catch (error) {
+      // Metadata failure is intentionally isolated; no legacy state or images are changed.
+      try { const errorDb = await openShadowMigrationDb(indexedDb); try { await shadowPutMetadata(errorDb, { schemaVersion: SHADOW_MIGRATION_SCHEMA_VERSION, sourceFormat: 'unknown', startedAt: new Date().toISOString(), completionTime: new Date().toISOString(), status: 'failed', errors: [error?.message || String(error)], retries: 1, sourceCounts: {}, destinationCounts: {}, verification: null }); } finally { errorDb.close?.(); } } catch (_) {}
+      return { status: 'failed', errors: [error?.message || String(error)] };
+    } finally { db?.close?.(); }
+  }
+
   global.TaskPointsCore = {
     NPC_SCORE_ABSOLUTE_MIN: NPC_SCORE_LOW_SOFT_CAP_MIN,
     NPC_SCORE_ABSOLUTE_MAX: NPC_SCORE_HIGH_SOFT_CAP_MAX,
@@ -9037,6 +9190,17 @@ return Number(cappedScore.toFixed(1));
     BACKUP_SLOT_KEYS,
     IMAGE_DB_NAME,
     IMAGE_STORE_NAME,
+    SHADOW_MIGRATION_DB_NAME,
+    SHADOW_MIGRATION_DB_VERSION,
+    SHADOW_MIGRATION_SCHEMA_VERSION,
+    shadowCanonicalJson,
+    shadowHash,
+    shadowSourceLayout,
+    shadowSourceSummary,
+    referencedImageIds,
+    getImageInventory,
+    getShadowMigrationStatus,
+    runShadowMigration,
     CATEGORY_DEFS,
     DEFAULT_SCORING_SETTINGS,
     SEASON_STATUSES,
