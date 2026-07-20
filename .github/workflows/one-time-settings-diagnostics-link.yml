@@ -1,6 +1,7 @@
 name: One-time Settings diagnostics link
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
