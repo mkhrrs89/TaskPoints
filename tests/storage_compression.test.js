@@ -158,6 +158,66 @@ test('habit toggles use interactive deferred compression and Storage Health dist
   assert.match(coreSource, /const criticalArrays = \['completions', 'matchups', 'gameHistory', 'seasonHistory', 'weightHistory', 'vo2MaxHistory', 'reminders', 'players', 'habits'\]/);
 });
 
+test('pending habit saves flush the Work On Cal App fixture before navigation or export', () => {
+  storage.clear();
+  const habitId = 'work-on-cal-app';
+  const dayKey = '2026-07-19';
+  const state = core.normalizeState({
+    habits: [{
+      id: habitId,
+      name: 'Work On Cal App',
+      halfPointEnabled: true,
+      daysPerCompleteWeek: 5,
+      tag: 'Vibe Coding',
+      doneKeys: ['2026-07-13', '2026-07-14', '2026-07-15', '2026-07-16', '2026-07-17', '2026-07-18'],
+      updatedAtISO: '2026-07-18T12:00:00.000Z'
+    }],
+    completions: [
+      { id: `habit:${habitId}:2026-07-17`, source: 'habit', habitId, dayKey: '2026-07-17', completionFraction: 0.5 },
+      { id: `habit:${habitId}:2026-07-18`, source: 'habit', habitId, dayKey: '2026-07-18', completionFraction: 0.5 }
+    ]
+  });
+
+  // Simulate the first tap's in-memory mutation, then the synchronous flush.
+  const habit = state.habits[0];
+  habit.doneKeys.push(dayKey);
+  habit.updatedAtISO = '2026-07-19T12:00:00.000Z';
+  state.completions.push({
+    id: `habit:${habitId}:${dayKey}`,
+    taskId: `habit:${habitId}:${dayKey}`,
+    source: 'habit', habitId, dayKey,
+    completionFraction: 1,
+    completedAtISO: '2026-07-19T12:00:00.000Z'
+  });
+  core.saveStateSnapshot(state, {
+    storageKey: core.STORAGE_KEY,
+    immediateWrite: true,
+    userInitiated: true,
+    replaceCompletions: true,
+    interactive: true,
+    deferCompression: true
+  });
+
+  const reloaded = core.readTaskPointsStoredState(core.STORAGE_KEY, {});
+  const savedHabit = reloaded.habits.find((item) => item.id === habitId);
+  assert.ok(savedHabit.doneKeys.includes(dayKey));
+  assert.equal(savedHabit.updatedAtISO, '2026-07-19T12:00:00.000Z');
+  assert.ok(reloaded.completions.some((item) => item.id === `habit:${habitId}:${dayKey}`));
+
+  const indexSource = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  assert.match(indexSource, /function flushPendingHabitSave\(reason = 'manual'\)[\s\S]*?clearTimeout\(habitSaveDebounceId\)[\s\S]*?savePendingHabitState/);
+  assert.match(indexSource, /flushPendingHabitSave\('pagehide'\)/);
+  assert.match(indexSource, /flushPendingHabitSave\('visibilitychange'\)/);
+  assert.match(indexSource, /flushPendingHabitSave\('before-navigation'\)/);
+  assert.match(indexSource, /function getTaskPointsExportSnapshot\(\) \{[\s\S]*?flushPendingHabitSave\('before-export'\)/);
+});
+
+test('completed-week stack decorations cannot intercept habit taps', () => {
+  const stylesSource = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
+  assert.match(stylesSource, /\.habitWeekCompleteStack::before\s*\{[\s\S]*?pointer-events:\s*none;/);
+  assert.match(stylesSource, /\.habitWeekCompleteStack::after\s*\{[\s\S]*?pointer-events:\s*none;/);
+});
+
 test('habit tap rerenders defer full DOM work while preserving immediate weekly feedback', () => {
   const indexSource = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 
