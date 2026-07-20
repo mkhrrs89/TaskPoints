@@ -1,0 +1,57 @@
+name: One-time Settings diagnostics link
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/one-time-settings-diagnostics-link.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-settings:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Add direct diagnostics link to Settings
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('settings.html')
+          text = path.read_text(encoding='utf-8')
+
+          old = '''            <a href="archive.html" class="btn btn-teal btn-toolbar nav-btn">Archive</a>
+            <a href="trash.html" class="btn btn-teal btn-toolbar nav-btn">Trash</a>'''
+          new = '''            <a href="archive.html" class="btn btn-teal btn-toolbar nav-btn">Archive</a>
+            <a href="trash.html" class="btn btn-teal btn-toolbar nav-btn">Trash</a>
+            <a href="storage_diagnostics.html" class="btn btn-teal btn-toolbar nav-btn">Storage Diagnostics</a>'''
+
+          if new in text:
+              print('Storage Diagnostics link is already present.')
+          elif old in text:
+              path.write_text(text.replace(old, new, 1), encoding='utf-8')
+              print('Added Storage Diagnostics link directly to Settings.')
+          else:
+              raise SystemExit('Expected Settings navigation block was not found; refusing to modify the file.')
+          PY
+
+      - name: Commit Settings link
+        shell: bash
+        run: |
+          if git diff --quiet -- settings.html; then
+            echo "No Settings change was necessary."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add settings.html
+          git commit -m "Add direct storage diagnostics link to Settings"
+          git push origin HEAD:main
