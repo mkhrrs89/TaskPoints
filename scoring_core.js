@@ -9055,7 +9055,11 @@ return Number(cappedScore.toFixed(1));
     Object.entries(layout.arrays).forEach(([field, records]) => { counts[field] = records.length; });
     Object.entries(layout.collections).forEach(([field, records]) => { counts[field] = records.length; });
     counts.topLevelValues = Object.keys(layout.values).length;
-    return { counts, hashes: { state: shadowHash(state), arrays: Object.fromEntries(Object.entries(layout.arrays).map(([k, v]) => [k, shadowHash(v)])), collections: Object.fromEntries(Object.entries(layout.collections).map(([k, v]) => [k, shadowHash(v)])), values: shadowHash(layout.values) } };
+    // Hash the migration representation, not the raw source object. Known
+    // empty stores are canonicalized by shadowSourceLayout, so an old snapshot
+    // that omitted (for example) seasonHistory verifies correctly after copy.
+    const canonicalLayout = { arrays: layout.arrays, collections: layout.collections, values: layout.values };
+    return { counts, hashes: { state: shadowHash(canonicalLayout), arrays: Object.fromEntries(Object.entries(layout.arrays).map(([k, v]) => [k, shadowHash(v)])), collections: Object.fromEntries(Object.entries(layout.collections).map(([k, v]) => [k, shadowHash(v)])), values: shadowHash(layout.values) } };
   }
   function shadowRequest(request) { return new Promise((resolve, reject) => { request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error || new Error('IndexedDB request failed')); }); }
   function shadowTransaction(transaction) { return new Promise((resolve, reject) => { transaction.oncomplete = () => resolve(); transaction.onabort = () => reject(transaction.error || new Error('IndexedDB transaction aborted')); transaction.onerror = () => reject(transaction.error || new Error('IndexedDB transaction failed')); }); }
@@ -9116,7 +9120,12 @@ return Number(cappedScore.toFixed(1));
   }
   function referencedImageIds(state) {
     const ids = new Set(); if (state?.youImageId) ids.add(String(state.youImageId));
-    (state?.players || []).forEach(player => { if (player?.imageId) ids.add(String(player.imageId)); }); return [...ids].sort();
+    const addPlayerImage = player => { if (player?.imageId) ids.add(String(player.imageId)); };
+    (state?.players || []).forEach(addPlayerImage);
+    // The Season UI resolves image IDs from playerPool as a fallback when the
+    // top-level player row is absent or lacks an image.
+    (state?.currentSeason?.playerPool || []).forEach(addPlayerImage);
+    return [...ids].sort();
   }
   async function runShadowMigration(options = {}) {
     const indexedDb = options.indexedDB || global.indexedDB;
@@ -9138,9 +9147,15 @@ return Number(cappedScore.toFixed(1));
       Object.entries(layout.collections).forEach(([field, rows]) => rows.forEach((value, index) => tx.objectStore('collections').put({ key: `${field}:${index}`, field, index, value })));
       Object.entries(layout.values).forEach(([field, value]) => tx.objectStore('values').put({ field, value }));
       await shadowTransaction(tx);
-      const readTx = db.transaction(stores, 'readonly'); const destination = {};
-      for (const field of SHADOW_ARRAY_STORES) destination[field] = (await shadowRequest(readTx.objectStore(field).getAll())).sort((a,b) => a.key - b.key).map(row => row.value);
-      const collectionRows = await shadowRequest(readTx.objectStore('collections').getAll()); const valuesRows = await shadowRequest(readTx.objectStore('values').getAll());
+      const readTx = db.transaction(stores, 'readonly');
+      // Create every request before awaiting any: some Safari implementations
+      // deactivate an IndexedDB transaction between awaited continuations.
+      const arrayReads = Object.fromEntries(SHADOW_ARRAY_STORES.map(field => [field, shadowRequest(readTx.objectStore(field).getAll())]));
+      const collectionRead = shadowRequest(readTx.objectStore('collections').getAll());
+      const valuesRead = shadowRequest(readTx.objectStore('values').getAll());
+      const [arrayRows, collectionRows, valuesRows] = await Promise.all([Promise.all(SHADOW_ARRAY_STORES.map(field => arrayReads[field])), collectionRead, valuesRead]);
+      const destination = {};
+      SHADOW_ARRAY_STORES.forEach((field, index) => { destination[field] = arrayRows[index].sort((a,b) => a.key - b.key).map(row => row.value); });
       const rebuilt = {}; Object.entries(destination).forEach(([field, value]) => { rebuilt[field] = value; });
       collectionRows.forEach(row => { (rebuilt[row.field] ||= [])[row.index] = row.value; }); valuesRows.forEach(row => { rebuilt[row.field] = row.value; });
       const destinationSummary = shadowSourceSummary(rebuilt);
