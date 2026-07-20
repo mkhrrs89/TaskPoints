@@ -402,3 +402,37 @@ test('habit score synchronization keeps detached pre-tap snapshots and coalesced
   assert.match(source, /habitTodayScoreReconcileFrameId === null && habitTodayScoreReconcileId === null/);
   assert.match(source, /__tpOptimisticTodayScore = roundedTodayScore;/);
 });
+
+test('failed habit save rollback restores only the exact affected completion snapshot', () => {
+  const indexSource = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const match = indexSource.match(/function restoreHabitDayAfterFailedSave\([\s\S]*?\n}\n\nfunction handleHabitBubbleTap/);
+  assert.ok(match, 'targeted rollback helper is present');
+  const helperSource = match[0].replace(/\nfunction handleHabitBubbleTap$/, '');
+  let dirtyCalls = 0;
+  const restore = new Function('markCompletionsDirty', `${helperSource}; return restoreHabitDayAfterFailedSave;`)(() => { dirtyCalls += 1; });
+  const dayKey = '2026-07-20';
+  const unrelated = { id: 'task:other', source: 'task', points: 9 };
+  const full = { id: 'habit:shower:2026-07-20', source: 'habit', habitId: 'shower', dayKey, points: 3 };
+  const state = { completions: [unrelated, { ...full, points: 3.5 }] };
+  const shower = { doneKeys: [dayKey], failedKeys: [], iceKeys: [dayKey], updatedAtISO: 'changed' };
+  restore(state, shower, { doneKeys: [dayKey], failedKeys: [], iceKeys: [], updatedAtISO: 'original' }, full, 'shower', dayKey);
+  assert.deepEqual(shower, { doneKeys: [dayKey], failedKeys: [], iceKeys: [], updatedAtISO: 'original' });
+  assert.equal(state.completions.filter(c => c.habitId === 'shower' && c.dayKey === dayKey).length, 1);
+  assert.equal(state.completions.find(c => c.habitId === 'shower').points, 3);
+  assert.strictEqual(state.completions.find(c => c.id === unrelated.id), unrelated);
+
+  const cases = [
+    { name: 'full to half', before: { doneKeys: [dayKey], failedKeys: [], iceKeys: [] }, current: { doneKeys: [dayKey], failedKeys: [], iceKeys: [] }, completion: { source: 'habit', habitId: 'normal', dayKey, points: 4, completionFraction: 1 } },
+    { name: 'half to off', before: { doneKeys: [dayKey], failedKeys: [], iceKeys: [] }, current: { doneKeys: [], failedKeys: [], iceKeys: [] }, completion: { source: 'habit', habitId: 'normal', dayKey, points: 2, completionFraction: .5 } },
+    { name: 'vice completed to failed', before: { doneKeys: [dayKey], failedKeys: [], iceKeys: [] }, current: { doneKeys: [], failedKeys: [dayKey], iceKeys: [] }, completion: { source: 'vice', habitId: 'vice', dayKey, points: 2 } }
+  ];
+  cases.forEach(({ before, current, completion }) => {
+    const appState = { completions: [] };
+    const habit = { ...current, updatedAtISO: 'changed' };
+    restore(appState, habit, { ...before, updatedAtISO: 'original' }, completion, completion.habitId, dayKey);
+    assert.deepEqual(habit.doneKeys, before.doneKeys);
+    assert.deepEqual(habit.failedKeys, before.failedKeys);
+    assert.deepEqual(appState.completions, [completion]);
+  });
+  assert.equal(dirtyCalls, 4);
+});

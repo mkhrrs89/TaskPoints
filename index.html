@@ -8948,6 +8948,25 @@ if (dayKey === todayKey()) {
   return getHabitBubbleStatusClass(h, dayKey);
 }
 
+function restoreHabitDayAfterFailedSave(appState, habit, beforeHabit, beforeCompletion, habitId, dayKey) {
+  // Only replace the one mutable completion that this tap could have touched.
+  // This preserves object identity and data for every unrelated history entry.
+  const completions = Array.isArray(appState.completions) ? appState.completions : [];
+  for (let index = completions.length - 1; index >= 0; index--) {
+    const completion = completions[index];
+    if ((completion?.source === 'habit' || completion?.source === 'vice') &&
+        completion?.habitId === habitId && completion?.dayKey === dayKey) {
+      completions.splice(index, 1);
+    }
+  }
+  if (beforeCompletion) completions.unshift({ ...beforeCompletion });
+  habit.doneKeys = [...beforeHabit.doneKeys];
+  habit.failedKeys = [...beforeHabit.failedKeys];
+  habit.iceKeys = [...beforeHabit.iceKeys];
+  habit.updatedAtISO = beforeHabit.updatedAtISO;
+  markCompletionsDirty();
+}
+
 function handleHabitBubbleTap(bubbleEl) {
   const habitId = bubbleEl.getAttribute('data-habit');
   const dayKey = bubbleEl.getAttribute('data-day');
@@ -8970,7 +8989,7 @@ const oldTodayScoreForToast = __tpOptimisticTodayScore ?? __tpGetLastRenderedTod
 const existingCompletion = state.completions.find(c => (c?.source === 'habit' || c?.source === 'vice') && c.habitId === habitId && c.dayKey === dayKey);
 const completionBeforeTap = existingCompletion ? { ...existingCompletion } : null;
 const habitBeforeScoring = { ...h, doneKeys: [...(h.doneKeys || [])], failedKeys: [...(h.failedKeys || [])], iceKeys: [...(h.iceKeys || [])] };
-const habitBeforeTap = { doneKeys: [...(h.doneKeys || [])], failedKeys: [...(h.failedKeys || [])], iceKeys: [...(h.iceKeys || [])], updatedAtISO: h.updatedAtISO, completions: state.completions.slice() };
+const habitBeforeTap = { doneKeys: [...(h.doneKeys || [])], failedKeys: [...(h.failedKeys || [])], iceKeys: [...(h.iceKeys || [])], updatedAtISO: h.updatedAtISO };
 
 let statusClass;
 __tpSuppressQueuedTodayScoreToast = true;
@@ -9014,10 +9033,7 @@ try {
       const persistedCompletion = persisted.completions?.find(item => item?.id === completionId && item?.habitId === habitId && item?.dayKey === dayKey && item?.source === journalDelta.source);
       if (!persistedHabit || !TaskPointsCore.verifyPersistedHabitDeltas(persisted, [journalDelta], [journalDelta]).length || (journalDelta.done && !persistedCompletion)) throw new Error('Fallback save readback did not contain the habit change');
     } catch (saveError) {
-      h.doneKeys = habitBeforeTap.doneKeys; h.failedKeys = habitBeforeTap.failedKeys;
-      h.iceKeys = habitBeforeTap.iceKeys; h.updatedAtISO = habitBeforeTap.updatedAtISO;
-      state.completions = habitBeforeTap.completions;
-      markCompletionsDirty();
+      restoreHabitDayAfterFailedSave(state, h, habitBeforeTap, completionBeforeTap, habitId, dayKey);
       const revertedStatus = getHabitBubbleStatusClass(h, dayKey);
       applyCanonicalHabitBubbleVisual(bubbleEl, h, dayKey, revertedStatus);
       refreshHabitRowWeekCompleteVisual(bubbleEl.closest('.habitRow[data-habit-row-id]'), h, weekDays(habitViceBaseDate()));
