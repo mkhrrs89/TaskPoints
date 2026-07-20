@@ -7780,7 +7780,7 @@ if (!habitTapHandlerBound) {
     tap = null; activeHabitPointerGesture = null;
     // Compare stable identity, not a DOM node that a delayed render may replace.
     const ended = e.target.closest('.habitDay[data-habit][data-day]');
-    if (gesture.moved || (ended && (ended.dataset.habit !== gesture.habitId || ended.dataset.day !== gesture.dayKey))) {
+    if (gesture.moved || !ended || ended.dataset.habit !== gesture.habitId || ended.dataset.day !== gesture.dayKey) {
       scheduleDeferredHabitRestack(); return;
     }
     const bubble = wrap.querySelector(`.habitDay[data-habit="${CSS.escape(gesture.habitId)}"][data-day="${CSS.escape(gesture.dayKey)}"]`);
@@ -7788,9 +7788,15 @@ if (!habitTapHandlerBound) {
     scheduleDeferredHabitRestack();
   }, { passive: true });
 
-  wrap.addEventListener('pointercancel', (e) => {
-    if (tap && e.pointerId === tap.pointerId) { tap = null; activeHabitPointerGesture = null; scheduleDeferredHabitRestack(); }
-  }, { passive: true });
+  const clearHabitGestureFromDocument = (e) => {
+    if (!tap || e.pointerId !== tap.pointerId) return;
+    tap = null; activeHabitPointerGesture = null;
+    scheduleDeferredHabitRestack();
+  };
+  wrap.addEventListener('pointercancel', clearHabitGestureFromDocument, { passive: true });
+  // A release outside the list does not bubble through wrap; clean it up without toggling.
+  document.addEventListener('pointerup', clearHabitGestureFromDocument, { passive: true });
+  document.addEventListener('pointercancel', clearHabitGestureFromDocument, { passive: true });
 }
 }
 
@@ -7982,7 +7988,7 @@ const nameHtml = `
       const gesture = tap;
       tap = null; activeHabitPointerGesture = null;
       const ended = getViceBubble(e);
-      if (gesture.moved || (ended && (ended.dataset.habit !== gesture.habitId || ended.dataset.day !== gesture.dayKey))) {
+      if (gesture.moved || !ended || ended.dataset.habit !== gesture.habitId || ended.dataset.day !== gesture.dayKey) {
         scheduleDeferredHabitRestack(); return;
       }
       const bubble = wrap.querySelector(`.habitDay.viceDay[data-habit="${CSS.escape(gesture.habitId)}"][data-day="${CSS.escape(gesture.dayKey)}"]`);
@@ -7990,9 +7996,14 @@ const nameHtml = `
       scheduleDeferredHabitRestack();
     }, { passive: true });
 
-    wrap.addEventListener('pointercancel', (e) => {
-      if (tap && e.pointerId === tap.pointerId) { tap = null; activeHabitPointerGesture = null; scheduleDeferredHabitRestack(); }
-    }, { passive: true });
+    const clearViceGestureFromDocument = (e) => {
+      if (!tap || e.pointerId !== tap.pointerId) return;
+      tap = null; activeHabitPointerGesture = null;
+      scheduleDeferredHabitRestack();
+    };
+    wrap.addEventListener('pointercancel', clearViceGestureFromDocument, { passive: true });
+    document.addEventListener('pointerup', clearViceGestureFromDocument, { passive: true });
+    document.addEventListener('pointercancel', clearViceGestureFromDocument, { passive: true });
   }
 
 
@@ -8540,12 +8551,11 @@ function savePendingHabitState(perfStart = null) {
     }
     const raw = localStorage.getItem(STORAGE_KEY);
     const persisted = raw ? TaskPointsCore.parseTaskPointsStorageJson(raw, {}) : null;
-    // Verification must not mutate live arrays merely to learn which deltas persisted.
-    const verificationState = typeof structuredClone === 'function'
-      ? structuredClone({ habits: state.habits, completions: state.completions })
-      : JSON.parse(JSON.stringify({ habits: state.habits, completions: state.completions }));
-    const applied = TaskPointsCore.applyPendingHabitDeltas(verificationState, journalSnapshot).appliedDeltas;
-    const verified = TaskPointsCore.verifyPersistedHabitDeltas(persisted, journalSnapshot, applied);
+    // The live state is already final. Candidate selection is pure; verification
+    // compares those journal entries directly to the parsed persisted snapshot.
+    const habitIds = new Set((state.habits || []).map(habit => habit?.id).filter(Boolean));
+    const candidates = journalSnapshot.filter(delta => habitIds.has(delta?.habitId));
+    const verified = TaskPointsCore.verifyPersistedHabitDeltas(persisted, candidates, candidates);
     const cleared = TaskPointsCore.clearCompactedHabitDeltas?.(verified) || 0;
     if (window.TP_DEBUG_PERF) console.debug('[TP_DEBUG_PERF] journal-compaction', { ms: Math.round(performance.now() - started), entries: journalSnapshot.length, cleared });
   } catch (error) {
@@ -8591,13 +8601,26 @@ document.addEventListener('click', (event) => {
 }, { capture: true });
 
 let habitTodayScoreReconcileId = null;
+let __tpOptimisticTodayScore = null;
+function renderTodayScoreValueOnly(todayPoints) {
+  const score = Math.round(Number(todayPoints) * 10) / 10;
+  if (!Number.isFinite(score)) return;
+  const text = score.toLocaleString(undefined, { maximumFractionDigits: 1 });
+  const today = $('todayPoints'); if (today) today.textContent = text;
+  const island = $('todayScoreIslandValue'); if (island) island.textContent = score.toFixed(1);
+  try { localStorage.setItem('tpTodayScore', score.toFixed(1)); } catch (e) {}
+  window.__tpLastRenderedTodayScore = score;
+  __tpOptimisticTodayScore = score;
+}
 function scheduleHabitTodayScoreReconciliation() {
   if (habitTodayScoreReconcileId) return;
-  habitTodayScoreReconcileId = setTimeout(() => {
+  requestAnimationFrame(() => { habitTodayScoreReconcileId = setTimeout(() => {
     habitTodayScoreReconcileId = null;
     const score = __tpGetCurrentTodayScoreForToast();
-    if (Number.isFinite(score)) renderTodayPointsSummary(score, 0, 0);
-  }, 0);
+    if (!Number.isFinite(score)) return;
+    renderTodayScoreValueOnly(score);
+    __tpConsumeQueuedTodayScoreToast(score);
+  }, 0); });
 }
 
 function scheduleHabitRerender() {
@@ -8923,9 +8946,10 @@ function handleHabitBubbleTap(bubbleEl) {
 // Use the actual current score before/after the tap for the toast.
 // The older queued-toast path can be off by 0.1 when the rendered island/localStorage
 // baseline is stale during save/rerender races.
-__tpPendingTodayToastOld = null;
 // The rendered/current optimistic value is only a score baseline, never habit state.
-const oldTodayScoreForToast = __tpGetLastRenderedTodayScore();
+const oldTodayScoreForToast = __tpOptimisticTodayScore ?? __tpGetLastRenderedTodayScore();
+const completionBeforeTap = state.completions.find(c => (c?.source === 'habit' || c?.source === 'vice') && c.habitId === habitId && c.dayKey === dayKey);
+const habitBeforeScoring = { ...h, doneKeys: [...(h.doneKeys || [])], failedKeys: [...(h.failedKeys || [])], iceKeys: [...(h.iceKeys || [])] };
 const habitBeforeTap = { doneKeys: [...(h.doneKeys || [])], failedKeys: [...(h.failedKeys || [])], iceKeys: [...(h.iceKeys || [])], updatedAtISO: h.updatedAtISO, completions: state.completions.slice() };
 
 let statusClass;
@@ -8990,16 +9014,19 @@ applyCanonicalHabitBubbleVisual(bubbleEl, h, dayKey, statusClass);
   const row = bubbleEl.closest('.habitRow[data-habit-row-id]');
   refreshHabitRowWeekCompleteVisual(row, h, weekDays(habitViceBaseDate()));
 
-  // Today taps update the island synchronously after the input feedback. This
-  // reconciliation is intentionally after bubble/row painting, never before it.
+  // Score only this completion. pointsForCompletion is the canonical scoring
+  // helper (including half, icy stored points, vice, and streak multipliers).
   if (dayKey === todayKey()) {
-    const newTodayScoreForToast = __tpGetCurrentTodayScoreForToast();
-    if (Number.isFinite(newTodayScoreForToast)) {
-      renderTodayPointsSummary(newTodayScoreForToast, 0, 0);
-      __tpToastTodayScoreDeltaFromScores(newTodayScoreForToast, oldTodayScoreForToast);
-    }
+    const scoringStateBefore = { ...state, habits: state.habits.map(item => item.id === habitId ? habitBeforeScoring : item) };
+    const beforePoints = completionBeforeTap ? Number(TaskPointsCore.pointsForCompletion(completionBeforeTap, scoringStateBefore)) || 0 : 0;
+    const afterPoints = finalCompletion ? Number(TaskPointsCore.pointsForCompletion(finalCompletion, state)) || 0 : 0;
+    const delta = Math.round((afterPoints - beforePoints) * 10) / 10;
+    const baseline = Number.isFinite(oldTodayScoreForToast) ? oldTodayScoreForToast : 0;
+    renderTodayScoreValueOnly(baseline + delta);
+    if (delta) showPointsToast(delta);
   } else {
     __tpQueueTodayScoreDeltaToast();
+    scheduleHabitTodayScoreReconciliation();
   }
 
   if (window.TP_DEBUG_PERF) {

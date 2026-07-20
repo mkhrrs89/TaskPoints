@@ -336,3 +336,40 @@ test('habit tap rerenders defer full DOM work while preserving immediate weekly 
   assert.match(indexSource, /tap->fullHabitRerender/);
   assert.match(indexSource, /tap->statsRefresh/);
 });
+
+test('canonical habit bubble visual projection clears stale classes through executable state cycles', () => {
+  const indexSource = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const match = indexSource.match(/function applyCanonicalHabitBubbleVisual\([\s\S]*?\n}\n\nfunction applyHabitBubbleStyle/);
+  assert.ok(match, 'canonical visual helper is present');
+  const helperSource = match[0].replace(/\nfunction applyHabitBubbleStyle$/, '');
+  class ClassList {
+    constructor(values = []) { this.values = new Set(values); }
+    remove(...values) { values.forEach(value => this.values.delete(value)); }
+    add(...values) { values.forEach(value => this.values.add(value)); }
+    toggle(value, enabled) { if (enabled) this.add(value); else this.remove(value); }
+    contains(value) { return this.values.has(value); }
+  }
+  const bubble = { classList: new ClassList(['off', 'half', 'habit-half', 'past-incomplete']), removeAttribute() {}, setAttribute() {} };
+  const helper = new Function('todayKey', 'isShowerHabit', 'applyHabitBubbleStyle', `${helperSource}; return applyCanonicalHabitBubbleVisual;`)(
+    () => '2026-07-20', habit => habit.name === 'Shower', () => {}
+  );
+  const primary = () => ['on', 'off', 'half', 'failed'].filter(value => bubble.classList.contains(value));
+  const habit = { category: 'habit', name: 'Work', iceKeys: [] };
+  ['on', 'half', 'off', 'on'].forEach(status => {
+    helper(bubble, habit, '2026-07-20', status);
+    assert.deepEqual(primary(), [status]);
+    assert.equal(bubble.classList.contains('habit-half'), status === 'half');
+  });
+  const vice = { category: 'vice', name: 'Vice', iceKeys: [] };
+  ['on', 'failed', 'off'].forEach(status => {
+    helper(bubble, vice, '2026-07-19', status);
+    assert.deepEqual(primary(), [status]);
+    assert.equal(bubble.classList.contains('past-failed'), status === 'failed');
+  });
+  const shower = { category: 'habit', name: 'Shower', iceKeys: ['2026-07-20'] };
+  helper(bubble, shower, '2026-07-20', 'on');
+  assert.equal(bubble.classList.contains('icy'), true);
+  helper(bubble, shower, '2026-07-20', 'off');
+  assert.deepEqual(primary(), ['off']);
+  assert.equal(bubble.classList.contains('icy'), false);
+});
