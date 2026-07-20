@@ -1412,6 +1412,7 @@ Nothing visible on the page is built here. === -->
 <script src="scoring_core.js"></script>  
 <script>
 const STORAGE_KEY="taskpoints_v1";
+const PENDING_HABIT_DELTAS_KEY="taskpoints_pending_habit_deltas_v1";
 const OLD_PLAYERS_KEY="taskpoints_players";
 const PROJECTS_STORAGE_KEY="tp_projects_v1";
 const TODAY_STORE_KEY="taskpoints_today_view_v1";
@@ -2894,7 +2895,8 @@ function getCachedStorageState() {
   if (!raw) return null;
 
   if (__TP_PERF_BOOT) console.time('LOAD: JSON.parse');
-  const parsed = TaskPointsCore.parseTaskPointsStorageJson(raw, {});
+  // Shared loader replays the habit journal before this page derives or paints.
+  const parsed = TaskPointsCore.loadAppState({ syncDerived: false, persistSync: false }).state;
   if (__TP_PERF_BOOT) console.timeEnd('LOAD: JSON.parse');
 
   storageCache.raw = raw;
@@ -8510,7 +8512,8 @@ function deferAfterPaint(fn) {
 function scheduleHabitSave() {
   if (habitSaveDebounceId) clearTimeout(habitSaveDebounceId);
   const perfStart = window.TP_DEBUG_PERF ? habitLastTapPerfStart : null;
-
+  // The journal is already synchronous.  This is only one idle compaction for
+  // the entire burst, never a full save on an input event.
   habitSaveDebounceId = setTimeout(() => {
     habitSaveDebounceId = null;
     habitSaveDeferred = true;
@@ -8518,25 +8521,36 @@ function scheduleHabitSave() {
       habitSaveDeferred = false;
       savePendingHabitState(perfStart);
     });
-  }, 25);
+  }, 3000);
 }
 
 // Keep the interactive path fast, but use this exact same write when a page
 // transition or export cannot wait for the debounce/idle callback.
 function savePendingHabitState(perfStart = null) {
-  // Habit toggles intentionally remove/replace completion rows when cycling:
-  // off -> full -> half -> off. Save a full current snapshot so a visible tap
-  // can never be replaced by an older localStorage snapshot.
-  save('habit-toggle', {
-    immediateWrite: true,
-    userInitiated: true,
-    replaceCompletions: true,
-    interactive: true,
-    deferCompression: true
-  });
+  const journalSnapshot = TaskPointsCore?.readPendingHabitDeltas?.() || [];
+  if (!journalSnapshot.length) return;
+  const started = performance.now();
+  try {
+    // Verification is intentionally retained here, after the burst.
+    const result = TaskPointsCore.saveStateSnapshot(state, buildHomeSaveOptions('habit-journal-compaction', {
+      immediateWrite: true, userInitiated: true, replaceCompletions: true,
+      interactive: true, deferCompression: true
+    }));
+    if (result?.skipped || result?.blockedByQuotaCircuit) throw new Error('Compaction save was skipped');
+    if (result?.state) state = result.state;
+    const raw = localStorage.getItem(STORAGE_KEY);
+    const persisted = raw ? TaskPointsCore.parseTaskPointsStorageJson(raw, {}) : null;
+    const applied = TaskPointsCore.applyPendingHabitDeltas({ habits: state.habits, completions: state.completions }, journalSnapshot).appliedDeltas;
+    const verified = TaskPointsCore.verifyPersistedHabitDeltas(persisted, journalSnapshot, applied);
+    const cleared = TaskPointsCore.clearCompactedHabitDeltas?.(verified) || 0;
+    if (window.TP_DEBUG_PERF) console.debug('[TP_DEBUG_PERF] journal-compaction', { ms: Math.round(performance.now() - started), entries: journalSnapshot.length, cleared });
+  } catch (error) {
+    // Keep the journal intact: a reload will replay every pending tap.
+    console.warn('Habit journal compaction failed; pending changes retained.', error);
+  }
 
   if (window.TP_DEBUG_PERF && perfStart !== null) {
-    console.log(`[TP_PERF] tap->save ${Math.round(performance.now() - perfStart)}ms`);
+    console.log(`[TP_PERF] tapBurst->fullStateCompaction ${Math.round(performance.now() - perfStart)}ms`);
   }
 }
 
@@ -8548,12 +8562,9 @@ function flushPendingHabitSave(reason = 'manual') {
     habitSaveDebounceId = null;
   }
 
-  // A timer may already have handed work to deferAfterPaint. Writing again is
-  // safe and makes the current in-memory state durable before a transition.
-  if (hadPendingSave) {
-    habitSaveDeferred = false;
-    savePendingHabitState(window.TP_DEBUG_PERF ? habitLastTapPerfStart : null);
-  }
+  // Navigation/backgrounding never needs a heavy synchronous state write: the
+  // journal was committed before the bubble was painted.  A pending idle save
+  // is allowed to happen naturally when the page remains alive.
 
   if (window.TP_DEBUG_PERF) {
     console.log(`[TP_PERF] habitSaveFlush reason=${reason} pending=${hadPendingSave}`);
@@ -8879,6 +8890,7 @@ function handleHabitBubbleTap(bubbleEl) {
 // baseline is stale during save/rerender races.
 __tpPendingTodayToastOld = null;
 const oldTodayScoreForToast = __tpGetCurrentTodayScoreForToast();
+const habitBeforeTap = { doneKeys: [...(h.doneKeys || [])], failedKeys: [...(h.failedKeys || [])], iceKeys: [...(h.iceKeys || [])], updatedAtISO: h.updatedAtISO, completions: state.completions.slice() };
 
 let statusClass;
 __tpSuppressQueuedTodayScoreToast = true;
@@ -8887,6 +8899,55 @@ try {
 } finally {
   __tpSuppressQueuedTodayScoreToast = false;
 }
+
+  // Write the final value, not a toggle operation, so repeated taps coalesce
+  // and replay is deterministic. This is synchronous and precedes all visual
+  // feedback and deferred work.
+  const journalStatus = statusClass === 'on' ? 'full' : statusClass;
+  const finalCompletion = state.completions.find(c => (c?.source === 'habit' || c?.source === 'vice') && c.habitId === habitId && c.dayKey === dayKey);
+  const journalDelta = {
+    id: `${(h.category || 'habit') === 'vice' ? 'vice' : 'habit'}:${habitId}:${dayKey}`,
+    habitId, dayKey, source: (h.category || 'habit') === 'vice' ? 'vice' : 'habit',
+    status: journalStatus === 'half' ? 'half' : (journalStatus === 'failed' ? 'failed' : (journalStatus === 'full' ? 'full' : 'off')),
+    completionFraction: journalStatus === 'half' ? 0.5 : (journalStatus === 'full' ? 1 : 0),
+    done: Array.isArray(h.doneKeys) && h.doneKeys.includes(dayKey),
+    failed: Array.isArray(h.failedKeys) && h.failedKeys.includes(dayKey),
+    icy: Array.isArray(h.iceKeys) && h.iceKeys.includes(dayKey),
+    completionPoints: finalCompletion ? Number(finalCompletion.points) : null,
+    updatedAtISO: h.updatedAtISO,
+    createdAtISO: new Date().toISOString()
+  };
+  try {
+    TaskPointsCore.writePendingHabitDelta(journalDelta, PENDING_HABIT_DELTAS_KEY);
+    if (window.TP_DEBUG_PERF) console.debug('[TP_DEBUG_PERF] tap->journal', { ms: Math.round(performance.now() - perfStart), bytes: JSON.stringify(journalDelta).length * 2 });
+  } catch (journalError) {
+    try {
+      const fallback = TaskPointsCore.saveStateSnapshot(state, buildHomeSaveOptions('habit-journal-fallback', {
+        immediateWrite: true, userInitiated: true, replaceCompletions: true,
+        interactive: true, deferCompression: true
+      }));
+      if (fallback?.skipped || fallback?.blockedByQuotaCircuit || !fallback?.state) throw new Error('Fallback save was not verified');
+      const raw = localStorage.getItem(STORAGE_KEY);
+      const persisted = raw ? TaskPointsCore.parseTaskPointsStorageJson(raw, {}) : {};
+      const persistedHabit = persisted.habits?.find(item => item?.id === habitId);
+      const completionId = TaskPointsCore.habitCompletionId(habitId, dayKey);
+      const persistedCompletion = persisted.completions?.find(item => item?.id === completionId && item?.habitId === habitId && item?.dayKey === dayKey && item?.source === journalDelta.source);
+      if (!persistedHabit || !TaskPointsCore.verifyPersistedHabitDeltas(persisted, [journalDelta], [journalDelta]).length || (journalDelta.done && !persistedCompletion)) throw new Error('Fallback save readback did not contain the habit change');
+    } catch (saveError) {
+      h.doneKeys = habitBeforeTap.doneKeys; h.failedKeys = habitBeforeTap.failedKeys;
+      h.iceKeys = habitBeforeTap.iceKeys; h.updatedAtISO = habitBeforeTap.updatedAtISO;
+      state.completions = habitBeforeTap.completions;
+      markCompletionsDirty();
+      bubbleEl.classList.remove('on', 'off', 'failed', 'habit-half', 'icy');
+      const revertedStatus = getHabitBubbleStatusClass(h, dayKey);
+      bubbleEl.classList.add(revertedStatus);
+      applyHabitBubbleStyle(bubbleEl, h, revertedStatus);
+      refreshHabitRowWeekCompleteVisual(bubbleEl.closest('.habitRow[data-habit-row-id]'), h, weekDays(habitViceBaseDate()));
+      alert('This habit change could not be saved.');
+      console.error('Habit journal and fallback save failed', journalError, saveError);
+      return;
+    }
+  }
 
 const newTodayScoreForToast = __tpGetCurrentTodayScoreForToast();
 __tpToastTodayScoreDeltaFromScores(newTodayScoreForToast, oldTodayScoreForToast);
@@ -11910,20 +11971,9 @@ function getTaskPointsExportSnapshot() {
 
   window.TaskPointsCore?.flushPendingSaves?.();
 
+  // The in-memory state already includes journaled taps. Never replace it with
+  // the deliberately lagging taskpoints_v1 snapshot during an export.
   let latestState = state || {};
-  try {
-    if (window.TaskPointsCore?.loadAppState) {
-      latestState = TaskPointsCore.loadAppState({
-        syncDerived: false,
-        persistSync: false
-      }).state || latestState;
-    } else {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      latestState = raw ? TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY, latestState) : latestState;
-    }
-  } catch (error) {
-    console.warn('Failed to read latest state for export; falling back to in-memory state', error);
-  }
 
   const normalizedState = stripLegacyImageFields({ ...latestState, projects: loadProjectsFromStorage() });
   if (!normalizedState.currentSeason && state?.currentSeason) normalizedState.currentSeason = state.currentSeason;
