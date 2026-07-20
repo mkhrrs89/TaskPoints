@@ -9071,8 +9071,12 @@ return Number(cappedScore.toFixed(1));
   function shadowVerificationMismatches(source, destination) {
     const mismatches = [];
     const countFields = new Set([...Object.keys(source.counts), ...Object.keys(destination.counts)]);
+    const collectionFields = new Set([...Object.keys(source.hashDetails.collections), ...Object.keys(destination.hashDetails.collections)]);
     [...countFields].sort().forEach(field => {
-      if (source.counts[field] !== destination.counts[field]) mismatches.push({ type: 'count', field, sourceCount: source.counts[field] || 0, destinationCount: destination.counts[field] || 0 });
+      // A missing future collection has its own structural mismatch below.
+      // Do not turn its missing count into a misleading zero.
+      if (collectionFields.has(field) && (!Object.hasOwn(source.counts, field) || !Object.hasOwn(destination.counts, field))) return;
+      if (source.counts[field] !== destination.counts[field]) mismatches.push({ type: 'count', field, sourceCount: source.counts[field] ?? null, destinationCount: destination.counts[field] ?? null });
     });
     const addHashMismatch = (field, sourceDetail, destinationDetail, type = 'hash') => {
       if (!sourceDetail || !destinationDetail || sourceDetail.hash === destinationDetail.hash) return;
@@ -9083,8 +9087,8 @@ return Number(cappedScore.toFixed(1));
       const fields = new Set([...Object.keys(source.hashDetails[group]), ...Object.keys(destination.hashDetails[group])]);
       [...fields].sort().forEach(field => {
         const sourceDetail = source.hashDetails[group][field], destinationDetail = destination.hashDetails[group][field];
-        if (group === 'collections' && !sourceDetail) mismatches.push({ type: 'unexpected_collection', field, sourceCount: 0, destinationCount: destination.counts[field] || 0, destinationHash: destinationDetail.hash, destinationCanonicalLength: destinationDetail.canonicalLength });
-        else if (group === 'collections' && !destinationDetail) mismatches.push({ type: 'missing_collection', field, sourceCount: source.counts[field] || 0, destinationCount: 0, sourceHash: sourceDetail.hash, sourceCanonicalLength: sourceDetail.canonicalLength });
+        if (group === 'collections' && !sourceDetail) mismatches.push({ type: 'unexpected_collection', field, sourceCount: null, destinationCount: destination.counts[field] ?? null, destinationHash: destinationDetail.hash, destinationCanonicalLength: destinationDetail.canonicalLength });
+        else if (group === 'collections' && !destinationDetail) mismatches.push({ type: 'missing_collection', field, sourceCount: source.counts[field] ?? null, destinationCount: null, sourceHash: sourceDetail.hash, sourceCanonicalLength: sourceDetail.canonicalLength });
         else addHashMismatch(field, sourceDetail, destinationDetail);
       });
     });
@@ -9194,7 +9198,12 @@ return Number(cappedScore.toFixed(1));
       const tx = db.transaction(stores, 'readwrite');
       [...SHADOW_ARRAY_STORES, 'collections'].forEach(name => tx.objectStore(name).clear()); tx.objectStore('values').clear();
       Object.entries(layout.arrays).forEach(([field, rows]) => rows.forEach((value, index) => tx.objectStore(field).put({ key: index, value })));
-      Object.entries(layout.collections).forEach(([field, rows]) => rows.forEach((value, index) => tx.objectStore('collections').put({ key: `${field}:${index}`, field, index, value })));
+      Object.entries(layout.collections).forEach(([field, rows]) => {
+        // Manifests preserve present-but-empty unknown collections. Prefixes
+        // make their keys disjoint from the indexed item records.
+        tx.objectStore('collections').put({ key: `manifest:${field}`, kind: 'manifest', field });
+        rows.forEach((value, index) => tx.objectStore('collections').put({ key: `item:${field}:${index}`, kind: 'item', field, index, value }));
+      });
       Object.entries(layout.values).forEach(([field, value]) => tx.objectStore('values').put({ field, value }));
       await shadowTransaction(tx);
       const readTx = db.transaction(stores, 'readonly');
@@ -9207,7 +9216,10 @@ return Number(cappedScore.toFixed(1));
       const destination = {};
       SHADOW_ARRAY_STORES.forEach((field, index) => { destination[field] = arrayRows[index].sort((a,b) => a.key - b.key).map(row => row.value); });
       const rebuilt = {}; Object.entries(destination).forEach(([field, value]) => { rebuilt[field] = value; });
-      collectionRows.forEach(row => { (rebuilt[row.field] ||= [])[row.index] = row.value; }); valuesRows.forEach(row => { rebuilt[row.field] = row.value; });
+      // Rebuild manifests first so empty collections remain structurally present.
+      collectionRows.filter(row => row.kind === 'manifest').forEach(row => { rebuilt[row.field] = []; });
+      collectionRows.filter(row => row.kind === 'item').forEach(row => { (rebuilt[row.field] ||= [])[row.index] = row.value; });
+      valuesRows.forEach(row => { rebuilt[row.field] = row.value; });
       const destinationSummary = shadowSourceSummary(rebuilt);
       const imageInventory = await getImageInventory(indexedDb); const imageSet = new Set(imageInventory.ids); const referenced = referencedImageIds(source); const missingImageIds = referenced.filter(id => !imageSet.has(id));
       const mismatches = shadowVerificationMismatches(sourceSummary, destinationSummary);

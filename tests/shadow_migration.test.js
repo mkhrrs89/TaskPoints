@@ -109,11 +109,12 @@ test('IndexedDB integration migrates records, future fields, images, and remains
   assert.deepEqual(result.verification.images.unreferencedImageIds, ['orphan-image']);
   const shadow = idb._db(core.SHADOW_MIGRATION_DB_NAME);
   assert.equal((await fakeRows(shadow, 'completions')).length, 2);
-  assert.deepEqual((await fakeRows(shadow, 'collections')).map(row => row.field), ['futureRows']);
+  assert.deepEqual((await fakeRows(shadow, 'collections')).map(row => [row.kind, row.field]), [['manifest', 'futureRows'], ['item', 'futureRows']]);
   assert.equal((await fakeRows(shadow, 'values')).find(row => row.field === 'futureFlag').value.enabled, true);
   assert.equal(JSON.stringify(state), rawBefore);
   const again = await core.runShadowMigration({ state, indexedDB: idb, localStorage: { getItem: () => '' } });
   assert.equal(again.status, 'passed_verification'); assert.equal((await fakeRows(shadow, 'completions')).length, 2);
+  assert.deepEqual((await fakeRows(shadow, 'collections')).map(row => [row.kind, row.field]), [['manifest', 'futureRows'], ['item', 'futureRows']]);
   assert.equal(idb._db(core.IMAGE_DB_NAME).version, 7); assert.equal((await fakeRows(imageDb, core.IMAGE_STORE_NAME)).length, 4);
 });
 
@@ -144,6 +145,46 @@ test('full migration passes when legacy source omits known empty stores', async 
   assert.equal((await fakeRows(idb._db(core.SHADOW_MIGRATION_DB_NAME), 'seasonHistory')).length, 0);
 });
 
+test('migration manifests preserve empty future collections without exposing them as items', async () => {
+  const idb = createFakeIndexedDb({ strictTransactions: true });
+  const state = fixture();
+  // This mirrors the production shape: several present empty future arrays and
+  // populated collections whose order and duplicate values must be unchanged.
+  Object.assign(state, {
+    schedule: [], opponentDripSchedules: [], storageWarnings: [], workHistory: [],
+    futureRows: [{ id: 'first', nested: { value: 1 } }, { id: 'duplicate' }, { id: 'duplicate' }],
+    futureEvents: [{ at: 2 }, { at: 1 }]
+  });
+  await openFakeDb(idb, core.IMAGE_DB_NAME, 1, db => db.createObjectStore(core.IMAGE_STORE_NAME));
+  const imageDb = idb._db(core.IMAGE_DB_NAME); const tx = imageDb.transaction(core.IMAGE_STORE_NAME, 'readwrite');
+  ['profile-image', 'player-image', 'season-image'].forEach(id => tx.objectStore(core.IMAGE_STORE_NAME).put(new Blob(['ok']), id)); await new Promise(resolve => { tx.oncomplete = resolve; });
+
+  const source = core.shadowSourceSummary(state);
+  const result = await core.runShadowMigration({ state, indexedDB: idb, localStorage: { getItem: () => '' } });
+  assert.equal(result.status, 'passed_verification', JSON.stringify(result));
+  assert.equal(result.verification.source.hashes.state, result.verification.destination.hashes.state);
+  assert.equal(result.verification.source.hashDetails.state.canonicalLength, result.verification.destination.hashDetails.state.canonicalLength);
+  ['schedule', 'opponentDripSchedules', 'storageWarnings', 'workHistory'].forEach(field => {
+    assert.equal(result.verification.destination.counts[field], 0);
+    assert.equal(result.verification.destination.hashes.collections[field], source.hashes.collections[field]);
+  });
+  assert.deepEqual(result.verification.destination.hashes.collections.futureRows, source.hashes.collections.futureRows);
+  assert.equal(result.verification.destination.counts.futureRows, 3);
+
+  const shadow = idb._db(core.SHADOW_MIGRATION_DB_NAME); const rows = await fakeRows(shadow, 'collections');
+  const manifests = rows.filter(row => row.kind === 'manifest'); const items = rows.filter(row => row.kind === 'item');
+  assert.deepEqual(manifests.map(row => row.field).sort(), ['futureEvents', 'futureRows', 'opponentDripSchedules', 'schedule', 'storageWarnings', 'workHistory']);
+  assert.equal(items.length, 5);
+  assert.equal(rows.length, manifests.length + items.length);
+  assert.equal(items.every(row => Number.isInteger(row.index)), true);
+  assert.equal(new Set(rows.map(row => row.key)).size, rows.length);
+  assert.equal(rows.every(row => row.kind === 'manifest' || row.kind === 'item'), true);
+
+  const rerun = await core.runShadowMigration({ state, indexedDB: idb, localStorage: { getItem: () => '' } });
+  assert.equal(rerun.status, 'passed_verification', JSON.stringify(rerun));
+  assert.deepEqual(await fakeRows(shadow, 'collections'), rows);
+});
+
 test('verification reports count mismatches with source and destination counts', () => {
   const source = core.shadowSourceSummary(fixture());
   const destinationState = fixture(); destinationState.completions.pop();
@@ -160,7 +201,18 @@ test('verification reports per-collection hash mismatches and missing collection
   assert.ok(rowMismatch); assert.notEqual(rowMismatch.sourceHash, rowMismatch.destinationHash);
   assert.equal(typeof rowMismatch.sourceCanonicalLength, 'number');
   const missing = fixture(); delete missing.futureRows;
-  assert.equal(core.shadowVerificationMismatches(source, core.shadowSourceSummary(missing)).some(item => item.type === 'missing_collection' && item.field === 'futureRows'), true);
+  const missingMismatches = core.shadowVerificationMismatches(source, core.shadowSourceSummary(missing));
+  assert.deepEqual(missingMismatches.find(item => item.type === 'missing_collection' && item.field === 'futureRows'), { type: 'missing_collection', field: 'futureRows', sourceCount: 1, destinationCount: null, sourceHash: source.hashDetails.collections.futureRows.hash, sourceCanonicalLength: source.hashDetails.collections.futureRows.canonicalLength });
+  assert.equal(missingMismatches.some(item => item.type === 'count' && item.field === 'futureRows'), false);
+});
+
+test('verification distinguishes an empty missing collection from a present empty collection', () => {
+  const state = fixture(); state.schedule = [];
+  const source = core.shadowSourceSummary(state); delete state.schedule;
+  const mismatches = core.shadowVerificationMismatches(source, core.shadowSourceSummary(state));
+  assert.deepEqual(mismatches.find(item => item.type === 'missing_collection' && item.field === 'schedule'), { type: 'missing_collection', field: 'schedule', sourceCount: 0, destinationCount: null, sourceHash: source.hashDetails.collections.schedule.hash, sourceCanonicalLength: source.hashDetails.collections.schedule.canonicalLength });
+  assert.equal(mismatches.some(item => item.type === 'count' && item.field === 'schedule'), false);
+  assert.doesNotMatch(core.formatShadowMigrationDiagnostics({ verification: { countsMatch: false, hashesMatch: false, mismatches } }), /schedule \(0 source \/ 0 destination\)/);
 });
 
 test('verification reports an overall hash mismatch even when counts match', () => {
