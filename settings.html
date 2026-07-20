@@ -132,7 +132,7 @@
           <div class="muted text-sm">Phase 1 verification copy. TaskPoints continues reading and writing localStorage.</div>
         </div>
         <div id="shadowMigrationStatus" class="muted text-xs">Checking migration status…</div>
-        <button id="runShadowMigrationBtn" class="btn btn-ghost btn-toolbar nav-btn" type="button">Run Shadow Migration</button>
+        <div class="flex flex-wrap gap-2"><button id="runShadowMigrationBtn" class="btn btn-ghost btn-toolbar nav-btn" type="button">Run Shadow Migration</button><button id="downloadShadowMigrationDiagnosticsBtn" class="btn btn-ghost btn-toolbar nav-btn hidden" type="button">Download Diagnostic JSON</button></div>
       </section>
 
       <details class="glass space-y-3" id="seasonChampionshipRepairSection">
@@ -4667,7 +4667,9 @@ rows.push([
       setSeasonRepairStatus(`Season data repaired. currentSeason: ${result.state.currentSeason ? 'present' : 'none'}; archives: ${(result.state.seasonHistory || []).length}.`);
     }
 
+    let latestShadowMigrationMetadata = null;
     function renderShadowMigrationStatus(metadata) {
+      if (metadata && typeof metadata === 'object') latestShadowMigrationMetadata = metadata;
       const output = document.getElementById('shadowMigrationStatus');
       if (!output) return;
       const status = metadata?.status || 'not_started';
@@ -4676,7 +4678,21 @@ rows.push([
       const imageText = verification?.images
         ? ` Images: ${verification.images.total} stored (${Number(verification.images.totalBytes || 0).toLocaleString()} bytes); ${verification.images.referenced} referenced; ${verification.images.unreferencedImageIds.length} unreferenced; ${verification.images.missingImageIds.length} missing referenced.`
         : '';
-      output.textContent = `${labels[status] || status}. ${metadata?.completionTime ? `Completed ${metadata.completionTime}.` : ''}${metadata?.errors?.length ? ` ${metadata.errors.join(' ')}` : ''}${imageText}`;
+      const diagnostics = window.TaskPointsCore?.formatShadowMigrationDiagnostics?.(metadata) || '';
+      output.textContent = `${labels[status] || status}. ${metadata?.completionTime ? `Completed ${metadata.completionTime}.` : ''}${metadata?.errors?.length ? ` ${metadata.errors.join(' ')}` : ''}${imageText}${diagnostics}`;
+      const diagnosticButton = document.getElementById('downloadShadowMigrationDiagnosticsBtn');
+      diagnosticButton?.classList.toggle('hidden', !(status === 'failed' && verification));
+    }
+    async function downloadShadowMigrationDiagnostics() {
+      const metadata = await window.TaskPointsCore?.resolveShadowMigrationDiagnosticMetadata?.(
+        latestShadowMigrationMetadata,
+        () => window.TaskPointsCore?.getShadowMigrationStatus?.()
+      );
+      const report = window.TaskPointsCore?.shadowDiagnosticExport?.(metadata);
+      if (!report) return;
+      const url = URL.createObjectURL(new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' }));
+      const link = document.createElement('a'); link.href = url; link.download = 'taskpoints-shadow-migration-diagnostics.json'; link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 0);
     }
     async function refreshShadowMigrationStatus() {
       try { renderShadowMigrationStatus(await window.TaskPointsCore?.getShadowMigrationStatus?.()); }
@@ -4704,6 +4720,7 @@ rows.push([
       document.getElementById('settingsSeasonExportArchiveBtn')?.addEventListener('click', handleSeasonExportArchiveData);
       document.getElementById('settingsSeasonRepairBtn')?.addEventListener('click', handleSeasonRepairData);
       document.getElementById('runShadowMigrationBtn')?.addEventListener('click', handleRunShadowMigration);
+      document.getElementById('downloadShadowMigrationDiagnosticsBtn')?.addEventListener('click', downloadShadowMigrationDiagnostics);
       refreshShadowMigrationStatus();
       document.getElementById('settingsExportMatchupsBtn')?.addEventListener('click', exportMatchupsAndHistoryCsv);
       document.getElementById('settingsExportPersonalScoresBtn')?.addEventListener('click', exportPersonalScoreHistoryCsv);
