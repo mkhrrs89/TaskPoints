@@ -9076,15 +9076,42 @@ return Number(cappedScore.toFixed(1));
   async function shadowPutMetadata(db, metadata) {
     const tx = db.transaction('metadata', 'readwrite'); tx.objectStore('metadata').put({ id: 'current', ...metadata }); await shadowTransaction(tx);
   }
+  async function shadowReadMetadata(db) {
+    const tx = db.transaction('metadata', 'readonly');
+    return (await shadowRequest(tx.objectStore('metadata').get('current'))) || null;
+  }
+  async function indexedDbExists(indexedDb, name) {
+    // `databases()` lets read-only status/inventory checks avoid creating a DB.
+    if (typeof indexedDb?.databases !== 'function') return null;
+    return (await indexedDb.databases()).some(database => database.name === name);
+  }
   async function getShadowMigrationStatus(options = {}) {
-    const db = await openShadowMigrationDb(options.indexedDB);
-    try { const tx = db.transaction('metadata', 'readonly'); const result = await shadowRequest(tx.objectStore('metadata').get('current')); return result || { status: 'not_started', schemaVersion: SHADOW_MIGRATION_SCHEMA_VERSION }; }
+    const indexedDb = options.indexedDB || global.indexedDB;
+    const exists = await indexedDbExists(indexedDb, SHADOW_MIGRATION_DB_NAME);
+    if (exists === false) return { status: 'not_started', schemaVersion: SHADOW_MIGRATION_SCHEMA_VERSION };
+    // On older browsers without databases(), do not risk creating a DB merely
+    // to render Settings; the user can explicitly start the migration instead.
+    if (exists === null) return { status: 'not_started', schemaVersion: SHADOW_MIGRATION_SCHEMA_VERSION, availability: 'unknown' };
+    const db = await openShadowMigrationDb(indexedDb);
+    try { return (await shadowReadMetadata(db)) || { status: 'not_started', schemaVersion: SHADOW_MIGRATION_SCHEMA_VERSION }; }
     finally { db.close?.(); }
   }
   async function getImageInventory(indexedDb = global.indexedDB) {
     if (!indexedDb) throw new Error('IndexedDB is not available.');
-    const db = await new Promise((resolve, reject) => { const request = indexedDb.open(IMAGE_DB_NAME, 1); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
-    try { const tx = db.transaction(IMAGE_STORE_NAME, 'readonly'); const keys = await shadowRequest(tx.objectStore(IMAGE_STORE_NAME).getAllKeys()); return keys.map(String); }
+    const exists = await indexedDbExists(indexedDb, IMAGE_DB_NAME);
+    if (exists === false) return { available: false, exists: false, count: 0, totalBytes: 0, ids: [], blobs: [] };
+    if (exists === null) return { available: false, exists: null, count: 0, totalBytes: 0, ids: [], blobs: [], error: 'IndexedDB database enumeration is unavailable.' };
+    // Never pass a version here: opening an existing database at its current
+    // version cannot upgrade/downgrade it, and the existence check prevents a
+    // missing image DB from being created.
+    const db = await new Promise((resolve, reject) => { const request = indexedDb.open(IMAGE_DB_NAME); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error || new Error('Could not inspect image database.')); });
+    try {
+      if (!db.objectStoreNames.contains(IMAGE_STORE_NAME)) return { available: false, exists: true, count: 0, totalBytes: 0, ids: [], blobs: [], error: 'Image store is missing.' };
+      const tx = db.transaction(IMAGE_STORE_NAME, 'readonly'); const store = tx.objectStore(IMAGE_STORE_NAME);
+      const [keys, blobs] = await Promise.all([shadowRequest(store.getAllKeys()), shadowRequest(store.getAll())]);
+      const rows = blobs.map((blob, index) => ({ id: String(keys[index]), blob, bytes: Number(blob?.size) || 0 }));
+      return { available: true, exists: true, count: rows.length, totalBytes: rows.reduce((sum, row) => sum + row.bytes, 0), ids: rows.map(row => row.id), blobs: rows };
+    }
     finally { db.close?.(); }
   }
   function referencedImageIds(state) {
@@ -9094,12 +9121,12 @@ return Number(cappedScore.toFixed(1));
   async function runShadowMigration(options = {}) {
     const indexedDb = options.indexedDB || global.indexedDB;
     const storage = options.localStorage || global.localStorage;
-    let source;
+    let source; let db = null;
     try {
       // Decode only. Do not normalize or save: localStorage remains byte-for-byte untouched.
       source = options.state || readTaskPointsStoredState(options.storageKey || STORAGE_KEY, {});
-      const db = await openShadowMigrationDb(indexedDb);
-      const previous = await getShadowMigrationStatus({ indexedDB: indexedDb }).catch(() => ({}));
+      db = await openShadowMigrationDb(indexedDb);
+      const previous = (await shadowReadMetadata(db).catch(() => ({}))) || {};
       const startedAt = new Date().toISOString();
       const sourceSummary = shadowSourceSummary(source);
       await shadowPutMetadata(db, { schemaVersion: SHADOW_MIGRATION_SCHEMA_VERSION, sourceFormat: getTaskPointsStorageEncodingInfo(storage?.getItem?.(options.storageKey || STORAGE_KEY) || '').label, startedAt, completionTime: null, status: 'running', errors: [], retries: (Number(previous.retries) || 0) + 1, sourceCounts: sourceSummary.counts, destinationCounts: {}, verification: null });
@@ -9117,16 +9144,16 @@ return Number(cappedScore.toFixed(1));
       const rebuilt = {}; Object.entries(destination).forEach(([field, value]) => { rebuilt[field] = value; });
       collectionRows.forEach(row => { (rebuilt[row.field] ||= [])[row.index] = row.value; }); valuesRows.forEach(row => { rebuilt[row.field] = row.value; });
       const destinationSummary = shadowSourceSummary(rebuilt);
-      const imageKeys = await getImageInventory(indexedDb); const imageSet = new Set(imageKeys); const referenced = referencedImageIds(source); const missingImageIds = referenced.filter(id => !imageSet.has(id));
-      const verification = { countsMatch: shadowCanonicalJson(sourceSummary.counts) === shadowCanonicalJson(destinationSummary.counts), hashesMatch: sourceSummary.hashes.state === destinationSummary.hashes.state, images: { total: imageKeys.length, referenced: referenced.length, missingImageIds, unreferencedImageIds: imageKeys.filter(id => !referenced.includes(id)).sort() } };
-      const status = verification.countsMatch && verification.hashesMatch && missingImageIds.length === 0 ? 'passed_verification' : 'failed';
+      const imageInventory = await getImageInventory(indexedDb); const imageSet = new Set(imageInventory.ids); const referenced = referencedImageIds(source); const missingImageIds = referenced.filter(id => !imageSet.has(id));
+      const verification = { countsMatch: shadowCanonicalJson(sourceSummary.counts) === shadowCanonicalJson(destinationSummary.counts), hashesMatch: sourceSummary.hashes.state === destinationSummary.hashes.state, images: { available: imageInventory.available, total: imageInventory.count, totalBytes: imageInventory.totalBytes, referenced: referenced.length, missingImageIds, unreferencedImageIds: imageInventory.ids.filter(id => !referenced.includes(id)).sort(), error: imageInventory.error || null } };
+      const status = verification.countsMatch && verification.hashesMatch && imageInventory.available && missingImageIds.length === 0 ? 'passed_verification' : 'failed';
       const metadata = { schemaVersion: SHADOW_MIGRATION_SCHEMA_VERSION, sourceFormat: getTaskPointsStorageEncodingInfo(storage?.getItem?.(options.storageKey || STORAGE_KEY) || '').label, startedAt, completionTime: new Date().toISOString(), status, errors: status === 'failed' ? ['Verification did not pass.'] : [], retries: (Number(previous.retries) || 0) + 1, sourceCounts: sourceSummary.counts, destinationCounts: destinationSummary.counts, verification };
-      await shadowPutMetadata(db, metadata); db.close?.(); return metadata;
+      await shadowPutMetadata(db, metadata); return metadata;
     } catch (error) {
       // Metadata failure is intentionally isolated; no legacy state or images are changed.
-      try { const db = await openShadowMigrationDb(indexedDb); await shadowPutMetadata(db, { schemaVersion: SHADOW_MIGRATION_SCHEMA_VERSION, sourceFormat: 'unknown', startedAt: new Date().toISOString(), completionTime: new Date().toISOString(), status: 'failed', errors: [error?.message || String(error)], retries: 1, sourceCounts: {}, destinationCounts: {}, verification: null }); db.close?.(); } catch (_) {}
+      try { const errorDb = await openShadowMigrationDb(indexedDb); try { await shadowPutMetadata(errorDb, { schemaVersion: SHADOW_MIGRATION_SCHEMA_VERSION, sourceFormat: 'unknown', startedAt: new Date().toISOString(), completionTime: new Date().toISOString(), status: 'failed', errors: [error?.message || String(error)], retries: 1, sourceCounts: {}, destinationCounts: {}, verification: null }); } finally { errorDb.close?.(); } } catch (_) {}
       return { status: 'failed', errors: [error?.message || String(error)] };
-    }
+    } finally { db?.close?.(); }
   }
 
   global.TaskPointsCore = {

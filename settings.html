@@ -4674,7 +4674,7 @@ rows.push([
       const labels = { not_started: 'Not started', running: 'Running', failed: 'Failed', passed_verification: 'Passed verification' };
       const verification = metadata?.verification;
       const imageText = verification?.images
-        ? ` Images: ${verification.images.total} stored; ${verification.images.referenced} referenced; ${verification.images.unreferencedImageIds.length} unreferenced; ${verification.images.missingImageIds.length} missing referenced.`
+        ? ` Images: ${verification.images.total} stored (${Number(verification.images.totalBytes || 0).toLocaleString()} bytes); ${verification.images.referenced} referenced; ${verification.images.unreferencedImageIds.length} unreferenced; ${verification.images.missingImageIds.length} missing referenced.`
         : '';
       output.textContent = `${labels[status] || status}. ${metadata?.completionTime ? `Completed ${metadata.completionTime}.` : ''}${metadata?.errors?.length ? ` ${metadata.errors.join(' ')}` : ''}${imageText}`;
     }
