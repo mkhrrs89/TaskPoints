@@ -42,6 +42,22 @@ function largeState() {
 
 const protectedFields = ['tasks', 'reminders', 'completions', 'players', 'habits', 'gameHistory', 'matchups', 'seasonHistory', 'weightHistory', 'vo2MaxHistory'];
 
+test('pending habit delta journal synchronously coalesces and replays final off state', () => {
+  storage.clear();
+  const base = core.normalizeState({ habits: [{ id: 'cal', name: 'Work On Cal App', pointsPerDay: 2, doneKeys: ['2026-07-19'], failedKeys: [] }], completions: [{ id: 'habit:cal:2026-07-19', source: 'habit', habitId: 'cal', dayKey: '2026-07-19', points: 2 }] });
+  core.writePendingHabitDelta({ habitId: 'cal', dayKey: '2026-07-19', source: 'habit', status: 'full', completionFraction: 1, updatedAtISO: '2026-07-20T12:00:00.000Z' });
+  core.writePendingHabitDelta({ habitId: 'cal', dayKey: '2026-07-19', source: 'habit', status: 'half', completionFraction: .5, updatedAtISO: '2026-07-20T12:01:00.000Z' });
+  core.writePendingHabitDelta({ habitId: 'cal', dayKey: '2026-07-19', source: 'habit', status: 'off', completionFraction: 0, updatedAtISO: '2026-07-20T12:02:00.000Z' });
+  const journal = core.readPendingHabitDeltas();
+  assert.equal(journal.length, 1);
+  assert.equal(journal[0].status, 'off');
+  core.applyPendingHabitDeltas(base, journal);
+  assert.ok(!base.habits[0].doneKeys.includes('2026-07-19'));
+  assert.ok(!base.completions.some(c => c.id === 'habit:cal:2026-07-19'));
+  assert.equal(core.clearCompactedHabitDeltas(journal), 1);
+  assert.equal(core.readPendingHabitDeltas().length, 0);
+});
+
 test('optimized storage chooses and decodes compressed packed JSON without count loss', () => {
   const state = largeState();
   const plan = core.buildOptimizedTaskPointsStorageRaw(state);
@@ -158,7 +174,7 @@ test('habit toggles use interactive deferred compression and Storage Health dist
   assert.match(coreSource, /const criticalArrays = \['completions', 'matchups', 'gameHistory', 'seasonHistory', 'weightHistory', 'vo2MaxHistory', 'reminders', 'players', 'habits'\]/);
 });
 
-test('pending habit saves flush the Work On Cal App fixture before navigation or export', () => {
+test('pending habit journals preserve the Work On Cal App fixture before navigation or export', () => {
   storage.clear();
   const habitId = 'work-on-cal-app';
   const dayKey = '2026-07-19';
@@ -205,11 +221,13 @@ test('pending habit saves flush the Work On Cal App fixture before navigation or
   assert.ok(reloaded.completions.some((item) => item.id === `habit:${habitId}:${dayKey}`));
 
   const indexSource = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
-  assert.match(indexSource, /function flushPendingHabitSave\(reason = 'manual'\)[\s\S]*?clearTimeout\(habitSaveDebounceId\)[\s\S]*?savePendingHabitState/);
+  assert.match(indexSource, /taskpoints_pending_habit_deltas_v1/);
+  assert.match(indexSource, /function scheduleHabitSave\(\)[\s\S]*?\}, 3000\);/);
+  assert.doesNotMatch(indexSource, /function handleHabitBubbleTap\([\s\S]*?applyHabitDayToggle[\s\S]*?savePendingHabitState\(/);
   assert.match(indexSource, /flushPendingHabitSave\('pagehide'\)/);
   assert.match(indexSource, /flushPendingHabitSave\('visibilitychange'\)/);
   assert.match(indexSource, /flushPendingHabitSave\('before-navigation'\)/);
-  assert.match(indexSource, /function getTaskPointsExportSnapshot\(\) \{[\s\S]*?flushPendingHabitSave\('before-export'\)/);
+  assert.match(indexSource, /function getTaskPointsExportSnapshot\(\) \{[\s\S]*?let latestState = state \|\| \{\}/);
 });
 
 test('completed-week stack decorations cannot intercept habit taps', () => {
@@ -238,7 +256,7 @@ test('habit tap rerenders defer full DOM work while preserving immediate weekly 
   assert.match(scheduleHabitRerenderSource, /scheduleHabitStatsRefresh\(\);/);
   assert.doesNotMatch(scheduleHabitRerenderSource, /render(?:Habits|Stats|Vices)\(/);
   assert.match(indexSource, /tap->bubble[\s\S]*?tap->rowWeekVisual/);
-  assert.match(indexSource, /tap->save/);
+  assert.match(indexSource, /tap->journal/);
   assert.match(indexSource, /tap->fullHabitRerender/);
   assert.match(indexSource, /tap->statsRefresh/);
 });

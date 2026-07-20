@@ -1,5 +1,6 @@
 (function(global){
   const STORAGE_KEY = "taskpoints_v1";
+  const PENDING_HABIT_DELTAS_KEY = "taskpoints_pending_habit_deltas_v1";
   const PROJECTS_STORAGE_KEY = "tp_projects_v1";
   const IMAGE_DB_NAME = "taskpoints";
   const IMAGE_STORE_NAME = "images";
@@ -18,6 +19,56 @@
   const TASKPOINTS_INTERACTIVE_PACKED_SAFE_BYTES = 3.75 * 1024 * 1024;
   const TASKPOINTS_INTERACTIVE_RECOMPRESS_DELAY_MS = 2000;
   const pendingInteractiveRecompresses = new Map();
+
+  // This deliberately contains only the final state of a habit/day pair.  It is
+  // a synchronous crash-safe write-ahead journal; taskpoints_v1 remains the
+  // canonical compressed snapshot after compaction.
+  function habitDeltaId(delta) { return `${delta.source === 'vice' ? 'vice' : 'habit'}:${delta.habitId}:${delta.dayKey}`; }
+  function readPendingHabitDeltas(storageKey = PENDING_HABIT_DELTAS_KEY) {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      const values = Array.isArray(parsed) ? parsed : Object.values(parsed || {});
+      return values.filter(d => d && d.habitId && d.dayKey && ['habit', 'vice'].includes(d.source));
+    } catch (_) { return []; }
+  }
+  function writePendingHabitDelta(delta, storageKey = PENDING_HABIT_DELTAS_KEY) {
+    const entries = readPendingHabitDeltas(storageKey);
+    const id = delta.id || habitDeltaId(delta);
+    const next = { ...delta, id, source: delta.source === 'vice' ? 'vice' : 'habit' };
+    const at = entries.findIndex(entry => entry.id === id);
+    if (at >= 0) entries[at] = next; else entries.push(next);
+    localStorage.setItem(storageKey, JSON.stringify(entries));
+    return next;
+  }
+  function applyPendingHabitDeltas(state, deltas = readPendingHabitDeltas()) {
+    const started = Date.now(); let applied = 0;
+    state.habits = Array.isArray(state.habits) ? state.habits : [];
+    state.completions = Array.isArray(state.completions) ? state.completions : [];
+    for (const delta of deltas) {
+      const habit = state.habits.find(h => h && h.id === delta.habitId);
+      if (!habit) continue;
+      habit.doneKeys = Array.isArray(habit.doneKeys) ? habit.doneKeys.filter(k => k !== delta.dayKey) : [];
+      habit.failedKeys = Array.isArray(habit.failedKeys) ? habit.failedKeys.filter(k => k !== delta.dayKey) : [];
+      state.completions = state.completions.filter(c => !((c?.source === 'habit' || c?.source === 'vice') && c.habitId === delta.habitId && c.dayKey === delta.dayKey));
+      if (delta.status === 'full' || delta.status === 'half') {
+        habit.doneKeys.push(delta.dayKey);
+        const fraction = delta.completionFraction == null ? (delta.status === 'half' ? .5 : 1) : Number(delta.completionFraction);
+        const points = (Number(habit.pointsPerDay) || 0) * fraction;
+        state.completions.unshift({ id: `habit:${habit.id}:${delta.dayKey}`, taskId: `habit:${habit.id}:${delta.dayKey}`, title: `[${delta.source === 'vice' ? 'Vice' : 'Habit'}] ${habit.name} (${delta.dayKey})`, points, completedAtISO: delta.updatedAtISO, source: delta.source, habitId: habit.id, dayKey: delta.dayKey, completionFraction: fraction });
+      } else if (delta.status === 'failed') habit.failedKeys.push(delta.dayKey);
+      habit.updatedAtISO = delta.updatedAtISO || habit.updatedAtISO;
+      applied++;
+    }
+    if (global?.TP_DEBUG_PERF) console.debug('[TP_DEBUG_PERF] journal-replay', { ms: Date.now() - started, entries: applied });
+    return { state, applied, ms: Date.now() - started };
+  }
+  function clearCompactedHabitDeltas(compacted, storageKey = PENDING_HABIT_DELTAS_KEY) {
+    const byId = new Map((compacted || []).map(d => [d.id, JSON.stringify(d)]));
+    const current = readPendingHabitDeltas(storageKey);
+    const remaining = current.filter(d => byId.get(d.id) !== JSON.stringify(d));
+    localStorage.setItem(storageKey, JSON.stringify(remaining));
+    return current.length - remaining.length;
+  }
 
   const TASKPOINTS_PACKED_STORAGE_VERSION = 1;
   const PACKED_ARRAY_SCHEMAS = {
@@ -8878,6 +8929,12 @@ return Number(cappedScore.toFixed(1));
     NPC_SCORE_ABSOLUTE_MIN: NPC_SCORE_LOW_SOFT_CAP_MIN,
     NPC_SCORE_ABSOLUTE_MAX: NPC_SCORE_HIGH_SOFT_CAP_MAX,
     STORAGE_KEY,
+    PENDING_HABIT_DELTAS_KEY,
+    habitDeltaId,
+    readPendingHabitDeltas,
+    writePendingHabitDelta,
+    applyPendingHabitDeltas,
+    clearCompactedHabitDeltas,
     PROJECTS_STORAGE_KEY,
     QUARANTINE_SNAPSHOT_KEY,
     QUARANTINE_INLINE_MAX_BYTES,
