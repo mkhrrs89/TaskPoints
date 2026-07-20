@@ -4861,7 +4861,9 @@ function renderTodayPointsSummary(todayPoints, inertia, inertiaAvg){
 
   // Track the last rendered Today score for toast comparisons
   if (Number.isFinite(todayPoints)) {
-    window.__tpLastRenderedTodayScore = Math.round(todayPoints * 10) / 10;
+    const roundedTodayScore = Math.round(todayPoints * 10) / 10;
+    window.__tpLastRenderedTodayScore = roundedTodayScore;
+    __tpOptimisticTodayScore = roundedTodayScore;
   }
 
   // If a past-day edit queued a Today-score toast, resolve it now
@@ -8601,6 +8603,7 @@ document.addEventListener('click', (event) => {
 }, { capture: true });
 
 let habitTodayScoreReconcileId = null;
+let habitTodayScoreReconcileFrameId = null;
 let __tpOptimisticTodayScore = null;
 function renderTodayScoreValueOnly(todayPoints) {
   const score = Math.round(Number(todayPoints) * 10) / 10;
@@ -8613,16 +8616,32 @@ function renderTodayScoreValueOnly(todayPoints) {
   __tpOptimisticTodayScore = score;
 }
 function scheduleHabitTodayScoreReconciliation() {
-  if (habitTodayScoreReconcileId) return;
-  requestAnimationFrame(() => { habitTodayScoreReconcileId = setTimeout(() => {
-    habitTodayScoreReconcileId = null;
-    const score = __tpGetCurrentTodayScoreForToast();
-    if (!Number.isFinite(score)) return;
-    renderTodayScoreValueOnly(score);
-    __tpConsumeQueuedTodayScoreToast(score);
-  }, 0); });
+  // Mark scheduled before the next frame: a rapid burst must have one canonical rebuild.
+  if (habitTodayScoreReconcileFrameId === null && habitTodayScoreReconcileId === null) {
+    habitTodayScoreReconcileFrameId = requestAnimationFrame(() => {
+      habitTodayScoreReconcileFrameId = null;
+      habitTodayScoreReconcileId = setTimeout(() => {
+        habitTodayScoreReconcileId = null;
+        const score = __tpGetCurrentTodayScoreForToast();
+        if (!Number.isFinite(score)) return;
+        renderTodayScoreValueOnly(score);
+        __tpConsumeQueuedTodayScoreToast(score);
+      }, 150);
+    });
+    return;
+  }
+  // Once post-paint is armed, extend the short burst debounce rather than queue work.
+  if (habitTodayScoreReconcileId !== null) {
+    clearTimeout(habitTodayScoreReconcileId);
+    habitTodayScoreReconcileId = setTimeout(() => {
+      habitTodayScoreReconcileId = null;
+      const score = __tpGetCurrentTodayScoreForToast();
+      if (!Number.isFinite(score)) return;
+      renderTodayScoreValueOnly(score);
+      __tpConsumeQueuedTodayScoreToast(score);
+    }, 150);
+  }
 }
-
 function scheduleHabitRerender() {
   scheduleHabitFullRestackRerender();
   scheduleHabitStatsRefresh();
@@ -8948,7 +8967,8 @@ function handleHabitBubbleTap(bubbleEl) {
 // baseline is stale during save/rerender races.
 // The rendered/current optimistic value is only a score baseline, never habit state.
 const oldTodayScoreForToast = __tpOptimisticTodayScore ?? __tpGetLastRenderedTodayScore();
-const completionBeforeTap = state.completions.find(c => (c?.source === 'habit' || c?.source === 'vice') && c.habitId === habitId && c.dayKey === dayKey);
+const existingCompletion = state.completions.find(c => (c?.source === 'habit' || c?.source === 'vice') && c.habitId === habitId && c.dayKey === dayKey);
+const completionBeforeTap = existingCompletion ? { ...existingCompletion } : null;
 const habitBeforeScoring = { ...h, doneKeys: [...(h.doneKeys || [])], failedKeys: [...(h.failedKeys || [])], iceKeys: [...(h.iceKeys || [])] };
 const habitBeforeTap = { doneKeys: [...(h.doneKeys || [])], failedKeys: [...(h.failedKeys || [])], iceKeys: [...(h.iceKeys || [])], updatedAtISO: h.updatedAtISO, completions: state.completions.slice() };
 
@@ -9023,6 +9043,9 @@ applyCanonicalHabitBubbleVisual(bubbleEl, h, dayKey, statusClass);
     const delta = Math.round((afterPoints - beforePoints) * 10) / 10;
     const baseline = Number.isFinite(oldTodayScoreForToast) ? oldTodayScoreForToast : 0;
     renderTodayScoreValueOnly(baseline + delta);
+    // A queued historical baseline must move with a direct Today change so the
+    // later canonical toast contains only inertia/history, never this tap too.
+    if (__tpPendingTodayToastOld != null) __tpPendingTodayToastOld = Math.round((__tpPendingTodayToastOld + delta) * 10) / 10;
     if (delta) showPointsToast(delta);
   } else {
     __tpQueueTodayScoreDeltaToast();

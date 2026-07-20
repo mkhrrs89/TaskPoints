@@ -373,3 +373,32 @@ test('canonical habit bubble visual projection clears stale classes through exec
   assert.deepEqual(primary(), ['off']);
   assert.equal(bubble.classList.contains('icy'), false);
 });
+
+test('canonical completion scoring preserves detached shower, half, and vice tap deltas', () => {
+  const dayKey = '2026-07-20';
+  const shower = { id: 'shower', name: 'Shower', pointsPerDay: 3, doneKeys: [dayKey], iceKeys: [] };
+  const scoringState = core.normalizeState({ habits: [shower], completions: [] });
+  const full = { source: 'habit', habitId: shower.id, dayKey, points: 3 };
+  const before = { ...full };
+  const icy = { ...full, points: 3.5 };
+  assert.equal(core.pointsForCompletion(before, scoringState), 3);
+  assert.equal(core.pointsForCompletion(icy, scoringState) - core.pointsForCompletion(before, scoringState), 0.5);
+  assert.equal(0 - core.pointsForCompletion(icy, scoringState), -3.5);
+
+  const habit = { id: 'half', name: 'Half', pointsPerDay: 4, doneKeys: [dayKey] };
+  const halfState = core.normalizeState({ habits: [habit], completions: [] });
+  assert.equal(core.pointsForCompletion({ source: 'habit', habitId: 'half', dayKey, points: 2, completionFraction: .5 }, halfState) - core.pointsForCompletion({ source: 'habit', habitId: 'half', dayKey, points: 4, completionFraction: 1 }, halfState), -2);
+
+  const vice = { id: 'vice', name: 'Vice', category: 'vice', pointsPerDay: 2, doneKeys: [dayKey] };
+  const viceState = core.normalizeState({ habits: [vice], completions: [] });
+  assert.equal(core.pointsForCompletion({ source: 'vice', habitId: 'vice', dayKey, points: 2 }, viceState), 2);
+  assert.equal(0 - core.pointsForCompletion({ source: 'vice', habitId: 'vice', dayKey, points: 2 }, viceState), -2);
+});
+
+test('habit score synchronization keeps detached pre-tap snapshots and coalesced reconciliation guards', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  assert.match(source, /const completionBeforeTap = existingCompletion \? \{ \.\.\.existingCompletion \} : null;/);
+  assert.match(source, /__tpPendingTodayToastOld = Math\.round\(\(__tpPendingTodayToastOld \+ delta\) \* 10\) \/ 10;/);
+  assert.match(source, /habitTodayScoreReconcileFrameId === null && habitTodayScoreReconcileId === null/);
+  assert.match(source, /__tpOptimisticTodayScore = roundedTodayScore;/);
+});
