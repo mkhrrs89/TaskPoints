@@ -1,0 +1,384 @@
+name: Apply Phase 2 IndexedDB dual-write patch
+
+on:
+  push:
+    branches:
+      - codex/phase-2-indexeddb-dual-write
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/phase-2-indexeddb-dual-write
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Apply focused Phase 2 patch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          core_path = Path('scoring_core.js')
+          tests_path = Path('tests/shadow_migration.test.js')
+          text = core_path.read_text()
+
+          if 'SHADOW_DUAL_WRITE_METADATA_ID' not in text:
+              old = '  const SHADOW_MIGRATION_SCHEMA_VERSION = 1;\n  const SHADOW_ARRAY_STORES ='
+              new = "  const SHADOW_MIGRATION_SCHEMA_VERSION = 1;\n  const SHADOW_DUAL_WRITE_METADATA_ID = 'dual_write';\n  const SHADOW_ARRAY_STORES ="
+              if old not in text:
+                  raise SystemExit('Could not locate shadow migration constants')
+              text = text.replace(old, new, 1)
+
+          if 'let shadowDualWriteQueue = Promise.resolve();' not in text:
+              old = '  const pendingInteractiveRecompresses = new Map();\n  const pendingHabitJournalCompactions = new Map();'
+              new = "  const pendingInteractiveRecompresses = new Map();\n  const pendingHabitJournalCompactions = new Map();\n  let shadowDualWriteQueue = Promise.resolve();\n  let shadowDualWritePendingCount = 0;\n  let shadowDualWriteSequence = 0;"
+              if old not in text:
+                  raise SystemExit('Could not locate save queue declarations')
+              text = text.replace(old, new, 1)
+
+          old_safe = '''  function safeReplaceTaskPointsStorage(storageKey, serializedCandidate) {
+    const previousRaw = localStorage.getItem(storageKey);
+    if (previousRaw && serializedCandidate.length < previousRaw.length) {
+      localStorage.removeItem(storageKey);
+      try {
+        localStorage.setItem(storageKey, serializedCandidate);
+      } catch (err) {
+        try { localStorage.setItem(storageKey, previousRaw); } catch (restoreErr) { console.warn('TaskPointsCore: failed to restore previous storage after packed write failure.', restoreErr); }
+        throw err;
+      }
+      return;
+    }
+    localStorage.setItem(storageKey, serializedCandidate);
+  }'''
+          new_safe = '''  function safeReplaceTaskPointsStorage(storageKey, serializedCandidate) {
+    const previousRaw = localStorage.getItem(storageKey);
+    if (previousRaw && serializedCandidate.length < previousRaw.length) {
+      localStorage.removeItem(storageKey);
+      try {
+        localStorage.setItem(storageKey, serializedCandidate);
+      } catch (err) {
+        try { localStorage.setItem(storageKey, previousRaw); } catch (restoreErr) { console.warn('TaskPointsCore: failed to restore previous storage after packed write failure.', restoreErr); }
+        throw err;
+      }
+      scheduleShadowDualWriteFromSerializedState(storageKey, serializedCandidate);
+      return;
+    }
+    localStorage.setItem(storageKey, serializedCandidate);
+    scheduleShadowDualWriteFromSerializedState(storageKey, serializedCandidate);
+  }'''
+          if 'scheduleShadowDualWriteFromSerializedState(storageKey, serializedCandidate);' not in text:
+              if old_safe not in text:
+                  raise SystemExit('Could not locate safeReplaceTaskPointsStorage')
+              text = text.replace(old_safe, new_safe, 1)
+
+          dual_functions = r'''
+  function cloneShadowDualWriteState(state) {
+    if (typeof global.structuredClone === 'function') return global.structuredClone(state);
+    return JSON.parse(JSON.stringify(state));
+  }
+  async function shadowPutMetadataRecord(db, id, metadata) {
+    const tx = db.transaction('metadata', 'readwrite');
+    tx.objectStore('metadata').put({ id, ...metadata });
+    await shadowTransaction(tx);
+  }
+  async function shadowReadMetadataRecord(db, id) {
+    const tx = db.transaction('metadata', 'readonly');
+    return (await shadowRequest(tx.objectStore('metadata').get(id))) || null;
+  }
+  async function shadowWriteStateStores(db, source) {
+    const layout = shadowSourceLayout(source);
+    const stores = [...SHADOW_ARRAY_STORES, 'collections', 'values'];
+    const tx = db.transaction(stores, 'readwrite');
+    [...SHADOW_ARRAY_STORES, 'collections'].forEach(name => tx.objectStore(name).clear());
+    tx.objectStore('values').clear();
+    Object.entries(layout.arrays).forEach(([field, rows]) => rows.forEach((value, index) => tx.objectStore(field).put({ key: index, value })));
+    Object.entries(layout.collections).forEach(([field, rows]) => {
+      tx.objectStore('collections').put({ key: `manifest:${field}`, kind: 'manifest', field });
+      rows.forEach((value, index) => tx.objectStore('collections').put({ key: `item:${field}:${index}`, kind: 'item', field, index, value }));
+    });
+    Object.entries(layout.values).forEach(([field, value]) => tx.objectStore('values').put({ field, value }));
+    await shadowTransaction(tx);
+  }
+  async function shadowReadStateStores(db) {
+    const stores = [...SHADOW_ARRAY_STORES, 'collections', 'values'];
+    const tx = db.transaction(stores, 'readonly');
+    // Create all requests before awaiting so Safari cannot deactivate the
+    // transaction between asynchronous continuations.
+    const arrayReads = Object.fromEntries(SHADOW_ARRAY_STORES.map(field => [field, shadowRequest(tx.objectStore(field).getAll())]));
+    const collectionRead = shadowRequest(tx.objectStore('collections').getAll());
+    const valuesRead = shadowRequest(tx.objectStore('values').getAll());
+    const [arrayRows, collectionRows, valuesRows] = await Promise.all([
+      Promise.all(SHADOW_ARRAY_STORES.map(field => arrayReads[field])),
+      collectionRead,
+      valuesRead
+    ]);
+    const rebuilt = {};
+    SHADOW_ARRAY_STORES.forEach((field, index) => {
+      rebuilt[field] = arrayRows[index].sort((a, b) => a.key - b.key).map(row => row.value);
+    });
+    collectionRows.filter(row => row.kind === 'manifest').forEach(row => { rebuilt[row.field] = []; });
+    collectionRows.filter(row => row.kind === 'item').forEach(row => { (rebuilt[row.field] ||= [])[row.index] = row.value; });
+    valuesRows.forEach(row => { rebuilt[row.field] = row.value; });
+    return rebuilt;
+  }
+  async function writeShadowDualWriteSnapshot(state, options = {}) {
+    const indexedDb = options.indexedDB || global.indexedDB;
+    const source = cloneShadowDualWriteState(state && typeof state === 'object' ? state : {});
+    let db = null;
+    const startedAt = new Date().toISOString();
+    const sequence = Number(options.sequence) || 0;
+    try {
+      db = await openShadowMigrationDb(indexedDb);
+      const migrationMetadata = await shadowReadMetadata(db);
+      if (options.requireVerified !== false && migrationMetadata?.status !== 'passed_verification') {
+        return { status: 'skipped_not_verified', schemaVersion: SHADOW_MIGRATION_SCHEMA_VERSION, phase: 'dual_write' };
+      }
+      const sourceSummary = shadowSourceSummary(source);
+      await shadowPutMetadataRecord(db, SHADOW_DUAL_WRITE_METADATA_ID, {
+        schemaVersion: SHADOW_MIGRATION_SCHEMA_VERSION,
+        phase: 'dual_write',
+        status: 'running',
+        startedAt,
+        completionTime: null,
+        sequence,
+        errors: [],
+        sourceCounts: sourceSummary.counts,
+        destinationCounts: {},
+        verification: null
+      });
+      await shadowWriteStateStores(db, source);
+      const rebuilt = await shadowReadStateStores(db);
+      const destinationSummary = shadowSourceSummary(rebuilt);
+      const mismatches = shadowVerificationMismatches(sourceSummary, destinationSummary);
+      const countsMatch = shadowCanonicalJson(sourceSummary.counts) === shadowCanonicalJson(destinationSummary.counts);
+      const hashesMatch = sourceSummary.hashes.state === destinationSummary.hashes.state;
+      const verification = {
+        countsMatch,
+        hashesMatch,
+        source: { counts: sourceSummary.counts, hashes: sourceSummary.hashes, hashDetails: sourceSummary.hashDetails },
+        destination: { counts: destinationSummary.counts, hashes: destinationSummary.hashes, hashDetails: destinationSummary.hashDetails },
+        mismatches
+      };
+      const status = countsMatch && hashesMatch ? 'passed_verification' : 'failed';
+      const metadata = {
+        schemaVersion: SHADOW_MIGRATION_SCHEMA_VERSION,
+        phase: 'dual_write',
+        status,
+        startedAt,
+        completionTime: new Date().toISOString(),
+        sequence,
+        errors: status === 'failed' ? ['Dual-write verification did not pass.'] : [],
+        sourceCounts: sourceSummary.counts,
+        destinationCounts: destinationSummary.counts,
+        verification
+      };
+      await shadowPutMetadataRecord(db, SHADOW_DUAL_WRITE_METADATA_ID, metadata);
+      return metadata;
+    } catch (error) {
+      const failed = {
+        schemaVersion: SHADOW_MIGRATION_SCHEMA_VERSION,
+        phase: 'dual_write',
+        status: 'failed',
+        startedAt,
+        completionTime: new Date().toISOString(),
+        sequence,
+        errors: [error?.message || String(error)],
+        sourceCounts: {},
+        destinationCounts: {},
+        verification: null
+      };
+      try {
+        const errorDb = db || await openShadowMigrationDb(indexedDb);
+        await shadowPutMetadataRecord(errorDb, SHADOW_DUAL_WRITE_METADATA_ID, failed);
+        if (!db) errorDb.close?.();
+      } catch (_) {}
+      return failed;
+    } finally {
+      db?.close?.();
+    }
+  }
+  async function getShadowDualWriteStatus(options = {}) {
+    const indexedDb = options.indexedDB || global.indexedDB;
+    if (!indexedDb) return { status: 'unavailable', schemaVersion: SHADOW_MIGRATION_SCHEMA_VERSION, phase: 'dual_write' };
+    const exists = await indexedDbExists(indexedDb, SHADOW_MIGRATION_DB_NAME);
+    if (exists === false) return { status: 'not_started', schemaVersion: SHADOW_MIGRATION_SCHEMA_VERSION, phase: 'dual_write' };
+    const db = await openShadowMigrationDb(indexedDb);
+    try {
+      return (await shadowReadMetadataRecord(db, SHADOW_DUAL_WRITE_METADATA_ID)) || { status: 'not_started', schemaVersion: SHADOW_MIGRATION_SCHEMA_VERSION, phase: 'dual_write' };
+    } finally {
+      db.close?.();
+    }
+  }
+  function queueShadowDualWrite(state, options = {}) {
+    const snapshot = state && typeof state === 'object' ? cloneShadowDualWriteState(state) : null;
+    const sequence = ++shadowDualWriteSequence;
+    shadowDualWritePendingCount += 1;
+    const operation = shadowDualWriteQueue.catch(() => undefined).then(() => {
+      let source = snapshot;
+      if (!source) {
+        const storageKey = options.storageKey || STORAGE_KEY;
+        const currentRaw = global.localStorage?.getItem?.(storageKey);
+        const raw = currentRaw || options.serializedCandidate || '';
+        source = raw ? parseTaskPointsStorageJson(raw, {}) : {};
+      }
+      return writeShadowDualWriteSnapshot(source, { ...options, sequence });
+    }).finally(() => {
+      shadowDualWritePendingCount = Math.max(0, shadowDualWritePendingCount - 1);
+    });
+    shadowDualWriteQueue = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+  function scheduleShadowDualWriteFromSerializedState(storageKey, serializedCandidate) {
+    if (storageKey !== STORAGE_KEY) return null;
+    try {
+      const operation = queueShadowDualWrite(null, { storageKey, serializedCandidate });
+      operation.catch(error => console.warn('TaskPointsCore: IndexedDB dual-write failed; localStorage remains authoritative.', error));
+      return operation;
+    } catch (error) {
+      console.warn('TaskPointsCore: could not queue IndexedDB dual-write; localStorage remains authoritative.', error);
+      return null;
+    }
+  }
+  function flushShadowDualWrites() {
+    return shadowDualWriteQueue.catch(() => undefined);
+  }
+'''
+
+          marker = '  async function runShadowMigration(options = {}) {'
+          if 'function writeShadowDualWriteSnapshot' not in text:
+              if marker not in text:
+                  raise SystemExit('Could not locate runShadowMigration insertion point')
+              text = text.replace(marker, dual_functions + '\n' + marker, 1)
+
+          if '    writeShadowDualWriteSnapshot,' not in text:
+              old = '    getShadowMigrationStatus,\n    runShadowMigration,'
+              new = '''    getShadowMigrationStatus,
+    runShadowMigration,
+    SHADOW_DUAL_WRITE_METADATA_ID,
+    writeShadowDualWriteSnapshot,
+    getShadowDualWriteStatus,
+    queueShadowDualWrite,
+    scheduleShadowDualWriteFromSerializedState,
+    flushShadowDualWrites,
+    getPendingShadowDualWriteCount: () => shadowDualWritePendingCount,'''
+              if old not in text:
+                  raise SystemExit('Could not locate TaskPointsCore shadow exports')
+              text = text.replace(old, new, 1)
+
+          core_path.write_text(text)
+
+          tests = tests_path.read_text()
+          if "dual-write queue preserves the newest rapid save" not in tests:
+              tests += r'''
+
+test('dual-write refuses to start until the Phase 1 shadow copy is verified', async () => {
+  const idb = createFakeIndexedDb({ strictTransactions: true });
+  const result = await core.writeShadowDualWriteSnapshot(fixture(), { indexedDB: idb });
+  assert.equal(result.status, 'skipped_not_verified');
+  const shadow = idb._db(core.SHADOW_MIGRATION_DB_NAME);
+  assert.equal((await fakeRows(shadow, 'tasks')).length, 0);
+  assert.equal((await fakeRows(shadow, 'collections')).length, 0);
+});
+
+async function seedVerifiedShadowForDualWrite(idb, state = fixture()) {
+  await openFakeDb(idb, core.IMAGE_DB_NAME, 1, db => db.createObjectStore(core.IMAGE_STORE_NAME));
+  const imageDb = idb._db(core.IMAGE_DB_NAME);
+  const tx = imageDb.transaction(core.IMAGE_STORE_NAME, 'readwrite');
+  tx.objectStore(core.IMAGE_STORE_NAME).put(new Blob(['profile']), 'profile-image');
+  tx.objectStore(core.IMAGE_STORE_NAME).put(new Blob(['player']), 'player-image');
+  tx.objectStore(core.IMAGE_STORE_NAME).put(new Blob(['season']), 'season-image');
+  await new Promise(resolve => { tx.oncomplete = resolve; });
+  const migration = await core.runShadowMigration({ state, indexedDB: idb, localStorage: { getItem: () => '' } });
+  assert.equal(migration.status, 'passed_verification', JSON.stringify(migration));
+  return imageDb;
+}
+
+test('dual-write queue preserves the newest rapid save with exact hashes and empty collections', async () => {
+  const idb = createFakeIndexedDb({ strictTransactions: true });
+  const imageDb = await seedVerifiedShadowForDualWrite(idb);
+  const imageRowsBefore = await fakeRows(imageDb, core.IMAGE_STORE_NAME);
+  const states = [1, 2, 3].map(version => ({
+    ...fixture(),
+    tasks: [{ id: `task-${version}`, version }],
+    schedule: [], opponentDripSchedules: [], storageWarnings: [], workHistory: [],
+    futureRows: [{ id: 'duplicate' }, { id: 'duplicate' }, { version }]
+  }));
+  const results = await Promise.all(states.map(state => core.queueShadowDualWrite(state, { indexedDB: idb })));
+  await core.flushShadowDualWrites();
+  assert.equal(results.every(result => result.status === 'passed_verification'), true, JSON.stringify(results));
+  assert.equal(core.getPendingShadowDualWriteCount(), 0);
+  const status = await core.getShadowDualWriteStatus({ indexedDB: idb });
+  const expected = core.shadowSourceSummary(states.at(-1));
+  assert.equal(status.status, 'passed_verification');
+  assert.equal(status.verification.source.hashes.state, expected.hashes.state);
+  assert.equal(status.verification.destination.hashes.state, expected.hashes.state);
+  assert.equal(status.verification.countsMatch, true);
+  assert.equal(status.verification.hashesMatch, true);
+  const shadow = idb._db(core.SHADOW_MIGRATION_DB_NAME);
+  assert.deepEqual((await fakeRows(shadow, 'tasks')).map(row => row.value.id), ['task-3']);
+  const collectionRows = await fakeRows(shadow, 'collections');
+  ['schedule', 'opponentDripSchedules', 'storageWarnings', 'workHistory'].forEach(field => {
+    assert.equal(collectionRows.some(row => row.kind === 'manifest' && row.field === field), true, field);
+  });
+  assert.equal(collectionRows.filter(row => row.kind === 'item' && row.field === 'futureRows').length, 3);
+  assert.deepEqual(await fakeRows(imageDb, core.IMAGE_STORE_NAME), imageRowsBefore);
+});
+
+test('a missing IndexedDB cannot block a successful localStorage save', async () => {
+  const previousStorage = global.localStorage;
+  const previousIndexedDb = global.indexedDB;
+  const rows = new Map();
+  global.localStorage = {
+    getItem: key => rows.has(String(key)) ? rows.get(String(key)) : null,
+    setItem: (key, value) => rows.set(String(key), String(value)),
+    removeItem: key => rows.delete(String(key))
+  };
+  global.indexedDB = null;
+  try {
+    const state = fixture();
+    const raw = core.writeTaskPointsStoredState(state, { storageKey: core.STORAGE_KEY });
+    assert.equal(rows.get(core.STORAGE_KEY), raw);
+    assert.deepEqual(core.parseTaskPointsStorageJson(raw, {}).tasks, state.tasks);
+    await core.flushShadowDualWrites();
+    assert.equal(rows.get(core.STORAGE_KEY), raw);
+  } finally {
+    global.localStorage = previousStorage;
+    global.indexedDB = previousIndexedDb;
+  }
+});
+'''
+          tests_path.write_text(tests)
+          PY
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run focused migration tests
+        run: node --test tests/shadow_migration.test.js
+
+      - name: Run full test suite
+        run: npm test
+
+      - name: Commit Phase 2 implementation
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "Patch already applied; nothing to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scoring_core.js tests/shadow_migration.test.js
+          git commit -m "Add verified IndexedDB dual writes"
+          git push origin HEAD:codex/phase-2-indexeddb-dual-write
