@@ -241,7 +241,7 @@ test('habit toggles use interactive deferred compression and Storage Health dist
   const indexSource = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
   const settingsSource = fs.readFileSync(path.join(__dirname, '..', 'settings.html'), 'utf8');
   assert.match(indexSource, /function scheduleHabitSave\(\)[\s\S]*?interactive:\s*true[\s\S]*?deferCompression:\s*true/);
-  assert.match(indexSource, /function handleHabitBubbleTap\([\s\S]*?applyHabitDayToggle[\s\S]*?applyHabitBubbleStyle[\s\S]*?refreshHabitRowWeekCompleteVisual\([\s\S]*?scheduleHabitSave\(\)[\s\S]*?scheduleHabitRerender\(\)/);
+  assert.match(indexSource, /function handleHabitBubbleTap\([\s\S]*?applyHabitDayToggle[\s\S]*?applyCanonicalHabitBubbleVisual[\s\S]*?refreshHabitRowWeekCompleteVisual\([\s\S]*?scheduleHabitSave\(\)[\s\S]*?scheduleHabitRerender\(\)/);
   assert.match(settingsSource, /Main state is already optimized\./);
   assert.match(settingsSource, /Optimized version was not smaller\./);
   const coreSource = fs.readFileSync(path.join(__dirname, '..', 'scoring_core.js'), 'utf8');
@@ -335,4 +335,104 @@ test('habit tap rerenders defer full DOM work while preserving immediate weekly 
   assert.match(indexSource, /tap->journal/);
   assert.match(indexSource, /tap->fullHabitRerender/);
   assert.match(indexSource, /tap->statsRefresh/);
+});
+
+test('canonical habit bubble visual projection clears stale classes through executable state cycles', () => {
+  const indexSource = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const match = indexSource.match(/function applyCanonicalHabitBubbleVisual\([\s\S]*?\n}\n\nfunction applyHabitBubbleStyle/);
+  assert.ok(match, 'canonical visual helper is present');
+  const helperSource = match[0].replace(/\nfunction applyHabitBubbleStyle$/, '');
+  class ClassList {
+    constructor(values = []) { this.values = new Set(values); }
+    remove(...values) { values.forEach(value => this.values.delete(value)); }
+    add(...values) { values.forEach(value => this.values.add(value)); }
+    toggle(value, enabled) { if (enabled) this.add(value); else this.remove(value); }
+    contains(value) { return this.values.has(value); }
+  }
+  const bubble = { classList: new ClassList(['off', 'half', 'habit-half', 'past-incomplete']), removeAttribute() {}, setAttribute() {} };
+  const helper = new Function('todayKey', 'isShowerHabit', 'applyHabitBubbleStyle', `${helperSource}; return applyCanonicalHabitBubbleVisual;`)(
+    () => '2026-07-20', habit => habit.name === 'Shower', () => {}
+  );
+  const primary = () => ['on', 'off', 'half', 'failed'].filter(value => bubble.classList.contains(value));
+  const habit = { category: 'habit', name: 'Work', iceKeys: [] };
+  ['on', 'half', 'off', 'on'].forEach(status => {
+    helper(bubble, habit, '2026-07-20', status);
+    assert.deepEqual(primary(), [status]);
+    assert.equal(bubble.classList.contains('habit-half'), status === 'half');
+  });
+  const vice = { category: 'vice', name: 'Vice', iceKeys: [] };
+  ['on', 'failed', 'off'].forEach(status => {
+    helper(bubble, vice, '2026-07-19', status);
+    assert.deepEqual(primary(), [status]);
+    assert.equal(bubble.classList.contains('past-failed'), status === 'failed');
+  });
+  const shower = { category: 'habit', name: 'Shower', iceKeys: ['2026-07-20'] };
+  helper(bubble, shower, '2026-07-20', 'on');
+  assert.equal(bubble.classList.contains('icy'), true);
+  helper(bubble, shower, '2026-07-20', 'off');
+  assert.deepEqual(primary(), ['off']);
+  assert.equal(bubble.classList.contains('icy'), false);
+});
+
+test('canonical completion scoring preserves detached shower, half, and vice tap deltas', () => {
+  const dayKey = '2026-07-20';
+  const shower = { id: 'shower', name: 'Shower', pointsPerDay: 3, doneKeys: [dayKey], iceKeys: [] };
+  const scoringState = core.normalizeState({ habits: [shower], completions: [] });
+  const full = { source: 'habit', habitId: shower.id, dayKey, points: 3 };
+  const before = { ...full };
+  const icy = { ...full, points: 3.5 };
+  assert.equal(core.pointsForCompletion(before, scoringState), 3);
+  assert.equal(core.pointsForCompletion(icy, scoringState) - core.pointsForCompletion(before, scoringState), 0.5);
+  assert.equal(0 - core.pointsForCompletion(icy, scoringState), -3.5);
+
+  const habit = { id: 'half', name: 'Half', pointsPerDay: 4, doneKeys: [dayKey] };
+  const halfState = core.normalizeState({ habits: [habit], completions: [] });
+  assert.equal(core.pointsForCompletion({ source: 'habit', habitId: 'half', dayKey, points: 2, completionFraction: .5 }, halfState) - core.pointsForCompletion({ source: 'habit', habitId: 'half', dayKey, points: 4, completionFraction: 1 }, halfState), -2);
+
+  const vice = { id: 'vice', name: 'Vice', category: 'vice', pointsPerDay: 2, doneKeys: [dayKey] };
+  const viceState = core.normalizeState({ habits: [vice], completions: [] });
+  assert.equal(core.pointsForCompletion({ source: 'vice', habitId: 'vice', dayKey, points: 2 }, viceState), 2);
+  assert.equal(0 - core.pointsForCompletion({ source: 'vice', habitId: 'vice', dayKey, points: 2 }, viceState), -2);
+});
+
+test('habit score synchronization keeps detached pre-tap snapshots and coalesced reconciliation guards', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  assert.match(source, /const completionBeforeTap = existingCompletion \? \{ \.\.\.existingCompletion \} : null;/);
+  assert.match(source, /__tpPendingTodayToastOld = Math\.round\(\(__tpPendingTodayToastOld \+ delta\) \* 10\) \/ 10;/);
+  assert.match(source, /habitTodayScoreReconcileFrameId === null && habitTodayScoreReconcileId === null/);
+  assert.match(source, /__tpOptimisticTodayScore = roundedTodayScore;/);
+});
+
+test('failed habit save rollback restores only the exact affected completion snapshot', () => {
+  const indexSource = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const match = indexSource.match(/function restoreHabitDayAfterFailedSave\([\s\S]*?\n}\n\nfunction handleHabitBubbleTap/);
+  assert.ok(match, 'targeted rollback helper is present');
+  const helperSource = match[0].replace(/\nfunction handleHabitBubbleTap$/, '');
+  let dirtyCalls = 0;
+  const restore = new Function('markCompletionsDirty', `${helperSource}; return restoreHabitDayAfterFailedSave;`)(() => { dirtyCalls += 1; });
+  const dayKey = '2026-07-20';
+  const unrelated = { id: 'task:other', source: 'task', points: 9 };
+  const full = { id: 'habit:shower:2026-07-20', source: 'habit', habitId: 'shower', dayKey, points: 3 };
+  const state = { completions: [unrelated, { ...full, points: 3.5 }] };
+  const shower = { doneKeys: [dayKey], failedKeys: [], iceKeys: [dayKey], updatedAtISO: 'changed' };
+  restore(state, shower, { doneKeys: [dayKey], failedKeys: [], iceKeys: [], updatedAtISO: 'original' }, full, 'shower', dayKey);
+  assert.deepEqual(shower, { doneKeys: [dayKey], failedKeys: [], iceKeys: [], updatedAtISO: 'original' });
+  assert.equal(state.completions.filter(c => c.habitId === 'shower' && c.dayKey === dayKey).length, 1);
+  assert.equal(state.completions.find(c => c.habitId === 'shower').points, 3);
+  assert.strictEqual(state.completions.find(c => c.id === unrelated.id), unrelated);
+
+  const cases = [
+    { name: 'full to half', before: { doneKeys: [dayKey], failedKeys: [], iceKeys: [] }, current: { doneKeys: [dayKey], failedKeys: [], iceKeys: [] }, completion: { source: 'habit', habitId: 'normal', dayKey, points: 4, completionFraction: 1 } },
+    { name: 'half to off', before: { doneKeys: [dayKey], failedKeys: [], iceKeys: [] }, current: { doneKeys: [], failedKeys: [], iceKeys: [] }, completion: { source: 'habit', habitId: 'normal', dayKey, points: 2, completionFraction: .5 } },
+    { name: 'vice completed to failed', before: { doneKeys: [dayKey], failedKeys: [], iceKeys: [] }, current: { doneKeys: [], failedKeys: [dayKey], iceKeys: [] }, completion: { source: 'vice', habitId: 'vice', dayKey, points: 2 } }
+  ];
+  cases.forEach(({ before, current, completion }) => {
+    const appState = { completions: [] };
+    const habit = { ...current, updatedAtISO: 'changed' };
+    restore(appState, habit, { ...before, updatedAtISO: 'original' }, completion, completion.habitId, dayKey);
+    assert.deepEqual(habit.doneKeys, before.doneKeys);
+    assert.deepEqual(habit.failedKeys, before.failedKeys);
+    assert.deepEqual(appState.completions, [completion]);
+  });
+  assert.equal(dirtyCalls, 4);
 });
