@@ -213,9 +213,20 @@
   }
 
   function stateFromLatestStoredRaw(capturedRaw) {
-    const latestRaw = global.localStorage?.getItem?.(core.STORAGE_KEY);
-    const raw = latestRaw || capturedRaw || '';
-    return raw ? core.parseTaskPointsStorageJson(raw, {}) : {};
+    try {
+      const latestRaw = global.localStorage?.getItem?.(core.STORAGE_KEY);
+      // A confirmed missing authoritative key represents an empty state. Never
+      // fall back to an older captured payload, which could resurrect data
+      // after Reset All in this page or another open TaskPoints tab.
+      if (latestRaw === null) return {};
+      if (typeof latestRaw === 'string') {
+        return latestRaw ? core.parseTaskPointsStorageJson(latestRaw, {}) : {};
+      }
+    } catch (_) {
+      // If localStorage cannot be read, the captured successful setItem payload
+      // is the safest fallback available for this single write.
+    }
+    return capturedRaw ? core.parseTaskPointsStorageJson(capturedRaw, {}) : {};
   }
 
   function queueWrite(state, options = {}) {
