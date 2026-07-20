@@ -126,6 +126,15 @@
 
 
 
+      <section class="glass space-y-3" aria-labelledby="shadowMigrationTitle">
+        <div>
+          <div id="shadowMigrationTitle" class="text-lg font-semibold">Shadow IndexedDB Migration</div>
+          <div class="muted text-sm">Phase 1 verification copy. TaskPoints continues reading and writing localStorage.</div>
+        </div>
+        <div id="shadowMigrationStatus" class="muted text-xs">Checking migration status…</div>
+        <button id="runShadowMigrationBtn" class="btn btn-ghost btn-toolbar nav-btn" type="button">Run Shadow Migration</button>
+      </section>
+
       <details class="glass space-y-3" id="seasonChampionshipRepairSection">
         <summary class="flex items-center justify-between gap-3 flex-wrap cursor-pointer">
           <div>
@@ -4658,6 +4667,29 @@ rows.push([
       setSeasonRepairStatus(`Season data repaired. currentSeason: ${result.state.currentSeason ? 'present' : 'none'}; archives: ${(result.state.seasonHistory || []).length}.`);
     }
 
+    function renderShadowMigrationStatus(metadata) {
+      const output = document.getElementById('shadowMigrationStatus');
+      if (!output) return;
+      const status = metadata?.status || 'not_started';
+      const labels = { not_started: 'Not started', running: 'Running', failed: 'Failed', passed_verification: 'Passed verification' };
+      const verification = metadata?.verification;
+      const imageText = verification?.images
+        ? ` Images: ${verification.images.total} stored; ${verification.images.referenced} referenced; ${verification.images.unreferencedImageIds.length} unreferenced; ${verification.images.missingImageIds.length} missing referenced.`
+        : '';
+      output.textContent = `${labels[status] || status}. ${metadata?.completionTime ? `Completed ${metadata.completionTime}.` : ''}${metadata?.errors?.length ? ` ${metadata.errors.join(' ')}` : ''}${imageText}`;
+    }
+    async function refreshShadowMigrationStatus() {
+      try { renderShadowMigrationStatus(await window.TaskPointsCore?.getShadowMigrationStatus?.()); }
+      catch (error) { renderShadowMigrationStatus({ status: 'failed', errors: [error.message || String(error)] }); }
+    }
+    async function handleRunShadowMigration() {
+      const button = document.getElementById('runShadowMigrationBtn');
+      if (!window.TaskPointsCore?.runShadowMigration) return;
+      button.disabled = true; renderShadowMigrationStatus({ status: 'running' });
+      try { renderShadowMigrationStatus(await TaskPointsCore.runShadowMigration()); }
+      finally { button.disabled = false; }
+    }
+
     let latestSimulation = null;
 
     document.addEventListener('DOMContentLoaded', () => {
@@ -4671,6 +4703,8 @@ rows.push([
       document.getElementById('settingsSeasonRebuildBtn')?.addEventListener('click', handleSeasonRebuildFromSavedResults);
       document.getElementById('settingsSeasonExportArchiveBtn')?.addEventListener('click', handleSeasonExportArchiveData);
       document.getElementById('settingsSeasonRepairBtn')?.addEventListener('click', handleSeasonRepairData);
+      document.getElementById('runShadowMigrationBtn')?.addEventListener('click', handleRunShadowMigration);
+      refreshShadowMigrationStatus();
       document.getElementById('settingsExportMatchupsBtn')?.addEventListener('click', exportMatchupsAndHistoryCsv);
       document.getElementById('settingsExportPersonalScoresBtn')?.addEventListener('click', exportPersonalScoreHistoryCsv);
       document.getElementById('categoryReportBtn')?.addEventListener('click', generateCategoryReport);
