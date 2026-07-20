@@ -58,6 +58,35 @@ test('pending habit delta journal synchronously coalesces and replays final off 
   assert.equal(core.readPendingHabitDeltas().length, 0);
 });
 
+test('shared loader replays exact normal, vice, and shower journal states', () => {
+  storage.clear();
+  const base = core.normalizeState({ habits: [
+    { id: 'normal', name: 'Normal', pointsPerDay: 2, doneKeys: [], failedKeys: [] },
+    { id: 'vice', name: 'Vice', category: 'vice', pointsPerDay: -3, doneKeys: [], failedKeys: [] },
+    { id: 'shower', name: 'Shower', pointsPerDay: 2, doneKeys: [], failedKeys: [], iceKeys: [] }
+  ], completions: [], gameHistory: [{ id: 'protected' }] });
+  core.saveStateSnapshot(base, { immediateWrite: true });
+  core.writePendingHabitDelta({ habitId: 'normal', dayKey: '2026-07-19', source: 'habit', status: 'half', done: true, failed: false, icy: false, completionFraction: .5, completionPoints: 1, updatedAtISO: '2026-07-19T12:00:00.000Z' });
+  core.writePendingHabitDelta({ habitId: 'vice', dayKey: '2026-07-19', source: 'vice', status: 'failed', done: false, failed: true, icy: false, updatedAtISO: '2026-07-19T12:00:00.000Z' });
+  core.writePendingHabitDelta({ habitId: 'shower', dayKey: '2026-07-19', source: 'habit', status: 'full', done: true, failed: false, icy: true, completionFraction: 1, completionPoints: 2.5, updatedAtISO: '2026-07-19T12:00:00.000Z' });
+  const loaded = core.loadAppState({ syncDerived: false, persistSync: false }).state;
+  assert.equal(loaded.habits.find(h => h.id === 'normal').doneKeys.includes('2026-07-19'), true);
+  assert.equal(loaded.habits.find(h => h.id === 'vice').failedKeys.includes('2026-07-19'), true);
+  const shower = loaded.habits.find(h => h.id === 'shower');
+  assert.equal(shower.doneKeys.includes('2026-07-19'), true);
+  assert.equal(shower.iceKeys.includes('2026-07-19'), true);
+  assert.equal(loaded.completions.find(c => c.id === 'habit:shower:2026-07-19').points, 2.5);
+  assert.equal(loaded.gameHistory.length, 1);
+});
+
+test('malformed journal is preserved and cannot be overwritten by a new delta', () => {
+  storage.clear();
+  storage.set(core.PENDING_HABIT_DELTAS_KEY, '{not json');
+  assert.throws(() => core.writePendingHabitDelta({ habitId: 'h', dayKey: '2026-07-19', source: 'habit', status: 'full' }));
+  assert.equal(storage.get(core.PENDING_HABIT_DELTAS_KEY), '{not json');
+  storage.clear();
+});
+
 test('optimized storage chooses and decodes compressed packed JSON without count loss', () => {
   const state = largeState();
   const plan = core.buildOptimizedTaskPointsStorageRaw(state);
@@ -174,7 +203,7 @@ test('habit toggles use interactive deferred compression and Storage Health dist
   assert.match(coreSource, /const criticalArrays = \['completions', 'matchups', 'gameHistory', 'seasonHistory', 'weightHistory', 'vo2MaxHistory', 'reminders', 'players', 'habits'\]/);
 });
 
-test('pending habit journals preserve the Work On Cal App fixture before navigation or export', () => {
+test('pending habit journals recover and compact the Work On Cal App fixture through shared loading', async () => {
   storage.clear();
   const habitId = 'work-on-cal-app';
   const dayKey = '2026-07-19';
@@ -194,17 +223,7 @@ test('pending habit journals preserve the Work On Cal App fixture before navigat
     ]
   });
 
-  // Simulate the first tap's in-memory mutation, then the synchronous flush.
-  const habit = state.habits[0];
-  habit.doneKeys.push(dayKey);
-  habit.updatedAtISO = '2026-07-19T12:00:00.000Z';
-  state.completions.push({
-    id: `habit:${habitId}:${dayKey}`,
-    taskId: `habit:${habitId}:${dayKey}`,
-    source: 'habit', habitId, dayKey,
-    completionFraction: 1,
-    completedAtISO: '2026-07-19T12:00:00.000Z'
-  });
+  // Persist July 19 off, then simulate a durable journal-only tap.
   core.saveStateSnapshot(state, {
     storageKey: core.STORAGE_KEY,
     immediateWrite: true,
@@ -213,12 +232,19 @@ test('pending habit journals preserve the Work On Cal App fixture before navigat
     interactive: true,
     deferCompression: true
   });
+  core.writePendingHabitDelta({ habitId, dayKey, source: 'habit', status: 'full', done: true, failed: false, icy: false, completionFraction: 1, completionPoints: 0, updatedAtISO: '2026-07-19T12:00:00.000Z' });
 
-  const reloaded = core.readTaskPointsStoredState(core.STORAGE_KEY, {});
+  const reloaded = core.loadAppState({ syncDerived: false, persistSync: false }).state;
   const savedHabit = reloaded.habits.find((item) => item.id === habitId);
   assert.ok(savedHabit.doneKeys.includes(dayKey));
   assert.equal(savedHabit.updatedAtISO, '2026-07-19T12:00:00.000Z');
   assert.ok(reloaded.completions.some((item) => item.id === `habit:${habitId}:${dayKey}`));
+  // The automatic startup scheduler can be invoked at zero delay in this test.
+  core.schedulePendingHabitDeltaCompaction(reloaded, { delayMs: 0 });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  const compacted = core.readTaskPointsStoredState(core.STORAGE_KEY, {});
+  assert.ok(compacted.habits.find(item => item.id === habitId).doneKeys.includes(dayKey));
+  assert.equal(core.readPendingHabitDeltas().length, 0);
 
   const indexSource = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
   assert.match(indexSource, /taskpoints_pending_habit_deltas_v1/);

@@ -2895,7 +2895,8 @@ function getCachedStorageState() {
   if (!raw) return null;
 
   if (__TP_PERF_BOOT) console.time('LOAD: JSON.parse');
-  const parsed = TaskPointsCore.parseTaskPointsStorageJson(raw, {});
+  // Shared loader replays the habit journal before this page derives or paints.
+  const parsed = TaskPointsCore.loadAppState({ syncDerived: false, persistSync: false }).state;
   if (__TP_PERF_BOOT) console.timeEnd('LOAD: JSON.parse');
 
   storageCache.raw = raw;
@@ -2959,9 +2960,6 @@ function load() {
       };
     }
 
-    // Replay the tiny write-ahead journal before any UI or derived-score work.
-    // Replaying replaces deterministic completion IDs, so it is idempotent.
-    if (window.TaskPointsCore?.applyPendingHabitDeltas) TaskPointsCore.applyPendingHabitDeltas(cached);
     const p = cached;
     const storedProjects = loadProjectsFromStorage();
 
@@ -8902,11 +8900,16 @@ try {
   // and replay is deterministic. This is synchronous and precedes all visual
   // feedback and deferred work.
   const journalStatus = statusClass === 'on' ? 'full' : statusClass;
+  const finalCompletion = state.completions.find(c => (c?.source === 'habit' || c?.source === 'vice') && c.habitId === habitId && c.dayKey === dayKey);
   const journalDelta = {
     id: `${(h.category || 'habit') === 'vice' ? 'vice' : 'habit'}:${habitId}:${dayKey}`,
     habitId, dayKey, source: (h.category || 'habit') === 'vice' ? 'vice' : 'habit',
     status: journalStatus === 'half' ? 'half' : (journalStatus === 'failed' ? 'failed' : (journalStatus === 'full' ? 'full' : 'off')),
     completionFraction: journalStatus === 'half' ? 0.5 : (journalStatus === 'full' ? 1 : 0),
+    done: Array.isArray(h.doneKeys) && h.doneKeys.includes(dayKey),
+    failed: Array.isArray(h.failedKeys) && h.failedKeys.includes(dayKey),
+    icy: Array.isArray(h.iceKeys) && h.iceKeys.includes(dayKey),
+    completionPoints: finalCompletion ? Number(finalCompletion.points) : null,
     updatedAtISO: h.updatedAtISO,
     createdAtISO: new Date().toISOString()
   };
@@ -8915,10 +8918,15 @@ try {
     if (window.TP_DEBUG_PERF) console.debug('[TP_DEBUG_PERF] tap->journal', { ms: Math.round(performance.now() - perfStart), bytes: JSON.stringify(journalDelta).length * 2 });
   } catch (journalError) {
     try {
-      TaskPointsCore.saveStateSnapshot(state, buildHomeSaveOptions('habit-journal-fallback', {
+      const fallback = TaskPointsCore.saveStateSnapshot(state, buildHomeSaveOptions('habit-journal-fallback', {
         immediateWrite: true, userInitiated: true, replaceCompletions: true,
         interactive: true, deferCompression: true
       }));
+      if (fallback?.skipped || fallback?.blockedByQuotaCircuit || !fallback?.state) throw new Error('Fallback save was not verified');
+      const persisted = TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY, {});
+      const persistedHabit = persisted.habits?.find(item => item?.id === habitId);
+      const persistedCompletion = persisted.completions?.find(item => item?.id === journalDelta.id);
+      if (!persistedHabit || Boolean(persistedHabit.doneKeys?.includes(dayKey)) !== journalDelta.done || Boolean(persistedHabit.failedKeys?.includes(dayKey)) !== journalDelta.failed || Boolean(persistedHabit.iceKeys?.includes(dayKey)) !== journalDelta.icy || (journalDelta.done && !persistedCompletion)) throw new Error('Fallback save readback did not contain the habit change');
     } catch (saveError) {
       h.doneKeys = habitBeforeTap.doneKeys; h.failedKeys = habitBeforeTap.failedKeys;
       h.iceKeys = habitBeforeTap.iceKeys; h.updatedAtISO = habitBeforeTap.updatedAtISO;

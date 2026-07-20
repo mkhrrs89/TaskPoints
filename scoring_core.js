@@ -19,17 +19,27 @@
   const TASKPOINTS_INTERACTIVE_PACKED_SAFE_BYTES = 3.75 * 1024 * 1024;
   const TASKPOINTS_INTERACTIVE_RECOMPRESS_DELAY_MS = 2000;
   const pendingInteractiveRecompresses = new Map();
+  const pendingHabitJournalCompactions = new Map();
 
   // This deliberately contains only the final state of a habit/day pair.  It is
   // a synchronous crash-safe write-ahead journal; taskpoints_v1 remains the
   // canonical compressed snapshot after compaction.
   function habitDeltaId(delta) { return `${delta.source === 'vice' ? 'vice' : 'habit'}:${delta.habitId}:${delta.dayKey}`; }
   function readPendingHabitDeltas(storageKey = PENDING_HABIT_DELTAS_KEY) {
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) return [];
     try {
-      const parsed = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      const parsed = JSON.parse(raw);
       const values = Array.isArray(parsed) ? parsed : Object.values(parsed || {});
       return values.filter(d => d && d.habitId && d.dayKey && ['habit', 'vice'].includes(d.source));
-    } catch (_) { return []; }
+    } catch (error) {
+      // Never turn a corrupt non-empty journal into an empty one: doing so
+      // would let the next tap overwrite evidence of durable user input.
+      const journalError = new Error('Pending habit journal is malformed and was preserved.');
+      journalError.cause = error;
+      journalError.raw = raw;
+      throw journalError;
+    }
   }
   function writePendingHabitDelta(delta, storageKey = PENDING_HABIT_DELTAS_KEY) {
     const entries = readPendingHabitDeltas(storageKey);
@@ -49,13 +59,17 @@
       if (!habit) continue;
       habit.doneKeys = Array.isArray(habit.doneKeys) ? habit.doneKeys.filter(k => k !== delta.dayKey) : [];
       habit.failedKeys = Array.isArray(habit.failedKeys) ? habit.failedKeys.filter(k => k !== delta.dayKey) : [];
+      habit.iceKeys = Array.isArray(habit.iceKeys) ? habit.iceKeys.filter(k => k !== delta.dayKey) : [];
       state.completions = state.completions.filter(c => !((c?.source === 'habit' || c?.source === 'vice') && c.habitId === delta.habitId && c.dayKey === delta.dayKey));
-      if (delta.status === 'full' || delta.status === 'half') {
+      const done = delta.done === true || delta.status === 'full' || delta.status === 'half';
+      const failed = delta.failed === true || delta.status === 'failed';
+      if (done) {
         habit.doneKeys.push(delta.dayKey);
         const fraction = delta.completionFraction == null ? (delta.status === 'half' ? .5 : 1) : Number(delta.completionFraction);
-        const points = (Number(habit.pointsPerDay) || 0) * fraction;
+        if (delta.icy === true) habit.iceKeys.push(delta.dayKey);
+        const points = Number.isFinite(Number(delta.completionPoints)) ? Number(delta.completionPoints) : (Number(habit.pointsPerDay) || 0) * fraction;
         state.completions.unshift({ id: `habit:${habit.id}:${delta.dayKey}`, taskId: `habit:${habit.id}:${delta.dayKey}`, title: `[${delta.source === 'vice' ? 'Vice' : 'Habit'}] ${habit.name} (${delta.dayKey})`, points, completedAtISO: delta.updatedAtISO, source: delta.source, habitId: habit.id, dayKey: delta.dayKey, completionFraction: fraction });
-      } else if (delta.status === 'failed') habit.failedKeys.push(delta.dayKey);
+      } else if (failed) habit.failedKeys.push(delta.dayKey);
       habit.updatedAtISO = delta.updatedAtISO || habit.updatedAtISO;
       applied++;
     }
@@ -68,6 +82,29 @@
     const remaining = current.filter(d => byId.get(d.id) !== JSON.stringify(d));
     localStorage.setItem(storageKey, JSON.stringify(remaining));
     return current.length - remaining.length;
+  }
+  function schedulePendingHabitDeltaCompaction(state, options = {}) {
+    const storageKey = options.storageKey || STORAGE_KEY;
+    const delay = Number.isFinite(options.delayMs) ? options.delayMs : 3000;
+    const existing = pendingHabitJournalCompactions.get(storageKey);
+    if (existing) clearTimeout(existing);
+    const run = () => {
+      pendingHabitJournalCompactions.delete(storageKey);
+      let snapshot;
+      try { snapshot = readPendingHabitDeltas(); } catch (error) { console.warn('Pending habit journal compaction skipped:', error); return; }
+      if (!snapshot.length) return;
+      try {
+        const result = saveStateSnapshot(state, { storageKey, immediateWrite: true, userInitiated: true, replaceCompletions: true, interactive: true, deferCompression: true, savePath: 'habit-journal-startup-compaction' });
+        if (result?.skipped || result?.blockedByQuotaCircuit || !result?.state) throw new Error('Habit journal compaction was not verified');
+        clearCompactedHabitDeltas(snapshot);
+        if (global?.TP_DEBUG_PERF) console.debug('[TP_DEBUG_PERF] startup-journal-compaction', { entries: snapshot.length });
+      } catch (error) { console.warn('Habit journal compaction failed; pending changes retained.', error); }
+    };
+    const timer = setTimeout(() => {
+      if (typeof global?.requestIdleCallback === 'function') global.requestIdleCallback(run, { timeout: 1000 }); else run();
+    }, delay);
+    pendingHabitJournalCompactions.set(storageKey, timer);
+    return timer;
   }
 
   const TASKPOINTS_PACKED_STORAGE_VERSION = 1;
@@ -448,7 +485,10 @@ function buildOptimizedTaskPointsStorageRaw(state) {
     const key = storageKey || STORAGE_KEY;
     const raw = localStorage.getItem(key);
     if (!raw) return fallback;
-    return parseTaskPointsStorageJson(raw, fallback || {});
+    const state = parseTaskPointsStorageJson(raw, fallback || {});
+    // Keep direct shared-reader consumers (older pages) current too.
+    if (key === STORAGE_KEY && state) applyPendingHabitDeltas(state);
+    return state;
   }
 
   function serializeTaskPointsStoredState(nextState, options = {}) {
@@ -5356,6 +5396,15 @@ workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
     }
 
     let state = normalizeState(parsed);
+    // This is the authoritative app-wide recovery point. Every page using the
+    // shared loader sees pending taps before scoring, rendering, or saves.
+    let pendingHabitDeltas = [];
+    try {
+      pendingHabitDeltas = readPendingHabitDeltas();
+      if (pendingHabitDeltas.length) applyPendingHabitDeltas(state, pendingHabitDeltas);
+    } catch (error) {
+      console.error('Failed to safely read pending habit journal; it was preserved.', error);
+    }
     const shouldSync = options.syncDerived !== false;
     const shouldPersist = options.persistSync !== false;
     let changed = false;
@@ -5391,7 +5440,8 @@ workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
       mergeAndSaveState(state, { storageKey: STORAGE_KEY });
     }
 
-    return { state, storageKeysFound };
+    if (pendingHabitDeltas.length) schedulePendingHabitDeltaCompaction(state, { storageKey: STORAGE_KEY });
+    return { state, storageKeysFound, pendingHabitDeltas };
   }
 
   function isQuotaError(err) {
@@ -8935,6 +8985,7 @@ return Number(cappedScore.toFixed(1));
     writePendingHabitDelta,
     applyPendingHabitDeltas,
     clearCompactedHabitDeltas,
+    schedulePendingHabitDeltaCompaction,
     PROJECTS_STORAGE_KEY,
     QUARANTINE_SNAPSHOT_KEY,
     QUARANTINE_INLINE_MAX_BYTES,
