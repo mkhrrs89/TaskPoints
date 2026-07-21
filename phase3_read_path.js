@@ -314,9 +314,13 @@
       }
       if (normalizedKey === core.PENDING_HABIT_DELTAS_KEY) {
         const liveRaw = readLive();
-        if (liveRaw !== expectedJournalRaw) journalChanged = true;
-        // The verified attempt must never schedule compaction from a journal
-        // that appeared after its safety gate. The real loader is rerun below.
+        if (liveRaw !== expectedJournalRaw) {
+          journalChanged = true;
+          // Never replay either the stale captured journal or a newly arrived
+          // journal inside the discarded verified attempt. The untouched
+          // localStorage loader is rerun after this attempt returns.
+          return null;
+        }
         return expectedJournalRaw;
       }
       return readLive();
@@ -327,6 +331,7 @@
       const prototype = StorageCtor.prototype;
       const original = prototype.getItem;
       prototype.getItem = function phase3VerifiedGetItem(key) {
+        if (this !== global.localStorage) return original.call(this, key);
         return substitute(() => original.call(this, key), key);
       };
       try {
