@@ -47,6 +47,8 @@ let pendingHabitRows = [];
 let throwOnLoad = false;
 let originalLoadCalls = 0;
 let capturedLoadOptions = [];
+let capturedJournalReads = [];
+let readPendingHabitHook = null;
 
 function canonical(value) {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
@@ -113,13 +115,20 @@ const core = global.TaskPointsCore = {
   parseTaskPointsStorageJson(raw, fallback = {}) { return raw ? JSON.parse(raw) : fallback; },
   flushShadowDualWrites: async () => undefined,
   getPendingShadowDualWriteCount: () => pendingWrites,
-  readPendingHabitDeltas: () => pendingHabitRows,
+  readPendingHabitDeltas: () => {
+    if (readPendingHabitHook) {
+      const hook = readPendingHabitHook;
+      readPendingHabitHook = null;
+      hook();
+    }
+    return pendingHabitRows;
+  },
   loadAppState(options = {}) {
     originalLoadCalls += 1;
     capturedLoadOptions.push({ ...options });
     if (throwOnLoad) throw new Error('original loader failure');
     const raw = global.localStorage.getItem(this.STORAGE_KEY);
-    global.localStorage.getItem(this.PENDING_HABIT_DELTAS_KEY);
+    capturedJournalReads.push(global.localStorage.getItem(this.PENDING_HABIT_DELTAS_KEY));
     return { state: raw ? JSON.parse(raw) : {}, storageKeysFound: raw ? [this.STORAGE_KEY] : [], pendingHabitDeltas: [] };
   }
 };
@@ -263,6 +272,8 @@ async function reset(state = fixture(1), mode = 'off') {
   throwOnLoad = false;
   originalLoadCalls = 0;
   capturedLoadOptions = [];
+  capturedJournalReads = [];
+  readPendingHabitHook = null;
   mainGetCount = 0;
   mainGetHookAt = 0;
   mainGetHook = null;
@@ -413,6 +424,30 @@ test('a pending habit journal prevents IndexedDB reads and uses the authoritativ
   const result = core.loadAppState();
   assert.equal(result.state.tasks[0].id, 'task-13');
   assert.equal(core.getPhase3ReadStatus().lastFallbackReason, 'pending_habit_journal');
+});
+
+test('a journal cleared between raw capture and the safety gate is never replayed', async () => {
+  const state = fixture(15);
+  await reset(state, 'verified_indexeddb');
+  const idb = createFakeIndexedDb();
+  global.indexedDB = idb;
+  await seedShadow(idb, state);
+  await core.refreshPhase3ReadCache({ indexedDB: idb, force: true });
+
+  const staleJournal = [{ id: 'stale-cleared-journal' }];
+  pendingHabitRows = staleJournal;
+  localRows.set(core.PENDING_HABIT_DELTAS_KEY, JSON.stringify(staleJournal));
+  readPendingHabitHook = () => {
+    pendingHabitRows = [];
+    localRows.delete(core.PENDING_HABIT_DELTAS_KEY);
+  };
+
+  const result = core.loadAppState();
+
+  assert.equal(result.state.tasks[0].id, 'task-15');
+  assert.equal(capturedLoadOptions[0].persistSync, false);
+  assert.equal(capturedJournalReads[0], null, 'the discarded verified attempt must receive an empty journal');
+  assert.equal(core.getPhase3ReadStatus().lastFallbackReason, 'authoritative_changed_during_indexeddb_read');
 });
 
 test('a habit journal appearing during a substituted load discards the verified attempt', async () => {
