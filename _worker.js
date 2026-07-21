@@ -1,6 +1,23 @@
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+
+    if (url.pathname === '/settings.html') {
+      const settingsResponse = await env.ASSETS.fetch(request);
+      if (!settingsResponse.ok) return settingsResponse;
+
+      return new HTMLRewriter()
+        .on('section[aria-labelledby="shadowMigrationTitle"]', {
+          element(element) {
+            element.append(
+              '<div class="flex flex-wrap gap-2"><a href="dual_write_status.html" class="btn btn-teal btn-toolbar nav-btn">View Dual-Write Status</a></div>',
+              { html: true }
+            );
+          }
+        })
+        .transform(settingsResponse);
+    }
+
     if (url.pathname !== '/scoring_core.js') return env.ASSETS.fetch(request);
 
     // Do not forward browser cache validators to the static asset binding. A
