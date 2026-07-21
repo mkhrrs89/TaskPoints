@@ -78,11 +78,6 @@
     return nextMode;
   }
 
-  function cloneState(state) {
-    if (typeof global.structuredClone === 'function') return global.structuredClone(state);
-    return JSON.parse(JSON.stringify(state));
-  }
-
   function requestPromise(request) {
     return new Promise((resolve, reject) => {
       request.onsuccess = () => resolve(request.result);
@@ -115,7 +110,7 @@
         }
         resolve(request.result);
       };
-      request.onerror = () => reject(request.error || new Error(rejectedUpgrade ? 'shadow_db_missing' : 'shadow_db_open_failed'));
+      request.onerror = () => reject(new Error(rejectedUpgrade ? 'shadow_db_missing' : (request.error?.message || 'shadow_db_open_failed')));
     });
   }
 
@@ -233,7 +228,6 @@
         verifiedCache = {
           authoritativeRaw: authoritativeRawBefore,
           serializedState,
-          state: cloneState(snapshot.state),
           sourceHash: sourceSummary.hashes.state,
           destinationHash: destinationSummary.hashes.state,
           sourceCounts: sourceSummary.counts,
@@ -444,7 +438,6 @@
   core.getPhase3ReadStatus = getStatus;
   core.clearPhase3ReadCache = clearCache;
   core.readPhase3ShadowSnapshot = readShadowSnapshot;
-  core.__phase3OriginalLoadAppState = ORIGINAL_LOAD_APP_STATE;
   core.loadAppState = wrappedLoadAppState;
 
   if (getMode() !== 'off') scheduleRefresh('module_install');
