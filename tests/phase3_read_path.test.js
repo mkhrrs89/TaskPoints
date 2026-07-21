@@ -3,8 +3,34 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 
 const localRows = new Map();
+let mainGetCount = 0;
+let mainGetHookAt = 0;
+let mainGetHook = null;
+let journalGetCount = 0;
+let journalGetHookAt = 0;
+let journalGetHook = null;
 const storage = {
-  getItem(key) { return localRows.has(String(key)) ? localRows.get(String(key)) : null; },
+  getItem(key) {
+    const normalized = String(key);
+    const value = localRows.has(normalized) ? localRows.get(normalized) : null;
+    if (normalized === 'taskpoints_v1') {
+      mainGetCount += 1;
+      if (mainGetHook && mainGetCount === mainGetHookAt) {
+        const hook = mainGetHook;
+        mainGetHook = null;
+        hook();
+      }
+    }
+    if (normalized === 'taskpoints_pending_habit_deltas_v1') {
+      journalGetCount += 1;
+      if (journalGetHook && journalGetCount === journalGetHookAt) {
+        const hook = journalGetHook;
+        journalGetHook = null;
+        hook();
+      }
+    }
+    return value;
+  },
   setItem(key, value) { localRows.set(String(key), String(value)); },
   removeItem(key) { localRows.delete(String(key)); },
   key(index) { return [...localRows.keys()][index] ?? null; },
@@ -17,8 +43,10 @@ global.queueMicrotask ||= queueMicrotask;
 
 const ARRAY_STORES = ['completions', 'matchups', 'gameHistory', 'seasonHistory', 'tasks', 'habits', 'players'];
 let pendingWrites = 0;
+let pendingHabitRows = [];
 let throwOnLoad = false;
 let originalLoadCalls = 0;
+let capturedLoadOptions = [];
 
 function canonical(value) {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
@@ -72,6 +100,7 @@ function mismatches(source, destination) {
 
 const core = global.TaskPointsCore = {
   STORAGE_KEY: 'taskpoints_v1',
+  PENDING_HABIT_DELTAS_KEY: 'taskpoints_pending_habit_deltas_v1',
   SHADOW_MIGRATION_DB_NAME: 'taskpoints_shadow_state_v1',
   SHADOW_MIGRATION_DB_VERSION: 1,
   SHADOW_MIGRATION_SCHEMA_VERSION: 1,
@@ -84,10 +113,13 @@ const core = global.TaskPointsCore = {
   parseTaskPointsStorageJson(raw, fallback = {}) { return raw ? JSON.parse(raw) : fallback; },
   flushShadowDualWrites: async () => undefined,
   getPendingShadowDualWriteCount: () => pendingWrites,
-  loadAppState() {
+  readPendingHabitDeltas: () => pendingHabitRows,
+  loadAppState(options = {}) {
     originalLoadCalls += 1;
+    capturedLoadOptions.push({ ...options });
     if (throwOnLoad) throw new Error('original loader failure');
     const raw = global.localStorage.getItem(this.STORAGE_KEY);
+    global.localStorage.getItem(this.PENDING_HABIT_DELTAS_KEY);
     return { state: raw ? JSON.parse(raw) : {}, storageKeysFound: raw ? [this.STORAGE_KEY] : [], pendingHabitDeltas: [] };
   }
 };
@@ -227,8 +259,16 @@ async function reset(state = fixture(1), mode = 'off') {
   localRows.set(core.PHASE3_READ_MODE_KEY, mode);
   core.clearPhase3ReadCache();
   pendingWrites = 0;
+  pendingHabitRows = [];
   throwOnLoad = false;
   originalLoadCalls = 0;
+  capturedLoadOptions = [];
+  mainGetCount = 0;
+  mainGetHookAt = 0;
+  mainGetHook = null;
+  journalGetCount = 0;
+  journalGetHookAt = 0;
+  journalGetHook = null;
 }
 
 test('default mode is off and does not open IndexedDB', async () => {
@@ -340,6 +380,57 @@ test('Phase 1 and dual-write verification metadata are both required', async () 
   const status = await core.getPhase3ReadStatus({ refresh: true, indexedDB: idb });
   assert.equal(status.status, 'fallback');
   assert.equal(status.lastFallbackReason, 'dual_write_not_verified');
+});
+
+test('a cross-tab reset during a substituted load discards the stale result and reruns localStorage', async () => {
+  const state = fixture(12);
+  await reset(state, 'verified_indexeddb');
+  const idb = createFakeIndexedDb();
+  global.indexedDB = idb;
+  await seedShadow(idb, state);
+  await core.refreshPhase3ReadCache({ indexedDB: idb, force: true });
+
+  mainGetCount = 0;
+  mainGetHookAt = 2;
+  mainGetHook = () => localRows.delete(core.STORAGE_KEY);
+  const result = core.loadAppState({ persistSync: true });
+
+  assert.deepEqual(result.state, {});
+  assert.equal(capturedLoadOptions[0].persistSync, false, 'the substituted attempt must not persist derived state');
+  assert.equal(capturedLoadOptions.at(-1).persistSync, true, 'fallback reruns the caller request against localStorage');
+  assert.equal(core.getPhase3ReadStatus().lastFallbackReason, 'authoritative_changed_during_indexeddb_read');
+});
+
+test('a pending habit journal prevents IndexedDB reads and uses the authoritative loader', async () => {
+  const state = fixture(13);
+  await reset(state, 'verified_indexeddb');
+  const idb = createFakeIndexedDb();
+  global.indexedDB = idb;
+  await seedShadow(idb, state);
+  await core.refreshPhase3ReadCache({ indexedDB: idb, force: true });
+  pendingHabitRows = [{ id: 'pending-habit' }];
+  localRows.set(core.PENDING_HABIT_DELTAS_KEY, JSON.stringify(pendingHabitRows));
+  const result = core.loadAppState();
+  assert.equal(result.state.tasks[0].id, 'task-13');
+  assert.equal(core.getPhase3ReadStatus().lastFallbackReason, 'pending_habit_journal');
+});
+
+test('a habit journal appearing during a substituted load discards the verified attempt', async () => {
+  const state = fixture(14);
+  await reset(state, 'verified_indexeddb');
+  const idb = createFakeIndexedDb();
+  global.indexedDB = idb;
+  await seedShadow(idb, state);
+  await core.refreshPhase3ReadCache({ indexedDB: idb, force: true });
+
+  journalGetCount = 0;
+  journalGetHookAt = 2;
+  journalGetHook = () => localRows.set(core.PENDING_HABIT_DELTAS_KEY, JSON.stringify([{ id: 'cross-tab-journal' }]));
+  const result = core.loadAppState();
+
+  assert.equal(result.state.tasks[0].id, 'task-14');
+  assert.equal(capturedLoadOptions[0].persistSync, false);
+  assert.equal(core.getPhase3ReadStatus().lastFallbackReason, 'authoritative_changed_during_indexeddb_read');
 });
 
 test('temporary getItem override is restored even when the original loader throws', async () => {
