@@ -292,20 +292,45 @@
     return null;
   }
 
-  function withTemporaryAuthoritativeRaw(serializedState, callback) {
+  function withTemporaryAuthoritativeRaw(expectedRaw, expectedJournalRaw, serializedState, callback) {
     const storage = global.localStorage;
-    if (!storage || typeof storage.getItem !== 'function') return callback();
+    if (!storage || typeof storage.getItem !== 'function') {
+      return { result: callback(), usedVerifiedRaw: false, authoritativeChanged: true, journalChanged: true };
+    }
+
+    let usedVerifiedRaw = false;
+    let authoritativeChanged = false;
+    let journalChanged = false;
+    const substitute = (readLive, key) => {
+      const normalizedKey = String(key);
+      if (normalizedKey === core.STORAGE_KEY) {
+        const liveRaw = readLive();
+        if (liveRaw === expectedRaw) {
+          usedVerifiedRaw = true;
+          return serializedState;
+        }
+        authoritativeChanged = true;
+        return liveRaw;
+      }
+      if (normalizedKey === core.PENDING_HABIT_DELTAS_KEY) {
+        const liveRaw = readLive();
+        if (liveRaw !== expectedJournalRaw) journalChanged = true;
+        // The verified attempt must never schedule compaction from a journal
+        // that appeared after its safety gate. The real loader is rerun below.
+        return expectedJournalRaw;
+      }
+      return readLive();
+    };
 
     const StorageCtor = global.Storage;
     if (StorageCtor?.prototype?.getItem) {
       const prototype = StorageCtor.prototype;
       const original = prototype.getItem;
       prototype.getItem = function phase3VerifiedGetItem(key) {
-        if (this === global.localStorage && String(key) === core.STORAGE_KEY) return serializedState;
-        return original.call(this, key);
+        return substitute(() => original.call(this, key), key);
       };
       try {
-        return callback();
+        return { result: callback(), usedVerifiedRaw, authoritativeChanged, journalChanged };
       } finally {
         prototype.getItem = original;
       }
@@ -313,11 +338,10 @@
 
     const original = storage.getItem;
     storage.getItem = function phase3VerifiedGetItem(key) {
-      if (String(key) === core.STORAGE_KEY) return serializedState;
-      return original.call(storage, key);
+      return substitute(() => original.call(storage, key), key);
     };
     try {
-      return callback();
+      return { result: callback(), usedVerifiedRaw, authoritativeChanged, journalChanged };
     } finally {
       storage.getItem = original;
     }
@@ -340,21 +364,27 @@
     if (mode === 'off' || servingFromIndexedDb) return ORIGINAL_LOAD_APP_STATE.apply(core, args);
 
     const authoritativeRaw = safeStorageGet(core.STORAGE_KEY);
+    const pendingJournalRaw = safeStorageGet(core.PENDING_HABIT_DELTAS_KEY);
     const pendingWrites = Number(core.getPendingShadowDualWriteCount?.()) || 0;
+    let pendingHabitDeltas = 0;
+    try { pendingHabitDeltas = Number(core.readPendingHabitDeltas?.().length) || 0; } catch (_) { pendingHabitDeltas = 1; }
     const canServe = mode === 'verified_indexeddb'
       && verifiedCache
       && authoritativeRaw !== null
       && authoritativeRaw === verifiedCache.authoritativeRaw
-      && pendingWrites === 0;
+      && pendingWrites === 0
+      && pendingHabitDeltas === 0;
 
     if (!canServe) {
       const reason = authoritativeRaw === null
         ? 'authoritative_missing'
         : pendingWrites > 0
           ? 'dual_write_pending'
-          : verifiedCache
-            ? 'authoritative_changed_since_verification'
-            : 'cache_not_ready';
+          : pendingHabitDeltas > 0
+            ? 'pending_habit_journal'
+            : verifiedCache
+              ? 'authoritative_changed_since_verification'
+              : 'cache_not_ready';
       const result = ORIGINAL_LOAD_APP_STATE.apply(core, args);
       if (mode === 'verified_indexeddb') recordFallback(reason);
       scheduleRefresh(reason);
@@ -363,7 +393,30 @@
 
     servingFromIndexedDb = true;
     try {
-      const result = withTemporaryAuthoritativeRaw(verifiedCache.serializedState, () => ORIGINAL_LOAD_APP_STATE.apply(core, args));
+      const loadOptions = args[0] && typeof args[0] === 'object' && !Array.isArray(args[0]) ? { ...args[0] } : {};
+      // A verified snapshot is never allowed to persist derived changes. If the
+      // authoritative value changes during this synchronous load, its result is
+      // discarded and the untouched original loader is rerun against localStorage.
+      loadOptions.persistSync = false;
+      const verifiedAttempt = withTemporaryAuthoritativeRaw(
+        verifiedCache.authoritativeRaw,
+        pendingJournalRaw,
+        verifiedCache.serializedState,
+        () => ORIGINAL_LOAD_APP_STATE.call(core, loadOptions)
+      );
+      const currentRaw = safeStorageGet(core.STORAGE_KEY);
+      const currentJournalRaw = safeStorageGet(core.PENDING_HABIT_DELTAS_KEY);
+      if (verifiedAttempt.authoritativeChanged
+        || verifiedAttempt.journalChanged
+        || !verifiedAttempt.usedVerifiedRaw
+        || currentRaw !== verifiedCache.authoritativeRaw
+        || currentJournalRaw !== pendingJournalRaw) {
+        verifiedCache = null;
+        recordFallback('authoritative_changed_during_indexeddb_read');
+        scheduleRefresh('authoritative_changed_during_indexeddb_read');
+        return ORIGINAL_LOAD_APP_STATE.apply(core, args);
+      }
+
       const previous = readDiagnostics();
       writeDiagnostics({
         configuredMode: mode,
@@ -373,12 +426,7 @@
         lastFallbackReason: null,
         indexedDbReadsTotal: (Number(previous.indexedDbReadsTotal) || 0) + 1
       });
-      const currentRaw = safeStorageGet(core.STORAGE_KEY);
-      if (currentRaw !== verifiedCache.authoritativeRaw) {
-        verifiedCache = null;
-        scheduleRefresh('authoritative_changed_after_indexeddb_read');
-      }
-      return result;
+      return verifiedAttempt.result;
     } catch (error) {
       verifiedCache = null;
       recordFallback('indexeddb_read_exception');
