@@ -4,8 +4,8 @@ export default {
 
     if (url.pathname === '/settings.html') {
       // Always retrieve a fresh response body before rewriting. A cached 304
-      // has no body, so forwarding browser validators could prevent the new
-      // in-app status link from appearing for returning Home Screen users.
+      // has no body, so forwarding browser validators could prevent the
+      // in-app diagnostics links from appearing for returning Home Screen users.
       const settingsHeaders = new Headers(request.headers);
       settingsHeaders.delete('if-none-match');
       settingsHeaders.delete('if-modified-since');
@@ -31,7 +31,7 @@ export default {
         .on('section[aria-labelledby="shadowMigrationTitle"]', {
           element(element) {
             element.append(
-              '<div class="flex flex-wrap gap-2"><a href="dual_write_status.html" class="btn btn-teal btn-toolbar nav-btn">View Dual-Write Status</a></div>',
+              '<div class="flex flex-wrap gap-2"><a href="dual_write_status.html" class="btn btn-teal btn-toolbar nav-btn">View Dual-Write Status</a><a href="phase3_read_status.html" class="btn btn-teal btn-toolbar nav-btn">View Phase 3 Read Status</a></div>',
               { html: true }
             );
           }
@@ -43,7 +43,7 @@ export default {
 
     // Do not forward browser cache validators to the static asset binding. A
     // 304 has no response body to augment, so always retrieve the current core
-    // asset and return a fresh 200 response containing the Phase 2 modules.
+    // asset and return a fresh 200 response containing the migration modules.
     const assetHeaders = new Headers(request.headers);
     assetHeaders.delete('if-none-match');
     assetHeaders.delete('if-modified-since');
@@ -55,13 +55,17 @@ export default {
     const coreResponse = await env.ASSETS.fetch(coreRequest);
     if (!coreResponse.ok) return coreResponse;
 
-    const moduleRequests = [
+    const modulePaths = [
       '/phase2_dual_write.js',
-      '/phase2_reset_hook.js'
-    ].map((pathname) => env.ASSETS.fetch(new Request(new URL(pathname, request.url), {
-      method: 'GET'
-    })));
-    const [dualWriteResponse, resetHookResponse] = await Promise.all(moduleRequests);
+      '/phase2_reset_hook.js',
+      '/phase3_read_path.js'
+    ];
+    const [dualWriteResponse, resetHookResponse, phase3Response] = await Promise.all(
+      modulePaths.map((pathname) => env.ASSETS.fetch(new Request(new URL(pathname, request.url), { method: 'GET' })))
+    );
+
+    // Phase 2 remains the production safety floor. If either required Phase 2
+    // module is unavailable, return the untouched core rather than a partial hook.
     if (!dualWriteResponse.ok || !resetHookResponse.ok) return coreResponse;
 
     const [coreSource, dualWriteSource, resetHookSource] = await Promise.all([
@@ -69,15 +73,21 @@ export default {
       dualWriteResponse.text(),
       resetHookResponse.text()
     ]);
+
+    let phase3Source = '';
+    if (phase3Response.ok) phase3Source = await phase3Response.text();
+
     const headers = new Headers(coreResponse.headers);
     headers.delete('content-length');
     headers.delete('etag');
     headers.delete('last-modified');
     headers.set('cache-control', 'no-cache');
     headers.set('content-type', 'application/javascript; charset=utf-8');
-    headers.set('x-taskpoints-phase', '2-dual-write');
+    headers.set('x-taskpoints-phase', phase3Source ? '3-read-path' : '2-dual-write');
 
-    return new Response(`${coreSource}\n;${dualWriteSource}\n;${resetHookSource}\n`, {
+    const sources = [coreSource, dualWriteSource, resetHookSource];
+    if (phase3Source) sources.push(phase3Source);
+    return new Response(`${sources.map((source) => `;${source}`).join('\n')}\n`, {
       status: 200,
       headers
     });
