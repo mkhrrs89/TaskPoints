@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="TaskPoints" />
+  <title>TaskPoints — Phase 3 Read Status</title>
+  <link rel="stylesheet" href="assets/tailwind.css" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="min-h-screen">
+  <main class="mx-auto max-w-4xl p-4 sm:p-6 pb-20 space-y-4">
+    <header class="flex items-center justify-between gap-3 flex-wrap">
+      <div>
+        <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight">Phase 3 Read Status</h1>
+        <p class="muted text-sm mt-1">Optional IndexedDB reads with immediate localStorage fallback.</p>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <a href="settings.html" class="btn btn-teal btn-toolbar nav-btn">Settings</a>
+        <a href="dual_write_status.html" class="btn btn-ghost btn-toolbar nav-btn">Dual-Write Status</a>
+      </div>
+    </header>
+
+    <section class="glass space-y-3" aria-labelledby="phase3ModeTitle">
+      <div>
+        <div id="phase3ModeTitle" class="text-lg font-semibold">Read mode</div>
+        <div class="muted text-sm">Off is the default. Compare mode verifies IndexedDB but continues reading localStorage. Verified mode can use IndexedDB only after an exact same-page comparison succeeds.</div>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <button id="modeOffBtn" class="btn btn-ghost btn-toolbar nav-btn" type="button">Off</button>
+        <button id="modeCompareBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Compare Only</button>
+        <button id="modeVerifiedBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Verified IndexedDB Reads</button>
+      </div>
+      <p class="muted text-xs">Changing this mode does not delete, replace, or migrate any data. localStorage remains available as the immediate fallback.</p>
+    </section>
+
+    <section class="glass space-y-3" aria-labelledby="phase3VerificationTitle">
+      <div class="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <div id="phase3VerificationTitle" class="text-lg font-semibold">Verification</div>
+          <div id="phase3Summary" class="muted text-sm">Loading status…</div>
+        </div>
+        <button id="refreshPhase3Btn" class="btn btn-teal btn-toolbar nav-btn" type="button">Run Fresh Comparison</button>
+      </div>
+      <div id="phase3Details" class="grid gap-2 text-sm"></div>
+      <pre id="phase3Json" class="overflow-auto rounded-xl p-3 text-xs bg-black/20 whitespace-pre-wrap break-words"></pre>
+    </section>
+  </main>
+
+  <script src="scoring_core.js"></script>
+  <script>
+    (function () {
+      const core = window.TaskPointsCore;
+      const summary = document.getElementById('phase3Summary');
+      const details = document.getElementById('phase3Details');
+      const json = document.getElementById('phase3Json');
+      const refreshButton = document.getElementById('refreshPhase3Btn');
+      const modeButtons = {
+        off: document.getElementById('modeOffBtn'),
+        compare: document.getElementById('modeCompareBtn'),
+        verified_indexeddb: document.getElementById('modeVerifiedBtn')
+      };
+
+      function localTime(iso) {
+        if (!iso) return '—';
+        const date = new Date(iso);
+        return Number.isNaN(date.getTime()) ? String(iso) : date.toLocaleString();
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? '')
+          .replaceAll('&', '&amp;')
+          .replaceAll('<', '&lt;')
+          .replaceAll('>', '&gt;')
+          .replaceAll('"', '&quot;')
+          .replaceAll("'", '&#39;');
+      }
+
+      function setBusy(busy) {
+        refreshButton.disabled = busy;
+        refreshButton.textContent = busy ? 'Comparing…' : 'Run Fresh Comparison';
+        Object.values(modeButtons).forEach((button) => { button.disabled = busy; });
+      }
+
+      function render(status) {
+        const configuredMode = status?.configuredMode || 'off';
+        Object.entries(modeButtons).forEach(([mode, button]) => {
+          button.setAttribute('aria-pressed', mode === configuredMode ? 'true' : 'false');
+          button.classList.toggle('active', mode === configuredMode);
+        });
+
+        const passed = status?.countsMatch === true && status?.hashesMatch === true && (!status?.mismatches || status.mismatches.length === 0);
+        const statusText = status?.status || 'unknown';
+        summary.textContent = passed
+          ? `Passed verification — ${statusText}`
+          : `${statusText}${status?.lastFallbackReason ? ` — ${status.lastFallbackReason}` : ''}`;
+
+        const rows = [
+          ['Configured mode', configuredMode],
+          ['Effective source', status?.effectiveSource || 'localStorage'],
+          ['Last verified', localTime(status?.lastVerifiedAt)],
+          ['Last IndexedDB read', localTime(status?.lastServedAt)],
+          ['Last fallback', localTime(status?.lastFallbackAt)],
+          ['Fallback reason', status?.lastFallbackReason || '—'],
+          ['Counts match', status?.countsMatch === true ? 'true' : 'false'],
+          ['Hashes match', status?.hashesMatch === true ? 'true' : 'false'],
+          ['Pending dual writes', Number(status?.pendingWritesThisPage) || 0],
+          ['Cache ready on this page', status?.cacheReadyThisPage === true ? 'true' : 'false'],
+          ['Current localStorage matches cache', status?.currentRawMatchesCache === true ? 'true' : 'false'],
+          ['Verified IndexedDB reads', Number(status?.indexedDbReadsTotal) || 0],
+          ['Fallback reads', Number(status?.fallbackReadsTotal) || 0]
+        ];
+        details.innerHTML = rows.map(([label, value]) => (
+          `<div class="flex items-start justify-between gap-4 border-b border-white/5 pb-2"><span class="muted">${escapeHtml(label)}</span><strong class="text-right">${escapeHtml(value)}</strong></div>`
+        )).join('');
+        json.textContent = JSON.stringify(status, null, 2);
+      }
+
+      async function readStatus(refresh) {
+        if (!core?.getPhase3ReadStatus) {
+          summary.textContent = 'Phase 3 module is not loaded. localStorage remains active.';
+          json.textContent = '{}';
+          return;
+        }
+        setBusy(true);
+        try {
+          const status = await Promise.resolve(core.getPhase3ReadStatus({ refresh: refresh === true }));
+          render(status);
+        } catch (error) {
+          summary.textContent = 'Could not read Phase 3 status. localStorage remains active.';
+          json.textContent = JSON.stringify({ status: 'fallback', error: error?.message || String(error) }, null, 2);
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      async function chooseMode(mode) {
+        if (!core?.setPhase3ReadMode) return;
+        if (mode === 'verified_indexeddb') {
+          const confirmed = window.confirm('Enable verified IndexedDB reads? IndexedDB will be used only after an exact comparison, and localStorage remains the immediate fallback.');
+          if (!confirmed) return;
+        }
+        core.setPhase3ReadMode(mode);
+        await readStatus(mode !== 'off');
+      }
+
+      modeButtons.off.addEventListener('click', () => chooseMode('off'));
+      modeButtons.compare.addEventListener('click', () => chooseMode('compare'));
+      modeButtons.verified_indexeddb.addEventListener('click', () => chooseMode('verified_indexeddb'));
+      refreshButton.addEventListener('click', () => readStatus(true));
+      readStatus(false);
+    })();
+  </script>
+</body>
+</html>
