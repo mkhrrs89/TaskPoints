@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>TaskPoints Dual-Write Status</title>
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    body { margin: 0; padding: 24px; background: Canvas; color: CanvasText; }
+    main { max-width: 760px; margin: 0 auto; }
+    .card { border: 1px solid color-mix(in srgb, CanvasText 18%, transparent); border-radius: 16px; padding: 18px; margin: 16px 0; }
+    button { border: 0; border-radius: 999px; padding: 11px 18px; font: inherit; font-weight: 700; cursor: pointer; background: #23767d; color: white; }
+    pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.45; }
+    .muted { opacity: .72; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>IndexedDB Dual-Write Status</h1>
+    <p class="muted">This page reads diagnostics only. It does not delete data, switch reads, or modify images.</p>
+    <button id="refresh" type="button">Refresh status</button>
+    <section class="card" aria-live="polite">
+      <strong id="summary">Loading…</strong>
+      <pre id="details"></pre>
+    </section>
+  </main>
+  <script src="scoring_core.js"></script>
+  <script>
+    const summary = document.getElementById('summary');
+    const details = document.getElementById('details');
+    async function refresh() {
+      const core = window.TaskPointsCore;
+      if (!core?.getShadowDualWriteStatus) {
+        summary.textContent = 'Phase 2 module is not loaded.';
+        details.textContent = '';
+        return;
+      }
+      summary.textContent = 'Checking…';
+      const status = await core.getShadowDualWriteStatus();
+      const verification = status?.verification || null;
+      summary.textContent = status?.status === 'passed_verification'
+        ? 'Passed verification'
+        : String(status?.status || 'unknown').replaceAll('_', ' ');
+      details.textContent = JSON.stringify({
+        schemaVersion: status?.schemaVersion,
+        phase: status?.phase,
+        status: status?.status,
+        startedAt: status?.startedAt,
+        completionTime: status?.completionTime,
+        sequence: status?.sequence,
+        sourceCounts: status?.sourceCounts || {},
+        destinationCounts: status?.destinationCounts || {},
+        countsMatch: verification?.countsMatch,
+        hashesMatch: verification?.hashesMatch,
+        sourceHash: verification?.source?.hashes?.state,
+        destinationHash: verification?.destination?.hashes?.state,
+        mismatches: verification?.mismatches || [],
+        pendingWritesThisPage: core.getPendingShadowDualWriteCount?.() || 0
+      }, null, 2);
+    }
+    document.getElementById('refresh').addEventListener('click', refresh);
+    refresh();
+  </script>
+</body>
+</html>
