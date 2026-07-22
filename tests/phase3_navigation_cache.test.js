@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const MODULE_SOURCE = fs.readFileSync(path.join(__dirname, '..', 'phase3_read_path.js'), 'utf8');
+const MODULE_SOURCE = fs.readFileSync(path.join(__dirname, '..', 'phase3_navigation_cache.js'), 'utf8');
 const MODE_KEY = 'taskpoints_phase3_read_mode_v1';
 const DIAGNOSTICS_KEY = 'taskpoints_phase3_read_diagnostics_v1';
 const SESSION_CACHE_KEY = 'taskpoints_phase3_verified_session_cache_v1';
@@ -12,11 +12,11 @@ const STORAGE_KEY = 'taskpoints_v1';
 const JOURNAL_KEY = 'taskpoints_pending_habit_deltas_v1';
 const ARRAY_STORES = ['completions', 'matchups', 'gameHistory', 'seasonHistory', 'tasks', 'habits', 'players'];
 
-function storageFrom(initial = {}) {
+function storageFrom(initial = {}, failSet = false) {
   const rows = new Map(Object.entries(initial).map(([key, value]) => [String(key), String(value)]));
   return {
     getItem(key) { return rows.has(String(key)) ? rows.get(String(key)) : null; },
-    setItem(key, value) { rows.set(String(key), String(value)); },
+    setItem(key, value) { if (failSet) throw new Error('quota'); rows.set(String(key), String(value)); },
     removeItem(key) { rows.delete(String(key)); },
     clear() { rows.clear(); },
     key(index) { return [...rows.keys()][index] ?? null; },
@@ -33,26 +33,25 @@ function canonical(value) {
   return JSON.stringify(value);
 }
 
-function hashDetails(value) {
+function sourceLayout(state) {
+  const arrays = {}, collections = {}, values = {};
+  for (const [field, value] of Object.entries(state || {})) {
+    if (ARRAY_STORES.includes(field) && Array.isArray(value)) arrays[field] = value;
+    else if (Array.isArray(value)) collections[field] = value;
+    else values[field] = value;
+  }
+  ARRAY_STORES.forEach((field) => { if (!arrays[field]) arrays[field] = []; });
+  return { arrays, collections, values };
+}
+
+function stateHash(value) {
   const text = canonical(value);
   let hash = 2166136261;
   for (let index = 0; index < text.length; index += 1) {
     hash ^= text.charCodeAt(index);
     hash = Math.imul(hash, 16777619);
   }
-  return { hash: `${(hash >>> 0).toString(16).padStart(8, '0')}:${text.length}`, canonicalLength: text.length };
-}
-
-function sourceLayout(state) {
-  const source = state && typeof state === 'object' ? state : {};
-  const arrays = {}, collections = {}, values = {};
-  Object.keys(source).forEach((field) => {
-    if (ARRAY_STORES.includes(field) && Array.isArray(source[field])) arrays[field] = source[field];
-    else if (Array.isArray(source[field])) collections[field] = source[field];
-    else values[field] = source[field];
-  });
-  ARRAY_STORES.forEach((field) => { if (!arrays[field]) arrays[field] = []; });
-  return { arrays, collections, values };
+  return `${(hash >>> 0).toString(16).padStart(8, '0')}:${text.length}`;
 }
 
 function sourceSummary(state) {
@@ -63,7 +62,7 @@ function sourceSummary(state) {
   counts.topLevelValues = Object.keys(layout.values).length;
   return {
     counts,
-    hashes: { state: hashDetails({ arrays: layout.arrays, collections: layout.collections, values: layout.values }).hash }
+    hashes: { state: stateHash({ arrays: layout.arrays, collections: layout.collections, values: layout.values }) }
   };
 }
 
@@ -95,32 +94,67 @@ function sessionRecord(state) {
   });
 }
 
-function install({ authoritativeState, cachedState = authoritativeState, mode = 'verified_indexeddb' }) {
+function install({ authoritativeState, cachedState = authoritativeState, mode = 'verified_indexeddb', sessionSetFails = false }) {
   const localStorage = storageFrom({
     [STORAGE_KEY]: JSON.stringify(authoritativeState),
     [MODE_KEY]: mode
   });
   const sessionStorage = storageFrom({
     [SESSION_CACHE_KEY]: sessionRecord(cachedState)
-  });
+  }, sessionSetFails);
   const capturedOptions = [];
   let originalLoadCalls = 0;
 
   const core = {
     STORAGE_KEY,
     PENDING_HABIT_DELTAS_KEY: JOURNAL_KEY,
-    SHADOW_MIGRATION_DB_NAME: 'taskpoints_shadow_state_v1',
-    SHADOW_DUAL_WRITE_METADATA_ID: 'dual_write',
+    PHASE3_READ_MODE_KEY: MODE_KEY,
+    PHASE3_READ_DIAGNOSTICS_KEY: DIAGNOSTICS_KEY,
     shadowCanonicalJson: canonical,
     shadowSourceLayout: sourceLayout,
     shadowSourceSummary: sourceSummary,
     shadowVerificationMismatches(source, destination) {
-      return source.hashes.state === destination.hashes.state ? [] : [{ type: 'hash', field: 'overallState' }];
+      return source.hashes.state === destination.hashes.state ? [] : [{ type: 'hash' }];
     },
     parseTaskPointsStorageJson(raw, fallback = {}) { return raw ? JSON.parse(raw) : fallback; },
-    flushShadowDualWrites: async () => undefined,
     getPendingShadowDualWriteCount: () => 0,
     readPendingHabitDeltas: () => [],
+    getPhase3ReadMode() {
+      const value = localStorage.getItem(MODE_KEY);
+      return ['off', 'compare', 'verified_indexeddb'].includes(value) ? value : 'off';
+    },
+    setPhase3ReadMode(value) { localStorage.setItem(MODE_KEY, value); return value; },
+    getPhase3ReadStatus() {
+      let diagnostics = {};
+      try { diagnostics = JSON.parse(localStorage.getItem(DIAGNOSTICS_KEY) || '{}'); } catch (_) {}
+      return {
+        configuredMode: this.getPhase3ReadMode(),
+        status: diagnostics.status || 'ready',
+        effectiveSource: diagnostics.effectiveSource || 'localStorage',
+        indexedDbReadsTotal: diagnostics.indexedDbReadsTotal || 0,
+        fallbackReadsTotal: diagnostics.fallbackReadsTotal || 0,
+        lastFallbackReason: diagnostics.lastFallbackReason || null,
+        cacheReadyThisPage: false,
+        currentRawMatchesCache: false
+      };
+    },
+    refreshPhase3ReadCache: async () => ({ status: 'ready' }),
+    clearPhase3ReadCache: () => true,
+    testPhase3VerifiedRead: () => ({ served: false, reason: 'internal' }),
+    readPhase3ShadowSnapshot: async () => {
+      const summary = sourceSummary(authoritativeState);
+      return {
+        state: authoritativeState,
+        currentMetadata: { status: 'passed_verification' },
+        dualWriteMetadata: {
+          status: 'passed_verification',
+          verification: {
+            source: { hashes: { state: summary.hashes.state } },
+            destination: { hashes: { state: summary.hashes.state } }
+          }
+        }
+      };
+    },
     loadAppState(options = {}) {
       originalLoadCalls += 1;
       capturedOptions.push({ ...options });
@@ -134,7 +168,6 @@ function install({ authoritativeState, cachedState = authoritativeState, mode = 
     TaskPointsCore: core,
     localStorage,
     sessionStorage,
-    indexedDB: undefined,
     queueMicrotask() {},
     structuredClone,
     JSON,
@@ -153,7 +186,7 @@ function install({ authoritativeState, cachedState = authoritativeState, mode = 
   };
   context.window = context;
   context.globalThis = context;
-  vm.runInNewContext(MODULE_SOURCE, context, { filename: 'phase3_read_path.js' });
+  vm.runInNewContext(MODULE_SOURCE, context, { filename: 'phase3_navigation_cache.js' });
 
   return {
     core,
@@ -165,9 +198,7 @@ function install({ authoritativeState, cachedState = authoritativeState, mode = 
 }
 
 test('a verified session snapshot serves the first load after same-tab navigation', () => {
-  const state = fixture(21);
-  const harness = install({ authoritativeState: state });
-
+  const harness = install({ authoritativeState: fixture(21) });
   const result = harness.core.loadAppState({ persistSync: true });
   const status = harness.core.getPhase3ReadStatus();
 
@@ -183,10 +214,7 @@ test('a verified session snapshot serves the first load after same-tab navigatio
 });
 
 test('a stale session snapshot is rejected, cleared, and cannot override localStorage', () => {
-  const authoritative = fixture(22);
-  const stale = fixture(21);
-  const harness = install({ authoritativeState: authoritative, cachedState: stale });
-
+  const harness = install({ authoritativeState: fixture(22), cachedState: fixture(21) });
   const result = harness.core.loadAppState();
   const status = harness.core.getPhase3ReadStatus();
 
@@ -197,13 +225,29 @@ test('a stale session snapshot is rejected, cleared, and cannot override localSt
 });
 
 test('turning Phase 3 Off clears the session navigation snapshot', () => {
-  const state = fixture(23);
-  const harness = install({ authoritativeState: state });
-
+  const harness = install({ authoritativeState: fixture(23) });
   assert.notEqual(harness.sessionStorage.getItem(SESSION_CACHE_KEY), null);
   harness.core.setPhase3ReadMode('off');
-
   assert.equal(harness.sessionStorage.getItem(SESSION_CACHE_KEY), null);
   assert.equal(harness.core.getPhase3ReadStatus().configuredMode, 'off');
-  assert.equal(harness.core.getPhase3ReadStatus().effectiveSource, 'localStorage');
+});
+
+test('Compare mode ignores and clears a session navigation snapshot', () => {
+  const harness = install({ authoritativeState: fixture(24), mode: 'compare' });
+  const result = harness.core.loadAppState();
+  assert.equal(result.state.tasks[0].id, 'task-24');
+  assert.equal(harness.sessionStorage.getItem(SESSION_CACHE_KEY), null);
+  assert.equal(harness.core.getPhase3ReadStatus().indexedDbReadsTotal, 0);
+});
+
+test('sessionStorage quota failure is nonfatal and keeps the same-page cache usable', async () => {
+  const harness = install({
+    authoritativeState: fixture(25),
+    cachedState: fixture(24),
+    sessionSetFails: true
+  });
+  await harness.core.rebuildPhase3NavigationCache();
+  const result = harness.core.loadAppState();
+  assert.equal(result.state.tasks[0].id, 'task-25');
+  assert.equal(harness.core.getPhase3ReadStatus().indexedDbReadsTotal, 1);
 });
