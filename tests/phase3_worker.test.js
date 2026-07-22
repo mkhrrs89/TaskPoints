@@ -121,6 +121,15 @@ test('Phase 3 status page exposes a guarded in-place verified read test', () => 
   assert.match(source, /indexedDbReadsTotal/);
 });
 
+test('Phase 3 test readiness checks the live habit journal and fails closed after errors', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'phase3_read_status.html'), 'utf8');
+  assert.match(source, /readPendingHabitDeltas/);
+  assert.match(source, /pendingHabitJournalCount\(\) === 0/);
+  assert.match(source, /function clearReadiness\(\)/);
+  assert.match(source, /latestStatus = null/);
+  assert.match(source, /window\.addEventListener\('storage'/);
+});
+
 test('unrelated routes bypass the worker augmentation', async () => {
   const worker = loadWorker();
   const { env, calls } = createEnv();
