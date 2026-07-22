@@ -221,7 +221,7 @@
           core?.PHASE3_READ_MODE_KEY,
           core?.PHASE3_READ_DIAGNOSTICS_KEY
         ];
-        if (watchedKeys.includes(event.key)) readStatus(false);
+        if (event.key === null || watchedKeys.includes(event.key)) readStatus(false);
       });
       readStatus(false);
     })();
