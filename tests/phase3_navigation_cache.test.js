@@ -325,3 +325,25 @@ for (const disabledMode of ['off', 'compare']) {
     assert.equal(status.lastFallbackReason, 'cache_not_ready');
   });
 }
+
+test('a cross-tab authoritative reset event cannot resurrect the previous snapshot', () => {
+  const harness = install({ authoritativeState: fixture(29) });
+  assert.notEqual(harness.sessionStorage.getItem(SESSION_CACHE_KEY), null);
+
+  harness.localStorage.removeItem(STORAGE_KEY);
+  harness.dispatchStorage({
+    key: STORAGE_KEY,
+    oldValue: JSON.stringify(fixture(29)),
+    newValue: null,
+    storageArea: harness.localStorage
+  });
+  assert.equal(harness.sessionStorage.getItem(SESSION_CACHE_KEY), null);
+
+  const replacement = fixture(30);
+  harness.localStorage.setItem(STORAGE_KEY, JSON.stringify(replacement));
+  const result = harness.core.loadAppState();
+  const status = harness.core.getPhase3ReadStatus();
+  assert.equal(result.state.tasks[0].id, 'task-30');
+  assert.equal(status.indexedDbReadsTotal, 0);
+  assert.equal(status.lastFallbackReason, 'cache_not_ready');
+});
