@@ -113,6 +113,13 @@ test('Settings receives both diagnostics links through a fresh rewritten 200 res
   assert.equal(call.headers.get('range'), null);
 });
 
+test('Phase 3 status page exposes a non-persisting in-place verified read test', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'phase3_read_status.html'), 'utf8');
+  assert.match(source, /id="testVerifiedReadBtn"/);
+  assert.match(source, /core\.loadAppState\(\{ persistSync: false \}\)/);
+  assert.match(source, /indexedDbReadsTotal/);
+});
+
 test('unrelated routes bypass the worker augmentation', async () => {
   const worker = loadWorker();
   const { env, calls } = createEnv();
