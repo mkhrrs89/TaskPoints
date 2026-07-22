@@ -52,6 +52,16 @@
     clearSessionCache();
   }
 
+  function handleModeStorageEvent(event) {
+    if (event?.storageArea && event.storageArea !== global.localStorage) return;
+    if (event?.key !== MODE_KEY && event?.key !== null) return;
+    const observedMode = event?.key === MODE_KEY ? event.newValue : core.getPhase3ReadMode();
+    if (observedMode !== VERIFIED_MODE) {
+      clearNavigationCache();
+      sessionRestoreMismatchPending = false;
+    }
+  }
+
   function readDiagnostics() {
     try {
       const raw = global.localStorage?.getItem?.(DIAGNOSTICS_KEY);
@@ -460,6 +470,10 @@
   core.PHASE3_SESSION_CACHE_KEY = SESSION_CACHE_KEY;
   core.restorePhase3NavigationCache = restoreSessionCache;
   core.rebuildPhase3NavigationCache = rebuildNavigationCache;
+
+  if (typeof global.addEventListener === 'function') {
+    global.addEventListener('storage', handleModeStorageEvent);
+  }
 
   if (core.getPhase3ReadMode() === VERIFIED_MODE) {
     if (!restoreSessionCache()) scheduleNavigationRefresh('module_install');
