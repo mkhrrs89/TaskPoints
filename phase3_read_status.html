@@ -42,8 +42,12 @@
           <div id="phase3VerificationTitle" class="text-lg font-semibold">Verification</div>
           <div id="phase3Summary" class="muted text-sm">Loading status…</div>
         </div>
-        <button id="refreshPhase3Btn" class="btn btn-teal btn-toolbar nav-btn" type="button">Run Fresh Comparison</button>
+        <div class="flex flex-wrap gap-2">
+          <button id="refreshPhase3Btn" class="btn btn-teal btn-toolbar nav-btn" type="button">Run Fresh Comparison</button>
+          <button id="testVerifiedReadBtn" class="btn btn-teal btn-toolbar nav-btn" type="button" hidden>Test verified read now</button>
+        </div>
       </div>
+      <p id="verifiedReadHelp" class="muted text-xs" hidden>This performs one non-persisting app-state load on this page. It does not edit, delete, reset, or migrate data.</p>
       <div id="phase3Details" class="grid gap-2 text-sm"></div>
       <pre id="phase3Json" class="overflow-auto rounded-xl p-3 text-xs bg-black/20 whitespace-pre-wrap break-words"></pre>
     </section>
@@ -57,6 +61,8 @@
       const details = document.getElementById('phase3Details');
       const json = document.getElementById('phase3Json');
       const refreshButton = document.getElementById('refreshPhase3Btn');
+      const testVerifiedReadButton = document.getElementById('testVerifiedReadBtn');
+      const verifiedReadHelp = document.getElementById('verifiedReadHelp');
       const modeButtons = {
         off: document.getElementById('modeOffBtn'),
         compare: document.getElementById('modeCompareBtn'),
@@ -78,9 +84,11 @@
           .replaceAll("'", '&#39;');
       }
 
-      function setBusy(busy) {
+      function setBusy(busy, action = 'compare') {
         refreshButton.disabled = busy;
-        refreshButton.textContent = busy ? 'Comparing…' : 'Run Fresh Comparison';
+        refreshButton.textContent = busy && action === 'compare' ? 'Comparing…' : 'Run Fresh Comparison';
+        testVerifiedReadButton.disabled = busy;
+        testVerifiedReadButton.textContent = busy && action === 'test' ? 'Testing…' : 'Test verified read now';
         Object.values(modeButtons).forEach((button) => { button.disabled = busy; });
       }
 
@@ -90,6 +98,14 @@
           button.setAttribute('aria-pressed', mode === configuredMode ? 'true' : 'false');
           button.classList.toggle('active', mode === configuredMode);
         });
+
+        const testReady = configuredMode === 'verified_indexeddb'
+          && status?.cacheReadyThisPage === true
+          && status?.currentRawMatchesCache === true
+          && Number(status?.pendingWritesThisPage || 0) === 0;
+        testVerifiedReadButton.hidden = configuredMode !== 'verified_indexeddb';
+        testVerifiedReadButton.disabled = !testReady;
+        verifiedReadHelp.hidden = configuredMode !== 'verified_indexeddb';
 
         const passed = status?.countsMatch === true && status?.hashesMatch === true && (!status?.mismatches || status.mismatches.length === 0);
         const statusText = status?.status || 'unknown';
@@ -124,7 +140,7 @@
           json.textContent = '{}';
           return;
         }
-        setBusy(true);
+        setBusy(true, 'compare');
         try {
           const status = await Promise.resolve(core.getPhase3ReadStatus({ refresh: refresh === true }));
           render(status);
@@ -146,10 +162,31 @@
         await readStatus(mode !== 'off');
       }
 
+      async function testVerifiedRead() {
+        if (!core?.loadAppState || !core?.getPhase3ReadStatus) return;
+        setBusy(true, 'test');
+        try {
+          const before = await Promise.resolve(core.getPhase3ReadStatus());
+          const beforeCount = Number(before?.indexedDbReadsTotal) || 0;
+          core.loadAppState({ persistSync: false });
+          const after = await Promise.resolve(core.getPhase3ReadStatus());
+          render(after);
+          if ((Number(after?.indexedDbReadsTotal) || 0) <= beforeCount) {
+            summary.textContent = `Verified read used fallback${after?.lastFallbackReason ? ` — ${after.lastFallbackReason}` : ''}`;
+          }
+        } catch (error) {
+          summary.textContent = 'Verified read test failed; localStorage remains active.';
+          json.textContent = JSON.stringify({ status: 'fallback', error: error?.message || String(error) }, null, 2);
+        } finally {
+          setBusy(false);
+        }
+      }
+
       modeButtons.off.addEventListener('click', () => chooseMode('off'));
       modeButtons.compare.addEventListener('click', () => chooseMode('compare'));
       modeButtons.verified_indexeddb.addEventListener('click', () => chooseMode('verified_indexeddb'));
       refreshButton.addEventListener('click', () => readStatus(true));
+      testVerifiedReadButton.addEventListener('click', testVerifiedRead);
       readStatus(false);
     })();
   </script>
