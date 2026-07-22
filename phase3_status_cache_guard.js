@@ -10,11 +10,21 @@
 
   core.__phase3StatusCacheGuardInstalled = true;
   const originalGetStatus = core.getPhase3ReadStatus;
+  const modeKey = core.PHASE3_READ_MODE_KEY || 'taskpoints_phase3_read_mode_v1';
+
+  function clearBothCacheLayers() {
+    try { core.clearPhase3ReadCache(); } catch (_) {}
+  }
 
   core.getPhase3ReadStatus = function phase3GuardedGetStatus(options = {}) {
-    if (core.getPhase3ReadMode() !== 'verified_indexeddb') {
-      try { core.clearPhase3ReadCache(); } catch (_) {}
-    }
+    if (core.getPhase3ReadMode() !== 'verified_indexeddb') clearBothCacheLayers();
     return originalGetStatus.call(core, options);
   };
+
+  if (typeof global.addEventListener === 'function') {
+    global.addEventListener('storage', (event) => {
+      if (event?.storageArea && event.storageArea !== global.localStorage) return;
+      if (event?.key === modeKey) clearBothCacheLayers();
+    });
+  }
 })(typeof window !== 'undefined' ? window : globalThis);
