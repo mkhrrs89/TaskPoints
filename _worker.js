@@ -58,20 +58,22 @@ export default {
     const modulePaths = [
       '/phase2_dual_write.js',
       '/phase2_reset_hook.js',
-      '/phase3_read_path.js'
+      '/phase3_read_path.js',
+      '/phase3_navigation_cache.js'
     ];
     const moduleResults = await Promise.allSettled(
       modulePaths.map((pathname) => env.ASSETS.fetch(new Request(new URL(pathname, request.url), { method: 'GET' })))
     );
-    const [dualWriteResult, resetHookResult, phase3Result] = moduleResults;
+    const [dualWriteResult, resetHookResult, phase3Result, navigationCacheResult] = moduleResults;
     const dualWriteResponse = dualWriteResult.status === 'fulfilled' ? dualWriteResult.value : null;
     const resetHookResponse = resetHookResult.status === 'fulfilled' ? resetHookResult.value : null;
     const phase3Response = phase3Result.status === 'fulfilled' ? phase3Result.value : null;
+    const navigationCacheResponse = navigationCacheResult.status === 'fulfilled' ? navigationCacheResult.value : null;
 
     // Phase 2 remains the production safety floor. If either required Phase 2
     // module is unavailable or its asset fetch rejects, return the untouched
-    // core rather than a partial hook. A missing/rejected Phase 3 module is
-    // optional and falls back to the complete Phase 2 augmentation below.
+    // core rather than a partial hook. Phase 3 modules are optional and degrade
+    // independently: the navigation cache can never take down the read path.
     if (!dualWriteResponse?.ok || !resetHookResponse?.ok) return coreResponse;
 
     let dualWriteSource;
@@ -98,6 +100,17 @@ export default {
       }
     }
 
+    let navigationCacheSource = '';
+    if (phase3Source && navigationCacheResponse?.ok) {
+      try {
+        navigationCacheSource = await navigationCacheResponse.text();
+      } catch (_) {
+        // The navigation cache is an optional enhancement to the Phase 3 read
+        // path. Any fetch/body failure leaves the reviewed Phase 3 module intact.
+        navigationCacheSource = '';
+      }
+    }
+
     const headers = new Headers(coreResponse.headers);
     headers.delete('content-length');
     headers.delete('etag');
@@ -108,6 +121,7 @@ export default {
 
     const sources = [coreSource, dualWriteSource, resetHookSource];
     if (phase3Source) sources.push(phase3Source);
+    if (navigationCacheSource) sources.push(navigationCacheSource);
     return new Response(`${sources.map((source) => `;${source}`).join('\n')}\n`, {
       status: 200,
       headers
