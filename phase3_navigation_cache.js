@@ -52,11 +52,17 @@
     clearSessionCache();
   }
 
-  function handleModeStorageEvent(event) {
+  function handleRelevantStorageEvent(event) {
     if (event?.storageArea && event.storageArea !== global.localStorage) return;
-    if (event?.key !== MODE_KEY && event?.key !== null) return;
-    const observedMode = event?.key === MODE_KEY ? event.newValue : core.getPhase3ReadMode();
-    if (observedMode !== VERIFIED_MODE) {
+    const key = event?.key;
+    const authoritativeChanged = key === core.STORAGE_KEY || key === core.PENDING_HABIT_DELTAS_KEY;
+    if (key === null || authoritativeChanged) {
+      clearNavigationCache();
+      sessionRestoreMismatchPending = false;
+      return;
+    }
+    if (key !== MODE_KEY) return;
+    if (event.newValue !== VERIFIED_MODE) {
       clearNavigationCache();
       sessionRestoreMismatchPending = false;
     }
@@ -472,7 +478,7 @@
   core.rebuildPhase3NavigationCache = rebuildNavigationCache;
 
   if (typeof global.addEventListener === 'function') {
-    global.addEventListener('storage', handleModeStorageEvent);
+    global.addEventListener('storage', handleRelevantStorageEvent);
   }
 
   if (core.getPhase3ReadMode() === VERIFIED_MODE) {
