@@ -3,7 +3,15 @@
 
   const core = global.TaskPointsCore;
   if (!core || core.__phase3NavigationCacheInstalled || typeof core.loadAppState !== 'function') return;
-  if (typeof core.getPhase3ReadMode !== 'function' || typeof core.getPhase3ReadStatus !== 'function') return;
+  const requiredPhase3Apis = [
+    'getPhase3ReadMode',
+    'getPhase3ReadStatus',
+    'refreshPhase3ReadCache',
+    'setPhase3ReadMode',
+    'clearPhase3ReadCache',
+    'readPhase3ShadowSnapshot'
+  ];
+  if (requiredPhase3Apis.some((name) => typeof core[name] !== 'function')) return;
   core.__phase3NavigationCacheInstalled = true;
 
   const MODE_KEY = core.PHASE3_READ_MODE_KEY || 'taskpoints_phase3_read_mode_v1';
@@ -440,7 +448,8 @@
     const served = status.indexedDbReadsTotal > before.indexedDbReadsTotal;
     if (served) return { served: true, reason: null, status };
     if (outcome?.__phase3VerifiedReadTestRefused) return { served: false, reason: outcome.reason, status };
-    return PHASE3_TEST_READ ? PHASE3_TEST_READ.call(core) : { served: false, reason: status.lastFallbackReason, status };
+    if (outcome && typeof outcome.served === 'boolean') return { ...outcome, status };
+    return { served: false, reason: status.lastFallbackReason, status };
   };
 
   core.PHASE3_SESSION_CACHE_KEY = SESSION_CACHE_KEY;
