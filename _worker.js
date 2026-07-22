@@ -74,14 +74,29 @@ export default {
     // optional and falls back to the complete Phase 2 augmentation below.
     if (!dualWriteResponse?.ok || !resetHookResponse?.ok) return coreResponse;
 
-    const [coreSource, dualWriteSource, resetHookSource] = await Promise.all([
-      coreResponse.text(),
-      dualWriteResponse.text(),
-      resetHookResponse.text()
-    ]);
+    let dualWriteSource;
+    let resetHookSource;
+    try {
+      [dualWriteSource, resetHookSource] = await Promise.all([
+        dualWriteResponse.text(),
+        resetHookResponse.text()
+      ]);
+    } catch (_) {
+      // A required Phase 2 module whose body cannot be read is equivalent to a
+      // missing required module. The untouched core response is still unread.
+      return coreResponse;
+    }
 
+    const coreSource = await coreResponse.text();
     let phase3Source = '';
-    if (phase3Response?.ok) phase3Source = await phase3Response.text();
+    if (phase3Response?.ok) {
+      try {
+        phase3Source = await phase3Response.text();
+      } catch (_) {
+        // Phase 3 is optional. A body-read failure must preserve complete Phase 2.
+        phase3Source = '';
+      }
+    }
 
     const headers = new Headers(coreResponse.headers);
     headers.delete('content-length');
