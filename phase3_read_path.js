@@ -364,9 +364,18 @@
     });
   }
 
-  function wrappedLoadAppState(...args) {
+  function refusedTestResult(reason) {
+    return { __phase3VerifiedReadTestRefused: true, reason };
+  }
+
+  function loadAppStateWithPolicy(args, noNormalFallback = false) {
     const mode = getMode();
-    if (mode === 'off' || servingFromIndexedDb) return ORIGINAL_LOAD_APP_STATE.apply(core, args);
+    if (servingFromIndexedDb) {
+      return noNormalFallback ? refusedTestResult('recursive_load') : ORIGINAL_LOAD_APP_STATE.apply(core, args);
+    }
+    if (mode === 'off') {
+      return noNormalFallback ? refusedTestResult('mode_off') : ORIGINAL_LOAD_APP_STATE.apply(core, args);
+    }
 
     const authoritativeRaw = safeStorageGet(core.STORAGE_KEY);
     const pendingJournalRaw = safeStorageGet(core.PENDING_HABIT_DELTAS_KEY);
@@ -390,10 +399,9 @@
             : verifiedCache
               ? 'authoritative_changed_since_verification'
               : 'cache_not_ready';
-      const result = ORIGINAL_LOAD_APP_STATE.apply(core, args);
       if (mode === 'verified_indexeddb') recordFallback(reason);
       scheduleRefresh(reason);
-      return result;
+      return noNormalFallback ? refusedTestResult(reason) : ORIGINAL_LOAD_APP_STATE.apply(core, args);
     }
 
     servingFromIndexedDb = true;
@@ -417,9 +425,10 @@
         || currentRaw !== verifiedCache.authoritativeRaw
         || currentJournalRaw !== pendingJournalRaw) {
         verifiedCache = null;
-        recordFallback('authoritative_changed_during_indexeddb_read');
-        scheduleRefresh('authoritative_changed_during_indexeddb_read');
-        return ORIGINAL_LOAD_APP_STATE.apply(core, args);
+        const reason = 'authoritative_changed_during_indexeddb_read';
+        recordFallback(reason);
+        scheduleRefresh(reason);
+        return noNormalFallback ? refusedTestResult(reason) : ORIGINAL_LOAD_APP_STATE.apply(core, args);
       }
 
       const previous = readDiagnostics();
@@ -434,12 +443,17 @@
       return verifiedAttempt.result;
     } catch (error) {
       verifiedCache = null;
-      recordFallback('indexeddb_read_exception');
-      scheduleRefresh('indexeddb_read_exception');
-      return ORIGINAL_LOAD_APP_STATE.apply(core, args);
+      const reason = 'indexeddb_read_exception';
+      recordFallback(reason);
+      scheduleRefresh(reason);
+      return noNormalFallback ? refusedTestResult(reason) : ORIGINAL_LOAD_APP_STATE.apply(core, args);
     } finally {
       servingFromIndexedDb = false;
     }
+  }
+
+  function wrappedLoadAppState(...args) {
+    return loadAppStateWithPolicy(args, false);
   }
 
   function getStatus(options = {}) {
@@ -477,6 +491,14 @@
     return finish();
   }
 
+  function testVerifiedRead() {
+    const before = getStatus();
+    loadAppStateWithPolicy([{ persistSync: false }], true);
+    const status = getStatus();
+    const served = status.indexedDbReadsTotal > before.indexedDbReadsTotal;
+    return { served, reason: served ? null : status.lastFallbackReason, status };
+  }
+
   function clearCache() {
     verifiedCache = null;
     return true;
@@ -489,6 +511,7 @@
   core.setPhase3ReadMode = setMode;
   core.refreshPhase3ReadCache = refreshReadCache;
   core.getPhase3ReadStatus = getStatus;
+  core.testPhase3VerifiedRead = testVerifiedRead;
   core.clearPhase3ReadCache = clearCache;
   core.readPhase3ShadowSnapshot = readShadowSnapshot;
   core.loadAppState = wrappedLoadAppState;
