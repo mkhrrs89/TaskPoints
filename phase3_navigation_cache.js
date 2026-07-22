@@ -140,7 +140,8 @@
     if (rawRecord === null) return false;
     let record;
     try { record = JSON.parse(rawRecord); } catch (_) { record = null; }
-    const restored = validateRecord(record, safeLocalGet(core.STORAGE_KEY));
+    let restored = null;
+    try { restored = validateRecord(record, safeLocalGet(core.STORAGE_KEY)); } catch (_) { restored = null; }
     if (!restored) {
       clearNavigationCache();
       sessionRestoreMismatchPending = true;
@@ -308,7 +309,11 @@
   function loadWithNavigationPolicy(args, noNormalFallback = false) {
     const mode = core.getPhase3ReadMode();
     if (servingFromNavigationCache) return noNormalFallback ? refused('recursive_load') : callAuthoritativeLoader(args);
-    if (mode !== VERIFIED_MODE) return noNormalFallback ? refused('mode_not_verified') : PHASE3_LOAD_APP_STATE.apply(core, args);
+    if (mode !== VERIFIED_MODE) {
+      clearNavigationCache();
+      sessionRestoreMismatchPending = false;
+      return noNormalFallback ? refused('mode_not_verified') : PHASE3_LOAD_APP_STATE.apply(core, args);
+    }
 
     const authoritativeRaw = safeLocalGet(core.STORAGE_KEY);
     const pendingJournalRaw = safeLocalGet(core.PENDING_HABIT_DELTAS_KEY);
