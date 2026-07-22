@@ -94,7 +94,13 @@ function sessionRecord(state) {
   });
 }
 
-function install({ authoritativeState, cachedState = authoritativeState, mode = 'verified_indexeddb', sessionSetFails = false }) {
+function install({
+  authoritativeState,
+  cachedState = authoritativeState,
+  mode = 'verified_indexeddb',
+  sessionSetFails = false,
+  throwOnCachedSummary = false
+}) {
   const localStorage = storageFrom({
     [STORAGE_KEY]: JSON.stringify(authoritativeState),
     [MODE_KEY]: mode
@@ -112,7 +118,10 @@ function install({ authoritativeState, cachedState = authoritativeState, mode = 
     PHASE3_READ_DIAGNOSTICS_KEY: DIAGNOSTICS_KEY,
     shadowCanonicalJson: canonical,
     shadowSourceLayout: sourceLayout,
-    shadowSourceSummary: sourceSummary,
+    shadowSourceSummary(state) {
+      if (throwOnCachedSummary && state?.__throwValidation === true) throw new Error('pathological canonical state');
+      return sourceSummary(state);
+    },
     shadowVerificationMismatches(source, destination) {
       return source.hashes.state === destination.hashes.state ? [] : [{ type: 'hash' }];
     },
@@ -250,4 +259,38 @@ test('sessionStorage quota failure is nonfatal and keeps the same-page cache usa
   const result = harness.core.loadAppState();
   assert.equal(result.state.tasks[0].id, 'task-25');
   assert.equal(harness.core.getPhase3ReadStatus().indexedDbReadsTotal, 1);
+});
+
+test('a pathological valid-JSON session state cannot abort module installation', () => {
+  const authoritative = fixture(26);
+  const pathological = { ...fixture(26), __throwValidation: true };
+  const harness = install({
+    authoritativeState: authoritative,
+    cachedState: pathological,
+    throwOnCachedSummary: true
+  });
+
+  const result = harness.core.loadAppState();
+  const status = harness.core.getPhase3ReadStatus();
+  assert.equal(result.state.tasks[0].id, 'task-26');
+  assert.equal(status.indexedDbReadsTotal, 0);
+  assert.equal(status.lastFallbackReason, 'session_cache_mismatch');
+  assert.equal(harness.sessionStorage.getItem(SESSION_CACHE_KEY), null);
+});
+
+test('an observed cross-tab Off or Compare mode clears the old snapshot before re-enable', () => {
+  const harness = install({ authoritativeState: fixture(27) });
+  assert.notEqual(harness.sessionStorage.getItem(SESSION_CACHE_KEY), null);
+
+  harness.localStorage.setItem(MODE_KEY, 'compare');
+  const compareResult = harness.core.loadAppState();
+  assert.equal(compareResult.state.tasks[0].id, 'task-27');
+  assert.equal(harness.sessionStorage.getItem(SESSION_CACHE_KEY), null);
+
+  harness.localStorage.setItem(MODE_KEY, 'verified_indexeddb');
+  const verifiedResult = harness.core.loadAppState();
+  const status = harness.core.getPhase3ReadStatus();
+  assert.equal(verifiedResult.state.tasks[0].id, 'task-27');
+  assert.equal(status.indexedDbReadsTotal, 0);
+  assert.equal(status.lastFallbackReason, 'cache_not_ready');
 });
