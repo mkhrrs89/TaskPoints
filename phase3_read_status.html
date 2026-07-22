@@ -86,12 +86,21 @@
           .replaceAll("'", '&#39;');
       }
 
+      function pendingHabitJournalCount() {
+        try {
+          return Number(core?.readPendingHabitDeltas?.().length) || 0;
+        } catch (_) {
+          return 1;
+        }
+      }
+
       function updateTestControl() {
         const configuredMode = latestStatus?.configuredMode || 'off';
         const testReady = configuredMode === 'verified_indexeddb'
           && latestStatus?.cacheReadyThisPage === true
           && latestStatus?.currentRawMatchesCache === true
-          && Number(latestStatus?.pendingWritesThisPage || 0) === 0;
+          && Number(latestStatus?.pendingWritesThisPage || 0) === 0
+          && pendingHabitJournalCount() === 0;
         testVerifiedReadButton.hidden = configuredMode !== 'verified_indexeddb';
         testVerifiedReadButton.disabled = busy || !testReady;
         verifiedReadHelp.hidden = configuredMode !== 'verified_indexeddb';
@@ -131,6 +140,7 @@
           ['Counts match', latestStatus.countsMatch === true ? 'true' : 'false'],
           ['Hashes match', latestStatus.hashesMatch === true ? 'true' : 'false'],
           ['Pending dual writes', Number(latestStatus.pendingWritesThisPage) || 0],
+          ['Pending habit journal entries', pendingHabitJournalCount()],
           ['Cache ready on this page', latestStatus.cacheReadyThisPage === true ? 'true' : 'false'],
           ['Current localStorage matches cache', latestStatus.currentRawMatchesCache === true ? 'true' : 'false'],
           ['Verified IndexedDB reads', Number(latestStatus.indexedDbReadsTotal) || 0],
@@ -142,8 +152,14 @@
         json.textContent = JSON.stringify(latestStatus, null, 2);
       }
 
+      function clearReadiness() {
+        latestStatus = null;
+        updateTestControl();
+      }
+
       async function readStatus(refresh) {
         if (!core?.getPhase3ReadStatus) {
+          clearReadiness();
           summary.textContent = 'Phase 3 module is not loaded. localStorage remains active.';
           json.textContent = '{}';
           return;
@@ -153,6 +169,7 @@
           const status = await Promise.resolve(core.getPhase3ReadStatus({ refresh: refresh === true }));
           render(status);
         } catch (error) {
+          clearReadiness();
           summary.textContent = 'Could not read Phase 3 status. localStorage remains active.';
           json.textContent = JSON.stringify({ status: 'fallback', error: error?.message || String(error) }, null, 2);
         } finally {
@@ -172,6 +189,7 @@
 
       async function testVerifiedRead() {
         if (!core?.testPhase3VerifiedRead) {
+          clearReadiness();
           summary.textContent = 'Guarded verified-read test is unavailable. localStorage remains active.';
           return;
         }
@@ -183,6 +201,7 @@
             summary.textContent = `Verified read safely refused${outcome?.reason ? ` — ${outcome.reason}` : ''}`;
           }
         } catch (error) {
+          clearReadiness();
           summary.textContent = 'Verified read test failed safely; localStorage remains active.';
           json.textContent = JSON.stringify({ status: 'fallback', error: error?.message || String(error) }, null, 2);
         } finally {
@@ -195,6 +214,15 @@
       modeButtons.verified_indexeddb.addEventListener('click', () => chooseMode('verified_indexeddb'));
       refreshButton.addEventListener('click', () => readStatus(true));
       testVerifiedReadButton.addEventListener('click', testVerifiedRead);
+      window.addEventListener('storage', (event) => {
+        const watchedKeys = [
+          core?.STORAGE_KEY,
+          core?.PENDING_HABIT_DELTAS_KEY,
+          core?.PHASE3_READ_MODE_KEY,
+          core?.PHASE3_READ_DIAGNOSTICS_KEY
+        ];
+        if (watchedKeys.includes(event.key)) readStatus(false);
+      });
       readStatus(false);
     })();
   </script>
