@@ -52,18 +52,23 @@
     clearSessionCache();
   }
 
+  function clearAllReadCaches() {
+    clearNavigationCache();
+    try { PHASE3_CLEAR_CACHE.call(core); } catch (_) {}
+  }
+
   function handleRelevantStorageEvent(event) {
     if (event?.storageArea && event.storageArea !== global.localStorage) return;
     const key = event?.key;
     const authoritativeChanged = key === core.STORAGE_KEY || key === core.PENDING_HABIT_DELTAS_KEY;
     if (key === null || authoritativeChanged) {
-      clearNavigationCache();
+      clearAllReadCaches();
       sessionRestoreMismatchPending = false;
       return;
     }
     if (key !== MODE_KEY) return;
     if (event.newValue !== VERIFIED_MODE) {
-      clearNavigationCache();
+      clearAllReadCaches();
       sessionRestoreMismatchPending = false;
     }
   }
@@ -149,7 +154,7 @@
 
   function restoreSessionCache() {
     if (core.getPhase3ReadMode() !== VERIFIED_MODE) {
-      clearNavigationCache();
+      clearAllReadCaches();
       return false;
     }
     const rawRecord = safeSessionGet();
@@ -159,7 +164,7 @@
     let restored = null;
     try { restored = validateRecord(record, safeLocalGet(core.STORAGE_KEY)); } catch (_) { restored = null; }
     if (!restored) {
-      clearNavigationCache();
+      clearAllReadCaches();
       sessionRestoreMismatchPending = true;
       return false;
     }
@@ -188,16 +193,16 @@
 
   async function rebuildNavigationCache() {
     if (core.getPhase3ReadMode() !== VERIFIED_MODE || typeof core.readPhase3ShadowSnapshot !== 'function') {
-      clearNavigationCache();
+      clearAllReadCaches();
       return false;
     }
     const authoritativeRawBefore = safeLocalGet(core.STORAGE_KEY);
     if (authoritativeRawBefore === null) {
-      clearNavigationCache();
+      clearAllReadCaches();
       return false;
     }
     if ((Number(core.getPendingShadowDualWriteCount?.()) || 0) > 0 || pendingHabitCount() > 0) {
-      clearNavigationCache();
+      clearAllReadCaches();
       return false;
     }
 
@@ -234,7 +239,7 @@
       persistSessionRecord(destinationState, cache);
       return true;
     } catch (_) {
-      clearNavigationCache();
+      clearAllReadCaches();
       return false;
     }
   }
@@ -326,7 +331,7 @@
     const mode = core.getPhase3ReadMode();
     if (servingFromNavigationCache) return noNormalFallback ? refused('recursive_load') : callAuthoritativeLoader(args);
     if (mode !== VERIFIED_MODE) {
-      clearNavigationCache();
+      clearAllReadCaches();
       sessionRestoreMismatchPending = false;
       return noNormalFallback ? refused('mode_not_verified') : PHASE3_LOAD_APP_STATE.apply(core, args);
     }
@@ -362,7 +367,7 @@
                 ? 'session_cache_mismatch'
                 : 'cache_not_ready';
       sessionRestoreMismatchPending = false;
-      if (navigationCache) clearNavigationCache();
+      clearAllReadCaches();
       if (noNormalFallback) return refused(reason);
       recordFallback(reason);
       scheduleNavigationRefresh(reason);
@@ -382,7 +387,7 @@
       const currentRaw = safeLocalGet(core.STORAGE_KEY);
       const currentJournalRaw = safeLocalGet(core.PENDING_HABIT_DELTAS_KEY);
       if (attempt.changed || !attempt.usedState || currentRaw !== navigationCache.authoritativeRaw || currentJournalRaw !== pendingJournalRaw) {
-        clearNavigationCache();
+        clearAllReadCaches();
         const reason = 'authoritative_changed_during_indexeddb_read';
         if (noNormalFallback) return refused(reason);
         recordFallback(reason);
@@ -401,7 +406,7 @@
       });
       return attempt.result;
     } catch (error) {
-      clearNavigationCache();
+      clearAllReadCaches();
       const reason = 'indexeddb_read_exception';
       if (noNormalFallback) return refused(reason);
       recordFallback(reason);
@@ -435,7 +440,7 @@
     if (!options || options.refresh !== true) return decorateStatus(result);
     return Promise.resolve(result).then(async (status) => {
       if (core.getPhase3ReadMode() === VERIFIED_MODE && status?.status === 'ready') await rebuildNavigationCache();
-      else if (core.getPhase3ReadMode() !== VERIFIED_MODE) clearNavigationCache();
+      else if (core.getPhase3ReadMode() !== VERIFIED_MODE) clearAllReadCaches();
       return decorateStatus(PHASE3_GET_STATUS.call(core));
     });
   };
@@ -443,7 +448,7 @@
   core.refreshPhase3ReadCache = function phase3NavigationRefresh(...args) {
     return Promise.resolve(PHASE3_REFRESH_CACHE.apply(core, args)).then(async (status) => {
       if (core.getPhase3ReadMode() === VERIFIED_MODE && status?.status === 'ready') await rebuildNavigationCache();
-      else if (core.getPhase3ReadMode() !== VERIFIED_MODE || status?.status === 'fallback') clearNavigationCache();
+      else if (core.getPhase3ReadMode() !== VERIFIED_MODE || status?.status === 'fallback') clearAllReadCaches();
       return status;
     });
   };
@@ -484,6 +489,6 @@
   if (core.getPhase3ReadMode() === VERIFIED_MODE) {
     if (!restoreSessionCache()) scheduleNavigationRefresh('module_install');
   } else {
-    clearNavigationCache();
+    clearAllReadCaches();
   }
 })(typeof window !== 'undefined' ? window : globalThis);
