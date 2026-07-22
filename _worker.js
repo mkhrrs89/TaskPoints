@@ -60,13 +60,19 @@ export default {
       '/phase2_reset_hook.js',
       '/phase3_read_path.js'
     ];
-    const [dualWriteResponse, resetHookResponse, phase3Response] = await Promise.all(
+    const moduleResults = await Promise.allSettled(
       modulePaths.map((pathname) => env.ASSETS.fetch(new Request(new URL(pathname, request.url), { method: 'GET' })))
     );
+    const [dualWriteResult, resetHookResult, phase3Result] = moduleResults;
+    const dualWriteResponse = dualWriteResult.status === 'fulfilled' ? dualWriteResult.value : null;
+    const resetHookResponse = resetHookResult.status === 'fulfilled' ? resetHookResult.value : null;
+    const phase3Response = phase3Result.status === 'fulfilled' ? phase3Result.value : null;
 
     // Phase 2 remains the production safety floor. If either required Phase 2
-    // module is unavailable, return the untouched core rather than a partial hook.
-    if (!dualWriteResponse.ok || !resetHookResponse.ok) return coreResponse;
+    // module is unavailable or its asset fetch rejects, return the untouched
+    // core rather than a partial hook. A missing/rejected Phase 3 module is
+    // optional and falls back to the complete Phase 2 augmentation below.
+    if (!dualWriteResponse?.ok || !resetHookResponse?.ok) return coreResponse;
 
     const [coreSource, dualWriteSource, resetHookSource] = await Promise.all([
       coreResponse.text(),
@@ -75,7 +81,7 @@ export default {
     ]);
 
     let phase3Source = '';
-    if (phase3Response.ok) phase3Source = await phase3Response.text();
+    if (phase3Response?.ok) phase3Source = await phase3Response.text();
 
     const headers = new Headers(coreResponse.headers);
     headers.delete('content-length');
