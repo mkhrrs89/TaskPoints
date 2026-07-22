@@ -328,6 +328,38 @@ test('verified mode serves an exact cached IndexedDB snapshot on later synchrono
   assert.equal(global.localStorage.getItem, getItemBefore, 'temporary read override must be restored');
 });
 
+test('guarded verified-read test serves safely and forces persistSync false', async () => {
+  const state = fixture(16);
+  await reset(state, 'verified_indexeddb');
+  const idb = createFakeIndexedDb();
+  global.indexedDB = idb;
+  await seedShadow(idb, state);
+  await core.refreshPhase3ReadCache({ indexedDB: idb, force: true });
+  const beforeCalls = originalLoadCalls;
+  const outcome = core.testPhase3VerifiedRead();
+  assert.equal(outcome.served, true);
+  assert.equal(outcome.status.indexedDbReadsTotal, 1);
+  assert.equal(originalLoadCalls, beforeCalls + 1);
+  assert.equal(capturedLoadOptions.at(-1).persistSync, false);
+});
+
+test('guarded verified-read test refuses an existing pending journal without invoking the loader', async () => {
+  const state = fixture(17);
+  await reset(state, 'verified_indexeddb');
+  const idb = createFakeIndexedDb();
+  global.indexedDB = idb;
+  await seedShadow(idb, state);
+  await core.refreshPhase3ReadCache({ indexedDB: idb, force: true });
+  pendingHabitRows = [{ id: 'pending-test-journal' }];
+  localRows.set(core.PENDING_HABIT_DELTAS_KEY, JSON.stringify(pendingHabitRows));
+  const beforeCalls = originalLoadCalls;
+  const outcome = core.testPhase3VerifiedRead();
+  assert.equal(outcome.served, false);
+  assert.equal(outcome.reason, 'pending_habit_journal');
+  assert.equal(originalLoadCalls, beforeCalls);
+  assert.equal(outcome.status.indexedDbReadsTotal, 0);
+});
+
 test('a changed authoritative raw value immediately forces localStorage fallback', async () => {
   const state = fixture(4);
   await reset(state, 'verified_indexeddb');
@@ -466,6 +498,27 @@ test('a habit journal appearing during a substituted load discards the verified 
   assert.equal(result.state.tasks[0].id, 'task-14');
   assert.equal(capturedLoadOptions[0].persistSync, false);
   assert.equal(core.getPhase3ReadStatus().lastFallbackReason, 'authoritative_changed_during_indexeddb_read');
+});
+
+test('guarded verified-read test suppresses a newly arrived journal and never reruns the loader', async () => {
+  const state = fixture(18);
+  await reset(state, 'verified_indexeddb');
+  const idb = createFakeIndexedDb();
+  global.indexedDB = idb;
+  await seedShadow(idb, state);
+  await core.refreshPhase3ReadCache({ indexedDB: idb, force: true });
+
+  journalGetCount = 0;
+  journalGetHookAt = 2;
+  journalGetHook = () => localRows.set(core.PENDING_HABIT_DELTAS_KEY, JSON.stringify([{ id: 'test-cross-tab-journal' }]));
+  const outcome = core.testPhase3VerifiedRead();
+
+  assert.equal(outcome.served, false);
+  assert.equal(outcome.reason, 'authoritative_changed_during_indexeddb_read');
+  assert.equal(originalLoadCalls, 1, 'only the non-persisting verified attempt may run');
+  assert.equal(capturedLoadOptions[0].persistSync, false);
+  assert.equal(capturedJournalReads[0], null);
+  assert.equal(outcome.status.indexedDbReadsTotal, 0);
 });
 
 test('temporary getItem override is restored even when the original loader throws', async () => {
