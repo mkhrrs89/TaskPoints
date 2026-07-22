@@ -59,21 +59,23 @@ export default {
       '/phase2_dual_write.js',
       '/phase2_reset_hook.js',
       '/phase3_read_path.js',
-      '/phase3_navigation_cache.js'
+      '/phase3_navigation_cache.js',
+      '/phase3_status_cache_guard.js'
     ];
     const moduleResults = await Promise.allSettled(
       modulePaths.map((pathname) => env.ASSETS.fetch(new Request(new URL(pathname, request.url), { method: 'GET' })))
     );
-    const [dualWriteResult, resetHookResult, phase3Result, navigationCacheResult] = moduleResults;
+    const [dualWriteResult, resetHookResult, phase3Result, navigationCacheResult, statusGuardResult] = moduleResults;
     const dualWriteResponse = dualWriteResult.status === 'fulfilled' ? dualWriteResult.value : null;
     const resetHookResponse = resetHookResult.status === 'fulfilled' ? resetHookResult.value : null;
     const phase3Response = phase3Result.status === 'fulfilled' ? phase3Result.value : null;
     const navigationCacheResponse = navigationCacheResult.status === 'fulfilled' ? navigationCacheResult.value : null;
+    const statusGuardResponse = statusGuardResult.status === 'fulfilled' ? statusGuardResult.value : null;
 
     // Phase 2 remains the production safety floor. If either required Phase 2
     // module is unavailable or its asset fetch rejects, return the untouched
     // core rather than a partial hook. Phase 3 modules are optional and degrade
-    // independently: the navigation cache can never take down the read path.
+    // independently: the navigation bundle can never take down the read path.
     if (!dualWriteResponse?.ok || !resetHookResponse?.ok) return coreResponse;
 
     let dualWriteSource;
@@ -101,13 +103,18 @@ export default {
     }
 
     let navigationCacheSource = '';
-    if (phase3Source && navigationCacheResponse?.ok) {
+    let statusGuardSource = '';
+    if (phase3Source && navigationCacheResponse?.ok && statusGuardResponse?.ok) {
       try {
-        navigationCacheSource = await navigationCacheResponse.text();
+        [navigationCacheSource, statusGuardSource] = await Promise.all([
+          navigationCacheResponse.text(),
+          statusGuardResponse.text()
+        ]);
       } catch (_) {
-        // The navigation cache is an optional enhancement to the Phase 3 read
-        // path. Any fetch/body failure leaves the reviewed Phase 3 module intact.
+        // The navigation cache and status guard form one optional enhancement.
+        // If either body cannot be read, preserve the reviewed Phase 3 path.
         navigationCacheSource = '';
+        statusGuardSource = '';
       }
     }
 
@@ -121,7 +128,7 @@ export default {
 
     const sources = [coreSource, dualWriteSource, resetHookSource];
     if (phase3Source) sources.push(phase3Source);
-    if (navigationCacheSource) sources.push(navigationCacheSource);
+    if (navigationCacheSource && statusGuardSource) sources.push(navigationCacheSource, statusGuardSource);
     return new Response(`${sources.map((source) => `;${source}`).join('\n')}\n`, {
       status: 200,
       headers
