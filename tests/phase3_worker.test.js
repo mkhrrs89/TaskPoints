@@ -26,6 +26,13 @@ function loadWorker() {
   return module.exports;
 }
 
+function unreadableResponse() {
+  return {
+    ok: true,
+    async text() { throw new Error('asset body unreadable'); }
+  };
+}
+
 function createEnv(options = {}) {
   const calls = [];
   const bodies = {
@@ -45,6 +52,8 @@ function createEnv(options = {}) {
           calls.push({ path: url.pathname, headers: new Headers(request.headers) });
           if (options.rejectPhase3 && url.pathname === '/phase3_read_path.js') throw new Error('phase3 asset rejected');
           if (options.rejectPhase2 && url.pathname === '/phase2_dual_write.js') throw new Error('phase2 asset rejected');
+          if (options.unreadablePhase3 && url.pathname === '/phase3_read_path.js') return unreadableResponse();
+          if (options.unreadablePhase2 && url.pathname === '/phase2_dual_write.js') return unreadableResponse();
           if (options.failPhase3 && url.pathname === '/phase3_read_path.js') return new Response('missing', { status: 404 });
           if (options.failPhase2 && url.pathname === '/phase2_dual_write.js') return new Response('missing', { status: 404 });
           return new Response(bodies[url.pathname] || 'UNKNOWN', {
@@ -101,6 +110,18 @@ test('a rejected Phase 3 fetch preserves the complete Phase 2 augmentation', asy
   assert.equal(response.headers.get('x-taskpoints-phase'), '2-dual-write');
 });
 
+test('an unreadable Phase 3 body preserves the complete Phase 2 augmentation', async () => {
+  const worker = loadWorker();
+  const { env } = createEnv({ unreadablePhase3: true });
+  const response = await worker.fetch(new Request('https://example.test/scoring_core.js'), env);
+  const body = await response.text();
+  assert.match(body, /CORE_SOURCE/);
+  assert.match(body, /PHASE2_DUAL/);
+  assert.match(body, /PHASE2_RESET/);
+  assert.doesNotMatch(body, /PHASE3_READ/);
+  assert.equal(response.headers.get('x-taskpoints-phase'), '2-dual-write');
+});
+
 test('a missing required Phase 2 module returns the untouched core asset', async () => {
   const worker = loadWorker();
   const { env } = createEnv({ failPhase2: true });
@@ -112,6 +133,14 @@ test('a missing required Phase 2 module returns the untouched core asset', async
 test('a rejected required Phase 2 fetch returns the untouched core asset', async () => {
   const worker = loadWorker();
   const { env } = createEnv({ rejectPhase2: true });
+  const response = await worker.fetch(new Request('https://example.test/scoring_core.js'), env);
+  assert.equal(await response.text(), 'CORE_SOURCE');
+  assert.equal(response.headers.get('x-taskpoints-phase'), null);
+});
+
+test('an unreadable required Phase 2 body returns the untouched core asset', async () => {
+  const worker = loadWorker();
+  const { env } = createEnv({ unreadablePhase2: true });
   const response = await worker.fetch(new Request('https://example.test/scoring_core.js'), env);
   assert.equal(await response.text(), 'CORE_SOURCE');
   assert.equal(response.headers.get('x-taskpoints-phase'), null);
