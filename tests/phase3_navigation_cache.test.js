@@ -109,6 +109,7 @@ function install({
     [SESSION_CACHE_KEY]: sessionRecord(cachedState)
   }, sessionSetFails);
   const capturedOptions = [];
+  const eventListeners = new Map();
   let originalLoadCalls = 0;
 
   const core = {
@@ -178,6 +179,11 @@ function install({
     localStorage,
     sessionStorage,
     queueMicrotask() {},
+    addEventListener(type, callback) {
+      const rows = eventListeners.get(type) || [];
+      rows.push(callback);
+      eventListeners.set(type, rows);
+    },
     structuredClone,
     JSON,
     Date,
@@ -202,7 +208,10 @@ function install({
     localStorage,
     sessionStorage,
     capturedOptions,
-    originalLoadCalls: () => originalLoadCalls
+    originalLoadCalls: () => originalLoadCalls,
+    dispatchStorage(event) {
+      for (const callback of eventListeners.get('storage') || []) callback(event);
+    }
   };
 }
 
@@ -294,3 +303,25 @@ test('an observed cross-tab Off or Compare mode clears the old snapshot before r
   assert.equal(status.indexedDbReadsTotal, 0);
   assert.equal(status.lastFallbackReason, 'cache_not_ready');
 });
+
+for (const disabledMode of ['off', 'compare']) {
+  test(`a cross-tab ${disabledMode} storage event clears the snapshot before re-enable`, () => {
+    const harness = install({ authoritativeState: fixture(28) });
+    assert.notEqual(harness.sessionStorage.getItem(SESSION_CACHE_KEY), null);
+
+    harness.localStorage.setItem(MODE_KEY, disabledMode);
+    harness.dispatchStorage({
+      key: MODE_KEY,
+      newValue: disabledMode,
+      storageArea: harness.localStorage
+    });
+    assert.equal(harness.sessionStorage.getItem(SESSION_CACHE_KEY), null);
+
+    harness.localStorage.setItem(MODE_KEY, 'verified_indexeddb');
+    const result = harness.core.loadAppState();
+    const status = harness.core.getPhase3ReadStatus();
+    assert.equal(result.state.tasks[0].id, 'task-28');
+    assert.equal(status.indexedDbReadsTotal, 0);
+    assert.equal(status.lastFallbackReason, 'cache_not_ready');
+  });
+}
