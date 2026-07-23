@@ -349,17 +349,21 @@
 
   function installHooks() {
     if (prototype?.getItem && prototype?.setItem && prototype?.removeItem) {
-      if (!prototype.__taskPointsPhase3CodecOriginalGetItem) {
-        Object.defineProperties(prototype, {
-          __taskPointsPhase3CodecOriginalGetItem: { value: prototype.getItem, configurable: true },
-          __taskPointsPhase3CodecOriginalSetItem: { value: prototype.setItem, configurable: true },
-          __taskPointsPhase3CodecOriginalRemoveItem: { value: prototype.removeItem, configurable: true }
-        });
-        prototype.getItem = function taskPointsPhase3CodecGetItem(key) { return interceptedGet(this, key); };
-        prototype.setItem = function taskPointsPhase3CodecSetItem(key, value) { return interceptedSet(this, key, value); };
-        prototype.removeItem = function taskPointsPhase3CodecRemoveItem(key) { return interceptedRemove(this, key); };
+      try {
+        if (!prototype.__taskPointsPhase3CodecOriginalGetItem) {
+          Object.defineProperties(prototype, {
+            __taskPointsPhase3CodecOriginalGetItem: { value: prototype.getItem, configurable: true },
+            __taskPointsPhase3CodecOriginalSetItem: { value: prototype.setItem, configurable: true },
+            __taskPointsPhase3CodecOriginalRemoveItem: { value: prototype.removeItem, configurable: true }
+          });
+          prototype.getItem = function taskPointsPhase3CodecGetItem(key) { return interceptedGet(this, key); };
+          prototype.setItem = function taskPointsPhase3CodecSetItem(key, value) { return interceptedSet(this, key, value); };
+          prototype.removeItem = function taskPointsPhase3CodecRemoveItem(key) { return interceptedRemove(this, key); };
+        }
+        return true;
+      } catch (_) {
+        return false;
       }
-      return true;
     }
 
     if (storage.__taskPointsPhase3CodecOriginalGetItem) return true;
