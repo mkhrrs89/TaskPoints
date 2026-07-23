@@ -59,16 +59,18 @@ export default {
       '/phase2_dual_write.js',
       '/phase2_reset_hook.js',
       '/phase3_read_path.js',
+      '/phase3_session_codec.js',
       '/phase3_navigation_cache.js',
       '/phase3_status_cache_guard.js'
     ];
     const moduleResults = await Promise.allSettled(
       modulePaths.map((pathname) => env.ASSETS.fetch(new Request(new URL(pathname, request.url), { method: 'GET' })))
     );
-    const [dualWriteResult, resetHookResult, phase3Result, navigationCacheResult, statusGuardResult] = moduleResults;
+    const [dualWriteResult, resetHookResult, phase3Result, codecResult, navigationCacheResult, statusGuardResult] = moduleResults;
     const dualWriteResponse = dualWriteResult.status === 'fulfilled' ? dualWriteResult.value : null;
     const resetHookResponse = resetHookResult.status === 'fulfilled' ? resetHookResult.value : null;
     const phase3Response = phase3Result.status === 'fulfilled' ? phase3Result.value : null;
+    const codecResponse = codecResult.status === 'fulfilled' ? codecResult.value : null;
     const navigationCacheResponse = navigationCacheResult.status === 'fulfilled' ? navigationCacheResult.value : null;
     const statusGuardResponse = statusGuardResult.status === 'fulfilled' ? statusGuardResult.value : null;
 
@@ -102,17 +104,20 @@ export default {
       }
     }
 
+    let codecSource = '';
     let navigationCacheSource = '';
     let statusGuardSource = '';
-    if (phase3Source && navigationCacheResponse?.ok && statusGuardResponse?.ok) {
+    if (phase3Source && codecResponse?.ok && navigationCacheResponse?.ok && statusGuardResponse?.ok) {
       try {
-        [navigationCacheSource, statusGuardSource] = await Promise.all([
+        [codecSource, navigationCacheSource, statusGuardSource] = await Promise.all([
+          codecResponse.text(),
           navigationCacheResponse.text(),
           statusGuardResponse.text()
         ]);
       } catch (_) {
-        // The navigation cache and status guard form one optional enhancement.
-        // If either body cannot be read, preserve the reviewed Phase 3 path.
+        // The codec, navigation cache, and status guard form one optional bundle.
+        // If any body cannot be read, preserve the reviewed Phase 3 path.
+        codecSource = '';
         navigationCacheSource = '';
         statusGuardSource = '';
       }
@@ -128,7 +133,9 @@ export default {
 
     const sources = [coreSource, dualWriteSource, resetHookSource];
     if (phase3Source) sources.push(phase3Source);
-    if (navigationCacheSource && statusGuardSource) sources.push(navigationCacheSource, statusGuardSource);
+    if (codecSource && navigationCacheSource && statusGuardSource) {
+      sources.push(codecSource, navigationCacheSource, statusGuardSource);
+    }
     return new Response(`${sources.map((source) => `;${source}`).join('\n')}\n`, {
       status: 200,
       headers
