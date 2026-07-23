@@ -1,0 +1,65 @@
+name: Apply standings zero styling
+
+on:
+  push:
+    branches:
+      - codex/gray-zero-standings-record
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: codex/gray-zero-standings-record
+          fetch-depth: 0
+
+      - name: Gray zero wins, losses, and ties
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("standings.html")
+          text = path.read_text(encoding="utf-8")
+
+          css_anchor = """.standings-gold-col .sort-indicator{
+            color:#fb923c;
+          }
+          """
+          css_replacement = css_anchor + """
+          .standings-zero-value{
+            color:#6b7280;
+          }
+          """
+
+          replacements = {
+              css_anchor: css_replacement,
+              '<td>${wins}</td>': '<td class="${wins === 0 ? "standings-zero-value" : ""}">${wins}</td>',
+              '<td>${losses}</td>': '<td class="${losses === 0 ? "standings-zero-value" : ""}">${losses}</td>',
+              '<td>${ties}</td>': '<td class="${ties === 0 ? "standings-zero-value" : ""}">${ties}</td>',
+          }
+
+          for old, new in replacements.items():
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"Expected exactly one occurrence of {old!r}; found {count}")
+              text = text.replace(old, new, 1)
+
+          path.write_text(text, encoding="utf-8")
+          PY
+
+      - name: Commit clean final change
+        shell: bash
+        run: |
+          rm .github/workflows/apply-standings-zero-style.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add standings.html .github/workflows/apply-standings-zero-style.yml
+          git diff --cached --check
+          git commit -m "Gray zero records in standings"
+          git push origin HEAD:codex/gray-zero-standings-record
