@@ -134,7 +134,56 @@ export default {
     const sources = [coreSource, dualWriteSource, resetHookSource];
     if (phase3Source) sources.push(phase3Source);
     if (codecSource && navigationCacheSource && statusGuardSource) {
-      sources.push(codecSource, navigationCacheSource, statusGuardSource);
+      const atomicBundle = [
+        ';(function installTaskPointsPhase3AtomicNavigationBundle() {',
+        "  'use strict';",
+        "  const global = typeof window !== 'undefined' ? window : globalThis;",
+        '  const core = global.TaskPointsCore;',
+        '  const storage = global.sessionStorage;',
+        '  const prototype = global.Storage?.prototype;',
+        "  const names = ['getItem', 'setItem', 'removeItem',",
+        "    '__taskPointsPhase3CodecOriginalGetItem',",
+        "    '__taskPointsPhase3CodecOriginalSetItem',",
+        "    '__taskPointsPhase3CodecOriginalRemoveItem'];",
+        '  function snapshot(target) {',
+        '    if (!target) return null;',
+        '    const result = new Map();',
+        '    for (const name of names) {',
+        '      try { result.set(name, Object.getOwnPropertyDescriptor(target, name) || null); }',
+        '      catch (_) { result.set(name, null); }',
+        '    }',
+        '    return result;',
+        '  }',
+        '  function restore(target, saved) {',
+        '    if (!target || !saved) return;',
+        '    for (const [name, descriptor] of saved) {',
+        '      try {',
+        '        if (descriptor) Object.defineProperty(target, name, descriptor);',
+        '        else delete target[name];',
+        '      } catch (_) {}',
+        '    }',
+        '  }',
+        '  const prototypeSnapshot = snapshot(prototype);',
+        '  const storageSnapshot = snapshot(storage);',
+        '  let codecReady = false;',
+        '  try {',
+        codecSource,
+        '    codecReady = !!core?.__phase3SessionCodecInstalled;',
+        '  } catch (_) {',
+        '    codecReady = false;',
+        '  } finally {',
+        '    if (!codecReady) {',
+        '      restore(prototype, prototypeSnapshot);',
+        '      restore(storage, storageSnapshot);',
+        '      try { if (core) delete core.__phase3SessionCodecInstalled; } catch (_) {}',
+        '    }',
+        '  }',
+        '  if (!codecReady) return;',
+        navigationCacheSource,
+        statusGuardSource,
+        '})();'
+      ].join('\n');
+      sources.push(atomicBundle);
     }
     return new Response(`${sources.map((source) => `;${source}`).join('\n')}\n`, {
       status: 200,
