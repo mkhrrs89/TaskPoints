@@ -58,20 +58,26 @@ export default {
     const modulePaths = [
       '/phase2_dual_write.js',
       '/phase2_reset_hook.js',
-      '/phase3_read_path.js'
+      '/phase3_read_path.js',
+      '/phase3_session_codec.js',
+      '/phase3_navigation_cache.js',
+      '/phase3_status_cache_guard.js'
     ];
     const moduleResults = await Promise.allSettled(
       modulePaths.map((pathname) => env.ASSETS.fetch(new Request(new URL(pathname, request.url), { method: 'GET' })))
     );
-    const [dualWriteResult, resetHookResult, phase3Result] = moduleResults;
+    const [dualWriteResult, resetHookResult, phase3Result, codecResult, navigationCacheResult, statusGuardResult] = moduleResults;
     const dualWriteResponse = dualWriteResult.status === 'fulfilled' ? dualWriteResult.value : null;
     const resetHookResponse = resetHookResult.status === 'fulfilled' ? resetHookResult.value : null;
     const phase3Response = phase3Result.status === 'fulfilled' ? phase3Result.value : null;
+    const codecResponse = codecResult.status === 'fulfilled' ? codecResult.value : null;
+    const navigationCacheResponse = navigationCacheResult.status === 'fulfilled' ? navigationCacheResult.value : null;
+    const statusGuardResponse = statusGuardResult.status === 'fulfilled' ? statusGuardResult.value : null;
 
     // Phase 2 remains the production safety floor. If either required Phase 2
     // module is unavailable or its asset fetch rejects, return the untouched
-    // core rather than a partial hook. A missing/rejected Phase 3 module is
-    // optional and falls back to the complete Phase 2 augmentation below.
+    // core rather than a partial hook. Phase 3 modules are optional and degrade
+    // independently: the navigation bundle can never take down the read path.
     if (!dualWriteResponse?.ok || !resetHookResponse?.ok) return coreResponse;
 
     let dualWriteSource;
@@ -98,6 +104,25 @@ export default {
       }
     }
 
+    let codecSource = '';
+    let navigationCacheSource = '';
+    let statusGuardSource = '';
+    if (phase3Source && codecResponse?.ok && navigationCacheResponse?.ok && statusGuardResponse?.ok) {
+      try {
+        [codecSource, navigationCacheSource, statusGuardSource] = await Promise.all([
+          codecResponse.text(),
+          navigationCacheResponse.text(),
+          statusGuardResponse.text()
+        ]);
+      } catch (_) {
+        // The codec, navigation cache, and status guard form one optional bundle.
+        // If any body cannot be read, preserve the reviewed Phase 3 path.
+        codecSource = '';
+        navigationCacheSource = '';
+        statusGuardSource = '';
+      }
+    }
+
     const headers = new Headers(coreResponse.headers);
     headers.delete('content-length');
     headers.delete('etag');
@@ -108,6 +133,58 @@ export default {
 
     const sources = [coreSource, dualWriteSource, resetHookSource];
     if (phase3Source) sources.push(phase3Source);
+    if (codecSource && navigationCacheSource && statusGuardSource) {
+      const atomicBundle = [
+        ';(function installTaskPointsPhase3AtomicNavigationBundle() {',
+        "  'use strict';",
+        "  const global = typeof window !== 'undefined' ? window : globalThis;",
+        '  const core = global.TaskPointsCore;',
+        '  const storage = global.sessionStorage;',
+        '  const prototype = global.Storage?.prototype;',
+        "  const names = ['getItem', 'setItem', 'removeItem',",
+        "    '__taskPointsPhase3CodecOriginalGetItem',",
+        "    '__taskPointsPhase3CodecOriginalSetItem',",
+        "    '__taskPointsPhase3CodecOriginalRemoveItem'];",
+        '  function snapshot(target) {',
+        '    if (!target) return null;',
+        '    const result = new Map();',
+        '    for (const name of names) {',
+        '      try { result.set(name, Object.getOwnPropertyDescriptor(target, name) || null); }',
+        '      catch (_) { result.set(name, null); }',
+        '    }',
+        '    return result;',
+        '  }',
+        '  function restore(target, saved) {',
+        '    if (!target || !saved) return;',
+        '    for (const [name, descriptor] of saved) {',
+        '      try {',
+        '        if (descriptor) Object.defineProperty(target, name, descriptor);',
+        '        else delete target[name];',
+        '      } catch (_) {}',
+        '    }',
+        '  }',
+        '  const prototypeSnapshot = snapshot(prototype);',
+        '  const storageSnapshot = snapshot(storage);',
+        '  let codecReady = false;',
+        '  try {',
+        codecSource,
+        '    codecReady = !!core?.__phase3SessionCodecInstalled;',
+        '  } catch (_) {',
+        '    codecReady = false;',
+        '  } finally {',
+        '    if (!codecReady) {',
+        '      restore(prototype, prototypeSnapshot);',
+        '      restore(storage, storageSnapshot);',
+        '      try { if (core) delete core.__phase3SessionCodecInstalled; } catch (_) {}',
+        '    }',
+        '  }',
+        '  if (!codecReady) return;',
+        navigationCacheSource,
+        statusGuardSource,
+        '})();'
+      ].join('\n');
+      sources.push(atomicBundle);
+    }
     return new Response(`${sources.map((source) => `;${source}`).join('\n')}\n`, {
       status: 200,
       headers
