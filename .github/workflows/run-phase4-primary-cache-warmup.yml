@@ -21,6 +21,7 @@ jobs:
         run: |
           python .github/scripts/apply_phase4_primary_cache_warmup.py
           python .github/scripts/fix_phase4_warmup_test_wait.py
+          python .github/scripts/fix_phase4_optional_cache_counts.py
 
       - name: Validate focused cache warmup contracts
         shell: bash
@@ -61,10 +62,11 @@ jobs:
         run: |
           rm .github/scripts/apply_phase4_primary_cache_warmup.py
           rm .github/scripts/fix_phase4_warmup_test_wait.py
+          rm .github/scripts/fix_phase4_optional_cache_counts.py
           rm .github/workflows/run-phase4-primary-cache-warmup.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add phase3_session_codec.js phase4_storage_coordinator.js phase4_primary_read_path.js phase4_storage_status.html tests/phase4_primary_cache_warmup_contract.test.js .github/scripts/apply_phase4_primary_cache_warmup.py .github/scripts/fix_phase4_warmup_test_wait.py .github/workflows/run-phase4-primary-cache-warmup.yml
+          git add phase3_session_codec.js phase4_storage_coordinator.js phase4_primary_read_path.js phase4_storage_status.html tests/phase4_primary_cache_warmup_contract.test.js .github/scripts/apply_phase4_primary_cache_warmup.py .github/scripts/fix_phase4_warmup_test_wait.py .github/scripts/fix_phase4_optional_cache_counts.py .github/workflows/run-phase4-primary-cache-warmup.yml
           git diff --cached --check
           git commit -m "Restore and warm Phase 4 primary cache"
           git push origin HEAD:codex/phase-4-primary-cache-warmup
