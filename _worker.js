@@ -2,17 +2,18 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
+    const freshHeaders = (headers) => {
+      const next = new Headers(headers);
+      next.delete('if-none-match');
+      next.delete('if-modified-since');
+      next.delete('range');
+      return next;
+    };
+
     if (url.pathname === '/settings.html') {
-      // Always retrieve a fresh response body before rewriting. A cached 304
-      // has no body, so forwarding browser validators could prevent the
-      // in-app diagnostics links from appearing for returning Home Screen users.
-      const settingsHeaders = new Headers(request.headers);
-      settingsHeaders.delete('if-none-match');
-      settingsHeaders.delete('if-modified-since');
-      settingsHeaders.delete('range');
       const settingsRequest = new Request(request.url, {
         method: 'GET',
-        headers: settingsHeaders
+        headers: freshHeaders(request.headers)
       });
       const settingsResponse = await env.ASSETS.fetch(settingsRequest);
       if (!settingsResponse.ok) return settingsResponse;
@@ -31,7 +32,7 @@ export default {
         .on('section[aria-labelledby="shadowMigrationTitle"]', {
           element(element) {
             element.append(
-              '<div class="flex flex-wrap gap-2"><a href="dual_write_status.html" class="btn btn-teal btn-toolbar nav-btn">View Dual-Write Status</a><a href="phase3_read_status.html" class="btn btn-teal btn-toolbar nav-btn">View Phase 3 Read Status</a></div>',
+              '<div class="flex flex-wrap gap-2"><a href="dual_write_status.html" class="btn btn-teal btn-toolbar nav-btn">View Dual-Write Status</a><a href="phase3_read_status.html" class="btn btn-teal btn-toolbar nav-btn">View Phase 3 Read Status</a><a href="phase4_storage_status.html" class="btn btn-teal btn-toolbar nav-btn">View Phase 4 Storage</a></div>',
               { html: true }
             );
           }
@@ -41,16 +42,9 @@ export default {
 
     if (url.pathname !== '/scoring_core.js') return env.ASSETS.fetch(request);
 
-    // Do not forward browser cache validators to the static asset binding. A
-    // 304 has no response body to augment, so always retrieve the current core
-    // asset and return a fresh 200 response containing the migration modules.
-    const assetHeaders = new Headers(request.headers);
-    assetHeaders.delete('if-none-match');
-    assetHeaders.delete('if-modified-since');
-    assetHeaders.delete('range');
     const coreRequest = new Request(request.url, {
       method: 'GET',
-      headers: assetHeaders
+      headers: freshHeaders(request.headers)
     });
     const coreResponse = await env.ASSETS.fetch(coreRequest);
     if (!coreResponse.ok) return coreResponse;
@@ -61,23 +55,46 @@ export default {
       '/phase3_read_path.js',
       '/phase3_session_codec.js',
       '/phase3_navigation_cache.js',
-      '/phase3_status_cache_guard.js'
+      '/phase3_status_cache_guard.js',
+      '/phase4_storage_coordinator.js',
+      '/phase4_primary_read_path.js',
+      '/phase4_cache_guard.js',
+      '/phase4_diagnostics.js'
     ];
     const moduleResults = await Promise.allSettled(
-      modulePaths.map((pathname) => env.ASSETS.fetch(new Request(new URL(pathname, request.url), { method: 'GET' })))
+      modulePaths.map((pathname) => env.ASSETS.fetch(new Request(new URL(pathname, request.url), {
+        method: 'GET',
+        headers: freshHeaders(request.headers)
+      })))
     );
-    const [dualWriteResult, resetHookResult, phase3Result, codecResult, navigationCacheResult, statusGuardResult] = moduleResults;
-    const dualWriteResponse = dualWriteResult.status === 'fulfilled' ? dualWriteResult.value : null;
-    const resetHookResponse = resetHookResult.status === 'fulfilled' ? resetHookResult.value : null;
-    const phase3Response = phase3Result.status === 'fulfilled' ? phase3Result.value : null;
-    const codecResponse = codecResult.status === 'fulfilled' ? codecResult.value : null;
-    const navigationCacheResponse = navigationCacheResult.status === 'fulfilled' ? navigationCacheResult.value : null;
-    const statusGuardResponse = statusGuardResult.status === 'fulfilled' ? statusGuardResult.value : null;
+    const [
+      dualWriteResult,
+      resetHookResult,
+      phase3Result,
+      codecResult,
+      navigationCacheResult,
+      statusGuardResult,
+      phase4WriteResult,
+      phase4ReadResult,
+      phase4CacheResult,
+      phase4DiagnosticsResult
+    ] = moduleResults;
 
-    // Phase 2 remains the production safety floor. If either required Phase 2
-    // module is unavailable or its asset fetch rejects, return the untouched
-    // core rather than a partial hook. Phase 3 modules are optional and degrade
-    // independently: the navigation bundle can never take down the read path.
+    const responseFrom = (result) => result?.status === 'fulfilled' ? result.value : null;
+    const dualWriteResponse = responseFrom(dualWriteResult);
+    const resetHookResponse = responseFrom(resetHookResult);
+    const phase3Response = responseFrom(phase3Result);
+    const codecResponse = responseFrom(codecResult);
+    const navigationCacheResponse = responseFrom(navigationCacheResult);
+    const statusGuardResponse = responseFrom(statusGuardResult);
+    const phase4WriteResponse = responseFrom(phase4WriteResult);
+    const phase4ReadResponse = responseFrom(phase4ReadResult);
+    const phase4CacheResponse = responseFrom(phase4CacheResult);
+    const phase4DiagnosticsResponse = responseFrom(phase4DiagnosticsResult);
+
+    // Phase 2 remains the required safety floor. A partial Phase 2 install is
+    // never served. Later phases are optional and fail back to the last complete
+    // reviewed bundle.
     if (!dualWriteResponse?.ok || !resetHookResponse?.ok) return coreResponse;
 
     let dualWriteSource;
@@ -88,20 +105,14 @@ export default {
         resetHookResponse.text()
       ]);
     } catch (_) {
-      // A required Phase 2 module whose body cannot be read is equivalent to a
-      // missing required module. The untouched core response is still unread.
       return coreResponse;
     }
 
     const coreSource = await coreResponse.text();
     let phase3Source = '';
     if (phase3Response?.ok) {
-      try {
-        phase3Source = await phase3Response.text();
-      } catch (_) {
-        // Phase 3 is optional. A body-read failure must preserve complete Phase 2.
-        phase3Source = '';
-      }
+      try { phase3Source = await phase3Response.text(); }
+      catch (_) { phase3Source = ''; }
     }
 
     let codecSource = '';
@@ -115,11 +126,34 @@ export default {
           statusGuardResponse.text()
         ]);
       } catch (_) {
-        // The codec, navigation cache, and status guard form one optional bundle.
-        // If any body cannot be read, preserve the reviewed Phase 3 path.
         codecSource = '';
         navigationCacheSource = '';
         statusGuardSource = '';
+      }
+    }
+
+    let phase4WriteSource = '';
+    let phase4ReadSource = '';
+    let phase4CacheSource = '';
+    let phase4DiagnosticsSource = '';
+    const completePhase3Navigation = Boolean(phase3Source && codecSource && navigationCacheSource && statusGuardSource);
+    if (completePhase3Navigation
+      && phase4WriteResponse?.ok
+      && phase4ReadResponse?.ok
+      && phase4CacheResponse?.ok
+      && phase4DiagnosticsResponse?.ok) {
+      try {
+        [phase4WriteSource, phase4ReadSource, phase4CacheSource, phase4DiagnosticsSource] = await Promise.all([
+          phase4WriteResponse.text(),
+          phase4ReadResponse.text(),
+          phase4CacheResponse.text(),
+          phase4DiagnosticsResponse.text()
+        ]);
+      } catch (_) {
+        phase4WriteSource = '';
+        phase4ReadSource = '';
+        phase4CacheSource = '';
+        phase4DiagnosticsSource = '';
       }
     }
 
@@ -129,12 +163,14 @@ export default {
     headers.delete('last-modified');
     headers.set('cache-control', 'no-cache');
     headers.set('content-type', 'application/javascript; charset=utf-8');
-    headers.set('x-taskpoints-phase', phase3Source ? '3-read-path' : '2-dual-write');
+
+    const completePhase4 = Boolean(phase4WriteSource && phase4ReadSource && phase4CacheSource && phase4DiagnosticsSource);
+    headers.set('x-taskpoints-phase', completePhase4 ? '4-indexeddb-primary-capable' : (phase3Source ? '3-read-path' : '2-dual-write'));
 
     const sources = [coreSource, dualWriteSource, resetHookSource];
     if (phase3Source) sources.push(phase3Source);
-    if (codecSource && navigationCacheSource && statusGuardSource) {
-      const atomicBundle = [
+    if (completePhase3Navigation) {
+      const atomicNavigationBundle = [
         ';(function installTaskPointsPhase3AtomicNavigationBundle() {',
         "  'use strict';",
         "  const global = typeof window !== 'undefined' ? window : globalThis;",
@@ -183,8 +219,30 @@ export default {
         statusGuardSource,
         '})();'
       ].join('\n');
-      sources.push(atomicBundle);
+      sources.push(atomicNavigationBundle);
     }
+
+    if (completePhase4) {
+      const atomicPhase4Bundle = [
+        ';(function installTaskPointsPhase4AtomicBundle() {',
+        "  'use strict';",
+        "  const global = typeof window !== 'undefined' ? window : globalThis;",
+        '  const core = global.TaskPointsCore;',
+        '  if (!core) return;',
+        '  try {',
+        phase4WriteSource,
+        phase4ReadSource,
+        phase4CacheSource,
+        phase4DiagnosticsSource,
+        '  } catch (error) {',
+        "    try { core.setPhase4StorageMode?.('off'); } catch (_) {}",
+        "    console.warn('TaskPoints Phase 4 bundle failed to install; current Phase 3 behavior remains active.', error);",
+        '  }',
+        '})();'
+      ].join('\n');
+      sources.push(atomicPhase4Bundle);
+    }
+
     return new Response(`${sources.map((source) => `;${source}`).join('\n')}\n`, {
       status: 200,
       headers
