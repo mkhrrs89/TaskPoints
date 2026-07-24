@@ -18,7 +18,7 @@ jobs:
       - name: Materialize implementation payload
         shell: bash
         run: |
-          sed -n "/^PAYLOAD$/,/^PAYLOAD$/p" .github/workflows/apply-phase4-dark-storage.yml | sed '1d;$d' > /tmp/phase4_payload.b64
+          awk '/^PAYLOAD$/{marker++; next} marker==1{print} marker==2{exit}' .github/workflows/apply-phase4-dark-storage.yml > /tmp/phase4_payload.b64
           base64 -d /tmp/phase4_payload.b64 > /tmp/phase4_payload.tar.gz
           tar -xzf /tmp/phase4_payload.tar.gz -C .
       - name: Run Phase 4 contracts
