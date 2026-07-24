@@ -42,40 +42,60 @@
     const summary = document.getElementById('summary');
     const raw = document.getElementById('raw');
     const fields = [
-      ['Configured mode','configuredMode'],['Effective source','effectiveSource'],['Latest queued sequence','latestQueuedSequence'],['Latest passed sequence','latestPassedSequence'],['Pending writes','pendingWrites'],['Last verified','lastVerifiedAt'],['Last fallback','lastFallbackAt'],['Fallback reason','lastFallbackReason'],['Verification failures','verificationFailuresTotal'],['Deferred writes','deferredWritesTotal'],['Cache ready','cacheReadyThisPage'],['Mirror matches cache','currentMirrorMatchesCache'],['Reset tombstone','resetTombstone']
+      ['Configured mode','configuredMode'],['Effective source','effectiveSource'],['Latest queued sequence','latestQueuedSequence'],['Latest passed sequence','latestPassedSequence'],['Pending writes','pendingWrites'],['Last verified','lastVerifiedAt'],['Last fallback','lastFallbackAt'],['Fallback reason','lastFallbackReason'],['Verification failures','verificationFailuresTotal'],['Deferred writes','deferredWritesTotal'],['Cache ready','cacheReadyThisPage'],['Mirror matches cache','currentMirrorMatchesCache'],['Session cache present','sessionCachePresent'],['Restored from session','cacheRestoredFromSession'],['Cache warmup pending','cacheWarmupPending'],['Reset tombstone','resetTombstone']
     ];
-    function render(){
+    function getStatus(){
       const core = window.TaskPointsCore;
-      const status = core?.getPhase4StorageStatus?.() || { configuredMode:'off', effectiveSource:'localStorage', unavailable:true };
+      return core?.getPhase4StorageStatus?.() || { configuredMode:'off', effectiveSource:'localStorage', unavailable:true };
+    }
+    function render(){
+      const status = getStatus();
       summary.innerHTML = fields.map(([label,key]) => `<div class="status-row"><span class="opacity-70">${label}</span><span class="status-value">${status[key] ?? '—'}</span></div>`).join('');
       raw.textContent = JSON.stringify(status,null,2);
+      return status;
+    }
+    async function recoverStatus(reason){
+      const core = window.TaskPointsCore;
+      const status = getStatus();
+      const primaryNeedsWarmup = status.configuredMode === 'indexeddb_primary' && (
+        status.cacheReadyThisPage !== true
+        || status.currentMirrorMatchesCache !== true
+        || !['indexedDB_ready','indexedDB'].includes(status.effectiveSource)
+      );
+      const writeNeedsRecovery = status.configuredMode !== 'off' && (
+        status.lastFallbackReason
+        || Number(status.latestQueuedSequence || 0) > Number(status.latestPassedSequence || 0)
+      );
+      if (primaryNeedsWarmup && typeof core?.warmPhase4PrimaryCache === 'function') {
+        await core.warmPhase4PrimaryCache(reason || 'manual_status_refresh');
+      } else if (writeNeedsRecovery) {
+        core?.resumePhase4DeferredWrite?.();
+        core?.queuePhase4PrimaryWrite?.({ reason: reason || 'manual_status_refresh' });
+        await core?.flushPhase4PrimaryWrites?.();
+      }
+      return render();
     }
     document.getElementById('refresh').addEventListener('click', async (event) => {
       const button = event.currentTarget;
       const originalText = button.textContent;
       button.disabled = true;
       button.textContent = 'Checking…';
-      try {
-        const core = window.TaskPointsCore;
-        const status = core?.getPhase4StorageStatus?.() || {};
-        const needsRecovery = status.configuredMode !== 'off' && (
-status.lastFallbackReason
-|| Number(status.latestQueuedSequence || 0) > Number(status.latestPassedSequence || 0)
-        );
-        if (needsRecovery) {
-core?.resumePhase4DeferredWrite?.();
-core?.queuePhase4PrimaryWrite?.({ reason: 'manual_status_refresh' });
-await core?.flushPhase4PrimaryWrites?.();
-        }
-      } finally {
-        render();
-        button.disabled = false;
-        button.textContent = originalText;
-      }
+      try { await recoverStatus('manual_status_refresh'); }
+      finally { button.disabled = false; button.textContent = originalText; }
     });
-    document.querySelectorAll('[data-mode]').forEach((button) => button.addEventListener('click', () => {
-      window.TaskPointsCore?.setPhase4StorageMode?.(button.dataset.mode);
-      render();
+    document.querySelectorAll('[data-mode]').forEach((button) => button.addEventListener('click', async () => {
+      const buttons = [...document.querySelectorAll('[data-mode]')];
+      buttons.forEach((item) => { item.disabled = true; });
+      const originalText = button.textContent;
+      button.textContent = 'Switching…';
+      try {
+        window.TaskPointsCore?.setPhase4StorageMode?.(button.dataset.mode);
+        if (button.dataset.mode === 'indexeddb_primary') await recoverStatus('indexeddb_primary_mode_enabled');
+        else render();
+      } finally {
+        button.textContent = originalText;
+        buttons.forEach((item) => { item.disabled = false; });
+      }
     }));
     window.addEventListener('load', render);
   </script>
