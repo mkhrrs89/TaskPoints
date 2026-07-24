@@ -42,7 +42,7 @@
     const summary = document.getElementById('summary');
     const raw = document.getElementById('raw');
     const fields = [
-      ['Configured mode','configuredMode'],['Effective source','effectiveSource'],['Latest queued sequence','latestQueuedSequence'],['Latest passed sequence','latestPassedSequence'],['Pending writes','pendingWrites'],['Last verified','lastVerifiedAt'],['Last fallback','lastFallbackAt'],['Fallback reason','lastFallbackReason'],['Cache ready','cacheReadyThisPage'],['Mirror matches cache','currentMirrorMatchesCache'],['Reset tombstone','resetTombstone']
+      ['Configured mode','configuredMode'],['Effective source','effectiveSource'],['Latest queued sequence','latestQueuedSequence'],['Latest passed sequence','latestPassedSequence'],['Pending writes','pendingWrites'],['Last verified','lastVerifiedAt'],['Last fallback','lastFallbackAt'],['Fallback reason','lastFallbackReason'],['Verification failures','verificationFailuresTotal'],['Deferred writes','deferredWritesTotal'],['Cache ready','cacheReadyThisPage'],['Mirror matches cache','currentMirrorMatchesCache'],['Reset tombstone','resetTombstone']
     ];
     function render(){
       const core = window.TaskPointsCore;
