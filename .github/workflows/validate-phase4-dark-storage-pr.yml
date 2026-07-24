@@ -34,8 +34,58 @@ jobs:
 
           path = Path('phase4_storage_coordinator.js')
           source = path.read_text(encoding='utf-8')
-          source = source.replace('this === global.localStorage && ', '')
-          path.write_text(source, encoding='utf-8')
+          start = source.index('  function installStorageHooks() {')
+          end = source.index('\n\n  core.PHASE4_STORAGE_MODE_KEY', start)
+          replacement = '''  function installStorageHooks() {
+            const storage = global.localStorage;
+            if (!storage) return;
+
+            try {
+              if (!storage.__taskPointsPhase4InstanceHookInstalled && typeof storage.setItem === 'function') {
+                const originalSet = storage.setItem.bind(storage);
+                const originalRemove = typeof storage.removeItem === 'function' ? storage.removeItem.bind(storage) : null;
+                const wrappedSet = function phase4SetItem(key, value) {
+                  const result = originalSet(key, value);
+                  if (String(key) === core.STORAGE_KEY && getMode() !== 'off') queueWrite();
+                  return result;
+                };
+                const wrappedRemove = originalRemove ? function phase4RemoveItem(key) {
+                  const result = originalRemove(key);
+                  if (String(key) === core.STORAGE_KEY && getMode() !== 'off') queueWrite();
+                  return result;
+                } : null;
+                storage.setItem = wrappedSet;
+                if (wrappedRemove) storage.removeItem = wrappedRemove;
+                if (storage.setItem === wrappedSet) {
+                  Object.defineProperty(storage, '__taskPointsPhase4InstanceHookInstalled', { value: true, configurable: true });
+                  return;
+                }
+              }
+            } catch (_) {}
+
+            const StorageCtor = global.Storage;
+            if (!StorageCtor?.prototype?.setItem) return;
+            const prototype = StorageCtor.prototype;
+            if (!prototype.__taskPointsPhase4OriginalSetItem) {
+              const originalSet = prototype.setItem;
+              Object.defineProperty(prototype, '__taskPointsPhase4OriginalSetItem', { value: originalSet, configurable: true });
+              prototype.setItem = function phase4SetItem(key, value) {
+                const result = originalSet.call(this, key, value);
+                if (this === global.localStorage && String(key) === core.STORAGE_KEY && getMode() !== 'off') queueWrite();
+                return result;
+              };
+            }
+            if (prototype.removeItem && !prototype.__taskPointsPhase4OriginalRemoveItem) {
+              const originalRemove = prototype.removeItem;
+              Object.defineProperty(prototype, '__taskPointsPhase4OriginalRemoveItem', { value: originalRemove, configurable: true });
+              prototype.removeItem = function phase4RemoveItem(key) {
+                const result = originalRemove.call(this, key);
+                if (this === global.localStorage && String(key) === core.STORAGE_KEY && getMode() !== 'off') queueWrite();
+                return result;
+              };
+            }
+          }'''
+          path.write_text(source[:start] + replacement + source[end:], encoding='utf-8')
           PY
       - name: Run Phase 4 contracts
         id: contracts
