@@ -45,12 +45,23 @@
       indexedDbReadsTotal: Number(previous.indexedDbReadsTotal) || 0,
       fallbackReadsTotal: Number(previous.fallbackReadsTotal) || 0,
       verificationFailuresTotal: Number(previous.verificationFailuresTotal) || 0,
+      deferredWritesTotal: Number(previous.deferredWritesTotal) || 0,
       lastFallbackReason: previous.lastFallbackReason || null,
       resetTombstone: previous.resetTombstone === true,
       ...previous,
       ...patch,
       pendingWrites: patch.pendingWrites == null ? pendingCount : patch.pendingWrites
     };
+    next.latestPassedSequence = Math.max(
+      Number(previous.latestPassedSequence) || 0,
+      Number(next.latestPassedSequence) || 0
+    );
+    next.latestQueuedSequence = Math.max(
+      Number(previous.latestQueuedSequence) || 0,
+      Number(previous.latestPassedSequence) || 0,
+      Number(next.latestQueuedSequence) || 0,
+      Number(next.latestPassedSequence) || 0
+    );
     try { global.localStorage?.setItem?.(DIAGNOSTICS_KEY, JSON.stringify(next)); } catch (_) {}
     return next;
   }
@@ -217,6 +228,23 @@
     try { return Number(core.readPendingHabitDeltas?.().length) || 0; } catch (_) { return 1; }
   }
 
+  function nextSequence() {
+    const diagnostics = readDiagnostics();
+    sequence = Math.max(
+      sequence,
+      Number(diagnostics.latestQueuedSequence) || 0,
+      Number(diagnostics.latestPassedSequence) || 0
+    ) + 1;
+    return sequence;
+  }
+
+  function queueAfterJournalCleared() {
+    if (getMode() === 'off') return;
+    if (journalCount() > 0) return;
+    if (safeGet(core.STORAGE_KEY) === null) return;
+    queueWrite({ reason: 'habit_journal_cleared' });
+  }
+
   async function performWrite(options = {}) {
     const indexedDb = options.indexedDB || global.indexedDB;
     const writeSequence = Number(options.sequence) || 0;
@@ -226,11 +254,13 @@
     const pendingJournalCount = journalCount();
     if (pendingJournalCount > 0) {
       clearCaches();
+      const previous = readDiagnostics();
       return writeDiagnostics({
         effectiveSource: 'localStorage',
         latestQueuedSequence: writeSequence,
         lastFallbackAt: nowIso(),
         lastFallbackReason: 'pending_habit_journal',
+        deferredWritesTotal: (Number(previous.deferredWritesTotal) || 0) + 1,
         resetTombstone: false
       });
     }
@@ -305,13 +335,20 @@
     } catch (error) {
       clearCaches();
       const previous = readDiagnostics();
+      const reason = String(error?.message || error || 'phase4_write_failed');
+      const deferred = new Set([
+        'pending_habit_journal',
+        'dual_write_pending',
+        'mirror_changed_during_verification'
+      ]).has(reason);
       return writeDiagnostics({
         configuredMode: getMode(),
         effectiveSource: 'localStorage',
         latestQueuedSequence: writeSequence,
         lastFallbackAt: nowIso(),
-        lastFallbackReason: String(error?.message || error || 'phase4_write_failed'),
-        verificationFailuresTotal: (Number(previous.verificationFailuresTotal) || 0) + 1,
+        lastFallbackReason: reason,
+        verificationFailuresTotal: (Number(previous.verificationFailuresTotal) || 0) + (deferred ? 0 : 1),
+        deferredWritesTotal: (Number(previous.deferredWritesTotal) || 0) + (deferred ? 1 : 0),
         resetTombstone: false
       });
     } finally { db?.close?.(); }
@@ -319,7 +356,7 @@
 
   function queueWrite(options = {}) {
     if (getMode() === 'off' && options.force !== true) return Promise.resolve({ status: 'off' });
-    const writeSequence = ++sequence;
+    const writeSequence = nextSequence();
     pendingCount += 1;
     writeDiagnostics({ latestQueuedSequence: writeSequence, pendingWrites: pendingCount });
     const operation = queueTail
@@ -350,6 +387,7 @@
       indexedDbReadsTotal: Number(diagnostics.indexedDbReadsTotal) || 0,
       fallbackReadsTotal: Number(diagnostics.fallbackReadsTotal) || 0,
       verificationFailuresTotal: Number(diagnostics.verificationFailuresTotal) || 0,
+      deferredWritesTotal: Number(diagnostics.deferredWritesTotal) || 0,
       countsMatch: diagnostics.countsMatch === true,
       hashesMatch: diagnostics.hashesMatch === true,
       canonicalMatch: diagnostics.canonicalMatch === true,
@@ -370,12 +408,16 @@
       const originalRemove = typeof storage.removeItem === 'function' ? storage.removeItem.bind(storage) : null;
       const wrappedSet = function phase4SetItem(key, value) {
         const result = originalSet(key, value);
-        if (String(key) === core.STORAGE_KEY && getMode() !== 'off') queueWrite();
+        const normalizedKey = String(key);
+        if (normalizedKey === core.STORAGE_KEY && getMode() !== 'off') queueWrite();
+        else if (normalizedKey === core.PENDING_HABIT_DELTAS_KEY) queueAfterJournalCleared();
         return result;
       };
       const wrappedRemove = originalRemove ? function phase4RemoveItem(key) {
         const result = originalRemove(key);
-        if (String(key) === core.STORAGE_KEY && getMode() !== 'off') queueWrite();
+        const normalizedKey = String(key);
+        if (normalizedKey === core.STORAGE_KEY && getMode() !== 'off') queueWrite();
+        else if (normalizedKey === core.PENDING_HABIT_DELTAS_KEY) queueAfterJournalCleared();
         return result;
       } : null;
       storage.setItem = wrappedSet;
@@ -395,7 +437,11 @@
     Object.defineProperty(prototype, '__taskPointsPhase4OriginalSetItem', { value: originalSet, configurable: true });
     prototype.setItem = function phase4SetItem(key, value) {
       const result = originalSet.call(this, key, value);
-      if (this === global.localStorage && String(key) === core.STORAGE_KEY && getMode() !== 'off') queueWrite();
+      if (this === global.localStorage) {
+        const normalizedKey = String(key);
+        if (normalizedKey === core.STORAGE_KEY && getMode() !== 'off') queueWrite();
+        else if (normalizedKey === core.PENDING_HABIT_DELTAS_KEY) queueAfterJournalCleared();
+      }
       return result;
     };
   }
@@ -404,7 +450,11 @@
     Object.defineProperty(prototype, '__taskPointsPhase4OriginalRemoveItem', { value: originalRemove, configurable: true });
     prototype.removeItem = function phase4RemoveItem(key) {
       const result = originalRemove.call(this, key);
-      if (this === global.localStorage && String(key) === core.STORAGE_KEY && getMode() !== 'off') queueWrite();
+      if (this === global.localStorage) {
+        const normalizedKey = String(key);
+        if (normalizedKey === core.STORAGE_KEY && getMode() !== 'off') queueWrite();
+        else if (normalizedKey === core.PENDING_HABIT_DELTAS_KEY) queueAfterJournalCleared();
+      }
       return result;
     };
   }

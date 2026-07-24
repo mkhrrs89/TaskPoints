@@ -8,6 +8,7 @@ const MODULE_PATH = path.join(__dirname, '..', 'phase4_storage_coordinator.js');
 const STORAGE_KEY = 'taskpoints_v1';
 const JOURNAL_KEY = 'taskpoints_pending_habit_deltas_v1';
 const MODE_KEY = 'taskpoints_phase4_storage_mode_v1';
+const DIAGNOSTICS_KEY = 'taskpoints_phase4_diagnostics_v1';
 const SHADOW_DB = 'taskpoints_shadow_state_v1';
 const ARRAY_STORES = ['completions', 'matchups', 'gameHistory', 'seasonHistory', 'tasks', 'habits', 'players'];
 
@@ -259,11 +260,12 @@ async function getRow(db, storeName, key) {
   });
 }
 
-async function install({ mode, journal = [], indexedDB = createFakeIndexedDb() } = {}) {
+async function install({ mode, journal = [], diagnostics = null, indexedDB = createFakeIndexedDb() } = {}) {
   const source = readPlannedModule();
   const localStorage = new FakeStorage({
     ...(mode == null ? {} : { [MODE_KEY]: mode }),
-    ...(journal.length ? { [JOURNAL_KEY]: JSON.stringify(journal) } : {})
+    ...(journal.length ? { [JOURNAL_KEY]: JSON.stringify(journal) } : {}),
+    ...(diagnostics ? { [DIAGNOSTICS_KEY]: JSON.stringify(diagnostics) } : {})
   });
   await seedShadow(indexedDB);
   let phase3ClearCalls = 0;
@@ -470,4 +472,37 @@ test('indexeddb_primary mode retains a complete localStorage rollback mirror', a
   await harness.core.flushPhase4PrimaryWrites();
   assert.equal(harness.localStorage.getItem(STORAGE_KEY), raw);
   assert.deepEqual(JSON.parse(harness.localStorage.getItem(STORAGE_KEY)), state);
+});
+
+
+test('write sequences continue above persisted diagnostics after a page reload', async () => {
+  const harness = await install({
+    mode: 'verify_primary_writes',
+    diagnostics: { latestQueuedSequence: 7, latestPassedSequence: 7 }
+  });
+  harness.localStorage.setItem(STORAGE_KEY, JSON.stringify(fixture(14)));
+  await harness.core.flushPhase4PrimaryWrites();
+  const status = harness.core.getPhase4StorageStatus();
+  assert.equal(status.latestQueuedSequence > 7, true, JSON.stringify(status));
+  assert.equal(status.latestPassedSequence, status.latestQueuedSequence);
+});
+
+test('clearing a pending habit journal automatically retries without adding a verification failure', async () => {
+  const harness = await install({
+    mode: 'verify_primary_writes',
+    journal: [{ id: 'habit:h1:2026-07-24', habitId: 'h1', dayKey: '2026-07-24', source: 'habit' }]
+  });
+  harness.localStorage.setItem(STORAGE_KEY, JSON.stringify(fixture(15)));
+  await harness.core.flushPhase4PrimaryWrites();
+  const deferred = harness.core.getPhase4StorageStatus();
+  assert.equal(deferred.lastFallbackReason, 'pending_habit_journal');
+  const failuresBefore = deferred.verificationFailuresTotal;
+
+  harness.localStorage.setItem(JOURNAL_KEY, '[]');
+  await harness.core.flushPhase4PrimaryWrites();
+  const recovered = harness.core.getPhase4StorageStatus();
+  assert.equal(recovered.latestQueuedSequence, recovered.latestPassedSequence, JSON.stringify(recovered));
+  assert.equal(recovered.lastFallbackReason, null);
+  assert.equal(recovered.verificationFailuresTotal, failuresBefore);
+  assert.equal(recovered.deferredWritesTotal > 0, true);
 });
