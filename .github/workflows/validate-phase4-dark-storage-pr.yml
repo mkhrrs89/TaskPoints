@@ -21,6 +21,22 @@ jobs:
           base64 -d .github/phase4_payload.b64 > /tmp/phase4_payload.tar.gz
           tar -xzf /tmp/phase4_payload.tar.gz -C .
       - name: Run Phase 4 contracts
-        run: node --test tests/phase4_storage_contract.test.js tests/phase4_read_contract.test.js tests/phase4_worker_contract.test.js
+        id: contracts
+        shell: bash
+        run: |
+          set +e
+          node --test tests/phase4_storage_contract.test.js tests/phase4_read_contract.test.js tests/phase4_worker_contract.test.js > phase4-contract.log 2>&1
+          code=$?
+          cat phase4-contract.log
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Upload contract log
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase4-contract-log
+          path: phase4-contract.log
+      - name: Require Phase 4 contracts
+        if: steps.contracts.outputs.exit_code != '0'
+        run: exit 1
       - name: Run full suite
         run: npm test
