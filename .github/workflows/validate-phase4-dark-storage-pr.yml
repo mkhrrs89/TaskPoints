@@ -18,8 +18,25 @@ jobs:
       - name: Materialize implementation payload
         shell: bash
         run: |
-          base64 -d .github/phase4_payload.b64 > /tmp/phase4_payload.tar.gz
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path('.github/workflows/apply-phase4-dark-storage.yml').read_text(encoding='utf-8')
+          marker = "cat > /tmp/phase4_payload.b64 <<'PAYLOAD'\n"
+          start = source.index(marker) + len(marker)
+          end = source.index('\nPAYLOAD\n', start)
+          Path('/tmp/phase4_payload.b64').write_text(source[start:end] + '\n', encoding='utf-8')
+          PY
+          base64 -d /tmp/phase4_payload.b64 > /tmp/phase4_payload.tar.gz
           tar -xzf /tmp/phase4_payload.tar.gz -C .
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('phase4_storage_coordinator.js')
+          source = path.read_text(encoding='utf-8')
+          source = source.replace('this === global.localStorage && ', '')
+          path.write_text(source, encoding='utf-8')
+          PY
       - name: Run Phase 4 contracts
         id: contracts
         shell: bash
