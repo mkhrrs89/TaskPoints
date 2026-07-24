@@ -20,13 +20,18 @@ jobs:
       - name: Apply primary cache warmup fix
         run: python .github/scripts/apply_phase4_primary_cache_warmup.py
 
-      - name: Validate Phase 4 primary cache warmup
+      - name: Validate focused cache warmup contracts
         shell: bash
         run: |
           node --check phase3_session_codec.js
           node --check phase4_storage_coordinator.js
           node --check phase4_primary_read_path.js
-          node --test tests/phase4_storage_contract.test.js tests/phase4_read_contract.test.js tests/phase4_worker_contract.test.js tests/phase4_journal_recovery_contract.test.js tests/phase4_status_recovery_contract.test.js tests/phase4_primary_cache_warmup_contract.test.js
+          node --test tests/phase4_primary_cache_warmup_contract.test.js
+
+      - name: Validate complete Phase 4 and repository suites
+        shell: bash
+        run: |
+          node --test tests/phase4_storage_contract.test.js tests/phase4_read_contract.test.js tests/phase4_worker_contract.test.js tests/phase4_journal_recovery_contract.test.js tests/phase4_status_recovery_contract.test.js
           npm test
 
       - name: Commit clean fix
