@@ -104,6 +104,10 @@ th.standings-gold-col{
   color:#fb923c;
 }
 
+.standings-zero-value{
+  color:#6b7280;
+}
+
 .standingsScopeTabs{
   display:flex;
   align-items:center;
@@ -787,9 +791,9 @@ const goldDisplay = formatOneDecimalNumber(getGoldCount(p));
 
         tr.innerHTML = `
           <td class="pr-4">${escapeHtml(p.name || "—")}</td>
-<td>${wins}</td>
-<td>${losses}</td>
-<td>${ties}</td>
+<td class="${wins === 0 ? "standings-zero-value" : ""}">${wins}</td>
+<td class="${losses === 0 ? "standings-zero-value" : ""}">${losses}</td>
+<td class="${ties === 0 ? "standings-zero-value" : ""}">${ties}</td>
 <td>${matchups}</td>
           <td>${winPctDisplay}</td>
           <td>${movDisplay}</td>
