@@ -50,7 +50,29 @@
       summary.innerHTML = fields.map(([label,key]) => `<div class="status-row"><span class="opacity-70">${label}</span><span class="status-value">${status[key] ?? '—'}</span></div>`).join('');
       raw.textContent = JSON.stringify(status,null,2);
     }
-    document.getElementById('refresh').addEventListener('click', render);
+    document.getElementById('refresh').addEventListener('click', async (event) => {
+      const button = event.currentTarget;
+      const originalText = button.textContent;
+      button.disabled = true;
+      button.textContent = 'Checking…';
+      try {
+        const core = window.TaskPointsCore;
+        const status = core?.getPhase4StorageStatus?.() || {};
+        const needsRecovery = status.configuredMode !== 'off' && (
+status.lastFallbackReason
+|| Number(status.latestQueuedSequence || 0) > Number(status.latestPassedSequence || 0)
+        );
+        if (needsRecovery) {
+core?.resumePhase4DeferredWrite?.();
+core?.queuePhase4PrimaryWrite?.({ reason: 'manual_status_refresh' });
+await core?.flushPhase4PrimaryWrites?.();
+        }
+      } finally {
+        render();
+        button.disabled = false;
+        button.textContent = originalText;
+      }
+    });
     document.querySelectorAll('[data-mode]').forEach((button) => button.addEventListener('click', () => {
       window.TaskPointsCore?.setPhase4StorageMode?.(button.dataset.mode);
       render();
