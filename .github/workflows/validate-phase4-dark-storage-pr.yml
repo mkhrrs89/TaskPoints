@@ -86,6 +86,14 @@ jobs:
             }
           }'''
           path.write_text(source[:start] + replacement + source[end:], encoding='utf-8')
+
+          old = "assert.equal(response.headers.get('x-taskpoints-phase'), '3-read-path');"
+          new = "assert.equal(response.headers.get('x-taskpoints-phase'), '4-indexeddb-primary-capable');"
+          for test_path in [Path('tests/phase3_navigation_worker.test.js'), Path('tests/phase3_worker.test.js')]:
+            test_source = test_path.read_text(encoding='utf-8')
+            if old not in test_source:
+              raise SystemExit(f'Missing expected Phase 3 success assertion in {test_path}')
+            test_path.write_text(test_source.replace(old, new, 1), encoding='utf-8')
           PY
       - name: Run Phase 4 contracts
         id: contracts
