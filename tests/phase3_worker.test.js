@@ -77,7 +77,7 @@ test('scoring core appends Phase 3 after both Phase 2 modules and strips validat
   assert.ok(body.indexOf('CORE_SOURCE') < body.indexOf('PHASE2_DUAL'));
   assert.ok(body.indexOf('PHASE2_DUAL') < body.indexOf('PHASE2_RESET'));
   assert.ok(body.indexOf('PHASE2_RESET') < body.indexOf('PHASE3_READ'));
-  assert.equal(response.headers.get('x-taskpoints-phase'), '3-read-path');
+  assert.equal(response.headers.get('x-taskpoints-phase'), '4-indexeddb-primary-capable');
   assert.equal(response.headers.get('cache-control'), 'no-cache');
   assert.equal(response.headers.get('etag'), null);
   const coreCall = calls.find((call) => call.path === '/scoring_core.js');

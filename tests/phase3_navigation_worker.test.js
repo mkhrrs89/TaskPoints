@@ -70,7 +70,7 @@ test('codec, navigation cache, and status guard are appended after the Phase 3 r
   assert.ok(body.indexOf('P3') < body.indexOf('CODEC'));
   assert.ok(body.indexOf('CODEC') < body.indexOf('NAV'));
   assert.ok(body.indexOf('NAV') < body.indexOf('GUARD'));
-  assert.equal(response.headers.get('x-taskpoints-phase'), '3-read-path');
+  assert.equal(response.headers.get('x-taskpoints-phase'), '4-indexeddb-primary-capable');
 });
 
 for (const [name, options] of [

@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>TaskPoints — Phase 4 Storage</title>
+  <link rel="stylesheet" href="assets/tailwind.css">
+  <link rel="stylesheet" href="styles.css">
+  <script src="scoring_core.js" defer></script>
+  <style>
+    body{background:#0a0a0a;color:#fafafa}.status-card{background:#18181b;border:1px solid #27272a;border-radius:18px;padding:18px}.status-row{display:flex;justify-content:space-between;gap:18px;padding:9px 0;border-bottom:1px solid #27272a}.status-row:last-child{border-bottom:0}.status-value{font-weight:800;text-align:right;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#101214;border-radius:14px;padding:14px;font-size:12px}
+  </style>
+</head>
+<body class="min-h-screen">
+  <main class="mx-auto max-w-3xl px-4 py-6">
+    <div class="flex items-center justify-between gap-3 mb-5">
+      <div><h1 class="text-2xl font-extrabold">Phase 4 Storage</h1><p class="text-sm opacity-70">IndexedDB-primary capability and rollback status</p></div>
+      <a href="settings.html" class="btn btn-teal btn-toolbar">Settings</a>
+    </div>
+
+    <section class="status-card mb-4">
+      <h2 class="text-lg font-bold mb-2">Mode</h2>
+      <p class="text-sm opacity-75 mb-3">Phase 4 defaults to Off. Changing modes never deletes localStorage or images.</p>
+      <div class="flex flex-wrap gap-2">
+        <button type="button" class="btn btn-teal btn-toolbar" data-mode="off">Off</button>
+        <button type="button" class="btn btn-teal btn-toolbar" data-mode="verify_primary_writes">Verify Primary Writes</button>
+        <button type="button" class="btn btn-teal btn-toolbar" data-mode="indexeddb_primary">IndexedDB Primary</button>
+      </div>
+    </section>
+
+    <section class="status-card mb-4">
+      <h2 class="text-lg font-bold mb-2">Current status</h2>
+      <div id="summary"></div>
+    </section>
+
+    <section class="status-card">
+      <div class="flex items-center justify-between gap-3 mb-3"><h2 class="text-lg font-bold">Diagnostics</h2><button id="refresh" type="button" class="btn btn-teal btn-toolbar">Refresh</button></div>
+      <pre id="raw">Loading…</pre>
+    </section>
+  </main>
+  <script>
+    const summary = document.getElementById('summary');
+    const raw = document.getElementById('raw');
+    const fields = [
+      ['Configured mode','configuredMode'],['Effective source','effectiveSource'],['Latest queued sequence','latestQueuedSequence'],['Latest passed sequence','latestPassedSequence'],['Pending writes','pendingWrites'],['Last verified','lastVerifiedAt'],['Last fallback','lastFallbackAt'],['Fallback reason','lastFallbackReason'],['Verification failures','verificationFailuresTotal'],['Deferred writes','deferredWritesTotal'],['Cache ready','cacheReadyThisPage'],['Mirror matches cache','currentMirrorMatchesCache'],['Reset tombstone','resetTombstone']
+    ];
+    function render(){
+      const core = window.TaskPointsCore;
+      const status = core?.getPhase4StorageStatus?.() || { configuredMode:'off', effectiveSource:'localStorage', unavailable:true };
+      summary.innerHTML = fields.map(([label,key]) => `<div class="status-row"><span class="opacity-70">${label}</span><span class="status-value">${status[key] ?? '—'}</span></div>`).join('');
+      raw.textContent = JSON.stringify(status,null,2);
+    }
+    document.getElementById('refresh').addEventListener('click', render);
+    document.querySelectorAll('[data-mode]').forEach((button) => button.addEventListener('click', () => {
+      window.TaskPointsCore?.setPhase4StorageMode?.(button.dataset.mode);
+      render();
+    }));
+    window.addEventListener('load', render);
+  </script>
+</body>
+</html>
