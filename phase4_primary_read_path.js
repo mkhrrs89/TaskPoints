@@ -7,12 +7,22 @@
 
   const ORIGINAL_LOAD = core.loadAppState;
   const ORIGINAL_SET_MODE = core.setPhase4StorageMode;
+  const ORIGINAL_GET_STATUS = core.getPhase4StorageStatus;
   const DIAGNOSTICS_KEY = core.PHASE4_DIAGNOSTICS_KEY || 'taskpoints_phase4_diagnostics_v1';
+  const SESSION_CACHE_KEY = core.PHASE4_SESSION_CACHE_KEY || 'taskpoints_phase4_verified_primary_cache_v1';
   let servingPrimary = false;
+  let warmupPromise = null;
+  let warmupScheduled = false;
 
   function nowIso() { return new Date().toISOString(); }
   function safeGet(key) {
     try { return global.localStorage?.getItem?.(key) ?? null; } catch (_) { return null; }
+  }
+  function safeSessionGet() {
+    try { return global.sessionStorage?.getItem?.(SESSION_CACHE_KEY) ?? null; } catch (_) { return null; }
+  }
+  function clearSessionCache() {
+    try { global.sessionStorage?.removeItem?.(SESSION_CACHE_KEY); } catch (_) {}
   }
   function readDiagnostics() {
     try {
@@ -36,7 +46,10 @@
     return next;
   }
   function cache() { return core.getPhase4VerifiedPrimaryCache?.() || null; }
-  function clearCache() { return core.clearPhase4Caches?.() ?? true; }
+  function clearCache() {
+    warmupScheduled = false;
+    try { return core.clearPhase4Caches?.() ?? true; } catch (_) { clearSessionCache(); return true; }
+  }
   function journalCount() {
     try { return Number(core.readPendingHabitDeltas?.().length) || 0; } catch (_) { return 1; }
   }
@@ -49,9 +62,57 @@
         && mirrorSummary.hashes.state === primarySummary.hashes.state
         && primaryCache.sourceHash === mirrorSummary.hashes.state
         && primaryCache.destinationHash === primarySummary.hashes.state
+        && (primaryCache.sourceCounts == null
+          || core.shadowCanonicalJson(primaryCache.sourceCounts) === core.shadowCanonicalJson(mirrorSummary.counts))
+        && (primaryCache.destinationCounts == null
+          || core.shadowCanonicalJson(primaryCache.destinationCounts) === core.shadowCanonicalJson(primarySummary.counts))
         && mismatch.length === 0
         && core.shadowCanonicalJson(mirrorState) === core.shadowCanonicalJson(primaryState);
     } catch (_) { return false; }
+  }
+  function cacheMatchesMirror(primaryCache, mirrorRaw) {
+    if (!primaryCache || mirrorRaw === null || primaryCache.mirrorRaw !== mirrorRaw) return false;
+    if ((Number(core.getPendingShadowDualWriteCount?.()) || 0) > 0) return false;
+    if ((Number(core.getPendingPhase4WriteCount?.()) || 0) > 0) return false;
+    if (journalCount() > 0) return false;
+    let mirrorState;
+    try { mirrorState = core.parseTaskPointsStorageJson(mirrorRaw, {}) || {}; } catch (_) { return false; }
+    return summariesMatch(mirrorState, primaryCache.state || {}, primaryCache);
+  }
+  function validateSessionRecord(record, mirrorRaw) {
+    if (!record || typeof record !== 'object' || Array.isArray(record)) return null;
+    if (record.schemaVersion !== 1 || record.status !== 'passed_verification') return null;
+    if (!record.state || typeof record.state !== 'object' || Array.isArray(record.state)) return null;
+    if (!Number.isFinite(Number(record.sequence)) || Number(record.sequence) < 1) return null;
+    const candidate = {
+      ...record,
+      sequence: Number(record.sequence),
+      serializedState: typeof record.serializedState === 'string'
+        ? record.serializedState
+        : JSON.stringify(record.state),
+      restoredFromSession: true
+    };
+    return cacheMatchesMirror(candidate, mirrorRaw) ? candidate : null;
+  }
+  function restoreSessionCache() {
+    if ((core.getPhase4StorageMode?.() || 'off') !== 'indexeddb_primary') return false;
+    const raw = safeSessionGet();
+    if (raw === null) return false;
+    let record = null;
+    try { record = JSON.parse(raw); } catch (_) { record = null; }
+    const restored = validateSessionRecord(record, safeGet(core.STORAGE_KEY));
+    if (!restored) {
+      clearCache();
+      return false;
+    }
+    core.setPhase4VerifiedPrimaryCache?.(restored, { persist: false });
+    writeDiagnostics({
+      configuredMode: 'indexeddb_primary',
+      effectiveSource: 'indexedDB_ready',
+      lastFallbackReason: null,
+      cacheRestoredFromSession: true
+    });
+    return true;
   }
   function recordFallback(reason) {
     const previous = readDiagnostics();
@@ -61,6 +122,44 @@
       lastFallbackAt: nowIso(),
       lastFallbackReason: reason,
       fallbackReadsTotal: (Number(previous.fallbackReadsTotal) || 0) + 1
+    });
+  }
+
+  async function warmPrimaryCache(reason = 'primary_cache_warmup') {
+    if ((core.getPhase4StorageMode?.() || 'off') !== 'indexeddb_primary') return false;
+    const mirrorRaw = safeGet(core.STORAGE_KEY);
+    if (cacheMatchesMirror(cache(), mirrorRaw)) {
+      writeDiagnostics({ effectiveSource: 'indexedDB_ready', lastFallbackReason: null });
+      return true;
+    }
+    if (warmupPromise) return warmupPromise;
+    warmupPromise = Promise.resolve()
+      .then(() => core.queuePhase4PrimaryWrite?.({ reason }))
+      .then(() => core.flushPhase4PrimaryWrites?.())
+      .then(() => {
+        const ready = cacheMatchesMirror(cache(), safeGet(core.STORAGE_KEY));
+        writeDiagnostics({
+          effectiveSource: ready ? 'indexedDB_ready' : 'localStorage',
+          lastFallbackReason: ready ? null : 'cache_warmup_failed'
+        });
+        return ready;
+      })
+      .catch(() => {
+        writeDiagnostics({ effectiveSource: 'localStorage', lastFallbackReason: 'cache_warmup_failed' });
+        return false;
+      })
+      .finally(() => { warmupPromise = null; });
+    return warmupPromise;
+  }
+  function schedulePrimaryWarmup(reason = 'cache_not_ready') {
+    if ((core.getPhase4StorageMode?.() || 'off') !== 'indexeddb_primary' || warmupScheduled || warmupPromise) return;
+    warmupScheduled = true;
+    const schedule = typeof global.queueMicrotask === 'function'
+      ? global.queueMicrotask.bind(global)
+      : (callback) => Promise.resolve().then(callback);
+    schedule(() => {
+      warmupScheduled = false;
+      warmPrimaryCache(reason);
     });
   }
 
@@ -139,6 +238,7 @@
     const primaryCache = cache();
     if (!primaryCache) {
       recordFallback('cache_not_ready');
+      schedulePrimaryWarmup('cache_not_ready');
       return ORIGINAL_LOAD.apply(core, args);
     }
     let mirrorState;
@@ -151,6 +251,7 @@
     if (primaryCache.mirrorRaw !== mirrorRaw || !summariesMatch(mirrorState, primaryCache.state, primaryCache)) {
       clearCache();
       recordFallback('mirror_mismatch');
+      schedulePrimaryWarmup('mirror_mismatch');
       return ORIGINAL_LOAD.apply(core, args);
     }
 
@@ -170,11 +271,13 @@
       if (attempt.journalChanged || journalAfter !== journalRaw) {
         clearCache();
         recordFallback('journal_changed_during_primary_read');
+        schedulePrimaryWarmup('journal_changed_during_primary_read');
         return ORIGINAL_LOAD.apply(core, args);
       }
       if (attempt.mirrorChanged || !attempt.usedPrimary || mirrorAfter !== mirrorRaw) {
         clearCache();
         recordFallback('mirror_changed_during_primary_read');
+        schedulePrimaryWarmup('mirror_changed_during_primary_read');
         return ORIGINAL_LOAD.apply(core, args);
       }
       const previous = readDiagnostics();
@@ -189,21 +292,57 @@
     } catch (_) {
       clearCache();
       recordFallback('primary_read_exception');
+      schedulePrimaryWarmup('primary_read_exception');
       return ORIGINAL_LOAD.apply(core, args);
     } finally { servingPrimary = false; }
   }
 
   core.loadAppState = function phase4LoadAppState(...args) { return loadWithPolicy(args); };
+  if (typeof ORIGINAL_GET_STATUS === 'function') {
+    core.getPhase4StorageStatus = function phase4PrimaryGetStatus(...args) {
+      const value = ORIGINAL_GET_STATUS.apply(core, args) || {};
+      return {
+        ...value,
+        sessionCachePresent: safeSessionGet() !== null,
+        cacheRestoredFromSession: Boolean(cache()?.restoredFromSession),
+        cacheWarmupPending: Boolean(warmupPromise || warmupScheduled)
+      };
+    };
+  }
   if (typeof ORIGINAL_SET_MODE === 'function') {
     core.setPhase4StorageMode = function phase4SetStorageMode(mode) {
       const next = ORIGINAL_SET_MODE.call(core, mode);
-      if (next === 'off') clearCache();
+      if (next === 'off') {
+        clearCache();
+      } else if (next === 'indexeddb_primary') {
+        const mirrorRaw = safeGet(core.STORAGE_KEY);
+        if (cacheMatchesMirror(cache(), mirrorRaw)) {
+          writeDiagnostics({ effectiveSource: 'indexedDB_ready', lastFallbackReason: null });
+        } else if (!restoreSessionCache()) {
+          schedulePrimaryWarmup('mode_changed');
+        }
+      }
       return next;
     };
   }
 
+  core.restorePhase4PrimaryCache = restoreSessionCache;
+  core.warmPhase4PrimaryCache = warmPrimaryCache;
+
   global.addEventListener?.('storage', (event) => {
     if (event?.storageArea && event.storageArea !== global.localStorage) return;
-    if ([core.STORAGE_KEY, core.PENDING_HABIT_DELTAS_KEY, core.PHASE4_STORAGE_MODE_KEY].includes(event?.key)) clearCache();
+    if (![core.STORAGE_KEY, core.PENDING_HABIT_DELTAS_KEY, core.PHASE4_STORAGE_MODE_KEY].includes(event?.key)) return;
+    clearCache();
+    if ((core.getPhase4StorageMode?.() || 'off') === 'indexeddb_primary') schedulePrimaryWarmup('storage_changed');
   });
+  global.addEventListener?.('pageshow', () => {
+    if ((core.getPhase4StorageMode?.() || 'off') !== 'indexeddb_primary') return;
+    if (!cacheMatchesMirror(cache(), safeGet(core.STORAGE_KEY)) && !restoreSessionCache()) {
+      schedulePrimaryWarmup('pageshow');
+    }
+  });
+
+  if ((core.getPhase4StorageMode?.() || 'off') === 'indexeddb_primary') {
+    if (!restoreSessionCache()) schedulePrimaryWarmup('module_install');
+  }
 })(typeof window !== 'undefined' ? window : globalThis);

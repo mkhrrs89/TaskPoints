@@ -5,6 +5,8 @@
   if (!core || core.__phase3SessionCodecInstalled) return;
 
   const SESSION_CACHE_KEY = 'taskpoints_phase3_verified_session_cache_v1';
+  const PHASE4_SESSION_CACHE_KEY = 'taskpoints_phase4_verified_primary_cache_v1';
+  const MANAGED_SESSION_CACHE_KEYS = new Set([SESSION_CACHE_KEY, PHASE4_SESSION_CACHE_KEY]);
   const CODEC_ID = 'lz-string-utf16-v1';
   const ENVELOPE_VERSION = 2;
   const storage = global.sessionStorage;
@@ -225,10 +227,10 @@
     Object.assign(status, patch);
   }
 
-  function invalidate(failure) {
+  function invalidate(key, failure) {
     lastEnvelope = null;
     lastDecoded = null;
-    try { rawRemove(storage, SESSION_CACHE_KEY); } catch (_) {}
+    try { rawRemove(storage, key); } catch (_) {}
     updateStatus({
       present: false,
       codec: null,
@@ -297,7 +299,8 @@
   }
 
   function interceptedGet(target, key) {
-    if (target !== storage || String(key) !== SESSION_CACHE_KEY) return rawGet(target, key);
+    const normalizedKey = String(key);
+    if (target !== storage || !MANAGED_SESSION_CACHE_KEYS.has(normalizedKey)) return rawGet(target, key);
     const envelope = rawGet(target, key);
     if (envelope === null) {
       updateStatus({ present: false, codec: null, originalChars: null, storedChars: null });
@@ -306,18 +309,19 @@
     try {
       return decodeEnvelope(String(envelope));
     } catch (error) {
-      invalidate(error?.message || 'decode_failed');
+      invalidate(normalizedKey, error?.message || 'decode_failed');
       return null;
     }
   }
 
   function interceptedSet(target, key, value) {
-    if (target !== storage || String(key) !== SESSION_CACHE_KEY) return rawSet(target, key, value);
+    const normalizedKey = String(key);
+    if (target !== storage || !MANAGED_SESSION_CACHE_KEYS.has(normalizedKey)) return rawSet(target, key, value);
     let encoded;
     try {
       encoded = encodeRecord(value);
     } catch (error) {
-      invalidate(error?.message || 'compression_failed');
+      invalidate(normalizedKey, error?.message || 'compression_failed');
       throw error;
     }
     try {
@@ -332,14 +336,14 @@
         persistFailure: null
       });
     } catch (error) {
-      invalidate(error?.name === 'QuotaExceededError' ? 'quota_exceeded' : 'storage_write_failed');
+      invalidate(normalizedKey, error?.name === 'QuotaExceededError' ? 'quota_exceeded' : 'storage_write_failed');
       throw error;
     }
   }
 
   function interceptedRemove(target, key) {
     const result = rawRemove(target, key);
-    if (target === storage && String(key) === SESSION_CACHE_KEY) {
+    if (target === storage && MANAGED_SESSION_CACHE_KEYS.has(String(key))) {
       lastEnvelope = null;
       lastDecoded = null;
       updateStatus({ present: false, codec: null, originalChars: null, storedChars: null, persistFailure: null });
@@ -385,6 +389,7 @@
   if (!installHooks()) return;
   core.__phase3SessionCodecInstalled = true;
   core.PHASE3_SESSION_CACHE_CODEC = CODEC_ID;
+  core.PHASE4_SESSION_CACHE_KEY = PHASE4_SESSION_CACHE_KEY;
   core.getPhase3SessionCodecStatus = () => ({ ...status });
 
   const originalGetStatus = typeof core.getPhase3ReadStatus === 'function' ? core.getPhase3ReadStatus : null;

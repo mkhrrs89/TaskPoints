@@ -7,6 +7,7 @@
 
   const MODE_KEY = 'taskpoints_phase4_storage_mode_v1';
   const DIAGNOSTICS_KEY = 'taskpoints_phase4_diagnostics_v1';
+  const SESSION_CACHE_KEY = 'taskpoints_phase4_verified_primary_cache_v1';
   const MODES = ['off', 'verify_primary_writes', 'indexeddb_primary'];
   const MODE_SET = new Set(MODES);
   const ARRAY_STORES = ['completions', 'matchups', 'gameHistory', 'seasonHistory', 'tasks', 'habits', 'players'];
@@ -62,6 +63,30 @@
   function isRetryableWriteReason(reason) {
     return RETRYABLE_WRITE_REASONS.has(String(reason || ''));
   }
+  function persistVerifiedPrimaryCache(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    const record = {
+      schemaVersion: 1,
+      sequence: Number(value.sequence) || 0,
+      state: value.state,
+      serializedState: value.serializedState || JSON.stringify(value.state || {}),
+      sourceHash: value.sourceHash || null,
+      destinationHash: value.destinationHash || null,
+      sourceCounts: value.sourceCounts || null,
+      destinationCounts: value.destinationCounts || null,
+      mirrorRaw: value.mirrorRaw ?? null,
+      mirrorHash: value.mirrorHash || null,
+      status: value.status || null,
+      verifiedAt: value.verifiedAt || null
+    };
+    try {
+      global.sessionStorage?.setItem?.(SESSION_CACHE_KEY, JSON.stringify(record));
+      return true;
+    } catch (_) {
+      try { global.sessionStorage?.removeItem?.(SESSION_CACHE_KEY); } catch (_) {}
+      return false;
+    }
+  }
   function readDiagnostics() {
     try {
       const value = JSON.parse(safeGet(DIAGNOSTICS_KEY) || '{}');
@@ -108,7 +133,7 @@
   function clearCaches() {
     verifiedPrimaryCache = null;
     try { core.clearPhase3ReadCache?.(); } catch (_) {}
-    try { global.sessionStorage?.removeItem?.('taskpoints_phase4_verified_primary_cache_v1'); } catch (_) {}
+    try { global.sessionStorage?.removeItem?.(SESSION_CACHE_KEY); } catch (_) {}
     return true;
   }
   function setMode(mode) {
@@ -384,6 +409,7 @@ if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: '
         status: 'passed_verification',
         verifiedAt: completionTime
       };
+      persistVerifiedPrimaryCache(verifiedPrimaryCache);
       return writeDiagnostics({
         configuredMode: getMode(),
         effectiveSource: getMode() === 'indexeddb_primary' ? 'indexedDB_ready' : 'localStorage',
@@ -565,6 +591,7 @@ verificationFailuresTotal: (Number(previous.verificationFailuresTotal) || 0) + 1
 
   core.PHASE4_STORAGE_MODE_KEY = MODE_KEY;
   core.PHASE4_DIAGNOSTICS_KEY = DIAGNOSTICS_KEY;
+  core.PHASE4_SESSION_CACHE_KEY = SESSION_CACHE_KEY;
   core.PHASE4_STORAGE_MODES = MODES.slice();
   core.PHASE4_CANDIDATE_METADATA_ID = CANDIDATE_ID;
   core.PHASE4_PRIMARY_COMMIT_METADATA_ID = PRIMARY_COMMIT_ID;
@@ -576,7 +603,18 @@ verificationFailuresTotal: (Number(previous.verificationFailuresTotal) || 0) + 1
   core.getPhase4StorageStatus = getStatus;
   core.clearPhase4Caches = clearCaches;
   core.getPhase4VerifiedPrimaryCache = () => verifiedPrimaryCache;
-  core.setPhase4VerifiedPrimaryCache = (value) => { verifiedPrimaryCache = value || null; return verifiedPrimaryCache; };
+  core.persistPhase4VerifiedPrimaryCache = persistVerifiedPrimaryCache;
+  core.setPhase4VerifiedPrimaryCache = (value, options = {}) => {
+    verifiedPrimaryCache = value || null;
+    if (!verifiedPrimaryCache) {
+      if (options.clearSession !== false) {
+        try { global.sessionStorage?.removeItem?.(SESSION_CACHE_KEY); } catch (_) {}
+      }
+    } else if (options.persist !== false) {
+      persistVerifiedPrimaryCache(verifiedPrimaryCache);
+    }
+    return verifiedPrimaryCache;
+  };
 
   installStorageHooks();
   writeDiagnostics({ configuredMode: getMode(), effectiveSource: 'localStorage', pendingWrites: 0 });
