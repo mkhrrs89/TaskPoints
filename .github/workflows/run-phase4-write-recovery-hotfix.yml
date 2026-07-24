@@ -17,12 +17,12 @@ jobs:
           ref: codex/phase-4-write-recovery-hotfix
           fetch-depth: 0
 
-      - name: Extract and apply embedded hotfix
+      - name: Extract and apply robust hotfix
         shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
-          source = Path('.github/workflows/apply-phase4-write-recovery-hotfix.yml').read_text(encoding='utf-8').splitlines()
+          source = Path('.github/workflows/run-phase4-write-recovery-hotfix-v2.yml').read_text(encoding='utf-8').splitlines()
           start = next(i for i, line in enumerate(source) if "python - <<'PY'" in line) + 1
           end = next(i for i in range(start, len(source)) if source[i].strip() == 'PY')
           body = [line[10:] if line.startswith('          ') else line for line in source[start:end]]
@@ -40,12 +40,13 @@ jobs:
       - name: Commit clean hotfix
         shell: bash
         run: |
-          rm .github/workflows/apply-phase4-write-recovery-hotfix.yml
-          rm .github/workflows/run-phase4-write-recovery-hotfix.yml
+          rm -f .github/workflows/apply-phase4-write-recovery-hotfix.yml
+          rm -f .github/workflows/run-phase4-write-recovery-hotfix.yml
+          rm -f .github/workflows/run-phase4-write-recovery-hotfix-v2.yml
           rm -f .github/phase4-write-recovery-trigger.txt
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add phase4_storage_coordinator.js phase4_storage_status.html tests/phase4_storage_contract.test.js tests/phase4_status_recovery_contract.test.js .github/workflows/apply-phase4-write-recovery-hotfix.yml .github/workflows/run-phase4-write-recovery-hotfix.yml .github/phase4-write-recovery-trigger.txt
+          git add -A
           git diff --cached --check
           git commit -m "Fix Phase 4 write recovery and coalescing"
           git push origin HEAD:codex/phase-4-write-recovery-hotfix
