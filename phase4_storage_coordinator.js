@@ -17,6 +17,25 @@
   let pendingCount = 0;
   let sequence = 0;
   let verifiedPrimaryCache = null;
+  let writeLoopRunning = false;
+  let requestedWriteRevision = 0;
+  let latestWriteOptions = {};
+  const MAX_RETRYABLE_ATTEMPTS = 2;
+  const RETRY_BASE_DELAY_MS = 250;
+  const TRANSACTION_TIMEOUT_MS = 20000;
+  const RETRYABLE_WRITE_REASONS = new Set([
+    'indexeddb_request_failed',
+    'indexeddb_request_timeout',
+    'indexeddb_transaction_aborted',
+    'indexeddb_transaction_timeout',
+    'indexeddb_open_failed',
+    'indexeddb_open_blocked',
+    'indexeddb_open_timeout',
+    'TransactionInactiveError',
+    'UnknownError',
+    'AbortError',
+    'forced_transaction_failure'
+  ]);
 
   function nowIso() { return new Date().toISOString(); }
   function clone(value) {
@@ -25,6 +44,23 @@
   }
   function safeGet(key) {
     try { return global.localStorage?.getItem?.(key) ?? null; } catch (_) { return null; }
+  }
+  function delay(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+  function storageError(code, cause = null) {
+    const error = new Error(code);
+    error.code = code;
+    error.cause = cause || null;
+    return error;
+  }
+  function normalizedErrorReason(error) {
+    const code = String(error?.code || '').trim();
+    if (code) return code;
+    const name = String(error?.name || '').trim();
+    if (name && name !== 'Error') return name;
+    return String(error?.message || error || 'phase4_write_failed');
+  }
+  function isRetryableWriteReason(reason) {
+    return RETRYABLE_WRITE_REASONS.has(String(reason || ''));
   }
   function readDiagnostics() {
     try {
@@ -85,15 +121,36 @@
 
   function requestPromise(request) {
     return new Promise((resolve, reject) => {
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error || new Error('IndexedDB request failed'));
+      let settled = false;
+      const finish = (callback, value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        callback(value);
+      };
+      const timer = setTimeout(() => finish(reject, storageError('indexeddb_request_timeout')), TRANSACTION_TIMEOUT_MS);
+      request.onsuccess = () => finish(resolve, request.result);
+      request.onerror = () => finish(reject, storageError('indexeddb_request_failed', request.error));
     });
   }
   function transactionPromise(tx) {
     return new Promise((resolve, reject) => {
-      tx.oncomplete = () => resolve();
-      tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted'));
-      tx.onerror = () => reject(tx.error || new Error('IndexedDB transaction failed'));
+      let settled = false;
+      const finish = (callback, value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        callback(value);
+      };
+      const timer = setTimeout(() => {
+        try { tx.abort?.(); } catch (_) {}
+        finish(reject, storageError('indexeddb_transaction_timeout', tx.error));
+      }, TRANSACTION_TIMEOUT_MS);
+      tx.oncomplete = () => finish(resolve);
+      tx.onabort = () => finish(reject, storageError('indexeddb_transaction_aborted', tx.error));
+      // Safari can emit a bubbled error before the transaction reaches its
+      // terminal abort or complete event. Wait for that terminal event.
+      tx.onerror = () => undefined;
     });
   }
   function hashValue(value) {
@@ -109,19 +166,28 @@
   }
 
   function openShadowDb(indexedDb = global.indexedDB) {
-    if (!indexedDb) return Promise.reject(new Error('indexeddb_unavailable'));
+    if (!indexedDb) return Promise.reject(storageError('indexeddb_open_failed'));
     return new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (callback, value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        callback(value);
+      };
+      const timer = setTimeout(() => finish(reject, storageError('indexeddb_open_timeout')), TRANSACTION_TIMEOUT_MS);
       const request = indexedDb.open(core.SHADOW_MIGRATION_DB_NAME, core.SHADOW_MIGRATION_DB_VERSION || 1);
       request.onupgradeneeded = () => {
         const db = request.result;
         [...ARRAY_STORES, 'collections'].forEach((name) => {
-          if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: 'key' });
+if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: 'key' });
         });
         if (!db.objectStoreNames.contains('values')) db.createObjectStore('values', { keyPath: 'field' });
         if (!db.objectStoreNames.contains('metadata')) db.createObjectStore('metadata', { keyPath: 'id' });
       };
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error || new Error('shadow_db_open_failed'));
+      request.onsuccess = () => finish(resolve, request.result);
+      request.onerror = () => finish(reject, storageError('indexeddb_open_failed', request.error));
+      request.onblocked = () => finish(reject, storageError('indexeddb_open_blocked'));
     });
   }
 
@@ -335,8 +401,10 @@
     } catch (error) {
       clearCaches();
       const previous = readDiagnostics();
-      const reason = String(error?.message || error || 'phase4_write_failed');
-      const deferred = new Set([
+      const reason = normalizedErrorReason(error);
+      const retryAttempt = Number(options.retryAttempt) || 0;
+      const willRetry = isRetryableWriteReason(reason) && retryAttempt < MAX_RETRYABLE_ATTEMPTS;
+      const deferred = willRetry || new Set([
         'pending_habit_journal',
         'dual_write_pending',
         'mirror_changed_during_verification'
@@ -354,20 +422,55 @@
     } finally { db?.close?.(); }
   }
 
+  async function runWriteLoop() {
+    let retryAttempt = 0;
+    try {
+      while (getMode() !== 'off') {
+        const targetRevision = requestedWriteRevision;
+        const writeSequence = nextSequence();
+        writeDiagnostics({ latestQueuedSequence: writeSequence, pendingWrites: 1 });
+        const result = await performWrite({
+...latestWriteOptions,
+sequence: writeSequence,
+retryAttempt
+        });
+        const reason = result?.lastFallbackReason || null;
+        if (isRetryableWriteReason(reason) && retryAttempt < MAX_RETRYABLE_ATTEMPTS && getMode() !== 'off') {
+retryAttempt += 1;
+await delay(RETRY_BASE_DELAY_MS * retryAttempt);
+continue;
+        }
+        retryAttempt = 0;
+        if (requestedWriteRevision === targetRevision) break;
+      }
+    } finally {
+      pendingCount = 0;
+      writeLoopRunning = false;
+      writeDiagnostics({ pendingWrites: 0 });
+    }
+  }
+
   function queueWrite(options = {}) {
     if (getMode() === 'off' && options.force !== true) return Promise.resolve({ status: 'off' });
-    const writeSequence = nextSequence();
-    pendingCount += 1;
-    writeDiagnostics({ latestQueuedSequence: writeSequence, pendingWrites: pendingCount });
-    const operation = queueTail
-      .catch(() => undefined)
-      .then(() => performWrite({ ...options, sequence: writeSequence }))
-      .finally(() => {
-        pendingCount = Math.max(0, pendingCount - 1);
-        writeDiagnostics({ pendingWrites: pendingCount });
+    requestedWriteRevision += 1;
+    latestWriteOptions = { ...latestWriteOptions, ...options };
+    if (writeLoopRunning) return queueTail;
+
+    writeLoopRunning = true;
+    pendingCount = 1;
+    writeDiagnostics({ pendingWrites: 1 });
+    queueTail = Promise.resolve()
+      .then(runWriteLoop)
+      .catch((error) => {
+        const previous = readDiagnostics();
+        writeDiagnostics({
+effectiveSource: 'localStorage',
+lastFallbackAt: nowIso(),
+lastFallbackReason: normalizedErrorReason(error),
+verificationFailuresTotal: (Number(previous.verificationFailuresTotal) || 0) + 1
+        });
       });
-    queueTail = operation.then(() => undefined, () => undefined);
-    return operation;
+    return queueTail;
   }
   function flushWrites() { return queueTail.catch(() => undefined); }
   function getStatus() {

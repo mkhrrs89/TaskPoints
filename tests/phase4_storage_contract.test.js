@@ -98,7 +98,7 @@ function fixture(version = 1) {
 function createFakeIndexedDb({ strictTransactions = true } = {}) {
   const databases = new Map();
   const openedNames = [];
-  let failNextTransaction = false;
+  let failTransactionCount = 0;
 
   const request = (run, onFinish) => {
     const req = {};
@@ -137,8 +137,8 @@ function createFakeIndexedDb({ strictTransactions = true } = {}) {
       return store;
     }
     transaction(names) {
-      if (failNextTransaction) {
-        failNextTransaction = false;
+      if (failTransactionCount > 0) {
+        failTransactionCount -= 1;
         throw new Error('forced_transaction_failure');
       }
       const db = this;
@@ -215,7 +215,7 @@ function createFakeIndexedDb({ strictTransactions = true } = {}) {
     },
     _db: (name) => databases.get(name),
     _openedNames: openedNames,
-    failNextTransaction() { failNextTransaction = true; }
+    failNextTransaction(count = 1) { failTransactionCount += Math.max(1, Number(count) || 1); }
   };
 }
 
@@ -397,7 +397,7 @@ test('queued work re-reads the live mirror and never restores a removed pre-rese
 
 test('IndexedDB failure preserves the newer localStorage mirror and records fallback', async () => {
   const harness = await install({ mode: 'verify_primary_writes' });
-  harness.indexedDB.failNextTransaction();
+  harness.indexedDB.failNextTransaction(5);
   const state = fixture(8);
   const raw = JSON.stringify(state);
   harness.localStorage.setItem(STORAGE_KEY, raw);
@@ -505,4 +505,33 @@ test('clearing a pending habit journal automatically retries without adding a ve
   assert.equal(recovered.lastFallbackReason, null);
   assert.equal(recovered.verificationFailuresTotal, failuresBefore);
   assert.equal(recovered.deferredWritesTotal > 0, true);
+});
+
+
+test('a transient IndexedDB transaction failure retries and settles without a verification failure', async () => {
+  const harness = await install({ mode: 'verify_primary_writes' });
+  harness.indexedDB.failNextTransaction();
+  harness.localStorage.setItem(STORAGE_KEY, JSON.stringify(fixture(17)));
+  await harness.core.flushPhase4PrimaryWrites();
+
+  const status = harness.core.getPhase4StorageStatus();
+  assert.equal(status.latestQueuedSequence, status.latestPassedSequence, JSON.stringify(status));
+  assert.equal(status.pendingWrites, 0);
+  assert.equal(status.lastFallbackReason, null);
+  assert.equal(status.verificationFailuresTotal, 0);
+  assert.equal(status.deferredWritesTotal > 0, true);
+});
+
+test('a burst of mirror writes is coalesced into a small number of verified transactions', async () => {
+  const harness = await install({ mode: 'verify_primary_writes' });
+  for (let version = 20; version < 40; version += 1) {
+    harness.localStorage.setItem(STORAGE_KEY, JSON.stringify(fixture(version)));
+  }
+  await harness.core.flushPhase4PrimaryWrites();
+
+  const status = harness.core.getPhase4StorageStatus();
+  assert.equal(status.latestQueuedSequence, status.latestPassedSequence, JSON.stringify(status));
+  assert.equal(status.latestQueuedSequence <= 3, true, JSON.stringify(status));
+  assert.equal(status.pendingWrites, 0);
+  assert.equal(JSON.parse(harness.localStorage.getItem(STORAGE_KEY)).tasks[0].id, 'task-39');
 });
