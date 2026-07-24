@@ -1,1 +1,1 @@
-Trigger the temporary Phase 4 cross-page journal recovery validator.
+Trigger the push-based Phase 4 cross-page journal recovery runner.
