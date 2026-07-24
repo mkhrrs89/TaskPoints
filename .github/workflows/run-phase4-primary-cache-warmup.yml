@@ -43,8 +43,18 @@ jobs:
       - name: Validate complete Phase 4 and repository suites
         shell: bash
         run: |
-          node --test tests/phase4_storage_contract.test.js tests/phase4_read_contract.test.js tests/phase4_worker_contract.test.js tests/phase4_journal_recovery_contract.test.js tests/phase4_status_recovery_contract.test.js
-          npm test
+          set -o pipefail
+          {
+            node --test tests/phase4_storage_contract.test.js tests/phase4_read_contract.test.js tests/phase4_worker_contract.test.js tests/phase4_journal_recovery_contract.test.js tests/phase4_status_recovery_contract.test.js
+            npm test
+          } 2>&1 | tee /tmp/phase4-primary-cache-complete.log
+
+      - name: Upload complete failure log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase4-primary-cache-complete-log
+          path: /tmp/phase4-primary-cache-complete.log
 
       - name: Commit clean fix
         shell: bash
