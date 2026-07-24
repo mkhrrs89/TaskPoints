@@ -23,10 +23,20 @@ jobs:
       - name: Validate focused cache warmup contracts
         shell: bash
         run: |
-          node --check phase3_session_codec.js
-          node --check phase4_storage_coordinator.js
-          node --check phase4_primary_read_path.js
-          node --test tests/phase4_primary_cache_warmup_contract.test.js
+          set -o pipefail
+          {
+            node --check phase3_session_codec.js
+            node --check phase4_storage_coordinator.js
+            node --check phase4_primary_read_path.js
+            node --test tests/phase4_primary_cache_warmup_contract.test.js
+          } 2>&1 | tee /tmp/phase4-primary-cache-focused.log
+
+      - name: Upload focused failure log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase4-primary-cache-focused-log
+          path: /tmp/phase4-primary-cache-focused.log
 
       - name: Validate complete Phase 4 and repository suites
         shell: bash
