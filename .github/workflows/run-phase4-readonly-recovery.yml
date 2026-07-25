@@ -1,0 +1,54 @@
+name: Run Phase 4 readonly recovery
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  apply-test-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/phase-4-readonly-recovery
+          fetch-depth: 0
+
+      - name: Apply readonly recovery fix
+        run: python .github/scripts/apply_phase4_readonly_recovery.py
+
+      - name: Validate focused Phase 4 recovery contracts
+        shell: bash
+        run: |
+          set -o pipefail
+          {
+            node --check phase4_storage_coordinator.js
+            node --check phase4_primary_read_path.js
+            node --check phase4_cache_guard.js
+            node --test tests/phase4_storage_contract.test.js tests/phase4_primary_cache_warmup_contract.test.js tests/phase4_journal_recovery_contract.test.js tests/phase4_status_recovery_contract.test.js
+          } 2>&1 | tee /tmp/phase4-readonly-recovery.log
+
+      - name: Upload focused failure log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase4-readonly-recovery-log
+          path: /tmp/phase4-readonly-recovery.log
+
+      - name: Validate full repository suite
+        run: npm test
+
+      - name: Commit clean fix
+        shell: bash
+        run: |
+          rm .github/scripts/apply_phase4_readonly_recovery.py
+          rm .github/workflows/run-phase4-readonly-recovery.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add phase4_storage_coordinator.js phase4_primary_read_path.js phase4_cache_guard.js phase4_storage_status.html tests/phase4_storage_contract.test.js tests/phase4_primary_cache_warmup_contract.test.js tests/phase4_journal_recovery_contract.test.js .github/scripts/apply_phase4_readonly_recovery.py .github/workflows/run-phase4-readonly-recovery.yml
+          git diff --cached --check
+          git commit -m "Restore Phase 4 primary without rewriting"
+          git push origin HEAD:codex/phase-4-readonly-recovery
