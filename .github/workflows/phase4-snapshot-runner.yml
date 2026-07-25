@@ -37,8 +37,9 @@ jobs:
       - name: Commit validated branch
         run: |
           rm .github/workflows/phase4-single-snapshot.yml
+          rm -f .phase4-trigger
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add phase4_storage_coordinator.js tests/phase4_storage_contract.test.js .github/workflows/phase4-single-snapshot.yml
+          git add phase4_storage_coordinator.js tests/phase4_storage_contract.test.js .github/workflows/phase4-single-snapshot.yml .phase4-trigger
           git commit -m "Store Phase 4 as one verified snapshot"
           git push origin HEAD:codex/phase4-single-snapshot
