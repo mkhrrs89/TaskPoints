@@ -1,0 +1,44 @@
+name: Validate Phase 4 snapshot branch
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    if: github.head_ref == 'codex/phase4-single-snapshot'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/phase4-single-snapshot
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply branch-contained patch
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import textwrap
+          workflow = Path('.github/workflows/phase4-single-snapshot.yml').read_text()
+          marker = "          python3 - <<'PY'\n"
+          body = workflow.split(marker, 1)[1].split("\n          PY", 1)[0]
+          exec(compile(textwrap.dedent(body), 'phase4_snapshot_patch.py', 'exec'))
+          PY
+      - name: Validate complete repository
+        run: |
+          npm test
+          node --check phase4_storage_coordinator.js
+          node --check phase4_primary_read_path.js
+      - name: Commit validated branch
+        run: |
+          rm .github/workflows/phase4-single-snapshot.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add phase4_storage_coordinator.js tests/phase4_storage_contract.test.js .github/workflows/phase4-single-snapshot.yml
+          git commit -m "Store Phase 4 as one verified snapshot"
+          git push origin HEAD:codex/phase4-single-snapshot
