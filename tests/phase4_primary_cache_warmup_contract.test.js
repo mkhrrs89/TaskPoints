@@ -41,7 +41,7 @@ function cacheRecord(state, mirrorRaw, sequence = 4) {
     mirrorHash: hash(mirrorRaw), status: 'passed_verification', verifiedAt: '2026-07-24T22:00:00.000Z'
   };
 }
-async function install({ mode = 'indexeddb_primary', sessionRecord = null } = {}) {
+async function install({ mode = 'indexeddb_primary', sessionRecord = null, committedRecord = null, restoreFailure = null } = {}) {
   const state = fixture(1);
   const mirrorRaw = JSON.stringify(state);
   const localStorage = new FakeStorage({ [STORAGE_KEY]: mirrorRaw, [MODE_KEY]: mode });
@@ -50,6 +50,7 @@ async function install({ mode = 'indexeddb_primary', sessionRecord = null } = {}
   const microtasks = [];
   let currentCache = null;
   let queueCalls = 0;
+  let restoreCalls = 0;
   const core = {
     STORAGE_KEY, PENDING_HABIT_DELTAS_KEY: JOURNAL_KEY, PHASE4_STORAGE_MODE_KEY: MODE_KEY,
     PHASE4_DIAGNOSTICS_KEY: DIAGNOSTICS_KEY, PHASE4_SESSION_CACHE_KEY: SESSION_KEY,
@@ -65,6 +66,13 @@ async function install({ mode = 'indexeddb_primary', sessionRecord = null } = {}
     getPhase4VerifiedPrimaryCache: () => currentCache,
     setPhase4VerifiedPrimaryCache(value) { currentCache = value || null; return currentCache; },
     clearPhase4Caches() { currentCache = null; sessionStorage.removeItem(SESSION_KEY); return true; },
+    async restorePhase4CommittedPrimary() {
+      restoreCalls += 1;
+      if (!committedRecord) return { restored: false, reason: restoreFailure || 'primary_commit_missing' };
+      currentCache = committedRecord;
+      sessionStorage.setItem(SESSION_KEY, JSON.stringify(currentCache));
+      return { restored: true, cache: currentCache };
+    },
     queuePhase4PrimaryWrite() {
       queueCalls += 1;
       currentCache = cacheRecord(state, mirrorRaw, queueCalls + 10);
@@ -98,7 +106,7 @@ async function install({ mode = 'indexeddb_primary', sessionRecord = null } = {}
     await core.warmPhase4PrimaryCache?.('test_drain');
     await Promise.resolve();
   }
-  return { core, localStorage, sessionStorage, mirrorRaw, state, drain, queueCalls: () => queueCalls };
+  return { core, localStorage, sessionStorage, mirrorRaw, state, drain, queueCalls: () => queueCalls, restoreCalls: () => restoreCalls };
 }
 
 test('Phase 4 restores a matching verified primary cache from compressed session storage semantics', async () => {
@@ -113,7 +121,18 @@ test('Phase 4 restores a matching verified primary cache from compressed session
   assert.equal(harness.core.getPhase4StorageStatus().effectiveSource, 'indexedDB');
 });
 
-test('a cold IndexedDB Primary page schedules one verified cache warmup', async () => {
+test('a cold IndexedDB Primary page restores the committed primary before rewriting', async () => {
+  const state = fixture(1);
+  const mirrorRaw = JSON.stringify(state);
+  const harness = await install({ committedRecord: cacheRecord(state, mirrorRaw, 9) });
+  await harness.drain();
+  assert.equal(harness.restoreCalls(), 1);
+  assert.equal(harness.queueCalls(), 0);
+  assert.equal(harness.core.getPhase4StorageStatus().cacheReadyThisPage, true);
+  assert.equal(harness.core.getPhase4StorageStatus().effectiveSource, 'indexedDB_ready');
+});
+
+test('a cold IndexedDB Primary page schedules one verified cache warmup when no committed primary can be restored', async () => {
   const harness = await install();
   assert.equal(harness.core.getPhase4StorageStatus().cacheReadyThisPage, false);
   await harness.drain();
@@ -142,4 +161,5 @@ test('Phase 4 Refresh and mode selection explicitly warm a missing primary cache
   assert.match(html, /primaryNeedsWarmup/);
   assert.match(html, /indexeddb_primary_mode_enabled/);
   assert.match(html, /Checking…/);
+  assert.match(html, /Verified ✓/);
 });

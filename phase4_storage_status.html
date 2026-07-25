@@ -48,6 +48,18 @@
       const core = window.TaskPointsCore;
       return core?.getPhase4StorageStatus?.() || { configuredMode:'off', effectiveSource:'localStorage', unavailable:true };
     }
+    function wait(ms){ return new Promise((resolve) => setTimeout(resolve, ms)); }
+    function isHealthy(status){
+      if (status.configuredMode === 'off') return Number(status.pendingWrites || 0) === 0;
+      const sequencesMatch = Number(status.latestQueuedSequence || 0) === Number(status.latestPassedSequence || 0);
+      if (status.configuredMode === 'verify_primary_writes') return sequencesMatch && Number(status.pendingWrites || 0) === 0 && !status.lastFallbackReason;
+      return sequencesMatch
+        && Number(status.pendingWrites || 0) === 0
+        && !status.lastFallbackReason
+        && status.cacheReadyThisPage === true
+        && status.currentMirrorMatchesCache === true
+        && ['indexedDB_ready','indexedDB'].includes(status.effectiveSource);
+    }
     function render(){
       const status = getStatus();
       summary.innerHTML = fields.map(([label,key]) => `<div class="status-row"><span class="opacity-70">${label}</span><span class="status-value">${status[key] ?? '—'}</span></div>`).join('');
@@ -80,8 +92,13 @@
       const originalText = button.textContent;
       button.disabled = true;
       button.textContent = 'Checking…';
-      try { await recoverStatus('manual_status_refresh'); }
-      finally { button.disabled = false; button.textContent = originalText; }
+      const startedAt = Date.now();
+      try {
+        const status = await recoverStatus('manual_status_refresh');
+        await wait(Math.max(0, 350 - (Date.now() - startedAt)));
+        button.textContent = isHealthy(status) ? 'Verified ✓' : 'Needs attention';
+        await wait(900);
+      } finally { button.disabled = false; button.textContent = originalText; }
     });
     document.querySelectorAll('[data-mode]').forEach((button) => button.addEventListener('click', async () => {
       const buttons = [...document.querySelectorAll('[data-mode]')];

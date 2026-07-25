@@ -6,7 +6,7 @@ const vm = require('node:vm');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'phase4_cache_guard.js'), 'utf8');
 
-function install({ mode = 'verify_primary_writes', journal = [{}], gap = true, autoCompact = true } = {}) {
+function install({ mode = 'verify_primary_writes', journal = [{}], gap = true, autoCompact = true, recoverySucceeds = true } = {}) {
   const rows = new Map([['taskpoints_v1', JSON.stringify({ habits: [], completions: [] })]]);
   let journalRows = journal.slice();
   let compactionCalls = 0;
@@ -37,8 +37,10 @@ function install({ mode = 'verify_primary_writes', journal = [{}], gap = true, a
     queuePhase4PrimaryWrite() {
       queueCalls += 1;
       status.latestQueuedSequence = 23;
-      status.latestPassedSequence = 23;
-      status.lastFallbackReason = null;
+      if (recoverySucceeds) {
+        status.latestPassedSequence = 23;
+        status.lastFallbackReason = null;
+      }
       return Promise.resolve();
     }
   };
@@ -70,6 +72,12 @@ test('gap without a remaining journal queues one recovery write', async () => {
   const harness = install({ journal: [] });
   await new Promise((resolve) => setTimeout(resolve, 250));
   assert.equal(harness.compactionCalls(), 0);
+  assert.equal(harness.queueCalls(), 1);
+});
+
+test('a failed recovery attempt does not create a retry storm', async () => {
+  const harness = install({ journal: [], recoverySucceeds: false });
+  await new Promise((resolve) => setTimeout(resolve, 1400));
   assert.equal(harness.queueCalls(), 1);
 });
 
