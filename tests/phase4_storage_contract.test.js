@@ -394,9 +394,9 @@ test('rapid saves commit only the newest valid sequence as primary', async () =>
   });
   await harness.core.flushPhase4PrimaryWrites();
 
-  const taskRows = await getAll(harness.db, 'tasks');
+  const snapshot = await getRow(harness.db, 'metadata', 'phase4_primary_snapshot');
   const status = await harness.core.getPhase4StorageStatus({ indexedDB: harness.indexedDB });
-  assert.deepEqual(taskRows.map((row) => row.value.id), ['task-6']);
+  assert.equal(JSON.parse(snapshot.serializedState).tasks[0].id, 'task-6');
   assert.equal(JSON.parse(harness.localStorage.getItem(STORAGE_KEY)).tasks[0].id, 'task-6');
   assert.equal(status.latestQueuedSequence, status.latestPassedSequence);
 });
@@ -449,16 +449,12 @@ test('unknown collections, empty collections, duplicates, ordering, and image ID
   harness.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   await harness.core.flushPhase4PrimaryWrites();
 
-  const collections = await getAll(harness.db, 'collections');
-  const values = await getAll(harness.db, 'values');
-  const players = await getAll(harness.db, 'players');
-  assert.equal(collections.some((row) => row.kind === 'manifest' && row.field === 'schedule'), true);
-  assert.deepEqual(
-    collections.filter((row) => row.kind === 'item' && row.field === 'futureRows').map((row) => row.value.id),
-    ['duplicate', 'duplicate', undefined]
-  );
-  assert.equal(values.some((row) => row.field === 'youImageId' && row.value === 'profile-image'), true);
-  assert.equal(players[0].value.imageId, 'player-image');
+  const snapshot = await getRow(harness.db, 'metadata', 'phase4_primary_snapshot');
+  const restored = JSON.parse(snapshot.serializedState);
+  assert.deepEqual(restored.schedule, []);
+  assert.deepEqual(restored.futureRows.map((row) => row.id), ['duplicate', 'duplicate', undefined]);
+  assert.equal(restored.youImageId, 'profile-image');
+  assert.equal(restored.players[0].imageId, 'player-image');
 });
 
 test('Phase 4 state writes never open or mutate the live image database', async () => {
@@ -553,4 +549,34 @@ test('a burst of mirror writes is coalesced into a small number of verified tran
   assert.equal(status.latestQueuedSequence <= 3, true, JSON.stringify(status));
   assert.equal(status.pendingWrites, 0);
   assert.equal(JSON.parse(harness.localStorage.getItem(STORAGE_KEY)).tasks[0].id, 'task-39');
+});
+
+
+test('large Phase 4 saves use one metadata snapshot instead of repopulating row stores', async () => {
+  const harness = await install({ mode: 'verify_primary_writes' });
+  const state = fixture(18);
+  state.completions = Array.from({ length: 6000 }, (_, index) => ({ id: `c-${index}`, points: index % 20 }));
+  state.gameHistory = Array.from({ length: 4000 }, (_, index) => ({ id: `g-${index}`, score: index }));
+  const raw = JSON.stringify(state);
+  harness.localStorage.setItem(STORAGE_KEY, raw);
+  await harness.core.flushPhase4PrimaryWrites();
+
+  const snapshot = await getRow(harness.db, 'metadata', 'phase4_primary_snapshot');
+  const commit = await getRow(harness.db, 'metadata', 'phase4_primary_commit');
+  const status = harness.core.getPhase4StorageStatus();
+  assert.equal(snapshot.serializedState, raw);
+  assert.equal(snapshot.sequence, commit.sequence);
+  assert.equal(commit.snapshotFormat, 'metadata_raw_v1');
+  assert.equal(status.latestQueuedSequence, status.latestPassedSequence, JSON.stringify(status));
+  assert.deepEqual(await getAll(harness.db, 'completions'), []);
+  assert.deepEqual(await getAll(harness.db, 'gameHistory'), []);
+});
+
+test('the coordinator retains legacy row restore compatibility without using rows for new writes', () => {
+  const source = readPlannedModule();
+  assert.match(source, /PRIMARY_SNAPSHOT_ID = 'phase4_primary_snapshot'/);
+  assert.match(source, /async function readLegacyState/);
+  const candidateBlock = source.slice(source.indexOf('async function writeCandidate'), source.indexOf('async function readLegacyState'));
+  assert.match(candidateBlock, /db\.transaction\('metadata', 'readwrite'\)/);
+  assert.doesNotMatch(candidateBlock, /\.clear\(/);
 });

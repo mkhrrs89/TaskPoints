@@ -12,6 +12,7 @@
   const MODE_SET = new Set(MODES);
   const ARRAY_STORES = ['completions', 'matchups', 'gameHistory', 'seasonHistory', 'tasks', 'habits', 'players'];
   const CANDIDATE_ID = 'phase4_candidate';
+  const PRIMARY_SNAPSHOT_ID = 'phase4_primary_snapshot';
   const PRIMARY_COMMIT_ID = 'phase4_primary_commit';
 
   let queueTail = Promise.resolve();
@@ -221,24 +222,22 @@ if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: '
   }
 
   async function writeCandidate(db, state, raw, writeSequence, journalCount) {
-    const layout = layoutFor(state);
     const summary = core.shadowSourceSummary(state);
-    const stores = [...ARRAY_STORES, 'collections', 'values', 'metadata'];
-    const tx = db.transaction(stores, 'readwrite');
-
-    [...ARRAY_STORES, 'collections'].forEach((name) => tx.objectStore(name).clear());
-    tx.objectStore('values').clear();
-    Object.entries(layout.arrays || {}).forEach(([field, rows]) => {
-      (rows || []).forEach((value, index) => tx.objectStore(field).put({ key: index, value }));
-    });
-    Object.entries(layout.collections || {}).forEach(([field, rows]) => {
-      tx.objectStore('collections').put({ key: `manifest:${field}`, kind: 'manifest', field });
-      (rows || []).forEach((value, index) => {
-        tx.objectStore('collections').put({ key: `item:${field}:${index}`, kind: 'item', field, index, value });
-      });
-    });
-    Object.entries(layout.values || {}).forEach(([field, value]) => {
-      tx.objectStore('values').put({ field, value });
+    const serializedState = typeof raw === 'string' ? raw : JSON.stringify(state || {});
+    const tx = db.transaction('metadata', 'readwrite');
+    tx.objectStore('metadata').put({
+      id: PRIMARY_SNAPSHOT_ID,
+      schemaVersion: 1,
+      phase: 'indexeddb_primary',
+      status: 'candidate_written',
+      sequence: writeSequence,
+      startedAt: nowIso(),
+      serializedState,
+      stateHash: summary.hashes.state,
+      sourceCounts: summary.counts,
+      mirrorHash: hashValue(serializedState),
+      pendingJournalCount: journalCount,
+      errors: []
     });
     tx.objectStore('metadata').put({
       id: CANDIDATE_ID,
@@ -247,9 +246,11 @@ if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: '
       status: 'candidate_written',
       sequence: writeSequence,
       startedAt: nowIso(),
+      snapshotId: PRIMARY_SNAPSHOT_ID,
+      snapshotFormat: 'metadata_raw_v1',
       sourceCounts: summary.counts,
       sourceHashes: summary.hashes,
-      mirrorHash: hashValue(raw),
+      mirrorHash: hashValue(serializedState),
       pendingJournalCount: journalCount,
       errors: []
     });
@@ -257,16 +258,14 @@ if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: '
     return summary;
   }
 
-  async function readState(db) {
-    const stores = [...ARRAY_STORES, 'collections', 'values', 'metadata'];
+  async function readLegacyState(db, candidate, primaryCommit) {
+    const stores = [...ARRAY_STORES, 'collections', 'values'];
     const tx = db.transaction(stores, 'readonly');
     const arrayRequests = ARRAY_STORES.map((field) => requestPromise(tx.objectStore(field).getAll()));
     const collectionRequest = requestPromise(tx.objectStore('collections').getAll());
     const valuesRequest = requestPromise(tx.objectStore('values').getAll());
-    const candidateRequest = requestPromise(tx.objectStore('metadata').get(CANDIDATE_ID));
-    const primaryCommitRequest = requestPromise(tx.objectStore('metadata').get(PRIMARY_COMMIT_ID));
-    const [arrayRows, collectionRows, valuesRows, candidate, primaryCommit] = await Promise.all([
-      Promise.all(arrayRequests), collectionRequest, valuesRequest, candidateRequest, primaryCommitRequest
+    const [arrayRows, collectionRows, valuesRows] = await Promise.all([
+      Promise.all(arrayRequests), collectionRequest, valuesRequest
     ]);
     const state = {};
     ARRAY_STORES.forEach((field, index) => {
@@ -277,7 +276,30 @@ if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: '
       .sort((a, b) => String(a.field).localeCompare(String(b.field)) || Number(a.index) - Number(b.index))
       .forEach((row) => { (state[row.field] ||= [])[Number(row.index)] = row.value; });
     (valuesRows || []).forEach((row) => { if (row && typeof row.field === 'string') state[row.field] = row.value; });
-    return { state, candidate: candidate || null, primaryCommit: primaryCommit || null };
+    return { state, candidate: candidate || null, primaryCommit: primaryCommit || null, snapshot: null, snapshotFormat: 'legacy_rows_v1' };
+  }
+
+  async function readState(db) {
+    const tx = db.transaction('metadata', 'readonly');
+    const snapshotRequest = requestPromise(tx.objectStore('metadata').get(PRIMARY_SNAPSHOT_ID));
+    const candidateRequest = requestPromise(tx.objectStore('metadata').get(CANDIDATE_ID));
+    const primaryCommitRequest = requestPromise(tx.objectStore('metadata').get(PRIMARY_COMMIT_ID));
+    const [snapshot, candidate, primaryCommit] = await Promise.all([
+      snapshotRequest, candidateRequest, primaryCommitRequest
+    ]);
+    if (snapshot?.serializedState && typeof snapshot.serializedState === 'string') {
+      let state;
+      try { state = core.parseTaskPointsStorageJson(snapshot.serializedState, {}) || {}; }
+      catch (error) { throw storageError('primary_snapshot_parse_failed', error); }
+      return {
+        state,
+        candidate: candidate || null,
+        primaryCommit: primaryCommit || null,
+        snapshot,
+        snapshotFormat: 'metadata_raw_v1'
+      };
+    }
+    return readLegacyState(db, candidate, primaryCommit);
   }
 
   async function restoreVerifiedPrimaryFromIndexedDb(options = {}) {
@@ -310,6 +332,11 @@ if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: '
       const canonicalMatch = core.shadowCanonicalJson(layoutFor(source)) === core.shadowCanonicalJson(layoutFor(rebuilt.state));
       const mismatches = core.shadowVerificationMismatches(sourceSummary, destinationSummary) || [];
       if (commit.mirrorHash && commit.mirrorHash !== hashValue(rawBefore)) throw new Error('committed_mirror_mismatch');
+      if (rebuilt.snapshot) {
+        if (Number(rebuilt.snapshot.sequence) !== Number(commit.sequence)) throw new Error('committed_snapshot_sequence_mismatch');
+        if (rebuilt.snapshot.mirrorHash && rebuilt.snapshot.mirrorHash !== hashValue(rawBefore)) throw new Error('committed_snapshot_mirror_mismatch');
+        if (rebuilt.snapshot.stateHash && rebuilt.snapshot.stateHash !== destinationSummary.hashes.state) throw new Error('committed_snapshot_hash_mismatch');
+      }
       const committedSourceHash = commit.verification?.source?.hashes?.state;
       const committedDestinationHash = commit.verification?.destination?.hashes?.state;
       if (committedSourceHash && committedSourceHash !== sourceSummary.hashes.state) throw new Error('committed_source_hash_mismatch');
@@ -329,7 +356,7 @@ if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: '
         sequence: reconciledSequence,
         committedSequence: Number(commit.sequence) || 0,
         state: clone(rebuilt.state),
-        serializedState: JSON.stringify(rebuilt.state),
+        serializedState: rawBefore,
         sourceHash: sourceSummary.hashes.state,
         destinationHash: destinationSummary.hashes.state,
         sourceCounts: sourceSummary.counts,
@@ -384,6 +411,7 @@ if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: '
         completionTime: nowIso(),
         errors: []
       });
+      tx.objectStore('metadata').delete(PRIMARY_SNAPSHOT_ID);
       tx.objectStore('metadata').delete(PRIMARY_COMMIT_ID);
       await transactionPromise(tx);
       clearCaches();
@@ -457,6 +485,7 @@ if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: '
       if (journalCount() > 0) throw new Error('pending_habit_journal');
       if (!countsMatch || !hashesMatch || !canonicalMatch || mismatches.length) throw new Error('verification_mismatch');
       if (Number(rebuilt.candidate?.sequence) !== writeSequence) throw new Error('candidate_sequence_mismatch');
+      if (Number(rebuilt.snapshot?.sequence) !== writeSequence) throw new Error('snapshot_sequence_mismatch');
 
       const completionTime = nowIso();
       const verification = {
@@ -474,6 +503,8 @@ if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: '
         sequence: writeSequence,
         completionTime,
         mirrorHash: hashValue(rawBefore),
+        snapshotId: PRIMARY_SNAPSHOT_ID,
+        snapshotFormat: 'metadata_raw_v1',
         verification,
         errors: []
       });
@@ -481,7 +512,7 @@ if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: '
         schemaVersion: 1,
         sequence: writeSequence,
         state: clone(rebuilt.state),
-        serializedState: JSON.stringify(rebuilt.state),
+        serializedState: rawBefore,
         sourceHash: sourceSummary.hashes.state,
         destinationHash: destinationSummary.hashes.state,
         sourceCounts: sourceSummary.counts,
@@ -677,6 +708,7 @@ verificationFailuresTotal: (Number(previous.verificationFailuresTotal) || 0) + 1
   core.PHASE4_SESSION_CACHE_KEY = SESSION_CACHE_KEY;
   core.PHASE4_STORAGE_MODES = MODES.slice();
   core.PHASE4_CANDIDATE_METADATA_ID = CANDIDATE_ID;
+  core.PHASE4_PRIMARY_SNAPSHOT_METADATA_ID = PRIMARY_SNAPSHOT_ID;
   core.PHASE4_PRIMARY_COMMIT_METADATA_ID = PRIMARY_COMMIT_ID;
   core.getPhase4StorageMode = getMode;
   core.setPhase4StorageMode = setMode;
