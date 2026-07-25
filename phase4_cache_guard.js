@@ -88,9 +88,7 @@
 
       recoveryChecks += 1;
       const queued = core.queuePhase4PrimaryWrite?.({ reason: 'cross_page_habit_journal_recovery' });
-      Promise.resolve(queued).finally(() => {
-        if (recoveryChecks < RECOVERY_MAX_CHECKS && hasDeferredGap()) scheduleRecovery(RECOVERY_SETTLE_MS);
-      });
+      Promise.resolve(queued).finally(() => stopRecovery());
     };
 
     recoveryTimer = setTimeout(check, delay);

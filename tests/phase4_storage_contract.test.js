@@ -312,7 +312,7 @@ async function install({ mode, journal = [], diagnostics = null, indexedDB = cre
   for (const method of [
     'getPhase4StorageMode', 'setPhase4StorageMode', 'queuePhase4PrimaryWrite',
     'flushPhase4PrimaryWrites', 'getPendingPhase4WriteCount',
-    'getPhase4StorageStatus', 'clearPhase4Caches'
+    'getPhase4StorageStatus', 'clearPhase4Caches', 'restorePhase4CommittedPrimary'
   ]) {
     assert.equal(typeof core[method], 'function', `${method} must be installed`);
   }
@@ -366,6 +366,25 @@ test('a failed localStorage mirror write cannot create or promote a candidate', 
   assert.equal(harness.core.getPendingPhase4WriteCount(), 0);
   assert.equal(await getRow(harness.db, 'metadata', 'phase4_candidate'), null);
   assert.equal(await getRow(harness.db, 'metadata', 'phase4_primary_commit'), null);
+});
+
+test('a cold page restores and re-verifies the committed primary without rewriting it', async () => {
+  const harness = await install({ mode: 'indexeddb_primary' });
+  const state = fixture(16);
+  harness.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  await harness.core.flushPhase4PrimaryWrites();
+  const commitBefore = await getRow(harness.db, 'metadata', 'phase4_primary_commit');
+  harness.core.clearPhase4Caches();
+  assert.equal(harness.core.getPhase4StorageStatus().cacheReadyThisPage, false);
+
+  const restored = await harness.core.restorePhase4CommittedPrimary({ indexedDB: harness.indexedDB });
+  const commitAfter = await getRow(harness.db, 'metadata', 'phase4_primary_commit');
+  const status = harness.core.getPhase4StorageStatus();
+  assert.equal(restored.restored, true, JSON.stringify(restored));
+  assert.equal(status.cacheReadyThisPage, true);
+  assert.equal(status.currentMirrorMatchesCache, true);
+  assert.equal(status.latestQueuedSequence, status.latestPassedSequence);
+  assert.deepEqual(commitAfter, commitBefore);
 });
 
 test('rapid saves commit only the newest valid sequence as primary', async () => {

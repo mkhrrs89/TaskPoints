@@ -132,20 +132,39 @@
       writeDiagnostics({ effectiveSource: 'indexedDB_ready', lastFallbackReason: null });
       return true;
     }
+    if (restoreSessionCache() && cacheMatchesMirror(cache(), safeGet(core.STORAGE_KEY))) return true;
     if (warmupPromise) return warmupPromise;
+
+    let restoreFailureReason = null;
     warmupPromise = Promise.resolve()
-      .then(() => core.queuePhase4PrimaryWrite?.({ reason }))
-      .then(() => core.flushPhase4PrimaryWrites?.())
-      .then(() => {
-        const ready = cacheMatchesMirror(cache(), safeGet(core.STORAGE_KEY));
+      .then(() => core.restorePhase4CommittedPrimary?.({ reason }))
+      .then((outcome) => {
+        if (outcome?.restored === true && cacheMatchesMirror(cache(), safeGet(core.STORAGE_KEY))) return true;
+        restoreFailureReason = outcome?.reason || null;
+        return Promise.resolve(core.queuePhase4PrimaryWrite?.({ reason }))
+          .then(() => core.flushPhase4PrimaryWrites?.())
+          .then(() => cacheMatchesMirror(cache(), safeGet(core.STORAGE_KEY)));
+      })
+      .then((ready) => {
+        const currentStatus = core.getPhase4StorageStatus?.() || {};
+        const specificFailure = currentStatus.lastFallbackReason && currentStatus.lastFallbackReason !== 'cache_not_ready'
+          ? currentStatus.lastFallbackReason
+          : restoreFailureReason;
         writeDiagnostics({
           effectiveSource: ready ? 'indexedDB_ready' : 'localStorage',
-          lastFallbackReason: ready ? null : 'cache_warmup_failed'
+          lastFallbackReason: ready ? null : (specificFailure || 'cache_warmup_failed'),
+          cacheWarmupFailureDetail: ready ? null : (specificFailure || 'cache_warmup_failed')
         });
         return ready;
       })
-      .catch(() => {
-        writeDiagnostics({ effectiveSource: 'localStorage', lastFallbackReason: 'cache_warmup_failed' });
+      .catch((error) => {
+        const currentStatus = core.getPhase4StorageStatus?.() || {};
+        const specificFailure = currentStatus.lastFallbackReason || restoreFailureReason || error?.message || 'cache_warmup_failed';
+        writeDiagnostics({
+          effectiveSource: 'localStorage',
+          lastFallbackReason: specificFailure,
+          cacheWarmupFailureDetail: specificFailure
+        });
         return false;
       })
       .finally(() => { warmupPromise = null; });
@@ -153,6 +172,7 @@
   }
   function schedulePrimaryWarmup(reason = 'cache_not_ready') {
     if ((core.getPhase4StorageMode?.() || 'off') !== 'indexeddb_primary' || warmupScheduled || warmupPromise) return;
+    if (global.document?.visibilityState === 'hidden') return;
     warmupScheduled = true;
     const schedule = typeof global.queueMicrotask === 'function'
       ? global.queueMicrotask.bind(global)
@@ -339,6 +359,13 @@
     if ((core.getPhase4StorageMode?.() || 'off') !== 'indexeddb_primary') return;
     if (!cacheMatchesMirror(cache(), safeGet(core.STORAGE_KEY)) && !restoreSessionCache()) {
       schedulePrimaryWarmup('pageshow');
+    }
+  });
+  global.document?.addEventListener?.('visibilitychange', () => {
+    if (global.document.visibilityState !== 'visible') return;
+    if ((core.getPhase4StorageMode?.() || 'off') !== 'indexeddb_primary') return;
+    if (!cacheMatchesMirror(cache(), safeGet(core.STORAGE_KEY)) && !restoreSessionCache()) {
+      schedulePrimaryWarmup('visibility_restored');
     }
   });
 

@@ -264,8 +264,9 @@ if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: '
     const collectionRequest = requestPromise(tx.objectStore('collections').getAll());
     const valuesRequest = requestPromise(tx.objectStore('values').getAll());
     const candidateRequest = requestPromise(tx.objectStore('metadata').get(CANDIDATE_ID));
-    const [arrayRows, collectionRows, valuesRows, candidate] = await Promise.all([
-      Promise.all(arrayRequests), collectionRequest, valuesRequest, candidateRequest
+    const primaryCommitRequest = requestPromise(tx.objectStore('metadata').get(PRIMARY_COMMIT_ID));
+    const [arrayRows, collectionRows, valuesRows, candidate, primaryCommit] = await Promise.all([
+      Promise.all(arrayRequests), collectionRequest, valuesRequest, candidateRequest, primaryCommitRequest
     ]);
     const state = {};
     ARRAY_STORES.forEach((field, index) => {
@@ -276,7 +277,88 @@ if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: '
       .sort((a, b) => String(a.field).localeCompare(String(b.field)) || Number(a.index) - Number(b.index))
       .forEach((row) => { (state[row.field] ||= [])[Number(row.index)] = row.value; });
     (valuesRows || []).forEach((row) => { if (row && typeof row.field === 'string') state[row.field] = row.value; });
-    return { state, candidate: candidate || null };
+    return { state, candidate: candidate || null, primaryCommit: primaryCommit || null };
+  }
+
+  async function restoreVerifiedPrimaryFromIndexedDb(options = {}) {
+    const indexedDb = options.indexedDB || global.indexedDB;
+    const rawBefore = safeGet(core.STORAGE_KEY);
+    if (rawBefore === null) return { restored: false, reason: 'authoritative_missing' };
+    if ((Number(core.getPendingShadowDualWriteCount?.()) || 0) > 0) return { restored: false, reason: 'dual_write_pending' };
+    if ((Number(core.getPendingPhase4WriteCount?.()) || 0) > 0) return { restored: false, reason: 'phase4_write_pending' };
+    if (journalCount() > 0) return { restored: false, reason: 'pending_habit_journal' };
+
+    let db = null;
+    try {
+      db = await openShadowDb(indexedDb);
+      const rebuilt = await readState(db);
+      const commit = rebuilt.primaryCommit;
+      if (!commit || commit.status !== 'passed_verification') throw new Error('primary_commit_missing');
+
+      const rawAfter = safeGet(core.STORAGE_KEY);
+      if (rawAfter === null) throw new Error('authoritative_missing');
+      if (rawAfter !== rawBefore) throw new Error('mirror_changed_during_restore');
+      if ((Number(core.getPendingShadowDualWriteCount?.()) || 0) > 0) throw new Error('dual_write_pending');
+      if ((Number(core.getPendingPhase4WriteCount?.()) || 0) > 0) throw new Error('phase4_write_pending');
+      if (journalCount() > 0) throw new Error('pending_habit_journal');
+
+      const source = core.parseTaskPointsStorageJson(rawBefore, {}) || {};
+      const sourceSummary = core.shadowSourceSummary(source);
+      const destinationSummary = core.shadowSourceSummary(rebuilt.state);
+      const countsMatch = core.shadowCanonicalJson(sourceSummary.counts) === core.shadowCanonicalJson(destinationSummary.counts);
+      const hashesMatch = sourceSummary.hashes.state === destinationSummary.hashes.state;
+      const canonicalMatch = core.shadowCanonicalJson(layoutFor(source)) === core.shadowCanonicalJson(layoutFor(rebuilt.state));
+      const mismatches = core.shadowVerificationMismatches(sourceSummary, destinationSummary) || [];
+      if (commit.mirrorHash && commit.mirrorHash !== hashValue(rawBefore)) throw new Error('committed_mirror_mismatch');
+      const committedSourceHash = commit.verification?.source?.hashes?.state;
+      const committedDestinationHash = commit.verification?.destination?.hashes?.state;
+      if (committedSourceHash && committedSourceHash !== sourceSummary.hashes.state) throw new Error('committed_source_hash_mismatch');
+      if (committedDestinationHash && committedDestinationHash !== destinationSummary.hashes.state) throw new Error('committed_destination_hash_mismatch');
+      if (!countsMatch || !hashesMatch || !canonicalMatch || mismatches.length) throw new Error('committed_primary_mismatch');
+
+      const diagnostics = readDiagnostics();
+      const verifiedAt = nowIso();
+      const reconciledSequence = Math.max(
+        Number(diagnostics.latestQueuedSequence) || 0,
+        Number(diagnostics.latestPassedSequence) || 0,
+        Number(commit.sequence) || 0,
+        1
+      );
+      verifiedPrimaryCache = {
+        schemaVersion: 1,
+        sequence: reconciledSequence,
+        committedSequence: Number(commit.sequence) || 0,
+        state: clone(rebuilt.state),
+        serializedState: JSON.stringify(rebuilt.state),
+        sourceHash: sourceSummary.hashes.state,
+        destinationHash: destinationSummary.hashes.state,
+        sourceCounts: sourceSummary.counts,
+        destinationCounts: destinationSummary.counts,
+        mirrorRaw: rawBefore,
+        mirrorHash: hashValue(rawBefore),
+        status: 'passed_verification',
+        verifiedAt,
+        restoredFromIndexedDb: true
+      };
+      persistVerifiedPrimaryCache(verifiedPrimaryCache);
+      writeDiagnostics({
+        configuredMode: getMode(),
+        effectiveSource: getMode() === 'indexeddb_primary' ? 'indexedDB_ready' : 'localStorage',
+        latestQueuedSequence: reconciledSequence,
+        latestPassedSequence: reconciledSequence,
+        lastVerifiedAt: verifiedAt,
+        lastFallbackReason: null,
+        cacheRestoredFromIndexedDb: true,
+        countsMatch: true,
+        hashesMatch: true,
+        canonicalMatch: true,
+        mismatches: [],
+        cacheRestoredFromIndexedDb: false
+      });
+      return { restored: true, cache: verifiedPrimaryCache };
+    } catch (error) {
+      return { restored: false, reason: normalizedErrorReason(error) };
+    } finally { db?.close?.(); }
   }
 
   async function commitPrimary(db, metadata) {
@@ -523,7 +605,8 @@ verificationFailuresTotal: (Number(previous.verificationFailuresTotal) || 0) + 1
       mismatches: Array.isArray(diagnostics.mismatches) ? diagnostics.mismatches : [],
       resetTombstone: diagnostics.resetTombstone === true,
       cacheReadyThisPage: Boolean(verifiedPrimaryCache),
-      currentMirrorMatchesCache: Boolean(verifiedPrimaryCache && safeGet(core.STORAGE_KEY) === verifiedPrimaryCache.mirrorRaw)
+      currentMirrorMatchesCache: Boolean(verifiedPrimaryCache && safeGet(core.STORAGE_KEY) === verifiedPrimaryCache.mirrorRaw),
+      cacheRestoredFromIndexedDb: diagnostics.cacheRestoredFromIndexedDb === true || Boolean(verifiedPrimaryCache?.restoredFromIndexedDb)
     };
   }
 
@@ -604,6 +687,7 @@ verificationFailuresTotal: (Number(previous.verificationFailuresTotal) || 0) + 1
   core.clearPhase4Caches = clearCaches;
   core.getPhase4VerifiedPrimaryCache = () => verifiedPrimaryCache;
   core.persistPhase4VerifiedPrimaryCache = persistVerifiedPrimaryCache;
+  core.restorePhase4CommittedPrimary = restoreVerifiedPrimaryFromIndexedDb;
   core.setPhase4VerifiedPrimaryCache = (value, options = {}) => {
     verifiedPrimaryCache = value || null;
     if (!verifiedPrimaryCache) {
