@@ -1,0 +1,225 @@
+name: Build Phase 4 single snapshot
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-push:
+    if: github.head_ref == 'codex/phase4-single-snapshot'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/phase4-single-snapshot
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Replace row rewrite with atomic snapshot
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('phase4_storage_coordinator.js')
+          text = path.read_text()
+          text = text.replace(
+              "  const CANDIDATE_ID = 'phase4_candidate';\n  const PRIMARY_COMMIT_ID = 'phase4_primary_commit';",
+              "  const CANDIDATE_ID = 'phase4_candidate';\n  const PRIMARY_SNAPSHOT_ID = 'phase4_primary_snapshot';\n  const PRIMARY_COMMIT_ID = 'phase4_primary_commit';"
+          )
+
+          start = text.index('  async function writeCandidate(')
+          end = text.index('  async function restoreVerifiedPrimaryFromIndexedDb', start)
+          replacement = r'''  async function writeCandidate(db, state, raw, writeSequence, journalCount) {
+    const summary = core.shadowSourceSummary(state);
+    const serializedState = typeof raw === 'string' ? raw : JSON.stringify(state || {});
+    const tx = db.transaction('metadata', 'readwrite');
+    tx.objectStore('metadata').put({
+      id: PRIMARY_SNAPSHOT_ID,
+      schemaVersion: 1,
+      phase: 'indexeddb_primary',
+      status: 'candidate_written',
+      sequence: writeSequence,
+      startedAt: nowIso(),
+      serializedState,
+      stateHash: summary.hashes.state,
+      sourceCounts: summary.counts,
+      mirrorHash: hashValue(serializedState),
+      pendingJournalCount: journalCount,
+      errors: []
+    });
+    tx.objectStore('metadata').put({
+      id: CANDIDATE_ID,
+      schemaVersion: 1,
+      phase: 'indexeddb_primary',
+      status: 'candidate_written',
+      sequence: writeSequence,
+      startedAt: nowIso(),
+      snapshotId: PRIMARY_SNAPSHOT_ID,
+      snapshotFormat: 'metadata_raw_v1',
+      sourceCounts: summary.counts,
+      sourceHashes: summary.hashes,
+      mirrorHash: hashValue(serializedState),
+      pendingJournalCount: journalCount,
+      errors: []
+    });
+    await transactionPromise(tx);
+    return summary;
+  }
+
+  async function readLegacyState(db, candidate, primaryCommit) {
+    const stores = [...ARRAY_STORES, 'collections', 'values'];
+    const tx = db.transaction(stores, 'readonly');
+    const arrayRequests = ARRAY_STORES.map((field) => requestPromise(tx.objectStore(field).getAll()));
+    const collectionRequest = requestPromise(tx.objectStore('collections').getAll());
+    const valuesRequest = requestPromise(tx.objectStore('values').getAll());
+    const [arrayRows, collectionRows, valuesRows] = await Promise.all([
+      Promise.all(arrayRequests), collectionRequest, valuesRequest
+    ]);
+    const state = {};
+    ARRAY_STORES.forEach((field, index) => {
+      state[field] = (arrayRows[index] || []).slice().sort((a, b) => Number(a.key) - Number(b.key)).map((row) => row.value);
+    });
+    (collectionRows || []).filter((row) => row?.kind === 'manifest').forEach((row) => { state[row.field] = []; });
+    (collectionRows || []).filter((row) => row?.kind === 'item')
+      .sort((a, b) => String(a.field).localeCompare(String(b.field)) || Number(a.index) - Number(b.index))
+      .forEach((row) => { (state[row.field] ||= [])[Number(row.index)] = row.value; });
+    (valuesRows || []).forEach((row) => { if (row && typeof row.field === 'string') state[row.field] = row.value; });
+    return { state, candidate: candidate || null, primaryCommit: primaryCommit || null, snapshot: null, snapshotFormat: 'legacy_rows_v1' };
+  }
+
+  async function readState(db) {
+    const tx = db.transaction('metadata', 'readonly');
+    const snapshotRequest = requestPromise(tx.objectStore('metadata').get(PRIMARY_SNAPSHOT_ID));
+    const candidateRequest = requestPromise(tx.objectStore('metadata').get(CANDIDATE_ID));
+    const primaryCommitRequest = requestPromise(tx.objectStore('metadata').get(PRIMARY_COMMIT_ID));
+    const [snapshot, candidate, primaryCommit] = await Promise.all([
+      snapshotRequest, candidateRequest, primaryCommitRequest
+    ]);
+    if (snapshot?.serializedState && typeof snapshot.serializedState === 'string') {
+      let state;
+      try { state = core.parseTaskPointsStorageJson(snapshot.serializedState, {}) || {}; }
+      catch (error) { throw storageError('primary_snapshot_parse_failed', error); }
+      return {
+        state,
+        candidate: candidate || null,
+        primaryCommit: primaryCommit || null,
+        snapshot,
+        snapshotFormat: 'metadata_raw_v1'
+      };
+    }
+    return readLegacyState(db, candidate, primaryCommit);
+  }
+
+'''
+          text = text[:start] + replacement + text[end:]
+
+          text = text.replace(
+              "      if (commit.mirrorHash && commit.mirrorHash !== hashValue(rawBefore)) throw new Error('committed_mirror_mismatch');",
+              "      if (commit.mirrorHash && commit.mirrorHash !== hashValue(rawBefore)) throw new Error('committed_mirror_mismatch');\n      if (rebuilt.snapshot) {\n        if (Number(rebuilt.snapshot.sequence) !== Number(commit.sequence)) throw new Error('committed_snapshot_sequence_mismatch');\n        if (rebuilt.snapshot.mirrorHash && rebuilt.snapshot.mirrorHash !== hashValue(rawBefore)) throw new Error('committed_snapshot_mirror_mismatch');\n        if (rebuilt.snapshot.stateHash && rebuilt.snapshot.stateHash !== destinationSummary.hashes.state) throw new Error('committed_snapshot_hash_mismatch');\n      }"
+          )
+          text = text.replace(
+              "        cacheRestoredFromIndexedDb: true,\n        countsMatch: true,\n        hashesMatch: true,\n        canonicalMatch: true,\n        mismatches: [],\n        cacheRestoredFromIndexedDb: false",
+              "        cacheRestoredFromIndexedDb: true,\n        countsMatch: true,\n        hashesMatch: true,\n        canonicalMatch: true,\n        mismatches: []"
+          )
+          text = text.replace(
+              "      tx.objectStore('metadata').delete(PRIMARY_COMMIT_ID);",
+              "      tx.objectStore('metadata').delete(PRIMARY_SNAPSHOT_ID);\n      tx.objectStore('metadata').delete(PRIMARY_COMMIT_ID);"
+          )
+          text = text.replace(
+              "      if (Number(rebuilt.candidate?.sequence) !== writeSequence) throw new Error('candidate_sequence_mismatch');",
+              "      if (Number(rebuilt.candidate?.sequence) !== writeSequence) throw new Error('candidate_sequence_mismatch');\n      if (Number(rebuilt.snapshot?.sequence) !== writeSequence) throw new Error('snapshot_sequence_mismatch');"
+          )
+          text = text.replace(
+              "        mirrorHash: hashValue(rawBefore),\n        verification,",
+              "        mirrorHash: hashValue(rawBefore),\n        snapshotId: PRIMARY_SNAPSHOT_ID,\n        snapshotFormat: 'metadata_raw_v1',\n        verification,"
+          )
+          text = text.replace(
+              "        serializedState: JSON.stringify(rebuilt.state),",
+              "        serializedState: rawBefore,"
+          )
+          text = text.replace(
+              "        mismatches: []\n      });",
+              "        mismatches: [],\n        cacheRestoredFromIndexedDb: false\n      });",
+              1
+          )
+          text = text.replace(
+              "  core.PHASE4_CANDIDATE_METADATA_ID = CANDIDATE_ID;\n  core.PHASE4_PRIMARY_COMMIT_METADATA_ID = PRIMARY_COMMIT_ID;",
+              "  core.PHASE4_CANDIDATE_METADATA_ID = CANDIDATE_ID;\n  core.PHASE4_PRIMARY_SNAPSHOT_METADATA_ID = PRIMARY_SNAPSHOT_ID;\n  core.PHASE4_PRIMARY_COMMIT_METADATA_ID = PRIMARY_COMMIT_ID;"
+          )
+          path.write_text(text)
+
+          test_path = Path('tests/phase4_storage_contract.test.js')
+          tests = test_path.read_text()
+          tests = tests.replace(
+              "  const taskRows = await getAll(harness.db, 'tasks');\n  const status = await harness.core.getPhase4StorageStatus({ indexedDB: harness.indexedDB });\n  assert.deepEqual(taskRows.map((row) => row.value.id), ['task-6']);",
+              "  const snapshot = await getRow(harness.db, 'metadata', 'phase4_primary_snapshot');\n  const status = await harness.core.getPhase4StorageStatus({ indexedDB: harness.indexedDB });\n  assert.equal(JSON.parse(snapshot.serializedState).tasks[0].id, 'task-6');"
+          )
+          old = """  const collections = await getAll(harness.db, 'collections');
+  const values = await getAll(harness.db, 'values');
+  const players = await getAll(harness.db, 'players');
+  assert.equal(collections.some((row) => row.kind === 'manifest' && row.field === 'schedule'), true);
+  assert.deepEqual(
+    collections.filter((row) => row.kind === 'item' && row.field === 'futureRows').map((row) => row.value.id),
+    ['duplicate', 'duplicate', undefined]
+  );
+  assert.equal(values.some((row) => row.field === 'youImageId' && row.value === 'profile-image'), true);
+  assert.equal(players[0].value.imageId, 'player-image');"""
+          new = """  const snapshot = await getRow(harness.db, 'metadata', 'phase4_primary_snapshot');
+  const restored = JSON.parse(snapshot.serializedState);
+  assert.deepEqual(restored.schedule, []);
+  assert.deepEqual(restored.futureRows.map((row) => row.id), ['duplicate', 'duplicate', undefined]);
+  assert.equal(restored.youImageId, 'profile-image');
+  assert.equal(restored.players[0].imageId, 'player-image');"""
+          if old not in tests:
+              raise SystemExit('unknown collection test block not found')
+          tests = tests.replace(old, new)
+          tests += r'''
+
+test('large Phase 4 saves use one metadata snapshot instead of repopulating row stores', async () => {
+  const harness = await install({ mode: 'verify_primary_writes' });
+  const state = fixture(18);
+  state.completions = Array.from({ length: 6000 }, (_, index) => ({ id: `c-${index}`, points: index % 20 }));
+  state.gameHistory = Array.from({ length: 4000 }, (_, index) => ({ id: `g-${index}`, score: index }));
+  const raw = JSON.stringify(state);
+  harness.localStorage.setItem(STORAGE_KEY, raw);
+  await harness.core.flushPhase4PrimaryWrites();
+
+  const snapshot = await getRow(harness.db, 'metadata', 'phase4_primary_snapshot');
+  const commit = await getRow(harness.db, 'metadata', 'phase4_primary_commit');
+  const status = harness.core.getPhase4StorageStatus();
+  assert.equal(snapshot.serializedState, raw);
+  assert.equal(snapshot.sequence, commit.sequence);
+  assert.equal(commit.snapshotFormat, 'metadata_raw_v1');
+  assert.equal(status.latestQueuedSequence, status.latestPassedSequence, JSON.stringify(status));
+  assert.deepEqual(await getAll(harness.db, 'completions'), []);
+  assert.deepEqual(await getAll(harness.db, 'gameHistory'), []);
+});
+
+test('the coordinator retains legacy row restore compatibility without using rows for new writes', () => {
+  const source = readPlannedModule();
+  assert.match(source, /PRIMARY_SNAPSHOT_ID = 'phase4_primary_snapshot'/);
+  assert.match(source, /async function readLegacyState/);
+  const candidateBlock = source.slice(source.indexOf('async function writeCandidate'), source.indexOf('async function readLegacyState'));
+  assert.match(candidateBlock, /db\.transaction\('metadata', 'readwrite'\)/);
+  assert.doesNotMatch(candidateBlock, /\.clear\(/);
+});
+'''
+          test_path.write_text(tests)
+          PY
+      - name: Validate
+        run: |
+          npm test
+          node --check phase4_storage_coordinator.js
+          node --check phase4_primary_read_path.js
+      - name: Commit validated fix and remove helper
+        run: |
+          rm .github/workflows/phase4-single-snapshot.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add phase4_storage_coordinator.js tests/phase4_storage_contract.test.js .github/workflows/phase4-single-snapshot.yml
+          git commit -m "Store Phase 4 as one verified snapshot"
+          git push origin HEAD:codex/phase4-single-snapshot
