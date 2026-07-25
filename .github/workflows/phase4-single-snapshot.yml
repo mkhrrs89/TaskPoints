@@ -1,15 +1,15 @@
 name: Build Phase 4 single snapshot
 
 on:
-  pull_request:
-    branches: [main]
+  push:
+    branches: [codex/phase4-single-snapshot]
 
 permissions:
   contents: write
 
 jobs:
   patch-test-push:
-    if: github.head_ref == 'codex/phase4-single-snapshot'
+    if: github.ref_name == 'codex/phase4-single-snapshot'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
