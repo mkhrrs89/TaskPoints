@@ -7,6 +7,9 @@
   const WINNER_CLASSES = ['yesterdayWinner', 'yesterdayWinnerScore'];
   const LOSER_CLASSES = ['yesterdayLoser', 'yesterdayLoserScore'];
   const PLAYER_PHOTO_FRAME_STYLE_ID = 'taskpoints-player-photo-frame-override';
+  const TRENDLINE_COLOR = '#F59E0B';
+  const TRENDLINE_PERIOD = 14;
+  const TRENDLINE_MAX_POINTS = 400;
   let installAttempts = 0;
 
   function getElement(id) {
@@ -136,6 +139,145 @@
     return true;
   }
 
+  function downsampleTrendEntries(entries) {
+    if (entries.length <= TRENDLINE_MAX_POINTS) return entries;
+    const step = Math.ceil(entries.length / TRENDLINE_MAX_POINTS);
+    return entries.filter((_, index) => index % step === 0 || index === entries.length - 1);
+  }
+
+  function getDailyTrendEntries(dailyTotals) {
+    if (!dailyTotals || typeof dailyTotals !== 'object') return [];
+    return downsampleTrendEntries(
+      Object.entries(dailyTotals)
+        .map(([key, total]) => ({ key, value: Number(total) }))
+        .filter((entry) => Number.isFinite(entry.value))
+        .sort((a, b) => a.key.localeCompare(b.key))
+    );
+  }
+
+  function getCaloriesTrendEntries(caloriesHistoryInput) {
+    const source = Array.isArray(caloriesHistoryInput)
+      ? caloriesHistoryInput.slice()
+      : (typeof global.getCaloriesHistorySorted === 'function' ? global.getCaloriesHistorySorted() : []);
+
+    return downsampleTrendEntries(
+      source
+        .map((entry) => ({
+          key: String(entry?.key || ''),
+          value: Number(entry?.calories)
+        }))
+        .filter((entry) => Number.isFinite(entry.value))
+        .sort((a, b) => a.key.localeCompare(b.key))
+    );
+  }
+
+  function drawMovingAverageAboveDots(canvasId, entries, referenceValue) {
+    const canvas = getElement(canvasId);
+    if (!canvas?.getContext || entries.length < 2) return false;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return false;
+
+    const width = canvas.clientWidth || 320;
+    const height = canvas.clientHeight || 80;
+    const dpr = global.devicePixelRatio || 1;
+    const values = entries.map((entry) => entry.value);
+    const rangeValues = Number.isFinite(referenceValue) ? [...values, referenceValue] : values;
+    const maxValue = Math.max(...rangeValues);
+    const minValue = Math.min(...rangeValues);
+    const range = (maxValue - minValue) || 1;
+    const paddingX = 6;
+    const paddingTop = 22;
+    const paddingBottom = 6;
+    const chartWidth = width - paddingX * 2;
+    const chartHeight = height - paddingTop - paddingBottom;
+    const count = entries.length;
+
+    const points = entries.map((entry, index) => ({
+      x: paddingX + (count === 1 ? chartWidth / 2 : chartWidth * index / (count - 1)),
+      value: entry.value
+    }));
+
+    const movingAveragePoints = points.map((point, index) => {
+      const start = Math.max(0, index - TRENDLINE_PERIOD + 1);
+      const slice = points.slice(start, index + 1);
+      const average = slice.reduce((sum, current) => sum + current.value, 0) / slice.length;
+      const normalized = (average - minValue) / range;
+      return {
+        x: point.x,
+        y: paddingTop + chartHeight - normalized * chartHeight
+      };
+    });
+
+    if (typeof ctx.save === 'function') ctx.save();
+    if (typeof ctx.setTransform === 'function') ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.beginPath();
+    ctx.strokeStyle = TRENDLINE_COLOR;
+    ctx.lineWidth = 0.9;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.moveTo(movingAveragePoints[0].x, movingAveragePoints[0].y);
+
+    for (let index = 1; index < movingAveragePoints.length - 1; index += 1) {
+      const current = movingAveragePoints[index];
+      const next = movingAveragePoints[index + 1];
+      ctx.quadraticCurveTo(
+        current.x,
+        current.y,
+        (current.x + next.x) / 2,
+        (current.y + next.y) / 2
+      );
+    }
+
+    const last = movingAveragePoints[movingAveragePoints.length - 1];
+    ctx.lineTo(last.x, last.y);
+    ctx.stroke();
+    if (typeof ctx.restore === 'function') ctx.restore();
+    return true;
+  }
+
+  function wrapTrendRenderer(functionName, canvasId, entriesBuilder, referenceValue) {
+    const original = global[functionName];
+    if (typeof original !== 'function') return false;
+    if (original.__taskPointsTrendLineAboveDots) return true;
+
+    const wrapped = function taskPointsTrendLineAboveDots(...args) {
+      const result = original.apply(this, args);
+      try {
+        drawMovingAverageAboveDots(canvasId, entriesBuilder(args[0]), referenceValue);
+      } catch (error) {
+        console.warn(`TaskPoints could not redraw ${functionName} trendline above its dots.`, error);
+      }
+      return result;
+    };
+
+    wrapped.__taskPointsTrendLineAboveDots = true;
+    wrapped.__taskPointsOriginal = original;
+    global[functionName] = wrapped;
+    return true;
+  }
+
+  function installTrendLineLayering() {
+    const hasScoreCanvas = Boolean(getElement('dailyTrend'));
+    const hasCaloriesCanvas = Boolean(getElement('caloriesTrend'));
+    if (!hasScoreCanvas && !hasCaloriesCanvas) return true;
+
+    const scoreReady = !hasScoreCanvas || wrapTrendRenderer(
+      'drawDailyTrend',
+      'dailyTrend',
+      getDailyTrendEntries,
+      null
+    );
+    const caloriesReady = !hasCaloriesCanvas || wrapTrendRenderer(
+      'drawCaloriesTrend',
+      'caloriesTrend',
+      getCaloriesTrendEntries,
+      2600
+    );
+
+    return scoreReady && caloriesReady;
+  }
+
   function installPatch() {
     if (typeof global.renderYesterdaysResult !== 'function'
       || typeof global.getCompletedYouMatchupsForStats !== 'function') {
@@ -159,7 +301,9 @@
   }
 
   function installWhenReady() {
-    if (installPatch()) return;
+    const resultPatchReady = installPatch();
+    const trendLayeringReady = installTrendLineLayering();
+    if (resultPatchReady && trendLayeringReady) return;
     installAttempts += 1;
     if (installAttempts < 40) global.setTimeout?.(installWhenReady, 50);
   }
@@ -167,7 +311,9 @@
   global.TaskPointsHomeYesterdayResultConsistency = {
     applySavedYesterdayResult,
     installPatch,
-    installPlayerPhotoFrameOverride
+    installPlayerPhotoFrameOverride,
+    installTrendLineLayering,
+    drawMovingAverageAboveDots
   };
 
   installPlayerPhotoFrameOverride();
