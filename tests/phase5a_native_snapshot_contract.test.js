@@ -183,7 +183,7 @@ async function install({ mode = 'indexeddb_primary', mirrorRaw = 'opaque-compres
     shadowCanonicalJson: canonical,
     shadowSourceSummary: summary,
     normalizeState(value) { nativeNormalizeCalls += 1; return structuredClone(value); },
-    syncDerivedPoints(value) { return { state: value, changed: false }; },
+    syncDerivedPoints(value) { return { state: value, changed: true }; },
     syncYouMatchups(value) { return { state: value, changed: false }; },
     repairSeasonChampionshipData(value) { return { ok: false, state: value }; },
     mergeAndSaveState() { throw new Error('native read must not persist'); },
@@ -242,7 +242,7 @@ test('restores and serves native state without parsing or stringifying the opaqu
   harness.core.clearPhase5ANativeSnapshotCache();
   const restored = await harness.core.restorePhase5ANativeSnapshot();
   assert.equal(restored, true);
-  const loaded = harness.core.loadAppState({ persistSync: false });
+  const loaded = harness.core.loadAppState();
   assert.deepEqual(loaded.state, harness.state);
   assert.equal(harness.localStorage.getItem(STORAGE_KEY), harness.mirrorRaw);
   assert.equal(harness.core.getPhase5ANativeSnapshotStatus().cacheReady, true);
@@ -258,6 +258,25 @@ test('falls back when the rollback mirror changes', async () => {
   harness.localStorage.setItem(STORAGE_KEY, JSON.stringify({ tasks: [{ id: 'newer' }] }));
   const loaded = harness.core.loadAppState({ persistSync: false });
   assert.equal(loaded.state.tasks[0].id, 'newer');
+  assert.equal(harness.fallbackLoadCalls(), 1);
+});
+
+
+test('falls back while a pending habit journal exists', async () => {
+  const state = { tasks: [{ id: 'journal-safe' }] };
+  const mirrorRaw = JSON.stringify({
+    reminders: [], completions: [], players: [], habits: [], flexActions: [], gameHistory: [], matchups: [],
+    schedule: [], opponentDripSchedules: [], weightHistory: [], vo2MaxHistory: [], workHistory: [],
+    liveDiffHistory: {}, liveDiffSnapshots: {}, projects: [], notes: '', habitTagColors: {}, scoringSettings: {},
+    playerBadges: {}, currentSeason: null, latestSeasonId: '', seasonHistory: [],
+    ...state
+  });
+  const harness = await install({ mode: 'indexeddb_primary', mirrorRaw, state });
+  await harness.core.queuePhase5ANativeSnapshotWrite();
+  await harness.core.flushPhase5ANativeSnapshotWrites();
+  harness.localStorage.setItem(JOURNAL_KEY, JSON.stringify([{ id: 'pending', habitId: 'h1', dayKey: '2026-07-26', source: 'habit' }]));
+  const loaded = harness.core.loadAppState({ persistSync: false });
+  assert.equal(loaded.state.tasks[0].id, 'journal-safe');
   assert.equal(harness.fallbackLoadCalls(), 1);
 });
 
