@@ -41,6 +41,7 @@
     }
     return `${(result >>> 0).toString(16).padStart(8, '0')}:${text.length}`;
   }
+
   function diagnostics(patch) {
     let current = {};
     try { current = JSON.parse(get(DIAG_KEY) || '{}') || {}; } catch (_) {}
@@ -53,12 +54,14 @@
       }));
     } catch (_) {}
   }
+
   function requestResult(request) {
     return new Promise((resolve, reject) => {
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error || new Error('phase5a_request_failed'));
     });
   }
+
   function transactionDone(tx) {
     return new Promise((resolve, reject) => {
       tx.oncomplete = resolve;
@@ -66,6 +69,7 @@
       tx.onerror = () => undefined;
     });
   }
+
   function openDb() {
     return new Promise((resolve, reject) => {
       const request = global.indexedDB.open(core.SHADOW_MIGRATION_DB_NAME, core.SHADOW_MIGRATION_DB_VERSION || 1);
@@ -82,6 +86,7 @@
       request.onblocked = () => reject(new Error('phase5a_open_blocked'));
     });
   }
+
   async function readRows(db) {
     const tx = db.transaction(META, 'readonly');
     const store = tx.objectStore(META);
@@ -90,6 +95,7 @@
     const [snapshot, commit] = await Promise.all([snapshotRequest, commitRequest]);
     return { snapshot: snapshot || null, commit: commit || null };
   }
+
   async function removeSnapshot() {
     let db;
     try {
@@ -102,6 +108,7 @@
     } finally { db?.close?.(); }
     cache = null;
   }
+
   function makeCache(record, mirrorRaw, restored) {
     const stateInfo = summary(record.state);
     return {
@@ -109,7 +116,8 @@
       sequence: Number(record.sequence) || 0,
       committedSequence: Number(record.sequence) || 0,
       state: clone(record.state),
-      serializedState: JSON.stringify(record.state),
+      serializedState: null,
+      stateHash: record.stateHash || stateInfo.hashes.state,
       sourceHash: record.stateHash || stateInfo.hashes.state,
       destinationHash: record.stateHash || stateInfo.hashes.state,
       sourceCounts: record.counts || stateInfo.counts,
@@ -122,16 +130,17 @@
       restoredFromNativeIndexedDb: restored === true
     };
   }
+
   function valid(current, mirrorRaw) {
     return Boolean(current
       && current.status === 'passed_verification'
       && current.state && typeof current.state === 'object' && !Array.isArray(current.state)
       && mirrorRaw !== null && current.mirrorRaw === mirrorRaw
-      && (!current.mirrorHash || current.mirrorHash === hash(mirrorRaw))
       && (Number(core.getPendingShadowDualWriteCount?.()) || 0) === 0
       && (Number(core.getPendingPhase4WriteCount?.()) || 0) === 0
       && journalCount() === 0);
   }
+
   function setCache(next) {
     cache = next || null;
     if (cache) core.setPhase4VerifiedPrimaryCache?.(cache, { persist: false });
@@ -189,10 +198,19 @@
       verifyTx.objectStore(META).put(verified);
       await transactionDone(verifyTx);
       setCache(makeCache(verified, mirrorRaw, false));
-      diagnostics({ phase5aNativeSnapshotStatus: 'passed_verification', phase5aNativeSnapshotSequence: sequence, phase5aNativeSnapshotLastWriteAt: verified.verifiedAt, phase5aNativeSnapshotLastError: null });
+      diagnostics({
+        phase5aNativeSnapshotStatus: 'passed_verification',
+        phase5aNativeSnapshotSequence: sequence,
+        phase5aNativeSnapshotLastWriteAt: verified.verifiedAt,
+        phase5aNativeSnapshotLastError: null
+      });
       return true;
     } catch (error) {
-      diagnostics({ phase5aNativeSnapshotStatus: 'fallback', phase5aNativeSnapshotLastError: String(error?.message || error), phase5aNativeSnapshotLastFallbackAt: new Date().toISOString() });
+      diagnostics({
+        phase5aNativeSnapshotStatus: 'fallback',
+        phase5aNativeSnapshotLastError: String(error?.message || error),
+        phase5aNativeSnapshotLastFallbackAt: new Date().toISOString()
+      });
       return false;
     } finally { db?.close?.(); }
   }
@@ -216,11 +234,20 @@
       if (!snapshot.state || summary(snapshot.state).hashes.state !== snapshot.stateHash) throw new Error('phase5a_state_mismatch');
       if (get(core.STORAGE_KEY) !== mirrorRaw || journalCount() > 0) throw new Error('phase5a_restore_invalidated');
       setCache(makeCache(snapshot, mirrorRaw, true));
-      diagnostics({ phase5aNativeSnapshotStatus: 'restored', phase5aNativeSnapshotSequence: Number(snapshot.sequence) || 0, phase5aNativeSnapshotLastRestoreAt: new Date().toISOString(), phase5aNativeSnapshotLastError: null });
+      diagnostics({
+        phase5aNativeSnapshotStatus: 'restored',
+        phase5aNativeSnapshotSequence: Number(snapshot.sequence) || 0,
+        phase5aNativeSnapshotLastRestoreAt: new Date().toISOString(),
+        phase5aNativeSnapshotLastError: null
+      });
       return true;
     } catch (error) {
       cache = null;
-      diagnostics({ phase5aNativeSnapshotStatus: 'fallback', phase5aNativeSnapshotLastError: String(error?.message || error), phase5aNativeSnapshotLastFallbackAt: new Date().toISOString() });
+      diagnostics({
+        phase5aNativeSnapshotStatus: 'fallback',
+        phase5aNativeSnapshotLastError: String(error?.message || error),
+        phase5aNativeSnapshotLastFallbackAt: new Date().toISOString()
+      });
       return false;
     } finally { db?.close?.(); }
   }
@@ -235,6 +262,7 @@
       }
     } finally { writeRunning = false; }
   }
+
   function queueWrite() {
     if (mode() === 'off') return Promise.resolve(false);
     writeRevision += 1;
@@ -243,6 +271,7 @@
     writeTail = Promise.resolve().then(runWrites).catch(() => { writeRunning = false; });
     return writeTail;
   }
+
   function warm() {
     if (mode() !== 'indexeddb_primary') return Promise.resolve(false);
     if (valid(cache, get(core.STORAGE_KEY))) return Promise.resolve(true);
@@ -254,35 +283,41 @@
     return restorePromise;
   }
 
-  function substituteState(expectedMirror, expectedJournal, stateJson, callback) {
-    const storage = global.localStorage;
-    let used = false; let changed = false;
-    const replace = (read, key) => {
-      if (String(key) === core.STORAGE_KEY) {
-        const live = read();
-        if (live === expectedMirror) { used = true; return stateJson; }
-        changed = true; return live;
+  function loadNativeState(sourceState, options = {}) {
+    let state = core.normalizeState(clone(sourceState || {}));
+    const pendingHabitDeltas = [];
+    const shouldSync = options.syncDerived !== false;
+    const shouldPersist = options.persistSync !== false;
+    let changed = false;
+
+    const cutoff = Date.now() - (30 * 24 * 60 * 60 * 1000);
+    const beforeCount = state.tasks.length;
+    state.tasks = state.tasks.filter((task) => {
+      if (!task || task.status !== 'trashed') return true;
+      const deletedMs = Date.parse(task.deletedAtISO || task.deletedAt || '');
+      return (Number.isFinite(deletedMs) ? deletedMs : 0) >= cutoff;
+    });
+    if (state.tasks.length !== beforeCount) changed = true;
+
+    if (shouldSync) {
+      const derivedSync = core.syncDerivedPoints(state, { normalized: true });
+      state = derivedSync.state;
+      changed = changed || derivedSync.changed;
+
+      const matchupSync = core.syncYouMatchups(state, { normalized: true });
+      state = matchupSync.state;
+      changed = changed || matchupSync.changed;
+
+      const seasonRepair = core.repairSeasonChampionshipData(state, options);
+      if (seasonRepair.ok) {
+        const beforeSeasonRepair = JSON.stringify(state.currentSeason || null);
+        state = seasonRepair.state;
+        changed = changed || beforeSeasonRepair !== JSON.stringify(state.currentSeason || null);
       }
-      if (String(key) === core.PENDING_HABIT_DELTAS_KEY) {
-        const live = read();
-        if (live === expectedJournal) return expectedJournal;
-        changed = true; return null;
-      }
-      return read();
-    };
-    const prototype = global.Storage?.prototype;
-    if (prototype?.getItem) {
-      const original = prototype.getItem;
-      prototype.getItem = function phase5aGetItem(key) {
-        return this === storage ? replace(() => original.call(this, key), key) : original.call(this, key);
-      };
-      try { const result = callback(); return { result, used, changed }; }
-      finally { prototype.getItem = original; }
     }
-    const original = storage.getItem;
-    storage.getItem = (key) => replace(() => original.call(storage, key), key);
-    try { const result = callback(); return { result, used, changed }; }
-    finally { storage.getItem = original; }
+
+    if (changed && shouldPersist) core.mergeAndSaveState(state, { storageKey: core.STORAGE_KEY });
+    return { state, storageKeysFound: [core.STORAGE_KEY], pendingHabitDeltas };
   }
 
   function nativeLoad(args) {
@@ -291,45 +326,59 @@
     if (!valid(cache, mirrorRaw)) { cache = null; warm(); return originalLoad.apply(core, args); }
 
     const journalRaw = get(core.PENDING_HABIT_DELTAS_KEY);
-    const getMode = core.getPhase4StorageMode;
     const options = args[0] && typeof args[0] === 'object' && !Array.isArray(args[0])
       ? { ...args[0], persistSync: false }
       : { persistSync: false };
+
     serving = true;
     try {
-      core.getPhase4StorageMode = () => 'off';
-      const attempt = substituteState(mirrorRaw, journalRaw, cache.serializedState, () => originalLoad.call(core, options));
-      if (!attempt.used || attempt.changed || get(core.STORAGE_KEY) !== mirrorRaw || get(core.PENDING_HABIT_DELTAS_KEY) !== journalRaw) {
-        cache = null; warm(); return originalLoad.apply(core, args);
+      const result = loadNativeState(cache.state, options);
+      if (get(core.STORAGE_KEY) !== mirrorRaw || get(core.PENDING_HABIT_DELTAS_KEY) !== journalRaw) {
+        cache = null;
+        warm();
+        return originalLoad.apply(core, args);
       }
-      diagnostics({ effectiveSource: 'indexedDB_native', phase5aNativeSnapshotStatus: 'serving', phase5aNativeSnapshotLastReadAt: new Date().toISOString(), phase5aNativeSnapshotLastError: null });
-      return attempt.result;
+      diagnostics({
+        effectiveSource: 'indexedDB_native',
+        phase5aNativeSnapshotStatus: 'serving',
+        phase5aNativeSnapshotLastReadAt: new Date().toISOString(),
+        phase5aNativeSnapshotLastError: null
+      });
+      return result;
     } catch (_) {
-      cache = null; warm(); return originalLoad.apply(core, args);
-    } finally {
-      core.getPhase4StorageMode = getMode;
-      serving = false;
-    }
+      cache = null;
+      warm();
+      return originalLoad.apply(core, args);
+    } finally { serving = false; }
   }
 
   function installHooks() {
     const storage = global.localStorage;
     if (!storage) return;
+
     try {
-      const set = storage.setItem.bind(storage);
-      const remove = storage.removeItem?.bind(storage);
-      storage.setItem = function phase5aSetItem(key, value) {
-        const result = set(key, value);
-        if (String(key) === core.STORAGE_KEY && mode() !== 'off') queueWrite();
-        return result;
-      };
-      if (remove) storage.removeItem = function phase5aRemoveItem(key) {
-        const result = remove(key);
-        if (String(key) === core.STORAGE_KEY) removeSnapshot();
-        return result;
-      };
-      return;
+      if (!storage.__taskPointsPhase5AInstanceHookInstalled && typeof storage.setItem === 'function') {
+        const set = storage.setItem.bind(storage);
+        const remove = typeof storage.removeItem === 'function' ? storage.removeItem.bind(storage) : null;
+        const wrappedSet = function phase5aSetItem(key, value) {
+          const result = set(key, value);
+          if (String(key) === core.STORAGE_KEY && mode() !== 'off') queueWrite();
+          return result;
+        };
+        const wrappedRemove = remove ? function phase5aRemoveItem(key) {
+          const result = remove(key);
+          if (String(key) === core.STORAGE_KEY) removeSnapshot();
+          return result;
+        } : null;
+        storage.setItem = wrappedSet;
+        if (wrappedRemove) storage.removeItem = wrappedRemove;
+        if (storage.setItem === wrappedSet) {
+          Object.defineProperty(storage, '__taskPointsPhase5AInstanceHookInstalled', { value: true, configurable: true });
+          return;
+        }
+      }
     } catch (_) {}
+
     const prototype = global.Storage?.prototype;
     if (!prototype?.setItem || prototype.__taskPointsPhase5AOriginalSetItem) return;
     const set = prototype.setItem;
@@ -339,6 +388,15 @@
       if (this === storage && String(key) === core.STORAGE_KEY && mode() !== 'off') queueWrite();
       return result;
     };
+    if (prototype.removeItem && !prototype.__taskPointsPhase5AOriginalRemoveItem) {
+      const remove = prototype.removeItem;
+      Object.defineProperty(prototype, '__taskPointsPhase5AOriginalRemoveItem', { value: remove, configurable: true });
+      prototype.removeItem = function phase5aRemoveItem(key) {
+        const result = remove.call(this, key);
+        if (this === storage && String(key) === core.STORAGE_KEY) removeSnapshot();
+        return result;
+      };
+    }
   }
 
   core.PHASE5A_NATIVE_SNAPSHOT_METADATA_ID = ID;
@@ -348,7 +406,13 @@
   core.restorePhase5ANativeSnapshot = restoreSnapshot;
   core.queuePhase5ANativeSnapshotWrite = queueWrite;
   core.flushPhase5ANativeSnapshotWrites = () => writeTail.catch(() => undefined);
-  core.getPhase5ANativeSnapshotStatus = () => ({ enabled: true, format: FORMAT, cacheReady: valid(cache, get(core.STORAGE_KEY)), pendingWrite: writeRunning, restorePending: Boolean(restorePromise) });
+  core.getPhase5ANativeSnapshotStatus = () => ({
+    enabled: true,
+    format: FORMAT,
+    cacheReady: valid(cache, get(core.STORAGE_KEY)),
+    pendingWrite: writeRunning,
+    restorePending: Boolean(restorePromise)
+  });
 
   core.flushPhase4PrimaryWrites = async (...args) => {
     const result = await originalFlush(...args);
