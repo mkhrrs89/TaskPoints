@@ -46,21 +46,27 @@
   function applySavedYesterdayResult() {
     if (typeof global.getCompletedYouMatchupsForStats !== 'function') return false;
 
+    const panel = getElement('yesterdayResultsPanel');
     const yesterdayKey = getYesterdayGameKey();
     const completedRows = global.getCompletedYouMatchupsForStats();
     const matchup = (Array.isArray(completedRows) ? completedRows : [])
       .find((row) => row?.dateKey === yesterdayKey);
-    if (!matchup) return false;
+    if (!matchup) {
+      panel?.classList?.remove('yesterday-tie');
+      return false;
+    }
 
     const youScore = Number(matchup.youScore);
     const opponentScore = Number(matchup.oppScore);
-    if (!Number.isFinite(youScore) || !Number.isFinite(opponentScore)) return false;
+    if (!Number.isFinite(youScore) || !Number.isFinite(opponentScore)) {
+      panel?.classList?.remove('yesterday-tie');
+      return false;
+    }
 
     const result = normalizeResult(matchup, youScore, opponentScore);
     const youAreA = matchup.playerAId === 'YOU';
     const opponentId = youAreA ? matchup.playerBId : matchup.playerAId;
 
-    const panel = getElement('yesterdayResultsPanel');
     const yourName = getElement('yesterdayYouName');
     const yourScoreElement = getElement('yesterdayYourScore');
     const opponentName = getElement('yesterdayOpponent');
