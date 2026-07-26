@@ -6,10 +6,29 @@
 
   const WINNER_CLASSES = ['yesterdayWinner', 'yesterdayWinnerScore'];
   const LOSER_CLASSES = ['yesterdayLoser', 'yesterdayLoserScore'];
+  const PLAYER_PHOTO_FRAME_STYLE_ID = 'taskpoints-player-photo-frame-override';
   let installAttempts = 0;
 
   function getElement(id) {
     return global.document?.getElementById?.(id) || null;
+  }
+
+  function installPlayerPhotoFrameOverride() {
+    const document = global.document;
+    if (!document?.head || typeof document.createElement !== 'function') return false;
+    if (document.getElementById?.(PLAYER_PHOTO_FRAME_STYLE_ID)) return true;
+
+    const style = document.createElement('style');
+    style.id = PLAYER_PHOTO_FRAME_STYLE_ID;
+    style.textContent = `
+/* Players page: remove the silver gradient frame while retaining the black photo edge. */
+.player-img-frame {
+  padding: 0 !important;
+  background: transparent !important;
+}
+`;
+    document.head.appendChild(style);
+    return true;
   }
 
   function fallbackDateKey(date) {
@@ -147,8 +166,11 @@
 
   global.TaskPointsHomeYesterdayResultConsistency = {
     applySavedYesterdayResult,
-    installPatch
+    installPatch,
+    installPlayerPhotoFrameOverride
   };
+
+  installPlayerPhotoFrameOverride();
 
   if (global.document?.readyState === 'loading') {
     global.document.addEventListener?.('DOMContentLoaded', installWhenReady, { once: true });
