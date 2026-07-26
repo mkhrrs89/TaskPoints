@@ -49,8 +49,9 @@ function install(options = {}) {
     taskpoints_phase4_storage_mode_v1: options.mode || 'indexeddb_primary',
     taskpoints_pending_habit_deltas_v1: '[]'
   });
-  let phase4Cache = { status: 'passed_verification', sequence: 4, committedSequence: 4, state: baseState(), mirrorRaw: localStorage.getItem(STORAGE_KEY) };
-  let nativeCache = null;
+  let phase4Cache = options.phase4Cache || { status: 'passed_verification', sequence: 4, committedSequence: 4, state: baseState(), mirrorRaw: localStorage.getItem(STORAGE_KEY) };
+  let nativeCache = options.nativeCache ? clone(options.nativeCache) : null;
+  let mergeCalls = 0;
   let originalSaveCalls = 0;
   let originalValidatedCalls = 0;
   let nativeQueueCalls = 0;
@@ -61,15 +62,15 @@ function install(options = {}) {
     PENDING_HABIT_DELTAS_KEY: 'taskpoints_pending_habit_deltas_v1',
     getPhase4StorageMode: () => localStorage.getItem('taskpoints_phase4_storage_mode_v1') || 'off',
     normalizeState: normalize,
-    mergeState(next, opts = {}) { return { state: normalize(deepMerge(opts.existing || JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'), next || {})), storageKey: opts.storageKey || STORAGE_KEY }; },
-    loadAppState() { return { state: normalize(JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}')), storageKeysFound: [STORAGE_KEY], pendingHabitDeltas: [] }; },
+    mergeState(next, opts = {}) { mergeCalls++; return { state: normalize(deepMerge(opts.existing || JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'), next || {})), storageKey: opts.storageKey || STORAGE_KEY }; },
+    loadAppState() { return { state: normalize(options.loadedState || JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}')), storageKeysFound: [STORAGE_KEY], pendingHabitDeltas: [] }; },
     saveAppState() { originalSaveCalls++; return { state: normalize({ original: true }) }; },
     mergeAndSaveState() { originalSaveCalls++; return { state: normalize({ original: true }) }; },
     saveStateSnapshot(state) { originalSaveCalls++; localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); return { state }; },
     saveValidatedSnapshot(state) { originalValidatedCalls++; localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); return { state }; },
     readTaskPointsStoredState() { return normalize(JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}')); },
     writeTaskPointsStoredState(state) { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); return localStorage.getItem(STORAGE_KEY); },
-    safeReplaceTaskPointsStorage(key, raw) { localStorage.setItem(key, raw); },
+    safeReplaceTaskPointsStorage(key, raw) { if (options.failCheckpoint) throw new Error('forced_checkpoint_failure'); localStorage.setItem(key, raw); },
     buildOptimizedTaskPointsStorageRaw(state) { const raw = JSON.stringify(state); return { chosenRaw: raw, chosenEncoding: 'plain-json' }; },
     compactStateForLocalStorage: (state) => clone(state),
     parseTaskPointsStorageJson: (raw) => JSON.parse(raw),
@@ -95,6 +96,7 @@ function install(options = {}) {
       if (value && typeof value === 'object') return `{${Object.keys(value).sort().map(k => `${JSON.stringify(k)}:${core.shadowCanonicalJson(value[k])}`).join(',')}}`;
       return JSON.stringify(value);
     },
+    shadowSourceSummary(value) { return { hashes: { state: core.shadowCanonicalJson(value || {}) } }; },
     readPendingHabitDeltas: () => JSON.parse(localStorage.getItem('taskpoints_pending_habit_deltas_v1') || '[]'),
     applyPendingHabitDeltas: (state, deltas) => { state.pendingApplied = deltas.length; return { state }; }
   };
@@ -121,7 +123,8 @@ function install(options = {}) {
     originalSaveCalls: () => originalSaveCalls,
     originalValidatedCalls: () => originalValidatedCalls,
     nativeQueueCalls: () => nativeQueueCalls,
-    nativeCache: () => nativeCache
+    nativeCache: () => nativeCache,
+    mergeCalls: () => mergeCalls
   };
 }
 
@@ -149,6 +152,27 @@ test('journal reconstructs latest state synchronously after a reload before chec
   assert.equal(second.core.getPhase5BStatus().journalPresent, true);
 });
 
+test('reload does not replay a journal already included in the verified native snapshot', async () => {
+  const first = install();
+  first.core.saveAppState({ tasks: [{ id: 't1', title: 'Native already has this' }] }, { savePath: 'task-edit' });
+  await first.core.flushPhase5BNativeWrites();
+  const second = install({ localStorage: first.localStorage, loadedState: first.nativeCache().state, nativeCache: first.nativeCache() });
+  assert.equal(second.mergeCalls(), 0);
+  const before = second.mergeCalls();
+  const loaded = second.core.loadAppState({ persistSync: false });
+  assert.equal(loaded.state.tasks[0].title, 'Native already has this');
+  assert.equal(second.mergeCalls(), before);
+});
+
+test('Phase 5B revisions remain monotonic across checkpoints and reloads', () => {
+  const first = install();
+  const one = first.core.saveAppState({ tasks: [{ id: 't1', title: 'One' }] }, { savePath: 'task-edit' });
+  first.core.flushPhase5BMirrorCheckpoint('test');
+  const second = install({ localStorage: first.localStorage, base: one.state });
+  const two = second.core.saveAppState({ tasks: [{ id: 't1', title: 'Two' }] }, { savePath: 'task-edit' });
+  assert.ok(two.phase5bRevision > one.phase5bRevision);
+});
+
 test('manual checkpoint writes compressed-mirror candidate and clears journal', () => {
   const h = install();
   h.core.saveAppState({ tasks: [{ id: 't1', title: 'Checkpointed' }] }, { savePath: 'task-edit' });
@@ -165,6 +189,17 @@ test('destructive validated snapshot bypasses deferred path after checkpoint', (
   assert.equal(h.originalValidatedCalls(), 1);
   assert.equal(result.state.tasks[0].id, 'imported');
   assert.equal(h.localStorage.getItem(JOURNAL_KEY), null);
+});
+
+test('destructive saves are blocked when pending changes cannot be checkpointed', () => {
+  const h = install({ failCheckpoint: true });
+  h.core.saveAppState({ tasks: [{ id: 't1', title: 'Pending' }] }, { savePath: 'task-edit' });
+  const replacement = normalize({ tasks: [{ id: 'imported', title: 'Imported' }] });
+  const result = h.core.saveValidatedSnapshot(replacement, { allowDestructiveOverwrite: true, source: 'import' });
+  assert.equal(result.blocked, true);
+  assert.equal(result.reason, 'phase5b_checkpoint_failed');
+  assert.equal(h.originalValidatedCalls(), 0);
+  assert.ok(h.localStorage.getItem(JOURNAL_KEY));
 });
 
 test('pagehide forces the rollback checkpoint', () => {
@@ -187,13 +222,23 @@ test('habit journal defers native write until the crash-safe journal clears', as
   assert.equal(h.nativeCache().state.tasks[0].title, 'Habit-safe');
 });
 
-test('habit journal compaction keeps the original synchronous mirror path', () => {
+test('direct stored-state readers still replay pending habit deltas', () => {
   const h = install();
-  const state = normalize({ tasks: [{ id: 't1', title: 'Compacted' }] });
-  const result = h.core.saveStateSnapshot(state, { savePath: 'habit-journal-startup-compaction', interactive: true, deferCompression: true });
+  h.localStorage.setItem('taskpoints_pending_habit_deltas_v1', JSON.stringify([{ id: 'h1', habitId: 'h1', dayKey: '2026-07-26', source: 'habit' }]));
+  const state = h.core.readTaskPointsStoredState(STORAGE_KEY, {});
+  assert.equal(state.pendingApplied, 1);
+});
+
+test('habit journal compaction keeps the original synchronous mirror path without dropping newer Phase 5B changes', () => {
+  const h = install();
+  h.core.saveAppState({ tasks: [{ id: 't1', title: 'Newer Phase 5B edit' }] }, { savePath: 'task-edit' });
+  h.localStorage.setItem('taskpoints_pending_habit_deltas_v1', JSON.stringify([{ id: 'h1', habitId: 'h1', dayKey: '2026-07-26', source: 'habit' }]));
+  const staleState = normalize({ tasks: [{ id: 't1', title: 'Stale compaction state' }] });
+  const result = h.core.saveStateSnapshot(staleState, { savePath: 'habit-journal-startup-compaction', interactive: true, deferCompression: true });
   assert.equal(h.originalSaveCalls(), 1);
-  assert.equal(result.state.tasks[0].title, 'Compacted');
-  assert.equal(JSON.parse(h.localStorage.getItem(STORAGE_KEY)).tasks[0].title, 'Compacted');
+  assert.equal(result.state.tasks[0].title, 'Newer Phase 5B edit');
+  assert.equal(result.state.pendingApplied, 1);
+  assert.equal(JSON.parse(h.localStorage.getItem(STORAGE_KEY)).tasks[0].title, 'Newer Phase 5B edit');
   assert.equal(h.localStorage.getItem(JOURNAL_KEY), null);
 });
 
