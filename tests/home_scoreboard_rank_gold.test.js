@@ -7,6 +7,7 @@ const vm = require('node:vm');
 const root = path.resolve(__dirname, '..');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const css = fs.readFileSync(path.join(root, 'styles.css'), 'utf8');
+const worker = fs.readFileSync(path.join(root, '_worker.js'), 'utf8');
 
 function functionSource(name) {
   const start = html.indexOf(`function ${name}(`);
@@ -48,7 +49,7 @@ function buildHomepageHelpers() {
   return context;
 }
 
-test('Home scoreboard places the unique inline ranks around safely truncating names', () => {
+test('Home scoreboard places the unique inline ranks around complete names', () => {
   assert.equal((html.match(/id="matchupYourRank"/g) || []).length, 1);
   assert.equal((html.match(/id="matchupOpponentRank"/g) || []).length, 1);
   assert.match(html, /scoreboard-name-row--you[\s\S]*?id="matchupYourName"[\s\S]*?id="matchupYourRank"/);
@@ -57,7 +58,11 @@ test('Home scoreboard places the unique inline ranks around safely truncating na
   assert.match(html, /id="matchupYourGold"[\s\S]*?>Gold: 0\.0</);
   assert.match(html, /id="matchupOpponentGold"[\s\S]*?>Gold: —</);
   assert.match(css, /\.scoreboard-name-row \{[\s\S]*?display: flex;[\s\S]*?min-width: 0;/);
-  assert.match(css, /\.scoreboard-name-row \.scoreboard-name \{[\s\S]*?overflow: hidden;[\s\S]*?text-overflow: ellipsis;/);
+  assert.match(worker, /if \(url\.pathname === '\/styles\.css'\)[\s\S]*?scoreboardNameOverride/);
+  assert.match(worker, /\.scoreboard-name-row \.scoreboard-name \{[\s\S]*?overflow: visible;[\s\S]*?text-overflow: clip;[\s\S]*?white-space: normal;[\s\S]*?overflow-wrap: anywhere;/);
+  assert.match(worker, /\.scoreboard-name-row--opponent \.scoreboard-name \{[\s\S]*?text-align: right;/);
+  assert.match(worker, /\.home-scoreboard-card \.matchup-scoreboard \{[\s\S]*?--scoreboard-name-height: calc\(1\.1em \* 2\);/);
+  assert.match(worker, /new Response\(`\$\{stylesSource\}\\n\$\{scoreboardNameOverride\}\\n`/);
   assert.match(css, /\.scoreboard-rank-inline \{[\s\S]*?color: #fff;[\s\S]*?font-variant-numeric: tabular-nums;/);
   assert.match(css, /\.scoreboard-gold \{[\s\S]*?color: #fb923c;[\s\S]*?font-variant-numeric: tabular-nums;/);
 });
