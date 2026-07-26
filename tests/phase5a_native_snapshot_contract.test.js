@@ -138,23 +138,32 @@ async function getMetadata(indexedDB, key) {
 }
 
 async function install({ mode = 'indexeddb_primary', mirrorRaw = 'opaque-compressed-mirror', state = { tasks: [{ id: 't1' }] } } = {}) {
+  const completeState = {
+    reminders: [], completions: [], players: [], habits: [], flexActions: [], gameHistory: [], matchups: [],
+    schedule: [], opponentDripSchedules: [], weightHistory: [], vo2MaxHistory: [], workHistory: [],
+    liveDiffHistory: {}, liveDiffSnapshots: {}, projects: [], notes: '', habitTagColors: {}, scoringSettings: {},
+    playerBadges: {}, currentSeason: null, latestSeasonId: '', seasonHistory: [],
+    ...state
+  };
   const localStorage = new FakeStorage({ [MODE_KEY]: mode, [STORAGE_KEY]: mirrorRaw, [JOURNAL_KEY]: '[]' });
   const indexedDB = createFakeIndexedDb();
-  await seedCommit(indexedDB, mirrorRaw, state);
+  await seedCommit(indexedDB, mirrorRaw, completeState);
   let phase4Cache = {
     schemaVersion: 1,
     sequence: 3,
     committedSequence: 3,
-    state: structuredClone(state),
+    state: structuredClone(completeState),
     serializedState: mirrorRaw,
-    sourceHash: summary(state).hashes.state,
-    destinationHash: summary(state).hashes.state,
-    sourceCounts: summary(state).counts,
-    destinationCounts: summary(state).counts,
+    sourceHash: summary(completeState).hashes.state,
+    destinationHash: summary(completeState).hashes.state,
+    sourceCounts: summary(completeState).counts,
+    destinationCounts: summary(completeState).counts,
     mirrorRaw,
     mirrorHash: hashValue(mirrorRaw),
     status: 'passed_verification'
   };
+  let fallbackLoadCalls = 0;
+  let nativeNormalizeCalls = 0;
   const core = {
     STORAGE_KEY,
     PENDING_HABIT_DELTAS_KEY: JOURNAL_KEY,
@@ -173,7 +182,13 @@ async function install({ mode = 'indexeddb_primary', mirrorRaw = 'opaque-compres
     clearPhase4Caches() { phase4Cache = null; return true; },
     shadowCanonicalJson: canonical,
     shadowSourceSummary: summary,
+    normalizeState(value) { nativeNormalizeCalls += 1; return structuredClone(value); },
+    syncDerivedPoints(value) { return { state: value, changed: false }; },
+    syncYouMatchups(value) { return { state: value, changed: false }; },
+    repairSeasonChampionshipData(value) { return { ok: false, state: value }; },
+    mergeAndSaveState() { throw new Error('native read must not persist'); },
     loadAppState() {
+      fallbackLoadCalls += 1;
       return { state: JSON.parse(localStorage.getItem(STORAGE_KEY)) };
     }
   };
@@ -192,7 +207,11 @@ async function install({ mode = 'indexeddb_primary', mirrorRaw = 'opaque-compres
   context.globalThis = context;
   vm.runInNewContext(SOURCE, context, { filename: 'phase5a_native_snapshot.js' });
   await core.flushPhase5ANativeSnapshotWrites();
-  return { core, localStorage, indexedDB, state, mirrorRaw };
+  return {
+    core, localStorage, indexedDB, state: completeState, mirrorRaw,
+    fallbackLoadCalls: () => fallbackLoadCalls,
+    nativeNormalizeCalls: () => nativeNormalizeCalls
+  };
 }
 
 test('installs native snapshot APIs without replacing Phase 4 controls', async () => {
@@ -216,7 +235,7 @@ test('writes the normal state object directly into IndexedDB', async () => {
   assert.equal(Object.hasOwn(record, 'serializedState'), false);
 });
 
-test('restores and serves native state without parsing the opaque rollback mirror', async () => {
+test('restores and serves native state without parsing or stringifying the opaque rollback mirror', async () => {
   const harness = await install({ mode: 'indexeddb_primary' });
   await harness.core.queuePhase5ANativeSnapshotWrite();
   await harness.core.flushPhase5ANativeSnapshotWrites();
@@ -227,6 +246,9 @@ test('restores and serves native state without parsing the opaque rollback mirro
   assert.deepEqual(loaded.state, harness.state);
   assert.equal(harness.localStorage.getItem(STORAGE_KEY), harness.mirrorRaw);
   assert.equal(harness.core.getPhase5ANativeSnapshotStatus().cacheReady, true);
+  assert.equal(harness.fallbackLoadCalls(), 0);
+  assert.ok(harness.nativeNormalizeCalls() > 0);
+  assert.equal(harness.core.getPhase5ANativeSnapshotCache().serializedState, null);
 });
 
 test('falls back when the rollback mirror changes', async () => {
@@ -236,12 +258,14 @@ test('falls back when the rollback mirror changes', async () => {
   harness.localStorage.setItem(STORAGE_KEY, JSON.stringify({ tasks: [{ id: 'newer' }] }));
   const loaded = harness.core.loadAppState({ persistSync: false });
   assert.equal(loaded.state.tasks[0].id, 'newer');
+  assert.equal(harness.fallbackLoadCalls(), 1);
 });
 
-test('worker loads Phase 5A only after the complete Phase 4 bundle', () => {
+test('worker loads Phase 5A only after the complete Phase 4 bundle and keeps generated navigation JavaScript valid', () => {
   const worker = fs.readFileSync(path.join(__dirname, '..', '_worker.js'), 'utf8');
   assert.match(worker, /'\/phase5a_native_snapshot\.js'/);
   assert.match(worker, /completePhase5A/);
   assert.match(worker, /5a-native-indexeddb-snapshot/);
   assert.match(worker, /Phase 5A native snapshot failed to install; Phase 4 remains active/);
+  assert.match(worker, /try \{ result\.set\(name, Object\.getOwnPropertyDescriptor\(target, name\) \|\| null\); \}/);
 });
