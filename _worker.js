@@ -95,9 +95,6 @@ export default {
     const phase4DiagnosticsResponse = responseFrom(phase4DiagnosticsResult);
     const phase5aNativeResponse = responseFrom(phase5aNativeResult);
 
-    // Phase 2 remains the required safety floor. A partial Phase 2 install is
-    // never served. Later phases are optional and fail back to the last complete
-    // reviewed bundle.
     if (!dualWriteResponse?.ok || !resetHookResponse?.ok) return coreResponse;
 
     let dualWriteSource;
@@ -197,7 +194,7 @@ export default {
         '    if (!target) return null;',
         '    const result = new Map();',
         '    for (const name of names) {',
-        '      try { result.set(name, Object.getOwnPropertyDescriptor(target, name) || null);',
+        '      try { result.set(name, Object.getOwnPropertyDescriptor(target, name) || null); }',
         '      catch (_) { result.set(name, null); }',
         '    }',
         '    return result;',
