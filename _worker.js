@@ -60,7 +60,8 @@ export default {
       '/phase4_primary_read_path.js',
       '/phase4_cache_guard.js',
       '/phase4_diagnostics.js',
-      '/phase5a_native_snapshot.js'
+      '/phase5a_native_snapshot.js',
+      '/phase5b_deferred_mirror.js'
     ];
     const moduleResults = await Promise.allSettled(
       modulePaths.map((pathname) => env.ASSETS.fetch(new Request(new URL(pathname, request.url), {
@@ -79,7 +80,8 @@ export default {
       phase4ReadResult,
       phase4CacheResult,
       phase4DiagnosticsResult,
-      phase5aNativeResult
+      phase5aNativeResult,
+      phase5bDeferredResult
     ] = moduleResults;
 
     const responseFrom = (result) => result?.status === 'fulfilled' ? result.value : null;
@@ -94,6 +96,7 @@ export default {
     const phase4CacheResponse = responseFrom(phase4CacheResult);
     const phase4DiagnosticsResponse = responseFrom(phase4DiagnosticsResult);
     const phase5aNativeResponse = responseFrom(phase5aNativeResult);
+    const phase5bDeferredResponse = responseFrom(phase5bDeferredResult);
 
     // Phase 2 remains the required safety floor. A partial Phase 2 install is
     // never served. Later phases are optional and fail back to the last complete
@@ -167,6 +170,13 @@ export default {
       catch (_) { phase5aNativeSource = ''; }
     }
 
+    let phase5bDeferredSource = '';
+    const completePhase5A = Boolean(completePhase4 && phase5aNativeSource);
+    if (completePhase5A && phase5bDeferredResponse?.ok) {
+      try { phase5bDeferredSource = await phase5bDeferredResponse.text(); }
+      catch (_) { phase5bDeferredSource = ''; }
+    }
+
     const headers = new Headers(coreResponse.headers);
     headers.delete('content-length');
     headers.delete('etag');
@@ -174,10 +184,12 @@ export default {
     headers.set('cache-control', 'no-cache');
     headers.set('content-type', 'application/javascript; charset=utf-8');
 
-    const completePhase5A = Boolean(completePhase4 && phase5aNativeSource);
-    headers.set('x-taskpoints-phase', completePhase5A
-      ? '5a-native-indexeddb-snapshot'
-      : (completePhase4 ? '4-indexeddb-primary-capable' : (phase3Source ? '3-read-path' : '2-dual-write')));
+    const completePhase5B = Boolean(completePhase5A && phase5bDeferredSource);
+    headers.set('x-taskpoints-phase', completePhase5B
+      ? '5b-indexeddb-native-deferred-mirror'
+      : (completePhase5A
+        ? '5a-native-indexeddb-snapshot'
+        : (completePhase4 ? '4-indexeddb-primary-capable' : (phase3Source ? '3-read-path' : '2-dual-write'))));
 
     const sources = [coreSource, dualWriteSource, resetHookSource];
     if (phase3Source) sources.push(phase3Source);
@@ -270,6 +282,23 @@ export default {
         '})();'
       ].join('\n');
       sources.push(phase5aBundle);
+    }
+
+    if (completePhase5B) {
+      const phase5bBundle = [
+        ';(function installTaskPointsPhase5BBundle() {',
+        "  'use strict';",
+        "  const global = typeof window !== 'undefined' ? window : globalThis;",
+        '  const core = global.TaskPointsCore;',
+        '  if (!core?.__phase5aNativeSnapshotInstalled) return;',
+        '  try {',
+        phase5bDeferredSource,
+        '  } catch (error) {',
+        "    console.warn('TaskPoints Phase 5B deferred mirror failed to install; Phase 5A remains active.', error);",
+        '  }',
+        '})();'
+      ].join('\n');
+      sources.push(phase5bBundle);
     }
 
     return new Response(`${sources.map((source) => `;${source}`).join('\n')}\n`, {
