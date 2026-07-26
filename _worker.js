@@ -112,7 +112,8 @@ export default {
       '/phase4_cache_guard.js',
       '/phase4_diagnostics.js',
       '/phase5a_native_snapshot.js',
-      '/phase5b_deferred_mirror.js'
+      '/phase5b_deferred_mirror.js',
+      '/home_yesterday_result_consistency.js'
     ];
     const moduleResults = await Promise.allSettled(
       modulePaths.map((pathname) => env.ASSETS.fetch(new Request(new URL(pathname, request.url), {
@@ -132,7 +133,8 @@ export default {
       phase4CacheResult,
       phase4DiagnosticsResult,
       phase5aNativeResult,
-      phase5bDeferredResult
+      phase5bDeferredResult,
+      homeYesterdayConsistencyResult
     ] = moduleResults;
 
     const responseFrom = (result) => result?.status === 'fulfilled' ? result.value : null;
@@ -148,6 +150,7 @@ export default {
     const phase4DiagnosticsResponse = responseFrom(phase4DiagnosticsResult);
     const phase5aNativeResponse = responseFrom(phase5aNativeResult);
     const phase5bDeferredResponse = responseFrom(phase5bDeferredResult);
+    const homeYesterdayConsistencyResponse = responseFrom(homeYesterdayConsistencyResult);
 
     // Phase 2 remains the required safety floor. A partial Phase 2 install is
     // never served. Later phases are optional and fail back to the last complete
@@ -226,6 +229,12 @@ export default {
     if (completePhase5A && phase5bDeferredResponse?.ok) {
       try { phase5bDeferredSource = await phase5bDeferredResponse.text(); }
       catch (_) { phase5bDeferredSource = ''; }
+    }
+
+    let homeYesterdayConsistencySource = '';
+    if (homeYesterdayConsistencyResponse?.ok) {
+      try { homeYesterdayConsistencySource = await homeYesterdayConsistencyResponse.text(); }
+      catch (_) { homeYesterdayConsistencySource = ''; }
     }
 
     const headers = new Headers(coreResponse.headers);
@@ -351,6 +360,8 @@ export default {
       ].join('\n');
       sources.push(phase5bBundle);
     }
+
+    if (homeYesterdayConsistencySource) sources.push(homeYesterdayConsistencySource);
 
     return new Response(`${sources.map((source) => `;${source}`).join('\n')}\n`, {
       status: 200,
