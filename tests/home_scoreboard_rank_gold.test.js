@@ -8,6 +8,7 @@ const root = path.resolve(__dirname, '..');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const css = fs.readFileSync(path.join(root, 'styles.css'), 'utf8');
 const worker = fs.readFileSync(path.join(root, '_worker.js'), 'utf8');
+const routes = JSON.parse(fs.readFileSync(path.join(root, '_routes.json'), 'utf8'));
 
 function functionSource(name) {
   const start = html.indexOf(`function ${name}(`);
@@ -58,6 +59,7 @@ test('Home scoreboard places the unique inline ranks around complete names', () 
   assert.match(html, /id="matchupYourGold"[\s\S]*?>Gold: 0\.0</);
   assert.match(html, /id="matchupOpponentGold"[\s\S]*?>Gold: —</);
   assert.match(css, /\.scoreboard-name-row \{[\s\S]*?display: flex;[\s\S]*?min-width: 0;/);
+  assert.ok(routes.include.includes('/styles.css'), 'Cloudflare Pages must route styles.css through the worker override');
   assert.match(worker, /if \(url\.pathname === '\/styles\.css'\)[\s\S]*?scoreboardNameOverride/);
   assert.match(worker, /\.scoreboard-name-row \.scoreboard-name \{[\s\S]*?overflow: visible;[\s\S]*?text-overflow: clip;[\s\S]*?white-space: normal;[\s\S]*?overflow-wrap: anywhere;/);
   assert.match(worker, /\.scoreboard-name-row--opponent \.scoreboard-name \{[\s\S]*?text-align: right;/);
