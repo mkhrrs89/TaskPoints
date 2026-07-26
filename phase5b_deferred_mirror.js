@@ -133,7 +133,7 @@
   function bypass(options = {}) {
     if (mode() !== 'indexeddb_primary' || (options.storageKey || core.STORAGE_KEY) !== core.STORAGE_KEY) return true;
     if (options.phase5bBypass || options.forceLocalStorageMirror || options.allowDestructiveOverwrite || options.storageEmergencyCompaction) return true;
-    return /(import|restore|reset|backup|recovery|migration|quarantine)/i.test(String(options.savePath || options.source || options.reason || options.caller || ''));
+    return /(import|restore|reset|backup|recovery|migration|quarantine|habit[-_ ]?journal|journal.*compaction|habit.*compaction)/i.test(String(options.savePath || options.source || options.reason || options.caller || ''));
   }
 
   function setAheadCache(state) {
