@@ -50,7 +50,7 @@ function buildHomepageHelpers() {
   return context;
 }
 
-test('Home scoreboard places the unique inline ranks around complete names', () => {
+test('Home scoreboard places the unique inline ranks around complete single-line names', () => {
   assert.equal((html.match(/id="matchupYourRank"/g) || []).length, 1);
   assert.equal((html.match(/id="matchupOpponentRank"/g) || []).length, 1);
   assert.match(html, /scoreboard-name-row--you[\s\S]*?id="matchupYourName"[\s\S]*?id="matchupYourRank"/);
@@ -61,9 +61,12 @@ test('Home scoreboard places the unique inline ranks around complete names', () 
   assert.match(css, /\.scoreboard-name-row \{[\s\S]*?display: flex;[\s\S]*?min-width: 0;/);
   assert.ok(routes.include.includes('/styles.css'), 'Cloudflare Pages must route styles.css through the worker override');
   assert.match(worker, /if \(url\.pathname === '\/styles\.css'\)[\s\S]*?scoreboardNameOverride/);
-  assert.match(worker, /\.scoreboard-name-row \.scoreboard-name \{[\s\S]*?overflow: visible;[\s\S]*?text-overflow: clip;[\s\S]*?white-space: normal;[\s\S]*?overflow-wrap: anywhere;/);
+  assert.match(worker, /\.scoreboard-name-row \{[\s\S]*?flex-wrap: nowrap;/);
+  assert.match(worker, /\.scoreboard-name-row \.scoreboard-name \{[\s\S]*?overflow: visible;[\s\S]*?text-overflow: clip;[\s\S]*?white-space: nowrap;[\s\S]*?overflow-wrap: normal;[\s\S]*?word-break: normal;[\s\S]*?font-size: clamp\(0\.72rem, 3\.2vw, 0\.95rem\);/);
+  assert.doesNotMatch(worker, /scoreboardNameOverride[\s\S]*?overflow-wrap: anywhere;/);
   assert.match(worker, /\.scoreboard-name-row--opponent \.scoreboard-name \{[\s\S]*?text-align: right;/);
-  assert.match(worker, /\.home-scoreboard-card \.matchup-scoreboard \{[\s\S]*?--scoreboard-name-height: calc\(1\.1em \* 2\);/);
+  assert.match(worker, /\.home-scoreboard-card \.matchup-scoreboard \{[\s\S]*?--scoreboard-name-height: 1\.1em;/);
+  assert.match(worker, /\.home-scoreboard-card \.scoreboard-name-row \{[\s\S]*?gap: 0\.25rem;/);
   assert.match(worker, /new Response\(`\$\{stylesSource\}\\n\$\{scoreboardNameOverride\}\\n`/);
   assert.match(css, /\.scoreboard-rank-inline \{[\s\S]*?color: #fff;[\s\S]*?font-variant-numeric: tabular-nums;/);
   assert.match(css, /\.scoreboard-gold \{[\s\S]*?color: #fb923c;[\s\S]*?font-variant-numeric: tabular-nums;/);

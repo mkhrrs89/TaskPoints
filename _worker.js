@@ -20,12 +20,19 @@ export default {
 
       const stylesSource = await stylesResponse.text();
       const scoreboardNameOverride = `
-/* Home scoreboard: always display complete player names. */
+/* Home scoreboard: keep complete player names on one line. */
+.scoreboard-name-row {
+  flex-wrap: nowrap;
+}
+
 .scoreboard-name-row .scoreboard-name {
   overflow: visible;
   text-overflow: clip;
-  white-space: normal;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: normal;
+  min-height: 1.1em;
+  font-size: clamp(0.72rem, 3.2vw, 0.95rem);
 }
 
 .scoreboard-name-row--opponent .scoreboard-name {
@@ -34,7 +41,11 @@ export default {
 
 @media (max-width: 640px) {
   .home-scoreboard-card .matchup-scoreboard {
-    --scoreboard-name-height: calc(1.1em * 2);
+    --scoreboard-name-height: 1.1em;
+  }
+
+  .home-scoreboard-card .scoreboard-name-row {
+    gap: 0.25rem;
   }
 }
 `;
