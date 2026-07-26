@@ -10,6 +10,46 @@ export default {
       return next;
     };
 
+    if (url.pathname === '/styles.css') {
+      const stylesRequest = new Request(request.url, {
+        method: 'GET',
+        headers: freshHeaders(request.headers)
+      });
+      const stylesResponse = await env.ASSETS.fetch(stylesRequest);
+      if (!stylesResponse.ok) return stylesResponse;
+
+      const stylesSource = await stylesResponse.text();
+      const scoreboardNameOverride = `
+/* Home scoreboard: always display complete player names. */
+.scoreboard-name-row .scoreboard-name {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.scoreboard-name-row--opponent .scoreboard-name {
+  text-align: right;
+}
+
+@media (max-width: 640px) {
+  .home-scoreboard-card .matchup-scoreboard {
+    --scoreboard-name-height: calc(1.1em * 2);
+  }
+}
+`;
+      const headers = new Headers(stylesResponse.headers);
+      headers.delete('content-length');
+      headers.delete('etag');
+      headers.delete('last-modified');
+      headers.set('cache-control', 'no-cache');
+      headers.set('content-type', 'text/css; charset=utf-8');
+      return new Response(`${stylesSource}\n${scoreboardNameOverride}\n`, {
+        status: 200,
+        headers
+      });
+    }
+
     if (url.pathname === '/settings.html') {
       const settingsRequest = new Request(request.url, {
         method: 'GET',
