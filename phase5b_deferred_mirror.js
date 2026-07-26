@@ -52,10 +52,13 @@
     return `${(hash >>> 0).toString(16)}:${text.length}`;
   }
 
+  function readDiag() {
+    try { const value = JSON.parse(get(DIAG_KEY) || '{}'); return value && typeof value === 'object' ? value : {}; }
+    catch (_) { return {}; }
+  }
+
   function diag(patch) {
-    let previous = {};
-    try { previous = JSON.parse(get(DIAG_KEY) || '{}') || {}; } catch (_) {}
-    set(DIAG_KEY, JSON.stringify({ schemaVersion: 1, enabled: true, configuredMode: mode(), ...previous, ...patch }));
+    set(DIAG_KEY, JSON.stringify({ schemaVersion: 1, enabled: true, configuredMode: mode(), ...readDiag(), ...patch }));
   }
 
   function journal() {
@@ -94,11 +97,26 @@
     return state;
   }
 
+  function stateHash(state) {
+    return core.shadowSourceSummary?.(state || {})?.hashes?.state || null;
+  }
+
   function current() {
     if (stateCache) return stateCache;
     const loaded = original.load({ persistSync: false });
-    stateCache = applyJournal(loaded?.state || {}, journal());
-    revision = Math.max(revision, Number(journal()?.revision) || 0);
+    const record = journal();
+    const diagnostics = readDiag();
+    const native = core.getPhase5ANativeSnapshotCache?.();
+    const journalAlreadyNative = Boolean(record
+      && Number(diagnostics.lastNativeRevision) >= Number(record.revision)
+      && native?.status === 'passed_verification'
+      && native.mirrorRaw === get(core.STORAGE_KEY)
+      && stateHash(loaded?.state)
+      && stateHash(loaded?.state) === stateHash(native.state));
+    stateCache = journalAlreadyNative
+      ? core.normalizeState(clone(loaded?.state || {}))
+      : applyJournal(loaded?.state || {}, record);
+    revision = Math.max(revision, Number(record?.revision) || 0, Number(diagnostics.revision) || 0, Number(diagnostics.lastNativeRevision) || 0);
     return stateCache;
   }
 
@@ -108,13 +126,13 @@
     const record = {
       schemaVersion: 1,
       baseMirrorHash: mirrorHash,
-      revision: Math.max(revision, Number(existing?.revision) || 0) + 1,
+      revision: Math.max(revision, Number(existing?.revision) || 0, Number(readDiag().revision) || 0, Number(readDiag().lastNativeRevision) || 0) + 1,
       updatedAt: now(),
       operations: existing?.baseMirrorHash === mirrorHash ? existing.operations.concat(operation) : [operation]
     };
     let raw = JSON.stringify(record);
     if (raw.length > MAX_JOURNAL && stateCache) {
-      checkpoint('journal_limit');
+      if (!checkpoint('journal_limit')) return false;
       record.baseMirrorHash = rawHash(get(core.STORAGE_KEY));
       record.operations = [operation];
       raw = JSON.stringify(record);
@@ -130,10 +148,18 @@
         .every((key) => Array.isArray(state[key]));
   }
 
+  function saveLabel(options = {}) {
+    return String(options.savePath || options.source || options.reason || options.caller || '');
+  }
+
+  function isHabitCompaction(options = {}) {
+    return /(habit[-_ ]?journal|journal.*compaction|habit.*compaction)/i.test(saveLabel(options));
+  }
+
   function bypass(options = {}) {
     if (mode() !== 'indexeddb_primary' || (options.storageKey || core.STORAGE_KEY) !== core.STORAGE_KEY) return true;
     if (options.phase5bBypass || options.forceLocalStorageMirror || options.allowDestructiveOverwrite || options.storageEmergencyCompaction) return true;
-    return /(import|restore|reset|backup|recovery|migration|quarantine|habit[-_ ]?journal|journal.*compaction|habit.*compaction)/i.test(String(options.savePath || options.source || options.reason || options.caller || ''));
+    return isHabitCompaction(options) || /(import|restore|reset|backup|recovery|migration|quarantine)/i.test(saveLabel(options));
   }
 
   function setAheadCache(state) {
@@ -209,6 +235,8 @@
           original.safeReplace(core.STORAGE_KEY, plan.chosenRaw);
           const persisted = core.parseTaskPointsStorageJson(get(core.STORAGE_KEY), {});
           if (!validShape(persisted)) throw new Error('checkpoint_verification_failed');
+          const expectedHash = stateHash(candidates[i]);
+          if (expectedHash && stateHash(persisted) !== expectedHash) throw new Error('checkpoint_hash_mismatch');
           remove(JOURNAL_KEY);
           diag({ lastCheckpointAt: now(), lastCheckpointReason: reason, lastCheckpointEncoding: plan.chosenEncoding, checkpointCompacted: i === 1, nativeAhead: false, lastCheckpointError: null });
           return true;
@@ -219,6 +247,12 @@
       diag({ lastCheckpointFailureAt: now(), lastCheckpointReason: reason, lastCheckpointError: String(caught?.message || caught), nativeAhead: true });
       return false;
     } finally { checkpointing = false; }
+  }
+
+  function ensureCheckpoint(reason) {
+    if (!journal()) return true;
+    if (!stateCache) current();
+    return checkpoint(reason);
   }
 
   function scheduleCheckpoint(reason = 'idle_after_save') {
@@ -298,25 +332,47 @@
   };
   core.mergeAndSaveState = (nextState, options = {}) => mergeSave(nextState, options)
     || original.mergeSave(nextState || {}, { ...options, existing: clone(current()) });
-  core.saveStateSnapshot = (state, options = {}) => snapshotSave(state, options) || original.saveSnapshot(state, options);
+  core.saveStateSnapshot = function phase5bSnapshot(state, options = {}) {
+    const deferred = snapshotSave(state, options);
+    if (deferred) return deferred;
+    if (isHabitCompaction(options) && mode() === 'indexeddb_primary') {
+      const latest = clone(current());
+      const deltas = habitDeltas();
+      if (deltas.length && typeof core.applyPendingHabitDeltas === 'function') core.applyPendingHabitDeltas(latest, deltas);
+      return original.saveSnapshot(latest, { ...options, phase5bBypass: true, forceLocalStorageMirror: true });
+    }
+    if (!ensureCheckpoint('before_synchronous_snapshot')) return { state: clone(current()), blocked: true, reason: 'phase5b_checkpoint_failed', trimmed: false };
+    return original.saveSnapshot(state, options);
+  };
 
   if (original.saveValidated) core.saveValidatedSnapshot = function phase5bValidated(state, options = {}) {
-    checkpoint('before_validated_snapshot');
+    if (!ensureCheckpoint('before_validated_snapshot')) return { state: clone(current()), blocked: true, reason: 'phase5b_checkpoint_failed', trimmed: false };
     const result = original.saveValidated(state, { ...options, phase5bBypass: true, forceLocalStorageMirror: true });
-    stateCache = result?.state ? core.normalizeState(clone(result.state)) : null; remove(JOURNAL_KEY); return result;
+    stateCache = result?.state ? core.normalizeState(clone(result.state)) : null;
+    if (!result?.blocked) remove(JOURNAL_KEY);
+    return result;
   };
-  if (original.readStored) core.readTaskPointsStoredState = (key = core.STORAGE_KEY, fallback = null) =>
-    key === core.STORAGE_KEY && mode() === 'indexeddb_primary' ? clone(current()) : original.readStored(key, fallback);
+  if (original.readStored) core.readTaskPointsStoredState = (key = core.STORAGE_KEY, fallback = null) => {
+    if (key !== core.STORAGE_KEY || mode() !== 'indexeddb_primary') return original.readStored(key, fallback);
+    const state = clone(current());
+    const deltas = habitDeltas();
+    if (deltas.length && typeof core.applyPendingHabitDeltas === 'function') core.applyPendingHabitDeltas(state, deltas);
+    return state;
+  };
   if (original.writeStored) core.writeTaskPointsStoredState = function phase5bWriteStored(state, options = {}) {
-    checkpoint('before_direct_storage_write'); const result = original.writeStored(state, options);
+    if (!ensureCheckpoint('before_direct_storage_write')) throw new Error('Phase 5B rollback checkpoint failed; direct storage write was blocked.');
+    const result = original.writeStored(state, options);
     if ((options.storageKey || core.STORAGE_KEY) === core.STORAGE_KEY) { stateCache = core.normalizeState(clone(state || {})); remove(JOURNAL_KEY); }
     return result;
   };
   core.mergeState = (next, options = {}) => (mode() === 'indexeddb_primary' && !options.existing && (options.storageKey || core.STORAGE_KEY) === core.STORAGE_KEY)
     ? original.merge(next, { ...options, existing: clone(current()) }) : original.merge(next, options);
   if (original.scoring) core.getScoringSettings = (value) => value == null && mode() === 'indexeddb_primary' ? original.scoring(current()) : original.scoring(value);
-  if (original.recovery) core.getRecoveryCandidate = (options = {}) => { checkpoint('before_recovery_check'); return original.recovery(options); };
-  if (original.restoreBackup) core.restoreBackupSlot = (slot, options = {}) => { checkpoint('before_backup_restore'); const result = original.restoreBackup(slot, options); stateCache = null; remove(JOURNAL_KEY); return result; };
+  if (original.recovery) core.getRecoveryCandidate = (options = {}) => ensureCheckpoint('before_recovery_check') ? original.recovery(options) : null;
+  if (original.restoreBackup) core.restoreBackupSlot = (slot, options = {}) => {
+    if (!ensureCheckpoint('before_backup_restore')) return { restored: false, reason: 'phase5b_checkpoint_failed' };
+    const result = original.restoreBackup(slot, options); stateCache = null; if (result?.restored) remove(JOURNAL_KEY); return result;
+  };
 
   function observed(key, value, removed = false) {
     if (String(key) === core.STORAGE_KEY && !checkpointing) { stateCache = null; remove(JOURNAL_KEY); cancelCheckpoint(); }
@@ -324,14 +380,29 @@
   }
 
   const storage = global.localStorage;
+  let observerInstalled = false;
   try {
     const setItem = storage?.setItem?.bind(storage); const removeItem = storage?.removeItem?.bind(storage);
     if (setItem && !storage.__taskPointsPhase5BObserverInstalled) {
-      storage.setItem = function phase5bSet(key, value) { const result = setItem(key, value); observed(key, value, false); return result; };
-      if (removeItem) storage.removeItem = function phase5bRemove(key) { const result = removeItem(key); observed(key, null, true); return result; };
-      Object.defineProperty(storage, '__taskPointsPhase5BObserverInstalled', { value: true, configurable: true });
-    }
+      const wrappedSet = function phase5bSet(key, value) { const result = setItem(key, value); observed(key, value, false); return result; };
+      const wrappedRemove = removeItem ? function phase5bRemove(key) { const result = removeItem(key); observed(key, null, true); return result; } : null;
+      storage.setItem = wrappedSet; if (wrappedRemove) storage.removeItem = wrappedRemove;
+      observerInstalled = storage.setItem === wrappedSet;
+      if (observerInstalled) Object.defineProperty(storage, '__taskPointsPhase5BObserverInstalled', { value: true, configurable: true });
+    } else observerInstalled = Boolean(storage?.__taskPointsPhase5BObserverInstalled);
   } catch (_) {}
+  if (!observerInstalled) {
+    const prototype = global.Storage?.prototype;
+    if (prototype?.setItem && !prototype.__taskPointsPhase5BOriginalSetItem) {
+      const setItem = prototype.setItem; const removeItem = prototype.removeItem;
+      Object.defineProperty(prototype, '__taskPointsPhase5BOriginalSetItem', { value: setItem, configurable: true });
+      prototype.setItem = function phase5bSet(key, value) { const result = setItem.call(this, key, value); if (this === storage) observed(key, value, false); return result; };
+      if (removeItem) {
+        Object.defineProperty(prototype, '__taskPointsPhase5BOriginalRemoveItem', { value: removeItem, configurable: true });
+        prototype.removeItem = function phase5bRemove(key) { const result = removeItem.call(this, key); if (this === storage) observed(key, null, true); return result; };
+      }
+    }
+  }
 
   core.PHASE5B_JOURNAL_KEY = JOURNAL_KEY;
   core.PHASE5B_DIAGNOSTICS_KEY = DIAG_KEY;
