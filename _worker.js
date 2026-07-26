@@ -59,7 +59,8 @@ export default {
       '/phase4_storage_coordinator.js',
       '/phase4_primary_read_path.js',
       '/phase4_cache_guard.js',
-      '/phase4_diagnostics.js'
+      '/phase4_diagnostics.js',
+      '/phase5a_native_snapshot.js'
     ];
     const moduleResults = await Promise.allSettled(
       modulePaths.map((pathname) => env.ASSETS.fetch(new Request(new URL(pathname, request.url), {
@@ -77,7 +78,8 @@ export default {
       phase4WriteResult,
       phase4ReadResult,
       phase4CacheResult,
-      phase4DiagnosticsResult
+      phase4DiagnosticsResult,
+      phase5aNativeResult
     ] = moduleResults;
 
     const responseFrom = (result) => result?.status === 'fulfilled' ? result.value : null;
@@ -91,6 +93,7 @@ export default {
     const phase4ReadResponse = responseFrom(phase4ReadResult);
     const phase4CacheResponse = responseFrom(phase4CacheResult);
     const phase4DiagnosticsResponse = responseFrom(phase4DiagnosticsResult);
+    const phase5aNativeResponse = responseFrom(phase5aNativeResult);
 
     // Phase 2 remains the required safety floor. A partial Phase 2 install is
     // never served. Later phases are optional and fail back to the last complete
@@ -157,6 +160,13 @@ export default {
       }
     }
 
+    let phase5aNativeSource = '';
+    const completePhase4 = Boolean(phase4WriteSource && phase4ReadSource && phase4CacheSource && phase4DiagnosticsSource);
+    if (completePhase4 && phase5aNativeResponse?.ok) {
+      try { phase5aNativeSource = await phase5aNativeResponse.text(); }
+      catch (_) { phase5aNativeSource = ''; }
+    }
+
     const headers = new Headers(coreResponse.headers);
     headers.delete('content-length');
     headers.delete('etag');
@@ -164,8 +174,10 @@ export default {
     headers.set('cache-control', 'no-cache');
     headers.set('content-type', 'application/javascript; charset=utf-8');
 
-    const completePhase4 = Boolean(phase4WriteSource && phase4ReadSource && phase4CacheSource && phase4DiagnosticsSource);
-    headers.set('x-taskpoints-phase', completePhase4 ? '4-indexeddb-primary-capable' : (phase3Source ? '3-read-path' : '2-dual-write'));
+    const completePhase5A = Boolean(completePhase4 && phase5aNativeSource);
+    headers.set('x-taskpoints-phase', completePhase5A
+      ? '5a-native-indexeddb-snapshot'
+      : (completePhase4 ? '4-indexeddb-primary-capable' : (phase3Source ? '3-read-path' : '2-dual-write')));
 
     const sources = [coreSource, dualWriteSource, resetHookSource];
     if (phase3Source) sources.push(phase3Source);
@@ -241,6 +253,23 @@ export default {
         '})();'
       ].join('\n');
       sources.push(atomicPhase4Bundle);
+    }
+
+    if (completePhase5A) {
+      const phase5aBundle = [
+        ';(function installTaskPointsPhase5ABundle() {',
+        "  'use strict';",
+        "  const global = typeof window !== 'undefined' ? window : globalThis;",
+        '  const core = global.TaskPointsCore;',
+        '  if (!core?.__phase4StorageCoordinatorInstalled || !core?.__phase4PrimaryReadPathInstalled) return;',
+        '  try {',
+        phase5aNativeSource,
+        '  } catch (error) {',
+        "    console.warn('TaskPoints Phase 5A native snapshot failed to install; Phase 4 remains active.', error);",
+        '  }',
+        '})();'
+      ].join('\n');
+      sources.push(phase5aBundle);
     }
 
     return new Response(`${sources.map((source) => `;${source}`).join('\n')}\n`, {
