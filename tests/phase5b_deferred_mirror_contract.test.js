@@ -187,6 +187,16 @@ test('habit journal defers native write until the crash-safe journal clears', as
   assert.equal(h.nativeCache().state.tasks[0].title, 'Habit-safe');
 });
 
+test('habit journal compaction keeps the original synchronous mirror path', () => {
+  const h = install();
+  const state = normalize({ tasks: [{ id: 't1', title: 'Compacted' }] });
+  const result = h.core.saveStateSnapshot(state, { savePath: 'habit-journal-startup-compaction', interactive: true, deferCompression: true });
+  assert.equal(h.originalSaveCalls(), 1);
+  assert.equal(result.state.tasks[0].title, 'Compacted');
+  assert.equal(JSON.parse(h.localStorage.getItem(STORAGE_KEY)).tasks[0].title, 'Compacted');
+  assert.equal(h.localStorage.getItem(JOURNAL_KEY), null);
+});
+
 test('mode off uses original save behavior', () => {
   const h = install({ mode: 'off' });
   h.core.saveAppState({ tasks: [{ id: 't1', title: 'Off' }] }, { savePath: 'task-edit' });
