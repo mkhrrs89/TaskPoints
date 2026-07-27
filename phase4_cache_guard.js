@@ -250,6 +250,14 @@
 
   const parse = (raw, fallback = null) => { try { return JSON.parse(raw); } catch (_) { return fallback; } };
   const get = (key) => { try { return storage.getItem(key); } catch (_) { return null; } };
+  const journalCount = (key) => {
+    const raw = get(key);
+    if (!raw) return 0;
+    const value = parse(raw, null);
+    if (Array.isArray(value)) return value.length;
+    if (Array.isArray(value?.operations)) return value.operations.length;
+    return value && typeof value === 'object' ? Object.keys(value).length : 1;
+  };
   const hash = (raw) => {
     const text = String(raw || '');
     let value = 2166136261;
@@ -285,7 +293,7 @@
   if (gate.status !== 'awaiting_smoke_test') return;
   if (!gate.preparedBrowserSessionId || gate.preparedBrowserSessionId === sessionId) return;
   if ((get(MODE_KEY) || 'off') !== 'verify_primary_writes') return;
-  if (get(HABIT_JOURNAL_KEY) || get(LEGACY_JOURNAL_KEY)) return;
+  if (journalCount(HABIT_JOURNAL_KEY) > 0 || get(LEGACY_JOURNAL_KEY)) return;
   const currentRaw = get(STORAGE_KEY);
   if (!currentRaw) return;
 
