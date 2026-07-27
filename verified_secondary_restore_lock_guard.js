@@ -16,7 +16,10 @@
       if (!lock || lock.active !== true) return null;
       const committedAtMs = Number(lock.committedAtMs || 0);
       const createdAtMs = Number(lock.createdAtMs || 0);
-      if (committedAtMs === 0 && createdAtMs > 0 && Date.now() - createdAtMs > UNCOMMITTED_LOCK_TTL_MS) {
+      if (committedAtMs === 0
+        && lock.retainUntilManualRecovery !== true
+        && createdAtMs > 0
+        && Date.now() - createdAtMs > UNCOMMITTED_LOCK_TTL_MS) {
         if (!ownedToken || String(lock.token || '') === ownedToken) storage.removeItem(LOCK_KEY);
         return null;
       }
@@ -46,7 +49,11 @@
   function releaseOwnedUncommittedLock() {
     try {
       const lock = readLock();
-      if (ownedToken && lock && String(lock.token) === ownedToken && Number(lock.committedAtMs || 0) === 0) {
+      if (ownedToken
+        && lock
+        && String(lock.token) === ownedToken
+        && Number(lock.committedAtMs || 0) === 0
+        && lock.retainUntilManualRecovery !== true) {
         storage.removeItem(LOCK_KEY);
       }
     } catch (_) {}
