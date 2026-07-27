@@ -55,20 +55,22 @@
   global.__taskPointsPhase2ResetHookInstalled = true;
 })(typeof window !== 'undefined' ? window : globalThis);
 
-// This guard is intentionally installed from the always-loaded Phase 2 safety
-// floor. The later Phase 5B bundle contains the same idempotent installer, but
-// protection must not depend on Phase 4 or Phase 5A successfully starting.
+// Install the catastrophic-overwrite guard from the always-loaded Phase 2
+// safety floor. It must protect the mirror before Phase 4 or Phase 5A can run.
 (function installTaskPointsStorageDataLossGuard(global) {
   'use strict';
 
   const core = global.TaskPointsCore;
-  if (!core || core.__storageDataLossGuardInstalled) return;
+  const storage = global.localStorage;
+  if (!core || !storage || core.__storageDataLossGuardInstalled) return;
   core.__storageDataLossGuardInstalled = true;
 
   const STORAGE_KEY = core.STORAGE_KEY || 'taskpoints_v1';
   const MODE_KEY = 'taskpoints_phase4_storage_mode_v1';
   const HOLD_KEY = 'taskpoints_emergency_recovery_hold_v1';
   const DIAG_KEY = 'taskpoints_storage_data_loss_guard_v1';
+  const LEGACY_JOURNAL_KEY = 'taskpoints_phase5b_pending_changes_v1';
+  const LEGACY_JOURNAL_MARKER_KEY = 'taskpoints_phase5b_journal_reconciled_v1';
   const VAULT_DB_NAME = 'taskpoints_safety_vault_v1';
   const VAULT_DB_VERSION = 1;
   const VAULT_STORE = 'snapshots';
@@ -83,14 +85,18 @@
   let destructiveAllowanceDepth = 0;
   let vaultTail = Promise.resolve();
   let alertShown = false;
+  let rememberedRemovedRaw = null;
+  let rememberedRemovalToken = 0;
 
-  const storage = global.localStorage;
+  const clone = (value) => typeof global.structuredClone === 'function'
+    ? global.structuredClone(value)
+    : JSON.parse(JSON.stringify(value));
   const get = (key) => {
-    try { return storage?.getItem?.(key) ?? null; }
+    try { return storage.getItem(key); }
     catch (_) { return null; }
   };
-  const directSet = (key, value) => {
-    try { storage?.setItem?.(key, value); return true; }
+  const set = (key, value) => {
+    try { storage.setItem(key, value); return true; }
     catch (_) { return false; }
   };
 
@@ -118,6 +124,13 @@
     return `${(hash >>> 0).toString(16).padStart(8, '0')}:${text.length}`;
   }
 
+  function stateHash(state) {
+    try {
+      return core.shadowSourceSummary?.(state || {})?.hashes?.state
+        || (core.shadowCanonicalJson ? core.shadowCanonicalJson(state || {}) : JSON.stringify(state || {}));
+    } catch (_) { return null; }
+  }
+
   function readDiagnostics() {
     try {
       const parsed = JSON.parse(get(DIAG_KEY) || '{}');
@@ -133,9 +146,7 @@
       ...readDiagnostics(),
       ...patch
     };
-    try {
-      storage?.setItem?.(DIAG_KEY, JSON.stringify(value));
-    } catch (_) {}
+    try { storage.setItem(DIAG_KEY, JSON.stringify(value)); } catch (_) {}
   }
 
   function suspiciousReplacement(previousRaw, candidateRaw) {
@@ -143,26 +154,26 @@
     const previousText = String(previousRaw);
     const candidateText = String(candidateRaw);
     if (previousText === candidateText) return null;
+    // Normal saves are similarly sized. Only pay the decompression cost when a
+    // candidate is dramatically smaller than the current authoritative state.
     if (candidateText.length >= previousText.length * 0.5) return null;
+
     const previousState = parseState(previousText);
     const candidateState = parseState(candidateText);
     const previous = summarize(previousState);
     const candidate = summarize(candidateState);
-
     if (previous.majorTotal < 50) return null;
     if (!candidateState) return { reason: 'candidate_unreadable', previous, candidate };
 
-    const majorLoss = previous.majorTotal - candidate.majorTotal;
-    const majorRatio = previous.majorTotal ? candidate.majorTotal / previous.majorTotal : 1;
+    const ratio = previous.majorTotal ? candidate.majorTotal / previous.majorTotal : 1;
     const nearlyEmpty = candidate.majorTotal <= Math.max(5, Math.floor(previous.majorTotal * 0.02));
-    const catastrophicDrop = majorLoss >= 100 && majorRatio < 0.05;
+    const catastrophicDrop = previous.majorTotal - candidate.majorTotal >= 100 && ratio < 0.05;
     const criticalHistoryCollapse = (
       (previous.completions >= 100 && candidate.completions < previous.completions * 0.05)
       || (previous.matchups >= 100 && candidate.matchups < previous.matchups * 0.05)
       || (previous.gameHistory >= 100 && candidate.gameHistory < previous.gameHistory * 0.05)
       || (previous.players >= 10 && candidate.players === 0)
     );
-
     if (!nearlyEmpty && !catastrophicDrop && !criticalHistoryCollapse) return null;
     return {
       reason: nearlyEmpty ? 'candidate_nearly_empty' : (criticalHistoryCollapse ? 'critical_history_collapse' : 'catastrophic_record_drop'),
@@ -188,6 +199,24 @@
       try { global.alert(`${error.message}\n\nDo not reset or import anything until Storage Health is checked.`); } catch (_) {}
     }
     throw error;
+  }
+
+  function rememberRemovedAuthoritativeRaw(key) {
+    if (String(key) !== STORAGE_KEY) return;
+    const raw = get(STORAGE_KEY);
+    if (!raw) return;
+    rememberedRemovedRaw = raw;
+    const token = ++rememberedRemovalToken;
+    const clear = () => {
+      if (token === rememberedRemovalToken) rememberedRemovedRaw = null;
+    };
+    if (typeof global.queueMicrotask === 'function') global.queueMicrotask(clear);
+    else Promise.resolve().then(clear);
+  }
+
+  function clearRememberedRaw() {
+    rememberedRemovalToken += 1;
+    rememberedRemovedRaw = null;
   }
 
   function requestResult(request) {
@@ -225,8 +254,8 @@
       db = await openVault();
       if (!db) return false;
       const readTx = db.transaction(VAULT_STORE, 'readonly');
-      const readStore = readTx.objectStore(VAULT_STORE);
-      const slots = await Promise.all(VAULT_SLOT_IDS.map((id) => requestResult(readStore.get(id))));
+      const store = readTx.objectStore(VAULT_STORE);
+      const slots = await Promise.all(VAULT_SLOT_IDS.map((id) => requestResult(store.get(id))));
       const latest = slots[0] || null;
       const candidateHash = rawHash(raw);
       if (latest?.rawHash === candidateHash) return true;
@@ -240,12 +269,12 @@
       if (!state || counts.majorTotal < 30) return false;
 
       const timestamp = new Date(nowMs).toISOString();
-      const nextRecords = [];
+      const records = [];
       for (let index = VAULT_SLOT_IDS.length - 1; index >= 1; index -= 1) {
         const prior = slots[index - 1];
-        if (prior) nextRecords.push({ ...prior, id: VAULT_SLOT_IDS[index] });
+        if (prior) records.push({ ...prior, id: VAULT_SLOT_IDS[index] });
       }
-      nextRecords.push({
+      records.push({
         id: 'latest',
         schemaVersion: 1,
         createdAtISO: timestamp,
@@ -257,7 +286,7 @@
 
       const writeTx = db.transaction(VAULT_STORE, 'readwrite');
       const writeStore = writeTx.objectStore(VAULT_STORE);
-      nextRecords.forEach((record) => writeStore.put(record));
+      records.forEach((record) => writeStore.put(record));
       await transactionDone(writeTx);
       writeDiagnostics({
         lastVaultWriteAtISO: timestamp,
@@ -304,46 +333,152 @@
     core[name] = wrapped;
   }
 
-  function installStorageHook() {
-    if (!storage) return;
-
+  function installStorageHooks() {
+    let instanceInstalled = false;
     try {
-      if (!storage.__taskpointsDataLossGuardInstanceSetItem && typeof storage.setItem === 'function') {
-        const previousSetItem = storage.setItem.bind(storage);
-        const wrapped = function guardedTaskPointsInstanceSetItem(key, value) {
+      if (!storage.__taskpointsDataLossGuardInstanceHooks) {
+        const priorSet = storage.setItem.bind(storage);
+        const priorRemove = storage.removeItem.bind(storage);
+        const guardedSet = function guardedTaskPointsInstanceSetItem(key, value) {
           const targetKey = String(key);
           const candidateRaw = String(value);
           if (targetKey === STORAGE_KEY && destructiveAllowanceDepth === 0) {
-            const details = suspiciousReplacement(get(STORAGE_KEY), candidateRaw);
+            const previousRaw = get(STORAGE_KEY) || rememberedRemovedRaw;
+            const details = suspiciousReplacement(previousRaw, candidateRaw);
             if (details) blockReplacement(details);
           }
-          const result = previousSetItem(key, value);
-          if (targetKey === STORAGE_KEY) queueVaultSnapshot(candidateRaw, 'verified-state-write');
+          const result = priorSet(key, value);
+          if (targetKey === STORAGE_KEY) {
+            clearRememberedRaw();
+            queueVaultSnapshot(candidateRaw, 'verified-state-write');
+          }
           return result;
         };
-        storage.setItem = wrapped;
-        if (storage.setItem === wrapped) {
-          Object.defineProperty(storage, '__taskpointsDataLossGuardInstanceSetItem', { value: true, configurable: true });
-          return;
+        const guardedRemove = function guardedTaskPointsInstanceRemoveItem(key) {
+          rememberRemovedAuthoritativeRaw(key);
+          return priorRemove(key);
+        };
+        storage.setItem = guardedSet;
+        storage.removeItem = guardedRemove;
+        if (storage.setItem === guardedSet && storage.removeItem === guardedRemove) {
+          Object.defineProperty(storage, '__taskpointsDataLossGuardInstanceHooks', { value: true, configurable: true });
+          instanceInstalled = true;
         }
-      }
+      } else instanceInstalled = true;
     } catch (_) {}
+    if (instanceInstalled) return;
 
     const prototype = global.Storage?.prototype;
-    if (prototype?.setItem && !prototype.__taskpointsDataLossGuardSetItem) {
-      const previousSetItem = prototype.setItem;
-      Object.defineProperty(prototype, '__taskpointsDataLossGuardSetItem', { value: previousSetItem, configurable: true });
+    if (!prototype) return;
+    if (prototype.setItem && !prototype.__taskpointsDataLossGuardSetItem) {
+      const priorSet = prototype.setItem;
+      Object.defineProperty(prototype, '__taskpointsDataLossGuardSetItem', { value: priorSet, configurable: true });
       prototype.setItem = function guardedTaskPointsSetItem(key, value) {
         const targetKey = String(key);
         const candidateRaw = String(value);
         if (this === storage && targetKey === STORAGE_KEY && destructiveAllowanceDepth === 0) {
-          const details = suspiciousReplacement(get(STORAGE_KEY), candidateRaw);
+          const previousRaw = get(STORAGE_KEY) || rememberedRemovedRaw;
+          const details = suspiciousReplacement(previousRaw, candidateRaw);
           if (details) blockReplacement(details);
         }
-        const result = previousSetItem.call(this, key, value);
-        if (this === storage && targetKey === STORAGE_KEY) queueVaultSnapshot(candidateRaw, 'verified-state-write');
+        const result = priorSet.call(this, key, value);
+        if (this === storage && targetKey === STORAGE_KEY) {
+          clearRememberedRaw();
+          queueVaultSnapshot(candidateRaw, 'verified-state-write');
+        }
         return result;
       };
+    }
+    if (prototype.removeItem && !prototype.__taskpointsDataLossGuardRemoveItem) {
+      const priorRemove = prototype.removeItem;
+      Object.defineProperty(prototype, '__taskpointsDataLossGuardRemoveItem', { value: priorRemove, configurable: true });
+      prototype.removeItem = function guardedTaskPointsRemoveItem(key) {
+        if (this === storage) rememberRemovedAuthoritativeRaw(key);
+        return priorRemove.call(this, key);
+      };
+    }
+  }
+
+  function applyLegacyOperation(state, operation) {
+    if (operation?.type === 'merge' && typeof core.mergeState === 'function') {
+      return core.mergeState(operation.patch || {}, {
+        ...(operation.options || {}),
+        storageKey: STORAGE_KEY,
+        existing: state
+      }).state;
+    }
+    if (operation?.type === 'fields') {
+      const next = { ...(state || {}) };
+      Object.entries(operation.set || {}).forEach(([key, value]) => { next[key] = clone(value); });
+      (operation.delete || []).forEach((key) => { delete next[key]; });
+      return typeof core.normalizeState === 'function' ? core.normalizeState(next) : next;
+    }
+    return state;
+  }
+
+  function reconcileLegacyPhase5BJournal() {
+    const raw = get(LEGACY_JOURNAL_KEY);
+    if (!raw) return { reconciled: false, reason: 'no_journal' };
+    set(MODE_KEY, 'off');
+
+    let record;
+    try { record = JSON.parse(raw); }
+    catch (_) { record = null; }
+    if (!record || record.schemaVersion !== 1 || !Array.isArray(record.operations)) {
+      writeDiagnostics({ legacyJournalStatus: 'preserved_invalid', legacyJournalError: 'invalid_format' });
+      return { reconciled: false, reason: 'invalid_format' };
+    }
+
+    const journalHash = rawHash(raw);
+    try {
+      const marker = JSON.parse(get(LEGACY_JOURNAL_MARKER_KEY) || 'null');
+      if (marker?.journalHash === journalHash) {
+        storage.removeItem(LEGACY_JOURNAL_KEY);
+        writeDiagnostics({ legacyJournalStatus: 'already_reconciled', legacyJournalRevision: Number(record.revision) || 0 });
+        return { reconciled: true, reason: 'already_reconciled' };
+      }
+    } catch (_) {}
+
+    try {
+      const baseRaw = get(STORAGE_KEY);
+      const base = parseState(baseRaw);
+      if (!base || typeof core.writeTaskPointsStoredState !== 'function') throw new Error('required_storage_api_unavailable');
+      let next = typeof core.normalizeState === 'function' ? core.normalizeState(clone(base)) : clone(base);
+      record.operations.forEach((operation) => { next = applyLegacyOperation(next, operation); });
+
+      core.writeTaskPointsStoredState(next, { storageKey: STORAGE_KEY });
+      const verified = parseState(get(STORAGE_KEY));
+      if (!verified) throw new Error('journal_replay_readback_failed');
+      const expectedHash = stateHash(next);
+      const verifiedHash = stateHash(verified);
+      if (expectedHash && verifiedHash && expectedHash !== verifiedHash) throw new Error('journal_replay_verification_failed');
+
+      set(LEGACY_JOURNAL_MARKER_KEY, JSON.stringify({
+        schemaVersion: 1,
+        journalHash,
+        revision: Number(record.revision) || 0,
+        reconciledAtISO: new Date().toISOString()
+      }));
+      storage.removeItem(LEGACY_JOURNAL_KEY);
+      writeDiagnostics({
+        legacyJournalStatus: 'reconciled',
+        legacyJournalRevision: Number(record.revision) || 0,
+        legacyJournalOperations: record.operations.length,
+        legacyJournalReconciledAtISO: new Date().toISOString(),
+        legacyJournalError: null
+      });
+      return { reconciled: true, reason: 'replayed' };
+    } catch (error) {
+      writeDiagnostics({
+        legacyJournalStatus: 'preserved_for_recovery',
+        legacyJournalRevision: Number(record.revision) || 0,
+        legacyJournalError: String(error?.message || error)
+      });
+      if (!alertShown && typeof global.alert === 'function') {
+        alertShown = true;
+        try { global.alert('TaskPoints found pending edits from the disabled Phase 5B system. They were preserved for recovery, and IndexedDB Primary remains Off.'); } catch (_) {}
+      }
+      return { reconciled: false, reason: 'replay_failed' };
     }
   }
 
@@ -354,7 +489,7 @@
     installed: false,
     disabledForSafety: true,
     reason: 'phase5b_disabled_after_empty_state_overwrite',
-    journalPresent: Boolean(get('taskpoints_phase5b_pending_changes_v1'))
+    journalPresent: Boolean(get(LEGACY_JOURNAL_KEY))
   });
   core.flushPhase5BNativeWrites = () => Promise.resolve();
   core.flushPhase5BMirrorCheckpoint = () => false;
@@ -371,10 +506,11 @@
 
   wrapDestructiveEntryPoint('saveValidatedSnapshot');
   wrapDestructiveEntryPoint('saveStateSnapshot');
-  installStorageHook();
 
-  if (get(HOLD_KEY)) directSet(MODE_KEY, 'off');
-  const currentRaw = get(STORAGE_KEY);
-  if (currentRaw) queueVaultSnapshot(currentRaw, 'startup-known-good');
+  if (get(HOLD_KEY)) set(MODE_KEY, 'off');
+  const startupRaw = get(STORAGE_KEY);
+  if (startupRaw) queueVaultSnapshot(startupRaw, 'startup-known-good');
+  installStorageHooks();
+  reconcileLegacyPhase5BJournal();
   writeDiagnostics({ installedAtISO: new Date().toISOString(), lastInstallError: null });
 })(typeof window !== 'undefined' ? window : globalThis);
