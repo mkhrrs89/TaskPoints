@@ -10,6 +10,7 @@ const runtimeSource = fs.readFileSync(path.join(ROOT, 'indexeddb_requalification
 const page = fs.readFileSync(path.join(ROOT, 'indexeddb_requalification.html'), 'utf8');
 const statusPage = fs.readFileSync(path.join(ROOT, 'phase4_storage_status.html'), 'utf8');
 const alwaysLoadedGuard = fs.readFileSync(path.join(ROOT, 'phase4_cache_guard.js'), 'utf8');
+const holdGuard = fs.readFileSync(path.join(ROOT, 'indexeddb_requalification_hold_guard.js'), 'utf8');
 
 class FakeStorage {
   constructor(rows = {}) { this.rows = new Map(Object.entries(rows).map(([key, value]) => [key, String(value)])); }
@@ -88,11 +89,11 @@ test('setup page uses the two-step plain-language flow and restores the safety h
   assert.match(page, /current working copy/);
   assert.match(page, /player photos/);
   assert.match(page, /indexeddb_requalification_guard\.js/);
+  assert.ok(page.indexOf('indexeddb_requalification_hold_guard.js') < page.indexOf('phase4_cache_guard.js'));
   assert.ok(page.indexOf('phase4_cache_guard.js') < page.indexOf('indexeddb_requalification.js'));
   assert.match(runtimeSource, /status: 'authorizing_test_mode'/);
   assert.match(runtimeSource, /remove\(HOLD_KEY\)/);
   assert.match(runtimeSource, /setPhase4StorageMode\?\.\('verify_primary_writes'\)/);
-  assert.match(runtimeSource, /if \(hadRecoveryHold && previousHoldRaw != null\) set\(HOLD_KEY, previousHoldRaw\)/);
   assert.match(runtimeSource, /const resuming = before\.gate\.status === 'authorizing_test_mode'/);
   assert.match(runtimeSource, /previousRecoveryHoldRaw: previousHoldRaw/);
   assert.match(runtimeSource, /status: 'ready_for_fast_mode'/);
@@ -106,7 +107,6 @@ test('the faster-mode guard is included in the always-loaded Phase 4 bundle', ()
   assert.match(alwaysLoadedGuard, /core\.__indexedDbRestartWitnessInstalled = true/);
 });
 
-
 test('selecting Off during the short test leaves a visible restart path', () => {
   assert.match(runtimeSource, /'awaiting_smoke_test', 'ready_for_fast_mode'/);
   assert.match(runtimeSource, /const freshStart = report\.mode === 'off'/);
@@ -115,16 +115,27 @@ test('selecting Off during the short test leaves a visible restart path', () => 
 test('reopen proof comes from a new normal app session rather than the checklist page', () => {
   assert.match(alwaysLoadedGuard, /const SESSION_KEY = 'taskpoints_indexeddb_browser_session_v1'/);
   assert.match(alwaysLoadedGuard, /EXCLUDED_PAGES\.has\(pageName\)/);
-  assert.match(alwaysLoadedGuard, /!sessionStorageAvailable \|\| !broadcastSupported \|\| !sessionWasNew/);
-  assert.match(alwaysLoadedGuard, /navigationType === 'reload'/);
+  assert.match(alwaysLoadedGuard, /sessionStorageAvailable/);
+  assert.match(alwaysLoadedGuard, /lockSupported/);
+  assert.match(alwaysLoadedGuard, /navigationType !== 'reload'/);
   assert.match(alwaysLoadedGuard, /freshAppSessionId: sessionId/);
   assert.match(alwaysLoadedGuard, /journalCount\(HABIT_JOURNAL_KEY\) > 0/);
-  assert.match(alwaysLoadedGuard, /new global\.BroadcastChannel\(CHANNEL_NAME\)/);
-  assert.match(alwaysLoadedGuard, /findOtherOpenSessions/);
-  assert.match(alwaysLoadedGuard, /otherSessions\.size > 0/);
+  assert.match(alwaysLoadedGuard, /const PAGE_LOCK_NAME = 'taskpoints_active_page_v1'/);
+  assert.match(alwaysLoadedGuard, /mode: 'shared'/);
+  assert.match(alwaysLoadedGuard, /mode: 'exclusive', ifAvailable: true/);
+  assert.match(alwaysLoadedGuard, /exclusivePageLockConfirmed: true/);
   assert.match(alwaysLoadedGuard, /attempt < 11/);
   assert.doesNotMatch(runtimeSource, /restorePhase4CommittedPrimary\?\.\(\)/);
   assert.match(runtimeSource, /restartCheckerReady/);
+});
+
+test('a newly raised recovery hold cannot be cleared or overwritten by the setup page', () => {
+  assert.doesNotThrow(() => new vm.Script(holdGuard));
+  assert.match(holdGuard, /current !== initialHoldRaw/);
+  assert.match(holdGuard, /TASKPOINTS_RECOVERY_HOLD_CHANGED/);
+  assert.match(holdGuard, /TASKPOINTS_NEWER_RECOVERY_HOLD_ACTIVE/);
+  assert.match(holdGuard, /core\.setPhase4StorageMode\?\.\('off'\)/);
+  assert.doesNotMatch(holdGuard, /removeItem\(HOLD_KEY\)/);
 });
 
 test('resuming preparation preserves the original safety baselines', () => {
