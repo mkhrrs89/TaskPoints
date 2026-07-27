@@ -8,6 +8,7 @@
   const LEGACY_JOURNAL_KEY = 'taskpoints_phase5b_pending_changes_v1';
   const DB_NAME = 'taskpoints_verified_secondary_v1';
   const STORE_NAME = 'snapshots';
+  const preloadJournals = global.__taskPointsVerifiedSecondaryRestorePreload || {};
   let candidate = null;
   let validation = null;
 
@@ -95,9 +96,17 @@
   }
 
   function currentJournalState() {
+    const liveHabitCount = parseJournalCount(localStorage.getItem(HABIT_JOURNAL_KEY));
+    const capturedHabitCount = parseJournalCount(preloadJournals.habitJournalRaw || '');
+    const liveLegacyPresent = Boolean(localStorage.getItem(LEGACY_JOURNAL_KEY));
+    const capturedLegacyPresent = Boolean(preloadJournals.legacyJournalRaw);
     return {
-      pendingHabitCount: parseJournalCount(localStorage.getItem(HABIT_JOURNAL_KEY)),
-      legacyJournalPresent: Boolean(localStorage.getItem(LEGACY_JOURNAL_KEY))
+      pendingHabitCount: Math.max(liveHabitCount, capturedHabitCount),
+      legacyJournalPresent: liveLegacyPresent || capturedLegacyPresent,
+      liveHabitCount,
+      capturedHabitCount,
+      liveLegacyPresent,
+      capturedLegacyPresent
     };
   }
 
@@ -127,6 +136,11 @@
       exportType: 'taskpoints_verified_secondary_restore_package',
       exportedAtISO: new Date().toISOString(),
       current,
+      capturedBeforeTaskPointsCore: {
+        capturedAtISO: preloadJournals.capturedAtISO || '',
+        habitJournalRaw: preloadJournals.habitJournalRaw || '',
+        legacyJournalRaw: preloadJournals.legacyJournalRaw || ''
+      },
       verifiedSecondary: {
         verifiedAtISO: candidate.verifiedAtISO || '',
         raw: candidate.raw,
@@ -172,7 +186,7 @@
     }
     const journals = currentJournalState();
     if (journals.pendingHabitCount || journals.legacyJournalPresent) {
-      throw new Error('A pending journal appeared. Open full Emergency Data Recovery so those changes can be preserved.');
+      throw new Error('A pending journal exists or existed before TaskPointsCore loaded. Open full Emergency Data Recovery so those changes can be preserved.');
     }
     candidate = live;
     validation = { ...validation, ...journals };
@@ -183,7 +197,7 @@
     const initialJournals = currentJournalState();
     if (initialJournals.pendingHabitCount || initialJournals.legacyJournalPresent) {
       $('message').className = 'bad mb-4';
-      $('message').textContent = 'Restore is blocked because a pending journal exists. Open full Emergency Data Recovery so those pending changes can be preserved and reconciled.';
+      $('message').textContent = 'Restore is blocked because a pending journal exists or existed before TaskPointsCore loaded. Open full Emergency Data Recovery so those changes can be preserved and reconciled.';
       return;
     }
 
@@ -253,7 +267,7 @@
       const exactMatch = result.currentRaw === candidate.raw;
       if (result.pendingHabitCount || result.legacyJournalPresent) {
         $('message').className = 'bad mb-4';
-        $('message').textContent = 'A pending journal exists. Direct secondary restoration is disabled; use full Emergency Data Recovery to preserve those changes.';
+        $('message').textContent = 'A pending journal exists or existed before TaskPointsCore loaded. Direct secondary restoration is disabled; use full Emergency Data Recovery to preserve those changes.';
       } else if (exactMatch) {
         $('message').className = 'good mb-4';
         $('message').textContent = 'The verified secondary already matches the current authoritative save exactly. No restore is needed.';
@@ -269,8 +283,15 @@
         candidate: { verifiedAtISO:candidate.verifiedAtISO || '', rawHash:candidate.rawHash, counts:candidate.counts },
         current: { readable:result.currentReadable, rawHash:result.currentRaw ? result.api.rawHash(result.currentRaw) : '', counts:result.currentCounts },
         exactRawMatch: exactMatch,
-        pendingHabitCount: result.pendingHabitCount,
-        legacyJournalPresent: result.legacyJournalPresent
+        journals: {
+          capturedAtISO: preloadJournals.capturedAtISO || '',
+          pendingHabitCount: result.pendingHabitCount,
+          legacyJournalPresent: result.legacyJournalPresent,
+          liveHabitCount: result.liveHabitCount,
+          capturedHabitCount: result.capturedHabitCount,
+          liveLegacyPresent: result.liveLegacyPresent,
+          capturedLegacyPresent: result.capturedLegacyPresent
+        }
       }, null, 2);
     } catch (error) {
       $('message').className = 'bad mb-4';
