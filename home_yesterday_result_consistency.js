@@ -10,8 +10,6 @@
   const TRENDLINE_COLOR = '#F59E0B';
   const TRENDLINE_PERIOD = 14;
   const TRENDLINE_MAX_POINTS = 400;
-  const WEEKLY_ON_TRACK_ATTR = 'data-weekly-on-track';
-  const WEEKLY_BOARD_LIMIT = 10;
   let installAttempts = 0;
 
   function getElement(id) {
@@ -280,191 +278,6 @@
     return scoreReady && caloriesReady;
   }
 
-  function parseDateKeyLocal(key) {
-    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(key || ''));
-    if (!match) return null;
-    const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12, 0, 0, 0);
-    return Number.isNaN(date.getTime()) ? null : date;
-  }
-
-  function addLocalDays(date, amount) {
-    const next = new Date(date);
-    next.setDate(next.getDate() + amount);
-    return next;
-  }
-
-  function currentTaskPointsDate() {
-    let key = '';
-    try {
-      if (typeof global.getCurrentTaskPointsDayKey === 'function') key = global.getCurrentTaskPointsDayKey();
-      else if (typeof global.todayKey === 'function') key = global.todayKey();
-    } catch (_) {}
-    return parseDateKeyLocal(key) || new Date();
-  }
-
-  function mondayForDate(date) {
-    const day = date.getDay();
-    const daysSinceMonday = day === 0 ? 6 : day - 1;
-    return addLocalDays(date, -daysSinceMonday);
-  }
-
-  function formatWeeklyDate(date) {
-    if (typeof global.niceDate === 'function') {
-      try { return global.niceDate(date); } catch (_) {}
-    }
-    return date.toLocaleDateString(undefined, {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric'
-    });
-  }
-
-  function readProjectionState() {
-    try {
-      const loaded = global.TaskPointsCore?.loadAppState?.({ syncDerived: true, persistSync: false });
-      if (loaded?.state && typeof loaded.state === 'object') return loaded.state;
-    } catch (_) {}
-    return {};
-  }
-
-  function dailyTotalsWithInertiaForProjection(state) {
-    try {
-      if (typeof global.getDerived === 'function') {
-        const derived = global.getDerived();
-        if (derived?.dailyTotalsWithInertia && typeof derived.dailyTotalsWithInertia === 'object') {
-          return derived.dailyTotalsWithInertia;
-        }
-      }
-    } catch (_) {}
-
-    const core = global.TaskPointsCore;
-    const completions = Array.isArray(state?.completions) ? state.completions : [];
-    let dailyTotals = {};
-    try {
-      dailyTotals = core?.aggregateCompletionsByDate?.(completions, state)?.dailyTotals || {};
-    } catch (_) {}
-    try {
-      return core?.computeDailyTotalsWithInertia?.(dailyTotals, state) || dailyTotals;
-    } catch (_) {
-      return dailyTotals;
-    }
-  }
-
-  function buildCurrentWeekProjection() {
-    const state = readProjectionState();
-    const dailyTotals = dailyTotalsWithInertiaForProjection(state);
-    const today = currentTaskPointsDate();
-    today.setHours(12, 0, 0, 0);
-    const start = mondayForDate(today);
-    const end = addLocalDays(start, 6);
-    const elapsedDays = Math.round((today - start) / 86400000) + 1;
-    if (elapsedDays < 1 || elapsedDays > 7) return null;
-
-    let actualTotal = 0;
-    let hasCurrentWeekEntry = false;
-    for (let offset = 0; offset < elapsedDays; offset += 1) {
-      const key = fallbackDateKey(addLocalDays(start, offset));
-      if (!Object.prototype.hasOwnProperty.call(dailyTotals, key)) continue;
-      const value = Number(dailyTotals[key]);
-      if (!Number.isFinite(value)) continue;
-      hasCurrentWeekEntry = true;
-      actualTotal += value;
-    }
-    if (!hasCurrentWeekEntry) return null;
-
-    const projectedTotal = (actualTotal / elapsedDays) * 7;
-    if (!Number.isFinite(projectedTotal)) return null;
-    return {
-      key: fallbackDateKey(start),
-      start,
-      end,
-      actualTotal,
-      projectedTotal,
-      elapsedDays,
-      label: `${formatWeeklyDate(start)} – ${formatWeeklyDate(end)} (on-track)`
-    };
-  }
-
-  function scoreFromWeeklyRow(row) {
-    const scoreNode = row?.lastElementChild;
-    const text = String(scoreNode?.textContent || row?.textContent || '').replaceAll(',', '');
-    const matches = text.match(/-?\d+(?:\.\d+)?/g);
-    if (!matches?.length) return Number.NEGATIVE_INFINITY;
-    const value = Number(matches[matches.length - 1]);
-    return Number.isFinite(value) ? value : Number.NEGATIVE_INFINITY;
-  }
-
-  function createWeeklyProjectionRow(template, projection) {
-    const row = template?.cloneNode?.(true) || global.document.createElement('li');
-    row.setAttribute(WEEKLY_ON_TRACK_ATTR, '1');
-    row.dataset.key = projection.key;
-    row.classList.add('leaderboard-current');
-
-    const children = Array.from(row.children || []);
-    const scoreText = `${projection.projectedTotal.toLocaleString(undefined, { maximumFractionDigits: 1 })} pts`;
-    if (children.length >= 2) {
-      children[0].textContent = projection.label;
-      children[children.length - 1].textContent = scoreText;
-    } else {
-      row.className = `${row.className || ''} flex items-center justify-between`.trim();
-      row.innerHTML = '';
-      const label = global.document.createElement('span');
-      const score = global.document.createElement('span');
-      label.textContent = projection.label;
-      score.textContent = scoreText;
-      row.append(label, score);
-    }
-    return row;
-  }
-
-  function applyWeeklyOnTrackProjection() {
-    const board = getElement('weeklyBoard');
-    if (!board) return false;
-    const projection = buildCurrentWeekProjection();
-    if (!projection) return false;
-
-    const existingProjection = board.querySelector?.(`[${WEEKLY_ON_TRACK_ATTR}]`);
-    if (!existingProjection) {
-      board.__taskPointsWeeklyBaseRows = Array.from(board.children || []).map((row) => row.cloneNode(true));
-    }
-    const baseRows = Array.isArray(board.__taskPointsWeeklyBaseRows)
-      ? board.__taskPointsWeeklyBaseRows.map((row) => row.cloneNode(true))
-      : Array.from(board.children || [])
-          .filter((row) => !row.hasAttribute?.(WEEKLY_ON_TRACK_ATTR))
-          .map((row) => row.cloneNode(true));
-    if (!baseRows.length) return false;
-
-    const projectionRow = createWeeklyProjectionRow(baseRows[0], projection);
-    const rankedRows = [...baseRows, projectionRow]
-      .map((row, originalIndex) => ({ row, score: scoreFromWeeklyRow(row), originalIndex }))
-      .sort((a, b) => (b.score - a.score) || (a.originalIndex - b.originalIndex))
-      .slice(0, WEEKLY_BOARD_LIMIT)
-      .map((entry) => entry.row);
-
-    board.replaceChildren(...rankedRows);
-    return rankedRows.includes(projectionRow);
-  }
-
-  function installWeeklyOnTrackProjection() {
-    const board = getElement('weeklyBoard');
-    if (!board) return true;
-    const original = global.renderStats;
-    if (typeof original !== 'function') return false;
-    if (original.__taskPointsWeeklyOnTrackProjection) return true;
-
-    const wrapped = function taskPointsRenderStatsWithWeeklyProjection(...args) {
-      const result = original.apply(this, args);
-      try { applyWeeklyOnTrackProjection(); }
-      catch (error) { console.warn('TaskPoints could not add the weekly on-track projection.', error); }
-      return result;
-    };
-    wrapped.__taskPointsWeeklyOnTrackProjection = true;
-    wrapped.__taskPointsOriginal = original;
-    global.renderStats = wrapped;
-    applyWeeklyOnTrackProjection();
-    return true;
-  }
-
   function installPatch() {
     if (typeof global.renderYesterdaysResult !== 'function'
       || typeof global.getCompletedYouMatchupsForStats !== 'function') {
@@ -490,8 +303,7 @@
   function installWhenReady() {
     const resultPatchReady = installPatch();
     const trendLayeringReady = installTrendLineLayering();
-    const weeklyProjectionReady = installWeeklyOnTrackProjection();
-    if (resultPatchReady && trendLayeringReady && weeklyProjectionReady) return;
+    if (resultPatchReady && trendLayeringReady) return;
     installAttempts += 1;
     if (installAttempts < 40) global.setTimeout?.(installWhenReady, 50);
   }
@@ -501,10 +313,7 @@
     installPatch,
     installPlayerPhotoFrameOverride,
     installTrendLineLayering,
-    drawMovingAverageAboveDots,
-    buildCurrentWeekProjection,
-    applyWeeklyOnTrackProjection,
-    installWeeklyOnTrackProjection
+    drawMovingAverageAboveDots
   };
 
   installPlayerPhotoFrameOverride();
