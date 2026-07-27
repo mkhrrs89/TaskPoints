@@ -26,7 +26,8 @@
   let latestReport = null;
   let busy = false;
   const PAGE_INSTANCE_ID = global.crypto?.randomUUID?.() || `page-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  const BROWSER_SESSION_ID = core.getIndexedDbBrowserSessionStatus?.().sessionId || '';
+  const BROWSER_SESSION_STATUS = core.getIndexedDbBrowserSessionStatus?.() || {};
+  const BROWSER_SESSION_ID = BROWSER_SESSION_STATUS.sessionId || '';
 
   const get = (key) => { try { return localStorage.getItem(key); } catch (_) { return null; } };
   const set = (key, value) => localStorage.setItem(key, value);
@@ -243,6 +244,12 @@
     const habitPending = habitJournalCount();
     const legacyPending = Boolean(get(LEGACY_JOURNAL_KEY));
     const guardReady = core.__storageDataLossGuardInstalled === true && guard.enabled === true && guard.phase5bLiveBundleDisabled === true;
+    const restartCheckerReady = Boolean(
+      core.__indexedDbRestartWitnessInstalled === true
+      && BROWSER_SESSION_ID
+      && BROWSER_SESSION_STATUS.sessionStorageAvailable === true
+      && BROWSER_SESSION_STATUS.broadcastSupported === true
+    );
     const blockedWrites = Number(guard.blockedWritesTotal || 0);
     const baseReady = Boolean(
       current.readable && current.counts?.majorTotal >= 30
@@ -253,6 +260,7 @@
       && habitPending === 0
       && !legacyPending
       && core.__indexedDbRequalificationGuardInstalled === true
+      && restartCheckerReady
     );
     const noNewBlockedWrites = Number(blockedWrites) <= Number(gate.baselineBlockedWrites ?? blockedWrites);
     const reopenProven = Boolean(
@@ -275,7 +283,7 @@
     return {
       scannedAtISO: new Date().toISOString(), current, secondary, vault, fast, guard, gate, phase4,
       mode, recoveryHold: Boolean(recoveryHold), recoveryHoldRaw: recoveryHold,
-      attemptLock: Boolean(attemptLock), habitPending, legacyPending, guardReady,
+      attemptLock: Boolean(attemptLock), habitPending, legacyPending, guardReady, restartCheckerReady,
       blockedWrites, baseReady, noNewBlockedWrites, reopenProven, pageInstanceId: PAGE_INSTANCE_ID, browserSessionId: BROWSER_SESSION_ID, editDetected, testHealthy
     };
   }
@@ -301,6 +309,7 @@
       checkCard('The data-loss safety net is on', report.guardReady, report.guardReady ? (report.blockedWrites ? `${report.blockedWrites} bad replacement attempt(s) were safely blocked in the past.` : 'No dangerous replacement attempt has been detected.') : 'The safety net is not fully installed.'),
       checkCard('No changes are waiting to be saved', report.habitPending === 0 && !report.legacyPending, report.habitPending === 0 && !report.legacyPending ? 'No unfinished habit or older save notes remain.' : 'Finish or recover the waiting changes first.'),
       checkCard('No recovery is currently running', !report.attemptLock, report.attemptLock ? 'A recovery attempt is still active.' : 'No recovery attempt is active.'),
+      checkCard('The close-and-reopen checker is ready', report.restartCheckerReady, report.restartCheckerReady ? 'TaskPoints can confirm that no older TaskPoints window remains open.' : 'This browser cannot safely prove a fresh TaskPoints session.'),
       checkCard('The faster database copy is current', report.fast.ready, report.fast.ready ? 'Both faster copies match your working copy.' : 'This will be rebuilt during the short test.', !report.fast.ready),
       checkCard('iPhone storage protection', false, 'iOS still does not promise permanent website storage, so keep full exports.', true)
     ];
