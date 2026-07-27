@@ -162,6 +162,16 @@ test('promotes an exact hash- and count-verified copy only after a successful lo
   assert.equal(status.lastVerifiedCounts.majorTotal, 2);
 });
 
+test('rapid successful saves drain to the newest authoritative snapshot', async () => {
+  const harness = install();
+  harness.localStorage.setItem(STORAGE_KEY, JSON.stringify(makeState('first')));
+  const newestRaw = JSON.stringify(makeState('newest'));
+  harness.localStorage.setItem(STORAGE_KEY, newestRaw);
+  await harness.core.flushPhase5CVerifiedSecondaryWrites();
+  assert.equal(harness.indexedDB.read(DB_NAME, 'latest').raw, newestRaw);
+  assert.equal(harness.core.getPhase5CVerifiedSecondaryStatus().mirrorsCurrentSave, true);
+});
+
 test('a rejected authoritative write cannot queue or replace the verified secondary copy', async () => {
   const harness = install();
   harness.localStorage.failMain = true;
@@ -180,6 +190,11 @@ test('pending habit journal changes pause secondary mirroring', async () => {
   await harness.core.flushPhase5CVerifiedSecondaryWrites();
   assert.equal(harness.indexedDB.read(DB_NAME, 'latest'), undefined);
   assert.equal(harness.core.getPhase5CVerifiedSecondaryStatus().lastStatus, 'waiting_for_habit_journal');
+});
+
+test('includes an iPhone-compatible Storage prototype fallback', () => {
+  assert.match(SOURCE, /__taskPointsPhase5COriginalSetItem/);
+  assert.match(SOURCE, /prototype\.setItem = function phase5cSetItem/);
 });
 
 test('Storage Health adds a read-only verified-secondary check', () => {
