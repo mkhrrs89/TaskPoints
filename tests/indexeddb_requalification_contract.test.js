@@ -88,6 +88,7 @@ test('setup page uses the two-step plain-language flow and restores the safety h
   assert.match(page, /current working copy/);
   assert.match(page, /player photos/);
   assert.match(page, /indexeddb_requalification_guard\.js/);
+  assert.ok(page.indexOf('phase4_cache_guard.js') < page.indexOf('indexeddb_requalification.js'));
   assert.match(runtimeSource, /status: 'authorizing_test_mode'/);
   assert.match(runtimeSource, /remove\(HOLD_KEY\)/);
   assert.match(runtimeSource, /setPhase4StorageMode\?\.\('verify_primary_writes'\)/);
