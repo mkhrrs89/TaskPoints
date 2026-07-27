@@ -8,7 +8,9 @@ const ROOT = path.join(__dirname, '..');
 const preview = fs.readFileSync(path.join(ROOT, 'verified_secondary_recovery.html'), 'utf8');
 const restore = fs.readFileSync(path.join(ROOT, 'verified_secondary_restore.html'), 'utf8');
 const restoreRuntime = fs.readFileSync(path.join(ROOT, 'verified_secondary_restore.js'), 'utf8');
+const restoreLockGuard = fs.readFileSync(path.join(ROOT, 'verified_secondary_restore_lock_guard.js'), 'utf8');
 const verifiedSecondaryRuntime = fs.readFileSync(path.join(ROOT, 'phase5b_deferred_mirror.js'), 'utf8');
+const alwaysLoadedCompatibility = fs.readFileSync(path.join(ROOT, 'home_yesterday_result_consistency.js'), 'utf8');
 const health = fs.readFileSync(path.join(ROOT, 'storage_health.html'), 'utf8');
 
 function inlineScripts(html) {
@@ -34,18 +36,20 @@ test('read-only preview compiles and contains no saved-state mutation path', () 
   assert.doesNotMatch(preview, /\.(?:put|delete|clear)\s*\(/);
 });
 
-test('restore page captures journals and enters Recovery Hold before isolated runtime', () => {
+test('restore page captures journals and loads ownership guard before isolated runtime', () => {
   inlineScripts(restore).forEach((source) => assert.doesNotThrow(() => new vm.Script(source)));
   const captureAt = restore.indexOf('window.__taskPointsVerifiedSecondaryRestorePreload');
   const legacyReadAt = restore.indexOf("localStorage.getItem('taskpoints_phase5b_pending_changes_v1')");
   const holdAt = restore.indexOf("localStorage.setItem('taskpoints_emergency_recovery_hold_v1'");
   const modeAt = restore.indexOf("localStorage.setItem('taskpoints_phase4_storage_mode_v1', 'off')");
+  const lockGuardAt = restore.indexOf('<script src="verified_secondary_restore_lock_guard.js" defer></script>');
   const runtimeAt = restore.indexOf('<script src="verified_secondary_restore.js" defer></script>');
   assert.ok(captureAt >= 0);
   assert.ok(legacyReadAt > captureAt);
   assert.ok(holdAt > legacyReadAt);
   assert.ok(modeAt > holdAt);
-  assert.ok(runtimeAt > modeAt);
+  assert.ok(lockGuardAt > modeAt);
+  assert.ok(runtimeAt > lockGuardAt);
   assert.doesNotMatch(restore, /scoring_core\.js/);
 });
 
@@ -70,7 +74,7 @@ test('restore requires lock, download, confirmation, typed RESTORE, and exact di
   assert.match(restoreRuntime, /Close every other TaskPoints tab or window first/);
   assert.match(restoreRuntime, /type RESTORE in all capital letters/);
   assert.match(restoreRuntime, /typed !== 'RESTORE'/);
-  const lockAt = restoreRuntime.indexOf('acquireRecoveryLock()');
+  const lockAt = restoreRuntime.lastIndexOf('acquireRecoveryLock()');
   const revalidateAt = restoreRuntime.indexOf('await revalidateImmediatelyBeforeRestore()');
   const downloadAt = restoreRuntime.indexOf('if (!downloadPackage())');
   const replaceAt = restoreRuntime.indexOf('localStorage.setItem(STORAGE_KEY, candidate.raw)');
@@ -85,6 +89,16 @@ test('restore requires lock, download, confirmation, typed RESTORE, and exact di
   assert.match(restore, /verified secondary database and safety vault remain preserved/i);
 });
 
+test('the restore write is rejected unless this page still owns the exact uncommitted lock', () => {
+  assert.doesNotThrow(() => new vm.Script(restoreLockGuard));
+  assert.match(restoreLockGuard, /let ownedToken = ''/);
+  assert.match(restoreLockGuard, /normalizedKey === LOCK_KEY/);
+  assert.match(restoreLockGuard, /String\(lock\.token\) !== ownedToken/);
+  assert.match(restoreLockGuard, /Number\(lock\.committedAtMs \|\| 0\) !== 0/);
+  assert.match(restoreLockGuard, /normalizedKey === STORAGE_KEY\) assertLockOwnership\(\)/);
+  assert.match(restoreLockGuard, /TASKPOINTS_RECOVERY_LOCK_OWNERSHIP_LOST/);
+});
+
 test('already-open TaskPoints tabs are blocked until reloaded after the recovery commit', () => {
   assert.doesNotThrow(() => new vm.Script(verifiedSecondaryRuntime));
   assert.match(verifiedSecondaryRuntime, /installTaskPointsRecoveryWriteLockGuard/);
@@ -95,6 +109,17 @@ test('already-open TaskPoints tabs are blocked until reloaded after the recovery
   assert.match(verifiedSecondaryRuntime, /assertWriteAllowed\('removeItem'\)/);
   assert.match(verifiedSecondaryRuntime, /TASKPOINTS_RECOVERY_WRITE_LOCKED/);
   assert.match(verifiedSecondaryRuntime, /Reload this tab before making changes/);
+});
+
+test('stale tabs cannot write or clear the main save or either pending journal', () => {
+  assert.doesNotThrow(() => new vm.Script(alwaysLoadedCompatibility));
+  assert.match(alwaysLoadedCompatibility, /installTaskPointsRecoveryJournalWriteLockGuard/);
+  assert.match(alwaysLoadedCompatibility, /taskpoints_pending_habit_deltas_v1/);
+  assert.match(alwaysLoadedCompatibility, /taskpoints_phase5b_pending_changes_v1/);
+  assert.match(alwaysLoadedCompatibility, /const PROTECTED_KEYS = new Set\(\[STORAGE_KEY, HABIT_JOURNAL_KEY, LEGACY_JOURNAL_KEY\]\)/);
+  assert.match(alwaysLoadedCompatibility, /assertWriteAllowed\(key, 'setItem'\)/);
+  assert.match(alwaysLoadedCompatibility, /assertWriteAllowed\(key, 'removeItem'\)/);
+  assert.match(alwaysLoadedCompatibility, /pending journals remain protected/);
 });
 
 test('post-commit metadata failure cannot be reported as an uncommitted restore', () => {
