@@ -16,6 +16,7 @@ test('cross-tab saves cannot leave an older snapshot promoted as latest', () => 
   assert.match(source, /transaction\.abort\(\)/);
   assert.match(source, /if \(!pendingJournal && currentRaw\) queue\(currentRaw\)/);
   assert.match(source, /global\.addEventListener\('storage'/);
-  assert.match(source, /event\?\.key === KEY && event\.newValue/);
+  assert.match(source, /event\?\.key === KEY/);
+  assert.match(source, /if \(event\.newValue && get\(KEY\) === event\.newValue\)/);
   assert.match(source, /queue\(event\.newValue\)/);
 });
