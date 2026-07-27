@@ -324,3 +324,98 @@
     installWhenReady();
   }
 })(typeof window !== 'undefined' ? window : globalThis);
+
+(function installTaskPointsRecoveryJournalWriteLockGuard(global) {
+  'use strict';
+
+  const storage = global.localStorage;
+  if (!storage || global.__taskPointsRecoveryJournalWriteLockGuardInstalled) return;
+  global.__taskPointsRecoveryJournalWriteLockGuardInstalled = true;
+
+  const STORAGE_KEY = global.TaskPointsCore?.STORAGE_KEY || 'taskpoints_v1';
+  const HABIT_JOURNAL_KEY = global.TaskPointsCore?.PENDING_HABIT_DELTAS_KEY || 'taskpoints_pending_habit_deltas_v1';
+  const LEGACY_JOURNAL_KEY = 'taskpoints_phase5b_pending_changes_v1';
+  const LOCK_KEY = 'taskpoints_recovery_write_lock_v1';
+  const PAGE_STARTED_AT_MS = global.TaskPointsCore?.getRecoveryWriteLockStatus?.().pageStartedAtMs || Date.now();
+  const PROTECTED_KEYS = new Set([STORAGE_KEY, HABIT_JOURNAL_KEY, LEGACY_JOURNAL_KEY]);
+  let alertShown = false;
+
+  function readLock() {
+    try {
+      const lock = JSON.parse(storage.getItem(LOCK_KEY) || 'null');
+      return lock && lock.active === true && lock.token ? lock : null;
+    } catch (_) { return null; }
+  }
+
+  function pageMayWrite(lock) {
+    const committedAtMs = Number(lock?.committedAtMs || 0);
+    return committedAtMs > 0 && PAGE_STARTED_AT_MS >= committedAtMs;
+  }
+
+  function assertWriteAllowed(key, operation) {
+    const normalizedKey = String(key);
+    if (!PROTECTED_KEYS.has(normalizedKey)) return;
+    const lock = readLock();
+    if (!lock || pageMayWrite(lock)) return;
+    const error = new Error('TaskPoints blocked data from a tab that was open before a confirmed recovery. Reload this tab before making changes.');
+    error.code = 'TASKPOINTS_RECOVERY_WRITE_LOCKED';
+    error.key = normalizedKey;
+    error.operation = operation;
+    error.lock = lock;
+    console.error(error.message, { key: normalizedKey, operation, lock });
+    if (!alertShown && typeof global.alert === 'function') {
+      alertShown = true;
+      try { global.alert(`${error.message}\n\nYour recovered save and pending journals remain protected.`); } catch (_) {}
+    }
+    throw error;
+  }
+
+  function installInstanceHooks() {
+    try {
+      const priorSet = storage.setItem.bind(storage);
+      const priorRemove = storage.removeItem.bind(storage);
+      const guardedSet = function recoveryJournalLockedSetItem(key, value) {
+        assertWriteAllowed(key, 'setItem');
+        return priorSet(key, value);
+      };
+      const guardedRemove = function recoveryJournalLockedRemoveItem(key) {
+        assertWriteAllowed(key, 'removeItem');
+        return priorRemove(key);
+      };
+      storage.setItem = guardedSet;
+      storage.removeItem = guardedRemove;
+      return storage.setItem === guardedSet && storage.removeItem === guardedRemove;
+    } catch (_) { return false; }
+  }
+
+  function installPrototypeHooks() {
+    const prototype = global.Storage?.prototype;
+    if (!prototype) return false;
+    if (prototype.setItem && !prototype.__taskPointsRecoveryJournalLockOriginalSetItem) {
+      const priorSet = prototype.setItem;
+      Object.defineProperty(prototype, '__taskPointsRecoveryJournalLockOriginalSetItem', { value: priorSet, configurable: true });
+      prototype.setItem = function recoveryJournalLockedSetItem(key, value) {
+        if (this === storage) assertWriteAllowed(key, 'setItem');
+        return priorSet.call(this, key, value);
+      };
+    }
+    if (prototype.removeItem && !prototype.__taskPointsRecoveryJournalLockOriginalRemoveItem) {
+      const priorRemove = prototype.removeItem;
+      Object.defineProperty(prototype, '__taskPointsRecoveryJournalLockOriginalRemoveItem', { value: priorRemove, configurable: true });
+      prototype.removeItem = function recoveryJournalLockedRemoveItem(key) {
+        if (this === storage) assertWriteAllowed(key, 'removeItem');
+        return priorRemove.call(this, key);
+      };
+    }
+    return true;
+  }
+
+  const installed = installInstanceHooks() || installPrototypeHooks();
+  global.TaskPointsRecoveryJournalWriteLockGuard = {
+    installed,
+    protectedKeys: [...PROTECTED_KEYS],
+    pageStartedAtMs: PAGE_STARTED_AT_MS,
+    readLock,
+    pageMayWrite
+  };
+})(typeof window !== 'undefined' ? window : globalThis);
