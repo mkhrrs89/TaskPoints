@@ -8,6 +8,7 @@ const ROOT = path.join(__dirname, '..');
 const preview = fs.readFileSync(path.join(ROOT, 'verified_secondary_recovery.html'), 'utf8');
 const restore = fs.readFileSync(path.join(ROOT, 'verified_secondary_restore.html'), 'utf8');
 const restoreRuntime = fs.readFileSync(path.join(ROOT, 'verified_secondary_restore.js'), 'utf8');
+const verifiedSecondaryRuntime = fs.readFileSync(path.join(ROOT, 'phase5b_deferred_mirror.js'), 'utf8');
 const health = fs.readFileSync(path.join(ROOT, 'storage_health.html'), 'utf8');
 
 function inlineScripts(html) {
@@ -48,39 +49,62 @@ test('restore page captures journals and enters Recovery Hold before isolated ru
   assert.doesNotMatch(restore, /scoring_core\.js/);
 });
 
-test('restore runtime verifies readonly candidate and rechecks live and captured journals', () => {
+test('restore runtime verifies readonly candidate and rechecks current state plus journals', () => {
   assert.doesNotThrow(() => new vm.Script(restoreRuntime));
   assert.match(restoreRuntime, /db\.transaction\(STORE_NAME, 'readonly'\)/);
   assert.match(restoreRuntime, /record\.status !== 'passed_verification'/);
   assert.match(restoreRuntime, /record\.rawHash !== api\.rawHash\(record\.raw\)/);
   assert.match(restoreRuntime, /sameCounts\(decodedCounts, record\.counts/);
   assert.match(restoreRuntime, /const preloadJournals = global\.__taskPointsVerifiedSecondaryRestorePreload/);
-  assert.match(restoreRuntime, /capturedHabitCount/);
-  assert.match(restoreRuntime, /capturedLegacyPresent/);
   assert.match(restoreRuntime, /Math\.max\(liveHabitCount, capturedHabitCount\)/);
   assert.match(restoreRuntime, /liveLegacyPresent \|\| capturedLegacyPresent/);
   assert.match(restoreRuntime, /async function revalidateImmediatelyBeforeRestore\(\)/);
+  assert.match(restoreRuntime, /The current authoritative save changed while you were confirming/);
   assert.match(restoreRuntime, /verifyRecord\(await readLatest\(\), api\)/);
   assert.match(restoreRuntime, /The verified secondary changed while you were confirming/);
-  assert.match(restoreRuntime, /exists or existed when the recovery page opened/);
   assert.match(restoreRuntime, /capturedBeforeRecoveryRuntime/);
 });
 
-test('restore requires download, confirmation, typed RESTORE, and exact direct readback', () => {
+test('restore requires lock, download, confirmation, typed RESTORE, and exact direct readback', () => {
   assert.match(restoreRuntime, /const first = confirm\(/);
+  assert.match(restoreRuntime, /Close every other TaskPoints tab or window first/);
   assert.match(restoreRuntime, /type RESTORE in all capital letters/);
   assert.match(restoreRuntime, /typed !== 'RESTORE'/);
+  const lockAt = restoreRuntime.indexOf('acquireRecoveryLock()');
   const revalidateAt = restoreRuntime.indexOf('await revalidateImmediatelyBeforeRestore()');
   const downloadAt = restoreRuntime.indexOf('if (!downloadPackage())');
   const replaceAt = restoreRuntime.indexOf('localStorage.setItem(STORAGE_KEY, candidate.raw)');
-  assert.ok(revalidateAt >= 0 && downloadAt > revalidateAt && replaceAt > downloadAt);
+  assert.ok(lockAt >= 0 && revalidateAt > lockAt && downloadAt > revalidateAt && replaceAt > downloadAt);
+  assert.match(restoreRuntime, /await delay\(150\)/);
+  assert.match(restoreRuntime, /finalizeRecoveryLock\(\)/);
   assert.doesNotMatch(restoreRuntime, /safeReplaceTaskPointsStorage|withTaskPointsDestructiveWriteAllowed/);
   assert.match(restoreRuntime, /readBackRaw !== candidate\.raw/);
   assert.match(restoreRuntime, /Restored raw hash verification failed/);
   assert.match(restoreRuntime, /Restored record-count verification failed/);
   assert.match(restore, /Player images are not touched/);
   assert.match(restore, /verified secondary database and safety vault remain preserved/i);
-  assert.match(restoreRuntime, /verified secondary database and safety vault were preserved/i);
+});
+
+test('already-open TaskPoints tabs are blocked until reloaded after the recovery commit', () => {
+  assert.doesNotThrow(() => new vm.Script(verifiedSecondaryRuntime));
+  assert.match(verifiedSecondaryRuntime, /installTaskPointsRecoveryWriteLockGuard/);
+  assert.match(verifiedSecondaryRuntime, /taskpoints_recovery_write_lock_v1/);
+  assert.match(verifiedSecondaryRuntime, /const PAGE_STARTED_AT_MS = Date\.now\(\)/);
+  assert.match(verifiedSecondaryRuntime, /committedAtMs > 0 && PAGE_STARTED_AT_MS >= committedAtMs/);
+  assert.match(verifiedSecondaryRuntime, /assertWriteAllowed\('setItem'\)/);
+  assert.match(verifiedSecondaryRuntime, /assertWriteAllowed\('removeItem'\)/);
+  assert.match(verifiedSecondaryRuntime, /TASKPOINTS_RECOVERY_WRITE_LOCKED/);
+  assert.match(verifiedSecondaryRuntime, /Reload this tab before making changes/);
+});
+
+test('post-commit metadata failure cannot be reported as an uncommitted restore', () => {
+  assert.match(restoreRuntime, /let authoritativeWriteOccurred = false/);
+  assert.match(restoreRuntime, /let restoreVerified = false/);
+  assert.match(restoreRuntime, /authoritativeWriteOccurred = true/);
+  assert.match(restoreRuntime, /restoreVerified = true/);
+  assert.match(restoreRuntime, /catch \(_\) \{ holdFinalized = false; \}/);
+  assert.match(restoreRuntime, /The restore is committed and verified/);
+  assert.match(restoreRuntime, /Do not run the restore again/);
 });
 
 test('restore page cannot rotate or mutate the safety vault', () => {
