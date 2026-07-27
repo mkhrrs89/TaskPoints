@@ -1,0 +1,21 @@
+name: Temporary Storage Safety Test
+
+on:
+  push:
+    branches:
+      - agent/disable-phase5b-storage-safety
+
+jobs:
+  storage-safety:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Syntax check Phase 2 safety floor
+        run: node --check phase2_reset_hook.js
+      - name: Syntax check Phase 5B kill-switch
+        run: node --check phase5b_deferred_mirror.js
+      - name: Run focused safety contracts
+        run: node --test tests/phase5b_deferred_mirror_contract.test.js
