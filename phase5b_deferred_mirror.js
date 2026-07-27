@@ -101,7 +101,7 @@
     if (!raw || get(KEY) !== raw) return false;
     const pendingJournal = journalCount();
     if (pendingJournal) {
-      status({ phase5cLastStatus: 'waiting_for_habit_journal', phase5cPendingHabitJournalCount: pendingJournal, phase5cPendingWrite: false });
+      status({ phase5cLastStatus: 'waiting_for_habit_journal', phase5cPendingHabitJournalCount: pendingJournal, phase5cMirrorsCurrentSave: false, phase5cPendingWrite: false });
       return false;
     }
     let db;
@@ -181,9 +181,14 @@
         const result = original(key, value);
         const storageKey = String(key);
         if (storageKey === KEY && get(KEY) === String(value)) queue(String(value));
-        else if (storageKey === JOURNAL && journalCount() === 0) {
-          const currentRaw = get(KEY);
-          if (currentRaw) queue(currentRaw);
+        else if (storageKey === JOURNAL) {
+          const pendingJournal = journalCount();
+          if (pendingJournal === 0) {
+            const currentRaw = get(KEY);
+            if (currentRaw) queue(currentRaw);
+          } else {
+            status({ phase5cLastStatus: 'waiting_for_habit_journal', phase5cPendingHabitJournalCount: pendingJournal, phase5cMirrorsCurrentSave: false, phase5cPendingWrite: false });
+          }
         }
         return result;
       };
@@ -199,9 +204,14 @@
       if (this !== storage) return result;
       const storageKey = String(key);
       if (storageKey === KEY && get(KEY) === String(value)) queue(String(value));
-      else if (storageKey === JOURNAL && journalCount() === 0) {
-        const currentRaw = get(KEY);
-        if (currentRaw) queue(currentRaw);
+      else if (storageKey === JOURNAL) {
+        const pendingJournal = journalCount();
+        if (pendingJournal === 0) {
+          const currentRaw = get(KEY);
+          if (currentRaw) queue(currentRaw);
+        } else {
+          status({ phase5cLastStatus: 'waiting_for_habit_journal', phase5cPendingHabitJournalCount: pendingJournal, phase5cMirrorsCurrentSave: false, phase5cPendingWrite: false });
+        }
       }
       return result;
     };
@@ -224,7 +234,8 @@
     && currentRaw
     && existingStatus.phase5cLastStatus === 'passed_verification'
     && existingStatus.phase5cMirrorsCurrentSave === true
-    && existingStatus.phase5cLastVerifiedRawHash === hash(currentRaw));
+    && existingStatus.phase5cLastVerifiedRawHash === hash(currentRaw)
+    && journalCount() === 0);
   status({
     phase5cInstalledAtISO: new Date().toISOString(),
     phase5cHookInstalled: hookInstalled,
