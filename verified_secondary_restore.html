@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0d10">
+  <title>TaskPoints — Restore Verified Secondary</title>
+  <link rel="stylesheet" href="assets/tailwind.css">
+  <link rel="stylesheet" href="styles.css">
+  <script>
+    try {
+      localStorage.setItem('taskpoints_emergency_recovery_hold_v1', JSON.stringify({
+        active: true,
+        enteredAtISO: new Date().toISOString(),
+        reason: 'verified_secondary_manual_restore_preview'
+      }));
+      localStorage.setItem('taskpoints_phase4_storage_mode_v1', 'off');
+    } catch (_) {}
+  </script>
+  <script src="storage_health_codec.js" defer></script>
+  <script src="scoring_core.js" defer></script>
+  <style>
+    html,body{background:#0b0d10;color:#f8fafc}.panel{background:#15191d;border:1px solid #2b333b;border-radius:18px;padding:16px}.warning{background:#342411;border:1px solid #9a6327;color:#fed7aa;border-radius:14px;padding:12px}.good{background:#123126;border:1px solid #277654;color:#bbf7d0;border-radius:14px;padding:12px}.bad{background:#3a1518;border:1px solid #8f3038;color:#fecdd3;border-radius:14px;padding:12px}.muted{color:#94a3b8}.count-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px 14px}.count-row{display:flex;justify-content:space-between;gap:10px;font-size:13px}.pill{display:inline-flex;align-items:center;border:1px solid #475569;border-radius:999px;padding:2px 8px;font-size:11px;color:#cbd5e1}.good-pill{border-color:#277654;color:#bbf7d0}.bad-pill{border-color:#8f3038;color:#fecdd3}.actions{display:flex;flex-wrap:wrap;gap:10px}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;background:#0b0d10;border-radius:12px;padding:12px}@media(min-width:640px){.count-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
+  </style>
+</head>
+<body class="min-h-screen">
+  <main class="mx-auto max-w-4xl px-4 py-6 pb-24">
+    <header class="flex items-start justify-between gap-3 mb-5">
+      <div>
+        <h1 class="text-2xl font-extrabold">Restore Verified Secondary</h1>
+        <p class="text-sm muted mt-1">Manual replacement of the authoritative save from the independently verified copy.</p>
+      </div>
+      <a href="verified_secondary_recovery.html" class="btn btn-ghost btn-toolbar">Back to preview</a>
+    </header>
+
+    <div class="warning mb-4">
+      <strong>Recovery Hold is active.</strong> IndexedDB Primary remains Off. Nothing will be restored until you press the restore button and complete both confirmations.
+    </div>
+
+    <div id="message" class="warning mb-4" role="status" aria-live="polite">Validating the verified secondary copy…</div>
+
+    <section class="panel mb-4">
+      <div class="flex items-center justify-between gap-3 flex-wrap mb-3">
+        <div>
+          <h2 class="text-lg font-bold">Verified recovery candidate</h2>
+          <p id="verifiedAt" class="text-sm muted">Scanning…</p>
+        </div>
+        <span id="candidateStatus" class="pill">Checking…</span>
+      </div>
+      <div id="candidateCounts" class="count-grid"></div>
+    </section>
+
+    <section class="panel mb-4">
+      <h2 class="text-lg font-bold mb-2">What the restore does</h2>
+      <div class="text-sm muted space-y-2">
+        <p>It downloads one JSON recovery package containing both the current raw save and the verified secondary raw save.</p>
+        <p>It then replaces only <code>taskpoints_v1</code>, verifies exact raw bytes, hash, and record counts, leaves player images untouched, and keeps IndexedDB Primary Off.</p>
+        <p>The verified secondary database and safety vault remain preserved after restoration.</p>
+      </div>
+    </section>
+
+    <section class="panel mb-4">
+      <div class="actions">
+        <button id="downloadBtn" type="button" class="btn btn-ghost btn-toolbar" disabled>Download recovery package</button>
+        <button id="restoreBtn" type="button" class="btn btn-teal btn-toolbar" disabled>Restore verified copy</button>
+        <a href="emergency_recovery.html" class="btn btn-ghost btn-toolbar">Open full emergency recovery</a>
+      </div>
+    </section>
+
+    <details class="panel">
+      <summary class="cursor-pointer font-semibold">Technical validation</summary>
+      <pre id="technicalReport" class="mt-3">Loading…</pre>
+    </details>
+  </main>
+
+  <script>
+    (function installVerifiedSecondaryRestore(global) {
+      'use strict';
+      const STORAGE_KEY = 'taskpoints_v1';
+      const MODE_KEY = 'taskpoints_phase4_storage_mode_v1';
+      const HOLD_KEY = 'taskpoints_emergency_recovery_hold_v1';
+      const HABIT_JOURNAL_KEY = 'taskpoints_pending_habit_deltas_v1';
+      const LEGACY_JOURNAL_KEY = 'taskpoints_phase5b_pending_changes_v1';
+      const DB_NAME = 'taskpoints_verified_secondary_v1';
+      const STORE_NAME = 'snapshots';
+      let candidate = null;
+      let validation = null;
+      const $ = (id) => document.getElementById(id);
+      const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+      const formatTime = (value) => {
+        if (!value) return 'No verification timestamp recorded';
+        const date = new Date(value);
+        return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+      };
+      const parseJournalCount = (raw) => {
+        if (!raw) return 0;
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) return parsed.length;
+          if (Array.isArray(parsed?.operations)) return parsed.operations.length;
+          return parsed && typeof parsed === 'object' ? Object.keys(parsed).length : 1;
+        } catch (_) { return 1; }
+      };
+      const requestResult = (request) => new Promise((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error || new Error('Verified secondary read failed.'));
+      });
+      const transactionDone = (transaction) => new Promise((resolve, reject) => {
+        transaction.oncomplete = resolve;
+        transaction.onabort = () => reject(transaction.error || new Error('Verified secondary transaction aborted.'));
+        transaction.onerror = () => undefined;
+      });
+      async function openExistingDatabase() {
+        if (!global.indexedDB) return null;
+        if (typeof global.indexedDB.databases === 'function') {
+          try {
+            const databases = await global.indexedDB.databases();
+            if (!databases.some((entry) => entry?.name === DB_NAME)) return null;
+          } catch (_) {}
+        }
+        return new Promise((resolve, reject) => {
+          const request = global.indexedDB.open(DB_NAME);
+          let created = false;
+          request.onupgradeneeded = () => { created = true; try { request.transaction?.abort(); } catch (_) {} };
+          request.onsuccess = () => {
+            if (created) { request.result?.close?.(); resolve(null); }
+            else resolve(request.result);
+          };
+          request.onerror = () => created || request.error?.name === 'AbortError'
+            ? resolve(null)
+            : reject(request.error || new Error('Verified secondary database could not be opened.'));
+          request.onblocked = () => reject(new Error('Verified secondary database is blocked by another TaskPoints page.'));
+        });
+      }
+      async function readLatest() {
+        const db = await openExistingDatabase();
+        if (!db) return null;
+        try {
+          if (!db.objectStoreNames.contains(STORE_NAME)) return null;
+          const transaction = db.transaction(STORE_NAME, 'readonly');
+          const finished = transactionDone(transaction);
+          const record = await requestResult(transaction.objectStore(STORE_NAME).get('latest'));
+          await finished;
+          return record || null;
+        } finally { db.close(); }
+      }
+      const sameCounts = (a, b, api) => [...api.COUNT_KEYS, 'total', 'majorTotal']
+        .every((key) => Number(a?.[key] || 0) === Number(b?.[key] || 0));
+      const renderCounts = (counts) => {
+        const keys = ['tasks','completions','habits','players','matchups','gameHistory','seasonHistory','reminders'];
+        $('candidateCounts').innerHTML = counts
+          ? keys.map((key) => `<div class="count-row"><span class="muted">${escapeHtml(key)}</span><strong>${Number(counts[key] || 0).toLocaleString()}</strong></div>`).join('')
+          : '<div class="muted">No readable counts.</div>';
+      };
+      function downloadPackage() {
+        if (!candidate || !validation?.verified) return false;
+        const currentRaw = localStorage.getItem(STORAGE_KEY) || '';
+        const payload = {
+          exportType: 'taskpoints_verified_secondary_restore_package',
+          exportedAtISO: new Date().toISOString(),
+          current: {
+            raw: currentRaw,
+            rawHash: currentRaw ? validation.api.rawHash(currentRaw) : '',
+            readable: validation.currentReadable,
+            counts: validation.currentCounts
+          },
+          verifiedSecondary: {
+            verifiedAtISO: candidate.verifiedAtISO || '',
+            raw: candidate.raw,
+            rawHash: candidate.rawHash,
+            counts: candidate.counts
+          }
+        };
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = `taskpoints-before-secondary-restore-${new Date().toISOString().replace(/[:.]/g,'-')}.json`;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        URL.revokeObjectURL(url);
+        return true;
+      }
+      async function validate() {
+        const api = global.TaskPointsStorageHealth;
+        if (!api) throw new Error('Storage decoder did not load.');
+        const record = await readLatest();
+        if (!record) throw new Error('No verified secondary copy exists on this device.');
+        if (record.status !== 'passed_verification') throw new Error(`Secondary status is ${record.status || 'missing'}.`);
+        if (typeof record.raw !== 'string' || !record.raw) throw new Error('Secondary raw snapshot is missing.');
+        if (record.rawHash !== api.rawHash(record.raw)) throw new Error('Secondary raw hash verification failed.');
+        const parsed = api.parseStoredRaw(record.raw);
+        const decodedCounts = api.countsFor(parsed.state);
+        if (!sameCounts(decodedCounts, record.counts || {}, api)) throw new Error('Secondary decoded counts do not match its verification record.');
+        const pendingHabitCount = parseJournalCount(localStorage.getItem(HABIT_JOURNAL_KEY));
+        const legacyJournalPresent = Boolean(localStorage.getItem(LEGACY_JOURNAL_KEY));
+        let currentReadable = false;
+        let currentCounts = null;
+        const currentRaw = localStorage.getItem(STORAGE_KEY) || '';
+        try {
+          const currentParsed = api.parseStoredRaw(currentRaw);
+          currentReadable = true;
+          currentCounts = api.countsFor(currentParsed.state);
+        } catch (_) {}
+        candidate = { ...record, counts:decodedCounts };
+        validation = { api, verified:true, pendingHabitCount, legacyJournalPresent, currentRaw, currentReadable, currentCounts };
+        return validation;
+      }
+      async function restore() {
+        if (!candidate || !validation?.verified) return;
+        if (validation.pendingHabitCount || validation.legacyJournalPresent) {
+          $('message').className = 'bad mb-4';
+          $('message').textContent = 'Restore is blocked because a pending journal exists. Open full Emergency Data Recovery so those pending changes can be preserved and reconciled.';
+          return;
+        }
+        const first = confirm(`Restore the verified secondary copy with ${candidate.counts.majorTotal.toLocaleString()} major records?\n\nThe current authoritative save will be replaced. Player images are not touched.`);
+        if (!first) return;
+        const typed = prompt('Final confirmation: type RESTORE in all capital letters. A recovery package will download before any write occurs.');
+        if (typed !== 'RESTORE') {
+          $('message').className = 'warning mb-4';
+          $('message').textContent = 'Restore cancelled. The confirmation text did not match.';
+          return;
+        }
+        $('restoreBtn').disabled = true;
+        $('restoreBtn').textContent = 'Restoring…';
+        try {
+          if (!downloadPackage()) throw new Error('Recovery package could not be prepared.');
+          localStorage.setItem(MODE_KEY, 'off');
+          localStorage.setItem(HOLD_KEY, JSON.stringify({
+            active: true,
+            enteredAtISO: new Date().toISOString(),
+            reason: 'verified_secondary_restore_in_progress'
+          }));
+          const core = global.TaskPointsCore;
+          if (!core?.safeReplaceTaskPointsStorage) throw new Error('TaskPoints storage API did not load.');
+          const replace = () => core.safeReplaceTaskPointsStorage(STORAGE_KEY, candidate.raw);
+          if (typeof core.withTaskPointsDestructiveWriteAllowed === 'function') {
+            core.withTaskPointsDestructiveWriteAllowed(replace);
+          } else replace();
+          const readBackRaw = localStorage.getItem(STORAGE_KEY) || '';
+          if (readBackRaw !== candidate.raw) throw new Error('Exact raw readback verification failed.');
+          if (validation.api.rawHash(readBackRaw) !== candidate.rawHash) throw new Error('Restored raw hash verification failed.');
+          const readBack = validation.api.parseStoredRaw(readBackRaw);
+          const readBackCounts = validation.api.countsFor(readBack.state);
+          if (!sameCounts(readBackCounts, candidate.counts, validation.api)) throw new Error('Restored record-count verification failed.');
+          localStorage.setItem(HOLD_KEY, JSON.stringify({
+            active: true,
+            restored: true,
+            restoredAtISO: new Date().toISOString(),
+            reason: 'verified_secondary_post_restore_validation'
+          }));
+          $('message').className = 'good mb-4';
+          $('message').textContent = 'Verified secondary copy restored and read back successfully. Reloading TaskPoints with IndexedDB Primary left Off.';
+          setTimeout(() => { global.location.href = 'index.html'; }, 1200);
+        } catch (error) {
+          console.error(error);
+          $('message').className = 'bad mb-4';
+          $('message').textContent = `Restore failed: ${error?.message || error}. The verified secondary database was preserved.`;
+          $('restoreBtn').disabled = false;
+          $('restoreBtn').textContent = 'Restore verified copy';
+        }
+      }
+      async function initialize() {
+        try {
+          const result = await validate();
+          renderCounts(candidate.counts);
+          $('verifiedAt').textContent = `Verified ${formatTime(candidate.verifiedAtISO)} • exact hash and counts confirmed`;
+          $('candidateStatus').textContent = 'Verified';
+          $('candidateStatus').className = 'pill good-pill';
+          $('downloadBtn').disabled = false;
+          const exactMatch = result.currentRaw === candidate.raw;
+          if (result.pendingHabitCount || result.legacyJournalPresent) {
+            $('message').className = 'bad mb-4';
+            $('message').textContent = 'A pending journal exists. Direct secondary restoration is disabled; use full Emergency Data Recovery to preserve those changes.';
+          } else if (exactMatch) {
+            $('message').className = 'good mb-4';
+            $('message').textContent = 'The verified secondary already matches the current authoritative save exactly. No restore is needed.';
+          } else {
+            $('message').className = 'warning mb-4';
+            $('message').textContent = 'The verified copy is valid and differs from the current authoritative save. Manual restoration is available.';
+            $('restoreBtn').disabled = false;
+          }
+          $('technicalReport').textContent = JSON.stringify({
+            checkedAtISO: new Date().toISOString(),
+            recoveryHoldActive: true,
+            indexedDbPrimaryMode: localStorage.getItem(MODE_KEY),
+            candidate: { verifiedAtISO:candidate.verifiedAtISO || '', rawHash:candidate.rawHash, counts:candidate.counts },
+            current: { readable:result.currentReadable, rawHash:result.currentRaw ? result.api.rawHash(result.currentRaw) : '', counts:result.currentCounts },
+            exactRawMatch: exactMatch,
+            pendingHabitCount: result.pendingHabitCount,
+            legacyJournalPresent: result.legacyJournalPresent
+          }, null, 2);
+        } catch (error) {
+          $('message').className = 'bad mb-4';
+          $('message').textContent = String(error?.message || error);
+          $('candidateStatus').textContent = 'Unavailable';
+          $('candidateStatus').className = 'pill bad-pill';
+          $('technicalReport').textContent = JSON.stringify({ checkedAtISO:new Date().toISOString(), error:String(error?.message || error) }, null, 2);
+        }
+      }
+      $('downloadBtn').addEventListener('click', downloadPackage);
+      $('restoreBtn').addEventListener('click', restore);
+      global.addEventListener('load', initialize, { once:true });
+    })(typeof window !== 'undefined' ? window : globalThis);
+  </script>
+</body>
+</html>
