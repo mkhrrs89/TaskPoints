@@ -121,6 +121,7 @@ test('reopen proof comes from a new normal app session rather than the checklist
   assert.match(alwaysLoadedGuard, /if \(!sessionWasNew/);
   assert.match(alwaysLoadedGuard, /navigationType === 'reload'/);
   assert.match(alwaysLoadedGuard, /freshAppSessionId: sessionId/);
+  assert.match(alwaysLoadedGuard, /journalCount\(HABIT_JOURNAL_KEY\) > 0/);
   assert.doesNotMatch(runtimeSource, /restorePhase4CommittedPrimary\?\.\(\)/);
 });
 
