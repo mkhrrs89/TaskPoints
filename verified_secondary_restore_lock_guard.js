@@ -7,12 +7,20 @@
 
   const STORAGE_KEY = 'taskpoints_v1';
   const LOCK_KEY = 'taskpoints_recovery_write_lock_v1';
+  const UNCOMMITTED_LOCK_TTL_MS = 2 * 60 * 1000;
   let ownedToken = '';
 
   function readLock() {
     try {
       const lock = JSON.parse(storage.getItem(LOCK_KEY) || 'null');
-      return lock && lock.active === true ? lock : null;
+      if (!lock || lock.active !== true) return null;
+      const committedAtMs = Number(lock.committedAtMs || 0);
+      const createdAtMs = Number(lock.createdAtMs || 0);
+      if (committedAtMs === 0 && createdAtMs > 0 && Date.now() - createdAtMs > UNCOMMITTED_LOCK_TTL_MS) {
+        if (!ownedToken || String(lock.token || '') === ownedToken) storage.removeItem(LOCK_KEY);
+        return null;
+      }
+      return lock;
     } catch (_) { return null; }
   }
 
@@ -33,6 +41,15 @@
       error.code = 'TASKPOINTS_RECOVERY_LOCK_OWNERSHIP_LOST';
       throw error;
     }
+  }
+
+  function releaseOwnedUncommittedLock() {
+    try {
+      const lock = readLock();
+      if (ownedToken && lock && String(lock.token) === ownedToken && Number(lock.committedAtMs || 0) === 0) {
+        storage.removeItem(LOCK_KEY);
+      }
+    } catch (_) {}
   }
 
   function installInstanceHook() {
@@ -69,10 +86,14 @@
   }
 
   const installed = installInstanceHook() || installPrototypeHook();
+  global.addEventListener?.('pagehide', releaseOwnedUncommittedLock);
+  global.addEventListener?.('beforeunload', releaseOwnedUncommittedLock);
+
   global.TaskPointsVerifiedSecondaryRestoreLockGuard = {
     installed,
     readLock,
     assertLockOwnership,
+    releaseOwnedUncommittedLock,
     getOwnedToken: () => ownedToken
   };
 })(typeof window !== 'undefined' ? window : globalThis);
