@@ -4,6 +4,7 @@
   const STORAGE_KEY = 'taskpoints_v1';
   const MODE_KEY = 'taskpoints_phase4_storage_mode_v1';
   const HOLD_KEY = 'taskpoints_emergency_recovery_hold_v1';
+  const LOCK_KEY = 'taskpoints_recovery_write_lock_v1';
   const HABIT_JOURNAL_KEY = 'taskpoints_pending_habit_deltas_v1';
   const LEGACY_JOURNAL_KEY = 'taskpoints_phase5b_pending_changes_v1';
   const DB_NAME = 'taskpoints_verified_secondary_v1';
@@ -11,6 +12,9 @@
   const preloadJournals = global.__taskPointsVerifiedSecondaryRestorePreload || {};
   let candidate = null;
   let validation = null;
+  let recoveryLockToken = '';
+  let authoritativeWriteOccurred = false;
+  let restoreVerified = false;
 
   const $ = (id) => document.getElementById(id);
   const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({
@@ -39,6 +43,7 @@
     transaction.onabort = () => reject(transaction.error || new Error('Verified secondary transaction aborted.'));
     transaction.onerror = () => undefined;
   });
+  const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
   async function openExistingDatabase() {
     if (!global.indexedDB) return null;
@@ -129,6 +134,62 @@
     return { raw, readable, counts, rawHash: raw ? api.rawHash(raw) : '' };
   }
 
+  function createLockToken() {
+    if (global.crypto?.randomUUID) return global.crypto.randomUUID();
+    return `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+  }
+
+  function readRecoveryLock() {
+    try {
+      const lock = JSON.parse(localStorage.getItem(LOCK_KEY) || 'null');
+      return lock && lock.active === true ? lock : null;
+    } catch (_) { return null; }
+  }
+
+  function acquireRecoveryLock() {
+    recoveryLockToken = createLockToken();
+    const createdAtMs = String(Date.now()).padStart(13, '0');
+    const lock = {
+      schemaVersion: 1,
+      active: true,
+      token: recoveryLockToken,
+      reason: 'verified_secondary_manual_restore',
+      createdAtMs,
+      createdAtISO: new Date(Number(createdAtMs)).toISOString(),
+      committedAtMs: '0000000000000',
+      committedAtISO: '0000-00-00T00:00:00.000Z',
+      targetRawHash: candidate.rawHash
+    };
+    localStorage.setItem(LOCK_KEY, JSON.stringify(lock));
+    const verified = readRecoveryLock();
+    if (!verified || verified.token !== recoveryLockToken) throw new Error('The cross-tab recovery lock could not be acquired.');
+  }
+
+  function releaseUncommittedRecoveryLock() {
+    try {
+      const lock = readRecoveryLock();
+      if (lock?.token === recoveryLockToken && Number(lock.committedAtMs || 0) === 0) {
+        localStorage.removeItem(LOCK_KEY);
+      }
+    } catch (_) {}
+  }
+
+  function finalizeRecoveryLock() {
+    try {
+      const lock = readRecoveryLock();
+      if (!lock || lock.token !== recoveryLockToken) return false;
+      const committedAtMs = String(Date.now()).padStart(13, '0');
+      const next = {
+        ...lock,
+        committedAtMs,
+        committedAtISO: new Date(Number(committedAtMs)).toISOString()
+      };
+      localStorage.setItem(LOCK_KEY, JSON.stringify(next));
+      const verified = readRecoveryLock();
+      return verified?.token === recoveryLockToken && Number(verified.committedAtMs || 0) > 0;
+    } catch (_) { return false; }
+  }
+
   function downloadPackage() {
     if (!candidate || !validation?.verified) return false;
     const current = readCurrent(validation.api);
@@ -180,6 +241,9 @@
   async function revalidateImmediatelyBeforeRestore() {
     const api = validation?.api || global.TaskPointsStorageHealth;
     if (!api || !candidate) throw new Error('Recovery candidate is not initialized.');
+    if ((localStorage.getItem(STORAGE_KEY) || '') !== validation.currentRaw) {
+      throw new Error('The current authoritative save changed while you were confirming. Refresh the recovery preview and review both copies again.');
+    }
     const live = verifyRecord(await readLatest(), api);
     if (live.raw !== candidate.raw || live.rawHash !== candidate.rawHash || !sameCounts(live.counts, candidate.counts, api)) {
       throw new Error('The verified secondary changed while you were confirming. Refresh the page and review it again.');
@@ -201,7 +265,7 @@
       return;
     }
 
-    const first = confirm(`Restore the verified secondary copy with ${candidate.counts.majorTotal.toLocaleString()} major records?\n\nThe current authoritative save will be replaced. Player images are not touched.`);
+    const first = confirm(`Restore the verified secondary copy with ${candidate.counts.majorTotal.toLocaleString()} major records?\n\nClose every other TaskPoints tab or window first. The current authoritative save will be replaced. Player images are not touched.`);
     if (!first) return;
     const typed = prompt('Final confirmation: type RESTORE in all capital letters. A recovery package will download before any write occurs.');
     if (typed !== 'RESTORE') {
@@ -213,16 +277,26 @@
     $('restoreBtn').disabled = true;
     $('restoreBtn').textContent = 'Restoring…';
     try {
+      acquireRecoveryLock();
+      await delay(150);
       await revalidateImmediatelyBeforeRestore();
       if (!downloadPackage()) throw new Error('Recovery package could not be prepared.');
+      const finalJournals = currentJournalState();
+      if (finalJournals.pendingHabitCount || finalJournals.legacyJournalPresent) {
+        throw new Error('A pending journal appeared after the recovery package was prepared.');
+      }
+      if ((localStorage.getItem(STORAGE_KEY) || '') !== validation.currentRaw) {
+        throw new Error('The current authoritative save changed immediately before replacement.');
+      }
+
       localStorage.setItem(MODE_KEY, 'off');
       localStorage.setItem(HOLD_KEY, JSON.stringify({
         active: true,
         enteredAtISO: new Date().toISOString(),
         reason: 'verified_secondary_restore_in_progress'
       }));
-
       localStorage.setItem(STORAGE_KEY, candidate.raw);
+      authoritativeWriteOccurred = true;
 
       const readBackRaw = localStorage.getItem(STORAGE_KEY) || '';
       if (readBackRaw !== candidate.raw) throw new Error('Exact raw readback verification failed.');
@@ -232,22 +306,42 @@
       if (!sameCounts(readBackCounts, candidate.counts, validation.api)) {
         throw new Error('Restored record-count verification failed.');
       }
+      restoreVerified = true;
 
-      localStorage.setItem(HOLD_KEY, JSON.stringify({
-        active: true,
-        restored: true,
-        restoredAtISO: new Date().toISOString(),
-        reason: 'verified_secondary_post_restore_validation'
-      }));
-      $('message').className = 'good mb-4';
-      $('message').textContent = 'Verified secondary copy restored and read back successfully. Reloading TaskPoints with IndexedDB Primary left Off.';
-      setTimeout(() => { global.location.href = 'index.html'; }, 1200);
+      const lockFinalized = finalizeRecoveryLock();
+      let holdFinalized = true;
+      try {
+        localStorage.setItem(HOLD_KEY, JSON.stringify({
+          active: true,
+          restored: true,
+          restoredAtISO: new Date().toISOString(),
+          reason: 'verified_secondary_post_restore_validation'
+        }));
+      } catch (_) { holdFinalized = false; }
+
+      $('message').className = lockFinalized ? 'good mb-4' : 'warning mb-4';
+      $('message').textContent = lockFinalized
+        ? `Verified secondary copy restored and read back successfully.${holdFinalized ? '' : ' Post-restore hold metadata could not be expanded, but the restored save is committed and verified.'} Reloading TaskPoints with IndexedDB Primary left Off.`
+        : 'The restored save is committed and verified, but the cross-tab lock could not be finalized. Keep other TaskPoints tabs closed and open full Emergency Data Recovery before making further changes.';
+      if (lockFinalized) setTimeout(() => { global.location.href = 'index.html'; }, 1200);
     } catch (error) {
       console.error(error);
-      $('message').className = 'bad mb-4';
-      $('message').textContent = `Restore failed: ${error?.message || error}. The verified secondary database and safety vault were preserved by this recovery page.`;
-      $('restoreBtn').disabled = false;
-      $('restoreBtn').textContent = 'Restore verified copy';
+      if (!authoritativeWriteOccurred) releaseUncommittedRecoveryLock();
+      if (authoritativeWriteOccurred) finalizeRecoveryLock();
+      if (restoreVerified) {
+        $('message').className = 'warning mb-4';
+        $('message').textContent = `The restore is committed and verified, but final bookkeeping reported: ${error?.message || error}. Do not run the restore again.`;
+        $('restoreBtn').disabled = true;
+      } else if (authoritativeWriteOccurred) {
+        $('message').className = 'bad mb-4';
+        $('message').textContent = `The authoritative value was replaced, but verification failed: ${error?.message || error}. Keep all other TaskPoints tabs closed and use full Emergency Data Recovery. The verified secondary and safety vault remain preserved.`;
+        $('restoreBtn').disabled = true;
+      } else {
+        $('message').className = 'bad mb-4';
+        $('message').textContent = `Restore stopped before replacing the authoritative save: ${error?.message || error}. The verified secondary database and safety vault were preserved.`;
+        $('restoreBtn').disabled = false;
+        $('restoreBtn').textContent = 'Restore verified copy';
+      }
     }
   }
 
@@ -268,13 +362,14 @@
         $('message').textContent = 'The verified secondary already matches the current authoritative save exactly. No restore is needed.';
       } else {
         $('message').className = 'warning mb-4';
-        $('message').textContent = 'The verified copy is valid and differs from the current authoritative save. Manual restoration is available.';
+        $('message').textContent = 'The verified copy is valid and differs from the current authoritative save. Close every other TaskPoints tab or window before using manual restoration.';
         $('restoreBtn').disabled = false;
       }
       $('technicalReport').textContent = JSON.stringify({
         checkedAtISO: new Date().toISOString(),
         recoveryHoldActive: true,
         indexedDbPrimaryMode: localStorage.getItem(MODE_KEY),
+        recoveryWriteLockKey: LOCK_KEY,
         candidate: { verifiedAtISO:candidate.verifiedAtISO || '', rawHash:candidate.rawHash, counts:candidate.counts },
         current: { readable:result.currentReadable, rawHash:result.currentRaw ? result.api.rawHash(result.currentRaw) : '', counts:result.currentCounts },
         exactRawMatch: exactMatch,
