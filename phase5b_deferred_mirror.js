@@ -79,9 +79,13 @@
   }
 
   function suspiciousReplacement(previousRaw, candidateRaw) {
-    if (!previousRaw || String(previousRaw) === String(candidateRaw)) return null;
-    const previousState = parseState(previousRaw);
-    const candidateState = parseState(candidateRaw);
+    if (!previousRaw) return null;
+    const previousText = String(previousRaw);
+    const candidateText = String(candidateRaw);
+    if (previousText === candidateText) return null;
+    if (candidateText.length >= previousText.length * 0.5) return null;
+    const previousState = parseState(previousText);
+    const candidateState = parseState(candidateText);
     const previous = summarize(previousState);
     const candidate = summarize(candidateState);
 
@@ -156,10 +160,6 @@
   }
 
   async function writeVaultSnapshot(raw, reason = 'known-good-mirror') {
-    const state = parseState(raw);
-    const counts = summarize(state);
-    if (!state || counts.majorTotal < 30) return false;
-
     let db;
     try {
       db = await openVault();
@@ -174,6 +174,10 @@
       const nowMs = Date.now();
       const latestMs = Date.parse(latest?.createdAtISO || latest?.updatedAtISO || '');
       if (latest && Number.isFinite(latestMs) && nowMs - latestMs < VAULT_ROTATION_MS) return true;
+
+      const state = parseState(raw);
+      const counts = summarize(state);
+      if (!state || counts.majorTotal < 30) return false;
 
       const timestamp = new Date(nowMs).toISOString();
       const nextRecords = [];
