@@ -207,5 +207,21 @@
   };
 
   const hookInstalled = installHook();
-  status({ phase5cInstalledAtISO: new Date().toISOString(), phase5cHookInstalled: hookInstalled, phase5cLastStatus: hookInstalled ? 'waiting_for_successful_save' : 'hook_install_failed', phase5cPendingWrite: false, phase5cLastError: hookInstalled ? null : 'secondary_write_hook_unavailable' });
+  const existingStatus = json(get(DIAG), {}) || {};
+  const currentRaw = get(KEY);
+  const verifiedStillCurrent = Boolean(hookInstalled
+    && currentRaw
+    && existingStatus.phase5cLastStatus === 'passed_verification'
+    && existingStatus.phase5cMirrorsCurrentSave === true
+    && existingStatus.phase5cLastVerifiedRawHash === hash(currentRaw));
+  status({
+    phase5cInstalledAtISO: new Date().toISOString(),
+    phase5cHookInstalled: hookInstalled,
+    phase5cLastStatus: hookInstalled
+      ? (verifiedStillCurrent ? 'passed_verification' : 'waiting_for_successful_save')
+      : 'hook_install_failed',
+    phase5cMirrorsCurrentSave: verifiedStillCurrent,
+    phase5cPendingWrite: false,
+    phase5cLastError: hookInstalled ? null : 'secondary_write_hook_unavailable'
+  });
 })(typeof window !== 'undefined' ? window : globalThis);
