@@ -21,14 +21,24 @@ class FakeStorage {
   removeItem(key) { this.rows.delete(String(key)); }
 }
 
-function lock(token, committedAtMs = 0) {
+function lock(token, committedAtMs = 0, extra = {}) {
   return JSON.stringify({
     schemaVersion: 1,
     active: true,
     token,
     createdAtMs: String(Date.now()),
-    committedAtMs: String(committedAtMs).padStart(13, '0')
+    committedAtMs: String(committedAtMs).padStart(13, '0'),
+    ...extra
   });
+}
+
+function install(initial = {}) {
+  const storage = new FakeStorage(initial);
+  const context = { localStorage: storage, Storage: FakeStorage, JSON, Number, String, Object, Date, Error };
+  context.window = context;
+  context.globalThis = context;
+  vm.runInNewContext(splitSource, context, { filename: 'verified_secondary_lock_split.js' });
+  return storage;
 }
 
 test('restore loads the lock splitter before ownership enforcement and runtime', () => {
@@ -41,11 +51,7 @@ test('restore loads the lock splitter before ownership enforcement and runtime',
 
 test('a new attempt never overwrites or removes the prior committed recovery lock', () => {
   const priorCommitted = lock('committed-old', 1700000000000);
-  const storage = new FakeStorage({ [COMMITTED_KEY]: priorCommitted });
-  const context = { localStorage: storage, Storage: FakeStorage, JSON, Number, String, Object, Date };
-  context.window = context;
-  context.globalThis = context;
-  vm.runInNewContext(splitSource, context, { filename: 'verified_secondary_lock_split.js' });
+  const storage = install({ [COMMITTED_KEY]: priorCommitted });
 
   const attempt = lock('attempt-new', 0);
   storage.setItem(COMMITTED_KEY, attempt);
@@ -61,11 +67,7 @@ test('a new attempt never overwrites or removes the prior committed recovery loc
 
 test('only a successfully finalized attempt replaces the committed generation', () => {
   const priorCommitted = lock('committed-old', 1700000000000);
-  const storage = new FakeStorage({ [COMMITTED_KEY]: priorCommitted });
-  const context = { localStorage: storage, Storage: FakeStorage, JSON, Number, String, Object, Date };
-  context.window = context;
-  context.globalThis = context;
-  vm.runInNewContext(splitSource, context, { filename: 'verified_secondary_lock_split.js' });
+  const storage = install({ [COMMITTED_KEY]: priorCommitted });
 
   storage.setItem(COMMITTED_KEY, lock('attempt-new', 0));
   const finalized = lock('attempt-new', 1800000000000);
@@ -73,6 +75,20 @@ test('only a successfully finalized attempt replaces the committed generation', 
   assert.equal(storage.rows.get(COMMITTED_KEY), finalized);
   assert.equal(storage.rows.has(ATTEMPT_KEY), false);
   assert.equal(storage.getItem(COMMITTED_KEY), finalized);
+});
+
+test('a retained or competing attempt cannot be replaced by a new manual restore token', () => {
+  const retained = lock('retained-old', 0, { retainUntilManualRecovery: true });
+  const storage = install({ [ATTEMPT_KEY]: retained });
+  assert.throws(
+    () => storage.setItem(COMMITTED_KEY, lock('attempt-new', 0)),
+    (error) => error?.code === 'TASKPOINTS_RETAINED_RECOVERY_ATTEMPT_EXISTS'
+  );
+  assert.equal(storage.rows.get(ATTEMPT_KEY), retained);
+
+  const owningUpdate = lock('retained-old', 0, { retainUntilManualRecovery: true, writeBoundaryEnteredAtISO: 'now' });
+  storage.setItem(COMMITTED_KEY, owningUpdate);
+  assert.equal(storage.rows.get(ATTEMPT_KEY), owningUpdate);
 });
 
 test('normal TaskPoints tabs block the save and both journals while an attempt lock exists', () => {
@@ -90,6 +106,7 @@ test('normal TaskPoints tabs block the save and both journals while an attempt l
 test('splitter routes uncommitted and committed records to different physical keys', () => {
   assert.match(splitSource, /const COMMITTED_LOCK_KEY = 'taskpoints_recovery_write_lock_v1'/);
   assert.match(splitSource, /const ATTEMPT_LOCK_KEY = 'taskpoints_recovery_attempt_lock_v1'/);
+  assert.match(splitSource, /assertAttemptMayBeWritten/);
   assert.match(splitSource, /return priorSet\(ATTEMPT_LOCK_KEY, value\)/);
   assert.match(splitSource, /const result = priorSet\(COMMITTED_LOCK_KEY, value\)/);
   assert.match(splitSource, /priorRemove\(ATTEMPT_LOCK_KEY\)/);
