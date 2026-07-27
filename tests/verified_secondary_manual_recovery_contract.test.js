@@ -7,6 +7,7 @@ const vm = require('node:vm');
 const ROOT = path.join(__dirname, '..');
 const preview = fs.readFileSync(path.join(ROOT, 'verified_secondary_recovery.html'), 'utf8');
 const restore = fs.readFileSync(path.join(ROOT, 'verified_secondary_restore.html'), 'utf8');
+const restoreRuntime = fs.readFileSync(path.join(ROOT, 'verified_secondary_restore.js'), 'utf8');
 const health = fs.readFileSync(path.join(ROOT, 'storage_health.html'), 'utf8');
 
 function inlineScripts(html) {
@@ -30,34 +31,46 @@ test('read-only preview compiles and contains no saved-state mutation path', () 
   assert.doesNotMatch(preview, /\.(?:put|delete|clear)\s*\(/);
 });
 
-test('restore page enters Recovery Hold before TaskPointsCore loads', () => {
+test('restore page enters Recovery Hold before TaskPointsCore and the restore runtime load', () => {
+  inlineScripts(restore).forEach((source) => assert.doesNotThrow(() => new vm.Script(source)));
   const holdAt = restore.indexOf("localStorage.setItem('taskpoints_emergency_recovery_hold_v1'");
   const modeAt = restore.indexOf("localStorage.setItem('taskpoints_phase4_storage_mode_v1', 'off')");
   const coreAt = restore.indexOf('<script src="scoring_core.js" defer></script>');
+  const runtimeAt = restore.indexOf('<script src="verified_secondary_restore.js" defer></script>');
   assert.ok(holdAt >= 0);
   assert.ok(modeAt > holdAt);
   assert.ok(coreAt > modeAt);
+  assert.ok(runtimeAt > coreAt);
 });
 
-test('restore requires a verified readonly candidate, clear journals, download, and explicit confirmations', () => {
-  inlineScripts(restore).forEach((source) => assert.doesNotThrow(() => new vm.Script(source)));
-  assert.match(restore, /db\.transaction\(STORE_NAME, 'readonly'\)/);
-  assert.match(restore, /record\.status !== 'passed_verification'/);
-  assert.match(restore, /record\.rawHash !== api\.rawHash\(record\.raw\)/);
-  assert.match(restore, /sameCounts\(decodedCounts, record\.counts/);
-  assert.match(restore, /pendingHabitCount \|\| validation\.legacyJournalPresent/);
-  assert.match(restore, /const first = confirm\(/);
-  assert.match(restore, /type RESTORE in all capital letters/);
-  assert.match(restore, /typed !== 'RESTORE'/);
-  const downloadAt = restore.indexOf('if (!downloadPackage())');
-  const replaceAt = restore.indexOf('core.safeReplaceTaskPointsStorage');
-  assert.ok(downloadAt >= 0 && replaceAt > downloadAt);
-  assert.match(restore, /withTaskPointsDestructiveWriteAllowed/);
-  assert.match(restore, /readBackRaw !== candidate\.raw/);
-  assert.match(restore, /Restored raw hash verification failed/);
-  assert.match(restore, /Restored record-count verification failed/);
+test('restore runtime verifies readonly candidate and rechecks journals and candidate before writing', () => {
+  assert.doesNotThrow(() => new vm.Script(restoreRuntime));
+  assert.match(restoreRuntime, /db\.transaction\(STORE_NAME, 'readonly'\)/);
+  assert.match(restoreRuntime, /record\.status !== 'passed_verification'/);
+  assert.match(restoreRuntime, /record\.rawHash !== api\.rawHash\(record\.raw\)/);
+  assert.match(restoreRuntime, /sameCounts\(decodedCounts, record\.counts/);
+  assert.match(restoreRuntime, /function currentJournalState\(\)/);
+  assert.match(restoreRuntime, /async function revalidateImmediatelyBeforeRestore\(\)/);
+  assert.match(restoreRuntime, /verifyRecord\(await readLatest\(\), api\)/);
+  assert.match(restoreRuntime, /The verified secondary changed while you were confirming/);
+  assert.match(restoreRuntime, /A pending journal appeared/);
+});
+
+test('restore requires download, confirmation, typed RESTORE, allowance, and exact readback', () => {
+  assert.match(restoreRuntime, /const first = confirm\(/);
+  assert.match(restoreRuntime, /type RESTORE in all capital letters/);
+  assert.match(restoreRuntime, /typed !== 'RESTORE'/);
+  const revalidateAt = restoreRuntime.indexOf('await revalidateImmediatelyBeforeRestore()');
+  const downloadAt = restoreRuntime.indexOf('if (!downloadPackage())');
+  const replaceAt = restoreRuntime.indexOf('core.safeReplaceTaskPointsStorage');
+  assert.ok(revalidateAt >= 0 && downloadAt > revalidateAt && replaceAt > downloadAt);
+  assert.match(restoreRuntime, /withTaskPointsDestructiveWriteAllowed/);
+  assert.match(restoreRuntime, /readBackRaw !== candidate\.raw/);
+  assert.match(restoreRuntime, /Restored raw hash verification failed/);
+  assert.match(restoreRuntime, /Restored record-count verification failed/);
   assert.match(restore, /Player images are not touched/);
-  assert.match(restore, /verified IndexedDB copy is preserved|verified secondary database was preserved/i);
+  assert.match(restore, /verified secondary database and safety vault remain preserved/i);
+  assert.match(restoreRuntime, /verified secondary database was preserved/i);
 });
 
 test('Storage Health exposes the read-only recovery preview', () => {
