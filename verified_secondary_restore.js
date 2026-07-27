@@ -327,7 +327,7 @@
     } catch (error) {
       console.error(error);
       if (!authoritativeWriteOccurred) releaseUncommittedRecoveryLock();
-      if (authoritativeWriteOccurred) finalizeRecoveryLock();
+      if (restoreVerified) finalizeRecoveryLock();
       if (restoreVerified) {
         $('message').className = 'warning mb-4';
         $('message').textContent = `The restore is committed and verified, but final bookkeeping reported: ${error?.message || error}. Do not run the restore again.`;
