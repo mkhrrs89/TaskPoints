@@ -15,6 +15,19 @@
     } catch (_) { return null; }
   }
 
+  function assertAttemptMayBeWritten(existing, next) {
+    if (!existing || String(existing.token) === String(next?.token || '')) return;
+    const retained = existing.retainUntilManualRecovery === true;
+    const error = new Error(retained
+      ? 'A prior recovery attempt entered the authoritative write boundary and remains quarantined. Use full Emergency Data Recovery; do not start another manual restore.'
+      : 'Another manual recovery attempt is already active. Close or finish that recovery page before trying again.');
+    error.code = retained
+      ? 'TASKPOINTS_RETAINED_RECOVERY_ATTEMPT_EXISTS'
+      : 'TASKPOINTS_RECOVERY_ATTEMPT_ALREADY_ACTIVE';
+    error.existingAttempt = existing;
+    throw error;
+  }
+
   function installInstanceHooks() {
     try {
       const priorGet = storage.getItem.bind(storage);
@@ -30,6 +43,7 @@
         if (String(key) !== COMMITTED_LOCK_KEY) return priorSet(key, value);
         const lock = parseLock(value);
         if (lock && Number(lock.committedAtMs || 0) === 0) {
+          assertAttemptMayBeWritten(parseLock(priorGet(ATTEMPT_LOCK_KEY)), lock);
           return priorSet(ATTEMPT_LOCK_KEY, value);
         }
         const result = priorSet(COMMITTED_LOCK_KEY, value);
@@ -62,12 +76,16 @@
     }
     if (prototype.setItem && !prototype.__taskPointsRecoveryLockSplitOriginalSetItem) {
       const priorSet = prototype.setItem;
+      const priorGet = prototype.getItem;
       const priorRemove = prototype.removeItem;
       Object.defineProperty(prototype, '__taskPointsRecoveryLockSplitOriginalSetItem', { value: priorSet, configurable: true });
       prototype.setItem = function splitRecoveryLockSetItem(key, value) {
         if (this !== storage || String(key) !== COMMITTED_LOCK_KEY) return priorSet.call(this, key, value);
         const lock = parseLock(value);
-        if (lock && Number(lock.committedAtMs || 0) === 0) return priorSet.call(this, ATTEMPT_LOCK_KEY, value);
+        if (lock && Number(lock.committedAtMs || 0) === 0) {
+          assertAttemptMayBeWritten(parseLock(priorGet.call(this, ATTEMPT_LOCK_KEY)), lock);
+          return priorSet.call(this, ATTEMPT_LOCK_KEY, value);
+        }
         const result = priorSet.call(this, COMMITTED_LOCK_KEY, value);
         if (lock && Number(lock.committedAtMs || 0) > 0) priorRemove?.call(this, ATTEMPT_LOCK_KEY);
         return result;
