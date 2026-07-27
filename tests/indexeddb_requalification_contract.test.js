@@ -126,6 +126,13 @@ test('reopen proof comes from a new normal app session rather than the checklist
   assert.match(runtimeSource, /restartCheckerReady/);
 });
 
+test('resuming preparation preserves the original safety baselines', () => {
+  assert.match(runtimeSource, /resuming \? before\.gate\.baselineVerificationFailures/);
+  assert.match(runtimeSource, /resuming \? before\.gate\.baselineBlockedWrites/);
+  assert.match(runtimeSource, /resuming \? before\.gate\.baselineRawHash/);
+  assert.match(runtimeSource, /resuming \? before\.gate\.preparedBrowserSessionId/);
+});
+
 test('historical blocked writes are displayed but do not permanently block the checklist', () => {
   assert.doesNotMatch(runtimeSource, /blockedWrites === 0/);
   assert.match(runtimeSource, /baselineBlockedWrites/);
