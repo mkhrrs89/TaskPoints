@@ -9,6 +9,7 @@ const guardSource = fs.readFileSync(path.join(ROOT, 'indexeddb_requalification_g
 const runtimeSource = fs.readFileSync(path.join(ROOT, 'indexeddb_requalification.js'), 'utf8');
 const page = fs.readFileSync(path.join(ROOT, 'indexeddb_requalification.html'), 'utf8');
 const statusPage = fs.readFileSync(path.join(ROOT, 'phase4_storage_status.html'), 'utf8');
+const alwaysLoadedGuard = fs.readFileSync(path.join(ROOT, 'phase4_cache_guard.js'), 'utf8');
 
 class FakeStorage {
   constructor(rows = {}) { this.rows = new Map(Object.entries(rows).map(([key, value]) => [key, String(value)])); }
@@ -90,10 +91,26 @@ test('setup page uses the two-step plain-language flow and restores the safety h
   assert.match(runtimeSource, /status: 'authorizing_test_mode'/);
   assert.match(runtimeSource, /remove\(HOLD_KEY\)/);
   assert.match(runtimeSource, /setPhase4StorageMode\?\.\('verify_primary_writes'\)/);
-  assert.match(runtimeSource, /if \(previousHoldRaw != null\) set\(HOLD_KEY, previousHoldRaw\)/);
+  assert.match(runtimeSource, /if \(hadRecoveryHold && previousHoldRaw != null\) set\(HOLD_KEY, previousHoldRaw\)/);
+  assert.match(runtimeSource, /const resuming = before\.gate\.status === 'authorizing_test_mode'/);
+  assert.match(runtimeSource, /previousRecoveryHoldRaw: previousHoldRaw/);
+  assert.match(runtimeSource, /preparedPageId: PAGE_INSTANCE_ID/);
+  assert.match(runtimeSource, /gate\.preparedPageId !== PAGE_INSTANCE_ID/);
+  assert.match(runtimeSource, /restorePhase4CommittedPrimary/);
   assert.match(runtimeSource, /status: 'ready_for_fast_mode'/);
   assert.match(runtimeSource, /setPhase4StorageMode\?\.\('indexeddb_primary'\)/);
   assert.match(runtimeSource, /status: 'fast_mode_enabled'/);
+});
+
+test('the faster-mode guard is included in the always-loaded Phase 4 bundle', () => {
+  assert.match(alwaysLoadedGuard, /installTaskPointsIndexedDbRequalificationGuard/);
+  assert.match(alwaysLoadedGuard, /core\.__indexedDbRequalificationGuardInstalled = true/);
+});
+
+test('historical blocked writes are displayed but do not permanently block the checklist', () => {
+  assert.doesNotMatch(runtimeSource, /blockedWrites === 0/);
+  assert.match(runtimeSource, /baselineBlockedWrites/);
+  assert.match(runtimeSource, /noNewBlockedWrites/);
 });
 
 test('old storage buttons cannot skip the safety checklist', () => {
