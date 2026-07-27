@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="assets/tailwind.css">
   <link rel="stylesheet" href="styles.css">
   <script src="scoring_core.js" defer></script>
+  <script src="indexeddb_requalification_guard.js" defer></script>
   <style>
     body{background:#0a0a0a;color:#fafafa}.status-card{background:#18181b;border:1px solid #27272a;border-radius:18px;padding:18px}.status-row{display:flex;justify-content:space-between;gap:18px;padding:9px 0;border-bottom:1px solid #27272a}.status-row:last-child{border-bottom:0}.status-value{font-weight:800;text-align:right;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#101214;border-radius:14px;padding:14px;font-size:12px}
   </style>
@@ -14,7 +15,7 @@
 <body class="min-h-screen">
   <main class="mx-auto max-w-3xl px-4 py-6">
     <div class="flex items-center justify-between gap-3 mb-5">
-      <div><h1 class="text-2xl font-extrabold">Phase 4 Storage</h1><p class="text-sm opacity-70">IndexedDB-primary capability and rollback status</p></div>
+      <div><h1 class="text-2xl font-extrabold">Storage settings</h1><p class="text-sm opacity-70">Current storage mode and safety status</p></div>
       <a href="settings.html" class="btn btn-teal btn-toolbar">Settings</a>
     </div>
 
@@ -25,6 +26,16 @@
           <p class="text-sm opacity-80">Inspect your current save, safety vault, protection status, and browser quota without writing anything.</p>
         </div>
         <a href="storage_health.html" class="btn btn-teal btn-toolbar">Storage Health</a>
+      </div>
+    </section>
+
+    <section class="status-card mb-4" style="border-color:#31646a;background:#10262a">
+      <div class="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <h2 class="text-lg font-bold" style="color:#a5f3fc">Faster storage setup</h2>
+          <p class="text-sm opacity-80">Run the short safety test before turning on the faster database mode.</p>
+        </div>
+        <a href="indexeddb_requalification.html" class="btn btn-teal btn-toolbar">Open safety checklist</a>
       </div>
     </section>
 
@@ -40,11 +51,11 @@
 
     <section class="status-card mb-4">
       <h2 class="text-lg font-bold mb-2">Mode</h2>
-      <p class="text-sm opacity-75 mb-3">Phase 4 defaults to Off. Changing modes never deletes localStorage or images.</p>
+      <p class="text-sm opacity-75 mb-3">Off can always be selected here. The two faster modes now open the safety checklist so they cannot be turned on accidentally.</p>
       <div class="flex flex-wrap gap-2">
         <button type="button" class="btn btn-teal btn-toolbar" data-mode="off">Off</button>
-        <button type="button" class="btn btn-teal btn-toolbar" data-mode="verify_primary_writes">Verify Primary Writes</button>
-        <button type="button" class="btn btn-teal btn-toolbar" data-mode="indexeddb_primary">IndexedDB Primary</button>
+        <button type="button" class="btn btn-teal btn-toolbar" data-mode="verify_primary_writes">Short test mode</button>
+        <button type="button" class="btn btn-teal btn-toolbar" data-mode="indexeddb_primary">Faster mode</button>
       </div>
     </section>
 
@@ -78,7 +89,7 @@
         && !status.lastFallbackReason
         && status.cacheReadyThisPage === true
         && status.currentMirrorMatchesCache === true
-        && ['indexedDB_ready','indexedDB'].includes(status.effectiveSource);
+        && ['indexedDB_ready','indexedDB','indexedDB_native'].includes(status.effectiveSource);
     }
     function render(){
       const status = getStatus();
@@ -92,7 +103,7 @@
       const primaryNeedsWarmup = status.configuredMode === 'indexeddb_primary' && (
         status.cacheReadyThisPage !== true
         || status.currentMirrorMatchesCache !== true
-        || !['indexedDB_ready','indexedDB'].includes(status.effectiveSource)
+        || !['indexedDB_ready','indexedDB','indexedDB_native'].includes(status.effectiveSource)
       );
       const writeNeedsRecovery = status.configuredMode !== 'off' && (
         status.lastFallbackReason
@@ -121,14 +132,17 @@
       } finally { button.disabled = false; button.textContent = originalText; }
     });
     document.querySelectorAll('[data-mode]').forEach((button) => button.addEventListener('click', async () => {
+      if (button.dataset.mode !== 'off') {
+        window.location.href = 'indexeddb_requalification.html';
+        return;
+      }
       const buttons = [...document.querySelectorAll('[data-mode]')];
       buttons.forEach((item) => { item.disabled = true; });
       const originalText = button.textContent;
       button.textContent = 'Switching…';
       try {
-        window.TaskPointsCore?.setPhase4StorageMode?.(button.dataset.mode);
-        if (button.dataset.mode === 'indexeddb_primary') await recoverStatus('indexeddb_primary_mode_enabled');
-        else render();
+        window.TaskPointsCore?.setPhase4StorageMode?.('off');
+        render();
       } finally {
         button.textContent = originalText;
         buttons.forEach((item) => { item.disabled = false; });
