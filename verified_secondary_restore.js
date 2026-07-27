@@ -250,7 +250,12 @@
 
   async function validate() {
     const api = global.TaskPointsStorageHealth;
+    const split = global.TaskPointsVerifiedSecondaryRecoveryLockSplit;
+    const guard = global.TaskPointsVerifiedSecondaryRestoreLockGuard;
     if (!api) throw new Error('Storage decoder did not load.');
+    if (!split?.installed || !guard?.installed) {
+      throw new Error('Recovery lock protection did not install. Manual restoration is disabled; use full Emergency Data Recovery.');
+    }
     candidate = verifyRecord(await readLatest(), api);
     const journals = currentJournalState();
     const current = readCurrent(api);
