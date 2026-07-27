@@ -94,9 +94,11 @@ test('setup page uses the two-step plain-language flow and restores the safety h
   assert.match(runtimeSource, /if \(hadRecoveryHold && previousHoldRaw != null\) set\(HOLD_KEY, previousHoldRaw\)/);
   assert.match(runtimeSource, /const resuming = before\.gate\.status === 'authorizing_test_mode'/);
   assert.match(runtimeSource, /previousRecoveryHoldRaw: previousHoldRaw/);
-  assert.match(runtimeSource, /preparedPageId: PAGE_INSTANCE_ID/);
-  assert.match(runtimeSource, /gate\.preparedPageId !== PAGE_INSTANCE_ID/);
-  assert.match(runtimeSource, /restorePhase4CommittedPrimary/);
+  assert.match(runtimeSource, /preparedBrowserSessionId: BROWSER_SESSION_ID/);
+  assert.match(runtimeSource, /gate\.freshAppSessionId !== gate\.preparedBrowserSessionId/);
+  assert.match(alwaysLoadedGuard, /installTaskPointsIndexedDbRestartWitness/);
+  assert.match(alwaysLoadedGuard, /sessionWasNew/);
+  assert.match(alwaysLoadedGuard, /restorePhase4CommittedPrimary/);
   assert.match(runtimeSource, /status: 'ready_for_fast_mode'/);
   assert.match(runtimeSource, /setPhase4StorageMode\?\.\('indexeddb_primary'\)/);
   assert.match(runtimeSource, /status: 'fast_mode_enabled'/);
@@ -105,6 +107,21 @@ test('setup page uses the two-step plain-language flow and restores the safety h
 test('the faster-mode guard is included in the always-loaded Phase 4 bundle', () => {
   assert.match(alwaysLoadedGuard, /installTaskPointsIndexedDbRequalificationGuard/);
   assert.match(alwaysLoadedGuard, /core\.__indexedDbRequalificationGuardInstalled = true/);
+  assert.match(alwaysLoadedGuard, /core\.__indexedDbRestartWitnessInstalled = true/);
+});
+
+test('selecting Off during the short test leaves a visible restart path', () => {
+  assert.match(runtimeSource, /'awaiting_smoke_test', 'ready_for_fast_mode'/);
+  assert.match(runtimeSource, /const freshStart = report\.mode === 'off'/);
+});
+
+test('reopen proof comes from a new normal app session rather than the checklist page', () => {
+  assert.match(alwaysLoadedGuard, /const SESSION_KEY = 'taskpoints_indexeddb_browser_session_v1'/);
+  assert.match(alwaysLoadedGuard, /EXCLUDED_PAGES\.has\(pageName\)/);
+  assert.match(alwaysLoadedGuard, /if \(!sessionWasNew/);
+  assert.match(alwaysLoadedGuard, /navigationType === 'reload'/);
+  assert.match(alwaysLoadedGuard, /freshAppSessionId: sessionId/);
+  assert.doesNotMatch(runtimeSource, /restorePhase4CommittedPrimary\?\.\(\)/);
 });
 
 test('historical blocked writes are displayed but do not permanently block the checklist', () => {
