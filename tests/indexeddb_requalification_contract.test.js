@@ -94,11 +94,6 @@ test('setup page uses the two-step plain-language flow and restores the safety h
   assert.match(runtimeSource, /if \(hadRecoveryHold && previousHoldRaw != null\) set\(HOLD_KEY, previousHoldRaw\)/);
   assert.match(runtimeSource, /const resuming = before\.gate\.status === 'authorizing_test_mode'/);
   assert.match(runtimeSource, /previousRecoveryHoldRaw: previousHoldRaw/);
-  assert.match(runtimeSource, /preparedBrowserSessionId: BROWSER_SESSION_ID/);
-  assert.match(runtimeSource, /gate\.freshAppSessionId !== gate\.preparedBrowserSessionId/);
-  assert.match(alwaysLoadedGuard, /installTaskPointsIndexedDbRestartWitness/);
-  assert.match(alwaysLoadedGuard, /sessionWasNew/);
-  assert.match(alwaysLoadedGuard, /restorePhase4CommittedPrimary/);
   assert.match(runtimeSource, /status: 'ready_for_fast_mode'/);
   assert.match(runtimeSource, /setPhase4StorageMode\?\.\('indexeddb_primary'\)/);
   assert.match(runtimeSource, /status: 'fast_mode_enabled'/);
@@ -110,6 +105,7 @@ test('the faster-mode guard is included in the always-loaded Phase 4 bundle', ()
   assert.match(alwaysLoadedGuard, /core\.__indexedDbRestartWitnessInstalled = true/);
 });
 
+
 test('selecting Off during the short test leaves a visible restart path', () => {
   assert.match(runtimeSource, /'awaiting_smoke_test', 'ready_for_fast_mode'/);
   assert.match(runtimeSource, /const freshStart = report\.mode === 'off'/);
@@ -118,11 +114,16 @@ test('selecting Off during the short test leaves a visible restart path', () => 
 test('reopen proof comes from a new normal app session rather than the checklist page', () => {
   assert.match(alwaysLoadedGuard, /const SESSION_KEY = 'taskpoints_indexeddb_browser_session_v1'/);
   assert.match(alwaysLoadedGuard, /EXCLUDED_PAGES\.has\(pageName\)/);
-  assert.match(alwaysLoadedGuard, /if \(!sessionWasNew/);
+  assert.match(alwaysLoadedGuard, /!sessionStorageAvailable \|\| !broadcastSupported \|\| !sessionWasNew/);
   assert.match(alwaysLoadedGuard, /navigationType === 'reload'/);
   assert.match(alwaysLoadedGuard, /freshAppSessionId: sessionId/);
   assert.match(alwaysLoadedGuard, /journalCount\(HABIT_JOURNAL_KEY\) > 0/);
+  assert.match(alwaysLoadedGuard, /new global\.BroadcastChannel\(CHANNEL_NAME\)/);
+  assert.match(alwaysLoadedGuard, /findOtherOpenSessions/);
+  assert.match(alwaysLoadedGuard, /otherSessions\.size > 0/);
+  assert.match(alwaysLoadedGuard, /attempt < 11/);
   assert.doesNotMatch(runtimeSource, /restorePhase4CommittedPrimary\?\.\(\)/);
+  assert.match(runtimeSource, /restartCheckerReady/);
 });
 
 test('historical blocked writes are displayed but do not permanently block the checklist', () => {
