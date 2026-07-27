@@ -235,7 +235,7 @@
   const MODE_KEY = core.PHASE4_STORAGE_MODE_KEY || 'taskpoints_phase4_storage_mode_v1';
   const GATE_KEY = 'taskpoints_indexeddb_requalification_v1';
   const SESSION_KEY = 'taskpoints_indexeddb_browser_session_v1';
-  const CHANNEL_NAME = 'taskpoints_indexeddb_restart_witness_v1';
+  const PAGE_LOCK_NAME = 'taskpoints_active_page_v1';
   const HABIT_JOURNAL_KEY = core.PENDING_HABIT_DELTAS_KEY || 'taskpoints_pending_habit_deltas_v1';
   const LEGACY_JOURNAL_KEY = 'taskpoints_phase5b_pending_changes_v1';
   const EXCLUDED_PAGES = new Set([
@@ -284,90 +284,97 @@
     sessionStorageAvailable = false;
   }
 
-  let channel = null;
-  try {
-    if (typeof global.BroadcastChannel === 'function') channel = new global.BroadcastChannel(CHANNEL_NAME);
-  } catch (_) { channel = null; }
-  const broadcastSupported = Boolean(channel);
-  if (channel) {
-    channel.addEventListener('message', (event) => {
-      const message = event?.data || {};
-      if (message.type !== 'taskpoints_restart_ping' || !message.token || message.sessionId === sessionId) return;
-      try {
-        channel.postMessage({
-          type: 'taskpoints_restart_pong',
-          token: message.token,
-          sessionId,
-          page: String(global.location?.pathname || '')
-        });
-      } catch (_) {}
-    });
-    core.__indexedDbRestartBroadcastChannel = channel;
+  const locks = global.navigator?.locks;
+  const lockSupported = Boolean(locks && typeof locks.request === 'function');
+  let sharedLockRequested = false;
+  function holdSharedPageLock() {
+    if (!lockSupported || sharedLockRequested) return;
+    sharedLockRequested = true;
+    Promise.resolve(locks.request(PAGE_LOCK_NAME, { mode: 'shared' }, async (lock) => {
+      if (!lock) return;
+      await new Promise(() => {});
+    })).catch(() => undefined);
   }
 
   core.getIndexedDbBrowserSessionStatus = () => ({
     sessionId,
     sessionWasNew,
     sessionStorageAvailable,
-    broadcastSupported
+    lockSupported
   });
 
   const pageName = String(global.location?.pathname || '').split('/').pop() || 'index.html';
-  if (!sessionStorageAvailable || !broadcastSupported || !sessionWasNew || EXCLUDED_PAGES.has(pageName)) return;
   const navigationType = global.performance?.getEntriesByType?.('navigation')?.[0]?.type || '';
-  if (navigationType === 'reload') return;
-
-  function findOtherOpenSessions() {
-    return new Promise((resolve) => {
-      const token = makeId();
-      const responders = new Set();
-      const onMessage = (event) => {
-        const message = event?.data || {};
-        if (message.type !== 'taskpoints_restart_pong' || message.token !== token) return;
-        if (message.sessionId && message.sessionId !== sessionId) responders.add(message.sessionId);
-      };
-      channel.addEventListener('message', onMessage);
-      try { channel.postMessage({ type: 'taskpoints_restart_ping', token, sessionId }); } catch (_) {}
-      setTimeout(() => {
-        try { channel.removeEventListener('message', onMessage); } catch (_) {}
-        resolve(responders);
-      }, 300);
-    });
+  const canAttemptWitness = Boolean(
+    sessionStorageAvailable
+    && lockSupported
+    && sessionWasNew
+    && !EXCLUDED_PAGES.has(pageName)
+    && navigationType !== 'reload'
+  );
+  if (!canAttemptWitness) {
+    holdSharedPageLock();
+    return;
   }
 
   async function attemptWitness(attempt = 0) {
     const gate = parse(get(GATE_KEY), {}) || {};
-    if (gate.status !== 'awaiting_smoke_test') return;
-    if (!gate.preparedBrowserSessionId || gate.preparedBrowserSessionId === sessionId) return;
-    if ((get(MODE_KEY) || 'off') !== 'verify_primary_writes') return;
-    if (journalCount(HABIT_JOURNAL_KEY) > 0 || get(LEGACY_JOURNAL_KEY)) return;
-    const currentRaw = get(STORAGE_KEY);
-    if (!currentRaw) return;
-
-    const otherSessions = await findOtherOpenSessions();
-    if (otherSessions.size > 0) return;
-
-    const result = await core.restorePhase4CommittedPrimary?.();
-    if (result?.restored !== true) {
-      if (attempt < 11) setTimeout(() => attemptWitness(attempt + 1), 350);
+    if (gate.status !== 'awaiting_smoke_test'
+      || !gate.preparedBrowserSessionId
+      || gate.preparedBrowserSessionId === sessionId
+      || (get(MODE_KEY) || 'off') !== 'verify_primary_writes'
+      || journalCount(HABIT_JOURNAL_KEY) > 0
+      || get(LEGACY_JOURNAL_KEY)
+      || !get(STORAGE_KEY)) {
+      holdSharedPageLock();
       return;
     }
-    const latestGate = parse(get(GATE_KEY), {}) || {};
-    const latestRaw = get(STORAGE_KEY);
-    if (latestGate.status !== 'awaiting_smoke_test') return;
-    if (latestGate.preparedBrowserSessionId !== gate.preparedBrowserSessionId) return;
-    if (!latestRaw || latestRaw !== currentRaw) return;
-    try {
+
+    let shouldRetry = false;
+    const outcome = await locks.request(PAGE_LOCK_NAME, { mode: 'exclusive', ifAvailable: true }, async (lock) => {
+      if (!lock) return { exclusive: false, recorded: false };
+      const lockedGate = parse(get(GATE_KEY), {}) || {};
+      const currentRaw = get(STORAGE_KEY);
+      if (lockedGate.status !== 'awaiting_smoke_test'
+        || lockedGate.preparedBrowserSessionId !== gate.preparedBrowserSessionId
+        || lockedGate.preparedBrowserSessionId === sessionId
+        || lockedGate.freshAppSessionId
+        || (get(MODE_KEY) || 'off') !== 'verify_primary_writes'
+        || journalCount(HABIT_JOURNAL_KEY) > 0
+        || get(LEGACY_JOURNAL_KEY)
+        || !currentRaw) {
+        return { exclusive: true, recorded: false };
+      }
+
+      const result = await core.restorePhase4CommittedPrimary?.();
+      if (result?.restored !== true) return { exclusive: true, recorded: false, retry: true };
+      const latestGate = parse(get(GATE_KEY), {}) || {};
+      const latestRaw = get(STORAGE_KEY);
+      if (latestGate.status !== 'awaiting_smoke_test'
+        || latestGate.preparedBrowserSessionId !== gate.preparedBrowserSessionId
+        || latestGate.freshAppSessionId
+        || !latestRaw
+        || latestRaw !== currentRaw) {
+        return { exclusive: true, recorded: false };
+      }
       storage.setItem(GATE_KEY, JSON.stringify({
         ...latestGate,
         freshAppSessionId: sessionId,
         freshAppStartedAtISO: new Date().toISOString(),
         freshAppRawHash: hash(latestRaw),
         freshAppPage: pageName,
-        otherOpenSessionsFound: 0
+        exclusivePageLockConfirmed: true
       }));
-    } catch (_) {}
+      return { exclusive: true, recorded: true };
+    });
+
+    shouldRetry = Boolean((!outcome?.exclusive || outcome?.retry) && attempt < 11);
+    if (shouldRetry) {
+      setTimeout(() => attemptWitness(attempt + 1).catch(() => holdSharedPageLock()), 350);
+      return;
+    }
+    holdSharedPageLock();
   }
 
-  setTimeout(() => attemptWitness().catch(() => undefined), 250);
+  setTimeout(() => attemptWitness().catch(() => holdSharedPageLock()), 250);
 })(typeof window !== 'undefined' ? window : globalThis);
