@@ -92,11 +92,20 @@ test('restore requires lock, download, confirmation, typed RESTORE, and exact di
 test('the restore write is rejected unless this page still owns the exact uncommitted lock', () => {
   assert.doesNotThrow(() => new vm.Script(restoreLockGuard));
   assert.match(restoreLockGuard, /let ownedToken = ''/);
-  assert.match(restoreLockGuard, /normalizedKey === LOCK_KEY/);
+  assert.match(restoreLockGuard, /String\(key\) !== LOCK_KEY/);
   assert.match(restoreLockGuard, /String\(lock\.token\) !== ownedToken/);
   assert.match(restoreLockGuard, /Number\(lock\.committedAtMs \|\| 0\) !== 0/);
   assert.match(restoreLockGuard, /normalizedKey === STORAGE_KEY\) assertLockOwnership\(\)/);
   assert.match(restoreLockGuard, /TASKPOINTS_RECOVERY_LOCK_OWNERSHIP_LOST/);
+});
+
+test('an abandoned uncommitted restore lock is released during page teardown', () => {
+  assert.match(restoreLockGuard, /const UNCOMMITTED_LOCK_TTL_MS = 2 \* 60 \* 1000/);
+  assert.match(restoreLockGuard, /Date\.now\(\) - createdAtMs > UNCOMMITTED_LOCK_TTL_MS/);
+  assert.match(restoreLockGuard, /function releaseOwnedUncommittedLock\(\)/);
+  assert.match(restoreLockGuard, /global\.addEventListener\?\.\('pagehide', releaseOwnedUncommittedLock\)/);
+  assert.match(restoreLockGuard, /global\.addEventListener\?\.\('beforeunload', releaseOwnedUncommittedLock\)/);
+  assert.match(restoreLockGuard, /storage\.removeItem\(LOCK_KEY\)/);
 });
 
 test('already-open TaskPoints tabs are blocked until reloaded after the recovery commit', () => {
