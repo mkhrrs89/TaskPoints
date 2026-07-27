@@ -197,12 +197,15 @@ test('includes an iPhone-compatible Storage prototype fallback', () => {
   assert.match(SOURCE, /prototype\.setItem = function phase5cSetItem/);
 });
 
-test('Storage Health adds a read-only verified-secondary check', () => {
+test('Storage Health reads the actual verified secondary record without mutations', () => {
   assert.doesNotThrow(() => new vm.Script(HEALTH_SOURCE));
   assert.match(HEALTH_HTML, /storage_health_phase5c\.js/);
   assert.match(HEALTH_SOURCE, /phase5cLastVerifiedRawHash/);
   assert.match(HEALTH_SOURCE, /phase5cLastVerifiedCounts/);
+  assert.match(HEALTH_SOURCE, /global\.indexedDB\.open\(DB_NAME\)/);
+  assert.match(HEALTH_SOURCE, /db\.transaction\(STORE_NAME, 'readonly'\)/);
   assert.match(HEALTH_SOURCE, /Verified secondary mirror matches the current save/);
   assert.doesNotMatch(HEALTH_SOURCE, /localStorage\.(?:setItem|removeItem|clear)\s*\(/);
-  assert.doesNotMatch(HEALTH_SOURCE, /indexedDB\.(?:open|deleteDatabase)\s*\(/);
+  assert.doesNotMatch(HEALTH_SOURCE, /\.transaction\([^\n]*['"]readwrite['"]/);
+  assert.doesNotMatch(HEALTH_SOURCE, /\.(?:put|delete|clear)\s*\(/);
 });
