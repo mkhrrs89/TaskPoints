@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0d10">
+  <title>TaskPoints — Storage Health</title>
+  <link rel="stylesheet" href="assets/tailwind.css">
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    html,body{background:#0b0d10;color:#f8fafc}.panel{background:#15191d;border:1px solid #2b333b;border-radius:18px;padding:16px}.hero{background:linear-gradient(135deg,#153d42,#172328);border:1px solid #31646a;border-radius:20px;padding:18px}.status-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.metric{background:#101419;border:1px solid #28323c;border-radius:14px;padding:12px;min-width:0}.metric-label{color:#94a3b8;font-size:12px}.metric-value{font-size:20px;font-weight:800;overflow-wrap:anywhere}.check{display:flex;gap:10px;align-items:flex-start;border-radius:14px;padding:12px;border:1px solid #2b333b;background:#111519}.check.good{border-color:#277654;background:#123126}.check.warn{border-color:#9a6327;background:#342411}.check.bad{border-color:#8f3038;background:#3a1518}.dot{width:11px;height:11px;border-radius:999px;margin-top:5px;flex:0 0 auto;background:#94a3b8}.good .dot{background:#4ade80}.warn .dot{background:#fb923c}.bad .dot{background:#fb7185}.muted{color:#94a3b8}.snapshot{background:#101419;border:1px solid #2b333b;border-radius:14px;padding:14px}.snapshot.latest{border-color:#38bdf8}.count-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 14px}.count-row{display:flex;justify-content:space-between;gap:10px;font-size:13px}.pill{display:inline-flex;align-items:center;border:1px solid #475569;border-radius:999px;padding:2px 8px;font-size:11px;color:#cbd5e1}.good-pill{border-color:#277654;color:#bbf7d0}.warn-pill{border-color:#9a6327;color:#fed7aa}.bad-pill{border-color:#8f3038;color:#fecdd3}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;background:#0b0d10;border-radius:12px;padding:12px}@media(min-width:640px){.status-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.count-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
+  </style>
+</head>
+<body class="min-h-screen">
+  <main class="mx-auto max-w-4xl px-4 py-6 pb-24">
+    <header class="flex items-start justify-between gap-3 mb-5">
+      <div>
+        <h1 class="text-2xl font-extrabold">Storage Health</h1>
+        <p class="text-sm muted mt-1">Read-only verification of your current save and protected copies.</p>
+      </div>
+      <a href="phase4_storage_status.html" class="btn btn-ghost btn-toolbar">Storage settings</a>
+    </header>
+
+    <section class="hero mb-4">
+      <div class="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <div id="overallLabel" class="text-2xl font-extrabold">Checking…</div>
+          <div id="overallDetail" class="text-sm muted mt-1">Scanning without changing saved data.</div>
+        </div>
+        <button id="refreshBtn" type="button" class="btn btn-teal btn-toolbar">Refresh</button>
+      </div>
+    </section>
+
+    <section id="summaryCards" class="status-grid mb-4"></section>
+
+    <section class="panel mb-4">
+      <h2 class="text-lg font-bold mb-3">Health checks</h2>
+      <div id="healthChecks" class="space-y-2"></div>
+    </section>
+
+    <section class="panel mb-4">
+      <div class="flex items-center justify-between gap-3 flex-wrap mb-3">
+        <div>
+          <h2 class="text-lg font-bold">Current save counts</h2>
+          <p class="text-sm muted">Decoded directly from the current localStorage mirror.</p>
+        </div>
+        <span id="mirrorEncoding" class="pill">—</span>
+      </div>
+      <div id="currentCounts" class="count-grid"></div>
+    </section>
+
+    <section class="panel mb-4">
+      <div class="flex items-center justify-between gap-3 flex-wrap mb-3">
+        <div>
+          <h2 class="text-lg font-bold">Safety vault</h2>
+          <p class="text-sm muted">Independent IndexedDB snapshots that normal TaskPoints saves do not overwrite.</p>
+        </div>
+        <span id="vaultSummary" class="pill">Scanning…</span>
+      </div>
+      <div id="vaultList" class="space-y-3"></div>
+    </section>
+
+    <section class="panel mb-4">
+      <h2 class="text-lg font-bold mb-3">Storage protection</h2>
+      <div id="protectionRows" class="space-y-2 text-sm"></div>
+    </section>
+
+    <section class="panel mb-4">
+      <h2 class="text-lg font-bold mb-3">Browser storage</h2>
+      <div id="browserStorage" class="space-y-2 text-sm"></div>
+      <p class="text-xs muted mt-3">The browser can estimate TaskPoints origin storage, but it cannot report total free iPhone storage here.</p>
+    </section>
+
+    <details class="panel">
+      <summary class="cursor-pointer font-semibold">Technical report</summary>
+      <pre id="technicalReport" class="mt-3">Loading…</pre>
+    </details>
+  </main>
+
+  <script src="storage_health_codec.js" defer></script>
+  <script src="storage_health_readers.js" defer></script>
+  <script src="storage_health_ui.js" defer></script>
+
+</body>
+</html>
