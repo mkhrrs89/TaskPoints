@@ -1,0 +1,420 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0d10">
+  <title>TaskPoints — Emergency Data Recovery</title>
+  <link rel="stylesheet" href="assets/tailwind.css">
+  <link rel="stylesheet" href="styles.css">
+  <script>
+    // Enter recovery hold before the normal storage bundle installs. This is
+    // deliberately synchronous and does not touch app data.
+    try {
+      localStorage.setItem('taskpoints_emergency_recovery_hold_v1', JSON.stringify({
+        active: true,
+        enteredAtISO: new Date().toISOString(),
+        reason: 'manual_emergency_recovery'
+      }));
+      localStorage.setItem('taskpoints_phase4_storage_mode_v1', 'off');
+    } catch (_) {}
+  </script>
+  <script src="scoring_core.js" defer></script>
+  <style>
+    html,body{background:#0b0d10;color:#f8fafc}.panel{background:#15191d;border:1px solid #2b333b;border-radius:18px;padding:16px}.candidate{background:#111519;border:1px solid #303943;border-radius:14px;padding:14px}.candidate.recommended{border-color:#fb923c;box-shadow:0 0 0 1px rgba(251,146,60,.25)}.grid-counts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 12px}.count-row{display:flex;justify-content:space-between;gap:10px;font-size:13px}.muted{color:#94a3b8}.warning{background:#3a1d13;border:1px solid #9a4b27;color:#fed7aa;border-radius:14px;padding:12px}.success{background:#123126;border:1px solid #277654;color:#bbf7d0;border-radius:14px;padding:12px}.danger{background:#3a1518;border:1px solid #8f3038;color:#fecdd3;border-radius:14px;padding:12px}.source-chip{display:inline-flex;border:1px solid #475569;border-radius:999px;padding:2px 8px;font-size:11px;color:#cbd5e1}.candidate-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;background:#0b0d10;border-radius:12px;padding:12px}@media(min-width:640px){.grid-counts{grid-template-columns:repeat(4,minmax(0,1fr))}}
+  </style>
+</head>
+<body class="min-h-screen">
+  <main class="mx-auto max-w-4xl px-4 py-6 pb-24">
+    <div class="flex items-start justify-between gap-3 mb-5">
+      <div>
+        <h1 class="text-2xl font-extrabold">Emergency Data Recovery</h1>
+        <p class="text-sm muted mt-1">Read-only scan of saved TaskPoints copies on this device.</p>
+      </div>
+      <a href="phase4_storage_status.html" class="btn btn-ghost btn-toolbar">Storage status</a>
+    </div>
+
+    <div class="warning mb-4">
+      <strong>Recovery hold is active.</strong> IndexedDB-primary writes and delayed mirror checkpoints are disabled while you inspect candidates. Images are stored separately and are not changed by this page.
+    </div>
+
+    <section class="panel mb-4">
+      <div class="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <h2 class="text-lg font-bold">Saved copies found</h2>
+          <p id="scanStatus" class="text-sm muted">Scanning local backups and IndexedDB…</p>
+        </div>
+        <button id="rescanBtn" type="button" class="btn btn-teal btn-toolbar">Scan again</button>
+      </div>
+    </section>
+
+    <div id="message" class="hidden mb-4" role="status" aria-live="polite"></div>
+    <section id="candidateList" class="space-y-3"></section>
+
+    <details class="panel mt-4">
+      <summary class="cursor-pointer font-semibold">Technical diagnostic summary</summary>
+      <pre id="diagnosticRaw" class="mt-3">Loading…</pre>
+    </details>
+  </main>
+
+  <script>
+    const STORAGE_KEY = 'taskpoints_v1';
+    const MODE_KEY = 'taskpoints_phase4_storage_mode_v1';
+    const HOLD_KEY = 'taskpoints_emergency_recovery_hold_v1';
+    const PHASE5B_JOURNAL_KEY = 'taskpoints_phase5b_pending_changes_v1';
+    const HABIT_JOURNAL_KEY = 'taskpoints_pending_habit_deltas_v1';
+    const BACKUP_KEYS = [
+      'taskpoints_backup_latest',
+      'taskpoints_backup_prev1',
+      'taskpoints_backup_prev2',
+      'taskpoints_backup_prev3'
+    ];
+    const SHADOW_DB = 'taskpoints_shadow_state_v1';
+    const ARRAY_STORES = ['completions','matchups','gameHistory','seasonHistory','tasks','habits','players'];
+    const candidateMap = new Map();
+
+    const clone = (value) => typeof structuredClone === 'function'
+      ? structuredClone(value)
+      : JSON.parse(JSON.stringify(value));
+
+    function parseStoredRaw(raw, fallback = null) {
+      if (!raw) return fallback;
+      try {
+        if (window.TaskPointsCore?.parseTaskPointsStorageJson) {
+          return TaskPointsCore.parseTaskPointsStorageJson(raw, fallback);
+        }
+        return JSON.parse(raw);
+      } catch (_) {
+        return fallback;
+      }
+    }
+
+    function countsFor(state) {
+      const source = state && typeof state === 'object' ? state : {};
+      const keys = ['tasks','completions','habits','players','flexActions','gameHistory','matchups','schedule','seasonHistory','reminders','weightHistory','vo2MaxHistory'];
+      const counts = Object.fromEntries(keys.map((key) => [key, Array.isArray(source[key]) ? source[key].length : 0]));
+      counts.total = keys.reduce((sum, key) => sum + counts[key], 0);
+      counts.majorTotal = ['tasks','completions','habits','players','gameHistory','matchups','seasonHistory'].reduce((sum, key) => sum + counts[key], 0);
+      return counts;
+    }
+
+    function addCandidate(candidate) {
+      if (!candidate?.state || typeof candidate.state !== 'object' || Array.isArray(candidate.state)) return;
+      const counts = countsFor(candidate.state);
+      const id = candidate.id || `${candidate.source}:${candidateMap.size}`;
+      candidateMap.set(id, { ...candidate, id, counts, state: clone(candidate.state) });
+    }
+
+    function scanLocalCandidates() {
+      addCandidate({
+        id: 'current-mirror',
+        source: 'Current rollback mirror',
+        kind: 'current',
+        timestamp: '',
+        state: parseStoredRaw(localStorage.getItem(STORAGE_KEY), null)
+      });
+
+      BACKUP_KEYS.forEach((key, index) => {
+        let record = null;
+        try { record = JSON.parse(localStorage.getItem(key) || 'null'); } catch (_) {}
+        if (record?.state) {
+          addCandidate({
+            id: `backup-${index}`,
+            source: index === 0 ? 'Rolling backup — latest' : `Rolling backup — previous ${index}`,
+            kind: 'rolling-backup',
+            slotKey: key,
+            timestamp: record.timestamp || '',
+            reason: record.reason || '',
+            state: record.state
+          });
+        }
+      });
+
+      try {
+        const quarantine = JSON.parse(localStorage.getItem('taskpoints_quarantined_snapshot') || 'null');
+        if (quarantine?.payload) addCandidate({
+          id: 'quarantine-payload', source: 'Quarantined snapshot payload', kind: 'quarantine',
+          timestamp: quarantine.timestamp || '', reason: quarantine.reason || '', state: quarantine.payload
+        });
+      } catch (_) {}
+
+      try {
+        const session = JSON.parse(sessionStorage.getItem('taskpoints_phase4_verified_primary_cache_v1') || 'null');
+        if (session?.state) addCandidate({
+          id: 'phase4-session-cache', source: 'Phase 4 session cache', kind: 'session-cache',
+          timestamp: session.verifiedAt || '', state: session.state
+        });
+      } catch (_) {}
+    }
+
+    function requestResult(request) {
+      return new Promise((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error || new Error('IndexedDB request failed'));
+      });
+    }
+
+    function transactionDone(tx) {
+      return new Promise((resolve, reject) => {
+        tx.oncomplete = resolve;
+        tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted'));
+        tx.onerror = () => undefined;
+      });
+    }
+
+    async function openExistingShadowDb() {
+      if (!window.indexedDB) return null;
+      if (typeof indexedDB.databases === 'function') {
+        try {
+          const databases = await indexedDB.databases();
+          if (!databases.some((entry) => entry?.name === SHADOW_DB)) return null;
+        } catch (_) {}
+      }
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open(SHADOW_DB);
+        let created = false;
+        request.onupgradeneeded = () => { created = true; try { request.transaction?.abort(); } catch (_) {} };
+        request.onsuccess = () => {
+          if (created) { request.result?.close?.(); resolve(null); return; }
+          resolve(request.result);
+        };
+        request.onerror = () => created ? resolve(null) : reject(request.error || new Error('Could not open shadow database'));
+        request.onblocked = () => reject(new Error('Shadow database is blocked'));
+      });
+    }
+
+    async function scanIndexedDbCandidates() {
+      const db = await openExistingShadowDb();
+      if (!db) return;
+      try {
+        if (db.objectStoreNames.contains('metadata')) {
+          const tx = db.transaction('metadata', 'readonly');
+          const store = tx.objectStore('metadata');
+          const [nativeSnapshot, phase4Snapshot, commit] = await Promise.all([
+            requestResult(store.get('phase5a_native_snapshot')),
+            requestResult(store.get('phase4_primary_snapshot')),
+            requestResult(store.get('phase4_primary_commit'))
+          ]);
+          await transactionDone(tx).catch(() => undefined);
+
+          if (nativeSnapshot?.state) addCandidate({
+            id: 'indexeddb-native', source: 'IndexedDB native snapshot', kind: 'indexeddb-native',
+            timestamp: nativeSnapshot.verifiedAt || nativeSnapshot.updatedAt || '',
+            reason: `sequence ${nativeSnapshot.sequence || '—'}`, state: nativeSnapshot.state
+          });
+          if (phase4Snapshot?.serializedState) {
+            addCandidate({
+              id: 'indexeddb-phase4', source: 'IndexedDB Phase 4 snapshot', kind: 'indexeddb-phase4',
+              timestamp: phase4Snapshot.verifiedAt || phase4Snapshot.startedAt || commit?.completionTime || '',
+              reason: `sequence ${phase4Snapshot.sequence || commit?.sequence || '—'}`,
+              state: parseStoredRaw(phase4Snapshot.serializedState, null)
+            });
+          }
+        }
+
+        const requiredLegacyStores = [...ARRAY_STORES, 'collections', 'values'];
+        if (requiredLegacyStores.every((name) => db.objectStoreNames.contains(name))) {
+          const tx = db.transaction(requiredLegacyStores, 'readonly');
+          const arrayRows = await Promise.all(ARRAY_STORES.map((name) => requestResult(tx.objectStore(name).getAll())));
+          const collections = await requestResult(tx.objectStore('collections').getAll());
+          const values = await requestResult(tx.objectStore('values').getAll());
+          await transactionDone(tx).catch(() => undefined);
+          const state = {};
+          ARRAY_STORES.forEach((field, index) => {
+            state[field] = (arrayRows[index] || []).slice().sort((a,b) => Number(a.key)-Number(b.key)).map((row) => row.value);
+          });
+          (collections || []).filter((row) => row?.kind === 'manifest').forEach((row) => { state[row.field] = []; });
+          (collections || []).filter((row) => row?.kind === 'item')
+            .sort((a,b) => String(a.field).localeCompare(String(b.field)) || Number(a.index)-Number(b.index))
+            .forEach((row) => { (state[row.field] ||= [])[Number(row.index)] = row.value; });
+          (values || []).forEach((row) => { if (row && typeof row.field === 'string') state[row.field] = row.value; });
+          addCandidate({ id: 'indexeddb-legacy', source: 'IndexedDB legacy per-store copy', kind: 'indexeddb-legacy', timestamp: '', state });
+        }
+      } finally {
+        db.close();
+      }
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+    }
+
+    function formatTimestamp(value) {
+      if (!value) return 'No timestamp recorded';
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+    }
+
+    function sortedCandidates() {
+      return [...candidateMap.values()].sort((a,b) =>
+        (b.counts.majorTotal - a.counts.majorTotal)
+        || (b.counts.total - a.counts.total)
+        || String(b.timestamp || '').localeCompare(String(a.timestamp || ''))
+      );
+    }
+
+    function renderCandidates() {
+      const list = document.getElementById('candidateList');
+      const candidates = sortedCandidates();
+      const current = candidateMap.get('current-mirror');
+      const best = candidates.find((candidate) => candidate.id !== 'current-mirror' && candidate.counts.majorTotal > (current?.counts.majorTotal || 0));
+      list.innerHTML = '';
+
+      if (!candidates.length) {
+        list.innerHTML = '<div class="danger">No readable state candidates were found on this device.</div>';
+        return;
+      }
+
+      candidates.forEach((candidate) => {
+        const recommended = best?.id === candidate.id;
+        const card = document.createElement('article');
+        card.className = `candidate${recommended ? ' recommended' : ''}`;
+        const countKeys = ['tasks','completions','habits','players','matchups','gameHistory','seasonHistory','reminders'];
+        card.innerHTML = `
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <div class="flex items-center gap-2 flex-wrap">
+                <h2 class="font-bold">${escapeHtml(candidate.source)}</h2>
+                ${recommended ? '<span class="source-chip" style="border-color:#fb923c;color:#fdba74">Recommended intact copy</span>' : ''}
+                ${candidate.id === 'current-mirror' ? '<span class="source-chip">Currently displayed</span>' : ''}
+              </div>
+              <div class="text-xs muted mt-1">${escapeHtml(formatTimestamp(candidate.timestamp))}${candidate.reason ? ` • ${escapeHtml(candidate.reason)}` : ''}</div>
+            </div>
+            <div class="text-right"><div class="text-xl font-extrabold">${candidate.counts.majorTotal.toLocaleString()}</div><div class="text-xs muted">major records</div></div>
+          </div>
+          <div class="grid-counts mt-3">
+            ${countKeys.map((key) => `<div class="count-row"><span class="muted">${key}</span><strong>${candidate.counts[key].toLocaleString()}</strong></div>`).join('')}
+          </div>
+          <div class="candidate-actions">
+            <button type="button" class="btn btn-ghost btn-toolbar" data-download="${escapeHtml(candidate.id)}">Download copy</button>
+            ${candidate.id !== 'current-mirror' && candidate.counts.majorTotal > 0
+              ? `<button type="button" class="btn btn-teal btn-toolbar" data-restore="${escapeHtml(candidate.id)}">Restore this copy</button>`
+              : ''}
+          </div>`;
+        list.appendChild(card);
+      });
+
+      list.querySelectorAll('[data-download]').forEach((button) => button.addEventListener('click', () => downloadCandidate(button.dataset.download)));
+      list.querySelectorAll('[data-restore]').forEach((button) => button.addEventListener('click', () => restoreCandidate(button.dataset.restore, button)));
+    }
+
+    function downloadCandidate(id) {
+      const candidate = candidateMap.get(id);
+      if (!candidate) return;
+      const payload = {
+        exportType: 'taskpoints_emergency_recovery_candidate',
+        exportedAtISO: new Date().toISOString(),
+        source: candidate.source,
+        sourceTimestamp: candidate.timestamp || '',
+        state: candidate.state
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `taskpoints-recovery-${id}-${new Date().toISOString().replace(/[:.]/g,'-')}.json`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    function showMessage(text, kind = 'warning') {
+      const element = document.getElementById('message');
+      element.className = `${kind} mb-4`;
+      element.textContent = text;
+    }
+
+    function stateFingerprint(state) {
+      const counts = countsFor(state);
+      return JSON.stringify(counts);
+    }
+
+    async function restoreCandidate(id, button) {
+      const candidate = candidateMap.get(id);
+      if (!candidate) return;
+      const first = confirm(`Restore “${candidate.source}” with ${candidate.counts.majorTotal.toLocaleString()} major records?\n\nThe current empty state will be replaced. Player images are not touched.`);
+      if (!first) return;
+      const second = confirm('Final confirmation: restore this saved copy now? A recovery JSON download will be created first.');
+      if (!second) return;
+
+      button.disabled = true;
+      button.textContent = 'Restoring…';
+      try {
+        downloadCandidate(id);
+        localStorage.setItem(MODE_KEY, 'off');
+        localStorage.setItem(HOLD_KEY, JSON.stringify({ active:true, enteredAtISO:new Date().toISOString(), reason:'restore_in_progress', candidate:id }));
+
+        const phase5bJournal = localStorage.getItem(PHASE5B_JOURNAL_KEY);
+        if (phase5bJournal && phase5bJournal.length < 400000) {
+          localStorage.setItem('taskpoints_emergency_quarantined_phase5b_journal_v1', phase5bJournal);
+        }
+
+        let state = clone(candidate.state);
+        const core = window.TaskPointsCore;
+        const pendingHabitDeltas = (() => { try { return core?.readPendingHabitDeltas?.() || []; } catch (_) { return []; } })();
+        if (pendingHabitDeltas.length && typeof core?.applyPendingHabitDeltas === 'function') {
+          state = core.applyPendingHabitDeltas(state, pendingHabitDeltas)?.state || state;
+        }
+        state = core?.normalizeState ? core.normalizeState(state) : state;
+
+        const beforeRaw = localStorage.getItem(STORAGE_KEY) || '';
+        if (beforeRaw && beforeRaw.length < 400000) localStorage.setItem('taskpoints_emergency_pre_restore_mirror_v1', beforeRaw);
+        const plan = core?.buildOptimizedTaskPointsStorageRaw?.(state);
+        const chosenRaw = typeof plan === 'string' ? plan : plan?.chosenRaw;
+        if (!chosenRaw) throw new Error('Could not serialize recovery candidate.');
+        core.safeReplaceTaskPointsStorage(STORAGE_KEY, chosenRaw);
+
+        const verified = parseStoredRaw(localStorage.getItem(STORAGE_KEY), null);
+        if (!verified || stateFingerprint(verified) !== stateFingerprint(state)) throw new Error('Recovery verification failed; the restored counts did not match.');
+
+        localStorage.removeItem(PHASE5B_JOURNAL_KEY);
+        if (pendingHabitDeltas.length) localStorage.setItem(HABIT_JOURNAL_KEY, '[]');
+        try {
+          [...Array(sessionStorage.length)].forEach((_, index) => {
+            const key = sessionStorage.key(index);
+            if (key && /^taskpoints_phase[34]_/.test(key)) sessionStorage.removeItem(key);
+          });
+        } catch (_) {}
+        localStorage.setItem(HOLD_KEY, JSON.stringify({ active:true, restored:true, restoredAtISO:new Date().toISOString(), candidate:id, reason:'post_restore_validation' }));
+        showMessage(`Restored ${candidate.source}. Reloading TaskPoints with IndexedDB Primary left off for safety.`, 'success');
+        setTimeout(() => { window.location.href = 'index.html'; }, 900);
+      } catch (error) {
+        console.error(error);
+        showMessage(`Restore failed without clearing the saved candidates: ${error?.message || error}`, 'danger');
+        button.disabled = false;
+        button.textContent = 'Restore this copy';
+      }
+    }
+
+    function renderDiagnostic(errors = []) {
+      const payload = {
+        scannedAtISO: new Date().toISOString(),
+        recoveryHold: (() => { try { return JSON.parse(localStorage.getItem(HOLD_KEY) || 'null'); } catch (_) { return null; } })(),
+        configuredMode: localStorage.getItem(MODE_KEY),
+        phase5bJournalPresent: Boolean(localStorage.getItem(PHASE5B_JOURNAL_KEY)),
+        pendingHabitJournalPresent: Boolean(localStorage.getItem(HABIT_JOURNAL_KEY) && localStorage.getItem(HABIT_JOURNAL_KEY) !== '[]'),
+        candidates: sortedCandidates().map(({ id, source, timestamp, reason, counts }) => ({ id, source, timestamp, reason, counts })),
+        errors
+      };
+      document.getElementById('diagnosticRaw').textContent = JSON.stringify(payload, null, 2);
+    }
+
+    async function scan() {
+      const status = document.getElementById('scanStatus');
+      status.textContent = 'Scanning local backups and IndexedDB…';
+      candidateMap.clear();
+      const errors = [];
+      try { scanLocalCandidates(); } catch (error) { errors.push(`Local scan: ${error?.message || error}`); }
+      try { await scanIndexedDbCandidates(); } catch (error) { errors.push(`IndexedDB scan: ${error?.message || error}`); }
+      renderCandidates();
+      renderDiagnostic(errors);
+      const candidates = sortedCandidates();
+      status.textContent = `${candidates.length} readable candidate${candidates.length === 1 ? '' : 's'} found. No saved state was modified by the scan.`;
+    }
+
+    document.getElementById('rescanBtn').addEventListener('click', scan);
+    window.addEventListener('load', scan, { once:true });
+  </script>
+</body>
+</html>
