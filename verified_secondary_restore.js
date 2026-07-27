@@ -165,6 +165,29 @@
     if (!verified || verified.token !== recoveryLockToken) throw new Error('The cross-tab recovery lock could not be acquired.');
   }
 
+  function markRecoveryAttemptWriteBoundary() {
+    const lock = readRecoveryLock();
+    if (!lock || lock.token !== recoveryLockToken || Number(lock.committedAtMs || 0) !== 0) {
+      throw new Error('The recovery attempt lock was lost before the authoritative write boundary.');
+    }
+    const originalCreatedAtMs = String(lock.originalCreatedAtMs || lock.createdAtMs || Date.now());
+    const next = {
+      ...lock,
+      originalCreatedAtMs,
+      retainUntilManualRecovery: true,
+      writeBoundaryEnteredAtISO: new Date().toISOString(),
+      createdAtMs: '9999999999999'
+    };
+    localStorage.setItem(LOCK_KEY, JSON.stringify(next));
+    const verified = readRecoveryLock();
+    if (!verified
+      || verified.token !== recoveryLockToken
+      || verified.retainUntilManualRecovery !== true
+      || Number(verified.committedAtMs || 0) !== 0) {
+      throw new Error('The durable recovery quarantine could not be established before replacement.');
+    }
+  }
+
   function releaseUncommittedRecoveryLock() {
     try {
       const lock = readRecoveryLock();
@@ -179,8 +202,12 @@
       const lock = readRecoveryLock();
       if (!lock || lock.token !== recoveryLockToken) return false;
       const committedAtMs = String(Date.now()).padStart(13, '0');
+      const restoredCreatedAtMs = String(lock.originalCreatedAtMs || lock.createdAtMs || committedAtMs);
       const next = {
         ...lock,
+        createdAtMs: restoredCreatedAtMs,
+        createdAtISO: new Date(Number(restoredCreatedAtMs)).toISOString(),
+        retainUntilManualRecovery: false,
         committedAtMs,
         committedAtISO: new Date(Number(committedAtMs)).toISOString()
       };
@@ -295,6 +322,7 @@
         enteredAtISO: new Date().toISOString(),
         reason: 'verified_secondary_restore_in_progress'
       }));
+      markRecoveryAttemptWriteBoundary();
       localStorage.setItem(STORAGE_KEY, candidate.raw);
       authoritativeWriteOccurred = true;
 
@@ -334,7 +362,7 @@
         $('restoreBtn').disabled = true;
       } else if (authoritativeWriteOccurred) {
         $('message').className = 'bad mb-4';
-        $('message').textContent = `The authoritative value was replaced, but verification failed: ${error?.message || error}. Keep all other TaskPoints tabs closed and use full Emergency Data Recovery. The verified secondary and safety vault remain preserved.`;
+        $('message').textContent = `The authoritative value was replaced, but verification failed: ${error?.message || error}. Keep all other TaskPoints tabs closed and use full Emergency Data Recovery. The verified secondary and safety vault remain preserved, and the recovery quarantine remains active.`;
         $('restoreBtn').disabled = true;
       } else {
         $('message').className = 'bad mb-4';
