@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0d10">
+  <title>TaskPoints — Verified Secondary Recovery</title>
+  <link rel="stylesheet" href="assets/tailwind.css">
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    html,body{background:#0b0d10;color:#f8fafc}.panel{background:#15191d;border:1px solid #2b333b;border-radius:18px;padding:16px}.hero{background:linear-gradient(135deg,#153d42,#172328);border:1px solid #31646a;border-radius:20px;padding:18px}.good{background:#123126;border:1px solid #277654;color:#bbf7d0;border-radius:14px;padding:12px}.warn{background:#342411;border:1px solid #9a6327;color:#fed7aa;border-radius:14px;padding:12px}.bad{background:#3a1518;border:1px solid #8f3038;color:#fecdd3;border-radius:14px;padding:12px}.muted{color:#94a3b8}.count-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px 14px}.count-row{display:flex;justify-content:space-between;gap:10px;font-size:13px}.pill{display:inline-flex;align-items:center;border:1px solid #475569;border-radius:999px;padding:2px 8px;font-size:11px;color:#cbd5e1}.good-pill{border-color:#277654;color:#bbf7d0}.warn-pill{border-color:#9a6327;color:#fed7aa}.bad-pill{border-color:#8f3038;color:#fecdd3}.actions{display:flex;flex-wrap:wrap;gap:10px}.disabled-link{pointer-events:none;opacity:.45}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;background:#0b0d10;border-radius:12px;padding:12px}@media(min-width:640px){.count-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
+  </style>
+</head>
+<body class="min-h-screen">
+  <main class="mx-auto max-w-4xl px-4 py-6 pb-24">
+    <header class="flex items-start justify-between gap-3 mb-5">
+      <div>
+        <h1 class="text-2xl font-extrabold">Verified Secondary Recovery</h1>
+        <p class="text-sm muted mt-1">Read-only preview of the independently verified IndexedDB copy.</p>
+      </div>
+      <a href="storage_health.html" class="btn btn-ghost btn-toolbar">Storage Health</a>
+    </header>
+
+    <section class="hero mb-4">
+      <div class="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <div id="overallLabel" class="text-2xl font-extrabold">Checking…</div>
+          <div id="overallDetail" class="text-sm muted mt-1">No saved state will be changed by this preview.</div>
+        </div>
+        <button id="refreshBtn" type="button" class="btn btn-teal btn-toolbar">Refresh</button>
+      </div>
+    </section>
+
+    <div id="message" class="warn mb-4">
+      This page does not activate Recovery Hold, change storage mode, load the normal TaskPoints storage bundle, or write to IndexedDB.
+    </div>
+
+    <section class="panel mb-4">
+      <div class="flex items-center justify-between gap-3 flex-wrap mb-3">
+        <div>
+          <h2 class="text-lg font-bold">Verified secondary copy</h2>
+          <p id="secondaryTimestamp" class="text-sm muted">Scanning…</p>
+        </div>
+        <span id="secondaryStatus" class="pill">Checking…</span>
+      </div>
+      <div id="secondaryCounts" class="count-grid"></div>
+    </section>
+
+    <section class="panel mb-4">
+      <div class="flex items-center justify-between gap-3 flex-wrap mb-3">
+        <div>
+          <h2 class="text-lg font-bold">Current authoritative save</h2>
+          <p class="text-sm muted">Read directly from localStorage without changing it.</p>
+        </div>
+        <span id="currentStatus" class="pill">Checking…</span>
+      </div>
+      <div id="currentCounts" class="count-grid"></div>
+    </section>
+
+    <section class="panel mb-4">
+      <h2 class="text-lg font-bold mb-3">Comparison</h2>
+      <div id="comparison" class="warn">Comparing exact raw bytes, hash, and record counts…</div>
+      <div id="differences" class="count-grid mt-3"></div>
+    </section>
+
+    <section class="panel mb-4">
+      <h2 class="text-lg font-bold mb-2">Manual recovery actions</h2>
+      <p class="text-sm muted mb-3">Downloading is always safe. Beginning a restore opens the hardened Emergency Data Recovery page, which activates Recovery Hold and requires additional confirmations before replacing the authoritative save.</p>
+      <div class="actions">
+        <button id="downloadBtn" type="button" class="btn btn-ghost btn-toolbar" disabled>Download verified copy</button>
+        <a id="restoreLink" href="emergency_recovery.html?candidate=verified-secondary" class="btn btn-teal btn-toolbar disabled-link" aria-disabled="true">Begin confirmed restore</a>
+      </div>
+    </section>
+
+    <details class="panel">
+      <summary class="cursor-pointer font-semibold">Technical preview</summary>
+      <pre id="technicalReport" class="mt-3">Loading…</pre>
+    </details>
+  </main>
+
+  <script src="storage_health_codec.js"></script>
+  <script>
+    (function installVerifiedSecondaryRecoveryPreview(global) {
+      'use strict';
+      const api = global.TaskPointsStorageHealth;
+      const STORAGE_KEY = 'taskpoints_v1';
+      const DB_NAME = 'taskpoints_verified_secondary_v1';
+      const STORE_NAME = 'snapshots';
+      let latestRecord = null;
+      const $ = (id) => document.getElementById(id);
+      const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+      const formatTime = (value) => {
+        if (!value) return 'No verification timestamp recorded';
+        const date = new Date(value);
+        return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+      };
+      const sameCounts = (a, b) => [...api.COUNT_KEYS, 'total', 'majorTotal']
+        .every((key) => Number(a?.[key] || 0) === Number(b?.[key] || 0));
+      const renderCounts = (target, counts) => {
+        const keys = ['tasks','completions','habits','players','matchups','gameHistory','seasonHistory','reminders'];
+        target.innerHTML = counts
+          ? keys.map((key) => `<div class="count-row"><span class="muted">${escapeHtml(key)}</span><strong>${Number(counts[key] || 0).toLocaleString()}</strong></div>`).join('')
+          : '<div class="muted">No readable counts.</div>';
+      };
+      const requestResult = (request) => new Promise((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error || new Error('Verified secondary read failed.'));
+      });
+      const transactionDone = (transaction) => new Promise((resolve, reject) => {
+        transaction.oncomplete = resolve;
+        transaction.onabort = () => reject(transaction.error || new Error('Verified secondary transaction aborted.'));
+        transaction.onerror = () => undefined;
+      });
+      async function openExistingDatabase() {
+        if (!global.indexedDB) return null;
+        if (typeof global.indexedDB.databases === 'function') {
+          try {
+            const databases = await global.indexedDB.databases();
+            if (!databases.some((entry) => entry?.name === DB_NAME)) return null;
+          } catch (_) {}
+        }
+        return new Promise((resolve, reject) => {
+          const request = global.indexedDB.open(DB_NAME);
+          let created = false;
+          request.onupgradeneeded = () => { created = true; try { request.transaction?.abort(); } catch (_) {} };
+          request.onsuccess = () => {
+            if (created) { request.result?.close?.(); resolve(null); }
+            else resolve(request.result);
+          };
+          request.onerror = () => created || request.error?.name === 'AbortError'
+            ? resolve(null)
+            : reject(request.error || new Error('Verified secondary database could not be opened.'));
+          request.onblocked = () => reject(new Error('Verified secondary database is blocked by another TaskPoints page.'));
+        });
+      }
+      async function readLatest() {
+        const db = await openExistingDatabase();
+        if (!db) return null;
+        try {
+          if (!db.objectStoreNames.contains(STORE_NAME)) return null;
+          const transaction = db.transaction(STORE_NAME, 'readonly');
+          const finished = transactionDone(transaction);
+          const record = await requestResult(transaction.objectStore(STORE_NAME).get('latest'));
+          await finished;
+          return record || null;
+        } finally { db.close(); }
+      }
+      function downloadLatest() {
+        if (!latestRecord) return;
+        const payload = {
+          exportType: 'taskpoints_verified_secondary_recovery_copy',
+          exportedAtISO: new Date().toISOString(),
+          verifiedAtISO: latestRecord.verifiedAtISO || '',
+          rawHash: latestRecord.rawHash || '',
+          counts: latestRecord.counts || null,
+          raw: latestRecord.raw
+        };
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = `taskpoints-verified-secondary-${new Date().toISOString().replace(/[:.]/g,'-')}.json`;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        URL.revokeObjectURL(url);
+      }
+      async function scan() {
+        $('overallLabel').textContent = 'Checking…';
+        $('overallDetail').textContent = 'Reading the verified copy without changing saved data.';
+        $('downloadBtn').disabled = true;
+        $('restoreLink').classList.add('disabled-link');
+        $('restoreLink').setAttribute('aria-disabled', 'true');
+        latestRecord = null;
+        let current = { readable:false, raw:'', counts:null, encoding:'', error:'' };
+        let secondary = { readable:false, verified:false, raw:'', counts:null, encoding:'', error:'' };
+        try {
+          current.raw = localStorage.getItem(STORAGE_KEY) || '';
+          const parsed = api.parseStoredRaw(current.raw);
+          current.readable = true;
+          current.counts = api.countsFor(parsed.state);
+          current.encoding = parsed.encoding;
+        } catch (error) { current.error = String(error?.message || error); }
+        try {
+          const record = await readLatest();
+          if (!record) throw new Error('No verified secondary copy exists on this device.');
+          if (record.status !== 'passed_verification') throw new Error(`Secondary status is ${record.status || 'missing'}.`);
+          if (typeof record.raw !== 'string' || !record.raw) throw new Error('Secondary raw snapshot is missing.');
+          const computedHash = api.rawHash(record.raw);
+          if (record.rawHash !== computedHash) throw new Error('Secondary raw hash verification failed.');
+          const parsed = api.parseStoredRaw(record.raw);
+          const decodedCounts = api.countsFor(parsed.state);
+          if (!sameCounts(decodedCounts, record.counts || {})) throw new Error('Secondary decoded counts do not match its verification record.');
+          secondary = { readable:true, verified:true, raw:record.raw, counts:decodedCounts, encoding:parsed.encoding, error:'', record };
+          latestRecord = record;
+        } catch (error) { secondary.error = String(error?.message || error); }
+
+        renderCounts($('currentCounts'), current.counts);
+        renderCounts($('secondaryCounts'), secondary.counts);
+        $('currentStatus').textContent = current.readable ? 'Readable' : 'Missing or unreadable';
+        $('currentStatus').className = `pill ${current.readable ? 'good-pill' : 'bad-pill'}`;
+        $('secondaryStatus').textContent = secondary.verified ? 'Hash + counts verified' : 'Unavailable';
+        $('secondaryStatus').className = `pill ${secondary.verified ? 'good-pill' : 'bad-pill'}`;
+        $('secondaryTimestamp').textContent = secondary.verified
+          ? `Verified ${formatTime(secondary.record.verifiedAtISO)} • ${secondary.encoding}`
+          : secondary.error;
+
+        const exactRawMatch = Boolean(current.readable && secondary.verified && current.raw === secondary.raw);
+        const countsMatch = Boolean(current.counts && secondary.counts && sameCounts(current.counts, secondary.counts));
+        const differences = {};
+        api.COUNT_KEYS.forEach((key) => {
+          const value = Number(secondary.counts?.[key] || 0) - Number(current.counts?.[key] || 0);
+          if (value) differences[key] = value;
+        });
+        $('differences').innerHTML = Object.keys(differences).length
+          ? Object.entries(differences).map(([key, value]) => `<div class="count-row"><span class="muted">${escapeHtml(key)}</span><strong>${value > 0 ? '+' : ''}${value.toLocaleString()}</strong></div>`).join('')
+          : '<div class="muted">No collection-count differences.</div>';
+
+        if (!secondary.verified) {
+          $('overallLabel').textContent = 'No verified recovery copy';
+          $('overallDetail').textContent = secondary.error;
+          $('comparison').className = 'bad';
+          $('comparison').textContent = 'Restore is unavailable because the secondary copy did not pass direct verification.';
+        } else if (exactRawMatch) {
+          $('overallLabel').textContent = 'Verified copy matches current save';
+          $('overallDetail').textContent = `${secondary.counts.majorTotal.toLocaleString()} major records match exactly.`;
+          $('comparison').className = 'good';
+          $('comparison').textContent = 'The exact raw bytes, hash, and all tracked record counts match. No recovery is needed right now.';
+        } else {
+          $('overallLabel').textContent = current.readable ? 'Verified recovery copy is available' : 'Current save needs recovery';
+          $('overallDetail').textContent = `${secondary.counts.majorTotal.toLocaleString()} verified major records are available for manual restoration.`;
+          $('comparison').className = countsMatch ? 'warn' : 'bad';
+          $('comparison').textContent = current.readable
+            ? (countsMatch
+              ? 'Record counts match, but the raw snapshots differ. Review the verification timestamp before restoring.'
+              : 'The verified copy and current save differ. Restoration remains manual and requires explicit confirmation.')
+            : 'The current authoritative save is missing or unreadable; the verified secondary remains independently readable.';
+        }
+
+        if (secondary.verified) {
+          $('downloadBtn').disabled = false;
+          if (!exactRawMatch) {
+            $('restoreLink').classList.remove('disabled-link');
+            $('restoreLink').removeAttribute('aria-disabled');
+          }
+        }
+        $('technicalReport').textContent = JSON.stringify({
+          scannedAtISO: new Date().toISOString(),
+          previewIsReadOnly: true,
+          current: { readable:current.readable, encoding:current.encoding, rawHash:current.raw ? api.rawHash(current.raw) : '', counts:current.counts, error:current.error },
+          secondary: { readable:secondary.readable, verified:secondary.verified, encoding:secondary.encoding, verifiedAtISO:secondary.record?.verifiedAtISO || '', rawHash:secondary.record?.rawHash || '', counts:secondary.counts, error:secondary.error },
+          exactRawMatch, countsMatch, differences
+        }, null, 2);
+      }
+      $('downloadBtn').addEventListener('click', downloadLatest);
+      $('refreshBtn').addEventListener('click', scan);
+      global.addEventListener('load', scan, { once:true });
+    })(typeof window !== 'undefined' ? window : globalThis);
+  </script>
+</body>
+</html>
