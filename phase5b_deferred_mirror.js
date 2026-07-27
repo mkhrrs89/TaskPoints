@@ -169,7 +169,8 @@
     if (!value || get(KEY) !== value) return false;
     pending = value;
     status({ phase5cLastStatus: 'queued', phase5cQueuedAtISO: new Date().toISOString(), phase5cPendingWrite: true, phase5cLastError: null });
-    queueMicrotask(flush);
+    if (typeof global.queueMicrotask === 'function') global.queueMicrotask(flush);
+    else Promise.resolve().then(flush);
     return true;
   }
   function installHook() {
@@ -181,8 +182,18 @@
         return result;
       };
       storage.setItem = wrapped;
-      return storage.setItem === wrapped;
-    } catch (_) { return false; }
+      if (storage.setItem === wrapped) return true;
+    } catch (_) {}
+    const prototype = global.Storage?.prototype;
+    if (!prototype?.setItem || prototype.__taskPointsPhase5COriginalSetItem) return false;
+    const original = prototype.setItem;
+    Object.defineProperty(prototype, '__taskPointsPhase5COriginalSetItem', { value: original, configurable: true });
+    prototype.setItem = function phase5cSetItem(key, value) {
+      const result = original.call(this, key, value);
+      if (this === storage && String(key) === KEY && get(KEY) === String(value)) queue(String(value));
+      return result;
+    };
+    return true;
   }
 
   core.PHASE5C_VERIFIED_SECONDARY_DB_NAME = DB;
