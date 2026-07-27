@@ -282,3 +282,92 @@
     phase5cLastError: hookInstalled ? null : 'secondary_write_hook_unavailable'
   });
 })(typeof window !== 'undefined' ? window : globalThis);
+
+(function installTaskPointsRecoveryWriteLockGuard(global) {
+  'use strict';
+  const core = global.TaskPointsCore;
+  const storage = global.localStorage;
+  if (!core || !storage || core.__recoveryWriteLockGuardInstalled) return;
+  core.__recoveryWriteLockGuardInstalled = true;
+
+  const STORAGE_KEY = core.STORAGE_KEY || 'taskpoints_v1';
+  const LOCK_KEY = 'taskpoints_recovery_write_lock_v1';
+  const PAGE_STARTED_AT_MS = Date.now();
+  let alertShown = false;
+
+  function readLock() {
+    try {
+      const lock = JSON.parse(storage.getItem(LOCK_KEY) || 'null');
+      return lock && lock.active === true && lock.token ? lock : null;
+    } catch (_) { return null; }
+  }
+
+  function thisPageMayWrite(lock) {
+    const committedAtMs = Number(lock?.committedAtMs || 0);
+    return committedAtMs > 0 && PAGE_STARTED_AT_MS >= committedAtMs;
+  }
+
+  function assertWriteAllowed(operation) {
+    const lock = readLock();
+    if (!lock || thisPageMayWrite(lock)) return;
+    const error = new Error('TaskPoints blocked a save from a tab that was open before a confirmed recovery. Reload this tab before making changes.');
+    error.code = 'TASKPOINTS_RECOVERY_WRITE_LOCKED';
+    error.operation = operation;
+    error.lock = lock;
+    console.error(error.message, { operation, lock });
+    if (!alertShown && typeof global.alert === 'function') {
+      alertShown = true;
+      try { global.alert(`${error.message}\n\nYour recovered data remains protected.`); } catch (_) {}
+    }
+    throw error;
+  }
+
+  function installInstanceHooks() {
+    try {
+      const priorSet = storage.setItem.bind(storage);
+      const priorRemove = storage.removeItem.bind(storage);
+      const guardedSet = function recoveryLockedSetItem(key, value) {
+        if (String(key) === STORAGE_KEY) assertWriteAllowed('setItem');
+        return priorSet(key, value);
+      };
+      const guardedRemove = function recoveryLockedRemoveItem(key) {
+        if (String(key) === STORAGE_KEY) assertWriteAllowed('removeItem');
+        return priorRemove(key);
+      };
+      storage.setItem = guardedSet;
+      storage.removeItem = guardedRemove;
+      return storage.setItem === guardedSet && storage.removeItem === guardedRemove;
+    } catch (_) { return false; }
+  }
+
+  function installPrototypeHooks() {
+    const prototype = global.Storage?.prototype;
+    if (!prototype) return false;
+    if (prototype.setItem && !prototype.__taskPointsRecoveryLockOriginalSetItem) {
+      const priorSet = prototype.setItem;
+      Object.defineProperty(prototype, '__taskPointsRecoveryLockOriginalSetItem', { value: priorSet, configurable: true });
+      prototype.setItem = function recoveryLockedSetItem(key, value) {
+        if (this === storage && String(key) === STORAGE_KEY) assertWriteAllowed('setItem');
+        return priorSet.call(this, key, value);
+      };
+    }
+    if (prototype.removeItem && !prototype.__taskPointsRecoveryLockOriginalRemoveItem) {
+      const priorRemove = prototype.removeItem;
+      Object.defineProperty(prototype, '__taskPointsRecoveryLockOriginalRemoveItem', { value: priorRemove, configurable: true });
+      prototype.removeItem = function recoveryLockedRemoveItem(key) {
+        if (this === storage && String(key) === STORAGE_KEY) assertWriteAllowed('removeItem');
+        return priorRemove.call(this, key);
+      };
+    }
+    return true;
+  }
+
+  const installed = installInstanceHooks() || installPrototypeHooks();
+  core.RECOVERY_WRITE_LOCK_KEY = LOCK_KEY;
+  core.getRecoveryWriteLockStatus = () => ({
+    installed,
+    pageStartedAtMs: PAGE_STARTED_AT_MS,
+    lock: readLock(),
+    pageMayWrite: !readLock() || thisPageMayWrite(readLock())
+  });
+})(typeof window !== 'undefined' ? window : globalThis);
