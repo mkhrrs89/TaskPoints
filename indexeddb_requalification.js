@@ -392,13 +392,14 @@
       const authorization = {
         schemaVersion: 1,
         status: 'authorizing_test_mode',
-        authorizedAtISO: new Date().toISOString(),
-        authorizedRawHash: before.current.rawHash,
-        baselineRawHash: before.current.rawHash,
-        baselineCounts: before.current.counts,
-        baselineVerificationFailures: Number(before.phase4.verificationFailuresTotal || 0),
-        baselineBlockedWrites: Number(before.blockedWrites || 0),
-        preparedBrowserSessionId: BROWSER_SESSION_ID,
+        authorizedAtISO: resuming ? before.gate.authorizedAtISO : new Date().toISOString(),
+        resumedAtISO: resuming ? new Date().toISOString() : null,
+        authorizedRawHash: resuming ? before.gate.authorizedRawHash : before.current.rawHash,
+        baselineRawHash: resuming ? before.gate.baselineRawHash : before.current.rawHash,
+        baselineCounts: resuming ? before.gate.baselineCounts : before.current.counts,
+        baselineVerificationFailures: Number(resuming ? before.gate.baselineVerificationFailures : (before.phase4.verificationFailuresTotal || 0)),
+        baselineBlockedWrites: Number(resuming ? before.gate.baselineBlockedWrites : (before.blockedWrites || 0)),
+        preparedBrowserSessionId: resuming ? before.gate.preparedBrowserSessionId : BROWSER_SESSION_ID,
         hadRecoveryHold,
         previousRecoveryHoldRaw: previousHoldRaw
       };
