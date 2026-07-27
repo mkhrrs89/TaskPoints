@@ -9,7 +9,7 @@ const html = fs.readFileSync(path.join(ROOT, 'emergency_recovery.html'), 'utf8')
 const authorization = fs.readFileSync(path.join(ROOT, 'emergency_recovery_lock_authorization.js'), 'utf8');
 const restore = fs.readFileSync(path.join(ROOT, 'verified_secondary_restore.js'), 'utf8');
 
- test('emergency authorization loads before the normal storage bundle', () => {
+test('emergency authorization loads before the normal storage bundle', () => {
   assert.doesNotThrow(() => new vm.Script(authorization));
   const authorizationAt = html.indexOf('<script src="emergency_recovery_lock_authorization.js" defer></script>');
   const coreAt = html.indexOf('<script src="scoring_core.js" defer></script>');
@@ -21,7 +21,10 @@ test('only the emergency page hides recovery locks from its own guards', () => {
   assert.match(authorization, /const HIDDEN_KEYS = new Set\(\[COMMITTED_LOCK_KEY, ATTEMPT_LOCK_KEY\]\)/);
   assert.match(authorization, /if \(HIDDEN_KEYS\.has\(String\(key\)\)\) return null/);
   assert.match(authorization, /if \(this === storage && HIDDEN_KEYS\.has\(String\(key\)\)\) return null/);
-  assert.doesNotMatch(authorization, /storage\.removeItem\(ATTEMPT_LOCK_KEY\)[\s\S]*installInstanceGetHook/);
+  const finalizeAt = authorization.indexOf('function finalizeEmergencyRecoveryLock()');
+  const removeAt = authorization.indexOf('storage.removeItem(ATTEMPT_LOCK_KEY)', finalizeAt);
+  const wrapperAt = authorization.indexOf('function wrapRestoreCandidateWhenReady()', finalizeAt);
+  assert.ok(finalizeAt >= 0 && removeAt > finalizeAt && wrapperAt > removeAt);
 });
 
 test('a verified full emergency restore commits a fresh generation before removing the attempt', () => {
