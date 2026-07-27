@@ -159,7 +159,8 @@
     } finally { running = false; }
   }
   function flush() {
-    if (running || pending === null) return tail;
+    if (running) return tail.then(() => pending !== null ? flush() : true);
+    if (pending === null) return tail;
     running = true;
     tail = Promise.resolve().then(run).catch(() => false);
     return tail;
