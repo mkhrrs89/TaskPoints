@@ -9,6 +9,11 @@
   <link rel="stylesheet" href="styles.css">
   <script>
     try {
+      window.__taskPointsVerifiedSecondaryRestorePreload = {
+        capturedAtISO: new Date().toISOString(),
+        habitJournalRaw: localStorage.getItem('taskpoints_pending_habit_deltas_v1') || '',
+        legacyJournalRaw: localStorage.getItem('taskpoints_phase5b_pending_changes_v1') || ''
+      };
       localStorage.setItem('taskpoints_emergency_recovery_hold_v1', JSON.stringify({
         active: true,
         enteredAtISO: new Date().toISOString(),
