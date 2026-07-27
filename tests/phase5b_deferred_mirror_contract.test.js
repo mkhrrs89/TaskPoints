@@ -5,7 +5,9 @@ const vm = require('node:vm');
 const path = require('node:path');
 
 const MODULE_PATH = path.join(__dirname, '..', 'phase5b_deferred_mirror.js');
+const PHASE2_PATH = path.join(__dirname, '..', 'phase2_reset_hook.js');
 const SOURCE = fs.readFileSync(MODULE_PATH, 'utf8');
+const PHASE2_SOURCE = fs.readFileSync(PHASE2_PATH, 'utf8');
 const STORAGE_KEY = 'taskpoints_v1';
 const VAULT_DB = 'taskpoints_safety_vault_v1';
 
@@ -152,7 +154,7 @@ test('allows normal populated saves and creates an independent known-good vault 
 test('explicit confirmed import can replace the current state', async () => {
   const h = install();
   const imported = { ...emptyState(), tasks: [{ id: 'imported' }], completions: Array.from({ length: 20 }, (_, i) => ({ id: i })) };
-  const result = h.core.saveValidatedSnapshot(imported, { allowDestructiveOverwrite: true, source: 'full-backup-import' });
+  const result = h.core.saveValidatedSnapshot(imported, { allowDestructiveOverwrite: true, source: 'settings-import' });
   assert.equal(result.state.tasks[0].id, 'imported');
   assert.equal(JSON.parse(h.localStorage.getItem(STORAGE_KEY)).tasks[0].id, 'imported');
   await h.core.flushTaskPointsSafetyVault();
@@ -176,7 +178,16 @@ test('rotates and preserves four independent safety-vault snapshots', async () =
   assert.equal(JSON.parse(h.indexedDB.read(VAULT_DB, 'snapshots', 'latest').raw).tasks[0].id, 'task-d');
 });
 
-test('worker keeps the bundle slot but the Phase 5B source is a safety kill-switch', () => {
+test('guard is installed from the Phase 2 safety floor before Phase 4 and Phase 5A', () => {
+  const worker = fs.readFileSync(path.join(__dirname, '..', '_worker.js'), 'utf8');
+  assert.doesNotThrow(() => new vm.Script(PHASE2_SOURCE));
+  assert.match(PHASE2_SOURCE, /installTaskPointsStorageDataLossGuard/);
+  assert.match(PHASE2_SOURCE, /always-loaded Phase 2 safety/);
+  assert.ok(worker.indexOf("'/phase2_reset_hook.js'") < worker.indexOf("'/phase4_storage_coordinator.js'"));
+  assert.ok(worker.indexOf("'/phase2_reset_hook.js'") < worker.indexOf("'/phase5a_native_snapshot.js'"));
+});
+
+test('worker keeps the former Phase 5B bundle slot as an idempotent safety kill-switch', () => {
   const worker = fs.readFileSync(path.join(__dirname, '..', '_worker.js'), 'utf8');
   assert.match(worker, /'\/phase5b_deferred_mirror\.js'/);
   assert.match(SOURCE, /PHASE5B_LIVE_BUNDLE_DISABLED = true/);
