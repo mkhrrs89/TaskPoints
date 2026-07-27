@@ -386,3 +386,99 @@
     pageMayWrite
   };
 })(typeof window !== 'undefined' ? window : globalThis);
+
+(function installTaskPointsRecoveryAttemptWriteLockGuard(global) {
+  'use strict';
+
+  const storage = global.localStorage;
+  if (!storage || global.__taskPointsRecoveryAttemptWriteLockGuardInstalled) return;
+  global.__taskPointsRecoveryAttemptWriteLockGuardInstalled = true;
+
+  const STORAGE_KEY = global.TaskPointsCore?.STORAGE_KEY || 'taskpoints_v1';
+  const HABIT_JOURNAL_KEY = global.TaskPointsCore?.PENDING_HABIT_DELTAS_KEY || 'taskpoints_pending_habit_deltas_v1';
+  const LEGACY_JOURNAL_KEY = 'taskpoints_phase5b_pending_changes_v1';
+  const ATTEMPT_LOCK_KEY = 'taskpoints_recovery_attempt_lock_v1';
+  const ATTEMPT_TTL_MS = 2 * 60 * 1000;
+  const PROTECTED_KEYS = new Set([STORAGE_KEY, HABIT_JOURNAL_KEY, LEGACY_JOURNAL_KEY]);
+  let alertShown = false;
+
+  function readAttemptLock() {
+    try {
+      const lock = JSON.parse(storage.getItem(ATTEMPT_LOCK_KEY) || 'null');
+      if (!lock || lock.active !== true || !lock.token) return null;
+      const createdAtMs = Number(lock.createdAtMs || 0);
+      if (!createdAtMs || Date.now() - createdAtMs > ATTEMPT_TTL_MS) {
+        storage.removeItem(ATTEMPT_LOCK_KEY);
+        return null;
+      }
+      return lock;
+    } catch (_) { return null; }
+  }
+
+  function assertAttemptAllowsWrite(key, operation) {
+    const normalizedKey = String(key);
+    if (!PROTECTED_KEYS.has(normalizedKey)) return;
+    const attempt = readAttemptLock();
+    if (!attempt) return;
+    const error = new Error('TaskPoints paused saves while a verified recovery attempt is in progress. Finish or cancel that recovery page before making changes.');
+    error.code = 'TASKPOINTS_RECOVERY_ATTEMPT_WRITE_LOCKED';
+    error.key = normalizedKey;
+    error.operation = operation;
+    error.attempt = attempt;
+    console.error(error.message, { key: normalizedKey, operation, attempt });
+    if (!alertShown && typeof global.alert === 'function') {
+      alertShown = true;
+      try { global.alert(`${error.message}\n\nNo current data was overwritten.`); } catch (_) {}
+    }
+    throw error;
+  }
+
+  function installInstanceHooks() {
+    try {
+      const priorSet = storage.setItem.bind(storage);
+      const priorRemove = storage.removeItem.bind(storage);
+      const guardedSet = function recoveryAttemptLockedSetItem(key, value) {
+        assertAttemptAllowsWrite(key, 'setItem');
+        return priorSet(key, value);
+      };
+      const guardedRemove = function recoveryAttemptLockedRemoveItem(key) {
+        assertAttemptAllowsWrite(key, 'removeItem');
+        return priorRemove(key);
+      };
+      storage.setItem = guardedSet;
+      storage.removeItem = guardedRemove;
+      return storage.setItem === guardedSet && storage.removeItem === guardedRemove;
+    } catch (_) { return false; }
+  }
+
+  function installPrototypeHooks() {
+    const prototype = global.Storage?.prototype;
+    if (!prototype) return false;
+    if (prototype.setItem && !prototype.__taskPointsRecoveryAttemptOriginalSetItem) {
+      const priorSet = prototype.setItem;
+      Object.defineProperty(prototype, '__taskPointsRecoveryAttemptOriginalSetItem', { value: priorSet, configurable: true });
+      prototype.setItem = function recoveryAttemptLockedSetItem(key, value) {
+        if (this === storage) assertAttemptAllowsWrite(key, 'setItem');
+        return priorSet.call(this, key, value);
+      };
+    }
+    if (prototype.removeItem && !prototype.__taskPointsRecoveryAttemptOriginalRemoveItem) {
+      const priorRemove = prototype.removeItem;
+      Object.defineProperty(prototype, '__taskPointsRecoveryAttemptOriginalRemoveItem', { value: priorRemove, configurable: true });
+      prototype.removeItem = function recoveryAttemptLockedRemoveItem(key) {
+        if (this === storage) assertAttemptAllowsWrite(key, 'removeItem');
+        return priorRemove.call(this, key);
+      };
+    }
+    return true;
+  }
+
+  const installed = installInstanceHooks() || installPrototypeHooks();
+  readAttemptLock();
+  global.TaskPointsRecoveryAttemptWriteLockGuard = {
+    installed,
+    protectedKeys: [...PROTECTED_KEYS],
+    attemptLockKey: ATTEMPT_LOCK_KEY,
+    readAttemptLock
+  };
+})(typeof window !== 'undefined' ? window : globalThis);
