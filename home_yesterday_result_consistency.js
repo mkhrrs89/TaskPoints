@@ -162,10 +162,7 @@
 
     return downsampleTrendEntries(
       source
-        .map((entry) => ({
-          key: String(entry?.key || ''),
-          value: Number(entry?.calories)
-        }))
+        .map((entry) => ({ key: String(entry?.key || ''), value: Number(entry?.calories) }))
         .filter((entry) => Number.isFinite(entry.value))
         .sort((a, b) => a.key.localeCompare(b.key))
     );
@@ -174,7 +171,6 @@
   function drawMovingAverageAboveDots(canvasId, entries, referenceValue) {
     const canvas = getElement(canvasId);
     if (!canvas?.getContext || entries.length < 2) return false;
-
     const ctx = canvas.getContext('2d');
     if (!ctx) return false;
 
@@ -197,16 +193,12 @@
       x: paddingX + (count === 1 ? chartWidth / 2 : chartWidth * index / (count - 1)),
       value: entry.value
     }));
-
     const movingAveragePoints = points.map((point, index) => {
       const start = Math.max(0, index - TRENDLINE_PERIOD + 1);
       const slice = points.slice(start, index + 1);
       const average = slice.reduce((sum, current) => sum + current.value, 0) / slice.length;
       const normalized = (average - minValue) / range;
-      return {
-        x: point.x,
-        y: paddingTop + chartHeight - normalized * chartHeight
-      };
+      return { x: point.x, y: paddingTop + chartHeight - normalized * chartHeight };
     });
 
     if (typeof ctx.save === 'function') ctx.save();
@@ -217,18 +209,11 @@
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
     ctx.moveTo(movingAveragePoints[0].x, movingAveragePoints[0].y);
-
     for (let index = 1; index < movingAveragePoints.length - 1; index += 1) {
       const current = movingAveragePoints[index];
       const next = movingAveragePoints[index + 1];
-      ctx.quadraticCurveTo(
-        current.x,
-        current.y,
-        (current.x + next.x) / 2,
-        (current.y + next.y) / 2
-      );
+      ctx.quadraticCurveTo(current.x, current.y, (current.x + next.x) / 2, (current.y + next.y) / 2);
     }
-
     const last = movingAveragePoints[movingAveragePoints.length - 1];
     ctx.lineTo(last.x, last.y);
     ctx.stroke();
@@ -240,17 +225,12 @@
     const original = global[functionName];
     if (typeof original !== 'function') return false;
     if (original.__taskPointsTrendLineAboveDots) return true;
-
     const wrapped = function taskPointsTrendLineAboveDots(...args) {
       const result = original.apply(this, args);
-      try {
-        drawMovingAverageAboveDots(canvasId, entriesBuilder(args[0]), referenceValue);
-      } catch (error) {
-        console.warn(`TaskPoints could not redraw ${functionName} trendline above its dots.`, error);
-      }
+      try { drawMovingAverageAboveDots(canvasId, entriesBuilder(args[0]), referenceValue); }
+      catch (error) { console.warn(`TaskPoints could not redraw ${functionName} trendline above its dots.`, error); }
       return result;
     };
-
     wrapped.__taskPointsTrendLineAboveDots = true;
     wrapped.__taskPointsOriginal = original;
     global[functionName] = wrapped;
@@ -261,31 +241,14 @@
     const hasScoreCanvas = Boolean(getElement('dailyTrend'));
     const hasCaloriesCanvas = Boolean(getElement('caloriesTrend'));
     if (!hasScoreCanvas && !hasCaloriesCanvas) return true;
-
-    const scoreReady = !hasScoreCanvas || wrapTrendRenderer(
-      'drawDailyTrend',
-      'dailyTrend',
-      getDailyTrendEntries,
-      null
-    );
-    const caloriesReady = !hasCaloriesCanvas || wrapTrendRenderer(
-      'drawCaloriesTrend',
-      'caloriesTrend',
-      getCaloriesTrendEntries,
-      2600
-    );
-
+    const scoreReady = !hasScoreCanvas || wrapTrendRenderer('drawDailyTrend', 'dailyTrend', getDailyTrendEntries, null);
+    const caloriesReady = !hasCaloriesCanvas || wrapTrendRenderer('drawCaloriesTrend', 'caloriesTrend', getCaloriesTrendEntries, 2600);
     return scoreReady && caloriesReady;
   }
 
   function installPatch() {
-    if (typeof global.renderYesterdaysResult !== 'function'
-      || typeof global.getCompletedYouMatchupsForStats !== 'function') {
-      return false;
-    }
-
+    if (typeof global.renderYesterdaysResult !== 'function' || typeof global.getCompletedYouMatchupsForStats !== 'function') return false;
     if (global.renderYesterdaysResult.__taskPointsUsesSavedCompletedMatchup) return true;
-
     const originalRenderYesterdaysResult = global.renderYesterdaysResult;
     const wrappedRenderYesterdaysResult = function taskPointsRenderYesterdaysSavedResult(...args) {
       const result = originalRenderYesterdaysResult.apply(this, args);
@@ -295,7 +258,6 @@
     wrappedRenderYesterdaysResult.__taskPointsUsesSavedCompletedMatchup = true;
     wrappedRenderYesterdaysResult.__taskPointsOriginal = originalRenderYesterdaysResult;
     global.renderYesterdaysResult = wrappedRenderYesterdaysResult;
-
     applySavedYesterdayResult();
     return true;
   }
@@ -317,12 +279,8 @@
   };
 
   installPlayerPhotoFrameOverride();
-
-  if (global.document?.readyState === 'loading') {
-    global.document.addEventListener?.('DOMContentLoaded', installWhenReady, { once: true });
-  } else {
-    installWhenReady();
-  }
+  if (global.document?.readyState === 'loading') global.document.addEventListener?.('DOMContentLoaded', installWhenReady, { once: true });
+  else installWhenReady();
 })(typeof window !== 'undefined' ? window : globalThis);
 
 (function installTaskPointsRecoveryJournalWriteLockGuard(global) {
@@ -336,6 +294,7 @@
   const HABIT_JOURNAL_KEY = global.TaskPointsCore?.PENDING_HABIT_DELTAS_KEY || 'taskpoints_pending_habit_deltas_v1';
   const LEGACY_JOURNAL_KEY = 'taskpoints_phase5b_pending_changes_v1';
   const LOCK_KEY = 'taskpoints_recovery_write_lock_v1';
+  const UNCOMMITTED_LOCK_TTL_MS = 2 * 60 * 1000;
   const PAGE_STARTED_AT_MS = global.TaskPointsCore?.getRecoveryWriteLockStatus?.().pageStartedAtMs || Date.now();
   const PROTECTED_KEYS = new Set([STORAGE_KEY, HABIT_JOURNAL_KEY, LEGACY_JOURNAL_KEY]);
   let alertShown = false;
@@ -343,7 +302,14 @@
   function readLock() {
     try {
       const lock = JSON.parse(storage.getItem(LOCK_KEY) || 'null');
-      return lock && lock.active === true && lock.token ? lock : null;
+      if (!lock || lock.active !== true || !lock.token) return null;
+      const committedAtMs = Number(lock.committedAtMs || 0);
+      const createdAtMs = Number(lock.createdAtMs || 0);
+      if (committedAtMs === 0 && createdAtMs > 0 && Date.now() - createdAtMs > UNCOMMITTED_LOCK_TTL_MS) {
+        storage.removeItem(LOCK_KEY);
+        return null;
+      }
+      return lock;
     } catch (_) { return null; }
   }
 
@@ -411,6 +377,7 @@
   }
 
   const installed = installInstanceHooks() || installPrototypeHooks();
+  readLock();
   global.TaskPointsRecoveryJournalWriteLockGuard = {
     installed,
     protectedKeys: [...PROTECTED_KEYS],
