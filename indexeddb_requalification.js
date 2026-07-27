@@ -26,6 +26,7 @@
   let latestReport = null;
   let busy = false;
   const PAGE_INSTANCE_ID = global.crypto?.randomUUID?.() || `page-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const BROWSER_SESSION_ID = core.getIndexedDbBrowserSessionStatus?.().sessionId || '';
 
   const get = (key) => { try { return localStorage.getItem(key); } catch (_) { return null; } };
   const set = (key, value) => localStorage.setItem(key, value);
@@ -255,10 +256,10 @@
     );
     const noNewBlockedWrites = Number(blockedWrites) <= Number(gate.baselineBlockedWrites ?? blockedWrites);
     const reopenProven = Boolean(
-      gate.preparedPageId
-      && gate.preparedPageId !== PAGE_INSTANCE_ID
-      && gate.freshRestorePageId === PAGE_INSTANCE_ID
-      && gate.freshRestoreRawHash === current.rawHash
+      gate.preparedBrowserSessionId
+      && gate.freshAppSessionId
+      && gate.freshAppSessionId !== gate.preparedBrowserSessionId
+      && gate.freshAppRawHash === current.rawHash
     );
     const editDetected = Boolean(gate.baselineRawHash && current.rawHash !== gate.baselineRawHash);
     const testHealthy = Boolean(
@@ -275,7 +276,7 @@
       scannedAtISO: new Date().toISOString(), current, secondary, vault, fast, guard, gate, phase4,
       mode, recoveryHold: Boolean(recoveryHold), recoveryHoldRaw: recoveryHold,
       attemptLock: Boolean(attemptLock), habitPending, legacyPending, guardReady,
-      blockedWrites, baseReady, noNewBlockedWrites, reopenProven, pageInstanceId: PAGE_INSTANCE_ID, editDetected, testHealthy
+      blockedWrites, baseReady, noNewBlockedWrites, reopenProven, pageInstanceId: PAGE_INSTANCE_ID, browserSessionId: BROWSER_SESSION_ID, editDetected, testHealthy
     };
   }
 
@@ -315,7 +316,7 @@
       title = report.testHealthy ? 'Short test passed' : 'Make one harmless edit, then close and reopen';
       detail = report.testHealthy
         ? 'All copies match after your edit. Faster mode can now be turned on.'
-        : (!report.editDetected ? 'Edit something harmless, fully close TaskPoints, reopen it, then return here.' : (!report.reopenProven ? 'Your edit was detected, but this same page is still open. Fully close TaskPoints, reopen it, then return here.' : 'Your edit and reopen were detected. Wait a few seconds and tap Refresh so the other copies can catch up.'));
+        : (!report.editDetected ? 'Edit something harmless, fully close TaskPoints, reopen it, then return here.' : (!report.reopenProven ? 'Your edit was detected, but a brand-new TaskPoints session has not checked in yet. Fully close TaskPoints, reopen it to the normal app, then return here.' : 'Your edit and reopen were detected. Wait a few seconds and tap Refresh so the other copies can catch up.'));
     } else if (gateStatus === 'fast_mode_enabled' && report.mode === 'indexeddb_primary') {
       title = 'Faster mode is on';
       detail = 'TaskPoints can now read from the faster database copy, with your working copy and backups still kept for safety.';
@@ -332,7 +333,7 @@
 
     const start = $('startTestBtn');
     const finish = $('finishTestBtn');
-    const freshStart = report.mode === 'off' && ['not_started', '', 'failed', 'fast_mode_enabled', 'authorizing_test_mode'].includes(gateStatus);
+    const freshStart = report.mode === 'off' && ['not_started', '', 'failed', 'fast_mode_enabled', 'authorizing_test_mode', 'awaiting_smoke_test', 'ready_for_fast_mode'].includes(gateStatus);
     const resumePreparation = report.mode === 'verify_primary_writes' && gateStatus === 'authorizing_test_mode';
     start.dataset.allowed = report.baseReady && (freshStart || resumePreparation) ? 'true' : 'false';
     finish.dataset.allowed = report.testHealthy ? 'true' : 'false';
@@ -345,20 +346,12 @@
 
   async function verifyFreshPageRestore() {
     const gate = json(get(GATE_KEY), {}) || {};
-    if (!['awaiting_smoke_test', 'ready_for_fast_mode'].includes(gate.status)) return false;
-    if (!gate.preparedPageId || gate.preparedPageId === PAGE_INSTANCE_ID) return false;
-    const current = currentSave();
-    if (!current.readable) return false;
-    if (gate.freshRestorePageId === PAGE_INSTANCE_ID && gate.freshRestoreRawHash === current.rawHash) return true;
-    const restored = await core.restorePhase4CommittedPrimary?.();
-    if (restored?.restored !== true) return false;
-    set(GATE_KEY, JSON.stringify({
-      ...gate,
-      freshRestorePageId: PAGE_INSTANCE_ID,
-      freshRestoreAtISO: new Date().toISOString(),
-      freshRestoreRawHash: current.rawHash
-    }));
-    return true;
+    return Boolean(
+      gate.preparedBrowserSessionId
+      && gate.freshAppSessionId
+      && gate.freshAppSessionId !== gate.preparedBrowserSessionId
+      && gate.freshAppRawHash === currentSave().rawHash
+    );
   }
 
   async function refresh() {
@@ -396,6 +389,7 @@
         baselineCounts: before.current.counts,
         baselineVerificationFailures: Number(before.phase4.verificationFailuresTotal || 0),
         baselineBlockedWrites: Number(before.blockedWrites || 0),
+        preparedBrowserSessionId: BROWSER_SESSION_ID,
         hadRecoveryHold,
         previousRecoveryHoldRaw: previousHoldRaw
       };
@@ -418,15 +412,16 @@
         ...authorization,
         status: 'awaiting_smoke_test',
         preparedPageId: PAGE_INSTANCE_ID,
-        freshRestorePageId: null,
-        freshRestoreAtISO: null,
-        freshRestoreRawHash: null,
+        freshAppSessionId: null,
+        freshAppStartedAtISO: null,
+        freshAppRawHash: null,
+        freshAppPage: null,
         testPreparedAtISO: new Date().toISOString(),
         preparedSequence: Number(after.phase4.latestPassedSequence || 0),
         lastVerifiedRawHash: after.current.rawHash,
         lastError: null
       }));
-      $('actionMessage').textContent = 'Short test is ready. Make one harmless edit, fully close TaskPoints, reopen it, then return here.';
+      $('actionMessage').textContent = 'Short test is ready. Make one harmless edit, fully close TaskPoints, reopen it to the normal app, then return here.';
       render(await collect());
     } catch (error) {
       try { core.setPhase4StorageMode?.('off'); } catch (_) { try { set(MODE_KEY, 'off'); } catch (_) {} }
