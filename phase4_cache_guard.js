@@ -222,3 +222,88 @@
   const currentMode = core.getPhase4StorageMode?.() || get(MODE_KEY) || 'off';
   if (currentMode !== 'off' && !permission(currentMode).allowed) originalSetMode('off');
 })(typeof window !== 'undefined' ? window : globalThis);
+(function installTaskPointsIndexedDbRestartWitness(global) {
+  'use strict';
+
+  const core = global.TaskPointsCore;
+  const storage = global.localStorage;
+  const session = global.sessionStorage;
+  if (!core || !storage || !session || core.__indexedDbRestartWitnessInstalled) return;
+  core.__indexedDbRestartWitnessInstalled = true;
+
+  const STORAGE_KEY = core.STORAGE_KEY || 'taskpoints_v1';
+  const MODE_KEY = core.PHASE4_STORAGE_MODE_KEY || 'taskpoints_phase4_storage_mode_v1';
+  const GATE_KEY = 'taskpoints_indexeddb_requalification_v1';
+  const SESSION_KEY = 'taskpoints_indexeddb_browser_session_v1';
+  const HABIT_JOURNAL_KEY = core.PENDING_HABIT_DELTAS_KEY || 'taskpoints_pending_habit_deltas_v1';
+  const LEGACY_JOURNAL_KEY = 'taskpoints_phase5b_pending_changes_v1';
+  const EXCLUDED_PAGES = new Set([
+    'indexeddb_requalification.html',
+    'phase4_storage_status.html',
+    'storage_health.html',
+    'verified_secondary_recovery.html',
+    'verified_secondary_restore.html',
+    'emergency_recovery.html',
+    'dual_write_status.html',
+    'phase3_read_status.html'
+  ]);
+
+  const parse = (raw, fallback = null) => { try { return JSON.parse(raw); } catch (_) { return fallback; } };
+  const get = (key) => { try { return storage.getItem(key); } catch (_) { return null; } };
+  const hash = (raw) => {
+    const text = String(raw || '');
+    let value = 2166136261;
+    for (let index = 0; index < text.length; index += 1) {
+      value ^= text.charCodeAt(index);
+      value = Math.imul(value, 16777619);
+    }
+    return `${(value >>> 0).toString(16).padStart(8, '0')}:${text.length}`;
+  };
+  const makeId = () => global.crypto?.randomUUID?.() || `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+  let sessionId = '';
+  let sessionWasNew = false;
+  try {
+    sessionId = session.getItem(SESSION_KEY) || '';
+    if (!sessionId) {
+      sessionWasNew = true;
+      sessionId = makeId();
+      session.setItem(SESSION_KEY, sessionId);
+    }
+  } catch (_) {
+    sessionId = makeId();
+  }
+
+  core.getIndexedDbBrowserSessionStatus = () => ({ sessionId, sessionWasNew });
+
+  const pageName = String(global.location?.pathname || '').split('/').pop() || 'index.html';
+  if (!sessionWasNew || EXCLUDED_PAGES.has(pageName)) return;
+  const navigationType = global.performance?.getEntriesByType?.('navigation')?.[0]?.type || '';
+  if (navigationType === 'reload') return;
+
+  const gate = parse(get(GATE_KEY), {}) || {};
+  if (gate.status !== 'awaiting_smoke_test') return;
+  if (!gate.preparedBrowserSessionId || gate.preparedBrowserSessionId === sessionId) return;
+  if ((get(MODE_KEY) || 'off') !== 'verify_primary_writes') return;
+  if (get(HABIT_JOURNAL_KEY) || get(LEGACY_JOURNAL_KEY)) return;
+  const currentRaw = get(STORAGE_KEY);
+  if (!currentRaw) return;
+
+  Promise.resolve(core.restorePhase4CommittedPrimary?.()).then((result) => {
+    if (result?.restored !== true) return;
+    const latestGate = parse(get(GATE_KEY), {}) || {};
+    const latestRaw = get(STORAGE_KEY);
+    if (latestGate.status !== 'awaiting_smoke_test') return;
+    if (latestGate.preparedBrowserSessionId !== gate.preparedBrowserSessionId) return;
+    if (!latestRaw || latestRaw !== currentRaw) return;
+    try {
+      storage.setItem(GATE_KEY, JSON.stringify({
+        ...latestGate,
+        freshAppSessionId: sessionId,
+        freshAppStartedAtISO: new Date().toISOString(),
+        freshAppRawHash: hash(latestRaw),
+        freshAppPage: pageName
+      }));
+    } catch (_) {}
+  }).catch(() => undefined);
+})(typeof window !== 'undefined' ? window : globalThis);
