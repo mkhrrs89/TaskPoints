@@ -235,6 +235,7 @@
   const MODE_KEY = core.PHASE4_STORAGE_MODE_KEY || 'taskpoints_phase4_storage_mode_v1';
   const GATE_KEY = 'taskpoints_indexeddb_requalification_v1';
   const SESSION_KEY = 'taskpoints_indexeddb_browser_session_v1';
+  const CHANNEL_NAME = 'taskpoints_indexeddb_restart_witness_v1';
   const HABIT_JOURNAL_KEY = core.PENDING_HABIT_DELTAS_KEY || 'taskpoints_pending_habit_deltas_v1';
   const LEGACY_JOURNAL_KEY = 'taskpoints_phase5b_pending_changes_v1';
   const EXCLUDED_PAGES = new Set([
@@ -271,6 +272,7 @@
 
   let sessionId = '';
   let sessionWasNew = false;
+  let sessionStorageAvailable = true;
   try {
     sessionId = session.getItem(SESSION_KEY) || '';
     if (!sessionId) {
@@ -279,26 +281,77 @@
       session.setItem(SESSION_KEY, sessionId);
     }
   } catch (_) {
-    sessionId = makeId();
+    sessionStorageAvailable = false;
   }
 
-  core.getIndexedDbBrowserSessionStatus = () => ({ sessionId, sessionWasNew });
+  let channel = null;
+  try {
+    if (typeof global.BroadcastChannel === 'function') channel = new global.BroadcastChannel(CHANNEL_NAME);
+  } catch (_) { channel = null; }
+  const broadcastSupported = Boolean(channel);
+  if (channel) {
+    channel.addEventListener('message', (event) => {
+      const message = event?.data || {};
+      if (message.type !== 'taskpoints_restart_ping' || !message.token || message.sessionId === sessionId) return;
+      try {
+        channel.postMessage({
+          type: 'taskpoints_restart_pong',
+          token: message.token,
+          sessionId,
+          page: String(global.location?.pathname || '')
+        });
+      } catch (_) {}
+    });
+    core.__indexedDbRestartBroadcastChannel = channel;
+  }
+
+  core.getIndexedDbBrowserSessionStatus = () => ({
+    sessionId,
+    sessionWasNew,
+    sessionStorageAvailable,
+    broadcastSupported
+  });
 
   const pageName = String(global.location?.pathname || '').split('/').pop() || 'index.html';
-  if (!sessionWasNew || EXCLUDED_PAGES.has(pageName)) return;
+  if (!sessionStorageAvailable || !broadcastSupported || !sessionWasNew || EXCLUDED_PAGES.has(pageName)) return;
   const navigationType = global.performance?.getEntriesByType?.('navigation')?.[0]?.type || '';
   if (navigationType === 'reload') return;
 
-  const gate = parse(get(GATE_KEY), {}) || {};
-  if (gate.status !== 'awaiting_smoke_test') return;
-  if (!gate.preparedBrowserSessionId || gate.preparedBrowserSessionId === sessionId) return;
-  if ((get(MODE_KEY) || 'off') !== 'verify_primary_writes') return;
-  if (journalCount(HABIT_JOURNAL_KEY) > 0 || get(LEGACY_JOURNAL_KEY)) return;
-  const currentRaw = get(STORAGE_KEY);
-  if (!currentRaw) return;
+  function findOtherOpenSessions() {
+    return new Promise((resolve) => {
+      const token = makeId();
+      const responders = new Set();
+      const onMessage = (event) => {
+        const message = event?.data || {};
+        if (message.type !== 'taskpoints_restart_pong' || message.token !== token) return;
+        if (message.sessionId && message.sessionId !== sessionId) responders.add(message.sessionId);
+      };
+      channel.addEventListener('message', onMessage);
+      try { channel.postMessage({ type: 'taskpoints_restart_ping', token, sessionId }); } catch (_) {}
+      setTimeout(() => {
+        try { channel.removeEventListener('message', onMessage); } catch (_) {}
+        resolve(responders);
+      }, 300);
+    });
+  }
 
-  Promise.resolve(core.restorePhase4CommittedPrimary?.()).then((result) => {
-    if (result?.restored !== true) return;
+  async function attemptWitness(attempt = 0) {
+    const gate = parse(get(GATE_KEY), {}) || {};
+    if (gate.status !== 'awaiting_smoke_test') return;
+    if (!gate.preparedBrowserSessionId || gate.preparedBrowserSessionId === sessionId) return;
+    if ((get(MODE_KEY) || 'off') !== 'verify_primary_writes') return;
+    if (journalCount(HABIT_JOURNAL_KEY) > 0 || get(LEGACY_JOURNAL_KEY)) return;
+    const currentRaw = get(STORAGE_KEY);
+    if (!currentRaw) return;
+
+    const otherSessions = await findOtherOpenSessions();
+    if (otherSessions.size > 0) return;
+
+    const result = await core.restorePhase4CommittedPrimary?.();
+    if (result?.restored !== true) {
+      if (attempt < 11) setTimeout(() => attemptWitness(attempt + 1), 350);
+      return;
+    }
     const latestGate = parse(get(GATE_KEY), {}) || {};
     const latestRaw = get(STORAGE_KEY);
     if (latestGate.status !== 'awaiting_smoke_test') return;
@@ -310,8 +363,11 @@
         freshAppSessionId: sessionId,
         freshAppStartedAtISO: new Date().toISOString(),
         freshAppRawHash: hash(latestRaw),
-        freshAppPage: pageName
+        freshAppPage: pageName,
+        otherOpenSessionsFound: 0
       }));
     } catch (_) {}
-  }).catch(() => undefined);
+  }
+
+  setTimeout(() => attemptWitness().catch(() => undefined), 250);
 })(typeof window !== 'undefined' ? window : globalThis);
