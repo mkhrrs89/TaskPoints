@@ -25,6 +25,7 @@
   const $ = (id) => document.getElementById(id);
   let latestReport = null;
   let busy = false;
+  const PAGE_INSTANCE_ID = global.crypto?.randomUUID?.() || `page-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
   const get = (key) => { try { return localStorage.getItem(key); } catch (_) { return null; } };
   const set = (key, value) => localStorage.setItem(key, value);
@@ -247,17 +248,25 @@
       && secondary.exact
       && vault.ready
       && guardReady
-      && blockedWrites === 0
       && !attemptLock
       && habitPending === 0
       && !legacyPending
       && core.__indexedDbRequalificationGuardInstalled === true
     );
+    const noNewBlockedWrites = Number(blockedWrites) <= Number(gate.baselineBlockedWrites ?? blockedWrites);
+    const reopenProven = Boolean(
+      gate.preparedPageId
+      && gate.preparedPageId !== PAGE_INSTANCE_ID
+      && gate.freshRestorePageId === PAGE_INSTANCE_ID
+      && gate.freshRestoreRawHash === current.rawHash
+    );
     const editDetected = Boolean(gate.baselineRawHash && current.rawHash !== gate.baselineRawHash);
     const testHealthy = Boolean(
-      gate.status === 'awaiting_smoke_test'
-      && mode === 'verify_primary_writes'
+      ['awaiting_smoke_test', 'ready_for_fast_mode'].includes(gate.status)
+      && ['verify_primary_writes', 'indexeddb_primary'].includes(mode)
       && editDetected
+      && reopenProven
+      && noNewBlockedWrites
       && secondary.exact
       && fast.ready
       && phase4Healthy(phase4, gate.baselineVerificationFailures)
@@ -266,7 +275,7 @@
       scannedAtISO: new Date().toISOString(), current, secondary, vault, fast, guard, gate, phase4,
       mode, recoveryHold: Boolean(recoveryHold), recoveryHoldRaw: recoveryHold,
       attemptLock: Boolean(attemptLock), habitPending, legacyPending, guardReady,
-      blockedWrites, baseReady, editDetected, testHealthy
+      blockedWrites, baseReady, noNewBlockedWrites, reopenProven, pageInstanceId: PAGE_INSTANCE_ID, editDetected, testHealthy
     };
   }
 
@@ -288,7 +297,7 @@
       checkCard('Your current working copy is readable', report.current.readable, report.current.readable ? `${report.current.counts.majorTotal.toLocaleString()} main records are present.` : report.current.error),
       checkCard('Your separate backup copy matches', report.secondary.exact, report.secondary.exact ? 'The working copy and backup copy are identical.' : report.secondary.error || 'The two copies do not match.'),
       checkCard('Your emergency backup vault has a copy', report.vault.ready, report.vault.ready ? `${report.vault.counts.majorTotal.toLocaleString()} main records are protected there.` : report.vault.error),
-      checkCard('The data-loss safety net is on', report.guardReady && report.blockedWrites === 0, report.guardReady ? `${report.blockedWrites} dangerous replacement attempts have been blocked.` : 'The safety net is not fully installed.'),
+      checkCard('The data-loss safety net is on', report.guardReady, report.guardReady ? (report.blockedWrites ? `${report.blockedWrites} bad replacement attempt(s) were safely blocked in the past.` : 'No dangerous replacement attempt has been detected.') : 'The safety net is not fully installed.'),
       checkCard('No changes are waiting to be saved', report.habitPending === 0 && !report.legacyPending, report.habitPending === 0 && !report.legacyPending ? 'No unfinished habit or older save notes remain.' : 'Finish or recover the waiting changes first.'),
       checkCard('No recovery is currently running', !report.attemptLock, report.attemptLock ? 'A recovery attempt is still active.' : 'No recovery attempt is active.'),
       checkCard('The faster database copy is current', report.fast.ready, report.fast.ready ? 'Both faster copies match your working copy.' : 'This will be rebuilt during the short test.', !report.fast.ready),
@@ -306,7 +315,7 @@
       title = report.testHealthy ? 'Short test passed' : 'Make one harmless edit, then close and reopen';
       detail = report.testHealthy
         ? 'All copies match after your edit. Faster mode can now be turned on.'
-        : (report.editDetected ? 'Your edit was detected. Wait a few seconds and tap Refresh so the other copies can catch up.' : 'Edit something harmless, fully close TaskPoints, reopen it, then return here.');
+        : (!report.editDetected ? 'Edit something harmless, fully close TaskPoints, reopen it, then return here.' : (!report.reopenProven ? 'Your edit was detected, but this same page is still open. Fully close TaskPoints, reopen it, then return here.' : 'Your edit and reopen were detected. Wait a few seconds and tap Refresh so the other copies can catch up.'));
     } else if (gateStatus === 'fast_mode_enabled' && report.mode === 'indexeddb_primary') {
       title = 'Faster mode is on';
       detail = 'TaskPoints can now read from the faster database copy, with your working copy and backups still kept for safety.';
@@ -323,13 +332,33 @@
 
     const start = $('startTestBtn');
     const finish = $('finishTestBtn');
-    start.dataset.allowed = report.baseReady && ['not_started', '', 'failed'].includes(gateStatus) && report.mode === 'off' ? 'true' : 'false';
+    const freshStart = report.mode === 'off' && ['not_started', '', 'failed', 'fast_mode_enabled', 'authorizing_test_mode'].includes(gateStatus);
+    const resumePreparation = report.mode === 'verify_primary_writes' && gateStatus === 'authorizing_test_mode';
+    start.dataset.allowed = report.baseReady && (freshStart || resumePreparation) ? 'true' : 'false';
     finish.dataset.allowed = report.testHealthy ? 'true' : 'false';
     start.disabled = busy || start.dataset.allowed !== 'true';
     finish.disabled = busy || finish.dataset.allowed !== 'true';
-    start.textContent = gateStatus === 'failed' ? 'Try the short test again' : 'Start short test';
+    start.textContent = gateStatus === 'authorizing_test_mode' ? 'Resume short test' : (gateStatus === 'failed' ? 'Try the short test again' : (gateStatus === 'fast_mode_enabled' && report.mode === 'off' ? 'Run short test to turn faster mode back on' : 'Start short test'));
     finish.textContent = 'Finish test and turn on faster mode';
     $('technicalReport').textContent = JSON.stringify(report, (key, value) => ['raw','state','stateCanonical','recoveryHoldRaw','record','rows'].includes(key) ? undefined : value, 2);
+  }
+
+  async function verifyFreshPageRestore() {
+    const gate = json(get(GATE_KEY), {}) || {};
+    if (!['awaiting_smoke_test', 'ready_for_fast_mode'].includes(gate.status)) return false;
+    if (!gate.preparedPageId || gate.preparedPageId === PAGE_INSTANCE_ID) return false;
+    const current = currentSave();
+    if (!current.readable) return false;
+    if (gate.freshRestorePageId === PAGE_INSTANCE_ID && gate.freshRestoreRawHash === current.rawHash) return true;
+    const restored = await core.restorePhase4CommittedPrimary?.();
+    if (restored?.restored !== true) return false;
+    set(GATE_KEY, JSON.stringify({
+      ...gate,
+      freshRestorePageId: PAGE_INSTANCE_ID,
+      freshRestoreAtISO: new Date().toISOString(),
+      freshRestoreRawHash: current.rawHash
+    }));
+    return true;
   }
 
   async function refresh() {
@@ -339,6 +368,7 @@
       await core.flushPhase5CVerifiedSecondaryWrites?.();
       await core.flushPhase4PrimaryWrites?.();
       await core.flushPhase5ANativeSnapshotWrites?.();
+      await verifyFreshPageRestore();
       render(await collect());
       $('actionMessage').textContent = 'Check complete.';
     } catch (error) {
@@ -350,10 +380,13 @@
     if (busy) return;
     setBusy(true, 'Starting the short test…');
     let previousHoldRaw = null;
+    let hadRecoveryHold = false;
     try {
       const before = await collect();
-      if (!before.baseReady || before.mode !== 'off') throw new Error('The safety checklist is not ready yet.');
-      previousHoldRaw = before.recoveryHoldRaw;
+      const resuming = before.gate.status === 'authorizing_test_mode' && before.mode === 'verify_primary_writes';
+      if (!before.baseReady || (!resuming && before.mode !== 'off')) throw new Error('The safety checklist is not ready yet.');
+      previousHoldRaw = before.recoveryHoldRaw ?? before.gate.previousRecoveryHoldRaw ?? null;
+      hadRecoveryHold = before.recoveryHold || before.gate.hadRecoveryHold === true;
       const authorization = {
         schemaVersion: 1,
         status: 'authorizing_test_mode',
@@ -361,24 +394,33 @@
         authorizedRawHash: before.current.rawHash,
         baselineRawHash: before.current.rawHash,
         baselineCounts: before.current.counts,
-        baselineVerificationFailures: Number(before.phase4.verificationFailuresTotal || 0)
+        baselineVerificationFailures: Number(before.phase4.verificationFailuresTotal || 0),
+        baselineBlockedWrites: Number(before.blockedWrites || 0),
+        hadRecoveryHold,
+        previousRecoveryHoldRaw: previousHoldRaw
       };
       set(GATE_KEY, JSON.stringify(authorization));
-      remove(HOLD_KEY);
-      const selected = core.setPhase4StorageMode?.('verify_primary_writes');
-      if (selected !== 'verify_primary_writes') throw new Error('TaskPoints could not enter the short test mode.');
+      if (!resuming) {
+        remove(HOLD_KEY);
+        const selected = core.setPhase4StorageMode?.('verify_primary_writes');
+        if (selected !== 'verify_primary_writes') throw new Error('TaskPoints could not enter the short test mode.');
+      }
       core.queuePhase4PrimaryWrite?.({ reason: 'indexeddb_requalification_start', force: true });
       await core.flushPhase4PrimaryWrites?.();
       await core.flushPhase5ANativeSnapshotWrites?.();
       await core.flushPhase5CVerifiedSecondaryWrites?.();
       await wait(250);
       const after = await collect();
-      if (!after.fast.ready || !after.secondary.exact || !phase4Healthy(after.phase4, authorization.baselineVerificationFailures)) {
+      if (!after.fast.ready || !after.secondary.exact || Number(after.blockedWrites || 0) > Number(authorization.baselineBlockedWrites || 0) || !phase4Healthy(after.phase4, authorization.baselineVerificationFailures)) {
         throw new Error('The faster copy did not finish all of its checks.');
       }
       set(GATE_KEY, JSON.stringify({
         ...authorization,
         status: 'awaiting_smoke_test',
+        preparedPageId: PAGE_INSTANCE_ID,
+        freshRestorePageId: null,
+        freshRestoreAtISO: null,
+        freshRestoreRawHash: null,
         testPreparedAtISO: new Date().toISOString(),
         preparedSequence: Number(after.phase4.latestPassedSequence || 0),
         lastVerifiedRawHash: after.current.rawHash,
@@ -389,8 +431,8 @@
     } catch (error) {
       try { core.setPhase4StorageMode?.('off'); } catch (_) { try { set(MODE_KEY, 'off'); } catch (_) {} }
       try {
-        if (previousHoldRaw != null) set(HOLD_KEY, previousHoldRaw);
-        else set(HOLD_KEY, JSON.stringify({ schemaVersion: 1, active: true, restoredAfterFailedTestAtISO: new Date().toISOString() }));
+        if (hadRecoveryHold && previousHoldRaw != null) set(HOLD_KEY, previousHoldRaw);
+        else remove(HOLD_KEY);
       } catch (_) {}
       try {
         const existing = json(get(GATE_KEY), {}) || {};
@@ -409,6 +451,7 @@
       await core.flushPhase5ANativeSnapshotWrites?.();
       await core.flushPhase5CVerifiedSecondaryWrites?.();
       await wait(250);
+      await verifyFreshPageRestore();
       const before = await collect();
       if (!before.testHealthy) throw new Error('The short test is not fully caught up yet. Tap Refresh and check again.');
       const readyRecord = {
