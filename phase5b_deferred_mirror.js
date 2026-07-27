@@ -179,7 +179,12 @@
       const original = storage.setItem.bind(storage);
       const wrapped = function phase5cSetItem(key, value) {
         const result = original(key, value);
-        if (String(key) === KEY && get(KEY) === String(value)) queue(String(value));
+        const storageKey = String(key);
+        if (storageKey === KEY && get(KEY) === String(value)) queue(String(value));
+        else if (storageKey === JOURNAL && journalCount() === 0) {
+          const currentRaw = get(KEY);
+          if (currentRaw) queue(currentRaw);
+        }
         return result;
       };
       storage.setItem = wrapped;
@@ -191,7 +196,13 @@
     Object.defineProperty(prototype, '__taskPointsPhase5COriginalSetItem', { value: original, configurable: true });
     prototype.setItem = function phase5cSetItem(key, value) {
       const result = original.call(this, key, value);
-      if (this === storage && String(key) === KEY && get(KEY) === String(value)) queue(String(value));
+      if (this !== storage) return result;
+      const storageKey = String(key);
+      if (storageKey === KEY && get(KEY) === String(value)) queue(String(value));
+      else if (storageKey === JOURNAL && journalCount() === 0) {
+        const currentRaw = get(KEY);
+        if (currentRaw) queue(currentRaw);
+      }
       return result;
     };
     return true;
