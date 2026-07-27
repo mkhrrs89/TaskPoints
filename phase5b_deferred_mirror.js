@@ -97,6 +97,32 @@
     req.onblocked = () => reject(new Error('secondary_open_blocked'));
   });
 
+  function promoteCandidate(db, candidate, raw, verifiedAtISO) {
+    return new Promise((resolve, reject) => {
+      let intendedAbort = '';
+      const transaction = db.transaction(STORE, 'readwrite');
+      const store = transaction.objectStore(STORE);
+      const latestRequest = store.get('latest');
+      latestRequest.onerror = () => reject(latestRequest.error || new Error('secondary_latest_check_failed'));
+      latestRequest.onsuccess = () => {
+        const currentRaw = get(KEY);
+        const pendingJournal = journalCount();
+        if (currentRaw !== raw || pendingJournal) {
+          intendedAbort = pendingJournal ? 'journal_pending' : 'authoritative_changed';
+          try { transaction.abort(); } catch (_) {}
+          return;
+        }
+        store.put({ ...candidate, id: 'latest', status: 'passed_verification', verifiedAtISO });
+        store.delete(candidate.id);
+      };
+      transaction.oncomplete = () => resolve({ promoted: true, reason: '' });
+      transaction.onabort = () => intendedAbort
+        ? resolve({ promoted: false, reason: intendedAbort })
+        : reject(transaction.error || new Error('secondary_promotion_aborted'));
+      transaction.onerror = () => undefined;
+    });
+  }
+
   async function mirror(raw) {
     if (!raw || get(KEY) !== raw) return false;
     const pendingJournal = journalCount();
@@ -128,11 +154,20 @@
       if (get(KEY) !== raw || journalCount()) throw new Error('secondary_candidate_invalidated');
 
       const verifiedAtISO = new Date().toISOString();
-      const promoteTx = db.transaction(STORE, 'readwrite');
-      const store = promoteTx.objectStore(STORE);
-      store.put({ ...readBack, id: 'latest', status: 'passed_verification', verifiedAtISO });
-      store.delete('candidate');
-      await done(promoteTx);
+      const promotion = await promoteCandidate(db, readBack, raw, verifiedAtISO);
+      if (!promotion.promoted) {
+        const currentRaw = get(KEY);
+        const pendingJournal = journalCount();
+        status({
+          phase5cLastStatus: pendingJournal ? 'waiting_for_habit_journal' : 'passed_verification_stale',
+          phase5cPendingHabitJournalCount: pendingJournal,
+          phase5cMirrorsCurrentSave: false,
+          phase5cPendingWrite: false,
+          phase5cLastError: null
+        });
+        if (!pendingJournal && currentRaw) queue(currentRaw);
+        return false;
+      }
 
       const latestTx = db.transaction(STORE, 'readonly');
       const latestDone = done(latestTx);
@@ -174,6 +209,15 @@
     else Promise.resolve().then(flush);
     return true;
   }
+  function handleJournalState() {
+    const pendingJournal = journalCount();
+    if (pendingJournal === 0) {
+      const currentRaw = get(KEY);
+      if (currentRaw) queue(currentRaw);
+    } else {
+      status({ phase5cLastStatus: 'waiting_for_habit_journal', phase5cPendingHabitJournalCount: pendingJournal, phase5cMirrorsCurrentSave: false, phase5cPendingWrite: false });
+    }
+  }
   function installHook() {
     try {
       const original = storage.setItem.bind(storage);
@@ -181,15 +225,7 @@
         const result = original(key, value);
         const storageKey = String(key);
         if (storageKey === KEY && get(KEY) === String(value)) queue(String(value));
-        else if (storageKey === JOURNAL) {
-          const pendingJournal = journalCount();
-          if (pendingJournal === 0) {
-            const currentRaw = get(KEY);
-            if (currentRaw) queue(currentRaw);
-          } else {
-            status({ phase5cLastStatus: 'waiting_for_habit_journal', phase5cPendingHabitJournalCount: pendingJournal, phase5cMirrorsCurrentSave: false, phase5cPendingWrite: false });
-          }
-        }
+        else if (storageKey === JOURNAL) handleJournalState();
         return result;
       };
       storage.setItem = wrapped;
@@ -204,15 +240,7 @@
       if (this !== storage) return result;
       const storageKey = String(key);
       if (storageKey === KEY && get(KEY) === String(value)) queue(String(value));
-      else if (storageKey === JOURNAL) {
-        const pendingJournal = journalCount();
-        if (pendingJournal === 0) {
-          const currentRaw = get(KEY);
-          if (currentRaw) queue(currentRaw);
-        } else {
-          status({ phase5cLastStatus: 'waiting_for_habit_journal', phase5cPendingHabitJournalCount: pendingJournal, phase5cMirrorsCurrentSave: false, phase5cPendingWrite: false });
-        }
-      }
+      else if (storageKey === JOURNAL) handleJournalState();
       return result;
     };
     return true;
@@ -228,6 +256,13 @@
   };
 
   const hookInstalled = installHook();
+  if (typeof global.addEventListener === 'function') {
+    global.addEventListener('storage', (event) => {
+      if (event?.storageArea && event.storageArea !== storage) return;
+      if (event?.key === KEY && event.newValue && get(KEY) === event.newValue) queue(event.newValue);
+      else if (event?.key === JOURNAL) handleJournalState();
+    });
+  }
   const existingStatus = json(get(DIAG), {}) || {};
   const currentRaw = get(KEY);
   const verifiedStillCurrent = Boolean(hookInstalled
