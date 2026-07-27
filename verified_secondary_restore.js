@@ -136,7 +136,7 @@
       exportType: 'taskpoints_verified_secondary_restore_package',
       exportedAtISO: new Date().toISOString(),
       current,
-      capturedBeforeTaskPointsCore: {
+      capturedBeforeRecoveryRuntime: {
         capturedAtISO: preloadJournals.capturedAtISO || '',
         habitJournalRaw: preloadJournals.habitJournalRaw || '',
         legacyJournalRaw: preloadJournals.legacyJournalRaw || ''
@@ -186,7 +186,7 @@
     }
     const journals = currentJournalState();
     if (journals.pendingHabitCount || journals.legacyJournalPresent) {
-      throw new Error('A pending journal exists or existed before TaskPointsCore loaded. Open full Emergency Data Recovery so those changes can be preserved.');
+      throw new Error('A pending journal exists or existed when the recovery page opened. Open full Emergency Data Recovery so those changes can be preserved.');
     }
     candidate = live;
     validation = { ...validation, ...journals };
@@ -197,7 +197,7 @@
     const initialJournals = currentJournalState();
     if (initialJournals.pendingHabitCount || initialJournals.legacyJournalPresent) {
       $('message').className = 'bad mb-4';
-      $('message').textContent = 'Restore is blocked because a pending journal exists or existed before TaskPointsCore loaded. Open full Emergency Data Recovery so those changes can be preserved and reconciled.';
+      $('message').textContent = 'Restore is blocked because a pending journal exists or existed when the recovery page opened. Open full Emergency Data Recovery so those changes can be preserved and reconciled.';
       return;
     }
 
@@ -222,12 +222,7 @@
         reason: 'verified_secondary_restore_in_progress'
       }));
 
-      const core = global.TaskPointsCore;
-      if (!core?.safeReplaceTaskPointsStorage) throw new Error('TaskPoints storage API did not load.');
-      const replace = () => core.safeReplaceTaskPointsStorage(STORAGE_KEY, candidate.raw);
-      if (typeof core.withTaskPointsDestructiveWriteAllowed === 'function') {
-        core.withTaskPointsDestructiveWriteAllowed(replace);
-      } else replace();
+      localStorage.setItem(STORAGE_KEY, candidate.raw);
 
       const readBackRaw = localStorage.getItem(STORAGE_KEY) || '';
       if (readBackRaw !== candidate.raw) throw new Error('Exact raw readback verification failed.');
@@ -250,7 +245,7 @@
     } catch (error) {
       console.error(error);
       $('message').className = 'bad mb-4';
-      $('message').textContent = `Restore failed: ${error?.message || error}. The verified secondary database was preserved.`;
+      $('message').textContent = `Restore failed: ${error?.message || error}. The verified secondary database and safety vault were preserved by this recovery page.`;
       $('restoreBtn').disabled = false;
       $('restoreBtn').textContent = 'Restore verified copy';
     }
@@ -267,7 +262,7 @@
       const exactMatch = result.currentRaw === candidate.raw;
       if (result.pendingHabitCount || result.legacyJournalPresent) {
         $('message').className = 'bad mb-4';
-        $('message').textContent = 'A pending journal exists or existed before TaskPointsCore loaded. Direct secondary restoration is disabled; use full Emergency Data Recovery to preserve those changes.';
+        $('message').textContent = 'A pending journal exists or existed when the recovery page opened. Direct secondary restoration is disabled; use full Emergency Data Recovery to preserve those changes.';
       } else if (exactMatch) {
         $('message').className = 'good mb-4';
         $('message').textContent = 'The verified secondary already matches the current authoritative save exactly. No restore is needed.';
