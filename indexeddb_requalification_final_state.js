@@ -6,13 +6,19 @@
 
   const MODE_KEY = 'taskpoints_phase4_storage_mode_v1';
   const GATE_KEY = 'taskpoints_indexeddb_requalification_v1';
+  const FINAL_TITLE = 'Faster mode is on';
+  const RELEASE_RETRY_MS = 1000;
+  const MAX_RELEASE_ATTEMPTS = 3;
   const document = global.document;
   const storage = global.localStorage;
   let applying = false;
   let ownsUi = false;
   let observer = null;
   let rerenderQueued = false;
-  let rerenderAttempts = 0;
+  let releaseInFlight = false;
+  let releaseAttempts = 0;
+  let releaseTimer = null;
+  let reloadRequested = false;
 
   const get = (key) => {
     try { return storage?.getItem?.(key) ?? null; }
@@ -42,34 +48,83 @@
     if (button.dataset.allowed !== 'false') button.dataset.allowed = 'false';
   }
 
+  function clearReleaseTimer() {
+    if (releaseTimer == null) return;
+    global.clearTimeout?.(releaseTimer);
+    releaseTimer = null;
+  }
+
+  function cancelRelease() {
+    clearReleaseTimer();
+    releaseInFlight = false;
+    releaseAttempts = 0;
+    reloadRequested = false;
+  }
+
+  function finalUiIsVisible() {
+    return $('overallTitle')?.textContent === FINAL_TITLE;
+  }
+
+  function completeReleaseIfRendered() {
+    if (!ownsUi) return true;
+    if (finalUiIsVisible()) return false;
+    ownsUi = false;
+    cancelRelease();
+    return true;
+  }
+
+  function requestReload() {
+    if (reloadRequested) return;
+    reloadRequested = true;
+    global.location?.reload?.();
+  }
+
+  function scheduleReleaseCheck() {
+    clearReleaseTimer();
+    releaseTimer = global.setTimeout?.(() => {
+      releaseTimer = null;
+      if (isFasterModeEnabled()) {
+        cancelRelease();
+        applyFinalState();
+        return;
+      }
+      if (completeReleaseIfRendered()) return;
+      releaseInFlight = false;
+      if (releaseAttempts >= MAX_RELEASE_ATTEMPTS) {
+        requestReload();
+        return;
+      }
+      requestCurrentStateRender();
+    }, RELEASE_RETRY_MS) ?? null;
+  }
+
   function requestCurrentStateRender() {
-    if (rerenderQueued) return;
+    if (!ownsUi || isFasterModeEnabled() || rerenderQueued || releaseInFlight || reloadRequested) return;
     rerenderQueued = true;
     const run = () => {
       rerenderQueued = false;
       if (isFasterModeEnabled()) {
-        rerenderAttempts = 0;
+        cancelRelease();
         applyFinalState();
         return;
       }
+      if (completeReleaseIfRendered()) return;
 
       const refresh = $('refreshBtn');
-      if (typeof refresh?.click === 'function' && !refresh.disabled) {
-        ownsUi = false;
-        rerenderAttempts = 0;
-        refresh.click();
+      if (refresh?.disabled) {
+        scheduleReleaseCheck();
+        return;
+      }
+      if (typeof refresh?.click !== 'function') {
+        requestReload();
         return;
       }
 
-      if (refresh?.disabled && rerenderAttempts < 120) {
-        rerenderAttempts += 1;
-        global.setTimeout?.(requestCurrentStateRender, 50);
-        return;
-      }
-
-      ownsUi = false;
-      rerenderAttempts = 0;
-      global.location?.reload?.();
+      releaseAttempts += 1;
+      releaseInFlight = true;
+      refresh.click();
+      if (completeReleaseIfRendered()) return;
+      scheduleReleaseCheck();
     };
     if (typeof global.queueMicrotask === 'function') global.queueMicrotask(run);
     else global.setTimeout?.(run, 0);
@@ -79,9 +134,9 @@
     if (applying || !isFasterModeEnabled()) return false;
     applying = true;
     try {
+      cancelRelease();
       ownsUi = true;
-      rerenderAttempts = 0;
-      setText('overallTitle', 'Faster mode is on');
+      setText('overallTitle', FINAL_TITLE);
       setText('overallDetail', 'TaskPoints is using the faster database copy, while the working copy and backups remain in place.');
       setText('modeValue', 'Faster mode');
       setText('actionMessage', 'The short test is complete. No further setup action is needed.');
@@ -96,6 +151,7 @@
   function reconcileState() {
     if (isFasterModeEnabled()) return applyFinalState();
     if (!ownsUi) return false;
+    if (completeReleaseIfRendered()) return false;
     requestCurrentStateRender();
     return false;
   }
@@ -140,6 +196,11 @@
     isFasterModeEnabled,
     applyFinalState,
     reconcileState,
-    disconnect: () => observer?.disconnect?.()
+    ownsUi: () => ownsUi,
+    releaseInFlight: () => releaseInFlight,
+    disconnect: () => {
+      observer?.disconnect?.();
+      clearReleaseTimer();
+    }
   };
 })(typeof window !== 'undefined' ? window : globalThis);
