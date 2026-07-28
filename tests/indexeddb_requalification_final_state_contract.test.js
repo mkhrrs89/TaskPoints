@@ -29,7 +29,7 @@ function element(text = '', disabled = false, allowed = 'true') {
   };
 }
 
-function install(mode, gateStatus) {
+function install(mode, gateStatus, options = {}) {
   const elements = {
     overallTitle: element('Reading your saved copies…'),
     overallDetail: element('Nothing will switch or write while this page is opening.'),
@@ -37,7 +37,7 @@ function install(mode, gateStatus) {
     actionMessage: element('Reading all saved copies…'),
     startTestBtn: element('Start short test', true, 'false'),
     finishTestBtn: element('Finish test and turn on faster mode', true, 'false'),
-    refreshBtn: element('Refresh read-only checks')
+    refreshBtn: element('Refresh read-only checks', Boolean(options.refreshDisabled))
   };
   Object.entries(elements).forEach(([id, value]) => { value.id = id; });
 
@@ -47,11 +47,33 @@ function install(mode, gateStatus) {
     [MODE_KEY]: mode,
     [GATE_KEY]: JSON.stringify({ status: gateStatus })
   });
+  const timers = [];
+  let nextTimerId = 1;
   let refreshes = 0;
+  let reloads = 0;
 
-  elements.refreshBtn.click = () => {
-    if (elements.refreshBtn.disabled) return;
-    refreshes += 1;
+  function fakeSetTimeout(handler) {
+    const timer = { id: nextTimerId++, handler, cancelled: false };
+    timers.push(timer);
+    return timer.id;
+  }
+
+  function fakeClearTimeout(id) {
+    const timer = timers.find((entry) => entry.id === id);
+    if (timer) timer.cancelled = true;
+  }
+
+  function runNextTimer() {
+    while (timers.length) {
+      const timer = timers.shift();
+      if (timer.cancelled) continue;
+      timer.handler();
+      return true;
+    }
+    return false;
+  }
+
+  function renderCurrentState() {
     const currentMode = localStorage.getItem(MODE_KEY) || 'off';
     const currentGate = JSON.parse(localStorage.getItem(GATE_KEY) || '{}');
     const activeTest = currentMode === 'verify_primary_writes'
@@ -68,6 +90,14 @@ function install(mode, gateStatus) {
     elements.startTestBtn.dataset.allowed = activeTest ? 'false' : 'true';
     elements.finishTestBtn.disabled = !activeTest;
     elements.finishTestBtn.dataset.allowed = activeTest ? 'true' : 'false';
+  }
+
+  elements.refreshBtn.click = () => {
+    if (elements.refreshBtn.disabled) return;
+    refreshes += 1;
+    if (options.refreshFails) return;
+    if (options.asyncRefresh) fakeSetTimeout(renderCurrentState);
+    else renderCurrentState();
   };
 
   const document = {
@@ -79,6 +109,7 @@ function install(mode, gateStatus) {
   const context = {
     document,
     localStorage,
+    location: { reload() { reloads += 1; } },
     JSON,
     Object,
     Array,
@@ -88,17 +119,27 @@ function install(mode, gateStatus) {
     Error,
     console,
     queueMicrotask,
-    setTimeout,
+    setTimeout: fakeSetTimeout,
+    clearTimeout: fakeClearTimeout,
     addEventListener(type, handler) { windowListeners.set(type, handler); }
   };
   context.window = context;
   context.globalThis = context;
   vm.runInNewContext(SOURCE, context, { filename: 'indexeddb_requalification_final_state.js' });
-  return { context, elements, documentListeners, windowListeners, localStorage, getRefreshes: () => refreshes };
+  return {
+    context,
+    elements,
+    documentListeners,
+    windowListeners,
+    localStorage,
+    runNextTimer,
+    getRefreshes: () => refreshes,
+    getReloads: () => reloads
+  };
 }
 
-function settle(ms = 0) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function settle() {
+  return new Promise((resolve) => setImmediate(resolve));
 }
 
 test('final-state guard loads after the read-only loader', () => {
@@ -120,7 +161,7 @@ test('completed Faster Mode renders a final screen and disables both test action
 });
 
 test('ending the exact final state reruns the real read-only render instead of restoring the loading snapshot', async () => {
-  const { elements, localStorage, windowListeners, getRefreshes } = install('indexeddb_primary', 'fast_mode_enabled');
+  const { elements, context, localStorage, windowListeners, getRefreshes } = install('indexeddb_primary', 'fast_mode_enabled');
   localStorage.setItem(MODE_KEY, 'off');
   windowListeners.get('storage')({ key: MODE_KEY });
   await settle();
@@ -132,27 +173,76 @@ test('ending the exact final state reruns the real read-only render instead of r
   assert.equal(elements.startTestBtn.dataset.allowed, 'true');
   assert.equal(elements.finishTestBtn.disabled, true);
   assert.equal(elements.finishTestBtn.dataset.allowed, 'false');
+  assert.equal(context.TaskPointsRequalificationFinalState.ownsUi(), false);
 });
 
 test('ending final state waits for a busy Refresh button and rerenders when it becomes available', async () => {
-  const { elements, localStorage, windowListeners, getRefreshes } = install('indexeddb_primary', 'fast_mode_enabled');
-  elements.refreshBtn.disabled = true;
+  const { elements, context, localStorage, windowListeners, runNextTimer, getRefreshes } = install(
+    'indexeddb_primary',
+    'fast_mode_enabled',
+    { refreshDisabled: true }
+  );
   localStorage.setItem(MODE_KEY, 'off');
   windowListeners.get('storage')({ key: MODE_KEY });
-  await settle(10);
+  await settle();
 
   assert.equal(getRefreshes(), 0);
   assert.equal(elements.overallTitle.textContent, 'Faster mode is on');
-  assert.equal(elements.startTestBtn.disabled, true);
+  assert.equal(context.TaskPointsRequalificationFinalState.ownsUi(), true);
 
   elements.refreshBtn.disabled = false;
-  await settle(80);
+  runNextTimer();
+  await settle();
 
   assert.equal(getRefreshes(), 1);
   assert.equal(elements.overallTitle.textContent, 'Read-only checks passed');
   assert.equal(elements.modeValue.textContent, 'Safe mode');
   assert.equal(elements.startTestBtn.disabled, false);
-  assert.equal(elements.startTestBtn.dataset.allowed, 'true');
+  assert.equal(context.TaskPointsRequalificationFinalState.ownsUi(), false);
+});
+
+test('ownership remains until an asynchronous read-only render visibly replaces the final screen', async () => {
+  const { elements, context, localStorage, windowListeners, runNextTimer, getRefreshes } = install(
+    'indexeddb_primary',
+    'fast_mode_enabled',
+    { asyncRefresh: true }
+  );
+  localStorage.setItem(MODE_KEY, 'off');
+  windowListeners.get('storage')({ key: MODE_KEY });
+  await settle();
+
+  assert.equal(getRefreshes(), 1);
+  assert.equal(elements.overallTitle.textContent, 'Faster mode is on');
+  assert.equal(context.TaskPointsRequalificationFinalState.ownsUi(), true);
+  assert.equal(context.TaskPointsRequalificationFinalState.releaseInFlight(), true);
+
+  runNextTimer();
+  context.TaskPointsRequalificationFinalState.reconcileState();
+
+  assert.equal(elements.overallTitle.textContent, 'Read-only checks passed');
+  assert.equal(context.TaskPointsRequalificationFinalState.ownsUi(), false);
+  assert.equal(context.TaskPointsRequalificationFinalState.releaseInFlight(), false);
+});
+
+test('a failed asynchronous handoff retries and then reloads without releasing the stale final screen', async () => {
+  const { elements, context, localStorage, windowListeners, runNextTimer, getRefreshes, getReloads } = install(
+    'indexeddb_primary',
+    'fast_mode_enabled',
+    { refreshFails: true }
+  );
+  localStorage.setItem(MODE_KEY, 'off');
+  windowListeners.get('storage')({ key: MODE_KEY });
+  await settle();
+
+  for (let index = 0; index < 4; index += 1) {
+    runNextTimer();
+    await settle();
+  }
+
+  assert.equal(getRefreshes(), 3);
+  assert.equal(getReloads(), 1);
+  assert.equal(elements.overallTitle.textContent, 'Faster mode is on');
+  assert.equal(context.TaskPointsRequalificationFinalState.ownsUi(), true);
 });
 
 test('back-forward-cache restore also recomputes the current Off-mode setup state', async () => {
