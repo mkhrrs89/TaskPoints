@@ -18,6 +18,44 @@ class FakeButton {
   }
 }
 
+class FakeStorage {
+  constructor(rows = {}) { this.rows = new Map(Object.entries(rows).map(([key, value]) => [String(key), String(value)])); }
+  getItem(key) { return this.rows.has(String(key)) ? this.rows.get(String(key)) : null; }
+  setItem(key, value) { this.rows.set(String(key), String(value)); }
+}
+
+function installModeHarness() {
+  const localStorage = new FakeStorage({
+    taskpoints_phase4_storage_mode_v1: 'verify_primary_writes',
+    taskpoints_indexeddb_requalification_v1: JSON.stringify({ status: 'ready_for_fast_mode' })
+  });
+  const core = {
+    PHASE4_STORAGE_MODE_KEY: 'taskpoints_phase4_storage_mode_v1',
+    getPhase4StorageMode() { return localStorage.getItem(this.PHASE4_STORAGE_MODE_KEY) || 'off'; },
+    setPhase4StorageMode(mode) {
+      localStorage.setItem(this.PHASE4_STORAGE_MODE_KEY, String(mode || 'off'));
+      return String(mode || 'off');
+    }
+  };
+  const context = {
+    TaskPointsCore: core,
+    localStorage,
+    document: { getElementById: () => null },
+    Promise,
+    JSON,
+    Date,
+    Math,
+    String,
+    Boolean,
+    setTimeout,
+    clearTimeout
+  };
+  context.window = context;
+  context.globalThis = context;
+  vm.runInNewContext(guard, context, { filename: 'indexeddb_requalification_readonly_guard.js' });
+  return { core, localStorage };
+}
+
 test('initial checklist load cannot initialize any full storage module', () => {
   assert.doesNotMatch(page, /<script src="scoring_core\.js"/);
   assert.doesNotMatch(page, /<script src="phase4_cache_guard\.js"/);
@@ -54,6 +92,7 @@ test('an aborted Start or Finish handler immediately revokes every unused flush 
     TaskPointsCore: core,
     document: { getElementById: (id) => id === 'startTestBtn' ? startButton : finishButton },
     Promise,
+    JSON,
     Date,
     Math,
     String,
@@ -76,4 +115,19 @@ test('an aborted Start or Finish handler immediately revokes every unused flush 
   assert.equal(core.getIndexedDbRequalificationReadOnlyStatus().explicitCallsRemaining, 0);
   assert.equal(await core.flushPhase5CVerifiedSecondaryWrites(), false);
   assert.equal(flushes, 1);
+});
+
+test('rollback preserves an explicit Off selected after activation succeeded', () => {
+  const harness = installModeHarness();
+  assert.equal(harness.core.setPhase4StorageMode('indexeddb_primary'), 'indexeddb_primary');
+  harness.localStorage.setItem('taskpoints_phase4_storage_mode_v1', 'off');
+  assert.equal(harness.core.setPhase4StorageMode('verify_primary_writes'), 'off');
+  assert.equal(harness.localStorage.getItem('taskpoints_phase4_storage_mode_v1'), 'off');
+});
+
+test('rollback still returns to test mode after an ordinary activation failure', () => {
+  const harness = installModeHarness();
+  assert.equal(harness.core.setPhase4StorageMode('indexeddb_primary'), 'indexeddb_primary');
+  assert.equal(harness.core.setPhase4StorageMode('verify_primary_writes'), 'verify_primary_writes');
+  assert.equal(harness.localStorage.getItem('taskpoints_phase4_storage_mode_v1'), 'verify_primary_writes');
 });
