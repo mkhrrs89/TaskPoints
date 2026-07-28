@@ -246,7 +246,8 @@
     'verified_secondary_restore.html',
     'emergency_recovery.html',
     'dual_write_status.html',
-    'phase3_read_status.html'
+    'phase3_read_status.html',
+    'settings.html'
   ]);
 
   const parse = (raw, fallback = null) => { try { return JSON.parse(raw); } catch (_) { return fallback; } };
