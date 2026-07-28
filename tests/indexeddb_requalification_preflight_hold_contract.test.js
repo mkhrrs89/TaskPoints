@@ -19,8 +19,10 @@ test('Recovery Hold is captured before the read-only scan or full runtime can lo
 
 test('runtime removal compares against the preflight hold rather than the later runtime value', () => {
   assert.match(guard, /const preflight = global\.__TASKPOINTS_REQUALIFICATION_PREFLIGHT_HOLD_CAPTURE__/);
-  assert.match(guard, /preflight\?\.available === true/);
-  assert.match(guard, /const initialHoldRaw = expectedHoldRaw/);
+  assert.match(guard, /preflight\?\.available !== true/);
+  assert.match(guard, /core\.__indexedDbRequalificationGuardInstalled = false/);
+  assert.match(guard, /core\.setPhase4StorageMode\?\.\('off'\)/);
+  assert.match(guard, /const initialHoldRaw = preflight\.raw \?\? null/);
   assert.match(guard, /current !== initialHoldRaw/);
   assert.match(guard, /runtimeLoadHoldChanged/);
 });
