@@ -7,6 +7,7 @@ const vm = require('node:vm');
 const READ_PATH = path.join(__dirname, '..', 'phase4_primary_read_path.js');
 const CODEC_PATH = path.join(__dirname, '..', 'phase3_session_codec.js');
 const STATUS_PATH = path.join(__dirname, '..', 'phase4_storage_status.html');
+const REQUALIFICATION_PATH = path.join(__dirname, '..', 'indexeddb_requalification.js');
 const STORAGE_KEY = 'taskpoints_v1';
 const JOURNAL_KEY = 'taskpoints_pending_habit_deltas_v1';
 const MODE_KEY = 'taskpoints_phase4_storage_mode_v1';
@@ -155,11 +156,15 @@ test('the shared session codec manages the Phase 4 cache key', () => {
   assert.match(source, /MANAGED_SESSION_CACHE_KEYS/);
 });
 
-test('Phase 4 Refresh and mode selection explicitly warm a missing primary cache', () => {
+test('Phase 4 Refresh warms a missing cache and faster-mode selection routes through the guarded setup', () => {
   const html = fs.readFileSync(STATUS_PATH, 'utf8');
+  const setup = fs.readFileSync(REQUALIFICATION_PATH, 'utf8');
   assert.match(html, /warmPhase4PrimaryCache/);
   assert.match(html, /primaryNeedsWarmup/);
-  assert.match(html, /indexeddb_primary_mode_enabled/);
+  assert.match(html, /window\.location\.href = 'indexeddb_requalification\.html'/);
+  assert.doesNotMatch(html, /indexeddb_primary_mode_enabled/);
+  assert.match(setup, /warmPhase4PrimaryCache/);
+  assert.match(setup, /indexeddb_requalification_finish/);
   assert.match(html, /Checking…/);
   assert.match(html, /Verified ✓/);
 });
