@@ -54,6 +54,7 @@
     const gate = parse(get(GATE_KEY), {}) || {};
     const status = String(gate.status || '');
     const currentHash = rawHash(raw);
+    const configuredMode = get(MODE_KEY) || 'off';
 
     if (requested === 'verify_primary_writes') {
       const allowedStatuses = new Set(['authorizing_test_mode', 'awaiting_smoke_test', 'ready_for_fast_mode', 'fast_mode_enabled']);
@@ -65,7 +66,10 @@
     }
 
     if (requested === 'indexeddb_primary') {
-      if (status === 'fast_mode_enabled') return { allowed: true, reason: '', gate, currentHash };
+      if (status === 'fast_mode_enabled') {
+        if (configuredMode === 'indexeddb_primary') return { allowed: true, reason: '', gate, currentHash };
+        return { allowed: false, reason: 'fresh_reauthorization_required' };
+      }
       if (status !== 'ready_for_fast_mode') return { allowed: false, reason: 'short_test_not_finished' };
       if (gate.lastVerifiedRawHash !== currentHash) return { allowed: false, reason: 'current_save_changed_after_final_check' };
       return { allowed: true, reason: '', gate, currentHash };
