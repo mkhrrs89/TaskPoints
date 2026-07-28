@@ -6,6 +6,8 @@
   if (!core || !document || core.__indexedDbRequalificationReadOnlyGuardInstalled) return;
   core.__indexedDbRequalificationReadOnlyGuardInstalled = true;
 
+  const MODE_KEY = core.PHASE4_STORAGE_MODE_KEY || 'taskpoints_phase4_storage_mode_v1';
+  const GATE_KEY = 'taskpoints_indexeddb_requalification_v1';
   const flushNames = [
     'flushPhase5CVerifiedSecondaryWrites',
     'flushPhase4PrimaryWrites',
@@ -16,6 +18,43 @@
   let permittedCalls = 0;
   let activeActionToken = '';
   let permissionTimer = null;
+  let activationWasAccepted = false;
+
+  const get = (key) => { try { return global.localStorage?.getItem?.(key) ?? null; } catch (_) { return null; } };
+  const parse = (raw, fallback = null) => { try { return JSON.parse(raw); } catch (_) { return fallback; } };
+
+  function configuredMode() {
+    try { return core.getPhase4StorageMode?.() || get(MODE_KEY) || 'off'; }
+    catch (_) { return get(MODE_KEY) || 'off'; }
+  }
+
+  const originalSetMode = typeof core.setPhase4StorageMode === 'function'
+    ? core.setPhase4StorageMode.bind(core)
+    : null;
+
+  if (originalSetMode) {
+    core.setPhase4StorageMode = function preserveExplicitOffDuringActivationRollback(mode) {
+      const requested = String(mode || 'off');
+      const beforeMode = configuredMode();
+      const gateStatus = String((parse(get(GATE_KEY), {}) || {}).status || '');
+
+      if (requested === 'verify_primary_writes'
+        && activationWasAccepted
+        && beforeMode === 'off'
+        && gateStatus === 'ready_for_fast_mode') {
+        activationWasAccepted = false;
+        return 'off';
+      }
+
+      const result = originalSetMode(requested);
+      if (requested === 'indexeddb_primary') {
+        activationWasAccepted = result === 'indexeddb_primary';
+      } else if (requested === 'off' || (requested === 'verify_primary_writes' && result === 'verify_primary_writes')) {
+        activationWasAccepted = false;
+      }
+      return result;
+    };
+  }
 
   function revokeExplicitAction(token = '') {
     if (token && token !== activeActionToken) return false;
@@ -92,6 +131,7 @@
     protectedFlushes: [...originals.keys()],
     scopedActionListeners: [...scopedButtons],
     actionActive: Boolean(activeActionToken),
-    explicitCallsRemaining: permittedCalls
+    explicitCallsRemaining: permittedCalls,
+    activationRollbackProtected: Boolean(originalSetMode)
   });
 })(typeof window !== 'undefined' ? window : globalThis);
