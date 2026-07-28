@@ -9,12 +9,36 @@ function loadWorker() {
     .replace(/^export default/, 'module.exports =');
   const module = { exports: {} };
   class MockHTMLRewriter {
-    on(selector, handler) { this.selector = selector; this.handler = handler; return this; }
+    constructor() {
+      this.handlers = [];
+    }
+
+    on(selector, handler) {
+      this.handlers.push({ selector, handler });
+      return this;
+    }
+
     async transform(response) {
-      const original = await response.text();
-      let appended = '';
-      this.handler.element({ append(html) { appended += html; } });
-      return new Response(original.replace('</section>', `${appended}</section>`), {
+      let output = await response.text();
+      for (const { selector, handler } of this.handlers) {
+        let marker = null;
+        let closingTag = null;
+        if (selector === 'section[aria-labelledby="shadowMigrationTitle"]') {
+          marker = '<section aria-labelledby="shadowMigrationTitle"';
+          closingTag = '</section>';
+        } else if (selector === 'details#storageHealthSection') {
+          marker = '<details id="storageHealthSection"';
+          closingTag = '</details>';
+        }
+        const start = marker ? output.indexOf(marker) : -1;
+        if (start < 0) continue;
+        const close = output.indexOf(closingTag, start);
+        if (close < 0) continue;
+        let appended = '';
+        handler.element({ append(html) { appended += html; } });
+        output = `${output.slice(0, close)}${appended}${output.slice(close)}`;
+      }
+      return new Response(output, {
         status: response.status,
         headers: response.headers
       });
@@ -40,7 +64,7 @@ function createEnv(options = {}) {
     '/phase2_dual_write.js': 'PHASE2_DUAL',
     '/phase2_reset_hook.js': 'PHASE2_RESET',
     '/phase3_read_path.js': 'PHASE3_READ',
-    '/settings.html': '<html><section aria-labelledby="shadowMigrationTitle">SETTINGS</section></html>',
+    '/settings.html': '<html><section aria-labelledby="shadowMigrationTitle">SETTINGS</section><details id="storageHealthSection">HEALTH</details></html>',
     '/other.js': 'OTHER'
   };
   return {
@@ -146,7 +170,7 @@ test('an unreadable required Phase 2 body returns the untouched core asset', asy
   assert.equal(response.headers.get('x-taskpoints-phase'), null);
 });
 
-test('Settings receives both diagnostics links through a fresh rewritten 200 response', async () => {
+test('Settings receives diagnostics links and the Faster Storage Setup button through a fresh rewritten 200 response', async () => {
   const worker = loadWorker();
   const { env, calls } = createEnv();
   const response = await worker.fetch(new Request('https://example.test/settings.html', {
@@ -155,6 +179,8 @@ test('Settings receives both diagnostics links through a fresh rewritten 200 res
   const body = await response.text();
   assert.match(body, /dual_write_status\.html/);
   assert.match(body, /phase3_read_status\.html/);
+  assert.match(body, /indexeddb_requalification\.html/);
+  assert.match(body, /Faster Storage Setup/);
   assert.equal(response.status, 200);
   assert.equal(response.headers.get('cache-control'), 'no-cache');
   assert.equal(response.headers.get('etag'), null);

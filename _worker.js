@@ -88,6 +88,14 @@ export default {
             );
           }
         })
+        .on('details#storageHealthSection', {
+          element(element) {
+            element.append(
+              '<div class="flex flex-wrap items-center gap-2 pt-3"><a href="indexeddb_requalification.html" class="btn btn-teal btn-toolbar nav-btn">Faster Storage Setup</a></div>',
+              { html: true }
+            );
+          }
+        })
         .transform(freshSettingsResponse);
     }
 
