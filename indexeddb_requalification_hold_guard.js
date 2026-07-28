@@ -7,8 +7,10 @@
 
   const HOLD_KEY = 'taskpoints_emergency_recovery_hold_v1';
   const MODE_KEY = core.PHASE4_STORAGE_MODE_KEY || 'taskpoints_phase4_storage_mode_v1';
-  let initialHoldRaw = null;
-  try { initialHoldRaw = storage.getItem(HOLD_KEY); } catch (_) { initialHoldRaw = null; }
+  const preflight = global.__TASKPOINTS_REQUALIFICATION_PREFLIGHT_HOLD_CAPTURE__ || null;
+  let runtimeLoadHoldRaw = null;
+  try { runtimeLoadHoldRaw = storage.getItem(HOLD_KEY); } catch (_) { runtimeLoadHoldRaw = null; }
+  const expectedHoldRaw = preflight?.available === true ? (preflight.raw ?? null) : runtimeLoadHoldRaw;
 
   function currentHold() {
     try { return storage.getItem(HOLD_KEY); } catch (_) { return null; }
@@ -17,17 +19,17 @@
   function protectRemoval(key) {
     if (String(key) !== HOLD_KEY) return;
     const current = currentHold();
-    if (current != null && current !== initialHoldRaw) {
-      const error = new Error('Recovery protection changed while the faster-storage test was starting.');
+    if (current !== expectedHoldRaw) {
+      const error = new Error('Recovery protection changed while the faster-storage test was loading.');
       error.code = 'TASKPOINTS_RECOVERY_HOLD_CHANGED';
       throw error;
     }
   }
 
   function protectRestoration(key, value) {
-    if (String(key) !== HOLD_KEY || initialHoldRaw == null || String(value) !== initialHoldRaw) return;
+    if (String(key) !== HOLD_KEY || expectedHoldRaw == null || String(value) !== expectedHoldRaw) return;
     const current = currentHold();
-    if (current != null && current !== initialHoldRaw) {
+    if (current != null && current !== expectedHoldRaw) {
       const error = new Error('A newer recovery warning is active and cannot be replaced.');
       error.code = 'TASKPOINTS_NEWER_RECOVERY_HOLD_ACTIVE';
       throw error;
@@ -65,8 +67,10 @@
   core.__indexedDbRecoveryHoldGuardInstalled = true;
   core.getIndexedDbRecoveryHoldGuardStatus = () => ({
     installed: true,
-    initialHoldPresent: initialHoldRaw != null,
-    currentHoldChanged: currentHold() !== initialHoldRaw
+    preflightCaptureAvailable: preflight?.available === true,
+    expectedHoldPresent: expectedHoldRaw != null,
+    runtimeLoadHoldChanged: runtimeLoadHoldRaw !== expectedHoldRaw,
+    currentHoldChanged: currentHold() !== expectedHoldRaw
   });
 
   global.addEventListener?.('storage', (event) => {
