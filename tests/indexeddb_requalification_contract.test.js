@@ -7,6 +7,7 @@ const vm = require('node:vm');
 const ROOT = path.join(__dirname, '..');
 const guardSource = fs.readFileSync(path.join(ROOT, 'indexeddb_requalification_guard.js'), 'utf8');
 const runtimeSource = fs.readFileSync(path.join(ROOT, 'indexeddb_requalification.js'), 'utf8');
+const loaderSource = fs.readFileSync(path.join(ROOT, 'indexeddb_requalification_loader.js'), 'utf8');
 const page = fs.readFileSync(path.join(ROOT, 'indexeddb_requalification.html'), 'utf8');
 const statusPage = fs.readFileSync(path.join(ROOT, 'phase4_storage_status.html'), 'utf8');
 const alwaysLoadedGuard = fs.readFileSync(path.join(ROOT, 'phase4_cache_guard.js'), 'utf8');
@@ -80,17 +81,26 @@ test('short test may survive an expected edit and enabled fast mode may survive 
   assert.equal(harness.core.setPhase4StorageMode('indexeddb_primary'), 'indexeddb_primary');
 });
 
-test('setup page uses the two-step plain-language flow and restores the safety hold after a failed start', () => {
+test('setup page stays read-only until Start or Finish is deliberately pressed', () => {
   assert.doesNotThrow(() => new vm.Script(guardSource));
   assert.doesNotThrow(() => new vm.Script(runtimeSource));
+  assert.doesNotThrow(() => new vm.Script(loaderSource));
   assert.match(page, /Faster Storage Setup/);
   assert.match(page, /Start short test/);
   assert.match(page, /Finish test and turn on faster mode/);
   assert.match(page, /current working copy/);
   assert.match(page, /player photos/);
-  assert.match(page, /indexeddb_requalification_guard\.js/);
-  assert.ok(page.indexOf('indexeddb_requalification_hold_guard.js') < page.indexOf('phase4_cache_guard.js'));
-  assert.ok(page.indexOf('phase4_cache_guard.js') < page.indexOf('indexeddb_requalification.js'));
+  assert.match(page, /indexeddb_requalification_loader\.js/);
+  assert.doesNotMatch(page, /<script src="scoring_core\.js"/);
+  assert.doesNotMatch(page, /<script src="phase4_cache_guard\.js"/);
+  assert.doesNotMatch(page, /<script src="indexeddb_requalification\.js"/);
+  assert.match(loaderSource, /const RUNTIME_SCRIPTS = \[/);
+  assert.match(loaderSource, /'scoring_core\.js'/);
+  assert.match(loaderSource, /'indexeddb_requalification_readonly_guard\.js'/);
+  assert.match(loaderSource, /async function runExplicitAction\(buttonId\)/);
+  assert.match(loaderSource, /event\.stopImmediatePropagation\(\)/);
+  assert.match(loaderSource, /await loadRuntime\(\)/);
+  assert.match(loaderSource, /allowedSyntheticButton = buttonId/);
   assert.match(runtimeSource, /status: 'authorizing_test_mode'/);
   assert.match(runtimeSource, /remove\(HOLD_KEY\)/);
   assert.match(runtimeSource, /setPhase4StorageMode\?\.\('verify_primary_writes'\)/);
@@ -99,6 +109,15 @@ test('setup page uses the two-step plain-language flow and restores the safety h
   assert.match(runtimeSource, /status: 'ready_for_fast_mode'/);
   assert.match(runtimeSource, /setPhase4StorageMode\?\.\('indexeddb_primary'\)/);
   assert.match(runtimeSource, /status: 'fast_mode_enabled'/);
+});
+
+test('the read-only loader validates the emergency vault fingerprint and stored totals', () => {
+  assert.match(loaderSource, /const calculatedHash = api\.rawHash\(record\.raw\)/);
+  assert.match(loaderSource, /record\.rawHash !== calculatedHash/);
+  assert.match(loaderSource, /!record\.counts \|\| !countsMatch\(counts, record\.counts\)/);
+  assert.match(loaderSource, /counts\.majorTotal < 30/);
+  assert.match(loaderSource, /if \(!report\?\.vault\?\.ready\)/);
+  assert.match(loaderSource, /The action was stopped because the emergency backup/);
 });
 
 test('the faster-mode guard is included in the always-loaded Phase 4 bundle', () => {
