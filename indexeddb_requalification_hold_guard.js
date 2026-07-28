@@ -8,10 +8,17 @@
   const HOLD_KEY = 'taskpoints_emergency_recovery_hold_v1';
   const MODE_KEY = core.PHASE4_STORAGE_MODE_KEY || 'taskpoints_phase4_storage_mode_v1';
   const preflight = global.__TASKPOINTS_REQUALIFICATION_PREFLIGHT_HOLD_CAPTURE__ || null;
+  if (preflight?.available !== true) {
+    core.__indexedDbRequalificationGuardInstalled = false;
+    try { core.setPhase4StorageMode?.('off'); } catch (_) {
+      try { storage.setItem(MODE_KEY, 'off'); } catch (_) {}
+    }
+    return;
+  }
+
   let runtimeLoadHoldRaw = null;
   try { runtimeLoadHoldRaw = storage.getItem(HOLD_KEY); } catch (_) { runtimeLoadHoldRaw = null; }
-  const expectedHoldRaw = preflight?.available === true ? (preflight.raw ?? null) : runtimeLoadHoldRaw;
-  const initialHoldRaw = expectedHoldRaw;
+  const initialHoldRaw = preflight.raw ?? null;
 
   function currentHold() {
     try { return storage.getItem(HOLD_KEY); } catch (_) { return null; }
@@ -61,14 +68,17 @@
   let installed = installOn(storage);
   if (!installed) installed = installOn(global.Storage?.prototype);
   if (!installed) {
-    try { storage.setItem(MODE_KEY, 'off'); } catch (_) {}
+    core.__indexedDbRequalificationGuardInstalled = false;
+    try { core.setPhase4StorageMode?.('off'); } catch (_) {
+      try { storage.setItem(MODE_KEY, 'off'); } catch (_) {}
+    }
     return;
   }
 
   core.__indexedDbRecoveryHoldGuardInstalled = true;
   core.getIndexedDbRecoveryHoldGuardStatus = () => ({
     installed: true,
-    preflightCaptureAvailable: preflight?.available === true,
+    preflightCaptureAvailable: true,
     expectedHoldPresent: initialHoldRaw != null,
     runtimeLoadHoldChanged: runtimeLoadHoldRaw !== initialHoldRaw,
     currentHoldChanged: currentHold() !== initialHoldRaw
