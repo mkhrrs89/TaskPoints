@@ -71,6 +71,7 @@
         return { allowed: false, reason: 'fresh_reauthorization_required' };
       }
       if (status !== 'ready_for_fast_mode') return { allowed: false, reason: 'short_test_not_finished' };
+      if (configuredMode !== 'verify_primary_writes') return { allowed: false, reason: 'storage_mode_changed_before_enable' };
       if (gate.lastVerifiedRawHash !== currentHash) return { allowed: false, reason: 'current_save_changed_after_final_check' };
       return { allowed: true, reason: '', gate, currentHash };
     }
