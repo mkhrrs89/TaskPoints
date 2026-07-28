@@ -9,9 +9,9 @@
   const document = global.document;
   const storage = global.localStorage;
   let applying = false;
-  let observer = null;
   let ownsUi = false;
-  let previousUi = null;
+  let observer = null;
+  let rerenderQueued = false;
 
   const get = (key) => {
     try { return storage?.getItem?.(key) ?? null; }
@@ -41,25 +41,23 @@
     if (button.dataset.allowed !== 'false') button.dataset.allowed = 'false';
   }
 
-  function captureUi() {
-    if (previousUi) return;
-    previousUi = {
-      overallTitle: $('overallTitle')?.textContent ?? '',
-      overallDetail: $('overallDetail')?.textContent ?? '',
-      modeValue: $('modeValue')?.textContent ?? '',
-      actionMessage: $('actionMessage')?.textContent ?? '',
-      startDisabled: Boolean($('startTestBtn')?.disabled),
-      startAllowed: $('startTestBtn')?.dataset?.allowed ?? 'false',
-      finishDisabled: Boolean($('finishTestBtn')?.disabled),
-      finishAllowed: $('finishTestBtn')?.dataset?.allowed ?? 'false'
+  function requestCurrentStateRender() {
+    if (rerenderQueued) return;
+    rerenderQueued = true;
+    const run = () => {
+      rerenderQueued = false;
+      const refresh = $('refreshBtn');
+      if (typeof refresh?.click === 'function') refresh.click();
+      else global.location?.reload?.();
     };
+    if (typeof global.queueMicrotask === 'function') global.queueMicrotask(run);
+    else global.setTimeout?.(run, 0);
   }
 
   function applyFinalState() {
     if (applying || !isFasterModeEnabled()) return false;
     applying = true;
     try {
-      captureUi();
       ownsUi = true;
       setText('overallTitle', 'Faster mode is on');
       setText('overallDetail', 'TaskPoints is using the faster database copy, while the working copy and backups remain in place.');
@@ -73,39 +71,17 @@
     }
   }
 
-  function releaseFinalState() {
-    if (applying || !ownsUi || !previousUi || isFasterModeEnabled()) return false;
-    applying = true;
-    try {
-      setText('overallTitle', previousUi.overallTitle);
-      setText('overallDetail', previousUi.overallDetail);
-      setText('modeValue', previousUi.modeValue);
-      setText('actionMessage', previousUi.actionMessage);
-      const start = $('startTestBtn');
-      const finish = $('finishTestBtn');
-      if (start) {
-        start.disabled = previousUi.startDisabled;
-        start.dataset.allowed = previousUi.startAllowed;
-      }
-      if (finish) {
-        finish.disabled = previousUi.finishDisabled;
-        finish.dataset.allowed = previousUi.finishAllowed;
-      }
-      ownsUi = false;
-      previousUi = null;
-      return true;
-    } finally {
-      applying = false;
-    }
+  function reconcileState() {
+    if (isFasterModeEnabled()) return applyFinalState();
+    if (!ownsUi) return false;
+    ownsUi = false;
+    requestCurrentStateRender();
+    return false;
   }
 
-  function syncState() {
-    return isFasterModeEnabled() ? applyFinalState() : releaseFinalState();
-  }
-
-  function scheduleSync() {
-    if (typeof global.queueMicrotask === 'function') global.queueMicrotask(syncState);
-    else global.setTimeout?.(syncState, 0);
+  function scheduleReconcile() {
+    if (typeof global.queueMicrotask === 'function') global.queueMicrotask(reconcileState);
+    else global.setTimeout?.(reconcileState, 0);
   }
 
   document?.addEventListener?.('click', (event) => {
@@ -118,9 +94,9 @@
   }, true);
 
   function startWatching() {
-    syncState();
+    reconcileState();
     if (typeof global.MutationObserver === 'function' && document?.documentElement) {
-      observer = new global.MutationObserver(scheduleSync);
+      observer = new global.MutationObserver(scheduleReconcile);
       observer.observe(document.documentElement, {
         subtree: true,
         childList: true,
@@ -135,15 +111,14 @@
   else startWatching();
 
   global.addEventListener?.('storage', (event) => {
-    if (!event || event.key === MODE_KEY || event.key === GATE_KEY) scheduleSync();
+    if (!event || event.key === MODE_KEY || event.key === GATE_KEY) scheduleReconcile();
   });
-  global.addEventListener?.('pageshow', scheduleSync);
+  global.addEventListener?.('pageshow', scheduleReconcile);
 
   global.TaskPointsRequalificationFinalState = {
     isFasterModeEnabled,
     applyFinalState,
-    releaseFinalState,
-    syncState,
+    reconcileState,
     disconnect: () => observer?.disconnect?.()
   };
 })(typeof window !== 'undefined' ? window : globalThis);
