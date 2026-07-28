@@ -22,6 +22,7 @@
     'indexeddb_requalification_hold_guard.js',
     'indexeddb_requalification_session_compat.js',
     'indexeddb_requalification_guard.js',
+    'indexeddb_requalification_vault_gate.js',
     'indexeddb_requalification_readonly_guard.js',
     'indexeddb_requalification.js'
   ];
