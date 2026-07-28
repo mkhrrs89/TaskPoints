@@ -10,13 +10,17 @@ function loadWorker() {
     .replace(/^export default/, 'module.exports =');
   const module = { exports: {} };
   class MockHTMLRewriter {
+    constructor() {
+      this.handlers = [];
+    }
     on(selector, handler) {
-      this.selector = selector;
-      this.handler = handler;
+      this.handlers.push({ selector, handler });
       return this;
     }
     transform(response) {
-      this.handler?.element?.({ append(html) { appended.push(html); } });
+      this.handlers.forEach(({ handler }) => {
+        handler?.element?.({ append(html) { appended.push(html); } });
+      });
       return response;
     }
   }
@@ -41,7 +45,7 @@ function createEnv(options = {}) {
   const calls = [];
   const bodies = {
     '/scoring_core.js': 'CORE',
-    '/settings.html': '<section aria-labelledby="shadowMigrationTitle"></section>',
+    '/settings.html': '<section aria-labelledby="shadowMigrationTitle"></section><details id="storageHealthSection"></details>',
     '/phase2_dual_write.js': 'P2D',
     '/phase2_reset_hook.js': 'P2R',
     '/phase3_read_path.js': 'P3',
@@ -172,6 +176,15 @@ test('Settings gains a Phase 4 status/control entry without replacing existing m
   assert.match(html, /phase3_read_status\.html/);
   assert.match(html, /phase4_storage_status\.html/);
   assert.match(html, /Phase 4/i);
+});
+
+test('Settings exposes the Faster Storage Setup inside Storage Health', async () => {
+  const { worker, appended } = loadWorker();
+  const setup = createEnv();
+  await worker.fetch(new Request('https://example.test/settings.html'), setup.env);
+  const html = appended.join('\n');
+  assert.match(html, /indexeddb_requalification\.html/);
+  assert.match(html, /Faster Storage Setup/);
 });
 
 test('unrelated routes bypass all migration module fetching', async () => {
