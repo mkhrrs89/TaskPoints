@@ -64,6 +64,7 @@ test('guard blocks faster modes until the safety-check record allows them', () =
   harness.localStorage.setItem('taskpoints_indexeddb_requalification_v1', JSON.stringify({
     status: 'ready_for_fast_mode', lastVerifiedRawHash: hash(raw)
   }));
+  assert.equal(harness.core.setPhase4StorageMode('verify_primary_writes'), 'verify_primary_writes');
   assert.equal(harness.core.setPhase4StorageMode('indexeddb_primary'), 'indexeddb_primary');
 });
 
