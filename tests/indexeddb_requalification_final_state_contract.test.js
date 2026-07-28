@@ -8,6 +8,9 @@ const ROOT = path.join(__dirname, '..');
 const SOURCE = fs.readFileSync(path.join(ROOT, 'indexeddb_requalification_final_state.js'), 'utf8');
 const PAGE = fs.readFileSync(path.join(ROOT, 'indexeddb_requalification.html'), 'utf8');
 
+const MODE_KEY = 'taskpoints_phase4_storage_mode_v1';
+const GATE_KEY = 'taskpoints_indexeddb_requalification_v1';
+
 class FakeStorage {
   constructor(rows = {}) { this.rows = new Map(Object.entries(rows).map(([key, value]) => [String(key), String(value)])); }
   getItem(key) { return this.rows.has(String(key)) ? this.rows.get(String(key)) : null; }
@@ -15,38 +18,63 @@ class FakeStorage {
   removeItem(key) { this.rows.delete(String(key)); }
 }
 
-function element(text = '') {
+function element(text = '', disabled = false, allowed = 'true') {
   return {
     textContent: text,
-    disabled: false,
-    dataset: { allowed: 'true' },
+    disabled,
+    dataset: { allowed },
     id: '',
-    closest() { return this; }
+    closest() { return this; },
+    click() {}
   };
 }
 
 function install(mode, gateStatus) {
   const elements = {
-    overallTitle: element('Read-only checks passed'),
-    overallDetail: element('Nothing has been written or switched. Press Start to load the full two-step safety test.'),
-    modeValue: element(mode === 'indexeddb_primary' ? 'Faster mode' : 'Safe mode'),
-    actionMessage: element('This page has only read your saved copies so far.'),
-    startTestBtn: element('Start short test'),
-    finishTestBtn: element('Finish test and turn on faster mode')
+    overallTitle: element('Reading your saved copies…'),
+    overallDetail: element('Nothing will switch or write while this page is opening.'),
+    modeValue: element('Checking'),
+    actionMessage: element('Reading all saved copies…'),
+    startTestBtn: element('Start short test', true, 'false'),
+    finishTestBtn: element('Finish test and turn on faster mode', true, 'false'),
+    refreshBtn: element('Refresh read-only checks')
   };
   Object.entries(elements).forEach(([id, value]) => { value.id = id; });
-  const listeners = new Map();
+
+  const documentListeners = new Map();
   const windowListeners = new Map();
+  const localStorage = new FakeStorage({
+    [MODE_KEY]: mode,
+    [GATE_KEY]: JSON.stringify({ status: gateStatus })
+  });
+  let refreshes = 0;
+
+  elements.refreshBtn.click = () => {
+    refreshes += 1;
+    const currentMode = localStorage.getItem(MODE_KEY) || 'off';
+    const currentGate = JSON.parse(localStorage.getItem(GATE_KEY) || '{}');
+    const activeTest = currentMode === 'verify_primary_writes'
+      && ['awaiting_smoke_test', 'ready_for_fast_mode'].includes(currentGate.status);
+    elements.modeValue.textContent = currentMode === 'indexeddb_primary'
+      ? 'Faster mode'
+      : (currentMode === 'verify_primary_writes' ? 'Short test mode' : 'Safe mode');
+    elements.overallTitle.textContent = activeTest ? 'Ready to check your edit and reopen' : 'Read-only checks passed';
+    elements.overallDetail.textContent = activeTest
+      ? 'Press Finish when you have made the harmless edit and fully closed and reopened the normal TaskPoints app.'
+      : 'Nothing has been written or switched. Press Start to load the full two-step safety test.';
+    elements.actionMessage.textContent = 'This page has only read your saved copies so far.';
+    elements.startTestBtn.disabled = activeTest;
+    elements.startTestBtn.dataset.allowed = activeTest ? 'false' : 'true';
+    elements.finishTestBtn.disabled = !activeTest;
+    elements.finishTestBtn.dataset.allowed = activeTest ? 'true' : 'false';
+  };
+
   const document = {
     readyState: 'complete',
     documentElement: {},
     getElementById: (id) => elements[id] || null,
-    addEventListener(type, handler) { listeners.set(type, handler); }
+    addEventListener(type, handler) { documentListeners.set(type, handler); }
   };
-  const localStorage = new FakeStorage({
-    taskpoints_phase4_storage_mode_v1: mode,
-    taskpoints_indexeddb_requalification_v1: JSON.stringify({ status: gateStatus })
-  });
   const context = {
     document,
     localStorage,
@@ -65,7 +93,11 @@ function install(mode, gateStatus) {
   context.window = context;
   context.globalThis = context;
   vm.runInNewContext(SOURCE, context, { filename: 'indexeddb_requalification_final_state.js' });
-  return { context, elements, listeners, windowListeners, localStorage };
+  return { context, elements, documentListeners, windowListeners, localStorage, getRefreshes: () => refreshes };
+}
+
+function settle() {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 test('final-state guard loads after the read-only loader', () => {
@@ -73,7 +105,7 @@ test('final-state guard loads after the read-only loader', () => {
   assert.doesNotThrow(() => new vm.Script(SOURCE));
 });
 
-test('completed Faster Mode renders a final screen and disables both test actions', () => {
+test('completed Faster Mode renders a final screen and disables both test actions from the initial loading UI', () => {
   const { elements, context } = install('indexeddb_primary', 'fast_mode_enabled');
   assert.equal(elements.overallTitle.textContent, 'Faster mode is on');
   assert.match(elements.overallDetail.textContent, /working copy and backups remain in place/i);
@@ -86,17 +118,44 @@ test('completed Faster Mode renders a final screen and disables both test action
   assert.equal(context.TaskPointsRequalificationFinalState.isFasterModeEnabled(), true);
 });
 
-test('guard does not interfere with a short test that is still active', () => {
-  const { elements, context } = install('verify_primary_writes', 'awaiting_smoke_test');
+test('ending the exact final state reruns the real read-only render instead of restoring the loading snapshot', async () => {
+  const { elements, localStorage, windowListeners, getRefreshes } = install('indexeddb_primary', 'fast_mode_enabled');
+  localStorage.setItem(MODE_KEY, 'off');
+  windowListeners.get('storage')({ key: MODE_KEY });
+  await settle();
+
+  assert.equal(getRefreshes(), 1);
+  assert.equal(elements.overallTitle.textContent, 'Read-only checks passed');
+  assert.equal(elements.modeValue.textContent, 'Safe mode');
+  assert.equal(elements.startTestBtn.disabled, false);
+  assert.equal(elements.startTestBtn.dataset.allowed, 'true');
+  assert.equal(elements.finishTestBtn.disabled, true);
+  assert.equal(elements.finishTestBtn.dataset.allowed, 'false');
+});
+
+test('back-forward-cache restore also recomputes the current Off-mode setup state', async () => {
+  const { elements, localStorage, windowListeners, getRefreshes } = install('indexeddb_primary', 'fast_mode_enabled');
+  localStorage.setItem(MODE_KEY, 'off');
+  windowListeners.get('pageshow')({ persisted: true });
+  await settle();
+
+  assert.equal(getRefreshes(), 1);
   assert.equal(elements.overallTitle.textContent, 'Read-only checks passed');
   assert.equal(elements.startTestBtn.disabled, false);
-  assert.equal(elements.finishTestBtn.disabled, false);
+});
+
+test('guard does not interfere with a short test that is still active', () => {
+  const { elements, context, getRefreshes } = install('verify_primary_writes', 'awaiting_smoke_test');
+  assert.equal(elements.overallTitle.textContent, 'Reading your saved copies…');
+  assert.equal(elements.startTestBtn.disabled, true);
+  assert.equal(elements.finishTestBtn.disabled, true);
   assert.equal(context.TaskPointsRequalificationFinalState.isFasterModeEnabled(), false);
+  assert.equal(getRefreshes(), 0);
 });
 
 test('completed Faster Mode blocks accidental Start or Finish clicks before target handlers run', () => {
-  const { elements, listeners } = install('indexeddb_primary', 'fast_mode_enabled');
-  const click = listeners.get('click');
+  const { elements, documentListeners } = install('indexeddb_primary', 'fast_mode_enabled');
+  const click = documentListeners.get('click');
   let prevented = 0;
   let stopped = 0;
   click({
@@ -107,23 +166,4 @@ test('completed Faster Mode blocks accidental Start or Finish clicks before targ
   assert.equal(prevented, 1);
   assert.equal(stopped, 1);
   assert.equal(elements.startTestBtn.disabled, true);
-});
-
-test('turning Faster Mode off releases the final screen and restores the re-test controls', () => {
-  const { elements, context, localStorage } = install('indexeddb_primary', 'fast_mode_enabled');
-  assert.equal(elements.overallTitle.textContent, 'Faster mode is on');
-  assert.equal(elements.startTestBtn.disabled, true);
-
-  localStorage.setItem('taskpoints_phase4_storage_mode_v1', 'off');
-  assert.equal(context.TaskPointsRequalificationFinalState.syncState(), true);
-
-  assert.equal(elements.overallTitle.textContent, 'Read-only checks passed');
-  assert.match(elements.overallDetail.textContent, /Press Start to load the full two-step safety test/i);
-  assert.equal(elements.modeValue.textContent, 'Faster mode');
-  assert.equal(elements.actionMessage.textContent, 'This page has only read your saved copies so far.');
-  assert.equal(elements.startTestBtn.disabled, false);
-  assert.equal(elements.startTestBtn.dataset.allowed, 'true');
-  assert.equal(elements.finishTestBtn.disabled, false);
-  assert.equal(elements.finishTestBtn.dataset.allowed, 'true');
-  assert.equal(context.TaskPointsRequalificationFinalState.isFasterModeEnabled(), false);
 });
