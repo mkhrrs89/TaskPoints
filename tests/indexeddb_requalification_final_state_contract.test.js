@@ -36,6 +36,7 @@ function install(mode, gateStatus) {
   };
   Object.entries(elements).forEach(([id, value]) => { value.id = id; });
   const listeners = new Map();
+  const windowListeners = new Map();
   const document = {
     readyState: 'complete',
     documentElement: {},
@@ -59,12 +60,12 @@ function install(mode, gateStatus) {
     console,
     queueMicrotask,
     setTimeout,
-    addEventListener() {}
+    addEventListener(type, handler) { windowListeners.set(type, handler); }
   };
   context.window = context;
   context.globalThis = context;
   vm.runInNewContext(SOURCE, context, { filename: 'indexeddb_requalification_final_state.js' });
-  return { context, elements, listeners };
+  return { context, elements, listeners, windowListeners, localStorage };
 }
 
 test('final-state guard loads after the read-only loader', () => {
@@ -106,4 +107,23 @@ test('completed Faster Mode blocks accidental Start or Finish clicks before targ
   assert.equal(prevented, 1);
   assert.equal(stopped, 1);
   assert.equal(elements.startTestBtn.disabled, true);
+});
+
+test('turning Faster Mode off releases the final screen and restores the re-test controls', () => {
+  const { elements, context, localStorage } = install('indexeddb_primary', 'fast_mode_enabled');
+  assert.equal(elements.overallTitle.textContent, 'Faster mode is on');
+  assert.equal(elements.startTestBtn.disabled, true);
+
+  localStorage.setItem('taskpoints_phase4_storage_mode_v1', 'off');
+  assert.equal(context.TaskPointsRequalificationFinalState.syncState(), true);
+
+  assert.equal(elements.overallTitle.textContent, 'Read-only checks passed');
+  assert.match(elements.overallDetail.textContent, /Press Start to load the full two-step safety test/i);
+  assert.equal(elements.modeValue.textContent, 'Faster mode');
+  assert.equal(elements.actionMessage.textContent, 'This page has only read your saved copies so far.');
+  assert.equal(elements.startTestBtn.disabled, false);
+  assert.equal(elements.startTestBtn.dataset.allowed, 'true');
+  assert.equal(elements.finishTestBtn.disabled, false);
+  assert.equal(elements.finishTestBtn.dataset.allowed, 'true');
+  assert.equal(context.TaskPointsRequalificationFinalState.isFasterModeEnabled(), false);
 });
