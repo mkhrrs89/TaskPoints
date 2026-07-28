@@ -17,3 +17,10 @@ test('faster storage modes require a freshly verified emergency-vault proof', ()
   assert.match(gate, /__TASKPOINTS_REQUALIFICATION_VERIFIED_VAULT_HASH__/);
   assert.match(gate, /originalSetMode\('off'\)/);
 });
+
+test('Start remains fail-closed when Recovery Hold protection cannot install', () => {
+  assert.match(gate, /core\.__indexedDbRecoveryHoldGuardInstalled === true/);
+  assert.match(gate, /core\.__indexedDbRequalificationGuardInstalled = false/);
+  assert.match(gate, /!vaultReady \|\| !holdGuardReady/);
+  assert.match(gate, /recoveryHoldGuardReady:/);
+});
