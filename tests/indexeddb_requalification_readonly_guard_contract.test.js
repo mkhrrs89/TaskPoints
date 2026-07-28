@@ -5,8 +5,19 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const ROOT = path.join(__dirname, '..');
+const page = fs.readFileSync(path.join(ROOT, 'indexeddb_requalification.html'), 'utf8');
 const loader = fs.readFileSync(path.join(ROOT, 'indexeddb_requalification_loader.js'), 'utf8');
 const guard = fs.readFileSync(path.join(ROOT, 'indexeddb_requalification_readonly_guard.js'), 'utf8');
+
+test('initial checklist load cannot initialize any full storage module', () => {
+  assert.doesNotMatch(page, /<script src="scoring_core\.js"/);
+  assert.doesNotMatch(page, /<script src="phase4_cache_guard\.js"/);
+  assert.doesNotMatch(page, /<script src="indexeddb_requalification_readonly_guard\.js"/);
+  assert.doesNotMatch(page, /<script src="indexeddb_requalification\.js"/);
+  assert.match(page, /indexeddb_requalification_loader\.js/);
+  assert.match(loader, /async function runExplicitAction\(buttonId\)/);
+  assert.match(loader, /await loadRuntime\(\)/);
+});
 
 test('the runtime keeps ordinary refreshes read-only after an explicit action loads it', () => {
   assert.doesNotThrow(() => new vm.Script(guard));
