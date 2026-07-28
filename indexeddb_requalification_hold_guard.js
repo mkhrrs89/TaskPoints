@@ -11,6 +11,7 @@
   let runtimeLoadHoldRaw = null;
   try { runtimeLoadHoldRaw = storage.getItem(HOLD_KEY); } catch (_) { runtimeLoadHoldRaw = null; }
   const expectedHoldRaw = preflight?.available === true ? (preflight.raw ?? null) : runtimeLoadHoldRaw;
+  const initialHoldRaw = expectedHoldRaw;
 
   function currentHold() {
     try { return storage.getItem(HOLD_KEY); } catch (_) { return null; }
@@ -19,7 +20,7 @@
   function protectRemoval(key) {
     if (String(key) !== HOLD_KEY) return;
     const current = currentHold();
-    if (current !== expectedHoldRaw) {
+    if (current !== initialHoldRaw) {
       const error = new Error('Recovery protection changed while the faster-storage test was loading.');
       error.code = 'TASKPOINTS_RECOVERY_HOLD_CHANGED';
       throw error;
@@ -27,9 +28,9 @@
   }
 
   function protectRestoration(key, value) {
-    if (String(key) !== HOLD_KEY || expectedHoldRaw == null || String(value) !== expectedHoldRaw) return;
+    if (String(key) !== HOLD_KEY || initialHoldRaw == null || String(value) !== initialHoldRaw) return;
     const current = currentHold();
-    if (current != null && current !== expectedHoldRaw) {
+    if (current != null && current !== initialHoldRaw) {
       const error = new Error('A newer recovery warning is active and cannot be replaced.');
       error.code = 'TASKPOINTS_NEWER_RECOVERY_HOLD_ACTIVE';
       throw error;
@@ -68,9 +69,9 @@
   core.getIndexedDbRecoveryHoldGuardStatus = () => ({
     installed: true,
     preflightCaptureAvailable: preflight?.available === true,
-    expectedHoldPresent: expectedHoldRaw != null,
-    runtimeLoadHoldChanged: runtimeLoadHoldRaw !== expectedHoldRaw,
-    currentHoldChanged: currentHold() !== expectedHoldRaw
+    expectedHoldPresent: initialHoldRaw != null,
+    runtimeLoadHoldChanged: runtimeLoadHoldRaw !== initialHoldRaw,
+    currentHoldChanged: currentHold() !== initialHoldRaw
   });
 
   global.addEventListener?.('storage', (event) => {
