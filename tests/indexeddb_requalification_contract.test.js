@@ -8,6 +8,7 @@ const ROOT = path.join(__dirname, '..');
 const guardSource = fs.readFileSync(path.join(ROOT, 'indexeddb_requalification_guard.js'), 'utf8');
 const runtimeSource = fs.readFileSync(path.join(ROOT, 'indexeddb_requalification.js'), 'utf8');
 const loaderSource = fs.readFileSync(path.join(ROOT, 'indexeddb_requalification_loader.js'), 'utf8');
+const vaultGateSource = fs.readFileSync(path.join(ROOT, 'indexeddb_requalification_vault_gate.js'), 'utf8');
 const page = fs.readFileSync(path.join(ROOT, 'indexeddb_requalification.html'), 'utf8');
 const statusPage = fs.readFileSync(path.join(ROOT, 'phase4_storage_status.html'), 'utf8');
 const alwaysLoadedGuard = fs.readFileSync(path.join(ROOT, 'phase4_cache_guard.js'), 'utf8');
@@ -85,6 +86,7 @@ test('setup page stays read-only until Start or Finish is deliberately pressed',
   assert.doesNotThrow(() => new vm.Script(guardSource));
   assert.doesNotThrow(() => new vm.Script(runtimeSource));
   assert.doesNotThrow(() => new vm.Script(loaderSource));
+  assert.doesNotThrow(() => new vm.Script(vaultGateSource));
   assert.match(page, /Faster Storage Setup/);
   assert.match(page, /Start short test/);
   assert.match(page, /Finish test and turn on faster mode/);
@@ -96,6 +98,7 @@ test('setup page stays read-only until Start or Finish is deliberately pressed',
   assert.doesNotMatch(page, /<script src="indexeddb_requalification\.js"/);
   assert.match(loaderSource, /const RUNTIME_SCRIPTS = \[/);
   assert.match(loaderSource, /'scoring_core\.js'/);
+  assert.match(loaderSource, /'indexeddb_requalification_vault_gate\.js'/);
   assert.match(loaderSource, /'indexeddb_requalification_readonly_guard\.js'/);
   assert.match(loaderSource, /async function runExplicitAction\(buttonId\)/);
   assert.match(loaderSource, /event\.stopImmediatePropagation\(\)/);
@@ -118,6 +121,9 @@ test('the read-only loader validates the emergency vault fingerprint and stored 
   assert.match(loaderSource, /counts\.majorTotal < 30/);
   assert.match(loaderSource, /if \(!report\?\.vault\?\.ready\)/);
   assert.match(loaderSource, /The action was stopped because the emergency backup/);
+  assert.match(vaultGateSource, /requested !== 'off'/);
+  assert.match(vaultGateSource, /__TASKPOINTS_REQUALIFICATION_VERIFIED_VAULT_HASH__/);
+  assert.match(vaultGateSource, /originalSetMode\('off'\)/);
 });
 
 test('the faster-mode guard is included in the always-loaded Phase 4 bundle', () => {
