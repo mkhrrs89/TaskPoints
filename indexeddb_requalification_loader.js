@@ -35,7 +35,7 @@
   const vaultCountKeys = [
     'tasks', 'completions', 'habits', 'players', 'flexActions',
     'gameHistory', 'matchups', 'schedule', 'seasonHistory', 'reminders',
-    'total', 'majorTotal'
+    'majorTotal'
   ];
   let runtimePromise = null;
   let runtimeLoaded = false;
