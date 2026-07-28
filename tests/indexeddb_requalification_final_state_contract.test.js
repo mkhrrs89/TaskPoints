@@ -50,6 +50,7 @@ function install(mode, gateStatus) {
   let refreshes = 0;
 
   elements.refreshBtn.click = () => {
+    if (elements.refreshBtn.disabled) return;
     refreshes += 1;
     const currentMode = localStorage.getItem(MODE_KEY) || 'off';
     const currentGate = JSON.parse(localStorage.getItem(GATE_KEY) || '{}');
@@ -96,8 +97,8 @@ function install(mode, gateStatus) {
   return { context, elements, documentListeners, windowListeners, localStorage, getRefreshes: () => refreshes };
 }
 
-function settle() {
-  return new Promise((resolve) => setTimeout(resolve, 0));
+function settle(ms = 0) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 test('final-state guard loads after the read-only loader', () => {
@@ -131,6 +132,27 @@ test('ending the exact final state reruns the real read-only render instead of r
   assert.equal(elements.startTestBtn.dataset.allowed, 'true');
   assert.equal(elements.finishTestBtn.disabled, true);
   assert.equal(elements.finishTestBtn.dataset.allowed, 'false');
+});
+
+test('ending final state waits for a busy Refresh button and rerenders when it becomes available', async () => {
+  const { elements, localStorage, windowListeners, getRefreshes } = install('indexeddb_primary', 'fast_mode_enabled');
+  elements.refreshBtn.disabled = true;
+  localStorage.setItem(MODE_KEY, 'off');
+  windowListeners.get('storage')({ key: MODE_KEY });
+  await settle(10);
+
+  assert.equal(getRefreshes(), 0);
+  assert.equal(elements.overallTitle.textContent, 'Faster mode is on');
+  assert.equal(elements.startTestBtn.disabled, true);
+
+  elements.refreshBtn.disabled = false;
+  await settle(80);
+
+  assert.equal(getRefreshes(), 1);
+  assert.equal(elements.overallTitle.textContent, 'Read-only checks passed');
+  assert.equal(elements.modeValue.textContent, 'Safe mode');
+  assert.equal(elements.startTestBtn.disabled, false);
+  assert.equal(elements.startTestBtn.dataset.allowed, 'true');
 });
 
 test('back-forward-cache restore also recomputes the current Off-mode setup state', async () => {
