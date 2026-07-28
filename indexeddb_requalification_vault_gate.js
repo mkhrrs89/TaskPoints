@@ -6,9 +6,18 @@
   core.__indexedDbRequalificationVaultGateInstalled = true;
 
   const originalSetMode = core.setPhase4StorageMode.bind(core);
-  core.setPhase4StorageMode = function setModeWithVerifiedVault(mode) {
+  const recoveryHoldGuardReady = core.__indexedDbRecoveryHoldGuardInstalled === true;
+
+  if (!recoveryHoldGuardReady) {
+    core.__indexedDbRequalificationGuardInstalled = false;
+    try { originalSetMode('off'); } catch (_) {}
+  }
+
+  core.setPhase4StorageMode = function setModeWithVerifiedSafetyProof(mode) {
     const requested = String(mode || 'off');
-    if (requested !== 'off' && !global.__TASKPOINTS_REQUALIFICATION_VERIFIED_VAULT_HASH__) {
+    const vaultReady = Boolean(global.__TASKPOINTS_REQUALIFICATION_VERIFIED_VAULT_HASH__);
+    const holdGuardReady = core.__indexedDbRecoveryHoldGuardInstalled === true;
+    if (requested !== 'off' && (!vaultReady || !holdGuardReady)) {
       try { return originalSetMode('off'); } catch (_) { return 'off'; }
     }
     return originalSetMode(requested);
@@ -16,6 +25,7 @@
 
   core.getIndexedDbRequalificationVaultGateStatus = () => ({
     installed: true,
-    verifiedVaultHashPresent: Boolean(global.__TASKPOINTS_REQUALIFICATION_VERIFIED_VAULT_HASH__)
+    verifiedVaultHashPresent: Boolean(global.__TASKPOINTS_REQUALIFICATION_VERIFIED_VAULT_HASH__),
+    recoveryHoldGuardReady: core.__indexedDbRecoveryHoldGuardInstalled === true
   });
 })(typeof window !== 'undefined' ? window : globalThis);
