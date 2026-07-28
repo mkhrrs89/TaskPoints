@@ -23,6 +23,7 @@ test('every Start or Finish attempt revalidates the emergency vault before loadi
   assert.match(loader, /if \(!report\?\.vault\?\.ready\)/);
   assert.match(loader, /const calculatedHash = api\.rawHash\(record\.raw\)/);
   assert.match(loader, /record\.rawHash !== calculatedHash/);
-  assert.match(loader, /!record\.counts \|\| !countsMatch\(counts, record\.counts\)/);
+  assert.match(loader, /const vaultCountKeys = \[/);
+  assert.match(loader, /!record\.counts \|\| !countsMatch\(counts, record\.counts, vaultCountKeys\)/);
   assert.match(loader, /__TASKPOINTS_REQUALIFICATION_VERIFIED_VAULT_HASH__/);
 });
