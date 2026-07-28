@@ -12,6 +12,7 @@
   let ownsUi = false;
   let observer = null;
   let rerenderQueued = false;
+  let rerenderAttempts = 0;
 
   const get = (key) => {
     try { return storage?.getItem?.(key) ?? null; }
@@ -46,9 +47,29 @@
     rerenderQueued = true;
     const run = () => {
       rerenderQueued = false;
+      if (isFasterModeEnabled()) {
+        rerenderAttempts = 0;
+        applyFinalState();
+        return;
+      }
+
       const refresh = $('refreshBtn');
-      if (typeof refresh?.click === 'function') refresh.click();
-      else global.location?.reload?.();
+      if (typeof refresh?.click === 'function' && !refresh.disabled) {
+        ownsUi = false;
+        rerenderAttempts = 0;
+        refresh.click();
+        return;
+      }
+
+      if (refresh?.disabled && rerenderAttempts < 120) {
+        rerenderAttempts += 1;
+        global.setTimeout?.(requestCurrentStateRender, 50);
+        return;
+      }
+
+      ownsUi = false;
+      rerenderAttempts = 0;
+      global.location?.reload?.();
     };
     if (typeof global.queueMicrotask === 'function') global.queueMicrotask(run);
     else global.setTimeout?.(run, 0);
@@ -59,6 +80,7 @@
     applying = true;
     try {
       ownsUi = true;
+      rerenderAttempts = 0;
       setText('overallTitle', 'Faster mode is on');
       setText('overallDetail', 'TaskPoints is using the faster database copy, while the working copy and backups remain in place.');
       setText('modeValue', 'Faster mode');
@@ -74,7 +96,6 @@
   function reconcileState() {
     if (isFasterModeEnabled()) return applyFinalState();
     if (!ownsUi) return false;
-    ownsUi = false;
     requestCurrentStateRender();
     return false;
   }
