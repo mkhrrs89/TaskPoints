@@ -31,14 +31,19 @@
   const get = (key) => { try { return global.localStorage?.getItem?.(key) ?? null; } catch (_) { return null; } };
   const parseJson = (raw, fallback = null) => { try { return JSON.parse(raw); } catch (_) { return fallback; } };
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-  const countKeys = [...api.COUNT_KEYS, 'total', 'majorTotal'];
+  const secondaryCountKeys = [...api.COUNT_KEYS, 'total', 'majorTotal'];
+  const vaultCountKeys = [
+    'tasks', 'completions', 'habits', 'players', 'flexActions',
+    'gameHistory', 'matchups', 'schedule', 'seasonHistory', 'reminders',
+    'total', 'majorTotal'
+  ];
   let runtimePromise = null;
   let runtimeLoaded = false;
   let allowedSyntheticButton = '';
   let scanRevision = 0;
 
-  function countsMatch(left, right) {
-    return countKeys.every((key) => Number(left?.[key] || 0) === Number(right?.[key] || 0));
+  function countsMatch(left, right, keys = secondaryCountKeys) {
+    return keys.every((key) => Number(left?.[key] || 0) === Number(right?.[key] || 0));
   }
 
   function journalCount(raw) {
@@ -153,7 +158,7 @@
       }
       const parsed = api.parseStoredRaw(record.raw);
       const counts = api.countsFor(parsed.state);
-      if (!record.counts || !countsMatch(counts, record.counts)) {
+      if (!record.counts || !countsMatch(counts, record.counts, vaultCountKeys)) {
         throw new Error('The emergency backup record totals do not match its contents.');
       }
       if (counts.majorTotal < 30) throw new Error('The emergency backup does not contain enough records to be trusted.');
