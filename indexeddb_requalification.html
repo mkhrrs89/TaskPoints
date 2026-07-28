@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="styles.css">
   <script src="indexeddb_requalification_preflight_hold.js"></script>
   <script src="storage_health_codec.js" defer></script>
+  <script src="indexeddb_requalification_vault_repair.js" defer></script>
   <script src="indexeddb_requalification_loader.js" defer></script>
   <style>
     html,body{background:#0b0d10;color:#f8fafc}.panel{background:#15191d;border:1px solid #2b333b;border-radius:18px;padding:16px}.hero{background:linear-gradient(135deg,#153d42,#172328);border:1px solid #31646a;border-radius:20px;padding:18px}.muted{color:#94a3b8}.small{font-size:.84rem}.metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.metric{background:#11161c;border:1px solid #2b333b;border-radius:16px;padding:13px}.metric-label{color:#94a3b8;font-size:.82rem}.metric-value{font-size:1.35rem;font-weight:800;margin-top:3px}.checks{display:grid;gap:10px}.check{display:flex;gap:11px;border-radius:15px;padding:12px;border:1px solid}.check.good{background:#103426;border-color:#278458}.check.warn{background:#3a2812;border-color:#a76820}.check.bad{background:#3b171b;border-color:#9f3540}.mark{width:26px;height:26px;border-radius:999px;display:flex;align-items:center;justify-content:center;font-weight:900;background:rgba(255,255,255,.1);flex:0 0 auto}.actions{display:grid;gap:10px}.actions button:disabled{background:#222a30!important;color:#64748b!important;border-color:#334155!important;opacity:1!important;cursor:not-allowed!important;box-shadow:none!important}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;background:#0b0d10;border-radius:12px;padding:12px}@media(min-width:640px){.metrics{grid-template-columns:repeat(4,minmax(0,1fr))}.actions{grid-template-columns:repeat(2,minmax(0,1fr))}}
@@ -50,6 +51,7 @@
         <button id="finishTestBtn" type="button" class="btn btn-teal btn-toolbar" data-allowed="false" disabled>Finish test and turn on faster mode</button>
       </div>
       <button id="refreshBtn" type="button" class="btn btn-ghost btn-toolbar mt-3" data-allowed="true">Refresh read-only checks</button>
+      <button id="repairVaultCountsBtn" type="button" class="btn btn-warn btn-toolbar mt-3 hidden" disabled>Repair emergency backup check</button>
       <div id="actionMessage" class="text-sm muted mt-3">Reading all saved copies…</div>
     </section>
 
