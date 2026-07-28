@@ -78,8 +78,22 @@ test('short test may survive an expected edit and enabled fast mode may survive 
   harness.localStorage.setItem('taskpoints_v1', secondRaw);
   assert.equal(harness.core.setPhase4StorageMode('verify_primary_writes'), 'verify_primary_writes');
 
+  harness.localStorage.setItem('taskpoints_phase4_storage_mode_v1', 'indexeddb_primary');
   harness.localStorage.setItem('taskpoints_indexeddb_requalification_v1', JSON.stringify({ status: 'fast_mode_enabled' }));
   assert.equal(harness.core.setPhase4StorageMode('indexeddb_primary'), 'indexeddb_primary');
+});
+
+test('switching Off requires a new completed authorization before Faster Mode can return', () => {
+  const raw = '{"tasks":[1]}';
+  const harness = install({
+    taskpoints_v1: raw,
+    taskpoints_phase4_storage_mode_v1: 'indexeddb_primary',
+    taskpoints_indexeddb_requalification_v1: JSON.stringify({ status: 'fast_mode_enabled' })
+  });
+  assert.equal(harness.core.setPhase4StorageMode('indexeddb_primary'), 'indexeddb_primary');
+  assert.equal(harness.core.setPhase4StorageMode('off'), 'off');
+  assert.equal(harness.core.setPhase4StorageMode('indexeddb_primary'), 'off');
+  assert.equal(harness.core.getIndexedDbRequalificationPermission('indexeddb_primary').reason, 'fresh_reauthorization_required');
 });
 
 test('setup page stays read-only until Start or Finish is deliberately pressed', () => {
@@ -114,10 +128,14 @@ test('setup page stays read-only until Start or Finish is deliberately pressed',
   assert.match(runtimeSource, /status: 'fast_mode_enabled'/);
 });
 
-test('the read-only loader validates the emergency vault fingerprint and stored totals', () => {
+test('the read-only loader validates the emergency vault fingerprint and writer-compatible stored totals', () => {
   assert.match(loaderSource, /const calculatedHash = api\.rawHash\(record\.raw\)/);
   assert.match(loaderSource, /record\.rawHash !== calculatedHash/);
-  assert.match(loaderSource, /!record\.counts \|\| !countsMatch\(counts, record\.counts\)/);
+  assert.match(loaderSource, /const vaultCountKeys = \[/);
+  assert.match(loaderSource, /'flexActions'/);
+  assert.match(loaderSource, /'reminders'/);
+  assert.doesNotMatch(loaderSource.match(/const vaultCountKeys = \[[\s\S]*?\];/)?.[0] || '', /weightHistory|vo2MaxHistory/);
+  assert.match(loaderSource, /!countsMatch\(counts, record\.counts, vaultCountKeys\)/);
   assert.match(loaderSource, /counts\.majorTotal < 30/);
   assert.match(loaderSource, /if \(!report\?\.vault\?\.ready\)/);
   assert.match(loaderSource, /The action was stopped because the emergency backup/);
