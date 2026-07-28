@@ -7,14 +7,8 @@
   <title>TaskPoints — Faster Storage Setup</title>
   <link rel="stylesheet" href="assets/tailwind.css">
   <link rel="stylesheet" href="styles.css">
-  <script src="scoring_core.js" defer></script>
   <script src="storage_health_codec.js" defer></script>
-  <script src="indexeddb_requalification_hold_guard.js" defer></script>
-  <script src="phase4_cache_guard.js" defer></script>
-  <script src="indexeddb_requalification_session_compat.js" defer></script>
-  <script src="indexeddb_requalification_guard.js" defer></script>
-  <script src="indexeddb_requalification_readonly_guard.js" defer></script>
-  <script src="indexeddb_requalification.js" defer></script>
+  <script src="indexeddb_requalification_loader.js" defer></script>
   <style>
     html,body{background:#0b0d10;color:#f8fafc}.panel{background:#15191d;border:1px solid #2b333b;border-radius:18px;padding:16px}.hero{background:linear-gradient(135deg,#153d42,#172328);border:1px solid #31646a;border-radius:20px;padding:18px}.muted{color:#94a3b8}.small{font-size:.84rem}.metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.metric{background:#11161c;border:1px solid #2b333b;border-radius:16px;padding:13px}.metric-label{color:#94a3b8;font-size:.82rem}.metric-value{font-size:1.35rem;font-weight:800;margin-top:3px}.checks{display:grid;gap:10px}.check{display:flex;gap:11px;border-radius:15px;padding:12px;border:1px solid}.check.good{background:#103426;border-color:#278458}.check.warn{background:#3a2812;border-color:#a76820}.check.bad{background:#3b171b;border-color:#9f3540}.mark{width:26px;height:26px;border-radius:999px;display:flex;align-items:center;justify-content:center;font-weight:900;background:rgba(255,255,255,.1);flex:0 0 auto}.actions{display:grid;gap:10px}.actions button:disabled{background:#222a30!important;color:#64748b!important;border-color:#334155!important;opacity:1!important;cursor:not-allowed!important;box-shadow:none!important}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;background:#0b0d10;border-radius:12px;padding:12px}@media(min-width:640px){.metrics{grid-template-columns:repeat(4,minmax(0,1fr))}.actions{grid-template-columns:repeat(2,minmax(0,1fr))}}
   </style>
@@ -30,8 +24,8 @@
     </header>
 
     <section class="hero mb-4">
-      <div id="overallTitle" class="text-2xl font-extrabold">Checking your copies…</div>
-      <div id="overallDetail" class="text-sm muted mt-2">Nothing will switch automatically.</div>
+      <div id="overallTitle" class="text-2xl font-extrabold">Reading your saved copies…</div>
+      <div id="overallDetail" class="text-sm muted mt-2">Nothing will switch or write while this page is opening.</div>
     </section>
 
     <section class="metrics mb-4">
@@ -43,19 +37,19 @@
 
     <section class="panel mb-4">
       <h2 class="text-lg font-bold mb-2">Safety checklist</h2>
-      <p class="text-sm muted mb-3">Green means ready. Orange means it will be handled during the short test. Red stops the switch.</p>
+      <p class="text-sm muted mb-3">Green means ready. Orange is a standing iPhone warning. Red stops the switch.</p>
       <div id="checks" class="checks"></div>
     </section>
 
     <section class="panel mb-4">
       <h2 class="text-lg font-bold mb-2">Two-minute test</h2>
-      <p class="text-sm muted mb-3">First, TaskPoints rebuilds and checks the faster copy while your current working copy remains in charge. Then you make one harmless edit, fully close the app, and reopen it.</p>
+      <p class="text-sm muted mb-3">Opening and refreshing this page only reads your copies. The full storage system loads only after you deliberately press Start or Finish.</p>
       <div class="actions">
         <button id="startTestBtn" type="button" class="btn btn-teal btn-toolbar" data-allowed="false" disabled>Start short test</button>
         <button id="finishTestBtn" type="button" class="btn btn-teal btn-toolbar" data-allowed="false" disabled>Finish test and turn on faster mode</button>
       </div>
-      <button id="refreshBtn" type="button" class="btn btn-ghost btn-toolbar mt-3" data-allowed="true">Refresh checks</button>
-      <div id="actionMessage" class="text-sm muted mt-3">Checking all copies…</div>
+      <button id="refreshBtn" type="button" class="btn btn-ghost btn-toolbar mt-3" data-allowed="true">Refresh read-only checks</button>
+      <div id="actionMessage" class="text-sm muted mt-3">Reading all saved copies…</div>
     </section>
 
     <section class="panel mb-4">
