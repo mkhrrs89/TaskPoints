@@ -5,11 +5,20 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const ROOT = path.join(__dirname, '..');
-const SOURCE = fs.readFileSync(path.join(ROOT, 'indexeddb_requalification_final_state.js'), 'utf8');
+const SOURCE = fs.readFileSync(path.join(ROOT, 'indexeddb_requalification_loader.js'), 'utf8');
 const PAGE = fs.readFileSync(path.join(ROOT, 'indexeddb_requalification.html'), 'utf8');
 
+const STORAGE_KEY = 'taskpoints_v1';
 const MODE_KEY = 'taskpoints_phase4_storage_mode_v1';
 const GATE_KEY = 'taskpoints_indexeddb_requalification_v1';
+const SECONDARY_DB = 'taskpoints_verified_secondary_v1';
+const VAULT_DB = 'taskpoints_safety_vault_v1';
+const COUNT_KEYS = [
+  'tasks', 'completions', 'habits', 'players', 'flexActions',
+  'gameHistory', 'matchups', 'schedule', 'seasonHistory', 'reminders',
+  'weightHistory', 'vo2MaxHistory'
+];
+const MAJOR_KEYS = ['tasks', 'completions', 'habits', 'players', 'gameHistory', 'matchups', 'seasonHistory'];
 
 class FakeStorage {
   constructor(rows = {}) { this.rows = new Map(Object.entries(rows).map(([key, value]) => [String(key), String(value)])); }
@@ -18,137 +27,220 @@ class FakeStorage {
   removeItem(key) { this.rows.delete(String(key)); }
 }
 
-function element(text = '', disabled = false, allowed = 'true') {
+function rawHash(raw) {
+  const text = String(raw || '');
+  let value = 2166136261;
+  for (let index = 0; index < text.length; index += 1) {
+    value ^= text.charCodeAt(index);
+    value = Math.imul(value, 16777619);
+  }
+  return `${(value >>> 0).toString(16).padStart(8, '0')}:${text.length}`;
+}
+
+function countsFor(state) {
+  const counts = Object.fromEntries(COUNT_KEYS.map((key) => [key, Array.isArray(state?.[key]) ? state[key].length : 0]));
+  counts.total = COUNT_KEYS.reduce((sum, key) => sum + counts[key], 0);
+  counts.majorTotal = MAJOR_KEYS.reduce((sum, key) => sum + counts[key], 0);
+  return counts;
+}
+
+function vaultCountsFor(state) {
+  const keys = [
+    'tasks', 'completions', 'habits', 'players', 'flexActions',
+    'gameHistory', 'matchups', 'schedule', 'seasonHistory', 'reminders'
+  ];
+  const counts = Object.fromEntries(keys.map((key) => [key, Array.isArray(state?.[key]) ? state[key].length : 0]));
+  counts.total = keys.reduce((sum, key) => sum + counts[key], 0);
+  counts.majorTotal = MAJOR_KEYS.reduce((sum, key) => sum + counts[key], 0);
+  return counts;
+}
+
+function element(id, text = '') {
+  const listeners = new Map();
   return {
+    id,
     textContent: text,
-    disabled,
-    dataset: { allowed },
-    id: '',
-    closest() { return this; },
-    click() {}
+    innerHTML: '',
+    disabled: id !== 'refreshBtn',
+    dataset: { allowed: id === 'refreshBtn' ? 'true' : 'false' },
+    addEventListener(type, handler) {
+      const rows = listeners.get(type) || [];
+      rows.push(handler);
+      listeners.set(type, rows);
+    },
+    click() {
+      const event = {
+        target: this,
+        preventDefault() {},
+        stopImmediatePropagation() { this.stopped = true; }
+      };
+      for (const handler of listeners.get('click') || []) {
+        handler(event);
+        if (event.stopped) break;
+      }
+    }
   };
 }
 
-function install(mode, gateStatus, options = {}) {
-  const elements = {
-    overallTitle: element('Reading your saved copies…'),
-    overallDetail: element('Nothing will switch or write while this page is opening.'),
-    modeValue: element('Checking'),
-    actionMessage: element('Reading all saved copies…'),
-    startTestBtn: element('Start short test', true, 'false'),
-    finishTestBtn: element('Finish test and turn on faster mode', true, 'false'),
-    refreshBtn: element('Refresh read-only checks', Boolean(options.refreshDisabled))
-  };
-  Object.entries(elements).forEach(([id, value]) => { value.id = id; });
+function createIndexedDB(records, delayMs = 0) {
+  let activeReads = 0;
+  let maxActiveReads = 0;
 
-  const documentListeners = new Map();
-  const windowListeners = new Map();
+  function createDb(name) {
+    return {
+      objectStoreNames: { contains: (store) => store === 'snapshots' },
+      transaction() {
+        const transaction = { error: null };
+        transaction.objectStore = () => ({
+          get(id) {
+            const request = {};
+            activeReads += 1;
+            maxActiveReads = Math.max(maxActiveReads, activeReads);
+            setTimeout(() => {
+              request.result = JSON.parse(JSON.stringify(records[name]?.[id] || null));
+              request.onsuccess?.();
+              setTimeout(() => {
+                activeReads -= 1;
+                transaction.oncomplete?.();
+              }, 0);
+            }, delayMs);
+            return request;
+          }
+        });
+        return transaction;
+      },
+      close() {}
+    };
+  }
+
+  return {
+    databases: async () => [{ name: SECONDARY_DB }, { name: VAULT_DB }],
+    open(name) {
+      const request = {};
+      setTimeout(() => {
+        request.result = createDb(name);
+        request.onsuccess?.();
+      }, 0);
+      return request;
+    },
+    getMaxActiveReads: () => maxActiveReads
+  };
+}
+
+function makeState() {
+  return {
+    tasks: [{ id: 'task' }],
+    completions: Array.from({ length: 40 }, (_, id) => ({ id })),
+    habits: [{ id: 'habit' }],
+    players: Array.from({ length: 12 }, (_, id) => ({ id })),
+    flexActions: [{ id: 'flex' }],
+    gameHistory: Array.from({ length: 20 }, (_, id) => ({ id })),
+    matchups: Array.from({ length: 20 }, (_, id) => ({ id })),
+    schedule: [{ id: 'schedule' }],
+    seasonHistory: [{ id: 'season' }],
+    reminders: [{ id: 'reminder' }],
+    weightHistory: Array.from({ length: 3 }, (_, id) => ({ id })),
+    vo2MaxHistory: Array.from({ length: 2 }, (_, id) => ({ id }))
+  };
+}
+
+function install(mode = 'indexeddb_primary', gateStatus = 'fast_mode_enabled', delayMs = 0) {
+  const state = makeState();
+  const raw = JSON.stringify(state);
+  const fullCounts = countsFor(state);
+  const records = {
+    [SECONDARY_DB]: {
+      latest: { id: 'latest', raw, rawHash: rawHash(raw), counts: fullCounts, status: 'passed_verification' }
+    },
+    [VAULT_DB]: {
+      latest: { id: 'latest', raw, rawHash: rawHash(raw), counts: vaultCountsFor(state) }
+    }
+  };
+  const indexedDB = createIndexedDB(records, delayMs);
   const localStorage = new FakeStorage({
+    [STORAGE_KEY]: raw,
     [MODE_KEY]: mode,
     [GATE_KEY]: JSON.stringify({ status: gateStatus })
   });
-  const timers = [];
-  let nextTimerId = 1;
-  let refreshes = 0;
-  let reloads = 0;
-
-  function fakeSetTimeout(handler) {
-    const timer = { id: nextTimerId++, handler, cancelled: false };
-    timers.push(timer);
-    return timer.id;
-  }
-
-  function fakeClearTimeout(id) {
-    const timer = timers.find((entry) => entry.id === id);
-    if (timer) timer.cancelled = true;
-  }
-
-  function runNextTimer() {
-    while (timers.length) {
-      const timer = timers.shift();
-      if (timer.cancelled) continue;
-      timer.handler();
-      return true;
-    }
-    return false;
-  }
-
-  function renderCurrentState() {
-    const currentMode = localStorage.getItem(MODE_KEY) || 'off';
-    const currentGate = JSON.parse(localStorage.getItem(GATE_KEY) || '{}');
-    const activeTest = currentMode === 'verify_primary_writes'
-      && ['awaiting_smoke_test', 'ready_for_fast_mode'].includes(currentGate.status);
-    elements.modeValue.textContent = currentMode === 'indexeddb_primary'
-      ? 'Faster mode'
-      : (currentMode === 'verify_primary_writes' ? 'Short test mode' : 'Safe mode');
-    elements.overallTitle.textContent = activeTest ? 'Ready to check your edit and reopen' : 'Read-only checks passed';
-    elements.overallDetail.textContent = activeTest
-      ? 'Press Finish when you have made the harmless edit and fully closed and reopened the normal TaskPoints app.'
-      : 'Nothing has been written or switched. Press Start to load the full two-step safety test.';
-    elements.actionMessage.textContent = 'This page has only read your saved copies so far.';
-    elements.startTestBtn.disabled = activeTest;
-    elements.startTestBtn.dataset.allowed = activeTest ? 'false' : 'true';
-    elements.finishTestBtn.disabled = !activeTest;
-    elements.finishTestBtn.dataset.allowed = activeTest ? 'true' : 'false';
-  }
-
-  elements.refreshBtn.click = () => {
-    if (elements.refreshBtn.disabled) return;
-    refreshes += 1;
-    if (options.refreshFails) return;
-    if (options.asyncRefresh) fakeSetTimeout(renderCurrentState);
-    else renderCurrentState();
+  const elements = {
+    overallTitle: element('overallTitle', 'Reading your saved copies…'),
+    overallDetail: element('overallDetail', 'Nothing will switch or write while this page is opening.'),
+    modeValue: element('modeValue', 'Checking'),
+    recordValue: element('recordValue', '—'),
+    backupValue: element('backupValue', '—'),
+    holdValue: element('holdValue', '—'),
+    checks: element('checks'),
+    startTestBtn: element('startTestBtn', 'Start short test'),
+    finishTestBtn: element('finishTestBtn', 'Finish test and turn on faster mode'),
+    refreshBtn: element('refreshBtn', 'Refresh read-only checks'),
+    actionMessage: element('actionMessage', 'Reading all saved copies…'),
+    technicalReport: element('technicalReport', 'Loading…')
   };
-
+  const windowListeners = new Map();
+  let appendedScripts = 0;
   const document = {
-    readyState: 'complete',
-    documentElement: {},
     getElementById: (id) => elements[id] || null,
-    addEventListener(type, handler) { documentListeners.set(type, handler); }
+    createElement: () => ({ src: '', async: false, onload: null, onerror: null }),
+    head: { appendChild() { appendedScripts += 1; } }
   };
   const context = {
+    TaskPointsStorageHealth: {
+      COUNT_KEYS,
+      rawHash,
+      parseStoredRaw: (value) => ({ state: JSON.parse(value), encoding: 'plain JSON' }),
+      countsFor
+    },
     document,
     localStorage,
-    location: { reload() { reloads += 1; } },
+    indexedDB,
     JSON,
+    String,
+    Number,
+    Boolean,
     Object,
     Array,
-    String,
-    Boolean,
+    Set,
+    Date,
+    Math,
     Promise,
     Error,
+    Event: class Event { constructor(type) { this.type = type; } },
     console,
+    setTimeout,
+    clearTimeout,
     queueMicrotask,
-    setTimeout: fakeSetTimeout,
-    clearTimeout: fakeClearTimeout,
+    dispatchEvent() {},
     addEventListener(type, handler) { windowListeners.set(type, handler); }
   };
   context.window = context;
   context.globalThis = context;
-  vm.runInNewContext(SOURCE, context, { filename: 'indexeddb_requalification_final_state.js' });
+  vm.runInNewContext(SOURCE, context, { filename: 'indexeddb_requalification_loader.js' });
   return {
     context,
     elements,
-    documentListeners,
-    windowListeners,
     localStorage,
-    runNextTimer,
-    getRefreshes: () => refreshes,
-    getReloads: () => reloads
+    indexedDB,
+    windowListeners,
+    getAppendedScripts: () => appendedScripts
   };
 }
 
-function settle() {
-  return new Promise((resolve) => setImmediate(resolve));
+function settle(ms = 40) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-test('final-state guard loads after the read-only loader', () => {
-  assert.ok(PAGE.indexOf('indexeddb_requalification_loader.js') < PAGE.indexOf('indexeddb_requalification_final_state.js'));
-  assert.doesNotThrow(() => new vm.Script(SOURCE));
+test('completed Faster Mode is rendered by the existing read-only loader with no helper script', () => {
+  assert.doesNotMatch(PAGE, /indexeddb_requalification_final_state\.js/);
+  assert.match(SOURCE, /function isCompletedFastMode\(report\)/);
+  assert.match(SOURCE, /Faster mode is on/);
+  assert.match(SOURCE, /refreshPromise/);
+  assert.match(SOURCE, /refreshQueued/);
 });
 
-test('completed Faster Mode renders a final screen and disables both test actions from the initial loading UI', () => {
-  const { elements, context } = install('indexeddb_primary', 'fast_mode_enabled');
+test('initial completed state shows final success and disables both setup actions', async () => {
+  const { elements, context } = install();
+  await settle();
+
   assert.equal(elements.overallTitle.textContent, 'Faster mode is on');
   assert.match(elements.overallDetail.textContent, /working copy and backups remain in place/i);
   assert.equal(elements.modeValue.textContent, 'Faster mode');
@@ -157,125 +249,59 @@ test('completed Faster Mode renders a final screen and disables both test action
   assert.equal(elements.startTestBtn.dataset.allowed, 'false');
   assert.equal(elements.finishTestBtn.disabled, true);
   assert.equal(elements.finishTestBtn.dataset.allowed, 'false');
-  assert.equal(context.TaskPointsRequalificationFinalState.isFasterModeEnabled(), true);
+  assert.equal(context.TaskPointsRequalificationLoader.isCompletedFastMode(context.__TASKPOINTS_REQUALIFICATION_READ_ONLY_REPORT__), true);
 });
 
-test('ending the exact final state reruns the real read-only render instead of restoring the loading snapshot', async () => {
-  const { elements, context, localStorage, windowListeners, getRefreshes } = install('indexeddb_primary', 'fast_mode_enabled');
+test('switching Faster Mode Off reruns the actual read-only scan and restores Start', async () => {
+  const { elements, localStorage, windowListeners } = install();
+  await settle();
+
   localStorage.setItem(MODE_KEY, 'off');
   windowListeners.get('storage')({ key: MODE_KEY });
   await settle();
 
-  assert.equal(getRefreshes(), 1);
   assert.equal(elements.overallTitle.textContent, 'Read-only checks passed');
   assert.equal(elements.modeValue.textContent, 'Safe mode');
   assert.equal(elements.startTestBtn.disabled, false);
   assert.equal(elements.startTestBtn.dataset.allowed, 'true');
   assert.equal(elements.finishTestBtn.disabled, true);
   assert.equal(elements.finishTestBtn.dataset.allowed, 'false');
-  assert.equal(context.TaskPointsRequalificationFinalState.ownsUi(), false);
 });
 
-test('ending final state waits for a busy Refresh button and rerenders when it becomes available', async () => {
-  const { elements, context, localStorage, windowListeners, runNextTimer, getRefreshes } = install(
-    'indexeddb_primary',
-    'fast_mode_enabled',
-    { refreshDisabled: true }
-  );
-  localStorage.setItem(MODE_KEY, 'off');
-  windowListeners.get('storage')({ key: MODE_KEY });
+test('back-forward-cache restore also rescans the current state', async () => {
+  const { elements, localStorage, windowListeners } = install();
   await settle();
 
-  assert.equal(getRefreshes(), 0);
-  assert.equal(elements.overallTitle.textContent, 'Faster mode is on');
-  assert.equal(context.TaskPointsRequalificationFinalState.ownsUi(), true);
-
-  elements.refreshBtn.disabled = false;
-  runNextTimer();
-  await settle();
-
-  assert.equal(getRefreshes(), 1);
-  assert.equal(elements.overallTitle.textContent, 'Read-only checks passed');
-  assert.equal(elements.modeValue.textContent, 'Safe mode');
-  assert.equal(elements.startTestBtn.disabled, false);
-  assert.equal(context.TaskPointsRequalificationFinalState.ownsUi(), false);
-});
-
-test('ownership remains until an asynchronous read-only render visibly replaces the final screen', async () => {
-  const { elements, context, localStorage, windowListeners, runNextTimer, getRefreshes } = install(
-    'indexeddb_primary',
-    'fast_mode_enabled',
-    { asyncRefresh: true }
-  );
-  localStorage.setItem(MODE_KEY, 'off');
-  windowListeners.get('storage')({ key: MODE_KEY });
-  await settle();
-
-  assert.equal(getRefreshes(), 1);
-  assert.equal(elements.overallTitle.textContent, 'Faster mode is on');
-  assert.equal(context.TaskPointsRequalificationFinalState.ownsUi(), true);
-  assert.equal(context.TaskPointsRequalificationFinalState.releaseInFlight(), true);
-
-  runNextTimer();
-  context.TaskPointsRequalificationFinalState.reconcileState();
-
-  assert.equal(elements.overallTitle.textContent, 'Read-only checks passed');
-  assert.equal(context.TaskPointsRequalificationFinalState.ownsUi(), false);
-  assert.equal(context.TaskPointsRequalificationFinalState.releaseInFlight(), false);
-});
-
-test('a failed asynchronous handoff retries and then reloads without releasing the stale final screen', async () => {
-  const { elements, context, localStorage, windowListeners, runNextTimer, getRefreshes, getReloads } = install(
-    'indexeddb_primary',
-    'fast_mode_enabled',
-    { refreshFails: true }
-  );
-  localStorage.setItem(MODE_KEY, 'off');
-  windowListeners.get('storage')({ key: MODE_KEY });
-  await settle();
-
-  for (let index = 0; index < 4; index += 1) {
-    runNextTimer();
-    await settle();
-  }
-
-  assert.equal(getRefreshes(), 3);
-  assert.equal(getReloads(), 1);
-  assert.equal(elements.overallTitle.textContent, 'Faster mode is on');
-  assert.equal(context.TaskPointsRequalificationFinalState.ownsUi(), true);
-});
-
-test('back-forward-cache restore also recomputes the current Off-mode setup state', async () => {
-  const { elements, localStorage, windowListeners, getRefreshes } = install('indexeddb_primary', 'fast_mode_enabled');
   localStorage.setItem(MODE_KEY, 'off');
   windowListeners.get('pageshow')({ persisted: true });
   await settle();
 
-  assert.equal(getRefreshes(), 1);
   assert.equal(elements.overallTitle.textContent, 'Read-only checks passed');
   assert.equal(elements.startTestBtn.disabled, false);
 });
 
-test('guard does not interfere with a short test that is still active', () => {
-  const { elements, context, getRefreshes } = install('verify_primary_writes', 'awaiting_smoke_test');
-  assert.equal(elements.overallTitle.textContent, 'Reading your saved copies…');
-  assert.equal(elements.startTestBtn.disabled, true);
-  assert.equal(elements.finishTestBtn.disabled, true);
-  assert.equal(context.TaskPointsRequalificationFinalState.isFasterModeEnabled(), false);
-  assert.equal(getRefreshes(), 0);
+test('state changes during a slow scan are serialized instead of starting overlapping scans', async () => {
+  const { elements, localStorage, indexedDB, windowListeners } = install('indexeddb_primary', 'fast_mode_enabled', 35);
+  localStorage.setItem(MODE_KEY, 'off');
+  windowListeners.get('storage')({ key: MODE_KEY });
+  windowListeners.get('storage')({ key: GATE_KEY });
+  windowListeners.get('pageshow')({ persisted: true });
+  await settle(180);
+
+  assert.ok(indexedDB.getMaxActiveReads() <= 2, `expected at most two parallel database reads, got ${indexedDB.getMaxActiveReads()}`);
+  assert.equal(elements.overallTitle.textContent, 'Read-only checks passed');
+  assert.equal(elements.startTestBtn.disabled, false);
 });
 
-test('completed Faster Mode blocks accidental Start or Finish clicks before target handlers run', () => {
-  const { elements, documentListeners } = install('indexeddb_primary', 'fast_mode_enabled');
-  const click = documentListeners.get('click');
-  let prevented = 0;
-  let stopped = 0;
-  click({
-    target: elements.startTestBtn,
-    preventDefault() { prevented += 1; },
-    stopImmediatePropagation() { stopped += 1; }
-  });
-  assert.equal(prevented, 1);
-  assert.equal(stopped, 1);
+test('a stale test-button click cannot load the runtime after Faster Mode is already complete', async () => {
+  const { elements, getAppendedScripts } = install();
+  await settle();
+  elements.startTestBtn.disabled = false;
+  elements.startTestBtn.dataset.allowed = 'true';
+  elements.startTestBtn.click();
+  await settle();
+
+  assert.equal(getAppendedScripts(), 0);
+  assert.equal(elements.overallTitle.textContent, 'Faster mode is on');
   assert.equal(elements.startTestBtn.disabled, true);
 });
