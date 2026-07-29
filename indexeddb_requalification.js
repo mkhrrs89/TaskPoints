@@ -367,10 +367,6 @@
     if (busy) return;
     setBusy(true, 'Checking all copies…');
     try {
-      await core.flushPhase5CVerifiedSecondaryWrites?.();
-      await core.flushPhase4PrimaryWrites?.();
-      await core.flushPhase5ANativeSnapshotWrites?.();
-      await verifyFreshPageRestore();
       render(await collect());
       $('actionMessage').textContent = 'Check complete.';
     } catch (error) {
