@@ -57,11 +57,15 @@
     const keepingCompletedFastMode = requested === 'indexeddb_primary'
       && status === 'fast_mode_enabled'
       && configuredMode === 'indexeddb_primary';
+    const keepingActiveShortTest = requested === 'verify_primary_writes'
+      && configuredMode === 'verify_primary_writes'
+      && ['awaiting_smoke_test', 'ready_for_fast_mode'].includes(status);
 
     // Pending habit changes already force the read path to use the authoritative
-    // working copy. They should not permanently erase an otherwise completed
-    // Faster Mode choice while that brief fallback is active.
-    if (journalCount() > 0 && !keepingCompletedFastMode) {
+    // working copy. They should not permanently erase either a completed Faster
+    // Mode choice or an already-authorized short test while that brief fallback
+    // is active.
+    if (journalCount() > 0 && !keepingCompletedFastMode && !keepingActiveShortTest) {
       return { allowed: false, reason: 'habit_changes_waiting_to_save' };
     }
 
