@@ -47,7 +47,6 @@
     if (requested === 'off') return { allowed: true, reason: '' };
     if (get(HOLD_KEY)) return { allowed: false, reason: 'recovery_hold_active' };
     if (get(ATTEMPT_LOCK_KEY)) return { allowed: false, reason: 'recovery_attempt_active' };
-    if (journalCount() > 0) return { allowed: false, reason: 'habit_changes_waiting_to_save' };
     if (get(LEGACY_JOURNAL_KEY)) return { allowed: false, reason: 'older_recovery_changes_waiting' };
     const raw = get(STORAGE_KEY);
     if (!raw) return { allowed: false, reason: 'current_save_missing' };
@@ -55,6 +54,16 @@
     const status = String(gate.status || '');
     const currentHash = rawHash(raw);
     const configuredMode = get(MODE_KEY) || 'off';
+    const keepingCompletedFastMode = requested === 'indexeddb_primary'
+      && status === 'fast_mode_enabled'
+      && configuredMode === 'indexeddb_primary';
+
+    // Pending habit changes already force the read path to use the authoritative
+    // working copy. They should not permanently erase an otherwise completed
+    // Faster Mode choice while that brief fallback is active.
+    if (journalCount() > 0 && !keepingCompletedFastMode) {
+      return { allowed: false, reason: 'habit_changes_waiting_to_save' };
+    }
 
     if (requested === 'verify_primary_writes') {
       const allowedStatuses = new Set(['authorizing_test_mode', 'awaiting_smoke_test', 'ready_for_fast_mode', 'fast_mode_enabled']);

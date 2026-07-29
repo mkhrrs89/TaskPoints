@@ -117,6 +117,7 @@ export default {
       '/phase3_status_cache_guard.js',
       '/phase4_storage_coordinator.js',
       '/phase4_primary_read_path.js',
+      '/indexeddb_requalification_guard.js',
       '/phase4_cache_guard.js',
       '/phase4_diagnostics.js',
       '/phase5a_native_snapshot.js',
@@ -138,6 +139,7 @@ export default {
       statusGuardResult,
       phase4WriteResult,
       phase4ReadResult,
+      phase4RequalificationGuardResult,
       phase4CacheResult,
       phase4DiagnosticsResult,
       phase5aNativeResult,
@@ -154,6 +156,7 @@ export default {
     const statusGuardResponse = responseFrom(statusGuardResult);
     const phase4WriteResponse = responseFrom(phase4WriteResult);
     const phase4ReadResponse = responseFrom(phase4ReadResult);
+    const phase4RequalificationGuardResponse = responseFrom(phase4RequalificationGuardResult);
     const phase4CacheResponse = responseFrom(phase4CacheResult);
     const phase4DiagnosticsResponse = responseFrom(phase4DiagnosticsResult);
     const phase5aNativeResponse = responseFrom(phase5aNativeResult);
@@ -202,31 +205,35 @@ export default {
 
     let phase4WriteSource = '';
     let phase4ReadSource = '';
+    let phase4RequalificationGuardSource = '';
     let phase4CacheSource = '';
     let phase4DiagnosticsSource = '';
     const completePhase3Navigation = Boolean(phase3Source && codecSource && navigationCacheSource && statusGuardSource);
     if (completePhase3Navigation
       && phase4WriteResponse?.ok
       && phase4ReadResponse?.ok
+      && phase4RequalificationGuardResponse?.ok
       && phase4CacheResponse?.ok
       && phase4DiagnosticsResponse?.ok) {
       try {
-        [phase4WriteSource, phase4ReadSource, phase4CacheSource, phase4DiagnosticsSource] = await Promise.all([
+        [phase4WriteSource, phase4ReadSource, phase4RequalificationGuardSource, phase4CacheSource, phase4DiagnosticsSource] = await Promise.all([
           phase4WriteResponse.text(),
           phase4ReadResponse.text(),
+          phase4RequalificationGuardResponse.text(),
           phase4CacheResponse.text(),
           phase4DiagnosticsResponse.text()
         ]);
       } catch (_) {
         phase4WriteSource = '';
         phase4ReadSource = '';
+        phase4RequalificationGuardSource = '';
         phase4CacheSource = '';
         phase4DiagnosticsSource = '';
       }
     }
 
     let phase5aNativeSource = '';
-    const completePhase4 = Boolean(phase4WriteSource && phase4ReadSource && phase4CacheSource && phase4DiagnosticsSource);
+    const completePhase4 = Boolean(phase4WriteSource && phase4ReadSource && phase4RequalificationGuardSource && phase4CacheSource && phase4DiagnosticsSource);
     if (completePhase4 && phase5aNativeResponse?.ok) {
       try { phase5aNativeSource = await phase5aNativeResponse.text(); }
       catch (_) { phase5aNativeSource = ''; }
@@ -324,6 +331,7 @@ export default {
         '  try {',
         phase4WriteSource,
         phase4ReadSource,
+        phase4RequalificationGuardSource,
         phase4CacheSource,
         phase4DiagnosticsSource,
         '  } catch (error) {',
