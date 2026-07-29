@@ -10,7 +10,11 @@ const PAGE = fs.readFileSync(path.join(ROOT, 'indexeddb_requalification.html'), 
 
 const STORAGE_KEY = 'taskpoints_v1';
 const MODE_KEY = 'taskpoints_phase4_storage_mode_v1';
+const HOLD_KEY = 'taskpoints_emergency_recovery_hold_v1';
 const GATE_KEY = 'taskpoints_indexeddb_requalification_v1';
+const ATTEMPT_LOCK_KEY = 'taskpoints_recovery_attempt_lock_v1';
+const HABIT_JOURNAL_KEY = 'taskpoints_pending_habit_deltas_v1';
+const LEGACY_JOURNAL_KEY = 'taskpoints_phase5b_pending_changes_v1';
 const SECONDARY_DB = 'taskpoints_verified_secondary_v1';
 const VAULT_DB = 'taskpoints_safety_vault_v1';
 const COUNT_KEYS = [
@@ -25,6 +29,7 @@ class FakeStorage {
   getItem(key) { return this.rows.has(String(key)) ? this.rows.get(String(key)) : null; }
   setItem(key, value) { this.rows.set(String(key), String(value)); }
   removeItem(key) { this.rows.delete(String(key)); }
+  clear() { this.rows.clear(); }
 }
 
 function rawHash(raw) {
@@ -144,13 +149,13 @@ function makeState() {
   };
 }
 
-function install(mode = 'indexeddb_primary', gateStatus = 'fast_mode_enabled', delayMs = 0) {
+function install(mode = 'indexeddb_primary', gateStatus = 'fast_mode_enabled', delayMs = 0, options = {}) {
   const state = makeState();
   const raw = JSON.stringify(state);
   const fullCounts = countsFor(state);
   const records = {
     [SECONDARY_DB]: {
-      latest: { id: 'latest', raw, rawHash: rawHash(raw), counts: fullCounts, status: 'passed_verification' }
+      latest: { id: 'latest', raw, rawHash: rawHash(raw), counts: fullCounts, status: options.secondaryStatus || 'passed_verification' }
     },
     [VAULT_DB]: {
       latest: { id: 'latest', raw, rawHash: rawHash(raw), counts: vaultCountsFor(state) }
@@ -252,6 +257,18 @@ test('initial completed state shows final success and disables both setup action
   assert.equal(context.TaskPointsRequalificationLoader.isCompletedFastMode(context.__TASKPOINTS_REQUALIFICATION_READ_ONLY_REPORT__), true);
 });
 
+test('failed safety checks take priority over the completed Faster Mode banner', async () => {
+  const { elements } = install('indexeddb_primary', 'fast_mode_enabled', 0, { secondaryStatus: 'failed_verification' });
+  await settle();
+
+  assert.equal(elements.overallTitle.textContent, 'A safety check needs attention');
+  assert.equal(elements.backupValue.textContent, 'Check needed');
+  assert.match(elements.checks.innerHTML, /separate backup has not completed its safety check/i);
+  assert.equal(elements.startTestBtn.disabled, true);
+  assert.equal(elements.finishTestBtn.disabled, true);
+  assert.doesNotMatch(elements.actionMessage.textContent, /No further setup action is needed/i);
+});
+
 test('switching Faster Mode Off reruns the actual read-only scan and restores Start', async () => {
   const { elements, localStorage, windowListeners } = install();
   await settle();
@@ -291,6 +308,28 @@ test('state changes during a slow scan are serialized instead of starting overla
   assert.ok(indexedDB.getMaxActiveReads() <= 2, `expected at most two parallel database reads, got ${indexedDB.getMaxActiveReads()}`);
   assert.equal(elements.overallTitle.textContent, 'Read-only checks passed');
   assert.equal(elements.startTestBtn.disabled, false);
+});
+
+test('every report storage dependency and a clear event trigger a rescan', async () => {
+  const storageKeyBlock = SOURCE.match(/const reportStorageKeys = new Set\(\[[\s\S]*?\]\);/)?.[0] || '';
+  for (const token of ['STORAGE_KEY', 'MODE_KEY', 'HOLD_KEY', 'GATE_KEY', 'ATTEMPT_LOCK_KEY', 'HABIT_JOURNAL_KEY', 'LEGACY_JOURNAL_KEY']) {
+    assert.match(storageKeyBlock, new RegExp(`\\b${token}\\b`));
+  }
+  assert.match(SOURCE, /event\.key == null \|\| reportStorageKeys\.has\(event\.key\)/);
+
+  const { elements, localStorage, windowListeners } = install();
+  await settle();
+
+  localStorage.setItem(HABIT_JOURNAL_KEY, JSON.stringify([{ id: 'pending' }]));
+  windowListeners.get('storage')({ key: HABIT_JOURNAL_KEY });
+  await settle();
+  assert.equal(elements.overallTitle.textContent, 'A safety check needs attention');
+  assert.match(elements.checks.innerHTML, /Finish or recover the waiting changes first/i);
+
+  localStorage.removeItem(HABIT_JOURNAL_KEY);
+  windowListeners.get('storage')({ key: null });
+  await settle();
+  assert.equal(elements.overallTitle.textContent, 'Faster mode is on');
 });
 
 test('a stale test-button click cannot load the runtime after Faster Mode is already complete', async () => {
