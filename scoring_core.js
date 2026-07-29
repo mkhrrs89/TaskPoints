@@ -5369,6 +5369,15 @@ if (maxEntries !== null && finalSchedules.length > maxEntries) {
     return cleanedState;
   }
 
+  function normalizePlayer(player) {
+    if (!player || typeof player !== 'object' || Array.isArray(player)) return player;
+    const greed = Number(player.greed);
+    return {
+      ...player,
+      greed: Number.isFinite(greed) ? Math.min(100, Math.max(0, greed)) : 0
+    };
+  }
+
   function normalizeState(s) {
     const src = inflateRedundantFieldsFromStorage((s && typeof s === 'object') ? s : {});
     const normalized = {
@@ -5376,7 +5385,7 @@ if (maxEntries !== null && finalSchedules.length > maxEntries) {
       tasks:       Array.isArray(src.tasks)       ? src.tasks.map(normalizeTask)       : [],
       reminders:   Array.isArray(src.reminders)   ? src.reminders   : [],
       completions: Array.isArray(src.completions) ? src.completions.map(normalizeCompletion) : [],
-      players:     Array.isArray(src.players)     ? src.players     : [],
+      players:     Array.isArray(src.players)     ? src.players.map(normalizePlayer) : [],
       habits:      Array.isArray(src.habits)      ? src.habits.map(normalizeHabit)      : [],
       flexActions: Array.isArray(src.flexActions) ? src.flexActions : [],
       gameHistory: Array.isArray(src.gameHistory) ? src.gameHistory : [],
