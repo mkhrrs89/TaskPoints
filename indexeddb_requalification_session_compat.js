@@ -217,10 +217,12 @@
     );
     if (!candidate || !(await onlyThisTaskPointsPageIsOpen())) return false;
 
-    await rebuildFastCopies();
-    let restoreResult = null;
-    try { restoreResult = await core.restorePhase4CommittedPrimary?.(); } catch (_) {}
-    if (restoreResult?.restored !== true && !phase4IsHealthy()) return false;
+    if (!phase4IsHealthy()) {
+      await rebuildFastCopies();
+      let restoreResult = null;
+      try { restoreResult = await core.restorePhase4CommittedPrimary?.(); } catch (_) {}
+      if (restoreResult?.restored !== true && !phase4IsHealthy()) return false;
+    }
 
     const latestGate = parse(storage?.getItem?.(GATE_KEY), {}) || {};
     const latestRaw = storage?.getItem?.(STORAGE_KEY);
@@ -244,8 +246,8 @@
       missedWitnessRecoveredAtISO: new Date().toISOString(),
       lastError: null
     }));
-    await rebuildFastCopies();
     keepFinishAttemptAvailable();
+    rebuildFastCopies().catch(() => undefined);
     return true;
   }
 
@@ -294,7 +296,8 @@
     }
 
     if (proven && mode === 'verify_primary_writes') {
-      rebuildFastCopies().finally(keepFinishAttemptAvailable);
+      keepFinishAttemptAvailable();
+      rebuildFastCopies().catch(() => undefined);
     } else {
       recoverMissedFreshWitness().catch(() => undefined);
     }
