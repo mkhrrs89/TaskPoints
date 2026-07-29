@@ -5,6 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'flex_action_fast_path.js'), 'utf8');
+const homeSource = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const STORAGE_KEY = 'taskpoints_v1';
 const JOURNAL_KEY = 'taskpoints_pending_flex_completions_v1';
 
@@ -105,7 +106,12 @@ function makeHarness() {
     function save(savePath, extraOptions) {
       if (typeof beforeSnapshotHook === 'function') beforeSnapshotHook();
       var result = TaskPointsCore.saveStateSnapshot(state, Object.assign({ savePath: savePath }, extraOptions || {}));
-      state = result.state;
+      if (result && result.flexFastPathDrained && result.state) {
+        state = result.state;
+        return;
+      }
+      if (result && (result.skipped || result.blockedByQuotaCircuit)) return;
+      if (result && result.state) state = result.state;
     }
     function renderFlexActions() {}
     function renderAll() { renderCount += 1; }
@@ -149,6 +155,7 @@ function makeHarness() {
 }
 
 test('a drained shared journal refreshes from authoritative storage instead of writing a stale tab snapshot', () => {
+  assert.match(homeSource, /if \(result\?\.flexFastPathDrained && result\?\.state\) \{[\s\S]*?state = result\.state;[\s\S]*?return;[\s\S]*?\}\s*\/\/ If any other core save was skipped/);
   const h = makeHarness();
   h.context.logFlexCompletion('flex1');
   const own = h.state().completions[0];
