@@ -129,22 +129,38 @@
     );
   }
 
-  async function onlyThisTaskPointsPageIsOpen() {
+  async function pageLockState() {
     const locks = global.navigator?.locks;
-    if (!locks || typeof locks.query !== 'function') return false;
+    if (!locks || typeof locks.query !== 'function') {
+      return { available: false, solePage: false, anotherPagePresent: true };
+    }
+    try {
+      const snapshot = await locks.query();
+      const held = (snapshot?.held || []).filter((entry) => entry?.name === PAGE_LOCK_NAME);
+      const pending = (snapshot?.pending || []).filter((entry) => entry?.name === PAGE_LOCK_NAME);
+      return {
+        available: true,
+        solePage: held.length === 1 && pending.length === 0,
+        anotherPagePresent: held.length > 1 || pending.length > 0
+      };
+    } catch (_) {
+      return { available: false, solePage: false, anotherPagePresent: true };
+    }
+  }
+
+  async function onlyThisTaskPointsPageIsOpen() {
     for (let attempt = 0; attempt < 20; attempt += 1) {
-      try {
-        const snapshot = await locks.query();
-        const held = (snapshot?.held || []).filter((entry) => entry?.name === PAGE_LOCK_NAME);
-        const pending = (snapshot?.pending || []).filter((entry) => entry?.name === PAGE_LOCK_NAME);
-        if (held.length === 1 && pending.length === 0) return true;
-        if (held.length > 1) return false;
-      } catch (_) {
-        return false;
-      }
+      const state = await pageLockState();
+      if (!state.available || state.anotherPagePresent) return false;
+      if (state.solePage) return true;
       await wait(100);
     }
     return false;
+  }
+
+  async function solePageStillConfirmedNow() {
+    const state = await pageLockState();
+    return state.available && state.solePage;
   }
 
   function phase4IsHealthy() {
@@ -224,6 +240,11 @@
       if (restoreResult?.restored !== true && !phase4IsHealthy()) return false;
     }
 
+    // The initial lock query can become stale while the copy rebuild awaits.
+    // Revalidate immediately before persisting the witness, with no further
+    // asynchronous storage work between this check and the write.
+    if (!(await solePageStillConfirmedNow())) return false;
+
     const latestGate = parse(storage?.getItem?.(GATE_KEY), {}) || {};
     const latestRaw = storage?.getItem?.(STORAGE_KEY);
     const latestRawHash = rawHash(latestRaw);
@@ -234,6 +255,8 @@
       || latestRawHash === latestGate.baselineRawHash
       || !noBlockingWork()) return false;
 
+    const recoveryToken = global.crypto?.randomUUID?.()
+      || `missed-witness-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     storage.setItem(GATE_KEY, JSON.stringify({
       ...latestGate,
       freshAppSessionId: sessionStatus.sessionId,
@@ -242,10 +265,35 @@
       freshAppRawHash: latestRawHash,
       freshAppPage: 'normal_app_reopen_confirmed_from_setup',
       exclusivePageLockConfirmed: true,
-      reopenProofMethod: 'single_active_page_lock_query',
+      reopenProofMethod: 'single_active_page_lock_query_revalidated',
       missedWitnessRecoveredAtISO: new Date().toISOString(),
+      missedWitnessRecoveryToken: recoveryToken,
       lastError: null
     }));
+
+    // A second immediate snapshot catches a page that acquired the shared lock
+    // in the tiny interval between the final query and the synchronous write.
+    // Roll back only the witness created by this recovery attempt.
+    if (!(await solePageStillConfirmedNow())) {
+      const recordedGate = parse(storage?.getItem?.(GATE_KEY), {}) || {};
+      if (recordedGate.missedWitnessRecoveryToken === recoveryToken) {
+        storage.setItem(GATE_KEY, JSON.stringify({
+          ...recordedGate,
+          freshAppSessionId: null,
+          freshAppStartedAtISO: null,
+          freshAppWitnessRawHash: null,
+          freshAppRawHash: null,
+          freshAppPage: null,
+          exclusivePageLockConfirmed: false,
+          reopenProofMethod: null,
+          missedWitnessRecoveredAtISO: null,
+          missedWitnessRecoveryToken: null,
+          lastError: 'reopen_witness_exclusivity_lost'
+        }));
+      }
+      return false;
+    }
+
     keepFinishAttemptAvailable();
     rebuildFastCopies().catch(() => undefined);
     return true;
