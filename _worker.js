@@ -122,7 +122,8 @@ export default {
       '/phase4_diagnostics.js',
       '/phase5a_native_snapshot.js',
       '/phase5b_deferred_mirror.js',
-      '/home_yesterday_result_consistency.js'
+      '/home_yesterday_result_consistency.js',
+      '/flex_action_fast_path.js'
     ];
     const moduleResults = await Promise.allSettled(
       modulePaths.map((pathname) => env.ASSETS.fetch(new Request(new URL(pathname, request.url), {
@@ -144,7 +145,8 @@ export default {
       phase4DiagnosticsResult,
       phase5aNativeResult,
       phase5bDeferredResult,
-      homeYesterdayConsistencyResult
+      homeYesterdayConsistencyResult,
+      flexActionFastPathResult
     ] = moduleResults;
 
     const responseFrom = (result) => result?.status === 'fulfilled' ? result.value : null;
@@ -162,6 +164,7 @@ export default {
     const phase5aNativeResponse = responseFrom(phase5aNativeResult);
     const phase5bDeferredResponse = responseFrom(phase5bDeferredResult);
     const homeYesterdayConsistencyResponse = responseFrom(homeYesterdayConsistencyResult);
+    const flexActionFastPathResponse = responseFrom(flexActionFastPathResult);
 
     // Phase 2 remains the required safety floor. A partial Phase 2 install is
     // never served. Later phases are optional and fail back to the last complete
@@ -250,6 +253,12 @@ export default {
     if (homeYesterdayConsistencyResponse?.ok) {
       try { homeYesterdayConsistencySource = await homeYesterdayConsistencyResponse.text(); }
       catch (_) { homeYesterdayConsistencySource = ''; }
+    }
+
+    let flexActionFastPathSource = '';
+    if (flexActionFastPathResponse?.ok) {
+      try { flexActionFastPathSource = await flexActionFastPathResponse.text(); }
+      catch (_) { flexActionFastPathSource = ''; }
     }
 
     const headers = new Headers(coreResponse.headers);
@@ -378,6 +387,7 @@ export default {
     }
 
     if (homeYesterdayConsistencySource) sources.push(homeYesterdayConsistencySource);
+    if (flexActionFastPathSource) sources.push(flexActionFastPathSource);
 
     return new Response(`${sources.map((source) => `;${source}`).join('\n')}\n`, {
       status: 200,

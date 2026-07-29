@@ -4293,7 +4293,17 @@ function save(savePath, extraOptions = {}) {
     if (window.TaskPointsCore?.saveStateSnapshot) {
       const result = TaskPointsCore.saveStateSnapshot(state, saveOptions);
 
-      // If the core save was skipped because of quota cooldown,
+      // A drained Flex fast-path save is skipped to avoid overwriting a newer
+      // cross-tab snapshot, but its authoritative state must still replace the
+      // stale Home copy before a later ordinary save can run.
+      if (result?.flexFastPathDrained && result?.state) {
+        state = result.state;
+        storageCache.parsed = state;
+        storageCache.raw = null;
+        return;
+      }
+
+      // If any other core save was skipped because of quota cooldown,
       // do NOT replace the current in-memory state with old localStorage.
       if (result?.skipped || result?.blockedByQuotaCircuit) {
         storageCache.parsed = state;
