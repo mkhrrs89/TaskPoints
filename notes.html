@@ -156,6 +156,8 @@
     const moodNotesPanel = document.getElementById("moodNotesPanel");
     const moodNotesList = document.getElementById("moodNotesList");
     let saveTimer = null;
+    let notesDirty = false;
+    let loadedNotesValue = "";
 
     function getStoredState() {
       if (window.TaskPointsCore?.loadAppState) {
@@ -198,25 +200,46 @@
 
     function syncNotesStorageLocations(source = "notes-storage-sync") {
       const notesText = getBestNotesTextFromStorage();
+      let changed = false;
 
       try {
-        localStorage.setItem(NOTES_STORAGE_KEY, notesText);
+        if ((localStorage.getItem(NOTES_STORAGE_KEY) || "") !== notesText) {
+          localStorage.setItem(NOTES_STORAGE_KEY, notesText);
+          changed = true;
+        }
       } catch (error) {
         console.warn("Failed to sync taskpoints_notes_v1", error);
       }
 
       try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        const state = raw ? TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY, {}) : {};
-        state.notes = notesText;
-        TaskPointsCore.writeTaskPointsStoredState(state, { storageKey: STORAGE_KEY });
+        const currentState = getStoredState();
+        const currentNotes = typeof currentState.notes === "string" ? currentState.notes : "";
+        if (currentNotes !== notesText) {
+          if (window.TaskPointsCore?.saveAppState) {
+            TaskPointsCore.saveAppState({ notes: notesText }, {
+              storageKey: STORAGE_KEY,
+              immediateWrite: true,
+              userInitiated: true,
+              savePath: "notes-storage-sync"
+            });
+            window.TaskPointsCore?.flushPendingSaves?.();
+          } else {
+            const raw = localStorage.getItem(STORAGE_KEY);
+            const latestState = raw ? TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY, {}) : {};
+            latestState.notes = notesText;
+            TaskPointsCore.writeTaskPointsStoredState(latestState, { storageKey: STORAGE_KEY });
+          }
+          changed = true;
+        }
       } catch (error) {
         console.warn("Failed to sync taskpoints_v1.notes", error);
       }
 
-      window.dispatchEvent(new CustomEvent("taskpoints-notes-updated", {
-        detail: { source }
-      }));
+      if (changed) {
+        window.dispatchEvent(new CustomEvent("taskpoints-notes-updated", {
+          detail: { source }
+        }));
+      }
 
       return notesText;
     }
@@ -228,33 +251,51 @@
       window.syncNotesStorageLocations = syncNotesStorageLocations;
     }
 
-    function saveNotes(immediate = false) {
-      if (!notesInput) return;
+    function saveNotes(immediate = false, options = {}) {
+      if (!notesInput) return false;
       const value = notesInput.value || "";
+      const force = options.force === true;
+      if (!force && !notesDirty && value === loadedNotesValue) return false;
+
+      if (saveTimer) {
+        window.clearTimeout(saveTimer);
+        saveTimer = null;
+      }
+
       try {
         localStorage.setItem(NOTES_STORAGE_KEY, value);
       } catch (err) {
         console.error("Failed to cache notes", err);
       }
       if (window.TaskPointsCore?.saveAppState) {
-        TaskPointsCore.saveAppState({ notes: value }, { storageKey: STORAGE_KEY, immediateWrite: immediate });
+        TaskPointsCore.saveAppState({ notes: value }, {
+          storageKey: STORAGE_KEY,
+          immediateWrite: immediate,
+          userInitiated: true,
+          savePath: "general-notes-edit"
+        });
         window.TaskPointsCore?.flushPendingSaves?.();
       } else {
         try {
-          const existing = getStoredState();
+          const raw = localStorage.getItem(STORAGE_KEY);
+          const existing = raw ? TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY, {}) : {};
           existing.notes = value;
           TaskPointsCore.writeTaskPointsStoredState(existing, { storageKey: STORAGE_KEY });
         } catch (err) {
           console.error("Failed to save notes", err);
         }
       }
+      loadedNotesValue = value;
+      notesDirty = false;
       window.dispatchEvent(new CustomEvent("taskpoints-notes-updated", {
         detail: { source: "notes-save" }
       }));
       setStatus("Saved");
+      return true;
     }
 
     function scheduleSave() {
+      notesDirty = true;
       setStatus("Saving…");
       if (notesInput) {
         try {
@@ -267,10 +308,17 @@
       saveTimer = window.setTimeout(() => saveNotes(true), 400);
     }
 
+    function flushDirtyNotes() {
+      if (!notesDirty) return false;
+      return saveNotes(true);
+    }
+
     function loadNotes() {
       if (!notesInput) return;
       const notesText = syncNotesStorageLocations("notes-load-sync");
       notesInput.value = notesText;
+      loadedNotesValue = notesText;
+      notesDirty = false;
     }
 
     function formatCompactDate(date) {
@@ -330,15 +378,15 @@
     generalNotesTab?.addEventListener("click", () => setActiveTab("general"));
     moodNotesTab?.addEventListener("click", () => setActiveTab("mood"));
     notesInput?.addEventListener("input", scheduleSave);
-    notesInput?.addEventListener("change", () => saveNotes(true));
-    window.addEventListener("beforeunload", () => saveNotes(true));
-    window.addEventListener("pagehide", () => saveNotes(true));
+    notesInput?.addEventListener("change", flushDirtyNotes);
+    window.addEventListener("beforeunload", flushDirtyNotes);
+    window.addEventListener("pagehide", flushDirtyNotes);
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "hidden") saveNotes(true);
+      if (document.visibilityState === "hidden") flushDirtyNotes();
     });
     window.addEventListener("taskpoints-notes-updated", (event) => {
       const source = event?.detail?.source || "";
-      if (source === "notes-save" || source === "notes-load-sync") return;
+      if (source === "notes-save" || source === "notes-load-sync" || source === "notes-storage-sync") return;
       if (saveTimer) {
         window.clearTimeout(saveTimer);
         saveTimer = null;
