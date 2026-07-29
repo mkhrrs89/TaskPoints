@@ -27,7 +27,7 @@ function rawHash(raw) {
   return `${(value >>> 0).toString(16).padStart(8, '0')}:${text.length}`;
 }
 
-function makeHarness({ heldLocks = 1, vaultVerified = true, pendingJournal = false, sameSession = false } = {}) {
+function makeHarness({ heldLocks = 1, heldLockSequence = null, vaultVerified = true, pendingJournal = false, sameSession = false } = {}) {
   const baselineRaw = JSON.stringify({ tasks: [{ id: 'before' }] });
   const currentRaw = JSON.stringify({ tasks: [{ id: 'before' }, { id: 'after' }] });
   const storage = new FakeStorage({
@@ -42,6 +42,7 @@ function makeHarness({ heldLocks = 1, vaultVerified = true, pendingJournal = fal
   if (pendingJournal) storage.setItem(JOURNAL_KEY, JSON.stringify([{ id: 'waiting' }]));
 
   const finishButton = { dataset: { allowed: 'false' }, disabled: true };
+  let lockQueryIndex = 0;
   const core = {
     STORAGE_KEY,
     PHASE4_STORAGE_MODE_KEY: MODE_KEY,
@@ -76,8 +77,13 @@ function makeHarness({ heldLocks = 1, vaultVerified = true, pendingJournal = fal
     navigator: {
       locks: {
         async query() {
+          const sequence = Array.isArray(heldLockSequence) && heldLockSequence.length
+            ? heldLockSequence
+            : [heldLocks];
+          const currentHeldLocks = sequence[Math.min(lockQueryIndex, sequence.length - 1)];
+          lockQueryIndex += 1;
           return {
-            held: Array.from({ length: heldLocks }, () => ({ name: 'taskpoints_active_page_v1' })),
+            held: Array.from({ length: currentHeldLocks }, () => ({ name: 'taskpoints_active_page_v1' })),
             pending: []
           };
         }
@@ -112,7 +118,7 @@ test('a missed normal-app witness is recovered after the setup page confirms it 
   const gate = JSON.parse(harness.storage.getItem(GATE_KEY));
   assert.equal(gate.freshAppSessionId, 'fresh-session');
   assert.equal(gate.exclusivePageLockConfirmed, true);
-  assert.equal(gate.reopenProofMethod, 'single_active_page_lock_query');
+  assert.equal(gate.reopenProofMethod, 'single_active_page_lock_query_revalidated');
   assert.equal(harness.finishButton.dataset.allowed, 'true');
   assert.equal(harness.finishButton.disabled, false);
 });
@@ -132,4 +138,22 @@ test('the missed-witness repair still requires the vault, clean journals, and a 
     const gate = JSON.parse(harness.storage.getItem(GATE_KEY));
     assert.equal(gate.freshAppSessionId, undefined);
   }
+});
+
+test('the missed-witness repair revalidates page exclusivity after asynchronous preparation', async () => {
+  const harness = makeHarness({ heldLockSequence: [1, 2] });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const gate = JSON.parse(harness.storage.getItem(GATE_KEY));
+  assert.equal(gate.freshAppSessionId, undefined);
+  assert.equal(harness.finishButton.dataset.allowed, 'false');
+});
+
+test('the missed-witness repair rolls back its witness if another page appears during the final write window', async () => {
+  const harness = makeHarness({ heldLockSequence: [1, 1, 2] });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const gate = JSON.parse(harness.storage.getItem(GATE_KEY));
+  assert.equal(gate.freshAppSessionId, null);
+  assert.equal(gate.exclusivePageLockConfirmed, false);
+  assert.equal(gate.lastError, 'reopen_witness_exclusivity_lost');
+  assert.equal(harness.finishButton.dataset.allowed, 'false');
 });
