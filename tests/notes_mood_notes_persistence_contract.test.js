@@ -8,7 +8,27 @@ const source = fs.readFileSync(path.join(__dirname, '..', 'notes.html'), 'utf8')
 function extractFunction(name) {
   const start = source.indexOf(`function ${name}`);
   assert.notEqual(start, -1, `${name} not found`);
-  const braceStart = source.indexOf('{', start);
+
+  const paramsStart = source.indexOf('(', start);
+  assert.notEqual(paramsStart, -1, `${name} parameter list not found`);
+
+  let parenDepth = 0;
+  let paramsEnd = -1;
+  for (let index = paramsStart; index < source.length; index += 1) {
+    if (source[index] === '(') parenDepth += 1;
+    if (source[index] === ')') {
+      parenDepth -= 1;
+      if (parenDepth === 0) {
+        paramsEnd = index;
+        break;
+      }
+    }
+  }
+  assert.notEqual(paramsEnd, -1, `${name} parameter list did not close`);
+
+  const braceStart = source.indexOf('{', paramsEnd);
+  assert.notEqual(braceStart, -1, `${name} body not found`);
+
   let depth = 0;
   for (let index = braceStart; index < source.length; index += 1) {
     if (source[index] === '{') depth += 1;
