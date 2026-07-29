@@ -37,6 +37,15 @@
     'gameHistory', 'matchups', 'schedule', 'seasonHistory', 'reminders',
     'majorTotal'
   ];
+  const reportStorageKeys = new Set([
+    STORAGE_KEY,
+    MODE_KEY,
+    HOLD_KEY,
+    GATE_KEY,
+    ATTEMPT_LOCK_KEY,
+    HABIT_JOURNAL_KEY,
+    LEGACY_JOURNAL_KEY
+  ]);
   let runtimePromise = null;
   let runtimeLoaded = false;
   let allowedSyntheticButton = '';
@@ -228,7 +237,7 @@
 
     const gateStatus = String(report.gate?.status || 'not_started');
     const activeTest = report.mode === 'verify_primary_writes' && ['awaiting_smoke_test', 'ready_for_fast_mode'].includes(gateStatus);
-    const completedFastMode = isCompletedFastMode(report);
+    const completedFastMode = report.ready && isCompletedFastMode(report);
     const start = $('startTestBtn');
     const finish = $('finishTestBtn');
     start.disabled = !report.ready || activeTest || completedFastMode;
@@ -236,20 +245,20 @@
     start.dataset.allowed = start.disabled ? 'false' : 'true';
     finish.dataset.allowed = finish.disabled ? 'false' : 'true';
 
-    if (completedFastMode) {
+    if (!report.ready) {
+      $('overallTitle').textContent = 'A safety check needs attention';
+      $('overallDetail').textContent = 'Nothing has been written or switched. The full test will remain unavailable until the red check is resolved.';
+      $('actionMessage').textContent = 'Read-only check complete.';
+    } else if (completedFastMode) {
       $('overallTitle').textContent = 'Faster mode is on';
       $('overallDetail').textContent = 'TaskPoints is using the faster database copy, while the working copy and backups remain in place.';
       $('actionMessage').textContent = 'The short test is complete. No further setup action is needed.';
-    } else if (report.ready) {
+    } else {
       $('overallTitle').textContent = activeTest ? 'Ready to check your edit and reopen' : 'Read-only checks passed';
       $('overallDetail').textContent = activeTest
         ? 'Press Finish when you have made the harmless edit and fully closed and reopened the normal TaskPoints app.'
         : 'Nothing has been written or switched. Press Start to load the full two-step safety test.';
       $('actionMessage').textContent = 'This page has only read your saved copies so far.';
-    } else {
-      $('overallTitle').textContent = 'A safety check needs attention';
-      $('overallDetail').textContent = 'Nothing has been written or switched. The full test will remain unavailable until the red check is resolved.';
-      $('actionMessage').textContent = 'Read-only check complete.';
     }
     $('technicalReport').textContent = JSON.stringify(report, (key, value) => key === 'raw' ? undefined : value, 2);
   }
@@ -333,10 +342,6 @@
 
   async function runExplicitAction(buttonId) {
     const report = await scanReadOnly();
-    if (isCompletedFastMode(report)) {
-      renderReadOnly(report);
-      return;
-    }
     if (!report?.vault?.ready) {
       renderReadOnly(report);
       $('actionMessage').textContent = 'The action was stopped because the emergency backup did not pass its fingerprint and record-total checks.';
@@ -345,6 +350,10 @@
     if (!report.ready) {
       renderReadOnly(report);
       $('actionMessage').textContent = 'The action was stopped because a required read-only safety check did not pass.';
+      return;
+    }
+    if (isCompletedFastMode(report)) {
+      renderReadOnly(report);
       return;
     }
 
@@ -380,7 +389,7 @@
   }, { capture: true });
 
   global.addEventListener?.('storage', (event) => {
-    if (!event || event.key === MODE_KEY || event.key === GATE_KEY) scheduleReadOnlyRefresh();
+    if (!event || event.key == null || reportStorageKeys.has(event.key)) scheduleReadOnlyRefresh();
   });
   global.addEventListener?.('pageshow', scheduleReadOnlyRefresh);
 
