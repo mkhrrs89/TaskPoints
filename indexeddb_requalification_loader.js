@@ -37,10 +37,22 @@
     'gameHistory', 'matchups', 'schedule', 'seasonHistory', 'reminders',
     'majorTotal'
   ];
+  const reportStorageKeys = new Set([
+    STORAGE_KEY,
+    MODE_KEY,
+    HOLD_KEY,
+    GATE_KEY,
+    ATTEMPT_LOCK_KEY,
+    HABIT_JOURNAL_KEY,
+    LEGACY_JOURNAL_KEY
+  ]);
   let runtimePromise = null;
   let runtimeLoaded = false;
   let allowedSyntheticButton = '';
   let scanRevision = 0;
+  let refreshPromise = null;
+  let refreshQueued = false;
+  let refreshScheduleQueued = false;
 
   function countsMatch(left, right, keys = secondaryCountKeys) {
     return keys.every((key) => Number(left?.[key] || 0) === Number(right?.[key] || 0));
@@ -203,6 +215,10 @@
     return `<div class="check ${level}"><span class="mark">${mark}</span><div><strong>${label}</strong><div class="muted small">${detail}</div></div></div>`;
   }
 
+  function isCompletedFastMode(report) {
+    return report?.mode === 'indexeddb_primary' && String(report?.gate?.status || '') === 'fast_mode_enabled';
+  }
+
   function renderReadOnly(report) {
     if (!report || runtimeLoaded) return;
     const checks = [
@@ -221,25 +237,69 @@
 
     const gateStatus = String(report.gate?.status || 'not_started');
     const activeTest = report.mode === 'verify_primary_writes' && ['awaiting_smoke_test', 'ready_for_fast_mode'].includes(gateStatus);
+    const completedFastMode = report.ready && isCompletedFastMode(report);
     const start = $('startTestBtn');
     const finish = $('finishTestBtn');
-    start.disabled = !report.ready || activeTest;
-    finish.disabled = !report.ready || !activeTest;
+    start.disabled = !report.ready || activeTest || completedFastMode;
+    finish.disabled = !report.ready || !activeTest || completedFastMode;
     start.dataset.allowed = start.disabled ? 'false' : 'true';
     finish.dataset.allowed = finish.disabled ? 'false' : 'true';
 
-    if (report.ready) {
+    if (!report.ready) {
+      $('overallTitle').textContent = 'A safety check needs attention';
+      $('overallDetail').textContent = 'Nothing has been written or switched. The full test will remain unavailable until the red check is resolved.';
+      $('actionMessage').textContent = 'Read-only check complete.';
+    } else if (completedFastMode) {
+      $('overallTitle').textContent = 'Faster mode is on';
+      $('overallDetail').textContent = 'TaskPoints is using the faster database copy, while the working copy and backups remain in place.';
+      $('actionMessage').textContent = 'The short test is complete. No further setup action is needed.';
+    } else {
       $('overallTitle').textContent = activeTest ? 'Ready to check your edit and reopen' : 'Read-only checks passed';
       $('overallDetail').textContent = activeTest
         ? 'Press Finish when you have made the harmless edit and fully closed and reopened the normal TaskPoints app.'
         : 'Nothing has been written or switched. Press Start to load the full two-step safety test.';
       $('actionMessage').textContent = 'This page has only read your saved copies so far.';
-    } else {
-      $('overallTitle').textContent = 'A safety check needs attention';
-      $('overallDetail').textContent = 'Nothing has been written or switched. The full test will remain unavailable until the red check is resolved.';
-      $('actionMessage').textContent = 'Read-only check complete.';
     }
     $('technicalReport').textContent = JSON.stringify(report, (key, value) => key === 'raw' ? undefined : value, 2);
+  }
+
+  function refreshReadOnly(message = '') {
+    if (runtimeLoaded) return Promise.resolve(null);
+    if (message) $('actionMessage').textContent = message;
+    if (refreshPromise) {
+      refreshQueued = true;
+      return refreshPromise;
+    }
+    refreshPromise = scanReadOnly()
+      .then((report) => {
+        renderReadOnly(report);
+        return report;
+      })
+      .catch((error) => {
+        $('overallTitle').textContent = 'The read-only check could not finish';
+        $('overallDetail').textContent = String(error?.message || error);
+        $('actionMessage').textContent = 'Nothing was written or switched.';
+        return null;
+      })
+      .finally(() => {
+        refreshPromise = null;
+        if (refreshQueued && !runtimeLoaded) {
+          refreshQueued = false;
+          refreshReadOnly();
+        }
+      });
+    return refreshPromise;
+  }
+
+  function scheduleReadOnlyRefresh() {
+    if (runtimeLoaded || refreshScheduleQueued) return;
+    refreshScheduleQueued = true;
+    const run = () => {
+      refreshScheduleQueued = false;
+      refreshReadOnly();
+    };
+    if (typeof global.queueMicrotask === 'function') global.queueMicrotask(run);
+    else global.setTimeout?.(run, 0);
   }
 
   function loadScript(src) {
@@ -292,6 +352,10 @@
       $('actionMessage').textContent = 'The action was stopped because a required read-only safety check did not pass.';
       return;
     }
+    if (isCompletedFastMode(report)) {
+      renderReadOnly(report);
+      return;
+    }
 
     await loadRuntime();
     const available = await waitForRuntimeButton(buttonId);
@@ -321,15 +385,20 @@
     if (runtimeLoaded) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    $('actionMessage').textContent = 'Reading all saved copies again…';
-    scanReadOnly().then(renderReadOnly).catch((error) => {
-      $('actionMessage').textContent = String(error?.message || error);
-    });
+    refreshReadOnly('Reading all saved copies again…');
   }, { capture: true });
 
-  scanReadOnly().then(renderReadOnly).catch((error) => {
-    $('overallTitle').textContent = 'The read-only check could not finish';
-    $('overallDetail').textContent = String(error?.message || error);
-    $('actionMessage').textContent = 'Nothing was written or switched.';
+  global.addEventListener?.('storage', (event) => {
+    if (!event || event.key == null || reportStorageKeys.has(event.key)) scheduleReadOnlyRefresh();
   });
+  global.addEventListener?.('pageshow', scheduleReadOnlyRefresh);
+
+  global.TaskPointsRequalificationLoader = {
+    isCompletedFastMode,
+    renderReadOnly,
+    refreshReadOnly,
+    scheduleReadOnlyRefresh
+  };
+
+  refreshReadOnly();
 })(typeof window !== 'undefined' ? window : globalThis);
