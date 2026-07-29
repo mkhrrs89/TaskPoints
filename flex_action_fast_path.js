@@ -10,7 +10,9 @@
   const JOURNAL_KEY = 'taskpoints_pending_flex_completions_v1';
   const SAVE_PATH = 'flex-completion-fast-path';
   const MAX_INSTALL_ATTEMPTS = 120;
-  const RETRY_DELAY_MS = 1000;
+  const RETRY_BASE_DELAY_MS = 1000;
+  const RETRY_MAX_DELAY_MS = 30000;
+  const MAX_AUTOMATIC_RETRIES = 5;
   const originalLoadAppState = typeof core.loadAppState === 'function' ? core.loadAppState.bind(core) : null;
   const originalSaveStateSnapshot = typeof core.saveStateSnapshot === 'function' ? core.saveStateSnapshot.bind(core) : null;
 
@@ -21,6 +23,8 @@
   let saveRaf = 0;
   let saveTimer = 0;
   let retryTimer = 0;
+  let retryAttempt = 0;
+  let retryPaused = false;
   let malformedWarningShown = false;
   let originalLogFlexCompletion = null;
   let originalHomeSave = null;
@@ -162,6 +166,16 @@
     }
   }
 
+  function readAuthoritativeState(storageKey = STORAGE_KEY, fallbackState = null) {
+    if (typeof originalLoadAppState !== 'function') return fallbackState;
+    try {
+      const loaded = originalLoadAppState({ storageKey });
+      return loaded?.state || fallbackState;
+    } catch (_) {
+      return fallbackState;
+    }
+  }
+
   if (originalLoadAppState) {
     core.loadAppState = function loadAppStateWithPendingFlex(...args) {
       const result = originalLoadAppState(...args);
@@ -173,11 +187,27 @@
 
   if (originalSaveStateSnapshot) {
     core.saveStateSnapshot = function saveStateSnapshotWithPendingFlex(state, options = {}) {
+      const storageKey = options.storageKey || STORAGE_KEY;
       const record = readJournalRecord();
+
+      // A different Home tab may already have saved every shared journal entry
+      // while this tab's delayed fast save was waiting to run. Never let that
+      // drained request write its stale in-memory full snapshot back over the
+      // newer authoritative copy. Returning the authoritative state also lets
+      // the normal Home save assignment refresh this tab without another write.
+      if (options.savePath === SAVE_PATH && !record.malformed && !record.entries.length) {
+        return {
+          state: readAuthoritativeState(storageKey, state),
+          skipped: true,
+          skipReason: 'pending_flex_journal_already_drained',
+          flexFastPathDrained: true
+        };
+      }
+
       const candidate = record.malformed || !record.entries.length ? state : applyJournalToState(state, record.entries);
       const result = originalSaveStateSnapshot(candidate, options);
       if (!result?.skipped && !result?.blockedByQuotaCircuit && result?.state && record.entries.length) {
-        clearVerifiedJournal(options.storageKey || STORAGE_KEY);
+        clearVerifiedJournal(storageKey);
       }
       return result;
     };
@@ -190,13 +220,32 @@
     saveTimer = 0;
   }
 
+  function cancelRetryTimer() {
+    if (retryTimer) global.clearTimeout?.(retryTimer);
+    retryTimer = 0;
+  }
+
+  function resetRetryBackoff() {
+    cancelRetryTimer();
+    retryAttempt = 0;
+    retryPaused = false;
+  }
+
   function scheduleRetry() {
-    if (retryTimer || !readJournal().length) return;
+    const record = readJournalRecord();
+    if (retryTimer || retryPaused || record.malformed || !record.entries.length) return;
+    if (retryAttempt >= MAX_AUTOMATIC_RETRIES) {
+      retryPaused = true;
+      console.warn('TaskPoints paused automatic Flex Action save retries after repeated failures. The pending journal remains protected and will retry after the next Flex tap, storage update, or app resume.');
+      return;
+    }
+    const delay = Math.min(RETRY_BASE_DELAY_MS * (2 ** retryAttempt), RETRY_MAX_DELAY_MS);
+    retryAttempt += 1;
     retryTimer = global.setTimeout?.(() => {
       retryTimer = 0;
       savePending = true;
       persistNow('retry');
-    }, RETRY_DELAY_MS) || 0;
+    }, delay) || 0;
   }
 
   function requestFullRender() {
@@ -230,15 +279,25 @@
       console.warn('TaskPoints Flex Action background save failed; the pending completion journal was retained.', error);
     } finally {
       saveRunning = false;
-      requestFullRender();
     }
 
-    const remaining = readJournal().length;
-    if (remaining) scheduleRetry();
-    return remaining === 0;
+    const remainingRecord = readJournalRecord();
+    const remaining = remainingRecord.malformed ? 1 : remainingRecord.entries.length;
+    if (!remaining) {
+      resetRetryBackoff();
+      requestFullRender();
+      return true;
+    }
+
+    // Do not perform a heavy Home rerender on every failed retry. The orange
+    // dot is already painted, and the protected journal remains the source of
+    // truth until a later retry succeeds.
+    scheduleRetry();
+    return false;
   }
 
-  function scheduleSaveAfterPaint() {
+  function scheduleSaveAfterPaint(options = {}) {
+    if (options.resetRetry === true) resetRetryBackoff();
     savePending = true;
     if (saveRaf || saveTimer || saveRunning) return;
     const queueTimer = () => {
@@ -250,6 +309,18 @@
     };
     if (typeof global.requestAnimationFrame === 'function') saveRaf = global.requestAnimationFrame(queueTimer);
     else queueTimer();
+  }
+
+  function resumePendingSave(reason = 'resume') {
+    const record = readJournalRecord();
+    resetRetryBackoff();
+    if (record.malformed) return false;
+    if (record.entries.length) {
+      scheduleSaveAfterPaint();
+      return true;
+    }
+    if (savePending && !saveRunning) return persistNow(reason);
+    return false;
   }
 
   function findFlexRow(id) {
@@ -287,6 +358,7 @@
     if (current.__taskPointsFlexActionFastPath) return true;
     const wrapped = function flushPendingSavesWithFlex(...args) {
       const result = current.apply(this, args);
+      resetRetryBackoff();
       persistNow('core-flush');
       return result;
     };
@@ -354,7 +426,7 @@
       }
 
       if (fullRenderRequested) savePending = true;
-      if (saveRequested || readJournal().length) scheduleSaveAfterPaint();
+      if (saveRequested || readJournal().length) scheduleSaveAfterPaint({ resetRetry: true });
       return result;
     };
 
@@ -364,6 +436,7 @@
 
     if (originalResetAll && !originalResetAll.__taskPointsFlexActionFastPath) {
       const resetWithFlexFlush = function resetAllWithPendingFlex(...args) {
+        resetRetryBackoff();
         persistNow('before-reset');
         const priorConfirm = global.confirm;
         let resetConfirmed = false;
@@ -379,6 +452,7 @@
         } finally {
           if (global.confirm !== priorConfirm) global.confirm = priorConfirm;
           if (resetConfirmed) {
+            cancelRetryTimer();
             try { storage.removeItem(JOURNAL_KEY); } catch (_) {}
           }
         }
@@ -391,7 +465,7 @@
     installFlushBridge();
     uiInstalled = true;
 
-    if (readJournal().length) scheduleSaveAfterPaint();
+    if (readJournal().length) scheduleSaveAfterPaint({ resetRetry: true });
     return true;
   }
 
@@ -404,23 +478,34 @@
   }
 
   global.addEventListener?.('pagehide', () => persistNow('pagehide'));
+  global.addEventListener?.('pageshow', () => resumePendingSave('pageshow'));
+  global.addEventListener?.('storage', (event) => {
+    if (!event || (event.key !== JOURNAL_KEY && event.key !== STORAGE_KEY)) return;
+    resumePendingSave('storage-event');
+  });
   global.document?.addEventListener?.('visibilitychange', () => {
     if (global.document.visibilityState === 'hidden') persistNow('visibility-hidden');
+    else if (global.document.visibilityState === 'visible') resumePendingSave('visibility-visible');
   });
 
   core.PENDING_FLEX_COMPLETIONS_KEY = JOURNAL_KEY;
   core.readPendingFlexCompletions = readJournal;
   core.applyPendingFlexCompletions = applyJournalToState;
   core.getPendingFlexCompletionCount = () => readJournal().length;
-  core.flushPendingFlexCompletions = () => persistNow('explicit-flush');
+  core.flushPendingFlexCompletions = () => {
+    resetRetryBackoff();
+    return persistNow('explicit-flush');
+  };
   global.TaskPointsFlexActionFastPath = {
     journalKey: JOURNAL_KEY,
     installUiPatch,
     persistNow,
     scheduleSaveAfterPaint,
+    resumePendingSave,
     readJournal,
     readJournalRecord,
-    showInstantDot
+    showInstantDot,
+    getRetryStatus: () => ({ retryAttempt, retryPaused, retryScheduled: Boolean(retryTimer) })
   };
 
   if (global.document?.readyState === 'loading') global.document.addEventListener?.('DOMContentLoaded', installWhenReady, { once: true });
