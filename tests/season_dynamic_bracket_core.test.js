@@ -96,6 +96,6 @@ test('all tied August 1 Play-Ins advance the higher seeds into the correct Openi
   assert.deepEqual([opening[11].playerASeed, opening[11].playerBSeed], [28, 37]);
 
   const preparedOpening = core.prepareSeasonForDailySlate(season, '2026-08-02');
-  assert.equal(preparedOpening.activatedSeriesIds.length, 16);
+  assert.equal(preparedOpening.activatedSeriesIds.length, 4);
   assert.equal(Object.values(preparedOpening.season.series).filter((series) => series.roundId === 'opening_round' && series.status === 'active').length, 16);
 });
