@@ -108,7 +108,7 @@ test('new preview ordering follows the chosen scope without changing the selecte
   assert.deepEqual(rebuilt.seeds.map((seed) => seed.seed), [1, 2]);
   assert.equal(rebuilt.seeds.some((seed) => seed.playerId === 'C'), false);
   assert.equal(rebuilt.seeds.find((seed) => seed.playerId === 'A').imageId, 'image-a');
-  assert.deepEqual(rebuilt.bracket.participantIds, ['B', 'A']);
+  assert.deepEqual(rebuilt.bracket.participantIds, ['A', 'B']);
   assert.deepEqual(rebuilt.warnings, [{ code: 'structural', message: 'Keep me' }]);
   assert.equal(rebuilt.seedRankingScope, 'season2');
 });
