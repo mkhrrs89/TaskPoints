@@ -1533,7 +1533,7 @@ async function runMatrixBootAnim(){
     titleEl.textContent = MATRIX_WORD;
     tpBootFinishTimer = setTimeout(() => {
       finishMatrixBootNow();
-    }, 1000);
+    }, 180);
     bootAnimDoneResolve?.();
     return;
   }
@@ -1565,7 +1565,7 @@ async function runMatrixBootAnim(){
     }
   }
 
-  await new Promise(r => setTimeout(r, 120));
+  await new Promise(r => setTimeout(r, 80));
   if (tpBootSkipRequested){
     finishMatrixBootNow();
     bootAnimDoneResolve?.();
@@ -1574,7 +1574,7 @@ async function runMatrixBootAnim(){
   // Hold final title for a moment before boot completes
   tpBootFinishTimer = setTimeout(() => {
     finishMatrixBootNow();
-  }, 1000);
+  }, 180);
   bootAnimDoneResolve?.();
 }
 
