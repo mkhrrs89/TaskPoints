@@ -1,0 +1,1 @@
+Temporary guarded trigger for the early Matrix DOM-ready handoff fix.
