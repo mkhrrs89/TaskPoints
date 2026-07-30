@@ -128,7 +128,8 @@
     }
 
     const rebuildButton = panel.querySelector('[data-season-action="rebuild-standings"]');
-    if (rebuildButton) rebuildButton.textContent = 'Rebuild from selected rankings';
+    const rebuildButtonLabel = 'Rebuild from selected rankings';
+    if (rebuildButton && rebuildButton.textContent !== rebuildButtonLabel) rebuildButton.textContent = rebuildButtonLabel;
 
     const cardHeader = panel.previousElementSibling;
     const headingWrap = cardHeader?.querySelector?.('.season-section-title')?.parentElement;
@@ -139,7 +140,8 @@
       headingWrap.appendChild(summary);
     }
     const summary = headingWrap?.querySelector?.('[data-season-ranking-source-summary]');
-    if (summary) summary.textContent = `Ranking source: ${SCOPE_LABELS[selectedScope]}.`;
+    const summaryText = `Ranking source: ${SCOPE_LABELS[selectedScope]}.`;
+    if (summary && summary.textContent !== summaryText) summary.textContent = summaryText;
   }
 
   function enhanceCreatePanel(root) {
