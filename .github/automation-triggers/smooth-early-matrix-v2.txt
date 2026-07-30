@@ -1,1 +1,0 @@
-Trigger guarded smooth Matrix patch on the fresh branch.
