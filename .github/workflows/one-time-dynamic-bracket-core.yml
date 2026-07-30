@@ -1,6 +1,8 @@
 name: One-time dynamic bracket core
 
 on:
+  push:
+    branches: [agent/build-a-bracket-page]
   pull_request_target:
     types: [opened, synchronize, reopened]
 
@@ -10,9 +12,11 @@ permissions:
 jobs:
   patch:
     if: >-
-      github.event.pull_request.head.ref == 'agent/build-a-bracket-page' &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.base.ref == 'main'
+      (github.event_name == 'push' && github.ref_name == 'agent/build-a-bracket-page') ||
+      (github.event_name == 'pull_request_target' &&
+       github.event.pull_request.head.ref == 'agent/build-a-bracket-page' &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       github.event.pull_request.base.ref == 'main')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -32,11 +36,24 @@ jobs:
           node -c season_bracket_builder_core.js
           node -c season_bracket_builder.js
           node -c season_bracket_builder_entry.js
-          node --test tests/season_bracket_builder.test.js tests/season_dynamic_bracket_core.test.js
+          node --test \
+            tests/season_bracket_builder.test.js \
+            tests/season_dynamic_bracket_core.test.js \
+            tests/season_result_sync_regression.test.js \
+            tests/season_series_winner_score_repair.test.js \
+            tests/season_bracket_player_meta.test.js
           if ! git diff --quiet; then
             git config user.name "TaskPoints Automation"
             git config user.email "actions@users.noreply.github.com"
-            git add -A -- scoring_core.js .github/scripts/patch_dynamic_bracket_core.py .github/automation-triggers/build-a-bracket.txt
-            git commit -m "Support dynamic Season brackets"
+            git add -A -- \
+              scoring_core.js \
+              season_bracket_builder_core.js \
+              season_bracket_builder.js \
+              season_bracket_builder_entry.js \
+              tests/season_bracket_builder.test.js \
+              tests/season_dynamic_bracket_core.test.js \
+              .github/scripts/patch_dynamic_bracket_core.py \
+              .github/automation-triggers/build-a-bracket.txt
+            git commit -m "Finish dynamic bracket review fixes"
             git push origin HEAD:agent/build-a-bracket-page
           fi
