@@ -5,6 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const source = fs.readFileSync(path.resolve(__dirname, '..', 'season_champion_gold_bonus.js'), 'utf8');
+const loaderSource = fs.readFileSync(path.resolve(__dirname, '..', 'indexeddb_requalification_guard.js'), 'utf8');
 
 function makeContext(pathname = '/other.html') {
   const storage = new Map();
@@ -85,4 +86,42 @@ test('Season 1 rankings scope excludes post-June champion bonuses', () => {
   context.computeRankingExtrasForPlayer = () => ({ gold: 3, mov: 0, baseDelta: 0 });
   context.TaskPointsSeasonChampionGoldBonus.patchRankingsGold();
   assert.equal(context.computeRankingExtrasForPlayer({ id: 'A' }, { playerId: 'A' }, state).gold, 3);
+});
+
+test('shared scoring bundle loader requests the champion Gold module once', () => {
+  const appended = [];
+  const localStorage = {
+    getItem: () => null,
+    setItem: () => undefined,
+    removeItem: () => undefined
+  };
+  const document = {
+    head: { appendChild: (node) => appended.push(node) },
+    querySelector: () => null,
+    createElement: () => ({ dataset: {} })
+  };
+  const context = vm.createContext({
+    console,
+    Date,
+    Math,
+    Number,
+    String,
+    JSON,
+    Map,
+    Set,
+    document,
+    localStorage,
+    TaskPointsCore: {
+      STORAGE_KEY: 'taskpoints_v1',
+      PHASE4_STORAGE_MODE_KEY: 'taskpoints_phase4_storage_mode_v1',
+      setPhase4StorageMode: (mode) => mode,
+      getPhase4StorageMode: () => 'off'
+    }
+  });
+  context.window = context;
+  context.globalThis = context;
+  vm.runInContext(loaderSource, context);
+  assert.equal(appended.length, 1);
+  assert.equal(appended[0].src, 'season_champion_gold_bonus.js');
+  assert.equal(appended[0].dataset.taskpointsChampionGold, 'true');
 });
