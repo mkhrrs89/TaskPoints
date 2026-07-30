@@ -1,0 +1,75 @@
+name: One-time faster boot finish
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  patch-index:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shorten completed-title hold
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("index.html")
+          text = path.read_text(encoding="utf-8")
+
+          timer_old = '''    tpBootFinishTimer = setTimeout(() => {
+              finishMatrixBootNow();
+            }, 1000);'''
+          timer_new = '''    tpBootFinishTimer = setTimeout(() => {
+              finishMatrixBootNow();
+            }, 180);'''
+          pause_old = '  await new Promise(r => setTimeout(r, 120));'
+          pause_new = '  await new Promise(r => setTimeout(r, 80));'
+
+          timer_count = text.count(timer_old)
+          pause_count = text.count(pause_old)
+          if timer_count != 2:
+              raise SystemExit(f"Expected exactly two 1000 ms boot-finish timers, found {timer_count}")
+          if pause_count != 1:
+              raise SystemExit(f"Expected exactly one 120 ms final pause, found {pause_count}")
+
+          text = text.replace(timer_old, timer_new)
+          text = text.replace(pause_old, pause_new, 1)
+          path.write_text(text, encoding="utf-8")
+
+      - name: Verify exact scope
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          text = Path("index.html").read_text(encoding="utf-8")
+          timer_new = '''    tpBootFinishTimer = setTimeout(() => {
+              finishMatrixBootNow();
+            }, 180);'''
+          timer_old = '''    tpBootFinishTimer = setTimeout(() => {
+              finishMatrixBootNow();
+            }, 1000);'''
+          assert text.count(timer_new) == 2
+          assert text.count(timer_old) == 0
+          assert text.count('  await new Promise(r => setTimeout(r, 80));') == 1
+          assert text.count('  await new Promise(r => setTimeout(r, 120));') == 0
+          assert 'setTimeout(() => splash.remove(), 320);' in text
+          PY
+          test "$(git diff --numstat -- index.html)" = $'3\t3\tindex.html'
+          git diff --check
+          git diff --unified=3 -- index.html
+
+      - name: Commit patch and remove one-time workflow
+        shell: bash
+        run: |
+          rm .github/workflows/one-time-faster-boot-finish.yml
+          git config user.name "TaskPoints Automation"
+          git config user.email "actions@users.noreply.github.com"
+          git add index.html .github/workflows/one-time-faster-boot-finish.yml
+          git commit -m "Shorten startup animation finish delay"
+          git push origin HEAD:main
