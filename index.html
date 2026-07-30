@@ -578,70 +578,72 @@ Nothing visible on the page is built here. === -->
   const animationStyle = document.createElement("style");
   animationStyle.id = "tp-early-matrix-animation-style";
   animationStyle.textContent = `
-    #matrixTitle .tp-matrix-cell {
-      position: relative;
+    #matrixTitle .tp-matrix-window {
+      display: inline-block;
       height: 1.15em;
       line-height: 1.15em;
       overflow: hidden;
       vertical-align: middle;
+      contain: layout paint;
+      transform: translateZ(0);
     }
-    #matrixTitle .tp-matrix-reel {
+    #matrixTitle .tp-matrix-strip {
       display: flex;
       flex-direction: column;
       transform: translate3d(0, 0, 0);
+      backface-visibility: hidden;
       will-change: transform;
-      animation: tpMatrixGlyphReel 210ms steps(7, end) forwards;
+      animation: tpMatrixWordStrip 1500ms steps(30, end) forwards;
     }
-    #matrixTitle .tp-matrix-reel > span {
+    #matrixTitle .tp-matrix-frame {
       display: block;
       flex: 0 0 1.15em;
       height: 1.15em;
       line-height: 1.15em;
+      white-space: nowrap;
       text-align: center;
     }
-    #matrixTitle .tp-matrix-final {
+    #matrixTitle .tp-matrix-frame:last-child {
       color: #eafff1;
     }
-    #matrixTitle.tp-matrix-skip .tp-matrix-reel {
+    #matrixTitle.tp-matrix-skip .tp-matrix-strip {
       animation: none !important;
-      transform: translate3d(0, -8.05em, 0) !important;
+      transform: translate3d(0, -34.5em, 0) !important;
     }
-    @keyframes tpMatrixGlyphReel {
-      to { transform: translate3d(0, -8.05em, 0); }
+    @keyframes tpMatrixWordStrip {
+      to { transform: translate3d(0, -34.5em, 0); }
     }
   `;
   document.head.appendChild(animationStyle);
 
   const randomGlyph = () => glyphs[(Math.random() * glyphs.length) | 0];
-  const randomFrameCount = 7;
-  const characterDurationMs = 210;
-  const initialDelayMs = 90;
+  const totalSteps = 30;
+  const framesPerLock = 3;
+  const visualDurationMs = 1500;
   let completionScheduled = false;
-  let lastReel = null;
 
   titleEl.innerHTML = "";
-  for (let index = 0; index < word.length; index++){
-    const cell = document.createElement("span");
-    cell.className = "matrixChar tp-matrix-cell";
+  const windowEl = document.createElement("span");
+  windowEl.className = "tp-matrix-window";
+  const strip = document.createElement("span");
+  strip.className = "tp-matrix-strip";
 
-    const reel = document.createElement("span");
-    reel.className = "tp-matrix-reel";
-    reel.style.animationDelay = `${initialDelayMs + (index * characterDurationMs)}ms`;
-
-    for (let frameIndex = 0; frameIndex < randomFrameCount; frameIndex++){
-      const frame = document.createElement("span");
-      frame.textContent = randomGlyph();
-      reel.appendChild(frame);
+  for (let frameIndex = 0; frameIndex <= totalSteps; frameIndex++){
+    const lockedCount = Math.min(word.length, Math.floor(frameIndex / framesPerLock));
+    let frameText = "";
+    for (let charIndex = 0; charIndex < word.length; charIndex++){
+      frameText += charIndex < lockedCount ? word[charIndex] : randomGlyph();
     }
+    if (frameIndex === totalSteps) frameText = word;
 
-    const finalFrame = document.createElement("span");
-    finalFrame.className = "tp-matrix-final locked";
-    finalFrame.textContent = word[index];
-    reel.appendChild(finalFrame);
-    cell.appendChild(reel);
-    titleEl.appendChild(cell);
-    lastReel = reel;
+    const frame = document.createElement("span");
+    frame.className = "tp-matrix-frame";
+    frame.textContent = frameText;
+    strip.appendChild(frame);
   }
+
+  windowEl.appendChild(strip);
+  titleEl.appendChild(windowEl);
 
   const completeAfterVisual = () => {
     if (completionScheduled || skipRequested || finished) return;
@@ -652,10 +654,8 @@ Nothing visible on the page is built here. === -->
     }, 80);
   };
 
-  lastReel?.addEventListener("animationend", completeAfterVisual, { once: true });
-  const visualDurationMs = initialDelayMs + (word.length * characterDurationMs);
+  strip.addEventListener("animationend", completeAfterVisual, { once: true });
   setTimeout(completeAfterVisual, visualDurationMs + 120);
-
 
 })();
 </script>
