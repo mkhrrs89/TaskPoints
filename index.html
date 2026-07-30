@@ -578,24 +578,30 @@ Nothing visible on the page is built here. === -->
   const animationStyle = document.createElement("style");
   animationStyle.id = "tp-early-matrix-animation-style";
   animationStyle.textContent = `
-    #matrixTitle .tp-matrix-window {
+    #matrixTitle .tp-matrix-stage {
+      position: relative;
       display: inline-block;
       height: 1.15em;
       line-height: 1.15em;
-      overflow: hidden;
-      vertical-align: middle;
+      white-space: nowrap;
       contain: layout paint;
       transform: translateZ(0);
     }
-    #matrixTitle .tp-matrix-strip {
+    #matrixTitle .tp-matrix-scramble-window {
+      display: block;
+      height: 1.15em;
+      line-height: 1.15em;
+      overflow: hidden;
+    }
+    #matrixTitle .tp-matrix-scramble-strip {
       display: flex;
       flex-direction: column;
       transform: translate3d(0, 0, 0);
       backface-visibility: hidden;
       will-change: transform;
-      animation: tpMatrixWordStrip 1500ms steps(30, end) forwards;
+      animation: tpMatrixScrambleStrip 220ms steps(4, end) forwards;
     }
-    #matrixTitle .tp-matrix-frame {
+    #matrixTitle .tp-matrix-scramble-frame {
       display: block;
       flex: 0 0 1.15em;
       height: 1.15em;
@@ -603,47 +609,74 @@ Nothing visible on the page is built here. === -->
       white-space: nowrap;
       text-align: center;
     }
-    #matrixTitle .tp-matrix-frame:last-child {
+    #matrixTitle .tp-matrix-final-layer {
+      position: absolute;
+      inset: 0;
       color: #eafff1;
+      white-space: nowrap;
+      text-align: center;
+      clip-path: inset(0 100% 0 0);
+      -webkit-clip-path: inset(0 100% 0 0);
+      transform: translateZ(0);
+      will-change: clip-path;
+      animation: tpMatrixReveal 900ms steps(10, end) 220ms forwards;
     }
-    #matrixTitle.tp-matrix-skip .tp-matrix-strip {
+    #matrixTitle.tp-matrix-skip .tp-matrix-scramble-strip {
       animation: none !important;
-      transform: translate3d(0, -34.5em, 0) !important;
+      transform: translate3d(0, -4.6em, 0) !important;
     }
-    @keyframes tpMatrixWordStrip {
-      to { transform: translate3d(0, -34.5em, 0); }
+    #matrixTitle.tp-matrix-skip .tp-matrix-final-layer {
+      animation: none !important;
+      clip-path: inset(0 0 0 0) !important;
+      -webkit-clip-path: inset(0 0 0 0) !important;
+    }
+    @keyframes tpMatrixScrambleStrip {
+      to { transform: translate3d(0, -4.6em, 0); }
+    }
+    @keyframes tpMatrixReveal {
+      to {
+        clip-path: inset(0 0 0 0);
+        -webkit-clip-path: inset(0 0 0 0);
+      }
     }
   `;
   document.head.appendChild(animationStyle);
 
   const randomGlyph = () => glyphs[(Math.random() * glyphs.length) | 0];
-  const totalSteps = 30;
-  const framesPerLock = 3;
-  const visualDurationMs = 1500;
+  const scrambleFrameCount = 5;
+  const visualDurationMs = 1120;
   let completionScheduled = false;
 
+  const randomWord = () => {
+    let value = "";
+    for (let index = 0; index < word.length; index++) value += randomGlyph();
+    return value;
+  };
+
   titleEl.innerHTML = "";
-  const windowEl = document.createElement("span");
-  windowEl.className = "tp-matrix-window";
-  const strip = document.createElement("span");
-  strip.className = "tp-matrix-strip";
+  const stage = document.createElement("span");
+  stage.className = "tp-matrix-stage";
 
-  for (let frameIndex = 0; frameIndex <= totalSteps; frameIndex++){
-    const lockedCount = Math.min(word.length, Math.floor(frameIndex / framesPerLock));
-    let frameText = "";
-    for (let charIndex = 0; charIndex < word.length; charIndex++){
-      frameText += charIndex < lockedCount ? word[charIndex] : randomGlyph();
-    }
-    if (frameIndex === totalSteps) frameText = word;
+  const scrambleWindow = document.createElement("span");
+  scrambleWindow.className = "tp-matrix-scramble-window";
+  const scrambleStrip = document.createElement("span");
+  scrambleStrip.className = "tp-matrix-scramble-strip";
 
+  for (let frameIndex = 0; frameIndex < scrambleFrameCount; frameIndex++){
     const frame = document.createElement("span");
-    frame.className = "tp-matrix-frame";
-    frame.textContent = frameText;
-    strip.appendChild(frame);
+    frame.className = "tp-matrix-scramble-frame";
+    frame.textContent = randomWord();
+    scrambleStrip.appendChild(frame);
   }
 
-  windowEl.appendChild(strip);
-  titleEl.appendChild(windowEl);
+  const finalLayer = document.createElement("span");
+  finalLayer.className = "tp-matrix-final-layer";
+  finalLayer.textContent = word;
+
+  scrambleWindow.appendChild(scrambleStrip);
+  stage.appendChild(scrambleWindow);
+  stage.appendChild(finalLayer);
+  titleEl.appendChild(stage);
 
   const completeAfterVisual = () => {
     if (completionScheduled || skipRequested || finished) return;
@@ -654,7 +687,7 @@ Nothing visible on the page is built here. === -->
     }, 80);
   };
 
-  strip.addEventListener("animationend", completeAfterVisual, { once: true });
+  finalLayer.addEventListener("animationend", completeAfterVisual, { once: true });
   setTimeout(completeAfterVisual, visualDurationMs + 120);
 
 })();
