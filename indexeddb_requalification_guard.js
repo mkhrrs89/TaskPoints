@@ -128,3 +128,14 @@
   const currentMode = core.getPhase4StorageMode?.() || get(MODE_KEY) || 'off';
   if (currentMode !== 'off' && !permission(currentMode).allowed) originalSetMode('off');
 })(typeof window !== 'undefined' ? window : globalThis);
+
+;(function loadTaskPointsSeasonChampionGoldBonus(global) {
+  'use strict';
+  const document = global.document;
+  if (!document?.head || document.querySelector?.('script[data-taskpoints-champion-gold]')) return;
+  const script = document.createElement('script');
+  script.src = 'season_champion_gold_bonus.js';
+  script.defer = true;
+  script.dataset.taskpointsChampionGold = 'true';
+  document.head.appendChild(script);
+})(typeof window !== 'undefined' ? window : globalThis);
