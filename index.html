@@ -13195,9 +13195,16 @@ function applyCapitalizeWordsInput(input) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  const earlyBootPromise = window.__tpMatrixFinishedPromise;
   const shouldPlayBoot = !hasSeenBootThisSession();
 
-  if (shouldPlayBoot){
+  if (earlyBootPromise && typeof earlyBootPromise.then === "function"){
+    markBootSeenThisSession();
+    if (!window.__tpMatrixFinished) document.body.classList.add('booting');
+    earlyBootPromise.then(() => {
+      if (typeof bootAnimDoneResolve === "function") bootAnimDoneResolve();
+    });
+  } else if (shouldPlayBoot){
     document.body.classList.add('booting');
     markBootSeenThisSession();
     runMatrixBootAnim();
