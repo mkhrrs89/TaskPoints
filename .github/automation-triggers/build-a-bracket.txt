@@ -1,7 +1,0 @@
-Apply the guarded review fixes, run all bracket tests, and remove this trigger plus the patch script.
-Retry after review findings.
-Force pull request synchronize.
-Final workflow trigger.
-Another synchronization event.
-Please run.
-Last synchronize attempt before reopen.
