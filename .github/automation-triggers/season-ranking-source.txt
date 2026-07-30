@@ -1,1 +1,2 @@
 Apply the season ranking source selector patch.
+Retry after initial PR event.
