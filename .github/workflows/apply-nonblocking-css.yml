@@ -1,0 +1,51 @@
+name: Apply nonblocking CSS patch
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.head_ref == 'agent/nonblocking-css'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+      - name: Patch stylesheet loading
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('index.html')
+          text = path.read_text(encoding='utf-8')
+          old = '''  <link rel="stylesheet" href="assets/tailwind.css">
+
+<link rel="stylesheet" href="styles.css">'''
+          new = '''  <link rel="preload" href="assets/tailwind.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+  <link rel="preload" href="styles.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+  <noscript>
+    <link rel="stylesheet" href="assets/tailwind.css">
+    <link rel="stylesheet" href="styles.css">
+  </noscript>'''
+          if new in text:
+              print('Patch already present.')
+          elif old in text:
+              path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          else:
+              raise SystemExit('Expected stylesheet block not found; refusing to modify index.html')
+          PY
+      - name: Commit patch when needed
+        run: |
+          if git diff --quiet -- index.html; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git commit -m "Load home styles without blocking splash"
+          git push origin HEAD:${{ github.head_ref }}
