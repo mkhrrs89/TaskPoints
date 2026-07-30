@@ -20,9 +20,11 @@
 
     const existing = root.querySelector('[data-season-action="create-official-bracket"], [data-season-action="open-bracket-builder"]');
     if (existing) {
-      existing.dataset.seasonAction = 'open-bracket-builder';
-      existing.textContent = season.bracketConfig ? 'Continue Building Bracket' : 'Build Bracket';
-      existing.disabled = !Array.isArray(season.seeds) || season.seeds.length < 2;
+      if (existing.dataset.seasonAction !== 'open-bracket-builder') existing.dataset.seasonAction = 'open-bracket-builder';
+      const label = season.bracketConfig ? 'Continue Building Bracket' : 'Build Bracket';
+      if (existing.textContent !== label) existing.textContent = label;
+      const shouldDisable = !Array.isArray(season.seeds) || season.seeds.length < 2;
+      if (existing.disabled !== shouldDisable) existing.disabled = shouldDisable;
     }
 
     const hero = root.querySelector('.season-hero-card');
@@ -36,7 +38,8 @@
 
     root.querySelectorAll('.season-manual-banner').forEach((banner) => {
       if (!/designed for 34 players/i.test(banner.textContent || '')) return;
-      banner.textContent = 'This seed list is ready for the dynamic bracket builder. Choose the tournament field and format before official creation.';
+      const message = 'This seed list is ready for the dynamic bracket builder. Choose the tournament field and format before official creation.';
+      if (banner.textContent !== message) banner.textContent = message;
     });
   }
 
