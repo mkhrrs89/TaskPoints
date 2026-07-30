@@ -94,6 +94,7 @@ if old_start in early:
   const visualDurationMs = initialDelayMs + (word.length * characterDurationMs);
   setTimeout(completeAfterVisual, visualDurationMs + 120);
   '''
+    new_animation = "\n".join(line.rstrip() for line in new_animation.splitlines()) + "\n"
 
     early = early[:replace_start] + new_animation + early[replace_end:]
 
