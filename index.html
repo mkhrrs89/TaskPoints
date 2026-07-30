@@ -512,6 +512,111 @@ Nothing visible on the page is built here. === -->
   <div id="matrixTitle" class="matrixTitle" role="img" aria-label="TASKPOINTS"></div>
 </div>
 
+<script id="tp-early-matrix-bootstrap">
+(function startEarlyMatrixBoot(){
+  const splash = document.getElementById("bootSplash");
+  const titleEl = document.getElementById("matrixTitle");
+  const shouldPlayBoot = document.documentElement.classList.contains("tp-boot-pending");
+  const word = "TASKPOINTS";
+  const glyphs = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#$%&*+?@";
+  let finished = false;
+  let skipRequested = false;
+  let finishTimer = null;
+  let skipCleanup = null;
+  let resolveFinished;
+
+  window.__tpMatrixFinished = false;
+  window.__tpMatrixFinishedPromise = new Promise(resolve => {
+    resolveFinished = resolve;
+  });
+  window.__tpBootAnimStarted = true;
+
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    if (finishTimer !== null) clearTimeout(finishTimer);
+    if (typeof skipCleanup === "function") skipCleanup();
+    window.__tpMatrixFinished = true;
+    try { performance.mark("tp-matrix-finished"); } catch (e) {}
+    resolveFinished?.();
+    window.dispatchEvent(new Event("tp:matrixFinished"));
+  };
+
+  if (!splash || !titleEl){
+    finish();
+    return;
+  }
+
+  if (!shouldPlayBoot){
+    finish();
+    splash.remove();
+    return;
+  }
+
+  document.body.classList.add("booting");
+  try { performance.mark("tp-matrix-started"); } catch (e) {}
+
+  const requestSkip = () => {
+    if (skipRequested || finished) return;
+    skipRequested = true;
+    finish();
+  };
+  splash.addEventListener("pointerdown", requestSkip, { passive: true });
+  splash.addEventListener("click", requestSkip, { passive: true });
+  skipCleanup = () => {
+    splash.removeEventListener("pointerdown", requestSkip);
+    splash.removeEventListener("click", requestSkip);
+  };
+
+  if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches){
+    titleEl.textContent = word;
+    finishTimer = setTimeout(finish, 180);
+    return;
+  }
+
+  const randomGlyph = () => glyphs[(Math.random() * glyphs.length) | 0];
+  const spans = [];
+  titleEl.innerHTML = "";
+  for (const finalChar of word){
+    const span = document.createElement("span");
+    span.className = "matrixChar";
+    span.dataset.final = finalChar;
+    span.textContent = randomGlyph();
+    titleEl.appendChild(span);
+    spans.push(span);
+  }
+
+  const decodeOne = (span, finalChar) => new Promise(resolve => {
+    const start = performance.now();
+    const interval = setInterval(() => {
+      if (skipRequested){
+        clearInterval(interval);
+        resolve();
+        return;
+      }
+      span.textContent = randomGlyph();
+      if (performance.now() - start >= 210){
+        clearInterval(interval);
+        span.textContent = finalChar;
+        span.classList.add("locked");
+        resolve();
+      }
+    }, 20);
+  });
+
+  (async () => {
+    for (const span of spans){
+      if (skipRequested) return;
+      await decodeOne(span, span.dataset.final);
+    }
+    if (skipRequested) return;
+    await new Promise(resolve => setTimeout(resolve, 80));
+    if (skipRequested) return;
+    finishTimer = setTimeout(finish, 180);
+  })();
+})();
+</script>
+
 <!-- =========================================================================
            Everything visible on the page lives inside <body>.
 ========================================================================== -->
@@ -13090,9 +13195,16 @@ function applyCapitalizeWordsInput(input) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  const earlyBootPromise = window.__tpMatrixFinishedPromise;
   const shouldPlayBoot = !hasSeenBootThisSession();
 
-  if (shouldPlayBoot){
+  if (earlyBootPromise && typeof earlyBootPromise.then === "function"){
+    markBootSeenThisSession();
+    if (!window.__tpMatrixFinished) document.body.classList.add('booting');
+    earlyBootPromise.then(() => {
+      if (typeof bootAnimDoneResolve === "function") bootAnimDoneResolve();
+    });
+  } else if (shouldPlayBoot){
     document.body.classList.add('booting');
     markBootSeenThisSession();
     runMatrixBootAnim();
@@ -14238,8 +14350,11 @@ const dismissReminderForSession = () => {
 
 <script>
 (function(){
+  let bootFinished = false;
 
   function finishBoot(){
+    if (bootFinished) return;
+    bootFinished = true;
     const splash = document.getElementById("bootSplash");
     const app = document.getElementById("appRoot");
 
@@ -14262,10 +14377,18 @@ const dismissReminderForSession = () => {
     window.dispatchEvent(new Event("tp:bootFinished"));
   }
 
-  // Wait for matrix animation to finish
-  window.addEventListener("tp:matrixFinished", finishBoot);
+  // The early bootstrap may finish before this late app-ready gate exists.
+  if (window.__tpMatrixFinished){
+    finishBoot();
+  } else {
+    window.addEventListener("tp:matrixFinished", finishBoot, { once: true });
+    const matrixFinishedPromise = window.__tpMatrixFinishedPromise;
+    if (matrixFinishedPromise && typeof matrixFinishedPromise.then === "function"){
+      matrixFinishedPromise.then(finishBoot);
+    }
+  }
 
-  // failsafe in case event never fires
+  // failsafe in case the bootstrap cannot complete
   setTimeout(finishBoot, 4000);
 
 })();
