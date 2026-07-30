@@ -20,9 +20,10 @@
 
     const seasonId = String(season?.id || '').toLowerCase();
     const seasonName = String(season?.name || '').toLowerCase();
+    const seasonLabel = String(season?.label || '').toLowerCase();
     const monthKey = String(season?.monthKey || '');
-    if (seasonId.includes('season_2') || seasonName === 'season 2' || monthKey === '2026-08') return SCOPE_SEASON_TWO;
-    if (seasonId.includes('season_1') || seasonName === 'season 1' || monthKey === '2026-06') return SCOPE_SEASON_ONE;
+    if (seasonId.includes('season_2') || seasonName === 'season 2' || monthKey === '2026-08' || seasonLabel.includes('august 2026')) return SCOPE_SEASON_TWO;
+    if (seasonId.includes('season_1') || seasonName === 'season 1' || monthKey === '2026-06' || seasonLabel.includes('june 2026')) return SCOPE_SEASON_ONE;
     return SCOPE_OVERALL;
   }
 
@@ -138,7 +139,7 @@
       headingWrap.appendChild(summary);
     }
     const summary = headingWrap?.querySelector?.('[data-season-ranking-source-summary]');
-    if (summary) summary.textContent = `Current ranking source: ${SCOPE_LABELS[selectedScope]}.`;
+    if (summary) summary.textContent = `Ranking source: ${SCOPE_LABELS[selectedScope]}.`;
   }
 
   function enhanceCreatePanel(root) {
@@ -186,7 +187,7 @@
     const scopedInput = {
       ...(state || {}),
       players: (Array.isArray(state?.players) ? state.players : [])
-        .filter((player) => included.has(player?.id))
+        .filter((player) => included.has(player?.id || player?.playerId))
     };
     const projected = seasonApi.generateProjectedSeeds(getScopedState(scopedInput, normalized));
     const baseSeeds = Array.isArray(baseSeason?.seeds) ? baseSeason.seeds : [];
