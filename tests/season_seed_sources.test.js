@@ -67,6 +67,11 @@ test('ranking source defaults follow the season being previewed', () => {
   assert.equal(seedSources.normalizeScope('', { id: 'season_2_august_2026' }), 'season2');
   assert.equal(seedSources.normalizeScope('', { name: 'Season 1' }), 'season1');
   assert.equal(seedSources.normalizeScope('', { name: 'Season 2' }), 'season2');
+  assert.equal(seedSources.normalizeScope('', {
+    name: 'Season 1',
+    monthKey: '2026-06',
+    label: 'August 2026 TaskPoints Championship'
+  }), 'season2');
   assert.equal(seedSources.normalizeScope('', { name: 'Future Season' }), 'overall');
 });
 
