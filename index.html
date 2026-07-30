@@ -13255,7 +13255,19 @@ function refreshMainPageFromStorage() {
   scheduleRender(renderAll);
 }
 
-window.addEventListener('pageshow', () => {
+let hasCompletedInitialPageShow = false;
+
+window.addEventListener('pageshow', (event) => {
+  if (!hasCompletedInitialPageShow) {
+    hasCompletedInitialPageShow = true;
+
+    if (event.persisted) {
+      refreshMainPageFromStorage();
+    }
+
+    return;
+  }
+
   refreshMainPageFromStorage();
 });
 
