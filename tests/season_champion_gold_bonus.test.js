@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const source = fs.readFileSync(path.resolve(__dirname, '..', 'indexeddb_requalification_guard.js'), 'utf8');
+const source = fs.readFileSync(path.resolve(__dirname, '..', 'season_champion_gold_bonus.js'), 'utf8');
 
 function makeContext(pathname = '/other.html') {
   const storage = new Map();
@@ -43,9 +43,6 @@ function makeContext(pathname = '/other.html') {
     setTimeout: () => 0,
     TaskPointsCore: {
       STORAGE_KEY: 'taskpoints_v1',
-      PHASE4_STORAGE_MODE_KEY: 'taskpoints_phase4_storage_mode_v1',
-      setPhase4StorageMode: (mode) => mode,
-      getPhase4StorageMode: () => 'off',
       loadAppState: () => ({ state }),
       getSeasonChampionFromFinals: () => null
     }
@@ -71,12 +68,21 @@ test('homepage Gold wrapper adds the champion bonus once', () => {
   assert.equal(context.formatHomepageGold('A'), 'Gold: 52.5');
 });
 
-test('rankings Gold wrapper includes champion bonus without changing other extras', () => {
+test('rankings Gold wrapper includes only championships allowed by the active scope', () => {
   const { context, state } = makeContext('/rankings.html');
+  context.rankingsScopeAllowsDate = (dateKey) => dateKey >= '2027-01-01';
   context.computeRankingExtrasForPlayer = () => ({ gold: 4.2, mov: 7, baseDelta: 1 });
   assert.equal(context.TaskPointsSeasonChampionGoldBonus.patchRankingsGold(), true);
   assert.deepEqual(
-    JSON.parse(JSON.stringify(context.computeRankingExtrasForPlayer({ id: 'B' }, { playerId: 'B' }, state))),
-    { gold: 29.2, mov: 7, baseDelta: 1 }
+    JSON.parse(JSON.stringify(context.computeRankingExtrasForPlayer({ id: 'A' }, { playerId: 'A' }, state))),
+    { gold: 4.2, mov: 7, baseDelta: 1 }
   );
+});
+
+test('Season 1 rankings scope excludes post-June champion bonuses', () => {
+  const { context, state } = makeContext('/rankings.html');
+  context.rankingsScopeAllowsDate = (dateKey) => dateKey < '2026-07-01';
+  context.computeRankingExtrasForPlayer = () => ({ gold: 3, mov: 0, baseDelta: 0 });
+  context.TaskPointsSeasonChampionGoldBonus.patchRankingsGold();
+  assert.equal(context.computeRankingExtrasForPlayer({ id: 'A' }, { playerId: 'A' }, state).gold, 3);
 });
