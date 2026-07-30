@@ -186,6 +186,10 @@ jobs:
             text = text.replace(old_wait, new_wait, 1)
             path.write_text(text, encoding='utf-8')
 
+          trigger = Path('.github/automation-triggers/immediate-matrix-boot.txt')
+          if trigger.exists():
+            trigger.unlink()
+
           verified = path.read_text(encoding='utf-8')
           assert verified.count('id="tp-early-matrix-bootstrap"') == 1
           assert verified.count('window.__tpMatrixFinishedPromise = new Promise') == 1
@@ -196,23 +200,28 @@ jobs:
           assert verified.count('runMatrixBootAnim();') == 1
           assert '<script src="scoring_core.js"></script>' in verified
 
-      - name: Verify and commit only index.html
+      - name: Verify and commit the guarded patch
         shell: bash
         run: |
           set -euo pipefail
           git diff --check
-          changed="$(git diff --name-only)"
-          if [ -z "$changed" ]; then
+          mapfile -t changed < <(git diff --name-only | sort)
+          if [ "${#changed[@]}" -eq 0 ]; then
             echo "Guarded patch is already applied."
             exit 0
           fi
-          if [ "$changed" != "index.html" ]; then
-            echo "Unexpected changed files:"
-            printf '%s\n' "$changed"
+          for file in "${changed[@]}"; do
+            case "$file" in
+              index.html|.github/automation-triggers/immediate-matrix-boot.txt) ;;
+              *) echo "Unexpected changed file: $file"; exit 1 ;;
+            esac
+          done
+          if ! printf '%s\n' "${changed[@]}" | grep -qx 'index.html'; then
+            echo "index.html was not changed as expected."
             exit 1
           fi
           git config user.name "TaskPoints Automation"
           git config user.email "actions@users.noreply.github.com"
-          git add index.html
+          git add -A -- index.html .github/automation-triggers/immediate-matrix-boot.txt
           git commit -m "Start Matrix animation immediately"
           git push origin HEAD:automation/immediate-matrix-boot
