@@ -77,11 +77,11 @@
   }
 
   function readSeasonState() {
-    if (typeof seasonApi.loadSeasonState === 'function') return seasonApi.loadSeasonState();
     if (typeof core.loadAppState === 'function') {
       const loaded = core.loadAppState({ syncDerived: false, persistSync: false });
       return loaded?.state || loaded || {};
     }
+    if (typeof seasonApi.loadSeasonState === 'function') return seasonApi.loadSeasonState();
     return {};
   }
 
@@ -165,6 +165,19 @@
       ...rebuilt,
       seedRankingScope: normalized
     };
+  }
+
+  function getSeedDataSnapshot(season) {
+    return JSON.stringify((Array.isArray(season?.seeds) ? season.seeds : []).map((seed) => ({
+      seed: Number(seed?.seed) || 0,
+      playerId: seed?.playerId || seed?.id || '',
+      wins: Number(seed?.wins) || 0,
+      losses: Number(seed?.losses) || 0,
+      winPct: Number(seed?.winPct) || 0,
+      totalPoints: Number(seed?.totalPoints) || 0,
+      averageScore: Number(seed?.averageScore) || 0,
+      marginOfVictory: Number.isFinite(Number(seed?.marginOfVictory)) ? Number(seed.marginOfVictory) : null
+    })));
   }
 
   function reorderManualPreviewByScope(baseSeason, state, scope, playerIds) {
@@ -265,22 +278,28 @@
     if (action === 'create-manual-season-preview') handleScopedCreate(event, button);
   }
 
-  function migrateAutomaticPreviewToSeasonScope() {
+  function restoreAutomaticPreviewScope() {
     const state = readSeasonState();
     const season = state?.currentSeason;
-    if (!season || season.status !== 'preview' || season.seedMode === 'manual' || season.seedRankingScope) {
+    if (!season || season.status !== 'preview' || season.seedMode === 'manual') {
       enhanceSeasonControls(global.document?.getElementById('seasonView'), state);
       return;
     }
 
-    const scope = normalizeScope('', season);
+    const scope = normalizeScope(season.seedRankingScope, season);
     if (scope === SCOPE_OVERALL || typeof seasonApi.rebuildPreviewFromStandings !== 'function') {
       enhanceSeasonControls(global.document?.getElementById('seasonView'), state);
       return;
     }
 
     const rebuilt = rebuildFromScope(state, scope);
-    persistAndRender({ ...state, currentSeason: rebuilt }, `season-default-${scope}-rankings`);
+    const alreadyScoped = season.seedRankingScope === scope && getSeedDataSnapshot(season) === getSeedDataSnapshot(rebuilt);
+    if (alreadyScoped) {
+      enhanceSeasonControls(global.document?.getElementById('seasonView'), state);
+      return;
+    }
+
+    persistAndRender({ ...state, currentSeason: rebuilt }, `season-restore-${scope}-rankings`);
   }
 
   function initialize() {
@@ -293,7 +312,7 @@
       });
       observer.observe(mount, { childList: true, subtree: true });
     }
-    migrateAutomaticPreviewToSeasonScope();
+    restoreAutomaticPreviewScope();
   }
 
   global.TaskPointsSeasonSeedSources = {
@@ -303,6 +322,7 @@
     normalizeScope,
     scopeAllowsDate,
     getScopedState,
+    getSeedDataSnapshot,
     reorderManualPreviewByScope
   };
 
