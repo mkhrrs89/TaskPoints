@@ -559,6 +559,7 @@ Nothing visible on the page is built here. === -->
   const requestSkip = () => {
     if (skipRequested || finished) return;
     skipRequested = true;
+    titleEl.classList.add("tp-matrix-skip");
     finish();
   };
   splash.addEventListener("pointerdown", requestSkip, { passive: true });
@@ -574,46 +575,88 @@ Nothing visible on the page is built here. === -->
     return;
   }
 
+  const animationStyle = document.createElement("style");
+  animationStyle.id = "tp-early-matrix-animation-style";
+  animationStyle.textContent = `
+    #matrixTitle .tp-matrix-cell {
+      position: relative;
+      height: 1.15em;
+      line-height: 1.15em;
+      overflow: hidden;
+      vertical-align: middle;
+    }
+    #matrixTitle .tp-matrix-reel {
+      display: flex;
+      flex-direction: column;
+      transform: translate3d(0, 0, 0);
+      will-change: transform;
+      animation: tpMatrixGlyphReel 210ms steps(7, end) forwards;
+    }
+    #matrixTitle .tp-matrix-reel > span {
+      display: block;
+      flex: 0 0 1.15em;
+      height: 1.15em;
+      line-height: 1.15em;
+      text-align: center;
+    }
+    #matrixTitle .tp-matrix-final {
+      color: #eafff1;
+    }
+    #matrixTitle.tp-matrix-skip .tp-matrix-reel {
+      animation: none !important;
+      transform: translate3d(0, -8.05em, 0) !important;
+    }
+    @keyframes tpMatrixGlyphReel {
+      to { transform: translate3d(0, -8.05em, 0); }
+    }
+  `;
+  document.head.appendChild(animationStyle);
+
   const randomGlyph = () => glyphs[(Math.random() * glyphs.length) | 0];
-  const spans = [];
+  const randomFrameCount = 7;
+  const characterDurationMs = 210;
+  const initialDelayMs = 90;
+  let completionScheduled = false;
+  let lastReel = null;
+
   titleEl.innerHTML = "";
-  for (const finalChar of word){
-    const span = document.createElement("span");
-    span.className = "matrixChar";
-    span.dataset.final = finalChar;
-    span.textContent = randomGlyph();
-    titleEl.appendChild(span);
-    spans.push(span);
+  for (let index = 0; index < word.length; index++){
+    const cell = document.createElement("span");
+    cell.className = "matrixChar tp-matrix-cell";
+
+    const reel = document.createElement("span");
+    reel.className = "tp-matrix-reel";
+    reel.style.animationDelay = `${initialDelayMs + (index * characterDurationMs)}ms`;
+
+    for (let frameIndex = 0; frameIndex < randomFrameCount; frameIndex++){
+      const frame = document.createElement("span");
+      frame.textContent = randomGlyph();
+      reel.appendChild(frame);
+    }
+
+    const finalFrame = document.createElement("span");
+    finalFrame.className = "tp-matrix-final locked";
+    finalFrame.textContent = word[index];
+    reel.appendChild(finalFrame);
+    cell.appendChild(reel);
+    titleEl.appendChild(cell);
+    lastReel = reel;
   }
 
-  const decodeOne = (span, finalChar) => new Promise(resolve => {
-    const start = performance.now();
-    const interval = setInterval(() => {
-      if (skipRequested){
-        clearInterval(interval);
-        resolve();
-        return;
-      }
-      span.textContent = randomGlyph();
-      if (performance.now() - start >= 210){
-        clearInterval(interval);
-        span.textContent = finalChar;
-        span.classList.add("locked");
-        resolve();
-      }
-    }, 20);
-  });
+  const completeAfterVisual = () => {
+    if (completionScheduled || skipRequested || finished) return;
+    completionScheduled = true;
+    setTimeout(() => {
+      if (skipRequested || finished) return;
+      finishTimer = setTimeout(finish, 180);
+    }, 80);
+  };
 
-  (async () => {
-    for (const span of spans){
-      if (skipRequested) return;
-      await decodeOne(span, span.dataset.final);
-    }
-    if (skipRequested) return;
-    await new Promise(resolve => setTimeout(resolve, 80));
-    if (skipRequested) return;
-    finishTimer = setTimeout(finish, 180);
-  })();
+  lastReel?.addEventListener("animationend", completeAfterVisual, { once: true });
+  const visualDurationMs = initialDelayMs + (word.length * characterDurationMs);
+  setTimeout(completeAfterVisual, visualDurationMs + 120);
+
+
 })();
 </script>
 
