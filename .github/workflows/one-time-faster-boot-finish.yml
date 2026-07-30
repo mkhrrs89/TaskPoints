@@ -1,0 +1,101 @@
+name: One-time faster boot finish
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: write
+
+jobs:
+  patch-index:
+    if: github.head_ref == 'automation/faster-boot-finish' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Shorten completed-title hold
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("index.html")
+          text = path.read_text(encoding="utf-8")
+
+          reduced_old = '''    tpBootFinishTimer = setTimeout(() => {
+              finishMatrixBootNow();
+            }, 1000);'''
+          reduced_new = '''    tpBootFinishTimer = setTimeout(() => {
+              finishMatrixBootNow();
+            }, 180);'''
+          normal_old = '''  tpBootFinishTimer = setTimeout(() => {
+              finishMatrixBootNow();
+            }, 1000);'''
+          normal_new = '''  tpBootFinishTimer = setTimeout(() => {
+              finishMatrixBootNow();
+            }, 180);'''
+          pause_old = '  await new Promise(r => setTimeout(r, 120));'
+          pause_new = '  await new Promise(r => setTimeout(r, 80));'
+
+          old_counts = (
+              text.count(reduced_old),
+              text.count(normal_old),
+              text.count(pause_old),
+          )
+          new_counts = (
+              text.count(reduced_new),
+              text.count(normal_new),
+              text.count(pause_new),
+          )
+
+          if old_counts == (1, 1, 1):
+              text = text.replace(reduced_old, reduced_new, 1)
+              text = text.replace(normal_old, normal_new, 1)
+              text = text.replace(pause_old, pause_new, 1)
+              path.write_text(text, encoding="utf-8")
+          elif old_counts == (0, 0, 0) and new_counts == (1, 1, 1):
+              print("Boot timing patch is already present.")
+          else:
+              raise SystemExit(
+                  f"Unexpected boot timing state: old={old_counts}, new={new_counts}"
+              )
+
+      - name: Verify exact scope
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          text = Path("index.html").read_text(encoding="utf-8")
+          assert text.count("    }, 180);\n    bootAnimDoneResolve?.();") == 1
+          assert text.count("  }, 180);\n  bootAnimDoneResolve?.();") == 1
+          assert text.count("  await new Promise(r => setTimeout(r, 80));") == 1
+          assert "  await new Promise(r => setTimeout(r, 120));" not in text
+          assert "    }, 1000);\n    bootAnimDoneResolve?.();" not in text
+          assert "  }, 1000);\n  bootAnimDoneResolve?.();" not in text
+          assert "setTimeout(() => splash.remove(), 320);" in text
+          PY
+
+          if ! git diff --quiet -- index.html; then
+            test "$(git diff --numstat -- index.html)" = $'3\t3\tindex.html'
+            git diff --check
+            git diff --unified=3 -- index.html
+          fi
+
+      - name: Commit verified patch
+        shell: bash
+        run: |
+          if git diff --quiet -- index.html; then
+            exit 0
+          fi
+          git config user.name "TaskPoints Automation"
+          git config user.email "actions@users.noreply.github.com"
+          git add index.html
+          git commit -m "Shorten startup animation finish delay"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
