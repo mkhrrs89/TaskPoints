@@ -22,14 +22,18 @@ jobs:
           path = Path("index.html")
           text = path.read_text(encoding="utf-8")
 
-          timer_old = '''    tpBootFinishTimer = setTimeout(() => {
-              finishMatrixBootNow();
-            }, 1000);'''
-          timer_new = '''    tpBootFinishTimer = setTimeout(() => {
-              finishMatrixBootNow();
-            }, 180);'''
-          pause_old = '  await new Promise(r => setTimeout(r, 120));'
-          pause_new = '  await new Promise(r => setTimeout(r, 80));'
+          timer_old = (
+              "    tpBootFinishTimer = setTimeout(() => {\n"
+              "      finishMatrixBootNow();\n"
+              "    }, 1000);"
+          )
+          timer_new = (
+              "    tpBootFinishTimer = setTimeout(() => {\n"
+              "      finishMatrixBootNow();\n"
+              "    }, 180);"
+          )
+          pause_old = "  await new Promise(r => setTimeout(r, 120));"
+          pause_new = "  await new Promise(r => setTimeout(r, 80));"
 
           timer_count = text.count(timer_old)
           pause_count = text.count(pause_old)
@@ -48,17 +52,21 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           text = Path("index.html").read_text(encoding="utf-8")
-          timer_new = '''    tpBootFinishTimer = setTimeout(() => {
-              finishMatrixBootNow();
-            }, 180);'''
-          timer_old = '''    tpBootFinishTimer = setTimeout(() => {
-              finishMatrixBootNow();
-            }, 1000);'''
+          timer_new = (
+              "    tpBootFinishTimer = setTimeout(() => {\n"
+              "      finishMatrixBootNow();\n"
+              "    }, 180);"
+          )
+          timer_old = (
+              "    tpBootFinishTimer = setTimeout(() => {\n"
+              "      finishMatrixBootNow();\n"
+              "    }, 1000);"
+          )
           assert text.count(timer_new) == 2
           assert text.count(timer_old) == 0
-          assert text.count('  await new Promise(r => setTimeout(r, 80));') == 1
-          assert text.count('  await new Promise(r => setTimeout(r, 120));') == 0
-          assert 'setTimeout(() => splash.remove(), 320);' in text
+          assert text.count("  await new Promise(r => setTimeout(r, 80));") == 1
+          assert text.count("  await new Promise(r => setTimeout(r, 120));") == 0
+          assert "setTimeout(() => splash.remove(), 320);" in text
           PY
           test "$(git diff --numstat -- index.html)" = $'3\t3\tindex.html'
           git diff --check
