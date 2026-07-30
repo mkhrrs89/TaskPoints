@@ -139,3 +139,14 @@
   script.dataset.taskpointsChampionGold = 'true';
   document.head.appendChild(script);
 })(typeof window !== 'undefined' ? window : globalThis);
+
+;(function loadTaskPointsScoreAliasConsistency(global) {
+  'use strict';
+  const document = global.document;
+  if (!document?.head || document.querySelector?.('script[data-taskpoints-score-alias-consistency]')) return;
+  const script = document.createElement('script');
+  script.src = 'score_alias_consistency.js';
+  script.defer = true;
+  script.dataset.taskpointsScoreAliasConsistency = 'true';
+  document.head.appendChild(script);
+})(typeof window !== 'undefined' ? window : globalThis);
