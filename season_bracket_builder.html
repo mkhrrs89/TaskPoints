@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>TaskPoints — Build a Bracket</title>
+  <link rel="stylesheet" href="assets/tailwind.css">
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="season_bracket_builder.css" />
+  <link rel="preload" href="toolbar.js" as="script">
+  <script src="toolbar.js" defer></script>
+</head>
+<body class="min-h-screen season-page bracket-builder-page">
+  <div class="mx-auto max-w-6xl p-3 sm:p-4 pb-16 md:pb-5">
+    <div class="flex items-center justify-between gap-3 mb-3 md:hidden">
+      <a href="index.html" class="flex items-center gap-3">
+        <img src="assets/taskpoints-logo.png" alt="TaskPoints logo" class="w-10 h-10 rounded-2xl object-cover shrink-0 shadow-sm">
+        <h1 class="text-2xl font-extrabold tracking-tight leading-tight"><span style="color:#fb923c;">Task</span><span style="color:#1e666d;">Points</span></h1>
+      </a>
+      <a href="season.html" class="btn btn-ghost btn-toolbar">Back</a>
+    </div>
+
+    <header class="mb-3">
+      <div class="row items-center gap-3 sm:gap-4">
+        <div class="flex items-center gap-3 flex-1 min-w-0">
+          <div class="hidden md:block p-2 rounded-2xl bg-slate-900/50 border border-slate-700/60 shadow-inner">
+            <img src="assets/taskpoints-logo.png" alt="TaskPoints logo" class="w-10 h-10 rounded-2xl object-cover shrink-0">
+          </div>
+          <div class="min-w-0">
+            <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight page-title">Build a Bracket</h1>
+            <p class="muted text-sm">Turn the locked seed order into a tournament structure and calendar.</p>
+          </div>
+        </div>
+        <div class="toolbar header-nav mt-3 sm:mt-0">
+          <a href="season.html" class="btn btn-teal btn-toolbar nav-btn">Season</a>
+          <a href="rankings.html" class="btn btn-teal btn-toolbar nav-btn">Rankings</a>
+          <a href="schedule.html" class="btn btn-teal btn-toolbar nav-btn">Schedule</a>
+        </div>
+      </div>
+    </header>
+
+    <main id="bracketBuilderView" aria-live="polite">
+      <section class="glass season-card"><p class="muted text-sm">Loading bracket builder…</p></section>
+    </main>
+  </div>
+
+  <script src="scoring_core.js"></script>
+  <script src="season_bracket_builder_core.js"></script>
+  <script src="season_bracket_builder_fixes.js"></script>
+  <script src="season_bracket_builder.js"></script>
+</body>
+</html>
