@@ -1,1 +1,0 @@
-Apply the guarded dynamic bracket core patch, run the bracket tests, and remove this trigger plus the patch script.

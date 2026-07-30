@@ -1162,6 +1162,27 @@ meta: { seasonMatchupControlEnabled: false, ...(isSeasonObject(options.meta) ? o
   ];
   const OFFICIAL_SEASON_ROUND_ORDER = ['play_in', 'round_of_32', 'sweet_16', 'quarterfinals', 'semifinals', 'finals'];
 
+  function getSeasonRoundOrder(seasonOrState = null) {
+    const season = seasonOrState?.currentSeason || seasonOrState || null;
+    const bracketOrder = Array.isArray(season?.bracket?.roundOrder) ? season.bracket.roundOrder.filter(Boolean) : [];
+    if (bracketOrder.length) return Array.from(new Set(bracketOrder));
+    const configuredRounds = Array.isArray(season?.bracketConfig?.rounds)
+      ? season.bracketConfig.rounds.map((round) => round?.id).filter(Boolean)
+      : [];
+    if (configuredRounds.length) return Array.from(new Set(configuredRounds));
+    const dateWindowOrder = getSeasonDateWindowsForSeason(season).map((round) => round?.id).filter(Boolean);
+    return dateWindowOrder.length ? Array.from(new Set(dateWindowOrder)) : OFFICIAL_SEASON_ROUND_ORDER.slice();
+  }
+
+  function isLegacyProtectedPlayInSeason(season) {
+    const bracketType = String(season?.bracket?.type || '');
+    if (bracketType === 'official_34_player_championship' || bracketType === 'projected_34_player_preview') return true;
+    const entries = Object.values(season?.series || {});
+    const playInCount = entries.filter((series) => series?.roundId === 'play_in').length;
+    const roundOf32Count = entries.filter((series) => series?.roundId === 'round_of_32').length;
+    return playInCount === 2 && roundOf32Count === 16 && !getSeasonRoundOrder(season).includes('opening_round');
+  }
+
   function seasonNowISO(options = {}) {
     return typeof options.nowISO === 'string' ? options.nowISO : new Date().toISOString();
   }
@@ -1755,7 +1776,7 @@ function officialRoundDef(roundId, seasonOrOptions = null) {
     if (!series) return { ok: false, error: 'series_not_found', season: nextSeason };
     const winnerId = getSeasonSeriesWinner(series);
     if (!winnerId) return { ok: false, error: 'series_not_complete', season: nextSeason, series };
-    if (series.roundId === 'play_in') return resolvePlayInWinnersIntoRoundOf32(nextSeason, options);
+    if (series.roundId === 'play_in' && isLegacyProtectedPlayInSeason(nextSeason)) return resolvePlayInWinnersIntoRoundOf32(nextSeason, options);
     const slot = series.nextSlot;
     const nextSeriesId = series.nextSeriesId;
     if (!nextSeriesId || !slot) {
@@ -1780,7 +1801,7 @@ function officialRoundDef(roundId, seasonOrOptions = null) {
     let nextSeason = normalizeSeasonState(season);
     if (!nextSeason) return { ok: false, error: 'invalid_season', season, changed: false };
     let changed = false;
-    OFFICIAL_SEASON_ROUND_ORDER.forEach((roundId) => {
+    getSeasonRoundOrder(nextSeason).forEach((roundId) => {
       const entries = Object.values(nextSeason.series || {})
         .filter((series) => series?.roundId === roundId && getSeasonSeriesWinner(series))
         .sort((a, b) => (Number(a.seriesIndex) || 0) - (Number(b.seriesIndex) || 0));
@@ -1804,7 +1825,8 @@ function getCurrentSeasonRoundIdForDate(dateKey, seasonOrState = null) {
     const roundId = getCurrentSeasonRoundIdForDate(dateKey, season);
     if (!roundId || !season?.series) return [];
 
-    const currentRoundIndex = OFFICIAL_SEASON_ROUND_ORDER.indexOf(roundId);
+    const roundOrder = getSeasonRoundOrder(season);
+    const currentRoundIndex = roundOrder.indexOf(roundId);
     const seasonControlEnabled = season?.meta?.seasonMatchupControlEnabled === true;
     const currentRoundCanPlay = isSeasonRoundFullyReady(season, roundId) || hasSeasonRoundActivationOverride(season, roundId);
 
@@ -1815,7 +1837,7 @@ function getCurrentSeasonRoundIdForDate(dateKey, seasonOrState = null) {
 
         if (series.roundId === roundId) return currentRoundCanPlay;
 
-        const seriesRoundIndex = OFFICIAL_SEASON_ROUND_ORDER.indexOf(series.roundId);
+        const seriesRoundIndex = roundOrder.indexOf(series.roundId);
         return seasonControlEnabled
           && currentRoundIndex >= 0
           && seriesRoundIndex >= 0
@@ -1838,7 +1860,8 @@ function getCurrentSeasonRoundIdForDate(dateKey, seasonOrState = null) {
     const activatedSeriesIds = [];
     const warnings = [];
     let changed = false;
-    const currentRoundIndex = OFFICIAL_SEASON_ROUND_ORDER.indexOf(roundId);
+    const roundOrder = getSeasonRoundOrder(normalized);
+    const currentRoundIndex = roundOrder.indexOf(roundId);
     const seasonControlEnabled = normalized?.meta?.seasonMatchupControlEnabled === true;
     const currentRoundSeries = Object.values(normalized.series || {}).filter((series) => series?.roundId === roundId);
     const currentRoundReady = isSeasonRoundFullyReady(normalized, roundId);
@@ -1847,13 +1870,13 @@ function getCurrentSeasonRoundIdForDate(dateKey, seasonOrState = null) {
 
     if (currentRoundSeries.length && !canActivateCurrentRound) {
       const readyCount = currentRoundSeries.filter((series) => series?.playerAId && series?.playerBId).length;
-      warnings.push(`${getSeasonDisplayName(roundId) || roundId} is waiting for all series to be ready (${readyCount}/${currentRoundSeries.length}).`);
+      warnings.push(`${getSeasonDisplayName(roundId, normalized) || roundId} is waiting for all series to be ready (${readyCount}/${currentRoundSeries.length}).`);
     }
 
     Object.values(normalized.series || {}).forEach((series) => {
       if (!series || series.status !== 'pending') return;
       if (!series.playerAId || !series.playerBId) return;
-      const seriesRoundIndex = OFFICIAL_SEASON_ROUND_ORDER.indexOf(series.roundId);
+      const seriesRoundIndex = roundOrder.indexOf(series.roundId);
       const isCurrentRound = series.roundId === roundId;
       const isOverduePriorRound = seasonControlEnabled
         && currentRoundIndex >= 0
@@ -2060,7 +2083,7 @@ const seasonGateOpen = directSeason
 
   function getWinnerFacesText(season, series) {
     if (!series) return 'Winner faces: TBD';
-    if (series.roundId === 'play_in') return 'Winner enters Round of 32 with Play-In protection';
+    if (series.roundId === 'play_in' && isLegacyProtectedPlayInSeason(season)) return 'Winner enters Round of 32 with Play-In protection';
     if (!series.nextSeriesId || !series.nextSlot) return series.roundId === 'finals' ? 'Winner becomes champion candidate' : 'Winner faces: TBD';
     const next = season?.series?.[series.nextSeriesId];
     if (!next) return 'Winner faces: TBD';
@@ -2691,15 +2714,19 @@ function getSeasonManualResultDateKey(series, gameNumber, season = null) {
       let repaired = normalizeSeasonState({ ...fixed, series: cleanSeriesMap(fixed.series) });
       const winnerIdRepair = repairSeasonSeriesResultWinnerIds({ ...normalized, currentSeason: repaired }, options);
       if (winnerIdRepair?.state?.currentSeason) repaired = winnerIdRepair.state.currentSeason;
-      const repairState = normalizeState({ ...normalized, currentSeason: repaired });
-      const upstreamPlayInRepair = repairPlayInSeriesFromProtectedRoundOf32Slots(repaired, {
-        ...options,
-        state: repairState,
-        currentState: repairState
-      });
-      if (upstreamPlayInRepair.season && (upstreamPlayInRepair.ok || upstreamPlayInRepair.changed)) repaired = upstreamPlayInRepair.season;
-      const playInRepair = repairPlayInAdvancementForSeason(repaired, options);
-      if (playInRepair.season) repaired = playInRepair.season;
+      if (isLegacyProtectedPlayInSeason(repaired)) {
+        const repairState = normalizeState({ ...normalized, currentSeason: repaired });
+        const upstreamPlayInRepair = repairPlayInSeriesFromProtectedRoundOf32Slots(repaired, {
+          ...options,
+          state: repairState,
+          currentState: repairState
+        });
+        if (upstreamPlayInRepair.season && (upstreamPlayInRepair.ok || upstreamPlayInRepair.changed)) repaired = upstreamPlayInRepair.season;
+        const playInRepair = repairPlayInAdvancementForSeason(repaired, options);
+        if (playInRepair.season) repaired = playInRepair.season;
+      }
+      const advancementRepair = repairCompletedSeasonAdvancementForSeason(repaired, options);
+      if (advancementRepair.season) repaired = advancementRepair.season;
       return normalizeSeasonState(repaired);
     };
     const currentSeason = repairSeason(normalized.currentSeason);
@@ -4231,8 +4258,9 @@ if (Number.isFinite(Number(simulated))) {
 
     const explicitSeriesId = getRecordedSeriesId(raw);
     const hasExplicitSeries = Boolean(explicitSeriesId && explicitSeriesId === series?.id);
-    const currentRoundIndex = OFFICIAL_SEASON_ROUND_ORDER.indexOf(dateRound);
-    const seriesRoundIndex = OFFICIAL_SEASON_ROUND_ORDER.indexOf(series?.roundId);
+    const roundOrder = getSeasonRoundOrder(season);
+    const currentRoundIndex = roundOrder.indexOf(dateRound);
+    const seriesRoundIndex = roundOrder.indexOf(series?.roundId);
     const isOverduePriorRound =
       currentRoundIndex >= 0
       && seriesRoundIndex >= 0
@@ -4467,6 +4495,16 @@ if (Number.isFinite(Number(simulated))) {
       const winnerId = playerAScore > playerBScore ? playerAId : playerBId;
       const loserId = playerAScore > playerBScore ? playerBId : playerAId;
       return { winnerId, loserId, playerAScore, playerBScore, source: 'scores' };
+    }
+
+    if (playerAScore != null && playerBScore != null && playerAScore === playerBScore && series.tieBreaker === 'higher_seed' && playerAId && playerBId) {
+      const seedA = Number(series.playerASeed);
+      const seedB = Number(series.playerBSeed);
+      if (Number.isFinite(seedA) && Number.isFinite(seedB) && seedA !== seedB) {
+        const winnerId = seedA < seedB ? playerAId : playerBId;
+        const loserId = seedA < seedB ? playerBId : playerAId;
+        return { winnerId, loserId, playerAScore, playerBScore, source: 'higher_seed_tiebreaker' };
+      }
     }
 
     const fallback = getRecordedResultWinner(record);
@@ -9294,6 +9332,7 @@ return Number(cappedScore.toFixed(1));
     normalizeSeasonHistory,
     normalizeCurrentSeason,
     getSeasonRoundDefs,
+    getSeasonRoundOrder,
     getSeasonRoundForDate,
     daysBetweenDateKeys,
     isSeasonRoundFullyReady,
