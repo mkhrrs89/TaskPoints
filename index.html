@@ -75,7 +75,7 @@ Nothing visible on the page is built here. === -->
       place-items: center;
       z-index: 99999;
       opacity: 1;
-      transition: opacity 260ms ease;
+      transition: opacity 140ms ease;
     }
 
     .matrixTitle {
@@ -1582,7 +1582,7 @@ function hideBootSplash(){
   const splash = document.getElementById("bootSplash");
   if (!splash) return;
   splash.style.opacity = "0";
-  setTimeout(() => splash.remove(), 320);
+  setTimeout(() => splash.remove(), 160);
 }
 
 function showApp(){
