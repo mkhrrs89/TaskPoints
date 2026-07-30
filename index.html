@@ -181,9 +181,16 @@ Nothing visible on the page is built here. === -->
   <!-- removed 3/28/26 -->
   
   <!-- Your app scripts + CSS -->
-  <link rel="stylesheet" href="assets/tailwind.css">
+<link rel="preload" href="assets/tailwind.css" as="style">
+<link rel="preload" href="styles.css" as="style">
 
-<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="assets/tailwind.css" media="print" onload="this.media='all'">
+<link rel="stylesheet" href="styles.css" media="print" onload="this.media='all'">
+
+<noscript>
+  <link rel="stylesheet" href="assets/tailwind.css">
+  <link rel="stylesheet" href="styles.css">
+</noscript>
   <style>
 
 
