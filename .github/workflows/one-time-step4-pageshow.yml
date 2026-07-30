@@ -68,7 +68,7 @@ jobs:
           ))
           removed = [line for line in diff if line.startswith('-') and not line.startswith('---')]
           added = [line for line in diff if line.startswith('+') and not line.startswith('+++')]
-          if len(removed) != 3 or len(added) != 15:
+          if len(removed) != 1 or len(added) != 13:
             raise SystemExit(f"Unexpected diff size: {len(removed)} removed, {len(added)} added")
 
           path.write_text(updated, encoding="utf-8")
