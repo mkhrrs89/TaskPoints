@@ -200,7 +200,8 @@
           userInitiated: true,
           interactive: true,
           immediateWrite: true,
-          replaceCompletions: true
+          replaceCompletions: true,
+          allowDestructiveOverwrite: true
         });
         if (saved?.blocked || saved?.ok === false || saved?.skipped || saved?.blockedByQuotaCircuit || !saved?.state) {
           throw new Error(saved?.reason || saved?.error || 'The save was blocked or could not be verified.');
