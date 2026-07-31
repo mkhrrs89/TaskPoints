@@ -236,6 +236,7 @@ test('panel is preview-first and requires a fresh backup confirmation', () => {
   assert.match(source, /audit-habit-ledger-consistency-repair/);
   assert.match(source, /readTaskPointsStoredState/);
   assert.match(source, /replaceCompletions:\s*true/);
+  assert.match(source, /allowDestructiveOverwrite:\s*true/);
   assert.match(source, /persisted\.completions\.length !== result\.state\.completions\.length/);
   assert.match(source, /if \(!auditChecks\) return false/);
   assert.doesNotMatch(source, /querySelector\('main'\)/);
