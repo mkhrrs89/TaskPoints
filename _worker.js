@@ -63,7 +63,8 @@ export default {
         headers
       });
       const auditBootstrap = directPageKind === 'audit'
-        ? '<script src="/game_history_reconciliation_repair.js?v=20260731-1" data-taskpoints-game-history-repair="true"></script>'
+        ? '<script src="/audit_same_day_reconciliation.js?v=20260731-3" data-taskpoints-audit-same-day-direct="true"></script>'
+          + '<script src="/game_history_reconciliation_repair.js?v=20260731-1" data-taskpoints-game-history-repair="true"></script>'
           + '<script src="/game_history_repair_alias_sync.js?v=20260731-1" data-taskpoints-game-history-alias-sync="true"></script>'
           + '<script src="/score_alias_audit_bootstrap.js?v=20260731-2" data-taskpoints-score-alias-audit-bootstrap="true"></script>'
         : '';
