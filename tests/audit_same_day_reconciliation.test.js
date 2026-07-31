@@ -86,6 +86,39 @@ test('two same-day rows reconcile by unique scores regardless of matchup order',
   assert.equal(result.status, 'PASS');
 });
 
+test('repaired same-day tournament history stays paired while the legacy row matches the other game', () => {
+  const state = stateBase();
+  state.matchups = [
+    matchup('2026-06-09_regular_game', 56.4),
+    matchup('season_1_sweet_16_game', 45, {
+      seasonId: 'season_1_june_2026',
+      seriesId: 'season_1_june_2026_sweet_16_1',
+      roundId: 'sweet_16',
+      gameNumber: 1,
+      matchupType: 'tournament'
+    })
+  ];
+  state.gameHistory = [
+    history('legacy-row', 56.4),
+    history('repaired-row', 45, {
+      matchupId: 'season_1_sweet_16_game',
+      opponentId: 'YOU',
+      seasonId: 'season_1_june_2026',
+      seriesId: 'season_1_june_2026_sweet_16_1',
+      seasonSeriesId: 'season_1_june_2026_sweet_16_1',
+      roundId: 'sweet_16',
+      gameNumber: 1,
+      seriesGameNumber: 1,
+      matchupType: 'tournament',
+      source: 'audit-game-history-repair'
+    })
+  ];
+
+  const result = fix.buildMatchupHistoryReconciliationAudit(state, options);
+  assert.equal(result.status, 'PASS');
+  assert.doesNotMatch(result.details.join(' '), /conflicting explicit matchup IDs/);
+});
+
 test('same-day duplicate scores remain ambiguous instead of being greedily paired', () => {
   const state = stateBase();
   state.matchups = [
@@ -135,7 +168,7 @@ test('same-day reconciliation is read-only', () => {
   assert.deepEqual(state, before);
 });
 
-test('Audit worker bundle loads the same-day matcher after the base audit', () => {
+test('Audit loads the same-day matcher through both the bundle and a versioned direct fallback', () => {
   const worker = fs.readFileSync('_worker.js', 'utf8');
   assert.match(worker, /readAssetSource\(env, request, '\/audit_same_day_reconciliation\.js'\)/);
   assert.match(
@@ -143,4 +176,11 @@ test('Audit worker bundle loads the same-day matcher after the base audit', () =
     /\[\s*auditSource,\s*sameDaySource,\s*historyRepairSource,\s*historyAliasSyncSource,\s*aliasSource,\s*bootstrapSource\s*\]/
   );
   assert.match(worker, /x-taskpoints-audit-same-day-reconciliation/);
+  assert.match(worker, /audit_same_day_reconciliation\.js\?v=20260731-3/);
+  assert.match(worker, /data-taskpoints-audit-same-day-direct="true"/);
+  assert.ok(
+    worker.indexOf('/audit_same_day_reconciliation.js?v=20260731-3')
+      < worker.indexOf('/game_history_reconciliation_repair.js?v=20260731-1'),
+    'direct matcher must load before the repair panel'
+  );
 });
