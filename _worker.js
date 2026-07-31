@@ -18,10 +18,7 @@ function noCacheHeaders(headers) {
 }
 
 function isDirectAliasPage(pathname) {
-  return pathname === '/audit.html'
-    || pathname === '/audit'
-    || pathname === '/matchups.html'
-    || pathname === '/matchups';
+  return pathname === '/audit.html' || pathname === '/matchups.html';
 }
 
 export default {
