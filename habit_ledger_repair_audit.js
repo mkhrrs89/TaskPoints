@@ -202,8 +202,8 @@
           immediateWrite: true,
           replaceCompletions: true
         });
-        if (saved?.blocked || saved?.ok === false || saved?.skipped) {
-          throw new Error(saved?.reason || saved?.error || 'The save was blocked.');
+        if (saved?.blocked || saved?.ok === false || saved?.skipped || saved?.blockedByQuotaCircuit || !saved?.state) {
+          throw new Error(saved?.reason || saved?.error || 'The save was blocked or could not be verified.');
         }
 
         const persisted = readStoredState(null);
