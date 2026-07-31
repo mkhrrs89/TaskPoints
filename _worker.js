@@ -17,16 +17,20 @@ function noCacheHeaders(headers) {
   return next;
 }
 
-function isDirectAliasPage(pathname) {
-  return pathname === '/audit.html' || pathname === '/matchups.html';
+function directAliasPageKind(pathname) {
+  const clean = String(pathname || '').replace(/\/+$/, '');
+  if (/(^|\/)audit(?:\.html)?$/.test(clean)) return 'audit';
+  if (/(^|\/)matchups(?:\.html)?$/.test(clean)) return 'matchups';
+  return '';
 }
 
 export default {
   async fetch(request, env, ctx) {
     const response = await baseWorker.fetch(request, env, ctx);
     const url = new URL(request.url);
+    const directPageKind = directAliasPageKind(url.pathname);
 
-    if (request.method === 'GET' && response.ok && isDirectAliasPage(url.pathname)) {
+    if (request.method === 'GET' && response.ok && directPageKind) {
       const headers = noCacheHeaders(response.headers);
       headers.set('content-type', 'text/html; charset=utf-8');
       const freshResponse = new Response(response.body, {
@@ -34,12 +38,15 @@ export default {
         statusText: response.statusText,
         headers
       });
+      const auditBootstrap = directPageKind === 'audit'
+        ? '<script src="/score_alias_audit_bootstrap.js?v=20260731-1" data-taskpoints-score-alias-audit-bootstrap="true"></script>'
+        : '';
 
       return new HTMLRewriter()
         .on('body', {
           element(element) {
             element.append(
-              '<script src="/score_alias_consistency.js?v=20260730-3" data-taskpoints-score-alias-direct="true"></script>',
+              '<script src="/score_alias_consistency.js?v=20260731-4" data-taskpoints-score-alias-direct="true"></script>' + auditBootstrap,
               { html: true }
             );
           }
