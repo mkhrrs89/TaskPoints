@@ -4,7 +4,11 @@
     "/scoring_core.js",
     "/settings.html",
     "/styles.css",
+    "/audit",
+    "/audit/",
     "/audit.html",
+    "/matchups",
+    "/matchups/",
     "/matchups.html"
   ],
   "exclude": []
