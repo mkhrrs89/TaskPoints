@@ -156,12 +156,15 @@ test('changed live state invalidates a preview', () => {
   );
 });
 
-test('failed dates with conflicting done or ice markers remain manual review', () => {
+test('failed dates with conflicting done or ice markers remain fully manual', () => {
   const state = fixture();
   state.habits[0].doneKeys.push('2026-07-29');
+  state.completions.find((row) => row.id === 'vice-failed').source = 'habit';
   const plan = repair.buildHabitLedgerRepairPlan(state);
 
   assert.equal(plan.failedDateRemovals.length, 0);
+  assert.equal(plan.sourceUpdates.some((item) => item.completionId === 'vice-failed'), false);
+  assert.equal(plan.duplicateRemovals.some((item) => item.completionId === 'vice-failed'), false);
   assert.ok(plan.manualReview.some((item) => item.type === 'conflicting-ledger-status'));
 });
 
@@ -241,6 +244,7 @@ test('panel is preview-first and requires a fresh backup confirmation', () => {
   assert.match(source, /if \(!auditChecks\) return false/);
   assert.doesNotMatch(source, /querySelector\('main'\)/);
   assert.match(source, /Manual-review rows will not be changed/);
+  assert.match(source, /backupCheckbox\.checked = false;[\s\S]*previewPlan = null;[\s\S]*updateEnabled\(\)/);
 });
 
 test('worker loads the repair directly on Audit and through scoring core', () => {
