@@ -132,11 +132,15 @@
     const habitsById = new Map();
     const manualReview = [];
     const manualSeen = new Set();
+    const manualOnlyIndexes = new Set();
     const entries = [];
     const duplicateCompletionIds = new Set();
     const seenCompletionIds = new Set();
 
-    const addManual = (item) => {
+    const addManual = (item, indexes = []) => {
+      const affected = new Set(indexes);
+      if (Number.isInteger(item?.completionIndex)) affected.add(item.completionIndex);
+      affected.forEach((index) => manualOnlyIndexes.add(index));
       const key = manualKey(item);
       if (manualSeen.has(key)) return;
       manualSeen.add(key);
@@ -203,11 +207,14 @@
     });
 
     duplicateCompletionIds.forEach((id) => {
+      const indexes = entries
+        .filter((entry) => String(entry.row?.id || '').trim() === id)
+        .map((entry) => entry.index);
       addManual({
         type: 'duplicate-completion-id',
         completionId: id,
         reason: `More than one completion row uses ID ${id}.`
-      });
+      }, indexes);
     });
 
     const failedDateRemovals = [];
@@ -242,9 +249,23 @@
       removalIndexes.add(entry.index);
     });
 
+    entries.forEach((entry) => {
+      if (removalIndexes.has(entry.index) || entry.done || entry.failed) return;
+      addManual({
+        type: 'completion-without-ledger-status',
+        completionIndex: entry.index,
+        completionId: entry.completionId,
+        habitId: entry.habitId,
+        habitName: entry.habitName,
+        dayKey: entry.dayKey,
+        points: entry.points,
+        reason: 'A completion exists, but the date is in neither doneKeys nor failedKeys.'
+      });
+    });
+
     const activeGroups = new Map();
     entries.forEach((entry) => {
-      if (removalIndexes.has(entry.index)) return;
+      if (removalIndexes.has(entry.index) || manualOnlyIndexes.has(entry.index)) return;
       const key = `${entry.habitId}|${entry.dayKey}`;
       if (!activeGroups.has(key)) activeGroups.set(key, []);
       activeGroups.get(key).push(entry);
@@ -293,13 +314,13 @@
           dayKey: survivors[0].dayKey,
           completionIds: survivors.map((entry) => entry.completionId),
           reason: 'Multiple nonidentical completion rows remain for the same habit and date.'
-        });
+        }, survivors.map((entry) => entry.index));
       }
     });
 
     const sourceUpdates = [];
     entries.forEach((entry) => {
-      if (removalIndexes.has(entry.index)) return;
+      if (removalIndexes.has(entry.index) || manualOnlyIndexes.has(entry.index)) return;
       if (entry.currentSource !== entry.expectedSource) {
         sourceUpdates.push({
           completionIndex: entry.index,
@@ -310,19 +331,6 @@
           dayKey: entry.dayKey,
           fromSource: entry.currentSource,
           toSource: entry.expectedSource
-        });
-      }
-
-      if (!entry.done && !entry.failed) {
-        addManual({
-          type: 'completion-without-ledger-status',
-          completionIndex: entry.index,
-          completionId: entry.completionId,
-          habitId: entry.habitId,
-          habitName: entry.habitName,
-          dayKey: entry.dayKey,
-          points: entry.points,
-          reason: 'A completion exists, but the date is in neither doneKeys nor failedKeys.'
         });
       }
     });
