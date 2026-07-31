@@ -64,6 +64,7 @@ export default {
       });
       const auditBootstrap = directPageKind === 'audit'
         ? '<script src="/game_history_reconciliation_repair.js?v=20260731-1" data-taskpoints-game-history-repair="true"></script>'
+          + '<script src="/game_history_repair_alias_sync.js?v=20260731-1" data-taskpoints-game-history-alias-sync="true"></script>'
           + '<script src="/score_alias_audit_bootstrap.js?v=20260731-2" data-taskpoints-score-alias-audit-bootstrap="true"></script>'
         : '';
 
@@ -86,9 +87,10 @@ export default {
       } catch (_) {
         return response;
       }
-      const [sameDaySource, historyRepairSource, aliasSource, bootstrapSource] = await Promise.all([
+      const [sameDaySource, historyRepairSource, historyAliasSyncSource, aliasSource, bootstrapSource] = await Promise.all([
         readAssetSource(env, request, '/audit_same_day_reconciliation.js'),
         readAssetSource(env, request, '/game_history_reconciliation_repair.js'),
+        readAssetSource(env, request, '/game_history_repair_alias_sync.js'),
         readAssetSource(env, request, '/score_alias_consistency.js'),
         readAssetSource(env, request, '/score_alias_audit_bootstrap.js')
       ]);
@@ -96,12 +98,14 @@ export default {
         auditSource,
         sameDaySource,
         historyRepairSource,
+        historyAliasSyncSource,
         aliasSource,
         bootstrapSource
       ].filter(Boolean).join('\n');
       return javascriptResponse(modules || auditSource, response, {
         'x-taskpoints-audit-same-day-reconciliation': sameDaySource ? 'included' : 'missing',
         'x-taskpoints-game-history-repair': historyRepairSource ? 'included' : 'missing',
+        'x-taskpoints-game-history-alias-sync': historyAliasSyncSource ? 'included' : 'missing',
         'x-taskpoints-score-alias-audit-bundle': aliasSource && bootstrapSource ? 'included' : 'partial'
       });
     }
