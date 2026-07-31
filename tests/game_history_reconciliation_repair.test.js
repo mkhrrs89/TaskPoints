@@ -3,8 +3,16 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-global.TaskPointsCore = { STORAGE_KEY: 'taskpoints_v1' };
+let lastSavedState = null;
+global.TaskPointsCore = {
+  STORAGE_KEY: 'taskpoints_v1',
+  saveStateSnapshot(state) {
+    lastSavedState = structuredClone(state);
+    return { state };
+  }
+};
 const repair = require('../game_history_reconciliation_repair.js');
+const aliasSync = require('../game_history_repair_alias_sync.js');
 
 const VERRICK = '358b982e-c494-4c58-815a-d59953742997';
 const SLOANE = '05354bdf-f433-4824-981f-45f0d21b0d80';
@@ -46,7 +54,8 @@ function history({
   playerId,
   score,
   matchupId = '',
-  opponentId = ''
+  opponentId = '',
+  extra = {}
 }) {
   return {
     ...(id ? { id } : {}),
@@ -55,7 +64,8 @@ function history({
     playerId,
     score,
     opponentId,
-    ...(matchupId ? { matchupId } : {})
+    ...(matchupId ? { matchupId } : {}),
+    ...extra
   };
 }
 
@@ -131,12 +141,14 @@ function fixture() {
         id: 'verrick-history',
         dateKey: '2026-06-14',
         playerId: VERRICK,
-        score: 62.8
+        score: 62.8,
+        extra: { points: 62.8 }
       }),
       history({
         dateKey: '2026-06-24',
         playerId: SLOANE,
-        score: 41
+        score: 41,
+        extra: { total: 41 }
       }),
       history({
         id: 'inara-history',
@@ -201,7 +213,10 @@ test('apply changes gameHistory only and is idempotent', () => {
   const verrick = result.state.gameHistory.find((row) => row.id === 'verrick-history');
   const sloane = result.state.gameHistory.find((row) => row.playerId === SLOANE);
   assert.equal(verrick.score, 43.2);
+  assert.equal(verrick.points, 43.2);
   assert.equal(sloane.score, 27.56);
+  assert.equal(sloane.total, 27.56);
+  assert.equal(result.synchronizedLegacyFields, 2);
 
   const second = repair.applyGameHistoryRepair(result.state);
   assert.equal(second.changed, false);
@@ -253,6 +268,22 @@ test('same-day explicit ID conflicts are never overridden by score matching', ()
   assert.ok(plan.uncertain.some((item) => item.type === 'explicit-id-conflict'));
 });
 
+test('repair save path synchronizes populated legacy aliases before persistence', () => {
+  lastSavedState = null;
+  const state = fixture();
+  const verrick = state.gameHistory.find((row) => row.id === 'verrick-history');
+  verrick.score = 43.2;
+  verrick.points = 62.8;
+
+  global.TaskPointsCore.saveStateSnapshot(state, {
+    savePath: 'audit-game-history-reconciliation-repair'
+  });
+
+  const savedVerrick = lastSavedState.gameHistory.find((row) => row.id === 'verrick-history');
+  assert.equal(savedVerrick.score, 43.2);
+  assert.equal(savedVerrick.points, 43.2);
+});
+
 test('panel requires preview and fresh backup confirmation', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'game_history_reconciliation_repair.js'), 'utf8');
   assert.match(source, /Preview Game-History Repair/);
@@ -267,6 +298,11 @@ test('Audit worker loads repair directly and in the audit integrity bundle', () 
   const worker = fs.readFileSync(path.join(__dirname, '..', '_worker.js'), 'utf8');
   assert.match(worker, /game_history_reconciliation_repair\.js\?v=20260731-1/);
   assert.match(worker, /readAssetSource\(env, request, '\/game_history_reconciliation_repair\.js'\)/);
-  assert.match(worker, /\[sameDaySource, historyRepairSource, aliasSource, bootstrapSource\]/);
+  assert.match(worker, /readAssetSource\(env, request, '\/game_history_repair_alias_sync\.js'\)/);
+  assert.match(
+    worker,
+    /\[\s*auditSource,\s*sameDaySource,\s*historyRepairSource,\s*historyAliasSyncSource,\s*aliasSource,\s*bootstrapSource\s*\]/
+  );
   assert.match(worker, /x-taskpoints-game-history-repair/);
+  assert.match(worker, /x-taskpoints-game-history-alias-sync/);
 });
