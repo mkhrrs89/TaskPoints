@@ -17,16 +17,44 @@ function noCacheHeaders(headers) {
   return next;
 }
 
-function isDirectAliasPage(pathname) {
-  return pathname === '/audit.html' || pathname === '/matchups.html';
+function directAliasPageKind(pathname) {
+  const clean = String(pathname || '').replace(/\/+$/, '');
+  if (/(^|\/)audit(?:\.html)?$/.test(clean)) return 'audit';
+  if (/(^|\/)matchups(?:\.html)?$/.test(clean)) return 'matchups';
+  return '';
+}
+
+async function readAssetSource(env, request, pathname) {
+  try {
+    const assetRequest = new Request(new URL(pathname, request.url), {
+      method: 'GET',
+      headers: freshHeaders(request.headers)
+    });
+    const assetResponse = await env.ASSETS.fetch(assetRequest);
+    return assetResponse.ok ? await assetResponse.text() : '';
+  } catch (_) {
+    return '';
+  }
+}
+
+function javascriptResponse(source, response, extraHeaders = {}) {
+  const headers = noCacheHeaders(response.headers);
+  headers.set('content-type', 'application/javascript; charset=utf-8');
+  Object.entries(extraHeaders).forEach(([name, value]) => headers.set(name, value));
+  return new Response(source, {
+    status: response.status,
+    statusText: response.statusText,
+    headers
+  });
 }
 
 export default {
   async fetch(request, env, ctx) {
     const response = await baseWorker.fetch(request, env, ctx);
     const url = new URL(request.url);
+    const directPageKind = directAliasPageKind(url.pathname);
 
-    if (request.method === 'GET' && response.ok && isDirectAliasPage(url.pathname)) {
+    if (request.method === 'GET' && response.ok && directPageKind) {
       const headers = noCacheHeaders(response.headers);
       headers.set('content-type', 'text/html; charset=utf-8');
       const freshResponse = new Response(response.body, {
@@ -34,17 +62,37 @@ export default {
         statusText: response.statusText,
         headers
       });
+      const auditBootstrap = directPageKind === 'audit'
+        ? '<script src="/score_alias_audit_bootstrap.js?v=20260731-2" data-taskpoints-score-alias-audit-bootstrap="true"></script>'
+        : '';
 
       return new HTMLRewriter()
         .on('body', {
           element(element) {
             element.append(
-              '<script src="/score_alias_consistency.js?v=20260730-3" data-taskpoints-score-alias-direct="true"></script>',
+              '<script src="/score_alias_consistency.js?v=20260731-5" data-taskpoints-score-alias-direct="true"></script>' + auditBootstrap,
               { html: true }
             );
           }
         })
         .transform(freshResponse);
+    }
+
+    if (request.method === 'GET' && response.ok && url.pathname === '/audit_integrity.js') {
+      let auditSource = '';
+      try {
+        auditSource = await response.text();
+      } catch (_) {
+        return response;
+      }
+      const [aliasSource, bootstrapSource] = await Promise.all([
+        readAssetSource(env, request, '/score_alias_consistency.js'),
+        readAssetSource(env, request, '/score_alias_audit_bootstrap.js')
+      ]);
+      const modules = [auditSource, aliasSource, bootstrapSource].filter(Boolean).join('\n');
+      return javascriptResponse(modules || auditSource, response, {
+        'x-taskpoints-score-alias-audit-bundle': aliasSource && bootstrapSource ? 'included' : 'partial'
+      });
     }
 
     if (request.method !== 'GET' || url.pathname !== '/scoring_core.js' || !response.ok) {
@@ -58,34 +106,11 @@ export default {
       return response;
     }
 
-    let aliasSource = '';
-    try {
-      const aliasRequest = new Request(new URL('/score_alias_consistency.js', request.url), {
-        method: 'GET',
-        headers: freshHeaders(request.headers)
-      });
-      const aliasResponse = await env.ASSETS.fetch(aliasRequest);
-      if (aliasResponse.ok) aliasSource = await aliasResponse.text();
-    } catch (_) {
-      aliasSource = '';
-    }
+    const aliasSource = await readAssetSource(env, request, '/score_alias_consistency.js');
+    if (!aliasSource) return javascriptResponse(coreSource, response);
 
-    const headers = noCacheHeaders(response.headers);
-    headers.set('content-type', 'application/javascript; charset=utf-8');
-
-    if (!aliasSource) {
-      return new Response(coreSource, {
-        status: response.status,
-        statusText: response.statusText,
-        headers
-      });
-    }
-
-    headers.set('x-taskpoints-score-alias-bundle', 'included');
-    return new Response(`${coreSource}\n${aliasSource}\n`, {
-      status: response.status,
-      statusText: response.statusText,
-      headers
+    return javascriptResponse(`${coreSource}\n${aliasSource}\n`, response, {
+      'x-taskpoints-score-alias-bundle': 'included'
     });
   }
 };

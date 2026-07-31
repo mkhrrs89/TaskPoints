@@ -2,9 +2,14 @@
   "version": 1,
   "include": [
     "/scoring_core.js",
+    "/audit_integrity.js",
     "/settings.html",
     "/styles.css",
+    "/audit",
+    "/audit/",
     "/audit.html",
+    "/matchups",
+    "/matchups/",
     "/matchups.html"
   ],
   "exclude": []
