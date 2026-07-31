@@ -66,7 +66,8 @@ export default {
         ? '<script src="/audit_same_day_reconciliation.js?v=20260731-3" data-taskpoints-audit-same-day-direct="true"></script>'
           + '<script src="/game_history_reconciliation_repair.js?v=20260731-1" data-taskpoints-game-history-repair="true"></script>'
           + '<script src="/game_history_repair_alias_sync.js?v=20260731-1" data-taskpoints-game-history-alias-sync="true"></script>'
-          + '<script src="/habit_ledger_consistency_repair.js?v=20260731-1" data-taskpoints-habit-ledger-repair="true"></script>'
+          + '<script src="/habit_ledger_repair_planner.js?v=20260731-1" data-taskpoints-habit-ledger-planner="true"></script>'
+          + '<script src="/habit_ledger_repair_audit.js?v=20260731-1" data-taskpoints-habit-ledger-repair="true"></script>'
           + '<script src="/score_alias_audit_bootstrap.js?v=20260731-2" data-taskpoints-score-alias-audit-bootstrap="true"></script>'
         : '';
 
@@ -123,16 +124,16 @@ export default {
       return response;
     }
 
-    const [aliasSource, habitLedgerSource] = await Promise.all([
+    const [aliasSource, habitGuardSource] = await Promise.all([
       readAssetSource(env, request, '/score_alias_consistency.js'),
-      readAssetSource(env, request, '/habit_ledger_consistency_repair.js')
+      readAssetSource(env, request, '/habit_completion_source_guard.js')
     ]);
-    const additions = [aliasSource, habitLedgerSource].filter(Boolean);
+    const additions = [aliasSource, habitGuardSource].filter(Boolean);
     if (!additions.length) return javascriptResponse(coreSource, response);
 
     return javascriptResponse(`${coreSource}\n${additions.join('\n')}\n`, response, {
       'x-taskpoints-score-alias-bundle': aliasSource ? 'included' : 'missing',
-      'x-taskpoints-habit-ledger-bundle': habitLedgerSource ? 'included' : 'missing'
+      'x-taskpoints-habit-source-guard': habitGuardSource ? 'included' : 'missing'
     });
   }
 };
