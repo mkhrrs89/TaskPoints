@@ -8,10 +8,47 @@ function freshHeaders(headers) {
   return next;
 }
 
+function noCacheHeaders(headers) {
+  const next = new Headers(headers);
+  next.delete('content-length');
+  next.delete('etag');
+  next.delete('last-modified');
+  next.set('cache-control', 'no-cache, no-store, must-revalidate');
+  return next;
+}
+
+function isDirectAliasPage(pathname) {
+  return pathname === '/audit.html'
+    || pathname === '/audit'
+    || pathname === '/matchups.html'
+    || pathname === '/matchups';
+}
+
 export default {
   async fetch(request, env, ctx) {
     const response = await baseWorker.fetch(request, env, ctx);
     const url = new URL(request.url);
+
+    if (request.method === 'GET' && response.ok && isDirectAliasPage(url.pathname)) {
+      const headers = noCacheHeaders(response.headers);
+      headers.set('content-type', 'text/html; charset=utf-8');
+      const freshResponse = new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers
+      });
+
+      return new HTMLRewriter()
+        .on('body', {
+          element(element) {
+            element.append(
+              '<script src="/score_alias_consistency.js?v=20260730-3" data-taskpoints-score-alias-direct="true"></script>',
+              { html: true }
+            );
+          }
+        })
+        .transform(freshResponse);
+    }
 
     if (request.method !== 'GET' || url.pathname !== '/scoring_core.js' || !response.ok) {
       return response;
@@ -36,11 +73,7 @@ export default {
       aliasSource = '';
     }
 
-    const headers = new Headers(response.headers);
-    headers.delete('content-length');
-    headers.delete('etag');
-    headers.delete('last-modified');
-    headers.set('cache-control', 'no-cache');
+    const headers = noCacheHeaders(response.headers);
     headers.set('content-type', 'application/javascript; charset=utf-8');
 
     if (!aliasSource) {
