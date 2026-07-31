@@ -4,10 +4,10 @@
   const document = global.document;
   const location = global.location;
   if (!document || !location) return;
-  if (!/(^|\/)audit(?:\.html)?\/?$/.test(String(location.pathname || ''))) return;
 
   let attempts = 0;
   function install() {
+    if (!document.getElementById('auditChecks')) return;
     if (document.getElementById('scoreAliasRepairPanel')) return;
     const api = global.TaskPointsScoreAliasConsistency;
     if (!api?.installAuditRepairPanel) {
@@ -17,17 +17,15 @@
     }
 
     const originalUrl = `${location.pathname}${location.search}${location.hash}`;
-    const path = String(location.pathname || '');
-    const auditHtmlPath = path.replace(/audit(?:\.html)?\/?$/, 'audit.html');
-    const needsCompatibilityPath = !path.endsWith('/audit.html') && path !== 'audit.html';
+    const pathAlreadyCompatible = String(location.pathname || '').endsWith('/audit.html') || location.pathname === 'audit.html';
 
     try {
-      if (needsCompatibilityPath && global.history?.replaceState) {
-        global.history.replaceState(global.history.state, '', `${auditHtmlPath}${location.search}${location.hash}`);
+      if (!pathAlreadyCompatible && global.history?.replaceState) {
+        global.history.replaceState(global.history.state, '', `/audit.html${location.search}${location.hash}`);
       }
       api.installAuditRepairPanel();
     } finally {
-      if (needsCompatibilityPath && global.history?.replaceState) {
+      if (!pathAlreadyCompatible && global.history?.replaceState) {
         global.history.replaceState(global.history.state, '', originalUrl);
       }
     }
