@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const repair = require('../habit_ledger_consistency_repair.js');
+const repair = require('../habit_ledger_repair_planner.js');
 
 function fixture() {
   return {
@@ -166,7 +166,7 @@ test('failed dates with conflicting done or ice markers remain manual review', (
 });
 
 test('future source guard corrects only newly added vice completions', () => {
-  const source = fs.readFileSync(path.join(__dirname, '..', 'habit_ledger_consistency_repair.js'), 'utf8');
+  const source = fs.readFileSync(path.join(__dirname, '..', 'habit_completion_source_guard.js'), 'utf8');
   let savedState = null;
   const previous = {
     habits: [{ id: 'vice-1', name: 'No Weed', category: 'vice' }],
@@ -178,6 +178,7 @@ test('future source guard corrects only newly added vice completions', () => {
       points: 3
     }]
   };
+  let decoderReads = 0;
   const context = {
     console,
     structuredClone,
@@ -188,11 +189,17 @@ test('future source guard corrects only newly added vice completions', () => {
     globalThis: null,
     localStorage: {
       getItem(key) {
-        return key === 'taskpoints_v1' ? JSON.stringify(previous) : null;
+        return key === 'taskpoints_v1'
+          ? JSON.stringify({ __taskpointsStorageEncoding: 'lz16-packed-v1', payload: 'opaque' })
+          : null;
       }
     },
     TaskPointsCore: {
       STORAGE_KEY: 'taskpoints_v1',
+      readTaskPointsStoredState(key, fallback) {
+        decoderReads += 1;
+        return key === 'taskpoints_v1' ? structuredClone(previous) : fallback;
+      },
       saveStateSnapshot(state) {
         savedState = structuredClone(state);
         return { state };
@@ -200,7 +207,7 @@ test('future source guard corrects only newly added vice completions', () => {
     }
   };
   context.globalThis = context;
-  vm.runInNewContext(source, context, { filename: 'habit_ledger_consistency_repair.js' });
+  vm.runInNewContext(source, context, { filename: 'habit_completion_source_guard.js' });
 
   context.TaskPointsCore.saveStateSnapshot({
     habits: previous.habits,
@@ -216,24 +223,30 @@ test('future source guard corrects only newly added vice completions', () => {
     ]
   }, { savePath: 'today' });
 
+  assert.ok(decoderReads > 0, 'the packed previous snapshot is read through TaskPointsCore');
   assert.equal(savedState.completions[0].source, 'habit', 'existing rows are not silently rewritten');
   assert.equal(savedState.completions[1].source, 'vice');
   assert.equal(savedState.completions[1].habitId, 'vice-1');
 });
 
 test('panel is preview-first and requires a fresh backup confirmation', () => {
-  const source = fs.readFileSync(path.join(__dirname, '..', 'habit_ledger_consistency_repair.js'), 'utf8');
+  const source = fs.readFileSync(path.join(__dirname, '..', 'habit_ledger_repair_audit.js'), 'utf8');
   assert.match(source, /Preview Habit-Ledger Repair/);
   assert.match(source, /I exported a fresh full backup of the current phone data/);
   assert.match(source, /audit-habit-ledger-consistency-repair/);
-  assert.match(source, /planFingerprint\(livePlan\) !== planFingerprint\(previewPlan\)/);
+  assert.match(source, /readTaskPointsStoredState/);
+  assert.match(source, /replaceCompletions:\s*true/);
+  assert.match(source, /persisted\.completions\.length !== result\.state\.completions\.length/);
+  assert.match(source, /if \(!auditChecks\) return false/);
+  assert.doesNotMatch(source, /querySelector\('main'\)/);
   assert.match(source, /Manual-review rows will not be changed/);
 });
 
 test('worker loads the repair directly on Audit and through scoring core', () => {
   const worker = fs.readFileSync(path.join(__dirname, '..', '_worker.js'), 'utf8');
-  assert.match(worker, /habit_ledger_consistency_repair\.js\?v=20260731-1/);
+  assert.match(worker, /habit_ledger_repair_planner\.js\?v=20260731-1/);
+  assert.match(worker, /habit_ledger_repair_audit\.js\?v=20260731-1/);
   assert.match(worker, /data-taskpoints-habit-ledger-repair="true"/);
-  assert.match(worker, /readAssetSource\(env, request, '\/habit_ledger_consistency_repair\.js'\)/);
-  assert.match(worker, /x-taskpoints-habit-ledger-bundle/);
+  assert.match(worker, /readAssetSource\(env, request, '\/habit_completion_source_guard\.js'\)/);
+  assert.match(worker, /x-taskpoints-habit-source-guard/);
 });
