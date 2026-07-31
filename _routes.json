@@ -1,5 +1,11 @@
 {
   "version": 1,
-  "include": ["/scoring_core.js", "/settings.html", "/styles.css"],
+  "include": [
+    "/scoring_core.js",
+    "/settings.html",
+    "/styles.css",
+    "/audit.html",
+    "/matchups.html"
+  ],
   "exclude": []
 }
