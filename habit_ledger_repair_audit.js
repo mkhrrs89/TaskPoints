@@ -158,6 +158,9 @@
     };
 
     previewButton.addEventListener('click', () => {
+      backupCheckbox.checked = false;
+      previewPlan = null;
+      updateEnabled();
       try {
         const state = readStoredState(null);
         if (!state) throw new Error('No TaskPoints state was found in storage.');
