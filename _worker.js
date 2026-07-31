@@ -85,12 +85,14 @@ export default {
       } catch (_) {
         return response;
       }
-      const [aliasSource, bootstrapSource] = await Promise.all([
+      const [sameDaySource, aliasSource, bootstrapSource] = await Promise.all([
+        readAssetSource(env, request, '/audit_same_day_reconciliation.js'),
         readAssetSource(env, request, '/score_alias_consistency.js'),
         readAssetSource(env, request, '/score_alias_audit_bootstrap.js')
       ]);
-      const modules = [auditSource, aliasSource, bootstrapSource].filter(Boolean).join('\n');
+      const modules = [auditSource, sameDaySource, aliasSource, bootstrapSource].filter(Boolean).join('\n');
       return javascriptResponse(modules || auditSource, response, {
+        'x-taskpoints-audit-same-day-reconciliation': sameDaySource ? 'included' : 'missing',
         'x-taskpoints-score-alias-audit-bundle': aliasSource && bootstrapSource ? 'included' : 'partial'
       });
     }
