@@ -112,6 +112,19 @@ test('single genuine score mismatch still fails', () => {
   assert.match(result.details.join(' '), /matchup score 43\.2 differs from history score 62\.8/);
 });
 
+test('explicit mismatched IDs cannot be overridden by unique score matches', () => {
+  const state = stateBase();
+  state.matchups = [matchup('m1', 10), matchup('m2', 30)];
+  state.gameHistory = [
+    history('history-one', 10, { matchupId: 'unrelated-x' }),
+    history('history-two', 30, { matchupId: 'unrelated-y' })
+  ];
+
+  const result = fix.buildMatchupHistoryReconciliationAudit(state, options);
+  assert.equal(result.status, 'FAIL');
+  assert.match(result.details.join(' '), /conflicting explicit matchup IDs/);
+});
+
 test('same-day reconciliation is read-only', () => {
   const state = stateBase();
   state.matchups = [matchup('one', 14.5), matchup('two', 45)];
