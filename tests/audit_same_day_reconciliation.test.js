@@ -12,21 +12,17 @@ const options = {
 
 const playerId = 'inara';
 const stateBase = () => ({
-  players: [
-    { id: playerId, name: 'Inara' },
-    { id: 'brett', name: 'Brett' },
-    { id: 'seraphine', name: 'Seraphine' }
-  ],
+  players: [{ id: playerId, name: 'Inara' }],
   matchups: [],
   gameHistory: []
 });
 
-function matchup(id, opponentId, score, overrides = {}) {
+function matchup(id, score, overrides = {}) {
   return {
     id,
     dateKey: '2026-06-09',
     playerAId: playerId,
-    playerBId: opponentId,
+    playerBId: 'YOU',
     scoreA: score,
     scoreB: 40,
     playerAScore: score,
@@ -49,9 +45,9 @@ function history(id, score, overrides = {}) {
 test('same-day score row is assigned to its unique matchup instead of the first matchup', () => {
   const state = stateBase();
   state.matchups = [
-    matchup('inara-brett', 'brett', 14.5),
-    matchup('seraphine-inara', 'seraphine', 45, {
-      playerAId: 'seraphine',
+    matchup('inara-brett', 14.5),
+    matchup('seraphine-inara', 45, {
+      playerAId: 'YOU',
       playerBId: playerId,
       scoreA: 55,
       scoreB: 45,
@@ -78,8 +74,8 @@ test('same-day score row is assigned to its unique matchup instead of the first 
 test('two same-day rows reconcile by unique scores regardless of matchup order', () => {
   const state = stateBase();
   state.matchups = [
-    matchup('second', 'seraphine', 45),
-    matchup('first', 'brett', 14.5)
+    matchup('second', 45),
+    matchup('first', 14.5)
   ];
   state.gameHistory = [
     history('history-first', 14.5),
@@ -93,8 +89,8 @@ test('two same-day rows reconcile by unique scores regardless of matchup order',
 test('same-day duplicate scores remain ambiguous instead of being greedily paired', () => {
   const state = stateBase();
   state.matchups = [
-    matchup('', 'brett', 30, { matchupId: '' }),
-    matchup('', 'seraphine', 30, { matchupId: '' })
+    matchup('', 30, { matchupId: '' }),
+    matchup('', 30, { matchupId: '' })
   ];
   state.gameHistory = [
     history('history-one', 30),
@@ -108,7 +104,7 @@ test('same-day duplicate scores remain ambiguous instead of being greedily paire
 
 test('single genuine score mismatch still fails', () => {
   const state = stateBase();
-  state.matchups = [matchup('verrick-game', 'brett', 43.2)];
+  state.matchups = [matchup('verrick-game', 43.2)];
   state.gameHistory = [history('verrick-history', 62.8)];
 
   const result = fix.buildMatchupHistoryReconciliationAudit(state, options);
@@ -118,7 +114,7 @@ test('single genuine score mismatch still fails', () => {
 
 test('same-day reconciliation is read-only', () => {
   const state = stateBase();
-  state.matchups = [matchup('one', 'brett', 14.5), matchup('two', 'seraphine', 45)];
+  state.matchups = [matchup('one', 14.5), matchup('two', 45)];
   state.gameHistory = [history('history-two', 45)];
   const before = structuredClone(state);
 
