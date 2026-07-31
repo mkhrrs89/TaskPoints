@@ -138,6 +138,9 @@ test('same-day reconciliation is read-only', () => {
 test('Audit worker bundle loads the same-day matcher after the base audit', () => {
   const worker = fs.readFileSync('_worker.js', 'utf8');
   assert.match(worker, /readAssetSource\(env, request, '\/audit_same_day_reconciliation\.js'\)/);
-  assert.match(worker, /\[auditSource, sameDaySource, aliasSource, bootstrapSource\]/);
+  assert.match(
+    worker,
+    /\[\s*auditSource,\s*sameDaySource,\s*historyRepairSource,\s*historyAliasSyncSource,\s*aliasSource,\s*bootstrapSource\s*\]/
+  );
   assert.match(worker, /x-taskpoints-audit-same-day-reconciliation/);
 });
