@@ -73,6 +73,7 @@ export default {
           + '<script src="/habit_ledger_matchup_impact_canonical.js?v=20260801-1" data-taskpoints-habit-matchup-canonical="true"></script>'
           + '<script src="/habit_ledger_matchup_impact_dateiso.js?v=20260801-1" data-taskpoints-habit-matchup-dateiso="true"></script>'
           + '<script src="/habit_ledger_matchup_impact_legacy_scores.js?v=20260801-1" data-taskpoints-habit-matchup-legacy-scores="true"></script>'
+          + '<script src="/habit_ledger_matchup_impact_attestation.js?v=20260801-1" data-taskpoints-habit-matchup-attestation="true"></script>'
           + '<script src="/habit_ledger_matchup_impact_stale_guard.js?v=20260801-1" data-taskpoints-habit-matchup-stale-guard="true"></script>'
           + '<script src="/score_alias_audit_bootstrap.js?v=20260731-2" data-taskpoints-score-alias-audit-bootstrap="true"></script>'
         : '';
