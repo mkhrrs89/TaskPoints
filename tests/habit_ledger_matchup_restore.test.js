@@ -78,13 +78,14 @@ function loadRestoreFlow(plan) {
   vm.runInNewContext(applySource, context);
   return {
     planner,
+    context,
     getBaseApplyCalls: () => baseApplyCalls,
     getRawApplyCalls: () => rawApplyCalls
   };
 }
 
 test('projected canonical score equal to stored score is a safe restoration', () => {
-  const { planner } = loadRestoreFlow(restorePlan(10));
+  const { planner, context } = loadRestoreFlow(restorePlan(10));
   const plan = planner.buildHabitLedgerRepairPlan({});
   const day = plan.matchupImpact.days[0];
 
@@ -93,6 +94,7 @@ test('projected canonical score equal to stored score is a safe restoration', ()
   assert.equal(day.resultChanges, false);
   assert.equal(plan.matchupImpact.hasBlockingImpact, false);
   assert.equal(plan.matchupImpact.restoredScoreDays, 1);
+  assert.equal(context.__latestHabitLedgerMatchupImpact.days[0].status, 'restores-stored-score');
 });
 
 test('verified restoration bypasses the obsolete raw approximation but still uses base stale-plan checks', () => {
@@ -115,9 +117,11 @@ test('a projected score that differs from the stored score remains blocked', () 
   assert.equal(getBaseApplyCalls(), 0);
 });
 
-test('restoration UI relabels equal stored and projected scores as safe', () => {
+test('restoration UI uses the exact analyzed status rather than rounded score text', () => {
   assert.match(uiSource, /SAFE RESTORATION/);
-  assert.match(uiSource, /Math\.abs\(stored - projected\) > 0\.0001/);
+  assert.match(uiSource, /__latestHabitLedgerMatchupImpact/);
+  assert.match(uiSource, /status === 'restores-stored-score'/);
+  assert.doesNotMatch(uiSource, /Math\.abs\(stored - projected\)/);
   assert.match(uiSource, /restores the finalized matchup score/);
 });
 
