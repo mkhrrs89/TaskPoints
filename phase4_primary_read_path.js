@@ -53,31 +53,31 @@
   function journalCount() {
     try { return Number(core.readPendingHabitDeltas?.().length) || 0; } catch (_) { return 1; }
   }
-  function summariesMatch(mirrorState, primaryState, primaryCache) {
-    try {
-      const mirrorSummary = core.shadowSourceSummary(mirrorState);
-      const primarySummary = core.shadowSourceSummary(primaryState);
-      const mismatch = core.shadowVerificationMismatches(mirrorSummary, primarySummary) || [];
-      return primaryCache?.status === 'passed_verification'
-        && mirrorSummary.hashes.state === primarySummary.hashes.state
-        && primaryCache.sourceHash === mirrorSummary.hashes.state
-        && primaryCache.destinationHash === primarySummary.hashes.state
-        && (primaryCache.sourceCounts == null
-          || core.shadowCanonicalJson(primaryCache.sourceCounts) === core.shadowCanonicalJson(mirrorSummary.counts))
-        && (primaryCache.destinationCounts == null
-          || core.shadowCanonicalJson(primaryCache.destinationCounts) === core.shadowCanonicalJson(primarySummary.counts))
-        && mismatch.length === 0
-        && core.shadowCanonicalJson(mirrorState) === core.shadowCanonicalJson(primaryState);
-    } catch (_) { return false; }
+  function verifiedCacheRecordIsUsable(primaryCache) {
+    if (!primaryCache || typeof primaryCache !== 'object' || Array.isArray(primaryCache)) return false;
+    if (primaryCache.status !== 'passed_verification') return false;
+    if (!Number.isFinite(Number(primaryCache.sequence)) || Number(primaryCache.sequence) < 1) return false;
+    if (!primaryCache.state || typeof primaryCache.state !== 'object' || Array.isArray(primaryCache.state)) return false;
+    if (primaryCache.sourceHash && primaryCache.destinationHash
+      && primaryCache.sourceHash !== primaryCache.destinationHash) return false;
+    return true;
+  }
+  function cacheSerializedState(primaryCache) {
+    if (typeof primaryCache?.serializedState === 'string') return primaryCache.serializedState;
+    return typeof primaryCache?.mirrorRaw === 'string' ? primaryCache.mirrorRaw : null;
   }
   function cacheMatchesMirror(primaryCache, mirrorRaw) {
-    if (!primaryCache || mirrorRaw === null || primaryCache.mirrorRaw !== mirrorRaw) return false;
+    if (!verifiedCacheRecordIsUsable(primaryCache) || mirrorRaw === null) return false;
+    // The cache was fully verified when it was created. During ordinary reads,
+    // compare the exact saved bytes instead of reparsing, rehashing, and
+    // canonicalizing the entire application state again. Native Phase 5A
+    // caches intentionally omit serializedState, so their verified mirrorRaw
+    // is the exact byte source used by the fallback reader.
+    if (primaryCache.mirrorRaw !== mirrorRaw || cacheSerializedState(primaryCache) !== mirrorRaw) return false;
     if ((Number(core.getPendingShadowDualWriteCount?.()) || 0) > 0) return false;
     if ((Number(core.getPendingPhase4WriteCount?.()) || 0) > 0) return false;
     if (journalCount() > 0) return false;
-    let mirrorState;
-    try { mirrorState = core.parseTaskPointsStorageJson(mirrorRaw, {}) || {}; } catch (_) { return false; }
-    return summariesMatch(mirrorState, primaryCache.state || {}, primaryCache);
+    return true;
   }
   function validateSessionRecord(record, mirrorRaw) {
     if (!record || typeof record !== 'object' || Array.isArray(record)) return null;
@@ -261,14 +261,7 @@
       schedulePrimaryWarmup('cache_not_ready');
       return ORIGINAL_LOAD.apply(core, args);
     }
-    let mirrorState;
-    try { mirrorState = core.parseTaskPointsStorageJson(mirrorRaw, {}) || {}; }
-    catch (_) {
-      clearCache();
-      recordFallback('mirror_parse_failed');
-      return ORIGINAL_LOAD.apply(core, args);
-    }
-    if (primaryCache.mirrorRaw !== mirrorRaw || !summariesMatch(mirrorState, primaryCache.state, primaryCache)) {
+    if (!cacheMatchesMirror(primaryCache, mirrorRaw)) {
       clearCache();
       recordFallback('mirror_mismatch');
       schedulePrimaryWarmup('mirror_mismatch');
@@ -283,7 +276,7 @@
       const attempt = withTemporaryPrimary(
         mirrorRaw,
         journalRaw,
-        primaryCache.serializedState || JSON.stringify(primaryCache.state || {}),
+        cacheSerializedState(primaryCache),
         () => ORIGINAL_LOAD.call(core, primaryOptions)
       );
       const mirrorAfter = safeGet(core.STORAGE_KEY);
