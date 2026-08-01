@@ -54,6 +54,7 @@ function install() {
   vm.runInNewContext(source, context, { filename: 'save_pipeline_shared_work.js' });
   return {
     core,
+    context,
     raw,
     cache,
     parseCalls: () => parseCalls,
@@ -79,7 +80,7 @@ test('verified raw is cloned from the trusted Phase 4 package without reparsing'
 test('shared snapshot metadata follows structured clones used by later backup layers', () => {
   const harness = install();
   const parsed = harness.core.parseTaskPointsStorageJson(harness.raw, {});
-  const cloned = structuredClone(parsed);
+  const cloned = harness.context.structuredClone(parsed);
   const summary = harness.core.shadowSourceSummary(cloned);
   assert.equal(summary.hashes.state, 'state-hash');
   assert.equal(harness.summaryCalls(), 0);
