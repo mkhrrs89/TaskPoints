@@ -12,9 +12,9 @@
   }
 
   planner.applyHabitLedgerRepairPlan = function failClosedHabitLedgerApply(stateInput, previewPlan) {
-    if (hasPointRemovals(previewPlan) && !previewPlan?.matchupImpact) {
+    if (hasPointRemovals(previewPlan) && previewPlan?.matchupImpact?.completeImpactChain !== true) {
       throw new Error(
-        'The matchup-impact preview is unavailable. No habit rows were changed.'
+        'The complete canonical matchup-impact preview is unavailable. No habit rows were changed.'
       );
     }
     return originalApply(stateInput, previewPlan);
