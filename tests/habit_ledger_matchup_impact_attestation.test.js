@@ -112,8 +112,8 @@ test('worker loads attestation after all required layers and before stale guard'
   assert.match(worker, /habit_ledger_matchup_impact_attestation\.js\?v=20260801-1/);
   const attestationAt = worker.indexOf('/habit_ledger_matchup_impact_attestation.js?v=20260801-1');
   assert.ok(worker.indexOf('/habit_ledger_matchup_impact_guard.js?v=20260801-1') < attestationAt);
-  assert.ok(worker.indexOf('/habit_ledger_matchup_impact_canonical.js?v=20260801-2') < attestationAt);
-  assert.ok(worker.indexOf('/habit_ledger_matchup_impact_dateiso.js?v=20260801-2') < attestationAt);
+  assert.ok(worker.indexOf('/habit_ledger_matchup_impact_canonical.js?v=20260801-1') < attestationAt);
+  assert.ok(worker.indexOf('/habit_ledger_matchup_impact_dateiso.js?v=20260801-1') < attestationAt);
   assert.ok(worker.indexOf('/habit_ledger_matchup_impact_legacy_scores.js?v=20260801-1') < attestationAt);
   assert.ok(attestationAt < worker.indexOf('/habit_ledger_matchup_impact_stale_guard.js?v=20260801-1'));
 });
