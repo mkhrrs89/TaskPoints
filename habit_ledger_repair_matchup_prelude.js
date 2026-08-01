@@ -6,13 +6,9 @@
   planner.__matchupImpactPreludeInstalled = true;
   const originalApply = planner.applyHabitLedgerRepairPlan.bind(planner);
 
-  const finiteNonzero = (value) => Number.isFinite(Number(value)) && Math.abs(Number(value)) > 0.0001;
-
   function hasPointRemovals(plan) {
-    return []
-      .concat(Array.isArray(plan?.failedDateRemovals) ? plan.failedDateRemovals : [])
-      .concat(Array.isArray(plan?.duplicateRemovals) ? plan.duplicateRemovals : [])
-      .some((item) => finiteNonzero(item?.points));
+    return (Array.isArray(plan?.failedDateRemovals) && plan.failedDateRemovals.length > 0)
+      || (Array.isArray(plan?.duplicateRemovals) && plan.duplicateRemovals.length > 0);
   }
 
   planner.applyHabitLedgerRepairPlan = function failClosedHabitLedgerApply(stateInput, previewPlan) {
