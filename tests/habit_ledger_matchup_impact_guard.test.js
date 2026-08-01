@@ -107,7 +107,7 @@ test('stored score change remains blocked even when W/L result is unchanged', ()
   assert.equal(day.status, 'stored-score-change');
 });
 
-test('point removal on a day without a stored YOU matchup is nonblocking', () => {
+test('point removal on a day without a stored YOU matchup is nonblocking in the basic impact layer', () => {
   const { planner, getApplyCalls } = loadGuard();
   const state = stateWith(4);
   state.matchups = [];
@@ -115,6 +115,7 @@ test('point removal on a day without a stored YOU matchup is nonblocking', () =>
 
   assert.equal(plan.matchupImpact.hasBlockingImpact, false);
   assert.equal(plan.matchupImpact.days[0].status, 'no-matchup');
+  plan.matchupImpact.completeImpactChain = true;
   planner.applyHabitLedgerRepairPlan(state, plan);
   assert.equal(getApplyCalls(), 1);
 });
@@ -150,7 +151,7 @@ test('fail-closed prelude rejects point removals when the impact module is absen
 
   assert.throws(
     () => planner.applyHabitLedgerRepairPlan(state, state.plan),
-    /matchup-impact preview is unavailable/
+    /complete canonical matchup-impact preview is unavailable/
   );
   assert.equal(getApplyCalls(), 0);
 });
@@ -175,17 +176,17 @@ test('source-only corrections have no score or matchup impact', () => {
 
 test('Audit loader is fail-closed and ordered around the base repair panel', () => {
   const worker = fs.readFileSync(path.join(__dirname, '..', '_worker.js'), 'utf8');
-  assert.match(worker, /habit_ledger_repair_matchup_prelude\.js\?v=20260801-1/);
+  assert.match(worker, /habit_ledger_repair_matchup_prelude\.js\?v=20260801-2/);
   assert.match(worker, /habit_ledger_matchup_impact_guard\.js\?v=20260801-1/);
   assert.match(worker, /habit_ledger_matchup_impact_stale_guard\.js\?v=20260801-1/);
   assert.match(worker, /data-taskpoints-habit-matchup-impact="true"/);
   assert.ok(
     worker.indexOf('/habit_ledger_repair_planner.js?v=20260731-1')
-      < worker.indexOf('/habit_ledger_repair_matchup_prelude.js?v=20260801-1'),
+      < worker.indexOf('/habit_ledger_repair_matchup_prelude.js?v=20260801-2'),
     'prelude must load after the planner'
   );
   assert.ok(
-    worker.indexOf('/habit_ledger_repair_matchup_prelude.js?v=20260801-1')
+    worker.indexOf('/habit_ledger_repair_matchup_prelude.js?v=20260801-2')
       < worker.indexOf('/habit_ledger_repair_audit.js?v=20260731-1'),
     'fail-closed prelude must load before the base repair panel'
   );
@@ -207,6 +208,6 @@ test('UI and apply paths both enforce blocking impacts', () => {
   assert.match(impactSource, /impact\.hasBlockingImpact/);
   assert.match(impactSource, /No habit rows were changed/);
   assert.match(impactSource, /stored score .*projectedUserScore/s);
-  assert.match(preludeSource, /matchup-impact preview is unavailable/);
+  assert.match(preludeSource, /complete canonical matchup-impact preview is unavailable/);
   assert.match(staleSource, /stored matchup state changed after the preview/);
 });
