@@ -12,6 +12,7 @@
     ? global.structuredClone.bind(global)
     : null;
   const snapshotMeta = new WeakMap();
+  let recentParse = null;
   let parseReuseCount = 0;
   let summaryReuseCount = 0;
   let clonePropagationCount = 0;
@@ -52,6 +53,19 @@
     return value;
   }
 
+  function rememberRecentParse(raw, parsed) {
+    if (typeof raw !== 'string' || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      recentParse = null;
+      return;
+    }
+    recentParse = {
+      raw,
+      source: parsed,
+      snapshot: cloneSnapshot(parsed),
+      summary: null
+    };
+  }
+
   if (originalStructuredClone) {
     global.structuredClone = function taskPointsSharedStructuredClone(value, options) {
       const cloned = originalStructuredClone(value, options);
@@ -64,21 +78,39 @@
     };
   }
 
-  core.parseTaskPointsStorageJson = function sharedVerifiedParse(raw, fallback = {}) {
+  core.parseTaskPointsStorageJson = function sharedSaveParse(raw, fallback = {}) {
     const cache = verifiedCacheForRaw(raw);
     const cachedSummary = cache ? summaryFromCache(cache) : null;
-    if (!cache || !cachedSummary) return originalParse(raw, fallback);
+    if (cache && cachedSummary) {
+      parseReuseCount += 1;
+      return rememberSnapshot(cloneSnapshot(cache.state), {
+        raw,
+        sequence: Number(cache.sequence) || 0,
+        summary: cachedSummary,
+        verifiedAt: cache.verifiedAt || null
+      });
+    }
 
-    parseReuseCount += 1;
-    return rememberSnapshot(cloneSnapshot(cache.state), {
-      raw,
-      sequence: Number(cache.sequence) || 0,
-      summary: cachedSummary,
-      verifiedAt: cache.verifiedAt || null
-    });
+    if (recentParse && typeof raw === 'string' && recentParse.raw === raw) {
+      parseReuseCount += 1;
+      const cloned = cloneSnapshot(recentParse.snapshot);
+      if (recentParse.summary) {
+        rememberSnapshot(cloned, {
+          raw,
+          sequence: 0,
+          summary: recentParse.summary,
+          verifiedAt: null
+        });
+      }
+      return cloned;
+    }
+
+    const parsed = originalParse(raw, fallback);
+    rememberRecentParse(raw, parsed);
+    return parsed;
   };
 
-  core.shadowSourceSummary = function sharedVerifiedSummary(state) {
+  core.shadowSourceSummary = function sharedSaveSummary(state) {
     if (state && typeof state === 'object' && !Array.isArray(state)) {
       const metadata = snapshotMeta.get(state);
       if (metadata?.summary) {
@@ -101,7 +133,18 @@
         }
       }
     }
-    return originalSummary(state);
+
+    const result = originalSummary(state);
+    if (recentParse && recentParse.source === state) {
+      recentParse.summary = result;
+      rememberSnapshot(recentParse.snapshot, {
+        raw: recentParse.raw,
+        sequence: 0,
+        summary: result,
+        verifiedAt: null
+      });
+    }
+    return result;
   };
 
   core.getSharedVerifiedSavePackage = function getSharedVerifiedSavePackage(raw = null) {
@@ -133,11 +176,16 @@
     };
   };
 
+  core.clearSharedSaveWork = function clearSharedSaveWork() {
+    recentParse = null;
+  };
+
   core.getSharedSaveWorkStatus = () => ({
     installed: true,
     parseReuseCount,
     summaryReuseCount,
     clonePropagationCount,
+    recentRawPresent: Boolean(recentParse?.raw),
     packageReady: Boolean(core.getSharedVerifiedSavePackage?.())
   });
 })(typeof window !== 'undefined' ? window : globalThis);
