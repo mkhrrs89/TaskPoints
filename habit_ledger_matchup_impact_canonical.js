@@ -10,7 +10,9 @@
   const previousApply = planner.applyHabitLedgerRepairPlan.bind(planner);
   const EPSILON = 0.0001;
 
-  const finite = (value) => Number.isFinite(Number(value));
+  const populated = (value) =>
+    value !== null && value !== undefined && (typeof value !== 'string' || value.trim() !== '');
+  const finite = (value) => populated(value) && Number.isFinite(Number(value));
 
   function clone(value) {
     if (value == null) return value;
@@ -46,12 +48,24 @@
       if (validDayKey(direct)) return direct;
     }
     if (validDayKey(row.date)) return row.date;
-    for (const value of [row.date, row.completedAtISO, row.createdAtISO, row.finalizedAtISO]) {
-      if (value == null || value === '') continue;
+    for (const value of [
+      row.date,
+      row.dateISO,
+      row.completedAtISO,
+      row.createdAtISO,
+      row.finalizedAtISO
+    ]) {
+      if (!populated(value)) continue;
       const key = localDateKey(value);
       if (key) return key;
     }
     return '';
+  }
+
+  function scoreValue(primary, alias) {
+    if (finite(primary)) return Number(primary);
+    if (finite(alias)) return Number(alias);
+    return null;
   }
 
   function resultLabel(userScore, opponentScore) {
@@ -91,14 +105,36 @@
     return state;
   }
 
-  function canonicalScore(state, dayKey) {
-    if (typeof core.buildDaySnapshot !== 'function' || typeof core.computeDayTotals !== 'function') {
-      throw new Error('The canonical TaskPoints day scorer is unavailable.');
+  function buildCanonicalScoreMap(state) {
+    if (typeof core.youDailyTotalsWithInertia !== 'function') {
+      throw new Error('The canonical TaskPoints batch day scorer is unavailable.');
     }
-    const snapshot = core.buildDaySnapshot(dayKey, state);
-    const totals = core.computeDayTotals(snapshot);
-    if (!finite(totals?.total)) throw new Error(`No canonical score was produced for ${dayKey}.`);
-    return Number(totals.total);
+    const totals = core.youDailyTotalsWithInertia(state || {});
+    if (!totals || typeof totals !== 'object') {
+      throw new Error('The canonical TaskPoints batch day scorer returned no totals.');
+    }
+    const map = new Map();
+    Object.entries(totals).forEach(([dayKey, value]) => {
+      if (validDayKey(dayKey) && finite(value)) map.set(dayKey, Number(value));
+    });
+    return map;
+  }
+
+  function scoreFromMap(map, dayKey) {
+    if (!validDayKey(dayKey)) throw new Error(`Invalid score date ${dayKey || '(blank)'}.`);
+    const value = map.get(dayKey);
+    return finite(value) ? Number(value) : 0;
+  }
+
+  function buildCanonicalScoreMaps(state, projectedState) {
+    return {
+      live: buildCanonicalScoreMap(state),
+      projected: buildCanonicalScoreMap(projectedState)
+    };
+  }
+
+  function canonicalScore(state, dayKey) {
+    return scoreFromMap(buildCanonicalScoreMap(state), dayKey);
   }
 
   function impactFingerprint(impact) {
@@ -124,32 +160,55 @@
       .concat(Array.isArray(plan?.failedDateRemovals) ? plan.failedDateRemovals : [])
       .concat(Array.isArray(plan?.duplicateRemovals) ? plan.duplicateRemovals : [])
       .concat(Array.isArray(plan?.sourceUpdates) ? plan.sourceUpdates : []);
-    const hasConfirmedChanges = changeRows.length > 0;
     const directByDay = new Map();
+
     changeRows.forEach((item) => {
       if (!validDayKey(item?.dayKey)) return;
-      if (!directByDay.has(item.dayKey)) directByDay.set(item.dayKey, { pointsRemoved: 0, changeCount: 0 });
+      if (!directByDay.has(item.dayKey)) {
+        directByDay.set(item.dayKey, { pointsRemoved: 0, changeCount: 0 });
+      }
       const entry = directByDay.get(item.dayKey);
       if (finite(item.points)) entry.pointsRemoved += Number(item.points);
       entry.changeCount += 1;
     });
 
-    if (!hasConfirmedChanges) {
+    if (!changeRows.length) {
       return {
-        days: [], blockingDays: [], resultChangingDays: [], affectedDays: 0,
-        pointsRemoved: 0, hasBlockingImpact: false, canonical: true
+        days: [],
+        blockingDays: [],
+        resultChangingDays: [],
+        affectedDays: 0,
+        pointsRemoved: 0,
+        hasBlockingImpact: false,
+        canonical: true,
+        batchedScoreMaps: true,
+        includesDateISO: true
       };
     }
 
-    if (typeof core.buildDaySnapshot !== 'function' || typeof core.computeDayTotals !== 'function') {
+    let scoreMaps;
+    try {
+      scoreMaps = buildCanonicalScoreMaps(state, projectedState);
+    } catch (error) {
       const failure = {
-        dayKey: '', pointsRemoved: Number(plan?.pointsRemoved) || 0, matchupCount: 0,
-        status: 'analysis-error', blocking: true, resultChanges: null,
-        reason: 'The canonical TaskPoints day scorer is unavailable.'
+        dayKey: '',
+        pointsRemoved: Number(plan?.pointsRemoved) || 0,
+        matchupCount: 0,
+        status: 'analysis-error',
+        blocking: true,
+        resultChanges: null,
+        reason: error.message || String(error)
       };
       return {
-        days: [failure], blockingDays: [failure], resultChangingDays: [], affectedDays: 1,
-        pointsRemoved: Number(plan?.pointsRemoved) || 0, hasBlockingImpact: true, canonical: false
+        days: [failure],
+        blockingDays: [failure],
+        resultChangingDays: [],
+        affectedDays: 1,
+        pointsRemoved: Number(plan?.pointsRemoved) || 0,
+        hasBlockingImpact: true,
+        canonical: false,
+        batchedScoreMaps: false,
+        includesDateISO: true
       };
     }
 
@@ -164,27 +223,12 @@
 
     const days = [];
     const matchupImpactDates = new Set();
+
     matchupsByDay.forEach((matchups, dayKey) => {
-      let currentScore;
-      let projectedScore;
-      try {
-        currentScore = canonicalScore(state, dayKey);
-        projectedScore = canonicalScore(projectedState, dayKey);
-      } catch (error) {
-        const failure = {
-          dayKey,
-          pointsRemoved: Number(directByDay.get(dayKey)?.pointsRemoved || 0),
-          matchupCount: matchups.length,
-          status: 'analysis-error',
-          blocking: true,
-          resultChanges: null,
-          reason: error.message || String(error)
-        };
-        days.push(failure);
-        matchupImpactDates.add(dayKey);
-        return;
-      }
+      const currentScore = scoreFromMap(scoreMaps.live, dayKey);
+      const projectedScore = scoreFromMap(scoreMaps.projected, dayKey);
       if (Math.abs(currentScore - projectedScore) <= EPSILON) return;
+
       matchupImpactDates.add(dayKey);
       const direct = directByDay.get(dayKey) || { pointsRemoved: 0, changeCount: 0 };
       if (matchups.length !== 1) {
@@ -202,13 +246,15 @@
         });
         return;
       }
+
       const matchup = matchups[0];
       const youAreA = matchup.playerAId === 'YOU';
-      const scoreA = matchup.scoreA ?? matchup.playerAScore;
-      const scoreB = matchup.scoreB ?? matchup.playerBScore;
-      const storedUserScore = youAreA ? scoreA : scoreB;
-      const opponentScore = youAreA ? scoreB : scoreA;
+      const aScore = scoreValue(matchup.scoreA, matchup.playerAScore);
+      const bScore = scoreValue(matchup.scoreB, matchup.playerBScore);
+      const storedUserScore = youAreA ? aScore : bScore;
+      const opponentScore = youAreA ? bScore : aScore;
       const opponentId = youAreA ? matchup.playerBId : matchup.playerAId;
+
       if (!finite(storedUserScore) || !finite(opponentScore)) {
         days.push({
           dayKey,
@@ -226,12 +272,14 @@
           status: 'missing-matchup-score',
           blocking: true,
           resultChanges: null,
-          reason: 'The stored matchup does not contain two finite final scores.'
+          reason: 'The stored matchup does not contain two finite final scores after checking aliases.'
         });
         return;
       }
+
       const beforeResult = resultLabel(storedUserScore, opponentScore);
       const afterResult = resultLabel(projectedScore, opponentScore);
+      const resultChanges = beforeResult !== afterResult;
       days.push({
         dayKey,
         pointsRemoved: Number(direct.pointsRemoved.toFixed(4)),
@@ -247,12 +295,12 @@
         opponentScore: Number(opponentScore),
         beforeResult,
         afterResult,
-        resultChanges: beforeResult !== afterResult,
+        resultChanges,
         baselineDifference: Number((currentScore - Number(storedUserScore)).toFixed(4)),
         baselineMatchesStoredScore: Math.abs(currentScore - Number(storedUserScore)) <= 0.05,
-        status: beforeResult !== afterResult ? 'result-change' : 'stored-score-change',
+        status: resultChanges ? 'result-change' : 'stored-score-change',
         blocking: true,
-        reason: beforeResult !== afterResult
+        reason: resultChanges
           ? 'The canonical post-repair score would change the matchup result.'
           : 'The result stays the same, but the canonical post-repair score would differ from the stored matchup score.'
       });
@@ -260,18 +308,13 @@
 
     directByDay.forEach((direct, dayKey) => {
       if (matchupImpactDates.has(dayKey) || matchupsByDay.has(dayKey)) return;
-      let currentScore = null;
-      let projectedScore = null;
-      try {
-        currentScore = canonicalScore(state, dayKey);
-        projectedScore = canonicalScore(projectedState, dayKey);
-      } catch (_) {}
+      const currentScore = scoreFromMap(scoreMaps.live, dayKey);
+      const projectedScore = scoreFromMap(scoreMaps.projected, dayKey);
+      if (Math.abs(currentScore - projectedScore) <= EPSILON) return;
       days.push({
         dayKey,
         pointsRemoved: Number(direct.pointsRemoved.toFixed(4)),
-        canonicalScoreChange: finite(currentScore) && finite(projectedScore)
-          ? Number((Number(currentScore) - Number(projectedScore)).toFixed(4))
-          : null,
+        canonicalScoreChange: Number((currentScore - projectedScore).toFixed(4)),
         currentCompletionScore: currentScore,
         projectedCompletionScore: projectedScore,
         matchupCount: 0,
@@ -292,7 +335,9 @@
       affectedDays: days.length,
       pointsRemoved: Number(plan?.pointsRemoved) || 0,
       hasBlockingImpact: blockingDays.length > 0,
-      canonical: true
+      canonical: true,
+      batchedScoreMaps: true,
+      includesDateISO: true
     };
   }
 
@@ -308,10 +353,14 @@
       throw new Error('The canonical matchup-impact preview is missing. No habit rows were changed.');
     }
     if (impactFingerprint(livePlan.matchupImpact) !== impactFingerprint(previewImpact)) {
-      throw new Error('The canonical score or matchup state changed after preview. Run the preview again. No habit rows were changed.');
+      throw new Error(
+        'The canonical score or matchup state changed after preview. Run the preview again. No habit rows were changed.'
+      );
     }
     if (livePlan.matchupImpact.hasBlockingImpact) {
-      throw new Error(`${livePlan.matchupImpact.blockingDays.length} canonical matchup impact(s) block this repair. No habit rows were changed.`);
+      throw new Error(
+        `${livePlan.matchupImpact.blockingDays.length} canonical matchup impact(s) block this repair. No habit rows were changed.`
+      );
     }
     return previousApply(stateInput, previewPlan);
   };
@@ -322,8 +371,12 @@
   global.TaskPointsCanonicalHabitLedgerMatchupImpact = {
     buildCanonicalImpact,
     buildProjectedState,
+    buildCanonicalScoreMap,
+    buildCanonicalScoreMaps,
+    scoreFromMap,
     canonicalScore,
-    impactFingerprint
+    impactFingerprint,
+    rowDay
   };
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = global.TaskPointsCanonicalHabitLedgerMatchupImpact;
