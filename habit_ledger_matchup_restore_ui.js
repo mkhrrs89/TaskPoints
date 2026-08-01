@@ -35,11 +35,10 @@
     if (restored > 0) {
       const blockedMatch = (count?.textContent || '').match(/(\d+) blocked/i);
       const blocked = blockedMatch ? Number(blockedMatch[1]) : 0;
-      if (status) {
-        status.textContent = blocked > 0
-          ? `${restored} day(s) safely restore the finalized matchup score; ${blocked} other day(s) remain blocked.`
-          : `${restored} day(s) safely restore the finalized matchup score without changing the stored W/L/tie result.`;
-      }
+      const message = blocked > 0
+        ? `${restored} day(s) safely restore the finalized matchup score; ${blocked} other day(s) remain blocked.`
+        : `${restored} day(s) safely restore the finalized matchup score without changing the stored W/L/tie result.`;
+      if (status && status.textContent !== message) status.textContent = message;
     }
     return true;
   }
