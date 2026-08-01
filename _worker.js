@@ -18,7 +18,8 @@ const CORE_BUNDLE_ASSET_PATHS = Object.freeze([
   '/home_yesterday_result_consistency.js',
   '/flex_action_fast_path.js',
   '/score_alias_consistency.js',
-  '/habit_completion_source_guard.js'
+  '/habit_completion_source_guard.js',
+  '/save_pipeline_shared_work.js'
 ]);
 const CORE_BUNDLE_QUERY_KEY = 'v';
 const CORE_BUNDLE_BROWSER_MAX_AGE = 31536000;
@@ -82,9 +83,7 @@ async function readAssetFingerprint(env, request, pathname) {
     }));
     const headEtag = headResponse?.headers?.get?.('etag');
     if (headResponse?.ok && headEtag) return `${pathname}|etag:${headEtag}`;
-  } catch (_) {
-    // Some local asset implementations do not support HEAD. Fall through to GET.
-  }
+  } catch (_) {}
 
   try {
     const response = await env.ASSETS.fetch(new Request(assetUrl, {
@@ -178,24 +177,21 @@ async function buildCoreBundle(request, env, ctx, version) {
   if (!response.ok) return response;
 
   let coreSource = '';
-  try {
-    coreSource = await response.text();
-  } catch (_) {
-    return response;
-  }
+  try { coreSource = await response.text(); }
+  catch (_) { return response; }
 
-  const [aliasSource, habitGuardSource] = await Promise.all([
+  const [aliasSource, habitGuardSource, sharedSaveWorkSource] = await Promise.all([
     readAssetSource(env, request, '/score_alias_consistency.js'),
-    readAssetSource(env, request, '/habit_completion_source_guard.js')
+    readAssetSource(env, request, '/habit_completion_source_guard.js'),
+    readAssetSource(env, request, '/save_pipeline_shared_work.js')
   ]);
-  const additions = [aliasSource, habitGuardSource].filter(Boolean);
-  const source = additions.length
-    ? `${coreSource}\n${additions.join('\n')}\n`
-    : coreSource;
+  const additions = [aliasSource, habitGuardSource, sharedSaveWorkSource].filter(Boolean);
+  const source = additions.length ? `${coreSource}\n${additions.join('\n')}\n` : coreSource;
 
   return immutableJavascriptResponse(source, response, version, {
     'x-taskpoints-score-alias-bundle': aliasSource ? 'included' : 'missing',
-    'x-taskpoints-habit-source-guard': habitGuardSource ? 'included' : 'missing'
+    'x-taskpoints-habit-source-guard': habitGuardSource ? 'included' : 'missing',
+    'x-taskpoints-shared-save-work': sharedSaveWorkSource ? 'included' : 'missing'
   });
 }
 
@@ -206,9 +202,7 @@ async function serveCurrentCoreBundle(request, env, ctx, version) {
     try {
       const cached = await edgeCache.match(cacheKey);
       if (cached) return withBundleCacheStatus(cached, 'hit', version);
-    } catch (_) {
-      // Browser caching and in-isolate build de-duplication still remain active.
-    }
+    } catch (_) {}
   }
 
   let buildPromise = coreBundleBuildPromises.get(version);
@@ -286,11 +280,9 @@ export default {
 
     if (request.method === 'GET' && response.ok && url.pathname === '/audit_integrity.js') {
       let auditSource = '';
-      try {
-        auditSource = await response.text();
-      } catch (_) {
-        return response;
-      }
+      try { auditSource = await response.text(); }
+      catch (_) { return response; }
+
       const [sameDaySource, historyRepairSource, historyAliasSyncSource, aliasSource, bootstrapSource] = await Promise.all([
         readAssetSource(env, request, '/audit_same_day_reconciliation.js'),
         readAssetSource(env, request, '/game_history_reconciliation_repair.js'),
@@ -298,14 +290,9 @@ export default {
         readAssetSource(env, request, '/score_alias_consistency.js'),
         readAssetSource(env, request, '/score_alias_audit_bootstrap.js')
       ]);
-      const modules = [
-        auditSource,
-        sameDaySource,
-        historyRepairSource,
-        historyAliasSyncSource,
-        aliasSource,
-        bootstrapSource
-      ].filter(Boolean).join('\n');
+      const modules = [auditSource, sameDaySource, historyRepairSource, historyAliasSyncSource, aliasSource, bootstrapSource]
+        .filter(Boolean)
+        .join('\n');
       return javascriptResponse(modules || auditSource, response, {
         'x-taskpoints-audit-same-day-reconciliation': sameDaySource ? 'included' : 'missing',
         'x-taskpoints-game-history-repair': historyRepairSource ? 'included' : 'missing',
