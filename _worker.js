@@ -67,8 +67,10 @@ export default {
           + '<script src="/game_history_reconciliation_repair.js?v=20260731-1" data-taskpoints-game-history-repair="true"></script>'
           + '<script src="/game_history_repair_alias_sync.js?v=20260731-1" data-taskpoints-game-history-alias-sync="true"></script>'
           + '<script src="/habit_ledger_repair_planner.js?v=20260731-1" data-taskpoints-habit-ledger-planner="true"></script>'
+          + '<script src="/habit_ledger_repair_matchup_prelude.js?v=20260801-1" data-taskpoints-habit-matchup-prelude="true"></script>'
           + '<script src="/habit_ledger_repair_audit.js?v=20260731-1" data-taskpoints-habit-ledger-repair="true"></script>'
           + '<script src="/habit_ledger_matchup_impact_guard.js?v=20260801-1" data-taskpoints-habit-matchup-impact="true"></script>'
+          + '<script src="/habit_ledger_matchup_impact_stale_guard.js?v=20260801-1" data-taskpoints-habit-matchup-stale-guard="true"></script>'
           + '<script src="/score_alias_audit_bootstrap.js?v=20260731-2" data-taskpoints-score-alias-audit-bootstrap="true"></script>'
         : '';
 
