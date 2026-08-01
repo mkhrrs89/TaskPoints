@@ -168,6 +168,79 @@ test('failed dates with conflicting done or ice markers remain fully manual', ()
   assert.ok(plan.manualReview.some((item) => item.type === 'conflicting-ledger-status'));
 });
 
+test('duplicate completion IDs on failed dates remain fully manual', () => {
+  const state = fixture();
+  state.completions = [
+    {
+      id: 'duplicate-failed-id',
+      taskId: 'habit:vice-1:2026-07-29',
+      title: '[Vice] No Late Night Eats (2026-07-29)',
+      points: 3,
+      completedAtISO: '2026-07-29T20:00:00.000Z',
+      source: 'vice',
+      habitId: 'vice-1',
+      dayKey: '2026-07-29'
+    },
+    {
+      id: 'duplicate-failed-id',
+      taskId: 'habit:vice-1:2026-07-29',
+      title: '[Vice] No Late Night Eats (2026-07-29)',
+      points: 3,
+      completedAtISO: '2026-07-29T21:00:00.000Z',
+      source: 'vice',
+      habitId: 'vice-1',
+      dayKey: '2026-07-29'
+    }
+  ];
+
+  const plan = repair.buildHabitLedgerRepairPlan(state);
+  assert.ok(plan.manualReview.some((item) => item.type === 'duplicate-completion-id'));
+  assert.equal(plan.failedDateRemovals.length, 0);
+  assert.equal(plan.duplicateRemovals.length, 0);
+  assert.equal(plan.sourceUpdates.length, 0);
+});
+
+test('timestamp fallback uses the shared local date key', () => {
+  const previousCore = global.TaskPointsCore;
+  let sharedDateCalls = 0;
+  global.TaskPointsCore = {
+    dateKey(value) {
+      assert.ok(value instanceof Date);
+      sharedDateCalls += 1;
+      return '2026-07-29';
+    }
+  };
+
+  try {
+    const state = {
+      habits: [{
+        id: 'vice-1',
+        name: 'No Late Night Eats',
+        category: 'vice',
+        pointsPerDay: 3,
+        doneKeys: [],
+        failedKeys: ['2026-07-29'],
+        iceKeys: []
+      }],
+      completions: [{
+        id: 'near-midnight',
+        source: 'vice',
+        habitId: 'vice-1',
+        points: 3,
+        completedAtISO: '2026-07-30T01:30:00.000Z'
+      }]
+    };
+
+    const plan = repair.buildHabitLedgerRepairPlan(state);
+    assert.ok(sharedDateCalls > 0);
+    assert.equal(plan.failedDateRemovals.length, 1);
+    assert.equal(plan.failedDateRemovals[0].dayKey, '2026-07-29');
+  } finally {
+    if (previousCore === undefined) delete global.TaskPointsCore;
+    else global.TaskPointsCore = previousCore;
+  }
+});
+
 test('future source guard corrects only newly added vice completions', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'habit_completion_source_guard.js'), 'utf8');
   let savedState = null;
