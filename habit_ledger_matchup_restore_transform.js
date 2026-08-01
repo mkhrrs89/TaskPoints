@@ -52,10 +52,9 @@
 
   planner.buildHabitLedgerRepairPlan = function storedScoreRestoreBuild(stateInput) {
     const plan = previousBuild(stateInput);
-    return {
-      ...plan,
-      matchupImpact: classifyRestorations(plan?.matchupImpact)
-    };
+    const matchupImpact = classifyRestorations(plan?.matchupImpact);
+    global.__latestHabitLedgerMatchupImpact = matchupImpact;
+    return { ...plan, matchupImpact };
   };
 
   global.TaskPointsHabitLedgerStoredScoreRestore = { classifyRestorations };
