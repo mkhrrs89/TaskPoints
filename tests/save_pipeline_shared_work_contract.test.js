@@ -8,7 +8,7 @@ const ROOT = path.join(__dirname, '..');
 const source = fs.readFileSync(path.join(ROOT, 'save_pipeline_shared_work.js'), 'utf8');
 const worker = fs.readFileSync(path.join(ROOT, '_worker.js'), 'utf8');
 
-function install() {
+function install({ cacheEnabled = true } = {}) {
   const raw = JSON.stringify({ tasks: [{ id: 'a' }], habits: [], completions: [] });
   const verifiedState = JSON.parse(raw);
   let parseCalls = 0;
@@ -30,7 +30,7 @@ function install() {
   };
   const core = {
     STORAGE_KEY: 'taskpoints_v1',
-    getPhase4VerifiedPrimaryCache: () => cache,
+    getPhase4VerifiedPrimaryCache: () => cacheEnabled ? cache : null,
     getPendingShadowDualWriteCount: () => 0,
     getPendingPhase4WriteCount: () => pendingPhase4,
     readPendingHabitDeltas: () => journal,
@@ -77,6 +77,23 @@ test('verified raw is cloned from the trusted Phase 4 package without reparsing'
   assert.equal(harness.summaryCalls(), 0);
 });
 
+test('parallel backup layers share the first exact-byte parse before verification finishes', () => {
+  const harness = install({ cacheEnabled: false });
+  const first = harness.core.parseTaskPointsStorageJson(harness.raw, {});
+  const firstSummary = harness.core.shadowSourceSummary(first);
+  const second = harness.core.parseTaskPointsStorageJson(harness.raw, {});
+  const secondSummary = harness.core.shadowSourceSummary(second);
+
+  assert.notEqual(first, second);
+  assert.deepEqual(first, second);
+  assert.equal(firstSummary.hashes.state, 'fresh-hash');
+  assert.equal(secondSummary.hashes.state, 'fresh-hash');
+  assert.equal(harness.parseCalls(), 1);
+  assert.equal(harness.summaryCalls(), 1);
+  assert.equal(harness.core.getSharedSaveWorkStatus().parseReuseCount, 1);
+  assert.equal(harness.core.getSharedSaveWorkStatus().summaryReuseCount, 1);
+});
+
 test('shared snapshot metadata follows structured clones used by later backup layers', () => {
   const harness = install();
   const parsed = harness.core.parseTaskPointsStorageJson(harness.raw, {});
@@ -87,12 +104,13 @@ test('shared snapshot metadata follows structured clones used by later backup la
   assert.ok(harness.core.getSharedSaveWorkStatus().clonePropagationCount >= 1);
 });
 
-test('pending writes or habit journal entries disable reuse and fall back safely', () => {
+test('pending writes or habit journal entries disable verified-package reuse and fall back safely', () => {
   const harness = install();
   harness.setPending(1);
   harness.core.parseTaskPointsStorageJson(harness.raw, {});
   assert.equal(harness.parseCalls(), 1);
 
+  harness.core.clearSharedSaveWork();
   harness.setPending(0);
   harness.setJournal([{ id: 'pending' }]);
   harness.core.parseTaskPointsStorageJson(harness.raw, {});
