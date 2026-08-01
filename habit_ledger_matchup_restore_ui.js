@@ -4,9 +4,14 @@
   if (global.__habitLedgerStoredScoreRestoreUiInstalled) return;
   global.__habitLedgerStoredScoreRestoreUiInstalled = true;
 
-  function numeric(value) {
-    const number = Number(value);
-    return Number.isFinite(number) ? number : null;
+  function restorationDates() {
+    const impact = global.__latestHabitLedgerMatchupImpact;
+    return new Set(
+      (Array.isArray(impact?.days) ? impact.days : [])
+        .filter((day) => day?.status === 'restores-stored-score')
+        .map((day) => String(day.dayKey || ''))
+        .filter(Boolean)
+    );
   }
 
   function patchRestorationRows() {
@@ -17,14 +22,11 @@
     const count = wrapper.querySelector('#habitLedgerMatchupImpactCount');
     if (!rows) return false;
 
+    const safeDates = restorationDates();
     let restored = 0;
     rows.querySelectorAll('li').forEach((item) => {
-      const text = item.textContent || '';
-      const match = text.match(/stored score\s+(-?\d+(?:\.\d+)?)\s+→\s+(-?\d+(?:\.\d+)?)/i);
-      if (!match) return;
-      const stored = numeric(match[1]);
-      const projected = numeric(match[2]);
-      if (stored === null || projected === null || Math.abs(stored - projected) > 0.0001) return;
+      const dateMatch = (item.textContent || '').match(/^(\d{4}-\d{2}-\d{2})/);
+      if (!dateMatch || !safeDates.has(dateMatch[1])) return;
       const strong = [...item.querySelectorAll('strong')]
         .find((node) => /BLOCKED/i.test(node.textContent || ''));
       if (strong) strong.textContent = 'SAFE RESTORATION';
@@ -67,5 +69,5 @@
     tryInstall();
   }
 
-  global.TaskPointsHabitLedgerStoredScoreRestoreUi = { patchRestorationRows };
+  global.TaskPointsHabitLedgerStoredScoreRestoreUi = { patchRestorationRows, restorationDates };
 })(typeof window !== 'undefined' ? window : globalThis);
