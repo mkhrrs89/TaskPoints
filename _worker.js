@@ -67,7 +67,17 @@ export default {
           + '<script src="/game_history_reconciliation_repair.js?v=20260731-1" data-taskpoints-game-history-repair="true"></script>'
           + '<script src="/game_history_repair_alias_sync.js?v=20260731-1" data-taskpoints-game-history-alias-sync="true"></script>'
           + '<script src="/habit_ledger_repair_planner.js?v=20260731-1" data-taskpoints-habit-ledger-planner="true"></script>'
+          + '<script src="/habit_ledger_repair_matchup_prelude.js?v=20260801-2" data-taskpoints-habit-matchup-prelude="true"></script>'
           + '<script src="/habit_ledger_repair_audit.js?v=20260731-1" data-taskpoints-habit-ledger-repair="true"></script>'
+          + '<script src="/habit_ledger_matchup_impact_guard.js?v=20260801-1" data-taskpoints-habit-matchup-impact="true"></script>'
+          + '<script src="/habit_ledger_matchup_impact_canonical.js?v=20260801-1" data-taskpoints-habit-matchup-canonical="true"></script>'
+          + '<script src="/habit_ledger_matchup_impact_dateiso.js?v=20260801-1" data-taskpoints-habit-matchup-dateiso="true"></script>'
+          + '<script src="/habit_ledger_matchup_impact_legacy_scores.js?v=20260801-1" data-taskpoints-habit-matchup-legacy-scores="true"></script>'
+          + '<script src="/habit_ledger_matchup_restore_transform.js?v=20260801-1" data-taskpoints-habit-matchup-restore-transform="true"></script>'
+          + '<script src="/habit_ledger_matchup_impact_attestation.js?v=20260801-1" data-taskpoints-habit-matchup-attestation="true"></script>'
+          + '<script src="/habit_ledger_matchup_restore_ui.js?v=20260801-1" data-taskpoints-habit-matchup-restore-ui="true"></script>'
+          + '<script src="/habit_ledger_matchup_restore_apply.js?v=20260801-1" data-taskpoints-habit-matchup-restore-apply="true"></script>'
+          + '<script src="/habit_ledger_matchup_impact_stale_guard.js?v=20260801-1" data-taskpoints-habit-matchup-stale-guard="true"></script>'
           + '<script src="/score_alias_audit_bootstrap.js?v=20260731-2" data-taskpoints-score-alias-audit-bootstrap="true"></script>'
         : '';
 
