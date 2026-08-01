@@ -17,12 +17,17 @@
       const restoresStoredScore = Number(day?.matchupCount) === 1
         && finite(day?.storedUserScore)
         && finite(day?.projectedUserScore)
+        && finite(day?.opponentScore)
         && Math.abs(Number(day.projectedUserScore) - Number(day.storedUserScore)) <= EPSILON;
       if (!restoresStoredScore) return day;
 
       const beforeResult = day.beforeResult || '';
       const afterResult = day.afterResult || '';
-      const resultUnchanged = beforeResult && afterResult && beforeResult === afterResult;
+      const resultUnchanged = beforeResult
+        && afterResult
+        && beforeResult !== 'Unknown'
+        && afterResult !== 'Unknown'
+        && beforeResult === afterResult;
       if (!resultUnchanged) return day;
 
       return {
