@@ -1,5 +1,32 @@
 import baseWorker from './_worker_core.js';
 
+const CORE_BUNDLE_ASSET_PATHS = Object.freeze([
+  '/scoring_core.js',
+  '/phase2_dual_write.js',
+  '/phase2_reset_hook.js',
+  '/phase3_read_path.js',
+  '/phase3_session_codec.js',
+  '/phase3_navigation_cache.js',
+  '/phase3_status_cache_guard.js',
+  '/phase4_storage_coordinator.js',
+  '/phase4_primary_read_path.js',
+  '/indexeddb_requalification_guard.js',
+  '/phase4_cache_guard.js',
+  '/phase4_diagnostics.js',
+  '/phase5a_native_snapshot.js',
+  '/phase5b_deferred_mirror.js',
+  '/home_yesterday_result_consistency.js',
+  '/flex_action_fast_path.js',
+  '/score_alias_consistency.js',
+  '/habit_completion_source_guard.js'
+]);
+const CORE_BUNDLE_QUERY_KEY = 'v';
+const CORE_BUNDLE_BROWSER_MAX_AGE = 31536000;
+const CORE_REDIRECT_BROWSER_MAX_AGE = 60;
+
+let coreBundleVersionPromise = null;
+const coreBundleBuildPromises = new Map();
+
 function freshHeaders(headers) {
   const next = new Headers(headers);
   next.delete('if-none-match');
@@ -24,6 +51,15 @@ function directAliasPageKind(pathname) {
   return '';
 }
 
+function fnv1a(text) {
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
 async function readAssetSource(env, request, pathname) {
   try {
     const assetRequest = new Request(new URL(pathname, request.url), {
@@ -37,6 +73,62 @@ async function readAssetSource(env, request, pathname) {
   }
 }
 
+async function readAssetFingerprint(env, request, pathname) {
+  const assetUrl = new URL(pathname, request.url);
+  try {
+    const headResponse = await env.ASSETS.fetch(new Request(assetUrl, {
+      method: 'HEAD',
+      headers: freshHeaders(request.headers)
+    }));
+    const headEtag = headResponse?.headers?.get?.('etag');
+    if (headResponse?.ok && headEtag) return `${pathname}|etag:${headEtag}`;
+  } catch (_) {
+    // Some local asset implementations do not support HEAD. Fall through to GET.
+  }
+
+  try {
+    const response = await env.ASSETS.fetch(new Request(assetUrl, {
+      method: 'GET',
+      headers: freshHeaders(request.headers)
+    }));
+    if (!response.ok) return `${pathname}|missing:${response.status}`;
+    const etag = response.headers.get('etag');
+    if (etag) return `${pathname}|etag:${etag}`;
+    const source = await response.text();
+    return `${pathname}|body:${fnv1a(source)}:${source.length}`;
+  } catch (error) {
+    return `${pathname}|error:${String(error?.name || error?.message || 'asset_read_failed')}`;
+  }
+}
+
+function getCoreBundleVersion(env, request) {
+  if (!coreBundleVersionPromise) {
+    coreBundleVersionPromise = Promise.all(
+      CORE_BUNDLE_ASSET_PATHS.map((pathname) => readAssetFingerprint(env, request, pathname))
+    ).then((fingerprints) => `tp-${fnv1a(fingerprints.join('\n'))}`);
+  }
+  return coreBundleVersionPromise;
+}
+
+function coreBundleCacheKey(request, version) {
+  const url = new URL(request.url);
+  url.pathname = '/__taskpoints_cached/scoring_core.js';
+  url.search = '';
+  url.searchParams.set(CORE_BUNDLE_QUERY_KEY, version);
+  return new Request(url.toString(), { method: 'GET' });
+}
+
+function withBundleCacheStatus(response, status, version) {
+  const headers = new Headers(response.headers);
+  headers.set('x-taskpoints-bundle-cache', status);
+  headers.set('x-taskpoints-core-bundle-version', version);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers
+  });
+}
+
 function javascriptResponse(source, response, extraHeaders = {}) {
   const headers = noCacheHeaders(response.headers);
   headers.set('content-type', 'application/javascript; charset=utf-8');
@@ -48,10 +140,109 @@ function javascriptResponse(source, response, extraHeaders = {}) {
   });
 }
 
+function immutableJavascriptResponse(source, response, version, extraHeaders = {}) {
+  const headers = new Headers(response.headers);
+  headers.delete('content-length');
+  headers.delete('last-modified');
+  headers.set('cache-control', `public, max-age=${CORE_BUNDLE_BROWSER_MAX_AGE}, immutable`);
+  headers.set('content-type', 'application/javascript; charset=utf-8');
+  headers.set('etag', `"${version}"`);
+  headers.set('x-taskpoints-core-bundle-version', version);
+  headers.set('x-taskpoints-bundle-cache', 'miss');
+  Object.entries(extraHeaders).forEach(([name, value]) => headers.set(name, value));
+  return new Response(source, {
+    status: response.status,
+    statusText: response.statusText,
+    headers
+  });
+}
+
+function redirectToCurrentCoreBundle(request, version) {
+  const target = new URL(request.url);
+  target.search = '';
+  target.searchParams.set(CORE_BUNDLE_QUERY_KEY, version);
+  return new Response(null, {
+    status: 307,
+    headers: {
+      location: target.toString(),
+      'cache-control': `public, max-age=${CORE_REDIRECT_BROWSER_MAX_AGE}, must-revalidate`,
+      etag: `"${version}"`,
+      'x-taskpoints-core-bundle-version': version,
+      'x-taskpoints-bundle-redirect': 'current-version'
+    }
+  });
+}
+
+async function buildCoreBundle(request, env, ctx, version) {
+  const response = await baseWorker.fetch(request, env, ctx);
+  if (!response.ok) return response;
+
+  let coreSource = '';
+  try {
+    coreSource = await response.text();
+  } catch (_) {
+    return response;
+  }
+
+  const [aliasSource, habitGuardSource] = await Promise.all([
+    readAssetSource(env, request, '/score_alias_consistency.js'),
+    readAssetSource(env, request, '/habit_completion_source_guard.js')
+  ]);
+  const additions = [aliasSource, habitGuardSource].filter(Boolean);
+  const source = additions.length
+    ? `${coreSource}\n${additions.join('\n')}\n`
+    : coreSource;
+
+  return immutableJavascriptResponse(source, response, version, {
+    'x-taskpoints-score-alias-bundle': aliasSource ? 'included' : 'missing',
+    'x-taskpoints-habit-source-guard': habitGuardSource ? 'included' : 'missing'
+  });
+}
+
+async function serveCurrentCoreBundle(request, env, ctx, version) {
+  const cacheKey = coreBundleCacheKey(request, version);
+  const edgeCache = globalThis.caches?.default;
+  if (edgeCache) {
+    try {
+      const cached = await edgeCache.match(cacheKey);
+      if (cached) return withBundleCacheStatus(cached, 'hit', version);
+    } catch (_) {
+      // Browser caching and in-isolate build de-duplication still remain active.
+    }
+  }
+
+  let buildPromise = coreBundleBuildPromises.get(version);
+  if (!buildPromise) {
+    buildPromise = buildCoreBundle(request, env, ctx, version)
+      .finally(() => coreBundleBuildPromises.delete(version));
+    coreBundleBuildPromises.set(version, buildPromise);
+  }
+
+  const built = await buildPromise;
+  if (built.ok && edgeCache) {
+    const putPromise = edgeCache.put(cacheKey, built.clone()).catch(() => undefined);
+    if (typeof ctx?.waitUntil === 'function') ctx.waitUntil(putPromise);
+    else await putPromise;
+  }
+  return built.clone();
+}
+
+async function handleCoreBundleRequest(request, env, ctx) {
+  const version = await getCoreBundleVersion(env, request);
+  const requestedVersion = new URL(request.url).searchParams.get(CORE_BUNDLE_QUERY_KEY);
+  if (requestedVersion !== version) return redirectToCurrentCoreBundle(request, version);
+  return serveCurrentCoreBundle(request, env, ctx, version);
+}
+
 export default {
   async fetch(request, env, ctx) {
-    const response = await baseWorker.fetch(request, env, ctx);
     const url = new URL(request.url);
+
+    if ((request.method === 'GET' || request.method === 'HEAD') && url.pathname === '/scoring_core.js') {
+      return handleCoreBundleRequest(request, env, ctx);
+    }
+
+    const response = await baseWorker.fetch(request, env, ctx);
     const directPageKind = directAliasPageKind(url.pathname);
 
     if (request.method === 'GET' && response.ok && directPageKind) {
@@ -123,27 +314,6 @@ export default {
       });
     }
 
-    if (request.method !== 'GET' || url.pathname !== '/scoring_core.js' || !response.ok) {
-      return response;
-    }
-
-    let coreSource = '';
-    try {
-      coreSource = await response.text();
-    } catch (_) {
-      return response;
-    }
-
-    const [aliasSource, habitGuardSource] = await Promise.all([
-      readAssetSource(env, request, '/score_alias_consistency.js'),
-      readAssetSource(env, request, '/habit_completion_source_guard.js')
-    ]);
-    const additions = [aliasSource, habitGuardSource].filter(Boolean);
-    if (!additions.length) return javascriptResponse(coreSource, response);
-
-    return javascriptResponse(`${coreSource}\n${additions.join('\n')}\n`, response, {
-      'x-taskpoints-score-alias-bundle': aliasSource ? 'included' : 'missing',
-      'x-taskpoints-habit-source-guard': habitGuardSource ? 'included' : 'missing'
-    });
+    return response;
   }
 };
