@@ -30,6 +30,22 @@
     return JSON.parse(JSON.stringify(value));
   }
 
+  function localDateKey(value) {
+    const parsed = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(parsed.getTime())) return '';
+    if (typeof global.TaskPointsCore?.dateKey === 'function') {
+      try {
+        const shared = global.TaskPointsCore.dateKey(parsed);
+        if (validDayKey(shared)) return shared;
+      } catch (_) {}
+    }
+    const year = parsed.getFullYear();
+    const month = String(parsed.getMonth() + 1).padStart(2, '0');
+    const day = String(parsed.getDate()).padStart(2, '0');
+    const key = `${year}-${month}-${day}`;
+    return validDayKey(key) ? key : '';
+  }
+
   function completionDay(row) {
     if (!row || typeof row !== 'object') return '';
     for (const value of [row.dayKey, row.dateKey]) {
@@ -37,13 +53,8 @@
     }
     for (const value of [row.completedAtISO, row.createdAtISO]) {
       if (!populated(value)) continue;
-      const direct = String(value).slice(0, 10);
-      if (validDayKey(direct)) return direct;
-      const parsed = new Date(value);
-      if (!Number.isNaN(parsed.getTime())) {
-        const key = parsed.toISOString().slice(0, 10);
-        if (validDayKey(key)) return key;
-      }
+      const key = localDateKey(value);
+      if (key) return key;
     }
     return '';
   }
@@ -222,7 +233,7 @@
     const removalIndexes = new Set();
 
     entries.forEach((entry) => {
-      if (!entry.failed) return;
+      if (manualOnlyIndexes.has(entry.index) || !entry.failed) return;
       if (entry.done || entry.iced) {
         addManual({
           type: 'conflicting-ledger-status',
