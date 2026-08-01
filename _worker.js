@@ -70,6 +70,7 @@ export default {
           + '<script src="/habit_ledger_repair_matchup_prelude.js?v=20260801-1" data-taskpoints-habit-matchup-prelude="true"></script>'
           + '<script src="/habit_ledger_repair_audit.js?v=20260731-1" data-taskpoints-habit-ledger-repair="true"></script>'
           + '<script src="/habit_ledger_matchup_impact_guard.js?v=20260801-1" data-taskpoints-habit-matchup-impact="true"></script>'
+          + '<script src="/habit_ledger_matchup_impact_canonical.js?v=20260801-1" data-taskpoints-habit-matchup-canonical="true"></script>'
           + '<script src="/habit_ledger_matchup_impact_stale_guard.js?v=20260801-1" data-taskpoints-habit-matchup-stale-guard="true"></script>'
           + '<script src="/score_alias_audit_bootstrap.js?v=20260731-2" data-taskpoints-score-alias-audit-bootstrap="true"></script>'
         : '';
