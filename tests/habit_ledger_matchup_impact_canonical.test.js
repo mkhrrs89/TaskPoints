@@ -15,6 +15,7 @@ function dayOf(row) {
 
 function loadCanonicalGuard() {
   let applyCalls = 0;
+  let batchCalls = 0;
   const planner = {
     buildHabitLedgerRepairPlan: (state) => state.plan,
     applyHabitLedgerRepairPlan(state, plan) {
@@ -26,19 +27,18 @@ function loadCanonicalGuard() {
     dateKey(value) {
       return typeof value === 'string' ? value.slice(0, 10) : value.toISOString().slice(0, 10);
     },
-    buildDaySnapshot(dayKey, state) {
-      const current = (state.completions || [])
-        .filter((row) => dayOf(row) === dayKey)
-        .reduce((sum, row) => sum + Number(row.points || 0), 0);
-      const prior = dayKey === '2026-07-30'
-        ? (state.completions || [])
-          .filter((row) => dayOf(row) === '2026-07-29')
-          .reduce((sum, row) => sum + Number(row.points || 0), 0)
-        : 0;
-      return { total: current + prior * 0.25 };
-    },
-    computeDayTotals(snapshot) {
-      return { total: snapshot.total };
+    youDailyTotalsWithInertia(state) {
+      batchCalls += 1;
+      const totals = {};
+      const direct = {};
+      (state.completions || []).forEach((row) => {
+        const day = dayOf(row);
+        direct[day] = (direct[day] || 0) + Number(row.points || 0);
+      });
+      Object.keys(direct).forEach((day) => { totals[day] = direct[day]; });
+      const prior = direct['2026-07-29'] || 0;
+      totals['2026-07-30'] = (direct['2026-07-30'] || 0) + prior * 0.25;
+      return totals;
     }
   };
   const context = {
@@ -59,7 +59,12 @@ function loadCanonicalGuard() {
   [preludeSource, impactSource, canonicalSource, staleSource].forEach((source) => {
     vm.runInNewContext(source, context);
   });
-  return { planner, getApplyCalls: () => applyCalls };
+  return {
+    planner,
+    context,
+    getApplyCalls: () => applyCalls,
+    getBatchCalls: () => batchCalls
+  };
 }
 
 test('canonical preview detects a later matchup changed by scoring inertia', () => {
@@ -118,6 +123,83 @@ test('canonical preview retains a 0.05-point removal', () => {
   assert.equal(plan.matchupImpact.blockingDays[0].projectedUserScore, 0);
 });
 
+test('canonical preview includes a legacy dateISO matchup in the batch pass', () => {
+  const { planner } = loadCanonicalGuard();
+  const state = {
+    players: [{ id: 'opp', name: 'Reynolds' }],
+    completions: [{ id: 'a', dayKey: '2026-07-29', points: 4 }],
+    matchups: [{
+      id: 'legacy-dateiso',
+      dateISO: '2026-07-29T12:00:00.000Z',
+      playerAId: 'YOU',
+      playerBId: 'opp',
+      scoreA: 4,
+      scoreB: 2
+    }],
+    plan: {
+      sourceUpdates: [],
+      failedDateRemovals: [{ completionIndex: 0, completionId: 'a', dayKey: '2026-07-29', points: 4 }],
+      duplicateRemovals: [],
+      manualReview: [],
+      pointsRemoved: 4
+    }
+  };
+
+  const day = planner.buildHabitLedgerRepairPlan(state).matchupImpact.blockingDays[0];
+  assert.equal(day.matchupId, 'legacy-dateiso');
+  assert.equal(day.beforeResult, 'Win');
+  assert.equal(day.afterResult, 'Loss');
+});
+
+test('canonical preview builds only one live and one projected score map', () => {
+  const { planner, getBatchCalls } = loadCanonicalGuard();
+  const matchups = [];
+  for (let day = 1; day <= 28; day += 1) {
+    const key = `2026-07-${String(day).padStart(2, '0')}`;
+    matchups.push({
+      id: `m-${day}`,
+      dateKey: key,
+      playerAId: 'YOU',
+      playerBId: 'opp',
+      scoreA: 10,
+      scoreB: 5
+    });
+  }
+  const state = {
+    players: [{ id: 'opp', name: 'Reynolds' }],
+    completions: [{ id: 'a', dayKey: '2026-07-29', points: 4 }],
+    matchups,
+    plan: {
+      sourceUpdates: [],
+      failedDateRemovals: [{ completionIndex: 0, completionId: 'a', dayKey: '2026-07-29', points: 4 }],
+      duplicateRemovals: [],
+      manualReview: [],
+      pointsRemoved: 4
+    }
+  };
+
+  planner.buildHabitLedgerRepairPlan(state);
+  assert.equal(getBatchCalls(), 2);
+});
+
+test('source-only corrections with no canonical score change show zero affected days', () => {
+  const { planner } = loadCanonicalGuard();
+  const state = {
+    completions: [{ id: 'a', dayKey: '2026-07-29', points: 4, source: 'habit' }],
+    matchups: [],
+    plan: {
+      sourceUpdates: [{ completionIndex: 0, completionId: 'a', dayKey: '2026-07-29', toSource: 'vice' }],
+      failedDateRemovals: [],
+      duplicateRemovals: [],
+      manualReview: [],
+      pointsRemoved: 0
+    }
+  };
+  const impact = planner.buildHabitLedgerRepairPlan(state).matchupImpact;
+  assert.equal(impact.affectedDays, 0);
+  assert.equal(impact.hasBlockingImpact, false);
+});
+
 test('canonical preview rejects a changed score calculation after preview', () => {
   const { planner, getApplyCalls } = loadCanonicalGuard();
   const state = {
@@ -163,9 +245,11 @@ test('worker loads the canonical scorer between impact UI and stale guard', () =
   );
 });
 
-test('canonical implementation uses the shared day scorer rather than raw subtraction', () => {
-  assert.match(canonicalSource, /core\.buildDaySnapshot/);
-  assert.match(canonicalSource, /core\.computeDayTotals/);
+test('canonical implementation uses the shared batch scorer instead of per-date snapshots', () => {
+  assert.match(canonicalSource, /core\.youDailyTotalsWithInertia/);
+  assert.match(canonicalSource, /buildCanonicalScoreMaps/);
   assert.match(canonicalSource, /matchupsByDay\.forEach/);
+  assert.doesNotMatch(canonicalSource, /core\.buildDaySnapshot/);
+  assert.doesNotMatch(canonicalSource, /core\.computeDayTotals/);
   assert.doesNotMatch(canonicalSource, /Math\.abs\(Number\(item\.points\)\) > 0\.05/);
 });
