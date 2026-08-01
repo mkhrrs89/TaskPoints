@@ -30,7 +30,7 @@ test('fail-closed prelude requires impact analysis for a removal with missing ra
       failedDateRemovals: [{ completionId: 'derived-points-row' }],
       duplicateRemovals: []
     }),
-    /matchup-impact preview is unavailable/
+    /complete canonical matchup-impact preview is unavailable/
   );
   assert.equal(applyCalls, 0);
 });
