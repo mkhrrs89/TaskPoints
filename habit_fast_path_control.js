@@ -101,9 +101,6 @@
           lastReason = 'legacy_fallback_used';
           return undefined;
         }
-        // Never make habit bubbles inert merely because the emergency fallback
-        // is unavailable. The already-reviewed journal-first handler remains the
-        // safer choice in that case.
         lastReason = 'legacy_fallback_unavailable_used_fast_path';
       } else {
         lastReason = 'fast_path_used';
@@ -169,21 +166,4 @@
   global.addEventListener?.('pageshow', installAfterHomeScript);
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
-})(typeof window !== 'undefined' ? window : globalThis);
-
-(function loadTaskPointsHomeTargetedRenderControl(global) {
-  'use strict';
-  if (!global?.document || global.TaskPointsHomeTargetedRenderControl) return;
-  const path = String(global.location?.pathname || '/');
-  if (path !== '/' && !/\/index\.html$/i.test(path)) return;
-  if (global.document.querySelector?.('script[data-taskpoints-home-targeted-render]')) return;
-
-  const script = global.document.createElement('script');
-  script.src = '/home_targeted_render_control.js?v=20260802-1';
-  script.async = true;
-  script.dataset.taskpointsHomeTargetedRender = 'true';
-  script.onerror = () => {
-    if (global.TP_DEBUG_PERF) console.warn('[TP targeted render] controller failed to load; original rendering remains active.');
-  };
-  (global.document.head || global.document.documentElement).appendChild(script);
 })(typeof window !== 'undefined' ? window : globalThis);
