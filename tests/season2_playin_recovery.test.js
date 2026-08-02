@@ -58,6 +58,16 @@ function previewState(matchupControl = false) {
   };
 }
 
+function ordinaryAugustSecondMatchups() {
+  return Array.from({ length: 30 }, (_, index) => ({
+    id: `ordinary-2026-08-02-${index + 1}`,
+    date: '2026-08-02',
+    dateKey: '2026-08-02',
+    playerAId: `P${index * 2 + 1}`,
+    playerBId: `P${index * 2 + 2}`
+  }));
+}
+
 function brokenLockedSeasonState() {
   const locked = builder.lockConfiguredSeasonBracket(
     previewState(false),
@@ -86,11 +96,18 @@ function brokenLockedSeasonState() {
         score: 100 - seed
       };
     });
+  const augustSecond = ordinaryAugustSecondMatchups();
 
   return core.normalizeState({
     ...locked.state,
     currentSeason: season,
-    gameHistory
+    gameHistory,
+    matchups: augustSecond,
+    schedule: [{
+      date: '2026-08-02',
+      dateKey: '2026-08-02',
+      matchups: augustSecond
+    }]
   });
 }
 
@@ -124,12 +141,20 @@ test('missed August 1 Play-Ins are recovered from recorded daily scores and adva
   assert.equal(playIns.length, 12);
   assert.equal(playIns.every((series) => series.status === 'complete'), true);
   assert.equal(playIns.every((series) => series.winnerId && series.gameResults.length === 1), true);
-  assert.equal(playIns.every((series) => series.gameResults[0].source === 'season2_missed_playin_recovery'), true);
+  assert.equal(playIns.every((series) => series.gameResults[0].source === 'matchup'), true);
+  assert.equal(playIns.every((series) => String(series.gameResults[0].matchupId).startsWith('recovered_')), true);
 
   const openingRound = Object.values(result.state.currentSeason.series)
     .filter((series) => series.roundId === 'opening_round');
   assert.equal(openingRound.length, 16);
   assert.equal(openingRound.every((series) => series.playerAId && series.playerBId), true);
+
+  const augustSecond = result.state.schedule.find((day) => (day.dateKey || day.date) === '2026-08-02');
+  const tournamentRows = (augustSecond?.matchups || []).filter((matchup) => matchup.matchupType === 'tournament');
+  assert.equal(augustSecond?.seasonMatchupControl, true);
+  assert.equal(tournamentRows.length, 16);
+  assert.equal(tournamentRows.every((matchup) => matchup.roundId === 'opening_round'), true);
+  assert.equal(tournamentRows.every((matchup) => matchup.seriesGameNumber === 1), true);
 });
 
 test('Season 2 missed Play-In recovery is idempotent', () => {
