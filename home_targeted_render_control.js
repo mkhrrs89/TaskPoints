@@ -33,6 +33,7 @@
   let liveRefreshTimer = null;
   let canonicalStatsTimer = null;
   let canonicalStatsIdleId = null;
+  let canonicalIdleUsesTimeout = false;
   let canonicalStatsPending = false;
   let taskCompletionCallbackDepth = 0;
 
@@ -64,6 +65,14 @@
       || safeStorageGet(DISABLED_KEY) === '1';
   }
 
+  function habitFastPathEnabled() {
+    try {
+      return global.TaskPointsHabitFastPathControl?.isEnabled?.() !== false;
+    } catch (_) {
+      return true;
+    }
+  }
+
   function cancelTimer(name) {
     const id = name === 'restack'
       ? habitRestackTimer
@@ -77,10 +86,15 @@
   }
 
   function cancelCanonicalIdle() {
-    if (canonicalStatsIdleId != null && typeof global.cancelIdleCallback === 'function') {
-      try { global.cancelIdleCallback(canonicalStatsIdleId); } catch (_) {}
+    if (canonicalStatsIdleId != null) {
+      if (canonicalIdleUsesTimeout) {
+        try { global.clearTimeout?.(canonicalStatsIdleId); } catch (_) {}
+      } else if (typeof global.cancelIdleCallback === 'function') {
+        try { global.cancelIdleCallback(canonicalStatsIdleId); } catch (_) {}
+      }
     }
     canonicalStatsIdleId = null;
+    canonicalIdleUsesTimeout = false;
   }
 
   function cancelPendingWork() {
@@ -180,6 +194,7 @@
   function runCanonicalStatsRefresh() {
     canonicalStatsTimer = null;
     canonicalStatsIdleId = null;
+    canonicalIdleUsesTimeout = false;
     if (!canonicalStatsPending) return false;
     if (global.document?.hidden) return false;
     canonicalStatsPending = false;
@@ -205,11 +220,13 @@
       canonicalStatsTimer = null;
       if (global.document?.hidden) return;
       if (typeof global.requestIdleCallback === 'function') {
+        canonicalIdleUsesTimeout = false;
         canonicalStatsIdleId = global.requestIdleCallback(
           runCanonicalStatsRefresh,
           { timeout: Number(timing.canonicalStatsIdleTimeoutMs) || DEFAULT_TIMING.canonicalStatsIdleTimeoutMs }
         );
       } else {
+        canonicalIdleUsesTimeout = true;
         canonicalStatsIdleId = global.setTimeout(runCanonicalStatsRefresh, 0);
       }
     }, Number(timing.canonicalStatsDelayMs) || DEFAULT_TIMING.canonicalStatsDelayMs);
@@ -277,7 +294,9 @@
   }
 
   function targetedHabitRestackScheduler() {
-    if (disabled()) return originals.scheduleHabitFullRestackRerender?.apply(this, arguments);
+    if (disabled() || !habitFastPathEnabled()) {
+      return originals.scheduleHabitFullRestackRerender?.apply(this, arguments);
+    }
     if (!pendingHabitCategories.size) {
       return originals.scheduleHabitFullRestackRerender?.apply(this, arguments);
     }
@@ -289,7 +308,9 @@
   }
 
   function targetedHabitStatsScheduler() {
-    if (disabled()) return originals.scheduleHabitStatsRefresh?.apply(this, arguments);
+    if (disabled() || !habitFastPathEnabled()) {
+      return originals.scheduleHabitStatsRefresh?.apply(this, arguments);
+    }
     scheduleLightweightScoreRefresh({ includeYesterday: affectedYesterday() });
   }
 
@@ -355,7 +376,7 @@
     originals.renderStats = global.renderStats;
 
     global.handleHabitBubbleTap = function targetedHabitBubbleTap(bubble) {
-      if (!disabled()) rememberHabitInteraction(bubble);
+      if (!disabled() && habitFastPathEnabled()) rememberHabitInteraction(bubble);
       return originals.handleHabitBubbleTap.apply(this, arguments);
     };
     global.scheduleHabitFullRestackRerender = targetedHabitRestackScheduler;
@@ -404,6 +425,7 @@
       version: 1,
       installed,
       enabled: !disabled(),
+      habitFastPathEnabled: habitFastPathEnabled(),
       disabledKey: DISABLED_KEY,
       pendingHabitCategories: Array.from(pendingHabitCategories),
       pendingAffectedDays: Array.from(pendingAffectedDays),
