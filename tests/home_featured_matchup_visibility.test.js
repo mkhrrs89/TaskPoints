@@ -43,7 +43,11 @@ function makeContext({ state, featured }) {
     TaskPointsCore: {
       STORAGE_KEY: 'taskpoints_v1',
       loadAppState: () => ({ state }),
-      getFeaturedSeasonMatchup: () => featured
+      getFeaturedSeasonMatchup: () => featured,
+      getSeasonSeriesLength: (roundId, season) => {
+        const round = (season?.dateWindows || []).find((item) => item.id === roundId);
+        return round?.bestOf || null;
+      }
     },
     requestAnimationFrame(callback) { callback(); },
     setTimeout(callback) { callback(); },
@@ -64,9 +68,20 @@ function makeContext({ state, featured }) {
 }
 
 test('shows an August featured matchup for an active current season', () => {
-  const state = { currentSeason: { id: 'season-aug', status: 'active' }, matchups: [] };
+  const state = {
+    currentSeason: {
+      id: 'season-aug',
+      status: 'active',
+      series: {
+        'series-1': { id: 'series-1', roundId: 'round_of_32', bestOf: 5 }
+      }
+    },
+    matchups: []
+  };
   const featured = {
     title: 'Player A vs Player B',
+    seriesId: 'series-1',
+    roundId: 'round_of_32',
     roundName: 'Round of 32',
     gameNumber: 2,
     statusText: 'Player A leads 1–0',
@@ -76,10 +91,34 @@ test('shows an August featured matchup for an active current season', () => {
 
   const view = window.TaskPointsHomeFeaturedMatchup.render(state, '2026-08-01');
   assert.equal(view.visible, true);
+  assert.equal(view.bestOf, 5);
   assert.equal(mount.classList.contains('hidden'), false);
   assert.match(mount.innerHTML, /Featured Matchup/);
   assert.match(mount.innerHTML, /Player A vs Player B/);
   assert.match(mount.innerHTML, /Round of 32, Gm 2/);
+  assert.match(mount.innerHTML, /Best of 5/);
+});
+
+test('falls back to the configured round length when featured data has no series best-of', () => {
+  const state = {
+    currentSeason: {
+      id: 'season-aug',
+      status: 'active',
+      dateWindows: [{ id: 'finals', displayName: 'Finals', bestOf: 7 }]
+    }
+  };
+  const featured = {
+    title: 'Player A vs Player B',
+    roundId: 'finals',
+    roundName: 'Finals',
+    gameNumber: 1,
+    statusText: 'Series tied 0–0'
+  };
+  const { window, mount } = makeContext({ state, featured });
+
+  const view = window.TaskPointsHomeFeaturedMatchup.render(state, '2026-08-25');
+  assert.equal(view.bestOf, 7);
+  assert.match(mount.innerHTML, /Best of 7/);
 });
 
 test('keeps the section hidden when there is no active tournament', () => {
@@ -104,11 +143,25 @@ test('hides a completed tournament instead of showing a June-specific message', 
 });
 
 test('supports locked tournament seasons before the first result', () => {
-  const state = { currentSeason: { id: 'season-next', status: 'locked' } };
-  const featured = { title: 'Opening matchup', roundName: 'Play-In', gameNumber: 1, statusText: '' };
+  const state = {
+    currentSeason: {
+      id: 'season-next',
+      status: 'locked',
+      dateWindows: [{ id: 'play_in', displayName: 'Play-In', bestOf: 3 }]
+    }
+  };
+  const featured = {
+    title: 'Opening matchup',
+    roundId: 'play_in',
+    roundName: 'Play-In',
+    gameNumber: 1,
+    statusText: ''
+  };
   const { window, mount } = makeContext({ state, featured });
 
   const view = window.TaskPointsHomeFeaturedMatchup.render(state, '2026-08-01');
   assert.equal(view.visible, true);
+  assert.equal(view.bestOf, 3);
   assert.equal(mount.classList.contains('hidden'), false);
+  assert.match(mount.innerHTML, /Best of 3/);
 });
