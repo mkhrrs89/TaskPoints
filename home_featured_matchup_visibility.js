@@ -6,7 +6,6 @@
   const SCOREBOARD_FORMAT_CLASS = 'home-scoreboard-series-format';
   const ACTIVE_SEASON_STATUSES = new Set(['locked', 'active']);
   let observer = null;
-  let scoreboardObserver = null;
   let renderScheduled = false;
 
   function localDateKey(date = new Date()) {
@@ -18,11 +17,7 @@
 
   function escapeHtml(value) {
     return String(value ?? '').replace(/[&<>"']/g, (character) => ({
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      '"': '&quot;',
-      "'": '&#39;'
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
     }[character]));
   }
 
@@ -45,13 +40,10 @@
       try {
         const configured = normalizeBestOf(core.getSeasonSeriesLength(roundId, season));
         if (configured) return configured;
-      } catch (error) {
-        // Fall through to stored round definitions.
-      }
+      } catch (_) {}
     }
 
-    const roundCollections = [season?.dateWindows, season?.bracketConfig?.rounds, season?.bracket?.rounds];
-    for (const rounds of roundCollections) {
+    for (const rounds of [season?.dateWindows, season?.bracketConfig?.rounds, season?.bracket?.rounds]) {
       const round = (Array.isArray(rounds) ? rounds : []).find((item) => {
         if (!item) return false;
         if (roundId && item.id === roundId) return true;
@@ -71,7 +63,6 @@
   function ensureResponsiveStyle() {
     const documentRef = global.document;
     if (!documentRef?.head || documentRef.getElementById?.(STYLE_ID)) return;
-
     const style = documentRef.createElement('style');
     style.id = STYLE_ID;
     style.textContent = `
@@ -84,7 +75,6 @@
         margin-top: 4px;
         text-transform: uppercase;
       }
-
       @media (max-width: 640px) {
         .home-season-featured-kicker {
           width: 100%;
@@ -94,15 +84,8 @@
           font-size: 0.64rem !important;
           letter-spacing: 0.08em !important;
         }
-
-        .home-season-featured-kicker > span {
-          flex: 0 0 auto;
-        }
-
-        .${SCOREBOARD_FORMAT_CLASS} {
-          font-size: 0.7rem;
-          margin-top: 3px;
-        }
+        .home-season-featured-kicker > span { flex: 0 0 auto; }
+        .${SCOREBOARD_FORMAT_CLASS} { font-size: 0.7rem; margin-top: 3px; }
       }
     `;
     documentRef.head.appendChild(style);
@@ -128,7 +111,6 @@
     const state = stateInput && typeof stateInput === 'object' ? stateInput : {};
     const season = state.currentSeason;
     const core = global.TaskPointsCore;
-
     if (!season || !ACTIVE_SEASON_STATUSES.has(String(season.status || '')) || !core) {
       return { visible: false, reason: 'inactive-season', featured: null, html: '' };
     }
@@ -136,27 +118,21 @@
     const featured = typeof core.getFeaturedSeasonMatchup === 'function'
       ? core.getFeaturedSeasonMatchup(season, todayKey, state)
       : null;
+    if (!featured) return { visible: false, reason: 'no-featured-matchup', featured: null, html: '' };
 
-    if (!featured) {
-      return { visible: false, reason: 'no-featured-matchup', featured: null, html: '' };
-    }
-
-    const featuredTitle = featured.title || 'Featured matchup';
-    const featuredRoundLine = `${featured.roundName || 'Round'}${featured.gameNumber ? `, Gm ${featured.gameNumber}` : ''}`;
-    const featuredDetail = `${featured.statusText || ''}${featured.isEliminationGame ? ' • Elimination game' : ''}`;
+    const title = featured.title || 'Featured matchup';
+    const roundLine = `${featured.roundName || 'Round'}${featured.gameNumber ? `, Gm ${featured.gameNumber}` : ''}`;
+    const detail = `${featured.statusText || ''}${featured.isEliminationGame ? ' • Elimination game' : ''}`;
     const html = `
       <section class="home-season-featured" aria-label="Featured tournament matchup">
         <div class="home-season-featured-kicker">
           <span>Featured Matchup</span>
-          ${featuredRoundLine ? `<span class="home-season-featured-divider">|</span><span>${escapeHtml(featuredRoundLine)}</span>` : ''}
+          ${roundLine ? `<span class="home-season-featured-divider">|</span><span>${escapeHtml(roundLine)}</span>` : ''}
         </div>
-
-        <strong class="home-season-featured-title">${escapeHtml(featuredTitle)}</strong>
-
-        ${featuredDetail ? `<span class="home-season-featured-status">${escapeHtml(featuredDetail)}</span>` : ''}
+        <strong class="home-season-featured-title">${escapeHtml(title)}</strong>
+        ${detail ? `<span class="home-season-featured-status">${escapeHtml(detail)}</span>` : ''}
       </section>
     `;
-
     return { visible: true, reason: 'featured-matchup', featured, html };
   }
 
@@ -166,25 +142,25 @@
 
   function getCurrentUserMatchup(stateInput, todayKey = localDateKey()) {
     const matchups = Array.isArray(stateInput?.matchups) ? stateInput.matchups : [];
-    return matchups.find((matchup) => {
-      if (!matchup || matchupDateKey(matchup) !== todayKey) return false;
-      return matchup.playerAId === 'YOU' || matchup.playerBId === 'YOU';
-    }) || null;
+    return matchups.find((matchup) => matchup
+      && matchupDateKey(matchup) === todayKey
+      && (matchup.playerAId === 'YOU' || matchup.playerBId === 'YOU')) || null;
   }
 
   function findSeriesLine(scoreboard) {
-    if (!scoreboard?.querySelectorAll) return null;
-    const candidates = scoreboard.querySelectorAll('div, span, p, strong');
+    const candidates = scoreboard?.querySelectorAll?.('div, span, p, strong') || [];
     for (const element of candidates) {
-      const text = String(element?.textContent || '').trim();
-      if (/^SERIES\s*:/i.test(text)) return element;
+      if (/^SERIES\s*:/i.test(String(element?.textContent || '').trim())) return element;
     }
     return null;
   }
 
-  function removeScoreboardBestOf(scoreboard = null) {
-    const root = scoreboard || global.document?.querySelector?.('.home-scoreboard-card');
-    root?.querySelectorAll?.(`.${SCOREBOARD_FORMAT_CLASS}`)?.forEach?.((element) => element.remove?.());
+  function existingScoreboardLabels(scoreboard) {
+    return Array.from(scoreboard?.querySelectorAll?.(`.${SCOREBOARD_FORMAT_CLASS}`) || []);
+  }
+
+  function removeScoreboardBestOf(scoreboard) {
+    existingScoreboardLabels(scoreboard).forEach((element) => element.remove?.());
   }
 
   function renderCurrentSeriesBestOf(stateInput = null, todayKey = localDateKey()) {
@@ -192,26 +168,34 @@
     const scoreboard = documentRef?.querySelector?.('.home-scoreboard-card');
     if (!scoreboard) return { visible: false, reason: 'missing-scoreboard', bestOf: null };
 
-    removeScoreboardBestOf(scoreboard);
-
     const state = stateInput || loadState();
     const season = state?.currentSeason;
     const matchup = getCurrentUserMatchup(state, todayKey);
-    if (!season || !matchup) return { visible: false, reason: 'no-current-user-series', bestOf: null };
+    const bestOf = season && matchup
+      ? resolveMatchupBestOf(matchup, season, global.TaskPointsCore)
+      : null;
 
-    const bestOf = resolveMatchupBestOf(matchup, season, global.TaskPointsCore);
-    if (!bestOf) return { visible: false, reason: 'unknown-series-length', bestOf: null };
+    if (!bestOf) {
+      removeScoreboardBestOf(scoreboard);
+      return { visible: false, reason: matchup ? 'unknown-series-length' : 'no-current-user-series', bestOf: null };
+    }
 
+    const expectedText = `Best of ${bestOf}`;
+    const existing = existingScoreboardLabels(scoreboard);
+    if (existing.length === 1 && String(existing[0].textContent || '').trim() === expectedText) {
+      return { visible: true, reason: 'current-user-series', bestOf, matchup };
+    }
+
+    removeScoreboardBestOf(scoreboard);
     const seriesLine = findSeriesLine(scoreboard);
     if (!seriesLine) return { visible: false, reason: 'missing-series-line', bestOf };
 
     const label = documentRef.createElement?.('div');
     if (!label) return { visible: false, reason: 'cannot-create-label', bestOf };
     label.className = SCOREBOARD_FORMAT_CLASS;
-    label.textContent = `Best of ${bestOf}`;
+    label.textContent = expectedText;
     label.setAttribute?.('aria-label', `Current series is best of ${bestOf}`);
     seriesLine.insertAdjacentElement?.('afterend', label);
-
     return { visible: true, reason: 'current-user-series', bestOf, matchup };
   }
 
@@ -230,7 +214,6 @@
 
     if (mount) {
       setHidden(mount, !view.visible);
-
       if (!view.visible) {
         if (mount.innerHTML) mount.innerHTML = '';
         mount.removeAttribute?.('data-tp-featured-matchup');
@@ -263,20 +246,11 @@
     observer.observe(mount, { attributes: true, childList: true });
   }
 
-  function observeScoreboard() {
-    if (scoreboardObserver || typeof global.MutationObserver !== 'function') return;
-    const scoreboard = global.document?.querySelector?.('.home-scoreboard-card');
-    if (!scoreboard) return;
-    scoreboardObserver = new global.MutationObserver(scheduleRender);
-    scoreboardObserver.observe(scoreboard, { childList: true, subtree: true });
-  }
-
   function install() {
     global.renderHomeSeasonChampionshipCard = renderHomeFeaturedMatchup;
     ensureResponsiveStyle();
     renderHomeFeaturedMatchup();
     observeMount();
-    observeScoreboard();
   }
 
   const api = {
