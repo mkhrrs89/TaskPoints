@@ -3,8 +3,10 @@
 
   const MOUNT_ID = 'homeSeasonChampionshipMount';
   const STYLE_ID = 'tp-home-featured-matchup-mobile-style';
+  const SCOREBOARD_FORMAT_CLASS = 'home-scoreboard-series-format';
   const ACTIVE_SEASON_STATUSES = new Set(['locked', 'active']);
   let observer = null;
+  let scoreboardObserver = null;
   let renderScheduled = false;
 
   function localDateKey(date = new Date()) {
@@ -29,22 +31,22 @@
     return Number.isFinite(bestOf) && bestOf > 0 ? bestOf : null;
   }
 
-  function resolveFeaturedBestOf(featured, season, core) {
-    const direct = normalizeBestOf(featured?.bestOf ?? featured?.seriesBestOf ?? featured?.series?.bestOf);
+  function resolveMatchupBestOf(matchup, season, core) {
+    const direct = normalizeBestOf(matchup?.bestOf ?? matchup?.seriesBestOf ?? matchup?.series?.bestOf);
     if (direct) return direct;
 
-    const seriesId = featured?.seriesId || featured?.seasonSeriesId || featured?.series?.id || '';
+    const seriesId = matchup?.seriesId || matchup?.seasonSeriesId || matchup?.series?.id || '';
     const series = seriesId && season?.series ? season.series[seriesId] : null;
     const storedSeriesBestOf = normalizeBestOf(series?.bestOf);
     if (storedSeriesBestOf) return storedSeriesBestOf;
 
-    const roundId = featured?.roundId || series?.roundId || '';
+    const roundId = matchup?.roundId || series?.roundId || '';
     if (roundId && typeof core?.getSeasonSeriesLength === 'function') {
       try {
         const configured = normalizeBestOf(core.getSeasonSeriesLength(roundId, season));
         if (configured) return configured;
       } catch (error) {
-        // Fall through to the stored round definitions below.
+        // Fall through to stored round definitions.
       }
     }
 
@@ -53,13 +55,17 @@
       const round = (Array.isArray(rounds) ? rounds : []).find((item) => {
         if (!item) return false;
         if (roundId && item.id === roundId) return true;
-        return featured?.roundName && item.displayName === featured.roundName;
+        return matchup?.roundName && item.displayName === matchup.roundName;
       });
       const configured = normalizeBestOf(round?.bestOf);
       if (configured) return configured;
     }
 
     return null;
+  }
+
+  function resolveFeaturedBestOf(featured, season, core) {
+    return resolveMatchupBestOf(featured, season, core);
   }
 
   function ensureResponsiveStyle() {
@@ -69,12 +75,14 @@
     const style = documentRef.createElement('style');
     style.id = STYLE_ID;
     style.textContent = `
-      .home-season-featured-format {
+      .${SCOREBOARD_FORMAT_CLASS} {
         color: #cbd5e1;
-        font-size: 0.88rem;
+        font-size: 0.76rem;
         font-weight: 700;
         line-height: 1.1;
-        margin-top: -4px;
+        letter-spacing: 0.08em;
+        margin-top: 4px;
+        text-transform: uppercase;
       }
 
       @media (max-width: 640px) {
@@ -91,8 +99,9 @@
           flex: 0 0 auto;
         }
 
-        .home-season-featured-format {
-          font-size: 0.82rem;
+        .${SCOREBOARD_FORMAT_CLASS} {
+          font-size: 0.7rem;
+          margin-top: 3px;
         }
       }
     `;
@@ -135,7 +144,6 @@
     const featuredTitle = featured.title || 'Featured matchup';
     const featuredRoundLine = `${featured.roundName || 'Round'}${featured.gameNumber ? `, Gm ${featured.gameNumber}` : ''}`;
     const featuredDetail = `${featured.statusText || ''}${featured.isEliminationGame ? ' • Elimination game' : ''}`;
-    const bestOf = resolveFeaturedBestOf(featured, season, core);
     const html = `
       <section class="home-season-featured" aria-label="Featured tournament matchup">
         <div class="home-season-featured-kicker">
@@ -146,11 +154,65 @@
         <strong class="home-season-featured-title">${escapeHtml(featuredTitle)}</strong>
 
         ${featuredDetail ? `<span class="home-season-featured-status">${escapeHtml(featuredDetail)}</span>` : ''}
-        ${bestOf ? `<span class="home-season-featured-format">Best of ${escapeHtml(bestOf)}</span>` : ''}
       </section>
     `;
 
-    return { visible: true, reason: 'featured-matchup', featured, bestOf, html };
+    return { visible: true, reason: 'featured-matchup', featured, html };
+  }
+
+  function matchupDateKey(matchup) {
+    return String(matchup?.dateKey || matchup?.date || matchup?.dateISO || '').slice(0, 10);
+  }
+
+  function getCurrentUserMatchup(stateInput, todayKey = localDateKey()) {
+    const matchups = Array.isArray(stateInput?.matchups) ? stateInput.matchups : [];
+    return matchups.find((matchup) => {
+      if (!matchup || matchupDateKey(matchup) !== todayKey) return false;
+      return matchup.playerAId === 'YOU' || matchup.playerBId === 'YOU';
+    }) || null;
+  }
+
+  function findSeriesLine(scoreboard) {
+    if (!scoreboard?.querySelectorAll) return null;
+    const candidates = scoreboard.querySelectorAll('div, span, p, strong');
+    for (const element of candidates) {
+      const text = String(element?.textContent || '').trim();
+      if (/^SERIES\s*:/i.test(text)) return element;
+    }
+    return null;
+  }
+
+  function removeScoreboardBestOf(scoreboard = null) {
+    const root = scoreboard || global.document?.querySelector?.('.home-scoreboard-card');
+    root?.querySelectorAll?.(`.${SCOREBOARD_FORMAT_CLASS}`)?.forEach?.((element) => element.remove?.());
+  }
+
+  function renderCurrentSeriesBestOf(stateInput = null, todayKey = localDateKey()) {
+    const documentRef = global.document;
+    const scoreboard = documentRef?.querySelector?.('.home-scoreboard-card');
+    if (!scoreboard) return { visible: false, reason: 'missing-scoreboard', bestOf: null };
+
+    removeScoreboardBestOf(scoreboard);
+
+    const state = stateInput || loadState();
+    const season = state?.currentSeason;
+    const matchup = getCurrentUserMatchup(state, todayKey);
+    if (!season || !matchup) return { visible: false, reason: 'no-current-user-series', bestOf: null };
+
+    const bestOf = resolveMatchupBestOf(matchup, season, global.TaskPointsCore);
+    if (!bestOf) return { visible: false, reason: 'unknown-series-length', bestOf: null };
+
+    const seriesLine = findSeriesLine(scoreboard);
+    if (!seriesLine) return { visible: false, reason: 'missing-series-line', bestOf };
+
+    const label = documentRef.createElement?.('div');
+    if (!label) return { visible: false, reason: 'cannot-create-label', bestOf };
+    label.className = SCOREBOARD_FORMAT_CLASS;
+    label.textContent = `Best of ${bestOf}`;
+    label.setAttribute?.('aria-label', `Current series is best of ${bestOf}`);
+    seriesLine.insertAdjacentElement?.('afterend', label);
+
+    return { visible: true, reason: 'current-user-series', bestOf, matchup };
   }
 
   function setHidden(mount, hidden) {
@@ -160,20 +222,25 @@
   }
 
   function renderHomeFeaturedMatchup(stateInput = null, todayKey = localDateKey()) {
+    const state = stateInput || loadState();
     const mount = global.document?.getElementById?.(MOUNT_ID);
-    if (!mount) return { visible: false, reason: 'missing-mount', featured: null, html: '' };
+    const view = mount
+      ? buildFeaturedView(state, todayKey)
+      : { visible: false, reason: 'missing-mount', featured: null, html: '' };
 
-    const view = buildFeaturedView(stateInput || loadState(), todayKey);
-    setHidden(mount, !view.visible);
+    if (mount) {
+      setHidden(mount, !view.visible);
 
-    if (!view.visible) {
-      if (mount.innerHTML) mount.innerHTML = '';
-      mount.removeAttribute?.('data-tp-featured-matchup');
-      return view;
+      if (!view.visible) {
+        if (mount.innerHTML) mount.innerHTML = '';
+        mount.removeAttribute?.('data-tp-featured-matchup');
+      } else {
+        if (mount.innerHTML !== view.html) mount.innerHTML = view.html;
+        mount.setAttribute?.('data-tp-featured-matchup', 'active');
+      }
     }
 
-    if (mount.innerHTML !== view.html) mount.innerHTML = view.html;
-    mount.setAttribute?.('data-tp-featured-matchup', 'active');
+    renderCurrentSeriesBestOf(state, todayKey);
     return view;
   }
 
@@ -196,19 +263,31 @@
     observer.observe(mount, { attributes: true, childList: true });
   }
 
+  function observeScoreboard() {
+    if (scoreboardObserver || typeof global.MutationObserver !== 'function') return;
+    const scoreboard = global.document?.querySelector?.('.home-scoreboard-card');
+    if (!scoreboard) return;
+    scoreboardObserver = new global.MutationObserver(scheduleRender);
+    scoreboardObserver.observe(scoreboard, { childList: true, subtree: true });
+  }
+
   function install() {
-    // Replace the June-only page renderer after index.html has defined it.
     global.renderHomeSeasonChampionshipCard = renderHomeFeaturedMatchup;
     ensureResponsiveStyle();
     renderHomeFeaturedMatchup();
     observeMount();
+    observeScoreboard();
   }
 
   const api = {
     ACTIVE_SEASON_STATUSES,
+    SCOREBOARD_FORMAT_CLASS,
     localDateKey,
+    resolveMatchupBestOf,
     resolveFeaturedBestOf,
     buildFeaturedView,
+    getCurrentUserMatchup,
+    renderCurrentSeriesBestOf,
     render: renderHomeFeaturedMatchup,
     install
   };
