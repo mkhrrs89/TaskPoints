@@ -24,6 +24,44 @@
     }[character]));
   }
 
+  function normalizeBestOf(value) {
+    const bestOf = Math.floor(Number(value));
+    return Number.isFinite(bestOf) && bestOf > 0 ? bestOf : null;
+  }
+
+  function resolveFeaturedBestOf(featured, season, core) {
+    const direct = normalizeBestOf(featured?.bestOf ?? featured?.seriesBestOf ?? featured?.series?.bestOf);
+    if (direct) return direct;
+
+    const seriesId = featured?.seriesId || featured?.seasonSeriesId || featured?.series?.id || '';
+    const series = seriesId && season?.series ? season.series[seriesId] : null;
+    const storedSeriesBestOf = normalizeBestOf(series?.bestOf);
+    if (storedSeriesBestOf) return storedSeriesBestOf;
+
+    const roundId = featured?.roundId || series?.roundId || '';
+    if (roundId && typeof core?.getSeasonSeriesLength === 'function') {
+      try {
+        const configured = normalizeBestOf(core.getSeasonSeriesLength(roundId, season));
+        if (configured) return configured;
+      } catch (error) {
+        // Fall through to the stored round definitions below.
+      }
+    }
+
+    const roundCollections = [season?.dateWindows, season?.bracketConfig?.rounds, season?.bracket?.rounds];
+    for (const rounds of roundCollections) {
+      const round = (Array.isArray(rounds) ? rounds : []).find((item) => {
+        if (!item) return false;
+        if (roundId && item.id === roundId) return true;
+        return featured?.roundName && item.displayName === featured.roundName;
+      });
+      const configured = normalizeBestOf(round?.bestOf);
+      if (configured) return configured;
+    }
+
+    return null;
+  }
+
   function ensureResponsiveStyle() {
     const documentRef = global.document;
     if (!documentRef?.head || documentRef.getElementById?.(STYLE_ID)) return;
@@ -31,6 +69,14 @@
     const style = documentRef.createElement('style');
     style.id = STYLE_ID;
     style.textContent = `
+      .home-season-featured-format {
+        color: #cbd5e1;
+        font-size: 0.88rem;
+        font-weight: 700;
+        line-height: 1.1;
+        margin-top: -4px;
+      }
+
       @media (max-width: 640px) {
         .home-season-featured-kicker {
           width: 100%;
@@ -43,6 +89,10 @@
 
         .home-season-featured-kicker > span {
           flex: 0 0 auto;
+        }
+
+        .home-season-featured-format {
+          font-size: 0.82rem;
         }
       }
     `;
@@ -85,6 +135,7 @@
     const featuredTitle = featured.title || 'Featured matchup';
     const featuredRoundLine = `${featured.roundName || 'Round'}${featured.gameNumber ? `, Gm ${featured.gameNumber}` : ''}`;
     const featuredDetail = `${featured.statusText || ''}${featured.isEliminationGame ? ' • Elimination game' : ''}`;
+    const bestOf = resolveFeaturedBestOf(featured, season, core);
     const html = `
       <section class="home-season-featured" aria-label="Featured tournament matchup">
         <div class="home-season-featured-kicker">
@@ -95,10 +146,11 @@
         <strong class="home-season-featured-title">${escapeHtml(featuredTitle)}</strong>
 
         ${featuredDetail ? `<span class="home-season-featured-status">${escapeHtml(featuredDetail)}</span>` : ''}
+        ${bestOf ? `<span class="home-season-featured-format">Best of ${escapeHtml(bestOf)}</span>` : ''}
       </section>
     `;
 
-    return { visible: true, reason: 'featured-matchup', featured, html };
+    return { visible: true, reason: 'featured-matchup', featured, bestOf, html };
   }
 
   function setHidden(mount, hidden) {
@@ -155,6 +207,7 @@
   const api = {
     ACTIVE_SEASON_STATUSES,
     localDateKey,
+    resolveFeaturedBestOf,
     buildFeaturedView,
     render: renderHomeFeaturedMatchup,
     install
