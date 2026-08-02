@@ -5,6 +5,7 @@ const vm = require('node:vm');
 const path = require('node:path');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'inbox_count_badge.js'), 'utf8');
+const workerSource = fs.readFileSync(path.join(__dirname, '..', '_worker.js'), 'utf8');
 
 class FakeElement {
   constructor(tagName = 'div') {
@@ -137,4 +138,10 @@ test('preserves the full count instead of capping large inboxes', () => {
   const link = addLink(body, 'inbox.html', 'Inbox');
   window.TaskPointsInboxCountBadge.refresh();
   assert.equal(link.querySelector('.tp-inbox-count-badge').textContent, '127');
+});
+
+test('worker bundles the badge module into the versioned scoring bundle', () => {
+  assert.match(workerSource, /'\/inbox_count_badge\.js'/);
+  assert.match(workerSource, /readAssetSource\(env, request, '\/inbox_count_badge\.js'\)/);
+  assert.match(workerSource, /x-taskpoints-inbox-count-badge/);
 });
