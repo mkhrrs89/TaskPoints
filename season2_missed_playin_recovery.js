@@ -90,6 +90,30 @@
     );
   }
 
+  function repairCurrentSchedule(state, effectiveDateKey, nowISO, options = {}) {
+    if (
+      !effectiveDateKey
+      || effectiveDateKey <= '2026-08-01'
+      || typeof core?.repairSeasonControlledScheduleFromSyncedSeason !== 'function'
+    ) {
+      return { state, changed: false, repairedDates: [] };
+    }
+
+    const repaired = core.repairSeasonControlledScheduleFromSyncedSeason(state, {
+      ...options,
+      dateKey: effectiveDateKey,
+      todayDateKey: effectiveDateKey,
+      nowISO
+    });
+    return repaired?.state
+      ? {
+          state: repaired.state,
+          changed: Boolean(repaired.changed),
+          repairedDates: Array.isArray(repaired.repairedDates) ? repaired.repairedDates : []
+        }
+      : { state, changed: false, repairedDates: [] };
+  }
+
   function repairMissedPlayIn(state, options = {}) {
     const normalized = typeof core?.normalizeState === 'function'
       ? core.normalizeState(state || {})
@@ -169,8 +193,7 @@
         playerAScore: scoreA,
         playerBScore: scoreB,
         matchupType: 'tournament',
-        source: 'season2_missed_playin_recovery',
-        recoveredFromDailyScores: true
+        source: 'matchup'
       }, { ...options, nowISO });
 
       if (!recorded?.ok || !recorded?.season || !recorded?.series?.winnerId) {
@@ -225,12 +248,17 @@
           latestSeasonId: nextSeason.id || normalized.latestSeasonId || ''
         };
 
+    const scheduleRepair = repairCurrentSchedule(nextState, effectiveDateKey, nowISO, options);
+
     return {
       ok: true,
-      changed: recoveredSeriesIds.length > 0 || season?.meta?.seasonMatchupControlEnabled !== true,
+      changed: recoveredSeriesIds.length > 0
+        || season?.meta?.seasonMatchupControlEnabled !== true
+        || scheduleRepair.changed,
       reason: recoveredSeriesIds.length ? 'recovered' : 'matchup_control_enabled',
-      state: nextState,
+      state: scheduleRepair.state,
       recoveredSeriesIds,
+      repairedDates: scheduleRepair.repairedDates,
       missingPlayerIds: []
     };
   }
@@ -283,6 +311,7 @@
     PRESET_ID,
     RECOVERY_KEY,
     buildDailyScoreIndex,
+    repairCurrentSchedule,
     repairMissedPlayIn,
     runAutomaticRecovery
   };
