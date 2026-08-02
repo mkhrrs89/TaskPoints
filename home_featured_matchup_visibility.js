@@ -2,6 +2,7 @@
   'use strict';
 
   const MOUNT_ID = 'homeSeasonChampionshipMount';
+  const STYLE_ID = 'tp-home-featured-matchup-mobile-style';
   const ACTIVE_SEASON_STATUSES = new Set(['locked', 'active']);
   let observer = null;
   let renderScheduled = false;
@@ -21,6 +22,31 @@
       '"': '&quot;',
       "'": '&#39;'
     }[character]));
+  }
+
+  function ensureResponsiveStyle() {
+    const documentRef = global.document;
+    if (!documentRef?.head || documentRef.getElementById?.(STYLE_ID)) return;
+
+    const style = documentRef.createElement('style');
+    style.id = STYLE_ID;
+    style.textContent = `
+      @media (max-width: 640px) {
+        .home-season-featured-kicker {
+          width: 100%;
+          flex-wrap: nowrap !important;
+          white-space: nowrap;
+          gap: 5px !important;
+          font-size: 0.64rem !important;
+          letter-spacing: 0.08em !important;
+        }
+
+        .home-season-featured-kicker > span {
+          flex: 0 0 auto;
+        }
+      }
+    `;
+    documentRef.head.appendChild(style);
   }
 
   function loadState() {
@@ -121,6 +147,7 @@
   function install() {
     // Replace the June-only page renderer after index.html has defined it.
     global.renderHomeSeasonChampionshipCard = renderHomeFeaturedMatchup;
+    ensureResponsiveStyle();
     renderHomeFeaturedMatchup();
     observeMount();
   }
