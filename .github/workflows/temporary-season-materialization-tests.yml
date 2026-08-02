@@ -56,3 +56,5 @@ jobs:
       - name: Report test failure
         if: always() && (steps.season2.outcome != 'success' || steps.guard.outcome != 'success' || steps.fullsuite.outcome != 'success')
         run: exit 1
+
+# Temporary workflow; remove after the branch is verified.
