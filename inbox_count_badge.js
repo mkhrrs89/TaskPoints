@@ -205,3 +205,36 @@
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
+
+(function loadTaskPointsHomeFeaturedMatchupModule(global) {
+  'use strict';
+
+  const SCRIPT_ID = 'tpHomeFeaturedMatchupScript';
+  const SCRIPT_SRC = '/home_featured_matchup_visibility.js?v=20260801-1';
+
+  function load() {
+    const document = global.document;
+    if (!document?.getElementById?.('homeSeasonChampionshipMount')) return false;
+
+    if (global.TaskPointsHomeFeaturedMatchup?.install) {
+      global.TaskPointsHomeFeaturedMatchup.install();
+      return true;
+    }
+
+    if (document.getElementById(SCRIPT_ID)) return true;
+    const script = document.createElement?.('script');
+    if (!script) return false;
+    script.id = SCRIPT_ID;
+    script.src = SCRIPT_SRC;
+    script.async = false;
+    script.setAttribute?.('data-taskpoints-home-featured-matchup', 'true');
+    (document.body || document.head || document.documentElement)?.appendChild?.(script);
+    return true;
+  }
+
+  if (global.document?.readyState === 'loading') {
+    global.document.addEventListener?.('DOMContentLoaded', load, { once: true });
+  } else {
+    load();
+  }
+})(typeof window !== 'undefined' ? window : globalThis);
