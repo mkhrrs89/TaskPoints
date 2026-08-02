@@ -63,6 +63,21 @@
     };
   }
 
+  function enableLockedSeasonMatchupControl(result) {
+    if (!result?.ok || !result.season) return result;
+    const season = {
+      ...result.season,
+      meta: {
+        ...(result.season.meta || {}),
+        seasonMatchupControlEnabled: true
+      }
+    };
+    const state = result.state && typeof result.state === 'object'
+      ? { ...result.state, currentSeason: season }
+      : result.state;
+    return { ...result, season, state };
+  }
+
   api.normalizeConfig = normalizeConfig;
   api.validateConfig = validateConfig;
 
@@ -94,13 +109,14 @@
         warnings: validation.warnings || []
       };
     }
-    return originalLock(state, validation.config, options);
+    return enableLockedSeasonMatchupControl(originalLock(state, validation.config, options));
   };
 
   api.__reviewFixesApplied = true;
   global.TaskPointsBracketBuilderFixes = {
     normalizeConfig,
-    validateConfig
+    validateConfig,
+    enableLockedSeasonMatchupControl
   };
 
   if (typeof module !== 'undefined' && module.exports) {
