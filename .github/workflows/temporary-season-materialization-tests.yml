@@ -17,44 +17,32 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Check out repository
+      - name: Check out untouched main baseline
         uses: actions/checkout@v4
+        with:
+          ref: main
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
       - name: Create log directory
         run: mkdir -p test-logs
-      - name: Run Season 2 recovery regression
-        id: season2
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -o pipefail
-          node --test tests/season2_playin_recovery.test.js 2>&1 | tee test-logs/season2-playin-recovery.log
-      - name: Run Season materialization guard regression
-        id: guard
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -o pipefail
-          node --test tests/season_materialization_guard.test.js 2>&1 | tee test-logs/season-materialization-guard.log
-      - name: Run complete Node test suite
+      - name: Run complete main-branch Node test suite
         id: fullsuite
         continue-on-error: true
         shell: bash
         run: |
           set -o pipefail
-          npm test 2>&1 | tee test-logs/full-node-suite.log
-      - name: Upload test logs
+          npm test 2>&1 | tee test-logs/main-baseline-full-node-suite.log
+      - name: Upload baseline test log
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: season-materialization-test-logs
+          name: season-materialization-main-baseline-log
           path: test-logs/*.log
           if-no-files-found: error
-      - name: Report test failure
-        if: always() && (steps.season2.outcome != 'success' || steps.guard.outcome != 'success' || steps.fullsuite.outcome != 'success')
+      - name: Report baseline result
+        if: always() && steps.fullsuite.outcome != 'success'
         run: exit 1
 
 # Temporary workflow; remove after the branch is verified.
