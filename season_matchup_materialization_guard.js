@@ -132,6 +132,75 @@
     };
   }
 
+  function seriesIdFromGeneratedMatchup(row, dateKey, seriesById) {
+    const direct = String(row?.seriesId || row?.seasonSeriesId || '').trim();
+    if (direct && seriesById.has(direct)) return direct;
+
+    const id = String(row?.id || row?.matchupId || '').trim();
+    const prefix = `${dateKey}_`;
+    if (!id.startsWith(prefix)) return '';
+    const generated = id.slice(prefix.length).match(/^(.*)_g(\d+)$/);
+    if (!generated || !seriesById.has(generated[1])) return '';
+    return generated[1];
+  }
+
+  function enrichTournamentMetadataForDate(stateInput, dateKey) {
+    const state = stateInput && typeof stateInput === 'object' ? stateInput : {};
+    const season = state.currentSeason;
+    const seriesEntries = Object.values(season?.series || {}).filter(Boolean);
+    if (!season || !dateKey || !seriesEntries.length) {
+      return { state, changed: false, enrichedCount: 0 };
+    }
+
+    const seriesById = new Map(seriesEntries.map((series) => [String(series.id || ''), series]));
+    let enrichedCount = 0;
+
+    const enrich = (row) => {
+      if (!row || rowDateKey(row) !== dateKey) return row;
+      const type = String(row.matchupType || '').trim().toLowerCase();
+      if (type !== 'tournament' && type !== 'season') return row;
+
+      const seriesId = seriesIdFromGeneratedMatchup(row, dateKey, seriesById);
+      const series = seriesById.get(seriesId);
+      if (!series) return row;
+
+      const generatedNumber = String(row.id || row.matchupId || '').match(/_g(\d+)$/);
+      const gameNumber = Number(row.seriesGameNumber || row.gameNumber || generatedNumber?.[1]) || 1;
+      const roundName = series.roundName || series.displayName || series.roundId || 'Season';
+      const patch = {
+        seasonId: row.seasonId || season.id || series.seasonId || '',
+        seriesId,
+        seasonSeriesId: seriesId,
+        roundId: series.roundId || row.roundId || '',
+        roundName,
+        gameNumber,
+        seriesGameNumber: gameNumber,
+        game: gameNumber,
+        bestOf: Number(series.bestOf) || Number(row.bestOf) || 1,
+        winsNeeded: Number(series.winsNeeded) || Number(row.winsNeeded) || 1,
+        seasonMatchupLabel: row.seasonMatchupLabel || `${roundName}, Game ${gameNumber}`
+      };
+
+      const needsPatch = Object.entries(patch).some(([key, value]) => row[key] !== value);
+      if (!needsPatch) return row;
+      enrichedCount += 1;
+      return { ...row, ...patch };
+    };
+
+    const matchups = (Array.isArray(state.matchups) ? state.matchups : []).map(enrich);
+    const schedule = (Array.isArray(state.schedule) ? state.schedule : []).map((day) => {
+      if (rowDateKey(day) !== dateKey || !Array.isArray(day?.matchups)) return day;
+      return { ...day, matchups: day.matchups.map(enrich) };
+    });
+
+    if (!enrichedCount) return { state, changed: false, enrichedCount: 0 };
+    return {
+      state: { ...state, matchups, schedule },
+      changed: true,
+      enrichedCount
+    };
+  }
+
   function preflightLegacyClassification(state, dateKey, options) {
     const prepared = classifyLegacyRowsForDate(state, dateKey);
     if (!prepared.changed || !originalBuildSeasonDailySlate) {
@@ -153,6 +222,7 @@
       removedExhibitionCount: 0,
       removedStaleSeasonCount: 0,
       reclassifiedLegacyExhibitionCount: 0,
+      enrichedSeasonTournamentCount: 0,
       warnings: Array.isArray(slate?.warnings) ? slate.warnings : [],
       errors: Array.isArray(slate?.errors) ? slate.errors : []
     };
@@ -193,10 +263,13 @@
       if (!prepared.safe) return blockedMaterializationResult(state, prepared.slate);
 
       const result = originalMaterializeSeasonSlateMatchupsForDate(prepared.state, dateKey, options);
+      const enriched = enrichTournamentMetadataForDate(result?.state || prepared.state, dateKey);
       return {
         ...result,
-        changed: Boolean(result?.changed || prepared.changed),
-        reclassifiedLegacyExhibitionCount: prepared.classifiedCount || 0
+        state: enriched.state,
+        changed: Boolean(result?.changed || prepared.changed || enriched.changed),
+        reclassifiedLegacyExhibitionCount: prepared.classifiedCount || 0,
+        enrichedSeasonTournamentCount: enriched.enrichedCount || 0
       };
     };
   }
@@ -211,7 +284,7 @@
       ).slice(0, 10);
 
       if (String(state?.currentSeason?.status || '') === 'champion_crowned') {
-        return { state, changed: false, repairedDates: [], reclassifiedLegacyExhibitionCount: 0 };
+        return { state, changed: false, repairedDates: [], reclassifiedLegacyExhibitionCount: 0, enrichedSeasonTournamentCount: 0 };
       }
 
       const prepared = preflightLegacyClassification(state, dateKey, options);
@@ -221,26 +294,32 @@
           changed: false,
           repairedDates: [],
           reclassifiedLegacyExhibitionCount: 0,
+          enrichedSeasonTournamentCount: 0,
           warnings: Array.isArray(prepared.slate?.warnings) ? prepared.slate.warnings : [],
           errors: Array.isArray(prepared.slate?.errors) ? prepared.slate.errors : []
         };
       }
 
       const result = originalRepairSeasonControlledScheduleFromSyncedSeason(prepared.state, options);
+      const enriched = enrichTournamentMetadataForDate(result?.state || prepared.state, dateKey);
       return {
         ...result,
-        changed: Boolean(result?.changed || prepared.changed),
-        reclassifiedLegacyExhibitionCount: prepared.classifiedCount || 0
+        state: enriched.state,
+        changed: Boolean(result?.changed || prepared.changed || enriched.changed),
+        reclassifiedLegacyExhibitionCount: prepared.classifiedCount || 0,
+        enrichedSeasonTournamentCount: enriched.enrichedCount || 0
       };
     };
   }
 
   core.classifyLegacySeasonExhibitionsForDate = classifyLegacyRowsForDate;
+  core.enrichSeasonTournamentMetadataForDate = enrichTournamentMetadataForDate;
   core.__seasonMatchupMaterializationGuard = {
     allowedStatuses: Array.from(ALLOWED_CONTROL_STATUSES),
     rowDateKey,
     collectReferencedSeasonMatchupIds,
     isLegacyBlankTypeDailyRow,
-    classifyLegacyRowsForDate
+    classifyLegacyRowsForDate,
+    enrichTournamentMetadataForDate
   };
 })(typeof window !== 'undefined' ? window : globalThis);
