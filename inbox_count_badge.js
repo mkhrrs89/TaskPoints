@@ -238,3 +238,37 @@
     load();
   }
 })(typeof window !== 'undefined' ? window : globalThis);
+
+(function loadTaskPointsDynamicTournamentBracket(global) {
+  'use strict';
+
+  const SCRIPT_ID = 'tpDynamicTournamentBracketScript';
+  const SCRIPT_SRC = '/tournament_dynamic_bracket.js?v=20260802-1';
+
+  function load() {
+    const document = global.document;
+    const bracket = document?.getElementById?.('tournamentBracket');
+    if (!bracket) return false;
+
+    if (global.TaskPointsDynamicTournamentBracket?.render) {
+      global.TaskPointsDynamicTournamentBracket.render();
+      return true;
+    }
+
+    if (document.getElementById(SCRIPT_ID)) return true;
+    const script = document.createElement?.('script');
+    if (!script) return false;
+    script.id = SCRIPT_ID;
+    script.src = SCRIPT_SRC;
+    script.async = false;
+    script.setAttribute?.('data-taskpoints-dynamic-tournament', 'true');
+    (document.body || document.head || document.documentElement)?.appendChild?.(script);
+    return true;
+  }
+
+  if (global.document?.readyState === 'loading') {
+    global.document.addEventListener?.('DOMContentLoaded', load, { once: true });
+  } else {
+    load();
+  }
+})(typeof window !== 'undefined' ? window : globalThis);
