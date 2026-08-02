@@ -19,7 +19,8 @@ const CORE_BUNDLE_ASSET_PATHS = Object.freeze([
   '/flex_action_fast_path.js',
   '/score_alias_consistency.js',
   '/habit_completion_source_guard.js',
-  '/save_pipeline_shared_work.js'
+  '/save_pipeline_shared_work.js',
+  '/inbox_count_badge.js'
 ]);
 const CORE_BUNDLE_QUERY_KEY = 'v';
 const CORE_BUNDLE_BROWSER_MAX_AGE = 31536000;
@@ -180,18 +181,20 @@ async function buildCoreBundle(request, env, ctx, version) {
   try { coreSource = await response.text(); }
   catch (_) { return response; }
 
-  const [aliasSource, habitGuardSource, sharedSaveWorkSource] = await Promise.all([
+  const [aliasSource, habitGuardSource, sharedSaveWorkSource, inboxBadgeSource] = await Promise.all([
     readAssetSource(env, request, '/score_alias_consistency.js'),
     readAssetSource(env, request, '/habit_completion_source_guard.js'),
-    readAssetSource(env, request, '/save_pipeline_shared_work.js')
+    readAssetSource(env, request, '/save_pipeline_shared_work.js'),
+    readAssetSource(env, request, '/inbox_count_badge.js')
   ]);
-  const additions = [aliasSource, habitGuardSource, sharedSaveWorkSource].filter(Boolean);
+  const additions = [aliasSource, habitGuardSource, sharedSaveWorkSource, inboxBadgeSource].filter(Boolean);
   const source = additions.length ? `${coreSource}\n${additions.join('\n')}\n` : coreSource;
 
   return immutableJavascriptResponse(source, response, version, {
     'x-taskpoints-score-alias-bundle': aliasSource ? 'included' : 'missing',
     'x-taskpoints-habit-source-guard': habitGuardSource ? 'included' : 'missing',
-    'x-taskpoints-shared-save-work': sharedSaveWorkSource ? 'included' : 'missing'
+    'x-taskpoints-shared-save-work': sharedSaveWorkSource ? 'included' : 'missing',
+    'x-taskpoints-inbox-count-badge': inboxBadgeSource ? 'included' : 'missing'
   });
 }
 
