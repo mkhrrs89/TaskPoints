@@ -159,3 +159,33 @@
     global.addEventListener?.('DOMContentLoaded', load, { once: true });
   }
 })(typeof window !== 'undefined' ? window : globalThis);
+
+;(function loadHabitLedgerScoreReconciliationHardening(global) {
+  'use strict';
+
+  const SCRIPT_ID = 'tpHabitLedgerScoreReconciliationHardeningScript';
+  const SCRIPT_SRC = '/habit_ledger_score_reconciliation_hardening.js?v=20260803-1';
+  let attempts = 0;
+
+  function load() {
+    if (global.TaskPointsHabitLedgerScoreReconciliationCopyDomainHardening?.installed) return true;
+    const document = global.document;
+    if (!document?.getElementById?.('auditChecks') || !document.createElement) return false;
+    if (!global.TaskPointsHabitLedgerScoreReconciliation?.installed) {
+      if (++attempts < 240) global.setTimeout?.(load, 50);
+      return false;
+    }
+    if (document.getElementById(SCRIPT_ID)) return true;
+    const script = document.createElement('script');
+    script.id = SCRIPT_ID;
+    script.src = SCRIPT_SRC;
+    script.async = false;
+    script.setAttribute?.('data-taskpoints-habit-score-reconciliation-hardening', 'true');
+    (document.body || document.head || document.documentElement)?.appendChild?.(script);
+    return true;
+  }
+
+  if (!load()) {
+    global.addEventListener?.('DOMContentLoaded', load, { once: true });
+  }
+})(typeof window !== 'undefined' ? window : globalThis);
