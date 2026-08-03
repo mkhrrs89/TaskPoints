@@ -296,3 +296,29 @@
   load();
   global.addEventListener?.('pageshow', load);
 })(typeof window !== 'undefined' ? window : globalThis);
+
+(function loadTaskPointsResponsiveExport(global) {
+  'use strict';
+
+  const SCRIPT_ID = 'tpResponsiveExportScript';
+  const SCRIPT_SRC = '/home_export_responsiveness.js?v=20260803-1';
+
+  function load() {
+    if (global.TaskPointsResponsiveExport?.installed) return true;
+    const document = global.document;
+    if (!document?.querySelector?.('[data-export-button]') || !document.createElement) return false;
+    if (document.getElementById?.(SCRIPT_ID)) return true;
+    const script = document.createElement('script');
+    script.id = SCRIPT_ID;
+    script.src = SCRIPT_SRC;
+    script.async = false;
+    script.setAttribute?.('data-taskpoints-responsive-export', 'true');
+    (document.head || document.body || document.documentElement)?.appendChild?.(script);
+    return true;
+  }
+
+  if (!load()) {
+    global.document?.addEventListener?.('DOMContentLoaded', load, { once: true });
+  }
+  global.addEventListener?.('pageshow', load);
+})(typeof window !== 'undefined' ? window : globalThis);
