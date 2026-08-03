@@ -262,6 +262,22 @@ test('preview blocks ambiguous You gameHistory copies', () => {
   assert.equal(plan.blockingIssues.some((item) => item.type === 'ambiguous-history'), true);
 });
 
+test('preview includes a compatible legacy history row when an explicit row also exists', () => {
+  const { api, core, planner, repair } = install();
+  const state = fixture();
+  state.gameHistory.push({
+    ...clone(state.gameHistory[0]),
+    id: 'history-you-legacy',
+    matchupId: ''
+  });
+  const plan = api.buildReconciliationPlan(state, { core, planner, repair });
+
+  assert.equal(plan.canApply, false);
+  const issue = plan.blockingIssues.find((item) => item.type === 'ambiguous-history');
+  assert.ok(issue);
+  assert.match(issue.reason, /^2 You gameHistory rows match/);
+});
+
 test('apply rejects a stale preview after completions change', () => {
   const { api, core, planner, repair } = install();
   const state = fixture();
