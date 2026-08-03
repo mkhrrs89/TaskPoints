@@ -43,7 +43,10 @@ function loadWorker({ assetVersion = 'a' } = {}) {
           });
         }
         if (url.pathname === '/score_alias_consistency.js') return new Response('ALIAS');
+        if (url.pathname === '/you_score_alias_alignment.js') return new Response('YOU_ALIAS');
         if (url.pathname === '/habit_completion_source_guard.js') return new Response('GUARD');
+        if (url.pathname === '/save_pipeline_shared_work.js') return new Response('SHARED');
+        if (url.pathname === '/inbox_count_badge.js') return new Response('INBOX');
         return new Response(`ASSET:${url.pathname}`);
       }
     }
@@ -119,16 +122,17 @@ test('the versioned bundle is immutable and reused from the edge cache', async (
 
   const first = await harness.worker.fetch(new Request(versionedUrl), harness.env, harness.ctx);
   assert.equal(first.status, 200);
-  assert.equal(await first.text(), 'CORE\nALIAS\nGUARD\n');
+  assert.equal(await first.text(), 'CORE\nALIAS\nYOU_ALIAS\nGUARD\nSHARED\nINBOX\n');
   assert.match(first.headers.get('cache-control') || '', /max-age=31536000/);
   assert.match(first.headers.get('cache-control') || '', /immutable/);
   assert.equal(first.headers.get('x-taskpoints-bundle-cache'), 'miss');
+  assert.equal(first.headers.get('x-taskpoints-you-score-alias-alignment'), 'included');
   assert.equal(harness.baseFetchCalls(), 1);
   await harness.flush();
 
   const second = await harness.worker.fetch(new Request(versionedUrl), harness.env, harness.ctx);
   assert.equal(second.status, 200);
-  assert.equal(await second.text(), 'CORE\nALIAS\nGUARD\n');
+  assert.equal(await second.text(), 'CORE\nALIAS\nYOU_ALIAS\nGUARD\nSHARED\nINBOX\n');
   assert.equal(second.headers.get('x-taskpoints-bundle-cache'), 'hit');
   assert.equal(harness.baseFetchCalls(), 1);
 });
@@ -154,7 +158,15 @@ test('the fingerprint list covers every module assembled by the core worker', ()
   const moduleBlock = core.match(/const modulePaths = \[([\s\S]*?)\n\s*\];/);
   assert.ok(moduleBlock, 'core worker module list must remain discoverable');
   const modulePaths = [...moduleBlock[1].matchAll(/'([^']+\.js)'/g)].map((match) => match[1]);
-  for (const pathname of ['/scoring_core.js', ...modulePaths, '/score_alias_consistency.js', '/habit_completion_source_guard.js']) {
+  for (const pathname of [
+    '/scoring_core.js',
+    ...modulePaths,
+    '/score_alias_consistency.js',
+    '/you_score_alias_alignment.js',
+    '/habit_completion_source_guard.js',
+    '/save_pipeline_shared_work.js',
+    '/inbox_count_badge.js'
+  ]) {
     const escaped = pathname.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     assert.match(outer, new RegExp(`['"]${escaped}['"]`), pathname);
   }
