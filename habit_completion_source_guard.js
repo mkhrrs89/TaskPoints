@@ -41,8 +41,7 @@
 
   function completionDay(row) {
     for (const value of [row?.dayKey, row?.dateKey]) {
-      const direct = String(value || '').slice(0, 10);
-      if (validDayKey(direct)) return direct;
+      if (validDayKey(value)) return value;
     }
     for (const value of [row?.completedAtISO, row?.createdAtISO]) {
       if (!populated(value)) continue;
