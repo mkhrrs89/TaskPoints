@@ -473,3 +473,52 @@
   global.TaskPointsResponsiveExport = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
+
+(function installSettingsStorageDiagnosticsLink(global) {
+  'use strict';
+
+  const LINK_ID = 'storageDiagnosticsLink';
+  const SECTION_ID = 'storageHealthSection';
+
+  function isSettingsPage() {
+    const pathname = String(global.location?.pathname || '');
+    return pathname === 'settings.html' || pathname.endsWith('/settings.html');
+  }
+
+  function install() {
+    const documentRef = global.document;
+    if (!isSettingsPage() || !documentRef?.createElement) return false;
+    if (documentRef.getElementById?.(LINK_ID)) return true;
+
+    const section = documentRef.getElementById?.(SECTION_ID);
+    if (!section) return false;
+    const actionRow = section.querySelector?.('.flex.flex-wrap.items-center.justify-end.gap-2');
+    if (!actionRow) return false;
+
+    const link = documentRef.createElement('a');
+    link.id = LINK_ID;
+    link.href = 'storage_diagnostics.html';
+    link.className = 'btn btn-ghost btn-toolbar nav-btn';
+    link.textContent = 'Storage Diagnostics';
+    link.setAttribute?.('aria-label', 'Open Storage Diagnostics');
+    link.setAttribute?.('data-storage-diagnostics-link', 'true');
+    actionRow.appendChild?.(link);
+    return true;
+  }
+
+  function scheduleInstall() {
+    if (install()) return;
+    global.setTimeout?.(install, 0);
+    global.setTimeout?.(install, 150);
+    global.setTimeout?.(install, 600);
+  }
+
+  if (global.document?.readyState === 'loading') {
+    global.document.addEventListener?.('DOMContentLoaded', scheduleInstall, { once: true });
+  } else {
+    scheduleInstall();
+  }
+  global.addEventListener?.('pageshow', scheduleInstall);
+
+  global.TaskPointsSettingsStorageDiagnosticsLink = { install, isSettingsPage };
+})(typeof window !== 'undefined' ? window : globalThis);
