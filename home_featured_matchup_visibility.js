@@ -285,3 +285,49 @@
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
+
+(function installHomeStorageDiagnosticsLink(global) {
+  'use strict';
+
+  const LINK_ID = 'tpHomeStorageDiagnosticsLink';
+  const EXPORT_SELECTOR = '[data-export-button]';
+
+  function install() {
+    const documentRef = global.document;
+    if (!documentRef?.createElement || documentRef.getElementById?.(LINK_ID)) return false;
+
+    const exportButton = documentRef.querySelector?.(EXPORT_SELECTOR);
+    if (!exportButton) return false;
+
+    const link = documentRef.createElement('a');
+    link.id = LINK_ID;
+    link.href = 'storage_diagnostics.html';
+    link.className = 'btn btn-ghost btn-toolbar nav-btn';
+    link.textContent = 'Diagnostics';
+    link.setAttribute?.('aria-label', 'Open Storage Diagnostics');
+    link.setAttribute?.('data-storage-diagnostics-link', 'true');
+
+    if (typeof exportButton.insertAdjacentElement === 'function') {
+      exportButton.insertAdjacentElement('afterend', link);
+    } else {
+      exportButton.parentNode?.appendChild?.(link);
+    }
+    return true;
+  }
+
+  function scheduleInstall() {
+    if (install()) return;
+    global.setTimeout?.(install, 0);
+    global.setTimeout?.(install, 150);
+    global.setTimeout?.(install, 600);
+  }
+
+  if (global.document?.readyState === 'loading') {
+    global.document.addEventListener?.('DOMContentLoaded', scheduleInstall, { once: true });
+  } else {
+    scheduleInstall();
+  }
+  global.addEventListener?.('pageshow', scheduleInstall);
+
+  global.TaskPointsHomeStorageDiagnosticsLink = { install };
+})(typeof window !== 'undefined' ? window : globalThis);
