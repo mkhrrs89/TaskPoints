@@ -156,20 +156,27 @@
   function historyRowsForMatchup(state, matchup, core) {
     const rows = Array.isArray(state?.gameHistory) ? state.gameHistory : [];
     const mid = matchupId(matchup);
-    const explicit = mid
-      ? rows.filter((row) => isYou(row?.playerId) && String(row?.matchupId || '').trim() === mid)
-      : [];
-    if (explicit.length) return explicit;
-
     const dayKey = rowDay(matchup, core);
     const opponentId = isYou(matchup.playerAId) ? matchup.playerBId : matchup.playerAId;
-    return rows.filter((row) => {
-      if (!isYou(row?.playerId) || rowDay(row, core) !== dayKey) return false;
-      if (populated(row?.opponentId) && populated(opponentId)) {
-        return String(row.opponentId) === String(opponentId);
-      }
-      return true;
+    const matches = [];
+    const seen = new Set();
+
+    rows.forEach((row) => {
+      if (!isYou(row?.playerId)) return;
+      const rowMatchupId = String(row?.matchupId || '').trim();
+      const explicitMatch = Boolean(mid && rowMatchupId === mid);
+      const compatibleLegacy = !rowMatchupId
+        && rowDay(row, core) === dayKey
+        && (!populated(row?.opponentId)
+          || !populated(opponentId)
+          || String(row.opponentId) === String(opponentId));
+      if (!explicitMatch && !compatibleLegacy) return;
+      if (seen.has(row)) return;
+      seen.add(row);
+      matches.push(row);
     });
+
+    return matches;
   }
 
   function projectedChangeRows(state, projectedState, dependencies = {}) {
