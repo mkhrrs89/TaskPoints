@@ -167,3 +167,215 @@
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
+
+(function installTaskPointsImmediateHabitWeekPlate(global) {
+  'use strict';
+
+  if (!global || global.TaskPointsImmediateHabitWeekPlate?.__installedModule) return;
+
+  let installed = false;
+  let originalRefresh = null;
+  let immediateRefresh = null;
+  let installAttempts = 0;
+  let immediateRestacks = 0;
+  let fallbackCalls = 0;
+  let lastReason = 'not_installed';
+
+  function helpersAvailable() {
+    return typeof global.refreshHabitRowWeekCompleteVisual === 'function'
+      && typeof isHabitWeeklyCompleteForDays === 'function'
+      && typeof addHabitWeeklyCompleteClasses === 'function'
+      && typeof habitWeekCompleteRowClasses !== 'undefined'
+      && Array.isArray(habitWeekCompleteRowClasses)
+      && typeof state !== 'undefined';
+  }
+
+  function getStatus() {
+    return {
+      installed,
+      installAttempts,
+      immediateRestacks,
+      fallbackCalls,
+      lastReason,
+      originalRefreshAvailable: typeof originalRefresh === 'function'
+    };
+  }
+
+  function runOriginal(row, habit, days) {
+    fallbackCalls += 1;
+    lastReason = 'original_refresh_fallback';
+    return typeof originalRefresh === 'function'
+      ? originalRefresh(row, habit, days)
+      : undefined;
+  }
+
+  function install() {
+    installAttempts += 1;
+
+    if (immediateRefresh && global.refreshHabitRowWeekCompleteVisual === immediateRefresh) {
+      installed = true;
+      lastReason = 'installed';
+      return getStatus();
+    }
+
+    if (!helpersAvailable()) {
+      installed = false;
+      lastReason = 'home_helpers_unavailable';
+      return getStatus();
+    }
+
+    const candidate = global.refreshHabitRowWeekCompleteVisual;
+    if (
+      candidate?.__tpImmediateHabitWeekPlate === true
+      && typeof candidate.__tpOriginalHabitWeekRefresh === 'function'
+    ) {
+      immediateRefresh = candidate;
+      originalRefresh = candidate.__tpOriginalHabitWeekRefresh;
+      installed = true;
+      lastReason = 'installed';
+      return getStatus();
+    }
+
+    originalRefresh = candidate;
+    immediateRefresh = function taskPointsImmediateHabitWeekPlateRefresh(row, habit, days) {
+      if (!row || !habit || !Array.isArray(days)) {
+        return runOriginal(row, habit, days);
+      }
+
+      try {
+        const currentStack = row.parentElement?.classList?.contains('habitWeekCompleteStack')
+          ? row.parentElement
+          : null;
+        const container = currentStack?.parentElement || row.parentElement;
+        const anchor = currentStack || row;
+        if (!container || !anchor) return runOriginal(row, habit, days);
+
+        const isRestackNode = (node) =>
+          node?.classList?.contains('habitRow')
+          || node?.classList?.contains('habitWeekCompleteStack');
+
+        const containerChildren = Array.from(container.children || []);
+        const anchorIndex = containerChildren.indexOf(anchor);
+        if (anchorIndex === -1) return runOriginal(row, habit, days);
+
+        let segmentStart = anchorIndex;
+        let segmentEnd = anchorIndex;
+        while (segmentStart > 0 && isRestackNode(containerChildren[segmentStart - 1])) {
+          segmentStart -= 1;
+        }
+        while (
+          segmentEnd + 1 < containerChildren.length
+          && isRestackNode(containerChildren[segmentEnd + 1])
+        ) {
+          segmentEnd += 1;
+        }
+
+        const segmentNodes = containerChildren.slice(segmentStart, segmentEnd + 1);
+        const segmentRows = segmentNodes.flatMap((node) => {
+          if (node.classList?.contains('habitRow')) return [node];
+          return Array.from(node.children || [])
+            .filter((child) => child.classList?.contains('habitRow'));
+        });
+        if (!segmentRows.includes(row)) return runOriginal(row, habit, days);
+
+        const getRowHabit = (habitRow) => {
+          if (habitRow === row) return habit;
+          const rowHabitId = habitRow.dataset?.habitRowId;
+          return state.habits.find((candidateHabit) => candidateHabit.id === rowHabitId);
+        };
+        const completionFlags = segmentRows.map((habitRow) => {
+          const rowHabit = getRowHabit(habitRow);
+          return Boolean(rowHabit && isHabitWeeklyCompleteForDays(rowHabit, days));
+        });
+
+        const marker = global.document.createComment('habit-week-restack');
+        container.insertBefore(marker, segmentNodes[0]);
+
+        const fragment = global.document.createDocumentFragment();
+        let completedStack = null;
+
+        segmentRows.forEach((habitRow, index) => {
+          const isWeeklyComplete = completionFlags[index];
+          habitRow.classList.remove(...habitWeekCompleteRowClasses);
+          habitRow.querySelector('.habitDaysRow')
+            ?.classList.toggle('week-complete-row', isWeeklyComplete);
+          addHabitWeeklyCompleteClasses(
+            habitRow,
+            isWeeklyComplete,
+            completionFlags[index - 1] === true,
+            completionFlags[index + 1] === true
+          );
+
+          if (!isWeeklyComplete) {
+            completedStack = null;
+            fragment.appendChild(habitRow);
+            return;
+          }
+
+          if (!completedStack) {
+            completedStack = global.document.createElement('div');
+            completedStack.className = 'habitWeekCompleteStack';
+            fragment.appendChild(completedStack);
+          }
+          completedStack.appendChild(habitRow);
+        });
+
+        segmentNodes.forEach((node) => {
+          if (node.parentElement === container) node.remove();
+        });
+        container.insertBefore(fragment, marker);
+        marker.remove();
+
+        immediateRestacks += 1;
+        lastReason = 'immediate_restack';
+        return undefined;
+      } catch (error) {
+        console.error('Immediate habit week plate refresh failed', error);
+        return runOriginal(row, habit, days);
+      }
+    };
+
+    Object.defineProperties(immediateRefresh, {
+      __tpImmediateHabitWeekPlate: { value: true },
+      __tpOriginalHabitWeekRefresh: { value: originalRefresh }
+    });
+
+    global.refreshHabitRowWeekCompleteVisual = immediateRefresh;
+    installed = global.refreshHabitRowWeekCompleteVisual === immediateRefresh;
+    lastReason = installed ? 'installed' : 'assignment_failed';
+    return getStatus();
+  }
+
+  function disable() {
+    if (originalRefresh && global.refreshHabitRowWeekCompleteVisual === immediateRefresh) {
+      global.refreshHabitRowWeekCompleteVisual = originalRefresh;
+    }
+    installed = false;
+    lastReason = 'disabled';
+    return getStatus();
+  }
+
+  function enable() {
+    return install();
+  }
+
+  const api = {
+    __installedModule: true,
+    install,
+    enable,
+    disable,
+    getStatus
+  };
+  global.TaskPointsImmediateHabitWeekPlate = api;
+
+  const installAfterHomeScript = () => install();
+  if (global.document?.readyState === 'loading') {
+    global.document.addEventListener?.('DOMContentLoaded', installAfterHomeScript, { once: true });
+  } else if (typeof global.setTimeout === 'function') {
+    global.setTimeout(installAfterHomeScript, 0);
+  } else {
+    installAfterHomeScript();
+  }
+
+  global.addEventListener?.('pageshow', installAfterHomeScript);
+})(typeof window !== 'undefined' ? window : globalThis);
