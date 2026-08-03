@@ -47,7 +47,7 @@
   'use strict';
 
   const SCRIPT_ID = 'tpCompletionBackedHabitLedgerRepairScript';
-  const SCRIPT_SRC = '/habit_ledger_completion_backed_repair.js?v=20260803-1';
+  const SCRIPT_SRC = '/habit_ledger_completion_backed_repair.js?v=20260803-2';
 
   function load() {
     if (global.TaskPointsCompletionBackedHabitRepair) return true;
