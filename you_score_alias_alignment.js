@@ -69,6 +69,11 @@
     return populated(value) ? String(value).trim() : '';
   }
 
+  function currentSeasonId(state) {
+    const value = state?.currentSeason?.id || state?.currentSeason?.seasonId || '';
+    return populated(value) ? String(value).trim() : '';
+  }
+
   function seasonSeriesIds(state) {
     const series = state?.currentSeason?.series;
     const rows = Array.isArray(series) ? series : Object.values(series || {});
@@ -88,16 +93,26 @@
 
   function isExplicitCurrentSeasonTournament(row, state, currentSeriesIds = seasonSeriesIds(state)) {
     if (!row || typeof row !== 'object' || !state?.currentSeason) return false;
+
     const type = String(row.matchupType || '').trim().toLowerCase();
     if (type && type !== 'tournament' && type !== 'season') return false;
 
-    const seasonId = String(state.currentSeason.id || state.currentSeason.seasonId || '').trim();
-    const rowSeasonId = String(row.seasonId || '').trim();
-    if (seasonId && rowSeasonId && seasonId !== rowSeasonId) return false;
-
+    const seasonId = currentSeasonId(state);
+    const rowSeasonId = populated(row.seasonId) ? String(row.seasonId).trim() : '';
     const seriesId = recordedSeriesId(row);
-    if (seriesId && currentSeriesIds.size && !currentSeriesIds.has(seriesId)) return false;
-    return type === 'tournament' || type === 'season' || Boolean(seriesId && (!currentSeriesIds.size || currentSeriesIds.has(seriesId)));
+
+    const matchingSeason = Boolean(seasonId && rowSeasonId && seasonId === rowSeasonId);
+    const matchingSeries = Boolean(seriesId && currentSeriesIds.has(seriesId));
+
+    // Explicit contradictory metadata always wins over a looser signal.
+    if (seasonId && rowSeasonId && !matchingSeason) return false;
+    if (seriesId && currentSeriesIds.size && !matchingSeries) return false;
+
+    // A blank-type row is only tournament evidence when its series belongs to
+    // the current season. A typed legacy row still needs positive season or
+    // current-series identity evidence; matchupType alone is not sufficient.
+    if (type !== 'tournament' && type !== 'season') return matchingSeries;
+    return matchingSeason || matchingSeries;
   }
 
   function sameMatchup(left, right) {
@@ -160,9 +175,7 @@
       return aligned.row;
     });
 
-    const changedMatchups = repairedMatchups > 0;
     const sourceRows = matchups.filter((row) => alignmentScope(row, state, options, currentSeriesIds));
-
     const schedule = (Array.isArray(state.schedule) ? state.schedule : []).map((day) => {
       if (!Array.isArray(day?.matchups) || !sourceRows.length) return day;
       let dayChanged = false;
@@ -181,17 +194,15 @@
           next.playerBScore = Number(source.scoreB);
           local = true;
         }
-        if (local) {
-          dayChanged = true;
-          repairedScheduleCopies += 1;
-          return next;
-        }
-        return candidate;
+        if (!local) return candidate;
+        dayChanged = true;
+        repairedScheduleCopies += 1;
+        return next;
       });
       return dayChanged ? { ...day, matchups: dayMatchups } : day;
     });
 
-    const changed = changedMatchups || repairedScheduleCopies > 0;
+    const changed = repairedMatchups > 0 || repairedScheduleCopies > 0;
     return {
       state: changed ? { ...state, matchups, schedule } : state,
       changed,
@@ -234,12 +245,16 @@
     }
   }
 
+  function alignCurrentSeasonState(state) {
+    return alignYouScoreAliases(state, { currentSeasonOnly: true });
+  }
+
   if (originalSyncYouMatchups) {
     core.syncYouMatchups = function syncYouMatchupsWithAlignedAliases(state, options = {}) {
       const result = originalSyncYouMatchups(state, options);
       const syncedState = result?.state || result;
       if (!syncedState || typeof syncedState !== 'object') return result;
-      const aligned = alignYouScoreAliases(syncedState);
+      const aligned = alignCurrentSeasonState(syncedState);
       if (!aligned.changed) return result;
       return result?.state
         ? { ...result, state: aligned.state, changed: true, youScoreAliasAlignment: aligned }
@@ -254,7 +269,7 @@
       const loaded = originalLoadAppState(options);
       const state = loaded?.state || loaded;
       if (!state || typeof state !== 'object') return loaded;
-      const aligned = alignYouScoreAliases(state, { currentSeasonOnly: true });
+      const aligned = alignCurrentSeasonState(state);
       if (!aligned.changed) return loaded;
       persistRepair(aligned.state, aligned, options);
       return loaded?.state
@@ -267,7 +282,7 @@
 
   if (originalSaveStateSnapshot) {
     core.saveStateSnapshot = function saveStateSnapshotWithAlignedYouAliases(state, options = {}) {
-      const aligned = alignYouScoreAliases(state, { tournamentOnly: true });
+      const aligned = alignCurrentSeasonState(state);
       return originalSaveStateSnapshot(aligned.state, options);
     };
     core.saveStateSnapshot.__taskPointsYouScoreAliasAlignment = true;
@@ -278,7 +293,7 @@
     core.saveAppState = function saveAppStateWithAlignedYouAliases(...args) {
       const stateIndex = typeof args[0] === 'string' ? 1 : 0;
       if (args[stateIndex] && typeof args[stateIndex] === 'object') {
-        args[stateIndex] = alignYouScoreAliases(args[stateIndex], { tournamentOnly: true }).state;
+        args[stateIndex] = alignCurrentSeasonState(args[stateIndex]).state;
       }
       return originalSaveAppState(...args);
     };
@@ -288,7 +303,7 @@
 
   if (originalMergeAndSaveState) {
     core.mergeAndSaveState = function mergeAndSaveStateWithAlignedYouAliases(state, options = {}) {
-      const aligned = alignYouScoreAliases(state, { tournamentOnly: true });
+      const aligned = alignCurrentSeasonState(state);
       return originalMergeAndSaveState(aligned.state, options);
     };
     core.mergeAndSaveState.__taskPointsYouScoreAliasAlignment = true;
