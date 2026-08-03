@@ -296,3 +296,233 @@
   load();
   global.addEventListener?.('pageshow', load);
 })(typeof window !== 'undefined' ? window : globalThis);
+
+(function loadTaskPointsResponsiveExport(global) {
+  'use strict';
+
+  const SCRIPT_ID = 'tpResponsiveExportScript';
+  const SCRIPT_SRC = '/home_export_responsiveness.js?v=20260803-2';
+  const EXPORT_SELECTOR = '[data-export-button]';
+  const loaderState = global.__tpResponsiveExportLoaderState || {
+    pending: false,
+    guard: null
+  };
+  global.__tpResponsiveExportLoaderState = loaderState;
+
+  function isMainPage() {
+    const pathname = String(global.location?.pathname || '');
+    return pathname === '/' || pathname === '' || pathname.endsWith('/index.html');
+  }
+
+  function readProjects() {
+    try {
+      const raw = global.localStorage?.getItem?.('tp_projects_v1');
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  function stripLegacyImages(snapshot) {
+    const next = { ...(snapshot || {}) };
+    if (next.youImage) delete next.youImage;
+    if (Array.isArray(next.players)) {
+      next.players = next.players.map((player) => {
+        if (!player || typeof player !== 'object') return player;
+        const { imageData, ...rest } = player;
+        return rest;
+      });
+    }
+    return next;
+  }
+
+  function installSecondarySnapshotProvider() {
+    if (isMainPage() || typeof global.getTaskPointsExportSnapshot === 'function') return;
+
+    global.getTaskPointsExportSnapshot = function getSecondaryTaskPointsExportSnapshot() {
+      const core = global.TaskPointsCore || {};
+      core.flushPendingSaves?.();
+
+      let state = {};
+      try {
+        state = typeof core.loadAppState === 'function'
+          ? (core.loadAppState({ syncDerived: false, persistSync: false })?.state || {})
+          : {};
+      } catch (error) {
+        console.warn('Secondary-page export could not load current state', error);
+      }
+
+      if (!state || typeof state !== 'object' || !Object.keys(state).length) {
+        try {
+          const storageKey = core.STORAGE_KEY || 'taskpoints_v1';
+          state = typeof core.readTaskPointsStoredState === 'function'
+            ? core.readTaskPointsStoredState(storageKey, {})
+            : JSON.parse(global.localStorage?.getItem?.(storageKey) || '{}');
+        } catch (_) {
+          state = {};
+        }
+      }
+
+      const withProjects = { ...state, projects: readProjects() };
+      const normalized = stripLegacyImages(
+        typeof core.normalizeState === 'function' ? core.normalizeState(withProjects) : withProjects
+      );
+
+      const prepareSchedule = global.ensureUpcomingScheduleFallback;
+      const scheduleChanged = typeof prepareSchedule === 'function'
+        ? Boolean(prepareSchedule(normalized))
+        : false;
+
+      if (scheduleChanged) {
+        if (typeof global.saveStateSnapshotFallback === 'function') {
+          global.saveStateSnapshotFallback(normalized, { source: 'responsive-export-schedule-prep' });
+        } else if (typeof core.saveValidatedSnapshot === 'function') {
+          core.saveValidatedSnapshot(normalized, {
+            storageKey: core.STORAGE_KEY || 'taskpoints_v1',
+            immediateWrite: true,
+            source: 'responsive-export-schedule-prep'
+          });
+        } else if (typeof core.saveStateSnapshot === 'function') {
+          core.saveStateSnapshot(normalized, {
+            storageKey: core.STORAGE_KEY || 'taskpoints_v1',
+            immediateWrite: true
+          });
+        }
+      }
+
+      let notesText = typeof normalized.notes === 'string' ? normalized.notes : '';
+      if (typeof global.syncNotesStorageLocations === 'function') {
+        try { notesText = global.syncNotesStorageLocations('responsive-export-sync'); } catch (_) {}
+      } else {
+        try {
+          const cached = global.localStorage?.getItem?.('taskpoints_notes_v1') || '';
+          if (cached.length >= notesText.length) notesText = cached;
+        } catch (_) {}
+      }
+      normalized.notes = notesText;
+
+      let projectsRaw = null;
+      try { projectsRaw = global.localStorage?.getItem?.('tp_projects_v1'); } catch (_) {}
+
+      return {
+        exportType: 'taskpoints_full_backup',
+        version: 2,
+        exportedAtISO: new Date().toISOString(),
+        state: normalized,
+        aux: {
+          taskpoints_notes_v1: notesText,
+          ...(typeof projectsRaw === 'string' ? { tp_projects_v1: projectsRaw } : {})
+        }
+      };
+    };
+  }
+
+  function exportButtons() {
+    return Array.from(global.document?.querySelectorAll?.(EXPORT_SELECTOR) || []);
+  }
+
+  function markPreparing() {
+    exportButtons().forEach((button) => {
+      if (!button.getAttribute?.('data-tp-export-original-label')) {
+        button.setAttribute?.(
+          'data-tp-export-original-label',
+          String(button.textContent || 'Export').trim() || 'Export'
+        );
+      }
+      button.disabled = true;
+      button.setAttribute?.('aria-busy', 'true');
+      button.textContent = 'Preparing…';
+    });
+  }
+
+  function restoreButtons() {
+    exportButtons().forEach((button) => {
+      button.textContent = button.getAttribute?.('data-tp-export-original-label') || 'Export';
+      button.disabled = false;
+      button.removeAttribute?.('aria-busy');
+    });
+  }
+
+  function installLoadingGuard() {
+    if (loaderState.guard || global.TaskPointsResponsiveExport?.installed) return;
+    const document = global.document;
+    if (!document?.addEventListener) return;
+
+    loaderState.guard = (event) => {
+      const button = event.target?.closest?.(EXPORT_SELECTOR);
+      if (!button) return;
+      event.preventDefault?.();
+      event.stopPropagation?.();
+      event.stopImmediatePropagation?.();
+      loaderState.pending = true;
+      markPreparing();
+    };
+    document.addEventListener('click', loaderState.guard, true);
+  }
+
+  function releaseLoadingGuard() {
+    if (loaderState.guard) {
+      global.document?.removeEventListener?.('click', loaderState.guard, true);
+      loaderState.guard = null;
+    }
+  }
+
+  function handOffPendingExport() {
+    const shouldStart = loaderState.pending;
+    loaderState.pending = false;
+    releaseLoadingGuard();
+
+    if (!shouldStart) return;
+    const start = global.TaskPointsResponsiveExport?.startExport;
+    if (typeof start === 'function') {
+      Promise.resolve(start()).catch(() => {});
+    } else {
+      restoreButtons();
+    }
+  }
+
+  function handleLoadFailure() {
+    loaderState.pending = false;
+    releaseLoadingGuard();
+    restoreButtons();
+    console.error('TaskPoints responsive export controller failed to load.');
+  }
+
+  function load() {
+    installSecondarySnapshotProvider();
+    installLoadingGuard();
+
+    if (global.TaskPointsResponsiveExport?.installed) {
+      handOffPendingExport();
+      return true;
+    }
+
+    const document = global.document;
+    if (!document?.querySelector?.(EXPORT_SELECTOR) || !document.createElement) return false;
+
+    const existing = document.getElementById?.(SCRIPT_ID);
+    if (existing) {
+      existing.addEventListener?.('load', handOffPendingExport, { once: true });
+      existing.addEventListener?.('error', handleLoadFailure, { once: true });
+      return true;
+    }
+
+    const script = document.createElement('script');
+    script.id = SCRIPT_ID;
+    script.src = SCRIPT_SRC;
+    script.async = false;
+    script.setAttribute?.('data-taskpoints-responsive-export', 'true');
+    script.addEventListener?.('load', handOffPendingExport, { once: true });
+    script.addEventListener?.('error', handleLoadFailure, { once: true });
+    (document.head || document.body || document.documentElement)?.appendChild?.(script);
+    return true;
+  }
+
+  installSecondarySnapshotProvider();
+  installLoadingGuard();
+  if (!load()) {
+    global.document?.addEventListener?.('DOMContentLoaded', load, { once: true });
+  }
+  global.addEventListener?.('pageshow', load);
+})(typeof window !== 'undefined' ? window : globalThis);
