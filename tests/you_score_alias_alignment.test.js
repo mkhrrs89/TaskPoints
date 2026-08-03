@@ -39,6 +39,10 @@ function baseState() {
       {
         id: 'old-you-conflict', dateKey: '2026-07-31', matchupType: 'tournament', seasonId: 'old-season',
         seriesId: 'old-series', playerAId: 'YOU', playerBId: 'npc-c', scoreA: 44, playerAScore: 33, scoreB: 22, playerBScore: 22
+      },
+      {
+        id: 'legacy-typed-unscoped', dateKey: '2026-06-15', matchupType: 'tournament',
+        playerAId: 'YOU', playerBId: 'npc-d', scoreA: 55, playerAScore: 11, scoreB: 30, playerBScore: 30
       }
     ],
     schedule: [{
@@ -104,15 +108,33 @@ test('repairs the two August YOU aliases and their schedule copy without changin
   assert.equal(result.state.schedule[0].matchups[0].playerAScore, 23.81);
 });
 
-test('one-time current-season repair leaves NPC and unrelated old-season conflicts alone', () => {
+test('current-season repair requires matching season or current-series evidence', () => {
+  const state = baseState();
+  const { context } = makeHarness(state);
+  const api = context.TaskPointsYouScoreAliasAlignment;
+  assert.equal(api.isExplicitCurrentSeasonTournamentMatchup(state.matchups[0], state), true);
+  assert.equal(api.isExplicitCurrentSeasonTournamentMatchup(state.matchups[3], state), false);
+  assert.equal(api.isExplicitCurrentSeasonTournamentMatchup(state.matchups[4], state), false);
+
+  const linkedLegacy = {
+    ...state.matchups[4],
+    id: 'legacy-linked-current-series',
+    matchupType: '',
+    seriesId: 'season_2_august_2026_opening_round_5'
+  };
+  assert.equal(api.isExplicitCurrentSeasonTournamentMatchup(linkedLegacy, state), true);
+});
+
+test('one-time current-season repair leaves NPC, old-season, and unscoped typed legacy conflicts alone', () => {
   const state = baseState();
   const { context } = makeHarness(state);
   const result = context.TaskPointsYouScoreAliasAlignment.alignYouScoreAliases(state, { currentSeasonOnly: true });
   assert.equal(result.state.matchups[2].playerAScore, 2);
   assert.equal(result.state.matchups[3].playerAScore, 33);
+  assert.equal(result.state.matchups[4].playerAScore, 11);
 });
 
-test('syncYouMatchups wrapper aligns aliases immediately when the canonical YOU score changes', () => {
+test('syncYouMatchups wrapper aligns current-season aliases without rewriting unscoped history', () => {
   const state = baseState();
   const overrides = {
     syncYouMatchups(input) {
@@ -127,10 +149,11 @@ test('syncYouMatchups wrapper aligns aliases immediately when the canonical YOU 
   assert.equal(result.state.matchups[1].playerAScore, 25.5);
   assert.equal(result.state.schedule[0].matchups[0].scoreA, 25.5);
   assert.equal(result.state.schedule[0].matchups[0].playerAScore, 25.5);
+  assert.equal(result.state.matchups[4].playerAScore, 11);
   assert.equal(result.changed, true);
 });
 
-test('save wrapper aligns explicit tournament YOU aliases on every save path', () => {
+test('save wrapper aligns only evidenced current-season tournament YOU aliases', () => {
   const state = baseState();
   const { core, saves } = makeHarness(state);
   core.saveStateSnapshot(state, { savePath: 'habit-toggle' });
@@ -138,15 +161,18 @@ test('save wrapper aligns explicit tournament YOU aliases on every save path', (
   assert.equal(saved.matchups[0].playerAScore, 48.83);
   assert.equal(saved.matchups[1].playerAScore, 23.81);
   assert.equal(saved.matchups[2].playerAScore, 2);
+  assert.equal(saved.matchups[3].playerAScore, 33);
+  assert.equal(saved.matchups[4].playerAScore, 11);
 });
 
-test('startup repair persists once and is idempotent', () => {
+test('startup repair persists once, preserves unscoped history, and is idempotent', () => {
   const state = baseState();
   const { context, storage, saves } = makeHarness(state);
   assert.equal(saves.length, 1);
   const persisted = JSON.parse(storage.get('taskpoints_v1'));
   assert.equal(persisted.matchups[0].playerAScore, 48.83);
   assert.equal(persisted.matchups[1].playerAScore, 23.81);
+  assert.equal(persisted.matchups[4].playerAScore, 11);
   const second = context.TaskPointsYouScoreAliasAlignment.repairPersistedState();
   assert.equal(second.changed, false);
   assert.equal(saves.length, 1);
