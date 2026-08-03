@@ -42,3 +42,28 @@
     module.exports = global.TaskPointsHabitLedgerMatchupImpactStaleGuard;
   }
 })(typeof window !== 'undefined' ? window : globalThis);
+
+;(function loadCompletionBackedHabitLedgerRepair(global) {
+  'use strict';
+
+  const SCRIPT_ID = 'tpCompletionBackedHabitLedgerRepairScript';
+  const SCRIPT_SRC = '/habit_ledger_completion_backed_repair.js?v=20260803-1';
+
+  function load() {
+    if (global.TaskPointsCompletionBackedHabitRepair) return true;
+    const document = global.document;
+    if (!document?.getElementById?.('auditChecks') || !document.createElement) return false;
+    if (document.getElementById(SCRIPT_ID)) return true;
+    const script = document.createElement('script');
+    script.id = SCRIPT_ID;
+    script.src = SCRIPT_SRC;
+    script.async = false;
+    script.setAttribute?.('data-taskpoints-completion-backed-habit-repair', 'true');
+    (document.body || document.head || document.documentElement)?.appendChild?.(script);
+    return true;
+  }
+
+  if (!load()) {
+    global.addEventListener?.('DOMContentLoaded', load, { once: true });
+  }
+})(typeof window !== 'undefined' ? window : globalThis);
