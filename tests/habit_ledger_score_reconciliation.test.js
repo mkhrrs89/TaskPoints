@@ -163,9 +163,10 @@ function fixture(opponentScore = 10) {
       series: {
         s1: {
           id: 's1',
+          playerAId: 'YOU',
+          playerBId: 'xander',
           gameResults: [{
             id: 'match-1', matchupId: 'match-1', dateKey: '2026-04-13',
-            playerAId: 'YOU', playerBId: 'xander',
             playerAScore: 21.5, playerBScore: opponentScore,
             winnerId: opponentScore < 21.5 ? 'YOU' : 'xander',
             loserId: opponentScore < 21.5 ? 'xander' : 'YOU'
@@ -227,6 +228,25 @@ test('apply updates every score copy while preserving opponents, results, Gold, 
   assert.equal(result.scheduleCopiesUpdated, 1);
   assert.equal(result.historyRowsUpdated, 1);
   assert.equal(result.seasonCopiesUpdated, 2);
+});
+
+test('player-less Season results use parent series participant orientation', () => {
+  const { api, core, planner, repair } = install();
+  const state = fixture();
+  const series = state.seasonHistory[0].series.s1;
+  series.playerAId = 'xander';
+  series.playerBId = 'YOU';
+  series.gameResults[0].playerAScore = 10;
+  series.gameResults[0].playerBScore = 21.5;
+
+  const plan = api.buildReconciliationPlan(state, { core, planner, repair });
+  const result = api.applyReconciliationPlan(state, plan, { core, planner, repair });
+  const row = result.state.seasonHistory[0].series.s1.gameResults[0];
+
+  assert.equal(row.playerAScore, 10);
+  assert.equal(row.playerBScore, 21);
+  assert.equal(row.winnerId, 'YOU');
+  assert.equal(row.loserId, 'xander');
 });
 
 test('preview blocks a score change that would alter the stored result', () => {
