@@ -111,8 +111,6 @@
           ? []
           : (Array.isArray(habit.failedKeys) ? habit.failedKeys : null);
 
-        // A malformed ledger container is left for Audit/manual repair. Never replace it
-        // while recording an otherwise unrelated completion.
         if (doneKeys && failedKeys) {
           const hasDone = doneKeys.includes(dayKey);
           const hasFailed = failedKeys.includes(dayKey);
@@ -135,4 +133,29 @@
     }
     return originalSave(adjusted, options);
   };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+;(function loadHabitLedgerScoreReconciliation(global) {
+  'use strict';
+
+  const SCRIPT_ID = 'tpHabitLedgerScoreReconciliationScript';
+  const SCRIPT_SRC = '/habit_ledger_score_reconciliation.js?v=20260803-1';
+
+  function load() {
+    if (global.TaskPointsHabitLedgerScoreReconciliation?.installed) return true;
+    const document = global.document;
+    if (!document?.getElementById?.('auditChecks') || !document.createElement) return false;
+    if (document.getElementById(SCRIPT_ID)) return true;
+    const script = document.createElement('script');
+    script.id = SCRIPT_ID;
+    script.src = SCRIPT_SRC;
+    script.async = false;
+    script.setAttribute?.('data-taskpoints-habit-score-reconciliation', 'true');
+    (document.body || document.head || document.documentElement)?.appendChild?.(script);
+    return true;
+  }
+
+  if (!load()) {
+    global.addEventListener?.('DOMContentLoaded', load, { once: true });
+  }
 })(typeof window !== 'undefined' ? window : globalThis);
