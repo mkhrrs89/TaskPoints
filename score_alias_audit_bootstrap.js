@@ -11,6 +11,7 @@
     'season-play-in-pairings'
   ]);
   const SEASON_SCORE_ALIAS_AUDIT_ID = 'season-matchup-score-fields-aligned';
+  const SEASON_ADVANCEMENT_AUDIT_ID = 'season-winners-advanced-correctly';
   let variableSeedFilterAttempts = 0;
 
   function populated(value) {
@@ -38,6 +39,7 @@
       } catch (_) {}
     }
     if (Array.isArray(season?.series)) return season.series;
+    if (season?.series && typeof season.series === 'object') return Object.values(season.series);
     return [];
   }
 
@@ -118,13 +120,191 @@
     };
   }
 
+  function seasonSeriesId(series) {
+    return String(series?.id || series?.seriesId || series?.seasonSeriesId || '').trim();
+  }
+
+  function seasonRoundId(series) {
+    return String(series?.roundId || series?.round || '').trim().toLowerCase();
+  }
+
+  function seasonSeriesName(series) {
+    if (typeof global.getSeriesDisplayNameForAudit === 'function') {
+      try {
+        const value = global.getSeriesDisplayNameForAudit(series);
+        if (populated(value)) return String(value);
+      } catch (_) {}
+    }
+    return String(series?.roundName || series?.displayName || seasonSeriesId(series) || 'Series');
+  }
+
+  function seasonPlayerName(state, playerId) {
+    if (!playerId) return 'missing winner';
+    if (String(playerId).toUpperCase() === 'YOU') return state?.youName || 'You';
+    const player = (Array.isArray(state?.players) ? state.players : [])
+      .find((row) => row && String(row.id || row.playerId || '') === String(playerId));
+    return player?.name || player?.playerName || String(playerId);
+  }
+
+  function seasonSeriesWinnerId(series) {
+    if (typeof global.getSeriesWinnerIdForAudit === 'function') {
+      try {
+        const value = global.getSeriesWinnerIdForAudit(series);
+        if (populated(value)) return String(value).trim();
+      } catch (_) {}
+    }
+    return String(series?.winnerId || '').trim();
+  }
+
+  function seasonSeriesLoserId(series, winnerId = seasonSeriesWinnerId(series)) {
+    if (typeof global.getSeriesLoserIdForAudit === 'function') {
+      try {
+        const value = global.getSeriesLoserIdForAudit(series);
+        if (populated(value)) return String(value).trim();
+      } catch (_) {}
+    }
+    if (populated(series?.loserId)) return String(series.loserId).trim();
+    const playerAId = String(series?.playerAId || '').trim();
+    const playerBId = String(series?.playerBId || '').trim();
+    if (winnerId && winnerId === playerAId) return playerBId;
+    if (winnerId && winnerId === playerBId) return playerAId;
+    return '';
+  }
+
+  function seasonSeriesIsComplete(series) {
+    if (typeof global.isSeriesCompleteForAudit === 'function') {
+      try { return global.isSeriesCompleteForAudit(series) === true; } catch (_) {}
+    }
+    const status = String(series?.status || series?.state || '').trim().toLowerCase();
+    if (['complete', 'completed', 'final', 'finalized', 'finished'].includes(status)) return true;
+    const winnerId = seasonSeriesWinnerId(series);
+    if (!winnerId) return false;
+    const winsNeeded = Number(series?.winsNeeded) || Math.floor((Number(series?.bestOf) || 1) / 2) + 1;
+    const winsA = Number(series?.winsA) || 0;
+    const winsB = Number(series?.winsB) || 0;
+    return winsA >= winsNeeded || winsB >= winsNeeded;
+  }
+
+  function seasonAdvancementTarget(series) {
+    const nextSeriesId = String(
+      series?.nextSeriesId
+      || series?.advancesTo?.seriesId
+      || series?.advancesToSeriesId
+      || ''
+    ).trim();
+    const nextSlot = String(
+      series?.nextSlot
+      || series?.advancesTo?.slot
+      || series?.advancesToSlot
+      || ''
+    ).trim().toUpperCase();
+    return { nextSeriesId, nextSlot };
+  }
+
+  function usesDynamicPlayInAdvancement(season, seriesList) {
+    const playInSeries = seriesList.filter((series) => seasonRoundId(series) === 'play_in');
+    if (!playInSeries.length) return false;
+
+    const presetId = String(
+      season?.bracket?.presetId
+      || season?.bracketConfig?.presetId
+      || season?.meta?.bracketBuilderPresetId
+      || ''
+    ).trim();
+    if (presetId && presetId !== 'legacy_34_player') return true;
+
+    const roundOrder = Array.isArray(season?.bracket?.roundOrder)
+      ? season.bracket.roundOrder.map((value) => String(value).toLowerCase())
+      : [];
+    if (roundOrder.includes('opening_round')) return true;
+    if (playInSeries.length !== 2) return true;
+
+    const byId = new Map(seriesList.map((series) => [seasonSeriesId(series), series]));
+    return playInSeries.some((series) => {
+      const { nextSeriesId } = seasonAdvancementTarget(series);
+      const target = byId.get(nextSeriesId);
+      return target && seasonRoundId(target) !== 'round_of_32';
+    });
+  }
+
+  function buildDynamicSeasonAdvancementAudit(state, previousCheck) {
+    const season = currentSeasonForAudit(state);
+    const seriesList = seasonSeriesListForAudit(season);
+    if (!season || !usesDynamicPlayInAdvancement(season, seriesList)) return previousCheck;
+
+    const seriesById = new Map();
+    seriesList.forEach((series) => {
+      [series?.id, series?.seriesId, series?.seasonSeriesId].forEach((value) => {
+        if (populated(value)) seriesById.set(String(value).trim(), series);
+      });
+    });
+
+    const issues = [];
+    const checked = [];
+    const checkedByRound = new Map();
+
+    seriesList.filter(seasonSeriesIsComplete).forEach((series) => {
+      const { nextSeriesId, nextSlot } = seasonAdvancementTarget(series);
+      if (!nextSeriesId && !nextSlot) return;
+
+      const label = seasonSeriesName(series);
+      const winnerId = seasonSeriesWinnerId(series);
+      const loserId = seasonSeriesLoserId(series, winnerId);
+      const target = seriesById.get(nextSeriesId) || null;
+      checked.push(series);
+      const roundName = String(series?.roundName || seasonRoundId(series) || 'Round');
+      checkedByRound.set(roundName, (checkedByRound.get(roundName) || 0) + 1);
+
+      if (!winnerId) {
+        issues.push(`${label}: completed series has no winner to advance.`);
+        return;
+      }
+      if (!nextSeriesId || !['A', 'B'].includes(nextSlot)) {
+        issues.push(`${label}: advancement metadata is incomplete (${nextSeriesId || 'missing target'}, slot ${nextSlot || 'missing'}).`);
+        return;
+      }
+      if (!target) {
+        issues.push(`${label}: target ${nextSeriesId} slot ${nextSlot} does not exist.`);
+        return;
+      }
+
+      const actualId = String(nextSlot === 'B' ? target.playerBId || '' : target.playerAId || '').trim();
+      if (actualId !== winnerId) {
+        const actualLabel = actualId ? `${seasonPlayerName(state, actualId)} (${actualId})` : 'empty';
+        const loserNote = loserId && actualId === loserId ? ' — the loser advanced' : '';
+        issues.push(`${label}: expected winner ${seasonPlayerName(state, winnerId)} (${winnerId}) in ${seasonSeriesName(target)} slot ${nextSlot}; found ${actualLabel}${loserNote}.`);
+      }
+    });
+
+    const summaries = Array.from(checkedByRound.entries()).map(([roundName, count]) => (
+      `${roundName}: ${count} completed series winner${count === 1 ? '' : 's'} checked against declared next-round destination${count === 1 ? '' : 's'}.`
+    ));
+    const status = issues.length ? 'FAIL' : (checked.length ? 'PASS' : 'WARN');
+
+    return {
+      ...previousCheck,
+      status,
+      expected: 'Every completed series winner appears in the next series and slot declared by that series’ advancement metadata',
+      actual: issues.length
+        ? `${issues.length} advancement issue(s) across ${checked.length} checked completed series`
+        : (checked.length
+            ? `${checked.length} completed-series advancement target(s) checked; all correct`
+            : 'No completed series with declared advancement metadata are available to check'),
+      details: issues.length ? issues : summaries,
+      trace: 'currentSeason.series nextSeriesId/nextSlot/advancesTo resolved against the configured dynamic bracket'
+    };
+  }
+
   function filterVariableSeedAudits(checks, state) {
     if (!Array.isArray(checks)) return checks;
     return checks
       .filter((check) => !OMITTED_VARIABLE_SEED_AUDIT_IDS.has(String(check?.id || '')))
-      .map((check) => String(check?.id || '') === SEASON_SCORE_ALIAS_AUDIT_ID
-        ? buildNarrowSeasonScoreAliasAudit(state, check)
-        : check);
+      .map((check) => {
+        const id = String(check?.id || '');
+        if (id === SEASON_SCORE_ALIAS_AUDIT_ID) return buildNarrowSeasonScoreAliasAudit(state, check);
+        if (id === SEASON_ADVANCEMENT_AUDIT_ID) return buildDynamicSeasonAdvancementAudit(state, check);
+        return check;
+      });
   }
 
   function installVariableSeedAuditFilter() {
