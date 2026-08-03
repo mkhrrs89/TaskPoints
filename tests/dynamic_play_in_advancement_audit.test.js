@@ -16,7 +16,12 @@ function install(baseChecks) {
     location: { pathname: '/audit.html', search: '', hash: '' },
     setTimeout(fn) { fn(); },
     TaskPointsCore: {
-      getRecordedSeriesId(row) { return row?.seriesId || row?.seasonSeriesId || ''; }
+      getRecordedSeriesId(row) { return row?.seriesId || row?.seasonSeriesId || ''; },
+      getSeasonRoundOrder(season) {
+        if (Array.isArray(season?.bracket?.roundOrder)) return season.bracket.roundOrder;
+        if (Array.isArray(season?.bracketConfig?.rounds)) return season.bracketConfig.rounds.map((round) => round?.id).filter(Boolean);
+        return [];
+      }
     },
     getCurrentSeasonForAudit(state) { return state?.currentSeason || null; },
     getSeasonSeriesListForAudit(season) {
@@ -98,6 +103,67 @@ function buildDynamicSeason({ wrongSlot = false } = {}) {
   };
 }
 
+function buildProtectedCustom34Season() {
+  const series = {
+    play1: {
+      id: 'play1', roundId: 'play_in', roundName: 'Play-In', seriesIndex: 1,
+      status: 'complete', playerAId: 'winner-34', playerBId: 'loser-31',
+      winnerId: 'winner-34', loserId: 'loser-31',
+      // Generic bracket metadata is fixed, but protected advancement reseeds.
+      nextSeriesId: 'round32-2', nextSlot: 'B'
+    },
+    play2: {
+      id: 'play2', roundId: 'play_in', roundName: 'Play-In', seriesIndex: 2,
+      status: 'complete', playerAId: 'winner-31', playerBId: 'loser-34',
+      winnerId: 'winner-31', loserId: 'loser-34',
+      nextSeriesId: 'round32-1', nextSlot: 'B'
+    }
+  };
+
+  for (let index = 1; index <= 16; index += 1) {
+    series[`round32-${index}`] = {
+      id: `round32-${index}`,
+      roundId: 'round_of_32',
+      roundName: 'Round of 32',
+      seriesIndex: index,
+      status: 'pending',
+      playerAId: `seed-${index}`,
+      playerBId: ''
+    };
+  }
+
+  // After the upset, the worse numeric winner (Seed 34) is correctly reseeded
+  // against Seed 1, while the other winner faces Seed 2. This intentionally no
+  // longer agrees with the fixed nextSeriesId metadata on the Play-In rows.
+  series['round32-1'].playerBId = 'winner-34';
+  series['round32-2'].playerBId = 'winner-31';
+
+  return {
+    currentSeason: {
+      id: 'custom_34',
+      bracket: {
+        type: 'dynamic_configured_championship',
+        presetId: 'custom_single_elimination',
+        roundOrder: ['play_in', 'round_of_32', 'round_of_16', 'quarterfinals', 'semifinals', 'finals']
+      },
+      bracketConfig: {
+        presetId: 'custom_single_elimination',
+        entrantCount: 34,
+        rounds: [
+          { id: 'play_in' },
+          { id: 'round_of_32' },
+          { id: 'round_of_16' },
+          { id: 'quarterfinals' },
+          { id: 'semifinals' },
+          { id: 'finals' }
+        ]
+      },
+      series
+    },
+    matchups: []
+  };
+}
+
 test('60-player Play-In winners are checked against declared Opening Round slots without seed-range assumptions', () => {
   const context = install(baseChecks());
   const checks = context.buildSeasonChampionshipAuditChecks(buildDynamicSeason());
@@ -118,16 +184,35 @@ test('dynamic audit still fails when a Play-In loser occupies the declared winne
   assert.match(audit.details[0], /Opening Round 5 slot B/);
 });
 
-test('legacy two-Play-In direct-to-Round-of-32 seasons retain the original protected-slot audit', () => {
+test('custom 34-player brackets retain protected reseeding after a Play-In upset', () => {
+  const previous = baseChecks();
+  const originalAudit = previous.find((check) => check.id === 'season-winners-advanced-correctly');
+  originalAudit.status = 'PASS';
+  originalAudit.actual = 'Protected Play-In winners are correctly reseeded into Round of 32';
+  originalAudit.details = ['Seed 34 correctly faces Seed 1; Seed 31 correctly faces Seed 2'];
+
+  const context = install(previous);
+  const checks = context.buildSeasonChampionshipAuditChecks(buildProtectedCustom34Season());
+  const audit = checks.find((check) => check.id === 'season-winners-advanced-correctly');
+
+  assert.equal(audit.status, 'PASS');
+  assert.equal(audit.actual, originalAudit.actual);
+  assert.deepEqual(audit.details, originalAudit.details);
+  assert.doesNotMatch(audit.trace || '', /configured dynamic bracket/);
+});
+
+test('official legacy protected bracket types retain the original audit', () => {
   const previous = baseChecks();
   const context = install(previous);
-  const series = {
+  const state = buildProtectedCustom34Season();
+  state.currentSeason.bracket.type = 'official_34_player_championship';
+  state.currentSeason.series = {
     p1: { id: 'p1', roundId: 'play_in', status: 'complete', winnerId: 'w1', playerAId: 'w1', playerBId: 'l1', nextSeriesId: 'r1', nextSlot: 'B' },
     p2: { id: 'p2', roundId: 'play_in', status: 'complete', winnerId: 'w2', playerAId: 'w2', playerBId: 'l2', nextSeriesId: 'r2', nextSlot: 'B' },
     r1: { id: 'r1', roundId: 'round_of_32', playerAId: 'seed1', playerBId: 'w1' },
     r2: { id: 'r2', roundId: 'round_of_32', playerAId: 'seed2', playerBId: 'w2' }
   };
-  const checks = context.buildSeasonChampionshipAuditChecks({ currentSeason: { id: 'legacy', series }, matchups: [] });
+  const checks = context.buildSeasonChampionshipAuditChecks(state);
   const audit = checks.find((check) => check.id === 'season-winners-advanced-correctly');
   assert.equal(audit.status, 'FAIL');
   assert.equal(audit.actual, '12 advancement issue(s)');
