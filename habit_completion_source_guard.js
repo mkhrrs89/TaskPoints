@@ -30,6 +30,35 @@
     return String(row?.habitId || row?.viceId || '').trim();
   }
 
+  function validDayKey(value) {
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    const [year, month, day] = value.split('-').map(Number);
+    const date = new Date(Date.UTC(year, month - 1, day));
+    return date.getUTCFullYear() === year
+      && date.getUTCMonth() === month - 1
+      && date.getUTCDate() === day;
+  }
+
+  function completionDay(row) {
+    for (const value of [row?.dayKey, row?.dateKey]) {
+      if (validDayKey(value)) return value;
+    }
+    for (const value of [row?.completedAtISO, row?.createdAtISO]) {
+      if (!populated(value)) continue;
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) continue;
+      if (typeof core.dateKey === 'function') {
+        try {
+          const shared = core.dateKey(date);
+          if (validDayKey(shared)) return shared;
+        } catch (_) {}
+      }
+      const direct = date.toISOString().slice(0, 10);
+      if (validDayKey(direct)) return direct;
+    }
+    return '';
+  }
+
   core.saveStateSnapshot = function guardedHabitCompletionSave(nextState, options) {
     let adjusted = nextState;
     try {
@@ -54,24 +83,55 @@
         return originalSave(nextState, options);
       }
       const habitId = completionHabitId(added);
-      const habit = (Array.isArray(nextState?.habits) ? nextState.habits : [])
-        .find((item) => item && String(item.id) === habitId);
-      if (!habit) return originalSave(nextState, options);
-
+      const habitIndex = (Array.isArray(nextState?.habits) ? nextState.habits : [])
+        .findIndex((item) => item && String(item.id) === habitId);
+      if (habitIndex < 0) return originalSave(nextState, options);
+      const habit = nextState.habits[habitIndex];
       const expected = habit.category === 'vice' ? 'vice' : 'habit';
-      if (added.source === expected && (populated(added.habitId) || !populated(added.viceId))) {
-        return originalSave(nextState, options);
+      const dayKey = completionDay(added);
+      let changed = false;
+
+      let completions = nextRows;
+      if (added.source !== expected || (!populated(added.habitId) && populated(added.viceId))) {
+        completions = nextRows.map((row) => {
+          if (row !== added) return row;
+          const next = { ...row, source: expected };
+          if (!populated(next.habitId) && populated(next.viceId)) next.habitId = next.viceId;
+          return next;
+        });
+        changed = true;
       }
 
-      const completions = nextRows.map((row) => {
-        if (row !== added) return row;
-        const next = { ...row, source: expected };
-        if (!populated(next.habitId) && populated(next.viceId)) next.habitId = next.viceId;
-        return next;
-      });
-      adjusted = { ...nextState, completions };
+      let habits = nextState.habits;
+      if (validDayKey(dayKey)) {
+        const doneKeys = habit.doneKeys == null
+          ? []
+          : (Array.isArray(habit.doneKeys) ? habit.doneKeys : null);
+        const failedKeys = habit.failedKeys == null
+          ? []
+          : (Array.isArray(habit.failedKeys) ? habit.failedKeys : null);
+
+        // A malformed ledger container is left for Audit/manual repair. Never replace it
+        // while recording an otherwise unrelated completion.
+        if (doneKeys && failedKeys) {
+          const hasDone = doneKeys.includes(dayKey);
+          const hasFailed = failedKeys.includes(dayKey);
+          if (!hasDone || hasFailed) {
+            habits = nextState.habits.map((item, index) => {
+              if (index !== habitIndex) return item;
+              const nextHabit = { ...item };
+              if (!hasDone) nextHabit.doneKeys = doneKeys.concat(dayKey);
+              if (hasFailed) nextHabit.failedKeys = failedKeys.filter((key) => key !== dayKey);
+              return nextHabit;
+            });
+            changed = true;
+          }
+        }
+      }
+
+      if (changed) adjusted = { ...nextState, completions, habits };
     } catch (error) {
-      console.warn('Habit completion source guard skipped normalization', error);
+      console.warn('Habit completion source/status guard skipped normalization', error);
     }
     return originalSave(adjusted, options);
   };
