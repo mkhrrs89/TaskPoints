@@ -333,9 +333,43 @@
     return next;
   }
 
-  function updateSeasonRecord(row, sourceMatchup, newScore) {
+  function seasonParticipantContext(value, inherited = null) {
+    if (!value || typeof value !== 'object') return inherited;
+    const playerAId = String(value.playerAId || '').trim();
+    const playerBId = String(value.playerBId || '').trim();
+    return playerAId || playerBId ? { playerAId, playerBId } : inherited;
+  }
+
+  function sameParticipants(context, sourceMatchup) {
+    const contextA = String(context?.playerAId || '').trim();
+    const contextB = String(context?.playerBId || '').trim();
+    const sourceA = String(sourceMatchup?.playerAId || '').trim();
+    const sourceB = String(sourceMatchup?.playerBId || '').trim();
+    if (!contextA || !contextB || !sourceA || !sourceB) return false;
+    return (contextA === sourceA && contextB === sourceB)
+      || (contextA === sourceB && contextB === sourceA);
+  }
+
+  function playerlessSeasonRecordMatches(row, sourceMatchup, participantContext) {
+    if (!row || typeof row !== 'object') return false;
+    if (populated(row.playerAId) || populated(row.playerBId)) return false;
+    const rowMatchupId = String(row.matchupId || '').trim();
+    const sourceMatchupId = matchupId(sourceMatchup);
+    return Boolean(rowMatchupId && sourceMatchupId && rowMatchupId === sourceMatchupId
+      && sameParticipants(participantContext, sourceMatchup));
+  }
+
+  function seasonScoreSide(row, sourceMatchup, participantContext) {
+    if (isYou(row?.playerAId)) return 'A';
+    if (isYou(row?.playerBId)) return 'B';
+    if (isYou(participantContext?.playerAId)) return 'A';
+    if (isYou(participantContext?.playerBId)) return 'B';
+    return isYou(sourceMatchup?.playerAId) ? 'A' : 'B';
+  }
+
+  function updateSeasonRecord(row, sourceMatchup, newScore, participantContext = null) {
     if (!row || typeof row !== 'object') return row;
-    const side = isYou(sourceMatchup.playerAId) ? 'A' : 'B';
+    const side = seasonScoreSide(row, sourceMatchup, participantContext);
     const scoreKey = side === 'A' ? 'scoreA' : 'scoreB';
     const aliasKey = side === 'A' ? 'playerAScore' : 'playerBScore';
     if (!Object.prototype.hasOwnProperty.call(row, scoreKey)
@@ -343,7 +377,14 @@
     return { ...row, [scoreKey]: Number(newScore), [aliasKey]: Number(newScore) };
   }
 
-  function updateSeasonTree(value, sourceMatchup, newScore, core, seen = new WeakSet()) {
+  function updateSeasonTree(
+    value,
+    sourceMatchup,
+    newScore,
+    core,
+    seen = new WeakSet(),
+    inheritedParticipants = null
+  ) {
     if (!value || typeof value !== 'object') return { value, changed: 0 };
     if (seen.has(value)) return { value, changed: 0 };
     seen.add(value);
@@ -351,16 +392,27 @@
     if (Array.isArray(value)) {
       let changed = 0;
       const next = value.map((item) => {
-        const updated = updateSeasonTree(item, sourceMatchup, newScore, core, seen);
+        const updated = updateSeasonTree(
+          item,
+          sourceMatchup,
+          newScore,
+          core,
+          seen,
+          inheritedParticipants
+        );
         changed += updated.changed;
         return updated.value;
       });
       return { value: changed ? next : value, changed };
     }
 
-    if ((populated(value.playerAId) || populated(value.playerBId))
-      && sameMatchup(value, sourceMatchup, core)) {
-      const updated = updateSeasonRecord(value, sourceMatchup, newScore);
+    const participantContext = seasonParticipantContext(value, inheritedParticipants);
+    const hasOwnParticipants = populated(value.playerAId) || populated(value.playerBId);
+    const matches = hasOwnParticipants
+      ? sameMatchup(value, sourceMatchup, core)
+      : playerlessSeasonRecordMatches(value, sourceMatchup, participantContext);
+    if (matches) {
+      const updated = updateSeasonRecord(value, sourceMatchup, newScore, participantContext);
       if (updated !== value) return { value: updated, changed: 1 };
     }
 
@@ -369,7 +421,14 @@
     Object.keys(value).forEach((key) => {
       const child = value[key];
       if (!child || typeof child !== 'object') return;
-      const updated = updateSeasonTree(child, sourceMatchup, newScore, core, seen);
+      const updated = updateSeasonTree(
+        child,
+        sourceMatchup,
+        newScore,
+        core,
+        seen,
+        participantContext
+      );
       if (updated.changed) {
         next[key] = updated.value;
         changed += updated.changed;
