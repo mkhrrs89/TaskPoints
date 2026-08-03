@@ -18,6 +18,7 @@ const CORE_BUNDLE_ASSET_PATHS = Object.freeze([
   '/home_yesterday_result_consistency.js',
   '/flex_action_fast_path.js',
   '/score_alias_consistency.js',
+  '/you_score_alias_alignment.js',
   '/habit_completion_source_guard.js',
   '/save_pipeline_shared_work.js',
   '/inbox_count_badge.js'
@@ -181,17 +182,19 @@ async function buildCoreBundle(request, env, ctx, version) {
   try { coreSource = await response.text(); }
   catch (_) { return response; }
 
-  const [aliasSource, habitGuardSource, sharedSaveWorkSource, inboxBadgeSource] = await Promise.all([
+  const [aliasSource, youAliasSource, habitGuardSource, sharedSaveWorkSource, inboxBadgeSource] = await Promise.all([
     readAssetSource(env, request, '/score_alias_consistency.js'),
+    readAssetSource(env, request, '/you_score_alias_alignment.js'),
     readAssetSource(env, request, '/habit_completion_source_guard.js'),
     readAssetSource(env, request, '/save_pipeline_shared_work.js'),
     readAssetSource(env, request, '/inbox_count_badge.js')
   ]);
-  const additions = [aliasSource, habitGuardSource, sharedSaveWorkSource, inboxBadgeSource].filter(Boolean);
+  const additions = [aliasSource, youAliasSource, habitGuardSource, sharedSaveWorkSource, inboxBadgeSource].filter(Boolean);
   const source = additions.length ? `${coreSource}\n${additions.join('\n')}\n` : coreSource;
 
   return immutableJavascriptResponse(source, response, version, {
     'x-taskpoints-score-alias-bundle': aliasSource ? 'included' : 'missing',
+    'x-taskpoints-you-score-alias-alignment': youAliasSource ? 'included' : 'missing',
     'x-taskpoints-habit-source-guard': habitGuardSource ? 'included' : 'missing',
     'x-taskpoints-shared-save-work': sharedSaveWorkSource ? 'included' : 'missing',
     'x-taskpoints-inbox-count-badge': inboxBadgeSource ? 'included' : 'missing'
