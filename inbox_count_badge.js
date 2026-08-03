@@ -210,7 +210,7 @@
   'use strict';
 
   const SCRIPT_ID = 'tpHomeFeaturedMatchupScript';
-  const SCRIPT_SRC = '/home_featured_matchup_visibility.js?v=20260801-1';
+  const SCRIPT_SRC = '/home_featured_matchup_visibility.js?v=20260803-2';
 
   function load() {
     const document = global.document;
@@ -301,7 +301,7 @@
   'use strict';
 
   const SCRIPT_ID = 'tpResponsiveExportScript';
-  const SCRIPT_SRC = '/home_export_responsiveness.js?v=20260803-2';
+  const SCRIPT_SRC = '/home_export_responsiveness.js?v=20260803-3';
   const EXPORT_SELECTOR = '[data-export-button]';
   const loaderState = global.__tpResponsiveExportLoaderState || {
     pending: false,
