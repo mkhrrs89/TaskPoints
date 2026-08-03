@@ -201,30 +201,40 @@
     return { nextSeriesId, nextSlot };
   }
 
+  function seasonRoundOrder(season) {
+    const helper = global.TaskPointsCore?.getSeasonRoundOrder;
+    if (typeof helper === 'function') {
+      try {
+        const order = helper(season);
+        if (Array.isArray(order) && order.length) return order.map((value) => String(value).toLowerCase());
+      } catch (_) {}
+    }
+    const bracketOrder = Array.isArray(season?.bracket?.roundOrder)
+      ? season.bracket.roundOrder
+      : [];
+    if (bracketOrder.length) return bracketOrder.map((value) => String(value).toLowerCase());
+    const configuredRounds = Array.isArray(season?.bracketConfig?.rounds)
+      ? season.bracketConfig.rounds.map((round) => round?.id).filter(Boolean)
+      : [];
+    if (configuredRounds.length) return configuredRounds.map((value) => String(value).toLowerCase());
+    const dateWindows = Array.isArray(season?.dateWindows)
+      ? season.dateWindows.map((round) => round?.id).filter(Boolean)
+      : [];
+    return dateWindows.map((value) => String(value).toLowerCase());
+  }
+
+  function isProtectedPlayInSeason(season, seriesList) {
+    const bracketType = String(season?.bracket?.type || '');
+    if (bracketType === 'official_34_player_championship' || bracketType === 'projected_34_player_preview') return true;
+    const playInCount = seriesList.filter((series) => seasonRoundId(series) === 'play_in').length;
+    const roundOf32Count = seriesList.filter((series) => seasonRoundId(series) === 'round_of_32').length;
+    return playInCount === 2 && roundOf32Count === 16 && !seasonRoundOrder(season).includes('opening_round');
+  }
+
   function usesDynamicPlayInAdvancement(season, seriesList) {
     const playInSeries = seriesList.filter((series) => seasonRoundId(series) === 'play_in');
     if (!playInSeries.length) return false;
-
-    const presetId = String(
-      season?.bracket?.presetId
-      || season?.bracketConfig?.presetId
-      || season?.meta?.bracketBuilderPresetId
-      || ''
-    ).trim();
-    if (presetId && presetId !== 'legacy_34_player') return true;
-
-    const roundOrder = Array.isArray(season?.bracket?.roundOrder)
-      ? season.bracket.roundOrder.map((value) => String(value).toLowerCase())
-      : [];
-    if (roundOrder.includes('opening_round')) return true;
-    if (playInSeries.length !== 2) return true;
-
-    const byId = new Map(seriesList.map((series) => [seasonSeriesId(series), series]));
-    return playInSeries.some((series) => {
-      const { nextSeriesId } = seasonAdvancementTarget(series);
-      const target = byId.get(nextSeriesId);
-      return target && seasonRoundId(target) !== 'round_of_32';
-    });
+    return !isProtectedPlayInSeason(season, seriesList);
   }
 
   function buildDynamicSeasonAdvancementAudit(state, previousCheck) {
