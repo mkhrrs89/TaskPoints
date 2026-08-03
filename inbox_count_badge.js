@@ -272,3 +272,27 @@
     load();
   }
 })(typeof window !== 'undefined' ? window : globalThis);
+
+(function loadTaskPointsSeasonResultIntegrity(global) {
+  'use strict';
+
+  const SCRIPT_ID = 'tpSeasonResultIntegrityScript';
+  const SCRIPT_SRC = '/season_result_integrity_guard.js?v=20260803-1';
+
+  function load() {
+    if (global.TaskPointsSeasonResultIntegrity?.installed) return true;
+    const document = global.document;
+    if (!document?.createElement) return false;
+    if (document.getElementById?.(SCRIPT_ID)) return true;
+    const script = document.createElement('script');
+    script.id = SCRIPT_ID;
+    script.src = SCRIPT_SRC;
+    script.async = false;
+    script.setAttribute?.('data-taskpoints-season-result-integrity', 'true');
+    (document.head || document.body || document.documentElement)?.appendChild?.(script);
+    return true;
+  }
+
+  load();
+  global.addEventListener?.('pageshow', load);
+})(typeof window !== 'undefined' ? window : globalThis);
