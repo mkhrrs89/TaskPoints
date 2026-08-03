@@ -60,10 +60,6 @@
     return '';
   }
 
-  function uniqueDays(values) {
-    return [...new Set((Array.isArray(values) ? values : []).filter(validDayKey))].sort();
-  }
-
   core.saveStateSnapshot = function guardedHabitCompletionSave(nextState, options) {
     let adjusted = nextState;
     try {
@@ -109,21 +105,28 @@
 
       let habits = nextState.habits;
       if (validDayKey(dayKey)) {
-        const done = uniqueDays(habit.doneKeys);
-        const failed = uniqueDays(habit.failedKeys);
-        const hasDone = done.includes(dayKey);
-        const hasFailed = failed.includes(dayKey);
-        if (!hasDone || hasFailed) {
-          habits = nextState.habits.map((item, index) => {
-            if (index !== habitIndex) return item;
-            return {
-              ...item,
-              doneKeys: uniqueDays(done.concat(dayKey)),
-              failedKeys: failed.filter((key) => key !== dayKey),
-              iceKeys: uniqueDays(item.iceKeys)
-            };
-          });
-          changed = true;
+        const doneKeys = habit.doneKeys == null
+          ? []
+          : (Array.isArray(habit.doneKeys) ? habit.doneKeys : null);
+        const failedKeys = habit.failedKeys == null
+          ? []
+          : (Array.isArray(habit.failedKeys) ? habit.failedKeys : null);
+
+        // A malformed ledger container is left for Audit/manual repair. Never replace it
+        // while recording an otherwise unrelated completion.
+        if (doneKeys && failedKeys) {
+          const hasDone = doneKeys.includes(dayKey);
+          const hasFailed = failedKeys.includes(dayKey);
+          if (!hasDone || hasFailed) {
+            habits = nextState.habits.map((item, index) => {
+              if (index !== habitIndex) return item;
+              const nextHabit = { ...item };
+              if (!hasDone) nextHabit.doneKeys = doneKeys.concat(dayKey);
+              if (hasFailed) nextHabit.failedKeys = failedKeys.filter((key) => key !== dayKey);
+              return nextHabit;
+            });
+            changed = true;
+          }
         }
       }
 
