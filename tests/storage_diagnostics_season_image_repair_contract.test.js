@@ -23,6 +23,8 @@ test('repair is dynamic and never hardcodes the five observed player names or im
     assert.doesNotMatch(controller, new RegExp(forbidden, 'i'));
   }
   assert.match(helper, /currentByPlayerId/);
+  assert.match(helper, /currentPlayerIdFor/);
+  assert.match(helper, /seasonPlayerIdFor/);
   assert.match(helper, /duplicate-current-player-id/);
   assert.match(helper, /replacement-blob-missing/);
   assert.match(helper, /reference-paths-unavailable/);
@@ -60,13 +62,12 @@ test('runtime verifies whole-state parity, exact Season images, and zero missing
   assert.match(controller, /No other data changed/);
 });
 
-test('failed post-write verification rolls back only its own unchanged repair write', () => {
-  assert.match(controller, /rollbackRaw = validatedState\.raw/);
-  assert.match(controller, /repairWrittenRaw = persisted\.writtenRaw/);
-  assert.match(controller, /currentRaw === repairWrittenRaw/);
-  assert.match(controller, /restoreRawState\(rollbackRaw\)/);
-  assert.match(controller, /previous TaskPoints snapshot was restored automatically/);
-  assert.match(controller, /rollback was skipped because a newer TaskPoints state was detected and preserved/);
+test('post-write failure never performs a non-atomic automatic rollback', () => {
+  assert.match(controller, /automatic rollback was not attempted because localStorage cannot provide an atomic cross-tab compare-and-swap/);
+  assert.match(controller, /A newer TaskPoints state was detected and preserved/);
+  assert.doesNotMatch(controller, /restoreRawState/);
+  assert.doesNotMatch(controller, /safeReplaceTaskPointsStorage/);
+  assert.doesNotMatch(controller, /localStorage\.setItem\(STORAGE_KEY/);
 });
 
 test('terminal operation messages survive observer and interval refreshes', () => {
