@@ -1604,6 +1604,24 @@ const PENDING_HABIT_DELTAS_KEY="taskpoints_pending_habit_deltas_v1";
 const OLD_PLAYERS_KEY="taskpoints_players";
 const PROJECTS_STORAGE_KEY="tp_projects_v1";
 const TODAY_STORE_KEY="taskpoints_today_view_v1";
+let loadedStateRevision = '';
+
+function readHomeStateRevision() {
+  try {
+    return String(
+      window.TaskPointsStateRevision?.read?.()
+      || localStorage.getItem('taskpoints_state_revision_v1')
+      || ''
+    );
+  } catch (_) {
+    return '';
+  }
+}
+
+function markHomeStateRevisionCurrent() {
+  loadedStateRevision = readHomeStateRevision();
+  return loadedStateRevision;
+}
 const $=id=>document.getElementById(id);
 const storageCache = { raw: null, parsed: null };
 const bootStart = performance.now();
@@ -4526,6 +4544,8 @@ function save(savePath, extraOptions = {}) {
     } catch (e2) {
       console.error("Last-ditch save failed (index.html)", e2);
     }
+  } finally {
+    markHomeStateRevisionCurrent();
   }
 }
 
@@ -13388,6 +13408,7 @@ updateFlexDayToggleButton();
 // Preserve first-load daily initialization without re-reading storage.
 maybeAutoSimToday();
 state = syncStateWithMatchups(state);
+markHomeStateRevisionCurrent();
 
 renderHabitWeekLabels();
 renderViceWeekLabels();
@@ -13430,6 +13451,20 @@ function refreshMainPageFromStorage() {
 
   state = syncStateWithMatchups(state);
   scheduleRender(renderAll);
+  markHomeStateRevisionCurrent();
+  return true;
+}
+
+function refreshMainPageIfChanged(reason = 'lifecycle') {
+  const currentRevision = readHomeStateRevision();
+  if (currentRevision && loadedStateRevision && currentRevision === loadedStateRevision) {
+    if (window.TP_DEBUG_PERF) {
+      console.log(`[TP home refresh] skipped unchanged ${reason} revision=${currentRevision}`);
+    }
+    return false;
+  }
+
+  return refreshMainPageFromStorage();
 }
 
 let hasCompletedInitialPageShow = false;
@@ -13439,17 +13474,17 @@ window.addEventListener('pageshow', (event) => {
     hasCompletedInitialPageShow = true;
 
     if (event.persisted) {
-      refreshMainPageFromStorage();
+      refreshMainPageIfChanged('initial-bfcache-pageshow');
     }
 
     return;
   }
 
-  refreshMainPageFromStorage();
+  refreshMainPageIfChanged('pageshow');
 });
 
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) refreshMainPageFromStorage();
+  if (!document.hidden) refreshMainPageIfChanged('visibilitychange');
 });
   
   startOpponentDripTicker();

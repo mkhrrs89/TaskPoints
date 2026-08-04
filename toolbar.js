@@ -9,6 +9,120 @@ function closeAllDropdowns(exception) {
 
 window.TP_DEBUG_PERF = window.TP_DEBUG_PERF ?? false;
 
+(function installTaskPointsStateRevision(global) {
+  if (global.TaskPointsStateRevision?.installed) return;
+
+  const storage = global.localStorage;
+  if (!storage) return;
+
+  const REVISION_KEY = 'taskpoints_state_revision_v1';
+  const TRACKED_KEYS = new Set([
+    global.TaskPointsCore?.STORAGE_KEY || 'taskpoints_v1',
+    global.TaskPointsCore?.PENDING_HABIT_DELTAS_KEY || 'taskpoints_pending_habit_deltas_v1',
+    'tp_projects_v1'
+  ]);
+  const baseSetItem = storage.setItem.bind(storage);
+  const baseRemoveItem = storage.removeItem.bind(storage);
+  const baseClear = storage.clear.bind(storage);
+  let sequence = 0;
+
+  const read = () => {
+    try { return storage.getItem(REVISION_KEY) || ''; }
+    catch (_) { return ''; }
+  };
+
+  const createRevision = () => {
+    sequence += 1;
+    return `${Date.now().toString(36)}-${sequence.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  };
+
+  const publishRevision = (reason = 'state-write', emitEvent = true) => {
+    const revision = createRevision();
+    baseSetItem(REVISION_KEY, revision);
+    if (emitEvent && typeof global.dispatchEvent === 'function' && typeof global.CustomEvent === 'function') {
+      global.dispatchEvent(new CustomEvent('taskpoints:state-revision', {
+        detail: { revision, reason }
+      }));
+    }
+    return revision;
+  };
+
+  const installOnStorageObject = () => {
+    try {
+      const wrappedSetItem = function taskPointsRevisionSetItem(key, value) {
+        const result = baseSetItem(key, value);
+        if (TRACKED_KEYS.has(String(key))) publishRevision(`set:${String(key)}`);
+        return result;
+      };
+      const wrappedRemoveItem = function taskPointsRevisionRemoveItem(key) {
+        const result = baseRemoveItem(key);
+        if (TRACKED_KEYS.has(String(key))) publishRevision(`remove:${String(key)}`);
+        return result;
+      };
+      const wrappedClear = function taskPointsRevisionClear() {
+        const result = baseClear();
+        publishRevision('clear');
+        return result;
+      };
+
+      storage.setItem = wrappedSetItem;
+      storage.removeItem = wrappedRemoveItem;
+      storage.clear = wrappedClear;
+      return storage.setItem === wrappedSetItem
+        && storage.removeItem === wrappedRemoveItem
+        && storage.clear === wrappedClear;
+    } catch (_) {
+      return false;
+    }
+  };
+
+  const installOnStoragePrototype = () => {
+    const prototype = global.Storage?.prototype;
+    if (!prototype || prototype.__taskPointsStateRevisionHookInstalled) return false;
+
+    try {
+      const originalSetItem = prototype.setItem;
+      const originalRemoveItem = prototype.removeItem;
+      const originalClear = prototype.clear;
+
+      Object.defineProperty(prototype, '__taskPointsStateRevisionHookInstalled', {
+        value: true,
+        configurable: true
+      });
+
+      prototype.setItem = function taskPointsRevisionSetItem(key, value) {
+        const result = originalSetItem.call(this, key, value);
+        if (this === storage && TRACKED_KEYS.has(String(key))) publishRevision(`set:${String(key)}`);
+        return result;
+      };
+      prototype.removeItem = function taskPointsRevisionRemoveItem(key) {
+        const result = originalRemoveItem.call(this, key);
+        if (this === storage && TRACKED_KEYS.has(String(key))) publishRevision(`remove:${String(key)}`);
+        return result;
+      };
+      prototype.clear = function taskPointsRevisionClear() {
+        const result = originalClear.call(this);
+        if (this === storage) publishRevision('clear');
+        return result;
+      };
+      return true;
+    } catch (_) {
+      return false;
+    }
+  };
+
+  const installed = installOnStorageObject() || installOnStoragePrototype();
+  global.TaskPointsStateRevision = {
+    installed,
+    key: REVISION_KEY,
+    trackedKeys: Array.from(TRACKED_KEYS),
+    read,
+    bump: publishRevision,
+    ensure: () => read() || publishRevision('bootstrap', false)
+  };
+  global.TaskPointsStateRevision.ensure();
+})(window);
+
 const scheduleRender = window.scheduleRender || (() => {
   const queue = new Set();
   let scheduled = false;
