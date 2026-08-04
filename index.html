@@ -1814,16 +1814,17 @@ let state = (() => {
   const nativeBoot = window.TaskPointsHomeNativeBoot;
   const nativeCandidate = nativeBoot?.takeReadyState?.() || null;
 
-  if (nativeCandidate && window.TaskPointsCore?.prepareHomeNativeState) {
+  if (nativeCandidate && window.TaskPointsCore?.loadAppState) {
     if (__TP_PERF_BOOT) console.time('LOAD: IndexedDB native prepare');
-    const prepared = TaskPointsCore.prepareHomeNativeState(nativeCandidate, {
+    const loaded = TaskPointsCore.loadAppState({
+      preloadedState: nativeCandidate,
       syncDerived: false,
       persistSync: false
     });
     if (__TP_PERF_BOOT) console.timeEnd('LOAD: IndexedDB native prepare');
 
-    if (prepared?.ok && prepared.state) {
-      const s = normalizeState(prepared.state);
+    if (loaded?.state) {
+      const s = normalizeState(loaded.state);
       storageCache.parsed = s;
       storageCache.raw = null;
       window.__TP_HOME_BOOT_SOURCE = 'indexeddb-native';

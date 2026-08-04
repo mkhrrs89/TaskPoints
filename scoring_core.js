@@ -5483,10 +5483,20 @@ workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
     let parsed = {};
     let storageKeysFound = [];
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        parsed = parseTaskPointsStorageJson(raw, {}) || {};
+      const preloadedState = options.preloadedState;
+      if (preloadedState && typeof preloadedState === 'object' && !Array.isArray(preloadedState)) {
+        // A caller may provide a state object that was already verified against
+        // the authoritative mirror. Continue through the ordinary normalization,
+        // journal replay, pruning, repair, and wrapper pipeline without reparsing
+        // the compressed localStorage payload.
+        parsed = preloadedState;
         storageKeysFound.push(STORAGE_KEY);
+      } else {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          parsed = parseTaskPointsStorageJson(raw, {}) || {};
+          storageKeysFound.push(STORAGE_KEY);
+        }
       }
     } catch (e) {
       console.error("Failed to parse stored state", e);

@@ -8,6 +8,7 @@ const root = path.resolve(__dirname, '..');
 const bootstrap = fs.readFileSync(path.join(root, 'home_indexeddb_bootstrap.js'), 'utf8');
 const home = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const phase5c = fs.readFileSync(path.join(root, 'phase5b_deferred_mirror.js'), 'utf8');
+const scoringCore = fs.readFileSync(path.join(root, 'scoring_core.js'), 'utf8');
 
 function hashRaw(raw) {
   const text = String(raw || '');
@@ -111,7 +112,7 @@ test('Home starts the native IndexedDB read before the main app script', () => {
   assert.ok(bootstrapAt >= 0);
   assert.ok(coreAt > bootstrapAt);
   assert.match(home, /const nativeCandidate = nativeBoot\?\.takeReadyState\?\.\(\) \|\| null;/);
-  assert.match(home, /TaskPointsCore\.prepareHomeNativeState\(nativeCandidate/);
+  assert.match(home, /TaskPointsCore\.loadAppState\(\{\s*preloadedState: nativeCandidate/);
   assert.match(home, /window\.__TP_HOME_BOOT_SOURCE = 'indexeddb-native';/);
   assert.match(home, /const s = normalizeState\(load\(\)\);/);
 });
@@ -148,7 +149,9 @@ test('verified secondary atomically promotes a structured Home snapshot', () => 
   assert.match(phase5c, /store\.put\(\{[\s\S]*id: HOME_NATIVE_ID/);
   assert.match(phase5c, /request\(latestStore\.get\(HOME_NATIVE_ID\)\)/);
   assert.match(phase5c, /stateHash\(nativeLatest\.state\) !== sourceStateHash/);
-  assert.match(phase5c, /core\.prepareHomeNativeState = prepareHomeNativeState;/);
-  assert.match(phase5c, /core\.readPendingHabitDeltas\?\.\(\) \|\| \[\]/);
+  assert.doesNotMatch(phase5c, /core\.prepareHomeNativeState = prepareHomeNativeState;/);
+  assert.match(scoringCore, /const preloadedState = options\.preloadedState;/);
+  assert.match(scoringCore, /parsed = preloadedState;[\s\S]*storageKeysFound\.push\(STORAGE_KEY\);/);
+  assert.match(scoringCore, /let pendingHabitDeltas = \[\];[\s\S]*readPendingHabitDeltas\(\)/);
   assert.match(phase5c, /global\.requestIdleCallback\(backfill, \{ timeout: 5000 \}\)/);
 });

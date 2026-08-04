@@ -330,43 +330,10 @@
     return true;
   }
 
-  function prepareHomeNativeState(sourceState) {
-    try {
-      if (!sourceState || typeof sourceState !== 'object' || Array.isArray(sourceState)) {
-        return { ok: false, reason: 'native_state_invalid', state: null };
-      }
-      const pendingHabitDeltas = core.readPendingHabitDeltas?.() || [];
-      if (pendingHabitDeltas.length) {
-        return { ok: false, reason: 'pending_habit_journal', state: null };
-      }
-      let state = typeof core.normalizeState === 'function'
-        ? core.normalizeState(sourceState)
-        : sourceState;
-      const cutoff = Date.now() - (30 * 24 * 60 * 60 * 1000);
-      state.tasks = Array.isArray(state.tasks)
-        ? state.tasks.filter((task) => {
-            if (!task || task.status !== 'trashed') return true;
-            const deletedMs = Date.parse(task.deletedAtISO || task.deletedAt || '');
-            return Number.isFinite(deletedMs) && deletedMs >= cutoff;
-          })
-        : [];
-      return {
-        ok: true,
-        reason: null,
-        state,
-        storageKeysFound: [KEY],
-        pendingHabitDeltas: []
-      };
-    } catch (error) {
-      return { ok: false, reason: String(error?.message || error || 'native_prepare_failed'), state: null };
-    }
-  }
-
   core.PHASE5C_VERIFIED_SECONDARY_DB_NAME = DB;
   core.PHASE5C_VERIFIED_SECONDARY_STORE_NAME = STORE;
   core.HOME_NATIVE_SNAPSHOT_ID = HOME_NATIVE_ID;
   core.HOME_NATIVE_SNAPSHOT_FORMAT = HOME_NATIVE_FORMAT;
-  core.prepareHomeNativeState = prepareHomeNativeState;
   core.queuePhase5CVerifiedSecondaryWrite = () => { const raw = get(KEY); return raw ? queue(raw) : false; };
   core.flushPhase5CVerifiedSecondaryWrites = flush;
   core.getPhase5CVerifiedSecondaryStatus = () => {
