@@ -28,9 +28,12 @@
 
   const KEY = core.STORAGE_KEY || 'taskpoints_v1';
   const JOURNAL = core.PENDING_HABIT_DELTAS_KEY || 'taskpoints_pending_habit_deltas_v1';
+  const REVISION = 'taskpoints_state_revision_v1';
   const DIAG = 'taskpoints_storage_data_loss_guard_v1';
   const DB = 'taskpoints_verified_secondary_v1';
   const STORE = 'snapshots';
+  const HOME_NATIVE_ID = 'home_native_latest';
+  const HOME_NATIVE_FORMAT = 'home_structured_clone_v1';
   const COUNT_KEYS = ['tasks','completions','habits','players','flexActions','gameHistory','matchups','schedule','seasonHistory','reminders','weightHistory','vo2MaxHistory'];
   const MAJOR_KEYS = ['tasks','completions','habits','players','gameHistory','matchups','seasonHistory'];
   let pending = null;
@@ -47,6 +50,15 @@
       value = Math.imul(value, 16777619);
     }
     return `${(value >>> 0).toString(16).padStart(8, '0')}:${text.length}`;
+  };
+  const fingerprint = (raw) => {
+    const text = String(raw || '');
+    return {
+      rawHash: hash(text),
+      rawLength: text.length,
+      rawHead: text.slice(0, 64),
+      rawTail: text.slice(-64)
+    };
   };
   const parse = (raw) => typeof core.parseTaskPointsStorageJson === 'function'
     ? core.parseTaskPointsStorageJson(raw, null)
@@ -97,9 +109,10 @@
     req.onblocked = () => reject(new Error('secondary_open_blocked'));
   });
 
-  function promoteCandidate(db, candidate, raw, verifiedAtISO) {
+  function promoteCandidate(db, candidate, raw, verifiedAtISO, nativeRecord) {
     return new Promise((resolve, reject) => {
       let intendedAbort = '';
+      let promotedRevision = '';
       const transaction = db.transaction(STORE, 'readwrite');
       const store = transaction.objectStore(STORE);
       const latestRequest = store.get('latest');
@@ -112,12 +125,20 @@
           try { transaction.abort(); } catch (_) {}
           return;
         }
+        promotedRevision = String(get(REVISION) || '');
         store.put({ ...candidate, id: 'latest', status: 'passed_verification', verifiedAtISO });
+        store.put({
+          ...nativeRecord,
+          id: HOME_NATIVE_ID,
+          revision: promotedRevision,
+          status: 'passed_verification',
+          verifiedAtISO
+        });
         store.delete(candidate.id);
       };
-      transaction.oncomplete = () => resolve({ promoted: true, reason: '' });
+      transaction.oncomplete = () => resolve({ promoted: true, reason: '', revision: promotedRevision });
       transaction.onabort = () => intendedAbort
-        ? resolve({ promoted: false, reason: intendedAbort })
+        ? resolve({ promoted: false, reason: intendedAbort, revision: '' })
         : reject(transaction.error || new Error('secondary_promotion_aborted'));
       transaction.onerror = () => undefined;
     });
@@ -135,10 +156,18 @@
       const state = parse(raw);
       if (!state || typeof state !== 'object' || Array.isArray(state)) throw new Error('secondary_unreadable');
       const sourceCounts = counts(state);
-      const rawHash = hash(raw);
+      const sourceFingerprint = fingerprint(raw);
       const sourceStateHash = stateHash(state);
       db = await open();
-      const candidate = { id: 'candidate', status: 'candidate_written', raw, rawHash, stateHash: sourceStateHash, counts: sourceCounts, writtenAtISO: new Date().toISOString() };
+      const candidate = {
+        id: 'candidate',
+        status: 'candidate_written',
+        raw,
+        rawHash: sourceFingerprint.rawHash,
+        stateHash: sourceStateHash,
+        counts: sourceCounts,
+        writtenAtISO: new Date().toISOString()
+      };
       const writeTx = db.transaction(STORE, 'readwrite');
       writeTx.objectStore(STORE).put(candidate);
       await done(writeTx);
@@ -148,13 +177,25 @@
       const readBack = await request(verifyTx.objectStore(STORE).get('candidate'));
       await verifyDone;
       const readState = parse(readBack?.raw || '');
-      if (!readBack || readBack.raw !== raw || readBack.rawHash !== rawHash || stateHash(readState) !== sourceStateHash || !sameCounts(counts(readState), sourceCounts)) {
+      if (!readBack
+        || readBack.raw !== raw
+        || readBack.rawHash !== sourceFingerprint.rawHash
+        || stateHash(readState) !== sourceStateHash
+        || !sameCounts(counts(readState), sourceCounts)) {
         throw new Error('secondary_candidate_verification_failed');
       }
       if (get(KEY) !== raw || journalCount()) throw new Error('secondary_candidate_invalidated');
 
       const verifiedAtISO = new Date().toISOString();
-      const promotion = await promoteCandidate(db, readBack, raw, verifiedAtISO);
+      const nativeRecord = {
+        schemaVersion: 1,
+        snapshotFormat: HOME_NATIVE_FORMAT,
+        state: readState,
+        stateHash: sourceStateHash,
+        counts: sourceCounts,
+        ...sourceFingerprint
+      };
+      const promotion = await promoteCandidate(db, readBack, raw, verifiedAtISO, nativeRecord);
       if (!promotion.promoted) {
         const currentRaw = get(KEY);
         const pendingJournal = journalCount();
@@ -171,14 +212,57 @@
 
       const latestTx = db.transaction(STORE, 'readonly');
       const latestDone = done(latestTx);
-      const latest = await request(latestTx.objectStore(STORE).get('latest'));
+      const latestStore = latestTx.objectStore(STORE);
+      const [latest, nativeLatest] = await Promise.all([
+        request(latestStore.get('latest')),
+        request(latestStore.get(HOME_NATIVE_ID))
+      ]);
       await latestDone;
-      if (!latest || latest.raw !== raw || latest.rawHash !== rawHash || latest.status !== 'passed_verification') throw new Error('secondary_promotion_failed');
+      if (!latest
+        || latest.raw !== raw
+        || latest.rawHash !== sourceFingerprint.rawHash
+        || latest.status !== 'passed_verification') {
+        throw new Error('secondary_promotion_failed');
+      }
+      if (!nativeLatest
+        || nativeLatest.status !== 'passed_verification'
+        || nativeLatest.snapshotFormat !== HOME_NATIVE_FORMAT
+        || nativeLatest.rawHash !== sourceFingerprint.rawHash
+        || Number(nativeLatest.rawLength) !== sourceFingerprint.rawLength
+        || String(nativeLatest.rawHead || '') !== sourceFingerprint.rawHead
+        || String(nativeLatest.rawTail || '') !== sourceFingerprint.rawTail
+        || String(nativeLatest.revision || '') !== String(promotion.revision || '')
+        || stateHash(nativeLatest.state) !== sourceStateHash
+        || !sameCounts(counts(nativeLatest.state), sourceCounts)) {
+        throw new Error('home_native_promotion_failed');
+      }
       const current = get(KEY) === raw && journalCount() === 0;
-      status({ phase5cLastStatus: current ? 'passed_verification' : 'passed_verification_stale', phase5cLastVerifiedAtISO: verifiedAtISO, phase5cLastVerifiedRawHash: rawHash, phase5cLastVerifiedStateHash: sourceStateHash, phase5cLastVerifiedCounts: sourceCounts, phase5cMirrorsCurrentSave: current, phase5cPendingWrite: false, phase5cLastError: null });
+      status({
+        phase5cLastStatus: current ? 'passed_verification' : 'passed_verification_stale',
+        phase5cLastVerifiedAtISO: verifiedAtISO,
+        phase5cLastVerifiedRawHash: sourceFingerprint.rawHash,
+        phase5cLastVerifiedStateHash: sourceStateHash,
+        phase5cLastVerifiedCounts: sourceCounts,
+        phase5cMirrorsCurrentSave: current,
+        phase5cPendingWrite: false,
+        phase5cLastError: null,
+        phase5cHomeNativeStatus: current ? 'passed_verification' : 'passed_verification_stale',
+        phase5cHomeNativeVerifiedAtISO: verifiedAtISO,
+        phase5cHomeNativeRawHash: sourceFingerprint.rawHash,
+        phase5cHomeNativeRevision: promotion.revision || '',
+        phase5cHomeNativeLastError: null
+      });
       return true;
     } catch (error) {
-      status({ phase5cLastStatus: 'verification_failed', phase5cLastFailureAtISO: new Date().toISOString(), phase5cMirrorsCurrentSave: false, phase5cPendingWrite: false, phase5cLastError: String(error?.message || error) });
+      status({
+        phase5cLastStatus: 'verification_failed',
+        phase5cLastFailureAtISO: new Date().toISOString(),
+        phase5cMirrorsCurrentSave: false,
+        phase5cPendingWrite: false,
+        phase5cLastError: String(error?.message || error),
+        phase5cHomeNativeStatus: 'verification_failed',
+        phase5cHomeNativeLastError: String(error?.message || error)
+      });
       return false;
     } finally { try { db?.close?.(); } catch (_) {} }
   }
@@ -248,11 +332,32 @@
 
   core.PHASE5C_VERIFIED_SECONDARY_DB_NAME = DB;
   core.PHASE5C_VERIFIED_SECONDARY_STORE_NAME = STORE;
+  core.HOME_NATIVE_SNAPSHOT_ID = HOME_NATIVE_ID;
+  core.HOME_NATIVE_SNAPSHOT_FORMAT = HOME_NATIVE_FORMAT;
   core.queuePhase5CVerifiedSecondaryWrite = () => { const raw = get(KEY); return raw ? queue(raw) : false; };
   core.flushPhase5CVerifiedSecondaryWrites = flush;
   core.getPhase5CVerifiedSecondaryStatus = () => {
     const d = json(get(DIAG), {}) || {};
-    return { enabled: d.phase5cEnabled === true, installed: true, hookInstalled: d.phase5cHookInstalled === true, lastStatus: d.phase5cLastStatus || '', lastVerifiedAtISO: d.phase5cLastVerifiedAtISO || '', lastVerifiedRawHash: d.phase5cLastVerifiedRawHash || '', lastVerifiedCounts: d.phase5cLastVerifiedCounts || null, mirrorsCurrentSave: d.phase5cMirrorsCurrentSave === true, lastError: d.phase5cLastError || null, pendingWrite: running || pending !== null, authoritativeSource: 'localStorage', indexedDbReadsEnabled: false, indexedDbWriteBackEnabled: false };
+    return {
+      enabled: d.phase5cEnabled === true,
+      installed: true,
+      hookInstalled: d.phase5cHookInstalled === true,
+      lastStatus: d.phase5cLastStatus || '',
+      lastVerifiedAtISO: d.phase5cLastVerifiedAtISO || '',
+      lastVerifiedRawHash: d.phase5cLastVerifiedRawHash || '',
+      lastVerifiedCounts: d.phase5cLastVerifiedCounts || null,
+      mirrorsCurrentSave: d.phase5cMirrorsCurrentSave === true,
+      lastError: d.phase5cLastError || null,
+      pendingWrite: running || pending !== null,
+      authoritativeSource: 'localStorage',
+      indexedDbReadsEnabled: false,
+      indexedDbWriteBackEnabled: false,
+      homeNativeStatus: d.phase5cHomeNativeStatus || '',
+      homeNativeVerifiedAtISO: d.phase5cHomeNativeVerifiedAtISO || '',
+      homeNativeRawHash: d.phase5cHomeNativeRawHash || '',
+      homeNativeRevision: d.phase5cHomeNativeRevision || '',
+      homeNativeLastError: d.phase5cHomeNativeLastError || null
+    };
   };
 
   const hookInstalled = installHook();
@@ -265,11 +370,16 @@
   }
   const existingStatus = json(get(DIAG), {}) || {};
   const currentRaw = get(KEY);
+  const currentRawHash = currentRaw ? hash(currentRaw) : '';
   const verifiedStillCurrent = Boolean(hookInstalled
     && currentRaw
     && existingStatus.phase5cLastStatus === 'passed_verification'
     && existingStatus.phase5cMirrorsCurrentSave === true
-    && existingStatus.phase5cLastVerifiedRawHash === hash(currentRaw)
+    && existingStatus.phase5cLastVerifiedRawHash === currentRawHash
+    && journalCount() === 0);
+  const homeNativeKnownCurrent = Boolean(currentRaw
+    && existingStatus.phase5cHomeNativeStatus === 'passed_verification'
+    && existingStatus.phase5cHomeNativeRawHash === currentRawHash
     && journalCount() === 0);
   status({
     phase5cInstalledAtISO: new Date().toISOString(),
@@ -281,6 +391,18 @@
     phase5cPendingWrite: false,
     phase5cLastError: hookInstalled ? null : 'secondary_write_hook_unavailable'
   });
+
+  if (hookInstalled && currentRaw && !homeNativeKnownCurrent && journalCount() === 0) {
+    const backfill = () => {
+      const latestRaw = get(KEY);
+      if (latestRaw && journalCount() === 0) queue(latestRaw);
+    };
+    if (typeof global.requestIdleCallback === 'function') {
+      global.requestIdleCallback(backfill, { timeout: 5000 });
+    } else {
+      global.setTimeout?.(backfill, 2500);
+    }
+  }
 })(typeof window !== 'undefined' ? window : globalThis);
 
 (function installTaskPointsRecoveryWriteLockGuard(global) {
