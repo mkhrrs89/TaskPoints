@@ -158,3 +158,29 @@ test('blocks one missing image ID that ambiguously maps to multiple current play
   assert.equal(plan.safe, false);
   assert.ok(plan.unresolved.some((entry) => entry.imageId === 'old-1' && entry.reason === 'ambiguous-missing-image-reference'));
 });
+
+test('uses canonical current-player id before legacy playerId fallback', () => {
+  const state = {
+    players: [
+      { id: 'p1', playerId: 'p2', name: 'Canonical P1', imageId: 'new-p1' },
+      { id: 'p2', name: 'Canonical P2', imageId: 'new-p2' }
+    ],
+    currentSeason: {
+      seeds: [{ id: 'legacy-p1', playerId: 'p2', playerName: 'Canonical P2', imageId: 'old-p2' }]
+    },
+    seasonHistory: []
+  };
+  const report = {
+    missingReferences: ['old-p2'],
+    referencePaths: { 'old-p2': ['state.currentSeason.seeds[0].imageId'] },
+    rows: [
+      { key: 'new-p1', bytes: 100, type: 'image/jpeg' },
+      { key: 'new-p2', bytes: 100, type: 'image/jpeg' }
+    ]
+  };
+
+  const plan = repair.buildRepairPlan(state, report);
+  assert.equal(plan.safe, true);
+  assert.equal(plan.repairs[0].playerId, 'p2');
+  assert.equal(plan.repairs[0].newImageId, 'new-p2');
+});
