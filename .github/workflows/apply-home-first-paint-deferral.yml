@@ -1,0 +1,42 @@
+name: Apply Home first-paint deferral
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+
+      - name: Apply guarded first-paint patch
+        run: python scripts/apply_home_first_paint_deferral.py
+
+      - name: Run focused checks
+        run: |
+          node --check toolbar.js
+          node --test tests/home_first_paint_maintenance.test.js
+          node --test tests/home_matchup_export_regression.test.js
+          node --test tests/home_revision_refresh_contract.test.js
+          node --test tests/inbox_count_badge.test.js
+          node --test tests/season_materialization_regression.test.js
+          git diff --check
+
+      - name: Commit implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html toolbar.js tests/home_matchup_export_regression.test.js tests/home_first_paint_maintenance.test.js
+          git diff --cached --quiet && exit 0
+          git commit -m "Move Home maintenance behind first paint"
+          git push
