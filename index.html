@@ -29,6 +29,7 @@ Nothing visible on the page is built here. === -->
       }
     })();
   </script>
+  <script src="home_indexeddb_bootstrap.js"></script>
   <title>TaskPoints — To-Do + Points Tracker</title>
   <!-- --- Basic page metadata (END) --------------------------- -->
 
@@ -1810,12 +1811,37 @@ function showApp(){
 }
 
 let state = (() => {
+  const nativeBoot = window.TaskPointsHomeNativeBoot;
+  const nativeCandidate = nativeBoot?.takeReadyState?.() || null;
+
+  if (nativeCandidate && window.TaskPointsCore?.prepareHomeNativeState) {
+    if (__TP_PERF_BOOT) console.time('LOAD: IndexedDB native prepare');
+    const prepared = TaskPointsCore.prepareHomeNativeState(nativeCandidate, {
+      syncDerived: false,
+      persistSync: false
+    });
+    if (__TP_PERF_BOOT) console.timeEnd('LOAD: IndexedDB native prepare');
+
+    if (prepared?.ok && prepared.state) {
+      const s = normalizeState(prepared.state);
+      storageCache.parsed = s;
+      storageCache.raw = null;
+      window.__TP_HOME_BOOT_SOURCE = 'indexeddb-native';
+      if (window.TP_DEBUG_PERF) {
+        const completions = Array.isArray(s?.completions) ? s.completions.length : 0;
+        console.log(`[TP home boot] source=indexeddb-native completions=${completions}`, nativeBoot.recordMeta || null);
+      }
+      return s;
+    }
+  }
+
+  window.__TP_HOME_BOOT_SOURCE = `localStorage:${nativeBoot?.reason || nativeBoot?.status || 'native-unavailable'}`;
   if (__TP_PERF_BOOT) console.time('LOAD: normalizeState(load())');
   const s = normalizeState(load());
   if (__TP_PERF_BOOT) console.timeEnd('LOAD: normalizeState(load())');
   if (window.TP_DEBUG_PERF) {
-    const completions = Array.isArray(s?.completions) ? src.completions.length : 0;
-    console.log(`[TP home boot] initial loaded completions=${completions}`);
+    const completions = Array.isArray(s?.completions) ? s.completions.length : 0;
+    console.log(`[TP home boot] source=${window.__TP_HOME_BOOT_SOURCE} completions=${completions}`);
   }
   return s;
 })();
