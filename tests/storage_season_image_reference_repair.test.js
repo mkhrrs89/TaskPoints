@@ -60,6 +60,7 @@ test('builds a safe dynamic plan for five missing IDs across fourteen Season rec
   assert.equal(plan.missingIds.length, 5);
   assert.equal(plan.replacementGroups.length, 5);
   assert.equal(plan.repairs.length, 14);
+  assert.equal(plan.expectedAllowedPathCount, 14);
   assert.equal(plan.unresolved.length, 0);
   assert.equal(plan.externalPaths.length, 0);
 });
@@ -75,6 +76,7 @@ test('applies only imageId changes inside current and archived Season copies', (
   assert.equal(result.ok, true);
   assert.equal(result.updatedCount, 14);
   assert.equal(repair.nonImageSnapshot(result.state), beforeNonImage);
+  assert.notEqual(repair.seasonImageSnapshot(result.state), repair.seasonImageSnapshot(state));
   assert.equal(JSON.stringify(result.state.players), originalPlayers);
   assert.equal(JSON.stringify(result.state.scores), originalScores);
   assert.equal(result.state.currentSeason.playerPool[0].imageId, 'new-1');
@@ -104,4 +106,22 @@ test('blocks repair when a missing reference cannot be matched by stable player 
   const plan = repair.buildRepairPlan(state, report);
   assert.equal(plan.safe, false);
   assert.ok(plan.unresolved.some((entry) => entry.reason === 'player-not-found'));
+});
+
+test('blocks repair when current player IDs are duplicated', () => {
+  const { state, report } = fixture();
+  state.players.push({ id: 'p1', name: 'Duplicate Alpha', imageId: 'other-new-1' });
+  report.rows.push({ key: 'other-new-1', bytes: 100, type: 'image/jpeg' });
+  const plan = repair.buildRepairPlan(state, report);
+  assert.equal(plan.safe, false);
+  assert.ok(plan.duplicatePlayerIds.includes('p1'));
+  assert.ok(plan.unresolved.some((entry) => entry.playerId === 'p1' && entry.reason === 'duplicate-current-player-id'));
+});
+
+test('blocks repair when diagnostics does not provide exact reference paths', () => {
+  const { state, report } = fixture();
+  delete report.referencePaths['old-4'];
+  const plan = repair.buildRepairPlan(state, report);
+  assert.equal(plan.safe, false);
+  assert.ok(plan.unresolved.some((entry) => entry.imageId === 'old-4' && entry.reason === 'reference-paths-unavailable'));
 });
