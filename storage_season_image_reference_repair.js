@@ -64,11 +64,22 @@
     const players = Array.isArray(state?.players) ? state.players : [];
     const currentByPlayerId = new Map();
     const duplicatePlayerIds = new Set();
+    const seenPlayerIds = new Set(['YOU']);
+    const youImageId = typeof state?.youImageId === 'string' ? state.youImageId : '';
+    if (youImageId) {
+      currentByPlayerId.set('YOU', {
+        playerId: 'YOU',
+        imageId: youImageId,
+        name: state?.youName || 'You'
+      });
+    }
+
     players.forEach((player) => {
       const playerId = playerIdFor(player);
       const imageId = imageIdFor(player);
       if (!playerId) return;
-      if (currentByPlayerId.has(playerId)) duplicatePlayerIds.add(playerId);
+      if (seenPlayerIds.has(playerId)) duplicatePlayerIds.add(playerId);
+      else seenPlayerIds.add(playerId);
       if (imageId) {
         currentByPlayerId.set(playerId, {
           playerId,
