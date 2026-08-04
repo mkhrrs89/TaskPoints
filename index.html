@@ -5271,7 +5271,6 @@ tpPerfTime(
 );
 
 state = cleanupLiveDiffHistory(state);
-      captureLiveDiffPoint();
       tpPerfTime('renderStats: drawLiveDiffGraph', () => drawLiveDiffGraph());
       bindHomeGraphInteractions();
 
@@ -5892,6 +5891,84 @@ function setHomeMatchupTypeLabel(label) {
   labelEl.hidden = !safeLabel;
 }
 
+const HOME_SEASON_MATERIALIZATION_SESSION_KEY = 'tp_home_season_materialization_v1';
+let homeSeasonMaterializationScheduled = false;
+
+function getHomeSeasonMaterializationFingerprint(todayKeyStr) {
+  const dateKeyStr = String(todayKeyStr || '').slice(0, 10);
+  const seasonId = String(state?.currentSeason?.id || '');
+  const revision = typeof readHomeStateRevision === 'function'
+    ? readHomeStateRevision()
+    : '';
+  if (!dateKeyStr || !seasonId || !revision) return '';
+  return `${dateKeyStr}|${seasonId}|${revision}`;
+}
+
+function readHomeSeasonMaterializationFingerprint() {
+  try { return sessionStorage.getItem(HOME_SEASON_MATERIALIZATION_SESSION_KEY) || ''; }
+  catch (_) { return ''; }
+}
+
+function rememberHomeSeasonMaterializationFingerprint(fingerprint) {
+  if (!fingerprint) return;
+  try { sessionStorage.setItem(HOME_SEASON_MATERIALIZATION_SESSION_KEY, fingerprint); }
+  catch (_) {}
+}
+
+function scheduleHomeSeasonMaterializationAfterFirstPaint(todayKeyStr = getGameDayKey(new Date())) {
+  if (homeSeasonMaterializationScheduled) return false;
+  if (!window.TaskPointsCore?.materializeSeasonSlateMatchupsForDate) return false;
+
+  const seasonStatus = String(state?.currentSeason?.status || '');
+  if (!['locked', 'active'].includes(seasonStatus)) return false;
+
+  const safeDateKey = String(todayKeyStr || '').slice(0, 10);
+  const currentFingerprint = getHomeSeasonMaterializationFingerprint(safeDateKey);
+  if (currentFingerprint && readHomeSeasonMaterializationFingerprint() === currentFingerprint) {
+    return false;
+  }
+
+  homeSeasonMaterializationScheduled = true;
+
+  const run = () => {
+    let shouldRemember = false;
+    try {
+      const beforeRevision = typeof readHomeStateRevision === 'function'
+        ? readHomeStateRevision()
+        : '';
+      const materialized = TaskPointsCore.materializeSeasonSlateMatchupsForDate(state, safeDateKey, {
+        nowISO: `${safeDateKey}T12:00:00.000Z`
+      });
+      if (materialized?.state) state = materialized.state;
+
+      if (materialized?.changed) {
+        save('home-season-slate-idle-materialization');
+        const afterRevision = typeof readHomeStateRevision === 'function'
+          ? readHomeStateRevision()
+          : '';
+        shouldRemember = Boolean(afterRevision && afterRevision !== beforeRevision);
+      } else {
+        shouldRemember = true;
+      }
+
+      if (shouldRemember) {
+        rememberHomeSeasonMaterializationFingerprint(
+          getHomeSeasonMaterializationFingerprint(safeDateKey)
+        );
+      }
+    } catch (error) {
+      console.warn('Failed to materialize today Season slate after Home became idle', error);
+    }
+  };
+
+  if (window.TaskPointsHomeIdleQueue?.enqueue) {
+    window.TaskPointsHomeIdleQueue.enqueue('home-season-materialization', run, { delayMs: 10000 });
+  } else {
+    window.setTimeout(run, 10000);
+  }
+  return true;
+}
+
 function renderTodaysMatchup(todayKeyStr, yourScore){
   const oppNameEl = $('matchupOpponent');
   const oppScoreEl= $('matchupOpponentScore');
@@ -5944,18 +6021,6 @@ const updateTodayScoreIsland = (value) => {
   };
 
   setOpponentScoreboardMeta(null);
-
-  if (window.TaskPointsCore?.materializeSeasonSlateMatchupsForDate) {
-    try {
-      const materialized = TaskPointsCore.materializeSeasonSlateMatchupsForDate(state, todayKeyStr, {
-        nowISO: `${todayKeyStr}T12:00:00.000Z`
-      });
-      if (materialized?.state) state = materialized.state;
-      if (materialized?.changed) save();
-    } catch (error) {
-      console.warn('Failed to materialize today Season slate for Home matchup selection', error);
-    }
-  }
 
   const matchups = Array.isArray(state.matchups) ? state.matchups : [];
   const matchup = window.TaskPointsCore?.chooseUserMatchupForDate
@@ -6356,6 +6421,105 @@ let homeGraphScrollRaf = null;
 let homeGraphPointerDownAt = null;
 let liveDiffCaptureIntervalId = null;
 
+
+(function installTaskPointsHomeIdleQueue(global) {
+  if (global.TaskPointsHomeIdleQueue) return;
+
+  const jobs = [];
+  const queuedNames = new Set();
+  const quietMs = 3000;
+  const gapMs = 2000;
+  let timerId = null;
+  let running = false;
+  let lastInteractionAt = global.performance?.now?.() ?? Date.now();
+
+  const now = () => global.performance?.now?.() ?? Date.now();
+
+  function schedule(delayMs = 250) {
+    if (timerId != null) global.clearTimeout(timerId);
+    timerId = global.setTimeout(pump, Math.max(0, Number(delayMs) || 0));
+  }
+
+  function noteInteraction() {
+    lastInteractionAt = now();
+    if (jobs.length) schedule(quietMs);
+  }
+
+  function finishJob() {
+    running = false;
+    lastInteractionAt = now();
+    schedule(gapMs);
+  }
+
+  function execute(job) {
+    let result;
+    try {
+      result = job.task();
+    } catch (error) {
+      console.warn(`[TP home idle] ${job.name} failed`, error);
+      finishJob();
+      return;
+    }
+    Promise.resolve(result).catch((error) => {
+      console.warn(`[TP home idle] ${job.name} failed`, error);
+    }).finally(finishJob);
+  }
+
+  function pump() {
+    timerId = null;
+    if (running || !jobs.length) return;
+    if (document.hidden) {
+      schedule(1000);
+      return;
+    }
+
+    jobs.sort((left, right) => left.notBefore - right.notBefore);
+    const job = jobs[0];
+    const current = now();
+    const waitForDelay = job.notBefore - current;
+    const waitForQuiet = quietMs - (current - lastInteractionAt);
+    const waitMs = Math.max(waitForDelay, waitForQuiet, 0);
+    if (waitMs > 0) {
+      schedule(Math.min(Math.max(waitMs, 250), 2000));
+      return;
+    }
+
+    jobs.shift();
+    queuedNames.delete(job.name);
+    running = true;
+
+    if (typeof global.requestIdleCallback === 'function') {
+      global.requestIdleCallback(() => execute(job));
+    } else {
+      global.setTimeout(() => execute(job), 0);
+    }
+  }
+
+  function enqueue(name, task, options = {}) {
+    const safeName = String(name || 'maintenance');
+    if (typeof task !== 'function' || queuedNames.has(safeName)) return false;
+    queuedNames.add(safeName);
+    jobs.push({
+      name: safeName,
+      task,
+      notBefore: now() + Math.max(0, Number(options.delayMs) || 0)
+    });
+    schedule();
+    return true;
+  }
+
+  ['pointerdown', 'touchstart', 'wheel', 'scroll', 'keydown'].forEach((eventName) => {
+    global.addEventListener(eventName, noteInteraction, { capture: true, passive: true });
+  });
+  document.addEventListener('visibilitychange', noteInteraction, { passive: true });
+
+  global.TaskPointsHomeIdleQueue = {
+    enqueue,
+    noteInteraction,
+    get pendingCount() { return jobs.length + (running ? 1 : 0); }
+  };
+})(window);
+
 function getWeightHistorySorted() {
   const list = Array.isArray(state?.weightHistory) ? state.weightHistory : [];
   return list
@@ -6513,6 +6677,16 @@ function captureLiveDiffPoint(){
   }
   save();
   drawLiveDiffGraph();
+}
+
+
+function scheduleInitialHomeLiveDiffCapture() {
+  const run = () => captureLiveDiffPoint();
+  if (window.TaskPointsHomeIdleQueue?.enqueue) {
+    window.TaskPointsHomeIdleQueue.enqueue('home-live-diff-initial-capture', run, { delayMs: 18000 });
+  } else {
+    window.setTimeout(run, 18000);
+  }
 }
 
 function getTodayOpponentPrimaryColor(){
@@ -13462,6 +13636,8 @@ renderFlexActions();
 
 // paint ASAP
 scheduleRender(renderAll);
+scheduleHomeSeasonMaterializationAfterFirstPaint();
+scheduleInitialHomeLiveDiffCapture();
 
 (async () => {
   await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));

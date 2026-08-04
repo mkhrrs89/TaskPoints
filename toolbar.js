@@ -1210,11 +1210,10 @@ window.TaskPointsInbox = {
   upsetOverallGap: TP_INBOX_UPSET_OVR_GAP
 };
 
-function initToolbarNow() {
+let taskPointsToolbarMaintenanceScheduled = false;
+
+function runTaskPointsToolbarMaintenance() {
   autoPopulateTaskPointsInbox();
-  renderBottomToolbar();
-  setupMobileTasksMenu();
-  setupPopupMenuPressAnimation();
   try {
     const k = 'tp_audit_dupe_habits_last_run';
     const today = new Date().toISOString().slice(0,10);
@@ -1223,6 +1222,30 @@ function initToolbarNow() {
       auditDuplicateHabitCompletions(45);
     }
   } catch (_) {}
+}
+
+function scheduleTaskPointsToolbarMaintenance() {
+  if (taskPointsToolbarMaintenanceScheduled) return;
+  taskPointsToolbarMaintenanceScheduled = true;
+
+  const run = () => runTaskPointsToolbarMaintenance();
+  if (!isMainPagePathname(window.location.pathname)) {
+    run();
+    return;
+  }
+
+  if (window.TaskPointsHomeIdleQueue?.enqueue) {
+    window.TaskPointsHomeIdleQueue.enqueue('home-toolbar-maintenance', run, { delayMs: 22000 });
+  } else {
+    window.setTimeout(run, 22000);
+  }
+}
+
+function initToolbarNow() {
+  renderBottomToolbar();
+  setupMobileTasksMenu();
+  setupPopupMenuPressAnimation();
+  scheduleTaskPointsToolbarMaintenance();
 }
 
 let toolbarInitialized = false;

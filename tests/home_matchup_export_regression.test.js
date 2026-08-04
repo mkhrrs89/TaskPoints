@@ -257,14 +257,23 @@ test('Home ensureUpcomingSchedule freezes scored same-day stored rows before reb
   assert.ok(freezeBranch < rebuildBranch);
 });
 
-test('Home render materializes Season slate before choosing stored matchup row', () => {
+test('Home selects the live Season slate without saving during render', () => {
   const fs = require('node:fs');
   const indexHtml = fs.readFileSync(require.resolve('../index.html'), 'utf8');
   assert.match(indexHtml, /function getTodaySeasonMatchupsForHome\(todayKeyStr\)/);
   assert.match(indexHtml, /TaskPointsCore\.buildSeasonDailySlate\(state, todayKeyStr, \{\s*nowISO: `\$\{todayKeyStr\}T12:00:00\.000Z`/);
   assert.match(indexHtml, /function getHomeUserMatchupCandidatesForDate\(storedMatchups, todayKeyStr\)/);
   assert.match(indexHtml, /todaySeasonMatchups\.concat\(filteredStoredMatchups\)/);
-  assert.match(indexHtml, /TaskPointsCore\.materializeSeasonSlateMatchupsForDate\(state, todayKeyStr, \{/);
-  assert.match(indexHtml, /if \(materialized\?\.changed\) save\(\);/);
+  assert.match(indexHtml, /function scheduleHomeSeasonMaterializationAfterFirstPaint/);
+  assert.match(indexHtml, /save\('home-season-slate-idle-materialization'\)/);
+  assert.match(indexHtml, /scheduleRender\(renderAll\);\s*scheduleHomeSeasonMaterializationAfterFirstPaint\(\);/);
   assert.match(indexHtml, /TaskPointsCore\.chooseUserMatchupForDate\(state, todayKeyStr, 'YOU'\)/);
+
+  const renderStart = indexHtml.indexOf('function renderTodaysMatchup(todayKeyStr, yourScore)');
+  const renderEnd = indexHtml.indexOf('function getMatchupDateKeyForStats', renderStart);
+  assert.notEqual(renderStart, -1);
+  assert.notEqual(renderEnd, -1);
+  const renderBlock = indexHtml.slice(renderStart, renderEnd);
+  assert.doesNotMatch(renderBlock, /materializeSeasonSlateMatchupsForDate/);
+  assert.doesNotMatch(renderBlock, /\bsave\(/);
 });
