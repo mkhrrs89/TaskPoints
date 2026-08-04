@@ -1,5 +1,6 @@
 name: Run Home revision refresh patch
 
+# Updated to trigger the branch-local push workflow.
 on:
   push:
     branches:
