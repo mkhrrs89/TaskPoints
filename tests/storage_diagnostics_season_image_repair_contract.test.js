@@ -11,8 +11,8 @@ const helper = fs.readFileSync(path.join(root, 'storage_season_image_reference_r
 test('Storage Diagnostics loads versioned Season repair assets and exposes a separate disabled action', () => {
   assert.match(html, /id="repairMissingSeasonImagesBtn"[^>]*disabled/);
   assert.match(html, /id="seasonImageRepairStatus"/);
-  assert.match(html, /storage_season_image_reference_repair\.js\?v=20260804-2/);
-  assert.match(html, /storage_diagnostics_season_image_repair_controller\.js\?v=20260804-2/);
+  assert.match(html, /storage_season_image_reference_repair\.js\?v=20260804-3/);
+  assert.match(html, /storage_diagnostics_season_image_repair_controller\.js\?v=20260804-3/);
   assert.match(html, /Only the separately confirmed image-cleanup action can delete storage/);
   assert.match(html, /separate confirmed Season repair changes only verified Season imageId references/);
 });
