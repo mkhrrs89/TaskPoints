@@ -120,19 +120,7 @@
     if ((localStorage.getItem(STORAGE_KEY) || '') !== writtenRaw) {
       throw new Error('TaskPoints did not retain the exact repaired state.');
     }
-    return { previousRaw: expectedPreviousRaw, writtenRaw };
-  }
-
-  function restoreRawState(previousRaw) {
-    const core = window.TaskPointsCore || {};
-    if (typeof core.safeReplaceTaskPointsStorage === 'function') {
-      core.safeReplaceTaskPointsStorage(STORAGE_KEY, previousRaw);
-    } else {
-      localStorage.setItem(STORAGE_KEY, previousRaw);
-    }
-    if ((localStorage.getItem(STORAGE_KEY) || '') !== previousRaw) {
-      throw new Error('Automatic rollback could not restore the previous TaskPoints snapshot.');
-    }
+    return writtenRaw;
   }
 
   async function repairMissingSeasonImages() {
@@ -144,9 +132,7 @@
     if (button) button.disabled = true;
     if (runButton) runButton.disabled = true;
 
-    let rollbackRaw = '';
     let repairWrittenRaw = '';
-    let exactWriteCompleted = false;
 
     try {
       const { diagnostics, repair } = api();
@@ -215,10 +201,7 @@
 
       if (button) button.textContent = 'Saving Repair…';
       setStatus(`Replacing ${validatedPlan.missingIds.length} missing image ID(s) across ${validatedPlan.repairs.length} exact Season path(s)…`);
-      rollbackRaw = validatedState.raw;
-      const persisted = persistSeasonRepairExact(applied.state, rollbackRaw);
-      repairWrittenRaw = persisted.writtenRaw;
-      exactWriteCompleted = true;
+      repairWrittenRaw = persistSeasonRepairExact(applied.state, validatedState.raw);
 
       if (button) button.textContent = 'Verifying…';
       setStatus('Verifying the exact saved state and every replacement blob…');
@@ -243,32 +226,20 @@
         throw new Error(`Verification failed: ${finalReport.missingReferences.length} missing image reference(s) remain.`);
       }
 
-      exactWriteCompleted = false;
-      rollbackRaw = '';
       repairWrittenRaw = '';
       await diagnostics.runDiagnostics();
       setTerminalStatus(`Repaired and verified ${validatedPlan.missingIds.length} missing image ID(s) across ${validatedPlan.repairs.length} exact Season path(s). No other data changed. The orphan cleanup can now be reviewed.`);
     } catch (error) {
       console.error('Season image reference repair failed', error);
-      let rollbackMessage = '';
-      if (exactWriteCompleted && rollbackRaw) {
+      let preservationMessage = '';
+      if (repairWrittenRaw) {
         const currentRaw = localStorage.getItem(STORAGE_KEY) || '';
-        if (currentRaw === rollbackRaw) {
-          rollbackMessage = ' The previous TaskPoints snapshot was already active.';
-        } else if (repairWrittenRaw && currentRaw === repairWrittenRaw) {
-          try {
-            restoreRawState(rollbackRaw);
-            rollbackMessage = ' The previous TaskPoints snapshot was restored automatically.';
-          } catch (rollbackError) {
-            console.error('Season image repair rollback failed', rollbackError);
-            rollbackMessage = ` Automatic rollback failed: ${rollbackError?.message || String(rollbackError)} Restore the fresh ZIP backup before making further changes.`;
-          }
-        } else {
-          rollbackMessage = ' Automatic rollback was skipped because a newer TaskPoints state was detected and preserved.';
-        }
+        preservationMessage = currentRaw === repairWrittenRaw
+          ? ' The repair-written snapshot was preserved for inspection; automatic rollback was not attempted because localStorage cannot provide an atomic cross-tab compare-and-swap. Restore the fresh ZIP backup before further changes if verification reported unsafe data.'
+          : ' A newer TaskPoints state was detected and preserved; automatic rollback was not attempted.';
       }
-      setTerminalStatus(`Repair failed: ${error?.message || String(error)}${rollbackMessage} No orphan images were deleted.`);
-      window.alert(`Season image repair failed:\n\n${error?.message || String(error)}${rollbackMessage}`);
+      setTerminalStatus(`Repair failed: ${error?.message || String(error)}${preservationMessage} No orphan images were deleted.`);
+      window.alert(`Season image repair failed:\n\n${error?.message || String(error)}${preservationMessage}`);
       try { await window.TaskPointsStorageDiagnostics?.runDiagnostics?.(); } catch (_) {}
     } finally {
       busy = false;
