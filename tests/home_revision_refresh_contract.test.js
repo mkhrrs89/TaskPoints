@@ -11,7 +11,8 @@ const home = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 function extractFunction(source, signature) {
   const start = source.indexOf(signature);
   assert.notEqual(start, -1, `missing ${signature}`);
-  const braceStart = source.indexOf('{', start);
+  const closeParen = source.indexOf(')', start);
+  const braceStart = source.indexOf('{', closeParen);
   let depth = 0;
   for (let index = braceStart; index < source.length; index += 1) {
     if (source[index] === '{') depth += 1;
@@ -113,20 +114,60 @@ test('revision stamp failure never fails an authoritative storage write', () => 
   assert.equal(events.filter((event) => event.type === 'tp:local-storage-change').length, 1);
 });
 
-test('Home skips lifecycle reloads when its loaded revision is current', () => {
-  assert.match(home, /let loadedStateRevision = '';/);
-  assert.match(home, /function readHomeStateRevision\(\)/);
-  assert.match(home, /function refreshMainPageIfChanged\(reason = 'lifecycle'\)/);
-  assert.match(home, /currentRevision === loadedStateRevision/);
+test('Home refreshes when the TaskPoints game day changes', () => {
+  assert.match(home, /let loadedHomeGameDayKey = '';/);
+  assert.match(home, /function readHomeGameDayKey\(now = new Date\(\)\)/);
+  assert.match(home, /currentGameDayKey === loadedHomeGameDayKey/);
+  assert.match(home, /revisionUnchanged && gameDayUnchanged/);
+
+  const guardSource = extractFunction(home, "function refreshMainPageIfChanged(reason = 'lifecycle')");
+  const context = {
+    window: { TP_DEBUG_PERF: false },
+    loadedStateRevision: 'revision-one',
+    loadedHomeGameDayKey: '2026-08-04',
+    currentRevision: 'revision-one',
+    currentGameDayKey: '2026-08-04',
+    refreshCount: 0,
+    Boolean,
+    console
+  };
+  vm.runInNewContext(`
+    function readHomeStateRevision() { return currentRevision; }
+    function readHomeGameDayKey() { return currentGameDayKey; }
+    function refreshMainPageFromStorage() { refreshCount += 1; return true; }
+    ${guardSource}
+    resultSame = refreshMainPageIfChanged('same-day');
+  `, context);
+  assert.equal(context.resultSame, false);
+  assert.equal(context.refreshCount, 0);
+
+  context.currentGameDayKey = '2026-08-05';
+  vm.runInNewContext(`resultNextDay = refreshMainPageIfChanged('day-rollover');`, context);
+  assert.equal(context.resultNextDay, true);
+  assert.equal(context.refreshCount, 1);
+});
+
+test('Home baselines revisions only after successful saves', () => {
+  const saveSource = extractFunction(home, 'function save(savePath, extraOptions = {})');
+  assert.doesNotMatch(saveSource, /finally\s*\{[\s\S]*markHomeStateRevisionCurrent/);
+
+  const flexBlock = saveSource.match(/if \(result\?\.flexFastPathDrained && result\?\.state\) \{[\s\S]*?\n\s*\}/)?.[0] || '';
+  const skippedBlock = saveSource.match(/if \(result\?\.skipped \|\| result\?\.blockedByQuotaCircuit\) \{[\s\S]*?\n\s*\}/)?.[0] || '';
+  assert.ok(flexBlock);
+  assert.ok(skippedBlock);
+  assert.doesNotMatch(flexBlock, /markHomeStateRevisionCurrent/);
+  assert.doesNotMatch(skippedBlock, /markHomeStateRevisionCurrent/);
+
+  assert.match(saveSource, /if \(result\?\.state\) \{[\s\S]*?\}\s*markHomeStateRevisionCurrent\(\);\s*return;/);
+  assert.match(saveSource, /writeCachedStorageState\(merged\);[\s\S]*?markHomeStateRevisionCurrent\(\);/);
+  assert.match(saveSource, /writeCachedStorageState\(state\);\s*markHomeStateRevisionCurrent\(\);/);
+});
+
+test('Home records full lifecycle baselines after boot and real refreshes', () => {
+  assert.match(home, /function markHomeLifecycleBaseline\(\)/);
+  assert.match(home, /state = syncStateWithMatchups\(state\);\s*markHomeLifecycleBaseline\(\);\s*renderHabitWeekLabels/);
+  assert.match(home, /scheduleRender\(renderAll\);\s*markHomeLifecycleBaseline\(\);\s*return true;/);
   assert.match(home, /refreshMainPageIfChanged\('initial-bfcache-pageshow'\)/);
   assert.match(home, /refreshMainPageIfChanged\('pageshow'\)/);
   assert.match(home, /refreshMainPageIfChanged\('visibilitychange'\)/);
-});
-
-test('Home updates its revision after initial load, saves, and real refreshes', () => {
-  const marks = home.match(/markHomeStateRevisionCurrent\(\);/g) || [];
-  assert.ok(marks.length >= 3, `expected at least 3 revision baseline updates, found ${marks.length}`);
-  assert.match(home, /state = syncStateWithMatchups\(state\);\s*markHomeStateRevisionCurrent\(\);\s*renderHabitWeekLabels/);
-  assert.match(home, /finally \{\s*markHomeStateRevisionCurrent\(\);\s*\}/);
-  assert.match(home, /scheduleRender\(renderAll\);\s*markHomeStateRevisionCurrent\(\);\s*return true;/);
 });
