@@ -11,9 +11,10 @@ const helper = fs.readFileSync(path.join(root, 'storage_season_image_reference_r
 test('Storage Diagnostics loads versioned Season repair assets and exposes a separate disabled action', () => {
   assert.match(html, /id="repairMissingSeasonImagesBtn"[^>]*disabled/);
   assert.match(html, /id="seasonImageRepairStatus"/);
-  assert.match(html, /storage_season_image_reference_repair\.js\?v=20260804-1/);
-  assert.match(html, /storage_diagnostics_season_image_repair_controller\.js\?v=20260804-1/);
-  assert.match(html, /Only separately confirmed repair or cleanup actions can modify storage/);
+  assert.match(html, /storage_season_image_reference_repair\.js\?v=20260804-2/);
+  assert.match(html, /storage_diagnostics_season_image_repair_controller\.js\?v=20260804-2/);
+  assert.match(html, /Only the separately confirmed image-cleanup action can delete storage/);
+  assert.match(html, /separate confirmed Season repair changes only verified Season imageId references/);
 });
 
 test('repair is dynamic and never hardcodes the five observed player names or image IDs', () => {
@@ -25,20 +26,23 @@ test('repair is dynamic and never hardcodes the five observed player names or im
   assert.match(helper, /duplicate-current-player-id/);
   assert.match(helper, /replacement-blob-missing/);
   assert.match(helper, /reference-paths-unavailable/);
+  assert.match(helper, /ambiguous-missing-image-reference/);
 });
 
-test('controller requires native confirmation and stale-preview revalidation', () => {
+test('controller requires native confirmation and complete stale-preview revalidation', () => {
   assert.match(controller, /window\.confirm\(/);
   assert.match(controller, /validatedState\.raw !== previewState\.raw/);
+  assert.match(controller, /validatedReport\.fingerprint !== previewReport\.fingerprint/);
   assert.match(controller, /validatedPlan\.fingerprint !== previewPlan\.fingerprint/);
   assert.match(controller, /Nothing was changed/);
 });
 
-test('controller saves only currentSeason and seasonHistory through the normal save pipeline', () => {
-  assert.match(controller, /const patch = \{[\s\S]*currentSeason:[\s\S]*seasonHistory:/);
-  assert.match(controller, /core\.saveAppState\(patch/);
-  assert.match(controller, /immediateWrite: true/);
-  assert.match(controller, /userInitiated: true/);
+test('controller bypasses mutating save pipelines and uses the exact full-state writer', () => {
+  assert.match(controller, /core\.writeTaskPointsStoredState\(nextState/);
+  assert.match(controller, /expectedPreviousRaw/);
+  assert.match(controller, /localStorage\.getItem\(STORAGE_KEY\).*expectedPreviousRaw/s);
+  assert.doesNotMatch(controller, /core\.saveAppState\(/);
+  assert.doesNotMatch(controller, /core\.mergeAndSaveState\(/);
   assert.doesNotMatch(controller, /indexedDB\.deleteDatabase|objectStore\([^)]*\)\.delete/);
 });
 
@@ -52,8 +56,17 @@ test('runtime verifies whole-state parity, exact Season images, and zero missing
   assert.match(controller, /No other data changed/);
 });
 
-test('final operation message survives the controls refresh', () => {
-  assert.match(controller, /updateControls\(preserveStatus = false\)/);
-  assert.match(controller, /updateControls\(true\)/);
+test('failed post-write verification restores the exact previous raw snapshot', () => {
+  assert.match(controller, /rollbackRaw = validatedState\.raw/);
+  assert.match(controller, /restoreRawState\(rollbackRaw\)/);
+  assert.match(controller, /previous TaskPoints snapshot was restored automatically/);
+});
+
+test('terminal operation messages survive observer and interval refreshes', () => {
+  assert.match(controller, /let terminalStatusLocked = false/);
+  assert.match(controller, /function setTerminalStatus/);
+  assert.match(controller, /if \(!terminalStatusLocked/);
+  assert.match(controller, /setInterval\(updateControls, 1000\)/);
   assert.match(controller, /Repaired and verified/);
+  assert.match(controller, /addEventListener\('click',[\s\S]*clearTerminalStatus\(\)/);
 });
