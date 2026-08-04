@@ -1,0 +1,40 @@
+name: Apply Home IndexedDB first boot
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+
+      - name: Apply guarded Home IndexedDB boot patch
+        run: python scripts/apply_home_indexeddb_first_boot.py
+
+      - name: Run focused checks
+        run: |
+          node --check home_indexeddb_bootstrap.js
+          node --check phase5b_deferred_mirror.js
+          node --test tests/home_indexeddb_first_boot_contract.test.js
+          node --test tests/home_revision_refresh_contract.test.js
+          git diff --check
+
+      - name: Commit implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html phase5b_deferred_mirror.js tests/home_indexeddb_first_boot_contract.test.js
+          git diff --cached --quiet && exit 0
+          git commit -m "Boot Home from verified IndexedDB snapshot"
+          git push
