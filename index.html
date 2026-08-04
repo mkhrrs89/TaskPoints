@@ -77,6 +77,29 @@ Nothing visible on the page is built here. === -->
       z-index: 99999;
       opacity: 1;
       transition: opacity 140ms ease;
+      touch-action: manipulation;
+      cursor: pointer;
+    }
+
+    .bootSplashContent {
+      display: grid;
+      place-items: center;
+      gap: 18px;
+      text-align: center;
+    }
+
+    .bootSkipHint {
+      color: rgba(200,255,216,0.62);
+      font: 600 11px/1.2 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      user-select: none;
+      animation: tpBootSkipHintPulse 1.2s ease-in-out infinite alternate;
+    }
+
+    @keyframes tpBootSkipHintPulse {
+      from { opacity: 0.42; }
+      to { opacity: 0.82; }
     }
 
     .matrixTitle {
@@ -509,8 +532,17 @@ Nothing visible on the page is built here. === -->
 <!-- === BODY (START) === -->  
 <body class="min-h-screen" style="background:#0b0d10;">
 
-<div id="bootSplash" class="bootSplash" aria-hidden="true">
-  <div id="matrixTitle" class="matrixTitle" role="img" aria-label="TASKPOINTS"></div>
+<div
+  id="bootSplash"
+  class="bootSplash"
+  role="button"
+  tabindex="0"
+  aria-label="TaskPoints opening animation. Tap anywhere to skip."
+>
+  <div class="bootSplashContent">
+    <div id="matrixTitle" class="matrixTitle" role="img" aria-label="TASKPOINTS"></div>
+    <div class="bootSkipHint" aria-hidden="true">Tap anywhere to skip</div>
+  </div>
 </div>
 
 <script id="tp-early-matrix-bootstrap">
@@ -525,12 +557,47 @@ Nothing visible on the page is built here. === -->
   let finishTimer = null;
   let skipCleanup = null;
   let resolveFinished;
+  let viewFinished = false;
 
   window.__tpMatrixFinished = false;
   window.__tpMatrixFinishedPromise = new Promise(resolve => {
     resolveFinished = resolve;
   });
   window.__tpBootAnimStarted = true;
+
+  const completeBootView = ({ skipped = false } = {}) => {
+    if (viewFinished || window.__tpBootViewFinished) return true;
+
+    const app = document.getElementById("appRoot");
+    if (!app) {
+      window.__tpBootRevealPending = { skipped: Boolean(skipped) };
+      return false;
+    }
+
+    viewFinished = true;
+    window.__tpBootViewFinished = true;
+    window.__tpBootRevealPending = null;
+
+    try { sessionStorage.setItem("tpBootSeenThisSession", "1"); } catch (e) {}
+    document.documentElement.classList.remove("tp-boot-pending");
+    document.documentElement.classList.add("tp-boot-seen");
+    document.body.classList.remove("booting");
+
+    app.style.visibility = "visible";
+    app.style.opacity = "1";
+    app.style.pointerEvents = "auto";
+
+    if (splash) {
+      splash.style.pointerEvents = "none";
+      splash.style.transition = skipped ? "opacity 70ms ease" : "opacity 240ms ease";
+      splash.style.opacity = "0";
+      setTimeout(() => splash.remove(), skipped ? 80 : 260);
+    }
+
+    window.dispatchEvent(new Event("tp:bootFinished"));
+    return true;
+  };
+  window.__tpCompleteBootView = completeBootView;
 
   const finish = () => {
     if (finished) return;
@@ -562,12 +629,22 @@ Nothing visible on the page is built here. === -->
     skipRequested = true;
     titleEl.classList.add("tp-matrix-skip");
     finish();
+    completeBootView({ skipped: true });
+  };
+  const requestSkipFromKey = (event) => {
+    if (!["Enter", " ", "Escape"].includes(event.key)) return;
+    event.preventDefault();
+    requestSkip();
   };
   splash.addEventListener("pointerdown", requestSkip, { passive: true });
+  splash.addEventListener("touchstart", requestSkip, { passive: true });
   splash.addEventListener("click", requestSkip, { passive: true });
+  splash.addEventListener("keydown", requestSkipFromKey);
   skipCleanup = () => {
     splash.removeEventListener("pointerdown", requestSkip);
+    splash.removeEventListener("touchstart", requestSkip);
     splash.removeEventListener("click", requestSkip);
+    splash.removeEventListener("keydown", requestSkipFromKey);
   };
 
   if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches){
@@ -1598,6 +1675,11 @@ Nothing visible on the page is built here. === -->
   </div>
 </div>
 
+<script id="tp-boot-skip-ready">
+  if (window.__tpBootRevealPending && typeof window.__tpCompleteBootView === "function") {
+    window.__tpCompleteBootView(window.__tpBootRevealPending);
+  }
+</script>
 <script src="scoring_core.js"></script>  
 <script>
 const STORAGE_KEY="taskpoints_v1";
@@ -14685,8 +14767,16 @@ const dismissReminderForSession = () => {
   let bootFinished = false;
 
   function finishBoot(){
-    if (bootFinished) return;
+    if (bootFinished || window.__tpBootViewFinished) {
+      bootFinished = true;
+      return;
+    }
     bootFinished = true;
+
+    if (typeof window.__tpCompleteBootView === "function" && window.__tpCompleteBootView({ skipped: false })) {
+      return;
+    }
+
     const splash = document.getElementById("bootSplash");
     const app = document.getElementById("appRoot");
 
