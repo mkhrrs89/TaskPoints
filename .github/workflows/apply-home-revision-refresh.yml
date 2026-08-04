@@ -7,6 +7,7 @@ on:
     types:
       - synchronize
       - reopened
+      - ready_for_review
   push:
     branches:
       - fix/home-revision-aware-refresh
