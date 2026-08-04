@@ -1,0 +1,56 @@
+name: Apply Home single-load fix
+
+on:
+  push:
+    branches:
+      - fix/home-single-initial-load
+    paths:
+      - .github/workflows/apply-home-single-load-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-home:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+
+      - name: Remove the redundant initial post-paint reload
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          path = Path("index.html")
+          original = path.read_text(encoding="utf-8")
+          pattern = re.compile(
+              r"\n    const runPostPaintRefresh = \(\) => \{\n"
+              r"      refreshMainPageFromStorage\(\);\n"
+              r"    \};\n"
+              r"    requestAnimationFrame\(\(\) => \{\n"
+              r"      if \(typeof requestIdleCallback === 'function'\) \{\n"
+              r"        requestIdleCallback\(runPostPaintRefresh, \{ timeout: 800 \}\);\n"
+              r"      \} else \{\n"
+              r"        setTimeout\(runPostPaintRefresh, 0\);\n"
+              r"      \}\n"
+              r"    \}\);\n"
+          )
+          updated, replacements = pattern.subn("\n", original, count=1)
+          if replacements != 1:
+              raise SystemExit(f"Expected exactly one startup refresh block; found {replacements}")
+          if "function refreshMainPageFromStorage" not in updated:
+              raise SystemExit("Safety check failed: refreshMainPageFromStorage must remain")
+          if "maybeAutoSimToday()" not in updated:
+              raise SystemExit("Safety check failed: auto-simulation must remain")
+          path.write_text(updated, encoding="utf-8")
+
+      - name: Commit the focused change
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git diff --cached --check
+          git commit -m "Avoid duplicate Home startup reload"
+          git push
