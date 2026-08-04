@@ -20,7 +20,7 @@
           <img src="assets/taskpoints-logo.png" alt="TaskPoints logo" class="w-10 h-10 rounded-2xl object-cover shrink-0 shadow-sm">
           <div>
             <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight">Storage Diagnostics</h1>
-            <p class="muted text-sm">Storage measurements plus a guarded image-cleanup tool.</p>
+            <p class="muted text-sm">Storage measurements plus guarded image repair and cleanup tools.</p>
           </div>
         </a>
       </div>
@@ -32,7 +32,7 @@
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div>
             <div class="text-lg font-semibold">Diagnostic Controls</div>
-            <div class="muted text-sm">Running or exporting the report is read-only. Only the separately confirmed image-cleanup action can delete storage.</div>
+            <div class="muted text-sm">Running or exporting the report is read-only. Only the separately confirmed image-cleanup action can delete storage. The separate confirmed Season repair changes only verified Season imageId references.</div>
           </div>
           <div class="flex flex-wrap gap-2">
             <button id="runDiagnosticsBtn" type="button" class="btn btn-teal btn-toolbar nav-btn">Run Diagnostics</button>
@@ -69,15 +69,34 @@
         <div id="collectionsOutput" class="overflow-x-auto"></div>
       </section>
 
-      <section class="glass space-y-3" id="playerImageDatabaseSection">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <div class="text-lg font-semibold">Player Image Database</div>
-            <div class="muted text-sm">Counts image blobs, totals their bytes, and checks references across the full current TaskPoints state.</div>
-          </div>
-          <button id="cleanupUnreferencedImagesBtn" type="button" class="btn btn-danger btn-toolbar nav-btn" disabled>Run Diagnostics First</button>
+      <section class="glass space-y-4" id="playerImageDatabaseSection">
+        <div>
+          <div class="text-lg font-semibold">Player Image Database</div>
+          <div class="muted text-sm">Counts image blobs, totals their bytes, and checks references across the full current TaskPoints state.</div>
         </div>
-        <div id="imageCleanupStatus" class="muted text-xs">Run diagnostics to identify cleanup-safe image blobs.</div>
+
+        <div class="rounded-xl border border-slate-700/60 p-3 space-y-2">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div class="font-semibold">Repair Missing Season References</div>
+              <div class="muted text-xs">Replaces stale current or archived Season image IDs only when the matching player’s current image blob is verified.</div>
+            </div>
+            <button id="repairMissingSeasonImagesBtn" type="button" class="btn btn-ghost btn-toolbar nav-btn" disabled>Run Diagnostics First</button>
+          </div>
+          <div id="seasonImageRepairStatus" class="muted text-xs">Run diagnostics to identify repairable Season image references.</div>
+        </div>
+
+        <div class="rounded-xl border border-slate-700/60 p-3 space-y-2">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div class="font-semibold">Delete Unreferenced Image Blobs</div>
+              <div class="muted text-xs">Deletes only blobs that remain unreferenced after a fresh confirmation-time scan.</div>
+            </div>
+            <button id="cleanupUnreferencedImagesBtn" type="button" class="btn btn-danger btn-toolbar nav-btn" disabled>Run Diagnostics First</button>
+          </div>
+          <div id="imageCleanupStatus" class="muted text-xs">Run diagnostics to identify cleanup-safe image blobs.</div>
+        </div>
+
         <div id="imagesOutput" class="space-y-3 text-sm"></div>
       </section>
 
@@ -103,5 +122,7 @@
   <script src="storage_image_cleanup.js?v=20260803-1"></script>
   <script src="storage_diagnostics.js?v=20260803-1"></script>
   <script src="storage_diagnostics_cleanup_controller.js?v=20260803-1"></script>
+  <script src="storage_season_image_reference_repair.js?v=20260804-3"></script>
+  <script src="storage_diagnostics_season_image_repair_controller.js?v=20260804-3"></script>
 </body>
 </html>

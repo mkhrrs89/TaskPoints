@@ -1,0 +1,186 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const repair = require('../storage_season_image_reference_repair.js');
+
+function fixture() {
+  const players = [
+    { id: 'p1', name: 'Alpha', imageId: 'new-1' },
+    { id: 'p2', name: 'Bravo', imageId: 'new-2' },
+    { id: 'p3', name: 'Charlie', imageId: 'new-3' },
+    { id: 'p4', name: 'Delta', imageId: 'new-4' },
+    { id: 'p5', name: 'Echo', imageId: 'new-5' }
+  ];
+  const state = {
+    players,
+    currentSeason: {
+      status: 'active',
+      playerPool: [{ id: 'p1', name: 'Alpha', imageId: 'old-1', rating: 92 }],
+      seeds: [{ id: 'p1', playerId: 'p1', playerName: 'Alpha', imageId: 'old-1', seed: 5 }]
+    },
+    seasonHistory: [{
+      status: 'finalized',
+      championId: 'p2',
+      playerPool: [
+        { id: 'p2', name: 'Bravo', imageId: 'old-2' },
+        { id: 'p3', name: 'Charlie', imageId: 'old-3' },
+        { id: 'p4', name: 'Delta', imageId: 'old-4' },
+        { id: 'p5', name: 'Echo', imageId: 'old-5' }
+      ],
+      seeds: [
+        { playerId: 'p2', playerName: 'Bravo', imageId: 'old-2', seed: 1 },
+        { playerId: 'p3', playerName: 'Charlie', imageId: 'old-3', seed: 2 },
+        { playerId: 'p4', playerName: 'Delta', imageId: 'old-4', seed: 3 },
+        { playerId: 'p5', playerName: 'Echo', imageId: 'old-5', seed: 4 }
+      ],
+      originalSeeds: [
+        { playerId: 'p2', playerName: 'Bravo', imageId: 'old-2', seed: 1 },
+        { playerId: 'p3', playerName: 'Charlie', imageId: 'old-3', seed: 2 },
+        { playerId: 'p4', playerName: 'Delta', imageId: 'old-4', seed: 3 },
+        { playerId: 'p5', playerName: 'Echo', imageId: 'old-5', seed: 4 }
+      ]
+    }],
+    scores: { p1: 100, p2: 95 }
+  };
+  const missingReferences = ['old-1', 'old-2', 'old-3', 'old-4', 'old-5'];
+  const referencePaths = {
+    'old-1': ['state.currentSeason.playerPool[0].imageId', 'state.currentSeason.seeds[0].imageId'],
+    'old-2': ['state.seasonHistory[0].playerPool[0].imageId', 'state.seasonHistory[0].seeds[0].imageId', 'state.seasonHistory[0].originalSeeds[0].imageId'],
+    'old-3': ['state.seasonHistory[0].playerPool[1].imageId', 'state.seasonHistory[0].seeds[1].imageId', 'state.seasonHistory[0].originalSeeds[1].imageId'],
+    'old-4': ['state.seasonHistory[0].playerPool[2].imageId', 'state.seasonHistory[0].seeds[2].imageId', 'state.seasonHistory[0].originalSeeds[2].imageId'],
+    'old-5': ['state.seasonHistory[0].playerPool[3].imageId', 'state.seasonHistory[0].seeds[3].imageId', 'state.seasonHistory[0].originalSeeds[3].imageId']
+  };
+  const rows = players.map((player) => ({ key: player.imageId, bytes: 100, type: 'image/jpeg' }));
+  return { state, report: { missingReferences, referencePaths, rows } };
+}
+
+test('builds a safe dynamic plan for five missing IDs across fourteen exact Season paths', () => {
+  const { state, report } = fixture();
+  const plan = repair.buildRepairPlan(state, report);
+  assert.equal(plan.safe, true);
+  assert.equal(plan.missingIds.length, 5);
+  assert.equal(plan.replacementGroups.length, 5);
+  assert.equal(plan.repairs.length, 14);
+  assert.equal(plan.expectedAllowedPathCount, 14);
+  assert.equal(plan.unresolved.length, 0);
+  assert.equal(plan.externalPaths.length, 0);
+  assert.ok(plan.repairs.every((entry) => entry.path.endsWith('.imageId')));
+});
+
+test('applies only the exact confirmed imageId paths inside current and archived Season copies', () => {
+  const { state, report } = fixture();
+  const plan = repair.buildRepairPlan(state, report);
+  const beforeNonImage = repair.nonImageSnapshot(state);
+  const originalPlayers = JSON.stringify(state.players);
+  const originalScores = JSON.stringify(state.scores);
+  const result = repair.applyRepairPlan(state, plan);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.updatedCount, 14);
+  assert.equal(repair.nonImageSnapshot(result.state), beforeNonImage);
+  assert.notEqual(repair.seasonImageSnapshot(result.state), repair.seasonImageSnapshot(state));
+  assert.equal(JSON.stringify(result.state.players), originalPlayers);
+  assert.equal(JSON.stringify(result.state.scores), originalScores);
+  assert.equal(result.state.currentSeason.playerPool[0].imageId, 'new-1');
+  assert.equal(result.state.seasonHistory[0].originalSeeds[3].imageId, 'new-5');
+  assert.equal(state.currentSeason.playerPool[0].imageId, 'old-1', 'source state remains unchanged');
+});
+
+test('rejects a plan whose exact path no longer points to the confirmed player and image', () => {
+  const { state, report } = fixture();
+  const plan = repair.buildRepairPlan(state, report);
+  state.currentSeason.playerPool[0].imageId = 'different-old-image';
+  const result = repair.applyRepairPlan(state, plan);
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'repair-count-or-path-mismatch');
+  assert.equal(result.state, state);
+});
+
+test('blocks repair when a missing image is referenced outside Season data', () => {
+  const { state, report } = fixture();
+  report.referencePaths['old-1'].push('state.players[0].imageId');
+  const plan = repair.buildRepairPlan(state, report);
+  assert.equal(plan.safe, false);
+  assert.deepEqual(plan.externalPaths, [{ imageId: 'old-1', path: 'state.players[0].imageId' }]);
+});
+
+test('matches Season path roots on a segment boundary', () => {
+  assert.equal(repair.isAllowedSeasonPath('state.currentSeason.playerPool[0].imageId'), true);
+  assert.equal(repair.isAllowedSeasonPath('state.seasonHistory[0].seeds[0].imageId'), true);
+  assert.equal(repair.isAllowedSeasonPath('state.currentSeasonBackup.playerPool[0].imageId'), false);
+  assert.equal(repair.isAllowedSeasonPath('state.seasonHistoryBackup[0].imageId'), false);
+
+  const { state, report } = fixture();
+  report.referencePaths['old-1'].push('state.currentSeasonBackup.playerPool[0].imageId');
+  const plan = repair.buildRepairPlan(state, report);
+  assert.equal(plan.safe, false);
+  assert.ok(plan.externalPaths.some((entry) => entry.path.startsWith('state.currentSeasonBackup')));
+});
+
+test('blocks repair when the current replacement blob is not present', () => {
+  const { state, report } = fixture();
+  report.rows = report.rows.filter((row) => row.key !== 'new-3');
+  const plan = repair.buildRepairPlan(state, report);
+  assert.equal(plan.safe, false);
+  assert.ok(plan.unresolved.some((entry) => entry.playerId === 'p3' && entry.reason === 'replacement-blob-missing'));
+});
+
+test('blocks repair when a missing reference cannot be matched by stable player ID', () => {
+  const { state, report } = fixture();
+  state.seasonHistory[0].playerPool[0].id = 'unknown-player';
+  const plan = repair.buildRepairPlan(state, report);
+  assert.equal(plan.safe, false);
+  assert.ok(plan.unresolved.some((entry) => entry.reason === 'player-not-found'));
+});
+
+test('blocks repair when current player IDs are duplicated', () => {
+  const { state, report } = fixture();
+  state.players.push({ id: 'p1', name: 'Duplicate Alpha', imageId: 'other-new-1' });
+  report.rows.push({ key: 'other-new-1', bytes: 100, type: 'image/jpeg' });
+  const plan = repair.buildRepairPlan(state, report);
+  assert.equal(plan.safe, false);
+  assert.ok(plan.duplicatePlayerIds.includes('p1'));
+  assert.ok(plan.unresolved.some((entry) => entry.playerId === 'p1' && entry.reason === 'duplicate-current-player-id'));
+});
+
+test('blocks repair when diagnostics does not provide exact reference paths', () => {
+  const { state, report } = fixture();
+  delete report.referencePaths['old-4'];
+  const plan = repair.buildRepairPlan(state, report);
+  assert.equal(plan.safe, false);
+  assert.ok(plan.unresolved.some((entry) => entry.imageId === 'old-4' && entry.reason === 'reference-paths-unavailable'));
+});
+
+test('blocks one missing image ID that ambiguously maps to multiple current players', () => {
+  const { state, report } = fixture();
+  state.currentSeason.playerPool.push({ id: 'p2', name: 'Bravo', imageId: 'old-1' });
+  report.referencePaths['old-1'].push('state.currentSeason.playerPool[1].imageId');
+  const plan = repair.buildRepairPlan(state, report);
+  assert.equal(plan.safe, false);
+  assert.ok(plan.unresolved.some((entry) => entry.imageId === 'old-1' && entry.reason === 'ambiguous-missing-image-reference'));
+});
+
+test('uses canonical current-player id before legacy playerId fallback', () => {
+  const state = {
+    players: [
+      { id: 'p1', playerId: 'p2', name: 'Canonical P1', imageId: 'new-p1' },
+      { id: 'p2', name: 'Canonical P2', imageId: 'new-p2' }
+    ],
+    currentSeason: {
+      seeds: [{ id: 'legacy-p1', playerId: 'p2', playerName: 'Canonical P2', imageId: 'old-p2' }]
+    },
+    seasonHistory: []
+  };
+  const report = {
+    missingReferences: ['old-p2'],
+    referencePaths: { 'old-p2': ['state.currentSeason.seeds[0].imageId'] },
+    rows: [
+      { key: 'new-p1', bytes: 100, type: 'image/jpeg' },
+      { key: 'new-p2', bytes: 100, type: 'image/jpeg' }
+    ]
+  };
+
+  const plan = repair.buildRepairPlan(state, report);
+  assert.equal(plan.safe, true);
+  assert.equal(plan.repairs[0].playerId, 'p2');
+  assert.equal(plan.repairs[0].newImageId, 'new-p2');
+});
