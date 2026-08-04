@@ -10,7 +10,7 @@ function closeAllDropdowns(exception) {
 window.TP_DEBUG_PERF = window.TP_DEBUG_PERF ?? false;
 
 (function installTaskPointsStateRevision(global) {
-  if (global.TaskPointsStateRevision?.installed) return;
+  if (global.TaskPointsStateRevision) return;
 
   const storage = global.localStorage;
   if (!storage) return;
@@ -22,8 +22,6 @@ window.TP_DEBUG_PERF = window.TP_DEBUG_PERF ?? false;
     'tp_projects_v1'
   ]);
   const baseSetItem = storage.setItem.bind(storage);
-  const baseRemoveItem = storage.removeItem.bind(storage);
-  const baseClear = storage.clear.bind(storage);
   let sequence = 0;
 
   const read = () => {
@@ -37,92 +35,30 @@ window.TP_DEBUG_PERF = window.TP_DEBUG_PERF ?? false;
   };
 
   const publishRevision = (reason = 'state-write', emitEvent = true) => {
-  const revision = createRevision();
-  try {
-    baseSetItem(REVISION_KEY, revision);
-  } catch (_) {
-    return read();
-  }
-  if (emitEvent && typeof global.dispatchEvent === 'function' && typeof global.CustomEvent === 'function') {
-    global.dispatchEvent(new global.CustomEvent('taskpoints:state-revision', {
-      detail: { revision, reason }
-    }));
-  }
-  return revision;
-};
-
-  const installOnStorageObject = () => {
+    const revision = createRevision();
     try {
-      const wrappedSetItem = function taskPointsRevisionSetItem(key, value) {
-        const result = baseSetItem(key, value);
-        if (TRACKED_KEYS.has(String(key))) publishRevision(`set:${String(key)}`);
-        return result;
-      };
-      const wrappedRemoveItem = function taskPointsRevisionRemoveItem(key) {
-        const result = baseRemoveItem(key);
-        if (TRACKED_KEYS.has(String(key))) publishRevision(`remove:${String(key)}`);
-        return result;
-      };
-      const wrappedClear = function taskPointsRevisionClear() {
-        const result = baseClear();
-        publishRevision('clear');
-        return result;
-      };
-
-      storage.setItem = wrappedSetItem;
-      storage.removeItem = wrappedRemoveItem;
-      storage.clear = wrappedClear;
-      return storage.setItem === wrappedSetItem
-        && storage.removeItem === wrappedRemoveItem
-        && storage.clear === wrappedClear;
+      baseSetItem(REVISION_KEY, revision);
     } catch (_) {
-      return false;
+      return read();
     }
+    if (emitEvent && typeof global.dispatchEvent === 'function' && typeof global.CustomEvent === 'function') {
+      global.dispatchEvent(new global.CustomEvent('taskpoints:state-revision', {
+        detail: { revision, reason }
+      }));
+    }
+    return revision;
   };
 
-  const installOnStoragePrototype = () => {
-    const prototype = global.Storage?.prototype;
-    if (!prototype || prototype.__taskPointsStateRevisionHookInstalled) return false;
-
-    try {
-      const originalSetItem = prototype.setItem;
-      const originalRemoveItem = prototype.removeItem;
-      const originalClear = prototype.clear;
-
-      Object.defineProperty(prototype, '__taskPointsStateRevisionHookInstalled', {
-        value: true,
-        configurable: true
-      });
-
-      prototype.setItem = function taskPointsRevisionSetItem(key, value) {
-        const result = originalSetItem.call(this, key, value);
-        if (this === storage && TRACKED_KEYS.has(String(key))) publishRevision(`set:${String(key)}`);
-        return result;
-      };
-      prototype.removeItem = function taskPointsRevisionRemoveItem(key) {
-        const result = originalRemoveItem.call(this, key);
-        if (this === storage && TRACKED_KEYS.has(String(key))) publishRevision(`remove:${String(key)}`);
-        return result;
-      };
-      prototype.clear = function taskPointsRevisionClear() {
-        const result = originalClear.call(this);
-        if (this === storage) publishRevision('clear');
-        return result;
-      };
-      return true;
-    } catch (_) {
-      return false;
-    }
-  };
-
-  const installed = installOnStorageObject() || installOnStoragePrototype();
   global.TaskPointsStateRevision = {
-    installed,
+    installed: true,
+    hookInstalled: false,
     key: REVISION_KEY,
     trackedKeys: Array.from(TRACKED_KEYS),
+    shouldTrack: (key) => TRACKED_KEYS.has(String(key)),
     read,
     bump: publishRevision,
-    ensure: () => read() || publishRevision('bootstrap', false)
+    ensure: () => read() || publishRevision('bootstrap', false),
+    markHookInstalled() { this.hookInstalled = true; }
   };
   global.TaskPointsStateRevision.ensure();
 })(window);
@@ -1402,6 +1338,10 @@ function installToolbarStorageBridge() {
     if (this === window.localStorage) {
       const nextValue = String(value);
       dispatchChange({ key: normalizedKey, oldValue, newValue: nextValue });
+      const revision = window.TaskPointsStateRevision;
+      if (oldValue !== nextValue && revision?.shouldTrack?.(normalizedKey)) {
+        revision.bump(`set:${normalizedKey}`);
+      }
     }
     return result;
   };
@@ -1417,6 +1357,10 @@ function installToolbarStorageBridge() {
     const result = originalRemoveItem.apply(this, arguments);
     if (this === window.localStorage) {
       dispatchChange({ key: normalizedKey, oldValue, newValue: null });
+      const revision = window.TaskPointsStateRevision;
+      if (oldValue !== null && revision?.shouldTrack?.(normalizedKey)) {
+        revision.bump(`remove:${normalizedKey}`);
+      }
     }
     return result;
   };
@@ -1425,10 +1369,12 @@ function installToolbarStorageBridge() {
     const result = originalClear.apply(this, arguments);
     if (this === window.localStorage) {
       dispatchChange({ key: null, oldValue: null, newValue: null });
+      window.TaskPointsStateRevision?.bump?.('clear');
     }
     return result;
   };
 
+  window.TaskPointsStateRevision?.markHookInstalled?.();
   window.__tpToolbarStorageBridgeInstalled = true;
 }
 
