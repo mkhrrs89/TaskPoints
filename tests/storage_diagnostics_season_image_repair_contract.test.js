@@ -22,7 +22,9 @@ test('repair is dynamic and never hardcodes the five observed player names or im
     assert.doesNotMatch(controller, new RegExp(forbidden, 'i'));
   }
   assert.match(helper, /currentByPlayerId/);
+  assert.match(helper, /duplicate-current-player-id/);
   assert.match(helper, /replacement-blob-missing/);
+  assert.match(helper, /reference-paths-unavailable/);
 });
 
 test('controller requires native confirmation and stale-preview revalidation', () => {
@@ -40,12 +42,14 @@ test('controller saves only currentSeason and seasonHistory through the normal s
   assert.doesNotMatch(controller, /indexedDB\.deleteDatabase|objectStore\([^)]*\)\.delete/);
 });
 
-test('runtime verifies non-image parity and zero remaining missing references after saving', () => {
+test('runtime verifies whole-state parity, exact Season images, and zero missing references after saving', () => {
   assert.match(controller, /repair\.nonImageSnapshot\(validatedState\.state\) !== repair\.nonImageSnapshot\(applied\.state\)/);
   assert.match(controller, /repair\.nonImageSnapshot\(validatedState\.state\) !== repair\.nonImageSnapshot\(finalState\.state\)/);
+  assert.match(controller, /expectedSeasonImages = repair\.seasonImageSnapshot\(applied\.state\)/);
+  assert.match(controller, /repair\.seasonImageSnapshot\(finalState\.state\) !== expectedSeasonImages/);
   assert.match(controller, /remainingOldIds/);
   assert.match(controller, /finalReport\.missingReferences\.length/);
-  assert.match(controller, /No non-image Season fields changed/);
+  assert.match(controller, /No other data changed/);
 });
 
 test('final operation message survives the controls refresh', () => {
