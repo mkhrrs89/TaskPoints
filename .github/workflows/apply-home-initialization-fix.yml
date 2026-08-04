@@ -1,0 +1,72 @@
+name: Apply Home initialization fix
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - synchronize
+      - reopened
+
+permissions:
+  contents: write
+
+jobs:
+  patch-home:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out working branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+
+      - name: Restore first-load initialization without reloading storage
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("index.html")
+          original = path.read_text(encoding="utf-8")
+          old = """  initHomeTabs();
+          updateWeekToggleButtons();
+          updateFlexDayToggleButton();
+          renderHabitWeekLabels();
+          """
+          new = """  initHomeTabs();
+          updateWeekToggleButtons();
+          updateFlexDayToggleButton();
+
+          // Preserve first-load daily initialization without re-reading storage.
+          maybeAutoSimToday();
+          state = syncStateWithMatchups(state);
+
+          renderHabitWeekLabels();
+          """
+
+          matches = original.count(old)
+          if matches == 0 and "Preserve first-load daily initialization without re-reading storage." in original:
+              print("Home initialization fix is already applied.")
+          elif matches != 1:
+              raise SystemExit(f"Expected exactly one Home startup render block; found {matches}")
+          else:
+              updated = original.replace(old, new, 1)
+              if "runPostPaintRefresh" in updated:
+                  raise SystemExit("Safety check failed: redundant startup refresh returned")
+              if "function refreshMainPageFromStorage" not in updated:
+                  raise SystemExit("Safety check failed: later refresh path must remain")
+              if updated.count("maybeAutoSimToday();") < 2:
+                  raise SystemExit("Safety check failed: boot and refresh auto-sim calls must both remain")
+              if "state = syncStateWithMatchups(state);" not in updated:
+                  raise SystemExit("Safety check failed: in-memory matchup sync must remain")
+              path.write_text(updated, encoding="utf-8")
+
+      - name: Commit the focused change when needed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git diff --cached --quiet && exit 0
+          git diff --cached --check
+          test "$(git diff --cached --name-only)" = "index.html"
+          git commit -m "Preserve Home auto-sim on single-load boot"
+          git push
