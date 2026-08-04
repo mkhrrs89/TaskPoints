@@ -43,14 +43,19 @@
   function buildRepairPlan(state, imageReport) {
     const players = Array.isArray(state?.players) ? state.players : [];
     const currentByPlayerId = new Map();
+    const duplicatePlayerIds = new Set();
     players.forEach((player) => {
       const playerId = playerIdFor(player);
       const imageId = imageIdFor(player);
-      if (playerId && imageId) currentByPlayerId.set(playerId, {
-        playerId,
-        imageId,
-        name: player.name || player.playerName || playerId
-      });
+      if (!playerId) return;
+      if (currentByPlayerId.has(playerId)) duplicatePlayerIds.add(playerId);
+      if (imageId) {
+        currentByPlayerId.set(playerId, {
+          playerId,
+          imageId,
+          name: player.name || player.playerName || playerId
+        });
+      }
     });
 
     const missingIds = [...new Set((imageReport?.missingReferences || []).map(String).filter(Boolean))].sort();
@@ -60,9 +65,30 @@
     const missingSet = new Set(missingIds);
     const repairs = [];
     const unresolved = [];
+    const externalPaths = [];
+    const expectedAllowedPaths = new Set();
+
+    missingIds.forEach((imageId) => {
+      const paths = Array.isArray(referencePaths[imageId]) ? referencePaths[imageId].map(String) : [];
+      if (!paths.length) {
+        unresolved.push({ imageId, reason: 'reference-paths-unavailable' });
+        return;
+      }
+      paths.forEach((path) => {
+        if (path.startsWith('state.currentSeason') || path.startsWith('state.seasonHistory')) {
+          expectedAllowedPaths.add(`${imageId}|${path}`);
+        } else {
+          externalPaths.push({ imageId, path });
+        }
+      });
+    });
 
     seasonReferences.forEach((reference) => {
       if (!missingSet.has(reference.imageId)) return;
+      if (duplicatePlayerIds.has(reference.playerId)) {
+        unresolved.push({ ...reference, reason: 'duplicate-current-player-id' });
+        return;
+      }
       const current = currentByPlayerId.get(reference.playerId);
       if (!current) {
         unresolved.push({ ...reference, reason: 'player-not-found' });
@@ -85,20 +111,28 @@
       });
     });
 
-    const foundMissingIds = new Set(repairs.map((repair) => repair.oldImageId));
-    unresolved.forEach((entry) => foundMissingIds.add(entry.imageId));
-    missingIds.forEach((imageId) => {
-      if (!foundMissingIds.has(imageId)) unresolved.push({ imageId, reason: 'missing-reference-not-found-in-season-data' });
+    const coveredPaths = new Set();
+    repairs.forEach((repair) => coveredPaths.add(`${repair.oldImageId}|${repair.path}`));
+    unresolved.forEach((entry) => {
+      if (entry.imageId && entry.path) coveredPaths.add(`${entry.imageId}|${entry.path}`);
+    });
+    expectedAllowedPaths.forEach((key) => {
+      if (!coveredPaths.has(key)) {
+        const splitAt = key.indexOf('|');
+        unresolved.push({
+          imageId: key.slice(0, splitAt),
+          path: key.slice(splitAt + 1),
+          reason: 'reference-path-not-matched'
+        });
+      }
     });
 
-    const externalPaths = [];
+    const foundMissingIds = new Set(repairs.map((repair) => repair.oldImageId));
+    unresolved.forEach((entry) => {
+      if (entry.imageId) foundMissingIds.add(entry.imageId);
+    });
     missingIds.forEach((imageId) => {
-      const paths = Array.isArray(referencePaths[imageId]) ? referencePaths[imageId] : [];
-      paths.forEach((path) => {
-        if (!String(path).startsWith('state.currentSeason') && !String(path).startsWith('state.seasonHistory')) {
-          externalPaths.push({ imageId, path: String(path) });
-        }
-      });
+      if (!foundMissingIds.has(imageId)) unresolved.push({ imageId, reason: 'missing-reference-not-found-in-season-data' });
     });
 
     repairs.sort((a, b) => a.path.localeCompare(b.path));
@@ -129,9 +163,11 @@
     const safe = missingIds.length > 0
       && unresolved.length === 0
       && externalPaths.length === 0
-      && repairedMissingIds.length === missingIds.length;
+      && repairedMissingIds.length === missingIds.length
+      && repairs.length === expectedAllowedPaths.size;
     const fingerprint = JSON.stringify({
       missingIds,
+      expectedAllowedPaths: [...expectedAllowedPaths].sort(),
       repairs: repairs.map(({ path, playerId, oldImageId, newImageId }) => [path, playerId, oldImageId, newImageId])
     });
 
@@ -143,6 +179,8 @@
       replacementGroups,
       unresolved,
       externalPaths,
+      duplicatePlayerIds: [...duplicatePlayerIds].sort(),
+      expectedAllowedPathCount: expectedAllowedPaths.size,
       fingerprint
     };
   }
@@ -177,23 +215,28 @@
   }
 
   function nonImageSnapshot(state) {
-    const roots = {
-      currentSeason: clone(state?.currentSeason ?? null),
-      seasonHistory: clone(state?.seasonHistory ?? [])
-    };
-    walk(roots, 'roots', (value) => {
-      if (value && typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, 'imageId')) {
-        value.imageId = '__IMAGE_ID__';
-      }
+    const next = clone(state || {});
+    walk(next.currentSeason, 'state.currentSeason', (value) => {
+      if (Object.prototype.hasOwnProperty.call(value, 'imageId')) value.imageId = '__SEASON_IMAGE_ID__';
     });
-    return JSON.stringify(roots);
+    walk(next.seasonHistory, 'state.seasonHistory', (value) => {
+      if (Object.prototype.hasOwnProperty.call(value, 'imageId')) value.imageId = '__SEASON_IMAGE_ID__';
+    });
+    return JSON.stringify(next);
+  }
+
+  function seasonImageSnapshot(state) {
+    return JSON.stringify(collectSeasonReferences(state)
+      .map(({ path, playerId, imageId }) => [path, playerId, imageId])
+      .sort((a, b) => a[0].localeCompare(b[0])));
   }
 
   const api = {
     collectSeasonReferences,
     buildRepairPlan,
     applyRepairPlan,
-    nonImageSnapshot
+    nonImageSnapshot,
+    seasonImageSnapshot
   };
 
   global.TaskPointsSeasonImageReferenceRepair = api;
