@@ -37,15 +37,19 @@ window.TP_DEBUG_PERF = window.TP_DEBUG_PERF ?? false;
   };
 
   const publishRevision = (reason = 'state-write', emitEvent = true) => {
-    const revision = createRevision();
+  const revision = createRevision();
+  try {
     baseSetItem(REVISION_KEY, revision);
-    if (emitEvent && typeof global.dispatchEvent === 'function' && typeof global.CustomEvent === 'function') {
-      global.dispatchEvent(new CustomEvent('taskpoints:state-revision', {
-        detail: { revision, reason }
-      }));
-    }
-    return revision;
-  };
+  } catch (_) {
+    return read();
+  }
+  if (emitEvent && typeof global.dispatchEvent === 'function' && typeof global.CustomEvent === 'function') {
+    global.dispatchEvent(new global.CustomEvent('taskpoints:state-revision', {
+      detail: { revision, reason }
+    }));
+  }
+  return revision;
+};
 
   const installOnStorageObject = () => {
     try {

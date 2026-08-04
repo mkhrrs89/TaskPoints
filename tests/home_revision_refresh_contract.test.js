@@ -10,6 +10,7 @@ const home = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 test('shared toolbar stamps a small revision for authoritative Home data writes', () => {
   assert.match(toolbar, /installTaskPointsStateRevision/);
   assert.match(toolbar, /taskpoints_state_revision_v1/);
+  assert.match(toolbar, /try \{\s*baseSetItem\(REVISION_KEY, revision\);\s*\} catch/);
   assert.match(toolbar, /taskpoints_v1/);
   assert.match(toolbar, /taskpoints_pending_habit_deltas_v1/);
   assert.match(toolbar, /tp_projects_v1/);
