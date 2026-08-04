@@ -20,7 +20,9 @@ jobs:
           ref: ${{ github.head_ref }}
 
       - name: Apply guarded first-paint patch
-        run: python scripts/apply_home_first_paint_deferral.py
+        run: |
+          python scripts/apply_home_first_paint_deferral.py
+          python scripts/fix_home_first_paint_test.py
 
       - name: Run focused checks
         run: |
