@@ -6,7 +6,12 @@
     return JSON.parse(JSON.stringify(value));
   }
 
-  function playerIdFor(value) {
+  function currentPlayerIdFor(value) {
+    if (!value || typeof value !== 'object') return '';
+    return String(value.id || value.playerId || '');
+  }
+
+  function seasonPlayerIdFor(value) {
     if (!value || typeof value !== 'object') return '';
     return String(value.playerId || value.id || '');
   }
@@ -39,7 +44,7 @@
     const rows = [];
     walk(state?.currentSeason, 'state.currentSeason', (value, path) => {
       const imageId = imageIdFor(value);
-      const playerId = playerIdFor(value);
+      const playerId = seasonPlayerIdFor(value);
       if (imageId && playerId) rows.push({
         path: `${path}.imageId`,
         playerId,
@@ -49,7 +54,7 @@
     });
     walk(state?.seasonHistory, 'state.seasonHistory', (value, path) => {
       const imageId = imageIdFor(value);
-      const playerId = playerIdFor(value);
+      const playerId = seasonPlayerIdFor(value);
       if (imageId && playerId) rows.push({
         path: `${path}.imageId`,
         playerId,
@@ -75,7 +80,7 @@
     }
 
     players.forEach((player) => {
-      const playerId = playerIdFor(player);
+      const playerId = currentPlayerIdFor(player);
       const imageId = imageIdFor(player);
       if (!playerId) return;
       if (seenPlayerIds.has(playerId)) duplicatePlayerIds.add(playerId);
@@ -241,7 +246,7 @@
     const update = (value, path) => {
       const repair = repairsByPath.get(`${path}.imageId`);
       if (!repair) return;
-      const playerId = playerIdFor(value);
+      const playerId = seasonPlayerIdFor(value);
       const imageId = imageIdFor(value);
       if (playerId !== repair.playerId || imageId !== repair.oldImageId) {
         mismatch = true;
@@ -282,7 +287,9 @@
     applyRepairPlan,
     nonImageSnapshot,
     seasonImageSnapshot,
-    isAllowedSeasonPath
+    isAllowedSeasonPath,
+    currentPlayerIdFor,
+    seasonPlayerIdFor
   };
 
   global.TaskPointsSeasonImageReferenceRepair = api;
