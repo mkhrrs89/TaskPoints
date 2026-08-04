@@ -9,6 +9,60 @@ function closeAllDropdowns(exception) {
 
 window.TP_DEBUG_PERF = window.TP_DEBUG_PERF ?? false;
 
+(function installTaskPointsStateRevision(global) {
+  if (global.TaskPointsStateRevision) return;
+
+  const storage = global.localStorage;
+  if (!storage) return;
+
+  const REVISION_KEY = 'taskpoints_state_revision_v1';
+  const TRACKED_KEYS = new Set([
+    global.TaskPointsCore?.STORAGE_KEY || 'taskpoints_v1',
+    global.TaskPointsCore?.PENDING_HABIT_DELTAS_KEY || 'taskpoints_pending_habit_deltas_v1',
+    'tp_projects_v1'
+  ]);
+  const baseSetItem = storage.setItem.bind(storage);
+  let sequence = 0;
+
+  const read = () => {
+    try { return storage.getItem(REVISION_KEY) || ''; }
+    catch (_) { return ''; }
+  };
+
+  const createRevision = () => {
+    sequence += 1;
+    return `${Date.now().toString(36)}-${sequence.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  };
+
+  const publishRevision = (reason = 'state-write', emitEvent = true) => {
+    const revision = createRevision();
+    try {
+      baseSetItem(REVISION_KEY, revision);
+    } catch (_) {
+      return read();
+    }
+    if (emitEvent && typeof global.dispatchEvent === 'function' && typeof global.CustomEvent === 'function') {
+      global.dispatchEvent(new global.CustomEvent('taskpoints:state-revision', {
+        detail: { revision, reason }
+      }));
+    }
+    return revision;
+  };
+
+  global.TaskPointsStateRevision = {
+    installed: true,
+    hookInstalled: false,
+    key: REVISION_KEY,
+    trackedKeys: Array.from(TRACKED_KEYS),
+    shouldTrack: (key) => TRACKED_KEYS.has(String(key)),
+    read,
+    bump: publishRevision,
+    ensure: () => read() || publishRevision('bootstrap', false),
+    markHookInstalled() { this.hookInstalled = true; }
+  };
+  global.TaskPointsStateRevision.ensure();
+})(window);
+
 const scheduleRender = window.scheduleRender || (() => {
   const queue = new Set();
   let scheduled = false;
@@ -1284,6 +1338,10 @@ function installToolbarStorageBridge() {
     if (this === window.localStorage) {
       const nextValue = String(value);
       dispatchChange({ key: normalizedKey, oldValue, newValue: nextValue });
+      const revision = window.TaskPointsStateRevision;
+      if (oldValue !== nextValue && revision?.shouldTrack?.(normalizedKey)) {
+        revision.bump(`set:${normalizedKey}`);
+      }
     }
     return result;
   };
@@ -1299,6 +1357,10 @@ function installToolbarStorageBridge() {
     const result = originalRemoveItem.apply(this, arguments);
     if (this === window.localStorage) {
       dispatchChange({ key: normalizedKey, oldValue, newValue: null });
+      const revision = window.TaskPointsStateRevision;
+      if (oldValue !== null && revision?.shouldTrack?.(normalizedKey)) {
+        revision.bump(`remove:${normalizedKey}`);
+      }
     }
     return result;
   };
@@ -1307,10 +1369,12 @@ function installToolbarStorageBridge() {
     const result = originalClear.apply(this, arguments);
     if (this === window.localStorage) {
       dispatchChange({ key: null, oldValue: null, newValue: null });
+      window.TaskPointsStateRevision?.bump?.('clear');
     }
     return result;
   };
 
+  window.TaskPointsStateRevision?.markHookInstalled?.();
   window.__tpToolbarStorageBridgeInstalled = true;
 }
 
