@@ -93,6 +93,15 @@
     if (typeof core.flushPendingSaves === 'function') {
       await Promise.resolve(core.flushPendingSaves());
     }
+    if (typeof core.flushPendingInteractiveRecompresses === 'function') {
+      await Promise.resolve(core.flushPendingInteractiveRecompresses());
+    }
+  }
+
+  function requireImageReportFingerprint(report) {
+    if (typeof report?.fingerprint !== 'string' || !report.fingerprint) {
+      throw new Error('The complete image-database fingerprint is unavailable.');
+    }
   }
 
   function persistSeasonRepairExact(nextState, expectedPreviousRaw) {
@@ -115,7 +124,12 @@
   }
 
   function restoreRawState(previousRaw) {
-    localStorage.setItem(STORAGE_KEY, previousRaw);
+    const core = window.TaskPointsCore || {};
+    if (typeof core.safeReplaceTaskPointsStorage === 'function') {
+      core.safeReplaceTaskPointsStorage(STORAGE_KEY, previousRaw);
+    } else {
+      localStorage.setItem(STORAGE_KEY, previousRaw);
+    }
     if ((localStorage.getItem(STORAGE_KEY) || '') !== previousRaw) {
       throw new Error('Automatic rollback could not restore the previous TaskPoints snapshot.');
     }
@@ -131,6 +145,7 @@
     if (runButton) runButton.disabled = true;
 
     let rollbackRaw = '';
+    let repairWrittenRaw = '';
     let exactWriteCompleted = false;
 
     try {
@@ -142,6 +157,7 @@
       const previewState = diagnostics.readCurrentState();
       const previewReport = await diagnostics.getImageDatabaseReport(previewState.state);
       if (!previewReport.available) throw new Error(previewReport.reason || 'Image database is unavailable.');
+      requireImageReportFingerprint(previewReport);
       const previewPlan = repair.buildRepairPlan(previewState.state, previewReport);
       if (!previewPlan.missingIds.length) {
         await diagnostics.runDiagnostics();
@@ -171,6 +187,7 @@
       const validatedState = diagnostics.readCurrentState();
       const validatedReport = await diagnostics.getImageDatabaseReport(validatedState.state);
       if (!validatedReport.available) throw new Error(validatedReport.reason || 'Image database is unavailable.');
+      requireImageReportFingerprint(validatedReport);
       const validatedPlan = repair.buildRepairPlan(validatedState.state, validatedReport);
       if (validatedState.raw !== previewState.raw
         || validatedReport.fingerprint !== previewReport.fingerprint
@@ -199,7 +216,8 @@
       if (button) button.textContent = 'Saving Repair…';
       setStatus(`Replacing ${validatedPlan.missingIds.length} missing image ID(s) across ${validatedPlan.repairs.length} exact Season path(s)…`);
       rollbackRaw = validatedState.raw;
-      persistSeasonRepairExact(applied.state, rollbackRaw);
+      const persisted = persistSeasonRepairExact(applied.state, rollbackRaw);
+      repairWrittenRaw = persisted.writtenRaw;
       exactWriteCompleted = true;
 
       if (button) button.textContent = 'Verifying…';
@@ -207,6 +225,10 @@
       const finalState = diagnostics.readCurrentState();
       const finalReport = await diagnostics.getImageDatabaseReport(finalState.state);
       if (!finalReport.available) throw new Error(finalReport.reason || 'Image database became unavailable during verification.');
+      requireImageReportFingerprint(finalReport);
+      if ((localStorage.getItem(STORAGE_KEY) || '') !== finalState.raw) {
+        throw new Error('The TaskPoints state changed while the repair was being verified.');
+      }
       if (repair.nonImageSnapshot(validatedState.state) !== repair.nonImageSnapshot(finalState.state)) {
         throw new Error('Verification failed: data outside the confirmed Season imageId fields changed.');
       }
@@ -223,18 +245,26 @@
 
       exactWriteCompleted = false;
       rollbackRaw = '';
+      repairWrittenRaw = '';
       await diagnostics.runDiagnostics();
       setTerminalStatus(`Repaired and verified ${validatedPlan.missingIds.length} missing image ID(s) across ${validatedPlan.repairs.length} exact Season path(s). No other data changed. The orphan cleanup can now be reviewed.`);
     } catch (error) {
       console.error('Season image reference repair failed', error);
       let rollbackMessage = '';
       if (exactWriteCompleted && rollbackRaw) {
-        try {
-          restoreRawState(rollbackRaw);
-          rollbackMessage = ' The previous TaskPoints snapshot was restored automatically.';
-        } catch (rollbackError) {
-          console.error('Season image repair rollback failed', rollbackError);
-          rollbackMessage = ` Automatic rollback failed: ${rollbackError?.message || String(rollbackError)} Restore the fresh ZIP backup before making further changes.`;
+        const currentRaw = localStorage.getItem(STORAGE_KEY) || '';
+        if (currentRaw === rollbackRaw) {
+          rollbackMessage = ' The previous TaskPoints snapshot was already active.';
+        } else if (repairWrittenRaw && currentRaw === repairWrittenRaw) {
+          try {
+            restoreRawState(rollbackRaw);
+            rollbackMessage = ' The previous TaskPoints snapshot was restored automatically.';
+          } catch (rollbackError) {
+            console.error('Season image repair rollback failed', rollbackError);
+            rollbackMessage = ` Automatic rollback failed: ${rollbackError?.message || String(rollbackError)} Restore the fresh ZIP backup before making further changes.`;
+          }
+        } else {
+          rollbackMessage = ' Automatic rollback was skipped because a newer TaskPoints state was detected and preserved.';
         }
       }
       setTerminalStatus(`Repair failed: ${error?.message || String(error)}${rollbackMessage} No orphan images were deleted.`);
