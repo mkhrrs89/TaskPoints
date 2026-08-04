@@ -13384,6 +13384,11 @@ try {
   initHomeTabs();
 updateWeekToggleButtons();
 updateFlexDayToggleButton();
+
+// Preserve first-load daily initialization without re-reading storage.
+maybeAutoSimToday();
+state = syncStateWithMatchups(state);
+
 renderHabitWeekLabels();
 renderViceWeekLabels();
 renderHabits();
@@ -13399,22 +13404,6 @@ scheduleRender(renderAll);
 })();
 
 // Boot must remain read-only to avoid unintended persistence/pruning on mobile.
-// then do the heavier sync after paint / idle
-requestAnimationFrame(() => {
-  const runPostPaintRefresh = () => {
-    refreshMainPageFromStorage();
-    if (window.TP_DEBUG_PERF) {
-      const completions = Array.isArray(state?.completions) ? state.completions.length : 0;
-      console.log(`[TP home boot] post-refresh completions=${completions}`);
-    }
-  };
-
-  if (window.requestIdleCallback) {
-    requestIdleCallback(runPostPaintRefresh, { timeout: 800 });
-  } else {
-    setTimeout(runPostPaintRefresh, 0);
-  }
-});
   
 
 console.log('TaskPoints main state summary:', {
