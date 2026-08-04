@@ -1,6 +1,11 @@
 name: Apply Home initialization fix
 
 on:
+  push:
+    branches:
+      - fix/home-single-initial-load
+    paths:
+      - .github/workflows/apply-home-initialization-fix.yml
   pull_request:
     branches:
       - main
