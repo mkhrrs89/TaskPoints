@@ -25,17 +25,37 @@
     Object.entries(value).forEach(([key, child]) => walk(child, `${path}.${key}`, visitor));
   }
 
+  function isAllowedSeasonPath(pathInput) {
+    const path = String(pathInput || '');
+    return path === 'state.currentSeason'
+      || path.startsWith('state.currentSeason.')
+      || path.startsWith('state.currentSeason[')
+      || path === 'state.seasonHistory'
+      || path.startsWith('state.seasonHistory.')
+      || path.startsWith('state.seasonHistory[');
+  }
+
   function collectSeasonReferences(state) {
     const rows = [];
     walk(state?.currentSeason, 'state.currentSeason', (value, path) => {
       const imageId = imageIdFor(value);
       const playerId = playerIdFor(value);
-      if (imageId && playerId) rows.push({ path, playerId, imageId, name: value.playerName || value.name || playerId });
+      if (imageId && playerId) rows.push({
+        path: `${path}.imageId`,
+        playerId,
+        imageId,
+        name: value.playerName || value.name || playerId
+      });
     });
     walk(state?.seasonHistory, 'state.seasonHistory', (value, path) => {
       const imageId = imageIdFor(value);
       const playerId = playerIdFor(value);
-      if (imageId && playerId) rows.push({ path, playerId, imageId, name: value.playerName || value.name || playerId });
+      if (imageId && playerId) rows.push({
+        path: `${path}.imageId`,
+        playerId,
+        imageId,
+        name: value.playerName || value.name || playerId
+      });
     });
     return rows;
   }
@@ -75,11 +95,8 @@
         return;
       }
       paths.forEach((path) => {
-        if (path.startsWith('state.currentSeason') || path.startsWith('state.seasonHistory')) {
-          expectedAllowedPaths.add(`${imageId}|${path}`);
-        } else {
-          externalPaths.push({ imageId, path });
-        }
+        if (isAllowedSeasonPath(path)) expectedAllowedPaths.add(`${imageId}|${path}`);
+        else externalPaths.push({ imageId, path });
       });
     });
 
@@ -123,6 +140,22 @@
           imageId: key.slice(0, splitAt),
           path: key.slice(splitAt + 1),
           reason: 'reference-path-not-matched'
+        });
+      }
+    });
+
+    const candidatesByMissingId = new Map();
+    repairs.forEach((repair) => {
+      const candidate = `${repair.playerId}|${repair.newImageId}`;
+      if (!candidatesByMissingId.has(repair.oldImageId)) candidatesByMissingId.set(repair.oldImageId, new Set());
+      candidatesByMissingId.get(repair.oldImageId).add(candidate);
+    });
+    candidatesByMissingId.forEach((candidates, imageId) => {
+      if (candidates.size > 1) {
+        unresolved.push({
+          imageId,
+          candidates: [...candidates].sort(),
+          reason: 'ambiguous-missing-image-reference'
         });
       }
     });
@@ -190,26 +223,27 @@
       return { ok: false, state, updatedCount: 0, error: 'unsafe-plan' };
     }
     const next = clone(state || {});
-    const byPlayerAndOldImage = new Map();
-    plan.repairs.forEach((repair) => {
-      byPlayerAndOldImage.set(`${repair.playerId}|${repair.oldImageId}`, repair.newImageId);
-    });
-
+    const repairsByPath = new Map(plan.repairs.map((repair) => [repair.path, repair]));
     let updatedCount = 0;
-    const update = (value) => {
+    let mismatch = false;
+
+    const update = (value, path) => {
+      const repair = repairsByPath.get(`${path}.imageId`);
+      if (!repair) return;
       const playerId = playerIdFor(value);
       const imageId = imageIdFor(value);
-      if (!playerId || !imageId) return;
-      const replacement = byPlayerAndOldImage.get(`${playerId}|${imageId}`);
-      if (!replacement) return;
-      value.imageId = replacement;
+      if (playerId !== repair.playerId || imageId !== repair.oldImageId) {
+        mismatch = true;
+        return;
+      }
+      value.imageId = repair.newImageId;
       updatedCount += 1;
     };
     walk(next.currentSeason, 'state.currentSeason', update);
     walk(next.seasonHistory, 'state.seasonHistory', update);
 
-    if (updatedCount !== plan.repairs.length) {
-      return { ok: false, state, updatedCount, error: 'repair-count-mismatch' };
+    if (mismatch || updatedCount !== plan.repairs.length) {
+      return { ok: false, state, updatedCount, error: 'repair-count-or-path-mismatch' };
     }
     return { ok: true, state: next, updatedCount };
   }
@@ -236,7 +270,8 @@
     buildRepairPlan,
     applyRepairPlan,
     nonImageSnapshot,
-    seasonImageSnapshot
+    seasonImageSnapshot,
+    isAllowedSeasonPath
   };
 
   global.TaskPointsSeasonImageReferenceRepair = api;
