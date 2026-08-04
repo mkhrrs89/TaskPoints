@@ -53,7 +53,7 @@ function fixture() {
   return { state, report: { missingReferences, referencePaths, rows } };
 }
 
-test('builds a safe dynamic plan for five missing IDs across fourteen Season records', () => {
+test('builds a safe dynamic plan for five missing IDs across fourteen exact Season paths', () => {
   const { state, report } = fixture();
   const plan = repair.buildRepairPlan(state, report);
   assert.equal(plan.safe, true);
@@ -63,9 +63,10 @@ test('builds a safe dynamic plan for five missing IDs across fourteen Season rec
   assert.equal(plan.expectedAllowedPathCount, 14);
   assert.equal(plan.unresolved.length, 0);
   assert.equal(plan.externalPaths.length, 0);
+  assert.ok(plan.repairs.every((entry) => entry.path.endsWith('.imageId')));
 });
 
-test('applies only imageId changes inside current and archived Season copies', () => {
+test('applies only the exact confirmed imageId paths inside current and archived Season copies', () => {
   const { state, report } = fixture();
   const plan = repair.buildRepairPlan(state, report);
   const beforeNonImage = repair.nonImageSnapshot(state);
@@ -84,12 +85,35 @@ test('applies only imageId changes inside current and archived Season copies', (
   assert.equal(state.currentSeason.playerPool[0].imageId, 'old-1', 'source state remains unchanged');
 });
 
+test('rejects a plan whose exact path no longer points to the confirmed player and image', () => {
+  const { state, report } = fixture();
+  const plan = repair.buildRepairPlan(state, report);
+  state.currentSeason.playerPool[0].imageId = 'different-old-image';
+  const result = repair.applyRepairPlan(state, plan);
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'repair-count-or-path-mismatch');
+  assert.equal(result.state, state);
+});
+
 test('blocks repair when a missing image is referenced outside Season data', () => {
   const { state, report } = fixture();
   report.referencePaths['old-1'].push('state.players[0].imageId');
   const plan = repair.buildRepairPlan(state, report);
   assert.equal(plan.safe, false);
   assert.deepEqual(plan.externalPaths, [{ imageId: 'old-1', path: 'state.players[0].imageId' }]);
+});
+
+test('matches Season path roots on a segment boundary', () => {
+  assert.equal(repair.isAllowedSeasonPath('state.currentSeason.playerPool[0].imageId'), true);
+  assert.equal(repair.isAllowedSeasonPath('state.seasonHistory[0].seeds[0].imageId'), true);
+  assert.equal(repair.isAllowedSeasonPath('state.currentSeasonBackup.playerPool[0].imageId'), false);
+  assert.equal(repair.isAllowedSeasonPath('state.seasonHistoryBackup[0].imageId'), false);
+
+  const { state, report } = fixture();
+  report.referencePaths['old-1'].push('state.currentSeasonBackup.playerPool[0].imageId');
+  const plan = repair.buildRepairPlan(state, report);
+  assert.equal(plan.safe, false);
+  assert.ok(plan.externalPaths.some((entry) => entry.path.startsWith('state.currentSeasonBackup')));
 });
 
 test('blocks repair when the current replacement blob is not present', () => {
@@ -124,4 +148,13 @@ test('blocks repair when diagnostics does not provide exact reference paths', ()
   const plan = repair.buildRepairPlan(state, report);
   assert.equal(plan.safe, false);
   assert.ok(plan.unresolved.some((entry) => entry.imageId === 'old-4' && entry.reason === 'reference-paths-unavailable'));
+});
+
+test('blocks one missing image ID that ambiguously maps to multiple current players', () => {
+  const { state, report } = fixture();
+  state.currentSeason.playerPool.push({ id: 'p2', name: 'Bravo', imageId: 'old-1' });
+  report.referencePaths['old-1'].push('state.currentSeason.playerPool[1].imageId');
+  const plan = repair.buildRepairPlan(state, report);
+  assert.equal(plan.safe, false);
+  assert.ok(plan.unresolved.some((entry) => entry.imageId === 'old-1' && entry.reason === 'ambiguous-missing-image-reference'));
 });
