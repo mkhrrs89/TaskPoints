@@ -1,12 +1,17 @@
 name: Harden Home revision stamp
 
-# Updated to trigger the branch-local hardening workflow.
 on:
   push:
     branches:
       - fix/home-revision-aware-refresh
     paths:
       - .github/workflows/harden-home-revision-stamp.yml
+  pull_request:
+    branches:
+      - main
+    types:
+      - synchronize
+      - reopened
 
 permissions:
   contents: write
@@ -16,6 +21,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
       - name: Make revision stamping best effort
         shell: python
         run: |
