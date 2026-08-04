@@ -28,19 +28,11 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
+          import re
+
           toolbar_path = Path('toolbar.js')
           toolbar = toolbar_path.read_text(encoding='utf-8')
-          old = '''  const publishRevision = (reason = 'state-write', emitEvent = true) => {
-            const revision = createRevision();
-            baseSetItem(REVISION_KEY, revision);
-            if (emitEvent && typeof global.dispatchEvent === 'function' && typeof global.CustomEvent === 'function') {
-              global.dispatchEvent(new CustomEvent('taskpoints:state-revision', {
-                detail: { revision, reason }
-              }));
-            }
-            return revision;
-          };'''
-          new = '''  const publishRevision = (reason = 'state-write', emitEvent = true) => {
+          replacement = '''  const publishRevision = (reason = 'state-write', emitEvent = true) => {
             const revision = createRevision();
             try {
               baseSetItem(REVISION_KEY, revision);
@@ -54,10 +46,16 @@ jobs:
             }
             return revision;
           };'''
-          if old in toolbar:
-            toolbar_path.write_text(toolbar.replace(old, new, 1), encoding='utf-8')
-          elif 'return read();' not in toolbar:
-            raise SystemExit('Expected revision publisher block was not found')
+
+          if 'try {\n      baseSetItem(REVISION_KEY, revision);' not in toolbar:
+            pattern = re.compile(
+              r"  const publishRevision = \(reason = 'state-write', emitEvent = true\) => \{.*?\n  \};(?=\n\n  const installOnStorageObject)",
+              re.DOTALL
+            )
+            toolbar, replacements = pattern.subn(replacement, toolbar, count=1)
+            if replacements != 1:
+              raise SystemExit(f'Expected one bounded revision publisher block; found {replacements}')
+            toolbar_path.write_text(toolbar, encoding='utf-8')
 
           test_path = Path('tests/home_revision_refresh_contract.test.js')
           test = test_path.read_text(encoding='utf-8')
