@@ -13384,6 +13384,11 @@ try {
   initHomeTabs();
 updateWeekToggleButtons();
 updateFlexDayToggleButton();
+
+// Preserve first-load daily initialization without re-reading storage.
+maybeAutoSimToday();
+state = syncStateWithMatchups(state);
+
 renderHabitWeekLabels();
 renderViceWeekLabels();
 renderHabits();
