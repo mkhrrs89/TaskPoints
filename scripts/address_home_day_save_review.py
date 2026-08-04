@@ -1,0 +1,362 @@
+from pathlib import Path
+import re
+
+index_path = Path('index.html')
+index = index_path.read_text(encoding='utf-8')
+
+baseline_replacement = '''let loadedStateRevision = '';
+let loadedHomeGameDayKey = '';
+
+function readHomeStateRevision() {
+  try {
+    return String(
+      window.TaskPointsStateRevision?.read?.()
+      || localStorage.getItem('taskpoints_state_revision_v1')
+      || ''
+    );
+  } catch (_) {
+    return '';
+  }
+}
+
+function readHomeGameDayKey(now = new Date()) {
+  try {
+    return typeof getGameDayKey === 'function'
+      ? String(getGameDayKey(now) || '')
+      : '';
+  } catch (_) {
+    return '';
+  }
+}
+
+function markHomeStateRevisionCurrent() {
+  loadedStateRevision = readHomeStateRevision();
+  return loadedStateRevision;
+}
+
+function markHomeLifecycleBaseline() {
+  markHomeStateRevisionCurrent();
+  loadedHomeGameDayKey = readHomeGameDayKey();
+  return loadedHomeGameDayKey;
+}'''
+baseline_pattern = re.compile(
+    r"let loadedStateRevision = '';\n\nfunction readHomeStateRevision\(\) \{.*?\n\}\n\nfunction markHomeStateRevisionCurrent\(\) \{.*?\n\}",
+    re.DOTALL,
+)
+if 'function markHomeLifecycleBaseline()' not in index:
+    index, replacements = baseline_pattern.subn(baseline_replacement, index, count=1)
+    if replacements != 1:
+        raise SystemExit(f'Expected one Home baseline block; found {replacements}')
+
+save_replacement = '''function save(savePath, extraOptions = {}) {
+  try {
+    pruneOpponentDripSchedulesToTodayOnly();
+
+    const saveOptions = buildHomeSaveOptions(savePath, extraOptions);
+
+    if (window.TaskPointsCore?.saveStateSnapshot) {
+      const result = TaskPointsCore.saveStateSnapshot(state, saveOptions);
+
+      // A drained Flex fast-path save is skipped to avoid overwriting a newer
+      // cross-tab snapshot, but its authoritative state must still replace the
+      // stale Home copy before a later ordinary save can run.
+      if (result?.flexFastPathDrained && result?.state) {
+        state = result.state;
+        storageCache.parsed = state;
+        storageCache.raw = null;
+        return;
+      }
+
+      // If any other core save was skipped because of quota cooldown,
+      // do NOT replace the current in-memory state with old localStorage.
+      if (result?.skipped || result?.blockedByQuotaCircuit) {
+        storageCache.parsed = state;
+        storageCache.raw = null;
+        return;
+      }
+
+      if (result?.trimmed) {
+        console.warn('Storage nearing capacity. Older history items were trimmed to keep saves working.');
+      }
+
+      if (result?.state) {
+        state = result.state;
+        storageCache.parsed = state;
+        storageCache.raw = null;
+      }
+
+      markHomeStateRevisionCurrent();
+      return;
+    }
+
+    const existing = getCachedStorageState() || {};
+    const merged = { ...existing, ...state };
+    writeCachedStorageState(merged);
+    state = merged;
+    storageCache.parsed = merged;
+    storageCache.raw = null;
+    markHomeStateRevisionCurrent();
+  } catch (e) {
+    console.error("Failed to save state (index.html)", e);
+
+    try {
+      writeCachedStorageState(state);
+      markHomeStateRevisionCurrent();
+    } catch (e2) {
+      console.error("Last-ditch save failed (index.html)", e2);
+    }
+  }
+}'''
+save_pattern = re.compile(
+    r"function save\(savePath, extraOptions = \{\}\) \{.*?\n\}\n(?=\n\n\nfunction resetAll\(\))",
+    re.DOTALL,
+)
+current_save_match = save_pattern.search(index)
+if not current_save_match:
+    raise SystemExit('Expected one Home save function')
+if current_save_match.group(0) != save_replacement:
+    index = index[:current_save_match.start()] + save_replacement + index[current_save_match.end():]
+
+initial_old = '''// Preserve first-load daily initialization without re-reading storage.
+maybeAutoSimToday();
+state = syncStateWithMatchups(state);
+markHomeStateRevisionCurrent();'''
+initial_new = '''// Preserve first-load daily initialization without re-reading storage.
+maybeAutoSimToday();
+state = syncStateWithMatchups(state);
+markHomeLifecycleBaseline();'''
+if initial_new not in index:
+    if index.count(initial_old) != 1:
+        raise SystemExit('Expected one initial Home baseline marker')
+    index = index.replace(initial_old, initial_new, 1)
+
+refresh_old = '''  state = syncStateWithMatchups(state);
+  scheduleRender(renderAll);
+  markHomeStateRevisionCurrent();
+  return true;
+}'''
+refresh_new = '''  state = syncStateWithMatchups(state);
+  scheduleRender(renderAll);
+  markHomeLifecycleBaseline();
+  return true;
+}'''
+if refresh_new not in index:
+    if index.count(refresh_old) != 1:
+        raise SystemExit('Expected one refresh baseline marker')
+    index = index.replace(refresh_old, refresh_new, 1)
+
+guard_replacement = '''function refreshMainPageIfChanged(reason = 'lifecycle') {
+  const currentRevision = readHomeStateRevision();
+  const currentGameDayKey = readHomeGameDayKey();
+  const revisionUnchanged = Boolean(
+    currentRevision
+    && loadedStateRevision
+    && currentRevision === loadedStateRevision
+  );
+  const gameDayUnchanged = Boolean(
+    currentGameDayKey
+    && loadedHomeGameDayKey
+    && currentGameDayKey === loadedHomeGameDayKey
+  );
+
+  if (revisionUnchanged && gameDayUnchanged) {
+    if (window.TP_DEBUG_PERF) {
+      console.log(`[TP home refresh] skipped unchanged ${reason} revision=${currentRevision} gameDay=${currentGameDayKey}`);
+    }
+    return false;
+  }
+
+  return refreshMainPageFromStorage();
+}'''
+guard_pattern = re.compile(
+    r"function refreshMainPageIfChanged\(reason = 'lifecycle'\) \{.*?\n\}",
+    re.DOTALL,
+)
+guard_match = guard_pattern.search(index)
+if not guard_match:
+    raise SystemExit('Expected one lifecycle guard')
+if guard_match.group(0) != guard_replacement:
+    index = index[:guard_match.start()] + guard_replacement + index[guard_match.end():]
+
+if 'finally {\n    markHomeStateRevisionCurrent();' in index:
+    raise SystemExit('Failed-save revision baseline still present')
+if 'currentGameDayKey === loadedHomeGameDayKey' not in index:
+    raise SystemExit('Game-day lifecycle guard missing')
+
+index_path.write_text(index, encoding='utf-8')
+
+test_path = Path('tests/home_revision_refresh_contract.test.js')
+test_path.write_text(r'''const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+
+const root = path.resolve(__dirname, '..');
+const toolbar = fs.readFileSync(path.join(root, 'toolbar.js'), 'utf8');
+const home = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+
+function extractFunction(source, signature) {
+  const start = source.indexOf(signature);
+  assert.notEqual(start, -1, `missing ${signature}`);
+  const closeParen = source.indexOf(')', start);
+  const braceStart = source.indexOf('{', closeParen);
+  let depth = 0;
+  for (let index = braceStart; index < source.length; index += 1) {
+    if (source[index] === '{') depth += 1;
+    else if (source[index] === '}') {
+      depth -= 1;
+      if (depth === 0) return source.slice(start, index + 1);
+    }
+  }
+  throw new Error(`unterminated ${signature}`);
+}
+
+function createStorageRuntime() {
+  class FakeStorage {
+    constructor() {
+      this.values = new Map();
+      this.failRevisionWrites = false;
+    }
+    getItem(key) {
+      const normalized = String(key);
+      return this.values.has(normalized) ? this.values.get(normalized) : null;
+    }
+    setItem(key, value) {
+      const normalized = String(key);
+      if (normalized === 'taskpoints_state_revision_v1' && this.failRevisionWrites) {
+        throw new Error('quota');
+      }
+      this.values.set(normalized, String(value));
+    }
+    removeItem(key) { this.values.delete(String(key)); }
+    clear() { this.values.clear(); }
+  }
+
+  class FakeCustomEvent {
+    constructor(type, init = {}) {
+      this.type = type;
+      this.detail = init.detail;
+    }
+  }
+
+  const localStorage = new FakeStorage();
+  const events = [];
+  const window = {
+    Storage: FakeStorage,
+    localStorage,
+    CustomEvent: FakeCustomEvent,
+    dispatchEvent(event) { events.push(event); return true; }
+  };
+  const context = {
+    window,
+    CustomEvent: FakeCustomEvent,
+    console,
+    Date,
+    Math,
+    String,
+    Set,
+    Array,
+    Object,
+    Error
+  };
+
+  const revisionStart = toolbar.indexOf('(function installTaskPointsStateRevision(global) {');
+  const revisionEnd = toolbar.indexOf('})(window);', revisionStart) + '})(window);'.length;
+  assert.ok(revisionStart >= 0 && revisionEnd > revisionStart, 'missing revision installer');
+  const revisionSource = toolbar.slice(revisionStart, revisionEnd);
+  const bridgeSource = extractFunction(toolbar, 'function installToolbarStorageBridge()');
+  vm.runInNewContext(`${revisionSource}\n${bridgeSource}\ninstallToolbarStorageBridge();`, context);
+
+  return { window, localStorage, events };
+}
+
+test('revision stamping stays inside the existing storage-change bridge', () => {
+  assert.doesNotMatch(toolbar, /storage\.setItem = wrappedSetItem/);
+  assert.doesNotMatch(toolbar, /storage\.removeItem = wrappedRemoveItem/);
+  assert.doesNotMatch(toolbar, /storage\.clear = wrappedClear/);
+  assert.match(toolbar, /function installToolbarStorageBridge\(\)/);
+  assert.match(toolbar, /revision\?\.shouldTrack\?\.\(normalizedKey\)/);
+  assert.match(toolbar, /markHookInstalled/);
+
+  const { window, localStorage, events } = createStorageRuntime();
+  assert.equal(Object.hasOwn(localStorage, 'setItem'), false);
+  assert.equal(window.TaskPointsStateRevision.hookInstalled, true);
+
+  const priorRevision = window.TaskPointsStateRevision.read();
+  localStorage.setItem('taskpoints_v1', 'state-one');
+  assert.equal(localStorage.getItem('taskpoints_v1'), 'state-one');
+  assert.notEqual(window.TaskPointsStateRevision.read(), priorRevision);
+  assert.equal(events.filter((event) => event.type === 'tp:local-storage-change').length, 1);
+  assert.equal(events[0].detail.key, 'taskpoints_v1');
+});
+
+test('revision stamp failure never fails an authoritative storage write', () => {
+  const { window, localStorage, events } = createStorageRuntime();
+  const priorRevision = window.TaskPointsStateRevision.read();
+  localStorage.failRevisionWrites = true;
+
+  assert.doesNotThrow(() => localStorage.setItem('taskpoints_v1', 'state-two'));
+  assert.equal(localStorage.getItem('taskpoints_v1'), 'state-two');
+  assert.equal(window.TaskPointsStateRevision.read(), priorRevision);
+  assert.equal(events.filter((event) => event.type === 'tp:local-storage-change').length, 1);
+});
+
+test('Home refreshes when the TaskPoints game day changes', () => {
+  assert.match(home, /let loadedHomeGameDayKey = '';/);
+  assert.match(home, /function readHomeGameDayKey\(now = new Date\(\)\)/);
+  assert.match(home, /currentGameDayKey === loadedHomeGameDayKey/);
+  assert.match(home, /revisionUnchanged && gameDayUnchanged/);
+
+  const guardSource = extractFunction(home, "function refreshMainPageIfChanged(reason = 'lifecycle')");
+  const context = {
+    window: { TP_DEBUG_PERF: false },
+    loadedStateRevision: 'revision-one',
+    loadedHomeGameDayKey: '2026-08-04',
+    currentRevision: 'revision-one',
+    currentGameDayKey: '2026-08-04',
+    refreshCount: 0,
+    Boolean,
+    console
+  };
+  vm.runInNewContext(`
+    function readHomeStateRevision() { return currentRevision; }
+    function readHomeGameDayKey() { return currentGameDayKey; }
+    function refreshMainPageFromStorage() { refreshCount += 1; return true; }
+    ${guardSource}
+    resultSame = refreshMainPageIfChanged('same-day');
+  `, context);
+  assert.equal(context.resultSame, false);
+  assert.equal(context.refreshCount, 0);
+
+  context.currentGameDayKey = '2026-08-05';
+  vm.runInNewContext(`resultNextDay = refreshMainPageIfChanged('day-rollover');`, context);
+  assert.equal(context.resultNextDay, true);
+  assert.equal(context.refreshCount, 1);
+});
+
+test('Home baselines revisions only after successful saves', () => {
+  const saveSource = extractFunction(home, 'function save(savePath, extraOptions = {})');
+  assert.doesNotMatch(saveSource, /finally\s*\{[\s\S]*markHomeStateRevisionCurrent/);
+
+  const flexBlock = saveSource.match(/if \(result\?\.flexFastPathDrained && result\?\.state\) \{[\s\S]*?\n\s*\}/)?.[0] || '';
+  const skippedBlock = saveSource.match(/if \(result\?\.skipped \|\| result\?\.blockedByQuotaCircuit\) \{[\s\S]*?\n\s*\}/)?.[0] || '';
+  assert.ok(flexBlock);
+  assert.ok(skippedBlock);
+  assert.doesNotMatch(flexBlock, /markHomeStateRevisionCurrent/);
+  assert.doesNotMatch(skippedBlock, /markHomeStateRevisionCurrent/);
+
+  assert.match(saveSource, /if \(result\?\.state\) \{[\s\S]*?\}\s*markHomeStateRevisionCurrent\(\);\s*return;/);
+  assert.match(saveSource, /writeCachedStorageState\(merged\);[\s\S]*?markHomeStateRevisionCurrent\(\);/);
+  assert.match(saveSource, /writeCachedStorageState\(state\);\s*markHomeStateRevisionCurrent\(\);/);
+});
+
+test('Home records full lifecycle baselines after boot and real refreshes', () => {
+  assert.match(home, /function markHomeLifecycleBaseline\(\)/);
+  assert.match(home, /state = syncStateWithMatchups\(state\);\s*markHomeLifecycleBaseline\(\);\s*renderHabitWeekLabels/);
+  assert.match(home, /scheduleRender\(renderAll\);\s*markHomeLifecycleBaseline\(\);\s*return true;/);
+  assert.match(home, /refreshMainPageIfChanged\('initial-bfcache-pageshow'\)/);
+  assert.match(home, /refreshMainPageIfChanged\('pageshow'\)/);
+  assert.match(home, /refreshMainPageIfChanged\('visibilitychange'\)/);
+});
+''', encoding='utf-8')
