@@ -29,7 +29,11 @@ test('repair is dynamic and never hardcodes the five observed player names or im
   assert.match(helper, /ambiguous-missing-image-reference/);
 });
 
-test('controller requires native confirmation and complete stale-preview revalidation', () => {
+test('controller flushes deferred writes and requires complete stale-preview revalidation', () => {
+  assert.match(controller, /flushPendingSaves/);
+  assert.match(controller, /flushPendingInteractiveRecompresses/);
+  assert.match(controller, /requireImageReportFingerprint\(previewReport\)/);
+  assert.match(controller, /requireImageReportFingerprint\(validatedReport\)/);
   assert.match(controller, /window\.confirm\(/);
   assert.match(controller, /validatedState\.raw !== previewState\.raw/);
   assert.match(controller, /validatedReport\.fingerprint !== previewReport\.fingerprint/);
@@ -56,10 +60,13 @@ test('runtime verifies whole-state parity, exact Season images, and zero missing
   assert.match(controller, /No other data changed/);
 });
 
-test('failed post-write verification restores the exact previous raw snapshot', () => {
+test('failed post-write verification rolls back only its own unchanged repair write', () => {
   assert.match(controller, /rollbackRaw = validatedState\.raw/);
+  assert.match(controller, /repairWrittenRaw = persisted\.writtenRaw/);
+  assert.match(controller, /currentRaw === repairWrittenRaw/);
   assert.match(controller, /restoreRawState\(rollbackRaw\)/);
   assert.match(controller, /previous TaskPoints snapshot was restored automatically/);
+  assert.match(controller, /rollback was skipped because a newer TaskPoints state was detected and preserved/);
 });
 
 test('terminal operation messages survive observer and interval refreshes', () => {
