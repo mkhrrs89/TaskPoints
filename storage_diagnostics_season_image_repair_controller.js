@@ -13,7 +13,7 @@
     if (!diagnostics?.readCurrentState || !diagnostics?.getImageDatabaseReport || !diagnostics?.runDiagnostics) {
       throw new Error('Storage Diagnostics is not ready. Reload TaskPoints and try again.');
     }
-    if (!repair?.buildRepairPlan || !repair?.applyRepairPlan || !repair?.nonImageSnapshot) {
+    if (!repair?.buildRepairPlan || !repair?.applyRepairPlan || !repair?.nonImageSnapshot || !repair?.seasonImageSnapshot) {
       throw new Error('The Season image repair module did not load. Reload TaskPoints and try again.');
     }
     return { diagnostics, repair };
@@ -164,8 +164,9 @@
         throw new Error('The repair could not reproduce the exact confirmed record count.');
       }
       if (repair.nonImageSnapshot(validatedState.state) !== repair.nonImageSnapshot(applied.state)) {
-        throw new Error('Safety check failed: a non-image Season field would change.');
+        throw new Error('Safety check failed: a non-image or non-Season field would change.');
       }
+      const expectedSeasonImages = repair.seasonImageSnapshot(applied.state);
       if ((localStorage.getItem(STORAGE_KEY) || '') !== validatedState.raw) {
         await diagnostics.runDiagnostics();
         setStatus('The TaskPoints state changed immediately before saving. Nothing was repaired; review the refreshed report.');
@@ -177,12 +178,15 @@
       await persistSeasonRepair(applied.state);
 
       if (button) button.textContent = 'Verifying…';
-      setStatus('Verifying that only Season image references changed and every replacement blob exists…');
+      setStatus('Verifying that only the confirmed Season image references changed and every replacement blob exists…');
       const finalState = diagnostics.readCurrentState();
       const finalReport = await diagnostics.getImageDatabaseReport(finalState.state);
       if (!finalReport.available) throw new Error(finalReport.reason || 'Image database became unavailable during verification.');
       if (repair.nonImageSnapshot(validatedState.state) !== repair.nonImageSnapshot(finalState.state)) {
-        throw new Error('Verification failed: non-image Season data changed. Restore the fresh backup and do not run orphan cleanup.');
+        throw new Error('Verification failed: data outside the confirmed Season imageId fields changed. Restore the fresh backup and do not run orphan cleanup.');
+      }
+      if (repair.seasonImageSnapshot(finalState.state) !== expectedSeasonImages) {
+        throw new Error('Verification failed: the saved Season image references do not exactly match the confirmed replacements.');
       }
       const remainingOldIds = validatedPlan.missingIds.filter((imageId) => finalReport.referencedIds.includes(imageId));
       if (remainingOldIds.length) {
@@ -193,7 +197,7 @@
       }
 
       await diagnostics.runDiagnostics();
-      setStatus(`Repaired and verified ${validatedPlan.missingIds.length} missing image ID(s) across ${validatedPlan.repairs.length} Season record(s). No non-image Season fields changed. The orphan cleanup can now be reviewed.`);
+      setStatus(`Repaired and verified ${validatedPlan.missingIds.length} missing image ID(s) across ${validatedPlan.repairs.length} Season record(s). No other data changed. The orphan cleanup can now be reviewed.`);
     } catch (error) {
       console.error('Season image reference repair failed', error);
       setStatus(`Repair failed: ${error?.message || String(error)} No orphan images were deleted.`);
