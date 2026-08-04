@@ -5892,6 +5892,101 @@ function setHomeMatchupTypeLabel(label) {
   labelEl.hidden = !safeLabel;
 }
 
+const HOME_SEASON_MATERIALIZATION_SESSION_KEY = 'tp_home_season_materialization_v1';
+let homeSeasonMaterializationScheduled = false;
+
+function getHomeSeasonMaterializationFingerprint(todayKeyStr) {
+  const dateKeyStr = String(todayKeyStr || '').slice(0, 10);
+  const seasonId = String(state?.currentSeason?.id || '');
+  const revision = typeof readHomeStateRevision === 'function'
+    ? readHomeStateRevision()
+    : '';
+  if (!dateKeyStr || !seasonId || !revision) return '';
+  return `${dateKeyStr}|${seasonId}|${revision}`;
+}
+
+function readHomeSeasonMaterializationFingerprint() {
+  try { return sessionStorage.getItem(HOME_SEASON_MATERIALIZATION_SESSION_KEY) || ''; }
+  catch (_) { return ''; }
+}
+
+function rememberHomeSeasonMaterializationFingerprint(fingerprint) {
+  if (!fingerprint) return;
+  try { sessionStorage.setItem(HOME_SEASON_MATERIALIZATION_SESSION_KEY, fingerprint); }
+  catch (_) {}
+}
+
+function scheduleHomeSeasonMaterializationAfterFirstPaint(todayKeyStr = getGameDayKey(new Date())) {
+  if (homeSeasonMaterializationScheduled) return false;
+  if (!window.TaskPointsCore?.materializeSeasonSlateMatchupsForDate) return false;
+
+  const seasonStatus = String(state?.currentSeason?.status || '');
+  if (!['locked', 'active'].includes(seasonStatus)) return false;
+
+  const safeDateKey = String(todayKeyStr || '').slice(0, 10);
+  const currentFingerprint = getHomeSeasonMaterializationFingerprint(safeDateKey);
+  if (currentFingerprint && readHomeSeasonMaterializationFingerprint() === currentFingerprint) {
+    return false;
+  }
+
+  homeSeasonMaterializationScheduled = true;
+
+  const run = () => {
+    let shouldRefreshStats = false;
+    let shouldRemember = false;
+    try {
+      const beforeRevision = typeof readHomeStateRevision === 'function'
+        ? readHomeStateRevision()
+        : '';
+      const materialized = TaskPointsCore.materializeSeasonSlateMatchupsForDate(state, safeDateKey, {
+        nowISO: `${safeDateKey}T12:00:00.000Z`
+      });
+      if (materialized?.state) state = materialized.state;
+
+      if (materialized?.changed) {
+        save('home-season-slate-idle-materialization');
+        const afterRevision = typeof readHomeStateRevision === 'function'
+          ? readHomeStateRevision()
+          : '';
+        shouldRemember = Boolean(afterRevision && afterRevision !== beforeRevision);
+        shouldRefreshStats = true;
+      } else {
+        shouldRemember = true;
+      }
+
+      if (shouldRemember) {
+        rememberHomeSeasonMaterializationFingerprint(
+          getHomeSeasonMaterializationFingerprint(safeDateKey)
+        );
+      }
+    } catch (error) {
+      console.warn('Failed to materialize today Season slate after Home first paint', error);
+    }
+
+    if (shouldRefreshStats) {
+      scheduleRender(() => {
+        try { renderStats(); }
+        catch (error) { console.error('renderStats after Season materialization failed', error); }
+      });
+    }
+  };
+
+  const queueIdle = () => {
+    if (typeof window.requestIdleCallback === 'function') {
+      window.requestIdleCallback(run, { timeout: 4000 });
+    } else {
+      window.setTimeout(run, 250);
+    }
+  };
+
+  // Two frames guarantee that the initial Home render can commit before any
+  // full-state Season save begins.
+  window.requestAnimationFrame(() => {
+    window.requestAnimationFrame(queueIdle);
+  });
+  return true;
+}
+
 function renderTodaysMatchup(todayKeyStr, yourScore){
   const oppNameEl = $('matchupOpponent');
   const oppScoreEl= $('matchupOpponentScore');
@@ -5944,18 +6039,6 @@ const updateTodayScoreIsland = (value) => {
   };
 
   setOpponentScoreboardMeta(null);
-
-  if (window.TaskPointsCore?.materializeSeasonSlateMatchupsForDate) {
-    try {
-      const materialized = TaskPointsCore.materializeSeasonSlateMatchupsForDate(state, todayKeyStr, {
-        nowISO: `${todayKeyStr}T12:00:00.000Z`
-      });
-      if (materialized?.state) state = materialized.state;
-      if (materialized?.changed) save();
-    } catch (error) {
-      console.warn('Failed to materialize today Season slate for Home matchup selection', error);
-    }
-  }
 
   const matchups = Array.isArray(state.matchups) ? state.matchups : [];
   const matchup = window.TaskPointsCore?.chooseUserMatchupForDate
@@ -13462,6 +13545,7 @@ renderFlexActions();
 
 // paint ASAP
 scheduleRender(renderAll);
+scheduleHomeSeasonMaterializationAfterFirstPaint();
 
 (async () => {
   await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));

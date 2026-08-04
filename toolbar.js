@@ -1210,11 +1210,10 @@ window.TaskPointsInbox = {
   upsetOverallGap: TP_INBOX_UPSET_OVR_GAP
 };
 
-function initToolbarNow() {
+let taskPointsToolbarMaintenanceScheduled = false;
+
+function runTaskPointsToolbarMaintenance() {
   autoPopulateTaskPointsInbox();
-  renderBottomToolbar();
-  setupMobileTasksMenu();
-  setupPopupMenuPressAnimation();
   try {
     const k = 'tp_audit_dupe_habits_last_run';
     const today = new Date().toISOString().slice(0,10);
@@ -1223,6 +1222,38 @@ function initToolbarNow() {
       auditDuplicateHabitCompletions(45);
     }
   } catch (_) {}
+}
+
+function scheduleTaskPointsToolbarMaintenance() {
+  if (taskPointsToolbarMaintenanceScheduled) return;
+  taskPointsToolbarMaintenanceScheduled = true;
+
+  const run = () => runTaskPointsToolbarMaintenance();
+  if (!isMainPagePathname(window.location.pathname)) {
+    run();
+    return;
+  }
+
+  const queueIdle = () => {
+    if (typeof window.requestIdleCallback === 'function') {
+      window.requestIdleCallback(run, { timeout: 5000 });
+    } else {
+      window.setTimeout(run, 250);
+    }
+  };
+
+  // Keep Home's first visible and interactive frame clear of the full inbox
+  // scan and compressed save. Non-Home pages retain the existing immediate run.
+  window.requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => window.setTimeout(queueIdle, 750));
+  });
+}
+
+function initToolbarNow() {
+  renderBottomToolbar();
+  setupMobileTasksMenu();
+  setupPopupMenuPressAnimation();
+  scheduleTaskPointsToolbarMaintenance();
 }
 
 let toolbarInitialized = false;
