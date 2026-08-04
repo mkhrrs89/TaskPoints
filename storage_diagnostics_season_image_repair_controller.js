@@ -37,7 +37,7 @@
     return repair.buildRepairPlan(state, report.images);
   }
 
-  function updateControls() {
+  function updateControls(preserveStatus = false) {
     const button = $('repairMissingSeasonImagesBtn');
     if (!button) return;
     let plan = null;
@@ -50,14 +50,14 @@
     if (!plan || !plan.missingIds.length) {
       button.disabled = true;
       button.textContent = plan ? 'No Missing Season Images' : 'Run Diagnostics First';
-      if (plan && lastPlanFingerprint !== plan.fingerprint) setStatus('No missing Season image references were found.');
+      if (!preserveStatus && plan && lastPlanFingerprint !== plan.fingerprint) setStatus('No missing Season image references were found.');
       lastPlanFingerprint = plan?.fingerprint || '';
       return;
     }
     if (!plan.safe) {
       button.disabled = true;
       button.textContent = 'Season Image Repair Blocked';
-      if (lastPlanFingerprint !== plan.fingerprint) {
+      if (!preserveStatus && lastPlanFingerprint !== plan.fingerprint) {
         const reason = plan.externalPaths.length
           ? `${plan.externalPaths.length} missing reference(s) are outside Season data.`
           : `${plan.unresolved.length} missing Season reference(s) do not have a verified current replacement image.`;
@@ -69,7 +69,7 @@
 
     button.disabled = false;
     button.textContent = `Repair ${plan.missingIds.length} Missing Season Image${plan.missingIds.length === 1 ? '' : 's'}`;
-    if (lastPlanFingerprint !== plan.fingerprint) {
+    if (!preserveStatus && lastPlanFingerprint !== plan.fingerprint) {
       setStatus(`${plan.missingIds.length} missing image ID(s) across ${plan.repairs.length} Season record(s) can be replaced with verified current player images.`);
     }
     lastPlanFingerprint = plan.fingerprint;
@@ -202,7 +202,7 @@
     } finally {
       busy = false;
       if (runButton) runButton.disabled = false;
-      updateControls();
+      updateControls(true);
     }
   }
 
