@@ -1234,19 +1234,11 @@ function scheduleTaskPointsToolbarMaintenance() {
     return;
   }
 
-  const queueIdle = () => {
-    if (typeof window.requestIdleCallback === 'function') {
-      window.requestIdleCallback(run, { timeout: 5000 });
-    } else {
-      window.setTimeout(run, 250);
-    }
-  };
-
-  // Keep Home's first visible and interactive frame clear of the full inbox
-  // scan and compressed save. Non-Home pages retain the existing immediate run.
-  window.requestAnimationFrame(() => {
-    window.requestAnimationFrame(() => window.setTimeout(queueIdle, 750));
-  });
+  if (window.TaskPointsHomeIdleQueue?.enqueue) {
+    window.TaskPointsHomeIdleQueue.enqueue('home-toolbar-maintenance', run, { delayMs: 22000 });
+  } else {
+    window.setTimeout(run, 22000);
+  }
 }
 
 function initToolbarNow() {

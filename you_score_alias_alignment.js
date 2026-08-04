@@ -25,6 +25,32 @@
 
   let persistingRepair = false;
 
+  let homeAliasRepairFallbackTimer = null;
+
+  function isTaskPointsHomePage() {
+    const pathname = String(global.location?.pathname || '');
+    return pathname === '/' || pathname.endsWith('/index.html');
+  }
+
+  function scheduleHomeAliasRepair() {
+    const enqueue = global.TaskPointsHomeIdleQueue?.enqueue;
+    if (typeof enqueue === 'function') {
+      enqueue('home-you-score-alias-repair', () => repairPersistedState(), { delayMs: 14000 });
+      return true;
+    }
+    if (homeAliasRepairFallbackTimer != null) return true;
+    homeAliasRepairFallbackTimer = global.setTimeout?.(() => {
+      homeAliasRepairFallbackTimer = null;
+      const lateEnqueue = global.TaskPointsHomeIdleQueue?.enqueue;
+      if (typeof lateEnqueue === 'function') {
+        lateEnqueue('home-you-score-alias-repair', () => repairPersistedState(), { delayMs: 14000 });
+      } else {
+        global.setTimeout?.(() => repairPersistedState(), 14000);
+      }
+    }, 0);
+    return true;
+  }
+
   function populated(value) {
     return value !== null && value !== undefined && (typeof value !== 'string' || value.trim() !== '');
   }
@@ -271,7 +297,8 @@
       if (!state || typeof state !== 'object') return loaded;
       const aligned = alignCurrentSeasonState(state);
       if (!aligned.changed) return loaded;
-      persistRepair(aligned.state, aligned, options);
+      if (isTaskPointsHomePage()) scheduleHomeAliasRepair();
+      else persistRepair(aligned.state, aligned, options);
       return loaded?.state
         ? { ...loaded, state: aligned.state, youScoreAliasAlignment: aligned }
         : aligned.state;
@@ -319,9 +346,16 @@
   core.YouScoreAliasAlignment = api;
   global.TaskPointsYouScoreAliasAlignment = api;
 
-  repairPersistedState();
-  global.setTimeout?.(repairPersistedState, 0);
-  global.addEventListener?.('pageshow', repairPersistedState);
+  if (isTaskPointsHomePage()) {
+    scheduleHomeAliasRepair();
+  } else {
+    repairPersistedState();
+    global.setTimeout?.(repairPersistedState, 0);
+  }
+  global.addEventListener?.('pageshow', () => {
+    if (isTaskPointsHomePage()) scheduleHomeAliasRepair();
+    else repairPersistedState();
+  });
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

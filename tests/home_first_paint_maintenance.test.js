@@ -6,6 +6,7 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const home = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const toolbar = fs.readFileSync(path.join(root, 'toolbar.js'), 'utf8');
+const alias = fs.readFileSync(path.join(root, 'you_score_alias_alignment.js'), 'utf8');
 
 function blockBetween(source, startMarker, endMarker) {
   const start = source.indexOf(startMarker);
@@ -15,54 +16,61 @@ function blockBetween(source, startMarker, endMarker) {
   return source.slice(start, end);
 }
 
-test('Home matchup rendering is read-only on every render and ticker call', () => {
-  const renderBlock = blockBetween(
-    home,
-    'function renderTodaysMatchup(todayKeyStr, yourScore)',
-    'function getMatchupDateKeyForStats'
-  );
-  assert.doesNotMatch(renderBlock, /materializeSeasonSlateMatchupsForDate/);
-  assert.doesNotMatch(renderBlock, /\bsave\s*\(/);
-  assert.match(renderBlock, /chooseUserMatchupForDate/);
+test('Home first render does not reload or save live-diff state', () => {
+  const renderStats = blockBetween(home, 'function renderStats(){', 'const DEFAULT_MATCHUP_PRIMARY_COLOR');
+  assert.doesNotMatch(renderStats, /captureLiveDiffPoint\(\)/);
+  assert.match(renderStats, /drawLiveDiffGraph\(\)/);
+  assert.match(home, /function scheduleInitialHomeLiveDiffCapture\(\)/);
+  assert.match(home, /home-live-diff-initial-capture/);
+  assert.match(home, /delayMs: 18000/);
 });
 
-test('Season persistence is retained once after the first Home paint', () => {
+test('Home maintenance queue waits for interaction quiet and serializes jobs', () => {
+  const queue = blockBetween(
+    home,
+    '(function installTaskPointsHomeIdleQueue',
+    'function getWeightHistorySorted()'
+  );
+  assert.match(queue, /const quietMs = 3000/);
+  assert.match(queue, /const gapMs = 2000/);
+  for (const eventName of ['pointerdown', 'touchstart', 'wheel', 'scroll', 'keydown']) {
+    assert.match(queue, new RegExp(`'${eventName}'`));
+  }
+  assert.match(queue, /if \(document\.hidden\)/);
+  assert.match(queue, /queuedNames\.has\(safeName\)/);
+  assert.match(queue, /requestIdleCallback\(\(\) => execute\(job\)\)/);
+});
+
+test('Season persistence waits for idle and does not trigger a second full stats render', () => {
   const scheduler = blockBetween(
     home,
     'function scheduleHomeSeasonMaterializationAfterFirstPaint',
     'function renderTodaysMatchup(todayKeyStr, yourScore)'
   );
-  assert.match(scheduler, /materializeSeasonSlateMatchupsForDate/);
+  assert.match(scheduler, /home-season-materialization/);
+  assert.match(scheduler, /delayMs: 10000/);
   assert.match(scheduler, /save\('home-season-slate-idle-materialization'\)/);
-  assert.match(scheduler, /requestAnimationFrame\(\(\) => \{/);
-  assert.match(scheduler, /requestIdleCallback\(run, \{ timeout: 4000 \}\)/);
-  assert.match(home, /const HOME_SEASON_MATERIALIZATION_SESSION_KEY = 'tp_home_season_materialization_v1';/);
-  assert.match(scheduler, /afterRevision && afterRevision !== beforeRevision/);
-  assert.match(home, /scheduleRender\(renderAll\);\s*scheduleHomeSeasonMaterializationAfterFirstPaint\(\);/);
+  assert.doesNotMatch(scheduler, /renderStats\(/);
+  assert.doesNotMatch(scheduler, /requestIdleCallback\([^)]*timeout/);
 });
 
-test('Home toolbar chrome renders before inbox and audit maintenance is deferred', () => {
-  const initBlock = blockBetween(toolbar, 'function initToolbarNow()', 'let toolbarInitialized');
-  assert.match(initBlock, /renderBottomToolbar\(\)/);
-  assert.match(initBlock, /scheduleTaskPointsToolbarMaintenance\(\)/);
-  assert.doesNotMatch(initBlock, /^\s*autoPopulateTaskPointsInbox\(\);/m);
-  assert.ok(initBlock.indexOf('renderBottomToolbar()') < initBlock.indexOf('scheduleTaskPointsToolbarMaintenance()'));
-
+test('Home toolbar maintenance is postponed through the shared idle queue', () => {
   const scheduler = blockBetween(
     toolbar,
     'function scheduleTaskPointsToolbarMaintenance()',
     'function initToolbarNow()'
   );
   assert.match(scheduler, /if \(!isMainPagePathname\(window\.location\.pathname\)\) \{\s*run\(\);/);
-  assert.match(scheduler, /requestIdleCallback\(run, \{ timeout: 5000 \}\)/);
-  assert.match(scheduler, /requestAnimationFrame\(\(\) => \{/);
-  assert.match(scheduler, /setTimeout\(queueIdle, 750\)/);
+  assert.match(scheduler, /TaskPointsHomeIdleQueue\?\.enqueue/);
+  assert.match(scheduler, /home-toolbar-maintenance/);
+  assert.match(scheduler, /delayMs: 22000/);
+  assert.doesNotMatch(scheduler, /requestIdleCallback/);
+});
 
-  const maintenance = blockBetween(
-    toolbar,
-    'function runTaskPointsToolbarMaintenance()',
-    'function scheduleTaskPointsToolbarMaintenance()'
-  );
-  assert.match(maintenance, /autoPopulateTaskPointsInbox\(\)/);
-  assert.match(maintenance, /auditDuplicateHabitCompletions\(45\)/);
+test('YOU alias startup repair remains immediate off Home but is idle-queued on Home', () => {
+  assert.match(alias, /function isTaskPointsHomePage\(\)/);
+  assert.match(alias, /home-you-score-alias-repair/);
+  assert.match(alias, /delayMs: 14000/);
+  assert.match(alias, /if \(isTaskPointsHomePage\(\)\) scheduleHomeAliasRepair\(\);\s*else persistRepair/);
+  assert.match(alias, /if \(isTaskPointsHomePage\(\)\) \{\s*scheduleHomeAliasRepair\(\);\s*\} else \{\s*repairPersistedState\(\);/);
 });

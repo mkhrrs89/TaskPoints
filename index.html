@@ -5271,7 +5271,6 @@ tpPerfTime(
 );
 
 state = cleanupLiveDiffHistory(state);
-      captureLiveDiffPoint();
       tpPerfTime('renderStats: drawLiveDiffGraph', () => drawLiveDiffGraph());
       bindHomeGraphInteractions();
 
@@ -5932,7 +5931,6 @@ function scheduleHomeSeasonMaterializationAfterFirstPaint(todayKeyStr = getGameD
   homeSeasonMaterializationScheduled = true;
 
   const run = () => {
-    let shouldRefreshStats = false;
     let shouldRemember = false;
     try {
       const beforeRevision = typeof readHomeStateRevision === 'function'
@@ -5949,7 +5947,6 @@ function scheduleHomeSeasonMaterializationAfterFirstPaint(todayKeyStr = getGameD
           ? readHomeStateRevision()
           : '';
         shouldRemember = Boolean(afterRevision && afterRevision !== beforeRevision);
-        shouldRefreshStats = true;
       } else {
         shouldRemember = true;
       }
@@ -5960,30 +5957,15 @@ function scheduleHomeSeasonMaterializationAfterFirstPaint(todayKeyStr = getGameD
         );
       }
     } catch (error) {
-      console.warn('Failed to materialize today Season slate after Home first paint', error);
-    }
-
-    if (shouldRefreshStats) {
-      scheduleRender(() => {
-        try { renderStats(); }
-        catch (error) { console.error('renderStats after Season materialization failed', error); }
-      });
+      console.warn('Failed to materialize today Season slate after Home became idle', error);
     }
   };
 
-  const queueIdle = () => {
-    if (typeof window.requestIdleCallback === 'function') {
-      window.requestIdleCallback(run, { timeout: 4000 });
-    } else {
-      window.setTimeout(run, 250);
-    }
-  };
-
-  // Two frames guarantee that the initial Home render can commit before any
-  // full-state Season save begins.
-  window.requestAnimationFrame(() => {
-    window.requestAnimationFrame(queueIdle);
-  });
+  if (window.TaskPointsHomeIdleQueue?.enqueue) {
+    window.TaskPointsHomeIdleQueue.enqueue('home-season-materialization', run, { delayMs: 10000 });
+  } else {
+    window.setTimeout(run, 10000);
+  }
   return true;
 }
 
@@ -6439,6 +6421,105 @@ let homeGraphScrollRaf = null;
 let homeGraphPointerDownAt = null;
 let liveDiffCaptureIntervalId = null;
 
+
+(function installTaskPointsHomeIdleQueue(global) {
+  if (global.TaskPointsHomeIdleQueue) return;
+
+  const jobs = [];
+  const queuedNames = new Set();
+  const quietMs = 3000;
+  const gapMs = 2000;
+  let timerId = null;
+  let running = false;
+  let lastInteractionAt = global.performance?.now?.() ?? Date.now();
+
+  const now = () => global.performance?.now?.() ?? Date.now();
+
+  function schedule(delayMs = 250) {
+    if (timerId != null) global.clearTimeout(timerId);
+    timerId = global.setTimeout(pump, Math.max(0, Number(delayMs) || 0));
+  }
+
+  function noteInteraction() {
+    lastInteractionAt = now();
+    if (jobs.length) schedule(quietMs);
+  }
+
+  function finishJob() {
+    running = false;
+    lastInteractionAt = now();
+    schedule(gapMs);
+  }
+
+  function execute(job) {
+    let result;
+    try {
+      result = job.task();
+    } catch (error) {
+      console.warn(`[TP home idle] ${job.name} failed`, error);
+      finishJob();
+      return;
+    }
+    Promise.resolve(result).catch((error) => {
+      console.warn(`[TP home idle] ${job.name} failed`, error);
+    }).finally(finishJob);
+  }
+
+  function pump() {
+    timerId = null;
+    if (running || !jobs.length) return;
+    if (document.hidden) {
+      schedule(1000);
+      return;
+    }
+
+    jobs.sort((left, right) => left.notBefore - right.notBefore);
+    const job = jobs[0];
+    const current = now();
+    const waitForDelay = job.notBefore - current;
+    const waitForQuiet = quietMs - (current - lastInteractionAt);
+    const waitMs = Math.max(waitForDelay, waitForQuiet, 0);
+    if (waitMs > 0) {
+      schedule(Math.min(Math.max(waitMs, 250), 2000));
+      return;
+    }
+
+    jobs.shift();
+    queuedNames.delete(job.name);
+    running = true;
+
+    if (typeof global.requestIdleCallback === 'function') {
+      global.requestIdleCallback(() => execute(job));
+    } else {
+      global.setTimeout(() => execute(job), 0);
+    }
+  }
+
+  function enqueue(name, task, options = {}) {
+    const safeName = String(name || 'maintenance');
+    if (typeof task !== 'function' || queuedNames.has(safeName)) return false;
+    queuedNames.add(safeName);
+    jobs.push({
+      name: safeName,
+      task,
+      notBefore: now() + Math.max(0, Number(options.delayMs) || 0)
+    });
+    schedule();
+    return true;
+  }
+
+  ['pointerdown', 'touchstart', 'wheel', 'scroll', 'keydown'].forEach((eventName) => {
+    global.addEventListener(eventName, noteInteraction, { capture: true, passive: true });
+  });
+  document.addEventListener('visibilitychange', noteInteraction, { passive: true });
+
+  global.TaskPointsHomeIdleQueue = {
+    enqueue,
+    noteInteraction,
+    get pendingCount() { return jobs.length + (running ? 1 : 0); }
+  };
+})(window);
+
 function getWeightHistorySorted() {
   const list = Array.isArray(state?.weightHistory) ? state.weightHistory : [];
   return list
@@ -6596,6 +6677,16 @@ function captureLiveDiffPoint(){
   }
   save();
   drawLiveDiffGraph();
+}
+
+
+function scheduleInitialHomeLiveDiffCapture() {
+  const run = () => captureLiveDiffPoint();
+  if (window.TaskPointsHomeIdleQueue?.enqueue) {
+    window.TaskPointsHomeIdleQueue.enqueue('home-live-diff-initial-capture', run, { delayMs: 18000 });
+  } else {
+    window.setTimeout(run, 18000);
+  }
 }
 
 function getTodayOpponentPrimaryColor(){
@@ -13546,6 +13637,7 @@ renderFlexActions();
 // paint ASAP
 scheduleRender(renderAll);
 scheduleHomeSeasonMaterializationAfterFirstPaint();
+scheduleInitialHomeLiveDiffCapture();
 
 (async () => {
   await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
