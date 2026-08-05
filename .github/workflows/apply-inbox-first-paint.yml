@@ -1,0 +1,42 @@
+name: Apply Inbox first-paint optimization
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+
+      - name: Apply guarded Inbox performance patch
+        run: python scripts/apply_inbox_first_paint.py
+
+      - name: Run focused checks
+        run: |
+          node --check toolbar.js
+          node --check inbox_count_badge.js
+          node --test tests/inbox_first_paint_performance.test.js
+          node --test tests/inbox_count_badge.test.js
+          node --test tests/home_first_paint_maintenance.test.js
+          node --test tests/home_revision_refresh_contract.test.js
+          git diff --check
+
+      - name: Commit implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add inbox.html toolbar.js inbox_count_badge.js tests/inbox_first_paint_performance.test.js
+          git diff --cached --quiet && exit 0
+          git commit -m "Make Inbox interactive before maintenance"
+          git push
