@@ -19,6 +19,9 @@ jobs:
         with:
           ref: ${{ github.head_ref }}
 
+      - name: Keep Home scheduler contract isolated
+        run: python scripts/adjust_inbox_runner_home_contract.py
+
       - name: Apply guarded Inbox performance patch
         run: python scripts/apply_inbox_first_paint.py
 
