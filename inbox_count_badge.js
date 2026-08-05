@@ -162,7 +162,8 @@
 
   function observeLinks() {
     const document = global.document;
-    if (observer || typeof global.MutationObserver !== 'function' || !document?.documentElement) return;
+    if (observer) return true;
+    if (typeof global.MutationObserver !== 'function' || !document?.documentElement) return false;
     observer = new global.MutationObserver((mutations) => {
       const needsRefresh = mutations.some((mutation) => (
         Array.from(mutation.addedNodes || []).some(nodeContainsInboxLink)
@@ -170,13 +171,18 @@
       if (needsRefresh) queueRefresh();
     });
     observer.observe(document.documentElement, { childList: true, subtree: true });
+    return true;
   }
 
   function start() {
-    refresh();
-    observeLinks();
-    global.setTimeout?.(refresh, 0);
-    global.setTimeout?.(refresh, 150);
+    const knownCount = Number(global.__tpInboxKnownCount);
+    if (Number.isFinite(knownCount)) render(knownCount);
+    else refresh();
+
+    const observing = observeLinks();
+    // MutationObserver normally catches toolbar links inserted after startup.
+    // Keep one delayed fallback only for older environments without it.
+    if (!observing) global.setTimeout?.(refresh, 150);
   }
 
   global.addEventListener?.('storage', (event) => {
@@ -184,7 +190,11 @@
   });
   global.addEventListener?.('pageshow', queueRefresh);
   global.addEventListener?.('focus', queueRefresh);
-  global.addEventListener?.('taskpoints:inbox-updated', queueRefresh);
+  global.addEventListener?.('taskpoints:inbox-updated', (event) => {
+    const count = Number(event?.detail?.count);
+    if (Number.isFinite(count)) render(count);
+    else queueRefresh();
+  });
   global.document?.addEventListener?.('visibilitychange', () => {
     if (global.document?.visibilityState !== 'hidden') queueRefresh();
   });

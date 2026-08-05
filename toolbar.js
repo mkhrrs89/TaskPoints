@@ -1179,11 +1179,85 @@ function tpGenerateInboxMessages(sourceState, options = {}) {
   };
 }
 
-function autoPopulateTaskPointsInbox() {
+
+const TP_INBOX_SCAN_CHECKPOINT_KEY = 'taskpoints_inbox_scan_checkpoint_v1';
+const TP_INBOX_SCAN_ALGORITHM_VERSION = '20260805-1';
+
+function tpInboxRawFingerprint(raw) {
+  const value = String(raw || '');
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `${value.length}:${(hash >>> 0).toString(16).padStart(8, '0')}`;
+}
+
+function tpInboxReadStorageFingerprint(storageKey) {
+  try {
+    const raw = localStorage.getItem(storageKey);
+    return typeof raw === 'string' ? tpInboxRawFingerprint(raw) : '';
+  } catch (_) {
+    return '';
+  }
+}
+
+function tpInboxReadScanCheckpoint() {
+  try {
+    const raw = localStorage.getItem(TP_INBOX_SCAN_CHECKPOINT_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function tpInboxScanCheckpointMatches({ revealDayKey, fingerprint }) {
+  if (!revealDayKey || !fingerprint) return false;
+  const checkpoint = tpInboxReadScanCheckpoint();
+  return Boolean(
+    checkpoint
+    && checkpoint.version === TP_INBOX_SCAN_ALGORITHM_VERSION
+    && checkpoint.revealDayKey === revealDayKey
+    && checkpoint.fingerprint === fingerprint
+  );
+}
+
+function tpInboxWriteScanCheckpoint({ revealDayKey, fingerprint }) {
+  if (!revealDayKey || !fingerprint) return false;
+  try {
+    localStorage.setItem(TP_INBOX_SCAN_CHECKPOINT_KEY, JSON.stringify({
+      version: TP_INBOX_SCAN_ALGORITHM_VERSION,
+      revealDayKey,
+      fingerprint,
+      checkedAtISO: new Date().toISOString()
+    }));
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function autoPopulateTaskPointsInbox(options = {}) {
   if (!window.TaskPointsCore?.loadAppState || !window.TaskPointsCore?.mergeAndSaveState) return null;
+
+  const storageKey = window.TaskPointsCore?.STORAGE_KEY || 'taskpoints_v1';
+  const now = options.now instanceof Date ? options.now : new Date();
+  const revealDayKey = tpInboxRevealDayKey(now);
+  const sourceFingerprint = tpInboxReadStorageFingerprint(storageKey);
+
+  if (!options.force && tpInboxScanCheckpointMatches({ revealDayKey, fingerprint: sourceFingerprint })) {
+    return {
+      changed: false,
+      skipped: true,
+      reason: 'unchanged-source',
+      revealDayKey
+    };
+  }
+
   try {
     const loaded = TaskPointsCore.loadAppState({ syncDerived: true, persistSync: true });
-    const result = tpGenerateInboxMessages(loaded?.state || {});
+    const result = tpGenerateInboxMessages(loaded?.state || {}, { now });
     if (result.changed) {
       TaskPointsCore.mergeAndSaveState({
         inboxMessages: result.state.inboxMessages,
@@ -1194,8 +1268,20 @@ function autoPopulateTaskPointsInbox() {
         immediateWrite: true,
         assumeNormalized: true
       });
+
+      const activeCount = (Array.isArray(result.state.inboxMessages) ? result.state.inboxMessages : [])
+        .filter((message) => message && message.archived !== true)
+        .length;
+      if (typeof window.dispatchEvent === 'function' && typeof window.CustomEvent === 'function') {
+        window.dispatchEvent(new window.CustomEvent('taskpoints:inbox-updated', {
+          detail: { count: activeCount }
+        }));
+      }
+    } else {
+      const finalFingerprint = tpInboxReadStorageFingerprint(storageKey) || sourceFingerprint;
+      tpInboxWriteScanCheckpoint({ revealDayKey, fingerprint: finalFingerprint });
     }
-    return result;
+    return { ...result, skipped: false, revealDayKey };
   } catch (error) {
     console.warn('TaskPoints Inbox auto-population failed', error);
     return null;
@@ -1212,8 +1298,8 @@ window.TaskPointsInbox = {
 
 let taskPointsToolbarMaintenanceScheduled = false;
 
-function runTaskPointsToolbarMaintenance() {
-  autoPopulateTaskPointsInbox();
+function runTaskPointsToolbarMaintenance(options = {}) {
+  if (options.populateInbox !== false) autoPopulateTaskPointsInbox();
   try {
     const k = 'tp_audit_dupe_habits_last_run';
     const today = new Date().toISOString().slice(0,10);
@@ -1224,11 +1310,81 @@ function runTaskPointsToolbarMaintenance() {
   } catch (_) {}
 }
 
+function scheduleTaskPointsInboxAuditAfterStartup() {
+  let completed = false;
+  let timer = null;
+  let visibilityBound = false;
+
+  const cleanup = () => {
+    if (timer !== null) {
+      window.clearTimeout(timer);
+      timer = null;
+    }
+    if (visibilityBound) {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      visibilityBound = false;
+    }
+  };
+
+  const runWhenIdle = () => {
+    if (completed) return;
+    if (document.hidden) {
+      if (!visibilityBound) {
+        visibilityBound = true;
+        document.addEventListener('visibilitychange', onVisibilityChange);
+      }
+      return;
+    }
+
+    const auditOnly = () => {
+      if (completed || document.hidden) {
+        if (!completed) schedule(5000);
+        return;
+      }
+      completed = true;
+      cleanup();
+      runTaskPointsToolbarMaintenance({ populateInbox: false });
+    };
+
+    if (typeof window.requestIdleCallback === 'function') {
+      window.requestIdleCallback(auditOnly, { timeout: 5000 });
+    } else {
+      window.setTimeout(auditOnly, 0);
+    }
+  };
+
+  const schedule = (delayMs) => {
+    if (completed) return;
+    if (timer !== null) window.clearTimeout(timer);
+    timer = window.setTimeout(() => {
+      timer = null;
+      runWhenIdle();
+    }, delayMs);
+  };
+
+  function onVisibilityChange() {
+    if (document.hidden || completed) return;
+    if (visibilityBound) {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      visibilityBound = false;
+    }
+    schedule(1000);
+  }
+
+  schedule(30000);
+}
+
 function scheduleTaskPointsToolbarMaintenance() {
   if (taskPointsToolbarMaintenanceScheduled) return;
   taskPointsToolbarMaintenanceScheduled = true;
 
   const run = () => runTaskPointsToolbarMaintenance();
+  if (isInboxPagePathname(window.location.pathname)) {
+    // inbox.html owns message generation after its first interactive paint.
+    scheduleTaskPointsInboxAuditAfterStartup();
+    return;
+  }
+
   if (!isMainPagePathname(window.location.pathname)) {
     run();
     return;
@@ -1258,6 +1414,10 @@ function initToolbarNowOnce() {
 
 function isMainPagePathname(pathname) {
   return pathname === '/' || pathname.endsWith('/index.html');
+}
+
+function isInboxPagePathname(pathname) {
+  return pathname === '/inbox.html' || pathname.endsWith('/inbox.html');
 }
 
 function shouldDelayToolbarForBoot() {
