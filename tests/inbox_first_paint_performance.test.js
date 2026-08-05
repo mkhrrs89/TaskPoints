@@ -46,7 +46,10 @@ test('toolbar does not duplicate Inbox generation during Inbox startup', () => {
   assert.match(scheduler, /scheduleTaskPointsInboxAuditAfterStartup\(\)/);
   assert.match(helper, /runTaskPointsToolbarMaintenance\(\{ populateInbox: false \}\)/);
   assert.match(helper, /requestIdleCallback/);
-  assert.match(helper, /30000/);
+  assert.match(helper, /document\.hidden/);
+  assert.match(helper, /addEventListener\('visibilitychange', onVisibilityChange\)/);
+  assert.match(helper, /schedule\(1000\)/);
+  assert.match(helper, /schedule\(30000\)/);
 });
 
 test('unchanged Inbox scans use a day and full compressed-state fingerprint checkpoint', () => {
@@ -58,6 +61,13 @@ test('unchanged Inbox scans use a day and full compressed-state fingerprint chec
   assert.match(toolbar, /reason: 'unchanged-source'/);
   assert.match(toolbar, /if \(result\.changed\)/);
   assert.match(toolbar, /else \{\s*const finalFingerprint/);
+});
+
+test('Inbox update notifications are guarded when CustomEvent is unavailable', () => {
+  const populate = between(toolbar, 'function autoPopulateTaskPointsInbox(options = {})', 'window.TaskPointsInbox =');
+  assert.match(populate, /typeof window\.dispatchEvent === 'function'/);
+  assert.match(populate, /typeof window\.CustomEvent === 'function'/);
+  assert.match(populate, /new window\.CustomEvent\('taskpoints:inbox-updated'/);
 });
 
 test('Inbox badge accepts the page-known count and avoids redundant startup reads', () => {

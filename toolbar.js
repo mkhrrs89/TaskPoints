@@ -1272,9 +1272,11 @@ function autoPopulateTaskPointsInbox(options = {}) {
       const activeCount = (Array.isArray(result.state.inboxMessages) ? result.state.inboxMessages : [])
         .filter((message) => message && message.archived !== true)
         .length;
-      window.dispatchEvent?.(new CustomEvent('taskpoints:inbox-updated', {
-        detail: { count: activeCount }
-      }));
+      if (typeof window.dispatchEvent === 'function' && typeof window.CustomEvent === 'function') {
+        window.dispatchEvent(new window.CustomEvent('taskpoints:inbox-updated', {
+          detail: { count: activeCount }
+        }));
+      }
     } else {
       const finalFingerprint = tpInboxReadStorageFingerprint(storageKey) || sourceFingerprint;
       tpInboxWriteScanCheckpoint({ revealDayKey, fingerprint: finalFingerprint });
@@ -1309,15 +1311,67 @@ function runTaskPointsToolbarMaintenance(options = {}) {
 }
 
 function scheduleTaskPointsInboxAuditAfterStartup() {
-  window.setTimeout(() => {
-    const auditOnly = () => runTaskPointsToolbarMaintenance({ populateInbox: false });
-    if (document.hidden) return;
+  let completed = false;
+  let timer = null;
+  let visibilityBound = false;
+
+  const cleanup = () => {
+    if (timer !== null) {
+      window.clearTimeout(timer);
+      timer = null;
+    }
+    if (visibilityBound) {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      visibilityBound = false;
+    }
+  };
+
+  const runWhenIdle = () => {
+    if (completed) return;
+    if (document.hidden) {
+      if (!visibilityBound) {
+        visibilityBound = true;
+        document.addEventListener('visibilitychange', onVisibilityChange);
+      }
+      return;
+    }
+
+    const auditOnly = () => {
+      if (completed || document.hidden) {
+        if (!completed) schedule(5000);
+        return;
+      }
+      completed = true;
+      cleanup();
+      runTaskPointsToolbarMaintenance({ populateInbox: false });
+    };
+
     if (typeof window.requestIdleCallback === 'function') {
       window.requestIdleCallback(auditOnly, { timeout: 5000 });
     } else {
       window.setTimeout(auditOnly, 0);
     }
-  }, 30000);
+  };
+
+  const schedule = (delayMs) => {
+    if (completed) return;
+    if (timer !== null) window.clearTimeout(timer);
+    timer = window.setTimeout(() => {
+      timer = null;
+      runWhenIdle();
+    }, delayMs);
+  };
+
+  function onVisibilityChange() {
+    if (document.hidden || completed) return;
+    if (visibilityBound) {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      visibilityBound = false;
+    }
+    schedule(1000);
+  }
+
+  schedule(30000);
 }
 
 function scheduleTaskPointsToolbarMaintenance() {
