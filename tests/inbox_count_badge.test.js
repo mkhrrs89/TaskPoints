@@ -75,6 +75,17 @@ function makeContext(state) {
     MutationObserver: class {
       constructor(callback) { this.callback = callback; }
       observe() {}
+    },
+    CustomEvent: class {
+      constructor(type, init = {}) {
+        this.type = type;
+        this.detail = init.detail;
+      }
+    },
+    dispatchEvent(event) {
+      const callback = listeners.get(event?.type);
+      if (callback) callback(event);
+      return true;
     }
   };
   const context = vm.createContext({ window, document, globalThis: window, console, module: { exports: {} } });
@@ -144,4 +155,34 @@ test('worker bundles the badge module into the versioned scoring bundle', () => 
   assert.match(workerSource, /'\/inbox_count_badge\.js'/);
   assert.match(workerSource, /readAssetSource\(env, request, '\/inbox_count_badge\.js'\)/);
   assert.match(workerSource, /x-taskpoints-inbox-count-badge/);
+});
+
+
+test('emits the current Inbox message snapshot when a later badge read disagrees with the page', () => {
+  const state = { inboxMessages: [{ id: 'one' }, { id: 'two' }] };
+  const { window } = makeContext(state);
+  window.__tpInboxKnownCount = 0;
+
+  let detail = null;
+  window.addEventListener('taskpoints:inbox-state-snapshot', (event) => {
+    detail = event.detail;
+  });
+
+  assert.equal(window.TaskPointsInboxCountBadge.refresh(), 2);
+  assert.equal(detail?.count, 2);
+  assert.deepEqual(Array.from(detail?.inboxMessages || [], (message) => message?.id), ['one', 'two']);
+});
+
+test('does not emit an Inbox snapshot when the badge and page counts already agree', () => {
+  const state = { inboxMessages: [{ id: 'one' }, { id: 'two' }] };
+  const { window } = makeContext(state);
+  window.__tpInboxKnownCount = 2;
+
+  let emitted = false;
+  window.addEventListener('taskpoints:inbox-state-snapshot', () => {
+    emitted = true;
+  });
+
+  assert.equal(window.TaskPointsInboxCountBadge.refresh(), 2);
+  assert.equal(emitted, false);
 });

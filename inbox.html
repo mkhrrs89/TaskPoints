@@ -440,6 +440,12 @@
     if (event.key === STORAGE_KEY) queueStoredRefresh();
   });
 
+  window.addEventListener("taskpoints:inbox-state-snapshot", (event) => {
+    const messages = event?.detail?.inboxMessages;
+    if (!Array.isArray(messages)) return;
+    renderInboxState({ inboxMessages: messages }, { source: "badge-reconcile" });
+  });
+
   renderInboxState(loadInboxState(), { source: "stored" });
   requestAnimationFrame(() => requestAnimationFrame(() => queueBackgroundPopulate(QUIET_MS)));
 })();

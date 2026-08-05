@@ -138,8 +138,26 @@
     return count;
   }
 
+  function emitInboxStateSnapshotIfNeeded(state, count) {
+    const knownCount = Number(global.__tpInboxKnownCount);
+    if (!Number.isFinite(knownCount) || knownCount === count) return false;
+    if (typeof global.dispatchEvent !== 'function' || typeof global.CustomEvent !== 'function') return false;
+
+    global.dispatchEvent(new global.CustomEvent('taskpoints:inbox-state-snapshot', {
+      detail: {
+        count,
+        inboxMessages: Array.isArray(state?.inboxMessages) ? state.inboxMessages : []
+      }
+    }));
+    return true;
+  }
+
   function refresh() {
-    return render(countActiveInboxItems());
+    const state = readState();
+    const count = countActiveInboxItems(state);
+    render(count);
+    emitInboxStateSnapshotIfNeeded(state, count);
+    return count;
   }
 
   function queueRefresh() {
