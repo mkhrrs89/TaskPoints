@@ -392,6 +392,13 @@
 
     const run = () => {
       if (populateComplete) return;
+
+      const quietForNow = performance.now() - lastInteractionAt;
+      if (document.hidden || quietForNow < QUIET_MS) {
+        queueBackgroundPopulate(document.hidden ? QUIET_MS : QUIET_MS - quietForNow);
+        return;
+      }
+
       if (!window.TaskPointsInbox?.populate) {
         queueBackgroundPopulate(250);
         return;

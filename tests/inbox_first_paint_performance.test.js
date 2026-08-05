@@ -34,6 +34,9 @@ test('Inbox renders stored messages immediately and generates rollover messages 
   assert.match(runtime, /\["pointerdown", "touchstart", "wheel", "keydown"\]/);
   assert.match(runtime, /window\.addEventListener\("scroll", markInteraction/);
   assert.match(runtime, /requestIdleCallback\(run, \{ timeout: 5000 \}\)/);
+  assert.match(runtime, /const quietForNow = performance\.now\(\) - lastInteractionAt/);
+  assert.match(runtime, /document\.hidden \|\| quietForNow < QUIET_MS/);
+  assert.match(runtime, /queueBackgroundPopulate\(document\.hidden \? QUIET_MS : QUIET_MS - quietForNow\)/);
   assert.match(runtime, /result\?\.changed && result\?\.state/);
   assert.doesNotMatch(runtime, /DOMContentLoaded[^\n]*renderInbox/);
 });
