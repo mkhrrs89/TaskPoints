@@ -81,3 +81,15 @@ test('Inbox badge accepts the page-known count and avoids redundant startup read
   assert.doesNotMatch(start, /setTimeout\?\.\(refresh, 0\)/);
   assert.match(badge, /event\?\.detail\?\.count/);
 });
+
+
+test('Inbox body reconciles when a later badge read finds a fresher message snapshot', () => {
+  const runtime = between(inbox, '<script id="tp-inbox-runtime">', '</script>');
+  assert.match(runtime, /addEventListener\("taskpoints:inbox-state-snapshot"/);
+  assert.match(runtime, /event\?\.detail\?\.inboxMessages/);
+  assert.match(runtime, /renderInboxState\(\{ inboxMessages: messages \}, \{ source: "badge-reconcile" \}\)/);
+  assert.match(badge, /function emitInboxStateSnapshotIfNeeded\(state, count\)/);
+  assert.match(badge, /knownCount === count/);
+  assert.match(badge, /taskpoints:inbox-state-snapshot/);
+  assert.match(badge, /inboxMessages: Array\.isArray\(state\?\.inboxMessages\)/);
+});
