@@ -25,6 +25,9 @@ jobs:
       - name: Apply guarded Inbox performance patch
         run: python scripts/apply_inbox_first_paint.py
 
+      - name: Harden deferred Inbox maintenance
+        run: python scripts/harden_inbox_first_paint.py
+
       - name: Run focused checks
         run: |
           node --check toolbar.js
@@ -41,5 +44,5 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add inbox.html toolbar.js inbox_count_badge.js tests/inbox_first_paint_performance.test.js
           git diff --cached --quiet && exit 0
-          git commit -m "Make Inbox interactive before maintenance"
+          git commit -m "Harden Inbox first-paint maintenance"
           git push
