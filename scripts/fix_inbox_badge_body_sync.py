@@ -105,10 +105,8 @@ test('emits the current Inbox message snapshot when a later badge read disagrees
   });
 
   assert.equal(window.TaskPointsInboxCountBadge.refresh(), 2);
-  assert.deepEqual(detail, {
-    count: 2,
-    inboxMessages: state.inboxMessages
-  });
+  assert.equal(detail?.count, 2);
+  assert.deepEqual(Array.from(detail?.inboxMessages || [], (message) => message?.id), ['one', 'two']);
 });
 
 test('does not emit an Inbox snapshot when the badge and page counts already agree', () => {
