@@ -443,7 +443,8 @@
 }
 
 .player-editor-field input,
-.player-editor-field textarea {
+.player-editor-field textarea,
+.player-editor-field select {
   width: 100%;
   border-radius: 10px;
   font-size: 13px;
@@ -955,6 +956,13 @@ textarea{
         
           </select>
         </div>
+      </div>
+
+      <div>
+        <label class="text-xs muted">Rival</label>
+        <select id="playerRivalId" class="input mt-1">
+          <option value="">None</option>
+        </select>
       </div>
 
 <div class="create-player-three-col">
@@ -2287,6 +2295,44 @@ function isPlayerActive(player){
   return !!player && player.active !== false;
 }
 
+function buildPlayerRivalOptions({ excludePlayerId = "", selectedRivalId = "" } = {}) {
+  const excludedId = String(excludePlayerId || "");
+  const selectedId = String(selectedRivalId || "");
+  const candidatesById = new Map();
+
+  candidatesById.set("YOU", { id: "YOU", name: getYouName() });
+  (Array.isArray(state.players) ? state.players : []).forEach((player) => {
+    const id = String(player?.id || "");
+    if (!id || candidatesById.has(id)) return;
+    candidatesById.set(id, {
+      id,
+      name: String(player?.name || "Unnamed")
+    });
+  });
+
+  const candidates = Array.from(candidatesById.values())
+    .filter((candidate) => candidate.id !== excludedId)
+    .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+
+  return [
+    '<option value="">None</option>',
+    ...candidates.map((candidate) => {
+      const selected = candidate.id === selectedId ? " selected" : "";
+      return `<option value="${escapeHtmlAttr(candidate.id)}"${selected}>${escapeHtml(candidate.name)}</option>`;
+    })
+  ].join("");
+}
+
+function populateCreatePlayerRivalSelect(selectedRivalId = "") {
+  const select = $("playerRivalId");
+  if (!select) return;
+  const selectedId = String(selectedRivalId || "");
+  select.innerHTML = buildPlayerRivalOptions({ selectedRivalId: selectedId });
+  select.value = Array.from(select.options).some((option) => option.value === selectedId)
+    ? selectedId
+    : "";
+}
+
 function getAllParticipantIds(){
   const ids = ['YOU'];
   (state.players || []).forEach(p => {
@@ -3279,6 +3325,12 @@ function buildPlayerEditorContent(player) {
         <label>Style</label>
         <input data-field="style" value="${escapeHtmlAttr(player.style || "")}" />
       </div>
+      <div class="player-editor-field">
+        <label>Rival</label>
+        <select data-field="rivalId">
+          ${buildPlayerRivalOptions({ excludePlayerId: player.id, selectedRivalId: player.rivalId || "" })}
+        </select>
+      </div>
     </div>
 
     <div class="player-editor-colors">
@@ -3566,6 +3618,7 @@ const intimidationInput = card.querySelector('input[data-field="intimidation"]')
 const poiseInput     = card.querySelector('input[data-field="poise"]');
 const greedInput     = card.querySelector('input[data-field="greed"]');
 const styleInput     = card.querySelector('input[data-field="style"]');
+const rivalInput     = card.querySelector('select[data-field="rivalId"]');
   const primaryColorInput = card.querySelector('input[data-field="primaryColor"]');
   const secondaryColorInput = card.querySelector('input[data-field="secondaryColor"]');
 
@@ -3622,6 +3675,9 @@ const greed = greedInput
   const style = styleInput
     ? (styleInput.value || "").trim()
     : (player.style || "");
+  const rivalId = rivalInput
+    ? String(rivalInput.value || "").trim()
+    : String(player.rivalId || "").trim();
   const primaryColor = normalizePlayerColor(
     primaryColorInput ? primaryColorInput.value : player.primaryColor,
     DEFAULT_PRIMARY_COLOR
@@ -3645,6 +3701,7 @@ player.intimidation = Math.min(100, Math.max(0, isNaN(intimidation) ? 0 : intimi
 player.poise = Math.min(100, Math.max(0, isNaN(poise) ? 0 : poise));
 player.greed = Math.min(100, Math.max(0, isNaN(greed) ? 0 : greed));
 player.style    = style || "balanced";
+player.rivalId = rivalId && rivalId !== player.id ? rivalId : "";
     player.primaryColor = primaryColor;
     player.secondaryColor = secondaryColor;
 
@@ -3703,6 +3760,7 @@ $("createPlayerForm").addEventListener("submit", (e)=>{
   const notes = ($("playerNotes").value || "").trim();
   const file = $("playerImage").files && $("playerImage").files[0];
   const isActive = $("playerActive").checked;
+  const rivalId = String($("playerRivalId")?.value || "").trim();
 
 const baseline = Number($("playerBaseline").value || 60);
 const variance = Number($("playerVariance").value || 40);
@@ -3736,6 +3794,7 @@ const greed = Number($("playerGreed").value || 25);
       imageId: imageId || "",
       createdAtISO: new Date().toISOString(),
       active: isActive,
+      rivalId,
 
 baseline: isNaN(baseline) ? 50 : baseline,
 variance: isNaN(variance) ? 15 : variance,
@@ -3768,6 +3827,8 @@ $("playerIntimidation").value = "0";
 $("playerPoise").value = "0";
 $("playerGreed").value = "25";
 $("playerStyle").value = "";
+    $("playerRivalId").value = "";
+    populateCreatePlayerRivalSelect();
     $("playerPrimaryColor").value = DEFAULT_PRIMARY_COLOR;
     $("playerSecondaryColor").value = DEFAULT_SECONDARY_COLOR;
     $("playerActive").checked = false;
@@ -3943,6 +4004,7 @@ function setupCreatePlayerModal() {
   if (!modal || !openBtn || !closeBtn || modal.dataset.init === "true") return;
 
   const openModal = () => {
+    populateCreatePlayerRivalSelect($("playerRivalId")?.value || "");
     modal.classList.add("is-open");
     modal.setAttribute("aria-hidden", "false");
     openBtn.setAttribute("aria-expanded", "true");
@@ -3969,6 +4031,7 @@ function setupCreatePlayerModal() {
     if (event.key === "Escape") closeModal();
   });
 
+  populateCreatePlayerRivalSelect();
   window.openCreatePlayerModal = openModal;
   window.closeCreatePlayerModal = closeModal;
   modal.dataset.init = "true";
