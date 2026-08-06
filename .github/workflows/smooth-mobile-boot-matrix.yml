@@ -1,0 +1,49 @@
+name: Smooth mobile boot matrix
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - synchronize
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+
+      - name: Apply guarded smoothness patch
+        run: python scripts/smooth_mobile_boot_matrix.py
+
+      - name: Run animation and Home checks
+        run: |
+          node --test tests/boot_animation_sequence_contract.test.js
+          node --test tests/boot_animation_skip_contract.test.js
+          node --test tests/home_first_paint_maintenance.test.js
+          node --test tests/home_revision_refresh_contract.test.js
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const html = fs.readFileSync('index.html', 'utf8');
+          const marker = '<script id="tp-early-matrix-bootstrap">';
+          const start = html.indexOf(marker);
+          const bodyStart = html.indexOf('>', start) + 1;
+          const end = html.indexOf('</script>', bodyStart);
+          if (start < 0 || end < 0) throw new Error('early matrix script missing');
+          new Function(html.slice(bodyStart, end));
+          NODE
+          git diff --check
+
+      - name: Commit implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html tests/boot_animation_sequence_contract.test.js
+          git diff --cached --quiet && exit 0
+          git commit -m "Start mobile matrix after first blank paint"
+          git push
