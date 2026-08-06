@@ -12,6 +12,7 @@ function loadWorker({ assetVersion = 'a' } = {}) {
   let source = fs.readFileSync(WORKER_PATH, 'utf8');
   source = source
     .replace("import baseWorker from './_worker_core.js';", 'const baseWorker = globalThis.__baseWorker;')
+    .replace("import { isHomePagePath, transformHomeBoot } from './mobile_boot_gate.js';", 'const { isHomePagePath, transformHomeBoot } = globalThis.__mobileBootGate;')
     .replace('export default {', 'globalThis.__worker = {');
 
   let baseFetchCalls = 0;
@@ -47,6 +48,7 @@ function loadWorker({ assetVersion = 'a' } = {}) {
         if (url.pathname === '/habit_completion_source_guard.js') return new Response('GUARD');
         if (url.pathname === '/save_pipeline_shared_work.js') return new Response('SHARED');
         if (url.pathname === '/inbox_count_badge.js') return new Response('INBOX');
+        if (url.pathname === '/season_series_upset_notifications.js') return new Response('SERIES_UPSET');
         return new Response(`ASSET:${url.pathname}`);
       }
     }
@@ -64,6 +66,10 @@ function loadWorker({ assetVersion = 'a' } = {}) {
 
   const context = {
     __baseWorker: baseWorker,
+    __mobileBootGate: {
+      isHomePagePath: () => false,
+      transformHomeBoot: (response) => response
+    },
     caches: { default: cache },
     Request,
     Response,
@@ -122,17 +128,18 @@ test('the versioned bundle is immutable and reused from the edge cache', async (
 
   const first = await harness.worker.fetch(new Request(versionedUrl), harness.env, harness.ctx);
   assert.equal(first.status, 200);
-  assert.equal(await first.text(), 'CORE\nALIAS\nYOU_ALIAS\nGUARD\nSHARED\nINBOX\n');
+  assert.equal(await first.text(), 'CORE\nALIAS\nYOU_ALIAS\nGUARD\nSHARED\nINBOX\nSERIES_UPSET\n');
   assert.match(first.headers.get('cache-control') || '', /max-age=31536000/);
   assert.match(first.headers.get('cache-control') || '', /immutable/);
   assert.equal(first.headers.get('x-taskpoints-bundle-cache'), 'miss');
   assert.equal(first.headers.get('x-taskpoints-you-score-alias-alignment'), 'included');
+  assert.equal(first.headers.get('x-taskpoints-season-series-upsets'), 'included');
   assert.equal(harness.baseFetchCalls(), 1);
   await harness.flush();
 
   const second = await harness.worker.fetch(new Request(versionedUrl), harness.env, harness.ctx);
   assert.equal(second.status, 200);
-  assert.equal(await second.text(), 'CORE\nALIAS\nYOU_ALIAS\nGUARD\nSHARED\nINBOX\n');
+  assert.equal(await second.text(), 'CORE\nALIAS\nYOU_ALIAS\nGUARD\nSHARED\nINBOX\nSERIES_UPSET\n');
   assert.equal(second.headers.get('x-taskpoints-bundle-cache'), 'hit');
   assert.equal(harness.baseFetchCalls(), 1);
 });
@@ -165,7 +172,8 @@ test('the fingerprint list covers every module assembled by the core worker', ()
     '/you_score_alias_alignment.js',
     '/habit_completion_source_guard.js',
     '/save_pipeline_shared_work.js',
-    '/inbox_count_badge.js'
+    '/inbox_count_badge.js',
+    '/season_series_upset_notifications.js'
   ]) {
     const escaped = pathname.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     assert.match(outer, new RegExp(`['"]${escaped}['"]`), pathname);
