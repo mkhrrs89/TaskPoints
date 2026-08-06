@@ -1,6 +1,9 @@
 name: Smooth mobile boot matrix
 
 on:
+  push:
+    branches:
+      - fix/mobile-boot-matrix-sequence
   pull_request:
     branches:
       - main
@@ -16,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.head_ref }}
+          ref: ${{ github.head_ref || github.ref_name }}
 
       - name: Apply guarded smoothness patch
         run: python scripts/smooth_mobile_boot_matrix.py
