@@ -3801,8 +3801,9 @@ if (Number.isFinite(Number(simulated))) {
     return Number(series.playerASeed) === 1 || Number(series.playerBSeed) === 1 || Number(series.playerASeed) === 2 || Number(series.playerBSeed) === 2;
   }
 
-  function getSeasonRoundPlayedDatesBefore(roundId, todayDateKey) {
-    const round = JUNE_2026_SEASON_DATE_WINDOWS.find((item) => item.id === roundId);
+  function getSeasonRoundPlayedDatesBefore(roundId, todayDateKey, seasonOrState = null) {
+    const season = seasonOrState?.currentSeason || seasonOrState || null;
+    const round = getSeasonDateWindowsForSeason(season).find((item) => item.id === roundId);
     if (!round || !todayDateKey || todayDateKey <= round.startDate) return [];
     const endExclusive = todayDateKey <= round.endDate ? todayDateKey : adjacentLocalDateKey(round.endDate, 1);
     const dates = [];
@@ -3985,7 +3986,7 @@ if (Number.isFinite(Number(simulated))) {
     let season = normalizeSeasonState(seasonArg || normalizedState.currentSeason);
     if (!season) return { ok: false, state: normalizedState, season, updatedSeason: season, changed: false, backfilledCount: 0, seriesIds: [], errors: ['No current season.'] };
     const today = options.dateKey || (options.nowISO ? dateKey(options.nowISO) : dateKey(new Date()));
-    const missedDates = getSeasonRoundPlayedDatesBefore('round_of_32', today);
+    const missedDates = getSeasonRoundPlayedDatesBefore('round_of_32', today, season);
     if (!missedDates.length) return { ok: true, state: normalizedState, season, updatedSeason: season, changed: false, backfilledCount: 0, seriesIds: [] };
     const nextSeries = { ...(season.series || {}) };
     const changedSeriesIds = [];
