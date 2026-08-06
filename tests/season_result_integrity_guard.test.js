@@ -266,11 +266,21 @@ test('future materialization is blocked from the live ledger', () => {
   assert.equal(result.materializedCount, 0);
 });
 
-test('June-specific late-bound backfill is skipped for an August season', () => {
+test('late-bound backfill wrapper delegates August seasons to the season-aware core', () => {
   const { core } = createHarness();
-  const seasonState = { id: 'season_2_august_2026', monthKey: '2026-08', series: {} };
-  const result = core.backfillLateBoundSeasonSeriesResults({ currentSeason: seasonState }, seasonState, {});
-  assert.equal(result.changed, false);
-  assert.equal(result.backfilledCount, 0);
-  assert.equal(result.skippedIncompatibleSeason, true);
+  const seasonState = {
+    id: 'season_2_august_2026',
+    monthKey: '2026-08',
+    dateWindows: [{ id: 'round_of_32', startDate: '2026-08-04', endDate: '2026-08-08' }],
+    series: {}
+  };
+  const state = { currentSeason: seasonState };
+  const result = core.backfillLateBoundSeasonSeriesResults(state, seasonState, {
+    nowISO: '2026-08-06T10:10:00-04:00'
+  });
+  assert.equal(result.changed, true);
+  assert.equal(result.backfilledCount, 3);
+  assert.equal(result.state, state);
+  assert.equal(result.updatedSeason, seasonState);
+  assert.equal(result.skippedIncompatibleSeason, undefined);
 });
