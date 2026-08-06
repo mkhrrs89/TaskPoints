@@ -555,6 +555,7 @@ Nothing visible on the page is built here. === -->
   let finished = false;
   let skipRequested = false;
   let finishTimer = null;
+  let visualFallbackTimer = null;
   let skipCleanup = null;
   let resolveFinished;
   let viewFinished = false;
@@ -599,15 +600,27 @@ Nothing visible on the page is built here. === -->
   };
   window.__tpCompleteBootView = completeBootView;
 
+  const settleMatrixTitle = () => {
+    if (!titleEl) return;
+    titleEl.classList.remove("tp-matrix-running");
+    titleEl.textContent = word;
+  };
+  window.__tpForceMatrixFinal = settleMatrixTitle;
+
   const finish = () => {
     if (finished) return;
     finished = true;
     if (finishTimer !== null) clearTimeout(finishTimer);
+    if (visualFallbackTimer !== null) clearTimeout(visualFallbackTimer);
     if (typeof skipCleanup === "function") skipCleanup();
     window.__tpMatrixFinished = true;
     try { performance.mark("tp-matrix-finished"); } catch (e) {}
     resolveFinished?.();
     window.dispatchEvent(new Event("tp:matrixFinished"));
+  };
+  window.__tpForceMatrixCompletion = () => {
+    settleMatrixTitle();
+    finish();
   };
 
   if (!splash || !titleEl){
@@ -628,6 +641,7 @@ Nothing visible on the page is built here. === -->
     if (skipRequested || finished) return;
     skipRequested = true;
     titleEl.classList.add("tp-matrix-skip");
+    settleMatrixTitle();
     finish();
     completeBootView({ skipped: true });
   };
@@ -648,7 +662,7 @@ Nothing visible on the page is built here. === -->
   };
 
   if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches){
-    titleEl.textContent = word;
+    settleMatrixTitle();
     finishTimer = setTimeout(finish, 180);
     return;
   }
@@ -680,6 +694,9 @@ Nothing visible on the page is built here. === -->
       transform: translate3d(0, 0, 0);
       backface-visibility: hidden;
       will-change: transform;
+      animation: none;
+    }
+    #matrixTitle.tp-matrix-running .tp-matrix-char-strip {
       animation: tpMatrixDecodeChar var(--tp-char-duration) steps(6, end) var(--tp-char-delay) both;
     }
     #matrixTitle .tp-matrix-char-frame {
@@ -754,6 +771,7 @@ Nothing visible on the page is built here. === -->
   const completeAfterVisual = () => {
     if (completionScheduled || skipRequested || finished) return;
     completionScheduled = true;
+    settleMatrixTitle();
     setTimeout(() => {
       if (skipRequested || finished) return;
       finishTimer = setTimeout(finish, 180);
@@ -761,7 +779,17 @@ Nothing visible on the page is built here. === -->
   };
 
   lastStrip?.addEventListener("animationend", completeAfterVisual, { once: true });
-  setTimeout(completeAfterVisual, visualDurationMs + 120);
+
+  const startVisualAnimation = () => {
+    if (skipRequested || finished || titleEl.classList.contains("tp-matrix-running")) return;
+    try { performance.mark("tp-matrix-visual-started"); } catch (e) {}
+    titleEl.classList.add("tp-matrix-running");
+    visualFallbackTimer = setTimeout(completeAfterVisual, visualDurationMs + 400);
+  };
+  const nextFrame = typeof window.requestAnimationFrame === "function"
+    ? window.requestAnimationFrame.bind(window)
+    : (callback) => setTimeout(callback, 16);
+  nextFrame(() => nextFrame(startVisualAnimation));
 
 })();
 </script>
@@ -14806,7 +14834,11 @@ const dismissReminderForSession = () => {
   }
 
   // failsafe in case the bootstrap cannot complete
-  setTimeout(finishBoot, 4000);
+  // If the compositor animation stalls, settle the visible title before revealing Home.
+  setTimeout(() => {
+    window.__tpForceMatrixCompletion?.();
+    finishBoot();
+  }, 5000);
 
 })();
 </script>

@@ -42,3 +42,21 @@ test('normal completion follows the last character and skip jumps every strip to
   assert.match(early, /translate3d\(0, -6\.9em, 0\) !important/);
   assert.match(early, /completeBootView\(\{ skipped: true \}\)/);
 });
+
+
+test('visual sequence begins only after blank slots have received two paint opportunities', () => {
+  assert.match(early, /animation: none/);
+  assert.match(early, /#matrixTitle\.tp-matrix-running \.tp-matrix-char-strip/);
+  assert.match(early, /nextFrame\(\(\) => nextFrame\(startVisualAnimation\)\)/);
+  assert.match(early, /titleEl\.classList\.add\("tp-matrix-running"\)/);
+  assert.match(early, /visualFallbackTimer = setTimeout\(completeAfterVisual, visualDurationMs \+ 400\)/);
+});
+
+test('normal, skipped, and failsafe completion always settle a clean TASKPOINTS title', () => {
+  assert.match(early, /const settleMatrixTitle = \(\) =>/);
+  assert.match(early, /titleEl\.textContent = word/);
+  assert.match(early, /window\.__tpForceMatrixCompletion = \(\) =>/);
+  assert.match(early, /completionScheduled = true;\s+settleMatrixTitle\(\)/);
+  assert.match(early, /skipRequested = true;[\s\S]*settleMatrixTitle\(\);[\s\S]*finish\(\)/);
+  assert.match(html, /window\.__tpForceMatrixCompletion\?\.\(\);\s+finishBoot\(\);/);
+});
