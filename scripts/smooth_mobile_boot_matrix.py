@@ -1,5 +1,6 @@
 from pathlib import Path
 
+# Guarded patch runner for the second mobile video regression.
 INDEX = Path('index.html')
 TEST = Path('tests/boot_animation_sequence_contract.test.js')
 
