@@ -17,6 +17,7 @@ test('Settings receives two paint opportunities before heavy runtime replay', ()
 
 test('collapsed Settings panels initialize only when opened', () => {
   for (const id of [
+    'shadowMigrationSection',
     'storageHealthSection',
     'healthDataManagerSection',
     'habitCalendarReportSection',
@@ -36,4 +37,18 @@ test('repeat actions remain available after first lazy initialization', () => {
 
 test('Home prefetches Settings for faster navigation', () => {
   assert.match(source, /rel=\\"prefetch\\" href=\\"\/settings\.html\\"/);
+});
+
+test('every Settings card except Navigation Shortcuts is collapsed', () => {
+  assert.match(source, /heading\.textContent\.trim\(\) === \\"Navigation Shortcuts\\"/);
+  assert.match(source, /if \(card === navigationCard\) continue/);
+  assert.match(source, /document\.createElement\(\\"details\\"\)/);
+  assert.match(source, /card\.removeAttribute\(\\"open\\"\)/);
+  assert.match(source, /child !== navigationCard && child\.tagName === \\"DETAILS\\"/);
+});
+
+test('Settings collapse conversion runs before the deferred runtime', () => {
+  assert.match(source, /SETTINGS_COLLAPSE_SCRIPT \+ RUNTIME_LOADER_SCRIPT/);
+  assert.match(source, /tp-settings-collapsing/);
+  assert.match(source, /finally \{\s*finish\(\);\s*\}/);
 });
