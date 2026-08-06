@@ -40,11 +40,11 @@ test('Home prefetches Settings for faster navigation', () => {
 });
 
 test('every Settings card except Navigation Shortcuts is collapsed', () => {
-  assert.match(source, /heading\.textContent\.trim\(\) === \\"Navigation Shortcuts\\"/);
-  assert.match(source, /if \(card === navigationCard\) continue/);
-  assert.match(source, /document\.createElement\(\\"details\\"\)/);
-  assert.match(source, /card\.removeAttribute\(\\"open\\"\)/);
-  assert.match(source, /child !== navigationCard && child\.tagName === \\"DETAILS\\"/);
+  assert.ok(source.includes('heading.textContent.trim() === "Navigation Shortcuts"'));
+  assert.ok(source.includes('if (card === navigationCard) continue'));
+  assert.ok(source.includes('document.createElement("details")'));
+  assert.ok(source.includes('card.removeAttribute("open")'));
+  assert.ok(source.includes('child !== navigationCard && child.tagName === "DETAILS"'));
 });
 
 test('Settings collapse conversion runs before the deferred runtime', () => {
