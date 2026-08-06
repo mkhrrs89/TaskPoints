@@ -218,6 +218,75 @@ const COORDINATOR_SCRIPT = `<script id="tp-mobile-boot-runtime-coordinator">
 const RUNTIME_LOADER_SCRIPT = `<script id="tp-mobile-boot-runtime-loader">
 (function installTaskPointsDeferredRuntime(){
   const coordinator = window.__tpMobileBootCoordinator;
+  const isSettingsPage = /(^|\\/)settings(?:\\.html)?$/.test(location.pathname);
+
+  const localLateReadyListeners = [];
+  const nativeDocumentAdd = document.addEventListener.bind(document);
+  const nativeDocumentRemove = document.removeEventListener.bind(document);
+  const nativeWindowAdd = window.addEventListener.bind(window);
+  const nativeWindowRemove = window.removeEventListener.bind(window);
+  let localReadyCaptureActive = !coordinator;
+
+  function passedReadyEvent(type) {
+    if (type === "DOMContentLoaded") return document.readyState !== "loading";
+    if (type === "load") return document.readyState === "complete";
+    return false;
+  }
+
+  function captureLocalReadyListener(target, type, listener, options) {
+    if (!localReadyCaptureActive || !listener || !passedReadyEvent(type)) return false;
+    localLateReadyListeners.push({ target, type, listener, options });
+    return true;
+  }
+
+  if (localReadyCaptureActive) {
+    document.addEventListener = function(type, listener, options) {
+      if (captureLocalReadyListener(document, type, listener, options)) return;
+      return nativeDocumentAdd(type, listener, options);
+    };
+    document.removeEventListener = function(type, listener, options) {
+      for (let index = localLateReadyListeners.length - 1; index >= 0; index -= 1) {
+        const row = localLateReadyListeners[index];
+        if (row.target === document && row.type === type && row.listener === listener) {
+          localLateReadyListeners.splice(index, 1);
+        }
+      }
+      return nativeDocumentRemove(type, listener, options);
+    };
+    window.addEventListener = function(type, listener, options) {
+      if (captureLocalReadyListener(window, type, listener, options)) return;
+      return nativeWindowAdd(type, listener, options);
+    };
+    window.removeEventListener = function(type, listener, options) {
+      for (let index = localLateReadyListeners.length - 1; index >= 0; index -= 1) {
+        const row = localLateReadyListeners[index];
+        if (row.target === window && row.type === type && row.listener === listener) {
+          localLateReadyListeners.splice(index, 1);
+        }
+      }
+      return nativeWindowRemove(type, listener, options);
+    };
+  }
+
+  function flushLocalReadyListeners() {
+    if (!localReadyCaptureActive) return;
+    localReadyCaptureActive = false;
+    document.addEventListener = nativeDocumentAdd;
+    document.removeEventListener = nativeDocumentRemove;
+    window.addEventListener = nativeWindowAdd;
+    window.removeEventListener = nativeWindowRemove;
+
+    while (localLateReadyListeners.length) {
+      const row = localLateReadyListeners.shift();
+      const event = new Event(row.type);
+      try {
+        if (typeof row.listener === "function") row.listener.call(row.target, event);
+        else row.listener?.handleEvent?.(event);
+      } catch (error) {
+        setTimeout(() => { throw error; });
+      }
+    }
+  }
 
   function replayScript(node) {
     return new Promise(resolve => {
@@ -255,22 +324,77 @@ const RUNTIME_LOADER_SCRIPT = `<script id="tp-mobile-boot-runtime-loader">
     for (const node of afterRuntime) await replayScript(node);
   }
 
+  function installSettingsLazyInitializers() {
+    if (!isSettingsPage || window.__tpSettingsLazyInitializersInstalled) return;
+    window.__tpSettingsLazyInitializersInstalled = true;
+
+    const idle = window.requestIdleCallback
+      ? callback => window.requestIdleCallback(callback, { timeout: 800 })
+      : callback => setTimeout(callback, 120);
+
+    function lazySection(sectionId, functionName) {
+      const section = document.getElementById(sectionId);
+      const original = window[functionName];
+      if (!section || typeof original !== "function") return;
+
+      let initialized = false;
+      const run = (...args) => {
+        if (initialized && !args.length) return;
+        initialized = true;
+        return original.apply(window, args);
+      };
+
+      window[functionName] = function(...args) {
+        if (!section.open) return;
+        return run(...args);
+      };
+
+      section.addEventListener("toggle", () => {
+        if (!section.open || initialized) return;
+        requestAnimationFrame(() => run());
+      });
+    }
+
+    lazySection("storageHealthSection", "renderStorageHealthPanel");
+    lazySection("healthDataManagerSection", "renderHealthDataManager");
+    lazySection("habitCalendarReportSection", "renderHabitCalendarSelector");
+    lazySection("missingScoresSection", "populateMissingFlexOptions");
+    lazySection("scoringSettingsSection", "renderScoringSettings");
+    lazySection("habitTagColorsSection", "renderHabitTagColors");
+
+    const originalRefreshShadow = window.refreshShadowMigrationStatus;
+    if (typeof originalRefreshShadow === "function") {
+      let scheduled = false;
+      window.refreshShadowMigrationStatus = function() {
+        if (scheduled) return;
+        scheduled = true;
+        idle(() => originalRefreshShadow.call(window));
+      };
+    }
+  }
+
   const starter = async () => {
     await replayDeferredRuntime();
-    coordinator?.flushLateReadyListeners();
+    installSettingsLazyInitializers();
+    if (coordinator) coordinator.flushLateReadyListeners();
+    else flushLocalReadyListeners();
     await Promise.resolve();
     await Promise.resolve();
     coordinator?.requestReveal({ skipped: coordinator.isSkipRequested() });
   };
 
-  if (coordinator) coordinator.installRuntimeStarter(starter);
-  else starter();
+  if (coordinator) {
+    coordinator.installRuntimeStarter(starter);
+  } else {
+    const nextFrame = () => new Promise(resolve => requestAnimationFrame(resolve));
+    nextFrame().then(nextFrame).then(starter);
+  }
 })();
 </script>`;
 
 function isHomePagePath(pathname) {
   const clean = String(pathname || '').replace(/\/+$/, '');
-  return clean === '' || clean === '/index.html';
+  return clean === '' || clean === '/index.html' || clean === '/settings.html' || clean === '/settings';
 }
 
 function transformHomeBoot(response) {
@@ -291,7 +415,11 @@ function transformHomeBoot(response) {
   return new HTMLRewriter()
     .on('head', {
       element(element) {
-        element.append('<link rel="preload" href="/scoring_core.js" as="script">', { html: true });
+        element.append(
+          '<link rel="preload" href="/scoring_core.js" as="script">'
+          + '<link rel="prefetch" href="/settings.html">',
+          { html: true }
+        );
       }
     })
     .on('script#tp-early-matrix-bootstrap', {
