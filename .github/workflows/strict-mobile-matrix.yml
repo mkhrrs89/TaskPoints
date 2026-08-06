@@ -1,6 +1,9 @@
 name: Strict mobile matrix sequence
 
 on:
+  push:
+    branches:
+      - fix/mobile-boot-strict-sequence
   pull_request:
     branches:
       - main
@@ -17,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.head_ref }}
+          ref: ${{ github.head_ref || github.ref_name }}
 
       - name: Apply guarded strict sequence patch
         run: python scripts/apply_strict_mobile_matrix.py
