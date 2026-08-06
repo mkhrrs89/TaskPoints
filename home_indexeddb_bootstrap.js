@@ -9,11 +9,11 @@
 
   const WORD = 'TASKPOINTS';
   const GLYPHS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#$%&*+?@';
-  const INITIAL_BLANK_MS = 90;
-  const SCRAMBLE_MS = 160;
-  const GLYPH_TICK_MS = 24;
-  const BETWEEN_LETTERS_MS = 18;
-  const FINAL_HOLD_MS = 140;
+  const INITIAL_BLANK_MS = 35;
+  const SCRAMBLE_MS = 70;
+  const GLYPH_TICK_MS = 14;
+  const BETWEEN_LETTERS_MS = 0;
+  const FINAL_HOLD_MS = 70;
 
   let started = false;
   let stopped = false;
@@ -172,13 +172,8 @@
     });
     titleObserver.observe(titleEl, { childList: true });
 
-    // Wait until parsing is complete and the blank splash has received real paint
-    // opportunities. The old implementation started its clock during HTML parsing.
-    if (document.readyState === 'loading') {
-      await new Promise((resolve) => {
-        document.addEventListener('DOMContentLoaded', resolve, { once: true });
-      });
-    }
+    // Start after two real paint opportunities. Do not wait for the enormous page
+    // to finish parsing; mobile can decode while the rest of the app continues loading.
     await nextFrame();
     await nextFrame();
     await sleep(INITIAL_BLANK_MS);
