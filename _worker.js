@@ -1,4 +1,5 @@
 import baseWorker from './_worker_core.js';
+import { isHomePagePath, transformHomeBoot } from './mobile_boot_gate.js';
 
 const CORE_BUNDLE_ASSET_PATHS = Object.freeze([
   '/scoring_core.js',
@@ -243,6 +244,11 @@ export default {
     }
 
     const response = await baseWorker.fetch(request, env, ctx);
+
+    if (request.method === 'GET' && response.ok && isHomePagePath(url.pathname)) {
+      return transformHomeBoot(response);
+    }
+
     const directPageKind = directAliasPageKind(url.pathname);
 
     if (request.method === 'GET' && response.ok && directPageKind) {
