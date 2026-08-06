@@ -1,3 +1,230 @@
+(function installTaskPointsSequentialMatrixBoot(global) {
+  'use strict';
+
+  if (!global || global.__tpSequentialMatrixBootInstalled) return;
+  global.__tpSequentialMatrixBootInstalled = true;
+
+  const document = global.document;
+  if (!document) return;
+
+  const WORD = 'TASKPOINTS';
+  const GLYPHS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#$%&*+?@';
+  const INITIAL_BLANK_MS = 90;
+  const SCRAMBLE_MS = 160;
+  const GLYPH_TICK_MS = 24;
+  const BETWEEN_LETTERS_MS = 18;
+  const FINAL_HOLD_MS = 140;
+
+  let started = false;
+  let stopped = false;
+  let stage = null;
+  let titleObserver = null;
+  let removeSkipListeners = null;
+
+  const sleep = (ms) => new Promise((resolve) => global.setTimeout(resolve, ms));
+  const nextFrame = () => new Promise((resolve) => {
+    const raf = global.requestAnimationFrame || ((callback) => global.setTimeout(callback, 16));
+    raf.call(global, resolve);
+  });
+  const randomGlyph = () => GLYPHS[(Math.random() * GLYPHS.length) | 0];
+
+  const overrideStyle = document.createElement('style');
+  overrideStyle.id = 'tp-sequential-matrix-override';
+  overrideStyle.textContent = `
+    #matrixTitle.tp-matrix-running .tp-matrix-char-strip,
+    #matrixTitle .tp-matrix-char-strip {
+      animation: none !important;
+      transform: none !important;
+    }
+
+    #matrixTitle .tp-sequential-matrix-stage {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.08em;
+      height: 1.15em;
+      line-height: 1.15em;
+      white-space: nowrap;
+      letter-spacing: 0;
+      contain: layout paint;
+      transform: translateZ(0);
+    }
+
+    #matrixTitle .tp-sequential-matrix-char {
+      display: inline-block;
+      width: 0.85em;
+      height: 1.15em;
+      line-height: 1.15em;
+      text-align: center;
+      letter-spacing: 0;
+      white-space: nowrap;
+      color: #c8ffd8;
+    }
+
+    #matrixTitle .tp-sequential-matrix-char.is-scrambling {
+      color: #b7ffc9;
+      text-shadow:
+        0 0 8px rgba(60,255,120,0.34),
+        0 0 18px rgba(60,255,120,0.18);
+    }
+
+    #matrixTitle .tp-sequential-matrix-char.is-locked {
+      color: #eafff1;
+    }
+  `;
+  (document.head || document.documentElement).appendChild(overrideStyle);
+
+  function isBootPending() {
+    return document.documentElement.classList.contains('tp-boot-pending');
+  }
+
+  function finishSequence({ skipped = false } = {}) {
+    if (stopped) return;
+    stopped = true;
+
+    titleObserver?.disconnect();
+    titleObserver = null;
+    if (typeof removeSkipListeners === 'function') removeSkipListeners();
+
+    const titleEl = document.getElementById('matrixTitle');
+    if (titleEl) {
+      titleEl.classList.remove('tp-matrix-running', 'tp-matrix-skip');
+      titleEl.textContent = WORD;
+    }
+
+    // Release the temporary reveal guard, then use the original boot completion
+    // hooks so session tracking, fades, app visibility, and events stay intact.
+    global.__tpBootViewFinished = false;
+
+    let revealed = false;
+    if (typeof global.__tpCompleteBootView === 'function') {
+      try {
+        revealed = Boolean(global.__tpCompleteBootView({ skipped }));
+      } catch (_) {}
+    }
+
+    if (typeof global.__tpForceMatrixCompletion === 'function') {
+      try { global.__tpForceMatrixCompletion(); } catch (_) {}
+    } else if (!revealed) {
+      try { global.dispatchEvent(new Event('tp:matrixFinished')); } catch (_) {}
+    }
+  }
+
+  function bindSkipControls(splash) {
+    const requestSkip = (event) => {
+      if (stopped) return;
+      if (event?.cancelable) event.preventDefault();
+      event?.stopImmediatePropagation?.();
+      finishSequence({ skipped: true });
+    };
+
+    const requestSkipFromKey = (event) => {
+      if (!['Enter', ' ', 'Escape'].includes(event.key)) return;
+      requestSkip(event);
+    };
+
+    const pointerOptions = { capture: true, passive: false };
+    splash.addEventListener('pointerdown', requestSkip, pointerOptions);
+    splash.addEventListener('touchstart', requestSkip, pointerOptions);
+    splash.addEventListener('click', requestSkip, pointerOptions);
+    splash.addEventListener('keydown', requestSkipFromKey, true);
+
+    removeSkipListeners = () => {
+      splash.removeEventListener('pointerdown', requestSkip, pointerOptions);
+      splash.removeEventListener('touchstart', requestSkip, pointerOptions);
+      splash.removeEventListener('click', requestSkip, pointerOptions);
+      splash.removeEventListener('keydown', requestSkipFromKey, true);
+    };
+  }
+
+  async function runSequentialAnimation(titleEl, splash) {
+    if (started || !isBootPending()) return;
+    if (global.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+
+    started = true;
+
+    // Prevent the original CSS timeline or its completion listener from revealing
+    // the app while this paint-aware sequence owns the title.
+    global.__tpBootViewFinished = true;
+    bindSkipControls(splash);
+
+    titleEl.classList.remove('tp-matrix-running', 'tp-matrix-skip');
+    document.getElementById('tp-early-matrix-animation-style')?.remove();
+    titleEl.replaceChildren();
+
+    stage = document.createElement('span');
+    stage.className = 'tp-sequential-matrix-stage';
+
+    const slots = Array.from(WORD, () => {
+      const slot = document.createElement('span');
+      slot.className = 'tp-sequential-matrix-char';
+      slot.textContent = '\u00a0';
+      stage.appendChild(slot);
+      return slot;
+    });
+    titleEl.appendChild(stage);
+
+    // If the legacy fallback tries to replace the title while the new sequence is
+    // running, restore the owned stage without restarting or losing progress.
+    titleObserver = new MutationObserver(() => {
+      if (stopped || !titleEl.isConnected || titleEl.contains(stage)) return;
+      titleEl.replaceChildren(stage);
+    });
+    titleObserver.observe(titleEl, { childList: true });
+
+    // Wait until parsing is complete and the blank splash has received real paint
+    // opportunities. The old implementation started its clock during HTML parsing.
+    if (document.readyState === 'loading') {
+      await new Promise((resolve) => {
+        document.addEventListener('DOMContentLoaded', resolve, { once: true });
+      });
+    }
+    await nextFrame();
+    await nextFrame();
+    await sleep(INITIAL_BLANK_MS);
+
+    for (let index = 0; index < slots.length; index += 1) {
+      if (stopped) return;
+
+      const slot = slots[index];
+      slot.classList.add('is-scrambling');
+      const scrambleUntil = (global.performance?.now?.() ?? Date.now()) + SCRAMBLE_MS;
+
+      while (!stopped && (global.performance?.now?.() ?? Date.now()) < scrambleUntil) {
+        slot.textContent = randomGlyph();
+        await sleep(GLYPH_TICK_MS);
+      }
+      if (stopped) return;
+
+      slot.textContent = WORD[index];
+      slot.classList.remove('is-scrambling');
+      slot.classList.add('is-locked');
+      await sleep(BETWEEN_LETTERS_MS);
+    }
+
+    await sleep(FINAL_HOLD_MS);
+    finishSequence({ skipped: false });
+  }
+
+  function attemptStart() {
+    if (started || !isBootPending()) return;
+    const splash = document.getElementById('bootSplash');
+    const titleEl = document.getElementById('matrixTitle');
+    if (!splash || !titleEl) return;
+
+    // Let the inline bootstrap finish installing its existing completion hooks,
+    // then take over before the browser's first meaningful splash paint.
+    global.setTimeout(() => runSequentialAnimation(titleEl, splash), 0);
+  }
+
+  const domObserver = new MutationObserver(() => {
+    attemptStart();
+    if (started || !isBootPending()) domObserver.disconnect();
+  });
+  domObserver.observe(document.documentElement, { childList: true, subtree: true });
+  attemptStart();
+})(typeof window !== 'undefined' ? window : globalThis);
+
 (function installTaskPointsHomeNativeBoot(global) {
   'use strict';
 
