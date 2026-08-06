@@ -323,8 +323,6 @@
     return { ...result, state: final.state, changed: Boolean(result?.changed || fixed.changed || final.changed), futureScheduleDatesPreserved: future.map(rowDate).filter(Boolean), integrityRepair: final.diagnostics || fixed.diagnostics };
   };
   if (original.backfillLateBoundSeasonSeriesResults) c.backfillLateBoundSeasonSeriesResults = function backfillFixed(state, seasonArg, options = {}) {
-    const season = seasonArg || state?.currentSeason;
-    if (season?.monthKey && String(season.monthKey).slice(0, 7) !== '2026-06') return { ok: true, state, season, updatedSeason: season, changed: false, backfilledCount: 0, seriesIds: [], skippedIncompatibleSeason: true };
     return original.backfillLateBoundSeasonSeriesResults(state, seasonArg, options);
   };
 
