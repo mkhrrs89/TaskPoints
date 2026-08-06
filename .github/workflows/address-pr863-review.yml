@@ -1,0 +1,42 @@
+name: Address PR 863 review
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - synchronize
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+
+      - name: Apply production-wrapper fix
+        run: python scripts/address_pr863_review.py
+
+      - name: Run production-path and related checks
+        run: |
+          node --check scoring_core.js
+          node --check season_result_integrity_guard.js
+          node --test tests/season_late_bound_date_windows.test.js
+          node --test tests/season_result_integrity_guard.test.js
+          node --test tests/season_result_sync_regression.test.js
+          node --test tests/season2_playin_recovery.test.js
+          node --test tests/cal_log_bonus.test.js
+          git diff --check
+
+      - name: Commit implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add season_result_integrity_guard.js tests/season_result_integrity_guard.test.js
+          git diff --cached --quiet && exit 0
+          git commit -m "Allow August late-bound catch-up through integrity guard"
+          git push
