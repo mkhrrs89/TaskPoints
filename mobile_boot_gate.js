@@ -215,6 +215,107 @@ const COORDINATOR_SCRIPT = `<script id="tp-mobile-boot-runtime-coordinator">
 })();
 </script>`;
 
+const SETTINGS_COLLAPSE_HEAD = `<style id="tp-settings-collapse-prepaint">html.tp-settings-collapsing body{visibility:hidden}</style>
+<script id="tp-settings-collapse-prepaint-script">
+(function prepareSettingsCollapse(){
+  if (/(^|\\/)settings(?:\\.html)?$/.test(location.pathname)) {
+    document.documentElement.classList.add("tp-settings-collapsing");
+  }
+})();
+</script>`;
+
+const SETTINGS_COLLAPSE_SCRIPT = `<script id="tp-settings-collapse-all">
+(function collapseAllTaskPointsSettingsSections(){
+  if (!/(^|\\/)settings(?:\\.html)?$/.test(location.pathname)) return;
+
+  function finish() {
+    document.documentElement.classList.remove("tp-settings-collapsing");
+  }
+
+  try {
+    const stacks = Array.from(document.querySelectorAll("body .space-y-4"));
+    const page = stacks.find(container => Array.from(container.children).some(child => {
+      const heading = child.querySelector?.(".text-lg.font-semibold");
+      return heading && heading.textContent.trim() === "Navigation Shortcuts";
+    }));
+
+    if (!page) return;
+
+    const idsByTitle = {
+      "Shadow IndexedDB Migration": "shadowMigrationSection",
+      "Daily Brief + GitHub": "briefToolsSection",
+      "Points Category Report": "categoryReportSection",
+      "SCWM 2-Week Trend Lines": "scwmTrendSection",
+      "Skills Data": "skillsDataSection",
+      "Reset All Data": "resetAllDataSection"
+    };
+
+    const cards = Array.from(page.children);
+    const navigationCard = cards.find(child => {
+      const heading = child.querySelector?.(".text-lg.font-semibold");
+      return heading && heading.textContent.trim() === "Navigation Shortcuts";
+    });
+
+    for (const card of cards) {
+      if (card === navigationCard) continue;
+
+      if (card.tagName === "DETAILS") {
+        card.removeAttribute("open");
+        card.classList.add("tp-settings-section");
+        continue;
+      }
+
+      const title = card.querySelector(".text-lg.font-semibold");
+      if (!title) continue;
+      const titleText = title.textContent.trim();
+      const titleBlock = title.parentElement;
+      const description = titleBlock?.querySelector(".muted.text-sm") || null;
+
+      const details = document.createElement("details");
+      for (const attribute of Array.from(card.attributes)) {
+        if (attribute.name === "aria-labelledby") continue;
+        details.setAttribute(attribute.name, attribute.value);
+      }
+      details.removeAttribute("open");
+      details.classList.add("tp-settings-section");
+      if (!details.id) {
+        details.id = idsByTitle[titleText]
+          || titleText.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") + "Section";
+      }
+
+      const summary = document.createElement("summary");
+      summary.className = "flex items-center justify-between gap-3 flex-wrap cursor-pointer";
+      const summaryBlock = document.createElement("div");
+      summaryBlock.appendChild(title.cloneNode(true));
+      if (description) summaryBlock.appendChild(description.cloneNode(true));
+      summary.appendChild(summaryBlock);
+
+      const body = document.createElement("div");
+      body.className = "space-y-3 pt-4";
+
+      const headerParent = titleBlock?.parentElement || null;
+      titleBlock?.remove();
+      if (headerParent && headerParent !== card && !headerParent.children.length && !headerParent.textContent.trim()) {
+        headerParent.remove();
+      }
+
+      while (card.firstChild) body.appendChild(card.firstChild);
+      details.append(summary, body);
+      card.replaceWith(details);
+    }
+
+    Array.from(page.children).forEach(child => {
+      if (child !== navigationCard && child.tagName === "DETAILS") child.removeAttribute("open");
+    });
+    window.__tpSettingsSectionsCollapsed = true;
+  } catch (error) {
+    console.error("TaskPoints Settings collapse setup failed", error);
+  } finally {
+    finish();
+  }
+})();
+</script>`;
+
 const RUNTIME_LOADER_SCRIPT = `<script id="tp-mobile-boot-runtime-loader">
 (function installTaskPointsDeferredRuntime(){
   const coordinator = window.__tpMobileBootCoordinator;
@@ -328,10 +429,6 @@ const RUNTIME_LOADER_SCRIPT = `<script id="tp-mobile-boot-runtime-loader">
     if (!isSettingsPage || window.__tpSettingsLazyInitializersInstalled) return;
     window.__tpSettingsLazyInitializersInstalled = true;
 
-    const idle = window.requestIdleCallback
-      ? callback => window.requestIdleCallback(callback, { timeout: 800 })
-      : callback => setTimeout(callback, 120);
-
     function lazySection(sectionId, functionName) {
       const section = document.getElementById(sectionId);
       const original = window[functionName];
@@ -354,22 +451,13 @@ const RUNTIME_LOADER_SCRIPT = `<script id="tp-mobile-boot-runtime-loader">
       });
     }
 
+    lazySection("shadowMigrationSection", "refreshShadowMigrationStatus");
     lazySection("storageHealthSection", "renderStorageHealthPanel");
     lazySection("healthDataManagerSection", "renderHealthDataManager");
     lazySection("habitCalendarReportSection", "renderHabitCalendarSelector");
     lazySection("missingScoresSection", "populateMissingFlexOptions");
     lazySection("scoringSettingsSection", "renderScoringSettings");
     lazySection("habitTagColorsSection", "renderHabitTagColors");
-
-    const originalRefreshShadow = window.refreshShadowMigrationStatus;
-    if (typeof originalRefreshShadow === "function") {
-      let scheduled = false;
-      window.refreshShadowMigrationStatus = function() {
-        if (scheduled) return;
-        scheduled = true;
-        idle(() => originalRefreshShadow.call(window));
-      };
-    }
   }
 
   const starter = async () => {
@@ -416,7 +504,8 @@ function transformHomeBoot(response) {
       element(element) {
         element.append(
           '<link rel="preload" href="/scoring_core.js" as="script">'
-          + '<link rel="prefetch" href="/settings.html">',
+          + '<link rel="prefetch" href="/settings.html">'
+          + SETTINGS_COLLAPSE_HEAD,
           { html: true }
         );
       }
@@ -441,7 +530,7 @@ function transformHomeBoot(response) {
     })
     .on('body', {
       element(element) {
-        element.append(RUNTIME_LOADER_SCRIPT, { html: true });
+        element.append(SETTINGS_COLLAPSE_SCRIPT + RUNTIME_LOADER_SCRIPT, { html: true });
       }
     })
     .transform(freshResponse);
