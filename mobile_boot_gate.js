@@ -339,7 +339,6 @@ const RUNTIME_LOADER_SCRIPT = `<script id="tp-mobile-boot-runtime-loader">
 
       let initialized = false;
       const run = (...args) => {
-        if (initialized && !args.length) return;
         initialized = true;
         return original.apply(window, args);
       };
