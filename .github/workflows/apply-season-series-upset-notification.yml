@@ -1,0 +1,185 @@
+name: Apply season series upset notification
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/apply-season-series-upset-notification.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch inbox series upset notifications
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          toolbar_path = Path('toolbar.js')
+          source = toolbar_path.read_text(encoding='utf-8')
+
+          old_helpers = r"""function tpInboxRoundName(series) {
+            return String(
+              series?.roundName
+              || window.TaskPointsCore?.getSeasonDisplayName?.(series?.roundId)
+              || series?.roundId
+              || 'Tournament series'
+            ).replaceAll('_', ' ');
+          }
+
+          function tpInboxAdvancementTitle(roundId) {"""
+
+          new_helpers = r"""function tpInboxRoundName(series) {
+            return String(
+              series?.roundName
+              || window.TaskPointsCore?.getSeasonDisplayName?.(series?.roundId)
+              || series?.roundId
+              || 'Tournament series'
+            ).replaceAll('_', ' ');
+          }
+
+          function tpInboxSeriesSeedForPlayer(series, playerId) {
+            const normalizedPlayerId = String(playerId || '');
+            const playerAId = String(series?.playerAId || '');
+            const playerBId = String(series?.playerBId || '');
+            const rawSeed = normalizedPlayerId === playerAId
+              ? series?.playerASeed
+              : (normalizedPlayerId === playerBId ? series?.playerBSeed : null);
+            const seed = Number(rawSeed);
+            return Number.isInteger(seed) && seed > 0 ? seed : null;
+          }
+
+          function tpInboxSeriesLabel(series) {
+            const roundName = tpInboxRoundName(series);
+            const explicitName = String(
+              series?.name
+              || series?.seriesName
+              || series?.matchupName
+              || series?.label
+              || ''
+            ).replaceAll('_', ' ').trim();
+            const numericSeriesIndex = Number(series?.seriesIndex);
+            const seriesName = explicitName || (
+              Number.isInteger(numericSeriesIndex) && numericSeriesIndex >= 0
+                ? `Series ${numericSeriesIndex + 1}`
+                : ''
+            );
+            if (!seriesName || seriesName.toLowerCase() === roundName.toLowerCase()) return roundName;
+            return `${roundName} — ${seriesName}`;
+          }
+
+          function tpInboxAdvancementTitle(roundId) {"""
+
+          if source.count(old_helpers) != 1:
+              raise SystemExit(f'Expected one round-name helper insertion point, found {source.count(old_helpers)}')
+          source = source.replace(old_helpers, new_helpers, 1)
+
+          old_upset = r"""    const upsetEventId = `series-upset:${seasonId}:${seriesId}`;
+              if (markProcessed(upsetEventId)) {
+                const winnerOvr = tpInboxPlayerOverall(playerById.get(winnerId));
+                const loserOvr = tpInboxPlayerOverall(playerById.get(loserId));
+                const gap = Number.isFinite(winnerOvr) && Number.isFinite(loserOvr) ? loserOvr - winnerOvr : 0;
+                if (gap >= TP_INBOX_UPSET_OVR_GAP) {
+                  addMessage({
+                    id: upsetEventId,
+                    type: 'series_upset',
+                    eventDateKey,
+                    title: 'Tournament-series upset',
+                    body: `${winnerName} (${winnerOvr} OVR) defeated ${loserName} (${loserOvr} OVR) in the ${roundName}, ${winnerWins}–${loserWins}. The winner entered ${gap} OVR lower.`,
+                    relatedPage: 'tournament.html'
+                  });
+                }
+              }
+          """
+
+          new_upset = r"""    const legacyUpsetEventId = `series-upset:${seasonId}:${seriesId}`;
+              const upsetEventId = `season-series-seed-upset:${seasonId}:${seriesId}`;
+              if (markProcessed(upsetEventId)) {
+                const winnerSeed = tpInboxSeriesSeedForPlayer(series, winnerId);
+                const loserSeed = tpInboxSeriesSeedForPlayer(series, loserId);
+                const isSeedUpset = winnerSeed !== null && loserSeed !== null && winnerSeed > loserSeed;
+                const alreadyHasLegacyAlert = existingMessages.some((message) => message?.id === legacyUpsetEventId);
+                if (isSeedUpset && !alreadyHasLegacyAlert) {
+                  const seriesLabel = tpInboxSeriesLabel(series);
+                  addMessage({
+                    id: upsetEventId,
+                    type: 'series_upset',
+                    eventDateKey,
+                    title: `${roundName} upset`,
+                    body: `In ${seriesLabel}, #${winnerSeed} ${winnerName} upset #${loserSeed} ${loserName}, ${winnerWins}–${loserWins}.`,
+                    relatedPage: 'season.html',
+                    seasonId,
+                    seriesId,
+                    winnerId,
+                    loserId,
+                    winnerSeed,
+                    loserSeed
+                  });
+                }
+              }
+          """
+
+          if source.count(old_upset) != 1:
+              raise SystemExit(f'Expected one old series-upset block, found {source.count(old_upset)}')
+          source = source.replace(old_upset, new_upset, 1)
+
+          old_version = "const TP_INBOX_SCAN_ALGORITHM_VERSION = '20260805-1';"
+          new_version = "const TP_INBOX_SCAN_ALGORITHM_VERSION = '20260806-2';"
+          if source.count(old_version) != 1:
+              raise SystemExit(f'Expected one inbox scan algorithm version, found {source.count(old_version)}')
+          source = source.replace(old_version, new_version, 1)
+
+          toolbar_path.write_text(source, encoding='utf-8')
+
+          test_path = Path('tests/inbox_series_upset_notification.test.js')
+          test_path.write_text(r"""const test = require('node:test');
+          const assert = require('node:assert/strict');
+          const fs = require('node:fs');
+          const path = require('node:path');
+
+          const source = fs.readFileSync(path.join(__dirname, '..', 'toolbar.js'), 'utf8');
+
+          test('season-series upset notifications use bracket seeds and the clinched series', () => {
+            assert.match(source, /function tpInboxSeriesSeedForPlayer\(series, playerId\)/);
+            assert.match(source, /function tpInboxSeriesLabel\(series\)/);
+
+            const start = source.indexOf('const legacyUpsetEventId = `series-upset:');
+            const end = source.indexOf('if (TP_INBOX_ADVANCEMENT_ROUNDS.has(roundId))', start);
+            assert.ok(start >= 0 && end > start, 'series-upset generation block should be present');
+            const block = source.slice(start, end);
+
+            assert.match(block, /winnerSeed > loserSeed/);
+            assert.match(block, /season-series-seed-upset:/);
+            assert.match(block, /In \$\{seriesLabel\}, #\$\{winnerSeed\} \$\{winnerName\} upset #\$\{loserSeed\} \$\{loserName\}, \$\{winnerWins\}–\$\{loserWins\}\./);
+            assert.match(block, /relatedPage: 'season\.html'/);
+            assert.doesNotMatch(block, /tpInboxPlayerOverall|TP_INBOX_UPSET_OVR_GAP/);
+          });
+
+          test('the inbox scan version is bumped so completed seed upsets are reconsidered', () => {
+            assert.match(source, /TP_INBOX_SCAN_ALGORITHM_VERSION = '20260806-2'/);
+          });
+          """, encoding='utf-8')
+          PY
+
+      - name: Validate patch
+        run: |
+          node --check toolbar.js
+          node --test tests/inbox_series_upset_notification.test.js
+
+      - name: Commit implementation and remove one-time workflow
+        shell: bash
+        run: |
+          rm .github/workflows/apply-season-series-upset-notification.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add toolbar.js tests/inbox_series_upset_notification.test.js .github/workflows/apply-season-series-upset-notification.yml
+          git commit -m "Add season series upset inbox notifications"
+          git push
