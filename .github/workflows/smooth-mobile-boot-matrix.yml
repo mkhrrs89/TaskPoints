@@ -22,7 +22,9 @@ jobs:
           ref: ${{ github.head_ref || github.ref_name }}
 
       - name: Apply guarded smoothness patch
-        run: python scripts/smooth_mobile_boot_matrix.py
+        run: |
+          python scripts/smooth_mobile_boot_matrix.py
+          python scripts/preserve_boot_failsafe_marker.py
 
       - name: Run animation and Home checks
         run: |
