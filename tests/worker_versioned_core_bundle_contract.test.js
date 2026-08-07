@@ -44,6 +44,7 @@ function loadWorker({ assetVersion = 'a' } = {}) {
             headers: { etag: `"${assetVersion}:${url.pathname}"` }
           });
         }
+        if (url.pathname === '/performance_diagnostics.js') return new Response('PERF');
         if (url.pathname === '/score_alias_consistency.js') return new Response('ALIAS');
         if (url.pathname === '/you_score_alias_alignment.js') return new Response('YOU_ALIAS');
         if (url.pathname === '/habit_completion_source_guard.js') return new Response('GUARD');
@@ -126,13 +127,15 @@ test('the versioned bundle is immutable and reused from the edge cache', async (
     harness.ctx
   );
   const versionedUrl = redirect.headers.get('location');
+  const expected = 'PERF\nCORE\nALIAS\nYOU_ALIAS\nGUARD\nSHARED\nINBOX\nSERIES_UPSET\n;globalThis.TaskPointsPerf?.recordBundleReady?.();\n';
 
   const first = await harness.worker.fetch(new Request(versionedUrl), harness.env, harness.ctx);
   assert.equal(first.status, 200);
-  assert.equal(await first.text(), 'CORE\nALIAS\nYOU_ALIAS\nGUARD\nSHARED\nINBOX\nSERIES_UPSET\n');
+  assert.equal(await first.text(), expected);
   assert.match(first.headers.get('cache-control') || '', /max-age=31536000/);
   assert.match(first.headers.get('cache-control') || '', /immutable/);
   assert.equal(first.headers.get('x-taskpoints-bundle-cache'), 'miss');
+  assert.equal(first.headers.get('x-taskpoints-perf-diagnostics'), 'included');
   assert.equal(first.headers.get('x-taskpoints-you-score-alias-alignment'), 'included');
   assert.equal(first.headers.get('x-taskpoints-season-series-upsets'), 'included');
   assert.equal(first.headers.get('x-taskpoints-scwm-fast-path'), null);
@@ -141,7 +144,7 @@ test('the versioned bundle is immutable and reused from the edge cache', async (
 
   const second = await harness.worker.fetch(new Request(versionedUrl), harness.env, harness.ctx);
   assert.equal(second.status, 200);
-  assert.equal(await second.text(), 'CORE\nALIAS\nYOU_ALIAS\nGUARD\nSHARED\nINBOX\nSERIES_UPSET\n');
+  assert.equal(await second.text(), expected);
   assert.equal(second.headers.get('x-taskpoints-bundle-cache'), 'hit');
   assert.equal(harness.baseFetchCalls(), 1);
 });
@@ -168,6 +171,7 @@ test('the fingerprint list covers every module assembled by the core worker', ()
   assert.ok(moduleBlock, 'core worker module list must remain discoverable');
   const modulePaths = [...moduleBlock[1].matchAll(/'([^']+\.js)'/g)].map((match) => match[1]);
   for (const pathname of [
+    '/performance_diagnostics.js',
     '/scoring_core.js',
     ...modulePaths,
     '/score_alias_consistency.js',
