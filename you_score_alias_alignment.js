@@ -262,7 +262,14 @@
     try {
       const raw = global.localStorage.getItem(STORAGE_KEY);
       if (!raw) return { changed: false, repairedSides: 0 };
-      const state = core.parseTaskPointsStorageJson?.(raw, null) || JSON.parse(raw);
+      const decoded = core.parseTaskPointsStorageJson?.(raw, null) || JSON.parse(raw);
+      // Stored snapshots intentionally omit redundant score aliases when they
+      // match the canonical score. Normalize before checking for repairs so the
+      // compressor's compact representation is not mistaken for missing data
+      // and rewritten on every page bootstrap.
+      const state = typeof core.normalizeState === 'function'
+        ? core.normalizeState(decoded)
+        : decoded;
       const result = alignYouScoreAliases(state, { currentSeasonOnly: true });
       if (result.changed) persistRepair(result.state, result, options);
       return result;
