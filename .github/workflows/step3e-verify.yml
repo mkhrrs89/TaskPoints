@@ -83,7 +83,7 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - name: Run adjacent recovery, game-history, habit, and Home boot contracts
-        run: >-
+        run: &storage-neighbor-tests >-
           node --test
           tests/emergency_recovery_contract.test.js
           tests/emergency_recovery_lock_authorization_contract.test.js
@@ -112,3 +112,14 @@ jobs:
           tests/home_matchup_export_regression.test.js
           tests/home_revision_refresh_contract.test.js
           tests/home_targeted_render_control.test.js
+
+  main-storage-neighbors:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Run identical adjacent contracts on main
+        run: *storage-neighbor-tests
