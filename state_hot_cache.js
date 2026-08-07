@@ -47,10 +47,7 @@
   function cloneResult(result) {
     if (!result || typeof result !== 'object') return result;
     try { return clone(result); }
-    catch (_) {
-      // A failed defensive clone should never prevent a normal state read.
-      return null;
-    }
+    catch (_) { return null; }
   }
 
   core.loadAppState = function taskPointsHotCachedLoadAppState(...args) {
@@ -75,6 +72,35 @@
   };
 
   function installStorageInvalidation() {
+    // Phase 2 may already have instance-level Storage wrappers. Wrap whatever
+    // methods are active now so a successful authoritative write invalidates
+    // this cache regardless of whether the browser uses instance or prototype
+    // dispatch for Storage methods.
+    try {
+      if (!storage.__taskPointsStateHotCacheInstanceHooks) {
+        const priorSet = storage.setItem.bind(storage);
+        const priorRemove = storage.removeItem.bind(storage);
+        const guardedSet = function taskPointsHotCacheInstanceSetItem(key, value) {
+          const tracked = TRACKED_KEYS.has(String(key));
+          const result = priorSet(key, value);
+          if (tracked) invalidate();
+          return result;
+        };
+        const guardedRemove = function taskPointsHotCacheInstanceRemoveItem(key) {
+          const tracked = TRACKED_KEYS.has(String(key));
+          const result = priorRemove(key);
+          if (tracked) invalidate();
+          return result;
+        };
+        storage.setItem = guardedSet;
+        storage.removeItem = guardedRemove;
+        if (storage.setItem === guardedSet && storage.removeItem === guardedRemove) {
+          Object.defineProperty(storage, '__taskPointsStateHotCacheInstanceHooks', { value: true, configurable: true });
+          return;
+        }
+      } else return;
+    } catch (_) {}
+
     const prototype = global.Storage?.prototype;
     if (!prototype || prototype.__taskPointsStateHotCacheHooks) return;
     try {
@@ -96,16 +122,6 @@
       prototype.removeItem = function taskPointsHotCacheRemoveItem(key) {
         const tracked = this === storage && TRACKED_KEYS.has(String(key));
         const result = priorRemove.apply(this, arguments);
-        if (tracked) invalidate();
-        return result;
-      };
-    }
-
-    if (typeof prototype.clear === 'function') {
-      const priorClear = prototype.clear;
-      prototype.clear = function taskPointsHotCacheClear() {
-        const tracked = this === storage;
-        const result = priorClear.apply(this, arguments);
         if (tracked) invalidate();
         return result;
       };
