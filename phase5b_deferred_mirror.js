@@ -38,6 +38,8 @@
   const MAJOR_KEYS = ['tasks','completions','habits','players','gameHistory','matchups','seasonHistory'];
   let pending = null;
   let running = false;
+  let scheduled = false;
+  let activeRaw = null;
   let tail = Promise.resolve(false);
 
   const get = (key) => { try { return storage.getItem(key); } catch (_) { return null; } };
@@ -269,28 +271,69 @@
 
   async function run() {
     try {
-      while (pending !== null) {
-        const raw = pending;
-        pending = null;
-        await mirror(raw);
-      }
+      if (pending === null) return true;
+      const raw = pending;
+      pending = null;
+      activeRaw = raw;
+      await mirror(raw);
       return true;
-    } finally { running = false; }
+    } finally {
+      activeRaw = null;
+      running = false;
+      if (pending !== null) scheduleFlush();
+    }
   }
   function flush() {
+    scheduled = false;
     if (running) return tail.then(() => pending !== null ? flush() : true);
     if (pending === null) return tail;
     running = true;
     tail = Promise.resolve().then(run).catch(() => false);
     return tail;
   }
+  function scheduleFlush() {
+    if (scheduled || running || pending === null) return false;
+    scheduled = true;
+    const execute = () => {
+      scheduled = false;
+      return pending === null ? true : flush();
+    };
+    const launch = () => {
+      if (pending === null) { scheduled = false; return; }
+      if (typeof core.whenStorageMaintenanceQuiet === 'function') {
+        Promise.resolve(core.whenStorageMaintenanceQuiet(execute, { source: 'phase5c_verified_secondary' }))
+          .catch(() => { scheduled = false; });
+        return;
+      }
+      if (typeof global.requestIdleCallback === 'function') {
+        global.requestIdleCallback(execute, { timeout: 12000 });
+      } else {
+        global.setTimeout?.(execute, 2500);
+      }
+    };
+    if (typeof global.setTimeout === 'function') global.setTimeout(launch, 0);
+    else Promise.resolve().then(launch);
+    return true;
+  }
   function queue(raw) {
     const value = String(raw || '');
     if (!value || get(KEY) !== value) return false;
+    if (pending === value || activeRaw === value) return true;
+    const existing = json(get(DIAG), {}) || {};
+    const alreadyVerified = existing.phase5cLastStatus === 'passed_verification'
+      && existing.phase5cMirrorsCurrentSave === true
+      && existing.phase5cLastVerifiedRawHash === hash(value)
+      && journalCount() === 0;
+    if (alreadyVerified) return false;
     pending = value;
-    status({ phase5cLastStatus: 'queued', phase5cQueuedAtISO: new Date().toISOString(), phase5cPendingWrite: true, phase5cLastError: null });
-    if (typeof global.queueMicrotask === 'function') global.queueMicrotask(flush);
-    else Promise.resolve().then(flush);
+    status({
+      phase5cLastStatus: 'queued_waiting_for_idle',
+      phase5cQueuedAtISO: new Date().toISOString(),
+      phase5cMirrorsCurrentSave: false,
+      phase5cPendingWrite: true,
+      phase5cLastError: null
+    });
+    scheduleFlush();
     return true;
   }
   function handleJournalState() {
