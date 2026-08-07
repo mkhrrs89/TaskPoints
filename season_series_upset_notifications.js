@@ -11,6 +11,7 @@
   let installAttempts = 0;
   let reconciliationTimer = null;
   let reconciliationRunning = false;
+  let suppressRevisionQueue = false;
 
   function dateKey(value) {
     if (value == null || value === '') return '';
@@ -320,21 +321,30 @@
     if (!core?.loadAppState || !core?.mergeAndSaveState || reconciliationRunning) return null;
     reconciliationRunning = true;
     try {
-      const loaded = core.loadAppState({ syncDerived: true, persistSync: true });
+      // Reconciliation is observational unless this module actually has an inbox
+      // change to persist. Derived-state sync is still computed for correctness,
+      // but must never write the full TaskPoints snapshot just because we checked.
+      const loaded = core.loadAppState({ syncDerived: true, persistSync: false });
       const state = loaded?.state || loaded;
       if (!state || typeof state !== 'object') return null;
       const result = reconcileState(state, options);
       if (!result.changed) return result;
 
-      const saved = core.mergeAndSaveState({
-        inboxMessages: result.state.inboxMessages,
-        inboxProcessedEventIds: result.state.inboxProcessedEventIds,
-        inboxStartedDateKey: result.state.inboxStartedDateKey
-      }, {
-        savePath: 'season-series-upset-inbox',
-        immediateWrite: true,
-        assumeNormalized: true
-      });
+      let saved;
+      suppressRevisionQueue = true;
+      try {
+        saved = core.mergeAndSaveState({
+          inboxMessages: result.state.inboxMessages,
+          inboxProcessedEventIds: result.state.inboxProcessedEventIds,
+          inboxStartedDateKey: result.state.inboxStartedDateKey
+        }, {
+          savePath: 'season-series-upset-inbox',
+          immediateWrite: true,
+          assumeNormalized: true
+        });
+      } finally {
+        suppressRevisionQueue = false;
+      }
       const savedState = saved?.state || saved || result.state;
       result.state = savedState;
       emitInboxUpdated(savedState);
@@ -427,7 +437,10 @@
     queueReconcile(50);
   });
   global.addEventListener?.('focus', () => queueReconcile(100));
-  global.addEventListener?.('taskpoints:state-revision', () => queueReconcile(100));
+  global.addEventListener?.('taskpoints:state-revision', () => {
+    if (suppressRevisionQueue) return;
+    queueReconcile(100);
+  });
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
