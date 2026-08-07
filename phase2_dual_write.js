@@ -14,6 +14,7 @@
   let sequence = 0;
   let pendingSerializedBatch = null;
   let pendingSerializedTimer = null;
+  let pendingQuietGate = null;
 
   function requestPromise(request) {
     return new Promise((resolve, reject) => {
@@ -237,7 +238,6 @@
     const snapshot = state && typeof state === 'object' ? cloneState(state) : null;
     const writeSequence = ++sequence;
     pendingCount += 1;
-
     const operation = queueTail
       .catch(() => undefined)
       .then(() => {
@@ -262,16 +262,40 @@
     } catch (_) { return false; }
   }
 
+  function scheduleFallbackRecheck() {
+    if (pendingSerializedTimer) global.clearTimeout?.(pendingSerializedTimer);
+    pendingSerializedTimer = global.setTimeout?.(() => {
+      pendingSerializedTimer = null;
+      runScheduledSerializedWrite(false);
+    }, INTERACTION_RECHECK_MS);
+  }
+
+  function waitForSharedMaintenanceQuiet() {
+    if (pendingQuietGate || !pendingSerializedBatch) return pendingQuietGate;
+    const gate = core.whenStorageMaintenanceQuiet;
+    if (typeof gate !== 'function') return null;
+
+    pendingQuietGate = Promise.resolve(gate(() => {
+      pendingQuietGate = null;
+      if (!pendingSerializedBatch) return true;
+      return runScheduledSerializedWrite(true);
+    }, { reason: 'phase2_dual_write_coalesced' })).catch(() => {
+      pendingQuietGate = null;
+      if (pendingSerializedBatch) scheduleFallbackRecheck();
+      return undefined;
+    });
+    return pendingQuietGate;
+  }
+
   function runScheduledSerializedWrite(force = false) {
     const batch = pendingSerializedBatch;
     if (!batch) return Promise.resolve(true);
-    if (!force && interactionBusy()) {
-      if (pendingSerializedTimer) global.clearTimeout?.(pendingSerializedTimer);
-      pendingSerializedTimer = global.setTimeout?.(() => {
-        pendingSerializedTimer = null;
-        runScheduledSerializedWrite(false);
-      }, INTERACTION_RECHECK_MS);
-      return batch.promise;
+    if (!force) {
+      if (waitForSharedMaintenanceQuiet()) return batch.promise;
+      if (interactionBusy()) {
+        scheduleFallbackRecheck();
+        return batch.promise;
+      }
     }
 
     if (pendingSerializedTimer) global.clearTimeout?.(pendingSerializedTimer);
@@ -397,6 +421,7 @@
   core.getShadowDualWriteQueueStatus = () => ({
     pendingImmediate: pendingCount,
     pendingCoalesced: Boolean(pendingSerializedBatch),
+    waitingForMaintenanceQuiet: Boolean(pendingQuietGate),
     coalesceDelayMs: COALESCE_DELAY_MS
   });
   core.scheduleShadowDualWriteFromSerializedState = (storageKey, raw) => (
