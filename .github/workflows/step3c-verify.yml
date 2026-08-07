@@ -1,0 +1,24 @@
+name: Step 3C verification
+
+on:
+  push:
+    branches:
+      - agent/step3c-home-read-hotpath
+
+jobs:
+  focused-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Run Step 3C focused tests
+        run: >-
+          node --test
+          tests/step3c_home_read_hotpath.test.js
+          tests/home_featured_matchup_visibility.test.js
+          tests/season_home_featured.test.js
+          tests/step3a_storage_hot_path.test.js
+          tests/phase4_read_contract.test.js
+          tests/phase4_lightweight_read_validation_contract.test.js
