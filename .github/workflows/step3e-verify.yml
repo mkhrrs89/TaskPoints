@@ -40,39 +40,55 @@ jobs:
           tests/storage_compression.test.js
           tests/save_pipeline_shared_work_contract.test.js
           tests/step3a_storage_hot_path.test.js
+          tests/home_first_paint_maintenance.test.js
 
-  tests-e:
+  branch-unrelated-suspects:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - run: node --test tests/emergency_recovery_contract.test.js tests/emergency_recovery_lock_authorization_contract.test.js
-
-  tests-f:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 22 }
-      - run: node --test tests/faster_mode_reopen_persistence_contract.test.js tests/flex_action_fast_path_contract.test.js tests/flex_action_fast_path_review_contract.test.js
-
-  tests-g:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 22 }
-      - run: node --test tests/game_history_reconciliation_repair.test.js tests/greed_rating.test.js
-
-  tests-habit:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 22 }
-      - run: >-
+      - name: Run suspect pre-existing contracts on Step 3E branch
+        run: >-
           node --test
+          tests/faster_mode_reopen_persistence_contract.test.js
+          tests/flex_action_fast_path_contract.test.js
+          tests/flex_action_fast_path_review_contract.test.js
+          tests/home_scoreboard_rank_gold.test.js
+          tests/home_targeted_render_contract.test.js
+          tests/home_yesterday_result_consistency.test.js
+
+  main-unrelated-suspects:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Run identical suspect contracts on main
+        run: >-
+          node --test
+          tests/faster_mode_reopen_persistence_contract.test.js
+          tests/flex_action_fast_path_contract.test.js
+          tests/flex_action_fast_path_review_contract.test.js
+          tests/home_scoreboard_rank_gold.test.js
+          tests/home_targeted_render_contract.test.js
+          tests/home_yesterday_result_consistency.test.js
+
+  branch-storage-neighbors:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Run adjacent recovery, game-history, habit, and Home boot contracts
+        run: >-
+          node --test
+          tests/emergency_recovery_contract.test.js
+          tests/emergency_recovery_lock_authorization_contract.test.js
+          tests/game_history_reconciliation_repair.test.js
+          tests/greed_rating.test.js
           tests/habit_completion_exact_date_key.test.js
           tests/habit_completion_status_guard.test.js
           tests/habit_fast_path_control.test.js
@@ -89,23 +105,10 @@ jobs:
           tests/habit_ledger_score_reconciliation.test.js
           tests/habit_ledger_score_reconciliation_hardening.test.js
           tests/habit_week_plate_fast_restack.test.js
-
-  tests-home:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 22 }
-      - run: >-
-          node --test
           tests/home_export_responsiveness.test.js
           tests/home_featured_matchup_visibility.test.js
-          tests/home_first_paint_maintenance.test.js
           tests/home_graph_trendline_layering.test.js
           tests/home_indexeddb_first_boot_contract.test.js
           tests/home_matchup_export_regression.test.js
           tests/home_revision_refresh_contract.test.js
-          tests/home_scoreboard_rank_gold.test.js
-          tests/home_targeted_render_contract.test.js
           tests/home_targeted_render_control.test.js
-          tests/home_yesterday_result_consistency.test.js
