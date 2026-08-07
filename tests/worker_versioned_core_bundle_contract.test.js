@@ -7,6 +7,7 @@ const vm = require('node:vm');
 const ROOT = path.join(__dirname, '..');
 const WORKER_PATH = path.join(ROOT, '_worker.js');
 const CORE_WORKER_PATH = path.join(ROOT, '_worker_core.js');
+const SCWM_FAST_PATH = path.join(ROOT, 'scwm_interaction_fast_path.js');
 
 function loadWorker({ assetVersion = 'a' } = {}) {
   let source = fs.readFileSync(WORKER_PATH, 'utf8');
@@ -49,7 +50,6 @@ function loadWorker({ assetVersion = 'a' } = {}) {
         if (url.pathname === '/save_pipeline_shared_work.js') return new Response('SHARED');
         if (url.pathname === '/inbox_count_badge.js') return new Response('INBOX');
         if (url.pathname === '/season_series_upset_notifications.js') return new Response('SERIES_UPSET');
-        if (url.pathname === '/scwm_interaction_fast_path.js') return new Response('SCWM_FAST');
         return new Response(`ASSET:${url.pathname}`);
       }
     }
@@ -129,19 +129,19 @@ test('the versioned bundle is immutable and reused from the edge cache', async (
 
   const first = await harness.worker.fetch(new Request(versionedUrl), harness.env, harness.ctx);
   assert.equal(first.status, 200);
-  assert.equal(await first.text(), 'CORE\nALIAS\nYOU_ALIAS\nGUARD\nSHARED\nINBOX\nSERIES_UPSET\nSCWM_FAST\n');
+  assert.equal(await first.text(), 'CORE\nALIAS\nYOU_ALIAS\nGUARD\nSHARED\nINBOX\nSERIES_UPSET\n');
   assert.match(first.headers.get('cache-control') || '', /max-age=31536000/);
   assert.match(first.headers.get('cache-control') || '', /immutable/);
   assert.equal(first.headers.get('x-taskpoints-bundle-cache'), 'miss');
   assert.equal(first.headers.get('x-taskpoints-you-score-alias-alignment'), 'included');
   assert.equal(first.headers.get('x-taskpoints-season-series-upsets'), 'included');
-  assert.equal(first.headers.get('x-taskpoints-scwm-fast-path'), 'included');
+  assert.equal(first.headers.get('x-taskpoints-scwm-fast-path'), null);
   assert.equal(harness.baseFetchCalls(), 1);
   await harness.flush();
 
   const second = await harness.worker.fetch(new Request(versionedUrl), harness.env, harness.ctx);
   assert.equal(second.status, 200);
-  assert.equal(await second.text(), 'CORE\nALIAS\nYOU_ALIAS\nGUARD\nSHARED\nINBOX\nSERIES_UPSET\nSCWM_FAST\n');
+  assert.equal(await second.text(), 'CORE\nALIAS\nYOU_ALIAS\nGUARD\nSHARED\nINBOX\nSERIES_UPSET\n');
   assert.equal(second.headers.get('x-taskpoints-bundle-cache'), 'hit');
   assert.equal(harness.baseFetchCalls(), 1);
 });
@@ -175,10 +175,16 @@ test('the fingerprint list covers every module assembled by the core worker', ()
     '/habit_completion_source_guard.js',
     '/save_pipeline_shared_work.js',
     '/inbox_count_badge.js',
-    '/season_series_upset_notifications.js',
-    '/scwm_interaction_fast_path.js'
+    '/season_series_upset_notifications.js'
   ]) {
     const escaped = pathname.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     assert.match(outer, new RegExp(`['"]${escaped}['"]`), pathname);
   }
+});
+
+test('the SCWM performance shim remains available for reference but is not part of runtime assembly', () => {
+  const outer = fs.readFileSync(WORKER_PATH, 'utf8');
+  assert.equal(fs.existsSync(SCWM_FAST_PATH), true, 'keep the dormant shim source available for diagnosis');
+  assert.doesNotMatch(outer, /scwm_interaction_fast_path\.js/);
+  assert.doesNotMatch(outer, /x-taskpoints-scwm-fast-path/);
 });
