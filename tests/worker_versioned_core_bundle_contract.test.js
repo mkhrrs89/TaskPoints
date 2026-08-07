@@ -51,6 +51,8 @@ function loadWorker({ assetVersion = 'a' } = {}) {
         if (url.pathname === '/save_pipeline_shared_work.js') return new Response('SHARED');
         if (url.pathname === '/inbox_count_badge.js') return new Response('INBOX');
         if (url.pathname === '/season_series_upset_notifications.js') return new Response('SERIES_UPSET');
+        if (url.pathname === '/state_hot_cache.js') return new Response('HOT_CACHE');
+        if (url.pathname === '/storage_maintenance_idle.js') return new Response('STORAGE_IDLE');
         return new Response(`ASSET:${url.pathname}`);
       }
     }
@@ -127,7 +129,7 @@ test('the versioned bundle is immutable and reused from the edge cache', async (
     harness.ctx
   );
   const versionedUrl = redirect.headers.get('location');
-  const expected = 'PERF\nCORE\nALIAS\nYOU_ALIAS\nGUARD\nSHARED\nINBOX\nSERIES_UPSET\n;globalThis.TaskPointsPerf?.recordBundleReady?.();\n';
+  const expected = 'PERF\nCORE\nALIAS\nYOU_ALIAS\nGUARD\nSHARED\nINBOX\nSERIES_UPSET\nHOT_CACHE\nSTORAGE_IDLE\n;globalThis.TaskPointsPerf?.recordBundleReady?.();\n';
 
   const first = await harness.worker.fetch(new Request(versionedUrl), harness.env, harness.ctx);
   assert.equal(first.status, 200);
@@ -138,6 +140,8 @@ test('the versioned bundle is immutable and reused from the edge cache', async (
   assert.equal(first.headers.get('x-taskpoints-perf-diagnostics'), 'included');
   assert.equal(first.headers.get('x-taskpoints-you-score-alias-alignment'), 'included');
   assert.equal(first.headers.get('x-taskpoints-season-series-upsets'), 'included');
+  assert.equal(first.headers.get('x-taskpoints-state-hot-cache'), 'included');
+  assert.equal(first.headers.get('x-taskpoints-storage-idle'), 'included');
   assert.equal(first.headers.get('x-taskpoints-scwm-fast-path'), null);
   assert.equal(harness.baseFetchCalls(), 1);
   await harness.flush();
@@ -179,7 +183,9 @@ test('the fingerprint list covers every module assembled by the core worker', ()
     '/habit_completion_source_guard.js',
     '/save_pipeline_shared_work.js',
     '/inbox_count_badge.js',
-    '/season_series_upset_notifications.js'
+    '/season_series_upset_notifications.js',
+    '/state_hot_cache.js',
+    '/storage_maintenance_idle.js'
   ]) {
     const escaped = pathname.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     assert.match(outer, new RegExp(`['"]${escaped}['"]`), pathname);
