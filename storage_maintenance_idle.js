@@ -63,14 +63,20 @@
     return now() - lastInteractionAt >= QUIET_MS;
   }
 
-  function explicitOperation(args) {
-    const first = args?.[0];
-    const text = typeof first === 'string'
+  function operationText(first) {
+    return typeof first === 'string'
       ? first
       : first && typeof first === 'object'
         ? String(first.reason || first.source || first.action || first.caller || first.savePath || '')
         : '';
-    return /(manual|recovery|import|reset|smoke|test|explicit|user_requested)/i.test(text);
+  }
+
+  function explicitOperation(args) {
+    return /(manual|recovery|import|reset|smoke|test|explicit|user_requested)/i.test(operationText(args?.[0]));
+  }
+
+  function explicitSaveOperation(options) {
+    return /(manual|recovery|import|reset|smoke|test|explicit|user_requested|migration|migrate|upgrade|reencode|encoding|compact|backfill|repair)/i.test(operationText(options));
   }
 
   function whenQuiet(run) {
@@ -159,7 +165,7 @@
         && !observedUserInteraction
         && now() <= STARTUP_NOOP_SAVE_GUARD_MS
         && !pageLeaving
-        && !explicitOperation([options])
+        && !explicitSaveOperation(options)
         && options.allowDestructiveOverwrite !== true
         && options.userInitiated !== true
         && !hasPendingHabitJournal();
