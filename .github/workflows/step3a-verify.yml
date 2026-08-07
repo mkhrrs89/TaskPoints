@@ -29,5 +29,5 @@ jobs:
       - name: Run Phase 5A functional tests except known-stale worker assertion
         run: >-
           node --test
-          --test-name-pattern='^(?!worker loads Phase 5A only after the complete Phase 4 bundle).*'
+          --test-name-pattern='installs native snapshot APIs|writes the normal state object|restores and serves native state|falls back when the rollback mirror changes|falls back while a pending habit journal exists'
           tests/phase5a_native_snapshot_contract.test.js
