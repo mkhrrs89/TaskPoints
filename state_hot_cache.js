@@ -12,10 +12,12 @@
   const TRACKED_KEYS = new Set([STORAGE_KEY, JOURNAL_KEY]);
   const originalLoad = core.loadAppState;
   let generation = 0;
-  let cached = null;
+  const cachedByMode = new Map();
   let hits = 0;
   let misses = 0;
   let invalidations = 0;
+  let defaultHits = 0;
+  let readOnlyHits = 0;
 
   const clone = (value) => {
     if (typeof global.structuredClone === 'function') return global.structuredClone(value);
@@ -33,15 +35,18 @@
 
   function invalidate() {
     generation += 1;
-    cached = null;
+    cachedByMode.clear();
     invalidations += 1;
   }
 
-  function cacheableArgs(args) {
-    // The overwhelmingly common read is loadAppState() with default behavior.
-    // Calls with explicit options keep their exact existing semantics and are
-    // deliberately left on the original path.
-    return args.length === 0;
+  function cacheMode(args) {
+    if (args.length === 0) return 'default';
+    if (args.length !== 1) return '';
+    const options = args[0];
+    if (!options || typeof options !== 'object' || Array.isArray(options)) return '';
+    const keys = Object.keys(options);
+    if (keys.some((key) => key !== 'syncDerived' && key !== 'persistSync')) return '';
+    return options.syncDerived === false && options.persistSync === false ? 'read-only' : '';
   }
 
   function cloneResult(result) {
@@ -51,23 +56,27 @@
   }
 
   core.loadAppState = function taskPointsHotCachedLoadAppState(...args) {
-    if (!cacheableArgs(args)) return originalLoad.apply(core, args);
+    const mode = cacheMode(args);
+    if (!mode) return originalLoad.apply(core, args);
 
     const token = revisionToken();
+    const cached = cachedByMode.get(mode) || null;
     if (cached && cached.token === token) {
       const copy = cloneResult(cached.result);
       if (copy !== null) {
         hits += 1;
+        if (mode === 'default') defaultHits += 1;
+        if (mode === 'read-only') readOnlyHits += 1;
         return copy;
       }
-      cached = null;
+      cachedByMode.delete(mode);
     }
 
     misses += 1;
     const result = originalLoad.apply(core, args);
     const postToken = revisionToken();
     const snapshot = cloneResult(result);
-    if (snapshot !== null) cached = { token: postToken, result: snapshot };
+    if (snapshot !== null) cachedByMode.set(mode, { token: postToken, result: snapshot });
     return result;
   };
 
@@ -138,9 +147,12 @@
   core.clearStateHotCache = invalidate;
   core.getStateHotCacheStatus = () => ({
     installed: true,
-    cacheReady: Boolean(cached),
+    cacheReady: cachedByMode.size > 0,
+    cachedModes: Array.from(cachedByMode.keys()),
     generation,
     hits,
+    defaultHits,
+    readOnlyHits,
     misses,
     invalidations
   });
