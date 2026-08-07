@@ -383,9 +383,20 @@
     const candidateHash = rawHash(candidateRaw);
     if (vaultMetaSaysNoDatabaseNeeded(candidateHash)) return Promise.resolve(true);
 
+    // The first known-good state of a page/session is a recovery boundary. Do
+    // not allow a later ordinary save to replace this candidate before it has
+    // had a chance to establish/repair the vault's latest slot and metadata.
+    if (reason === 'startup-known-good') {
+      vaultTail = vaultTail
+        .then(() => writeVaultSnapshot(candidateRaw, reason, candidateHash))
+        .catch(() => false);
+      return vaultTail;
+    }
+
     // Coalesce a burst of ordinary saves. If a real vault check is due, keep
     // only the newest not-yet-processed state instead of scheduling a complete
-    // IndexedDB pass for every write.
+    // IndexedDB pass for every write. This work is chained behind any startup
+    // known-good capture already in progress.
     pendingVaultCandidate = { raw: candidateRaw, reason, hash: candidateHash };
     vaultTail = vaultTail.then(() => drainVaultQueue()).catch(() => false);
     return vaultTail;
