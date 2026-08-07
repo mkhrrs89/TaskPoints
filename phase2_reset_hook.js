@@ -76,6 +76,7 @@
   const VAULT_STORE = 'snapshots';
   const VAULT_SLOT_IDS = ['latest', 'prev1', 'prev2', 'prev3'];
   const VAULT_ROTATION_MS = 6 * 60 * 60 * 1000;
+  const VAULT_META_KEY = 'taskpoints_safety_vault_meta_v1';
   const CRITICAL_ARRAYS = [
     'tasks', 'completions', 'habits', 'players', 'flexActions',
     'gameHistory', 'matchups', 'schedule', 'seasonHistory', 'reminders'
@@ -84,6 +85,8 @@
 
   let destructiveAllowanceDepth = 0;
   let vaultTail = Promise.resolve();
+  let vaultDrainRunning = false;
+  let pendingVaultCandidate = null;
   let alertShown = false;
   let rememberedRemovedRaw = null;
   let rememberedRemovalToken = 0;
@@ -147,6 +150,39 @@
       ...patch
     };
     try { storage.setItem(DIAG_KEY, JSON.stringify(value)); } catch (_) {}
+  }
+
+  function readVaultMeta() {
+    try {
+      const parsed = JSON.parse(get(VAULT_META_KEY) || 'null');
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+      if (parsed.schemaVersion !== 1 || typeof parsed.latestRawHash !== 'string') return null;
+      return parsed;
+    } catch (_) { return null; }
+  }
+
+  function writeVaultMeta(record, source = 'vault-write') {
+    if (!record?.rawHash) return false;
+    const createdAtISO = record.createdAtISO || record.updatedAtISO || new Date().toISOString();
+    const value = {
+      schemaVersion: 1,
+      latestRawHash: String(record.rawHash),
+      latestCreatedAtISO: String(createdAtISO),
+      updatedAtISO: new Date().toISOString(),
+      source
+    };
+    try {
+      storage.setItem(VAULT_META_KEY, JSON.stringify(value));
+      return true;
+    } catch (_) { return false; }
+  }
+
+  function vaultMetaSaysNoDatabaseNeeded(candidateHash, nowMs = Date.now()) {
+    const meta = readVaultMeta();
+    if (!meta) return false;
+    if (meta.latestRawHash === candidateHash) return true;
+    const latestMs = Date.parse(meta.latestCreatedAtISO || '');
+    return Number.isFinite(latestMs) && nowMs - latestMs < VAULT_ROTATION_MS;
   }
 
   function suspiciousReplacement(previousRaw, candidateRaw) {
@@ -248,19 +284,40 @@
     });
   }
 
-  async function writeVaultSnapshot(raw, reason = 'known-good-mirror') {
+  async function readVaultLatest(db) {
+    const tx = db.transaction(VAULT_STORE, 'readonly');
+    const latest = await requestResult(tx.objectStore(VAULT_STORE).get('latest'));
+    await transactionDone(tx);
+    return latest || null;
+  }
+
+  async function readVaultPreviousSlots(db) {
+    const tx = db.transaction(VAULT_STORE, 'readonly');
+    const store = tx.objectStore(VAULT_STORE);
+    const rows = await Promise.all(VAULT_SLOT_IDS.slice(1).map((id) => requestResult(store.get(id))));
+    await transactionDone(tx);
+    return rows;
+  }
+
+  async function writeVaultSnapshot(raw, reason = 'known-good-mirror', expectedHash = null) {
     let db;
     try {
+      const candidateHash = expectedHash || rawHash(raw);
+      const nowMs = Date.now();
+      if (vaultMetaSaysNoDatabaseNeeded(candidateHash, nowMs)) {
+        writeDiagnostics({
+          lastVaultFastSkipAtISO: new Date(nowMs).toISOString(),
+          lastVaultFastSkipReason: readVaultMeta()?.latestRawHash === candidateHash ? 'same_hash' : 'rotation_not_due'
+        });
+        return true;
+      }
+
       db = await openVault();
       if (!db) return false;
-      const readTx = db.transaction(VAULT_STORE, 'readonly');
-      const store = readTx.objectStore(VAULT_STORE);
-      const slots = await Promise.all(VAULT_SLOT_IDS.map((id) => requestResult(store.get(id))));
-      const latest = slots[0] || null;
-      const candidateHash = rawHash(raw);
+      const latest = await readVaultLatest(db);
+      if (latest?.rawHash) writeVaultMeta(latest, 'vault-read-repair');
       if (latest?.rawHash === candidateHash) return true;
 
-      const nowMs = Date.now();
       const latestMs = Date.parse(latest?.createdAtISO || latest?.updatedAtISO || '');
       if (latest && Number.isFinite(latestMs) && nowMs - latestMs < VAULT_ROTATION_MS) return true;
 
@@ -268,13 +325,15 @@
       const counts = summarize(state);
       if (!state || counts.majorTotal < 30) return false;
 
+      const previousSlots = latest ? await readVaultPreviousSlots(db) : [];
+      const slots = [latest, ...previousSlots];
       const timestamp = new Date(nowMs).toISOString();
       const records = [];
       for (let index = VAULT_SLOT_IDS.length - 1; index >= 1; index -= 1) {
         const prior = slots[index - 1];
         if (prior) records.push({ ...prior, id: VAULT_SLOT_IDS[index] });
       }
-      records.push({
+      const latestRecord = {
         id: 'latest',
         schemaVersion: 1,
         createdAtISO: timestamp,
@@ -282,12 +341,14 @@
         raw: String(raw),
         rawHash: candidateHash,
         counts
-      });
+      };
+      records.push(latestRecord);
 
       const writeTx = db.transaction(VAULT_STORE, 'readwrite');
       const writeStore = writeTx.objectStore(VAULT_STORE);
       records.forEach((record) => writeStore.put(record));
       await transactionDone(writeTx);
+      writeVaultMeta(latestRecord, 'vault-rotation');
       writeDiagnostics({
         lastVaultWriteAtISO: timestamp,
         lastVaultReason: reason,
@@ -304,8 +365,29 @@
     } finally { db?.close?.(); }
   }
 
+  async function drainVaultQueue() {
+    if (vaultDrainRunning) return true;
+    vaultDrainRunning = true;
+    try {
+      while (pendingVaultCandidate) {
+        const candidate = pendingVaultCandidate;
+        pendingVaultCandidate = null;
+        await writeVaultSnapshot(candidate.raw, candidate.reason, candidate.hash);
+      }
+    } finally { vaultDrainRunning = false; }
+    return true;
+  }
+
   function queueVaultSnapshot(raw, reason) {
-    vaultTail = vaultTail.then(() => writeVaultSnapshot(raw, reason)).catch(() => false);
+    const candidateRaw = String(raw || '');
+    const candidateHash = rawHash(candidateRaw);
+    if (vaultMetaSaysNoDatabaseNeeded(candidateHash)) return Promise.resolve(true);
+
+    // Coalesce a burst of ordinary saves. If a real vault check is due, keep
+    // only the newest not-yet-processed state instead of scheduling a complete
+    // IndexedDB pass for every write.
+    pendingVaultCandidate = { raw: candidateRaw, reason, hash: candidateHash };
+    vaultTail = vaultTail.then(() => drainVaultQueue()).catch(() => false);
     return vaultTail;
   }
 
@@ -495,12 +577,15 @@
   core.flushPhase5BMirrorCheckpoint = () => false;
   core.TASKPOINTS_SAFETY_VAULT_DB_NAME = VAULT_DB_NAME;
   core.TASKPOINTS_SAFETY_VAULT_STORE = VAULT_STORE;
+  core.TASKPOINTS_SAFETY_VAULT_META_KEY = VAULT_META_KEY;
   core.withTaskPointsDestructiveWriteAllowed = (fn) => withAllowance(fn);
   core.flushTaskPointsSafetyVault = () => vaultTail.catch(() => undefined);
   core.getTaskPointsDataLossGuardStatus = () => ({
     installed: true,
     phase5bLiveBundleDisabled: true,
     destructiveAllowanceActive: destructiveAllowanceDepth > 0,
+    vaultMeta: readVaultMeta(),
+    vaultQueuePending: Boolean(pendingVaultCandidate || vaultDrainRunning),
     diagnostics: readDiagnostics()
   });
 
