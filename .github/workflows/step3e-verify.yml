@@ -40,3 +40,5 @@ jobs:
           tests/storage_compression.test.js
           tests/save_pipeline_shared_work_contract.test.js
           tests/step3a_storage_hot_path.test.js
+      - name: Run full test suite
+        run: node --test tests/*.test.js
