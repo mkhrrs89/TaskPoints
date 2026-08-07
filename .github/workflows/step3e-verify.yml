@@ -40,5 +40,51 @@ jobs:
           tests/storage_compression.test.js
           tests/save_pipeline_shared_work_contract.test.js
           tests/step3a_storage_hot_path.test.js
-      - name: Run full test suite
-        run: node --test tests/*.test.js
+
+  tests-a-d:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: node --test $(find tests -maxdepth 1 -type f -name '*.test.js' | grep -Ei '/[a-d][^/]*\.test\.js$' | sort)
+
+  tests-e-h:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: node --test $(find tests -maxdepth 1 -type f -name '*.test.js' | grep -Ei '/[e-h][^/]*\.test\.js$' | sort)
+
+  tests-i-l:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: node --test $(find tests -maxdepth 1 -type f -name '*.test.js' | grep -Ei '/[i-l][^/]*\.test\.js$' | sort)
+
+  tests-m-p:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: node --test $(find tests -maxdepth 1 -type f -name '*.test.js' | grep -Ei '/[m-p][^/]*\.test\.js$' | sort)
+
+  tests-q-t:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: node --test $(find tests -maxdepth 1 -type f -name '*.test.js' | grep -Ei '/[q-t][^/]*\.test\.js$' | sort)
+
+  tests-u-z:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: node --test $(find tests -maxdepth 1 -type f -name '*.test.js' | grep -Ei '/[u-z][^/]*\.test\.js$' | sort)
