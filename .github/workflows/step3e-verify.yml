@@ -41,50 +41,71 @@ jobs:
           tests/save_pipeline_shared_work_contract.test.js
           tests/step3a_storage_hot_path.test.js
 
-  tests-a-d:
+  tests-e:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - run: node --test $(find tests -maxdepth 1 -type f -name '*.test.js' | grep -Ei '/[a-d][^/]*\.test\.js$' | sort)
+      - run: node --test tests/emergency_recovery_contract.test.js tests/emergency_recovery_lock_authorization_contract.test.js
 
-  tests-e-h:
+  tests-f:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - run: node --test $(find tests -maxdepth 1 -type f -name '*.test.js' | grep -Ei '/[e-h][^/]*\.test\.js$' | sort)
+      - run: node --test tests/faster_mode_reopen_persistence_contract.test.js tests/flex_action_fast_path_contract.test.js tests/flex_action_fast_path_review_contract.test.js
 
-  tests-i-l:
+  tests-g:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - run: node --test $(find tests -maxdepth 1 -type f -name '*.test.js' | grep -Ei '/[i-l][^/]*\.test\.js$' | sort)
+      - run: node --test tests/game_history_reconciliation_repair.test.js tests/greed_rating.test.js
 
-  tests-m-p:
+  tests-habit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - run: node --test $(find tests -maxdepth 1 -type f -name '*.test.js' | grep -Ei '/[m-p][^/]*\.test\.js$' | sort)
+      - run: >-
+          node --test
+          tests/habit_completion_exact_date_key.test.js
+          tests/habit_completion_status_guard.test.js
+          tests/habit_fast_path_control.test.js
+          tests/habit_interaction_fast_path_contract.test.js
+          tests/habit_ledger_completion_backed_repair.test.js
+          tests/habit_ledger_consistency_repair.test.js
+          tests/habit_ledger_history_preservation.test.js
+          tests/habit_ledger_matchup_dateiso.test.js
+          tests/habit_ledger_matchup_impact_attestation.test.js
+          tests/habit_ledger_matchup_impact_canonical.test.js
+          tests/habit_ledger_matchup_impact_guard.test.js
+          tests/habit_ledger_matchup_legacy_safety.test.js
+          tests/habit_ledger_matchup_restore.test.js
+          tests/habit_ledger_score_reconciliation.test.js
+          tests/habit_ledger_score_reconciliation_hardening.test.js
+          tests/habit_week_plate_fast_restack.test.js
 
-  tests-q-t:
+  tests-home:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - run: node --test $(find tests -maxdepth 1 -type f -name '*.test.js' | grep -Ei '/[q-t][^/]*\.test\.js$' | sort)
-
-  tests-u-z:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 22 }
-      - run: node --test $(find tests -maxdepth 1 -type f -name '*.test.js' | grep -Ei '/[u-z][^/]*\.test\.js$' | sort)
+      - run: >-
+          node --test
+          tests/home_export_responsiveness.test.js
+          tests/home_featured_matchup_visibility.test.js
+          tests/home_first_paint_maintenance.test.js
+          tests/home_graph_trendline_layering.test.js
+          tests/home_indexeddb_first_boot_contract.test.js
+          tests/home_matchup_export_regression.test.js
+          tests/home_revision_refresh_contract.test.js
+          tests/home_scoreboard_rank_gold.test.js
+          tests/home_targeted_render_contract.test.js
+          tests/home_targeted_render_control.test.js
+          tests/home_yesterday_result_consistency.test.js
