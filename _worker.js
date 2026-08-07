@@ -2,6 +2,7 @@ import baseWorker from './_worker_core.js';
 import { isHomePagePath, transformHomeBoot } from './mobile_boot_gate.js';
 
 const CORE_BUNDLE_ASSET_PATHS = Object.freeze([
+  '/performance_diagnostics.js',
   '/scoring_core.js',
   '/phase2_dual_write.js',
   '/phase2_reset_hook.js',
@@ -184,7 +185,8 @@ async function buildCoreBundle(request, env, ctx, version) {
   try { coreSource = await response.text(); }
   catch (_) { return response; }
 
-  const [aliasSource, youAliasSource, habitGuardSource, sharedSaveWorkSource, inboxBadgeSource, seasonSeriesUpsetSource] = await Promise.all([
+  const [perfSource, aliasSource, youAliasSource, habitGuardSource, sharedSaveWorkSource, inboxBadgeSource, seasonSeriesUpsetSource] = await Promise.all([
+    readAssetSource(env, request, '/performance_diagnostics.js'),
     readAssetSource(env, request, '/score_alias_consistency.js'),
     readAssetSource(env, request, '/you_score_alias_alignment.js'),
     readAssetSource(env, request, '/habit_completion_source_guard.js'),
@@ -193,9 +195,15 @@ async function buildCoreBundle(request, env, ctx, version) {
     readAssetSource(env, request, '/season_series_upset_notifications.js')
   ]);
   const additions = [aliasSource, youAliasSource, habitGuardSource, sharedSaveWorkSource, inboxBadgeSource, seasonSeriesUpsetSource].filter(Boolean);
-  const source = additions.length ? `${coreSource}\n${additions.join('\n')}\n` : coreSource;
+  const source = [
+    perfSource,
+    coreSource,
+    ...additions,
+    perfSource ? ';globalThis.TaskPointsPerf?.recordBundleReady?.();' : ''
+  ].filter(Boolean).join('\n') + '\n';
 
   return immutableJavascriptResponse(source, response, version, {
+    'x-taskpoints-perf-diagnostics': perfSource ? 'included' : 'missing',
     'x-taskpoints-score-alias-bundle': aliasSource ? 'included' : 'missing',
     'x-taskpoints-you-score-alias-alignment': youAliasSource ? 'included' : 'missing',
     'x-taskpoints-habit-source-guard': habitGuardSource ? 'included' : 'missing',
