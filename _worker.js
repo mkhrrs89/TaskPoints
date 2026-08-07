@@ -24,7 +24,9 @@ const CORE_BUNDLE_ASSET_PATHS = Object.freeze([
   '/habit_completion_source_guard.js',
   '/save_pipeline_shared_work.js',
   '/inbox_count_badge.js',
-  '/season_series_upset_notifications.js'
+  '/season_series_upset_notifications.js',
+  '/state_hot_cache.js',
+  '/storage_maintenance_idle.js'
 ]);
 const CORE_BUNDLE_QUERY_KEY = 'v';
 const CORE_BUNDLE_BROWSER_MAX_AGE = 31536000;
@@ -185,16 +187,18 @@ async function buildCoreBundle(request, env, ctx, version) {
   try { coreSource = await response.text(); }
   catch (_) { return response; }
 
-  const [perfSource, aliasSource, youAliasSource, habitGuardSource, sharedSaveWorkSource, inboxBadgeSource, seasonSeriesUpsetSource] = await Promise.all([
+  const [perfSource, aliasSource, youAliasSource, habitGuardSource, sharedSaveWorkSource, inboxBadgeSource, seasonSeriesUpsetSource, stateHotCacheSource, storageIdleSource] = await Promise.all([
     readAssetSource(env, request, '/performance_diagnostics.js'),
     readAssetSource(env, request, '/score_alias_consistency.js'),
     readAssetSource(env, request, '/you_score_alias_alignment.js'),
     readAssetSource(env, request, '/habit_completion_source_guard.js'),
     readAssetSource(env, request, '/save_pipeline_shared_work.js'),
     readAssetSource(env, request, '/inbox_count_badge.js'),
-    readAssetSource(env, request, '/season_series_upset_notifications.js')
+    readAssetSource(env, request, '/season_series_upset_notifications.js'),
+    readAssetSource(env, request, '/state_hot_cache.js'),
+    readAssetSource(env, request, '/storage_maintenance_idle.js')
   ]);
-  const additions = [aliasSource, youAliasSource, habitGuardSource, sharedSaveWorkSource, inboxBadgeSource, seasonSeriesUpsetSource].filter(Boolean);
+  const additions = [aliasSource, youAliasSource, habitGuardSource, sharedSaveWorkSource, inboxBadgeSource, seasonSeriesUpsetSource, stateHotCacheSource, storageIdleSource].filter(Boolean);
   const source = [
     perfSource,
     coreSource,
@@ -209,7 +213,9 @@ async function buildCoreBundle(request, env, ctx, version) {
     'x-taskpoints-habit-source-guard': habitGuardSource ? 'included' : 'missing',
     'x-taskpoints-shared-save-work': sharedSaveWorkSource ? 'included' : 'missing',
     'x-taskpoints-inbox-count-badge': inboxBadgeSource ? 'included' : 'missing',
-    'x-taskpoints-season-series-upsets': seasonSeriesUpsetSource ? 'included' : 'missing'
+    'x-taskpoints-season-series-upsets': seasonSeriesUpsetSource ? 'included' : 'missing',
+    'x-taskpoints-state-hot-cache': stateHotCacheSource ? 'included' : 'missing',
+    'x-taskpoints-storage-idle': storageIdleSource ? 'included' : 'missing'
   });
 }
 
