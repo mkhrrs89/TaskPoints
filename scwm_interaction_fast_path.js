@@ -1,184 +1,306 @@
-;(function installTaskPointsScwmInteractionFastPath(global) {
+;(function installTaskPointsScwmFastPath(global) {
   'use strict';
 
   if (global.TaskPointsScwmInteractionFastPath?.installed) return;
 
-  const VERSION = 2;
-  const SAVE_IDLE_TIMEOUT_MS = 900;
-  const ARM_WINDOW_MS = 2400;
-  const CANONICAL_REFRESH_DELAY_MS = 1800;
-  const MODAL_INSTALL_RETRY_MS = 50;
-  const MAX_MODAL_INSTALL_ATTEMPTS = 240;
-  const DOMAIN_RENDERERS = Object.freeze({
-    sleep: 'renderSleepHistory',
-    calories: 'renderCaloriesHistory',
-    work: 'renderWorkHistory',
-    mood: 'renderMoodHistory'
-  });
-  const FUNCTION_DOMAINS = Object.freeze({
-    saveSleepScore: 'sleep',
-    submitSleepEditModal: 'sleep',
-    saveCalories: 'calories',
-    editTodayCalories: 'calories',
-    saveWorkScore: 'work',
-    submitWorkEditModal: 'work',
-    saveMoodScore: 'mood',
-    submitMoodEditModal: 'mood'
-  });
-  const SAVE_BUTTON_DOMAINS = Object.freeze({
-    sleepEditSaveBtn: 'sleep',
-    caloriesEditSaveBtn: 'calories',
-    workEditSaveBtn: 'work',
-    moodEditSaveBtn: 'mood'
-  });
-  const MODAL_OPEN_INPUTS = Object.freeze({
-    promptEditSleepEntry: 'sleepEditScoreInput',
-    promptEditWorkEntry: 'workEditScoreInput'
-  });
+  const VERSION = 3;
+  const MODALS = '#sleepEditModal, #caloriesEditModal, #workEditModal, #moodEditModal';
+  const PANEL_ID = 'homePanelScwm';
+  const HISTORY_DAYS = 14;
+  const SAVE_IDLE_TIMEOUT = 900;
+  const ARM_MS = 2400;
+  const POLL_GUARD_MS = 300;
+  const HEARTBEAT_MS = 850;
 
   const originals = {};
-  const wrappedFunctions = new Set();
-  const wrappedModalOpenFunctions = new Set();
-  const pendingDomains = new Set();
-  const counters = {
+  const wrapped = new Set();
+  const status = {
     installs: 0,
-    commitsObserved: 0,
     savesDeferred: 0,
     savesFlushed: 0,
-    fullRendersIntercepted: 0,
-    targetedRenders: 0,
-    modalLocks: 0,
-    modalOpensDeferred: 0,
-    fallbacks: 0
+    fullRendersSuppressed: 0,
+    scwmRenders: 0,
+    indexBuilds: 0,
+    compactRenders: 0,
+    pollsSuppressed: 0,
+    idleTouches: 0,
+    modalLocksBypassed: 0
   };
 
   let installed = false;
   let installAttempts = 0;
-  let modalInstallAttempts = 0;
-  let modalInstallTimer = null;
-  let commitDepth = 0;
+  let installTimer = null;
   let armedUntil = 0;
-  let renderInterceptUntil = 0;
+  let commitDepth = 0;
   let pendingSave = null;
   let saveTimer = null;
-  let saveIdleId = null;
-  let saveIdleUsesTimeout = false;
-  let canonicalTimer = null;
-  let modalLockCount = 0;
-  let modalSavedScrollY = 0;
-  let modalStyleSnapshot = null;
+  let saveIdle = null;
+  let pendingFullRender = false;
+  let index = null;
+  let indexDirty = true;
+  let compactDepth = 0;
+  let pollGuardUntil = 0;
+  let fakeIntervalId = -1;
+  let modalHeartbeat = null;
+  const modalLockStack = [];
 
-  function now() {
-    return Number(global.performance?.now?.()) || Date.now();
+  const now = () => Number(global.performance?.now?.()) || Date.now();
+
+  function isMobile() {
+    try {
+      return typeof global.matchMedia !== 'function'
+        || global.matchMedia('(max-width: 767px)').matches;
+    } catch (_) {
+      return true;
+    }
   }
 
-  function isArmed() {
+  function visible(el) {
+    return Boolean(
+      el
+      && el.hidden !== true
+      && !el.classList?.contains?.('hidden')
+      && el.getAttribute?.('aria-hidden') !== 'true'
+    );
+  }
+
+  function scwmPanelActive() {
+    if (!isMobile()) return false;
+    const panel = global.document?.getElementById?.(PANEL_ID);
+    return visible(panel) && Boolean(panel?.classList?.contains?.('is-active'));
+  }
+
+  function openScwmModal() {
+    const nodes = global.document?.querySelectorAll?.(MODALS) || [];
+    return Array.from(nodes).find(visible) || null;
+  }
+
+  function armed() {
     return commitDepth > 0 || now() <= armedUntil;
   }
 
-  function shouldInterceptRender() {
-    return isArmed() || now() <= renderInterceptUntil;
+  function scwmBusy() {
+    return isMobile() && (scwmPanelActive() || Boolean(openScwmModal()) || armed());
   }
 
-  function rememberDomain(domain) {
-    if (DOMAIN_RENDERERS[domain]) pendingDomains.add(domain);
+  function homeState() {
+    if (global.__tpScwmStateForTest && typeof global.__tpScwmStateForTest === 'object') {
+      return global.__tpScwmStateForTest;
+    }
+    if (global.state && typeof global.state === 'object') return global.state;
+    try {
+      return typeof global.eval === 'function'
+        ? global.eval('typeof state !== "undefined" ? state : null')
+        : null;
+    } catch (_) {
+      return null;
+    }
   }
 
-  function arm(domain) {
-    rememberDomain(domain);
-    armedUntil = Math.max(armedUntil, now() + ARM_WINDOW_MS);
+  function dayKey(value) {
+    if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    try {
+      const key = global.dateKey?.(date);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(String(key || ''))) return String(key);
+    } catch (_) {}
+    return [
+      date.getFullYear(),
+      String(date.getMonth() + 1).padStart(2, '0'),
+      String(date.getDate()).padStart(2, '0')
+    ].join('-');
+  }
+
+  function cutoffKey() {
+    const date = new Date();
+    date.setHours(12, 0, 0, 0);
+    date.setDate(date.getDate() - HISTORY_DAYS - 1);
+    return dayKey(date);
+  }
+
+  function category(entry) {
+    const title = String(entry?.title || '');
+    if (title.startsWith('Sleep Score')) return 'sleep';
+    if (title.startsWith('Calories')) return 'calories';
+    if (title.startsWith('Work Score')) return 'work';
+    if (title.startsWith('Mood Score')) return 'mood';
+    return '';
+  }
+
+  function completionDay(entry) {
+    const stored = String(entry?.dateKey || '').slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(stored) ? stored : dayKey(entry?.completedAtISO);
+  }
+
+  function invalidateIndex() {
+    indexDirty = true;
+  }
+
+  function buildIndex() {
+    const state = homeState();
+    const completions = Array.isArray(state?.completions) ? state.completions : [];
+    const currentDay = dayKey(new Date());
+    const cutoff = cutoffKey();
+    const byId = new Map();
+    const byDayCategory = new Map();
+    const compact = [];
+
+    for (const entry of completions) {
+      if (!entry || typeof entry !== 'object') continue;
+      if (entry.id != null && !byId.has(String(entry.id))) byId.set(String(entry.id), entry);
+      const cat = category(entry);
+      if (!cat) continue;
+      const key = completionDay(entry);
+      if (!key) continue;
+      if (!byDayCategory.has(`${key}|${cat}`)) byDayCategory.set(`${key}|${cat}`, entry);
+      if (key >= cutoff) compact.push(entry);
+    }
+
+    index = {
+      source: completions,
+      length: completions.length,
+      day: currentDay,
+      byId,
+      byDayCategory,
+      compact
+    };
+    indexDirty = false;
+    status.indexBuilds += 1;
+    return index;
+  }
+
+  function ensureIndex() {
+    const state = homeState();
+    const completions = Array.isArray(state?.completions) ? state.completions : [];
+    const currentDay = dayKey(new Date());
+    if (
+      indexDirty
+      || !index
+      || index.source !== completions
+      || index.length !== completions.length
+      || index.day !== currentDay
+    ) return buildIndex();
+    return index;
+  }
+
+  function compactCall(fn, thisArg, args) {
+    const state = homeState();
+    if (!state || !Array.isArray(state.completions) || compactDepth) {
+      return fn.apply(thisArg, args);
+    }
+    const full = state.completions;
+    state.completions = ensureIndex().compact;
+    compactDepth += 1;
+    try {
+      status.compactRenders += 1;
+      return fn.apply(thisArg, args);
+    } finally {
+      state.completions = full;
+      compactDepth -= 1;
+    }
+  }
+
+  function wrapIndexConsumers() {
+    if (typeof global.markCompletionsDirty === 'function' && !wrapped.has('markCompletionsDirty')) {
+      originals.markCompletionsDirty = global.markCompletionsDirty;
+      global.markCompletionsDirty = function () {
+        invalidateIndex();
+        return originals.markCompletionsDirty.apply(this, arguments);
+      };
+      wrapped.add('markCompletionsDirty');
+    }
+
+    if (typeof global.resolveCompletionRef === 'function' && !wrapped.has('resolveCompletionRef')) {
+      originals.resolveCompletionRef = global.resolveCompletionRef;
+      global.resolveCompletionRef = function (ref) {
+        const hit = ref?.id != null ? ensureIndex().byId.get(String(ref.id)) : null;
+        return hit || originals.resolveCompletionRef.apply(this, arguments);
+      };
+      wrapped.add('resolveCompletionRef');
+    }
+
+    const todayHelpers = {
+      getTodaySleepEntry: 'sleep',
+      getTodayCaloriesEntry: 'calories',
+      getTodayWorkEntry: 'work',
+      getTodayMoodEntry: 'mood'
+    };
+    Object.entries(todayHelpers).forEach(([name, cat]) => {
+      if (wrapped.has(name) || typeof global[name] !== 'function') return;
+      originals[name] = global[name];
+      global[name] = function () {
+        const hit = ensureIndex().byDayCategory.get(`${dayKey(new Date())}|${cat}`);
+        return hit || originals[name].apply(this, arguments);
+      };
+      wrapped.add(name);
+    });
+
+    ['renderScoreDashboardV2_Skeleton', 'renderScoreV2RecentGrid'].forEach((name) => {
+      if (wrapped.has(name) || typeof global[name] !== 'function') return;
+      originals[name] = global[name];
+      global[name] = function () {
+        return compactCall(originals[name], this, arguments);
+      };
+      wrapped.add(name);
+    });
   }
 
   function clearSaveSchedule() {
     if (saveTimer != null) global.clearTimeout?.(saveTimer);
-    saveTimer = null;
-    if (saveIdleId != null) {
-      if (saveIdleUsesTimeout) global.clearTimeout?.(saveIdleId);
-      else global.cancelIdleCallback?.(saveIdleId);
+    if (saveIdle != null) {
+      global.cancelIdleCallback?.(saveIdle);
+      global.clearTimeout?.(saveIdle);
     }
-    saveIdleId = null;
-    saveIdleUsesTimeout = false;
+    saveTimer = null;
+    saveIdle = null;
   }
 
-  function flushDeferredSave() {
+  function flushSave() {
     clearSaveSchedule();
     const queued = pendingSave;
     pendingSave = null;
     if (!queued || typeof originals.save !== 'function') return false;
-    try {
-      originals.save.apply(queued.thisArg, queued.args);
-      counters.savesFlushed += 1;
-      return true;
-    } catch (error) {
-      counters.fallbacks += 1;
-      console.warn('TaskPoints SCWM deferred save failed', error);
-      return false;
-    }
+    originals.save.apply(queued.thisArg, queued.args);
+    status.savesFlushed += 1;
+    return true;
   }
 
-  function queueDeferredSave() {
+  function queueSave() {
     clearSaveSchedule();
     const afterPaint = () => {
-      saveTimer = null;
       const run = () => {
-        saveIdleId = null;
-        saveIdleUsesTimeout = false;
-        flushDeferredSave();
+        saveIdle = null;
+        flushSave();
       };
       if (typeof global.requestIdleCallback === 'function') {
-        saveIdleUsesTimeout = false;
-        saveIdleId = global.requestIdleCallback(run, { timeout: SAVE_IDLE_TIMEOUT_MS });
+        saveIdle = global.requestIdleCallback(run, { timeout: SAVE_IDLE_TIMEOUT });
       } else {
-        saveIdleUsesTimeout = true;
-        saveIdleId = global.setTimeout(run, 0);
+        saveIdle = global.setTimeout?.(run, 0);
       }
     };
     if (typeof global.requestAnimationFrame === 'function') {
-      global.requestAnimationFrame(() => {
-        global.requestAnimationFrame(afterPaint);
-      });
+      global.requestAnimationFrame(() => global.requestAnimationFrame(afterPaint));
     } else {
-      saveTimer = global.setTimeout(afterPaint, 0);
+      saveTimer = global.setTimeout?.(afterPaint, 0);
     }
   }
 
-  function targetedSave() {
-    if (!isArmed()) return originals.save.apply(this, arguments);
+  function fastSave() {
+    if (!scwmBusy()) return originals.save.apply(this, arguments);
     pendingSave = { thisArg: this, args: Array.from(arguments) };
-    renderInterceptUntil = Math.max(renderInterceptUntil, now() + ARM_WINDOW_MS);
-    counters.savesDeferred += 1;
-    queueDeferredSave();
-    return undefined;
+    status.savesDeferred += 1;
+    queueSave();
   }
 
-  function scheduleCanonicalRefresh() {
-    if (canonicalTimer != null) global.clearTimeout?.(canonicalTimer);
-    canonicalTimer = global.setTimeout(() => {
-      canonicalTimer = null;
-      try {
-        const control = global.TaskPointsHomeTargetedRenderControl;
-        if (typeof control?.scheduleCanonicalStatsRefresh === 'function') {
-          control.scheduleCanonicalStatsRefresh();
-        } else if (typeof global.renderStats === 'function') {
-          global.renderStats();
-        }
-      } catch (error) {
-        counters.fallbacks += 1;
-        if (global.TP_DEBUG_PERF) console.warn('[TP SCWM fast path] canonical refresh failed', error);
-      }
-    }, CANONICAL_REFRESH_DELAY_MS);
-  }
-
-  function renderPendingDomains() {
-    const domains = Array.from(pendingDomains);
-    pendingDomains.clear();
+  function refreshScwm() {
+    status.scwmRenders += 1;
     try {
-      domains.forEach((domain) => {
-        const renderer = global[DOMAIN_RENDERERS[domain]];
-        if (typeof renderer !== 'function') throw new Error(`${DOMAIN_RENDERERS[domain]} unavailable`);
-        renderer.call(global);
-        counters.targetedRenders += 1;
-      });
+      if (typeof global.refreshScoreV2UI === 'function') global.refreshScoreV2UI();
+      else {
+        global.renderScoreDashboardV2_Skeleton?.();
+        global.renderScoreV2RecentGrid?.();
+      }
       const control = global.TaskPointsHomeTargetedRenderControl;
       if (typeof control?.refreshLiveScorePanels === 'function') {
         control.refreshLiveScorePanels({ includeYesterday: true });
@@ -187,307 +309,327 @@
         global.renderTodaysMatchup?.();
         global.updateTodayBreakdown?.();
       }
-      global.updateCriticalTasksIsland?.();
-      scheduleCanonicalRefresh();
       return true;
     } catch (error) {
-      counters.fallbacks += 1;
-      if (global.TP_DEBUG_PERF) console.warn('[TP SCWM fast path] targeted render failed; using renderAll', error);
-      originals.renderAll?.call(global);
+      if (global.TP_DEBUG_PERF) console.warn('[TP SCWM] lightweight refresh failed', error);
       return false;
     }
   }
 
-  function targetedScheduleRender(callback) {
-    if (shouldInterceptRender() && callback === originals.renderAll) {
-      counters.fullRendersIntercepted += 1;
-      renderInterceptUntil = Math.max(renderInterceptUntil, now() + ARM_WINDOW_MS);
-      return originals.scheduleRender.call(this, renderPendingDomains);
+  function fastRenderAll() {
+    if (scwmBusy()) {
+      pendingFullRender = true;
+      status.fullRendersSuppressed += 1;
+      return refreshScwm();
     }
-    return originals.scheduleRender.apply(this, arguments);
+    pendingFullRender = false;
+    return originals.renderAll.apply(this, arguments);
   }
 
-  function wrapCommitFunction(name, domain) {
-    if (wrappedFunctions.has(name) || typeof global[name] !== 'function') return false;
-    const original = global[name];
-    originals[name] = original;
-    global[name] = function taskPointsScwmCommitWrapper() {
-      arm(domain);
-      counters.commitsObserved += 1;
-      commitDepth += 1;
-      let result;
-      try {
-        result = original.apply(this, arguments);
-      } catch (error) {
-        commitDepth = Math.max(0, commitDepth - 1);
-        throw error;
+  function flushFullRender() {
+    if (!pendingFullRender || typeof originals.renderAll !== 'function') return false;
+    if (scwmBusy()) {
+      if (!scwmPanelActive() && !openScwmModal() && armed()) {
+        global.setTimeout?.(flushFullRender, Math.max(20, armedUntil - now() + 20));
       }
-      if (result && typeof result.then === 'function') {
-        return Promise.resolve(result).finally(() => {
-          commitDepth = Math.max(0, commitDepth - 1);
-        });
-      }
-      commitDepth = Math.max(0, commitDepth - 1);
-      return result;
-    };
-    wrappedFunctions.add(name);
+      return false;
+    }
+    pendingFullRender = false;
+    originals.renderAll.call(global);
     return true;
   }
 
-  function wrapAvailableCommitFunctions() {
-    Object.entries(FUNCTION_DOMAINS).forEach(([name, domain]) => wrapCommitFunction(name, domain));
+  function wrapCommits() {
+    const funcs = {
+      saveSleepScore: 'sleep',
+      submitSleepEditModal: 'sleep',
+      saveCalories: 'calories',
+      editTodayCalories: 'calories',
+      saveWorkScore: 'work',
+      submitWorkEditModal: 'work',
+      saveMoodScore: 'mood',
+      submitMoodEditModal: 'mood'
+    };
+    Object.entries(funcs).forEach(([name]) => {
+      if (wrapped.has(name) || typeof global[name] !== 'function') return;
+      originals[name] = global[name];
+      global[name] = function () {
+        armedUntil = Math.max(armedUntil, now() + ARM_MS);
+        commitDepth += 1;
+        let result;
+        try {
+          result = originals[name].apply(this, arguments);
+        } catch (error) {
+          commitDepth = Math.max(0, commitDepth - 1);
+          throw error;
+        }
+        const finish = () => {
+          commitDepth = Math.max(0, commitDepth - 1);
+          invalidateIndex();
+          global.requestAnimationFrame?.(refreshScwm);
+        };
+        if (result && typeof result.then === 'function') {
+          return Promise.resolve(result).finally(finish);
+        }
+        finish();
+        return result;
+      };
+      wrapped.add(name);
+    });
   }
 
-  function restoreStyleProperty(style, property, value) {
-    if (!style) return;
-    if (value) style[property] = value;
-    else if (typeof style.removeProperty === 'function') {
-      style.removeProperty(property.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`));
-    } else {
-      style[property] = '';
-    }
+  function installPollGuard() {
+    if (global.setInterval?.__tpScwmPollGuard || typeof global.setInterval !== 'function') return;
+    originals.setInterval = global.setInterval.bind(global);
+    const guarded = function (callback, delay) {
+      let source = '';
+      try { source = Function.prototype.toString.call(callback); } catch (_) {}
+      const legacyPoll = (
+        Number(delay) === 100
+        && now() <= pollGuardUntil
+        && source.includes('beforeTitle')
+        && source.includes('beforePts')
+        && source.includes('nowTitle')
+        && source.includes('nowPts')
+        && source.includes('renderScoreDashboardV2_Skeleton')
+      );
+      if (legacyPoll) {
+        status.pollsSuppressed += 1;
+        return --fakeIntervalId;
+      }
+      return originals.setInterval.apply(global, arguments);
+    };
+    guarded.__tpScwmPollGuard = true;
+    global.setInterval = guarded;
   }
 
-  function installLightweightModalScrollLock() {
-    if (global.lockScrollForModal?.__tpScwmLightweightModalLock === true) return true;
-    if (typeof global.lockScrollForModal !== 'function' || typeof global.unlockScrollForModal !== 'function') return false;
+  function noteInteraction() {
+    try {
+      global.TaskPointsHomeIdleQueue?.noteInteraction?.();
+      status.idleTouches += 1;
+    } catch (_) {}
+  }
+
+  function stopHeartbeat() {
+    if (modalHeartbeat != null) global.clearTimeout?.(modalHeartbeat);
+    modalHeartbeat = null;
+  }
+
+  function startHeartbeat() {
+    stopHeartbeat();
+    const tick = () => {
+      modalHeartbeat = null;
+      if (global.document?.hidden || !openScwmModal()) return;
+      noteInteraction();
+      modalHeartbeat = global.setTimeout?.(tick, HEARTBEAT_MS);
+    };
+    noteInteraction();
+    modalHeartbeat = global.setTimeout?.(tick, HEARTBEAT_MS);
+  }
+
+  function afterPaint(fn) {
+    if (typeof global.requestAnimationFrame === 'function') {
+      global.requestAnimationFrame(() => global.setTimeout?.(fn, 0));
+    } else global.setTimeout?.(fn, 0);
+  }
+
+  function wrapModalFunctions() {
+    const openers = {
+      promptEditSleepEntry: 'sleepEditScoreInput',
+      promptEditWorkEntry: 'workEditScoreInput'
+    };
+    Object.entries(openers).forEach(([name, inputId]) => {
+      if (wrapped.has(name) || typeof global[name] !== 'function') return;
+      originals[name] = global[name];
+      global[name] = function () {
+        pollGuardUntil = now() + POLL_GUARD_MS;
+        noteInteraction();
+        const input = global.document?.getElementById?.(inputId);
+        const focus = typeof input?.focus === 'function' ? input.focus.bind(input) : null;
+        const select = typeof input?.select === 'function' ? input.select.bind(input) : null;
+        let wantsFocus = false;
+        let wantsSelect = false;
+        let patched = false;
+        if (input && focus) {
+          try {
+            input.focus = () => { wantsFocus = true; };
+            input.select = () => { wantsSelect = true; };
+            patched = true;
+          } catch (_) {}
+        }
+        let result;
+        try {
+          result = originals[name].apply(this, arguments);
+        } finally {
+          if (patched) {
+            try {
+              delete input.focus;
+              delete input.select;
+            } catch (_) {}
+          }
+          global.document?.body?.classList?.toggle?.('tp-scwm-editing', Boolean(openScwmModal()));
+          startHeartbeat();
+        }
+        if (patched && (wantsFocus || wantsSelect)) {
+          afterPaint(() => {
+            if (wantsFocus) focus?.({ preventScroll: true });
+            if (wantsSelect) select?.();
+          });
+        }
+        return result;
+      };
+      wrapped.add(name);
+    });
+
+    ['closeSleepEditModal', 'closeWorkEditModal', 'closeMoodEditModal'].forEach((name) => {
+      if (wrapped.has(name) || typeof global[name] !== 'function') return;
+      originals[name] = global[name];
+      global[name] = function () {
+        const result = originals[name].apply(this, arguments);
+        afterPaint(() => {
+          const modalOpen = Boolean(openScwmModal());
+          global.document?.body?.classList?.toggle?.('tp-scwm-editing', modalOpen);
+          if (!modalOpen) stopHeartbeat();
+        });
+        return result;
+      };
+      wrapped.add(name);
+    });
+  }
+
+  function installSmartModalLock() {
+    if (
+      global.lockScrollForModal?.__tpScwmSmartLock
+      || typeof global.lockScrollForModal !== 'function'
+      || typeof global.unlockScrollForModal !== 'function'
+    ) return;
 
     originals.lockScrollForModal = global.lockScrollForModal;
     originals.unlockScrollForModal = global.unlockScrollForModal;
 
-    function lightweightLockScrollForModal() {
-      if (modalLockCount === 0) {
-        const root = global.document?.documentElement;
-        const body = global.document?.body;
-        modalSavedScrollY = Number(global.scrollY) || 0;
-        modalStyleSnapshot = {
-          rootOverflow: root?.style?.overflow || '',
-          rootOverscrollBehavior: root?.style?.overscrollBehavior || '',
-          bodyOverflow: body?.style?.overflow || '',
-          bodyOverscrollBehavior: body?.style?.overscrollBehavior || ''
-        };
-        if (root?.style) {
-          root.style.overflow = 'hidden';
-          root.style.overscrollBehavior = 'none';
-        }
-        if (body?.style) {
-          body.style.overflow = 'hidden';
-          body.style.overscrollBehavior = 'none';
-        }
+    const lock = function () {
+      const bypass = isMobile() && Boolean(openScwmModal());
+      modalLockStack.push(bypass ? 'scwm' : 'normal');
+      if (bypass) {
+        status.modalLocksBypassed += 1;
+        startHeartbeat();
+        return;
       }
-      modalLockCount += 1;
-      counters.modalLocks += 1;
-    }
-
-    function lightweightUnlockScrollForModal() {
-      if (modalLockCount === 0) return;
-      modalLockCount -= 1;
-      if (modalLockCount > 0) return;
-
-      global.document?.activeElement?.blur?.();
-      const root = global.document?.documentElement;
-      const body = global.document?.body;
-      const snapshot = modalStyleSnapshot || {};
-      restoreStyleProperty(root?.style, 'overflow', snapshot.rootOverflow || '');
-      restoreStyleProperty(root?.style, 'overscrollBehavior', snapshot.rootOverscrollBehavior || '');
-      restoreStyleProperty(body?.style, 'overflow', snapshot.bodyOverflow || '');
-      restoreStyleProperty(body?.style, 'overscrollBehavior', snapshot.bodyOverscrollBehavior || '');
-      modalStyleSnapshot = null;
-
-      const restore = () => {
-        if (Math.abs((Number(global.scrollY) || 0) - modalSavedScrollY) > 1) {
-          global.scrollTo?.(0, modalSavedScrollY);
-        }
-      };
-      if (typeof global.requestAnimationFrame === 'function') global.requestAnimationFrame(restore);
-      else global.setTimeout?.(restore, 0);
-    }
-
-    lightweightLockScrollForModal.__tpScwmLightweightModalLock = true;
-    lightweightUnlockScrollForModal.__tpScwmLightweightModalLock = true;
-    global.lockScrollForModal = lightweightLockScrollForModal;
-    global.unlockScrollForModal = lightweightUnlockScrollForModal;
-    return true;
-  }
-
-  function scheduleAfterModalPaint(callback) {
-    if (typeof global.requestAnimationFrame === 'function') {
-      global.requestAnimationFrame(() => global.setTimeout?.(callback, 0));
-    } else {
-      global.setTimeout?.(callback, 0);
-    }
-  }
-
-  function wrapModalOpenFunction(name, inputId) {
-    if (wrappedModalOpenFunctions.has(name) || typeof global[name] !== 'function') return false;
-    const original = global[name];
-    originals[name] = original;
-    global[name] = function taskPointsScwmModalOpenWrapper() {
-      const input = global.document?.getElementById?.(inputId) || null;
-      const originalFocus = typeof input?.focus === 'function' ? input.focus.bind(input) : null;
-      const originalSelect = typeof input?.select === 'function' ? input.select.bind(input) : null;
-      const hadOwnFocus = Boolean(input && Object.prototype.hasOwnProperty.call(input, 'focus'));
-      const hadOwnSelect = Boolean(input && Object.prototype.hasOwnProperty.call(input, 'select'));
-      const ownFocus = hadOwnFocus ? input.focus : null;
-      const ownSelect = hadOwnSelect ? input.select : null;
-      let focusRequested = false;
-      let selectRequested = false;
-      let intercepted = false;
-
-      if (input && originalFocus) {
-        try {
-          input.focus = () => { focusRequested = true; };
-          input.select = () => { selectRequested = true; };
-          intercepted = true;
-        } catch (_) {}
-      }
-
-      let result;
-      try {
-        result = original.apply(this, arguments);
-      } finally {
-        if (input && intercepted) {
-          try {
-            if (hadOwnFocus) input.focus = ownFocus;
-            else delete input.focus;
-            if (hadOwnSelect) input.select = ownSelect;
-            else delete input.select;
-          } catch (_) {}
-        }
-      }
-
-      if (intercepted && (focusRequested || selectRequested)) {
-        counters.modalOpensDeferred += 1;
-        scheduleAfterModalPaint(() => {
-          try {
-            if (focusRequested) originalFocus?.({ preventScroll: true });
-            if (selectRequested) originalSelect?.();
-          } catch (error) {
-            counters.fallbacks += 1;
-            if (global.TP_DEBUG_PERF) console.warn('[TP SCWM fast path] deferred modal focus failed', error);
-          }
-        });
-      }
-
-      return result;
+      return originals.lockScrollForModal.apply(this, arguments);
     };
-    wrappedModalOpenFunctions.add(name);
-    return true;
+    const unlock = function () {
+      const mode = modalLockStack.length ? modalLockStack.pop() : 'normal';
+      if (mode === 'scwm') {
+        if (!openScwmModal()) stopHeartbeat();
+        return;
+      }
+      return originals.unlockScrollForModal.apply(this, arguments);
+    };
+    lock.__tpScwmSmartLock = true;
+    unlock.__tpScwmSmartLock = true;
+    global.lockScrollForModal = lock;
+    global.unlockScrollForModal = unlock;
   }
 
-  function installModalInteractionFastPath() {
-    const lockReady = installLightweightModalScrollLock();
-    Object.entries(MODAL_OPEN_INPUTS).forEach(([name, inputId]) => wrapModalOpenFunction(name, inputId));
-    const workReady = wrappedModalOpenFunctions.has('promptEditWorkEntry');
-    if (lockReady && workReady) {
-      if (modalInstallTimer != null) global.clearTimeout?.(modalInstallTimer);
-      modalInstallTimer = null;
-      return true;
+  function insideScwm(target) {
+    try {
+      return Boolean(target?.closest?.(MODALS) || target?.closest?.(`#${PANEL_ID}`));
+    } catch (_) {
+      return false;
     }
-    modalInstallAttempts += 1;
-    if (modalInstallAttempts < MAX_MODAL_INSTALL_ATTEMPTS && modalInstallTimer == null) {
-      modalInstallTimer = global.setTimeout?.(() => {
-        modalInstallTimer = null;
-        installModalInteractionFastPath();
-      }, MODAL_INSTALL_RETRY_MS);
-    }
-    return false;
   }
 
-  function domainFromEventTarget(target) {
-    const element = target?.closest?.('[id]') || target;
-    const id = String(element?.id || '');
-    if (SAVE_BUTTON_DOMAINS[id]) return SAVE_BUTTON_DOMAINS[id];
-    const modal = target?.closest?.('#sleepEditModal, #caloriesEditModal, #workEditModal, #moodEditModal');
-    if (!modal) return '';
-    if (modal.id === 'sleepEditModal') return 'sleep';
-    if (modal.id === 'caloriesEditModal') return 'calories';
-    if (modal.id === 'workEditModal') return 'work';
-    if (modal.id === 'moodEditModal') return 'mood';
-    return '';
-  }
+  function installInteractionGuards() {
+    if (global.__tpScwmInteractionGuards) return;
+    global.__tpScwmInteractionGuards = true;
+    const doc = global.document;
 
-  function onPointerOrClick(event) {
-    const domain = domainFromEventTarget(event?.target);
-    const id = String(event?.target?.closest?.('[id]')?.id || event?.target?.id || '');
-    if (domain && SAVE_BUTTON_DOMAINS[id]) arm(domain);
-  }
+    ['beforeinput', 'input', 'focusin', 'compositionstart', 'compositionupdate', 'keydown', 'pointerdown', 'touchstart']
+      .forEach((name) => doc?.addEventListener?.(name, (event) => {
+        if (insideScwm(event?.target) || openScwmModal()) noteInteraction();
+      }, true));
 
-  function onKeyDown(event) {
-    if (event?.key !== 'Enter') return;
-    const domain = domainFromEventTarget(event?.target);
-    if (domain) arm(domain);
+    doc?.addEventListener?.('touchmove', (event) => {
+      if (event?.target?.closest?.(MODALS) && event.cancelable) event.preventDefault();
+    }, { capture: true, passive: false });
+
+    doc?.addEventListener?.('click', (event) => {
+      const tab = event?.target?.closest?.('[data-home-tab]');
+      if (!tab) return;
+      noteInteraction();
+      if (String(tab.dataset?.homeTab || '') !== 'scwm') {
+        global.setTimeout?.(flushFullRender, 0);
+      }
+    }, true);
+
+    doc?.addEventListener?.('visibilitychange', () => {
+      if (doc.hidden) {
+        flushSave();
+        stopHeartbeat();
+      } else if (openScwmModal()) startHeartbeat();
+    });
+
+    global.addEventListener?.('pagehide', () => {
+      flushSave();
+      stopHeartbeat();
+    }, { capture: true });
   }
 
   function install() {
-    if (installed) {
-      wrapAvailableCommitFunctions();
-      installModalInteractionFastPath();
-      return true;
-    }
-    if (
-      typeof global.save !== 'function'
-      || typeof global.scheduleRender !== 'function'
-      || typeof global.renderAll !== 'function'
-    ) {
-      installAttempts += 1;
-      if (installAttempts < 240) global.setTimeout?.(install, 50);
+    if (typeof global.save !== 'function' || typeof global.renderAll !== 'function') {
+      if (++installAttempts < 240 && installTimer == null) {
+        installTimer = global.setTimeout?.(() => {
+          installTimer = null;
+          install();
+        }, 50);
+      }
       return false;
     }
 
-    originals.save = global.save;
-    originals.scheduleRender = global.scheduleRender;
-    originals.renderAll = global.renderAll;
-    global.save = targetedSave;
-    global.scheduleRender = targetedScheduleRender;
-    wrapAvailableCommitFunctions();
-    installModalInteractionFastPath();
+    if (!installed) {
+      originals.save = global.save;
+      originals.renderAll = global.renderAll;
+      global.save = fastSave;
+      global.renderAll = fastRenderAll;
+      installPollGuard();
+      installInteractionGuards();
+      installed = true;
+      status.installs += 1;
+    }
 
-    global.document?.addEventListener?.('pointerdown', onPointerOrClick, true);
-    global.document?.addEventListener?.('click', onPointerOrClick, true);
-    global.document?.addEventListener?.('keydown', onKeyDown, true);
-    global.addEventListener?.('pagehide', flushDeferredSave, { capture: true });
-    global.document?.addEventListener?.('visibilitychange', () => {
-      if (global.document.hidden) flushDeferredSave();
-      else {
-        wrapAvailableCommitFunctions();
-        installModalInteractionFastPath();
-      }
-    });
-
-    installed = true;
-    counters.installs += 1;
+    wrapCommits();
+    wrapIndexConsumers();
+    wrapModalFunctions();
+    installSmartModalLock();
     return true;
   }
 
-  const api = {
+  global.TaskPointsScwmInteractionFastPath = {
     installed: true,
     version: VERSION,
     install,
-    flush: flushDeferredSave,
-    arm,
-    installModalInteractionFastPath,
+    flush: flushSave,
+    refreshScwm,
+    flushPendingFullRender: flushFullRender,
+    invalidateCompletionIndex: invalidateIndex,
+    ensureCompletionIndex: ensureIndex,
     getStatus() {
       return {
         installed,
         version: VERSION,
-        pendingDomains: Array.from(pendingDomains),
         pendingSave: Boolean(pendingSave),
-        wrappedFunctions: Array.from(wrappedFunctions),
-        wrappedModalOpenFunctions: Array.from(wrappedModalOpenFunctions),
-        lightweightModalLockInstalled: global.lockScrollForModal?.__tpScwmLightweightModalLock === true,
-        modalLockCount,
-        counters: { ...counters }
+        pendingFullRender,
+        compactEntryCount: index?.compact?.length || 0,
+        counters: { ...status }
       };
     }
   };
 
-  global.TaskPointsScwmInteractionFastPath = api;
-  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = global.TaskPointsScwmInteractionFastPath;
+  }
 
   if (global.document?.readyState === 'loading') {
     global.document.addEventListener?.('DOMContentLoaded', install, { once: true });
-  } else {
-    global.setTimeout?.(install, 0);
-  }
+  } else global.setTimeout?.(install, 0);
 })(typeof window !== 'undefined' ? window : globalThis);
