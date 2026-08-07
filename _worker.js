@@ -144,7 +144,7 @@ function javascriptResponse(source, response, extraHeaders = {}) {
   });
 }
 
-function immutableJavaScriptResponse(source, response, version, extraHeaders = {}) {
+function immutableJavascriptResponse(source, response, version, extraHeaders = {}) {
   const headers = new Headers(response.headers);
   headers.delete('content-length');
   headers.delete('last-modified');
