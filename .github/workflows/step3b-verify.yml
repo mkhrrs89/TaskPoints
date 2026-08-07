@@ -1,0 +1,21 @@
+name: Step 3B verification
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  focused-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run Step 3B focused tests
+        run: >-
+          node --test
+          tests/inbox_series_upset_notification.test.js
+          tests/season_series_upset_reconciliation_loop.test.js
