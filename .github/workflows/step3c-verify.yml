@@ -22,3 +22,4 @@ jobs:
           tests/step3a_storage_hot_path.test.js
           tests/phase4_read_contract.test.js
           tests/phase4_lightweight_read_validation_contract.test.js
+          tests/diagnostics_asset_cache_versions.test.js
