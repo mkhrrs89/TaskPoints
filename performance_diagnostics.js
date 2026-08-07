@@ -6,7 +6,13 @@
   const sget=k=>{try{return global.sessionStorage?.getItem?.(k)??null}catch(_){return null}}, sset=(k,v)=>{try{global.sessionStorage?.setItem?.(k,v);return true}catch(_){return false}}, sdel=k=>{try{global.sessionStorage?.removeItem?.(k)}catch(_){}};
   let q=null; try{q=new URLSearchParams(global.location?.search||'')}catch(_){} const requested=q?.get?.('perf')??q?.get?.('tpperf');
   if(requested==='0'||requested==='off')sdel(ENABLE); if(requested==='1'||requested==='on')sset(ENABLE,'1');
-  if(sget(ENABLE)!=='1'||global.TaskPointsPerf?.enabled)return;
+  const active=sget(ENABLE)==='1';
+  if(!active){
+    const mountActivator=()=>{if(!/\/settings(?:\.html)?$/.test(String(global.location?.pathname||''))||!global.document?.body||global.document.getElementById('tpPerfTraceEnableButton'))return;const b=global.document.createElement('button');b.id='tpPerfTraceEnableButton';b.type='button';b.textContent='Enable Perf Trace';b.style.cssText='position:fixed;right:10px;bottom:96px;z-index:2147483645;border:1px solid #64748b;border-radius:999px;background:#111827;color:#f8fafc;padding:7px 10px;font:600 11px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;opacity:.9';b.addEventListener('click',()=>{sset(ENABLE,'1');global.location.reload()});global.document.body.appendChild(b)};
+    if(global.document?.readyState==='loading')global.document.addEventListener('DOMContentLoaded',mountActivator,{once:true});else mountActivator();
+    return;
+  }
+  if(global.TaskPointsPerf?.enabled)return;
   let internal=0,panel=null,hooks=false; const inside=fn=>{internal++;try{return fn()}finally{internal=Math.max(0,internal-1)}};
   const page={schemaVersion:1,id:`${epoch().toString(36)}-${Math.random().toString(36).slice(2,8)}`,path:String(global.location?.pathname||''),title:String(global.document?.title||''),startedAtISO:new Date().toISOString(),timeOrigin:Number(perf?.timeOrigin)||null,userAgent:String(global.navigator?.userAgent||''),hardwareConcurrency:Number(global.navigator?.hardwareConcurrency)||null,deviceMemory:Number(global.navigator?.deviceMemory)||null,events:[]};
   const bundleStart=now();
