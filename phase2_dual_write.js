@@ -7,9 +7,15 @@
 
   const METADATA_ID = 'dual_write';
   const ARRAY_STORES = ['completions', 'matchups', 'gameHistory', 'seasonHistory', 'tasks', 'habits', 'players'];
+  const COALESCE_DELAY_MS = 900;
+  const INTERACTION_RECHECK_MS = 250;
   let queueTail = Promise.resolve();
   let pendingCount = 0;
   let sequence = 0;
+  let pendingSerializedRaw = null;
+  let pendingSerializedTimer = null;
+  let pendingSerializedPromise = null;
+  let pendingSerializedResolve = null;
 
   function requestPromise(request) {
     return new Promise((resolve, reject) => {
@@ -250,13 +256,56 @@
     return operation;
   }
 
+  function interactionBusy() {
+    try {
+      const status = core.getStorageMaintenanceIdleStatus?.();
+      if (!status) return false;
+      return status.activeEditor === true || Number(status.lastInteractionAgoMs || 0) < Number(status.quietMs || 0);
+    } catch (_) { return false; }
+  }
+
+  function settleScheduledPromise(result) {
+    const resolve = pendingSerializedResolve;
+    pendingSerializedPromise = null;
+    pendingSerializedResolve = null;
+    try { resolve?.(result); } catch (_) {}
+  }
+
+  function runScheduledSerializedWrite(force = false) {
+    if (!pendingSerializedRaw) return Promise.resolve(true);
+    if (!force && interactionBusy()) {
+      if (pendingSerializedTimer) global.clearTimeout?.(pendingSerializedTimer);
+      pendingSerializedTimer = global.setTimeout?.(() => {
+        pendingSerializedTimer = null;
+        runScheduledSerializedWrite(false);
+      }, INTERACTION_RECHECK_MS);
+      return pendingSerializedPromise || Promise.resolve(false);
+    }
+
+    if (pendingSerializedTimer) global.clearTimeout?.(pendingSerializedTimer);
+    pendingSerializedTimer = null;
+    const serializedCandidate = pendingSerializedRaw;
+    pendingSerializedRaw = null;
+    const operation = queueWrite(null, { serializedCandidate, coalescedAuthoritativeWrite: true });
+    operation.then(
+      (result) => settleScheduledPromise(result),
+      (error) => settleScheduledPromise({ status: 'failed', error: String(error?.message || error) })
+    );
+    return operation;
+  }
+
   function scheduleFromStoredRaw(serializedCandidate) {
     try {
-      const operation = queueWrite(null, { serializedCandidate });
-      operation.catch((error) => {
-        console.warn('TaskPointsCore: IndexedDB dual-write failed; localStorage remains authoritative.', error);
-      });
-      return operation;
+      pendingSerializedRaw = String(serializedCandidate);
+      if (!pendingSerializedPromise) {
+        pendingSerializedPromise = new Promise((resolve) => { pendingSerializedResolve = resolve; });
+      }
+      if (pendingSerializedTimer) global.clearTimeout?.(pendingSerializedTimer);
+      pendingSerializedTimer = global.setTimeout?.(() => {
+        pendingSerializedTimer = null;
+        runScheduledSerializedWrite(false);
+      }, COALESCE_DELAY_MS);
+      return pendingSerializedPromise;
     } catch (error) {
       console.warn('TaskPointsCore: could not queue IndexedDB dual-write; localStorage remains authoritative.', error);
       return null;
@@ -298,6 +347,11 @@
   }
 
   function flush() {
+    if (pendingSerializedRaw) {
+      return Promise.resolve(runScheduledSerializedWrite(true))
+        .then(() => queueTail)
+        .catch(() => queueTail);
+    }
     return queueTail.catch(() => undefined);
   }
 
@@ -338,7 +392,12 @@
   core.queueShadowDualWrite = queueWrite;
   core.flushShadowDualWrites = flush;
   core.getShadowDualWriteStatus = getStatus;
-  core.getPendingShadowDualWriteCount = () => pendingCount;
+  core.getPendingShadowDualWriteCount = () => pendingCount + (pendingSerializedRaw ? 1 : 0);
+  core.getShadowDualWriteQueueStatus = () => ({
+    pendingImmediate: pendingCount,
+    pendingCoalesced: Boolean(pendingSerializedRaw),
+    coalesceDelayMs: COALESCE_DELAY_MS
+  });
   core.scheduleShadowDualWriteFromSerializedState = (storageKey, raw) => (
     storageKey === core.STORAGE_KEY ? scheduleFromStoredRaw(raw) : null
   );
