@@ -6,6 +6,7 @@
   const SCOREBOARD_FORMAT_CLASS = 'home-scoreboard-series-format';
   const ACTIVE_SEASON_STATUSES = new Set(['locked', 'active']);
   let observer = null;
+  let observedMount = null;
   let renderScheduled = false;
 
   function localDateKey(date = new Date()) {
@@ -200,9 +201,29 @@
   }
 
   function setHidden(mount, hidden) {
+    const current = mount.classList?.contains?.('hidden');
+    if (typeof current === 'boolean' && current === hidden) return;
     if (mount.classList?.toggle) mount.classList.toggle('hidden', hidden);
     else if (hidden) mount.classList?.add?.('hidden');
     else mount.classList?.remove?.('hidden');
+  }
+
+  function connectObserver(mount = global.document?.getElementById?.(MOUNT_ID)) {
+    if (!observer || !mount) return false;
+    observer.disconnect?.();
+    observedMount = mount;
+    observer.observe(mount, { attributes: true, childList: true });
+    return true;
+  }
+
+  function mutateMountWithoutSelfObservation(mount, callback) {
+    const shouldResume = Boolean(observer && observedMount === mount);
+    if (shouldResume) observer.disconnect?.();
+    try {
+      return callback();
+    } finally {
+      if (shouldResume) connectObserver(mount);
+    }
   }
 
   function renderHomeFeaturedMatchup(stateInput = null, todayKey = localDateKey()) {
@@ -213,14 +234,20 @@
       : { visible: false, reason: 'missing-mount', featured: null, html: '' };
 
     if (mount) {
-      setHidden(mount, !view.visible);
-      if (!view.visible) {
-        if (mount.innerHTML) mount.innerHTML = '';
-        mount.removeAttribute?.('data-tp-featured-matchup');
-      } else {
-        if (mount.innerHTML !== view.html) mount.innerHTML = view.html;
-        mount.setAttribute?.('data-tp-featured-matchup', 'active');
-      }
+      mutateMountWithoutSelfObservation(mount, () => {
+        setHidden(mount, !view.visible);
+        if (!view.visible) {
+          if (mount.innerHTML) mount.innerHTML = '';
+          if (mount.getAttribute?.('data-tp-featured-matchup') != null) {
+            mount.removeAttribute?.('data-tp-featured-matchup');
+          }
+        } else {
+          if (mount.innerHTML !== view.html) mount.innerHTML = view.html;
+          if (mount.getAttribute?.('data-tp-featured-matchup') !== 'active') {
+            mount.setAttribute?.('data-tp-featured-matchup', 'active');
+          }
+        }
+      });
     }
 
     renderCurrentSeriesBestOf(state, todayKey);
@@ -239,11 +266,11 @@
   }
 
   function observeMount() {
-    if (observer || typeof global.MutationObserver !== 'function') return;
+    if (typeof global.MutationObserver !== 'function') return;
     const mount = global.document?.getElementById?.(MOUNT_ID);
     if (!mount) return;
-    observer = new global.MutationObserver(scheduleRender);
-    observer.observe(mount, { attributes: true, childList: true });
+    if (!observer) observer = new global.MutationObserver(scheduleRender);
+    connectObserver(mount);
   }
 
   function install() {
