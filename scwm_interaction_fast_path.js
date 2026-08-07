@@ -3,10 +3,12 @@
 
   if (global.TaskPointsScwmInteractionFastPath?.installed) return;
 
-  const VERSION = 1;
+  const VERSION = 2;
   const SAVE_IDLE_TIMEOUT_MS = 900;
   const ARM_WINDOW_MS = 2400;
   const CANONICAL_REFRESH_DELAY_MS = 1800;
+  const MODAL_INSTALL_RETRY_MS = 50;
+  const MAX_MODAL_INSTALL_ATTEMPTS = 240;
   const DOMAIN_RENDERERS = Object.freeze({
     sleep: 'renderSleepHistory',
     calories: 'renderCaloriesHistory',
@@ -29,9 +31,14 @@
     workEditSaveBtn: 'work',
     moodEditSaveBtn: 'mood'
   });
+  const MODAL_OPEN_INPUTS = Object.freeze({
+    promptEditSleepEntry: 'sleepEditScoreInput',
+    promptEditWorkEntry: 'workEditScoreInput'
+  });
 
   const originals = {};
   const wrappedFunctions = new Set();
+  const wrappedModalOpenFunctions = new Set();
   const pendingDomains = new Set();
   const counters = {
     installs: 0,
@@ -40,11 +47,15 @@
     savesFlushed: 0,
     fullRendersIntercepted: 0,
     targetedRenders: 0,
+    modalLocks: 0,
+    modalOpensDeferred: 0,
     fallbacks: 0
   };
 
   let installed = false;
   let installAttempts = 0;
+  let modalInstallAttempts = 0;
+  let modalInstallTimer = null;
   let commitDepth = 0;
   let armedUntil = 0;
   let renderInterceptUntil = 0;
@@ -53,6 +64,9 @@
   let saveIdleId = null;
   let saveIdleUsesTimeout = false;
   let canonicalTimer = null;
+  let modalLockCount = 0;
+  let modalSavedScrollY = 0;
+  let modalStyleSnapshot = null;
 
   function now() {
     return Number(global.performance?.now?.()) || Date.now();
@@ -224,6 +238,162 @@
     Object.entries(FUNCTION_DOMAINS).forEach(([name, domain]) => wrapCommitFunction(name, domain));
   }
 
+  function restoreStyleProperty(style, property, value) {
+    if (!style) return;
+    if (value) style[property] = value;
+    else if (typeof style.removeProperty === 'function') {
+      style.removeProperty(property.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`));
+    } else {
+      style[property] = '';
+    }
+  }
+
+  function installLightweightModalScrollLock() {
+    if (global.lockScrollForModal?.__tpScwmLightweightModalLock === true) return true;
+    if (typeof global.lockScrollForModal !== 'function' || typeof global.unlockScrollForModal !== 'function') return false;
+
+    originals.lockScrollForModal = global.lockScrollForModal;
+    originals.unlockScrollForModal = global.unlockScrollForModal;
+
+    function lightweightLockScrollForModal() {
+      if (modalLockCount === 0) {
+        const root = global.document?.documentElement;
+        const body = global.document?.body;
+        modalSavedScrollY = Number(global.scrollY) || 0;
+        modalStyleSnapshot = {
+          rootOverflow: root?.style?.overflow || '',
+          rootOverscrollBehavior: root?.style?.overscrollBehavior || '',
+          bodyOverflow: body?.style?.overflow || '',
+          bodyOverscrollBehavior: body?.style?.overscrollBehavior || ''
+        };
+        if (root?.style) {
+          root.style.overflow = 'hidden';
+          root.style.overscrollBehavior = 'none';
+        }
+        if (body?.style) {
+          body.style.overflow = 'hidden';
+          body.style.overscrollBehavior = 'none';
+        }
+      }
+      modalLockCount += 1;
+      counters.modalLocks += 1;
+    }
+
+    function lightweightUnlockScrollForModal() {
+      if (modalLockCount === 0) return;
+      modalLockCount -= 1;
+      if (modalLockCount > 0) return;
+
+      global.document?.activeElement?.blur?.();
+      const root = global.document?.documentElement;
+      const body = global.document?.body;
+      const snapshot = modalStyleSnapshot || {};
+      restoreStyleProperty(root?.style, 'overflow', snapshot.rootOverflow || '');
+      restoreStyleProperty(root?.style, 'overscrollBehavior', snapshot.rootOverscrollBehavior || '');
+      restoreStyleProperty(body?.style, 'overflow', snapshot.bodyOverflow || '');
+      restoreStyleProperty(body?.style, 'overscrollBehavior', snapshot.bodyOverscrollBehavior || '');
+      modalStyleSnapshot = null;
+
+      const restore = () => {
+        if (Math.abs((Number(global.scrollY) || 0) - modalSavedScrollY) > 1) {
+          global.scrollTo?.(0, modalSavedScrollY);
+        }
+      };
+      if (typeof global.requestAnimationFrame === 'function') global.requestAnimationFrame(restore);
+      else global.setTimeout?.(restore, 0);
+    }
+
+    lightweightLockScrollForModal.__tpScwmLightweightModalLock = true;
+    lightweightUnlockScrollForModal.__tpScwmLightweightModalLock = true;
+    global.lockScrollForModal = lightweightLockScrollForModal;
+    global.unlockScrollForModal = lightweightUnlockScrollForModal;
+    return true;
+  }
+
+  function scheduleAfterModalPaint(callback) {
+    if (typeof global.requestAnimationFrame === 'function') {
+      global.requestAnimationFrame(() => global.setTimeout?.(callback, 0));
+    } else {
+      global.setTimeout?.(callback, 0);
+    }
+  }
+
+  function wrapModalOpenFunction(name, inputId) {
+    if (wrappedModalOpenFunctions.has(name) || typeof global[name] !== 'function') return false;
+    const original = global[name];
+    originals[name] = original;
+    global[name] = function taskPointsScwmModalOpenWrapper() {
+      const input = global.document?.getElementById?.(inputId) || null;
+      const originalFocus = typeof input?.focus === 'function' ? input.focus.bind(input) : null;
+      const originalSelect = typeof input?.select === 'function' ? input.select.bind(input) : null;
+      const hadOwnFocus = Boolean(input && Object.prototype.hasOwnProperty.call(input, 'focus'));
+      const hadOwnSelect = Boolean(input && Object.prototype.hasOwnProperty.call(input, 'select'));
+      const ownFocus = hadOwnFocus ? input.focus : null;
+      const ownSelect = hadOwnSelect ? input.select : null;
+      let focusRequested = false;
+      let selectRequested = false;
+      let intercepted = false;
+
+      if (input && originalFocus) {
+        try {
+          input.focus = () => { focusRequested = true; };
+          input.select = () => { selectRequested = true; };
+          intercepted = true;
+        } catch (_) {}
+      }
+
+      let result;
+      try {
+        result = original.apply(this, arguments);
+      } finally {
+        if (input && intercepted) {
+          try {
+            if (hadOwnFocus) input.focus = ownFocus;
+            else delete input.focus;
+            if (hadOwnSelect) input.select = ownSelect;
+            else delete input.select;
+          } catch (_) {}
+        }
+      }
+
+      if (intercepted && (focusRequested || selectRequested)) {
+        counters.modalOpensDeferred += 1;
+        scheduleAfterModalPaint(() => {
+          try {
+            if (focusRequested) originalFocus?.({ preventScroll: true });
+            if (selectRequested) originalSelect?.();
+          } catch (error) {
+            counters.fallbacks += 1;
+            if (global.TP_DEBUG_PERF) console.warn('[TP SCWM fast path] deferred modal focus failed', error);
+          }
+        });
+      }
+
+      return result;
+    };
+    wrappedModalOpenFunctions.add(name);
+    return true;
+  }
+
+  function installModalInteractionFastPath() {
+    const lockReady = installLightweightModalScrollLock();
+    Object.entries(MODAL_OPEN_INPUTS).forEach(([name, inputId]) => wrapModalOpenFunction(name, inputId));
+    const workReady = wrappedModalOpenFunctions.has('promptEditWorkEntry');
+    if (lockReady && workReady) {
+      if (modalInstallTimer != null) global.clearTimeout?.(modalInstallTimer);
+      modalInstallTimer = null;
+      return true;
+    }
+    modalInstallAttempts += 1;
+    if (modalInstallAttempts < MAX_MODAL_INSTALL_ATTEMPTS && modalInstallTimer == null) {
+      modalInstallTimer = global.setTimeout?.(() => {
+        modalInstallTimer = null;
+        installModalInteractionFastPath();
+      }, MODAL_INSTALL_RETRY_MS);
+    }
+    return false;
+  }
+
   function domainFromEventTarget(target) {
     const element = target?.closest?.('[id]') || target;
     const id = String(element?.id || '');
@@ -252,6 +422,7 @@
   function install() {
     if (installed) {
       wrapAvailableCommitFunctions();
+      installModalInteractionFastPath();
       return true;
     }
     if (
@@ -270,6 +441,7 @@
     global.save = targetedSave;
     global.scheduleRender = targetedScheduleRender;
     wrapAvailableCommitFunctions();
+    installModalInteractionFastPath();
 
     global.document?.addEventListener?.('pointerdown', onPointerOrClick, true);
     global.document?.addEventListener?.('click', onPointerOrClick, true);
@@ -277,7 +449,10 @@
     global.addEventListener?.('pagehide', flushDeferredSave, { capture: true });
     global.document?.addEventListener?.('visibilitychange', () => {
       if (global.document.hidden) flushDeferredSave();
-      else wrapAvailableCommitFunctions();
+      else {
+        wrapAvailableCommitFunctions();
+        installModalInteractionFastPath();
+      }
     });
 
     installed = true;
@@ -291,6 +466,7 @@
     install,
     flush: flushDeferredSave,
     arm,
+    installModalInteractionFastPath,
     getStatus() {
       return {
         installed,
@@ -298,6 +474,9 @@
         pendingDomains: Array.from(pendingDomains),
         pendingSave: Boolean(pendingSave),
         wrappedFunctions: Array.from(wrappedFunctions),
+        wrappedModalOpenFunctions: Array.from(wrappedModalOpenFunctions),
+        lightweightModalLockInstalled: global.lockScrollForModal?.__tpScwmLightweightModalLock === true,
+        modalLockCount,
         counters: { ...counters }
       };
     }
