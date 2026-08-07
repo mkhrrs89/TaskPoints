@@ -23,8 +23,7 @@ const CORE_BUNDLE_ASSET_PATHS = Object.freeze([
   '/habit_completion_source_guard.js',
   '/save_pipeline_shared_work.js',
   '/inbox_count_badge.js',
-  '/season_series_upset_notifications.js',
-  '/scwm_interaction_fast_path.js'
+  '/season_series_upset_notifications.js'
 ]);
 const CORE_BUNDLE_QUERY_KEY = 'v';
 const CORE_BUNDLE_BROWSER_MAX_AGE = 31536000;
@@ -185,16 +184,15 @@ async function buildCoreBundle(request, env, ctx, version) {
   try { coreSource = await response.text(); }
   catch (_) { return response; }
 
-  const [aliasSource, youAliasSource, habitGuardSource, sharedSaveWorkSource, inboxBadgeSource, seasonSeriesUpsetSource, scwmFastPathSource] = await Promise.all([
+  const [aliasSource, youAliasSource, habitGuardSource, sharedSaveWorkSource, inboxBadgeSource, seasonSeriesUpsetSource] = await Promise.all([
     readAssetSource(env, request, '/score_alias_consistency.js'),
     readAssetSource(env, request, '/you_score_alias_alignment.js'),
     readAssetSource(env, request, '/habit_completion_source_guard.js'),
     readAssetSource(env, request, '/save_pipeline_shared_work.js'),
     readAssetSource(env, request, '/inbox_count_badge.js'),
-    readAssetSource(env, request, '/season_series_upset_notifications.js'),
-    readAssetSource(env, request, '/scwm_interaction_fast_path.js')
+    readAssetSource(env, request, '/season_series_upset_notifications.js')
   ]);
-  const additions = [aliasSource, youAliasSource, habitGuardSource, sharedSaveWorkSource, inboxBadgeSource, seasonSeriesUpsetSource, scwmFastPathSource].filter(Boolean);
+  const additions = [aliasSource, youAliasSource, habitGuardSource, sharedSaveWorkSource, inboxBadgeSource, seasonSeriesUpsetSource].filter(Boolean);
   const source = additions.length ? `${coreSource}\n${additions.join('\n')}\n` : coreSource;
 
   return immutableJavascriptResponse(source, response, version, {
@@ -203,8 +201,7 @@ async function buildCoreBundle(request, env, ctx, version) {
     'x-taskpoints-habit-source-guard': habitGuardSource ? 'included' : 'missing',
     'x-taskpoints-shared-save-work': sharedSaveWorkSource ? 'included' : 'missing',
     'x-taskpoints-inbox-count-badge': inboxBadgeSource ? 'included' : 'missing',
-    'x-taskpoints-season-series-upsets': seasonSeriesUpsetSource ? 'included' : 'missing',
-    'x-taskpoints-scwm-fast-path': scwmFastPathSource ? 'included' : 'missing'
+    'x-taskpoints-season-series-upsets': seasonSeriesUpsetSource ? 'included' : 'missing'
   });
 }
 
