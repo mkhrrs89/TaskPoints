@@ -12,10 +12,8 @@
   let queueTail = Promise.resolve();
   let pendingCount = 0;
   let sequence = 0;
-  let pendingSerializedRaw = null;
+  let pendingSerializedBatch = null;
   let pendingSerializedTimer = null;
-  let pendingSerializedPromise = null;
-  let pendingSerializedResolve = null;
 
   function requestPromise(request) {
     return new Promise((resolve, reject) => {
@@ -264,48 +262,51 @@
     } catch (_) { return false; }
   }
 
-  function settleScheduledPromise(result) {
-    const resolve = pendingSerializedResolve;
-    pendingSerializedPromise = null;
-    pendingSerializedResolve = null;
-    try { resolve?.(result); } catch (_) {}
-  }
-
   function runScheduledSerializedWrite(force = false) {
-    if (!pendingSerializedRaw) return Promise.resolve(true);
+    const batch = pendingSerializedBatch;
+    if (!batch) return Promise.resolve(true);
     if (!force && interactionBusy()) {
       if (pendingSerializedTimer) global.clearTimeout?.(pendingSerializedTimer);
       pendingSerializedTimer = global.setTimeout?.(() => {
         pendingSerializedTimer = null;
         runScheduledSerializedWrite(false);
       }, INTERACTION_RECHECK_MS);
-      return pendingSerializedPromise || Promise.resolve(false);
+      return batch.promise;
     }
 
     if (pendingSerializedTimer) global.clearTimeout?.(pendingSerializedTimer);
     pendingSerializedTimer = null;
-    const serializedCandidate = pendingSerializedRaw;
-    pendingSerializedRaw = null;
-    const operation = queueWrite(null, { serializedCandidate, coalescedAuthoritativeWrite: true });
-    operation.then(
-      (result) => settleScheduledPromise(result),
-      (error) => settleScheduledPromise({ status: 'failed', error: String(error?.message || error) })
-    );
+    // Detach this batch before starting the expensive write. A save that lands
+    // while this verification is running will create a distinct newer batch
+    // instead of being resolved by the older operation.
+    pendingSerializedBatch = null;
+    const operation = queueWrite(null, {
+      serializedCandidate: batch.raw,
+      coalescedAuthoritativeWrite: true
+    });
+    operation.then(batch.resolve, (error) => batch.resolve({ status: 'failed', error: String(error?.message || error) }));
     return operation;
   }
 
   function scheduleFromStoredRaw(serializedCandidate) {
     try {
-      pendingSerializedRaw = String(serializedCandidate);
-      if (!pendingSerializedPromise) {
-        pendingSerializedPromise = new Promise((resolve) => { pendingSerializedResolve = resolve; });
+      if (!pendingSerializedBatch) {
+        let resolveBatch;
+        const promise = new Promise((resolve) => { resolveBatch = resolve; });
+        pendingSerializedBatch = {
+          raw: String(serializedCandidate),
+          promise,
+          resolve: resolveBatch
+        };
+      } else {
+        pendingSerializedBatch.raw = String(serializedCandidate);
       }
       if (pendingSerializedTimer) global.clearTimeout?.(pendingSerializedTimer);
       pendingSerializedTimer = global.setTimeout?.(() => {
         pendingSerializedTimer = null;
         runScheduledSerializedWrite(false);
       }, COALESCE_DELAY_MS);
-      return pendingSerializedPromise;
+      return pendingSerializedBatch.promise;
     } catch (error) {
       console.warn('TaskPointsCore: could not queue IndexedDB dual-write; localStorage remains authoritative.', error);
       return null;
@@ -347,7 +348,7 @@
   }
 
   function flush() {
-    if (pendingSerializedRaw) {
+    if (pendingSerializedBatch) {
       return Promise.resolve(runScheduledSerializedWrite(true))
         .then(() => queueTail)
         .catch(() => queueTail);
@@ -392,10 +393,10 @@
   core.queueShadowDualWrite = queueWrite;
   core.flushShadowDualWrites = flush;
   core.getShadowDualWriteStatus = getStatus;
-  core.getPendingShadowDualWriteCount = () => pendingCount + (pendingSerializedRaw ? 1 : 0);
+  core.getPendingShadowDualWriteCount = () => pendingCount + (pendingSerializedBatch ? 1 : 0);
   core.getShadowDualWriteQueueStatus = () => ({
     pendingImmediate: pendingCount,
-    pendingCoalesced: Boolean(pendingSerializedRaw),
+    pendingCoalesced: Boolean(pendingSerializedBatch),
     coalesceDelayMs: COALESCE_DELAY_MS
   });
   core.scheduleShadowDualWriteFromSerializedState = (storageKey, raw) => (
