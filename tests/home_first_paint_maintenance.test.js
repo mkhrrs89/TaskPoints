@@ -67,10 +67,13 @@ test('Home toolbar maintenance is postponed through the shared idle queue', () =
   assert.doesNotMatch(scheduler, /requestIdleCallback/);
 });
 
-test('YOU alias startup repair remains immediate off Home but is idle-queued on Home', () => {
+test('YOU alias startup repair is deferred on every page and keeps the Home idle queue', () => {
   assert.match(alias, /function isTaskPointsHomePage\(\)/);
   assert.match(alias, /home-you-score-alias-repair/);
   assert.match(alias, /delayMs: 14000/);
-  assert.match(alias, /if \(isTaskPointsHomePage\(\)\) scheduleHomeAliasRepair\(\);\s*else persistRepair/);
-  assert.match(alias, /if \(isTaskPointsHomePage\(\)\) \{\s*scheduleHomeAliasRepair\(\);\s*\} else \{\s*repairPersistedState\(\);/);
+  assert.match(alias, /function scheduleNonHomeAliasRepair\(/);
+  assert.match(alias, /whenStorageMaintenanceQuiet/);
+  assert.match(alias, /if \(isTaskPointsHomePage\(\)\) scheduleHomeAliasRepair\(\);\s*else scheduleNonHomeAliasRepair\('load_alignment'\)/);
+  assert.match(alias, /if \(isTaskPointsHomePage\(\)\) \{\s*scheduleHomeAliasRepair\(\);\s*\} else \{\s*scheduleNonHomeAliasRepair\('module_install'\);/);
+  assert.doesNotMatch(alias, /if \(isTaskPointsHomePage\(\)\) scheduleHomeAliasRepair\(\);\s*else persistRepair/);
 });
