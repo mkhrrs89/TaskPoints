@@ -11,7 +11,7 @@ const source = fs.readFileSync(
 test('loads the cache-busted Home and Settings diagnostics assets', () => {
   assert.match(
     source,
-    /\/home_featured_matchup_visibility\.js\?v=20260803-2/
+    /\/home_featured_matchup_visibility\.js\?v=20260807-1/
   );
   assert.match(
     source,
@@ -20,7 +20,7 @@ test('loads the cache-busted Home and Settings diagnostics assets', () => {
 
   assert.doesNotMatch(
     source,
-    /\/home_featured_matchup_visibility\.js\?v=20260801-1/
+    /\/home_featured_matchup_visibility\.js\?v=20260803-2/
   );
   assert.doesNotMatch(
     source,
