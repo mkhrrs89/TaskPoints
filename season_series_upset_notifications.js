@@ -366,6 +366,22 @@
     }, Math.max(0, Number(delayMs) || 0));
   }
 
+  function queueReconcileWhenQuiet(reason = 'startup', delayMs = 0) {
+    if (!global.document || !global.localStorage) return;
+    const schedule = () => queueReconcile(delayMs);
+    const tryGate = () => {
+      const gate = global.TaskPointsCore?.whenStorageMaintenanceQuiet;
+      if (typeof gate !== 'function') return false;
+      Promise.resolve(gate(schedule, { reason: `season_series_upset_${reason}` }))
+        .catch(() => global.setTimeout?.(schedule, 3000));
+      return true;
+    };
+    if (tryGate()) return;
+    global.setTimeout?.(() => {
+      if (!tryGate()) schedule();
+    }, 0);
+  }
+
   function mergePopulateResults(originalResult, upsetResult) {
     if (!upsetResult?.changed) return originalResult;
     return {
@@ -410,7 +426,7 @@
     });
     populateWithSeasonSeriesUpsets.__taskPointsOriginal = originalPopulate;
     inbox.populate = populateWithSeasonSeriesUpsets;
-    queueReconcile(0);
+    queueReconcileWhenQuiet('bootstrap', 0);
     return true;
   }
 
@@ -434,7 +450,7 @@
 
   global.addEventListener?.('pageshow', () => {
     installPopulateWrapper();
-    queueReconcile(50);
+    queueReconcileWhenQuiet('pageshow', 50);
   });
   global.addEventListener?.('focus', () => queueReconcile(100));
   global.addEventListener?.('taskpoints:state-revision', () => {
