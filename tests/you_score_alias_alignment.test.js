@@ -165,14 +165,19 @@ test('save wrapper aligns only evidenced current-season tournament YOU aliases',
   assert.equal(saved.matchups[4].playerAScore, 11);
 });
 
-test('startup repair persists once, preserves unscoped history, and is idempotent', () => {
+test('startup repair is deferred, then persists once, preserves unscoped history, and is idempotent', () => {
   const state = baseState();
   const { context, storage, saves } = makeHarness(state);
+  assert.equal(saves.length, 0, 'module startup must not synchronously rewrite the full authoritative snapshot');
+
+  const first = context.TaskPointsYouScoreAliasAlignment.repairPersistedState();
+  assert.equal(first.changed, true);
   assert.equal(saves.length, 1);
   const persisted = JSON.parse(storage.get('taskpoints_v1'));
   assert.equal(persisted.matchups[0].playerAScore, 48.83);
   assert.equal(persisted.matchups[1].playerAScore, 23.81);
   assert.equal(persisted.matchups[4].playerAScore, 11);
+
   const second = context.TaskPointsYouScoreAliasAlignment.repairPersistedState();
   assert.equal(second.changed, false);
   assert.equal(saves.length, 1);

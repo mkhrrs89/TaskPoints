@@ -278,16 +278,34 @@
     return tracked;
   }
 
+  function runScheduledRefreshWhenQuiet(reason, options) {
+    const run = () => {
+      refreshScheduled = false;
+      return refreshReadCache({ ...options, reason });
+    };
+    const gate = core.whenStorageMaintenanceQuiet;
+    if (typeof gate === 'function') {
+      return Promise.resolve(gate(run, { reason: `phase3_read_cache_${reason}` }));
+    }
+    // The shared maintenance gate is appended later in the same core bundle.
+    // Yield one macrotask, then check again so module-install warmup cannot beat
+    // the startup/navigation protection via a captured microtask.
+    return new Promise((resolve) => {
+      global.setTimeout?.(() => {
+        const lateGate = core.whenStorageMaintenanceQuiet;
+        resolve(typeof lateGate === 'function'
+          ? lateGate(run, { reason: `phase3_read_cache_${reason}` })
+          : run());
+      }, 0);
+    });
+  }
+
   function scheduleRefresh(reason = 'load_fallback', options = {}) {
     if (getMode() === 'off' && options.force !== true) return null;
     if (refreshScheduled || refreshPromise) return refreshPromise;
     refreshScheduled = true;
-    const schedule = typeof global.queueMicrotask === 'function'
-      ? global.queueMicrotask.bind(global)
-      : (callback) => Promise.resolve().then(callback);
-    schedule(() => {
+    runScheduledRefreshWhenQuiet(reason, options).catch(() => {
       refreshScheduled = false;
-      refreshReadCache({ ...options, reason }).catch(() => undefined);
     });
     return null;
   }

@@ -174,13 +174,25 @@
     if ((core.getPhase4StorageMode?.() || 'off') !== 'indexeddb_primary' || warmupScheduled || warmupPromise) return;
     if (global.document?.visibilityState === 'hidden') return;
     warmupScheduled = true;
-    const schedule = typeof global.queueMicrotask === 'function'
-      ? global.queueMicrotask.bind(global)
-      : (callback) => Promise.resolve().then(callback);
-    schedule(() => {
+    const run = () => {
       warmupScheduled = false;
-      warmPrimaryCache(reason);
-    });
+      return warmPrimaryCache(reason);
+    };
+    const gate = core.whenStorageMaintenanceQuiet;
+    if (typeof gate === 'function') {
+      Promise.resolve(gate(run, { reason: `phase4_primary_cache_${reason}` }))
+        .catch(() => { warmupScheduled = false; });
+      return;
+    }
+    // The shared maintenance gate is appended later in the combined core
+    // script. Yield a macrotask and re-check it so primary warmup cannot race
+    // page startup through the old microtask path.
+    global.setTimeout?.(() => {
+      const lateGate = core.whenStorageMaintenanceQuiet;
+      Promise.resolve(typeof lateGate === 'function'
+        ? lateGate(run, { reason: `phase4_primary_cache_${reason}` })
+        : run()).catch(() => { warmupScheduled = false; });
+    }, 0);
   }
 
   function withTemporaryPrimary(expectedMirrorRaw, expectedJournalRaw, serializedState, callback) {

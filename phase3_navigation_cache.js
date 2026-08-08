@@ -244,19 +244,38 @@
     }
   }
 
+  function beginNavigationRefresh(reason) {
+    if (core.getPhase3ReadMode() !== VERIFIED_MODE) {
+      refreshScheduled = false;
+      return false;
+    }
+    refreshScheduled = false;
+    refreshPromise = Promise.resolve(PHASE3_REFRESH_CACHE?.call(core, { force: true, reason }))
+      .then(() => rebuildNavigationCache())
+      .catch(() => false)
+      .finally(() => { refreshPromise = null; });
+    return refreshPromise;
+  }
+
   function scheduleNavigationRefresh(reason = 'navigation_cache_not_ready') {
     if (core.getPhase3ReadMode() !== VERIFIED_MODE || refreshScheduled || refreshPromise) return;
     refreshScheduled = true;
-    const schedule = typeof global.queueMicrotask === 'function'
-      ? global.queueMicrotask.bind(global)
-      : (callback) => Promise.resolve().then(callback);
-    schedule(() => {
-      refreshScheduled = false;
-      refreshPromise = Promise.resolve(PHASE3_REFRESH_CACHE?.call(core, { force: true, reason }))
-        .then(() => rebuildNavigationCache())
-        .catch(() => false)
-        .finally(() => { refreshPromise = null; });
-    });
+    const run = () => beginNavigationRefresh(reason);
+    const gate = core.whenStorageMaintenanceQuiet;
+    if (typeof gate === 'function') {
+      Promise.resolve(gate(run, { reason: `phase3_navigation_cache_${reason}` }))
+        .catch(() => { refreshScheduled = false; });
+      return;
+    }
+    // The maintenance gate is appended later in the same combined core script.
+    // Yield a macrotask and re-check it instead of capturing the original
+    // refresh function into a microtask that can race page startup.
+    global.setTimeout?.(() => {
+      const lateGate = core.whenStorageMaintenanceQuiet;
+      Promise.resolve(typeof lateGate === 'function'
+        ? lateGate(run, { reason: `phase3_navigation_cache_${reason}` })
+        : run()).catch(() => { refreshScheduled = false; });
+    }, 0);
   }
 
   function recordFallback(reason) {
