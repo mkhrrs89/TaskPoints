@@ -26,6 +26,7 @@
   let persistingRepair = false;
   let homeAliasRepairFallbackTimer = null;
   let nonHomeAliasRepairScheduled = false;
+  const NON_HOME_ALIAS_REPAIR_DELAY_MS = 14000;
 
   function isTaskPointsHomePage() {
     const pathname = String(global.location?.pathname || '');
@@ -64,19 +65,19 @@
         ? gate(run, { reason: `you_score_alias_alignment_${reason}` })
         : run();
     };
-
-    const gate = core.whenStorageMaintenanceQuiet;
-    if (typeof gate === 'function') {
+    const scheduleGate = () => {
       Promise.resolve(useGateOrRun()).catch(() => { nonHomeAliasRepairScheduled = false; });
-      return true;
+    };
+
+    // This repair can require a full canonical snapshot rewrite. Do not let a
+    // short visit to a game page become eligible for that work merely because
+    // the user paused briefly before navigating again. After the eligibility
+    // delay, the shared quiet gate still re-checks interaction/navigation state.
+    if (typeof global.setTimeout === 'function') {
+      global.setTimeout(scheduleGate, NON_HOME_ALIAS_REPAIR_DELAY_MS);
+    } else {
+      scheduleGate();
     }
-
-    // The shared gate is appended later in the same combined core script.
-    // Yield one macrotask and re-check it instead of doing a full-state repair
-    // synchronously during bundle evaluation.
-    global.setTimeout?.(() => {
-      Promise.resolve(useGateOrRun()).catch(() => { nonHomeAliasRepairScheduled = false; });
-    }, 0);
     return true;
   }
 
