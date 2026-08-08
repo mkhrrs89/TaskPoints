@@ -25,14 +25,14 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          import re
 
           path = Path('toolbar.js')
           source = path.read_text()
-          old = """  if (!isMainPagePathname(window.location.pathname)) {
-            run();
-            return;
-          }
-          """
+          pattern = re.compile(
+              r"  if \(!isMainPagePathname\(window\.location\.pathname\)\) \{\s+run\(\);\s+return;\s+\}",
+              re.MULTILINE,
+          )
           new = """  if (!isMainPagePathname(window.location.pathname)) {
             const gate = window.TaskPointsCore?.whenStorageMaintenanceQuiet;
             if (typeof gate === 'function') {
@@ -43,11 +43,11 @@ jobs:
               window.setTimeout(run, 5000);
             }
             return;
-          }
-          """
-          if source.count(old) != 1:
-              raise SystemExit(f'Expected exactly one toolbar maintenance block, found {source.count(old)}')
-          path.write_text(source.replace(old, new, 1))
+          }"""
+          matches = list(pattern.finditer(source))
+          if len(matches) != 1:
+              raise SystemExit(f'Expected exactly one immediate non-Home toolbar maintenance block, found {len(matches)}')
+          path.write_text(pattern.sub(new, source, count=1))
 
           test = Path('tests/step3e_toolbar_maintenance_quiet.test.js')
           test.write_text(r'''const test = require('node:test');
