@@ -79,9 +79,11 @@ test('authoritative writes and removes invalidate the cached state immediately',
   assert.equal(harness.readsFor('taskpoints_v1'), 2);
 
   harness.storage.removeItem('taskpoints_v1');
-  const fallback = { players: [{ id: 'fallback' }] };
-  assert.deepEqual(harness.core.readTaskPointsStoredState('taskpoints_v1', fallback), fallback);
-  assert.equal(harness.readsFor('taskpoints_v1'), 3);
+  const firstFallback = { players: [{ id: 'fallback-a' }] };
+  const secondFallback = { players: [{ id: 'fallback-b' }] };
+  assert.deepEqual(harness.core.readTaskPointsStoredState('taskpoints_v1', firstFallback), firstFallback);
+  assert.deepEqual(harness.core.readTaskPointsStoredState('taskpoints_v1', secondFallback), secondFallback);
+  assert.equal(harness.readsFor('taskpoints_v1'), 4);
 });
 
 test('revision-token changes force a fresh authoritative read even without a tracked-key write', () => {
