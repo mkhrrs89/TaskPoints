@@ -11,13 +11,18 @@
   const REVISION_KEY = 'taskpoints_state_revision_v1';
   const TRACKED_KEYS = new Set([STORAGE_KEY, JOURNAL_KEY]);
   const originalLoad = core.loadAppState;
+  const originalReadStoredState = core.readTaskPointsStoredState;
   let generation = 0;
   const cachedByMode = new Map();
+  let authoritativeReadCache = null;
   let hits = 0;
   let misses = 0;
   let invalidations = 0;
   let defaultHits = 0;
   let readOnlyHits = 0;
+  let storedStateHits = 0;
+  let storedStateMisses = 0;
+  let storedStateCloneFailures = 0;
 
   const clone = (value) => {
     if (typeof global.structuredClone === 'function') return global.structuredClone(value);
@@ -29,6 +34,11 @@
     catch (_) { return ''; }
   }
 
+  function authoritativeStoragePresent() {
+    try { return storage.getItem(STORAGE_KEY) !== null; }
+    catch (_) { return false; }
+  }
+
   function revisionToken() {
     return `${generation}|${readSmall(REVISION_KEY)}`;
   }
@@ -36,6 +46,7 @@
   function invalidate() {
     generation += 1;
     cachedByMode.clear();
+    authoritativeReadCache = null;
     invalidations += 1;
   }
 
@@ -53,6 +64,39 @@
     if (!result || typeof result !== 'object') return result;
     try { return clone(result); }
     catch (_) { return null; }
+  }
+
+  if (typeof originalReadStoredState === 'function') {
+    core.readTaskPointsStoredState = function taskPointsHotCachedReadTaskPointsStoredState(...args) {
+      const requestedKey = args.length === 0 || args[0] == null || args[0] === ''
+        ? STORAGE_KEY
+        : String(args[0]);
+      if (requestedKey !== STORAGE_KEY) return originalReadStoredState.apply(core, args);
+
+      const token = revisionToken();
+      if (authoritativeReadCache && authoritativeReadCache.token === token) {
+        const copy = cloneResult(authoritativeReadCache.result);
+        if (copy !== null) {
+          storedStateHits += 1;
+          return copy;
+        }
+        authoritativeReadCache = null;
+        storedStateCloneFailures += 1;
+      }
+
+      storedStateMisses += 1;
+      const result = originalReadStoredState.apply(core, args);
+      const explicitFallback = args.length > 1 ? args[1] : undefined;
+      const returnedExplicitFallback = args.length > 1 && result === explicitFallback;
+      const snapshot = returnedExplicitFallback || !authoritativeStoragePresent() ? null : cloneResult(result);
+      if (snapshot !== null) {
+        authoritativeReadCache = {
+          token: revisionToken(),
+          result: snapshot
+        };
+      }
+      return result;
+    };
   }
 
   core.loadAppState = function taskPointsHotCachedLoadAppState(...args) {
@@ -147,13 +191,17 @@
   core.clearStateHotCache = invalidate;
   core.getStateHotCacheStatus = () => ({
     installed: true,
-    cacheReady: cachedByMode.size > 0,
+    cacheReady: cachedByMode.size > 0 || authoritativeReadCache !== null,
     cachedModes: Array.from(cachedByMode.keys()),
+    authoritativeReadCached: authoritativeReadCache !== null,
     generation,
     hits,
     defaultHits,
     readOnlyHits,
     misses,
+    storedStateHits,
+    storedStateMisses,
+    storedStateCloneFailures,
     invalidations
   });
 })(typeof window !== 'undefined' ? window : globalThis);
