@@ -1,0 +1,27 @@
+name: step3j-patch
+on:
+  push:
+    branches:
+      - agent/step3j-delay-alias-repair
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/step3j-delay-alias-repair
+      - name: Apply and test Step 3J
+        run: |
+          node .github/step3j-patch.js
+          node --check you_score_alias_alignment.js
+          node --test tests/you_score_alias_alignment.test.js tests/step3j_alias_repair_delay.test.js
+      - name: Commit patch and remove temporary files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add you_score_alias_alignment.js tests/step3j_alias_repair_delay.test.js
+          git rm .github/step3j-patch.js .github/workflows/step3j-patch.yml
+          git commit -m "Delay non-Home alias repair maintenance"
+          git push origin HEAD:agent/step3j-delay-alias-repair
