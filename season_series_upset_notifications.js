@@ -324,7 +324,7 @@
       // Reconciliation is observational unless this module actually has an inbox
       // change to persist. Derived-state sync is still computed for correctness,
       // but must never write the full TaskPoints snapshot just because we checked.
-      const loaded = core.loadAppState({ syncDerived: true, persistSync: false });
+      const loaded = core.loadAppState({ syncDerived: options.syncDerived !== false, persistSync: false });
       const state = loaded?.state || loaded;
       if (!state || typeof state !== 'object') return null;
       const result = reconcileState(state, options);
@@ -357,18 +357,18 @@
     }
   }
 
-  function queueReconcile(delayMs = 0) {
+  function queueReconcile(delayMs = 0, reconcileOptions = {}) {
     if (!global.document || !global.localStorage) return;
     if (reconciliationTimer !== null) global.clearTimeout?.(reconciliationTimer);
     reconciliationTimer = global.setTimeout?.(() => {
       reconciliationTimer = null;
-      reconcileStored();
+      reconcileStored(reconcileOptions);
     }, Math.max(0, Number(delayMs) || 0));
   }
 
   function queueReconcileWhenQuiet(reason = 'startup', delayMs = 0) {
     if (!global.document || !global.localStorage) return;
-    const schedule = () => queueReconcile(delayMs);
+    const schedule = () => queueReconcile(delayMs, { syncDerived: false });
     const tryGate = () => {
       const gate = global.TaskPointsCore?.whenStorageMaintenanceQuiet;
       if (typeof gate !== 'function') return false;
