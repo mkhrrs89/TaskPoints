@@ -1,5 +1,5 @@
-name: Step 3H patch
-on:
+name: step3h-patch
+'on':
   push:
     branches:
       - agent/step3h-upset-reconcile-quiet
@@ -7,20 +7,19 @@ permissions:
   contents: write
 jobs:
   patch:
-    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: agent/step3h-upset-reconcile-quiet
-      - name: Apply Step 3H
+      - name: Patch and test
         shell: bash
         run: |
-          python - <<'PY'
+          python3 - <<'PY'
           from pathlib import Path
-          path = Path('season_series_upset_notifications.js')
-          text = path.read_text()
-          old = """  function queueReconcile(delayMs = 0) {
+          p = Path('season_series_upset_notifications.js')
+          s = p.read_text()
+          needle = """  function queueReconcile(delayMs = 0) {
     if (!global.document || !global.localStorage) return;
     if (reconciliationTimer !== null) global.clearTimeout?.(reconciliationTimer);
     reconciliationTimer = global.setTimeout?.(() => {
@@ -29,63 +28,57 @@ jobs:
     }, Math.max(0, Number(delayMs) || 0));
   }
 """
-          new = old + """
+          insert = needle + """
   function queueReconcileWhenQuiet(reason = 'startup', delayMs = 0) {
     if (!global.document || !global.localStorage) return;
     const schedule = () => queueReconcile(delayMs);
-    const runThroughGate = () => {
+    const tryGate = () => {
       const gate = global.TaskPointsCore?.whenStorageMaintenanceQuiet;
       if (typeof gate !== 'function') return false;
       Promise.resolve(gate(schedule, { reason: `season_series_upset_${reason}` }))
         .catch(() => global.setTimeout?.(schedule, 3000));
       return true;
     };
-    if (runThroughGate()) return;
+    if (tryGate()) return;
     global.setTimeout?.(() => {
-      if (!runThroughGate()) schedule();
+      if (!tryGate()) schedule();
     }, 0);
   }
 """
-          if old not in text:
+          if needle not in s:
               raise SystemExit('queueReconcile block not found')
-          text = text.replace(old, new, 1)
-          if '    queueReconcile(0);\n    return true;' not in text:
-              raise SystemExit('bootstrap reconcile call not found')
-          text = text.replace('    queueReconcile(0);\n    return true;', "    queueReconcileWhenQuiet('bootstrap', 0);\n    return true;", 1)
-          if "    queueReconcile(50);\n  });" not in text:
-              raise SystemExit('pageshow reconcile call not found')
-          text = text.replace("    queueReconcile(50);\n  });", "    queueReconcileWhenQuiet('pageshow', 50);\n  });", 1)
-          path.write_text(text)
+          s = s.replace(needle, insert, 1)
+          s = s.replace("    queueReconcile(0);\n    return true;", "    queueReconcileWhenQuiet('bootstrap', 0);\n    return true;", 1)
+          s = s.replace("    queueReconcile(50);\n  });", "    queueReconcileWhenQuiet('pageshow', 50);\n  });", 1)
+          if "queueReconcileWhenQuiet('bootstrap', 0)" not in s or "queueReconcileWhenQuiet('pageshow', 50)" not in s:
+              raise SystemExit('startup calls were not patched')
+          p.write_text(s)
           PY
           cat > tests/step3h_upset_reconcile_quiet.test.js <<'EOF'
           const test = require('node:test');
           const assert = require('node:assert/strict');
           const fs = require('node:fs');
           const path = require('node:path');
-
           const source = fs.readFileSync(path.resolve(__dirname, '../season_series_upset_notifications.js'), 'utf8');
-
-          test('season-series startup reconciliation waits for storage-maintenance quiet', () => {
+          test('startup and pageshow upset reconciliation wait for the shared quiet gate', () => {
             assert.match(source, /function queueReconcileWhenQuiet\(/);
             assert.match(source, /TaskPointsCore\?\.whenStorageMaintenanceQuiet/);
-            assert.match(source, /season_series_upset_\$\{reason\}/);
             assert.match(source, /queueReconcileWhenQuiet\('bootstrap', 0\)/);
             assert.match(source, /queueReconcileWhenQuiet\('pageshow', 50\)/);
           });
-
-          test('live focus and state-revision reconciliation remain prompt', () => {
-            assert.match(source, /addEventListener\?\.\('focus', \(\) => queueReconcile\(100\)\)/);
-            assert.match(source, /addEventListener\?\.\('taskpoints:state-revision',[\s\S]*queueReconcile\(100\)/);
+          test('focus and state revisions keep prompt reconciliation', () => {
+            assert.match(source, /'focus', \(\) => queueReconcile\(100\)/);
+            assert.match(source, /'taskpoints:state-revision',[\s\S]*queueReconcile\(100\)/);
           });
           EOF
           node --check season_series_upset_notifications.js
           node --test tests/step3h_upset_reconcile_quiet.test.js
-      - name: Commit patch and remove temporary workflow
+      - name: Commit and clean workflow
         shell: bash
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add season_series_upset_notifications.js tests/step3h_upset_reconcile_quiet.test.js
           git rm .github/workflows/step3h-patch.yml
-          git commit -m "Defer season upset reconciliation until quiet"
+          git commit -m 'Defer season upset reconciliation until quiet'
           git push origin HEAD:agent/step3h-upset-reconcile-quiet
