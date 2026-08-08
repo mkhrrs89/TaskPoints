@@ -1,0 +1,233 @@
+name: Step 3F image batching patch
+
+on:
+  push:
+    branches:
+      - agent/step3f-image-batching
+    paths:
+      - .github/workflows/step3f-image-batching-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/step3f-image-batching
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Patch image blob reads and add regression test
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          core_path = Path('scoring_core.js')
+          source = core_path.read_text()
+          old = '''  async function getImageBlob(imageId) {
+    if (!imageId) return null;
+    const db = await openImageDb();
+    const tx = db.transaction(IMAGE_STORE_NAME, 'readonly');
+    const store = tx.objectStore(IMAGE_STORE_NAME);
+    const result = await requestToPromise(store.get(imageId));
+    return result || null;
+  }
+'''
+          new = '''  // Image-heavy game pages can ask for dozens of portraits in the same render
+  // turn. Keep the public single-image API, but issue those reads through one
+  // shared readonly transaction instead of creating one transaction per image.
+  const pendingImageBlobReads = new Map();
+  let imageBlobReadFlushScheduled = false;
+
+  function flushImageBlobReadBatch() {
+    imageBlobReadFlushScheduled = false;
+    if (!pendingImageBlobReads.size) return;
+
+    const batch = Array.from(pendingImageBlobReads.entries());
+    pendingImageBlobReads.clear();
+
+    openImageDb().then((db) => {
+      let store;
+      try {
+        const tx = db.transaction(IMAGE_STORE_NAME, 'readonly');
+        store = tx.objectStore(IMAGE_STORE_NAME);
+      } catch (error) {
+        for (const [, waiters] of batch) {
+          for (const waiter of waiters) waiter.reject(error);
+        }
+        return;
+      }
+
+      for (const [imageId, waiters] of batch) {
+        let request;
+        try {
+          request = store.get(imageId);
+        } catch (error) {
+          for (const waiter of waiters) waiter.reject(error);
+          continue;
+        }
+
+        request.onsuccess = () => {
+          const result = request.result || null;
+          for (const waiter of waiters) waiter.resolve(result);
+        };
+        request.onerror = () => {
+          const error = request.error || new Error(`Failed to read image blob: ${imageId}`);
+          for (const waiter of waiters) waiter.reject(error);
+        };
+      }
+    }).catch((error) => {
+      for (const [, waiters] of batch) {
+        for (const waiter of waiters) waiter.reject(error);
+      }
+    });
+  }
+
+  function scheduleImageBlobReadFlush() {
+    if (imageBlobReadFlushScheduled) return;
+    imageBlobReadFlushScheduled = true;
+    if (typeof queueMicrotask === 'function') queueMicrotask(flushImageBlobReadBatch);
+    else Promise.resolve().then(flushImageBlobReadBatch);
+  }
+
+  async function getImageBlob(imageId) {
+    if (!imageId) return null;
+    return new Promise((resolve, reject) => {
+      const waiters = pendingImageBlobReads.get(imageId);
+      if (waiters) waiters.push({ resolve, reject });
+      else pendingImageBlobReads.set(imageId, [{ resolve, reject }]);
+      scheduleImageBlobReadFlush();
+    });
+  }
+'''
+          count = source.count(old)
+          if count != 1:
+              raise SystemExit(f'Expected exactly one getImageBlob block, found {count}')
+          core_path.write_text(source.replace(old, new, 1))
+
+          test_path = Path('tests/step3f_image_read_batching.test.js')
+          test_path.write_text(r'''const test = require('node:test');
+const assert = require('node:assert/strict');
+
+function makeStorage() {
+  const values = new Map();
+  return {
+    getItem: (key) => values.has(String(key)) ? values.get(String(key)) : null,
+    setItem: (key, value) => { values.set(String(key), String(value)); },
+    removeItem: (key) => { values.delete(String(key)); },
+    key: (index) => Array.from(values.keys())[index] || null,
+    get length() { return values.size; }
+  };
+}
+
+function installFakeIndexedDb(records) {
+  let transactionCount = 0;
+  const db = {
+    transaction(storeName, mode) {
+      assert.equal(storeName, 'images');
+      assert.equal(mode, 'readonly');
+      transactionCount += 1;
+      return {
+        objectStore(name) {
+          assert.equal(name, 'images');
+          return {
+            get(key) {
+              const request = { result: undefined, error: null, onsuccess: null, onerror: null };
+              queueMicrotask(() => {
+                request.result = records.get(key);
+                request.onsuccess?.();
+              });
+              return request;
+            }
+          };
+        }
+      };
+    }
+  };
+
+  global.indexedDB = {
+    open(name, version) {
+      assert.equal(name, 'taskpoints');
+      assert.equal(version, 1);
+      const request = { result: null, error: null, onsuccess: null, onerror: null, onupgradeneeded: null };
+      queueMicrotask(() => {
+        request.result = db;
+        request.onsuccess?.();
+      });
+      return request;
+    }
+  };
+
+  return { get transactionCount() { return transactionCount; } };
+}
+
+global.window = global;
+global.localStorage = makeStorage();
+global.sessionStorage = makeStorage();
+const records = new Map(Array.from({ length: 120 }, (_, index) => [`img-${index}`, { id: `blob-${index}` }]));
+const idbStats = installFakeIndexedDb(records);
+require('../scoring_core.js');
+const core = global.TaskPointsCore;
+
+test('same-turn image reads share one IndexedDB readonly transaction', async () => {
+  const results = await Promise.all(Array.from({ length: 100 }, (_, index) => core.getImageBlob(`img-${index}`)));
+  assert.equal(idbStats.transactionCount, 1);
+  assert.equal(results.length, 100);
+  assert.equal(results[0].id, 'blob-0');
+  assert.equal(results[99].id, 'blob-99');
+});
+
+test('duplicate same-turn image reads coalesce without changing returned values', async () => {
+  const before = idbStats.transactionCount;
+  const [a, b, c, missing] = await Promise.all([
+    core.getImageBlob('img-5'),
+    core.getImageBlob('img-5'),
+    core.getImageBlob('img-5'),
+    core.getImageBlob('missing')
+  ]);
+  assert.equal(idbStats.transactionCount, before + 1);
+  assert.equal(a.id, 'blob-5');
+  assert.equal(b, a);
+  assert.equal(c, a);
+  assert.equal(missing, null);
+});
+
+test('a later image-read wave gets a fresh transaction and empty ids stay free', async () => {
+  const before = idbStats.transactionCount;
+  assert.equal(await core.getImageBlob(''), null);
+  assert.equal(idbStats.transactionCount, before);
+  const value = await core.getImageBlob('img-119');
+  assert.equal(value.id, 'blob-119');
+  assert.equal(idbStats.transactionCount, before + 1);
+});
+''')
+          PY
+
+      - name: Syntax check
+        run: node --check scoring_core.js
+
+      - name: Focused tests
+        run: |
+          node --test \
+            tests/step3f_image_read_batching.test.js \
+            tests/storage_image_cleanup.test.js \
+            tests/storage_season_image_reference_repair.test.js \
+            tests/tournament_mobile_image_hydration.test.js \
+            tests/player_photo_frame_override.test.js \
+            tests/step3e_startup_storage.test.js \
+            tests/step3e_toolbar_maintenance_quiet.test.js
+
+      - name: Commit tested patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scoring_core.js tests/step3f_image_read_batching.test.js
+          git diff --cached --check
+          git commit -m "Batch portrait reads into shared IndexedDB transactions"
+          git push origin HEAD:agent/step3f-image-batching
