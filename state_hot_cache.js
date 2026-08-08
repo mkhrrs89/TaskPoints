@@ -34,6 +34,11 @@
     catch (_) { return ''; }
   }
 
+  function authoritativeStoragePresent() {
+    try { return storage.getItem(STORAGE_KEY) !== null; }
+    catch (_) { return false; }
+  }
+
   function revisionToken() {
     return `${generation}|${readSmall(REVISION_KEY)}`;
   }
@@ -81,7 +86,9 @@
 
       storedStateMisses += 1;
       const result = originalReadStoredState.apply(core, args);
-      const snapshot = cloneResult(result);
+      const explicitFallback = args.length > 1 ? args[1] : undefined;
+      const returnedExplicitFallback = args.length > 1 && result === explicitFallback;
+      const snapshot = returnedExplicitFallback || !authoritativeStoragePresent() ? null : cloneResult(result);
       if (snapshot !== null) {
         authoritativeReadCache = {
           token: revisionToken(),
