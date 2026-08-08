@@ -115,7 +115,6 @@
   // operations remain immediate.
   [
     'restorePhase4CommittedPrimary',
-    'queuePhase4PrimaryWrite',
     'readPhase3ShadowSnapshot',
     'refreshPhase3ReadCache',
     'warmPhase4PrimaryCache',
