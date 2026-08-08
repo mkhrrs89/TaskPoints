@@ -1,7 +1,21 @@
-name: step3h-smoke
+name: step3h-patch
 'on': [push]
+permissions:
+  contents: write
 jobs:
-  smoke:
+  patch:
     runs-on: ubuntu-latest
     steps:
-      - run: echo ok
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/step3h-upset-reconcile-quiet
+      - run: node .github/step3h_patch.js
+      - run: node --check season_series_upset_notifications.js
+      - run: node --test tests/step3h_upset_reconcile_quiet.test.js
+      - run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add season_series_upset_notifications.js tests/step3h_upset_reconcile_quiet.test.js
+          git rm .github/step3h_patch.js .github/workflows/step3h-patch.yml
+          git commit -m 'Defer season upset reconciliation until quiet'
+          git push origin HEAD:agent/step3h-upset-reconcile-quiet
