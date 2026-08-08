@@ -9,6 +9,7 @@ const IDLE = fs.readFileSync(path.join(ROOT, 'storage_maintenance_idle.js'), 'ut
 const PHASE2 = fs.readFileSync(path.join(ROOT, 'phase2_dual_write.js'), 'utf8');
 const PHASE3_READ = fs.readFileSync(path.join(ROOT, 'phase3_read_path.js'), 'utf8');
 const PHASE3_NAV = fs.readFileSync(path.join(ROOT, 'phase3_navigation_cache.js'), 'utf8');
+const PHASE4_COORD = fs.readFileSync(path.join(ROOT, 'phase4_storage_coordinator.js'), 'utf8');
 const PHASE4_READ = fs.readFileSync(path.join(ROOT, 'phase4_primary_read_path.js'), 'utf8');
 const YOU_ALIAS = fs.readFileSync(path.join(ROOT, 'you_score_alias_alignment.js'), 'utf8');
 
@@ -129,6 +130,35 @@ test('YOU alias startup repair compares normalized runtime state rather than com
   assert.equal(core.YouScoreAliasAlignment.repairPersistedState().changed, false);
 });
 
+test('Phase 4 authoritative storage hook registers mirror work behind the shared quiet gate', () => {
+  const storageKey = 'taskpoints_v1';
+  const modeKey = 'taskpoints_phase4_storage_mode_v1';
+  const localStorage = new FakeStorage({
+    [storageKey]: JSON.stringify({ tasks: [{ id: 'before' }] }),
+    [modeKey]: 'indexeddb_primary'
+  });
+  let gateCalls = 0;
+  const core = {
+    STORAGE_KEY: storageKey,
+    SHADOW_MIGRATION_DB_NAME: 'taskpoints_test_shadow',
+    SHADOW_MIGRATION_DB_VERSION: 1,
+    readPendingHabitDeltas() { return []; },
+    getPendingShadowDualWriteCount() { return 0; },
+    whenStorageMaintenanceQuiet() {
+      gateCalls += 1;
+      return new Promise(() => {});
+    }
+  };
+  const { context } = basicContext(core, localStorage);
+  vm.runInNewContext(PHASE4_COORD, context, { filename: 'phase4_storage_coordinator.js' });
+
+  localStorage.setItem(storageKey, JSON.stringify({ tasks: [{ id: 'after' }] }));
+
+  assert.equal(gateCalls, 1, 'the private storage hook must use the shared quiet gate');
+  assert.equal(core.getPendingPhase4WriteCount(), 1, 'deferred mirror work must still register as pending immediately');
+  assert.equal(core.getPhase4StorageStatus().pendingWrites, 1);
+});
+
 test('Phase 2/3/4 automatic cache maintenance no longer uses startup microtask bypasses', () => {
   assert.match(PHASE2, /whenStorageMaintenanceQuiet/);
   assert.match(PHASE2, /phase2_dual_write_coalesced/);
@@ -136,6 +166,10 @@ test('Phase 2/3/4 automatic cache maintenance no longer uses startup microtask b
   assert.doesNotMatch(PHASE3_READ, /global\.queueMicrotask/);
   assert.match(PHASE3_NAV, /whenStorageMaintenanceQuiet/);
   assert.doesNotMatch(PHASE3_NAV, /global\.queueMicrotask/);
+  assert.match(PHASE4_COORD, /scheduleBackgroundWrite/);
+  assert.match(PHASE4_COORD, /whenStorageMaintenanceQuiet/);
+  assert.match(PHASE4_COORD, /function flushWrites\(\)[\s\S]*backgroundWriteScheduled[\s\S]*queueWrite/);
   assert.match(PHASE4_READ, /whenStorageMaintenanceQuiet/);
   assert.doesNotMatch(PHASE4_READ, /global\.queueMicrotask/);
+  assert.doesNotMatch(IDLE, /'queuePhase4PrimaryWrite'/);
 });
