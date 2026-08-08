@@ -243,3 +243,130 @@
     startupSaveSkips
   });
 })(typeof window !== 'undefined' ? window : globalThis);
+
+;(function installTaskPointsImageReadBatching(global) {
+  'use strict';
+
+  const core = global.TaskPointsCore;
+  const originalGetImageBlob = core?.getImageBlob;
+  if (!core || core.__imageReadBatchingInstalled || typeof originalGetImageBlob !== 'function') return;
+  if (!global.indexedDB?.open) return;
+
+  const DB_NAME = 'taskpoints';
+  const STORE_NAME = 'images';
+  const pendingReads = new Map();
+  let flushScheduled = false;
+  let dbPromise = null;
+  let batches = 0;
+  let transactions = 0;
+  let requestedReads = 0;
+  let distinctReads = 0;
+  let coalescedReads = 0;
+  let lastBatchSize = 0;
+  let maxBatchSize = 0;
+
+  function openDb() {
+    if (dbPromise) return dbPromise;
+    dbPromise = new Promise((resolve, reject) => {
+      const request = global.indexedDB.open(DB_NAME, 1);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME);
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => {
+        dbPromise = null;
+        reject(request.error || new Error('Failed to open TaskPoints image database.'));
+      };
+    });
+    return dbPromise;
+  }
+
+  function settleFromOriginal(imageId, waiters) {
+    Promise.resolve()
+      .then(() => originalGetImageBlob.call(core, imageId))
+      .then(
+        (value) => waiters.forEach((waiter) => waiter.resolve(value)),
+        (error) => waiters.forEach((waiter) => waiter.reject(error))
+      );
+  }
+
+  function fallbackBatch(batch) {
+    for (const [imageId, waiters] of batch) settleFromOriginal(imageId, waiters);
+  }
+
+  function flushBatch() {
+    flushScheduled = false;
+    if (!pendingReads.size) return;
+
+    const batch = Array.from(pendingReads.entries());
+    pendingReads.clear();
+    batches += 1;
+    lastBatchSize = batch.length;
+    maxBatchSize = Math.max(maxBatchSize, batch.length);
+
+    openDb().then((db) => {
+      let store;
+      try {
+        const tx = db.transaction(STORE_NAME, 'readonly');
+        transactions += 1;
+        store = tx.objectStore(STORE_NAME);
+      } catch (_) {
+        fallbackBatch(batch);
+        return;
+      }
+
+      for (const [imageId, waiters] of batch) {
+        let request;
+        try {
+          request = store.get(imageId);
+        } catch (_) {
+          settleFromOriginal(imageId, waiters);
+          continue;
+        }
+
+        request.onsuccess = () => {
+          const value = request.result || null;
+          waiters.forEach((waiter) => waiter.resolve(value));
+        };
+        request.onerror = () => settleFromOriginal(imageId, waiters);
+      }
+    }).catch(() => fallbackBatch(batch));
+  }
+
+  function scheduleFlush() {
+    if (flushScheduled) return;
+    flushScheduled = true;
+    if (typeof global.queueMicrotask === 'function') global.queueMicrotask(flushBatch);
+    else Promise.resolve().then(flushBatch);
+  }
+
+  core.getImageBlob = function taskPointsBatchedGetImageBlob(imageId) {
+    if (!imageId) return Promise.resolve(null);
+    requestedReads += 1;
+    return new Promise((resolve, reject) => {
+      const existing = pendingReads.get(imageId);
+      if (existing) {
+        coalescedReads += 1;
+        existing.push({ resolve, reject });
+      } else {
+        distinctReads += 1;
+        pendingReads.set(imageId, [{ resolve, reject }]);
+      }
+      scheduleFlush();
+    });
+  };
+
+  core.getImageReadBatchingStatus = () => ({
+    installed: true,
+    batches,
+    transactions,
+    requestedReads,
+    distinctReads,
+    coalescedReads,
+    lastBatchSize,
+    maxBatchSize,
+    pendingDistinctReads: pendingReads.size
+  });
+  core.__imageReadBatchingInstalled = true;
+})(typeof window !== 'undefined' ? window : globalThis);
