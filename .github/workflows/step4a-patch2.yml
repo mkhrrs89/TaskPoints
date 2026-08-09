@@ -1,0 +1,53 @@
+name: step4a-patch2
+on:
+  push:
+    branches: [agent/step4a-players-render-trace]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/step4a-players-render-trace
+      - name: Add Players render phase tracing
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('game.html')
+          s = p.read_text()
+          def rep(old, new, label):
+              global s
+              if s.count(old) != 1:
+                  raise SystemExit(f'{label}: expected one target, found {s.count(old)}')
+              s = s.replace(old, new, 1)
+
+          rep('''async function renderPlayers() {\n  const container = $("playersList");\n  if (!container) return;\n\n  updateSortSelectUI();''', '''function beginPlayersPerfSpan(name, detail = {}) {\n  const span = window.TaskPointsPerf?.span;\n  return typeof span === "function" ? span(name, detail) : (() => {});\n}\n\nasync function renderPlayers() {\n  const container = $("playersList");\n  if (!container) return;\n\n  const finishRenderPerf = beginPlayersPerfSpan("game.renderPlayers", {\n    players: Array.isArray(state.players) ? state.players.length : 0,\n    completions: Array.isArray(state.completions) ? state.completions.length : 0,\n    matchups: Array.isArray(state.matchups) ? state.matchups.length : 0,\n    gameHistory: Array.isArray(state.gameHistory) ? state.gameHistory.length : 0\n  });\n\n  updateSortSelectUI();''', 'render start')
+
+          rep('''  // --- compute your real TaskPoints score for today ---\n  const todayPoints = computeTodayPoints();\n  const youStats = calcYouStats();\n  const historyStats = buildPlayerHistoryStats();''', '''  // --- compute your real TaskPoints score for today ---\n  const finishTodayPointsPerf = beginPlayersPerfSpan("game.renderPlayers.computeTodayPoints");\n  const todayPoints = computeTodayPoints();\n  finishTodayPointsPerf();\n\n  const finishYouStatsPerf = beginPlayersPerfSpan("game.renderPlayers.calcYouStats");\n  const youStats = calcYouStats();\n  finishYouStatsPerf();\n\n  const finishHistoryStatsPerf = beginPlayersPerfSpan("game.renderPlayers.buildPlayerHistoryStats");\n  const historyStats = buildPlayerHistoryStats();\n  finishHistoryStatsPerf({ playerStats: historyStats?.size || 0 });''', 'stats')
+
+          rep('''const canonicalRankingRows = window.TaskPointsCore?.computeCanonicalRankings\n  ? TaskPointsCore.computeCanonicalRankings(state)\n  : [];''', '''const finishCanonicalRankingsPerf = beginPlayersPerfSpan("game.renderPlayers.computeCanonicalRankings");\nconst canonicalRankingRows = window.TaskPointsCore?.computeCanonicalRankings\n  ? TaskPointsCore.computeCanonicalRankings(state)\n  : [];\nfinishCanonicalRankingsPerf({ rows: canonicalRankingRows.length });''', 'rankings')
+
+          rep('''  const sortedPlayers = players.slice().sort(comparePlayers);\n\n  const appendPlayerCard = (p, targetContainer) => {''', '''  const finishSortPerf = beginPlayersPerfSpan("game.renderPlayers.sort");\n  const sortedPlayers = players.slice().sort(comparePlayers);\n  finishSortPerf({ players: sortedPlayers.length });\n\n  const appendPlayerCard = (p, targetContainer) => {''', 'sort')
+
+          rep('''  if (groupActivePlayers) {\n    const activePlayers = sortedPlayers.filter((p) => (p.isYou ? true : isPlayerActive(p)));''', '''  const finishDomBuildPerf = beginPlayersPerfSpan("game.renderPlayers.domBuild", {\n    players: sortedPlayers.length,\n    grouped: groupActivePlayers,\n    viewMode\n  });\n\n  if (groupActivePlayers) {\n    const activePlayers = sortedPlayers.filter((p) => (p.isYou ? true : isPlayerActive(p)));''', 'dom start')
+
+          rep('''  } else {\n    sortedPlayers.forEach((p) => appendPlayerCard(p, container));\n  }\n\n  container.querySelectorAll("button[data-act]").forEach(btn => {\n    btn.addEventListener("click", handlePlayerAction);\n  });\n  wirePlayerColorEditors(container);\n  syncPlayerEditorModalState();\n\n}''', '''  } else {\n    sortedPlayers.forEach((p) => appendPlayerCard(p, container));\n  }\n  finishDomBuildPerf({ childCount: container.children.length });\n\n  const finishWirePerf = beginPlayersPerfSpan("game.renderPlayers.wireControls");\n  container.querySelectorAll("button[data-act]").forEach(btn => {\n    btn.addEventListener("click", handlePlayerAction);\n  });\n  wirePlayerColorEditors(container);\n  syncPlayerEditorModalState();\n  finishWirePerf();\n  finishRenderPerf({ players: sortedPlayers.length, unresolvedImages: unresolvedImageIds.length });\n\n}''', 'dom end')
+
+          p.write_text(s)
+          PY
+          grep -q 'game.renderPlayers.computeCanonicalRankings' game.html
+          grep -q 'game.renderPlayers.domBuild' game.html
+          git diff --check
+      - name: Commit final Step 4A diagnostic patch
+        shell: bash
+        run: |
+          rm -f .github/workflows/step4a-patch.yml .github/workflows/step4a-patch2.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add game.html .github/workflows/step4a-patch.yml .github/workflows/step4a-patch2.yml
+          git commit -m 'Trace Players initial render phases'
+          git push origin HEAD:agent/step4a-players-render-trace
