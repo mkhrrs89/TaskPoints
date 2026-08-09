@@ -1537,12 +1537,35 @@ function setHTML(id, html){
     setModalOpen(false);
   }
 
+  function beginGameHubPerfSpan(name, detail = {}){
+    const span = window.TaskPointsPerf?.span;
+    return typeof span === 'function' ? span(name, detail) : (() => {});
+  }
+
   function renderGameHubFromState(state, { allowPersist = true } = {}){
+    const finishAll = beginGameHubPerfSpan('gamehub.renderAllSections', {
+      players: Array.isArray(state?.players) ? state.players.length : 0,
+      completions: Array.isArray(state?.completions) ? state.completions.length : 0,
+      matchups: Array.isArray(state?.matchups) ? state.matchups.length : 0,
+      gameHistory: Array.isArray(state?.gameHistory) ? state.gameHistory.length : 0,
+      allowPersist
+    });
+    const finishStandings = beginGameHubPerfSpan('gamehub.renderStandings');
     const { standings } = renderStandings(state);
+    finishStandings({ rows: standings?.length || 0 });
+    const finishBestWorst = beginGameHubPerfSpan('gamehub.renderBestWorstStats');
     renderBestWorstStats(state, standings);
+    finishBestWorst();
+    const finishRatings = beginGameHubPerfSpan('gamehub.renderRatingsLeaderboards');
     renderRatingsLeaderboards(state, standings);
+    finishRatings();
+    const finishSurprises = beginGameHubPerfSpan('gamehub.renderSurprisesBusts');
     renderSurprisesBusts(state, standings);
+    finishSurprises();
+    const finishMatchup = beginGameHubPerfSpan('gamehub.renderTodaysMatchup');
     renderTodaysMatchup(state, standings, { allowPersist });
+    finishMatchup();
+    finishAll({ rows: standings?.length || 0 });
   }
 
   function renderAll(){
@@ -1606,9 +1629,12 @@ function setHTML(id, html){
   function runGameHubBoot(){
     if (gameHubBootStarted || gameHubBootFinished) return;
     gameHubBootStarted = true;
+    const finishBoot = beginGameHubPerfSpan('gamehub.deferredBoot');
 
     // Boot must remain read-only to avoid unintended persistence/pruning on mobile.
+    const finishBootSync = beginGameHubPerfSpan('gamehub.deferredBoot.syncStateForDisplayOnly');
     const bootSync = syncStateForDisplayOnly(currentState || loadState(), { phase: 'deferred-boot' });
+    finishBootSync({ changed: !!bootSync.changed });
     const state = bootSync.state;
     if (window.TP_DEBUG_PERF) {
       console.debug('[TP_DEBUG_PERF][gamehub] boot sync result', { wouldMutateState: bootSync.changed });
@@ -1617,6 +1643,7 @@ function setHTML(id, html){
     currentState = state;
     gameHubBootFinished = true;
     renderGameHubFromState(state, { allowPersist: false });
+    finishBoot({ changed: !!bootSync.changed });
   }
 
   function scheduleGameHubBoot(){
@@ -1634,7 +1661,13 @@ function setHTML(id, html){
   }
 
   function renderInitialGameHub(){
-    const initialSync = syncStateForDisplayOnly(loadState(), { phase: 'initial-boot-render' });
+    const finishInitial = beginGameHubPerfSpan('gamehub.initialRender');
+    const finishLoad = beginGameHubPerfSpan('gamehub.initialRender.loadState');
+    const initialLoadedState = loadState();
+    finishLoad();
+    const finishInitialSync = beginGameHubPerfSpan('gamehub.initialRender.syncStateForDisplayOnly');
+    const initialSync = syncStateForDisplayOnly(initialLoadedState, { phase: 'initial-boot-render' });
+    finishInitialSync({ changed: !!initialSync.changed });
     const state = initialSync.state;
     if (initialSync.changed) {
       debugBootReadOnlySkip('saveState', { phase: 'initial-boot-render', reason: 'derived sync changes' });
@@ -1642,6 +1675,7 @@ function setHTML(id, html){
     currentState = state;
     renderGameHubFromState(state, { allowPersist: false });
     scheduleGameHubBoot();
+    finishInitial({ changed: !!initialSync.changed });
   }
 
   $('refreshGameHub')?.addEventListener('click', () => scheduleRender(renderAll));
