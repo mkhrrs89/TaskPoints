@@ -18,6 +18,9 @@
 
   let saving = false;
   let statAttempts = 0;
+  const LOAD_REPAIR_PERSIST_DELAY_MS = 14000;
+  let loadRepairPersistScheduled = false;
+  let pendingLoadRepairOptions = null;
   const copy = (value) => {
     if (value == null) return value;
     if (typeof g.structuredClone === 'function') {
@@ -275,13 +278,70 @@
     return fixed.changed ? { ...result, state: fixed.state, changed: true, integrityRepair: fixed.diagnostics } : result;
   };
 
+  function markIntegrityPerf(name, detail = {}) {
+    try { g.TaskPointsPerf?.mark?.(name, detail); } catch (_) {}
+  }
+
+  function persistFreshLoadRepair(options = {}) {
+    if (!original.loadAppState) return false;
+    let loaded;
+    try {
+      loaded = original.loadAppState({ ...(options || {}), persistSync: false });
+    } catch (_) {
+      return false;
+    }
+    const state = loaded?.state || loaded;
+    if (!state || typeof state !== 'object') return false;
+    const fixed = repair(state, options);
+    if (!fixed.changed) {
+      markIntegrityPerf('seasonIntegrity.loadRepairNoLongerNeeded');
+      return false;
+    }
+    const persistOptions = { ...(options || {}) };
+    delete persistOptions.persistSync;
+    const saved = persist(fixed.state, fixed.diagnostics, persistOptions);
+    markIntegrityPerf('seasonIntegrity.loadRepairPersisted', { saved: Boolean(saved) });
+    return saved;
+  }
+
+  function scheduleLoadRepairPersist(options = {}) {
+    if (options.persistSync === false) return false;
+    pendingLoadRepairOptions = { ...(options || {}) };
+    if (loadRepairPersistScheduled) return true;
+    if (typeof g.setTimeout !== 'function') return false;
+    loadRepairPersistScheduled = true;
+    markIntegrityPerf('seasonIntegrity.loadRepairDeferred', { delayMs: LOAD_REPAIR_PERSIST_DELAY_MS });
+
+    const run = () => {
+      const latestOptions = pendingLoadRepairOptions || {};
+      pendingLoadRepairOptions = null;
+      loadRepairPersistScheduled = false;
+      return persistFreshLoadRepair(latestOptions);
+    };
+    const enterQuietGate = () => {
+      const gate = c.whenStorageMaintenanceQuiet;
+      if (typeof gate === 'function') {
+        Promise.resolve(gate(run, { reason: 'season_result_integrity_load_persist' }))
+          .catch(() => { loadRepairPersistScheduled = false; });
+        return;
+      }
+      if (typeof g.requestIdleCallback === 'function') {
+        g.requestIdleCallback(() => run(), { timeout: 5000 });
+        return;
+      }
+      g.setTimeout(run, 1000);
+    };
+    g.setTimeout(enterQuietGate, LOAD_REPAIR_PERSIST_DELAY_MS);
+    return true;
+  }
+
   if (original.loadAppState) c.loadAppState = function loadFixed(options = {}) {
     const loaded = original.loadAppState(options);
     const state = loaded?.state || loaded;
     if (!state || typeof state !== 'object') return loaded;
     const fixed = repair(state, options);
     if (!fixed.changed) return loaded;
-    persist(fixed.state, fixed.diagnostics, options);
+    scheduleLoadRepairPersist(options);
     return loaded?.state ? { ...loaded, state: fixed.state, integrityRepair: fixed.diagnostics } : fixed.state;
   };
   if (original.saveStateSnapshot) c.saveStateSnapshot = function saveFixed(state, options = {}) {
