@@ -22,6 +22,9 @@
   let writeLoopRunning = false;
   let requestedWriteRevision = 0;
   let latestWriteOptions = {};
+  let backgroundWriteScheduled = false;
+  let backgroundWriteGatePromise = null;
+  let pendingBackgroundOptions = {};
   const MAX_RETRYABLE_ATTEMPTS = 2;
   const RETRY_BASE_DELAY_MS = 250;
   const TRANSACTION_TIMEOUT_MS = 20000;
@@ -140,7 +143,12 @@
   function setMode(mode) {
     const next = MODE_SET.has(mode) ? mode : 'off';
     try { global.localStorage?.setItem?.(MODE_KEY, next); } catch (_) {}
-    if (next === 'off') clearCaches();
+    if (next === 'off') {
+      clearCaches();
+      backgroundWriteScheduled = false;
+      backgroundWriteGatePromise = null;
+      pendingBackgroundOptions = {};
+    }
     writeDiagnostics({ configuredMode: next, effectiveSource: 'localStorage', lastFallbackReason: null });
     return next;
   }
@@ -206,7 +214,7 @@
       request.onupgradeneeded = () => {
         const db = request.result;
         [...ARRAY_STORES, 'collections'].forEach((name) => {
-if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: 'key' });
+          if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: 'key' });
         });
         if (!db.objectStoreNames.contains('values')) db.createObjectStore('values', { keyPath: 'field' });
         if (!db.objectStoreNames.contains('metadata')) db.createObjectStore('metadata', { keyPath: 'id' });
@@ -443,7 +451,7 @@ if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: '
     if (getMode() === 'off') return;
     if (journalCount() > 0) return;
     if (safeGet(core.STORAGE_KEY) === null) return;
-    queueWrite({ reason: 'habit_journal_cleared' });
+    scheduleBackgroundWrite({ reason: 'habit_journal_cleared' });
   }
 
   async function performWrite(options = {}) {
@@ -569,15 +577,15 @@ if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: '
         const writeSequence = nextSequence();
         writeDiagnostics({ latestQueuedSequence: writeSequence, pendingWrites: 1 });
         const result = await performWrite({
-...latestWriteOptions,
-sequence: writeSequence,
-retryAttempt
+          ...latestWriteOptions,
+          sequence: writeSequence,
+          retryAttempt
         });
         const reason = result?.lastFallbackReason || null;
         if (isRetryableWriteReason(reason) && retryAttempt < MAX_RETRYABLE_ATTEMPTS && getMode() !== 'off') {
-retryAttempt += 1;
-await delay(RETRY_BASE_DELAY_MS * retryAttempt);
-continue;
+          retryAttempt += 1;
+          await delay(RETRY_BASE_DELAY_MS * retryAttempt);
+          continue;
         }
         retryAttempt = 0;
         if (requestedWriteRevision === targetRevision) break;
@@ -585,7 +593,7 @@ continue;
     } finally {
       pendingCount = 0;
       writeLoopRunning = false;
-      writeDiagnostics({ pendingWrites: 0 });
+      writeDiagnostics({ pendingWrites: backgroundWriteScheduled ? 1 : 0 });
     }
   }
 
@@ -603,15 +611,84 @@ continue;
       .catch((error) => {
         const previous = readDiagnostics();
         writeDiagnostics({
-effectiveSource: 'localStorage',
-lastFallbackAt: nowIso(),
-lastFallbackReason: normalizedErrorReason(error),
-verificationFailuresTotal: (Number(previous.verificationFailuresTotal) || 0) + 1
+          effectiveSource: 'localStorage',
+          lastFallbackAt: nowIso(),
+          lastFallbackReason: normalizedErrorReason(error),
+          verificationFailuresTotal: (Number(previous.verificationFailuresTotal) || 0) + 1
         });
       });
     return queueTail;
   }
-  function flushWrites() { return queueTail.catch(() => undefined); }
+
+  function backgroundReason(options = {}) {
+    return String(options.reason || options.source || options.action || options.caller || 'authoritative_storage_write');
+  }
+
+  function scheduleBackgroundWrite(options = {}) {
+    if (getMode() === 'off' && options.force !== true) return Promise.resolve({ status: 'off' });
+    pendingBackgroundOptions = { ...pendingBackgroundOptions, ...options };
+    if (backgroundWriteScheduled) return backgroundWriteGatePromise || Promise.resolve(true);
+
+    backgroundWriteScheduled = true;
+    writeDiagnostics({ pendingWrites: pendingCount + 1 });
+
+    const run = () => {
+      if (!backgroundWriteScheduled) return true;
+      const queuedOptions = pendingBackgroundOptions;
+      backgroundWriteScheduled = false;
+      backgroundWriteGatePromise = null;
+      pendingBackgroundOptions = {};
+      return queueWrite(queuedOptions);
+    };
+    const gateOptions = { reason: `phase4_primary_write_${backgroundReason(options)}` };
+    const startThroughGate = () => {
+      const gate = core.whenStorageMaintenanceQuiet;
+      return typeof gate === 'function' ? gate(run, gateOptions) : run();
+    };
+
+    if (typeof core.whenStorageMaintenanceQuiet === 'function') {
+      backgroundWriteGatePromise = Promise.resolve(startThroughGate());
+    } else if (typeof global.setTimeout === 'function') {
+      backgroundWriteGatePromise = new Promise((resolve) => global.setTimeout(resolve, 0))
+        .then(startThroughGate);
+    } else {
+      backgroundWriteGatePromise = Promise.resolve().then(run);
+    }
+
+    backgroundWriteGatePromise = backgroundWriteGatePromise.catch((error) => {
+      backgroundWriteScheduled = false;
+      backgroundWriteGatePromise = null;
+      pendingBackgroundOptions = {};
+      const previous = readDiagnostics();
+      writeDiagnostics({
+        pendingWrites: pendingCount,
+        lastFallbackAt: nowIso(),
+        lastFallbackReason: normalizedErrorReason(error),
+        deferredWritesTotal: (Number(previous.deferredWritesTotal) || 0) + 1
+      });
+      return false;
+    });
+    return backgroundWriteGatePromise;
+  }
+
+  function flushWrites() {
+    if (backgroundWriteScheduled) {
+      const queuedOptions = pendingBackgroundOptions;
+      backgroundWriteScheduled = false;
+      backgroundWriteGatePromise = null;
+      pendingBackgroundOptions = {};
+      return Promise.resolve(queueWrite({
+        ...queuedOptions,
+        reason: queuedOptions.reason || 'flush_pending_background'
+      })).then(() => queueTail).catch(() => queueTail);
+    }
+    return queueTail.catch(() => undefined);
+  }
+
+  function pendingWriteCount() {
+    return pendingCount + (backgroundWriteScheduled ? 1 : 0);
+  }
+
   function getStatus() {
     const diagnostics = readDiagnostics();
     return {
@@ -621,7 +698,7 @@ verificationFailuresTotal: (Number(previous.verificationFailuresTotal) || 0) + 1
       effectiveSource: diagnostics.effectiveSource || 'localStorage',
       latestQueuedSequence: Number(diagnostics.latestQueuedSequence) || 0,
       latestPassedSequence: Number(diagnostics.latestPassedSequence) || 0,
-      pendingWrites: pendingCount,
+      pendingWrites: pendingWriteCount(),
       lastCandidateWriteAt: diagnostics.lastCandidateWriteAt || null,
       lastVerifiedAt: diagnostics.lastVerifiedAt || null,
       lastFallbackAt: diagnostics.lastFallbackAt || null,
@@ -642,66 +719,78 @@ verificationFailuresTotal: (Number(previous.verificationFailuresTotal) || 0) + 1
   }
 
   function installStorageHooks() {
-  const storage = global.localStorage;
-  if (!storage) return;
+    const storage = global.localStorage;
+    if (!storage) return;
 
-  try {
-    if (!storage.__taskPointsPhase4InstanceHookInstalled && typeof storage.setItem === 'function') {
-      const originalSet = storage.setItem.bind(storage);
-      const originalRemove = typeof storage.removeItem === 'function' ? storage.removeItem.bind(storage) : null;
-      const wrappedSet = function phase4SetItem(key, value) {
-        const result = originalSet(key, value);
-        const normalizedKey = String(key);
-        if (normalizedKey === core.STORAGE_KEY && getMode() !== 'off') queueWrite();
-        else if (normalizedKey === core.PENDING_HABIT_DELTAS_KEY) queueAfterJournalCleared();
+    try {
+      if (!storage.__taskPointsPhase4InstanceHookInstalled && typeof storage.setItem === 'function') {
+        const originalSet = storage.setItem.bind(storage);
+        const originalRemove = typeof storage.removeItem === 'function' ? storage.removeItem.bind(storage) : null;
+        const wrappedSet = function phase4SetItem(key, value) {
+          const result = originalSet(key, value);
+          const normalizedKey = String(key);
+          if (normalizedKey === core.STORAGE_KEY && getMode() !== 'off') {
+            scheduleBackgroundWrite({ reason: 'authoritative_storage_set' });
+          } else if (normalizedKey === core.PENDING_HABIT_DELTAS_KEY) {
+            queueAfterJournalCleared();
+          }
+          return result;
+        };
+        const wrappedRemove = originalRemove ? function phase4RemoveItem(key) {
+          const result = originalRemove(key);
+          const normalizedKey = String(key);
+          if (normalizedKey === core.STORAGE_KEY && getMode() !== 'off') {
+            scheduleBackgroundWrite({ reason: 'authoritative_storage_remove' });
+          } else if (normalizedKey === core.PENDING_HABIT_DELTAS_KEY) {
+            queueAfterJournalCleared();
+          }
+          return result;
+        } : null;
+        storage.setItem = wrappedSet;
+        if (wrappedRemove) storage.removeItem = wrappedRemove;
+        if (storage.setItem === wrappedSet) {
+          Object.defineProperty(storage, '__taskPointsPhase4InstanceHookInstalled', { value: true, configurable: true });
+          return;
+        }
+      }
+    } catch (_) {}
+
+    const StorageCtor = global.Storage;
+    if (!StorageCtor?.prototype?.setItem) return;
+    const prototype = StorageCtor.prototype;
+    if (!prototype.__taskPointsPhase4OriginalSetItem) {
+      const originalSet = prototype.setItem;
+      Object.defineProperty(prototype, '__taskPointsPhase4OriginalSetItem', { value: originalSet, configurable: true });
+      prototype.setItem = function phase4SetItem(key, value) {
+        const result = originalSet.call(this, key, value);
+        if (this === global.localStorage) {
+          const normalizedKey = String(key);
+          if (normalizedKey === core.STORAGE_KEY && getMode() !== 'off') {
+            scheduleBackgroundWrite({ reason: 'authoritative_storage_set' });
+          } else if (normalizedKey === core.PENDING_HABIT_DELTAS_KEY) {
+            queueAfterJournalCleared();
+          }
+        }
         return result;
       };
-      const wrappedRemove = originalRemove ? function phase4RemoveItem(key) {
-        const result = originalRemove(key);
-        const normalizedKey = String(key);
-        if (normalizedKey === core.STORAGE_KEY && getMode() !== 'off') queueWrite();
-        else if (normalizedKey === core.PENDING_HABIT_DELTAS_KEY) queueAfterJournalCleared();
-        return result;
-      } : null;
-      storage.setItem = wrappedSet;
-      if (wrappedRemove) storage.removeItem = wrappedRemove;
-      if (storage.setItem === wrappedSet) {
-        Object.defineProperty(storage, '__taskPointsPhase4InstanceHookInstalled', { value: true, configurable: true });
-        return;
-      }
     }
-  } catch (_) {}
-
-  const StorageCtor = global.Storage;
-  if (!StorageCtor?.prototype?.setItem) return;
-  const prototype = StorageCtor.prototype;
-  if (!prototype.__taskPointsPhase4OriginalSetItem) {
-    const originalSet = prototype.setItem;
-    Object.defineProperty(prototype, '__taskPointsPhase4OriginalSetItem', { value: originalSet, configurable: true });
-    prototype.setItem = function phase4SetItem(key, value) {
-      const result = originalSet.call(this, key, value);
-      if (this === global.localStorage) {
-        const normalizedKey = String(key);
-        if (normalizedKey === core.STORAGE_KEY && getMode() !== 'off') queueWrite();
-        else if (normalizedKey === core.PENDING_HABIT_DELTAS_KEY) queueAfterJournalCleared();
-      }
-      return result;
-    };
+    if (prototype.removeItem && !prototype.__taskPointsPhase4OriginalRemoveItem) {
+      const originalRemove = prototype.removeItem;
+      Object.defineProperty(prototype, '__taskPointsPhase4OriginalRemoveItem', { value: originalRemove, configurable: true });
+      prototype.removeItem = function phase4RemoveItem(key) {
+        const result = originalRemove.call(this, key);
+        if (this === global.localStorage) {
+          const normalizedKey = String(key);
+          if (normalizedKey === core.STORAGE_KEY && getMode() !== 'off') {
+            scheduleBackgroundWrite({ reason: 'authoritative_storage_remove' });
+          } else if (normalizedKey === core.PENDING_HABIT_DELTAS_KEY) {
+            queueAfterJournalCleared();
+          }
+        }
+        return result;
+      };
+    }
   }
-  if (prototype.removeItem && !prototype.__taskPointsPhase4OriginalRemoveItem) {
-    const originalRemove = prototype.removeItem;
-    Object.defineProperty(prototype, '__taskPointsPhase4OriginalRemoveItem', { value: originalRemove, configurable: true });
-    prototype.removeItem = function phase4RemoveItem(key) {
-      const result = originalRemove.call(this, key);
-      if (this === global.localStorage) {
-        const normalizedKey = String(key);
-        if (normalizedKey === core.STORAGE_KEY && getMode() !== 'off') queueWrite();
-        else if (normalizedKey === core.PENDING_HABIT_DELTAS_KEY) queueAfterJournalCleared();
-      }
-      return result;
-    };
-  }
-}
 
   core.PHASE4_STORAGE_MODE_KEY = MODE_KEY;
   core.PHASE4_DIAGNOSTICS_KEY = DIAGNOSTICS_KEY;
@@ -714,7 +803,7 @@ verificationFailuresTotal: (Number(previous.verificationFailuresTotal) || 0) + 1
   core.setPhase4StorageMode = setMode;
   core.queuePhase4PrimaryWrite = queueWrite;
   core.flushPhase4PrimaryWrites = flushWrites;
-  core.getPendingPhase4WriteCount = () => pendingCount;
+  core.getPendingPhase4WriteCount = pendingWriteCount;
   core.getPhase4StorageStatus = getStatus;
   core.clearPhase4Caches = clearCaches;
   core.getPhase4VerifiedPrimaryCache = () => verifiedPrimaryCache;

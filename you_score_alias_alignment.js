@@ -24,8 +24,8 @@
     : null;
 
   let persistingRepair = false;
-
   let homeAliasRepairFallbackTimer = null;
+  let nonHomeAliasRepairScheduled = false;
 
   function isTaskPointsHomePage() {
     const pathname = String(global.location?.pathname || '');
@@ -47,6 +47,35 @@
       } else {
         global.setTimeout?.(() => repairPersistedState(), 14000);
       }
+    }, 0);
+    return true;
+  }
+
+  function scheduleNonHomeAliasRepair(reason = 'background') {
+    if (nonHomeAliasRepairScheduled) return true;
+    nonHomeAliasRepairScheduled = true;
+    const run = () => {
+      nonHomeAliasRepairScheduled = false;
+      return repairPersistedState();
+    };
+    const useGateOrRun = () => {
+      const gate = core.whenStorageMaintenanceQuiet;
+      return typeof gate === 'function'
+        ? gate(run, { reason: `you_score_alias_alignment_${reason}` })
+        : run();
+    };
+
+    const gate = core.whenStorageMaintenanceQuiet;
+    if (typeof gate === 'function') {
+      Promise.resolve(useGateOrRun()).catch(() => { nonHomeAliasRepairScheduled = false; });
+      return true;
+    }
+
+    // The shared gate is appended later in the same combined core script.
+    // Yield one macrotask and re-check it instead of doing a full-state repair
+    // synchronously during bundle evaluation.
+    global.setTimeout?.(() => {
+      Promise.resolve(useGateOrRun()).catch(() => { nonHomeAliasRepairScheduled = false; });
     }, 0);
     return true;
   }
@@ -262,7 +291,14 @@
     try {
       const raw = global.localStorage.getItem(STORAGE_KEY);
       if (!raw) return { changed: false, repairedSides: 0 };
-      const state = core.parseTaskPointsStorageJson?.(raw, null) || JSON.parse(raw);
+      const decoded = core.parseTaskPointsStorageJson?.(raw, null) || JSON.parse(raw);
+      // Stored snapshots intentionally omit redundant score aliases when they
+      // match the canonical score. Normalize before checking for repairs so the
+      // compressor's compact representation is not mistaken for missing data
+      // and rewritten on every page bootstrap.
+      const state = typeof core.normalizeState === 'function'
+        ? core.normalizeState(decoded)
+        : decoded;
       const result = alignYouScoreAliases(state, { currentSeasonOnly: true });
       if (result.changed) persistRepair(result.state, result, options);
       return result;
@@ -298,7 +334,7 @@
       const aligned = alignCurrentSeasonState(state);
       if (!aligned.changed) return loaded;
       if (isTaskPointsHomePage()) scheduleHomeAliasRepair();
-      else persistRepair(aligned.state, aligned, options);
+      else scheduleNonHomeAliasRepair('load_alignment');
       return loaded?.state
         ? { ...loaded, state: aligned.state, youScoreAliasAlignment: aligned }
         : aligned.state;
@@ -349,12 +385,11 @@
   if (isTaskPointsHomePage()) {
     scheduleHomeAliasRepair();
   } else {
-    repairPersistedState();
-    global.setTimeout?.(repairPersistedState, 0);
+    scheduleNonHomeAliasRepair('module_install');
   }
   global.addEventListener?.('pageshow', () => {
     if (isTaskPointsHomePage()) scheduleHomeAliasRepair();
-    else repairPersistedState();
+    else scheduleNonHomeAliasRepair('pageshow');
   });
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

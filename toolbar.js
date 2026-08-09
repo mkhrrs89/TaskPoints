@@ -1386,9 +1386,16 @@ function scheduleTaskPointsToolbarMaintenance() {
   }
 
   if (!isMainPagePathname(window.location.pathname)) {
-    run();
-    return;
+  const gate = window.TaskPointsCore?.whenStorageMaintenanceQuiet;
+  if (typeof gate === 'function') {
+    Promise.resolve(gate(run, { reason: 'toolbar_background_maintenance' }))
+      .catch(() => window.setTimeout(run, 5000));
+  } else {
+    // Preserve eventual maintenance if the shared gate is unavailable.
+    window.setTimeout(run, 5000);
   }
+  return;
+}
 
   if (window.TaskPointsHomeIdleQueue?.enqueue) {
     window.TaskPointsHomeIdleQueue.enqueue('home-toolbar-maintenance', run, { delayMs: 22000 });
