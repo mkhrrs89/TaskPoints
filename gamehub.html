@@ -1641,7 +1641,11 @@ function setHTML(id, html){
     }
     currentState = state;
     renderGameHubFromState(state, { allowPersist: false });
-    scheduleGameHubBoot();
+    // The initial path already completed the same read-only synchronization that
+    // runGameHubBoot() would repeat. Mark boot complete so the dashboard is not
+    // synchronously rebuilt a second time during startup.
+    gameHubBootStarted = true;
+    gameHubBootFinished = true;
   }
 
   $('refreshGameHub')?.addEventListener('click', () => scheduleRender(renderAll));
