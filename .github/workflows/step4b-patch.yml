@@ -1,0 +1,141 @@
+name: step4b-patch
+on:
+  push:
+    branches: [agent/step4b-gamehub-render-trace]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/step4b-gamehub-render-trace
+      - name: Add Game Hub phase tracing
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('gamehub.html')
+          s=p.read_text()
+          def rep(old,new):
+              global s
+              c=s.count(old)
+              if c!=1: raise SystemExit(f'expected 1 match, got {c}: {old[:120]!r}')
+              s=s.replace(old,new,1)
+
+          rep("""  function renderGameHubFromState(state, { allowPersist = true } = {}){
+    const { standings } = renderStandings(state);
+    renderBestWorstStats(state, standings);
+    renderRatingsLeaderboards(state, standings);
+    renderSurprisesBusts(state, standings);
+    renderTodaysMatchup(state, standings, { allowPersist });
+  }""",
+          """  function beginGameHubPerfSpan(name, detail = {}){
+    const span = window.TaskPointsPerf?.span;
+    return typeof span === 'function' ? span(name, detail) : (() => {});
+  }
+
+  function renderGameHubFromState(state, { allowPersist = true } = {}){
+    const finishAll = beginGameHubPerfSpan('gamehub.renderAllSections', {
+      players: Array.isArray(state?.players) ? state.players.length : 0,
+      completions: Array.isArray(state?.completions) ? state.completions.length : 0,
+      matchups: Array.isArray(state?.matchups) ? state.matchups.length : 0,
+      gameHistory: Array.isArray(state?.gameHistory) ? state.gameHistory.length : 0,
+      allowPersist
+    });
+    const finishStandings = beginGameHubPerfSpan('gamehub.renderStandings');
+    const { standings } = renderStandings(state);
+    finishStandings({ rows: standings?.length || 0 });
+    const finishBestWorst = beginGameHubPerfSpan('gamehub.renderBestWorstStats');
+    renderBestWorstStats(state, standings);
+    finishBestWorst();
+    const finishRatings = beginGameHubPerfSpan('gamehub.renderRatingsLeaderboards');
+    renderRatingsLeaderboards(state, standings);
+    finishRatings();
+    const finishSurprises = beginGameHubPerfSpan('gamehub.renderSurprisesBusts');
+    renderSurprisesBusts(state, standings);
+    finishSurprises();
+    const finishMatchup = beginGameHubPerfSpan('gamehub.renderTodaysMatchup');
+    renderTodaysMatchup(state, standings, { allowPersist });
+    finishMatchup();
+    finishAll({ rows: standings?.length || 0 });
+  }""")
+
+          rep("""  function runGameHubBoot(){
+    if (gameHubBootStarted || gameHubBootFinished) return;
+    gameHubBootStarted = true;
+
+    // Boot must remain read-only to avoid unintended persistence/pruning on mobile.
+    const bootSync = syncStateForDisplayOnly(currentState || loadState(), { phase: 'deferred-boot' });""",
+          """  function runGameHubBoot(){
+    if (gameHubBootStarted || gameHubBootFinished) return;
+    gameHubBootStarted = true;
+    const finishBoot = beginGameHubPerfSpan('gamehub.deferredBoot');
+
+    // Boot must remain read-only to avoid unintended persistence/pruning on mobile.
+    const finishBootSync = beginGameHubPerfSpan('gamehub.deferredBoot.syncStateForDisplayOnly');
+    const bootSync = syncStateForDisplayOnly(currentState || loadState(), { phase: 'deferred-boot' });
+    finishBootSync({ changed: !!bootSync.changed });""")
+
+          rep("""    currentState = state;
+    gameHubBootFinished = true;
+    renderGameHubFromState(state, { allowPersist: false });
+  }
+
+  function scheduleGameHubBoot(){""",
+          """    currentState = state;
+    gameHubBootFinished = true;
+    renderGameHubFromState(state, { allowPersist: false });
+    finishBoot({ changed: !!bootSync.changed });
+  }
+
+  function scheduleGameHubBoot(){""")
+
+          rep("""  function renderInitialGameHub(){
+    const initialSync = syncStateForDisplayOnly(loadState(), { phase: 'initial-boot-render' });
+    const state = initialSync.state;""",
+          """  function renderInitialGameHub(){
+    const finishInitial = beginGameHubPerfSpan('gamehub.initialRender');
+    const finishLoad = beginGameHubPerfSpan('gamehub.initialRender.loadState');
+    const initialLoadedState = loadState();
+    finishLoad();
+    const finishInitialSync = beginGameHubPerfSpan('gamehub.initialRender.syncStateForDisplayOnly');
+    const initialSync = syncStateForDisplayOnly(initialLoadedState, { phase: 'initial-boot-render' });
+    finishInitialSync({ changed: !!initialSync.changed });
+    const state = initialSync.state;""")
+
+          rep("""    currentState = state;
+    renderGameHubFromState(state, { allowPersist: false });
+    scheduleGameHubBoot();
+  }
+
+  $('refreshGameHub')?.addEventListener('click', () => scheduleRender(renderAll));""",
+          """    currentState = state;
+    renderGameHubFromState(state, { allowPersist: false });
+    scheduleGameHubBoot();
+    finishInitial({ changed: !!initialSync.changed });
+  }
+
+  $('refreshGameHub')?.addEventListener('click', () => scheduleRender(renderAll));""")
+
+          p.write_text(s)
+          PY
+          python3 - <<'PY'
+          from pathlib import Path
+          s=Path('gamehub.html').read_text()
+          required=['gamehub.initialRender','gamehub.initialRender.loadState','gamehub.initialRender.syncStateForDisplayOnly','gamehub.deferredBoot','gamehub.deferredBoot.syncStateForDisplayOnly','gamehub.renderAllSections','gamehub.renderStandings','gamehub.renderBestWorstStats','gamehub.renderRatingsLeaderboards','gamehub.renderSurprisesBusts','gamehub.renderTodaysMatchup']
+          missing=[x for x in required if x not in s]
+          if missing: raise SystemExit(f'missing markers: {missing}')
+          PY
+          git diff --check
+      - name: Commit final Step 4B diagnostic patch
+        shell: bash
+        run: |
+          rm .github/workflows/step4b-patch.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add gamehub.html .github/workflows/step4b-patch.yml
+          git commit -m 'Trace Game Hub boot and render phases'
+          git push origin HEAD:agent/step4b-gamehub-render-trace
