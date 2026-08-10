@@ -30,6 +30,7 @@ function makeHarness(storageRows = {}) {
   const timers = [];
   const quietRuns = [];
   let saveCalls = 0;
+  let maintenanceQuiet = true;
   const core = {
     STORAGE_KEY,
     parseTaskPointsStorageJson(raw) { return JSON.parse(raw); },
@@ -40,7 +41,8 @@ function makeHarness(storageRows = {}) {
       storage.setItem(STORAGE_KEY, JSON.stringify(candidate));
       return { state: clone(candidate) };
     },
-    whenStorageMaintenanceQuiet(run) { quietRuns.push(run); return Promise.resolve(false); },
+    whenStorageMaintenanceQuiet(run) { quietRuns.push(run); return Promise.resolve(run()); },
+    isStorageMaintenanceQuiet() { return maintenanceQuiet; },
     noteStorageUserInteraction() {},
     clearStateHotCache() {}
   };
@@ -68,7 +70,19 @@ function makeHarness(storageRows = {}) {
   context.globalThis = context;
   vm.createContext(context);
   vm.runInContext(moduleSource, context, { filename: 'task_mutation_journal.js' });
-  return { context, core, storage, timers, quietRuns, getSaveCalls: () => saveCalls };
+  return {
+    context, core, storage, timers, quietRuns,
+    getSaveCalls: () => saveCalls,
+    setMaintenanceQuiet(value) { maintenanceQuiet = Boolean(value); }
+  };
+}
+
+async function runNextTimer(harness) {
+  const callback = harness.timers.shift();
+  assert.ok(callback, 'expected a scheduled timer');
+  callback();
+  await Promise.resolve();
+  await Promise.resolve();
 }
 
 test('worker bundles the task mutation journal before state hot cache', () => {
@@ -131,4 +145,36 @@ test('Home and Log use the tiny journal instead of immediate full-state saves fo
   assert.match(homeSource, /journalTaskMutation\(\{ task: liveTask, completionUpsert: completion \}\)/);
   assert.match(logSource, /completionDeleteId: c\.id \|\| key/);
   assert.match(resetSource, /clearPendingTaskMutations\?\.\(\)/);
+});
+
+
+test('scheduled compaction waits through the additional sustained-quiet grace period', async () => {
+  const h = makeHarness();
+  h.core.journalTaskMutation({ completionDeleteId: 'old' });
+
+  await runNextTimer(h); // module startup-replay timer; compaction is already scheduled
+  await runNextTimer(h); // scheduled compaction -> shared quiet gate -> extra grace timer
+  assert.equal(h.getSaveCalls(), 0, 'shared quiet alone must not start full-state compression');
+  assert.ok(h.timers.length >= 1, 'the extra sustained-quiet timer should be pending');
+
+  await runNextTimer(h); // extra grace -> idle callback -> compaction
+  await Promise.resolve();
+  assert.equal(h.getSaveCalls(), 1);
+  assert.equal(h.storage.getItem(JOURNAL_KEY), null);
+  assert.equal(h.core.getTaskMutationJournalStatus().extraQuietMs, 3000);
+});
+
+test('a user interaction during the extra grace period defers compaction instead of entering compression', async () => {
+  const h = makeHarness();
+  h.core.journalTaskMutation({ completionDeleteId: 'old' });
+
+  await runNextTimer(h); // module startup-replay timer
+  await runNextTimer(h); // shared gate passes; extra quiet timer is now pending
+  h.setMaintenanceQuiet(false);
+  await runNextTimer(h); // extra grace expires while interaction state is not quiet
+  await Promise.resolve();
+
+  assert.equal(h.getSaveCalls(), 0, 'full-state save must yield when quiet was broken');
+  assert.ok(h.storage.getItem(JOURNAL_KEY), 'durable journal must remain pending');
+  assert.equal(h.core.getTaskMutationJournalStatus().preflightDeferrals, 1);
 });

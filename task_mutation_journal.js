@@ -12,6 +12,11 @@
   const RETRY_BASE_DELAY_MS = 1500;
   const RETRY_MAX_DELAY_MS = 15000;
   const MAX_RETRIES = 5;
+  // The shared storage gate considers 1.4 s of inactivity quiet enough for
+  // ordinary maintenance. Full-state LZ compression can still block the main
+  // thread for ~0.6-1.0 s on large histories, so task-journal compaction gets
+  // an additional sustained-quiet grace period before it may start.
+  const COMPACTION_EXTRA_QUIET_MS = 3000;
 
   const originalReadStored = typeof core.readTaskPointsStoredState === 'function'
     ? core.readTaskPointsStoredState.bind(core)
@@ -27,6 +32,9 @@
   let compactionRunning = false;
   let retryTimer = 0;
   let retryCount = 0;
+  let preflightDeferrals = 0;
+  let compactionsStarted = 0;
+  let compactionsCompleted = 0;
 
   function emptyRecord() {
     return { schemaVersion: 1, tasks: [], completionUpserts: [], completionDeletes: [], updatedAtISO: null };
@@ -228,6 +236,8 @@
     const current = readRecord();
     if (current.malformed || isEmpty(current.record)) return false;
     compactionRunning = true;
+    compactionsStarted += 1;
+    try { global.TaskPointsPerf?.mark?.('taskMutation.compactionStart', { reason }); } catch (_) {}
     const snapshot = clone(current.record);
     try {
       const candidate = applyRecord(persistedState(), snapshot);
@@ -245,6 +255,8 @@
       if (!snapshotVerified(saved, snapshot)) throw new Error('Task mutation journal compaction verification failed.');
       clearVerifiedSnapshot(snapshot);
       retryCount = 0;
+      compactionsCompleted += 1;
+      try { global.TaskPointsPerf?.mark?.('taskMutation.compactionComplete', { reason }); } catch (_) {}
       return true;
     } catch (error) {
       console.warn('TaskPoints retained pending task changes for a later compaction retry.', error);
@@ -264,17 +276,62 @@
     }, delay) || 0;
   }
 
-  function runWhenQuiet(reason) {
-    const run = () => persistPending(reason);
-    const gate = core.whenStorageMaintenanceQuiet;
-    if (typeof gate === 'function') return Promise.resolve(gate(run, { reason: SAVE_PATH }));
+  function delay(ms) {
     return new Promise((resolve) => {
-      global.setTimeout?.(() => {
-        if (typeof global.requestIdleCallback === 'function') {
-          global.requestIdleCallback(() => resolve(run()), { timeout: 1500 });
-        } else resolve(run());
-      }, 1500);
+      if (typeof global.setTimeout === 'function') global.setTimeout(resolve, Math.max(0, Number(ms) || 0));
+      else resolve();
     });
+  }
+
+  function maintenanceStillQuiet() {
+    try {
+      return typeof core.isStorageMaintenanceQuiet !== 'function' || core.isStorageMaintenanceQuiet() === true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function runInIdleSlot(run) {
+    return new Promise((resolve) => {
+      const invoke = () => {
+        if (!maintenanceStillQuiet()) {
+          preflightDeferrals += 1;
+          try { global.TaskPointsPerf?.mark?.('taskMutation.compactionDeferred', { stage: 'idle-preflight' }); } catch (_) {}
+          resolve(false);
+          return;
+        }
+        resolve(run());
+      };
+      if (typeof global.requestIdleCallback === 'function') {
+        global.requestIdleCallback(invoke, { timeout: 1200 });
+      } else if (typeof global.requestAnimationFrame === 'function') {
+        global.requestAnimationFrame(() => global.setTimeout?.(invoke, 0));
+      } else {
+        global.setTimeout?.(invoke, 0);
+      }
+    });
+  }
+
+  async function runWhenQuiet(reason) {
+    const gate = core.whenStorageMaintenanceQuiet;
+    if (typeof gate === 'function') {
+      const gateReady = await Promise.resolve(gate(() => true, { reason: SAVE_PATH }));
+      if (gateReady !== true) return false;
+    } else {
+      await delay(1500);
+      if (!maintenanceStillQuiet()) return false;
+    }
+
+    // Do not launch a long, non-yielding compression immediately after the
+    // generic 1.4 s gate. Give the user a wider chance to keep interacting,
+    // then verify quiet again immediately before entering compression.
+    await delay(COMPACTION_EXTRA_QUIET_MS);
+    if (!maintenanceStillQuiet()) {
+      preflightDeferrals += 1;
+      try { global.TaskPointsPerf?.mark?.('taskMutation.compactionDeferred', { stage: 'sustained-quiet' }); } catch (_) {}
+      return false;
+    }
+    return runInIdleSlot(() => persistPending(reason));
   }
 
   function scheduleCompaction(reason = 'scheduled') {
@@ -345,7 +402,11 @@
       completionDeletes: current.record.completionDeletes.length,
       compactionScheduled,
       compactionRunning,
-      retryCount
+      retryCount,
+      extraQuietMs: COMPACTION_EXTRA_QUIET_MS,
+      preflightDeferrals,
+      compactionsStarted,
+      compactionsCompleted
     };
   };
 
