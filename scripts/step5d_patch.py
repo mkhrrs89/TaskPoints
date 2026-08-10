@@ -58,7 +58,8 @@ test('scheduled compaction waits through the additional sustained-quiet grace pe
   const h = makeHarness();
   h.core.journalTaskMutation({ completionDeleteId: 'old' });
 
-  await runNextTimer(h); // scheduleCompaction -> shared quiet gate -> extra grace timer
+  await runNextTimer(h); // module startup-replay timer; compaction is already scheduled
+  await runNextTimer(h); // scheduled compaction -> shared quiet gate -> extra grace timer
   assert.equal(h.getSaveCalls(), 0, 'shared quiet alone must not start full-state compression');
   assert.ok(h.timers.length >= 1, 'the extra sustained-quiet timer should be pending');
 
@@ -73,6 +74,7 @@ test('a user interaction during the extra grace period defers compaction instead
   const h = makeHarness();
   h.core.journalTaskMutation({ completionDeleteId: 'old' });
 
+  await runNextTimer(h); // module startup-replay timer
   await runNextTimer(h); // shared gate passes; extra quiet timer is now pending
   h.setMaintenanceQuiet(false);
   await runNextTimer(h); // extra grace expires while interaction state is not quiet
