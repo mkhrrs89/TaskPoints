@@ -1034,6 +1034,13 @@ function deleteCompletion(token){
   const ok = confirm(`Delete entry and send its task to Trash?\n\n${(c.title || 'Untitled')}\n${niceISO(c.completedAtISO)}`);
   if (!ok) return;
 
+  try { TaskPointsCore?.assertTaskMutationJournalWritable?.(); }
+  catch (error) {
+    console.warn('Log deletion paused because its durable journal is unavailable.', error);
+    try { alert(error?.message || 'Deletion is temporarily unavailable.'); } catch (_) {}
+    return;
+  }
+
   const nowISO = new Date().toISOString();
 
   if (c.taskId) {
@@ -1057,7 +1064,17 @@ function deleteCompletion(token){
   }
 
   state.completions.splice(idx, 1);
-  save();
+  if (TaskPointsCore?.journalTaskMutation) {
+    const linkedTask = c.taskId
+      ? (state.tasks || []).find(task => task && task.id === c.taskId) || null
+      : null;
+    TaskPointsCore.journalTaskMutation({
+      ...(linkedTask ? { task: linkedTask } : {}),
+      completionDeleteId: c.id || key
+    });
+  } else {
+    save();
+  }
   render();
 }
 

@@ -87,6 +87,21 @@
     try { core.clearStateHotCache?.(); } catch (_) {}
   }
 
+  function assertJournalWritable() {
+    if (!recoveryWriteAllowed()) {
+      const error = new Error('TaskPoints paused task changes while recovery protection is active.');
+      error.code = 'TASKPOINTS_TASK_MUTATION_JOURNAL_WRITE_LOCKED';
+      throw error;
+    }
+    const current = readRecord();
+    if (current.malformed) {
+      const error = new Error('Pending task mutation journal is malformed and was preserved.');
+      error.code = 'TASKPOINTS_TASK_MUTATION_JOURNAL_MALFORMED';
+      throw error;
+    }
+    return current;
+  }
+
   function writeRecord(record) {
     if (!recoveryWriteAllowed()) {
       const error = new Error('TaskPoints paused task changes while recovery protection is active.');
@@ -109,12 +124,7 @@
   }
 
   function journalMutation(mutation = {}) {
-    const current = readRecord();
-    if (current.malformed) {
-      const error = new Error('Pending task mutation journal is malformed and was preserved.');
-      error.code = 'TASKPOINTS_TASK_MUTATION_JOURNAL_MALFORMED';
-      throw error;
-    }
+    const current = assertJournalWritable();
     let record = current.record;
     if (mutation.task?.id) record.tasks = mergeById(record.tasks, mutation.task);
     if (mutation.completionUpsert?.id) {
@@ -316,6 +326,7 @@
 
   core.readPendingTaskMutations = () => readRecord();
   core.applyPendingTaskMutations = applyRecord;
+  core.assertTaskMutationJournalWritable = assertJournalWritable;
   core.journalTaskMutation = journalMutation;
   core.schedulePendingTaskMutationCompaction = scheduleCompaction;
   core.flushPendingTaskMutations = () => persistPending('explicit-flush');

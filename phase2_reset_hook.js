@@ -13,6 +13,7 @@
         // not enqueue a false reset. The explicit Reset All flow leaves it
         // absent, so only that confirmed authoritative removal is mirrored.
         if (storage.getItem(key) === null) {
+          try { core.clearPendingTaskMutations?.(); } catch (_) {}
           const operation = core.queueShadowDualWrite({}, { reset: true });
           operation?.catch?.((error) => {
             console.warn('TaskPointsCore: shadow reset failed; localStorage remains authoritative.', error);
