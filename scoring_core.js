@@ -361,6 +361,12 @@
 
   function packTaskPointsStorageState(state) {
     if (!state || typeof state !== 'object' || Array.isArray(state)) return state;
+    const perfEnd = global.TaskPointsPerf?.span?.('savePipeline.packTaskPointsStorageState', {
+      completions: Array.isArray(state.completions) ? state.completions.length : 0,
+      matchups: Array.isArray(state.matchups) ? state.matchups.length : 0,
+      gameHistory: Array.isArray(state.gameHistory) ? state.gameHistory.length : 0,
+      tasks: Array.isArray(state.tasks) ? state.tasks.length : 0
+    });
     const packed = { ...state };
     const packedArrays = {};
     Object.entries(PACKED_ARRAY_SCHEMAS).forEach(([key, fields]) => {
@@ -377,6 +383,7 @@
       delete packed.__packedStorageVersion;
       delete packed.__packedArrays;
     }
+    perfEnd?.({ packedArrayCount: Object.keys(packedArrays).length, outcome: 'return' });
     return packed;
   }
 
@@ -394,7 +401,11 @@
   }
 
   function compressStorageString(rawJson) {
-    return TaskPointsLZString.compressToUTF16(String(rawJson || ''));
+    const input = String(rawJson || '');
+    const perfEnd = global.TaskPointsPerf?.span?.('savePipeline.compressStorageString', { inputLength: input.length });
+    const output = TaskPointsLZString.compressToUTF16(input);
+    perfEnd?.({ outputLength: output.length, outcome: 'return' });
+    return output;
   }
 
   function decompressStorageString(encoded) {
@@ -485,6 +496,10 @@
   }
 
 function buildOptimizedTaskPointsStorageRaw(state) {
+  const perfEnd = global.TaskPointsPerf?.span?.('savePipeline.buildOptimizedTaskPointsStorageRaw', {
+    completions: Array.isArray(state?.completions) ? state.completions.length : 0,
+    tasks: Array.isArray(state?.tasks) ? state.tasks.length : 0
+  });
   const packedState = packTaskPointsStorageState(state);
   const packedRawJson = JSON.stringify(packedState);
 
@@ -498,7 +513,7 @@ function buildOptimizedTaskPointsStorageRaw(state) {
 
   const chosenRaw = useCompressed ? compressedWrapperRaw : packedRawJson;
 
-  return {
+  const plan = {
     packedState,
     packedRawJson,
     compressedWrapperRaw,
@@ -511,6 +526,14 @@ function buildOptimizedTaskPointsStorageRaw(state) {
     chosenChars: chosenRaw.length,
     chosenBytes: chosenRaw.length * 2
   };
+  perfEnd?.({
+    packedRawChars: plan.packedRawChars,
+    compressedRawChars: plan.compressedRawChars,
+    chosenChars: plan.chosenChars,
+    chosenEncoding: plan.chosenEncoding,
+    outcome: 'return'
+  });
+  return plan;
 }
 
 
