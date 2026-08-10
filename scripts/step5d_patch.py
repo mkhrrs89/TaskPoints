@@ -52,6 +52,36 @@ new = """  return {\n    context, core, storage, timers, quietRuns,\n    getSave
 assert old in test
 test = test.replace(old, new, 1)
 
-append = r'''\n\ntest('scheduled compaction waits through the additional sustained-quiet grace period', async () => {\n  const h = makeHarness();\n  h.core.journalTaskMutation({ completionDeleteId: 'old' });\n\n  await runNextTimer(h); // scheduleCompaction -> shared quiet gate -> extra grace timer\n  assert.equal(h.getSaveCalls(), 0, 'shared quiet alone must not start full-state compression');\n  assert.ok(h.timers.length >= 1, 'the extra sustained-quiet timer should be pending');\n\n  await runNextTimer(h); // extra grace -> idle callback -> compaction\n  await Promise.resolve();\n  assert.equal(h.getSaveCalls(), 1);\n  assert.equal(h.storage.getItem(JOURNAL_KEY), null);\n  assert.equal(h.core.getTaskMutationJournalStatus().extraQuietMs, 3000);\n});\n\ntest('a user interaction during the extra grace period defers compaction instead of entering compression', async () => {\n  const h = makeHarness();\n  h.core.journalTaskMutation({ completionDeleteId: 'old' });\n\n  await runNextTimer(h); // shared gate passes; extra quiet timer is now pending\n  h.setMaintenanceQuiet(false);\n  await runNextTimer(h); // extra grace expires while interaction state is not quiet\n  await Promise.resolve();\n\n  assert.equal(h.getSaveCalls(), 0, 'full-state save must yield when quiet was broken');\n  assert.ok(h.storage.getItem(JOURNAL_KEY), 'durable journal must remain pending');\n  assert.equal(h.core.getTaskMutationJournalStatus().preflightDeferrals, 1);\n});\n'''
+append = '''
+
+test('scheduled compaction waits through the additional sustained-quiet grace period', async () => {
+  const h = makeHarness();
+  h.core.journalTaskMutation({ completionDeleteId: 'old' });
+
+  await runNextTimer(h); // scheduleCompaction -> shared quiet gate -> extra grace timer
+  assert.equal(h.getSaveCalls(), 0, 'shared quiet alone must not start full-state compression');
+  assert.ok(h.timers.length >= 1, 'the extra sustained-quiet timer should be pending');
+
+  await runNextTimer(h); // extra grace -> idle callback -> compaction
+  await Promise.resolve();
+  assert.equal(h.getSaveCalls(), 1);
+  assert.equal(h.storage.getItem(JOURNAL_KEY), null);
+  assert.equal(h.core.getTaskMutationJournalStatus().extraQuietMs, 3000);
+});
+
+test('a user interaction during the extra grace period defers compaction instead of entering compression', async () => {
+  const h = makeHarness();
+  h.core.journalTaskMutation({ completionDeleteId: 'old' });
+
+  await runNextTimer(h); // shared gate passes; extra quiet timer is now pending
+  h.setMaintenanceQuiet(false);
+  await runNextTimer(h); // extra grace expires while interaction state is not quiet
+  await Promise.resolve();
+
+  assert.equal(h.getSaveCalls(), 0, 'full-state save must yield when quiet was broken');
+  assert.ok(h.storage.getItem(JOURNAL_KEY), 'durable journal must remain pending');
+  assert.equal(h.core.getTaskMutationJournalStatus().preflightDeferrals, 1);
+});
+'''
 assert "scheduled compaction waits through the additional sustained-quiet grace period" not in test
 test_path.write_text(test + append)
