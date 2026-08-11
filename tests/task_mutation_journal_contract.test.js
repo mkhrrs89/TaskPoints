@@ -21,7 +21,7 @@ class FakeStorage {
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
-function makeHarness(storageRows = {}) {
+function makeHarness(storageRows = {}, options = {}) {
   const baseline = {
     tasks: [{ id: 't1', title: 'Task', status: 'active', counts: 0 }],
     completions: [{ id: 'old', taskId: 't1', title: 'Old', points: 1, completedAtISO: '2026-08-09T12:00:00.000Z' }]
@@ -38,8 +38,11 @@ function makeHarness(storageRows = {}) {
     loadAppState() { return { state: JSON.parse(storage.getItem(STORAGE_KEY)) }; },
     saveStateSnapshot(candidate) {
       saveCalls += 1;
-      storage.setItem(STORAGE_KEY, JSON.stringify(candidate));
-      return { state: clone(candidate) };
+      const committed = typeof options.saveTransform === 'function'
+        ? options.saveTransform(clone(candidate))
+        : clone(candidate);
+      storage.setItem(STORAGE_KEY, JSON.stringify(committed));
+      return { state: clone(committed) };
     },
     whenStorageMaintenanceQuiet(run) { quietRuns.push(run); return Promise.resolve(run()); },
     isStorageMaintenanceQuiet() { return maintenanceQuiet; },
@@ -177,4 +180,50 @@ test('a user interaction during the extra grace period defers compaction instead
   assert.equal(h.getSaveCalls(), 0, 'full-state save must yield when quiet was broken');
   assert.ok(h.storage.getItem(JOURNAL_KEY), 'durable journal must remain pending');
   assert.equal(h.core.getTaskMutationJournalStatus().preflightDeferrals, 1);
+});
+
+
+test('a newer journal mutation invalidates an older startup preflight countdown', async () => {
+  const h = makeHarness();
+  h.core.journalTaskMutation({ completionDeleteId: 'old' });
+
+  await runNextTimer(h); // module startup timer cannot replace the already scheduled mutation run
+  await runNextTimer(h); // existing run passes shared quiet and begins extra grace
+
+  h.core.journalTaskMutation({ task: { id: 't1', title: 'Task', status: 'trashed', counts: 0 } });
+  await runNextTimer(h); // old grace expires; generation mismatch must abort it
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.equal(h.getSaveCalls(), 0, 'an older preflight must not compact a newer mutation');
+  assert.ok(h.storage.getItem(JOURNAL_KEY), 'newer mutation must remain durable in the journal');
+  assert.equal(h.core.getTaskMutationJournalStatus().preflightDeferrals, 1);
+  assert.equal(h.core.getTaskMutationJournalStatus().mutationGeneration, 2);
+});
+
+test('verification accepts the save pipeline normalized task row and clears the journal', () => {
+  const h = makeHarness({}, {
+    saveTransform(candidate) {
+      const task = candidate.tasks.find((row) => row.id === 't1');
+      if (task) delete task.deletedAt; // representative legacy alias stripped by normalization
+      return candidate;
+    }
+  });
+  const task = {
+    id: 't1', title: 'Task', status: 'trashed', counts: 0,
+    deletedAtISO: '2026-08-11T12:00:00.000Z',
+    deletedAt: '2026-08-11T12:00:00.000Z',
+    completedAtISO: null,
+    hidden: false
+  };
+  h.core.journalTaskMutation({ task, completionDeleteId: 'old' });
+
+  assert.equal(h.core.flushPendingTaskMutations(), true);
+  assert.equal(h.getSaveCalls(), 1);
+  assert.equal(h.storage.getItem(JOURNAL_KEY), null, 'verified normalized persistence should not retry forever');
+  const persisted = JSON.parse(h.storage.getItem(STORAGE_KEY));
+  assert.equal(persisted.tasks[0].status, 'trashed');
+  assert.equal(persisted.tasks[0].deletedAtISO, task.deletedAtISO);
+  assert.equal('deletedAt' in persisted.tasks[0], false);
+  assert.equal(persisted.completions.length, 0);
 });

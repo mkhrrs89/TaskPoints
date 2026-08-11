@@ -35,6 +35,9 @@
   let preflightDeferrals = 0;
   let compactionsStarted = 0;
   let compactionsCompleted = 0;
+  // Advances on every new user journal mutation. A pending preflight captures
+  // this generation so a newer mutation can invalidate an older countdown.
+  let mutationGeneration = 0;
 
   function emptyRecord() {
     return { schemaVersion: 1, tasks: [], completionUpserts: [], completionDeletes: [], updatedAtISO: null };
@@ -147,6 +150,7 @@
     }
     record.updatedAtISO = new Date().toISOString();
     const saved = writeRecord(record);
+    mutationGeneration += 1;
     try { core.noteStorageUserInteraction?.(); } catch (_) {}
     scheduleCompaction('mutation');
     return saved;
@@ -185,24 +189,35 @@
     catch (_) { return false; }
   }
 
-  function snapshotVerified(savedState, record) {
+  function rowMatchesExpected(saved, expected) {
+    if (!saved || !expected) return false;
+    for (const [key, value] of Object.entries(expected)) {
+      if (!valueMatches(saved[key], value)) return false;
+    }
+    return true;
+  }
+
+  function snapshotVerified(savedState, record, normalizedExpectedState = null) {
     if (!savedState || typeof savedState !== 'object') return false;
     for (const patch of record.tasks) {
-      const saved = (savedState.tasks || []).find((task) => String(task?.id || '') === String(patch.id));
-      if (!saved) return false;
-      for (const [key, value] of Object.entries(patch)) {
-        if (!valueMatches(saved[key], value)) return false;
-      }
+      const id = String(patch.id);
+      const saved = (savedState.tasks || []).find((task) => String(task?.id || '') === id);
+      const expected = normalizedExpectedState
+        ? (normalizedExpectedState.tasks || []).find((task) => String(task?.id || '') === id)
+        : patch;
+      if (!rowMatchesExpected(saved, expected || patch)) return false;
     }
     for (const patch of record.completionUpserts) {
-      const saved = (savedState.completions || []).find((entry) => String(entry?.id || '') === String(patch.id));
-      if (!saved) return false;
-      for (const [key, value] of Object.entries(patch)) {
-        if (!valueMatches(saved[key], value)) return false;
-      }
+      const id = String(patch.id);
+      const saved = (savedState.completions || []).find((entry) => String(entry?.id || '') === id);
+      const expected = normalizedExpectedState
+        ? (normalizedExpectedState.completions || []).find((entry) => String(entry?.id || '') === id)
+        : patch;
+      if (!rowMatchesExpected(saved, expected || patch)) return false;
     }
     for (const id of record.completionDeletes) {
       if ((savedState.completions || []).some((entry) => String(entry?.id || '') === String(id))) return false;
+      if (normalizedExpectedState && (normalizedExpectedState.completions || []).some((entry) => String(entry?.id || '') === String(id))) return false;
     }
     return true;
   }
@@ -252,13 +267,17 @@
       });
       if (result?.skipped || result?.blockedByQuotaCircuit || !result?.state) throw new Error('Task mutation journal compaction was not committed.');
       const saved = persistedState();
-      if (!snapshotVerified(saved, snapshot)) throw new Error('Task mutation journal compaction verification failed.');
+      // saveStateSnapshot may intentionally normalize task rows. Verify the
+      // canonical snapshot against the normalized state it actually committed,
+      // rather than requiring byte-for-byte equality with the pre-save patch.
+      if (!snapshotVerified(saved, snapshot, result.state)) throw new Error('Task mutation journal compaction verification failed.');
       clearVerifiedSnapshot(snapshot);
       retryCount = 0;
       compactionsCompleted += 1;
       try { global.TaskPointsPerf?.mark?.('taskMutation.compactionComplete', { reason }); } catch (_) {}
       return true;
     } catch (error) {
+      try { global.TaskPointsPerf?.mark?.('taskMutation.compactionFailed', { reason, message: String(error?.message || error) }); } catch (_) {}
       console.warn('TaskPoints retained pending task changes for a later compaction retry.', error);
       return false;
     } finally {
@@ -291,9 +310,15 @@
     }
   }
 
-  function runInIdleSlot(run) {
+  function runInIdleSlot(run, scheduledGeneration) {
     return new Promise((resolve) => {
       const invoke = () => {
+        if (scheduledGeneration !== mutationGeneration) {
+          preflightDeferrals += 1;
+          try { global.TaskPointsPerf?.mark?.('taskMutation.compactionDeferred', { stage: 'journal-mutated' }); } catch (_) {}
+          resolve(false);
+          return;
+        }
         if (!maintenanceStillQuiet()) {
           preflightDeferrals += 1;
           try { global.TaskPointsPerf?.mark?.('taskMutation.compactionDeferred', { stage: 'idle-preflight' }); } catch (_) {}
@@ -312,7 +337,7 @@
     });
   }
 
-  async function runWhenQuiet(reason) {
+  async function runWhenQuiet(reason, scheduledGeneration) {
     const gate = core.whenStorageMaintenanceQuiet;
     if (typeof gate === 'function') {
       const gateReady = await Promise.resolve(gate(() => true, { reason: SAVE_PATH }));
@@ -324,14 +349,21 @@
 
     // Do not launch a long, non-yielding compression immediately after the
     // generic 1.4 s gate. Give the user a wider chance to keep interacting,
-    // then verify quiet again immediately before entering compression.
+    // then verify quiet again immediately before entering compression. A new
+    // journal mutation also invalidates this countdown even if an older
+    // startup-replay attempt had already passed the generic quiet gate.
     await delay(COMPACTION_EXTRA_QUIET_MS);
+    if (scheduledGeneration !== mutationGeneration) {
+      preflightDeferrals += 1;
+      try { global.TaskPointsPerf?.mark?.('taskMutation.compactionDeferred', { stage: 'journal-mutated' }); } catch (_) {}
+      return false;
+    }
     if (!maintenanceStillQuiet()) {
       preflightDeferrals += 1;
       try { global.TaskPointsPerf?.mark?.('taskMutation.compactionDeferred', { stage: 'sustained-quiet' }); } catch (_) {}
       return false;
     }
-    return runInIdleSlot(() => persistPending(reason));
+    return runInIdleSlot(() => persistPending(reason), scheduledGeneration);
   }
 
   function scheduleCompaction(reason = 'scheduled') {
@@ -339,8 +371,9 @@
     const current = readRecord();
     if (current.malformed || isEmpty(current.record)) return false;
     compactionScheduled = true;
+    const scheduledGeneration = mutationGeneration;
     global.setTimeout?.(() => {
-      runWhenQuiet(reason)
+      runWhenQuiet(reason, scheduledGeneration)
         .then((ok) => { if (!ok && !isEmpty(readRecord().record)) scheduleRetry(); })
         .catch(() => scheduleRetry())
         .finally(() => { compactionScheduled = false; });
@@ -374,7 +407,7 @@
       if (!current.malformed && !isEmpty(current.record) && !result?.skipped && !result?.blockedByQuotaCircuit && result?.state) {
         try {
           const saved = persistedState();
-          if (snapshotVerified(saved, current.record)) clearVerifiedSnapshot(current.record);
+          if (snapshotVerified(saved, current.record, result.state)) clearVerifiedSnapshot(current.record);
         } catch (_) {}
       }
       return result;
@@ -406,7 +439,8 @@
       extraQuietMs: COMPACTION_EXTRA_QUIET_MS,
       preflightDeferrals,
       compactionsStarted,
-      compactionsCompleted
+      compactionsCompleted,
+      mutationGeneration
     };
   };
 
