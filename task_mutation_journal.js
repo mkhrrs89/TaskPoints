@@ -197,23 +197,41 @@
     return true;
   }
 
+  function taskPatchVerified(saved, patch, normalizedExpectedState) {
+    if (!saved || !patch) return false;
+    const id = String(patch.id || '');
+    const normalized = normalizedExpectedState
+      ? (normalizedExpectedState.tasks || []).find((task) => String(task?.id || '') === id)
+      : null;
+    if (normalizedExpectedState && !normalized) return false;
+    for (const [key, patchValue] of Object.entries(patch)) {
+      // `deletedAt` is a legacy alias. The canonical save path may retain only
+      // `deletedAtISO`; that omission is safe only when the normalized output
+      // still carries the canonical deletion timestamp. All other journaled
+      // task semantics remain mandatory.
+      if (key === 'deletedAt' && normalized && !Object.prototype.hasOwnProperty.call(normalized, key)) {
+        if (!Object.prototype.hasOwnProperty.call(normalized, 'deletedAtISO')) return false;
+        continue;
+      }
+      const expectedValue = normalized && Object.prototype.hasOwnProperty.call(normalized, key)
+        ? normalized[key]
+        : patchValue;
+      if (!valueMatches(saved[key], expectedValue)) return false;
+    }
+    return true;
+  }
+
   function snapshotVerified(savedState, record, normalizedExpectedState = null) {
     if (!savedState || typeof savedState !== 'object') return false;
     for (const patch of record.tasks) {
       const id = String(patch.id);
       const saved = (savedState.tasks || []).find((task) => String(task?.id || '') === id);
-      const expected = normalizedExpectedState
-        ? (normalizedExpectedState.tasks || []).find((task) => String(task?.id || '') === id)
-        : patch;
-      if (!rowMatchesExpected(saved, expected || patch)) return false;
+      if (!taskPatchVerified(saved, patch, normalizedExpectedState)) return false;
     }
     for (const patch of record.completionUpserts) {
       const id = String(patch.id);
       const saved = (savedState.completions || []).find((entry) => String(entry?.id || '') === id);
-      const expected = normalizedExpectedState
-        ? (normalizedExpectedState.completions || []).find((entry) => String(entry?.id || '') === id)
-        : patch;
-      if (!rowMatchesExpected(saved, expected || patch)) return false;
+      if (!rowMatchesExpected(saved, patch)) return false;
     }
     for (const id of record.completionDeletes) {
       if ((savedState.completions || []).some((entry) => String(entry?.id || '') === String(id))) return false;
