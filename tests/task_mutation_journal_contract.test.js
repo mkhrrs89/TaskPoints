@@ -31,6 +31,7 @@ function makeHarness(storageRows = {}, options = {}) {
   const quietRuns = [];
   let saveCalls = 0;
   let maintenanceQuiet = true;
+  let lastInteractionAgoMs = 10000;
   const core = {
     STORAGE_KEY,
     parseTaskPointsStorageJson(raw) { return JSON.parse(raw); },
@@ -46,6 +47,7 @@ function makeHarness(storageRows = {}, options = {}) {
     },
     whenStorageMaintenanceQuiet(run) { quietRuns.push(run); return Promise.resolve(run()); },
     isStorageMaintenanceQuiet() { return maintenanceQuiet; },
+    getStorageMaintenanceIdleStatus() { return { lastInteractionAgoMs }; },
     noteStorageUserInteraction() {},
     clearStateHotCache() {}
   };
@@ -76,7 +78,8 @@ function makeHarness(storageRows = {}, options = {}) {
   return {
     context, core, storage, timers, quietRuns,
     getSaveCalls: () => saveCalls,
-    setMaintenanceQuiet(value) { maintenanceQuiet = Boolean(value); }
+    setMaintenanceQuiet(value) { maintenanceQuiet = Boolean(value); },
+    setLastInteractionAgoMs(value) { lastInteractionAgoMs = Number(value) || 0; }
   };
 }
 
@@ -151,30 +154,34 @@ test('Home and Log use the tiny journal instead of immediate full-state saves fo
 });
 
 
-test('scheduled compaction waits through the additional sustained-quiet grace period', async () => {
+test('scheduled compaction waits until at least seven seconds since the latest interaction', async () => {
   const h = makeHarness();
+  h.setLastInteractionAgoMs(1400);
   h.core.journalTaskMutation({ completionDeleteId: 'old' });
 
   await runNextTimer(h); // module startup-replay timer; compaction is already scheduled
-  await runNextTimer(h); // scheduled compaction -> shared quiet gate -> extra grace timer
+  await runNextTimer(h); // shared quiet gate -> remaining time to seven seconds idle
   assert.equal(h.getSaveCalls(), 0, 'shared quiet alone must not start full-state compression');
-  assert.ok(h.timers.length >= 1, 'the extra sustained-quiet timer should be pending');
+  assert.ok(h.timers.length >= 1, 'the sustained-idle timer should be pending');
 
-  await runNextTimer(h); // extra grace -> idle callback -> compaction
+  h.setLastInteractionAgoMs(7000);
+  await runNextTimer(h); // seven seconds idle -> idle callback -> compaction
   await Promise.resolve();
   assert.equal(h.getSaveCalls(), 1);
   assert.equal(h.storage.getItem(JOURNAL_KEY), null);
-  assert.equal(h.core.getTaskMutationJournalStatus().extraQuietMs, 3000);
+  assert.equal(h.core.getTaskMutationJournalStatus().minIdleBeforeCompactionMs, 7000);
 });
 
 test('a user interaction during the extra grace period defers compaction instead of entering compression', async () => {
   const h = makeHarness();
+  h.setLastInteractionAgoMs(1400);
   h.core.journalTaskMutation({ completionDeleteId: 'old' });
 
   await runNextTimer(h); // module startup-replay timer
-  await runNextTimer(h); // shared gate passes; extra quiet timer is now pending
+  await runNextTimer(h); // shared gate passes; sustained-idle timer is now pending
+  h.setLastInteractionAgoMs(200);
   h.setMaintenanceQuiet(false);
-  await runNextTimer(h); // extra grace expires while interaction state is not quiet
+  await runNextTimer(h); // wait expires after a newer interaction
   await Promise.resolve();
 
   assert.equal(h.getSaveCalls(), 0, 'full-state save must yield when quiet was broken');

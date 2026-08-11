@@ -15,8 +15,8 @@
   // The shared storage gate considers 1.4 s of inactivity quiet enough for
   // ordinary maintenance. Full-state LZ compression can still block the main
   // thread for ~0.6-1.0 s on large histories, so task-journal compaction gets
-  // an additional sustained-quiet grace period before it may start.
-  const COMPACTION_EXTRA_QUIET_MS = 3000;
+  // a minimum sustained-idle interval before it may start.
+  const COMPACTION_MIN_IDLE_MS = 7000;
 
   const originalReadStored = typeof core.readTaskPointsStoredState === 'function'
     ? core.readTaskPointsStoredState.bind(core)
@@ -366,17 +366,21 @@
     }
 
     // Do not launch a long, non-yielding compression immediately after the
-    // generic 1.4 s gate. Give the user a wider chance to keep interacting,
+    // generic 1.4 s gate. Require a full 7 s since the most recent interaction,
     // then verify quiet again immediately before entering compression. A new
     // journal mutation also invalidates this countdown even if an older
     // startup-replay attempt had already passed the generic quiet gate.
-    await delay(COMPACTION_EXTRA_QUIET_MS);
+    const idleStatus = core.getStorageMaintenanceIdleStatus?.() || null;
+    const idleAgo = Math.max(0, Number(idleStatus?.lastInteractionAgoMs) || 0);
+    await delay(Math.max(0, COMPACTION_MIN_IDLE_MS - idleAgo));
+    const finalIdleStatus = core.getStorageMaintenanceIdleStatus?.() || null;
+    const finalIdleAgo = Math.max(0, Number(finalIdleStatus?.lastInteractionAgoMs) || 0);
     if (scheduledGeneration !== mutationGeneration) {
       preflightDeferrals += 1;
       try { global.TaskPointsPerf?.mark?.('taskMutation.compactionDeferred', { stage: 'journal-mutated' }); } catch (_) {}
       return false;
     }
-    if (!maintenanceStillQuiet()) {
+    if (!maintenanceStillQuiet() || finalIdleAgo < COMPACTION_MIN_IDLE_MS) {
       preflightDeferrals += 1;
       try { global.TaskPointsPerf?.mark?.('taskMutation.compactionDeferred', { stage: 'sustained-quiet' }); } catch (_) {}
       return false;
@@ -454,7 +458,7 @@
       compactionScheduled,
       compactionRunning,
       retryCount,
-      extraQuietMs: COMPACTION_EXTRA_QUIET_MS,
+      minIdleBeforeCompactionMs: COMPACTION_MIN_IDLE_MS,
       preflightDeferrals,
       compactionsStarted,
       compactionsCompleted,
