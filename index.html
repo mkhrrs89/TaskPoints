@@ -12255,13 +12255,21 @@ function completeTask(id){
       const liveTask = state.tasks.find(x => x.id === id);
       if (!liveTask) return;
 
-      addCompletion({
+      try { TaskPointsCore?.assertTaskMutationJournalWritable?.(); }
+      catch (error) {
+        console.warn('Task completion paused because its durable journal is unavailable.', error);
+        try { alert(error?.message || 'Task completion is temporarily unavailable.'); } catch (_) {}
+        return;
+      }
+
+      const completion = {
         id: crypto.randomUUID(),
         taskId: id,
         title: liveTask.title,
         points: liveTask.points,
         completedAtISO: now
-      });
+      };
+      addCompletion(completion);
 
       const rec = liveTask.recurrence || {};
       const mode = rec.mode || 'none';
@@ -12278,7 +12286,11 @@ function completeTask(id){
 
       liveTask.updatedAtISO = now;
       removeTaskFromTodayView(id, completedDayKey);
-      save();
+      if (TaskPointsCore?.journalTaskMutation) {
+        TaskPointsCore.journalTaskMutation({ task: liveTask, completionUpsert: completion });
+      } else {
+        save();
+      }
       window.updateCriticalTasksIsland?.();
       scheduleRender(renderAll);
     });
