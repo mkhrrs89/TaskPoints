@@ -21,7 +21,7 @@ class FakeStorage {
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
-function makeHarness(storageRows = {}) {
+function makeHarness(storageRows = {}, options = {}) {
   const baseline = {
     tasks: [{ id: 't1', title: 'Task', status: 'active', counts: 0 }],
     completions: [{ id: 'old', taskId: 't1', title: 'Old', points: 1, completedAtISO: '2026-08-09T12:00:00.000Z' }]
@@ -30,6 +30,8 @@ function makeHarness(storageRows = {}) {
   const timers = [];
   const quietRuns = [];
   let saveCalls = 0;
+  let maintenanceQuiet = true;
+  let lastInteractionAgoMs = 10000;
   const core = {
     STORAGE_KEY,
     parseTaskPointsStorageJson(raw) { return JSON.parse(raw); },
@@ -37,10 +39,18 @@ function makeHarness(storageRows = {}) {
     loadAppState() { return { state: JSON.parse(storage.getItem(STORAGE_KEY)) }; },
     saveStateSnapshot(candidate) {
       saveCalls += 1;
-      storage.setItem(STORAGE_KEY, JSON.stringify(candidate));
-      return { state: clone(candidate) };
+      const committed = typeof options.saveTransform === 'function'
+        ? options.saveTransform(clone(candidate))
+        : clone(candidate);
+      storage.setItem(STORAGE_KEY, JSON.stringify(committed));
+      const returnedState = typeof options.returnedStateTransform === 'function'
+        ? options.returnedStateTransform(clone(committed), clone(candidate))
+        : clone(committed);
+      return { state: returnedState };
     },
-    whenStorageMaintenanceQuiet(run) { quietRuns.push(run); return Promise.resolve(false); },
+    whenStorageMaintenanceQuiet(run) { quietRuns.push(run); return Promise.resolve(run()); },
+    isStorageMaintenanceQuiet() { return maintenanceQuiet; },
+    getStorageMaintenanceIdleStatus() { return { lastInteractionAgoMs }; },
     noteStorageUserInteraction() {},
     clearStateHotCache() {}
   };
@@ -68,7 +78,20 @@ function makeHarness(storageRows = {}) {
   context.globalThis = context;
   vm.createContext(context);
   vm.runInContext(moduleSource, context, { filename: 'task_mutation_journal.js' });
-  return { context, core, storage, timers, quietRuns, getSaveCalls: () => saveCalls };
+  return {
+    context, core, storage, timers, quietRuns,
+    getSaveCalls: () => saveCalls,
+    setMaintenanceQuiet(value) { maintenanceQuiet = Boolean(value); },
+    setLastInteractionAgoMs(value) { lastInteractionAgoMs = Number(value) || 0; }
+  };
+}
+
+async function runNextTimer(harness) {
+  const callback = harness.timers.shift();
+  assert.ok(callback, 'expected a scheduled timer');
+  callback();
+  await Promise.resolve();
+  await Promise.resolve();
 }
 
 test('worker bundles the task mutation journal before state hot cache', () => {
@@ -131,4 +154,164 @@ test('Home and Log use the tiny journal instead of immediate full-state saves fo
   assert.match(homeSource, /journalTaskMutation\(\{ task: liveTask, completionUpsert: completion \}\)/);
   assert.match(logSource, /completionDeleteId: c\.id \|\| key/);
   assert.match(resetSource, /clearPendingTaskMutations\?\.\(\)/);
+});
+
+
+test('scheduled compaction waits until at least seven seconds since the latest interaction', async () => {
+  const h = makeHarness();
+  h.setLastInteractionAgoMs(1400);
+  h.core.journalTaskMutation({ completionDeleteId: 'old' });
+
+  await runNextTimer(h); // module startup-replay timer; compaction is already scheduled
+  await runNextTimer(h); // shared quiet gate -> remaining time to seven seconds idle
+  assert.equal(h.getSaveCalls(), 0, 'shared quiet alone must not start full-state compression');
+  assert.ok(h.timers.length >= 1, 'the sustained-idle timer should be pending');
+
+  h.setLastInteractionAgoMs(7000);
+  await runNextTimer(h); // seven seconds idle -> idle callback -> compaction
+  await Promise.resolve();
+  assert.equal(h.getSaveCalls(), 1);
+  assert.equal(h.storage.getItem(JOURNAL_KEY), null);
+  assert.equal(h.core.getTaskMutationJournalStatus().minIdleBeforeCompactionMs, 7000);
+});
+
+test('a user interaction during the extra grace period defers compaction instead of entering compression', async () => {
+  const h = makeHarness();
+  h.setLastInteractionAgoMs(1400);
+  h.core.journalTaskMutation({ completionDeleteId: 'old' });
+
+  await runNextTimer(h); // module startup-replay timer
+  await runNextTimer(h); // shared gate passes; sustained-idle timer is now pending
+  h.setLastInteractionAgoMs(200);
+  h.setMaintenanceQuiet(false);
+  await runNextTimer(h); // wait expires after a newer interaction
+  await Promise.resolve();
+
+  assert.equal(h.getSaveCalls(), 0, 'full-state save must yield when quiet was broken');
+  assert.ok(h.storage.getItem(JOURNAL_KEY), 'durable journal must remain pending');
+  assert.equal(h.core.getTaskMutationJournalStatus().preflightDeferrals, 1);
+});
+
+
+test('a newer journal mutation invalidates an older startup preflight countdown', async () => {
+  const h = makeHarness();
+  h.core.journalTaskMutation({ completionDeleteId: 'old' });
+
+  await runNextTimer(h); // module startup timer cannot replace the already scheduled mutation run
+  await runNextTimer(h); // existing run passes shared quiet and begins extra grace
+
+  h.core.journalTaskMutation({ task: { id: 't1', title: 'Task', status: 'trashed', counts: 0 } });
+  await runNextTimer(h); // old grace expires; generation mismatch must abort it
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.equal(h.getSaveCalls(), 0, 'an older preflight must not compact a newer mutation');
+  assert.ok(h.storage.getItem(JOURNAL_KEY), 'newer mutation must remain durable in the journal');
+  assert.equal(h.core.getTaskMutationJournalStatus().preflightDeferrals, 1);
+  assert.equal(h.core.getTaskMutationJournalStatus().mutationGeneration, 2);
+});
+
+test('verification accepts the save pipeline normalized task row and clears the journal', () => {
+  const h = makeHarness({}, {
+    saveTransform(candidate) {
+      const task = candidate.tasks.find((row) => row.id === 't1');
+      if (task) delete task.deletedAt; // representative legacy alias stripped by normalization
+      return candidate;
+    }
+  });
+  const task = {
+    id: 't1', title: 'Task', status: 'trashed', counts: 0,
+    deletedAtISO: '2026-08-11T12:00:00.000Z',
+    deletedAt: '2026-08-11T12:00:00.000Z',
+    completedAtISO: null,
+    hidden: false
+  };
+  h.core.journalTaskMutation({ task, completionDeleteId: 'old' });
+
+  assert.equal(h.core.flushPendingTaskMutations(), true);
+  assert.equal(h.getSaveCalls(), 1);
+  assert.equal(h.storage.getItem(JOURNAL_KEY), null, 'verified normalized persistence should not retry forever');
+  const persisted = JSON.parse(h.storage.getItem(STORAGE_KEY));
+  assert.equal(persisted.tasks[0].status, 'trashed');
+  assert.equal(persisted.tasks[0].deletedAtISO, task.deletedAtISO);
+  assert.equal('deletedAt' in persisted.tasks[0], false);
+  assert.equal(persisted.completions.length, 0);
+});
+
+
+test('verification accepts canonical task defaults omitted by compact localStorage', () => {
+  const h = makeHarness({}, {
+    saveTransform(candidate) {
+      candidate.__storageCompactVersion = 1;
+      const task = candidate.tasks.find((row) => row.id === 't1');
+      if (!task) return candidate;
+      if (task.originalDueDateISO === task.dueDateISO) delete task.originalDueDateISO;
+      if (task.recurrence?.mode === 'none' && Object.keys(task.recurrence).length === 1) delete task.recurrence;
+      if (Array.isArray(task.tags) && task.tags.length === 0) delete task.tags;
+      if (Array.isArray(task.skipDates) && task.skipDates.length === 0) delete task.skipDates;
+      if (Array.isArray(task.skills) && task.skills.length === 2 && task.skills.every((slot) => slot?.skill === '' && slot?.pts === '')) delete task.skills;
+      if (task.hidden === false) delete task.hidden;
+      ['deletedAt', 'deletedFrom', 'prevStatus', 'completedAtISO'].forEach((key) => {
+        if (task[key] == null) delete task[key];
+      });
+      if (Number(task.postponedDays) === 0) delete task.postponedDays;
+      return candidate;
+    },
+    returnedStateTransform(_committed, candidate) {
+      return candidate;
+    }
+  });
+  const task = {
+    id: 't1',
+    title: 'Task',
+    status: 'active',
+    counts: 0,
+    dueDateISO: '2026-08-12',
+    originalDueDateISO: '2026-08-12',
+    recurrence: { mode: 'none' },
+    tags: [],
+    skipDates: [],
+    skills: [{ skill: '', pts: '' }, { skill: '', pts: '' }],
+    hidden: false,
+    deletedAt: null,
+    deletedAtISO: null,
+    deletedFrom: null,
+    prevStatus: null,
+    completedAtISO: null,
+    postponedDays: 0
+  };
+  h.core.journalTaskMutation({ task, completionDeleteId: 'old' });
+
+  assert.equal(h.core.flushPendingTaskMutations(), true);
+  assert.equal(h.getSaveCalls(), 1);
+  assert.equal(h.storage.getItem(JOURNAL_KEY), null, 'canonical compact omissions must verify and clear the journal');
+  const persisted = JSON.parse(h.storage.getItem(STORAGE_KEY));
+  assert.equal(persisted.__storageCompactVersion, 1);
+  assert.equal(persisted.tasks[0].dueDateISO, task.dueDateISO);
+  assert.equal('originalDueDateISO' in persisted.tasks[0], false);
+  assert.equal('hidden' in persisted.tasks[0], false);
+  assert.equal('postponedDays' in persisted.tasks[0], false);
+  assert.equal(persisted.completions.length, 0);
+});
+
+test('compact task verification still rejects substantive field corruption', () => {
+  const h = makeHarness({}, {
+    saveTransform(candidate) {
+      candidate.__storageCompactVersion = 1;
+      const task = candidate.tasks.find((row) => row.id === 't1');
+      if (task) task.status = 'trashed';
+      return candidate;
+    },
+    returnedStateTransform(_committed, candidate) {
+      return candidate;
+    }
+  });
+  h.core.journalTaskMutation({
+    task: { id: 't1', title: 'Task', status: 'active', counts: 0 },
+    completionDeleteId: 'old'
+  });
+
+  assert.equal(h.core.flushPendingTaskMutations(), false);
+  assert.equal(h.getSaveCalls(), 1);
+  assert.ok(h.storage.getItem(JOURNAL_KEY), 'journal must remain durable after substantive verification failure');
 });

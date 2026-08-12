@@ -12,6 +12,11 @@
   const RETRY_BASE_DELAY_MS = 1500;
   const RETRY_MAX_DELAY_MS = 15000;
   const MAX_RETRIES = 5;
+  // The shared storage gate considers 1.4 s of inactivity quiet enough for
+  // ordinary maintenance. Full-state LZ compression can still block the main
+  // thread for ~0.6-1.0 s on large histories, so task-journal compaction gets
+  // a minimum sustained-idle interval before it may start.
+  const COMPACTION_MIN_IDLE_MS = 7000;
 
   const originalReadStored = typeof core.readTaskPointsStoredState === 'function'
     ? core.readTaskPointsStoredState.bind(core)
@@ -27,6 +32,12 @@
   let compactionRunning = false;
   let retryTimer = 0;
   let retryCount = 0;
+  let preflightDeferrals = 0;
+  let compactionsStarted = 0;
+  let compactionsCompleted = 0;
+  // Advances on every new user journal mutation. A pending preflight captures
+  // this generation so a newer mutation can invalidate an older countdown.
+  let mutationGeneration = 0;
 
   function emptyRecord() {
     return { schemaVersion: 1, tasks: [], completionUpserts: [], completionDeletes: [], updatedAtISO: null };
@@ -139,6 +150,7 @@
     }
     record.updatedAtISO = new Date().toISOString();
     const saved = writeRecord(record);
+    mutationGeneration += 1;
     try { core.noteStorageUserInteraction?.(); } catch (_) {}
     scheduleCompaction('mutation');
     return saved;
@@ -177,24 +189,77 @@
     catch (_) { return false; }
   }
 
-  function snapshotVerified(savedState, record) {
-    if (!savedState || typeof savedState !== 'object') return false;
-    for (const patch of record.tasks) {
-      const saved = (savedState.tasks || []).find((task) => String(task?.id || '') === String(patch.id));
-      if (!saved) return false;
-      for (const [key, value] of Object.entries(patch)) {
-        if (!valueMatches(saved[key], value)) return false;
+  function rowMatchesExpected(saved, expected) {
+    if (!saved || !expected) return false;
+    for (const [key, value] of Object.entries(expected)) {
+      if (!valueMatches(saved[key], value)) return false;
+    }
+    return true;
+  }
+
+  function compactedTaskOmissionMatches(saved, key, expectedValue, compactedStorage) {
+    if (!compactedStorage || Object.prototype.hasOwnProperty.call(saved, key)) return false;
+    if (key === 'originalDueDateISO') return valueMatches(saved.dueDateISO, expectedValue);
+    if (key === 'recurrence') return valueMatches(expectedValue, { mode: 'none' });
+    if (key === 'tags' || key === 'skipDates') return Array.isArray(expectedValue) && expectedValue.length === 0;
+    if (key === 'skills') {
+      return valueMatches(expectedValue, [{ skill: '', pts: '' }, { skill: '', pts: '' }]);
+    }
+    if (key === 'hidden') return expectedValue === false;
+    if (key === 'deletedAt' || key === 'deletedFrom' || key === 'prevStatus' || key === 'completedAtISO') {
+      return expectedValue == null;
+    }
+    if (key === 'postponedDays') return Number(expectedValue) === 0;
+    return false;
+  }
+
+  function taskPatchVerified(saved, patch, normalizedExpectedState, compactedStorage = false) {
+    if (!saved || !patch) return false;
+    const id = String(patch.id || '');
+    const normalized = normalizedExpectedState
+      ? (normalizedExpectedState.tasks || []).find((task) => String(task?.id || '') === id)
+      : null;
+    if (normalizedExpectedState && !normalized) return false;
+    for (const [key, patchValue] of Object.entries(patch)) {
+      // `deletedAt` is a legacy alias. The canonical save path may retain only
+      // `deletedAtISO`; that omission is safe only when the normalized output
+      // still carries the canonical deletion timestamp.
+      if (key === 'deletedAt' && normalized && !Object.prototype.hasOwnProperty.call(normalized, key)) {
+        if (!Object.prototype.hasOwnProperty.call(normalized, 'deletedAtISO')) return false;
+        continue;
       }
+      const expectedValue = normalized && Object.prototype.hasOwnProperty.call(normalized, key)
+        ? normalized[key]
+        : patchValue;
+      if (valueMatches(saved[key], expectedValue)) continue;
+      // Large snapshots are intentionally compacted before localStorage write.
+      // That representation omits only canonical defaults that the load path
+      // reconstructs (empty arrays, false/null defaults, zero postponements,
+      // and originalDueDateISO when it equals dueDateISO). Treat only those
+      // documented omissions as equivalent; every substantive field remains
+      // mandatory for journal verification.
+      if (compactedTaskOmissionMatches(saved, key, expectedValue, compactedStorage)) continue;
+      return false;
+    }
+    return true;
+  }
+
+  function snapshotVerified(savedState, record, normalizedExpectedState = null) {
+    if (!savedState || typeof savedState !== 'object') return false;
+    const compactedStorage = Number(savedState.__storageCompactVersion) === 1;
+    for (const patch of record.tasks) {
+      const id = String(patch.id);
+      const saved = (savedState.tasks || []).find((task) => String(task?.id || '') === id);
+      if (!taskPatchVerified(saved, patch, normalizedExpectedState, compactedStorage)) return false;
     }
     for (const patch of record.completionUpserts) {
-      const saved = (savedState.completions || []).find((entry) => String(entry?.id || '') === String(patch.id));
-      if (!saved) return false;
-      for (const [key, value] of Object.entries(patch)) {
-        if (!valueMatches(saved[key], value)) return false;
-      }
+      const id = String(patch.id);
+      const saved = (savedState.completions || []).find((entry) => String(entry?.id || '') === id);
+      if (!rowMatchesExpected(saved, patch)) return false;
     }
     for (const id of record.completionDeletes) {
       if ((savedState.completions || []).some((entry) => String(entry?.id || '') === String(id))) return false;
+      if (normalizedExpectedState && (normalizedExpectedState.completions || []).some((entry) => String(entry?.id || '') === String(id))) return false;
     }
     return true;
   }
@@ -228,6 +293,8 @@
     const current = readRecord();
     if (current.malformed || isEmpty(current.record)) return false;
     compactionRunning = true;
+    compactionsStarted += 1;
+    try { global.TaskPointsPerf?.mark?.('taskMutation.compactionStart', { reason }); } catch (_) {}
     const snapshot = clone(current.record);
     try {
       const candidate = applyRecord(persistedState(), snapshot);
@@ -242,11 +309,17 @@
       });
       if (result?.skipped || result?.blockedByQuotaCircuit || !result?.state) throw new Error('Task mutation journal compaction was not committed.');
       const saved = persistedState();
-      if (!snapshotVerified(saved, snapshot)) throw new Error('Task mutation journal compaction verification failed.');
+      // saveStateSnapshot may intentionally normalize task rows. Verify the
+      // canonical snapshot against the normalized state it actually committed,
+      // rather than requiring byte-for-byte equality with the pre-save patch.
+      if (!snapshotVerified(saved, snapshot, result.state)) throw new Error('Task mutation journal compaction verification failed.');
       clearVerifiedSnapshot(snapshot);
       retryCount = 0;
+      compactionsCompleted += 1;
+      try { global.TaskPointsPerf?.mark?.('taskMutation.compactionComplete', { reason }); } catch (_) {}
       return true;
     } catch (error) {
+      try { global.TaskPointsPerf?.mark?.('taskMutation.compactionFailed', { reason, message: String(error?.message || error) }); } catch (_) {}
       console.warn('TaskPoints retained pending task changes for a later compaction retry.', error);
       return false;
     } finally {
@@ -264,17 +337,79 @@
     }, delay) || 0;
   }
 
-  function runWhenQuiet(reason) {
-    const run = () => persistPending(reason);
-    const gate = core.whenStorageMaintenanceQuiet;
-    if (typeof gate === 'function') return Promise.resolve(gate(run, { reason: SAVE_PATH }));
+  function delay(ms) {
     return new Promise((resolve) => {
-      global.setTimeout?.(() => {
-        if (typeof global.requestIdleCallback === 'function') {
-          global.requestIdleCallback(() => resolve(run()), { timeout: 1500 });
-        } else resolve(run());
-      }, 1500);
+      if (typeof global.setTimeout === 'function') global.setTimeout(resolve, Math.max(0, Number(ms) || 0));
+      else resolve();
     });
+  }
+
+  function maintenanceStillQuiet() {
+    try {
+      return typeof core.isStorageMaintenanceQuiet !== 'function' || core.isStorageMaintenanceQuiet() === true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function runInIdleSlot(run, scheduledGeneration) {
+    return new Promise((resolve) => {
+      const invoke = () => {
+        if (scheduledGeneration !== mutationGeneration) {
+          preflightDeferrals += 1;
+          try { global.TaskPointsPerf?.mark?.('taskMutation.compactionDeferred', { stage: 'journal-mutated' }); } catch (_) {}
+          resolve(false);
+          return;
+        }
+        if (!maintenanceStillQuiet()) {
+          preflightDeferrals += 1;
+          try { global.TaskPointsPerf?.mark?.('taskMutation.compactionDeferred', { stage: 'idle-preflight' }); } catch (_) {}
+          resolve(false);
+          return;
+        }
+        resolve(run());
+      };
+      if (typeof global.requestIdleCallback === 'function') {
+        global.requestIdleCallback(invoke, { timeout: 1200 });
+      } else if (typeof global.requestAnimationFrame === 'function') {
+        global.requestAnimationFrame(() => global.setTimeout?.(invoke, 0));
+      } else {
+        global.setTimeout?.(invoke, 0);
+      }
+    });
+  }
+
+  async function runWhenQuiet(reason, scheduledGeneration) {
+    const gate = core.whenStorageMaintenanceQuiet;
+    if (typeof gate === 'function') {
+      const gateReady = await Promise.resolve(gate(() => true, { reason: SAVE_PATH }));
+      if (gateReady !== true) return false;
+    } else {
+      await delay(1500);
+      if (!maintenanceStillQuiet()) return false;
+    }
+
+    // Do not launch a long, non-yielding compression immediately after the
+    // generic 1.4 s gate. Require a full 7 s since the most recent interaction,
+    // then verify quiet again immediately before entering compression. A new
+    // journal mutation also invalidates this countdown even if an older
+    // startup-replay attempt had already passed the generic quiet gate.
+    const idleStatus = core.getStorageMaintenanceIdleStatus?.() || null;
+    const idleAgo = Math.max(0, Number(idleStatus?.lastInteractionAgoMs) || 0);
+    await delay(Math.max(0, COMPACTION_MIN_IDLE_MS - idleAgo));
+    const finalIdleStatus = core.getStorageMaintenanceIdleStatus?.() || null;
+    const finalIdleAgo = Math.max(0, Number(finalIdleStatus?.lastInteractionAgoMs) || 0);
+    if (scheduledGeneration !== mutationGeneration) {
+      preflightDeferrals += 1;
+      try { global.TaskPointsPerf?.mark?.('taskMutation.compactionDeferred', { stage: 'journal-mutated' }); } catch (_) {}
+      return false;
+    }
+    if (!maintenanceStillQuiet() || finalIdleAgo < COMPACTION_MIN_IDLE_MS) {
+      preflightDeferrals += 1;
+      try { global.TaskPointsPerf?.mark?.('taskMutation.compactionDeferred', { stage: 'sustained-quiet' }); } catch (_) {}
+      return false;
+    }
+    return runInIdleSlot(() => persistPending(reason), scheduledGeneration);
   }
 
   function scheduleCompaction(reason = 'scheduled') {
@@ -282,8 +417,9 @@
     const current = readRecord();
     if (current.malformed || isEmpty(current.record)) return false;
     compactionScheduled = true;
+    const scheduledGeneration = mutationGeneration;
     global.setTimeout?.(() => {
-      runWhenQuiet(reason)
+      runWhenQuiet(reason, scheduledGeneration)
         .then((ok) => { if (!ok && !isEmpty(readRecord().record)) scheduleRetry(); })
         .catch(() => scheduleRetry())
         .finally(() => { compactionScheduled = false; });
@@ -317,7 +453,7 @@
       if (!current.malformed && !isEmpty(current.record) && !result?.skipped && !result?.blockedByQuotaCircuit && result?.state) {
         try {
           const saved = persistedState();
-          if (snapshotVerified(saved, current.record)) clearVerifiedSnapshot(current.record);
+          if (snapshotVerified(saved, current.record, result.state)) clearVerifiedSnapshot(current.record);
         } catch (_) {}
       }
       return result;
@@ -345,7 +481,12 @@
       completionDeletes: current.record.completionDeletes.length,
       compactionScheduled,
       compactionRunning,
-      retryCount
+      retryCount,
+      minIdleBeforeCompactionMs: COMPACTION_MIN_IDLE_MS,
+      preflightDeferrals,
+      compactionsStarted,
+      compactionsCompleted,
+      mutationGeneration
     };
   };
 
