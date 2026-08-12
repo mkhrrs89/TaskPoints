@@ -43,7 +43,10 @@ function makeHarness(storageRows = {}, options = {}) {
         ? options.saveTransform(clone(candidate))
         : clone(candidate);
       storage.setItem(STORAGE_KEY, JSON.stringify(committed));
-      return { state: clone(committed) };
+      const returnedState = typeof options.returnedStateTransform === 'function'
+        ? options.returnedStateTransform(clone(committed), clone(candidate))
+        : clone(committed);
+      return { state: returnedState };
     },
     whenStorageMaintenanceQuiet(run) { quietRuns.push(run); return Promise.resolve(run()); },
     isStorageMaintenanceQuiet() { return maintenanceQuiet; },
@@ -233,4 +236,82 @@ test('verification accepts the save pipeline normalized task row and clears the 
   assert.equal(persisted.tasks[0].deletedAtISO, task.deletedAtISO);
   assert.equal('deletedAt' in persisted.tasks[0], false);
   assert.equal(persisted.completions.length, 0);
+});
+
+
+test('verification accepts canonical task defaults omitted by compact localStorage', () => {
+  const h = makeHarness({}, {
+    saveTransform(candidate) {
+      candidate.__storageCompactVersion = 1;
+      const task = candidate.tasks.find((row) => row.id === 't1');
+      if (!task) return candidate;
+      if (task.originalDueDateISO === task.dueDateISO) delete task.originalDueDateISO;
+      if (task.recurrence?.mode === 'none' && Object.keys(task.recurrence).length === 1) delete task.recurrence;
+      if (Array.isArray(task.tags) && task.tags.length === 0) delete task.tags;
+      if (Array.isArray(task.skipDates) && task.skipDates.length === 0) delete task.skipDates;
+      if (Array.isArray(task.skills) && task.skills.length === 2 && task.skills.every((slot) => slot?.skill === '' && slot?.pts === '')) delete task.skills;
+      if (task.hidden === false) delete task.hidden;
+      ['deletedAt', 'deletedFrom', 'prevStatus', 'completedAtISO'].forEach((key) => {
+        if (task[key] == null) delete task[key];
+      });
+      if (Number(task.postponedDays) === 0) delete task.postponedDays;
+      return candidate;
+    },
+    returnedStateTransform(_committed, candidate) {
+      return candidate;
+    }
+  });
+  const task = {
+    id: 't1',
+    title: 'Task',
+    status: 'active',
+    counts: 0,
+    dueDateISO: '2026-08-12',
+    originalDueDateISO: '2026-08-12',
+    recurrence: { mode: 'none' },
+    tags: [],
+    skipDates: [],
+    skills: [{ skill: '', pts: '' }, { skill: '', pts: '' }],
+    hidden: false,
+    deletedAt: null,
+    deletedAtISO: null,
+    deletedFrom: null,
+    prevStatus: null,
+    completedAtISO: null,
+    postponedDays: 0
+  };
+  h.core.journalTaskMutation({ task, completionDeleteId: 'old' });
+
+  assert.equal(h.core.flushPendingTaskMutations(), true);
+  assert.equal(h.getSaveCalls(), 1);
+  assert.equal(h.storage.getItem(JOURNAL_KEY), null, 'canonical compact omissions must verify and clear the journal');
+  const persisted = JSON.parse(h.storage.getItem(STORAGE_KEY));
+  assert.equal(persisted.__storageCompactVersion, 1);
+  assert.equal(persisted.tasks[0].dueDateISO, task.dueDateISO);
+  assert.equal('originalDueDateISO' in persisted.tasks[0], false);
+  assert.equal('hidden' in persisted.tasks[0], false);
+  assert.equal('postponedDays' in persisted.tasks[0], false);
+  assert.equal(persisted.completions.length, 0);
+});
+
+test('compact task verification still rejects substantive field corruption', () => {
+  const h = makeHarness({}, {
+    saveTransform(candidate) {
+      candidate.__storageCompactVersion = 1;
+      const task = candidate.tasks.find((row) => row.id === 't1');
+      if (task) task.status = 'trashed';
+      return candidate;
+    },
+    returnedStateTransform(_committed, candidate) {
+      return candidate;
+    }
+  });
+  h.core.journalTaskMutation({
+    task: { id: 't1', title: 'Task', status: 'active', counts: 0 },
+    completionDeleteId: 'old'
+  });
+
+  assert.equal(h.core.flushPendingTaskMutations(), false);
+  assert.equal(h.getSaveCalls(), 1);
+  assert.ok(h.storage.getItem(JOURNAL_KEY), 'journal must remain durable after substantive verification failure');
 });

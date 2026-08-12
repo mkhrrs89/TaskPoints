@@ -197,7 +197,23 @@
     return true;
   }
 
-  function taskPatchVerified(saved, patch, normalizedExpectedState) {
+  function compactedTaskOmissionMatches(saved, key, expectedValue, compactedStorage) {
+    if (!compactedStorage || Object.prototype.hasOwnProperty.call(saved, key)) return false;
+    if (key === 'originalDueDateISO') return valueMatches(saved.dueDateISO, expectedValue);
+    if (key === 'recurrence') return valueMatches(expectedValue, { mode: 'none' });
+    if (key === 'tags' || key === 'skipDates') return Array.isArray(expectedValue) && expectedValue.length === 0;
+    if (key === 'skills') {
+      return valueMatches(expectedValue, [{ skill: '', pts: '' }, { skill: '', pts: '' }]);
+    }
+    if (key === 'hidden') return expectedValue === false;
+    if (key === 'deletedAt' || key === 'deletedFrom' || key === 'prevStatus' || key === 'completedAtISO') {
+      return expectedValue == null;
+    }
+    if (key === 'postponedDays') return Number(expectedValue) === 0;
+    return false;
+  }
+
+  function taskPatchVerified(saved, patch, normalizedExpectedState, compactedStorage = false) {
     if (!saved || !patch) return false;
     const id = String(patch.id || '');
     const normalized = normalizedExpectedState
@@ -207,8 +223,7 @@
     for (const [key, patchValue] of Object.entries(patch)) {
       // `deletedAt` is a legacy alias. The canonical save path may retain only
       // `deletedAtISO`; that omission is safe only when the normalized output
-      // still carries the canonical deletion timestamp. All other journaled
-      // task semantics remain mandatory.
+      // still carries the canonical deletion timestamp.
       if (key === 'deletedAt' && normalized && !Object.prototype.hasOwnProperty.call(normalized, key)) {
         if (!Object.prototype.hasOwnProperty.call(normalized, 'deletedAtISO')) return false;
         continue;
@@ -216,17 +231,26 @@
       const expectedValue = normalized && Object.prototype.hasOwnProperty.call(normalized, key)
         ? normalized[key]
         : patchValue;
-      if (!valueMatches(saved[key], expectedValue)) return false;
+      if (valueMatches(saved[key], expectedValue)) continue;
+      // Large snapshots are intentionally compacted before localStorage write.
+      // That representation omits only canonical defaults that the load path
+      // reconstructs (empty arrays, false/null defaults, zero postponements,
+      // and originalDueDateISO when it equals dueDateISO). Treat only those
+      // documented omissions as equivalent; every substantive field remains
+      // mandatory for journal verification.
+      if (compactedTaskOmissionMatches(saved, key, expectedValue, compactedStorage)) continue;
+      return false;
     }
     return true;
   }
 
   function snapshotVerified(savedState, record, normalizedExpectedState = null) {
     if (!savedState || typeof savedState !== 'object') return false;
+    const compactedStorage = Number(savedState.__storageCompactVersion) === 1;
     for (const patch of record.tasks) {
       const id = String(patch.id);
       const saved = (savedState.tasks || []).find((task) => String(task?.id || '') === id);
-      if (!taskPatchVerified(saved, patch, normalizedExpectedState)) return false;
+      if (!taskPatchVerified(saved, patch, normalizedExpectedState, compactedStorage)) return false;
     }
     for (const patch of record.completionUpserts) {
       const id = String(patch.id);
