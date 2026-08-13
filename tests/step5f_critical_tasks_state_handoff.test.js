@@ -13,12 +13,14 @@ function between(source, startNeedle, endNeedle) {
   return source.slice(start, end);
 }
 
-test('critical task list accepts a task-bearing state and preserves stored-state fallback', () => {
+test('critical task list accepts a task-bearing state, overlays pending task mutations, and preserves stored-state fallback', () => {
   const body = between(toolbar, 'function getCriticalDueList', 'function updateCriticalTasksIsland');
   assert.match(body, /Array\.isArray\(stateInput\.tasks\)/);
-  assert.match(body, /hasProvidedState \? stateInput : loadRawStateFallback\(\)/);
+  assert.match(body, /TaskPointsCore\?\.applyPendingTaskMutations/);
+  assert.match(body, /applyPendingTaskMutations\(stateInput\)/);
+  assert.match(body, /loadRawStateFallback\(\)/);
   assert.match(body, /criticalTasksIsland\.stateResolved/);
-  assert.match(body, /provided-state/);
+  assert.match(body, /provided-state\+journal/);
   assert.match(body, /stored-state/);
 });
 
