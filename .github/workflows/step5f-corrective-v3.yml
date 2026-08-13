@@ -1,0 +1,75 @@
+name: Step 5F corrective patch v3
+
+on:
+  push:
+    branches:
+      - agent/step5f-post-action-read-cache
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/step5f-post-action-read-cache
+          fetch-depth: 0
+
+      - name: Apply corrective Step 5F patch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64
+
+          home_path = Path('index.html')
+          home = home_path.read_text()
+          reps = [
+              ('function renderTasks(){', 'function renderTasks(stateInput = null){'),
+              ("  persistTaskActionMutation(t, 'bump-one-day');\n  renderTasks();\n  window.updateCriticalTasksIsland?.(state);", "  persistTaskActionMutation(t, 'bump-one-day');\n  renderTasks(state);"),
+              ("  persistTaskActionMutation(t, 'wont-do');\n  renderTasks();\n  window.updateCriticalTasksIsland?.(state);", "  persistTaskActionMutation(t, 'wont-do');\n  renderTasks(state);"),
+              ("  persistTaskActionMutation(t, 'edit-save');\n  renderTasks();\n  window.updateCriticalTasksIsland?.(state);", "  persistTaskActionMutation(t, 'edit-save');\n  renderTasks(state);"),
+              ("  container.appendChild(fragment);\n  initTaskListDelegation();\n  updateTaskActionSheetVisibility();\n  window.updateCriticalTasksIsland?.();\n}", "  container.appendChild(fragment);\n  initTaskListDelegation();\n  updateTaskActionSheetVisibility();\n  window.updateCriticalTasksIsland?.(stateInput);\n}"),
+          ]
+          for old, new in reps:
+              n = home.count(old)
+              if n != 1:
+                  raise SystemExit(f'expected one Home match, found {n}: {old[:70]}')
+              home = home.replace(old, new, 1)
+          home_path.write_text(home)
+
+          toolbar_path = Path('toolbar.js')
+          toolbar = toolbar_path.read_text()
+          old_state = "    const state = hasProvidedState ? stateInput : loadRawStateFallback();"
+          new_state = "    let state;\n    let source = 'stored-state';\n    if (hasProvidedState) {\n      if (typeof window.TaskPointsCore?.applyPendingTaskMutations === 'function') {\n        state = window.TaskPointsCore.applyPendingTaskMutations(stateInput);\n        source = 'provided-state+journal';\n      } else {\n        state = stateInput;\n        source = 'provided-state';\n      }\n    } else {\n      state = loadRawStateFallback();\n    }"
+          if toolbar.count(old_state) != 1:
+              raise SystemExit('expected one toolbar state assignment')
+          toolbar = toolbar.replace(old_state, new_state, 1)
+          old_source = "        source: hasProvidedState ? 'provided-state' : 'stored-state',"
+          if toolbar.count(old_source) != 1:
+              raise SystemExit('expected one toolbar PERF source expression')
+          toolbar = toolbar.replace(old_source, '        source,', 1)
+          toolbar_path.write_text(toolbar)
+
+          test_b64 = 'Y29uc3QgdGVzdCA9IHJlcXVpcmUoJ25vZGU6dGVzdCcpOwpjb25zdCBhc3NlcnQgPSByZXF1aXJlKCdub2RlOmFzc2VydC9zdHJpY3QnKTsKY29uc3QgZnMgPSByZXF1aXJlKCdub2RlOmZzJyk7Cgpjb25zdCB0b29sYmFyID0gZnMucmVhZEZpbGVTeW5jKCd0b29sYmFyLmpzJywgJ3V0ZjgnKTsKY29uc3QgaG9tZSA9IGZzLnJlYWRGaWxlU3luYygnaW5kZXguaHRtbCcsICd1dGY4Jyk7CgpmdW5jdGlvbiBiZXR3ZWVuKHNvdXJjZSwgc3RhcnROZWVkbGUsIGVuZE5lZWRsZSkgewogIGNvbnN0IHN0YXJ0ID0gc291cmNlLmluZGV4T2Yoc3RhcnROZWVkbGUpOwogIGFzc2VydC5ub3RFcXVhbChzdGFydCwgLTEsIGBtaXNzaW5nICR7c3RhcnROZWVkbGV9YCk7CiAgY29uc3QgZW5kID0gc291cmNlLmluZGV4T2YoZW5kTmVlZGxlLCBzdGFydCArIHN0YXJ0TmVlZGxlLmxlbmd0aCk7CiAgYXNzZXJ0Lm5vdEVxdWFsKGVuZCwgLTEsIGBtaXNzaW5nICR7ZW5kTmVlZGxlfWApOwogIHJldHVybiBzb3VyY2Uuc2xpY2Uoc3RhcnQsIGVuZCk7Cn0KCnRlc3QoJ2NyaXRpY2FsIHRhc2sgbGlzdCBvdmVybGF5cyBwZW5kaW5nIG11dGF0aW9ucyBvbiBwcm92aWRlZCBzdGF0ZSBhbmQgcHJlc2VydmVzIHN0b3JlZC1zdGF0ZSBmYWxsYmFjaycsICgpID0+IHsKICBjb25zdCBib2R5ID0gYmV0d2Vlbih0b29sYmFyLCAnZnVuY3Rpb24gZ2V0Q3JpdGljYWxEdWVMaXN0JywgJ2Z1bmN0aW9uIHVwZGF0ZUNyaXRpY2FsVGFza3NJc2xhbmQnKTsKICBhc3NlcnQubWF0Y2goYm9keSwgL0FycmF5XC5pc0FycmF5XChzdGF0ZUlucHV0XC50YXNrc1wpLyk7CiAgYXNzZXJ0Lm1hdGNoKGJvZHksIC93aW5kb3dcLlRhc2tQb2ludHNDb3JlXD9cLmFwcGx5UGVuZGluZ1Rhc2tNdXRhdGlvbnMvKTsKICBhc3NlcnQubWF0Y2goYm9keSwgL2FwcGx5UGVuZGluZ1Rhc2tNdXRhdGlvbnNcKHN0YXRlSW5wdXRcKS8pOwogIGFzc2VydC5tYXRjaChib2R5LCAvc3RhdGUgPSBsb2FkUmF3U3RhdGVGYWxsYmFja1woXCkvKTsKICBhc3NlcnQubWF0Y2goYm9keSwgL3Byb3ZpZGVkLXN0YXRlXCtqb3VybmFsLyk7CiAgYXNzZXJ0Lm1hdGNoKGJvZHksIC9wcm92aWRlZC1zdGF0ZS8pOwogIGFzc2VydC5tYXRjaChib2R5LCAvc3RvcmVkLXN0YXRlLyk7CiAgYXNzZXJ0Lm1hdGNoKGJvZHksIC9jcml0aWNhbFRhc2tzSXNsYW5kXC5zdGF0ZVJlc29sdmVkLyk7Cn0pOwoKdGVzdCgncmVuZGVyVGFza3MgZm9yd2FyZHMgb3B0aW9uYWwgc3RhdGUgdG8gaXRzIGV4aXN0aW5nIENyaXRpY2FsIFRhc2tzIHJlZnJlc2gnLCAoKSA9PiB7CiAgY29uc3QgYm9keSA9IGJldHdlZW4oaG9tZSwgJ2Z1bmN0aW9uIHJlbmRlclRhc2tzJywgJ2Z1bmN0aW9uIGZvcm1hdEhvbWVTdHJlYWtCb251c1ZhbHVlJyk7CiAgYXNzZXJ0Lm1hdGNoKGJvZHksIC9mdW5jdGlvbiByZW5kZXJUYXNrc1woc3RhdGVJbnB1dCA9IG51bGxcKS8pOwogIGFzc2VydC5tYXRjaChib2R5LCAvdXBkYXRlQ3JpdGljYWxUYXNrc0lzbGFuZFw/XC5cKHN0YXRlSW5wdXRcKS8pOwp9KTsKCnRlc3QoJ2NyaXRpY2FsIGlzbGFuZCBmb3J3YXJkcyBvcHRpb25hbCBzdGF0ZSB0byBpdHMgbGlzdCBidWlsZGVyJywgKCkgPT4gewogIGNvbnN0IGJvZHkgPSBiZXR3ZWVuKHRvb2xiYXIsICdmdW5jdGlvbiB1cGRhdGVDcml0aWNhbFRhc2tzSXNsYW5kJywgJ3dpbmRvdy50cFVwZGF0ZUNyaXRpY2FsSXNsYW5kJyk7CiAgYXNzZXJ0Lm1hdGNoKGJvZHksIC9mdW5jdGlvbiB1cGRhdGVDcml0aWNhbFRhc2tzSXNsYW5kXChzdGF0ZUlucHV0ID0gbnVsbFwpLyk7CiAgYXNzZXJ0Lm1hdGNoKGJvZHksIC9nZXRDcml0aWNhbER1ZUxpc3RcKHN0YXRlSW5wdXRcKS8pOwp9KTsKCmZvciAoY29uc3QgW2xhYmVsLCBzdGFydE5lZWRsZSwgZW5kTmVlZGxlLCBhY3Rpb25dIG9mIFsKICBbJ0VkaXQgU2F2ZScsICdmdW5jdGlvbiBzYXZlVGFza0VkaXQnLCAnZnVuY3Rpb24gaGlkZVRhc2snLCAnZWRpdC1zYXZlJ10sCiAgWycrMSBEYXknLCAnZnVuY3Rpb24gYnVtcFRhc2tPbmVEYXknLCAnZnVuY3Rpb24gYXBwbHlQb3N0cG9uZVRvVGFzaycsICdidW1wLW9uZS1kYXknXSwKICBbIldvbid0IERvIiwgJ2Z1bmN0aW9uIHdvbnREb01haW4nLCAnZnVuY3Rpb24gcHJlZmVyc1JlZHVjZWRUYXNrTW90aW9uJywgJ3dvbnQtZG8nXQpdKSB7CiAgdGVzdChgJHtsYWJlbH0gcmVuZGVycyBvbmNlIHdpdGggY3VycmVudCBIb21lIHN0YXRlIGFuZCBkb2VzIG5vdCBzZXBhcmF0ZWx5IHJlZnJlc2ggdGhlIGlzbGFuZGAsICgpID0+IHsKICAgIGNvbnN0IGJvZHkgPSBiZXR3ZWVuKGhvbWUsIHN0YXJ0TmVlZGxlLCBlbmROZWVkbGUpOwogICAgYXNzZXJ0Lm1hdGNoKGJvZHksIG5ldyBSZWdFeHAoYHBlcnNpc3RUYXNrQWN0aW9uTXV0YXRpb25cXCh0LCAnJHthY3Rpb259J1xcKWApKTsKICAgIGFzc2VydC5tYXRjaChib2R5LCAvcmVuZGVyVGFza3NcKHN0YXRlXCkvKTsKICAgIGFzc2VydC5kb2VzTm90TWF0Y2goYm9keSwgL3VwZGF0ZUNyaXRpY2FsVGFza3NJc2xhbmRcP1wuXChzdGF0ZVwpLyk7CiAgfSk7Cn0K'
+          Path('tests/step5f_critical_tasks_state_handoff.test.js').write_bytes(base64.b64decode(test_b64))
+          PY
+
+      - name: Run Step 5F validation
+        run: |
+          node --check toolbar.js
+          node --check task_mutation_journal.js
+          node --test tests/task_action_fast_paths.test.js tests/task_mutation_journal_contract.test.js tests/step5f_critical_tasks_state_handoff.test.js
+          git diff --check
+
+      - name: Commit corrective patch and remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name "chatgpt-codex-connector[bot]"
+          git config user.email "199175422+chatgpt-codex-connector[bot]@users.noreply.github.com"
+          git rm .github/workflows/step5f-corrective-v3.yml
+          git add index.html toolbar.js tests/step5f_critical_tasks_state_handoff.test.js
+          git commit -m "Fix Step 5F duplicate critical state read"
+          git push origin HEAD:agent/step5f-post-action-read-cache
