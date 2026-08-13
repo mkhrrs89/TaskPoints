@@ -12109,6 +12109,17 @@ function clearForm(){
 }
 
 
+function assertTaskActionMutationWritable(){
+try {
+  TaskPointsCore?.assertTaskMutationJournalWritable?.();
+  return true;
+} catch (error) {
+  console.warn('Task action paused because its durable journal is unavailable.', error);
+  try { alert(error?.message || 'This task action is temporarily unavailable.'); } catch (_) {}
+  return false;
+}
+}
+
 function persistTaskActionMutation(task, action){
   if (!task) return;
   if (TaskPointsCore?.journalTaskMutation) {
@@ -12121,7 +12132,7 @@ function persistTaskActionMutation(task, action){
 
 function bumpTaskOneDay(id){
   const t = state.tasks.find(x => x.id === id);
-  if (!t) return;
+  if (!t || !assertTaskActionMutationWritable()) return;
   bumpOneDay(t);
   persistTaskActionMutation(t, 'bump-one-day');
   renderTasks();
@@ -12158,7 +12169,7 @@ function postponeAllOverdueTasks(){
   window.updateCriticalTasksIsland?.();
 }
 function wontDoMain(id){
-  const t=state.tasks.find(x=>x.id===id); if(!t) return;
+  const t=state.tasks.find(x=>x.id===id); if(!t || !assertTaskActionMutationWritable()) return;
   const mode = (t.recurrence && t.recurrence.mode) || 'none';
   if(mode==='none'){
     if(!confirm('Won’t do this task? It will be removed.')) return;
@@ -12322,7 +12333,7 @@ function editTask(id){
   } catch (_) {}
 }
 function saveTaskEdit(id,card){
-  const t=state.tasks.find(x=>x.id===id); if(!t) return;
+  const t=state.tasks.find(x=>x.id===id); if(!t || !assertTaskActionMutationWritable()) return;
   const titleInput=card.querySelector('input[data-field="title"]');
   const ptsInput=card.querySelector('input[data-field="points"]');
   const dueInput=card.querySelector('input[data-field="due"]');
