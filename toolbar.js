@@ -3563,8 +3563,19 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  function getCriticalDueList() {
-    const state = loadRawStateFallback();
+  function getCriticalDueList(stateInput = null) {
+    const hasProvidedState = Boolean(
+      stateInput && typeof stateInput === 'object' && Array.isArray(stateInput.tasks)
+    );
+    const resolveStartedAt = window.performance?.now?.() ?? 0;
+    const state = hasProvidedState ? stateInput : loadRawStateFallback();
+    try {
+      const endedAt = window.performance?.now?.() ?? resolveStartedAt;
+      window.TaskPointsPerf?.mark?.('criticalTasksIsland.stateResolved', {
+        source: hasProvidedState ? 'provided-state' : 'stored-state',
+        durationMs: Math.round((endedAt - resolveStartedAt) * 100) / 100
+      });
+    } catch (_) {}
     const todayKey = todayKeyFallback();
     const tasks = Array.isArray(state.tasks) ? state.tasks : [];
     const list = [];
@@ -3676,12 +3687,12 @@ function updateCritIslandStacking() {
   }
 }
 
-  function updateCriticalTasksIsland() {
+  function updateCriticalTasksIsland(stateInput = null) {
     const island = document.getElementById('criticalTasksIsland');
     const mark = document.getElementById('criticalTasksIslandMark');
     if (!island || !mark) return;
 
-    const list = getCriticalDueList();
+    const list = getCriticalDueList(stateInput);
     const count = list.length;
     if (count <= 0) {
       island.style.display = 'none';

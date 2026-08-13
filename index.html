@@ -12136,7 +12136,7 @@ function bumpTaskOneDay(id){
   bumpOneDay(t);
   persistTaskActionMutation(t, 'bump-one-day');
   renderTasks();
-  window.updateCriticalTasksIsland?.();
+  window.updateCriticalTasksIsland?.(state);
 }
 
 function applyPostponeToTask(task){
@@ -12190,7 +12190,7 @@ function wontDoMain(id){
   }
   persistTaskActionMutation(t, 'wont-do');
   renderTasks();
-  window.updateCriticalTasksIsland?.();
+  window.updateCriticalTasksIsland?.(state);
 }
 
 function prefersReducedTaskMotion(){
@@ -12388,7 +12388,7 @@ if (repSel) {
   editingTaskId=null;
   persistTaskActionMutation(t, 'edit-save');
   renderTasks();
-  window.updateCriticalTasksIsland?.();
+  window.updateCriticalTasksIsland?.(state);
 }
 
 function hideTask(id){
