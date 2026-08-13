@@ -10,7 +10,6 @@ permissions:
 
 jobs:
   apply:
-    if: github.event.head_commit.message != 'Defer task action snapshot compression'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -124,7 +123,7 @@ const html = fs.readFileSync('index.html', 'utf8');
 function functionSlice(name, nextName) {
   const start = html.indexOf(`function ${name}`);
   assert.notEqual(start, -1, `${name} should exist`);
-  const end = nextName ? html.indexOf(`function ${nextName}`, start + 1) : -1;
+  const end = html.indexOf(`function ${nextName}`, start + 1);
   assert.notEqual(end, -1, `${nextName} should follow ${name}`);
   return html.slice(start, end);
 }
@@ -154,7 +153,7 @@ test("Won't Do journals only the changed task and preserves the confirmation", (
   assert.doesNotMatch(body, /\bsave\(\)/);
 });
 
-test('task mutation helper falls back to the legacy save only when journal support is absent', () => {
+test('task mutation helper falls back to legacy save only when journal support is absent', () => {
   const body = functionSlice('persistTaskActionMutation', 'bumpTaskOneDay');
   assert.match(body, /TaskPointsCore\?\.journalTaskMutation/);
   assert.match(body, /TaskPointsCore\.journalTaskMutation\(\{ task \}\)/);
