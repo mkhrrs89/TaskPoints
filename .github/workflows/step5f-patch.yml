@@ -1,0 +1,30 @@
+name: step5f-patch
+on:
+  push:
+    branches: [agent/step5f-post-action-read-cache]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/step5f-post-action-read-cache
+      - name: Apply Step 5F patch
+        run: python tools/step5f_patch.py
+      - name: Run focused tests
+        run: |
+          node --check toolbar.js
+          node --check task_mutation_journal.js
+          node --test tests/task_action_fast_paths.test.js tests/task_mutation_journal_contract.test.js tests/step5f_critical_tasks_state_handoff.test.js
+          git diff --check
+      - name: Commit Step 5F
+        run: |
+          rm -f tools/step5f_patch.py .github/workflows/step5f-patch.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Avoid redundant critical task state reads'
+          git push origin HEAD:agent/step5f-post-action-read-cache
