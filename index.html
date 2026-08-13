@@ -12109,11 +12109,32 @@ function clearForm(){
 }
 
 
+function assertTaskActionMutationWritable(){
+try {
+  TaskPointsCore?.assertTaskMutationJournalWritable?.();
+  return true;
+} catch (error) {
+  console.warn('Task action paused because its durable journal is unavailable.', error);
+  try { alert(error?.message || 'This task action is temporarily unavailable.'); } catch (_) {}
+  return false;
+}
+}
+
+function persistTaskActionMutation(task, action){
+  if (!task) return;
+  if (TaskPointsCore?.journalTaskMutation) {
+    TaskPointsCore.journalTaskMutation({ task });
+    try { window.TaskPointsPerf?.mark?.('taskAction.journaled', { action, taskId: task.id }); } catch (_) {}
+  } else {
+    save();
+  }
+}
+
 function bumpTaskOneDay(id){
   const t = state.tasks.find(x => x.id === id);
-  if (!t) return;
+  if (!t || !assertTaskActionMutationWritable()) return;
   bumpOneDay(t);
-  save();
+  persistTaskActionMutation(t, 'bump-one-day');
   renderTasks();
   window.updateCriticalTasksIsland?.();
 }
@@ -12148,7 +12169,7 @@ function postponeAllOverdueTasks(){
   window.updateCriticalTasksIsland?.();
 }
 function wontDoMain(id){
-  const t=state.tasks.find(x=>x.id===id); if(!t) return;
+  const t=state.tasks.find(x=>x.id===id); if(!t || !assertTaskActionMutationWritable()) return;
   const mode = (t.recurrence && t.recurrence.mode) || 'none';
   if(mode==='none'){
     if(!confirm('Won’t do this task? It will be removed.')) return;
@@ -12167,7 +12188,8 @@ function wontDoMain(id){
       t.dueDateISO = nextKey;
     }
   }
-  save(); renderTasks();
+  persistTaskActionMutation(t, 'wont-do');
+  renderTasks();
   window.updateCriticalTasksIsland?.();
 }
 
@@ -12299,9 +12321,19 @@ function completeTask(id){
 
 
 
-function editTask(id){ editingTaskId = id; renderTasks(); }
+function editTask(id){
+  const startedAt = performance.now();
+  editingTaskId = id;
+  renderTasks();
+  try {
+    window.TaskPointsPerf?.mark?.('taskAction.editOpenComplete', {
+      taskId: id,
+      durationMs: Math.round((performance.now() - startedAt) * 100) / 100
+    });
+  } catch (_) {}
+}
 function saveTaskEdit(id,card){
-  const t=state.tasks.find(x=>x.id===id); if(!t) return;
+  const t=state.tasks.find(x=>x.id===id); if(!t || !assertTaskActionMutationWritable()) return;
   const titleInput=card.querySelector('input[data-field="title"]');
   const ptsInput=card.querySelector('input[data-field="points"]');
   const dueInput=card.querySelector('input[data-field="due"]');
@@ -12354,7 +12386,8 @@ if (repSel) {
 
   t.updatedAtISO = new Date().toISOString();
   editingTaskId=null;
-  save(); renderTasks();
+  persistTaskActionMutation(t, 'edit-save');
+  renderTasks();
   window.updateCriticalTasksIsland?.();
 }
 
