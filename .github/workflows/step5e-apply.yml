@@ -1,0 +1,181 @@
+name: Step 5E apply
+
+on:
+  push:
+    branches:
+      - agent/step5e-task-action-fast-paths
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.head_commit.message != 'Defer task action snapshot compression'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/step5e-task-action-fast-paths
+          fetch-depth: 0
+
+      - name: Apply Step 5E patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('index.html')
+          text = path.read_text()
+
+          def replace_once(old, new, label):
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected 1 exact match, found {count}')
+              text = text.replace(old, new, 1)
+
+          replace_once(
+              "function editTask(id){ editingTaskId = id; renderTasks(); }",
+              """function editTask(id){
+  const startedAt = performance.now();
+  editingTaskId = id;
+  renderTasks();
+  try {
+    window.TaskPointsPerf?.mark?.('taskAction.editOpenComplete', {
+      taskId: id,
+      durationMs: Math.round((performance.now() - startedAt) * 100) / 100
+    });
+  } catch (_) {}
+}""",
+              'editTask instrumentation'
+          )
+
+          helper_anchor = "function bumpTaskOneDay(id){"
+          if text.count(helper_anchor) != 1:
+              raise SystemExit(f'fast-path helper anchor: expected 1 match, found {text.count(helper_anchor)}')
+          helper = """function persistTaskActionMutation(task, action){
+  if (!task) return;
+  if (TaskPointsCore?.journalTaskMutation) {
+    TaskPointsCore.journalTaskMutation({ task });
+    try { window.TaskPointsPerf?.mark?.('taskAction.journaled', { action, taskId: task.id }); } catch (_) {}
+  } else {
+    save();
+  }
+}
+
+"""
+          text = text.replace(helper_anchor, helper + helper_anchor, 1)
+
+          replace_once(
+              """  t.updatedAtISO = new Date().toISOString();
+  editingTaskId=null;
+  save(); renderTasks();
+  window.updateCriticalTasksIsland?.();
+}""",
+              """  t.updatedAtISO = new Date().toISOString();
+  editingTaskId=null;
+  persistTaskActionMutation(t, 'edit-save');
+  renderTasks();
+  window.updateCriticalTasksIsland?.();
+}""",
+              'edit save fast path'
+          )
+
+          replace_once(
+              """  bumpOneDay(t);
+  save();
+  renderTasks();
+  window.updateCriticalTasksIsland?.();
+}""",
+              """  bumpOneDay(t);
+  persistTaskActionMutation(t, 'bump-one-day');
+  renderTasks();
+  window.updateCriticalTasksIsland?.();
+}""",
+              '+1 day fast path'
+          )
+
+          replace_once(
+              """  }
+  save(); renderTasks();
+  window.updateCriticalTasksIsland?.();
+}
+
+function prefersReducedTaskMotion""",
+              """  }
+  persistTaskActionMutation(t, 'wont-do');
+  renderTasks();
+  window.updateCriticalTasksIsland?.();
+}
+
+function prefersReducedTaskMotion""",
+              "Won't Do fast path"
+          )
+
+          path.write_text(text)
+
+          test = Path('tests/task_action_fast_paths.test.js')
+          test.write_text(r'''const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+
+const html = fs.readFileSync('index.html', 'utf8');
+
+function functionSlice(name, nextName) {
+  const start = html.indexOf(`function ${name}`);
+  assert.notEqual(start, -1, `${name} should exist`);
+  const end = nextName ? html.indexOf(`function ${nextName}`, start + 1) : -1;
+  assert.notEqual(end, -1, `${nextName} should follow ${name}`);
+  return html.slice(start, end);
+}
+
+test('task edit opening emits a dedicated timing marker', () => {
+  const body = functionSlice('editTask', 'saveTaskEdit');
+  assert.match(body, /taskAction\.editOpenComplete/);
+  assert.match(body, /renderTasks\(\)/);
+});
+
+test('task edit save journals only the changed task instead of full save', () => {
+  const body = functionSlice('saveTaskEdit', 'hideTask');
+  assert.match(body, /persistTaskActionMutation\(t, 'edit-save'\)/);
+  assert.doesNotMatch(body, /\bsave\(\)\s*;\s*renderTasks\(\)/);
+});
+
+test('+1 day journals only the changed task instead of full save', () => {
+  const body = functionSlice('bumpTaskOneDay', 'applyPostponeToTask');
+  assert.match(body, /persistTaskActionMutation\(t, 'bump-one-day'\)/);
+  assert.doesNotMatch(body, /\bsave\(\)/);
+});
+
+test("Won't Do journals only the changed task and preserves the confirmation", () => {
+  const body = functionSlice('wontDoMain', 'prefersReducedTaskMotion');
+  assert.match(body, /confirm\('Won’t do this task\? It will be removed\.'\)/);
+  assert.match(body, /persistTaskActionMutation\(t, 'wont-do'\)/);
+  assert.doesNotMatch(body, /\bsave\(\)/);
+});
+
+test('task mutation helper falls back to the legacy save only when journal support is absent', () => {
+  const body = functionSlice('persistTaskActionMutation', 'bumpTaskOneDay');
+  assert.match(body, /TaskPointsCore\?\.journalTaskMutation/);
+  assert.match(body, /TaskPointsCore\.journalTaskMutation\(\{ task \}\)/);
+  assert.match(body, /else\s*\{\s*save\(\)/);
+});
+''')
+          PY
+
+      - name: Validate Step 5E
+        shell: bash
+        run: |
+          node --check task_mutation_journal.js
+          node --test tests/task_mutation_journal_contract.test.js tests/task_action_fast_paths.test.js
+          git diff --check
+
+      - name: Commit validated patch
+        shell: bash
+        run: |
+          rm .github/workflows/step5e-apply.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html tests/task_action_fast_paths.test.js .github/workflows/step5e-apply.yml
+          git commit -m "Defer task action snapshot compression"
+          git push origin HEAD:agent/step5e-task-action-fast-paths
