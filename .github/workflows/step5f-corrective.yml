@@ -1,0 +1,160 @@
+name: Step 5F corrective patch
+
+on:
+  push:
+    branches:
+      - agent/step5f-post-action-read-cache
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/step5f-post-action-read-cache
+          fetch-depth: 0
+
+      - name: Apply corrective Step 5F patch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          home_path = Path('index.html')
+          home = home_path.read_text()
+
+          replacements = [
+              ('function renderTasks(){', 'function renderTasks(stateInput = null){'),
+              ("  persistTaskActionMutation(t, 'bump-one-day');\n  renderTasks();\n  window.updateCriticalTasksIsland?.(state);", "  persistTaskActionMutation(t, 'bump-one-day');\n  renderTasks(state);"),
+              ("  persistTaskActionMutation(t, 'wont-do');\n  renderTasks();\n  window.updateCriticalTasksIsland?.(state);", "  persistTaskActionMutation(t, 'wont-do');\n  renderTasks(state);"),
+              ("  persistTaskActionMutation(t, 'edit-save');\n  renderTasks();\n  window.updateCriticalTasksIsland?.(state);", "  persistTaskActionMutation(t, 'edit-save');\n  renderTasks(state);"),
+              ("  container.appendChild(fragment);\n  initTaskListDelegation();\n  updateTaskActionSheetVisibility();\n  window.updateCriticalTasksIsland?.();\n}", "  container.appendChild(fragment);\n  initTaskListDelegation();\n  updateTaskActionSheetVisibility();\n  window.updateCriticalTasksIsland?.(stateInput);\n}"),
+          ]
+          for old, new in replacements:
+              count = home.count(old)
+              if count != 1:
+                  raise SystemExit(f'expected exactly one Home match for {old[:60]!r}, found {count}')
+              home = home.replace(old, new, 1)
+          home_path.write_text(home)
+
+          toolbar_path = Path('toolbar.js')
+          toolbar = toolbar_path.read_text()
+          old = """  function getCriticalDueList(stateInput = null) {
+    const hasProvidedState = Boolean(
+      stateInput && typeof stateInput === 'object' && Array.isArray(stateInput.tasks)
+    );
+    const resolveStartedAt = window.performance?.now?.() ?? 0;
+    const state = hasProvidedState ? stateInput : loadRawStateFallback();
+    try {
+      const endedAt = window.performance?.now?.() ?? resolveStartedAt;
+      window.TaskPointsPerf?.mark?.('criticalTasksIsland.stateResolved', {
+        source: hasProvidedState ? 'provided-state' : 'stored-state',
+        durationMs: Math.round((endedAt - resolveStartedAt) * 100) / 100
+      });
+    } catch (_) {}
+"""
+          new = """  function getCriticalDueList(stateInput = null) {
+    const hasProvidedState = Boolean(
+      stateInput && typeof stateInput === 'object' && Array.isArray(stateInput.tasks)
+    );
+    const resolveStartedAt = window.performance?.now?.() ?? 0;
+    let state;
+    let source = 'stored-state';
+    if (hasProvidedState) {
+      if (typeof window.TaskPointsCore?.applyPendingTaskMutations === 'function') {
+        state = window.TaskPointsCore.applyPendingTaskMutations(stateInput);
+        source = 'provided-state+journal';
+      } else {
+        state = stateInput;
+        source = 'provided-state';
+      }
+    } else {
+      state = loadRawStateFallback();
+    }
+    try {
+      const endedAt = window.performance?.now?.() ?? resolveStartedAt;
+      window.TaskPointsPerf?.mark?.('criticalTasksIsland.stateResolved', {
+        source,
+        durationMs: Math.round((endedAt - resolveStartedAt) * 100) / 100
+      });
+    } catch (_) {}
+"""
+          count = toolbar.count(old)
+          if count != 1:
+              raise SystemExit(f'expected one toolbar state-resolution block, found {count}')
+          toolbar_path.write_text(toolbar.replace(old, new, 1))
+
+          test_path = Path('tests/step5f_critical_tasks_state_handoff.test.js')
+          test_path.write_text(r'''const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+
+const toolbar = fs.readFileSync('toolbar.js', 'utf8');
+const home = fs.readFileSync('index.html', 'utf8');
+
+function between(source, startNeedle, endNeedle) {
+  const start = source.indexOf(startNeedle);
+  assert.notEqual(start, -1, `missing ${startNeedle}`);
+  const end = source.indexOf(endNeedle, start + startNeedle.length);
+  assert.notEqual(end, -1, `missing ${endNeedle}`);
+  return source.slice(start, end);
+}
+
+test('critical task list overlays pending mutations on provided state and preserves stored-state fallback', () => {
+  const body = between(toolbar, 'function getCriticalDueList', 'function updateCriticalTasksIsland');
+  assert.match(body, /Array\.isArray\(stateInput\.tasks\)/);
+  assert.match(body, /window\.TaskPointsCore\?\.applyPendingTaskMutations/);
+  assert.match(body, /applyPendingTaskMutations\(stateInput\)/);
+  assert.match(body, /state = loadRawStateFallback\(\)/);
+  assert.match(body, /provided-state\+journal/);
+  assert.match(body, /provided-state/);
+  assert.match(body, /stored-state/);
+  assert.match(body, /criticalTasksIsland\.stateResolved/);
+});
+
+test('renderTasks forwards optional state to its existing Critical Tasks refresh', () => {
+  const body = between(home, 'function renderTasks', 'function formatHomeStreakBonusValue');
+  assert.match(body, /function renderTasks\(stateInput = null\)/);
+  assert.match(body, /updateCriticalTasksIsland\?\.\(stateInput\)/);
+});
+
+test('critical island forwards optional state to its list builder', () => {
+  const body = between(toolbar, 'function updateCriticalTasksIsland', 'window.tpUpdateCriticalIsland');
+  assert.match(body, /function updateCriticalTasksIsland\(stateInput = null\)/);
+  assert.match(body, /getCriticalDueList\(stateInput\)/);
+});
+
+for (const [label, startNeedle, endNeedle, action] of [
+  ['Edit Save', 'function saveTaskEdit', 'function hideTask', 'edit-save'],
+  ['+1 Day', 'function bumpTaskOneDay', 'function applyPostponeToTask', 'bump-one-day'],
+  ["Won't Do", 'function wontDoMain', 'function prefersReducedTaskMotion', 'wont-do']
+]) {
+  test(`${label} renders once with current Home state and does not separately refresh the island`, () => {
+    const body = between(home, startNeedle, endNeedle);
+    assert.match(body, new RegExp(`persistTaskActionMutation\\(t, '${action}'\\)`));
+    assert.match(body, /renderTasks\(state\)/);
+    assert.doesNotMatch(body, /updateCriticalTasksIsland\?\.\(state\)/);
+  });
+}
+''')
+          PY
+
+      - name: Run Step 5F validation
+        run: |
+          node --check toolbar.js
+          node --check task_mutation_journal.js
+          node --test tests/task_action_fast_paths.test.js tests/task_mutation_journal_contract.test.js tests/step5f_critical_tasks_state_handoff.test.js
+          git diff --check
+
+      - name: Commit corrective patch and remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name "chatgpt-codex-connector[bot]"
+          git config user.email "199175422+chatgpt-codex-connector[bot]@users.noreply.github.com"
+          git rm .github/workflows/step5f-corrective.yml
+          git add index.html toolbar.js tests/step5f_critical_tasks_state_handoff.test.js
+          git commit -m "Fix Step 5F duplicate critical state read"
+          git push origin HEAD:agent/step5f-post-action-read-cache
