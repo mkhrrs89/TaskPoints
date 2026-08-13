@@ -12109,11 +12109,21 @@ function clearForm(){
 }
 
 
+function persistTaskActionMutation(task, action){
+  if (!task) return;
+  if (TaskPointsCore?.journalTaskMutation) {
+    TaskPointsCore.journalTaskMutation({ task });
+    try { window.TaskPointsPerf?.mark?.('taskAction.journaled', { action, taskId: task.id }); } catch (_) {}
+  } else {
+    save();
+  }
+}
+
 function bumpTaskOneDay(id){
   const t = state.tasks.find(x => x.id === id);
   if (!t) return;
   bumpOneDay(t);
-  save();
+  persistTaskActionMutation(t, 'bump-one-day');
   renderTasks();
   window.updateCriticalTasksIsland?.();
 }
@@ -12167,7 +12177,8 @@ function wontDoMain(id){
       t.dueDateISO = nextKey;
     }
   }
-  save(); renderTasks();
+  persistTaskActionMutation(t, 'wont-do');
+  renderTasks();
   window.updateCriticalTasksIsland?.();
 }
 
@@ -12299,7 +12310,17 @@ function completeTask(id){
 
 
 
-function editTask(id){ editingTaskId = id; renderTasks(); }
+function editTask(id){
+  const startedAt = performance.now();
+  editingTaskId = id;
+  renderTasks();
+  try {
+    window.TaskPointsPerf?.mark?.('taskAction.editOpenComplete', {
+      taskId: id,
+      durationMs: Math.round((performance.now() - startedAt) * 100) / 100
+    });
+  } catch (_) {}
+}
 function saveTaskEdit(id,card){
   const t=state.tasks.find(x=>x.id===id); if(!t) return;
   const titleInput=card.querySelector('input[data-field="title"]');
@@ -12354,7 +12375,8 @@ if (repSel) {
 
   t.updatedAtISO = new Date().toISOString();
   editingTaskId=null;
-  save(); renderTasks();
+  persistTaskActionMutation(t, 'edit-save');
+  renderTasks();
   window.updateCriticalTasksIsland?.();
 }
 
