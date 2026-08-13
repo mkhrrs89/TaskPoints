@@ -10128,7 +10128,7 @@ function wireTaskSkillEditor(card, taskId){
   }
 }
   
-function renderTasks(){
+function renderTasks(stateInput = null){
   const container=$('taskList'), empty=$('emptyList'); container.innerHTML='';
   window.updateUndatedReminderIsland?.();
   const active=state.tasks.filter(t=>!t.completedAtISO && !t.hidden && !isTaskTrashed(t) && getTaskStatus(t)!=='wontdo');
@@ -10388,7 +10388,7 @@ wireTaskSkillEditor(card, t.id);
   container.appendChild(fragment);
   initTaskListDelegation();
   updateTaskActionSheetVisibility();
-  window.updateCriticalTasksIsland?.();
+  window.updateCriticalTasksIsland?.(stateInput);
 }
 
 function formatHomeStreakBonusValue(value) {
@@ -12135,8 +12135,7 @@ function bumpTaskOneDay(id){
   if (!t || !assertTaskActionMutationWritable()) return;
   bumpOneDay(t);
   persistTaskActionMutation(t, 'bump-one-day');
-  renderTasks();
-  window.updateCriticalTasksIsland?.(state);
+  renderTasks(state);
 }
 
 function applyPostponeToTask(task){
@@ -12189,8 +12188,7 @@ function wontDoMain(id){
     }
   }
   persistTaskActionMutation(t, 'wont-do');
-  renderTasks();
-  window.updateCriticalTasksIsland?.(state);
+  renderTasks(state);
 }
 
 function prefersReducedTaskMotion(){
@@ -12387,8 +12385,7 @@ if (repSel) {
   t.updatedAtISO = new Date().toISOString();
   editingTaskId=null;
   persistTaskActionMutation(t, 'edit-save');
-  renderTasks();
-  window.updateCriticalTasksIsland?.(state);
+  renderTasks(state);
 }
 
 function hideTask(id){

@@ -13,37 +13,39 @@ function between(source, startNeedle, endNeedle) {
   return source.slice(start, end);
 }
 
-test('critical task list accepts a task-bearing state, overlays pending task mutations, and preserves stored-state fallback', () => {
+test('critical task list overlays pending mutations on provided state and preserves stored-state fallback', () => {
   const body = between(toolbar, 'function getCriticalDueList', 'function updateCriticalTasksIsland');
   assert.match(body, /Array\.isArray\(stateInput\.tasks\)/);
-  assert.match(body, /TaskPointsCore\?\.applyPendingTaskMutations/);
+  assert.match(body, /window\.TaskPointsCore\?\.applyPendingTaskMutations/);
   assert.match(body, /applyPendingTaskMutations\(stateInput\)/);
-  assert.match(body, /loadRawStateFallback\(\)/);
-  assert.match(body, /criticalTasksIsland\.stateResolved/);
+  assert.match(body, /state = loadRawStateFallback\(\)/);
   assert.match(body, /provided-state\+journal/);
+  assert.match(body, /provided-state/);
   assert.match(body, /stored-state/);
+  assert.match(body, /criticalTasksIsland\.stateResolved/);
 });
 
-test('critical island forwards only validated optional state to its list builder', () => {
+test('renderTasks forwards optional state to its existing Critical Tasks refresh', () => {
+  const body = between(home, 'function renderTasks', 'function formatHomeStreakBonusValue');
+  assert.match(body, /function renderTasks\(stateInput = null\)/);
+  assert.match(body, /updateCriticalTasksIsland\?\.\(stateInput\)/);
+});
+
+test('critical island forwards optional state to its list builder', () => {
   const body = between(toolbar, 'function updateCriticalTasksIsland', 'window.tpUpdateCriticalIsland');
   assert.match(body, /function updateCriticalTasksIsland\(stateInput = null\)/);
   assert.match(body, /getCriticalDueList\(stateInput\)/);
 });
 
-test('Edit Save hands current Home state to the critical island', () => {
-  const body = between(home, 'function saveTaskEdit', 'function hideTask');
-  assert.match(body, /persistTaskActionMutation\(t, 'edit-save'\)/);
-  assert.match(body, /updateCriticalTasksIsland\?\.\(state\)/);
-});
-
-test('+1 Day hands current Home state to the critical island', () => {
-  const body = between(home, 'function bumpTaskOneDay', 'function applyPostponeToTask');
-  assert.match(body, /persistTaskActionMutation\(t, 'bump-one-day'\)/);
-  assert.match(body, /updateCriticalTasksIsland\?\.\(state\)/);
-});
-
-test("Won't Do hands current Home state to the critical island", () => {
-  const body = between(home, 'function wontDoMain', 'function prefersReducedTaskMotion');
-  assert.match(body, /persistTaskActionMutation\(t, 'wont-do'\)/);
-  assert.match(body, /updateCriticalTasksIsland\?\.\(state\)/);
-});
+for (const [label, startNeedle, endNeedle, action] of [
+  ['Edit Save', 'function saveTaskEdit', 'function hideTask', 'edit-save'],
+  ['+1 Day', 'function bumpTaskOneDay', 'function applyPostponeToTask', 'bump-one-day'],
+  ["Won't Do", 'function wontDoMain', 'function prefersReducedTaskMotion', 'wont-do']
+]) {
+  test(`${label} renders once with current Home state and does not separately refresh the island`, () => {
+    const body = between(home, startNeedle, endNeedle);
+    assert.match(body, new RegExp(`persistTaskActionMutation\\(t, '${action}'\\)`));
+    assert.match(body, /renderTasks\(state\)/);
+    assert.doesNotMatch(body, /updateCriticalTasksIsland\?\.\(state\)/);
+  });
+}

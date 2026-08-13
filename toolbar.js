@@ -3568,11 +3568,23 @@ document.addEventListener('DOMContentLoaded', () => {
       stateInput && typeof stateInput === 'object' && Array.isArray(stateInput.tasks)
     );
     const resolveStartedAt = window.performance?.now?.() ?? 0;
-    const state = hasProvidedState ? stateInput : loadRawStateFallback();
+    let state;
+    let source = 'stored-state';
+    if (hasProvidedState) {
+      if (typeof window.TaskPointsCore?.applyPendingTaskMutations === 'function') {
+        state = window.TaskPointsCore.applyPendingTaskMutations(stateInput);
+        source = 'provided-state+journal';
+      } else {
+        state = stateInput;
+        source = 'provided-state';
+      }
+    } else {
+      state = loadRawStateFallback();
+    }
     try {
       const endedAt = window.performance?.now?.() ?? resolveStartedAt;
       window.TaskPointsPerf?.mark?.('criticalTasksIsland.stateResolved', {
-        source: hasProvidedState ? 'provided-state' : 'stored-state',
+        source,
         durationMs: Math.round((endedAt - resolveStartedAt) * 100) / 100
       });
     } catch (_) {}
