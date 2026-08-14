@@ -7,7 +7,7 @@ const source = fs.readFileSync(path.join(__dirname, '..', 'flex_action_fast_path
 
 test('Flex Actions header matches the Habits and Vices control layout', () => {
   assert.match(source, /function applyFlexHeaderPresentation\(\)/);
-  assert.match(source, /\.recent-toggle\[data-target=\\"flexWrap\\"\]/);
+  assert.match(source, /\.recent-toggle\[data-target="flexWrap"\]/);
   assert.match(source, /hideButton\?\.remove\?\.\(\)/);
   assert.match(source, /dayButton\.style\.marginLeft = 'auto'/);
   assert.match(source, /dayButton\.textContent = viewingYesterday \? 'Today ▶︎' : '◀︎ Week'/);
