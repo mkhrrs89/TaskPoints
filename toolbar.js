@@ -3778,7 +3778,7 @@ function updateCritIslandStacking() {
     updateTodayIslandVisibility();
   }
 
-  window.addEventListener('resize', updateCriticalTasksIsland, { passive: true });
+  window.addEventListener('resize', updateCritIslandStacking, { passive: true });
 
   
   const scrollButtons = Array.from(document.querySelectorAll('[data-scroll-top]'));
