@@ -148,6 +148,7 @@
 <script>
     const STORAGE_KEY = "taskpoints_v1";
     const NOTES_STORAGE_KEY = "taskpoints_notes_v1";
+    const NOTES_DIRTY_KEY = "taskpoints_notes_dirty_v1";
     const notesInput = document.getElementById("notesInput");
     const notesStatus = document.getElementById("notesStatus");
     const generalNotesTab = document.getElementById("generalNotesTab");
@@ -180,6 +181,7 @@
     function getBestNotesTextFromStorage() {
       let stateNotes = "";
       let cacheNotes = "";
+      let cacheDirty = false;
 
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
@@ -189,8 +191,12 @@
 
       try {
         cacheNotes = localStorage.getItem(NOTES_STORAGE_KEY) || "";
+        cacheDirty = localStorage.getItem(NOTES_DIRTY_KEY) === "1";
       } catch (_) {}
 
+      // While an edit session is dirty, the lightweight notes cache is the
+      // newest crash-safe copy even when the user shortened or cleared text.
+      if (cacheDirty) return cacheNotes;
       if (cacheNotes.trim() && !stateNotes.trim()) return cacheNotes;
       if (stateNotes.trim() && !cacheNotes.trim()) return stateNotes;
       if (cacheNotes === stateNotes) return cacheNotes;
@@ -201,6 +207,7 @@
     function syncNotesStorageLocations(source = "notes-storage-sync") {
       const notesText = getBestNotesTextFromStorage();
       let changed = false;
+      let stateSynced = false;
 
       try {
         if ((localStorage.getItem(NOTES_STORAGE_KEY) || "") !== notesText) {
@@ -216,13 +223,15 @@
         const currentNotes = typeof currentState.notes === "string" ? currentState.notes : "";
         if (currentNotes !== notesText) {
           if (window.TaskPointsCore?.saveAppState) {
-            TaskPointsCore.saveAppState({ notes: notesText }, {
+            const result = TaskPointsCore.saveAppState({ notes: notesText }, {
               storageKey: STORAGE_KEY,
               immediateWrite: true,
               userInitiated: true,
               savePath: "notes-storage-sync"
             });
-            window.TaskPointsCore?.flushPendingSaves?.();
+            if (result?.skipped || result?.blockedByQuotaCircuit) {
+              throw new Error("Notes state synchronization was not persisted");
+            }
           } else {
             const raw = localStorage.getItem(STORAGE_KEY);
             const latestState = raw ? TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY, {}) : {};
@@ -231,8 +240,13 @@
           }
           changed = true;
         }
+        stateSynced = true;
       } catch (error) {
         console.warn("Failed to sync taskpoints_v1.notes", error);
+      }
+
+      if (stateSynced) {
+        try { localStorage.removeItem(NOTES_DIRTY_KEY); } catch (_) {}
       }
 
       if (changed) {
@@ -267,24 +281,31 @@
       } catch (err) {
         console.error("Failed to cache notes", err);
       }
+      let stateSaved = false;
       if (window.TaskPointsCore?.saveAppState) {
-        TaskPointsCore.saveAppState({ notes: value }, {
+        const result = TaskPointsCore.saveAppState({ notes: value }, {
           storageKey: STORAGE_KEY,
           immediateWrite: immediate,
           userInitiated: true,
           savePath: "general-notes-edit"
         });
-        window.TaskPointsCore?.flushPendingSaves?.();
+        stateSaved = !(result?.skipped || result?.blockedByQuotaCircuit);
       } else {
         try {
           const raw = localStorage.getItem(STORAGE_KEY);
           const existing = raw ? TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY, {}) : {};
           existing.notes = value;
           TaskPointsCore.writeTaskPointsStoredState(existing, { storageKey: STORAGE_KEY });
+          stateSaved = true;
         } catch (err) {
           console.error("Failed to save notes", err);
         }
       }
+      if (!stateSaved) {
+        setStatus("Saved locally");
+        return false;
+      }
+      try { localStorage.removeItem(NOTES_DIRTY_KEY); } catch (_) {}
       loadedNotesValue = value;
       notesDirty = false;
       window.dispatchEvent(new CustomEvent("taskpoints-notes-updated", {
@@ -296,16 +317,18 @@
 
     function scheduleSave() {
       notesDirty = true;
-      setStatus("Saving…");
-      if (notesInput) {
-        try {
-          localStorage.setItem(NOTES_STORAGE_KEY, notesInput.value || "");
-        } catch (err) {
-          console.error("Failed to cache notes", err);
-        }
+      if (saveTimer) {
+        window.clearTimeout(saveTimer);
+        saveTimer = null;
       }
-      if (saveTimer) window.clearTimeout(saveTimer);
-      saveTimer = window.setTimeout(() => saveNotes(true), 400);
+      try {
+        localStorage.setItem(NOTES_STORAGE_KEY, notesInput?.value || "");
+        localStorage.setItem(NOTES_DIRTY_KEY, "1");
+        setStatus("Saved");
+      } catch (err) {
+        console.error("Failed to cache notes", err);
+        setStatus("Save pending");
+      }
     }
 
     function flushDirtyNotes() {
