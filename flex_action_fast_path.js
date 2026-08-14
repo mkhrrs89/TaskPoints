@@ -363,6 +363,18 @@
 
     if (dayButton.style) dayButton.style.marginLeft = 'auto';
 
+    const referenceButton = doc?.getElementById?.('weekBackBtnHabits') || doc?.getElementById?.('weekBackBtnVices');
+    if (referenceButton && dayButton.style && typeof global.getComputedStyle === 'function') {
+      const referenceFont = global.getComputedStyle(referenceButton);
+      dayButton.style.fontFamily = referenceFont.fontFamily;
+      dayButton.style.fontSize = referenceFont.fontSize;
+      dayButton.style.fontWeight = referenceFont.fontWeight;
+      dayButton.style.fontStyle = referenceFont.fontStyle;
+      dayButton.style.lineHeight = referenceFont.lineHeight;
+      dayButton.style.letterSpacing = referenceFont.letterSpacing;
+      dayButton.style.textTransform = referenceFont.textTransform;
+    }
+
     const applyLabel = () => {
       const viewingYesterday = typeof global.isViewingFlexYesterday === 'function' && global.isViewingFlexYesterday();
       const desiredLabel = viewingYesterday ? 'Today ▶︎' : '◀︎ Week';
