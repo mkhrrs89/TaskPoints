@@ -10582,6 +10582,14 @@ function pickTaskDate(id){
   window.updateCriticalTasksIsland?.();
 }
 
+function getTaskCardLayoutStateInput() {
+  const currentRevision = readHomeStateRevision();
+  if (currentRevision && currentRevision !== loadedStateRevision) {
+    return null;
+  }
+  return state;
+}
+
 function initTaskListDelegation(){
   const list = document.getElementById('taskList');
   if (!list) return;
@@ -10615,7 +10623,7 @@ function initTaskListDelegation(){
       const id = bodyTarget.getAttribute('data-task-card-body');
       if (id) {
         expandedTaskId = expandedTaskId === id ? null : id;
-        renderTasks();
+        renderTasks(getTaskCardLayoutStateInput());
       }
       return;
     }
@@ -10708,7 +10716,7 @@ function initTaskListDelegation(){
     const id = bodyTarget.getAttribute('data-task-card-body');
     if (!id) return;
     expandedTaskId = expandedTaskId === id ? null : id;
-    renderTasks();
+    renderTasks(getTaskCardLayoutStateInput());
   });
   list.dataset.tpDelegationAttached = '1';
 
