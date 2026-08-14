@@ -61,6 +61,33 @@ test('General Notes synchronization patches only the notes field from latest sto
   assert.match(save, /TaskPointsCore\.saveAppState\(\{ notes: value \}/);
   assert.match(save, /savePath:\s*"general-notes-edit"/);
   assert.match(save, /notesDirty\s*=\s*false/);
+  assert.doesNotMatch(save, /flushPendingSaves/);
+});
+
+test('typing General Notes stays on the lightweight crash-safe cache path', () => {
+  const schedule = extractFunction('scheduleSave');
+
+  assert.match(source, /const NOTES_DIRTY_KEY = "taskpoints_notes_dirty_v1";/);
+  assert.match(schedule, /localStorage\.setItem\(NOTES_STORAGE_KEY, notesInput\?\.value \|\| ""\)/);
+  assert.match(schedule, /localStorage\.setItem\(NOTES_DIRTY_KEY, "1"\)/);
+  assert.doesNotMatch(schedule, /saveNotes\(/);
+  assert.doesNotMatch(schedule, /saveAppState/);
+  assert.doesNotMatch(schedule, /flushPendingSaves/);
+  assert.doesNotMatch(schedule, /setTimeout/);
+
+  assert.match(source, /notesInput\?\.addEventListener\("change", flushDirtyNotes\)/);
+  assert.match(source, /document\.visibilityState === "hidden"\) flushDirtyNotes\(\)/);
+});
+
+test('dirty lightweight Notes cache wins even when an edit shortened the note', () => {
+  const getBest = extractFunction('getBestNotesTextFromStorage');
+  const save = extractFunction('saveNotes');
+  const sync = extractFunction('syncNotesStorageLocations');
+
+  assert.match(getBest, /cacheDirty = localStorage\.getItem\(NOTES_DIRTY_KEY\) === "1"/);
+  assert.match(getBest, /if \(cacheDirty\) return cacheNotes;/);
+  assert.match(save, /localStorage\.removeItem\(NOTES_DIRTY_KEY\)/);
+  assert.match(sync, /localStorage\.removeItem\(NOTES_DIRTY_KEY\)/);
 });
 
 test('Mood Notes tab remains a read-only view of completion moodNotes', () => {
