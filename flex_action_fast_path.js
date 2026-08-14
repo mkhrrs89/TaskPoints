@@ -352,6 +352,31 @@
     return true;
   }
 
+  function applyFlexHeaderPresentation() {
+    const doc = global.document;
+    const dayButton = doc?.getElementById?.('flexDayToggleBtn');
+    if (!dayButton) return false;
+
+    const controls = dayButton.closest?.('.flexControlsRow') || null;
+    const hideButton = controls?.querySelector?.('.recent-toggle[data-target="flexWrap"]') || null;
+    hideButton?.remove?.();
+
+    if (dayButton.style) dayButton.style.marginLeft = 'auto';
+    const viewingYesterday = typeof global.isViewingFlexYesterday === 'function' && global.isViewingFlexYesterday();
+    dayButton.textContent = viewingYesterday ? 'Today ▶︎' : '◀︎ Week';
+
+    if (!dayButton.__taskPointsFlexHeaderPresentationBound && typeof dayButton.addEventListener === 'function') {
+      dayButton.__taskPointsFlexHeaderPresentationBound = true;
+      dayButton.addEventListener('click', () => {
+        const refresh = () => applyFlexHeaderPresentation();
+        if (typeof global.queueMicrotask === 'function') global.queueMicrotask(refresh);
+        else global.setTimeout?.(refresh, 0);
+      });
+    }
+
+    return true;
+  }
+
   function installFlushBridge() {
     const current = core.flushPendingSaves;
     if (typeof current !== 'function') return false;
@@ -371,6 +396,7 @@
   function installUiPatch() {
     if (uiInstalled) {
       installFlushBridge();
+      applyFlexHeaderPresentation();
       return true;
     }
     if (typeof global.logFlexCompletion !== 'function'
@@ -384,6 +410,7 @@
     originalRenderAll = typeof global.renderAll === 'function' ? global.renderAll : null;
     originalRenderFlexActions = global.renderFlexActions;
     originalResetAll = typeof global.resetAll === 'function' ? global.resetAll : null;
+    applyFlexHeaderPresentation();
 
     const fastLogFlexCompletion = function taskPointsFastLogFlexCompletion(...args) {
       const id = String(args[0] || '');
@@ -505,6 +532,7 @@
     readJournal,
     readJournalRecord,
     showInstantDot,
+    applyFlexHeaderPresentation,
     getRetryStatus: () => ({ retryAttempt, retryPaused, retryScheduled: Boolean(retryTimer) })
   };
 
