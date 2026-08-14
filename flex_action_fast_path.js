@@ -6,6 +6,20 @@
   if (!core || !storage || global.__taskPointsFlexActionFastPathInstalled) return;
   global.__taskPointsFlexActionFastPathInstalled = true;
 
+  const criticalTaskStyleId = 'tp-critical-task-opaque-preview';
+  if (global.document && !global.document.getElementById?.(criticalTaskStyleId)) {
+    const criticalTaskStyle = global.document.createElement?.('style');
+    if (criticalTaskStyle) {
+      criticalTaskStyle.id = criticalTaskStyleId;
+      criticalTaskStyle.textContent = `
+.critical-card {
+  background: linear-gradient(180deg, #991b1b, #581c1c) !important;
+}
+`;
+      (global.document.head || global.document.documentElement)?.appendChild?.(criticalTaskStyle);
+    }
+  }
+
   const STORAGE_KEY = core.STORAGE_KEY || 'taskpoints_v1';
   const JOURNAL_KEY = 'taskpoints_pending_flex_completions_v1';
   const SAVE_PATH = 'flex-completion-fast-path';
