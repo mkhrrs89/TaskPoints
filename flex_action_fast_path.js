@@ -362,8 +362,22 @@
     hideButton?.remove?.();
 
     if (dayButton.style) dayButton.style.marginLeft = 'auto';
-    const viewingYesterday = typeof global.isViewingFlexYesterday === 'function' && global.isViewingFlexYesterday();
-    dayButton.textContent = viewingYesterday ? 'Today ▶︎' : '◀︎ Week';
+
+    const applyLabel = () => {
+      const viewingYesterday = typeof global.isViewingFlexYesterday === 'function' && global.isViewingFlexYesterday();
+      const desiredLabel = viewingYesterday ? 'Today ▶︎' : '◀︎ Week';
+      if (dayButton.textContent !== desiredLabel) dayButton.textContent = desiredLabel;
+    };
+    applyLabel();
+
+    // The legacy Home updater can still write "Yesterday" after this module
+    // installs. Keep presentation aligned with Habits/Vices without changing
+    // the underlying today/yesterday Flex view behavior.
+    if (!dayButton.__taskPointsFlexHeaderLabelObserver && typeof global.MutationObserver === 'function') {
+      const observer = new global.MutationObserver(applyLabel);
+      observer.observe(dayButton, { childList: true, characterData: true, subtree: true });
+      dayButton.__taskPointsFlexHeaderLabelObserver = observer;
+    }
 
     if (!dayButton.__taskPointsFlexHeaderPresentationBound && typeof dayButton.addEventListener === 'function') {
       dayButton.__taskPointsFlexHeaderPresentationBound = true;
