@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>TaskPoints — Streaks</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='%230b0d10'/><text x='50' y='62' font-size='60' text-anchor='middle' fill='white'>TP</text></svg>">
+  <link rel="stylesheet" href="assets/tailwind.css">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="preload" href="toolbar.js" as="script">
+  <script src="toolbar.js" defer></script>
+  <style>
+    .streaks-page {
+      min-height: 100vh;
+      background: #080c0f;
+      color: #eef4f5;
+      padding: 22px 14px calc(var(--tp-toolbar-stack-height, 86px) + 28px);
+    }
+    .streaks-shell {
+      width: min(980px, 100%);
+      margin: 0 auto;
+    }
+    .streaks-header {
+      margin: 8px 0 18px;
+    }
+    .streaks-kicker {
+      color: #8ca0aa;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .18em;
+      text-transform: uppercase;
+      margin-bottom: 5px;
+    }
+    .streaks-title {
+      margin: 0;
+      font-size: clamp(30px, 8vw, 46px);
+      line-height: 1;
+      font-weight: 900;
+      letter-spacing: -.025em;
+    }
+    .streaks-subtitle {
+      color: #93a1ae;
+      font-size: 14px;
+      margin-top: 9px;
+      max-width: 720px;
+    }
+    .streaks-card {
+      overflow: hidden;
+      border: 1px solid #26333b;
+      border-radius: 24px;
+      background: linear-gradient(180deg, #151a1e, #101519);
+      box-shadow: 0 14px 34px rgba(0,0,0,.24);
+    }
+    .streaks-summary {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 15px 17px;
+      border-bottom: 1px solid #26333b;
+      background: #1d4b51;
+    }
+    .streaks-summary strong {
+      font-size: 16px;
+    }
+    .streaks-summary span {
+      color: #d7e5e7;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .streaks-table-wrap {
+      width: 100%;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .streaks-table {
+      width: 100%;
+      min-width: 680px;
+      border-collapse: collapse;
+      font-variant-numeric: tabular-nums;
+    }
+    .streaks-table th,
+    .streaks-table td {
+      padding: 14px 16px;
+      border-bottom: 1px solid #242e35;
+      text-align: left;
+      vertical-align: middle;
+    }
+    .streaks-table th {
+      padding-top: 12px;
+      padding-bottom: 12px;
+      background: #101519;
+      color: #8fa0ad;
+      font-size: 11px;
+      letter-spacing: .09em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .streaks-table th.numeric,
+    .streaks-table td.numeric {
+      text-align: right;
+    }
+    .streaks-sort-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: inherit;
+      font: inherit;
+      letter-spacing: inherit;
+      text-transform: inherit;
+      background: none;
+      border: 0;
+      padding: 0;
+      cursor: pointer;
+    }
+    .streaks-sort-btn.numeric-sort {
+      width: 100%;
+      justify-content: flex-end;
+    }
+    .streaks-sort-arrow {
+      width: 12px;
+      color: #58c4d2;
+      font-size: 10px;
+      text-align: center;
+    }
+    .streaks-name {
+      color: #f5f8f9;
+      font-size: 15px;
+      font-weight: 800;
+    }
+    .streaks-type {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 58px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 10px;
+      font-weight: 900;
+      letter-spacing: .07em;
+      text-transform: uppercase;
+      border: 1px solid #37636a;
+      color: #a8e1e6;
+      background: #17363b;
+    }
+    .streaks-type.vice {
+      border-color: #765342;
+      color: #ffd0ad;
+      background: #3b271e;
+    }
+    .streaks-days {
+      font-size: 17px;
+      font-weight: 900;
+      color: #ffffff;
+    }
+    .streaks-points {
+      color: #c8d3d8;
+      font-weight: 800;
+    }
+    .streaks-bonus {
+      color: #61cad6;
+      font-weight: 900;
+    }
+    .streaks-bonus.zero {
+      color: #75838d;
+    }
+    .streaks-bonus.negative {
+      color: #ff9a9f;
+    }
+    .streaks-empty {
+      padding: 30px 18px;
+      color: #8795a1;
+      text-align: center;
+      font-size: 15px;
+    }
+    .streaks-note {
+      color: #71808b;
+      font-size: 11px;
+      line-height: 1.5;
+      padding: 13px 16px 16px;
+    }
+    @media (max-width: 640px) {
+      .streaks-page { padding-left: 10px; padding-right: 10px; }
+      .streaks-card { border-radius: 20px; }
+      .streaks-table { min-width: 620px; }
+      .streaks-table th,
+      .streaks-table td { padding-left: 12px; padding-right: 12px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="streaks-page">
+    <div class="streaks-shell">
+      <header class="streaks-header">
+        <div class="streaks-kicker">Habits + Vices</div>
+        <h1 class="streaks-title">Current Streaks</h1>
+        <p class="streaks-subtitle">Tap any column heading to sort. Current bonus is the extra point value at the present streak level, not the accumulated bonus from previous days.</p>
+      </header>
+
+      <section class="streaks-card" aria-labelledby="streaksTableHeading">
+        <div class="streaks-summary">
+          <strong id="streaksTableHeading">Streak Table</strong>
+          <span id="streaksCount">Loading…</span>
+        </div>
+        <div class="streaks-table-wrap">
+          <table class="streaks-table">
+            <thead>
+              <tr>
+                <th scope="col"><button class="streaks-sort-btn" type="button" data-sort="name">Name <span class="streaks-sort-arrow" aria-hidden="true"></span></button></th>
+                <th scope="col"><button class="streaks-sort-btn" type="button" data-sort="type">Type <span class="streaks-sort-arrow" aria-hidden="true"></span></button></th>
+                <th scope="col" class="numeric"><button class="streaks-sort-btn numeric-sort" type="button" data-sort="streak">Days <span class="streaks-sort-arrow" aria-hidden="true"></span></button></th>
+                <th scope="col" class="numeric"><button class="streaks-sort-btn numeric-sort" type="button" data-sort="points">Point Value <span class="streaks-sort-arrow" aria-hidden="true"></span></button></th>
+                <th scope="col" class="numeric"><button class="streaks-sort-btn numeric-sort" type="button" data-sort="bonus">Current Bonus <span class="streaks-sort-arrow" aria-hidden="true"></span></button></th>
+              </tr>
+            </thead>
+            <tbody id="streaksBody"></tbody>
+          </table>
+        </div>
+        <div id="streaksEmpty" class="streaks-empty" hidden>No current habits or vices found.</div>
+        <div class="streaks-note">A streak completed yesterday remains current until today is marked. Retired habits and vices are not included.</div>
+      </section>
+    </div>
+  </main>
+
+  <div id="bottomToolbarMount"></div>
+
+  <script src="scoring_core.js"></script>
+  <script>
+    (function () {
+      'use strict';
+
+      const core = window.TaskPointsCore;
+      const body = document.getElementById('streaksBody');
+      const empty = document.getElementById('streaksEmpty');
+      const count = document.getElementById('streaksCount');
+      const sortButtons = Array.from(document.querySelectorAll('[data-sort]'));
+      let sortKey = 'streak';
+      let sortDirection = 'desc';
+      let rows = [];
+
+      function localDateKey(date) {
+        const d = date instanceof Date ? date : new Date(date);
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+      }
+
+      function fromKey(key) {
+        const match = String(key || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (!match) return null;
+        const d = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+        d.setHours(0, 0, 0, 0);
+        return Number.isNaN(d.getTime()) ? null : d;
+      }
+
+      function computeCurrentStreak(habit) {
+        if (!habit || !Array.isArray(habit.doneKeys) || !habit.doneKeys.length) {
+          return { days: 0, endKey: '' };
+        }
+
+        const dates = habit.doneKeys
+          .map(fromKey)
+          .filter(Boolean)
+          .sort((a, b) => b - a);
+        if (!dates.length) return { days: 0, endKey: '' };
+
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const todayKey = localDateKey(today);
+        const mostRecent = new Date(dates[0].getTime());
+        const diffToToday = Math.round((today - mostRecent) / 86400000);
+        const doneKeys = Array.isArray(habit.doneKeys) ? habit.doneKeys : [];
+        const failedKeys = Array.isArray(habit.failedKeys) ? habit.failedKeys : [];
+        const isMarkedToday = doneKeys.includes(todayKey) || failedKeys.includes(todayKey);
+
+        if (diffToToday > 1 || diffToToday < 0 || (diffToToday === 1 && isMarkedToday)) {
+          return { days: 0, endKey: '' };
+        }
+
+        let streak = 1;
+        let previous = mostRecent;
+        for (let i = 1; i < dates.length; i += 1) {
+          const current = new Date(dates[i].getTime());
+          const gap = Math.round((previous - current) / 86400000);
+          if (gap === 0) continue;
+          if (gap !== 1) break;
+          streak += 1;
+          previous = current;
+        }
+
+        return { days: streak, endKey: localDateKey(mostRecent) };
+      }
+
+      function round2(value) {
+        const n = Number(value);
+        return Number.isFinite(n) ? Math.round(n * 100) / 100 : 0;
+      }
+
+      function pointText(value) {
+        const n = round2(value);
+        return Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+      }
+
+      function bonusText(value) {
+        const n = round2(value);
+        if (!n) return '0';
+        const text = Math.abs(n).toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+        return n > 0 ? `+${text}` : `-${text}`;
+      }
+
+      function currentBonus(habit, streak, state) {
+        const base = Number(habit?.pointsPerDay);
+        if (!Number.isFinite(base) || !streak?.endKey || streak.days <= 0) return 0;
+        if (habit?.streakMultiplierEnabled !== true || streak.days <= 1) return 0;
+
+        if (core?.pointsForCompletion) {
+          try {
+            const source = habit.category === 'vice' ? 'vice' : 'habit';
+            const synthetic = {
+              id: `streak-preview:${habit.id}:${streak.endKey}`,
+              taskId: `streak-preview:${habit.id}:${streak.endKey}`,
+              source,
+              habitId: habit.id,
+              dayKey: streak.endKey,
+              completedAtISO: `${streak.endKey}T12:00:00.000`,
+              points: base,
+              completionFraction: 1
+            };
+            const adjusted = Number(core.pointsForCompletion(synthetic, state));
+            if (Number.isFinite(adjusted)) return round2(adjusted - base);
+          } catch (_) {}
+        }
+
+        return round2(base * Math.pow(1.01, Math.max(0, streak.days - 1)) - base);
+      }
+
+      function buildRows(state) {
+        const habits = Array.isArray(state?.habits) ? state.habits : [];
+        return habits
+          .filter((habit) => habit && !habit.retired)
+          .map((habit) => {
+            const streak = computeCurrentStreak(habit);
+            const type = habit.category === 'vice' ? 'Vice' : 'Habit';
+            const points = Number(habit.pointsPerDay) || 0;
+            return {
+              id: String(habit.id || ''),
+              name: String(habit.name || 'Untitled'),
+              type,
+              streak: streak.days,
+              points: round2(points),
+              bonus: currentBonus(habit, streak, state)
+            };
+          });
+      }
+
+      function compare(a, b) {
+        const direction = sortDirection === 'asc' ? 1 : -1;
+        const av = a[sortKey];
+        const bv = b[sortKey];
+        if (typeof av === 'number' && typeof bv === 'number') {
+          if (av !== bv) return (av - bv) * direction;
+        } else {
+          const result = String(av).localeCompare(String(bv), undefined, { sensitivity: 'base' });
+          if (result) return result * direction;
+        }
+        return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+      }
+
+      function updateSortIndicators() {
+        sortButtons.forEach((button) => {
+          const active = button.dataset.sort === sortKey;
+          const arrow = button.querySelector('.streaks-sort-arrow');
+          if (arrow) arrow.textContent = active ? (sortDirection === 'asc' ? '▲' : '▼') : '';
+          button.setAttribute('aria-sort', active ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none');
+        });
+      }
+
+      function render() {
+        const ordered = rows.slice().sort(compare);
+        body.innerHTML = '';
+        empty.hidden = ordered.length > 0;
+        count.textContent = `${ordered.length} current ${ordered.length === 1 ? 'item' : 'items'}`;
+
+        ordered.forEach((row) => {
+          const tr = document.createElement('tr');
+          const bonusClass = row.bonus < 0 ? 'negative' : (!row.bonus ? 'zero' : '');
+          tr.innerHTML = `
+            <td><div class="streaks-name"></div></td>
+            <td><span class="streaks-type ${row.type === 'Vice' ? 'vice' : ''}">${row.type}</span></td>
+            <td class="numeric"><span class="streaks-days">${row.streak}</span></td>
+            <td class="numeric"><span class="streaks-points">${pointText(row.points)}</span></td>
+            <td class="numeric"><span class="streaks-bonus ${bonusClass}">${bonusText(row.bonus)}</span></td>
+          `;
+          tr.querySelector('.streaks-name').textContent = row.name;
+          body.appendChild(tr);
+        });
+
+        updateSortIndicators();
+      }
+
+      function loadRows() {
+        if (!core?.loadAppState) {
+          count.textContent = 'Unable to load';
+          empty.textContent = 'TaskPoints state could not be loaded.';
+          empty.hidden = false;
+          return;
+        }
+        try {
+          const loaded = core.loadAppState({ syncDerived: false, persistSync: false });
+          const state = loaded?.state || {};
+          rows = buildRows(state);
+          render();
+        } catch (error) {
+          console.error('Failed to render current streaks', error);
+          count.textContent = 'Unable to load';
+          empty.textContent = 'Current streaks could not be loaded.';
+          empty.hidden = false;
+        }
+      }
+
+      sortButtons.forEach((button) => {
+        button.addEventListener('click', () => {
+          const nextKey = button.dataset.sort;
+          if (!nextKey) return;
+          if (sortKey === nextKey) sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+          else {
+            sortKey = nextKey;
+            sortDirection = ['streak', 'points', 'bonus'].includes(nextKey) ? 'desc' : 'asc';
+          }
+          render();
+        });
+      });
+
+      window.addEventListener('pageshow', loadRows);
+      window.addEventListener('taskpoints:state-revision', loadRows);
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) loadRows();
+      });
+      loadRows();
+    })();
+  </script>
+</body>
+</html>
