@@ -223,3 +223,31 @@
     global.addEventListener?.('DOMContentLoaded', load, { once: true });
   }
 })(typeof window !== 'undefined' ? window : globalThis);
+
+;(function loadTaskPointsStreaksNavLink(global) {
+  'use strict';
+
+  const SCRIPT_ID = 'tpStreaksNavLinkScript';
+  const SCRIPT_SRC = '/streaks_nav_link.js?v=20260815-1';
+
+  function load() {
+    if (global.TaskPointsStreaksNavLink?.installed) {
+      global.TaskPointsStreaksNavLink.install?.();
+      return true;
+    }
+    const document = global.document;
+    if (!document?.createElement) return false;
+    if (document.getElementById?.(SCRIPT_ID)) return true;
+    const script = document.createElement('script');
+    script.id = SCRIPT_ID;
+    script.src = SCRIPT_SRC;
+    script.async = false;
+    script.setAttribute?.('data-taskpoints-streaks-nav-link', 'true');
+    (document.body || document.head || document.documentElement)?.appendChild?.(script);
+    return true;
+  }
+
+  if (!load()) {
+    global.addEventListener?.('DOMContentLoaded', load, { once: true });
+  }
+})(typeof window !== 'undefined' ? window : globalThis);
