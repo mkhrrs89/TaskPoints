@@ -189,3 +189,37 @@
     global.addEventListener?.('DOMContentLoaded', load, { once: true });
   }
 })(typeof window !== 'undefined' ? window : globalThis);
+
+;(function loadTaskPointsWorkEntryFastPath(global) {
+  'use strict';
+
+  const SCRIPT_ID = 'tpWorkEntryFastPathScript';
+  const SCRIPT_SRC = '/work_entry_fast_path.js?v=20260815-1';
+
+  function isHomePage() {
+    const pathname = String(global.location?.pathname || '');
+    return pathname === '/' || pathname === '' || pathname.endsWith('/index.html');
+  }
+
+  function load() {
+    if (!isHomePage()) return false;
+    if (global.TaskPointsWorkEntryFastPath?.installed) {
+      global.TaskPointsWorkEntryFastPath.install?.();
+      return true;
+    }
+    const document = global.document;
+    if (!document?.createElement) return false;
+    if (document.getElementById?.(SCRIPT_ID)) return true;
+    const script = document.createElement('script');
+    script.id = SCRIPT_ID;
+    script.src = SCRIPT_SRC;
+    script.async = false;
+    script.setAttribute?.('data-taskpoints-work-entry-fast-path', 'true');
+    (document.body || document.head || document.documentElement)?.appendChild?.(script);
+    return true;
+  }
+
+  if (!load()) {
+    global.addEventListener?.('DOMContentLoaded', load, { once: true });
+  }
+})(typeof window !== 'undefined' ? window : globalThis);
