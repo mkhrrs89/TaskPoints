@@ -3,11 +3,13 @@
 
   if (global.TaskPointsWorkEntryFastPath?.installed) return;
 
-  const VERSION = 1;
+  const VERSION = 2;
   const MAX_INSTALL_ATTEMPTS = 240;
   const INSTALL_RETRY_MS = 50;
   const POST_COMMIT_QUIET_MS = 3200;
   const QUIET_PULSE_MS = 450;
+  const RECONCILE_RECHECK_MS = 650;
+  const RECONCILE_IDLE_TIMEOUT_MS = 12000;
   const core = global.TaskPointsCore;
 
   if (!core) return;
@@ -22,7 +24,11 @@
     unchangedCommits: 0,
     fallbacks: 0,
     fallbackFullSaves: 0,
-    maintenanceQuietPulses: 0
+    maintenanceQuietPulses: 0,
+    targetedRenders: 0,
+    renderFallbacks: 0,
+    canonicalReconciles: 0,
+    canonicalReconcileDeferrals: 0
   };
 
   let installed = false;
@@ -30,6 +36,10 @@
   let installTimer = null;
   let quietTimer = null;
   let quietUntil = 0;
+  let reconcileTimer = null;
+  let reconcileIdleId = null;
+  let reconcileIdleUsesTimeout = false;
+  let canonicalReconcilePending = false;
 
   function now() {
     return Number(global.performance?.now?.()) || Date.now();
@@ -122,6 +132,114 @@
     pulse();
   }
 
+  function workEditorVisible() {
+    const modal = global.document?.getElementById?.('workEditModal');
+    if (!modal) return false;
+    if (modal.hidden === true || modal.classList?.contains?.('hidden')) return false;
+    return modal.getAttribute?.('aria-hidden') !== 'true';
+  }
+
+  function maintenanceQuiet() {
+    if (workEditorVisible()) return false;
+    try {
+      return typeof core.isStorageMaintenanceQuiet !== 'function'
+        || core.isStorageMaintenanceQuiet() === true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function cancelCanonicalReconcile() {
+    if (reconcileTimer != null) global.clearTimeout?.(reconcileTimer);
+    reconcileTimer = null;
+    if (reconcileIdleId != null) {
+      if (reconcileIdleUsesTimeout) global.clearTimeout?.(reconcileIdleId);
+      else global.cancelIdleCallback?.(reconcileIdleId);
+    }
+    reconcileIdleId = null;
+    reconcileIdleUsesTimeout = false;
+  }
+
+  function runCanonicalReconcile() {
+    reconcileIdleId = null;
+    reconcileIdleUsesTimeout = false;
+    if (!canonicalReconcilePending || global.document?.hidden) return false;
+    if (!maintenanceQuiet()) {
+      counters.canonicalReconcileDeferrals += 1;
+      reconcileTimer = global.setTimeout?.(attemptCanonicalReconcile, RECONCILE_RECHECK_MS) || null;
+      return false;
+    }
+
+    canonicalReconcilePending = false;
+    const control = global.TaskPointsHomeTargetedRenderControl;
+    if (typeof control?.reconcileNow !== 'function') return false;
+    try {
+      control.reconcileNow();
+      counters.canonicalReconciles += 1;
+      perfMark('workEntry.canonicalStatsReconciled', {});
+      return true;
+    } catch (error) {
+      canonicalReconcilePending = true;
+      counters.canonicalReconcileDeferrals += 1;
+      reconcileTimer = global.setTimeout?.(attemptCanonicalReconcile, RECONCILE_RECHECK_MS) || null;
+      return false;
+    }
+  }
+
+  function attemptCanonicalReconcile() {
+    reconcileTimer = null;
+    if (!canonicalReconcilePending || global.document?.hidden) return false;
+    if (!maintenanceQuiet()) {
+      counters.canonicalReconcileDeferrals += 1;
+      reconcileTimer = global.setTimeout?.(attemptCanonicalReconcile, RECONCILE_RECHECK_MS) || null;
+      return false;
+    }
+
+    if (typeof global.requestIdleCallback === 'function') {
+      reconcileIdleUsesTimeout = false;
+      reconcileIdleId = global.requestIdleCallback(runCanonicalReconcile, { timeout: RECONCILE_IDLE_TIMEOUT_MS });
+    } else {
+      reconcileIdleUsesTimeout = true;
+      reconcileIdleId = global.setTimeout?.(runCanonicalReconcile, 0) || null;
+    }
+    return true;
+  }
+
+  function scheduleCanonicalReconcile() {
+    canonicalReconcilePending = true;
+    cancelCanonicalReconcile();
+    reconcileTimer = global.setTimeout?.(attemptCanonicalReconcile, POST_COMMIT_QUIET_MS) || null;
+  }
+
+  function refreshWorkUi() {
+    try {
+      if (typeof global.refreshScoreV2UI === 'function') {
+        global.refreshScoreV2UI();
+      } else {
+        if (typeof global.renderScoreDashboardV2_Skeleton !== 'function' || typeof global.renderScoreV2RecentGrid !== 'function') {
+          throw new Error('SCWM renderers unavailable');
+        }
+        global.renderScoreDashboardV2_Skeleton();
+        global.renderScoreV2RecentGrid();
+      }
+
+      const control = global.TaskPointsHomeTargetedRenderControl;
+      if (typeof control?.refreshLiveScorePanels !== 'function') throw new Error('targeted Home score refresh unavailable');
+      if (control.refreshLiveScorePanels({ includeYesterday: true }) === false) {
+        throw new Error('targeted Home score refresh failed');
+      }
+
+      scheduleCanonicalReconcile();
+      counters.targetedRenders += 1;
+      perfMark('workEntry.targetedRender', {});
+      return true;
+    } catch (error) {
+      counters.renderFallbacks += 1;
+      perfMark('workEntry.targetedRenderFallback', { message: String(error?.message || error) });
+      return false;
+    }
+  }
+
   function fastPathReady() {
     if (typeof global.save !== 'function') return false;
     if (typeof core.journalTaskMutation !== 'function') return false;
@@ -165,44 +283,69 @@
     if (!before) return original.apply(thisArg, args);
 
     const priorSave = global.save;
+    const priorRenderAll = global.renderAll;
     if (typeof priorSave !== 'function') return original.apply(thisArg, args);
 
     let saveCalls = 0;
+    let commitResolved = false;
+    let fastCommitSucceeded = false;
+    let directRenderRequested = false;
+
     const suppressedSave = function suppressedWorkEntryFullSave() {
       saveCalls += 1;
       counters.suppressedFullSaves += 1;
       return undefined;
     };
 
+    const targetedRender = function targetedWorkEntryRender() {
+      if (!commitResolved) {
+        directRenderRequested = true;
+        return undefined;
+      }
+      if (fastCommitSucceeded && refreshWorkUi()) return true;
+      return typeof priorRenderAll === 'function' ? priorRenderAll.apply(this, arguments) : undefined;
+    };
+
     perfMark('workEntry.fastCommitStart', { name });
     noteInteraction();
     global.save = suppressedSave;
+    if (typeof priorRenderAll === 'function') global.renderAll = targetedRender;
 
     let result;
     try {
       result = original.apply(thisArg, args);
     } catch (error) {
       if (global.save === suppressedSave) global.save = priorSave;
+      if (global.renderAll === targetedRender) global.renderAll = priorRenderAll;
       throw error;
     } finally {
       if (global.save === suppressedSave) global.save = priorSave;
+      if (global.renderAll === targetedRender) global.renderAll = priorRenderAll;
     }
 
     // Validation exits do not call save(). Leave them completely unchanged.
-    if (!saveCalls) return result;
+    if (!saveCalls) {
+      commitResolved = true;
+      if (directRenderRequested && typeof priorRenderAll === 'function') priorRenderAll.call(global);
+      return result;
+    }
 
     const changed = changedWorkRows(before);
     if (!changed.length) {
       counters.unchangedCommits += 1;
       counters.fastCommits += 1;
+      fastCommitSucceeded = true;
+      commitResolved = true;
       holdMaintenanceQuiet();
       perfMark('workEntry.fastCommitNoop', { name, suppressedSaveCalls: saveCalls });
+      if (directRenderRequested) targetedRender.call(global);
       return result;
     }
 
     try {
       journalRows(changed);
       counters.fastCommits += 1;
+      fastCommitSucceeded = true;
       holdMaintenanceQuiet();
       perfMark('workEntry.fastCommitJournaled', {
         name,
@@ -214,6 +357,8 @@
       saveFallback(priorSave, 'journal-write-failed');
     }
 
+    commitResolved = true;
+    if (directRenderRequested) targetedRender.call(global);
     return result;
   }
 
@@ -264,9 +409,17 @@
     return installed;
   }
 
-  global.addEventListener?.('pagehide', stopQuietGuard, { capture: true });
+  function stopDeferredWork() {
+    stopQuietGuard();
+    cancelCanonicalReconcile();
+  }
+
+  global.addEventListener?.('pagehide', stopDeferredWork, { capture: true });
   global.document?.addEventListener?.('visibilitychange', () => {
-    if (global.document?.visibilityState === 'hidden') stopQuietGuard();
+    if (global.document?.visibilityState === 'hidden') stopDeferredWork();
+    else if (canonicalReconcilePending && reconcileTimer == null && reconcileIdleId == null) {
+      reconcileTimer = global.setTimeout?.(attemptCanonicalReconcile, RECONCILE_RECHECK_MS) || null;
+    }
   });
 
   global.TaskPointsWorkEntryFastPath = {
@@ -278,6 +431,7 @@
         active: installed,
         wrapped: Array.from(wrapped),
         quietGuardActive: quietUntil > now(),
+        canonicalReconcilePending,
         counters: { ...counters }
       };
     }
