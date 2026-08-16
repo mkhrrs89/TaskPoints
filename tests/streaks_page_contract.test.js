@@ -34,6 +34,11 @@ test('streaks table uses compact fixed columns and defaults to bonus descending'
   assert.match(page, /let sortDirection = ['"]desc['"]/);
 });
 
+test('zero-length current streaks are omitted from the table', () => {
+  assert.match(page, /filter\(\(row\) => row\.streak > 0\)/);
+  assert.match(page, /No active habit or vice streaks found\./);
+});
+
 test('current bonus reuses canonical completion scoring and subtracts base value', () => {
   assert.match(page, /core\.pointsForCompletion\(synthetic, state\)/);
   assert.match(page, /adjusted - base/);
