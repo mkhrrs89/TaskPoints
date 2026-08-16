@@ -384,16 +384,19 @@
 
       function buildRows(state) {
         const habits = Array.isArray(state?.habits) ? state.habits : [];
+        const todayKey = localDateKey(new Date());
         return habits
           .filter((habit) => habit && !habit.retired)
           .map((habit) => {
             const streak = computeCurrentStreak(habit);
             const points = Number(habit.pointsPerDay) || 0;
+            const doneKeys = Array.isArray(habit.doneKeys) ? habit.doneKeys : [];
             return {
               id: String(habit.id || ''),
               name: String(habit.name || 'Untitled'),
               streak: streak.days,
               endKey: streak.endKey,
+              completedToday: doneKeys.includes(todayKey),
               points: round2(points),
               bonus: currentBonus(habit, streak, state)
             };
@@ -446,7 +449,7 @@
       }
 
       function render() {
-        const atRiskRows = rows.filter((row) => row.endKey === yesterdayKey());
+        const atRiskRows = rows.filter((row) => row.endKey === yesterdayKey() && !row.completedToday);
         renderTable(
           tableContexts.risk,
           atRiskRows,
