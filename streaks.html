@@ -248,8 +248,8 @@
             <tbody data-streak-body></tbody>
           </table>
         </div>
-        <div class="streaks-empty" data-streak-empty hidden>No active habit or vice streaks found.</div>
-        <div class="streaks-note">A streak completed yesterday remains current until today is marked. Retired habits and vices are not included.</div>
+        <div class="streaks-empty" data-streak-empty hidden>No completed habit or vice streaks for today.</div>
+        <div class="streaks-note">Only habits and vices marked complete today appear here. Retired habits and vices are not included.</div>
       </section>
     </div>
   </main>
@@ -495,17 +495,12 @@
             risk.push(makeRow(habit, yesterdayStreak, yesterdayKey, state));
           }
 
-          let currentStreak = 0;
-          let currentEndKey = '';
+          // The lower Streak Table is intentionally today-only. Untouched and failed
+          // rows never appear here, which keeps it mutually exclusive with At Risk.
           if (todayState === 'done') {
-            currentStreak = countStreakEndingOn(status.done, todayKey);
-            currentEndKey = todayKey;
-          } else if (todayState === '') {
-            currentStreak = yesterdayStreak;
-            currentEndKey = yesterdayKey;
+            const currentStreak = countStreakEndingOn(status.done, todayKey);
+            if (currentStreak > 0) current.push(makeRow(habit, currentStreak, todayKey, state));
           }
-
-          if (currentStreak > 0) current.push(makeRow(habit, currentStreak, currentEndKey, state));
         }
 
         return { current, risk };
@@ -564,7 +559,7 @@
         renderTable(
           tableContexts.all,
           rows,
-          (length) => `${length} current ${length === 1 ? 'item' : 'items'}`
+          (length) => `${length} completed today`
         );
       }
 
