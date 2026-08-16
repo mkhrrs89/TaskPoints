@@ -217,7 +217,7 @@
             <tbody id="streaksBody"></tbody>
           </table>
         </div>
-        <div id="streaksEmpty" class="streaks-empty" hidden>No current habits or vices found.</div>
+        <div id="streaksEmpty" class="streaks-empty" hidden>No active habit or vice streaks found.</div>
         <div class="streaks-note">A streak completed yesterday remains current until today is marked. Retired habits and vices are not included.</div>
       </section>
     </div>
@@ -350,7 +350,8 @@
               points: round2(points),
               bonus: currentBonus(habit, streak, state)
             };
-          });
+          })
+          .filter((row) => row.streak > 0);
       }
 
       function compare(a, b) {
