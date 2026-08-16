@@ -26,7 +26,7 @@
     .streaks-kicker {
       color: #8ca0aa;
       font-size: 12px;
-      font-weight: 800;
+      font-weight: 600;
       letter-spacing: .18em;
       text-transform: uppercase;
       margin-bottom: 5px;
@@ -35,7 +35,7 @@
       margin: 0;
       font-size: clamp(30px, 8vw, 46px);
       line-height: 1;
-      font-weight: 900;
+      font-weight: 700;
       letter-spacing: -.025em;
     }
     .streaks-subtitle {
@@ -47,7 +47,7 @@
     .streaks-card {
       overflow: hidden;
       border: 1px solid #26333b;
-      border-radius: 24px;
+      border-radius: 20px;
       background: linear-gradient(180deg, #151a1e, #101519);
       box-shadow: 0 14px 34px rgba(0,0,0,.24);
     }
@@ -55,18 +55,19 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 12px;
-      padding: 15px 17px;
+      gap: 10px;
+      padding: 10px 13px;
       border-bottom: 1px solid #26333b;
       background: #1d4b51;
     }
     .streaks-summary strong {
-      font-size: 16px;
+      font-size: 14px;
+      font-weight: 400;
     }
     .streaks-summary span {
       color: #d7e5e7;
-      font-size: 12px;
-      font-weight: 700;
+      font-size: 11px;
+      font-weight: 400;
     }
     .streaks-table-wrap {
       width: 100%;
@@ -75,24 +76,26 @@
     }
     .streaks-table {
       width: 100%;
-      min-width: 680px;
+      min-width: 590px;
       border-collapse: collapse;
       font-variant-numeric: tabular-nums;
     }
     .streaks-table th,
     .streaks-table td {
-      padding: 14px 16px;
+      padding: 8px 10px;
       border-bottom: 1px solid #242e35;
       text-align: left;
       vertical-align: middle;
+      font-weight: 400;
     }
     .streaks-table th {
-      padding-top: 12px;
-      padding-bottom: 12px;
+      padding-top: 8px;
+      padding-bottom: 8px;
       background: #101519;
       color: #8fa0ad;
-      font-size: 11px;
-      letter-spacing: .09em;
+      font-size: 10px;
+      font-weight: 400;
+      letter-spacing: .07em;
       text-transform: uppercase;
       white-space: nowrap;
     }
@@ -103,9 +106,10 @@
     .streaks-sort-btn {
       display: inline-flex;
       align-items: center;
-      gap: 6px;
+      gap: 4px;
       color: inherit;
       font: inherit;
+      font-weight: 400;
       letter-spacing: inherit;
       text-transform: inherit;
       background: none;
@@ -118,26 +122,28 @@
       justify-content: flex-end;
     }
     .streaks-sort-arrow {
-      width: 12px;
+      width: 9px;
       color: #58c4d2;
-      font-size: 10px;
+      font-size: 8px;
       text-align: center;
     }
     .streaks-name {
       color: #f5f8f9;
-      font-size: 15px;
-      font-weight: 800;
+      font-size: 13px;
+      font-weight: 400;
+      line-height: 1.2;
     }
     .streaks-type {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      min-width: 58px;
-      padding: 4px 8px;
+      min-width: 48px;
+      padding: 2px 6px;
       border-radius: 999px;
-      font-size: 10px;
-      font-weight: 900;
-      letter-spacing: .07em;
+      font-size: 9px;
+      font-weight: 400;
+      line-height: 1.35;
+      letter-spacing: .05em;
       text-transform: uppercase;
       border: 1px solid #37636a;
       color: #a8e1e6;
@@ -149,17 +155,19 @@
       background: #3b271e;
     }
     .streaks-days {
-      font-size: 17px;
-      font-weight: 900;
+      font-size: 14px;
+      font-weight: 400;
       color: #ffffff;
     }
     .streaks-points {
       color: #c8d3d8;
-      font-weight: 800;
+      font-size: 13px;
+      font-weight: 400;
     }
     .streaks-bonus {
       color: #61cad6;
-      font-weight: 900;
+      font-size: 13px;
+      font-weight: 400;
     }
     .streaks-bonus.zero {
       color: #75838d;
@@ -168,23 +176,25 @@
       color: #ff9a9f;
     }
     .streaks-empty {
-      padding: 30px 18px;
+      padding: 24px 14px;
       color: #8795a1;
       text-align: center;
-      font-size: 15px;
+      font-size: 13px;
+      font-weight: 400;
     }
     .streaks-note {
       color: #71808b;
-      font-size: 11px;
-      line-height: 1.5;
-      padding: 13px 16px 16px;
+      font-size: 10px;
+      line-height: 1.45;
+      padding: 9px 11px 11px;
+      font-weight: 400;
     }
     @media (max-width: 640px) {
       .streaks-page { padding-left: 10px; padding-right: 10px; }
-      .streaks-card { border-radius: 20px; }
-      .streaks-table { min-width: 620px; }
+      .streaks-card { border-radius: 18px; }
+      .streaks-table { min-width: 535px; }
       .streaks-table th,
-      .streaks-table td { padding-left: 12px; padding-right: 12px; }
+      .streaks-table td { padding-left: 8px; padding-right: 8px; }
     }
   </style>
 </head>
