@@ -24,19 +24,32 @@ test('streaks page exposes the requested sortable columns in order', () => {
   assert.match(page, /filter\(\(habit\) => habit && !habit\.retired\)/);
 });
 
-test('streaks table uses compact fixed columns and defaults to bonus descending', () => {
+test('streaks tables use compact fixed columns and default to bonus descending', () => {
   assert.match(page, /table-layout:\s*fixed/);
   assert.match(page, /\.streaks-col-name\s*\{\s*width:\s*41%/);
   assert.match(page, /\.streaks-col-bonus\s*\{\s*width:\s*25%/);
   assert.match(page, /\.streaks-table th\.numeric,[\s\S]*text-align:\s*left/);
   assert.match(page, /\.streaks-sort-btn\.numeric-sort[\s\S]*justify-content:\s*flex-start/);
-  assert.match(page, /let sortKey = ['"]bonus['"]/);
-  assert.match(page, /let sortDirection = ['"]desc['"]/);
+  assert.match(page, /sortKey:\s*['"]bonus['"]/);
+  assert.match(page, /sortDirection:\s*['"]desc['"]/);
 });
 
-test('zero-length current streaks are omitted from the table', () => {
+test('zero-length current streaks are omitted from the tables', () => {
   assert.match(page, /filter\(\(row\) => row\.streak > 0\)/);
   assert.match(page, /No active habit or vice streaks found\./);
+});
+
+test('at-risk table is cloned above the full streak table', () => {
+  assert.match(page, /data-streak-table=["']risk["'][\s\S]*data-streak-table=["']all["']/);
+  assert.match(page, />At Risk Today\s*</);
+  assert.match(page, /No streaks are at risk today\./);
+});
+
+test('at-risk streaks are active streaks last completed yesterday', () => {
+  assert.match(page, /endKey:\s*streak\.endKey/);
+  assert.match(page, /row\.endKey === yesterdayKey\(\)/);
+  assert.match(page, /d\.setDate\(d\.getDate\(\) - 1\)/);
+  assert.match(page, /diffToToday === 1 && isMarkedToday/);
 });
 
 test('current bonus reuses canonical completion scoring and subtracts base value', () => {
