@@ -8,12 +8,19 @@ const page = fs.readFileSync(path.join(ROOT, 'streaks.html'), 'utf8');
 const nav = fs.readFileSync(path.join(ROOT, 'streaks_nav_link.js'), 'utf8');
 const guard = fs.readFileSync(path.join(ROOT, 'habit_completion_source_guard.js'), 'utf8');
 
-test('streaks page exposes all requested sortable columns', () => {
-  for (const key of ['name', 'type', 'streak', 'points', 'bonus']) {
+test('streaks page exposes the requested sortable columns in order', () => {
+  for (const key of ['name', 'bonus', 'streak', 'points']) {
     assert.match(page, new RegExp(`data-sort=["']${key}["']`));
   }
-  assert.match(page, /Point Value/);
-  assert.match(page, /Current Bonus/);
+  assert.doesNotMatch(page, /data-sort=["']type["']/);
+  assert.doesNotMatch(page, /<th[^>]*>.*\bType\b/s);
+  assert.match(page, />Bonus\s*</);
+  assert.match(page, />Days\s*</);
+  assert.match(page, />Pts\s*</);
+  assert.match(
+    page,
+    /data-sort=["']name["'][\s\S]*data-sort=["']bonus["'][\s\S]*data-sort=["']streak["'][\s\S]*data-sort=["']points["']/
+  );
   assert.match(page, /filter\(\(habit\) => habit && !habit\.retired\)/);
 });
 
