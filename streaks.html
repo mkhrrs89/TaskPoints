@@ -69,8 +69,8 @@
     [data-streak-table="risk"] .streaks-table tbody {
       background: linear-gradient(
         180deg,
-        rgba(153, 27, 27, 0.10),
-        rgba(88, 28, 28, 0.10)
+        rgba(153, 27, 27, 0.20),
+        rgba(88, 28, 28, 0.20)
       );
     }
     .streaks-summary strong {
@@ -537,7 +537,6 @@
           button.setAttribute('aria-sort', active ? (context.sortDirection === 'asc' ? 'ascending' : 'descending') : 'none');
         });
       }
-
       function renderTable(context, tableRows, countText) {
         const ordered = tableRows.slice().sort((a, b) => compareRows(a, b, context));
         context.body.innerHTML = '';
