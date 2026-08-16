@@ -24,6 +24,16 @@ test('streaks page exposes the requested sortable columns in order', () => {
   assert.match(page, /filter\(\(habit\) => habit && !habit\.retired\)/);
 });
 
+test('streaks table uses compact fixed columns and defaults to bonus descending', () => {
+  assert.match(page, /table-layout:\s*fixed/);
+  assert.match(page, /\.streaks-col-name\s*\{\s*width:\s*41%/);
+  assert.match(page, /\.streaks-col-bonus\s*\{\s*width:\s*25%/);
+  assert.match(page, /\.streaks-table th\.numeric,[\s\S]*text-align:\s*left/);
+  assert.match(page, /\.streaks-sort-btn\.numeric-sort[\s\S]*justify-content:\s*flex-start/);
+  assert.match(page, /let sortKey = ['"]bonus['"]/);
+  assert.match(page, /let sortDirection = ['"]desc['"]/);
+});
+
 test('current bonus reuses canonical completion scoring and subtracts base value', () => {
   assert.match(page, /core\.pointsForCompletion\(synthetic, state\)/);
   assert.match(page, /adjusted - base/);
