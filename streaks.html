@@ -71,15 +71,19 @@
     }
     .streaks-table-wrap {
       width: 100%;
-      overflow-x: auto;
-      -webkit-overflow-scrolling: touch;
+      overflow-x: hidden;
     }
     .streaks-table {
       width: 100%;
-      min-width: 500px;
+      min-width: 0;
+      table-layout: fixed;
       border-collapse: collapse;
       font-variant-numeric: tabular-nums;
     }
+    .streaks-col-name { width: 41%; }
+    .streaks-col-bonus { width: 25%; }
+    .streaks-col-days { width: 18%; }
+    .streaks-col-points { width: 16%; }
     .streaks-table th,
     .streaks-table td {
       padding: 8px 10px;
@@ -101,7 +105,7 @@
     }
     .streaks-table th.numeric,
     .streaks-table td.numeric {
-      text-align: right;
+      text-align: left;
     }
     .streaks-sort-btn {
       display: inline-flex;
@@ -119,19 +123,23 @@
     }
     .streaks-sort-btn.numeric-sort {
       width: 100%;
-      justify-content: flex-end;
+      justify-content: flex-start;
     }
     .streaks-sort-arrow {
       width: 9px;
       color: #58c4d2;
       font-size: 8px;
       text-align: center;
+      flex: 0 0 9px;
     }
     .streaks-name {
       color: #f5f8f9;
       font-size: 13px;
       font-weight: 400;
       line-height: 1.2;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .streaks-days {
       font-size: 14px;
@@ -171,7 +179,6 @@
     @media (max-width: 640px) {
       .streaks-page { padding-left: 10px; padding-right: 10px; }
       .streaks-card { border-radius: 18px; }
-      .streaks-table { min-width: 430px; }
       .streaks-table th,
       .streaks-table td { padding-left: 8px; padding-right: 8px; }
     }
@@ -193,6 +200,12 @@
         </div>
         <div class="streaks-table-wrap">
           <table class="streaks-table">
+            <colgroup>
+              <col class="streaks-col-name">
+              <col class="streaks-col-bonus">
+              <col class="streaks-col-days">
+              <col class="streaks-col-points">
+            </colgroup>
             <thead>
               <tr>
                 <th scope="col"><button class="streaks-sort-btn" type="button" data-sort="name">Name <span class="streaks-sort-arrow" aria-hidden="true"></span></button></th>
@@ -222,7 +235,7 @@
       const empty = document.getElementById('streaksEmpty');
       const count = document.getElementById('streaksCount');
       const sortButtons = Array.from(document.querySelectorAll('[data-sort]'));
-      let sortKey = 'streak';
+      let sortKey = 'bonus';
       let sortDirection = 'desc';
       let rows = [];
 
