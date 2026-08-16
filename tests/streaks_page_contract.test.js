@@ -52,12 +52,17 @@ test('at-risk streaks are last completed yesterday and not completed today', () 
   assert.match(page, /d\.setDate\(d\.getDate\(\) - 1\)/);
 });
 
-test('completed-today detection checks doneKeys, completion ledger, and pending habit journal', () => {
+test('completed-today detection uses canonical completion day rules', () => {
+  assert.match(page, /function validDayKey\(value\)/);
+  assert.match(page, /for \(const value of \[row\?\.dayKey, row\?\.dateKey\]\)/);
+  assert.match(page, /for \(const value of \[row\?\.completedAtISO, row\?\.createdAtISO\]\)/);
+  assert.match(page, /completionHabitId\(completion\) !== String\(habit\?\.id \|\| ''\)\.trim\(\)/);
+  assert.match(page, /completionDay\(completion\) === todayKey/);
+  assert.match(page, /row\?\.habitId \|\| row\?\.viceId/);
+});
+
+test('completed-today detection also checks doneKeys and pending habit journal', () => {
   assert.match(page, /doneKeys\.includes\(todayKey\)/);
-  assert.match(page, /Array\.isArray\(state\?\.completions\)/);
-  assert.match(page, /completion\?\.source !== 'habit' && completion\?\.source !== 'vice'/);
-  assert.match(page, /completion\?\.habitId !== habit\?\.id/);
-  assert.match(page, /completionKey === todayKey/);
   assert.match(page, /taskpoints_pending_habit_deltas_v1/);
   assert.match(page, /pending\.status === 'full' \|\| pending\.status === 'half'/);
 });
