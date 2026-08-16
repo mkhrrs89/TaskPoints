@@ -45,9 +45,10 @@ test('at-risk table is cloned above the full streak table', () => {
   assert.match(page, /No streaks are at risk today\./);
 });
 
-test('at-risk streaks are active streaks last completed yesterday', () => {
+test('at-risk streaks are active streaks last completed yesterday and not completed today', () => {
   assert.match(page, /endKey:\s*streak\.endKey/);
-  assert.match(page, /row\.endKey === yesterdayKey\(\)/);
+  assert.match(page, /completedToday:\s*doneKeys\.includes\(todayKey\)/);
+  assert.match(page, /row\.endKey === yesterdayKey\(\) && !row\.completedToday/);
   assert.match(page, /d\.setDate\(d\.getDate\(\) - 1\)/);
   assert.match(page, /diffToToday === 1 && isMarkedToday/);
 });
