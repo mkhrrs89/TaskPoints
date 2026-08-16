@@ -34,12 +34,12 @@ test('streaks tables use compact fixed columns and default to bonus descending',
   assert.match(page, /sortDirection:\s*['"]desc['"]/);
 });
 
-test('zero-length current streaks remain omitted', () => {
+test('completed streak table omits zero-length streaks', () => {
   assert.match(page, /if \(currentStreak > 0\) current\.push/);
-  assert.match(page, /No active habit or vice streaks found\./);
+  assert.match(page, /No completed habit or vice streaks for today\./);
 });
 
-test('at-risk table remains above the full streak table', () => {
+test('at-risk table remains above the completed streak table', () => {
   assert.match(page, /data-streak-table=["']risk["'][\s\S]*data-streak-table=["']all["']/);
   assert.match(page, />At Risk Today\s*</);
   assert.match(page, /No streaks are at risk today\./);
@@ -86,12 +86,14 @@ test('current bonus reuses canonical completion scoring and subtracts base value
   assert.match(page, /streakMultiplierEnabled !== true/);
 });
 
-test('full streak table preserves yesterday while untouched, advances on done, and drops on failed', () => {
+test('lower streak table contains completed-today streaks only', () => {
   assert.match(page, /if \(todayState === 'done'\)/);
-  assert.match(page, /currentStreak = countStreakEndingOn\(status\.done, todayKey\)/);
-  assert.match(page, /else if \(todayState === ''\)/);
-  assert.match(page, /currentStreak = yesterdayStreak/);
-  assert.doesNotMatch(page, /todayState === 'failed'[\s\S]*currentStreak =/);
+  assert.match(page, /const currentStreak = countStreakEndingOn\(status\.done, todayKey\)/);
+  assert.match(page, /current\.push\(makeRow\(habit, currentStreak, todayKey, state\)\)/);
+  assert.doesNotMatch(page, /else if \(todayState === ''\)[\s\S]*current\.push/);
+  assert.doesNotMatch(page, /todayState === 'failed'[\s\S]*current\.push/);
+  assert.match(page, /Only habits and vices marked complete today appear here/);
+  assert.match(page, /completed today/);
 });
 
 test('mobile Streaks link is inserted directly after Today without replacing it', () => {
