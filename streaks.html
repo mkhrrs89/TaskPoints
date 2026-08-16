@@ -76,7 +76,7 @@
     }
     .streaks-table {
       width: 100%;
-      min-width: 590px;
+      min-width: 500px;
       border-collapse: collapse;
       font-variant-numeric: tabular-nums;
     }
@@ -133,27 +133,6 @@
       font-weight: 400;
       line-height: 1.2;
     }
-    .streaks-type {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      min-width: 48px;
-      padding: 2px 6px;
-      border-radius: 999px;
-      font-size: 9px;
-      font-weight: 400;
-      line-height: 1.35;
-      letter-spacing: .05em;
-      text-transform: uppercase;
-      border: 1px solid #37636a;
-      color: #a8e1e6;
-      background: #17363b;
-    }
-    .streaks-type.vice {
-      border-color: #765342;
-      color: #ffd0ad;
-      background: #3b271e;
-    }
     .streaks-days {
       font-size: 14px;
       font-weight: 400;
@@ -192,7 +171,7 @@
     @media (max-width: 640px) {
       .streaks-page { padding-left: 10px; padding-right: 10px; }
       .streaks-card { border-radius: 18px; }
-      .streaks-table { min-width: 535px; }
+      .streaks-table { min-width: 430px; }
       .streaks-table th,
       .streaks-table td { padding-left: 8px; padding-right: 8px; }
     }
@@ -204,7 +183,7 @@
       <header class="streaks-header">
         <div class="streaks-kicker">Habits + Vices</div>
         <h1 class="streaks-title">Current Streaks</h1>
-        <p class="streaks-subtitle">Tap any column heading to sort. Current bonus is the extra point value at the present streak level, not the accumulated bonus from previous days.</p>
+        <p class="streaks-subtitle">Tap any column heading to sort. Bonus is the extra point value at the present streak level, not the accumulated bonus from previous days.</p>
       </header>
 
       <section class="streaks-card" aria-labelledby="streaksTableHeading">
@@ -217,10 +196,9 @@
             <thead>
               <tr>
                 <th scope="col"><button class="streaks-sort-btn" type="button" data-sort="name">Name <span class="streaks-sort-arrow" aria-hidden="true"></span></button></th>
-                <th scope="col"><button class="streaks-sort-btn" type="button" data-sort="type">Type <span class="streaks-sort-arrow" aria-hidden="true"></span></button></th>
+                <th scope="col" class="numeric"><button class="streaks-sort-btn numeric-sort" type="button" data-sort="bonus">Bonus <span class="streaks-sort-arrow" aria-hidden="true"></span></button></th>
                 <th scope="col" class="numeric"><button class="streaks-sort-btn numeric-sort" type="button" data-sort="streak">Days <span class="streaks-sort-arrow" aria-hidden="true"></span></button></th>
-                <th scope="col" class="numeric"><button class="streaks-sort-btn numeric-sort" type="button" data-sort="points">Point Value <span class="streaks-sort-arrow" aria-hidden="true"></span></button></th>
-                <th scope="col" class="numeric"><button class="streaks-sort-btn numeric-sort" type="button" data-sort="bonus">Current Bonus <span class="streaks-sort-arrow" aria-hidden="true"></span></button></th>
+                <th scope="col" class="numeric"><button class="streaks-sort-btn numeric-sort" type="button" data-sort="points">Pts <span class="streaks-sort-arrow" aria-hidden="true"></span></button></th>
               </tr>
             </thead>
             <tbody id="streaksBody"></tbody>
@@ -351,12 +329,10 @@
           .filter((habit) => habit && !habit.retired)
           .map((habit) => {
             const streak = computeCurrentStreak(habit);
-            const type = habit.category === 'vice' ? 'Vice' : 'Habit';
             const points = Number(habit.pointsPerDay) || 0;
             return {
               id: String(habit.id || ''),
               name: String(habit.name || 'Untitled'),
-              type,
               streak: streak.days,
               points: round2(points),
               bonus: currentBonus(habit, streak, state)
@@ -397,10 +373,9 @@
           const bonusClass = row.bonus < 0 ? 'negative' : (!row.bonus ? 'zero' : '');
           tr.innerHTML = `
             <td><div class="streaks-name"></div></td>
-            <td><span class="streaks-type ${row.type === 'Vice' ? 'vice' : ''}">${row.type}</span></td>
+            <td class="numeric"><span class="streaks-bonus ${bonusClass}">${bonusText(row.bonus)}</span></td>
             <td class="numeric"><span class="streaks-days">${row.streak}</span></td>
             <td class="numeric"><span class="streaks-points">${pointText(row.points)}</span></td>
-            <td class="numeric"><span class="streaks-bonus ${bonusClass}">${bonusText(row.bonus)}</span></td>
           `;
           tr.querySelector('.streaks-name').textContent = row.name;
           body.appendChild(tr);
