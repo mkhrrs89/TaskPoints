@@ -21,7 +21,7 @@ test('streaks page exposes the requested sortable columns in order', () => {
     page,
     /data-sort=["']name["'][\s\S]*data-sort=["']bonus["'][\s\S]*data-sort=["']streak["'][\s\S]*data-sort=["']points["']/
   );
-  assert.match(page, /filter\(\(habit\) => habit && !habit\.retired\)/);
+  assert.match(page, /if \(!habit \|\| habit\.retired\) continue/);
 });
 
 test('streaks tables use compact fixed columns and default to bonus descending', () => {
@@ -34,37 +34,50 @@ test('streaks tables use compact fixed columns and default to bonus descending',
   assert.match(page, /sortDirection:\s*['"]desc['"]/);
 });
 
-test('zero-length current streaks are omitted from the tables', () => {
-  assert.match(page, /filter\(\(row\) => row\.streak > 0\)/);
+test('zero-length current streaks remain omitted', () => {
+  assert.match(page, /if \(currentStreak > 0\) current\.push/);
   assert.match(page, /No active habit or vice streaks found\./);
 });
 
-test('at-risk table is cloned above the full streak table', () => {
+test('at-risk table remains above the full streak table', () => {
   assert.match(page, /data-streak-table=["']risk["'][\s\S]*data-streak-table=["']all["']/);
   assert.match(page, />At Risk Today\s*</);
   assert.match(page, /No streaks are at risk today\./);
 });
 
-test('at-risk streaks are last completed yesterday and not completed today', () => {
-  assert.match(page, /endKey:\s*streak\.endKey/);
-  assert.match(page, /completedToday:\s*completedTodayForHabit\(habit, state, todayKey, pendingDeltas\)/);
-  assert.match(page, /row\.endKey === yesterdayKey\(\) && !row\.completedToday/);
-  assert.match(page, /d\.setDate\(d\.getDate\(\) - 1\)/);
+test('at-risk means active through yesterday and completely untouched today', () => {
+  assert.match(page, /const yesterdayStreak = countStreakEndingOn\(status\.done, yesterdayKey\)/);
+  assert.match(page, /const completedToday = status\.done\.has\(todayKey\)/);
+  assert.match(page, /const failedToday = status\.failed\.has\(todayKey\)/);
+  assert.match(page, /const todayState = completedToday \? 'done' : \(failedToday \? 'failed' : ''\)/);
+  assert.match(page, /if \(todayState === '' && yesterdayStreak > 0\)/);
+  assert.match(page, /no completed or failed toggle for today/i);
 });
 
-test('completed-today detection uses canonical completion day rules', () => {
+test('toggle evidence mirrors habit done and failed state plus completion ledger', () => {
+  assert.match(page, /habit\?\.doneKeys/);
+  assert.match(page, /habit\?\.failedKeys/);
+  assert.match(page, /completionDaysByHabit/);
+  assert.match(page, /completionHabitId\(completion\)/);
+  assert.match(page, /completionDay\(completion\)/);
+  assert.match(page, /failed\.forEach\(\(dayKey\) => done\.delete\(dayKey\)\)/);
+});
+
+test('pending habit journal is the newest toggle-state override', () => {
+  assert.match(page, /taskpoints_pending_habit_deltas_v1/);
+  assert.match(page, /done\.delete\(dayKey\)/);
+  assert.match(page, /failed\.delete\(dayKey\)/);
+  assert.match(page, /if \(pendingIsDone\(delta\)\) done\.add\(dayKey\)/);
+  assert.match(page, /else if \(pendingIsFailed\(delta\)\) failed\.add\(dayKey\)/);
+  assert.match(page, /delta\?\.status === 'failed'/);
+});
+
+test('completion date and habit identity use canonical compatible fields', () => {
   assert.match(page, /function validDayKey\(value\)/);
   assert.match(page, /for \(const value of \[row\?\.dayKey, row\?\.dateKey\]\)/);
   assert.match(page, /for \(const value of \[row\?\.completedAtISO, row\?\.createdAtISO\]\)/);
-  assert.match(page, /completionHabitId\(completion\) !== String\(habit\?\.id \|\| ''\)\.trim\(\)/);
-  assert.match(page, /completionDay\(completion\) === todayKey/);
   assert.match(page, /row\?\.habitId \|\| row\?\.viceId/);
-});
-
-test('completed-today detection also checks doneKeys and pending habit journal', () => {
-  assert.match(page, /doneKeys\.includes\(todayKey\)/);
-  assert.match(page, /taskpoints_pending_habit_deltas_v1/);
-  assert.match(page, /pending\.status === 'full' \|\| pending\.status === 'half'/);
+  assert.match(page, /core\?\.dateKey/);
 });
 
 test('current bonus reuses canonical completion scoring and subtracts base value', () => {
@@ -73,9 +86,12 @@ test('current bonus reuses canonical completion scoring and subtracts base value
   assert.match(page, /streakMultiplierEnabled !== true/);
 });
 
-test('current streak keeps yesterday alive until today is explicitly marked', () => {
-  assert.match(page, /diffToToday === 1 && isMarkedToday/);
-  assert.match(page, /doneKeys\.includes\(todayKey\) \|\| failedKeys\.includes\(todayKey\)/);
+test('full streak table preserves yesterday while untouched, advances on done, and drops on failed', () => {
+  assert.match(page, /if \(todayState === 'done'\)/);
+  assert.match(page, /currentStreak = countStreakEndingOn\(status\.done, todayKey\)/);
+  assert.match(page, /else if \(todayState === ''\)/);
+  assert.match(page, /currentStreak = yesterdayStreak/);
+  assert.doesNotMatch(page, /todayState === 'failed'[\s\S]*currentStreak =/);
 });
 
 test('mobile Streaks link is inserted directly after Today without replacing it', () => {
