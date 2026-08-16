@@ -51,6 +51,9 @@
       background: linear-gradient(180deg, #151a1e, #101519);
       box-shadow: 0 14px 34px rgba(0,0,0,.24);
     }
+    .streaks-card + .streaks-card {
+      margin-top: 14px;
+    }
     .streaks-summary {
       display: flex;
       align-items: center;
@@ -193,10 +196,10 @@
         <p class="streaks-subtitle">Tap any column heading to sort. Bonus is the extra point value at the present streak level, not the accumulated bonus from previous days.</p>
       </header>
 
-      <section class="streaks-card" aria-labelledby="streaksTableHeading">
+      <section class="streaks-card" data-streak-table="risk" aria-labelledby="streaksRiskHeading">
         <div class="streaks-summary">
-          <strong id="streaksTableHeading">Streak Table</strong>
-          <span id="streaksCount">Loading…</span>
+          <strong id="streaksRiskHeading">At Risk Today</strong>
+          <span data-streak-count>Loading…</span>
         </div>
         <div class="streaks-table-wrap">
           <table class="streaks-table">
@@ -214,10 +217,38 @@
                 <th scope="col" class="numeric"><button class="streaks-sort-btn numeric-sort" type="button" data-sort="points">Pts <span class="streaks-sort-arrow" aria-hidden="true"></span></button></th>
               </tr>
             </thead>
-            <tbody id="streaksBody"></tbody>
+            <tbody data-streak-body></tbody>
           </table>
         </div>
-        <div id="streaksEmpty" class="streaks-empty" hidden>No active habit or vice streaks found.</div>
+        <div class="streaks-empty" data-streak-empty hidden>No streaks are at risk today.</div>
+        <div class="streaks-note">These streaks were last completed yesterday and will reset if today is not completed.</div>
+      </section>
+
+      <section class="streaks-card" data-streak-table="all" aria-labelledby="streaksTableHeading">
+        <div class="streaks-summary">
+          <strong id="streaksTableHeading">Streak Table</strong>
+          <span data-streak-count>Loading…</span>
+        </div>
+        <div class="streaks-table-wrap">
+          <table class="streaks-table">
+            <colgroup>
+              <col class="streaks-col-name">
+              <col class="streaks-col-bonus">
+              <col class="streaks-col-days">
+              <col class="streaks-col-points">
+            </colgroup>
+            <thead>
+              <tr>
+                <th scope="col"><button class="streaks-sort-btn" type="button" data-sort="name">Name <span class="streaks-sort-arrow" aria-hidden="true"></span></button></th>
+                <th scope="col" class="numeric"><button class="streaks-sort-btn numeric-sort" type="button" data-sort="bonus">Bonus <span class="streaks-sort-arrow" aria-hidden="true"></span></button></th>
+                <th scope="col" class="numeric"><button class="streaks-sort-btn numeric-sort" type="button" data-sort="streak">Days <span class="streaks-sort-arrow" aria-hidden="true"></span></button></th>
+                <th scope="col" class="numeric"><button class="streaks-sort-btn numeric-sort" type="button" data-sort="points">Pts <span class="streaks-sort-arrow" aria-hidden="true"></span></button></th>
+              </tr>
+            </thead>
+            <tbody data-streak-body></tbody>
+          </table>
+        </div>
+        <div class="streaks-empty" data-streak-empty hidden>No active habit or vice streaks found.</div>
         <div class="streaks-note">A streak completed yesterday remains current until today is marked. Retired habits and vices are not included.</div>
       </section>
     </div>
@@ -231,13 +262,21 @@
       'use strict';
 
       const core = window.TaskPointsCore;
-      const body = document.getElementById('streaksBody');
-      const empty = document.getElementById('streaksEmpty');
-      const count = document.getElementById('streaksCount');
-      const sortButtons = Array.from(document.querySelectorAll('[data-sort]'));
-      let sortKey = 'bonus';
-      let sortDirection = 'desc';
+      const tableContexts = {};
       let rows = [];
+
+      document.querySelectorAll('[data-streak-table]').forEach((section) => {
+        const key = section.dataset.streakTable;
+        tableContexts[key] = {
+          section,
+          body: section.querySelector('[data-streak-body]'),
+          empty: section.querySelector('[data-streak-empty]'),
+          count: section.querySelector('[data-streak-count]'),
+          sortButtons: Array.from(section.querySelectorAll('[data-sort]')),
+          sortKey: 'bonus',
+          sortDirection: 'desc'
+        };
+      });
 
       function localDateKey(date) {
         const d = date instanceof Date ? date : new Date(date);
@@ -245,6 +284,13 @@
         const m = String(d.getMonth() + 1).padStart(2, '0');
         const day = String(d.getDate()).padStart(2, '0');
         return `${y}-${m}-${day}`;
+      }
+
+      function yesterdayKey() {
+        const d = new Date();
+        d.setHours(0, 0, 0, 0);
+        d.setDate(d.getDate() - 1);
+        return localDateKey(d);
       }
 
       function fromKey(key) {
@@ -347,6 +393,7 @@
               id: String(habit.id || ''),
               name: String(habit.name || 'Untitled'),
               streak: streak.days,
+              endKey: streak.endKey,
               points: round2(points),
               bonus: currentBonus(habit, streak, state)
             };
@@ -354,10 +401,10 @@
           .filter((row) => row.streak > 0);
       }
 
-      function compare(a, b) {
-        const direction = sortDirection === 'asc' ? 1 : -1;
-        const av = a[sortKey];
-        const bv = b[sortKey];
+      function compareRows(a, b, context) {
+        const direction = context.sortDirection === 'asc' ? 1 : -1;
+        const av = a[context.sortKey];
+        const bv = b[context.sortKey];
         if (typeof av === 'number' && typeof bv === 'number') {
           if (av !== bv) return (av - bv) * direction;
         } else {
@@ -367,20 +414,20 @@
         return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
       }
 
-      function updateSortIndicators() {
-        sortButtons.forEach((button) => {
-          const active = button.dataset.sort === sortKey;
+      function updateSortIndicators(context) {
+        context.sortButtons.forEach((button) => {
+          const active = button.dataset.sort === context.sortKey;
           const arrow = button.querySelector('.streaks-sort-arrow');
-          if (arrow) arrow.textContent = active ? (sortDirection === 'asc' ? '▲' : '▼') : '';
-          button.setAttribute('aria-sort', active ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none');
+          if (arrow) arrow.textContent = active ? (context.sortDirection === 'asc' ? '▲' : '▼') : '';
+          button.setAttribute('aria-sort', active ? (context.sortDirection === 'asc' ? 'ascending' : 'descending') : 'none');
         });
       }
 
-      function render() {
-        const ordered = rows.slice().sort(compare);
-        body.innerHTML = '';
-        empty.hidden = ordered.length > 0;
-        count.textContent = `${ordered.length} current ${ordered.length === 1 ? 'item' : 'items'}`;
+      function renderTable(context, tableRows, countText) {
+        const ordered = tableRows.slice().sort((a, b) => compareRows(a, b, context));
+        context.body.innerHTML = '';
+        context.empty.hidden = ordered.length > 0;
+        context.count.textContent = countText(ordered.length);
 
         ordered.forEach((row) => {
           const tr = document.createElement('tr');
@@ -392,17 +439,33 @@
             <td class="numeric"><span class="streaks-points">${pointText(row.points)}</span></td>
           `;
           tr.querySelector('.streaks-name').textContent = row.name;
-          body.appendChild(tr);
+          context.body.appendChild(tr);
         });
 
-        updateSortIndicators();
+        updateSortIndicators(context);
+      }
+
+      function render() {
+        const atRiskRows = rows.filter((row) => row.endKey === yesterdayKey());
+        renderTable(
+          tableContexts.risk,
+          atRiskRows,
+          (length) => `${length} at risk`
+        );
+        renderTable(
+          tableContexts.all,
+          rows,
+          (length) => `${length} current ${length === 1 ? 'item' : 'items'}`
+        );
       }
 
       function loadRows() {
         if (!core?.loadAppState) {
-          count.textContent = 'Unable to load';
-          empty.textContent = 'TaskPoints state could not be loaded.';
-          empty.hidden = false;
+          Object.values(tableContexts).forEach((context) => {
+            context.count.textContent = 'Unable to load';
+            context.empty.textContent = 'TaskPoints state could not be loaded.';
+            context.empty.hidden = false;
+          });
           return;
         }
         try {
@@ -412,22 +475,26 @@
           render();
         } catch (error) {
           console.error('Failed to render current streaks', error);
-          count.textContent = 'Unable to load';
-          empty.textContent = 'Current streaks could not be loaded.';
-          empty.hidden = false;
+          Object.values(tableContexts).forEach((context) => {
+            context.count.textContent = 'Unable to load';
+            context.empty.textContent = 'Current streaks could not be loaded.';
+            context.empty.hidden = false;
+          });
         }
       }
 
-      sortButtons.forEach((button) => {
-        button.addEventListener('click', () => {
-          const nextKey = button.dataset.sort;
-          if (!nextKey) return;
-          if (sortKey === nextKey) sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
-          else {
-            sortKey = nextKey;
-            sortDirection = ['streak', 'points', 'bonus'].includes(nextKey) ? 'desc' : 'asc';
-          }
-          render();
+      Object.values(tableContexts).forEach((context) => {
+        context.sortButtons.forEach((button) => {
+          button.addEventListener('click', () => {
+            const nextKey = button.dataset.sort;
+            if (!nextKey) return;
+            if (context.sortKey === nextKey) context.sortDirection = context.sortDirection === 'asc' ? 'desc' : 'asc';
+            else {
+              context.sortKey = nextKey;
+              context.sortDirection = ['streak', 'points', 'bonus'].includes(nextKey) ? 'desc' : 'asc';
+            }
+            render();
+          });
         });
       });
 
