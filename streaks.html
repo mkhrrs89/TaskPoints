@@ -221,7 +221,7 @@
           </table>
         </div>
         <div class="streaks-empty" data-streak-empty hidden>No streaks are at risk today.</div>
-        <div class="streaks-note">These streaks were last completed yesterday and will reset if today is not completed.</div>
+        <div class="streaks-note">Only streaks active through yesterday with no completed or failed toggle for today appear here.</div>
       </section>
 
       <section class="streaks-card" data-streak-table="all" aria-labelledby="streaksTableHeading">
@@ -264,6 +264,7 @@
       const core = window.TaskPointsCore;
       const tableContexts = {};
       let rows = [];
+      let atRiskRows = [];
 
       document.querySelectorAll('[data-streak-table]').forEach((section) => {
         const key = section.dataset.streakTable;
@@ -286,13 +287,6 @@
         return `${y}-${m}-${day}`;
       }
 
-      function yesterdayKey() {
-        const d = new Date();
-        d.setHours(0, 0, 0, 0);
-        d.setDate(d.getDate() - 1);
-        return localDateKey(d);
-      }
-
       function fromKey(key) {
         const match = String(key || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
         if (!match) return null;
@@ -307,6 +301,23 @@
         return !!parsed && localDateKey(parsed) === value;
       }
 
+      function appDateKey(date) {
+        if (typeof core?.dateKey === 'function') {
+          try {
+            const shared = core.dateKey(date);
+            if (validDayKey(shared)) return shared;
+          } catch (_) {}
+        }
+        return localDateKey(date);
+      }
+
+      function previousDayKey(key) {
+        const d = fromKey(key);
+        if (!d) return '';
+        d.setDate(d.getDate() - 1);
+        return localDateKey(d);
+      }
+
       function completionHabitId(row) {
         return String(row?.habitId || row?.viceId || '').trim();
       }
@@ -319,54 +330,92 @@
           if (value === null || value === undefined || String(value).trim() === '') continue;
           const date = new Date(value);
           if (Number.isNaN(date.getTime())) continue;
-          if (typeof core?.dateKey === 'function') {
-            try {
-              const shared = core.dateKey(date);
-              if (validDayKey(shared)) return shared;
-            } catch (_) {}
-          }
-          const direct = date.toISOString().slice(0, 10);
-          if (validDayKey(direct)) return direct;
+          const shared = appDateKey(date);
+          if (validDayKey(shared)) return shared;
         }
         return '';
       }
 
-      function computeCurrentStreak(habit) {
-        if (!habit || !Array.isArray(habit.doneKeys) || !habit.doneKeys.length) {
-          return { days: 0, endKey: '' };
+      function readPendingHabitDeltasSafe() {
+        try {
+          const raw = localStorage.getItem('taskpoints_pending_habit_deltas_v1');
+          if (!raw) return [];
+          const parsed = JSON.parse(raw);
+          return Array.isArray(parsed) ? parsed : Object.values(parsed || {});
+        } catch (_) {
+          return [];
+        }
+      }
+
+      function pendingIsDone(delta) {
+        return delta?.done === true || delta?.status === 'full' || delta?.status === 'half';
+      }
+
+      function pendingIsFailed(delta) {
+        return delta?.failed === true || delta?.status === 'failed';
+      }
+
+      function buildEvidence(state, pendingDeltas) {
+        const completionDaysByHabit = new Map();
+        const completions = Array.isArray(state?.completions) ? state.completions : [];
+        for (const completion of completions) {
+          if (completion?.source !== 'habit' && completion?.source !== 'vice') continue;
+          const habitId = completionHabitId(completion);
+          const dayKey = completionDay(completion);
+          if (!habitId || !dayKey) continue;
+          if (!completionDaysByHabit.has(habitId)) completionDaysByHabit.set(habitId, new Set());
+          completionDaysByHabit.get(habitId).add(dayKey);
         }
 
-        const dates = habit.doneKeys
-          .map(fromKey)
-          .filter(Boolean)
-          .sort((a, b) => b - a);
-        if (!dates.length) return { days: 0, endKey: '' };
-
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const todayKey = localDateKey(today);
-        const mostRecent = new Date(dates[0].getTime());
-        const diffToToday = Math.round((today - mostRecent) / 86400000);
-        const doneKeys = Array.isArray(habit.doneKeys) ? habit.doneKeys : [];
-        const failedKeys = Array.isArray(habit.failedKeys) ? habit.failedKeys : [];
-        const isMarkedToday = doneKeys.includes(todayKey) || failedKeys.includes(todayKey);
-
-        if (diffToToday > 1 || diffToToday < 0 || (diffToToday === 1 && isMarkedToday)) {
-          return { days: 0, endKey: '' };
+        const pendingByHabitDay = new Map();
+        for (const delta of pendingDeltas || []) {
+          const habitId = String(delta?.habitId || '').trim();
+          const dayKey = String(delta?.dayKey || '').trim();
+          if (!habitId || !validDayKey(dayKey)) continue;
+          const id = `${habitId}:${dayKey}`;
+          const previous = pendingByHabitDay.get(id);
+          if (!previous || String(delta?.updatedAtISO || '') >= String(previous?.updatedAtISO || '')) {
+            pendingByHabitDay.set(id, delta);
+          }
         }
 
-        let streak = 1;
-        let previous = mostRecent;
-        for (let i = 1; i < dates.length; i += 1) {
-          const current = new Date(dates[i].getTime());
-          const gap = Math.round((previous - current) / 86400000);
-          if (gap === 0) continue;
-          if (gap !== 1) break;
+        return { completionDaysByHabit, pendingByHabitDay };
+      }
+
+      function evidenceForHabit(habit, evidence) {
+        const habitId = String(habit?.id || '').trim();
+        const done = new Set((Array.isArray(habit?.doneKeys) ? habit.doneKeys : []).filter(validDayKey));
+        const failed = new Set((Array.isArray(habit?.failedKeys) ? habit.failedKeys : []).filter(validDayKey));
+
+        const completionDays = evidence.completionDaysByHabit.get(habitId);
+        if (completionDays) completionDays.forEach((dayKey) => done.add(dayKey));
+
+        // A failed toggle is authoritative over any stale completion row for the same day.
+        failed.forEach((dayKey) => done.delete(dayKey));
+
+        for (const [id, delta] of evidence.pendingByHabitDay) {
+          if (!id.startsWith(`${habitId}:`)) continue;
+          const dayKey = String(delta.dayKey || '');
+          done.delete(dayKey);
+          failed.delete(dayKey);
+          if (pendingIsDone(delta)) done.add(dayKey);
+          else if (pendingIsFailed(delta)) failed.add(dayKey);
+        }
+
+        return { done, failed };
+      }
+
+      function countStreakEndingOn(doneKeys, endKey) {
+        if (!validDayKey(endKey) || !doneKeys?.has(endKey)) return 0;
+        let streak = 0;
+        let cursor = fromKey(endKey);
+        while (cursor) {
+          const key = localDateKey(cursor);
+          if (!doneKeys.has(key)) break;
           streak += 1;
-          previous = current;
+          cursor.setDate(cursor.getDate() - 1);
         }
-
-        return { days: streak, endKey: localDateKey(mostRecent) };
+        return streak;
       }
 
       function round2(value) {
@@ -412,57 +461,54 @@
         return round2(base * Math.pow(1.01, Math.max(0, streak.days - 1)) - base);
       }
 
-      function readPendingHabitDeltasSafe() {
-        try {
-          const raw = localStorage.getItem('taskpoints_pending_habit_deltas_v1');
-          if (!raw) return [];
-          const parsed = JSON.parse(raw);
-          return Array.isArray(parsed) ? parsed : Object.values(parsed || {});
-        } catch (_) {
-          return [];
-        }
-      }
-
-      function completedTodayForHabit(habit, state, todayKey, pendingDeltas) {
-        const doneKeys = Array.isArray(habit?.doneKeys) ? habit.doneKeys : [];
-        let completed = doneKeys.includes(todayKey);
-
-        const completions = Array.isArray(state?.completions) ? state.completions : [];
-        if (!completed) {
-          completed = completions.some((completion) => {
-            if (completion?.source !== 'habit' && completion?.source !== 'vice') return false;
-            if (completionHabitId(completion) !== String(habit?.id || '').trim()) return false;
-            return completionDay(completion) === todayKey;
-          });
-        }
-
-        const pending = (pendingDeltas || []).find((delta) => delta?.habitId === habit?.id && delta?.dayKey === todayKey);
-        if (pending) {
-          completed = pending.done === true || pending.status === 'full' || pending.status === 'half';
-        }
-        return completed;
+      function makeRow(habit, streakDays, endKey, state) {
+        const streak = { days: streakDays, endKey };
+        return {
+          id: String(habit?.id || ''),
+          name: String(habit?.name || 'Untitled'),
+          streak: streakDays,
+          points: round2(Number(habit?.pointsPerDay) || 0),
+          bonus: currentBonus(habit, streak, state)
+        };
       }
 
       function buildRows(state) {
         const habits = Array.isArray(state?.habits) ? state.habits : [];
-        const todayKey = localDateKey(new Date());
         const pendingDeltas = readPendingHabitDeltasSafe();
-        return habits
-          .filter((habit) => habit && !habit.retired)
-          .map((habit) => {
-            const streak = computeCurrentStreak(habit);
-            const points = Number(habit.pointsPerDay) || 0;
-            return {
-              id: String(habit.id || ''),
-              name: String(habit.name || 'Untitled'),
-              streak: streak.days,
-              endKey: streak.endKey,
-              completedToday: completedTodayForHabit(habit, state, todayKey, pendingDeltas),
-              points: round2(points),
-              bonus: currentBonus(habit, streak, state)
-            };
-          })
-          .filter((row) => row.streak > 0);
+        const evidence = buildEvidence(state, pendingDeltas);
+        const todayKey = appDateKey(new Date());
+        const yesterdayKey = previousDayKey(todayKey);
+        const current = [];
+        const risk = [];
+
+        for (const habit of habits) {
+          if (!habit || habit.retired) continue;
+          const status = evidenceForHabit(habit, evidence);
+          const completedToday = status.done.has(todayKey);
+          const failedToday = status.failed.has(todayKey);
+          const todayState = completedToday ? 'done' : (failedToday ? 'failed' : '');
+
+          // At Risk is intentionally based on yesterday first, then today's toggle state:
+          // active through yesterday + absolutely no completed/failed toggle today.
+          const yesterdayStreak = countStreakEndingOn(status.done, yesterdayKey);
+          if (todayState === '' && yesterdayStreak > 0) {
+            risk.push(makeRow(habit, yesterdayStreak, yesterdayKey, state));
+          }
+
+          let currentStreak = 0;
+          let currentEndKey = '';
+          if (todayState === 'done') {
+            currentStreak = countStreakEndingOn(status.done, todayKey);
+            currentEndKey = todayKey;
+          } else if (todayState === '') {
+            currentStreak = yesterdayStreak;
+            currentEndKey = yesterdayKey;
+          }
+
+          if (currentStreak > 0) current.push(makeRow(habit, currentStreak, currentEndKey, state));
+        }
+
+        return { current, risk };
       }
 
       function compareRows(a, b, context) {
@@ -510,7 +556,6 @@
       }
 
       function render() {
-        const atRiskRows = rows.filter((row) => row.endKey === yesterdayKey() && !row.completedToday);
         renderTable(
           tableContexts.risk,
           atRiskRows,
@@ -535,7 +580,9 @@
         try {
           const loaded = core.loadAppState({ syncDerived: false, persistSync: false });
           const state = loaded?.state || {};
-          rows = buildRows(state);
+          const built = buildRows(state);
+          rows = built.current;
+          atRiskRows = built.risk;
           render();
         } catch (error) {
           console.error('Failed to render current streaks', error);
