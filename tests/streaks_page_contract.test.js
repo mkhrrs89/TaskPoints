@@ -45,12 +45,21 @@ test('at-risk table is cloned above the full streak table', () => {
   assert.match(page, /No streaks are at risk today\./);
 });
 
-test('at-risk streaks are active streaks last completed yesterday and not completed today', () => {
+test('at-risk streaks are last completed yesterday and not completed today', () => {
   assert.match(page, /endKey:\s*streak\.endKey/);
-  assert.match(page, /completedToday:\s*doneKeys\.includes\(todayKey\)/);
+  assert.match(page, /completedToday:\s*completedTodayForHabit\(habit, state, todayKey, pendingDeltas\)/);
   assert.match(page, /row\.endKey === yesterdayKey\(\) && !row\.completedToday/);
   assert.match(page, /d\.setDate\(d\.getDate\(\) - 1\)/);
-  assert.match(page, /diffToToday === 1 && isMarkedToday/);
+});
+
+test('completed-today detection checks doneKeys, completion ledger, and pending habit journal', () => {
+  assert.match(page, /doneKeys\.includes\(todayKey\)/);
+  assert.match(page, /Array\.isArray\(state\?\.completions\)/);
+  assert.match(page, /completion\?\.source !== 'habit' && completion\?\.source !== 'vice'/);
+  assert.match(page, /completion\?\.habitId !== habit\?\.id/);
+  assert.match(page, /completionKey === todayKey/);
+  assert.match(page, /taskpoints_pending_habit_deltas_v1/);
+  assert.match(page, /pending\.status === 'full' \|\| pending\.status === 'half'/);
 });
 
 test('current bonus reuses canonical completion scoring and subtracts base value', () => {
