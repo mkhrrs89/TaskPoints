@@ -88,11 +88,13 @@ test('loadAppState trace records options and caller information only while traci
   };
   context.TaskPointsPerf.installHooks();
 
-  function invokeLoadAppStateFromTest() {
-    return context.TaskPointsCore.loadAppState({ syncDerived: true, persistSync: false, preloadedState: { tasks: [] } });
-  }
+  vm.runInNewContext(`
+    globalThis.invokeLoadAppStateFromVm = function invokeLoadAppStateFromVm() {
+      return TaskPointsCore.loadAppState({ syncDerived: true, persistSync: false, preloadedState: { tasks: [] } });
+    };
+  `, context);
 
-  const result = invokeLoadAppStateFromTest();
+  const result = context.invokeLoadAppStateFromVm();
   assert.deepEqual(result.state, {});
   const report = context.TaskPointsPerf.buildReport();
   const event = report.pages.flatMap((page) => page.events || []).find((row) => row.name === 'core.loadAppState');
@@ -100,7 +102,7 @@ test('loadAppState trace records options and caller information only while traci
   assert.equal(event.detail?.syncDerived, true);
   assert.equal(event.detail?.persistSync, false);
   assert.equal(event.detail?.hasPreloadedState, true);
-  assert.match(String(event.detail?.caller || event.detail?.stack || ''), /invokeLoadAppStateFromTest|performance_diagnostics\.test\.js/);
+  assert.match(String(event.detail?.caller || event.detail?.stack || ''), /invokeLoadAppStateFromVm|evalmachine/);
 });
 
 test('perf=0 disables tracing for the session', () => {
