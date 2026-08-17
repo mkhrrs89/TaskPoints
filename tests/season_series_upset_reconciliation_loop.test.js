@@ -65,8 +65,10 @@ function loadHarness(initialState, options = {}) {
   const timers = new Map();
   const loadCalls = [];
   const mergeCalls = [];
+  const marks = [];
   let nextTimerId = 1;
   let state = initialState;
+  const idleStatus = options.idleStatus || null;
 
   const emit = (type, detail = {}) => {
     for (const listener of listeners.get(type) || []) listener({ type, detail });
@@ -86,6 +88,9 @@ function loadHarness(initialState, options = {}) {
       return { state };
     }
   };
+  if (idleStatus) {
+    core.getStorageMaintenanceIdleStatus = () => ({ ...idleStatus });
+  }
 
   const context = {
     window: null,
@@ -101,9 +106,13 @@ function loadHarness(initialState, options = {}) {
     Map,
     JSON,
     module: { exports: {} },
-    document: {},
+    document: { visibilityState: 'visible' },
+    location: { pathname: options.pathname || '/season' },
     localStorage: {},
     TaskPointsCore: core,
+    TaskPointsPerf: {
+      mark(name, detail) { marks.push({ name, detail }); }
+    },
     TaskPointsInbox: {
       populate() {
         return { changed: false, addedMessages: [], updatedMessages: [] };
@@ -145,7 +154,9 @@ function loadHarness(initialState, options = {}) {
     api: context.module.exports,
     loadCalls,
     mergeCalls,
+    marks,
     timers,
+    idleStatus,
     emit,
     runOnlyTimer() {
       assert.equal(timers.size, 1);
@@ -196,4 +207,29 @@ test('rapid external state revisions coalesce into one delayed reconciliation', 
   assert.equal(harness.loadCalls.length, 1);
   assert.equal(harness.loadCalls[0].persistSync, false);
   assert.equal(harness.mergeCalls.length, 0);
+});
+
+test('Log reconciliation cannot execute a pre-scheduled callback before eight seconds quiet', () => {
+  const idleStatus = {
+    lastInteractionAgoMs: 2200,
+    navigationQuietForMs: 0,
+    pageLeaving: false,
+    activeEditor: false
+  };
+  const harness = loadHarness(noChangeState(), { pathname: '/log', idleStatus });
+
+  const first = harness.api.reconcileStored({ now: new Date('2026-08-08T06:00:00-04:00') });
+  assert.equal(first, null);
+  assert.equal(harness.loadCalls.length, 0, 'the expensive state load must not run while Log is active');
+  assert.equal(harness.timers.size, 1);
+  const pendingTimer = Array.from(harness.timers.values())[0];
+  assert.equal(pendingTimer.delay, 250);
+  assert.ok(harness.marks.some((mark) => mark.name === 'upset.logExecutionGuardDeferred'));
+
+  idleStatus.lastInteractionAgoMs = 8000;
+  harness.runOnlyTimer();
+  assert.equal(harness.loadCalls.length, 1);
+  assert.equal(harness.loadCalls[0].syncDerived, true);
+  assert.equal(harness.loadCalls[0].persistSync, false);
+  assert.ok(harness.marks.some((mark) => mark.name === 'upset.logExecutionGuardReleased'));
 });
