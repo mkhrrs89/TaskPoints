@@ -28,7 +28,7 @@
     if (/phase5c_verified_secondary/i.test(text)) return 'phase5c';
     if (/phase2_dual_write_coalesced/i.test(text)) return 'phase2';
     if (/toolbar_background_maintenance/i.test(text)) return 'toolbar';
-    if (/season_series_upset_(focus|state_revision)/i.test(text)) return 'upset';
+    if (/season_series_upset_/i.test(text)) return 'upset';
     return '';
   }
 
@@ -170,7 +170,7 @@
       installed: true,
       requiredQuietMs: REQUIRED_QUIET_MS,
       pollMs: POLL_MS,
-      guardedOperations: ['phase5c_verified_secondary', 'phase2_dual_write_coalesced', 'toolbar_background_maintenance', 'season_series_upset_focus', 'season_series_upset_state_revision'],
+      guardedOperations: ['phase5c_verified_secondary', 'phase2_dual_write_coalesced', 'toolbar_background_maintenance', 'season_series_upset_bootstrap', 'season_series_upset_pageshow', 'season_series_upset_focus', 'season_series_upset_state_revision'],
       toolbarRunGuardInstalled: Boolean(global.runTaskPointsToolbarMaintenance?.__taskpointsLogToolbarRunQuietGuard),
       toolbarPreScheduledDeferrals,
       toolbarPreScheduledReleases,
