@@ -90,6 +90,14 @@ test('Log toolbar background maintenance waits for the same eight-second quiet w
   await assertGuardedOperationWaits('toolbar_background_maintenance', 'toolbar');
 });
 
+test('Log season-series upset bootstrap reconciliation waits for the same eight-second quiet window', async () => {
+  await assertGuardedOperationWaits('season_series_upset_bootstrap', 'upset');
+});
+
+test('Log season-series upset pageshow reconciliation waits for the same eight-second quiet window', async () => {
+  await assertGuardedOperationWaits('season_series_upset_pageshow', 'upset');
+});
+
 test('Log season-series upset state reconciliation waits for the same eight-second quiet window', async () => {
   await assertGuardedOperationWaits('season_series_upset_state_revision', 'upset');
 });
