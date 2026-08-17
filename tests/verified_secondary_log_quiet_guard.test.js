@@ -90,6 +90,14 @@ test('Log toolbar background maintenance waits for the same eight-second quiet w
   await assertGuardedOperationWaits('toolbar_background_maintenance', 'toolbar');
 });
 
+test('Log season-series upset state reconciliation waits for the same eight-second quiet window', async () => {
+  await assertGuardedOperationWaits('season_series_upset_state_revision', 'upset');
+});
+
+test('Log season-series upset focus reconciliation waits for the same eight-second quiet window', async () => {
+  await assertGuardedOperationWaits('season_series_upset_focus', 'upset');
+});
+
 test('a toolbar callback scheduled before guard installation is still held until eight seconds quiet', async () => {
   const h = installHarness();
   const statusAtInstall = h.core.getLogLongMaintenanceQuietGuardStatus();
