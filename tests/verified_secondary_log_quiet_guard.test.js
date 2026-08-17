@@ -10,6 +10,7 @@ const LOADER = fs.readFileSync(path.join(ROOT, 'habit_completion_source_guard.js
 
 function installHarness() {
   const timers = [];
+  const marks = [];
   let originalCalls = 0;
   let runs = 0;
   const idleStatus = {
@@ -30,7 +31,7 @@ function installHarness() {
   const context = {
     TaskPointsCore: core,
     document: { visibilityState: 'visible' },
-    TaskPointsPerf: { mark() {} },
+    TaskPointsPerf: { mark(name, detail) { marks.push({ name, detail }); } },
     setTimeout(fn, delay) { timers.push({ fn, delay }); return timers.length; },
     Promise, Object, Array, String, Number, Boolean, RegExp, Error, Math, Date, console
   };
@@ -40,6 +41,7 @@ function installHarness() {
   return {
     core,
     timers,
+    marks,
     idleStatus,
     originalCalls: () => originalCalls,
     runs: () => runs,
@@ -47,14 +49,11 @@ function installHarness() {
   };
 }
 
-test('Log verified-secondary maintenance waits for eight seconds of uninterrupted quiet', async () => {
+async function assertGuardedOperationWaits(source, expectedKind) {
   const h = installHarness();
-  assert.equal(h.core.getVerifiedSecondaryLogQuietGuardStatus().requiredQuietMs, 8000);
+  assert.equal(h.core.getLogLongMaintenanceQuietGuardStatus().requiredQuietMs, 8000);
 
-  const pending = h.core.whenStorageMaintenanceQuiet(
-    h.makeRun(),
-    { source: 'phase5c_verified_secondary' }
-  );
+  const pending = h.core.whenStorageMaintenanceQuiet(h.makeRun(), { source });
   assert.equal(h.runs(), 0);
   assert.equal(h.originalCalls(), 0);
   assert.equal(h.timers.length, 1);
@@ -69,6 +68,18 @@ test('Log verified-secondary maintenance waits for eight seconds of uninterrupte
   await pending;
   assert.equal(h.originalCalls(), 1);
   assert.equal(h.runs(), 1);
+
+  const status = h.core.getLogLongMaintenanceQuietGuardStatus();
+  assert.equal(status.deferredByOperation[expectedKind], 1);
+  assert.equal(status.releasedByOperation[expectedKind], 1);
+}
+
+test('Log verified-secondary maintenance waits for eight seconds of uninterrupted quiet', async () => {
+  await assertGuardedOperationWaits('phase5c_verified_secondary', 'phase5c');
+});
+
+test('Log Phase 2 shadow dual-write waits for the same eight-second quiet window', async () => {
+  await assertGuardedOperationWaits('phase2_dual_write_coalesced', 'phase2');
 });
 
 test('unrelated maintenance keeps the original shared idle behavior', async () => {
