@@ -251,3 +251,34 @@
     global.addEventListener?.('DOMContentLoaded', load, { once: true });
   }
 })(typeof window !== 'undefined' ? window : globalThis);
+
+;(function loadVerifiedSecondaryLogQuietGuard(global) {
+  'use strict';
+
+  const SCRIPT_ID = 'tpVerifiedSecondaryLogQuietGuardScript';
+  const SCRIPT_SRC = '/verified_secondary_log_quiet_guard.js?v=20260816-1';
+
+  function isLogPage() {
+    const pathname = String(global.location?.pathname || '').replace(/\/+$/, '');
+    return pathname === '/log' || pathname.endsWith('/log.html');
+  }
+
+  function load() {
+    if (!isLogPage()) return false;
+    if (global.TaskPointsCore?.__verifiedSecondaryLogQuietGuardInstalled) return true;
+    const document = global.document;
+    if (!document?.createElement) return false;
+    if (document.getElementById?.(SCRIPT_ID)) return true;
+    const script = document.createElement('script');
+    script.id = SCRIPT_ID;
+    script.src = SCRIPT_SRC;
+    script.async = false;
+    script.setAttribute?.('data-taskpoints-verified-secondary-log-quiet-guard', 'true');
+    (document.body || document.head || document.documentElement)?.appendChild?.(script);
+    return true;
+  }
+
+  if (!load()) {
+    global.addEventListener?.('DOMContentLoaded', load, { once: true });
+  }
+})(typeof window !== 'undefined' ? window : globalThis);

@@ -8,10 +8,12 @@
   const LEGACY_EVENT_PREFIX = 'series-upset';
   const INSTALL_RETRY_MS = 50;
   const MAX_INSTALL_ATTEMPTS = 240;
+  const LOG_RECONCILE_QUIET_MS = 8000;
   let installAttempts = 0;
   let reconciliationTimer = null;
   let reconciliationRunning = false;
   let suppressRevisionQueue = false;
+  let executionQuietDeferred = false;
 
   function dateKey(value) {
     if (value == null || value === '') return '';
@@ -316,9 +318,55 @@
     global.dispatchEvent(new global.CustomEvent('taskpoints:inbox-updated', { detail: { count } }));
   }
 
+  function isLogPage() {
+    const pathname = String(global.location?.pathname || '');
+    return pathname === '/log' || pathname.endsWith('/log.html');
+  }
+
+  function logReconcileReadyAtExecution() {
+    if (!isLogPage()) return true;
+    const status = global.TaskPointsCore?.getStorageMaintenanceIdleStatus?.();
+    if (!status || typeof status !== 'object') return true;
+    if (global.document?.visibilityState === 'hidden') return false;
+    if (status.pageLeaving === true || status.activeEditor === true) return false;
+    if (Number(status.navigationQuietForMs || 0) > 0) return false;
+    return Number(status.lastInteractionAgoMs || 0) >= LOG_RECONCILE_QUIET_MS;
+  }
+
+  function deferLogReconcileAtExecution() {
+    if (!isLogPage() || logReconcileReadyAtExecution()) {
+      if (executionQuietDeferred) {
+        const status = global.TaskPointsCore?.getStorageMaintenanceIdleStatus?.();
+        executionQuietDeferred = false;
+        try {
+          global.TaskPointsPerf?.mark?.('upset.logExecutionGuardReleased', {
+            requiredQuietMs: LOG_RECONCILE_QUIET_MS,
+            lastInteractionAgoMs: Number(status?.lastInteractionAgoMs || 0)
+          });
+        } catch (_) {}
+      }
+      return false;
+    }
+
+    if (!executionQuietDeferred) {
+      executionQuietDeferred = true;
+      const status = global.TaskPointsCore?.getStorageMaintenanceIdleStatus?.();
+      try {
+        global.TaskPointsPerf?.mark?.('upset.logExecutionGuardDeferred', {
+          requiredQuietMs: LOG_RECONCILE_QUIET_MS,
+          lastInteractionAgoMs: Number(status?.lastInteractionAgoMs || 0),
+          navigationQuietForMs: Number(status?.navigationQuietForMs || 0)
+        });
+      } catch (_) {}
+    }
+    queueReconcile(250);
+    return true;
+  }
+
   function reconcileStored(options = {}) {
     const core = global.TaskPointsCore;
     if (!core?.loadAppState || !core?.mergeAndSaveState || reconciliationRunning) return null;
+    if (deferLogReconcileAtExecution()) return null;
     reconciliationRunning = true;
     try {
       // Reconciliation is observational unless this module actually has an inbox
@@ -452,10 +500,14 @@
     installPopulateWrapper();
     queueReconcileWhenQuiet('pageshow', 50);
   });
-  global.addEventListener?.('focus', () => queueReconcile(100));
+  global.addEventListener?.('focus', () => {
+    if (isLogPage()) queueReconcileWhenQuiet('focus', 0);
+    else queueReconcile(100);
+  });
   global.addEventListener?.('taskpoints:state-revision', () => {
     if (suppressRevisionQueue) return;
-    queueReconcile(100);
+    if (isLogPage()) queueReconcileWhenQuiet('state_revision', 0);
+    else queueReconcile(100);
   });
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

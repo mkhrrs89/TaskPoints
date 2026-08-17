@@ -81,6 +81,30 @@ test('perf=1 enables a session trace and exposes report controls', () => {
   assert.ok(report.topDurations.some((row) => row.name === 'core.bundle.evaluate'));
 });
 
+test('loadAppState trace records options and caller information only while tracing is enabled', () => {
+  const { context } = run('?perf=1');
+  context.TaskPointsCore = {
+    loadAppState(options = {}) { return { state: {}, options }; }
+  };
+  context.TaskPointsPerf.installHooks();
+
+  vm.runInNewContext(`
+    globalThis.invokeLoadAppStateFromVm = function invokeLoadAppStateFromVm() {
+      return TaskPointsCore.loadAppState({ syncDerived: true, persistSync: false, preloadedState: { tasks: [] } });
+    };
+  `, context);
+
+  const result = context.invokeLoadAppStateFromVm();
+  assert.deepEqual(result.state, {});
+  const report = context.TaskPointsPerf.buildReport();
+  const event = report.pages.flatMap((page) => page.events || []).find((row) => row.name === 'core.loadAppState');
+  assert.ok(event, 'expected a core.loadAppState duration event');
+  assert.equal(event.detail?.syncDerived, true);
+  assert.equal(event.detail?.persistSync, false);
+  assert.equal(event.detail?.hasPreloadedState, true);
+  assert.match(String(event.detail?.caller || event.detail?.stack || ''), /invokeLoadAppStateFromVm|evalmachine/);
+});
+
 test('perf=0 disables tracing for the session', () => {
   const { context, sessionStorage } = run('?perf=0', { tp_perf_trace_enabled_v1: '1' });
   assert.equal(context.TaskPointsPerf, undefined);
