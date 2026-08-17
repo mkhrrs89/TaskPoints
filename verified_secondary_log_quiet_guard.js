@@ -11,8 +11,8 @@
   let installAttempts = 0;
   let deferredRuns = 0;
   let releasedRuns = 0;
-  const deferredByOperation = { phase5c: 0, phase2: 0 };
-  const releasedByOperation = { phase5c: 0, phase2: 0 };
+  const deferredByOperation = { phase5c: 0, phase2: 0, toolbar: 0 };
+  const releasedByOperation = { phase5c: 0, phase2: 0, toolbar: 0 };
 
   function operationText(options) {
     if (typeof options === 'string') return options;
@@ -24,6 +24,7 @@
     const text = operationText(options);
     if (/phase5c_verified_secondary/i.test(text)) return 'phase5c';
     if (/phase2_dual_write_coalesced/i.test(text)) return 'phase2';
+    if (/toolbar_background_maintenance/i.test(text)) return 'toolbar';
     return '';
   }
 
@@ -35,12 +36,14 @@
     mark('storage.logQuietGuardDeferred', { operation: kind, ...detail });
     if (kind === 'phase5c') mark('phase5c.logQuietGuardDeferred', detail);
     if (kind === 'phase2') mark('phase2.logQuietGuardDeferred', detail);
+    if (kind === 'toolbar') mark('toolbar.logQuietGuardDeferred', detail);
   }
 
   function markReleased(kind, detail) {
     mark('storage.logQuietGuardReleased', { operation: kind, ...detail });
     if (kind === 'phase5c') mark('phase5c.logQuietGuardReleased', detail);
     if (kind === 'phase2') mark('phase2.logQuietGuardReleased', detail);
+    if (kind === 'toolbar') mark('toolbar.logQuietGuardReleased', detail);
   }
 
   function statusReadyForLongMaintenance(status) {
@@ -106,7 +109,7 @@
       installed: true,
       requiredQuietMs: REQUIRED_QUIET_MS,
       pollMs: POLL_MS,
-      guardedOperations: ['phase5c_verified_secondary', 'phase2_dual_write_coalesced'],
+      guardedOperations: ['phase5c_verified_secondary', 'phase2_dual_write_coalesced', 'toolbar_background_maintenance'],
       deferredRuns,
       releasedRuns,
       deferredByOperation: { ...deferredByOperation },
@@ -120,7 +123,7 @@
     mark('phase5c.logQuietGuardInstalled', { requiredQuietMs: REQUIRED_QUIET_MS });
     mark('storage.logQuietGuardInstalled', {
       requiredQuietMs: REQUIRED_QUIET_MS,
-      guardedOperations: ['phase5c', 'phase2']
+      guardedOperations: ['phase5c', 'phase2', 'toolbar']
     });
     return true;
   }
