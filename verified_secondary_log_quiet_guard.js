@@ -9,8 +9,11 @@
   const INSTALL_RETRY_MS = 50;
   const MAX_INSTALL_ATTEMPTS = 240;
   let installAttempts = 0;
+  let toolbarRunInstallAttempts = 0;
   let deferredRuns = 0;
   let releasedRuns = 0;
+  let toolbarPreScheduledDeferrals = 0;
+  let toolbarPreScheduledReleases = 0;
   const deferredByOperation = { phase5c: 0, phase2: 0, toolbar: 0 };
   const releasedByOperation = { phase5c: 0, phase2: 0, toolbar: 0 };
 
@@ -54,6 +57,60 @@
     return Number(status.lastInteractionAgoMs || 0) >= REQUIRED_QUIET_MS;
   }
 
+  function installToolbarRunGuard() {
+    const originalRun = global.runTaskPointsToolbarMaintenance;
+    if (typeof originalRun !== 'function') {
+      toolbarRunInstallAttempts += 1;
+      if (toolbarRunInstallAttempts < MAX_INSTALL_ATTEMPTS) {
+        global.setTimeout?.(installToolbarRunGuard, INSTALL_RETRY_MS);
+      }
+      return false;
+    }
+    if (originalRun.__taskpointsLogToolbarRunQuietGuard) return true;
+
+    const wrappedRun = function taskPointsLogToolbarRunQuietGuard(...args) {
+      const idleStatus = core.getStorageMaintenanceIdleStatus?.();
+      if (statusReadyForLongMaintenance(idleStatus)) {
+        return originalRun.apply(this, args);
+      }
+
+      toolbarPreScheduledDeferrals += 1;
+      const deferredDetail = {
+        requiredQuietMs: REQUIRED_QUIET_MS,
+        lastInteractionAgoMs: Number(idleStatus?.lastInteractionAgoMs || 0),
+        navigationQuietForMs: Number(idleStatus?.navigationQuietForMs || 0),
+        stage: 'pre-scheduled-run'
+      };
+      markDeferred('toolbar', deferredDetail);
+
+      return new Promise((resolve, reject) => {
+        const retry = () => {
+          const nextStatus = core.getStorageMaintenanceIdleStatus?.();
+          if (!statusReadyForLongMaintenance(nextStatus)) {
+            global.setTimeout?.(retry, POLL_MS);
+            return;
+          }
+
+          toolbarPreScheduledReleases += 1;
+          const releasedDetail = {
+            requiredQuietMs: REQUIRED_QUIET_MS,
+            lastInteractionAgoMs: Number(nextStatus?.lastInteractionAgoMs || 0),
+            stage: 'pre-scheduled-run'
+          };
+          markReleased('toolbar', releasedDetail);
+          Promise.resolve(originalRun.apply(this, args)).then(resolve, reject);
+        };
+        retry();
+      });
+    };
+
+    Object.defineProperty(wrappedRun, '__taskpointsLogToolbarRunQuietGuard', { value: true });
+    Object.defineProperty(wrappedRun, '__taskPointsOriginal', { value: originalRun });
+    global.runTaskPointsToolbarMaintenance = wrappedRun;
+    mark('toolbar.logQuietRunGuardInstalled', { requiredQuietMs: REQUIRED_QUIET_MS });
+    return true;
+  }
+
   function install() {
     const original = core.whenStorageMaintenanceQuiet;
     if (typeof original !== 'function') {
@@ -63,6 +120,7 @@
     }
     if (original.__taskpointsVerifiedSecondaryLogQuietGuard) {
       core.__verifiedSecondaryLogQuietGuardInstalled = true;
+      installToolbarRunGuard();
       return true;
     }
 
@@ -110,6 +168,9 @@
       requiredQuietMs: REQUIRED_QUIET_MS,
       pollMs: POLL_MS,
       guardedOperations: ['phase5c_verified_secondary', 'phase2_dual_write_coalesced', 'toolbar_background_maintenance'],
+      toolbarRunGuardInstalled: Boolean(global.runTaskPointsToolbarMaintenance?.__taskpointsLogToolbarRunQuietGuard),
+      toolbarPreScheduledDeferrals,
+      toolbarPreScheduledReleases,
       deferredRuns,
       releasedRuns,
       deferredByOperation: { ...deferredByOperation },
@@ -125,8 +186,10 @@
       requiredQuietMs: REQUIRED_QUIET_MS,
       guardedOperations: ['phase5c', 'phase2', 'toolbar']
     });
+    installToolbarRunGuard();
     return true;
   }
 
   install();
+  installToolbarRunGuard();
 })(typeof window !== 'undefined' ? window : globalThis);
