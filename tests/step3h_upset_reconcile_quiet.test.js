@@ -12,7 +12,8 @@ test('startup and pageshow upset reconciliation wait for the shared quiet gate',
   assert.match(source, /queueReconcileWhenQuiet\('pageshow', 50\)/);
 });
 
-test('focus and state revisions keep prompt reconciliation', () => {
-  assert.match(source, /'focus', \(\) => queueReconcile\(100\)/);
-  assert.match(source, /'taskpoints:state-revision',[\s\S]*queueReconcile\(100\)/);
+test('Log focus and state revisions wait for quiet while other pages stay prompt', () => {
+  assert.match(source, /function isLogPage\(\)[\s\S]*pathname === '\/log'[\s\S]*pathname\.endsWith\('\/log\.html'\)/);
+  assert.match(source, /'focus',[\s\S]*isLogPage\(\)[\s\S]*queueReconcileWhenQuiet\('focus', 0\)[\s\S]*else queueReconcile\(100\)/);
+  assert.match(source, /'taskpoints:state-revision',[\s\S]*isLogPage\(\)[\s\S]*queueReconcileWhenQuiet\('state_revision', 0\)[\s\S]*else queueReconcile\(100\)/);
 });
