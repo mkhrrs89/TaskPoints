@@ -382,6 +382,11 @@
     }, 0);
   }
 
+  function isLogPage() {
+    const pathname = String(global.location?.pathname || '');
+    return pathname === '/log' || pathname.endsWith('/log.html');
+  }
+
   function mergePopulateResults(originalResult, upsetResult) {
     if (!upsetResult?.changed) return originalResult;
     return {
@@ -452,10 +457,14 @@
     installPopulateWrapper();
     queueReconcileWhenQuiet('pageshow', 50);
   });
-  global.addEventListener?.('focus', () => queueReconcile(100));
+  global.addEventListener?.('focus', () => {
+    if (isLogPage()) queueReconcileWhenQuiet('focus', 0);
+    else queueReconcile(100);
+  });
   global.addEventListener?.('taskpoints:state-revision', () => {
     if (suppressRevisionQueue) return;
-    queueReconcile(100);
+    if (isLogPage()) queueReconcileWhenQuiet('state_revision', 0);
+    else queueReconcile(100);
   });
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
