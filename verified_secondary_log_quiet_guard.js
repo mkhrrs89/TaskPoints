@@ -14,8 +14,8 @@
   let releasedRuns = 0;
   let toolbarPreScheduledDeferrals = 0;
   let toolbarPreScheduledReleases = 0;
-  const deferredByOperation = { phase5c: 0, phase2: 0, toolbar: 0 };
-  const releasedByOperation = { phase5c: 0, phase2: 0, toolbar: 0 };
+  const deferredByOperation = { phase5c: 0, phase2: 0, toolbar: 0, upset: 0 };
+  const releasedByOperation = { phase5c: 0, phase2: 0, toolbar: 0, upset: 0 };
 
   function operationText(options) {
     if (typeof options === 'string') return options;
@@ -28,6 +28,7 @@
     if (/phase5c_verified_secondary/i.test(text)) return 'phase5c';
     if (/phase2_dual_write_coalesced/i.test(text)) return 'phase2';
     if (/toolbar_background_maintenance/i.test(text)) return 'toolbar';
+    if (/season_series_upset_(focus|state_revision)/i.test(text)) return 'upset';
     return '';
   }
 
@@ -40,6 +41,7 @@
     if (kind === 'phase5c') mark('phase5c.logQuietGuardDeferred', detail);
     if (kind === 'phase2') mark('phase2.logQuietGuardDeferred', detail);
     if (kind === 'toolbar') mark('toolbar.logQuietGuardDeferred', detail);
+    if (kind === 'upset') mark('upset.logQuietGuardDeferred', detail);
   }
 
   function markReleased(kind, detail) {
@@ -47,6 +49,7 @@
     if (kind === 'phase5c') mark('phase5c.logQuietGuardReleased', detail);
     if (kind === 'phase2') mark('phase2.logQuietGuardReleased', detail);
     if (kind === 'toolbar') mark('toolbar.logQuietGuardReleased', detail);
+    if (kind === 'upset') mark('upset.logQuietGuardReleased', detail);
   }
 
   function statusReadyForLongMaintenance(status) {
@@ -167,7 +170,7 @@
       installed: true,
       requiredQuietMs: REQUIRED_QUIET_MS,
       pollMs: POLL_MS,
-      guardedOperations: ['phase5c_verified_secondary', 'phase2_dual_write_coalesced', 'toolbar_background_maintenance'],
+      guardedOperations: ['phase5c_verified_secondary', 'phase2_dual_write_coalesced', 'toolbar_background_maintenance', 'season_series_upset_focus', 'season_series_upset_state_revision'],
       toolbarRunGuardInstalled: Boolean(global.runTaskPointsToolbarMaintenance?.__taskpointsLogToolbarRunQuietGuard),
       toolbarPreScheduledDeferrals,
       toolbarPreScheduledReleases,
@@ -184,7 +187,7 @@
     mark('phase5c.logQuietGuardInstalled', { requiredQuietMs: REQUIRED_QUIET_MS });
     mark('storage.logQuietGuardInstalled', {
       requiredQuietMs: REQUIRED_QUIET_MS,
-      guardedOperations: ['phase5c', 'phase2', 'toolbar']
+      guardedOperations: ['phase5c', 'phase2', 'toolbar', 'upset']
     });
     installToolbarRunGuard();
     return true;
