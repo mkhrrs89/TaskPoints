@@ -11,6 +11,8 @@
   let installAttempts = 0;
   let deferredRuns = 0;
   let releasedRuns = 0;
+  const deferredByOperation = { phase5c: 0, phase2: 0 };
+  const releasedByOperation = { phase5c: 0, phase2: 0 };
 
   function operationText(options) {
     if (typeof options === 'string') return options;
@@ -18,12 +20,27 @@
     return String(options.source || options.reason || options.action || options.caller || options.savePath || '');
   }
 
-  function isVerifiedSecondaryRequest(options) {
-    return /phase5c_verified_secondary/i.test(operationText(options));
+  function longMaintenanceKind(options) {
+    const text = operationText(options);
+    if (/phase5c_verified_secondary/i.test(text)) return 'phase5c';
+    if (/phase2_dual_write_coalesced/i.test(text)) return 'phase2';
+    return '';
   }
 
   function mark(name, detail) {
     try { global.TaskPointsPerf?.mark?.(name, detail); } catch (_) {}
+  }
+
+  function markDeferred(kind, detail) {
+    mark('storage.logQuietGuardDeferred', { operation: kind, ...detail });
+    if (kind === 'phase5c') mark('phase5c.logQuietGuardDeferred', detail);
+    if (kind === 'phase2') mark('phase2.logQuietGuardDeferred', detail);
+  }
+
+  function markReleased(kind, detail) {
+    mark('storage.logQuietGuardReleased', { operation: kind, ...detail });
+    if (kind === 'phase5c') mark('phase5c.logQuietGuardReleased', detail);
+    if (kind === 'phase2') mark('phase2.logQuietGuardReleased', detail);
   }
 
   function statusReadyForLongMaintenance(status) {
@@ -47,7 +64,8 @@
     }
 
     const wrapped = function taskPointsVerifiedSecondaryLogQuietGuard(run, options = {}) {
-      if (!isVerifiedSecondaryRequest(options)) return original.call(this, run, options);
+      const kind = longMaintenanceKind(options);
+      if (!kind) return original.call(this, run, options);
       if (typeof run !== 'function') return original.call(this, run, options);
 
       let markedDeferred = false;
@@ -58,7 +76,8 @@
             if (!markedDeferred) {
               markedDeferred = true;
               deferredRuns += 1;
-              mark('phase5c.logQuietGuardDeferred', {
+              deferredByOperation[kind] += 1;
+              markDeferred(kind, {
                 requiredQuietMs: REQUIRED_QUIET_MS,
                 lastInteractionAgoMs: Number(idleStatus?.lastInteractionAgoMs || 0),
                 navigationQuietForMs: Number(idleStatus?.navigationQuietForMs || 0)
@@ -69,7 +88,8 @@
           }
 
           releasedRuns += 1;
-          mark('phase5c.logQuietGuardReleased', {
+          releasedByOperation[kind] += 1;
+          markReleased(kind, {
             requiredQuietMs: REQUIRED_QUIET_MS,
             lastInteractionAgoMs: Number(idleStatus?.lastInteractionAgoMs || 0)
           });
@@ -82,15 +102,26 @@
     Object.defineProperty(wrapped, '__taskpointsVerifiedSecondaryLogQuietGuard', { value: true });
     Object.defineProperty(wrapped, '__taskPointsOriginal', { value: original });
     core.whenStorageMaintenanceQuiet = wrapped;
-    core.getVerifiedSecondaryLogQuietGuardStatus = () => ({
+    const getStatus = () => ({
       installed: true,
       requiredQuietMs: REQUIRED_QUIET_MS,
       pollMs: POLL_MS,
+      guardedOperations: ['phase5c_verified_secondary', 'phase2_dual_write_coalesced'],
       deferredRuns,
-      releasedRuns
+      releasedRuns,
+      deferredByOperation: { ...deferredByOperation },
+      releasedByOperation: { ...releasedByOperation }
     });
+    // Keep the original public status helper for compatibility while exposing
+    // the broader meaning of the guard to diagnostics.
+    core.getVerifiedSecondaryLogQuietGuardStatus = getStatus;
+    core.getLogLongMaintenanceQuietGuardStatus = getStatus;
     core.__verifiedSecondaryLogQuietGuardInstalled = true;
     mark('phase5c.logQuietGuardInstalled', { requiredQuietMs: REQUIRED_QUIET_MS });
+    mark('storage.logQuietGuardInstalled', {
+      requiredQuietMs: REQUIRED_QUIET_MS,
+      guardedOperations: ['phase5c', 'phase2']
+    });
     return true;
   }
 
