@@ -82,6 +82,10 @@ test('Log Phase 2 shadow dual-write waits for the same eight-second quiet window
   await assertGuardedOperationWaits('phase2_dual_write_coalesced', 'phase2');
 });
 
+test('Log toolbar background maintenance waits for the same eight-second quiet window', async () => {
+  await assertGuardedOperationWaits('toolbar_background_maintenance', 'toolbar');
+});
+
 test('unrelated maintenance keeps the original shared idle behavior', async () => {
   const h = installHarness();
   await h.core.whenStorageMaintenanceQuiet(h.makeRun(), { source: 'phase3_cache_refresh' });
