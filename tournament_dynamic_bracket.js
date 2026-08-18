@@ -13,6 +13,17 @@
     stagePad: 84
   };
 
+  const initialBracket = global.document?.getElementById?.('tournamentBracket');
+  if (initialBracket && initialBracket.getAttribute('data-bracket-format') !== FORMAT_ID) {
+    initialBracket.style.visibility = 'hidden';
+    global.setTimeout?.(() => {
+      if (initialBracket.style.visibility === 'hidden'
+          && initialBracket.getAttribute('data-bracket-format') !== FORMAT_ID) {
+        initialBracket.style.visibility = '';
+      }
+    }, 3000);
+  }
+
   function escapeHtml(value) {
     return String(value ?? '')
       .replace(/&/g, '&amp;')
@@ -595,6 +606,10 @@
     });
   }
 
+  function revealBracket(bracket) {
+    if (bracket?.style?.visibility === 'hidden') bracket.style.visibility = '';
+  }
+
   function render() {
     const bracket = document.getElementById('tournamentBracket');
     if (!bracket) return { ok: false, reason: 'mount_missing' };
@@ -609,6 +624,7 @@
 
     if (!season || !rounds.length) {
       bracket.innerHTML = '<div class="tp-classic-empty">No current Season tournament bracket is available.</div>';
+      revealBracket(bracket);
       return { ok: false, reason: 'season_missing' };
     }
 
@@ -617,6 +633,7 @@
     const positions = computePositions(rounds);
     bracket.innerHTML = renderMarkup(state, season, rounds, players, seeds);
     applyPositions(bracket, rounds, positions);
+    revealBracket(bracket);
     hydrateImages(bracket).finally(() => scheduleConnectorDraw(bracket, rounds));
     scheduleConnectorDraw(bracket, rounds);
 
@@ -631,7 +648,7 @@
   global.TaskPointsDynamicTournamentBracket = { render, orderedRounds };
 
   const run = () => {
-    global.setTimeout?.(render, 0);
+    render();
     global.setTimeout?.(render, 250);
   };
 
