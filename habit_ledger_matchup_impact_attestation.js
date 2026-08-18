@@ -372,3 +372,90 @@
     document.addEventListener('DOMContentLoaded', install, { once: true });
   }
 })(typeof window !== 'undefined' ? window : globalThis);
+
+;(function installTaskPointsAuditCompactMobileSizingFix(global) {
+  'use strict';
+  const document = global.document;
+  if (!document || document.getElementById('taskpointsAuditCompactMobileSizingFix')) return;
+
+  const style = document.createElement('style');
+  style.id = 'taskpointsAuditCompactMobileSizingFix';
+  style.textContent = `
+    .audit-primary-controls {
+      grid-template-columns: minmax(7.75rem, 0.72fr) minmax(0, 1.28fr) !important;
+      grid-template-rows: auto 2.4rem !important;
+      column-gap: 0.72rem !important;
+      row-gap: 0.22rem !important;
+      align-items: end !important;
+    }
+    .audit-primary-controls > #auditDate {
+      box-sizing: border-box !important;
+      width: 100% !important;
+      max-width: 100% !important;
+      min-width: 0 !important;
+      height: 2.4rem !important;
+      min-height: 2.4rem !important;
+      padding: 0.34rem 0.42rem !important;
+      font-size: 0.78rem !important;
+      line-height: 1.15 !important;
+      overflow: hidden !important;
+      position: static !important;
+      margin: 0 !important;
+    }
+    .audit-primary-controls > #runAuditBtn {
+      box-sizing: border-box !important;
+      width: 100% !important;
+      max-width: 100% !important;
+      min-width: 0 !important;
+      height: 2.4rem !important;
+      min-height: 2.4rem !important;
+      padding: 0.38rem 0.62rem !important;
+      font-size: 0.8rem !important;
+      line-height: 1.1 !important;
+      position: static !important;
+      margin: 0 !important;
+      transform: none !important;
+    }
+    .audit-secondary-controls {
+      display: grid !important;
+      grid-template-columns: repeat(3, max-content) !important;
+      grid-auto-rows: minmax(2rem, auto) !important;
+      gap: 0.36rem 0.4rem !important;
+      justify-content: start !important;
+      align-items: start !important;
+      width: 100% !important;
+    }
+    .audit-secondary-controls .btn {
+      box-sizing: border-box !important;
+      width: auto !important;
+      max-width: 100% !important;
+      min-width: 0 !important;
+      min-height: 2rem !important;
+      margin: 0 !important;
+      white-space: nowrap !important;
+    }
+    .audit-secondary-controls .btn:nth-child(4) {
+      grid-column: 1 !important;
+    }
+    @media (max-width: 380px) {
+      .audit-primary-controls {
+        grid-template-columns: minmax(7.2rem, 0.75fr) minmax(0, 1.25fr) !important;
+        column-gap: 0.55rem !important;
+      }
+      .audit-primary-controls > #auditDate {
+        font-size: 0.73rem !important;
+        padding-left: 0.34rem !important;
+        padding-right: 0.34rem !important;
+      }
+      .audit-secondary-controls {
+        gap: 0.32rem !important;
+      }
+      .audit-secondary-controls .btn {
+        font-size: 0.67rem !important;
+        padding-left: 0.44rem !important;
+        padding-right: 0.44rem !important;
+      }
+    }
+  `;
+  (document.head || document.documentElement).appendChild(style);
+})(typeof window !== 'undefined' ? window : globalThis);
