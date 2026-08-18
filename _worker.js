@@ -300,6 +300,9 @@ export default {
       const auditFirstPaintGuard = directPageKind === 'audit'
         ? '<style id="taskpoints-audit-first-paint-guard">main{visibility:hidden!important}</style>'
         : '';
+      const auditResultWrapStyle = directPageKind === 'audit'
+        ? '<style id="taskpoints-audit-result-wrap">#auditChecks{min-width:0;max-width:100%;overflow-x:hidden}#auditChecks>*{min-width:0!important;max-width:100%!important}#auditChecks>.border{box-sizing:border-box;min-width:0!important;max-width:100%!important;overflow-x:hidden}#auditChecks>.border *{min-width:0;max-width:100%}#auditChecks .flex.items-center.justify-between{min-width:0;width:100%;align-items:flex-start}#auditChecks .flex.items-center.justify-between>.flex{min-width:0;flex:1 1 auto}#auditChecks .flex.items-center.justify-between>.flex>div{min-width:0;flex:1 1 auto}#auditChecks .flex.items-center.justify-between>:last-child{flex:0 0 auto}#auditChecks .font-semibold,#auditChecks .muted,#auditChecks .font-mono,#auditChecks .font-mono *,#auditChecks li{overflow-wrap:anywhere!important;word-break:break-word!important;white-space:normal!important;max-width:100%!important}</style>'
+        : '';
       const auditFirstPaintReveal = directPageKind === 'audit'
         ? '<script data-taskpoints-audit-first-paint-reveal="true">document.getElementById("taskpoints-audit-first-paint-guard")?.remove();</script>'
         : '';
@@ -307,7 +310,7 @@ export default {
       return new HTMLRewriter()
         .on('head', {
           element(element) {
-            if (auditFirstPaintGuard) element.append(auditFirstPaintGuard, { html: true });
+            if (auditFirstPaintGuard || auditResultWrapStyle) element.append(auditFirstPaintGuard + auditResultWrapStyle, { html: true });
           }
         })
         .on('body', {
