@@ -297,12 +297,23 @@ export default {
           + '<script src="/habit_ledger_matchup_impact_stale_guard.js?v=20260803-3" data-taskpoints-habit-matchup-stale-guard="true"></script>'
           + '<script src="/score_alias_audit_bootstrap.js?v=20260731-2" data-taskpoints-score-alias-audit-bootstrap="true"></script>'
         : '';
+      const auditFirstPaintGuard = directPageKind === 'audit'
+        ? '<style id="taskpoints-audit-first-paint-guard">main{visibility:hidden!important}</style>'
+        : '';
+      const auditFirstPaintReveal = directPageKind === 'audit'
+        ? '<script data-taskpoints-audit-first-paint-reveal="true">document.getElementById("taskpoints-audit-first-paint-guard")?.remove();</script>'
+        : '';
 
       return new HTMLRewriter()
+        .on('head', {
+          element(element) {
+            if (auditFirstPaintGuard) element.append(auditFirstPaintGuard, { html: true });
+          }
+        })
         .on('body', {
           element(element) {
             element.append(
-              '<script src="/score_alias_consistency.js?v=20260731-5" data-taskpoints-score-alias-direct="true"></script>' + auditBootstrap,
+              '<script src="/score_alias_consistency.js?v=20260731-5" data-taskpoints-score-alias-direct="true"></script>' + auditBootstrap + auditFirstPaintReveal,
               { html: true }
             );
           }
