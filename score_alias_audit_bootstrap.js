@@ -317,6 +317,33 @@
       });
   }
 
+  function runWithLatestRoundAuditCache(run, stats) {
+    const helperName = 'getLatestSeasonScheduledOrRecordedRoundIndexForAudit';
+    const originalHelper = global[helperName];
+    if (typeof originalHelper !== 'function') return run();
+
+    const cache = new Map();
+    function memoizedLatestRound(state, season, auditDateKey) {
+      const seasonId = String(season?.id || season?.seasonId || '');
+      const key = `${seasonId}|${String(auditDateKey || '')}`;
+      if (cache.has(key)) {
+        if (stats) stats.hits += 1;
+        return cache.get(key);
+      }
+      if (stats) stats.misses += 1;
+      const value = originalHelper.apply(this, arguments);
+      cache.set(key, value);
+      return value;
+    }
+
+    global[helperName] = memoizedLatestRound;
+    try {
+      return run();
+    } finally {
+      if (global[helperName] === memoizedLatestRound) global[helperName] = originalHelper;
+    }
+  }
+
   function installVariableSeedAuditFilter() {
     if (global.__taskpointsVariableSeedAuditFilterInstalled) return true;
     const original = global.buildSeasonChampionshipAuditChecks;
@@ -327,7 +354,16 @@
     }
 
     function buildVariableSeedSeasonChampionshipAuditChecks(...args) {
-      return filterVariableSeedAudits(original.apply(this, args), args[0]);
+      const stats = { hits: 0, misses: 0 };
+      const end = global.TaskPointsPerf?.span?.('audit.seasonChampionshipChecks');
+      try {
+        return runWithLatestRoundAuditCache(
+          () => filterVariableSeedAudits(original.apply(this, args), args[0]),
+          stats
+        );
+      } finally {
+        end?.({ latestRoundCacheHits: stats.hits, latestRoundCacheMisses: stats.misses });
+      }
     }
     Object.defineProperty(buildVariableSeedSeasonChampionshipAuditChecks, '__taskpointsVariableSeedAuditFilterInstalled', {
       value: true,
