@@ -228,3 +228,94 @@
   `;
   (document.head || document.documentElement)?.appendChild(style);
 })(typeof window !== 'undefined' ? window : globalThis);
+
+;(function installTournamentCompactVisual(global) {
+  'use strict';
+
+  const pathname = String(global.location?.pathname || '').replace(/\/+$/, '');
+  if (!(pathname === '/tournament' || pathname.endsWith('/tournament.html'))) return;
+
+  const document = global.document;
+  if (!document?.createElement || document.getElementById('tpTournamentCompactVisual')) return;
+
+  const style = document.createElement('style');
+  style.id = 'tpTournamentCompactVisual';
+  style.textContent = `
+    body.tp-tournament-bracket-refresh section.glass:has(#tournamentBracket) {
+      padding: 10px 8px 8px !important;
+    }
+
+    body.tp-tournament-bracket-refresh .tournament-bracket-scroll {
+      margin: 0 !important;
+      padding: 4px 0 8px !important;
+      background: #071016 !important;
+      background-image: none !important;
+    }
+
+    body #tournamentBracket[data-bracket-format="dynamic_current_season"] {
+      --tp-classic-column-gap: 62px !important;
+      padding: .15rem .15rem .65rem !important;
+      background: rgba(3, 13, 19, .9) !important;
+      background-image: none !important;
+      background-size: auto !important;
+    }
+
+    @media (max-width: 767px) {
+      body #tournamentBracket[data-bracket-format="dynamic_current_season"] {
+        --tp-classic-column-gap: 58px !important;
+        padding-left: .1rem !important;
+        padding-right: .1rem !important;
+      }
+
+      body.tp-tournament-bracket-refresh .tournament-bracket-scroll {
+        padding-bottom: 5px !important;
+      }
+    }
+  `;
+  (document.head || document.documentElement)?.appendChild(style);
+
+  const BASELINE_Y = 84;
+  const VERTICAL_SCALE = 0.79;
+  let observedBracket = null;
+  let observer = null;
+  let lastFirstSeries = null;
+
+  function compact(bracket) {
+    if (!bracket || bracket.getAttribute('data-bracket-format') !== 'dynamic_current_season') return;
+    const series = Array.from(bracket.querySelectorAll('.tp-classic-series'));
+    const firstSeries = series[0] || null;
+    if (!firstSeries || firstSeries === lastFirstSeries) return;
+    lastFirstSeries = firstSeries;
+
+    let maxTop = BASELINE_Y;
+    series.forEach((node) => {
+      const currentTop = Number.parseFloat(node.style.top || '');
+      if (!Number.isFinite(currentTop)) return;
+      const compactTop = BASELINE_Y + ((currentTop - BASELINE_Y) * VERTICAL_SCALE);
+      node.style.top = `${compactTop.toFixed(2)}px`;
+      maxTop = Math.max(maxTop, compactTop);
+    });
+
+    const stageHeight = Math.ceil(maxTop + 160);
+    bracket.querySelectorAll('.tp-classic-round-stage').forEach((stage) => {
+      stage.style.height = `${stageHeight}px`;
+    });
+  }
+
+  function observeBracket() {
+    const bracket = document.getElementById('tournamentBracket');
+    if (!bracket) return false;
+    if (bracket !== observedBracket) {
+      observer?.disconnect?.();
+      observedBracket = bracket;
+      observer = new MutationObserver(() => compact(bracket));
+      observer.observe(bracket, { childList: true });
+    }
+    compact(bracket);
+    return true;
+  }
+
+  if (!observeBracket()) {
+    document.addEventListener('DOMContentLoaded', observeBracket, { once: true });
+  }
+})(typeof window !== 'undefined' ? window : globalThis);
