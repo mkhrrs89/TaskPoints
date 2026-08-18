@@ -205,3 +205,26 @@
     invalidations
   });
 })(typeof window !== 'undefined' ? window : globalThis);
+
+;(function installTournamentFirstPaintGuard(global) {
+  'use strict';
+
+  const pathname = String(global.location?.pathname || '').replace(/\/+$/, '');
+  if (!(pathname === '/tournament' || pathname.endsWith('/tournament.html'))) return;
+
+  const document = global.document;
+  if (!document?.createElement || document.getElementById('tpTournamentFirstPaintGuard')) return;
+
+  const style = document.createElement('style');
+  style.id = 'tpTournamentFirstPaintGuard';
+  style.textContent = `
+    @keyframes tpTournamentScaffoldFallbackReveal {
+      to { visibility: visible; }
+    }
+    #tournamentBracket[data-bracket-format="official_34_player_championship"] {
+      visibility: hidden;
+      animation: tpTournamentScaffoldFallbackReveal 0s linear 3s forwards;
+    }
+  `;
+  (document.head || document.documentElement)?.appendChild(style);
+})(typeof window !== 'undefined' ? window : globalThis);
