@@ -459,3 +459,75 @@
   `;
   (document.head || document.documentElement).appendChild(style);
 })(typeof window !== 'undefined' ? window : globalThis);
+
+;(function installTaskPointsAuditDateSizingFixV2(global) {
+  'use strict';
+  const document = global.document;
+  if (!document || document.getElementById('taskpointsAuditDateSizingFixV2')) return;
+
+  const style = document.createElement('style');
+  style.id = 'taskpointsAuditDateSizingFixV2';
+  style.textContent = `
+    .audit-primary-controls {
+      grid-template-columns: 7.25rem minmax(0, 1fr) !important;
+      grid-template-rows: 1rem 2.15rem !important;
+      column-gap: 0.62rem !important;
+      row-gap: 0.28rem !important;
+      align-items: end !important;
+    }
+    .audit-primary-controls > label {
+      grid-column: 1 !important;
+      grid-row: 1 !important;
+      display: block !important;
+      align-self: end !important;
+      position: relative !important;
+      z-index: 3 !important;
+      min-height: 1rem !important;
+      height: 1rem !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      line-height: 1rem !important;
+      overflow: visible !important;
+    }
+    .audit-primary-controls > #auditDate {
+      grid-column: 1 !important;
+      grid-row: 2 !important;
+      box-sizing: border-box !important;
+      width: 7.25rem !important;
+      min-width: 7.25rem !important;
+      max-width: 7.25rem !important;
+      height: 2.15rem !important;
+      min-height: 2.15rem !important;
+      max-height: 2.15rem !important;
+      padding: 0.24rem 0.36rem !important;
+      font-size: 0.74rem !important;
+      line-height: 1 !important;
+      position: relative !important;
+      z-index: 1 !important;
+      margin: 0 !important;
+    }
+    .audit-primary-controls > #runAuditBtn {
+      grid-column: 2 !important;
+      grid-row: 2 !important;
+      box-sizing: border-box !important;
+      height: 2.15rem !important;
+      min-height: 2.15rem !important;
+      max-height: 2.15rem !important;
+      align-self: end !important;
+      margin: 0 !important;
+    }
+    @media (max-width: 380px) {
+      .audit-primary-controls {
+        grid-template-columns: 6.85rem minmax(0, 1fr) !important;
+        column-gap: 0.5rem !important;
+      }
+      .audit-primary-controls > #auditDate {
+        width: 6.85rem !important;
+        min-width: 6.85rem !important;
+        max-width: 6.85rem !important;
+        font-size: 0.7rem !important;
+      }
+    }
+  `;
+  (document.head || document.documentElement).appendChild(style);
+})(typeof window !== 'undefined' ? window : globalThis);
