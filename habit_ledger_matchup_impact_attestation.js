@@ -131,11 +131,11 @@
       }
       #${PHASE_ID} {
         position: relative;
-        min-height: 1.05rem;
-        margin-top: 0.08rem;
+        min-height: 0.95rem;
+        margin-top: 0.05rem;
         overflow: hidden;
         color: rgba(94, 234, 212, 0.9);
-        font-size: 0.72rem;
+        font-size: 0.68rem;
         font-weight: 600;
       }
       #${PHASE_ID}[hidden] { display: none !important; }
@@ -158,6 +158,132 @@
       @keyframes taskpointsAuditPhase3 { 0%,55% {opacity:0} 58%,72% {opacity:1} 75%,100% {opacity:0} }
       @keyframes taskpointsAuditPhase4 { 0%,72% {opacity:0} 75%,91% {opacity:1} 94%,100% {opacity:0} }
       @keyframes taskpointsAuditPhase5 { 0%,91% {opacity:0} 94%,100% {opacity:1} }
+
+      main.audit-compact-main > :not([hidden]) ~ :not([hidden]) {
+        margin-top: 0.7rem !important;
+      }
+      .audit-control-card {
+        padding: 0.9rem 1rem !important;
+        display: grid !important;
+        gap: 0.62rem !important;
+      }
+      .audit-control-card > :not([hidden]) ~ :not([hidden]) {
+        margin-top: 0 !important;
+      }
+      .audit-control-header {
+        display: grid !important;
+        grid-template-columns: minmax(0, 1fr) !important;
+        gap: 0.55rem !important;
+        align-items: stretch !important;
+      }
+      .audit-control-title-block {
+        min-width: 0;
+      }
+      .audit-control-title-block > :first-child {
+        font-size: 1.08rem !important;
+        line-height: 1.25 !important;
+        font-weight: 700 !important;
+      }
+      .audit-primary-controls {
+        display: grid !important;
+        grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.65fr) !important;
+        grid-template-rows: auto 2.55rem !important;
+        gap: 0.22rem 0.5rem !important;
+        align-items: stretch !important;
+        width: 100%;
+      }
+      .audit-primary-controls > label {
+        grid-column: 1;
+        grid-row: 1;
+        align-self: end;
+        font-size: 0.7rem !important;
+        line-height: 1 !important;
+      }
+      .audit-primary-controls > #auditDate {
+        grid-column: 1;
+        grid-row: 2;
+        width: 100% !important;
+        min-width: 0 !important;
+        height: 2.55rem !important;
+        padding: 0.42rem 0.55rem !important;
+        font-size: 0.83rem !important;
+      }
+      .audit-primary-controls > #runAuditBtn {
+        grid-column: 2;
+        grid-row: 2;
+        width: 100% !important;
+        min-width: 0 !important;
+        min-height: 2.55rem !important;
+        padding: 0.45rem 0.7rem !important;
+        font-size: 0.84rem !important;
+        font-weight: 700 !important;
+      }
+      .audit-secondary-controls {
+        display: flex !important;
+        flex-wrap: wrap !important;
+        gap: 0.38rem !important;
+      }
+      .audit-secondary-controls .btn {
+        flex: 0 0 auto !important;
+        min-height: 2.05rem !important;
+        padding: 0.43rem 0.58rem !important;
+        font-size: 0.73rem !important;
+        line-height: 1.05 !important;
+        border-radius: 0.65rem !important;
+      }
+      #auditProgressWrap {
+        border: 0 !important;
+        background: transparent !important;
+        border-radius: 0 !important;
+        padding: 0.16rem 0 0 !important;
+        gap: 0.25rem !important;
+      }
+      #auditProgressLabel {
+        font-size: 0.74rem !important;
+      }
+      #auditProgressMeta {
+        font-size: 0.67rem !important;
+      }
+      #auditProgressTrack {
+        height: 0.32rem !important;
+      }
+      .audit-summary-card {
+        padding: 0.82rem 1rem !important;
+      }
+      .audit-summary-card > :not([hidden]) ~ :not([hidden]) {
+        margin-top: 0.6rem !important;
+      }
+      .audit-summary-title {
+        font-size: 0.92rem !important;
+        line-height: 1.2 !important;
+        text-transform: uppercase;
+        letter-spacing: 0.035em;
+      }
+      #auditSummaryMeta {
+        font-size: 0.76rem !important;
+        line-height: 1.3 !important;
+      }
+      #auditHighlights {
+        grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+        gap: 0.45rem !important;
+      }
+      #auditHighlights > div {
+        padding: 0.55rem 0.6rem !important;
+      }
+      #auditHighlights > div > :last-child {
+        font-size: 1.45rem !important;
+        line-height: 1.05 !important;
+      }
+      @media (max-width: 360px) {
+        .audit-primary-controls {
+          grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.4fr) !important;
+        }
+        .audit-secondary-controls .btn {
+          padding-left: 0.5rem !important;
+          padding-right: 0.5rem !important;
+          font-size: 0.7rem !important;
+        }
+      }
     `;
     (document.head || document.documentElement).appendChild(style);
   }
@@ -193,9 +319,52 @@
     sync();
   }
 
+  function installCompactLayout() {
+    const main = document.querySelector('main');
+    const runBtn = document.getElementById('runAuditBtn');
+    if (!main || !runBtn) return;
+
+    const controlCard = Array.from(main.children).find((child) => child.classList?.contains('glass'));
+    if (!controlCard || controlCard.dataset.auditCompactLayout === '1') return;
+    controlCard.dataset.auditCompactLayout = '1';
+    main.classList.add('audit-compact-main');
+    controlCard.classList.add('audit-control-card');
+
+    const controlHeader = controlCard.firstElementChild;
+    if (controlHeader) {
+      controlHeader.classList.add('audit-control-header');
+      const titleBlock = controlHeader.firstElementChild;
+      if (titleBlock) {
+        titleBlock.classList.add('audit-control-title-block');
+        Array.from(titleBlock.children).forEach((node) => {
+          if (/Re-run TaskPoints math for one day without mutating data\./i.test(String(node.textContent || '').trim())) {
+            node.remove();
+          }
+        });
+      }
+    }
+
+    const primaryControls = runBtn.parentElement;
+    primaryControls?.classList.add('audit-primary-controls');
+
+    const syncMatchupsBtn = document.getElementById('syncMatchupsBtn');
+    syncMatchupsBtn?.parentElement?.classList.add('audit-secondary-controls');
+
+    const summaryCard = Array.from(main.children).filter((child) => child.classList?.contains('glass'))[1];
+    if (summaryCard) {
+      summaryCard.classList.add('audit-summary-card');
+      const summaryTitle = summaryCard.querySelector('.text-lg.font-semibold');
+      if (summaryTitle) {
+        summaryTitle.classList.add('audit-summary-title');
+        summaryTitle.textContent = 'Audit Summary';
+      }
+    }
+  }
+
   function install() {
     installStyle();
     installPhaseFeedback();
+    installCompactLayout();
   }
 
   install();
