@@ -18,6 +18,18 @@ test('Audit live progress uses compositor-friendly fill movement and phase feedb
   assert.match(source, /Finalizing audit report/);
 });
 
+test('Audit compact layout keeps all controls while reducing vertical space', () => {
+  assert.match(source, /installCompactLayout/);
+  assert.match(source, /audit-primary-controls/);
+  assert.match(source, /grid-template-columns:\s*minmax\(0, 0\.85fr\) minmax\(0, 1\.65fr\)/);
+  assert.match(source, /audit-secondary-controls/);
+  assert.match(source, /syncMatchupsBtn/);
+  assert.match(source, /syncNotesBtn|copyReportBtn|exportJsonBtn|audit-secondary-controls/);
+  assert.match(source, /Re-run TaskPoints math for one day without mutating data/);
+  assert.match(source, /node\.remove\(\)/);
+  assert.match(source, /Audit Summary/);
+});
+
 test('Audit live progress does not replace the existing habit-ledger attestation feature', () => {
   assert.match(source, /installHabitLedgerImpactAttestation/);
   assert.match(source, /planner\.buildHabitLedgerRepairPlan = function attestedImpactBuild/);
