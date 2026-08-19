@@ -27,6 +27,8 @@
   const RETRY_BASE_DELAY_MS = 1000;
   const RETRY_MAX_DELAY_MS = 30000;
   const MAX_AUTOMATIC_RETRIES = 5;
+  const REQUIRED_QUIET_MS = 8000;
+  const QUIET_POLL_MS = 250;
   const originalLoadAppState = typeof core.loadAppState === 'function' ? core.loadAppState.bind(core) : null;
   const originalSaveStateSnapshot = typeof core.saveStateSnapshot === 'function' ? core.saveStateSnapshot.bind(core) : null;
 
@@ -40,6 +42,11 @@
   let retryAttempt = 0;
   let retryPaused = false;
   let malformedWarningShown = false;
+  let renderPending = false;
+  let pendingRenderSatisfied = false;
+  let quietDeferred = false;
+  let quietDeferrals = 0;
+  let quietRuns = 0;
   let originalLogFlexCompletion = null;
   let originalHomeSave = null;
   let originalAddCompletion = null;
@@ -269,6 +276,50 @@
     else global.setTimeout?.(() => originalRenderAll(), 0);
   }
 
+  function storageQuietStatus() {
+    try {
+      const status = core.getStorageMaintenanceIdleStatus?.();
+      return status && typeof status === 'object' ? status : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function flexCompactionReady(status = storageQuietStatus()) {
+    // Older test/standalone environments do not install the global maintenance
+    // tracker. Preserve the legacy after-paint behavior there rather than
+    // risking a journal that can never compact.
+    if (!status) return true;
+    if (status.pageLeaving === true || global.document?.visibilityState === 'hidden') return true;
+    if (status.activeEditor === true) return false;
+    if (Number(status.navigationQuietForMs || 0) > 0) return false;
+    return Number(status.lastInteractionAgoMs || 0) >= REQUIRED_QUIET_MS;
+  }
+
+  function markQuietDeferred(status) {
+    if (quietDeferred) return;
+    quietDeferred = true;
+    try {
+      global.TaskPointsPerf?.mark?.('flex.compactionDeferred', {
+        requiredQuietMs: REQUIRED_QUIET_MS,
+        lastInteractionAgoMs: Number(status?.lastInteractionAgoMs || 0),
+        navigationQuietForMs: Number(status?.navigationQuietForMs || 0),
+        activeEditor: status?.activeEditor === true
+      });
+    } catch (_) {}
+  }
+
+  function markQuietReleased(status) {
+    if (!quietDeferred) return;
+    quietDeferred = false;
+    try {
+      global.TaskPointsPerf?.mark?.('flex.compactionReleased', {
+        requiredQuietMs: REQUIRED_QUIET_MS,
+        lastInteractionAgoMs: Number(status?.lastInteractionAgoMs || 0)
+      });
+    } catch (_) {}
+  }
+
   function persistNow(reason = 'background') {
     if (saveRunning) {
       savePending = true;
@@ -299,7 +350,10 @@
     const remaining = remainingRecord.malformed ? 1 : remainingRecord.entries.length;
     if (!remaining) {
       resetRetryBackoff();
-      requestFullRender();
+      if (!pendingRenderSatisfied) requestFullRender();
+      pendingRenderSatisfied = false;
+      renderPending = false;
+      quietDeferred = false;
       return true;
     }
 
@@ -310,16 +364,40 @@
     return false;
   }
 
+  function attemptQuietSave(reason = 'quiet-after-paint') {
+    saveTimer = 0;
+    const record = readJournalRecord();
+    if (record.malformed || (!savePending && !record.entries.length)) return false;
+
+    // Preserve the visible behavior of a Flex tap without coupling that UI
+    // refresh to the multi-megabyte persistence snapshot. The dot gets the
+    // first paint; the normal Home render gets the following frame.
+    if (renderPending) {
+      renderPending = false;
+      pendingRenderSatisfied = true;
+      requestFullRender();
+    }
+
+    const status = storageQuietStatus();
+    if (!flexCompactionReady(status)) {
+      quietDeferrals += 1;
+      markQuietDeferred(status);
+      saveTimer = global.setTimeout?.(() => attemptQuietSave(reason), QUIET_POLL_MS) || 0;
+      return false;
+    }
+
+    markQuietReleased(status);
+    quietRuns += 1;
+    return persistNow(reason);
+  }
+
   function scheduleSaveAfterPaint(options = {}) {
     if (options.resetRetry === true) resetRetryBackoff();
     savePending = true;
     if (saveRaf || saveTimer || saveRunning) return;
     const queueTimer = () => {
       saveRaf = 0;
-      saveTimer = global.setTimeout?.(() => {
-        saveTimer = 0;
-        persistNow('after-paint');
-      }, 0) || 0;
+      saveTimer = global.setTimeout?.(() => attemptQuietSave('quiet-after-paint'), 0) || 0;
     };
     if (typeof global.requestAnimationFrame === 'function') saveRaf = global.requestAnimationFrame(queueTimer);
     else queueTimer();
@@ -492,7 +570,7 @@
         if (global.renderFlexActions === instantFlexRender) global.renderFlexActions = priorRenderFlexActions;
       }
 
-      if (fullRenderRequested) savePending = true;
+      if (fullRenderRequested) renderPending = true;
       if (saveRequested || readJournal().length) scheduleSaveAfterPaint({ resetRetry: true });
       return result;
     };
@@ -573,7 +651,16 @@
     readJournalRecord,
     showInstantDot,
     applyFlexHeaderPresentation,
-    getRetryStatus: () => ({ retryAttempt, retryPaused, retryScheduled: Boolean(retryTimer) })
+    getRetryStatus: () => ({ retryAttempt, retryPaused, retryScheduled: Boolean(retryTimer) }),
+    getQuietCompactionStatus: () => ({
+      requiredQuietMs: REQUIRED_QUIET_MS,
+      quietPollMs: QUIET_POLL_MS,
+      deferred: quietDeferred,
+      deferrals: quietDeferrals,
+      runs: quietRuns,
+      renderPending,
+      pendingRenderSatisfied
+    })
   };
 
   if (global.document?.readyState === 'loading') global.document.addEventListener?.('DOMContentLoaded', installWhenReady, { once: true });
