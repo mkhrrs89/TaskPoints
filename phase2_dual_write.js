@@ -9,12 +9,16 @@
   const ARRAY_STORES = ['completions', 'matchups', 'gameHistory', 'seasonHistory', 'tasks', 'habits', 'players'];
   const COALESCE_DELAY_MS = 900;
   const INTERACTION_RECHECK_MS = 250;
+  const HOME_LONG_QUIET_MS = 8000;
+  const pathname = String(global.location?.pathname || '').replace(/\/+$/, '');
+  const homeLongQuietEnabled = pathname === '' || pathname === '/' || pathname === '/index.html' || pathname.endsWith('/index.html');
   let queueTail = Promise.resolve();
   let pendingCount = 0;
   let sequence = 0;
   let pendingSerializedBatch = null;
   let pendingSerializedTimer = null;
   let pendingQuietGate = null;
+  let homeLongQuietDeferred = false;
 
   function requestPromise(request) {
     return new Promise((resolve, reject) => {
@@ -254,12 +258,46 @@
     return operation;
   }
 
-  function interactionBusy() {
+  function maintenanceStatus() {
     try {
       const status = core.getStorageMaintenanceIdleStatus?.();
-      if (!status) return false;
-      return status.activeEditor === true || Number(status.lastInteractionAgoMs || 0) < Number(status.quietMs || 0);
-    } catch (_) { return false; }
+      return status && typeof status === 'object' ? status : null;
+    } catch (_) { return null; }
+  }
+
+  function interactionBusy(status = maintenanceStatus()) {
+    if (!status) return false;
+    const requiredQuietMs = homeLongQuietEnabled
+      ? HOME_LONG_QUIET_MS
+      : Number(status.quietMs || 0);
+    return status.pageLeaving === true
+      || status.activeEditor === true
+      || Number(status.navigationQuietForMs || 0) > 0
+      || Number(status.lastInteractionAgoMs || 0) < requiredQuietMs;
+  }
+
+  function markHomeLongQuietDeferred(status) {
+    if (!homeLongQuietEnabled || homeLongQuietDeferred) return;
+    homeLongQuietDeferred = true;
+    try {
+      global.TaskPointsPerf?.mark?.('phase2.homeLongQuietDeferred', {
+        requiredQuietMs: HOME_LONG_QUIET_MS,
+        lastInteractionAgoMs: Number(status?.lastInteractionAgoMs || 0),
+        navigationQuietForMs: Number(status?.navigationQuietForMs || 0),
+        activeEditor: status?.activeEditor === true
+      });
+    } catch (_) {}
+  }
+
+  function markHomeLongQuietReleased(status) {
+    if (!homeLongQuietEnabled || !homeLongQuietDeferred) return;
+    homeLongQuietDeferred = false;
+    try {
+      global.TaskPointsPerf?.mark?.('phase2.homeLongQuietReleased', {
+        requiredQuietMs: HOME_LONG_QUIET_MS,
+        lastInteractionAgoMs: Number(status?.lastInteractionAgoMs || 0)
+      });
+    } catch (_) {}
   }
 
   function scheduleFallbackRecheck() {
@@ -278,6 +316,13 @@
     pendingQuietGate = Promise.resolve(gate(() => {
       pendingQuietGate = null;
       if (!pendingSerializedBatch) return true;
+      const status = maintenanceStatus();
+      if (interactionBusy(status)) {
+        markHomeLongQuietDeferred(status);
+        scheduleFallbackRecheck();
+        return false;
+      }
+      markHomeLongQuietReleased(status);
       return runScheduledSerializedWrite(true);
     }, { reason: 'phase2_dual_write_coalesced' })).catch(() => {
       pendingQuietGate = null;
@@ -293,6 +338,7 @@
     if (!force) {
       if (waitForSharedMaintenanceQuiet()) return batch.promise;
       if (interactionBusy()) {
+        markHomeLongQuietDeferred(maintenanceStatus());
         scheduleFallbackRecheck();
         return batch.promise;
       }
@@ -422,7 +468,10 @@
     pendingImmediate: pendingCount,
     pendingCoalesced: Boolean(pendingSerializedBatch),
     waitingForMaintenanceQuiet: Boolean(pendingQuietGate),
-    coalesceDelayMs: COALESCE_DELAY_MS
+    coalesceDelayMs: COALESCE_DELAY_MS,
+    homeLongQuietEnabled,
+    homeLongQuietMs: homeLongQuietEnabled ? HOME_LONG_QUIET_MS : 0,
+    homeLongQuietDeferred
   });
   core.scheduleShadowDualWriteFromSerializedState = (storageKey, raw) => (
     storageKey === core.STORAGE_KEY ? scheduleFromStoredRaw(raw) : null
