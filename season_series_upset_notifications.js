@@ -323,6 +323,11 @@
     return pathname === '/log' || pathname.endsWith('/log.html');
   }
 
+  function isHomePage() {
+    const pathname = String(global.location?.pathname || '');
+    return pathname === '/' || pathname === '/index.html' || pathname.endsWith('/index.html');
+  }
+
   function logReconcileReadyAtExecution() {
     if (!isLogPage()) return true;
     const status = global.TaskPointsCore?.getStorageMaintenanceIdleStatus?.();
@@ -416,7 +421,18 @@
 
   function queueReconcileWhenQuiet(reason = 'startup', delayMs = 0) {
     if (!global.document || !global.localStorage) return;
-    const schedule = () => queueReconcile(delayMs);
+    const schedule = () => {
+      if (reason === 'home_state_revision') {
+        const status = global.TaskPointsCore?.getStorageMaintenanceIdleStatus?.();
+        try {
+          global.TaskPointsPerf?.mark?.('upset.homeStateRevisionQuietReleased', {
+            lastInteractionAgoMs: Number(status?.lastInteractionAgoMs || 0),
+            navigationQuietForMs: Number(status?.navigationQuietForMs || 0)
+          });
+        } catch (_) {}
+      }
+      queueReconcile(delayMs);
+    };
     const tryGate = () => {
       const gate = global.TaskPointsCore?.whenStorageMaintenanceQuiet;
       if (typeof gate !== 'function') return false;
@@ -506,8 +522,22 @@
   });
   global.addEventListener?.('taskpoints:state-revision', () => {
     if (suppressRevisionQueue) return;
-    if (isLogPage()) queueReconcileWhenQuiet('state_revision', 0);
-    else queueReconcile(100);
+    if (isLogPage()) {
+      queueReconcileWhenQuiet('state_revision', 0);
+      return;
+    }
+    if (isHomePage()) {
+      const status = global.TaskPointsCore?.getStorageMaintenanceIdleStatus?.();
+      try {
+        global.TaskPointsPerf?.mark?.('upset.homeStateRevisionQuietQueued', {
+          lastInteractionAgoMs: Number(status?.lastInteractionAgoMs || 0),
+          navigationQuietForMs: Number(status?.navigationQuietForMs || 0)
+        });
+      } catch (_) {}
+      queueReconcileWhenQuiet('home_state_revision', 0);
+      return;
+    }
+    queueReconcile(100);
   });
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
