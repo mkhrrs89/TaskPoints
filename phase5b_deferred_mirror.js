@@ -36,11 +36,17 @@
   const HOME_NATIVE_FORMAT = 'home_structured_clone_v1';
   const COUNT_KEYS = ['tasks','completions','habits','players','flexActions','gameHistory','matchups','schedule','seasonHistory','reminders','weightHistory','vo2MaxHistory'];
   const MAJOR_KEYS = ['tasks','completions','habits','players','gameHistory','matchups','seasonHistory'];
+  const HOME_LONG_QUIET_MS = 8000;
+  const HOME_LONG_QUIET_POLL_MS = 250;
+  const pathname = String(global.location?.pathname || '').replace(/\/+$/, '');
+  const homeLongQuietEnabled = pathname === '' || pathname === '/' || pathname === '/index.html' || pathname.endsWith('/index.html');
   let pending = null;
   let running = false;
   let scheduled = false;
   let activeRaw = null;
   let tail = Promise.resolve(false);
+  let homeLongQuietDeferred = false;
+  let homeLongQuietTimer = 0;
 
   const get = (key) => { try { return storage.getItem(key); } catch (_) { return null; } };
   const json = (raw, fallback = null) => { try { return JSON.parse(raw); } catch (_) { return fallback; } };
@@ -283,7 +289,54 @@
       if (pending !== null) scheduleFlush();
     }
   }
+
+  function maintenanceStatus() {
+    try {
+      const idleStatus = core.getStorageMaintenanceIdleStatus?.();
+      return idleStatus && typeof idleStatus === 'object' ? idleStatus : null;
+    } catch (_) { return null; }
+  }
+
+  function homeLongQuietReady(idleStatus = maintenanceStatus()) {
+    if (!homeLongQuietEnabled) return true;
+    if (!idleStatus) return null;
+    if (global.document?.visibilityState === 'hidden') return false;
+    if (idleStatus.pageLeaving === true || idleStatus.activeEditor === true) return false;
+    if (Number(idleStatus.navigationQuietForMs || 0) > 0) return false;
+    return Number(idleStatus.lastInteractionAgoMs || 0) >= HOME_LONG_QUIET_MS;
+  }
+
+  function markHomeLongQuietDeferred(idleStatus) {
+    if (!homeLongQuietEnabled || homeLongQuietDeferred) return;
+    homeLongQuietDeferred = true;
+    try {
+      global.TaskPointsPerf?.mark?.('phase5c.homeLongQuietDeferred', {
+        requiredQuietMs: HOME_LONG_QUIET_MS,
+        lastInteractionAgoMs: Number(idleStatus?.lastInteractionAgoMs || 0),
+        navigationQuietForMs: Number(idleStatus?.navigationQuietForMs || 0),
+        activeEditor: idleStatus?.activeEditor === true
+      });
+    } catch (_) {}
+  }
+
+  function markHomeLongQuietReleased(idleStatus) {
+    if (!homeLongQuietEnabled || !homeLongQuietDeferred) return;
+    homeLongQuietDeferred = false;
+    try {
+      global.TaskPointsPerf?.mark?.('phase5c.homeLongQuietReleased', {
+        requiredQuietMs: HOME_LONG_QUIET_MS,
+        lastInteractionAgoMs: Number(idleStatus?.lastInteractionAgoMs || 0)
+      });
+    } catch (_) {}
+  }
+
+  function clearHomeLongQuietTimer() {
+    if (homeLongQuietTimer) global.clearTimeout?.(homeLongQuietTimer);
+    homeLongQuietTimer = 0;
+  }
+
   function flush() {
+    clearHomeLongQuietTimer();
     scheduled = false;
     if (running) return tail.then(() => pending !== null ? flush() : true);
     if (pending === null) return tail;
@@ -295,14 +348,33 @@
     if (scheduled || running || pending === null) return false;
     scheduled = true;
     const execute = () => {
+      homeLongQuietTimer = 0;
+      if (pending === null) {
+        scheduled = false;
+        homeLongQuietDeferred = false;
+        return true;
+      }
+
+      const idleStatus = maintenanceStatus();
+      const ready = homeLongQuietReady(idleStatus);
+      if (ready === false) {
+        markHomeLongQuietDeferred(idleStatus);
+        homeLongQuietTimer = global.setTimeout?.(execute, HOME_LONG_QUIET_POLL_MS) || 0;
+        return false;
+      }
+      if (ready === true) markHomeLongQuietReleased(idleStatus);
+
       scheduled = false;
-      return pending === null ? true : flush();
+      return flush();
     };
     const launch = () => {
       if (pending === null) { scheduled = false; return; }
       if (typeof core.whenStorageMaintenanceQuiet === 'function') {
         Promise.resolve(core.whenStorageMaintenanceQuiet(execute, { source: 'phase5c_verified_secondary' }))
-          .catch(() => { scheduled = false; });
+          .catch(() => {
+            clearHomeLongQuietTimer();
+            scheduled = false;
+          });
         return;
       }
       if (typeof global.requestIdleCallback === 'function') {
@@ -399,7 +471,10 @@
       homeNativeVerifiedAtISO: d.phase5cHomeNativeVerifiedAtISO || '',
       homeNativeRawHash: d.phase5cHomeNativeRawHash || '',
       homeNativeRevision: d.phase5cHomeNativeRevision || '',
-      homeNativeLastError: d.phase5cHomeNativeLastError || null
+      homeNativeLastError: d.phase5cHomeNativeLastError || null,
+      homeLongQuietEnabled,
+      homeLongQuietMs: homeLongQuietEnabled ? HOME_LONG_QUIET_MS : 0,
+      homeLongQuietDeferred
     };
   };
 
