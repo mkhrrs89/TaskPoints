@@ -16,14 +16,24 @@ test('Tournament bracket supports pinch zoom and two-axis panning', () => {
   assert.match(zoom, /addEventListener\('touchmove'/);
   assert.match(zoom, /addEventListener\('touchend'/);
   assert.match(zoom, /event\.preventDefault\(\)/);
-  assert.match(zoom, /viewport\.scrollLeft -= dx;/);
-  assert.match(zoom, /viewport\.scrollTop -= dy;/);
-  assert.match(zoom, /bracket\.style\.transform = `scale\(\$\{scale\}\)`/);
+  assert.match(zoom, /pendingPanX \+= dx;/);
+  assert.match(zoom, /pendingPanY \+= dy;/);
+  assert.match(zoom, /translate3d\(0, 0, 0\) scale\(\$\{scale\}\)/);
+});
+
+test('Tournament pinch/pan work is coalesced to animation frames without observing its own style writes', () => {
+  assert.match(zoom, /function scheduleFrame\(\)/);
+  assert.match(zoom, /requestAnimationFrame\?\.\(applyQueuedFrame\)/);
+  assert.match(zoom, /function expandStageForPinch\(\)/);
+  assert.match(zoom, /updateStageSize\(scale\);/);
+  assert.match(zoom, /noteStorageUserInteraction/);
+  assert.match(zoom, /characterData: true/);
+  assert.doesNotMatch(zoom, /attributes:\s*true/);
 });
 
 test('Tournament bracket zoom module is loaded only on the tournament page', () => {
   assert.match(diagnostics, /loadTaskPointsTournamentBracketZoom/);
-  assert.match(diagnostics, /tournament_bracket_zoom\.js\?v=20260820-1/);
+  assert.match(diagnostics, /tournament_bracket_zoom\.js\?v=20260820-2/);
   assert.match(diagnostics, /pathname === '\/tournament'/);
   assert.match(diagnostics, /pathname === '\/tournament\.html'/);
 });
