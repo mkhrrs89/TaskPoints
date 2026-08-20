@@ -29,105 +29,129 @@
   'use strict';
 
   const core = global.TaskPointsCore;
-  if (!core || core.__phase4HomeLongQuietGuardInstalled || typeof core.whenStorageMaintenanceQuiet !== 'function') return;
+  if (!core || core.__phase4HomeLongQuietGuardInstalled) return;
 
   const pathname = String(global.location?.pathname || '').replace(/\/+$/, '');
   const isHome = pathname === '' || pathname === '/' || pathname === '/index.html' || pathname.endsWith('/index.html');
   if (!isHome) return;
 
-  core.__phase4HomeLongQuietGuardInstalled = true;
-
   const HOME_LONG_QUIET_MS = 8000;
   const HOME_LONG_QUIET_POLL_MS = 250;
-  const originalGate = core.whenStorageMaintenanceQuiet.bind(core);
+  const MAX_INSTALL_ATTEMPTS = 240;
+  let installAttempts = 0;
 
-  function maintenanceStatus() {
-    try {
-      const value = core.getStorageMaintenanceIdleStatus?.();
-      return value && typeof value === 'object' ? value : null;
-    } catch (_) {
-      return null;
+  function installGuard() {
+    if (core.__phase4HomeLongQuietGuardInstalled) return true;
+
+    // storage_maintenance_idle.js is appended later in the final core bundle
+    // and owns the final generic 1.4s maintenance gate. Wait until that module
+    // has installed so this Home-specific Phase 4 wrapper cannot be overwritten.
+    if (!core.__storageMaintenanceIdleInstalled || typeof core.whenStorageMaintenanceQuiet !== 'function') {
+      return false;
     }
-  }
 
-  function isPhase4PrimaryBackground(options = {}) {
-    const reason = String(options.reason || options.source || '');
-    return reason.startsWith('phase4_primary_write_');
-  }
+    const originalGate = core.whenStorageMaintenanceQuiet.bind(core);
 
-  function authoritativeStateMissing() {
-    try { return global.localStorage?.getItem?.(core.STORAGE_KEY) == null; }
-    catch (_) { return false; }
-  }
+    function maintenanceStatus() {
+      try {
+        const value = core.getStorageMaintenanceIdleStatus?.();
+        return value && typeof value === 'object' ? value : null;
+      } catch (_) {
+        return null;
+      }
+    }
 
-  function readyForHomeLongQuiet(status) {
-    if (!status) return null;
-    if (status.pageLeaving === true || status.activeEditor === true) return false;
-    if (Number(status.navigationQuietForMs || 0) > 0) return false;
-    return Number(status.lastInteractionAgoMs || 0) >= HOME_LONG_QUIET_MS;
-  }
+    function isPhase4PrimaryBackground(options = {}) {
+      const reason = String(options.reason || options.source || '');
+      return reason.startsWith('phase4_primary_write_');
+    }
 
-  function waitForHomeLongQuiet(callback, options = {}) {
-    return new Promise((resolve, reject) => {
-      let deferred = false;
+    function authoritativeStateMissing() {
+      try { return global.localStorage?.getItem?.(core.STORAGE_KEY) == null; }
+      catch (_) { return false; }
+    }
 
-      const run = () => {
-        // An actual reset must not wait for the Home quiet window. Phase 4's
-        // reset tombstone/cleanup path remains immediate once the ordinary
-        // maintenance gate releases it.
-        if (authoritativeStateMissing()) {
-          Promise.resolve().then(callback).then(resolve, reject);
-          return;
-        }
+    function readyForHomeLongQuiet(status) {
+      if (!status) return null;
+      if (status.pageLeaving === true || status.activeEditor === true) return false;
+      if (Number(status.navigationQuietForMs || 0) > 0) return false;
+      return Number(status.lastInteractionAgoMs || 0) >= HOME_LONG_QUIET_MS;
+    }
 
-        const status = maintenanceStatus();
-        const ready = readyForHomeLongQuiet(status);
+    function waitForHomeLongQuiet(callback, options = {}) {
+      return new Promise((resolve, reject) => {
+        let deferred = false;
 
-        // If the shared idle-status helper is unavailable, preserve Phase 4's
-        // existing generic-gate behavior rather than blocking maintenance.
-        if (ready == null) {
-          Promise.resolve().then(callback).then(resolve, reject);
-          return;
-        }
+        const run = () => {
+          // An actual reset must not wait for the Home quiet window. Phase 4's
+          // reset tombstone/cleanup path remains immediate once the ordinary
+          // maintenance gate releases it.
+          if (authoritativeStateMissing()) {
+            Promise.resolve().then(callback).then(resolve, reject);
+            return;
+          }
 
-        if (!ready) {
-          if (!deferred) {
-            deferred = true;
+          const status = maintenanceStatus();
+          const ready = readyForHomeLongQuiet(status);
+
+          // If the shared idle-status helper is unavailable, preserve Phase 4's
+          // existing generic-gate behavior rather than blocking maintenance.
+          if (ready == null) {
+            Promise.resolve().then(callback).then(resolve, reject);
+            return;
+          }
+
+          if (!ready) {
+            if (!deferred) {
+              deferred = true;
+              try {
+                global.TaskPointsPerf?.mark?.('phase4.homeLongQuietDeferred', {
+                  requiredQuietMs: HOME_LONG_QUIET_MS,
+                  lastInteractionAgoMs: Number(status.lastInteractionAgoMs || 0),
+                  navigationQuietForMs: Number(status.navigationQuietForMs || 0),
+                  activeEditor: status.activeEditor === true,
+                  reason: String(options.reason || options.source || '')
+                });
+              } catch (_) {}
+            }
+            global.setTimeout?.(run, HOME_LONG_QUIET_POLL_MS);
+            return;
+          }
+
+          if (deferred) {
             try {
-              global.TaskPointsPerf?.mark?.('phase4.homeLongQuietDeferred', {
+              global.TaskPointsPerf?.mark?.('phase4.homeLongQuietReleased', {
                 requiredQuietMs: HOME_LONG_QUIET_MS,
                 lastInteractionAgoMs: Number(status.lastInteractionAgoMs || 0),
-                navigationQuietForMs: Number(status.navigationQuietForMs || 0),
-                activeEditor: status.activeEditor === true,
                 reason: String(options.reason || options.source || '')
               });
             } catch (_) {}
           }
-          global.setTimeout?.(run, HOME_LONG_QUIET_POLL_MS);
-          return;
-        }
 
-        if (deferred) {
-          try {
-            global.TaskPointsPerf?.mark?.('phase4.homeLongQuietReleased', {
-              requiredQuietMs: HOME_LONG_QUIET_MS,
-              lastInteractionAgoMs: Number(status.lastInteractionAgoMs || 0),
-              reason: String(options.reason || options.source || '')
-            });
-          } catch (_) {}
-        }
+          Promise.resolve().then(callback).then(resolve, reject);
+        };
 
-        Promise.resolve().then(callback).then(resolve, reject);
-      };
+        run();
+      });
+    }
 
-      run();
-    });
+    core.whenStorageMaintenanceQuiet = function phase4HomeLongQuietMaintenanceGate(callback, options = {}) {
+      if (typeof callback !== 'function' || !isPhase4PrimaryBackground(options)) {
+        return originalGate(callback, options);
+      }
+      return originalGate(() => waitForHomeLongQuiet(callback, options), options);
+    };
+
+    core.__phase4HomeLongQuietGuardInstalled = true;
+    return true;
   }
 
-  core.whenStorageMaintenanceQuiet = function phase4HomeLongQuietMaintenanceGate(callback, options = {}) {
-    if (typeof callback !== 'function' || !isPhase4PrimaryBackground(options)) {
-      return originalGate(callback, options);
+  function installWhenReady() {
+    installAttempts += 1;
+    if (!installGuard() && installAttempts < MAX_INSTALL_ATTEMPTS) {
+      global.setTimeout?.(installWhenReady, 50);
     }
-    return originalGate(() => waitForHomeLongQuiet(callback, options), options);
-  };
+  }
+
+  installWhenReady();
 })(typeof window !== 'undefined' ? window : globalThis);
