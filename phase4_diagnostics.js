@@ -224,7 +224,7 @@
 
   if (document.querySelector('script[data-taskpoints-tournament-bracket-zoom]')) return;
   const script = document.createElement('script');
-  script.src = '/tournament_bracket_zoom.js?v=20260820-1';
+  script.src = '/tournament_bracket_zoom.js?v=20260820-2';
   script.async = true;
   script.dataset.taskpointsTournamentBracketZoom = 'true';
   (document.head || document.documentElement).appendChild(script);
