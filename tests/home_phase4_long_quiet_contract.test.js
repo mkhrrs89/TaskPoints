@@ -16,6 +16,12 @@ test('Home Phase 4 automatic primary writes require sustained quiet', () => {
   assert.match(guardSource, /return originalGate\(\(\) => waitForHomeLongQuiet\(callback, options\), options\);/);
 });
 
+test('Home Phase 4 guard installs after the final shared idle scheduler', () => {
+  assert.match(guardSource, /core\.__storageMaintenanceIdleInstalled/);
+  assert.match(guardSource, /queueMicrotask\(startPostBundleInstall\)/);
+  assert.match(guardSource, /phase4\.homeLongQuietGuardInstalled/);
+});
+
 test('Phase 4 reset and explicit queue or flush paths remain immediate', () => {
   assert.match(guardSource, /if \(authoritativeStateMissing\(\)\) \{\s*Promise\.resolve\(\)\.then\(callback\)/);
   assert.match(coordinatorSource, /core\.queuePhase4PrimaryWrite = queueWrite;/);
