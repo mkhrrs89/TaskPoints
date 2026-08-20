@@ -12,6 +12,10 @@
   const COMMIT_ID = core.PHASE4_PRIMARY_COMMIT_METADATA_ID || 'phase4_primary_commit';
   const STORES = ['completions', 'matchups', 'gameHistory', 'seasonHistory', 'tasks', 'habits', 'players'];
   const DIAG_KEY = core.PHASE4_DIAGNOSTICS_KEY || 'taskpoints_phase4_diagnostics_v1';
+  const HOME_LONG_QUIET_MS = 8000;
+  const HOME_LONG_QUIET_POLL_MS = 250;
+  const pathname = String(global.location?.pathname || '').replace(/\/+$/, '');
+  const homeLongQuietEnabled = pathname === '' || pathname === '/' || pathname === '/index.html' || pathname.endsWith('/index.html');
   const originalLoad = core.loadAppState;
   const originalFlush = core.flushPhase4PrimaryWrites.bind(core);
   const originalSetMode = core.setPhase4StorageMode?.bind(core);
@@ -23,6 +27,9 @@
   let writeRevision = 0;
   let restorePromise = null;
   let serving = false;
+  let backgroundWriteScheduled = false;
+  let backgroundWriteTimer = 0;
+  let backgroundWriteDeferred = false;
 
   const clone = (value) => typeof global.structuredClone === 'function'
     ? global.structuredClone(value)
@@ -272,6 +279,101 @@
     return writeTail;
   }
 
+  function maintenanceStatus() {
+    try {
+      const value = core.getStorageMaintenanceIdleStatus?.();
+      return value && typeof value === 'object' ? value : null;
+    } catch (_) { return null; }
+  }
+
+  function homeLongQuietReady(status = maintenanceStatus()) {
+    if (!homeLongQuietEnabled) return true;
+    if (!status) return null;
+    if (global.document?.visibilityState === 'hidden') return false;
+    if (status.pageLeaving === true || status.activeEditor === true) return false;
+    if (Number(status.navigationQuietForMs || 0) > 0) return false;
+    return Number(status.lastInteractionAgoMs || 0) >= HOME_LONG_QUIET_MS;
+  }
+
+  function markBackgroundDeferred(status) {
+    if (!homeLongQuietEnabled || backgroundWriteDeferred) return;
+    backgroundWriteDeferred = true;
+    try {
+      global.TaskPointsPerf?.mark?.('phase5a.homeLongQuietDeferred', {
+        requiredQuietMs: HOME_LONG_QUIET_MS,
+        lastInteractionAgoMs: Number(status?.lastInteractionAgoMs || 0),
+        navigationQuietForMs: Number(status?.navigationQuietForMs || 0),
+        activeEditor: status?.activeEditor === true
+      });
+    } catch (_) {}
+  }
+
+  function markBackgroundReleased(status) {
+    if (!homeLongQuietEnabled || !backgroundWriteDeferred) return;
+    backgroundWriteDeferred = false;
+    try {
+      global.TaskPointsPerf?.mark?.('phase5a.homeLongQuietReleased', {
+        requiredQuietMs: HOME_LONG_QUIET_MS,
+        lastInteractionAgoMs: Number(status?.lastInteractionAgoMs || 0)
+      });
+    } catch (_) {}
+  }
+
+  function clearBackgroundTimer() {
+    if (backgroundWriteTimer) global.clearTimeout?.(backgroundWriteTimer);
+    backgroundWriteTimer = 0;
+  }
+
+  function cancelBackgroundWrite() {
+    clearBackgroundTimer();
+    backgroundWriteScheduled = false;
+    backgroundWriteDeferred = false;
+  }
+
+  function scheduleBackgroundWrite() {
+    if (mode() === 'off') return Promise.resolve(false);
+    if (!homeLongQuietEnabled) return queueWrite();
+    if (backgroundWriteScheduled) return Promise.resolve(true);
+    backgroundWriteScheduled = true;
+
+    const execute = () => {
+      backgroundWriteTimer = 0;
+      if (!backgroundWriteScheduled || mode() === 'off') {
+        cancelBackgroundWrite();
+        return false;
+      }
+      const status = maintenanceStatus();
+      const ready = homeLongQuietReady(status);
+      if (ready === false) {
+        markBackgroundDeferred(status);
+        backgroundWriteTimer = global.setTimeout?.(execute, HOME_LONG_QUIET_POLL_MS) || 0;
+        return false;
+      }
+      if (ready === true) markBackgroundReleased(status);
+      backgroundWriteScheduled = false;
+      return queueWrite();
+    };
+
+    const gate = core.whenStorageMaintenanceQuiet;
+    if (typeof gate === 'function') {
+      Promise.resolve(gate(execute, { source: 'phase5a_native_snapshot_background' }))
+        .catch(() => cancelBackgroundWrite());
+    } else if (typeof global.requestIdleCallback === 'function') {
+      global.requestIdleCallback(execute, { timeout: 12000 });
+    } else {
+      backgroundWriteTimer = global.setTimeout?.(execute, 2500) || 0;
+    }
+    return Promise.resolve(true);
+  }
+
+  function flushWrites() {
+    if (backgroundWriteScheduled) {
+      cancelBackgroundWrite();
+      return Promise.resolve(queueWrite()).then(() => writeTail).catch(() => writeTail);
+    }
+    return writeTail.catch(() => undefined);
+  }
+
   function warm() {
     if (mode() !== 'indexeddb_primary') return Promise.resolve(false);
     if (valid(cache, get(core.STORAGE_KEY))) return Promise.resolve(true);
@@ -362,12 +464,15 @@
         const remove = typeof storage.removeItem === 'function' ? storage.removeItem.bind(storage) : null;
         const wrappedSet = function phase5aSetItem(key, value) {
           const result = set(key, value);
-          if (String(key) === core.STORAGE_KEY && mode() !== 'off') queueWrite();
+          if (String(key) === core.STORAGE_KEY && mode() !== 'off') scheduleBackgroundWrite();
           return result;
         };
         const wrappedRemove = remove ? function phase5aRemoveItem(key) {
           const result = remove(key);
-          if (String(key) === core.STORAGE_KEY) removeSnapshot();
+          if (String(key) === core.STORAGE_KEY) {
+            cancelBackgroundWrite();
+            removeSnapshot();
+          }
           return result;
         } : null;
         storage.setItem = wrappedSet;
@@ -385,7 +490,7 @@
     Object.defineProperty(prototype, '__taskPointsPhase5AOriginalSetItem', { value: set, configurable: true });
     prototype.setItem = function phase5aSetItem(key, value) {
       const result = set.call(this, key, value);
-      if (this === storage && String(key) === core.STORAGE_KEY && mode() !== 'off') queueWrite();
+      if (this === storage && String(key) === core.STORAGE_KEY && mode() !== 'off') scheduleBackgroundWrite();
       return result;
     };
     if (prototype.removeItem && !prototype.__taskPointsPhase5AOriginalRemoveItem) {
@@ -393,7 +498,10 @@
       Object.defineProperty(prototype, '__taskPointsPhase5AOriginalRemoveItem', { value: remove, configurable: true });
       prototype.removeItem = function phase5aRemoveItem(key) {
         const result = remove.call(this, key);
-        if (this === storage && String(key) === core.STORAGE_KEY) removeSnapshot();
+        if (this === storage && String(key) === core.STORAGE_KEY) {
+          cancelBackgroundWrite();
+          removeSnapshot();
+        }
         return result;
       };
     }
@@ -405,12 +513,15 @@
   core.clearPhase5ANativeSnapshotCache = () => { cache = null; };
   core.restorePhase5ANativeSnapshot = restoreSnapshot;
   core.queuePhase5ANativeSnapshotWrite = queueWrite;
-  core.flushPhase5ANativeSnapshotWrites = () => writeTail.catch(() => undefined);
+  core.flushPhase5ANativeSnapshotWrites = flushWrites;
   core.getPhase5ANativeSnapshotStatus = () => ({
     enabled: true,
     format: FORMAT,
     cacheReady: valid(cache, get(core.STORAGE_KEY)),
-    pendingWrite: writeRunning,
+    pendingWrite: writeRunning || backgroundWriteScheduled,
+    backgroundWriteScheduled,
+    homeLongQuietEnabled,
+    requiredHomeQuietMs: homeLongQuietEnabled ? HOME_LONG_QUIET_MS : 0,
     restorePending: Boolean(restorePromise)
   });
 
@@ -421,8 +532,10 @@
   };
   if (originalSetMode) core.setPhase4StorageMode = (nextMode) => {
     const next = originalSetMode(nextMode);
-    if (next === 'off') cache = null;
-    else if (next === 'indexeddb_primary') warm();
+    if (next === 'off') {
+      cache = null;
+      cancelBackgroundWrite();
+    } else if (next === 'indexeddb_primary') warm();
     else queueWrite();
     return next;
   };
@@ -432,5 +545,5 @@
   installHooks();
   diagnostics({ phase5aNativeSnapshotStatus: 'installed', phase5aNativeSnapshotLastError: null });
   if (mode() === 'indexeddb_primary') warm();
-  else if (mode() === 'verify_primary_writes') queueWrite();
+  else if (mode() === 'verify_primary_writes') scheduleBackgroundWrite();
 })(typeof window !== 'undefined' ? window : globalThis);

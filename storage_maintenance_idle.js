@@ -244,6 +244,162 @@
   });
 })(typeof window !== 'undefined' ? window : globalThis);
 
+;(function installTaskPointsHomeHabitCompactionQuietGuard(global) {
+  'use strict';
+
+  const core = global.TaskPointsCore;
+  const document = global.document;
+  if (!core || !document || core.__homeHabitCompactionQuietGuardInstalled) return;
+
+  const pathname = String(global.location?.pathname || '').replace(/\/+$/, '');
+  const isHome = pathname === '' || pathname === '/' || pathname === '/index.html' || pathname.endsWith('/index.html');
+  if (!isHome) return;
+
+  const REQUIRED_QUIET_MS = 8000;
+  const POLL_MS = 250;
+  const MAX_INSTALL_ATTEMPTS = 240;
+  let installAttempts = 0;
+  let installed = false;
+  let pending = false;
+  let timer = 0;
+  let deferred = false;
+  let deferrals = 0;
+  let runs = 0;
+  let originalScheduleHabitSave = null;
+  let originalSavePendingHabitState = null;
+  let originalFlushPendingHabitSave = null;
+
+  function cancelTimer() {
+    if (timer) global.clearTimeout?.(timer);
+    timer = 0;
+  }
+
+  function idleStatus() {
+    try {
+      const status = core.getStorageMaintenanceIdleStatus?.();
+      return status && typeof status === 'object' ? status : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function compactionReady(status = idleStatus()) {
+    if (!status) return null;
+    if (status.pageLeaving === true || document.visibilityState === 'hidden') return false;
+    if (status.activeEditor === true) return false;
+    if (Number(status.navigationQuietForMs || 0) > 0) return false;
+    return Number(status.lastInteractionAgoMs || 0) >= REQUIRED_QUIET_MS;
+  }
+
+  function markDeferred(status) {
+    if (deferred) return;
+    deferred = true;
+    try {
+      global.TaskPointsPerf?.mark?.('habit.compactionDeferred', {
+        requiredQuietMs: REQUIRED_QUIET_MS,
+        lastInteractionAgoMs: Number(status?.lastInteractionAgoMs || 0),
+        navigationQuietForMs: Number(status?.navigationQuietForMs || 0),
+        activeEditor: status?.activeEditor === true
+      });
+    } catch (_) {}
+  }
+
+  function markReleased(status) {
+    if (!deferred) return;
+    deferred = false;
+    try {
+      global.TaskPointsPerf?.mark?.('habit.compactionReleased', {
+        requiredQuietMs: REQUIRED_QUIET_MS,
+        lastInteractionAgoMs: Number(status?.lastInteractionAgoMs || 0)
+      });
+    } catch (_) {}
+  }
+
+  function attemptCompaction() {
+    timer = 0;
+    if (!pending || typeof originalSavePendingHabitState !== 'function') return false;
+
+    const status = idleStatus();
+    const ready = compactionReady(status);
+    if (ready === null) {
+      // If the maintenance tracker is unavailable, preserve the legacy Home
+      // scheduler rather than risking a journal that can never compact.
+      pending = false;
+      deferred = false;
+      originalScheduleHabitSave?.();
+      return true;
+    }
+    if (!ready) {
+      deferrals += 1;
+      markDeferred(status);
+      timer = global.setTimeout?.(attemptCompaction, POLL_MS) || 0;
+      return false;
+    }
+
+    pending = false;
+    markReleased(status);
+    runs += 1;
+    originalSavePendingHabitState();
+    return true;
+  }
+
+  function scheduleGuardedHabitCompaction() {
+    pending = true;
+    cancelTimer();
+    timer = global.setTimeout?.(attemptCompaction, POLL_MS) || 0;
+  }
+
+  function install() {
+    if (installed) return true;
+    if (typeof global.scheduleHabitSave !== 'function'
+      || typeof global.savePendingHabitState !== 'function'
+      || typeof global.flushPendingHabitSave !== 'function') return false;
+
+    originalScheduleHabitSave = global.scheduleHabitSave;
+    originalSavePendingHabitState = global.savePendingHabitState;
+    originalFlushPendingHabitSave = global.flushPendingHabitSave;
+
+    scheduleGuardedHabitCompaction.__taskpointsHomeHabitCompactionQuietGuard = true;
+    scheduleGuardedHabitCompaction.__taskPointsOriginal = originalScheduleHabitSave;
+    global.scheduleHabitSave = scheduleGuardedHabitCompaction;
+
+    const guardedFlush = function taskPointsHomeHabitCompactionQuietFlush(...args) {
+      const hadGuardPending = pending || Boolean(timer);
+      cancelTimer();
+      pending = false;
+      deferred = false;
+      const legacyPending = originalFlushPendingHabitSave.apply(this, args);
+      return Boolean(hadGuardPending || legacyPending);
+    };
+    guardedFlush.__taskpointsHomeHabitCompactionQuietGuard = true;
+    guardedFlush.__taskPointsOriginal = originalFlushPendingHabitSave;
+    global.flushPendingHabitSave = guardedFlush;
+
+    core.getHomeHabitCompactionQuietGuardStatus = () => ({
+      installed: true,
+      requiredQuietMs: REQUIRED_QUIET_MS,
+      pollMs: POLL_MS,
+      pending,
+      deferred,
+      deferrals,
+      runs
+    });
+    core.__homeHabitCompactionQuietGuardInstalled = true;
+    installed = true;
+    return true;
+  }
+
+  function installWhenReady() {
+    installAttempts += 1;
+    if (!install() && installAttempts < MAX_INSTALL_ATTEMPTS) {
+      global.setTimeout?.(installWhenReady, 50);
+    }
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', installWhenReady, { once: true });
+  else installWhenReady();
+})(typeof window !== 'undefined' ? window : globalThis);
+
 ;(function installTaskPointsImageReadBatching(global) {
   'use strict';
 

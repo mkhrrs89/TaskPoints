@@ -22,11 +22,14 @@
 
   const STORAGE_KEY = core.STORAGE_KEY || 'taskpoints_v1';
   const JOURNAL_KEY = 'taskpoints_pending_flex_completions_v1';
+  const ORDER_JOURNAL_KEY = 'taskpoints_pending_flex_order_v1';
   const SAVE_PATH = 'flex-completion-fast-path';
   const MAX_INSTALL_ATTEMPTS = 120;
   const RETRY_BASE_DELAY_MS = 1000;
   const RETRY_MAX_DELAY_MS = 30000;
   const MAX_AUTOMATIC_RETRIES = 5;
+  const REQUIRED_QUIET_MS = 8000;
+  const QUIET_POLL_MS = 250;
   const originalLoadAppState = typeof core.loadAppState === 'function' ? core.loadAppState.bind(core) : null;
   const originalSaveStateSnapshot = typeof core.saveStateSnapshot === 'function' ? core.saveStateSnapshot.bind(core) : null;
 
@@ -40,11 +43,18 @@
   let retryAttempt = 0;
   let retryPaused = false;
   let malformedWarningShown = false;
+  let malformedOrderWarningShown = false;
+  let renderPending = false;
+  let pendingRenderSatisfied = false;
+  let quietDeferred = false;
+  let quietDeferrals = 0;
+  let quietRuns = 0;
   let originalLogFlexCompletion = null;
   let originalHomeSave = null;
   let originalAddCompletion = null;
   let originalRenderAll = null;
   let originalRenderFlexActions = null;
+  let originalMoveFlexAction = null;
   let originalResetAll = null;
 
   function parse(raw, fallback = null) {
@@ -86,6 +96,45 @@
     if (malformedWarningShown) return;
     malformedWarningShown = true;
     const message = 'TaskPoints preserved a malformed pending Flex Action journal instead of overwriting it. No new Flex Action was recorded.';
+    console.error(message);
+    try { global.alert?.(message); } catch (_) {}
+  }
+
+  function normalizeOrderRecord(value) {
+    if (!value || !Array.isArray(value.orderedIds)) return null;
+    const orderedIds = [];
+    const seen = new Set();
+    value.orderedIds.forEach((rawId) => {
+      const id = String(rawId || '').trim();
+      if (!id || seen.has(id)) return;
+      seen.add(id);
+      orderedIds.push(id);
+    });
+    if (!orderedIds.length) return null;
+    return {
+      version: 1,
+      orderedIds,
+      updatedAtISO: String(value.updatedAtISO || new Date().toISOString())
+    };
+  }
+
+  function readOrderJournalRecord() {
+    const raw = storage.getItem(ORDER_JOURNAL_KEY);
+    if (!raw) return { raw: '', malformed: false, record: null };
+    const record = normalizeOrderRecord(parse(raw, null));
+    return record
+      ? { raw, malformed: false, record }
+      : { raw, malformed: true, record: null };
+  }
+
+  function readOrderJournal() {
+    return readOrderJournalRecord().record;
+  }
+
+  function warnMalformedOrderJournal() {
+    if (malformedOrderWarningShown) return;
+    malformedOrderWarningShown = true;
+    const message = 'TaskPoints preserved a malformed pending Flex Action order journal instead of overwriting it. The reorder will use the normal save path.';
     console.error(message);
     try { global.alert?.(message); } catch (_) {}
   }
@@ -138,6 +187,42 @@
     return normalized;
   }
 
+  function writeOrderJournal(orderedIds) {
+    if (!recoveryWriteAllowed()) {
+      const error = new Error('TaskPoints paused Flex Action reordering while recovery protection is active.');
+      error.code = 'TASKPOINTS_FLEX_ORDER_JOURNAL_WRITE_LOCKED';
+      throw error;
+    }
+    const existing = readOrderJournalRecord();
+    if (existing.malformed) {
+      warnMalformedOrderJournal();
+      const error = new Error('Pending Flex Action order journal is malformed and was preserved.');
+      error.code = 'TASKPOINTS_FLEX_ORDER_JOURNAL_MALFORMED';
+      throw error;
+    }
+    const record = normalizeOrderRecord({ orderedIds, updatedAtISO: new Date().toISOString() });
+    if (!record) {
+      storage.removeItem(ORDER_JOURNAL_KEY);
+      return null;
+    }
+    storage.setItem(ORDER_JOURNAL_KEY, JSON.stringify(record));
+    return record;
+  }
+
+  function captureRenderedFlexOrder() {
+    const list = global.document?.getElementById?.('flexList');
+    const buttons = list?.querySelectorAll?.('[data-act="flex-up"][data-id]') || [];
+    const ids = [];
+    const seen = new Set();
+    for (const button of buttons) {
+      const id = String(button.getAttribute?.('data-id') || '').trim();
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      ids.push(id);
+    }
+    return ids;
+  }
+
   function applyJournalToState(sourceState, entries = readJournal()) {
     const state = sourceState && typeof sourceState === 'object' && !Array.isArray(sourceState)
       ? sourceState
@@ -152,6 +237,35 @@
     return { ...state, completions: [...additions, ...completions] };
   }
 
+  function applyOrderJournalToState(sourceState, record = readOrderJournal()) {
+    const state = sourceState && typeof sourceState === 'object' && !Array.isArray(sourceState)
+      ? sourceState
+      : {};
+    if (!record?.orderedIds?.length || !Array.isArray(state.flexActions)) return state;
+
+    const byId = new Map(state.flexActions.map((entry) => [String(entry?.id || ''), entry]));
+    const orderedKnownIds = record.orderedIds.filter((id) => byId.has(id) && !byId.get(id)?.retired);
+    const known = new Set(orderedKnownIds);
+    const remainingIds = state.flexActions
+      .filter((entry) => entry && !entry.retired && !known.has(String(entry.id || '')))
+      .slice()
+      .sort((a, b) => Number(a.order || 0) - Number(b.order || 0))
+      .map((entry) => String(entry.id || ''))
+      .filter(Boolean);
+    const finalIds = [...orderedKnownIds, ...remainingIds];
+    const orderById = new Map(finalIds.map((id, index) => [id, index + 1]));
+    let changed = false;
+    const flexActions = state.flexActions.map((entry) => {
+      const id = String(entry?.id || '');
+      if (!entry || entry.retired || !orderById.has(id)) return entry;
+      const nextOrder = orderById.get(id);
+      if (Number(entry.order || 0) === nextOrder) return entry;
+      changed = true;
+      return { ...entry, order: nextOrder };
+    });
+    return changed ? { ...state, flexActions } : state;
+  }
+
   function storedCompletionIds(storageKey = STORAGE_KEY) {
     const raw = storage.getItem(storageKey);
     if (!raw) return new Set();
@@ -162,6 +276,27 @@
       return new Set((Array.isArray(saved?.completions) ? saved.completions : []).map((entry) => entry?.id).filter(Boolean));
     } catch (_) {
       return new Set();
+    }
+  }
+
+  function storedFlexOrderMatches(record, storageKey = STORAGE_KEY) {
+    if (!record?.orderedIds?.length) return true;
+    const raw = storage.getItem(storageKey);
+    if (!raw) return false;
+    try {
+      const saved = typeof core.parseTaskPointsStorageJson === 'function'
+        ? core.parseTaskPointsStorageJson(raw, {})
+        : JSON.parse(raw);
+      const activeIds = (Array.isArray(saved?.flexActions) ? saved.flexActions : [])
+        .filter((entry) => entry && !entry.retired)
+        .slice()
+        .sort((a, b) => Number(a.order || 0) - Number(b.order || 0))
+        .map((entry) => String(entry.id || ''))
+        .filter(Boolean);
+      if (activeIds.length < record.orderedIds.length) return false;
+      return record.orderedIds.every((id, index) => activeIds[index] === id);
+    } catch (_) {
+      return false;
     }
   }
 
@@ -180,6 +315,18 @@
     }
   }
 
+  function clearVerifiedOrderJournal(storageKey = STORAGE_KEY) {
+    const current = readOrderJournalRecord();
+    if (current.malformed || !current.record || !storedFlexOrderMatches(current.record, storageKey)) return false;
+    try {
+      storage.removeItem(ORDER_JOURNAL_KEY);
+      return true;
+    } catch (error) {
+      console.warn('TaskPoints saved the Flex Action order but retained its order journal for a later verification retry.', error);
+      return false;
+    }
+  }
+
   function readAuthoritativeState(storageKey = STORAGE_KEY, fallbackState = null) {
     if (typeof originalLoadAppState !== 'function') return fallbackState;
     try {
@@ -193,23 +340,47 @@
   if (originalLoadAppState) {
     core.loadAppState = function loadAppStateWithPendingFlex(...args) {
       const result = originalLoadAppState(...args);
-      const record = readJournalRecord();
-      if (record.malformed || !record.entries.length || !result?.state) return result;
-      return { ...result, state: applyJournalToState(result.state, record.entries), pendingFlexCompletions: record.entries.length };
+      if (!result?.state) return result;
+      const completionRecord = readJournalRecord();
+      const orderRecord = readOrderJournalRecord();
+      let state = result.state;
+      let changed = false;
+      if (!completionRecord.malformed && completionRecord.entries.length) {
+        state = applyJournalToState(state, completionRecord.entries);
+        changed = true;
+      }
+      if (!orderRecord.malformed && orderRecord.record) {
+        state = applyOrderJournalToState(state, orderRecord.record);
+        changed = true;
+      }
+      if (!changed) return result;
+      return {
+        ...result,
+        state,
+        pendingFlexCompletions: completionRecord.entries.length,
+        pendingFlexOrder: Boolean(orderRecord.record)
+      };
     };
   }
 
   if (originalSaveStateSnapshot) {
     core.saveStateSnapshot = function saveStateSnapshotWithPendingFlex(state, options = {}) {
       const storageKey = options.storageKey || STORAGE_KEY;
-      const record = readJournalRecord();
+      const completionRecord = readJournalRecord();
+      const orderRecord = readOrderJournalRecord();
+      const completionPending = !completionRecord.malformed && completionRecord.entries.length > 0;
+      const orderPending = !orderRecord.malformed && Boolean(orderRecord.record);
 
       // A different Home tab may already have saved every shared journal entry
       // while this tab's delayed fast save was waiting to run. Never let that
       // drained request write its stale in-memory full snapshot back over the
       // newer authoritative copy. Returning the authoritative state also lets
       // the normal Home save assignment refresh this tab without another write.
-      if (options.savePath === SAVE_PATH && !record.malformed && !record.entries.length) {
+      if (options.savePath === SAVE_PATH
+        && !completionRecord.malformed
+        && !orderRecord.malformed
+        && !completionPending
+        && !orderPending) {
         return {
           state: readAuthoritativeState(storageKey, state),
           skipped: true,
@@ -218,10 +389,13 @@
         };
       }
 
-      const candidate = record.malformed || !record.entries.length ? state : applyJournalToState(state, record.entries);
+      let candidate = state;
+      if (completionPending) candidate = applyJournalToState(candidate, completionRecord.entries);
+      if (orderPending) candidate = applyOrderJournalToState(candidate, orderRecord.record);
       const result = originalSaveStateSnapshot(candidate, options);
-      if (!result?.skipped && !result?.blockedByQuotaCircuit && result?.state && record.entries.length) {
-        clearVerifiedJournal(storageKey);
+      if (!result?.skipped && !result?.blockedByQuotaCircuit && result?.state) {
+        if (completionPending) clearVerifiedJournal(storageKey);
+        if (orderPending) clearVerifiedOrderJournal(storageKey);
       }
       return result;
     };
@@ -246,8 +420,11 @@
   }
 
   function scheduleRetry() {
-    const record = readJournalRecord();
-    if (retryTimer || retryPaused || record.malformed || !record.entries.length) return;
+    const completionRecord = readJournalRecord();
+    const orderRecord = readOrderJournalRecord();
+    const orderPending = !orderRecord.malformed && Boolean(orderRecord.record);
+    if (retryTimer || retryPaused || completionRecord.malformed
+      || (!completionRecord.entries.length && !orderPending)) return;
     if (retryAttempt >= MAX_AUTOMATIC_RETRIES) {
       retryPaused = true;
       console.warn('TaskPoints paused automatic Flex Action save retries after repeated failures. The pending journal remains protected and will retry after the next Flex tap, storage update, or app resume.');
@@ -269,15 +446,61 @@
     else global.setTimeout?.(() => originalRenderAll(), 0);
   }
 
+  function storageQuietStatus() {
+    try {
+      const status = core.getStorageMaintenanceIdleStatus?.();
+      return status && typeof status === 'object' ? status : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function flexCompactionReady(status = storageQuietStatus()) {
+    // Older test/standalone environments do not install the global maintenance
+    // tracker. Preserve the legacy after-paint behavior there rather than
+    // risking a journal that can never compact.
+    if (!status) return true;
+    if (status.pageLeaving === true || global.document?.visibilityState === 'hidden') return true;
+    if (status.activeEditor === true) return false;
+    if (Number(status.navigationQuietForMs || 0) > 0) return false;
+    return Number(status.lastInteractionAgoMs || 0) >= REQUIRED_QUIET_MS;
+  }
+
+  function markQuietDeferred(status) {
+    if (quietDeferred) return;
+    quietDeferred = true;
+    try {
+      global.TaskPointsPerf?.mark?.('flex.compactionDeferred', {
+        requiredQuietMs: REQUIRED_QUIET_MS,
+        lastInteractionAgoMs: Number(status?.lastInteractionAgoMs || 0),
+        navigationQuietForMs: Number(status?.navigationQuietForMs || 0),
+        activeEditor: status?.activeEditor === true
+      });
+    } catch (_) {}
+  }
+
+  function markQuietReleased(status) {
+    if (!quietDeferred) return;
+    quietDeferred = false;
+    try {
+      global.TaskPointsPerf?.mark?.('flex.compactionReleased', {
+        requiredQuietMs: REQUIRED_QUIET_MS,
+        lastInteractionAgoMs: Number(status?.lastInteractionAgoMs || 0)
+      });
+    } catch (_) {}
+  }
+
   function persistNow(reason = 'background') {
     if (saveRunning) {
       savePending = true;
       return false;
     }
     cancelScheduledSave();
-    const record = readJournalRecord();
-    if (record.malformed) return false;
-    if (!savePending && !record.entries.length) return false;
+    const completionRecord = readJournalRecord();
+    const orderRecord = readOrderJournalRecord();
+    const orderPending = !orderRecord.malformed && Boolean(orderRecord.record);
+    if (completionRecord.malformed) return false;
+    if (!savePending && !completionRecord.entries.length && !orderPending) return false;
     if (typeof originalHomeSave !== 'function') return false;
 
     savePending = false;
@@ -290,24 +513,61 @@
         flexFastPathReason: reason
       });
     } catch (error) {
-      console.warn('TaskPoints Flex Action background save failed; the pending completion journal was retained.', error);
+      console.warn('TaskPoints Flex Action background save failed; the pending Flex journal was retained.', error);
     } finally {
       saveRunning = false;
     }
 
-    const remainingRecord = readJournalRecord();
-    const remaining = remainingRecord.malformed ? 1 : remainingRecord.entries.length;
+    const remainingCompletionRecord = readJournalRecord();
+    const remainingOrderRecord = readOrderJournalRecord();
+    const remainingOrder = !remainingOrderRecord.malformed && Boolean(remainingOrderRecord.record);
+    const remaining = remainingCompletionRecord.malformed
+      ? 1
+      : remainingCompletionRecord.entries.length + (remainingOrder ? 1 : 0);
     if (!remaining) {
       resetRetryBackoff();
-      requestFullRender();
+      if (!pendingRenderSatisfied) requestFullRender();
+      pendingRenderSatisfied = false;
+      renderPending = false;
+      quietDeferred = false;
       return true;
     }
 
-    // Do not perform a heavy Home rerender on every failed retry. The orange
-    // dot is already painted, and the protected journal remains the source of
-    // truth until a later retry succeeds.
+    // Do not perform a heavy Home rerender on every failed retry. The visible
+    // Flex state is already painted, and the protected journals remain the
+    // source of truth until a later retry succeeds.
     scheduleRetry();
     return false;
+  }
+
+  function attemptQuietSave(reason = 'quiet-after-paint') {
+    saveTimer = 0;
+    const completionRecord = readJournalRecord();
+    const orderRecord = readOrderJournalRecord();
+    const orderPending = !orderRecord.malformed && Boolean(orderRecord.record);
+    if (completionRecord.malformed
+      || (!savePending && !completionRecord.entries.length && !orderPending)) return false;
+
+    // Preserve the visible behavior of a Flex tap without coupling that UI
+    // refresh to the multi-megabyte persistence snapshot. The visible change
+    // gets the first paint; the normal Home render can follow later.
+    if (renderPending) {
+      renderPending = false;
+      pendingRenderSatisfied = true;
+      requestFullRender();
+    }
+
+    const status = storageQuietStatus();
+    if (!flexCompactionReady(status)) {
+      quietDeferrals += 1;
+      markQuietDeferred(status);
+      saveTimer = global.setTimeout?.(() => attemptQuietSave(reason), QUIET_POLL_MS) || 0;
+      return false;
+    }
+
+    markQuietReleased(status);
+    quietRuns += 1;
+    return persistNow(reason);
   }
 
   function scheduleSaveAfterPaint(options = {}) {
@@ -316,20 +576,19 @@
     if (saveRaf || saveTimer || saveRunning) return;
     const queueTimer = () => {
       saveRaf = 0;
-      saveTimer = global.setTimeout?.(() => {
-        saveTimer = 0;
-        persistNow('after-paint');
-      }, 0) || 0;
+      saveTimer = global.setTimeout?.(() => attemptQuietSave('quiet-after-paint'), 0) || 0;
     };
     if (typeof global.requestAnimationFrame === 'function') saveRaf = global.requestAnimationFrame(queueTimer);
     else queueTimer();
   }
 
   function resumePendingSave(reason = 'resume') {
-    const record = readJournalRecord();
+    const completionRecord = readJournalRecord();
+    const orderRecord = readOrderJournalRecord();
+    const orderPending = !orderRecord.malformed && Boolean(orderRecord.record);
     resetRetryBackoff();
-    if (record.malformed) return false;
-    if (record.entries.length) {
+    if (completionRecord.malformed) return false;
+    if (completionRecord.entries.length || orderPending) {
       scheduleSaveAfterPaint();
       return true;
     }
@@ -442,13 +701,15 @@
     if (typeof global.logFlexCompletion !== 'function'
       || typeof global.save !== 'function'
       || typeof global.addCompletion !== 'function'
-      || typeof global.renderFlexActions !== 'function') return false;
+      || typeof global.renderFlexActions !== 'function'
+      || typeof global.moveFlexAction !== 'function') return false;
 
     originalLogFlexCompletion = global.logFlexCompletion;
     originalHomeSave = global.save;
     originalAddCompletion = global.addCompletion;
     originalRenderAll = typeof global.renderAll === 'function' ? global.renderAll : null;
     originalRenderFlexActions = global.renderFlexActions;
+    originalMoveFlexAction = global.moveFlexAction;
     originalResetAll = typeof global.resetAll === 'function' ? global.resetAll : null;
     applyFlexHeaderPresentation();
 
@@ -492,7 +753,7 @@
         if (global.renderFlexActions === instantFlexRender) global.renderFlexActions = priorRenderFlexActions;
       }
 
-      if (fullRenderRequested) savePending = true;
+      if (fullRenderRequested) renderPending = true;
       if (saveRequested || readJournal().length) scheduleSaveAfterPaint({ resetRetry: true });
       return result;
     };
@@ -500,6 +761,50 @@
     fastLogFlexCompletion.__taskPointsFlexActionFastPath = true;
     fastLogFlexCompletion.__taskPointsOriginal = originalLogFlexCompletion;
     global.logFlexCompletion = fastLogFlexCompletion;
+
+    const fastMoveFlexAction = function taskPointsFastMoveFlexAction(...args) {
+      let saveRequested = false;
+      const priorSave = global.save;
+      const suppressedSave = function suppressedFlexReorderSave() {
+        saveRequested = true;
+      };
+      global.save = suppressedSave;
+
+      let result;
+      try {
+        result = originalMoveFlexAction.apply(this, args);
+      } finally {
+        if (global.save === suppressedSave) global.save = priorSave;
+      }
+
+      if (!saveRequested) return result;
+
+      const orderedIds = captureRenderedFlexOrder();
+      if (!orderedIds.length) {
+        // If the rendered order cannot be captured, preserve the legacy durable
+        // behavior rather than deferring an unjournaled reorder.
+        priorSave();
+        return result;
+      }
+
+      try {
+        writeOrderJournal(orderedIds);
+        global.TaskPointsPerf?.mark?.('flex.reorderDeferred', {
+          id: String(args[0] || ''),
+          delta: Number(args[1] || 0),
+          itemCount: orderedIds.length
+        });
+        scheduleSaveAfterPaint({ resetRetry: true });
+      } catch (error) {
+        console.warn('TaskPoints could not journal the Flex Action reorder; using the normal durable save path.', error);
+        priorSave();
+      }
+      return result;
+    };
+
+    fastMoveFlexAction.__taskPointsFlexActionFastPath = true;
+    fastMoveFlexAction.__taskPointsOriginal = originalMoveFlexAction;
+    global.moveFlexAction = fastMoveFlexAction;
 
     if (originalResetAll && !originalResetAll.__taskPointsFlexActionFastPath) {
       const resetWithFlexFlush = function resetAllWithPendingFlex(...args) {
@@ -521,6 +826,7 @@
           if (resetConfirmed) {
             cancelRetryTimer();
             try { storage.removeItem(JOURNAL_KEY); } catch (_) {}
+            try { storage.removeItem(ORDER_JOURNAL_KEY); } catch (_) {}
           }
         }
       };
@@ -532,7 +838,10 @@
     installFlushBridge();
     uiInstalled = true;
 
-    if (readJournal().length) scheduleSaveAfterPaint({ resetRetry: true });
+    const orderRecord = readOrderJournalRecord();
+    if (readJournal().length || (!orderRecord.malformed && orderRecord.record)) {
+      scheduleSaveAfterPaint({ resetRetry: true });
+    }
     return true;
   }
 
@@ -547,7 +856,7 @@
   global.addEventListener?.('pagehide', () => persistNow('pagehide'));
   global.addEventListener?.('pageshow', () => resumePendingSave('pageshow'));
   global.addEventListener?.('storage', (event) => {
-    if (!event || (event.key !== JOURNAL_KEY && event.key !== STORAGE_KEY)) return;
+    if (!event || (event.key !== JOURNAL_KEY && event.key !== ORDER_JOURNAL_KEY && event.key !== STORAGE_KEY)) return;
     resumePendingSave('storage-event');
   });
   global.document?.addEventListener?.('visibilitychange', () => {
@@ -556,24 +865,41 @@
   });
 
   core.PENDING_FLEX_COMPLETIONS_KEY = JOURNAL_KEY;
+  core.PENDING_FLEX_ORDER_KEY = ORDER_JOURNAL_KEY;
   core.readPendingFlexCompletions = readJournal;
   core.applyPendingFlexCompletions = applyJournalToState;
   core.getPendingFlexCompletionCount = () => readJournal().length;
+  core.readPendingFlexOrder = readOrderJournal;
+  core.applyPendingFlexOrder = applyOrderJournalToState;
   core.flushPendingFlexCompletions = () => {
     resetRetryBackoff();
     return persistNow('explicit-flush');
   };
   global.TaskPointsFlexActionFastPath = {
     journalKey: JOURNAL_KEY,
+    orderJournalKey: ORDER_JOURNAL_KEY,
     installUiPatch,
     persistNow,
     scheduleSaveAfterPaint,
     resumePendingSave,
     readJournal,
     readJournalRecord,
+    readOrderJournal,
+    readOrderJournalRecord,
+    writeOrderJournal,
+    captureRenderedFlexOrder,
     showInstantDot,
     applyFlexHeaderPresentation,
-    getRetryStatus: () => ({ retryAttempt, retryPaused, retryScheduled: Boolean(retryTimer) })
+    getRetryStatus: () => ({ retryAttempt, retryPaused, retryScheduled: Boolean(retryTimer) }),
+    getQuietCompactionStatus: () => ({
+      requiredQuietMs: REQUIRED_QUIET_MS,
+      quietPollMs: QUIET_POLL_MS,
+      deferred: quietDeferred,
+      deferrals: quietDeferrals,
+      runs: quietRuns,
+      renderPending,
+      pendingRenderSatisfied
+    })
   };
 
   if (global.document?.readyState === 'loading') global.document.addEventListener?.('DOMContentLoaded', installWhenReady, { once: true });
