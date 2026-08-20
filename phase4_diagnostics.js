@@ -195,3 +195,37 @@
     load();
   }
 })(typeof window !== 'undefined' ? window : globalThis);
+
+;(function loadTaskPointsHomeSeasonSlateLongQuiet(global) {
+  'use strict';
+  const document = global.document;
+  if (!document) return;
+
+  const pathname = String(global.location?.pathname || '').replace(/\/+$/, '');
+  const isHome = pathname === '' || pathname === '/' || pathname === '/index.html' || pathname.endsWith('/index.html');
+  if (!isHome) return;
+
+  if (document.querySelector('script[data-taskpoints-home-season-slate-long-quiet]')) return;
+  const script = document.createElement('script');
+  script.src = '/home_season_slate_long_quiet.js?v=20260820-1';
+  script.async = true;
+  script.dataset.taskpointsHomeSeasonSlateLongQuiet = 'true';
+  (document.head || document.documentElement).appendChild(script);
+})(typeof window !== 'undefined' ? window : globalThis);
+
+;(function loadTaskPointsTournamentBracketZoom(global) {
+  'use strict';
+  const document = global.document;
+  if (!document) return;
+
+  const pathname = String(global.location?.pathname || '').replace(/\/+$/, '');
+  const isTournament = pathname === '/tournament' || pathname === '/tournament.html' || pathname.endsWith('/tournament.html');
+  if (!isTournament) return;
+
+  if (document.querySelector('script[data-taskpoints-tournament-bracket-zoom]')) return;
+  const script = document.createElement('script');
+  script.src = '/tournament_bracket_zoom.js?v=20260820-1';
+  script.async = true;
+  script.dataset.taskpointsTournamentBracketZoom = 'true';
+  (document.head || document.documentElement).appendChild(script);
+})(typeof window !== 'undefined' ? window : globalThis);
