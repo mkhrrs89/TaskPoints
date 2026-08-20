@@ -105,7 +105,7 @@
     const segment = global.document.createElement('div');
     segment.className = primaryGrid.className || 'scoreV2-recentGrid';
     segment.dataset.scwmHistoryOffset = String(offsetDays);
-    segment.style.display = 'contents';
+    segment.style.marginTop = '8px';
 
     const extras = global.document.getElementById(EXTRAS_ID);
     if (!extras) return null;
