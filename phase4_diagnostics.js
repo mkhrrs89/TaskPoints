@@ -229,3 +229,135 @@
   script.dataset.taskpointsTournamentBracketZoom = 'true';
   (document.head || document.documentElement).appendChild(script);
 })(typeof window !== 'undefined' ? window : globalThis);
+
+;(function installTaskPointsToolbarLongQuietGuard(global) {
+  'use strict';
+
+  const core = global.TaskPointsCore;
+  const document = global.document;
+  if (!core || !document || global.__taskPointsToolbarLongQuietGuardInstalled) return;
+
+  const pathname = String(global.location?.pathname || '').replace(/\/+$/, '');
+  const isInbox = pathname === '/inbox.html' || pathname.endsWith('/inbox.html');
+  if (isInbox) return;
+
+  const REQUIRED_QUIET_MS = 8000;
+  const QUIET_POLL_MS = 250;
+  const INSTALL_RETRY_MS = 50;
+  const MAX_INSTALL_ATTEMPTS = 240;
+  let installAttempts = 0;
+
+  function maintenanceStatus() {
+    try {
+      const value = core.getStorageMaintenanceIdleStatus?.();
+      return value && typeof value === 'object' ? value : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function readyForLongQuiet(status) {
+    if (!status) return null;
+    if (document.hidden === true) return false;
+    if (status.pageLeaving === true || status.activeEditor === true) return false;
+    if (Number(status.navigationQuietForMs || 0) > 0) return false;
+    return Number(status.lastInteractionAgoMs || 0) >= REQUIRED_QUIET_MS;
+  }
+
+  function installGuard() {
+    if (global.__taskPointsToolbarLongQuietGuardInstalled) return true;
+
+    const original = global.runTaskPointsToolbarMaintenance;
+    if (typeof original !== 'function') return false;
+    if (original.__taskpointsToolbarLongQuietGuard === true) {
+      global.__taskPointsToolbarLongQuietGuardInstalled = true;
+      return true;
+    }
+
+    function runAfterLongQuiet(context, args) {
+      return new Promise((resolve, reject) => {
+        let deferred = false;
+
+        const attempt = () => {
+          const status = maintenanceStatus();
+          const ready = readyForLongQuiet(status);
+
+          // If the shared maintenance-status helper is unavailable, preserve
+          // toolbar/Inbox behavior rather than risking a maintenance deadlock.
+          if (ready == null) {
+            Promise.resolve(original.apply(context, args)).then(resolve, reject);
+            return;
+          }
+
+          if (!ready) {
+            if (!deferred) {
+              deferred = true;
+              try {
+                global.TaskPointsPerf?.mark?.('toolbar.longQuietDeferred', {
+                  requiredQuietMs: REQUIRED_QUIET_MS,
+                  lastInteractionAgoMs: Number(status.lastInteractionAgoMs || 0),
+                  navigationQuietForMs: Number(status.navigationQuietForMs || 0),
+                  activeEditor: status.activeEditor === true
+                });
+              } catch (_) {}
+            }
+            global.setTimeout?.(attempt, QUIET_POLL_MS);
+            return;
+          }
+
+          if (deferred) {
+            try {
+              global.TaskPointsPerf?.mark?.('toolbar.longQuietReleased', {
+                requiredQuietMs: REQUIRED_QUIET_MS,
+                lastInteractionAgoMs: Number(status.lastInteractionAgoMs || 0)
+              });
+            } catch (_) {}
+          }
+
+          Promise.resolve(original.apply(context, args)).then(resolve, reject);
+        };
+
+        attempt();
+      });
+    }
+
+    const wrapped = function taskPointsToolbarLongQuietMaintenance(...args) {
+      const status = maintenanceStatus();
+      const ready = readyForLongQuiet(status);
+
+      // Preserve the original synchronous return when maintenance is already
+      // safe to start, or when the shared status helper is unavailable.
+      if (ready === true || ready == null) {
+        return original.apply(this, args);
+      }
+      return runAfterLongQuiet(this, args);
+    };
+
+    wrapped.__taskpointsToolbarLongQuietGuard = true;
+    wrapped.__taskPointsOriginal = original;
+    global.runTaskPointsToolbarMaintenance = wrapped;
+    global.__taskPointsToolbarLongQuietGuardInstalled = true;
+
+    try {
+      const status = maintenanceStatus();
+      global.TaskPointsPerf?.mark?.('toolbar.longQuietGuardInstalled', {
+        requiredQuietMs: REQUIRED_QUIET_MS,
+        storageIdleInstalled: core.__storageMaintenanceIdleInstalled === true,
+        lastInteractionAgoMs: Number(status?.lastInteractionAgoMs || 0)
+      });
+    } catch (_) {}
+
+    return true;
+  }
+
+  function installWhenReady() {
+    installAttempts += 1;
+    if (!installGuard() && installAttempts < MAX_INSTALL_ATTEMPTS) {
+      global.setTimeout?.(installWhenReady, INSTALL_RETRY_MS);
+    }
+  }
+
+  // toolbar.js is a later classic script. Retry until its global maintenance
+  // entry point exists, then wrap that entry point without changing Inbox logic.
+  installWhenReady();
+})(typeof window !== 'undefined' ? window : globalThis);
