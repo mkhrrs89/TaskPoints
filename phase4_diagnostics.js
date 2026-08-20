@@ -44,8 +44,8 @@
     if (core.__phase4HomeLongQuietGuardInstalled) return true;
 
     // storage_maintenance_idle.js is appended later in the final core bundle
-    // and owns the final generic 1.4s maintenance gate. Wait until that module
-    // has installed so this Home-specific Phase 4 wrapper cannot be overwritten.
+    // and owns the final generic 1.4s maintenance gate. Install only after that
+    // final shared gate exists so this Home-specific wrapper cannot be replaced.
     if (!core.__storageMaintenanceIdleInstalled || typeof core.whenStorageMaintenanceQuiet !== 'function') {
       return false;
     }
@@ -143,6 +143,12 @@
     };
 
     core.__phase4HomeLongQuietGuardInstalled = true;
+    try {
+      global.TaskPointsPerf?.mark?.('phase4.homeLongQuietGuardInstalled', {
+        requiredQuietMs: HOME_LONG_QUIET_MS,
+        storageIdleInstalled: core.__storageMaintenanceIdleInstalled === true
+      });
+    } catch (_) {}
     return true;
   }
 
@@ -153,5 +159,39 @@
     }
   }
 
-  installWhenReady();
+  // Phase 4 is embedded earlier than storage_maintenance_idle.js in the same
+  // final scoring_core.js response. A microtask runs only after the entire
+  // script finishes evaluating, making the normal install order deterministic.
+  const startPostBundleInstall = () => installWhenReady();
+  if (typeof global.queueMicrotask === 'function') {
+    global.queueMicrotask(startPostBundleInstall);
+  } else {
+    Promise.resolve().then(startPostBundleInstall);
+  }
+})(typeof window !== 'undefined' ? window : globalThis);
+
+;(function loadTaskPointsScwmHistoryLoadMore(global) {
+  'use strict';
+  const document = global.document;
+  if (!document) return;
+
+  const pathname = String(global.location?.pathname || '').replace(/\/+$/, '');
+  const isHome = pathname === '' || pathname === '/' || pathname === '/index.html' || pathname.endsWith('/index.html');
+  if (!isHome) return;
+
+  const load = () => {
+    if (global.TaskPointsScwmHistoryLoadMore?.installed) return;
+    if (document.querySelector('script[data-taskpoints-scwm-history-load-more]')) return;
+    const script = document.createElement('script');
+    script.src = '/scwm_history_load_more.js?v=20260820-1';
+    script.async = true;
+    script.dataset.taskpointsScwmHistoryLoadMore = 'true';
+    (document.head || document.documentElement).appendChild(script);
+  };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', load, { once: true });
+  } else {
+    load();
+  }
 })(typeof window !== 'undefined' ? window : globalThis);
