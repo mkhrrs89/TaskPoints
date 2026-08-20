@@ -208,3 +208,170 @@
 
   installWhenReady();
 })(typeof window !== 'undefined' ? window : globalThis);
+
+;(function installTaskPointsRecurringTaskDoneTodayUi(global) {
+  'use strict';
+
+  const core = global.TaskPointsCore;
+  const document = global.document;
+  if (!global || !core || !document || global.TaskPointsRecurringTaskDoneTodayUi?.installed) return;
+
+  const pathname = String(global.location?.pathname || '').replace(/\/+$/, '');
+  const isHome = pathname === '' || pathname === '/' || pathname === '/index.html' || pathname.endsWith('/index.html');
+  if (!isHome) return;
+
+  const INSTALL_POLL_MS = 50;
+  const MAX_INSTALL_ATTEMPTS = 240;
+  let installAttempts = 0;
+  let refreshFrame = 0;
+  let midnightTimer = 0;
+  let lastDecoratedCount = -1;
+
+  function localDayKey(value) {
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  function isRecurringTask(task) {
+    return String(task?.recurrence?.mode || 'none') !== 'none';
+  }
+
+  function loadJournalAwareState() {
+    try {
+      const loaded = core.loadAppState?.({ syncDerived: false, persistSync: false });
+      if (loaded?.state && typeof loaded.state === 'object') return loaded.state;
+      if (loaded && typeof loaded === 'object') return loaded;
+    } catch (_) {}
+    return null;
+  }
+
+  function refresh() {
+    const list = document.getElementById('taskList');
+    if (!list) return;
+
+    const state = loadJournalAwareState();
+    if (!state) return;
+
+    const today = localDayKey(new Date());
+    const completedToday = new Set();
+    for (const completion of Array.isArray(state.completions) ? state.completions : []) {
+      const taskId = String(completion?.taskId || '');
+      if (!taskId || localDayKey(completion?.completedAtISO) !== today) continue;
+      completedToday.add(taskId);
+    }
+
+    const tasksById = new Map(
+      (Array.isArray(state.tasks) ? state.tasks : [])
+        .filter((task) => task?.id)
+        .map((task) => [String(task.id), task])
+    );
+
+    let decoratedCount = 0;
+    list.querySelectorAll('button[data-task-action="complete"][data-task-id]').forEach((button) => {
+      const taskId = String(button.getAttribute('data-task-id') || '');
+      const task = tasksById.get(taskId);
+      const doneToday = completedToday.has(taskId) && isRecurringTask(task);
+
+      if (doneToday) {
+        decoratedCount += 1;
+        if (button.dataset.taskDoneToday !== '1') {
+          button.dataset.taskDoneToday = '1';
+          button.disabled = true;
+          button.setAttribute('aria-disabled', 'true');
+          button.setAttribute('aria-label', 'Already completed today');
+          button.setAttribute('title', 'Already completed today');
+          button.textContent = '✓ Today';
+          button.style.opacity = '0.62';
+          button.style.cursor = 'default';
+        }
+      } else if (button.dataset.taskDoneToday === '1') {
+        delete button.dataset.taskDoneToday;
+        button.disabled = false;
+        button.removeAttribute('aria-disabled');
+        button.setAttribute('aria-label', 'Done');
+        button.removeAttribute('title');
+        button.textContent = '✓';
+        button.style.removeProperty('opacity');
+        button.style.removeProperty('cursor');
+      }
+    });
+
+    if (decoratedCount !== lastDecoratedCount) {
+      lastDecoratedCount = decoratedCount;
+      try {
+        global.TaskPointsPerf?.mark?.('taskAction.doneTodayUiRefreshed', {
+          decoratedCount,
+          dayKey: today
+        });
+      } catch (_) {}
+    }
+  }
+
+  function scheduleRefresh() {
+    if (refreshFrame) return;
+    const run = () => {
+      refreshFrame = 0;
+      refresh();
+    };
+    if (typeof global.requestAnimationFrame === 'function') {
+      refreshFrame = global.requestAnimationFrame(run);
+    } else {
+      refreshFrame = global.setTimeout?.(run, 0) || 0;
+    }
+  }
+
+  function scheduleMidnightRefresh() {
+    if (midnightTimer) global.clearTimeout?.(midnightTimer);
+    const now = new Date();
+    const next = new Date(now);
+    next.setHours(24, 0, 1, 0);
+    const delay = Math.max(1000, next.getTime() - now.getTime());
+    midnightTimer = global.setTimeout?.(() => {
+      midnightTimer = 0;
+      scheduleRefresh();
+      scheduleMidnightRefresh();
+    }, delay) || 0;
+  }
+
+  function install() {
+    const list = document.getElementById('taskList');
+    if (!list || typeof global.MutationObserver !== 'function') return false;
+
+    const observer = new global.MutationObserver(() => scheduleRefresh());
+    observer.observe(list, { childList: true, subtree: true });
+
+    global.addEventListener?.('taskpoints:state-revision', scheduleRefresh);
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) scheduleRefresh();
+    });
+
+    global.TaskPointsRecurringTaskDoneTodayUi = {
+      installed: true,
+      refresh: scheduleRefresh,
+      observer,
+      get decoratedCount() { return Math.max(0, lastDecoratedCount); }
+    };
+
+    scheduleRefresh();
+    scheduleMidnightRefresh();
+
+    try {
+      global.TaskPointsPerf?.mark?.('taskAction.doneTodayUiInstalled', {});
+    } catch (_) {}
+
+    return true;
+  }
+
+  function installWhenReady() {
+    installAttempts += 1;
+    if (!install() && installAttempts < MAX_INSTALL_ATTEMPTS) {
+      global.setTimeout?.(installWhenReady, INSTALL_POLL_MS);
+    }
+  }
+
+  installWhenReady();
+})(typeof window !== 'undefined' ? window : globalThis);
