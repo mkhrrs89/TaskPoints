@@ -9078,6 +9078,11 @@ function savePendingHabitState(perfStart = null) {
   if (!journalSnapshot.length) return;
   const started = performance.now();
   try {
+    // The tap path only journals the change. Reconcile the resulting canonical
+    // day total here, immediately before the deferred full-snapshot compaction.
+    if (window.TaskPointsCore?.syncYouMatchups) {
+      state = TaskPointsCore.syncYouMatchups(state).state;
+    }
     // Verification is intentionally retained here, after the burst.
     const result = TaskPointsCore.saveStateSnapshot(state, buildHomeSaveOptions('habit-journal-compaction', {
       immediateWrite: true, userInitiated: true, replaceCompletions: true,

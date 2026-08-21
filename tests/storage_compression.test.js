@@ -306,6 +306,44 @@ test('pending habit journals recover and compact the Work On Cal App fixture thr
   assert.match(indexSource, /function getTaskPointsExportSnapshot\(\) \{[\s\S]*?let latestState = state \|\| \{\}/);
 });
 
+test('deferred habit journal compaction synchronizes a stale YOU matchup before persisting', async () => {
+  storage.clear();
+  const habitId = 'half-point-habit';
+  const dayKey = '2026-08-20';
+  const initial = core.normalizeState({
+    scoringSettings: { inertia: { enabled: false } },
+    habits: [{ id: habitId, name: 'Half point', pointsPerDay: 1, halfPointEnabled: true, doneKeys: [] }],
+    completions: [],
+    matchups: [{
+      id: 'stale-you-score', dateKey: dayKey,
+      playerAId: 'YOU', playerBId: 'npc',
+      scoreA: 0, playerAScore: 0, scoreB: 10, playerBScore: 10,
+      diff: -10, result: 'you-loss'
+    }]
+  });
+  core.saveStateSnapshot(initial, { storageKey: core.STORAGE_KEY, immediateWrite: true, replaceCompletions: true });
+  core.writePendingHabitDelta({
+    habitId, dayKey, source: 'habit', status: 'half', done: true, failed: false, icy: false,
+    completionFraction: 0.5, completionPoints: 0.5, updatedAtISO: '2026-08-20T12:00:00.000Z'
+  });
+
+  const replayed = core.loadAppState({ syncDerived: false, persistSync: false }).state;
+  assert.equal(replayed.matchups[0].scoreA, 0, 'journal replay alone must remain on the cheap input/recovery path');
+  core.schedulePendingHabitDeltaCompaction(replayed, { delayMs: 0 });
+  await new Promise(resolve => setTimeout(resolve, 10));
+
+  const persisted = core.loadAppState({ syncDerived: false, persistSync: false }).state;
+  const canonical = core.youDailyTotalsWithInertia(persisted)[dayKey];
+  assert.equal(canonical, 0.5);
+  assert.equal(persisted.matchups[0].scoreA, canonical);
+  assert.equal(persisted.matchups[0].playerAScore, canonical);
+  assert.equal(persisted.matchups[0].diff, -9.5);
+  assert.equal(persisted.matchups[0].result, 'you-loss');
+  assert.ok(persisted.habits[0].doneKeys.includes(dayKey));
+  assert.equal(persisted.completions.find(item => item.id === `habit:${habitId}:${dayKey}`).completionFraction, 0.5);
+  assert.equal(core.readPendingHabitDeltas().length, 0);
+});
+
 test('completed-week stack decorations cannot intercept habit taps', () => {
   const stylesSource = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
   assert.match(stylesSource, /\.habitWeekCompleteStack::before\s*\{[\s\S]*?pointer-events:\s*none;/);
