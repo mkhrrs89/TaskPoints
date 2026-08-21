@@ -271,7 +271,7 @@
   'use strict';
 
   const SCRIPT_ID = 'tpDynamicTournamentBracketScript';
-  const SCRIPT_SRC = '/tournament_dynamic_bracket.js?v=20260802-1';
+  const SCRIPT_SRC = '/tournament_dynamic_bracket.js?v=20260820-1';
 
   function load() {
     const document = global.document;

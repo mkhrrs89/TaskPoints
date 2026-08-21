@@ -119,11 +119,13 @@
       || placeholder
       || 'TBD'
     );
+    const liveImageId = id === 'YOU'
+      ? (state?.youImageId || player?.imageId)
+      : player?.imageId;
     const imageId = String(
-      series?.[`player${suffix}ImageId`]
+      liveImageId
+      || series?.[`player${suffix}ImageId`]
       || seedRow?.imageId
-      || player?.imageId
-      || (id === 'YOU' ? state?.youImageId : '')
       || ''
     );
     const seed = Number.isFinite(seriesSeed) && seriesSeed > 0
@@ -138,10 +140,13 @@
     if (!id) return { id: '', name: 'Champion', imageId: '', seed: null, wins: 0, isTbd: true };
     const seedRow = seeds.get(id) || null;
     const player = players.get(id) || null;
+    const liveImageId = id === 'YOU'
+      ? (state?.youImageId || player?.imageId)
+      : player?.imageId;
     return {
       id,
       name: String(seedRow?.playerName || seedRow?.name || player?.name || (id === 'YOU' ? 'You' : id)),
-      imageId: String(seedRow?.imageId || player?.imageId || (id === 'YOU' ? state?.youImageId : '') || ''),
+      imageId: String(liveImageId || seedRow?.imageId || ''),
       seed: Number(seedRow?.seed) || null,
       wins: 0,
       isTbd: false
