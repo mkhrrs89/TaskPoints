@@ -8644,12 +8644,12 @@ function computeRankingsPageRows(state){
       const next = { ...m };
       let localChange = false;
 
-      if (aIsYou && (Number(next.scoreA) !== youScore || Number(next.playerAScore) !== youScore)) {
+      if (aIsYou && Number(next.scoreA) !== youScore) {
         next.scoreA = youScore;
         next.playerAScore = youScore;
         localChange = true;
       }
-      if (bIsYou && (Number(next.scoreB) !== youScore || Number(next.playerBScore) !== youScore)) {
+      if (bIsYou && Number(next.scoreB) !== youScore) {
         next.scoreB = youScore;
         next.playerBScore = youScore;
         localChange = true;

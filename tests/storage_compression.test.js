@@ -319,6 +319,11 @@ test('deferred habit journal compaction synchronizes a stale YOU matchup before 
       playerAId: 'YOU', playerBId: 'npc',
       scoreA: 0, playerAScore: 0, scoreB: 10, playerBScore: 10,
       diff: -10, result: 'you-loss'
+    }, {
+      id: 'old-unscoped-alias-conflict', dateKey: dayKey, seasonId: 'season-old',
+      playerAId: 'npc-2', playerBId: 'YOU',
+      scoreA: 10, playerAScore: 10, scoreB: 0.5, playerBScore: 99,
+      diff: 9.5, result: 'you-loss'
     }]
   });
   core.saveStateSnapshot(initial, { storageKey: core.STORAGE_KEY, immediateWrite: true, replaceCompletions: true });
@@ -339,6 +344,10 @@ test('deferred habit journal compaction synchronizes a stale YOU matchup before 
   assert.equal(persisted.matchups[0].playerAScore, canonical);
   assert.equal(persisted.matchups[0].diff, -9.5);
   assert.equal(persisted.matchups[0].result, 'you-loss');
+  assert.equal(persisted.matchups[1].scoreB, canonical);
+  assert.equal(persisted.matchups[1].playerBScore, 99, 'base sync must not repair an alias-only historical conflict');
+  assert.equal(persisted.matchups[1].diff, 9.5);
+  assert.equal(persisted.matchups[1].result, 'you-loss');
   assert.ok(persisted.habits[0].doneKeys.includes(dayKey));
   assert.equal(persisted.completions.find(item => item.id === `habit:${habitId}:${dayKey}`).completionFraction, 0.5);
   assert.equal(core.readPendingHabitDeltas().length, 0);
