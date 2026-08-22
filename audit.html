@@ -1180,7 +1180,7 @@ function buildLogNormalizeShape(state) {
       state = d.state;
       const m = runSyncYouMatchups(state);
       state = m.state;
-      return { state: cloneAuditState(state), mode: 'direct-page-helper', logic: 'gamehub syncStateForDisplayOnly() (normalize + syncDerived + syncYouMatchups, read-only)' };
+      return { state: cloneAuditState(state), persistedState: loaded, mode: 'direct-page-helper', logic: 'gamehub syncStateForDisplayOnly() (normalize + syncDerived + syncYouMatchups, read-only)' };
     }
 
     function adapterMatchups(rawInput) {
@@ -1190,7 +1190,7 @@ function buildLogNormalizeShape(state) {
       if (synced.changed) {
         state = { ...loaded, ...buildMatchupsNormalizeShape(synced.state) };
       }
-      return { state: cloneAuditState(state), mode: 'audit-mirror', logic: 'matchups load() + syncYouMatchupsWithCompletions(persist:false) + normalize/save shape' };
+      return { state: cloneAuditState(state), persistedState: cloneAuditState(rawInput || {}), mode: 'audit-mirror', logic: 'matchups load() + syncYouMatchupsWithCompletions(persist:false) + normalize/save shape' };
     }
 
     const AUDIT_PAGE_ADAPTERS = [
@@ -1242,14 +1242,11 @@ function buildLogNormalizeShape(state) {
     }
 
     function runNoOpPageVisitAudit(state) {
-      const results = AUDIT_PAGE_ADAPTERS.map(adapter => {
-        const baseline = cloneAuditState(state || {});
-        const runResult = adapter.run(cloneAuditState(baseline));
-        const next = runResult && runResult.state ? runResult.state : runResult;
-        const diffs = summarizeNoOpStateDiff(baseline, next);
-        return { adapter, diffs, runResult };
+      const evaluation = TaskPointsAuditIntegrity.evaluateReadOnlyPageVisits(state, AUDIT_PAGE_ADAPTERS, {
+        clone: cloneAuditState,
+        diff: summarizeNoOpStateDiff
       });
-      const failed = results.filter(r => r.diffs.length);
+      const { results, failed } = evaluation;
       const details = [];
       failed.forEach(r => {
         const changedKeys = r.diffs.filter(d => d.type === 'changed').map(d => d.key);
@@ -1264,8 +1261,8 @@ function buildLogNormalizeShape(state) {
       });
       return {
         status: failed.length ? 'FAIL' : 'PASS',
-        expected: 'No important state mutations during page visit simulation',
-        actual: failed.length ? `${failed.length}/${results.length} page adapters mutated state` : `${results.length}/${results.length} page adapters remained read-only`,
+        expected: 'No important persistent state mutations during page visit simulation',
+        actual: failed.length ? `${failed.length}/${results.length} page adapters would persist mutated state` : `${results.length}/${results.length} page adapters remained persistently read-only`,
         details: failed.length ? details : results.map(r => `${r.adapter.page} [${r.runResult?.mode || 'audit-mirror'}]: no-op safe`)
       };
     }

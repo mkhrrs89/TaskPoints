@@ -98,6 +98,21 @@
     ledgers.forEach((ledger, habitId) => ledger.done.forEach(day => { if (validLedgerKey(day) && !completionKeys.has(`${habitId}|${day}`)) out.warn(`${ledger.label} doneKey ${day} has no completion row`, 4); }));
     const result = out.result(options); return { id: 'habit-ledger-consistency', title: 'Habit ledger consistency', section: 'Habit Ledger Integrity', status: result.status, expected: 'Habit/Vice done, failed, ice, and completion records agree by habit and date', actual: result.summary, details: result.details, trace: 'state.habits doneKeys/failedKeys/iceKeys ↔ state.completions source/habitId/dayKey', tips: 'Legacy doneKeys without completion rows are warnings only. This audit does not create or delete completion entries.' };
   }
-  const api = { buildNpcScoreHealthAudit, buildMatchupHistoryReconciliationAudit, buildHabitLedgerConsistencyAudit };
+  function evaluateReadOnlyPageVisits(state, adapters, helpers = {}) {
+    const clone = helpers.clone || (value => JSON.parse(JSON.stringify(value)));
+    const diff = helpers.diff || ((before, after) => JSON.stringify(before) === JSON.stringify(after) ? [] : [{ type: 'changed', key: 'state' }]);
+    const results = (adapters || []).map(adapter => {
+      const baseline = clone(state || {});
+      const runResult = adapter.run(clone(baseline));
+      // An adapter may prepare a private display clone. Only the state that its
+      // modeled page path would persist is relevant to this audit invariant.
+      const persistedState = runResult && Object.prototype.hasOwnProperty.call(runResult, 'persistedState')
+        ? runResult.persistedState
+        : (runResult && runResult.state ? runResult.state : runResult);
+      return { adapter, diffs: diff(baseline, persistedState), runResult };
+    });
+    return { results, failed: results.filter(result => result.diffs.length) };
+  }
+  const api = { buildNpcScoreHealthAudit, buildMatchupHistoryReconciliationAudit, buildHabitLedgerConsistencyAudit, evaluateReadOnlyPageVisits };
   global.TaskPointsAuditIntegrity = api; if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -141,6 +141,10 @@
       if (!snapshot.length) return;
       try {
         const applyResult = applyPendingHabitDeltas(state, snapshot);
+        // Journal replay stays cheap and durable; only the deferred compaction
+        // pays for canonical day-score synchronization before its full save.
+        const matchupSync = syncYouMatchups(state);
+        state = matchupSync.state;
         const result = saveStateSnapshot(state, { storageKey, immediateWrite: true, userInitiated: true, replaceCompletions: true, interactive: true, deferCompression: true, savePath: 'habit-journal-startup-compaction' });
         if (result?.skipped || result?.blockedByQuotaCircuit || !result?.state) throw new Error('Habit journal compaction was not verified');
         const raw = localStorage.getItem(storageKey);
@@ -8642,10 +8646,12 @@ function computeRankingsPageRows(state){
 
       if (aIsYou && Number(next.scoreA) !== youScore) {
         next.scoreA = youScore;
+        next.playerAScore = youScore;
         localChange = true;
       }
       if (bIsYou && Number(next.scoreB) !== youScore) {
         next.scoreB = youScore;
+        next.playerBScore = youScore;
         localChange = true;
       }
 

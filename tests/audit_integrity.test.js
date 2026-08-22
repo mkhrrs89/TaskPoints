@@ -151,6 +151,30 @@ test('all audit builders leave input state unchanged', () => {
   cases.forEach(([builder, state]) => { const clone = structuredClone(state); builder(state, options); assert.deepEqual(state, clone); });
 });
 
+test('read-only page audit ignores display-clone normalization but catches persistent mutation', () => {
+  const state = { matchups: [{ scoreA: 33.7 }], habits: [] };
+  const clone = structuredClone;
+  const diff = (before, after) => assert.deepEqual(before, after) || [];
+  const harmless = audit.evaluateReadOnlyPageVisits(state, [{
+    page: 'display.html',
+    run(input) {
+      const persistedState = structuredClone(input);
+      input.matchups[0].scoreA = 34.2;
+      return { state: input, persistedState };
+    }
+  }], { clone, diff });
+  assert.equal(harmless.failed.length, 0);
+
+  const persistent = audit.evaluateReadOnlyPageVisits(state, [{
+    page: 'writer.html',
+    run(input) {
+      input.matchups[0].scoreA = 34.2;
+      return { state: input, persistedState: input };
+    }
+  }], { clone, diff: (before, after) => before.matchups[0].scoreA === after.matchups[0].scoreA ? [] : [{ key: 'matchups' }] });
+  assert.equal(persistent.failed.length, 1);
+});
+
 test('audit page loads and wires read-only integrity builders and centralized limits', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'audit.html'), 'utf8');
   assert.match(html, /<script src="audit_integrity\.js"><\/script>/);
