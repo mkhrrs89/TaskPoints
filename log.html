@@ -31,6 +31,11 @@
   border-radius: 6px !important;
 }
 
+/* Log-only source colors. Keep action controls unchanged. */
+#logList .log-source-colored > div:not(:nth-child(5)) {
+  color: inherit !important;
+}
+
     .muted{color:var(--muted)}
 .day-divider{
   display:flex;
@@ -347,7 +352,6 @@ function getSleepInfo(entry) {
 
   return { score, rested };
 }
-
 function sleepPoints(score, rested = 0) {
   if (window.TaskPointsCore?.sleepPoints) {
     return TaskPointsCore.sleepPoints(score, rested, state);
@@ -779,6 +783,23 @@ function renderRows(rows, dayKeys, totalPages, pageStart, pageEnd) {
       tasks: 'Task'
     };
     const src = srcMap[category] || baseSrc;
+    const sourceColorMap = {
+      Task: '#2dd4bf',
+      Habit: '#fb923c',
+      Sleep: '#c084fc',
+      Diet: '#4ade80',
+      Flex: '#f8fafc',
+      Mood: '#60a5fa',
+      Work: '#38bdf8',
+      Vice: '#a63d4f',
+      Vices: '#a63d4f',
+      Inertia: '#9ca3af'
+    };
+    const rowColor = sourceColorMap[src];
+    if (rowColor) {
+      row.style.color = rowColor;
+      row.classList.add('log-source-colored');
+    }
     const canDelete = (baseSrc === 'Task' || baseSrc === 'Flex' || isHabit || isVice); // allow delete for tasks, flex, habits, vices
     const canEditDate = (!isHabit && !isVice && !isInertia);      // allow date-edit for tasks + sleep + flex
     const displayPoints = getCompletionPoints(c);
