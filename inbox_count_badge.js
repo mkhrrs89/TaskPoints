@@ -86,6 +86,9 @@
       html.tp-standalone-app .mobile-bottom-nav-shell.is-expanded .mobile-bottom-nav-secondary {
         padding-bottom: calc(var(--tp-safe-bottom) + 0.25rem) !important;
       }
+      html.tp-standalone-app .mobile-bottom-nav-shell {
+        bottom: calc(-10px - min(16px, var(--mobile-bottom-nav-offset, 0px))) !important;
+      }
     `;
     (document.head || document.documentElement || document.body)?.appendChild?.(style);
   }
