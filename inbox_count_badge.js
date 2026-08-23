@@ -80,6 +80,12 @@
         top: -0.15rem;
         right: calc(50% - 1.55rem);
       }
+      html.tp-standalone-app .mobile-bottom-nav-shell.is-expanded > .mobile-bottom-nav {
+        padding-bottom: 0.25rem !important;
+      }
+      html.tp-standalone-app .mobile-bottom-nav-shell.is-expanded .mobile-bottom-nav-secondary {
+        padding-bottom: calc(var(--tp-safe-bottom) + 0.25rem) !important;
+      }
     `;
     (document.head || document.documentElement || document.body)?.appendChild?.(style);
   }
@@ -193,6 +199,13 @@
   }
 
   function start() {
+    const document = global.document;
+    const standalone = Boolean(
+      global.navigator?.standalone === true
+      || global.matchMedia?.('(display-mode: standalone)')?.matches
+    );
+    if (standalone) document?.documentElement?.classList?.add('tp-standalone-app');
+
     const knownCount = Number(global.__tpInboxKnownCount);
     if (Number.isFinite(knownCount)) render(knownCount);
     else refresh();
