@@ -180,6 +180,7 @@
   let fastLoads = 0;
   let backgroundLoads = 0;
   let pageLoads = 0;
+  let deferredCompressionSaves = 0;
   let lastLoadMs = 0;
   let lastPopulateMs = 0;
   let lastGenerationMs = 0;
@@ -215,9 +216,21 @@
 
       lastGenerationMs = Math.max(0, now() - loadEndedAt);
       const saveStartedAt = now();
+      const optimizedOptions = {
+        ...options,
+        // saveStateSnapshot already has a crash-safe packed-storage fast path
+        // that writes the canonical state immediately and moves only LZ
+        // recompression to a later timer. Inbox is background work, so paying
+        // that compression cost on the main interaction path is unnecessary.
+        interactive: true,
+        deferCompression: true
+      };
+      deferredCompressionSaves += 1;
       let outcome = 'return';
+      let result = null;
       try {
-        return originalMergeAndSave.apply(core, arguments);
+        result = originalMergeAndSave.call(core, nextState, optimizedOptions);
+        return result;
       } catch (error) {
         outcome = 'throw';
         throw error;
@@ -228,6 +241,9 @@
           generationMs: Math.round(lastGenerationMs * 100) / 100,
           saveMs: Math.round(lastSaveMs * 100) / 100,
           totalSinceLoadMs: Math.round((lastGenerationMs + lastSaveMs) * 100) / 100,
+          requestedDeferredCompression: true,
+          deferredCompression: Boolean(result?.deferredCompression),
+          encoding: result?.encoding || null,
           outcome
         });
       }
@@ -291,6 +307,7 @@
     fastLoads,
     backgroundLoads,
     pageLoads,
+    deferredCompressionSaves,
     lastLoadMs,
     lastPopulateMs,
     lastGenerationMs,
