@@ -165,3 +165,128 @@
     fallbackSaves
   });
 })(typeof window !== 'undefined' ? window : globalThis);
+
+// Inbox population currently lives in toolbar.js, which loads after the shared
+// scoring bundle on most pages. Keep this as a separate, narrowly-scoped IIFE:
+// it changes only the one full-state load performed by TaskPointsInbox.populate.
+(function installTaskPointsInboxPopulationFastPath(global) {
+  'use strict';
+
+  const core = global.TaskPointsCore;
+  if (!core || core.__inboxPopulationFastPathInstalled || typeof core.loadAppState !== 'function') return;
+  core.__inboxPopulationFastPathInstalled = true;
+
+  let fastLoads = 0;
+  let populateCalls = 0;
+  let lastLoadMs = 0;
+  let lastPopulateMs = 0;
+
+  const now = () => Number(global.performance?.now?.() || Date.now());
+  const mark = (name, detail) => {
+    try { global.TaskPointsPerf?.mark?.(name, detail); } catch (_) {}
+  };
+
+  function patchInboxApi(api) {
+    if (!api || typeof api !== 'object' || typeof api.populate !== 'function') return api;
+    if (api.populate.__tpInboxPopulationFastPath) return api;
+
+    const originalPopulate = api.populate;
+
+    function inboxPopulationFastPath(options) {
+      populateCalls += 1;
+      const populateStartedAt = now();
+      const originalLoadAppState = core.loadAppState;
+      let intercepted = false;
+
+      // One-shot interception: toolbar's Inbox generator currently asks for a
+      // full derive + persist before doing its own read-only scan. Replace only
+      // that exact first request, then immediately restore the real load method.
+      core.loadAppState = function inboxPopulationLoadOnce(loadOptions = {}) {
+        core.loadAppState = originalLoadAppState;
+        const shouldUseFastLoad = loadOptions
+          && loadOptions.syncDerived === true
+          && loadOptions.persistSync === true;
+
+        if (!shouldUseFastLoad) {
+          return originalLoadAppState.apply(core, arguments);
+        }
+
+        intercepted = true;
+        const loadStartedAt = now();
+        const result = originalLoadAppState.call(core, {
+          ...loadOptions,
+          syncDerived: false,
+          persistSync: false
+        });
+        lastLoadMs = Math.max(0, now() - loadStartedAt);
+        fastLoads += 1;
+        mark('inbox.populate.fastLoad', {
+          durationMs: Math.round(lastLoadMs * 100) / 100,
+          syncDerived: false,
+          persistSync: false
+        });
+        return result;
+      };
+
+      try {
+        const result = originalPopulate.apply(this, arguments);
+        lastPopulateMs = Math.max(0, now() - populateStartedAt);
+        mark('inbox.populate.fastPath', {
+          durationMs: Math.round(lastPopulateMs * 100) / 100,
+          intercepted,
+          changed: Boolean(result?.changed),
+          skipped: Boolean(result?.skipped)
+        });
+        return result;
+      } finally {
+        if (core.loadAppState !== originalLoadAppState) {
+          core.loadAppState = originalLoadAppState;
+        }
+      }
+    }
+
+    inboxPopulationFastPath.__tpInboxPopulationFastPath = true;
+    api.populate = inboxPopulationFastPath;
+    return api;
+  }
+
+  function installOnAssignment() {
+    const existing = global.TaskPointsInbox;
+    if (existing && typeof existing === 'object') {
+      global.TaskPointsInbox = patchInboxApi(existing);
+      return true;
+    }
+
+    let pendingValue;
+    try {
+      Object.defineProperty(global, 'TaskPointsInbox', {
+        configurable: true,
+        enumerable: true,
+        get() { return pendingValue; },
+        set(value) {
+          const patched = patchInboxApi(value);
+          pendingValue = patched;
+          Object.defineProperty(global, 'TaskPointsInbox', {
+            configurable: true,
+            enumerable: true,
+            writable: true,
+            value: patched
+          });
+        }
+      });
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  core.getInboxPopulationFastPathStatus = () => ({
+    installed: true,
+    fastLoads,
+    populateCalls,
+    lastLoadMs,
+    lastPopulateMs
+  });
+
+  installOnAssignment();
+})(typeof window !== 'undefined' ? window : globalThis);
