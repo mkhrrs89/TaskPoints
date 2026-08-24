@@ -22,7 +22,11 @@ function makeHarness() {
     mergeAndSaveState(nextState, options = {}) {
       saveCalls.push({ nextState, options: { ...options } });
       clock += 10;
-      return { state: nextState };
+      return {
+        state: nextState,
+        encoding: options.interactive && options.deferCompression ? 'packed-v1' : 'lz16-packed-v1',
+        deferredCompression: Boolean(options.interactive && options.deferCompression)
+      };
     }
   };
   const originalMergeAndSaveState = core.mergeAndSaveState;
@@ -62,7 +66,7 @@ function makeHarness() {
   };
 }
 
-test('toolbar background Inbox population converts derived load into read-only load', () => {
+test('toolbar background Inbox population converts derived load into read-only load and defers compression', () => {
   const h = makeHarness();
 
   vm.runInContext(`
@@ -89,6 +93,13 @@ test('toolbar background Inbox population converts derived load into read-only l
     caller: 'toolbar'
   });
   assert.equal(h.saveCalls.length, 1);
+  assert.deepEqual(h.saveCalls[0].options, {
+    savePath: 'inbox-auto-populate',
+    immediateWrite: true,
+    assumeNormalized: true,
+    interactive: true,
+    deferCompression: true
+  });
 
   const loadMark = h.perfMarks.find((entry) => entry.name === 'inbox.populate.fastLoad');
   assert.ok(loadMark);
@@ -100,6 +111,9 @@ test('toolbar background Inbox population converts derived load into read-only l
   assert.equal(saveMark.detail.source, 'toolbar-background');
   assert.equal(saveMark.detail.generationMs, 15);
   assert.equal(saveMark.detail.saveMs, 10);
+  assert.equal(saveMark.detail.requestedDeferredCompression, true);
+  assert.equal(saveMark.detail.deferredCompression, true);
+  assert.equal(saveMark.detail.encoding, 'packed-v1');
 
   h.flushMicrotasks();
   const totalMark = h.perfMarks.find((entry) => entry.name === 'inbox.populate.fastPath');
@@ -107,6 +121,7 @@ test('toolbar background Inbox population converts derived load into read-only l
   assert.equal(totalMark.detail.source, 'toolbar-background');
   assert.equal(h.core.mergeAndSaveState, h.originalMergeAndSaveState);
   assert.equal(h.core.getInboxPopulationFastPathStatus().backgroundLoads, 1);
+  assert.equal(h.core.getInboxPopulationFastPathStatus().deferredCompressionSaves, 1);
 });
 
 test('direct Inbox population also gets the fast read even when persistSync was requested', () => {
@@ -141,20 +156,29 @@ test('unrelated derived state loads are unchanged', () => {
   assert.equal(h.core.getInboxPopulationFastPathStatus().fastLoads, 0);
 });
 
-test('Inbox timing wrapper delegates unrelated saves and restores after the population task', () => {
+test('Inbox timing wrapper delegates unrelated saves unchanged and restores after the population task', () => {
   const h = makeHarness();
 
   vm.runInContext(`
     function autoPopulateTaskPointsInbox() {
       TaskPointsCore.loadAppState({ syncDerived: true, persistSync: true });
-      TaskPointsCore.mergeAndSaveState({ tasks: [] }, { savePath: 'some-other-save' });
+      TaskPointsCore.mergeAndSaveState({ tasks: [] }, {
+        savePath: 'some-other-save',
+        interactive: false,
+        deferCompression: false
+      });
     }
     autoPopulateTaskPointsInbox();
   `, h.context);
 
   assert.equal(h.saveCalls.length, 1);
-  assert.equal(h.saveCalls[0].options.savePath, 'some-other-save');
+  assert.deepEqual(h.saveCalls[0].options, {
+    savePath: 'some-other-save',
+    interactive: false,
+    deferCompression: false
+  });
   assert.equal(h.perfMarks.some((entry) => entry.name === 'inbox.populate.generateAndSave'), false);
+  assert.equal(h.core.getInboxPopulationFastPathStatus().deferredCompressionSaves, 0);
   assert.notEqual(h.core.mergeAndSaveState, h.originalMergeAndSaveState);
 
   h.flushMicrotasks();
