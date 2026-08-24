@@ -166,9 +166,9 @@
   });
 })(typeof window !== 'undefined' ? window : globalThis);
 
-// Inbox population currently lives in toolbar.js, which loads after the shared
-// scoring bundle on most pages. Keep this as a separate, narrowly-scoped IIFE:
-// it changes only the one full-state load performed by TaskPointsInbox.populate.
+// Inbox auto-population is invoked both through window.TaskPointsInbox.populate
+// and directly by toolbar background maintenance. Intercept only loadAppState
+// calls whose stack proves they originate inside autoPopulateTaskPointsInbox.
 (function installTaskPointsInboxPopulationFastPath(global) {
   'use strict';
 
@@ -176,117 +176,124 @@
   if (!core || core.__inboxPopulationFastPathInstalled || typeof core.loadAppState !== 'function') return;
   core.__inboxPopulationFastPathInstalled = true;
 
+  const originalLoadAppState = core.loadAppState;
   let fastLoads = 0;
-  let populateCalls = 0;
+  let backgroundLoads = 0;
+  let pageLoads = 0;
   let lastLoadMs = 0;
   let lastPopulateMs = 0;
+  let lastGenerationMs = 0;
+  let lastSaveMs = 0;
 
   const now = () => Number(global.performance?.now?.() || Date.now());
   const mark = (name, detail) => {
     try { global.TaskPointsPerf?.mark?.(name, detail); } catch (_) {}
   };
+  const queueMicrotaskSafe = (callback) => {
+    if (typeof global.queueMicrotask === 'function') global.queueMicrotask(callback);
+    else Promise.resolve().then(callback);
+  };
 
-  function patchInboxApi(api) {
-    if (!api || typeof api !== 'object' || typeof api.populate !== 'function') return api;
-    if (api.populate.__tpInboxPopulationFastPath) return api;
+  function inboxCallerDetails() {
+    let stack = '';
+    try { stack = String(new Error().stack || ''); } catch (_) {}
+    if (!stack.includes('autoPopulateTaskPointsInbox')) return null;
+    const source = stack.includes('runTaskPointsToolbarMaintenance')
+      ? 'toolbar-background'
+      : 'inbox-page-or-api';
+    return { stack, source };
+  }
 
-    const originalPopulate = api.populate;
+  function installSaveTiming(loadEndedAt, source) {
+    const originalMergeAndSave = core.mergeAndSaveState;
+    if (typeof originalMergeAndSave !== 'function') return () => {};
 
-    function inboxPopulationFastPath(options) {
-      populateCalls += 1;
-      const populateStartedAt = now();
-      const originalLoadAppState = core.loadAppState;
-      let intercepted = false;
+    function timedInboxMergeAndSave(nextState, options = {}) {
+      if (options?.savePath !== 'inbox-auto-populate') {
+        return originalMergeAndSave.apply(core, arguments);
+      }
 
-      // One-shot interception: toolbar's Inbox generator currently asks for a
-      // full derive + persist before doing its own read-only scan. Replace only
-      // that exact first request, then immediately restore the real load method.
-      core.loadAppState = function inboxPopulationLoadOnce(loadOptions = {}) {
-        core.loadAppState = originalLoadAppState;
-        const shouldUseFastLoad = loadOptions
-          && loadOptions.syncDerived === true
-          && loadOptions.persistSync === true;
-
-        if (!shouldUseFastLoad) {
-          return originalLoadAppState.apply(core, arguments);
-        }
-
-        intercepted = true;
-        const loadStartedAt = now();
-        const result = originalLoadAppState.call(core, {
-          ...loadOptions,
-          syncDerived: false,
-          persistSync: false
-        });
-        lastLoadMs = Math.max(0, now() - loadStartedAt);
-        fastLoads += 1;
-        mark('inbox.populate.fastLoad', {
-          durationMs: Math.round(lastLoadMs * 100) / 100,
-          syncDerived: false,
-          persistSync: false
-        });
-        return result;
-      };
-
+      lastGenerationMs = Math.max(0, now() - loadEndedAt);
+      const saveStartedAt = now();
+      let outcome = 'return';
       try {
-        const result = originalPopulate.apply(this, arguments);
-        lastPopulateMs = Math.max(0, now() - populateStartedAt);
-        mark('inbox.populate.fastPath', {
-          durationMs: Math.round(lastPopulateMs * 100) / 100,
-          intercepted,
-          changed: Boolean(result?.changed),
-          skipped: Boolean(result?.skipped)
-        });
-        return result;
+        return originalMergeAndSave.apply(core, arguments);
+      } catch (error) {
+        outcome = 'throw';
+        throw error;
       } finally {
-        if (core.loadAppState !== originalLoadAppState) {
-          core.loadAppState = originalLoadAppState;
-        }
+        lastSaveMs = Math.max(0, now() - saveStartedAt);
+        mark('inbox.populate.generateAndSave', {
+          source,
+          generationMs: Math.round(lastGenerationMs * 100) / 100,
+          saveMs: Math.round(lastSaveMs * 100) / 100,
+          totalSinceLoadMs: Math.round((lastGenerationMs + lastSaveMs) * 100) / 100,
+          outcome
+        });
       }
     }
 
-    inboxPopulationFastPath.__tpInboxPopulationFastPath = true;
-    api.populate = inboxPopulationFastPath;
-    return api;
+    core.mergeAndSaveState = timedInboxMergeAndSave;
+    return () => {
+      if (core.mergeAndSaveState === timedInboxMergeAndSave) {
+        core.mergeAndSaveState = originalMergeAndSave;
+      }
+    };
   }
 
-  function installOnAssignment() {
-    const existing = global.TaskPointsInbox;
-    if (existing && typeof existing === 'object') {
-      global.TaskPointsInbox = patchInboxApi(existing);
-      return true;
+  core.loadAppState = function inboxPopulationLoadAppState(options = {}) {
+    if (!options || options.syncDerived !== true) {
+      return originalLoadAppState.apply(core, arguments);
     }
 
-    let pendingValue;
-    try {
-      Object.defineProperty(global, 'TaskPointsInbox', {
-        configurable: true,
-        enumerable: true,
-        get() { return pendingValue; },
-        set(value) {
-          const patched = patchInboxApi(value);
-          pendingValue = patched;
-          Object.defineProperty(global, 'TaskPointsInbox', {
-            configurable: true,
-            enumerable: true,
-            writable: true,
-            value: patched
-          });
-        }
+    const caller = inboxCallerDetails();
+    if (!caller) return originalLoadAppState.apply(core, arguments);
+
+    const populateStartedAt = now();
+    const loadStartedAt = now();
+    const result = originalLoadAppState.call(core, {
+      ...options,
+      syncDerived: false,
+      persistSync: false
+    });
+    const loadEndedAt = now();
+    lastLoadMs = Math.max(0, loadEndedAt - loadStartedAt);
+    fastLoads += 1;
+    if (caller.source === 'toolbar-background') backgroundLoads += 1;
+    else pageLoads += 1;
+
+    mark('inbox.populate.fastLoad', {
+      source: caller.source,
+      durationMs: Math.round(lastLoadMs * 100) / 100,
+      originalSyncDerived: options.syncDerived === true,
+      originalPersistSync: options.persistSync === true,
+      syncDerived: false,
+      persistSync: false
+    });
+
+    const restoreMergeAndSave = installSaveTiming(loadEndedAt, caller.source);
+    queueMicrotaskSafe(() => {
+      restoreMergeAndSave();
+      lastPopulateMs = Math.max(0, now() - populateStartedAt);
+      mark('inbox.populate.fastPath', {
+        source: caller.source,
+        durationMs: Math.round(lastPopulateMs * 100) / 100,
+        fastLoadMs: Math.round(lastLoadMs * 100) / 100,
+        postLoadMs: Math.round(Math.max(0, lastPopulateMs - lastLoadMs) * 100) / 100
       });
-      return true;
-    } catch (_) {
-      return false;
-    }
-  }
+    });
+
+    return result;
+  };
 
   core.getInboxPopulationFastPathStatus = () => ({
     installed: true,
     fastLoads,
-    populateCalls,
+    backgroundLoads,
+    pageLoads,
     lastLoadMs,
-    lastPopulateMs
+    lastPopulateMs,
+    lastGenerationMs,
+    lastSaveMs
   });
-
-  installOnAssignment();
 })(typeof window !== 'undefined' ? window : globalThis);
