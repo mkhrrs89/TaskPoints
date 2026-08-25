@@ -86,6 +86,121 @@
     let state = TaskPointsCore.loadAppState().state;
 const DAILY_SOURCES_PAGE_SIZE = 50;
 let dailySourcesPage = 1;
+let dailyBreakdownsCache = null;
+
+function addDailySourcePoints(current, delta) {
+  return TaskPointsCore.roundPoints((Number(current) || 0) + (Number(delta) || 0), 2);
+}
+
+function emptyDailySourceCategories() {
+  const categories = {};
+  CATEGORY_DEFS.forEach((def) => { categories[def.key] = 0; });
+  categories.inertia = 0;
+  return categories;
+}
+
+// buildDailyBreakdowns() historically rebuilt a full day snapshot for every
+// calendar day, and each snapshot rescanned the entire completion history.
+// Build the same source totals in one completion pass, then apply inertia by day.
+function buildDailyBreakdownsFast(stateInput) {
+  const startedAt = performance.now();
+  const normalized = TaskPointsCore.normalizeState(stateInput || {});
+  const completions = Array.isArray(normalized.completions) ? normalized.completions : [];
+  const dayCompletions = new Map();
+  const categoriesByDay = new Map();
+  const dailyTotals = {};
+  const loggedKeys = new Set();
+
+  for (const completion of completions) {
+    if (!completion || !completion.completedAtISO) continue;
+    const completedDate = new Date(completion.completedAtISO);
+    if (Number.isNaN(completedDate.getTime())) continue;
+    const key = TaskPointsCore.dateKey(completedDate);
+    const parsed = TaskPointsCore.fromKey(key);
+    if (!parsed || Number.isNaN(parsed.getTime())) continue;
+
+    loggedKeys.add(key);
+    if (!dayCompletions.has(key)) dayCompletions.set(key, []);
+    dayCompletions.get(key).push(completion);
+
+    let categories = categoriesByDay.get(key);
+    if (!categories) {
+      categories = emptyDailySourceCategories();
+      categoriesByDay.set(key, categories);
+    }
+
+    const category = TaskPointsCore.categorizeCompletion(completion);
+    const def = CATEGORY_DEFS.find((candidate) => candidate.key === category)
+      || CATEGORY_DEFS[CATEGORY_DEFS.length - 1];
+    const categoryKey = def?.key || 'tasks';
+    const points = TaskPointsCore.pointsForCompletion(completion, normalized);
+    categories[categoryKey] = addDailySourcePoints(categories[categoryKey], points);
+    dailyTotals[key] = addDailySourcePoints(dailyTotals[key], points);
+  }
+
+  if (!loggedKeys.size) return {};
+
+  // Cal-log bonus is a synthetic daily source, so calculate it once per day
+  // rather than once for every day-by-history scan.
+  dayCompletions.forEach((entries, key) => {
+    const bonus = Number(TaskPointsCore.computeCalLogBonusPoints(entries, normalized)) || 0;
+    if (!bonus) return;
+    const categories = categoriesByDay.get(key) || emptyDailySourceCategories();
+    categories.calLogBonus = addDailySourcePoints(categories.calLogBonus, bonus);
+    categoriesByDay.set(key, categories);
+    dailyTotals[key] = addDailySourcePoints(dailyTotals[key], bonus);
+  });
+
+  const sortedLoggedKeys = Array.from(loggedKeys)
+    .sort((a, b) => TaskPointsCore.fromKey(a) - TaskPointsCore.fromKey(b));
+  const start = TaskPointsCore.fromKey(sortedLoggedKeys[0]);
+  const latestLogged = TaskPointsCore.fromKey(sortedLoggedKeys[sortedLoggedKeys.length - 1]);
+  const today = TaskPointsCore.fromKey(TaskPointsCore.todayKey());
+  const end = latestLogged > today ? latestLogged : today;
+  const out = {};
+
+  for (const cursor = new Date(start); cursor <= end; cursor.setDate(cursor.getDate() + 1)) {
+    const key = TaskPointsCore.dateKey(cursor);
+    const categories = { ...(categoriesByDay.get(key) || emptyDailySourceCategories()) };
+    const inertiaInfo = TaskPointsCore.computeInertia(dailyTotals, key, normalized) || {};
+    const inertia = Number.isFinite(Number(inertiaInfo.inertia)) ? Number(inertiaInfo.inertia) : 0;
+    if (inertia) categories.inertia = addDailySourcePoints(categories.inertia, inertia);
+
+    const baseTotal = Number(dailyTotals[key]) || 0;
+    const total = TaskPointsCore.roundPoints(baseTotal + inertia, 2);
+    const hasItems = (dayCompletions.get(key)?.length || 0) > 0;
+    const hasInertia = Math.abs(inertia) > 0.01;
+    const hasTotal = Math.abs(total) > 0.01;
+    if (!hasItems && !hasInertia && !hasTotal) continue;
+
+    out[key] = { total, categories };
+  }
+
+  const durationMs = Math.max(0, performance.now() - startedAt);
+  try {
+    TaskPointsPerf?.mark?.('dailySources.fastBreakdowns', {
+      durationMs: Math.round(durationMs * 100) / 100,
+      completionCount: completions.length,
+      dayCount: Object.keys(out).length
+    });
+  } catch (_) {}
+  return out;
+}
+
+function getDailyBreakdowns() {
+  if (dailyBreakdownsCache) return dailyBreakdownsCache;
+  try {
+    dailyBreakdownsCache = buildDailyBreakdownsFast(state);
+  } catch (error) {
+    try {
+      TaskPointsPerf?.mark?.('dailySources.fastBreakdownsFallback', {
+        message: String(error?.message || error || 'unknown')
+      });
+    } catch (_) {}
+    dailyBreakdownsCache = TaskPointsCore.buildDailyBreakdowns(state);
+  }
+  return dailyBreakdownsCache;
+}
   
 function renderDailySourcesPagination(totalPages, totalDays, startIndex, endIndex) {
   const controls = [$("dailyPagination"), $("dailyPaginationBottom")].filter(Boolean);
@@ -135,7 +250,7 @@ function renderDailyBreakdowns() {
   const summaryEl = $("dailySummary");
   if (!listEl) return;
 
-  const daily = TaskPointsCore.buildDailyBreakdowns(state);
+  const daily = getDailyBreakdowns();
   const keys = Object.keys(daily).sort((a, b) => TaskPointsCore.fromKey(b) - TaskPointsCore.fromKey(a));
 
   if (!keys.length) {
