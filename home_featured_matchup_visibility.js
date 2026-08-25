@@ -87,6 +87,20 @@
         }
         .home-season-featured-kicker > span { flex: 0 0 auto; }
         .${SCOREBOARD_FORMAT_CLASS} { font-size: 0.7rem; margin-top: 3px; }
+
+        /* Give the completion-date row a slightly larger safe zone. The name
+           and move controls keep all of their existing behavior; their actual
+           hit boxes simply sit a few pixels farther above the date bubbles. */
+        .habitRow--single,
+        .habitGroupBody .habitRow {
+          row-gap: 0.5rem !important;
+        }
+        .habitRow--single .habitLeft,
+        .habitRow--single .habitControls,
+        .habitGroupBody .habitRow .habitLeft,
+        .habitGroupBody .habitRow .habitControls {
+          transform: translateY(-2px);
+        }
       }
     `;
     documentRef.head.appendChild(style);
