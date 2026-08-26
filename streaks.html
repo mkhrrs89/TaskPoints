@@ -203,7 +203,7 @@
       <header class="streaks-header">
         <div class="streaks-kicker">Habits + Vices</div>
         <h1 class="streaks-title">Current Streaks</h1>
-        <p class="streaks-subtitle">Tap any column heading to sort. Bonus is the extra point value at the present streak level, not the accumulated bonus from previous days.</p>
+        <p class="streaks-subtitle">Tap any column heading to sort. Bonus shows today’s streak value: earned for completed items, or at stake for unfinished streaks.</p>
       </header>
 
       <section class="streaks-card" data-streak-table="risk" aria-labelledby="streaksRiskHeading">
@@ -231,7 +231,7 @@
           </table>
         </div>
         <div class="streaks-empty" data-streak-empty hidden>No streaks are at risk today.</div>
-        <div class="streaks-note">Only streaks active through yesterday with no completed or failed toggle for today appear here.</div>
+        <div class="streaks-note">Only streaks active through yesterday with no completed or failed toggle for today appear here. Bonus previews what today’s completion would add.</div>
       </section>
 
       <section class="streaks-card" data-streak-table="all" aria-labelledby="streaksTableHeading">
@@ -471,14 +471,14 @@
         return round2(base * Math.pow(1.01, Math.max(0, streak.days - 1)) - base);
       }
 
-      function makeRow(habit, streakDays, endKey, state) {
-        const streak = { days: streakDays, endKey };
+      function makeRow(habit, streakDays, endKey, state, bonusStreakDays = streakDays, bonusEndKey = endKey) {
+        const bonusStreak = { days: bonusStreakDays, endKey: bonusEndKey };
         return {
           id: String(habit?.id || ''),
           name: String(habit?.name || 'Untitled'),
           streak: streakDays,
           points: round2(Number(habit?.pointsPerDay) || 0),
-          bonus: currentBonus(habit, streak, state)
+          bonus: currentBonus(habit, bonusStreak, state)
         };
       }
 
@@ -498,15 +498,22 @@
           const failedToday = status.failed.has(todayKey);
           const todayState = completedToday ? 'done' : (failedToday ? 'failed' : '');
 
-          // At Risk is intentionally based on yesterday first, then today's toggle state:
-          // active through yesterday + absolutely no completed/failed toggle today.
+          // At Risk keeps the displayed streak at the completed-through-yesterday
+          // count, while the Bonus column previews the value of completing today.
           const yesterdayStreak = countStreakEndingOn(status.done, yesterdayKey);
           if (todayState === '' && yesterdayStreak > 0) {
-            risk.push(makeRow(habit, yesterdayStreak, yesterdayKey, state));
+            risk.push(makeRow(
+              habit,
+              yesterdayStreak,
+              yesterdayKey,
+              state,
+              yesterdayStreak + 1,
+              todayKey
+            ));
           }
 
-          // The lower Streak Table is intentionally today-only. Untouched and failed
-          // rows never appear here, which keeps it mutually exclusive with At Risk.
+          // The lower Streak Table is intentionally today-only. Its Bonus is the
+          // bonus actually earned at today's resulting streak level.
           if (todayState === 'done') {
             const currentStreak = countStreakEndingOn(status.done, todayKey);
             if (currentStreak > 0) current.push(makeRow(habit, currentStreak, todayKey, state));
