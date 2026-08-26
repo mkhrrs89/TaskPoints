@@ -80,8 +80,12 @@ test('completion date and habit identity use canonical compatible fields', () =>
   assert.match(page, /core\?\.dateKey/);
 });
 
-test('current bonus reuses canonical completion scoring and subtracts base value', () => {
-  assert.match(page, /core\.pointsForCompletion\(synthetic, state\)/);
+test('current bonus previews a missing completion before canonical scoring', () => {
+  assert.match(page, /function stateWithPreviewedCompletion\(habit, dayKey, state\)/);
+  assert.match(page, /doneKeys:\s*\[\.\.\.doneKeys, dayKey\]/);
+  assert.match(page, /failedKeys:[\s\S]*filter\(\(key\) => key !== dayKey\)/);
+  assert.match(page, /const scoringState = stateWithPreviewedCompletion\(habit, streak\.endKey, state\)/);
+  assert.match(page, /core\.pointsForCompletion\(synthetic, scoringState\)/);
   assert.match(page, /adjusted - base/);
   assert.match(page, /streakMultiplierEnabled !== true/);
 });
