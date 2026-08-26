@@ -443,7 +443,7 @@
       .then(() => originalGetImageBlob.call(core, imageId))
       .then(
         (value) => waiters.forEach((waiter) => waiter.resolve(value)),
-        (error) => waiters.forEach((waiter) => waiter.reject(error)
+        (error) => waiters.forEach((waiter) => waiter.reject(error))
       );
   }
 
