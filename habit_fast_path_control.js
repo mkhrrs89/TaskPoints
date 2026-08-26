@@ -379,3 +379,231 @@
 
   global.addEventListener?.('pageshow', installAfterHomeScript);
 })(typeof window !== 'undefined' ? window : globalThis);
+
+(function installTaskPointsHabitReorderFastPath(global) {
+  'use strict';
+
+  if (!global || global.TaskPointsHabitReorderFastPath?.__installedModule) return;
+
+  const REORDER_FUNCTIONS = ['moveHabit', 'moveHabitWithinGroup', 'moveHabitGroup'];
+  const REQUIRED_QUIET_MS = 3000;
+  const POLL_MS = 180;
+  const MAX_INSTALL_ATTEMPTS = 240;
+  const originals = new Map();
+  let installAttempts = 0;
+  let installed = false;
+  let pending = false;
+  let pendingGeneration = 0;
+  let timer = 0;
+  let interceptedSaves = 0;
+  let deferredFlushes = 0;
+  let forcedFlushes = 0;
+  let lastReason = 'not_installed';
+  let pageLeaving = false;
+
+  function mark(name, detail = {}) {
+    try { global.TaskPointsPerf?.mark?.(name, detail); } catch (_) {}
+  }
+
+  function clearTimer() {
+    if (timer) global.clearTimeout?.(timer);
+    timer = 0;
+  }
+
+  function idleStatus() {
+    try {
+      const status = global.TaskPointsCore?.getStorageMaintenanceIdleStatus?.();
+      return status && typeof status === 'object' ? status : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function readyForDeferredSave(status = idleStatus()) {
+    if (pageLeaving) return true;
+    if (!status) return null;
+    if (status.pageLeaving === true || global.document?.visibilityState === 'hidden') return false;
+    if (status.activeEditor === true) return false;
+    if (Number(status.navigationQuietForMs || 0) > 0) return false;
+    return Number(status.lastInteractionAgoMs || 0) >= REQUIRED_QUIET_MS;
+  }
+
+  function persistNow(reason = 'deferred') {
+    if (!pending || typeof global.save !== 'function') return false;
+    clearTimer();
+    pending = false;
+    pendingGeneration += 1;
+    if (reason === 'deferred') deferredFlushes += 1;
+    else forcedFlushes += 1;
+    const started = global.performance?.now?.() ?? Date.now();
+    mark('habit.reorder.persistStarted', { reason });
+    try {
+      global.save('habit-reorder-deferred', {
+        immediateWrite: true,
+        userInitiated: true,
+        interactive: true,
+        deferCompression: true
+      });
+      mark('habit.reorder.persistCompleted', {
+        reason,
+        durationMs: Math.max(0, Math.round((global.performance?.now?.() ?? Date.now()) - started))
+      });
+      lastReason = `persisted_${reason}`;
+      return true;
+    } catch (error) {
+      pending = true;
+      lastReason = 'persist_failed';
+      console.warn('Deferred habit reorder save failed; will retry.', error);
+      return false;
+    }
+  }
+
+  function attemptDeferredSave(generation) {
+    timer = 0;
+    if (!pending || generation !== pendingGeneration) return;
+    const status = idleStatus();
+    const ready = readyForDeferredSave(status);
+    if (ready === true || ready === null) {
+      persistNow('deferred');
+      return;
+    }
+    timer = global.setTimeout?.(() => attemptDeferredSave(generation), POLL_MS) || 0;
+  }
+
+  function scheduleDeferredSave(source) {
+    pending = true;
+    pendingGeneration += 1;
+    const generation = pendingGeneration;
+    clearTimer();
+    mark('habit.reorder.persistQueued', {
+      source,
+      requiredQuietMs: REQUIRED_QUIET_MS,
+      generation
+    });
+    timer = global.setTimeout?.(() => attemptDeferredSave(generation), POLL_MS) || 0;
+  }
+
+  function wrapReorderFunction(name, candidate) {
+    if (candidate?.__tpHabitReorderFastPath === true) return candidate;
+    originals.set(name, candidate);
+    const wrapped = function taskPointsHabitReorderFastPathWrapper() {
+      const core = global.TaskPointsCore;
+      if (!core || typeof core.saveStateSnapshot !== 'function') {
+        lastReason = 'core_save_unavailable';
+        return candidate.apply(this, arguments);
+      }
+
+      const originalSaveStateSnapshot = core.saveStateSnapshot;
+      let intercepted = false;
+      const captureSave = function taskPointsHabitReorderSaveCapture(nextState, options = {}) {
+        if (intercepted) return originalSaveStateSnapshot.apply(this, arguments);
+        intercepted = true;
+        interceptedSaves += 1;
+        return {
+          state: nextState,
+          trimmed: false,
+          skipped: false,
+          noOp: true,
+          storageKey: options.storageKey || core.STORAGE_KEY || 'taskpoints_v1',
+          encoding: 'deferred-habit-reorder'
+        };
+      };
+      core.saveStateSnapshot = captureSave;
+
+      const started = global.performance?.now?.() ?? Date.now();
+      try {
+        const result = candidate.apply(this, arguments);
+        if (intercepted) scheduleDeferredSave(name);
+        mark('habit.reorder.fastPath', {
+          source: name,
+          intercepted,
+          durationMs: Math.max(0, Math.round((global.performance?.now?.() ?? Date.now()) - started))
+        });
+        lastReason = intercepted ? 'fast_path_used' : 'save_not_intercepted';
+        return result;
+      } finally {
+        if (core.saveStateSnapshot === captureSave) core.saveStateSnapshot = originalSaveStateSnapshot;
+      }
+    };
+
+    Object.defineProperties(wrapped, {
+      __tpHabitReorderFastPath: { value: true },
+      __tpOriginalHabitReorder: { value: candidate },
+      __tpHabitReorderName: { value: name }
+    });
+    return wrapped;
+  }
+
+  function install() {
+    installAttempts += 1;
+    let available = 0;
+    let wrappedCount = 0;
+
+    for (const name of REORDER_FUNCTIONS) {
+      const candidate = global[name];
+      if (typeof candidate !== 'function') continue;
+      available += 1;
+      if (candidate.__tpHabitReorderFastPath === true) {
+        wrappedCount += 1;
+        continue;
+      }
+      global[name] = wrapReorderFunction(name, candidate);
+      if (global[name]?.__tpHabitReorderFastPath === true) wrappedCount += 1;
+    }
+
+    installed = available > 0 && wrappedCount === available;
+    lastReason = installed ? 'installed' : (available ? 'partial_install' : 'reorder_functions_unavailable');
+    return getStatus();
+  }
+
+  function getStatus() {
+    return {
+      installed,
+      installAttempts,
+      requiredQuietMs: REQUIRED_QUIET_MS,
+      pending,
+      pendingGeneration,
+      interceptedSaves,
+      deferredFlushes,
+      forcedFlushes,
+      lastReason,
+      wrappedFunctions: REORDER_FUNCTIONS.filter((name) => global[name]?.__tpHabitReorderFastPath === true)
+    };
+  }
+
+  global.TaskPointsHabitReorderFastPath = {
+    __installedModule: true,
+    install,
+    flush: () => persistNow('manual'),
+    getStatus
+  };
+
+  const installWhenReady = () => {
+    const status = install();
+    if (!status.installed && installAttempts < MAX_INSTALL_ATTEMPTS) {
+      global.setTimeout?.(installWhenReady, 50);
+    }
+  };
+
+  if (global.document?.readyState === 'loading') {
+    global.document.addEventListener?.('DOMContentLoaded', installWhenReady, { once: true });
+  } else {
+    installWhenReady();
+  }
+
+  global.addEventListener?.('pageshow', () => {
+    pageLeaving = false;
+    installWhenReady();
+  });
+  global.addEventListener?.('pagehide', () => {
+    pageLeaving = true;
+    if (pending) persistNow('pagehide');
+  });
+  global.addEventListener?.('beforeunload', () => {
+    pageLeaving = true;
+    if (pending) persistNow('beforeunload');
+  });
+  global.document?.addEventListener?.('visibilitychange', () => {
+    if (global.document.visibilityState === 'hidden' && pending) persistNow('hidden');
+  });
+})(typeof window !== 'undefined' ? window : globalThis);
