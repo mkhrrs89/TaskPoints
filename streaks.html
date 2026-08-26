@@ -445,6 +445,26 @@
         return n > 0 ? `+${text}` : `-${text}`;
       }
 
+      function stateWithPreviewedCompletion(habit, dayKey, state) {
+        if (!habit?.id || !validDayKey(dayKey) || !Array.isArray(state?.habits)) return state;
+        const habitIndex = state.habits.findIndex((candidate) => candidate?.id === habit.id);
+        if (habitIndex < 0) return state;
+        const storedHabit = state.habits[habitIndex];
+        const doneKeys = Array.isArray(storedHabit?.doneKeys) ? storedHabit.doneKeys : [];
+        if (doneKeys.includes(dayKey)) return state;
+
+        const previewHabit = {
+          ...storedHabit,
+          doneKeys: [...doneKeys, dayKey],
+          failedKeys: Array.isArray(storedHabit?.failedKeys)
+            ? storedHabit.failedKeys.filter((key) => key !== dayKey)
+            : []
+        };
+        const previewHabits = state.habits.slice();
+        previewHabits[habitIndex] = previewHabit;
+        return { ...state, habits: previewHabits };
+      }
+
       function currentBonus(habit, streak, state) {
         const base = Number(habit?.pointsPerDay);
         if (!Number.isFinite(base) || !streak?.endKey || streak.days <= 0) return 0;
@@ -463,7 +483,12 @@
               points: base,
               completionFraction: 1
             };
-            const adjusted = Number(core.pointsForCompletion(synthetic, state));
+            // Canonical streak scoring counts only doneKeys. For an unfinished
+            // At Risk row, temporarily add today's completion to a cloned view
+            // of the state so the preview uses the streak day the user WOULD
+            // reach by completing it today without mutating real app state.
+            const scoringState = stateWithPreviewedCompletion(habit, streak.endKey, state);
+            const adjusted = Number(core.pointsForCompletion(synthetic, scoringState));
             if (Number.isFinite(adjusted)) return round2(adjusted - base);
           } catch (_) {}
         }
