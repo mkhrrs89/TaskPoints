@@ -18,8 +18,15 @@ test('heavy storage verification jobs are serialized with a cooldown instead of 
   assert.match(source, /const MIN_GAP_MS = 10000/);
   assert.match(source, /tail\.catch\(\(\) => undefined\)\.then/);
   assert.match(source, /await waitForGap\(\)/);
-  assert.match(source, /return originalWhenQuiet\(async \(\) =>/);
+  assert.match(source, /return await originalWhenQuiet\(serialRun, options\)/);
   assert.doesNotMatch(source, /PHASE5C.*DISABLED|phase2.*disabled/i);
+});
+
+test('serial guard safely bypasses its own final-boundary re-entry', () => {
+  assert.match(source, /const reentrantRuns = new WeakSet\(\)/);
+  assert.match(source, /if \(reentrantRuns\.has\(run\)\)/);
+  assert.match(source, /reentrantRuns\.add\(serialRun\)/);
+  assert.match(source, /reentrantRuns\.delete\(serialRun\)/);
 });
 
 test('serial guard emits timing markers for the next performance trace', () => {
