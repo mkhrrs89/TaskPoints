@@ -87,6 +87,20 @@
         }
         .home-season-featured-kicker > span { flex: 0 0 auto; }
         .${SCOREBOARD_FORMAT_CLASS} { font-size: 0.7rem; margin-top: 3px; }
+
+        /* Give the completion-date row a slightly larger safe zone. The name
+           and move controls keep all of their existing behavior; their actual
+           hit boxes simply sit a few pixels farther above the date bubbles. */
+        .habitRow--single,
+        .habitGroupBody .habitRow {
+          row-gap: 0.5rem !important;
+        }
+        .habitRow--single .habitLeft,
+        .habitRow--single .habitControls,
+        .habitGroupBody .habitRow .habitLeft,
+        .habitGroupBody .habitRow .habitControls {
+          transform: translateY(-2px);
+        }
       }
     `;
     documentRef.head.appendChild(style);
@@ -311,4 +325,117 @@
   });
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
+})(typeof window !== 'undefined' ? window : globalThis);
+
+;(function installTaskPointsHeavyStorageSerialGuard(global) {
+  'use strict';
+
+  const core = global.TaskPointsCore;
+  const documentRef = global.document;
+  if (!core || !documentRef || core.__heavyStorageSerialGuardInstalled) return;
+  if (typeof core.whenStorageMaintenanceQuiet !== 'function') return;
+
+  const pathname = String(global.location?.pathname || '').replace(/\/+$/, '');
+  const isHome = pathname === '' || pathname === '/' || pathname === '/index.html' || pathname.endsWith('/index.html');
+  if (!isHome) return;
+
+  const HEAVY_REASONS = new Set(['phase2_dual_write_coalesced', 'phase5c_verified_secondary']);
+  const MIN_GAP_MS = 10000;
+  const originalWhenQuiet = core.whenStorageMaintenanceQuiet.bind(core);
+  const reentrantRuns = new WeakSet();
+  const now = () => global.performance?.now?.() ?? Date.now();
+  let tail = Promise.resolve();
+  let runningReason = '';
+  let lastCompletedAt = 0;
+  let queued = 0;
+  let started = 0;
+  let completed = 0;
+
+  function reasonFor(options = {}) {
+    return String(options.reason || options.source || options.action || options.caller || '');
+  }
+
+  function mark(name, detail = {}) {
+    try { global.TaskPointsPerf?.mark?.(name, detail); } catch (_) {}
+  }
+
+  function waitForGap() {
+    const remaining = Math.max(0, MIN_GAP_MS - (now() - lastCompletedAt));
+    if (!lastCompletedAt || remaining <= 0) return Promise.resolve();
+    return new Promise((resolve) => global.setTimeout?.(resolve, remaining));
+  }
+
+  core.whenStorageMaintenanceQuiet = function taskPointsSerialHeavyStorageMaintenance(run, options = {}) {
+    const reason = reasonFor(options);
+    if (typeof run !== 'function' || !HEAVY_REASONS.has(reason)) {
+      return originalWhenQuiet(run, options);
+    }
+
+    // The existing 20-second guard can call core.whenStorageMaintenanceQuiet
+    // again when a touch lands at its final release boundary. Let that exact
+    // same wrapped callback re-enter the original guard directly; otherwise it
+    // would enqueue behind itself and could never finish.
+    if (reentrantRuns.has(run)) {
+      return originalWhenQuiet(run, options);
+    }
+
+    queued += 1;
+    mark('storage.heavyMaintenanceQueued', {
+      reason,
+      runningReason,
+      minGapMs: MIN_GAP_MS,
+      queueDepth: Math.max(1, queued - completed)
+    });
+
+    const operation = tail.catch(() => undefined).then(async () => {
+      await waitForGap();
+
+      const serialRun = async () => {
+        runningReason = reason;
+        started += 1;
+        const startedAt = now();
+        mark('storage.heavyMaintenanceStarted', {
+          reason,
+          minGapMs: MIN_GAP_MS,
+          queueDepth: Math.max(1, queued - completed)
+        });
+        try {
+          return await run();
+        } finally {
+          const finishedAt = now();
+          runningReason = '';
+          lastCompletedAt = finishedAt;
+          completed += 1;
+          mark('storage.heavyMaintenanceCompleted', {
+            reason,
+            durationMs: Math.max(0, Math.round(finishedAt - startedAt)),
+            minGapMs: MIN_GAP_MS,
+            remainingQueued: Math.max(0, queued - completed)
+          });
+        }
+      };
+
+      reentrantRuns.add(serialRun);
+      try {
+        return await originalWhenQuiet(serialRun, options);
+      } finally {
+        reentrantRuns.delete(serialRun);
+      }
+    });
+
+    tail = Promise.resolve(operation).then(() => undefined, () => undefined);
+    return operation;
+  };
+
+  core.getHeavyStorageSerialGuardStatus = () => ({
+    installed: true,
+    minGapMs: MIN_GAP_MS,
+    heavyReasons: Array.from(HEAVY_REASONS),
+    queued,
+    started,
+    completed,
+    runningReason,
+    lastCompletedAgoMs: lastCompletedAt ? Math.max(0, Math.round(now() - lastCompletedAt)) : null
+  });
+  core.__heavyStorageSerialGuardInstalled = true;
 })(typeof window !== 'undefined' ? window : globalThis);

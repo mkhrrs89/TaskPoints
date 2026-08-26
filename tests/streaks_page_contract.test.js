@@ -80,10 +80,24 @@ test('completion date and habit identity use canonical compatible fields', () =>
   assert.match(page, /core\?\.dateKey/);
 });
 
-test('current bonus reuses canonical completion scoring and subtracts base value', () => {
-  assert.match(page, /core\.pointsForCompletion\(synthetic, state\)/);
+test('current bonus previews a missing completion before canonical scoring', () => {
+  assert.match(page, /function stateWithPreviewedCompletion\(habit, dayKey, state\)/);
+  assert.match(page, /doneKeys:\s*\[\.\.\.doneKeys, dayKey\]/);
+  assert.match(page, /failedKeys:[\s\S]*filter\(\(key\) => key !== dayKey\)/);
+  assert.match(page, /const scoringState = stateWithPreviewedCompletion\(habit, streak\.endKey, state\)/);
+  assert.match(page, /core\.pointsForCompletion\(synthetic, scoringState\)/);
   assert.match(page, /adjusted - base/);
   assert.match(page, /streakMultiplierEnabled !== true/);
+});
+
+test('at-risk bonus previews today while the displayed streak remains completed-through-yesterday', () => {
+  assert.match(page, /streak:\s*streakDays/);
+  assert.match(
+    page,
+    /risk\.push\(makeRow\([\s\S]*?yesterdayStreak,[\s\S]*?yesterdayKey,[\s\S]*?state,[\s\S]*?yesterdayStreak \+ 1,[\s\S]*?todayKey[\s\S]*?\)\)/
+  );
+  assert.match(page, /Bonus shows today’s streak value/);
+  assert.match(page, /Bonus previews what today’s completion would add/);
 });
 
 test('lower streak table contains completed-today streaks only', () => {

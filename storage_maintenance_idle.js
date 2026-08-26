@@ -526,3 +526,116 @@
   });
   core.__imageReadBatchingInstalled = true;
 })(typeof window !== 'undefined' ? window : globalThis);
+
+;(function installTaskPointsHeavyStorageLongQuietGuard(global) {
+  'use strict';
+
+  const core = global.TaskPointsCore;
+  const document = global.document;
+  if (!core || !document || core.__heavyStorageLongQuietGuardInstalled) return;
+
+  const pathname = String(global.location?.pathname || '').replace(/\/+$/, '');
+  const isHome = pathname === '' || pathname === '/' || pathname === '/index.html' || pathname.endsWith('/index.html');
+  if (!isHome || typeof core.whenStorageMaintenanceQuiet !== 'function') return;
+
+  const REQUIRED_QUIET_MS = 20000;
+  const POLL_MS = 250;
+  const HEAVY_REASONS = new Set(['phase2_dual_write_coalesced', 'phase5c_verified_secondary']);
+  const originalWhenQuiet = core.whenStorageMaintenanceQuiet.bind(core);
+  let deferrals = 0;
+  let releases = 0;
+  let pendingWaiters = 0;
+  let lastReason = '';
+
+  function optionReason(options = {}) {
+    return String(options.reason || options.source || options.action || options.caller || '');
+  }
+
+  function status() {
+    try {
+      const value = core.getStorageMaintenanceIdleStatus?.();
+      return value && typeof value === 'object' ? value : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function deepQuietReady(current = status()) {
+    if (!current) return null;
+    if (document.visibilityState === 'hidden') return false;
+    if (current.pageLeaving === true || current.activeEditor === true) return false;
+    if (Number(current.navigationQuietForMs || 0) > 0) return false;
+    return Number(current.lastInteractionAgoMs || 0) >= REQUIRED_QUIET_MS;
+  }
+
+  function mark(name, detail = {}) {
+    try { global.TaskPointsPerf?.mark?.(name, detail); } catch (_) {}
+  }
+
+  function waitForDeepQuiet(reason) {
+    const current = status();
+    const ready = deepQuietReady(current);
+    if (ready === null) return Promise.resolve();
+    if (ready) return Promise.resolve();
+
+    deferrals += 1;
+    pendingWaiters += 1;
+    lastReason = reason;
+    mark('storage.heavyMaintenanceDeferred', {
+      reason,
+      requiredQuietMs: REQUIRED_QUIET_MS,
+      lastInteractionAgoMs: Number(current?.lastInteractionAgoMs || 0),
+      navigationQuietForMs: Number(current?.navigationQuietForMs || 0),
+      activeEditor: current?.activeEditor === true
+    });
+
+    return new Promise((resolve) => {
+      const retry = () => {
+        const next = status();
+        const nextReady = deepQuietReady(next);
+        if (nextReady === false) {
+          global.setTimeout?.(retry, POLL_MS);
+          return;
+        }
+        pendingWaiters = Math.max(0, pendingWaiters - 1);
+        releases += 1;
+        mark('storage.heavyMaintenanceReleased', {
+          reason,
+          requiredQuietMs: REQUIRED_QUIET_MS,
+          lastInteractionAgoMs: Number(next?.lastInteractionAgoMs || 0)
+        });
+        resolve();
+      };
+      global.setTimeout?.(retry, POLL_MS);
+    });
+  }
+
+  core.whenStorageMaintenanceQuiet = function taskPointsHeavyStorageLongQuiet(run, options = {}) {
+    const reason = optionReason(options);
+    if (typeof run !== 'function' || !HEAVY_REASONS.has(reason)) {
+      return originalWhenQuiet(run, options);
+    }
+
+    return waitForDeepQuiet(reason).then(() => originalWhenQuiet(() => {
+      // Re-check at the final execution boundary. If a touch landed while the
+      // shared 1.4 s maintenance gate was resolving, restart the deep-idle wait
+      // instead of beginning a multi-second IndexedDB mirror beside that touch.
+      if (deepQuietReady(status()) === false) {
+        return core.whenStorageMaintenanceQuiet(run, options);
+      }
+      return run();
+    }, options));
+  };
+
+  core.getHeavyStorageLongQuietGuardStatus = () => ({
+    installed: true,
+    requiredQuietMs: REQUIRED_QUIET_MS,
+    pollMs: POLL_MS,
+    heavyReasons: Array.from(HEAVY_REASONS),
+    deferrals,
+    releases,
+    pendingWaiters,
+    lastReason
+  });
+  core.__heavyStorageLongQuietGuardInstalled = true;
+})(typeof window !== 'undefined' ? window : globalThis);

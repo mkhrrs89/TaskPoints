@@ -165,3 +165,398 @@
     fallbackSaves
   });
 })(typeof window !== 'undefined' ? window : globalThis);
+
+// Inbox auto-population is invoked both through window.TaskPointsInbox.populate
+// and directly by toolbar background maintenance. Intercept only loadAppState
+// calls whose stack proves they originate inside autoPopulateTaskPointsInbox.
+(function installTaskPointsInboxPopulationFastPath(global) {
+  'use strict';
+
+  const core = global.TaskPointsCore;
+  if (!core || core.__inboxPopulationFastPathInstalled || typeof core.loadAppState !== 'function') return;
+  core.__inboxPopulationFastPathInstalled = true;
+
+  const originalLoadAppState = core.loadAppState;
+  let fastLoads = 0;
+  let backgroundLoads = 0;
+  let pageLoads = 0;
+  let deferredCompressionSaves = 0;
+  let lastLoadMs = 0;
+  let lastPopulateMs = 0;
+  let lastGenerationMs = 0;
+  let lastSaveMs = 0;
+
+  const now = () => Number(global.performance?.now?.() || Date.now());
+  const mark = (name, detail) => {
+    try { global.TaskPointsPerf?.mark?.(name, detail); } catch (_) {}
+  };
+  const queueMicrotaskSafe = (callback) => {
+    if (typeof global.queueMicrotask === 'function') global.queueMicrotask(callback);
+    else Promise.resolve().then(callback);
+  };
+
+  function inboxCallerDetails() {
+    let stack = '';
+    try { stack = String(new Error().stack || ''); } catch (_) {}
+    if (!stack.includes('autoPopulateTaskPointsInbox')) return null;
+    const source = stack.includes('runTaskPointsToolbarMaintenance')
+      ? 'toolbar-background'
+      : 'inbox-page-or-api';
+    return { stack, source };
+  }
+
+  function installSaveTiming(loadEndedAt, source) {
+    const originalMergeAndSave = core.mergeAndSaveState;
+    if (typeof originalMergeAndSave !== 'function') return () => {};
+
+    function timedInboxMergeAndSave(nextState, options = {}) {
+      if (options?.savePath !== 'inbox-auto-populate') {
+        return originalMergeAndSave.apply(core, arguments);
+      }
+
+      lastGenerationMs = Math.max(0, now() - loadEndedAt);
+      const saveStartedAt = now();
+      const optimizedOptions = {
+        ...options,
+        // saveStateSnapshot already has a crash-safe packed-storage fast path
+        // that writes the canonical state immediately and moves only LZ
+        // recompression to a later timer. Inbox is background work, so paying
+        // that compression cost on the main interaction path is unnecessary.
+        interactive: true,
+        deferCompression: true
+      };
+      deferredCompressionSaves += 1;
+      let outcome = 'return';
+      let result = null;
+      try {
+        result = originalMergeAndSave.call(core, nextState, optimizedOptions);
+        return result;
+      } catch (error) {
+        outcome = 'throw';
+        throw error;
+      } finally {
+        lastSaveMs = Math.max(0, now() - saveStartedAt);
+        mark('inbox.populate.generateAndSave', {
+          source,
+          generationMs: Math.round(lastGenerationMs * 100) / 100,
+          saveMs: Math.round(lastSaveMs * 100) / 100,
+          totalSinceLoadMs: Math.round((lastGenerationMs + lastSaveMs) * 100) / 100,
+          requestedDeferredCompression: true,
+          deferredCompression: Boolean(result?.deferredCompression),
+          encoding: result?.encoding || null,
+          outcome
+        });
+      }
+    }
+
+    core.mergeAndSaveState = timedInboxMergeAndSave;
+    return () => {
+      if (core.mergeAndSaveState === timedInboxMergeAndSave) {
+        core.mergeAndSaveState = originalMergeAndSave;
+      }
+    };
+  }
+
+  core.loadAppState = function inboxPopulationLoadAppState(options = {}) {
+    if (!options || options.syncDerived !== true) {
+      return originalLoadAppState.apply(core, arguments);
+    }
+
+    const caller = inboxCallerDetails();
+    if (!caller) return originalLoadAppState.apply(core, arguments);
+
+    const populateStartedAt = now();
+    const loadStartedAt = now();
+    const result = originalLoadAppState.call(core, {
+      ...options,
+      syncDerived: false,
+      persistSync: false
+    });
+    const loadEndedAt = now();
+    lastLoadMs = Math.max(0, loadEndedAt - loadStartedAt);
+    fastLoads += 1;
+    if (caller.source === 'toolbar-background') backgroundLoads += 1;
+    else pageLoads += 1;
+
+    mark('inbox.populate.fastLoad', {
+      source: caller.source,
+      durationMs: Math.round(lastLoadMs * 100) / 100,
+      originalSyncDerived: options.syncDerived === true,
+      originalPersistSync: options.persistSync === true,
+      syncDerived: false,
+      persistSync: false
+    });
+
+    const restoreMergeAndSave = installSaveTiming(loadEndedAt, caller.source);
+    queueMicrotaskSafe(() => {
+      restoreMergeAndSave();
+      lastPopulateMs = Math.max(0, now() - populateStartedAt);
+      mark('inbox.populate.fastPath', {
+        source: caller.source,
+        durationMs: Math.round(lastPopulateMs * 100) / 100,
+        fastLoadMs: Math.round(lastLoadMs * 100) / 100,
+        postLoadMs: Math.round(Math.max(0, lastPopulateMs - lastLoadMs) * 100) / 100
+      });
+    });
+
+    return result;
+  };
+
+  core.getInboxPopulationFastPathStatus = () => ({
+    installed: true,
+    fastLoads,
+    backgroundLoads,
+    pageLoads,
+    deferredCompressionSaves,
+    lastLoadMs,
+    lastPopulateMs,
+    lastGenerationMs,
+    lastSaveMs
+  });
+})(typeof window !== 'undefined' ? window : globalThis);
+
+// The full TaskPoints snapshot is now too large for the generic packed
+// interactive-save shortcut. Keep Inbox auto-population crash-safe by writing
+// only its three changed fields to a tiny journal immediately, overlaying that
+// journal on every state read, and compacting it into the canonical verified
+// snapshot after sustained idle.
+;(function installTaskPointsInboxMutationJournal(global) {
+  'use strict';
+
+  const core = global.TaskPointsCore;
+  const storage = global.localStorage;
+  if (!core || !storage || core.__inboxMutationJournalInstalled || typeof core.mergeAndSaveState !== 'function') return;
+  core.__inboxMutationJournalInstalled = true;
+
+  const JOURNAL_KEY = 'taskpoints_pending_inbox_state_v1';
+  const STORAGE_KEY = core.STORAGE_KEY || 'taskpoints_v1';
+  const COMPACTION_QUIET_MS = 8000;
+  const POLL_MS = 500;
+  const originalMergeAndSaveState = core.mergeAndSaveState.bind(core);
+  const originalReadStored = typeof core.readTaskPointsStoredState === 'function'
+    ? core.readTaskPointsStoredState.bind(core)
+    : null;
+  const originalLoadAppState = typeof core.loadAppState === 'function'
+    ? core.loadAppState.bind(core)
+    : null;
+
+  let timer = 0;
+  let journalSaves = 0;
+  let fallbackSaves = 0;
+  let compactionsStarted = 0;
+  let compactionsCompleted = 0;
+  let compactionDeferrals = 0;
+
+  const mark = (name, detail = {}) => {
+    try { global.TaskPointsPerf?.mark?.(name, detail); } catch (_) {}
+  };
+
+  function clone(value) {
+    if (value == null) return value;
+    if (typeof global.structuredClone === 'function') {
+      try { return global.structuredClone(value); } catch (_) {}
+    }
+    return JSON.parse(JSON.stringify(value));
+  }
+
+  function normalizePatch(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    if (value.schemaVersion != null && value.schemaVersion !== 1) return null;
+    return {
+      schemaVersion: 1,
+      inboxMessages: Array.isArray(value.inboxMessages) ? clone(value.inboxMessages) : [],
+      inboxProcessedEventIds: Array.isArray(value.inboxProcessedEventIds) ? clone(value.inboxProcessedEventIds) : [],
+      inboxStartedDateKey: value.inboxStartedDateKey == null ? null : String(value.inboxStartedDateKey),
+      updatedAtISO: typeof value.updatedAtISO === 'string' ? value.updatedAtISO : new Date().toISOString()
+    };
+  }
+
+  function readJournal() {
+    let raw = '';
+    try { raw = storage.getItem(JOURNAL_KEY) || ''; }
+    catch (_) { return { raw: '', malformed: true, record: null }; }
+    if (!raw) return { raw: '', malformed: false, record: null };
+    try {
+      const record = normalizePatch(JSON.parse(raw));
+      return record ? { raw, malformed: false, record } : { raw, malformed: true, record: null };
+    } catch (_) {
+      return { raw, malformed: true, record: null };
+    }
+  }
+
+  function applyPatch(state, record) {
+    if (!state || typeof state !== 'object' || !record) return state;
+    return {
+      ...state,
+      inboxMessages: clone(record.inboxMessages),
+      inboxProcessedEventIds: clone(record.inboxProcessedEventIds),
+      inboxStartedDateKey: record.inboxStartedDateKey
+    };
+  }
+
+  function patchesMatch(state, record) {
+    if (!state || !record) return false;
+    try {
+      return JSON.stringify(state.inboxMessages || []) === JSON.stringify(record.inboxMessages || [])
+        && JSON.stringify(state.inboxProcessedEventIds || []) === JSON.stringify(record.inboxProcessedEventIds || [])
+        && (state.inboxStartedDateKey == null ? null : String(state.inboxStartedDateKey)) === record.inboxStartedDateKey;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function invalidateCaches() {
+    try { core.clearStateHotCache?.(); } catch (_) {}
+  }
+
+  function compactionReady() {
+    let status = null;
+    try { status = core.getStorageMaintenanceIdleStatus?.() || null; } catch (_) {}
+    if (!status) return false;
+    if (status.pageLeaving === true || status.activeEditor === true) return false;
+    if (Number(status.navigationQuietForMs || 0) > 0) return false;
+    return Number(status.lastInteractionAgoMs || 0) >= COMPACTION_QUIET_MS;
+  }
+
+  function scheduleCompaction(delayMs = POLL_MS) {
+    if (timer || typeof global.setTimeout !== 'function') return;
+    timer = global.setTimeout(() => {
+      timer = 0;
+      attemptCompaction();
+    }, Math.max(POLL_MS, Number(delayMs) || POLL_MS));
+  }
+
+  function attemptCompaction() {
+    const current = readJournal();
+    if (!current.record) return false;
+    if (current.malformed) return false;
+    if (!compactionReady()) {
+      compactionDeferrals += 1;
+      scheduleCompaction();
+      return false;
+    }
+
+    compactionsStarted += 1;
+    mark('inbox.journal.compactionStart', { journalBytes: current.raw.length });
+    const rawSnapshot = current.raw;
+    const record = current.record;
+    try {
+      const result = originalMergeAndSaveState({
+        inboxMessages: record.inboxMessages,
+        inboxProcessedEventIds: record.inboxProcessedEventIds,
+        inboxStartedDateKey: record.inboxStartedDateKey
+      }, {
+        savePath: 'inbox-journal-compaction',
+        immediateWrite: true,
+        assumeNormalized: true
+      });
+      if (result?.skipped || result?.blockedByQuotaCircuit) throw new Error('Inbox journal compaction was not committed.');
+
+      const persisted = originalReadStored
+        ? originalReadStored(STORAGE_KEY, {})
+        : result?.state;
+      if (!patchesMatch(persisted, record)) throw new Error('Inbox journal compaction verification failed.');
+
+      const latest = readJournal();
+      if (latest.raw === rawSnapshot) storage.removeItem(JOURNAL_KEY);
+      invalidateCaches();
+      compactionsCompleted += 1;
+      mark('inbox.journal.compactionComplete', { journalBytes: rawSnapshot.length });
+      return true;
+    } catch (error) {
+      mark('inbox.journal.compactionFailed', { message: String(error?.message || error || 'unknown') });
+      scheduleCompaction(2000);
+      return false;
+    }
+  }
+
+  function writeJournal(nextState) {
+    const existing = readJournal();
+    if (existing.malformed) {
+      const error = new Error('Pending Inbox journal is malformed and was preserved.');
+      error.code = 'TASKPOINTS_INBOX_JOURNAL_MALFORMED';
+      throw error;
+    }
+    const record = normalizePatch({
+      inboxMessages: nextState?.inboxMessages,
+      inboxProcessedEventIds: nextState?.inboxProcessedEventIds,
+      inboxStartedDateKey: nextState?.inboxStartedDateKey,
+      updatedAtISO: new Date().toISOString()
+    });
+    if (!record) throw new Error('Inbox journal patch was invalid.');
+    const raw = JSON.stringify(record);
+    storage.setItem(JOURNAL_KEY, raw);
+    invalidateCaches();
+    try { global.TaskPointsStateRevision?.bump?.('inbox-journal'); } catch (_) {}
+    scheduleCompaction();
+    journalSaves += 1;
+    mark('inbox.populate.journalSave', {
+      journalBytes: raw.length,
+      messageCount: record.inboxMessages.length,
+      processedEventCount: record.inboxProcessedEventIds.length,
+      deferredFullSnapshot: true
+    });
+    return record;
+  }
+
+  core.mergeAndSaveState = function inboxJournalMergeAndSaveState(nextState, options = {}) {
+    if (options?.savePath !== 'inbox-auto-populate') {
+      return originalMergeAndSaveState(nextState, options);
+    }
+
+    try {
+      const record = writeJournal(nextState);
+      return {
+        state: applyPatch({}, record),
+        inboxJournalFastPath: true,
+        deferredFullSnapshot: true,
+        deferredCompression: false,
+        encoding: 'inbox-journal-v1'
+      };
+    } catch (error) {
+      fallbackSaves += 1;
+      mark('inbox.populate.journalFallback', { message: String(error?.message || error || 'journal_failed') });
+      return originalMergeAndSaveState(nextState, options);
+    }
+  };
+
+  if (originalReadStored) {
+    core.readTaskPointsStoredState = function readTaskPointsStoredStateWithInboxJournal(...args) {
+      const state = originalReadStored(...args);
+      const current = readJournal();
+      if (!state || current.malformed || !current.record) return state;
+      return applyPatch(state, current.record);
+    };
+  }
+
+  if (originalLoadAppState) {
+    core.loadAppState = function loadAppStateWithInboxJournal(...args) {
+      const result = originalLoadAppState(...args);
+      const current = readJournal();
+      if (!result?.state || current.malformed || !current.record) return result;
+      return {
+        ...result,
+        state: applyPatch(result.state, current.record),
+        pendingInboxJournal: true
+      };
+    };
+  }
+
+  const pendingAtInstall = readJournal();
+  if (pendingAtInstall.record && !pendingAtInstall.malformed) scheduleCompaction();
+
+  core.getInboxMutationJournalStatus = () => {
+    const current = readJournal();
+    return {
+      installed: true,
+      pending: Boolean(current.record),
+      malformed: current.malformed,
+      journalBytes: current.raw.length,
+      journalSaves,
+      fallbackSaves,
+      compactionsStarted,
+      compactionsCompleted,
+      compactionDeferrals
+    };
+  };
+})(typeof window !== 'undefined' ? window : globalThis);
