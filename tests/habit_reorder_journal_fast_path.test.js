@@ -6,9 +6,16 @@ const vm = require('node:vm');
 
 const ROOT = path.join(__dirname, '..');
 const source = fs.readFileSync(path.join(ROOT, 'habit_fast_path_control.js'), 'utf8');
+const workerSource = fs.readFileSync(path.join(ROOT, '_worker.js'), 'utf8');
 
 test('habit fast-path module remains valid JavaScript with reorder journal path', () => {
   assert.doesNotThrow(() => new vm.Script(source));
+});
+
+test('Home core bundle actually includes the habit fast-path module', () => {
+  assert.match(workerSource, /'\/habit_fast_path_control\.js'/);
+  assert.match(workerSource, /habitFastPathControlSource/);
+  assert.match(workerSource, /x-taskpoints-habit-fast-path-control/);
 });
 
 test('reorder clicks are intercepted before the legacy full-save handlers run', () => {
