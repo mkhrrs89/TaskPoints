@@ -86,6 +86,16 @@ test('current bonus reuses canonical completion scoring and subtracts base value
   assert.match(page, /streakMultiplierEnabled !== true/);
 });
 
+test('at-risk bonus previews today while the displayed streak remains completed-through-yesterday', () => {
+  assert.match(page, /streak:\s*streakDays/);
+  assert.match(
+    page,
+    /risk\.push\(makeRow\([\s\S]*?yesterdayStreak,[\s\S]*?yesterdayKey,[\s\S]*?state,[\s\S]*?yesterdayStreak \+ 1,[\s\S]*?todayKey[\s\S]*?\)\)/
+  );
+  assert.match(page, /Bonus shows today’s streak value/);
+  assert.match(page, /Bonus previews what today’s completion would add/);
+});
+
 test('lower streak table contains completed-today streaks only', () => {
   assert.match(page, /if \(todayState === 'done'\)/);
   assert.match(page, /const currentStreak = countStreakEndingOn\(status\.done, todayKey\)/);
