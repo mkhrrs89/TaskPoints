@@ -280,7 +280,7 @@
 
         const getRowHabit = (habitRow) => {
           if (habitRow === row) return habit;
-          const rowHabitId = habitRow.dataset?.habitRowRowId;
+          const rowHabitId = habitRow.dataset?.habitRowId;
           return state.habits.find((candidateHabit) => candidateHabit.id === rowHabitId);
         };
         const completionFlags = segmentRows.map((habitRow) => {
