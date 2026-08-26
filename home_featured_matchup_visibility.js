@@ -342,6 +342,7 @@
   const HEAVY_REASONS = new Set(['phase2_dual_write_coalesced', 'phase5c_verified_secondary']);
   const MIN_GAP_MS = 10000;
   const originalWhenQuiet = core.whenStorageMaintenanceQuiet.bind(core);
+  const reentrantRuns = new WeakSet();
   const now = () => global.performance?.now?.() ?? Date.now();
   let tail = Promise.resolve();
   let runningReason = '';
@@ -370,6 +371,14 @@
       return originalWhenQuiet(run, options);
     }
 
+    // The existing 20-second guard can call core.whenStorageMaintenanceQuiet
+    // again when a touch lands at its final release boundary. Let that exact
+    // same wrapped callback re-enter the original guard directly; otherwise it
+    // would enqueue behind itself and could never finish.
+    if (reentrantRuns.has(run)) {
+      return originalWhenQuiet(run, options);
+    }
+
     queued += 1;
     mark('storage.heavyMaintenanceQueued', {
       reason,
@@ -380,7 +389,8 @@
 
     const operation = tail.catch(() => undefined).then(async () => {
       await waitForGap();
-      return originalWhenQuiet(async () => {
+
+      const serialRun = async () => {
         runningReason = reason;
         started += 1;
         const startedAt = now();
@@ -403,7 +413,14 @@
             remainingQueued: Math.max(0, queued - completed)
           });
         }
-      }, options);
+      };
+
+      reentrantRuns.add(serialRun);
+      try {
+        return await originalWhenQuiet(serialRun, options);
+      } finally {
+        reentrantRuns.delete(serialRun);
+      }
     });
 
     tail = Promise.resolve(operation).then(() => undefined, () => undefined);
