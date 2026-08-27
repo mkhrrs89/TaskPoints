@@ -163,8 +163,6 @@
         core.applyPendingHabitDeltas(state, pending);
       }
     } catch (error) {
-      // Dark mirroring must never interfere with the production journal. Keep
-      // the existing state untouched and report the mirror as unhealthy.
       throw new Error(`state_runtime_v2_pending_journal_unreadable:${String(error?.message || error)}`);
     }
 
@@ -216,6 +214,9 @@
 
   async function seedFromLegacy(options = {}) {
     if (!isDarkEnabled()) return { seeded: false, reason: 'dark_disabled' };
+    if (seeded && options.force !== true) {
+      return { seeded: false, reason: 'already_seeded_this_page', hash: lastSeedHash };
+    }
     if (seedPromise && options.force !== true) return seedPromise;
 
     const run = async () => {
@@ -483,8 +484,6 @@
     originalWritePendingHabitDelta = core.writePendingHabitDelta.bind(core);
     core.writePendingHabitDelta = function taskPointsV2DarkWritePendingHabitDelta(delta) {
       const result = originalWritePendingHabitDelta(...arguments);
-      // Production durability succeeds first. V2 mirrors asynchronously and a
-      // V2 failure cannot make the production action fail.
       enqueueHabitDelta(result || delta);
       return result;
     };
@@ -593,9 +592,6 @@
 
   function disableDarkMirror() {
     safeRemove(DARK_MODE_KEY);
-    // Do not rewrite the production method in-place while a page may still be
-    // executing it. The wrapper becomes a no-op immediately because it checks
-    // the flag before enqueueing; a reload returns to the untouched bundle path.
     return getStatus();
   }
 
