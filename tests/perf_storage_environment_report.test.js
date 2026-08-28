@@ -27,6 +27,19 @@ test('storage report covers the major browser storage containers', () => {
   assert.match(source, /serviceWorkerInventory\(\)/);
 });
 
+test('indexedDB inventory attaches transaction completion before awaiting count requests', () => {
+  const attachIndex = source.indexOf("const tx=db.transaction(stores,'readonly'),done=txDone(tx)");
+  const waitIndex = source.indexOf('const rows=await Promise.all(stores.map');
+  assert.ok(attachIndex >= 0);
+  assert.ok(waitIndex > attachIndex);
+});
+
+test('indexedDB inventory has a hard per-database timeout and inspects databases in parallel', () => {
+  assert.match(source, /error:'inventory_timeout'/);
+  assert.match(source, /setTimeout\?\.\(\(\)=>finish\([^)]*inventory_timeout/s);
+  assert.match(source, /Promise\.all\(infos\.map\(info=>inspectDatabase\(info\)\)\)/);
+});
+
 test('iOS download keeps the actual file click synchronous', () => {
   assert.match(source, /function download\(\)\{const b=new Blob/);
   assert.doesNotMatch(source, /async function download\(\)/);
