@@ -27,9 +27,16 @@ test('storage report covers the major browser storage containers', () => {
   assert.match(source, /serviceWorkerInventory\(\)/);
 });
 
-test('copy and download auto-collect storage metadata if the user forgets', () => {
-  assert.match(source, /async function copy\(\)\{if\(!storageEnvironment\)await collectStorageEnvironment\(\)/);
-  assert.match(source, /async function download\(\)\{if\(!storageEnvironment\)await collectStorageEnvironment\(\)/);
+test('iOS download keeps the actual file click synchronous', () => {
+  assert.match(source, /function download\(\)\{const b=new Blob/);
+  assert.doesNotMatch(source, /async function download\(\)/);
+  assert.doesNotMatch(source, /function download\(\)\{if\(!storageEnvironment\)await/);
+});
+
+test('copy and download collect storage first and ask for a second tap', () => {
+  assert.match(source, /Storage report ready\. Tap Copy report again\./);
+  assert.match(source, /Storage report ready\. Tap Download JSON again\./);
+  assert.match(source, /if\(!storageEnvironment\).*collectStorageEnvironment/s);
 });
 
 test('mobile perf badge stays below modal action buttons', () => {
