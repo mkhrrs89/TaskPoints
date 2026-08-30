@@ -55,11 +55,11 @@
       margin-top: 14px;
     }
     .streaks-summary {
-      display: flex;
+      display: grid;
+      grid-template-columns: 41% 25% 18% 16%;
       align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      padding: 10px 13px;
+      gap: 0;
+      padding: 10px 0;
       border-bottom: 1px solid #26333b;
       background: #1d4b51;
     }
@@ -74,6 +74,7 @@
       );
     }
     .streaks-summary strong {
+      padding-left: 13px;
       font-size: 14px;
       font-weight: 400;
     }
@@ -81,6 +82,24 @@
       color: #d7e5e7;
       font-size: 11px;
       font-weight: 400;
+    }
+    .streaks-summary [data-streak-bonus-total] {
+      padding-left: 10px;
+      color: #61cad6;
+      font-size: 13px;
+      font-variant-numeric: tabular-nums;
+      text-align: left;
+    }
+    .streaks-summary [data-streak-bonus-total].zero {
+      color: #d7e5e7;
+    }
+    .streaks-summary [data-streak-bonus-total].negative {
+      color: #ff9a9f;
+    }
+    .streaks-summary [data-streak-count] {
+      grid-column: 3 / 5;
+      padding-right: 13px;
+      text-align: right;
     }
     .streaks-table-wrap {
       width: 100%;
@@ -194,6 +213,7 @@
       .streaks-card { border-radius: 18px; }
       .streaks-table th,
       .streaks-table td { padding-left: 8px; padding-right: 8px; }
+      .streaks-summary [data-streak-bonus-total] { padding-left: 8px; }
     }
   </style>
 </head>
@@ -209,6 +229,7 @@
       <section class="streaks-card" data-streak-table="risk" aria-labelledby="streaksRiskHeading">
         <div class="streaks-summary">
           <strong id="streaksRiskHeading">At Risk Today</strong>
+          <span data-streak-bonus-total>0</span>
           <span data-streak-count>Loading…</span>
         </div>
         <div class="streaks-table-wrap">
@@ -237,6 +258,7 @@
       <section class="streaks-card" data-streak-table="all" aria-labelledby="streaksTableHeading">
         <div class="streaks-summary">
           <strong id="streaksTableHeading">Streak Table</strong>
+          <span data-streak-bonus-total>0</span>
           <span data-streak-count>Loading…</span>
         </div>
         <div class="streaks-table-wrap">
@@ -283,6 +305,7 @@
           body: section.querySelector('[data-streak-body]'),
           empty: section.querySelector('[data-streak-empty]'),
           count: section.querySelector('[data-streak-count]'),
+          bonusTotal: section.querySelector('[data-streak-bonus-total]'),
           sortButtons: Array.from(section.querySelectorAll('[data-sort]')),
           sortKey: 'bonus',
           sortDirection: 'desc'
@@ -571,9 +594,13 @@
       }
       function renderTable(context, tableRows, countText) {
         const ordered = tableRows.slice().sort((a, b) => compareRows(a, b, context));
+        const bonusTotal = round2(tableRows.reduce((total, row) => total + (Number(row?.bonus) || 0), 0));
         context.body.innerHTML = '';
         context.empty.hidden = ordered.length > 0;
         context.count.textContent = countText(ordered.length);
+        context.bonusTotal.textContent = bonusText(bonusTotal);
+        context.bonusTotal.classList.toggle('zero', !bonusTotal);
+        context.bonusTotal.classList.toggle('negative', bonusTotal < 0);
 
         ordered.forEach((row) => {
           const tr = document.createElement('tr');
