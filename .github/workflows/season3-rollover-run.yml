@@ -1,0 +1,32 @@
+name: Run Season 3 rollover patch
+
+on:
+  push:
+    branches:
+      - feature/season-3-rollover
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/season-3-rollover
+          fetch-depth: 0
+      - name: Apply patch
+        run: python3 scripts/apply_season3_rollover.py
+      - name: Run Season 3 contract
+        run: node tests/season3_rollover_contract.test.js
+      - name: Remove temporary delivery files
+        run: rm -f .github/workflows/season3-rollover-one-shot.yml .github/workflows/season3-rollover-run.yml scripts/apply_season3_rollover.py
+      - name: Commit result
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "[season3-patched] Add Season 3 rollover"
+          git push origin HEAD:feature/season-3-rollover
