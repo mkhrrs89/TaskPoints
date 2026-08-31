@@ -439,3 +439,29 @@
     transaction.onerror = () => undefined;
   };
 })(typeof window !== 'undefined' ? window : globalThis);
+
+(function installTaskPointsAddTaskMobileLayout(global) {
+  'use strict';
+
+  const document = global?.document;
+  if (!document || document.getElementById('tp-add-task-mobile-layout')) return;
+
+  const style = document.createElement('style');
+  style.id = 'tp-add-task-mobile-layout';
+  style.textContent = `
+    @media (max-width: 640px) {
+      #addTaskModal {
+        z-index: 70 !important;
+      }
+
+      #addTaskModal .addTaskModalPanel {
+        padding-top: 72px !important;
+      }
+
+      body:has(#addTaskModal:not(.hidden)) #mobileBottomNav {
+        z-index: 80 !important;
+      }
+    }
+  `;
+  (document.head || document.documentElement).appendChild(style);
+})(typeof window !== 'undefined' ? window : globalThis);

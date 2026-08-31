@@ -22,6 +22,20 @@ const SEASON_TWO_DATE_WINDOWS = [
   { id: 'semifinals', startDate: '2026-08-19', endDate: '2026-08-23', displayName: 'Semifinals', bestOf: 5 },
   { id: 'finals', startDate: '2026-08-25', endDate: '2026-08-31', displayName: 'Finals', bestOf: 7 }
 ];
+const SEASON_THREE_ID = 'season_3_october_2026';
+const SEASON_THREE_NAME = 'Season 3';
+const SEASON_THREE_LABEL = 'October 2026 TaskPoints Championship';
+const SEASON_THREE_MONTH_KEY = '2026-10';
+const SEASON_THREE_START_DATE = '2026-10-01';
+const SEASON_THREE_END_DATE = '2026-10-31';
+const SEASON_THREE_DATE_WINDOWS = [
+  { id: 'play_in', startDate: '2026-10-01', endDate: '2026-10-03', displayName: 'Play-In', bestOf: 3 },
+  { id: 'round_of_32', startDate: '2026-10-04', endDate: '2026-10-08', displayName: 'Round of 32', bestOf: 5 },
+  { id: 'sweet_16', startDate: '2026-10-09', endDate: '2026-10-13', displayName: 'Sweet 16', bestOf: 5 },
+  { id: 'quarterfinals', startDate: '2026-10-14', endDate: '2026-10-18', displayName: 'Quarterfinals', bestOf: 5 },
+  { id: 'semifinals', startDate: '2026-10-19', endDate: '2026-10-23', displayName: 'Semifinals', bestOf: 5 },
+  { id: 'finals', startDate: '2026-10-25', endDate: '2026-10-31', displayName: 'Finals', bestOf: 7 }
+];
   const AUTO_SEED_MODE = 'auto';
   const MANUAL_SEED_MODE = 'manual';
   const seasonImageUrlCache = new Map();
@@ -440,18 +454,22 @@ function getRoundDefs(season = null) {
     if (seeds.length !== 34) warnings.push({ code: 'non_34_player_pool', message: 'This format was designed for 34 players.' });
     const canCreateOfficialBracket = seeds.length === 34;
 const isAugustSeasonTwo = monthKey === SEASON_TWO_MONTH_KEY;
-const dateWindows = isAugustSeasonTwo ? SEASON_TWO_DATE_WINDOWS.map((round) => ({ ...round })) : [];
+const isOctoberSeasonThree = monthKey === SEASON_THREE_MONTH_KEY;
+const dateWindows = isOctoberSeasonThree
+  ? SEASON_THREE_DATE_WINDOWS.map((round) => ({ ...round }))
+  : (isAugustSeasonTwo ? SEASON_TWO_DATE_WINDOWS.map((round) => ({ ...round })) : []);
 
 const draftOptions = {
-  id: isAugustSeasonTwo ? SEASON_TWO_ID : undefined,
-  name: isAugustSeasonTwo ? SEASON_TWO_NAME : name,
-  label: isAugustSeasonTwo ? SEASON_TWO_LABEL : name,
+  id: isOctoberSeasonThree ? SEASON_THREE_ID : (isAugustSeasonTwo ? SEASON_TWO_ID : undefined),
+  name: isOctoberSeasonThree ? SEASON_THREE_NAME : (isAugustSeasonTwo ? SEASON_TWO_NAME : name),
+  label: isOctoberSeasonThree ? SEASON_THREE_LABEL : (isAugustSeasonTwo ? SEASON_TWO_LABEL : name),
   monthKey,
   startDate,
   endDate,
   dateWindows,
   status: 'preview',
   seedMode: MANUAL_SEED_MODE,
+  seedRankingScope: isOctoberSeasonThree ? 'season3' : (isAugustSeasonTwo ? 'season2' : undefined),
   playerPool,
   seeds,
   bracket: canCreateOfficialBracket ? buildProjectedBracket(seeds) : { type: 'manual_preview_shell', rounds: [] },
@@ -461,7 +479,7 @@ const draftOptions = {
     canCreateOfficialBracket,
     autoAdaptedBracketAvailable: false,
     previewOnly: !canCreateOfficialBracket,
-    bufferDays: isAugustSeasonTwo ? ['2026-08-24'] : []
+    bufferDays: isOctoberSeasonThree ? ['2026-10-24'] : (isAugustSeasonTwo ? ['2026-08-24'] : [])
   }
 };
     if (typeof core.createEmptySeasonDraft === 'function') return core.createEmptySeasonDraft(draftOptions);
@@ -801,8 +819,8 @@ function renderFormatList(season = null) {
   function renderPreviewSeason(season, state = {}) {
     return `
       <section class="glass season-hero-card">
-        <p class="season-eyebrow">Season 1 Preview</p>
-        <h2 class="season-title">Season 1 Preview</h2>
+        <p class="season-eyebrow">${escapeHtml(season?.name || 'Season')} Preview</p>
+        <h2 class="season-title">${escapeHtml(season?.name || 'Season')} Preview</h2>
         <p class="season-subtitle">${escapeHtml(season?.label || SEASON_ONE_LABEL)}</p>
         <p class="season-projection-note">Seeds and bracket are projected from current standings. No official series are created until you create the official bracket.</p>
         <div class="season-rebuild-actions mt-4">
@@ -1164,7 +1182,7 @@ function getRoundForToday(season, dateKey = getEffectiveDateKey()) {
       <section class="glass season-champion-summary season-card">
         <p class="season-eyebrow">Champion Summary</p>
         ${championParticipant ? `<div class="season-bracket-slot season-champion-player">${renderBracketParticipant(championParticipant, finals, championSide, state)}</div>` : ''}
-        <h2 class="season-title">Season 1 Champion: ${escapeHtml(summary.championName || 'Champion TBD')}</h2>
+        <h2 class="season-title">${escapeHtml(season?.name || 'Season')} Champion: ${escapeHtml(summary.championName || 'Champion TBD')}</h2>
         <p class="muted text-sm">Runner-up: ${escapeHtml(summary.runnerUpName || 'Runner-up TBD')}</p>
         <p class="season-series-status">Finals result: ${escapeHtml(summary.finalsResult || 'Finals complete')}</p>
         <p class="muted text-sm">Tournament record: ${escapeHtml(summary.record || '—')} • Points: ${escapeHtml(formatStat(summary.totalPoints, 0))} • Avg: ${escapeHtml(formatStat(summary.averageScore))}</p>
@@ -1313,7 +1331,7 @@ function getRoundForToday(season, dateKey = getEffectiveDateKey()) {
     return `
       <section class="glass season-card">
         <h3 class="season-section-title">Season Matchup Control</h3>
-        <p class="muted text-sm">When enabled during June 2026, the Season system will create the full daily matchup slate: tournament games first, then exhibition matchups for everyone else.</p>
+        <p class="muted text-sm">When enabled during this Season's configured tournament dates, the Season system will create the full daily matchup slate: tournament games first, then exhibition matchups for everyone else.</p>
         <p class="muted text-sm mt-2">Current setting: <strong>${enabled ? 'Enabled' : 'Disabled'}</strong></p>
         <div class="season-rebuild-actions mt-4">
           <button type="button" class="btn ${enabled ? 'btn-ghost' : 'btn-success'} btn-toolbar" data-season-action="${enabled ? 'disable-matchup-control' : 'enable-matchup-control'}">${enabled ? 'Disable Season Matchup Control' : 'Enable Season Matchup Control'}</button>
@@ -1455,9 +1473,9 @@ function getRoundForToday(season, dateKey = getEffectiveDateKey()) {
         </div>
         <div data-create-season-panel hidden>
           <div class="season-rebuild-actions mt-3">
-<label class="muted text-xs">Season name <input class="season-admin-input" type="text" data-create-season-name value="Season 2"></label>
-<label class="muted text-xs">Start date <input class="season-admin-input" type="date" data-create-season-start value="2026-08-01"></label>
-<label class="muted text-xs">End date <input class="season-admin-input" type="date" data-create-season-end value="2026-08-31"></label>
+<label class="muted text-xs">Season name <input class="season-admin-input" type="text" data-create-season-name value="Season 3"></label>
+<label class="muted text-xs">Start date <input class="season-admin-input" type="date" data-create-season-start value="2026-10-01"></label>
+<label class="muted text-xs">End date <input class="season-admin-input" type="date" data-create-season-end value="2026-10-31"></label>
           </div>
           <p class="muted text-sm mt-3">Player pool review: all active players are included by default (${escapeHtml(count)} active players).</p>
           ${count !== 34 ? '<p class="season-manual-banner">This format was designed for 34 players. Review/edit the player pool to 34 players, or create a preview shell with warning; invalid official brackets will not be created.</p>' : ''}
@@ -1905,6 +1923,9 @@ function saveAndRenderSeason(nextState, savePath = 'season-preview-action', save
 
   global.TaskPointsSeason = {
     SEASON_ONE_ID,
+    SEASON_THREE_ID,
+    SEASON_THREE_MONTH_KEY,
+    SEASON_THREE_DATE_WINDOWS,
     AUTO_SEED_MODE,
     MANUAL_SEED_MODE,
     getSeasonStatusLabel,
