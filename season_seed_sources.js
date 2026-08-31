@@ -7,8 +7,12 @@
   const SCOPE_OVERALL = 'overall';
   const SCOPE_SEASON_ONE = 'season1';
   const SCOPE_SEASON_TWO = 'season2';
+  const SCOPE_SEASON_THREE = 'season3';
   const SEASON_TWO_START_DATE = '2026-07-01';
+  const SEASON_THREE_START_DATE = '2026-09-01';
+  const SEASON_THREE_TOURNAMENT_START_DATE = '2026-10-01';
   const SCOPE_LABELS = {
+    [SCOPE_SEASON_THREE]: 'Season 3 rankings',
     [SCOPE_SEASON_TWO]: 'Season 2 rankings',
     [SCOPE_SEASON_ONE]: 'Season 1 rankings',
     [SCOPE_OVERALL]: 'Overall rankings'
@@ -16,12 +20,13 @@
 
   function normalizeScope(value, season = null) {
     const scope = String(value || '').trim().toLowerCase();
-    if ([SCOPE_OVERALL, SCOPE_SEASON_ONE, SCOPE_SEASON_TWO].includes(scope)) return scope;
+    if ([SCOPE_OVERALL, SCOPE_SEASON_ONE, SCOPE_SEASON_TWO, SCOPE_SEASON_THREE].includes(scope)) return scope;
 
     const seasonId = String(season?.id || '').toLowerCase();
     const seasonName = String(season?.name || '').toLowerCase();
     const seasonLabel = String(season?.label || '').toLowerCase();
     const monthKey = String(season?.monthKey || '');
+    if (seasonId.includes('season_3') || seasonName === 'season 3' || monthKey === '2026-10' || seasonLabel.includes('october 2026')) return SCOPE_SEASON_THREE;
     if (seasonId.includes('season_2') || seasonName === 'season 2' || monthKey === '2026-08' || seasonLabel.includes('august 2026')) return SCOPE_SEASON_TWO;
     if (seasonId.includes('season_1') || seasonName === 'season 1' || monthKey === '2026-06' || seasonLabel.includes('june 2026')) return SCOPE_SEASON_ONE;
     return SCOPE_OVERALL;
@@ -38,7 +43,9 @@
     const normalized = normalizeScope(scope);
     if (normalized === SCOPE_OVERALL) return true;
     if (normalized === SCOPE_SEASON_ONE) return key < SEASON_TWO_START_DATE;
-    return key >= SEASON_TWO_START_DATE;
+    if (normalized === SCOPE_SEASON_TWO) return key >= SEASON_TWO_START_DATE && key < SEASON_THREE_START_DATE;
+    if (normalized === SCOPE_SEASON_THREE) return key >= SEASON_THREE_START_DATE && key < SEASON_THREE_TOURNAMENT_START_DATE;
+    return false;
   }
 
   function getScopedState(state, scope) {
@@ -60,7 +67,7 @@
     select.className = 'season-admin-input';
     select.setAttribute(attributeName, '');
     const selected = normalizeScope(selectedScope);
-    [SCOPE_SEASON_TWO, SCOPE_SEASON_ONE, SCOPE_OVERALL].forEach((scope) => {
+    [SCOPE_SEASON_THREE, SCOPE_SEASON_TWO, SCOPE_SEASON_ONE, SCOPE_OVERALL].forEach((scope) => {
       const option = global.document.createElement('option');
       option.value = scope;
       option.textContent = SCOPE_LABELS[scope];
@@ -149,7 +156,7 @@
     if (!panel || panel.querySelector('[data-create-season-ranking-scope]')) return;
     const firstActions = panel.querySelector('.season-rebuild-actions');
     if (!firstActions) return;
-    const select = makeScopeSelect('data-create-season-ranking-scope', SCOPE_SEASON_TWO);
+    const select = makeScopeSelect('data-create-season-ranking-scope', SCOPE_SEASON_THREE);
     firstActions.appendChild(makeScopeLabel('Initial seed ranking source', select));
   }
 
@@ -322,6 +329,7 @@
     SCOPE_OVERALL,
     SCOPE_SEASON_ONE,
     SCOPE_SEASON_TWO,
+    SCOPE_SEASON_THREE,
     normalizeScope,
     scopeAllowsDate,
     getScopedState,

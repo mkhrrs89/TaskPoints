@@ -1,35 +1,4 @@
-from pathlib import Path
-
-
-def replace_once(path, old, new):
-    p = Path(path)
-    text = p.read_text()
-    count = text.count(old)
-    if count != 1:
-        raise SystemExit(f"{path}: expected exactly one match, found {count}: {old[:100]!r}")
-    p.write_text(text.replace(old, new, 1))
-
-replace_once('scoring_core.js', '''  if (season?.monthKey === '2026-08' || String(season?.id || '').includes('2026-08')) {
-    return AUGUST_2026_SEASON_DATE_WINDOWS.map((round) => ({ ...round }));
-  }
-
-  return JUNE_2026_SEASON_DATE_WINDOWS.map((round) => ({ ...round }));''', '''  if (season?.monthKey === '2026-10' || String(season?.id || '').includes('2026-10') || String(season?.id || '').includes('october_2026')) {
-    return OCTOBER_2026_SEASON_DATE_WINDOWS.map((round) => ({ ...round }));
-  }
-
-  if (season?.monthKey === '2026-08' || String(season?.id || '').includes('2026-08')) {
-    return AUGUST_2026_SEASON_DATE_WINDOWS.map((round) => ({ ...round }));
-  }
-
-  return JUNE_2026_SEASON_DATE_WINDOWS.map((round) => ({ ...round }));''')
-
-replace_once('scoring_core.js', '''  const seasonRef = season || { id: series?.seasonId || '', monthKey: String(series?.seasonId || '').includes('august_2026') ? '2026-08' : DEFAULT_SEASON_MONTH_KEY };''', '''  const seasonId = String(series?.seasonId || '');
-  const inferredMonthKey = seasonId.includes('october_2026') || seasonId.includes('2026-10')
-    ? '2026-10'
-    : (seasonId.includes('august_2026') || seasonId.includes('2026-08') ? '2026-08' : DEFAULT_SEASON_MONTH_KEY);
-  const seasonRef = season || { id: seasonId, monthKey: inferredMonthKey };''')
-
-Path('tests/season3_rollover_contract.test.js').write_text(r'''const fs = require('fs');
+const fs = require('fs');
 const assert = require('assert');
 
 const standings = fs.readFileSync('standings.html', 'utf8');
@@ -70,4 +39,3 @@ assert(core.includes('return OCTOBER_2026_SEASON_DATE_WINDOWS.map'));
 assert(core.includes("seasonId.includes('october_2026')"));
 
 console.log('Season 3 rollover contract OK');
-''')

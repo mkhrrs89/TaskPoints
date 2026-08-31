@@ -264,6 +264,7 @@
   <h2 class="text-2xl font-extrabold tracking-wide">POWER RANKINGS</h2>
 
   <div class="rankingsScopeTabs mb-4 mt-3" role="tablist" aria-label="Rankings scope">
+    <button type="button" class="rankingsScopeTab" data-rankings-scope="season3">Season 3</button>
     <button type="button" class="rankingsScopeTab" data-rankings-scope="season2">Season 2</button>
     <button type="button" class="rankingsScopeTab" data-rankings-scope="overall">Overall</button>
     <button type="button" class="rankingsScopeTab" data-rankings-scope="season1">Season 1</button>
@@ -280,20 +281,36 @@
     const imageUrlCache = new Map();
 
 const RANKINGS_SCOPE_STORAGE_KEY = "taskpoints_rankings_scope_v1";
+const RANKINGS_SEASON_THREE_ROLLOVER_KEY = "taskpoints_rankings_scope_season3_rollover_v1";
 const RANKINGS_SEASON_TWO_START = "2026-07-01";
+const RANKINGS_SEASON_THREE_START = "2026-09-01";
+const RANKINGS_SEASON_THREE_END_EXCLUSIVE = "2026-11-01";
 
 const RANKINGS_SCOPE_LABELS = {
+  season3: "Season 3",
   season2: "Season 2",
   overall: "Overall",
   season1: "Season 1"
 };
 
 let rankingsScope = (() => {
+  const d = new Date();
+  const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   try {
     const saved = localStorage.getItem(RANKINGS_SCOPE_STORAGE_KEY);
-    if (saved === "season1" || saved === "season2" || saved === "overall") return saved;
+    const rolloverDone = localStorage.getItem(RANKINGS_SEASON_THREE_ROLLOVER_KEY) === "1";
+    const seasonThreeIsCurrent = today >= RANKINGS_SEASON_THREE_START && today < RANKINGS_SEASON_THREE_END_EXCLUSIVE;
+    if (seasonThreeIsCurrent && !rolloverDone) {
+      localStorage.setItem(RANKINGS_SEASON_THREE_ROLLOVER_KEY, "1");
+      if (!saved || saved === "season2") {
+        localStorage.setItem(RANKINGS_SCOPE_STORAGE_KEY, "season3");
+        return "season3";
+      }
+    }
+    if (saved === "season1" || saved === "season2" || saved === "season3" || saved === "overall") return saved;
   } catch (e) {}
 
+  if (today >= RANKINGS_SEASON_THREE_START && today < RANKINGS_SEASON_THREE_END_EXCLUSIVE) return "season3";
   return "season2";
 })();
 
@@ -303,7 +320,8 @@ function rankingsScopeAllowsDate(dateKeyStr) {
 
   if (rankingsScope === "overall") return true;
   if (rankingsScope === "season1") return key < RANKINGS_SEASON_TWO_START;
-  if (rankingsScope === "season2") return key >= RANKINGS_SEASON_TWO_START;
+  if (rankingsScope === "season2") return key >= RANKINGS_SEASON_TWO_START && key < RANKINGS_SEASON_THREE_START;
+  if (rankingsScope === "season3") return key >= RANKINGS_SEASON_THREE_START && key < RANKINGS_SEASON_THREE_END_EXCLUSIVE;
 
   return true;
 }

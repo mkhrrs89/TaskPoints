@@ -203,6 +203,7 @@ th.standings-gold-col{
 </div>
 
 <div class="standingsScopeTabs mb-3" role="tablist" aria-label="Standings scope">
+  <button type="button" class="standingsScopeTab" data-standings-scope="season3">Season 3</button>
   <button type="button" class="standingsScopeTab" data-standings-scope="season2">Season 2</button>
   <button type="button" class="standingsScopeTab" data-standings-scope="lifetime">Lifetime</button>
   <button type="button" class="standingsScopeTab" data-standings-scope="season1">Season 1</button>
@@ -248,20 +249,35 @@ th.standings-gold-col{
     let activeIds = new Set(["YOU"]);
 
 const STANDINGS_SCOPE_STORAGE_KEY = "taskpoints_standings_scope_v1";
+const STANDINGS_SEASON_THREE_ROLLOVER_KEY = "taskpoints_standings_scope_season3_rollover_v1";
 const STANDINGS_SEASON_TWO_START = "2026-07-01";
+const STANDINGS_SEASON_THREE_START = "2026-09-01";
+const STANDINGS_SEASON_THREE_END_EXCLUSIVE = "2026-11-01";
 
 const STANDINGS_SCOPE_LABELS = {
+  season3: "Season 3",
   season2: "Season 2",
   lifetime: "Lifetime",
   season1: "Season 1"
 };
 
 let standingsScope = (() => {
+  const today = getSimpleDateKey(new Date());
   try {
     const saved = localStorage.getItem(STANDINGS_SCOPE_STORAGE_KEY);
-    if (saved === "season1" || saved === "season2" || saved === "lifetime") return saved;
+    const rolloverDone = localStorage.getItem(STANDINGS_SEASON_THREE_ROLLOVER_KEY) === "1";
+    const seasonThreeIsCurrent = today >= STANDINGS_SEASON_THREE_START && today < STANDINGS_SEASON_THREE_END_EXCLUSIVE;
+    if (seasonThreeIsCurrent && !rolloverDone) {
+      localStorage.setItem(STANDINGS_SEASON_THREE_ROLLOVER_KEY, "1");
+      if (!saved || saved === "season2") {
+        localStorage.setItem(STANDINGS_SCOPE_STORAGE_KEY, "season3");
+        return "season3";
+      }
+    }
+    if (saved === "season1" || saved === "season2" || saved === "season3" || saved === "lifetime") return saved;
   } catch (e) {}
 
+  if (today >= STANDINGS_SEASON_THREE_START && today < STANDINGS_SEASON_THREE_END_EXCLUSIVE) return "season3";
   return "season2";
 })();
 
@@ -311,7 +327,8 @@ function standingsScopeAllowsDate(dateKeyStr) {
 
   if (standingsScope === "lifetime") return true;
   if (standingsScope === "season1") return key < STANDINGS_SEASON_TWO_START;
-  if (standingsScope === "season2") return key >= STANDINGS_SEASON_TWO_START;
+  if (standingsScope === "season2") return key >= STANDINGS_SEASON_TWO_START && key < STANDINGS_SEASON_THREE_START;
+  if (standingsScope === "season3") return key >= STANDINGS_SEASON_THREE_START && key < STANDINGS_SEASON_THREE_END_EXCLUSIVE;
 
   return true;
 }
