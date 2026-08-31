@@ -1,0 +1,409 @@
+name: Apply Season 3 rollover patch
+
+on:
+  push:
+    branches:
+      - feature/season-3-rollover
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[season3-patched]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/season-3-rollover
+          fetch-depth: 0
+
+      - name: Apply Season 3 rollover
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected exactly one match, found {count}: {old[:90]!r}")
+              p.write_text(text.replace(old, new, 1))
+
+          # Standings: preserve all existing views, add Season 3, and bound Season 2.
+          replace_once('standings.html', '''<div class="standingsScopeTabs mb-3" role="tablist" aria-label="Standings scope">
+  <button type="button" class="standingsScopeTab" data-standings-scope="season2">Season 2</button>
+  <button type="button" class="standingsScopeTab" data-standings-scope="lifetime">Lifetime</button>
+  <button type="button" class="standingsScopeTab" data-standings-scope="season1">Season 1</button>
+</div>''', '''<div class="standingsScopeTabs mb-3" role="tablist" aria-label="Standings scope">
+  <button type="button" class="standingsScopeTab" data-standings-scope="season3">Season 3</button>
+  <button type="button" class="standingsScopeTab" data-standings-scope="season2">Season 2</button>
+  <button type="button" class="standingsScopeTab" data-standings-scope="lifetime">Lifetime</button>
+  <button type="button" class="standingsScopeTab" data-standings-scope="season1">Season 1</button>
+</div>''')
+
+          replace_once('standings.html', '''const STANDINGS_SCOPE_STORAGE_KEY = "taskpoints_standings_scope_v1";
+const STANDINGS_SEASON_TWO_START = "2026-07-01";
+
+const STANDINGS_SCOPE_LABELS = {
+  season2: "Season 2",
+  lifetime: "Lifetime",
+  season1: "Season 1"
+};
+
+let standingsScope = (() => {
+  try {
+    const saved = localStorage.getItem(STANDINGS_SCOPE_STORAGE_KEY);
+    if (saved === "season1" || saved === "season2" || saved === "lifetime") return saved;
+  } catch (e) {}
+
+  return "season2";
+})();''', '''const STANDINGS_SCOPE_STORAGE_KEY = "taskpoints_standings_scope_v1";
+const STANDINGS_SEASON_THREE_ROLLOVER_KEY = "taskpoints_standings_scope_season3_rollover_v1";
+const STANDINGS_SEASON_TWO_START = "2026-07-01";
+const STANDINGS_SEASON_THREE_START = "2026-09-01";
+const STANDINGS_SEASON_THREE_END_EXCLUSIVE = "2026-11-01";
+
+const STANDINGS_SCOPE_LABELS = {
+  season3: "Season 3",
+  season2: "Season 2",
+  lifetime: "Lifetime",
+  season1: "Season 1"
+};
+
+let standingsScope = (() => {
+  const today = getSimpleDateKey(new Date());
+  try {
+    const saved = localStorage.getItem(STANDINGS_SCOPE_STORAGE_KEY);
+    const rolloverDone = localStorage.getItem(STANDINGS_SEASON_THREE_ROLLOVER_KEY) === "1";
+    if (today >= STANDINGS_SEASON_THREE_START && today < STANDINGS_SEASON_THREE_END_EXCLUSIVE && !rolloverDone && (!saved || saved === "season2")) {
+      localStorage.setItem(STANDINGS_SCOPE_STORAGE_KEY, "season3");
+      localStorage.setItem(STANDINGS_SEASON_THREE_ROLLOVER_KEY, "1");
+      return "season3";
+    }
+    if (saved === "season1" || saved === "season2" || saved === "season3" || saved === "lifetime") return saved;
+  } catch (e) {}
+
+  if (today >= STANDINGS_SEASON_THREE_START && today < STANDINGS_SEASON_THREE_END_EXCLUSIVE) return "season3";
+  return "season2";
+})();''')
+
+          replace_once('standings.html', '''  if (standingsScope === "lifetime") return true;
+  if (standingsScope === "season1") return key < STANDINGS_SEASON_TWO_START;
+  if (standingsScope === "season2") return key >= STANDINGS_SEASON_TWO_START;
+
+  return true;''', '''  if (standingsScope === "lifetime") return true;
+  if (standingsScope === "season1") return key < STANDINGS_SEASON_TWO_START;
+  if (standingsScope === "season2") return key >= STANDINGS_SEASON_TWO_START && key < STANDINGS_SEASON_THREE_START;
+  if (standingsScope === "season3") return key >= STANDINGS_SEASON_THREE_START && key < STANDINGS_SEASON_THREE_END_EXCLUSIVE;
+
+  return true;''')
+
+          # Rankings: same date boundaries and one-time Sept. 1 rollover.
+          replace_once('rankings.html', '''  <div class="rankingsScopeTabs mb-4 mt-3" role="tablist" aria-label="Rankings scope">
+    <button type="button" class="rankingsScopeTab" data-rankings-scope="season2">Season 2</button>
+    <button type="button" class="rankingsScopeTab" data-rankings-scope="overall">Overall</button>
+    <button type="button" class="rankingsScopeTab" data-rankings-scope="season1">Season 1</button>
+  </div>''', '''  <div class="rankingsScopeTabs mb-4 mt-3" role="tablist" aria-label="Rankings scope">
+    <button type="button" class="rankingsScopeTab" data-rankings-scope="season3">Season 3</button>
+    <button type="button" class="rankingsScopeTab" data-rankings-scope="season2">Season 2</button>
+    <button type="button" class="rankingsScopeTab" data-rankings-scope="overall">Overall</button>
+    <button type="button" class="rankingsScopeTab" data-rankings-scope="season1">Season 1</button>
+  </div>''')
+
+          replace_once('rankings.html', '''const RANKINGS_SCOPE_STORAGE_KEY = "taskpoints_rankings_scope_v1";
+const RANKINGS_SEASON_TWO_START = "2026-07-01";
+
+const RANKINGS_SCOPE_LABELS = {
+  season2: "Season 2",
+  overall: "Overall",
+  season1: "Season 1"
+};
+
+let rankingsScope = (() => {
+  try {
+    const saved = localStorage.getItem(RANKINGS_SCOPE_STORAGE_KEY);
+    if (saved === "season1" || saved === "season2" || saved === "overall") return saved;
+  } catch (e) {}
+
+  return "season2";
+})();''', '''const RANKINGS_SCOPE_STORAGE_KEY = "taskpoints_rankings_scope_v1";
+const RANKINGS_SEASON_THREE_ROLLOVER_KEY = "taskpoints_rankings_scope_season3_rollover_v1";
+const RANKINGS_SEASON_TWO_START = "2026-07-01";
+const RANKINGS_SEASON_THREE_START = "2026-09-01";
+const RANKINGS_SEASON_THREE_END_EXCLUSIVE = "2026-11-01";
+
+const RANKINGS_SCOPE_LABELS = {
+  season3: "Season 3",
+  season2: "Season 2",
+  overall: "Overall",
+  season1: "Season 1"
+};
+
+let rankingsScope = (() => {
+  const today = (() => {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  })();
+  try {
+    const saved = localStorage.getItem(RANKINGS_SCOPE_STORAGE_KEY);
+    const rolloverDone = localStorage.getItem(RANKINGS_SEASON_THREE_ROLLOVER_KEY) === "1";
+    if (today >= RANKINGS_SEASON_THREE_START && today < RANKINGS_SEASON_THREE_END_EXCLUSIVE && !rolloverDone && (!saved || saved === "season2")) {
+      localStorage.setItem(RANKINGS_SCOPE_STORAGE_KEY, "season3");
+      localStorage.setItem(RANKINGS_SEASON_THREE_ROLLOVER_KEY, "1");
+      return "season3";
+    }
+    if (saved === "season1" || saved === "season2" || saved === "season3" || saved === "overall") return saved;
+  } catch (e) {}
+
+  if (today >= RANKINGS_SEASON_THREE_START && today < RANKINGS_SEASON_THREE_END_EXCLUSIVE) return "season3";
+  return "season2";
+})();''')
+
+          replace_once('rankings.html', '''  if (rankingsScope === "overall") return true;
+  if (rankingsScope === "season1") return key < RANKINGS_SEASON_TWO_START;
+  if (rankingsScope === "season2") return key >= RANKINGS_SEASON_TWO_START;
+
+  return true;''', '''  if (rankingsScope === "overall") return true;
+  if (rankingsScope === "season1") return key < RANKINGS_SEASON_TWO_START;
+  if (rankingsScope === "season2") return key >= RANKINGS_SEASON_TWO_START && key < RANKINGS_SEASON_THREE_START;
+  if (rankingsScope === "season3") return key >= RANKINGS_SEASON_THREE_START && key < RANKINGS_SEASON_THREE_END_EXCLUSIVE;
+
+  return true;''')
+
+          # Season seeding sources: Season 3 seed standings are September only.
+          replace_once('season_seed_sources.js', '''  const SCOPE_OVERALL = 'overall';
+  const SCOPE_SEASON_ONE = 'season1';
+  const SCOPE_SEASON_TWO = 'season2';
+  const SEASON_TWO_START_DATE = '2026-07-01';
+  const SCOPE_LABELS = {
+    [SCOPE_SEASON_TWO]: 'Season 2 rankings',
+    [SCOPE_SEASON_ONE]: 'Season 1 rankings',
+    [SCOPE_OVERALL]: 'Overall rankings'
+  };''', '''  const SCOPE_OVERALL = 'overall';
+  const SCOPE_SEASON_ONE = 'season1';
+  const SCOPE_SEASON_TWO = 'season2';
+  const SCOPE_SEASON_THREE = 'season3';
+  const SEASON_TWO_START_DATE = '2026-07-01';
+  const SEASON_THREE_START_DATE = '2026-09-01';
+  const SEASON_THREE_TOURNAMENT_START_DATE = '2026-10-01';
+  const SCOPE_LABELS = {
+    [SCOPE_SEASON_THREE]: 'Season 3 rankings',
+    [SCOPE_SEASON_TWO]: 'Season 2 rankings',
+    [SCOPE_SEASON_ONE]: 'Season 1 rankings',
+    [SCOPE_OVERALL]: 'Overall rankings'
+  };''')
+
+          replace_once('season_seed_sources.js', '''    if ([SCOPE_OVERALL, SCOPE_SEASON_ONE, SCOPE_SEASON_TWO].includes(scope)) return scope;
+
+    const seasonId = String(season?.id || '').toLowerCase();
+    const seasonName = String(season?.name || '').toLowerCase();
+    const seasonLabel = String(season?.label || '').toLowerCase();
+    const monthKey = String(season?.monthKey || '');
+    if (seasonId.includes('season_2') || seasonName === 'season 2' || monthKey === '2026-08' || seasonLabel.includes('august 2026')) return SCOPE_SEASON_TWO;
+    if (seasonId.includes('season_1') || seasonName === 'season 1' || monthKey === '2026-06' || seasonLabel.includes('june 2026')) return SCOPE_SEASON_ONE;''', '''    if ([SCOPE_OVERALL, SCOPE_SEASON_ONE, SCOPE_SEASON_TWO, SCOPE_SEASON_THREE].includes(scope)) return scope;
+
+    const seasonId = String(season?.id || '').toLowerCase();
+    const seasonName = String(season?.name || '').toLowerCase();
+    const seasonLabel = String(season?.label || '').toLowerCase();
+    const monthKey = String(season?.monthKey || '');
+    if (seasonId.includes('season_3') || seasonName === 'season 3' || monthKey === '2026-10' || seasonLabel.includes('october 2026')) return SCOPE_SEASON_THREE;
+    if (seasonId.includes('season_2') || seasonName === 'season 2' || monthKey === '2026-08' || seasonLabel.includes('august 2026')) return SCOPE_SEASON_TWO;
+    if (seasonId.includes('season_1') || seasonName === 'season 1' || monthKey === '2026-06' || seasonLabel.includes('june 2026')) return SCOPE_SEASON_ONE;''')
+
+          replace_once('season_seed_sources.js', '''    if (normalized === SCOPE_OVERALL) return true;
+    if (normalized === SCOPE_SEASON_ONE) return key < SEASON_TWO_START_DATE;
+    return key >= SEASON_TWO_START_DATE;''', '''    if (normalized === SCOPE_OVERALL) return true;
+    if (normalized === SCOPE_SEASON_ONE) return key < SEASON_TWO_START_DATE;
+    if (normalized === SCOPE_SEASON_TWO) return key >= SEASON_TWO_START_DATE && key < SEASON_THREE_START_DATE;
+    if (normalized === SCOPE_SEASON_THREE) return key >= SEASON_THREE_START_DATE && key < SEASON_THREE_TOURNAMENT_START_DATE;
+    return false;''')
+
+          replace_once('season_seed_sources.js', '''    [SCOPE_SEASON_TWO, SCOPE_SEASON_ONE, SCOPE_OVERALL].forEach((scope) => {''', '''    [SCOPE_SEASON_THREE, SCOPE_SEASON_TWO, SCOPE_SEASON_ONE, SCOPE_OVERALL].forEach((scope) => {''')
+          replace_once('season_seed_sources.js', '''    const select = makeScopeSelect('data-create-season-ranking-scope', SCOPE_SEASON_TWO);''', '''    const select = makeScopeSelect('data-create-season-ranking-scope', SCOPE_SEASON_THREE);''')
+          replace_once('season_seed_sources.js', '''    SCOPE_SEASON_ONE,
+    SCOPE_SEASON_TWO,
+    normalizeScope,''', '''    SCOPE_SEASON_ONE,
+    SCOPE_SEASON_TWO,
+    SCOPE_SEASON_THREE,
+    normalizeScope,''')
+
+          # Season 3 championship object uses October, mirroring Season 2's August cadence.
+          replace_once('season.js', '''const SEASON_TWO_DATE_WINDOWS = [
+  { id: 'play_in', startDate: '2026-08-01', endDate: '2026-08-03', displayName: 'Play-In', bestOf: 3 },
+  { id: 'round_of_32', startDate: '2026-08-04', endDate: '2026-08-08', displayName: 'Round of 32', bestOf: 5 },
+  { id: 'sweet_16', startDate: '2026-08-09', endDate: '2026-08-13', displayName: 'Sweet 16', bestOf: 5 },
+  { id: 'quarterfinals', startDate: '2026-08-14', endDate: '2026-08-18', displayName: 'Quarterfinals', bestOf: 5 },
+  { id: 'semifinals', startDate: '2026-08-19', endDate: '2026-08-23', displayName: 'Semifinals', bestOf: 5 },
+  { id: 'finals', startDate: '2026-08-25', endDate: '2026-08-31', displayName: 'Finals', bestOf: 7 }
+];''', '''const SEASON_TWO_DATE_WINDOWS = [
+  { id: 'play_in', startDate: '2026-08-01', endDate: '2026-08-03', displayName: 'Play-In', bestOf: 3 },
+  { id: 'round_of_32', startDate: '2026-08-04', endDate: '2026-08-08', displayName: 'Round of 32', bestOf: 5 },
+  { id: 'sweet_16', startDate: '2026-08-09', endDate: '2026-08-13', displayName: 'Sweet 16', bestOf: 5 },
+  { id: 'quarterfinals', startDate: '2026-08-14', endDate: '2026-08-18', displayName: 'Quarterfinals', bestOf: 5 },
+  { id: 'semifinals', startDate: '2026-08-19', endDate: '2026-08-23', displayName: 'Semifinals', bestOf: 5 },
+  { id: 'finals', startDate: '2026-08-25', endDate: '2026-08-31', displayName: 'Finals', bestOf: 7 }
+];
+const SEASON_THREE_ID = 'season_3_october_2026';
+const SEASON_THREE_NAME = 'Season 3';
+const SEASON_THREE_LABEL = 'October 2026 TaskPoints Championship';
+const SEASON_THREE_MONTH_KEY = '2026-10';
+const SEASON_THREE_START_DATE = '2026-10-01';
+const SEASON_THREE_END_DATE = '2026-10-31';
+const SEASON_THREE_DATE_WINDOWS = [
+  { id: 'play_in', startDate: '2026-10-01', endDate: '2026-10-03', displayName: 'Play-In', bestOf: 3 },
+  { id: 'round_of_32', startDate: '2026-10-04', endDate: '2026-10-08', displayName: 'Round of 32', bestOf: 5 },
+  { id: 'sweet_16', startDate: '2026-10-09', endDate: '2026-10-13', displayName: 'Sweet 16', bestOf: 5 },
+  { id: 'quarterfinals', startDate: '2026-10-14', endDate: '2026-10-18', displayName: 'Quarterfinals', bestOf: 5 },
+  { id: 'semifinals', startDate: '2026-10-19', endDate: '2026-10-23', displayName: 'Semifinals', bestOf: 5 },
+  { id: 'finals', startDate: '2026-10-25', endDate: '2026-10-31', displayName: 'Finals', bestOf: 7 }
+];''')
+
+          replace_once('season.js', '''const isAugustSeasonTwo = monthKey === SEASON_TWO_MONTH_KEY;
+const dateWindows = isAugustSeasonTwo ? SEASON_TWO_DATE_WINDOWS.map((round) => ({ ...round })) : [];
+
+const draftOptions = {
+  id: isAugustSeasonTwo ? SEASON_TWO_ID : undefined,
+  name: isAugustSeasonTwo ? SEASON_TWO_NAME : name,
+  label: isAugustSeasonTwo ? SEASON_TWO_LABEL : name,
+  monthKey,''', '''const isAugustSeasonTwo = monthKey === SEASON_TWO_MONTH_KEY;
+const isOctoberSeasonThree = monthKey === SEASON_THREE_MONTH_KEY;
+const dateWindows = isOctoberSeasonThree
+  ? SEASON_THREE_DATE_WINDOWS.map((round) => ({ ...round }))
+  : (isAugustSeasonTwo ? SEASON_TWO_DATE_WINDOWS.map((round) => ({ ...round })) : []);
+
+const draftOptions = {
+  id: isOctoberSeasonThree ? SEASON_THREE_ID : (isAugustSeasonTwo ? SEASON_TWO_ID : undefined),
+  name: isOctoberSeasonThree ? SEASON_THREE_NAME : (isAugustSeasonTwo ? SEASON_TWO_NAME : name),
+  label: isOctoberSeasonThree ? SEASON_THREE_LABEL : (isAugustSeasonTwo ? SEASON_TWO_LABEL : name),
+  monthKey,''')
+
+          replace_once('season.js', '''  seedMode: MANUAL_SEED_MODE,
+  playerPool,''', '''  seedMode: MANUAL_SEED_MODE,
+  seedRankingScope: isOctoberSeasonThree ? 'season3' : (isAugustSeasonTwo ? 'season2' : undefined),
+  playerPool,''')
+          replace_once('season.js', '''    bufferDays: isAugustSeasonTwo ? ['2026-08-24'] : []''', '''    bufferDays: isOctoberSeasonThree ? ['2026-10-24'] : (isAugustSeasonTwo ? ['2026-08-24'] : [])''')
+
+          replace_once('season.js', '''<label class="muted text-xs">Season name <input class="season-admin-input" type="text" data-create-season-name value="Season 2"></label>
+<label class="muted text-xs">Start date <input class="season-admin-input" type="date" data-create-season-start value="2026-08-01"></label>
+<label class="muted text-xs">End date <input class="season-admin-input" type="date" data-create-season-end value="2026-08-31"></label>''', '''<label class="muted text-xs">Season name <input class="season-admin-input" type="text" data-create-season-name value="Season 3"></label>
+<label class="muted text-xs">Start date <input class="season-admin-input" type="date" data-create-season-start value="2026-10-01"></label>
+<label class="muted text-xs">End date <input class="season-admin-input" type="date" data-create-season-end value="2026-10-31"></label>''')
+
+          replace_once('season.js', '''        <p class="season-eyebrow">Season 1 Preview</p>
+        <h2 class="season-title">Season 1 Preview</h2>''', '''        <p class="season-eyebrow">${escapeHtml(season?.name || 'Season')} Preview</p>
+        <h2 class="season-title">${escapeHtml(season?.name || 'Season')} Preview</h2>''')
+
+          replace_once('season.js', '''    SEASON_ONE_ID,
+    AUTO_SEED_MODE,''', '''    SEASON_ONE_ID,
+    SEASON_THREE_ID,
+    SEASON_THREE_MONTH_KEY,
+    SEASON_THREE_DATE_WINDOWS,
+    AUTO_SEED_MODE,''')
+
+          # Core October fallback: custom dateWindows are primary, but manual/admin result helpers must also infer Oct correctly.
+          replace_once('scoring_core.js', '''const AUGUST_2026_SEASON_DATE_WINDOWS = [
+  { id: 'play_in', startDate: '2026-08-01', endDate: '2026-08-03', displayName: 'Play-In', bestOf: 3 },
+  { id: 'round_of_32', startDate: '2026-08-04', endDate: '2026-08-08', displayName: 'Round of 32', bestOf: 5 },
+  { id: 'sweet_16', startDate: '2026-08-09', endDate: '2026-08-13', displayName: 'Sweet 16', bestOf: 5 },
+  { id: 'quarterfinals', startDate: '2026-08-14', endDate: '2026-08-18', displayName: 'Quarterfinals', bestOf: 5 },
+  { id: 'semifinals', startDate: '2026-08-19', endDate: '2026-08-23', displayName: 'Semifinals', bestOf: 5 },
+  { id: 'finals', startDate: '2026-08-25', endDate: '2026-08-31', displayName: 'Finals', bestOf: 7 }
+];''', '''const AUGUST_2026_SEASON_DATE_WINDOWS = [
+  { id: 'play_in', startDate: '2026-08-01', endDate: '2026-08-03', displayName: 'Play-In', bestOf: 3 },
+  { id: 'round_of_32', startDate: '2026-08-04', endDate: '2026-08-08', displayName: 'Round of 32', bestOf: 5 },
+  { id: 'sweet_16', startDate: '2026-08-09', endDate: '2026-08-13', displayName: 'Sweet 16', bestOf: 5 },
+  { id: 'quarterfinals', startDate: '2026-08-14', endDate: '2026-08-18', displayName: 'Quarterfinals', bestOf: 5 },
+  { id: 'semifinals', startDate: '2026-08-19', endDate: '2026-08-23', displayName: 'Semifinals', bestOf: 5 },
+  { id: 'finals', startDate: '2026-08-25', endDate: '2026-08-31', displayName: 'Finals', bestOf: 7 }
+];
+const OCTOBER_2026_SEASON_DATE_WINDOWS = [
+  { id: 'play_in', startDate: '2026-10-01', endDate: '2026-10-03', displayName: 'Play-In', bestOf: 3 },
+  { id: 'round_of_32', startDate: '2026-10-04', endDate: '2026-10-08', displayName: 'Round of 32', bestOf: 5 },
+  { id: 'sweet_16', startDate: '2026-10-09', endDate: '2026-10-13', displayName: 'Sweet 16', bestOf: 5 },
+  { id: 'quarterfinals', startDate: '2026-10-14', endDate: '2026-10-18', displayName: 'Quarterfinals', bestOf: 5 },
+  { id: 'semifinals', startDate: '2026-10-19', endDate: '2026-10-23', displayName: 'Semifinals', bestOf: 5 },
+  { id: 'finals', startDate: '2026-10-25', endDate: '2026-10-31', displayName: 'Finals', bestOf: 7 }
+];''')
+
+          replace_once('scoring_core.js', '''  if (season?.monthKey === '2026-08' || String(season?.id || '').includes('2026-08')) {
+    return AUGUST_2026_SEASON_DATE_WINDOWS.map((round) => ({ ...round }));
+  }
+  return JUNE_2026_SEASON_DATE_WINDOWS.map((round) => ({ ...round }));''', '''  if (season?.monthKey === '2026-10' || String(season?.id || '').includes('2026-10') || String(season?.id || '').includes('october_2026')) {
+    return OCTOBER_2026_SEASON_DATE_WINDOWS.map((round) => ({ ...round }));
+  }
+  if (season?.monthKey === '2026-08' || String(season?.id || '').includes('2026-08')) {
+    return AUGUST_2026_SEASON_DATE_WINDOWS.map((round) => ({ ...round }));
+  }
+  return JUNE_2026_SEASON_DATE_WINDOWS.map((round) => ({ ...round }));''')
+
+          replace_once('scoring_core.js', '''  const seasonRef = season || { id: series?.seasonId || '', monthKey: String(series?.seasonId || '').includes('august_2026') ? '2026-08' : DEFAULT_SEASON_MONTH_KEY };''', '''  const seasonId = String(series?.seasonId || '');
+  const inferredMonthKey = seasonId.includes('october_2026') || seasonId.includes('2026-10')
+    ? '2026-10'
+    : (seasonId.includes('august_2026') || seasonId.includes('2026-08') ? '2026-08' : DEFAULT_SEASON_MONTH_KEY);
+  const seasonRef = season || { id: seasonId, monthKey: inferredMonthKey };''')
+
+          test = r'''const fs = require('fs');
+const assert = require('assert');
+
+const standings = fs.readFileSync('standings.html', 'utf8');
+const rankings = fs.readFileSync('rankings.html', 'utf8');
+const season = fs.readFileSync('season.js', 'utf8');
+const seeds = fs.readFileSync('season_seed_sources.js', 'utf8');
+const core = fs.readFileSync('scoring_core.js', 'utf8');
+
+assert(standings.includes('data-standings-scope="season3"'));
+assert(standings.includes('data-standings-scope="season2"'));
+assert(standings.includes('data-standings-scope="season1"'));
+assert(standings.includes('data-standings-scope="lifetime"'));
+assert(standings.includes('key >= STANDINGS_SEASON_TWO_START && key < STANDINGS_SEASON_THREE_START'));
+assert(standings.includes('key >= STANDINGS_SEASON_THREE_START && key < STANDINGS_SEASON_THREE_END_EXCLUSIVE'));
+
+assert(rankings.includes('data-rankings-scope="season3"'));
+assert(rankings.includes('data-rankings-scope="season2"'));
+assert(rankings.includes('data-rankings-scope="season1"'));
+assert(rankings.includes('data-rankings-scope="overall"'));
+assert(rankings.includes('key >= RANKINGS_SEASON_TWO_START && key < RANKINGS_SEASON_THREE_START'));
+assert(rankings.includes('key >= RANKINGS_SEASON_THREE_START && key < RANKINGS_SEASON_THREE_END_EXCLUSIVE'));
+
+assert(seeds.includes("const SCOPE_SEASON_THREE = 'season3'"));
+assert(seeds.includes("const SEASON_THREE_START_DATE = '2026-09-01'"));
+assert(seeds.includes("const SEASON_THREE_TOURNAMENT_START_DATE = '2026-10-01'"));
+assert(seeds.includes('key >= SEASON_THREE_START_DATE && key < SEASON_THREE_TOURNAMENT_START_DATE'));
+
+assert(season.includes("const SEASON_THREE_ID = 'season_3_october_2026'"));
+assert(season.includes("const SEASON_THREE_START_DATE = '2026-10-01'"));
+assert(season.includes("const SEASON_THREE_END_DATE = '2026-10-31'"));
+assert(season.includes("startDate: '2026-10-01', endDate: '2026-10-03'"));
+assert(season.includes("startDate: '2026-10-25', endDate: '2026-10-31'"));
+assert(season.includes("bufferDays: isOctoberSeasonThree ? ['2026-10-24']"));
+assert(season.includes('seedRankingScope: isOctoberSeasonThree ? \'season3\''));
+
+assert(core.includes('const OCTOBER_2026_SEASON_DATE_WINDOWS = ['));
+assert(core.includes("return OCTOBER_2026_SEASON_DATE_WINDOWS.map"));
+assert(core.includes("seasonId.includes('october_2026')"));
+
+console.log('Season 3 rollover contract OK');
+'''
+          Path('tests/season3_rollover_contract.test.js').write_text(test)
+
+          # The workflow is only a delivery mechanism; do not leave it in the product branch.
+          Path('.github/workflows/season3-rollover-one-shot.yml').unlink()
+          PY
+
+      - name: Run Season 3 contract
+        run: node tests/season3_rollover_contract.test.js
+
+      - name: Commit patched files
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add standings.html rankings.html season.js season_seed_sources.js scoring_core.js tests/season3_rollover_contract.test.js .github/workflows/season3-rollover-one-shot.yml
+          git commit -m "[season3-patched] Add Season 3 rollover"
+          git push origin HEAD:feature/season-3-rollover
