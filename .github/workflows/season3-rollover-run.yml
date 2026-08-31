@@ -16,12 +16,27 @@ jobs:
         with:
           ref: feature/season-3-rollover
           fetch-depth: 0
-      - name: Apply patch
-        run: python3 scripts/apply_season3_rollover.py
+      - name: Apply main patch through known core handoff
+        shell: bash
+        run: |
+          set +e
+          python3 scripts/apply_season3_rollover.py 2> /tmp/season3-main.err
+          status=$?
+          set -e
+          cat /tmp/season3-main.err
+          if [ "$status" -eq 0 ]; then
+            echo "Main patch completed without handoff."
+          elif grep -q "scoring_core.js: expected exactly one match" /tmp/season3-main.err; then
+            echo "Reached expected exact-core handoff."
+          else
+            exit "$status"
+          fi
+      - name: Finish exact core patch
+        run: python3 scripts/finish_season3_rollover.py
       - name: Run Season 3 contract
         run: node tests/season3_rollover_contract.test.js
       - name: Remove temporary delivery files
-        run: rm -f .github/workflows/season3-rollover-one-shot.yml .github/workflows/season3-rollover-run.yml scripts/apply_season3_rollover.py
+        run: rm -f .github/workflows/season3-rollover-one-shot.yml .github/workflows/season3-rollover-run.yml scripts/apply_season3_rollover.py scripts/finish_season3_rollover.py
       - name: Commit result
         shell: bash
         run: |
