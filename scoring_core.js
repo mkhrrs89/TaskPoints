@@ -830,6 +830,14 @@ const AUGUST_2026_SEASON_DATE_WINDOWS = [
   { id: 'semifinals', startDate: '2026-08-19', endDate: '2026-08-23', displayName: 'Semifinals', bestOf: 5 },
   { id: 'finals', startDate: '2026-08-25', endDate: '2026-08-31', displayName: 'Finals', bestOf: 7 }
 ];
+const OCTOBER_2026_SEASON_DATE_WINDOWS = [
+  { id: 'play_in', startDate: '2026-10-01', endDate: '2026-10-03', displayName: 'Play-In', bestOf: 3 },
+  { id: 'round_of_32', startDate: '2026-10-04', endDate: '2026-10-08', displayName: 'Round of 32', bestOf: 5 },
+  { id: 'sweet_16', startDate: '2026-10-09', endDate: '2026-10-13', displayName: 'Sweet 16', bestOf: 5 },
+  { id: 'quarterfinals', startDate: '2026-10-14', endDate: '2026-10-18', displayName: 'Quarterfinals', bestOf: 5 },
+  { id: 'semifinals', startDate: '2026-10-19', endDate: '2026-10-23', displayName: 'Semifinals', bestOf: 5 },
+  { id: 'finals', startDate: '2026-10-25', endDate: '2026-10-31', displayName: 'Finals', bestOf: 7 }
+];
 
 const DEFAULT_SEASON_NAME = 'June 2026 TaskPoints Championship';
 const DEFAULT_SEASON_MONTH_KEY = '2026-06';
@@ -837,6 +845,10 @@ const DEFAULT_SEASON_MONTH_KEY = '2026-06';
   function getSeasonDateWindowsForSeason(season) {
   const custom = Array.isArray(season?.dateWindows) ? season.dateWindows : [];
   if (custom.length) return custom.map((round) => ({ ...round }));
+
+  if (season?.monthKey === '2026-10' || String(season?.id || '').includes('2026-10') || String(season?.id || '').includes('october_2026')) {
+    return OCTOBER_2026_SEASON_DATE_WINDOWS.map((round) => ({ ...round }));
+  }
 
   if (season?.monthKey === '2026-08' || String(season?.id || '').includes('2026-08')) {
     return AUGUST_2026_SEASON_DATE_WINDOWS.map((round) => ({ ...round }));
@@ -2457,7 +2469,11 @@ const seasonGateOpen = directSeason
 
 
 function getSeasonManualResultDateKey(series, gameNumber, season = null) {
-  const seasonRef = season || { id: series?.seasonId || '', monthKey: String(series?.seasonId || '').includes('august_2026') ? '2026-08' : DEFAULT_SEASON_MONTH_KEY };
+  const seasonId = String(series?.seasonId || '');
+  const inferredMonthKey = seasonId.includes('october_2026') || seasonId.includes('2026-10')
+    ? '2026-10'
+    : (seasonId.includes('august_2026') || seasonId.includes('2026-08') ? '2026-08' : DEFAULT_SEASON_MONTH_KEY);
+  const seasonRef = season || { id: seasonId, monthKey: inferredMonthKey };
   const round = getSeasonDateWindowsForSeason(seasonRef).find((item) => item.id === series?.roundId);
   if (!round) return '';
 
