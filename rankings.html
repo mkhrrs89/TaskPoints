@@ -180,8 +180,13 @@
   display:flex;
   align-items:center;
   gap:8px;
-  flex-wrap:wrap;
+  flex-wrap:nowrap;
+  width:100%;
+  overflow-x:auto;
+  overflow-y:hidden;
+  -webkit-overflow-scrolling:touch;
 }
+
 
 .rankingsScopeTab{
   border:1px solid rgba(148,163,184,0.28);
@@ -194,6 +199,8 @@
   letter-spacing:0.04em;
   text-transform:uppercase;
   cursor:pointer;
+  flex:0 0 auto;
+  white-space:nowrap;
 }
 
 .rankingsScopeTab.is-active{
