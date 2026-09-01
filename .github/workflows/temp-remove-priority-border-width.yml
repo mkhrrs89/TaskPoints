@@ -1,0 +1,72 @@
+name: Temporary Remove Priority Border Width
+
+on:
+  push:
+    branches:
+      - agent/remove-priority-border-width
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/remove-priority-border-width
+          fetch-depth: 0
+
+      - name: Remove High and Critical borders completely
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const file = 'styles.css';
+          let source = fs.readFileSync(file, 'utf8');
+
+          function patchBlock(selector) {
+            const start = source.indexOf(`${selector} {`);
+            if (start < 0) throw new Error(`Missing ${selector} rule`);
+            const end = source.indexOf('\n}', start);
+            if (end < 0) throw new Error(`Could not find end of ${selector} rule`);
+            const block = source.slice(start, end + 2);
+            if (!block.includes('background: linear-gradient(')) throw new Error(`${selector} gradient missing`);
+            const needle = '  border-color: transparent !important;';
+            const matches = block.split(needle).length - 1;
+            if (matches !== 1) throw new Error(`Expected one transparent border in ${selector}, found ${matches}`);
+            const patched = block.replace(needle, '  border: none !important;');
+            source = source.slice(0, start) + patched + source.slice(end + 2);
+          }
+
+          patchBlock('.critical-card');
+          patchBlock('.high-card');
+          fs.writeFileSync(file, source);
+          NODE
+
+      - name: Verify gradients remain with no border
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const source = fs.readFileSync('styles.css', 'utf8');
+          for (const selector of ['.critical-card', '.high-card']) {
+            const start = source.indexOf(`${selector} {`);
+            const end = source.indexOf('\n}', start);
+            const block = source.slice(start, end + 2);
+            if (!block.includes('background: linear-gradient(')) throw new Error(`${selector} gradient missing`);
+            if (!block.includes('border: none !important;')) throw new Error(`${selector} still has a border`);
+            if (block.includes('border-color: transparent')) throw new Error(`${selector} still uses transparent border`);
+          }
+          NODE
+
+      - name: Run task-card regression tests
+        run: node --test tests/task_action_fast_paths.test.js tests/step5h_task_card_expand_state_handoff.test.js
+
+      - name: Commit verified tweak
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add styles.css
+          git commit -m "Remove High and Critical task borders completely"
+          git push origin HEAD:agent/remove-priority-border-width
