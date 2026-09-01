@@ -20,6 +20,13 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
 
       - name: Run State Runtime V2 contract tests
         run: node --test tests/state_runtime_v2*.test.js tests/perf_trace_v2_visibility_contract.test.js
+
+      - name: Run full TaskPoints test suite
+        run: npm test
