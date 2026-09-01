@@ -7,6 +7,7 @@
   const DB_NAME = 'taskpoints_state_v2';
   const DB_VERSION = 1;
   const DARK_MODE_KEY = 'taskpoints_state_v2_dark_mode_v1';
+  const GENERATION_KEY = 'taskpoints_state_v2_generation_v1';
   const RUNTIME_META_ID = 'runtime';
   const SCHEMA_VERSION = 1;
   const STORE_NAMES = Object.freeze(['habits', 'completions', 'mutations', 'meta']);
@@ -21,9 +22,11 @@
   let mirroredMutations = 0;
   let duplicateMutations = 0;
   let mirrorFailures = 0;
+  let generationInvalidations = 0;
   let lastError = null;
   let lastMutationId = null;
   let lastSeedHash = null;
+  let lastResetGeneration = null;
   let lastParity = null;
 
   function nowIso() { return new Date().toISOString(); }
@@ -65,6 +68,39 @@
 
   function isDarkEnabled() {
     return safeGet(DARK_MODE_KEY) === '1';
+  }
+
+  function newResetGeneration(prefix = 'seed') {
+    const random = global.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    return `${prefix}:${random}`;
+  }
+
+  function generationModule() {
+    return global.TaskPointsStateRuntimeV2Generation || null;
+  }
+
+  function currentGeneration(options = {}) {
+    const existing = generationModule()?.read?.() || safeGet(GENERATION_KEY);
+    if (existing) return String(existing);
+    if (options.create === false) return null;
+
+    const ensured = generationModule()?.ensure?.();
+    if (ensured?.generation) return String(ensured.generation);
+
+    const generation = newResetGeneration('runtime-bootstrap');
+    if (!safeSet(GENERATION_KEY, generation)) {
+      throw new Error('state_runtime_v2_generation_unavailable');
+    }
+    return generation;
+  }
+
+  function staleGenerationError(expectedGeneration, actualGeneration, phase) {
+    const error = new Error(`state_runtime_v2_stale_generation:${phase}:${expectedGeneration || 'missing'}:${actualGeneration || 'missing'}`);
+    error.code = 'STATE_RUNTIME_V2_STALE_GENERATION';
+    error.expectedGeneration = expectedGeneration || null;
+    error.actualGeneration = actualGeneration || null;
+    error.phase = phase;
+    return error;
   }
 
   function fnv1a(text) {
@@ -183,12 +219,7 @@
     return `${fnv1a(text)}:${text.length}`;
   }
 
-  function newResetGeneration(prefix = 'seed') {
-    const random = global.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    return `${prefix}:${random}`;
-  }
-
-  async function clearForMissingLegacy(db, previousMeta = null) {
+  async function clearForMissingLegacy(db, previousMeta = null, resetGeneration = currentGeneration()) {
     const tx = db.transaction(STORE_NAMES, 'readwrite');
     tx.objectStore('habits').clear();
     tx.objectStore('completions').clear();
@@ -198,7 +229,7 @@
       schemaVersion: SCHEMA_VERSION,
       revision: Number(previousMeta?.revision || 0) + 1,
       completionSequence: 0,
-      resetGeneration: newResetGeneration('legacy-missing'),
+      resetGeneration,
       source: 'legacy-dark-mirror',
       seedHash: null,
       seededAtISO: nowIso(),
@@ -208,29 +239,41 @@
     await transactionPromise(tx);
     seeded = true;
     lastSeedHash = null;
-    mark('stateV2.seededEmpty', { reason: 'legacy_missing' });
-    return { seeded: true, empty: true, reason: 'legacy_missing' };
+    lastResetGeneration = resetGeneration;
+    mark('stateV2.seededEmpty', { reason: 'legacy_missing', resetGeneration });
+    return { seeded: true, empty: true, reason: 'legacy_missing', resetGeneration };
   }
 
   async function seedFromLegacy(options = {}) {
     if (!isDarkEnabled()) return { seeded: false, reason: 'dark_disabled' };
-    if (seeded && options.force !== true) {
-      return { seeded: false, reason: 'already_seeded_this_page', hash: lastSeedHash };
+    const requestedGeneration = currentGeneration();
+    if (seeded && options.force !== true && lastResetGeneration === requestedGeneration) {
+      return { seeded: false, reason: 'already_seeded_this_page', hash: lastSeedHash, resetGeneration: lastResetGeneration };
     }
-    if (seedPromise && options.force !== true) return seedPromise;
+    if (seedPromise) {
+      if (options.force !== true) return seedPromise;
+      return seedPromise.then(() => seedFromLegacy({ ...options, force: true }));
+    }
 
     const run = async () => {
+      const desiredGeneration = currentGeneration();
       const db = await open();
       if (!db) return { seeded: false, reason: 'dark_disabled' };
       const previousMeta = await readMeta(db);
       const source = parseLegacyStateWithPending();
-      if (source.missing) return clearForMissingLegacy(db, previousMeta);
+      if (source.missing) return clearForMissingLegacy(db, previousMeta, desiredGeneration);
 
       const hash = subsetHash(source.state);
-      if (options.force !== true && previousMeta?.seedHash === hash && previousMeta?.legacyMissing !== true) {
+      if (
+        options.force !== true
+        && previousMeta?.seedHash === hash
+        && previousMeta?.legacyMissing !== true
+        && previousMeta?.resetGeneration === desiredGeneration
+      ) {
         seeded = true;
         lastSeedHash = hash;
-        return { seeded: false, reason: 'already_current', hash };
+        lastResetGeneration = desiredGeneration;
+        return { seeded: false, reason: 'already_current', hash, resetGeneration: desiredGeneration };
       }
 
       const habits = source.state.habits;
@@ -261,7 +304,7 @@
         schemaVersion: SCHEMA_VERSION,
         revision,
         completionSequence: completions.length,
-        resetGeneration: previousMeta?.resetGeneration || newResetGeneration('legacy-seed'),
+        resetGeneration: desiredGeneration,
         source: 'legacy-dark-mirror',
         seedHash: hash,
         seededAtISO: nowIso(),
@@ -271,10 +314,18 @@
       });
       await transactionPromise(tx);
 
+      const currentAfterCommit = currentGeneration({ create: false });
+      if (currentAfterCommit && currentAfterCommit !== desiredGeneration) {
+        generationInvalidations += 1;
+        mark('stateV2.seedGenerationSuperseded', { desiredGeneration, currentGeneration: currentAfterCommit });
+        return seedFromLegacy({ force: true });
+      }
+
       seeded = true;
       lastSeedHash = hash;
-      mark('stateV2.seeded', { habits: habits.length, completions: completions.length, revision });
-      return { seeded: true, reason: 'seeded', hash, revision, habits: habits.length, completions: completions.length };
+      lastResetGeneration = desiredGeneration;
+      mark('stateV2.seeded', { habits: habits.length, completions: completions.length, revision, resetGeneration: desiredGeneration });
+      return { seeded: true, reason: 'seeded', hash, revision, resetGeneration: desiredGeneration, habits: habits.length, completions: completions.length };
     };
 
     seedPromise = run().finally(() => { seedPromise = null; });
@@ -294,8 +345,10 @@
     };
   }
 
-  function mutationIdForDelta(delta) {
+  function mutationIdForDelta(delta, generationInput = null) {
+    const generation = String(generationInput || currentGeneration());
     const identity = stableJson({
+      generation,
       id: delta.id,
       habitId: delta.habitId,
       dayKey: delta.dayKey,
@@ -350,12 +403,20 @@
     };
   }
 
-  async function applyHabitDelta(deltaInput) {
+  async function applyHabitDelta(deltaInput, options = {}) {
     if (!isDarkEnabled()) return { committed: false, reason: 'dark_disabled' };
     const delta = normalizeDelta(deltaInput);
+    const expectedGeneration = String(options.expectedGeneration || currentGeneration());
     await seedFromLegacy();
+
+    const generationBeforeOpen = currentGeneration({ create: false });
+    if (generationBeforeOpen !== expectedGeneration) {
+      generationInvalidations += 1;
+      throw staleGenerationError(expectedGeneration, generationBeforeOpen, 'before-open');
+    }
+
     const db = await open();
-    const mutationId = mutationIdForDelta(delta);
+    const mutationId = mutationIdForDelta(delta, expectedGeneration);
 
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAMES, 'readwrite');
@@ -374,29 +435,65 @@
       let duplicate = false;
       let nextRevision = null;
       let prepared = false;
+      let settled = false;
+      let generationInvalidated = false;
+      let unsubscribeGeneration = () => undefined;
 
-      const fail = (error) => {
-        try { tx.abort(); } catch (_) {}
+      const finishReject = (error) => {
+        if (settled) return;
+        settled = true;
+        unsubscribeGeneration();
         reject(error);
       };
 
+      const fail = (error) => {
+        if (settled) return;
+        try { tx.abort(); } catch (_) {}
+        finishReject(error);
+      };
+
+      const generationApi = generationModule();
+      if (typeof generationApi?.subscribe === 'function') {
+        unsubscribeGeneration = generationApi.subscribe((event) => {
+          const nextGeneration = typeof event === 'string' ? event : event?.generation;
+          if (!nextGeneration || String(nextGeneration) === expectedGeneration || settled) return;
+          generationInvalidated = true;
+          generationInvalidations += 1;
+          fail(staleGenerationError(expectedGeneration, String(nextGeneration), 'in-flight'));
+        });
+      }
+
       const prepare = () => {
         readyCount += 1;
-        if (readyCount !== 3 || prepared) return;
+        if (readyCount !== 3 || prepared || settled) return;
         prepared = true;
         try {
-          if (existingMutation) {
-            duplicate = true;
-            return;
+          const durableGeneration = currentGeneration({ create: false });
+          if (durableGeneration !== expectedGeneration) {
+            generationInvalidated = true;
+            generationInvalidations += 1;
+            throw staleGenerationError(expectedGeneration, durableGeneration, 'prepare');
           }
-          if (!habitRow?.value) throw new Error(`state_runtime_v2_habit_missing:${delta.habitId}`);
+
           runtimeMeta = runtimeMeta || {
             id: RUNTIME_META_ID,
             schemaVersion: SCHEMA_VERSION,
             revision: 0,
             completionSequence: 0,
-            resetGeneration: newResetGeneration('late-init')
+            resetGeneration: expectedGeneration
           };
+          if (runtimeMeta.resetGeneration && runtimeMeta.resetGeneration !== expectedGeneration) {
+            generationInvalidated = true;
+            generationInvalidations += 1;
+            throw staleGenerationError(expectedGeneration, runtimeMeta.resetGeneration, 'meta');
+          }
+
+          if (existingMutation) {
+            duplicate = true;
+            return;
+          }
+          if (!habitRow?.value) throw new Error(`state_runtime_v2_habit_missing:${delta.habitId}`);
+
           nextRevision = Number(runtimeMeta.revision || 0) + 1;
           const nextHabit = patchHabit(habitRow.value, delta);
           habitsStore.put({ ...habitRow, id: delta.habitId, value: nextHabit });
@@ -420,7 +517,7 @@
             source: 'legacy-habit-journal-dark-mirror',
             status: 'committed',
             revision: nextRevision,
-            resetGeneration: runtimeMeta.resetGeneration,
+            resetGeneration: expectedGeneration,
             createdAtISO: nowIso(),
             delta: clone(delta)
           });
@@ -430,6 +527,7 @@
             schemaVersion: SCHEMA_VERSION,
             revision: nextRevision,
             completionSequence,
+            resetGeneration: expectedGeneration,
             source: 'legacy-dark-mirror',
             lastMutationId: mutationId,
             updatedAtISO: nowIso(),
@@ -448,17 +546,41 @@
       metaRequest.onerror = () => fail(metaRequest.error || new Error('state_runtime_v2_meta_read_failed'));
 
       tx.oncomplete = () => {
+        if (settled) return;
+        const durableGeneration = currentGeneration({ create: false });
+        if (durableGeneration !== expectedGeneration || generationInvalidated) {
+          settled = true;
+          unsubscribeGeneration();
+          generationInvalidations += 1;
+          const error = staleGenerationError(expectedGeneration, durableGeneration, 'after-commit');
+          Promise.resolve(seedFromLegacy({ force: true })).catch((seedError) => {
+            lastError = String(seedError?.message || seedError);
+            mark('stateV2.generationScrubFailed', { message: lastError });
+          });
+          reject(error);
+          return;
+        }
+
+        settled = true;
+        unsubscribeGeneration();
         if (duplicate) {
           duplicateMutations += 1;
-          resolve({ committed: false, duplicate: true, mutationId });
+          resolve({ committed: false, duplicate: true, mutationId, resetGeneration: expectedGeneration });
           return;
         }
         mirroredMutations += 1;
         lastMutationId = mutationId;
-        mark('stateV2.darkMutationCommitted', { mutationId, revision: nextRevision, habitId: delta.habitId, dayKey: delta.dayKey });
-        resolve({ committed: true, duplicate: false, mutationId, revision: nextRevision });
+        mark('stateV2.darkMutationCommitted', { mutationId, revision: nextRevision, resetGeneration: expectedGeneration, habitId: delta.habitId, dayKey: delta.dayKey });
+        resolve({ committed: true, duplicate: false, mutationId, revision: nextRevision, resetGeneration: expectedGeneration });
       };
-      tx.onabort = () => reject(tx.error || new Error('state_runtime_v2_mutation_aborted'));
+      tx.onabort = () => {
+        if (settled) return;
+        if (generationInvalidated) {
+          finishReject(staleGenerationError(expectedGeneration, currentGeneration({ create: false }), 'abort'));
+          return;
+        }
+        finishReject(tx.error || new Error('state_runtime_v2_mutation_aborted'));
+      };
       tx.onerror = () => undefined;
     });
   }
@@ -466,12 +588,13 @@
   function enqueueHabitDelta(delta) {
     if (!isDarkEnabled()) return;
     const snapshot = clone(delta);
+    const expectedGeneration = currentGeneration();
     mirrorTail = mirrorTail
-      .then(() => applyHabitDelta(snapshot))
+      .then(() => applyHabitDelta(snapshot, { expectedGeneration }))
       .catch((error) => {
         mirrorFailures += 1;
         lastError = String(error?.message || error);
-        mark('stateV2.darkMutationFailed', { message: lastError, habitId: snapshot?.habitId || null, dayKey: snapshot?.dayKey || null });
+        mark('stateV2.darkMutationFailed', { message: lastError, resetGeneration: expectedGeneration, habitId: snapshot?.habitId || null, dayKey: snapshot?.dayKey || null });
         console.warn('TaskPoints V2 dark mirror failed; production state remains authoritative.', error);
       });
   }
@@ -563,17 +686,22 @@
       mirroredMutations,
       duplicateMutations,
       mirrorFailures,
+      generationInvalidations,
+      generationKey: GENERATION_KEY,
+      currentGeneration: currentGeneration({ create: false }),
+      lastResetGeneration,
       lastMutationId,
       lastSeedHash,
       lastError,
       lastParity,
       readAuthority: 'legacy_only',
-      walMode: 'legacy_habit_journal_protects_dark_stage'
+      walMode: 'v2_generation_stamped_wal_with_legacy_authority'
     };
   }
 
   async function startDarkMirror() {
     if (!isDarkEnabled()) return getStatus();
+    currentGeneration();
     installHabitJournalHook();
     try { await seedFromLegacy(); }
     catch (error) {
@@ -586,6 +714,7 @@
 
   function enableDarkMirror() {
     safeSet(DARK_MODE_KEY, '1');
+    currentGeneration();
     startDarkMirror();
     return getStatus();
   }
@@ -600,6 +729,7 @@
     DB_NAME,
     DB_VERSION,
     DARK_MODE_KEY,
+    GENERATION_KEY,
     STORE_NAMES,
     isDarkEnabled,
     enableDarkMirror,
@@ -611,7 +741,7 @@
       if (mutation?.type !== 'habit-completion-set' || !mutation?.delta) {
         return Promise.reject(new Error('state_runtime_v2_unsupported_dark_mutation'));
       }
-      return applyHabitDelta(mutation.delta);
+      return applyHabitDelta(mutation.delta, { expectedGeneration: mutation.generation || undefined });
     },
     applyHabitDelta,
     getHabit: async (id) => {
