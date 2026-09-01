@@ -1,10 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-// Step 2 intentionally defines the State Runtime V2 behavioral contract before
-// runtime implementation exists. The TODOs become executable tests one by one
-// during Step 3; keeping them as node:test TODOs means this planning branch does
-// not require or enable any V2 production code.
+// The matrix remains the source-of-truth checklist for State Runtime V2.
+// Contracts move out of TODO status only after an executable test exercises the
+// behavior. The coverage map below points to the concrete test file responsible
+// for each promoted contract.
 
 const CONTRACTS = Object.freeze([
   {
@@ -141,7 +141,21 @@ const CONTRACTS = Object.freeze([
   }
 ]);
 
-test('State Runtime V2 Step 2 defines the complete initial 22-contract matrix', () => {
+const EXECUTABLE_COVERAGE = Object.freeze({
+  'V2-01': 'tests/state_runtime_v2_atomic_contract.test.js',
+  'V2-02': 'tests/state_runtime_v2_atomic_contract.test.js',
+  'V2-03': 'tests/state_runtime_v2_atomic_contract.test.js',
+  'V2-04': 'tests/state_runtime_v2_atomic_contract.test.js',
+  'V2-05': 'tests/state_runtime_v2_atomic_contract.test.js',
+  'V2-06': 'tests/state_runtime_v2_atomic_contract.test.js',
+  'V2-07': 'tests/state_runtime_v2_wal_bridge_contract.test.js',
+  'V2-08': 'tests/state_runtime_v2_wal_contract.test.js',
+  'V2-09': 'tests/state_runtime_v2_wal_bridge_contract.test.js',
+  'V2-10': 'tests/state_runtime_v2_wal_bridge_contract.test.js',
+  'V2-11': 'tests/state_runtime_v2_wal_bridge_contract.test.js'
+});
+
+test('State Runtime V2 defines the complete initial 22-contract matrix', () => {
   assert.equal(CONTRACTS.length, 22);
   assert.equal(new Set(CONTRACTS.map((contract) => contract.id)).size, 22);
   assert.deepEqual(
@@ -150,7 +164,7 @@ test('State Runtime V2 Step 2 defines the complete initial 22-contract matrix', 
   );
 });
 
-test('State Runtime V2 contract matrix covers every correctness boundary required before dark runtime work', () => {
+test('State Runtime V2 contract matrix covers every required correctness boundary', () => {
   const areas = new Set(CONTRACTS.map((contract) => contract.area));
   for (const requiredArea of [
     'database-boundary',
@@ -183,8 +197,22 @@ test('V2 contracts explicitly preserve existing production and image-storage bou
   assert.match(text, /default-off rollout/);
 });
 
+test('V2-01 through V2-11 are promoted only with explicit executable coverage files', () => {
+  const promoted = Object.keys(EXECUTABLE_COVERAGE);
+  assert.deepEqual(
+    promoted,
+    Array.from({ length: 11 }, (_, index) => `V2-${String(index + 1).padStart(2, '0')}`)
+  );
+  const contractIds = new Set(CONTRACTS.map((contract) => contract.id));
+  for (const [id, filename] of Object.entries(EXECUTABLE_COVERAGE)) {
+    assert.equal(contractIds.has(id), true, `unknown promoted contract: ${id}`);
+    assert.match(filename, /^tests\/state_runtime_v2_.*\.test\.js$/);
+  }
+});
+
 for (const contract of CONTRACTS) {
+  if (EXECUTABLE_COVERAGE[contract.id]) continue;
   test.todo(`${contract.id} ${contract.name}`);
 }
 
-module.exports = { CONTRACTS };
+module.exports = { CONTRACTS, EXECUTABLE_COVERAGE };
