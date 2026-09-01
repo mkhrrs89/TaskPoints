@@ -9935,7 +9935,7 @@ function taskDueMeta(t, today){
   if (t.dueDateISO) {
     const dueDate = fromKey(t.dueDateISO);
     const diff = Math.round((dueDate - today) / 86400000);
-    parts.push(niceDate(dueDate));
+    parts.push(niceDate(dueDate).replace(/\b(\d{4})\b/, (_, year) => `’${year.slice(-2)}`));
     if (diff > 0) parts.push(`Due in ${diff}d`);
     else if (diff === 0) parts.push('Due today');
     else parts.push(`${Math.abs(diff)}d overdue`);
