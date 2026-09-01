@@ -94,10 +94,12 @@ test('dark mirror preserves production write ordering and isolates V2 failures',
 });
 
 test('pilot mutation transaction covers habit, completion, mutation ledger, and meta together', () => {
+  const applyStart = runtimeSource.search(/async function applyHabitDelta\(deltaInput(?:,\s*options\s*=\s*\{\})?\)/);
   const apply = runtimeSource.slice(
-    runtimeSource.indexOf('async function applyHabitDelta(deltaInput)'),
+    applyStart,
     runtimeSource.indexOf('function enqueueHabitDelta(delta)')
   );
+  assert.ok(applyStart >= 0, 'applyHabitDelta implementation must be present');
   assert.match(apply, /db\.transaction\(STORE_NAMES, 'readwrite'\)/);
   for (const store of ['habits', 'completions', 'mutations', 'meta']) {
     assert.ok(apply.includes(`objectStore('${store}')`), `${store} participates in the mutation transaction`);
