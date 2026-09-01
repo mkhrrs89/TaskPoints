@@ -37,8 +37,8 @@ test('V2-22 preview opt-in explicitly blocks production hostnames before setting
   assert.match(previewEnable, /www\.taskpoints\.pages\.dev/);
   assert.match(previewEnable, /productionHosts/);
 
-  const productionGuardAt = previewEnable.indexOf('productionHosts.has');
-  const setFlagAt = previewEnable.indexOf("localStorage.setItem('taskpoints_state_v2_dark_mode_v1', '1')");
+  const productionGuardAt = previewEnable.indexOf('productionHosts.has(hostname)');
+  const setFlagAt = previewEnable.indexOf("localStorage.setItem(KEY, '1')");
   assert.ok(productionGuardAt >= 0, 'production hostname guard must exist');
   assert.ok(setFlagAt > productionGuardAt, 'V2 flag must only be set after the production guard');
 });
