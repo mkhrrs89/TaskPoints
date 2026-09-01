@@ -5,6 +5,7 @@
 
   const KEY = 'taskpoints_v2_pending_mutations_v1';
   const DARK_MODE_KEY = 'taskpoints_state_v2_dark_mode_v1';
+  const GENERATION_KEY = 'taskpoints_state_v2_generation_v1';
   const SCHEMA_VERSION = 1;
   const MAX_ROWS = 250;
 
@@ -52,6 +53,30 @@
     return JSON.parse(JSON.stringify(value));
   }
 
+  function newFallbackGeneration() {
+    const random = global.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    return `v2-wal:${random}`;
+  }
+
+  function ensureGeneration() {
+    const generationApi = global.TaskPointsStateRuntimeV2Generation;
+    if (typeof generationApi?.ensure === 'function') {
+      const result = generationApi.ensure();
+      if (result?.generation) return String(result.generation);
+    }
+    const existing = safeGet(GENERATION_KEY);
+    if (existing) return String(existing);
+    const generation = newFallbackGeneration();
+    if (!safeSet(GENERATION_KEY, generation)) {
+      throw new Error(`state_runtime_v2_wal_generation_write_failed:${lastError || 'unknown'}`);
+    }
+    return generation;
+  }
+
+  function cloneGeneration() {
+    return global.TaskPointsStateRuntimeV2Generation?.read?.() || safeGet(GENERATION_KEY) || null;
+  }
+
   function fnv1a(text) {
     let hash = 2166136261;
     for (let index = 0; index < text.length; index += 1) {
@@ -84,9 +109,11 @@
     };
   }
 
-  function mutationIdForDelta(deltaInput) {
+  function mutationIdForDelta(deltaInput, generationInput = null) {
     const delta = normalizeDelta(deltaInput);
+    const generation = String(generationInput || cloneGeneration() || ensureGeneration());
     const identity = stableJson({
+      generation,
       id: delta.id,
       habitId: delta.habitId,
       dayKey: delta.dayKey,
@@ -127,16 +154,18 @@
   function appendHabitDelta(deltaInput, options = {}) {
     if (!isEnabled()) return { written: false, reason: 'dark_disabled' };
     const delta = normalizeDelta(deltaInput);
-    const mutationId = options.mutationId || mutationIdForDelta(delta);
+    const generation = String(options.generation || ensureGeneration());
+    const mutationId = options.mutationId || mutationIdForDelta(delta, generation);
     const current = read();
     if (!current.ok) throw new Error(current.error || 'state_runtime_v2_wal_unreadable');
-    const existing = current.rows.find((row) => row.id === mutationId);
-    if (existing) return { written: false, duplicate: true, mutationId, row: clone(existing) };
+    const existing = current.rows.find((row) => row.id === mutationId && row.generation === generation);
+    if (existing) return { written: false, duplicate: true, mutationId, generation, row: clone(existing) };
 
     const row = {
       id: mutationId,
       schemaVersion: SCHEMA_VERSION,
       type: 'habit-completion-set',
+      generation,
       createdAtISO: nowIso(),
       delta: clone(delta)
     };
@@ -144,8 +173,8 @@
     if (next.length > MAX_ROWS) throw new Error('state_runtime_v2_wal_capacity_exceeded');
     writeRows(next);
     appendCount += 1;
-    try { global.TaskPointsPerf?.mark?.('stateV2.walAppended', { mutationId, habitId: delta.habitId, dayKey: delta.dayKey }); } catch (_) {}
-    return { written: true, duplicate: false, mutationId, row: clone(row) };
+    try { global.TaskPointsPerf?.mark?.('stateV2.walAppended', { mutationId, generation, habitId: delta.habitId, dayKey: delta.dayKey }); } catch (_) {}
+    return { written: true, duplicate: false, mutationId, generation, row: clone(row) };
   }
 
   function removeMutation(mutationId) {
@@ -173,6 +202,8 @@
       installed: true,
       enabled: isEnabled(),
       key: KEY,
+      generationKey: GENERATION_KEY,
+      generation: cloneGeneration(),
       pendingCount: current.ok ? current.rows.length : null,
       malformed: !current.ok,
       appendCount,
@@ -186,8 +217,10 @@
     __installedModule: true,
     KEY,
     DARK_MODE_KEY,
+    GENERATION_KEY,
     SCHEMA_VERSION,
     isEnabled,
+    ensureGeneration,
     mutationIdForDelta,
     appendHabitDelta,
     removeMutation,
