@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
+const generationSource = fs.readFileSync(path.join(__dirname, '..', 'state_runtime_v2_generation.js'), 'utf8');
 const walSource = fs.readFileSync(path.join(__dirname, '..', 'state_runtime_v2_wal.js'), 'utf8');
 const bridgeSource = fs.readFileSync(path.join(__dirname, '..', 'state_runtime_v2_wal_bridge.js'), 'utf8');
 
@@ -18,6 +19,7 @@ class FakeStorage {
 
 const DARK = 'taskpoints_state_v2_dark_mode_v1';
 const WAL_KEY = 'taskpoints_v2_pending_mutations_v1';
+const GENERATION_KEY = 'taskpoints_state_v2_generation_v1';
 const delta = {
   id: 'habit:h1:2026-08-31',
   habitId: 'h1',
@@ -32,6 +34,7 @@ function install({ enabled = true, initial = {}, applyResult = { committed: true
   const localStorage = new FakeStorage({ ...(enabled ? { [DARK]: '1' } : {}), ...initial });
   const timers = [];
   const events = [];
+  let uuid = 0;
   let runtimeApply = async () => {
     events.push('apply');
     if (applyResult instanceof Error) throw applyResult;
@@ -39,6 +42,7 @@ function install({ enabled = true, initial = {}, applyResult = { committed: true
   };
 
   const core = {
+    STORAGE_KEY: 'taskpoints_v1',
     writePendingHabitDelta(input) {
       events.push('legacy');
       return { ...input };
@@ -60,25 +64,30 @@ function install({ enabled = true, initial = {}, applyResult = { committed: true
     Set,
     Promise,
     console,
+    crypto: { randomUUID() { uuid += 1; return `bridge-test-${uuid}`; } },
     TaskPointsCore: core,
     TaskPointsStateRuntimeV2: {
-      applyHabitDelta(input) { return runtimeApply(input); }
+      applyHabitDelta(input, options) { return runtimeApply(input, options); }
     },
-    setTimeout(fn) { timers.push(fn); return timers.length; }
+    setTimeout(fn) { timers.push(fn); return timers.length; },
+    queueMicrotask(fn) { Promise.resolve().then(fn); }
   };
   context.window = context;
   context.globalThis = context;
 
+  vm.runInNewContext(generationSource, context, { filename: 'state_runtime_v2_generation.js' });
   vm.runInNewContext(walSource, context, { filename: 'state_runtime_v2_wal.js' });
   vm.runInNewContext(bridgeSource, context, { filename: 'state_runtime_v2_wal_bridge.js' });
 
   async function flushTimers() {
-    while (timers.length) {
-      const fn = timers.shift();
-      await fn();
+    for (let pass = 0; pass < 8; pass += 1) {
+      while (timers.length) {
+        const fn = timers.shift();
+        await fn();
+        await Promise.resolve();
+      }
       await Promise.resolve();
     }
-    await Promise.resolve();
   }
 
   return {
@@ -98,9 +107,10 @@ test('bridge is default-off and leaves the production habit journal untouched', 
   assert.equal(context.TaskPointsStateRuntimeV2WalBridge.installHook(), false);
   assert.equal(core.writePendingHabitDelta, original);
   assert.equal(localStorage.getItem(WAL_KEY), null);
+  assert.equal(localStorage.getItem(GENERATION_KEY), null);
 });
 
-test('habit journal writes V1 first, then synchronously writes V2 WAL before async verification', async () => {
+test('habit journal writes V1 first, then synchronously writes generation-stamped V2 WAL before async verification', async () => {
   const app = install();
   await app.flushTimers();
   app.events.length = 0;
@@ -110,6 +120,7 @@ test('habit journal writes V1 first, then synchronously writes V2 WAL before asy
   const pending = JSON.parse(app.localStorage.getItem(WAL_KEY));
   assert.equal(pending.length, 1);
   assert.equal(pending[0].delta.habitId, 'h1');
+  assert.equal(pending[0].generation, app.context.TaskPointsStateRuntimeV2Generation.read());
   assert.equal(app.events.includes('apply'), false);
 
   await app.flushTimers();
@@ -136,32 +147,35 @@ test('failed IndexedDB verification preserves WAL for a later replay', async () 
   assert.equal(app.context.TaskPointsStateRuntimeV2WalBridge.getStatus().failures > 0, true);
 });
 
-test('startup replay commits an interrupted WAL mutation and removes it exactly after verification', async () => {
+test('startup replay commits an interrupted current-generation WAL mutation and removes it exactly after verification', async () => {
   const seed = install();
   await seed.flushTimers();
-  const mutationId = seed.context.TaskPointsStateRuntimeV2Wal.mutationIdForDelta(delta);
+  const generation = seed.context.TaskPointsStateRuntimeV2Generation.read();
+  const mutationId = seed.context.TaskPointsStateRuntimeV2Wal.mutationIdForDelta(delta, generation);
   const row = {
     id: mutationId,
     schemaVersion: 1,
     type: 'habit-completion-set',
+    generation,
     createdAtISO: '2026-08-31T20:00:01.000Z',
     delta
   };
 
-  const app = install({ initial: { [WAL_KEY]: JSON.stringify([row]) } });
+  const app = install({ initial: { [GENERATION_KEY]: generation, [WAL_KEY]: JSON.stringify([row]) } });
   await app.flushTimers();
   assert.equal(app.events.filter((event) => event === 'apply').length, 1);
   assert.equal(app.localStorage.getItem(WAL_KEY), null);
   assert.equal(app.context.TaskPointsStateRuntimeV2WalBridge.getStatus().replayCleared, 1);
 });
 
-test('startup replay stops at a failed mutation and leaves it durable', async () => {
+test('startup replay stops at a failed current-generation mutation and leaves it durable', async () => {
   const seed = install();
   await seed.flushTimers();
-  const mutationId = seed.context.TaskPointsStateRuntimeV2Wal.mutationIdForDelta(delta);
-  const row = { id: mutationId, schemaVersion: 1, type: 'habit-completion-set', createdAtISO: 'x', delta };
+  const generation = seed.context.TaskPointsStateRuntimeV2Generation.read();
+  const mutationId = seed.context.TaskPointsStateRuntimeV2Wal.mutationIdForDelta(delta, generation);
+  const row = { id: mutationId, schemaVersion: 1, type: 'habit-completion-set', generation, createdAtISO: 'x', delta };
   const app = install({
-    initial: { [WAL_KEY]: JSON.stringify([row]) },
+    initial: { [GENERATION_KEY]: generation, [WAL_KEY]: JSON.stringify([row]) },
     applyResult: new Error('indexeddb_failed')
   });
   await app.flushTimers();
@@ -169,13 +183,28 @@ test('startup replay stops at a failed mutation and leaves it durable', async ()
   assert.equal(JSON.parse(app.localStorage.getItem(WAL_KEY)).length, 1);
 });
 
-test('identity-mismatched replay row is preserved and never applied', async () => {
-  const row = { id: 'habit-delta:not-the-right-id', schemaVersion: 1, type: 'habit-completion-set', createdAtISO: 'x', delta };
-  const app = install({ initial: { [WAL_KEY]: JSON.stringify([row]) } });
+test('identity-mismatched current-generation replay row is preserved and never applied', async () => {
+  const generation = 'generation:identity-test';
+  const row = { id: 'habit-delta:not-the-right-id', schemaVersion: 1, type: 'habit-completion-set', generation, createdAtISO: 'x', delta };
+  const app = install({ initial: { [GENERATION_KEY]: generation, [WAL_KEY]: JSON.stringify([row]) } });
   await app.flushTimers();
   assert.equal(app.events.includes('apply'), false);
   assert.equal(JSON.parse(app.localStorage.getItem(WAL_KEY)).length, 1);
   assert.match(app.context.TaskPointsStateRuntimeV2WalBridge.getStatus().lastError, /identity_mismatch/);
+});
+
+test('stale-generation replay row is preserved and skipped without applying it', async () => {
+  const activeGeneration = 'generation:active';
+  const staleGeneration = 'generation:stale';
+  const seed = install({ initial: { [GENERATION_KEY]: staleGeneration } });
+  await seed.flushTimers();
+  const mutationId = seed.context.TaskPointsStateRuntimeV2Wal.mutationIdForDelta(delta, staleGeneration);
+  const row = { id: mutationId, schemaVersion: 1, type: 'habit-completion-set', generation: staleGeneration, createdAtISO: 'x', delta };
+  const app = install({ initial: { [GENERATION_KEY]: activeGeneration, [WAL_KEY]: JSON.stringify([row]) } });
+  await app.flushTimers();
+  assert.equal(app.events.includes('apply'), false);
+  assert.equal(JSON.parse(app.localStorage.getItem(WAL_KEY)).length, 1);
+  assert.equal(app.context.TaskPointsStateRuntimeV2WalBridge.getStatus().staleRowsPreserved > 0, true);
 });
 
 test('malformed WAL is preserved during startup replay and is never silently cleared', async () => {
