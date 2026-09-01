@@ -1,0 +1,57 @@
+name: Temporary Remove Task More Menu
+
+on:
+  push:
+    branches:
+      - agent/remove-task-more-menu
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/remove-task-more-menu
+          fetch-depth: 0
+
+      - name: Remove per-task more button
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const file = 'index.html';
+          let source = fs.readFileSync(file, 'utf8');
+          const button = '                <button class="btn btn-ghost btn-task task-more-btn" data-task-action="more" data-task-id="${t.id}" aria-haspopup="dialog" aria-label="More actions">⋯</button>\n';
+          const matches = source.split(button).length - 1;
+          if (matches !== 1) throw new Error(`Expected exactly one per-task more button, found ${matches}`);
+          source = source.replace(button, '');
+          if (source.includes('task-more-btn" data-task-action="more"')) throw new Error('Per-task more button still present');
+          if (!source.includes('data-task-action="complete" data-task-id="${t.id}" aria-label="Done">✓</button>')) {
+            throw new Error('Task completion checkmark was altered or removed');
+          }
+          fs.writeFileSync(file, source);
+          NODE
+
+      - name: Run task interaction regression tests
+        run: node --test tests/task_action_fast_paths.test.js tests/step5h_task_card_expand_state_handoff.test.js
+
+      - name: Verify card no longer renders submenu trigger
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const source = fs.readFileSync('index.html', 'utf8');
+          if (source.includes('task-more-btn" data-task-action="more"')) process.exit(1);
+          if (!source.includes('<div class="task-card-header-actions">\n                <button class="btn btn-success btn-task btn-check" data-task-action="complete"')) process.exit(1);
+          NODE
+
+      - name: Commit verified tweak
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git commit -m "Remove per-task more actions button"
+          git push origin HEAD:agent/remove-task-more-menu
