@@ -34,6 +34,7 @@ jobs:
           set -uo pipefail
           mapfile -d '' files < <(find tests -type f -name '*.test.js' -print0 | sort -z)
           echo "Found ${#files[@]} test files"
+          failures=()
           for file in "${files[@]}"; do
             echo "=== TEST FILE: $file ==="
             set +e
@@ -42,13 +43,17 @@ jobs:
             set -e
             if [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; then
               echo "HUNG_TEST_FILE=$file"
-              exit 124
-            fi
-            if [ "$status" -ne 0 ]; then
+              failures+=("HUNG:$file")
+            elif [ "$status" -ne 0 ]; then
               echo "FAILED_TEST_FILE=$file STATUS=$status"
-              exit "$status"
+              failures+=("FAILED:$file:$status")
             fi
           done
+          if [ "${#failures[@]}" -ne 0 ]; then
+            echo "=== INDIVIDUAL TEST DIAGNOSTIC FAILURES ==="
+            printf '%s\n' "${failures[@]}"
+            exit 1
+          fi
 
       - name: Run full TaskPoints test suite
         run: npm test
