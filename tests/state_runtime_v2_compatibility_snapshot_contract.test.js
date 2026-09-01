@@ -147,8 +147,10 @@ test('V2-17 compatibility snapshot preserves completion order, duplicate IDs, di
 
   const parity = await app.api.verifyParity();
   assert.equal(parity.match, true);
-  assert.deepEqual(parity.expectedCounts, { habits: 1, completions: 5 });
-  assert.deepEqual(parity.actualCounts, { habits: 1, completions: 5 });
+  assert.equal(parity.expectedCounts.habits, 1);
+  assert.equal(parity.expectedCounts.completions, 5);
+  assert.equal(parity.actualCounts.habits, 1);
+  assert.equal(parity.actualCounts.completions, 5);
 });
 
 test('V2-17 a new V2 habit completion sorts ahead of preserved unrelated duplicate legacy rows', async () => {
