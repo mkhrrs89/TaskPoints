@@ -169,6 +169,15 @@ test('startup replay stops at a failed mutation and leaves it durable', async ()
   assert.equal(JSON.parse(app.localStorage.getItem(WAL_KEY)).length, 1);
 });
 
+test('identity-mismatched replay row is preserved and never applied', async () => {
+  const row = { id: 'habit-delta:not-the-right-id', schemaVersion: 1, type: 'habit-completion-set', createdAtISO: 'x', delta };
+  const app = install({ initial: { [WAL_KEY]: JSON.stringify([row]) } });
+  await app.flushTimers();
+  assert.equal(app.events.includes('apply'), false);
+  assert.equal(JSON.parse(app.localStorage.getItem(WAL_KEY)).length, 1);
+  assert.match(app.context.TaskPointsStateRuntimeV2WalBridge.getStatus().lastError, /identity_mismatch/);
+});
+
 test('malformed WAL is preserved during startup replay and is never silently cleared', async () => {
   const malformed = '{ nope';
   const app = install({ initial: { [WAL_KEY]: malformed } });
