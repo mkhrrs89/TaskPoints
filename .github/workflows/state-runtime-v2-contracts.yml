@@ -28,5 +28,27 @@ jobs:
       - name: Run State Runtime V2 contract tests
         run: node --test tests/state_runtime_v2*.test.js tests/perf_trace_v2_visibility_contract.test.js
 
+      - name: Diagnose individual TaskPoints test files
+        shell: bash
+        run: |
+          set -uo pipefail
+          mapfile -d '' files < <(find tests -type f -name '*.test.js' -print0 | sort -z)
+          echo "Found ${#files[@]} test files"
+          for file in "${files[@]}"; do
+            echo "=== TEST FILE: $file ==="
+            set +e
+            timeout --signal=TERM --kill-after=5s 30s node --test "$file"
+            status=$?
+            set -e
+            if [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; then
+              echo "HUNG_TEST_FILE=$file"
+              exit 124
+            fi
+            if [ "$status" -ne 0 ]; then
+              echo "FAILED_TEST_FILE=$file STATUS=$status"
+              exit "$status"
+            fi
+          done
+
       - name: Run full TaskPoints test suite
         run: npm test
