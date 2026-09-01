@@ -158,7 +158,10 @@ const EXECUTABLE_COVERAGE = Object.freeze({
   'V2-14': 'tests/state_runtime_v2_generation_contract.test.js',
   'V2-15': 'tests/state_runtime_v2_revision_conflict_contract.test.js',
   'V2-16': 'tests/state_runtime_v2_compatibility_snapshot_contract.test.js',
-  'V2-17': 'tests/state_runtime_v2_compatibility_snapshot_contract.test.js'
+  'V2-17': 'tests/state_runtime_v2_compatibility_snapshot_contract.test.js',
+  'V2-18': 'tests/state_runtime_v2_failure_isolation_contract.test.js',
+  'V2-19': 'tests/state_runtime_v2_failure_isolation_contract.test.js',
+  'V2-20': 'tests/state_runtime_v2_failure_isolation_contract.test.js'
 });
 
 test('State Runtime V2 defines the complete initial 22-contract matrix', () => {
@@ -203,11 +206,11 @@ test('V2 contracts explicitly preserve existing production and image-storage bou
   assert.match(text, /default-off rollout/);
 });
 
-test('V2-01 through V2-17 are promoted only with explicit executable coverage files', () => {
+test('V2-01 through V2-20 are promoted only with explicit executable coverage files', () => {
   const promoted = Object.keys(EXECUTABLE_COVERAGE);
   assert.deepEqual(
     promoted,
-    Array.from({ length: 17 }, (_, index) => `V2-${String(index + 1).padStart(2, '0')}`)
+    Array.from({ length: 20 }, (_, index) => `V2-${String(index + 1).padStart(2, '0')}`)
   );
   const contractIds = new Set(CONTRACTS.map((contract) => contract.id));
   for (const [id, filename] of Object.entries(EXECUTABLE_COVERAGE)) {
