@@ -2168,7 +2168,7 @@ header,
     rgba(153, 27, 27, 0.34),
     rgba(88, 28, 28, 0.24)
   ) !important;
-  border-color: transparent !important;
+  border: none !important;
 }
 
 .task-priority-card.task-priority-medium {
@@ -2194,7 +2194,7 @@ header,
     rgba(180, 83, 9, 0.24),
     rgba(120, 52, 4, 0.16)
   ) !important;
-  border-color: transparent !important;
+  border: none !important;
 }
 
 /* =======================================================================
