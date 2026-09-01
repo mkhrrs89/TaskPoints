@@ -1704,6 +1704,7 @@ Nothing visible on the page is built here. === -->
   }
 </script>
 <script src="scoring_core.js"></script>  
+<script src="home_rank_percentile_line.js"></script>
 <script>
 const STORAGE_KEY="taskpoints_v1";
 const PENDING_HABIT_DELTAS_KEY="taskpoints_pending_habit_deltas_v1";
@@ -3452,7 +3453,7 @@ function getPlayerRecordText(playerId) {
   if (!playerId || playerId === 'YOU') return '0-0';
 
   if (window.TaskPointsCore?.computeRecord) {
-    const record = TaskPointsCore.computeRecord(getHomeScoreboardSeasonTwoState(), playerId, { includeToday: false, allowFallback: false });
+    const record = TaskPointsCore.computeRecord(getHomeScoreboardSeasonThreeState(), playerId, { includeToday: false, allowFallback: false });
     return record.games ? `${record.wins}-${record.losses}` : '0-0';
   }
 
@@ -3461,7 +3462,7 @@ function getPlayerRecordText(playerId) {
     ? player.baseline
     : null;
 
-  const scopedState = getHomeScoreboardSeasonTwoState();
+  const scopedState = getHomeScoreboardSeasonThreeState();
   const history = Array.isArray(scopedState.gameHistory) ? scopedState.gameHistory : [];
 
   let wins = 0;
@@ -3491,7 +3492,7 @@ function getYourRecordText() {
 
 function computeYourRecord(){
   if (window.TaskPointsCore?.computeRecord) {
-    return TaskPointsCore.computeRecord(getHomeScoreboardSeasonTwoState(), 'YOU', { includeToday: false, allowFallback: false });
+    return TaskPointsCore.computeRecord(getHomeScoreboardSeasonThreeState(), 'YOU', { includeToday: false, allowFallback: false });
   }
   const matchupRecord = computeYourMatchupRecord();
   if (matchupRecord.games > 0) return matchupRecord;
@@ -3871,6 +3872,8 @@ function getAllParticipantIds(){
 }
 
 const HOME_SCOREBOARD_SEASON_TWO_START = "2026-07-01";
+const HOME_SCOREBOARD_SEASON_THREE_START = "2026-09-01";
+const HOME_SCOREBOARD_SEASON_THREE_END = "2026-10-01";
 
 function getHomeScoreboardDateKey(row) {
   if (!row) return "";
@@ -3885,30 +3888,30 @@ function getHomeScoreboardDateKey(row) {
   return "";
 }
 
-function getHomeScoreboardSeasonTwoRows(rows) {
+function getHomeScoreboardSeasonThreeRows(rows) {
   const list = Array.isArray(rows) ? rows : [];
 
   return list.filter((row) => {
     const key = getHomeScoreboardDateKey(row);
-    return key && key >= HOME_SCOREBOARD_SEASON_TWO_START;
+    return key && key >= HOME_SCOREBOARD_SEASON_THREE_START && key < HOME_SCOREBOARD_SEASON_THREE_END;
   });
 }
 
-function getHomeScoreboardSeasonTwoState() {
+function getHomeScoreboardSeasonThreeState() {
   const s = state || {};
 
   return {
     ...s,
-    matchups: getHomeScoreboardSeasonTwoRows(s.matchups),
-    gameHistory: getHomeScoreboardSeasonTwoRows(s.gameHistory),
-    completions: getHomeScoreboardSeasonTwoRows(s.completions)
+    matchups: getHomeScoreboardSeasonThreeRows(s.matchups),
+    gameHistory: getHomeScoreboardSeasonThreeRows(s.gameHistory),
+    completions: getHomeScoreboardSeasonThreeRows(s.completions)
   };
 }
 
 function getCanonicalRankingMap(){
   if (!window.TaskPointsCore?.computeCanonicalRankings) return new Map();
 
-  const scopedState = getHomeScoreboardSeasonTwoState();
+  const scopedState = getHomeScoreboardSeasonThreeState();
   const rows = TaskPointsCore.computeCanonicalRankings(scopedState);
   const byId = new Map();
 
@@ -9933,7 +9936,7 @@ function taskDueMeta(t, today){
   if (t.dueDateISO) {
     const dueDate = fromKey(t.dueDateISO);
     const diff = Math.round((dueDate - today) / 86400000);
-    parts.push(niceDate(dueDate));
+    parts.push(niceDate(dueDate).replace(/\b(\d{4})\b/, (_, year) => `’${year.slice(-2)}`));
     if (diff > 0) parts.push(`Due in ${diff}d`);
     else if (diff === 0) parts.push('Due today');
     else parts.push(`${Math.abs(diff)}d overdue`);
@@ -10371,7 +10374,6 @@ wireTaskSkillEditor(card, t.id);
               <div class="task-card-header-actions">
                 <button class="btn btn-success btn-task btn-check" data-task-action="complete" data-task-id="${t.id}" aria-label="Done">✓</button>
                 ${isOverdue ? `<button class="btn btn-ghost btn-task" data-task-action="postpone" data-task-id="${t.id}">Postpone</button>` : ''}
-                <button class="btn btn-ghost btn-task task-more-btn" data-task-action="more" data-task-id="${t.id}" aria-haspopup="dialog" aria-label="More actions">⋯</button>
               </div>
             </div>
           </div>
