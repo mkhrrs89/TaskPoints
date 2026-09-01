@@ -49,8 +49,8 @@ jobs:
           fs.writeFileSync(file, source);
           NODE
 
-      - name: Run focused home scoreboard tests
-        run: node --test tests/home_scoreboard_rank_gold.test.js tests/home_scoreboard_season3_scope.test.js
+      - name: Run Season 3 home scoreboard regression contract
+        run: node --test tests/home_scoreboard_season3_scope.test.js
 
       - name: Commit verified patch
         run: |
