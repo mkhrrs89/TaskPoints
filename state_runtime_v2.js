@@ -23,10 +23,13 @@
   let duplicateMutations = 0;
   let mirrorFailures = 0;
   let generationInvalidations = 0;
+  let revisionConflicts = 0;
   let lastError = null;
   let lastMutationId = null;
   let lastSeedHash = null;
   let lastResetGeneration = null;
+  let lastKnownRevision = null;
+  let lastRevisionConflict = null;
   let lastParity = null;
 
   function nowIso() { return new Date().toISOString(); }
@@ -99,6 +102,15 @@
     error.code = 'STATE_RUNTIME_V2_STALE_GENERATION';
     error.expectedGeneration = expectedGeneration || null;
     error.actualGeneration = actualGeneration || null;
+    error.phase = phase;
+    return error;
+  }
+
+  function revisionConflictError(expectedRevision, actualRevision, phase = 'meta') {
+    const error = new Error(`state_runtime_v2_revision_conflict:${phase}:${expectedRevision ?? 'missing'}:${actualRevision ?? 'missing'}`);
+    error.code = 'STATE_RUNTIME_V2_REVISION_CONFLICT';
+    error.expectedRevision = expectedRevision ?? null;
+    error.actualRevision = actualRevision ?? null;
     error.phase = phase;
     return error;
   }
@@ -220,6 +232,7 @@
   }
 
   async function clearForMissingLegacy(db, previousMeta = null, resetGeneration = currentGeneration()) {
+    const revision = Number(previousMeta?.revision || 0) + 1;
     const tx = db.transaction(STORE_NAMES, 'readwrite');
     tx.objectStore('habits').clear();
     tx.objectStore('completions').clear();
@@ -227,7 +240,7 @@
     tx.objectStore('meta').put({
       id: RUNTIME_META_ID,
       schemaVersion: SCHEMA_VERSION,
-      revision: Number(previousMeta?.revision || 0) + 1,
+      revision,
       completionSequence: 0,
       resetGeneration,
       source: 'legacy-dark-mirror',
@@ -240,15 +253,22 @@
     seeded = true;
     lastSeedHash = null;
     lastResetGeneration = resetGeneration;
-    mark('stateV2.seededEmpty', { reason: 'legacy_missing', resetGeneration });
-    return { seeded: true, empty: true, reason: 'legacy_missing', resetGeneration };
+    lastKnownRevision = revision;
+    mark('stateV2.seededEmpty', { reason: 'legacy_missing', resetGeneration, revision });
+    return { seeded: true, empty: true, reason: 'legacy_missing', resetGeneration, revision };
   }
 
   async function seedFromLegacy(options = {}) {
     if (!isDarkEnabled()) return { seeded: false, reason: 'dark_disabled' };
     const requestedGeneration = currentGeneration();
     if (seeded && options.force !== true && lastResetGeneration === requestedGeneration) {
-      return { seeded: false, reason: 'already_seeded_this_page', hash: lastSeedHash, resetGeneration: lastResetGeneration };
+      return {
+        seeded: false,
+        reason: 'already_seeded_this_page',
+        hash: lastSeedHash,
+        resetGeneration: lastResetGeneration,
+        revision: lastKnownRevision
+      };
     }
     if (seedPromise) {
       if (options.force !== true) return seedPromise;
@@ -273,7 +293,14 @@
         seeded = true;
         lastSeedHash = hash;
         lastResetGeneration = desiredGeneration;
-        return { seeded: false, reason: 'already_current', hash, resetGeneration: desiredGeneration };
+        lastKnownRevision = Number(previousMeta?.revision || 0);
+        return {
+          seeded: false,
+          reason: 'already_current',
+          hash,
+          resetGeneration: desiredGeneration,
+          revision: lastKnownRevision
+        };
       }
 
       const habits = source.state.habits;
@@ -324,6 +351,7 @@
       seeded = true;
       lastSeedHash = hash;
       lastResetGeneration = desiredGeneration;
+      lastKnownRevision = revision;
       mark('stateV2.seeded', { habits: habits.length, completions: completions.length, revision, resetGeneration: desiredGeneration });
       return { seeded: true, reason: 'seeded', hash, revision, resetGeneration: desiredGeneration, habits: habits.length, completions: completions.length };
     };
@@ -408,6 +436,9 @@
     const delta = normalizeDelta(deltaInput);
     const expectedGeneration = String(options.expectedGeneration || currentGeneration());
     await seedFromLegacy();
+    const expectedRevision = options.expectedRevision != null
+      ? Number(options.expectedRevision)
+      : lastKnownRevision;
 
     const generationBeforeOpen = currentGeneration({ create: false });
     if (generationBeforeOpen !== expectedGeneration) {
@@ -492,9 +523,26 @@
             duplicate = true;
             return;
           }
+
+          const actualRevision = Number(runtimeMeta.revision || 0);
+          if (expectedRevision != null && actualRevision !== Number(expectedRevision)) {
+            revisionConflicts += 1;
+            lastKnownRevision = actualRevision;
+            lastRevisionConflict = {
+              expectedRevision: Number(expectedRevision),
+              actualRevision,
+              mutationId,
+              habitId: delta.habitId,
+              dayKey: delta.dayKey,
+              detectedAtISO: nowIso()
+            };
+            mark('stateV2.revisionConflict', lastRevisionConflict);
+            throw revisionConflictError(Number(expectedRevision), actualRevision, 'meta');
+          }
+
           if (!habitRow?.value) throw new Error(`state_runtime_v2_habit_missing:${delta.habitId}`);
 
-          nextRevision = Number(runtimeMeta.revision || 0) + 1;
+          nextRevision = actualRevision + 1;
           const nextHabit = patchHabit(habitRow.value, delta);
           habitsStore.put({ ...habitRow, id: delta.habitId, value: nextHabit });
 
@@ -516,6 +564,7 @@
             type: 'habit-completion-set',
             source: 'legacy-habit-journal-dark-mirror',
             status: 'committed',
+            previousRevision: actualRevision,
             revision: nextRevision,
             resetGeneration: expectedGeneration,
             createdAtISO: nowIso(),
@@ -565,11 +614,20 @@
         unsubscribeGeneration();
         if (duplicate) {
           duplicateMutations += 1;
-          resolve({ committed: false, duplicate: true, mutationId, resetGeneration: expectedGeneration });
+          lastKnownRevision = Number(runtimeMeta?.revision || lastKnownRevision || 0);
+          resolve({
+            committed: false,
+            duplicate: true,
+            mutationId,
+            revision: lastKnownRevision,
+            resetGeneration: expectedGeneration
+          });
           return;
         }
         mirroredMutations += 1;
         lastMutationId = mutationId;
+        lastKnownRevision = nextRevision;
+        lastRevisionConflict = null;
         mark('stateV2.darkMutationCommitted', { mutationId, revision: nextRevision, resetGeneration: expectedGeneration, habitId: delta.habitId, dayKey: delta.dayKey });
         resolve({ committed: true, duplicate: false, mutationId, revision: nextRevision, resetGeneration: expectedGeneration });
       };
@@ -687,15 +745,18 @@
       duplicateMutations,
       mirrorFailures,
       generationInvalidations,
+      revisionConflicts,
       generationKey: GENERATION_KEY,
       currentGeneration: currentGeneration({ create: false }),
       lastResetGeneration,
+      lastKnownRevision,
+      lastRevisionConflict,
       lastMutationId,
       lastSeedHash,
       lastError,
       lastParity,
       readAuthority: 'legacy_only',
-      walMode: 'v2_generation_stamped_wal_with_legacy_authority'
+      walMode: 'v2_generation_stamped_wal_with_revision_conflict_guard_and_legacy_authority'
     };
   }
 
@@ -741,9 +802,13 @@
       if (mutation?.type !== 'habit-completion-set' || !mutation?.delta) {
         return Promise.reject(new Error('state_runtime_v2_unsupported_dark_mutation'));
       }
-      return applyHabitDelta(mutation.delta, { expectedGeneration: mutation.generation || undefined });
+      return applyHabitDelta(mutation.delta, {
+        expectedGeneration: mutation.generation || undefined,
+        expectedRevision: mutation.expectedRevision ?? undefined
+      });
     },
     applyHabitDelta,
+    getObservedRevision: () => lastKnownRevision,
     getHabit: async (id) => {
       const db = await open();
       if (!db) return null;
