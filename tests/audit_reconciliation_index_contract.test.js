@@ -32,7 +32,7 @@ test('indexed reconciliation preserves large-scale matching semantics', () => {
       id: matchupId,
       dateKey: `2026-06-${day}`,
       playerAId: 'YOU',
-      playerBId,
+      playerBId: playerId,
       scoreA: 100,
       scoreB: score,
       completedAtISO: `2026-06-${day}T12:00:00Z`
