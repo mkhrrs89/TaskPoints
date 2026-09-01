@@ -9,7 +9,7 @@
   const DARK_MODE_KEY = 'taskpoints_state_v2_dark_mode_v1';
   const GENERATION_KEY = 'taskpoints_state_v2_generation_v1';
   const RUNTIME_META_ID = 'runtime';
-  const SCHEMA_VERSION = 1;
+  const SCHEMA_VERSION = 2;
   const STORE_NAMES = Object.freeze(['habits', 'completions', 'mutations', 'meta']);
 
   let dbPromise = null;
@@ -231,6 +231,40 @@
     return `${fnv1a(text)}:${text.length}`;
   }
 
+  function packLegacyCompletionRows(completions) {
+    const rows = new Map();
+    (completions || []).forEach((completion, index) => {
+      const storageId = completion?.id != null
+        ? String(completion.id)
+        : `__tp_v2_missing_completion_id__:${index}`;
+      const row = rows.get(storageId) || { id: storageId, entries: [] };
+      row.entries.push({
+        value: clone(completion),
+        sequence: completions.length - index
+      });
+      rows.set(storageId, row);
+    });
+    return Array.from(rows.values());
+  }
+
+  function unpackCompletionRows(rows) {
+    return (rows || [])
+      .flatMap((row) => {
+        if (Array.isArray(row?.entries)) {
+          return row.entries.map((entry) => ({
+            value: clone(entry?.value),
+            sequence: Number(entry?.sequence || 0)
+          }));
+        }
+        if (row && Object.prototype.hasOwnProperty.call(row, 'value')) {
+          return [{ value: clone(row.value), sequence: Number(row.sequence || 0) }];
+        }
+        return [];
+      })
+      .sort((a, b) => Number(b.sequence || 0) - Number(a.sequence || 0))
+      .map((entry) => clone(entry.value));
+  }
+
   async function clearForMissingLegacy(db, previousMeta = null, resetGeneration = currentGeneration()) {
     const revision = Number(previousMeta?.revision || 0) + 1;
     const tx = db.transaction(STORE_NAMES, 'readwrite');
@@ -286,6 +320,7 @@
       const hash = subsetHash(source.state);
       if (
         options.force !== true
+        && previousMeta?.schemaVersion === SCHEMA_VERSION
         && previousMeta?.seedHash === hash
         && previousMeta?.legacyMissing !== true
         && previousMeta?.resetGeneration === desiredGeneration
@@ -316,14 +351,7 @@
         if (!habit?.id) return;
         habitsStore.put({ id: String(habit.id), value: clone(habit), legacyIndex: index });
       });
-      completions.forEach((completion, index) => {
-        if (!completion?.id) return;
-        completionsStore.put({
-          id: String(completion.id),
-          value: clone(completion),
-          sequence: completions.length - index
-        });
-      });
+      packLegacyCompletionRows(completions).forEach((row) => completionsStore.put(row));
 
       const revision = Number(previousMeta?.revision || 0) + 1;
       tx.objectStore('meta').put({
@@ -687,10 +715,7 @@
       .slice()
       .sort((a, b) => Number(a.legacyIndex || 0) - Number(b.legacyIndex || 0))
       .map((row) => clone(row.value));
-    const completions = (completionRows || [])
-      .slice()
-      .sort((a, b) => Number(b.sequence || 0) - Number(a.sequence || 0))
-      .map((row) => clone(row.value));
+    const completions = unpackCompletionRows(completionRows);
     return { habits, completions };
   }
 
@@ -737,6 +762,7 @@
       darkEnabled: isDarkEnabled(),
       databaseName: DB_NAME,
       databaseVersion: DB_VERSION,
+      schemaVersion: SCHEMA_VERSION,
       stores: [...STORE_NAMES],
       opened,
       seeded,
