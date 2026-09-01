@@ -340,6 +340,11 @@
         throw new Error('Restored record-count verification failed.');
       }
       restoreVerified = true;
+      try {
+        global.TaskPointsStateRuntimeV2Generation?.rotate?.('verified-secondary-restore');
+      } catch (generationError) {
+        console.warn('TaskPoints V2 generation rotation failed after verified restore; legacy restore remains authoritative.', generationError);
+      }
 
       const lockFinalized = finalizeRecoveryLock();
       let holdFinalized = true;
