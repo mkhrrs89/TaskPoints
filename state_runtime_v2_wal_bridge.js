@@ -40,8 +40,13 @@
 
   async function verifyAndClear(delta, mutationId, phase = 'confirm') {
     const { runtime, wal } = deps();
-    if (!runtime?.applyHabitDelta || !wal?.removeMutation) {
+    if (!runtime?.applyHabitDelta || !wal?.removeMutation || !wal?.mutationIdForDelta) {
       throw new Error('state_runtime_v2_wal_bridge_dependencies_unavailable');
+    }
+
+    const expectedMutationId = wal.mutationIdForDelta(delta);
+    if (expectedMutationId !== String(mutationId)) {
+      throw new Error(`state_runtime_v2_wal_identity_mismatch:${String(mutationId)}`);
     }
 
     const result = await runtime.applyHabitDelta(delta);
