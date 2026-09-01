@@ -232,10 +232,12 @@ test('verified-secondary restore loads generation guard and rotates only after v
   const restoreScriptAt = verifiedRestoreHtml.indexOf('verified_secondary_restore.js');
   assert.ok(generationScriptAt >= 0 && restoreScriptAt > generationScriptAt);
 
+  const countVerifiedAt = verifiedRestoreSource.indexOf('Restored record-count verification failed');
   const verifiedAt = verifiedRestoreSource.indexOf('restoreVerified = true;');
   const rotateAt = verifiedRestoreSource.indexOf("TaskPointsStateRuntimeV2Generation?.rotate?.('verified-secondary-restore')");
-  assert.ok(verifiedAt >= 0 && rotateAt > verifiedAt);
-  assert.match(verifiedRestoreSource.slice(verifiedAt, rotateAt), /Restored record-count verification failed/);
+  assert.ok(countVerifiedAt >= 0, 'record-count verification must be present');
+  assert.ok(verifiedAt > countVerifiedAt, 'restore is marked verified only after exact count verification');
+  assert.ok(rotateAt > verifiedAt, 'generation rotates only after the restore is fully verified');
 });
 
 test('generation module is default-off and does not create an epoch on production/default state', () => {
