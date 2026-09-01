@@ -1,0 +1,25 @@
+name: State Runtime V2 Contracts
+
+on:
+  push:
+    branches:
+      - arch/state-runtime-v2-plan
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  v2-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run State Runtime V2 contract tests
+        run: node --test tests/state_runtime_v2*.test.js tests/perf_trace_v2_visibility_contract.test.js
