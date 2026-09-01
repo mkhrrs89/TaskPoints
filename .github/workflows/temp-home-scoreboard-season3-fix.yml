@@ -1,0 +1,61 @@
+name: Temporary Home Scoreboard Season 3 Fix
+
+on:
+  push:
+    branches:
+      - agent/home-scoreboard-season3-fix
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/home-scoreboard-season3-fix
+          fetch-depth: 0
+
+      - name: Apply focused Season 3 scoreboard patch
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const file = 'index.html';
+          let source = fs.readFileSync(file, 'utf8');
+
+          const constantNeedle = 'const HOME_SCOREBOARD_SEASON_TWO_START = "2026-07-01";';
+          if (!source.includes(constantNeedle)) throw new Error('Season 2 scoreboard cutoff not found');
+          if (!source.includes('function getHomeScoreboardSeasonTwoRows(')) throw new Error('Season 2 rows helper not found');
+          if (!source.includes('function getHomeScoreboardSeasonTwoState(')) throw new Error('Season 2 state helper not found');
+
+          source = source.replace(
+            constantNeedle,
+            constantNeedle + '\nconst HOME_SCOREBOARD_SEASON_THREE_START = "2026-09-01";\nconst HOME_SCOREBOARD_SEASON_THREE_END = "2026-10-01";'
+          );
+          source = source.replaceAll('getHomeScoreboardSeasonTwoRows', 'getHomeScoreboardSeasonThreeRows');
+          source = source.replaceAll('getHomeScoreboardSeasonTwoState', 'getHomeScoreboardSeasonThreeState');
+
+          const oldFilter = 'return key && key >= HOME_SCOREBOARD_SEASON_TWO_START;';
+          const newFilter = 'return key && key >= HOME_SCOREBOARD_SEASON_THREE_START && key < HOME_SCOREBOARD_SEASON_THREE_END;';
+          if (!source.includes(oldFilter)) throw new Error('Season 2 rows filter not found');
+          source = source.replace(oldFilter, newFilter);
+
+          if (source.includes('getHomeScoreboardSeasonTwoRows') || source.includes('getHomeScoreboardSeasonTwoState')) {
+            throw new Error('Old Season 2 scoreboard state helpers remain after patch');
+          }
+          fs.writeFileSync(file, source);
+          NODE
+
+      - name: Run focused home scoreboard tests
+        run: node --test tests/home_scoreboard_rank_gold.test.js tests/home_scoreboard_season3_scope.test.js
+
+      - name: Commit verified patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html tests/home_scoreboard_season3_scope.test.js
+          git commit -m "Use Season 3 stats on home scoreboard"
+          git push origin HEAD:agent/home-scoreboard-season3-fix
