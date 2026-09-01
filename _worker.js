@@ -23,6 +23,7 @@ const CORE_BUNDLE_ASSET_PATHS = Object.freeze([
   '/you_score_alias_alignment.js',
   '/habit_completion_source_guard.js',
   '/habit_fast_path_control.js',
+  '/state_runtime_v2_generation.js',
   '/state_runtime_v2_wal.js',
   '/state_runtime_v2.js',
   '/state_runtime_v2_wal_bridge.js',
@@ -193,12 +194,13 @@ async function buildCoreBundle(request, env, ctx, version) {
   try { coreSource = await response.text(); }
   catch (_) { return response; }
 
-  const [perfSource, aliasSource, youAliasSource, habitGuardSource, habitFastPathControlSource, stateRuntimeV2WalSource, stateRuntimeV2Source, stateRuntimeV2WalBridgeSource, sharedSaveWorkSource, inboxBadgeSource, seasonSeriesUpsetSource, taskMutationJournalSource, taskCreateFastPathSource, stateHotCacheSource, storageIdleSource] = await Promise.all([
+  const [perfSource, aliasSource, youAliasSource, habitGuardSource, habitFastPathControlSource, stateRuntimeV2GenerationSource, stateRuntimeV2WalSource, stateRuntimeV2Source, stateRuntimeV2WalBridgeSource, sharedSaveWorkSource, inboxBadgeSource, seasonSeriesUpsetSource, taskMutationJournalSource, taskCreateFastPathSource, stateHotCacheSource, storageIdleSource] = await Promise.all([
     readAssetSource(env, request, '/performance_diagnostics.js'),
     readAssetSource(env, request, '/score_alias_consistency.js'),
     readAssetSource(env, request, '/you_score_alias_alignment.js'),
     readAssetSource(env, request, '/habit_completion_source_guard.js'),
     readAssetSource(env, request, '/habit_fast_path_control.js'),
+    readAssetSource(env, request, '/state_runtime_v2_generation.js'),
     readAssetSource(env, request, '/state_runtime_v2_wal.js'),
     readAssetSource(env, request, '/state_runtime_v2.js'),
     readAssetSource(env, request, '/state_runtime_v2_wal_bridge.js'),
@@ -210,7 +212,7 @@ async function buildCoreBundle(request, env, ctx, version) {
     readAssetSource(env, request, '/state_hot_cache.js'),
     readAssetSource(env, request, '/storage_maintenance_idle.js')
   ]);
-  const additions = [aliasSource, youAliasSource, habitGuardSource, habitFastPathControlSource, stateRuntimeV2WalSource, stateRuntimeV2Source, stateRuntimeV2WalBridgeSource, sharedSaveWorkSource, inboxBadgeSource, seasonSeriesUpsetSource, taskMutationJournalSource, taskCreateFastPathSource, stateHotCacheSource, storageIdleSource].filter(Boolean);
+  const additions = [aliasSource, youAliasSource, habitGuardSource, habitFastPathControlSource, stateRuntimeV2GenerationSource, stateRuntimeV2WalSource, stateRuntimeV2Source, stateRuntimeV2WalBridgeSource, sharedSaveWorkSource, inboxBadgeSource, seasonSeriesUpsetSource, taskMutationJournalSource, taskCreateFastPathSource, stateHotCacheSource, storageIdleSource].filter(Boolean);
   const source = [
     perfSource,
     coreSource,
@@ -224,6 +226,7 @@ async function buildCoreBundle(request, env, ctx, version) {
     'x-taskpoints-you-score-alias-alignment': youAliasSource ? 'included' : 'missing',
     'x-taskpoints-habit-source-guard': habitGuardSource ? 'included' : 'missing',
     'x-taskpoints-habit-fast-path-control': habitFastPathControlSource ? 'included' : 'missing',
+    'x-taskpoints-state-runtime-v2-generation': stateRuntimeV2GenerationSource ? 'included' : 'missing',
     'x-taskpoints-state-runtime-v2-wal': stateRuntimeV2WalSource ? 'included' : 'missing',
     'x-taskpoints-state-runtime-v2': stateRuntimeV2Source ? 'included' : 'missing',
     'x-taskpoints-state-runtime-v2-wal-bridge': stateRuntimeV2WalBridgeSource ? 'included' : 'missing',
