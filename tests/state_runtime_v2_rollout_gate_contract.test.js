@@ -5,23 +5,36 @@ const path = require('node:path');
 
 const repoRoot = path.join(__dirname, '..');
 const workflow = fs.readFileSync(path.join(repoRoot, '.github', 'workflows', 'state-runtime-v2-contracts.yml'), 'utf8');
+const baselineFailures = fs.readFileSync(path.join(repoRoot, 'tests', 'state_runtime_v2_baseline_failures.txt'), 'utf8');
 const packageJson = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
 const previewEnable = fs.readFileSync(path.join(repoRoot, 'state_v2_preview_enable.html'), 'utf8');
 const runtime = fs.readFileSync(path.join(repoRoot, 'state_runtime_v2.js'), 'utf8');
 
 const V2_COMMAND = 'node --test tests/state_runtime_v2*.test.js tests/perf_trace_v2_visibility_contract.test.js';
 
-test('V2-22 branch CI requires locked dependencies, focused V2 contracts, and the complete TaskPoints test suite', () => {
+test('V2-22 branch CI gates focused V2 contracts and regressions beyond the recorded current-main baseline', () => {
   assert.match(workflow, /branches:\s*\n\s*- arch\/state-runtime-v2-plan/);
   assert.match(workflow, /run:\s*npm ci/);
   assert.ok(workflow.includes(V2_COMMAND), 'focused V2 safety suite must remain an explicit gate');
-  assert.match(workflow, /name:\s*Run full TaskPoints test suite[\s\S]*?run:\s*npm test/);
+  assert.match(workflow, /Diagnose individual TaskPoints test files against main baseline/);
+  assert.match(workflow, /tests\/state_runtime_v2_baseline_failures\.txt/);
+  assert.match(workflow, /NEW_V2_REGRESSION/);
+  assert.match(workflow, /Fail rollout gate on new V2 regressions/);
+  assert.match(workflow, /Run full TaskPoints test suite as supplemental diagnostic/);
+  assert.match(workflow, /timeout[^\n]*npm test/);
+  assert.match(workflow, /continue-on-error:\s*true/);
   assert.equal(packageJson.scripts?.test, 'node --test');
+  assert.match(baselineFailures, /Snapshot of individual test-file failures observed on current main/);
 
   const installAt = workflow.indexOf('run: npm ci');
   const v2At = workflow.indexOf(V2_COMMAND);
-  const fullAt = workflow.indexOf('run: npm test');
-  assert.ok(installAt >= 0 && v2At > installAt && fullAt > v2At, 'full-suite gate must run after dependencies and focused V2 contracts');
+  const individualAt = workflow.indexOf('Diagnose individual TaskPoints test files against main baseline');
+  const fullAt = workflow.indexOf('Run full TaskPoints test suite as supplemental diagnostic');
+  const regressionGateAt = workflow.indexOf('Fail rollout gate on new V2 regressions');
+  assert.ok(
+    installAt >= 0 && v2At > installAt && individualAt > v2At && fullAt > individualAt && regressionGateAt > fullAt,
+    'baseline-aware regression gate must run after dependencies, focused V2 contracts, individual diagnostics, and the supplemental full suite'
+  );
 });
 
 test('V2-22 rollout remains default-off and preview-only rather than silently becoming production authority', () => {
