@@ -1,0 +1,35 @@
+# Snapshot of individual test-file failures observed on current main (0b643035811045f2ee450831faef8db2e5a2dd10) on 2026-09-02.
+# The V2 gate continues to report these, but they do not count as V2 regressions unless their status changes or a new failure appears.
+FAILED:tests/audit_reconciliation_index_contract.test.js
+FAILED:tests/direct_score_alias_page_loader.test.js
+FAILED:tests/faster_mode_reopen_persistence_contract.test.js
+FAILED:tests/flex_action_fast_path_contract.test.js
+FAILED:tests/flex_action_fast_path_review_contract.test.js
+FAILED:tests/habit_ledger_history_preservation.test.js
+FAILED:tests/habit_ledger_matchup_impact_attestation.test.js
+FAILED:tests/habit_ledger_matchup_impact_canonical.test.js
+FAILED:tests/habit_ledger_matchup_impact_guard.test.js
+FAILED:tests/habit_ledger_matchup_legacy_safety.test.js
+FAILED:tests/habit_ledger_matchup_restore.test.js
+FAILED:tests/home_first_paint_maintenance.test.js
+FAILED:tests/home_scoreboard_rank_gold.test.js
+FAILED:tests/home_targeted_render_contract.test.js
+FAILED:tests/home_yesterday_result_consistency.test.js
+FAILED:tests/inbox_population_fast_path.test.js
+FAILED:tests/indexeddb_requalification_readonly_start_contract.test.js
+FAILED:tests/keep_faster_mode_on_contract.test.js
+FAILED:tests/perf_storage_environment_report.test.js
+FAILED:tests/phase3_codec_atomic_bundle.test.js
+FAILED:tests/phase3_navigation_worker.test.js
+FAILED:tests/phase3_worker.test.js
+FAILED:tests/phase4_worker_contract.test.js
+FAILED:tests/phase5a_native_snapshot_contract.test.js
+FAILED:tests/phase5c_cross_tab_contract.test.js
+FAILED:tests/phase5c_interrupted_and_removal_contract.test.js
+FAILED:tests/phase5c_navigation_status_contract.test.js
+FAILED:tests/settings_fast_path.test.js
+HUNG:tests/step3d_navigation_maintenance.test.js
+FAILED:tests/step3h_upset_reconcile_quiet.test.js
+FAILED:tests/tournament_dynamic_bracket_contract.test.js
+FAILED:tests/work_entry_fast_path.test.js
+FAILED:tests/worker_versioned_core_bundle_contract.test.js
