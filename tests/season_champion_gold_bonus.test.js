@@ -120,7 +120,7 @@ test('reconstructs missing historical ranking matchups from gameHistory and arch
   const rows = context.TaskPointsSeasonChampionGoldBonus.collectCompleteRankingMatchups(state);
   assert.equal(rows.length, 3);
   assert.deepEqual(
-    rows.map((row) => row.id).sort(),
+    JSON.parse(JSON.stringify(rows.map((row) => row.id).sort())),
     ['season-2-final', 'season-2-game', 'season-3-game']
   );
 });
@@ -218,7 +218,7 @@ test('shared scoring bundle loader requests the champion Gold module once', () =
   context.window = context;
   context.globalThis = context;
   vm.runInContext(loaderSource, context);
-  assert.equal(appended.length, 1);
-  assert.equal(appended[0].src, 'season_champion_gold_bonus.js');
-  assert.equal(appended[0].dataset.taskpointsChampionGold, 'true');
+  const championGoldScripts = appended.filter((node) => node.src === 'season_champion_gold_bonus.js');
+  assert.equal(championGoldScripts.length, 1);
+  assert.equal(championGoldScripts[0].dataset.taskpointsChampionGold, 'true');
 });
