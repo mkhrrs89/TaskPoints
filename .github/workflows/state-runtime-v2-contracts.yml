@@ -29,24 +29,32 @@ jobs:
         run: node --test tests/state_runtime_v2*.test.js tests/perf_trace_v2_visibility_contract.test.js
 
       - name: Diagnose individual TaskPoints test files
+        id: individual_diagnostics
         shell: bash
+        continue-on-error: true
         run: |
           set -uo pipefail
+          mkdir -p v2-rollout-diagnostics/logs
+          : > v2-rollout-diagnostics/failures.txt
           mapfile -d '' files < <(find tests -type f -name '*.test.js' -print0 | sort -z)
           echo "Found ${#files[@]} test files"
           failures=()
           for file in "${files[@]}"; do
             echo "=== TEST FILE: $file ==="
+            safe_name="${file//\//__}"
+            log_file="v2-rollout-diagnostics/logs/${safe_name}.log"
             set +e
-            timeout --signal=TERM --kill-after=5s 30s node --test "$file"
-            status=$?
+            timeout --signal=TERM --kill-after=5s 30s node --test "$file" 2>&1 | tee "$log_file"
+            status=${PIPESTATUS[0]}
             set -e
             if [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; then
               echo "HUNG_TEST_FILE=$file"
               failures+=("HUNG:$file")
+              printf 'HUNG:%s\n' "$file" >> v2-rollout-diagnostics/failures.txt
             elif [ "$status" -ne 0 ]; then
               echo "FAILED_TEST_FILE=$file STATUS=$status"
               failures+=("FAILED:$file:$status")
+              printf 'FAILED:%s:%s\n' "$file" "$status" >> v2-rollout-diagnostics/failures.txt
             fi
           done
           if [ "${#failures[@]}" -ne 0 ]; then
@@ -54,6 +62,21 @@ jobs:
             printf '%s\n' "${failures[@]}"
             exit 1
           fi
+
+      - name: Upload V2 rollout diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: state-runtime-v2-rollout-diagnostics
+          path: v2-rollout-diagnostics
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Fail rollout gate if individual diagnostics failed
+        if: steps.individual_diagnostics.outcome == 'failure'
+        run: |
+          echo "Individual TaskPoints test diagnostics failed. See the uploaded state-runtime-v2-rollout-diagnostics artifact."
+          exit 1
 
       - name: Run full TaskPoints test suite
         run: npm test
