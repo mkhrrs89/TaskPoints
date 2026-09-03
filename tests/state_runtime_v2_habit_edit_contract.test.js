@@ -167,6 +167,7 @@ test('Habit metadata edit updates only the targeted Habit when historical comple
   const after = app.indexedDB.dump(DB_NAME);
 
   assert.equal(result.committed, true);
+  assert.equal(result.completionRowsTouched, 0, 'future-only edit must write zero historical completion rows');
   assert.equal(habitRow(app.indexedDB, 'h1').name, 'Read 30 Minutes');
   assert.equal(habitRow(app.indexedDB, 'h1').tag, 'Focus');
   assert.equal(habitRow(app.indexedDB, 'h1').pointsPerDay, 10);
