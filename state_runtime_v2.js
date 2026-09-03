@@ -22,6 +22,7 @@
   let mirroredMutations = 0;
   let mirroredOrderMutations = 0;
   let mirroredEditMutations = 0;
+  let mirroredPresenceMutations = 0;
   let duplicateMutations = 0;
   let mirrorFailures = 0;
   let generationInvalidations = 0;
@@ -1340,6 +1341,315 @@
     });
   }
 
+  function captureHabitPresenceSnapshotFromLegacy(habitIdInput, options = {}) {
+    const habitId = String(habitIdInput || '').trim();
+    if (!habitId) throw new Error('state_runtime_v2_invalid_habit_presence_id');
+    const source = parseLegacyStateWithPending();
+    const habits = source.missing ? [] : source.state.habits;
+    const habitIndex = habits.findIndex((habit) => String(habit?.id || '') === habitId);
+    const exists = habitIndex >= 0;
+    return {
+      version: 1,
+      habitId,
+      exists,
+      source: String(options.source || 'legacy-habit-presence'),
+      capturedAtISO: nowIso(),
+      habitIndex: exists ? habitIndex : null,
+      habit: exists ? clone(habits[habitIndex]) : null
+    };
+  }
+
+  function normalizeHabitPresenceSnapshot(snapshotInput) {
+    const source = snapshotInput && typeof snapshotInput === 'object' ? snapshotInput : {};
+    const habitId = String(source.habitId || source.habit?.id || '').trim();
+    const exists = source.exists === true;
+    const habit = exists ? clone(source.habit || null) : null;
+    if (!habitId || (exists && (!habit || String(habit.id || '') !== habitId))) {
+      throw new Error('state_runtime_v2_invalid_habit_presence_snapshot');
+    }
+    return {
+      version: Number(source.version || 1),
+      habitId,
+      exists,
+      source: String(source.source || 'legacy-habit-presence'),
+      capturedAtISO: source.capturedAtISO || nowIso(),
+      habitIndex: Number.isFinite(Number(source.habitIndex)) ? Number(source.habitIndex) : null,
+      habit
+    };
+  }
+
+  function habitPresenceMutationId(snapshot, generationInput = null) {
+    const generation = String(generationInput || currentGeneration());
+    const identity = stableJson({
+      generation,
+      habitId: snapshot.habitId,
+      exists: snapshot.exists,
+      habit: snapshot.habit
+    });
+    return `habit-presence:${fnv1a(identity)}:${identity.length}`;
+  }
+
+  async function applyHabitPresenceSnapshot(snapshotInput, options = {}) {
+    if (!isDarkEnabled()) return { committed: false, reason: 'dark_disabled' };
+    const snapshot = normalizeHabitPresenceSnapshot(snapshotInput);
+    const expectedGeneration = String(options.expectedGeneration || currentGeneration());
+    await seedFromLegacy();
+    const expectedRevision = options.expectedRevision != null
+      ? Number(options.expectedRevision)
+      : lastKnownRevision;
+
+    const generationBeforeOpen = currentGeneration({ create: false });
+    if (generationBeforeOpen !== expectedGeneration) {
+      generationInvalidations += 1;
+      throw staleGenerationError(expectedGeneration, generationBeforeOpen, 'presence-before-open');
+    }
+
+    const db = await open();
+    const mutationId = habitPresenceMutationId(snapshot, expectedGeneration);
+
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAMES, 'readwrite');
+      const habitsStore = tx.objectStore('habits');
+      const mutationsStore = tx.objectStore('mutations');
+      const metaStore = tx.objectStore('meta');
+
+      const mutationRequest = mutationsStore.get(mutationId);
+      const habitRequest = habitsStore.get(snapshot.habitId);
+      const habitsRequest = habitsStore.getAll();
+      const metaRequest = metaStore.get(RUNTIME_META_ID);
+      let existingMutation;
+      let habitRow;
+      let habitRows = [];
+      let runtimeMeta;
+      let readyCount = 0;
+      let duplicate = false;
+      let noChange = false;
+      let nextRevision = null;
+      let assignedLegacyIndex = null;
+      let prepared = false;
+      let settled = false;
+      let generationInvalidated = false;
+      let unsubscribeGeneration = () => undefined;
+
+      const finishReject = (error) => {
+        if (settled) return;
+        settled = true;
+        unsubscribeGeneration();
+        reject(error);
+      };
+
+      const fail = (error) => {
+        if (settled) return;
+        try { tx.abort(); } catch (_) {}
+        finishReject(error);
+      };
+
+      const generationApi = generationModule();
+      if (typeof generationApi?.subscribe === 'function') {
+        unsubscribeGeneration = generationApi.subscribe((event) => {
+          const nextGeneration = typeof event === 'string' ? event : event?.generation;
+          if (!nextGeneration || String(nextGeneration) === expectedGeneration || settled) return;
+          generationInvalidated = true;
+          generationInvalidations += 1;
+          fail(staleGenerationError(expectedGeneration, String(nextGeneration), 'presence-in-flight'));
+        });
+      }
+
+      const prepare = () => {
+        readyCount += 1;
+        if (readyCount !== 4 || prepared || settled) return;
+        prepared = true;
+        try {
+          const durableGeneration = currentGeneration({ create: false });
+          if (durableGeneration !== expectedGeneration) {
+            generationInvalidated = true;
+            generationInvalidations += 1;
+            throw staleGenerationError(expectedGeneration, durableGeneration, 'presence-prepare');
+          }
+
+          runtimeMeta = runtimeMeta || {
+            id: RUNTIME_META_ID,
+            schemaVersion: SCHEMA_VERSION,
+            revision: 0,
+            completionSequence: 0,
+            resetGeneration: expectedGeneration
+          };
+          if (runtimeMeta.resetGeneration && runtimeMeta.resetGeneration !== expectedGeneration) {
+            generationInvalidated = true;
+            generationInvalidations += 1;
+            throw staleGenerationError(expectedGeneration, runtimeMeta.resetGeneration, 'presence-meta');
+          }
+
+          if (existingMutation) {
+            duplicate = true;
+            return;
+          }
+
+          const actualRevision = Number(runtimeMeta.revision || 0);
+          if (expectedRevision != null && actualRevision !== Number(expectedRevision)) {
+            revisionConflicts += 1;
+            lastKnownRevision = actualRevision;
+            lastRevisionConflict = {
+              expectedRevision: Number(expectedRevision),
+              actualRevision,
+              mutationId,
+              mutationType: 'habit-presence-sync',
+              habitId: snapshot.habitId,
+              detectedAtISO: nowIso()
+            };
+            mark('stateV2.revisionConflict', lastRevisionConflict);
+            throw revisionConflictError(Number(expectedRevision), actualRevision, 'presence-meta');
+          }
+
+          if (snapshot.exists) {
+            if (habitRow?.value && stableJson(habitRow.value) === stableJson(snapshot.habit)) {
+              noChange = true;
+              return;
+            }
+            if (habitRow && Number.isFinite(Number(habitRow.legacyIndex))) {
+              assignedLegacyIndex = Number(habitRow.legacyIndex);
+            } else {
+              assignedLegacyIndex = habitRows.reduce((max, row) => {
+                const value = Number(row?.legacyIndex);
+                return Number.isFinite(value) && value > max ? value : max;
+              }, -1) + 1;
+            }
+            habitsStore.put({
+              ...(habitRow || {}),
+              id: snapshot.habitId,
+              legacyIndex: assignedLegacyIndex,
+              value: clone(snapshot.habit)
+            });
+          } else {
+            if (!habitRow?.value) {
+              noChange = true;
+              return;
+            }
+            assignedLegacyIndex = Number.isFinite(Number(habitRow.legacyIndex)) ? Number(habitRow.legacyIndex) : null;
+            habitsStore.delete(snapshot.habitId);
+          }
+
+          nextRevision = actualRevision + 1;
+          mutationsStore.put({
+            id: mutationId,
+            schemaVersion: SCHEMA_VERSION,
+            type: 'habit-presence-sync',
+            source: snapshot.source || 'legacy-habit-presence-dark-mirror',
+            status: 'committed',
+            action: snapshot.exists ? 'upsert' : 'delete',
+            previousRevision: actualRevision,
+            revision: nextRevision,
+            resetGeneration: expectedGeneration,
+            createdAtISO: nowIso(),
+            habitId: snapshot.habitId,
+            assignedLegacyIndex
+          });
+          metaStore.put({
+            ...runtimeMeta,
+            id: RUNTIME_META_ID,
+            schemaVersion: SCHEMA_VERSION,
+            revision: nextRevision,
+            resetGeneration: expectedGeneration,
+            source: 'legacy-dark-mirror',
+            lastMutationId: mutationId,
+            updatedAtISO: nowIso(),
+            legacyMissing: false
+          });
+        } catch (error) {
+          fail(error);
+        }
+      };
+
+      mutationRequest.onsuccess = () => { existingMutation = mutationRequest.result || null; prepare(); };
+      habitRequest.onsuccess = () => { habitRow = habitRequest.result || null; prepare(); };
+      habitsRequest.onsuccess = () => { habitRows = habitsRequest.result || []; prepare(); };
+      metaRequest.onsuccess = () => { runtimeMeta = metaRequest.result || null; prepare(); };
+      mutationRequest.onerror = () => fail(mutationRequest.error || new Error('state_runtime_v2_presence_mutation_read_failed'));
+      habitRequest.onerror = () => fail(habitRequest.error || new Error('state_runtime_v2_presence_habit_read_failed'));
+      habitsRequest.onerror = () => fail(habitsRequest.error || new Error('state_runtime_v2_presence_habits_read_failed'));
+      metaRequest.onerror = () => fail(metaRequest.error || new Error('state_runtime_v2_presence_meta_read_failed'));
+
+      tx.oncomplete = () => {
+        if (settled) return;
+        const durableGeneration = currentGeneration({ create: false });
+        if (durableGeneration !== expectedGeneration || generationInvalidated) {
+          settled = true;
+          unsubscribeGeneration();
+          generationInvalidations += 1;
+          const error = staleGenerationError(expectedGeneration, durableGeneration, 'presence-after-commit');
+          Promise.resolve(seedFromLegacy({ force: true })).catch((seedError) => {
+            lastError = String(seedError?.message || seedError);
+            mark('stateV2.generationScrubFailed', { message: lastError });
+          });
+          reject(error);
+          return;
+        }
+
+        settled = true;
+        unsubscribeGeneration();
+        if (duplicate) {
+          duplicateMutations += 1;
+          lastKnownRevision = Number(runtimeMeta?.revision || lastKnownRevision || 0);
+          resolve({
+            committed: false,
+            duplicate: true,
+            mutationId,
+            revision: lastKnownRevision,
+            resetGeneration: expectedGeneration
+          });
+          return;
+        }
+        if (noChange) {
+          lastKnownRevision = Number(runtimeMeta?.revision || lastKnownRevision || 0);
+          resolve({
+            committed: false,
+            duplicate: false,
+            noChange: true,
+            mutationId,
+            revision: lastKnownRevision,
+            resetGeneration: expectedGeneration,
+            habitId: snapshot.habitId,
+            exists: snapshot.exists
+          });
+          return;
+        }
+
+        mirroredMutations += 1;
+        mirroredPresenceMutations += 1;
+        lastMutationId = mutationId;
+        lastKnownRevision = nextRevision;
+        lastRevisionConflict = null;
+        mark('stateV2.darkHabitPresenceCommitted', {
+          mutationId,
+          revision: nextRevision,
+          resetGeneration: expectedGeneration,
+          habitId: snapshot.habitId,
+          exists: snapshot.exists,
+          assignedLegacyIndex
+        });
+        resolve({
+          committed: true,
+          duplicate: false,
+          mutationId,
+          revision: nextRevision,
+          resetGeneration: expectedGeneration,
+          habitId: snapshot.habitId,
+          exists: snapshot.exists,
+          assignedLegacyIndex
+        });
+      };
+      tx.onabort = () => {
+        if (settled) return;
+        if (generationInvalidated) {
+          finishReject(staleGenerationError(expectedGeneration, currentGeneration({ create: false }), 'presence-abort'));
+          return;
+        }
+        finishReject(tx.error || new Error('state_runtime_v2_presence_mutation_aborted'));
+      };
+      tx.onerror = () => undefined;
+    });
+  }
+
   function enqueueHabitDelta(delta) {
     if (!isDarkEnabled()) return mirrorTail;
     const snapshot = clone(delta);
@@ -1418,6 +1728,45 @@
           habitId
         });
         console.warn('TaskPoints V2 dark Habit edit mirror failed; production state remains authoritative.', error);
+      });
+    return mirrorTail;
+  }
+
+  function enqueueHabitPresenceFromLegacy(habitIdInput, options = {}) {
+    if (!isDarkEnabled()) return mirrorTail;
+    const habitId = String(habitIdInput || '').trim();
+    if (!habitId) return mirrorTail;
+    let snapshot;
+    try {
+      snapshot = captureHabitPresenceSnapshotFromLegacy(habitId, options);
+    } catch (error) {
+      mirrorFailures += 1;
+      lastError = String(error?.message || error);
+      mark('stateV2.darkHabitPresenceCaptureFailed', { habitId, message: lastError });
+      return Promise.resolve({ committed: false, reason: 'capture_failed', error: lastError });
+    }
+    const expectedGeneration = currentGeneration();
+    mirrorTail = mirrorTail
+      .then(async () => {
+        try {
+          return await applyHabitPresenceSnapshot(snapshot, { expectedGeneration });
+        } catch (error) {
+          if (error?.code === 'STATE_RUNTIME_V2_REVISION_CONFLICT') {
+            const refreshed = captureHabitPresenceSnapshotFromLegacy(habitId, options);
+            return applyHabitPresenceSnapshot(refreshed, { expectedGeneration });
+          }
+          throw error;
+        }
+      })
+      .catch((error) => {
+        mirrorFailures += 1;
+        lastError = String(error?.message || error);
+        mark('stateV2.darkHabitPresenceFailed', {
+          message: lastError,
+          resetGeneration: expectedGeneration,
+          habitId
+        });
+        console.warn('TaskPoints V2 dark Habit presence mirror failed; production state remains authoritative.', error);
       });
     return mirrorTail;
   }
@@ -1507,6 +1856,7 @@
       mirroredMutations,
       mirroredOrderMutations,
       mirroredEditMutations,
+      mirroredPresenceMutations,
       duplicateMutations,
       mirrorFailures,
       generationInvalidations,
@@ -1523,7 +1873,8 @@
       readAuthority: 'legacy_only',
       walMode: 'v2_generation_stamped_wal_with_revision_conflict_guard_and_legacy_authority',
       habitOrderDurability: 'production_habit_order_overlay',
-      habitEditDurability: 'persisted_legacy_habit_subset_after_home_save'
+      habitEditDurability: 'persisted_legacy_habit_subset_after_home_save',
+      habitPresenceDurability: 'persisted_legacy_habit_presence_after_home_save'
     };
   }
 
@@ -1584,6 +1935,12 @@
           expectedRevision: mutation.expectedRevision ?? undefined
         });
       }
+      if (mutation?.type === 'habit-presence-sync' && mutation?.snapshot) {
+        return applyHabitPresenceSnapshot(mutation.snapshot, {
+          expectedGeneration: mutation.generation || undefined,
+          expectedRevision: mutation.expectedRevision ?? undefined
+        });
+      }
       return Promise.reject(new Error('state_runtime_v2_unsupported_dark_mutation'));
     },
     applyHabitDelta,
@@ -1592,6 +1949,9 @@
     captureHabitEditSnapshotFromLegacy,
     applyHabitEditSnapshot,
     enqueueHabitEditFromLegacy,
+    captureHabitPresenceSnapshotFromLegacy,
+    applyHabitPresenceSnapshot,
+    enqueueHabitPresenceFromLegacy,
     getObservedRevision: () => lastKnownRevision,
     getHabit: async (id) => {
       const db = await open();
