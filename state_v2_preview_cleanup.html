@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TaskPoints V2 Preview Cleanup</title>
+  <style>
+    html,body{background:#0b0d10;color:#e5e7eb;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:0;min-height:100%}
+    body{display:grid;place-items:center;min-height:100vh;padding:24px;box-sizing:border-box}
+    main{max-width:620px;width:100%;border:1px solid rgba(148,163,184,.25);border-radius:16px;padding:24px;background:#111827}
+    h1{font-size:1.25rem;margin:0 0 12px}p{line-height:1.5;color:#cbd5e1}.ok{color:#86efac}.bad{color:#fca5a5}
+  </style>
+</head>
+<body>
+<main>
+  <h1>TaskPoints V2 Dark Mirror Cleanup</h1>
+  <p id="status">Checking this deployment…</p>
+</main>
+<script>
+(() => {
+  'use strict';
+  const V2_DATABASE = 'taskpoints_state_v2';
+  const V2_KEYS = Object.freeze([
+    'taskpoints_state_v2_dark_mode_v1',
+    'taskpoints_state_v2_generation_v1',
+    'taskpoints_v2_pending_mutations_v1'
+  ]);
+  const status = document.getElementById('status');
+  const hostname = String(location.hostname || '').toLowerCase();
+  const productionHosts = new Set(['taskpoints.pages.dev', 'www.taskpoints.pages.dev']);
+
+  function fail(message) {
+    status.className = 'bad';
+    status.textContent = message;
+  }
+
+  if (productionHosts.has(hostname)) {
+    fail('V2 preview cleanup is blocked on the production TaskPoints hostname. No storage was changed.');
+    return;
+  }
+
+  if (!hostname.endsWith('.taskpoints.pages.dev') && hostname !== 'localhost' && hostname !== '127.0.0.1') {
+    fail('This cleanup page only operates on a TaskPoints branch preview or local development origin.');
+    return;
+  }
+
+  try {
+    V2_KEYS.forEach((key) => localStorage.removeItem(key));
+  } catch (error) {
+    fail('Could not remove V2 preview flags/WAL: ' + String(error?.message || error));
+    return;
+  }
+
+  if (!window.indexedDB?.deleteDatabase) {
+    fail('V2 preview flags were removed, but IndexedDB cleanup is unavailable in this browser.');
+    return;
+  }
+
+  let request;
+  try {
+    request = indexedDB.deleteDatabase(V2_DATABASE);
+  } catch (error) {
+    fail('V2 preview flags were removed, but the V2 database could not be deleted: ' + String(error?.message || error));
+    return;
+  }
+
+  request.onsuccess = () => {
+    status.className = 'ok';
+    status.textContent = 'V2 dark mirroring is disabled and its isolated test database/WAL were deleted. Production TaskPoints state and images were not touched.';
+  };
+  request.onerror = () => {
+    fail('V2 preview flags were removed, but the isolated V2 database deletion failed. Reload this cleanup page and try again.');
+  };
+  request.onblocked = () => {
+    fail('V2 preview flags were removed. Database deletion is blocked by another open TaskPoints preview tab; close those tabs, then reload this cleanup page.');
+  };
+})();
+</script>
+</body>
+</html>
