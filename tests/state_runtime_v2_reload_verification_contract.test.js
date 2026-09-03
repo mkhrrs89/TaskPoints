@@ -79,6 +79,10 @@ function runtimeMeta(indexedDB) {
   return indexedDB.dump(DB_NAME).meta.find((row) => row.id === 'runtime');
 }
 
+function plain(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
 test('V2 preview survives repeated runtime recreation and repeated parity verification without duplicating state', async () => {
   const indexedDB = new FakeIndexedDB();
   const localStorage = new FakeStorage({
@@ -104,8 +108,8 @@ test('V2 preview survives repeated runtime recreation and repeated parity verifi
   const parityB2 = await runtimeB.verifyParity();
   assert.equal(parityB1.match, true);
   assert.equal(parityB2.match, true);
-  assert.deepEqual(parityB2.expectedCounts, { habits: 1, completions: 1 });
-  assert.deepEqual(parityB2.actualCounts, { habits: 1, completions: 1 });
+  assert.deepEqual(plain(parityB2.expectedCounts), { habits: 1, completions: 1 });
+  assert.deepEqual(plain(parityB2.actualCounts), { habits: 1, completions: 1 });
 
   const afterB = indexedDB.dump(DB_NAME);
   assert.equal(afterB.habits[0].value.doneKeys.includes('2026-09-03'), true);
