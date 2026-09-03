@@ -6,7 +6,8 @@ on:
       - feature/greed-gold-ledger
   pull_request:
     paths:
-      - indexeddb_requalification_guard.js
+      - greed_gold_economy.js
+      - _worker.js
       - gold_ledger.html
       - tests/greed_gold_economy.test.js
       - tests/greed_rating.test.js
@@ -22,6 +23,6 @@ jobs:
         with:
           node-version: 22
       - name: Check Greed Gold runtime syntax
-        run: node --check indexeddb_requalification_guard.js
+        run: node --check greed_gold_economy.js
       - name: Run Greed Gold contracts
         run: node --test tests/greed_gold_economy.test.js tests/greed_rating.test.js tests/season_champion_gold_bonus.test.js
