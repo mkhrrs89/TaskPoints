@@ -105,7 +105,7 @@ test('Habit order overlay commits changed Habit rows, mutation ledger, and revis
   const h2After = habitRow(app.indexedDB, 'h2');
 
   assert.equal(result.committed, true);
-  assert.deepEqual(result.changedHabitIds.sort(), ['h1', 'h2']);
+  assert.deepEqual(Array.from(result.changedHabitIds).sort(), ['h1', 'h2']);
   assert.equal(h1After.order, 2);
   assert.equal(h2After.order, 1);
   assert.deepEqual({ ...h1After, order: h1Before.order }, h1Before, 'only h1.order may change');
@@ -115,7 +115,7 @@ test('Habit order overlay commits changed Habit rows, mutation ledger, and revis
   assert.equal(snapshot.mutations[0].type, 'habit-order-set');
   assert.equal(snapshot.mutations[0].previousRevision, startingRevision);
   assert.equal(snapshot.mutations[0].revision, startingRevision + 1);
-  assert.deepEqual(snapshot.mutations[0].changedHabitIds.sort(), ['h1', 'h2']);
+  assert.deepEqual(Array.from(snapshot.mutations[0].changedHabitIds).sort(), ['h1', 'h2']);
   assert.equal(runtimeMeta(app.indexedDB).revision, startingRevision + 1);
   assert.equal(app.api.getStatus().mirroredOrderMutations, 1);
   assert.equal(app.api.getStatus().readAuthority, 'legacy_only');
@@ -199,5 +199,5 @@ test('production reorder overlay is persisted before V2 is queued, and replay qu
   const applyBody = fastPathSource.slice(applyStart, applyEnd);
   assert.match(applyBody, /queueV2OrderMirror\(overlay, 'overlay-replayed'\)/);
   assert.match(applyBody, /queueV2OrderMirror\(overlay, 'overlay-already-compacted'\)/);
-  assert.match(fastPathSource, /habitOrderDurability|production_habit_order_overlay|enqueueHabitOrderOverlay/);
+  assert.match(fastPathSource, /enqueueHabitOrderOverlay/);
 });
