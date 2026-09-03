@@ -20,6 +20,7 @@
   let opened = false;
   let seeded = false;
   let mirroredMutations = 0;
+  let mirroredOrderMutations = 0;
   let duplicateMutations = 0;
   let mirrorFailures = 0;
   let generationInvalidations = 0;
@@ -671,8 +672,272 @@
     });
   }
 
+  function normalizeHabitOrderOverlay(payload) {
+    const source = payload && typeof payload === 'object' ? payload : {};
+    const orders = {};
+    Object.keys(source.orders || {}).sort().forEach((habitId) => {
+      const order = Number(source.orders[habitId]);
+      if (!habitId || !Number.isFinite(order)) return;
+      orders[String(habitId)] = order;
+    });
+    if (!Object.keys(orders).length) throw new Error('state_runtime_v2_invalid_habit_order_overlay');
+    return {
+      version: Number(source.version || 1),
+      updatedAtISO: source.updatedAtISO || nowIso(),
+      orders
+    };
+  }
+
+  function mutationIdForHabitOrderOverlay(overlay, generationInput = null) {
+    const generation = String(generationInput || currentGeneration());
+    const identity = stableJson({
+      generation,
+      updatedAtISO: overlay.updatedAtISO,
+      orders: overlay.orders
+    });
+    return `habit-order:${fnv1a(identity)}:${identity.length}`;
+  }
+
+  async function applyHabitOrderOverlay(payloadInput, options = {}) {
+    if (!isDarkEnabled()) return { committed: false, reason: 'dark_disabled' };
+    const overlay = normalizeHabitOrderOverlay(payloadInput);
+    const expectedGeneration = String(options.expectedGeneration || currentGeneration());
+    await seedFromLegacy();
+    const expectedRevision = options.expectedRevision != null
+      ? Number(options.expectedRevision)
+      : lastKnownRevision;
+
+    const generationBeforeOpen = currentGeneration({ create: false });
+    if (generationBeforeOpen !== expectedGeneration) {
+      generationInvalidations += 1;
+      throw staleGenerationError(expectedGeneration, generationBeforeOpen, 'order-before-open');
+    }
+
+    const db = await open();
+    const mutationId = mutationIdForHabitOrderOverlay(overlay, expectedGeneration);
+
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAMES, 'readwrite');
+      const habitsStore = tx.objectStore('habits');
+      const mutationsStore = tx.objectStore('mutations');
+      const metaStore = tx.objectStore('meta');
+
+      const mutationRequest = mutationsStore.get(mutationId);
+      const habitsRequest = habitsStore.getAll();
+      const metaRequest = metaStore.get(RUNTIME_META_ID);
+      let existingMutation;
+      let habitRows = [];
+      let runtimeMeta;
+      let readyCount = 0;
+      let duplicate = false;
+      let noChange = false;
+      let changedHabitIds = [];
+      let nextRevision = null;
+      let prepared = false;
+      let settled = false;
+      let generationInvalidated = false;
+      let unsubscribeGeneration = () => undefined;
+
+      const finishReject = (error) => {
+        if (settled) return;
+        settled = true;
+        unsubscribeGeneration();
+        reject(error);
+      };
+
+      const fail = (error) => {
+        if (settled) return;
+        try { tx.abort(); } catch (_) {}
+        finishReject(error);
+      };
+
+      const generationApi = generationModule();
+      if (typeof generationApi?.subscribe === 'function') {
+        unsubscribeGeneration = generationApi.subscribe((event) => {
+          const nextGeneration = typeof event === 'string' ? event : event?.generation;
+          if (!nextGeneration || String(nextGeneration) === expectedGeneration || settled) return;
+          generationInvalidated = true;
+          generationInvalidations += 1;
+          fail(staleGenerationError(expectedGeneration, String(nextGeneration), 'order-in-flight'));
+        });
+      }
+
+      const prepare = () => {
+        readyCount += 1;
+        if (readyCount !== 3 || prepared || settled) return;
+        prepared = true;
+        try {
+          const durableGeneration = currentGeneration({ create: false });
+          if (durableGeneration !== expectedGeneration) {
+            generationInvalidated = true;
+            generationInvalidations += 1;
+            throw staleGenerationError(expectedGeneration, durableGeneration, 'order-prepare');
+          }
+
+          runtimeMeta = runtimeMeta || {
+            id: RUNTIME_META_ID,
+            schemaVersion: SCHEMA_VERSION,
+            revision: 0,
+            completionSequence: 0,
+            resetGeneration: expectedGeneration
+          };
+          if (runtimeMeta.resetGeneration && runtimeMeta.resetGeneration !== expectedGeneration) {
+            generationInvalidated = true;
+            generationInvalidations += 1;
+            throw staleGenerationError(expectedGeneration, runtimeMeta.resetGeneration, 'order-meta');
+          }
+
+          if (existingMutation) {
+            duplicate = true;
+            return;
+          }
+
+          const actualRevision = Number(runtimeMeta.revision || 0);
+          if (expectedRevision != null && actualRevision !== Number(expectedRevision)) {
+            revisionConflicts += 1;
+            lastKnownRevision = actualRevision;
+            lastRevisionConflict = {
+              expectedRevision: Number(expectedRevision),
+              actualRevision,
+              mutationId,
+              mutationType: 'habit-order-set',
+              detectedAtISO: nowIso()
+            };
+            mark('stateV2.revisionConflict', lastRevisionConflict);
+            throw revisionConflictError(Number(expectedRevision), actualRevision, 'order-meta');
+          }
+
+          changedHabitIds = [];
+          habitRows.forEach((row) => {
+            const habitId = String(row?.id || '');
+            if (!habitId || !Object.prototype.hasOwnProperty.call(overlay.orders, habitId) || !row?.value) return;
+            const nextOrder = Number(overlay.orders[habitId]);
+            if (!Number.isFinite(nextOrder) || Number(row.value.order) === nextOrder) return;
+            const nextHabit = { ...clone(row.value), order: nextOrder };
+            habitsStore.put({ ...row, id: habitId, value: nextHabit });
+            changedHabitIds.push(habitId);
+          });
+
+          if (!changedHabitIds.length) {
+            noChange = true;
+            return;
+          }
+
+          nextRevision = actualRevision + 1;
+          mutationsStore.put({
+            id: mutationId,
+            schemaVersion: SCHEMA_VERSION,
+            type: 'habit-order-set',
+            source: 'habit-order-overlay-dark-mirror',
+            status: 'committed',
+            previousRevision: actualRevision,
+            revision: nextRevision,
+            resetGeneration: expectedGeneration,
+            createdAtISO: nowIso(),
+            overlay: clone(overlay),
+            changedHabitIds: [...changedHabitIds]
+          });
+          metaStore.put({
+            ...runtimeMeta,
+            id: RUNTIME_META_ID,
+            schemaVersion: SCHEMA_VERSION,
+            revision: nextRevision,
+            resetGeneration: expectedGeneration,
+            source: 'legacy-dark-mirror',
+            lastMutationId: mutationId,
+            updatedAtISO: nowIso(),
+            legacyMissing: false
+          });
+        } catch (error) {
+          fail(error);
+        }
+      };
+
+      mutationRequest.onsuccess = () => { existingMutation = mutationRequest.result || null; prepare(); };
+      habitsRequest.onsuccess = () => { habitRows = habitsRequest.result || []; prepare(); };
+      metaRequest.onsuccess = () => { runtimeMeta = metaRequest.result || null; prepare(); };
+      mutationRequest.onerror = () => fail(mutationRequest.error || new Error('state_runtime_v2_order_mutation_read_failed'));
+      habitsRequest.onerror = () => fail(habitsRequest.error || new Error('state_runtime_v2_order_habits_read_failed'));
+      metaRequest.onerror = () => fail(metaRequest.error || new Error('state_runtime_v2_order_meta_read_failed'));
+
+      tx.oncomplete = () => {
+        if (settled) return;
+        const durableGeneration = currentGeneration({ create: false });
+        if (durableGeneration !== expectedGeneration || generationInvalidated) {
+          settled = true;
+          unsubscribeGeneration();
+          generationInvalidations += 1;
+          const error = staleGenerationError(expectedGeneration, durableGeneration, 'order-after-commit');
+          Promise.resolve(seedFromLegacy({ force: true })).catch((seedError) => {
+            lastError = String(seedError?.message || seedError);
+            mark('stateV2.generationScrubFailed', { message: lastError });
+          });
+          reject(error);
+          return;
+        }
+
+        settled = true;
+        unsubscribeGeneration();
+        if (duplicate) {
+          duplicateMutations += 1;
+          lastKnownRevision = Number(runtimeMeta?.revision || lastKnownRevision || 0);
+          resolve({
+            committed: false,
+            duplicate: true,
+            mutationId,
+            revision: lastKnownRevision,
+            resetGeneration: expectedGeneration
+          });
+          return;
+        }
+        if (noChange) {
+          lastKnownRevision = Number(runtimeMeta?.revision || lastKnownRevision || 0);
+          resolve({
+            committed: false,
+            duplicate: false,
+            noChange: true,
+            mutationId,
+            revision: lastKnownRevision,
+            resetGeneration: expectedGeneration,
+            changedHabitIds: []
+          });
+          return;
+        }
+
+        mirroredMutations += 1;
+        mirroredOrderMutations += 1;
+        lastMutationId = mutationId;
+        lastKnownRevision = nextRevision;
+        lastRevisionConflict = null;
+        mark('stateV2.darkOrderMutationCommitted', {
+          mutationId,
+          revision: nextRevision,
+          resetGeneration: expectedGeneration,
+          changedHabitIds: [...changedHabitIds]
+        });
+        resolve({
+          committed: true,
+          duplicate: false,
+          mutationId,
+          revision: nextRevision,
+          resetGeneration: expectedGeneration,
+          changedHabitIds: [...changedHabitIds]
+        });
+      };
+      tx.onabort = () => {
+        if (settled) return;
+        if (generationInvalidated) {
+          finishReject(staleGenerationError(expectedGeneration, currentGeneration({ create: false }), 'order-abort'));
+          return;
+        }
+        finishReject(tx.error || new Error('state_runtime_v2_order_mutation_aborted'));
+      };
+      tx.onerror = () => undefined;
+    });
+  }
+
   function enqueueHabitDelta(delta) {
-    if (!isDarkEnabled()) return;
+    if (!isDarkEnabled()) return mirrorTail;
     const snapshot = clone(delta);
     const expectedGeneration = currentGeneration();
     mirrorTail = mirrorTail
@@ -683,6 +948,35 @@
         mark('stateV2.darkMutationFailed', { message: lastError, resetGeneration: expectedGeneration, habitId: snapshot?.habitId || null, dayKey: snapshot?.dayKey || null });
         console.warn('TaskPoints V2 dark mirror failed; production state remains authoritative.', error);
       });
+    return mirrorTail;
+  }
+
+  function enqueueHabitOrderOverlay(payload) {
+    if (!isDarkEnabled()) return mirrorTail;
+    const snapshot = clone(payload);
+    const expectedGeneration = currentGeneration();
+    mirrorTail = mirrorTail
+      .then(async () => {
+        try {
+          return await applyHabitOrderOverlay(snapshot, { expectedGeneration });
+        } catch (error) {
+          if (error?.code === 'STATE_RUNTIME_V2_REVISION_CONFLICT') {
+            return applyHabitOrderOverlay(snapshot, { expectedGeneration });
+          }
+          throw error;
+        }
+      })
+      .catch((error) => {
+        mirrorFailures += 1;
+        lastError = String(error?.message || error);
+        mark('stateV2.darkOrderMutationFailed', {
+          message: lastError,
+          resetGeneration: expectedGeneration,
+          entries: Object.keys(snapshot?.orders || {}).length
+        });
+        console.warn('TaskPoints V2 dark reorder mirror failed; production state remains authoritative.', error);
+      });
+    return mirrorTail;
   }
 
   function installHabitJournalHook() {
@@ -768,6 +1062,7 @@
       seeded,
       hookInstalled,
       mirroredMutations,
+      mirroredOrderMutations,
       duplicateMutations,
       mirrorFailures,
       generationInvalidations,
@@ -782,7 +1077,8 @@
       lastError,
       lastParity,
       readAuthority: 'legacy_only',
-      walMode: 'v2_generation_stamped_wal_with_revision_conflict_guard_and_legacy_authority'
+      walMode: 'v2_generation_stamped_wal_with_revision_conflict_guard_and_legacy_authority',
+      habitOrderDurability: 'production_habit_order_overlay'
     };
   }
 
@@ -825,15 +1121,23 @@
     open,
     seedFromLegacy,
     applyMutation(mutation) {
-      if (mutation?.type !== 'habit-completion-set' || !mutation?.delta) {
-        return Promise.reject(new Error('state_runtime_v2_unsupported_dark_mutation'));
+      if (mutation?.type === 'habit-completion-set' && mutation?.delta) {
+        return applyHabitDelta(mutation.delta, {
+          expectedGeneration: mutation.generation || undefined,
+          expectedRevision: mutation.expectedRevision ?? undefined
+        });
       }
-      return applyHabitDelta(mutation.delta, {
-        expectedGeneration: mutation.generation || undefined,
-        expectedRevision: mutation.expectedRevision ?? undefined
-      });
+      if (mutation?.type === 'habit-order-set' && mutation?.overlay) {
+        return applyHabitOrderOverlay(mutation.overlay, {
+          expectedGeneration: mutation.generation || undefined,
+          expectedRevision: mutation.expectedRevision ?? undefined
+        });
+      }
+      return Promise.reject(new Error('state_runtime_v2_unsupported_dark_mutation'));
     },
     applyHabitDelta,
+    applyHabitOrderOverlay,
+    enqueueHabitOrderOverlay,
     getObservedRevision: () => lastKnownRevision,
     getHabit: async (id) => {
       const db = await open();
