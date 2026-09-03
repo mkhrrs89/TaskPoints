@@ -28,6 +28,7 @@ const CORE_BUNDLE_ASSET_PATHS = Object.freeze([
   '/state_runtime_v2.js',
   '/state_runtime_v2_wal_bridge.js',
   '/state_runtime_v2_habit_edit_bridge.js',
+  '/state_runtime_v2_habit_structure_bridge.js',
   '/save_pipeline_shared_work.js',
   '/inbox_count_badge.js',
   '/season_series_upset_notifications.js',
@@ -195,7 +196,7 @@ async function buildCoreBundle(request, env, ctx, version) {
   try { coreSource = await response.text(); }
   catch (_) { return response; }
 
-  const [perfSource, aliasSource, youAliasSource, habitGuardSource, habitFastPathControlSource, stateRuntimeV2GenerationSource, stateRuntimeV2WalSource, stateRuntimeV2Source, stateRuntimeV2WalBridgeSource, stateRuntimeV2HabitEditBridgeSource, sharedSaveWorkSource, inboxBadgeSource, seasonSeriesUpsetSource, taskMutationJournalSource, taskCreateFastPathSource, stateHotCacheSource, storageIdleSource] = await Promise.all([
+  const [perfSource, aliasSource, youAliasSource, habitGuardSource, habitFastPathControlSource, stateRuntimeV2GenerationSource, stateRuntimeV2WalSource, stateRuntimeV2Source, stateRuntimeV2WalBridgeSource, stateRuntimeV2HabitEditBridgeSource, stateRuntimeV2HabitStructureBridgeSource, sharedSaveWorkSource, inboxBadgeSource, seasonSeriesUpsetSource, taskMutationJournalSource, taskCreateFastPathSource, stateHotCacheSource, storageIdleSource] = await Promise.all([
     readAssetSource(env, request, '/performance_diagnostics.js'),
     readAssetSource(env, request, '/score_alias_consistency.js'),
     readAssetSource(env, request, '/you_score_alias_alignment.js'),
@@ -206,6 +207,7 @@ async function buildCoreBundle(request, env, ctx, version) {
     readAssetSource(env, request, '/state_runtime_v2.js'),
     readAssetSource(env, request, '/state_runtime_v2_wal_bridge.js'),
     readAssetSource(env, request, '/state_runtime_v2_habit_edit_bridge.js'),
+    readAssetSource(env, request, '/state_runtime_v2_habit_structure_bridge.js'),
     readAssetSource(env, request, '/save_pipeline_shared_work.js'),
     readAssetSource(env, request, '/inbox_count_badge.js'),
     readAssetSource(env, request, '/season_series_upset_notifications.js'),
@@ -214,7 +216,7 @@ async function buildCoreBundle(request, env, ctx, version) {
     readAssetSource(env, request, '/state_hot_cache.js'),
     readAssetSource(env, request, '/storage_maintenance_idle.js')
   ]);
-  const additions = [aliasSource, youAliasSource, habitGuardSource, habitFastPathControlSource, stateRuntimeV2GenerationSource, stateRuntimeV2WalSource, stateRuntimeV2Source, stateRuntimeV2WalBridgeSource, stateRuntimeV2HabitEditBridgeSource, sharedSaveWorkSource, inboxBadgeSource, seasonSeriesUpsetSource, taskMutationJournalSource, taskCreateFastPathSource, stateHotCacheSource, storageIdleSource].filter(Boolean);
+  const additions = [aliasSource, youAliasSource, habitGuardSource, habitFastPathControlSource, stateRuntimeV2GenerationSource, stateRuntimeV2WalSource, stateRuntimeV2Source, stateRuntimeV2WalBridgeSource, stateRuntimeV2HabitEditBridgeSource, stateRuntimeV2HabitStructureBridgeSource, sharedSaveWorkSource, inboxBadgeSource, seasonSeriesUpsetSource, taskMutationJournalSource, taskCreateFastPathSource, stateHotCacheSource, storageIdleSource].filter(Boolean);
   const source = [
     perfSource,
     coreSource,
@@ -233,6 +235,7 @@ async function buildCoreBundle(request, env, ctx, version) {
     'x-taskpoints-state-runtime-v2': stateRuntimeV2Source ? 'included' : 'missing',
     'x-taskpoints-state-runtime-v2-wal-bridge': stateRuntimeV2WalBridgeSource ? 'included' : 'missing',
     'x-taskpoints-state-runtime-v2-habit-edit-bridge': stateRuntimeV2HabitEditBridgeSource ? 'included' : 'missing',
+    'x-taskpoints-state-runtime-v2-habit-structure-bridge': stateRuntimeV2HabitStructureBridgeSource ? 'included' : 'missing',
     'x-taskpoints-shared-save-work': sharedSaveWorkSource ? 'included' : 'missing',
     'x-taskpoints-inbox-count-badge': inboxBadgeSource ? 'included' : 'missing',
     'x-taskpoints-season-series-upsets': seasonSeriesUpsetSource ? 'included' : 'missing',
