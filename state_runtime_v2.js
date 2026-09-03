@@ -1190,9 +1190,17 @@
 
           affectedIds.forEach((storageId) => {
             const existingRow = existingRowsById.get(storageId);
-            const retainedEntries = completionEntriesForRow(existingRow)
+            const existingEntries = completionEntriesForRow(existingRow);
+            const existingTargetEntriesForRow = existingEntries
+              .filter((entry) => String(entry?.value?.habitId || '') === snapshot.habitId)
+              .sort((a, b) => Number(b.sequence || 0) - Number(a.sequence || 0));
+            const desiredEntries = (desiredById.get(storageId) || [])
+              .slice()
+              .sort((a, b) => Number(b.sequence || 0) - Number(a.sequence || 0));
+            if (stableJson(existingTargetEntriesForRow) === stableJson(desiredEntries)) return;
+
+            const retainedEntries = existingEntries
               .filter((entry) => String(entry?.value?.habitId || '') !== snapshot.habitId);
-            const desiredEntries = desiredById.get(storageId) || [];
             const combined = [...retainedEntries, ...desiredEntries]
               .sort((a, b) => Number(b.sequence || 0) - Number(a.sequence || 0));
             if (combined.length) {
@@ -1200,8 +1208,8 @@
             } else {
               completionsStore.delete(storageId);
             }
+            completionRowsTouched += 1;
           });
-          completionRowsTouched = affectedIds.size;
 
           const legacyIndex = Number.isFinite(Number(habitRow.legacyIndex))
             ? Number(habitRow.legacyIndex)
