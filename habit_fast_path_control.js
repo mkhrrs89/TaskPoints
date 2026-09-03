@@ -401,6 +401,8 @@
   let overlayWrites = 0;
   let overlayReplays = 0;
   let compactions = 0;
+  let v2MirrorQueues = 0;
+  let v2MirrorQueueFailures = 0;
   let compactionTimer = 0;
   let compactionGeneration = 0;
   let lastReorderAt = 0;
@@ -408,6 +410,28 @@
 
   function mark(name, detail = {}) {
     try { global.TaskPointsPerf?.mark?.(name, detail); } catch (_) {}
+  }
+
+  function queueV2OrderMirror(overlay, reason = 'habit-order-overlay') {
+    try {
+      const runtime = global.TaskPointsStateRuntimeV2;
+      if (typeof runtime?.enqueueHabitOrderOverlay !== 'function') return false;
+      runtime.enqueueHabitOrderOverlay(overlay);
+      v2MirrorQueues += 1;
+      mark('habit.reorder.v2MirrorQueued', {
+        reason,
+        entries: Object.keys(overlay?.orders || {}).length,
+        updatedAtISO: overlay?.updatedAtISO || null
+      });
+      return true;
+    } catch (error) {
+      v2MirrorQueueFailures += 1;
+      mark('habit.reorder.v2MirrorQueueFailed', {
+        reason,
+        message: String(error?.message || error)
+      });
+      return false;
+    }
   }
 
   function getHabits() {
@@ -476,6 +500,7 @@
       entries: Object.keys(orders).length,
       bytes: raw.length * 2
     });
+    queueV2OrderMirror(payload, 'overlay-written');
     return payload;
   }
 
@@ -485,6 +510,7 @@
     if (!overlay || !Array.isArray(habits)) return 0;
 
     if (stateMatchesOrders(habits, overlay.orders)) {
+      queueV2OrderMirror(overlay, 'overlay-already-compacted');
       clearOverlay();
       lastReason = 'overlay_already_compacted';
       return 0;
@@ -502,6 +528,7 @@
     if (changed) {
       overlayReplays += 1;
       lastReason = 'overlay_replayed';
+      queueV2OrderMirror(overlay, 'overlay-replayed');
       try { global.renderHabits?.(); } catch (_) {}
       try { global.renderVices?.(); } catch (_) {}
       mark('habit.reorder.overlayReplayed', { changed });
@@ -665,6 +692,8 @@
       overlayWrites,
       overlayReplays,
       compactions,
+      v2MirrorQueues,
+      v2MirrorQueueFailures,
       overlayPending: Boolean(readOverlay()),
       lastReason
     };
