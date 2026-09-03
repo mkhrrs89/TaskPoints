@@ -4,13 +4,15 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const source = fs.readFileSync(path.resolve(__dirname, '..', 'indexeddb_requalification_guard.js'), 'utf8');
+const source = fs.readFileSync(path.resolve(__dirname, '..', 'greed_gold_economy.js'), 'utf8');
+const workerSource = fs.readFileSync(path.resolve(__dirname, '..', '_worker.js'), 'utf8');
+const ledgerPageSource = fs.readFileSync(path.resolve(__dirname, '..', 'gold_ledger.html'), 'utf8');
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-function install(initialState = {}) {
+function install(initialState = {}, coreOverrides = {}) {
   let savedState = clone(initialState);
   const localStorage = {
     values: new Map(),
@@ -18,10 +20,9 @@ function install(initialState = {}) {
     setItem(key, value) { this.values.set(key, String(value)); },
     removeItem(key) { this.values.delete(key); }
   };
+  localStorage.setItem('taskpoints_v1', JSON.stringify(savedState));
   const core = {
     STORAGE_KEY: 'taskpoints_v1',
-    setPhase4StorageMode(mode) { return mode; },
-    getPhase4StorageMode() { return 'off'; },
     parseTaskPointsStorageJson(raw, fallback) {
       try { return JSON.parse(raw); } catch (_) { return fallback; }
     },
@@ -30,16 +31,26 @@ function install(initialState = {}) {
       localStorage.setItem('taskpoints_v1', JSON.stringify(savedState));
       return { state };
     },
-    loadAppState() { return { state: savedState }; },
+    mergeAndSaveState(state) {
+      savedState = clone(state);
+      localStorage.setItem('taskpoints_v1', JSON.stringify(savedState));
+      return { state };
+    },
+    saveAppState(state) {
+      savedState = clone(state);
+      localStorage.setItem('taskpoints_v1', JSON.stringify(savedState));
+      return { state };
+    },
+    loadAppState() { return { state: clone(savedState) }; },
     simulateAiScoreForPlayerCore(player, dateKey, options = {}) {
       options.context?.captureEffects?.({ intimidationApplied: false, poiseApplied: false });
       return Number(options.baseScore ?? player.baseScore ?? 50);
     },
-    materializeSeasonSlateMatchupsForDate(state) { return { state, changed: false, materializedCount: 0 }; }
+    materializeSeasonSlateMatchupsForDate(state) { return { state, changed: false, materializedCount: 0 }; },
+    ...coreOverrides
   };
   const document = {
     readyState: 'complete',
-    head: { appendChild() {} },
     querySelector() { return null; },
     querySelectorAll() { return []; },
     createElement() { return { dataset: {} }; },
@@ -84,6 +95,7 @@ function ledgerState(players, balances) {
       type: 'opening_balance',
       playerId,
       amount,
+      balanceAfter: amount,
       dateKey: '2026-09-03',
       createdAtISO: '2026-09-03T12:00:00.000Z'
     });
@@ -277,4 +289,78 @@ test('settled theft remains permanent after later Greed edits', () => {
   api.reconcileGoldEconomy(state);
   assert.equal(matchup.goldOutcome.theftGoldStolen, 1);
   assert.equal(api.goldBalance(state, 'B'), 39);
+});
+
+test('season materialization applies Greed before deciding winner, margin Gold, and theft', () => {
+  const state = ledgerState([
+    { id: 'A', name: 'Alpha', greed: 100, active: true },
+    { id: 'B', name: 'Beta', greed: 0, active: true }
+  ], { B: 40 });
+
+  const { core, api } = install(state, {
+    materializeSeasonSlateMatchupsForDate(nextState, dateKey) {
+      nextState.matchups.push({
+        id: 'materialized',
+        dateKey,
+        playerAId: 'A',
+        playerBId: 'B',
+        scoreA: 50,
+        scoreB: 52,
+        playerAScore: 50,
+        playerBScore: 52,
+        completedAtISO: `${dateKey}T12:00:00.000Z`
+      });
+      return { state: nextState, changed: true, materializedCount: 1 };
+    }
+  });
+
+  const result = core.materializeSeasonSlateMatchupsForDate(state, '2026-09-04', { nowISO: '2026-09-04T12:00:00.000Z' });
+  const matchup = result.state.matchups[0];
+  assert.equal(matchup.scoreA, 55);
+  assert.equal(matchup.scoreB, 52);
+  assert.equal(matchup.winnerId, 'A');
+  assert.equal(matchup.goldOutcome.winnerId, 'A');
+  assert.equal(matchup.goldOutcome.marginGoldAwarded, 0.3);
+  assert.equal(matchup.goldOutcome.theftGoldStolen, 4);
+  assert.equal(api.goldBalance(result.state, 'A'), 4.3);
+  assert.equal(api.goldBalance(result.state, 'B'), 36);
+});
+
+test('partial page saves preserve the established Gold ledger', () => {
+  const initial = ledgerState([{ id: 'A', greed: 50, active: true }], { A: 12.5 });
+  const { core, getSaved } = install(initial);
+  core.mergeAndSaveState({ players: initial.players, matchups: [], gameHistory: [] }, { savePath: 'partial-page' });
+  const saved = getSaved();
+  assert.equal(saved.goldEconomy.version, 1);
+  assert.equal(saved.goldLedger.length, 1);
+  assert.equal(saved.goldLedger[0].amount, 12.5);
+});
+
+test('matchup telemetry explains Greed bonus and Gold outcome after completion', () => {
+  const { api } = install({ players: [{ id: 'A', name: 'Alpha' }, { id: 'B', name: 'Beta' }] });
+  const matchup = {
+    playerAId: 'A',
+    playerBId: 'B',
+    playerAEffects: { greedTelemetryVersion: 1, greedPerformanceEligible: true, greedBonus: 2.5, greedRating: 50, opponentGoldRating: 100 },
+    playerBEffects: { greedTelemetryVersion: 1, greedPerformanceEligible: true, greedBonus: 0, greedRating: 0, opponentGoldRating: 50 },
+    goldOutcome: { settled: true, winnerId: 'A', marginGoldAwarded: 1.2, theftGoldStolen: 2.4 }
+  };
+  const detail = api.formatMatchupGreedDetails(matchup);
+  assert.match(detail, /Greed \+2\.5 \(GR 50, OG 100\)/);
+  assert.match(detail, /Gold: .*\+1\.2 margin Gold.*stole 2\.4 Gold/);
+});
+
+test('Gold Ledger page exposes balances and transaction filters without historical backfill', () => {
+  assert.match(ledgerPageSource, /<title>TaskPoints — Gold Ledger<\/title>/);
+  assert.match(ledgerPageSource, /id="goldBalances"/);
+  assert.match(ledgerPageSource, /id="playerFilter"/);
+  assert.match(ledgerPageSource, /id="typeFilter"/);
+  assert.match(ledgerPageSource, /Historical activity before launch is represented only by opening balances/);
+  assert.match(ledgerPageSource, /<script src="scoring_core\.js"><\/script>/);
+});
+
+test('Cloudflare core bundle includes Greed Gold runtime last with a diagnostic header', () => {
+  assert.match(workerSource, /'\/greed_gold_economy\.js'/);
+  assert.match(workerSource, /storageIdleSource, greedGoldSource\]\.filter\(Boolean\)/);
+  assert.match(workerSource, /x-taskpoints-greed-gold-economy/);
 });
