@@ -21,6 +21,7 @@
   let seeded = false;
   let mirroredMutations = 0;
   let mirroredOrderMutations = 0;
+  let mirroredEditMutations = 0;
   let duplicateMutations = 0;
   let mirrorFailures = 0;
   let generationInvalidations = 0;
@@ -936,6 +937,401 @@
     });
   }
 
+  function completionEntriesForRow(row) {
+    if (Array.isArray(row?.entries)) {
+      return row.entries.map((entry) => ({
+        value: clone(entry?.value),
+        sequence: Number(entry?.sequence || 0)
+      }));
+    }
+    if (row && Object.prototype.hasOwnProperty.call(row, 'value')) {
+      return [{ value: clone(row.value), sequence: Number(row.sequence || 0) }];
+    }
+    return [];
+  }
+
+  function captureHabitEditSnapshotFromLegacy(habitIdInput, options = {}) {
+    const habitId = String(habitIdInput || '').trim();
+    if (!habitId) throw new Error('state_runtime_v2_invalid_habit_edit_id');
+    const source = parseLegacyStateWithPending();
+    if (source.missing) throw new Error('state_runtime_v2_habit_edit_legacy_missing');
+    const habitIndex = source.state.habits.findIndex((habit) => String(habit?.id || '') === habitId);
+    if (habitIndex < 0) throw new Error(`state_runtime_v2_habit_edit_missing:${habitId}`);
+
+    const completionEntries = [];
+    const completions = source.state.completions;
+    completions.forEach((completion, index) => {
+      if (String(completion?.habitId || '') !== habitId) return;
+      const storageId = completion?.id != null
+        ? String(completion.id)
+        : `__tp_v2_missing_completion_id__:${index}`;
+      completionEntries.push({
+        storageId,
+        sequence: completions.length - index,
+        value: clone(completion)
+      });
+    });
+
+    return {
+      version: 1,
+      habitId,
+      source: String(options.source || 'legacy-habit-edit'),
+      capturedAtISO: nowIso(),
+      habitIndex,
+      habit: clone(source.state.habits[habitIndex]),
+      completionEntries
+    };
+  }
+
+  function normalizeHabitEditSnapshot(snapshotInput) {
+    const source = snapshotInput && typeof snapshotInput === 'object' ? snapshotInput : {};
+    const habit = clone(source.habit || null);
+    const habitId = String(source.habitId || habit?.id || '').trim();
+    if (!habitId || !habit || String(habit.id || '') !== habitId) {
+      throw new Error('state_runtime_v2_invalid_habit_edit_snapshot');
+    }
+    const completionEntries = (Array.isArray(source.completionEntries) ? source.completionEntries : [])
+      .map((entry) => {
+        const value = clone(entry?.value || null);
+        const storageId = String(entry?.storageId || '').trim();
+        const sequence = Number(entry?.sequence || 0);
+        if (!value || !storageId || String(value?.habitId || '') !== habitId || !Number.isFinite(sequence)) return null;
+        return { storageId, sequence, value };
+      })
+      .filter(Boolean)
+      .sort((a, b) => {
+        const byStorage = String(a.storageId).localeCompare(String(b.storageId));
+        if (byStorage !== 0) return byStorage;
+        return Number(b.sequence || 0) - Number(a.sequence || 0);
+      });
+    return {
+      version: Number(source.version || 1),
+      habitId,
+      source: String(source.source || 'legacy-habit-edit'),
+      capturedAtISO: source.capturedAtISO || nowIso(),
+      habitIndex: Number.isFinite(Number(source.habitIndex)) ? Number(source.habitIndex) : null,
+      habit,
+      completionEntries
+    };
+  }
+
+  function habitEditMutationId(snapshot, generationInput = null) {
+    const generation = String(generationInput || currentGeneration());
+    const identity = stableJson({
+      generation,
+      habitId: snapshot.habitId,
+      habit: snapshot.habit,
+      completionEntries: snapshot.completionEntries.map((entry) => ({
+        storageId: entry.storageId,
+        sequence: entry.sequence,
+        value: entry.value
+      }))
+    });
+    return `habit-edit:${fnv1a(identity)}:${identity.length}`;
+  }
+
+  function targetCompletionEntriesFromRows(rows, habitId) {
+    const entries = [];
+    (rows || []).forEach((row) => {
+      completionEntriesForRow(row).forEach((entry) => {
+        if (String(entry?.value?.habitId || '') !== String(habitId)) return;
+        entries.push({
+          storageId: String(row.id),
+          sequence: Number(entry.sequence || 0),
+          value: clone(entry.value)
+        });
+      });
+    });
+    return entries.sort((a, b) => {
+      const byStorage = String(a.storageId).localeCompare(String(b.storageId));
+      if (byStorage !== 0) return byStorage;
+      return Number(b.sequence || 0) - Number(a.sequence || 0);
+    });
+  }
+
+  async function applyHabitEditSnapshot(snapshotInput, options = {}) {
+    if (!isDarkEnabled()) return { committed: false, reason: 'dark_disabled' };
+    const snapshot = normalizeHabitEditSnapshot(snapshotInput);
+    const expectedGeneration = String(options.expectedGeneration || currentGeneration());
+    await seedFromLegacy();
+    const expectedRevision = options.expectedRevision != null
+      ? Number(options.expectedRevision)
+      : lastKnownRevision;
+
+    const generationBeforeOpen = currentGeneration({ create: false });
+    if (generationBeforeOpen !== expectedGeneration) {
+      generationInvalidations += 1;
+      throw staleGenerationError(expectedGeneration, generationBeforeOpen, 'edit-before-open');
+    }
+
+    const db = await open();
+    const mutationId = habitEditMutationId(snapshot, expectedGeneration);
+
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAMES, 'readwrite');
+      const habitsStore = tx.objectStore('habits');
+      const completionsStore = tx.objectStore('completions');
+      const mutationsStore = tx.objectStore('mutations');
+      const metaStore = tx.objectStore('meta');
+
+      const mutationRequest = mutationsStore.get(mutationId);
+      const habitRequest = habitsStore.get(snapshot.habitId);
+      const completionsRequest = completionsStore.getAll();
+      const metaRequest = metaStore.get(RUNTIME_META_ID);
+      let existingMutation;
+      let habitRow;
+      let completionRows = [];
+      let runtimeMeta;
+      let readyCount = 0;
+      let duplicate = false;
+      let noChange = false;
+      let nextRevision = null;
+      let completionRowsTouched = 0;
+      let prepared = false;
+      let settled = false;
+      let generationInvalidated = false;
+      let unsubscribeGeneration = () => undefined;
+
+      const finishReject = (error) => {
+        if (settled) return;
+        settled = true;
+        unsubscribeGeneration();
+        reject(error);
+      };
+
+      const fail = (error) => {
+        if (settled) return;
+        try { tx.abort(); } catch (_) {}
+        finishReject(error);
+      };
+
+      const generationApi = generationModule();
+      if (typeof generationApi?.subscribe === 'function') {
+        unsubscribeGeneration = generationApi.subscribe((event) => {
+          const nextGeneration = typeof event === 'string' ? event : event?.generation;
+          if (!nextGeneration || String(nextGeneration) === expectedGeneration || settled) return;
+          generationInvalidated = true;
+          generationInvalidations += 1;
+          fail(staleGenerationError(expectedGeneration, String(nextGeneration), 'edit-in-flight'));
+        });
+      }
+
+      const prepare = () => {
+        readyCount += 1;
+        if (readyCount !== 4 || prepared || settled) return;
+        prepared = true;
+        try {
+          const durableGeneration = currentGeneration({ create: false });
+          if (durableGeneration !== expectedGeneration) {
+            generationInvalidated = true;
+            generationInvalidations += 1;
+            throw staleGenerationError(expectedGeneration, durableGeneration, 'edit-prepare');
+          }
+
+          runtimeMeta = runtimeMeta || {
+            id: RUNTIME_META_ID,
+            schemaVersion: SCHEMA_VERSION,
+            revision: 0,
+            completionSequence: 0,
+            resetGeneration: expectedGeneration
+          };
+          if (runtimeMeta.resetGeneration && runtimeMeta.resetGeneration !== expectedGeneration) {
+            generationInvalidated = true;
+            generationInvalidations += 1;
+            throw staleGenerationError(expectedGeneration, runtimeMeta.resetGeneration, 'edit-meta');
+          }
+
+          if (existingMutation) {
+            duplicate = true;
+            return;
+          }
+
+          const actualRevision = Number(runtimeMeta.revision || 0);
+          if (expectedRevision != null && actualRevision !== Number(expectedRevision)) {
+            revisionConflicts += 1;
+            lastKnownRevision = actualRevision;
+            lastRevisionConflict = {
+              expectedRevision: Number(expectedRevision),
+              actualRevision,
+              mutationId,
+              mutationType: 'habit-edit-sync',
+              habitId: snapshot.habitId,
+              detectedAtISO: nowIso()
+            };
+            mark('stateV2.revisionConflict', lastRevisionConflict);
+            throw revisionConflictError(Number(expectedRevision), actualRevision, 'edit-meta');
+          }
+
+          if (!habitRow?.value) throw new Error(`state_runtime_v2_habit_missing:${snapshot.habitId}`);
+
+          const existingTargetEntries = targetCompletionEntriesFromRows(completionRows, snapshot.habitId);
+          if (
+            stableJson(habitRow.value) === stableJson(snapshot.habit)
+            && stableJson(existingTargetEntries) === stableJson(snapshot.completionEntries)
+          ) {
+            noChange = true;
+            return;
+          }
+
+          const existingRowsById = new Map((completionRows || []).map((row) => [String(row?.id || ''), row]));
+          const desiredById = new Map();
+          snapshot.completionEntries.forEach((entry) => {
+            const list = desiredById.get(entry.storageId) || [];
+            list.push({ value: clone(entry.value), sequence: Number(entry.sequence || 0) });
+            desiredById.set(entry.storageId, list);
+          });
+
+          const affectedIds = new Set(desiredById.keys());
+          completionRows.forEach((row) => {
+            if (completionEntriesForRow(row).some((entry) => String(entry?.value?.habitId || '') === snapshot.habitId)) {
+              affectedIds.add(String(row.id));
+            }
+          });
+
+          affectedIds.forEach((storageId) => {
+            const existingRow = existingRowsById.get(storageId);
+            const retainedEntries = completionEntriesForRow(existingRow)
+              .filter((entry) => String(entry?.value?.habitId || '') !== snapshot.habitId);
+            const desiredEntries = desiredById.get(storageId) || [];
+            const combined = [...retainedEntries, ...desiredEntries]
+              .sort((a, b) => Number(b.sequence || 0) - Number(a.sequence || 0));
+            if (combined.length) {
+              completionsStore.put({ id: storageId, entries: combined });
+            } else {
+              completionsStore.delete(storageId);
+            }
+          });
+          completionRowsTouched = affectedIds.size;
+
+          const legacyIndex = Number.isFinite(Number(habitRow.legacyIndex))
+            ? Number(habitRow.legacyIndex)
+            : (snapshot.habitIndex ?? 0);
+          habitsStore.put({
+            ...habitRow,
+            id: snapshot.habitId,
+            legacyIndex,
+            value: clone(snapshot.habit)
+          });
+
+          nextRevision = actualRevision + 1;
+          mutationsStore.put({
+            id: mutationId,
+            schemaVersion: SCHEMA_VERSION,
+            type: 'habit-edit-sync',
+            source: snapshot.source || 'legacy-habit-edit-dark-mirror',
+            status: 'committed',
+            previousRevision: actualRevision,
+            revision: nextRevision,
+            resetGeneration: expectedGeneration,
+            createdAtISO: nowIso(),
+            habitId: snapshot.habitId,
+            completionRowsTouched,
+            snapshotHash: `${fnv1a(stableJson(snapshot))}:${stableJson(snapshot).length}`
+          });
+          metaStore.put({
+            ...runtimeMeta,
+            id: RUNTIME_META_ID,
+            schemaVersion: SCHEMA_VERSION,
+            revision: nextRevision,
+            resetGeneration: expectedGeneration,
+            source: 'legacy-dark-mirror',
+            lastMutationId: mutationId,
+            updatedAtISO: nowIso(),
+            legacyMissing: false
+          });
+        } catch (error) {
+          fail(error);
+        }
+      };
+
+      mutationRequest.onsuccess = () => { existingMutation = mutationRequest.result || null; prepare(); };
+      habitRequest.onsuccess = () => { habitRow = habitRequest.result || null; prepare(); };
+      completionsRequest.onsuccess = () => { completionRows = completionsRequest.result || []; prepare(); };
+      metaRequest.onsuccess = () => { runtimeMeta = metaRequest.result || null; prepare(); };
+      mutationRequest.onerror = () => fail(mutationRequest.error || new Error('state_runtime_v2_edit_mutation_read_failed'));
+      habitRequest.onerror = () => fail(habitRequest.error || new Error('state_runtime_v2_edit_habit_read_failed'));
+      completionsRequest.onerror = () => fail(completionsRequest.error || new Error('state_runtime_v2_edit_completions_read_failed'));
+      metaRequest.onerror = () => fail(metaRequest.error || new Error('state_runtime_v2_edit_meta_read_failed'));
+
+      tx.oncomplete = () => {
+        if (settled) return;
+        const durableGeneration = currentGeneration({ create: false });
+        if (durableGeneration !== expectedGeneration || generationInvalidated) {
+          settled = true;
+          unsubscribeGeneration();
+          generationInvalidations += 1;
+          const error = staleGenerationError(expectedGeneration, durableGeneration, 'edit-after-commit');
+          Promise.resolve(seedFromLegacy({ force: true })).catch((seedError) => {
+            lastError = String(seedError?.message || seedError);
+            mark('stateV2.generationScrubFailed', { message: lastError });
+          });
+          reject(error);
+          return;
+        }
+
+        settled = true;
+        unsubscribeGeneration();
+        if (duplicate) {
+          duplicateMutations += 1;
+          lastKnownRevision = Number(runtimeMeta?.revision || lastKnownRevision || 0);
+          resolve({
+            committed: false,
+            duplicate: true,
+            mutationId,
+            revision: lastKnownRevision,
+            resetGeneration: expectedGeneration
+          });
+          return;
+        }
+        if (noChange) {
+          lastKnownRevision = Number(runtimeMeta?.revision || lastKnownRevision || 0);
+          resolve({
+            committed: false,
+            duplicate: false,
+            noChange: true,
+            mutationId,
+            revision: lastKnownRevision,
+            resetGeneration: expectedGeneration,
+            habitId: snapshot.habitId,
+            completionRowsTouched: 0
+          });
+          return;
+        }
+
+        mirroredMutations += 1;
+        mirroredEditMutations += 1;
+        lastMutationId = mutationId;
+        lastKnownRevision = nextRevision;
+        lastRevisionConflict = null;
+        mark('stateV2.darkHabitEditCommitted', {
+          mutationId,
+          revision: nextRevision,
+          resetGeneration: expectedGeneration,
+          habitId: snapshot.habitId,
+          completionRowsTouched
+        });
+        resolve({
+          committed: true,
+          duplicate: false,
+          mutationId,
+          revision: nextRevision,
+          resetGeneration: expectedGeneration,
+          habitId: snapshot.habitId,
+          completionRowsTouched
+        });
+      };
+      tx.onabort = () => {
+        if (settled) return;
+        if (generationInvalidated) {
+          finishReject(staleGenerationError(expectedGeneration, currentGeneration({ create: false }), 'edit-abort'));
+          return;
+        }
+        finishReject(tx.error || new Error('state_runtime_v2_edit_mutation_aborted'));
+      };
+      tx.onerror = () => undefined;
+    });
+  }
+
   function enqueueHabitDelta(delta) {
     if (!isDarkEnabled()) return mirrorTail;
     const snapshot = clone(delta);
@@ -975,6 +1371,45 @@
           entries: Object.keys(snapshot?.orders || {}).length
         });
         console.warn('TaskPoints V2 dark reorder mirror failed; production state remains authoritative.', error);
+      });
+    return mirrorTail;
+  }
+
+  function enqueueHabitEditFromLegacy(habitIdInput, options = {}) {
+    if (!isDarkEnabled()) return mirrorTail;
+    const habitId = String(habitIdInput || '').trim();
+    if (!habitId) return mirrorTail;
+    let snapshot;
+    try {
+      snapshot = captureHabitEditSnapshotFromLegacy(habitId, options);
+    } catch (error) {
+      mirrorFailures += 1;
+      lastError = String(error?.message || error);
+      mark('stateV2.darkHabitEditCaptureFailed', { habitId, message: lastError });
+      return Promise.resolve({ committed: false, reason: 'capture_failed', error: lastError });
+    }
+    const expectedGeneration = currentGeneration();
+    mirrorTail = mirrorTail
+      .then(async () => {
+        try {
+          return await applyHabitEditSnapshot(snapshot, { expectedGeneration });
+        } catch (error) {
+          if (error?.code === 'STATE_RUNTIME_V2_REVISION_CONFLICT') {
+            const refreshed = captureHabitEditSnapshotFromLegacy(habitId, options);
+            return applyHabitEditSnapshot(refreshed, { expectedGeneration });
+          }
+          throw error;
+        }
+      })
+      .catch((error) => {
+        mirrorFailures += 1;
+        lastError = String(error?.message || error);
+        mark('stateV2.darkHabitEditFailed', {
+          message: lastError,
+          resetGeneration: expectedGeneration,
+          habitId
+        });
+        console.warn('TaskPoints V2 dark Habit edit mirror failed; production state remains authoritative.', error);
       });
     return mirrorTail;
   }
@@ -1063,6 +1498,7 @@
       hookInstalled,
       mirroredMutations,
       mirroredOrderMutations,
+      mirroredEditMutations,
       duplicateMutations,
       mirrorFailures,
       generationInvalidations,
@@ -1078,7 +1514,8 @@
       lastParity,
       readAuthority: 'legacy_only',
       walMode: 'v2_generation_stamped_wal_with_revision_conflict_guard_and_legacy_authority',
-      habitOrderDurability: 'production_habit_order_overlay'
+      habitOrderDurability: 'production_habit_order_overlay',
+      habitEditDurability: 'persisted_legacy_habit_subset_after_home_save'
     };
   }
 
@@ -1133,11 +1570,20 @@
           expectedRevision: mutation.expectedRevision ?? undefined
         });
       }
+      if (mutation?.type === 'habit-edit-sync' && mutation?.snapshot) {
+        return applyHabitEditSnapshot(mutation.snapshot, {
+          expectedGeneration: mutation.generation || undefined,
+          expectedRevision: mutation.expectedRevision ?? undefined
+        });
+      }
       return Promise.reject(new Error('state_runtime_v2_unsupported_dark_mutation'));
     },
     applyHabitDelta,
     applyHabitOrderOverlay,
     enqueueHabitOrderOverlay,
+    captureHabitEditSnapshotFromLegacy,
+    applyHabitEditSnapshot,
+    enqueueHabitEditFromLegacy,
     getObservedRevision: () => lastKnownRevision,
     getHabit: async (id) => {
       const db = await open();
