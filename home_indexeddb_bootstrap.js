@@ -436,23 +436,12 @@
   const style = document.createElement('style');
   style.id = 'tp-add-task-mobile-layout';
   style.textContent = `
-    #createTaskSkillsEditor {
-      display: none !important;
-    }
+    #createTaskSkillsEditor { display: none !important; }
 
     @media (max-width: 640px) {
-      #addTaskModal {
-        z-index: 70 !important;
-      }
-
-      #addTaskModal .addTaskModalPanel {
-        padding-top: 72px !important;
-      }
-
-      body:has(#addTaskModal:not(.hidden)) #mobileBottomNav {
-        z-index: 80 !important;
-      }
-
+      #addTaskModal { z-index: 70 !important; }
+      #addTaskModal .addTaskModalPanel { padding-top: 72px !important; }
+      body:has(#addTaskModal:not(.hidden)) #mobileBottomNav { z-index: 80 !important; }
       body:has(#addTaskModal:not(.hidden)) #criticalTasksIsland {
         visibility: hidden !important;
         pointer-events: none !important;
@@ -460,97 +449,83 @@
 
       #addTaskModalBody {
         display: grid !important;
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
-        column-gap: 10px !important;
-        row-gap: 10px !important;
-        align-items: stretch !important;
-      }
-
-      #addTaskModalBody > #titleInput {
-        grid-column: 1 / -1 !important;
-        grid-row: 1 !important;
+        grid-template-columns: 1fr !important;
+        gap: 10px !important;
       }
 
       #addTaskRow2,
       #addTaskRow3 {
-        display: contents !important;
-      }
-
-      #importanceInput {
-        grid-column: 1 !important;
-        grid-row: 2 !important;
-      }
-
-      #dueDateInput {
-        grid-column: 2 !important;
-        grid-row: 2 !important;
-        width: 100% !important;
-        min-width: 0 !important;
-        max-width: 100% !important;
-        margin: 0 !important;
-      }
-
-      #pointsInput {
-        grid-column: 1 !important;
-        grid-row: 3 !important;
+        display: grid !important;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
+        gap: 10px !important;
+        margin-top: 0 !important;
         width: 100% !important;
         min-width: 0 !important;
       }
 
       #addTaskQuickDueRow {
-        grid-column: 2 !important;
-        grid-row: 3 !important;
         display: grid !important;
         grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
         gap: 8px !important;
-        align-items: stretch !important;
         margin: 0 !important;
-        min-width: 0 !important;
-      }
-
-      #addTaskQuickDueRow .addTaskTodayBtn {
-        width: 100% !important;
-        min-width: 0 !important;
-        margin: 0 !important;
-      }
-
-      #repeatInput {
-        grid-column: 1 / -1 !important;
-        grid-row: 4 !important;
         width: 100% !important;
         min-width: 0 !important;
       }
 
-      #repeatCustomRow {
-        grid-column: 1 / -1 !important;
-        grid-row: 5 !important;
-      }
-
+      #titleInput,
+      #importanceInput,
+      #dueDateInput,
+      #pointsInput,
+      #repeatInput,
       #tagsInput {
-        grid-column: 1 / -1 !important;
-        grid-row: 6 !important;
-      }
-
-      #addBtn {
-        grid-column: 1 / -1 !important;
-        grid-row: 7 !important;
-      }
-
-      #addTaskModalBody .input,
-      #addTaskModalBody select {
+        width: 100% !important;
+        min-width: 0 !important;
+        max-width: 100% !important;
         height: 48px !important;
         min-height: 48px !important;
         max-height: 48px !important;
         box-sizing: border-box !important;
+        margin: 0 !important;
       }
 
       #addTaskQuickDueRow button {
+        width: 100% !important;
+        min-width: 0 !important;
         height: 48px !important;
         min-height: 48px !important;
         max-height: 48px !important;
+        margin: 0 !important;
         box-sizing: border-box !important;
       }
+
+      #repeatCustomRow { margin-top: 0 !important; }
     }
   `;
   (document.head || document.documentElement).appendChild(style);
+
+  function arrangeMobileTaskFields() {
+    if (!global.matchMedia?.('(max-width: 640px)').matches) return;
+
+    const body = document.getElementById('addTaskModalBody');
+    const row2 = document.getElementById('addTaskRow2');
+    const row3 = document.getElementById('addTaskRow3');
+    const importance = document.getElementById('importanceInput');
+    const dueDate = document.getElementById('dueDateInput');
+    const points = document.getElementById('pointsInput');
+    const repeat = document.getElementById('repeatInput');
+    const quickDue = document.getElementById('addTaskQuickDueRow');
+    if (!body || !row2 || !row3 || !importance || !dueDate || !points || !repeat || !quickDue) return;
+    if (body.dataset.mobileTaskLayoutReady === '1') return;
+
+    row2.replaceChildren(importance, dueDate);
+    row3.replaceChildren(points, quickDue);
+    row3.after(repeat);
+    body.dataset.mobileTaskLayoutReady = '1';
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', arrangeMobileTaskFields, { once: true });
+  } else {
+    arrangeMobileTaskFields();
+  }
 })(typeof window !== 'undefined' ? window : globalThis);
