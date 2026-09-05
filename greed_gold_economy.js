@@ -16,6 +16,8 @@
   const MAX_PATCH_ATTEMPTS = 160;
   let patchAttempts = 0;
   let internalPersistDepth = 0;
+  let displayStateCache = null;
+  let displayStateCacheRevision = '';
 
   const roundGold = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 10) / 10;
   const roundScore = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 10) / 10;
@@ -812,12 +814,29 @@
     core.loadAppState.__taskPointsGreedAware = true;
   }
 
+  function currentStorageRevision() {
+    try { return String(global.localStorage?.getItem?.('taskpoints_state_revision_v1') || ''); }
+    catch (_) { return ''; }
+  }
+
   function loadCurrentState() {
+    const revision = currentStorageRevision();
+    if (revision && displayStateCache && displayStateCacheRevision === revision) return displayStateCache;
     try {
       const loaded = core.loadAppState?.({ syncDerived: false, persistSync: false });
-      return loaded?.state || loaded || null;
+      const state = loaded?.state || loaded || null;
+      if (state && typeof state === 'object') {
+        displayStateCache = state;
+        displayStateCacheRevision = currentStorageRevision() || revision;
+        return state;
+      }
     } catch (_) {}
-    return readStoredState();
+    const stored = readStoredState();
+    if (stored && typeof stored === 'object') {
+      displayStateCache = stored;
+      displayStateCacheRevision = currentStorageRevision() || revision;
+    }
+    return stored;
   }
 
   function patchGoldDisplays() {
