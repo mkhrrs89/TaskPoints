@@ -92,8 +92,6 @@
       titleEl.textContent = WORD;
     }
 
-    // Release the temporary reveal guard, then use the original boot completion
-    // hooks so session tracking, fades, app visibility, and events stay intact.
     global.__tpBootViewFinished = false;
 
     let revealed = false;
@@ -142,9 +140,6 @@
     if (global.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
 
     started = true;
-
-    // Prevent the original CSS timeline or its completion listener from revealing
-    // the app while this paint-aware sequence owns the title.
     global.__tpBootViewFinished = true;
     bindSkipControls(splash);
 
@@ -164,16 +159,12 @@
     });
     titleEl.appendChild(stage);
 
-    // If the legacy fallback tries to replace the title while the new sequence is
-    // running, restore the owned stage without restarting or losing progress.
     titleObserver = new MutationObserver(() => {
       if (stopped || !titleEl.isConnected || titleEl.contains(stage)) return;
       titleEl.replaceChildren(stage);
     });
     titleObserver.observe(titleEl, { childList: true });
 
-    // Start after two real paint opportunities. Do not wait for the enormous page
-    // to finish parsing; mobile can decode while the rest of the app continues loading.
     await nextFrame();
     await nextFrame();
     await sleep(INITIAL_BLANK_MS);
@@ -207,8 +198,6 @@
     const titleEl = document.getElementById('matrixTitle');
     if (!splash || !titleEl) return;
 
-    // Let the inline bootstrap finish installing its existing completion hooks,
-    // then take over before the browser's first meaningful splash paint.
     global.setTimeout(() => runSequentialAnimation(titleEl, splash), 0);
   }
 
@@ -359,8 +348,6 @@
   let databaseWasMissing = false;
   let request;
   try {
-    // No version is supplied: opening an existing database is allowed, while a
-    // missing database is detected and its creation transaction is aborted.
     request = global.indexedDB.open(DB_NAME);
   } catch (_) {
     finish('fallback', 'indexeddb_open_exception');
@@ -449,6 +436,10 @@
   const style = document.createElement('style');
   style.id = 'tp-add-task-mobile-layout';
   style.textContent = `
+    #createTaskSkillsEditor {
+      display: none !important;
+    }
+
     @media (max-width: 640px) {
       #addTaskModal {
         z-index: 70 !important;
@@ -460,6 +451,104 @@
 
       body:has(#addTaskModal:not(.hidden)) #mobileBottomNav {
         z-index: 80 !important;
+      }
+
+      body:has(#addTaskModal:not(.hidden)) #criticalTasksIsland {
+        visibility: hidden !important;
+        pointer-events: none !important;
+      }
+
+      #addTaskModalBody {
+        display: grid !important;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
+        column-gap: 10px !important;
+        row-gap: 10px !important;
+        align-items: stretch !important;
+      }
+
+      #addTaskModalBody > #titleInput {
+        grid-column: 1 / -1 !important;
+        grid-row: 1 !important;
+      }
+
+      #addTaskRow2,
+      #addTaskRow3 {
+        display: contents !important;
+      }
+
+      #importanceInput {
+        grid-column: 1 !important;
+        grid-row: 2 !important;
+      }
+
+      #dueDateInput {
+        grid-column: 2 !important;
+        grid-row: 2 !important;
+        width: 100% !important;
+        min-width: 0 !important;
+        max-width: 100% !important;
+        margin: 0 !important;
+      }
+
+      #pointsInput {
+        grid-column: 1 !important;
+        grid-row: 3 !important;
+        width: 100% !important;
+        min-width: 0 !important;
+      }
+
+      #addTaskQuickDueRow {
+        grid-column: 2 !important;
+        grid-row: 3 !important;
+        display: grid !important;
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        gap: 8px !important;
+        align-items: stretch !important;
+        margin: 0 !important;
+        min-width: 0 !important;
+      }
+
+      #addTaskQuickDueRow .addTaskTodayBtn {
+        width: 100% !important;
+        min-width: 0 !important;
+        margin: 0 !important;
+      }
+
+      #repeatInput {
+        grid-column: 1 / -1 !important;
+        grid-row: 4 !important;
+        width: 100% !important;
+        min-width: 0 !important;
+      }
+
+      #repeatCustomRow {
+        grid-column: 1 / -1 !important;
+        grid-row: 5 !important;
+      }
+
+      #tagsInput {
+        grid-column: 1 / -1 !important;
+        grid-row: 6 !important;
+      }
+
+      #addBtn {
+        grid-column: 1 / -1 !important;
+        grid-row: 7 !important;
+      }
+
+      #addTaskModalBody .input,
+      #addTaskModalBody select {
+        height: 48px !important;
+        min-height: 48px !important;
+        max-height: 48px !important;
+        box-sizing: border-box !important;
+      }
+
+      #addTaskQuickDueRow button {
+        height: 48px !important;
+        min-height: 48px !important;
+        max-height: 48px !important;
+        box-sizing: border-box !important;
       }
     }
   `;
