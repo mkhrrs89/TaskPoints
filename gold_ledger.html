@@ -24,8 +24,9 @@
     .gold-table-wrap { overflow-x:auto; }
     .gold-table { width:100%; border-collapse:collapse; font-size:13px; }
     .gold-table th { text-align:left; padding:10px 8px; color:#94a3b8; font-size:11px; text-transform:uppercase; letter-spacing:.07em; border-bottom:1px solid rgba(148,163,184,.2); white-space:nowrap; }
-    .gold-table td { padding:11px 8px; border-bottom:1px solid rgba(148,163,184,.11); vertical-align:top; }
+    .gold-table td { padding:11px 8px; border-bottom:1px solid rgba(148,163,184,.11); vertical-align:middle; }
     .gold-table tbody tr:last-child td { border-bottom:0; }
+    .gold-date { white-space:nowrap; line-height:1.2; font-variant-numeric:tabular-nums; }
     .gold-amount { font-weight:900; font-variant-numeric:tabular-nums; white-space:nowrap; }
     .gold-amount.positive { color:#86efac; }
     .gold-amount.negative { color:#fca5a5; }
@@ -38,6 +39,7 @@
       .gold-card { border-radius:15px; }
       .gold-table { font-size:12px; }
       .gold-table th,.gold-table td { padding-left:6px; padding-right:6px; }
+      .gold-date { min-width:54px; font-size:11px; }
     }
   </style>
 </head>
@@ -162,6 +164,16 @@
       champion_bonus: 'Champion Bonus'
     }[type] || type || 'Transaction');
 
+    function formatLedgerDate(value) {
+      const raw = String(value || '').slice(0, 10);
+      const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
+      if (!match) return raw || '—';
+      const year = Number(match[1]) % 100;
+      const month = Number(match[2]);
+      const day = Number(match[3]);
+      return `${month}/${day}/${String(year).padStart(2, '0')}`;
+    }
+
     function transactionDetail(row) {
       const opponent = row.opponentId ? playerName(row.opponentId) : '';
       if (row.type === 'opening_balance') return 'Gold carried into the new ledger at launch.';
@@ -217,8 +229,9 @@
         const amount = roundGold(row.amount);
         const amountClass = amount < 0 ? 'negative' : 'positive';
         const sign = amount > 0 ? '+' : '';
+        const date = formatLedgerDate(row.dateKey || String(row.createdAtISO || '').slice(0,10));
         return `<tr>
-          <td>${esc(row.dateKey || String(row.createdAtISO || '').slice(0,10) || '—')}</td>
+          <td class="gold-date">${esc(date)}</td>
           <td><strong>${esc(playerName(row.playerId))}</strong></td>
           <td><span class="gold-type-pill">${esc(typeLabel(row.type))}</span></td>
           <td class="gold-amount ${amountClass}">${sign}${amount.toFixed(1)}</td>
