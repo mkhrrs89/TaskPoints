@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>TaskPoints — Gold Ledger</title>
+  <meta name="theme-color" content="#0b0d10" />
+  <link rel="stylesheet" href="assets/tailwind.css" />
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="preload" href="toolbar.js" as="script" />
+  <script src="toolbar.js" defer></script>
+  <style>
+    body { background:#0b0d10; color:#f8fafc; }
+    .gold-shell { max-width:1152px; margin:0 auto; padding:16px 16px 84px; }
+    .gold-card { border:1px solid rgba(251,146,60,.22); background:rgba(15,18,23,.88); border-radius:18px; box-shadow:0 16px 44px rgba(0,0,0,.22); }
+    .gold-title { color:#fb923c; }
+    .gold-muted { color:#94a3b8; }
+    .gold-balance-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; }
+    .gold-balance-card { padding:12px 14px; border:1px solid rgba(148,163,184,.14); border-radius:14px; background:rgba(255,255,255,.025); min-width:0; }
+    .gold-balance-name { font-size:12px; color:#cbd5e1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .gold-balance-value { margin-top:3px; font-size:23px; line-height:1; font-weight:900; color:#fb923c; font-variant-numeric:tabular-nums; }
+    .gold-controls { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+    .gold-select { min-height:38px; padding:7px 10px; border-radius:10px; border:1px solid rgba(148,163,184,.3); background:#111827; color:#f8fafc; }
+    .gold-table-wrap { overflow-x:auto; }
+    .gold-table { width:100%; border-collapse:collapse; font-size:13px; }
+    .gold-table th { text-align:left; padding:10px 8px; color:#94a3b8; font-size:11px; text-transform:uppercase; letter-spacing:.07em; border-bottom:1px solid rgba(148,163,184,.2); white-space:nowrap; }
+    .gold-table td { padding:11px 8px; border-bottom:1px solid rgba(148,163,184,.11); vertical-align:top; }
+    .gold-table tbody tr:last-child td { border-bottom:0; }
+    .gold-amount { font-weight:900; font-variant-numeric:tabular-nums; white-space:nowrap; }
+    .gold-amount.positive { color:#86efac; }
+    .gold-amount.negative { color:#fca5a5; }
+    .gold-balance-after { color:#fb923c; font-weight:800; font-variant-numeric:tabular-nums; white-space:nowrap; }
+    .gold-type-pill { display:inline-flex; border:1px solid rgba(148,163,184,.2); border-radius:999px; padding:3px 7px; font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.04em; white-space:nowrap; }
+    .gold-detail { color:#cbd5e1; line-height:1.35; min-width:190px; }
+    .gold-empty { padding:26px 12px; text-align:center; color:#94a3b8; }
+    @media (max-width:640px) {
+      .gold-shell { padding-left:12px; padding-right:12px; }
+      .gold-card { border-radius:15px; }
+      .gold-table { font-size:12px; }
+      .gold-table th,.gold-table td { padding-left:6px; padding-right:6px; }
+    }
+  </style>
+</head>
+<body class="min-h-screen">
+  <div class="gold-shell">
+    <div class="flex items-center justify-between gap-3 mb-3 md:hidden">
+      <a href="index.html" class="flex items-center gap-3">
+        <img src="assets/taskpoints-logo.png" alt="TaskPoints logo" class="w-10 h-10 rounded-2xl object-cover shrink-0 shadow-sm" />
+        <h1 class="text-2xl font-extrabold tracking-tight leading-tight"><span style="color:#fb923c;">Task</span><span style="color:#1e666d;">Points</span></h1>
+      </a>
+    </div>
+
+    <header class="mb-4">
+      <div class="row items-center">
+        <a href="index.html" class="hidden md:flex items-center gap-3">
+          <img src="assets/taskpoints-logo.svg" alt="TaskPoints logo" class="w-10 h-10 rounded-2xl object-cover shrink-0 shadow-sm" />
+          <div>
+            <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight">TaskPoints</h1>
+            <p class="text-xs gold-muted">Game — Gold Ledger</p>
+          </div>
+        </a>
+        <div class="toolbar header-nav">
+          <a href="index.html" class="btn btn-teal btn-toolbar nav-btn">Main</a>
+          <a href="today.html" class="btn btn-teal btn-toolbar nav-btn mobile-hide-header-today">Today</a>
+          <a href="daily_sources.html" class="btn btn-teal btn-toolbar nav-btn">Sources</a>
+          <a href="log.html" class="btn btn-teal btn-toolbar nav-btn">Log</a>
+          <a href="week.html" class="btn btn-teal btn-toolbar nav-btn">Week</a>
+          <a href="notes.html" class="btn btn-teal btn-toolbar nav-btn desktop-header-notes-link">Notes</a>
+          <div class="dropdown hidden md:block">
+            <button type="button" class="btn btn-teal btn-toolbar nav-btn dropdown-toggle active" data-dropdown-toggle aria-expanded="false">Game <span class="caret">▾</span></button>
+            <div class="dropdown-menu">
+              <a href="gamehub.html" class="btn btn-teal btn-toolbar nav-btn">Game Hub</a>
+              <a href="game.html" class="btn btn-teal btn-toolbar nav-btn">Players</a>
+              <a href="standings.html" class="btn btn-teal btn-toolbar nav-btn">Standings</a>
+              <a href="rankings.html" class="btn btn-teal btn-toolbar nav-btn">Rankings</a>
+              <a href="matchups.html" class="btn btn-teal btn-toolbar nav-btn">Matchups</a>
+              <a href="head_to_heads.html" class="btn btn-teal btn-toolbar nav-btn">Head to Heads</a>
+              <a href="schedule.html" class="btn btn-teal btn-toolbar nav-btn">Schedule</a>
+              <a href="game_ratings.html" class="btn btn-teal btn-toolbar nav-btn">Ratings</a>
+              <a href="gold_ledger.html" class="btn btn-teal btn-toolbar nav-btn active" aria-current="page">Gold Ledger</a>
+              <a href="records.html" class="btn btn-teal btn-toolbar nav-btn">Records</a>
+            </div>
+          </div>
+          <a href="projects.html" class="btn btn-teal btn-toolbar nav-btn">Projects</a>
+          <a href="season.html" class="btn btn-teal btn-toolbar nav-btn">Season</a>
+          <a href="settings.html" class="btn btn-teal btn-toolbar nav-btn">Settings</a>
+        </div>
+      </div>
+    </header>
+
+    <main class="space-y-4">
+      <section class="gold-card p-4 sm:p-5">
+        <div class="flex items-start justify-between gap-4 flex-wrap mb-4">
+          <div>
+            <div class="text-xs uppercase tracking-[.16em] gold-muted">Gold Economy</div>
+            <h2 class="text-2xl font-black gold-title mt-1">Gold Ledger</h2>
+            <p class="text-sm gold-muted mt-1">Permanent Gold transactions from the Greed economy. Historical activity before launch is represented only by opening balances.</p>
+          </div>
+          <div id="ledgerLaunchMeta" class="text-xs gold-muted text-right"></div>
+        </div>
+        <div id="goldBalances" class="gold-balance-grid"></div>
+      </section>
+
+      <section class="gold-card p-4 sm:p-5">
+        <div class="flex items-center justify-between gap-3 flex-wrap mb-3">
+          <div>
+            <h2 class="text-lg font-bold">Transactions</h2>
+            <div id="transactionCount" class="text-xs gold-muted"></div>
+          </div>
+          <div class="gold-controls">
+            <select id="playerFilter" class="gold-select" aria-label="Filter Gold transactions by player"><option value="">All players</option></select>
+            <select id="typeFilter" class="gold-select" aria-label="Filter Gold transactions by type">
+              <option value="">All transaction types</option>
+              <option value="opening_balance">Opening Balance</option>
+              <option value="matchup_margin">Matchup Margin</option>
+              <option value="matchup_theft">Gold Theft</option>
+              <option value="champion_bonus">Champion Bonus</option>
+            </select>
+          </div>
+        </div>
+        <div class="gold-table-wrap">
+          <table class="gold-table">
+            <thead><tr><th>Date</th><th>Player</th><th>Type</th><th>Amount</th><th>Balance</th><th>Details</th></tr></thead>
+            <tbody id="ledgerRows"></tbody>
+          </table>
+          <div id="ledgerEmpty" class="gold-empty hidden">No Gold transactions match these filters.</div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="scoring_core.js"></script>
+  <script>
+  (function () {
+    const core = window.TaskPointsCore || {};
+    const api = window.TaskPointsGreedGoldEconomy || {};
+    const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+    const roundGold = api.roundGold || ((value) => Math.round((Number(value || 0) + Number.EPSILON) * 10) / 10);
+
+    function loadState() {
+      try {
+        const loaded = core.loadAppState?.({ syncDerived: false, persistSync: false });
+        const state = loaded?.state || loaded || {};
+        if (core.reconcileGoldEconomy) core.reconcileGoldEconomy(state);
+        return state;
+      } catch (error) {
+        console.error('Could not load Gold Ledger state', error);
+        return {};
+      }
+    }
+
+    let state = loadState();
+    const players = new Map((Array.isArray(state.players) ? state.players : []).map((player) => [String(player.id || player.playerId || ''), player]));
+    const playerName = (id) => {
+      if (String(id) === 'YOU') return String(state.youName || 'You');
+      return String(players.get(String(id))?.name || id || 'Unknown');
+    };
+    const typeLabel = (type) => ({
+      opening_balance: 'Opening Balance',
+      matchup_margin: 'Matchup Margin',
+      matchup_theft: 'Gold Theft',
+      champion_bonus: 'Champion Bonus'
+    }[type] || type || 'Transaction');
+
+    function transactionDetail(row) {
+      const opponent = row.opponentId ? playerName(row.opponentId) : '';
+      if (row.type === 'opening_balance') return 'Gold carried into the new ledger at launch.';
+      if (row.type === 'champion_bonus') return `Season championship bonus${row.seasonId ? ` · ${row.seasonId}` : ''}.`;
+      if (row.type === 'matchup_margin') {
+        const diff = Number(row.meta?.pointDifferential);
+        return `${opponent ? `Defeated ${opponent}. ` : ''}${Number.isFinite(diff) ? `${diff.toFixed(1)}-point margin ÷ 10.` : 'Point-differential Gold.'}`;
+      }
+      if (row.type === 'matchup_theft') {
+        const greed = Number(row.meta?.winnerGreedRating);
+        const pct = Number.isFinite(greed) ? greed / 10 : null;
+        if (Number(row.amount) < 0) return `${opponent || 'Opponent'} stole ${Math.abs(Number(row.amount)).toFixed(1)} Gold${pct != null ? ` at ${pct.toFixed(1)}% theft rate` : ''}.`;
+        return `Stole ${Number(row.amount).toFixed(1)} Gold from ${opponent || 'opponent'}${pct != null ? ` at ${pct.toFixed(1)}% theft rate` : ''}.`;
+      }
+      return '';
+    }
+
+    function renderBalances() {
+      const ids = new Set(['YOU']);
+      players.forEach((player, id) => { if (id) ids.add(id); });
+      const rows = [...ids].map((id) => ({ id, name: playerName(id), gold: core.getGoldBalance ? core.getGoldBalance(state, id) : 0 }))
+        .sort((a, b) => b.gold - a.gold || a.name.localeCompare(b.name));
+      document.getElementById('goldBalances').innerHTML = rows.map((row) => `
+        <div class="gold-balance-card">
+          <div class="gold-balance-name" title="${esc(row.name)}">${esc(row.name)}</div>
+          <div class="gold-balance-value">${Number(row.gold).toFixed(1)}</div>
+        </div>`).join('');
+    }
+
+    function installPlayerFilter() {
+      const select = document.getElementById('playerFilter');
+      const ids = new Set((Array.isArray(state.goldLedger) ? state.goldLedger : []).map((row) => String(row.playerId || '')).filter(Boolean));
+      const options = [...ids].map((id) => ({ id, name: playerName(id) })).sort((a,b) => a.name.localeCompare(b.name));
+      options.forEach(({ id, name }) => {
+        const option = document.createElement('option');
+        option.value = id;
+        option.textContent = name;
+        select.appendChild(option);
+      });
+    }
+
+    function renderLedger() {
+      const playerId = document.getElementById('playerFilter').value;
+      const type = document.getElementById('typeFilter').value;
+      const all = Array.isArray(state.goldLedger) ? state.goldLedger : [];
+      const filtered = all.filter((row) => (!playerId || String(row.playerId || '') === playerId) && (!type || row.type === type))
+        .slice()
+        .sort((a, b) => String(b.createdAtISO || b.dateKey || '').localeCompare(String(a.createdAtISO || a.dateKey || '')) || String(b.id || '').localeCompare(String(a.id || '')));
+      const tbody = document.getElementById('ledgerRows');
+      const empty = document.getElementById('ledgerEmpty');
+      document.getElementById('transactionCount').textContent = `${filtered.length} of ${all.length} transactions`;
+      tbody.innerHTML = filtered.map((row) => {
+        const amount = roundGold(row.amount);
+        const amountClass = amount < 0 ? 'negative' : 'positive';
+        const sign = amount > 0 ? '+' : '';
+        return `<tr>
+          <td>${esc(row.dateKey || String(row.createdAtISO || '').slice(0,10) || '—')}</td>
+          <td><strong>${esc(playerName(row.playerId))}</strong></td>
+          <td><span class="gold-type-pill">${esc(typeLabel(row.type))}</span></td>
+          <td class="gold-amount ${amountClass}">${sign}${amount.toFixed(1)}</td>
+          <td class="gold-balance-after">${Number(row.balanceAfter || 0).toFixed(1)}</td>
+          <td class="gold-detail">${esc(transactionDetail(row))}</td>
+        </tr>`;
+      }).join('');
+      empty.classList.toggle('hidden', filtered.length !== 0);
+    }
+
+    const economy = state.goldEconomy || {};
+    document.getElementById('ledgerLaunchMeta').innerHTML = economy.launchedAtISO
+      ? `Ledger started<br><strong>${esc(String(economy.launchedAtISO).replace('T',' ').replace('.000Z',' UTC'))}</strong>`
+      : 'Ledger not initialized';
+    renderBalances();
+    installPlayerFilter();
+    renderLedger();
+    document.getElementById('playerFilter').addEventListener('change', renderLedger);
+    document.getElementById('typeFilter').addEventListener('change', renderLedger);
+  })();
+  </script>
+</body>
+</html>
