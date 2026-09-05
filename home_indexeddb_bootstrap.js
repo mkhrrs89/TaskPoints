@@ -488,6 +488,39 @@
         margin: 0 !important;
       }
 
+      #dueDateInput {
+        -webkit-appearance: none !important;
+        appearance: none !important;
+        display: block !important;
+        block-size: 48px !important;
+        min-block-size: 48px !important;
+        max-block-size: 48px !important;
+        padding: 0 14px !important;
+        line-height: 48px !important;
+        font-size: 16px !important;
+        overflow: hidden !important;
+        align-self: start !important;
+      }
+
+      #dueDateInput::-webkit-date-and-time-value {
+        min-height: 0 !important;
+        height: auto !important;
+        line-height: normal !important;
+        text-align: left !important;
+        padding: 0 !important;
+        margin: 0 !important;
+      }
+
+      #dueDateInput::-webkit-datetime-edit {
+        padding: 0 !important;
+        margin: 0 !important;
+      }
+
+      #dueDateInput::-webkit-calendar-picker-indicator {
+        padding: 0 !important;
+        margin: 0 !important;
+      }
+
       #addTaskQuickDueRow button {
         width: 100% !important;
         min-width: 0 !important;
