@@ -18,7 +18,12 @@ test('V2-22 branch CI gates focused V2 contracts and regressions against live cu
   assert.ok(workflow.includes(STEP4_COMMAND), 'Step 4 performance contract must remain an explicit gate');
   assert.match(workflow, /Run V2 core storage contracts/);
   assert.match(workflow, /Run V2 Habit mutation contracts/);
-  assert.match(workflow, /Run V2 lifecycle and rollout contracts/);
+  assert.match(workflow, /Run V2 lifecycle interruption contract/);
+  assert.match(workflow, /Run V2 preview cleanup contract/);
+  assert.match(workflow, /Run V2 preview opt-in contract/);
+  assert.match(workflow, /Run V2 reload verification contract/);
+  assert.match(workflow, /Run V2 rollout gate contract/);
+  assert.match(workflow, /Run V2 perf trace visibility contract/);
   assert.match(workflow, /Prepare live current-main baseline worktree/);
   assert.match(workflow, /git fetch origin main/);
   assert.match(workflow, /git worktree add --detach \/tmp\/taskpoints-main origin\/main/);
@@ -36,6 +41,7 @@ test('V2-22 branch CI gates focused V2 contracts and regressions against live cu
   const installAt = workflow.indexOf('run: npm ci');
   const step4At = workflow.indexOf(STEP4_COMMAND);
   const coreAt = workflow.indexOf('Run V2 core storage contracts');
+  const lifecycleAt = workflow.indexOf('Run V2 lifecycle interruption contract');
   const liveMainAt = workflow.indexOf('Prepare live current-main baseline worktree');
   const individualAt = workflow.indexOf('Compare individual test failures with live current main');
   const fullAt = workflow.indexOf('Run full TaskPoints test suite as supplemental diagnostic');
@@ -44,7 +50,8 @@ test('V2-22 branch CI gates focused V2 contracts and regressions against live cu
     installAt >= 0
       && step4At > installAt
       && coreAt > step4At
-      && liveMainAt > coreAt
+      && lifecycleAt > coreAt
+      && liveMainAt > lifecycleAt
       && individualAt > liveMainAt
       && fullAt > individualAt
       && regressionGateAt > fullAt,
