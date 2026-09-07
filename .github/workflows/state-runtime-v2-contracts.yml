@@ -15,6 +15,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -28,58 +30,81 @@ jobs:
       - name: Run State Runtime V2 contract tests
         run: node --test tests/state_runtime_v2*.test.js tests/perf_trace_v2_visibility_contract.test.js
 
-      - name: Diagnose individual TaskPoints test files against main baseline
+      - name: Prepare live current-main baseline worktree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          rm -rf /tmp/taskpoints-main
+          git worktree add --detach /tmp/taskpoints-main origin/main
+          ln -s "$GITHUB_WORKSPACE/node_modules" /tmp/taskpoints-main/node_modules
+          echo "V2 head: $(git rev-parse HEAD)"
+          echo "Current main baseline: $(git -C /tmp/taskpoints-main rev-parse HEAD)"
+
+      - name: Compare individual test failures with live current main
         id: individual_diagnostics
         shell: bash
         run: |
           set -uo pipefail
-          mkdir -p v2-rollout-diagnostics/logs
-          : > v2-rollout-diagnostics/failures.txt
-          : > v2-rollout-diagnostics/known-main-baseline-failures.txt
+          mkdir -p v2-rollout-diagnostics/main-logs v2-rollout-diagnostics/v2-logs
+          : > v2-rollout-diagnostics/main-failures.txt
+          : > v2-rollout-diagnostics/v2-failures.txt
           : > v2-rollout-diagnostics/new-v2-regressions.txt
-          mapfile -d '' files < <(find tests -type f -name '*.test.js' -print0 | sort -z)
-          echo "Found ${#files[@]} test files"
-          known_count=0
-          new_count=0
+          : > v2-rollout-diagnostics/main-baseline-sha.txt
+          git -C /tmp/taskpoints-main rev-parse HEAD > v2-rollout-diagnostics/main-baseline-sha.txt
 
-          for file in "${files[@]}"; do
-            echo "=== TEST FILE: $file ==="
-            safe_name="${file//\//__}"
-            log_file="v2-rollout-diagnostics/logs/${safe_name}.log"
+          run_file() {
+            local root="$1"
+            local file="$2"
+            local log_dir="$3"
+            local output="$4"
+            local safe_name="${file//\//__}"
+            local log_file="$log_dir/${safe_name}.log"
             set +e
-            timeout --signal=TERM --kill-after=5s 30s node --test "$file" 2>&1 | tee "$log_file"
-            status=${PIPESTATUS[0]}
+            (cd "$root" && timeout --signal=TERM --kill-after=5s 30s node --test "$file") >"$log_file" 2>&1
+            local status=$?
             set -e
-
-            signature=""
-            detail=""
             if [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; then
-              signature="HUNG:$file"
-              detail="$signature"
+              printf 'HUNG:%s\n' "$file" >> "$output"
             elif [ "$status" -ne 0 ]; then
-              signature="FAILED:$file"
-              detail="$signature:$status"
+              printf 'FAILED:%s\n' "$file" >> "$output"
             fi
+          }
 
-            if [ -z "$signature" ]; then
-              continue
-            fi
-
-            printf '%s\n' "$detail" >> v2-rollout-diagnostics/failures.txt
-            if grep -Fxq "$signature" tests/state_runtime_v2_baseline_failures.txt; then
-              echo "KNOWN_MAIN_BASELINE=$detail"
-              printf '%s\n' "$detail" >> v2-rollout-diagnostics/known-main-baseline-failures.txt
-              known_count=$((known_count + 1))
-            else
-              echo "NEW_V2_REGRESSION=$detail"
-              printf '%s\n' "$detail" >> v2-rollout-diagnostics/new-v2-regressions.txt
-              new_count=$((new_count + 1))
-            fi
+          mapfile -d '' main_files < <(cd /tmp/taskpoints-main && find tests -type f -name '*.test.js' -print0 | sort -z)
+          echo "Collecting live main baseline from ${#main_files[@]} test files"
+          for file in "${main_files[@]}"; do
+            run_file /tmp/taskpoints-main "$file" v2-rollout-diagnostics/main-logs v2-rollout-diagnostics/main-failures.txt
           done
 
-          echo "known_main_baseline_count=$known_count" >> "$GITHUB_OUTPUT"
+          mapfile -d '' v2_files < <(find tests -type f -name '*.test.js' -print0 | sort -z)
+          echo "Checking ${#v2_files[@]} V2-branch test files"
+          for file in "${v2_files[@]}"; do
+            case "$file" in
+              tests/state_runtime_v2*.test.js|tests/perf_trace_v2_visibility_contract.test.js)
+                continue
+                ;;
+            esac
+            run_file "$GITHUB_WORKSPACE" "$file" v2-rollout-diagnostics/v2-logs v2-rollout-diagnostics/v2-failures.txt
+          done
+
+          new_count=0
+          while IFS= read -r signature; do
+            [ -z "$signature" ] && continue
+            if ! grep -Fxq "$signature" v2-rollout-diagnostics/main-failures.txt; then
+              echo "NEW_V2_REGRESSION=$signature"
+              printf '%s\n' "$signature" >> v2-rollout-diagnostics/new-v2-regressions.txt
+              new_count=$((new_count + 1))
+            fi
+          done < v2-rollout-diagnostics/v2-failures.txt
+
+          main_count=$(grep -c . v2-rollout-diagnostics/main-failures.txt || true)
+          v2_count=$(grep -c . v2-rollout-diagnostics/v2-failures.txt || true)
+          echo "main_baseline_failure_count=$main_count" >> "$GITHUB_OUTPUT"
+          echo "v2_branch_failure_count=$v2_count" >> "$GITHUB_OUTPUT"
           echo "new_v2_regression_count=$new_count" >> "$GITHUB_OUTPUT"
-          echo "Known current-main failures: $known_count"
+          echo "Live current-main failures: $main_count"
+          echo "V2 branch non-V2 failures: $v2_count"
           echo "New V2 regressions: $new_count"
           if [ "$new_count" -ne 0 ]; then
             echo "=== NEW V2 REGRESSIONS ==="
@@ -105,10 +130,12 @@ jobs:
         if: always()
         run: |
           echo "Full-suite outcome: ${{ steps.full_suite.outcome }}"
-          echo "The rollout gate is decided by V2 contracts plus per-file regression comparison against the recorded current-main baseline."
+          echo "Live current-main baseline failures: ${{ steps.individual_diagnostics.outputs.main_baseline_failure_count }}"
+          echo "V2 branch non-V2 failures: ${{ steps.individual_diagnostics.outputs.v2_branch_failure_count }}"
+          echo "The rollout gate is decided by focused V2 contracts plus a live per-file comparison against current main."
 
       - name: Fail rollout gate on new V2 regressions
         if: steps.individual_diagnostics.outputs.new_v2_regression_count != '0'
         run: |
-          echo "Found ${{ steps.individual_diagnostics.outputs.new_v2_regression_count }} V2 regression(s) beyond the recorded current-main baseline."
+          echo "Found ${{ steps.individual_diagnostics.outputs.new_v2_regression_count }} V2 regression(s) beyond live current main."
           exit 1
