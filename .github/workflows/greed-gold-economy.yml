@@ -1,0 +1,28 @@
+name: Greed Gold Economy
+
+on:
+  push:
+    branches:
+      - feature/greed-gold-ledger
+  pull_request:
+    paths:
+      - greed_gold_economy.js
+      - _worker.js
+      - gold_ledger.html
+      - tests/greed_gold_economy.test.js
+      - tests/greed_rating.test.js
+      - tests/season_champion_gold_bonus.test.js
+      - .github/workflows/greed-gold-economy.yml
+
+jobs:
+  focused-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check Greed Gold runtime syntax
+        run: node --check greed_gold_economy.js
+      - name: Run Greed Gold contracts
+        run: node --test tests/greed_gold_economy.test.js tests/greed_rating.test.js tests/season_champion_gold_bonus.test.js

@@ -92,8 +92,6 @@
       titleEl.textContent = WORD;
     }
 
-    // Release the temporary reveal guard, then use the original boot completion
-    // hooks so session tracking, fades, app visibility, and events stay intact.
     global.__tpBootViewFinished = false;
 
     let revealed = false;
@@ -142,9 +140,6 @@
     if (global.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
 
     started = true;
-
-    // Prevent the original CSS timeline or its completion listener from revealing
-    // the app while this paint-aware sequence owns the title.
     global.__tpBootViewFinished = true;
     bindSkipControls(splash);
 
@@ -164,16 +159,12 @@
     });
     titleEl.appendChild(stage);
 
-    // If the legacy fallback tries to replace the title while the new sequence is
-    // running, restore the owned stage without restarting or losing progress.
     titleObserver = new MutationObserver(() => {
       if (stopped || !titleEl.isConnected || titleEl.contains(stage)) return;
       titleEl.replaceChildren(stage);
     });
     titleObserver.observe(titleEl, { childList: true });
 
-    // Start after two real paint opportunities. Do not wait for the enormous page
-    // to finish parsing; mobile can decode while the rest of the app continues loading.
     await nextFrame();
     await nextFrame();
     await sleep(INITIAL_BLANK_MS);
@@ -207,8 +198,6 @@
     const titleEl = document.getElementById('matrixTitle');
     if (!splash || !titleEl) return;
 
-    // Let the inline bootstrap finish installing its existing completion hooks,
-    // then take over before the browser's first meaningful splash paint.
     global.setTimeout(() => runSequentialAnimation(titleEl, splash), 0);
   }
 
@@ -359,8 +348,6 @@
   let databaseWasMissing = false;
   let request;
   try {
-    // No version is supplied: opening an existing database is allowed, while a
-    // missing database is detected and its creation transaction is aborted.
     request = global.indexedDB.open(DB_NAME);
   } catch (_) {
     finish('fallback', 'indexeddb_open_exception');
@@ -449,19 +436,129 @@
   const style = document.createElement('style');
   style.id = 'tp-add-task-mobile-layout';
   style.textContent = `
+    #createTaskSkillsEditor { display: none !important; }
+
     @media (max-width: 640px) {
-      #addTaskModal {
-        z-index: 70 !important;
+      #addTaskModal { z-index: 70 !important; }
+      #addTaskModal .addTaskModalPanel { padding-top: 72px !important; }
+      body:has(#addTaskModal:not(.hidden)) #mobileBottomNav { z-index: 80 !important; }
+      body:has(#addTaskModal:not(.hidden)) #criticalTasksIsland {
+        visibility: hidden !important;
+        pointer-events: none !important;
       }
 
-      #addTaskModal .addTaskModalPanel {
-        padding-top: 72px !important;
+      #addTaskModalBody {
+        display: grid !important;
+        grid-template-columns: 1fr !important;
+        gap: 10px !important;
       }
 
-      body:has(#addTaskModal:not(.hidden)) #mobileBottomNav {
-        z-index: 80 !important;
+      #addTaskRow2,
+      #addTaskRow3 {
+        display: grid !important;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
+        gap: 10px !important;
+        margin-top: 0 !important;
+        width: 100% !important;
+        min-width: 0 !important;
       }
+
+      #addTaskQuickDueRow {
+        display: grid !important;
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        gap: 8px !important;
+        margin: 0 !important;
+        width: 100% !important;
+        min-width: 0 !important;
+      }
+
+      #titleInput,
+      #importanceInput,
+      #dueDateInput,
+      #pointsInput,
+      #repeatInput,
+      #tagsInput {
+        width: 100% !important;
+        min-width: 0 !important;
+        max-width: 100% !important;
+        height: 48px !important;
+        min-height: 48px !important;
+        max-height: 48px !important;
+        box-sizing: border-box !important;
+        margin: 0 !important;
+      }
+
+      #dueDateInput {
+        -webkit-appearance: none !important;
+        appearance: none !important;
+        display: block !important;
+        block-size: 48px !important;
+        min-block-size: 48px !important;
+        max-block-size: 48px !important;
+        padding: 0 14px !important;
+        line-height: 48px !important;
+        font-size: 16px !important;
+        overflow: hidden !important;
+        align-self: start !important;
+      }
+
+      #dueDateInput::-webkit-date-and-time-value {
+        min-height: 0 !important;
+        height: auto !important;
+        line-height: normal !important;
+        text-align: left !important;
+        padding: 0 !important;
+        margin: 0 !important;
+      }
+
+      #dueDateInput::-webkit-datetime-edit {
+        padding: 0 !important;
+        margin: 0 !important;
+      }
+
+      #dueDateInput::-webkit-calendar-picker-indicator {
+        padding: 0 !important;
+        margin: 0 !important;
+      }
+
+      #addTaskQuickDueRow button {
+        width: 100% !important;
+        min-width: 0 !important;
+        height: 48px !important;
+        min-height: 48px !important;
+        max-height: 48px !important;
+        margin: 0 !important;
+        box-sizing: border-box !important;
+      }
+
+      #repeatCustomRow { margin-top: 0 !important; }
     }
   `;
   (document.head || document.documentElement).appendChild(style);
+
+  function arrangeMobileTaskFields() {
+    if (!global.matchMedia?.('(max-width: 640px)').matches) return;
+
+    const body = document.getElementById('addTaskModalBody');
+    const row2 = document.getElementById('addTaskRow2');
+    const row3 = document.getElementById('addTaskRow3');
+    const importance = document.getElementById('importanceInput');
+    const dueDate = document.getElementById('dueDateInput');
+    const points = document.getElementById('pointsInput');
+    const repeat = document.getElementById('repeatInput');
+    const quickDue = document.getElementById('addTaskQuickDueRow');
+    if (!body || !row2 || !row3 || !importance || !dueDate || !points || !repeat || !quickDue) return;
+    if (body.dataset.mobileTaskLayoutReady === '1') return;
+
+    row2.replaceChildren(importance, dueDate);
+    row3.replaceChildren(points, quickDue);
+    row3.after(repeat);
+    body.dataset.mobileTaskLayoutReady = '1';
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', arrangeMobileTaskFields, { once: true });
+  } else {
+    arrangeMobileTaskFields();
+  }
 })(typeof window !== 'undefined' ? window : globalThis);
