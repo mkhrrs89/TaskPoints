@@ -61,10 +61,6 @@
       && configuredMode === 'verify_primary_writes'
       && ['awaiting_smoke_test', 'ready_for_fast_mode'].includes(status);
 
-    // Pending habit changes already force the read path to use the authoritative
-    // working copy. They should not permanently erase either a completed Faster
-    // Mode choice or an already-authorized short test while that brief fallback
-    // is active.
     if (journalCount() > 0 && !keepingCompletedFastMode && !keepingActiveShortTest) {
       return { allowed: false, reason: 'habit_changes_waiting_to_save' };
     }
@@ -145,7 +141,6 @@
   const NEW_HIGH_RANGE = NEW_HIGH_MAX - HIGH_START;
   const roundScore = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 10) / 10;
 
-  // Exact 62 -> 86 soft-curb for callers that use the shared helper directly.
   core.softCurbNpcScore = function softCurbNpcScore86(rawScore) {
     const score = Number(rawScore);
     if (!Number.isFinite(score)) return LOW_MIN;
@@ -164,10 +159,6 @@
     return roundScore(cappedScore);
   };
 
-  // scoring_core's internal simulator still closes over the former 85 curb.
-  // Convert its already-curbed high-end result to the mathematically equivalent
-  // 86 curb, then let Greed use the new final ceiling too. This installs after
-  // the rest of the core bundle (including Greed) has finished evaluating.
   function remapOldHighCurbTo86(value) {
     const score = Number(value);
     if (!Number.isFinite(score) || score <= HIGH_START) return score;
@@ -243,5 +234,16 @@
   script.src = 'score_alias_consistency.js';
   script.defer = true;
   script.dataset.taskpointsScoreAliasConsistency = 'true';
+  document.head.appendChild(script);
+})(typeof window !== 'undefined' ? window : globalThis);
+
+;(function loadTaskPointsTaskDeleteFastPath(global) {
+  'use strict';
+  const document = global.document;
+  if (!document?.head || document.querySelector?.('script[data-taskpoints-task-delete-fast-path]')) return;
+  const script = document.createElement('script');
+  script.src = 'task_delete_fast_path.js';
+  script.defer = true;
+  script.dataset.taskpointsTaskDeleteFastPath = 'true';
   document.head.appendChild(script);
 })(typeof window !== 'undefined' ? window : globalThis);
