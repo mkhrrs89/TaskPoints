@@ -20,9 +20,16 @@
 (() => {
   'use strict';
   const KEY = 'taskpoints_state_v2_dark_mode_v1';
+  const PERF_KEY = 'tp_perf_trace_enabled_v1';
   const status = document.getElementById('status');
   const hostname = String(location.hostname || '').toLowerCase();
   const productionHosts = new Set(['taskpoints.pages.dev', 'www.taskpoints.pages.dev']);
+  let perfRequested = false;
+  try {
+    const params = new URLSearchParams(location.search || '');
+    const value = String(params.get('perf') || params.get('tpperf') || '').toLowerCase();
+    perfRequested = value === '1' || value === 'on';
+  } catch (_) {}
 
   if (productionHosts.has(hostname)) {
     try { localStorage.removeItem(KEY); } catch (_) {}
@@ -39,8 +46,11 @@
 
   try {
     localStorage.setItem(KEY, '1');
+    if (perfRequested) sessionStorage.setItem(PERF_KEY, '1');
     status.className = 'ok';
-    status.innerHTML = 'V2 dark mirroring is enabled for <code>' + hostname.replace(/[<>&]/g, '') + '</code>. Returning to Home…';
+    status.innerHTML = 'V2 dark mirroring is enabled for <code>' + hostname.replace(/[<>&]/g, '') + '</code>'
+      + (perfRequested ? ' with performance tracing enabled for this preview session' : '')
+      + '. Returning to Home…';
     setTimeout(() => location.replace('/'), 500);
   } catch (error) {
     status.className = 'bad';
