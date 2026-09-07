@@ -155,7 +155,7 @@
     }
 
     const original = candidate;
-    const wrapped = function taskPointsStateV2HabitRetireBridge(habitId) {
+    const wrapped = function taskPointsStateRuntimeV2HabitRetireBridge(habitId) {
       const before = liveHabit(habitId);
       const beforeUpdatedAt = before?.updatedAtISO || null;
       const beforeRetired = before?.retired === true;
@@ -219,14 +219,29 @@
     };
   }
 
+  function loadPerfInstrumentation() {
+    if (!isEnabled() || global.TaskPointsStateRuntimeV2Perf?.installed || !global.document?.createElement) return false;
+    if (global.document.querySelector?.('script[data-taskpoints-state-v2-perf]')) return true;
+    const script = global.document.createElement('script');
+    script.src = '/state_runtime_v2_perf.js';
+    script.defer = true;
+    script.dataset.taskpointsStateV2Perf = 'true';
+    (global.document.head || global.document.documentElement)?.appendChild?.(script);
+    return true;
+  }
+
   const api = {
     __installedModule: true,
     install,
-    getStatus
+    getStatus,
+    loadPerfInstrumentation
   };
   global.TaskPointsStateRuntimeV2HabitStructureBridge = api;
 
-  const installAfterHomeScript = () => install();
+  const installAfterHomeScript = () => {
+    loadPerfInstrumentation();
+    return install();
+  };
   if (global.document?.readyState === 'loading') {
     global.document.addEventListener?.('DOMContentLoaded', installAfterHomeScript, { once: true });
   } else if (typeof global.setTimeout === 'function') {
