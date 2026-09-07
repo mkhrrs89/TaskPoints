@@ -16,6 +16,8 @@
   }
 
   function extractTaskId(button) {
+    const dataId = String(button?.getAttribute?.('data-task-id') || '').trim();
+    if (dataId) return dataId;
     const onclick = String(button?.getAttribute?.('onclick') || '');
     const match = onclick.match(/deleteTask\((['"])(.*?)\1\)/);
     return match ? String(match[2] || '') : '';
@@ -32,7 +34,7 @@
   document.addEventListener?.('click', (event) => {
     const target = event?.target;
     const button = typeof target?.closest === 'function'
-      ? target.closest('[onclick*="deleteTask("]')
+      ? target.closest('[data-task-action="delete"][data-task-id], [data-task-action="task-delete"][data-task-id], [onclick*="deleteTask("]')
       : null;
     if (!button || button.disabled) return;
 
