@@ -1,5 +1,12 @@
-# Snapshot of individual test-file failures observed on current main (0b643035811045f2ee450831faef8db2e5a2dd10) on 2026-09-02.
-# The V2 gate continues to report these, but they do not count as V2 regressions unless their status changes or a new failure appears.
+# DEPRECATED REFERENCE ONLY.
+#
+# This file was the static snapshot of individual test-file failures observed on
+# main SHA 0b643035811045f2ee450831faef8db2e5a2dd10 on 2026-09-02.
+#
+# As of 2026-09-06, .github/workflows/state-runtime-v2-contracts.yml no longer
+# uses this list to decide the rollout gate. CI now checks out live current main,
+# runs its test files, and compares the V2 branch against that live baseline.
+# Keeping the old signatures below is useful only as historical evidence.
 FAILED:tests/audit_reconciliation_index_contract.test.js
 FAILED:tests/direct_score_alias_page_loader.test.js
 FAILED:tests/faster_mode_reopen_persistence_contract.test.js
