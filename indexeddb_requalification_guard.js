@@ -61,10 +61,6 @@
       && configuredMode === 'verify_primary_writes'
       && ['awaiting_smoke_test', 'ready_for_fast_mode'].includes(status);
 
-    // Pending habit changes already force the read path to use the authoritative
-    // working copy. They should not permanently erase either a completed Faster
-    // Mode choice or an already-authorized short test while that brief fallback
-    // is active.
     if (journalCount() > 0 && !keepingCompletedFastMode && !keepingActiveShortTest) {
       return { allowed: false, reason: 'habit_changes_waiting_to_save' };
     }
@@ -129,6 +125,96 @@
   if (currentMode !== 'off' && !permission(currentMode).allowed) originalSetMode('off');
 })(typeof window !== 'undefined' ? window : globalThis);
 
+;(function installTaskPointsNpcScoreCap86(global) {
+  'use strict';
+
+  const core = global.TaskPointsCore;
+  if (!core || core.__npcScoreCap86Installed) return;
+  core.__npcScoreCap86Installed = true;
+
+  const HIGH_START = 62;
+  const OLD_HIGH_MAX = 85;
+  const NEW_HIGH_MAX = 86;
+  const LOW_START = 20;
+  const LOW_MIN = 5;
+  const OLD_HIGH_RANGE = OLD_HIGH_MAX - HIGH_START;
+  const NEW_HIGH_RANGE = NEW_HIGH_MAX - HIGH_START;
+  const roundScore = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 10) / 10;
+
+  core.softCurbNpcScore = function softCurbNpcScore86(rawScore) {
+    const score = Number(rawScore);
+    if (!Number.isFinite(score)) return LOW_MIN;
+
+    let cappedScore = score;
+    if (score > HIGH_START) {
+      const over = score - HIGH_START;
+      cappedScore = HIGH_START + NEW_HIGH_RANGE * (over / (over + NEW_HIGH_RANGE));
+    } else if (score < LOW_START) {
+      const under = LOW_START - score;
+      const lowRange = LOW_START - LOW_MIN;
+      cappedScore = LOW_START - lowRange * (under / (under + lowRange));
+    }
+
+    cappedScore = Math.max(LOW_MIN, Math.min(NEW_HIGH_MAX, cappedScore));
+    return roundScore(cappedScore);
+  };
+
+  function remapOldHighCurbTo86(value) {
+    const score = Number(value);
+    if (!Number.isFinite(score) || score <= HIGH_START) return score;
+    if (score >= OLD_HIGH_MAX) return NEW_HIGH_MAX;
+
+    const delta = score - HIGH_START;
+    const denominator = OLD_HIGH_RANGE - delta;
+    if (denominator <= 0) return NEW_HIGH_MAX;
+    const estimatedOver = (OLD_HIGH_RANGE * delta) / denominator;
+    return roundScore(HIGH_START + NEW_HIGH_RANGE * (estimatedOver / (estimatedOver + NEW_HIGH_RANGE)));
+  }
+
+  function installFinalSimulatorWrapper() {
+    const current = core.simulateAiScoreForPlayerCore;
+    if (typeof current !== 'function' || current.__taskPointsNpcScoreCap86Final) return;
+
+    core.simulateAiScoreForPlayerCore = function npcScoreCap86Simulator(player, dateKey, options = {}) {
+      const context = options?.context || {};
+      const originalCapture = typeof context.captureEffects === 'function' ? context.captureEffects : null;
+      let capturedEffects = null;
+      const wrappedContext = {
+        ...context,
+        captureEffects(effects) { capturedEffects = effects || null; }
+      };
+
+      const oldFinalScore = Number(current(player, dateKey, { ...options, context: wrappedContext }));
+      let newFinalScore = remapOldHighCurbTo86(oldFinalScore);
+      let nextEffects = capturedEffects;
+
+      if (capturedEffects && Number(capturedEffects.greedTelemetryVersion) >= 1) {
+        const oldAppliedGreed = Number(capturedEffects.greedBonus) || 0;
+        const oldBaseScore = oldFinalScore - oldAppliedGreed;
+        const newBaseScore = remapOldHighCurbTo86(oldBaseScore);
+        const potentialGreed = capturedEffects.greedPerformanceEligible === true
+          ? Math.max(0, Number(capturedEffects.greedPotentialBonus) || 0)
+          : 0;
+        newFinalScore = roundScore(Math.min(NEW_HIGH_MAX, newBaseScore + potentialGreed));
+        const newAppliedGreed = roundScore(Math.max(0, newFinalScore - newBaseScore));
+        nextEffects = {
+          ...capturedEffects,
+          greedApplied: newAppliedGreed > 0,
+          greedBonus: newAppliedGreed
+        };
+      }
+
+      if (originalCapture) originalCapture(nextEffects || capturedEffects || {});
+      return roundScore(Math.max(LOW_MIN, Math.min(NEW_HIGH_MAX, newFinalScore)));
+    };
+    core.simulateAiScoreForPlayerCore.__taskPointsNpcScoreCap86Final = true;
+    core.simulateAiScoreForPlayerCore.__taskPointsOriginal = current;
+  }
+
+  if (typeof global.queueMicrotask === 'function') global.queueMicrotask(installFinalSimulatorWrapper);
+  else Promise.resolve().then(installFinalSimulatorWrapper);
+})(typeof window !== 'undefined' ? window : globalThis);
+
 ;(function loadTaskPointsSeasonChampionGoldBonus(global) {
   'use strict';
   const document = global.document;
@@ -148,5 +234,16 @@
   script.src = 'score_alias_consistency.js';
   script.defer = true;
   script.dataset.taskpointsScoreAliasConsistency = 'true';
+  document.head.appendChild(script);
+})(typeof window !== 'undefined' ? window : globalThis);
+
+;(function loadTaskPointsTaskDeleteFastPath(global) {
+  'use strict';
+  const document = global.document;
+  if (!document?.head || document.querySelector?.('script[data-taskpoints-task-delete-fast-path]')) return;
+  const script = document.createElement('script');
+  script.src = 'task_delete_fast_path.js';
+  script.defer = true;
+  script.dataset.taskpointsTaskDeleteFastPath = 'true';
   document.head.appendChild(script);
 })(typeof window !== 'undefined' ? window : globalThis);
