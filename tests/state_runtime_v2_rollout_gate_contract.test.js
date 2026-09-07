@@ -10,30 +10,45 @@ const packageJson = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json
 const previewEnable = fs.readFileSync(path.join(repoRoot, 'state_v2_preview_enable.html'), 'utf8');
 const runtime = fs.readFileSync(path.join(repoRoot, 'state_runtime_v2.js'), 'utf8');
 
-const V2_COMMAND = 'node --test tests/state_runtime_v2*.test.js tests/perf_trace_v2_visibility_contract.test.js';
+const STEP4_COMMAND = 'node --test tests/state_runtime_v2_perf_contract.test.js';
 
-test('V2-22 branch CI gates focused V2 contracts and regressions beyond the recorded current-main baseline', () => {
+test('V2-22 branch CI gates focused V2 contracts and regressions against live current main', () => {
   assert.match(workflow, /branches:\s*\n\s*- arch\/state-runtime-v2-plan/);
   assert.match(workflow, /run:\s*npm ci/);
-  assert.ok(workflow.includes(V2_COMMAND), 'focused V2 safety suite must remain an explicit gate');
-  assert.match(workflow, /Diagnose individual TaskPoints test files against main baseline/);
-  assert.match(workflow, /tests\/state_runtime_v2_baseline_failures\.txt/);
+  assert.ok(workflow.includes(STEP4_COMMAND), 'Step 4 performance contract must remain an explicit gate');
+  assert.match(workflow, /Run V2 core storage contracts/);
+  assert.match(workflow, /Run V2 Habit mutation contracts/);
+  assert.match(workflow, /Run V2 lifecycle and rollout contracts/);
+  assert.match(workflow, /Prepare live current-main baseline worktree/);
+  assert.match(workflow, /git fetch origin main/);
+  assert.match(workflow, /git worktree add --detach \/tmp\/taskpoints-main origin\/main/);
+  assert.match(workflow, /Compare individual test failures with live current main/);
+  assert.match(workflow, /main-failures\.txt/);
   assert.match(workflow, /NEW_V2_REGRESSION/);
   assert.match(workflow, /Fail rollout gate on new V2 regressions/);
   assert.match(workflow, /Run full TaskPoints test suite as supplemental diagnostic/);
   assert.match(workflow, /timeout[^\n]*npm test/);
   assert.match(workflow, /continue-on-error:\s*true/);
   assert.equal(packageJson.scripts?.test, 'node --test');
-  assert.match(baselineFailures, /Snapshot of individual test-file failures observed on current main/);
+  assert.match(baselineFailures, /DEPRECATED REFERENCE ONLY/);
+  assert.match(baselineFailures, /no longer\s+uses this list/i);
 
   const installAt = workflow.indexOf('run: npm ci');
-  const v2At = workflow.indexOf(V2_COMMAND);
-  const individualAt = workflow.indexOf('Diagnose individual TaskPoints test files against main baseline');
+  const step4At = workflow.indexOf(STEP4_COMMAND);
+  const coreAt = workflow.indexOf('Run V2 core storage contracts');
+  const liveMainAt = workflow.indexOf('Prepare live current-main baseline worktree');
+  const individualAt = workflow.indexOf('Compare individual test failures with live current main');
   const fullAt = workflow.indexOf('Run full TaskPoints test suite as supplemental diagnostic');
   const regressionGateAt = workflow.indexOf('Fail rollout gate on new V2 regressions');
   assert.ok(
-    installAt >= 0 && v2At > installAt && individualAt > v2At && fullAt > individualAt && regressionGateAt > fullAt,
-    'baseline-aware regression gate must run after dependencies, focused V2 contracts, individual diagnostics, and the supplemental full suite'
+    installAt >= 0
+      && step4At > installAt
+      && coreAt > step4At
+      && liveMainAt > coreAt
+      && individualAt > liveMainAt
+      && fullAt > individualAt
+      && regressionGateAt > fullAt,
+    'live-main regression gate must run after dependencies, focused V2 contracts, current-main collection, branch diagnostics, and supplemental full suite'
   );
 });
 
