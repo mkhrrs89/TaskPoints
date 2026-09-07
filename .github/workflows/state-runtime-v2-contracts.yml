@@ -27,8 +27,15 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
-      - name: Run State Runtime V2 contract tests
-        run: node --test tests/state_runtime_v2*.test.js tests/perf_trace_v2_visibility_contract.test.js
+      - name: Run Step 4 V2 performance contract
+        run: node --test tests/state_runtime_v2_perf_contract.test.js
+
+      - name: Run established State Runtime V2 contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -d '' files < <(find tests -maxdepth 1 -type f -name 'state_runtime_v2*.test.js' ! -name 'state_runtime_v2_perf_contract.test.js' -print0 | sort -z)
+          node --test "${files[@]}" tests/perf_trace_v2_visibility_contract.test.js
 
       - name: Prepare live current-main baseline worktree
         shell: bash
