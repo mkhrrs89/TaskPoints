@@ -30,12 +30,37 @@ jobs:
       - name: Run Step 4 V2 performance contract
         run: node --test tests/state_runtime_v2_perf_contract.test.js
 
-      - name: Run established State Runtime V2 contracts
-        shell: bash
-        run: |
-          set -euo pipefail
-          mapfile -d '' files < <(find tests -maxdepth 1 -type f -name 'state_runtime_v2*.test.js' ! -name 'state_runtime_v2_perf_contract.test.js' -print0 | sort -z)
-          node --test "${files[@]}" tests/perf_trace_v2_visibility_contract.test.js
+      - name: Run V2 core storage contracts
+        run: >-
+          node --test
+          tests/state_runtime_v2_atomic_contract.test.js
+          tests/state_runtime_v2_compatibility_snapshot_contract.test.js
+          tests/state_runtime_v2_contract.test.js
+          tests/state_runtime_v2_dark_contract.test.js
+          tests/state_runtime_v2_export_contract.test.js
+          tests/state_runtime_v2_failure_isolation_contract.test.js
+          tests/state_runtime_v2_generation_contract.test.js
+          tests/state_runtime_v2_revision_conflict_contract.test.js
+          tests/state_runtime_v2_wal_contract.test.js
+          tests/state_runtime_v2_wal_bridge_contract.test.js
+
+      - name: Run V2 Habit mutation contracts
+        run: >-
+          node --test
+          tests/state_runtime_v2_habit_edit_contract.test.js
+          tests/state_runtime_v2_habit_order_contract.test.js
+          tests/state_runtime_v2_habit_presence_contract.test.js
+          tests/state_runtime_v2_habit_preview_scenarios_contract.test.js
+
+      - name: Run V2 lifecycle and rollout contracts
+        run: >-
+          node --test
+          tests/state_runtime_v2_lifecycle_interruption_contract.test.js
+          tests/state_runtime_v2_preview_cleanup.test.js
+          tests/state_runtime_v2_preview_optin.test.js
+          tests/state_runtime_v2_reload_verification_contract.test.js
+          tests/state_runtime_v2_rollout_gate_contract.test.js
+          tests/perf_trace_v2_visibility_contract.test.js
 
       - name: Prepare live current-main baseline worktree
         shell: bash
