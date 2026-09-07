@@ -52,15 +52,23 @@ jobs:
           tests/state_runtime_v2_habit_presence_contract.test.js
           tests/state_runtime_v2_habit_preview_scenarios_contract.test.js
 
-      - name: Run V2 lifecycle and rollout contracts
-        run: >-
-          node --test
-          tests/state_runtime_v2_lifecycle_interruption_contract.test.js
-          tests/state_runtime_v2_preview_cleanup.test.js
-          tests/state_runtime_v2_preview_optin.test.js
-          tests/state_runtime_v2_reload_verification_contract.test.js
-          tests/state_runtime_v2_rollout_gate_contract.test.js
-          tests/perf_trace_v2_visibility_contract.test.js
+      - name: Run V2 lifecycle interruption contract
+        run: node --test tests/state_runtime_v2_lifecycle_interruption_contract.test.js
+
+      - name: Run V2 preview cleanup contract
+        run: node --test tests/state_runtime_v2_preview_cleanup.test.js
+
+      - name: Run V2 preview opt-in contract
+        run: node --test tests/state_runtime_v2_preview_optin.test.js
+
+      - name: Run V2 reload verification contract
+        run: node --test tests/state_runtime_v2_reload_verification_contract.test.js
+
+      - name: Run V2 rollout gate contract
+        run: node --test tests/state_runtime_v2_rollout_gate_contract.test.js
+
+      - name: Run V2 perf trace visibility contract
+        run: node --test tests/perf_trace_v2_visibility_contract.test.js
 
       - name: Prepare live current-main baseline worktree
         shell: bash
