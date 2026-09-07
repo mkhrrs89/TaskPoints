@@ -19,6 +19,15 @@ test('V2 preview opt-in only persists the dark flag on preview or localhost orig
   assert.ok(setFlag > hostGuard, 'flag write must happen only after preview hostname guard');
 });
 
+test('V2 preview opt-in can enable the existing perf tracer in the same preview session', () => {
+  assert.match(source, /const PERF_KEY = 'tp_perf_trace_enabled_v1'/);
+  assert.match(source, /params\.get\('perf'\)/);
+  assert.match(source, /sessionStorage\.setItem\(PERF_KEY, '1'\)/);
+  const productionGuard = source.indexOf('productionHosts.has(hostname)');
+  const perfWrite = source.indexOf("sessionStorage.setItem(PERF_KEY, '1')");
+  assert.ok(perfWrite > productionGuard, 'performance tracing must not be enabled before the production-host guard');
+});
+
 test('V2 preview opt-in returns to Home after enabling the isolated origin flag', () => {
   assert.match(source, /location\.replace\('\/'\)/);
 });
