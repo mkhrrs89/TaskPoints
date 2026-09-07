@@ -17,13 +17,6 @@
     lastMutation: null
   };
 
-  function detailValue(value) {
-    if (value == null) return null;
-    if (Array.isArray(value)) return value.length;
-    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value;
-    return null;
-  }
-
   function mark(name, detail = {}) {
     try { global.TaskPointsPerf?.mark?.(name, detail); } catch (_) {}
   }
@@ -163,6 +156,16 @@
       };
     }
   };
+
+  const originalGetStatus = typeof runtime.getStatus === 'function' ? runtime.getStatus.bind(runtime) : null;
+  if (originalGetStatus) {
+    runtime.getStatus = function stateRuntimeV2StatusWithPerformance() {
+      const status = originalGetStatus() || {};
+      return { ...status, performance: api.getStatus() };
+    };
+    runtime.getStatus.__taskPointsV2PerfWrapped = true;
+    runtime.getStatus.__taskPointsOriginal = originalGetStatus;
+  }
 
   global.TaskPointsStateRuntimeV2Perf = api;
   mark('stateV2.perfInstrumentationInstalled', { version: api.version });
