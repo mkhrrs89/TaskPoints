@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'state_v2_preview_enable.html'), 'utf8');
+const generationSource = fs.readFileSync(path.join(__dirname, '..', 'state_runtime_v2_generation.js'), 'utf8');
 
 test('V2 preview opt-in is explicitly blocked on production hostnames', () => {
   assert.match(source, /taskpoints\.pages\.dev/);
@@ -28,6 +29,19 @@ test('V2 preview opt-in can enable the existing perf tracer in the same preview 
   assert.ok(perfWrite > productionGuard, 'performance tracing must not be enabled before the production-host guard');
 });
 
-test('V2 preview opt-in returns to Home after enabling the isolated origin flag', () => {
-  assert.match(source, /location\.replace\('\/'\)/);
+test('V2 preview opt-in carries a one-time Home bootstrap signal across redirect', () => {
+  assert.match(source, /homeParams\.set\('v2dark', '1'\)/);
+  assert.match(source, /location\.replace\('\/\?' \+ homeParams\.toString\(\)\)/);
+  assert.match(generationSource, /params\.get\('v2dark'\)/);
+  assert.match(generationSource, /safeSet\(DARK_MODE_KEY, '1'\)/);
+  assert.match(generationSource, /previewQueryBootstrap = true/);
+});
+
+test('Home-side V2 bootstrap independently blocks production and non-preview origins', () => {
+  const productionGuard = generationSource.indexOf('productionHosts.has(hostname)');
+  const darkWrite = generationSource.indexOf("safeSet(DARK_MODE_KEY, '1')");
+  assert.ok(productionGuard >= 0, 'Home bootstrap must have production host guard');
+  assert.ok(darkWrite > productionGuard, 'Home bootstrap dark write must occur only after production guard');
+  assert.match(generationSource, /if \(!previewHost && !localHost\) return false/);
+  assert.match(generationSource, /safeRemove\(DARK_MODE_KEY\)/);
 });
