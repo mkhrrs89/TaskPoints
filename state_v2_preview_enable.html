@@ -51,7 +51,15 @@
     status.innerHTML = 'V2 dark mirroring is enabled for <code>' + hostname.replace(/[<>&]/g, '') + '</code>'
       + (perfRequested ? ' with performance tracing enabled for this preview session' : '')
       + '. Returning to Home…';
-    setTimeout(() => location.replace('/'), 500);
+
+    // Carry an explicit one-time signal into Home as well as writing storage here.
+    // The V2 generation bootstrap consumes this signal before state_runtime_v2.js
+    // decides whether to start. This makes the opt-in resilient to browsers that
+    // fail to preserve the first page's localStorage write across the redirect.
+    const homeParams = new URLSearchParams();
+    homeParams.set('v2dark', '1');
+    if (perfRequested) homeParams.set('perf', '1');
+    setTimeout(() => location.replace('/?' + homeParams.toString()), 500);
   } catch (error) {
     status.className = 'bad';
     status.textContent = 'Could not enable the preview flag: ' + String(error?.message || error);
