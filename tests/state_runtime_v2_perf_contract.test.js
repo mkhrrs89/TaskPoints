@@ -5,6 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'state_runtime_v2_perf.js'), 'utf8');
+const serializationGuard = fs.readFileSync(path.join(__dirname, '..', 'state_runtime_v2_serialization_guard.js'), 'utf8');
 const structureBridge = fs.readFileSync(path.join(__dirname, '..', 'state_runtime_v2_habit_structure_bridge.js'), 'utf8');
 
 function install() {
@@ -92,4 +93,24 @@ test('dark Habit structure bridge loads performance instrumentation only through
   assert.match(structureBridge, /script\.src = '\/state_runtime_v2_perf\.js'/);
   assert.match(structureBridge, /if \(!isEnabled\(\) \|\| global\.TaskPointsStateRuntimeV2Perf\?\.installed/);
   assert.match(structureBridge, /loadPerfInstrumentation\(\);\s*return install\(\);/);
+});
+
+test('mobile V2 tracing hides the legacy live text wall without disabling trace collection', () => {
+  assert.match(source, /#tp-perf-panel\{display:none!important\}/);
+  assert.match(source, /\(max-width: 768px\)/);
+  assert.match(source, /global\.TaskPointsPerf\?\.mark/);
+  assert.match(source, /global\.TaskPointsPerf\?\.duration/);
+});
+
+test('V2 preview loads a shared serializer that deduplicates and sequences mutation transactions', () => {
+  assert.match(source, /state_runtime_v2_serialization_guard\.js/);
+  assert.match(serializationGuard, /const inFlight = new Map\(\)/);
+  assert.match(serializationGuard, /const recent = new Map\(\)/);
+  assert.match(serializationGuard, /const run = tail\.then/);
+  assert.match(serializationGuard, /tail = run\.catch/);
+  assert.match(serializationGuard, /stateV2\.serializationDeduped/);
+  assert.match(serializationGuard, /applyHabitDelta/);
+  assert.match(serializationGuard, /applyHabitOrderOverlay/);
+  assert.match(serializationGuard, /applyHabitEditSnapshot/);
+  assert.match(serializationGuard, /applyHabitPresenceSnapshot/);
 });
