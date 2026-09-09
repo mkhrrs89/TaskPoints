@@ -38,10 +38,19 @@ test('V2 preview opt-in carries a one-time Home bootstrap signal across redirect
 });
 
 test('Home-side V2 bootstrap independently blocks production and non-preview origins', () => {
-  const productionGuard = generationSource.indexOf('productionHosts.has(hostname)');
-  const darkWrite = generationSource.indexOf("safeSet(DARK_MODE_KEY, '1')");
+  const productionGuard = generationSource.indexOf('productionHosts.has(currentHostname)');
+  const queryBootstrap = generationSource.indexOf('function bootstrapFromPreviewQuery()');
+  const guardedDarkWrite = generationSource.indexOf("safeSet(DARK_MODE_KEY, '1')", queryBootstrap);
   assert.ok(productionGuard >= 0, 'Home bootstrap must have production host guard');
-  assert.ok(darkWrite > productionGuard, 'Home bootstrap dark write must occur only after production guard');
+  assert.ok(guardedDarkWrite > productionGuard, 'Home query bootstrap dark write must occur only after production guard');
   assert.match(generationSource, /if \(!previewHost && !localHost\) return false/);
   assert.match(generationSource, /safeRemove\(DARK_MODE_KEY\)/);
+});
+
+test('dedicated V2 architecture preview is forced on without depending on redirect storage persistence', () => {
+  assert.match(generationSource, /const FORCED_PREVIEW_HOST = 'arch-state-runtime-v2-plan\.taskpoints\.pages\.dev'/);
+  assert.match(generationSource, /hostname\(\) === FORCED_PREVIEW_HOST/);
+  assert.match(generationSource, /bootstrapForcedPreviewHost\(\)/);
+  assert.match(generationSource, /isForcedPreviewHost\(\) \|\| safeGet\(DARK_MODE_KEY\) === '1'/);
+  assert.match(generationSource, /stateV2\.previewForcedEnabled/);
 });
