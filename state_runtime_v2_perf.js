@@ -25,6 +25,17 @@
     try { global.TaskPointsPerf?.duration?.(name, ms, detail); } catch (_) {}
   }
 
+  function keepMobileTraceUiCompact() {
+    if (global.matchMedia?.('(max-width: 768px)')?.matches !== true || !global.document?.createElement) return;
+    if (global.document.getElementById('tp-v2-mobile-perf-panel-guard')) return;
+    const style = global.document.createElement('style');
+    style.id = 'tp-v2-mobile-perf-panel-guard';
+    style.textContent = '#tp-perf-panel{display:none!important}';
+    (global.document.head || global.document.documentElement)?.appendChild?.(style);
+  }
+
+  keepMobileTraceUiCompact();
+
   function mutationShape(kind, args, result) {
     const input = args?.[0] || {};
     const base = {
