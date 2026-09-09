@@ -215,7 +215,11 @@ test('dark-off and missing-coordinator cases fail closed without running heavywe
   const noCoordinator = await api.scheduleParityVerification({ source: 'test' });
   assert.equal(noCoordinator.reason, 'idle_coordinator_unavailable');
   assert.equal(env.counts().underlyingParityCalls, 0);
-  assert.equal(api.getStatus().idleCoordinatorAvailable, false);
+  const status = api.getStatus();
+  assert.equal(status.idleCoordinatorAvailable, false);
+  assert.equal(status.lanes.parity.requested, 1);
+  assert.equal(status.lanes.parity.completed, 1);
+  assert.equal(status.lanes.parity.active, false);
 });
 
 test('performance preview loader includes the V2 idle maintenance module', () => {
