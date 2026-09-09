@@ -175,7 +175,7 @@
 
   const api = {
     installed: true,
-    version: 1,
+    version: 2,
     getStatus() {
       return {
         installed: true,
@@ -192,6 +192,33 @@
     }
   };
 
+  function safeSubsystemStatus(value) {
+    try { return value?.getStatus?.() || null; }
+    catch (error) { return { error: String(error?.message || error) }; }
+  }
+
+  function installRuntimeTraceStatusBridge() {
+    const original = runtime.getStatus;
+    if (typeof original !== 'function' || original.__taskPointsV2TraceStatusBridge) return false;
+    const wrapped = function taskPointsV2TraceStatusBridge() {
+      const base = original.apply(this, arguments);
+      const status = base && typeof base === 'object' ? { ...base } : { value: base ?? null };
+      status.traceDiagnostics = {
+        perf: api.getStatus(),
+        maintenanceIdle: safeSubsystemStatus(global.TaskPointsStateRuntimeV2MaintenanceIdle),
+        serialization: safeSubsystemStatus(global.TaskPointsStateRuntimeV2SerializationGuard)
+      };
+      return status;
+    };
+    Object.defineProperties(wrapped, {
+      __taskPointsV2TraceStatusBridge: { value: true },
+      __taskPointsOriginal: { value: original }
+    });
+    runtime.getStatus = wrapped;
+    return true;
+  }
+
   global.TaskPointsStateRuntimeV2Perf = api;
+  installRuntimeTraceStatusBridge();
   mark('stateV2.perfInstrumentationInstalled', { version: api.version });
 })(typeof window !== 'undefined' ? window : globalThis);
