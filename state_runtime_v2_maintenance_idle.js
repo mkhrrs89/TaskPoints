@@ -141,8 +141,11 @@
 
     lane.promise = (async () => {
       while (lane.completed < lane.requested) {
-        const targetRequest = lane.requested;
-        lane.lastResult = await runWhenQuiet(kind, source, runner);
+        let targetRequest = lane.completed;
+        lane.lastResult = await runWhenQuiet(kind, source, async () => {
+          targetRequest = lane.requested;
+          return runner();
+        });
         lane.completed = targetRequest;
       }
       return lane.lastResult;
