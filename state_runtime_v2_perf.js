@@ -45,6 +45,17 @@
     return true;
   }
 
+  function loadIdleMaintenanceScheduler() {
+    if (global.TaskPointsStateRuntimeV2MaintenanceIdle?.installed || !global.document?.createElement) return true;
+    if (global.document.querySelector?.('script[data-taskpoints-state-v2-maintenance-idle]')) return true;
+    const script = global.document.createElement('script');
+    script.src = '/state_runtime_v2_maintenance_idle.js';
+    script.defer = true;
+    script.dataset.taskpointsStateV2MaintenanceIdle = 'true';
+    (global.document.head || global.document.documentElement)?.appendChild?.(script);
+    return true;
+  }
+
   keepMobileTraceUiCompact();
 
   function mutationShape(kind, args, result) {
@@ -160,6 +171,7 @@
   wrapMaintenance('verifyParity', 'parity', 'parityChecks');
   wrapMaintenance('buildCompatibilitySnapshot', 'compatibility', 'compatibilityBuilds');
   loadSerializationGuard();
+  loadIdleMaintenanceScheduler();
 
   const api = {
     installed: true,
