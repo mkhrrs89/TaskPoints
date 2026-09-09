@@ -1,6 +1,6 @@
 # State Runtime V2 — Preview Validation Evidence
 
-Updated: 2026-09-06
+Updated: 2026-09-09
 
 This document tracks evidence for the Habits/completions V2 dark-mirror pilot and the Step 4 performance-validation phase.
 
@@ -55,30 +55,40 @@ Important boundaries:
 | Add Habit / add Vice mirror as one V2 presence mutation | `tests/state_runtime_v2_habit_presence_contract.test.js` | Automated passing |
 | Retire Habit mirrors accepted metadata change | Habit presence/edit contracts | Automated passing |
 | Delete Habit removes V2 Habit row while preserving completion history | Habit presence contract | Automated passing |
-| V2-specific focused CI | `.github/workflows/state-runtime-v2-contracts.yml` | Passing before Step 4 changes; revalidation in progress |
-| No regressions beyond current main | live-main baseline comparison in V2 CI | Replaced stale static baseline on 2026-09-06 |
+| Idle parity waits for the shared quiet-maintenance coordinator, coalesces pre-idle bursts, and reruns when a mutation lands during verification | `tests/state_runtime_v2_maintenance_idle_contract.test.js` | Automated contract added; focused CI hard-gated |
+| V2-specific focused CI | `.github/workflows/state-runtime-v2-contracts.yml` | Live current-main comparison + focused V2 hard gates |
+| No regressions beyond current main | live-main baseline comparison in V2 CI | Live baseline; no static failure snapshot |
 
 ## Step 4 — performance observability
 
-Step 4 has begun. The goal is to prove that V2 improves or bounds foreground work rather than simply moving full-state work elsewhere.
+Step 4 is active. The goal is to prove that V2 improves or bounds foreground work rather than simply moving full-state work elsewhere.
 
-New dark-preview-only instrumentation:
+Dark-preview-only instrumentation and scheduling now include:
 
 - `state_runtime_v2_perf.js` times the synchronous enqueue portion separately from the asynchronous V2 IndexedDB mutation;
 - completion, reorder, edit, and presence transactions emit `stateV2.txn.*` durations;
 - transaction events report the expected store count and bounded logical row count for that mutation class;
-- direct parity and compatibility snapshot work emits `stateV2.maintenance.*` durations so heavyweight verification is visible in a trace;
+- direct parity and compatibility snapshot work emits `stateV2.maintenance.*` durations with `foregroundBlocking: true`, making an accidental direct foreground call visible in a trace;
+- `state_runtime_v2_maintenance_idle.js` adds a separate automatic maintenance lane that calls the underlying parity verifier only through `TaskPointsCore.whenStorageMaintenanceQuiet`;
+- automatic parity work is not chained into the mutation promise returned to the interaction path;
+- mutation bursts that finish before quiet execution are coalesced into one parity pass;
+- if another mutation finishes while parity is already running, the lane schedules a follow-up quiet pass so the newer mutation is not silently considered verified by an older read;
+- idle-maintenance trace events emit `foregroundBlocking: false` and `scheduled: true`, so they can be distinguished from direct maintenance calls;
+- if the shared idle coordinator is unavailable, automatic V2 heavyweight maintenance fails closed instead of falling back to foreground execution;
+- direct `verifyParity()` and `buildCompatibilitySnapshot()` APIs remain immediate for explicit diagnostics, export, recovery, and other correctness-sensitive callers;
 - `tests/state_runtime_v2_perf_contract.test.js` contracts the trace names, foreground/async separation, and mutation scope metadata;
-- V2 performance instrumentation is loaded only when the V2 dark-preview flag is enabled.
+- `tests/state_runtime_v2_maintenance_idle_contract.test.js` contracts idle deferral, burst coalescing, during-run follow-up, fail-closed behavior, and preservation of direct calls;
+- V2 performance instrumentation and idle scheduling are loaded only through the V2 dark-preview path.
 
 Still required before Step 4 is considered complete:
 
 - capture real device/PWA traces for ordinary Habit completion, rapid completion burst, reorder, edit, add, retire, and delete;
 - confirm synchronous V2 enqueue time remains negligible compared with the production action;
-- confirm no V2 parity/compatibility work occurs before the visible response boundary in ordinary interaction traces;
+- confirm automatic V2 parity work appears only as scheduled non-foreground maintenance in ordinary interaction traces;
+- confirm no V2 compatibility snapshot work occurs before the visible response boundary in ordinary interaction traces;
 - correlate existing Phase 2/4/5 trace events with the V2 events to show whether full-state production work still blocks the foreground;
-- move any V2 heavyweight maintenance that proves foreground-blocking behind the existing global idle/maintenance coordinator;
-- verify user interaction postpones/preempts V2 heavyweight maintenance that has not started.
+- verify user interaction postpones/preempts V2 heavyweight maintenance that has not started;
+- use the resulting traces to decide which remaining legacy full-state work must move off the interaction path before V2 can own a mutation.
 
 ## Implemented, but physical preview validation still required
 
@@ -95,17 +105,18 @@ These have automated coverage for their storage/recovery mechanics, but browser/
 | Repeated reorder clicks in the real UI | Atomic reorder and overlay replay are automated; capture-click + render + idle compaction integration needs preview smoke testing. |
 | Habit edit/add/retire/delete in real UI | Mutation semantics are automated; actual Home editor/confirmation timing still needs preview validation. |
 | Reload repeatedly during dark verification | Runtime recreation/parity is automated; actual browser cache/worker lifecycle must still be exercised. |
+| Automatic idle parity under real mobile interaction | The coordinator and coalescing semantics are automated, but iOS/PWA scheduling and user-interaction preemption must be confirmed in a trace. |
 | Ordinary export immediately after a recent Habit mutation | Export contract is automated; the real UI export timing needs preview verification. |
 | Reset All / import / emergency restore using real controls | Generation protocols are automated; end-to-end UI paths must be smoke-tested. |
 | V2 cleanup page with another preview tab holding the DB open | `onblocked` handling is coded/tested; real tab blocking behavior should be confirmed. |
 
 ## Current automated rollout gate semantics
 
-The previous static failure snapshot was based on old `main` SHA `0b643035811045f2ee450831faef8db2e5a2dd10` and is no longer used as the authoritative regression comparator.
+The previous static failure snapshot is no longer used as the authoritative regression comparator.
 
-As of 2026-09-06, the V2 CI gate now:
+The V2 CI gate now:
 
-1. hard-gates the focused V2 contract suite;
+1. hard-gates the focused V2 contract suite, including the Step 4 performance and idle-maintenance contracts;
 2. fetches and checks out **live current `main`** into a separate worktree;
 3. runs each current-main test file independently and records its actual current failure signatures;
 4. runs all non-V2 test files independently on the V2 branch;
@@ -114,4 +125,4 @@ As of 2026-09-06, the V2 CI gate now:
 7. uploads both baseline and V2 diagnostics;
 8. runs the full `npm test` suite as a supplemental diagnostic.
 
-Current production baseline at the start of Step 4 is `5da660b0cc91fca1c6b69b4c069196f8a81a600d`. The live-main workflow intentionally avoids requiring another manually maintained failure list whenever `main` advances.
+The live-main workflow intentionally avoids requiring another manually maintained failure list whenever `main` advances.
