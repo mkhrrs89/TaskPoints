@@ -66,6 +66,26 @@ test('sync enqueue timing is separately observable from async V2 transaction tim
   assert.equal(status.asyncMutations, 1);
 });
 
+test('runtime status exported by the generic perf trace includes V2 perf, deep-idle, and serializer summaries', () => {
+  const { context, runtime } = install();
+  context.TaskPointsStateRuntimeV2MaintenanceIdle = {
+    getStatus: () => ({ installed: true, deepQuietMs: 20000, deepQuietPending: 1 })
+  };
+  context.TaskPointsStateRuntimeV2SerializationGuard = {
+    getStatus: () => ({ installed: true, active: 2, maxQueueDepth: 3 })
+  };
+
+  const status = runtime.getStatus();
+  assert.equal(status.darkEnabled, true);
+  assert.equal(status.traceDiagnostics.perf.installed, true);
+  assert.equal(status.traceDiagnostics.maintenanceIdle.deepQuietMs, 20000);
+  assert.equal(status.traceDiagnostics.maintenanceIdle.deepQuietPending, 1);
+  assert.equal(status.traceDiagnostics.serialization.active, 2);
+  assert.equal(status.traceDiagnostics.serialization.maxQueueDepth, 3);
+  assert.equal(runtime.getStatus.__taskPointsV2TraceStatusBridge, true);
+  assert.equal(typeof runtime.getStatus.__taskPointsOriginal, 'function');
+});
+
 test('order and edit traces disclose bounded row/store scope', async () => {
   const { runtime, events } = install();
   await runtime.applyHabitOrderOverlay({ orders: { h1: 1, h2: 2, h3: 3 } });
