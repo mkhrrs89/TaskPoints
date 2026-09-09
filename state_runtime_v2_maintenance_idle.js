@@ -146,6 +146,10 @@
           targetRequest = lane.requested;
           return runner();
         });
+        if (lane.lastResult?.skipped === true && targetRequest <= lane.completed) {
+          lane.completed = lane.requested;
+          break;
+        }
         lane.completed = targetRequest;
       }
       return lane.lastResult;
