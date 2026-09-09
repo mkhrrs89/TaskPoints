@@ -31,7 +31,7 @@ jobs:
         run: node --test tests/state_runtime_v2_perf_contract.test.js
 
       - name: Run Step 4 V2 idle maintenance contract
-        run: node --test tests/state_runtime_v2_maintenance_idle_contract.test.js
+        run: timeout --signal=TERM --kill-after=5s 30s node --test tests/state_runtime_v2_maintenance_idle_contract.test.js
 
       - name: Run V2 core storage contracts
         run: >-
