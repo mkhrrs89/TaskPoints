@@ -34,6 +34,11 @@
     try { global.TaskPointsPerf?.duration?.(name, ms, detail); } catch (_) {}
   }
 
+  function isDarkEnabled() {
+    try { return runtime.getStatus?.().darkEnabled === true; }
+    catch (_) { return false; }
+  }
+
   function getLane(kind) {
     let lane = lanes.get(kind);
     if (!lane) {
@@ -155,6 +160,10 @@
   }
 
   function scheduleParityVerification(options = {}) {
+    if (!isDarkEnabled()) {
+      skipped += 1;
+      return Promise.resolve({ skipped: true, reason: 'dark_disabled' });
+    }
     const source = String(options.source || 'v2-mutation');
     const verify = originalRuntimeMethod('verifyParity');
     if (!verify) {
@@ -165,6 +174,10 @@
   }
 
   function scheduleCompatibilitySnapshot(options = {}) {
+    if (!isDarkEnabled()) {
+      skipped += 1;
+      return Promise.resolve({ skipped: true, reason: 'dark_disabled' });
+    }
     const source = String(options.source || 'v2-checkpoint');
     const build = originalRuntimeMethod('buildCompatibilitySnapshot');
     if (!build) {
@@ -180,6 +193,7 @@
 
     const wrapped = function taskPointsV2IdleMaintenanceMutationHook() {
       const result = original.apply(this, arguments);
+      if (!isDarkEnabled()) return result;
       Promise.resolve(result).then(
         () => {
           Promise.resolve(scheduleParityVerification({ source: `mutation:${kind}` })).catch((error) => {
@@ -219,6 +233,7 @@
       }
       return {
         installed: true,
+        darkEnabled: isDarkEnabled(),
         idleCoordinatorAvailable: idleCoordinatorAvailable(),
         installedMutationHooks,
         scheduled,
@@ -241,7 +256,7 @@
     idleCoordinatorAvailable: idleCoordinatorAvailable()
   });
 
-  if (runtime.getStatus?.().darkEnabled === true) {
+  if (isDarkEnabled()) {
     Promise.resolve(scheduleParityVerification({ source: 'maintenance-module-install' })).catch((error) => {
       failures += 1;
       lastError = String(error?.code || error?.message || error);
