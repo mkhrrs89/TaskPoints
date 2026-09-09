@@ -34,6 +34,17 @@
     (global.document.head || global.document.documentElement)?.appendChild?.(style);
   }
 
+  function loadSerializationGuard() {
+    if (global.TaskPointsStateRuntimeV2SerializationGuard?.installed || !global.document?.createElement) return true;
+    if (global.document.querySelector?.('script[data-taskpoints-state-v2-serialization-guard]')) return true;
+    const script = global.document.createElement('script');
+    script.src = '/state_runtime_v2_serialization_guard.js';
+    script.defer = true;
+    script.dataset.taskpointsStateV2SerializationGuard = 'true';
+    (global.document.head || global.document.documentElement)?.appendChild?.(script);
+    return true;
+  }
+
   keepMobileTraceUiCompact();
 
   function mutationShape(kind, args, result) {
@@ -148,6 +159,7 @@
 
   wrapMaintenance('verifyParity', 'parity', 'parityChecks');
   wrapMaintenance('buildCompatibilitySnapshot', 'compatibility', 'compatibilityBuilds');
+  loadSerializationGuard();
 
   const api = {
     installed: true,
