@@ -208,7 +208,8 @@ async function buildCoreBundle(request, env, ctx, version) {
     readAssetSource(env, request, '/greed_gold_economy.js'),
     readAssetSource(env, request, '/gold_theft_top50_notifications.js')
   ]);
-  const additions = [aliasSource, youAliasSource, habitGuardSource, habitFastPathControlSource, sharedSaveWorkSource, inboxBadgeSource, seasonSeriesUpsetSource, taskMutationJournalSource, taskCreateFastPathSource, stateHotCacheSource, storageIdleSource, greedGoldSource, goldTheftTop50Source].filter(Boolean);
+  const additions = [aliasSource, youAliasSource, habitGuardSource, habitFastPathControlSource, sharedSaveWorkSource, inboxBadgeSource, seasonSeriesUpsetSource, taskMutationJournalSource, taskCreateFastPathSource, stateHotCacheSource, storageIdleSource, greedGoldSource].filter(Boolean);
+  if (goldTheftTop50Source) additions.push(goldTheftTop50Source);
   const source = [
     perfSource,
     coreSource,
@@ -304,8 +305,8 @@ export default {
           + '<script src="/habit_ledger_matchup_impact_legacy_scores.js?v=20260801-1" data-taskpoints-habit-matchup-legacy-scores="true"></script>'
           + '<script src="/habit_ledger_matchup_restore_transform.js?v=20260801-1" data-taskpoints-habit-matchup-restore-transform="true"></script>'
           + '<script src="/habit_ledger_matchup_impact_attestation.js?v=20260801-1" data-taskpoints-habit-matchup-attestation="true"></script>'
-          + '<script src="/habit_ledger_matchup_restore_ui.js?v=20260801-1" data-taskpoints-habit-matchup-restore-ui="true"></script>'
-          + '<script src="/habit_ledger_matchup_restore_apply.js?v=20260801-1" data-taskpoints-habit-matchup-restore-apply="true"></script>'
+          + '<script src="/habit_ledger_matchup_restore_ui.js?v=20260731-1" data-taskpoints-habit-matchup-restore-ui="true"></script>'
+          + '<script src="/habit_ledger_matchup_restore_apply.js?v=20260731-1" data-taskpoints-habit-matchup-restore-apply="true"></script>'
           + '<script src="/habit_ledger_matchup_impact_stale_guard.js?v=20260803-3" data-taskpoints-habit-matchup-stale-guard="true"></script>'
           + '<script src="/score_alias_audit_bootstrap.js?v=20260731-2" data-taskpoints-score-alias-audit-bootstrap="true"></script>'
         : '';
