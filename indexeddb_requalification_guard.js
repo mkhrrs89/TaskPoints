@@ -260,3 +260,16 @@
   script.dataset.taskpointsRecordsGoldTheftTab = 'true';
   document.head.appendChild(script);
 })(typeof window !== 'undefined' ? window : globalThis);
+
+;(function loadTaskPointsRecordsGoldTheftHistoryFix(global) {
+  'use strict';
+  const document = global.document;
+  const path = String(global.location?.pathname || '');
+  if (!/(^|\/)records(?:\.html)?$/i.test(path)) return;
+  if (!document?.head || document.querySelector?.('script[data-taskpoints-records-gold-theft-history-fix]')) return;
+  const script = document.createElement('script');
+  script.src = 'records_gold_theft_history_fix.js';
+  script.defer = true;
+  script.dataset.taskpointsRecordsGoldTheftHistoryFix = 'true';
+  document.head.appendChild(script);
+})(typeof window !== 'undefined' ? window : globalThis);
