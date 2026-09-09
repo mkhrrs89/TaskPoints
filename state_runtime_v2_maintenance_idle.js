@@ -5,6 +5,8 @@
   const core = global?.TaskPointsCore;
   if (!global || !runtime || !core || global.TaskPointsStateRuntimeV2MaintenanceIdle?.installed) return;
 
+  const DEEP_QUIET_MS = 20000;
+  const DEEP_QUIET_POLL_MS = 250;
   const mutationMethods = [
     ['enqueueHabitDelta', 'completion'],
     ['enqueueHabitOrderOverlay', 'order'],
@@ -18,6 +20,9 @@
   let coalesced = 0;
   let skipped = 0;
   let failures = 0;
+  let deepQuietDeferrals = 0;
+  let deepQuietReleases = 0;
+  let deepQuietPending = 0;
   let lastKind = null;
   let lastSource = null;
   let lastError = null;
@@ -52,13 +57,80 @@
     return typeof core.whenStorageMaintenanceQuiet === 'function';
   }
 
+  function idleStatus() {
+    try {
+      const value = core.getStorageMaintenanceIdleStatus?.();
+      return value && typeof value === 'object' ? value : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function deepQuietReady(status = idleStatus()) {
+    if (!status) return null;
+    if (global.document?.visibilityState === 'hidden') return false;
+    if (status.pageLeaving === true || status.activeEditor === true) return false;
+    if (Number(status.navigationQuietForMs || 0) > 0) return false;
+    return Number(status.lastInteractionAgoMs || 0) >= DEEP_QUIET_MS;
+  }
+
+  function waitForDeepQuiet(kind, source) {
+    const current = idleStatus();
+    const ready = deepQuietReady(current);
+    if (ready === null || ready === true) return Promise.resolve({ waited: false, status: current });
+    if (typeof global.setTimeout !== 'function') {
+      mark(`stateV2.maintenance.${kind}.deepQuietBypassed`, {
+        kind,
+        source,
+        reason: 'timer_unavailable',
+        foregroundBlocking: false
+      });
+      return Promise.resolve({ waited: false, bypassed: true, status: current });
+    }
+
+    deepQuietDeferrals += 1;
+    deepQuietPending += 1;
+    mark(`stateV2.maintenance.${kind}.deepDeferred`, {
+      kind,
+      source,
+      requiredQuietMs: DEEP_QUIET_MS,
+      lastInteractionAgoMs: Number(current?.lastInteractionAgoMs || 0),
+      navigationQuietForMs: Number(current?.navigationQuietForMs || 0),
+      activeEditor: current?.activeEditor === true,
+      foregroundBlocking: false
+    });
+
+    return new Promise((resolve) => {
+      const retry = () => {
+        const next = idleStatus();
+        const nextReady = deepQuietReady(next);
+        if (nextReady === false) {
+          global.setTimeout(retry, DEEP_QUIET_POLL_MS);
+          return;
+        }
+        deepQuietPending = Math.max(0, deepQuietPending - 1);
+        deepQuietReleases += 1;
+        mark(`stateV2.maintenance.${kind}.deepReleased`, {
+          kind,
+          source,
+          requiredQuietMs: DEEP_QUIET_MS,
+          lastInteractionAgoMs: Number(next?.lastInteractionAgoMs || 0),
+          statusUnavailable: nextReady === null,
+          foregroundBlocking: false
+        });
+        resolve({ waited: true, status: next });
+      };
+      global.setTimeout(retry, DEEP_QUIET_POLL_MS);
+    });
+  }
+
   function originalRuntimeMethod(name) {
     const method = runtime?.[name];
     if (typeof method !== 'function') return null;
     return typeof method.__taskPointsOriginal === 'function' ? method.__taskPointsOriginal : method;
   }
 
-  function runWhenQuiet(kind, source, runner) {
+  async function runWhenQuiet(kind, source, runner) {
     if (!idleCoordinatorAvailable()) {
       skipped += 1;
       mark(`stateV2.maintenance.${kind}.idleSkipped`, {
@@ -67,7 +139,7 @@
         foregroundBlocking: false,
         reason: 'idle_coordinator_unavailable'
       });
-      return Promise.resolve({ skipped: true, reason: 'idle_coordinator_unavailable' });
+      return { skipped: true, reason: 'idle_coordinator_unavailable' };
     }
 
     scheduled += 1;
@@ -76,6 +148,8 @@
       source,
       foregroundBlocking: false
     });
+
+    await waitForDeepQuiet(kind, source);
 
     return core.whenStorageMaintenanceQuiet(async () => {
       const started = now();
@@ -226,7 +300,7 @@
 
   const api = {
     installed: true,
-    version: 1,
+    version: 2,
     scheduleParityVerification,
     scheduleCompatibilitySnapshot,
     getStatus() {
@@ -242,6 +316,11 @@
         installed: true,
         darkEnabled: isDarkEnabled(),
         idleCoordinatorAvailable: idleCoordinatorAvailable(),
+        deepQuietMs: DEEP_QUIET_MS,
+        deepQuietPollMs: DEEP_QUIET_POLL_MS,
+        deepQuietDeferrals,
+        deepQuietReleases,
+        deepQuietPending,
         installedMutationHooks,
         scheduled,
         executed,
@@ -259,8 +338,10 @@
 
   global.TaskPointsStateRuntimeV2MaintenanceIdle = api;
   mark('stateV2.maintenanceIdleInstalled', {
+    version: api.version,
     installedMutationHooks,
-    idleCoordinatorAvailable: idleCoordinatorAvailable()
+    idleCoordinatorAvailable: idleCoordinatorAvailable(),
+    deepQuietMs: DEEP_QUIET_MS
   });
 
   if (isDarkEnabled()) {
