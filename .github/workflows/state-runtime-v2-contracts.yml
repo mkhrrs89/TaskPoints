@@ -30,6 +30,9 @@ jobs:
       - name: Run Step 4 V2 performance contract
         run: node --test tests/state_runtime_v2_perf_contract.test.js
 
+      - name: Run Step 4 V2 idle maintenance contract
+        run: node --test tests/state_runtime_v2_maintenance_idle_contract.test.js
+
       - name: Run V2 core storage contracts
         run: >-
           node --test
