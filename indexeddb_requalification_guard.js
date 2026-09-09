@@ -273,3 +273,16 @@
   script.dataset.taskpointsRecordsGoldTheftHistoryFix = 'true';
   document.head.appendChild(script);
 })(typeof window !== 'undefined' ? window : globalThis);
+
+;(function loadTaskPointsHomeStreakBonusConsistency(global) {
+  'use strict';
+  const document = global.document;
+  const path = String(global.location?.pathname || '');
+  if (!/(^|\/)(?:index\.html)?$/i.test(path)) return;
+  if (!document?.head || document.querySelector?.('script[data-taskpoints-home-streak-bonus-consistency]')) return;
+  const script = document.createElement('script');
+  script.src = 'home_streak_bonus_consistency.js';
+  script.defer = true;
+  script.dataset.taskpointsHomeStreakBonusConsistency = 'true';
+  document.head.appendChild(script);
+})(typeof window !== 'undefined' ? window : globalThis);
