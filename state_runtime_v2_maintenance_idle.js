@@ -5,6 +5,7 @@
   const core = global?.TaskPointsCore;
   if (!global || !runtime || !core || global.TaskPointsStateRuntimeV2MaintenanceIdle?.installed) return;
 
+  const DARK_MODE_KEY = 'taskpoints_state_v2_dark_mode_v1';
   const DEEP_QUIET_MS = 20000;
   const DEEP_QUIET_POLL_MS = 250;
   const mutationMethods = [
@@ -40,8 +41,19 @@
   }
 
   function isDarkEnabled() {
-    try { return runtime.getStatus?.().darkEnabled === true; }
-    catch (_) { return false; }
+    try {
+      const stored = global.localStorage?.getItem?.(DARK_MODE_KEY);
+      if (stored !== null && stored !== undefined) return stored === '1';
+    } catch (_) {}
+    try {
+      const getter = runtime.getStatus;
+      const base = typeof getter?.__taskPointsOriginal === 'function'
+        ? getter.__taskPointsOriginal.call(runtime)
+        : getter?.call(runtime);
+      return base?.darkEnabled === true;
+    } catch (_) {
+      return false;
+    }
   }
 
   function getLane(kind) {
