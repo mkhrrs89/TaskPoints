@@ -142,10 +142,10 @@ test('two distinct Top-50 thefts by the same player on the same day each create 
 
   assert.equal(result.addedMessages.length, 2);
   assert.deepEqual(
-    result.addedMessages.map((message) => message.rank).sort((a, b) => a - b),
+    Array.from(result.addedMessages, (message) => message.rank).sort((a, b) => a - b),
     [1, 2]
   );
-  assert.equal(new Set(result.addedMessages.map((message) => message.id)).size, 2);
+  assert.equal(new Set(Array.from(result.addedMessages, (message) => message.id)).size, 2);
 });
 
 test('yesterday thefts wait until the same 5 AM reveal rollover used by the existing inbox records', () => {
