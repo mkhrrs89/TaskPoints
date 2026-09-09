@@ -13,7 +13,9 @@ function install(options = {}) {
   let directParityCalls = 0;
   let compatibilityCalls = 0;
   let tick = 0;
+  let idle = options.idleStatus ? { ...options.idleStatus } : null;
   const jobs = [];
+  const timers = [];
   const events = [];
 
   async function parityOriginal() {
@@ -53,6 +55,7 @@ function install(options = {}) {
       jobs.push({ run, maintenanceOptions, resolve, reject });
     });
   }
+  if (idle) core.getStorageMaintenanceIdleStatus = () => ({ ...idle });
 
   const context = {
     TaskPointsStateRuntimeV2: runtime,
@@ -61,7 +64,10 @@ function install(options = {}) {
       mark(name, detail) { events.push({ type: 'mark', name, detail }); },
       duration(name, durationMs, detail) { events.push({ type: 'duration', name, durationMs, detail }); }
     },
+    document: { visibilityState: 'visible' },
     performance: { now() { tick += 0.25; return tick; } },
+    setTimeout(fn) { timers.push(fn); return timers.length; },
+    clearTimeout() {},
     Date,
     Math,
     Number,
@@ -97,15 +103,30 @@ function install(options = {}) {
     }
   }
 
+  async function runNextTimer() {
+    const timer = timers.shift();
+    assert.ok(timer, 'expected a queued deep-idle timer');
+    timer();
+    await flush();
+  }
+
   return {
     context,
     runtime,
     core,
     jobs,
+    timers,
     events,
     flush,
     runNextJob,
+    runNextTimer,
     setDark(value) { darkEnabled = value === true; },
+    setIdle(value) {
+      idle = value ? { ...value } : null;
+      if (idle && typeof core.getStorageMaintenanceIdleStatus !== 'function') {
+        core.getStorageMaintenanceIdleStatus = () => ({ ...idle });
+      }
+    },
     counts() { return { underlyingParityCalls, directParityCalls, compatibilityCalls }; }
   };
 }
@@ -132,6 +153,53 @@ test('mutation completion schedules parity behind the existing quiet-maintenance
   assert.ok(durationEvent);
   assert.equal(durationEvent.detail.foregroundBlocking, false);
   assert.equal(durationEvent.detail.scheduled, true);
+});
+
+test('V2 background parity waits for 20 seconds of sustained quiet before entering the shared maintenance coordinator', async () => {
+  const env = install({
+    idleStatus: {
+      lastInteractionAgoMs: 5000,
+      navigationQuietForMs: 0,
+      pageLeaving: false,
+      activeEditor: false
+    }
+  });
+  env.setDark(true);
+  const api = env.context.TaskPointsStateRuntimeV2MaintenanceIdle;
+
+  const parityPromise = api.scheduleParityVerification({ source: 'deep-idle-test' });
+  await env.flush();
+  assert.equal(env.jobs.length, 0);
+  assert.equal(env.timers.length, 1);
+  assert.equal(api.getStatus().deepQuietMs, 20000);
+  assert.equal(api.getStatus().deepQuietPending, 1);
+
+  env.setIdle({
+    lastInteractionAgoMs: 12000,
+    navigationQuietForMs: 0,
+    pageLeaving: false,
+    activeEditor: false
+  });
+  await env.runNextTimer();
+  assert.equal(env.jobs.length, 0);
+  assert.equal(env.timers.length, 1, 'continued activity window should keep deep verification deferred');
+
+  env.setIdle({
+    lastInteractionAgoMs: 20050,
+    navigationQuietForMs: 0,
+    pageLeaving: false,
+    activeEditor: false
+  });
+  await env.runNextTimer();
+  assert.equal(env.jobs.length, 1);
+  assert.equal(api.getStatus().deepQuietPending, 0);
+  assert.equal(api.getStatus().deepQuietReleases, 1);
+
+  await env.runNextJob();
+  await parityPromise;
+  assert.equal(env.counts().underlyingParityCalls, 1);
+  assert.equal(env.events.some((event) => event.name === 'stateV2.maintenance.parity.deepDeferred'), true);
+  assert.equal(env.events.some((event) => event.name === 'stateV2.maintenance.parity.deepReleased'), true);
 });
 
 test('rapid mutation requests coalesce into one parity pass when they all arrive before idle execution', async () => {
@@ -226,5 +294,6 @@ test('performance preview loader includes the V2 idle maintenance module', () =>
   assert.match(perfSource, /state_runtime_v2_maintenance_idle\.js/);
   assert.match(perfSource, /data-taskpoints-state-v2-maintenance-idle/);
   assert.match(source, /whenStorageMaintenanceQuiet/);
+  assert.match(source, /DEEP_QUIET_MS = 20000/);
   assert.match(source, /foregroundBlocking: false/);
 });
