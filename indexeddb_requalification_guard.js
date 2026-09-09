@@ -247,3 +247,16 @@
   script.dataset.taskpointsTaskDeleteFastPath = 'true';
   document.head.appendChild(script);
 })(typeof window !== 'undefined' ? window : globalThis);
+
+;(function loadTaskPointsRecordsGoldTheftTab(global) {
+  'use strict';
+  const document = global.document;
+  const path = String(global.location?.pathname || '');
+  if (!/(^|\/)records(?:\.html)?$/i.test(path)) return;
+  if (!document?.head || document.querySelector?.('script[data-taskpoints-records-gold-theft-tab]')) return;
+  const script = document.createElement('script');
+  script.src = 'records_gold_theft_tab.js';
+  script.defer = true;
+  script.dataset.taskpointsRecordsGoldTheftTab = 'true';
+  document.head.appendChild(script);
+})(typeof window !== 'undefined' ? window : globalThis);
