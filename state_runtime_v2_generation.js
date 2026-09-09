@@ -7,6 +7,7 @@
   const DARK_MODE_KEY = 'taskpoints_state_v2_dark_mode_v1';
   const PERF_KEY = 'tp_perf_trace_enabled_v1';
   const productionHosts = new Set(['taskpoints.pages.dev', 'www.taskpoints.pages.dev']);
+  const FORCED_PREVIEW_HOST = 'arch-state-runtime-v2-plan.taskpoints.pages.dev';
   const listeners = new Set();
   let sequence = 0;
   let rotations = 0;
@@ -14,6 +15,7 @@
   let lastReason = null;
   let lastError = null;
   let previewQueryBootstrap = false;
+  let forcedPreviewBootstrap = false;
 
   function safeGet(key) {
     try { return global.localStorage?.getItem?.(key) ?? null; }
@@ -50,10 +52,31 @@
     }
   }
 
+  function hostname() {
+    return String(global.location?.hostname || '').toLowerCase();
+  }
+
+  function isForcedPreviewHost() {
+    return hostname() === FORCED_PREVIEW_HOST;
+  }
+
+  function bootstrapForcedPreviewHost() {
+    if (!isForcedPreviewHost()) return false;
+    if (!safeSet(DARK_MODE_KEY, '1')) return false;
+    forcedPreviewBootstrap = true;
+    lastReason = 'forced-preview-host-bootstrap';
+    try {
+      global.TaskPointsPerf?.mark?.('stateV2.previewForcedEnabled', {
+        hostname: FORCED_PREVIEW_HOST
+      });
+    } catch (_) {}
+    return true;
+  }
+
   function bootstrapFromPreviewQuery() {
-    const hostname = String(global.location?.hostname || '').toLowerCase();
-    const previewHost = hostname.endsWith('.taskpoints.pages.dev') && !productionHosts.has(hostname);
-    const localHost = hostname === 'localhost' || hostname === '127.0.0.1';
+    const currentHostname = hostname();
+    const previewHost = currentHostname.endsWith('.taskpoints.pages.dev') && !productionHosts.has(currentHostname);
+    const localHost = currentHostname === 'localhost' || currentHostname === '127.0.0.1';
     let params;
     try { params = new URLSearchParams(global.location?.search || ''); }
     catch (_) { return false; }
@@ -61,7 +84,7 @@
     const requested = String(params.get('v2dark') || '').toLowerCase();
     if (requested !== '1' && requested !== 'on') return false;
 
-    if (productionHosts.has(hostname)) {
+    if (productionHosts.has(currentHostname)) {
       safeRemove(DARK_MODE_KEY);
       return false;
     }
@@ -84,10 +107,15 @@
     return true;
   }
 
+  // The dedicated architecture branch is a test environment. Force dark mode
+  // there on every page load so mobile browser storage/redirect quirks cannot
+  // silently turn V2 off. Production remains explicitly blocked below and the
+  // hostname check means this behavior cannot activate on main if merged later.
+  bootstrapForcedPreviewHost();
   bootstrapFromPreviewQuery();
 
   function isEnabled() {
-    return safeGet(DARK_MODE_KEY) === '1';
+    return isForcedPreviewHost() || safeGet(DARK_MODE_KEY) === '1';
   }
 
   function createGeneration(reason = 'generation') {
@@ -115,8 +143,8 @@
     if (existing) return { enabled: true, generation: existing, created: false };
     const generation = createGeneration('v2-bootstrap');
     if (!safeSet(KEY, generation)) throw new Error(`state_runtime_v2_generation_write_failed:${lastError || 'unknown'}`);
-    lastReason = 'bootstrap';
-    notify({ generation, previousGeneration: null, reason: 'bootstrap', source: 'local' });
+    lastReason = forcedPreviewBootstrap ? 'forced-preview-bootstrap' : 'bootstrap';
+    notify({ generation, previousGeneration: null, reason: lastReason, source: 'local' });
     return { enabled: true, generation, created: true };
   }
 
@@ -147,6 +175,8 @@
       rotations,
       externalChanges,
       previewQueryBootstrap,
+      forcedPreviewBootstrap,
+      forcedPreviewHost: isForcedPreviewHost(),
       lastReason,
       lastError
     };
@@ -170,6 +200,8 @@
     __installedModule: true,
     KEY,
     DARK_MODE_KEY,
+    FORCED_PREVIEW_HOST,
+    isForcedPreviewHost,
     isEnabled,
     createGeneration,
     read,
