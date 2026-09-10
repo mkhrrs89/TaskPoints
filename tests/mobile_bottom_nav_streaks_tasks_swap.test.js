@@ -40,6 +40,17 @@ test('mobile header nav buttons are visually removed while their row footprint i
   assert.doesNotMatch(nav, /\.header-nav[\s\S]{0,500}display:\s*none\s*!important/);
 });
 
+test('mobile bottom menu motion uses composited child transforms and avoids filtered shell animation', () => {
+  assert.match(nav, /MOTION_STYLE_ID = 'taskpoints-mobile-bottom-nav-motion-style'/);
+  assert.match(nav, /will-change: height, transform/);
+  assert.match(nav, /filter: none !important/);
+  assert.match(nav, /box-shadow: 0 -3px 10px rgba\(0, 0, 0, 0\.16\)/);
+  assert.match(nav, /transform: translate3d\(0, 10px, 0\)/);
+  assert.match(nav, /transform: translate3d\(0, 0, 0\)/);
+  assert.match(nav, /cubic-bezier\(0\.22, 1, 0\.36, 1\)/);
+  assert.match(nav, /\.mobile-bottom-nav-shell\.is-dragging[\s\S]*transition: none !important/);
+});
+
 test('moving Tasks preserves its existing popup and actions', () => {
   assert.match(toolbar, /id="mobileTasksToggle"/);
   assert.match(toolbar, /id="mobileTasksMenu"/);
