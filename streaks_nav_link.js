@@ -5,6 +5,7 @@
 
   const LINK_ATTR = 'data-taskpoints-streaks-nav';
   const HEADER_SPACER_STYLE_ID = 'taskpoints-relocated-header-nav-mobile-style';
+  const MOTION_STYLE_ID = 'taskpoints-mobile-bottom-nav-motion-style';
   const EXPANDED_SHORTCUT_ATTR = 'data-taskpoints-expanded-shortcut';
   const EXPANDED_SHORTCUTS = Object.freeze([
     { href: 'daily_sources.html', label: 'Sources', icon: '📚', key: 'sources' },
@@ -44,6 +45,42 @@
         .header-nav > a[href="season.html"] {
           visibility: hidden !important;
           pointer-events: none !important;
+        }
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function ensureMotionStyle(document) {
+    if (!document?.createElement || !document.head || document.getElementById?.(MOTION_STYLE_ID)) return;
+    const style = document.createElement('style');
+    style.id = MOTION_STYLE_ID;
+    style.textContent = `
+      @media (max-width: 767px) {
+        .mobile-bottom-nav-shell {
+          will-change: height, transform;
+          -webkit-backface-visibility: hidden;
+          backface-visibility: hidden;
+          filter: none !important;
+          box-shadow: 0 -3px 10px rgba(0, 0, 0, 0.16);
+          transition: height 220ms cubic-bezier(0.22, 1, 0.36, 1), transform 160ms ease !important;
+        }
+
+        .mobile-bottom-nav-expanded {
+          will-change: opacity, transform;
+          -webkit-backface-visibility: hidden;
+          backface-visibility: hidden;
+          transform: translate3d(0, 10px, 0);
+          transition: opacity 180ms linear, transform 220ms cubic-bezier(0.22, 1, 0.36, 1) !important;
+        }
+
+        .mobile-bottom-nav-shell.is-expanded .mobile-bottom-nav-expanded {
+          transform: translate3d(0, 0, 0);
+        }
+
+        .mobile-bottom-nav-shell.is-dragging,
+        .mobile-bottom-nav-shell.is-dragging .mobile-bottom-nav-expanded {
+          transition: none !important;
         }
       }
     `;
@@ -110,6 +147,7 @@
     // The old mobile header buttons stay in layout but become invisible. This
     // deliberately preserves the exact blank row height/spacing they occupied.
     ensureHeaderNavSpacerStyle(document);
+    ensureMotionStyle(document);
 
     const nav = document.querySelector('#mobileBottomNav');
     if (!nav) return false;
