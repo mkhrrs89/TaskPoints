@@ -214,3 +214,24 @@
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
+
+;(function installTaskPointsUndatedReminderBellCleanup(global) {
+  'use strict';
+
+  function removeBell() {
+    const modal = global.document?.getElementById?.('undatedReminderModal');
+    const bell = Array.from(modal?.querySelectorAll?.('.text-2xl[aria-hidden="true"]') || [])
+      .find((node) => String(node?.textContent || '').trim() === '🔔');
+    if (!bell) return false;
+    bell.remove();
+    return true;
+  }
+
+  if (global.document?.readyState === 'loading') {
+    global.document.addEventListener?.('DOMContentLoaded', removeBell, { once: true });
+  } else {
+    removeBell();
+  }
+
+  global.addEventListener?.('pageshow', removeBell);
+})(typeof window !== 'undefined' ? window : globalThis);
