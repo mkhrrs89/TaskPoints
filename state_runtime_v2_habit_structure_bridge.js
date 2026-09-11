@@ -114,11 +114,22 @@
     return queue;
   }
 
+  function wrapperChainContains(candidate, marker) {
+    let current = candidate;
+    const seen = new Set();
+    for (let depth = 0; typeof current === 'function' && depth < 12 && !seen.has(current); depth += 1) {
+      if (current[marker] === true) return true;
+      seen.add(current);
+      current = typeof current.__taskPointsOriginal === 'function' ? current.__taskPointsOriginal : null;
+    }
+    return false;
+  }
+
   function installHotPresenceEnqueue() {
     const runtime = global.TaskPointsStateRuntimeV2;
     if (!runtime?.enqueueHabitPresenceFromLegacy || !runtime?.applyHabitPresenceSnapshot) return false;
     const candidate = runtime.enqueueHabitPresenceFromLegacy;
-    if (candidate.__tpStateV2HotPresenceEnqueueWrapped === true) return true;
+    if (wrapperChainContains(candidate, '__tpStateV2HotPresenceEnqueueWrapped')) return true;
     const original = candidate;
     const wrapped = function taskPointsStateV2HotPresenceEnqueue(habitId, options = {}) {
       const hotSnapshot = options?.hotSnapshot;
