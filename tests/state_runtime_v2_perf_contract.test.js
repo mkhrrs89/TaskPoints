@@ -8,7 +8,7 @@ const source = fs.readFileSync(path.join(__dirname, '..', 'state_runtime_v2_perf
 const serializationGuard = fs.readFileSync(path.join(__dirname, '..', 'state_runtime_v2_serialization_guard.js'), 'utf8');
 const structureBridge = fs.readFileSync(path.join(__dirname, '..', 'state_runtime_v2_habit_structure_bridge.js'), 'utf8');
 
-function install() {
+function install(options = {}) {
   const events = [];
   let tick = 0;
   const runtime = {
@@ -16,16 +16,20 @@ function install() {
     applyHabitOrderOverlay: async (payload) => ({ committed: true, revision: 3, payload }),
     applyHabitEditSnapshot: async () => ({ committed: true, revision: 4 }),
     applyHabitPresenceSnapshot: async () => ({ committed: true, revision: 5 }),
-    enqueueHabitDelta: () => Promise.resolve(true),
     enqueueHabitOrderOverlay: () => Promise.resolve(true),
     enqueueHabitEditFromLegacy: () => Promise.resolve(true),
     enqueueHabitPresenceFromLegacy: () => Promise.resolve(true),
     verifyParity: async () => ({ match: true }),
     buildCompatibilitySnapshot: async () => ({ habits: [], completions: [] }),
-    getStatus: () => ({ installed: true, darkEnabled: true })
+    getStatus: () => ({ installed: true, darkEnabled: true, hookInstalled: options.publicCompletionEnqueue === false })
+  };
+  if (options.publicCompletionEnqueue !== false) runtime.enqueueHabitDelta = () => Promise.resolve(true);
+  const core = {
+    writePendingHabitDelta(delta) { return { ...delta, journaled: true }; }
   };
   const context = {
     TaskPointsStateRuntimeV2: runtime,
+    TaskPointsCore: core,
     TaskPointsPerf: {
       mark(name, detail) { events.push({ type: 'mark', name, detail }); },
       duration(name, durationMs, detail) { events.push({ type: 'duration', name, durationMs, detail }); }
@@ -43,7 +47,7 @@ function install() {
   context.window = context;
   context.globalThis = context;
   vm.runInNewContext(source, context, { filename: 'state_runtime_v2_perf.js' });
-  return { context, runtime, events };
+  return { context, runtime, core, events };
 }
 
 test('sync enqueue timing is separately observable from async V2 transaction timing', async () => {
@@ -67,6 +71,19 @@ test('sync enqueue timing is separately observable from async V2 transaction tim
   assert.equal(status.asyncFailures, 0);
   assert.equal(status.mutationClasses.completion.syncEnqueues, 1);
   assert.equal(status.mutationClasses.completion.asyncMutations, 1);
+});
+
+test('completion enqueue timing falls back to the installed pending-Habit journal when the runtime enqueue is lexical-only', () => {
+  const { context, core, events } = install({ publicCompletionEnqueue: false });
+  const result = core.writePendingHabitDelta({ habitId: 'h1', dayKey: '2026-09-11', status: 'full' });
+
+  assert.equal(result.journaled, true);
+  const enqueue = events.find((event) => event.name === 'stateV2.enqueue.completion.sync');
+  assert.ok(enqueue);
+  assert.equal(enqueue.detail.foregroundBlocking, true);
+  assert.equal(enqueue.detail.source, 'pending-habit-journal');
+  assert.equal(context.TaskPointsStateRuntimeV2Perf.getStatus().completionJournalEnqueueBridgeInstalled, true);
+  assert.equal(context.TaskPointsStateRuntimeV2Perf.getStatus().mutationClasses.completion.syncEnqueues, 1);
 });
 
 test('runtime status exported by the generic perf trace includes V2 perf, deep-idle, serializer, and acceptance summaries', () => {
@@ -158,7 +175,7 @@ test('parity and compatibility work is labeled as heavyweight foreground mainten
 });
 
 test('dark Habit structure bridge loads performance instrumentation only through the dark preview path', () => {
-  assert.match(structureBridge, /script\.src = '\/state_runtime_v2_perf\.js\?v=20260911-4'/);
+  assert.match(structureBridge, /script\.src = '\/state_runtime_v2_perf\.js\?v=20260911-5'/);
   assert.match(structureBridge, /if \(!isEnabled\(\) \|\| global\.TaskPointsStateRuntimeV2Perf\?\.installed/);
   assert.match(structureBridge, /loadPerfInstrumentation\(\);\s*loadLiveTraceReview\(\);\s*return install\(\);/);
 });
