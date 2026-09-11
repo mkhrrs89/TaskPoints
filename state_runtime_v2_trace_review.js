@@ -6,6 +6,7 @@
   const MUTATION_KINDS = ['completion', 'order', 'edit', 'presence'];
   const ENQUEUE_PREFIX = 'stateV2.enqueue.';
   const TXN_PREFIX = 'stateV2.txn.';
+  const V2_DB_NAME = 'taskpoints_state_v2';
 
   function finiteNumber(value) {
     const number = Number(value);
@@ -180,6 +181,15 @@
     };
   }
 
+  function durationRow(event) {
+    return {
+      name: String(event.name || ''),
+      durationMs: Number(event.durationMs),
+      page: String(event.__pagePath || ''),
+      detail: detailObject(event)
+    };
+  }
+
   function legacyForegroundDurations(events) {
     return events
       .filter((event) => {
@@ -190,12 +200,31 @@
       })
       .sort((a, b) => Number(b.durationMs) - Number(a.durationMs))
       .slice(0, 20)
-      .map((event) => ({
-        name: String(event.name || ''),
-        durationMs: Number(event.durationMs),
-        page: String(event.__pagePath || ''),
-        detail: detailObject(event)
-      }));
+      .map(durationRow);
+  }
+
+  function legacyFullStateCandidates(events) {
+    return events
+      .filter((event) => {
+        if (!Number.isFinite(Number(event?.durationMs))) return false;
+        const name = String(event?.name || '');
+        const lower = name.toLowerCase();
+        const detail = detailObject(event);
+        if (lower.includes('phase2') || lower.includes('phase4') || lower.includes('phase5')
+          || lower.includes('verifiedsecondary') || lower.includes('snapshot')) return true;
+        if (name === 'storage.setItem' && String(detail.key || '') === 'taskpoints_v1') return true;
+        if (name === 'json.stringify' || name === 'structuredClone') return true;
+        if (name === 'core.saveStateSnapshot' || name === 'core.saveValidatedSnapshot'
+          || name === 'core.shadowSourceSummary' || name === 'core.shadowCanonicalJson') return true;
+        if (name === 'indexedDB.transaction') {
+          const db = String(detail.db || '');
+          return Boolean(db) && db !== V2_DB_NAME;
+        }
+        return false;
+      })
+      .sort((a, b) => Number(b.durationMs) - Number(a.durationMs))
+      .slice(0, 40)
+      .map(durationRow);
   }
 
   function review(report) {
@@ -205,11 +234,12 @@
     const maintenance = maintenanceEvidence(events, status);
     const preemption = preemptionEvidence(events, maintenance.deepQuietMs);
     const failures = failureEvidence(events, status, mutationClasses);
+    const legacyCandidates = legacyFullStateCandidates(events);
     const allMutationClassesObserved = MUTATION_KINDS.every((kind) => mutationClasses[kind].observed === true);
     const noDirectForegroundMaintenanceObserved = maintenance.directForegroundMaintenanceCount === 0;
 
     return {
-      schemaVersion: 1,
+      schemaVersion: 2,
       reportGeneratedAtISO: report?.generatedAtISO || null,
       pageCount: Array.isArray(report?.pages) ? report.pages.length : 0,
       eventCount: events.length,
@@ -222,6 +252,9 @@
       automaticParityDeepIdleObserved: maintenance.automaticParityDeepIdleObserved,
       interactionPreemptionObserved: preemption.observed,
       legacyForegroundDurations: legacyForegroundDurations(events),
+      legacyFullStateCandidates: legacyCandidates,
+      maxLegacyFullStateCandidateMs: legacyCandidates.length ? legacyCandidates[0].durationMs : null,
+      legacyForegroundCorrelationStillRequired: legacyCandidates.length > 0,
       evidenceCompleteForDeviceTrace: allMutationClassesObserved
         && noDirectForegroundMaintenanceObserved
         && maintenance.automaticParityDeepIdleObserved
@@ -232,7 +265,7 @@
 
   const api = {
     installed: true,
-    version: 1,
+    version: 2,
     review,
     flattenEvents
   };
