@@ -49,6 +49,7 @@ function baseReport(extraEvents = []) {
 test('review recognizes complete four-class device trace evidence and deep-idle preemption', () => {
   const result = reviewer.review(baseReport());
 
+  assert.equal(result.schemaVersion, 2);
   assert.equal(result.allMutationClassesObserved, true);
   assert.equal(result.mutationClasses.completion.observed, true);
   assert.equal(result.mutationClasses.order.observed, true);
@@ -92,18 +93,32 @@ test('failed V2 events or subsystem failures block evidence-complete verdict', (
   assert.equal(result.evidenceCompleteForDeviceTrace, false);
 });
 
-test('legacy Phase 2/4/5 and snapshot durations are surfaced for foreground correlation', () => {
+test('legacy Phase 2/4/5 and generic full-state durations are surfaced for foreground correlation', () => {
   const report = baseReport([
     { epochMs: 31000, type: 'duration', name: 'phase4.storage.verifySnapshot', durationMs: 44, detail: { source: 'habit' } },
     { epochMs: 32000, type: 'duration', name: 'phase2.persist', durationMs: 88, detail: { source: 'habit' } },
+    { epochMs: 32500, type: 'duration', name: 'storage.setItem', durationMs: 31, detail: { key: 'taskpoints_v1', valueLength: 500000 } },
+    { epochMs: 32600, type: 'duration', name: 'json.stringify', durationMs: 27, detail: { outputLength: 500000 } },
+    { epochMs: 32700, type: 'duration', name: 'structuredClone', durationMs: 22, detail: { completions: 9000 } },
+    { epochMs: 32800, type: 'duration', name: 'core.saveStateSnapshot', durationMs: 36, detail: { savePath: 'habit' } },
+    { epochMs: 32900, type: 'duration', name: 'indexedDB.transaction', durationMs: 19, detail: { db: 'taskpoints_shadow_migration', mode: 'readwrite' } },
+    { epochMs: 32950, type: 'duration', name: 'indexedDB.transaction', durationMs: 200, detail: { db: 'taskpoints_state_v2', mode: 'readwrite' } },
     { epochMs: 33000, type: 'duration', name: 'unrelated.fastThing', durationMs: 999, detail: {} }
   ]);
   const result = reviewer.review(report);
 
-  assert.equal(result.legacyForegroundDurations.length, 2);
+  assert.equal(result.legacyForegroundDurations.length, 3);
   assert.equal(result.legacyForegroundDurations[0].name, 'phase2.persist');
   assert.equal(result.legacyForegroundDurations[0].durationMs, 88);
   assert.equal(result.legacyForegroundDurations[1].name, 'phase4.storage.verifySnapshot');
+  assert.equal(result.legacyFullStateCandidates.some((row) => row.name === 'storage.setItem' && row.detail.key === 'taskpoints_v1'), true);
+  assert.equal(result.legacyFullStateCandidates.some((row) => row.name === 'json.stringify'), true);
+  assert.equal(result.legacyFullStateCandidates.some((row) => row.name === 'structuredClone'), true);
+  assert.equal(result.legacyFullStateCandidates.some((row) => row.name === 'core.saveStateSnapshot'), true);
+  assert.equal(result.legacyFullStateCandidates.some((row) => row.name === 'indexedDB.transaction' && row.detail.db === 'taskpoints_shadow_migration'), true);
+  assert.equal(result.legacyFullStateCandidates.some((row) => row.name === 'indexedDB.transaction' && row.detail.db === 'taskpoints_state_v2'), false);
+  assert.equal(result.maxLegacyFullStateCandidateMs, 88);
+  assert.equal(result.legacyForegroundCorrelationStillRequired, true);
 });
 
 test('review remains conservative when mutation classes or deep-idle evidence are absent', () => {
@@ -120,4 +135,6 @@ test('review remains conservative when mutation classes or deep-idle evidence ar
   assert.equal(result.automaticParityDeepIdleObserved, false);
   assert.equal(result.interactionPreemptionObserved, false);
   assert.equal(result.evidenceCompleteForDeviceTrace, false);
+  assert.equal(result.legacyFullStateCandidates.length, 0);
+  assert.equal(result.legacyForegroundCorrelationStillRequired, false);
 });
