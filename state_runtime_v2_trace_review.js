@@ -60,6 +60,21 @@
     return String(event?.name || '') === `${prefix}${kind}${suffix}`;
   }
 
+  function mirroredCommitCount(status, kind) {
+    if (!status || typeof status !== 'object') return 0;
+    if (kind === 'order') return Math.max(0, finiteNumber(status.mirroredOrderMutations) || 0);
+    if (kind === 'edit') return Math.max(0, finiteNumber(status.mirroredEditMutations) || 0);
+    if (kind === 'presence') return Math.max(0, finiteNumber(status.mirroredPresenceMutations) || 0);
+    if (kind === 'completion') {
+      const total = Math.max(0, finiteNumber(status.mirroredMutations) || 0);
+      const structural = Math.max(0, finiteNumber(status.mirroredOrderMutations) || 0)
+        + Math.max(0, finiteNumber(status.mirroredEditMutations) || 0)
+        + Math.max(0, finiteNumber(status.mirroredPresenceMutations) || 0);
+      return Math.max(0, total - structural);
+    }
+    return 0;
+  }
+
   function observedMutationClasses(events, status) {
     const statusClasses = status?.traceDiagnostics?.perf?.mutationClasses
       || status?.traceDiagnostics?.acceptance?.mutationClasses
@@ -77,7 +92,7 @@
       const statusFailures = finiteNumber(statusRow.asyncFailures) || 0;
       const enqueueCount = Math.max(enqueueEvents.length, statusEnqueues);
       const transactionCount = Math.max(txnEvents.length, statusTransactions);
-      const commitCount = commitEvents.length;
+      const commitCount = Math.max(commitEvents.length, mirroredCommitCount(status, kind));
       out[kind] = {
         enqueueCount,
         transactionCount,
@@ -140,11 +155,11 @@
     };
   }
 
-  function preemptionEvidence(events, deepQuietMs) {
+  function preemptionEvidence(events, maintenance) {
     const interactions = events.filter((event) => String(event?.name || '').startsWith('interaction.'));
     const deferred = events.filter((event) => String(event?.name || '') === 'stateV2.maintenance.parity.deepDeferred');
     const released = events.filter((event) => String(event?.name || '') === 'stateV2.maintenance.parity.deepReleased');
-    const requiredQuietMs = finiteNumber(deepQuietMs);
+    const requiredQuietMs = finiteNumber(maintenance?.deepQuietMs);
 
     for (const release of released) {
       const detail = detailObject(release);
@@ -184,6 +199,16 @@
         quietAfterLastInteractionMs: Number(quietAfterInteractionMs.toFixed(2)),
         requiredQuietMs,
         evidenceSource: 'generic_interaction_trace'
+      };
+    }
+
+    if (Number(maintenance?.deepPreemptionCount || 0) > 0 && Number(maintenance?.deepReleasedCount || 0) > 0) {
+      return {
+        observed: true,
+        interactionCount: Number(maintenance.deepPreemptionCount || 0),
+        quietAfterLastInteractionMs: null,
+        requiredQuietMs,
+        evidenceSource: 'maintenance_status'
       };
     }
 
@@ -273,7 +298,7 @@
     const status = report?.stateRuntimeV2Status || null;
     const mutationClasses = observedMutationClasses(events, status);
     const maintenance = maintenanceEvidence(events, status);
-    const preemption = preemptionEvidence(events, maintenance.deepQuietMs);
+    const preemption = preemptionEvidence(events, maintenance);
     const failures = failureEvidence(events, status, mutationClasses);
     const legacyCandidates = legacyFullStateCandidates(events);
     const allMutationClassesObserved = MUTATION_KINDS.every((kind) => mutationClasses[kind].observed === true);
