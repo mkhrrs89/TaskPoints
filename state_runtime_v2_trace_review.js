@@ -6,6 +6,12 @@
   const MUTATION_KINDS = ['completion', 'order', 'edit', 'presence'];
   const ENQUEUE_PREFIX = 'stateV2.enqueue.';
   const TXN_PREFIX = 'stateV2.txn.';
+  const COMMIT_MARKS = Object.freeze({
+    completion: 'stateV2.darkMutationCommitted',
+    order: 'stateV2.darkOrderMutationCommitted',
+    edit: 'stateV2.darkHabitEditCommitted',
+    presence: 'stateV2.darkHabitPresenceCommitted'
+  });
   const V2_DB_NAME = 'taskpoints_state_v2';
 
   function finiteNumber(value) {
@@ -62,19 +68,24 @@
     for (const kind of MUTATION_KINDS) {
       const enqueueEvents = events.filter((event) => eventMatchesKind(event, ENQUEUE_PREFIX, kind, '.sync'));
       const txnEvents = events.filter((event) => eventMatchesKind(event, TXN_PREFIX, kind));
+      const commitEvents = events.filter((event) => String(event?.name || '') === COMMIT_MARKS[kind]);
       const statusRow = statusClasses?.[kind] || {};
       const enqueueDurations = enqueueEvents.map((event) => finiteNumber(event.durationMs)).filter((value) => value !== null);
       const txnDurations = txnEvents.map((event) => finiteNumber(event.durationMs)).filter((value) => value !== null);
       const statusEnqueues = finiteNumber(statusRow.syncEnqueues) || 0;
       const statusTransactions = finiteNumber(statusRow.asyncMutations) || 0;
       const statusFailures = finiteNumber(statusRow.asyncFailures) || 0;
+      const enqueueCount = Math.max(enqueueEvents.length, statusEnqueues);
+      const transactionCount = Math.max(txnEvents.length, statusTransactions);
+      const commitCount = commitEvents.length;
       out[kind] = {
-        enqueueCount: Math.max(enqueueEvents.length, statusEnqueues),
-        transactionCount: Math.max(txnEvents.length, statusTransactions),
+        enqueueCount,
+        transactionCount,
+        commitCount,
         failureCount: statusFailures + txnEvents.filter((event) => detailObject(event).failed === true).length,
         maxSyncEnqueueMs: enqueueDurations.length ? Math.max(...enqueueDurations) : finiteNumber(statusRow.maxSyncEnqueueMs),
         maxTransactionMs: txnDurations.length ? Math.max(...txnDurations) : finiteNumber(statusRow.maxMutationMs),
-        observed: Math.max(enqueueEvents.length, statusEnqueues) > 0 && Math.max(txnEvents.length, statusTransactions) > 0
+        observed: enqueueCount > 0 && (transactionCount > 0 || commitCount > 0)
       };
     }
     return out;
@@ -118,6 +129,10 @@
       scheduledParityCount: scheduledParity.length,
       deepDeferredCount: Math.max(deepDeferred.length, finiteNumber(maintenanceStatus.deepQuietDeferrals) || 0),
       deepReleasedCount: Math.max(deepReleased.length, finiteNumber(maintenanceStatus.deepQuietReleases) || 0),
+      deepPreemptionCount: Math.max(
+        events.filter((event) => String(event?.name || '') === 'stateV2.maintenance.parity.preempted').length,
+        finiteNumber(maintenanceStatus.deepQuietPreemptions) || 0
+      ),
       deepQuietMs: finiteNumber(maintenanceStatus.deepQuietMs) ?? finiteNumber(statusAcceptance.deepQuietMs),
       scheduledAfterDeepRelease,
       automaticParityDeepIdleObserved: scheduledAfterDeepRelease
@@ -130,6 +145,22 @@
     const deferred = events.filter((event) => String(event?.name || '') === 'stateV2.maintenance.parity.deepDeferred');
     const released = events.filter((event) => String(event?.name || '') === 'stateV2.maintenance.parity.deepReleased');
     const requiredQuietMs = finiteNumber(deepQuietMs);
+
+    for (const release of released) {
+      const detail = detailObject(release);
+      const preservedPreemptionCount = Math.max(0, finiteNumber(detail.preemptionCount) || 0);
+      if (preservedPreemptionCount <= 0) continue;
+      const quietAfterInteractionMs = finiteNumber(detail.lastInteractionAgoMs);
+      const quietSatisfied = requiredQuietMs === null
+        || (quietAfterInteractionMs !== null && quietAfterInteractionMs >= Math.max(0, requiredQuietMs - 1000));
+      return {
+        observed: quietSatisfied,
+        interactionCount: preservedPreemptionCount,
+        quietAfterLastInteractionMs: quietAfterInteractionMs,
+        requiredQuietMs,
+        evidenceSource: 'maintenance_release'
+      };
+    }
 
     for (const start of deferred) {
       const startTime = eventTime(start);
@@ -151,7 +182,8 @@
         observed: requiredQuietMs === null ? true : quietAfterInteractionMs >= Math.max(0, requiredQuietMs - 1000),
         interactionCount: between.length,
         quietAfterLastInteractionMs: Number(quietAfterInteractionMs.toFixed(2)),
-        requiredQuietMs
+        requiredQuietMs,
+        evidenceSource: 'generic_interaction_trace'
       };
     }
 
@@ -159,7 +191,8 @@
       observed: false,
       interactionCount: 0,
       quietAfterLastInteractionMs: null,
-      requiredQuietMs
+      requiredQuietMs,
+      evidenceSource: null
     };
   }
 
@@ -247,7 +280,7 @@
     const noDirectForegroundMaintenanceObserved = maintenance.directForegroundMaintenanceCount === 0;
 
     return {
-      schemaVersion: 2,
+      schemaVersion: 3,
       reportGeneratedAtISO: report?.generatedAtISO || null,
       pageCount: Array.isArray(report?.pages) ? report.pages.length : 0,
       eventCount: events.length,
@@ -274,7 +307,7 @@
 
   const api = {
     installed: true,
-    version: 2,
+    version: 3,
     review,
     flattenEvents
   };
