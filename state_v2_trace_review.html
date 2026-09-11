@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>TaskPoints V2 Trace Review</title>
+  <style>
+    :root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:#0b0d10;color:#e5e7eb;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:calc(env(safe-area-inset-top,0px) + 24px) 18px calc(env(safe-area-inset-bottom,0px) + 32px)}main{max-width:760px;margin:0 auto}h1{font-size:1.35rem;margin:0 0 8px}p{color:#cbd5e1;line-height:1.5}.card{background:#111827;border:1px solid #334155;border-radius:16px;padding:16px;margin-top:14px}.file{display:block;width:100%;padding:14px;border:1px dashed #64748b;border-radius:12px;background:#0f172a;color:#e2e8f0}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:12px}.metric{border:1px solid #334155;border-radius:12px;padding:12px;background:#0f172a}.metric strong{display:block;font-size:.78rem;color:#94a3b8;margin-bottom:5px}.yes{color:#86efac}.no{color:#fca5a5}.neutral{color:#fde68a}pre{white-space:pre-wrap;word-break:break-word;background:#020617;border:1px solid #334155;border-radius:12px;padding:12px;overflow:auto;max-height:42vh;font-size:12px}button{min-height:44px;border:1px solid #64748b;border-radius:10px;background:#1e293b;color:#f8fafc;padding:8px 14px;font-weight:650}button[hidden]{display:none}.hint{font-size:.85rem;color:#94a3b8}@media(max-width:560px){.grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+<main>
+  <h1>State Runtime V2 — Trace Review</h1>
+  <p>Select a TaskPoints PERF JSON exported from the V2 branch preview. This page only reads the selected file and does not write TaskPoints state.</p>
+
+  <section class="card">
+    <input id="traceFile" class="file" type="file" accept="application/json,.json">
+    <p id="status" class="hint">Waiting for a trace.</p>
+  </section>
+
+  <section id="results" class="card" hidden>
+    <div id="summary" class="grid"></div>
+    <p id="deviceNote" class="hint"></p>
+    <button id="copyReview" type="button">Copy review JSON</button>
+    <pre id="reviewJson"></pre>
+  </section>
+</main>
+<script src="/state_runtime_v2_trace_review.js"></script>
+<script>
+(() => {
+  'use strict';
+  const input = document.getElementById('traceFile');
+  const status = document.getElementById('status');
+  const results = document.getElementById('results');
+  const summary = document.getElementById('summary');
+  const deviceNote = document.getElementById('deviceNote');
+  const reviewJson = document.getElementById('reviewJson');
+  const copyReview = document.getElementById('copyReview');
+  let lastReview = null;
+
+  const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  })[char]);
+
+  function verdict(label, value, neutralWhenFalse = false) {
+    const className = value ? 'yes' : (neutralWhenFalse ? 'neutral' : 'no');
+    const text = value ? 'YES' : 'NO';
+    return `<div class="metric"><strong>${esc(label)}</strong><span class="${className}">${text}</span></div>`;
+  }
+
+  function render(review) {
+    const classes = review.mutationClasses || {};
+    const classText = ['completion','order','edit','presence']
+      .map((kind) => `${kind}: ${classes[kind]?.observed ? '✓' : '—'}`)
+      .join(' · ');
+    summary.innerHTML = [
+      verdict('All 4 mutation classes observed', review.allMutationClassesObserved),
+      verdict('No direct foreground V2 maintenance', review.noDirectForegroundMaintenanceObserved),
+      verdict('Automatic parity crossed deep-idle gate', review.automaticParityDeepIdleObserved),
+      verdict('Interaction postponement observed', review.interactionPreemptionObserved, true),
+      verdict('No V2 failures observed', review.failures?.noV2FailuresObserved === true),
+      verdict('Core device-trace evidence complete', review.evidenceCompleteForDeviceTrace),
+      `<div class="metric"><strong>Mutation classes</strong><span>${esc(classText)}</span></div>`,
+      `<div class="metric"><strong>Deep quiet target</strong><span>${esc(review.maintenance?.deepQuietMs ?? 'unknown')} ms</span></div>`
+    ].join('');
+    deviceNote.textContent = 'This reviewer summarizes trace evidence only. The tester still has to confirm the trace came from the intended physical iPhone/PWA scenario.';
+    reviewJson.textContent = JSON.stringify(review, null, 2);
+    results.hidden = false;
+  }
+
+  input.addEventListener('change', async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    status.textContent = 'Reading trace…';
+    results.hidden = true;
+    try {
+      const raw = await file.text();
+      const report = JSON.parse(raw);
+      const reviewer = window.TaskPointsStateRuntimeV2TraceReview;
+      if (!reviewer?.review) throw new Error('V2 trace reviewer failed to load.');
+      lastReview = reviewer.review(report);
+      render(lastReview);
+      status.textContent = `Reviewed ${file.name}.`;
+    } catch (error) {
+      lastReview = null;
+      status.textContent = `Could not review this file: ${String(error?.message || error)}`;
+    }
+  });
+
+  copyReview.addEventListener('click', async () => {
+    if (!lastReview) return;
+    const text = JSON.stringify(lastReview, null, 2);
+    try {
+      await navigator.clipboard.writeText(text);
+      copyReview.textContent = 'Copied';
+    } catch (_) {
+      const area = document.createElement('textarea');
+      area.value = text;
+      area.style.cssText = 'position:fixed;opacity:0;pointer-events:none';
+      document.body.appendChild(area);
+      area.select();
+      document.execCommand('copy');
+      area.remove();
+      copyReview.textContent = 'Copied';
+    }
+    setTimeout(() => { copyReview.textContent = 'Copy review JSON'; }, 1200);
+  });
+})();
+</script>
+</body>
+</html>
