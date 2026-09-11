@@ -6,6 +6,7 @@
   const MUTATION_KINDS = ['completion', 'order', 'edit', 'presence'];
   const ENQUEUE_PREFIX = 'stateV2.enqueue.';
   const TXN_PREFIX = 'stateV2.txn.';
+  const CAPTURE_PREFIX = 'stateV2.capture.';
   const COMMIT_MARKS = Object.freeze({
     completion: 'stateV2.darkMutationCommitted',
     order: 'stateV2.darkOrderMutationCommitted',
@@ -60,17 +61,17 @@
     return String(event?.name || '') === `${prefix}${kind}${suffix}`;
   }
 
-  function mirroredCommitCount(status, kind) {
-    if (!status || typeof status !== 'object') return 0;
-    if (kind === 'order') return Math.max(0, finiteNumber(status.mirroredOrderMutations) || 0);
-    if (kind === 'edit') return Math.max(0, finiteNumber(status.mirroredEditMutations) || 0);
-    if (kind === 'presence') return Math.max(0, finiteNumber(status.mirroredPresenceMutations) || 0);
+  function durableRuntimeCommitCount(kind, status) {
+    const total = Math.max(0, finiteNumber(status?.mirroredMutations) || 0);
+    const order = Math.max(0, finiteNumber(status?.mirroredOrderMutations) || 0);
+    const edit = Math.max(0, finiteNumber(status?.mirroredEditMutations) || 0);
+    const presence = Math.max(0, finiteNumber(status?.mirroredPresenceMutations) || 0);
+    if (kind === 'order') return order;
+    if (kind === 'edit') return edit;
+    if (kind === 'presence') return presence;
     if (kind === 'completion') {
-      const total = Math.max(0, finiteNumber(status.mirroredMutations) || 0);
-      const structural = Math.max(0, finiteNumber(status.mirroredOrderMutations) || 0)
-        + Math.max(0, finiteNumber(status.mirroredEditMutations) || 0)
-        + Math.max(0, finiteNumber(status.mirroredPresenceMutations) || 0);
-      return Math.max(0, total - structural);
+      const explicit = finiteNumber(status?.mirroredCompletionMutations);
+      return explicit === null ? Math.max(0, total - order - edit - presence) : Math.max(0, explicit);
     }
     return 0;
   }
@@ -83,22 +84,32 @@
     for (const kind of MUTATION_KINDS) {
       const enqueueEvents = events.filter((event) => eventMatchesKind(event, ENQUEUE_PREFIX, kind, '.sync'));
       const txnEvents = events.filter((event) => eventMatchesKind(event, TXN_PREFIX, kind));
+      const captureEvents = events.filter((event) => eventMatchesKind(event, CAPTURE_PREFIX, kind, '.sync'));
       const commitEvents = events.filter((event) => String(event?.name || '') === COMMIT_MARKS[kind]);
       const statusRow = statusClasses?.[kind] || {};
       const enqueueDurations = enqueueEvents.map((event) => finiteNumber(event.durationMs)).filter((value) => value !== null);
       const txnDurations = txnEvents.map((event) => finiteNumber(event.durationMs)).filter((value) => value !== null);
+      const captureDurations = captureEvents.map((event) => finiteNumber(event.durationMs)).filter((value) => value !== null);
       const statusEnqueues = finiteNumber(statusRow.syncEnqueues) || 0;
       const statusTransactions = finiteNumber(statusRow.asyncMutations) || 0;
       const statusFailures = finiteNumber(statusRow.asyncFailures) || 0;
       const enqueueCount = Math.max(enqueueEvents.length, statusEnqueues);
       const transactionCount = Math.max(txnEvents.length, statusTransactions);
-      const commitCount = Math.max(commitEvents.length, mirroredCommitCount(status, kind));
+      const durableCommits = durableRuntimeCommitCount(kind, status);
+      const commitCount = Math.max(commitEvents.length, durableCommits);
+      const maxSyncEnqueueMs = enqueueDurations.length ? Math.max(...enqueueDurations) : finiteNumber(statusRow.maxSyncEnqueueMs);
+      const maxCaptureMs = captureDurations.length ? Math.max(...captureDurations) : null;
+      const foregroundSync = [maxSyncEnqueueMs, maxCaptureMs].filter((value) => value !== null);
       out[kind] = {
         enqueueCount,
         transactionCount,
         commitCount,
+        durableCommitCount: durableCommits,
+        captureCount: captureEvents.length,
         failureCount: statusFailures + txnEvents.filter((event) => detailObject(event).failed === true).length,
-        maxSyncEnqueueMs: enqueueDurations.length ? Math.max(...enqueueDurations) : finiteNumber(statusRow.maxSyncEnqueueMs),
+        maxSyncEnqueueMs,
+        maxCaptureMs,
+        maxForegroundSyncMs: foregroundSync.length ? Math.max(...foregroundSync) : null,
         maxTransactionMs: txnDurations.length ? Math.max(...txnDurations) : finiteNumber(statusRow.maxMutationMs),
         observed: enqueueCount > 0 && (transactionCount > 0 || commitCount > 0)
       };
@@ -155,11 +166,11 @@
     };
   }
 
-  function preemptionEvidence(events, maintenance) {
+  function preemptionEvidence(events, deepQuietMs) {
     const interactions = events.filter((event) => String(event?.name || '').startsWith('interaction.'));
     const deferred = events.filter((event) => String(event?.name || '') === 'stateV2.maintenance.parity.deepDeferred');
     const released = events.filter((event) => String(event?.name || '') === 'stateV2.maintenance.parity.deepReleased');
-    const requiredQuietMs = finiteNumber(maintenance?.deepQuietMs);
+    const requiredQuietMs = finiteNumber(deepQuietMs);
 
     for (const release of released) {
       const detail = detailObject(release);
@@ -199,16 +210,6 @@
         quietAfterLastInteractionMs: Number(quietAfterInteractionMs.toFixed(2)),
         requiredQuietMs,
         evidenceSource: 'generic_interaction_trace'
-      };
-    }
-
-    if (Number(maintenance?.deepPreemptionCount || 0) > 0 && Number(maintenance?.deepReleasedCount || 0) > 0) {
-      return {
-        observed: true,
-        interactionCount: Number(maintenance.deepPreemptionCount || 0),
-        quietAfterLastInteractionMs: null,
-        requiredQuietMs,
-        evidenceSource: 'maintenance_status'
       };
     }
 
@@ -298,7 +299,7 @@
     const status = report?.stateRuntimeV2Status || null;
     const mutationClasses = observedMutationClasses(events, status);
     const maintenance = maintenanceEvidence(events, status);
-    const preemption = preemptionEvidence(events, maintenance);
+    const preemption = preemptionEvidence(events, maintenance.deepQuietMs);
     const failures = failureEvidence(events, status, mutationClasses);
     const legacyCandidates = legacyFullStateCandidates(events);
     const allMutationClassesObserved = MUTATION_KINDS.every((kind) => mutationClasses[kind].observed === true);
@@ -332,7 +333,7 @@
 
   const api = {
     installed: true,
-    version: 3,
+    version: 4,
     review,
     flattenEvents
   };
