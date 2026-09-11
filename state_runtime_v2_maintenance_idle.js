@@ -8,6 +8,7 @@
   const DARK_MODE_KEY = 'taskpoints_state_v2_dark_mode_v1';
   const DEEP_QUIET_MS = 20000;
   const DEEP_QUIET_POLL_MS = 250;
+  const INTERACTION_EVENTS = ['pointerdown', 'touchstart', 'keydown', 'beforeinput', 'input', 'focusin'];
   const mutationMethods = [
     ['enqueueHabitDelta', 'completion'],
     ['enqueueHabitOrderOverlay', 'order'],
@@ -24,6 +25,10 @@
   let deepQuietDeferrals = 0;
   let deepQuietReleases = 0;
   let deepQuietPending = 0;
+  let deepQuietPreemptions = 0;
+  let interactionRevision = 0;
+  let lastInteractionAtMs = null;
+  let installedInteractionObservers = 0;
   let lastKind = null;
   let lastSource = null;
   let lastError = null;
@@ -86,10 +91,30 @@
     return Number(status.lastInteractionAgoMs || 0) >= DEEP_QUIET_MS;
   }
 
+  function noteInteraction(event) {
+    if (event?.isTrusted === false) return;
+    interactionRevision += 1;
+    lastInteractionAtMs = now();
+  }
+
+  function installInteractionObservers() {
+    const document = global.document;
+    if (!document?.addEventListener) return 0;
+    let count = 0;
+    INTERACTION_EVENTS.forEach((eventName) => {
+      try {
+        document.addEventListener(eventName, noteInteraction, true);
+        count += 1;
+      } catch (_) {}
+    });
+    installedInteractionObservers = count;
+    return count;
+  }
+
   function waitForDeepQuiet(kind, source) {
     const current = idleStatus();
     const ready = deepQuietReady(current);
-    if (ready === null || ready === true) return Promise.resolve({ waited: false, status: current });
+    if (ready === null || ready === true) return Promise.resolve({ waited: false, status: current, preemptionCount: 0 });
     if (typeof global.setTimeout !== 'function') {
       mark(`stateV2.maintenance.${kind}.deepQuietBypassed`, {
         kind,
@@ -97,11 +122,14 @@
         reason: 'timer_unavailable',
         foregroundBlocking: false
       });
-      return Promise.resolve({ waited: false, bypassed: true, status: current });
+      return Promise.resolve({ waited: false, bypassed: true, status: current, preemptionCount: 0 });
     }
 
     deepQuietDeferrals += 1;
     deepQuietPending += 1;
+    const interactionRevisionAtDeferral = interactionRevision;
+    let observedInteractionRevision = interactionRevisionAtDeferral;
+    let preemptionCount = 0;
     mark(`stateV2.maintenance.${kind}.deepDeferred`, {
       kind,
       source,
@@ -109,12 +137,29 @@
       lastInteractionAgoMs: Number(current?.lastInteractionAgoMs || 0),
       navigationQuietForMs: Number(current?.navigationQuietForMs || 0),
       activeEditor: current?.activeEditor === true,
+      interactionRevision: interactionRevisionAtDeferral,
       foregroundBlocking: false
     });
 
     return new Promise((resolve) => {
       const retry = () => {
         const next = idleStatus();
+        if (interactionRevision > observedInteractionRevision) {
+          const newlyObserved = interactionRevision - observedInteractionRevision;
+          observedInteractionRevision = interactionRevision;
+          preemptionCount += newlyObserved;
+          deepQuietPreemptions += newlyObserved;
+          mark(`stateV2.maintenance.${kind}.preempted`, {
+            kind,
+            source,
+            newlyObserved,
+            preemptionCount,
+            interactionRevision,
+            requiredQuietMs: DEEP_QUIET_MS,
+            lastInteractionAgoMs: Number(next?.lastInteractionAgoMs || 0),
+            foregroundBlocking: false
+          });
+        }
         const nextReady = deepQuietReady(next);
         if (nextReady === false) {
           global.setTimeout(retry, DEEP_QUIET_POLL_MS);
@@ -128,9 +173,12 @@
           requiredQuietMs: DEEP_QUIET_MS,
           lastInteractionAgoMs: Number(next?.lastInteractionAgoMs || 0),
           statusUnavailable: nextReady === null,
+          preemptionCount,
+          interactionRevisionAtDeferral,
+          interactionRevisionAtRelease: interactionRevision,
           foregroundBlocking: false
         });
-        resolve({ waited: true, status: next });
+        resolve({ waited: true, status: next, preemptionCount });
       };
       global.setTimeout(retry, DEEP_QUIET_POLL_MS);
     });
@@ -308,11 +356,12 @@
     return true;
   }
 
+  installInteractionObservers();
   mutationMethods.forEach(([name, kind]) => wrapMutationEnqueue(name, kind));
 
   const api = {
     installed: true,
-    version: 2,
+    version: 3,
     scheduleParityVerification,
     scheduleCompatibilitySnapshot,
     getStatus() {
@@ -333,6 +382,10 @@
         deepQuietDeferrals,
         deepQuietReleases,
         deepQuietPending,
+        deepQuietPreemptions,
+        interactionRevision,
+        lastInteractionAtMs,
+        installedInteractionObservers,
         installedMutationHooks,
         scheduled,
         executed,
@@ -352,6 +405,7 @@
   mark('stateV2.maintenanceIdleInstalled', {
     version: api.version,
     installedMutationHooks,
+    installedInteractionObservers,
     idleCoordinatorAvailable: idleCoordinatorAvailable(),
     deepQuietMs: DEEP_QUIET_MS
   });
