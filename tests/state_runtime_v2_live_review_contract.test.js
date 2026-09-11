@@ -30,7 +30,7 @@ function installForHost(hostname, dark = true) {
 test('live reviewer is dynamically loaded only from the V2 dark structure bridge', () => {
   assert.match(structureBridge, /function loadLiveTraceReview\(\)/);
   assert.match(structureBridge, /if \(!isEnabled\(\) \|\| global\.TaskPointsStateRuntimeV2LiveReview\?\.installed/);
-  assert.match(structureBridge, /state_runtime_v2_live_review\.js\?v=20260911-1/);
+  assert.match(structureBridge, /state_runtime_v2_live_review\.js\?v=20260911-2/);
   assert.match(structureBridge, /loadPerfInstrumentation\(\);\s*loadLiveTraceReview\(\);/);
 });
 
@@ -41,6 +41,15 @@ test('live reviewer is read-only with respect to TaskPoints persistence and muta
   assert.doesNotMatch(source, /enqueueHabitDelta|enqueueHabitOrderOverlay|enqueueHabitEditFromLegacy|enqueueHabitPresenceFromLegacy/);
   assert.match(source, /TaskPointsPerf\.buildReport\(\)/);
   assert.match(source, /reviewer\.review\(report\)/);
+});
+
+test('fresh-start control clears only PERF trace state before reloading', () => {
+  assert.match(source, /function startFreshTest\(\)/);
+  assert.match(source, /global\.TaskPointsPerf\.clearTrace\(\)/);
+  assert.match(source, /global\.location\?\.reload\?\.\(\)/);
+  assert.match(source, /Start fresh test/);
+  assert.match(source, /clears only PERF trace history and reloads/);
+  assert.doesNotMatch(source, /TaskPointsStateRuntimeV2\?*\.disableDarkMirror/);
 });
 
 test('live reviewer exposes every Step 4 physical-device evidence check', () => {
