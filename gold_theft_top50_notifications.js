@@ -3,7 +3,7 @@
 
   if (global.TaskPointsGoldTheftTop50Notifications?.installed) return;
 
-  const VERSION = 1;
+  const VERSION = 2;
   const EVENT_PREFIX = 'gold-theft-top50';
   const STARTED_DATE_KEY = 'goldTheftTop50InboxStartedDateKey';
   const INSTALL_RETRY_MS = 50;
@@ -48,6 +48,11 @@
     if (shifted.getHours() < 5) shifted.setDate(shifted.getDate() - 1);
     shifted.setHours(0, 0, 0, 0);
     return dateKey(shifted);
+  }
+
+  function isInboxPage() {
+    const path = String(global.location?.pathname || '').replace(/\/+$/, '');
+    return path === '/inbox' || path.endsWith('/inbox.html');
   }
 
   function playerName(state, playerId) {
@@ -193,19 +198,38 @@
 
   function emitInboxUpdated(state) {
     if (typeof global.dispatchEvent !== 'function' || typeof global.CustomEvent !== 'function') return;
-    const count = (Array.isArray(state?.inboxMessages) ? state.inboxMessages : [])
-      .filter((message) => message && message.archived !== true)
-      .length;
-    global.dispatchEvent(new global.CustomEvent('taskpoints:inbox-updated', { detail: { count } }));
+    const messages = Array.isArray(state?.inboxMessages) ? state.inboxMessages : [];
+    const count = messages.filter((message) => message && message.archived !== true).length;
+    const detail = { count, inboxMessages: messages };
+    global.dispatchEvent(new global.CustomEvent('taskpoints:inbox-updated', { detail }));
+    // The inbox page renders its stored snapshot before this late-loaded module
+    // usually reconciles. Emit the snapshot event too so a same-tab save paints
+    // the new message immediately instead of waiting for focus/pageshow.
+    global.dispatchEvent(new global.CustomEvent('taskpoints:inbox-state-snapshot', { detail }));
+  }
+
+  function readStateForReconcile(core) {
+    const storageKey = core?.STORAGE_KEY || 'taskpoints_v1';
+    if (typeof core?.readTaskPointsStoredState === 'function') {
+      try {
+        const state = core.readTaskPointsStoredState(storageKey, {});
+        if (state && typeof state === 'object') return state;
+      } catch (_) {}
+    }
+    if (typeof core?.loadAppState === 'function') {
+      const loaded = core.loadAppState({ syncDerived: false, persistSync: false });
+      const state = loaded?.state || loaded;
+      if (state && typeof state === 'object') return state;
+    }
+    return null;
   }
 
   function reconcileStored(options = {}) {
     const core = global.TaskPointsCore;
-    if (!core?.loadAppState || !core?.mergeAndSaveState || reconciliationRunning) return null;
+    if (!core?.mergeAndSaveState || reconciliationRunning) return null;
     reconciliationRunning = true;
     try {
-      const loaded = core.loadAppState({ syncDerived: true, persistSync: false });
-      const state = loaded?.state || loaded;
+      const state = readStateForReconcile(core);
       if (!state || typeof state !== 'object') return null;
       const result = reconcileState(state, options);
       if (!result.changed) return result;
@@ -237,18 +261,33 @@
     }
   }
 
+  function runQueuedReconcile(run) {
+    // Gold notifications are user-facing Inbox content, not background storage
+    // maintenance. On the Inbox page, let first paint happen and then reconcile
+    // promptly instead of waiting through the 3.5s startup maintenance grace.
+    if (isInboxPage()) {
+      if (typeof global.requestIdleCallback === 'function') {
+        global.requestIdleCallback(run, { timeout: 250 });
+      } else {
+        global.setTimeout?.(run, 0);
+      }
+      return;
+    }
+
+    const gate = global.TaskPointsCore?.whenStorageMaintenanceQuiet;
+    if (typeof gate === 'function') {
+      Promise.resolve(gate(run, { reason: 'gold_theft_top50_inbox' })).catch(() => run());
+    } else {
+      run();
+    }
+  }
+
   function queueReconcile(delayMs = RECONCILE_DEBOUNCE_MS) {
     if (!global.document || !global.localStorage) return;
     if (reconciliationTimer !== null) global.clearTimeout?.(reconciliationTimer);
     reconciliationTimer = global.setTimeout?.(() => {
       reconciliationTimer = null;
-      const run = () => reconcileStored();
-      const gate = global.TaskPointsCore?.whenStorageMaintenanceQuiet;
-      if (typeof gate === 'function') {
-        Promise.resolve(gate(run, { reason: 'gold_theft_top50_inbox' })).catch(() => run());
-      } else {
-        run();
-      }
+      runQueuedReconcile(() => reconcileStored());
     }, Math.max(0, Number(delayMs) || 0));
   }
 
