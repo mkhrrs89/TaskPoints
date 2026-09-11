@@ -258,6 +258,7 @@
       evidenceCompleteForDeviceTrace: allMutationClassesObserved
         && noDirectForegroundMaintenanceObserved
         && maintenance.automaticParityDeepIdleObserved
+        && preemption.observed
         && failures.noV2FailuresObserved,
       physicalDeviceEvidenceMustBeConfirmedByTester: true
     };
