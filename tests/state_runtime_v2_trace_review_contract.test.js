@@ -121,6 +121,19 @@ test('legacy Phase 2/4/5 and generic full-state durations are surfaced for foreg
   assert.equal(result.legacyForegroundCorrelationStillRequired, true);
 });
 
+test('otherwise complete trace is not accepted without interaction preemption evidence', () => {
+  const report = baseReport();
+  report.pages[0].events = report.pages[0].events.filter((event) => event.name !== 'interaction.pointerdown');
+  const result = reviewer.review(report);
+
+  assert.equal(result.allMutationClassesObserved, true);
+  assert.equal(result.automaticParityDeepIdleObserved, true);
+  assert.equal(result.noDirectForegroundMaintenanceObserved, true);
+  assert.equal(result.failures.noV2FailuresObserved, true);
+  assert.equal(result.interactionPreemptionObserved, false);
+  assert.equal(result.evidenceCompleteForDeviceTrace, false);
+});
+
 test('review remains conservative when mutation classes or deep-idle evidence are absent', () => {
   const report = {
     stateRuntimeV2Status: { traceDiagnostics: { maintenanceIdle: { deepQuietMs: 20000 }, serialization: { failures: 0 } } },
