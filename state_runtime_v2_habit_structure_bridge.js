@@ -232,7 +232,7 @@
     if (!isEnabled() || global.TaskPointsStateRuntimeV2Perf?.installed || !global.document?.createElement) return false;
     if (global.document.querySelector?.('script[data-taskpoints-state-v2-perf]')) return true;
     const script = global.document.createElement('script');
-    script.src = '/state_runtime_v2_perf.js?v=20260911-4';
+    script.src = '/state_runtime_v2_perf.js?v=20260911-5';
     script.defer = true;
     script.dataset.taskpointsStateV2Perf = 'true';
     (global.document.head || global.document.documentElement)?.appendChild?.(script);
@@ -243,7 +243,7 @@
     if (!isEnabled() || global.TaskPointsStateRuntimeV2LiveReview?.installed || !global.document?.createElement) return false;
     if (global.document.querySelector?.('script[data-taskpoints-state-v2-live-review]')) return true;
     const script = global.document.createElement('script');
-    script.src = '/state_runtime_v2_live_review.js?v=20260911-3';
+    script.src = '/state_runtime_v2_live_review.js?v=20260911-4';
     script.defer = true;
     script.dataset.taskpointsStateV2LiveReview = 'true';
     (global.document.head || global.document.documentElement)?.appendChild?.(script);
