@@ -76,7 +76,7 @@
       { key: 'completion', label: 'Habit completion / toggle', ok: mutations.completion?.observed === true },
       { key: 'order', label: 'Habit reorder', ok: mutations.order?.observed === true },
       { key: 'edit', label: 'Habit edit', ok: mutations.edit?.observed === true },
-      { key: 'presence', label: 'Habit add / retire', ok: mutations.presence?.observed === true },
+      { key: 'presence', label: 'Habit add / delete', ok: mutations.presence?.observed === true },
       { key: 'foreground', label: 'No direct foreground V2 maintenance', ok: review?.noDirectForegroundMaintenanceObserved === true },
       { key: 'idle', label: 'Automatic parity waited for deep idle', ok: review?.automaticParityDeepIdleObserved === true },
       { key: 'preemption', label: 'Interaction postponed pending maintenance', ok: review?.interactionPreemptionObserved === true },
@@ -143,7 +143,7 @@
         <li>Toggle a Habit completion.</li>
         <li>Reorder Habits.</li>
         <li>Edit a Habit.</li>
-        <li>Add or retire a Habit.</li>
+        <li>Add a temporary Habit. Adding it is enough to exercise the V2 presence path; deleting a Habit also counts.</li>
         <li>Keep using the app briefly after a mutation so pending parity is postponed.</li>
         <li>Then leave the app untouched and visible for at least 20 seconds.</li>
         <li>Open V2 TEST again and tap Refresh evidence.</li>
@@ -279,7 +279,7 @@
 
   const api = {
     installed: true,
-    version: 2,
+    version: 3,
     isAllowedPreview,
     isDarkEnabled,
     traceAvailable,
