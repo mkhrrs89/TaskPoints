@@ -9,6 +9,13 @@ const editSource = fs.readFileSync(path.join(__dirname, '..', 'state_runtime_v2_
 const structureSource = fs.readFileSync(path.join(__dirname, '..', 'state_runtime_v2_habit_structure_bridge.js'), 'utf8');
 const DARK_MODE_KEY = 'taskpoints_state_v2_dark_mode_v1';
 
+async function flushQueue() {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
+}
+
 function baseStatus() {
   return {
     mirroredMutations: 4,
@@ -130,15 +137,17 @@ function editHarness() {
 test('Habit edit bridge snapshots only the hot affected Habit/completions and avoids the persisted-state fallback', async () => {
   const harness = editHarness();
   harness.context.saveHabitEdit('h1');
-  await Promise.resolve();
-  await Promise.resolve();
+  await flushQueue();
 
   assert.equal(harness.legacyCalls(), 0);
   assert.equal(harness.applied.length, 1);
   assert.equal(harness.applied[0].habitId, 'h1');
   assert.equal(harness.applied[0].habit.name, 'Read');
   assert.equal(harness.applied[0].completionEntries.length, 2);
-  assert.deepEqual(harness.applied[0].completionEntries.map((entry) => entry.value.id), ['c1', 'c2']);
+  assert.equal(
+    Array.from(harness.applied[0].completionEntries, (entry) => String(entry.value.id)).join(','),
+    'c1,c2'
+  );
   assert.equal(harness.context.TaskPointsStateRuntimeV2HabitEditBridge.getStatus().hotSnapshotRequests, 1);
   assert.equal(harness.context.TaskPointsStateRuntimeV2HabitEditBridge.getStatus().legacyFallbackRequests, 0);
   assert.equal(harness.durations.some((row) => row.name === 'stateV2.capture.edit.sync'), true);
@@ -202,8 +211,7 @@ function structureHarness() {
 test('Habit add/delete presence bridge uses a tiny hot snapshot instead of reparsing persisted state', async () => {
   const harness = structureHarness();
   harness.context.addHabit();
-  await Promise.resolve();
-  await Promise.resolve();
+  await flushQueue();
   assert.equal(harness.legacyCalls(), 0);
   assert.equal(harness.applied.length, 1);
   assert.equal(harness.applied[0].habitId, 'h2');
@@ -211,8 +219,7 @@ test('Habit add/delete presence bridge uses a tiny hot snapshot instead of repar
   assert.equal(Object.prototype.hasOwnProperty.call(harness.applied[0], 'completions'), false);
 
   harness.context.deleteHabit('h2');
-  await Promise.resolve();
-  await Promise.resolve();
+  await flushQueue();
   assert.equal(harness.applied.length, 2);
   assert.equal(harness.applied[1].habitId, 'h2');
   assert.equal(harness.applied[1].exists, false);
