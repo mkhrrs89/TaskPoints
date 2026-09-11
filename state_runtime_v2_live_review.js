@@ -4,7 +4,7 @@
   if (!global || global.TaskPointsStateRuntimeV2LiveReview?.installed) return;
 
   const DARK_MODE_KEY = 'taskpoints_state_v2_dark_mode_v1';
-  const REVIEWER_SRC = '/state_runtime_v2_trace_review.js?v=20260911-4';
+  const REVIEWER_SRC = '/state_runtime_v2_trace_review.js?v=20260911-5';
   const BUTTON_ID = 'tpV2LiveReviewButton';
   const PANEL_ID = 'tpV2LiveReviewPanel';
   const REVIEW_SCRIPT_ATTR = 'data-taskpoints-state-v2-trace-review';
@@ -279,7 +279,7 @@
 
   const api = {
     installed: true,
-    version: 3,
+    version: 4,
     isAllowedPreview,
     isDarkEnabled,
     traceAvailable,
