@@ -1,6 +1,6 @@
 # State Runtime V2 — Preview Validation Evidence
 
-Updated: 2026-09-09
+Updated: 2026-09-11
 
 This document tracks evidence for the Habits/completions V2 dark-mirror pilot and the Step 4 performance-validation phase.
 
@@ -12,6 +12,12 @@ Important boundaries:
 - Automated simulation is not treated as proof of a physical browser/PWA lifecycle scenario.
 - A scenario marked **Manual preview required** must be exercised on the branch preview before V2 can own that mutation class.
 - No V2 code is approved for merge into `main` by this document.
+
+## Current branch integration baseline
+
+As of 2026-09-11, `arch/state-runtime-v2-plan` contains current production `main` through `d025dd443f26f7ac1cd8297b4e83bd8911c1ad6d` as a real second parent of merge commit `4f80fa9509f8f9f342286decf882a6cd22ed557f`.
+
+The only overlapping production/V2 integration point was `_worker.js`. Its resolved version preserves both sides: the V2 runtime/WAL modules remain in the core bundle and the newer production Gold Theft notification bundle remains after Greed. The branch therefore starts Step 4 device validation from current production behavior rather than an older production snapshot.
 
 ## Automated and passing
 
@@ -59,6 +65,7 @@ Important boundaries:
 | Pre-idle mutation bursts coalesce, and a mutation landing during parity forces a follow-up quiet pass | `tests/state_runtime_v2_maintenance_idle_contract.test.js` | Automated passing |
 | Missing idle coordinator fails closed without running heavyweight parity in the foreground | `tests/state_runtime_v2_maintenance_idle_contract.test.js` | Automated passing |
 | Focused idle-maintenance CI is bounded by a 30-second fail-fast timeout | `.github/workflows/state-runtime-v2-contracts.yml` | Contracted |
+| Per-mutation-class trace evidence and direct-vs-idle maintenance acceptance summary | `tests/state_runtime_v2_perf_contract.test.js` | Automated passing |
 | V2-specific focused CI | `.github/workflows/state-runtime-v2-contracts.yml` | Live current-main comparison + focused V2 hard gates |
 | No regressions beyond current main | live-main baseline comparison in V2 CI | Live baseline; no static failure snapshot |
 
@@ -71,6 +78,10 @@ Dark-preview-only instrumentation and scheduling now include:
 - `state_runtime_v2_perf.js` times the synchronous enqueue portion separately from the asynchronous V2 IndexedDB mutation;
 - completion, reorder, edit, and presence transactions emit `stateV2.txn.*` durations;
 - transaction events report the expected store count and bounded logical row count for that mutation class;
+- V2 perf status tracks completion/order/edit/presence separately, including enqueue counts, transaction counts, failures, average/max enqueue duration, average/max transaction duration, and last mutation evidence;
+- `TaskPointsStateRuntimeV2Perf.getAcceptanceSnapshot()` summarizes whether all four mutation classes were actually observed, whether any direct foreground parity/compatibility call occurred, whether automatic parity was seen crossing the deep-idle boundary, and whether the V2 perf/maintenance/serializer layers recorded failures;
+- the same acceptance snapshot is embedded under `TaskPointsStateRuntimeV2.getStatus().traceDiagnostics.acceptance`, so the ordinary PERF JSON export carries its own Step 4 evidence summary;
+- that summary deliberately reports `physicalDeviceEvidenceStillRequired: true`; automated counters are not allowed to masquerade as proof of an iOS/PWA lifecycle test;
 - direct parity and compatibility snapshot work emits `stateV2.maintenance.*` durations with `foregroundBlocking: true`, making an accidental direct foreground call visible in a trace;
 - `state_runtime_v2_maintenance_idle.js` adds a separate automatic maintenance lane for parity and optional compatibility checkpoints;
 - when `TaskPointsCore.getStorageMaintenanceIdleStatus()` is available, automatic V2 heavyweight maintenance requires **20 seconds of sustained quiet** before it may enter the ordinary shared `TaskPointsCore.whenStorageMaintenanceQuiet` gate;
@@ -81,7 +92,7 @@ Dark-preview-only instrumentation and scheduling now include:
 - idle-maintenance trace events emit `foregroundBlocking: false` and `scheduled: true`, with `deepDeferred` / `deepReleased` marks exposing the 20-second gate;
 - if the shared idle coordinator is unavailable, automatic V2 heavyweight maintenance fails closed instead of falling back to foreground execution;
 - direct `verifyParity()` and `buildCompatibilitySnapshot()` APIs remain immediate for explicit diagnostics, export, recovery, and other correctness-sensitive callers;
-- `tests/state_runtime_v2_perf_contract.test.js` contracts the trace names, foreground/async separation, and mutation scope metadata;
+- `tests/state_runtime_v2_perf_contract.test.js` contracts the trace names, foreground/async separation, mutation scope metadata, per-class counters, and acceptance summary;
 - `tests/state_runtime_v2_maintenance_idle_contract.test.js` contracts 20-second deep-idle deferral, burst coalescing, during-run follow-up, fail-closed behavior, and preservation of direct calls;
 - the focused idle-maintenance test has a 30-second CI timeout so a scheduling regression cannot indefinitely stall the rollout gate;
 - V2 performance instrumentation and idle scheduling are loaded only through the V2 dark-preview path.
