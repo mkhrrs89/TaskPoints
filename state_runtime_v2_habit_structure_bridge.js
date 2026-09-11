@@ -52,6 +52,11 @@
       .catch((error) => {
         failures += 1;
         lastReason = 'presence_queue_failed';
+        mark('stateV2.habitPresenceQueueFailed', {
+          habitId: String(habitId),
+          source,
+          message: String(error?.code || error?.message || error)
+        });
         console.warn('TaskPoints V2 Habit structure mirror request failed; production state remains authoritative.', error);
       });
     mark('stateV2.habitPresenceQueued', { habitId: String(habitId), source });
@@ -70,6 +75,10 @@
       .catch((error) => {
         failures += 1;
         lastReason = 'retire_edit_queue_failed';
+        mark('stateV2.habitRetireQueueFailed', {
+          habitId: String(habitId),
+          message: String(error?.code || error?.message || error)
+        });
         console.warn('TaskPoints V2 Habit retire mirror request failed; production state remains authoritative.', error);
       });
     mark('stateV2.habitRetireQueued', { habitId: String(habitId) });
@@ -234,7 +243,7 @@
     if (!isEnabled() || global.TaskPointsStateRuntimeV2LiveReview?.installed || !global.document?.createElement) return false;
     if (global.document.querySelector?.('script[data-taskpoints-state-v2-live-review]')) return true;
     const script = global.document.createElement('script');
-    script.src = '/state_runtime_v2_live_review.js?v=20260911-1';
+    script.src = '/state_runtime_v2_live_review.js?v=20260911-2';
     script.defer = true;
     script.dataset.taskpointsStateV2LiveReview = 'true';
     (global.document.head || global.document.documentElement)?.appendChild?.(script);
