@@ -2,6 +2,7 @@
   'use strict';
 
   const runtime = global?.TaskPointsStateRuntimeV2;
+  const core = global?.TaskPointsCore;
   if (!global || !runtime || global.TaskPointsStateRuntimeV2Perf?.installed) return;
 
   const now = () => global.performance?.now?.() ?? Date.now();
@@ -28,6 +29,7 @@
     maxMutationMs: 0,
     lastMutation: null
   }]));
+  let completionJournalEnqueueBridgeInstalled = false;
 
   function mark(name, detail = {}) {
     try { global.TaskPointsPerf?.mark?.(name, detail); } catch (_) {}
@@ -61,7 +63,7 @@
     if (global.TaskPointsStateRuntimeV2MaintenanceIdle?.installed || !global.document?.createElement) return true;
     if (global.document.querySelector?.('script[data-taskpoints-state-v2-maintenance-idle]')) return true;
     const script = global.document.createElement('script');
-    script.src = '/state_runtime_v2_maintenance_idle.js';
+    script.src = '/state_runtime_v2_maintenance_idle.js?v=20260911-2';
     script.defer = true;
     script.dataset.taskpointsStateV2MaintenanceIdle = 'true';
     (global.document.head || global.document.documentElement)?.appendChild?.(script);
@@ -94,6 +96,29 @@
       return { ...base, storesTouched: 3, estimatedRowsTouched: 3, exists: input?.exists !== false };
     }
     return base;
+  }
+
+  function recordSyncEnqueue(kind, ms, result, extraDetail = {}) {
+    const kindCounter = mutationCounters[kind];
+    counters.syncEnqueues += 1;
+    counters.totalSyncEnqueueMs += ms;
+    counters.maxSyncEnqueueMs = Math.max(counters.maxSyncEnqueueMs, ms);
+    if (kindCounter) {
+      kindCounter.syncEnqueues += 1;
+      kindCounter.totalSyncEnqueueMs += ms;
+      kindCounter.maxSyncEnqueueMs = Math.max(kindCounter.maxSyncEnqueueMs, ms);
+    }
+    duration(`stateV2.enqueue.${kind}.sync`, ms, {
+      kind,
+      foregroundBlocking: true,
+      promiseReturned: Boolean(result && typeof result.then === 'function'),
+      ...extraDetail
+    });
+    mark(`stateV2.enqueue.${kind}.queued`, {
+      kind,
+      synchronousMs: Number(ms.toFixed(2)),
+      ...extraDetail
+    });
   }
 
   function wrapAsyncMethod(name, kind) {
@@ -135,31 +160,55 @@
 
   function wrapSyncEnqueue(name, kind) {
     const original = runtime[name];
-    if (typeof original !== 'function' || original.__taskPointsV2PerfWrapped) return;
+    if (typeof original !== 'function' || original.__taskPointsV2PerfWrapped) return false;
     const wrapped = function (...args) {
       const started = now();
       const result = original.apply(this, args);
       const ms = now() - started;
-      const kindCounter = mutationCounters[kind];
-      counters.syncEnqueues += 1;
-      counters.totalSyncEnqueueMs += ms;
-      counters.maxSyncEnqueueMs = Math.max(counters.maxSyncEnqueueMs, ms);
-      if (kindCounter) {
-        kindCounter.syncEnqueues += 1;
-        kindCounter.totalSyncEnqueueMs += ms;
-        kindCounter.maxSyncEnqueueMs = Math.max(kindCounter.maxSyncEnqueueMs, ms);
-      }
-      duration(`stateV2.enqueue.${kind}.sync`, ms, {
-        kind,
-        foregroundBlocking: true,
-        promiseReturned: Boolean(result && typeof result.then === 'function')
-      });
-      mark(`stateV2.enqueue.${kind}.queued`, { kind, synchronousMs: Number(ms.toFixed(2)) });
+      recordSyncEnqueue(kind, ms, result);
       return result;
     };
     wrapped.__taskPointsV2PerfWrapped = true;
     wrapped.__taskPointsOriginal = original;
     runtime[name] = wrapped;
+    return true;
+  }
+
+  function installCompletionJournalEnqueueBridge(attempt = 0) {
+    if (typeof runtime.enqueueHabitDelta === 'function') {
+      return wrapSyncEnqueue('enqueueHabitDelta', 'completion') || runtime.enqueueHabitDelta.__taskPointsV2PerfWrapped === true;
+    }
+    if (!core || typeof core.writePendingHabitDelta !== 'function') return false;
+
+    let hookInstalled = false;
+    try { hookInstalled = runtime.getStatus?.()?.hookInstalled === true; } catch (_) {}
+    if (!hookInstalled) {
+      if (attempt < 20 && typeof global.setTimeout === 'function') {
+        global.setTimeout(() => installCompletionJournalEnqueueBridge(attempt + 1), 50);
+      }
+      return false;
+    }
+
+    const original = core.writePendingHabitDelta;
+    if (original.__taskPointsV2PerfCompletionJournalWrapped) {
+      completionJournalEnqueueBridgeInstalled = true;
+      return true;
+    }
+    const wrapped = function taskPointsV2PerfCompletionJournalEnqueue() {
+      const started = now();
+      const result = original.apply(this, arguments);
+      const ms = now() - started;
+      recordSyncEnqueue('completion', ms, result, { source: 'pending-habit-journal' });
+      return result;
+    };
+    Object.defineProperties(wrapped, {
+      __taskPointsV2PerfCompletionJournalWrapped: { value: true },
+      __taskPointsOriginal: { value: original }
+    });
+    core.writePendingHabitDelta = wrapped;
+    completionJournalEnqueueBridgeInstalled = true;
+    mark('stateV2.perfCompletionJournalBridgeInstalled', { source: 'pending-habit-journal' });
+    return true;
   }
 
   function wrapMaintenance(name, label, counterKey) {
@@ -190,7 +239,7 @@
   wrapAsyncMethod('applyHabitEditSnapshot', 'edit');
   wrapAsyncMethod('applyHabitPresenceSnapshot', 'presence');
 
-  wrapSyncEnqueue('enqueueHabitDelta', 'completion');
+  installCompletionJournalEnqueueBridge();
   wrapSyncEnqueue('enqueueHabitOrderOverlay', 'order');
   wrapSyncEnqueue('enqueueHabitEditFromLegacy', 'edit');
   wrapSyncEnqueue('enqueueHabitPresenceFromLegacy', 'presence');
@@ -252,7 +301,7 @@
 
   const api = {
     installed: true,
-    version: 3,
+    version: 4,
     getStatus() {
       return {
         installed: true,
@@ -261,6 +310,7 @@
         asyncFailures: counters.asyncFailures,
         parityChecks: counters.parityChecks,
         compatibilityBuilds: counters.compatibilityBuilds,
+        completionJournalEnqueueBridgeInstalled,
         averageSyncEnqueueMs: counters.syncEnqueues ? Number((counters.totalSyncEnqueueMs / counters.syncEnqueues).toFixed(2)) : 0,
         maxSyncEnqueueMs: Number(counters.maxSyncEnqueueMs.toFixed(2)),
         averageMutationMs: counters.asyncMutations ? Number((counters.totalMutationMs / counters.asyncMutations).toFixed(2)) : 0,
