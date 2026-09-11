@@ -36,7 +36,8 @@ const CORE_BUNDLE_ASSET_PATHS = Object.freeze([
   '/task_create_fast_path.js',
   '/state_hot_cache.js',
   '/storage_maintenance_idle.js',
-  '/greed_gold_economy.js'
+  '/greed_gold_economy.js',
+  '/gold_theft_top50_notifications.js'
 ]);
 const CORE_BUNDLE_QUERY_KEY = 'v';
 const CORE_BUNDLE_BROWSER_MAX_AGE = 31536000;
@@ -197,7 +198,7 @@ async function buildCoreBundle(request, env, ctx, version) {
   try { coreSource = await response.text(); }
   catch (_) { return response; }
 
-  const [perfSource, aliasSource, youAliasSource, habitGuardSource, habitFastPathControlSource, stateRuntimeV2GenerationSource, stateRuntimeV2WalSource, stateRuntimeV2Source, stateRuntimeV2WalBridgeSource, stateRuntimeV2HabitEditBridgeSource, stateRuntimeV2HabitStructureBridgeSource, sharedSaveWorkSource, inboxBadgeSource, seasonSeriesUpsetSource, taskMutationJournalSource, taskCreateFastPathSource, stateHotCacheSource, storageIdleSource, greedGoldSource] = await Promise.all([
+  const [perfSource, aliasSource, youAliasSource, habitGuardSource, habitFastPathControlSource, stateRuntimeV2GenerationSource, stateRuntimeV2WalSource, stateRuntimeV2Source, stateRuntimeV2WalBridgeSource, stateRuntimeV2HabitEditBridgeSource, stateRuntimeV2HabitStructureBridgeSource, sharedSaveWorkSource, inboxBadgeSource, seasonSeriesUpsetSource, taskMutationJournalSource, taskCreateFastPathSource, stateHotCacheSource, storageIdleSource, greedGoldSource, goldTheftTop50Source] = await Promise.all([
     readAssetSource(env, request, '/performance_diagnostics.js'),
     readAssetSource(env, request, '/score_alias_consistency.js'),
     readAssetSource(env, request, '/you_score_alias_alignment.js'),
@@ -216,9 +217,11 @@ async function buildCoreBundle(request, env, ctx, version) {
     readAssetSource(env, request, '/task_create_fast_path.js'),
     readAssetSource(env, request, '/state_hot_cache.js'),
     readAssetSource(env, request, '/storage_maintenance_idle.js'),
-    readAssetSource(env, request, '/greed_gold_economy.js')
+    readAssetSource(env, request, '/greed_gold_economy.js'),
+    readAssetSource(env, request, '/gold_theft_top50_notifications.js')
   ]);
   const additions = [aliasSource, youAliasSource, habitGuardSource, habitFastPathControlSource, stateRuntimeV2GenerationSource, stateRuntimeV2WalSource, stateRuntimeV2Source, stateRuntimeV2WalBridgeSource, stateRuntimeV2HabitEditBridgeSource, stateRuntimeV2HabitStructureBridgeSource, sharedSaveWorkSource, inboxBadgeSource, seasonSeriesUpsetSource, taskMutationJournalSource, taskCreateFastPathSource, stateHotCacheSource, storageIdleSource, greedGoldSource].filter(Boolean);
+  if (goldTheftTop50Source) additions.push(goldTheftTop50Source);
   const source = [
     perfSource,
     coreSource,
@@ -245,7 +248,8 @@ async function buildCoreBundle(request, env, ctx, version) {
     'x-taskpoints-task-create-fast-path': taskCreateFastPathSource ? 'included' : 'missing',
     'x-taskpoints-state-hot-cache': stateHotCacheSource ? 'included' : 'missing',
     'x-taskpoints-storage-idle': storageIdleSource ? 'included' : 'missing',
-    'x-taskpoints-greed-gold-economy': greedGoldSource ? 'included' : 'missing'
+    'x-taskpoints-greed-gold-economy': greedGoldSource ? 'included' : 'missing',
+    'x-taskpoints-gold-theft-top50-notifications': goldTheftTop50Source ? 'included' : 'missing'
   });
 }
 
