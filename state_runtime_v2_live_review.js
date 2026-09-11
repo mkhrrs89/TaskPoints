@@ -4,7 +4,7 @@
   if (!global || global.TaskPointsStateRuntimeV2LiveReview?.installed) return;
 
   const DARK_MODE_KEY = 'taskpoints_state_v2_dark_mode_v1';
-  const REVIEWER_SRC = '/state_runtime_v2_trace_review.js?v=20260911-3';
+  const REVIEWER_SRC = '/state_runtime_v2_trace_review.js?v=20260911-4';
   const BUTTON_ID = 'tpV2LiveReviewButton';
   const PANEL_ID = 'tpV2LiveReviewPanel';
   const REVIEW_SCRIPT_ATTR = 'data-taskpoints-state-v2-trace-review';
@@ -138,16 +138,17 @@
       <div class="tp-v2-live-checks">${rows}</div>
       <div class="tp-v2-live-meta">V2 failures counted: ${failures}<br>Legacy/full-state timing candidates: ${legacyCount} (${escapeHtml(legacyMax)})</div>
       <p class="tp-v2-live-note">The legacy/full-state count is diagnostic, not an automatic failure; those timings still need foreground correlation.</p>
-      <details><summary>How to finish the test</summary><ol>
+      <details open><summary>How to finish the test</summary><ol>
+        <li>Tap <strong>Start fresh test</strong> once. This clears only PERF trace history and reloads; it does not change TaskPoints data.</li>
         <li>Toggle a Habit completion.</li>
         <li>Reorder Habits.</li>
         <li>Edit a Habit.</li>
         <li>Add or retire a Habit.</li>
         <li>Keep using the app briefly after a mutation so pending parity is postponed.</li>
         <li>Then leave the app untouched and visible for at least 20 seconds.</li>
-        <li>Tap Refresh evidence.</li>
+        <li>Open V2 TEST again and tap Refresh evidence.</li>
       </ol></details>
-      <div class="tp-v2-live-actions"><button type="button" data-v2-refresh>Refresh evidence</button><button type="button" data-v2-copy>Copy review</button></div>
+      <div class="tp-v2-live-actions"><button type="button" data-v2-start>Start fresh test</button><button type="button" data-v2-refresh>Refresh evidence</button><button type="button" data-v2-copy>Copy review</button></div>
       <div data-v2-status class="tp-v2-live-status"></div>`;
   }
 
@@ -191,8 +192,29 @@
     global.document?.getElementById?.(PANEL_ID)?.remove?.();
   }
 
+  function startFreshTest() {
+    if (!traceAvailable() || typeof global.TaskPointsPerf?.clearTrace !== 'function') {
+      throw new Error('Performance tracing is not ready.');
+    }
+    global.TaskPointsPerf.clearTrace();
+    lastReview = null;
+    updateButton(null);
+    if (typeof global.setTimeout === 'function') global.setTimeout(() => global.location?.reload?.(), 80);
+    else global.location?.reload?.();
+    return true;
+  }
+
   function bindPanel(panel) {
     panel.querySelector?.('[data-v2-close]')?.addEventListener?.('click', closePanel);
+    panel.querySelector?.('[data-v2-start]')?.addEventListener?.('click', () => {
+      const status = panel.querySelector?.('[data-v2-status]');
+      try {
+        if (status) status.textContent = 'Clearing only PERF trace history and reloading…';
+        startFreshTest();
+      } catch (error) {
+        if (status) status.textContent = String(error?.message || error);
+      }
+    });
     panel.querySelector?.('[data-v2-refresh]')?.addEventListener?.('click', async () => {
       const status = panel.querySelector?.('[data-v2-status]');
       if (status) status.textContent = 'Refreshing trace evidence…';
@@ -257,11 +279,12 @@
 
   const api = {
     installed: true,
-    version: 1,
+    version: 2,
     isAllowedPreview,
     isDarkEnabled,
     traceAvailable,
     buildReview,
+    startFreshTest,
     openPanel,
     closePanel,
     mountButton,
