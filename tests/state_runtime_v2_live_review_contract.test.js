@@ -30,7 +30,7 @@ function installForHost(hostname, dark = true) {
 test('live reviewer is dynamically loaded only from the V2 dark structure bridge', () => {
   assert.match(structureBridge, /function loadLiveTraceReview\(\)/);
   assert.match(structureBridge, /if \(!isEnabled\(\) \|\| global\.TaskPointsStateRuntimeV2LiveReview\?\.installed/);
-  assert.match(structureBridge, /state_runtime_v2_live_review\.js\?v=20260911-2/);
+  assert.match(structureBridge, /state_runtime_v2_live_review\.js\?v=20260911-3/);
   assert.match(structureBridge, /loadPerfInstrumentation\(\);\s*loadLiveTraceReview\(\);/);
 });
 
@@ -57,7 +57,7 @@ test('live reviewer exposes every Step 4 physical-device evidence check', () => 
     'Habit completion / toggle',
     'Habit reorder',
     'Habit edit',
-    'Habit add / retire',
+    'Habit add / delete',
     'No direct foreground V2 maintenance',
     'Automatic parity waited for deep idle',
     'Interaction postponed pending maintenance',
@@ -65,6 +65,7 @@ test('live reviewer exposes every Step 4 physical-device evidence check', () => 
   ]) {
     assert.match(source, new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
+  assert.match(source, /Add a temporary Habit/);
   assert.match(source, /leave the app untouched and visible for at least 20 seconds/);
   assert.match(source, /legacyFullStateCandidates/);
   assert.match(source, /Legacy\/full-state timing candidates/);
