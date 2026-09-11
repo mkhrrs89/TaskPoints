@@ -17,6 +17,7 @@ function install(options = {}) {
   const jobs = [];
   const timers = [];
   const events = [];
+  const eventHandlers = new Map();
 
   async function parityOriginal() {
     underlyingParityCalls += 1;
@@ -57,6 +58,15 @@ function install(options = {}) {
   }
   if (idle) core.getStorageMaintenanceIdleStatus = () => ({ ...idle });
 
+  const document = {
+    visibilityState: 'visible',
+    addEventListener(name, handler) {
+      const handlers = eventHandlers.get(name) || [];
+      handlers.push(handler);
+      eventHandlers.set(name, handlers);
+    }
+  };
+
   const context = {
     TaskPointsStateRuntimeV2: runtime,
     TaskPointsCore: core,
@@ -64,7 +74,7 @@ function install(options = {}) {
       mark(name, detail) { events.push({ type: 'mark', name, detail }); },
       duration(name, durationMs, detail) { events.push({ type: 'duration', name, durationMs, detail }); }
     },
-    document: { visibilityState: 'visible' },
+    document,
     performance: { now() { tick += 0.25; return tick; } },
     setTimeout(fn) { timers.push(fn); return timers.length; },
     clearTimeout() {},
@@ -120,6 +130,9 @@ function install(options = {}) {
     flush,
     runNextJob,
     runNextTimer,
+    dispatchInteraction(name = 'pointerdown') {
+      for (const handler of eventHandlers.get(name) || []) handler({ type: name, isTrusted: true });
+    },
     setDark(value) { darkEnabled = value === true; },
     setIdle(value) {
       idle = value ? { ...value } : null;
@@ -200,6 +213,52 @@ test('V2 background parity waits for 20 seconds of sustained quiet before enteri
   assert.equal(env.counts().underlyingParityCalls, 1);
   assert.equal(env.events.some((event) => event.name === 'stateV2.maintenance.parity.deepDeferred'), true);
   assert.equal(env.events.some((event) => event.name === 'stateV2.maintenance.parity.deepReleased'), true);
+});
+
+test('interaction during a deep-idle wait is preserved on the release event even if generic trace interaction marks disappear', async () => {
+  const env = install({
+    idleStatus: {
+      lastInteractionAgoMs: 5000,
+      navigationQuietForMs: 0,
+      pageLeaving: false,
+      activeEditor: false
+    }
+  });
+  env.setDark(true);
+  const api = env.context.TaskPointsStateRuntimeV2MaintenanceIdle;
+
+  const parityPromise = api.scheduleParityVerification({ source: 'preemption-test' });
+  await env.flush();
+  assert.equal(env.timers.length, 1);
+
+  env.dispatchInteraction('pointerdown');
+  env.setIdle({
+    lastInteractionAgoMs: 100,
+    navigationQuietForMs: 0,
+    pageLeaving: false,
+    activeEditor: false
+  });
+  await env.runNextTimer();
+  assert.equal(env.jobs.length, 0);
+  assert.equal(api.getStatus().deepQuietPreemptions, 1);
+
+  env.setIdle({
+    lastInteractionAgoMs: 20050,
+    navigationQuietForMs: 0,
+    pageLeaving: false,
+    activeEditor: false
+  });
+  await env.runNextTimer();
+  assert.equal(env.jobs.length, 1);
+
+  const release = env.events.find((event) => event.name === 'stateV2.maintenance.parity.deepReleased');
+  assert.ok(release);
+  assert.equal(release.detail.preemptionCount, 1);
+  assert.equal(release.detail.lastInteractionAgoMs, 20050);
+  assert.equal(env.events.some((event) => event.name === 'stateV2.maintenance.parity.preempted'), true);
+
+  await env.runNextJob();
+  await parityPromise;
 });
 
 test('rapid mutation requests coalesce into one parity pass when they all arrive before idle execution', async () => {
@@ -290,10 +349,11 @@ test('dark-off and missing-coordinator cases fail closed without running heavywe
   assert.equal(status.lanes.parity.active, false);
 });
 
-test('performance preview loader includes the V2 idle maintenance module', () => {
-  assert.match(perfSource, /state_runtime_v2_maintenance_idle\.js/);
+test('performance preview loader includes the V2 idle maintenance module with a cache-busted URL', () => {
+  assert.match(perfSource, /state_runtime_v2_maintenance_idle\.js\?v=20260911-2/);
   assert.match(perfSource, /data-taskpoints-state-v2-maintenance-idle/);
   assert.match(source, /whenStorageMaintenanceQuiet/);
   assert.match(source, /DEEP_QUIET_MS = 20000/);
+  assert.match(source, /preemptionCount/);
   assert.match(source, /foregroundBlocking: false/);
 });
