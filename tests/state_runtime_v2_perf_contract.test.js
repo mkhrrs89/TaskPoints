@@ -64,15 +64,18 @@ test('sync enqueue timing is separately observable from async V2 transaction tim
   const status = context.TaskPointsStateRuntimeV2Perf.getStatus();
   assert.equal(status.syncEnqueues, 1);
   assert.equal(status.asyncMutations, 1);
+  assert.equal(status.asyncFailures, 0);
+  assert.equal(status.mutationClasses.completion.syncEnqueues, 1);
+  assert.equal(status.mutationClasses.completion.asyncMutations, 1);
 });
 
-test('runtime status exported by the generic perf trace includes V2 perf, deep-idle, and serializer summaries', () => {
+test('runtime status exported by the generic perf trace includes V2 perf, deep-idle, serializer, and acceptance summaries', () => {
   const { context, runtime } = install();
   context.TaskPointsStateRuntimeV2MaintenanceIdle = {
-    getStatus: () => ({ installed: true, deepQuietMs: 20000, deepQuietPending: 1 })
+    getStatus: () => ({ installed: true, deepQuietMs: 20000, deepQuietPending: 1, failures: 0 })
   };
   context.TaskPointsStateRuntimeV2SerializationGuard = {
-    getStatus: () => ({ installed: true, active: 2, maxQueueDepth: 3 })
+    getStatus: () => ({ installed: true, active: 2, maxQueueDepth: 3, failures: 0 })
   };
 
   const status = runtime.getStatus();
@@ -82,8 +85,53 @@ test('runtime status exported by the generic perf trace includes V2 perf, deep-i
   assert.equal(status.traceDiagnostics.maintenanceIdle.deepQuietPending, 1);
   assert.equal(status.traceDiagnostics.serialization.active, 2);
   assert.equal(status.traceDiagnostics.serialization.maxQueueDepth, 3);
+  assert.equal(status.traceDiagnostics.acceptance.deepQuietMs, 20000);
+  assert.equal(status.traceDiagnostics.acceptance.physicalDeviceEvidenceStillRequired, true);
   assert.equal(runtime.getStatus.__taskPointsV2TraceStatusBridge, true);
   assert.equal(typeof runtime.getStatus.__taskPointsOriginal, 'function');
+});
+
+test('acceptance snapshot summarizes all four mutation classes and distinguishes automatic idle work from direct foreground maintenance', async () => {
+  const { context, runtime } = install();
+  context.TaskPointsStateRuntimeV2MaintenanceIdle = {
+    getStatus: () => ({
+      installed: true,
+      deepQuietMs: 20000,
+      deepQuietDeferrals: 1,
+      deepQuietReleases: 1,
+      executed: 1,
+      failures: 0
+    })
+  };
+  context.TaskPointsStateRuntimeV2SerializationGuard = {
+    getStatus: () => ({ installed: true, failures: 0 })
+  };
+
+  await runtime.enqueueHabitDelta({ habitId: 'h1', dayKey: '2026-09-06' });
+  await runtime.applyHabitDelta({ habitId: 'h1', dayKey: '2026-09-06' });
+  await runtime.enqueueHabitOrderOverlay({ orders: { h1: 1, h2: 2 } });
+  await runtime.applyHabitOrderOverlay({ orders: { h1: 1, h2: 2 } });
+  await runtime.enqueueHabitEditFromLegacy({ habitId: 'h1' });
+  await runtime.applyHabitEditSnapshot({ habitId: 'h1', completionRows: [] });
+  await runtime.enqueueHabitPresenceFromLegacy({ habitId: 'h2', exists: false });
+  await runtime.applyHabitPresenceSnapshot({ habitId: 'h2', exists: false });
+
+  const beforeDirect = context.TaskPointsStateRuntimeV2Perf.getAcceptanceSnapshot();
+  assert.equal(beforeDirect.allMutationClassesObserved, true);
+  assert.equal(beforeDirect.mutationClasses.completion.syncEnqueues, 1);
+  assert.equal(beforeDirect.mutationClasses.order.asyncMutations, 1);
+  assert.equal(beforeDirect.mutationClasses.edit.asyncFailures, 0);
+  assert.equal(beforeDirect.mutationClasses.presence.asyncMutations, 1);
+  assert.equal(beforeDirect.directForegroundMaintenanceCalls, 0);
+  assert.equal(beforeDirect.noDirectForegroundMaintenanceObserved, true);
+  assert.equal(beforeDirect.automaticParityDeepIdleObserved, true);
+  assert.equal(beforeDirect.noV2FailuresObserved, true);
+  assert.equal(beforeDirect.physicalDeviceEvidenceStillRequired, true);
+
+  await runtime.verifyParity();
+  const afterDirect = context.TaskPointsStateRuntimeV2Perf.getAcceptanceSnapshot();
+  assert.equal(afterDirect.directForegroundMaintenanceCalls, 1);
+  assert.equal(afterDirect.noDirectForegroundMaintenanceObserved, false);
 });
 
 test('order and edit traces disclose bounded row/store scope', async () => {
