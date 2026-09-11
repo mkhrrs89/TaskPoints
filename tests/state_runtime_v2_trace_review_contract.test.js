@@ -89,6 +89,32 @@ test('failed V2 events or subsystem failures block evidence-complete verdict', (
   assert.equal(result.failures.failedEventCount, 1);
   assert.equal(result.failures.mutationFailureCount, 1);
   assert.equal(result.failures.subsystemFailureCount, 1);
+  assert.equal(result.failures.runtimeMirrorFailureCount, 0);
+  assert.equal(result.failures.noV2FailuresObserved, false);
+  assert.equal(result.evidenceCompleteForDeviceTrace, false);
+});
+
+test('legacy failures do not masquerade as V2 failures', () => {
+  const report = baseReport([
+    { epochMs: 30500, type: 'duration', name: 'phase2.persist', durationMs: 5, detail: { failed: true } }
+  ]);
+  const result = reviewer.review(report);
+
+  assert.equal(result.failures.failedEventCount, 0);
+  assert.equal(result.failures.noV2FailuresObserved, true);
+  assert.equal(result.evidenceCompleteForDeviceTrace, true);
+});
+
+test('named V2 failure marks and runtime mirror failures block acceptance', () => {
+  const report = baseReport([
+    { epochMs: 30500, type: 'mark', name: 'stateV2.walBridgeFailed', detail: { phase: 'confirm' } }
+  ]);
+  report.stateRuntimeV2Status.mirrorFailures = 1;
+  const result = reviewer.review(report);
+
+  assert.equal(result.failures.failedEventCount, 1);
+  assert.equal(result.failures.runtimeMirrorFailureCount, 1);
+  assert.equal(result.failures.subsystemFailureCount, 1);
   assert.equal(result.failures.noV2FailuresObserved, false);
   assert.equal(result.evidenceCompleteForDeviceTrace, false);
 });
