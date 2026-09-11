@@ -43,7 +43,7 @@ On Home, the dark preview should show two temporary diagnostics controls above t
 3. Use the real TaskPoints UI to toggle at least one Habit completion.
 4. Reorder Habits.
 5. Edit a Habit and save it normally.
-6. Add a Habit or retire a Habit using the normal UI.
+6. Add a temporary Habit using the normal UI. Adding it is enough to exercise the V2 presence mutation; deleting a Habit also exercises that path. Retiring a Habit is intentionally not used for this check because retirement mirrors through the V2 edit path.
 7. Continue touching/using the app briefly after one of those mutations. This is intentional: the trace must prove that user activity postpones the pending heavyweight parity pass.
 8. Stop interacting with the app while leaving it visible in the foreground for at least **20 seconds**.
 9. Open **V2 TEST** again and tap **Refresh evidence**.
@@ -57,7 +57,7 @@ A complete device trace must show all eight checks:
 1. Habit completion / toggle observed.
 2. Habit reorder observed.
 3. Habit edit observed.
-4. Habit add / retire (presence mutation) observed.
+4. Habit add / delete presence mutation observed.
 5. No direct foreground V2 parity/compatibility maintenance observed.
 6. Automatic parity crossed the 20-second deep-idle boundary.
 7. Real user interaction postponed pending maintenance before that release.
@@ -94,7 +94,7 @@ The primary Step 4 trace is not the only manual lifecycle evidence required befo
 - navigate/background during an actual IndexedDB write;
 - standalone PWA plus Safari tab simultaneously;
 - two normal tabs modifying Habits;
-- repeated reorder/edit/add/retire/delete in the real UI;
+- repeated reorder/edit/add/retire/delete in the real UI; retirement remains an edit-path scenario while add/delete exercise presence;
 - repeated reload during dark verification;
 - export immediately after a recent mutation;
 - Reset All/import/emergency restore through real controls;
