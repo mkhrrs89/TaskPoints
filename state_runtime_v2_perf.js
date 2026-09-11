@@ -5,9 +5,11 @@
   if (!global || !runtime || global.TaskPointsStateRuntimeV2Perf?.installed) return;
 
   const now = () => global.performance?.now?.() ?? Date.now();
+  const MUTATION_KINDS = ['completion', 'order', 'edit', 'presence'];
   const counters = {
     syncEnqueues: 0,
     asyncMutations: 0,
+    asyncFailures: 0,
     parityChecks: 0,
     compatibilityBuilds: 0,
     totalSyncEnqueueMs: 0,
@@ -16,6 +18,16 @@
     maxMutationMs: 0,
     lastMutation: null
   };
+  const mutationCounters = Object.fromEntries(MUTATION_KINDS.map((kind) => [kind, {
+    syncEnqueues: 0,
+    asyncMutations: 0,
+    asyncFailures: 0,
+    totalSyncEnqueueMs: 0,
+    maxSyncEnqueueMs: 0,
+    totalMutationMs: 0,
+    maxMutationMs: 0,
+    lastMutation: null
+  }]));
 
   function mark(name, detail = {}) {
     try { global.TaskPointsPerf?.mark?.(name, detail); } catch (_) {}
@@ -94,15 +106,24 @@
         const result = await original.apply(this, args);
         const ms = now() - started;
         const detail = mutationShape(kind, args, result);
+        const kindCounter = mutationCounters[kind];
         counters.asyncMutations += 1;
         counters.totalMutationMs += ms;
         counters.maxMutationMs = Math.max(counters.maxMutationMs, ms);
         counters.lastMutation = { ...detail, durationMs: Number(ms.toFixed(2)) };
+        if (kindCounter) {
+          kindCounter.asyncMutations += 1;
+          kindCounter.totalMutationMs += ms;
+          kindCounter.maxMutationMs = Math.max(kindCounter.maxMutationMs, ms);
+          kindCounter.lastMutation = counters.lastMutation;
+        }
         duration(`stateV2.txn.${kind}`, ms, detail);
         mark(`stateV2.txn.${kind}.finish`, detail);
         return result;
       } catch (error) {
         const ms = now() - started;
+        counters.asyncFailures += 1;
+        if (mutationCounters[kind]) mutationCounters[kind].asyncFailures += 1;
         duration(`stateV2.txn.${kind}`, ms, { kind, failed: true, error: String(error?.code || error?.message || error) });
         throw error;
       }
@@ -119,9 +140,15 @@
       const started = now();
       const result = original.apply(this, args);
       const ms = now() - started;
+      const kindCounter = mutationCounters[kind];
       counters.syncEnqueues += 1;
       counters.totalSyncEnqueueMs += ms;
       counters.maxSyncEnqueueMs = Math.max(counters.maxSyncEnqueueMs, ms);
+      if (kindCounter) {
+        kindCounter.syncEnqueues += 1;
+        kindCounter.totalSyncEnqueueMs += ms;
+        kindCounter.maxSyncEnqueueMs = Math.max(kindCounter.maxSyncEnqueueMs, ms);
+      }
       duration(`stateV2.enqueue.${kind}.sync`, ms, {
         kind,
         foregroundBlocking: true,
@@ -173,29 +200,82 @@
   loadSerializationGuard();
   loadIdleMaintenanceScheduler();
 
+  function safeSubsystemStatus(value) {
+    try { return value?.getStatus?.() || null; }
+    catch (error) { return { error: String(error?.message || error) }; }
+  }
+
+  function mutationClassStatus() {
+    return Object.fromEntries(MUTATION_KINDS.map((kind) => {
+      const row = mutationCounters[kind];
+      return [kind, {
+        syncEnqueues: row.syncEnqueues,
+        asyncMutations: row.asyncMutations,
+        asyncFailures: row.asyncFailures,
+        averageSyncEnqueueMs: row.syncEnqueues ? Number((row.totalSyncEnqueueMs / row.syncEnqueues).toFixed(2)) : 0,
+        maxSyncEnqueueMs: Number(row.maxSyncEnqueueMs.toFixed(2)),
+        averageMutationMs: row.asyncMutations ? Number((row.totalMutationMs / row.asyncMutations).toFixed(2)) : 0,
+        maxMutationMs: Number(row.maxMutationMs.toFixed(2)),
+        lastMutation: row.lastMutation
+      }];
+    }));
+  }
+
+  function buildAcceptanceSnapshot(maintenanceIdle, serialization) {
+    const mutationClasses = mutationClassStatus();
+    const allMutationClassesObserved = MUTATION_KINDS.every((kind) => (
+      mutationClasses[kind].syncEnqueues > 0 && mutationClasses[kind].asyncMutations > 0
+    ));
+    const directForegroundMaintenanceCalls = counters.parityChecks + counters.compatibilityBuilds;
+    const automaticParityDeepIdleObserved = Boolean(
+      maintenanceIdle
+      && Number(maintenanceIdle.deepQuietDeferrals || 0) > 0
+      && Number(maintenanceIdle.deepQuietReleases || 0) > 0
+      && Number(maintenanceIdle.executed || 0) > 0
+    );
+    const noV2FailuresObserved = counters.asyncFailures === 0
+      && Number(maintenanceIdle?.failures || 0) === 0
+      && Number(serialization?.failures || 0) === 0;
+
+    return {
+      schemaVersion: 1,
+      mutationClasses,
+      allMutationClassesObserved,
+      directForegroundMaintenanceCalls,
+      noDirectForegroundMaintenanceObserved: directForegroundMaintenanceCalls === 0,
+      automaticParityDeepIdleObserved,
+      noV2FailuresObserved,
+      deepQuietMs: Number.isFinite(Number(maintenanceIdle?.deepQuietMs)) ? Number(maintenanceIdle.deepQuietMs) : null,
+      physicalDeviceEvidenceStillRequired: true
+    };
+  }
+
   const api = {
     installed: true,
-    version: 2,
+    version: 3,
     getStatus() {
       return {
         installed: true,
         syncEnqueues: counters.syncEnqueues,
         asyncMutations: counters.asyncMutations,
+        asyncFailures: counters.asyncFailures,
         parityChecks: counters.parityChecks,
         compatibilityBuilds: counters.compatibilityBuilds,
         averageSyncEnqueueMs: counters.syncEnqueues ? Number((counters.totalSyncEnqueueMs / counters.syncEnqueues).toFixed(2)) : 0,
         maxSyncEnqueueMs: Number(counters.maxSyncEnqueueMs.toFixed(2)),
         averageMutationMs: counters.asyncMutations ? Number((counters.totalMutationMs / counters.asyncMutations).toFixed(2)) : 0,
         maxMutationMs: Number(counters.maxMutationMs.toFixed(2)),
-        lastMutation: counters.lastMutation
+        lastMutation: counters.lastMutation,
+        mutationClasses: mutationClassStatus()
       };
+    },
+    getAcceptanceSnapshot() {
+      return buildAcceptanceSnapshot(
+        safeSubsystemStatus(global.TaskPointsStateRuntimeV2MaintenanceIdle),
+        safeSubsystemStatus(global.TaskPointsStateRuntimeV2SerializationGuard)
+      );
     }
   };
-
-  function safeSubsystemStatus(value) {
-    try { return value?.getStatus?.() || null; }
-    catch (error) { return { error: String(error?.message || error) }; }
-  }
 
   function installRuntimeTraceStatusBridge() {
     const original = runtime.getStatus;
@@ -203,10 +283,13 @@
     const wrapped = function taskPointsV2TraceStatusBridge() {
       const base = original.apply(this, arguments);
       const status = base && typeof base === 'object' ? { ...base } : { value: base ?? null };
+      const maintenanceIdle = safeSubsystemStatus(global.TaskPointsStateRuntimeV2MaintenanceIdle);
+      const serialization = safeSubsystemStatus(global.TaskPointsStateRuntimeV2SerializationGuard);
       status.traceDiagnostics = {
         perf: api.getStatus(),
-        maintenanceIdle: safeSubsystemStatus(global.TaskPointsStateRuntimeV2MaintenanceIdle),
-        serialization: safeSubsystemStatus(global.TaskPointsStateRuntimeV2SerializationGuard)
+        maintenanceIdle,
+        serialization,
+        acceptance: buildAcceptanceSnapshot(maintenanceIdle, serialization)
       };
       return status;
     };
