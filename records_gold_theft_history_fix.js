@@ -10,28 +10,45 @@
   const roundGold = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 10) / 10;
   const imageUrls = new Map();
   const imageLoads = new Map();
+  let lastRows = [];
+  let listenersInstalled = false;
 
-  function loadFullState() {
+  function addState(list, candidate) {
+    const state = candidate?.state || candidate;
+    if (!state || typeof state !== 'object' || Array.isArray(state)) return;
+    if (!list.includes(state)) list.push(state);
+  }
+
+  function loadFullStates() {
     const core = global.TaskPointsCore || {};
+    const states = [];
     try {
       if (typeof core.loadAppState === 'function') {
-        const loaded = core.loadAppState({ syncDerived: false, persistSync: false });
-        const state = loaded?.state || loaded;
-        if (state && typeof state === 'object') return state;
+        addState(states, core.loadAppState({ syncDerived: false, persistSync: false }));
       }
     } catch (error) {
       console.warn('Gold Theft records full-state load failed; falling back to stored snapshot.', error);
     }
     try {
       if (typeof core.readTaskPointsStoredState === 'function') {
-        return core.readTaskPointsStoredState(STORAGE_KEY, {}) || {};
+        addState(states, core.readTaskPointsStoredState(STORAGE_KEY, {}) || {});
       }
-      const raw = global.localStorage?.getItem?.(STORAGE_KEY);
-      return raw ? JSON.parse(raw) : {};
     } catch (error) {
-      console.error('Gold Theft records could not load state', error);
-      return {};
+      console.warn('Gold Theft records stored-state read failed.', error);
     }
+    try {
+      const raw = global.localStorage?.getItem?.(STORAGE_KEY);
+      if (raw) {
+        const parsed = typeof core.parseTaskPointsStorageJson === 'function'
+          ? core.parseTaskPointsStorageJson(raw, null)
+          : JSON.parse(raw);
+        addState(states, parsed);
+      }
+    } catch (error) {
+      console.warn('Gold Theft records raw-state read failed.', error);
+    }
+    if (!states.length) states.push({});
+    return states;
   }
 
   function youName(state) {
@@ -39,18 +56,31 @@
     return name || 'You';
   }
 
-  function maps(state) {
+  function maps(states) {
     const names = new Map();
     const images = new Map();
-    (Array.isArray(state?.players) ? state.players : []).forEach((player) => {
-      const id = String(player?.id || player?.playerId || '');
-      if (!id) return;
-      names.set(id, String(player?.name || 'Unknown Player'));
-      images.set(id, String(player?.imageId || ''));
+    (Array.isArray(states) ? states : [states]).forEach((state) => {
+      (Array.isArray(state?.players) ? state.players : []).forEach((player) => {
+        const id = String(player?.id || player?.playerId || '');
+        if (!id) return;
+        if (!names.has(id)) names.set(id, String(player?.name || 'Unknown Player'));
+        if (!images.has(id)) images.set(id, String(player?.imageId || ''));
+      });
+      if (!names.has('YOU')) names.set('YOU', youName(state));
+      if (!images.has('YOU')) images.set('YOU', String(state?.youImageId || ''));
     });
-    names.set('YOU', youName(state));
-    images.set('YOU', String(state?.youImageId || ''));
     return { names, images };
+  }
+
+  function rowDateKey(row) {
+    for (const value of [row?.dateKey, row?.date, row?.completedAtISO, row?.finalizedAtISO, row?.recordedAtISO, row?.createdAtISO, row?.goldOutcome?.settledAtISO]) {
+      if (value == null || value === '') continue;
+      const direct = String(value).slice(0, 10);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(direct)) return direct;
+      const parsed = new Date(value);
+      if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
+    }
+    return '';
   }
 
   function formatDate(value) {
@@ -114,36 +144,76 @@
     });
   }
 
-  function allTheftRows(state) {
-    const { names, images } = maps(state);
-    const seenTransfers = new Set();
-    const rows = [];
+  function visitHistoricalMatchups(state, callback) {
+    (Array.isArray(state?.matchups) ? state.matchups : []).forEach(callback);
+    (Array.isArray(state?.gameHistory) ? state.gameHistory : []).forEach(callback);
+    (Array.isArray(state?.currentSeason?.tournamentMatchupResults) ? state.currentSeason.tournamentMatchupResults : []).forEach(callback);
+    (Array.isArray(state?.seasonHistory) ? state.seasonHistory : []).forEach((season) => {
+      (Array.isArray(season?.tournamentMatchupResults) ? season.tournamentMatchupResults : []).forEach(callback);
+    });
+    (Array.isArray(state?.schedule) ? state.schedule : []).forEach((day) => {
+      (Array.isArray(day?.matchups) ? day.matchups : []).forEach(callback);
+    });
+  }
 
-    (Array.isArray(state?.goldLedger) ? state.goldLedger : []).forEach((entry) => {
-      if (entry?.type !== 'matchup_theft') return;
-      const amount = Number(entry.amount);
-      if (!Number.isFinite(amount) || amount <= 0) return;
+  function allTheftRows(statesInput) {
+    const states = Array.isArray(statesInput) ? statesInput : [statesInput || {}];
+    const { names, images } = maps(states);
+    const rowsByKey = new Map();
 
-      const transferKey = String(entry.transferId || entry.id || `${entry.matchupId || ''}:${entry.playerId || ''}:${entry.dateKey || ''}:${amount}`);
-      if (seenTransfers.has(transferKey)) return;
-      seenTransfers.add(transferKey);
+    const addRow = (row, key, prefer = false) => {
+      if (!key) key = `fallback:${row.date}|${row.playerId}|${row.opponentId}|${row.amount}`;
+      if (!rowsByKey.has(key) || prefer) rowsByKey.set(key, row);
+    };
 
-      const playerId = String(entry.playerId || '');
-      const opponentId = String(entry.opponentId || '');
-      rows.push({
-        playerId,
-        playerName: names.get(playerId) || 'Unknown Player',
-        imageId: images.get(playerId) || '',
-        opponentId,
-        opponentName: names.get(opponentId) || 'Unknown Player',
-        date: String(entry.dateKey || entry.createdAtISO || '').slice(0, 10),
-        amount: roundGold(amount),
-        transferId: transferKey
+    states.forEach((state) => {
+      (Array.isArray(state?.goldLedger) ? state.goldLedger : []).forEach((entry) => {
+        if (entry?.type !== 'matchup_theft') return;
+        const amount = Number(entry.amount);
+        if (!Number.isFinite(amount) || amount <= 0) return;
+        const playerId = String(entry.playerId || '');
+        const opponentId = String(entry.opponentId || '');
+        const matchupId = String(entry.matchupId || '').trim();
+        const transferId = String(entry.transferId || entry.id || '').trim();
+        addRow({
+          playerId,
+          playerName: names.get(playerId) || 'Unknown Player',
+          imageId: images.get(playerId) || '',
+          opponentId,
+          opponentName: names.get(opponentId) || 'Unknown Player',
+          date: rowDateKey(entry),
+          amount: roundGold(amount),
+          transferId,
+          matchupId
+        }, matchupId ? `matchup:${matchupId}` : transferId ? `transfer:${transferId}` : '', true);
       });
     });
 
-    rows.sort((a, b) => b.amount - a.amount || String(b.date).localeCompare(String(a.date)) || a.playerName.localeCompare(b.playerName));
-    return rows;
+    states.forEach((state) => {
+      visitHistoricalMatchups(state, (matchup) => {
+        const outcome = matchup?.goldOutcome;
+        const amount = Number(outcome?.theftGoldStolen);
+        if (outcome?.settled !== true || !Number.isFinite(amount) || amount <= 0) return;
+        const playerId = String(outcome.winnerId || '');
+        const opponentId = String(outcome.loserId || '');
+        if (!playerId || !opponentId) return;
+        const matchupId = String(matchup?.id || matchup?.matchupId || '').trim();
+        addRow({
+          playerId,
+          playerName: names.get(playerId) || 'Unknown Player',
+          imageId: images.get(playerId) || '',
+          opponentId,
+          opponentName: names.get(opponentId) || 'Unknown Player',
+          date: rowDateKey(matchup),
+          amount: roundGold(amount),
+          transferId: '',
+          matchupId
+        }, matchupId ? `matchup:${matchupId}` : '');
+      });
+    });
+
+    return [...rowsByKey.values()]
+      .sort((a, b) => b.amount - a.amount || String(b.date).localeCompare(String(a.date)) || a.playerName.localeCompare(b.playerName));
   }
 
   function currentFilters() {
@@ -156,9 +226,10 @@
 
   function render() {
     if (!$('goldRecordsTabPanel')) return false;
-    const state = loadFullState();
+    const states = loadFullStates();
+    const state = states[0] || {};
     const name = youName(state);
-    const all = allTheftRows(state);
+    const all = allTheftRows(states);
     const filters = currentFilters();
     let shown = all.slice();
     if (filters.include === 'you') shown = shown.filter((row) => row.playerId === 'YOU');
@@ -186,6 +257,7 @@
       wrap?.classList.add('hidden');
       if (sub) sub.textContent = 'No matching records.';
       if (tbody) tbody.innerHTML = '';
+      lastRows = [];
       global.__lastTopGoldTheftRecords = [];
       return true;
     }
@@ -204,21 +276,60 @@
         return `<tr><td class="rankCell num font-extrabold">${index + 1}</td><td class="scoreCell num font-extrabold">${row.amount.toFixed(1)}</td><td class="imageCell">${photoHtml(row)}</td><td class="playerCell"><div class="font-semibold">${esc(row.playerName)}</div></td><td class="dateCell num">${esc(formatDate(row.date))}</td><td class="srcCell">${sourcePill}</td></tr>`;
       }).join('');
     }
+    lastRows = shown;
     global.__lastTopGoldTheftRecords = shown;
     hydrateImages(shown);
     return true;
   }
 
+  async function copyGoldList(event) {
+    if (!lastRows.length) return;
+    event?.preventDefault?.();
+    event?.stopImmediatePropagation?.();
+    const name = youName(loadFullStates()[0] || {});
+    const text = lastRows.map((row, index) => `${index + 1}. ${row.amount.toFixed(1)} Gold — ${row.playerName} — ${row.date} — ${row.playerId === 'YOU' ? name : 'Player'}`).join('\n');
+    try {
+      if (typeof global.navigator?.clipboard?.writeText !== 'function') throw new Error('Clipboard unavailable');
+      await global.navigator.clipboard.writeText(text);
+      const button = $('goldRecordsCopyBtn');
+      if (!button) return;
+      const previous = button.textContent;
+      button.textContent = 'Copied!';
+      global.setTimeout(() => { button.textContent = previous; }, 900);
+    } catch (_) {
+      global.alert?.('Couldn’t copy automatically. (Clipboard blocked.)\n\nTip: select and copy from the table.');
+    }
+  }
+
   function install() {
     if (!$('goldRecordsTab')) return false;
-    const rerender = () => global.setTimeout(render, 0);
-    $('goldRecordsTab')?.addEventListener('click', rerender);
-    $('goldRecordsIncludeSelect')?.addEventListener('change', rerender);
-    $('goldRecordsTopSelect')?.addEventListener('change', rerender);
-    $('goldRecordsSearchInput')?.addEventListener('input', rerender);
-    $('goldRecordsRefreshBtn')?.addEventListener('click', rerender);
+    if (!listenersInstalled) {
+      listenersInstalled = true;
+      const rerender = () => global.setTimeout(render, 0);
+      $('goldRecordsTab')?.addEventListener('click', rerender);
+      $('goldRecordsIncludeSelect')?.addEventListener('change', rerender);
+      $('goldRecordsTopSelect')?.addEventListener('change', rerender);
+      $('goldRecordsSearchInput')?.addEventListener('input', rerender);
+      $('goldRecordsRefreshBtn')?.addEventListener('click', rerender);
+      $('goldRecordsCopyBtn')?.addEventListener('click', copyGoldList, true);
+      global.addEventListener?.('pageshow', rerender);
+      global.addEventListener?.('taskpoints:state-revision', rerender);
+    }
+
+    // This script is injected after the base Gold Theft tab. The first tab
+    // click can happen before these listeners exist, so render immediately on
+    // install instead of waiting for a second user action.
+    global.setTimeout(render, 0);
     return true;
   }
+
+  global.TaskPointsGoldTheftRecordsHistoryFix = {
+    installed: true,
+    loadFullStates,
+    allTheftRows,
+    render,
+    install
+  };
 
   let attempts = 0;
   const timer = global.setInterval(() => {
