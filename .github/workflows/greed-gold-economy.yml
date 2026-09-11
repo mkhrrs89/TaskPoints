@@ -8,12 +8,14 @@ on:
     paths:
       - greed_gold_economy.js
       - gold_theft_top50_notifications.js
+      - records_gold_theft_history_fix.js
       - _worker.js
       - gold_ledger.html
       - tests/greed_gold_economy.test.js
       - tests/greed_rating.test.js
       - tests/season_champion_gold_bonus.test.js
       - tests/inbox_gold_theft_top50_notification.test.js
+      - tests/records_gold_theft_history_fix.test.js
       - .github/workflows/greed-gold-economy.yml
 
 jobs:
@@ -28,6 +30,8 @@ jobs:
         run: node --check greed_gold_economy.js
       - name: Check Gold Theft inbox notification syntax
         run: node --check gold_theft_top50_notifications.js
+      - name: Check Gold Theft records history syntax
+        run: node --check records_gold_theft_history_fix.js
       - name: Run Greed Gold contracts
         run: >-
           node --test
@@ -35,3 +39,4 @@ jobs:
           tests/greed_rating.test.js
           tests/season_champion_gold_bonus.test.js
           tests/inbox_gold_theft_top50_notification.test.js
+          tests/records_gold_theft_history_fix.test.js
