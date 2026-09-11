@@ -17,6 +17,7 @@
   let deduped = 0;
   let failures = 0;
   let maxQueueDepth = 0;
+  let requestSequence = 0;
   let lastKind = null;
   let lastError = null;
   const inFlight = new Map();
@@ -49,6 +50,10 @@
     }
   }
 
+  function isAdjacent(sequence, currentSequence) {
+    return Number(sequence) === Number(currentSequence) - 1;
+  }
+
   function wrap(name, kind) {
     const original = runtime[name];
     if (typeof original !== 'function' || original.__taskPointsV2Serialized) return false;
@@ -57,19 +62,22 @@
       const args = Array.from(arguments);
       const key = stableKey(kind, args);
       const now = Date.now();
+      const sequence = ++requestSequence;
       pruneRecent(now);
 
       const active = inFlight.get(key);
-      if (active) {
+      if (active && isAdjacent(active.sequence, sequence)) {
+        active.sequence = sequence;
         deduped += 1;
-        mark('stateV2.serializationDeduped', { kind, phase: 'inflight' });
-        return active;
+        mark('stateV2.serializationDeduped', { kind, phase: 'inflight', adjacent: true, sequence });
+        return active.promise;
       }
 
       const cached = recent.get(key);
-      if (cached && cached.expiresAt > now) {
+      if (cached && cached.expiresAt > now && isAdjacent(cached.sequence, sequence)) {
+        cached.sequence = sequence;
         deduped += 1;
-        mark('stateV2.serializationDeduped', { kind, phase: 'recent' });
+        mark('stateV2.serializationDeduped', { kind, phase: 'recent', adjacent: true, sequence });
         return Promise.resolve(cached.result);
       }
 
@@ -78,12 +86,13 @@
       maxQueueDepth = Math.max(maxQueueDepth, queueDepth);
       lastKind = kind;
 
+      const entry = { promise: null, sequence };
       const run = tail.then(async () => {
-        mark('stateV2.serializationStarted', { kind, queued: inFlight.size });
+        mark('stateV2.serializationStarted', { kind, queued: inFlight.size, sequence: entry.sequence });
         try {
           const result = await original.apply(this, args);
           completed += 1;
-          recent.set(key, { result, expiresAt: Date.now() + RECENT_MS });
+          recent.set(key, { result, expiresAt: Date.now() + RECENT_MS, sequence: entry.sequence });
           return result;
         } catch (error) {
           failures += 1;
@@ -92,10 +101,11 @@
         }
       });
 
-      inFlight.set(key, run);
+      entry.promise = run;
+      inFlight.set(key, entry);
       tail = run.catch(() => undefined);
       run.finally(() => {
-        if (inFlight.get(key) === run) inFlight.delete(key);
+        if (inFlight.get(key) === entry) inFlight.delete(key);
       }).catch(() => undefined);
       return run;
     };
@@ -112,7 +122,7 @@
 
   const api = {
     installed: true,
-    version: 1,
+    version: 2,
     getStatus() {
       return {
         installed: true,
@@ -123,6 +133,7 @@
         failures,
         active: inFlight.size,
         maxQueueDepth,
+        requestSequence,
         lastKind,
         lastError
       };
@@ -130,5 +141,5 @@
   };
 
   global.TaskPointsStateRuntimeV2SerializationGuard = api;
-  mark('stateV2.serializationGuardInstalled', { wrappedMethods: wrappedMethods.length });
+  mark('stateV2.serializationGuardInstalled', { wrappedMethods: wrappedMethods.length, version: api.version });
 })(typeof window !== 'undefined' ? window : globalThis);
