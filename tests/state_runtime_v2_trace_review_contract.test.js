@@ -49,7 +49,7 @@ function baseReport(extraEvents = []) {
 test('review recognizes complete four-class device trace evidence and deep-idle preemption', () => {
   const result = reviewer.review(baseReport());
 
-  assert.equal(result.schemaVersion, 2);
+  assert.equal(result.schemaVersion, 3);
   assert.equal(result.allMutationClassesObserved, true);
   assert.equal(result.mutationClasses.completion.observed, true);
   assert.equal(result.mutationClasses.order.observed, true);
@@ -62,10 +62,54 @@ test('review recognizes complete four-class device trace evidence and deep-idle 
   assert.equal(result.automaticParityDeepIdleObserved, true);
   assert.equal(result.preemption.interactionCount, 1);
   assert.equal(result.preemption.quietAfterLastInteractionMs, 20000);
+  assert.equal(result.preemption.evidenceSource, 'generic_interaction_trace');
   assert.equal(result.interactionPreemptionObserved, true);
   assert.equal(result.failures.noV2FailuresObserved, true);
   assert.equal(result.evidenceCompleteForDeviceTrace, true);
   assert.equal(result.physicalDeviceEvidenceMustBeConfirmedByTester, true);
+});
+
+test('internal dark-mirror commit marks complete mutation evidence when public apply wrappers are bypassed', () => {
+  const report = baseReport([
+    { epochMs: 2020, type: 'mark', name: 'stateV2.darkOrderMutationCommitted', detail: { revision: 2 } },
+    { epochMs: 3020, type: 'mark', name: 'stateV2.darkHabitEditCommitted', detail: { revision: 3 } },
+    { epochMs: 4020, type: 'mark', name: 'stateV2.darkHabitPresenceCommitted', detail: { revision: 4 } }
+  ]);
+  report.pages[0].events = report.pages[0].events.filter((event) => ![
+    'stateV2.txn.order',
+    'stateV2.txn.edit',
+    'stateV2.txn.presence'
+  ].includes(event.name));
+
+  const result = reviewer.review(report);
+  assert.equal(result.mutationClasses.order.transactionCount, 0);
+  assert.equal(result.mutationClasses.order.commitCount, 1);
+  assert.equal(result.mutationClasses.order.observed, true);
+  assert.equal(result.mutationClasses.edit.commitCount, 1);
+  assert.equal(result.mutationClasses.edit.observed, true);
+  assert.equal(result.mutationClasses.presence.commitCount, 1);
+  assert.equal(result.mutationClasses.presence.observed, true);
+  assert.equal(result.allMutationClassesObserved, true);
+});
+
+test('deep-idle release preserves preemption evidence even when generic interaction events have aged out of the trace ring', () => {
+  const report = baseReport();
+  report.pages[0].events = report.pages[0].events.filter((event) => event.name !== 'interaction.pointerdown');
+  const release = report.pages[0].events.find((event) => event.name === 'stateV2.maintenance.parity.deepReleased');
+  release.detail = {
+    foregroundBlocking: false,
+    preemptionCount: 2,
+    lastInteractionAgoMs: 20050,
+    requiredQuietMs: 20000
+  };
+
+  const result = reviewer.review(report);
+  assert.equal(result.preemption.observed, true);
+  assert.equal(result.preemption.interactionCount, 2);
+  assert.equal(result.preemption.quietAfterLastInteractionMs, 20050);
+  assert.equal(result.preemption.evidenceSource, 'maintenance_release');
+  assert.equal(result.interactionPreemptionObserved, true);
+  assert.equal(result.evidenceCompleteForDeviceTrace, true);
 });
 
 test('direct foreground parity is called out and blocks evidence-complete verdict', () => {
