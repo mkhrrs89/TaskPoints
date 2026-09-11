@@ -158,9 +158,9 @@ test('parity and compatibility work is labeled as heavyweight foreground mainten
 });
 
 test('dark Habit structure bridge loads performance instrumentation only through the dark preview path', () => {
-  assert.match(structureBridge, /script\.src = '\/state_runtime_v2_perf\.js'/);
+  assert.match(structureBridge, /script\.src = '\/state_runtime_v2_perf\.js\?v=20260911-4'/);
   assert.match(structureBridge, /if \(!isEnabled\(\) \|\| global\.TaskPointsStateRuntimeV2Perf\?\.installed/);
-  assert.match(structureBridge, /loadPerfInstrumentation\(\);\s*return install\(\);/);
+  assert.match(structureBridge, /loadPerfInstrumentation\(\);\s*loadLiveTraceReview\(\);\s*return install\(\);/);
 });
 
 test('mobile V2 tracing hides the legacy live text wall without disabling trace collection', () => {
