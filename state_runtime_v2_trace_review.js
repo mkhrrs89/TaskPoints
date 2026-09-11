@@ -164,16 +164,24 @@
   }
 
   function failureEvidence(events, status, mutationClasses) {
-    const failedEvents = events.filter((event) => detailObject(event).failed === true);
+    const failedEvents = events.filter((event) => {
+      const name = String(event?.name || '');
+      if (!name.startsWith('stateV2.')) return false;
+      return detailObject(event).failed === true || /(?:failed|failure)$/i.test(name);
+    });
     const acceptance = status?.traceDiagnostics?.acceptance || {};
     const maintenance = status?.traceDiagnostics?.maintenanceIdle || {};
     const serialization = status?.traceDiagnostics?.serialization || {};
     const classFailures = MUTATION_KINDS.reduce((sum, kind) => sum + Number(mutationClasses[kind]?.failureCount || 0), 0);
-    const subsystemFailures = Number(maintenance.failures || 0) + Number(serialization.failures || 0);
+    const runtimeMirrorFailures = Number(status?.mirrorFailures || 0);
+    const subsystemFailures = Number(maintenance.failures || 0)
+      + Number(serialization.failures || 0)
+      + runtimeMirrorFailures;
     return {
       failedEventCount: failedEvents.length,
       mutationFailureCount: classFailures,
       subsystemFailureCount: subsystemFailures,
+      runtimeMirrorFailureCount: runtimeMirrorFailures,
       noV2FailuresObserved: failedEvents.length === 0
         && classFailures === 0
         && subsystemFailures === 0
