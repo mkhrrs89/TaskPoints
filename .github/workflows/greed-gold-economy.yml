@@ -17,6 +17,7 @@ on:
       - tests/inbox_gold_theft_top50_notification.test.js
       - tests/inbox_gold_theft_delivery_race.test.js
       - tests/records_gold_theft_history_fix.test.js
+      - tests/retroactive_gold_score_adjustments.test.js
       - .github/workflows/greed-gold-economy.yml
 
 jobs:
@@ -42,3 +43,4 @@ jobs:
           tests/inbox_gold_theft_top50_notification.test.js
           tests/inbox_gold_theft_delivery_race.test.js
           tests/records_gold_theft_history_fix.test.js
+          tests/retroactive_gold_score_adjustments.test.js

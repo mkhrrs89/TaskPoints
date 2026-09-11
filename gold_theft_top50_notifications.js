@@ -364,3 +364,345 @@
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
+
+;(function installTaskPointsRetroactiveGoldScoreAdjustments(global) {
+  'use strict';
+
+  const core = global.TaskPointsCore;
+  if (!core || core.__retroactiveGoldScoreAdjustmentsInstalled) return;
+  const originalSaveStateSnapshot = typeof core.saveStateSnapshot === 'function'
+    ? core.saveStateSnapshot.bind(core)
+    : null;
+  if (!originalSaveStateSnapshot) return;
+  core.__retroactiveGoldScoreAdjustmentsInstalled = true;
+
+  const STORAGE_KEY = core.STORAGE_KEY || 'taskpoints_v1';
+  const ECONOMY_VERSION = 1;
+  const THEFT_MAX_RATE = 0.10;
+  const YOU_THEFT_GREED = 50;
+  const roundGold = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 10) / 10;
+  const finite = (value) => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value));
+  const safeId = (value) => encodeURIComponent(String(value || '').trim()).replace(/%/g, '_');
+
+  function rowDateKey(row) {
+    const candidates = [row?.dateKey, row?.date, row?.completedAtISO, row?.finalizedAtISO, row?.recordedAtISO, row?.createdAtISO];
+    for (const candidate of candidates) {
+      if (candidate == null || candidate === '') continue;
+      const direct = String(candidate).slice(0, 10);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(direct)) return direct;
+      const parsed = new Date(candidate);
+      if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
+    }
+    return '';
+  }
+
+  function sideScore(matchup, side) {
+    const primary = matchup?.[side === 'B' ? 'scoreB' : 'scoreA'];
+    const alias = matchup?.[side === 'B' ? 'playerBScore' : 'playerAScore'];
+    if (finite(primary)) return Number(primary);
+    return finite(alias) ? Number(alias) : null;
+  }
+
+  function matchupKey(matchup, index = -1) {
+    const explicit = String(matchup?.id || matchup?.matchupId || '').trim();
+    if (explicit) return `id:${explicit}`;
+    const a = String(matchup?.playerAId || '').trim();
+    const b = String(matchup?.playerBId || '').trim();
+    const date = rowDateKey(matchup);
+    if (a && b && date) {
+      const context = [
+        matchup?.seasonId,
+        matchup?.seriesId || matchup?.seasonSeriesId,
+        matchup?.roundId,
+        matchup?.gameNumber || matchup?.seriesGameNumber,
+        matchup?.matchupType || matchup?.type
+      ].map((value) => value == null ? '' : String(value)).join('|');
+      return `fallback:${date}|${[a, b].sort().join('|')}|${context}`;
+    }
+    return index >= 0 ? `index:${index}` : '';
+  }
+
+  function readPersistedState() {
+    try {
+      const raw = global.localStorage?.getItem?.(STORAGE_KEY);
+      if (!raw) return null;
+      return core.parseTaskPointsStorageJson?.(raw, null) || JSON.parse(raw);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function goldBalance(state, playerId) {
+    const id = String(playerId || '').trim();
+    if (!id) return 0;
+    return roundGold((Array.isArray(state?.goldLedger) ? state.goldLedger : []).reduce((sum, row) => (
+      String(row?.playerId || '') === id ? sum + (Number(row?.amount) || 0) : sum
+    ), 0));
+  }
+
+  function appendAdjustment(state, entry) {
+    if (!Array.isArray(state.goldLedger)) state.goldLedger = [];
+    if (state.goldLedger.some((row) => String(row?.id || '') === String(entry.id || ''))) return false;
+    const before = goldBalance(state, entry.playerId);
+    const amount = roundGold(entry.amount);
+    state.goldLedger.push({ ...entry, amount, balanceAfter: roundGold(before + amount) });
+    return true;
+  }
+
+  function winnerFor(matchup) {
+    const scoreA = sideScore(matchup, 'A');
+    const scoreB = sideScore(matchup, 'B');
+    if (scoreA === null || scoreB === null) return null;
+    if (scoreA === scoreB) return { tie: true, scoreA, scoreB, winnerId: '', loserId: '' };
+    return scoreA > scoreB
+      ? { tie: false, scoreA, scoreB, winnerId: String(matchup?.playerAId || ''), loserId: String(matchup?.playerBId || '') }
+      : { tie: false, scoreA, scoreB, winnerId: String(matchup?.playerBId || ''), loserId: String(matchup?.playerAId || '') };
+  }
+
+  function transactionTimestamp(matchup) {
+    return String(matchup?.completedAtISO || matchup?.finalizedAtISO || matchup?.recordedAtISO || matchup?.createdAtISO || `${rowDateKey(matchup) || '1970-01-01'}T12:00:00.000Z`);
+  }
+
+  function historicalPregameGold(previousState, priorMatchup, playerId, priorOutcome) {
+    const id = String(playerId || '').trim();
+    if (!id) return 0;
+    if (String(priorOutcome?.winnerId || '') === id && finite(priorOutcome?.winnerPregameGold)) {
+      return Math.max(0, roundGold(priorOutcome.winnerPregameGold));
+    }
+    if (String(priorOutcome?.loserId || '') === id && finite(priorOutcome?.loserPregameGold)) {
+      return Math.max(0, roundGold(priorOutcome.loserPregameGold));
+    }
+
+    const ledger = Array.isArray(previousState?.goldLedger) ? previousState.goldLedger : [];
+    const matchupId = String(priorMatchup?.id || priorMatchup?.matchupId || '').trim();
+    if (matchupId) {
+      const firstTargetIndex = ledger.findIndex((row) => String(row?.matchupId || '') === matchupId);
+      if (firstTargetIndex >= 0) {
+        return Math.max(0, roundGold(ledger.slice(0, firstTargetIndex).reduce((sum, row) => (
+          String(row?.playerId || '') === id ? sum + (Number(row?.amount) || 0) : sum
+        ), 0)));
+      }
+    }
+
+    const targetDate = rowDateKey(priorMatchup);
+    const targetStamp = transactionTimestamp(priorMatchup);
+    return Math.max(0, roundGold(ledger.reduce((sum, row) => {
+      if (String(row?.playerId || '') !== id) return sum;
+      const rowDate = rowDateKey(row);
+      const rowStamp = String(row?.createdAtISO || '');
+      const before = rowDate < targetDate || (rowDate === targetDate && rowStamp && rowStamp < targetStamp);
+      return before ? sum + (Number(row?.amount) || 0) : sum;
+    }, 0)));
+  }
+
+  function winnerGreed(state, matchup, winnerId, priorOutcome) {
+    const id = String(winnerId || '').trim();
+    if (!id) return 0;
+    if (id === 'YOU') return YOU_THEFT_GREED;
+    if (String(priorOutcome?.winnerId || '') === id && finite(priorOutcome?.winnerEffectiveGreed)) {
+      return Math.max(0, Math.min(100, Number(priorOutcome.winnerEffectiveGreed)));
+    }
+    const side = String(matchup?.playerAId || '') === id ? 'A' : String(matchup?.playerBId || '') === id ? 'B' : '';
+    const captured = side ? Number(matchup?.[`player${side}Effects`]?.greedRating) : NaN;
+    if (Number.isFinite(captured)) return Math.max(0, Math.min(100, captured));
+    const player = (Array.isArray(state?.players) ? state.players : []).find((row) => String(row?.id || row?.playerId || '') === id);
+    return Math.max(0, Math.min(100, Number(player?.greed) || 0));
+  }
+
+  function desiredOutcome(state, previousState, matchup, priorMatchup, priorOutcome) {
+    const result = winnerFor(matchup);
+    if (!result) return null;
+    const oldRevision = Math.max(0, Math.trunc(Number(priorOutcome?.adjustmentRevision) || 0));
+    const settledAtISO = String(priorOutcome?.settledAtISO || transactionTimestamp(priorMatchup || matchup));
+
+    if (result.tie) {
+      return {
+        settled: true,
+        tie: true,
+        winnerId: '',
+        loserId: '',
+        marginGoldAwarded: 0,
+        theftGoldStolen: 0,
+        scoreA: result.scoreA,
+        scoreB: result.scoreB,
+        settledAtISO,
+        adjustmentRevision: oldRevision
+      };
+    }
+
+    const marginGold = roundGold(Math.abs(result.scoreA - result.scoreB) / 10);
+    const sameWinner = priorOutcome?.tie !== true && String(priorOutcome?.winnerId || '') === result.winnerId;
+    const winnerPregameGold = sameWinner && finite(priorOutcome?.winnerPregameGold)
+      ? roundGold(priorOutcome.winnerPregameGold)
+      : historicalPregameGold(previousState, priorMatchup || matchup, result.winnerId, priorOutcome);
+    const loserPregameGold = sameWinner && finite(priorOutcome?.loserPregameGold)
+      ? roundGold(priorOutcome.loserPregameGold)
+      : historicalPregameGold(previousState, priorMatchup || matchup, result.loserId, priorOutcome);
+    const greed = sameWinner && finite(priorOutcome?.winnerEffectiveGreed)
+      ? Number(priorOutcome.winnerEffectiveGreed)
+      : winnerGreed(state, matchup, result.winnerId, priorOutcome);
+    const theftRate = sameWinner && finite(priorOutcome?.theftRate)
+      ? Number(priorOutcome.theftRate)
+      : (Math.max(0, Math.min(100, greed)) / 100) * THEFT_MAX_RATE;
+    const theftGold = sameWinner
+      ? roundGold(Number(priorOutcome?.theftGoldStolen) || 0)
+      : Math.min(Math.max(0, loserPregameGold), roundGold(Math.max(0, loserPregameGold) * theftRate));
+
+    return {
+      settled: true,
+      tie: false,
+      winnerId: result.winnerId,
+      loserId: result.loserId,
+      winnerPregameGold: roundGold(winnerPregameGold),
+      loserPregameGold: roundGold(loserPregameGold),
+      winnerEffectiveGreed: Math.max(0, Math.min(100, Number(greed) || 0)),
+      theftRate,
+      marginGoldAwarded: marginGold,
+      theftGoldStolen: roundGold(theftGold),
+      scoreA: result.scoreA,
+      scoreB: result.scoreB,
+      settledAtISO,
+      adjustmentRevision: oldRevision
+    };
+  }
+
+  function addOutcomeFlow(map, outcome, multiplier) {
+    if (!outcome || outcome.settled !== true || outcome.tie === true) return;
+    const winnerId = String(outcome.winnerId || '');
+    const loserId = String(outcome.loserId || '');
+    const margin = roundGold(Number(outcome.marginGoldAwarded) || 0);
+    const theft = roundGold(Number(outcome.theftGoldStolen) || 0);
+    if (winnerId) map.set(winnerId, roundGold((map.get(winnerId) || 0) + multiplier * (margin + theft)));
+    if (loserId) map.set(loserId, roundGold((map.get(loserId) || 0) - multiplier * theft));
+  }
+
+  function applyOutcomeToCopies(state, sourceMatchup, outcome) {
+    const key = matchupKey(sourceMatchup);
+    if (!key) return;
+    const copy = (row, index = -1) => {
+      if (matchupKey(row, index) === key) row.goldOutcome = { ...outcome };
+    };
+    (Array.isArray(state?.matchups) ? state.matchups : []).forEach(copy);
+    (Array.isArray(state?.schedule) ? state.schedule : []).forEach((day) => {
+      (Array.isArray(day?.matchups) ? day.matchups : []).forEach(copy);
+    });
+    (Array.isArray(state?.currentSeason?.tournamentMatchupResults) ? state.currentSeason.tournamentMatchupResults : []).forEach(copy);
+    (Array.isArray(state?.seasonHistory) ? state.seasonHistory : []).forEach((season) => {
+      (Array.isArray(season?.tournamentMatchupResults) ? season.tournamentMatchupResults : []).forEach(copy);
+    });
+  }
+
+  function reconcileOne(state, previousState, matchup, priorMatchup) {
+    const priorOutcome = priorMatchup?.goldOutcome;
+    if (!priorOutcome || priorOutcome.settled !== true) return false;
+    const desired = desiredOutcome(state, previousState, matchup, priorMatchup, priorOutcome);
+    if (!desired) return false;
+
+    const deltas = new Map();
+    addOutcomeFlow(deltas, priorOutcome, -1);
+    addOutcomeFlow(deltas, desired, 1);
+    const nonzero = [...deltas.entries()].filter(([, amount]) => Math.abs(roundGold(amount)) >= 0.05);
+    const oldScoreA = sideScore(priorMatchup, 'A');
+    const oldScoreB = sideScore(priorMatchup, 'B');
+    const newScoreA = sideScore(matchup, 'A');
+    const newScoreB = sideScore(matchup, 'B');
+    const financialChanged = nonzero.length > 0;
+    const outcomeChanged = financialChanged
+      || Boolean(priorOutcome.tie) !== Boolean(desired.tie)
+      || String(priorOutcome.winnerId || '') !== String(desired.winnerId || '')
+      || roundGold(priorOutcome.marginGoldAwarded) !== roundGold(desired.marginGoldAwarded)
+      || roundGold(priorOutcome.theftGoldStolen) !== roundGold(desired.theftGoldStolen)
+      || Number(oldScoreA) !== Number(newScoreA)
+      || Number(oldScoreB) !== Number(newScoreB);
+    if (!outcomeChanged) return false;
+
+    const revision = Math.max(0, Math.trunc(Number(priorOutcome.adjustmentRevision) || 0)) + (financialChanged ? 1 : 0);
+    const adjustedAtISO = new Date().toISOString();
+    const matchupId = String(matchup?.id || matchup?.matchupId || matchupKey(matchup));
+    const date = rowDateKey(matchup) || rowDateKey(priorMatchup);
+    const seasonId = String(matchup?.seasonId || priorMatchup?.seasonId || '');
+
+    if (financialChanged) {
+      nonzero.forEach(([playerId, rawAmount]) => {
+        const amount = roundGold(rawAmount);
+        appendAdjustment(state, {
+          id: `gold:${safeId(matchupKey(matchup))}:adjust:${revision}:${safeId(playerId)}`,
+          type: 'matchup_adjustment',
+          playerId,
+          opponentId: playerId === String(desired.winnerId || '') ? String(desired.loserId || '') : String(desired.winnerId || ''),
+          matchupId,
+          seasonId,
+          dateKey: date,
+          createdAtISO: adjustedAtISO,
+          amount,
+          meta: {
+            reason: 'retroactive_score_edit',
+            adjustmentRevision: revision,
+            oldScoreA,
+            oldScoreB,
+            newScoreA,
+            newScoreB,
+            oldWinnerId: String(priorOutcome.winnerId || ''),
+            newWinnerId: String(desired.winnerId || ''),
+            oldMarginGold: roundGold(priorOutcome.marginGoldAwarded),
+            newMarginGold: roundGold(desired.marginGoldAwarded),
+            oldTheftGold: roundGold(priorOutcome.theftGoldStolen),
+            newTheftGold: roundGold(desired.theftGoldStolen)
+          }
+        });
+      });
+    }
+
+    const updatedOutcome = {
+      ...desired,
+      adjustmentRevision: revision,
+      ...(financialChanged ? { adjustedAtISO } : {}),
+      adjustmentReason: financialChanged ? 'retroactive_score_edit' : String(priorOutcome.adjustmentReason || '')
+    };
+    applyOutcomeToCopies(state, matchup, updatedOutcome);
+    return true;
+  }
+
+  function reconcileEditedGold(stateInput, previousStateInput) {
+    const state = stateInput && typeof stateInput === 'object' ? stateInput : {};
+    const previous = previousStateInput && typeof previousStateInput === 'object' ? previousStateInput : {};
+    if (Number(state?.goldEconomy?.version) !== ECONOMY_VERSION || !Array.isArray(state?.goldLedger)) {
+      return { state, changed: false, adjustedMatchups: 0, adjustmentEntries: 0 };
+    }
+    const previousRows = Array.isArray(previous?.matchups) ? previous.matchups : [];
+    const previousByKey = new Map(previousRows.map((row, index) => [matchupKey(row, index), row]));
+    const beforeEntries = state.goldLedger.length;
+    let adjustedMatchups = 0;
+
+    (Array.isArray(state?.matchups) ? state.matchups : []).forEach((matchup, index) => {
+      if (!matchup) return;
+      const prior = previousByKey.get(matchupKey(matchup, index));
+      if (!prior) return;
+      if (reconcileOne(state, previous, matchup, prior)) adjustedMatchups += 1;
+    });
+
+    return {
+      state,
+      changed: adjustedMatchups > 0,
+      adjustedMatchups,
+      adjustmentEntries: Math.max(0, state.goldLedger.length - beforeEntries)
+    };
+  }
+
+  core.saveStateSnapshot = function saveStateSnapshotWithRetroactiveGoldAdjustments(state, options = {}) {
+    if (String(options?.savePath || '') === 'matchups-edit-result' && state && typeof state === 'object') {
+      const previous = readPersistedState();
+      if (previous) reconcileEditedGold(state, previous);
+    }
+    return originalSaveStateSnapshot(state, options);
+  };
+  core.saveStateSnapshot.__taskPointsRetroactiveGoldAdjustments = true;
+  core.saveStateSnapshot.__taskPointsOriginal = originalSaveStateSnapshot;
+
+  global.TaskPointsRetroactiveGoldScoreAdjustments = {
+    installed: true,
+    reconcileEditedGold,
+    desiredOutcome,
+    goldBalance
+  };
+})(typeof window !== 'undefined' ? window : globalThis);
