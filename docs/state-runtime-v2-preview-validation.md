@@ -159,3 +159,14 @@ The 16:49:52 trace from preview head `45348ec` confirms 0–1 ms hot edit/presen
 Regression coverage holds a presence request open while exercising the internal journal and generic mutation entry points, checks that both wait, and verifies all three commits without a revision conflict. Additional tests cover bounded/read-only mismatch reporting and failed/missing parity evidence.
 
 Next physical evidence: reload the updated stable branch preview, Start fresh test, and repeat completion, reorder, edit/save and temporary-Habit add. Keep interacting briefly, then leave the page visible and untouched for at least 20 seconds and Refresh evidence / Copy review before navigating away. Startup can reseed V2 when the legacy seed hash changes, so an idle-only reload is not sufficient to reproduce the original mismatch. No TaskPoints data reset is needed. The mismatch field report is needed before claiming parity is fixed or allowing V2 to own mutations. Main remains unchanged.
+
+
+## September 12 cache-aware parity comparison
+
+The 21:28 device review recorded all four mutation classes with zero mutation failures and 0–3 ms synchronous V2 overhead. Parity still failed: 46 Habits and four completion records differed, with no missing/extra/moved rows. Habit samples were dominated by `__streak`, `__completion`, and `__failedStreak`; some also included `updatedAtISO`. The original global sample cap hid all completion details.
+
+Home `renderHabits` recomputes those exact three double-underscore fields for display and sorting. Parity now compares a projection excluding only these three Habit fields. It reports the comparison scope and separate ignored-cache counts. This changes no persisted records, compatibility exports, display calculations, or production behavior. No other double-underscore fields are ignored, and completion records and timestamps remain strictly compared. The comparison hashes now describe this explicitly named projection.
+
+Mismatch sampling allows up to 20 entries **per collection** (40 total). Each sampled field includes presence/type/length/hash evidence; only bounded timestamp/day-key/scoring fields include scalar values. Arbitrary titles, names and record text are not copied into the report. Missing, extra, moved and duplicate-occurrence evidence remains available.
+
+Focused regression tests prove cache-only differences pass without mutating either store or compatibility exports; timestamp/unknown-field/completion differences still fail; and 46 Habit mismatches cannot crowd four completion mismatches out of the report. The remaining device timestamp/completion differences are not yet diagnosed or repaired. Repeat the short device sequence on the updated preview and capture Copy review before navigating away; no data reset is needed.

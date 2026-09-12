@@ -214,3 +214,68 @@ test('parity diagnostics cap samples while keeping full mismatch counts', async 
   assert.equal(result.differences.samples.length, 20);
   assert.equal(result.differences.truncated, true);
 });
+
+test('parity ignores only the three recomputed Habit caches without changing storage or exports', async () => {
+  const initial = { habits: [{ ...baseHabit('h1', 'Read', '', 0), __streak: 2, __completion: 50, __failedStreak: 0 }], completions: [] };
+  const { api, localStorage, indexedDB } = install(initial);
+  await api.seedFromLegacy();
+  const before = JSON.stringify(indexedDB.dump(DB_NAME));
+  const changed = structuredClone(initial);
+  changed.habits[0].__streak = 3;
+  changed.habits[0].__completion = 75;
+  delete changed.habits[0].__failedStreak;
+  const raw = JSON.stringify(changed);
+  localStorage.setItem(LEGACY_KEY, raw);
+  const result = await api.verifyParity();
+  assert.equal(result.match, true);
+  assert.equal(result.expectedHash, result.actualHash);
+  assert.equal(result.differences, null);
+  assert.equal(result.ignoredDerivedCacheDifferences.records, 1);
+  assert.equal(result.ignoredDerivedCacheDifferences.fields.__failedStreak, 1);
+  assert.equal(localStorage.getItem(LEGACY_KEY), raw);
+  assert.equal(JSON.stringify(indexedDB.dump(DB_NAME)), before);
+  assert.equal((await api.buildCompatibilitySnapshot()).habits[0].__streak, 2);
+});
+
+test('Habit timestamps, unknown double-underscore fields and every completion field remain strict', async () => {
+  const initial = { habits: [{ ...baseHabit('h1', 'Read', '', 0), updatedAtISO: '2026-09-12T12:00:00.000Z' }], completions: [{ id: 'c1', points: 4, __streak: 1 }] };
+  const { api, localStorage } = install(initial);
+  await api.seedFromLegacy();
+  initial.habits[0].updatedAtISO = '2026-09-12T12:00:01.000Z';
+  initial.habits[0].__other = 7;
+  initial.completions[0].__streak = 2;
+  localStorage.setItem(LEGACY_KEY, JSON.stringify(initial));
+  const result = await api.verifyParity();
+  assert.equal(result.match, false);
+  const habit = result.differences.samples.find((row) => row.collection === 'habits');
+  assert.equal(habit.fields.includes('updatedAtISO'), true);
+  assert.equal(habit.fields.includes('__other'), true);
+  const timestamp = habit.fieldDetails.find((row) => row.field === 'updatedAtISO');
+  assert.equal(timestamp.expected.value, '2026-09-12T12:00:01.000Z');
+  assert.equal(timestamp.actual.value, '2026-09-12T12:00:00.000Z');
+  assert.equal(result.differences.collections.completions.changed, 1);
+});
+
+test('forty-six Habit mismatches cannot crowd four completion mismatches out of the report', async () => {
+  const initial = {
+    habits: Array.from({ length: 46 }, (_, i) => ({ ...baseHabit(`h${i}`, 'Read', '', i), __streak: 0, updatedAtISO: 'before' })),
+    completions: Array.from({ length: 4 }, (_, i) => ({ id: `c${i}`, points: 4, title: 'Private original title' }))
+  };
+  const { api, localStorage } = install(initial);
+  await api.seedFromLegacy();
+  for (const habit of initial.habits) { habit.__streak = 1; habit.updatedAtISO = 'after'; }
+  for (const completion of initial.completions) { completion.points = 8; completion.title = 'Private changed title'; }
+  localStorage.setItem(LEGACY_KEY, JSON.stringify(initial));
+  const result = await api.verifyParity();
+  assert.equal(result.match, false);
+  assert.equal(result.ignoredDerivedCacheDifferences.records, 46);
+  assert.equal(result.differences.sampleCounts.habits, 20);
+  assert.equal(result.differences.sampleCounts.completions, 4);
+  assert.equal(result.differences.samples.length, 24);
+  assert.equal(result.differences.sampleLimitPerCollection, 20);
+  assert.equal(result.differences.truncated, true);
+  const completion = result.differences.samples.find((row) => row.collection === 'completions');
+  assert.equal(completion.fieldDetails.find((row) => row.field === 'points').expected.value, 8);
+  assert.equal(completion.fieldDetails.find((row) => row.field === 'points').actual.value, 4);
+  assert.equal(JSON.stringify(result).includes('Private'), false);
+});

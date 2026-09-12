@@ -1818,12 +1818,29 @@
     };
   }
 
+  // Home renderHabits recomputes exactly these fields for display/sorting.
+  // Exclude them only from parity; stored records and compatibility exports stay intact.
+  const DERIVED_HABIT_CACHE_FIELDS = ['__streak', '__completion', '__failedStreak'];
+  function paritySubset(state) {
+    return {
+      habits: (state.habits || []).map((habit) => {
+        if (!habit || typeof habit !== 'object') return habit;
+        const copy = { ...habit };
+        for (const field of DERIVED_HABIT_CACHE_FIELDS) delete copy[field];
+        return copy;
+      }),
+      completions: state.completions || []
+    };
+  }
+
   // Diagnostic only: run alongside idle/explicit parity, never on mutation capture.
-  // Preserve ordering and duplicate IDs; expose field names, not record contents.
+  // Preserve ordering and duplicate IDs; expose bounded field diagnostics, not full records.
   function parityDifferences(expected, actual) {
     const samples = [];
     const collections = {};
     const limit = 20;
+    const sampleCounts = { habits: 0, completions: 0 };
+    const ignoredDerivedCacheDifferences = { records: 0, fields: Object.fromEntries(DERIVED_HABIT_CACHE_FIELDS.map((field) => [field, 0])) };
     for (const collection of ['habits', 'completions']) {
       const left = expected[collection] || [];
       const right = actual[collection] || [];
@@ -1843,11 +1860,26 @@
       const counts = { missing: 0, extra: 0, changed: 0, moved: 0 };
       const add = (row, kind, other, fields = []) => {
         counts[kind] += 1;
-        if (samples.length < limit) samples.push({
+        if (sampleCounts[collection] >= limit) return;
+        sampleCounts[collection] += 1;
+        samples.push({
           collection, kind, id: row.id, occurrence: row.occurrence,
           expectedIndex: kind === 'extra' ? null : row.position,
           actualIndex: kind === 'missing' ? null : (other || row).position,
-          fields: fields.slice(0, 20), fieldsTruncated: fields.length > 20
+          fields: fields.slice(0, 20), fieldsTruncated: fields.length > 20,
+          fieldDetails: fields.slice(0, 20).map((field) => {
+            const describe = (record) => {
+              if (!Object.prototype.hasOwnProperty.call(record || {}, field)) return { present: false };
+              const value = record[field];
+              const text = stableJson(value) ?? 'undefined';
+              const summary = { present: true, type: value === null ? 'null' : typeof value, hash: fnv1a(text), length: text.length };
+              // Bounded timing/scoring evidence; names, titles and arbitrary text stay out.
+              if (['updatedAtISO', 'completedAtISO', 'dayKey', 'points', 'completionFraction'].includes(field)
+                && (value === null || typeof value === 'number' || (typeof value === 'string' && value.length <= 40))) summary.value = value;
+              return summary;
+            };
+            return { field, expected: describe(row.value), actual: describe(other?.value) };
+          })
         });
       };
       for (const row of leftRows) {
@@ -1856,16 +1888,23 @@
         rightMap.delete(row.key);
         if (row.position !== other.position) add(row, 'moved', other);
         if (stableJson(row.value) !== stableJson(other.value)) {
-          const fields = [...new Set([...Object.keys(row.value || {}), ...Object.keys(other.value || {})])]
-            .filter((field) => stableJson(row.value?.[field]) !== stableJson(other.value?.[field]));
-          add(row, 'changed', other, fields);
+          const allFields = [...new Set([...Object.keys(row.value || {}), ...Object.keys(other.value || {})])]
+            .filter((field) => Object.prototype.hasOwnProperty.call(row.value || {}, field) !== Object.prototype.hasOwnProperty.call(other.value || {}, field)
+              || stableJson(row.value?.[field]) !== stableJson(other.value?.[field]));
+          const ignored = collection === 'habits' ? allFields.filter((field) => DERIVED_HABIT_CACHE_FIELDS.includes(field)) : [];
+          if (ignored.length) {
+            ignoredDerivedCacheDifferences.records += 1;
+            for (const field of ignored) ignoredDerivedCacheDifferences.fields[field] += 1;
+          }
+          const fields = allFields.filter((field) => !ignored.includes(field));
+          if (fields.length) add(row, 'changed', other, fields);
         }
       }
       for (const row of rightMap.values()) add(row, 'extra');
       collections[collection] = counts;
     }
     const total = Object.values(collections).reduce((sum, counts) => sum + Object.values(counts).reduce((a, b) => a + b, 0), 0);
-    return { collections, samples, truncated: total > samples.length, sampleLimit: limit };
+    return { collections, samples, sampleCounts, truncated: total > samples.length, sampleLimit: limit * 2, sampleLimitPerCollection: limit, ignoredDerivedCacheDifferences };
   }
 
   async function verifyParity() {
@@ -1877,14 +1916,20 @@
       return lastParity;
     }
     const collections = await readV2Collections();
-    const expectedText = stableJson(sourceSubset(source.state));
-    const actualText = stableJson(collections);
+    const expected = sourceSubset(source.state);
+    const expectedText = stableJson(paritySubset(expected));
+    const actualText = stableJson(paritySubset(collections));
+    const hasRawDifferences = expectedText !== actualText || stableJson(expected.habits) !== stableJson(collections.habits);
+    const diagnostics = hasRawDifferences ? parityDifferences(expected, collections) : null;
     lastParity = {
       checked: true,
       match: expectedText === actualText,
       expectedHash: `${fnv1a(expectedText)}:${expectedText.length}`,
       actualHash: `${fnv1a(actualText)}:${actualText.length}`,
-      differences: expectedText === actualText ? null : parityDifferences(sourceSubset(source.state), collections),
+      comparisonScope: 'authoritative_records_excluding_three_home_display_caches',
+      ignoredHabitCacheFields: [...DERIVED_HABIT_CACHE_FIELDS],
+      ignoredDerivedCacheDifferences: diagnostics?.ignoredDerivedCacheDifferences || null,
+      differences: expectedText === actualText ? null : diagnostics,
       expectedCounts: { habits: source.state.habits.length, completions: source.state.completions.length },
       actualCounts: { habits: collections.habits.length, completions: collections.completions.length },
       checkedAtISO: nowIso()
