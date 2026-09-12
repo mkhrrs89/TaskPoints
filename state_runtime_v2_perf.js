@@ -5,6 +5,7 @@
   const core = global?.TaskPointsCore;
   if (!global || !runtime || global.TaskPointsStateRuntimeV2Perf?.installed) return;
 
+  const readRuntimeStatus = typeof runtime.getStatus === 'function' ? runtime.getStatus.bind(runtime) : () => ({});
   const now = () => global.performance?.now?.() ?? Date.now();
   const MUTATION_KINDS = ['completion', 'order', 'edit', 'presence'];
   const counters = {
@@ -282,7 +283,11 @@
       && Number(maintenanceIdle.deepQuietReleases || 0) > 0
       && Number(maintenanceIdle.executed || 0) > 0
     );
-    const noV2FailuresObserved = counters.asyncFailures === 0
+    const runtimeStatus = readRuntimeStatus();
+    const parityMismatchObserved = runtimeStatus?.lastParity?.checked === true && runtimeStatus.lastParity.match === false;
+    const noV2FailuresObserved = !parityMismatchObserved
+      && Number(runtimeStatus?.mirrorFailures || 0) === 0
+      && counters.asyncFailures === 0
       && Number(maintenanceIdle?.failures || 0) === 0
       && Number(serialization?.failures || 0) === 0;
 
@@ -294,6 +299,7 @@
       noDirectForegroundMaintenanceObserved: directForegroundMaintenanceCalls === 0,
       automaticParityDeepIdleObserved,
       noV2FailuresObserved,
+      parityMismatchObserved,
       deepQuietMs: Number.isFinite(Number(maintenanceIdle?.deepQuietMs)) ? Number(maintenanceIdle.deepQuietMs) : null,
       physicalDeviceEvidenceStillRequired: true
     };

@@ -222,7 +222,20 @@
     };
   }
 
-  function failureEvidence(events, status, mutationClasses) {
+  function parityEvidence(events, status) {
+    const checks = events.filter((event) => event.name === 'stateV2.parityChecked').map(detailObject);
+    const last = status?.lastParity;
+    if (last?.checked === true) checks.push(last);
+    const mismatches = checks.filter((check) => check.match === false);
+    return {
+      observed: checks.some((check) => check.checked === true),
+      mismatchObserved: mismatches.length > 0,
+      matchConfirmed: checks.some((check) => check.checked === true && check.match === true) && mismatches.length === 0,
+      lastCheck: last || checks[checks.length - 1] || null
+    };
+  }
+
+  function failureEvidence(events, status, mutationClasses, parity) {
     const failedEvents = events.filter((event) => {
       const name = String(event?.name || '');
       if (!name.startsWith('stateV2.')) return false;
@@ -238,10 +251,13 @@
       + runtimeMirrorFailures;
     return {
       failedEventCount: failedEvents.length,
+      failedEvents: failedEvents.slice(-20).map((event) => ({ name: event.name, page: event.__pagePath, epochMs: event.epochMs, detail: detailObject(event) })),
+      parityMismatchObserved: parity.mismatchObserved,
       mutationFailureCount: classFailures,
       subsystemFailureCount: subsystemFailures,
       runtimeMirrorFailureCount: runtimeMirrorFailures,
       noV2FailuresObserved: failedEvents.length === 0
+        && !parity.mismatchObserved
         && classFailures === 0
         && subsystemFailures === 0
         && acceptance.noV2FailuresObserved !== false
@@ -300,13 +316,14 @@
     const mutationClasses = observedMutationClasses(events, status);
     const maintenance = maintenanceEvidence(events, status);
     const preemption = preemptionEvidence(events, maintenance.deepQuietMs);
-    const failures = failureEvidence(events, status, mutationClasses);
+    const parity = parityEvidence(events, status);
+    const failures = failureEvidence(events, status, mutationClasses, parity);
     const legacyCandidates = legacyFullStateCandidates(events);
     const allMutationClassesObserved = MUTATION_KINDS.every((kind) => mutationClasses[kind].observed === true);
     const noDirectForegroundMaintenanceObserved = maintenance.directForegroundMaintenanceCount === 0;
 
     return {
-      schemaVersion: 3,
+      schemaVersion: 4,
       reportGeneratedAtISO: report?.generatedAtISO || null,
       pageCount: Array.isArray(report?.pages) ? report.pages.length : 0,
       eventCount: events.length,
@@ -315,6 +332,7 @@
       maintenance,
       preemption,
       failures,
+      parity,
       noDirectForegroundMaintenanceObserved,
       automaticParityDeepIdleObserved: maintenance.automaticParityDeepIdleObserved,
       interactionPreemptionObserved: preemption.observed,
@@ -326,14 +344,15 @@
         && noDirectForegroundMaintenanceObserved
         && maintenance.automaticParityDeepIdleObserved
         && preemption.observed
-        && failures.noV2FailuresObserved,
+        && failures.noV2FailuresObserved
+        && parity.matchConfirmed,
       physicalDeviceEvidenceMustBeConfirmedByTester: true
     };
   }
 
   const api = {
     installed: true,
-    version: 4,
+    version: 5,
     review,
     flattenEvents
   };

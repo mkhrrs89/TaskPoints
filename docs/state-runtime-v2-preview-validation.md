@@ -1,6 +1,6 @@
 # State Runtime V2 — Preview Validation Evidence
 
-Updated: 2026-09-11
+Updated: 2026-09-12
 
 This document tracks evidence for the Habits/completions V2 dark-mirror pilot and the Step 4 performance-validation phase.
 
@@ -144,3 +144,18 @@ The V2 CI gate now:
 9. runs the full `npm test` suite as a supplemental diagnostic.
 
 The live-main workflow intentionally avoids requiring another manually maintained failure list whenever `main` advances.
+
+
+## September 12 iPhone trace follow-up
+
+The 16:49:52 trace from preview head `45348ec` confirms 0–1 ms hot edit/presence capture, but does **not** pass the device gate:
+
+- A completion expected revision 75 while a presence mutation committed revision 76. The same completion ID then committed at revision 77. Internal lexical apply calls bypassed the public serialization guard; internal enqueue and generic mutation dispatch now use the wrapped public methods. Revision/generation checks remain intact.
+- Idle parity reported `match: false` with matching counts (65 Habits / 7,310 completions). Hashes alone cannot identify the differing records. No mismatch repair or reseed is justified by this trace.
+- Parity now produces bounded record IDs, occurrence/index information, mismatch counts and changed top-level field names, without exporting field values. This work runs only during existing idle/explicit parity. It does not mutate either data source.
+- Both trace review and runtime acceptance expose parity mismatch. The review requires affirmative matching parity and now displays nine checks, including data equality. Failed-event details survive in Copy review across the retained pages.
+- Long V2 transactions overlapped legacy loads and event-loop stalls. The queue fix is not a claim that legacy whole-state costs are removed.
+
+Regression coverage holds a presence request open while exercising the internal journal and generic mutation entry points, checks that both wait, and verifies all three commits without a revision conflict. Additional tests cover bounded/read-only mismatch reporting and failed/missing parity evidence.
+
+Next physical evidence: reload the updated stable branch preview with the existing data, leave it visible and untouched for at least 20 seconds, then Refresh evidence / Copy review. This diagnostic pass does not require another full mutation sequence or a data reset. The mismatch field report is needed before claiming parity is fixed or allowing V2 to own mutations. Main remains unchanged.

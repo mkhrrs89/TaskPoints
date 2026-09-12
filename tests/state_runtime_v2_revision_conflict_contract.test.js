@@ -35,7 +35,7 @@ function createCore() {
   };
 }
 
-function installRuntime(indexedDB, localStorage, label) {
+function installRuntime(indexedDB, localStorage, label, configure = () => {}) {
   let uuid = 0;
   const context = {
     indexedDB,
@@ -60,6 +60,7 @@ function installRuntime(indexedDB, localStorage, label) {
   context.window = context;
   context.globalThis = context;
   vm.runInNewContext(runtimeSource, context, { filename: `state_runtime_v2_${label}.js` });
+  configure(context);
   return context.TaskPointsStateRuntimeV2;
 }
 
@@ -152,4 +153,36 @@ test('duplicate mutation remains idempotent even when caller revision is stale',
   assert.equal(duplicate.duplicate, true);
   assert.equal(duplicate.mutationId, first.mutationId);
   assert.deepEqual(indexedDB.dump(DB_NAME), beforeDuplicate);
+});
+
+
+test('internal journal and generic mutation dispatch share the queue with an in-flight presence mutation', async () => {
+  const indexedDB = new FakeIndexedDB();
+  const storage = new FakeStorage({ [DARK_MODE_KEY]: '1', [LEGACY_KEY]: JSON.stringify(legacyState()) });
+  let context;
+  const runtime = installRuntime(indexedDB, storage, 'queue', (value) => { context = value; });
+  await runtime.startDarkMirror();
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  let started = false;
+  const presence = runtime.applyHabitPresenceSnapshot;
+  runtime.applyHabitPresenceSnapshot = async (...args) => { started = true; await gate; return presence(...args); };
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '..', 'state_runtime_v2_serialization_guard.js'), 'utf8'), context);
+  const before = runtime.getObservedRevision();
+  const adding = runtime.applyHabitPresenceSnapshot({ habitId: 'h2', exists: true, habit: { id: 'h2', name: 'New' } });
+  await Promise.resolve();
+  assert.equal(started, true);
+  context.TaskPointsCore.writePendingHabitDelta(delta('2026-09-01'));
+  const generic = runtime.applyMutation({ type: 'habit-completion-set', delta: delta('2026-09-02') });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(runtime.getObservedRevision(), before, 'internal paths must not bypass the held queue');
+  release();
+  await Promise.all([adding, generic]);
+  while (context.TaskPointsStateRuntimeV2SerializationGuard.getStatus().active) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.equal(runtime.getStatus().revisionConflicts, 0);
+  assert.equal(runtime.getStatus().mirrorFailures, 0);
+  assert.equal(runtime.getObservedRevision(), before + 3);
+  assert.equal((await runtime.getCompletionsForHabit('h1')).length, 2);
 });

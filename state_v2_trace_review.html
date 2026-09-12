@@ -58,6 +58,7 @@
       verdict('No direct foreground V2 maintenance', review.noDirectForegroundMaintenanceObserved),
       verdict('Automatic parity crossed deep-idle gate', review.automaticParityDeepIdleObserved),
       verdict('Interaction postponement observed', review.interactionPreemptionObserved, true),
+      verdict('V2 data matches legacy data', review.parity?.matchConfirmed === true),
       verdict('No V2 failures observed', review.failures?.noV2FailuresObserved === true),
       verdict('Core device-trace evidence complete', review.evidenceCompleteForDeviceTrace),
       `<div class="metric"><strong>Mutation classes</strong><span>${esc(classText)}</span></div>`,

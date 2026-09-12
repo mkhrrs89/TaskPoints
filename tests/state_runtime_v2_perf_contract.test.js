@@ -21,7 +21,7 @@ function install(options = {}) {
     enqueueHabitPresenceFromLegacy: () => Promise.resolve(true),
     verifyParity: async () => ({ match: true }),
     buildCompatibilitySnapshot: async () => ({ habits: [], completions: [] }),
-    getStatus: () => ({ installed: true, darkEnabled: true, hookInstalled: options.publicCompletionEnqueue === false })
+    getStatus: () => ({ installed: true, darkEnabled: true, lastParity: options.lastParity, mirrorFailures: options.mirrorFailures || 0, hookInstalled: options.publicCompletionEnqueue === false })
   };
   if (options.publicCompletionEnqueue !== false) runtime.enqueueHabitDelta = () => Promise.resolve(true);
   const core = {
@@ -175,7 +175,7 @@ test('parity and compatibility work is labeled as heavyweight foreground mainten
 });
 
 test('dark Habit structure bridge loads performance instrumentation only through the dark preview path', () => {
-  assert.match(structureBridge, /script\.src = '\/state_runtime_v2_perf\.js\?v=20260911-5'/);
+  assert.match(structureBridge, /script\.src = '\/state_runtime_v2_perf\.js\?v=20260912-1'/);
   assert.match(structureBridge, /if \(!isEnabled\(\) \|\| global\.TaskPointsStateRuntimeV2Perf\?\.installed/);
   assert.match(structureBridge, /loadPerfInstrumentation\(\);\s*loadLiveTraceReview\(\);\s*return install\(\);/);
 });
@@ -198,4 +198,11 @@ test('V2 preview loads a shared serializer that deduplicates and sequences mutat
   assert.match(serializationGuard, /applyHabitOrderOverlay/);
   assert.match(serializationGuard, /applyHabitEditSnapshot/);
   assert.match(serializationGuard, /applyHabitPresenceSnapshot/);
+});
+
+
+test('runtime acceptance cannot hide parity mismatch behind clean async counters', () => {
+  const { context, runtime } = install({ lastParity: { checked: true, match: false } });
+  assert.equal(context.TaskPointsStateRuntimeV2Perf.getAcceptanceSnapshot().noV2FailuresObserved, false);
+  assert.equal(runtime.getStatus().traceDiagnostics.acceptance.parityMismatchObserved, true);
 });

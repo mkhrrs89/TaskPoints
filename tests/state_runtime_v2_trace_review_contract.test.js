@@ -8,6 +8,7 @@ function baseReport(extraEvents = []) {
   return {
     generatedAtISO: '2026-09-11T16:00:00.000Z',
     stateRuntimeV2Status: {
+      lastParity: { checked: true, match: true },
       traceDiagnostics: {
         maintenanceIdle: {
           deepQuietMs: 20000,
@@ -49,7 +50,7 @@ function baseReport(extraEvents = []) {
 test('review recognizes complete four-class device trace evidence and deep-idle preemption', () => {
   const result = reviewer.review(baseReport());
 
-  assert.equal(result.schemaVersion, 3);
+  assert.equal(result.schemaVersion, 4);
   assert.equal(result.allMutationClassesObserved, true);
   assert.equal(result.mutationClasses.completion.observed, true);
   assert.equal(result.mutationClasses.order.observed, true);
@@ -220,4 +221,32 @@ test('review remains conservative when mutation classes or deep-idle evidence ar
   assert.equal(result.evidenceCompleteForDeviceTrace, false);
   assert.equal(result.legacyFullStateCandidates.length, 0);
   assert.equal(result.legacyForegroundCorrelationStillRequired, false);
+});
+
+
+test('failed parity blocks clean counters even after its event leaves the trace ring', () => {
+  const report = baseReport();
+  report.stateRuntimeV2Status.lastParity = { checked: true, match: false, differences: { samples: [{ id: 'h1', fields: ['name'] }] } };
+  const result = reviewer.review(report);
+  assert.equal(result.parity.matchConfirmed, false);
+  assert.equal(result.failures.parityMismatchObserved, true);
+  assert.equal(result.failures.noV2FailuresObserved, false);
+  assert.equal(result.evidenceCompleteForDeviceTrace, false);
+  assert.equal(result.parity.lastCheck.differences.samples[0].id, 'h1');
+});
+
+test('missing parity evidence cannot pass and previous-page mismatches survive clean current status', () => {
+  const report = baseReport();
+  delete report.stateRuntimeV2Status.lastParity;
+  assert.equal(reviewer.review(report).evidenceCompleteForDeviceTrace, false);
+  report.stateRuntimeV2Status.lastParity = { checked: true, match: true };
+  report.pages[0].events.push({ name: 'stateV2.parityChecked', epochMs: 29500, detail: { checked: true, match: false } });
+  assert.equal(reviewer.review(report).evidenceCompleteForDeviceTrace, false);
+});
+
+test('failure details identify the original revision conflict across page navigation', () => {
+  const report = baseReport([{ name: 'stateV2.darkMutationFailed', epochMs: 30100, detail: { message: 'state_runtime_v2_revision_conflict:meta:75:76' } }]);
+  const result = reviewer.review(report);
+  assert.equal(result.failures.failedEvents[0].detail.message, 'state_runtime_v2_revision_conflict:meta:75:76');
+  assert.equal(result.failures.failedEvents[0].page, '/');
 });

@@ -18,6 +18,7 @@ async function flushQueue() {
 
 function baseStatus() {
   return {
+    lastParity: { checked: true, match: true },
     mirroredMutations: 4,
     mirroredOrderMutations: 1,
     mirroredEditMutations: 1,

@@ -181,3 +181,36 @@ test('V2-17 a new V2 habit completion sorts ahead of preserved unrelated duplica
   assert.deepEqual(snapshot.completions.slice(1), legacy.completions);
   assert.equal(snapshot.completions.filter((row) => row.id === 'dup').length, 2);
 });
+
+
+test('parity identifies changed fields and reordered records without exposing values or repairing data', async () => {
+  const initial = { habits: [baseHabit('h1', 'Read', '', 0), baseHabit('h2', 'Walk', '', 1)], completions: [] };
+  const { api, localStorage, indexedDB } = install(initial);
+  await api.seedFromLegacy();
+  const before = JSON.stringify(indexedDB.dump(DB_NAME));
+  const changed = structuredClone(initial);
+  changed.habits[0].name = 'Private changed name';
+  changed.habits.reverse();
+  localStorage.setItem(LEGACY_KEY, JSON.stringify(changed));
+  const parity = await api.verifyParity();
+  assert.equal(parity.match, false);
+  assert.equal(parity.differences.collections.habits.changed, 1);
+  assert.equal(parity.differences.collections.habits.moved, 2);
+  const row = parity.differences.samples.find((sample) => sample.kind === 'changed');
+  assert.equal(row.id, 'h1');
+  assert.equal(Array.from(row.fields).join(','), 'name');
+  assert.equal(JSON.stringify(parity.differences).includes('Private changed name'), false);
+  assert.equal(JSON.stringify(indexedDB.dump(DB_NAME)), before);
+});
+
+test('parity diagnostics cap samples while keeping full mismatch counts', async () => {
+  const initial = { habits: Array.from({ length: 40 }, (_, i) => baseHabit(`h${i}`, 'Before', '', i)), completions: [] };
+  const { api, localStorage } = install(initial);
+  await api.seedFromLegacy();
+  initial.habits.forEach((habit) => { habit.name = 'After'; });
+  localStorage.setItem(LEGACY_KEY, JSON.stringify(initial));
+  const result = await api.verifyParity();
+  assert.equal(result.differences.collections.habits.changed, 40);
+  assert.equal(result.differences.samples.length, 20);
+  assert.equal(result.differences.truncated, true);
+});

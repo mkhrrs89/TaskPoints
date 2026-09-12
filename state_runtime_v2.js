@@ -1655,7 +1655,7 @@
     const snapshot = clone(delta);
     const expectedGeneration = currentGeneration();
     mirrorTail = mirrorTail
-      .then(() => applyHabitDelta(snapshot, { expectedGeneration }))
+      .then(() => api.applyHabitDelta(snapshot, { expectedGeneration }))
       .catch((error) => {
         mirrorFailures += 1;
         lastError = String(error?.message || error);
@@ -1672,10 +1672,10 @@
     mirrorTail = mirrorTail
       .then(async () => {
         try {
-          return await applyHabitOrderOverlay(snapshot, { expectedGeneration });
+          return await api.applyHabitOrderOverlay(snapshot, { expectedGeneration });
         } catch (error) {
           if (error?.code === 'STATE_RUNTIME_V2_REVISION_CONFLICT') {
-            return applyHabitOrderOverlay(snapshot, { expectedGeneration });
+            return api.applyHabitOrderOverlay(snapshot, { expectedGeneration });
           }
           throw error;
         }
@@ -1710,11 +1710,11 @@
     mirrorTail = mirrorTail
       .then(async () => {
         try {
-          return await applyHabitEditSnapshot(snapshot, { expectedGeneration });
+          return await api.applyHabitEditSnapshot(snapshot, { expectedGeneration });
         } catch (error) {
           if (error?.code === 'STATE_RUNTIME_V2_REVISION_CONFLICT') {
             const refreshed = captureHabitEditSnapshotFromLegacy(habitId, options);
-            return applyHabitEditSnapshot(refreshed, { expectedGeneration });
+            return api.applyHabitEditSnapshot(refreshed, { expectedGeneration });
           }
           throw error;
         }
@@ -1749,11 +1749,11 @@
     mirrorTail = mirrorTail
       .then(async () => {
         try {
-          return await applyHabitPresenceSnapshot(snapshot, { expectedGeneration });
+          return await api.applyHabitPresenceSnapshot(snapshot, { expectedGeneration });
         } catch (error) {
           if (error?.code === 'STATE_RUNTIME_V2_REVISION_CONFLICT') {
             const refreshed = captureHabitPresenceSnapshotFromLegacy(habitId, options);
-            return applyHabitPresenceSnapshot(refreshed, { expectedGeneration });
+            return api.applyHabitPresenceSnapshot(refreshed, { expectedGeneration });
           }
           throw error;
         }
@@ -1818,6 +1818,56 @@
     };
   }
 
+  // Diagnostic only: run alongside idle/explicit parity, never on mutation capture.
+  // Preserve ordering and duplicate IDs; expose field names, not record contents.
+  function parityDifferences(expected, actual) {
+    const samples = [];
+    const collections = {};
+    const limit = 20;
+    for (const collection of ['habits', 'completions']) {
+      const left = expected[collection] || [];
+      const right = actual[collection] || [];
+      const index = (rows) => {
+        const occurrences = new Map();
+        return rows.map((value, position) => {
+          const id = value?.id == null ? null : String(value.id);
+          const base = id === null ? `missing:${position}` : `id:${id}`;
+          const occurrence = occurrences.get(base) || 0;
+          occurrences.set(base, occurrence + 1);
+          return { key: `${base}:${occurrence}`, id, occurrence, position, value };
+        });
+      };
+      const leftRows = index(left);
+      const rightRows = index(right);
+      const rightMap = new Map(rightRows.map((row) => [row.key, row]));
+      const counts = { missing: 0, extra: 0, changed: 0, moved: 0 };
+      const add = (row, kind, other, fields = []) => {
+        counts[kind] += 1;
+        if (samples.length < limit) samples.push({
+          collection, kind, id: row.id, occurrence: row.occurrence,
+          expectedIndex: kind === 'extra' ? null : row.position,
+          actualIndex: kind === 'missing' ? null : (other || row).position,
+          fields: fields.slice(0, 20), fieldsTruncated: fields.length > 20
+        });
+      };
+      for (const row of leftRows) {
+        const other = rightMap.get(row.key);
+        if (!other) { add(row, 'missing'); continue; }
+        rightMap.delete(row.key);
+        if (row.position !== other.position) add(row, 'moved', other);
+        if (stableJson(row.value) !== stableJson(other.value)) {
+          const fields = [...new Set([...Object.keys(row.value || {}), ...Object.keys(other.value || {})])]
+            .filter((field) => stableJson(row.value?.[field]) !== stableJson(other.value?.[field]));
+          add(row, 'changed', other, fields);
+        }
+      }
+      for (const row of rightMap.values()) add(row, 'extra');
+      collections[collection] = counts;
+    }
+    const total = Object.values(collections).reduce((sum, counts) => sum + Object.values(counts).reduce((a, b) => a + b, 0), 0);
+    return { collections, samples, truncated: total > samples.length, sampleLimit: limit };
+  }
+
   async function verifyParity() {
     if (!isDarkEnabled()) return { checked: false, reason: 'dark_disabled' };
     await seedFromLegacy();
@@ -1834,6 +1884,7 @@
       match: expectedText === actualText,
       expectedHash: `${fnv1a(expectedText)}:${expectedText.length}`,
       actualHash: `${fnv1a(actualText)}:${actualText.length}`,
+      differences: expectedText === actualText ? null : parityDifferences(sourceSubset(source.state), collections),
       expectedCounts: { habits: source.state.habits.length, completions: source.state.completions.length },
       actualCounts: { habits: collections.habits.length, completions: collections.completions.length },
       checkedAtISO: nowIso()
@@ -1918,25 +1969,25 @@
     seedFromLegacy,
     applyMutation(mutation) {
       if (mutation?.type === 'habit-completion-set' && mutation?.delta) {
-        return applyHabitDelta(mutation.delta, {
+        return api.applyHabitDelta(mutation.delta, {
           expectedGeneration: mutation.generation || undefined,
           expectedRevision: mutation.expectedRevision ?? undefined
         });
       }
       if (mutation?.type === 'habit-order-set' && mutation?.overlay) {
-        return applyHabitOrderOverlay(mutation.overlay, {
+        return api.applyHabitOrderOverlay(mutation.overlay, {
           expectedGeneration: mutation.generation || undefined,
           expectedRevision: mutation.expectedRevision ?? undefined
         });
       }
       if (mutation?.type === 'habit-edit-sync' && mutation?.snapshot) {
-        return applyHabitEditSnapshot(mutation.snapshot, {
+        return api.applyHabitEditSnapshot(mutation.snapshot, {
           expectedGeneration: mutation.generation || undefined,
           expectedRevision: mutation.expectedRevision ?? undefined
         });
       }
       if (mutation?.type === 'habit-presence-sync' && mutation?.snapshot) {
-        return applyHabitPresenceSnapshot(mutation.snapshot, {
+        return api.applyHabitPresenceSnapshot(mutation.snapshot, {
           expectedGeneration: mutation.generation || undefined,
           expectedRevision: mutation.expectedRevision ?? undefined
         });
