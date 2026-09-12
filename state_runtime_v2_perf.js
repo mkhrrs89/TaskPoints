@@ -53,7 +53,7 @@
     if (global.TaskPointsStateRuntimeV2SerializationGuard?.installed || !global.document?.createElement) return true;
     if (global.document.querySelector?.('script[data-taskpoints-state-v2-serialization-guard]')) return true;
     const script = global.document.createElement('script');
-    script.src = '/state_runtime_v2_serialization_guard.js';
+    script.src = '/state_runtime_v2_serialization_guard.js?v=20260912-1';
     script.defer = true;
     script.dataset.taskpointsStateV2SerializationGuard = 'true';
     (global.document.head || global.document.documentElement)?.appendChild?.(script);

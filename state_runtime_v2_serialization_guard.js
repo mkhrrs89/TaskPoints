@@ -36,6 +36,7 @@
       serialized = JSON.stringify([
         kind,
         options?.expectedGeneration || null,
+        options?.expectedRevision ?? null,
         payload
       ]);
     } catch (_) {

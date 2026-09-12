@@ -115,3 +115,11 @@ test('truly adjacent identical in-flight requests still coalesce', async () => {
   assert.equal(dedupeMark.detail.phase, 'inflight');
   assert.equal(dedupeMark.detail.adjacent, true);
 });
+
+
+test('requests with distinct explicit revision preconditions never reuse a cached result', async () => {
+  const { runtime, calls } = install();
+  await runtime.applyHabitDelta(payload('full'), { expectedRevision: 1 });
+  await runtime.applyHabitDelta(payload('full'), { expectedRevision: 2 });
+  assert.deepEqual(calls, ['full', 'full']);
+});
