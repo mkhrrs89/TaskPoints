@@ -124,7 +124,8 @@
       done: delta.done === true,
       failed: delta.failed === true,
       icy: delta.icy === true,
-      updatedAtISO: delta.updatedAtISO || null
+      updatedAtISO: delta.updatedAtISO || null,
+      ...(delta.completedAtISO ? { completedAtISO: delta.completedAtISO } : {})
     });
     return `habit-delta:${fnv1a(identity)}:${identity.length}`;
   }

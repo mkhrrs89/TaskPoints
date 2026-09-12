@@ -418,7 +418,8 @@
       done: delta.done === true,
       failed: delta.failed === true,
       icy: delta.icy === true,
-      updatedAtISO: delta.updatedAtISO || null
+      updatedAtISO: delta.updatedAtISO || null,
+      ...(delta.completedAtISO ? { completedAtISO: delta.completedAtISO } : {})
     });
     return `habit-delta:${fnv1a(identity)}:${identity.length}`;
   }
@@ -454,7 +455,7 @@
       taskId: completionId,
       title: `[${delta.source === 'vice' ? 'Vice' : 'Habit'}] ${habit?.name || ''} (${delta.dayKey})`,
       points,
-      completedAtISO: delta.updatedAtISO,
+      completedAtISO: delta.completedAtISO || delta.updatedAtISO,
       source: delta.source,
       habitId: delta.habitId,
       dayKey: delta.dayKey,
@@ -686,7 +687,10 @@
     return {
       version: Number(source.version || 1),
       updatedAtISO: source.updatedAtISO || nowIso(),
-      orders
+      orders,
+      ...(source.habitUpdatedAtISO && typeof source.habitUpdatedAtISO === 'object'
+        ? { habitUpdatedAtISO: Object.fromEntries(Object.keys(orders).filter((id) => typeof source.habitUpdatedAtISO[id] === 'string').map((id) => [id, source.habitUpdatedAtISO[id]])) }
+        : {})
     };
   }
 
@@ -695,7 +699,8 @@
     const identity = stableJson({
       generation,
       updatedAtISO: overlay.updatedAtISO,
-      orders: overlay.orders
+      orders: overlay.orders,
+      ...(overlay.habitUpdatedAtISO ? { habitUpdatedAtISO: overlay.habitUpdatedAtISO } : {})
     });
     return `habit-order:${fnv1a(identity)}:${identity.length}`;
   }
@@ -814,8 +819,11 @@
             const habitId = String(row?.id || '');
             if (!habitId || !Object.prototype.hasOwnProperty.call(overlay.orders, habitId) || !row?.value) return;
             const nextOrder = Number(overlay.orders[habitId]);
-            if (!Number.isFinite(nextOrder) || Number(row.value.order) === nextOrder) return;
+            const timestamp = overlay.habitUpdatedAtISO?.[habitId];
+            const newerTimestamp = typeof timestamp === 'string' && timestamp > String(row.value.updatedAtISO || '');
+            if (!Number.isFinite(nextOrder) || (Number(row.value.order) === nextOrder && !newerTimestamp)) return;
             const nextHabit = { ...clone(row.value), order: nextOrder };
+            if (newerTimestamp) nextHabit.updatedAtISO = timestamp;
             habitsStore.put({ ...row, id: habitId, value: nextHabit });
             changedHabitIds.push(habitId);
           });

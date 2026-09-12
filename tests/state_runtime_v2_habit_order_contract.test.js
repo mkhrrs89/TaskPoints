@@ -201,3 +201,17 @@ test('production reorder overlay is persisted before V2 is queued, and replay qu
   assert.match(applyBody, /queueV2OrderMirror\(overlay, 'overlay-already-compacted'\)/);
   assert.match(fastPathSource, /enqueueHabitOrderOverlay/);
 });
+
+test('reorder carries individual Habit timestamps, including order-neutral updates, without replacing newer edits', async () => {
+  const { api } = installRuntime();
+  await api.seedFromLegacy();
+  const times = { h1: '2026-09-12T21:40:14.208Z', h2: '2026-09-12T21:40:14.549Z' };
+  await api.applyHabitOrderOverlay({ orders: { h1: 2, h2: 1 }, updatedAtISO: '2026-09-12T21:40:15.000Z', habitUpdatedAtISO: times });
+  assert.equal((await api.getHabit('h1')).updatedAtISO, times.h1);
+  assert.equal((await api.getHabit('h2')).updatedAtISO, times.h2);
+  const newer = '2026-09-12T21:41:00.000Z';
+  await api.applyHabitOrderOverlay({ orders: { h1: 2, h2: 1 }, updatedAtISO: newer, habitUpdatedAtISO: { h1: newer } });
+  assert.equal((await api.getHabit('h1')).updatedAtISO, newer);
+  await api.applyHabitOrderOverlay({ orders: { h1: 1, h2: 2 }, updatedAtISO: '2026-09-12T21:42:00.000Z', habitUpdatedAtISO: times });
+  assert.equal((await api.getHabit('h1')).updatedAtISO, newer);
+});

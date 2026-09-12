@@ -279,3 +279,26 @@ test('forty-six Habit mismatches cannot crowd four completion mismatches out of 
   assert.equal(completion.fieldDetails.find((row) => row.field === 'points').actual.value, 4);
   assert.equal(JSON.stringify(result).includes('Private'), false);
 });
+
+test('backdated completion retains its canonical date through legacy replay and V2, independently of tap time', async () => {
+  const initial = { habits: [baseHabit('h1', 'Read', '', 1)], completions: [] };
+  const { api, localStorage } = install(initial);
+  await api.seedFromLegacy();
+  const delta = { habitId: 'h1', dayKey: '2026-09-10', source: 'habit', status: 'full', done: true,
+    updatedAtISO: '2026-09-12T21:40:08.329Z', completedAtISO: '2026-09-10T16:00:00.000Z' };
+  const coreSource = fs.readFileSync(path.join(__dirname, '..', 'scoring_core.js'), 'utf8');
+  const replaySource = coreSource.slice(coreSource.indexOf('  function applyPendingHabitDeltas('), coreSource.indexOf('  function verifyPersistedHabitDeltas('));
+  const context = { Date, console, global: {}, habitCompletionId: (id, day) => `habit:${id}:${day}` };
+  vm.runInNewContext(replaySource, context);
+  const legacy = structuredClone(initial);
+  context.applyPendingHabitDeltas(legacy, [delta]);
+  localStorage.setItem(LEGACY_KEY, JSON.stringify(legacy));
+  await api.applyHabitDelta(delta);
+  assert.equal((await api.verifyParity()).match, true);
+  assert.equal((await api.getCompletionsForHabit('h1'))[0].completedAtISO, delta.completedAtISO);
+  assert.equal((await api.getHabit('h1')).updatedAtISO, delta.updatedAtISO);
+  const fallback = structuredClone(initial);
+  const oldDelta = { ...delta }; delete oldDelta.completedAtISO;
+  context.applyPendingHabitDeltas(fallback, [oldDelta]);
+  assert.equal(fallback.completions[0].completedAtISO, delta.updatedAtISO);
+});

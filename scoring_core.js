@@ -83,7 +83,7 @@
         if (delta.icy === true) habit.iceKeys.push(delta.dayKey);
         const points = Number.isFinite(Number(delta.completionPoints)) ? Number(delta.completionPoints) : (Number(habit.pointsPerDay) || 0) * fraction;
         const completionId = habitCompletionId(habit.id, delta.dayKey);
-        state.completions.unshift({ id: completionId, taskId: completionId, title: `[${delta.source === 'vice' ? 'Vice' : 'Habit'}] ${habit.name} (${delta.dayKey})`, points, completedAtISO: delta.updatedAtISO, source: delta.source, habitId: habit.id, dayKey: delta.dayKey, completionFraction: fraction });
+        state.completions.unshift({ id: completionId, taskId: completionId, title: `[${delta.source === 'vice' ? 'Vice' : 'Habit'}] ${habit.name} (${delta.dayKey})`, points, completedAtISO: delta.completedAtISO || delta.updatedAtISO, source: delta.source, habitId: habit.id, dayKey: delta.dayKey, completionFraction: fraction });
       } else if (failed) habit.failedKeys.push(delta.dayKey);
       habit.updatedAtISO = delta.updatedAtISO || habit.updatedAtISO;
       applied++; appliedDeltas.push(delta);

@@ -129,3 +129,11 @@ test('source explicitly uses the contract WAL and generation keys with synchrono
   assert.match(walSource, /localStorage\?\.setItem/);
   assert.doesNotMatch(walSource, /setTimeout\([^)]*appendHabitDelta/s);
 });
+
+test('WAL preserves canonical completion time and distinguishes timestamp corrections', () => {
+  const { api } = install({ [DARK]: '1' });
+  const delta = { ...deltaA, completedAtISO: '2026-08-31T16:00:00.000Z' };
+  const saved = api.appendHabitDelta(delta);
+  assert.equal(saved.row.delta.completedAtISO, delta.completedAtISO);
+  assert.notEqual(api.mutationIdForDelta(delta), api.mutationIdForDelta(deltaA));
+});

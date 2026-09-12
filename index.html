@@ -9562,6 +9562,7 @@ try {
     failed: Array.isArray(h.failedKeys) && h.failedKeys.includes(dayKey),
     icy: Array.isArray(h.iceKeys) && h.iceKeys.includes(dayKey),
     completionPoints: finalCompletion ? Number(finalCompletion.points) : null,
+    completedAtISO: finalCompletion?.completedAtISO || null,
     updatedAtISO: h.updatedAtISO,
     createdAtISO: new Date().toISOString()
   };
@@ -14188,15 +14189,16 @@ function tpPerfMark(label) {
       <input id="habitName" class="input" placeholder="Habit name">
     </label>
 
-    <label class="grid gap-1 text-sm font-medium mt-3">
-      Tag
-      <input id="habitTag" class="input" placeholder="Tag">
-    </label>
-
-    <label class="grid gap-1 text-sm font-medium mt-3">
-      Points
-      <input id="habitPts" class="input" type="number" placeholder="Pts">
-    </label>
+    <div class="mt-3" style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px">
+      <label class="grid gap-1 text-sm font-medium" style="min-width:0">
+        Tag
+        <input id="habitTag" class="input" style="width:100%;min-width:0" placeholder="Tag">
+      </label>
+      <label class="grid gap-1 text-sm font-medium" style="min-width:0">
+        Points
+        <input id="habitPts" class="input" style="width:100%;min-width:0" type="number" placeholder="Pts">
+      </label>
+    </div>
     <label class="mt-3 flex items-start gap-2 text-sm">
       <input id="habitHalfPointEnabledInput" type="checkbox" checked>
       <span>

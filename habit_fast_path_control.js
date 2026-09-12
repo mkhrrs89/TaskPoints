@@ -462,12 +462,13 @@
     return aKeys.every((key, index) => key === bKeys[index] && Number(a[key]) === Number(b[key]));
   }
 
-  function stateMatchesOrders(habits, orders) {
+  function stateMatchesOrders(habits, orders, timestamps = {}) {
     if (!Array.isArray(habits) || !orders || typeof orders !== 'object') return false;
     const byId = new Map(habits.filter(Boolean).map((habit) => [habit.id, habit]));
     return Object.entries(orders).every(([id, order]) => {
       const habit = byId.get(id);
-      return habit && Number(habit.order) === Number(order);
+      return habit && Number(habit.order) === Number(order)
+        && (!timestamps?.[id] || String(habit.updatedAtISO || '') >= timestamps[id]);
     });
   }
 
@@ -491,7 +492,8 @@
     const payload = {
       version: 1,
       updatedAtISO: new Date().toISOString(),
-      orders
+      orders,
+      habitUpdatedAtISO: Object.fromEntries((getHabits() || []).filter((habit) => habit?.id && typeof habit.updatedAtISO === 'string').map((habit) => [habit.id, habit.updatedAtISO]))
     };
     const raw = JSON.stringify(payload);
     global.localStorage?.setItem?.(OVERLAY_KEY, raw);
@@ -509,7 +511,7 @@
     const habits = getHabits();
     if (!overlay || !Array.isArray(habits)) return 0;
 
-    if (stateMatchesOrders(habits, overlay.orders)) {
+    if (stateMatchesOrders(habits, overlay.orders, overlay.habitUpdatedAtISO)) {
       queueV2OrderMirror(overlay, 'overlay-already-compacted');
       clearOverlay();
       lastReason = 'overlay_already_compacted';
@@ -520,8 +522,11 @@
     habits.forEach((habit) => {
       if (!habit?.id || !Object.prototype.hasOwnProperty.call(overlay.orders, habit.id)) return;
       const nextOrder = Number(overlay.orders[habit.id]);
-      if (!Number.isFinite(nextOrder) || Number(habit.order) === nextOrder) return;
+      const timestamp = overlay.habitUpdatedAtISO?.[habit.id];
+      const newerTimestamp = typeof timestamp === 'string' && timestamp > String(habit.updatedAtISO || '');
+      if (!Number.isFinite(nextOrder) || (Number(habit.order) === nextOrder && !newerTimestamp)) return;
       habit.order = nextOrder;
+      if (newerTimestamp) habit.updatedAtISO = timestamp;
       changed += 1;
     });
 
@@ -558,7 +563,7 @@
   function verifyCanonicalOverlay(overlay) {
     try {
       const stored = global.TaskPointsCore?.readTaskPointsStoredState?.('taskpoints_v1', {}) || null;
-      return Boolean(stored && stateMatchesOrders(stored.habits, overlay?.orders));
+      return Boolean(stored && stateMatchesOrders(stored.habits, overlay?.orders, overlay?.habitUpdatedAtISO));
     } catch (_) {
       return false;
     }

@@ -170,3 +170,15 @@ Home `renderHabits` recomputes those exact three double-underscore fields for di
 Mismatch sampling allows up to 20 entries **per collection** (40 total). Each sampled field includes presence/type/length/hash evidence; only bounded timestamp/day-key/scoring fields include scalar values. Arbitrary titles, names and record text are not copied into the report. Missing, extra, moved and duplicate-occurrence evidence remains available.
 
 Focused regression tests prove cache-only differences pass without mutating either store or compatibility exports; timestamp/unknown-field/completion differences still fail; and 46 Habit mismatches cannot crowd four completion mismatches out of the report. The remaining device timestamp/completion differences are not yet diagnosed or repaired. Repeat the short device sequence on the updated preview and capture Copy review before navigating away; no data reset is needed.
+
+
+## September 12 timestamp payload corrections and create-Habit layout
+
+The 21:41 device report narrowed strict parity to three Habit `updatedAtISO` fields and one backdated completion `completedAtISO`. Code inspection found two payload omissions:
+
+- Home reorder stamps the affected Habits individually, but the durable order overlay and V2 previously carried order numbers only. The overlay now carries per-Habit timestamps through replay, compaction verification, mutation identity and V2 commit. Older overlay timestamps cannot overwrite newer Habit timestamps; old overlays without this optional map retain their existing behavior.
+- Home already constructs a canonical completion time for the selected day, but the pending delta omitted it. The delta now carries `completedAtISO`, legacy journal replay and V2 honor it, and the V2 WAL identity includes it when present. Existing deltas without this optional value retain the previous timestamp fallback and identity.
+
+Strict timestamp parity remains enabled. Focused tests cover a September 10 completion tapped on September 12, per-Habit reorder timestamps, order-neutral timestamp updates, preservation of newer timestamps, and WAL timestamp retention/identity. These fixes still require physical-device verification.
+
+Create Habit now places Tag and Points in one equal-width grid row with shrinkable inputs, preserving both labels, controls, options and actions. Local browser layout validation was unavailable because the Playwright Chromium executable is not installed.
