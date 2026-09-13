@@ -8,8 +8,13 @@
   const TROPHY = '🏆';
   let installAttempts = 0;
   let championCounts = new Map();
+  let championNameCounts = new Map();
   let observer = null;
   let decorating = false;
+
+  function normalizeName(value) {
+    return String(value || '').trim().toLocaleLowerCase();
+  }
 
   function loadState() {
     try {
@@ -43,10 +48,91 @@
     return `index:${index}`;
   }
 
+  function playerNameForId(playerId, state) {
+    const id = String(playerId || '').trim();
+    if (!id) return '';
+    if (id === 'YOU') return String(state?.youName || '').trim() || 'You';
+
+    const candidates = [
+      ...(Array.isArray(state?.players) ? state.players : []),
+      ...(Array.isArray(state?.currentSeason?.playerPool) ? state.currentSeason.playerPool : []),
+      ...(Array.isArray(state?.currentSeason?.seeds) ? state.currentSeason.seeds : [])
+    ];
+    const player = candidates.find((candidate) => String(candidate?.id || candidate?.playerId || '').trim() === id);
+    return String(player?.name || player?.playerName || '').trim();
+  }
+
+  function playerIdForName(name, state, season = null) {
+    const target = normalizeName(name);
+    if (!target) return '';
+
+    if (normalizeName(state?.youName || 'You') === target) return 'YOU';
+
+    const candidates = [
+      ...(Array.isArray(state?.players) ? state.players : []),
+      ...(Array.isArray(season?.playerPool) ? season.playerPool : []),
+      ...(Array.isArray(season?.seeds) ? season.seeds : []),
+      ...(Array.isArray(season?.originalSeeds) ? season.originalSeeds : []),
+      ...(Array.isArray(season?.finalPlacements) ? season.finalPlacements : []),
+      ...(Array.isArray(season?.tournamentStats) ? season.tournamentStats : [])
+    ];
+
+    const match = candidates.find((candidate) => {
+      const candidateName = candidate?.name || candidate?.playerName;
+      return normalizeName(candidateName) === target;
+    });
+    return String(match?.id || match?.playerId || '').trim();
+  }
+
+  function winnerFromPlacementRows(season) {
+    const rows = [
+      ...(Array.isArray(season?.finalPlacements) ? season.finalPlacements : []),
+      ...(Array.isArray(season?.tournamentStats) ? season.tournamentStats : [])
+    ];
+    const champion = rows.find((row) => {
+      const finish = String(row?.finish || row?.placement || row?.result || '').trim().toLowerCase();
+      return finish === 'champion' || finish === 'winner' || Number(row?.finishTier) === 0;
+    });
+    if (!champion) return { id: '', name: '' };
+    return {
+      id: String(champion?.playerId || champion?.id || '').trim(),
+      name: String(champion?.playerName || champion?.name || '').trim()
+    };
+  }
+
+  function winnerFromSeriesArchive(season) {
+    const directFinals = season?.finalsSeries;
+    if (directFinals && typeof directFinals === 'object') {
+      const id = String(directFinals?.winnerId || '').trim();
+      const name = String(directFinals?.winnerName || '').trim();
+      if (id || name) return { id, name };
+    }
+
+    const archived = Array.isArray(season?.seriesResults) ? season.seriesResults : [];
+    const archivedFinal = archived.find((row) => String(row?.roundId || row?.roundName || '').trim().toLowerCase() === 'finals');
+    if (archivedFinal) {
+      const id = String(archivedFinal?.winnerId || '').trim();
+      const name = String(archivedFinal?.winnerName || '').trim();
+      if (id || name) return { id, name };
+    }
+
+    const seriesValues = season?.series && typeof season.series === 'object'
+      ? Object.values(season.series)
+      : [];
+    const liveFinal = seriesValues.find((row) => String(row?.roundId || row?.roundName || '').trim().toLowerCase() === 'finals');
+    if (liveFinal) {
+      const id = String(liveFinal?.winnerId || '').trim();
+      const name = String(liveFinal?.winnerName || '').trim();
+      if (id || name) return { id, name };
+    }
+
+    return { id: '', name: '' };
+  }
+
   function winnerFromFinalsRows(season) {
     const rows = (Array.isArray(season?.tournamentMatchupResults) ? season.tournamentMatchupResults : [])
       .filter((row) => String(row?.roundId || '').toLowerCase() === 'finals');
-    if (!rows.length) return '';
+    if (!rows.length) return { id: '', name: '' };
 
     const wins = new Map();
     rows.forEach((row) => {
@@ -61,57 +147,112 @@
       if (winnerId) wins.set(winnerId, (wins.get(winnerId) || 0) + 1);
     });
 
-    if (!wins.size) return '';
+    if (!wins.size) return { id: '', name: '' };
     const sorted = Array.from(wins.entries()).sort((a, b) => b[1] - a[1]);
+    let winnerId = sorted[0][0];
     if (sorted.length > 1 && sorted[0][1] === sorted[1][1]) {
-      const lastWinner = [...rows].reverse().map((row) => String(row?.winnerId || '').trim()).find(Boolean);
-      return lastWinner || '';
+      winnerId = [...rows].reverse().map((row) => String(row?.winnerId || '').trim()).find(Boolean) || winnerId;
     }
-    return sorted[0][0];
+    const row = [...rows].reverse().find((candidate) => String(candidate?.winnerId || '').trim() === winnerId) || rows[rows.length - 1];
+    const winnerName = winnerId === String(row?.playerAId || '').trim()
+      ? String(row?.playerAName || '').trim()
+      : winnerId === String(row?.playerBId || '').trim()
+        ? String(row?.playerBName || '').trim()
+        : '';
+    return { id: winnerId, name: winnerName };
   }
 
-  function championIdForSeason(season) {
-    const stored = String(
+  function championForSeason(season, state = {}) {
+    const directId = String(
       season?.championSummary?.championId
       || season?.championId
       || season?.champion?.playerId
       || season?.champion?.id
       || ''
     ).trim();
-    if (stored) return stored;
+    const directName = String(
+      season?.championSummary?.championName
+      || season?.championName
+      || season?.champion?.playerName
+      || season?.champion?.name
+      || ''
+    ).trim();
+    if (directId) return { id: directId, name: directName || playerNameForId(directId, state) };
+
+    const placement = winnerFromPlacementRows(season);
+    if (placement.id || placement.name) {
+      return {
+        id: placement.id || playerIdForName(placement.name, state, season),
+        name: placement.name || playerNameForId(placement.id, state)
+      };
+    }
+
+    const series = winnerFromSeriesArchive(season);
+    if (series.id || series.name) {
+      return {
+        id: series.id || playerIdForName(series.name, state, season),
+        name: series.name || playerNameForId(series.id, state)
+      };
+    }
 
     try {
-      const derived = String(core.getSeasonChampionFromFinals?.(season)?.playerId || '').trim();
-      if (derived) return derived;
+      const derived = core.getSeasonChampionFromFinals?.(season);
+      const id = String(derived?.playerId || derived?.id || '').trim();
+      const name = String(derived?.playerName || derived?.name || '').trim();
+      if (id || name) return { id: id || playerIdForName(name, state, season), name: name || playerNameForId(id, state) };
     } catch (_) {}
 
-    return winnerFromFinalsRows(season);
+    const rowsWinner = winnerFromFinalsRows(season);
+    if (rowsWinner.id || rowsWinner.name) {
+      return {
+        id: rowsWinner.id || playerIdForName(rowsWinner.name, state, season),
+        name: rowsWinner.name || playerNameForId(rowsWinner.id, state)
+      };
+    }
+
+    if (directName) return { id: playerIdForName(directName, state, season), name: directName };
+    return { id: '', name: '' };
   }
 
-  function buildChampionCounts(stateInput = null) {
+  function championIdForSeason(season, stateInput = null) {
+    const state = stateInput && typeof stateInput === 'object' ? stateInput : (loadState() || {});
+    return championForSeason(season, state).id;
+  }
+
+  function buildChampionData(stateInput = null) {
     const state = stateInput && typeof stateInput === 'object' ? stateInput : (loadState() || {});
     const seasons = [state?.currentSeason, ...(Array.isArray(state?.seasonHistory) ? state.seasonHistory : [])]
       .filter(Boolean);
     const seen = new Set();
-    const counts = new Map();
+    const byId = new Map();
+    const byName = new Map();
 
     seasons.forEach((season, index) => {
       const identity = seasonIdentity(season, index);
       if (seen.has(identity)) return;
       seen.add(identity);
 
-      const championId = championIdForSeason(season);
-      if (!championId) return;
-      counts.set(championId, (counts.get(championId) || 0) + 1);
+      const champion = championForSeason(season, state);
+      const id = String(champion.id || '').trim();
+      const name = String(champion.name || playerNameForId(id, state) || '').trim();
+      if (id) byId.set(id, (byId.get(id) || 0) + 1);
+      if (name) {
+        const key = normalizeName(name);
+        byName.set(key, (byName.get(key) || 0) + 1);
+      }
     });
 
-    return counts;
+    return { byId, byName };
+  }
+
+  function buildChampionCounts(stateInput = null) {
+    return buildChampionData(stateInput).byId;
   }
 
   function getTournamentWinCount(playerId, stateInput = null) {
     const id = String(playerId || '').trim();
     if (!id) return 0;
-    return buildChampionCounts(stateInput).get(id) || 0;
+    return buildChampionData(stateInput).byId.get(id) || 0;
   }
 
   function trophySuffix(winCount) {
@@ -124,24 +265,18 @@
   }
 
   function decorateName(name, playerId, stateInput = null) {
-    return `${stripTrophySuffix(name)}${trophySuffix(getTournamentWinCount(playerId, stateInput))}`;
+    const state = stateInput && typeof stateInput === 'object' ? stateInput : (loadState() || {});
+    const data = buildChampionData(state);
+    const cleanName = stripTrophySuffix(name);
+    const count = data.byId.get(String(playerId || '').trim()) || data.byName.get(normalizeName(cleanName)) || 0;
+    return `${cleanName}${trophySuffix(count)}`;
   }
 
   function refreshChampionCounts(stateInput = null) {
-    championCounts = buildChampionCounts(stateInput || loadState());
+    const data = buildChampionData(stateInput || loadState());
+    championCounts = data.byId;
+    championNameCounts = data.byName;
     return championCounts;
-  }
-
-  function playerNameForId(playerId, state) {
-    const id = String(playerId || '').trim();
-    if (!id) return '';
-    if (id === 'YOU') {
-      const youName = String(state?.youName || '').trim();
-      return youName || 'You';
-    }
-    const player = (Array.isArray(state?.players) ? state.players : [])
-      .find((candidate) => String(candidate?.id || '').trim() === id);
-    return String(player?.name || '').trim();
   }
 
   function rankedPlayerIds(state) {
@@ -152,7 +287,7 @@
       const rows = typeof core.computeCanonicalRankings === 'function'
         ? core.computeCanonicalRankings(scoped)
         : [];
-      return rows.map((row) => String(row?.playerId || '').trim()).filter(Boolean);
+      return rows.map((row) => String(row?.playerId || '').trim());
     } catch (_) {
       return [];
     }
@@ -176,10 +311,10 @@
         const nameElement = row?.querySelector?.('.ranking-name');
         if (!nameElement) return;
 
-        const playerId = ids[index] || '';
-        const fallbackName = stripTrophySuffix(nameElement.textContent || '');
-        const canonicalName = playerNameForId(playerId, state) || fallbackName;
-        const count = championCounts.get(playerId) || 0;
+        const cleanName = stripTrophySuffix(nameElement.textContent || '');
+        const playerId = ids[index] || playerIdForName(cleanName, state) || '';
+        const canonicalName = playerNameForId(playerId, state) || cleanName;
+        const count = championCounts.get(playerId) || championNameCounts.get(normalizeName(canonicalName)) || championNameCounts.get(normalizeName(cleanName)) || 0;
         const desired = `${canonicalName}${trophySuffix(count)}`;
         if (nameElement.textContent !== desired) nameElement.textContent = desired;
       });
@@ -189,8 +324,18 @@
     return true;
   }
 
+  function renameCurrentRankingsLinks() {
+    const links = Array.from(global.document?.querySelectorAll?.('a[href="rankings.html"],a[href="/rankings.html"]') || []);
+    links.forEach((link) => {
+      if (String(link.textContent || '').trim() === 'Rankings') link.textContent = 'Power Rankings';
+    });
+  }
+
   function scheduleDecoration() {
-    const run = () => decorateRankingsDom();
+    const run = () => {
+      renameCurrentRankingsLinks();
+      decorateRankingsDom();
+    };
     if (typeof global.requestAnimationFrame === 'function') global.requestAnimationFrame(run);
     else global.setTimeout?.(run, 0);
   }
@@ -210,51 +355,10 @@
     return true;
   }
 
-  function patchRankings() {
-    const originalRenderRow = global.renderRow;
-    const originalRenderRankings = global.renderRankings;
-    if (typeof originalRenderRow !== 'function' || typeof originalRenderRankings !== 'function') return false;
-
-    if (!originalRenderRow.__taskPointsTournamentTrophiesIncluded) {
-      const wrappedRenderRow = function renderRowWithTournamentTrophies(player) {
-        const source = player && typeof player === 'object' ? player : null;
-        if (!source) return originalRenderRow.apply(this, arguments);
-
-        const playerId = String(source.playerId || source.id || '').trim();
-        const wins = championCounts.get(playerId) || 0;
-        if (!wins) return originalRenderRow.apply(this, arguments);
-
-        const args = Array.from(arguments);
-        args[0] = {
-          ...source,
-          name: `${stripTrophySuffix(source.name)}${trophySuffix(wins)}`
-        };
-        return originalRenderRow.apply(this, args);
-      };
-      wrappedRenderRow.__taskPointsTournamentTrophiesIncluded = true;
-      wrappedRenderRow.__taskPointsOriginal = originalRenderRow;
-      global.renderRow = wrappedRenderRow;
-    }
-
-    if (!originalRenderRankings.__taskPointsTournamentTrophiesIncluded) {
-      const wrappedRenderRankings = function renderRankingsWithTournamentTrophies() {
-        refreshChampionCounts();
-        const result = originalRenderRankings.apply(this, arguments);
-        Promise.resolve(result).finally(scheduleDecoration);
-        return result;
-      };
-      wrappedRenderRankings.__taskPointsTournamentTrophiesIncluded = true;
-      wrappedRenderRankings.__taskPointsOriginal = originalRenderRankings;
-      global.renderRankings = wrappedRenderRankings;
-    }
-
-    return true;
-  }
-
   function installWhenReady() {
-    const patched = patchRankings();
+    renameCurrentRankingsLinks();
     const observing = startDomObserver();
-    if (patched || observing) {
+    if (observing) {
       refreshChampionCounts();
       scheduleDecoration();
       return;
@@ -265,9 +369,14 @@
 
   const api = {
     installed: true,
+    normalizeName,
     seasonIdentity,
+    championForSeason,
     championIdForSeason,
+    winnerFromPlacementRows,
+    winnerFromSeriesArchive,
     winnerFromFinalsRows,
+    buildChampionData,
     buildChampionCounts,
     getTournamentWinCount,
     trophySuffix,
@@ -275,8 +384,8 @@
     decorateName,
     refreshChampionCounts,
     decorateRankingsDom,
-    startDomObserver,
-    patchRankings
+    renameCurrentRankingsLinks,
+    startDomObserver
   };
 
   global.TaskPointsRankingsTournamentTrophies = api;
