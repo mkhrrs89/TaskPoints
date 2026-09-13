@@ -33,6 +33,7 @@ test('live reviewer is dynamically loaded only from the V2 dark structure bridge
   assert.match(structureBridge, /state_runtime_v2_live_review\.js\?v=20260912-1/);
   assert.match(structureBridge, /loadPerfInstrumentation\(\);\s*loadLiveTraceReview\(\);/);
   assert.match(source, /state_runtime_v2_trace_review\.js\?v=20260912-1/);
+  assert.match(source, /state_runtime_v2_foreground_correlation\.js\?v=20260913-1/);
 });
 
 test('live reviewer is read-only with respect to TaskPoints persistence and mutation APIs', () => {
@@ -42,6 +43,7 @@ test('live reviewer is read-only with respect to TaskPoints persistence and muta
   assert.doesNotMatch(source, /enqueueHabitDelta|enqueueHabitOrderOverlay|enqueueHabitEditFromLegacy|enqueueHabitPresenceFromLegacy/);
   assert.match(source, /TaskPointsPerf\.buildReport\(\)/);
   assert.match(source, /reviewer\.review\(report\)/);
+  assert.match(source, /review\.foregroundCorrelation = correlator\.review\(report\)/);
 });
 
 test('fresh-start control clears only PERF trace state before reloading', () => {
@@ -62,6 +64,7 @@ test('live reviewer exposes every Step 4 physical-device evidence check', () => 
     'No direct foreground V2 maintenance',
     'Automatic parity waited for deep idle',
     'Interaction postponed pending maintenance',
+    'V2 data matches legacy data',
     'No V2 failures observed'
   ]) {
     assert.match(source, new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
@@ -70,6 +73,15 @@ test('live reviewer exposes every Step 4 physical-device evidence check', () => 
   assert.match(source, /leave the app untouched and visible for at least 20 seconds/);
   assert.match(source, /legacyFullStateCandidates/);
   assert.match(source, /Legacy\/full-state timing candidates/);
+});
+
+test('live reviewer surfaces foreground correlation without making it a Step 4 pass condition', () => {
+  assert.match(source, /Foreground correlation:/);
+  assert.match(source, /correlatedMutationWindowCount/);
+  assert.match(source, /windowsWithLegacyWork/);
+  assert.match(source, /maxLegacyForegroundCandidateMs/);
+  assert.match(source, /Foreground correlation is diagnostic, not an automatic Step 4 failure/);
+  assert.doesNotMatch(source, /evidenceCompleteForDeviceTrace\s*=.*foregroundCorrelation/s);
 });
 
 test('live reviewer refuses to mount on the production TaskPoints hostname', () => {
