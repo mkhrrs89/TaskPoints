@@ -26,6 +26,7 @@
   </section>
 </main>
 <script src="/state_runtime_v2_trace_review.js"></script>
+<script src="/state_runtime_v2_foreground_correlation.js"></script>
 <script>
 (() => {
   'use strict';
@@ -50,9 +51,14 @@
 
   function render(review) {
     const classes = review.mutationClasses || {};
+    const correlation = review.foregroundCorrelation || {};
     const classText = ['completion','order','edit','presence']
       .map((kind) => `${kind}: ${classes[kind]?.observed ? '✓' : '—'}`)
       .join(' · ');
+    const correlationText = `${correlation.correlatedMutationWindowCount ?? 0}/${correlation.enqueueCount ?? 0}`;
+    const maxLegacyText = Number.isFinite(Number(correlation.maxLegacyForegroundCandidateMs))
+      ? `${Number(correlation.maxLegacyForegroundCandidateMs).toFixed(1)} ms`
+      : 'none observed';
     summary.innerHTML = [
       verdict('All 4 mutation classes observed', review.allMutationClassesObserved),
       verdict('No direct foreground V2 maintenance', review.noDirectForegroundMaintenanceObserved),
@@ -62,9 +68,12 @@
       verdict('No V2 failures observed', review.failures?.noV2FailuresObserved === true),
       verdict('Core device-trace evidence complete', review.evidenceCompleteForDeviceTrace),
       `<div class="metric"><strong>Mutation classes</strong><span>${esc(classText)}</span></div>`,
-      `<div class="metric"><strong>Deep quiet target</strong><span>${esc(review.maintenance?.deepQuietMs ?? 'unknown')} ms</span></div>`
+      `<div class="metric"><strong>Deep quiet target</strong><span>${esc(review.maintenance?.deepQuietMs ?? 'unknown')} ms</span></div>`,
+      `<div class="metric"><strong>Foreground windows correlated</strong><span>${esc(correlationText)}</span></div>`,
+      verdict('Legacy/full-state work overlapped a mutation foreground window', correlation.foregroundLegacyWorkObserved === true, true),
+      `<div class="metric"><strong>Max overlapping legacy/full-state duration</strong><span>${esc(maxLegacyText)}</span></div>`
     ].join('');
-    deviceNote.textContent = 'This reviewer summarizes trace evidence only. The tester still has to confirm the trace came from the intended physical iPhone/PWA scenario.';
+    deviceNote.textContent = 'This reviewer summarizes trace evidence only. The tester still has to confirm the trace came from the intended physical iPhone/PWA scenario. Foreground correlation uses the latest recorded interaction before each V2 enqueue, on the same page, within a bounded 5-second window.';
     reviewJson.textContent = JSON.stringify(review, null, 2);
     results.hidden = false;
   }
@@ -78,8 +87,11 @@
       const raw = await file.text();
       const report = JSON.parse(raw);
       const reviewer = window.TaskPointsStateRuntimeV2TraceReview;
+      const correlator = window.TaskPointsStateRuntimeV2ForegroundCorrelation;
       if (!reviewer?.review) throw new Error('V2 trace reviewer failed to load.');
+      if (!correlator?.review) throw new Error('V2 foreground correlator failed to load.');
       lastReview = reviewer.review(report);
+      lastReview.foregroundCorrelation = correlator.review(report);
       render(lastReview);
       status.textContent = `Reviewed ${file.name}.`;
     } catch (error) {
