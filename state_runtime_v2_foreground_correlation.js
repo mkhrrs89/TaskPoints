@@ -5,6 +5,7 @@
 
   const MUTATION_KINDS = Object.freeze(['completion', 'order', 'edit', 'presence']);
   const V2_DB_NAME = 'taskpoints_state_v2';
+  const PAINT_BOUNDARY_NAME = 'stateV2.foreground.nextPaint';
   const MAX_WINDOW_MS = 5000;
   const MAX_WINDOWS = 40;
   const MAX_CANDIDATES_PER_WINDOW = 12;
@@ -65,7 +66,12 @@
   }
 
   function isInteraction(event) {
-    return String(event?.name || '').startsWith('interaction.');
+    if (String(event?.type || '') !== 'mark') return false;
+    return /^interaction\.(pointerdown|click|beforeinput|input|keydown)$/.test(String(event?.name || ''));
+  }
+
+  function isPaintBoundary(event) {
+    return String(event?.name || '') === PAINT_BOUNDARY_NAME && finiteNumber(event?.durationMs) !== null;
   }
 
   function isLegacyFullStateCandidate(event) {
@@ -125,15 +131,33 @@
     return best;
   }
 
+  function firstPaintAfterEnqueue(events, interaction, anchor) {
+    const interactionTime = eventTime(interaction);
+    const enqueueTime = eventTime(anchor);
+    if (interactionTime === null || enqueueTime === null) return null;
+    const pageIndex = anchor.__pageIndex;
+    let best = null;
+    for (const event of events) {
+      if (event.__pageIndex !== pageIndex || !isPaintBoundary(event)) continue;
+      const time = eventTime(event);
+      if (time === null || time < enqueueTime) continue;
+      if (time - interactionTime > MAX_WINDOW_MS) continue;
+      if (!best || time < eventTime(best) || (time === eventTime(best) && event.__eventIndex < best.__eventIndex)) best = event;
+    }
+    return best;
+  }
+
   function summarizeClass(windows, kind) {
     const rows = windows.filter((window) => window.kind === kind);
     const correlated = rows.filter((window) => window.correlated === true);
+    const paintBounded = correlated.filter((window) => window.foregroundEndSource === 'nextPaint');
     const withLegacy = correlated.filter((window) => window.candidateCount > 0);
     const candidateCount = withLegacy.reduce((sum, window) => sum + window.candidateCount, 0);
     const maxCandidateMs = withLegacy.reduce((max, window) => Math.max(max, finiteNumber(window.maxCandidateMs) || 0), 0);
     return {
       enqueueCount: rows.length,
       correlatedWindowCount: correlated.length,
+      paintBoundedWindowCount: paintBounded.length,
       windowsWithLegacyWork: withLegacy.length,
       candidateCount,
       maxCandidateMs: withLegacy.length ? maxCandidateMs : null,
@@ -149,9 +173,12 @@
 
     for (const anchor of anchors.slice(-MAX_WINDOWS)) {
       const kind = mutationKind(anchor);
-      const end = eventTime(anchor);
+      const enqueueTime = eventTime(anchor);
       const interaction = latestInteractionBefore(events, anchor);
       const start = interaction ? eventTime(interaction) : null;
+      const paintBoundary = interaction ? firstPaintAfterEnqueue(events, interaction, anchor) : null;
+      const paintTime = paintBoundary ? eventTime(paintBoundary) : null;
+      const end = paintTime ?? enqueueTime;
       const pagePath = String(anchor.__pagePath || '');
       const matching = start === null || end === null
         ? []
@@ -161,10 +188,14 @@
       windows.push({
         kind,
         page: pagePath,
-        enqueueEpochMs: end,
+        enqueueEpochMs: enqueueTime,
         interactionEpochMs: start,
         interactionName: interaction ? String(interaction.name || '') : null,
-        interactionToEnqueueMs: start !== null && end !== null ? Math.max(0, end - start) : null,
+        interactionToEnqueueMs: start !== null && enqueueTime !== null ? Math.max(0, enqueueTime - start) : null,
+        paintBoundaryEpochMs: paintTime,
+        interactionToPaintMs: start !== null && paintTime !== null ? Math.max(0, paintTime - start) : null,
+        foregroundWindowEndEpochMs: end,
+        foregroundEndSource: paintTime !== null ? 'nextPaint' : 'enqueue',
         correlated: start !== null && end !== null,
         candidateCount: matching.length,
         maxCandidateMs: matching.length ? finiteNumber(matching[0].durationMs) : null,
@@ -174,15 +205,18 @@
 
     const byMutationClass = Object.fromEntries(MUTATION_KINDS.map((kind) => [kind, summarizeClass(windows, kind)]));
     const correlated = windows.filter((window) => window.correlated);
+    const paintBounded = correlated.filter((window) => window.foregroundEndSource === 'nextPaint');
     const withLegacy = correlated.filter((window) => window.candidateCount > 0);
     const maxLegacyForegroundCandidateMs = withLegacy.reduce((max, window) => Math.max(max, finiteNumber(window.maxCandidateMs) || 0), 0);
     const allObservedEnqueuesCorrelated = windows.length > 0 && correlated.length === windows.length;
 
     return {
-      schemaVersion: 1,
+      schemaVersion: 2,
       maxInteractionWindowMs: MAX_WINDOW_MS,
       enqueueCount: windows.length,
       correlatedMutationWindowCount: correlated.length,
+      paintBoundedMutationWindowCount: paintBounded.length,
+      enqueueFallbackWindowCount: correlated.length - paintBounded.length,
       uncorrelatedMutationWindowCount: windows.length - correlated.length,
       allObservedEnqueuesCorrelated,
       foregroundLegacyWorkObserved: withLegacy.length > 0,
@@ -196,10 +230,11 @@
 
   const api = {
     installed: true,
-    version: 2,
+    version: 3,
     review,
     flattenEvents,
-    isLegacyFullStateCandidate
+    isLegacyFullStateCandidate,
+    isPaintBoundary
   };
 
   global.TaskPointsStateRuntimeV2ForegroundCorrelation = api;
