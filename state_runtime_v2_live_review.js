@@ -5,12 +5,15 @@
 
   const DARK_MODE_KEY = 'taskpoints_state_v2_dark_mode_v1';
   const REVIEWER_SRC = '/state_runtime_v2_trace_review.js?v=20260912-1';
+  const CORRELATOR_SRC = '/state_runtime_v2_foreground_correlation.js?v=20260913-1';
   const BUTTON_ID = 'tpV2LiveReviewButton';
   const PANEL_ID = 'tpV2LiveReviewPanel';
   const REVIEW_SCRIPT_ATTR = 'data-taskpoints-state-v2-trace-review';
+  const CORRELATOR_SCRIPT_ATTR = 'data-taskpoints-state-v2-foreground-correlation';
   const productionHosts = new Set(['taskpoints.pages.dev', 'www.taskpoints.pages.dev']);
   let lastReview = null;
   let reviewerPromise = null;
+  let correlatorPromise = null;
 
   function isAllowedPreview() {
     const hostname = String(global.location?.hostname || '').toLowerCase();
@@ -37,6 +40,11 @@
   function reviewerReady() {
     return Boolean(global.TaskPointsStateRuntimeV2TraceReview?.installed
       && typeof global.TaskPointsStateRuntimeV2TraceReview?.review === 'function');
+  }
+
+  function correlatorReady() {
+    return Boolean(global.TaskPointsStateRuntimeV2ForegroundCorrelation?.installed
+      && typeof global.TaskPointsStateRuntimeV2ForegroundCorrelation?.review === 'function');
   }
 
   function loadReviewer() {
@@ -68,6 +76,37 @@
     });
 
     return reviewerPromise;
+  }
+
+  function loadCorrelator() {
+    if (correlatorReady()) return Promise.resolve(global.TaskPointsStateRuntimeV2ForegroundCorrelation);
+    if (correlatorPromise) return correlatorPromise;
+    if (!global.document?.createElement) return Promise.reject(new Error('document_unavailable'));
+
+    correlatorPromise = new Promise((resolve, reject) => {
+      let script = global.document.querySelector?.(`script[${CORRELATOR_SCRIPT_ATTR}]`);
+      if (!script) {
+        script = global.document.createElement('script');
+        script.src = CORRELATOR_SRC;
+        script.defer = true;
+        script.setAttribute(CORRELATOR_SCRIPT_ATTR, 'true');
+        (global.document.head || global.document.documentElement)?.appendChild?.(script);
+      }
+
+      const finish = () => {
+        if (correlatorReady()) resolve(global.TaskPointsStateRuntimeV2ForegroundCorrelation);
+        else reject(new Error('v2_foreground_correlator_unavailable'));
+      };
+      if (correlatorReady()) finish();
+      else {
+        script.addEventListener?.('load', finish, { once: true });
+        script.addEventListener?.('error', () => reject(new Error('v2_foreground_correlator_load_failed')), { once: true });
+      }
+    }).finally(() => {
+      correlatorPromise = null;
+    });
+
+    return correlatorPromise;
   }
 
   function checkRows(review) {
@@ -130,6 +169,16 @@
     const legacyMax = Number.isFinite(Number(review?.maxLegacyFullStateCandidateMs))
       ? `${Number(review.maxLegacyFullStateCandidateMs).toFixed(1)} ms max`
       : 'none timed';
+    const correlation = review?.foregroundCorrelation || {};
+    const correlatedWindows = Number(correlation.correlatedMutationWindowCount || 0);
+    const enqueueCount = Number(correlation.enqueueCount || 0);
+    const overlappingWindows = Number(correlation.windowsWithLegacyWork || 0);
+    const overlappingMax = Number.isFinite(Number(correlation.maxLegacyForegroundCandidateMs))
+      ? `${Number(correlation.maxLegacyForegroundCandidateMs).toFixed(1)} ms max`
+      : 'none observed';
+    const foregroundCorrelationLine = enqueueCount > 0
+      ? `${correlatedWindows}/${enqueueCount} mutation windows correlated; ${overlappingWindows} contained legacy/full-state work (${escapeHtml(overlappingMax)})`
+      : 'No V2 mutation enqueue window is available to correlate yet.';
     const verdict = review?.evidenceCompleteForDeviceTrace === true
       ? '<div class="tp-v2-live-verdict ok">Step 4 trace evidence complete ✓</div>'
       : `<div class="tp-v2-live-verdict pending">${state.complete}/${state.total} checks observed</div>`;
@@ -137,8 +186,8 @@
     return `<div class="tp-v2-live-head"><strong>V2 physical trace test</strong><button type="button" data-v2-close>Close</button></div>
       ${verdict}
       <div class="tp-v2-live-checks">${rows}</div>
-      <div class="tp-v2-live-meta">V2 failures counted: ${failures}<br>Legacy/full-state timing candidates: ${legacyCount} (${escapeHtml(legacyMax)})</div>
-      <p class="tp-v2-live-note">The legacy/full-state count is diagnostic, not an automatic failure; those timings still need foreground correlation.</p>
+      <div class="tp-v2-live-meta">V2 failures counted: ${failures}<br>Legacy/full-state timing candidates: ${legacyCount} (${escapeHtml(legacyMax)})<br>Foreground correlation: ${foregroundCorrelationLine}</div>
+      <p class="tp-v2-live-note">Foreground correlation is diagnostic, not an automatic Step 4 failure. It links legacy whole-state reads/writes and snapshot work to the recorded interaction-to-V2-enqueue window so we can identify what still belongs off the tap path.</p>
       <details open><summary>How to finish the test</summary><ol>
         <li>Tap <strong>Start fresh test</strong> once. This clears only PERF trace history and reloads; it does not change TaskPoints data.</li>
         <li>Toggle a Habit completion.</li>
@@ -181,9 +230,10 @@
 
   async function buildReview() {
     if (!traceAvailable()) throw new Error('Performance tracing is off. Re-open the V2 opt-in page with ?perf=1.');
-    const reviewer = await loadReviewer();
+    const [reviewer, correlator] = await Promise.all([loadReviewer(), loadCorrelator()]);
     const report = global.TaskPointsPerf.buildReport();
     const review = reviewer.review(report);
+    review.foregroundCorrelation = correlator.review(report);
     lastReview = review;
     updateButton(review);
     return review;
@@ -280,7 +330,7 @@
 
   const api = {
     installed: true,
-    version: 4,
+    version: 5,
     isAllowedPreview,
     isDarkEnabled,
     traceAvailable,
@@ -297,7 +347,9 @@
         darkEnabled: isDarkEnabled(),
         traceAvailable: traceAvailable(),
         reviewerReady: reviewerReady(),
-        lastEvidenceComplete: lastReview?.evidenceCompleteForDeviceTrace === true
+        correlatorReady: correlatorReady(),
+        lastEvidenceComplete: lastReview?.evidenceCompleteForDeviceTrace === true,
+        foregroundCorrelationAvailable: Boolean(lastReview?.foregroundCorrelation)
       };
     }
   };
@@ -306,6 +358,7 @@
 
   if (isAllowedPreview() && isDarkEnabled()) {
     loadReviewer().catch(() => undefined);
+    loadCorrelator().catch(() => undefined);
     if (global.document?.readyState === 'loading') global.document.addEventListener?.('DOMContentLoaded', mountButton, { once: true });
     else mountButton();
     global.addEventListener?.('pageshow', mountButton);
