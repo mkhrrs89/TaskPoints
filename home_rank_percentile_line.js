@@ -235,3 +235,20 @@
 
   global.addEventListener?.('pageshow', removeBell);
 })(typeof window !== 'undefined' ? window : globalThis);
+
+;(function installTaskPointsHabitModalLayerGuard(global) {
+  'use strict';
+
+  const document = global?.document;
+  const STYLE_ID = 'taskpoints-habit-modal-layer-guard';
+  if (!document?.createElement || document.getElementById?.(STYLE_ID)) return;
+
+  const style = document.createElement('style');
+  style.id = STYLE_ID;
+  style.textContent = `
+    #addHabitModal {
+      z-index: 1000000 !important;
+    }
+  `;
+  (document.head || document.documentElement)?.appendChild?.(style);
+})(typeof window !== 'undefined' ? window : globalThis);
