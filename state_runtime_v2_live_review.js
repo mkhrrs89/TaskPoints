@@ -5,7 +5,8 @@
 
   const DARK_MODE_KEY = 'taskpoints_state_v2_dark_mode_v1';
   const REVIEWER_SRC = '/state_runtime_v2_trace_review.js?v=20260912-1';
-  const CORRELATOR_SRC = '/state_runtime_v2_foreground_correlation.js?v=20260913-1';
+  const CORRELATOR_SRC = '/state_runtime_v2_foreground_correlation.js?v=20260913-2';
+  const PAINT_PROBE_NAME = 'stateV2.foreground.nextPaint';
   const BUTTON_ID = 'tpV2LiveReviewButton';
   const PANEL_ID = 'tpV2LiveReviewPanel';
   const REVIEW_SCRIPT_ATTR = 'data-taskpoints-state-v2-trace-review';
@@ -14,6 +15,9 @@
   let lastReview = null;
   let reviewerPromise = null;
   let correlatorPromise = null;
+  let paintProbeInstalled = false;
+
+  const now = () => global.performance?.now?.() ?? Date.now();
 
   function isAllowedPreview() {
     const hostname = String(global.location?.hostname || '').toLowerCase();
@@ -35,6 +39,62 @@
     return String(value ?? '').replace(/[&<>"']/g, (character) => ({
       '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
     }[character]));
+  }
+
+  function describeTarget(target) {
+    if (!target) return '';
+    const tag = String(target.tagName || '').toLowerCase();
+    const id = target.id ? `#${String(target.id)}` : '';
+    const className = typeof target.className === 'string' && target.className.trim()
+      ? `.${target.className.trim().split(/\s+/).slice(0, 2).join('.')}`
+      : '';
+    return `${tag}${id}${className}`.slice(0, 120);
+  }
+
+  function isHabitInteractionTarget(target) {
+    try {
+      return Boolean(target?.closest?.([
+        '#homePanelScwm .habitDay',
+        '#homePanelScwm .scwm-card',
+        '#homePanelScwm button',
+        '#homePanelScwm input',
+        '#homePanelScwm textarea',
+        '#homePanelScwm select',
+        '[id$="EditModal"] button',
+        '[id$="EditModal"] input',
+        '[id$="EditModal"] textarea',
+        '[id$="EditModal"] select'
+      ].join(',')));
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function installForegroundPaintProbe() {
+    if (paintProbeInstalled) return true;
+    const document = global.document;
+    if (!document?.addEventListener || typeof global.requestAnimationFrame !== 'function') return false;
+
+    for (const interactionType of ['pointerdown', 'pointerup', 'click']) {
+      document.addEventListener(interactionType, (event) => {
+        if (!traceAvailable() || !isHabitInteractionTarget(event?.target)) return;
+        const started = now();
+        const target = describeTarget(event?.target);
+        global.requestAnimationFrame(() => {
+          const elapsed = Math.max(0, now() - started);
+          try {
+            global.TaskPointsPerf?.duration?.(PAINT_PROBE_NAME, elapsed, {
+              interactionType,
+              target,
+              foregroundBoundary: true
+            });
+          } catch (_) {}
+        });
+      }, true);
+    }
+
+    paintProbeInstalled = true;
+    return true;
   }
 
   function reviewerReady() {
@@ -172,12 +232,13 @@
     const correlation = review?.foregroundCorrelation || {};
     const correlatedWindows = Number(correlation.correlatedMutationWindowCount || 0);
     const enqueueCount = Number(correlation.enqueueCount || 0);
+    const paintBoundedWindows = Number(correlation.paintBoundedMutationWindowCount || 0);
     const overlappingWindows = Number(correlation.windowsWithLegacyWork || 0);
     const overlappingMax = Number.isFinite(Number(correlation.maxLegacyForegroundCandidateMs))
       ? `${Number(correlation.maxLegacyForegroundCandidateMs).toFixed(1)} ms max`
       : 'none observed';
     const foregroundCorrelationLine = enqueueCount > 0
-      ? `${correlatedWindows}/${enqueueCount} mutation windows correlated; ${overlappingWindows} contained legacy/full-state work (${escapeHtml(overlappingMax)})`
+      ? `${correlatedWindows}/${enqueueCount} mutation windows correlated; ${paintBoundedWindows} reached next paint; ${overlappingWindows} contained legacy/full-state work (${escapeHtml(overlappingMax)})`
       : 'No V2 mutation enqueue window is available to correlate yet.';
     const verdict = review?.evidenceCompleteForDeviceTrace === true
       ? '<div class="tp-v2-live-verdict ok">Step 4 trace evidence complete ✓</div>'
@@ -187,7 +248,7 @@
       ${verdict}
       <div class="tp-v2-live-checks">${rows}</div>
       <div class="tp-v2-live-meta">V2 failures counted: ${failures}<br>Legacy/full-state timing candidates: ${legacyCount} (${escapeHtml(legacyMax)})<br>Foreground correlation: ${foregroundCorrelationLine}</div>
-      <p class="tp-v2-live-note">Foreground correlation is diagnostic, not an automatic Step 4 failure. It links legacy whole-state reads/writes and snapshot work to the recorded interaction-to-V2-enqueue window so we can identify what still belongs off the tap path.</p>
+      <p class="tp-v2-live-note">Foreground correlation is diagnostic, not an automatic Step 4 failure. When a render-frame probe is available it measures from the recorded interaction through the next paint boundary; otherwise it falls back to the V2 enqueue boundary. This lets us catch legacy whole-state work that begins after enqueue but still delays visible response.</p>
       <details open><summary>How to finish the test</summary><ol>
         <li>Tap <strong>Start fresh test</strong> once. This clears only PERF trace history and reloads; it does not change TaskPoints data.</li>
         <li>Toggle a Habit completion.</li>
@@ -315,6 +376,7 @@
 
   function mountButton() {
     if (!isAllowedPreview() || !isDarkEnabled() || !global.document?.body) return false;
+    installForegroundPaintProbe();
     if (global.document.getElementById(BUTTON_ID)) return true;
     ensureStyles();
     const button = global.document.createElement('button');
@@ -330,10 +392,11 @@
 
   const api = {
     installed: true,
-    version: 5,
+    version: 6,
     isAllowedPreview,
     isDarkEnabled,
     traceAvailable,
+    installForegroundPaintProbe,
     buildReview,
     startFreshTest,
     openPanel,
@@ -348,6 +411,7 @@
         traceAvailable: traceAvailable(),
         reviewerReady: reviewerReady(),
         correlatorReady: correlatorReady(),
+        paintProbeInstalled,
         lastEvidenceComplete: lastReview?.evidenceCompleteForDeviceTrace === true,
         foregroundCorrelationAvailable: Boolean(lastReview?.foregroundCorrelation)
       };
