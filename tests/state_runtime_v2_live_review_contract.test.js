@@ -33,7 +33,7 @@ test('live reviewer is dynamically loaded only from the V2 dark structure bridge
   assert.match(structureBridge, /state_runtime_v2_live_review\.js\?v=20260913-1/);
   assert.match(structureBridge, /loadPerfInstrumentation\(\);\s*loadLiveTraceReview\(\);/);
   assert.match(source, /state_runtime_v2_trace_review\.js\?v=20260912-1/);
-  assert.match(source, /state_runtime_v2_foreground_correlation\.js\?v=20260913-1/);
+  assert.match(source, /state_runtime_v2_foreground_correlation\.js\?v=20260913-2/);
 });
 
 test('live reviewer is read-only with respect to TaskPoints persistence and mutation APIs', () => {
@@ -75,19 +75,31 @@ test('live reviewer exposes every Step 4 physical-device evidence check', () => 
   assert.match(source, /Legacy\/full-state timing candidates/);
 });
 
+test('live reviewer records a next-frame foreground boundary for Habit interactions', () => {
+  assert.match(source, /PAINT_PROBE_NAME = 'stateV2\.foreground\.nextPaint'/);
+  assert.match(source, /function installForegroundPaintProbe\(\)/);
+  assert.match(source, /\['pointerdown', 'pointerup', 'click'\]/);
+  assert.match(source, /global\.requestAnimationFrame\(\(\) =>/);
+  assert.match(source, /TaskPointsPerf\?\.duration\?\.\(PAINT_PROBE_NAME, elapsed/);
+  assert.match(source, /paintBoundedMutationWindowCount/);
+  assert.match(source, /reached next paint/);
+});
+
 test('live reviewer surfaces foreground correlation without making it a Step 4 pass condition', () => {
   assert.match(source, /Foreground correlation:/);
   assert.match(source, /correlatedMutationWindowCount/);
   assert.match(source, /windowsWithLegacyWork/);
   assert.match(source, /maxLegacyForegroundCandidateMs/);
   assert.match(source, /Foreground correlation is diagnostic, not an automatic Step 4 failure/);
+  assert.match(source, /through the next paint boundary/);
+  assert.match(source, /falls back to the V2 enqueue boundary/);
 
   const checksStart = source.indexOf('function checkRows(review)');
   const checksEnd = source.indexOf('function progress(review)', checksStart);
   assert.notEqual(checksStart, -1);
   assert.notEqual(checksEnd, -1);
   const step4Checks = source.slice(checksStart, checksEnd);
-  assert.doesNotMatch(step4Checks, /foregroundCorrelation|windowsWithLegacyWork|maxLegacyForegroundCandidateMs/);
+  assert.doesNotMatch(step4Checks, /foregroundCorrelation|windowsWithLegacyWork|maxLegacyForegroundCandidateMs|paintBoundedMutationWindowCount/);
 });
 
 test('live reviewer refuses to mount on the production TaskPoints hostname', () => {
