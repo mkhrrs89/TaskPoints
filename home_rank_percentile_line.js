@@ -235,3 +235,72 @@
 
   global.addEventListener?.('pageshow', removeBell);
 })(typeof window !== 'undefined' ? window : globalThis);
+
+;(function installTaskPointsHomeScoreboardTieRecord(global) {
+  'use strict';
+
+  let installed = false;
+  let retries = 0;
+
+  function formatRecord(record) {
+    const wins = Number(record?.wins) || 0;
+    const losses = Number(record?.losses) || 0;
+    const ties = Number(record?.ties) || 0;
+    return ties > 0 ? `${wins}-${losses}-${ties}` : `${wins}-${losses}`;
+  }
+
+  function refreshVisibleRecord() {
+    const yourRecord = global.document?.getElementById?.('matchupYourRecord');
+    if (yourRecord && typeof global.getYourRecordText === 'function') {
+      yourRecord.textContent = `Record: ${global.getYourRecordText()}`;
+    }
+  }
+
+  function install() {
+    if (installed) {
+      refreshVisibleRecord();
+      return true;
+    }
+
+    if (
+      typeof global.computeYourRecord !== 'function'
+      || typeof global.getPlayerRecordText !== 'function'
+      || typeof global.getHomeScoreboardSeasonThreeState !== 'function'
+    ) {
+      retries += 1;
+      if (retries < 50) global.setTimeout?.(install, 50);
+      return false;
+    }
+
+    const originalPlayerRecordText = global.getPlayerRecordText;
+
+    global.getYourRecordText = function taskPointsYourRecordTextWithTies() {
+      return formatRecord(global.computeYourRecord());
+    };
+
+    global.getPlayerRecordText = function taskPointsPlayerRecordTextWithTies(playerId) {
+      try {
+        const core = global.TaskPointsCore;
+        if (core?.computeRecord) {
+          const record = core.computeRecord(global.getHomeScoreboardSeasonThreeState(), playerId, {
+            includeToday: false,
+            allowFallback: false
+          });
+          return formatRecord(record);
+        }
+      } catch (_) {}
+      return originalPlayerRecordText.call(this, playerId);
+    };
+
+    installed = true;
+    refreshVisibleRecord();
+    return true;
+  }
+
+  if (global.document?.readyState === 'loading') {
+    global.document.addEventListener?.('DOMContentLoaded', install, { once: true });
+  } else {
+    global.setTimeout?.(install, 0);
+  }
+  global.addEventListener?.('pageshow', install);
+})(typeof window !== 'undefined' ? window : globalThis);
