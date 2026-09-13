@@ -81,7 +81,13 @@ test('live reviewer surfaces foreground correlation without making it a Step 4 p
   assert.match(source, /windowsWithLegacyWork/);
   assert.match(source, /maxLegacyForegroundCandidateMs/);
   assert.match(source, /Foreground correlation is diagnostic, not an automatic Step 4 failure/);
-  assert.doesNotMatch(source, /evidenceCompleteForDeviceTrace\s*=.*foregroundCorrelation/s);
+
+  const checksStart = source.indexOf('function checkRows(review)');
+  const checksEnd = source.indexOf('function progress(review)', checksStart);
+  assert.notEqual(checksStart, -1);
+  assert.notEqual(checksEnd, -1);
+  const step4Checks = source.slice(checksStart, checksEnd);
+  assert.doesNotMatch(step4Checks, /foregroundCorrelation|windowsWithLegacyWork|maxLegacyForegroundCandidateMs/);
 });
 
 test('live reviewer refuses to mount on the production TaskPoints hostname', () => {
