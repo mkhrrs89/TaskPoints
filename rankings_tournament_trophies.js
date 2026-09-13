@@ -8,6 +8,10 @@
   const TROPHY = '🏆';
   const TROPHY_CLASS = 'ranking-trophy-mark';
   const TROPHY_STYLE_ID = 'taskpoints-ranking-trophy-size';
+  const RETRO_BADGE_ID = 'retroWinner';
+  const RETRO_BADGE_NAME = 'Retro Winner';
+  const RETRO_BADGE_ICON = 'assets/retrowinner.PNG';
+  const RETRO_BADGE_CLASS = 'ranking-retro-winner-badge';
   let installAttempts = 0;
   let championCounts = new Map();
   let championNameCounts = new Map();
@@ -18,6 +22,14 @@
 
   function normalizeName(value) {
     return String(value || '').trim().toLocaleLowerCase();
+  }
+
+  function normalizeBadgeIds(entries) {
+    if (!Array.isArray(entries)) return [];
+    return [...new Set(entries.map((entry) => {
+      if (typeof entry === 'string') return entry.trim();
+      return String(entry?.id || entry?.badgeId || '').trim();
+    }).filter(Boolean))];
   }
 
   function loadState() {
@@ -94,6 +106,25 @@
       return normalizeName(candidateName) === target;
     });
     return String(match?.id || match?.playerId || '').trim();
+  }
+
+  function playerBadgeIds(state, playerId, playerName = '') {
+    const map = state?.playerBadges && typeof state.playerBadges === 'object' ? state.playerBadges : {};
+    const id = String(playerId || '').trim();
+    const name = String(playerName || '').trim();
+    const direct = normalizeBadgeIds(map[id]);
+    if (direct.length) return direct;
+    if (name) {
+      const exactName = normalizeBadgeIds(map[name]);
+      if (exactName.length) return exactName;
+      const matchedKey = Object.keys(map).find((key) => normalizeName(key) === normalizeName(name));
+      if (matchedKey) return normalizeBadgeIds(map[matchedKey]);
+    }
+    return [];
+  }
+
+  function hasRetroWinnerBadge(state, playerId, playerName = '') {
+    return playerBadgeIds(state, playerId, playerName).includes(RETRO_BADGE_ID);
   }
 
   function winnerFromPlacementRows(season) {
@@ -298,26 +329,39 @@
     if (!document?.createElement || document.getElementById?.(TROPHY_STYLE_ID)) return;
     const style = document.createElement('style');
     style.id = TROPHY_STYLE_ID;
-    style.textContent = `.${TROPHY_CLASS}{font-size:0.72em;line-height:1;vertical-align:0.08em;}`;
+    style.textContent = `.${TROPHY_CLASS}{font-size:0.72em;line-height:1;vertical-align:0.08em;}.${RETRO_BADGE_CLASS}{width:0.72em;height:0.72em;object-fit:contain;display:inline-block;vertical-align:-0.06em;margin-left:0.22em;}`;
     (document.head || document.documentElement || document.body)?.appendChild?.(style);
   }
 
-  function renderDecoratedName(nameElement, canonicalName, count) {
-    const desired = `${canonicalName}${trophySuffix(count)}`;
+  function renderDecoratedName(nameElement, canonicalName, count, retroWinner = false) {
+    const desiredText = `${canonicalName}${trophySuffix(count)}`;
     const existingMark = nameElement?.querySelector?.(`.${TROPHY_CLASS}`) || null;
-    if (nameElement?.textContent === desired && (count === 0 || existingMark)) return;
+    const existingRetro = nameElement?.querySelector?.(`.${RETRO_BADGE_CLASS}`) || null;
+    const trophyReady = count === 0 || Boolean(existingMark);
+    const retroReady = retroWinner ? Boolean(existingRetro) : !existingRetro;
+    if (nameElement?.textContent === desiredText && trophyReady && retroReady) return;
 
     const document = global.document;
-    if (!count || !document?.createElement || typeof nameElement?.appendChild !== 'function') {
-      if (nameElement) nameElement.textContent = desired;
+    if (!document?.createElement || typeof nameElement?.appendChild !== 'function') {
+      if (nameElement) nameElement.textContent = desiredText;
       return;
     }
 
     nameElement.textContent = canonicalName;
-    const mark = document.createElement('span');
-    mark.className = TROPHY_CLASS;
-    mark.textContent = ` ${TROPHY.repeat(count)}`;
-    nameElement.appendChild(mark);
+    if (count) {
+      const mark = document.createElement('span');
+      mark.className = TROPHY_CLASS;
+      mark.textContent = ` ${TROPHY.repeat(count)}`;
+      nameElement.appendChild(mark);
+    }
+    if (retroWinner) {
+      const badge = document.createElement('img');
+      badge.className = RETRO_BADGE_CLASS;
+      badge.src = RETRO_BADGE_ICON;
+      badge.alt = RETRO_BADGE_NAME;
+      badge.title = RETRO_BADGE_NAME;
+      nameElement.appendChild(badge);
+    }
   }
 
   function rankedPlayerIds(state) {
@@ -360,7 +404,8 @@
           || championNameCounts.get(normalizeName(canonicalName))
           || championNameCounts.get(normalizeName(cleanName))
           || 0;
-        renderDecoratedName(nameElement, canonicalName, count);
+        const retroWinner = hasRetroWinnerBadge(state, playerId, canonicalName);
+        renderDecoratedName(nameElement, canonicalName, count, retroWinner);
       });
     } finally {
       decorating = false;
@@ -454,6 +499,9 @@
   const api = {
     installed: true,
     normalizeName,
+    normalizeBadgeIds,
+    playerBadgeIds,
+    hasRetroWinnerBadge,
     seasonIdentity,
     championForSeason,
     championIdForSeason,
