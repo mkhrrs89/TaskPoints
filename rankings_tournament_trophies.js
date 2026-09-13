@@ -6,6 +6,8 @@
   const core = global.TaskPointsCore || {};
   const MAX_INSTALL_ATTEMPTS = 120;
   const TROPHY = '🏆';
+  const TROPHY_CLASS = 'ranking-trophy-mark';
+  const TROPHY_STYLE_ID = 'taskpoints-ranking-trophy-size';
   let installAttempts = 0;
   let championCounts = new Map();
   let championNameCounts = new Map();
@@ -291,6 +293,33 @@
     return championCounts;
   }
 
+  function ensureTrophyStyles() {
+    const document = global.document;
+    if (!document?.createElement || document.getElementById?.(TROPHY_STYLE_ID)) return;
+    const style = document.createElement('style');
+    style.id = TROPHY_STYLE_ID;
+    style.textContent = `.${TROPHY_CLASS}{font-size:0.72em;line-height:1;vertical-align:0.08em;}`;
+    (document.head || document.documentElement || document.body)?.appendChild?.(style);
+  }
+
+  function renderDecoratedName(nameElement, canonicalName, count) {
+    const desired = `${canonicalName}${trophySuffix(count)}`;
+    const existingMark = nameElement?.querySelector?.(`.${TROPHY_CLASS}`) || null;
+    if (nameElement?.textContent === desired && (count === 0 || existingMark)) return;
+
+    const document = global.document;
+    if (!count || !document?.createElement || typeof nameElement?.appendChild !== 'function') {
+      if (nameElement) nameElement.textContent = desired;
+      return;
+    }
+
+    nameElement.textContent = canonicalName;
+    const mark = document.createElement('span');
+    mark.className = TROPHY_CLASS;
+    mark.textContent = ` ${TROPHY.repeat(count)}`;
+    nameElement.appendChild(mark);
+  }
+
   function rankedPlayerIds(state) {
     try {
       const scoped = typeof global.getScopedRankingsState === 'function'
@@ -311,6 +340,7 @@
     const list = document?.getElementById?.('rankingsList');
     if (!list?.querySelectorAll) return false;
 
+    ensureTrophyStyles();
     const state = stateInput && typeof stateInput === 'object' ? stateInput : (loadState() || {});
     refreshChampionCounts(state);
     const ids = rankedPlayerIds(state);
@@ -330,8 +360,7 @@
           || championNameCounts.get(normalizeName(canonicalName))
           || championNameCounts.get(normalizeName(cleanName))
           || 0;
-        const desired = `${canonicalName}${trophySuffix(count)}`;
-        if (nameElement.textContent !== desired) nameElement.textContent = desired;
+        renderDecoratedName(nameElement, canonicalName, count);
       });
     } finally {
       decorating = false;
@@ -400,6 +429,7 @@
     const list = document?.getElementById?.('rankingsList');
     if (!list) return false;
 
+    ensureTrophyStyles();
     scheduleDecoration();
     if (rankingsObserver || typeof global.MutationObserver !== 'function') return true;
 
@@ -437,6 +467,8 @@
     stripTrophySuffix,
     decorateName,
     refreshChampionCounts,
+    ensureTrophyStyles,
+    renderDecoratedName,
     decorateRankingsDom,
     renameRankingsLinks,
     startNavObserver,
