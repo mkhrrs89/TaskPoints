@@ -1,6 +1,6 @@
 # State Runtime V2 — Physical Device Step 4 Runbook
 
-Updated: 2026-09-11
+Updated: 2026-09-13
 
 This runbook is for the remaining real iPhone/PWA evidence required by the Habits/completions V2 dark-mirror pilot.
 
@@ -50,9 +50,9 @@ On Home, the dark preview should show two temporary diagnostics controls above t
 
 The panel evaluates the current PERF report in memory; no report upload is required for the first pass.
 
-## Eight live evidence checks
+## Nine live evidence checks
 
-A complete device trace must show all eight checks:
+A complete device trace must show all nine checks:
 
 1. Habit completion / toggle observed.
 2. Habit reorder observed.
@@ -61,15 +61,22 @@ A complete device trace must show all eight checks:
 5. No direct foreground V2 parity/compatibility maintenance observed.
 6. Automatic parity crossed the 20-second deep-idle boundary.
 7. Real user interaction postponed pending maintenance before that release.
-8. No V2 mutation/runtime/serializer/maintenance failure evidence observed.
+8. V2 Habit/completion data affirmatively matches the legacy authority after idle parity.
+9. No V2 mutation/runtime/serializer/maintenance failure evidence observed.
 
 When all are present, the button changes to **V2 TEST ✓** and the panel reports **Step 4 trace evidence complete**.
 
-## Legacy/full-state timing line
+Parity is intentionally strict for authoritative fields. The comparison ignores only the three known Home Habit render caches `__streak`, `__completion`, and `__failedStreak`. Timestamps, completion records, Habit order, and other fields remain part of the comparison.
 
-The panel also reports legacy/full-state timing candidates and the maximum observed duration. This is intentionally separate from the eight V2 checks.
+## Legacy/full-state foreground correlation
 
-Candidates can include:
+The ordinary V2 TEST panel still reports legacy/full-state timing candidates. For deeper Step 4 analysis, export the PERF JSON and open:
+
+`https://arch-state-runtime-v2-plan.taskpoints.pages.dev/state_v2_trace_review.html`
+
+The offline review page now correlates each recorded V2 mutation enqueue with the most recent user interaction on the same page, within a bounded five-second window. It then identifies legacy/full-state operations whose timed intervals overlap that interaction-to-enqueue foreground window.
+
+The correlation can include:
 
 - Phase 2/4/5 work;
 - writes to `taskpoints_v1`;
@@ -77,13 +84,33 @@ Candidates can include:
 - snapshot/canonicalization work;
 - non-V2 IndexedDB transactions.
 
-A candidate does **not** automatically prove foreground blocking merely because it occurred somewhere in the trace. The real trace is used to correlate those durations with the interaction path and decide which remaining legacy full-state work should move off that path before V2 can become authoritative.
+The page reports:
+
+- how many V2 mutation windows could be correlated to a real interaction;
+- how many correlated windows contained legacy/full-state work;
+- the maximum overlapping legacy/full-state duration;
+- a bounded per-mutation list of the overlapping operation names and durations.
+
+The V2 IndexedDB transaction itself is explicitly excluded from this legacy-work result. The correlator is read-only and does not affect the Step 4 pass/fail verdict; it exists to identify which remaining legacy whole-state costs are actually on the foreground path before V2 can own a mutation class.
+
+A legacy candidate occurring elsewhere in the trace is no longer enough by itself to call the interaction blocked. If a mutation enqueue has no nearby recorded interaction, the correlator marks that window uncorrelated rather than guessing.
 
 ## If the panel is not fully green
 
-Tap **Copy review** and send the copied review back for inspection. If deeper timing correlation is needed, use the existing PERF control to download the full JSON report as well.
+Tap **Copy review** and send the copied review back for inspection. If parity is red, the review includes bounded mismatch evidence; do not reset or reseed simply to make the check green.
+
+If deeper timing correlation is needed, use the existing PERF control to download the full JSON report and run it through `state_v2_trace_review.html` as described above.
 
 Do not repair, reset, or delete TaskPoints data simply because a V2 check is missing or red. The dark mirror is diagnostic and production/legacy state remains authoritative.
+
+## Current timestamp verification target
+
+The latest parity fixes preserve two timestamps that previously could diverge in the dark mirror:
+
+- Habit reorder now carries the per-Habit `updatedAtISO` values produced by the canonical Home reorder path through the durable overlay and V2 mutation.
+- Backdated Habit completion now carries the canonical `completedAtISO` from the selected day through pending delta replay, WAL identity, and V2 commit.
+
+The next physical pass must therefore include a normal reorder and, when convenient, a completion recorded for a day other than today. Strict parity should remain green without weakening timestamp comparison.
 
 ## Additional physical scenarios after the primary trace
 
