@@ -8,6 +8,15 @@
   const MAX_WINDOW_MS = 5000;
   const MAX_WINDOWS = 40;
   const MAX_CANDIDATES_PER_WINDOW = 12;
+  const LEGACY_WHOLE_STATE_CORE_CALLS = new Set([
+    'core.loadAppState',
+    'core.readTaskPointsStoredState',
+    'core.parseTaskPointsStorageJson',
+    'core.saveStateSnapshot',
+    'core.saveValidatedSnapshot',
+    'core.shadowSourceSummary',
+    'core.shadowCanonicalJson'
+  ]);
 
   function finiteNumber(value) {
     const number = Number(value);
@@ -69,10 +78,9 @@
     if (name.startsWith('stateV2.')) return false;
     if (lower.includes('phase2') || lower.includes('phase4') || lower.includes('phase5')
       || lower.includes('verifiedsecondary') || lower.includes('snapshot')) return true;
-    if (name === 'storage.setItem' && String(detail.key || '') === 'taskpoints_v1') return true;
+    if ((name === 'storage.setItem' || name === 'storage.getItem') && String(detail.key || '') === 'taskpoints_v1') return true;
     if (name === 'json.stringify' || name === 'structuredClone') return true;
-    if (name === 'core.saveStateSnapshot' || name === 'core.saveValidatedSnapshot'
-      || name === 'core.shadowSourceSummary' || name === 'core.shadowCanonicalJson') return true;
+    if (LEGACY_WHOLE_STATE_CORE_CALLS.has(name)) return true;
     if (name === 'indexedDB.transaction') {
       const db = String(detail.db || '');
       return Boolean(db) && db !== V2_DB_NAME;
@@ -188,7 +196,7 @@
 
   const api = {
     installed: true,
-    version: 1,
+    version: 2,
     review,
     flattenEvents,
     isLegacyFullStateCandidate
