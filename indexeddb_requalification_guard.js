@@ -229,11 +229,9 @@
 ;(function loadTaskPointsRankingsTournamentTrophies(global) {
   'use strict';
   const document = global.document;
-  const path = String(global.location?.pathname || '');
-  if (!/(^|\/)rankings(?:\.html)?$/i.test(path)) return;
   if (!document?.head || document.querySelector?.('script[data-taskpoints-rankings-tournament-trophies]')) return;
   const script = document.createElement('script');
-  script.src = 'rankings_tournament_trophies.js';
+  script.src = 'rankings_tournament_trophies.js?v=20260913-3';
   script.defer = true;
   script.dataset.taskpointsRankingsTournamentTrophies = 'true';
   document.head.appendChild(script);
