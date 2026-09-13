@@ -30,7 +30,7 @@ function installForHost(hostname, dark = true) {
 test('live reviewer is dynamically loaded only from the V2 dark structure bridge', () => {
   assert.match(structureBridge, /function loadLiveTraceReview\(\)/);
   assert.match(structureBridge, /if \(!isEnabled\(\) \|\| global\.TaskPointsStateRuntimeV2LiveReview\?\.installed/);
-  assert.match(structureBridge, /state_runtime_v2_live_review\.js\?v=20260912-1/);
+  assert.match(structureBridge, /state_runtime_v2_live_review\.js\?v=20260913-1/);
   assert.match(structureBridge, /loadPerfInstrumentation\(\);\s*loadLiveTraceReview\(\);/);
   assert.match(source, /state_runtime_v2_trace_review\.js\?v=20260912-1/);
   assert.match(source, /state_runtime_v2_foreground_correlation\.js\?v=20260913-1/);
