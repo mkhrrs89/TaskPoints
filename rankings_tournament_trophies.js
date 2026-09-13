@@ -9,8 +9,10 @@
   let installAttempts = 0;
   let championCounts = new Map();
   let championNameCounts = new Map();
-  let observer = null;
+  let rankingsObserver = null;
+  let navObserver = null;
   let decorating = false;
+  let navRefreshQueued = false;
 
   function normalizeName(value) {
     return String(value || '').trim().toLocaleLowerCase();
@@ -53,10 +55,18 @@
     if (!id) return '';
     if (id === 'YOU') return String(state?.youName || '').trim() || 'You';
 
+    const historical = (Array.isArray(state?.seasonHistory) ? state.seasonHistory : []).flatMap((season) => [
+      ...(Array.isArray(season?.playerPool) ? season.playerPool : []),
+      ...(Array.isArray(season?.seeds) ? season.seeds : []),
+      ...(Array.isArray(season?.originalSeeds) ? season.originalSeeds : []),
+      ...(Array.isArray(season?.finalPlacements) ? season.finalPlacements : []),
+      ...(Array.isArray(season?.tournamentStats) ? season.tournamentStats : [])
+    ]);
     const candidates = [
       ...(Array.isArray(state?.players) ? state.players : []),
       ...(Array.isArray(state?.currentSeason?.playerPool) ? state.currentSeason.playerPool : []),
-      ...(Array.isArray(state?.currentSeason?.seeds) ? state.currentSeason.seeds : [])
+      ...(Array.isArray(state?.currentSeason?.seeds) ? state.currentSeason.seeds : []),
+      ...historical
     ];
     const player = candidates.find((candidate) => String(candidate?.id || candidate?.playerId || '').trim() === id);
     return String(player?.name || player?.playerName || '').trim();
@@ -252,7 +262,9 @@
   function getTournamentWinCount(playerId, stateInput = null) {
     const id = String(playerId || '').trim();
     if (!id) return 0;
-    return buildChampionData(stateInput).byId.get(id) || 0;
+    const state = stateInput && typeof stateInput === 'object' ? stateInput : (loadState() || {});
+    const data = buildChampionData(state);
+    return data.byId.get(id) || data.byName.get(normalizeName(playerNameForId(id, state))) || 0;
   }
 
   function trophySuffix(winCount) {
@@ -314,7 +326,10 @@
         const cleanName = stripTrophySuffix(nameElement.textContent || '');
         const playerId = ids[index] || playerIdForName(cleanName, state) || '';
         const canonicalName = playerNameForId(playerId, state) || cleanName;
-        const count = championCounts.get(playerId) || championNameCounts.get(normalizeName(canonicalName)) || championNameCounts.get(normalizeName(cleanName)) || 0;
+        const count = championCounts.get(playerId)
+          || championNameCounts.get(normalizeName(canonicalName))
+          || championNameCounts.get(normalizeName(cleanName))
+          || 0;
         const desired = `${canonicalName}${trophySuffix(count)}`;
         if (nameElement.textContent !== desired) nameElement.textContent = desired;
       });
@@ -324,47 +339,86 @@
     return true;
   }
 
-  function renameCurrentRankingsLinks() {
-    const links = Array.from(global.document?.querySelectorAll?.('a[href="rankings.html"],a[href="/rankings.html"]') || []);
+  function isRankingsLink(link) {
+    if (!link?.getAttribute) return false;
+    const href = String(link.getAttribute('href') || '').trim();
+    return /(^|\/)rankings\.html(?:[?#].*)?$/.test(href);
+  }
+
+  function renameRankingsLinks(root = global.document) {
+    const links = [];
+    if (isRankingsLink(root)) links.push(root);
+    if (root?.querySelectorAll) {
+      Array.from(root.querySelectorAll('a[href]')).forEach((link) => {
+        if (isRankingsLink(link)) links.push(link);
+      });
+    }
     links.forEach((link) => {
       if (String(link.textContent || '').trim() === 'Rankings') link.textContent = 'Power Rankings';
+      if (String(link.getAttribute?.('aria-label') || '').trim() === 'Rankings') link.setAttribute?.('aria-label', 'Power Rankings');
     });
+    return links.length;
+  }
+
+  function queueNavRename() {
+    if (navRefreshQueued) return;
+    navRefreshQueued = true;
+    const run = () => {
+      navRefreshQueued = false;
+      renameRankingsLinks();
+    };
+    if (typeof global.requestAnimationFrame === 'function') global.requestAnimationFrame(run);
+    else global.setTimeout?.(run, 0);
+  }
+
+  function startNavObserver() {
+    const document = global.document;
+    renameRankingsLinks();
+    if (navObserver || typeof global.MutationObserver !== 'function' || !document?.documentElement) return Boolean(document);
+    navObserver = new global.MutationObserver((mutations) => {
+      const relevant = mutations.some((mutation) => Array.from(mutation.addedNodes || []).some((node) => {
+        if (isRankingsLink(node)) return true;
+        return Array.from(node?.querySelectorAll?.('a[href]') || []).some(isRankingsLink);
+      }));
+      if (relevant) queueNavRename();
+    });
+    navObserver.observe(document.documentElement, { childList: true, subtree: true });
+    return true;
   }
 
   function scheduleDecoration() {
     const run = () => {
-      renameCurrentRankingsLinks();
+      renameRankingsLinks();
       decorateRankingsDom();
     };
     if (typeof global.requestAnimationFrame === 'function') global.requestAnimationFrame(run);
     else global.setTimeout?.(run, 0);
   }
 
-  function startDomObserver() {
+  function startRankingsObserver() {
     const document = global.document;
     const list = document?.getElementById?.('rankingsList');
     if (!list) return false;
 
     scheduleDecoration();
-    if (observer || typeof global.MutationObserver !== 'function') return true;
+    if (rankingsObserver || typeof global.MutationObserver !== 'function') return true;
 
-    observer = new global.MutationObserver(() => {
+    rankingsObserver = new global.MutationObserver(() => {
       if (!decorating) scheduleDecoration();
     });
-    observer.observe(list, { childList: true, subtree: true });
+    rankingsObserver.observe(list, { childList: true, subtree: true });
     return true;
   }
 
-  function installWhenReady() {
-    renameCurrentRankingsLinks();
-    const observing = startDomObserver();
+  function installRankingsWhenReady() {
+    const observing = startRankingsObserver();
     if (observing) {
       refreshChampionCounts();
       scheduleDecoration();
       return;
     }
     installAttempts += 1;
-    if (installAttempts < MAX_INSTALL_ATTEMPTS) global.setTimeout?.(installWhenReady, 50);
+    if (installAttempts < MAX_INSTALL_ATTEMPTS) global.setTimeout?.(installRankingsWhenReady, 50);
   }
 
   const api = {
@@ -384,20 +438,25 @@
     decorateName,
     refreshChampionCounts,
     decorateRankingsDom,
-    renameCurrentRankingsLinks,
-    startDomObserver
+    renameRankingsLinks,
+    startNavObserver,
+    startRankingsObserver
   };
 
   global.TaskPointsRankingsTournamentTrophies = api;
   core.getSeasonTournamentWinCount = getTournamentWinCount;
 
   const pathname = String(global.location?.pathname || '');
-  const isRankings = pathname.endsWith('/rankings.html') || pathname === 'rankings.html';
-  if (!isRankings) return;
+  const isRankingsPage = /(^|\/)rankings(?:\.html)?$/i.test(pathname);
+
+  function start() {
+    startNavObserver();
+    if (isRankingsPage) installRankingsWhenReady();
+  }
 
   if (global.document?.readyState === 'loading') {
-    global.document.addEventListener?.('DOMContentLoaded', installWhenReady, { once: true });
+    global.document.addEventListener?.('DOMContentLoaded', start, { once: true });
   } else {
-    installWhenReady();
+    start();
   }
 })(typeof window !== 'undefined' ? window : globalThis);
