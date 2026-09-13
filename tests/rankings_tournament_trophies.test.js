@@ -42,6 +42,15 @@ function makeState() {
   };
 }
 
+function navLink(href, textContent) {
+  const attrs = new Map([['href', href]]);
+  return {
+    textContent,
+    getAttribute(name) { return attrs.get(String(name)) || null; },
+    setAttribute(name, value) { attrs.set(String(name), String(value)); }
+  };
+}
+
 function makeContext(pathname = '/other.html') {
   const state = makeState();
   const links = [];
@@ -60,9 +69,10 @@ function makeContext(pathname = '/other.html') {
     localStorage: { getItem: () => null },
     document: {
       readyState: 'complete',
+      documentElement: null,
       addEventListener: () => undefined,
       getElementById: () => null,
-      querySelectorAll: () => links
+      querySelectorAll: (selector) => selector === 'a[href]' ? links : []
     },
     setTimeout: () => 0,
     TaskPointsCore: {
@@ -191,6 +201,7 @@ test('name fallback still decorates a champion if an old archive only preserved 
     seasonHistory: [{ id: 'name-only', championSummary: { championName: 'Carl' } }]
   };
   assert.equal(context.TaskPointsRankingsTournamentTrophies.decorateName('Carl', 'CARL', state), 'Carl 🏆');
+  assert.equal(context.TaskPointsRankingsTournamentTrophies.getTournamentWinCount('CARL', state), 1);
 });
 
 test('trophy decoration is idempotent and never stacks duplicates', () => {
@@ -200,15 +211,15 @@ test('trophy decoration is idempotent and never stacks duplicates', () => {
   assert.equal(api.decorateName('Carl 🏆', 'CARL', state), 'Carl 🏆');
 });
 
-test('Rankings page nav label is renamed to Power Rankings', () => {
-  const { context, links } = makeContext('/rankings.html');
-  links.push({ textContent: 'Rankings' }, { textContent: 'Standings' });
-  context.TaskPointsRankingsTournamentTrophies.renameCurrentRankingsLinks();
+test('Rankings navigation label is renamed to Power Rankings on any page', () => {
+  const { context, links } = makeContext('/index.html');
+  links.push(navLink('rankings.html', 'Rankings'), navLink('standings.html', 'Standings'));
+  context.TaskPointsRankingsTournamentTrophies.renameRankingsLinks();
   assert.equal(links[0].textContent, 'Power Rankings');
   assert.equal(links[1].textContent, 'Standings');
 });
 
-test('shared loader injects the trophy helper only on the Rankings page', () => {
+test('shared loader injects the helper globally so dynamically rendered navs can say Power Rankings', () => {
   function runLoader(pathname) {
     const appended = [];
     const storage = new Map();
@@ -246,12 +257,11 @@ test('shared loader injects the trophy helper only on the Rankings page', () => 
     return appended;
   }
 
-  const rankingScripts = runLoader('/rankings.html')
-    .filter((node) => node.src === 'rankings_tournament_trophies.js');
-  const otherScripts = runLoader('/index.html')
-    .filter((node) => node.src === 'rankings_tournament_trophies.js');
-
-  assert.equal(rankingScripts.length, 1);
-  assert.equal(rankingScripts[0].dataset.taskpointsRankingsTournamentTrophies, 'true');
-  assert.equal(otherScripts.length, 0);
+  for (const pathname of ['/rankings.html', '/index.html', '/game.html']) {
+    const scripts = runLoader(pathname)
+      .filter((node) => String(node.src || '').startsWith('rankings_tournament_trophies.js'));
+    assert.equal(scripts.length, 1, pathname);
+    assert.equal(scripts[0].src, 'rankings_tournament_trophies.js?v=20260913-3');
+    assert.equal(scripts[0].dataset.taskpointsRankingsTournamentTrophies, 'true');
+  }
 });
