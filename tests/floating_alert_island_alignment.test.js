@@ -11,14 +11,25 @@ test('mobile floating alert islands align to the former header-nav row', () => {
   assert.match(moduleSource, /documentRowCenterY\(row\)/);
   assert.match(moduleSource, /rect\.top \+ scrollY \+ \(rect\.height \/ 2\)/);
   assert.match(moduleSource, /centerFixedElementOnDocumentY\(red, centerY/);
-  assert.match(moduleSource, /centerFixedElementOnDocumentY\(orange, centerY/);
+  assert.match(moduleSource, /centerFixedElementOnDocumentY\(\s*orange,/);
 });
 
-test('red island moves inward while orange island stays on the right tray edge', () => {
-  assert.match(moduleSource, /const RED_LEFT = '3rem'/);
+test('orange island gets only a slight downward nudge', () => {
+  assert.match(moduleSource, /const ORANGE_VERTICAL_NUDGE_PX = 4/);
+  assert.match(moduleSource, /centerY \+ ORANGE_VERTICAL_NUDGE_PX/);
   assert.match(moduleSource, /const ORANGE_RIGHT = '0\.75rem'/);
-  assert.match(moduleSource, /red\.style\.left = RED_LEFT/);
   assert.match(moduleSource, /orange\.style\.right = ORANGE_RIGHT/);
+});
+
+test('red island is slightly smaller and horizontally mirrors the orange island', () => {
+  assert.match(moduleSource, /const RED_SIZE_PX = 52/);
+  assert.match(moduleSource, /function sizeRedIsland\(red\)/);
+  assert.match(moduleSource, /red\.style\.width = size/);
+  assert.match(moduleSource, /red\.style\.height = size/);
+  assert.match(moduleSource, /function mirrorRedToOrange\(red, orange\)/);
+  assert.match(moduleSource, /const orangeCenterX = orangeRect\.left \+ \(orangeRect\.width \/ 2\)/);
+  assert.match(moduleSource, /const mirroredCenterX = viewportWidth - orangeCenterX/);
+  assert.match(moduleSource, /red\.style\.left = `\$\{Math\.round\(mirroredCenterX - \(redRect\.width \/ 2\)\)\}px`/);
 });
 
 test('alignment does not attach a scroll listener or alter floating transforms', () => {
@@ -30,7 +41,7 @@ test('alignment does not attach a scroll listener or alter floating transforms',
   assert.match(moduleSource, /addEventListener\?*\('pageshow', scheduleAlign/);
 });
 
-test('shared production loader includes floating island alignment module', () => {
-  assert.match(loaderSource, /floating_alert_island_alignment\.js\?v=20260913-1/);
+test('shared production loader includes cache-busted floating island alignment module', () => {
+  assert.match(loaderSource, /floating_alert_island_alignment\.js\?v=20260913-2/);
   assert.match(loaderSource, /data-taskpoints-floating-alert-alignment/);
 });
