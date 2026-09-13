@@ -39,7 +39,7 @@ test('trace review page can copy only the derived review JSON', () => {
   assert.doesNotMatch(source, /fetch\s*\(/);
 });
 
-test('foreground correlator ties legacy full-state work to the interaction-to-enqueue window', () => {
+test('foreground correlator uses enqueue as a conservative fallback when no paint boundary exists', () => {
   const report = {
     pages: [{
       path: '/',
@@ -58,17 +58,62 @@ test('foreground correlator ties legacy full-state work to the interaction-to-en
   const result = correlator.review(report);
   assert.equal(result.enqueueCount, 1);
   assert.equal(result.correlatedMutationWindowCount, 1);
+  assert.equal(result.paintBoundedMutationWindowCount, 0);
+  assert.equal(result.enqueueFallbackWindowCount, 1);
   assert.equal(result.foregroundLegacyWorkObserved, true);
   assert.equal(result.windowsWithLegacyWork, 1);
   assert.equal(result.legacyForegroundCandidateCount, 4);
   assert.equal(result.maxLegacyForegroundCandidateMs, 45);
   assert.equal(result.byMutationClass.completion.fullyCorrelated, true);
+  assert.equal(result.mutationWindows[0].foregroundEndSource, 'enqueue');
   assert.deepEqual(result.mutationWindows[0].candidates.map((row) => row.name), [
     'core.loadAppState',
     'phase2.persist',
     'storage.setItem',
     'storage.getItem'
   ]);
+});
+
+test('foreground correlator extends the window through next paint and catches work after enqueue', () => {
+  const report = {
+    pages: [{
+      path: '/',
+      events: [
+        { epochMs: 1000, name: 'interaction.click', type: 'mark', detail: { target: '.habitDay' } },
+        { epochMs: 1040, name: 'stateV2.enqueue.completion.sync', type: 'duration', durationMs: 0.5, detail: {} },
+        { epochMs: 1120, name: 'core.loadAppState', type: 'duration', durationMs: 70, detail: { syncDerived: false } },
+        { epochMs: 1160, name: 'stateV2.foreground.nextPaint', type: 'duration', durationMs: 160, detail: { interactionType: 'click' } }
+      ]
+    }]
+  };
+
+  const result = correlator.review(report);
+  assert.equal(result.correlatedMutationWindowCount, 1);
+  assert.equal(result.paintBoundedMutationWindowCount, 1);
+  assert.equal(result.enqueueFallbackWindowCount, 0);
+  assert.equal(result.foregroundLegacyWorkObserved, true);
+  assert.equal(result.maxLegacyForegroundCandidateMs, 70);
+  assert.equal(result.mutationWindows[0].foregroundEndSource, 'nextPaint');
+  assert.equal(result.mutationWindows[0].interactionToEnqueueMs, 40);
+  assert.equal(result.mutationWindows[0].interactionToPaintMs, 160);
+  assert.deepEqual(result.mutationWindows[0].candidates.map((row) => row.name), ['core.loadAppState']);
+});
+
+test('foreground correlator ignores interaction toPaint duration rows as interaction anchors', () => {
+  const report = {
+    pages: [{
+      path: '/',
+      events: [
+        { epochMs: 1000, name: 'interaction.pointerdown', type: 'mark', detail: {} },
+        { epochMs: 1020, name: 'interaction.input.toPaint', type: 'duration', durationMs: 20, detail: {} },
+        { epochMs: 1050, name: 'stateV2.enqueue.order.sync', type: 'duration', durationMs: 0.5, detail: {} }
+      ]
+    }]
+  };
+
+  const result = correlator.review(report);
+  assert.equal(result.mutationWindows[0].interactionName, 'interaction.pointerdown');
+  assert.equal(result.mutationWindows[0].interactionEpochMs, 1000);
 });
 
 test('foreground correlator recognizes legacy state parsing and stored-state reads', () => {
