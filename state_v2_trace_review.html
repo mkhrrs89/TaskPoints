@@ -56,6 +56,7 @@
       .map((kind) => `${kind}: ${classes[kind]?.observed ? '✓' : '—'}`)
       .join(' · ');
     const correlationText = `${correlation.correlatedMutationWindowCount ?? 0}/${correlation.enqueueCount ?? 0}`;
+    const paintText = `${correlation.paintBoundedMutationWindowCount ?? 0}/${correlation.correlatedMutationWindowCount ?? 0}`;
     const maxLegacyText = Number.isFinite(Number(correlation.maxLegacyForegroundCandidateMs))
       ? `${Number(correlation.maxLegacyForegroundCandidateMs).toFixed(1)} ms`
       : 'none observed';
@@ -70,10 +71,11 @@
       `<div class="metric"><strong>Mutation classes</strong><span>${esc(classText)}</span></div>`,
       `<div class="metric"><strong>Deep quiet target</strong><span>${esc(review.maintenance?.deepQuietMs ?? 'unknown')} ms</span></div>`,
       `<div class="metric"><strong>Foreground windows correlated</strong><span>${esc(correlationText)}</span></div>`,
+      `<div class="metric"><strong>Correlated windows reaching next paint</strong><span>${esc(paintText)}</span></div>`,
       verdict('Legacy/full-state work overlapped a mutation foreground window', correlation.foregroundLegacyWorkObserved === true, true),
       `<div class="metric"><strong>Max overlapping legacy/full-state duration</strong><span>${esc(maxLegacyText)}</span></div>`
     ].join('');
-    deviceNote.textContent = 'This reviewer summarizes trace evidence only. The tester still has to confirm the trace came from the intended physical iPhone/PWA scenario. Foreground correlation uses the latest recorded interaction before each V2 enqueue, on the same page, within a bounded 5-second window.';
+    deviceNote.textContent = 'This reviewer summarizes trace evidence only. The tester still has to confirm the trace came from the intended physical iPhone/PWA scenario. Foreground correlation starts at the latest recorded interaction before each V2 enqueue. When the live V2 paint probe is present, the window extends through the next render frame so post-enqueue work that delays visible response is included; older traces fall back to the enqueue boundary. Windows are limited to the same page and a bounded 5-second span.';
     reviewJson.textContent = JSON.stringify(review, null, 2);
     results.hidden = false;
   }
