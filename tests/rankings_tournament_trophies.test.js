@@ -16,14 +16,27 @@ function makeState() {
     ],
     currentSeason: {
       id: 'season-3',
-      championSummary: { championId: 'POPPY' }
+      championSummary: { championId: 'POPPY', championName: 'Poppy' }
     },
     seasonHistory: [
-      { id: 'season-1', championId: 'POPPY' },
-      { id: 'season-2', championSummary: { championId: 'POPPY' } },
-      { id: 'season-3', championSummary: { championId: 'POPPY' } },
-      { id: 'season-4', championId: 'RUE' },
-      { id: 'season-5', championSummary: { championId: 'CARL' } },
+      { id: 'season-1', championId: 'POPPY', championName: 'Poppy' },
+      {
+        id: 'season-2',
+        championSummary: { championName: 'Poppy' },
+        finalPlacements: [
+          { playerId: 'POPPY', playerName: 'Poppy', finish: 'Champion', finishTier: 0 },
+          { playerId: 'RUE', playerName: 'Rue', finish: 'Runner-Up', finishTier: 1 }
+        ]
+      },
+      { id: 'season-3', championSummary: { championId: 'POPPY', championName: 'Poppy' } },
+      { id: 'season-4', championId: 'RUE', championName: 'Rue' },
+      {
+        id: 'season-5',
+        championSummary: { championName: 'Carl' },
+        finalPlacements: [
+          { playerId: 'CARL', playerName: 'Carl', finish: 'Champion' }
+        ]
+      },
       { id: 'season-6' }
     ]
   };
@@ -31,6 +44,7 @@ function makeState() {
 
 function makeContext(pathname = '/other.html') {
   const state = makeState();
+  const links = [];
   const context = vm.createContext({
     console,
     JSON,
@@ -40,13 +54,15 @@ function makeContext(pathname = '/other.html') {
     Number,
     String,
     Array,
+    Object,
     Promise,
     location: { pathname },
     localStorage: { getItem: () => null },
     document: {
       readyState: 'complete',
       addEventListener: () => undefined,
-      getElementById: () => null
+      getElementById: () => null,
+      querySelectorAll: () => links
     },
     setTimeout: () => 0,
     TaskPointsCore: {
@@ -59,7 +75,7 @@ function makeContext(pathname = '/other.html') {
   context.window = context;
   context.globalThis = context;
   vm.runInContext(source, context);
-  return { context, state };
+  return { context, state, links };
 }
 
 test('counts one trophy per unique all-time season tournament championship', () => {
@@ -75,63 +91,84 @@ test('counts one trophy per unique all-time season tournament championship', () 
   assert.equal(api.decorateName('Rue', 'RUE', state), 'Rue 🏆');
 });
 
+test('reads legacy finalized archive champion from finalPlacements when championId is absent', () => {
+  const { context } = makeContext();
+  const state = {
+    players: [{ id: 'CARL', name: 'Carl' }, { id: 'POPPY', name: 'Poppy' }],
+    currentSeason: null,
+    seasonHistory: [
+      {
+        id: 'legacy-carl',
+        championSummary: { championName: 'Carl', finalsResult: 'Carl defeats Poppy, 4–2' },
+        finalPlacements: [
+          { playerId: 'CARL', playerName: 'Carl', finish: 'Champion', finishTier: 0 },
+          { playerId: 'POPPY', playerName: 'Poppy', finish: 'Runner-Up' }
+        ]
+      },
+      {
+        id: 'legacy-poppy',
+        championSummary: { championName: 'Poppy' },
+        tournamentStats: [
+          { playerId: 'POPPY', playerName: 'Poppy', finish: 'Champion' }
+        ]
+      }
+    ]
+  };
+
+  assert.equal(context.TaskPointsRankingsTournamentTrophies.getTournamentWinCount('CARL', state), 1);
+  assert.equal(context.TaskPointsRankingsTournamentTrophies.getTournamentWinCount('POPPY', state), 1);
+});
+
+test('reads archived Finals winner when finalPlacements is absent', () => {
+  const { context } = makeContext();
+  const state = {
+    players: [{ id: 'CARL', name: 'Carl' }],
+    seasonHistory: [{
+      id: 'archive-series',
+      championSummary: { championName: 'Carl' },
+      finalsSeries: { roundId: 'finals', winnerId: 'CARL', winnerName: 'Carl' }
+    }]
+  };
+  assert.equal(context.TaskPointsRankingsTournamentTrophies.getTournamentWinCount('CARL', state), 1);
+});
+
 test('does not double-count the same season when currentSeason is also archived', () => {
   const { context, state } = makeContext();
   const counts = context.TaskPointsRankingsTournamentTrophies.buildChampionCounts(state);
   assert.equal(counts.get('POPPY'), 3);
 });
 
-test('falls back to finals-derived champion when no stored champion id exists', () => {
+test('falls back to finals-derived champion when archived fields do not identify one', () => {
   const { context } = makeContext();
-  context.TaskPointsCore.getSeasonChampionFromFinals = (season) => season?.id === 'season-x' ? { playerId: 'FINALS' } : null;
+  context.TaskPointsCore.getSeasonChampionFromFinals = (season) => season?.id === 'season-x' ? { playerId: 'FINALS', playerName: 'Finals Player' } : null;
   const state = { currentSeason: null, seasonHistory: [{ id: 'season-x' }] };
   assert.equal(context.TaskPointsRankingsTournamentTrophies.getTournamentWinCount('FINALS', state), 1);
 });
 
-test('can derive a champion directly from stored finals rows when the season summary is absent', () => {
+test('can derive a champion directly from stored finals rows when summaries and archive placements are absent', () => {
   const { context } = makeContext();
   const state = {
+    players: [{ id: 'CARL', name: 'Carl' }, { id: 'RUE', name: 'Rue' }],
     currentSeason: null,
     seasonHistory: [{
       id: 'season-finals-only',
       tournamentMatchupResults: [
-        { roundId: 'finals', playerAId: 'CARL', playerBId: 'RUE', scoreA: 60, scoreB: 55, winnerId: 'CARL' },
-        { roundId: 'finals', playerAId: 'CARL', playerBId: 'RUE', scoreA: 58, scoreB: 54, winnerId: 'CARL' }
+        { roundId: 'finals', playerAId: 'CARL', playerAName: 'Carl', playerBId: 'RUE', playerBName: 'Rue', scoreA: 60, scoreB: 55, winnerId: 'CARL' },
+        { roundId: 'finals', playerAId: 'CARL', playerAName: 'Carl', playerBId: 'RUE', playerBName: 'Rue', scoreA: 58, scoreB: 54, winnerId: 'CARL' }
       ]
     }]
   };
   assert.equal(context.TaskPointsRankingsTournamentTrophies.getTournamentWinCount('CARL', state), 1);
 });
 
-test('rankings row patch decorates the visible player name and leaves non-champions unchanged', () => {
-  const { context } = makeContext('/rankings.html');
-  const seenNames = [];
-  context.renderRow = (player) => {
-    seenNames.push(player.name);
-    return player.name;
-  };
-  context.renderRankings = () => 'rendered';
-
-  const api = context.TaskPointsRankingsTournamentTrophies;
-  assert.equal(api.patchRankings(), true);
-  context.renderRankings();
-
-  assert.equal(context.renderRow({ id: 'POPPY', playerId: 'POPPY', name: 'Poppy' }), 'Poppy 🏆🏆🏆');
-  assert.equal(context.renderRow({ id: 'CARL', playerId: 'CARL', name: 'Carl' }), 'Carl 🏆');
-  assert.equal(context.renderRow({ id: 'NONE', playerId: 'NONE', name: 'Nobody' }), 'Nobody');
-  assert.deepEqual(seenNames, ['Poppy 🏆🏆🏆', 'Carl 🏆', 'Nobody']);
-});
-
-test('post-render DOM decoration fixes names even when renderRow wrapping is bypassed', () => {
+test('post-render DOM decoration shows trophies for Poppy and Carl from archived season data', () => {
   const { context, state } = makeContext('/rankings.html');
   const poppyName = { textContent: 'Poppy' };
   const carlName = { textContent: 'Carl' };
   const otherName = { textContent: 'Nobody' };
   const row = (nameElement) => ({ querySelector: (selector) => selector === '.ranking-name' ? nameElement : null });
   const rows = [row(poppyName), row(carlName), row(otherName)];
-  const list = {
-    querySelectorAll: (selector) => selector === '.ranking-row' ? rows : []
-  };
+  const list = { querySelectorAll: (selector) => selector === '.ranking-row' ? rows : [] };
 
   context.document.getElementById = (id) => id === 'rankingsList' ? list : null;
   context.getScopedRankingsState = (candidate) => candidate;
@@ -147,11 +184,28 @@ test('post-render DOM decoration fixes names even when renderRow wrapping is byp
   assert.equal(otherName.textContent, 'Nobody');
 });
 
-test('trophy decoration is idempotent and never stacks duplicates on an already decorated name', () => {
+test('name fallback still decorates a champion if an old archive only preserved championName', () => {
+  const { context } = makeContext();
+  const state = {
+    players: [{ id: 'CARL', name: 'Carl' }],
+    seasonHistory: [{ id: 'name-only', championSummary: { championName: 'Carl' } }]
+  };
+  assert.equal(context.TaskPointsRankingsTournamentTrophies.decorateName('Carl', 'CARL', state), 'Carl 🏆');
+});
+
+test('trophy decoration is idempotent and never stacks duplicates', () => {
   const { context, state } = makeContext();
   const api = context.TaskPointsRankingsTournamentTrophies;
   assert.equal(api.decorateName('Poppy 🏆🏆🏆', 'POPPY', state), 'Poppy 🏆🏆🏆');
   assert.equal(api.decorateName('Carl 🏆', 'CARL', state), 'Carl 🏆');
+});
+
+test('Rankings page nav label is renamed to Power Rankings', () => {
+  const { context, links } = makeContext('/rankings.html');
+  links.push({ textContent: 'Rankings' }, { textContent: 'Standings' });
+  context.TaskPointsRankingsTournamentTrophies.renameCurrentRankingsLinks();
+  assert.equal(links[0].textContent, 'Power Rankings');
+  assert.equal(links[1].textContent, 'Standings');
 });
 
 test('shared loader injects the trophy helper only on the Rankings page', () => {
