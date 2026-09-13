@@ -237,6 +237,17 @@
   document.head.appendChild(script);
 })(typeof window !== 'undefined' ? window : globalThis);
 
+;(function loadTaskPointsFloatingAlertIslandAlignment(global) {
+  'use strict';
+  const document = global.document;
+  if (!document?.head || document.querySelector?.('script[data-taskpoints-floating-alert-alignment]')) return;
+  const script = document.createElement('script');
+  script.src = 'floating_alert_island_alignment.js?v=20260913-1';
+  script.defer = true;
+  script.dataset.taskpointsFloatingAlertAlignment = 'true';
+  document.head.appendChild(script);
+})(typeof window !== 'undefined' ? window : globalThis);
+
 ;(function loadTaskPointsScoreAliasConsistency(global) {
   'use strict';
   const document = global.document;
