@@ -7,10 +7,12 @@
   const RED_ID = 'criticalTasksIsland';
   const ORANGE_SELECTOR = '.tp-reminder-island';
   const HEADER_ROW_SELECTOR = '.header-nav';
-  const RED_LEFT = '3rem';
+  const RED_FALLBACK_LEFT = '0.75rem';
   const ORANGE_RIGHT = '0.75rem';
+  const RED_SIZE_PX = 52;
+  const ORANGE_VERTICAL_NUDGE_PX = 4;
   const FALLBACK_RED_TOP = 'calc(env(safe-area-inset-top, 0px) + 3.45rem)';
-  const FALLBACK_ORANGE_TOP = 'calc(env(safe-area-inset-top, 0px) + 3.45rem)';
+  const FALLBACK_ORANGE_TOP = 'calc(env(safe-area-inset-top, 0px) + 3.7rem)';
 
   let observer = null;
   let scheduled = false;
@@ -48,6 +50,41 @@
     return true;
   }
 
+  function visibleOrange(oranges) {
+    return oranges.find((orange) => {
+      const rect = orange?.getBoundingClientRect?.();
+      if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+      const style = global.getComputedStyle?.(orange);
+      return style?.display !== 'none' && style?.visibility !== 'hidden';
+    }) || oranges[0] || null;
+  }
+
+  function sizeRedIsland(red) {
+    if (!red) return;
+    const size = `${RED_SIZE_PX}px`;
+    red.style.width = size;
+    red.style.height = size;
+    red.style.minWidth = size;
+    red.style.minHeight = size;
+    red.style.padding = '0.35rem';
+    red.style.boxSizing = 'border-box';
+  }
+
+  function mirrorRedToOrange(red, orange) {
+    if (!red) return false;
+    const viewportWidth = Number(global.innerWidth || global.document?.documentElement?.clientWidth || 0);
+    const orangeRect = orange?.getBoundingClientRect?.();
+    const redRect = red.getBoundingClientRect?.();
+    if (!(viewportWidth > 0) || !orangeRect || !redRect || !(orangeRect.width > 0) || !(redRect.width > 0)) {
+      red.style.left = RED_FALLBACK_LEFT;
+      return false;
+    }
+    const orangeCenterX = orangeRect.left + (orangeRect.width / 2);
+    const mirroredCenterX = viewportWidth - orangeCenterX;
+    red.style.left = `${Math.round(mirroredCenterX - (redRect.width / 2))}px`;
+    return true;
+  }
+
   function align() {
     scheduled = false;
     const document = global.document;
@@ -60,6 +97,12 @@
       if (red) {
         red.style.removeProperty('top');
         red.style.removeProperty('left');
+        red.style.removeProperty('width');
+        red.style.removeProperty('height');
+        red.style.removeProperty('min-width');
+        red.style.removeProperty('min-height');
+        red.style.removeProperty('padding');
+        red.style.removeProperty('box-sizing');
       }
       oranges.forEach((orange) => {
         orange.style.removeProperty('top');
@@ -71,15 +114,20 @@
     const row = visibleHeaderRow();
     const centerY = documentRowCenterY(row);
 
-    if (red) {
-      red.style.left = RED_LEFT;
-      centerFixedElementOnDocumentY(red, centerY, FALLBACK_RED_TOP);
-    }
-
     oranges.forEach((orange) => {
       orange.style.right = ORANGE_RIGHT;
-      centerFixedElementOnDocumentY(orange, centerY, FALLBACK_ORANGE_TOP);
+      centerFixedElementOnDocumentY(
+        orange,
+        Number.isFinite(centerY) ? centerY + ORANGE_VERTICAL_NUDGE_PX : centerY,
+        FALLBACK_ORANGE_TOP
+      );
     });
+
+    if (red) {
+      sizeRedIsland(red);
+      centerFixedElementOnDocumentY(red, centerY, FALLBACK_RED_TOP);
+      mirrorRedToOrange(red, visibleOrange(oranges));
+    }
 
     return Boolean(red || oranges.length);
   }
@@ -113,7 +161,7 @@
 
   global.TaskPointsFloatingAlertIslandAlignment = {
     installed: true,
-    version: 1,
+    version: 2,
     align,
     scheduleAlign,
     getStatus() {
@@ -122,7 +170,9 @@
         mobile: isMobile(),
         headerRowFound: Boolean(visibleHeaderRow()),
         redFound: Boolean(global.document?.getElementById?.(RED_ID)),
-        orangeCount: global.document?.querySelectorAll?.(ORANGE_SELECTOR)?.length || 0
+        orangeCount: global.document?.querySelectorAll?.(ORANGE_SELECTOR)?.length || 0,
+        redSizePx: RED_SIZE_PX,
+        orangeVerticalNudgePx: ORANGE_VERTICAL_NUDGE_PX
       };
     }
   };
