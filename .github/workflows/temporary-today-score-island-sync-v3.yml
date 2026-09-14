@@ -1,0 +1,37 @@
+name: Today Score Island Sync Patch v3
+
+on:
+  push:
+    branches: [fix/today-score-island-sync-20260914]
+    paths: [.github/workflows/temporary-today-score-island-sync-v3.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/today-score-island-sync-20260914
+          fetch-depth: 0
+
+      - name: Apply score-island synchronization patch
+        run: python .github/scripts/patch_today_score_island_sync.py
+
+      - name: Run focused score synchronization tests
+        run: >-
+          node --test
+          tests/home_today_score_island_sync.test.js
+          tests/home_scoreboard_season3_scope.test.js
+
+      - name: Commit verified fix and remove temporary tooling
+        run: |
+          git config user.name "TaskPoints Score Sync Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git rm .github/workflows/temporary-today-score-island-sync.yml .github/workflows/temporary-today-score-island-sync-v2.yml .github/workflows/temporary-today-score-island-sync-v3.yml .github/scripts/patch_today_score_island_sync.py
+          git add index.html tests/home_today_score_island_sync.test.js
+          git commit -m "Keep floating Today score synced with scoreboard"
+          git push origin HEAD:fix/today-score-island-sync-20260914
