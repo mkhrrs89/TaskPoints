@@ -1,0 +1,159 @@
+name: Temporary Home Score Rounding Fix
+
+on:
+  push:
+    branches:
+      - 'fix/home-score-rounding-parity-20260914'
+    paths:
+      - '.github/workflows/temporary-home-score-rounding-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/home-score-rounding-parity-20260914
+          fetch-depth: 0
+
+      - name: Unify home scoreboard and floating-island rounding
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          index_path = Path('index.html')
+          text = index_path.read_text()
+
+          marker = "function renderTodayPointsSummary(todayPoints, inertia, inertiaAvg){\n"
+          helper = """function roundHomeScoreForDisplay(value){
+            const num = Number(value);
+            if (!Number.isFinite(num)) return null;
+            if (window.TaskPointsCore?.roundPoints) {
+              return TaskPointsCore.roundPoints(num, 1);
+            }
+            return Math.round(num * 10) / 10;
+          }
+
+          function formatHomeScoreOneDecimal(value){
+            const rounded = roundHomeScoreForDisplay(value);
+            return rounded == null ? '—' : rounded.toFixed(1);
+          }
+
+          function renderTodayPointsSummary(todayPoints, inertia, inertiaAvg){
+          """
+          if text.count(marker) != 1:
+              raise SystemExit(f'Expected one renderTodayPointsSummary marker, found {text.count(marker)}')
+          text = text.replace(marker, helper, 1)
+
+          old_persist = """  // Persist \"Today score\" across pages for the floating island
+            try {
+              const v = Number.isFinite(todayPoints)
+                ? (Math.round(todayPoints * 10) / 10).toFixed(1)
+                : '—';
+              localStorage.setItem('tpTodayScore', v);
+          """
+          new_persist = """  // Persist the same canonical one-decimal score used by the home scoreboard.
+            try {
+              const v = formatHomeScoreOneDecimal(todayPoints);
+              localStorage.setItem('tpTodayScore', v);
+          """
+          if text.count(old_persist) != 1:
+              raise SystemExit(f'Expected one Today-score persistence block, found {text.count(old_persist)}')
+          text = text.replace(old_persist, new_persist, 1)
+
+          old_no_match = """    yourScoreEl.textContent = safeYour.toFixed(1);
+              updateTodayScoreIsland(safeYour.toFixed(1));
+          """
+          new_no_match = """    const formattedYourScore = formatHomeScoreOneDecimal(safeYour);
+              yourScoreEl.textContent = formattedYourScore;
+              updateTodayScoreIsland(formattedYourScore);
+          """
+          if text.count(old_no_match) != 1:
+              raise SystemExit(f'Expected one no-match current-score block, found {text.count(old_no_match)}')
+          text = text.replace(old_no_match, new_no_match, 1)
+
+          old_match = """  yourScoreEl.textContent = safeYourScore.toFixed(1);
+            updateTodayScoreIsland(safeYourScore.toFixed(1));
+          """
+          new_match = """  const formattedYourScore = formatHomeScoreOneDecimal(safeYourScore);
+            yourScoreEl.textContent = formattedYourScore;
+            updateTodayScoreIsland(formattedYourScore);
+          """
+          if text.count(old_match) != 1:
+              raise SystemExit(f'Expected one active-match current-score block, found {text.count(old_match)}')
+          text = text.replace(old_match, new_match, 1)
+
+          index_path.write_text(text)
+
+          test_path = Path('tests/home_score_rounding_parity.test.js')
+          test_path.write_text(r'''const test = require('node:test');
+          const assert = require('node:assert/strict');
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const vm = require('node:vm');
+
+          const indexSource = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+
+          function sliceBetween(startMarker, endMarker) {
+            const start = indexSource.indexOf(startMarker);
+            const end = indexSource.indexOf(endMarker, start + startMarker.length);
+            assert.ok(start >= 0, `missing start marker: ${startMarker}`);
+            assert.ok(end > start, `missing end marker: ${endMarker}`);
+            return indexSource.slice(start, end);
+          }
+
+          test('home score formatter uses canonical one-decimal rounding before string formatting', () => {
+            const helpers = sliceBetween('function roundHomeScoreForDisplay', 'function renderTodayPointsSummary');
+            const context = {
+              window: {},
+              TaskPointsCore: {
+                roundPoints(value, decimals = 2) {
+                  const factor = 10 ** decimals;
+                  return Math.round(Number(value) * factor) / factor;
+                }
+              }
+            };
+            context.window.TaskPointsCore = context.TaskPointsCore;
+            vm.createContext(context);
+            vm.runInContext(`${helpers}; result = [formatHomeScoreOneDecimal(2.55), formatHomeScoreOneDecimal(15.35), formatHomeScoreOneDecimal(20.45), formatHomeScoreOneDecimal(9.95)];`, context);
+            assert.deepEqual(Array.from(context.result), ['2.6', '15.4', '20.5', '10.0']);
+          });
+
+          test('current home matchup score and floating island share the same formatter', () => {
+            const matchup = sliceBetween('function renderTodaysMatchup', 'function renderYesterdaysResult');
+            assert.doesNotMatch(matchup, /yourScoreEl\.textContent\s*=\s*safeYour(?:Score)?\.toFixed\(1\)/);
+            assert.doesNotMatch(matchup, /updateTodayScoreIsland\(safeYour(?:Score)?\.toFixed\(1\)\)/);
+            assert.match(matchup, /const formattedYourScore = formatHomeScoreOneDecimal\(safeYour\)/);
+            assert.match(matchup, /const formattedYourScore = formatHomeScoreOneDecimal\(safeYourScore\)/);
+            assert.match(matchup, /yourScoreEl\.textContent = formattedYourScore;\s*updateTodayScoreIsland\(formattedYourScore\);/);
+          });
+
+          test('persisted floating-island score uses the same canonical formatter', () => {
+            const summary = sliceBetween('function renderTodayPointsSummary', 'function updateTodayBreakdown');
+            assert.match(summary, /const v = formatHomeScoreOneDecimal\(todayPoints\);/);
+            assert.doesNotMatch(summary, /Math\.round\(todayPoints \* 10\).*toFixed\(1\)/s);
+          });
+          '''.replace('\n          ', '\n').trimStart())
+          PY
+
+      - name: Run focused home score tests
+        run: >-
+          node --test
+          tests/home_score_rounding_parity.test.js
+          tests/home_targeted_render_control.test.js
+          tests/home_targeted_render_contract.test.js
+
+      - name: Commit verified fix and remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name 'TaskPoints Score Parity Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git rm .github/workflows/temporary-home-score-rounding-fix.yml
+          git add index.html tests/home_score_rounding_parity.test.js
+          git commit -m 'Unify home score display rounding'
+          git push origin HEAD:fix/home-score-rounding-parity-20260914
