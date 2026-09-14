@@ -1,37 +1,4 @@
-from pathlib import Path
-
-path = Path('index.html')
-text = path.read_text()
-old = """const updateTodayScoreIsland = (value) => {
-  const islandValueEl = $('todayScoreIslandValue');
-  if (islandValueEl) islandValueEl.textContent = value;
-};
-"""
-new = """const updateTodayScoreIsland = (value) => {
-  const displayValue = (value == null || value === '') ? '—' : String(value);
-  const islandValueEl = $('todayScoreIslandValue');
-  if (islandValueEl) islandValueEl.textContent = displayValue;
-
-  // toolbar.js uses this lightweight cache so the floating island can show the
-  // latest Home score on every page. Keep the cache sourced from the exact same
-  // already-rounded value rendered by the Home scoreboard; never let an older
-  // cached value overwrite the live scoreboard value after startup/focus.
-  try {
-    const cacheKey = 'tpTodayScore';
-    if (displayValue === '—') {
-      if (localStorage.getItem(cacheKey) != null) localStorage.removeItem(cacheKey);
-    } else if (localStorage.getItem(cacheKey) !== displayValue) {
-      localStorage.setItem(cacheKey, displayValue);
-    }
-  } catch (_) {}
-};
-"""
-if text.count(old) != 1:
-    raise SystemExit(f'Expected exactly one updateTodayScoreIsland implementation, found {text.count(old)}')
-path.write_text(text.replace(old, new))
-
-test = Path('tests/home_today_score_island_sync.test.js')
-test.write_text(r'''const fs = require('node:fs');
+const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -86,4 +53,3 @@ test('Floating island reads the same tpTodayScore cache the Home scoreboard now 
 test('Home scoreboard passes its already-rounded displayed value into the shared island updater', () => {
   assert.match(HOME, /yourScoreEl\.textContent = safeYourScore\.toFixed\(1\);\s*updateTodayScoreIsland\(safeYourScore\.toFixed\(1\)\);/);
 });
-''')
