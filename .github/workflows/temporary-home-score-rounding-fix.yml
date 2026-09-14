@@ -125,12 +125,11 @@ jobs:
           });
 
           test('current home matchup score and floating island share the same formatter', () => {
-            const matchup = sliceBetween('function renderTodaysMatchup', 'function renderYesterdaysResult');
-            assert.doesNotMatch(matchup, /yourScoreEl\.textContent\s*=\s*safeYour(?:Score)?\.toFixed\(1\)/);
-            assert.doesNotMatch(matchup, /updateTodayScoreIsland\(safeYour(?:Score)?\.toFixed\(1\)\)/);
-            assert.match(matchup, /const formattedYourScore = formatHomeScoreOneDecimal\(safeYour\)/);
-            assert.match(matchup, /const formattedYourScore = formatHomeScoreOneDecimal\(safeYourScore\)/);
-            assert.match(matchup, /yourScoreEl\.textContent = formattedYourScore;\s*updateTodayScoreIsland\(formattedYourScore\);/);
+            assert.doesNotMatch(indexSource, /yourScoreEl\.textContent\s*=\s*safeYour(?:Score)?\.toFixed\(1\)/);
+            assert.doesNotMatch(indexSource, /updateTodayScoreIsland\(safeYour(?:Score)?\.toFixed\(1\)\)/);
+            assert.match(indexSource, /const formattedYourScore = formatHomeScoreOneDecimal\(safeYour\)/);
+            assert.match(indexSource, /const formattedYourScore = formatHomeScoreOneDecimal\(safeYourScore\)/);
+            assert.match(indexSource, /yourScoreEl\.textContent = formattedYourScore;\s*updateTodayScoreIsland\(formattedYourScore\);/);
           });
 
           test('persisted floating-island score uses the same canonical formatter', () => {
