@@ -1,0 +1,216 @@
+name: Temporary Atomic Storage Fix
+
+on:
+  push:
+    branches:
+      - 'fix/atomic-storage-replacement-20260914'
+    paths:
+      - '.github/workflows/temporary-atomic-storage-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out fix branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/atomic-storage-replacement-20260914
+          fetch-depth: 0
+
+      - name: Patch unsafe remove-before-set paths and add regression coverage
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          core_path = Path('scoring_core.js')
+          core = core_path.read_text()
+          old_core = '''  function safeReplaceTaskPointsStorage(storageKey, serializedCandidate) {
+            const previousRaw = localStorage.getItem(storageKey);
+            if (previousRaw && serializedCandidate.length < previousRaw.length) {
+              localStorage.removeItem(storageKey);
+              try {
+                localStorage.setItem(storageKey, serializedCandidate);
+              } catch (err) {
+                try { localStorage.setItem(storageKey, previousRaw); } catch (restoreErr) { console.warn('TaskPointsCore: failed to restore previous storage after packed write failure.', restoreErr); }
+                throw err;
+              }
+              return;
+            }
+            localStorage.setItem(storageKey, serializedCandidate);
+          }
+          '''
+          new_core = '''  function safeReplaceTaskPointsStorage(storageKey, serializedCandidate) {
+            // Never delete the authoritative snapshot to make room for its replacement.
+            // Web Storage setItem replaces a single key atomically: if the write fails,
+            // the previous value remains authoritative. A remove-then-set sequence creates
+            // a data-loss window if the replacement (and any rollback) is rejected.
+            localStorage.setItem(storageKey, serializedCandidate);
+          }
+          '''
+          if core.count(old_core) != 1:
+              raise SystemExit(f'Expected exactly one legacy safeReplaceTaskPointsStorage body, found {core.count(old_core)}')
+          core = core.replace(old_core, new_core)
+          core_path.write_text(core)
+
+          settings_path = Path('settings.html')
+          settings = settings_path.read_text()
+          write_pattern = re.compile(r'(?P<indent>\s*)localStorage\.removeItem\(storageKey\);\n(?P=indent)localStorage\.setItem\(storageKey, plan\.chosenRaw\);')
+          rollback_pattern = re.compile(r'(?P<indent>\s*)localStorage\.removeItem\(storageKey\);\n(?P=indent)localStorage\.setItem\(storageKey, oldRaw\);')
+          settings, write_count = write_pattern.subn(lambda m: f"{m.group('indent')}localStorage.setItem(storageKey, plan.chosenRaw);", settings)
+          settings, rollback_count = rollback_pattern.subn(lambda m: f"{m.group('indent')}localStorage.setItem(storageKey, oldRaw);", settings)
+          if write_count != 1:
+              raise SystemExit(f'Expected one settings optimized remove-before-set path, found {write_count}')
+          if rollback_count != 1:
+              raise SystemExit(f'Expected one settings rollback remove-before-set path, found {rollback_count}')
+          settings_path.write_text(settings)
+
+          phase2_path = Path('phase2_reset_hook.js')
+          phase2 = phase2_path.read_text()
+          old_incident = """      candidateCounts: details?.candidate || null
+          """
+          new_incident = """      candidateCounts: details?.candidate || null,
+                callerStack: typeof details?.callerStack === 'string' ? details.callerStack : null
+          """
+          if phase2.count(old_incident) != 1:
+              raise SystemExit(f'Expected one incident candidateCounts field, found {phase2.count(old_incident)}')
+          phase2 = phase2.replace(old_incident, new_incident)
+
+          old_block = """  function blockReplacement(details, previousRaw = null) {
+              const preservedRaw = previousRaw || get(STORAGE_KEY) || rememberedRemovedRaw;
+              const incident = writeIncident(details, preservedRaw);
+              const error = new Error('TaskPoints blocked a suspicious destructive state overwrite. The existing saved data remains protected.');
+              error.code = 'TASKPOINTS_SUSPICIOUS_STATE_OVERWRITE_BLOCKED';
+              error.details = details;
+          """
+          new_block = """  function blockReplacement(details, previousRaw = null) {
+              const preservedRaw = previousRaw || get(STORAGE_KEY) || rememberedRemovedRaw;
+              let callerStack = null;
+              try { callerStack = new Error('TaskPoints suspicious replacement caller').stack || null; } catch (_) {}
+              const incidentDetails = { ...details, callerStack };
+              const incident = writeIncident(incidentDetails, preservedRaw);
+              const error = new Error('TaskPoints blocked a suspicious destructive state overwrite. The existing saved data remains protected.');
+              error.code = 'TASKPOINTS_SUSPICIOUS_STATE_OVERWRITE_BLOCKED';
+              error.details = incidentDetails;
+          """
+          if phase2.count(old_block) != 1:
+              raise SystemExit(f'Expected one blockReplacement prelude, found {phase2.count(old_block)}')
+          phase2 = phase2.replace(old_block, new_block)
+
+          old_diag = """      candidateCounts: details?.candidate || null,
+                failClosedIncidentActive: true,
+          """
+          new_diag = """      candidateCounts: details?.candidate || null,
+                lastBlockedCallerStack: callerStack,
+                failClosedIncidentActive: true,
+          """
+          if phase2.count(old_diag) != 1:
+              raise SystemExit(f'Expected one blocked-write diagnostic candidateCounts field, found {phase2.count(old_diag)}')
+          phase2 = phase2.replace(old_diag, new_diag)
+          phase2_path.write_text(phase2)
+
+          test_path = Path('tests/storage_atomic_replace_contract.test.js')
+          test_path.write_text(r'''const test = require('node:test');
+          const assert = require('node:assert/strict');
+          const fs = require('node:fs');
+          const path = require('node:path');
+
+          const ROOT = path.join(__dirname, '..');
+          const CORE = fs.readFileSync(path.join(ROOT, 'scoring_core.js'), 'utf8');
+          const SETTINGS = fs.readFileSync(path.join(ROOT, 'settings.html'), 'utf8');
+          const PHASE2 = fs.readFileSync(path.join(ROOT, 'phase2_reset_hook.js'), 'utf8');
+
+          function safeReplaceSource() {
+            const start = CORE.indexOf('function safeReplaceTaskPointsStorage');
+            const end = CORE.indexOf('\n  function runPendingInteractiveRecompress', start);
+            assert.ok(start >= 0 && end > start, 'safeReplaceTaskPointsStorage source must be locatable');
+            return CORE.slice(start, end);
+          }
+
+          function buildSafeReplace(storage) {
+            const source = safeReplaceSource();
+            return Function('localStorage', `${source}; return safeReplaceTaskPointsStorage;`)(storage);
+          }
+
+          test('normal authoritative replacements never remove taskpoints_v1 first', () => {
+            const source = safeReplaceSource();
+            assert.doesNotMatch(source, /removeItem\s*\(/, 'the core replacement primitive must never delete before setItem');
+            assert.match(source, /localStorage\.setItem\(storageKey, serializedCandidate\)/);
+
+            const rows = new Map([['taskpoints_v1', 'a much larger old authoritative snapshot']]);
+            let removals = 0;
+            const storage = {
+              getItem(key) { return rows.has(String(key)) ? rows.get(String(key)) : null; },
+              setItem(key, value) { rows.set(String(key), String(value)); },
+              removeItem(key) { removals += 1; rows.delete(String(key)); }
+            };
+            buildSafeReplace(storage)('taskpoints_v1', 'small');
+            assert.equal(rows.get('taskpoints_v1'), 'small');
+            assert.equal(removals, 0);
+          });
+
+          test('a failed replacement leaves the previous authoritative raw physically present', () => {
+            const oldRaw = 'the old authoritative state that must survive';
+            const rows = new Map([['taskpoints_v1', oldRaw]]);
+            let removals = 0;
+            const storage = {
+              getItem(key) { return rows.has(String(key)) ? rows.get(String(key)) : null; },
+              setItem(key, value) {
+                if (String(key) === 'taskpoints_v1' && String(value) === 'candidate') {
+                  const error = new Error('simulated iOS storage failure');
+                  error.name = 'QuotaExceededError';
+                  throw error;
+                }
+                rows.set(String(key), String(value));
+              },
+              removeItem(key) { removals += 1; rows.delete(String(key)); }
+            };
+            const safeReplace = buildSafeReplace(storage);
+            assert.throws(() => safeReplace('taskpoints_v1', 'candidate'), /simulated iOS storage failure/);
+            assert.equal(rows.get('taskpoints_v1'), oldRaw);
+            assert.equal(removals, 0, 'failed normal replacement must perform zero physical removals');
+          });
+
+          test('Settings storage optimization and rollback do not remove before replacing', () => {
+            assert.doesNotMatch(
+              SETTINGS,
+              /localStorage\.removeItem\(storageKey\);\s*localStorage\.setItem\(storageKey, plan\.chosenRaw\)/,
+              'optimized settings rewrite must directly replace the existing key'
+            );
+            assert.doesNotMatch(
+              SETTINGS,
+              /localStorage\.removeItem\(storageKey\);\s*localStorage\.setItem\(storageKey, oldRaw\)/,
+              'settings rollback must not create a second delete-before-write window'
+            );
+          });
+
+          test('catastrophic-write incidents retain caller diagnostics for future root-cause tracing', () => {
+            assert.match(PHASE2, /callerStack/);
+            assert.match(PHASE2, /lastBlockedCallerStack/);
+          });
+          ''').replace('\n          ', '\n').lstrip())
+          PY
+
+      - name: Run focused storage safety tests
+        run: >-
+          node --test
+          tests/storage_atomic_replace_contract.test.js
+          tests/storage_data_loss_fail_closed.test.js
+          tests/phase2_reset_hook.test.js
+          tests/phase2_authoritative_absence.test.js
+          tests/phase5b_deferred_mirror_contract.test.js
+
+      - name: Commit verified fix to branch
+        shell: bash
+        run: |
+          git config user.name 'TaskPoints Storage Safety Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git rm .github/workflows/temporary-atomic-storage-fix.yml
+          git add scoring_core.js settings.html phase2_reset_hook.js tests/storage_atomic_replace_contract.test.js
+          git commit -m 'Make authoritative storage replacement atomic'
+          git push origin HEAD:fix/atomic-storage-replacement-20260914
