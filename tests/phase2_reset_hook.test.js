@@ -1,6 +1,16 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
+async function flushDeferredRemovalAndResetMirror() {
+  // The data-loss guard now keeps taskpoints_v1 physically present for one
+  // microtask so a synchronous safe remove→set replacement can be validated
+  // before the previous authoritative raw is deleted. Once a direct removal is
+  // confirmed, the original Phase 2 reset hook schedules the shadow reset in a
+  // following microtask.
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 test('confirmed removal mirrors an empty state but temporary safe-replace removal does not', async () => {
   const rows = new Map();
   const queued = [];
@@ -24,14 +34,14 @@ test('confirmed removal mirrors an empty state but temporary safe-replace remova
 
   localStorage.setItem('taskpoints_v1', '{"old":true}');
   localStorage.removeItem('taskpoints_v1');
-  await Promise.resolve();
+  await flushDeferredRemovalAndResetMirror();
   assert.deepEqual(queued, [{ state: {}, options: { reset: true } }]);
 
   queued.length = 0;
   localStorage.setItem('taskpoints_v1', '{"old":true}');
   localStorage.removeItem('taskpoints_v1');
   localStorage.setItem('taskpoints_v1', '{"new":true}');
-  await Promise.resolve();
+  await flushDeferredRemovalAndResetMirror();
   assert.deepEqual(queued, []);
   assert.equal(localStorage.getItem('taskpoints_v1'), '{"new":true}');
 });
