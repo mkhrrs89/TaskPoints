@@ -1,0 +1,44 @@
+name: Storage Data-Loss Guard
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'phase2_reset_hook.js'
+      - 'phase5b_deferred_mirror.js'
+      - 'tests/storage_data_loss_fail_closed.test.js'
+      - 'tests/phase5b_deferred_mirror_contract.test.js'
+      - 'tests/phase2_reset_hook.test.js'
+      - 'tests/phase2_authoritative_absence.test.js'
+      - '.github/workflows/storage-data-loss-guard.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  storage-safety:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run focused storage-loss protection contracts
+        run: >-
+          node --test
+          tests/storage_data_loss_fail_closed.test.js
+          tests/phase5b_deferred_mirror_contract.test.js
+          tests/phase2_reset_hook.test.js
+          tests/phase2_authoritative_absence.test.js
+
+      - name: Run full TaskPoints suite
+        run: npm test
