@@ -561,17 +561,9 @@ function buildOptimizedTaskPointsStorageRaw(state) {
   }
 
   function safeReplaceTaskPointsStorage(storageKey, serializedCandidate) {
-    const previousRaw = localStorage.getItem(storageKey);
-    if (previousRaw && serializedCandidate.length < previousRaw.length) {
-      localStorage.removeItem(storageKey);
-      try {
-        localStorage.setItem(storageKey, serializedCandidate);
-      } catch (err) {
-        try { localStorage.setItem(storageKey, previousRaw); } catch (restoreErr) { console.warn('TaskPointsCore: failed to restore previous storage after packed write failure.', restoreErr); }
-        throw err;
-      }
-      return;
-    }
+    // Never delete the authoritative snapshot before its replacement is durable.
+    // A direct setItem replacement fails closed: if the write throws, the old
+    // taskpoints_v1 value is still physically present.
     localStorage.setItem(storageKey, serializedCandidate);
   }
 
