@@ -1,0 +1,93 @@
+name: Temporary Atomic Storage Fix v4
+
+on:
+  push:
+    branches:
+      - 'fix/atomic-storage-replacement-20260914'
+    paths:
+      - '.github/workflows/temporary-atomic-storage-fix-v4.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/atomic-storage-replacement-20260914
+          fetch-depth: 0
+
+      - name: Remove delete-before-replace behavior
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          core_path = Path('scoring_core.js')
+          core = core_path.read_text()
+          pattern = re.compile(r"  function safeReplaceTaskPointsStorage\(storageKey, serializedCandidate\) \{.*?\n  \}\n\n  function runPendingInteractiveRecompress", re.S)
+          replacement = """  function safeReplaceTaskPointsStorage(storageKey, serializedCandidate) {
+            // Never delete the authoritative snapshot before its replacement is durable.
+            // A direct setItem replacement fails closed: if the write throws, the old
+            // taskpoints_v1 value is still physically present.
+            localStorage.setItem(storageKey, serializedCandidate);
+          }
+
+          function runPendingInteractiveRecompress"""
+          core, count = pattern.subn(replacement, core)
+          if count != 1:
+              raise SystemExit(f'Expected one safeReplaceTaskPointsStorage implementation, found {count}')
+          core_path.write_text(core)
+
+          settings_path = Path('settings.html')
+          settings = settings_path.read_text()
+          replacements = [
+              (r'(?P<i>[ \t]*)localStorage\.removeItem\(storageKey\);\n(?P=i)localStorage\.setItem\(storageKey, plan\.chosenRaw\);', 'plan.chosenRaw'),
+              (r'(?P<i>[ \t]*)localStorage\.removeItem\(storageKey\);\n(?P=i)localStorage\.setItem\(storageKey, oldRaw\);', 'oldRaw'),
+          ]
+          for raw_pattern, value in replacements:
+              rx = re.compile(raw_pattern)
+              settings, count = rx.subn(lambda m, v=value: f"{m.group('i')}localStorage.setItem(storageKey, {v});", settings)
+              if count != 1:
+                  raise SystemExit(f'Expected one settings remove-before-set path for {value}, found {count}')
+          settings_path.write_text(settings)
+
+          updated_core = core_path.read_text()
+          start = updated_core.index('function safeReplaceTaskPointsStorage')
+          end = updated_core.index('\n  function runPendingInteractiveRecompress', start)
+          safe_replace = updated_core[start:end]
+          if 'removeItem(' in safe_replace:
+              raise SystemExit('safeReplaceTaskPointsStorage still contains removeItem')
+          if 'localStorage.setItem(storageKey, serializedCandidate)' not in safe_replace:
+              raise SystemExit('safeReplaceTaskPointsStorage lost direct setItem replacement')
+          updated_settings = settings_path.read_text()
+          forbidden = [
+              r'localStorage\.removeItem\(storageKey\);\s*localStorage\.setItem\(storageKey, plan\.chosenRaw\)',
+              r'localStorage\.removeItem\(storageKey\);\s*localStorage\.setItem\(storageKey, oldRaw\)',
+          ]
+          for item in forbidden:
+              if re.search(item, updated_settings):
+                  raise SystemExit('settings.html still contains a delete-before-replace path')
+          PY
+
+      - name: Run focused storage safety suite
+        run: >-
+          node --test
+          tests/storage_data_loss_fail_closed.test.js
+          tests/phase2_reset_hook.test.js
+          tests/phase2_authoritative_absence.test.js
+          tests/phase5b_deferred_mirror_contract.test.js
+
+      - name: Commit verified fix
+        shell: bash
+        run: |
+          git config user.name 'TaskPoints Storage Safety Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git rm .github/workflows/temporary-atomic-storage-fix.yml .github/workflows/temporary-atomic-storage-fix-v2.yml .github/workflows/temporary-atomic-storage-fix-v3.yml .github/workflows/temporary-atomic-storage-fix-v4.yml
+          git add scoring_core.js settings.html
+          git commit -m 'Make authoritative storage replacement atomic'
+          git push origin HEAD:fix/atomic-storage-replacement-20260914
