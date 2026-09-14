@@ -4,8 +4,11 @@ on:
   push:
     branches: [main]
     paths:
+      - 'scoring_core.js'
+      - 'settings.html'
       - 'phase2_reset_hook.js'
       - 'phase5b_deferred_mirror.js'
+      - 'tests/storage_atomic_replace_contract.test.js'
       - 'tests/storage_data_loss_fail_closed.test.js'
       - 'tests/phase5b_deferred_mirror_contract.test.js'
       - 'tests/phase2_reset_hook.test.js'
@@ -35,6 +38,7 @@ jobs:
       - name: Run focused storage-loss protection contracts
         run: >-
           node --test
+          tests/storage_atomic_replace_contract.test.js
           tests/storage_data_loss_fail_closed.test.js
           tests/phase5b_deferred_mirror_contract.test.js
           tests/phase2_reset_hook.test.js
