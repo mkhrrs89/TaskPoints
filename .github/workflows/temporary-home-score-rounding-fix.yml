@@ -138,7 +138,7 @@ jobs:
             assert.match(summary, /const v = formatHomeScoreOneDecimal\(todayPoints\);/);
             assert.doesNotMatch(summary, /Math\.round\(todayPoints \* 10\).*toFixed\(1\)/s);
           });
-          '''.replace('\n          ', '\n').trimStart())
+          '''.replace('\n          ', '\n').lstrip())
           PY
 
       - name: Run focused home score tests
