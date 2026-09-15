@@ -6805,8 +6805,32 @@ if (!userInitiatedSave && blockedUntil > Date.now()) {
       const interactiveFastSave = options.interactive === true && options.deferCompression === true;
       const packedState = packTaskPointsStorageState(candidateWithSticky);
       const packedRawJson = JSON.stringify(packedState);
+      const packedInteractiveBytes = packedRawJson.length * 2;
+      // Some journal-backed UI paths can safely leave canonical compaction for
+      // a lifecycle/explicit flush. Once the packed snapshot grows beyond the
+      // localStorage-safe fast-write ceiling, do not turn an automatic quiet
+      // save into a multi-second synchronous LZ compression stall.
+      if (interactiveFastSave
+        && options.deferIfCompressionRequired === true
+        && packedInteractiveBytes >= TASKPOINTS_INTERACTIVE_PACKED_SAFE_BYTES) {
+        if (debugEnabled) console.debug('[TP_DEBUG_PERF] interactive-save-oversize-deferred', {
+          savePath,
+          packedBytes: packedInteractiveBytes,
+          safePackedLimitBytes: TASKPOINTS_INTERACTIVE_PACKED_SAFE_BYTES
+        });
+        return {
+          state: candidateWithSticky,
+          trimmed,
+          skipped: true,
+          deferredOversizeInteractive: true,
+          skipReason: 'interactive_packed_exceeds_safe_limit',
+          packedRawChars: packedRawJson.length,
+          packedBytes: packedInteractiveBytes,
+          safePackedLimitBytes: TASKPOINTS_INTERACTIVE_PACKED_SAFE_BYTES
+        };
+      }
       // Do not invoke the LZ encoder for safe, small interactive writes.
-      const useFastPacked = interactiveFastSave && packedRawJson.length * 2 < TASKPOINTS_INTERACTIVE_PACKED_SAFE_BYTES;
+      const useFastPacked = interactiveFastSave && packedInteractiveBytes < TASKPOINTS_INTERACTIVE_PACKED_SAFE_BYTES;
       const storagePlan = useFastPacked
         ? {
           packedState,

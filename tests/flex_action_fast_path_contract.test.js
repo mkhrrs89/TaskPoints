@@ -68,6 +68,9 @@ function makeHarness(options = {}) {
       metrics.saveCalls += 1;
       metrics.lastSaveOptions = clone(saveOptions);
       if (options.failSave) throw new Error('forced save failure');
+      if (options.deferOversizeAutoSave && saveOptions.deferIfCompressionRequired === true) {
+        return { state: clone(candidate), skipped: true, deferredOversizeInteractive: true, skipReason: 'interactive_packed_exceeds_safe_limit', packedBytes: 5000000, safePackedLimitBytes: 3932160 };
+      }
       storedState = clone(candidate);
       storage.setItem(STORAGE_KEY, JSON.stringify(storedState));
       return { state: clone(candidate), options: saveOptions };
@@ -118,6 +121,7 @@ function makeHarness(options = {}) {
       state = result.state;
     }
     function renderFlexActions() { metrics.fallbackFlexRenderCalls += 1; }
+    function moveFlexAction() {}
     function renderAll() { metrics.fullRenderCalls += 1; }
     function scheduleRender(fn) { requestAnimationFrame(fn); }
     function flexBaseDate() { return new Date('2026-07-29T00:00:00'); }
@@ -196,8 +200,7 @@ function flushTimers(harness, limit = 20) {
 }
 
 test('the worker bundles the Flex Action fast path after the home modules', () => {
-  assert.match(workerSource, /'\/flex_action_fast_path\.js'/);
-  assert.match(workerSource, /if \(flexActionFastPathSource\) sources\.push\(flexActionFastPathSource\)/);
+  assert.match(workerSource, /'\/home_yesterday_result_consistency\.js',\s*'\/flex_action_fast_path\.js'/);
 });
 
 test('a Flex Action tap paints its orange dot before any full-state save or full render', () => {
@@ -297,4 +300,22 @@ test('a malformed pending Flex journal is preserved rather than overwritten', ()
   assert.throws(() => h.context.logFlexCompletion('flex1'), /journal is malformed/);
   assert.equal(h.storage.getItem(JOURNAL_KEY), '{bad-json');
   assert.equal(h.getState().completions.length, 0);
+});
+
+
+test('oversized visible quiet compaction stays journaled without retrying, while pagehide still forces the canonical save', () => {
+  const h = makeHarness({ deferOversizeAutoSave: true });
+  h.context.logFlexCompletion('flex1');
+  flushRafs(h);
+  flushTimers(h, 1);
+  assert.equal(h.getSaveCalls(), 1);
+  assert.equal(h.getLastSaveOptions().deferIfCompressionRequired, true);
+  assert.ok(h.storage.getItem(JOURNAL_KEY));
+  assert.equal(h.context.TaskPointsFlexActionFastPath.getRetryStatus().retryScheduled, false);
+  assert.equal(h.context.TaskPointsFlexActionFastPath.getQuietCompactionStatus().oversizeAutoDeferred, true);
+  h.listeners.pagehide[0]();
+  assert.equal(h.getSaveCalls(), 2);
+  assert.equal(h.getLastSaveOptions().deferIfCompressionRequired, false);
+  assert.equal(h.storage.getItem(JOURNAL_KEY), null);
+  assert.equal(h.context.TaskPointsFlexActionFastPath.getQuietCompactionStatus().oversizeAutoDeferred, false);
 });
