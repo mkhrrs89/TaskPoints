@@ -17,7 +17,9 @@ jobs:
         with:
           node-version: 22
       - name: Apply patch
-        run: python3 tmp_patch_habit_guard_fastpath.py
+        run: |
+          python3 tmp_patch_habit_guard_fastpath.py
+          python3 tmp_fix_habit_guard_stale_contract.py
       - name: Run focused habit/save safety tests
         run: |
           node --test tests/habit_completion_status_guard.test.js
@@ -31,10 +33,10 @@ jobs:
       - name: Verify scope
         run: |
           git diff --check
-          git diff -- habit_completion_source_guard.js tests/habit_completion_status_guard.test.js
+          git diff -- habit_completion_source_guard.js tests/habit_completion_status_guard.test.js tests/habit_ledger_history_preservation.test.js
       - name: Commit tested patch
         run: |
-          rm tmp_patch_habit_guard_fastpath.py .github/workflows/habit-guard-fastpath-once.yml
+          rm tmp_patch_habit_guard_fastpath.py tmp_fix_habit_guard_stale_contract.py .github/workflows/habit-guard-fastpath-once.yml
           git add -A
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
