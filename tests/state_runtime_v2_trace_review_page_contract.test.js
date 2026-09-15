@@ -8,7 +8,7 @@ const correlator = require(path.join(__dirname, '..', 'state_runtime_v2_foregrou
 
 test('trace review page loads the V2 reviewer, foreground correlator, and accepts JSON files', () => {
   assert.match(source, /id="traceFile"[^>]+type="file"[^>]+accept="application\/json,\.json"/);
-  assert.match(source, /<script src="\/state_runtime_v2_trace_review\.js"><\/script>/);
+  assert.match(source, /<script src="\/state_runtime_v2_trace_review\.js\?v=20260915-1"><\/script>/);
   assert.match(source, /<script src="\/state_runtime_v2_foreground_correlation\.js"><\/script>/);
   assert.match(source, /TaskPointsStateRuntimeV2TraceReview/);
   assert.match(source, /TaskPointsStateRuntimeV2ForegroundCorrelation/);
@@ -29,6 +29,11 @@ test('trace review page keeps physical-device confirmation explicit', () => {
   assert.match(source, /Core device-trace evidence complete/);
   assert.match(source, /Interaction postponement observed/);
   assert.match(source, /Automatic parity crossed deep-idle gate/);
+  assert.match(source, /V2 stores only Habit\/Vice pilot completions/);
+  assert.match(source, /pilotOwnership\?\.v2StoreContainsOnlyPilotCompletions/);
+  assert.match(source, /Out-of-scope completions physically in V2/);
+  assert.match(source, /expectedExcludedCompletions/);
+  assert.match(source, /actualExcludedCompletions/);
   assert.match(source, /Foreground windows correlated/);
   assert.match(source, /Legacy\/full-state work overlapped a mutation foreground window/);
 });

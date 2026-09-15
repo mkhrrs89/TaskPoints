@@ -25,7 +25,7 @@
     <pre id="reviewJson"></pre>
   </section>
 </main>
-<script src="/state_runtime_v2_trace_review.js"></script>
+<script src="/state_runtime_v2_trace_review.js?v=20260915-1"></script>
 <script src="/state_runtime_v2_foreground_correlation.js"></script>
 <script>
 (() => {
@@ -65,17 +65,21 @@
       verdict('No direct foreground V2 maintenance', review.noDirectForegroundMaintenanceObserved),
       verdict('Automatic parity crossed deep-idle gate', review.automaticParityDeepIdleObserved),
       verdict('Interaction postponement observed', review.interactionPreemptionObserved, true),
+      verdict('V2 stores only Habit/Vice pilot completions', review.pilotOwnership?.v2StoreContainsOnlyPilotCompletions === true),
       verdict('V2 data matches legacy data', review.parity?.matchConfirmed === true),
       verdict('No V2 failures observed', review.failures?.noV2FailuresObserved === true),
       verdict('Core device-trace evidence complete', review.evidenceCompleteForDeviceTrace),
       `<div class="metric"><strong>Mutation classes</strong><span>${esc(classText)}</span></div>`,
       `<div class="metric"><strong>Deep quiet target</strong><span>${esc(review.maintenance?.deepQuietMs ?? 'unknown')} ms</span></div>`,
+      `<div class="metric"><strong>Pilot parity scope</strong><span>${esc(review.pilotOwnership?.comparisonScope ?? 'not observed')}</span></div>`,
+      `<div class="metric"><strong>Legacy-only completions outside pilot</strong><span>${esc(review.pilotOwnership?.expectedExcludedCompletions ?? 'unknown')}</span></div>`,
+      `<div class="metric"><strong>Out-of-scope completions physically in V2</strong><span>${esc(review.pilotOwnership?.actualExcludedCompletions ?? 'unknown')}</span></div>`,
       `<div class="metric"><strong>Foreground windows correlated</strong><span>${esc(correlationText)}</span></div>`,
       `<div class="metric"><strong>Correlated windows reaching next paint</strong><span>${esc(paintText)}</span></div>`,
       verdict('Legacy/full-state work overlapped a mutation foreground window', correlation.foregroundLegacyWorkObserved === true, true),
       `<div class="metric"><strong>Max overlapping legacy/full-state duration</strong><span>${esc(maxLegacyText)}</span></div>`
     ].join('');
-    deviceNote.textContent = 'This reviewer summarizes trace evidence only. The tester still has to confirm the trace came from the intended physical iPhone/PWA scenario. Foreground correlation starts at the latest recorded interaction before each V2 enqueue. When the live V2 paint probe is present, the window extends through the next render frame so post-enqueue work that delays visible response is included; older traces fall back to the enqueue boundary. Windows are limited to the same page and a bounded 5-second span.';
+    deviceNote.textContent = 'This reviewer summarizes trace evidence only. The tester still has to confirm the trace came from the intended physical iPhone/PWA scenario. Pilot ownership is a separate gate from parity: a pilot-scoped match does not pass if out-of-scope completion rows are physically present in V2. Foreground correlation starts at the latest recorded interaction before each V2 enqueue. When the live V2 paint probe is present, the window extends through the next render frame so post-enqueue work that delays visible response is included; older traces fall back to the enqueue boundary. Windows are limited to the same page and a bounded 5-second span.';
     reviewJson.textContent = JSON.stringify(review, null, 2);
     results.hidden = false;
   }
