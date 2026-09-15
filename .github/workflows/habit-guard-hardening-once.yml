@@ -1,0 +1,42 @@
+name: Habit Guard Hardening Once
+on:
+  push:
+    branches:
+      - fix/habit-guard-previous-read-fastpath-20260915
+jobs:
+  patch-and-test:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/habit-guard-previous-read-fastpath-20260915
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply hardening
+        run: python3 tmp_harden_habit_guard_tracker.py
+      - name: Run focused habit/save safety tests
+        run: |
+          node --test tests/habit_completion_status_guard.test.js
+          node --test tests/habit_ledger_history_preservation.test.js
+          node --test tests/habit_fast_path_control.test.js
+          node --test tests/task_create_fast_path.test.js
+          node --test tests/inbox_mutation_journal_fast_path.test.js
+          node --test tests/flex_action_fast_path_contract.test.js
+          node --test tests/storage_atomic_replace_contract.test.js
+          node --test tests/storage_data_loss_fail_closed.test.js
+      - name: Verify scope
+        run: |
+          git diff --check
+          git diff -- habit_completion_source_guard.js
+      - name: Commit tested hardening
+        run: |
+          rm tmp_harden_habit_guard_tracker.py .github/workflows/habit-guard-hardening-once.yml
+          git add -A
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Fail closed when habit guard tracker revision is uncertain'
+          git push
