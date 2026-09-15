@@ -8,7 +8,7 @@ function baseReport(extraEvents = []) {
   return {
     generatedAtISO: '2026-09-11T16:00:00.000Z',
     stateRuntimeV2Status: {
-      lastParity: { checked: true, match: true },
+      lastParity: { checked: true, match: true, comparisonScope: 'habit_records_plus_habit_vice_completions_normalizing_full_fraction', scopeExcludedCounts: { expectedCompletions: 7, actualCompletions: 0 } },
       traceDiagnostics: {
         maintenanceIdle: {
           deepQuietMs: 20000,
@@ -66,8 +66,47 @@ test('review recognizes complete four-class device trace evidence and deep-idle 
   assert.equal(result.preemption.evidenceSource, 'generic_interaction_trace');
   assert.equal(result.interactionPreemptionObserved, true);
   assert.equal(result.failures.noV2FailuresObserved, true);
+  assert.equal(result.pilotOwnership.observed, true);
+  assert.equal(result.pilotOwnership.expectedExcludedCompletions, 7);
+  assert.equal(result.pilotOwnership.actualExcludedCompletions, 0);
+  assert.equal(result.pilotOwnership.v2StoreContainsOnlyPilotCompletions, true);
   assert.equal(result.evidenceCompleteForDeviceTrace, true);
   assert.equal(result.physicalDeviceEvidenceMustBeConfirmedByTester, true);
+});
+
+test('device evidence stays incomplete when pilot ownership diagnostics are absent', () => {
+  const report = baseReport();
+  report.stateRuntimeV2Status.lastParity = { checked: true, match: true };
+  const result = reviewer.review(report);
+
+  assert.equal(result.parity.matchConfirmed, true);
+  assert.equal(result.pilotOwnership.observed, false);
+  assert.equal(result.pilotOwnership.v2StoreContainsOnlyPilotCompletions, false);
+  assert.equal(result.evidenceCompleteForDeviceTrace, false);
+});
+
+test('device evidence fails closed if non-pilot completions are physically present in V2', () => {
+  const report = baseReport();
+  report.stateRuntimeV2Status.lastParity.scopeExcludedCounts.actualCompletions = 2;
+  const result = reviewer.review(report);
+
+  assert.equal(result.parity.matchConfirmed, true, 'pilot-scoped parity can still match while out-of-scope rows exist');
+  assert.equal(result.pilotOwnership.observed, true);
+  assert.equal(result.pilotOwnership.actualExcludedCompletions, 2);
+  assert.equal(result.pilotOwnership.v2StoreContainsOnlyPilotCompletions, false);
+  assert.equal(result.evidenceCompleteForDeviceTrace, false);
+});
+
+test('legacy-only completions may exist outside the pilot without blocking ownership evidence', () => {
+  const report = baseReport();
+  report.stateRuntimeV2Status.lastParity.scopeExcludedCounts.expectedCompletions = 19;
+  report.stateRuntimeV2Status.lastParity.scopeExcludedCounts.actualCompletions = 0;
+  const result = reviewer.review(report);
+
+  assert.equal(result.pilotOwnership.expectedExcludedCompletions, 19);
+  assert.equal(result.pilotOwnership.actualExcludedCompletions, 0);
+  assert.equal(result.pilotOwnership.v2StoreContainsOnlyPilotCompletions, true);
+  assert.equal(result.evidenceCompleteForDeviceTrace, true);
 });
 
 test('internal dark-mirror commit marks complete mutation evidence when public apply wrappers are bypassed', () => {

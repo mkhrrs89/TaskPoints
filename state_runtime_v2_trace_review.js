@@ -235,6 +235,23 @@
     };
   }
 
+  const PILOT_PARITY_SCOPE = 'habit_records_plus_habit_vice_completions_normalizing_full_fraction';
+
+  function pilotOwnershipEvidence(parity) {
+    const last = parity?.lastCheck;
+    const comparisonScope = typeof last?.comparisonScope === 'string' ? last.comparisonScope : null;
+    const expectedExcludedCompletions = finiteNumber(last?.scopeExcludedCounts?.expectedCompletions);
+    const actualExcludedCompletions = finiteNumber(last?.scopeExcludedCounts?.actualCompletions);
+    const observed = last?.checked === true && comparisonScope === PILOT_PARITY_SCOPE;
+    return {
+      observed,
+      comparisonScope,
+      expectedExcludedCompletions,
+      actualExcludedCompletions,
+      v2StoreContainsOnlyPilotCompletions: observed && actualExcludedCompletions === 0
+    };
+  }
+
   function failureEvidence(events, status, mutationClasses, parity) {
     const failedEvents = events.filter((event) => {
       const name = String(event?.name || '');
@@ -317,6 +334,7 @@
     const maintenance = maintenanceEvidence(events, status);
     const preemption = preemptionEvidence(events, maintenance.deepQuietMs);
     const parity = parityEvidence(events, status);
+    const pilotOwnership = pilotOwnershipEvidence(parity);
     const failures = failureEvidence(events, status, mutationClasses, parity);
     const legacyCandidates = legacyFullStateCandidates(events);
     const allMutationClassesObserved = MUTATION_KINDS.every((kind) => mutationClasses[kind].observed === true);
@@ -333,6 +351,7 @@
       preemption,
       failures,
       parity,
+      pilotOwnership,
       noDirectForegroundMaintenanceObserved,
       automaticParityDeepIdleObserved: maintenance.automaticParityDeepIdleObserved,
       interactionPreemptionObserved: preemption.observed,
@@ -345,7 +364,8 @@
         && maintenance.automaticParityDeepIdleObserved
         && preemption.observed
         && failures.noV2FailuresObserved
-        && parity.matchConfirmed,
+        && parity.matchConfirmed
+        && pilotOwnership.v2StoreContainsOnlyPilotCompletions,
       physicalDeviceEvidenceMustBeConfirmedByTester: true
     };
   }

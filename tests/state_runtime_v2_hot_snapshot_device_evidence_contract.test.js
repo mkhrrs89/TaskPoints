@@ -18,7 +18,7 @@ async function flushQueue() {
 
 function baseStatus() {
   return {
-    lastParity: { checked: true, match: true },
+    lastParity: { checked: true, match: true, comparisonScope: 'habit_records_plus_habit_vice_completions_normalizing_full_fraction', scopeExcludedCounts: { expectedCompletions: 6, actualCompletions: 0 } },
     mirroredMutations: 4,
     mirroredOrderMutations: 1,
     mirroredEditMutations: 1,
