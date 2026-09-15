@@ -148,9 +148,13 @@ test('V2-17 compatibility snapshot preserves completion order, duplicate IDs, di
   const parity = await app.api.verifyParity();
   assert.equal(parity.match, true);
   assert.equal(parity.expectedCounts.habits, 1);
-  assert.equal(parity.expectedCounts.completions, 5);
+  assert.equal(parity.expectedCounts.completions, 2);
   assert.equal(parity.actualCounts.habits, 1);
-  assert.equal(parity.actualCounts.completions, 5);
+  assert.equal(parity.actualCounts.completions, 2);
+  assert.deepEqual(JSON.parse(JSON.stringify(parity.scopeExcludedCounts)), {
+    expectedCompletions: 3,
+    actualCompletions: 3
+  });
 });
 
 test('V2-17 a new V2 habit completion sorts ahead of preserved unrelated duplicate legacy rows', async () => {
@@ -238,7 +242,7 @@ test('parity ignores only the three recomputed Habit caches without changing sto
 });
 
 test('Habit timestamps, unknown double-underscore fields and every completion field remain strict', async () => {
-  const initial = { habits: [{ ...baseHabit('h1', 'Read', '', 0), updatedAtISO: '2026-09-12T12:00:00.000Z' }], completions: [{ id: 'c1', points: 4, __streak: 1 }] };
+  const initial = { habits: [{ ...baseHabit('h1', 'Read', '', 0), updatedAtISO: '2026-09-12T12:00:00.000Z' }], completions: [{ id: 'habit:h1:2026-09-12', source: 'habit', habitId: 'h1', dayKey: '2026-09-12', points: 4, __streak: 1 }] };
   const { api, localStorage } = install(initial);
   await api.seedFromLegacy();
   initial.habits[0].updatedAtISO = '2026-09-12T12:00:01.000Z';
@@ -259,7 +263,7 @@ test('Habit timestamps, unknown double-underscore fields and every completion fi
 test('forty-six Habit mismatches cannot crowd four completion mismatches out of the report', async () => {
   const initial = {
     habits: Array.from({ length: 46 }, (_, i) => ({ ...baseHabit(`h${i}`, 'Read', '', i), __streak: 0, updatedAtISO: 'before' })),
-    completions: Array.from({ length: 4 }, (_, i) => ({ id: `c${i}`, points: 4, title: 'Private original title' }))
+    completions: Array.from({ length: 4 }, (_, i) => ({ id: `habit:h${i}:2026-09-10`, source: 'habit', habitId: `h${i}`, dayKey: '2026-09-10', points: 4, title: 'Private original title' }))
   };
   const { api, localStorage } = install(initial);
   await api.seedFromLegacy();
