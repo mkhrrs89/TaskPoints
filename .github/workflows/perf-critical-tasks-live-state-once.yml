@@ -30,6 +30,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add toolbar.js home_targeted_render_control.js tests/home_targeted_render_control.test.js tests/critical_tasks_home_live_state_contract.test.js
+          git add toolbar.js home_targeted_render_control.js tests/home_targeted_render_control.test.js tests/home_targeted_render_contract.test.js tests/critical_tasks_home_live_state_contract.test.js
           git commit -m "Reuse Home live state for Critical Tasks refreshes"
           git push origin HEAD:perf/main-trace-read-churn-20260915
