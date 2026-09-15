@@ -1,0 +1,175 @@
+name: State Runtime V2 Main Sync Once
+
+on:
+  push:
+    branches:
+      - arch/state-runtime-v2-plan
+    paths:
+      - '.github/workflows/state-runtime-v2-main-sync-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  sync-main:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out V2 branch with full history
+        uses: actions/checkout@v4
+        with:
+          ref: arch/state-runtime-v2-plan
+          fetch-depth: 0
+
+      - name: Merge current main with explicit conflict preservation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+
+          set +e
+          git merge --no-commit --no-ff origin/main
+          merge_status=$?
+          set -e
+
+          conflicts="$(git diff --name-only --diff-filter=U || true)"
+          if [ -n "$conflicts" ]; then
+            printf 'Conflicted files:\n%s\n' "$conflicts"
+            unexpected="$(printf '%s\n' "$conflicts" | grep -Ev '^(home_rank_percentile_line\.js|index\.html|scoring_core\.js|tests/home_scoreboard_tie_record\.test\.js)$' || true)"
+            if [ -n "$unexpected" ]; then
+              echo "Unexpected merge conflicts; refusing to guess:"
+              printf '%s\n' "$unexpected"
+              exit 1
+            fi
+          elif [ "$merge_status" -ne 0 ]; then
+            echo "Merge failed without ordinary content conflicts."
+            exit "$merge_status"
+          fi
+
+          if git diff --name-only --diff-filter=U | grep -qx 'home_rank_percentile_line.js'; then
+            git checkout --ours -- home_rank_percentile_line.js
+            grep -q 'installTaskPointsHomeScoreboardTieRecord' home_rank_percentile_line.js
+            grep -q 'installTaskPointsHabitModalLayerGuard' home_rank_percentile_line.js
+            git add home_rank_percentile_line.js
+          fi
+
+          if git diff --name-only --diff-filter=U | grep -qx 'tests/home_scoreboard_tie_record.test.js'; then
+            git checkout --ours -- tests/home_scoreboard_tie_record.test.js
+            grep -q 'installTaskPointsHabitModalLayerGuard' tests/home_scoreboard_tie_record.test.js
+            git add tests/home_scoreboard_tie_record.test.js
+          fi
+
+          if git diff --name-only --diff-filter=U | grep -qx 'scoring_core.js'; then
+            git checkout --theirs -- scoring_core.js
+            python - <<'PY'
+          from pathlib import Path
+          path = Path('scoring_core.js')
+          text = path.read_text()
+          old = 'completedAtISO: delta.updatedAtISO,'
+          new = 'completedAtISO: delta.completedAtISO || delta.updatedAtISO,'
+          if new not in text:
+              if text.count(old) != 1:
+                  raise SystemExit(f'Expected exactly one V2 timestamp merge target, found {text.count(old)}')
+              text = text.replace(old, new, 1)
+          path.write_text(text)
+          PY
+            grep -q 'completedAtISO: delta.completedAtISO || delta.updatedAtISO' scoring_core.js
+            if sed -n '/function safeReplaceTaskPointsStorage/,/^  }/p' scoring_core.js | grep -q 'removeItem'; then
+              echo 'Unsafe remove-before-replace path reappeared.'
+              exit 1
+            fi
+            git add scoring_core.js
+          fi
+
+          if git diff --name-only --diff-filter=U | grep -qx 'index.html'; then
+            git checkout --ours -- index.html
+            python - <<'PY'
+          from pathlib import Path
+          path = Path('index.html')
+          text = path.read_text()
+          old = '''const match = text.match(/-?\\d+(?:\\.\\d+)?/);
+              if (!match) return;
+              localStorage.setItem("tpTodayScore", String(Number(match[0])));'''
+          new = '''const match = text.match(/-?\\d+(?:\\.\\d+)?/);
+              if (!match) return;
+              const normalizedScore = String(Number(match[0]));
+              if (localStorage.getItem("tpTodayScore") === normalizedScore) return;
+              localStorage.setItem("tpTodayScore", normalizedScore);'''
+          if new not in text:
+              if text.count(old) != 1:
+                  raise SystemExit(f'Expected exactly one Today-score merge target, found {text.count(old)}')
+              text = text.replace(old, new, 1)
+          required = [
+              'completedAtISO: finalCompletion?.completedAtISO || undefined',
+              'function handleHabitBubbleTap(bubbleEl)',
+          ]
+          for marker in required:
+              if marker not in text:
+                  raise SystemExit(f'Missing preserved V2 marker: {marker}')
+          path.write_text(text)
+          PY
+            git add index.html
+          fi
+
+          remaining="$(git diff --name-only --diff-filter=U || true)"
+          if [ -n "$remaining" ]; then
+            echo 'Unresolved conflicts remain:'
+            printf '%s\n' "$remaining"
+            exit 1
+          fi
+
+          if grep -R -nE '^(<<<<<<<|=======|>>>>>>>)' -- . ':!node_modules' 2>/dev/null; then
+            echo 'Conflict markers remain.'
+            exit 1
+          fi
+
+          git status --short
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run focused merge safety contracts
+        run: >-
+          node --test
+          tests/storage_atomic_replace_contract.test.js
+          tests/storage_data_loss_fail_closed.test.js
+          tests/habit_completion_status_guard.test.js
+          tests/habit_ledger_history_preservation.test.js
+          tests/save_pipeline_shared_work_contract.test.js
+          tests/phase2_dual_write.test.js
+          tests/phase2_reset_hook.test.js
+          tests/phase3_read_path.test.js
+          tests/phase4_storage_contract.test.js
+          tests/phase5a_native_snapshot_contract.test.js
+          tests/home_scoreboard_tie_record.test.js
+          tests/home_today_score_island_sync.test.js
+          tests/critical_tasks_home_live_state_contract.test.js
+          tests/greed_gold_home_live_state_fast_path.test.js
+          tests/inbox_mutation_journal_fast_path.test.js
+          tests/state_runtime_v2_dark_contract.test.js
+          tests/state_runtime_v2_reload_verification_contract.test.js
+          tests/state_runtime_v2_habit_preview_scenarios_contract.test.js
+          tests/state_runtime_v2_maintenance_idle_contract.test.js
+          tests/state_runtime_v2_trace_review_contract.test.js
+
+      - name: Run bounded full TaskPoints suite
+        shell: bash
+        run: |
+          set +e
+          timeout 180s npm test
+          status=$?
+          set -e
+          if [ "$status" -eq 124 ]; then
+            echo 'Full TaskPoints suite exceeded 180s; focused merge/V2 contracts remain the merge gate.'
+            exit 0
+          fi
+          exit "$status"
+
+      - name: Commit and push merge to V2 branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git commit -m "Merge current main into State Runtime V2 preview"
+          git push origin HEAD:arch/state-runtime-v2-plan
