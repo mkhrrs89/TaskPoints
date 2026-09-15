@@ -186,7 +186,7 @@
   let lastGenerationMs = 0;
   let lastSaveMs = 0;
 
-  const now = () => Number(global.performance?.now?.() || Date.now());
+  const now = () => Number(global.performance?.now?.() ?? Date.now());
   const mark = (name, detail) => {
     try { global.TaskPointsPerf?.mark?.(name, detail); } catch (_) {}
   };
@@ -315,11 +315,11 @@
   });
 })(typeof window !== 'undefined' ? window : globalThis);
 
-// The full TaskPoints snapshot is now too large for the generic packed
-// interactive-save shortcut. Keep Inbox auto-population crash-safe by writing
-// only its three changed fields to a tiny journal immediately, overlaying that
-// journal on every state read, and compacting it into the canonical verified
-// snapshot after sustained idle.
+// The full TaskPoints snapshot is now too large for background Inbox maintenance.
+// Keep Inbox-related mutations crash-safe by writing only their small shared fields
+// to a synchronous journal, overlaying that journal on reads, and compacting once
+// after sustained idle. This also prevents independent notification reconcilers
+// from repeatedly overwriting each other's processed-event state.
 ;(function installTaskPointsInboxMutationJournal(global) {
   'use strict';
 
@@ -330,8 +330,20 @@
 
   const JOURNAL_KEY = 'taskpoints_pending_inbox_state_v1';
   const STORAGE_KEY = core.STORAGE_KEY || 'taskpoints_v1';
+  const JOURNAL_SCHEMA_VERSION = 2;
   const COMPACTION_QUIET_MS = 8000;
   const POLL_MS = 500;
+  const JOURNALED_SAVE_PATHS = new Set([
+    'inbox-auto-populate',
+    'season-series-upset-inbox',
+    'gold-theft-top50-inbox'
+  ]);
+  const TRACKED_FIELDS = [
+    'inboxMessages',
+    'inboxProcessedEventIds',
+    'inboxStartedDateKey',
+    'goldTheftTop50InboxStartedDateKey'
+  ];
   const originalMergeAndSaveState = core.mergeAndSaveState.bind(core);
   const originalReadStored = typeof core.readTaskPointsStoredState === 'function'
     ? core.readTaskPointsStoredState.bind(core)
@@ -350,6 +362,7 @@
   const mark = (name, detail = {}) => {
     try { global.TaskPointsPerf?.mark?.(name, detail); } catch (_) {}
   };
+  const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value || {}, key);
 
   function clone(value) {
     if (value == null) return value;
@@ -359,16 +372,48 @@
     return JSON.parse(JSON.stringify(value));
   }
 
+  function processedEventMap(value) {
+    if (Array.isArray(value)) {
+      const map = {};
+      value.forEach((eventId) => {
+        const id = String(eventId || '').trim();
+        if (id) map[id] = true;
+      });
+      return map;
+    }
+    if (value && typeof value === 'object') return clone(value);
+    return {};
+  }
+
   function normalizePatch(value) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-    if (value.schemaVersion != null && value.schemaVersion !== 1) return null;
-    return {
-      schemaVersion: 1,
-      inboxMessages: Array.isArray(value.inboxMessages) ? clone(value.inboxMessages) : [],
-      inboxProcessedEventIds: Array.isArray(value.inboxProcessedEventIds) ? clone(value.inboxProcessedEventIds) : [],
-      inboxStartedDateKey: value.inboxStartedDateKey == null ? null : String(value.inboxStartedDateKey),
+    const schemaVersion = Number(value.schemaVersion || 1);
+    if (schemaVersion !== 1 && schemaVersion !== JOURNAL_SCHEMA_VERSION) return null;
+
+    const record = {
+      schemaVersion: JOURNAL_SCHEMA_VERSION,
       updatedAtISO: typeof value.updatedAtISO === 'string' ? value.updatedAtISO : new Date().toISOString()
     };
+
+    if (hasOwn(value, 'inboxMessages')) {
+      if (!Array.isArray(value.inboxMessages)) return null;
+      record.inboxMessages = clone(value.inboxMessages);
+    }
+    if (hasOwn(value, 'inboxProcessedEventIds')) {
+      if (!Array.isArray(value.inboxProcessedEventIds)
+        && (!value.inboxProcessedEventIds || typeof value.inboxProcessedEventIds !== 'object')) return null;
+      record.inboxProcessedEventIds = processedEventMap(value.inboxProcessedEventIds);
+    }
+    if (hasOwn(value, 'inboxStartedDateKey')) {
+      record.inboxStartedDateKey = value.inboxStartedDateKey == null ? null : String(value.inboxStartedDateKey);
+    }
+    if (hasOwn(value, 'goldTheftTop50InboxStartedDateKey')) {
+      record.goldTheftTop50InboxStartedDateKey = value.goldTheftTop50InboxStartedDateKey == null
+        ? null
+        : String(value.goldTheftTop50InboxStartedDateKey);
+    }
+
+    return TRACKED_FIELDS.some((field) => hasOwn(record, field)) ? record : null;
   }
 
   function readJournal() {
@@ -386,20 +431,49 @@
 
   function applyPatch(state, record) {
     if (!state || typeof state !== 'object' || !record) return state;
-    return {
-      ...state,
-      inboxMessages: clone(record.inboxMessages),
-      inboxProcessedEventIds: clone(record.inboxProcessedEventIds),
-      inboxStartedDateKey: record.inboxStartedDateKey
-    };
+    const next = { ...state };
+    TRACKED_FIELDS.forEach((field) => {
+      if (!hasOwn(record, field)) return;
+      if (field === 'inboxProcessedEventIds') {
+        next[field] = {
+          ...processedEventMap(state?.[field]),
+          ...processedEventMap(record[field])
+        };
+      } else {
+        next[field] = clone(record[field]);
+      }
+    });
+    return next;
+  }
+
+  function buildCompactionPatch(record, canonicalState = null) {
+    const patch = {};
+    TRACKED_FIELDS.forEach((field) => {
+      if (!hasOwn(record, field)) return;
+      if (field === 'inboxProcessedEventIds') {
+        patch[field] = {
+          ...processedEventMap(canonicalState?.[field]),
+          ...processedEventMap(record[field])
+        };
+      } else {
+        patch[field] = clone(record[field]);
+      }
+    });
+    return patch;
   }
 
   function patchesMatch(state, record) {
     if (!state || !record) return false;
     try {
-      return JSON.stringify(state.inboxMessages || []) === JSON.stringify(record.inboxMessages || [])
-        && JSON.stringify(state.inboxProcessedEventIds || []) === JSON.stringify(record.inboxProcessedEventIds || [])
-        && (state.inboxStartedDateKey == null ? null : String(state.inboxStartedDateKey)) === record.inboxStartedDateKey;
+      return TRACKED_FIELDS.every((field) => {
+        if (!hasOwn(record, field)) return true;
+        if (field === 'inboxProcessedEventIds') {
+          const actual = processedEventMap(state[field]);
+          const expected = processedEventMap(record[field]);
+          return Object.keys(expected).every((key) => actual[key] === expected[key]);
+        }
+        return JSON.stringify(state[field] ?? null) === JSON.stringify(record[field] ?? null);
+      });
     } catch (_) {
       return false;
     }
@@ -428,8 +502,7 @@
 
   function attemptCompaction() {
     const current = readJournal();
-    if (!current.record) return false;
-    if (current.malformed) return false;
+    if (!current.record || current.malformed) return false;
     if (!compactionReady()) {
       compactionDeferrals += 1;
       scheduleCompaction();
@@ -441,11 +514,11 @@
     const rawSnapshot = current.raw;
     const record = current.record;
     try {
-      const result = originalMergeAndSaveState({
-        inboxMessages: record.inboxMessages,
-        inboxProcessedEventIds: record.inboxProcessedEventIds,
-        inboxStartedDateKey: record.inboxStartedDateKey
-      }, {
+      // Read canonical state only once, during deep idle, so a legacy v1 journal
+      // can never erase processed-event IDs that are already durable.
+      const canonicalBefore = originalReadStored ? originalReadStored(STORAGE_KEY, {}) : null;
+      const patch = buildCompactionPatch(record, canonicalBefore);
+      const result = originalMergeAndSaveState(patch, {
         savePath: 'inbox-journal-compaction',
         immediateWrite: true,
         assumeNormalized: true
@@ -470,19 +543,30 @@
     }
   }
 
-  function writeJournal(nextState) {
+  function writeJournal(nextState, savePath = '') {
     const existing = readJournal();
     if (existing.malformed) {
       const error = new Error('Pending Inbox journal is malformed and was preserved.');
       error.code = 'TASKPOINTS_INBOX_JOURNAL_MALFORMED';
       throw error;
     }
-    const record = normalizePatch({
-      inboxMessages: nextState?.inboxMessages,
-      inboxProcessedEventIds: nextState?.inboxProcessedEventIds,
-      inboxStartedDateKey: nextState?.inboxStartedDateKey,
-      updatedAtISO: new Date().toISOString()
+
+    const candidate = existing.record ? clone(existing.record) : { schemaVersion: JOURNAL_SCHEMA_VERSION };
+    TRACKED_FIELDS.forEach((field) => {
+      if (!hasOwn(nextState, field)) return;
+      if (field === 'inboxProcessedEventIds') {
+        candidate[field] = {
+          ...processedEventMap(candidate[field]),
+          ...processedEventMap(nextState[field])
+        };
+      } else {
+        candidate[field] = clone(nextState[field]);
+      }
     });
+    candidate.schemaVersion = JOURNAL_SCHEMA_VERSION;
+    candidate.updatedAtISO = new Date().toISOString();
+
+    const record = normalizePatch(candidate);
     if (!record) throw new Error('Inbox journal patch was invalid.');
     const raw = JSON.stringify(record);
     storage.setItem(JOURNAL_KEY, raw);
@@ -490,32 +574,39 @@
     try { global.TaskPointsStateRevision?.bump?.('inbox-journal'); } catch (_) {}
     scheduleCompaction();
     journalSaves += 1;
+    const processed = processedEventMap(record.inboxProcessedEventIds);
     mark('inbox.populate.journalSave', {
+      savePath,
       journalBytes: raw.length,
-      messageCount: record.inboxMessages.length,
-      processedEventCount: record.inboxProcessedEventIds.length,
+      messageCount: Array.isArray(record.inboxMessages) ? record.inboxMessages.length : 0,
+      processedEventCount: Object.keys(processed).length,
       deferredFullSnapshot: true
     });
     return record;
   }
 
   core.mergeAndSaveState = function inboxJournalMergeAndSaveState(nextState, options = {}) {
-    if (options?.savePath !== 'inbox-auto-populate') {
+    const savePath = String(options?.savePath || '');
+    if (!JOURNALED_SAVE_PATHS.has(savePath)) {
       return originalMergeAndSaveState(nextState, options);
     }
 
     try {
-      const record = writeJournal(nextState);
+      const record = writeJournal(nextState, savePath);
       return {
         state: applyPatch({}, record),
         inboxJournalFastPath: true,
+        journalSavePath: savePath,
         deferredFullSnapshot: true,
         deferredCompression: false,
-        encoding: 'inbox-journal-v1'
+        encoding: 'inbox-journal-v2'
       };
     } catch (error) {
       fallbackSaves += 1;
-      mark('inbox.populate.journalFallback', { message: String(error?.message || error || 'journal_failed') });
+      mark('inbox.populate.journalFallback', {
+        savePath,
+        message: String(error?.message || error || 'journal_failed')
+      });
       return originalMergeAndSaveState(nextState, options);
     }
   };
@@ -549,6 +640,8 @@
     const current = readJournal();
     return {
       installed: true,
+      schemaVersion: JOURNAL_SCHEMA_VERSION,
+      journaledSavePaths: Array.from(JOURNALED_SAVE_PATHS),
       pending: Boolean(current.record),
       malformed: current.malformed,
       journalBytes: current.raw.length,
