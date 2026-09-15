@@ -1,0 +1,39 @@
+name: Home Upset Hotpath Once
+on:
+  push:
+    branches:
+      - fix/home-upset-reconcile-read-churn-20260915
+jobs:
+  patch-and-test:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/home-upset-reconcile-read-churn-20260915
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply patch
+        run: python3 tmp_patch_home_upset_hotpath.py
+      - name: Run focused reconciliation and safety tests
+        run: |
+          node --test tests/season_series_upset_reconciliation_loop.test.js
+          node --test tests/season_series_upset_notifications.test.js
+          node --test tests/home_live_state_bridge_contract.test.js
+          node --test tests/storage_atomic_replace_contract.test.js
+          node --test tests/storage_data_loss_fail_closed.test.js
+      - name: Verify scope
+        run: |
+          git diff --check
+          git diff -- season_series_upset_notifications.js tests/season_series_upset_reconciliation_loop.test.js
+      - name: Commit tested patch
+        run: |
+          rm tmp_patch_home_upset_hotpath.py .github/workflows/home-upset-hotpath-once.yml
+          git add -A
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Reuse live Home state for upset reconciliation'
+          git push
