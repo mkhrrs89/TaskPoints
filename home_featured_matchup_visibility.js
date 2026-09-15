@@ -8,6 +8,8 @@
   let observer = null;
   let observedMount = null;
   let renderScheduled = false;
+  let liveStateReads = 0;
+  let fallbackStateReads = 0;
 
   function localDateKey(date = new Date()) {
     const year = date.getFullYear();
@@ -108,6 +110,15 @@
 
   function loadState() {
     const core = global.TaskPointsCore;
+    try {
+      const live = global.TaskPointsHomeLiveState?.getState?.();
+      if (live && typeof live === 'object') {
+        liveStateReads += 1;
+        return live;
+      }
+    } catch (_) {}
+
+    fallbackStateReads += 1;
     try {
       if (typeof core?.loadAppState === 'function') {
         const loaded = core.loadAppState({ syncDerived: false, persistSync: false });
@@ -304,7 +315,9 @@
     getCurrentUserMatchup,
     renderCurrentSeriesBestOf,
     render: renderHomeFeaturedMatchup,
-    install
+    install,
+    get liveStateReads() { return liveStateReads; },
+    get fallbackStateReads() { return fallbackStateReads; }
   };
 
   global.TaskPointsHomeFeaturedMatchup = api;

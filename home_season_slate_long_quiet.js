@@ -226,6 +226,8 @@
   let refreshFrame = 0;
   let midnightTimer = 0;
   let lastDecoratedCount = -1;
+  let liveStateReads = 0;
+  let fallbackStateReads = 0;
 
   function localDayKey(value) {
     const date = value instanceof Date ? value : new Date(value);
@@ -241,6 +243,15 @@
   }
 
   function loadJournalAwareState() {
+    try {
+      const live = global.TaskPointsHomeLiveState?.getState?.();
+      if (live && typeof live === 'object') {
+        liveStateReads += 1;
+        return live;
+      }
+    } catch (_) {}
+
+    fallbackStateReads += 1;
     try {
       const loaded = core.loadAppState?.({ syncDerived: false, persistSync: false });
       if (loaded?.state && typeof loaded.state === 'object') return loaded.state;
@@ -353,7 +364,9 @@
       installed: true,
       refresh: scheduleRefresh,
       observer,
-      get decoratedCount() { return Math.max(0, lastDecoratedCount); }
+      get decoratedCount() { return Math.max(0, lastDecoratedCount); },
+      get liveStateReads() { return liveStateReads; },
+      get fallbackStateReads() { return fallbackStateReads; }
     };
 
     scheduleRefresh();

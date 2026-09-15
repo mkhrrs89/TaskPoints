@@ -165,18 +165,18 @@ function createFeaturedHarness() {
     addEventListener(name, fn) { documentListeners.set(name, fn); }
   };
 
+  const liveState = {
+    currentSeason: { status: 'active', series: {} },
+    matchups: []
+  };
+
   const core = {
     STORAGE_KEY: 'taskpoints_v1',
     loadAppState(options) {
       loadCalls += 1;
       assert.equal(options?.syncDerived, false);
       assert.equal(options?.persistSync, false);
-      return {
-        state: {
-          currentSeason: { status: 'active', series: {} },
-          matchups: []
-        }
-      };
+      return { state: liveState };
     },
     getFeaturedSeasonMatchup() {
       return {
@@ -191,6 +191,7 @@ function createFeaturedHarness() {
 
   const context = {
     TaskPointsCore: core,
+    TaskPointsHomeLiveState: { getState() { return liveState; } },
     document,
     MutationObserver: FakeMutationObserver,
     requestAnimationFrame(fn) { rafQueue.push(fn); return rafQueue.length; },
@@ -214,19 +215,19 @@ test('Home featured matchup observes external changes without observing its own 
   const harness = createFeaturedHarness();
   vm.runInNewContext(FEATURED, harness.context, { filename: 'home_featured_matchup_visibility.js' });
 
-  assert.equal(harness.loadCalls, 1, 'initial install should load state once');
+  assert.equal(harness.loadCalls, 0, 'initial install should use the live Home state without a full-state load');
   assert.equal(harness.rafQueue.length, 0, 'initial DOM writes must not schedule a self-rerender');
   assert.equal(harness.FakeMutationObserver.instances.length, 1);
   assert.equal(harness.FakeMutationObserver.instances[0].connected, true, 'external mutation observation remains enabled');
 
   harness.context.TaskPointsHomeFeaturedMatchup.render();
-  assert.equal(harness.loadCalls, 2);
+  assert.equal(harness.loadCalls, 0, 'direct rerenders should keep using the live Home state');
   assert.equal(harness.rafQueue.length, 0, 'direct renders must not recursively enqueue another render');
 
   harness.mount.externalMutation();
   assert.equal(harness.rafQueue.length, 1, 'an external Home mutation should still schedule one corrective render');
   harness.rafQueue.shift()();
-  assert.equal(harness.loadCalls, 3, 'external mutation should cause exactly one state-backed rerender');
+  assert.equal(harness.loadCalls, 0, 'external mutation should rerender from live Home state without a core load');
   assert.equal(harness.rafQueue.length, 0, 'the corrective render must not observe its own DOM repair');
   assert.equal(harness.FakeMutationObserver.instances[0].connected, true, 'observer reconnects after the guarded render');
 });
