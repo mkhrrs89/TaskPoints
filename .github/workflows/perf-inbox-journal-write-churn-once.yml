@@ -24,6 +24,8 @@ jobs:
       - run: npm ci
       - name: Apply Inbox journal fix
         run: python scripts/apply_inbox_journal_write_churn_fix.py
+      - name: Apply gate compatibility fixes
+        run: python scripts/apply_inbox_journal_gate_compat.py
       - name: Run focused Inbox and storage contracts
         run: >-
           node --test
