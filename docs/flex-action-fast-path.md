@@ -6,8 +6,8 @@ Flex Action checkmarks now update the tapped row immediately instead of waiting 
 
 1. Write the completed Flex Action to the small `taskpoints_pending_flex_completions_v1` crash-safe journal.
 2. Add the completion to the current in-memory state and paint the new orange dot immediately.
-3. After the browser has had a chance to paint, save the full TaskPoints snapshot using the existing interactive packed-save path.
-4. Clear only journal entries whose completion IDs are verified in the authoritative saved snapshot.
+3. After the browser has had a chance to paint, attempt the normal interactive packed-save path. If the packed snapshot has grown beyond the safe interactive localStorage ceiling, keep the tiny journal durable and defer canonical compression instead of synchronously LZ-compressing the multi-megabyte state on the visible main thread.
+4. Clear only journal entries whose completion IDs are verified in the authoritative saved snapshot. Explicit/lifecycle flushes retain the existing canonical full-save behavior.
 5. Run the normal full home-page render afterward so every dependent score and summary remains current.
 
 Rapid taps are coalesced into one background snapshot save. Pending entries are replayed during app loading and flushed during page hiding, exports, and reset-related save flushes.

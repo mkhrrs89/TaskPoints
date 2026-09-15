@@ -49,6 +49,9 @@
   let quietDeferred = false;
   let quietDeferrals = 0;
   let quietRuns = 0;
+  let oversizeQuietDeferrals = 0;
+  let oversizeAutoDeferred = false;
+  let lastFastSaveResult = null;
   let originalLogFlexCompletion = null;
   let originalHomeSave = null;
   let originalAddCompletion = null;
@@ -381,18 +384,21 @@
         && !orderRecord.malformed
         && !completionPending
         && !orderPending) {
-        return {
+        const drainedResult = {
           state: readAuthoritativeState(storageKey, state),
           skipped: true,
           skipReason: 'pending_flex_journal_already_drained',
           flexFastPathDrained: true
         };
+        lastFastSaveResult = drainedResult;
+        return drainedResult;
       }
 
       let candidate = state;
       if (completionPending) candidate = applyJournalToState(candidate, completionRecord.entries);
       if (orderPending) candidate = applyOrderJournalToState(candidate, orderRecord.record);
       const result = originalSaveStateSnapshot(candidate, options);
+      if (options.savePath === SAVE_PATH) lastFastSaveResult = result;
       if (!result?.skipped && !result?.blockedByQuotaCircuit && result?.state) {
         if (completionPending) clearVerifiedJournal(storageKey);
         if (orderPending) clearVerifiedOrderJournal(storageKey);
@@ -505,13 +511,29 @@
 
     savePending = false;
     saveRunning = true;
+    const allowOversizeDeferral = reason === 'quiet-after-paint';
+    lastFastSaveResult = null;
     try {
       originalHomeSave(SAVE_PATH, {
         userInitiated: true,
         interactive: true,
         deferCompression: true,
+        deferIfCompressionRequired: allowOversizeDeferral,
         flexFastPathReason: reason
       });
+      if (allowOversizeDeferral && lastFastSaveResult?.deferredOversizeInteractive === true) {
+        oversizeQuietDeferrals += 1;
+        oversizeAutoDeferred = true;
+        try {
+          global.TaskPointsPerf?.mark?.('flex.compactionOversizeDeferred', {
+            packedBytes: Number(lastFastSaveResult.packedBytes || 0),
+            safePackedLimitBytes: Number(lastFastSaveResult.safePackedLimitBytes || 0),
+            pendingCompletions: completionRecord.entries.length,
+            pendingOrder: orderPending
+          });
+        } catch (_) {}
+        return false;
+      }
     } catch (error) {
       console.warn('TaskPoints Flex Action background save failed; the pending Flex journal was retained.', error);
     } finally {
@@ -526,6 +548,7 @@
       : remainingCompletionRecord.entries.length + (remainingOrder ? 1 : 0);
     if (!remaining) {
       resetRetryBackoff();
+      oversizeAutoDeferred = false;
       if (!pendingRenderSatisfied) requestFullRender();
       pendingRenderSatisfied = false;
       renderPending = false;
@@ -555,6 +578,13 @@
       renderPending = false;
       pendingRenderSatisfied = true;
       requestFullRender();
+    }
+
+    // A known-oversized snapshot stays journal-backed while the page is visible.
+    // Explicit/lifecycle flushes still call persistNow() and retain canonical saves.
+    if (oversizeAutoDeferred) {
+      savePending = false;
+      return false;
     }
 
     const status = storageQuietStatus();
@@ -897,6 +927,8 @@
       deferred: quietDeferred,
       deferrals: quietDeferrals,
       runs: quietRuns,
+      oversizeQuietDeferrals,
+      oversizeAutoDeferred,
       renderPending,
       pendingRenderSatisfied
     })

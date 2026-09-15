@@ -114,6 +114,7 @@ function makeHarness() {
       if (result && result.state) state = result.state;
     }
     function renderFlexActions() {}
+    function moveFlexAction() {}
     function renderAll() { renderCount += 1; }
     function scheduleRender(fn) { requestAnimationFrame(fn); }
     function flexBaseDate() { return new Date('2026-07-29T00:00:00'); }

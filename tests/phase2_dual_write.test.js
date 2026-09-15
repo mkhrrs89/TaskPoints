@@ -214,13 +214,15 @@ test('rapid localStorage saves end with exact latest state in IndexedDB', async 
   assert.equal(status.verification.hashesMatch, true);
   assert.equal(status.verification.source.hashes.state, expected.hashes.state);
   assert.equal(status.verification.destination.hashes.state, expected.hashes.state);
-  assert.deepEqual((await rows(db, 'tasks')).map((row) => row.value.id), ['task-3']);
-
-  const collectionRows = await rows(db, 'collections');
-  ['schedule', 'opponentDripSchedules', 'storageWarnings', 'workHistory'].forEach((field) => {
-    assert.equal(collectionRows.some((row) => row.kind === 'manifest' && row.field === field), true, field);
-  });
-  assert.equal(collectionRows.filter((row) => row.kind === 'item' && row.field === 'futureRows').length, 3);
+  const snapshotRows = await rows(db, 'metadata');
+  const snapshot = snapshotRows.find((row) => row.id === core.SHADOW_DUAL_WRITE_SNAPSHOT_ID);
+  assert.ok(snapshot, 'verified dual write should store one metadata snapshot');
+  assert.equal(snapshot.snapshotFormat, 'metadata_raw_v1');
+  assert.equal(snapshot.status, 'passed_verification');
+  assert.equal(snapshot.serializedState, JSON.stringify(states[2]));
+  assert.equal(core.parseTaskPointsStorageJson(snapshot.serializedState, {}).tasks[0].id, 'task-3');
+  assert.equal((await rows(db, 'tasks')).length, 0, 'new dual writes must not enqueue per-row task puts');
+  assert.equal((await rows(db, 'collections')).length, 0, 'new dual writes must not enqueue per-row collection puts');
   assert.equal(idb._db(core.IMAGE_DB_NAME), undefined, 'dual writes must not create or alter the image database');
 });
 
@@ -237,5 +239,120 @@ test('IndexedDB failure never blocks the authoritative localStorage save', async
     assert.equal(global.localStorage.getItem(core.STORAGE_KEY), raw);
   } finally {
     global.indexedDB = previousIndexedDb;
+  }
+});
+
+
+test('coalesced authoritative raw reuses its detached parsed state instead of cloning the full snapshot again', async () => {
+  localRows.clear();
+  const idb = createFakeIndexedDb({ strictTransactions: true });
+  global.indexedDB = idb;
+  await seedVerifiedShadow(idb);
+
+  const before = core.getShadowDualWriteQueueStatus();
+  const state = fixture(21);
+  const raw = JSON.stringify(state);
+  global.localStorage.setItem(core.STORAGE_KEY, raw);
+  await core.flushShadowDualWrites();
+  const after = core.getShadowDualWriteQueueStatus();
+
+  assert.equal(after.sourceCloneCount - before.sourceCloneCount, 0,
+    'the freshly parsed coalesced authoritative snapshot is already detached and should not be cloned again');
+  assert.equal(after.detachedSourceReuseCount - before.detachedSourceReuseCount, 1);
+  assert.equal(global.localStorage.getItem(core.STORAGE_KEY), raw);
+
+  const status = await core.getShadowDualWriteStatus({ indexedDB: idb });
+  assert.equal(status.status, 'passed_verification', JSON.stringify(status));
+  assert.equal(status.verification.countsMatch, true);
+  assert.equal(status.verification.hashesMatch, true);
+});
+
+test('public direct shadow snapshot writes still defensively clone caller-owned state', async () => {
+  const idb = createFakeIndexedDb({ strictTransactions: true });
+  await seedVerifiedShadow(idb);
+  const before = core.getShadowDualWriteQueueStatus();
+  const state = fixture(22);
+  const result = await core.writeShadowDualWriteSnapshot(state, { indexedDB: idb });
+  const after = core.getShadowDualWriteQueueStatus();
+
+  assert.equal(result.status, 'passed_verification', JSON.stringify(result));
+  assert.equal(after.sourceCloneCount - before.sourceCloneCount, 1,
+    'public direct writes must preserve the defensive clone boundary');
+  assert.equal(after.detachedSourceReuseCount - before.detachedSourceReuseCount, 0);
+});
+
+
+test('dual-write metadata snapshot collapses the legacy row-write fanout', async () => {
+  localRows.clear();
+  const idb = createFakeIndexedDb({ strictTransactions: true });
+  global.indexedDB = idb;
+  const db = await seedVerifiedShadow(idb);
+  const state = fixture(30);
+  const raw = JSON.stringify(state);
+  const before = core.getShadowDualWriteQueueStatus();
+
+  global.localStorage.setItem(core.STORAGE_KEY, raw);
+  await core.flushShadowDualWrites();
+  const after = core.getShadowDualWriteQueueStatus();
+
+  assert.equal(after.metadataSnapshotWriteCount - before.metadataSnapshotWriteCount, 1);
+  assert.equal(after.legacyRowWriteCount - before.legacyRowWriteCount, 0);
+  const snapshot = (await rows(db, 'metadata')).find((row) => row.id === core.SHADOW_DUAL_WRITE_SNAPSHOT_ID);
+  assert.equal(snapshot.serializedState, raw);
+  assert.equal(snapshot.status, 'passed_verification');
+  for (const storeName of ['completions', 'matchups', 'gameHistory', 'seasonHistory', 'tasks', 'habits', 'players', 'collections']) {
+    assert.equal((await rows(db, storeName)).length, 0, `${storeName} should stay untouched by the new snapshot path`);
+  }
+});
+
+
+test('coalesced authoritative write reuses an exact shared source package but still parses the IndexedDB readback', async () => {
+  localRows.clear();
+  const idb = createFakeIndexedDb({ strictTransactions: true });
+  global.indexedDB = idb;
+  await seedVerifiedShadow(idb);
+
+  const state = fixture(31);
+  const raw = JSON.stringify(state);
+  const sharedState = structuredClone(state);
+  const sharedSummary = core.shadowSourceSummary(sharedState);
+  const originalPackage = core.getSharedSaveSourcePackage;
+  const originalParse = core.parseTaskPointsStorageJson;
+  let packageCalls = 0;
+  let parseCalls = 0;
+
+  try {
+    core.getSharedSaveSourcePackage = (candidateRaw) => {
+      packageCalls += 1;
+      if (candidateRaw !== raw) return null;
+      return {
+        raw,
+        state: sharedState,
+        summary: sharedSummary,
+        sourceKind: 'recent_exact_parse'
+      };
+    };
+    core.parseTaskPointsStorageJson = (...args) => {
+      parseCalls += 1;
+      return originalParse(...args);
+    };
+
+    const before = core.getShadowDualWriteQueueStatus();
+    global.localStorage.setItem(core.STORAGE_KEY, raw);
+    await core.flushShadowDualWrites();
+    const after = core.getShadowDualWriteQueueStatus();
+
+    assert.ok(packageCalls >= 1);
+    assert.equal(after.sharedSourceReuseCount - before.sharedSourceReuseCount, 1);
+    assert.equal(after.sharedSourceFallbackCount - before.sharedSourceFallbackCount, 0);
+    assert.equal(parseCalls, 1,
+      'the shared package should remove the source parse while the IndexedDB readback remains independently parsed');
+    const status = await core.getShadowDualWriteStatus({ indexedDB: idb });
+    assert.equal(status.status, 'passed_verification', JSON.stringify(status));
+    assert.equal(status.verification.hashesMatch, true);
+    assert.equal(status.verification.rawMatches, true);
+  } finally {
+    core.getSharedSaveSourcePackage = originalPackage;
+    core.parseTaskPointsStorageJson = originalParse;
   }
 });

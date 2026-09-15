@@ -12,8 +12,11 @@ test('recurring task done-today UI preserves duplicate-completion protection and
   assert.match(source, /button\.setAttribute\('aria-label', 'Already completed today'\);/);
 });
 
-test('done-today UI reads journal-aware state without derived-state persistence', () => {
+test('done-today UI prefers live Home state and retains journal-aware persisted fallback', () => {
+  assert.match(source, /global\.TaskPointsHomeLiveState\?\.getState\?\.\(\)/);
   assert.match(source, /core\.loadAppState\?\.\(\{ syncDerived: false, persistSync: false \}\)/);
+  assert.match(source, /liveStateReads \+= 1/);
+  assert.match(source, /fallbackStateReads \+= 1/);
 });
 
 test('done-today UI refreshes after task-list rerenders and across midnight', () => {

@@ -107,7 +107,7 @@ function makeState(label) {
   };
 }
 
-function install() {
+function install(options = {}) {
   const localStorage = new FakeStorage({
     [STORAGE_KEY]: JSON.stringify(makeState('initial')),
     [JOURNAL_KEY]: '[]',
@@ -115,16 +115,20 @@ function install() {
   });
   const indexedDB = createFakeIndexedDb();
   let loadCalls = 0;
+  let parseCalls = 0;
   const core = {
     STORAGE_KEY,
     PENDING_HABIT_DELTAS_KEY: JOURNAL_KEY,
     __storageDataLossGuardInstalled: true,
     __phase5aNativeSnapshotInstalled: true,
-    parseTaskPointsStorageJson(raw, fallback) { try { return JSON.parse(raw); } catch (_) { return fallback; } },
+    parseTaskPointsStorageJson(raw, fallback) { parseCalls += 1; try { return JSON.parse(raw); } catch (_) { return fallback; } },
     shadowCanonicalJson: canonical,
     shadowSourceSummary: summary,
     loadAppState() { loadCalls += 1; return {}; }
   };
+  if (typeof options.getSharedSaveSourcePackage === 'function') {
+    core.getSharedSaveSourcePackage = options.getSharedSaveSourcePackage;
+  }
   const context = {
     TaskPointsCore: core, localStorage, indexedDB, Storage: FakeStorage,
     structuredClone, queueMicrotask, setTimeout, clearTimeout,
@@ -133,7 +137,7 @@ function install() {
   context.window = context;
   context.globalThis = context;
   vm.runInNewContext(SOURCE, context, { filename: 'phase5b_deferred_mirror.js' });
-  return { core, localStorage, indexedDB, loadCalls: () => loadCalls };
+  return { core, localStorage, indexedDB, loadCalls: () => loadCalls, parseCalls: () => parseCalls };
 }
 
 test('does not consult IndexedDB during installation or replace the app read path', () => {
@@ -208,4 +212,38 @@ test('Storage Health reads the actual verified secondary record without mutation
   assert.doesNotMatch(HEALTH_SOURCE, /localStorage\.(?:setItem|removeItem|clear)\s*\(/);
   assert.doesNotMatch(HEALTH_SOURCE, /\.transaction\([^\n]*['"]readwrite['"]/);
   assert.doesNotMatch(HEALTH_SOURCE, /\.(?:put|delete|clear)\s*\(/);
+});
+
+
+test('reuses an exact shared source package while still parsing the IndexedDB readback independently', async () => {
+  const sourceState = makeState('shared-source');
+  const raw = JSON.stringify(sourceState);
+  let packageCalls = 0;
+  const harness = install({
+    getSharedSaveSourcePackage(candidateRaw) {
+      packageCalls += 1;
+      if (candidateRaw !== raw) return null;
+      return {
+        raw,
+        state: sourceState,
+        summary: summary(sourceState),
+        sourceKind: 'recent_exact_parse'
+      };
+    }
+  });
+
+  const beforeParseCalls = harness.parseCalls();
+  harness.localStorage.setItem(STORAGE_KEY, raw);
+  await harness.core.flushPhase5CVerifiedSecondaryWrites();
+  const parseDelta = harness.parseCalls() - beforeParseCalls;
+
+  assert.ok(packageCalls >= 1);
+  assert.equal(parseDelta, 1,
+    'the source parse should be reused, but the IndexedDB candidate readback must still be independently parsed');
+  const latest = harness.indexedDB.read(DB_NAME, 'latest');
+  assert.equal(latest.raw, raw);
+  assert.equal(latest.status, 'passed_verification');
+  const status = harness.core.getPhase5CVerifiedSecondaryStatus();
+  assert.ok(status.sharedSourceReuseCount >= 1);
+  assert.equal(status.lastStatus, 'passed_verification');
 });

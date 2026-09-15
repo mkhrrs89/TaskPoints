@@ -6,21 +6,21 @@ const vm = require('node:vm');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'phase5b_deferred_mirror.js'), 'utf8');
 
-test('interrupted queued mirrors retry after page load without becoming a read source', () => {
+test('a missing current Home-native mirror is backfilled from the latest authoritative save without becoming a read source', () => {
   assert.doesNotThrow(() => new vm.Script(source));
-  assert.match(source, /existingStatus\.phase5cPendingWrite === true \|\| existingStatus\.phase5cLastStatus === 'queued'/);
-  assert.match(source, /phase5cPendingWrite: interruptedWrite/);
-  assert.match(source, /requestIdleCallback\(runRetry/);
-  assert.match(source, /addEventListener\('load', retry, \{ once: true \}\)/);
+  assert.match(source, /const homeNativeKnownCurrent = Boolean\(currentRaw/);
+  assert.match(source, /if \(hookInstalled && currentRaw && !homeNativeKnownCurrent && journalCount\(\) === 0\)/);
+  assert.match(source, /const backfill = \(\) => \{/);
   assert.match(source, /if \(latestRaw && journalCount\(\) === 0\) queue\(latestRaw\)/);
+  assert.match(source, /requestIdleCallback\(backfill, \{ timeout: 5000 \}\)/);
+  assert.match(source, /indexedDbReadsEnabled: false/);
+  assert.match(source, /indexedDbWriteBackEnabled: false/);
 });
 
-test('removing the authoritative save marks the verified secondary stale without deleting it', () => {
-  assert.match(source, /function handleAuthoritativeRemoval\(\)/);
-  assert.match(source, /phase5cLastStatus: 'authoritative_removed'/);
-  assert.match(source, /phase5cMirrorsCurrentSave: false/);
-  assert.match(source, /wrappedRemove = function phase5cRemoveItem/);
-  assert.match(source, /prototype\.removeItem = function phase5cRemoveItem/);
-  assert.match(source, /event\.newValue === null && get\(KEY\) === null/);
+test('authoritative absence cannot be reported as a current verified secondary and does not delete recovery data', () => {
+  assert.match(source, /const currentRaw = get\(KEY\)/);
+  assert.match(source, /const verifiedStillCurrent = Boolean\(hookInstalled[\s\S]*?&& currentRaw/);
+  assert.match(source, /phase5cMirrorsCurrentSave: verifiedStillCurrent/);
+  assert.match(source, /verifiedStillCurrent \? 'passed_verification' : 'waiting_for_successful_save'/);
   assert.doesNotMatch(source, /deleteDatabase\s*\(/);
 });

@@ -207,7 +207,7 @@
 
   if (document.querySelector('script[data-taskpoints-home-season-slate-long-quiet]')) return;
   const script = document.createElement('script');
-  script.src = '/home_season_slate_long_quiet.js?v=20260820-1';
+  script.src = '/home_season_slate_long_quiet.js?v=20260915-1';
   script.async = true;
   script.dataset.taskpointsHomeSeasonSlateLongQuiet = 'true';
   (document.head || document.documentElement).appendChild(script);

@@ -16,6 +16,8 @@
   let parseReuseCount = 0;
   let summaryReuseCount = 0;
   let clonePropagationCount = 0;
+  let sourcePackageReuseCount = 0;
+  let sourcePackageMissCount = 0;
 
   function pendingJournalCount() {
     try { return Number(core.readPendingHabitDeltas?.().length) || 0; }
@@ -176,6 +178,45 @@
     };
   };
 
+  core.getSharedSaveSourcePackage = function getSharedSaveSourcePackage(raw = null) {
+    const targetRaw = typeof raw === 'string'
+      ? raw
+      : (() => {
+          try { return global.localStorage?.getItem?.(core.STORAGE_KEY) ?? null; }
+          catch (_) { return null; }
+        })();
+
+    const verified = core.getSharedVerifiedSavePackage?.(targetRaw);
+    if (verified) {
+      sourcePackageReuseCount += 1;
+      return { ...verified, sourceKind: 'verified_primary' };
+    }
+
+    if (typeof targetRaw === 'string'
+      && targetRaw
+      && recentParse
+      && recentParse.raw === targetRaw
+      && recentParse.snapshot
+      && recentParse.summary
+      && pendingJournalCount() === 0) {
+      sourcePackageReuseCount += 1;
+      return {
+        schemaVersion: 1,
+        sequence: 0,
+        raw: targetRaw,
+        state: recentParse.snapshot,
+        summary: recentParse.summary,
+        mirrorHash: null,
+        verifiedAt: null,
+        status: 'exact_source_parse',
+        sourceKind: 'recent_exact_parse'
+      };
+    }
+
+    sourcePackageMissCount += 1;
+    return null;
+  };
+
   core.clearSharedSaveWork = function clearSharedSaveWork() {
     recentParse = null;
   };
@@ -185,6 +226,8 @@
     parseReuseCount,
     summaryReuseCount,
     clonePropagationCount,
+    sourcePackageReuseCount,
+    sourcePackageMissCount,
     recentRawPresent: Boolean(recentParse?.raw),
     packageReady: Boolean(core.getSharedVerifiedSavePackage?.())
   });

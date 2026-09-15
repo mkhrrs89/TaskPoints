@@ -70,6 +70,7 @@
   const MODE_KEY = 'taskpoints_phase4_storage_mode_v1';
   const HOLD_KEY = 'taskpoints_emergency_recovery_hold_v1';
   const DIAG_KEY = 'taskpoints_storage_data_loss_guard_v1';
+  const INCIDENT_KEY = 'taskpoints_storage_guard_incident_v1';
   const LEGACY_JOURNAL_KEY = 'taskpoints_phase5b_pending_changes_v1';
   const LEGACY_JOURNAL_MARKER_KEY = 'taskpoints_phase5b_journal_reconciled_v1';
   const VAULT_DB_NAME = 'taskpoints_safety_vault_v1';
@@ -90,7 +91,8 @@
   let pendingVaultCandidate = null;
   let alertShown = false;
   let rememberedRemovedRaw = null;
-  let rememberedRemovalToken = 0;
+  let pendingAuthoritativeRemoval = null;
+  let pendingAuthoritativeRemovalToken = 0;
 
   const clone = (value) => typeof global.structuredClone === 'function'
     ? global.structuredClone(value)
@@ -151,6 +153,42 @@
       ...patch
     };
     try { storage.setItem(DIAG_KEY, JSON.stringify(value)); } catch (_) {}
+  }
+
+  function readIncident() {
+    try {
+      const parsed = JSON.parse(get(INCIDENT_KEY) || 'null');
+      return parsed && parsed.active === true ? parsed : null;
+    } catch (_) { return null; }
+  }
+
+  function writeIncident(details, previousRaw) {
+    const nowISO = new Date().toISOString();
+    const previousCounts = details?.previous || summarize(parseState(previousRaw));
+    const incident = {
+      schemaVersion: 1,
+      active: true,
+      reason: String(details?.reason || 'suspicious_destructive_write'),
+      blockedAtISO: nowISO,
+      previousRawHash: previousRaw ? rawHash(previousRaw) : null,
+      previousCounts,
+      candidateCounts: details?.candidate || null
+    };
+    try { storage.setItem(INCIDENT_KEY, JSON.stringify(incident)); } catch (_) {}
+    try { storage.setItem(MODE_KEY, 'off'); } catch (_) {}
+    return incident;
+  }
+
+  function clearIncident(reason) {
+    const incident = readIncident();
+    if (!incident) return false;
+    try { storage.removeItem(INCIDENT_KEY); } catch (_) { return false; }
+    writeDiagnostics({
+      failClosedIncidentActive: false,
+      failClosedIncidentClearedAtISO: new Date().toISOString(),
+      failClosedIncidentClearReason: reason || 'verified_primary_present'
+    });
+    return true;
   }
 
   function readVaultMeta() {
@@ -219,41 +257,83 @@
     };
   }
 
-  function blockReplacement(details) {
-    const error = new Error('TaskPoints blocked a suspicious destructive state overwrite. The previous saved data was preserved.');
+  function authorizedRecoveryWrite() {
+    return destructiveAllowanceDepth > 0 || global.__taskPointsEmergencyRecoveryAuthorized === true;
+  }
+
+  function blockReplacement(details, previousRaw = null) {
+    const preservedRaw = previousRaw || get(STORAGE_KEY) || rememberedRemovedRaw;
+    const incident = writeIncident(details, preservedRaw);
+    const error = new Error('TaskPoints blocked a suspicious destructive state overwrite. The existing saved data remains protected.');
     error.code = 'TASKPOINTS_SUSPICIOUS_STATE_OVERWRITE_BLOCKED';
     error.details = details;
     writeDiagnostics({
-      lastBlockedAtISO: new Date().toISOString(),
+      lastBlockedAtISO: incident.blockedAtISO,
       lastBlockedReason: details?.reason || 'unknown',
       previousCounts: details?.previous || null,
       candidateCounts: details?.candidate || null,
+      failClosedIncidentActive: true,
+      failClosedIncidentPrimaryPresent: Boolean(get(STORAGE_KEY)),
       blockedWritesTotal: Number(readDiagnostics().blockedWritesTotal || 0) + 1
     });
     console.error(error.message, details);
     if (!alertShown && typeof global.alert === 'function') {
       alertShown = true;
-      try { global.alert(`${error.message}\n\nDo not reset or import anything until Storage Health is checked.`); } catch (_) {}
+      try {
+        global.alert(`${error.message}\n\nTaskPoints has locked destructive saves for this session. Reload before making more changes. If the app does not reopen with your data, use Storage Health or a backup; an empty replacement will not be accepted automatically.`);
+      } catch (_) {}
     }
+    throw error;
+  }
+
+  function blockIncidentWrite(candidateRaw) {
+    const incident = readIncident();
+    if (!incident || authorizedRecoveryWrite()) return false;
+    const currentRaw = get(STORAGE_KEY);
+    if (currentRaw && currentRaw === candidateRaw) return false;
+    const candidate = summarize(parseState(candidateRaw));
+    const error = new Error('TaskPoints is in fail-closed storage protection after a blocked destructive write. Automatic state replacement is locked until a verified reload or recovery.');
+    error.code = 'TASKPOINTS_STORAGE_FAIL_CLOSED';
+    error.details = { reason: 'fail_closed_incident_active', previous: incident.previousCounts || null, candidate };
+    writeDiagnostics({
+      failClosedIncidentActive: true,
+      failClosedBlockedWriteAtISO: new Date().toISOString(),
+      failClosedBlockedWritesTotal: Number(readDiagnostics().failClosedBlockedWritesTotal || 0) + 1,
+      failClosedPrimaryPresent: Boolean(currentRaw)
+    });
     throw error;
   }
 
   function rememberRemovedAuthoritativeRaw(key) {
     if (String(key) !== STORAGE_KEY) return;
     const raw = get(STORAGE_KEY);
-    if (!raw) return;
-    rememberedRemovedRaw = raw;
-    const token = ++rememberedRemovalToken;
-    const clear = () => {
-      if (token === rememberedRemovalToken) rememberedRemovedRaw = null;
-    };
-    if (typeof global.queueMicrotask === 'function') global.queueMicrotask(clear);
-    else Promise.resolve().then(clear);
+    if (raw) rememberedRemovedRaw = raw;
   }
 
   function clearRememberedRaw() {
-    rememberedRemovalToken += 1;
     rememberedRemovedRaw = null;
+  }
+
+  function cancelPendingAuthoritativeRemoval() {
+    if (!pendingAuthoritativeRemoval) return false;
+    pendingAuthoritativeRemovalToken += 1;
+    pendingAuthoritativeRemoval = null;
+    return true;
+  }
+
+  function deferAuthoritativeRemoval(key, removeAction) {
+    rememberRemovedAuthoritativeRaw(key);
+    const token = ++pendingAuthoritativeRemovalToken;
+    pendingAuthoritativeRemoval = { token, key: String(key) };
+    const run = () => {
+      if (!pendingAuthoritativeRemoval || pendingAuthoritativeRemoval.token !== token) return;
+      pendingAuthoritativeRemoval = null;
+      try { removeAction(); }
+      finally { clearRememberedRaw(); }
+    };
+    if (typeof global.queueMicrotask === 'function') global.queueMicrotask(run);
+    else Promise.resolve().then(run);
+    return undefined;
   }
 
   function requestResult(request) {
@@ -404,7 +484,6 @@
   }
 
   function shouldAllowDestructiveOptions(options = {}) {
-    if (options.storageSafetyBypass === true) return true;
     if (options.allowDestructiveOverwrite !== true) return false;
     const label = String(options.source || options.savePath || options.reason || options.caller || '');
     return /(import|restore|reset|backup|recovery|migration|quarantine)/i.test(label);
@@ -436,21 +515,35 @@
         const guardedSet = function guardedTaskPointsInstanceSetItem(key, value) {
           const targetKey = String(key);
           const candidateRaw = String(value);
-          if (targetKey === STORAGE_KEY && destructiveAllowanceDepth === 0) {
-            const previousRaw = get(STORAGE_KEY) || rememberedRemovedRaw;
-            const details = suspiciousReplacement(previousRaw, candidateRaw);
-            if (details) blockReplacement(details);
+          if (targetKey === STORAGE_KEY) {
+            // Any synchronous replacement after removeItem cancels the deferred
+            // physical removal first. This keeps the prior authoritative raw
+            // present while the candidate is evaluated.
+            cancelPendingAuthoritativeRemoval();
+            if (readIncident() && !authorizedRecoveryWrite()) blockIncidentWrite(candidateRaw);
+            if (destructiveAllowanceDepth === 0 && global.__taskPointsEmergencyRecoveryAuthorized !== true) {
+              const previousRaw = get(STORAGE_KEY) || rememberedRemovedRaw;
+              const details = suspiciousReplacement(previousRaw, candidateRaw);
+              if (details) blockReplacement(details, previousRaw);
+            }
           }
           const result = priorSet(key, value);
           if (targetKey === STORAGE_KEY) {
             clearRememberedRaw();
             queueVaultSnapshot(candidateRaw, 'verified-state-write');
+            if (authorizedRecoveryWrite() && readIncident()) clearIncident('authorized_recovery_write');
           }
           return result;
         };
         const guardedRemove = function guardedTaskPointsInstanceRemoveItem(key) {
-          rememberRemovedAuthoritativeRaw(key);
-          return priorRemove(key);
+          const targetKey = String(key);
+          if (targetKey !== STORAGE_KEY) return priorRemove(key);
+          if (readIncident() && !authorizedRecoveryWrite()) {
+            const error = new Error('TaskPoints is in fail-closed storage protection; the authoritative save cannot be removed until a verified reload or recovery.');
+            error.code = 'TASKPOINTS_STORAGE_FAIL_CLOSED';
+            throw error;
+          }
+          return deferAuthoritativeRemoval(targetKey, () => priorRemove(key));
         };
         storage.setItem = guardedSet;
         storage.removeItem = guardedRemove;
@@ -470,15 +563,20 @@
       prototype.setItem = function guardedTaskPointsSetItem(key, value) {
         const targetKey = String(key);
         const candidateRaw = String(value);
-        if (this === storage && targetKey === STORAGE_KEY && destructiveAllowanceDepth === 0) {
-          const previousRaw = get(STORAGE_KEY) || rememberedRemovedRaw;
-          const details = suspiciousReplacement(previousRaw, candidateRaw);
-          if (details) blockReplacement(details);
+        if (this === storage && targetKey === STORAGE_KEY) {
+          cancelPendingAuthoritativeRemoval();
+          if (readIncident() && !authorizedRecoveryWrite()) blockIncidentWrite(candidateRaw);
+          if (destructiveAllowanceDepth === 0 && global.__taskPointsEmergencyRecoveryAuthorized !== true) {
+            const previousRaw = get(STORAGE_KEY) || rememberedRemovedRaw;
+            const details = suspiciousReplacement(previousRaw, candidateRaw);
+            if (details) blockReplacement(details, previousRaw);
+          }
         }
         const result = priorSet.call(this, key, value);
         if (this === storage && targetKey === STORAGE_KEY) {
           clearRememberedRaw();
           queueVaultSnapshot(candidateRaw, 'verified-state-write');
+          if (authorizedRecoveryWrite() && readIncident()) clearIncident('authorized_recovery_write');
         }
         return result;
       };
@@ -487,8 +585,14 @@
       const priorRemove = prototype.removeItem;
       Object.defineProperty(prototype, '__taskpointsDataLossGuardRemoveItem', { value: priorRemove, configurable: true });
       prototype.removeItem = function guardedTaskPointsRemoveItem(key) {
-        if (this === storage) rememberRemovedAuthoritativeRaw(key);
-        return priorRemove.call(this, key);
+        const targetKey = String(key);
+        if (this !== storage || targetKey !== STORAGE_KEY) return priorRemove.call(this, key);
+        if (readIncident() && !authorizedRecoveryWrite()) {
+          const error = new Error('TaskPoints is in fail-closed storage protection; the authoritative save cannot be removed until a verified reload or recovery.');
+          error.code = 'TASKPOINTS_STORAGE_FAIL_CLOSED';
+          throw error;
+        }
+        return deferAuthoritativeRemoval(targetKey, () => priorRemove.call(this, key));
       };
     }
   }
@@ -590,12 +694,15 @@
   core.TASKPOINTS_SAFETY_VAULT_DB_NAME = VAULT_DB_NAME;
   core.TASKPOINTS_SAFETY_VAULT_STORE = VAULT_STORE;
   core.TASKPOINTS_SAFETY_VAULT_META_KEY = VAULT_META_KEY;
+  core.TASKPOINTS_STORAGE_GUARD_INCIDENT_KEY = INCIDENT_KEY;
   core.withTaskPointsDestructiveWriteAllowed = (fn) => withAllowance(fn);
   core.flushTaskPointsSafetyVault = () => vaultTail.catch(() => undefined);
   core.getTaskPointsDataLossGuardStatus = () => ({
     installed: true,
     phase5bLiveBundleDisabled: true,
     destructiveAllowanceActive: destructiveAllowanceDepth > 0,
+    failClosedIncident: readIncident(),
+    pendingAuthoritativeRemoval: Boolean(pendingAuthoritativeRemoval),
     vaultMeta: readVaultMeta(),
     vaultQueuePending: Boolean(pendingVaultCandidate || vaultDrainRunning),
     diagnostics: readDiagnostics()
@@ -606,6 +713,20 @@
 
   if (get(HOLD_KEY)) set(MODE_KEY, 'off');
   const startupRaw = get(STORAGE_KEY);
+  const startupIncident = readIncident();
+  if (startupIncident) {
+    set(MODE_KEY, 'off');
+    if (startupRaw && startupIncident.previousRawHash && rawHash(startupRaw) === startupIncident.previousRawHash) {
+      clearIncident('verified_original_primary_on_reload');
+    } else {
+      writeDiagnostics({
+        failClosedIncidentActive: true,
+        failClosedStartupAtISO: new Date().toISOString(),
+        failClosedPrimaryPresent: Boolean(startupRaw),
+        failClosedStartupReason: startupRaw ? 'primary_changed_after_incident' : 'primary_missing_after_incident'
+      });
+    }
+  }
   if (startupRaw) queueVaultSnapshot(startupRaw, 'startup-known-good');
   installStorageHooks();
   reconcileLegacyPhase5BJournal();

@@ -4169,7 +4169,6 @@ rows.push([
       // a large string with a smaller value. Do not route this manual rescue through
       // the normal app save/merge path; only change the raw storage representation.
       try {
-        localStorage.removeItem(storageKey);
         localStorage.setItem(storageKey, plan.chosenRaw);
       } catch (writeError) {
         console.error("Optimized write failed; attempting rollback", writeError);
@@ -4204,7 +4203,6 @@ rows.push([
         console.error("Optimized verification failed", verifyError);
         let restored = false;
         try {
-          localStorage.removeItem(storageKey);
           localStorage.setItem(storageKey, oldRaw);
           restored = true;
         } catch (rollbackError) {

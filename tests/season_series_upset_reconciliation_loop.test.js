@@ -66,6 +66,7 @@ function loadHarness(initialState, options = {}) {
   const loadCalls = [];
   const mergeCalls = [];
   const marks = [];
+  const quietCallbacks = [];
   let nextTimerId = 1;
   let state = initialState;
   const idleStatus = options.idleStatus || null;
@@ -77,7 +78,7 @@ function loadHarness(initialState, options = {}) {
   const core = {
     loadAppState(loadOptions) {
       loadCalls.push(loadOptions);
-      return { state };
+      return { state: loadOptions?.preloadedState || state };
     },
     mergeAndSaveState(patch, saveOptions) {
       mergeCalls.push({ patch, options: saveOptions });
@@ -90,6 +91,12 @@ function loadHarness(initialState, options = {}) {
   };
   if (idleStatus) {
     core.getStorageMaintenanceIdleStatus = () => ({ ...idleStatus });
+  }
+  if (options.captureQuietGates) {
+    core.whenStorageMaintenanceQuiet = (run) => {
+      quietCallbacks.push(run);
+      return new Promise(() => {});
+    };
   }
 
   const context = {
@@ -110,6 +117,7 @@ function loadHarness(initialState, options = {}) {
     location: { pathname: options.pathname || '/season' },
     localStorage: {},
     TaskPointsCore: core,
+    ...(options.homeLiveState ? { TaskPointsHomeLiveState: { getState: () => options.homeLiveState } } : {}),
     TaskPointsPerf: {
       mark(name, detail) { marks.push({ name, detail }); }
     },
@@ -149,6 +157,7 @@ function loadHarness(initialState, options = {}) {
   // Discard the module's one-time startup reconciliation. Each test below
   // exercises only the behavior it explicitly triggers.
   timers.clear();
+  quietCallbacks.length = 0;
 
   return {
     api: context.module.exports,
@@ -156,6 +165,7 @@ function loadHarness(initialState, options = {}) {
     mergeCalls,
     marks,
     timers,
+    quietCallbacks,
     idleStatus,
     emit,
     runOnlyTimer() {
@@ -232,4 +242,43 @@ test('Log reconciliation cannot execute a pre-scheduled callback before eight se
   assert.equal(harness.loadCalls[0].syncDerived, true);
   assert.equal(harness.loadCalls[0].persistSync, false);
   assert.ok(harness.marks.some((mark) => mark.name === 'upset.logExecutionGuardReleased'));
+});
+
+
+test('Home reconciliation preserves derived sync while reusing the live Home state as preloaded input', () => {
+  const liveState = noChangeState();
+  const harness = loadHarness(liveState, { pathname: '/', homeLiveState: liveState });
+  const result = harness.api.reconcileStored({ now: new Date('2026-08-08T06:00:00-04:00') });
+
+  assert.equal(result.changed, false);
+  assert.equal(harness.loadCalls.length, 1);
+  assert.equal(harness.loadCalls[0].syncDerived, true);
+  assert.equal(harness.loadCalls[0].persistSync, false);
+  assert.equal(harness.loadCalls[0].preloadedState, liveState);
+  assert.equal(harness.api.getReadHotpathStatus().homePreloadedReads, 1);
+  assert.equal(harness.api.getReadHotpathStatus().persistedStateReads, 0);
+});
+
+test('superseded Home quiet reconciliation gates cannot schedule stale duplicate checks', () => {
+  const liveState = noChangeState();
+  const harness = loadHarness(liveState, {
+    pathname: '/',
+    homeLiveState: liveState,
+    captureQuietGates: true
+  });
+
+  harness.emit('taskpoints:state-revision', { revision: 'a' });
+  harness.emit('taskpoints:state-revision', { revision: 'b' });
+  harness.emit('taskpoints:state-revision', { revision: 'c' });
+  assert.equal(harness.quietCallbacks.length, 3);
+
+  harness.quietCallbacks[0]();
+  harness.quietCallbacks[1]();
+  assert.equal(harness.timers.size, 0, 'older quiet gates should be ignored once superseded');
+
+  harness.quietCallbacks[2]();
+  assert.equal(harness.timers.size, 1, 'only the newest quiet gate may schedule reconciliation');
+  harness.runOnlyTimer();
+  assert.equal(harness.loadCalls.length, 1);
+  assert.equal(harness.loadCalls[0].preloadedState, liveState);
 });

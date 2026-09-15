@@ -18,6 +18,6 @@ test('Home season slate materialization requires eight seconds of sustained quie
 
 test('Home season quiet guard is loaded only on Home', () => {
   assert.match(diagnostics, /loadTaskPointsHomeSeasonSlateLongQuiet/);
-  assert.match(diagnostics, /home_season_slate_long_quiet\.js\?v=20260820-1/);
+  assert.match(diagnostics, /home_season_slate_long_quiet\.js\?v=20260915-1/);
   assert.match(diagnostics, /if \(!isHome\) return;/);
 });

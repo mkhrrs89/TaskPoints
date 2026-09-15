@@ -1953,6 +1953,10 @@ let state = (() => {
   return s;
 })();
 
+window.TaskPointsHomeLiveState = {
+  getState() { return state; }
+};
+
   // ---------- Derived cache (speeds up iOS renders) ----------
 const _derived = {
   rev: 0,
@@ -6104,8 +6108,22 @@ setPlayerColorSwatches(yourPrimarySwatchEl, yourSecondarySwatchEl, youPlayerColo
 setHomeScoreboardGradientColors(youPlayerColors, {});
 
 const updateTodayScoreIsland = (value) => {
+  const displayValue = (value == null || value === '') ? '—' : String(value);
   const islandValueEl = $('todayScoreIslandValue');
-  if (islandValueEl) islandValueEl.textContent = value;
+  if (islandValueEl) islandValueEl.textContent = displayValue;
+
+  // toolbar.js uses this lightweight cache so the floating island can show the
+  // latest Home score on every page. Keep the cache sourced from the exact same
+  // already-rounded value rendered by the Home scoreboard; never let an older
+  // cached value overwrite the live scoreboard value after startup/focus.
+  try {
+    const cacheKey = 'tpTodayScore';
+    if (displayValue === '—') {
+      if (localStorage.getItem(cacheKey) != null) localStorage.removeItem(cacheKey);
+    } else if (localStorage.getItem(cacheKey) !== displayValue) {
+      localStorage.setItem(cacheKey, displayValue);
+    }
+  } catch (_) {}
 };
 
 

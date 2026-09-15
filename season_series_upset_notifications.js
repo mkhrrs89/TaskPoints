@@ -14,6 +14,9 @@
   let reconciliationRunning = false;
   let suppressRevisionQueue = false;
   let executionQuietDeferred = false;
+  let homePreloadedReads = 0;
+  let persistedStateReads = 0;
+  let quietQueueGeneration = 0;
 
   function dateKey(value) {
     if (value == null || value === '') return '';
@@ -377,7 +380,23 @@
       // Reconciliation is observational unless this module actually has an inbox
       // change to persist. Derived-state sync is still computed for correctness,
       // but must never write the full TaskPoints snapshot just because we checked.
-      const loaded = core.loadAppState({ syncDerived: true, persistSync: false });
+      const loadOptions = { syncDerived: true, persistSync: false };
+      if (isHomePage()) {
+        try {
+          const liveState = global.TaskPointsHomeLiveState?.getState?.();
+          if (liveState && typeof liveState === 'object') {
+            loadOptions.preloadedState = liveState;
+            homePreloadedReads += 1;
+          } else {
+            persistedStateReads += 1;
+          }
+        } catch (_) {
+          persistedStateReads += 1;
+        }
+      } else {
+        persistedStateReads += 1;
+      }
+      const loaded = core.loadAppState(loadOptions);
       const state = loaded?.state || loaded;
       if (!state || typeof state !== 'object') return null;
       const result = reconcileState(state, options);
@@ -421,7 +440,9 @@
 
   function queueReconcileWhenQuiet(reason = 'startup', delayMs = 0) {
     if (!global.document || !global.localStorage) return;
+    const requestGeneration = ++quietQueueGeneration;
     const schedule = () => {
+      if (requestGeneration !== quietQueueGeneration) return;
       if (reason === 'home_state_revision') {
         const status = global.TaskPointsCore?.getStorageMaintenanceIdleStatus?.();
         try {
@@ -506,7 +527,12 @@
     notificationForSeries,
     reconcileState,
     reconcileStored,
-    installPopulateWrapper
+    installPopulateWrapper,
+    getReadHotpathStatus: () => ({
+      homePreloadedReads,
+      persistedStateReads,
+      quietQueueGeneration
+    })
   };
 
   global.TaskPointsSeasonSeriesUpsetNotifications = api;

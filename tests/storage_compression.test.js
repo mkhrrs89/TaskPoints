@@ -483,3 +483,20 @@ test('failed habit save rollback restores only the exact affected completion sna
   });
   assert.equal(dirtyCalls, 4);
 });
+
+
+test('opt-in oversized interactive save defers before synchronous compression and leaves authoritative storage untouched', () => {
+  storage.clear();
+  const baseline = core.normalizeState({ tasks: [{ id: 'keep', title: 'Keep me' }], completions: [], habits: [], matchups: [], gameHistory: [] });
+  core.saveStateSnapshot(baseline, { immediateWrite: true, savePath: 'oversize-deferral-baseline' });
+  const before = storage.get(core.STORAGE_KEY);
+  const candidate = { ...baseline, __oversizeInteractiveProbe: 'x'.repeat(2000000) };
+  const packedBytes = JSON.stringify(core.packTaskPointsStorageState(candidate)).length * 2;
+  assert.ok(packedBytes >= 3.75 * 1024 * 1024);
+  const result = core.saveStateSnapshot(candidate, { immediateWrite: true, interactive: true, deferCompression: true, deferIfCompressionRequired: true, savePath: 'oversize-interactive-deferral-test' });
+  assert.equal(result.skipped, true);
+  assert.equal(result.deferredOversizeInteractive, true);
+  assert.equal(result.skipReason, 'interactive_packed_exceeds_safe_limit');
+  assert.ok(result.packedBytes >= result.safePackedLimitBytes);
+  assert.equal(storage.get(core.STORAGE_KEY), before);
+});

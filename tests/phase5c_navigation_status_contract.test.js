@@ -11,6 +11,7 @@ test('verified secondary status survives navigation only while the authoritative
   assert.match(source, /const existingStatus = json\(get\(DIAG\), \{\}\) \|\| \{\}/);
   assert.match(source, /existingStatus\.phase5cLastStatus === 'passed_verification'/);
   assert.match(source, /existingStatus\.phase5cMirrorsCurrentSave === true/);
-  assert.match(source, /existingStatus\.phase5cLastVerifiedRawHash === hash\(currentRaw\)/);
+  assert.match(source, /const currentRawHash = currentRaw \? hash\(currentRaw\) : '';/);
+  assert.match(source, /existingStatus\.phase5cLastVerifiedRawHash === currentRawHash/);
   assert.match(source, /verifiedStillCurrent \? 'passed_verification' : 'waiting_for_successful_save'/);
 });

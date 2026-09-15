@@ -161,6 +161,14 @@
       .replaceAll("'", '&#039;');
   }
 
+  function normalizeBadgeIds(entries){
+    if (!Array.isArray(entries)) return [];
+    return [...new Set(entries.map((entry) => {
+      if (typeof entry === 'string') return entry.trim();
+      return String(entry?.id || entry?.badgeId || '').trim();
+    }).filter(Boolean))];
+  }
+
   function getAchievementsPageState(){
     try {
       if (window.TaskPointsCore && typeof TaskPointsCore.loadAppState === 'function') {
@@ -188,8 +196,10 @@
     }
   }
 
-  function getActivePlayersForBadges(){
-    const currentState = getAchievementsPageState();
+  function getActivePlayersForBadges(currentStateInput = null){
+    const currentState = currentStateInput && typeof currentStateInput === 'object'
+      ? currentStateInput
+      : getAchievementsPageState();
     const sourcePlayers = Array.isArray(currentState.players) ? currentState.players : [];
 
     return sourcePlayers
@@ -232,13 +242,20 @@
   function saveAchievementsPageState(nextState){
     try {
       if (window.TaskPointsCore && typeof TaskPointsCore.saveStateSnapshot === 'function') {
-        TaskPointsCore.saveStateSnapshot(nextState);
-        return;
+        const saved = TaskPointsCore.saveStateSnapshot(nextState, {
+          storageKey: TaskPointsCore.STORAGE_KEY || 'taskpoints_v1',
+          immediateWrite: true,
+          userInitiated: true,
+          savePath: 'achievements-player-badge',
+          source: 'achievements-player-badge'
+        });
+        return saved?.state || nextState;
       }
     } catch (err) {
       console.warn('[badges] TaskPointsCore.saveStateSnapshot failed', err);
     }
     TaskPointsCore.writeTaskPointsStoredState(nextState, { storageKey: 'taskpoints_v1' });
+    return nextState;
   }
 
   function getPlayerIdForBadges(player){
@@ -248,7 +265,10 @@
   function getPlayerBadgeIds(player, currentState){
     const playerId = getPlayerIdForBadges(player);
     const map = currentState?.playerBadges || {};
-    return Array.isArray(map[playerId]) ? map[playerId] : [];
+    const direct = normalizeBadgeIds(map[playerId]);
+    if (direct.length) return direct;
+    const playerName = player?.name || player?.displayName || player?.nickname || '';
+    return normalizeBadgeIds(map[playerName]);
   }
 
   function playerHasBadge(player, badgeId, currentState){
@@ -267,14 +287,14 @@
         : {}
     };
 
-    const currentBadges = Array.isArray(next.playerBadges[playerId]) ? next.playerBadges[playerId].slice() : [];
+    const currentBadges = normalizeBadgeIds(next.playerBadges[playerId]);
     const hasBadge = currentBadges.includes(badgeId);
     next.playerBadges[playerId] = hasBadge
       ? currentBadges.filter((id) => id !== badgeId)
       : currentBadges.concat(badgeId);
 
-    saveAchievementsPageState(next);
-    renderBadgesTab();
+    const savedState = saveAchievementsPageState(next);
+    renderBadgesTab(savedState);
   }
 
   function showBadgeDetails(badgeId){
@@ -299,16 +319,18 @@ ${badge.description}`);
     return icons || '<span class="muted">—</span>';
   }
 
-  function renderBadgesTab(){
+  function renderBadgesTab(currentStateInput = null){
     const rowsEl = document.getElementById('badgesRows');
     if (!rowsEl) {
       console.warn('[badges] missing #badgesRows container');
       return;
     }
 
-    const currentState = getAchievementsPageState();
+    const currentState = currentStateInput && typeof currentStateInput === 'object'
+      ? currentStateInput
+      : getAchievementsPageState();
     const allPlayers = Array.isArray(currentState.players) ? currentState.players : [];
-    const players = getActivePlayersForBadges();
+    const players = getActivePlayersForBadges(currentState);
 
     console.debug('[badges] render', {
       allPlayers: allPlayers.length,

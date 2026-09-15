@@ -8,7 +8,7 @@ const source = fs.readFileSync(path.join(__dirname, '..', 'phase5b_deferred_mirr
 
 test('cross-tab saves cannot leave an older snapshot promoted as latest', () => {
   assert.doesNotThrow(() => new vm.Script(source));
-  assert.match(source, /function promoteCandidate\(db, candidate, raw, verifiedAtISO\)/);
+  assert.match(source, /function promoteCandidate\(db, candidate, raw, verifiedAtISO, nativeRecord\)/);
   assert.match(source, /db\.transaction\(STORE, 'readwrite'\)/);
   assert.match(source, /const latestRequest = store\.get\('latest'\)/);
   assert.match(source, /const currentRaw = get\(KEY\)/);
@@ -17,6 +17,6 @@ test('cross-tab saves cannot leave an older snapshot promoted as latest', () => 
   assert.match(source, /if \(!pendingJournal && currentRaw\) queue\(currentRaw\)/);
   assert.match(source, /global\.addEventListener\('storage'/);
   assert.match(source, /event\?\.key === KEY/);
-  assert.match(source, /if \(event\.newValue && get\(KEY\) === event\.newValue\)/);
+  assert.match(source, /if \(event\?\.key === KEY && event\.newValue && get\(KEY\) === event\.newValue\) queue\(event\.newValue\)/);
   assert.match(source, /queue\(event\.newValue\)/);
 });

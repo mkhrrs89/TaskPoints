@@ -295,7 +295,7 @@ test('Audit bootstrap cache-busts both repair loader levels', () => {
     path.join(__dirname, '..', 'habit_ledger_matchup_impact_stale_guard.js'),
     'utf8'
   );
-  assert.match(worker, /habit_ledger_matchup_impact_stale_guard\.js\?v=20260803-2/);
+  assert.match(worker, /habit_ledger_matchup_impact_stale_guard\.js\?v=20260803-3/);
   assert.doesNotMatch(worker, /habit_ledger_matchup_impact_stale_guard\.js\?v=20260801-1/);
-  assert.match(staleGuard, /habit_ledger_completion_backed_repair\.js\?v=20260803-2/);
+  assert.match(staleGuard, /habit_ledger_completion_backed_repair\.js\?v=20260803-3/);
 });
