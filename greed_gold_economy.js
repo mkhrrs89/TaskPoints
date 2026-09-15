@@ -820,6 +820,24 @@
   }
 
   function loadCurrentState() {
+    // Home already owns the authoritative in-memory state for the current page.
+    // Prefer it for display-only Gold reads so each state revision does not force
+    // another parse/clone of the full persisted TaskPoints snapshot. Keep the
+    // existing persisted path as the fallback, including initialization cases.
+    try {
+      const liveState = global.TaskPointsHomeLiveState?.getState?.();
+      if (
+        liveState
+        && typeof liveState === 'object'
+        && Number(liveState.goldEconomy?.version) === ECONOMY_VERSION
+        && Array.isArray(liveState.goldLedger)
+      ) {
+        displayStateCache = liveState;
+        displayStateCacheRevision = currentStorageRevision();
+        return liveState;
+      }
+    } catch (_) {}
+
     const revision = currentStorageRevision();
     if (revision && displayStateCache && displayStateCacheRevision === revision) return displayStateCache;
     try {
