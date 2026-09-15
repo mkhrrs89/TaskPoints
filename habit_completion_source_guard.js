@@ -5,12 +5,157 @@
   if (!core || core.__habitCompletionSourceGuardInstalled || typeof core.saveStateSnapshot !== 'function') return;
   core.__habitCompletionSourceGuardInstalled = true;
   const STORAGE_KEY = core.STORAGE_KEY || 'taskpoints_v1';
+  const JOURNAL_KEY = core.PENDING_HABIT_DELTAS_KEY || 'taskpoints_pending_habit_deltas_v1';
+  const REVISION_KEY = 'taskpoints_state_revision_v1';
   const originalSave = core.saveStateSnapshot.bind(core);
+  const originalLoad = typeof core.loadAppState === 'function' ? core.loadAppState.bind(core) : null;
+  let completionTracker = null;
+  let trackerSeeds = 0;
+  let trackerInvalidations = 0;
+  let countFastSkips = 0;
+  let nonHabitAddFastSkips = 0;
+  let fullPreviousStateReads = 0;
 
   const populated = (value) =>
     value !== null && value !== undefined && (typeof value !== 'string' || value.trim() !== '');
 
+  function currentVersionToken() {
+    try {
+      const hot = core.getStateHotCacheStatus?.();
+      if (hot && Number.isFinite(Number(hot.generation))) return `hot:${Number(hot.generation)}`;
+    } catch (_) {}
+    try {
+      const revision = global.localStorage?.getItem?.(REVISION_KEY);
+      return revision ? `revision:${String(revision)}` : null;
+    } catch (_) { return null; }
+  }
+
+  function pendingJournalCount() {
+    try {
+      if (typeof core.readPendingHabitDeltas === 'function') {
+        return Number(core.readPendingHabitDeltas()?.length) || 0;
+      }
+      const raw = global.localStorage?.getItem?.(JOURNAL_KEY);
+      if (!raw) return 0;
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.length : 1;
+    } catch (_) { return 1; }
+  }
+
+  function invalidateCompletionTracker() {
+    if (completionTracker) trackerInvalidations += 1;
+    completionTracker = null;
+  }
+
+  function buildCompletionTracker(state) {
+    const rows = Array.isArray(state?.completions) ? state.completions : null;
+    const token = currentVersionToken();
+    if (!rows || !token) return null;
+    const ids = new Set();
+    let idsUsable = true;
+    for (const row of rows) {
+      const id = String(row?.id || '').trim();
+      if (!id || ids.has(id)) {
+        idsUsable = false;
+        break;
+      }
+      ids.add(id);
+    }
+    return {
+      token,
+      count: rows.length,
+      ids: idsUsable ? ids : null
+    };
+  }
+
+  function rememberCompletionState(state) {
+    const next = buildCompletionTracker(state);
+    if (!next) {
+      invalidateCompletionTracker();
+      return false;
+    }
+    completionTracker = next;
+    trackerSeeds += 1;
+    return true;
+  }
+
+  function currentCompletionTracker() {
+    if (!completionTracker) return null;
+    const token = currentVersionToken();
+    if (!token || token !== completionTracker.token) {
+      invalidateCompletionTracker();
+      return null;
+    }
+    return completionTracker;
+  }
+
+  function isAuthoritativeSave(options = {}) {
+    const storageKey = options?.storageKey || STORAGE_KEY;
+    return storageKey === STORAGE_KEY && options?.persistSync !== false;
+  }
+
+  function uniqueAddedRow(nextRows, tracker) {
+    if (!tracker?.ids || nextRows.length !== tracker.count + 1) return null;
+    let addition = null;
+    const seenPrevious = new Set();
+    for (const row of nextRows) {
+      const id = String(row?.id || '').trim();
+      if (!id) return null;
+      if (tracker.ids.has(id)) {
+        seenPrevious.add(id);
+        continue;
+      }
+      if (addition) return null;
+      addition = row;
+    }
+    if (!addition || seenPrevious.size !== tracker.count) return null;
+    return addition;
+  }
+
+  function saveAndRefreshTracker(state, options, trackerBefore = null) {
+    const beforeToken = currentVersionToken();
+    const result = originalSave(state, options);
+    if (!isAuthoritativeSave(options)) return result;
+
+    const afterToken = currentVersionToken();
+    const resultState = result?.state && typeof result.state === 'object' ? result.state : state;
+    if (result?.noOp === true) {
+      rememberCompletionState(resultState);
+      return result;
+    }
+    if (afterToken && beforeToken && afterToken !== beforeToken) {
+      rememberCompletionState(resultState);
+      return result;
+    }
+
+    // No observable authoritative revision changed. Do not infer that the
+    // completion identity set is still current from count alone; fail closed so
+    // the next save uses the original full previous-state check.
+    invalidateCompletionTracker();
+    return result;
+  }
+
+  if (originalLoad) {
+    core.loadAppState = function habitCompletionGuardLoadTracker(...args) {
+      const result = originalLoad(...args);
+      try {
+        if (result?.state && pendingJournalCount() === 0 && global.localStorage?.getItem?.(STORAGE_KEY) !== null) {
+          rememberCompletionState(result.state);
+        }
+      } catch (_) {}
+      return result;
+    };
+  }
+
+  global.addEventListener?.('storage', (event) => {
+    if (event?.key === null || [STORAGE_KEY, JOURNAL_KEY, REVISION_KEY].includes(String(event?.key || ''))) {
+      invalidateCompletionTracker();
+    }
+  });
+  global.addEventListener?.('taskpoints:state-revision', invalidateCompletionTracker);
+
   function readPreviousState() {
+    fullPreviousStateReads += 1;
     if (typeof core.readTaskPointsStoredState === 'function') {
       const decoded = core.readTaskPointsStoredState(STORAGE_KEY, null);
       return decoded && typeof decoded === 'object' ? decoded : null;
@@ -59,14 +204,32 @@
     return '';
   }
 
-  core.saveStateSnapshot = function guardedHabitCompletionSave(nextState, options) {
+  core.saveStateSnapshot = function guardedHabitCompletionSave(nextState, options = {}) {
     let adjusted = nextState;
+    const nextRows = Array.isArray(nextState?.completions) ? nextState.completions : null;
+    const tracker = isAuthoritativeSave(options) ? currentCompletionTracker() : null;
+
+    // Most saves cannot possibly be the one-row Habit/Vice insertion this guard
+    // exists to repair. When a current tracker proves that up front, preserve
+    // the guard while avoiding a multi-megabyte previous-state decode/clone.
+    if (tracker && nextRows && nextRows.length !== tracker.count + 1) {
+      countFastSkips += 1;
+      return saveAndRefreshTracker(nextState, options, tracker);
+    }
+
+    if (tracker && nextRows && nextRows.length === tracker.count + 1) {
+      const addedFromTracker = uniqueAddedRow(nextRows, tracker);
+      if (addedFromTracker && addedFromTracker.source !== 'habit' && addedFromTracker.source !== 'vice') {
+        nonHabitAddFastSkips += 1;
+        return saveAndRefreshTracker(nextState, options, tracker);
+      }
+    }
+
     try {
       const previous = readPreviousState();
       const previousRows = Array.isArray(previous?.completions) ? previous.completions : null;
-      const nextRows = Array.isArray(nextState?.completions) ? nextState.completions : null;
       if (!previousRows || !nextRows || nextRows.length !== previousRows.length + 1) {
-        return originalSave(nextState, options);
+        return saveAndRefreshTracker(nextState, options, tracker);
       }
 
       const previousIds = new Set(
@@ -76,16 +239,16 @@
         const id = String(row?.id || '').trim();
         return id && !previousIds.has(id);
       });
-      if (additions.length !== 1) return originalSave(nextState, options);
+      if (additions.length !== 1) return saveAndRefreshTracker(nextState, options, tracker);
 
       const added = additions[0];
       if (added.source !== 'habit' && added.source !== 'vice') {
-        return originalSave(nextState, options);
+        return saveAndRefreshTracker(nextState, options, tracker);
       }
       const habitId = completionHabitId(added);
       const habitIndex = (Array.isArray(nextState?.habits) ? nextState.habits : [])
         .findIndex((item) => item && String(item.id) === habitId);
-      if (habitIndex < 0) return originalSave(nextState, options);
+      if (habitIndex < 0) return saveAndRefreshTracker(nextState, options, tracker);
       const habit = nextState.habits[habitIndex];
       const expected = habit.category === 'vice' ? 'vice' : 'habit';
       const dayKey = completionDay(added);
@@ -131,8 +294,20 @@
     } catch (error) {
       console.warn('Habit completion source/status guard skipped normalization', error);
     }
-    return originalSave(adjusted, options);
+    return saveAndRefreshTracker(adjusted, options, tracker);
   };
+
+  core.getHabitCompletionSourceGuardStatus = () => ({
+    installed: true,
+    trackerReady: Boolean(currentCompletionTracker()),
+    trackerCount: completionTracker?.count ?? null,
+    trackerIdsUsable: completionTracker?.ids instanceof Set,
+    trackerSeeds,
+    trackerInvalidations,
+    countFastSkips,
+    nonHabitAddFastSkips,
+    fullPreviousStateReads
+  });
 })(typeof window !== 'undefined' ? window : globalThis);
 
 ;(function loadHabitLedgerScoreReconciliation(global) {
