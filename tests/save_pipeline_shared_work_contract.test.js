@@ -122,3 +122,22 @@ test('the versioned worker fingerprints and includes the shared save module', ()
   assert.match(worker, /readAssetSource\(env, request, '\/save_pipeline_shared_work\.js'\)/);
   assert.match(worker, /x-taskpoints-shared-save-work/);
 });
+
+
+test('exact recent parse and summary can be reused as a read-only source package without reparsing', () => {
+  const harness = install({ cacheEnabled: false });
+  const parsed = harness.core.parseTaskPointsStorageJson(harness.raw, {});
+  const summary = harness.core.shadowSourceSummary(parsed);
+  const beforeParseCalls = harness.parseCalls();
+  const beforeSummaryCalls = harness.summaryCalls();
+
+  const sourcePackage = harness.core.getSharedSaveSourcePackage(harness.raw);
+  assert.equal(sourcePackage.sourceKind, 'recent_exact_parse');
+  assert.equal(sourcePackage.raw, harness.raw);
+  assert.deepEqual(sourcePackage.state, parsed);
+  assert.notEqual(sourcePackage.state, parsed, 'the shared package owns the private detached snapshot, not the caller object');
+  assert.equal(sourcePackage.summary.hashes.state, summary.hashes.state);
+  assert.equal(harness.parseCalls(), beforeParseCalls);
+  assert.equal(harness.summaryCalls(), beforeSummaryCalls);
+  assert.equal(harness.core.getSharedSaveWorkStatus().sourcePackageReuseCount, 1);
+});
