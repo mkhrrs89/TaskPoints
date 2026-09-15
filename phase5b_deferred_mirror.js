@@ -47,6 +47,8 @@
   let tail = Promise.resolve(false);
   let homeLongQuietDeferred = false;
   let homeLongQuietTimer = 0;
+  let sharedSourceReuseCount = 0;
+  let sharedSourceFallbackCount = 0;
 
   const get = (key) => { try { return storage.getItem(key); } catch (_) { return null; } };
   const json = (raw, fallback = null) => { try { return JSON.parse(raw); } catch (_) { return fallback; } };
@@ -71,6 +73,22 @@
   const parse = (raw) => typeof core.parseTaskPointsStorageJson === 'function'
     ? core.parseTaskPointsStorageJson(raw, null)
     : JSON.parse(raw);
+  const sharedSourcePackage = (raw) => {
+    try {
+      const sourcePackage = core.getSharedSaveSourcePackage?.(raw);
+      if (sourcePackage
+        && sourcePackage.raw === raw
+        && sourcePackage.state
+        && typeof sourcePackage.state === 'object'
+        && !Array.isArray(sourcePackage.state)
+        && sourcePackage.summary?.hashes?.state) {
+        sharedSourceReuseCount += 1;
+        return sourcePackage;
+      }
+    } catch (_) {}
+    sharedSourceFallbackCount += 1;
+    return null;
+  };
   const counts = (state) => {
     const source = state && typeof state === 'object' && !Array.isArray(state) ? state : {};
     const result = Object.fromEntries(COUNT_KEYS.map((key) => [key, Array.isArray(source[key]) ? source[key].length : 0]));
@@ -161,11 +179,15 @@
     }
     let db;
     try {
-      const state = parse(raw);
+      // Reuse an exact source parse/hash already produced by an earlier backup
+      // layer when available. The IndexedDB readback below is still parsed and
+      // hashed independently, so secondary verification remains independent.
+      const sharedSource = sharedSourcePackage(raw);
+      const state = sharedSource?.state || parse(raw);
       if (!state || typeof state !== 'object' || Array.isArray(state)) throw new Error('secondary_unreadable');
       const sourceCounts = counts(state);
       const sourceFingerprint = fingerprint(raw);
-      const sourceStateHash = stateHash(state);
+      const sourceStateHash = sharedSource?.summary?.hashes?.state || stateHash(state);
       db = await open();
       const candidate = {
         id: 'candidate',
@@ -474,7 +496,9 @@
       homeNativeLastError: d.phase5cHomeNativeLastError || null,
       homeLongQuietEnabled,
       homeLongQuietMs: homeLongQuietEnabled ? HOME_LONG_QUIET_MS : 0,
-      homeLongQuietDeferred
+      homeLongQuietDeferred,
+      sharedSourceReuseCount,
+      sharedSourceFallbackCount
     };
   };
 
