@@ -26,6 +26,8 @@ jobs:
         run: python scripts/apply_v2_pilot_completion_ownership.py
       - name: Preserve compatibility array realm semantics
         run: python scripts/apply_v2_pilot_completion_ownership_compat.py
+      - name: Align compatibility scope count contract
+        run: python scripts/apply_v2_pilot_completion_boundary_test_update.py
       - name: Run focused V2 compatibility and safety contracts
         run: >-
           node --test
@@ -54,7 +56,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add state_runtime_v2.js tests/state_runtime_v2_pilot_compatibility_boundary_contract.test.js
+          git add state_runtime_v2.js tests/state_runtime_v2_pilot_compatibility_boundary_contract.test.js tests/state_runtime_v2_compatibility_snapshot_contract.test.js
           if git diff --cached --quiet; then
             echo 'No runtime/test changes to commit.'
           else
