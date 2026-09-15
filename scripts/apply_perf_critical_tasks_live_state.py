@@ -143,3 +143,33 @@ test('targeted task refresh passes live Home state through renderTasks without a
   assert.doesNotMatch(body, /global\.updateCriticalTasksIsland/);
 });
 ''')
+
+contract = Path("tests/home_targeted_render_contract.test.js")
+text = contract.read_text()
+text = replace_once(
+    text,
+    """  assert.match(controllerSource, /global\\.renderTasks\\s*\\(\\s*\\)/);
+""",
+    """  assert.match(controllerSource, /TaskPointsHomeLiveState\\?\\.getState/);
+  assert.match(controllerSource, /global\\.renderTasks\\(liveState && typeof liveState === 'object' \\? liveState : null\\)/);
+""",
+    "targeted render static contract",
+)
+text = replace_once(
+    text,
+    """test('controller loader is Home-only and preserves original rendering if loading fails', () => {
+  assert.match(loaderSource, /home_targeted_render_control\\.js\\?v=20260802-1/);
+  assert.match(loaderSource, /path\\s*!==\\s*'\\/'/);
+  assert.match(loaderSource, /original rendering remains active/);
+});
+""",
+    """test('controller preserves original rendering as its fallback and retains a kill switch', () => {
+  assert.match(controllerSource, /originals\\.renderAll\\.call\\(global\\)/);
+  assert.match(controllerSource, /taskpoints_home_targeted_render_disabled_v1/);
+  assert.match(controllerSource, /function disable\\s*\\(/);
+  assert.match(loaderSource, /taskpoints_habit_fast_path_disabled_v1/);
+});
+""",
+    "stale targeted-render loader contract",
+)
+contract.write_text(text)
