@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: state-runtime-v2-contracts-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   v2-contracts:
     runs-on: ubuntu-latest
