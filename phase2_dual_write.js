@@ -10,6 +10,7 @@
   const COALESCE_DELAY_MS = 900;
   const INTERACTION_RECHECK_MS = 250;
   const HOME_LONG_QUIET_MS = 8000;
+  const INTERNAL_DETACHED_SOURCE = Symbol('taskpointsPhase2DetachedSource');
   const pathname = String(global.location?.pathname || '').replace(/\/+$/, '');
   const homeLongQuietEnabled = pathname === '' || pathname === '/' || pathname === '/index.html' || pathname.endsWith('/index.html');
   let queueTail = Promise.resolve();
@@ -19,6 +20,8 @@
   let pendingSerializedTimer = null;
   let pendingQuietGate = null;
   let homeLongQuietDeferred = false;
+  let sourceCloneCount = 0;
+  let detachedSourceReuseCount = 0;
 
   function requestPromise(request) {
     return new Promise((resolve, reject) => {
@@ -36,6 +39,7 @@
   }
 
   function cloneState(state) {
+    sourceCloneCount += 1;
     if (typeof global.structuredClone === 'function') return global.structuredClone(state);
     return JSON.parse(JSON.stringify(state));
   }
@@ -143,7 +147,10 @@
 
   async function writeSnapshot(state, options = {}) {
     const indexedDb = options.indexedDB || global.indexedDB;
-    const source = cloneState(state && typeof state === 'object' ? state : {});
+    const sourceInput = state && typeof state === 'object' ? state : {};
+    const source = options[INTERNAL_DETACHED_SOURCE] === true
+      ? (detachedSourceReuseCount += 1, sourceInput)
+      : cloneState(sourceInput);
     const startedAt = new Date().toISOString();
     const writeSequence = Number(options.sequence) || 0;
     let db = null;
@@ -246,7 +253,15 @@
       .catch(() => undefined)
       .then(() => {
         const source = snapshot || stateFromLatestStoredRaw(options.serializedCandidate);
-        return writeSnapshot(source, { ...options, sequence: writeSequence });
+        // Both branches above are already detached from caller-owned/live state:
+        // `snapshot` was cloned when queued, while the raw path was freshly parsed.
+        // Reuse that private snapshot instead of cloning the entire multi-megabyte
+        // state a second time immediately before the shadow write.
+        return writeSnapshot(source, {
+          ...options,
+          sequence: writeSequence,
+          [INTERNAL_DETACHED_SOURCE]: true
+        });
       })
       .finally(() => {
         pendingCount = Math.max(0, pendingCount - 1);
@@ -471,7 +486,9 @@
     coalesceDelayMs: COALESCE_DELAY_MS,
     homeLongQuietEnabled,
     homeLongQuietMs: homeLongQuietEnabled ? HOME_LONG_QUIET_MS : 0,
-    homeLongQuietDeferred
+    homeLongQuietDeferred,
+    sourceCloneCount,
+    detachedSourceReuseCount
   });
   core.scheduleShadowDualWriteFromSerializedState = (storageKey, raw) => (
     storageKey === core.STORAGE_KEY ? scheduleFromStoredRaw(raw) : null
