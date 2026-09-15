@@ -981,7 +981,11 @@
     if (habitIndex < 0) throw new Error(`state_runtime_v2_habit_edit_missing:${habitId}`);
 
     const completionEntries = [];
-    const completions = source.state.completions;
+    // V2 sequences are defined inside the pilot-owned Habit/Vice completion set.
+    // Using the full legacy completion array here lets unrelated task/manual rows
+    // shift sequence numbers and makes a future-only Habit edit look like it must
+    // rewrite unchanged historical Habit completions.
+    const completions = pilotCompletions(source.state);
     completions.forEach((completion, index) => {
       if (String(completion?.habitId || '') !== habitId) return;
       const storageId = completion?.id != null
