@@ -14,6 +14,9 @@ const STEP4_COMMAND = 'node --test tests/state_runtime_v2_perf_contract.test.js'
 
 test('V2-22 branch CI gates focused V2 contracts and regressions against live current main', () => {
   assert.match(workflow, /branches:\s*\n\s*- arch\/state-runtime-v2-plan/);
+  assert.match(workflow, /concurrency:/);
+  assert.match(workflow, /group:\s*state-runtime-v2-contracts-\$\{\{\s*github\.ref\s*\}\}/);
+  assert.match(workflow, /cancel-in-progress:\s*true/);
   assert.match(workflow, /run:\s*npm ci/);
   assert.ok(workflow.includes(STEP4_COMMAND), 'Step 4 performance contract must remain an explicit gate');
   assert.match(workflow, /Run V2 core storage contracts/);
