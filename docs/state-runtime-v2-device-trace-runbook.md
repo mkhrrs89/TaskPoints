@@ -1,6 +1,6 @@
 # State Runtime V2 — Physical Device Step 4 Runbook
 
-Updated: 2026-09-13
+Updated: 2026-09-15
 
 This runbook is for the remaining real iPhone/PWA evidence required by the Habits/completions V2 dark-mirror pilot.
 
@@ -50,9 +50,9 @@ On Home, the dark preview should show two temporary diagnostics controls above t
 
 The panel evaluates the current PERF report in memory; no report upload is required for the first pass.
 
-## Nine live evidence checks
+## Ten live evidence checks
 
-A complete device trace must show all nine checks:
+A complete device trace must show all ten checks:
 
 1. Habit completion / toggle observed.
 2. Habit reorder observed.
@@ -61,12 +61,15 @@ A complete device trace must show all nine checks:
 5. No direct foreground V2 parity/compatibility maintenance observed.
 6. Automatic parity crossed the 20-second deep-idle boundary.
 7. Real user interaction postponed pending maintenance before that release.
-8. V2 Habit/completion data affirmatively matches the legacy authority after idle parity.
-9. No V2 mutation/runtime/serializer/maintenance failure evidence observed.
+8. The physical V2 completion store contains only the Habit/Vice completion records owned by this pilot.
+9. V2 Habit/pilot-completion data affirmatively matches the legacy authority after idle parity.
+10. No V2 mutation/runtime/serializer/maintenance failure evidence observed.
 
 When all are present, the button changes to **V2 TEST ✓** and the panel reports **Step 4 trace evidence complete**.
 
-Parity is intentionally strict for authoritative fields. The comparison ignores only the three known Home Habit render caches `__streak`, `__completion`, and `__failedStreak`. Timestamps, completion records, Habit order, and other fields remain part of the comparison.
+The ownership check is deliberately separate from parity. Pilot-scoped parity can be green while an unrelated task/manual completion is accidentally present in the V2 store, so device evidence does not pass unless `scopeExcludedCounts.actualCompletions` is zero for the pilot comparison scope. Legacy-only completion classes may still exist in `taskpoints_v1`; they remain outside the first V2 proving ground and are preserved by compatibility snapshots.
+
+Parity is intentionally strict for authoritative fields. The comparison ignores only the three known Home Habit render caches `__streak`, `__completion`, and `__failedStreak`. Timestamps, completion records, Habit order, and other fields remain part of the comparison. For parity comparison only, a historical full Habit/Vice completion that omits `completionFraction` is treated as the canonical full value `1`; half/custom fraction differences remain strict and neither stored source is rewritten by that normalization.
 
 ## Legacy/full-state foreground correlation
 
@@ -97,20 +100,27 @@ A legacy candidate occurring elsewhere in the trace is no longer enough by itsel
 
 ## If the panel is not fully green
 
-Tap **Copy review** and send the copied review back for inspection. If parity is red, the review includes bounded mismatch evidence; do not reset or reseed simply to make the check green.
+Tap **Copy review** and send the copied review back for inspection. If parity or pilot ownership is red, the review includes bounded diagnostic evidence; do not reset or reseed simply to make the check green.
 
 If deeper timing correlation is needed, use the existing PERF control to download the full JSON report and run it through `state_v2_trace_review.html` as described above.
 
 Do not repair, reset, or delete TaskPoints data simply because a V2 check is missing or red. The dark mirror is diagnostic and production/legacy state remains authoritative.
 
-## Current timestamp verification target
+## Current timestamp and ownership verification targets
 
 The latest parity fixes preserve two timestamps that previously could diverge in the dark mirror:
 
 - Habit reorder now carries the per-Habit `updatedAtISO` values produced by the canonical Home reorder path through the durable overlay and V2 mutation.
 - Backdated Habit completion now carries the canonical `completedAtISO` from the selected day through pending delta replay, WAL identity, and V2 commit.
 
-The next physical pass must therefore include a normal reorder and, when convenient, a completion recorded for a day other than today. Strict parity should remain green without weakening timestamp comparison.
+The September 15 ownership tightening also means:
+
+- V2 seeds and stores only Habit/Vice completion rows for this first pilot;
+- task/manual/other completion classes remain legacy-only and are preserved when a compatibility snapshot is built;
+- Habit-edit completion sequencing is calculated inside the same pilot-owned subset so unrelated legacy completion rows cannot make a metadata-only edit rewrite unchanged Habit completion history;
+- the live trace verdict now fails closed unless the pilot scope is explicitly reported and the V2 store contains zero out-of-scope completion rows.
+
+The next physical pass must therefore include a normal reorder and, when convenient, a completion recorded for a day other than today. Strict parity and pilot ownership should both remain green without weakening timestamp or completion semantics.
 
 ## Additional physical scenarios after the primary trace
 
