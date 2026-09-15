@@ -1,6 +1,6 @@
 # State Runtime V2 — Preview Validation Evidence
 
-Updated: 2026-09-12
+Updated: 2026-09-15
 
 This document tracks evidence for the Habits/completions V2 dark-mirror pilot and the Step 4 performance-validation phase.
 
@@ -182,3 +182,22 @@ The 21:41 device report narrowed strict parity to three Habit `updatedAtISO` fie
 Strict timestamp parity remains enabled. Focused tests cover a September 10 completion tapped on September 12, per-Habit reorder timestamps, order-neutral timestamp updates, preservation of newer timestamps, and WAL timestamp retention/identity. These fixes still require physical-device verification.
 
 Create Habit now places Tag and Points in one equal-width grid row with shrinkable inputs, preserving both labels, controls, options and actions. Local browser layout validation was unavailable because the Playwright Chromium executable is not installed.
+
+
+## September 15 pilot ownership boundary and device gate
+
+Follow-up inspection of the dark mirror exposed an ownership mismatch in the original completion mirror: the first proving ground is Habits/Vices, but V2 seed/parity had treated every legacy completion class as if it belonged to that pilot. That made unrelated task/manual completion records capable of producing false parity failures and made the physical store boundary broader than the architecture intended.
+
+The V2 branch now enforces the pilot boundary consistently:
+
+- V2 seed/storage owns only completion records with a Habit/Vice source and a Habit ID. Task/manual/other completion classes remain legacy-only for this phase.
+- `buildCompatibilitySnapshot()` overlays V2-owned Habit/Vice completions back into their legacy positions while preserving unrelated legacy completion rows, including ordering, duplicate IDs, id-less rows, and rows added after V2 was seeded. V2-only pilot completions are still represented in the compatibility output.
+- Parity compares all Habit records plus only the Habit/Vice completion subset. For comparison only, a historical full completion with no `completionFraction` is treated as canonical `1`; real half/custom-fraction differences still fail. Neither stored source is rewritten by that normalization.
+- `scopeExcludedCounts` reports completion rows outside the pilot on each side. The physical-device verdict now requires the explicit pilot comparison scope and requires `scopeExcludedCounts.actualCompletions === 0`, so filtered parity cannot hide an out-of-scope row that accidentally entered V2.
+- Habit-edit completion sequencing now uses the same pilot-owned subset. Unrelated legacy completion rows can no longer shift V2 sequence numbers and make a future-only Habit metadata edit rewrite unchanged historical Habit completion rows.
+- The persistent V2 CI workflow hard-gates the pilot compatibility-boundary and parity-scope contracts.
+- The live V2 TEST panel has a tenth check, **V2 stores only Habit/Vice pilot completions**, and its reviewer/live-review cache versions were advanced so a physical preview cannot silently keep the pre-ownership reviewer.
+
+Focused ownership, compatibility, Habit-edit, trace-review, live-review, atomic-replacement, and data-loss fail-closed contracts pass with these changes. V2 remains default-off, preview-only, and legacy-read-authoritative. No authority transition is authorized by this change.
+
+The next Step 4 physical pass should use the updated stable branch preview, Start fresh test, exercise completion/reorder/edit/add, keep interacting briefly to preempt pending maintenance, then leave the page visible and untouched for at least 20 seconds. A complete session now requires all ten live checks, including both green pilot ownership and green pilot-scoped parity. If either is red, copy the review without resetting TaskPoints data.
