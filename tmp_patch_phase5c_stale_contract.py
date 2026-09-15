@@ -13,3 +13,17 @@ text = text.replace(
     1,
 )
 path.write_text(text)
+
+nav_path = Path('tests/phase5c_navigation_status_contract.test.js')
+nav = nav_path.read_text()
+nav = nav.replace(
+    r"/existingStatus\.phase5cLastVerifiedRawHash === hash\(currentRaw\)/",
+    r"/const currentRawHash = currentRaw \? hash\(currentRaw\) : '';/",
+    1,
+)
+nav = nav.replace(
+    "  assert.match(source, /verifiedStillCurrent \\? 'passed_verification' : 'waiting_for_successful_save'/);\n",
+    "  assert.match(source, /existingStatus\\.phase5cLastVerifiedRawHash === currentRawHash/);\n  assert.match(source, /verifiedStillCurrent \\? 'passed_verification' : 'waiting_for_successful_save'/);\n",
+    1,
+)
+nav_path.write_text(nav)
