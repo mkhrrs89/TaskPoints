@@ -1,0 +1,19 @@
+name: Main Flex Baseline Once
+
+on:
+  push:
+    branches:
+      - tmp/main-flex-baseline-20260914
+    paths:
+      - '.github/workflows/main-flex-baseline-once.yml'
+
+jobs:
+  baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: tmp/main-flex-baseline-20260914
+      - name: Run current main Flex contracts unchanged
+        run: node --test tests/flex_action_fast_path_contract.test.js tests/flex_action_fast_path_review_contract.test.js
