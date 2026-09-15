@@ -1,0 +1,58 @@
+name: Main Flex Quiet Stall Fix Once V5
+
+on:
+  push:
+    branches:
+      - fix/main-flex-quiet-stall-20260914
+    paths:
+      - '.github/workflows/main-flex-quiet-stall-once-v5.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/main-flex-quiet-stall-20260914
+          fetch-depth: 0
+
+      - name: Apply performance patch and current test-harness repair
+        run: |
+          python .github/scripts/apply_main_flex_stall_fix.py
+          python .github/scripts/repair_flex_contract_harness.py
+
+      - name: Run focused Flex and storage safety contracts
+        run: >-
+          node --test
+          tests/storage_compression.test.js
+          tests/flex_action_fast_path_contract.test.js
+          tests/flex_action_fast_path_review_contract.test.js
+          tests/storage_atomic_replace_contract.test.js
+          tests/storage_data_loss_fail_closed.test.js
+          tests/phase2_reset_hook.test.js
+          tests/home_revision_refresh_contract.test.js
+
+      - name: Verify patch shape
+        run: |
+          git diff --check
+          git diff --stat
+
+      - name: Commit tested patch
+        run: |
+          rm -f .github/scripts/apply_main_flex_stall_fix.py
+          rm -f .github/scripts/repair_flex_contract_harness.py
+          rm -f .github/workflows/main-flex-quiet-stall-once.yml
+          rm -f .github/workflows/main-flex-quiet-stall-once-v2.yml
+          rm -f .github/workflows/main-flex-quiet-stall-once-v3.yml
+          rm -f .github/workflows/main-flex-quiet-stall-once-v4.yml
+          rm -f .github/workflows/main-flex-quiet-stall-once-v5.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Defer oversized automatic Flex compaction"
+          git push origin HEAD:fix/main-flex-quiet-stall-20260914
