@@ -254,7 +254,7 @@
   'use strict';
 
   const SCRIPT_ID = 'tpHomeFeaturedMatchupScript';
-  const SCRIPT_SRC = '/home_featured_matchup_visibility.js?v=20260807-1';
+  const SCRIPT_SRC = '/home_featured_matchup_visibility.js?v=20260915-1';
 
   function load() {
     const document = global.document;

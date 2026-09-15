@@ -1953,6 +1953,10 @@ let state = (() => {
   return s;
 })();
 
+window.TaskPointsHomeLiveState = {
+  getState() { return state; }
+};
+
   // ---------- Derived cache (speeds up iOS renders) ----------
 const _derived = {
   rev: 0,
