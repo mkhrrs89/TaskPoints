@@ -9,6 +9,8 @@
   const DIAGNOSTICS_KEY = 'taskpoints_phase3_read_diagnostics_v1';
   const MODES = new Set(['off', 'compare', 'verified_indexeddb']);
   const ARRAY_STORES = ['completions', 'matchups', 'gameHistory', 'seasonHistory', 'tasks', 'habits', 'players'];
+  const DUAL_SNAPSHOT_ID = core.SHADOW_DUAL_WRITE_SNAPSHOT_ID || 'phase2_dual_write_snapshot';
+  const DUAL_SNAPSHOT_FORMAT = core.SHADOW_DUAL_WRITE_SNAPSHOT_FORMAT || 'metadata_raw_v1';
   const ORIGINAL_LOAD_APP_STATE = core.loadAppState;
 
   let verifiedCache = null;
@@ -114,47 +116,81 @@
     });
   }
 
+  async function readLegacyShadowSnapshot(db, currentMetadata, dualWriteMetadata) {
+    const requiredStores = [...ARRAY_STORES, 'collections', 'values'];
+    const missing = requiredStores.filter((name) => !db.objectStoreNames.contains(name));
+    if (missing.length) throw new Error(`shadow_store_missing:${missing.join(',')}`);
+
+    const tx = db.transaction(requiredStores, 'readonly');
+    const arrayRequests = ARRAY_STORES.map((field) => requestPromise(tx.objectStore(field).getAll()));
+    const collectionRequest = requestPromise(tx.objectStore('collections').getAll());
+    const valuesRequest = requestPromise(tx.objectStore('values').getAll());
+    const [arrayRows, collectionRows, valuesRows] = await Promise.all([
+      Promise.all(arrayRequests),
+      collectionRequest,
+      valuesRequest
+    ]);
+
+    const state = {};
+    ARRAY_STORES.forEach((field, index) => {
+      state[field] = (arrayRows[index] || [])
+        .slice()
+        .sort((a, b) => Number(a.key) - Number(b.key))
+        .map((row) => row.value);
+    });
+    (collectionRows || [])
+      .filter((row) => row?.kind === 'manifest' && typeof row.field === 'string')
+      .forEach((row) => { state[row.field] = []; });
+    (collectionRows || [])
+      .filter((row) => row?.kind === 'item' && typeof row.field === 'string')
+      .sort((a, b) => String(a.field).localeCompare(String(b.field)) || Number(a.index) - Number(b.index))
+      .forEach((row) => { (state[row.field] ||= [])[Number(row.index)] = row.value; });
+    (valuesRows || []).forEach((row) => {
+      if (row && typeof row.field === 'string') state[row.field] = row.value;
+    });
+
+    return {
+      state,
+      currentMetadata: currentMetadata || null,
+      dualWriteMetadata: dualWriteMetadata || null,
+      dualSnapshotMetadata: null,
+      snapshotFormat: 'legacy_rows_v1'
+    };
+  }
+
   async function readShadowSnapshot(indexedDb = global.indexedDB) {
     const db = await openExistingShadowDb(indexedDb);
     try {
-      const requiredStores = [...ARRAY_STORES, 'collections', 'values', 'metadata'];
-      const missing = requiredStores.filter((name) => !db.objectStoreNames.contains(name));
-      if (missing.length) throw new Error(`shadow_store_missing:${missing.join(',')}`);
-
-      const tx = db.transaction(requiredStores, 'readonly');
-      const arrayRequests = ARRAY_STORES.map((field) => requestPromise(tx.objectStore(field).getAll()));
-      const collectionRequest = requestPromise(tx.objectStore('collections').getAll());
-      const valuesRequest = requestPromise(tx.objectStore('values').getAll());
-      const currentMetadataRequest = requestPromise(tx.objectStore('metadata').get('current'));
-      const dualWriteMetadataRequest = requestPromise(tx.objectStore('metadata').get(core.SHADOW_DUAL_WRITE_METADATA_ID || 'dual_write'));
-
-      const [arrayRows, collectionRows, valuesRows, currentMetadata, dualWriteMetadata] = await Promise.all([
-        Promise.all(arrayRequests),
-        collectionRequest,
-        valuesRequest,
+      if (!db.objectStoreNames.contains('metadata')) throw new Error('shadow_store_missing:metadata');
+      const metadataTx = db.transaction('metadata', 'readonly');
+      const currentMetadataRequest = requestPromise(metadataTx.objectStore('metadata').get('current'));
+      const dualWriteMetadataRequest = requestPromise(metadataTx.objectStore('metadata').get(core.SHADOW_DUAL_WRITE_METADATA_ID || 'dual_write'));
+      const dualSnapshotRequest = requestPromise(metadataTx.objectStore('metadata').get(DUAL_SNAPSHOT_ID));
+      const [currentMetadata, dualWriteMetadata, dualSnapshotMetadata] = await Promise.all([
         currentMetadataRequest,
-        dualWriteMetadataRequest
+        dualWriteMetadataRequest,
+        dualSnapshotRequest
       ]);
 
-      const state = {};
-      ARRAY_STORES.forEach((field, index) => {
-        state[field] = (arrayRows[index] || [])
-          .slice()
-          .sort((a, b) => Number(a.key) - Number(b.key))
-          .map((row) => row.value);
-      });
-      (collectionRows || [])
-        .filter((row) => row?.kind === 'manifest' && typeof row.field === 'string')
-        .forEach((row) => { state[row.field] = []; });
-      (collectionRows || [])
-        .filter((row) => row?.kind === 'item' && typeof row.field === 'string')
-        .sort((a, b) => String(a.field).localeCompare(String(b.field)) || Number(a.index) - Number(b.index))
-        .forEach((row) => { (state[row.field] ||= [])[Number(row.index)] = row.value; });
-      (valuesRows || []).forEach((row) => {
-        if (row && typeof row.field === 'string') state[row.field] = row.value;
-      });
+      if (dualSnapshotMetadata) {
+        const validSnapshot = dualSnapshotMetadata.snapshotFormat === DUAL_SNAPSHOT_FORMAT
+          && dualSnapshotMetadata.status === 'passed_verification'
+          && typeof dualSnapshotMetadata.serializedState === 'string'
+          && dualWriteMetadata?.status === 'passed_verification'
+          && Number(dualSnapshotMetadata.sequence) === Number(dualWriteMetadata.sequence);
+        if (!validSnapshot) throw new Error('dual_write_not_verified');
+        const state = core.parseTaskPointsStorageJson(dualSnapshotMetadata.serializedState, null);
+        if (!state || typeof state !== 'object' || Array.isArray(state)) throw new Error('dual_write_not_verified');
+        return {
+          state,
+          currentMetadata: currentMetadata || null,
+          dualWriteMetadata: dualWriteMetadata || null,
+          dualSnapshotMetadata,
+          snapshotFormat: DUAL_SNAPSHOT_FORMAT
+        };
+      }
 
-      return { state, currentMetadata: currentMetadata || null, dualWriteMetadata: dualWriteMetadata || null };
+      return await readLegacyShadowSnapshot(db, currentMetadata, dualWriteMetadata);
     } finally {
       db.close?.();
     }
@@ -215,6 +251,10 @@
         if ((Number(core.getPendingShadowDualWriteCount?.()) || 0) > 0) throw new Error('dual_write_pending');
 
         const destinationSummary = core.shadowSourceSummary(snapshot.state);
+        if (snapshot.dualSnapshotMetadata?.stateHash
+          && snapshot.dualSnapshotMetadata.stateHash !== destinationSummary.hashes.state) {
+          throw new Error('dual_write_hash_mismatch');
+        }
         const comparison = summariesMatch(authoritativeState, snapshot.state, sourceSummary, destinationSummary);
         if (!comparison.countsMatch || !comparison.hashesMatch || !comparison.canonicalMatch || comparison.mismatches.length) throw new Error('hash_mismatch');
 

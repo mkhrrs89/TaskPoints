@@ -280,11 +280,27 @@ test('falls back while a pending habit journal exists', async () => {
   assert.equal(harness.fallbackLoadCalls(), 1);
 });
 
-test('worker loads Phase 5A only after the complete Phase 4 bundle and keeps generated navigation JavaScript valid', () => {
+test('worker loads Phase 5A only after the complete Phase 4 bundle and keeps guarded install semantics', () => {
   const worker = fs.readFileSync(path.join(__dirname, '..', '_worker.js'), 'utf8');
-  assert.match(worker, /'\/phase5a_native_snapshot\.js'/);
-  assert.match(worker, /completePhase5A/);
-  assert.match(worker, /5a-native-indexeddb-snapshot/);
-  assert.match(worker, /Phase 5A native snapshot failed to install; Phase 4 remains active/);
-  assert.match(worker, /try \{ result\.set\(name, Object\.getOwnPropertyDescriptor\(target, name\) \|\| null\); \}/);
+  const workerCore = fs.readFileSync(path.join(__dirname, '..', '_worker_core.js'), 'utf8');
+  const phase4Assets = [
+    '/phase4_storage_coordinator.js',
+    '/phase4_primary_read_path.js',
+    '/indexeddb_requalification_guard.js',
+    '/phase4_cache_guard.js',
+    '/phase4_diagnostics.js'
+  ];
+  const phase5aIndex = worker.indexOf("'/phase5a_native_snapshot.js'");
+  assert.ok(phase5aIndex >= 0, 'Phase 5A must remain in the versioned core asset list');
+  phase4Assets.forEach((asset) => {
+    const index = worker.indexOf(`'${asset}'`);
+    assert.ok(index >= 0, `${asset} must remain in the versioned core asset list`);
+    assert.ok(index < phase5aIndex, `${asset} must precede Phase 5A`);
+  });
+  const phase5bIndex = worker.indexOf("'/phase5b_deferred_mirror.js'");
+  assert.ok(phase5bIndex > phase5aIndex, 'Phase 5A must still precede Phase 5B');
+  assert.match(workerCore, /completePhase5A/);
+  assert.match(workerCore, /5a-native-indexeddb-snapshot/);
+  assert.match(workerCore, /Phase 5A native snapshot failed to install; Phase 4 remains active/);
+  assert.match(workerCore, /try \{ result\.set\(name, Object\.getOwnPropertyDescriptor\(target, name\) \|\| null\); \}/);
 });
