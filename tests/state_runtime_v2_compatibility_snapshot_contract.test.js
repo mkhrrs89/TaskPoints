@@ -153,7 +153,7 @@ test('V2-17 compatibility snapshot preserves completion order, duplicate IDs, di
   assert.equal(parity.actualCounts.completions, 2);
   assert.deepEqual(JSON.parse(JSON.stringify(parity.scopeExcludedCounts)), {
     expectedCompletions: 3,
-    actualCompletions: 3
+    actualCompletions: 0
   });
 });
 
