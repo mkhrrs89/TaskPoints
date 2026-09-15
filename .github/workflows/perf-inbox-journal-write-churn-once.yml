@@ -1,0 +1,47 @@
+name: Perf Inbox Journal Write Churn Once
+
+on:
+  push:
+    branches:
+      - perf/inbox-journal-write-churn-20260915
+    paths:
+      - '.github/workflows/perf-inbox-journal-write-churn-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: perf/inbox-journal-write-churn-20260915
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - name: Apply Inbox journal fix
+        run: python scripts/apply_inbox_journal_write_churn_fix.py
+      - name: Run focused Inbox and storage contracts
+        run: >-
+          node --test
+          tests/inbox_mutation_journal_fast_path.test.js
+          tests/inbox_population_fast_path.test.js
+          tests/season_series_upset_reconciliation_loop.test.js
+          tests/inbox_series_upset_notification.test.js
+          tests/inbox_gold_theft_delivery_race.test.js
+          tests/inbox_gold_theft_top50_notification.test.js
+          tests/task_create_fast_path.test.js
+          tests/storage_atomic_replace_contract.test.js
+          tests/storage_data_loss_fail_closed.test.js
+      - name: Run full TaskPoints suite
+        run: npm test
+      - name: Commit production fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add task_create_fast_path.js tests/inbox_mutation_journal_fast_path.test.js
+          git commit -m "Journal background Inbox reconciliations together"
+          git push origin HEAD:perf/inbox-journal-write-churn-20260915
