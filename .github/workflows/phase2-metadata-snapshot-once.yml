@@ -1,0 +1,42 @@
+name: Phase2 Metadata Snapshot Once
+on:
+  push:
+    branches:
+      - fix/phase2-metadata-snapshot-20260915
+jobs:
+  patch-and-test:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/phase2-metadata-snapshot-20260915
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply patch
+        run: python3 tmp_patch_phase2_metadata_snapshot.py
+      - name: Run focused Phase 2/3/4 and storage safety tests
+        run: |
+          node --test tests/phase2_dual_write.test.js
+          node --test tests/phase3_read_path.test.js
+          node --test tests/phase4_storage_contract.test.js
+          node --test tests/phase5a_native_snapshot_contract.test.js
+          node --test tests/phase2_authoritative_absence.test.js
+          node --test tests/phase2_reset_hook.test.js
+          node --test tests/storage_atomic_replace_contract.test.js
+          node --test tests/storage_data_loss_fail_closed.test.js
+      - name: Verify scope
+        run: |
+          git diff --check
+          git diff -- phase2_dual_write.js phase3_read_path.js phase4_storage_coordinator.js tests/phase2_dual_write.test.js tests/phase3_read_path.test.js tests/phase4_storage_contract.test.js
+      - name: Commit tested patch
+        run: |
+          rm tmp_patch_phase2_metadata_snapshot.py .github/workflows/phase2-metadata-snapshot-once.yml
+          git add -A
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Store Phase 2 shadow as verified metadata snapshot'
+          git push
