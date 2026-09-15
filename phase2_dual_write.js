@@ -13,6 +13,7 @@
   const INTERACTION_RECHECK_MS = 250;
   const HOME_LONG_QUIET_MS = 8000;
   const INTERNAL_DETACHED_SOURCE = Symbol('taskpointsPhase2DetachedSource');
+  const INTERNAL_SOURCE_SUMMARY = Symbol('taskpointsPhase2SourceSummary');
   const pathname = String(global.location?.pathname || '').replace(/\/+$/, '');
   const homeLongQuietEnabled = pathname === '' || pathname === '/' || pathname === '/index.html' || pathname.endsWith('/index.html');
   let queueTail = Promise.resolve();
@@ -26,6 +27,8 @@
   let detachedSourceReuseCount = 0;
   let metadataSnapshotWriteCount = 0;
   let legacyRowWriteCount = 0;
+  let sharedSourceReuseCount = 0;
+  let sharedSourceFallbackCount = 0;
 
   function requestPromise(request) {
     return new Promise((resolve, reject) => {
@@ -46,6 +49,23 @@
     sourceCloneCount += 1;
     if (typeof global.structuredClone === 'function') return global.structuredClone(state);
     return JSON.parse(JSON.stringify(state));
+  }
+
+  function exactSharedSourcePackage(raw) {
+    try {
+      const sourcePackage = core.getSharedSaveSourcePackage?.(raw);
+      if (sourcePackage
+        && sourcePackage.raw === raw
+        && sourcePackage.state
+        && typeof sourcePackage.state === 'object'
+        && !Array.isArray(sourcePackage.state)
+        && sourcePackage.summary?.hashes?.state) {
+        sharedSourceReuseCount += 1;
+        return sourcePackage;
+      }
+    } catch (_) {}
+    sharedSourceFallbackCount += 1;
+    return null;
   }
 
   function openShadowDb(indexedDb = global.indexedDB) {
@@ -224,7 +244,10 @@
         };
       }
 
-      const sourceSummary = core.shadowSourceSummary(source);
+      const reusableSummary = options[INTERNAL_SOURCE_SUMMARY];
+      const sourceSummary = reusableSummary?.hashes?.state
+        ? reusableSummary
+        : core.shadowSourceSummary(source);
       const serializedState = typeof options.serializedSourceRaw === 'string'
         ? options.serializedSourceRaw
         : JSON.stringify(source);
@@ -296,28 +319,36 @@
     }
   }
 
+  function sourceForExactRaw(raw) {
+    const normalizedRaw = typeof raw === 'string' && raw ? raw : '{}';
+    const shared = exactSharedSourcePackage(normalizedRaw);
+    if (shared) {
+      return {
+        state: shared.state,
+        raw: normalizedRaw,
+        summary: shared.summary
+      };
+    }
+    return {
+      state: normalizedRaw === '{}' ? {} : core.parseTaskPointsStorageJson(normalizedRaw, {}),
+      raw: normalizedRaw,
+      summary: null
+    };
+  }
+
   function sourceFromLatestStoredRaw(capturedRaw) {
     try {
       const latestRaw = global.localStorage?.getItem?.(core.STORAGE_KEY);
       // A confirmed missing authoritative key represents an empty state. Never
       // fall back to an older captured payload, which could resurrect data
       // after Reset All in this page or another open TaskPoints tab.
-      if (latestRaw === null) return { state: {}, raw: '{}' };
-      if (typeof latestRaw === 'string') {
-        return {
-          state: latestRaw ? core.parseTaskPointsStorageJson(latestRaw, {}) : {},
-          raw: latestRaw || '{}'
-        };
-      }
+      if (latestRaw === null) return { state: {}, raw: '{}', summary: null };
+      if (typeof latestRaw === 'string') return sourceForExactRaw(latestRaw);
     } catch (_) {
       // If localStorage cannot be read, the captured successful setItem payload
       // is the safest fallback available for this single write.
     }
-    const fallbackRaw = typeof capturedRaw === 'string' && capturedRaw ? capturedRaw : '{}';
-    return {
-      state: fallbackRaw === '{}' ? {} : core.parseTaskPointsStorageJson(fallbackRaw, {}),
-      raw: fallbackRaw
-    };
+    return sourceForExactRaw(capturedRaw);
   }
 
   function queueWrite(state, options = {}) {
@@ -328,7 +359,7 @@
       .catch(() => undefined)
       .then(() => {
         const resolved = snapshot
-          ? { state: snapshot, raw: null }
+          ? { state: snapshot, raw: null, summary: null }
           : sourceFromLatestStoredRaw(options.serializedCandidate);
         // Both branches above are already detached from caller-owned/live state:
         // `snapshot` was cloned when queued, while the raw path was freshly parsed.
@@ -338,6 +369,7 @@
           ...options,
           sequence: writeSequence,
           serializedSourceRaw: resolved.raw,
+          [INTERNAL_SOURCE_SUMMARY]: resolved.summary,
           [INTERNAL_DETACHED_SOURCE]: true
         });
       })
@@ -570,7 +602,9 @@
     sourceCloneCount,
     detachedSourceReuseCount,
     metadataSnapshotWriteCount,
-    legacyRowWriteCount
+    legacyRowWriteCount,
+    sharedSourceReuseCount,
+    sharedSourceFallbackCount
   });
   core.scheduleShadowDualWriteFromSerializedState = (storageKey, raw) => (
     storageKey === core.STORAGE_KEY ? scheduleFromStoredRaw(raw) : null

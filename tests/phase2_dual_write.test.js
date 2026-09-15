@@ -304,3 +304,55 @@ test('dual-write metadata snapshot collapses the legacy row-write fanout', async
     assert.equal((await rows(db, storeName)).length, 0, `${storeName} should stay untouched by the new snapshot path`);
   }
 });
+
+
+test('coalesced authoritative write reuses an exact shared source package but still parses the IndexedDB readback', async () => {
+  localRows.clear();
+  const idb = createFakeIndexedDb({ strictTransactions: true });
+  global.indexedDB = idb;
+  await seedVerifiedShadow(idb);
+
+  const state = fixture(31);
+  const raw = JSON.stringify(state);
+  const sharedState = structuredClone(state);
+  const sharedSummary = core.shadowSourceSummary(sharedState);
+  const originalPackage = core.getSharedSaveSourcePackage;
+  const originalParse = core.parseTaskPointsStorageJson;
+  let packageCalls = 0;
+  let parseCalls = 0;
+
+  try {
+    core.getSharedSaveSourcePackage = (candidateRaw) => {
+      packageCalls += 1;
+      if (candidateRaw !== raw) return null;
+      return {
+        raw,
+        state: sharedState,
+        summary: sharedSummary,
+        sourceKind: 'recent_exact_parse'
+      };
+    };
+    core.parseTaskPointsStorageJson = (...args) => {
+      parseCalls += 1;
+      return originalParse(...args);
+    };
+
+    const before = core.getShadowDualWriteQueueStatus();
+    global.localStorage.setItem(core.STORAGE_KEY, raw);
+    await core.flushShadowDualWrites();
+    const after = core.getShadowDualWriteQueueStatus();
+
+    assert.ok(packageCalls >= 1);
+    assert.equal(after.sharedSourceReuseCount - before.sharedSourceReuseCount, 1);
+    assert.equal(after.sharedSourceFallbackCount - before.sharedSourceFallbackCount, 0);
+    assert.equal(parseCalls, 1,
+      'the shared package should remove the source parse while the IndexedDB readback remains independently parsed');
+    const status = await core.getShadowDualWriteStatus({ indexedDB: idb });
+    assert.equal(status.status, 'passed_verification', JSON.stringify(status));
+    assert.equal(status.verification.hashesMatch, true);
+    assert.equal(status.verification.rawMatches, true);
+  } finally {
+    core.getSharedSaveSourcePackage = originalPackage;
+    core.parseTaskPointsStorageJson = originalParse;
+  }
+});
