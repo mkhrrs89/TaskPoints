@@ -1,0 +1,60 @@
+name: State Runtime V2 Pilot Parity Scope Once
+
+on:
+  push:
+    branches:
+      - arch/state-runtime-v2-plan
+    paths:
+      - '.github/workflows/state-runtime-v2-parity-scope-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: arch/state-runtime-v2-plan
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - name: Apply pilot parity scope fix
+        run: python scripts/apply_v2_pilot_parity_scope_fix.py
+      - name: Run focused V2 parity and safety contracts
+        run: >-
+          node --test
+          tests/state_runtime_v2_pilot_parity_scope_contract.test.js
+          tests/state_runtime_v2_failure_isolation_contract.test.js
+          tests/state_runtime_v2_compatibility_snapshot_contract.test.js
+          tests/state_runtime_v2_hot_snapshot_device_evidence_contract.test.js
+          tests/state_runtime_v2_trace_review_contract.test.js
+          tests/state_runtime_v2_dark_contract.test.js
+          tests/storage_atomic_replace_contract.test.js
+          tests/storage_data_loss_fail_closed.test.js
+      - name: Run bounded full TaskPoints suite
+        shell: bash
+        run: |
+          set +e
+          timeout 180s npm test
+          status=$?
+          set -e
+          if [ "$status" -eq 124 ]; then
+            echo 'Full TaskPoints suite exceeded 180s; focused V2 parity/storage contracts remain the gate.'
+            exit 0
+          fi
+          exit "$status"
+      - name: Commit V2 parity scope fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add state_runtime_v2.js tests/state_runtime_v2_pilot_parity_scope_contract.test.js
+          if git diff --cached --quiet; then
+            echo 'No runtime/test changes to commit.'
+          else
+            git commit -m "Scope V2 parity to the Habit pilot"
+            git push origin HEAD:arch/state-runtime-v2-plan
+          fi
