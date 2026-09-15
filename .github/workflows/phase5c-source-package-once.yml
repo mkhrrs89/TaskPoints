@@ -17,7 +17,9 @@ jobs:
         with:
           node-version: 22
       - name: Apply patch
-        run: python3 tmp_patch_phase5c_source_package.py
+        run: |
+          python3 tmp_patch_phase5c_source_package.py
+          python3 tmp_patch_phase5c_stale_contract.py
       - name: Run focused shared-save, Phase 5C, and safety tests
         run: |
           node --test tests/save_pipeline_shared_work_contract.test.js
@@ -34,10 +36,10 @@ jobs:
       - name: Verify scope
         run: |
           git diff --check
-          git diff -- save_pipeline_shared_work.js phase5b_deferred_mirror.js tests/save_pipeline_shared_work_contract.test.js tests/phase5c_verified_secondary_contract.test.js
+          git diff -- save_pipeline_shared_work.js phase5b_deferred_mirror.js tests/save_pipeline_shared_work_contract.test.js tests/phase5c_verified_secondary_contract.test.js tests/phase5c_cross_tab_contract.test.js
       - name: Commit tested patch
         run: |
-          rm tmp_patch_phase5c_source_package.py .github/workflows/phase5c-source-package-once.yml
+          rm tmp_patch_phase5c_source_package.py tmp_patch_phase5c_stale_contract.py .github/workflows/phase5c-source-package-once.yml
           git add -A
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
