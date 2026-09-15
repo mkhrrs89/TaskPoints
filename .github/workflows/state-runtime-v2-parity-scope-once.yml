@@ -24,6 +24,8 @@ jobs:
       - run: npm ci
       - name: Apply pilot parity scope fix
         run: python scripts/apply_v2_pilot_parity_scope_fix.py
+      - name: Align existing parity contracts with the pilot scope
+        run: python scripts/apply_v2_pilot_parity_test_updates.py
       - name: Run focused V2 parity and safety contracts
         run: >-
           node --test
@@ -51,7 +53,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add state_runtime_v2.js tests/state_runtime_v2_pilot_parity_scope_contract.test.js
+          git add state_runtime_v2.js tests/state_runtime_v2_pilot_parity_scope_contract.test.js tests/state_runtime_v2_compatibility_snapshot_contract.test.js
           if git diff --cached --quiet; then
             echo 'No runtime/test changes to commit.'
           else
