@@ -3539,14 +3539,23 @@ document.addEventListener('DOMContentLoaded', () => {
       island.dataset.bound = '1';
     }
 
-    updateCriticalTasksIsland();
+    const updateCriticalTasksIslandFromBestState = () => {
+      let liveState = null;
+      try { liveState = window.TaskPointsHomeLiveState?.getState?.() || null; } catch (_) {}
+      if (liveState && typeof liveState === 'object') {
+        return updateCriticalTasksIsland(liveState);
+      }
+      return updateCriticalTasksIsland();
+    };
+
+    updateCriticalTasksIslandFromBestState();
     let criticalRefreshQueued = false;
     const queueCriticalRefresh = () => {
       if (criticalRefreshQueued) return;
       criticalRefreshQueued = true;
       requestAnimationFrame(() => {
         criticalRefreshQueued = false;
-        updateCriticalTasksIsland();
+        updateCriticalTasksIslandFromBestState();
       });
     };
     window.addEventListener('load', updateCriticalTasksIsland);

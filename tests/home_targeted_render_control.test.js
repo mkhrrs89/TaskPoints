@@ -24,8 +24,10 @@ function makeContext(overrides = {}) {
     renderYesterday: 0,
     renderBreakdown: 0,
     renderStreakBonus: 0,
-    criticalIsland: 0
+    criticalIsland: 0,
+    lastRenderTasksState: null
   };
+  const homeLiveState = { tasks: [{ id: 'task-1' }] };
 
   const context = {
     console,
@@ -78,7 +80,12 @@ function makeContext(overrides = {}) {
     renderStats: () => { calls.renderStats += 1; },
     renderHabits: () => { calls.renderHabits += 1; },
     renderVices: () => { calls.renderVices += 1; },
-    renderTasks: () => { calls.renderTasks += 1; },
+    TaskPointsHomeLiveState: { getState: () => homeLiveState },
+    renderTasks: (stateInput = null) => {
+      calls.renderTasks += 1;
+      calls.lastRenderTasksState = stateInput;
+      if (stateInput) calls.criticalIsland += 1;
+    },
     updateCriticalTasksIsland: () => { calls.criticalIsland += 1; },
     getDerived: () => ({
       lifetimePoints: 22,
@@ -176,6 +183,7 @@ test('task completion intercepts only renderAll scheduled inside its completion 
   assert.equal(calls.renderToday, 1);
   assert.equal(calls.renderAll, 0);
   assert.equal(calls.criticalIsland, 1);
+  assert.deepEqual(calls.lastRenderTasksState, { tasks: [{ id: 'task-1' }] });
 
   context.scheduleRender(context.renderAll);
   assert.equal(calls.renderAll, 1, 'unrelated renderAll must remain untouched');

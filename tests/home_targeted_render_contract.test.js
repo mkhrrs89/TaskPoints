@@ -26,7 +26,8 @@ test('task completion keeps existing mutation and save logic while controller re
 
   assert.match(controllerSource, /taskCompletionCallbackDepth\s*>\s*0/);
   assert.match(controllerSource, /callback\s*===\s*originals\.renderAll/);
-  assert.match(controllerSource, /global\.renderTasks\s*\(\s*\)/);
+  assert.match(controllerSource, /TaskPointsHomeLiveState\?\.getState/);
+  assert.match(controllerSource, /global\.renderTasks\(liveState && typeof liveState === 'object' \? liveState : null\)/);
   assert.match(controllerSource, /originals\.renderAll\.call\(global\)/);
 });
 
@@ -63,8 +64,9 @@ test('normal task creation remains targeted and does not use renderAll', () => {
   assert.doesNotMatch(block, /renderAll/);
 });
 
-test('controller loader is Home-only and preserves original rendering if loading fails', () => {
-  assert.match(loaderSource, /home_targeted_render_control\.js\?v=20260802-1/);
-  assert.match(loaderSource, /path\s*!==\s*'\/'/);
-  assert.match(loaderSource, /original rendering remains active/);
+test('controller preserves original rendering as its fallback and retains a kill switch', () => {
+  assert.match(controllerSource, /originals\.renderAll\.call\(global\)/);
+  assert.match(controllerSource, /taskpoints_home_targeted_render_disabled_v1/);
+  assert.match(controllerSource, /function disable\s*\(/);
+  assert.match(loaderSource, /taskpoints_habit_fast_path_disabled_v1/);
 });
