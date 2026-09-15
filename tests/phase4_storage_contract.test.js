@@ -276,6 +276,8 @@ async function install({ mode, journal = [], diagnostics = null, indexedDB = cre
     SHADOW_MIGRATION_DB_VERSION: 1,
     SHADOW_MIGRATION_SCHEMA_VERSION: 1,
     SHADOW_DUAL_WRITE_METADATA_ID: 'dual_write',
+    SHADOW_DUAL_WRITE_SNAPSHOT_ID: 'phase2_dual_write_snapshot',
+    SHADOW_DUAL_WRITE_SNAPSHOT_FORMAT: 'metadata_raw_v1',
     IMAGE_DB_NAME: 'taskpoints',
     shadowCanonicalJson: canonical,
     shadowSourceLayout: sourceLayout,
@@ -579,4 +581,50 @@ test('the coordinator retains legacy row restore compatibility without using row
   const candidateBlock = source.slice(source.indexOf('async function writeCandidate'), source.indexOf('async function readLegacyState'));
   assert.match(candidateBlock, /db\.transaction\('metadata', 'readwrite'\)/);
   assert.doesNotMatch(candidateBlock, /\.clear\(/);
+});
+
+
+test('Phase 4 restore prefers a current Phase 2 metadata snapshot before legacy row fallback', async () => {
+  const harness = await install({ mode: 'indexeddb_primary' });
+  const state = fixture(41);
+  const raw = JSON.stringify(state);
+  harness.localStorage.setItem(STORAGE_KEY, raw);
+  await harness.core.flushPhase4PrimaryWrites();
+
+  const commit = await getRow(harness.db, 'metadata', 'phase4_primary_commit');
+  assert.equal(commit.status, 'passed_verification');
+  const summary = sourceSummary(state);
+
+  // Remove only the Phase 4 raw snapshot to force its compatibility fallback.
+  const tx = harness.db.transaction('metadata', 'readwrite');
+  tx.objectStore('metadata').delete('phase4_primary_snapshot');
+  tx.objectStore('metadata').put({
+    id: 'dual_write',
+    status: 'passed_verification',
+    sequence: 77,
+    verification: {
+      source: { hashes: { state: summary.hashes.state } },
+      destination: { hashes: { state: summary.hashes.state } }
+    }
+  });
+  tx.objectStore('metadata').put({
+    id: 'phase2_dual_write_snapshot',
+    snapshotFormat: 'metadata_raw_v1',
+    status: 'passed_verification',
+    sequence: 77,
+    serializedState: raw,
+    stateHash: summary.hashes.state
+  });
+  await new Promise((resolve) => { tx.oncomplete = resolve; });
+
+  // Poison legacy rows so success proves the Phase 2 metadata snapshot won.
+  const rowTx = harness.db.transaction('tasks', 'readwrite');
+  rowTx.objectStore('tasks').clear();
+  rowTx.objectStore('tasks').put({ key: 0, value: { id: 'stale-legacy-row' } });
+  await new Promise((resolve) => { rowTx.oncomplete = resolve; });
+
+  harness.core.clearPhase4Caches();
+  const restored = await harness.core.restorePhase4CommittedPrimary({ indexedDB: harness.indexedDB });
+  assert.equal(restored.restored, true, JSON.stringify(restored));
+  assert.equal(restored.cache.state.tasks[0].id, 'task-41');
 });

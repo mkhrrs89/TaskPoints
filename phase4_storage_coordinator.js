@@ -14,6 +14,8 @@
   const CANDIDATE_ID = 'phase4_candidate';
   const PRIMARY_SNAPSHOT_ID = 'phase4_primary_snapshot';
   const PRIMARY_COMMIT_ID = 'phase4_primary_commit';
+  const DUAL_SNAPSHOT_ID = core.SHADOW_DUAL_WRITE_SNAPSHOT_ID || 'phase2_dual_write_snapshot';
+  const DUAL_SNAPSHOT_FORMAT = core.SHADOW_DUAL_WRITE_SNAPSHOT_FORMAT || 'metadata_raw_v1';
 
   let queueTail = Promise.resolve();
   let pendingCount = 0;
@@ -292,8 +294,10 @@
     const snapshotRequest = requestPromise(tx.objectStore('metadata').get(PRIMARY_SNAPSHOT_ID));
     const candidateRequest = requestPromise(tx.objectStore('metadata').get(CANDIDATE_ID));
     const primaryCommitRequest = requestPromise(tx.objectStore('metadata').get(PRIMARY_COMMIT_ID));
-    const [snapshot, candidate, primaryCommit] = await Promise.all([
-      snapshotRequest, candidateRequest, primaryCommitRequest
+    const dualSnapshotRequest = requestPromise(tx.objectStore('metadata').get(DUAL_SNAPSHOT_ID));
+    const dualMetadataRequest = requestPromise(tx.objectStore('metadata').get(core.SHADOW_DUAL_WRITE_METADATA_ID || 'dual_write'));
+    const [snapshot, candidate, primaryCommit, dualSnapshot, dualMetadata] = await Promise.all([
+      snapshotRequest, candidateRequest, primaryCommitRequest, dualSnapshotRequest, dualMetadataRequest
     ]);
     if (snapshot?.serializedState && typeof snapshot.serializedState === 'string') {
       let state;
@@ -305,6 +309,25 @@
         primaryCommit: primaryCommit || null,
         snapshot,
         snapshotFormat: 'metadata_raw_v1'
+      };
+    }
+    const phase2SnapshotCurrent = dualSnapshot?.snapshotFormat === DUAL_SNAPSHOT_FORMAT
+      && dualSnapshot.status === 'passed_verification'
+      && typeof dualSnapshot.serializedState === 'string'
+      && dualMetadata?.status === 'passed_verification'
+      && Number(dualSnapshot.sequence) === Number(dualMetadata.sequence);
+    if (phase2SnapshotCurrent) {
+      let state;
+      try { state = core.parseTaskPointsStorageJson(dualSnapshot.serializedState, {}) || {}; }
+      catch (error) { throw storageError('phase2_snapshot_parse_failed', error); }
+      return {
+        state,
+        candidate: candidate || null,
+        primaryCommit: primaryCommit || null,
+        snapshot: null,
+        phase2Snapshot: dualSnapshot,
+        phase2DualMetadata: dualMetadata,
+        snapshotFormat: 'phase2_metadata_raw_v1'
       };
     }
     return readLegacyState(db, candidate, primaryCommit);
@@ -344,6 +367,15 @@
         if (Number(rebuilt.snapshot.sequence) !== Number(commit.sequence)) throw new Error('committed_snapshot_sequence_mismatch');
         if (rebuilt.snapshot.mirrorHash && rebuilt.snapshot.mirrorHash !== hashValue(rawBefore)) throw new Error('committed_snapshot_mirror_mismatch');
         if (rebuilt.snapshot.stateHash && rebuilt.snapshot.stateHash !== destinationSummary.hashes.state) throw new Error('committed_snapshot_hash_mismatch');
+      }
+      if (rebuilt.phase2Snapshot) {
+        if (rebuilt.phase2Snapshot.stateHash && rebuilt.phase2Snapshot.stateHash !== destinationSummary.hashes.state) {
+          throw new Error('phase2_snapshot_hash_mismatch');
+        }
+        const phase2SourceHash = rebuilt.phase2DualMetadata?.verification?.source?.hashes?.state;
+        const phase2DestinationHash = rebuilt.phase2DualMetadata?.verification?.destination?.hashes?.state;
+        if (phase2SourceHash && phase2SourceHash !== destinationSummary.hashes.state) throw new Error('phase2_source_hash_mismatch');
+        if (phase2DestinationHash && phase2DestinationHash !== destinationSummary.hashes.state) throw new Error('phase2_destination_hash_mismatch');
       }
       const committedSourceHash = commit.verification?.source?.hashes?.state;
       const committedDestinationHash = commit.verification?.destination?.hashes?.state;

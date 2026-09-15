@@ -107,6 +107,8 @@ const core = global.TaskPointsCore = {
   SHADOW_MIGRATION_DB_VERSION: 1,
   SHADOW_MIGRATION_SCHEMA_VERSION: 1,
   SHADOW_DUAL_WRITE_METADATA_ID: 'dual_write',
+  SHADOW_DUAL_WRITE_SNAPSHOT_ID: 'phase2_dual_write_snapshot',
+  SHADOW_DUAL_WRITE_SNAPSHOT_FORMAT: 'metadata_raw_v1',
   IMAGE_DB_NAME: 'taskpoints',
   shadowCanonicalJson: canonical,
   shadowSourceLayout: sourceLayout,
@@ -241,22 +243,36 @@ async function seedShadow(idb, state, options = {}) {
   const tx = db.transaction(stores, 'readwrite');
   [...ARRAY_STORES, 'collections'].forEach((name) => tx.objectStore(name).clear());
   tx.objectStore('values').clear();
-  Object.entries(layout.arrays).forEach(([field, rows]) => rows.forEach((value, index) => tx.objectStore(field).put({ key: index, value })));
-  Object.entries(layout.collections).forEach(([field, rows]) => {
-    tx.objectStore('collections').put({ key: `manifest:${field}`, kind: 'manifest', field });
-    rows.forEach((value, index) => tx.objectStore('collections').put({ key: `item:${field}:${index}`, kind: 'item', field, index, value }));
-  });
-  Object.entries(layout.values).forEach(([field, value]) => tx.objectStore('values').put({ field, value }));
+  if (!options.metadataSnapshot) {
+    Object.entries(layout.arrays).forEach(([field, rows]) => rows.forEach((value, index) => tx.objectStore(field).put({ key: index, value })));
+    Object.entries(layout.collections).forEach(([field, rows]) => {
+      tx.objectStore('collections').put({ key: `manifest:${field}`, kind: 'manifest', field });
+      rows.forEach((value, index) => tx.objectStore('collections').put({ key: `item:${field}:${index}`, kind: 'item', field, index, value }));
+    });
+    Object.entries(layout.values).forEach(([field, value]) => tx.objectStore('values').put({ field, value }));
+  }
   const summary = sourceSummary(state);
+  const sequence = Number(options.sequence) || 1;
   tx.objectStore('metadata').put({ id: 'current', status: options.currentStatus || 'passed_verification' });
   tx.objectStore('metadata').put({
     id: 'dual_write',
     status: options.dualStatus || 'passed_verification',
+    sequence,
     verification: {
       source: { hashes: { state: options.dualSourceHash || summary.hashes.state } },
       destination: { hashes: { state: options.dualDestinationHash || summary.hashes.state } }
     }
   });
+  if (options.metadataSnapshot) {
+    tx.objectStore('metadata').put({
+      id: core.SHADOW_DUAL_WRITE_SNAPSHOT_ID,
+      snapshotFormat: core.SHADOW_DUAL_WRITE_SNAPSHOT_FORMAT,
+      status: options.snapshotStatus || 'passed_verification',
+      sequence: Number(options.snapshotSequence) || sequence,
+      serializedState: JSON.stringify(state),
+      stateHash: options.snapshotStateHash || summary.hashes.state
+    });
+  }
   await new Promise((resolve) => setTimeout(resolve, 0));
   return db;
 }
@@ -533,4 +549,54 @@ test('temporary getItem override is restored even when the original loader throw
   assert.throws(() => core.loadAppState(), /original loader failure/);
   assert.equal(global.localStorage.getItem, getItemBefore);
   throwOnLoad = false;
+});
+
+
+test('compare mode verifies the new Phase 2 metadata snapshot without legacy row records', async () => {
+  const state = fixture(31);
+  await reset(state, 'compare');
+  const idb = createFakeIndexedDb();
+  global.indexedDB = idb;
+  const db = await seedShadow(idb, state, { metadataSnapshot: true, sequence: 31 });
+  for (const storeName of ARRAY_STORES) {
+    assert.equal(db.stores.get(storeName).rows.size, 0, `${storeName} legacy rows should be empty`);
+  }
+  assert.equal(db.stores.get('collections').rows.size, 0);
+
+  const status = await core.getPhase3ReadStatus({ refresh: true, indexedDB: idb });
+  assert.equal(status.status, 'compare_passed', JSON.stringify(status));
+  assert.equal(status.hashesMatch, true);
+  assert.equal(status.countsMatch, true);
+});
+
+test('verified mode serves the new metadata snapshot while legacy row snapshots remain supported', async () => {
+  const state = fixture(32);
+  await reset(state, 'verified_indexeddb');
+  const idb = createFakeIndexedDb();
+  global.indexedDB = idb;
+  await seedShadow(idb, state, { metadataSnapshot: true, sequence: 32 });
+  const warmed = await core.getPhase3ReadStatus({ refresh: true, indexedDB: idb });
+  assert.equal(warmed.status, 'ready', JSON.stringify(warmed));
+  const result = core.loadAppState();
+  assert.equal(result.state.tasks[0].id, 'task-32');
+
+  // Existing row-format databases must remain readable as a fallback.
+  await reset(fixture(33), 'compare');
+  const legacyIdb = createFakeIndexedDb();
+  global.indexedDB = legacyIdb;
+  await seedShadow(legacyIdb, fixture(33));
+  const legacyStatus = await core.getPhase3ReadStatus({ refresh: true, indexedDB: legacyIdb });
+  assert.equal(legacyStatus.status, 'compare_passed', JSON.stringify(legacyStatus));
+});
+
+test('an unverified or sequence-mismatched metadata snapshot fails closed instead of falling back to stale rows', async () => {
+  const state = fixture(34);
+  await reset(state, 'compare');
+  const idb = createFakeIndexedDb();
+  global.indexedDB = idb;
+  await seedShadow(idb, state, { metadataSnapshot: true, sequence: 34, snapshotSequence: 35 });
+  const status = await core.getPhase3ReadStatus({ refresh: true, indexedDB: idb });
+  assert.equal(status.status, 'fallback');
+  assert.equal(status.effectiveSource, 'localStorage');
+  assert.equal(status.lastFallbackReason, 'dual_write_not_verified');
 });

@@ -6,6 +6,8 @@
   core.__phase2DualWriteInstalled = true;
 
   const METADATA_ID = 'dual_write';
+  const SNAPSHOT_ID = 'phase2_dual_write_snapshot';
+  const SNAPSHOT_FORMAT = 'metadata_raw_v1';
   const ARRAY_STORES = ['completions', 'matchups', 'gameHistory', 'seasonHistory', 'tasks', 'habits', 'players'];
   const COALESCE_DELAY_MS = 900;
   const INTERACTION_RECHECK_MS = 250;
@@ -22,6 +24,8 @@
   let homeLongQuietDeferred = false;
   let sourceCloneCount = 0;
   let detachedSourceReuseCount = 0;
+  let metadataSnapshotWriteCount = 0;
+  let legacyRowWriteCount = 0;
 
   function requestPromise(request) {
     return new Promise((resolve, reject) => {
@@ -130,6 +134,60 @@
     return rebuilt;
   }
 
+  async function writeMetadataSnapshotCandidate(db, serializedState, sourceSummary, startedAt, writeSequence) {
+    const snapshot = {
+      id: SNAPSHOT_ID,
+      schemaVersion: core.SHADOW_MIGRATION_SCHEMA_VERSION,
+      phase: 'dual_write',
+      snapshotFormat: SNAPSHOT_FORMAT,
+      status: 'candidate_written',
+      sequence: writeSequence,
+      startedAt,
+      completionTime: null,
+      serializedState,
+      stateHash: sourceSummary.hashes.state,
+      sourceCounts: sourceSummary.counts,
+      errors: []
+    };
+    const tx = db.transaction('metadata', 'readwrite');
+    tx.objectStore('metadata').put({
+      id: METADATA_ID,
+      schemaVersion: core.SHADOW_MIGRATION_SCHEMA_VERSION,
+      phase: 'dual_write',
+      status: 'running',
+      startedAt,
+      completionTime: null,
+      sequence: writeSequence,
+      snapshotId: SNAPSHOT_ID,
+      snapshotFormat: SNAPSHOT_FORMAT,
+      errors: [],
+      sourceCounts: sourceSummary.counts,
+      destinationCounts: {},
+      verification: null
+    });
+    tx.objectStore('metadata').put(snapshot);
+    metadataSnapshotWriteCount += 1;
+    await transactionPromise(tx);
+    return snapshot;
+  }
+
+  async function readMetadataSnapshot(db) {
+    const tx = db.transaction('metadata', 'readonly');
+    return (await requestPromise(tx.objectStore('metadata').get(SNAPSHOT_ID))) || null;
+  }
+
+  async function finalizeMetadataSnapshot(db, snapshot, metadata) {
+    const tx = db.transaction('metadata', 'readwrite');
+    tx.objectStore('metadata').put({
+      ...snapshot,
+      status: metadata.status,
+      completionTime: metadata.completionTime,
+      errors: metadata.errors || []
+    });
+    tx.objectStore('metadata').put({ id: METADATA_ID, ...metadata });
+    await transactionPromise(tx);
+  }
+
   function failedMetadata(error, startedAt, writeSequence) {
     return {
       schemaVersion: core.SHADOW_MIGRATION_SCHEMA_VERSION,
@@ -167,26 +225,33 @@
       }
 
       const sourceSummary = core.shadowSourceSummary(source);
-      await putMetadata(db, METADATA_ID, {
-        schemaVersion: core.SHADOW_MIGRATION_SCHEMA_VERSION,
-        phase: 'dual_write',
-        status: 'running',
+      const serializedState = typeof options.serializedSourceRaw === 'string'
+        ? options.serializedSourceRaw
+        : JSON.stringify(source);
+      const snapshotCandidate = await writeMetadataSnapshotCandidate(
+        db,
+        serializedState,
+        sourceSummary,
         startedAt,
-        completionTime: null,
-        sequence: writeSequence,
-        errors: [],
-        sourceCounts: sourceSummary.counts,
-        destinationCounts: {},
-        verification: null
-      });
-
-      await writeStores(db, source);
-      const rebuilt = await readStores(db);
+        writeSequence
+      );
+      const readBack = await readMetadataSnapshot(db);
+      if (!readBack
+        || readBack.snapshotFormat !== SNAPSHOT_FORMAT
+        || typeof readBack.serializedState !== 'string'
+        || Number(readBack.sequence) !== writeSequence) {
+        throw new Error('dual_write_snapshot_readback_missing');
+      }
+      const rebuilt = core.parseTaskPointsStorageJson(readBack.serializedState, null);
+      if (!rebuilt || typeof rebuilt !== 'object' || Array.isArray(rebuilt)) {
+        throw new Error('dual_write_snapshot_readback_unreadable');
+      }
       const destinationSummary = core.shadowSourceSummary(rebuilt);
       const mismatches = core.shadowVerificationMismatches(sourceSummary, destinationSummary);
       const countsMatch = core.shadowCanonicalJson(sourceSummary.counts) === core.shadowCanonicalJson(destinationSummary.counts);
       const hashesMatch = sourceSummary.hashes.state === destinationSummary.hashes.state;
-      const status = countsMatch && hashesMatch ? 'passed_verification' : 'failed';
+      const rawMatches = readBack.serializedState === serializedState;
+      const status = countsMatch && hashesMatch && rawMatches ? 'passed_verification' : 'failed';
       const metadata = {
         schemaVersion: core.SHADOW_MIGRATION_SCHEMA_VERSION,
         phase: 'dual_write',
@@ -194,12 +259,15 @@
         startedAt,
         completionTime: new Date().toISOString(),
         sequence: writeSequence,
+        snapshotId: SNAPSHOT_ID,
+        snapshotFormat: SNAPSHOT_FORMAT,
         errors: status === 'failed' ? ['Dual-write verification did not pass.'] : [],
         sourceCounts: sourceSummary.counts,
         destinationCounts: destinationSummary.counts,
         verification: {
           countsMatch,
           hashesMatch,
+          rawMatches,
           source: {
             counts: sourceSummary.counts,
             hashes: sourceSummary.hashes,
@@ -213,7 +281,7 @@
           mismatches
         }
       };
-      await putMetadata(db, METADATA_ID, metadata);
+      await finalizeMetadataSnapshot(db, snapshotCandidate, metadata);
       return metadata;
     } catch (error) {
       const metadata = failedMetadata(error, startedAt, writeSequence);
@@ -228,21 +296,28 @@
     }
   }
 
-  function stateFromLatestStoredRaw(capturedRaw) {
+  function sourceFromLatestStoredRaw(capturedRaw) {
     try {
       const latestRaw = global.localStorage?.getItem?.(core.STORAGE_KEY);
       // A confirmed missing authoritative key represents an empty state. Never
       // fall back to an older captured payload, which could resurrect data
       // after Reset All in this page or another open TaskPoints tab.
-      if (latestRaw === null) return {};
+      if (latestRaw === null) return { state: {}, raw: '{}' };
       if (typeof latestRaw === 'string') {
-        return latestRaw ? core.parseTaskPointsStorageJson(latestRaw, {}) : {};
+        return {
+          state: latestRaw ? core.parseTaskPointsStorageJson(latestRaw, {}) : {},
+          raw: latestRaw || '{}'
+        };
       }
     } catch (_) {
       // If localStorage cannot be read, the captured successful setItem payload
       // is the safest fallback available for this single write.
     }
-    return capturedRaw ? core.parseTaskPointsStorageJson(capturedRaw, {}) : {};
+    const fallbackRaw = typeof capturedRaw === 'string' && capturedRaw ? capturedRaw : '{}';
+    return {
+      state: fallbackRaw === '{}' ? {} : core.parseTaskPointsStorageJson(fallbackRaw, {}),
+      raw: fallbackRaw
+    };
   }
 
   function queueWrite(state, options = {}) {
@@ -252,14 +327,17 @@
     const operation = queueTail
       .catch(() => undefined)
       .then(() => {
-        const source = snapshot || stateFromLatestStoredRaw(options.serializedCandidate);
+        const resolved = snapshot
+          ? { state: snapshot, raw: null }
+          : sourceFromLatestStoredRaw(options.serializedCandidate);
         // Both branches above are already detached from caller-owned/live state:
         // `snapshot` was cloned when queued, while the raw path was freshly parsed.
         // Reuse that private snapshot instead of cloning the entire multi-megabyte
         // state a second time immediately before the shadow write.
-        return writeSnapshot(source, {
+        return writeSnapshot(resolved.state, {
           ...options,
           sequence: writeSequence,
+          serializedSourceRaw: resolved.raw,
           [INTERNAL_DETACHED_SOURCE]: true
         });
       })
@@ -474,6 +552,8 @@
   }
 
   core.SHADOW_DUAL_WRITE_METADATA_ID = METADATA_ID;
+  core.SHADOW_DUAL_WRITE_SNAPSHOT_ID = SNAPSHOT_ID;
+  core.SHADOW_DUAL_WRITE_SNAPSHOT_FORMAT = SNAPSHOT_FORMAT;
   core.writeShadowDualWriteSnapshot = writeSnapshot;
   core.queueShadowDualWrite = queueWrite;
   core.flushShadowDualWrites = flush;
@@ -488,7 +568,9 @@
     homeLongQuietMs: homeLongQuietEnabled ? HOME_LONG_QUIET_MS : 0,
     homeLongQuietDeferred,
     sourceCloneCount,
-    detachedSourceReuseCount
+    detachedSourceReuseCount,
+    metadataSnapshotWriteCount,
+    legacyRowWriteCount
   });
   core.scheduleShadowDualWriteFromSerializedState = (storageKey, raw) => (
     storageKey === core.STORAGE_KEY ? scheduleFromStoredRaw(raw) : null

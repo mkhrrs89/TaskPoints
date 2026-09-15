@@ -214,13 +214,15 @@ test('rapid localStorage saves end with exact latest state in IndexedDB', async 
   assert.equal(status.verification.hashesMatch, true);
   assert.equal(status.verification.source.hashes.state, expected.hashes.state);
   assert.equal(status.verification.destination.hashes.state, expected.hashes.state);
-  assert.deepEqual((await rows(db, 'tasks')).map((row) => row.value.id), ['task-3']);
-
-  const collectionRows = await rows(db, 'collections');
-  ['schedule', 'opponentDripSchedules', 'storageWarnings', 'workHistory'].forEach((field) => {
-    assert.equal(collectionRows.some((row) => row.kind === 'manifest' && row.field === field), true, field);
-  });
-  assert.equal(collectionRows.filter((row) => row.kind === 'item' && row.field === 'futureRows').length, 3);
+  const snapshotRows = await rows(db, 'metadata');
+  const snapshot = snapshotRows.find((row) => row.id === core.SHADOW_DUAL_WRITE_SNAPSHOT_ID);
+  assert.ok(snapshot, 'verified dual write should store one metadata snapshot');
+  assert.equal(snapshot.snapshotFormat, 'metadata_raw_v1');
+  assert.equal(snapshot.status, 'passed_verification');
+  assert.equal(snapshot.serializedState, JSON.stringify(states[2]));
+  assert.equal(core.parseTaskPointsStorageJson(snapshot.serializedState, {}).tasks[0].id, 'task-3');
+  assert.equal((await rows(db, 'tasks')).length, 0, 'new dual writes must not enqueue per-row task puts');
+  assert.equal((await rows(db, 'collections')).length, 0, 'new dual writes must not enqueue per-row collection puts');
   assert.equal(idb._db(core.IMAGE_DB_NAME), undefined, 'dual writes must not create or alter the image database');
 });
 
@@ -277,4 +279,28 @@ test('public direct shadow snapshot writes still defensively clone caller-owned 
   assert.equal(after.sourceCloneCount - before.sourceCloneCount, 1,
     'public direct writes must preserve the defensive clone boundary');
   assert.equal(after.detachedSourceReuseCount - before.detachedSourceReuseCount, 0);
+});
+
+
+test('dual-write metadata snapshot collapses the legacy row-write fanout', async () => {
+  localRows.clear();
+  const idb = createFakeIndexedDb({ strictTransactions: true });
+  global.indexedDB = idb;
+  const db = await seedVerifiedShadow(idb);
+  const state = fixture(30);
+  const raw = JSON.stringify(state);
+  const before = core.getShadowDualWriteQueueStatus();
+
+  global.localStorage.setItem(core.STORAGE_KEY, raw);
+  await core.flushShadowDualWrites();
+  const after = core.getShadowDualWriteQueueStatus();
+
+  assert.equal(after.metadataSnapshotWriteCount - before.metadataSnapshotWriteCount, 1);
+  assert.equal(after.legacyRowWriteCount - before.legacyRowWriteCount, 0);
+  const snapshot = (await rows(db, 'metadata')).find((row) => row.id === core.SHADOW_DUAL_WRITE_SNAPSHOT_ID);
+  assert.equal(snapshot.serializedState, raw);
+  assert.equal(snapshot.status, 'passed_verification');
+  for (const storeName of ['completions', 'matchups', 'gameHistory', 'seasonHistory', 'tasks', 'habits', 'players', 'collections']) {
+    assert.equal((await rows(db, storeName)).length, 0, `${storeName} should stay untouched by the new snapshot path`);
+  }
 });
