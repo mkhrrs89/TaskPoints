@@ -4,7 +4,7 @@
   if (!global || global.TaskPointsStateRuntimeV2LiveReview?.installed) return;
 
   const DARK_MODE_KEY = 'taskpoints_state_v2_dark_mode_v1';
-  const REVIEWER_SRC = '/state_runtime_v2_trace_review.js?v=20260912-1';
+  const REVIEWER_SRC = '/state_runtime_v2_trace_review.js?v=20260915-1';
   const CORRELATOR_SRC = '/state_runtime_v2_foreground_correlation.js?v=20260913-2';
   const PAINT_PROBE_NAME = 'stateV2.foreground.nextPaint';
   const BUTTON_ID = 'tpV2LiveReviewButton';
@@ -179,6 +179,7 @@
       { key: 'foreground', label: 'No direct foreground V2 maintenance', ok: review?.noDirectForegroundMaintenanceObserved === true },
       { key: 'idle', label: 'Automatic parity waited for deep idle', ok: review?.automaticParityDeepIdleObserved === true },
       { key: 'preemption', label: 'Interaction postponed pending maintenance', ok: review?.interactionPreemptionObserved === true },
+      { key: 'ownership', label: 'V2 stores only Habit/Vice pilot completions', ok: review?.pilotOwnership?.v2StoreContainsOnlyPilotCompletions === true },
       { key: 'parity', label: 'V2 data matches legacy data', ok: review?.parity?.matchConfirmed === true },
       { key: 'failures', label: 'No V2 failures observed', ok: review?.failures?.noV2FailuresObserved === true }
     ];

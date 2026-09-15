@@ -30,9 +30,9 @@ function installForHost(hostname, dark = true) {
 test('live reviewer is dynamically loaded only from the V2 dark structure bridge', () => {
   assert.match(structureBridge, /function loadLiveTraceReview\(\)/);
   assert.match(structureBridge, /if \(!isEnabled\(\) \|\| global\.TaskPointsStateRuntimeV2LiveReview\?\.installed/);
-  assert.match(structureBridge, /state_runtime_v2_live_review\.js\?v=20260913-2/);
+  assert.match(structureBridge, /state_runtime_v2_live_review\.js\?v=20260915-1/);
   assert.match(structureBridge, /loadPerfInstrumentation\(\);\s*loadLiveTraceReview\(\);/);
-  assert.match(source, /state_runtime_v2_trace_review\.js\?v=20260912-1/);
+  assert.match(source, /state_runtime_v2_trace_review\.js\?v=20260915-1/);
   assert.match(source, /state_runtime_v2_foreground_correlation\.js\?v=20260913-2/);
 });
 
@@ -64,6 +64,7 @@ test('live reviewer exposes every Step 4 physical-device evidence check', () => 
     'No direct foreground V2 maintenance',
     'Automatic parity waited for deep idle',
     'Interaction postponed pending maintenance',
+    'V2 stores only Habit/Vice pilot completions',
     'V2 data matches legacy data',
     'No V2 failures observed'
   ]) {
@@ -73,6 +74,7 @@ test('live reviewer exposes every Step 4 physical-device evidence check', () => 
   assert.match(source, /leave the app untouched and visible for at least 20 seconds/);
   assert.match(source, /legacyFullStateCandidates/);
   assert.match(source, /Legacy\/full-state timing candidates/);
+  assert.match(source, /pilotOwnership\?\.v2StoreContainsOnlyPilotCompletions/);
 });
 
 test('live reviewer records a next-frame foreground boundary for Habit interactions', () => {
