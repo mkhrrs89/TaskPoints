@@ -24,6 +24,8 @@ jobs:
       - run: npm ci
       - name: Apply V2 pilot completion ownership boundary
         run: python scripts/apply_v2_pilot_completion_ownership.py
+      - name: Preserve compatibility array realm semantics
+        run: python scripts/apply_v2_pilot_completion_ownership_compat.py
       - name: Run focused V2 compatibility and safety contracts
         run: >-
           node --test
