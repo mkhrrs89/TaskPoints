@@ -1,0 +1,116 @@
+from pathlib import Path
+
+
+def replace_once(path, old, new):
+    p = Path(path)
+    text = p.read_text()
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f'{path}: expected exactly one replacement target, found {count}')
+    p.write_text(text.replace(old, new, 1))
+
+
+replace_once(
+    'scoring_core.js',
+    """      const interactiveFastSave = options.interactive === true && options.deferCompression === true;\n      const packedState = packTaskPointsStorageState(candidateWithSticky);\n      const packedRawJson = JSON.stringify(packedState);\n      // Do not invoke the LZ encoder for safe, small interactive writes.\n      const useFastPacked = interactiveFastSave && packedRawJson.length * 2 < TASKPOINTS_INTERACTIVE_PACKED_SAFE_BYTES;\n""",
+    """      const interactiveFastSave = options.interactive === true && options.deferCompression === true;\n      const packedState = packTaskPointsStorageState(candidateWithSticky);\n      const packedRawJson = JSON.stringify(packedState);\n      const packedInteractiveBytes = packedRawJson.length * 2;\n      // Some journal-backed UI paths can safely leave canonical compaction for\n      // a lifecycle/explicit flush. Once the packed snapshot grows beyond the\n      // localStorage-safe fast-write ceiling, do not turn an automatic quiet\n      // save into a multi-second synchronous LZ compression stall.\n      if (interactiveFastSave\n        && options.deferIfCompressionRequired === true\n        && packedInteractiveBytes >= TASKPOINTS_INTERACTIVE_PACKED_SAFE_BYTES) {\n        if (debugEnabled) console.debug('[TP_DEBUG_PERF] interactive-save-oversize-deferred', {\n          savePath,\n          packedBytes: packedInteractiveBytes,\n          safePackedLimitBytes: TASKPOINTS_INTERACTIVE_PACKED_SAFE_BYTES\n        });\n        return {\n          state: candidateWithSticky,\n          trimmed,\n          skipped: true,\n          deferredOversizeInteractive: true,\n          skipReason: 'interactive_packed_exceeds_safe_limit',\n          packedRawChars: packedRawJson.length,\n          packedBytes: packedInteractiveBytes,\n          safePackedLimitBytes: TASKPOINTS_INTERACTIVE_PACKED_SAFE_BYTES\n        };\n      }\n      // Do not invoke the LZ encoder for safe, small interactive writes.\n      const useFastPacked = interactiveFastSave && packedInteractiveBytes < TASKPOINTS_INTERACTIVE_PACKED_SAFE_BYTES;\n"""
+)
+
+replace_once(
+    'flex_action_fast_path.js',
+    """  let quietDeferred = false;\n  let quietDeferrals = 0;\n  let quietRuns = 0;\n  let originalLogFlexCompletion = null;\n""",
+    """  let quietDeferred = false;\n  let quietDeferrals = 0;\n  let quietRuns = 0;\n  let oversizeQuietDeferrals = 0;\n  let oversizeAutoDeferred = false;\n  let lastFastSaveResult = null;\n  let originalLogFlexCompletion = null;\n"""
+)
+
+replace_once(
+    'flex_action_fast_path.js',
+    """      if (options.savePath === SAVE_PATH\n        && !completionRecord.malformed\n        && !orderRecord.malformed\n        && !completionPending\n        && !orderPending) {\n        return {\n          state: readAuthoritativeState(storageKey, state),\n          skipped: true,\n          skipReason: 'pending_flex_journal_already_drained',\n          flexFastPathDrained: true\n        };\n      }\n\n      let candidate = state;\n      if (completionPending) candidate = applyJournalToState(candidate, completionRecord.entries);\n      if (orderPending) candidate = applyOrderJournalToState(candidate, orderRecord.record);\n      const result = originalSaveStateSnapshot(candidate, options);\n""",
+    """      if (options.savePath === SAVE_PATH\n        && !completionRecord.malformed\n        && !orderRecord.malformed\n        && !completionPending\n        && !orderPending) {\n        const drainedResult = {\n          state: readAuthoritativeState(storageKey, state),\n          skipped: true,\n          skipReason: 'pending_flex_journal_already_drained',\n          flexFastPathDrained: true\n        };\n        lastFastSaveResult = drainedResult;\n        return drainedResult;\n      }\n\n      let candidate = state;\n      if (completionPending) candidate = applyJournalToState(candidate, completionRecord.entries);\n      if (orderPending) candidate = applyOrderJournalToState(candidate, orderRecord.record);\n      const result = originalSaveStateSnapshot(candidate, options);\n      if (options.savePath === SAVE_PATH) lastFastSaveResult = result;\n"""
+)
+
+replace_once(
+    'flex_action_fast_path.js',
+    """    savePending = false;\n    saveRunning = true;\n    try {\n      originalHomeSave(SAVE_PATH, {\n        userInitiated: true,\n        interactive: true,\n        deferCompression: true,\n        flexFastPathReason: reason\n      });\n    } catch (error) {\n""",
+    """    savePending = false;\n    saveRunning = true;\n    const allowOversizeDeferral = reason === 'quiet-after-paint';\n    lastFastSaveResult = null;\n    try {\n      originalHomeSave(SAVE_PATH, {\n        userInitiated: true,\n        interactive: true,\n        deferCompression: true,\n        deferIfCompressionRequired: allowOversizeDeferral,\n        flexFastPathReason: reason\n      });\n      if (allowOversizeDeferral && lastFastSaveResult?.deferredOversizeInteractive === true) {\n        oversizeQuietDeferrals += 1;\n        oversizeAutoDeferred = true;\n        try {\n          global.TaskPointsPerf?.mark?.('flex.compactionOversizeDeferred', {\n            packedBytes: Number(lastFastSaveResult.packedBytes || 0),\n            safePackedLimitBytes: Number(lastFastSaveResult.safePackedLimitBytes || 0),\n            pendingCompletions: completionRecord.entries.length,\n            pendingOrder: orderPending\n          });\n        } catch (_) {}\n        return false;\n      }\n    } catch (error) {\n"""
+)
+
+replace_once(
+    'flex_action_fast_path.js',
+    """    if (!remaining) {\n      resetRetryBackoff();\n      if (!pendingRenderSatisfied) requestFullRender();\n      pendingRenderSatisfied = false;\n      renderPending = false;\n      quietDeferred = false;\n      return true;\n    }\n""",
+    """    if (!remaining) {\n      resetRetryBackoff();\n      oversizeAutoDeferred = false;\n      if (!pendingRenderSatisfied) requestFullRender();\n      pendingRenderSatisfied = false;\n      renderPending = false;\n      quietDeferred = false;\n      return true;\n    }\n"""
+)
+
+replace_once(
+    'flex_action_fast_path.js',
+    """    const status = storageQuietStatus();\n    if (!flexCompactionReady(status)) {\n""",
+    """    // A known-oversized snapshot stays journal-backed while the page is visible.\n    // Explicit/lifecycle flushes still call persistNow() and retain canonical saves.\n    if (oversizeAutoDeferred) {\n      savePending = false;\n      return false;\n    }\n\n    const status = storageQuietStatus();\n    if (!flexCompactionReady(status)) {\n"""
+)
+
+replace_once(
+    'flex_action_fast_path.js',
+    """      runs: quietRuns,\n      renderPending,\n      pendingRenderSatisfied\n""",
+    """      runs: quietRuns,\n      oversizeQuietDeferrals,\n      oversizeAutoDeferred,\n      renderPending,\n      pendingRenderSatisfied\n"""
+)
+
+replace_once(
+    'tests/flex_action_fast_path_contract.test.js',
+    """      metrics.saveCalls += 1;\n      metrics.lastSaveOptions = clone(saveOptions);\n      if (options.failSave) throw new Error('forced save failure');\n      storedState = clone(candidate);\n""",
+    """      metrics.saveCalls += 1;\n      metrics.lastSaveOptions = clone(saveOptions);\n      if (options.failSave) throw new Error('forced save failure');\n      if (options.deferOversizeAutoSave && saveOptions.deferIfCompressionRequired === true) {\n        return { state: clone(candidate), skipped: true, deferredOversizeInteractive: true, skipReason: 'interactive_packed_exceeds_safe_limit', packedBytes: 5000000, safePackedLimitBytes: 3932160 };\n      }\n      storedState = clone(candidate);\n"""
+)
+
+p = Path('tests/flex_action_fast_path_contract.test.js')
+text = p.read_text()
+addition = r'''
+
+test('oversized visible quiet compaction stays journaled without retrying, while pagehide still forces the canonical save', () => {
+  const h = makeHarness({ deferOversizeAutoSave: true });
+  h.context.logFlexCompletion('flex1');
+  flushRafs(h);
+  flushTimers(h, 1);
+  assert.equal(h.getSaveCalls(), 1);
+  assert.equal(h.getLastSaveOptions().deferIfCompressionRequired, true);
+  assert.ok(h.storage.getItem(JOURNAL_KEY));
+  assert.equal(h.context.TaskPointsFlexActionFastPath.getRetryStatus().retryScheduled, false);
+  assert.equal(h.context.TaskPointsFlexActionFastPath.getQuietCompactionStatus().oversizeAutoDeferred, true);
+  h.listeners.pagehide[0]();
+  assert.equal(h.getSaveCalls(), 2);
+  assert.equal(h.getLastSaveOptions().deferIfCompressionRequired, false);
+  assert.equal(h.storage.getItem(JOURNAL_KEY), null);
+  assert.equal(h.context.TaskPointsFlexActionFastPath.getQuietCompactionStatus().oversizeAutoDeferred, false);
+});
+'''
+if 'oversized visible quiet compaction stays journaled' in text:
+    raise SystemExit('Flex oversize test already exists')
+p.write_text(text + addition)
+
+p = Path('tests/storage_compression.test.js')
+text = p.read_text()
+addition = r'''
+
+test('opt-in oversized interactive save defers before synchronous compression and leaves authoritative storage untouched', () => {
+  storage.clear();
+  const baseline = core.normalizeState({ tasks: [{ id: 'keep', title: 'Keep me' }], completions: [], habits: [], matchups: [], gameHistory: [] });
+  core.saveStateSnapshot(baseline, { immediateWrite: true, savePath: 'oversize-deferral-baseline' });
+  const before = storage.get(core.STORAGE_KEY);
+  const candidate = { ...baseline, __oversizeInteractiveProbe: 'x'.repeat(2000000) };
+  const packedBytes = JSON.stringify(core.packTaskPointsStorageState(candidate)).length * 2;
+  assert.ok(packedBytes >= 3.75 * 1024 * 1024);
+  const result = core.saveStateSnapshot(candidate, { immediateWrite: true, interactive: true, deferCompression: true, deferIfCompressionRequired: true, savePath: 'oversize-interactive-deferral-test' });
+  assert.equal(result.skipped, true);
+  assert.equal(result.deferredOversizeInteractive, true);
+  assert.equal(result.skipReason, 'interactive_packed_exceeds_safe_limit');
+  assert.ok(result.packedBytes >= result.safePackedLimitBytes);
+  assert.equal(storage.get(core.STORAGE_KEY), before);
+});
+'''
+if 'opt-in oversized interactive save defers before synchronous compression' in text:
+    raise SystemExit('Core oversize test already exists')
+p.write_text(text + addition)
+
+p = Path('docs/flex-action-fast-path.md')
+text = p.read_text()
+old = "3. After the browser has had a chance to paint, save the full TaskPoints snapshot using the existing interactive packed-save path.\n4. Clear only journal entries whose completion IDs are verified in the authoritative saved snapshot.\n5. Run the normal full home-page render afterward so every dependent score and summary remains current."
+new = "3. After the browser has had a chance to paint, attempt the normal interactive packed-save path. If the packed snapshot has grown beyond the safe interactive localStorage ceiling, keep the tiny journal durable and defer canonical compression instead of synchronously LZ-compressing the multi-megabyte state on the visible main thread.\n4. Clear only journal entries whose completion IDs are verified in the authoritative saved snapshot. Explicit/lifecycle flushes retain the existing canonical full-save behavior.\n5. Run the normal full home-page render afterward so every dependent score and summary remains current."
+if text.count(old) != 1:
+    raise SystemExit('Flex docs target missing')
+p.write_text(text.replace(old, new, 1))
