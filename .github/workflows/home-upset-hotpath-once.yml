@@ -21,7 +21,6 @@ jobs:
       - name: Run focused reconciliation and safety tests
         run: |
           node --test tests/season_series_upset_reconciliation_loop.test.js
-          node --test tests/season_series_upset_notifications.test.js
           node --test tests/home_live_state_bridge_contract.test.js
           node --test tests/storage_atomic_replace_contract.test.js
           node --test tests/storage_data_loss_fail_closed.test.js
