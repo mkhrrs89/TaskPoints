@@ -324,8 +324,8 @@
       return originals.scheduleRender.call(this, () => {
         try {
           if (typeof global.renderTasks !== 'function') throw new Error('renderTasks unavailable');
-          global.renderTasks();
-          global.updateCriticalTasksIsland?.();
+          const liveState = global.TaskPointsHomeLiveState?.getState?.();
+          global.renderTasks(liveState && typeof liveState === 'object' ? liveState : null);
           const ok = refreshLiveScorePanels({ includeYesterday: false });
           if (!ok) throw new Error('live score refresh failed');
           scheduleCanonicalStatsRefresh();
