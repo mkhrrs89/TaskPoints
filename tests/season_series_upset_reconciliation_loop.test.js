@@ -245,14 +245,14 @@ test('Log reconciliation cannot execute a pre-scheduled callback before eight se
 });
 
 
-test('Home reconciliation preserves derived sync while reusing the live Home state as preloaded input', () => {
+test('Home reconciliation skips derived sync while reusing the live Home state as preloaded input', () => {
   const liveState = noChangeState();
   const harness = loadHarness(liveState, { pathname: '/', homeLiveState: liveState });
   const result = harness.api.reconcileStored({ now: new Date('2026-08-08T06:00:00-04:00') });
 
   assert.equal(result.changed, false);
   assert.equal(harness.loadCalls.length, 1);
-  assert.equal(harness.loadCalls[0].syncDerived, true);
+  assert.equal(harness.loadCalls[0].syncDerived, false);
   assert.equal(harness.loadCalls[0].persistSync, false);
   assert.equal(harness.loadCalls[0].preloadedState, liveState);
   assert.equal(harness.api.getReadHotpathStatus().homePreloadedReads, 1);

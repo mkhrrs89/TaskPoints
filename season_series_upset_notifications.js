@@ -9,11 +9,13 @@
   const INSTALL_RETRY_MS = 50;
   const MAX_INSTALL_ATTEMPTS = 240;
   const LOG_RECONCILE_QUIET_MS = 8000;
+  const HOME_RECONCILE_QUIET_MS = 8000;
   let installAttempts = 0;
   let reconciliationTimer = null;
   let reconciliationRunning = false;
   let suppressRevisionQueue = false;
   let executionQuietDeferred = false;
+  let homeExecutionQuietDeferred = false;
   let homePreloadedReads = 0;
   let persistedStateReads = 0;
   let quietQueueGeneration = 0;
@@ -371,16 +373,61 @@
     return true;
   }
 
+  function homeReconcileReadyAtExecution() {
+    if (!isHomePage()) return true;
+    const status = global.TaskPointsCore?.getStorageMaintenanceIdleStatus?.();
+    // This is a foreground-performance guard, not a correctness prerequisite.
+    // Preserve reconciliation in environments where the shared idle helper is
+    // unavailable; production Home installs the helper before this module runs.
+    if (!status || typeof status !== 'object') return true;
+    if (global.document?.visibilityState === 'hidden') return false;
+    if (status.pageLeaving === true || status.activeEditor === true) return false;
+    if (Number(status.navigationQuietForMs || 0) > 0) return false;
+    return Number(status.lastInteractionAgoMs || 0) >= HOME_RECONCILE_QUIET_MS;
+  }
+
+  function deferHomeReconcileAtExecution() {
+    if (!isHomePage() || homeReconcileReadyAtExecution()) {
+      if (homeExecutionQuietDeferred) {
+        const status = global.TaskPointsCore?.getStorageMaintenanceIdleStatus?.();
+        homeExecutionQuietDeferred = false;
+        try {
+          global.TaskPointsPerf?.mark?.('upset.homeExecutionGuardReleased', {
+            requiredQuietMs: HOME_RECONCILE_QUIET_MS,
+            lastInteractionAgoMs: Number(status?.lastInteractionAgoMs || 0)
+          });
+        } catch (_) {}
+      }
+      return false;
+    }
+
+    if (!homeExecutionQuietDeferred) {
+      homeExecutionQuietDeferred = true;
+      const status = global.TaskPointsCore?.getStorageMaintenanceIdleStatus?.();
+      try {
+        global.TaskPointsPerf?.mark?.('upset.homeExecutionGuardDeferred', {
+          requiredQuietMs: HOME_RECONCILE_QUIET_MS,
+          lastInteractionAgoMs: Number(status?.lastInteractionAgoMs || 0),
+          navigationQuietForMs: Number(status?.navigationQuietForMs || 0)
+        });
+      } catch (_) {}
+    }
+    // Poll only the cheap idle status. Never start the full reconciliation until
+    // a fresh execution-time check confirms a sustained quiet window.
+    queueReconcile(500);
+    return true;
+  }
+
   function reconcileStored(options = {}) {
     const core = global.TaskPointsCore;
     if (!core?.loadAppState || !core?.mergeAndSaveState || reconciliationRunning) return null;
-    if (deferLogReconcileAtExecution()) return null;
+    if (deferLogReconcileAtExecution() || deferHomeReconcileAtExecution()) return null;
     reconciliationRunning = true;
     try {
       // Reconciliation is observational unless this module actually has an inbox
       // change to persist. Derived-state sync is still computed for correctness,
       // but must never write the full TaskPoints snapshot just because we checked.
-      const loadOptions = { syncDerived: true, persistSync: false };
+      const loadOptions = { syncDerived: !isHomePage(), persistSync: false };
       if (isHomePage()) {
         try {
           const liveState = global.TaskPointsHomeLiveState?.getState?.();
