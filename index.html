@@ -12293,8 +12293,8 @@ function animateTaskCompletion(id, onDone){
 
 function completeTask(id){
   return tpPerfTime('completeTask total', () => {
-    const t = state.tasks.find(x => x.id === id);
-    if (!t || taskCompletionAnimations.has(id)) return;
+    const liveTask = state.tasks.find(x => x.id === id);
+    if (!liveTask || taskCompletionAnimations.has(id)) return;
 
     const now = new Date().toISOString();
     const completedDayKey = dateKey(now);
@@ -12303,49 +12303,55 @@ function completeTask(id){
       ? state.completions.some(c => c && c.taskId === id && dateKey(c.completedAtISO) === completedDayKey)
       : false;
 
-    if (alreadyCompletedToday) return;
+    if (alreadyCompletedToday || !assertTaskActionMutationWritable()) return;
 
+    const completion = {
+      id: crypto.randomUUID(),
+      taskId: id,
+      title: liveTask.title,
+      points: liveTask.points,
+      completedAtISO: now
+    };
+    addCompletion(completion);
+
+    const rec = liveTask.recurrence || {};
+    const mode = rec.mode || 'none';
+
+    if (mode === 'none') {
+      liveTask.completedAtISO = now;
+      liveTask.status = 'done';
+    } else {
+      const nextKey = computeNextDueDate(liveTask);
+      if (nextKey) liveTask.dueDateISO = nextKey;
+      liveTask.postponedDays = 0;
+      liveTask.completedAtISO = null;
+    }
+
+    liveTask.updatedAtISO = now;
+
+    // Durability comes before animation/paint. The tiny task journal survives an
+    // app close and overlays canonical reads until its verified idle compaction.
+    // Keep the full-save fallback for environments where the journal is absent.
+    if (TaskPointsCore?.journalTaskMutation) {
+      TaskPointsCore.journalTaskMutation({ task: liveTask, completionUpsert: completion });
+      try {
+        window.TaskPointsPerf?.mark?.('taskAction.completionDurable', {
+          taskId: id,
+          completionId: completion.id,
+          recurring: mode !== 'none'
+        });
+      } catch (_) {}
+    } else {
+      save();
+    }
+
+    removeTaskFromTodayView(id, completedDayKey);
+    window.updateCriticalTasksIsland?.(state);
+
+    // Preserve the existing dust animation, but it is now purely visual. A slow
+    // or interrupted animation can no longer prevent the completion from being
+    // written to the durable journal.
     animateTaskCompletion(id, () => {
-      const liveTask = state.tasks.find(x => x.id === id);
-      if (!liveTask) return;
-
-      try { TaskPointsCore?.assertTaskMutationJournalWritable?.(); }
-      catch (error) {
-        console.warn('Task completion paused because its durable journal is unavailable.', error);
-        try { alert(error?.message || 'Task completion is temporarily unavailable.'); } catch (_) {}
-        return;
-      }
-
-      const completion = {
-        id: crypto.randomUUID(),
-        taskId: id,
-        title: liveTask.title,
-        points: liveTask.points,
-        completedAtISO: now
-      };
-      addCompletion(completion);
-
-      const rec = liveTask.recurrence || {};
-      const mode = rec.mode || 'none';
-
-      if (mode === 'none') {
-        liveTask.completedAtISO = now;
-        liveTask.status = 'done';
-      } else {
-        const nextKey = computeNextDueDate(liveTask);
-        if (nextKey) liveTask.dueDateISO = nextKey;
-        liveTask.postponedDays = 0;
-        liveTask.completedAtISO = null;
-      }
-
-      liveTask.updatedAtISO = now;
-      removeTaskFromTodayView(id, completedDayKey);
-      if (TaskPointsCore?.journalTaskMutation) {
-        TaskPointsCore.journalTaskMutation({ task: liveTask, completionUpsert: completion });
-      } else {
-        save();
-      }
-      window.updateCriticalTasksIsland?.();
       scheduleRender(renderAll);
     });
   });
