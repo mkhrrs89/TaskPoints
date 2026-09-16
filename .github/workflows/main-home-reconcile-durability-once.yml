@@ -24,6 +24,8 @@ jobs:
       - run: npm ci
       - name: Apply production hot-path and durability fix
         run: python scripts/apply_main_home_reconcile_durability_fix.py
+      - name: Align existing Home reconciliation regression expectation
+        run: python scripts/apply_main_home_reconcile_test_update.py
       - name: Run focused production safety contracts
         run: >-
           node --test
@@ -58,7 +60,7 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add season_series_upset_notifications.js index.html tests/home_upset_reconcile_hotpath_contract.test.js tests/task_completion_durability_order_contract.test.js
+          git add season_series_upset_notifications.js index.html tests/home_upset_reconcile_hotpath_contract.test.js tests/task_completion_durability_order_contract.test.js tests/season_series_upset_reconciliation_loop.test.js
           if git diff --cached --quiet; then
             echo 'No runtime/test changes to commit.'
           else
