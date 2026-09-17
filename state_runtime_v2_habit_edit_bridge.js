@@ -61,7 +61,11 @@
     if (!habitId || !current || !Array.isArray(current.habits)) return null;
     const habitIndex = current.habits.findIndex((habit) => String(habit?.id || '') === habitId);
     if (habitIndex < 0) return null;
-    const completions = Array.isArray(current.completions) ? current.completions : [];
+    // V2 owns only Habit/Vice completions in this pilot. Sequence values must
+    // therefore be calculated inside that same subset; using the full legacy
+    // completion array lets unrelated task/manual rows distort V2 ordering.
+    const completions = (Array.isArray(current.completions) ? current.completions : [])
+      .filter((completion) => completion?.source === 'habit' || completion?.source === 'vice');
     const completionEntries = [];
     completions.forEach((completion, index) => {
       if (String(completion?.habitId || '') !== habitId) return;
