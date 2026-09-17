@@ -219,6 +219,33 @@
 
     state.habits = Array.isArray(state.habits) ? state.habits : [];
     state.completions = Array.isArray(state.completions) ? state.completions : [];
+
+    // Production Habit reorder durability lives in a tiny localStorage overlay
+    // until its idle full-state compaction succeeds. Treat that overlay as part
+    // of the effective legacy authority for V2 seed/parity/compatibility reads,
+    // just as pending Habit completion deltas already are above.
+    try {
+      const rawOrderOverlay = safeGet('taskpoints_habit_order_overlay_v1');
+      if (rawOrderOverlay) {
+        const orderOverlay = JSON.parse(rawOrderOverlay);
+        if (orderOverlay?.orders && typeof orderOverlay.orders === 'object') {
+          const habitsById = new Map(state.habits.filter(Boolean).map((habit) => [String(habit.id || ''), habit]));
+          Object.entries(orderOverlay.orders).forEach(([habitId, orderValue]) => {
+            const habit = habitsById.get(String(habitId));
+            const nextOrder = Number(orderValue);
+            if (!habit || !Number.isFinite(nextOrder)) return;
+            habit.order = nextOrder;
+            const timestamp = orderOverlay.habitUpdatedAtISO?.[habitId];
+            if (typeof timestamp === 'string' && timestamp > String(habit.updatedAtISO || '')) {
+              habit.updatedAtISO = timestamp;
+            }
+          });
+        }
+      }
+    } catch (error) {
+      throw new Error(`state_runtime_v2_pending_order_overlay_unreadable:${String(error?.message || error)}`);
+    }
+
     return { missing: false, raw, state };
   }
 
