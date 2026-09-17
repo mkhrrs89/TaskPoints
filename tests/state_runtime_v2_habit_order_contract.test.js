@@ -186,6 +186,32 @@ test('order and completion mutations share the same revision guard across runtim
   assert.equal(habitRow(indexedDB, 'h1').doneKeys.includes('2026-09-03'), true);
 });
 
+test('pending production reorder overlay participates in V2 seed and parity before legacy compaction', async () => {
+  const orderOverlayKey = 'taskpoints_habit_order_overlay_v1';
+  const h1Time = '2026-09-17T22:30:30.456Z';
+  const h2Time = '2026-09-17T22:30:31.089Z';
+  const storage = new FakeStorage({
+    [DARK_MODE_KEY]: '1',
+    [LEGACY_KEY]: JSON.stringify(legacyState()),
+    [orderOverlayKey]: JSON.stringify({
+      version: 1,
+      updatedAtISO: h2Time,
+      orders: { h1: 2, h2: 1 },
+      habitUpdatedAtISO: { h1: h1Time, h2: h2Time }
+    })
+  });
+  const app = installRuntime(new FakeIndexedDB(), storage, 'pending-order-overlay');
+
+  await app.api.seedFromLegacy();
+  assert.equal((await app.api.getHabit('h1')).order, 2);
+  assert.equal((await app.api.getHabit('h2')).order, 1);
+  assert.equal((await app.api.getHabit('h1')).updatedAtISO, h1Time);
+  assert.equal((await app.api.getHabit('h2')).updatedAtISO, h2Time);
+
+  const parity = await app.api.verifyParity();
+  assert.equal(parity.match, true, 'pending durable reorder overlay must be part of expected legacy authority');
+});
+
 test('production reorder overlay is persisted before V2 is queued, and replay queues the same durable overlay', () => {
   const writeStart = fastPathSource.indexOf('function writeOverlay()');
   const writeEnd = fastPathSource.indexOf('function applyOverlay()', writeStart);
