@@ -96,9 +96,11 @@ function editHarness() {
       { id: 'h2', name: 'Walk', updatedAtISO: 'before' }
     ],
     completions: [
-      { id: 'c1', habitId: 'h1', points: 4 },
-      ...Array.from({ length: 250 }, (_, index) => ({ id: `u${index}`, habitId: 'h2', points: 1 })),
-      { id: 'c2', habitId: 'h1', points: 4 }
+      { id: 'task-top', source: 'task', taskId: 't1', points: 9 },
+      { id: 'c1', source: 'habit', habitId: 'h1', points: 4 },
+      ...Array.from({ length: 250 }, (_, index) => ({ id: `u${index}`, source: 'habit', habitId: 'h2', points: 1 })),
+      { id: 'c2', source: 'habit', habitId: 'h1', points: 4 },
+      { id: 'manual-bottom', source: 'manual', points: 3 }
     ]
   };
   const runtime = {
@@ -148,6 +150,11 @@ test('Habit edit bridge snapshots only the hot affected Habit/completions and av
   assert.equal(
     Array.from(harness.applied[0].completionEntries, (entry) => String(entry.value.id)).join(','),
     'c1,c2'
+  );
+  assert.deepEqual(
+    Array.from(harness.applied[0].completionEntries, (entry) => Number(entry.sequence)),
+    [252, 1],
+    'hot edit sequence must be based only on the 252 pilot-owned Habit/Vice rows'
   );
   assert.equal(harness.context.TaskPointsStateRuntimeV2HabitEditBridge.getStatus().hotSnapshotRequests, 1);
   assert.equal(harness.context.TaskPointsStateRuntimeV2HabitEditBridge.getStatus().legacyFallbackRequests, 0);
