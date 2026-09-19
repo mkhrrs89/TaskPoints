@@ -185,6 +185,50 @@ test('Habit metadata edit updates only the targeted Habit when historical comple
   assert.equal(app.api.getStatus().readAuthority, 'legacy_only');
 });
 
+test('future-only Habit edit does not resequence historical completions after prior V2 completion mutations', async () => {
+  const app = installRuntime();
+  await app.api.seedFromLegacy();
+
+  const beforeMutation = app.indexedDB.dump(DB_NAME);
+  const h1SeededCompletion = beforeMutation.completions
+    .find((row) => row.id === 'dup')
+    ?.entries?.find((entry) => entry.value?.habitId === 'h1');
+  assert.ok(h1SeededCompletion);
+
+  const mutation = await app.api.applyHabitDelta({
+    habitId: 'h1',
+    dayKey: '2026-09-01',
+    source: 'habit',
+    status: 'full',
+    done: true,
+    completionFraction: 1,
+    completionPoints: 8,
+    completedAtISO: '2026-09-01T12:00:00.000Z',
+    updatedAtISO: '2026-09-03T15:29:00.000Z'
+  });
+  assert.equal(mutation.committed, true);
+
+  const beforeEditCompletions = plain(app.indexedDB.dump(DB_NAME).completions);
+
+  const authoritative = readLegacy(app.localStorage);
+  const h1 = authoritative.habits.find((habit) => habit.id === 'h1');
+  h1.name = 'Read Without Reordering History';
+  h1.updatedAtISO = '2026-09-03T15:30:00.000Z';
+  writeLegacy(app.localStorage, authoritative);
+
+  const result = await app.api.applyHabitEditSnapshot(
+    app.api.captureHabitEditSnapshotFromLegacy('h1', { source: 'test-future-only-after-mutation' })
+  );
+
+  assert.equal(result.committed, true);
+  assert.equal(result.completionRowsTouched, 0);
+  assert.deepEqual(
+    plain(app.indexedDB.dump(DB_NAME).completions),
+    beforeEditCompletions,
+    'future-only metadata edits must not rewrite or resequence unchanged historical completions'
+  );
+});
+
 test('retroactive point edit rewrites only the edited Habits entries even inside a duplicate-ID completion row', async () => {
   const app = installRuntime();
   await app.api.seedFromLegacy();
