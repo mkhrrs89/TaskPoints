@@ -6781,7 +6781,13 @@ function captureLiveDiffPoint(){
   const dayKey = getCurrentTaskPointsDayKey();
   const slot = getLiveDiffSlotForNow();
   if (!slot) return;
-  const latest = normalizeState(load());
+  // Live Diff runs after interactive Habit/reorder fast paths. Those paths can
+  // already be durable in their journals/overlays while Home's parsed-storage
+  // cache still points at an older object. Re-loading through load() here could
+  // replace the newer live state and then save that stale snapshot over it.
+  // Capture from the current Home state instead; lifecycle/revision handling is
+  // responsible for bringing cross-tab changes into this live state.
+  const latest = normalizeState(state);
   state = latest;
   const scores = getTodayVisibleMatchupScores();
   if (!scores) return;
@@ -9114,10 +9120,13 @@ function savePendingHabitState(perfStart = null) {
       state = result.state;
       // A compaction may replace completion arrays; never retain derived data for the old object.
       markCompletionsDirty();
-      storageCache.parsed = state;
-      storageCache.raw = null;
       scheduleHabitTodayScoreReconciliation();
     }
+    // Keep Home's parsed-state cache on the exact live object that just became
+    // canonical. Fast-path reorders that follow will mutate this same object,
+    // preventing later maintenance from resurrecting a pre-Habit snapshot.
+    storageCache.parsed = state;
+    storageCache.raw = null;
     const raw = localStorage.getItem(STORAGE_KEY);
     const persisted = raw ? TaskPointsCore.parseTaskPointsStorageJson(raw, {}) : null;
     // The live state is already final. Candidate selection is pure; verification
