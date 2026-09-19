@@ -6603,7 +6603,8 @@ let liveDiffCaptureIntervalId = null;
     const job = jobs[0];
     const current = now();
     const waitForDelay = job.notBefore - current;
-    const waitForQuiet = quietMs - (current - lastInteractionAt);
+    const requiredQuietMs = Math.max(quietMs, Number(job.quietMs) || 0);
+    const waitForQuiet = requiredQuietMs - (current - lastInteractionAt);
     const waitMs = Math.max(waitForDelay, waitForQuiet, 0);
     if (waitMs > 0) {
       schedule(Math.min(Math.max(waitMs, 250), 2000));
@@ -6628,7 +6629,8 @@ let liveDiffCaptureIntervalId = null;
     jobs.push({
       name: safeName,
       task,
-      notBefore: now() + Math.max(0, Number(options.delayMs) || 0)
+      notBefore: now() + Math.max(0, Number(options.delayMs) || 0),
+      quietMs: Math.max(quietMs, Number(options.quietMs) || 0)
     });
     schedule();
     return true;
@@ -6807,7 +6809,7 @@ function captureLiveDiffPoint(){
   if (window.TP_DEBUG_PERF) {
     console.log('[TP liveDiff]', { dayKey, slot, diff, pointsToday: Object.keys(daySnapshots).length, cleanupRan: true });
   }
-  save();
+  save('home-live-diff-capture');
   drawLiveDiffGraph();
 }
 
@@ -6815,7 +6817,7 @@ function captureLiveDiffPoint(){
 function scheduleInitialHomeLiveDiffCapture() {
   const run = () => captureLiveDiffPoint();
   if (window.TaskPointsHomeIdleQueue?.enqueue) {
-    window.TaskPointsHomeIdleQueue.enqueue('home-live-diff-initial-capture', run, { delayMs: 18000 });
+    window.TaskPointsHomeIdleQueue.enqueue('home-live-diff-initial-capture', run, { delayMs: 18000, quietMs: 8000 });
   } else {
     window.setTimeout(run, 18000);
   }
@@ -6953,7 +6955,12 @@ function bindHomeGraphInteractions() {
 
   if (!liveDiffCaptureIntervalId) {
     liveDiffCaptureIntervalId = window.setInterval(() => {
-      captureLiveDiffPoint();
+      const run = () => captureLiveDiffPoint();
+      if (window.TaskPointsHomeIdleQueue?.enqueue) {
+        window.TaskPointsHomeIdleQueue.enqueue('home-live-diff-periodic-capture', run, { quietMs: 8000 });
+      } else {
+        run();
+      }
     }, 5 * 60 * 1000);
   }
 }
