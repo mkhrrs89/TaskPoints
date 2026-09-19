@@ -162,3 +162,61 @@ test('V2 pilot parity still fails when an authoritative Habit completion is actu
   assert.equal(parity.differences.collections.completions.missing, 1);
   assert.equal(parity.differences.collections.completions.extra, 0);
 });
+
+
+test('V2 parity sample budget reports missing and extra rows before positional move cascades', async () => {
+  const app = install();
+  const state = initialState();
+  state.habits[0].doneKeys = [];
+  state.completions = [];
+
+  for (let index = 1; index <= 30; index += 1) {
+    const dayKey = `2026-08-${String(index).padStart(2, '0')}`;
+    const id = `habit:h1:${dayKey}`;
+    state.habits[0].doneKeys.push(dayKey);
+    state.completions.push({
+      id,
+      taskId: id,
+      title: `[Habit] Read (${dayKey})`,
+      points: 4,
+      completedAtISO: `${dayKey}T12:00:00.000Z`,
+      source: 'habit',
+      habitId: 'h1',
+      dayKey,
+      completionFraction: 1
+    });
+  }
+  app.localStorage.setItem(LEGACY_KEY, JSON.stringify(state));
+  await app.api.seedFromLegacy({ force: true });
+
+  const store = completionStore(app.indexedDB);
+  const missingId = 'habit:h1:2026-08-30';
+  store.delete(missingId);
+  store.set('habit:h1:2099-01-01', {
+    id: 'habit:h1:2099-01-01',
+    value: {
+      id: 'habit:h1:2099-01-01',
+      taskId: 'habit:h1:2099-01-01',
+      title: '[Habit] Read (2099-01-01)',
+      points: 4,
+      completedAtISO: '2099-01-01T12:00:00.000Z',
+      source: 'habit',
+      habitId: 'h1',
+      dayKey: '2099-01-01',
+      completionFraction: 1
+    },
+    sequence: 9999
+  });
+
+  const parity = await app.api.verifyParity();
+  assert.equal(parity.match, false);
+  assert.equal(parity.differences.collections.completions.missing, 1);
+  assert.equal(parity.differences.collections.completions.extra, 1);
+  assert.ok(parity.differences.collections.completions.moved > 20);
+
+  const completionSamples = parity.differences.samples.filter((row) => row.collection === 'completions');
+  assert.equal(completionSamples[0].kind, 'missing');
+  assert.equal(completionSamples[0].id, missingId);
+  assert.equal(completionSamples[1].kind, 'extra');
+  assert.equal(completionSamples[1].id, 'habit:h1:2099-01-01');
+});
