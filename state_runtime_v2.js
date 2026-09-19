@@ -1981,11 +1981,10 @@
       const rightRows = index(right);
       const rightMap = new Map(rightRows.map((row) => [row.key, row]));
       const counts = { missing: 0, extra: 0, changed: 0, moved: 0 };
+      const sampleBuckets = { missing: [], extra: [], changed: [], moved: [] };
       const add = (row, kind, other, fields = []) => {
         counts[kind] += 1;
-        if (sampleCounts[collection] >= limit) return;
-        sampleCounts[collection] += 1;
-        samples.push({
+        sampleBuckets[kind].push({
           collection, kind, id: row.id, occurrence: row.occurrence,
           expectedIndex: kind === 'extra' ? null : row.position,
           actualIndex: kind === 'missing' ? null : (other || row).position,
@@ -2024,6 +2023,19 @@
         }
       }
       for (const row of rightMap.values()) add(row, 'extra');
+
+      // A single insertion/removal can make thousands of otherwise-equal rows
+      // appear "moved". Preserve the scarce sample budget for actionable
+      // membership/content mismatches first so the trace never hides the real
+      // missing/extra IDs behind that positional cascade.
+      for (const kind of ['missing', 'extra', 'changed', 'moved']) {
+        for (const sample of sampleBuckets[kind]) {
+          if (sampleCounts[collection] >= limit) break;
+          samples.push(sample);
+          sampleCounts[collection] += 1;
+        }
+        if (sampleCounts[collection] >= limit) break;
+      }
       collections[collection] = counts;
     }
     const total = Object.values(collections).reduce((sum, counts) => sum + Object.values(counts).reduce((a, b) => a + b, 0), 0);
