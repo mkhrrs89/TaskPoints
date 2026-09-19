@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const audit = require('../audit_integrity.js');
 
-const options = { todayKey: '2026-07-17', dateKey: value => String(value).slice(0, 10), npcScoreMin: 5, npcScoreMax: 85 };
+const options = { todayKey: '2026-07-17', dateKey: value => String(value).slice(0, 10), npcScoreMin: 5, npcScoreMax: 86 };
 const npc = (overrides = {}) => ({ players: [{ id: 'npc', active: true, baseline: 30 }], matchups: [], gameHistory: [], opponentDripSchedules: [], ...overrides });
 const matchup = (overrides = {}) => ({ id: 'm1', dateKey: options.todayKey, playerAId: 'YOU', playerBId: 'npc', scoreA: 100, scoreB: 30, completedAtISO: `${options.todayKey}T12:00:00Z`, ...overrides });
 const history = (overrides = {}) => ({ id: 'g1', dateKey: options.todayKey, playerId: 'npc', score: 30, matchupId: 'm1', ...overrides });
@@ -16,6 +16,15 @@ const habitState = (habitOverrides = {}, completionOverrides = {}) => ({
 test('NPC score health accepts healthy data and ignores YOU range', () => {
   assert.equal(audit.buildNpcScoreHealthAudit(npc({ matchups: [matchup()], gameHistory: [history()] }), options).status, 'PASS');
 });
+test('NPC score health accepts the new 86 ceiling', () => {
+  assert.equal(audit.buildNpcScoreHealthAudit(npc({ gameHistory: [history({ score: 85.2 })] }), options).status, 'PASS');
+  assert.equal(audit.buildNpcScoreHealthAudit(npc({ gameHistory: [history({ score: 86 })] }), options).status, 'PASS');
+  assert.equal(audit.buildNpcScoreHealthAudit(npc({ gameHistory: [history({ score: 86.1 })] }), options).status, 'FAIL');
+
+  const defaultRange = { todayKey: options.todayKey, dateKey: options.dateKey };
+  assert.equal(audit.buildNpcScoreHealthAudit(npc({ gameHistory: [history({ score: 85.2 })] }), defaultRange).status, 'PASS');
+});
+
 test('NPC historical out-of-range warns and current out-of-range fails', () => {
   assert.equal(audit.buildNpcScoreHealthAudit(npc({ gameHistory: [history({ dateKey: '2026-07-16', score: -2.2 })] }), options).status, 'WARN');
   assert.equal(audit.buildNpcScoreHealthAudit(npc({ gameHistory: [history({ score: -2.2 })] }), options).status, 'FAIL');
@@ -180,7 +189,7 @@ test('audit page loads and wires read-only integrity builders and centralized li
   assert.match(html, /<script src="audit_integrity\.js"><\/script>/);
   for (const name of ['buildNpcScoreHealthAudit', 'buildMatchupHistoryReconciliationAudit', 'buildHabitLedgerConsistencyAudit']) assert.match(html, new RegExp(`checks\\.push\\(TaskPointsAuditIntegrity\\.${name}`));
   assert.match(html, /TaskPointsCore\.NPC_SCORE_ABSOLUTE_MIN \?\? 5/);
-  assert.match(html, /TaskPointsCore\.NPC_SCORE_ABSOLUTE_MAX \?\? 85/);
+  assert.match(html, /npcScoreMax:\s*86/);
   const source = fs.readFileSync(path.join(__dirname, '..', 'audit_integrity.js'), 'utf8');
   assert.doesNotMatch(source, /saveAppState|saveStateSnapshot|mergeAndSaveState|localStorage\.setItem|\bsync[A-Z]/);
 });
