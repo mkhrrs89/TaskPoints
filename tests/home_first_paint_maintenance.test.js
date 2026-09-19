@@ -25,6 +25,28 @@ test('Home first render does not reload or save live-diff state', () => {
   assert.match(home, /delayMs: 18000/);
 });
 
+test('Live Diff maintenance preserves current Home fast-path state instead of reloading a stale parsed cache', () => {
+  const capture = blockBetween(
+    home,
+    'function captureLiveDiffPoint(){',
+    'function scheduleInitialHomeLiveDiffCapture()'
+  );
+  assert.match(capture, /const latest = normalizeState\(state\)/);
+  assert.doesNotMatch(capture, /normalizeState\(load\(\)\)/);
+  assert.match(capture, /state = nextState/);
+  assert.match(capture, /save\(\)/);
+});
+
+test('Habit journal compaction always points the Home parsed cache at the newly canonical live state', () => {
+  const compaction = blockBetween(
+    home,
+    'function savePendingHabitState(perfStart = null)',
+    'function flushPendingHabitSave(reason = \'manual\')'
+  );
+  assert.match(compaction, /storageCache\.parsed = state/);
+  assert.match(compaction, /storageCache\.raw = null/);
+});
+
 test('Home maintenance queue waits for interaction quiet and serializes jobs', () => {
   const queue = blockBetween(
     home,
