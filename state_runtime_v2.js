@@ -466,16 +466,24 @@
 
   function patchHabit(habit, delta) {
     const next = clone(habit || {});
-    const removeDay = (values) => (Array.isArray(values) ? values : []).filter((key) => key !== delta.dayKey);
-    next.doneKeys = removeDay(next.doneKeys);
-    next.failedKeys = removeDay(next.failedKeys);
-    next.iceKeys = removeDay(next.iceKeys);
+    const preserveOrRemoveDay = (values, shouldContain) => {
+      const current = Array.isArray(values) ? values.slice() : [];
+      const alreadyContains = current.includes(delta.dayKey);
+      if (shouldContain) {
+        // Match the legacy foreground mutation exactly: when a day stays in
+        // the same set (for example full -> half or normal -> icy), its array
+        // position does not change. Only a newly-added day is appended.
+        if (!alreadyContains) current.push(delta.dayKey);
+        return current;
+      }
+      return current.filter((key) => key !== delta.dayKey);
+    };
 
     const done = delta.done === true || delta.status === 'full' || delta.status === 'half';
     const failed = delta.failed === true || delta.status === 'failed';
-    if (done) next.doneKeys.push(delta.dayKey);
-    if (failed) next.failedKeys.push(delta.dayKey);
-    if (delta.icy === true) next.iceKeys.push(delta.dayKey);
+    next.doneKeys = preserveOrRemoveDay(next.doneKeys, done);
+    next.failedKeys = preserveOrRemoveDay(next.failedKeys, failed);
+    next.iceKeys = preserveOrRemoveDay(next.iceKeys, delta.icy === true);
     next.updatedAtISO = delta.updatedAtISO || next.updatedAtISO;
     return next;
   }
@@ -1218,9 +1226,14 @@
           if (!habitRow?.value) throw new Error(`state_runtime_v2_habit_missing:${snapshot.habitId}`);
 
           const existingTargetEntries = targetCompletionEntriesFromRows(completionRows, snapshot.habitId);
+          const completionPayloadsEqual = (left, right) => stableJson(
+            (left || []).map((entry) => ({ storageId: entry.storageId, value: entry.value }))
+          ) === stableJson(
+            (right || []).map((entry) => ({ storageId: entry.storageId, value: entry.value }))
+          );
           if (
             stableJson(habitRow.value) === stableJson(snapshot.habit)
-            && stableJson(existingTargetEntries) === stableJson(snapshot.completionEntries)
+            && completionPayloadsEqual(existingTargetEntries, snapshot.completionEntries)
           ) {
             noChange = true;
             return;
@@ -1250,11 +1263,22 @@
             const desiredEntries = (desiredById.get(storageId) || [])
               .slice()
               .sort((a, b) => Number(b.sequence || 0) - Number(a.sequence || 0));
-            if (stableJson(existingTargetEntriesForRow) === stableJson(desiredEntries)) return;
+            const existingValues = existingTargetEntriesForRow.map((entry) => clone(entry.value));
+            const desiredValues = desiredEntries.map((entry) => clone(entry.value));
+            if (stableJson(existingValues) === stableJson(desiredValues)) return;
 
             const retainedEntries = existingEntries
               .filter((entry) => String(entry?.value?.habitId || '') !== snapshot.habitId);
-            const combined = [...retainedEntries, ...desiredEntries]
+            // Habit edits may change historical completion payloads (for
+            // example a retroactive points edit), but they do not reorder those
+            // completions. Preserve each existing V2 sequence while replacing
+            // its value. Snapshot sequence numbers describe legacy positions
+            // and can collide with the runtime's monotonic mutation sequence.
+            const rewrittenDesiredEntries = desiredEntries.map((entry, index) => ({
+              value: clone(entry.value),
+              sequence: Number(existingTargetEntriesForRow[index]?.sequence ?? entry.sequence ?? 0)
+            }));
+            const combined = [...retainedEntries, ...rewrittenDesiredEntries]
               .sort((a, b) => Number(b.sequence || 0) - Number(a.sequence || 0));
             if (combined.length) {
               completionsStore.put({ id: storageId, entries: combined });
