@@ -22,7 +22,9 @@ test('Home first render does not reload or save live-diff state', () => {
   assert.match(renderStats, /drawLiveDiffGraph\(\)/);
   assert.match(home, /function scheduleInitialHomeLiveDiffCapture\(\)/);
   assert.match(home, /home-live-diff-initial-capture/);
-  assert.match(home, /delayMs: 18000/);
+  assert.match(home, /delayMs: 18000, quietMs: 8000/);
+  assert.match(home, /home-live-diff-periodic-capture/);
+  assert.match(home, /home-live-diff-capture/);
 });
 
 test('Live Diff maintenance preserves current Home fast-path state instead of reloading a stale parsed cache', () => {
@@ -34,7 +36,7 @@ test('Live Diff maintenance preserves current Home fast-path state instead of re
   assert.match(capture, /const latest = normalizeState\(state\)/);
   assert.doesNotMatch(capture, /normalizeState\(load\(\)\)/);
   assert.match(capture, /state = nextState/);
-  assert.match(capture, /save\(\)/);
+  assert.match(capture, /save\('home-live-diff-capture'\)/);
 });
 
 test('Habit journal compaction always points the Home parsed cache at the newly canonical live state', () => {
@@ -55,6 +57,8 @@ test('Home maintenance queue waits for interaction quiet and serializes jobs', (
   );
   assert.match(queue, /const quietMs = 3000/);
   assert.match(queue, /const gapMs = 2000/);
+  assert.match(queue, /requiredQuietMs = Math\.max\(quietMs, Number\(job\.quietMs\) \|\| 0\)/);
+  assert.match(queue, /quietMs: Math\.max\(quietMs, Number\(options\.quietMs\) \|\| 0\)/);
   for (const eventName of ['pointerdown', 'touchstart', 'wheel', 'scroll', 'keydown']) {
     assert.match(queue, new RegExp(`'${eventName}'`));
   }
