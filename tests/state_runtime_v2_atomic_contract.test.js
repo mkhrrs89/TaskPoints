@@ -140,6 +140,53 @@ test('V2-03 one habit mutation atomically commits habit, completion, ledger row,
   assert.equal(meta.completionSequence, 1);
 });
 
+test('Habit mutation preserves doneKeys position when a completed day remains completed', async () => {
+  const localStorage = new FakeStorage({
+    [DARK_MODE_KEY]: '1',
+    [LEGACY_KEY]: JSON.stringify({
+      habits: [{
+        id: 'h1',
+        name: 'Read',
+        pointsPerDay: 4,
+        doneKeys: ['2026-09-01', '2026-09-02', '2026-09-03'],
+        failedKeys: [],
+        iceKeys: []
+      }],
+      completions: [{
+        id: 'habit:h1:2026-09-02',
+        taskId: 'habit:h1:2026-09-02',
+        title: '[Habit] Read (2026-09-02)',
+        points: 4,
+        completedAtISO: '2026-09-02T12:00:00.000Z',
+        source: 'habit',
+        habitId: 'h1',
+        dayKey: '2026-09-02',
+        completionFraction: 1
+      }]
+    })
+  });
+  const app = installRuntime({ localStorage });
+  await app.api.seedFromLegacy();
+
+  const result = await app.api.applyHabitDelta(delta('2026-09-02', {
+    status: 'half',
+    done: true,
+    completionFraction: 0.5,
+    completionPoints: 2,
+    completedAtISO: '2026-09-02T12:00:00.000Z',
+    updatedAtISO: '2026-09-03T15:00:00.000Z'
+  }));
+
+  assert.equal(result.committed, true);
+  const after = app.indexedDB.dump(DB_NAME);
+  assert.deepEqual(
+    after.habits.find((row) => row.id === 'h1').value.doneKeys,
+    ['2026-09-01', '2026-09-02', '2026-09-03'],
+    'full-to-half must not move an already-completed day to the end of doneKeys'
+  );
+  assert.equal(completion(after, '2026-09-02').value.completionFraction, 0.5);
+});
+
 test('V2-04 failure of the final meta write rolls back every part of the logical mutation', async () => {
   const app = installRuntime();
   await app.api.seedFromLegacy();
