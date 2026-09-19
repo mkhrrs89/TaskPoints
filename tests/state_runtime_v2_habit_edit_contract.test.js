@@ -189,32 +189,61 @@ test('future-only Habit edit does not resequence historical completions after pr
   const app = installRuntime();
   await app.api.seedFromLegacy();
 
-  const beforeMutation = app.indexedDB.dump(DB_NAME);
-  const h1SeededCompletion = beforeMutation.completions
-    .find((row) => row.id === 'dup')
-    ?.entries?.find((entry) => entry.value?.habitId === 'h1');
-  assert.ok(h1SeededCompletion);
-
-  const mutation = await app.api.applyHabitDelta({
+  // Add one ordinary canonical completion to both authorities.
+  const authoritativeFull = readLegacy(app.localStorage);
+  const h1Full = authoritativeFull.habits.find((habit) => habit.id === 'h1');
+  h1Full.doneKeys.push('2026-09-03');
+  authoritativeFull.completions.unshift({
+    id: 'habit:h1:2026-09-03',
+    taskId: 'habit:h1:2026-09-03',
+    title: '[Habit] Read (2026-09-03)',
+    source: 'habit',
     habitId: 'h1',
-    dayKey: '2026-09-01',
+    dayKey: '2026-09-03',
+    points: 8,
+    completionFraction: 1,
+    completedAtISO: '2026-09-03T12:00:00.000Z'
+  });
+  writeLegacy(app.localStorage, authoritativeFull);
+  await app.api.applyHabitDelta({
+    habitId: 'h1',
+    dayKey: '2026-09-03',
     source: 'habit',
     status: 'full',
     done: true,
     completionFraction: 1,
     completionPoints: 8,
-    completedAtISO: '2026-09-01T12:00:00.000Z',
-    updatedAtISO: '2026-09-03T15:29:00.000Z'
+    completedAtISO: '2026-09-03T12:00:00.000Z',
+    updatedAtISO: '2026-09-03T12:00:00.000Z'
   });
-  assert.equal(mutation.committed, true);
+
+  // Update the same completion again. Its V2 monotonic sequence now advances
+  // beyond the fixed legacy array-position sequence, while the payload/order
+  // remain semantically identical between authorities.
+  const authoritativeHalf = readLegacy(app.localStorage);
+  const halfCompletion = authoritativeHalf.completions.find((completion) => completion.id === 'habit:h1:2026-09-03');
+  halfCompletion.points = 4;
+  halfCompletion.completionFraction = 0.5;
+  writeLegacy(app.localStorage, authoritativeHalf);
+  await app.api.applyHabitDelta({
+    habitId: 'h1',
+    dayKey: '2026-09-03',
+    source: 'habit',
+    status: 'half',
+    done: true,
+    completionFraction: 0.5,
+    completionPoints: 4,
+    completedAtISO: '2026-09-03T12:00:00.000Z',
+    updatedAtISO: '2026-09-03T12:01:00.000Z'
+  });
 
   const beforeEditCompletions = plain(app.indexedDB.dump(DB_NAME).completions);
 
-  const authoritative = readLegacy(app.localStorage);
-  const h1 = authoritative.habits.find((habit) => habit.id === 'h1');
+  const authoritativeEdit = readLegacy(app.localStorage);
+  const h1 = authoritativeEdit.habits.find((habit) => habit.id === 'h1');
   h1.name = 'Read Without Reordering History';
   h1.updatedAtISO = '2026-09-03T15:30:00.000Z';
-  writeLegacy(app.localStorage, authoritative);
+  writeLegacy(app.localStorage, authoritativeEdit);
 
   const result = await app.api.applyHabitEditSnapshot(
     app.api.captureHabitEditSnapshotFromLegacy('h1', { source: 'test-future-only-after-mutation' })
@@ -228,6 +257,7 @@ test('future-only Habit edit does not resequence historical completions after pr
     'future-only metadata edits must not rewrite or resequence unchanged historical completions'
   );
 });
+
 
 test('retroactive point edit rewrites only the edited Habits entries even inside a duplicate-ID completion row', async () => {
   const app = installRuntime();
