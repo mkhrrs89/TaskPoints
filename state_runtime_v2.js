@@ -1984,6 +1984,7 @@
       const sampleBuckets = { missing: [], extra: [], changed: [], moved: [] };
       const add = (row, kind, other, fields = []) => {
         counts[kind] += 1;
+        if (sampleBuckets[kind].length >= limit) return;
         sampleBuckets[kind].push({
           collection, kind, id: row.id, occurrence: row.occurrence,
           expectedIndex: kind === 'extra' ? null : row.position,
