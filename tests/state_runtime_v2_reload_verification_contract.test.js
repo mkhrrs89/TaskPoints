@@ -83,6 +83,48 @@ function plain(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+test('reload seed captures the pre-mutation legacy baseline before awaiting IndexedDB', async () => {
+  const indexedDB = new FakeIndexedDB();
+  const localStorage = new FakeStorage({
+    [DARK_MODE_KEY]: '1',
+    [LEGACY_KEY]: JSON.stringify(legacyState())
+  });
+
+  const runtimeA = installRuntime(indexedDB, localStorage, 'capture-a');
+  await runtimeA.seedFromLegacy();
+  await runtimeA.applyHabitDelta(delta());
+  const checkpoint = await runtimeA.buildCompatibilitySnapshot();
+  localStorage.setItem(LEGACY_KEY, JSON.stringify(checkpoint));
+
+  const runtimeB = installRuntime(indexedDB, localStorage, 'capture-b');
+  const seedPromise = runtimeB.seedFromLegacy();
+
+  // Simulate the user adding a Habit while IndexedDB startup work is still
+  // pending. The seed must keep the authority snapshot from the instant it was
+  // requested, then let the explicit presence mutation mirror this later add.
+  const afterAdd = JSON.parse(localStorage.getItem(LEGACY_KEY));
+  afterAdd.habits.push({
+    id: 'h2',
+    name: 'Added While Seed Is Pending',
+    pointsPerDay: 3,
+    doneKeys: [],
+    failedKeys: [],
+    iceKeys: []
+  });
+  localStorage.setItem(LEGACY_KEY, JSON.stringify(afterAdd));
+
+  const seed = await seedPromise;
+  assert.equal(seed.seeded, false);
+  assert.equal(seed.reason, 'verified_current');
+  assert.equal(await runtimeB.getHabit('h2'), null, 'pending seed must not absorb a later user mutation into its baseline');
+
+  const presence = await runtimeB.applyHabitPresenceSnapshot(
+    runtimeB.captureHabitPresenceSnapshotFromLegacy('h2', { source: 'reload-race-test' })
+  );
+  assert.equal(presence.committed, true);
+  assert.equal((await runtimeB.verifyParity()).match, true);
+});
+
 test('V2 preview survives repeated runtime recreation and repeated parity verification without duplicating state', async () => {
   const indexedDB = new FakeIndexedDB();
   const localStorage = new FakeStorage({
@@ -99,10 +141,13 @@ test('V2 preview survives repeated runtime recreation and repeated parity verifi
   localStorage.setItem(LEGACY_KEY, JSON.stringify(compatibility));
 
   const revisionAfterMutation = runtimeMeta(indexedDB).revision;
+  const beforeReloadVerification = indexedDB.dump(DB_NAME);
   const runtimeB = installRuntime(indexedDB, localStorage, 'reload-b');
-  const reseed = await runtimeB.seedFromLegacy();
-  assert.equal(reseed.seeded, true, 'first reload reseeds after the legacy checkpoint catches up');
-  assert.equal(runtimeMeta(indexedDB).revision, revisionAfterMutation + 1);
+  const reloadVerification = await runtimeB.seedFromLegacy();
+  assert.equal(reloadVerification.seeded, false, 'reload adopts an already-correct V2 mirror instead of reseeding it');
+  assert.equal(reloadVerification.reason, 'verified_current');
+  assert.equal(reloadVerification.verifiedExisting, true);
+  assert.equal(runtimeMeta(indexedDB).revision, revisionAfterMutation, 'read-only reload verification does not advance the mutation revision');
 
   const parityB1 = await runtimeB.verifyParity();
   const parityB2 = await runtimeB.verifyParity();
@@ -114,7 +159,17 @@ test('V2 preview survives repeated runtime recreation and repeated parity verifi
   const afterB = indexedDB.dump(DB_NAME);
   assert.equal(afterB.habits[0].value.doneKeys.includes('2026-09-03'), true);
   assert.equal(afterB.completions.length, 1);
-  assert.equal(afterB.mutations.length, 0, 'reseed establishes a fresh verified mirror rather than replaying old mutations');
+  assert.equal(afterB.mutations.length, 1, 'verified reload preserves the incremental mutation ledger');
+  assert.deepEqual(
+    plain(afterB.habits),
+    plain(beforeReloadVerification.habits),
+    'verified reload does not rewrite Habit rows'
+  );
+  assert.deepEqual(
+    plain(afterB.completions),
+    plain(beforeReloadVerification.completions),
+    'verified reload does not rewrite completion rows'
+  );
 
   const runtimeC = installRuntime(indexedDB, localStorage, 'reload-c');
   const beforeC = indexedDB.dump(DB_NAME);
@@ -125,6 +180,6 @@ test('V2 preview survives repeated runtime recreation and repeated parity verifi
   assert.equal(seedC.seeded, false);
   assert.equal(seedC.reason, 'already_current');
   assert.equal(parityC.match, true);
-  assert.deepEqual(afterC, beforeC, 'an already-current reload performs no destructive rewrite');
+  assert.deepEqual(afterC, beforeC, 'a parity-marked reload performs no destructive rewrite');
   assert.equal(runtimeC.getStatus().readAuthority, 'legacy_only');
 });
