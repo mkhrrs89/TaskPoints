@@ -2170,6 +2170,22 @@
       },
       checkedAtISO: nowIso()
     };
+
+    // A successful parity check is also proof that the persisted V2 baseline is
+    // current. Refresh the cheap reload marker so the next page load can adopt
+    // this database immediately instead of rewriting the full pilot dataset.
+    if (lastParity.match) {
+      const verifiedHash = subsetHash(source.state);
+      try {
+        const db = await open();
+        const meta = db ? await readMeta(db) : null;
+        if (db && meta) await refreshSeedMarker(db, meta, verifiedHash, currentGeneration({ create: false }), 'parity-match');
+        lastSeedHash = verifiedHash;
+      } catch (error) {
+        mark('stateV2.seedMarkerRefreshFailed', { message: String(error?.message || error), source: 'parity-match' });
+      }
+    }
+
     mark('stateV2.parityChecked', lastParity);
     return lastParity;
   }
