@@ -335,6 +335,39 @@
     return { seeded: true, empty: true, reason: 'legacy_missing', resetGeneration, revision };
   }
 
+  async function readV2CollectionsFromDb(db) {
+    const tx = db.transaction(['habits', 'completions'], 'readonly');
+    const habitsRequest = tx.objectStore('habits').getAll();
+    const completionsRequest = tx.objectStore('completions').getAll();
+    const [habitRows, completionRows] = await Promise.all([
+      requestPromise(habitsRequest),
+      requestPromise(completionsRequest)
+    ]);
+    const habits = (habitRows || [])
+      .slice()
+      .sort((a, b) => Number(a.legacyIndex || 0) - Number(b.legacyIndex || 0))
+      .map((row) => clone(row.value));
+    const completions = unpackCompletionRows(completionRows);
+    return { habits, completions };
+  }
+
+  async function refreshSeedMarker(db, previousMeta, hash, desiredGeneration, reason) {
+    if (!previousMeta || previousMeta.seedHash === hash) return previousMeta;
+    const nextMeta = {
+      ...previousMeta,
+      id: RUNTIME_META_ID,
+      schemaVersion: SCHEMA_VERSION,
+      resetGeneration: desiredGeneration,
+      seedHash: hash,
+      seedVerifiedAtISO: nowIso(),
+      seedVerifiedReason: String(reason || 'verified-current')
+    };
+    const tx = db.transaction('meta', 'readwrite');
+    tx.objectStore('meta').put(nextMeta);
+    await transactionPromise(tx);
+    return nextMeta;
+  }
+
   async function seedFromLegacy(options = {}) {
     if (!isDarkEnabled()) return { seeded: false, reason: 'dark_disabled' };
     const requestedGeneration = currentGeneration();
@@ -352,15 +385,22 @@
       return seedPromise.then(() => seedFromLegacy({ ...options, force: true }));
     }
 
+    // Capture the legacy authority before the first async IndexedDB wait. On a
+    // physical device, opening/reading IndexedDB can take long enough for the
+    // user to perform a new mutation. Seeding from a later snapshot would fold
+    // that new mutation into the baseline before its incremental V2 mirror runs.
+    const desiredGeneration = currentGeneration();
+    const source = parseLegacyStateWithPending();
+    const capturedHash = source.missing ? null : subsetHash(source.state);
+
     const run = async () => {
-      const desiredGeneration = currentGeneration();
       const db = await open();
       if (!db) return { seeded: false, reason: 'dark_disabled' };
-      const previousMeta = await readMeta(db);
-      const source = parseLegacyStateWithPending();
+      let previousMeta = await readMeta(db);
       if (source.missing) return clearForMissingLegacy(db, previousMeta, desiredGeneration);
 
-      const hash = subsetHash(source.state);
+      const hash = capturedHash;
+
       if (
         options.force !== true
         && previousMeta?.schemaVersion === SCHEMA_VERSION
@@ -379,6 +419,48 @@
           resetGeneration: desiredGeneration,
           revision: lastKnownRevision
         };
+      }
+
+      // A stale seedHash does not necessarily mean the V2 data is stale. Every
+      // successful incremental mirror advances V2 without recomputing a full
+      // legacy hash, so after a reload the old implementation could clear and
+      // rewrite thousands of already-correct rows. Verify the persisted V2
+      // pilot data read-only first; only a real parity mismatch may fall back to
+      // the destructive full reseed below.
+      if (
+        options.force !== true
+        && previousMeta?.schemaVersion === SCHEMA_VERSION
+        && previousMeta?.legacyMissing !== true
+        && previousMeta?.resetGeneration === desiredGeneration
+      ) {
+        const collections = await readV2CollectionsFromDb(db);
+        const expectedText = stableJson(paritySubset(sourceSubset(source.state)));
+        const actualText = stableJson(paritySubset(collections));
+        if (expectedText === actualText) {
+          try {
+            previousMeta = await refreshSeedMarker(db, previousMeta, hash, desiredGeneration, 'read-only-reload-verification');
+          } catch (error) {
+            mark('stateV2.seedMarkerRefreshFailed', { message: String(error?.message || error) });
+          }
+          seeded = true;
+          lastSeedHash = hash;
+          lastResetGeneration = desiredGeneration;
+          lastKnownRevision = Number(previousMeta?.revision || 0);
+          mark('stateV2.seedAdoptedExisting', {
+            habits: collections.habits.length,
+            completions: collections.completions.length,
+            revision: lastKnownRevision,
+            resetGeneration: desiredGeneration
+          });
+          return {
+            seeded: false,
+            reason: 'verified_current',
+            verifiedExisting: true,
+            hash,
+            resetGeneration: desiredGeneration,
+            revision: lastKnownRevision
+          };
+        }
       }
 
       const habits = source.state.habits;
@@ -1866,19 +1948,7 @@
   async function readV2Collections() {
     const db = await open();
     if (!db) return { habits: [], completions: [] };
-    const tx = db.transaction(['habits', 'completions'], 'readonly');
-    const habitsRequest = tx.objectStore('habits').getAll();
-    const completionsRequest = tx.objectStore('completions').getAll();
-    const [habitRows, completionRows] = await Promise.all([
-      requestPromise(habitsRequest),
-      requestPromise(completionsRequest)
-    ]);
-    const habits = (habitRows || [])
-      .slice()
-      .sort((a, b) => Number(a.legacyIndex || 0) - Number(b.legacyIndex || 0))
-      .map((row) => clone(row.value));
-    const completions = unpackCompletionRows(completionRows);
-    return { habits, completions };
+    return readV2CollectionsFromDb(db);
   }
 
   function completionCompatibilityBase(completion) {
