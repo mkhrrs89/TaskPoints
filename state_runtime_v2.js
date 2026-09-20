@@ -1948,7 +1948,19 @@
   async function readV2Collections() {
     const db = await open();
     if (!db) return { habits: [], completions: [] };
-    return readV2CollectionsFromDb(db);
+    const tx = db.transaction(['habits', 'completions'], 'readonly');
+    const habitsRequest = tx.objectStore('habits').getAll();
+    const completionsRequest = tx.objectStore('completions').getAll();
+    const [habitRows, completionRows] = await Promise.all([
+      requestPromise(habitsRequest),
+      requestPromise(completionsRequest)
+    ]);
+    const habits = (habitRows || [])
+      .slice()
+      .sort((a, b) => Number(a.legacyIndex || 0) - Number(b.legacyIndex || 0))
+      .map((row) => clone(row.value));
+    const completions = unpackCompletionRows(completionRows);
+    return { habits, completions };
   }
 
   function completionCompatibilityBase(completion) {
@@ -2171,20 +2183,6 @@
       checkedAtISO: nowIso()
     };
 
-    // A successful parity check is also proof that the persisted V2 baseline is
-    // current. Refresh the cheap reload marker so the next page load can adopt
-    // this database immediately instead of rewriting the full pilot dataset.
-    if (lastParity.match) {
-      const verifiedHash = subsetHash(source.state);
-      try {
-        const db = await open();
-        const meta = db ? await readMeta(db) : null;
-        if (db && meta) await refreshSeedMarker(db, meta, verifiedHash, currentGeneration({ create: false }), 'parity-match');
-        lastSeedHash = verifiedHash;
-      } catch (error) {
-        mark('stateV2.seedMarkerRefreshFailed', { message: String(error?.message || error), source: 'parity-match' });
-      }
-    }
 
     mark('stateV2.parityChecked', lastParity);
     return lastParity;
