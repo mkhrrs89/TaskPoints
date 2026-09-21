@@ -104,6 +104,13 @@
     if (!id) return 'Backup row has no completion ID.';
     if (row.source !== target.expectedSource) return 'Backup row has the wrong habit/vice source.';
     if (habitIdFor(row) !== target.habitId || dayFor(row) !== target.dayKey) return 'Backup row does not exactly match the habit/date.';
+    if (!row.completedAtISO) return 'Backup row has no completedAtISO, so it would not contribute to historical scoring.';
+    const completedAt = new Date(row.completedAtISO);
+    if (Number.isNaN(completedAt.getTime())) return 'Backup row has an invalid completedAtISO.';
+    let scoredDay = '';
+    try { scoredDay = typeof core.dateKey === 'function' ? core.dateKey(completedAt) : completedAt.toISOString().slice(0, 10); }
+    catch (_) { scoredDay = ''; }
+    if (scoredDay !== target.dayKey) return 'Backup row completedAtISO would score on a different day.';
     if (!Number.isFinite(Number(row.points))) return 'Backup row has no finite stored point value.';
     const fraction = row.completionFraction == null ? 1 : Number(row.completionFraction);
     if (fraction !== 0.5 && fraction !== 1) return 'Backup row has an invalid completionFraction.';
