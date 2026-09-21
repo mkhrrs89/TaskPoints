@@ -1358,6 +1358,8 @@ function runWeightVo2HistorySavePathAudit(state) {
     const SEASON_AUDIT_ROUND_ORDER = ['play_in', 'round_of_32', 'sweet_16', 'quarterfinals', 'semifinals', 'finals'];
 
     const NOTES_PAGE_CACHE_KEY_FOR_AUDIT = "taskpoints_notes_v1";
+    const NOTES_DIRTY_KEY_FOR_AUDIT = "taskpoints_notes_dirty_v1";
+    const NOTES_AUTHORITY_KEY_FOR_AUDIT = "taskpoints_notes_authoritative_v1";
 
     function hasMeaningfulNoteValueForAudit(value) {
       if (typeof value === 'string') return value.trim().length > 0;
@@ -1415,9 +1417,17 @@ function runWeightVo2HistorySavePathAudit(state) {
     }
 
     function getBestNotesTextForAudit(state = null) {
-      const cached = getCachedGeneralNotesForAudit() || '';
+      const cachedRaw = getCachedGeneralNotesForAudit();
+      const cached = cachedRaw || '';
       const stateNotes = typeof state?.notes === 'string' ? state.notes : '';
+      let cacheDirty = false;
+      let cacheAuthoritative = false;
+      try {
+        cacheDirty = localStorage.getItem(NOTES_DIRTY_KEY_FOR_AUDIT) === '1';
+        cacheAuthoritative = localStorage.getItem(NOTES_AUTHORITY_KEY_FOR_AUDIT) === '1';
+      } catch (_) {}
 
+      if (cachedRaw !== null && (cacheDirty || cacheAuthoritative)) return cached;
       if (cached.trim() && !stateNotes.trim()) return cached;
       if (stateNotes.trim() && !cached.trim()) return stateNotes;
       if (cached === stateNotes) return cached;
@@ -1449,9 +1459,16 @@ function runWeightVo2HistorySavePathAudit(state) {
         aux: { [NOTES_PAGE_CACHE_KEY_FOR_AUDIT]: notesText }
       });
 
+      let cacheDirty = false;
+      let cacheAuthoritative = false;
+      try {
+        cacheDirty = localStorage.getItem(NOTES_DIRTY_KEY_FOR_AUDIT) === '1';
+        cacheAuthoritative = localStorage.getItem(NOTES_AUTHORITY_KEY_FOR_AUDIT) === '1';
+      } catch (_) {}
+
       const details = [];
-      if (cached !== stateNotes) {
-        details.push('Open Notes once or run Notes sync to reconcile taskpoints_v1.notes and taskpoints_notes_v1.');
+      if (cached !== stateNotes && !cacheDirty && !cacheAuthoritative) {
+        details.push('Legacy Notes copies disagree and no canonical cache has been established yet. Open Notes once or run Notes sync once.');
       }
       if (exportPayload.state.notes !== notesText) {
         details.push('Export snapshot state.notes does not contain the selected notes text.');
@@ -1463,10 +1480,15 @@ function runWeightVo2HistorySavePathAudit(state) {
         details.push('Full backup notes reader did not recover aux.taskpoints_notes_v1.');
       }
 
+      const mirrorDriftProtected = cached !== stateNotes && (cacheDirty || cacheAuthoritative);
       return {
         status: details.length ? 'WARN' : 'PASS',
-        expected: 'Notes cache and state stay synchronized, exports include Notes in state and aux, and imports read aux.taskpoints_notes_v1',
-        actual: details.length ? details.join(' ') : 'Notes cache/state and backup note paths are consistent',
+        expected: 'Canonical Notes are protected from stale state saves, exports include Notes in state and aux, and imports read aux.taskpoints_notes_v1',
+        actual: details.length
+          ? details.join(' ')
+          : (mirrorDriftProtected
+            ? 'Dedicated Notes cache is canonical; stale state mirror cannot overwrite it and backup paths use the canonical text'
+            : 'Notes cache/state and backup note paths are consistent'),
         details
       };
     }
