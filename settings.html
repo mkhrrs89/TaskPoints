@@ -984,14 +984,22 @@
       }
       let stateNotes = "";
       let cacheNotes = "";
+      let cachePresent = false;
+      let cacheDirty = false;
+      let cacheAuthoritative = false;
       try {
         const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
         const savedState = raw ? TaskPointsCore.readTaskPointsStoredState(SETTINGS_STORAGE_KEY, {}) : {};
         stateNotes = typeof savedState.notes === "string" ? savedState.notes : "";
       } catch (_) {}
       try {
-        cacheNotes = localStorage.getItem("taskpoints_notes_v1") || "";
+        const cachedRaw = localStorage.getItem("taskpoints_notes_v1");
+        cachePresent = cachedRaw !== null;
+        cacheNotes = cachedRaw || "";
+        cacheDirty = localStorage.getItem("taskpoints_notes_dirty_v1") === "1";
+        cacheAuthoritative = localStorage.getItem("taskpoints_notes_authoritative_v1") === "1";
       } catch (_) {}
+      if (cachePresent && (cacheDirty || cacheAuthoritative)) return cacheNotes;
       if (cacheNotes.trim() && !stateNotes.trim()) return cacheNotes;
       if (stateNotes.trim() && !cacheNotes.trim()) return stateNotes;
       if (cacheNotes === stateNotes) return cacheNotes;
@@ -1007,6 +1015,8 @@
 
       try {
         localStorage.setItem("taskpoints_notes_v1", notesText);
+        localStorage.setItem("taskpoints_notes_authoritative_v1", "1");
+        localStorage.removeItem("taskpoints_notes_dirty_v1");
       } catch (error) {
         console.error("Failed to write imported notes cache", error);
       }
