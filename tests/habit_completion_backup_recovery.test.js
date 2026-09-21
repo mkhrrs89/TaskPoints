@@ -41,7 +41,7 @@ test('restores exact historical points instead of current habit value', () => {
 
 test('identical backup copies agree while differing exact rows are blocked', () => {
   const api=install(), current=fixture();
-  const row={ id:'old', source:'habit', habitId:'h1', dayKey:'2026-07-01', points:2 };
+  const row={ id:'old', source:'habit', habitId:'h1', dayKey:'2026-07-01', completedAtISO:'2026-07-01T12:00:00.000Z', points:2 };
   let plan=api.buildRecoveryPlan(current,[{id:'a',state:{completions:[row]}},{id:'b',state:{completions:[clone(row)]}}]);
   assert.equal(plan.recoverable.length,1);
   plan=api.buildRecoveryPlan(current,[{id:'a',state:{completions:[row]}},{id:'b',state:{completions:[{...row,points:1}]}}]);
@@ -51,7 +51,7 @@ test('identical backup copies agree while differing exact rows are blocked', () 
 
 test('failed-date and ID-collision recovery are blocked', () => {
   const api=install(), current=fixture();
-  const row={ id:'old', source:'habit', habitId:'h1', dayKey:'2026-07-01', points:2 };
+  const row={ id:'old', source:'habit', habitId:'h1', dayKey:'2026-07-01', completedAtISO:'2026-07-01T12:00:00.000Z', points:2 };
   current.habits[0].failedKeys.push('2026-07-01');
   let plan=api.buildRecoveryPlan(current,[{id:'a',state:{completions:[row]}}]);
   assert.equal(plan.recoverable.length,0);
@@ -70,9 +70,18 @@ test('missing rows are never manufactured when backups do not contain them', () 
   assert.equal(plan.notFound.length,2);
 });
 
-test('apply refuses stale preview after habit/completion state changes', () => {
+test('rows without a scoring-valid completion timestamp are blocked', () => {
   const api=install(), current=fixture();
   const row={ id:'old', source:'habit', habitId:'h1', dayKey:'2026-07-01', points:2 };
+  const plan=api.buildRecoveryPlan(current,[{id:'a',state:{completions:[row]}}]);
+  assert.equal(plan.recoverable.length,0);
+  assert.equal(plan.conflicts.length,1);
+  assert.match(plan.conflicts[0].reason,/completedAtISO/);
+});
+
+test('apply refuses stale preview after habit/completion state changes', () => {
+  const api=install(), current=fixture();
+  const row={ id:'old', source:'habit', habitId:'h1', dayKey:'2026-07-01', completedAtISO:'2026-07-01T12:00:00.000Z', points:2 };
   const plan=api.buildRecoveryPlan(current,[{id:'a',state:{completions:[row]}}]);
   const changed=clone(current); changed.habits[0].doneKeys.push('2026-07-05');
   assert.throws(()=>api.applyRecoveryPlan(changed,plan),/changed after the scan/);
