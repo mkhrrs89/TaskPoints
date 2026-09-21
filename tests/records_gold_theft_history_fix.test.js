@@ -6,6 +6,7 @@ const vm = require('node:vm');
 
 const ROOT = path.join(__dirname, '..');
 const source = fs.readFileSync(path.join(ROOT, 'records_gold_theft_history_fix.js'), 'utf8');
+const tabSource = fs.readFileSync(path.join(ROOT, 'records_gold_theft_tab.js'), 'utf8');
 
 function loadApi() {
   const context = {
@@ -55,6 +56,7 @@ test('recovers older thefts from saved goldOutcome when ledger has only current-
   assert.deepEqual(Array.from(rows, row => row.date).sort(), ['2026-09-09', '2026-09-11']);
   const old = rows.find(row => row.date === '2026-09-09');
   assert.equal(old.playerName, 'Old Winner');
+  assert.equal(old.opponentName, 'Old Loser');
   assert.equal(old.amount, 4.7);
 });
 
@@ -88,4 +90,13 @@ test('history reader rerenders immediately after its late install', () => {
   assert.match(source, /global\.setTimeout\(render, 0\);/);
   assert.match(source, /taskpoints:state-revision/);
   assert.match(source, /pageshow/);
+});
+
+
+test('Gold Theft table includes the player the Gold was taken from', () => {
+  assert.match(tabSource, /<th class="opponentCell">Taken From<\/th>/);
+  assert.match(tabSource, /esc\(row\.opponentName\)/);
+  assert.match(source, /class="opponentCell"/);
+  assert.match(source, /esc\(row\.opponentName\)/);
+  assert.match(source, /\$\{row\.playerName\} from \$\{row\.opponentName\}/);
 });
