@@ -70,6 +70,27 @@ test('missing rows are never manufactured when backups do not contain them', () 
   assert.equal(plan.notFound.length,2);
 });
 
+test('legacy-only exact evidence is reported but never auto-restored', () => {
+  const api=install(), current=fixture();
+  const row={ id:'old', source:'habit', habitId:'h1', dayKey:'2026-07-01', completedAtISO:'2026-07-01T12:00:00.000Z', points:2 };
+  const plan=api.buildRecoveryPlan(current,[{id:'legacy',label:'Legacy',trusted:false,state:{completions:[row]}}]);
+  assert.equal(plan.recoverable.length,0);
+  assert.equal(plan.evidenceOnly.length,1);
+  assert.equal(plan.notFound.length,1);
+  assert.equal(plan.evidenceOnly[0].points,2);
+});
+
+test('trusted evidence can recover when an untrusted copy agrees exactly', () => {
+  const api=install(), current=fixture();
+  const row={ id:'old', source:'habit', habitId:'h1', dayKey:'2026-07-01', completedAtISO:'2026-07-01T12:00:00.000Z', points:2 };
+  const plan=api.buildRecoveryPlan(current,[
+    {id:'legacy',label:'Legacy',trusted:false,state:{completions:[row]}},
+    {id:'trusted',label:'Verified',trusted:true,state:{completions:[clone(row)]}}
+  ]);
+  assert.equal(plan.recoverable.length,1);
+  assert.equal(plan.evidenceOnly.length,0);
+});
+
 test('rows without a scoring-valid completion timestamp are blocked', () => {
   const api=install(), current=fixture();
   const row={ id:'old', source:'habit', habitId:'h1', dayKey:'2026-07-01', points:2 };
@@ -88,9 +109,9 @@ test('apply refuses stale preview after habit/completion state changes', () => {
 });
 
 test('audit page injects backup recovery after the habit ledger stack', () => {
-  assert.match(worker, /habit_completion_backup_recovery\.js\?v=20260921-1/);
+  assert.match(worker, /habit_completion_backup_recovery\.js\?v=20260921-2/);
   assert.ok(
     worker.indexOf('/habit_ledger_matchup_impact_stale_guard.js?v=20260803-3')
-      < worker.indexOf('/habit_completion_backup_recovery.js?v=20260921-1')
+      < worker.indexOf('/habit_completion_backup_recovery.js?v=20260921-2')
   );
 });
