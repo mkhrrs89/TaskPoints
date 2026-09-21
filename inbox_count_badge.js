@@ -345,7 +345,7 @@
   'use strict';
 
   const SCRIPT_ID = 'tpResponsiveExportScript';
-  const SCRIPT_SRC = '/home_export_responsiveness.js?v=20260803-3';
+  const SCRIPT_SRC = '/home_export_responsiveness.js?v=20260921-1';
   const EXPORT_SELECTOR = '[data-export-button]';
   const loaderState = global.__tpResponsiveExportLoaderState || {
     pending: false,
