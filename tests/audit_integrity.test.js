@@ -189,7 +189,9 @@ test('audit page loads and wires read-only integrity builders and centralized li
   assert.match(html, /<script src="audit_integrity\.js"><\/script>/);
   for (const name of ['buildNpcScoreHealthAudit', 'buildMatchupHistoryReconciliationAudit', 'buildHabitLedgerConsistencyAudit']) assert.match(html, new RegExp(`checks\\.push\\(TaskPointsAuditIntegrity\\.${name}`));
   assert.match(html, /TaskPointsCore\.NPC_SCORE_ABSOLUTE_MIN \?\? 5/);
-  assert.match(html, /npcScoreMax:\s*86/);
+  assert.match(html, /if \(key !== 'reminders'\) emptyWarnings\.push/);
+  assert.match(html, /!value\.length && key !== 'reminders'/);
+  assert.match(html, /empty reminders list is valid/);
   const source = fs.readFileSync(path.join(__dirname, '..', 'audit_integrity.js'), 'utf8');
   assert.doesNotMatch(source, /saveAppState|saveStateSnapshot|mergeAndSaveState|localStorage\.setItem|\bsync[A-Z]/);
 });
