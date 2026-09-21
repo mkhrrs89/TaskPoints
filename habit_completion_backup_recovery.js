@@ -6,6 +6,8 @@
   const STORAGE_KEY = core.STORAGE_KEY || 'taskpoints_v1';
   const ROLLING_KEYS = ['taskpoints_backup_latest','taskpoints_backup_prev1','taskpoints_backup_prev2','taskpoints_backup_prev3'];
   const VAULT_SLOTS = ['latest','prev1','prev2','prev3'];
+  const SHADOW_DB = 'taskpoints_shadow_state_v1';
+  const SHADOW_ARRAY_STORES = ['completions','matchups','gameHistory','seasonHistory','tasks','habits','players'];
 
   const clone = (value) => typeof global.structuredClone === 'function' ? global.structuredClone(value) : JSON.parse(JSON.stringify(value));
   const validDay = (value) => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
@@ -123,7 +125,7 @@
     const candidates = Array.isArray(candidatesInput) ? candidatesInput : [];
     const targets = buildMissingTargets(state);
     const currentIds = new Set((state.completions || []).map((row) => String(row?.id || '').trim()).filter(Boolean));
-    const recoverable = [], conflicts = [], notFound = [];
+    const recoverable = [], conflicts = [], evidenceOnly = [], notFound = [];
 
     targets.forEach((target) => {
       if (target.failed) {
@@ -135,14 +137,20 @@
       candidates.forEach((candidate) => {
         const rows = (candidate?.state?.completions || []).filter((row) => ['habit','vice'].includes(row?.source) && habitIdFor(row) === target.habitId && dayFor(row) === target.dayKey);
         if (rows.length > 1) sourceDuplicate = true;
-        rows.forEach((row) => evidence.push({ row:clone(row), fingerprint:rowFingerprint(row), label:candidate.label || candidate.id || 'Backup', error:validateRow(row,target,currentIds) }));
+        rows.forEach((row) => evidence.push({
+          row:clone(row),
+          fingerprint:rowFingerprint(row),
+          label:candidate.label || candidate.id || 'Backup',
+          trusted:candidate.trusted !== false,
+          error:validateRow(row,target,currentIds)
+        }));
       });
       if (!evidence.length) {
-        notFound.push({ ...target, reason:'No exact completion row was found in the scanned backups.' });
+        notFound.push({ ...target, reason:'No exact completion row was found in any scanned source.' });
         return;
       }
       if (sourceDuplicate) {
-        conflicts.push({ ...target, reason:'A backup contains multiple rows for this same habit/date.' });
+        conflicts.push({ ...target, reason:'A scanned source contains multiple rows for this same habit/date.' });
         return;
       }
       const valid = evidence.filter((item) => !item.error);
@@ -150,21 +158,51 @@
         conflicts.push({ ...target, reason:evidence[0].error || 'Backup evidence is not safe to restore.' });
         return;
       }
-      const groups = new Map();
+
+      const allGroups = new Map();
       valid.forEach((item) => {
-        if (!groups.has(item.fingerprint)) groups.set(item.fingerprint, []);
-        groups.get(item.fingerprint).push(item);
+        if (!allGroups.has(item.fingerprint)) allGroups.set(item.fingerprint, []);
+        allGroups.get(item.fingerprint).push(item);
       });
-      if (groups.size !== 1) {
-        conflicts.push({ ...target, reason:'Different exact backup-row versions disagree for this habit/date.' });
+      if (allGroups.size !== 1) {
+        conflicts.push({ ...target, reason:'Different scanned copies disagree on the exact original row for this habit/date.' });
         return;
       }
-      const agreed = [...groups.values()][0];
-      const chosen = agreed[0];
-      recoverable.push({ ...target, row:clone(chosen.row), rowFingerprint:chosen.fingerprint, completionId:String(chosen.row.id), points:Number(chosen.row.points), sourceLabels:agreed.map((x) => x.label) });
+
+      const agreed = [...allGroups.values()][0];
+      const trusted = agreed.filter((item) => item.trusted);
+      if (!trusted.length) {
+        const chosen = agreed[0];
+        evidenceOnly.push({
+          ...target,
+          row:clone(chosen.row),
+          rowFingerprint:chosen.fingerprint,
+          completionId:String(chosen.row.id),
+          points:Number(chosen.row.points),
+          sourceLabels:agreed.map((x) => x.label),
+          reason:'Exact row exists only in legacy/quarantine evidence, so it is not automatically restorable.'
+        });
+        return;
+      }
+
+      const chosen = trusted[0];
+      recoverable.push({
+        ...target,
+        row:clone(chosen.row),
+        rowFingerprint:chosen.fingerprint,
+        completionId:String(chosen.row.id),
+        points:Number(chosen.row.points),
+        sourceLabels:agreed.map((x) => x.label)
+      });
     });
 
-    return { liveFingerprint:liveFingerprint(state), missingCount:targets.length, sourceCount:candidates.length, recoverable, conflicts, notFound };
+    return {
+      liveFingerprint:liveFingerprint(state),
+      missingCount:targets.length,
+      sourceCount:candidates.length,
+      sourceLabels:candidates.map((candidate) => candidate.label || candidate.id || 'Backup'),
+      recoverable, conflicts, evidenceOnly, notFound
+    };
   }
 
   function applyRecoveryPlan(currentState, plan) {
