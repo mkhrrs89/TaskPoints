@@ -201,6 +201,7 @@
           <td class="scoreCell num font-extrabold">${row.amount.toFixed(1)}</td>
           <td class="imageCell">${photoHtml(row)}</td>
           <td class="playerCell"><div class="font-semibold">${esc(row.playerName)}</div></td>
+          <td class="opponentCell"><div class="font-semibold">${esc(row.opponentName)}</div></td>
           <td class="dateCell num">${esc(formatDate(row.date))}</td>
           <td class="srcCell">${sourcePill}</td>
         </tr>`;
@@ -213,7 +214,7 @@
   async function copyGoldList() {
     if (!lastRows.length) return;
     const name = youName(loadState());
-    const text = lastRows.map((row, index) => `${index + 1}. ${row.amount.toFixed(1)} Gold — ${row.playerName} — ${row.date} — ${row.playerId === 'YOU' ? name : 'Player'}`).join('\n');
+    const text = lastRows.map((row, index) => `${index + 1}. ${row.amount.toFixed(1)} Gold — ${row.playerName} from ${row.opponentName} — ${row.date} — ${row.playerId === 'YOU' ? name : 'Player'}`).join('\n');
     try {
       await global.navigator.clipboard.writeText(text);
       const button = $('goldRecordsCopyBtn');
@@ -237,6 +238,7 @@
       #goldRecordsSubtitleLine{font-size:15px;line-height:1.35}
       #goldRecordsCopyBtn{font-size:15px;padding:10px 14px;min-height:44px;white-space:nowrap}
       #goldRecordsRefreshBtn{background:linear-gradient(180deg,#fdba74,#fb923c);color:#111827;border-color:transparent;outline:none;box-shadow:none;font-weight:700}
+      #goldRecordsTableWrap .opponentCell{white-space:nowrap}
       @media(max-width:640px){#goldRecordsSubtitleLine{font-size:14px;line-height:1.3}#goldRecordsCopyBtn{font-size:14px;padding:8px 12px;min-height:40px}}
     `;
     global.document.head.appendChild(style);
@@ -300,7 +302,7 @@
         <div id="goldRecordsEmptyState" class="muted hidden">No Gold theft records found.</div>
         <div class="tableWrap" id="goldRecordsTableWrap">
           <table>
-            <thead><tr><th class="rankCell">Rank</th><th class="scoreCell">Gold Stolen</th><th class="imageCell"></th><th class="playerCell">Player</th><th class="dateCell">Date</th><th class="srcCell">Source</th></tr></thead>
+            <thead><tr><th class="rankCell">Rank</th><th class="scoreCell">Gold Stolen</th><th class="imageCell"></th><th class="playerCell">Player</th><th class="opponentCell">Taken From</th><th class="dateCell">Date</th><th class="srcCell">Source</th></tr></thead>
             <tbody id="goldRecordsTbody"></tbody>
           </table>
         </div>
