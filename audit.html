@@ -2343,14 +2343,20 @@ if (!season) {
       protectedKeys.forEach(key => {
         const value = state?.[key];
         const present = Object.prototype.hasOwnProperty.call(state || {}, key);
-        if (!present) { emptyWarnings.push(`${key} missing (app can tolerate default/empty value)`); return; }
+        // An empty reminders list is a normal valid state, so it should not
+        // create routine audit noise. We still validate reminders when present:
+        // a non-array value remains a real shape failure.
+        if (!present) {
+          if (key !== 'reminders') emptyWarnings.push(`${key} missing (app can tolerate default/empty value)`);
+          return;
+        }
         if (key === 'liveDiffHistory' || key === 'liveDiffSnapshots') {
           if (value && typeof value === 'object' && !Array.isArray(value)) {
             if (!Object.keys(value).length) emptyWarnings.push(`${key} is empty and no previous snapshot is available`);
           } else shapeIssues.push(`${key} should be an object map`);
         } else if (!Array.isArray(value)) {
           shapeIssues.push(`${key} should be an array`);
-        } else if (!value.length) {
+        } else if (!value.length && key !== 'reminders') {
           emptyWarnings.push(`${key} is empty and no previous snapshot is available`);
         }
       });
@@ -2360,7 +2366,7 @@ if (!season) {
       const savePathAudit = runWeightVo2HistorySavePathAudit(state);
       const protectedDetails = [...shapeIssues, ...emptyWarnings];
       if (savePathAudit.status === 'FAIL') protectedDetails.push(...(savePathAudit.details || []));
-      checks.push({ ...base, id: 'season-protected-histories-preserved', title: 'Season saves preserved protected histories', status: shapeIssues.length || savePathAudit.status === 'FAIL' ? 'FAIL' : (emptyWarnings.length ? 'WARN' : 'PASS'), expected: 'Season and matchup saves do not wipe protected Home histories and Notes page content', actual: shapeIssues.length ? `${shapeIssues.length} invalid protected shape(s)` : (emptyWarnings.length ? `${emptyWarnings.length} protected key warning(s); current values empty/missing and no previous snapshot is available` : 'Protected history keys and Notes page content are present with valid shape'), details: protectedDetails, trace: 'weightHistory/vo2MaxHistory/liveDiffHistory/liveDiffSnapshots/reminders/Notes page content (notes + taskpoints_notes_v1 cache + completions[].moodNotes) + save-path sentinel audit' });
+      checks.push({ ...base, id: 'season-protected-histories-preserved', title: 'Season saves preserved protected histories', status: shapeIssues.length || savePathAudit.status === 'FAIL' ? 'FAIL' : (emptyWarnings.length ? 'WARN' : 'PASS'), expected: 'Season and matchup saves do not wipe protected Home histories and Notes page content; an empty reminders list is valid', actual: shapeIssues.length ? `${shapeIssues.length} invalid protected shape(s)` : (emptyWarnings.length ? `${emptyWarnings.length} protected key warning(s); current values empty/missing and no previous snapshot is available` : 'Protected history keys and Notes page content are present with valid shape'), details: protectedDetails, trace: 'weightHistory/vo2MaxHistory/liveDiffHistory/liveDiffSnapshots/reminders/Notes page content (notes + taskpoints_notes_v1 cache + completions[].moodNotes) + save-path sentinel audit' });
 
       return checks;
     }
