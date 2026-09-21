@@ -434,13 +434,15 @@
     section.id = 'habitCompletionBackupRecovery'; section.className = 'border-t border-zinc-700/60 pt-4 space-y-3';
     section.innerHTML = [
       '<div class="font-semibold">Recover missing Habit completion rows from backups</div>',
-      '<p class="muted text-sm">Scans rolling backups, Safety Vault snapshots, and the verified secondary mirror for the exact original row behind each doneKey that has no completion row. Historical points are never recalculated from the Habit\'s current value.</p>',
+      '<p class="muted text-sm">Scans rolling backups, Safety Vault snapshots, verified secondary copies, older IndexedDB snapshots, and surviving recovery caches for the exact original row behind each doneKey that has no completion row. Historical points are never recalculated from the Habit\'s current value.</p>',
       '<div class="flex flex-wrap gap-2"><button id="scanHabitCompletionBackupsBtn" type="button" class="btn btn-primary">Scan Backups for Missing Rows</button><button id="restoreHabitCompletionBackupsBtn" type="button" class="btn btn-ghost" disabled>Restore Exact Recovered Rows</button></div>',
       '<div id="habitCompletionBackupRecoveryStatus" class="muted text-sm">Run the backup scan first. The scan is read-only.</div>',
       '<div id="habitCompletionBackupRecoverySummary" class="text-sm"></div>',
       '<div id="habitCompletionRecoverableCount" class="font-semibold">Exact rows recoverable: 0</div><div id="habitCompletionRecoverableRows"></div>',
       '<div id="habitCompletionConflictCount" class="font-semibold">Backup conflicts / blocked rows: 0</div><div id="habitCompletionConflictRows"></div>',
-      '<div id="habitCompletionNotFoundCount" class="font-semibold">Not found in backups: 0</div><div id="habitCompletionNotFoundRows"></div>'
+      '<div id="habitCompletionEvidenceCount" class="font-semibold">Legacy evidence only: 0</div><div id="habitCompletionEvidenceRows"></div>',
+      '<div id="habitCompletionNotFoundCount" class="font-semibold">Not found in any scanned source: 0</div><div id="habitCompletionNotFoundRows"></div>',
+      '<details class="text-sm"><summary class="cursor-pointer font-semibold">Sources scanned</summary><div id="habitCompletionSourceRows" class="muted mt-2"></div></details>'
     ].join('');
     parent.appendChild(section);
     const scan = section.querySelector('#scanHabitCompletionBackupsBtn');
@@ -450,18 +452,21 @@
     const enabled = () => { restore.disabled = !(plan?.recoverable?.length && backupCheckbox.checked); };
 
     scan.addEventListener('click', async () => {
-      plan = null; backupCheckbox.checked = false; enabled(); scan.disabled = true; status.textContent = 'Scanning rolling and verified backups…';
+      plan = null; backupCheckbox.checked = false; enabled(); scan.disabled = true; status.textContent = 'Scanning all surviving local backup and IndexedDB sources…';
       try {
         const state = readCurrent(); if (!state) throw new Error('No TaskPoints state was found.');
         const found = await collectBackupCandidates(); plan = buildRecoveryPlan(state, found.candidates);
-        section.querySelector('#habitCompletionBackupRecoverySummary').innerHTML = 'Missing doneKeys scanned: <strong>' + plan.missingCount + '</strong><br>Readable backup sources scanned: <strong>' + plan.sourceCount + '</strong>' + (found.errors.length ? '<br>Backup read warning(s): <strong>' + found.errors.length + '</strong>' : '');
+        section.querySelector('#habitCompletionBackupRecoverySummary').innerHTML = 'Missing doneKeys scanned: <strong>' + plan.missingCount + '</strong><br>Readable sources scanned: <strong>' + plan.sourceCount + '</strong>' + (found.errors.length ? '<br>Source read warning(s): <strong>' + found.errors.length + '</strong>' : '');
         section.querySelector('#habitCompletionRecoverableCount').textContent = 'Exact rows recoverable: ' + plan.recoverable.length;
         section.querySelector('#habitCompletionConflictCount').textContent = 'Backup conflicts / blocked rows: ' + plan.conflicts.length;
-        section.querySelector('#habitCompletionNotFoundCount').textContent = 'Not found in backups: ' + plan.notFound.length;
+        section.querySelector('#habitCompletionEvidenceCount').textContent = 'Legacy evidence only: ' + plan.evidenceOnly.length;
+        section.querySelector('#habitCompletionNotFoundCount').textContent = 'Not found in any scanned source: ' + plan.notFound.length;
         section.querySelector('#habitCompletionRecoverableRows').innerHTML = renderRows(plan.recoverable,(item)=>escapeHtml(item.habitName) + ' on ' + escapeHtml(item.dayKey) + ': restore ' + escapeHtml(item.points) + ' point(s), ID ' + escapeHtml(item.completionId) + ', from ' + escapeHtml(item.sourceLabels.join(', ')));
         section.querySelector('#habitCompletionConflictRows').innerHTML = renderRows(plan.conflicts,(item)=>escapeHtml(item.habitName) + ' on ' + escapeHtml(item.dayKey) + ': ' + escapeHtml(item.reason));
+        section.querySelector('#habitCompletionEvidenceRows').innerHTML = renderRows(plan.evidenceOnly,(item)=>escapeHtml(item.habitName) + ' on ' + escapeHtml(item.dayKey) + ': found ' + escapeHtml(item.points) + ' point row in ' + escapeHtml(item.sourceLabels.join(', ')) + ' — review only, not auto-restored');
         section.querySelector('#habitCompletionNotFoundRows').innerHTML = renderRows(plan.notFound,(item)=>escapeHtml(item.habitName) + ' on ' + escapeHtml(item.dayKey));
-        status.textContent = plan.recoverable.length ? 'Scan complete: ' + plan.recoverable.length + ' exact original row(s) can be restored without guessing points. Confirm the fresh-backup checkbox above to enable restore.' : 'Scan complete, but none of the missing rows can be restored exactly from these backups.';
+        section.querySelector('#habitCompletionSourceRows').innerHTML = plan.sourceLabels.length ? plan.sourceLabels.map((label)=>'<div>• ' + escapeHtml(label) + '</div>').join('') : 'No readable sources found.';
+        status.textContent = plan.recoverable.length ? 'Deep scan complete: ' + plan.recoverable.length + ' exact original row(s) can be restored without guessing points. Confirm the fresh-backup checkbox above to enable restore.' : (plan.evidenceOnly.length ? 'Deep scan found historical evidence for ' + plan.evidenceOnly.length + ' row(s), but only in non-authoritative legacy/quarantine sources, so automatic restore remains disabled for those rows.' : 'Deep scan complete, but none of the missing rows exist in any surviving scanned source.');
         if (found.errors.length) status.textContent += ' ' + found.errors.length + ' backup source(s) also reported a read/verification warning.';
       } catch (error) { status.textContent = 'Backup scan failed: ' + (error?.message || error); }
       finally { scan.disabled = false; enabled(); }
