@@ -382,7 +382,7 @@ test('panel requires preview and fresh backup confirmation', () => {
 
 test('Audit worker loads repair directly and in the audit integrity bundle', () => {
   const worker = fs.readFileSync(path.join(__dirname, '..', '_worker.js'), 'utf8');
-  assert.match(worker, /game_history_reconciliation_repair\.js\?v=20260731-1/);
+  assert.match(worker, /game_history_reconciliation_repair\.js\?v=20260921-1/);
   assert.match(worker, /readAssetSource\(env, request, '\/game_history_reconciliation_repair\.js'\)/);
   assert.match(worker, /readAssetSource\(env, request, '\/game_history_repair_alias_sync\.js'\)/);
   assert.match(
