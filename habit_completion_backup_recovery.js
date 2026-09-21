@@ -6,6 +6,8 @@
   const STORAGE_KEY = core.STORAGE_KEY || 'taskpoints_v1';
   const ROLLING_KEYS = ['taskpoints_backup_latest','taskpoints_backup_prev1','taskpoints_backup_prev2','taskpoints_backup_prev3'];
   const VAULT_SLOTS = ['latest','prev1','prev2','prev3'];
+  const SHADOW_DB = 'taskpoints_shadow_state_v1';
+  const SHADOW_ARRAY_STORES = ['completions','matchups','gameHistory','seasonHistory','tasks','habits','players'];
 
   const clone = (value) => typeof global.structuredClone === 'function' ? global.structuredClone(value) : JSON.parse(JSON.stringify(value));
   const validDay = (value) => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
@@ -123,7 +125,7 @@
     const candidates = Array.isArray(candidatesInput) ? candidatesInput : [];
     const targets = buildMissingTargets(state);
     const currentIds = new Set((state.completions || []).map((row) => String(row?.id || '').trim()).filter(Boolean));
-    const recoverable = [], conflicts = [], notFound = [];
+    const recoverable = [], conflicts = [], evidenceOnly = [], notFound = [];
 
     targets.forEach((target) => {
       if (target.failed) {
@@ -135,14 +137,20 @@
       candidates.forEach((candidate) => {
         const rows = (candidate?.state?.completions || []).filter((row) => ['habit','vice'].includes(row?.source) && habitIdFor(row) === target.habitId && dayFor(row) === target.dayKey);
         if (rows.length > 1) sourceDuplicate = true;
-        rows.forEach((row) => evidence.push({ row:clone(row), fingerprint:rowFingerprint(row), label:candidate.label || candidate.id || 'Backup', error:validateRow(row,target,currentIds) }));
+        rows.forEach((row) => evidence.push({
+          row:clone(row),
+          fingerprint:rowFingerprint(row),
+          label:candidate.label || candidate.id || 'Backup',
+          trusted:candidate.trusted !== false,
+          error:validateRow(row,target,currentIds)
+        }));
       });
       if (!evidence.length) {
-        notFound.push({ ...target, reason:'No exact completion row was found in the scanned backups.' });
+        notFound.push({ ...target, reason:'No exact completion row was found in any scanned source.' });
         return;
       }
       if (sourceDuplicate) {
-        conflicts.push({ ...target, reason:'A backup contains multiple rows for this same habit/date.' });
+        conflicts.push({ ...target, reason:'A scanned source contains multiple rows for this same habit/date.' });
         return;
       }
       const valid = evidence.filter((item) => !item.error);
@@ -150,21 +158,51 @@
         conflicts.push({ ...target, reason:evidence[0].error || 'Backup evidence is not safe to restore.' });
         return;
       }
-      const groups = new Map();
+
+      const allGroups = new Map();
       valid.forEach((item) => {
-        if (!groups.has(item.fingerprint)) groups.set(item.fingerprint, []);
-        groups.get(item.fingerprint).push(item);
+        if (!allGroups.has(item.fingerprint)) allGroups.set(item.fingerprint, []);
+        allGroups.get(item.fingerprint).push(item);
       });
-      if (groups.size !== 1) {
-        conflicts.push({ ...target, reason:'Different exact backup-row versions disagree for this habit/date.' });
+      if (allGroups.size !== 1) {
+        conflicts.push({ ...target, reason:'Different scanned copies disagree on the exact original row for this habit/date.' });
         return;
       }
-      const agreed = [...groups.values()][0];
-      const chosen = agreed[0];
-      recoverable.push({ ...target, row:clone(chosen.row), rowFingerprint:chosen.fingerprint, completionId:String(chosen.row.id), points:Number(chosen.row.points), sourceLabels:agreed.map((x) => x.label) });
+
+      const agreed = [...allGroups.values()][0];
+      const trusted = agreed.filter((item) => item.trusted);
+      if (!trusted.length) {
+        const chosen = agreed[0];
+        evidenceOnly.push({
+          ...target,
+          row:clone(chosen.row),
+          rowFingerprint:chosen.fingerprint,
+          completionId:String(chosen.row.id),
+          points:Number(chosen.row.points),
+          sourceLabels:agreed.map((x) => x.label),
+          reason:'Exact row exists only in legacy/quarantine evidence, so it is not automatically restorable.'
+        });
+        return;
+      }
+
+      const chosen = trusted[0];
+      recoverable.push({
+        ...target,
+        row:clone(chosen.row),
+        rowFingerprint:chosen.fingerprint,
+        completionId:String(chosen.row.id),
+        points:Number(chosen.row.points),
+        sourceLabels:agreed.map((x) => x.label)
+      });
     });
 
-    return { liveFingerprint:liveFingerprint(state), missingCount:targets.length, sourceCount:candidates.length, recoverable, conflicts, notFound };
+    return {
+      liveFingerprint:liveFingerprint(state),
+      missingCount:targets.length,
+      sourceCount:candidates.length,
+      sourceLabels:candidates.map((candidate) => candidate.label || candidate.id || 'Backup'),
+      recoverable, conflicts, evidenceOnly, notFound
+    };
   }
 
   function applyRecoveryPlan(currentState, plan) {
@@ -210,12 +248,53 @@
 
   async function collectBackupCandidates() {
     const candidates = [], errors = [];
+    const add = (candidate) => {
+      if (!candidate?.state || typeof candidate.state !== 'object' || Array.isArray(candidate.state)) return;
+      candidates.push({ trusted:true, ...candidate });
+    };
+
     ROLLING_KEYS.forEach((key,index) => {
       try {
         const record = JSON.parse(global.localStorage?.getItem?.(key) || 'null');
-        if (record?.state) candidates.push({ id:'rolling-' + index, label:index === 0 ? 'Rolling backup — latest' : 'Rolling backup — previous ' + index, state:record.state });
+        if (record?.state) add({
+          id:'rolling-' + index,
+          label:index === 0 ? 'Rolling backup — latest' : 'Rolling backup — previous ' + index,
+          state:record.state,
+          trusted:true
+        });
       } catch (error) { errors.push(key + ': ' + (error?.message || error)); }
     });
+
+    try {
+      const quarantine = JSON.parse(global.localStorage?.getItem?.('taskpoints_quarantined_snapshot') || 'null');
+      if (quarantine?.payload) add({
+        id:'quarantine-payload',
+        label:'Quarantined snapshot payload',
+        state:quarantine.payload,
+        trusted:false
+      });
+    } catch (error) { errors.push('Quarantined snapshot: ' + (error?.message || error)); }
+
+    try {
+      const preRestoreRaw = global.localStorage?.getItem?.('taskpoints_emergency_pre_restore_mirror_v1');
+      const state = parseRaw(preRestoreRaw);
+      if (state) add({
+        id:'emergency-pre-restore',
+        label:'Emergency pre-restore mirror',
+        state,
+        trusted:false
+      });
+    } catch (error) { errors.push('Emergency pre-restore mirror: ' + (error?.message || error)); }
+
+    try {
+      const session = JSON.parse(global.sessionStorage?.getItem?.('taskpoints_phase4_verified_primary_cache_v1') || 'null');
+      if (session?.state) add({
+        id:'phase4-session-cache',
+        label:'Phase 4 verified session cache',
+        state:session.state,
+        trusted:session.status === 'passed_verification'
+      });
+    } catch (error) { errors.push('Phase 4 session cache: ' + (error?.message || error)); }
 
     try {
       const db = await openExistingDatabase('taskpoints_safety_vault_v1');
@@ -226,9 +305,17 @@
             const rows = await Promise.all(VAULT_SLOTS.map((id) => requestResult(store.get(id)))); await done;
             rows.filter(Boolean).forEach((record,index) => {
               if (!record.raw) return;
-              if (record.rawHash && record.rawHash !== fnv(record.raw)) { errors.push('Safety vault ' + (record.id || VAULT_SLOTS[index]) + ': hash mismatch.'); return; }
+              if (record.rawHash && record.rawHash !== fnv(record.raw)) {
+                errors.push('Safety vault ' + (record.id || VAULT_SLOTS[index]) + ': hash mismatch.');
+                return;
+              }
               const state = parseRaw(record.raw);
-              if (state) candidates.push({ id:'vault-' + (record.id || index), label:'Safety vault — ' + (record.id || VAULT_SLOTS[index]), state });
+              if (state) add({
+                id:'vault-' + (record.id || index),
+                label:'Safety vault — ' + (record.id || VAULT_SLOTS[index]),
+                state,
+                trusted:true
+              });
             });
           }
         } finally { db.close(); }
@@ -244,13 +331,89 @@
             const rows = await Promise.all([requestResult(store.get('latest')), requestResult(store.get('home_native_latest'))]); await done;
             const latest = rows[0], native = rows[1];
             if (latest?.status === 'passed_verification' && latest.raw && (!latest.rawHash || latest.rawHash === fnv(latest.raw))) {
-              const state = parseRaw(latest.raw); if (state) candidates.push({ id:'secondary-latest', label:'Verified secondary — latest', state });
+              const state = parseRaw(latest.raw);
+              if (state) add({ id:'secondary-latest', label:'Verified secondary — latest', state, trusted:true });
             }
-            if (native?.status === 'passed_verification' && native?.state) candidates.push({ id:'secondary-native', label:'Verified secondary — native latest', state:native.state });
+            if (native?.status === 'passed_verification' && native?.state) {
+              add({ id:'secondary-native', label:'Verified secondary — native latest', state:native.state, trusted:true });
+            }
           }
         } finally { db.close(); }
       }
     } catch (error) { errors.push('Verified secondary: ' + (error?.message || error)); }
+
+    try {
+      const db = await openExistingDatabase(SHADOW_DB);
+      if (db) {
+        try {
+          if (db.objectStoreNames.contains('metadata')) {
+            const tx = db.transaction('metadata','readonly'); const done = transactionDone(tx); const store = tx.objectStore('metadata');
+            const [nativeSnapshot, phase4Snapshot, phase4Commit, dualSnapshot, dualMetadata] = await Promise.all([
+              requestResult(store.get('phase5a_native_snapshot')),
+              requestResult(store.get('phase4_primary_snapshot')),
+              requestResult(store.get('phase4_primary_commit')),
+              requestResult(store.get('phase2_dual_write_snapshot')),
+              requestResult(store.get('dual_write'))
+            ]);
+            await done;
+
+            if (nativeSnapshot?.state) {
+              add({
+                id:'shadow-native',
+                label:'IndexedDB Phase 5A native snapshot',
+                state:nativeSnapshot.state,
+                trusted:nativeSnapshot.status === 'passed_verification'
+              });
+            }
+
+            if (phase4Snapshot?.serializedState) {
+              const state = parseRaw(phase4Snapshot.serializedState);
+              const verified = phase4Commit?.status === 'passed_verification'
+                && Number(phase4Snapshot.sequence) === Number(phase4Commit.sequence);
+              if (state) add({
+                id:'shadow-phase4',
+                label:'IndexedDB Phase 4 primary snapshot',
+                state,
+                trusted:verified
+              });
+            }
+
+            const dualVerified = dualSnapshot?.status === 'passed_verification'
+              && dualMetadata?.status === 'passed_verification'
+              && Number(dualSnapshot.sequence) === Number(dualMetadata.sequence);
+            if (dualSnapshot?.serializedState) {
+              const state = parseRaw(dualSnapshot.serializedState);
+              if (state) add({
+                id:'shadow-phase2-dual',
+                label:'IndexedDB Phase 2 dual-write snapshot',
+                state,
+                trusted:dualVerified
+              });
+            }
+          }
+
+          const requiredLegacyStores = [...SHADOW_ARRAY_STORES,'collections','values'];
+          if (requiredLegacyStores.every((name) => db.objectStoreNames.contains(name))) {
+            const tx = db.transaction(requiredLegacyStores,'readonly');
+            const arrayRows = await Promise.all(SHADOW_ARRAY_STORES.map((name) => requestResult(tx.objectStore(name).getAll())));
+            const collections = await requestResult(tx.objectStore('collections').getAll());
+            const values = await requestResult(tx.objectStore('values').getAll());
+            await transactionDone(tx);
+            const state = {};
+            SHADOW_ARRAY_STORES.forEach((field,index) => {
+              state[field] = (arrayRows[index] || []).slice().sort((x,y) => Number(x.key)-Number(y.key)).map((row) => row.value);
+            });
+            (collections || []).filter((row) => row?.kind === 'manifest').forEach((row) => { state[row.field] = []; });
+            (collections || []).filter((row) => row?.kind === 'item')
+              .sort((x,y) => String(x.field).localeCompare(String(y.field)) || Number(x.index)-Number(y.index))
+              .forEach((row) => { (state[row.field] ||= [])[Number(row.index)] = row.value; });
+            (values || []).forEach((row) => { if (row && typeof row.field === 'string') state[row.field] = row.value; });
+            add({ id:'shadow-legacy', label:'IndexedDB legacy per-store copy', state, trusted:false });
+          }
+        } finally { db.close(); }
+      }
+    } catch (error) { errors.push('IndexedDB shadow history: ' + (error?.message || error)); }
+
     return { candidates, errors };
   }
 
@@ -271,13 +434,15 @@
     section.id = 'habitCompletionBackupRecovery'; section.className = 'border-t border-zinc-700/60 pt-4 space-y-3';
     section.innerHTML = [
       '<div class="font-semibold">Recover missing Habit completion rows from backups</div>',
-      '<p class="muted text-sm">Scans rolling backups, Safety Vault snapshots, and the verified secondary mirror for the exact original row behind each doneKey that has no completion row. Historical points are never recalculated from the Habit\'s current value.</p>',
+      '<p class="muted text-sm">Scans rolling backups, Safety Vault snapshots, verified secondary copies, older IndexedDB snapshots, and surviving recovery caches for the exact original row behind each doneKey that has no completion row. Historical points are never recalculated from the Habit\'s current value.</p>',
       '<div class="flex flex-wrap gap-2"><button id="scanHabitCompletionBackupsBtn" type="button" class="btn btn-primary">Scan Backups for Missing Rows</button><button id="restoreHabitCompletionBackupsBtn" type="button" class="btn btn-ghost" disabled>Restore Exact Recovered Rows</button></div>',
       '<div id="habitCompletionBackupRecoveryStatus" class="muted text-sm">Run the backup scan first. The scan is read-only.</div>',
       '<div id="habitCompletionBackupRecoverySummary" class="text-sm"></div>',
       '<div id="habitCompletionRecoverableCount" class="font-semibold">Exact rows recoverable: 0</div><div id="habitCompletionRecoverableRows"></div>',
       '<div id="habitCompletionConflictCount" class="font-semibold">Backup conflicts / blocked rows: 0</div><div id="habitCompletionConflictRows"></div>',
-      '<div id="habitCompletionNotFoundCount" class="font-semibold">Not found in backups: 0</div><div id="habitCompletionNotFoundRows"></div>'
+      '<div id="habitCompletionEvidenceCount" class="font-semibold">Legacy evidence only: 0</div><div id="habitCompletionEvidenceRows"></div>',
+      '<div id="habitCompletionNotFoundCount" class="font-semibold">Not found in any scanned source: 0</div><div id="habitCompletionNotFoundRows"></div>',
+      '<details class="text-sm"><summary class="cursor-pointer font-semibold">Sources scanned</summary><div id="habitCompletionSourceRows" class="muted mt-2"></div></details>'
     ].join('');
     parent.appendChild(section);
     const scan = section.querySelector('#scanHabitCompletionBackupsBtn');
@@ -287,18 +452,21 @@
     const enabled = () => { restore.disabled = !(plan?.recoverable?.length && backupCheckbox.checked); };
 
     scan.addEventListener('click', async () => {
-      plan = null; backupCheckbox.checked = false; enabled(); scan.disabled = true; status.textContent = 'Scanning rolling and verified backups…';
+      plan = null; backupCheckbox.checked = false; enabled(); scan.disabled = true; status.textContent = 'Scanning all surviving local backup and IndexedDB sources…';
       try {
         const state = readCurrent(); if (!state) throw new Error('No TaskPoints state was found.');
         const found = await collectBackupCandidates(); plan = buildRecoveryPlan(state, found.candidates);
-        section.querySelector('#habitCompletionBackupRecoverySummary').innerHTML = 'Missing doneKeys scanned: <strong>' + plan.missingCount + '</strong><br>Readable backup sources scanned: <strong>' + plan.sourceCount + '</strong>' + (found.errors.length ? '<br>Backup read warning(s): <strong>' + found.errors.length + '</strong>' : '');
+        section.querySelector('#habitCompletionBackupRecoverySummary').innerHTML = 'Missing doneKeys scanned: <strong>' + plan.missingCount + '</strong><br>Readable sources scanned: <strong>' + plan.sourceCount + '</strong>' + (found.errors.length ? '<br>Source read warning(s): <strong>' + found.errors.length + '</strong>' : '');
         section.querySelector('#habitCompletionRecoverableCount').textContent = 'Exact rows recoverable: ' + plan.recoverable.length;
         section.querySelector('#habitCompletionConflictCount').textContent = 'Backup conflicts / blocked rows: ' + plan.conflicts.length;
-        section.querySelector('#habitCompletionNotFoundCount').textContent = 'Not found in backups: ' + plan.notFound.length;
+        section.querySelector('#habitCompletionEvidenceCount').textContent = 'Legacy evidence only: ' + plan.evidenceOnly.length;
+        section.querySelector('#habitCompletionNotFoundCount').textContent = 'Not found in any scanned source: ' + plan.notFound.length;
         section.querySelector('#habitCompletionRecoverableRows').innerHTML = renderRows(plan.recoverable,(item)=>escapeHtml(item.habitName) + ' on ' + escapeHtml(item.dayKey) + ': restore ' + escapeHtml(item.points) + ' point(s), ID ' + escapeHtml(item.completionId) + ', from ' + escapeHtml(item.sourceLabels.join(', ')));
         section.querySelector('#habitCompletionConflictRows').innerHTML = renderRows(plan.conflicts,(item)=>escapeHtml(item.habitName) + ' on ' + escapeHtml(item.dayKey) + ': ' + escapeHtml(item.reason));
+        section.querySelector('#habitCompletionEvidenceRows').innerHTML = renderRows(plan.evidenceOnly,(item)=>escapeHtml(item.habitName) + ' on ' + escapeHtml(item.dayKey) + ': found ' + escapeHtml(item.points) + ' point row in ' + escapeHtml(item.sourceLabels.join(', ')) + ' — review only, not auto-restored');
         section.querySelector('#habitCompletionNotFoundRows').innerHTML = renderRows(plan.notFound,(item)=>escapeHtml(item.habitName) + ' on ' + escapeHtml(item.dayKey));
-        status.textContent = plan.recoverable.length ? 'Scan complete: ' + plan.recoverable.length + ' exact original row(s) can be restored without guessing points. Confirm the fresh-backup checkbox above to enable restore.' : 'Scan complete, but none of the missing rows can be restored exactly from these backups.';
+        section.querySelector('#habitCompletionSourceRows').innerHTML = plan.sourceLabels.length ? plan.sourceLabels.map((label)=>'<div>• ' + escapeHtml(label) + '</div>').join('') : 'No readable sources found.';
+        status.textContent = plan.recoverable.length ? 'Deep scan complete: ' + plan.recoverable.length + ' exact original row(s) can be restored without guessing points. Confirm the fresh-backup checkbox above to enable restore.' : (plan.evidenceOnly.length ? 'Deep scan found historical evidence for ' + plan.evidenceOnly.length + ' row(s), but only in non-authoritative legacy/quarantine sources, so automatic restore remains disabled for those rows.' : 'Deep scan complete, but none of the missing rows exist in any surviving scanned source.');
         if (found.errors.length) status.textContent += ' ' + found.errors.length + ' backup source(s) also reported a read/verification warning.';
       } catch (error) { status.textContent = 'Backup scan failed: ' + (error?.message || error); }
       finally { scan.disabled = false; enabled(); }
