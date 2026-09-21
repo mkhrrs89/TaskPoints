@@ -248,12 +248,53 @@
 
   async function collectBackupCandidates() {
     const candidates = [], errors = [];
+    const add = (candidate) => {
+      if (!candidate?.state || typeof candidate.state !== 'object' || Array.isArray(candidate.state)) return;
+      candidates.push({ trusted:true, ...candidate });
+    };
+
     ROLLING_KEYS.forEach((key,index) => {
       try {
         const record = JSON.parse(global.localStorage?.getItem?.(key) || 'null');
-        if (record?.state) candidates.push({ id:'rolling-' + index, label:index === 0 ? 'Rolling backup — latest' : 'Rolling backup — previous ' + index, state:record.state });
+        if (record?.state) add({
+          id:'rolling-' + index,
+          label:index === 0 ? 'Rolling backup — latest' : 'Rolling backup — previous ' + index,
+          state:record.state,
+          trusted:true
+        });
       } catch (error) { errors.push(key + ': ' + (error?.message || error)); }
     });
+
+    try {
+      const quarantine = JSON.parse(global.localStorage?.getItem?.('taskpoints_quarantined_snapshot') || 'null');
+      if (quarantine?.payload) add({
+        id:'quarantine-payload',
+        label:'Quarantined snapshot payload',
+        state:quarantine.payload,
+        trusted:false
+      });
+    } catch (error) { errors.push('Quarantined snapshot: ' + (error?.message || error)); }
+
+    try {
+      const preRestoreRaw = global.localStorage?.getItem?.('taskpoints_emergency_pre_restore_mirror_v1');
+      const state = parseRaw(preRestoreRaw);
+      if (state) add({
+        id:'emergency-pre-restore',
+        label:'Emergency pre-restore mirror',
+        state,
+        trusted:false
+      });
+    } catch (error) { errors.push('Emergency pre-restore mirror: ' + (error?.message || error)); }
+
+    try {
+      const session = JSON.parse(global.sessionStorage?.getItem?.('taskpoints_phase4_verified_primary_cache_v1') || 'null');
+      if (session?.state) add({
+        id:'phase4-session-cache',
+        label:'Phase 4 verified session cache',
+        state:session.state,
+        trusted:session.status === 'passed_verification'
+      });
+    } catch (error) { errors.push('Phase 4 session cache: ' + (error?.message || error)); }
 
     try {
       const db = await openExistingDatabase('taskpoints_safety_vault_v1');
@@ -264,9 +305,17 @@
             const rows = await Promise.all(VAULT_SLOTS.map((id) => requestResult(store.get(id)))); await done;
             rows.filter(Boolean).forEach((record,index) => {
               if (!record.raw) return;
-              if (record.rawHash && record.rawHash !== fnv(record.raw)) { errors.push('Safety vault ' + (record.id || VAULT_SLOTS[index]) + ': hash mismatch.'); return; }
+              if (record.rawHash && record.rawHash !== fnv(record.raw)) {
+                errors.push('Safety vault ' + (record.id || VAULT_SLOTS[index]) + ': hash mismatch.');
+                return;
+              }
               const state = parseRaw(record.raw);
-              if (state) candidates.push({ id:'vault-' + (record.id || index), label:'Safety vault — ' + (record.id || VAULT_SLOTS[index]), state });
+              if (state) add({
+                id:'vault-' + (record.id || index),
+                label:'Safety vault — ' + (record.id || VAULT_SLOTS[index]),
+                state,
+                trusted:true
+              });
             });
           }
         } finally { db.close(); }
@@ -282,13 +331,89 @@
             const rows = await Promise.all([requestResult(store.get('latest')), requestResult(store.get('home_native_latest'))]); await done;
             const latest = rows[0], native = rows[1];
             if (latest?.status === 'passed_verification' && latest.raw && (!latest.rawHash || latest.rawHash === fnv(latest.raw))) {
-              const state = parseRaw(latest.raw); if (state) candidates.push({ id:'secondary-latest', label:'Verified secondary — latest', state });
+              const state = parseRaw(latest.raw);
+              if (state) add({ id:'secondary-latest', label:'Verified secondary — latest', state, trusted:true });
             }
-            if (native?.status === 'passed_verification' && native?.state) candidates.push({ id:'secondary-native', label:'Verified secondary — native latest', state:native.state });
+            if (native?.status === 'passed_verification' && native?.state) {
+              add({ id:'secondary-native', label:'Verified secondary — native latest', state:native.state, trusted:true });
+            }
           }
         } finally { db.close(); }
       }
     } catch (error) { errors.push('Verified secondary: ' + (error?.message || error)); }
+
+    try {
+      const db = await openExistingDatabase(SHADOW_DB);
+      if (db) {
+        try {
+          if (db.objectStoreNames.contains('metadata')) {
+            const tx = db.transaction('metadata','readonly'); const done = transactionDone(tx); const store = tx.objectStore('metadata');
+            const [nativeSnapshot, phase4Snapshot, phase4Commit, dualSnapshot, dualMetadata] = await Promise.all([
+              requestResult(store.get('phase5a_native_snapshot')),
+              requestResult(store.get('phase4_primary_snapshot')),
+              requestResult(store.get('phase4_primary_commit')),
+              requestResult(store.get('phase2_dual_write_snapshot')),
+              requestResult(store.get('dual_write'))
+            ]);
+            await done;
+
+            if (nativeSnapshot?.state) {
+              add({
+                id:'shadow-native',
+                label:'IndexedDB Phase 5A native snapshot',
+                state:nativeSnapshot.state,
+                trusted:nativeSnapshot.status === 'passed_verification'
+              });
+            }
+
+            if (phase4Snapshot?.serializedState) {
+              const state = parseRaw(phase4Snapshot.serializedState);
+              const verified = phase4Commit?.status === 'passed_verification'
+                && Number(phase4Snapshot.sequence) === Number(phase4Commit.sequence);
+              if (state) add({
+                id:'shadow-phase4',
+                label:'IndexedDB Phase 4 primary snapshot',
+                state,
+                trusted:verified
+              });
+            }
+
+            const dualVerified = dualSnapshot?.status === 'passed_verification'
+              && dualMetadata?.status === 'passed_verification'
+              && Number(dualSnapshot.sequence) === Number(dualMetadata.sequence);
+            if (dualSnapshot?.serializedState) {
+              const state = parseRaw(dualSnapshot.serializedState);
+              if (state) add({
+                id:'shadow-phase2-dual',
+                label:'IndexedDB Phase 2 dual-write snapshot',
+                state,
+                trusted:dualVerified
+              });
+            }
+          }
+
+          const requiredLegacyStores = [...SHADOW_ARRAY_STORES,'collections','values'];
+          if (requiredLegacyStores.every((name) => db.objectStoreNames.contains(name))) {
+            const tx = db.transaction(requiredLegacyStores,'readonly');
+            const arrayRows = await Promise.all(SHADOW_ARRAY_STORES.map((name) => requestResult(tx.objectStore(name).getAll())));
+            const collections = await requestResult(tx.objectStore('collections').getAll());
+            const values = await requestResult(tx.objectStore('values').getAll());
+            await transactionDone(tx);
+            const state = {};
+            SHADOW_ARRAY_STORES.forEach((field,index) => {
+              state[field] = (arrayRows[index] || []).slice().sort((x,y) => Number(x.key)-Number(y.key)).map((row) => row.value);
+            });
+            (collections || []).filter((row) => row?.kind === 'manifest').forEach((row) => { state[row.field] = []; });
+            (collections || []).filter((row) => row?.kind === 'item')
+              .sort((x,y) => String(x.field).localeCompare(String(y.field)) || Number(x.index)-Number(y.index))
+              .forEach((row) => { (state[row.field] ||= [])[Number(row.index)] = row.value; });
+            (values || []).forEach((row) => { if (row && typeof row.field === 'string') state[row.field] = row.value; });
+            add({ id:'shadow-legacy', label:'IndexedDB legacy per-store copy', state, trusted:false });
+          }
+        } finally { db.close(); }
+      }
+    } catch (error) { errors.push('IndexedDB shadow history: ' + (error?.message || error)); }
+
     return { candidates, errors };
   }
 
