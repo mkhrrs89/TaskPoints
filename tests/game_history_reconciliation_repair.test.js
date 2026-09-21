@@ -188,6 +188,88 @@ test('preview confirms only the two approved stale scores and confidently missin
   );
   assert.equal(plan.uncertain.length, 0);
   assert.equal(plan.orphanCount, 25);
+  assert.deepEqual(plan.orphanReview.counts, {
+    safeDuplicate: 0,
+    likelyLegacyOnly: 25,
+    needsReview: 0
+  });
+  assert.equal(plan.orphanReview.rows.length, 25);
+  assert.ok(plan.orphanReview.rows.every((row) => row.classification === 'likely_legacy_only'));
+  assert.ok(plan.orphanReview.rows.every((row) => row.recordsSource === true));
+});
+
+test('orphan review marks a strongly evidenced duplicate as safe without deleting it', () => {
+  const state = {
+    players: [player(RICK, 'Rick')],
+    matchups: [
+      matchup({
+        id: 'rick-dup-game',
+        dateKey: '2026-05-01',
+        playerAId: RICK,
+        scoreA: 44.4,
+        scoreB: 40
+      })
+    ],
+    gameHistory: [
+      history({
+        id: 'rick-linked',
+        matchupId: 'rick-dup-game',
+        dateKey: '2026-05-01',
+        playerId: RICK,
+        score: 44.4,
+        opponentId: 'YOU'
+      }),
+      history({
+        id: 'rick-duplicate',
+        dateKey: '2026-05-01',
+        playerId: RICK,
+        score: 44.4,
+        opponentId: 'YOU'
+      })
+    ]
+  };
+
+  const plan = repair.buildGameHistoryRepairPlan(state);
+  assert.equal(plan.orphanCount, 1);
+  assert.deepEqual(plan.orphanReview.counts, {
+    safeDuplicate: 1,
+    likelyLegacyOnly: 0,
+    needsReview: 0
+  });
+  const row = plan.orphanReview.rows[0];
+  assert.equal(row.historyId, 'rick-duplicate');
+  assert.equal(row.classification, 'safe_duplicate');
+  assert.equal(row.duplicateEvidence.historyId, 'rick-linked');
+  assert.equal(row.duplicateEvidence.matchedToFinalizedMatchup, true);
+  assert.match(row.recordsImpact, /equivalent score row would remain/);
+  assert.equal(state.gameHistory.length, 2, 'preview classification must not mutate history');
+});
+
+test('orphan review sends stale explicit matchup links to manual review', () => {
+  const state = {
+    players: [player(RICK, 'Rick')],
+    matchups: [],
+    gameHistory: [
+      history({
+        id: 'stale-explicit-link',
+        matchupId: 'missing-matchup',
+        dateKey: '2026-05-02',
+        playerId: RICK,
+        score: 51.2,
+        opponentId: 'YOU'
+      })
+    ]
+  };
+
+  const plan = repair.buildGameHistoryRepairPlan(state);
+  assert.equal(plan.orphanCount, 1);
+  assert.deepEqual(plan.orphanReview.counts, {
+    safeDuplicate: 0,
+    likelyLegacyOnly: 0,
+    needsReview: 1
+  });
+  assert.equal(plan.orphanReview.rows[0].classification, 'needs_review');
+  assert.match(plan.orphanReview.rows[0].reason, /explicit matchup ID/);
 });
 
 test('apply changes gameHistory only and is idempotent', () => {
@@ -287,6 +369,10 @@ test('repair save path synchronizes populated legacy aliases before persistence'
 test('panel requires preview and fresh backup confirmation', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'game_history_reconciliation_repair.js'), 'utf8');
   assert.match(source, /Preview Game-History Repair/);
+  assert.match(source, /Copy Orphan Review/);
+  assert.match(source, /Classification is preview-only\. No orphan row can be deleted from this panel/);
+  assert.match(source, /Probably legitimate legacy-only/);
+  assert.match(source, /Records impact/);
   assert.match(source, /I exported a fresh full backup of the current phone data/);
   assert.match(source, /audit-game-history-reconciliation-repair/);
   assert.match(source, /freshPlan\.uncertain\.length/);
