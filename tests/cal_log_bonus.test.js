@@ -82,6 +82,97 @@ test('saveStateSnapshot preserves existing reminders from stale snapshots', () =
   assert.equal(saved.reminders[0].text, 'Do not drop me');
 });
 
+test('routine stale snapshots cannot overwrite an authoritative Notes cache', () => {
+  storage.clear();
+  const canonicalNotes = 'shorter current notes';
+  const existing = core.normalizeState({
+    tasks: [],
+    reminders: [],
+    completions: [],
+    players: [],
+    habits: [],
+    flexActions: [],
+    gameHistory: [],
+    matchups: [],
+    schedule: [],
+    opponentDripSchedules: [],
+    notes: canonicalNotes
+  });
+  global.localStorage.setItem(core.STORAGE_KEY, JSON.stringify(existing));
+  global.localStorage.setItem('taskpoints_notes_v1', canonicalNotes);
+  global.localStorage.setItem('taskpoints_notes_authoritative_v1', '1');
+
+  const stale = core.normalizeState({
+    ...existing,
+    notes: 'older and much longer stale notes that must not come back'
+  });
+  core.saveStateSnapshot(stale, { storageKey: core.STORAGE_KEY, savePath: 'unrelated-page-save' });
+
+  const saved = core.parseTaskPointsStorageJson(global.localStorage.getItem(core.STORAGE_KEY), {});
+  assert.equal(saved.notes, canonicalNotes);
+  assert.equal(global.localStorage.getItem('taskpoints_notes_v1'), canonicalNotes);
+});
+
+test('dirty Notes cache is protected before the full-state mirror catches up', () => {
+  storage.clear();
+  const existing = core.normalizeState({
+    tasks: [],
+    reminders: [],
+    completions: [],
+    players: [],
+    habits: [],
+    flexActions: [],
+    gameHistory: [],
+    matchups: [],
+    schedule: [],
+    opponentDripSchedules: [],
+    notes: 'old state copy'
+  });
+  global.localStorage.setItem(core.STORAGE_KEY, JSON.stringify(existing));
+  global.localStorage.setItem('taskpoints_notes_v1', '');
+  global.localStorage.setItem('taskpoints_notes_dirty_v1', '1');
+
+  core.saveStateSnapshot(
+    { ...existing, notes: 'old state copy' },
+    { storageKey: core.STORAGE_KEY, savePath: 'background-save' }
+  );
+
+  const saved = core.parseTaskPointsStorageJson(global.localStorage.getItem(core.STORAGE_KEY), {});
+  assert.equal(saved.notes, '', 'an intentional in-progress clear must not be resurrected by a stale snapshot');
+});
+
+test('explicit destructive restore can replace Notes independently of the cache guard', () => {
+  storage.clear();
+  const existing = core.normalizeState({
+    tasks: [],
+    reminders: [],
+    completions: [],
+    players: [],
+    habits: [],
+    flexActions: [],
+    gameHistory: [],
+    matchups: [],
+    schedule: [],
+    opponentDripSchedules: [],
+    notes: 'current notes'
+  });
+  global.localStorage.setItem(core.STORAGE_KEY, JSON.stringify(existing));
+  global.localStorage.setItem('taskpoints_notes_v1', 'current notes');
+  global.localStorage.setItem('taskpoints_notes_authoritative_v1', '1');
+
+  core.saveStateSnapshot(
+    { ...existing, notes: 'restored backup notes' },
+    {
+      storageKey: core.STORAGE_KEY,
+      allowDestructiveOverwrite: true,
+      savePath: 'explicit-restore'
+    }
+  );
+
+  const saved = core.parseTaskPointsStorageJson(global.localStorage.getItem(core.STORAGE_KEY), {});
+  assert.equal(saved.notes, 'restored backup notes');
+});
+
 test('saveStateSnapshot allows explicit reminder deletion by id', () => {
   storage.clear();
   const existing = core.normalizeState({
