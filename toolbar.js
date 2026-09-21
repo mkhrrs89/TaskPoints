@@ -2258,6 +2258,7 @@ function getBestNotesTextFromStorageFallback() {
 
 function syncNotesStorageLocationsFallback(source = 'notes-storage-sync') {
   const notesText = getBestNotesTextFromStorageFallback();
+  let stateSynced = false;
 
   try {
     localStorage.setItem('taskpoints_notes_v1', notesText);
@@ -2271,8 +2272,13 @@ function syncNotesStorageLocationsFallback(source = 'notes-storage-sync') {
     const state = raw ? (window.TaskPointsCore?.readTaskPointsStoredState ? TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY_FALLBACK, {}) : parseTaskPointsRawFallback(raw, {})) : {};
     state.notes = notesText;
     TaskPointsCore.writeTaskPointsStoredState(state, { storageKey: STORAGE_KEY_FALLBACK });
+    stateSynced = true;
   } catch (error) {
     console.warn('Failed to sync taskpoints_v1.notes', error);
+  }
+
+  if (stateSynced) {
+    try { localStorage.removeItem('taskpoints_notes_dirty_v1'); } catch (_) {}
   }
 
   window.dispatchEvent(new CustomEvent('taskpoints-notes-updated', {
