@@ -15,7 +15,7 @@ test('loads the cache-busted Home and Settings diagnostics assets', () => {
   );
   assert.match(
     source,
-    /\/home_export_responsiveness\.js\?v=20260803-3/
+    /\/home_export_responsiveness\.js\?v=20260921-1/
   );
 
   assert.doesNotMatch(

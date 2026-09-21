@@ -149,8 +149,18 @@
       try { return global.syncNotesStorageLocations('responsive-export-sync'); } catch (_) {}
     }
     let cached = '';
-    try { cached = global.localStorage?.getItem?.('taskpoints_notes_v1') || ''; } catch (_) {}
+    let cachePresent = false;
+    let cacheDirty = false;
+    let cacheAuthoritative = false;
+    try {
+      const cachedRaw = global.localStorage?.getItem?.('taskpoints_notes_v1');
+      cachePresent = cachedRaw !== null && cachedRaw !== undefined;
+      cached = cachedRaw || '';
+      cacheDirty = global.localStorage?.getItem?.('taskpoints_notes_dirty_v1') === '1';
+      cacheAuthoritative = global.localStorage?.getItem?.('taskpoints_notes_authoritative_v1') === '1';
+    } catch (_) {}
     const stateNotes = typeof state?.notes === 'string' ? state.notes : '';
+    if (cachePresent && (cacheDirty || cacheAuthoritative)) return cached;
     if (cached.trim() && !stateNotes.trim()) return cached;
     if (stateNotes.trim() && !cached.trim()) return stateNotes;
     return cached.length >= stateNotes.length ? cached : stateNotes;

@@ -345,7 +345,7 @@
   'use strict';
 
   const SCRIPT_ID = 'tpResponsiveExportScript';
-  const SCRIPT_SRC = '/home_export_responsiveness.js?v=20260803-3';
+  const SCRIPT_SRC = '/home_export_responsiveness.js?v=20260921-1';
   const EXPORT_SELECTOR = '[data-export-button]';
   const loaderState = global.__tpResponsiveExportLoaderState || {
     pending: false,
@@ -440,8 +440,12 @@
         try { notesText = global.syncNotesStorageLocations('responsive-export-sync'); } catch (_) {}
       } else {
         try {
-          const cached = global.localStorage?.getItem?.('taskpoints_notes_v1') || '';
-          if (cached.length >= notesText.length) notesText = cached;
+          const cachedRaw = global.localStorage?.getItem?.('taskpoints_notes_v1');
+          const cached = cachedRaw || '';
+          const cacheDirty = global.localStorage?.getItem?.('taskpoints_notes_dirty_v1') === '1';
+          const cacheAuthoritative = global.localStorage?.getItem?.('taskpoints_notes_authoritative_v1') === '1';
+          if (cachedRaw !== null && cachedRaw !== undefined && (cacheDirty || cacheAuthoritative)) notesText = cached;
+          else if (cached.length >= notesText.length) notesText = cached;
         } catch (_) {}
       }
       normalized.notes = notesText;

@@ -69,6 +69,7 @@ test('typing General Notes stays on the lightweight crash-safe cache path', () =
 
   assert.match(source, /const NOTES_DIRTY_KEY = "taskpoints_notes_dirty_v1";/);
   assert.match(schedule, /localStorage\.setItem\(NOTES_STORAGE_KEY, notesInput\?\.value \|\| ""\)/);
+  assert.match(schedule, /localStorage\.setItem\(NOTES_AUTHORITY_KEY, "1"\)/);
   assert.match(schedule, /localStorage\.setItem\(NOTES_DIRTY_KEY, "1"\)/);
   assert.doesNotMatch(schedule, /saveNotes\(/);
   assert.doesNotMatch(schedule, /saveAppState/);
@@ -79,13 +80,19 @@ test('typing General Notes stays on the lightweight crash-safe cache path', () =
   assert.match(source, /document\.visibilityState === "hidden"\) flushDirtyNotes\(\)/);
 });
 
-test('dirty lightweight Notes cache wins even when an edit shortened the note', () => {
+test('authoritative lightweight Notes cache wins even when a stale state copy is longer', () => {
   const getBest = extractFunction('getBestNotesTextFromStorage');
   const save = extractFunction('saveNotes');
   const sync = extractFunction('syncNotesStorageLocations');
+  const schedule = extractFunction('scheduleSave');
 
+  assert.match(source, /const NOTES_AUTHORITY_KEY = "taskpoints_notes_authoritative_v1";/);
   assert.match(getBest, /cacheDirty = localStorage\.getItem\(NOTES_DIRTY_KEY\) === "1"/);
-  assert.match(getBest, /if \(cacheDirty\) return cacheNotes;/);
+  assert.match(getBest, /cacheAuthoritative = localStorage\.getItem\(NOTES_AUTHORITY_KEY\) === "1"/);
+  assert.match(getBest, /cachePresent && \(cacheDirty \|\| cacheAuthoritative\)/);
+  assert.match(save, /localStorage\.setItem\(NOTES_AUTHORITY_KEY, "1"\)/);
+  assert.match(sync, /localStorage\.setItem\(NOTES_AUTHORITY_KEY, "1"\)/);
+  assert.match(schedule, /localStorage\.setItem\(NOTES_AUTHORITY_KEY, "1"\)/);
   assert.match(save, /localStorage\.removeItem\(NOTES_DIRTY_KEY\)/);
   assert.match(sync, /localStorage\.removeItem\(NOTES_DIRTY_KEY\)/);
 });
