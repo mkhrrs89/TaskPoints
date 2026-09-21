@@ -121,10 +121,15 @@ test('habit invalid fraction, date, and orphan ice key fail', () => {
   assert.equal(audit.buildHabitLedgerConsistencyAudit(habitState({ doneKeys: ['2026-02-30'] }, { dayKey: '2026-02-30' }), options).status, 'FAIL');
   assert.equal(audit.buildHabitLedgerConsistencyAudit(habitState({ iceKeys: ['2026-07-16'] }), options).status, 'FAIL');
 });
-test('habit current point mismatch fails while historical mismatch warns', () => {
+test('habit current point mismatch fails while historical point values are preserved', () => {
   assert.equal(audit.buildHabitLedgerConsistencyAudit(habitState({}, { points: 3 }), options).status, 'FAIL');
   const old = '2026-07-16';
-  assert.equal(audit.buildHabitLedgerConsistencyAudit(habitState({ doneKeys: [old] }, { dayKey: old, points: 3 }), options).status, 'WARN');
+  const result = audit.buildHabitLedgerConsistencyAudit(
+    habitState({ doneKeys: [old] }, { dayKey: old, points: 3 }),
+    options
+  );
+  assert.equal(result.status, 'PASS');
+  assert.doesNotMatch(result.details.join(' '), /historical point mismatches/);
 });
 
 
@@ -145,10 +150,25 @@ test('reconciliation ambiguous duplicates warn and groups orphan history', () =>
   const result = audit.buildMatchupHistoryReconciliationAudit({ matchups: [matchup({ id: '', matchupId: '' }), matchup({ id: '', matchupId: '' })], gameHistory: [history({ matchupId: '' }), history({ id: 'g2', matchupId: '' }), history({ id: 'orphan-1', dateKey: '2026-07-16', matchupId: '' }), history({ id: 'orphan-2', dateKey: '2026-07-15', matchupId: '' })] }, options);
   assert.equal(result.status, 'WARN'); assert.match(result.details.join(' '), /Ambiguous historical/); assert.match(result.details.join(' '), /2 legacy gameHistory rows/);
 });
-test('habit historical point drift is grouped and contradiction details lead with habit names', () => {
-  const old = ['2026-07-16', '2026-07-15']; const state = habitState({ title: 'Morning Dishes', doneKeys: [options.todayKey, ...old], failedKeys: [options.todayKey] });
-  state.completions.push(...old.map((day, i) => ({ id: `very-long-completion-id-${i}`, source: 'habit', habitId: 'h1', dayKey: day, points: 3, completionFraction: 1 })));
-  const result = audit.buildHabitLedgerConsistencyAudit(state, options); assert.equal(result.status, 'FAIL'); assert.match(result.details.join(' '), /Morning Dishes \(h1\) on 2026-07-17/); assert.match(result.details.join(' '), /2 historical point mismatches for Morning Dishes/); assert.equal(result.details.filter(detail => /historical point mismatches/.test(detail)).length, 1);
+test('habit historical point drift stays silent while current structural contradictions still fail', () => {
+  const old = ['2026-07-16', '2026-07-15'];
+  const state = habitState({
+    title: 'Morning Dishes',
+    doneKeys: [options.todayKey, ...old],
+    failedKeys: [options.todayKey]
+  });
+  state.completions.push(...old.map((day, i) => ({
+    id: `very-long-completion-id-${i}`,
+    source: 'habit',
+    habitId: 'h1',
+    dayKey: day,
+    points: 3,
+    completionFraction: 1
+  })));
+  const result = audit.buildHabitLedgerConsistencyAudit(state, options);
+  assert.equal(result.status, 'FAIL');
+  assert.match(result.details.join(' '), /Morning Dishes \(h1\) on 2026-07-17/);
+  assert.doesNotMatch(result.details.join(' '), /historical point mismatches/);
 });
 
 test('all audit builders leave input state unchanged', () => {
@@ -193,5 +213,7 @@ test('audit page loads and wires read-only integrity builders and centralized li
   assert.match(html, /!value\.length && key !== 'reminders'/);
   assert.match(html, /empty reminders list is valid/);
   const source = fs.readFileSync(path.join(__dirname, '..', 'audit_integrity.js'), 'utf8');
+  assert.match(source, /Historical stored points are preserved because Habit\/Vice values may change over time/);
+  assert.doesNotMatch(source, /historical point mismatches for/);
   assert.doesNotMatch(source, /saveAppState|saveStateSnapshot|mergeAndSaveState|localStorage\.setItem|\bsync[A-Z]/);
 });
