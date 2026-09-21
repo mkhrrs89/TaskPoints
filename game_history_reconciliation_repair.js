@@ -147,6 +147,116 @@
     ) || null;
   }
 
+  function orphanClassificationLabel(classification) {
+    if (classification === 'safe_duplicate') return 'Safe duplicate';
+    if (classification === 'likely_legacy_only') return 'Probably legitimate legacy-only result';
+    return 'Needs review';
+  }
+
+  function buildOrphanReview(state, histories, orphanRows, expectations, usedHistories) {
+    const players = Array.isArray(state?.players) ? state.players : [];
+    const playerById = new Map(players.filter(Boolean).map((item) => [String(item.id || ''), item]));
+
+    const rows = orphanRows.map((found) => {
+      const sameBaseHistory = histories.filter((other) =>
+        other !== found
+        && other.playerId === found.playerId
+        && other.dateKey === found.dateKey
+      );
+      const sameScoreHistory = sameBaseHistory.filter((other) =>
+        finite(found.score) && finite(other.score) && equalScore(found.score, other.score)
+      );
+      const sameBaseExpectations = expectations.filter((expected) =>
+        expected.playerId === found.playerId
+        && expected.dateKey === found.dateKey
+      );
+
+      const strongDuplicate = sameScoreHistory.find((other) => {
+        const sameMatchup = Boolean(
+          found.matchupId && other.matchupId && found.matchupId === other.matchupId
+        );
+        const sameOpponent = Boolean(
+          found.opponentId && other.opponentId && found.opponentId === other.opponentId
+        );
+        const sameContext = Boolean(
+          found.context && other.context && found.context === other.context
+        );
+        return sameMatchup
+          || (usedHistories.has(other) && (sameOpponent || sameContext))
+          || (sameOpponent && sameContext);
+      }) || null;
+
+      let classification = 'likely_legacy_only';
+      let reason = 'No finalized matchup or duplicate history row shares this player/date. This appears to be unique legacy-only history and may be the only surviving record of that score.';
+
+      if (!found.dateKey || !finite(found.score)) {
+        classification = 'needs_review';
+        reason = 'This row is missing a usable date or score, so it cannot be safely identified as duplicate or unique legacy history.';
+      } else if (strongDuplicate) {
+        classification = 'safe_duplicate';
+        const link = strongDuplicate.matchupId
+          ? `matched history ${strongDuplicate.historyId || '(no history ID)'} → matchup ${strongDuplicate.matchupId}`
+          : `history ${strongDuplicate.historyId || '(no history ID)'}`;
+        reason = `Another row already represents the same player/date/score with compatible game evidence (${link}). Removing this orphan would leave that score represented.`;
+      } else if (found.matchupId) {
+        classification = 'needs_review';
+        reason = `This orphan carries explicit matchup ID ${found.matchupId}, but it did not reconcile to a finalized matchup. An explicit stale link should be reviewed before deletion.`;
+      } else if (sameBaseExpectations.length) {
+        classification = 'needs_review';
+        reason = `${sameBaseExpectations.length} finalized matchup side(s) exist for this player/date, but none safely matched this history row.`;
+      } else if (sameBaseHistory.length) {
+        classification = 'needs_review';
+        reason = `${sameBaseHistory.length} other history row(s) share this player/date, but the evidence is not strong enough to prove they are duplicate games.`;
+      }
+
+      const player = playerById.get(found.playerId);
+      const recordsSource = Boolean(
+        player
+        && player.active !== false
+        && found.dateKey
+        && finite(found.score)
+      );
+      const recordsImpact = !recordsSource
+        ? 'Not currently a usable active-player Records source row.'
+        : classification === 'safe_duplicate'
+          ? 'Deleting this row would remove one stored Records entry, but an equivalent score row would remain.'
+          : 'Deleting this row would remove a unique stored NPC Records source entry.';
+
+      return {
+        classification,
+        classificationLabel: orphanClassificationLabel(classification),
+        dateKey: found.dateKey,
+        playerId: found.playerId,
+        playerName: found.playerName,
+        opponentId: found.opponentId,
+        opponentName: found.opponentName,
+        score: finite(found.score) ? Number(found.score) : null,
+        historyId: found.historyId,
+        matchupId: found.matchupId,
+        historyIndex: found.historyIndex,
+        context: found.context,
+        recordsSource,
+        recordsImpact,
+        reason,
+        duplicateEvidence: strongDuplicate ? {
+          historyId: strongDuplicate.historyId,
+          matchupId: strongDuplicate.matchupId,
+          opponentId: strongDuplicate.opponentId,
+          score: finite(strongDuplicate.score) ? Number(strongDuplicate.score) : null,
+          matchedToFinalizedMatchup: usedHistories.has(strongDuplicate)
+        } : null
+      };
+    });
+
+    const counts = {
+      safeDuplicate: rows.filter((item) => item.classification === 'safe_duplicate').length,
+      likelyLegacyOnly: rows.filter((item) => item.classification === 'likely_legacy_only').length,
+      needsReview: rows.filter((item) => item.classification === 'needs_review').length
+    };
+
+    return { rows, counts };
+  }
+
   function buildGameHistoryRepairPlan(stateInput) {
     const state = stateInput && typeof stateInput === 'object' ? stateInput : {};
     const expectations = [];
@@ -203,6 +313,7 @@
         if (seenHistoryIds.has(id)) duplicateHistoryIds.add(id);
         seenHistoryIds.add(id);
       }
+      const opponentId = String(row.opponentId || '');
       histories.push({
         row,
         historyIndex,
@@ -211,7 +322,8 @@
         dateKey: dateKey(row),
         playerId: String(row.playerId),
         playerName: playerName(state, row.playerId),
-        opponentId: String(row.opponentId || ''),
+        opponentId,
+        opponentName: opponentId ? playerName(state, opponentId) : '',
         score: historyScore(row),
         context: contextKey(row)
       });
@@ -394,6 +506,13 @@
       !usedHistories.has(found)
       && !ambiguousBases.has(`${found.dateKey}|${found.playerId}`)
     );
+    const orphanReview = buildOrphanReview(
+      state,
+      histories,
+      orphanRows,
+      expectations,
+      usedHistories
+    );
 
     confirmedScoreUpdates.sort((a, b) =>
       a.dateKey.localeCompare(b.dateKey) || a.playerName.localeCompare(b.playerName));
@@ -415,7 +534,8 @@
         playerId: item.playerId,
         playerName: item.playerName,
         historyId: item.historyId
-      }))
+      })),
+      orphanReview
     };
   }
 
@@ -446,7 +566,16 @@
         item.historyId || '',
         item.reason || ''
       ]),
-      orphanCount: Number(plan?.orphanCount) || 0
+      orphanCount: Number(plan?.orphanCount) || 0,
+      orphanReview: (plan?.orphanReview?.rows || []).map((item) => [
+        item.classification,
+        item.dateKey,
+        item.playerId,
+        item.historyId,
+        item.matchupId,
+        item.score,
+        item.reason
+      ])
     });
   }
 
@@ -610,8 +739,8 @@
       <div>
         <div class="text-lg font-semibold">Game-History Reconciliation Repair</div>
         <p class="muted text-sm mt-1">
-          Preview the two confirmed stale history scores and confidently missing NPC history rows.
-          Matchups, winners, records, Gold, Season results, and the 25 orphan history rows are not changed.
+          Preview confirmed reconciliation repairs plus a read-only classification of orphan NPC history rows.
+          Matchups, winners, Records, Gold, Season results, and orphan history rows are not changed by the review.
         </p>
       </div>
       <div class="flex flex-wrap gap-2">
@@ -620,6 +749,9 @@
         </button>
         <button id="repairGameHistoryBtn" type="button" class="btn btn-ghost" disabled>
           Repair Confirmed History Rows
+        </button>
+        <button id="copyOrphanReviewBtn" type="button" class="btn btn-ghost" disabled>
+          Copy Orphan Review
         </button>
       </div>
       <label class="flex items-start gap-2 text-sm">
@@ -635,6 +767,7 @@
 
     const previewButton = panel.querySelector('#previewGameHistoryRepairBtn');
     const repairButton = panel.querySelector('#repairGameHistoryBtn');
+    const copyOrphanButton = panel.querySelector('#copyOrphanReviewBtn');
     const backupCheckbox = panel.querySelector('#gameHistoryBackupConfirmed');
     const status = panel.querySelector('#gameHistoryRepairStatus');
     const previewWrap = panel.querySelector('#gameHistoryRepairPreview');
@@ -676,6 +809,22 @@
         'Needs manual review: 0'
       );
 
+      const orphanRows = Array.isArray(plan?.orphanReview?.rows) ? plan.orphanReview.rows : [];
+      const orphanCounts = plan?.orphanReview?.counts || { safeDuplicate: 0, likelyLegacyOnly: 0, needsReview: 0 };
+      const orphanMarkup = orphanRows.length
+        ? orphanRows.map((item) => {
+            const opponent = item.opponentName || item.opponentId
+              ? ` · vs ${escapeHtml(item.opponentName || item.opponentId)}`
+              : '';
+            const score = item.score == null ? 'score ?' : `score ${escapeHtml(item.score)}`;
+            const historyId = item.historyId ? ` · history ${escapeHtml(item.historyId)}` : '';
+            return `<li class="mb-3"><strong>${escapeHtml(item.classificationLabel)}</strong> — `
+              + `${escapeHtml(item.dateKey || 'Unknown date')} · ${escapeHtml(item.playerName || item.playerId || 'Unknown player')} · ${score}${opponent}${historyId}`
+              + `<div class="muted mt-1">${escapeHtml(item.reason)}</div>`
+              + `<div class="muted">${escapeHtml(item.recordsImpact)}</div></li>`;
+          }).join('')
+        : '<p class="muted text-sm">No orphan history rows.</p>';
+
       previewWrap.innerHTML = `
         <div>
           <strong>Confirmed score updates: ${plan.confirmedScoreUpdates.length}</strong>
@@ -689,10 +838,22 @@
           <strong>Needs manual review: ${plan.uncertain.length}</strong>
           ${uncertainMarkup}
         </div>
-        <p class="muted text-sm">
-          Orphan legacy history rows left untouched: ${plan.orphanCount}.
-        </p>
+        <div>
+          <strong>Orphan history review: ${plan.orphanCount}</strong>
+          <div class="muted text-sm mt-1">
+            Safe duplicate: ${orphanCounts.safeDuplicate} ·
+            Probably legitimate legacy-only: ${orphanCounts.likelyLegacyOnly} ·
+            Needs review: ${orphanCounts.needsReview}
+          </div>
+          <div class="text-sm mt-2">
+            ${orphanRows.length ? `<ul style="padding-left:1.25rem;list-style:disc">${orphanMarkup}</ul>` : orphanMarkup}
+          </div>
+          <p class="muted text-sm mt-2">
+            Classification is preview-only. No orphan row can be deleted from this panel.
+          </p>
+        </div>
       `;
+      copyOrphanButton.disabled = !orphanRows.length;
 
       if (plan.uncertain.length) {
         status.textContent = 'Repair is blocked because at least one row needs manual review.';
@@ -715,6 +876,38 @@
     });
 
     backupCheckbox.addEventListener('change', updateRepairAvailability);
+
+    copyOrphanButton.addEventListener('click', async () => {
+      const rows = Array.isArray(previewPlan?.orphanReview?.rows)
+        ? previewPlan.orphanReview.rows
+        : [];
+      if (!rows.length) return;
+      const counts = previewPlan.orphanReview.counts || {};
+      const lines = [
+        `Orphan Game-History Review — ${rows.length} row(s)`,
+        `Safe duplicate: ${Number(counts.safeDuplicate) || 0}`,
+        `Probably legitimate legacy-only: ${Number(counts.likelyLegacyOnly) || 0}`,
+        `Needs review: ${Number(counts.needsReview) || 0}`,
+        ''
+      ];
+      rows.forEach((item, index) => {
+        lines.push(
+          `${index + 1}. [${item.classificationLabel}] ${item.dateKey || 'Unknown date'} · `
+          + `${item.playerName || item.playerId || 'Unknown player'} · `
+          + `score ${item.score == null ? '?' : item.score}`
+          + `${item.opponentName || item.opponentId ? ` · vs ${item.opponentName || item.opponentId}` : ''}`
+          + `${item.historyId ? ` · history ${item.historyId}` : ''}`
+        );
+        lines.push(`   Reason: ${item.reason}`);
+        lines.push(`   Records impact: ${item.recordsImpact}`);
+      });
+      try {
+        await global.navigator?.clipboard?.writeText?.(lines.join('\n'));
+        status.textContent = 'Orphan review copied. No data was changed.';
+      } catch (_) {
+        status.textContent = 'Could not copy the orphan review automatically. The preview remains read-only.';
+      }
+    });
 
     repairButton.addEventListener('click', () => {
       if (!previewPlan || !backupCheckbox.checked) return;
@@ -790,6 +983,7 @@
 
   const api = {
     CONFIRMED_SCORE_CORRECTIONS,
+    buildOrphanReview,
     buildGameHistoryRepairPlan,
     planFingerprint,
     applyGameHistoryRepair,
