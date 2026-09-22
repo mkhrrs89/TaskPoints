@@ -361,6 +361,9 @@
       outcome,
       safeReuseConfirmed: outcome === 'already_current' || outcome === 'verified_current',
       fullReseedObserved: outcome === 'seeded',
+      reseedReason: outcome === 'seeded' ? String(detailObject(latest).reseedReason || 'unknown') : null,
+      expectedBootstrapSeed: outcome === 'seeded' && String(detailObject(latest).reseedReason || '') === 'initial_bootstrap',
+      suspiciousReseed: outcome === 'seeded' && !['initial_bootstrap', 'generation_changed', 'schema_changed', 'previous_legacy_missing'].includes(String(detailObject(latest).reseedReason || '')),
       page: String(latest.__pagePath || ''),
       epochMs: eventTime(latest),
       detail: detailObject(latest)
