@@ -183,3 +183,11 @@ test('V2 preview survives repeated runtime recreation and repeated parity verifi
   assert.deepEqual(afterC, beforeC, 'a parity-marked reload performs no destructive rewrite');
   assert.equal(runtimeC.getStatus().readAuthority, 'legacy_only');
 });
+
+
+test('reload startup emits explicit non-destructive reuse evidence', () => {
+  assert.match(runtimeSource, /mark\('stateV2\.seedAlreadyCurrent'/);
+  assert.match(runtimeSource, /mark\('stateV2\.seedAdoptedExisting'/);
+  assert.match(runtimeSource, /reason: 'already_current'/);
+  assert.match(runtimeSource, /reason: 'verified_current'/);
+});
