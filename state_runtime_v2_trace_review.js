@@ -327,6 +327,46 @@
       .map(durationRow);
   }
 
+  function startupSeedEvidence(events) {
+    const rows = events
+      .filter((event) => [
+        'stateV2.seedAlreadyCurrent',
+        'stateV2.seedAdoptedExisting',
+        'stateV2.seeded',
+        'stateV2.seededEmpty'
+      ].includes(String(event?.name || '')))
+      .sort((a, b) => (eventTime(a) ?? 0) - (eventTime(b) ?? 0));
+    const latest = rows[rows.length - 1] || null;
+    if (!latest) {
+      return {
+        observed: false,
+        eventName: null,
+        outcome: null,
+        safeReuseConfirmed: false,
+        fullReseedObserved: false,
+        detail: null
+      };
+    }
+    const eventName = String(latest.name || '');
+    const outcome = eventName === 'stateV2.seedAlreadyCurrent'
+      ? 'already_current'
+      : eventName === 'stateV2.seedAdoptedExisting'
+        ? 'verified_current'
+        : eventName === 'stateV2.seededEmpty'
+          ? 'legacy_missing'
+          : 'seeded';
+    return {
+      observed: true,
+      eventName,
+      outcome,
+      safeReuseConfirmed: outcome === 'already_current' || outcome === 'verified_current',
+      fullReseedObserved: outcome === 'seeded',
+      page: String(latest.__pagePath || ''),
+      epochMs: eventTime(latest),
+      detail: detailObject(latest)
+    };
+  }
+
   function review(report) {
     const events = flattenEvents(report);
     const status = report?.stateRuntimeV2Status || null;
@@ -337,6 +377,7 @@
     const pilotOwnership = pilotOwnershipEvidence(parity);
     const failures = failureEvidence(events, status, mutationClasses, parity);
     const legacyCandidates = legacyFullStateCandidates(events);
+    const startupSeed = startupSeedEvidence(events);
     const allMutationClassesObserved = MUTATION_KINDS.every((kind) => mutationClasses[kind].observed === true);
     const noDirectForegroundMaintenanceObserved = maintenance.directForegroundMaintenanceCount === 0;
 
@@ -352,6 +393,7 @@
       failures,
       parity,
       pilotOwnership,
+      startupSeed,
       noDirectForegroundMaintenanceObserved,
       automaticParityDeepIdleObserved: maintenance.automaticParityDeepIdleObserved,
       interactionPreemptionObserved: preemption.observed,
@@ -372,7 +414,7 @@
 
   const api = {
     installed: true,
-    version: 5,
+    version: 6,
     review,
     flattenEvents
   };
