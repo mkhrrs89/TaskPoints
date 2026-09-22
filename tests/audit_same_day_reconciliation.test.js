@@ -245,7 +245,7 @@ test('Audit loads the same-day matcher through both the bundle and a versioned d
   assert.match(worker, /data-taskpoints-audit-same-day-direct="true"/);
   assert.ok(
     worker.indexOf('/audit_same_day_reconciliation.js?v=20260922-1')
-      < worker.indexOf('/game_history_reconciliation_repair.js?v=20260731-1'),
+      < worker.indexOf('/game_history_reconciliation_repair.js?v=20260921-1'),
     'direct matcher must load before the repair panel'
   );
 });
