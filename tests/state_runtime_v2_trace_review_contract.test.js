@@ -315,3 +315,23 @@ test('trace review distinguishes safe reload reuse from a full pilot reseed', ()
   assert.equal(reseedResult.startupSeed.safeReuseConfirmed, false);
   assert.equal(reseedResult.startupSeed.fullReseedObserved, true);
 });
+
+
+test('startup review classifies expected bootstrap and suspicious parity reseeds', () => {
+  const bootstrap = baseReport([
+    { epochMs: 30000, type: 'mark', name: 'stateV2.seeded', detail: { reseedReason: 'initial_bootstrap', hadPreviousMeta: false } }
+  ]);
+  const bootstrapResult = reviewer.review(bootstrap).startupSeed;
+  assert.equal(bootstrapResult.fullReseedObserved, true);
+  assert.equal(bootstrapResult.reseedReason, 'initial_bootstrap');
+  assert.equal(bootstrapResult.expectedBootstrapSeed, true);
+  assert.equal(bootstrapResult.suspiciousReseed, false);
+
+  const mismatch = baseReport([
+    { epochMs: 30000, type: 'mark', name: 'stateV2.seeded', detail: { reseedReason: 'parity_mismatch', hadPreviousMeta: true } }
+  ]);
+  const mismatchResult = reviewer.review(mismatch).startupSeed;
+  assert.equal(mismatchResult.reseedReason, 'parity_mismatch');
+  assert.equal(mismatchResult.expectedBootstrapSeed, false);
+  assert.equal(mismatchResult.suspiciousReseed, true);
+});

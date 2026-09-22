@@ -30,7 +30,7 @@ function installForHost(hostname, dark = true) {
 test('live reviewer is dynamically loaded only from the V2 dark structure bridge', () => {
   assert.match(structureBridge, /function loadLiveTraceReview\(\)/);
   assert.match(structureBridge, /if \(!isEnabled\(\) \|\| global\.TaskPointsStateRuntimeV2LiveReview\?\.installed/);
-  assert.match(structureBridge, /state_runtime_v2_live_review\.js\?v=20260922-1/);
+  assert.match(structureBridge, /state_runtime_v2_live_review\.js\?v=20260922-2/);
   assert.match(structureBridge, /loadPerfInstrumentation\(\);\s*loadLiveTraceReview\(\);/);
   assert.match(source, /state_runtime_v2_trace_review\.js\?v=20260922-1/);
   assert.match(source, /state_runtime_v2_foreground_correlation\.js\?v=20260913-2/);
@@ -138,4 +138,13 @@ test('live reviewer surfaces reload persistence separately from the ten Step 4 c
   assert.match(source, /verified existing — read-only reload verification/);
   assert.match(source, /full V2 pilot reseed observed on latest startup/);
   assert.match(source, /Startup persistence is separate from the 10 Step 4 checks/);
+});
+
+
+test('live reviewer explains why a full seed happened instead of treating every seed as suspicious', () => {
+  assert.match(source, /initial V2 pilot bootstrap seed — expected for a fresh browser context/);
+  assert.match(source, /reset generation changed/);
+  assert.match(source, /V2 schema changed/);
+  assert.match(source, /persisted V2 did not match legacy/);
+  assert.match(source, /startupSeed\.reseedReason/);
 });

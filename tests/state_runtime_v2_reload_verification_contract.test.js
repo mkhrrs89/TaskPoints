@@ -191,3 +191,16 @@ test('reload startup emits explicit non-destructive reuse evidence', () => {
   assert.match(runtimeSource, /reason: 'already_current'/);
   assert.match(runtimeSource, /reason: 'verified_current'/);
 });
+
+
+test('full seed diagnostics identify why a destructive seed occurred', () => {
+  assert.match(runtimeSource, /reseedReason/);
+  assert.match(runtimeSource, /'initial_bootstrap'/);
+  assert.match(runtimeSource, /'generation_changed'/);
+  assert.match(runtimeSource, /'schema_changed'/);
+  assert.match(runtimeSource, /'previous_legacy_missing'/);
+  assert.match(runtimeSource, /'parity_mismatch'/);
+  assert.match(runtimeSource, /hadPreviousMeta/);
+  assert.match(runtimeSource, /previousResetGeneration/);
+  assert.match(runtimeSource, /parityComparedBeforeReseed/);
+});

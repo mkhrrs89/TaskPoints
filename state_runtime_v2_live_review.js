@@ -231,7 +231,17 @@
     const startupLine = startupSeed.safeReuseConfirmed === true
       ? `✓ ${startupSeed.outcome === 'already_current' ? 'already current — reused existing V2 DB' : 'verified existing — read-only reload verification'}`
       : startupSeed.fullReseedObserved === true
-        ? '⚠ full V2 pilot reseed observed on latest startup'
+        ? (startupSeed.expectedBootstrapSeed === true
+            ? '✓ initial V2 pilot bootstrap seed — expected for a fresh browser context'
+            : startupSeed.reseedReason === 'generation_changed'
+              ? 'ℹ V2 pilot reseeded because the reset generation changed'
+              : startupSeed.reseedReason === 'schema_changed'
+                ? 'ℹ V2 pilot reseeded because the V2 schema changed'
+                : startupSeed.reseedReason === 'previous_legacy_missing'
+                  ? 'ℹ V2 pilot reseeded after legacy state returned'
+                  : startupSeed.reseedReason === 'parity_mismatch'
+                    ? '⚠ V2 pilot reseeded because persisted V2 did not match legacy'
+                    : `⚠ full V2 pilot reseed observed — reason: ${String(startupSeed.reseedReason || 'unknown')}`)
         : startupSeed.observed === true
           ? `Startup outcome: ${String(startupSeed.outcome || 'unknown')}`
           : 'No startup seed evidence in this trace';

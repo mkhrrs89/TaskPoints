@@ -400,6 +400,14 @@
       if (source.missing) return clearForMissingLegacy(db, previousMeta, desiredGeneration);
 
       const hash = capturedHash;
+      const seedContext = {
+        hadPreviousMeta: Boolean(previousMeta),
+        previousSchemaVersion: previousMeta?.schemaVersion ?? null,
+        previousResetGeneration: previousMeta?.resetGeneration ?? null,
+        desiredGeneration,
+        previousLegacyMissing: previousMeta?.legacyMissing === true
+      };
+      let parityComparedBeforeReseed = false;
 
       if (
         options.force !== true
@@ -440,6 +448,7 @@
         const collections = await readV2CollectionsFromDb(db);
         const expectedText = stableJson(paritySubset(sourceSubset(source.state)));
         const actualText = stableJson(paritySubset(collections));
+        parityComparedBeforeReseed = true;
         if (expectedText === actualText) {
           try {
             previousMeta = await refreshSeedMarker(db, previousMeta, hash, desiredGeneration, 'read-only-reload-verification');
@@ -509,8 +518,40 @@
       lastSeedHash = hash;
       lastResetGeneration = desiredGeneration;
       lastKnownRevision = revision;
-      mark('stateV2.seeded', { habits: habits.length, completions: completions.length, revision, resetGeneration: desiredGeneration });
-      return { seeded: true, reason: 'seeded', hash, revision, resetGeneration: desiredGeneration, habits: habits.length, completions: completions.length };
+      const reseedReason = !seedContext.hadPreviousMeta
+        ? 'initial_bootstrap'
+        : options.force === true
+          ? 'forced'
+          : seedContext.previousSchemaVersion !== SCHEMA_VERSION
+            ? 'schema_changed'
+            : seedContext.previousLegacyMissing
+              ? 'previous_legacy_missing'
+              : seedContext.previousResetGeneration !== desiredGeneration
+                ? 'generation_changed'
+                : parityComparedBeforeReseed
+                  ? 'parity_mismatch'
+                  : 'unknown';
+      mark('stateV2.seeded', {
+        habits: habits.length,
+        completions: completions.length,
+        revision,
+        resetGeneration: desiredGeneration,
+        reseedReason,
+        hadPreviousMeta: seedContext.hadPreviousMeta,
+        previousSchemaVersion: seedContext.previousSchemaVersion,
+        previousResetGeneration: seedContext.previousResetGeneration,
+        parityComparedBeforeReseed
+      });
+      return {
+        seeded: true,
+        reason: 'seeded',
+        reseedReason,
+        hash,
+        revision,
+        resetGeneration: desiredGeneration,
+        habits: habits.length,
+        completions: completions.length
+      };
     };
 
     seedPromise = run().finally(() => { seedPromise = null; });
