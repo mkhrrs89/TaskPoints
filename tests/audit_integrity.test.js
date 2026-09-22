@@ -116,6 +116,65 @@ test('habit done without completion warns and failed with completion fails', () 
   assert.equal(audit.buildHabitLedgerConsistencyAudit({ ...habitState(), completions: [] }, options).status, 'WARN');
   assert.equal(audit.buildHabitLedgerConsistencyAudit(habitState({ failedKeys: [options.todayKey] }), options).status, 'FAIL');
 });
+
+test('historical missing doneKey is silent when the stored You game score still matches the canonical ledger', () => {
+  const day = '2026-07-16';
+  const state = {
+    ...habitState({ doneKeys: [day] }),
+    completions: [],
+    matchups: [matchup({ dateKey: day, completedAtISO: day + 'T12:00:00Z', scoreA: 42.5, scoreB: 30 })]
+  };
+  const result = audit.buildHabitLedgerConsistencyAudit(state, {
+    ...options,
+    youDailyTotals: { [day]: 42.5 }
+  });
+  assert.equal(result.status, 'PASS');
+  assert.doesNotMatch(result.details.join(' '), /no completion row|cannot be proven score-neutral/);
+});
+
+test('historical missing doneKey still warns when the stored You game score differs from the canonical ledger', () => {
+  const day = '2026-07-16';
+  const state = {
+    ...habitState({ doneKeys: [day] }),
+    completions: [],
+    matchups: [matchup({ dateKey: day, completedAtISO: day + 'T12:00:00Z', scoreA: 42.5, scoreB: 30 })]
+  };
+  const result = audit.buildHabitLedgerConsistencyAudit(state, {
+    ...options,
+    youDailyTotals: { [day]: 40 }
+  });
+  assert.equal(result.status, 'WARN');
+  assert.match(result.details.join(' '), /cannot be proven score-neutral/);
+  assert.match(result.details.join(' '), /stored game 42.5, current ledger 40/);
+});
+
+test('pre-game-era missing doneKeys are treated as legacy markers but later unverified dates still warn', () => {
+  const firstGameDay = '2026-07-10';
+  const firstGame = matchup({ dateKey: firstGameDay, completedAtISO: firstGameDay + 'T12:00:00Z', scoreA: 50, scoreB: 30 });
+
+  const preGameDay = '2026-07-01';
+  const preGame = audit.buildHabitLedgerConsistencyAudit({
+    ...habitState({ doneKeys: [preGameDay] }),
+    completions: [],
+    matchups: [firstGame]
+  }, {
+    ...options,
+    youDailyTotals: { [preGameDay]: 35, [firstGameDay]: 50 }
+  });
+  assert.equal(preGame.status, 'PASS');
+
+  const postGameDay = '2026-07-16';
+  const postGame = audit.buildHabitLedgerConsistencyAudit({
+    ...habitState({ doneKeys: [postGameDay] }),
+    completions: [],
+    matchups: [firstGame]
+  }, {
+    ...options,
+    youDailyTotals: { [postGameDay]: 35, [firstGameDay]: 50 }
+  });
+  assert.equal(postGame.status, 'WARN');
+  assert.match(postGame.details.join(' '), /no stored You matchup is available to verify score impact/);
+});
 test('habit invalid fraction, date, and orphan ice key fail', () => {
   assert.equal(audit.buildHabitLedgerConsistencyAudit(habitState({}, { completionFraction: 0.25 }), options).status, 'FAIL');
   assert.equal(audit.buildHabitLedgerConsistencyAudit(habitState({ doneKeys: ['2026-02-30'] }, { dayKey: '2026-02-30' }), options).status, 'FAIL');
@@ -209,11 +268,14 @@ test('audit page loads and wires read-only integrity builders and centralized li
   assert.match(html, /<script src="audit_integrity\.js"><\/script>/);
   for (const name of ['buildNpcScoreHealthAudit', 'buildMatchupHistoryReconciliationAudit', 'buildHabitLedgerConsistencyAudit']) assert.match(html, new RegExp(`checks\\.push\\(TaskPointsAuditIntegrity\\.${name}`));
   assert.match(html, /TaskPointsCore\.NPC_SCORE_ABSOLUTE_MIN \?\? 5/);
+  assert.match(html, /TaskPointsCore\.youDailyTotalsWithInertia\(state\)/);
   assert.match(html, /if \(key !== 'reminders'\) emptyWarnings\.push/);
   assert.match(html, /!value\.length && key !== 'reminders'/);
   assert.match(html, /empty reminders list is valid/);
   const source = fs.readFileSync(path.join(__dirname, '..', 'audit_integrity.js'), 'utf8');
   assert.match(source, /Historical stored points are preserved because Habit\/Vice values may change over time/);
+  assert.match(source, /stored You game score still matches the canonical completion ledger/);
+  assert.match(source, /predates the first stored You matchup/);
   assert.doesNotMatch(source, /historical point mismatches for/);
   assert.doesNotMatch(source, /saveAppState|saveStateSnapshot|mergeAndSaveState|localStorage\.setItem|\bsync[A-Z]/);
 });

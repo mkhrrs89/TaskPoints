@@ -3469,13 +3469,21 @@ if (!dripSchedule) {
 
       checks.push(...buildSeasonChampionshipAuditChecks(state, dateKey));
 
+      let auditYouDailyTotals = null;
+      try {
+        auditYouDailyTotals = typeof TaskPointsCore.youDailyTotalsWithInertia === 'function'
+          ? TaskPointsCore.youDailyTotalsWithInertia(state)
+          : null;
+      } catch (_) {}
+
       const integrityOptions = {
         dateKey: value => TaskPointsCore.dateKey(value),
         todayKey: TaskPointsCore.todayKey(),
         selectedDateKey: dateKey,
         npcScoreMin: TaskPointsCore.NPC_SCORE_ABSOLUTE_MIN ?? 5,
         npcScoreMax: 86,
-        detailLimit: 75
+        detailLimit: 75,
+        youDailyTotals: auditYouDailyTotals
       };
       if (window.TaskPointsAuditIntegrity) {
         checks.push(TaskPointsAuditIntegrity.buildNpcScoreHealthAudit(state, integrityOptions));
