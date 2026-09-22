@@ -241,7 +241,7 @@ test('Audit loads the same-day matcher through both the bundle and a versioned d
     /\[\s*auditSource,\s*sameDaySource,\s*historyRepairSource,\s*historyAliasSyncSource,\s*aliasSource,\s*bootstrapSource\s*\]/
   );
   assert.match(worker, /x-taskpoints-audit-same-day-reconciliation/);
-  assert.match(worker, /audit_same_day_reconciliation\.js\?v=20260731-3/);
+  assert.match(worker, /audit_same_day_reconciliation\.js\?v=20260922-1/);
   assert.match(worker, /data-taskpoints-audit-same-day-direct="true"/);
   assert.ok(
     worker.indexOf('/audit_same_day_reconciliation.js?v=20260922-1')
