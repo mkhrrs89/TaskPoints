@@ -128,5 +128,5 @@ test('Habit add and edit UI stays above V2 and PERF diagnostic controls', () => 
   assert.match(source, /body:has\(#addHabitModal:not\(\.hidden\)\) #tpPerfTraceButton/);
   assert.match(source, /body:has\(\[data-act="habit-save"\]\) #\$\{BUTTON_ID\}/);
   assert.match(source, /body:has\(\[data-act="habit-save"\]\) #tpPerfTraceButton/);
-  assert.match(source, /#addHabitModal:not\(\.hidden\)\)\{z-index:2147483646!important\}/);
+  assert.match(source, /#addHabitModal:not\(\.hidden\)\{z-index:2147483646!important\}/);
 });
