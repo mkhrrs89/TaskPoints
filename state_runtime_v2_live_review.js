@@ -269,6 +269,8 @@
     const style = global.document.createElement('style');
     style.id = 'tpV2LiveReviewStyles';
     style.textContent = `
+      body:has(#addHabitModal:not(.hidden)) #${BUTTON_ID},body:has(#addHabitModal:not(.hidden)) #tpPerfTraceButton,body:has([data-act="habit-save"]) #${BUTTON_ID},body:has([data-act="habit-save"]) #tpPerfTraceButton{visibility:hidden!important;pointer-events:none!important;opacity:0!important}
+      #addHabitModal:not(.hidden){z-index:2147483646!important}
       #${BUTTON_ID}{position:fixed;left:10px;bottom:calc(env(safe-area-inset-bottom,0px) + 135px);z-index:2147483645;border:1px solid #64748b;border-radius:999px;background:#111827;color:#f8fafc;padding:7px 11px;min-height:36px;font:700 11px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;opacity:.92}
       #${PANEL_ID}{position:fixed;inset:calc(env(safe-area-inset-top,0px) + 18px) 12px calc(env(safe-area-inset-bottom,0px) + 18px);z-index:2147483647;overflow:auto;border:1px solid #475569;border-radius:14px;background:#0b0f14;color:#f8fafc;padding:14px;font:14px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;box-shadow:0 12px 40px rgba(0,0,0,.5)}
       #${PANEL_ID} .tp-v2-live-head{display:flex;align-items:center;justify-content:space-between;gap:12px;position:sticky;top:-14px;background:#0b0f14;padding:14px 0 10px;z-index:2}
