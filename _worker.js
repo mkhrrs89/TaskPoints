@@ -293,7 +293,7 @@ export default {
         headers
       });
       const auditBootstrap = directPageKind === 'audit'
-        ? '<script src="/audit_same_day_reconciliation.js?v=20260731-3" data-taskpoints-audit-same-day-direct="true"></script>'
+        ? '<script src="/audit_same_day_reconciliation.js?v=20260922-1" data-taskpoints-audit-same-day-direct="true"></script>'
           + '<script src="/game_history_reconciliation_repair.js?v=20260921-1" data-taskpoints-game-history-repair="true"></script>'
           + '<script src="/game_history_repair_alias_sync.js?v=20260731-1" data-taskpoints-game-history-alias-sync="true"></script>'
           + '<script src="/habit_ledger_repair_planner.js?v=20260731-1" data-taskpoints-habit-ledger-planner="true"></script>'
