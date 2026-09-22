@@ -4,7 +4,7 @@
   if (!global || global.TaskPointsStateRuntimeV2LiveReview?.installed) return;
 
   const DARK_MODE_KEY = 'taskpoints_state_v2_dark_mode_v1';
-  const REVIEWER_SRC = '/state_runtime_v2_trace_review.js?v=20260915-1';
+  const REVIEWER_SRC = '/state_runtime_v2_trace_review.js?v=20260922-1';
   const CORRELATOR_SRC = '/state_runtime_v2_foreground_correlation.js?v=20260913-2';
   const PAINT_PROBE_NAME = 'stateV2.foreground.nextPaint';
   const BUTTON_ID = 'tpV2LiveReviewButton';
@@ -227,6 +227,14 @@
       + Number(review?.failures?.mutationFailureCount || 0)
       + Number(review?.failures?.subsystemFailureCount || 0);
     const legacyCount = Array.isArray(review?.legacyFullStateCandidates) ? review.legacyFullStateCandidates.length : 0;
+    const startupSeed = review?.startupSeed || {};
+    const startupLine = startupSeed.safeReuseConfirmed === true
+      ? `✓ ${startupSeed.outcome === 'already_current' ? 'already current — reused existing V2 DB' : 'verified existing — read-only reload verification'}`
+      : startupSeed.fullReseedObserved === true
+        ? '⚠ full V2 pilot reseed observed on latest startup'
+        : startupSeed.observed === true
+          ? `Startup outcome: ${String(startupSeed.outcome || 'unknown')}`
+          : 'No startup seed evidence in this trace';
     const legacyMax = Number.isFinite(Number(review?.maxLegacyFullStateCandidateMs))
       ? `${Number(review.maxLegacyFullStateCandidateMs).toFixed(1)} ms max`
       : 'none timed';
@@ -248,7 +256,8 @@
     return `<div class="tp-v2-live-head"><strong>V2 physical trace test</strong><button type="button" data-v2-close>Close</button></div>
       ${verdict}
       <div class="tp-v2-live-checks">${rows}</div>
-      <div class="tp-v2-live-meta">V2 failures counted: ${failures}<br>Legacy/full-state timing candidates: ${legacyCount} (${escapeHtml(legacyMax)})<br>Foreground correlation: ${foregroundCorrelationLine}</div>
+      <div class="tp-v2-live-meta">V2 failures counted: ${failures}<br>Legacy/full-state timing candidates: ${legacyCount} (${escapeHtml(legacyMax)})<br>Foreground correlation: ${foregroundCorrelationLine}<br>Startup persistence: ${escapeHtml(startupLine)}</div>
+      <p class="tp-v2-live-note">Startup persistence is separate from the 10 Step 4 checks. After a reload or reopen, use this line to confirm that V2 reused the existing pilot database instead of destructively reseeding it.</p>
       <p class="tp-v2-live-note">Foreground correlation is diagnostic, not an automatic Step 4 failure. When a render-frame probe is available it measures from the recorded interaction through the next paint boundary; otherwise it falls back to the V2 enqueue boundary. This lets us catch legacy whole-state work that begins after enqueue but still delays visible response.</p>
       <details open><summary>How to finish the test</summary><ol>
         <li>Tap <strong>Start fresh test</strong> once. This clears only PERF trace history and reloads; it does not change TaskPoints data.</li>

@@ -30,9 +30,9 @@ function installForHost(hostname, dark = true) {
 test('live reviewer is dynamically loaded only from the V2 dark structure bridge', () => {
   assert.match(structureBridge, /function loadLiveTraceReview\(\)/);
   assert.match(structureBridge, /if \(!isEnabled\(\) \|\| global\.TaskPointsStateRuntimeV2LiveReview\?\.installed/);
-  assert.match(structureBridge, /state_runtime_v2_live_review\.js\?v=20260915-1/);
+  assert.match(structureBridge, /state_runtime_v2_live_review\.js\?v=20260922-1/);
   assert.match(structureBridge, /loadPerfInstrumentation\(\);\s*loadLiveTraceReview\(\);/);
-  assert.match(source, /state_runtime_v2_trace_review\.js\?v=20260915-1/);
+  assert.match(source, /state_runtime_v2_trace_review\.js\?v=20260922-1/);
   assert.match(source, /state_runtime_v2_foreground_correlation\.js\?v=20260913-2/);
 });
 
@@ -129,4 +129,13 @@ test('Habit add and edit UI stays above V2 and PERF diagnostic controls', () => 
   assert.match(source, /body:has\(\[data-act="habit-save"\]\) #\$\{BUTTON_ID\}/);
   assert.match(source, /body:has\(\[data-act="habit-save"\]\) #tpPerfTraceButton/);
   assert.match(source, /#addHabitModal:not\(\.hidden\)\{z-index:2147483646!important\}/);
+});
+
+
+test('live reviewer surfaces reload persistence separately from the ten Step 4 checks', () => {
+  assert.match(source, /Startup persistence:/);
+  assert.match(source, /already current — reused existing V2 DB/);
+  assert.match(source, /verified existing — read-only reload verification/);
+  assert.match(source, /full V2 pilot reseed observed on latest startup/);
+  assert.match(source, /Startup persistence is separate from the 10 Step 4 checks/);
 });

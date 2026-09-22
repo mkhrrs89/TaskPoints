@@ -412,6 +412,10 @@
         lastSeedHash = hash;
         lastResetGeneration = desiredGeneration;
         lastKnownRevision = Number(previousMeta?.revision || 0);
+        mark('stateV2.seedAlreadyCurrent', {
+          revision: lastKnownRevision,
+          resetGeneration: desiredGeneration
+        });
         return {
           seeded: false,
           reason: 'already_current',
