@@ -289,3 +289,29 @@ test('failure details identify the original revision conflict across page naviga
   assert.equal(result.failures.failedEvents[0].detail.message, 'state_runtime_v2_revision_conflict:meta:75:76');
   assert.equal(result.failures.failedEvents[0].page, '/');
 });
+
+
+test('trace review distinguishes safe reload reuse from a full pilot reseed', () => {
+  const already = baseReport([
+    { epochMs: 30000, type: 'mark', name: 'stateV2.seedAlreadyCurrent', detail: { revision: 7 } }
+  ]);
+  const alreadyResult = reviewer.review(already);
+  assert.equal(alreadyResult.startupSeed.observed, true);
+  assert.equal(alreadyResult.startupSeed.outcome, 'already_current');
+  assert.equal(alreadyResult.startupSeed.safeReuseConfirmed, true);
+  assert.equal(alreadyResult.startupSeed.fullReseedObserved, false);
+
+  const verified = baseReport([
+    { epochMs: 30000, type: 'mark', name: 'stateV2.seedAdoptedExisting', detail: { revision: 7 } }
+  ]);
+  assert.equal(reviewer.review(verified).startupSeed.outcome, 'verified_current');
+  assert.equal(reviewer.review(verified).startupSeed.safeReuseConfirmed, true);
+
+  const reseeded = baseReport([
+    { epochMs: 30000, type: 'mark', name: 'stateV2.seeded', detail: { revision: 8 } }
+  ]);
+  const reseedResult = reviewer.review(reseeded);
+  assert.equal(reseedResult.startupSeed.outcome, 'seeded');
+  assert.equal(reseedResult.startupSeed.safeReuseConfirmed, false);
+  assert.equal(reseedResult.startupSeed.fullReseedObserved, true);
+});
