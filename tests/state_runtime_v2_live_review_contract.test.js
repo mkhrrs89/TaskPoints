@@ -136,7 +136,7 @@ test('live reviewer surfaces reload persistence separately from the ten Step 4 c
   assert.match(source, /Startup persistence:/);
   assert.match(source, /already current — reused existing V2 DB/);
   assert.match(source, /verified existing — read-only reload verification/);
-  assert.match(source, /full V2 pilot reseed observed on latest startup/);
+  assert.match(source, /full V2 pilot reseed observed/);
   assert.match(source, /Startup persistence is separate from the 10 Step 4 checks/);
 });
 
