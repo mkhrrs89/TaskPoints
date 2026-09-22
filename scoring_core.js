@@ -1,5 +1,8 @@
 (function(global){
   const STORAGE_KEY = "taskpoints_v1";
+  const NOTES_STORAGE_KEY = "taskpoints_notes_v1";
+  const NOTES_DIRTY_KEY = "taskpoints_notes_dirty_v1";
+  const NOTES_AUTHORITY_KEY = "taskpoints_notes_authoritative_v1";
   const PENDING_HABIT_DELTAS_KEY = "taskpoints_pending_habit_deltas_v1";
   const PROJECTS_STORAGE_KEY = "tp_projects_v1";
   const IMAGE_DB_NAME = "taskpoints";
@@ -545,6 +548,44 @@ function buildOptimizedTaskPointsStorageRaw(state) {
     return state;
   }
 
+  function getNotesCacheAuthorityState() {
+    let cacheRaw = null;
+    let dirty = false;
+    let authoritative = false;
+    try {
+      cacheRaw = localStorage.getItem(NOTES_STORAGE_KEY);
+      dirty = localStorage.getItem(NOTES_DIRTY_KEY) === '1';
+      authoritative = localStorage.getItem(NOTES_AUTHORITY_KEY) === '1';
+    } catch (_) {}
+    return {
+      cachePresent: cacheRaw !== null,
+      cacheNotes: cacheRaw == null ? '' : String(cacheRaw),
+      dirty,
+      authoritative
+    };
+  }
+
+  function preserveAuthoritativeNotesBeforeSave(candidateState, storageKey = STORAGE_KEY, options = {}) {
+    const next = candidateState && typeof candidateState === 'object'
+      ? { ...candidateState }
+      : candidateState;
+    if (!next || typeof next !== 'object' || storageKey !== STORAGE_KEY) return next;
+    // Explicit destructive restore/import flows are allowed to replace Notes.
+    // Their Notes import path updates the lightweight cache separately.
+    if (options.allowDestructiveOverwrite === true) return next;
+
+    const authority = getNotesCacheAuthorityState();
+    if (!authority.cachePresent) return next;
+    // Older installations may have an unmarked cache. Until Notes has been
+    // opened/synced once, avoid guessing between two conflicting legacy copies.
+    if (!authority.dirty && !authority.authoritative) return next;
+
+    if (typeof next.notes !== 'string' || next.notes !== authority.cacheNotes) {
+      next.notes = authority.cacheNotes;
+    }
+    return next;
+  }
+
   function serializeTaskPointsStoredState(nextState, options = {}) {
     if (typeof buildOptimizedTaskPointsStorageRaw === 'function') {
       const built = buildOptimizedTaskPointsStorageRaw(nextState, options);
@@ -555,7 +596,8 @@ function buildOptimizedTaskPointsStorageRaw(state) {
 
   function writeTaskPointsStoredState(nextState, options = {}) {
     const storageKey = options.storageKey || STORAGE_KEY;
-    const raw = serializeTaskPointsStoredState(nextState, options);
+    const protectedState = preserveAuthoritativeNotesBeforeSave(nextState, storageKey, options);
+    const raw = serializeTaskPointsStoredState(protectedState, options);
     safeReplaceTaskPointsStorage(storageKey, raw);
     return raw;
   }
@@ -6718,7 +6760,7 @@ return { state: merged, storageKey };
       }
       next[key] = {};
     });
-    return next;
+    return preserveAuthoritativeNotesBeforeSave(next, storageKey, options);
   }
 
   function saveStateSnapshot(state, options = {}) {

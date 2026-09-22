@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const audit = require('../audit_integrity.js');
 
-const options = { todayKey: '2026-07-17', dateKey: value => String(value).slice(0, 10), npcScoreMin: 5, npcScoreMax: 85 };
+const options = { todayKey: '2026-07-17', dateKey: value => String(value).slice(0, 10), npcScoreMin: 5, npcScoreMax: 86 };
 const npc = (overrides = {}) => ({ players: [{ id: 'npc', active: true, baseline: 30 }], matchups: [], gameHistory: [], opponentDripSchedules: [], ...overrides });
 const matchup = (overrides = {}) => ({ id: 'm1', dateKey: options.todayKey, playerAId: 'YOU', playerBId: 'npc', scoreA: 100, scoreB: 30, completedAtISO: `${options.todayKey}T12:00:00Z`, ...overrides });
 const history = (overrides = {}) => ({ id: 'g1', dateKey: options.todayKey, playerId: 'npc', score: 30, matchupId: 'm1', ...overrides });
@@ -16,6 +16,15 @@ const habitState = (habitOverrides = {}, completionOverrides = {}) => ({
 test('NPC score health accepts healthy data and ignores YOU range', () => {
   assert.equal(audit.buildNpcScoreHealthAudit(npc({ matchups: [matchup()], gameHistory: [history()] }), options).status, 'PASS');
 });
+test('NPC score health accepts the new 86 ceiling', () => {
+  assert.equal(audit.buildNpcScoreHealthAudit(npc({ gameHistory: [history({ score: 85.2 })] }), options).status, 'PASS');
+  assert.equal(audit.buildNpcScoreHealthAudit(npc({ gameHistory: [history({ score: 86 })] }), options).status, 'PASS');
+  assert.equal(audit.buildNpcScoreHealthAudit(npc({ gameHistory: [history({ score: 86.1 })] }), options).status, 'FAIL');
+
+  const defaultRange = { todayKey: options.todayKey, dateKey: options.dateKey };
+  assert.equal(audit.buildNpcScoreHealthAudit(npc({ gameHistory: [history({ score: 85.2 })] }), defaultRange).status, 'PASS');
+});
+
 test('NPC historical out-of-range warns and current out-of-range fails', () => {
   assert.equal(audit.buildNpcScoreHealthAudit(npc({ gameHistory: [history({ dateKey: '2026-07-16', score: -2.2 })] }), options).status, 'WARN');
   assert.equal(audit.buildNpcScoreHealthAudit(npc({ gameHistory: [history({ score: -2.2 })] }), options).status, 'FAIL');
@@ -107,15 +116,79 @@ test('habit done without completion warns and failed with completion fails', () 
   assert.equal(audit.buildHabitLedgerConsistencyAudit({ ...habitState(), completions: [] }, options).status, 'WARN');
   assert.equal(audit.buildHabitLedgerConsistencyAudit(habitState({ failedKeys: [options.todayKey] }), options).status, 'FAIL');
 });
+
+test('historical missing doneKey is silent when the stored You game score still matches the canonical ledger', () => {
+  const day = '2026-07-16';
+  const state = {
+    ...habitState({ doneKeys: [day] }),
+    completions: [],
+    matchups: [matchup({ dateKey: day, completedAtISO: day + 'T12:00:00Z', scoreA: 42.5, scoreB: 30 })]
+  };
+  const result = audit.buildHabitLedgerConsistencyAudit(state, {
+    ...options,
+    youDailyTotals: { [day]: 42.5 }
+  });
+  assert.equal(result.status, 'PASS');
+  assert.doesNotMatch(result.details.join(' '), /no completion row|cannot be proven score-neutral/);
+});
+
+test('historical missing doneKey still warns when the stored You game score differs from the canonical ledger', () => {
+  const day = '2026-07-16';
+  const state = {
+    ...habitState({ doneKeys: [day] }),
+    completions: [],
+    matchups: [matchup({ dateKey: day, completedAtISO: day + 'T12:00:00Z', scoreA: 42.5, scoreB: 30 })]
+  };
+  const result = audit.buildHabitLedgerConsistencyAudit(state, {
+    ...options,
+    youDailyTotals: { [day]: 40 }
+  });
+  assert.equal(result.status, 'WARN');
+  assert.match(result.details.join(' '), /cannot be proven score-neutral/);
+  assert.match(result.details.join(' '), /stored game 42.5, current ledger 40/);
+});
+
+test('pre-game-era missing doneKeys are treated as legacy markers but later unverified dates still warn', () => {
+  const firstGameDay = '2026-07-10';
+  const firstGame = matchup({ dateKey: firstGameDay, completedAtISO: firstGameDay + 'T12:00:00Z', scoreA: 50, scoreB: 30 });
+
+  const preGameDay = '2026-07-01';
+  const preGame = audit.buildHabitLedgerConsistencyAudit({
+    ...habitState({ doneKeys: [preGameDay] }),
+    completions: [],
+    matchups: [firstGame]
+  }, {
+    ...options,
+    youDailyTotals: { [preGameDay]: 35, [firstGameDay]: 50 }
+  });
+  assert.equal(preGame.status, 'PASS');
+
+  const postGameDay = '2026-07-16';
+  const postGame = audit.buildHabitLedgerConsistencyAudit({
+    ...habitState({ doneKeys: [postGameDay] }),
+    completions: [],
+    matchups: [firstGame]
+  }, {
+    ...options,
+    youDailyTotals: { [postGameDay]: 35, [firstGameDay]: 50 }
+  });
+  assert.equal(postGame.status, 'WARN');
+  assert.match(postGame.details.join(' '), /no stored You matchup is available to verify score impact/);
+});
 test('habit invalid fraction, date, and orphan ice key fail', () => {
   assert.equal(audit.buildHabitLedgerConsistencyAudit(habitState({}, { completionFraction: 0.25 }), options).status, 'FAIL');
   assert.equal(audit.buildHabitLedgerConsistencyAudit(habitState({ doneKeys: ['2026-02-30'] }, { dayKey: '2026-02-30' }), options).status, 'FAIL');
   assert.equal(audit.buildHabitLedgerConsistencyAudit(habitState({ iceKeys: ['2026-07-16'] }), options).status, 'FAIL');
 });
-test('habit current point mismatch fails while historical mismatch warns', () => {
+test('habit current point mismatch fails while historical point values are preserved', () => {
   assert.equal(audit.buildHabitLedgerConsistencyAudit(habitState({}, { points: 3 }), options).status, 'FAIL');
   const old = '2026-07-16';
-  assert.equal(audit.buildHabitLedgerConsistencyAudit(habitState({ doneKeys: [old] }, { dayKey: old, points: 3 }), options).status, 'WARN');
+  const result = audit.buildHabitLedgerConsistencyAudit(
+    habitState({ doneKeys: [old] }, { dayKey: old, points: 3 }),
+    options
+  );
+  assert.equal(result.status, 'PASS');
+  assert.doesNotMatch(result.details.join(' '), /historical point mismatches/);
 });
 
 
@@ -136,10 +209,25 @@ test('reconciliation ambiguous duplicates warn and groups orphan history', () =>
   const result = audit.buildMatchupHistoryReconciliationAudit({ matchups: [matchup({ id: '', matchupId: '' }), matchup({ id: '', matchupId: '' })], gameHistory: [history({ matchupId: '' }), history({ id: 'g2', matchupId: '' }), history({ id: 'orphan-1', dateKey: '2026-07-16', matchupId: '' }), history({ id: 'orphan-2', dateKey: '2026-07-15', matchupId: '' })] }, options);
   assert.equal(result.status, 'WARN'); assert.match(result.details.join(' '), /Ambiguous historical/); assert.match(result.details.join(' '), /2 legacy gameHistory rows/);
 });
-test('habit historical point drift is grouped and contradiction details lead with habit names', () => {
-  const old = ['2026-07-16', '2026-07-15']; const state = habitState({ title: 'Morning Dishes', doneKeys: [options.todayKey, ...old], failedKeys: [options.todayKey] });
-  state.completions.push(...old.map((day, i) => ({ id: `very-long-completion-id-${i}`, source: 'habit', habitId: 'h1', dayKey: day, points: 3, completionFraction: 1 })));
-  const result = audit.buildHabitLedgerConsistencyAudit(state, options); assert.equal(result.status, 'FAIL'); assert.match(result.details.join(' '), /Morning Dishes \(h1\) on 2026-07-17/); assert.match(result.details.join(' '), /2 historical point mismatches for Morning Dishes/); assert.equal(result.details.filter(detail => /historical point mismatches/.test(detail)).length, 1);
+test('habit historical point drift stays silent while current structural contradictions still fail', () => {
+  const old = ['2026-07-16', '2026-07-15'];
+  const state = habitState({
+    title: 'Morning Dishes',
+    doneKeys: [options.todayKey, ...old],
+    failedKeys: [options.todayKey]
+  });
+  state.completions.push(...old.map((day, i) => ({
+    id: `very-long-completion-id-${i}`,
+    source: 'habit',
+    habitId: 'h1',
+    dayKey: day,
+    points: 3,
+    completionFraction: 1
+  })));
+  const result = audit.buildHabitLedgerConsistencyAudit(state, options);
+  assert.equal(result.status, 'FAIL');
+  assert.match(result.details.join(' '), /Morning Dishes \(h1\) on 2026-07-17/);
+  assert.doesNotMatch(result.details.join(' '), /historical point mismatches/);
 });
 
 test('all audit builders leave input state unchanged', () => {
@@ -180,7 +268,14 @@ test('audit page loads and wires read-only integrity builders and centralized li
   assert.match(html, /<script src="audit_integrity\.js"><\/script>/);
   for (const name of ['buildNpcScoreHealthAudit', 'buildMatchupHistoryReconciliationAudit', 'buildHabitLedgerConsistencyAudit']) assert.match(html, new RegExp(`checks\\.push\\(TaskPointsAuditIntegrity\\.${name}`));
   assert.match(html, /TaskPointsCore\.NPC_SCORE_ABSOLUTE_MIN \?\? 5/);
-  assert.match(html, /TaskPointsCore\.NPC_SCORE_ABSOLUTE_MAX \?\? 85/);
+  assert.match(html, /TaskPointsCore\.youDailyTotalsWithInertia\(state\)/);
+  assert.match(html, /if \(key !== 'reminders'\) emptyWarnings\.push/);
+  assert.match(html, /!value\.length && key !== 'reminders'/);
+  assert.match(html, /empty reminders list is valid/);
   const source = fs.readFileSync(path.join(__dirname, '..', 'audit_integrity.js'), 'utf8');
+  assert.match(source, /Historical stored points are preserved because Habit\/Vice values may change over time/);
+  assert.match(source, /stored You game score still matches the canonical completion ledger/);
+  assert.match(source, /predates the first stored You matchup/);
+  assert.doesNotMatch(source, /historical point mismatches for/);
   assert.doesNotMatch(source, /saveAppState|saveStateSnapshot|mergeAndSaveState|localStorage\.setItem|\bsync[A-Z]/);
 });

@@ -273,7 +273,7 @@
         const sourcePill = row.playerId === 'YOU'
           ? `<span class="pill pill-orange">${esc(name)}</span>`
           : '<span class="pill pill-blue">Player</span>';
-        return `<tr><td class="rankCell num font-extrabold">${index + 1}</td><td class="scoreCell num font-extrabold">${row.amount.toFixed(1)}</td><td class="imageCell">${photoHtml(row)}</td><td class="playerCell"><div class="font-semibold">${esc(row.playerName)}</div></td><td class="dateCell num">${esc(formatDate(row.date))}</td><td class="srcCell">${sourcePill}</td></tr>`;
+        return `<tr><td class="rankCell num font-extrabold">${index + 1}</td><td class="scoreCell num font-extrabold">${row.amount.toFixed(1)}</td><td class="imageCell">${photoHtml(row)}</td><td class="playerCell"><div class="font-semibold">${esc(row.playerName)}</div></td><td class="opponentCell"><div class="font-semibold">${esc(row.opponentName)}</div></td><td class="dateCell num">${esc(formatDate(row.date))}</td><td class="srcCell">${sourcePill}</td></tr>`;
       }).join('');
     }
     lastRows = shown;
@@ -287,7 +287,7 @@
     event?.preventDefault?.();
     event?.stopImmediatePropagation?.();
     const name = youName(loadFullStates()[0] || {});
-    const text = lastRows.map((row, index) => `${index + 1}. ${row.amount.toFixed(1)} Gold — ${row.playerName} — ${row.date} — ${row.playerId === 'YOU' ? name : 'Player'}`).join('\n');
+    const text = lastRows.map((row, index) => `${index + 1}. ${row.amount.toFixed(1)} Gold — ${row.playerName} from ${row.opponentName} — ${row.date} — ${row.playerId === 'YOU' ? name : 'Player'}`).join('\n');
     try {
       if (typeof global.navigator?.clipboard?.writeText !== 'function') throw new Error('Clipboard unavailable');
       await global.navigator.clipboard.writeText(text);

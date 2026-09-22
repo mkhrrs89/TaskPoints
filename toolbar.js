@@ -2231,6 +2231,9 @@ function saveStateSnapshotFallback(next, options = {}) {
 function getBestNotesTextFromStorageFallback() {
   let stateNotes = '';
   let cacheNotes = '';
+  let cachePresent = false;
+  let cacheDirty = false;
+  let cacheAuthoritative = false;
 
   try {
     const raw = localStorage.getItem(STORAGE_KEY_FALLBACK);
@@ -2239,21 +2242,27 @@ function getBestNotesTextFromStorageFallback() {
   } catch (_) {}
 
   try {
-    cacheNotes = localStorage.getItem('taskpoints_notes_v1') || '';
+    const cachedRaw = localStorage.getItem('taskpoints_notes_v1');
+    cachePresent = cachedRaw !== null;
+    cacheNotes = cachedRaw || '';
+    cacheDirty = localStorage.getItem('taskpoints_notes_dirty_v1') === '1';
+    cacheAuthoritative = localStorage.getItem('taskpoints_notes_authoritative_v1') === '1';
   } catch (_) {}
 
+  if (cachePresent && (cacheDirty || cacheAuthoritative)) return cacheNotes;
   if (cacheNotes.trim() && !stateNotes.trim()) return cacheNotes;
   if (stateNotes.trim() && !cacheNotes.trim()) return stateNotes;
   if (cacheNotes === stateNotes) return cacheNotes;
-
   return cacheNotes.length >= stateNotes.length ? cacheNotes : stateNotes;
 }
 
 function syncNotesStorageLocationsFallback(source = 'notes-storage-sync') {
   const notesText = getBestNotesTextFromStorageFallback();
+  let stateSynced = false;
 
   try {
     localStorage.setItem('taskpoints_notes_v1', notesText);
+    localStorage.setItem('taskpoints_notes_authoritative_v1', '1');
   } catch (error) {
     console.warn('Failed to sync taskpoints_notes_v1', error);
   }
@@ -2263,8 +2272,13 @@ function syncNotesStorageLocationsFallback(source = 'notes-storage-sync') {
     const state = raw ? (window.TaskPointsCore?.readTaskPointsStoredState ? TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY_FALLBACK, {}) : parseTaskPointsRawFallback(raw, {})) : {};
     state.notes = notesText;
     TaskPointsCore.writeTaskPointsStoredState(state, { storageKey: STORAGE_KEY_FALLBACK });
+    stateSynced = true;
   } catch (error) {
     console.warn('Failed to sync taskpoints_v1.notes', error);
+  }
+
+  if (stateSynced) {
+    try { localStorage.removeItem('taskpoints_notes_dirty_v1'); } catch (_) {}
   }
 
   window.dispatchEvent(new CustomEvent('taskpoints-notes-updated', {
@@ -2340,6 +2354,8 @@ function applyImportedNotesPayloadFallback(notesPayload, options = {}) {
 
   try {
     localStorage.setItem('taskpoints_notes_v1', notesText);
+    localStorage.setItem('taskpoints_notes_authoritative_v1', '1');
+    localStorage.removeItem('taskpoints_notes_dirty_v1');
   } catch (error) {
     console.error('Failed to write imported notes cache', error);
   }

@@ -14,6 +14,57 @@
     return parsed.getUTCFullYear() === y && parsed.getUTCMonth() === m - 1 && parsed.getUTCDate() === d;
   };
 
+
+  const REVIEWED_LEGACY_HISTORY = Object.freeze([
+    Object.freeze({ id: '1455656d-4aff-4571-acce-37133586187d', date: '2026-04-24', score: 64.9 }),
+    Object.freeze({ id: '97b42ce0-4569-4c94-a0bf-d4c60835e5d2', date: '2026-06-14', score: 76.1 }),
+    Object.freeze({ id: '0237ebbe-90bd-423e-a5a9-8b949e043958', date: '2026-06-14', score: 43.4 }),
+    Object.freeze({ id: '4d6bfb2e-4c60-4543-8297-968aa55abf8c', date: '2026-06-14', score: 47 }),
+    Object.freeze({ id: '323d0df8-fbed-4276-b9f7-303816858159', date: '2026-06-14', score: 41.6 }),
+    Object.freeze({ id: 'aa3d9527-a07f-4f62-8003-5b6cf211a221', date: '2026-06-14', score: 42.9 }),
+    Object.freeze({ id: 'c6d813ac-6418-4a11-9d8d-85df63455cb3', date: '2026-06-14', score: 29.7 }),
+    Object.freeze({ id: '1290705e-3c86-4e16-ab0b-84bac53802a2', date: '2026-06-14', score: 37.4 }),
+    Object.freeze({ id: '1bd66c72-9770-4858-8b95-ab1dac07202b', date: '2026-06-14', score: 46.8 }),
+    Object.freeze({ id: '83a3afce-2e89-47dc-9f76-5a358dccfa9f', date: '2026-06-14', score: 28.7 }),
+    Object.freeze({ id: 'd26921d1-9543-4b80-94a3-01c85a6f4853', date: '2026-06-14', score: 43.8 }),
+    Object.freeze({ id: '6661a09e-de85-42e6-8bf7-6d1188abbfdd', date: '2026-06-14', score: 61.7 }),
+    Object.freeze({ id: '06a9af59-7157-4119-9923-582e045b210c', date: '2026-06-14', score: 40.6 }),
+    Object.freeze({ id: '32911f20-67aa-4de4-a126-56d4667ec7ee', date: '2026-06-14', score: 35.7 }),
+    Object.freeze({ id: '88d122ae-6f7e-44c9-bc01-8ff960e63cc5', date: '2026-06-14', score: 57.4 }),
+    Object.freeze({ id: '5b3ecc5d-8c59-461c-9241-69ab1ebeb53c', date: '2026-06-14', score: 40.1 }),
+    Object.freeze({ id: '9e1bc886-f211-4669-ac36-e514a8550ec0', date: '2026-06-14', score: 44 }),
+    Object.freeze({ id: 'ee21e7f7-a7ef-4a00-87de-e6aa6d4d6c21', date: '2026-06-14', score: 44.8 }),
+    Object.freeze({ id: '5206a3bf-3fb0-480c-875c-5fd82b9f51d2', date: '2026-06-14', score: 44.9 }),
+    Object.freeze({ id: '3bf523ed-2d66-4ccd-8365-b5bbef231123', date: '2026-06-14', score: 38.8 }),
+    Object.freeze({ id: 'c52424d6-89c2-4b93-ac78-7a7a007cbe65', date: '2026-06-14', score: 59.2 }),
+    Object.freeze({ id: 'd61c32ad-7926-46ae-920d-ddf7042415b4', date: '2026-06-14', score: 47.5 }),
+    Object.freeze({ id: '86d94b15-f0fe-4946-beee-6f74dd035fd4', date: '2026-06-14', score: 40.1 }),
+    Object.freeze({ id: '910c5f7f-7dc4-4902-999a-addece91b69e', date: '2026-06-14', score: 26.9 }),
+    Object.freeze({ id: '919d8981-e405-4d74-97c9-8a484514d28a', date: '2026-06-14', score: 53.8 })
+  ]);
+  const reviewedLegacyById = new Map(REVIEWED_LEGACY_HISTORY.map(item => [item.id, item]));
+
+  function reviewedLegacyIdentity(found) {
+    const id = String(found?.row?.id || '').trim();
+    const reviewed = reviewedLegacyById.get(id);
+    if (!reviewed || found.date !== reviewed.date || !found.score?.valid) return null;
+    return Math.abs(Number(found.score.value) - reviewed.score) <= 0.05 ? reviewed : null;
+  }
+
+  function isReviewedLegacyOrphan(found, expectations, histories) {
+    if (!reviewedLegacyIdentity(found)) return false;
+    if (found.matchupId) return false;
+    const baseKey = `${found.date}|${found.playerId}`;
+    const sameBaseHistory = histories.filter(other =>
+      other !== found && `${other.date}|${other.playerId}` === baseKey
+    );
+    if (sameBaseHistory.length) return false;
+    const sameBaseExpectations = expectations.filter(expected =>
+      `${expected.date}|${expected.playerId}` === baseKey
+    );
+    return sameBaseExpectations.length === 0;
+  }
+
   function normalizeDate(values, options) {
     for (const value of values) {
       if (!populated(value)) continue;
@@ -259,25 +310,46 @@
     });
 
     const orphan = [...unused].filter(found => !ambiguous.has(`${found.date}|${found.playerId}`));
-    if (orphan.length) {
-      out.warn(`${orphan.length} legacy gameHistory rows have no corresponding finalized matchup. Orphan sample: ${orphan.slice(0, 5).map(found => `${found.label} on ${found.date}`).join('; ')}.`, 5);
+    const reviewedLegacy = orphan.filter(found => isReviewedLegacyOrphan(found, expectations, histories));
+    const reviewedLegacySet = new Set(reviewedLegacy);
+    const unexplainedOrphan = orphan.filter(found => !reviewedLegacySet.has(found));
+    if (unexplainedOrphan.length) {
+      out.warn(`${unexplainedOrphan.length} legacy gameHistory rows have no corresponding finalized matchup. Orphan sample: ${unexplainedOrphan.slice(0, 5).map(found => `${found.label} on ${found.date}`).join('; ')}.`, 5);
     }
 
     const result = out.result(options);
+    const reviewedDetails = reviewedLegacy.length
+      ? [
+          `INFO — ${reviewedLegacy.length} reviewed legacy-only gameHistory row(s) are preserved and excluded from warnings only while their reviewed identity and safety conditions remain unchanged.`,
+          ...reviewedLegacy.map(found =>
+            `INFO — Reviewed legacy-only: ${found.date} · ${playerLabel(state, found.playerId)} · score ${formatScore(found.score.value)} · history ${String(found.row?.id || '')}`
+          )
+        ]
+      : [];
+    const reviewedSummary = reviewedLegacy.length
+      ? `${result.summary}; ${reviewedLegacy.length} reviewed legacy-only history row(s) preserved`
+      : result.summary;
     return {
       id: 'matchup-history-reconciliation',
       title: 'Matchups and game history reconcile',
       section: 'Game Data Integrity',
       status: result.status,
       expected: 'Finalized NPC matchup sides reconcile to gameHistory by ID, series/game context, opponent, or one-to-one legacy date/player/score matching.',
-      actual: result.summary,
-      details: result.details,
+      actual: reviewedSummary,
+      details: [...result.details, ...reviewedDetails],
+      reviewedLegacyHistory: reviewedLegacy.map(found => ({
+        historyId: String(found.row?.id || ''),
+        date: found.date,
+        playerId: found.playerId,
+        player: playerLabel(state, found.playerId),
+        score: found.score.value
+      })),
       trace: 'state.matchups ↔ state.gameHistory by ID, context, opponent, and one-to-one legacy keys',
-      tips: 'Same-day games are matched as a group so one history row cannot be consumed by the wrong matchup. No rows are created, removed, or changed.'
+      tips: 'Same-day games are matched as a group so one history row cannot be consumed by the wrong matchup. Reviewed legacy-only rows remain visible as PASS-side informational evidence; any new or changed orphan still warns. No rows are created, removed, or changed.'
     };
   }
 
-  global.TaskPointsAuditIntegrity = { ...existing, buildMatchupHistoryReconciliationAudit };
-  global.TaskPointsAuditSameDayReconciliation = { buildMatchupHistoryReconciliationAudit };
-  if (typeof module !== 'undefined' && module.exports) module.exports = { buildMatchupHistoryReconciliationAudit };
+  global.TaskPointsAuditIntegrity = { ...existing, buildMatchupHistoryReconciliationAudit, REVIEWED_LEGACY_HISTORY };
+  global.TaskPointsAuditSameDayReconciliation = { buildMatchupHistoryReconciliationAudit, REVIEWED_LEGACY_HISTORY };
+  if (typeof module !== 'undefined' && module.exports) module.exports = { buildMatchupHistoryReconciliationAudit, REVIEWED_LEGACY_HISTORY };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -1358,6 +1358,8 @@ function runWeightVo2HistorySavePathAudit(state) {
     const SEASON_AUDIT_ROUND_ORDER = ['play_in', 'round_of_32', 'sweet_16', 'quarterfinals', 'semifinals', 'finals'];
 
     const NOTES_PAGE_CACHE_KEY_FOR_AUDIT = "taskpoints_notes_v1";
+    const NOTES_DIRTY_KEY_FOR_AUDIT = "taskpoints_notes_dirty_v1";
+    const NOTES_AUTHORITY_KEY_FOR_AUDIT = "taskpoints_notes_authoritative_v1";
 
     function hasMeaningfulNoteValueForAudit(value) {
       if (typeof value === 'string') return value.trim().length > 0;
@@ -1415,9 +1417,17 @@ function runWeightVo2HistorySavePathAudit(state) {
     }
 
     function getBestNotesTextForAudit(state = null) {
-      const cached = getCachedGeneralNotesForAudit() || '';
+      const cachedRaw = getCachedGeneralNotesForAudit();
+      const cached = cachedRaw || '';
       const stateNotes = typeof state?.notes === 'string' ? state.notes : '';
+      let cacheDirty = false;
+      let cacheAuthoritative = false;
+      try {
+        cacheDirty = localStorage.getItem(NOTES_DIRTY_KEY_FOR_AUDIT) === '1';
+        cacheAuthoritative = localStorage.getItem(NOTES_AUTHORITY_KEY_FOR_AUDIT) === '1';
+      } catch (_) {}
 
+      if (cachedRaw !== null && (cacheDirty || cacheAuthoritative)) return cached;
       if (cached.trim() && !stateNotes.trim()) return cached;
       if (stateNotes.trim() && !cached.trim()) return stateNotes;
       if (cached === stateNotes) return cached;
@@ -1449,9 +1459,16 @@ function runWeightVo2HistorySavePathAudit(state) {
         aux: { [NOTES_PAGE_CACHE_KEY_FOR_AUDIT]: notesText }
       });
 
+      let cacheDirty = false;
+      let cacheAuthoritative = false;
+      try {
+        cacheDirty = localStorage.getItem(NOTES_DIRTY_KEY_FOR_AUDIT) === '1';
+        cacheAuthoritative = localStorage.getItem(NOTES_AUTHORITY_KEY_FOR_AUDIT) === '1';
+      } catch (_) {}
+
       const details = [];
-      if (cached !== stateNotes) {
-        details.push('Open Notes once or run Notes sync to reconcile taskpoints_v1.notes and taskpoints_notes_v1.');
+      if (cached !== stateNotes && !cacheDirty && !cacheAuthoritative) {
+        details.push('Legacy Notes copies disagree and no canonical cache has been established yet. Open Notes once or run Notes sync once.');
       }
       if (exportPayload.state.notes !== notesText) {
         details.push('Export snapshot state.notes does not contain the selected notes text.');
@@ -1463,10 +1480,15 @@ function runWeightVo2HistorySavePathAudit(state) {
         details.push('Full backup notes reader did not recover aux.taskpoints_notes_v1.');
       }
 
+      const mirrorDriftProtected = cached !== stateNotes && (cacheDirty || cacheAuthoritative);
       return {
         status: details.length ? 'WARN' : 'PASS',
-        expected: 'Notes cache and state stay synchronized, exports include Notes in state and aux, and imports read aux.taskpoints_notes_v1',
-        actual: details.length ? details.join(' ') : 'Notes cache/state and backup note paths are consistent',
+        expected: 'Canonical Notes are protected from stale state saves, exports include Notes in state and aux, and imports read aux.taskpoints_notes_v1',
+        actual: details.length
+          ? details.join(' ')
+          : (mirrorDriftProtected
+            ? 'Dedicated Notes cache is canonical; stale state mirror cannot overwrite it and backup paths use the canonical text'
+            : 'Notes cache/state and backup note paths are consistent'),
         details
       };
     }
@@ -2343,14 +2365,20 @@ if (!season) {
       protectedKeys.forEach(key => {
         const value = state?.[key];
         const present = Object.prototype.hasOwnProperty.call(state || {}, key);
-        if (!present) { emptyWarnings.push(`${key} missing (app can tolerate default/empty value)`); return; }
+        // An empty reminders list is a normal valid state, so it should not
+        // create routine audit noise. We still validate reminders when present:
+        // a non-array value remains a real shape failure.
+        if (!present) {
+          if (key !== 'reminders') emptyWarnings.push(`${key} missing (app can tolerate default/empty value)`);
+          return;
+        }
         if (key === 'liveDiffHistory' || key === 'liveDiffSnapshots') {
           if (value && typeof value === 'object' && !Array.isArray(value)) {
             if (!Object.keys(value).length) emptyWarnings.push(`${key} is empty and no previous snapshot is available`);
           } else shapeIssues.push(`${key} should be an object map`);
         } else if (!Array.isArray(value)) {
           shapeIssues.push(`${key} should be an array`);
-        } else if (!value.length) {
+        } else if (!value.length && key !== 'reminders') {
           emptyWarnings.push(`${key} is empty and no previous snapshot is available`);
         }
       });
@@ -2360,7 +2388,7 @@ if (!season) {
       const savePathAudit = runWeightVo2HistorySavePathAudit(state);
       const protectedDetails = [...shapeIssues, ...emptyWarnings];
       if (savePathAudit.status === 'FAIL') protectedDetails.push(...(savePathAudit.details || []));
-      checks.push({ ...base, id: 'season-protected-histories-preserved', title: 'Season saves preserved protected histories', status: shapeIssues.length || savePathAudit.status === 'FAIL' ? 'FAIL' : (emptyWarnings.length ? 'WARN' : 'PASS'), expected: 'Season and matchup saves do not wipe protected Home histories and Notes page content', actual: shapeIssues.length ? `${shapeIssues.length} invalid protected shape(s)` : (emptyWarnings.length ? `${emptyWarnings.length} protected key warning(s); current values empty/missing and no previous snapshot is available` : 'Protected history keys and Notes page content are present with valid shape'), details: protectedDetails, trace: 'weightHistory/vo2MaxHistory/liveDiffHistory/liveDiffSnapshots/reminders/Notes page content (notes + taskpoints_notes_v1 cache + completions[].moodNotes) + save-path sentinel audit' });
+      checks.push({ ...base, id: 'season-protected-histories-preserved', title: 'Season saves preserved protected histories', status: shapeIssues.length || savePathAudit.status === 'FAIL' ? 'FAIL' : (emptyWarnings.length ? 'WARN' : 'PASS'), expected: 'Season and matchup saves do not wipe protected Home histories and Notes page content; an empty reminders list is valid', actual: shapeIssues.length ? `${shapeIssues.length} invalid protected shape(s)` : (emptyWarnings.length ? `${emptyWarnings.length} protected key warning(s); current values empty/missing and no previous snapshot is available` : 'Protected history keys and Notes page content are present with valid shape'), details: protectedDetails, trace: 'weightHistory/vo2MaxHistory/liveDiffHistory/liveDiffSnapshots/reminders/Notes page content (notes + taskpoints_notes_v1 cache + completions[].moodNotes) + save-path sentinel audit' });
 
       return checks;
     }
@@ -3441,13 +3469,21 @@ if (!dripSchedule) {
 
       checks.push(...buildSeasonChampionshipAuditChecks(state, dateKey));
 
+      let auditYouDailyTotals = null;
+      try {
+        auditYouDailyTotals = typeof TaskPointsCore.youDailyTotalsWithInertia === 'function'
+          ? TaskPointsCore.youDailyTotalsWithInertia(state)
+          : null;
+      } catch (_) {}
+
       const integrityOptions = {
         dateKey: value => TaskPointsCore.dateKey(value),
         todayKey: TaskPointsCore.todayKey(),
         selectedDateKey: dateKey,
         npcScoreMin: TaskPointsCore.NPC_SCORE_ABSOLUTE_MIN ?? 5,
-        npcScoreMax: TaskPointsCore.NPC_SCORE_ABSOLUTE_MAX ?? 85,
-        detailLimit: 75
+        npcScoreMax: 86,
+        detailLimit: 75,
+        youDailyTotals: auditYouDailyTotals
       };
       if (window.TaskPointsAuditIntegrity) {
         checks.push(TaskPointsAuditIntegrity.buildNpcScoreHealthAudit(state, integrityOptions));
@@ -3512,7 +3548,7 @@ if (!dripSchedule) {
         actual: notesBackupAudit.actual,
         details: notesBackupAudit.details,
         trace: 'taskpoints_v1.notes + taskpoints_notes_v1 + full backup state.notes/aux.taskpoints_notes_v1 reader',
-        tips: 'If this fails, open Notes once or re-import a full backup so both Notes storage locations match.'
+        tips: 'If a one-time legacy authority warning appears, open Notes once or tap Sync Notes. After that, the dedicated Notes cache is canonical and stale full-state saves cannot overwrite it.'
       });
 
       // New: Audit self-check (verifies other checks are wired correctly)
