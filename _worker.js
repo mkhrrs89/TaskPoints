@@ -309,6 +309,7 @@ export default {
           + '<script src="/habit_ledger_matchup_restore_apply.js?v=20260801-1" data-taskpoints-habit-matchup-restore-apply="true"></script>'
           + '<script src="/habit_ledger_matchup_impact_stale_guard.js?v=20260803-3" data-taskpoints-habit-matchup-stale-guard="true"></script>'
           + '<script src="/habit_completion_backup_recovery.js?v=20260921-2" data-taskpoints-habit-completion-backup-recovery="true"></script>'
+          + '<script src="/habit_missing_donekey_date_analysis.js?v=20260922-1" data-taskpoints-habit-missing-donekey-date-analysis="true"></script>'
           + '<script src="/score_alias_audit_bootstrap.js?v=20260731-2" data-taskpoints-score-alias-audit-bootstrap="true"></script>'
         : '';
       const auditFirstPaintGuard = directPageKind === 'audit'
