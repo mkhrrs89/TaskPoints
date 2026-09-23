@@ -58,14 +58,19 @@
     return generation?.read?.() || null;
   }
 
-  function scheduleGenerationSync(reason = 'generation-change') {
+  function scheduleGenerationSync(reason = 'generation-change', options = {}) {
     const { runtime } = deps();
     if (!runtime?.seedFromLegacy) return generationSyncTail;
+    const force = options.force !== false;
     generationSyncTail = generationSyncTail
       .then(async () => {
         generationSynchronizations += 1;
-        await runtime.seedFromLegacy({ force: true });
-        mark('stateV2.generationSynchronized', { reason, generation: currentGeneration() });
+        await runtime.seedFromLegacy(force ? { force: true } : {});
+        mark('stateV2.generationSynchronized', {
+          reason,
+          generation: currentGeneration(),
+          forced: force
+        });
       })
       .catch((error) => {
         rememberFailure(error, 'generation_sync');
@@ -369,7 +374,10 @@
     installHook();
     if (!replayPromise) {
       replayPromise = Promise.resolve()
-        .then(() => scheduleGenerationSync('startup'))
+        // Ordinary startup must verify/reuse an existing V2 pilot DB rather
+        // than destructively force-reseeding it. Real generation-change events
+        // still use the forced scrub path via the generation subscription.
+        .then(() => scheduleGenerationSync('startup', { force: false }))
         .then(() => replayPending())
         .finally(() => { replayPromise = null; });
     }
