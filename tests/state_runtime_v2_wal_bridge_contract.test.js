@@ -35,6 +35,7 @@ function install({ enabled = true, initial = {}, applyResult = { committed: true
   const timers = [];
   const events = [];
   let uuid = 0;
+  const seedCalls = [];
   let runtimeApply = async () => {
     events.push('apply');
     if (applyResult instanceof Error) throw applyResult;
@@ -67,6 +68,10 @@ function install({ enabled = true, initial = {}, applyResult = { committed: true
     crypto: { randomUUID() { uuid += 1; return `bridge-test-${uuid}`; } },
     TaskPointsCore: core,
     TaskPointsStateRuntimeV2: {
+      seedFromLegacy(options = {}) {
+        seedCalls.push({ ...options });
+        return Promise.resolve({ seeded: false, reason: options.force === true ? 'forced-test' : 'startup-test' });
+      },
       applyHabitDelta(input, options) { return runtimeApply(input, options); }
     },
     setTimeout(fn) { timers.push(fn); return timers.length; },
@@ -95,6 +100,7 @@ function install({ enabled = true, initial = {}, applyResult = { committed: true
     core,
     localStorage,
     events,
+    seedCalls,
     flushTimers,
     setRuntimeApply(fn) { runtimeApply = fn; }
   };
@@ -108,6 +114,26 @@ test('bridge is default-off and leaves the production habit journal untouched', 
   assert.equal(core.writePendingHabitDelta, original);
   assert.equal(localStorage.getItem(WAL_KEY), null);
   assert.equal(localStorage.getItem(GENERATION_KEY), null);
+});
+
+test('ordinary startup seeds/verifies without forcing a destructive V2 reseed', async () => {
+  const app = install();
+  await app.flushTimers();
+
+  assert.equal(app.seedCalls.length >= 1, true);
+  assert.equal(app.seedCalls[0].force, undefined, 'startup must use the normal verify/reuse seed path');
+  assert.equal(app.context.TaskPointsStateRuntimeV2WalBridge.getStatus().failures, 0);
+});
+
+test('real generation changes still force a V2 scrub before continuing', async () => {
+  const app = install();
+  await app.flushTimers();
+  app.seedCalls.length = 0;
+
+  app.context.TaskPointsStateRuntimeV2Generation.rotate('reset-all-test');
+  await app.flushTimers();
+
+  assert.equal(app.seedCalls.some((options) => options.force === true), true);
 });
 
 test('habit journal writes V1 first, then synchronously writes generation-stamped V2 WAL before async verification', async () => {
