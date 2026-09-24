@@ -291,6 +291,41 @@ test('failure details identify the original revision conflict across page naviga
 });
 
 
+test('trace review surfaces explicit WAL replay recovery evidence', () => {
+  const report = baseReport([
+    { epochMs: 25000, type: 'mark', name: 'stateV2.walReplayAttempted', detail: { mutationId: 'm1', generation: 'g1' } },
+    { epochMs: 25010, type: 'mark', name: 'stateV2.walBridgeCleared', detail: { phase: 'replay', mutationId: 'm1', generation: 'g1', duplicate: false } },
+    { epochMs: 25020, type: 'mark', name: 'stateV2.walReplayAttempted', detail: { mutationId: 'm2', generation: 'g1' } },
+    { epochMs: 25030, type: 'mark', name: 'stateV2.walBridgeCleared', detail: { phase: 'replay', mutationId: 'm2', generation: 'g1', duplicate: true } }
+  ]);
+  const result = reviewer.review(report);
+
+  assert.equal(result.walRecovery.observed, true);
+  assert.equal(result.walRecovery.replayAttemptCount, 2);
+  assert.equal(result.walRecovery.replayClearedCount, 2);
+  assert.equal(result.walRecovery.duplicateReplayClearCount, 1);
+  assert.equal(result.walRecovery.stalePreservedCount, 0);
+  assert.equal(result.walRecovery.replayFailureCount, 0);
+  assert.equal(result.walRecovery.replayRecoveryConfirmed, true);
+  assert.deepEqual(result.walRecovery.replayedMutationIds, ['m1', 'm2']);
+});
+
+test('trace review keeps failed or stale WAL replay evidence distinct from confirmed recovery', () => {
+  const report = baseReport([
+    { epochMs: 25000, type: 'mark', name: 'stateV2.walReplayAttempted', detail: { mutationId: 'm1', generation: 'g1' } },
+    { epochMs: 25010, type: 'mark', name: 'stateV2.walBridgeFailed', detail: { phase: 'replay_apply', mutationId: 'm1' } },
+    { epochMs: 25020, type: 'mark', name: 'stateV2.walStalePreserved', detail: { mutationId: 'm0', rowGeneration: 'g0', currentGeneration: 'g1' } }
+  ]);
+  const wal = reviewer.review(report).walRecovery;
+
+  assert.equal(wal.observed, true);
+  assert.equal(wal.replayAttemptCount, 1);
+  assert.equal(wal.replayClearedCount, 0);
+  assert.equal(wal.stalePreservedCount, 1);
+  assert.equal(wal.replayFailureCount, 1);
+  assert.equal(wal.replayRecoveryConfirmed, false);
+});
+
 test('trace review distinguishes safe reload reuse from a full pilot reseed', () => {
   const already = baseReport([
     { epochMs: 30000, type: 'mark', name: 'stateV2.seedAlreadyCurrent', detail: { revision: 7 } }
