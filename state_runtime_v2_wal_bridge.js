@@ -341,6 +341,11 @@
 
       attempted += 1;
       replayAttempts += 1;
+      mark('stateV2.walReplayAttempted', {
+        mutationId: row.id,
+        generation: row.generation,
+        currentGeneration: durableGeneration
+      });
       try {
         const result = await verifyAndClear(row.delta, row.id, 'replay', row.generation);
         if (result?.stale) {

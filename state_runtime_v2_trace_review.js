@@ -327,6 +327,30 @@
       .map(durationRow);
   }
 
+  function walRecoveryEvidence(events) {
+    const attempts = events.filter((event) => String(event?.name || '') === 'stateV2.walReplayAttempted');
+    const cleared = events.filter((event) => (
+      String(event?.name || '') === 'stateV2.walBridgeCleared'
+      && String(detailObject(event).phase || '') === 'replay'
+    ));
+    const stale = events.filter((event) => String(event?.name || '') === 'stateV2.walStalePreserved');
+    const failures = events.filter((event) => {
+      if (String(event?.name || '') !== 'stateV2.walBridgeFailed') return false;
+      return ['replay_apply', 'replay_read', 'replay_row'].includes(String(detailObject(event).phase || ''));
+    });
+    const duplicateClears = cleared.filter((event) => detailObject(event).duplicate === true);
+    return {
+      observed: attempts.length > 0 || cleared.length > 0 || stale.length > 0 || failures.length > 0,
+      replayAttemptCount: attempts.length,
+      replayClearedCount: cleared.length,
+      duplicateReplayClearCount: duplicateClears.length,
+      stalePreservedCount: stale.length,
+      replayFailureCount: failures.length,
+      replayRecoveryConfirmed: cleared.length > 0 && failures.length === 0,
+      replayedMutationIds: cleared.map((event) => String(detailObject(event).mutationId || '')).filter(Boolean).slice(0, 20)
+    };
+  }
+
   function startupSeedEvidence(events) {
     const rows = events
       .filter((event) => [
@@ -381,6 +405,7 @@
     const failures = failureEvidence(events, status, mutationClasses, parity);
     const legacyCandidates = legacyFullStateCandidates(events);
     const startupSeed = startupSeedEvidence(events);
+    const walRecovery = walRecoveryEvidence(events);
     const allMutationClassesObserved = MUTATION_KINDS.every((kind) => mutationClasses[kind].observed === true);
     const noDirectForegroundMaintenanceObserved = maintenance.directForegroundMaintenanceCount === 0;
 
@@ -397,6 +422,7 @@
       parity,
       pilotOwnership,
       startupSeed,
+      walRecovery,
       noDirectForegroundMaintenanceObserved,
       automaticParityDeepIdleObserved: maintenance.automaticParityDeepIdleObserved,
       interactionPreemptionObserved: preemption.observed,
@@ -417,7 +443,7 @@
 
   const api = {
     installed: true,
-    version: 6,
+    version: 7,
     review,
     flattenEvents
   };
