@@ -136,6 +136,13 @@ test('real generation changes still force a V2 scrub before continuing', async (
   assert.equal(app.seedCalls.some((options) => options.force === true), true);
 });
 
+test('startup replay emits explicit WAL replay attempt evidence before verification', () => {
+  assert.match(bridgeSource, /stateV2\.walReplayAttempted/);
+  const attemptAt = bridgeSource.indexOf("mark('stateV2.walReplayAttempted'");
+  const verifyAt = bridgeSource.indexOf("verifyAndClear(row.delta, row.id, 'replay'", attemptAt);
+  assert.ok(attemptAt >= 0 && verifyAt > attemptAt);
+});
+
 test('habit journal writes V1 first, then synchronously writes generation-stamped V2 WAL before async verification', async () => {
   const app = install();
   await app.flushTimers();
