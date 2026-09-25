@@ -114,6 +114,13 @@ test('runtime page startup delegates to WAL bridge orchestration when the bridge
   assert.match(runtimeSource, /async function inspectStartupMeta\(\)/);
   assert.match(runtimeSource, /db\.transaction\('meta', 'readonly'\)/);
   assert.match(runtimeSource, /function startCoordinatedDarkMirror\(\)/);
+  const coordinatedStart = runtimeSource.slice(
+    runtimeSource.indexOf('function startCoordinatedDarkMirror()'),
+    runtimeSource.indexOf('function enableDarkMirror()', runtimeSource.indexOf('function startCoordinatedDarkMirror()'))
+  );
+  const installHookAt = coordinatedStart.indexOf('installHabitJournalHook()');
+  const bridgeStartAt = coordinatedStart.indexOf('return bridge.start()');
+  assert.ok(installHookAt >= 0 && bridgeStartAt > installHookAt, 'ordinary dark mirror hook must remain installed before WAL startup orchestration');
   assert.match(runtimeSource, /TaskPointsStateRuntimeV2WalBridge/);
   assert.match(runtimeSource, /typeof bridge\.start === 'function'/);
   assert.match(runtimeSource, /return bridge\.start\(\)/);
