@@ -110,6 +110,16 @@ test('preview WAL kill hold delays the normal async mirror path without moving i
   assert.ok(wait > hold && apply > wait, 'preview-only hold must occur before V2 IndexedDB apply');
 });
 
+test('runtime page startup delegates to WAL bridge orchestration when the bridge is installed', () => {
+  assert.match(runtimeSource, /async function inspectStartupMeta\(\)/);
+  assert.match(runtimeSource, /db\.transaction\('meta', 'readonly'\)/);
+  assert.match(runtimeSource, /function startCoordinatedDarkMirror\(\)/);
+  assert.match(runtimeSource, /TaskPointsStateRuntimeV2WalBridge/);
+  assert.match(runtimeSource, /typeof bridge\.start === 'function'/);
+  assert.match(runtimeSource, /return bridge\.start\(\)/);
+  assert.match(runtimeSource, /DOMContentLoaded', \(\) => startCoordinatedDarkMirror\(\)/);
+});
+
 test('pilot mutation transaction covers habit, completion, mutation ledger, and meta together', () => {
   const applyStart = runtimeSource.search(/async function applyHabitDelta\(deltaInput(?:,\s*options\s*=\s*\{\})?\)/);
   const apply = runtimeSource.slice(
