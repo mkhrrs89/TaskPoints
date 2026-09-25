@@ -30,7 +30,7 @@ function installForHost(hostname, dark = true) {
 test('live reviewer is dynamically loaded only from the V2 dark structure bridge', () => {
   assert.match(structureBridge, /function loadLiveTraceReview\(\)/);
   assert.match(structureBridge, /if \(!isEnabled\(\) \|\| global\.TaskPointsStateRuntimeV2LiveReview\?\.installed/);
-  assert.match(structureBridge, /state_runtime_v2_live_review\.js\?v=20260924-1/);
+  assert.match(structureBridge, /state_runtime_v2_live_review\.js\?v=20260925-1/);
   assert.match(structureBridge, /loadPerfInstrumentation\(\);\s*loadLiveTraceReview\(\);/);
   assert.match(source, /state_runtime_v2_trace_review\.js\?v=20260924-1/);
   assert.match(source, /state_runtime_v2_foreground_correlation\.js\?v=20260913-2/);
@@ -44,6 +44,18 @@ test('live reviewer is read-only with respect to TaskPoints persistence and muta
   assert.match(source, /TaskPointsPerf\.buildReport\(\)/);
   assert.match(source, /reviewer\.review\(report\)/);
   assert.match(source, /review\.foregroundCorrelation = correlator\.review\(report\)/);
+});
+
+test('live reviewer exposes a preview-only one-shot deterministic WAL kill control', () => {
+  assert.match(source, /Arm WAL kill test/);
+  assert.match(source, /data-v2-wal-arm/);
+  assert.match(source, /function armWalKillTest\(\)/);
+  assert.match(source, /taskpoints_state_v2_wal_test_armed_v1/);
+  assert.match(source, /taskpoints_state_v2_wal_test_hold_until_v1/);
+  assert.match(source, /WAL_TEST_HOLD_MS = 8000/);
+  assert.match(source, /if \(!isAllowedPreview\(\)\) throw new Error\('WAL kill test is preview-only\.'\)/);
+  assert.match(source, /sessionStorage\.setItem\(WAL_TEST_ARM_KEY, '1'\)/);
+  assert.match(source, /toggle ONE Habit, then kill TaskPoints within 8 seconds/);
 });
 
 test('fresh-start control clears only PERF trace state before reloading', () => {

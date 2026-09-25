@@ -4,6 +4,9 @@
   if (!global || global.TaskPointsStateRuntimeV2LiveReview?.installed) return;
 
   const DARK_MODE_KEY = 'taskpoints_state_v2_dark_mode_v1';
+  const WAL_TEST_ARM_KEY = 'taskpoints_state_v2_wal_test_armed_v1';
+  const WAL_TEST_HOLD_UNTIL_KEY = 'taskpoints_state_v2_wal_test_hold_until_v1';
+  const WAL_TEST_HOLD_MS = 8000;
   const REVIEWER_SRC = '/state_runtime_v2_trace_review.js?v=20260924-1';
   const CORRELATOR_SRC = '/state_runtime_v2_foreground_correlation.js?v=20260913-2';
   const PAINT_PROBE_NAME = 'stateV2.foreground.nextPaint';
@@ -33,6 +36,16 @@
 
   function traceAvailable() {
     return Boolean(global.TaskPointsPerf?.enabled && typeof global.TaskPointsPerf?.buildReport === 'function');
+  }
+
+  function armWalKillTest() {
+    if (!isAllowedPreview()) throw new Error('WAL kill test is preview-only.');
+    if (!isDarkEnabled()) throw new Error('V2 dark mirror is not enabled.');
+    if (typeof global.sessionStorage?.setItem !== 'function') throw new Error('Session storage is unavailable.');
+    global.sessionStorage.removeItem?.(WAL_TEST_HOLD_UNTIL_KEY);
+    global.sessionStorage.setItem(WAL_TEST_ARM_KEY, '1');
+    try { global.TaskPointsPerf?.mark?.('stateV2.walTestArmed', { holdMs: WAL_TEST_HOLD_MS }); } catch (_) {}
+    return true;
   }
 
   function escapeHtml(value) {
@@ -279,7 +292,8 @@
         <li>Then leave the app untouched and visible for at least 20 seconds.</li>
         <li>Open V2 TEST again and tap Refresh evidence.</li>
       </ol></details>
-      <div class="tp-v2-live-actions"><button type="button" data-v2-start>Start fresh test</button><button type="button" data-v2-refresh>Refresh evidence</button><button type="button" data-v2-copy>Copy review</button></div>
+      <p class="tp-v2-live-note"><strong>Deterministic WAL kill test:</strong> arm it, close this panel, toggle one Habit, then kill TaskPoints within 8 seconds. The hold applies only to preview V2 async writes; the authoritative V1 write still happens normally.</p>
+      <div class="tp-v2-live-actions"><button type="button" data-v2-wal-arm>Arm WAL kill test</button><button type="button" data-v2-start>Start fresh test</button><button type="button" data-v2-refresh>Refresh evidence</button><button type="button" data-v2-copy>Copy review</button></div>
       <div data-v2-status class="tp-v2-live-status"></div>`;
   }
 
@@ -340,6 +354,15 @@
 
   function bindPanel(panel) {
     panel.querySelector?.('[data-v2-close]')?.addEventListener?.('click', closePanel);
+    panel.querySelector?.('[data-v2-wal-arm]')?.addEventListener?.('click', () => {
+      const status = panel.querySelector?.('[data-v2-status]');
+      try {
+        armWalKillTest();
+        if (status) status.textContent = 'WAL kill test armed. Close this panel, toggle ONE Habit, then kill TaskPoints within 8 seconds after the tap.';
+      } catch (error) {
+        if (status) status.textContent = String(error?.message || error);
+      }
+    });
     panel.querySelector?.('[data-v2-start]')?.addEventListener?.('click', () => {
       const status = panel.querySelector?.('[data-v2-status]');
       try {
@@ -414,12 +437,13 @@
 
   const api = {
     installed: true,
-    version: 7,
+    version: 8,
     isAllowedPreview,
     isDarkEnabled,
     traceAvailable,
     installForegroundPaintProbe,
     buildReview,
+    armWalKillTest,
     startFreshTest,
     openPanel,
     closePanel,

@@ -398,7 +398,7 @@
     if (!isEnabled() || global.TaskPointsStateRuntimeV2LiveReview?.installed || !global.document?.createElement) return false;
     if (global.document.querySelector?.('script[data-taskpoints-state-v2-live-review]')) return true;
     const script = global.document.createElement('script');
-    script.src = '/state_runtime_v2_live_review.js?v=20260924-1';
+    script.src = '/state_runtime_v2_live_review.js?v=20260925-1';
     script.defer = true;
     script.dataset.taskpointsStateV2LiveReview = 'true';
     (global.document.head || global.document.documentElement)?.appendChild?.(script);
