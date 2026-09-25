@@ -20,6 +20,8 @@ class FakeStorage {
 const DARK = 'taskpoints_state_v2_dark_mode_v1';
 const WAL_KEY = 'taskpoints_v2_pending_mutations_v1';
 const GENERATION_KEY = 'taskpoints_state_v2_generation_v1';
+const WAL_TEST_ARM_KEY = 'taskpoints_state_v2_wal_test_armed_v1';
+const WAL_TEST_HOLD_UNTIL_KEY = 'taskpoints_state_v2_wal_test_hold_until_v1';
 const delta = {
   id: 'habit:h1:2026-08-31',
   habitId: 'h1',
@@ -30,8 +32,15 @@ const delta = {
   updatedAtISO: '2026-08-31T20:00:00.000Z'
 };
 
-function install({ enabled = true, initial = {}, applyResult = { committed: true, duplicate: false } } = {}) {
+function install({
+  enabled = true,
+  initial = {},
+  sessionInitial = {},
+  hostname = 'arch-state-runtime-v2-plan.taskpoints.pages.dev',
+  applyResult = { committed: true, duplicate: false }
+} = {}) {
   const localStorage = new FakeStorage({ ...(enabled ? { [DARK]: '1' } : {}), ...initial });
+  const sessionStorage = new FakeStorage(sessionInitial);
   const timers = [];
   const events = [];
   let uuid = 0;
@@ -52,6 +61,8 @@ function install({ enabled = true, initial = {}, applyResult = { committed: true
 
   const context = {
     localStorage,
+    sessionStorage,
+    location: { hostname, pathname: '/' },
     structuredClone,
     JSON,
     Date,
@@ -74,7 +85,11 @@ function install({ enabled = true, initial = {}, applyResult = { committed: true
       },
       applyHabitDelta(input, options) { return runtimeApply(input, options); }
     },
-    setTimeout(fn) { timers.push(fn); return timers.length; },
+    setTimeout(fn, delay = 0) {
+      Object.defineProperty(fn, '__delayMs', { value: Number(delay) || 0, configurable: true });
+      timers.push(fn);
+      return timers.length;
+    },
     queueMicrotask(fn) { Promise.resolve().then(fn); }
   };
   context.window = context;
@@ -99,6 +114,8 @@ function install({ enabled = true, initial = {}, applyResult = { committed: true
     context,
     core,
     localStorage,
+    sessionStorage,
+    timers,
     events,
     seedCalls,
     flushTimers,
@@ -141,6 +158,38 @@ test('startup replay emits explicit WAL replay attempt evidence before verificat
   const attemptAt = bridgeSource.indexOf("mark('stateV2.walReplayAttempted'");
   const verifyAt = bridgeSource.indexOf("verifyAndClear(row.delta, row.id, 'replay'", attemptAt);
   assert.ok(attemptAt >= 0 && verifyAt > attemptAt);
+});
+
+test('preview-only deterministic kill test starts its hold only after the WAL row is synchronous', async () => {
+  const app = install({ sessionInitial: { [WAL_TEST_ARM_KEY]: '1' } });
+  await app.flushTimers();
+  app.events.length = 0;
+
+  app.core.writePendingHabitDelta(delta);
+
+  const pending = JSON.parse(app.localStorage.getItem(WAL_KEY));
+  assert.equal(pending.length, 1, 'WAL row must already be durable before the artificial hold');
+  assert.equal(app.sessionStorage.getItem(WAL_TEST_ARM_KEY), null, 'one-shot arm is consumed by the next Habit journal write');
+  assert.ok(Number(app.sessionStorage.getItem(WAL_TEST_HOLD_UNTIL_KEY)) > Date.now());
+  assert.equal(app.events.includes('apply'), false, 'V2 IndexedDB verification must still be pending during the hold');
+  assert.equal(app.timers.some((fn) => Number(fn.__delayMs) > 0), true, 'confirmation is intentionally delayed');
+
+  await app.flushTimers();
+  assert.equal(app.events.includes('apply'), true);
+  assert.equal(app.localStorage.getItem(WAL_KEY), null);
+});
+
+test('deterministic WAL hold cannot activate on the production hostname', async () => {
+  const app = install({
+    hostname: 'taskpoints.pages.dev',
+    sessionInitial: { [WAL_TEST_ARM_KEY]: '1' }
+  });
+  await app.flushTimers();
+  app.core.writePendingHabitDelta(delta);
+
+  assert.equal(app.sessionStorage.getItem(WAL_TEST_ARM_KEY), '1');
+  assert.equal(app.sessionStorage.getItem(WAL_TEST_HOLD_UNTIL_KEY), null);
+  assert.equal(app.timers.some((fn) => Number(fn.__delayMs) > 0), false);
 });
 
 test('habit journal writes V1 first, then synchronously writes generation-stamped V2 WAL before async verification', async () => {
