@@ -101,10 +101,13 @@ test('preview WAL kill hold delays the normal async mirror path without moving i
   const enqueueStart = runtimeSource.indexOf('function enqueueHabitDelta(delta)');
   const enqueueEnd = runtimeSource.indexOf('function enqueueHabitOrderOverlay', enqueueStart);
   const enqueue = runtimeSource.slice(enqueueStart, enqueueEnd);
+  const queued = enqueue.indexOf('.then(async () => {');
   const hold = enqueue.indexOf('previewWalTestHoldRemainingMs()');
   const wait = enqueue.indexOf('await waitForPreviewWalTestHold');
   const apply = enqueue.indexOf('api.applyHabitDelta');
-  assert.ok(hold >= 0 && wait > hold && apply > wait, 'preview-only hold must occur before V2 IndexedDB apply');
+  assert.ok(queued >= 0, 'Habit mirror must stay queued behind the synchronous journal wrapper stack');
+  assert.ok(hold > queued, 'preview-only hold must be read only after the synchronous WAL wrapper has returned');
+  assert.ok(wait > hold && apply > wait, 'preview-only hold must occur before V2 IndexedDB apply');
 });
 
 test('pilot mutation transaction covers habit, completion, mutation ledger, and meta together', () => {
