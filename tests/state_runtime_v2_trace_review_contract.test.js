@@ -291,6 +291,31 @@ test('failure details identify the original revision conflict across page naviga
 });
 
 
+test('trace review surfaces startup WAL-vs-seed orchestration and observed event order', () => {
+  const walFirst = baseReport([
+    { epochMs: 24000, type: 'mark', name: 'stateV2.startupWalReplayFirst', detail: { reason: 'current_generation_wal_on_compatible_v2', pendingCurrentCount: 1 } },
+    { epochMs: 24010, type: 'mark', name: 'stateV2.walReplayAttempted', detail: { mutationId: 'm1', generation: 'g1' } },
+    { epochMs: 24020, type: 'mark', name: 'stateV2.seedAdoptedExisting', detail: { revision: 8 } }
+  ]);
+  const walFirstResult = reviewer.review(walFirst).startupRecoveryOrder;
+  assert.equal(walFirstResult.observed, true);
+  assert.equal(walFirstResult.mode, 'wal_then_seed');
+  assert.equal(walFirstResult.reason, 'current_generation_wal_on_compatible_v2');
+  assert.equal(walFirstResult.replayAttemptBeforeSeed, true);
+  assert.equal(walFirstResult.firstReplayAttemptEpochMs, 24010);
+  assert.equal(walFirstResult.firstSeedEpochMs, 24020);
+
+  const seedFirst = baseReport([
+    { epochMs: 25000, type: 'mark', name: 'stateV2.startupSeedFirst', detail: { reason: 'no_current_generation_wal' } },
+    { epochMs: 25010, type: 'mark', name: 'stateV2.seedAlreadyCurrent', detail: { revision: 8 } }
+  ]);
+  const seedFirstResult = reviewer.review(seedFirst).startupRecoveryOrder;
+  assert.equal(seedFirstResult.observed, true);
+  assert.equal(seedFirstResult.mode, 'seed_then_wal');
+  assert.equal(seedFirstResult.reason, 'no_current_generation_wal');
+  assert.equal(seedFirstResult.replayAttemptBeforeSeed, null);
+});
+
 test('trace review surfaces explicit WAL replay recovery evidence', () => {
   const report = baseReport([
     { epochMs: 25000, type: 'mark', name: 'stateV2.walReplayAttempted', detail: { mutationId: 'm1', generation: 'g1' } },
