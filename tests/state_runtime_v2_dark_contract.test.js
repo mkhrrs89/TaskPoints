@@ -93,6 +93,20 @@ test('dark mirror preserves production write ordering and isolates V2 failures',
   assert.match(runtimeSource, /production state remains authoritative/);
 });
 
+test('preview WAL kill hold delays the normal async mirror path without moving it ahead of the V1 journal', () => {
+  assert.match(runtimeSource, /taskpoints_state_v2_wal_test_hold_until_v1/);
+  assert.match(runtimeSource, /function isWalTestPreviewHost\(\)/);
+  assert.match(runtimeSource, /taskpoints\.pages\.dev/);
+
+  const enqueueStart = runtimeSource.indexOf('function enqueueHabitDelta(delta)');
+  const enqueueEnd = runtimeSource.indexOf('function enqueueHabitOrderOverlay', enqueueStart);
+  const enqueue = runtimeSource.slice(enqueueStart, enqueueEnd);
+  const hold = enqueue.indexOf('previewWalTestHoldRemainingMs()');
+  const wait = enqueue.indexOf('await waitForPreviewWalTestHold');
+  const apply = enqueue.indexOf('api.applyHabitDelta');
+  assert.ok(hold >= 0 && wait > hold && apply > wait, 'preview-only hold must occur before V2 IndexedDB apply');
+});
+
 test('pilot mutation transaction covers habit, completion, mutation ledger, and meta together', () => {
   const applyStart = runtimeSource.search(/async function applyHabitDelta\(deltaInput(?:,\s*options\s*=\s*\{\})?\)/);
   const apply = runtimeSource.slice(
