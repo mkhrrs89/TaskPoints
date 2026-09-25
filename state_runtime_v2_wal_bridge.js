@@ -23,6 +23,8 @@
   let lastMutationId = null;
   let replayPromise = null;
   let generationSyncTail = Promise.resolve();
+  let startupReplayFirstCount = 0;
+  let lastStartupOrder = null;
   let resetCheckPending = false;
   let replacementCallDepth = 0;
 
@@ -356,6 +358,47 @@
     return true;
   }
 
+  async function startupReplayPlan() {
+    if (!isEnabled()) return { replayFirst: false, reason: 'dark_disabled' };
+    const { runtime, wal } = deps();
+    if (!wal?.getPendingRows || typeof runtime?.inspectStartupMeta !== 'function') {
+      return { replayFirst: false, reason: 'startup_inspection_unavailable' };
+    }
+
+    const pending = wal.getPendingRows();
+    if (!pending?.ok) return { replayFirst: false, reason: 'wal_unreadable' };
+
+    const generation = currentGeneration() || ensureGeneration();
+    const currentRows = (pending.rows || []).filter((row) => String(row?.generation || '') === String(generation || ''));
+    if (!currentRows.length) return { replayFirst: false, reason: 'no_current_generation_wal' };
+    if (currentRows.some((row) => row?.type !== 'habit-completion-set' || !row?.id || !row?.delta)) {
+      return { replayFirst: false, reason: 'invalid_current_generation_wal' };
+    }
+
+    try {
+      const meta = await runtime.inspectStartupMeta();
+      const runtimeSchemaVersion = runtime.getStatus?.()?.schemaVersion ?? null;
+      if (!meta?.exists) return { replayFirst: false, reason: 'missing_runtime_meta' };
+      if (meta.legacyMissing === true) return { replayFirst: false, reason: 'previous_legacy_missing' };
+      if (Number(meta.schemaVersion) !== Number(runtimeSchemaVersion)) {
+        return { replayFirst: false, reason: 'schema_changed' };
+      }
+      if (!generation || String(meta.resetGeneration || '') !== String(generation)) {
+        return { replayFirst: false, reason: 'generation_changed' };
+      }
+      return {
+        replayFirst: true,
+        reason: 'current_generation_wal_on_compatible_v2',
+        generation,
+        pendingCurrentCount: currentRows.length,
+        revision: meta.revision
+      };
+    } catch (error) {
+      rememberFailure(error, 'startup_replay_inspection');
+      return { replayFirst: false, reason: 'startup_inspection_failed' };
+    }
+  }
+
   async function replayPending() {
     if (!isEnabled()) return { replayed: false, reason: 'dark_disabled', attempted: 0, cleared: 0, stale: 0 };
     const { wal } = deps();
@@ -424,11 +467,26 @@
     installHook();
     if (!replayPromise) {
       replayPromise = Promise.resolve()
-        // Ordinary startup must verify/reuse an existing V2 pilot DB rather
-        // than destructively force-reseeding it. Real generation-change events
-        // still use the forced scrub path via the generation subscription.
-        .then(() => scheduleGenerationSync('startup', { force: false }))
-        .then(() => replayPending())
+        .then(async () => {
+          const plan = await startupReplayPlan();
+          if (plan.replayFirst) {
+            startupReplayFirstCount += 1;
+            lastStartupOrder = 'wal_then_seed';
+            mark('stateV2.startupWalReplayFirst', plan);
+            const replay = await replayPending();
+            // After replay, ordinary startup verification should now be able to
+            // reuse/adopt the existing V2 DB instead of parity-mismatch reseeding.
+            await scheduleGenerationSync('startup-after-wal-replay', { force: false });
+            return replay;
+          }
+
+          lastStartupOrder = 'seed_then_wal';
+          mark('stateV2.startupSeedFirst', { reason: plan.reason || 'default' });
+          // Fresh installs, schema/generation changes, stale/invalid WAL, and
+          // other unsafe preconditions retain the conservative seed-first path.
+          await scheduleGenerationSync('startup', { force: false });
+          return replayPending();
+        })
         .finally(() => { replayPromise = null; });
     }
     return replayPromise.then(() => getStatus());
@@ -449,6 +507,8 @@
       replayCleared,
       staleRowsPreserved,
       generationSynchronizations,
+      startupReplayFirstCount,
+      lastStartupOrder,
       failures,
       lastError,
       lastMutationId,
@@ -462,6 +522,7 @@
     DARK_MODE_KEY,
     installHook,
     installGenerationHooks,
+    startupReplayPlan,
     replayPending,
     start,
     getStatus
