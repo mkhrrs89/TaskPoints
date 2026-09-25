@@ -37,6 +37,8 @@ function install({
   initial = {},
   sessionInitial = {},
   hostname = 'example.test',
+  startupMeta = null,
+  runtimeSchemaVersion = 2,
   applyResult = { committed: true, duplicate: false }
 } = {}) {
   const localStorage = new FakeStorage({ ...(enabled ? { [DARK]: '1' } : {}), ...initial });
@@ -80,9 +82,14 @@ function install({
     TaskPointsCore: core,
     TaskPointsStateRuntimeV2: {
       seedFromLegacy(options = {}) {
+        events.push('seed');
         seedCalls.push({ ...options });
         return Promise.resolve({ seeded: false, reason: options.force === true ? 'forced-test' : 'startup-test' });
       },
+      inspectStartupMeta() {
+        return Promise.resolve(startupMeta || { checked: true, exists: false, schemaVersion: null, resetGeneration: null, legacyMissing: false, revision: null });
+      },
+      getStatus() { return { schemaVersion: runtimeSchemaVersion }; },
       applyHabitDelta(input, options) { return runtimeApply(input, options); }
     },
     setTimeout(fn, delay = 0) {
@@ -151,6 +158,59 @@ test('real generation changes still force a V2 scrub before continuing', async (
   await app.flushTimers();
 
   assert.equal(app.seedCalls.some((options) => options.force === true), true);
+});
+
+test('startup replays valid current-generation WAL before parity seeding when persisted V2 meta is compatible', async () => {
+  const seed = install();
+  await seed.flushTimers();
+  const generation = seed.context.TaskPointsStateRuntimeV2Generation.read();
+  const mutationId = seed.context.TaskPointsStateRuntimeV2Wal.mutationIdForDelta(delta, generation);
+  const row = { id: mutationId, schemaVersion: 1, type: 'habit-completion-set', generation, createdAtISO: 'x', delta };
+
+  const app = install({
+    initial: { [GENERATION_KEY]: generation, [WAL_KEY]: JSON.stringify([row]) },
+    startupMeta: {
+      checked: true,
+      exists: true,
+      schemaVersion: 2,
+      resetGeneration: generation,
+      legacyMissing: false,
+      revision: 12
+    }
+  });
+  await app.flushTimers();
+
+  const applyAt = app.events.indexOf('apply');
+  const seedAt = app.events.indexOf('seed');
+  assert.ok(applyAt >= 0 && seedAt > applyAt, 'compatible current-generation WAL must replay before parity seed verification');
+  assert.equal(app.context.TaskPointsStateRuntimeV2WalBridge.getStatus().lastStartupOrder, 'wal_then_seed');
+  assert.equal(app.context.TaskPointsStateRuntimeV2WalBridge.getStatus().startupReplayFirstCount, 1);
+  assert.equal(app.localStorage.getItem(WAL_KEY), null);
+});
+
+test('startup keeps seed-first safety for missing, stale, or incompatible V2 meta', async () => {
+  const seed = install();
+  await seed.flushTimers();
+  const generation = seed.context.TaskPointsStateRuntimeV2Generation.read();
+  const mutationId = seed.context.TaskPointsStateRuntimeV2Wal.mutationIdForDelta(delta, generation);
+  const row = { id: mutationId, schemaVersion: 1, type: 'habit-completion-set', generation, createdAtISO: 'x', delta };
+
+  for (const startupMeta of [
+    { checked: true, exists: false, schemaVersion: null, resetGeneration: null, legacyMissing: false },
+    { checked: true, exists: true, schemaVersion: 1, resetGeneration: generation, legacyMissing: false },
+    { checked: true, exists: true, schemaVersion: 2, resetGeneration: 'different-generation', legacyMissing: false },
+    { checked: true, exists: true, schemaVersion: 2, resetGeneration: generation, legacyMissing: true }
+  ]) {
+    const app = install({
+      initial: { [GENERATION_KEY]: generation, [WAL_KEY]: JSON.stringify([row]) },
+      startupMeta
+    });
+    await app.flushTimers();
+    const seedAt = app.events.indexOf('seed');
+    const applyAt = app.events.indexOf('apply');
+    assert.ok(seedAt >= 0 && applyAt > seedAt, 'unsafe startup meta must retain seed-first ordering');
+    assert.equal(app.context.TaskPointsStateRuntimeV2WalBridge.getStatus().lastStartupOrder, 'seed_then_wal');
+  }
 });
 
 test('startup replay emits explicit WAL replay attempt evidence before verification', () => {
