@@ -382,7 +382,7 @@
       decisionEventName: latestDecision ? String(latestDecision.name || '') : null,
       reason: latestDecision ? String(detailObject(latestDecision).reason || '') || null : null,
       decisionEpochMs: eventTime(latestDecision),
-      firstReplayAttemptEpochMs,
+      firstReplayAttemptEpochMs: firstReplayEpochMs,
       firstSeedEpochMs,
       replayAttemptBeforeSeed: firstReplayEpochMs != null && firstSeedEpochMs != null
         ? firstReplayEpochMs < firstSeedEpochMs
