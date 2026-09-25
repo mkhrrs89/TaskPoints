@@ -7,7 +7,7 @@
   const WAL_TEST_ARM_KEY = 'taskpoints_state_v2_wal_test_armed_v1';
   const WAL_TEST_HOLD_UNTIL_KEY = 'taskpoints_state_v2_wal_test_hold_until_v1';
   const WAL_TEST_HOLD_MS = 8000;
-  const REVIEWER_SRC = '/state_runtime_v2_trace_review.js?v=20260924-1';
+  const REVIEWER_SRC = '/state_runtime_v2_trace_review.js?v=20260925-2';
   const CORRELATOR_SRC = '/state_runtime_v2_foreground_correlation.js?v=20260913-2';
   const PAINT_PROBE_NAME = 'stateV2.foreground.nextPaint';
   const BUTTON_ID = 'tpV2LiveReviewButton';
