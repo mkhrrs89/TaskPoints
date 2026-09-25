@@ -351,6 +351,46 @@
     };
   }
 
+  function startupRecoveryOrderEvidence(events) {
+    const decisions = events
+      .filter((event) => ['stateV2.startupWalReplayFirst', 'stateV2.startupSeedFirst'].includes(String(event?.name || '')))
+      .sort((a, b) => (eventTime(a) ?? 0) - (eventTime(b) ?? 0));
+    const latestDecision = decisions[decisions.length - 1] || null;
+    const replayAttempts = events
+      .filter((event) => String(event?.name || '') === 'stateV2.walReplayAttempted')
+      .sort((a, b) => (eventTime(a) ?? 0) - (eventTime(b) ?? 0));
+    const seeds = events
+      .filter((event) => [
+        'stateV2.seedAlreadyCurrent',
+        'stateV2.seedAdoptedExisting',
+        'stateV2.seeded',
+        'stateV2.seededEmpty'
+      ].includes(String(event?.name || '')))
+      .sort((a, b) => (eventTime(a) ?? 0) - (eventTime(b) ?? 0));
+    const firstReplay = replayAttempts[0] || null;
+    const firstSeed = seeds[0] || null;
+    const mode = latestDecision?.name === 'stateV2.startupWalReplayFirst'
+      ? 'wal_then_seed'
+      : latestDecision?.name === 'stateV2.startupSeedFirst'
+        ? 'seed_then_wal'
+        : null;
+    const firstReplayEpochMs = eventTime(firstReplay);
+    const firstSeedEpochMs = eventTime(firstSeed);
+    return {
+      observed: Boolean(latestDecision),
+      mode,
+      decisionEventName: latestDecision ? String(latestDecision.name || '') : null,
+      reason: latestDecision ? String(detailObject(latestDecision).reason || '') || null : null,
+      decisionEpochMs: eventTime(latestDecision),
+      firstReplayAttemptEpochMs,
+      firstSeedEpochMs,
+      replayAttemptBeforeSeed: firstReplayEpochMs != null && firstSeedEpochMs != null
+        ? firstReplayEpochMs < firstSeedEpochMs
+        : null,
+      detail: latestDecision ? detailObject(latestDecision) : null
+    };
+  }
+
   function startupSeedEvidence(events) {
     const rows = events
       .filter((event) => [
@@ -405,6 +445,7 @@
     const failures = failureEvidence(events, status, mutationClasses, parity);
     const legacyCandidates = legacyFullStateCandidates(events);
     const startupSeed = startupSeedEvidence(events);
+    const startupRecoveryOrder = startupRecoveryOrderEvidence(events);
     const walRecovery = walRecoveryEvidence(events);
     const allMutationClassesObserved = MUTATION_KINDS.every((kind) => mutationClasses[kind].observed === true);
     const noDirectForegroundMaintenanceObserved = maintenance.directForegroundMaintenanceCount === 0;
@@ -422,6 +463,7 @@
       parity,
       pilotOwnership,
       startupSeed,
+      startupRecoveryOrder,
       walRecovery,
       noDirectForegroundMaintenanceObserved,
       automaticParityDeepIdleObserved: maintenance.automaticParityDeepIdleObserved,
@@ -443,7 +485,7 @@
 
   const api = {
     installed: true,
-    version: 7,
+    version: 8,
     review,
     flattenEvents
   };
