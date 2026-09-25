@@ -36,7 +36,7 @@ function install({
   enabled = true,
   initial = {},
   sessionInitial = {},
-  hostname = 'arch-state-runtime-v2-plan.taskpoints.pages.dev',
+  hostname = 'example.test',
   applyResult = { committed: true, duplicate: false }
 } = {}) {
   const localStorage = new FakeStorage({ ...(enabled ? { [DARK]: '1' } : {}), ...initial });
@@ -161,7 +161,10 @@ test('startup replay emits explicit WAL replay attempt evidence before verificat
 });
 
 test('preview-only deterministic kill test starts its hold only after the WAL row is synchronous', async () => {
-  const app = install({ sessionInitial: { [WAL_TEST_ARM_KEY]: '1' } });
+  const app = install({
+    hostname: 'arch-state-runtime-v2-plan.taskpoints.pages.dev',
+    sessionInitial: { [WAL_TEST_ARM_KEY]: '1' }
+  });
   await app.flushTimers();
   app.events.length = 0;
 
