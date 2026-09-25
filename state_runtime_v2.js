@@ -2341,6 +2341,11 @@
   }
 
   function startCoordinatedDarkMirror() {
+    if (!isDarkEnabled()) return Promise.resolve(getStatus());
+    // Preserve the ordinary dark-mirror mutation hook. The WAL bridge owns only
+    // startup seed/replay ordering; it does not replace the normal mirror path.
+    currentGeneration();
+    installHabitJournalHook();
     const bridge = global.TaskPointsStateRuntimeV2WalBridge;
     if (bridge?.__installedModule && typeof bridge.start === 'function') {
       return bridge.start();
