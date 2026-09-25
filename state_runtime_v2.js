@@ -7,6 +7,7 @@
   const DB_NAME = 'taskpoints_state_v2';
   const DB_VERSION = 1;
   const DARK_MODE_KEY = 'taskpoints_state_v2_dark_mode_v1';
+  const WAL_TEST_HOLD_UNTIL_KEY = 'taskpoints_state_v2_wal_test_hold_until_v1';
   const GENERATION_KEY = 'taskpoints_state_v2_generation_v1';
   const RUNTIME_META_ID = 'runtime';
   const SCHEMA_VERSION = 2;
@@ -39,6 +40,36 @@
 
   function mark(name, detail = {}) {
     try { global.TaskPointsPerf?.mark?.(name, detail); } catch (_) {}
+  }
+
+  function isWalTestPreviewHost() {
+    const hostname = String(global.location?.hostname || '').toLowerCase();
+    if (hostname === 'taskpoints.pages.dev' || hostname === 'www.taskpoints.pages.dev') return false;
+    return hostname === 'localhost'
+      || hostname === '127.0.0.1'
+      || hostname.endsWith('.taskpoints.pages.dev');
+  }
+
+  function previewWalTestHoldRemainingMs() {
+    if (!isWalTestPreviewHost()) return 0;
+    try {
+      const holdUntil = Number(global.sessionStorage?.getItem?.(WAL_TEST_HOLD_UNTIL_KEY) || 0);
+      const remaining = holdUntil - Date.now();
+      if (!Number.isFinite(remaining) || remaining <= 0) {
+        if (holdUntil) global.sessionStorage?.removeItem?.(WAL_TEST_HOLD_UNTIL_KEY);
+        return 0;
+      }
+      return Math.min(10000, Math.max(0, Math.ceil(remaining)));
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  function waitForPreviewWalTestHold(holdMs, detail = {}) {
+    const delay = Math.max(0, Number(holdMs) || 0);
+    if (!delay || typeof global.setTimeout !== 'function') return Promise.resolve();
+    mark('stateV2.walTestHoldApplied', { source: 'runtime_enqueue', holdMs: delay, ...detail });
+    return new Promise((resolve) => global.setTimeout(resolve, delay));
   }
 
   function clone(value) {
@@ -1857,8 +1888,17 @@
     if (!isDarkEnabled()) return mirrorTail;
     const snapshot = clone(delta);
     const expectedGeneration = currentGeneration();
+    const testHoldMs = previewWalTestHoldRemainingMs();
     mirrorTail = mirrorTail
-      .then(() => api.applyHabitDelta(snapshot, { expectedGeneration }))
+      .then(async () => {
+        if (testHoldMs > 0) {
+          await waitForPreviewWalTestHold(testHoldMs, {
+            habitId: snapshot?.habitId || null,
+            dayKey: snapshot?.dayKey || null
+          });
+        }
+        return api.applyHabitDelta(snapshot, { expectedGeneration });
+      })
       .catch((error) => {
         mirrorFailures += 1;
         lastError = String(error?.message || error);
