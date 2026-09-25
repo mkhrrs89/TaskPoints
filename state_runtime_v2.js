@@ -1888,9 +1888,12 @@
     if (!isDarkEnabled()) return mirrorTail;
     const snapshot = clone(delta);
     const expectedGeneration = currentGeneration();
-    const testHoldMs = previewWalTestHoldRemainingMs();
     mirrorTail = mirrorTail
       .then(async () => {
+        // Read the preview-only hold on the queued microtask, not synchronously
+        // while the journal wrapper stack is still unwinding. The outer WAL
+        // wrapper appends its durable row and activates the hold before this runs.
+        const testHoldMs = previewWalTestHoldRemainingMs();
         if (testHoldMs > 0) {
           await waitForPreviewWalTestHold(testHoldMs, {
             habitId: snapshot?.habitId || null,
