@@ -227,6 +227,21 @@
     return row || null;
   }
 
+  async function inspectStartupMeta() {
+    if (!isDarkEnabled()) return { checked: false, reason: 'dark_disabled', exists: false };
+    const db = await open();
+    if (!db) return { checked: false, reason: 'dark_disabled', exists: false };
+    const meta = await readMeta(db);
+    return {
+      checked: true,
+      exists: Boolean(meta),
+      schemaVersion: meta?.schemaVersion ?? null,
+      resetGeneration: meta?.resetGeneration ?? null,
+      legacyMissing: meta?.legacyMissing === true,
+      revision: Number.isFinite(Number(meta?.revision)) ? Number(meta.revision) : null
+    };
+  }
+
   function parseLegacyStateWithPending() {
     const storageKey = core.STORAGE_KEY || 'taskpoints_v1';
     const raw = safeGet(storageKey);
@@ -2325,10 +2340,18 @@
     return getStatus();
   }
 
+  function startCoordinatedDarkMirror() {
+    const bridge = global.TaskPointsStateRuntimeV2WalBridge;
+    if (bridge?.__installedModule && typeof bridge.start === 'function') {
+      return bridge.start();
+    }
+    return startDarkMirror();
+  }
+
   function enableDarkMirror() {
     safeSet(DARK_MODE_KEY, '1');
     currentGeneration();
-    startDarkMirror();
+    startCoordinatedDarkMirror();
     return getStatus();
   }
 
@@ -2348,7 +2371,9 @@
     enableDarkMirror,
     disableDarkMirror,
     startDarkMirror,
+    startCoordinatedDarkMirror,
     open,
+    inspectStartupMeta,
     seedFromLegacy,
     applyMutation(mutation) {
       if (mutation?.type === 'habit-completion-set' && mutation?.delta) {
@@ -2407,11 +2432,11 @@
 
   if (isDarkEnabled()) {
     if (global.document?.readyState === 'loading') {
-      global.document.addEventListener?.('DOMContentLoaded', () => startDarkMirror(), { once: true });
+      global.document.addEventListener?.('DOMContentLoaded', () => startCoordinatedDarkMirror(), { once: true });
     } else if (typeof global.setTimeout === 'function') {
-      global.setTimeout(() => startDarkMirror(), 0);
+      global.setTimeout(() => startCoordinatedDarkMirror(), 0);
     } else {
-      startDarkMirror();
+      startCoordinatedDarkMirror();
     }
   }
 
