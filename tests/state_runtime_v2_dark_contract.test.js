@@ -111,6 +111,18 @@ test('preview WAL kill hold pauses the normal async mirror until page restart wi
   assert.ok(wait > hold && apply > wait, 'preview-only restart hold must block before V2 IndexedDB apply');
 });
 
+test('verified WAL replay can bypass only the initial seed and still validates persisted meta', () => {
+  const start = runtimeSource.indexOf('async function applyHabitDelta(deltaInput, options = {})');
+  const end = runtimeSource.indexOf('async function applyHabitOrderOverlay', start);
+  const apply = runtimeSource.slice(start, end);
+  assert.match(apply, /skipInitialSeedForVerifiedReplay === true/);
+  assert.match(apply, /if \(!skipInitialSeedForVerifiedReplay\) \{\s*await seedFromLegacy\(\)/);
+  assert.match(apply, /stateV2\.walReplaySeedBypass/);
+  assert.match(apply, /runtimeMeta\.schemaVersion/);
+  assert.match(apply, /runtimeMeta\.legacyMissing === true/);
+  assert.match(apply, /expectedRevision/);
+});
+
 test('runtime page startup delegates to WAL bridge orchestration when the bridge is installed', () => {
   assert.match(runtimeSource, /async function inspectStartupMeta\(\)/);
   assert.match(runtimeSource, /db\.transaction\('meta', 'readonly'\)/);
