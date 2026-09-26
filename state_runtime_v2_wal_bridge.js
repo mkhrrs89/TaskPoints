@@ -256,7 +256,7 @@
     return true;
   }
 
-  async function verifyAndClear(delta, mutationId, phase = 'confirm', expectedGeneration = null) {
+  async function verifyAndClear(delta, mutationId, phase = 'confirm', expectedGeneration = null, options = {}) {
     const { runtime, wal } = deps();
     if (!runtime?.applyHabitDelta || !wal?.removeMutation || !wal?.mutationIdForDelta) {
       throw new Error('state_runtime_v2_wal_bridge_dependencies_unavailable');
@@ -274,7 +274,10 @@
       throw new Error(`state_runtime_v2_wal_identity_mismatch:${String(mutationId)}`);
     }
 
-    const result = await runtime.applyHabitDelta(delta, { expectedGeneration: generation });
+    const applyOptions = { expectedGeneration: generation };
+    if (options.skipInitialSeedForVerifiedReplay === true) applyOptions.skipInitialSeedForVerifiedReplay = true;
+    if (options.expectedRevision != null) applyOptions.expectedRevision = Number(options.expectedRevision);
+    const result = await runtime.applyHabitDelta(delta, applyOptions);
     if (result?.committed !== true && result?.duplicate !== true) {
       return { cleared: false, reason: result?.reason || 'mutation_not_verified', result };
     }
@@ -386,7 +389,7 @@
     }
   }
 
-  async function replayPending() {
+  async function replayPending(options = {}) {
     if (!isEnabled()) return { replayed: false, reason: 'dark_disabled', attempted: 0, cleared: 0, stale: 0 };
     const { wal } = deps();
     if (!wal?.getPendingRows) return { replayed: false, reason: 'wal_unavailable', attempted: 0, cleared: 0, stale: 0 };
@@ -401,6 +404,9 @@
     let attempted = 0;
     let cleared = 0;
     let stale = 0;
+    let expectedReplayRevision = options.expectedInitialRevision != null
+      ? Number(options.expectedInitialRevision)
+      : null;
     for (const row of pending.rows || []) {
       if (row?.type !== 'habit-completion-set' || !row?.id || !row?.delta) {
         rememberFailure(new Error('state_runtime_v2_wal_replay_invalid_row'), 'replay_row', row?.id || null);
@@ -422,7 +428,10 @@
         currentGeneration: durableGeneration
       });
       try {
-        const result = await verifyAndClear(row.delta, row.id, 'replay', row.generation);
+        const result = await verifyAndClear(row.delta, row.id, 'replay', row.generation, {
+          skipInitialSeedForVerifiedReplay: options.skipInitialSeedForVerifiedReplay === true,
+          expectedRevision: expectedReplayRevision
+        });
         if (result?.stale) {
           stale += 1;
           staleRowsPreserved += 1;
@@ -430,6 +439,10 @@
         }
         if (!result?.cleared) break;
         cleared += 1;
+        if (options.skipInitialSeedForVerifiedReplay === true) {
+          const committedRevision = Number(result?.result?.revision);
+          expectedReplayRevision = Number.isFinite(committedRevision) ? committedRevision : null;
+        }
       } catch (error) {
         rememberFailure(error, 'replay_apply', row.id);
         break;
@@ -460,7 +473,10 @@
             startupReplayFirstCount += 1;
             lastStartupOrder = 'wal_then_seed';
             mark('stateV2.startupWalReplayFirst', plan);
-            const replay = await replayPending();
+            const replay = await replayPending({
+              skipInitialSeedForVerifiedReplay: true,
+              expectedInitialRevision: plan.revision
+            });
             // After replay, ordinary startup verification should now be able to
             // reuse/adopt the existing V2 DB instead of parity-mismatch reseeding.
             await scheduleGenerationSync('startup-after-wal-replay', { force: false });
