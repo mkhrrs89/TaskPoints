@@ -327,6 +327,31 @@
       .map(durationRow);
   }
 
+  function revisionConflictEvidence(events, status) {
+    const rows = events
+      .filter((event) => String(event?.name || '') === 'stateV2.revisionConflict')
+      .sort((a, b) => (eventTime(a) ?? 0) - (eventTime(b) ?? 0));
+    const latestEvent = rows[rows.length - 1] || null;
+    const statusLatest = status?.lastRevisionConflict || null;
+    const statusCount = Math.max(0, finiteNumber(status?.revisionConflicts) || 0);
+    const latest = latestEvent ? detailObject(latestEvent) : statusLatest;
+    return {
+      observed: rows.length > 0 || statusCount > 0 || Boolean(statusLatest),
+      eventCount: rows.length,
+      statusCount,
+      latest: latest ? {
+        expectedRevision: finiteNumber(latest.expectedRevision),
+        actualRevision: finiteNumber(latest.actualRevision),
+        mutationId: latest.mutationId != null ? String(latest.mutationId) : null,
+        habitId: latest.habitId != null ? String(latest.habitId) : null,
+        dayKey: latest.dayKey != null ? String(latest.dayKey) : null,
+        detectedAtISO: latest.detectedAtISO != null ? String(latest.detectedAtISO) : null,
+        page: latestEvent ? String(latestEvent.__pagePath || '') : null,
+        epochMs: latestEvent ? eventTime(latestEvent) : null
+      } : null
+    };
+  }
+
   function walRecoveryEvidence(events) {
     const attempts = events.filter((event) => String(event?.name || '') === 'stateV2.walReplayAttempted');
     const cleared = events.filter((event) => (
@@ -446,6 +471,7 @@
     const legacyCandidates = legacyFullStateCandidates(events);
     const startupSeed = startupSeedEvidence(events);
     const startupRecoveryOrder = startupRecoveryOrderEvidence(events);
+    const revisionConflicts = revisionConflictEvidence(events, status);
     const walRecovery = walRecoveryEvidence(events);
     const allMutationClassesObserved = MUTATION_KINDS.every((kind) => mutationClasses[kind].observed === true);
     const noDirectForegroundMaintenanceObserved = maintenance.directForegroundMaintenanceCount === 0;
@@ -464,6 +490,7 @@
       pilotOwnership,
       startupSeed,
       startupRecoveryOrder,
+      revisionConflicts,
       walRecovery,
       noDirectForegroundMaintenanceObserved,
       automaticParityDeepIdleObserved: maintenance.automaticParityDeepIdleObserved,
@@ -485,7 +512,7 @@
 
   const api = {
     installed: true,
-    version: 8,
+    version: 9,
     review,
     flattenEvents
   };

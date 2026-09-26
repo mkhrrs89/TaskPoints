@@ -316,6 +316,41 @@ test('trace review surfaces startup WAL-vs-seed orchestration and observed event
   assert.equal(seedFirstResult.replayAttemptBeforeSeed, null);
 });
 
+test('trace review surfaces revision conflicts from event or runtime status', () => {
+  const eventResult = reviewer.review(baseReport([
+    {
+      epochMs: 23500,
+      type: 'mark',
+      name: 'stateV2.revisionConflict',
+      detail: {
+        expectedRevision: 20,
+        actualRevision: 21,
+        mutationId: 'm-stale',
+        habitId: 'h2',
+        dayKey: '2026-09-26',
+        detectedAtISO: '2026-09-26T19:00:00.000Z'
+      }
+    }
+  ]));
+  assert.equal(eventResult.revisionConflicts.observed, true);
+  assert.equal(eventResult.revisionConflicts.eventCount, 1);
+  assert.equal(eventResult.revisionConflicts.latest.expectedRevision, 20);
+  assert.equal(eventResult.revisionConflicts.latest.actualRevision, 21);
+  assert.equal(eventResult.revisionConflicts.latest.mutationId, 'm-stale');
+
+  const report = baseReport();
+  report.stateRuntimeV2Status.revisionConflicts = 2;
+  report.stateRuntimeV2Status.lastRevisionConflict = {
+    expectedRevision: 8,
+    actualRevision: 10,
+    mutationId: 'm-status'
+  };
+  const statusResult = reviewer.review(report);
+  assert.equal(statusResult.revisionConflicts.observed, true);
+  assert.equal(statusResult.revisionConflicts.statusCount, 2);
+  assert.equal(statusResult.revisionConflicts.latest.actualRevision, 10);
+});
+
 test('trace review surfaces explicit WAL replay recovery evidence', () => {
   const report = baseReport([
     { epochMs: 25000, type: 'mark', name: 'stateV2.walReplayAttempted', detail: { mutationId: 'm1', generation: 'g1' } },
