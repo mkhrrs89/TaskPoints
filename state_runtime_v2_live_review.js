@@ -5,8 +5,6 @@
 
   const DARK_MODE_KEY = 'taskpoints_state_v2_dark_mode_v1';
   const WAL_TEST_ARM_KEY = 'taskpoints_state_v2_wal_test_armed_v1';
-  const WAL_TEST_HOLD_UNTIL_KEY = 'taskpoints_state_v2_wal_test_hold_until_v1';
-  const WAL_TEST_HOLD_MS = 8000;
   const REVIEWER_SRC = '/state_runtime_v2_trace_review.js?v=20260925-2';
   const CORRELATOR_SRC = '/state_runtime_v2_foreground_correlation.js?v=20260913-2';
   const PAINT_PROBE_NAME = 'stateV2.foreground.nextPaint';
@@ -42,9 +40,8 @@
     if (!isAllowedPreview()) throw new Error('WAL kill test is preview-only.');
     if (!isDarkEnabled()) throw new Error('V2 dark mirror is not enabled.');
     if (typeof global.sessionStorage?.setItem !== 'function') throw new Error('Session storage is unavailable.');
-    global.sessionStorage.removeItem?.(WAL_TEST_HOLD_UNTIL_KEY);
     global.sessionStorage.setItem(WAL_TEST_ARM_KEY, '1');
-    try { global.TaskPointsPerf?.mark?.('stateV2.walTestArmed', { holdMs: WAL_TEST_HOLD_MS }); } catch (_) {}
+    try { global.TaskPointsPerf?.mark?.('stateV2.walTestArmed', { holdMode: 'until_restart' }); } catch (_) {}
     return true;
   }
 
@@ -292,7 +289,7 @@
         <li>Then leave the app untouched and visible for at least 20 seconds.</li>
         <li>Open V2 TEST again and tap Refresh evidence.</li>
       </ol></details>
-      <p class="tp-v2-live-note"><strong>Deterministic WAL kill test:</strong> arm it, close this panel, toggle one Habit, then kill TaskPoints within 8 seconds. The hold applies only to preview V2 async writes; the authoritative V1 write still happens normally.</p>
+      <p class="tp-v2-live-note"><strong>Deterministic WAL kill test:</strong> arm it, close this panel, toggle one Habit, then restart TaskPoints. After that Habit writes its WAL row, preview V2 async writes stay paused for the rest of this page lifetime; the authoritative V1 write still happens normally.</p>
       <div class="tp-v2-live-actions"><button type="button" data-v2-wal-arm>Arm WAL kill test</button><button type="button" data-v2-start>Start fresh test</button><button type="button" data-v2-refresh>Refresh evidence</button><button type="button" data-v2-copy>Copy review</button></div>
       <div data-v2-status class="tp-v2-live-status"></div>`;
   }
@@ -358,7 +355,7 @@
       const status = panel.querySelector?.('[data-v2-status]');
       try {
         armWalKillTest();
-        if (status) status.textContent = 'WAL kill test armed. Close this panel, toggle ONE Habit, then kill TaskPoints within 8 seconds after the tap.';
+        if (status) status.textContent = 'WAL kill test armed. Close this panel, toggle ONE Habit, then restart TaskPoints. There is no countdown; the preview V2 hold lasts until this page is restarted.';
       } catch (error) {
         if (status) status.textContent = String(error?.message || error);
       }

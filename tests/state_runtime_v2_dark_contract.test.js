@@ -93,21 +93,22 @@ test('dark mirror preserves production write ordering and isolates V2 failures',
   assert.match(runtimeSource, /production state remains authoritative/);
 });
 
-test('preview WAL kill hold delays the normal async mirror path without moving it ahead of the V1 journal', () => {
-  assert.match(runtimeSource, /taskpoints_state_v2_wal_test_hold_until_v1/);
+test('preview WAL kill hold pauses the normal async mirror until page restart without moving it ahead of the V1 journal', () => {
+  assert.match(runtimeSource, /__taskpointsStateV2WalKillHoldV1/);
   assert.match(runtimeSource, /function isWalTestPreviewHost\(\)/);
   assert.match(runtimeSource, /taskpoints\.pages\.dev/);
+  assert.match(runtimeSource, /return new Promise\(\(\) => undefined\)/);
 
   const enqueueStart = runtimeSource.indexOf('function enqueueHabitDelta(delta)');
   const enqueueEnd = runtimeSource.indexOf('function enqueueHabitOrderOverlay', enqueueStart);
   const enqueue = runtimeSource.slice(enqueueStart, enqueueEnd);
   const queued = enqueue.indexOf('.then(async () => {');
-  const hold = enqueue.indexOf('previewWalTestHoldRemainingMs()');
-  const wait = enqueue.indexOf('await waitForPreviewWalTestHold');
+  const hold = enqueue.indexOf('isPreviewWalTestHoldActive()');
+  const wait = enqueue.indexOf('await waitForPreviewWalTestRestart');
   const apply = enqueue.indexOf('api.applyHabitDelta');
   assert.ok(queued >= 0, 'Habit mirror must stay queued behind the synchronous journal wrapper stack');
-  assert.ok(hold > queued, 'preview-only hold must be read only after the synchronous WAL wrapper has returned');
-  assert.ok(wait > hold && apply > wait, 'preview-only hold must occur before V2 IndexedDB apply');
+  assert.ok(hold > queued, 'preview-only hold must be checked only after the synchronous WAL wrapper has returned');
+  assert.ok(wait > hold && apply > wait, 'preview-only restart hold must block before V2 IndexedDB apply');
 });
 
 test('runtime page startup delegates to WAL bridge orchestration when the bridge is installed', () => {

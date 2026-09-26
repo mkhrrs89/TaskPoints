@@ -21,7 +21,7 @@ const DARK = 'taskpoints_state_v2_dark_mode_v1';
 const WAL_KEY = 'taskpoints_v2_pending_mutations_v1';
 const GENERATION_KEY = 'taskpoints_state_v2_generation_v1';
 const WAL_TEST_ARM_KEY = 'taskpoints_state_v2_wal_test_armed_v1';
-const WAL_TEST_HOLD_UNTIL_KEY = 'taskpoints_state_v2_wal_test_hold_until_v1';
+const WAL_TEST_ACTIVE_GLOBAL = '__taskpointsStateV2WalKillHoldV1';
 const delta = {
   id: 'habit:h1:2026-08-31',
   habitId: 'h1',
@@ -220,7 +220,7 @@ test('startup replay emits explicit WAL replay attempt evidence before verificat
   assert.ok(attemptAt >= 0 && verifyAt > attemptAt);
 });
 
-test('preview-only deterministic kill test starts its hold only after the WAL row is synchronous', async () => {
+test('preview-only deterministic kill test holds the WAL mutation until page restart after the WAL row is synchronous', async () => {
   const app = install({
     hostname: 'arch-state-runtime-v2-plan.taskpoints.pages.dev',
     sessionInitial: { [WAL_TEST_ARM_KEY]: '1' }
@@ -233,13 +233,12 @@ test('preview-only deterministic kill test starts its hold only after the WAL ro
   const pending = JSON.parse(app.localStorage.getItem(WAL_KEY));
   assert.equal(pending.length, 1, 'WAL row must already be durable before the artificial hold');
   assert.equal(app.sessionStorage.getItem(WAL_TEST_ARM_KEY), null, 'one-shot arm is consumed by the next Habit journal write');
-  assert.ok(Number(app.sessionStorage.getItem(WAL_TEST_HOLD_UNTIL_KEY)) > Date.now());
-  assert.equal(app.events.includes('apply'), false, 'V2 IndexedDB verification must still be pending during the hold');
-  assert.equal(app.timers.some((fn) => Number(fn.__delayMs) > 0), true, 'confirmation is intentionally delayed');
+  assert.equal(app.context[WAL_TEST_ACTIVE_GLOBAL], true, 'hold is in-memory so a real restart clears it automatically');
+  assert.equal(app.events.includes('apply'), false, 'V2 IndexedDB verification must remain blocked during this page lifetime');
 
   await app.flushTimers();
-  assert.equal(app.events.includes('apply'), true);
-  assert.equal(app.localStorage.getItem(WAL_KEY), null);
+  assert.equal(app.events.includes('apply'), false, 'timer flushing cannot release an until-restart hold');
+  assert.ok(app.localStorage.getItem(WAL_KEY), 'WAL stays durable until startup replay on the next page lifetime');
 });
 
 test('deterministic WAL hold cannot activate on the production hostname', async () => {
@@ -251,7 +250,7 @@ test('deterministic WAL hold cannot activate on the production hostname', async 
   app.core.writePendingHabitDelta(delta);
 
   assert.equal(app.sessionStorage.getItem(WAL_TEST_ARM_KEY), '1');
-  assert.equal(app.sessionStorage.getItem(WAL_TEST_HOLD_UNTIL_KEY), null);
+  assert.notEqual(app.context[WAL_TEST_ACTIVE_GLOBAL], true);
   assert.equal(app.timers.some((fn) => Number(fn.__delayMs) > 0), false);
 });
 
