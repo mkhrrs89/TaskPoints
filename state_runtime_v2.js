@@ -7,7 +7,7 @@
   const DB_NAME = 'taskpoints_state_v2';
   const DB_VERSION = 1;
   const DARK_MODE_KEY = 'taskpoints_state_v2_dark_mode_v1';
-  const WAL_TEST_HOLD_UNTIL_KEY = 'taskpoints_state_v2_wal_test_hold_until_v1';
+  const WAL_TEST_ACTIVE_GLOBAL = '__taskpointsStateV2WalKillHoldV1';
   const GENERATION_KEY = 'taskpoints_state_v2_generation_v1';
   const RUNTIME_META_ID = 'runtime';
   const SCHEMA_VERSION = 2;
@@ -50,26 +50,16 @@
       || hostname.endsWith('.taskpoints.pages.dev');
   }
 
-  function previewWalTestHoldRemainingMs() {
-    if (!isWalTestPreviewHost()) return 0;
-    try {
-      const holdUntil = Number(global.sessionStorage?.getItem?.(WAL_TEST_HOLD_UNTIL_KEY) || 0);
-      const remaining = holdUntil - Date.now();
-      if (!Number.isFinite(remaining) || remaining <= 0) {
-        if (holdUntil) global.sessionStorage?.removeItem?.(WAL_TEST_HOLD_UNTIL_KEY);
-        return 0;
-      }
-      return Math.min(10000, Math.max(0, Math.ceil(remaining)));
-    } catch (_) {
-      return 0;
-    }
+  function isPreviewWalTestHoldActive() {
+    return isWalTestPreviewHost() && global[WAL_TEST_ACTIVE_GLOBAL] === true;
   }
 
-  function waitForPreviewWalTestHold(holdMs, detail = {}) {
-    const delay = Math.max(0, Number(holdMs) || 0);
-    if (!delay || typeof global.setTimeout !== 'function') return Promise.resolve();
-    mark('stateV2.walTestHoldApplied', { source: 'runtime_enqueue', holdMs: delay, ...detail });
-    return new Promise((resolve) => global.setTimeout(resolve, delay));
+  function waitForPreviewWalTestRestart(detail = {}) {
+    if (!isPreviewWalTestHoldActive()) return Promise.resolve();
+    mark('stateV2.walTestHoldApplied', { source: 'runtime_enqueue', holdMode: 'until_restart', ...detail });
+    // Deliberately never resolves in this page lifetime. A real reload/restart
+    // creates a fresh JS context, removing the preview-only in-memory hold.
+    return new Promise(() => undefined);
   }
 
   function clone(value) {
@@ -1908,9 +1898,8 @@
         // Read the preview-only hold on the queued microtask, not synchronously
         // while the journal wrapper stack is still unwinding. The outer WAL
         // wrapper appends its durable row and activates the hold before this runs.
-        const testHoldMs = previewWalTestHoldRemainingMs();
-        if (testHoldMs > 0) {
-          await waitForPreviewWalTestHold(testHoldMs, {
+        if (isPreviewWalTestHoldActive()) {
+          await waitForPreviewWalTestRestart({
             habitId: snapshot?.habitId || null,
             dayKey: snapshot?.dayKey || null
           });
