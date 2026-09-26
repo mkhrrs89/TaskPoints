@@ -47,10 +47,12 @@ function install({
   const events = [];
   let uuid = 0;
   const seedCalls = [];
-  let runtimeApply = async () => {
+  const applyCalls = [];
+  let runtimeApply = async (input, options = {}) => {
     events.push('apply');
+    applyCalls.push({ input, options: { ...options } });
     if (applyResult instanceof Error) throw applyResult;
-    return typeof applyResult === 'function' ? applyResult() : applyResult;
+    return typeof applyResult === 'function' ? applyResult(input, options) : applyResult;
   };
 
   const core = {
@@ -125,6 +127,7 @@ function install({
     timers,
     events,
     seedCalls,
+    applyCalls,
     flushTimers,
     setRuntimeApply(fn) { runtimeApply = fn; }
   };
@@ -185,6 +188,8 @@ test('startup replays valid current-generation WAL before parity seeding when pe
   assert.ok(applyAt >= 0 && seedAt > applyAt, 'compatible current-generation WAL must replay before parity seed verification');
   assert.equal(app.context.TaskPointsStateRuntimeV2WalBridge.getStatus().lastStartupOrder, 'wal_then_seed');
   assert.equal(app.context.TaskPointsStateRuntimeV2WalBridge.getStatus().startupReplayFirstCount, 1);
+  assert.equal(app.applyCalls[0].options.skipInitialSeedForVerifiedReplay, true);
+  assert.equal(app.applyCalls[0].options.expectedRevision, 12);
   assert.equal(app.localStorage.getItem(WAL_KEY), null);
 });
 
@@ -209,8 +214,40 @@ test('startup keeps seed-first safety for missing, stale, or incompatible V2 met
     const seedAt = app.events.indexOf('seed');
     const applyAt = app.events.indexOf('apply');
     assert.ok(seedAt >= 0 && applyAt > seedAt, 'unsafe startup meta must retain seed-first ordering');
+    assert.notEqual(app.applyCalls[0]?.options?.skipInitialSeedForVerifiedReplay, true, 'seed-first fallback must not bypass normal runtime seeding');
     assert.equal(app.context.TaskPointsStateRuntimeV2WalBridge.getStatus().lastStartupOrder, 'seed_then_wal');
   }
+});
+
+test('verified WAL-first replay chains the committed revision across multiple pending rows', async () => {
+  const seed = install();
+  await seed.flushTimers();
+  const generation = seed.context.TaskPointsStateRuntimeV2Generation.read();
+  const delta2 = { ...delta, dayKey: '2026-09-01', id: 'habit:h1:2026-09-01', updatedAtISO: '2026-09-01T20:00:00.000Z' };
+  const walApi = seed.context.TaskPointsStateRuntimeV2Wal;
+  const rows = [delta, delta2].map((item) => ({
+    id: walApi.mutationIdForDelta(item, generation),
+    schemaVersion: 1,
+    type: 'habit-completion-set',
+    generation,
+    createdAtISO: 'x',
+    delta: item
+  }));
+  let revision = 40;
+  const app = install({
+    initial: { [GENERATION_KEY]: generation, [WAL_KEY]: JSON.stringify(rows) },
+    startupMeta: { checked: true, exists: true, schemaVersion: 2, resetGeneration: generation, legacyMissing: false, revision },
+    applyResult(input, options) {
+      assert.equal(options.expectedRevision, revision);
+      revision += 1;
+      return { committed: true, duplicate: false, revision };
+    }
+  });
+  await app.flushTimers();
+
+  assert.equal(app.applyCalls.length, 2);
+  assert.deepEqual(app.applyCalls.map((call) => call.options.expectedRevision), [40, 41]);
+  assert.equal(app.localStorage.getItem(WAL_KEY), null);
 });
 
 test('startup replay emits explicit WAL replay attempt evidence before verification', () => {

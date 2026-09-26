@@ -678,7 +678,15 @@
     if (!isDarkEnabled()) return { committed: false, reason: 'dark_disabled' };
     const delta = normalizeDelta(deltaInput);
     const expectedGeneration = String(options.expectedGeneration || currentGeneration());
-    await seedFromLegacy();
+    const skipInitialSeedForVerifiedReplay = options.skipInitialSeedForVerifiedReplay === true;
+    if (!skipInitialSeedForVerifiedReplay) {
+      await seedFromLegacy();
+    } else {
+      mark('stateV2.walReplaySeedBypass', {
+        expectedGeneration,
+        expectedRevision: options.expectedRevision != null ? Number(options.expectedRevision) : null
+      });
+    }
     const expectedRevision = options.expectedRevision != null
       ? Number(options.expectedRevision)
       : lastKnownRevision;
@@ -760,6 +768,14 @@
             generationInvalidated = true;
             generationInvalidations += 1;
             throw staleGenerationError(expectedGeneration, runtimeMeta.resetGeneration, 'meta');
+          }
+          if (skipInitialSeedForVerifiedReplay) {
+            if (Number(runtimeMeta.schemaVersion) !== Number(SCHEMA_VERSION)) {
+              throw new Error(`state_runtime_v2_verified_replay_schema_mismatch:${String(runtimeMeta.schemaVersion)}:${String(SCHEMA_VERSION)}`);
+            }
+            if (runtimeMeta.legacyMissing === true) {
+              throw new Error('state_runtime_v2_verified_replay_legacy_missing');
+            }
           }
 
           if (existingMutation) {
