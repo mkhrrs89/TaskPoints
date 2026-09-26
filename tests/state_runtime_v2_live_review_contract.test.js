@@ -32,7 +32,7 @@ test('live reviewer is dynamically loaded only from the V2 dark structure bridge
   assert.match(structureBridge, /if \(!isEnabled\(\) \|\| global\.TaskPointsStateRuntimeV2LiveReview\?\.installed/);
   assert.match(structureBridge, /state_runtime_v2_live_review\.js\?v=20260926-2/);
   assert.match(structureBridge, /loadPerfInstrumentation\(\);\s*loadLiveTraceReview\(\);/);
-  assert.match(source, /state_runtime_v2_trace_review\.js\?v=20260925-2/);
+  assert.match(source, /state_runtime_v2_trace_review\.js\?v=20260926-3/);
   assert.match(source, /state_runtime_v2_foreground_correlation\.js\?v=20260913-2/);
 });
 
