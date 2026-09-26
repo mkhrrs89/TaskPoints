@@ -5,8 +5,7 @@
 
   const DARK_MODE_KEY = 'taskpoints_state_v2_dark_mode_v1';
   const WAL_TEST_ARM_KEY = 'taskpoints_state_v2_wal_test_armed_v1';
-  const WAL_TEST_HOLD_UNTIL_KEY = 'taskpoints_state_v2_wal_test_hold_until_v1';
-  const WAL_TEST_HOLD_MS = 8000;
+  const WAL_TEST_ACTIVE_GLOBAL = '__taskpointsStateV2WalKillHoldV1';
   let hookInstalled = false;
   let resetBoundaryHookInstalled = false;
   let replacementHooksInstalled = false;
@@ -46,32 +45,20 @@
   }
 
   function activatePreviewWalTestHold(mutationId) {
-    if (!isWalTestPreviewHost()) return 0;
+    if (!isWalTestPreviewHost()) return false;
     try {
-      if (global.sessionStorage?.getItem?.(WAL_TEST_ARM_KEY) !== '1') return 0;
+      if (global.sessionStorage?.getItem?.(WAL_TEST_ARM_KEY) !== '1') return false;
       global.sessionStorage.removeItem(WAL_TEST_ARM_KEY);
-      const holdUntil = Date.now() + WAL_TEST_HOLD_MS;
-      global.sessionStorage.setItem(WAL_TEST_HOLD_UNTIL_KEY, String(holdUntil));
-      mark('stateV2.walTestHoldActivated', { mutationId, holdMs: WAL_TEST_HOLD_MS, holdUntil });
-      return WAL_TEST_HOLD_MS;
+      global[WAL_TEST_ACTIVE_GLOBAL] = true;
+      mark('stateV2.walTestHoldActivated', { mutationId, holdMode: 'until_restart' });
+      return true;
     } catch (_) {
-      return 0;
+      return false;
     }
   }
 
-  function previewWalTestHoldRemainingMs() {
-    if (!isWalTestPreviewHost()) return 0;
-    try {
-      const holdUntil = Number(global.sessionStorage?.getItem?.(WAL_TEST_HOLD_UNTIL_KEY) || 0);
-      const remaining = holdUntil - Date.now();
-      if (!Number.isFinite(remaining) || remaining <= 0) {
-        if (holdUntil) global.sessionStorage?.removeItem?.(WAL_TEST_HOLD_UNTIL_KEY);
-        return 0;
-      }
-      return Math.min(WAL_TEST_HOLD_MS, Math.max(0, Math.ceil(remaining)));
-    } catch (_) {
-      return 0;
-    }
+  function isPreviewWalTestHoldActive() {
+    return isWalTestPreviewHost() && global[WAL_TEST_ACTIVE_GLOBAL] === true;
   }
 
   function deps() {
@@ -318,11 +305,11 @@
       }
     };
 
-    const testHoldMs = previewWalTestHoldRemainingMs();
-    if (testHoldMs > 0) {
-      mark('stateV2.walTestHoldApplied', { source: 'wal_confirmation', mutationId, holdMs: testHoldMs });
+    if (isPreviewWalTestHoldActive()) {
+      mark('stateV2.walTestHoldApplied', { source: 'wal_confirmation', mutationId, holdMode: 'until_restart' });
+      return;
     }
-    if (typeof global.setTimeout === 'function') global.setTimeout(run, testHoldMs);
+    if (typeof global.setTimeout === 'function') global.setTimeout(run, 0);
     else Promise.resolve().then(run);
   }
 
