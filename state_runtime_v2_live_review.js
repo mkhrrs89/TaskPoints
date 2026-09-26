@@ -274,6 +274,8 @@
       : `<div class="tp-v2-live-verdict pending">${state.complete}/${state.total} checks observed</div>`;
 
     return `<div class="tp-v2-live-head"><strong>V2 physical trace test</strong><button type="button" data-v2-close>Close</button></div>
+      <div class="tp-v2-live-actions"><button type="button" data-v2-wal-arm>Arm WAL kill test</button><button type="button" data-v2-start>Start fresh test</button><button type="button" data-v2-refresh>Refresh evidence</button><button type="button" data-v2-copy>Copy review</button></div>
+      <div data-v2-status class="tp-v2-live-status"></div>
       ${verdict}
       <div class="tp-v2-live-checks">${rows}</div>
       <div class="tp-v2-live-meta">V2 failures counted: ${failures}<br>Legacy/full-state timing candidates: ${legacyCount} (${escapeHtml(legacyMax)})<br>Foreground correlation: ${foregroundCorrelationLine}<br>Startup persistence: ${escapeHtml(startupLine)}</div>
@@ -290,8 +292,7 @@
         <li>Open V2 TEST again and tap Refresh evidence.</li>
       </ol></details>
       <p class="tp-v2-live-note"><strong>Deterministic WAL kill test:</strong> arm it, close this panel, toggle one Habit, then restart TaskPoints. After that Habit writes its WAL row, preview V2 async writes stay paused for the rest of this page lifetime; the authoritative V1 write still happens normally.</p>
-      <div class="tp-v2-live-actions"><button type="button" data-v2-wal-arm>Arm WAL kill test</button><button type="button" data-v2-start>Start fresh test</button><button type="button" data-v2-refresh>Refresh evidence</button><button type="button" data-v2-copy>Copy review</button></div>
-      <div data-v2-status class="tp-v2-live-status"></div>`;
+      `;
   }
 
   function ensureStyles() {
