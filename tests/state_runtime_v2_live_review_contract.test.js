@@ -30,7 +30,7 @@ function installForHost(hostname, dark = true) {
 test('live reviewer is dynamically loaded only from the V2 dark structure bridge', () => {
   assert.match(structureBridge, /function loadLiveTraceReview\(\)/);
   assert.match(structureBridge, /if \(!isEnabled\(\) \|\| global\.TaskPointsStateRuntimeV2LiveReview\?\.installed/);
-  assert.match(structureBridge, /state_runtime_v2_live_review\.js\?v=20260926-1/);
+  assert.match(structureBridge, /state_runtime_v2_live_review\.js\?v=20260926-2/);
   assert.match(structureBridge, /loadPerfInstrumentation\(\);\s*loadLiveTraceReview\(\);/);
   assert.match(source, /state_runtime_v2_trace_review\.js\?v=20260925-2/);
   assert.match(source, /state_runtime_v2_foreground_correlation\.js\?v=20260913-2/);
@@ -56,6 +56,15 @@ test('live reviewer exposes a preview-only one-shot deterministic WAL kill contr
   assert.match(source, /hold lasts until this page is restarted/);
   assert.match(source, /There is no countdown/);
   assert.doesNotMatch(source, /WAL_TEST_HOLD_MS = 8000/);
+});
+
+test('V2 modal action buttons render directly under the sticky header', () => {
+  const headerAt = source.indexOf('tp-v2-live-head');
+  const actionsAt = source.indexOf('tp-v2-live-actions', headerAt);
+  const verdictAt = source.indexOf('${verdict}', headerAt);
+  const checksAt = source.indexOf('tp-v2-live-checks', headerAt);
+  assert.ok(headerAt >= 0 && actionsAt > headerAt);
+  assert.ok(verdictAt > actionsAt && checksAt > verdictAt, 'actions must be above verdict/check content');
 });
 
 test('fresh-start control clears only PERF trace state before reloading', () => {
