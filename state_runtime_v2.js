@@ -9,6 +9,8 @@
   const DARK_MODE_KEY = 'taskpoints_state_v2_dark_mode_v1';
   const WAL_TEST_ACTIVE_GLOBAL = '__taskpointsStateV2WalKillHoldV1';
   const GENERATION_KEY = 'taskpoints_state_v2_generation_v1';
+  const REVISION_SIGNAL_KEY = 'taskpoints_state_v2_revision_signal_v1';
+  const REVISION_CHANNEL_NAME = 'taskpoints_state_v2_revision_v1';
   const RUNTIME_META_ID = 'runtime';
   const SCHEMA_VERSION = 2;
   const STORE_NAMES = Object.freeze(['habits', 'completions', 'mutations', 'meta']);
@@ -35,6 +37,16 @@
   let lastKnownRevision = null;
   let lastRevisionConflict = null;
   let lastParity = null;
+  const contextId = global.crypto?.randomUUID?.() || `v2-context:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+  const contextStartedEpochMs = Date.now();
+  let revisionChannel = null;
+  let revisionInvalidationListenersInstalled = false;
+  let externalRevisionInvalidated = false;
+  let externalRevision = null;
+  let externalRevisionMutationId = null;
+  let externalRevisionAtISO = null;
+  let externalRevisionSource = null;
+  let externalRevisionReloadRequests = 0;
 
   function nowIso() { return new Date().toISOString(); }
 
@@ -95,6 +107,120 @@
 
   function isDarkEnabled() {
     return safeGet(DARK_MODE_KEY) === '1';
+  }
+
+  function parseRevisionSignal(value) {
+    if (!value) return null;
+    if (typeof value === 'object') return value;
+    try { return JSON.parse(String(value)); }
+    catch (_) { return null; }
+  }
+
+  function acceptRevisionSignal(value, source = 'unknown') {
+    if (!isDarkEnabled()) return false;
+    const signal = parseRevisionSignal(value);
+    if (!signal || String(signal.sourceId || '') === String(contextId)) return false;
+    const revision = Number(signal.revision);
+    const epochMs = Number(signal.epochMs);
+    if (!Number.isFinite(revision) || revision < 0) return false;
+    const generation = currentGeneration({ create: false });
+    if (!generation || String(signal.generation || '') !== String(generation)) return false;
+    if (Number.isFinite(epochMs) && epochMs < contextStartedEpochMs) return false;
+    const knownRevision = Number(lastKnownRevision);
+    if (Number.isFinite(knownRevision) && revision <= knownRevision) return false;
+
+    externalRevisionInvalidated = true;
+    externalRevision = revision;
+    externalRevisionMutationId = signal.mutationId != null ? String(signal.mutationId) : null;
+    externalRevisionAtISO = signal.atISO != null ? String(signal.atISO) : null;
+    externalRevisionSource = String(source || 'unknown');
+    mark('stateV2.externalRevisionInvalidated', {
+      revision,
+      observedRevision: Number.isFinite(knownRevision) ? knownRevision : null,
+      mutationId: externalRevisionMutationId,
+      source: externalRevisionSource
+    });
+    return true;
+  }
+
+  function checkForExternalRevisionSignal() {
+    return acceptRevisionSignal(safeGet(REVISION_SIGNAL_KEY), 'persisted_signal');
+  }
+
+  function installRevisionInvalidationListeners() {
+    if (!isDarkEnabled() || revisionInvalidationListenersInstalled) return revisionInvalidationListenersInstalled;
+    revisionInvalidationListenersInstalled = true;
+
+    if (typeof global.BroadcastChannel === 'function') {
+      try {
+        revisionChannel = new global.BroadcastChannel(REVISION_CHANNEL_NAME);
+        revisionChannel.addEventListener?.('message', (event) => acceptRevisionSignal(event?.data, 'broadcast_channel'));
+        if (!revisionChannel.addEventListener) revisionChannel.onmessage = (event) => acceptRevisionSignal(event?.data, 'broadcast_channel');
+      } catch (_) {
+        revisionChannel = null;
+      }
+    }
+
+    global.addEventListener?.('storage', (event) => {
+      if (String(event?.key || '') !== REVISION_SIGNAL_KEY) return;
+      acceptRevisionSignal(event?.newValue, 'storage_event');
+    });
+    global.addEventListener?.('pageshow', () => checkForExternalRevisionSignal());
+    global.document?.addEventListener?.('visibilitychange', () => {
+      if (global.document?.visibilityState === 'visible' || global.document?.hidden === false) {
+        checkForExternalRevisionSignal();
+      }
+    });
+    return true;
+  }
+
+  function publishCommittedRevision(revisionInput, mutationId, generationInput) {
+    if (!isDarkEnabled()) return false;
+    const revision = Number(revisionInput);
+    if (!Number.isFinite(revision)) return false;
+    const generation = String(generationInput || currentGeneration({ create: false }) || '');
+    if (!generation) return false;
+    const payload = {
+      version: 1,
+      sourceId: contextId,
+      revision,
+      mutationId: mutationId != null ? String(mutationId) : null,
+      generation,
+      epochMs: Date.now(),
+      atISO: nowIso()
+    };
+    safeSet(REVISION_SIGNAL_KEY, JSON.stringify(payload));
+    try { revisionChannel?.postMessage?.(payload); } catch (_) {}
+    mark('stateV2.revisionPublished', {
+      revision,
+      mutationId: payload.mutationId,
+      generation,
+      broadcastChannel: Boolean(revisionChannel)
+    });
+    return true;
+  }
+
+  function beforeHabitInteraction(detail = {}) {
+    if (!isDarkEnabled()) return { proceed: true, reason: 'dark_disabled' };
+    installRevisionInvalidationListeners();
+    checkForExternalRevisionSignal();
+    if (!externalRevisionInvalidated) return { proceed: true, reason: 'current' };
+
+    externalRevisionReloadRequests += 1;
+    mark('stateV2.externalRevisionReloadRequested', {
+      revision: externalRevision,
+      mutationId: externalRevisionMutationId,
+      source: externalRevisionSource,
+      habitId: detail?.habitId != null ? String(detail.habitId) : null,
+      dayKey: detail?.dayKey != null ? String(detail.dayKey) : null
+    });
+    try { global.location?.reload?.(); } catch (_) {}
+    return {
+      proceed: false,
+      reason: 'external_revision_invalidated',
+      reloadRequested: true,
+      revision: externalRevision
+    };
   }
 
   function newResetGeneration(prefix = 'seed') {
@@ -888,6 +1014,7 @@
         lastKnownRevision = nextRevision;
         lastRevisionConflict = null;
         mark('stateV2.darkMutationCommitted', { mutationId, revision: nextRevision, resetGeneration: expectedGeneration, habitId: delta.habitId, dayKey: delta.dayKey });
+        publishCommittedRevision(nextRevision, mutationId, expectedGeneration);
         resolve({ committed: true, duplicate: false, mutationId, revision: nextRevision, resetGeneration: expectedGeneration });
       };
       tx.onabort = () => {
@@ -1152,6 +1279,7 @@
           resetGeneration: expectedGeneration,
           changedHabitIds: [...changedHabitIds]
         });
+        publishCommittedRevision(nextRevision, mutationId, expectedGeneration);
         resolve({
           committed: true,
           duplicate: false,
@@ -1574,6 +1702,7 @@
           habitId: snapshot.habitId,
           completionRowsTouched
         });
+        publishCommittedRevision(nextRevision, mutationId, expectedGeneration);
         resolve({
           committed: true,
           duplicate: false,
@@ -1882,6 +2011,7 @@
           exists: snapshot.exists,
           assignedLegacyIndex
         });
+        publishCommittedRevision(nextRevision, mutationId, expectedGeneration);
         resolve({
           committed: true,
           duplicate: false,
@@ -2315,6 +2445,16 @@
       mirrorFailures,
       generationInvalidations,
       revisionConflicts,
+      revisionSignalKey: REVISION_SIGNAL_KEY,
+      revisionChannelName: REVISION_CHANNEL_NAME,
+      contextId,
+      revisionInvalidationListenersInstalled,
+      externalRevisionInvalidated,
+      externalRevision,
+      externalRevisionMutationId,
+      externalRevisionAtISO,
+      externalRevisionSource,
+      externalRevisionReloadRequests,
       generationKey: GENERATION_KEY,
       currentGeneration: currentGeneration({ create: false }),
       lastResetGeneration,
@@ -2350,6 +2490,7 @@
     // Preserve the ordinary dark-mirror mutation hook. The WAL bridge owns only
     // startup seed/replay ordering; it does not replace the normal mirror path.
     currentGeneration();
+    installRevisionInvalidationListeners();
     installHabitJournalHook();
     const bridge = global.TaskPointsStateRuntimeV2WalBridge;
     if (bridge?.__installedModule && typeof bridge.start === 'function') {
@@ -2377,7 +2518,12 @@
     DARK_MODE_KEY,
     GENERATION_KEY,
     STORE_NAMES,
+    REVISION_SIGNAL_KEY,
+    REVISION_CHANNEL_NAME,
     isDarkEnabled,
+    installRevisionInvalidationListeners,
+    checkForExternalRevisionSignal,
+    beforeHabitInteraction,
     enableDarkMirror,
     disableDarkMirror,
     startDarkMirror,
