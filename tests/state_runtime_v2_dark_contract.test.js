@@ -123,6 +123,19 @@ test('verified WAL replay can bypass only the initial seed and still validates p
   assert.match(apply, /expectedRevision/);
 });
 
+test('dark runtime announces committed revisions and exposes a pre-Habit invalidation guard', () => {
+  assert.match(runtimeSource, /taskpoints_state_v2_revision_signal_v1/);
+  assert.match(runtimeSource, /taskpoints_state_v2_revision_v1/);
+  assert.match(runtimeSource, /BroadcastChannel/);
+  assert.match(runtimeSource, /addEventListener\?\.\('storage'/);
+  assert.match(runtimeSource, /function publishCommittedRevision\(/);
+  assert.match(runtimeSource, /function beforeHabitInteraction\(/);
+  assert.match(runtimeSource, /stateV2\.externalRevisionInvalidated/);
+  assert.match(runtimeSource, /stateV2\.externalRevisionReloadRequested/);
+  assert.match(runtimeSource, /global\.location\?\.reload\?\.\(\)/);
+  assert.match(runtimeSource, /publishCommittedRevision\(nextRevision, mutationId, expectedGeneration\)/);
+});
+
 test('runtime page startup delegates to WAL bridge orchestration when the bridge is installed', () => {
   assert.match(runtimeSource, /async function inspectStartupMeta\(\)/);
   assert.match(runtimeSource, /db\.transaction\('meta', 'readonly'\)/);
