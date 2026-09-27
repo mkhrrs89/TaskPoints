@@ -54,6 +54,23 @@
     return true;
   }
 
+  function allowV2HabitInteraction(bubbleEl) {
+    const guard = global.TaskPointsStateRuntimeV2?.beforeHabitInteraction;
+    if (typeof guard !== 'function') return true;
+    try {
+      const identity = readBubbleIdentity(bubbleEl);
+      const result = guard(identity);
+      if (result?.proceed === false) {
+        lastReason = 'v2_external_invalidation_reload';
+        return false;
+      }
+    } catch (_) {
+      // V2 is preview-only here. Never make the existing Habit path inert
+      // because the invalidation guard itself failed.
+    }
+    return true;
+  }
+
   function status() {
     return {
       installed,
@@ -96,6 +113,7 @@
 
     originalHandler = candidate;
     controlledHandler = function taskPointsControlledHabitBubbleTap(bubbleEl) {
+      if (!allowV2HabitInteraction(bubbleEl)) return undefined;
       if (isDisabled()) {
         if (runLegacyFallback(bubbleEl)) {
           lastReason = 'legacy_fallback_used';
