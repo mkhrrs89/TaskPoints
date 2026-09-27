@@ -31,6 +31,10 @@ function makeContext(options = {}) {
     handleHabitBubbleTap() { fastCalls += 1; return 'fast'; }
   };
 
+  if (typeof options.v2Guard === 'function') {
+    window.TaskPointsStateRuntimeV2 = { beforeHabitInteraction: options.v2Guard };
+  }
+
   if (options.legacyAvailable !== false) {
     window.toggleHabitDay = (habitId, dayKey) => {
       legacyCalls += 1;
@@ -75,6 +79,32 @@ test('journal-first habit fast path remains enabled by default', () => {
   assert.equal(context.fastCalls(), 1);
   assert.equal(context.legacyCalls(), 0);
   assert.equal(context.window.TaskPointsHabitFastPathControl.getStatus().enabled, true);
+});
+
+test('V2 external invalidation guard blocks the Habit tap before fast or legacy mutation runs', () => {
+  let guardCalls = 0;
+  const context = makeContext({
+    v2Guard(identity) {
+      guardCalls += 1;
+      assert.equal(identity.habitId, 'habit-1');
+      assert.equal(identity.dayKey, '2026-08-02');
+      return { proceed: false, reason: 'external_revision_invalidated', reloadRequested: true };
+    }
+  });
+  const result = context.window.handleHabitBubbleTap(context.bubble);
+  assert.equal(result, undefined);
+  assert.equal(guardCalls, 1);
+  assert.equal(context.fastCalls(), 0);
+  assert.equal(context.legacyCalls(), 0);
+  assert.equal(context.window.TaskPointsHabitFastPathControl.getStatus().lastReason, 'v2_external_invalidation_reload');
+});
+
+test('V2 guard failure never makes the existing Habit path inert', () => {
+  const context = makeContext({
+    v2Guard() { throw new Error('preview guard failed'); }
+  });
+  assert.equal(context.window.handleHabitBubbleTap(context.bubble), 'fast');
+  assert.equal(context.fastCalls(), 1);
 });
 
 test('persisted kill switch uses the existing synchronous legacy path', () => {
