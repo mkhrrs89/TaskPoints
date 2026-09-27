@@ -80,6 +80,40 @@ function runtimeMeta(indexedDB) {
   return indexedDB.dump(DB_NAME).meta.find((row) => row.id === 'runtime');
 }
 
+test('cross-tab revision signal invalidates a stale runtime before its next Habit interaction', async () => {
+  const indexedDB = new FakeIndexedDB();
+  const localStorage = new FakeStorage({
+    [DARK_MODE_KEY]: '1',
+    [LEGACY_KEY]: JSON.stringify(legacyState())
+  });
+  let reloads = 0;
+  let contextB;
+  const runtimeA = installRuntime(indexedDB, localStorage, 'signal-a');
+  const runtimeB = installRuntime(indexedDB, localStorage, 'signal-b', (context) => {
+    contextB = context;
+    context.location = { reload() { reloads += 1; } };
+  });
+
+  await runtimeA.seedFromLegacy();
+  await runtimeB.seedFromLegacy();
+  const startingRevision = runtimeB.getObservedRevision();
+
+  const committed = await runtimeA.applyHabitDelta(delta('2026-09-01'));
+  assert.equal(committed.revision, startingRevision + 1);
+  assert.equal(runtimeB.getStatus().externalRevisionInvalidated, false);
+
+  assert.equal(runtimeB.checkForExternalRevisionSignal(), true);
+  const invalidated = runtimeB.getStatus();
+  assert.equal(invalidated.externalRevisionInvalidated, true);
+  assert.equal(invalidated.externalRevision, startingRevision + 1);
+
+  const guard = runtimeB.beforeHabitInteraction({ habitId: 'h1', dayKey: '2026-09-02' });
+  assert.equal(guard.proceed, false);
+  assert.equal(guard.reloadRequested, true);
+  assert.equal(reloads, 1);
+  assert.equal(contextB.TaskPointsCore.writePendingHabitDelta(delta('2026-09-02')).dayKey, '2026-09-02');
+});
+
 test('V2-15 stale runtime detects revision conflict inside the mutation transaction and cannot overwrite newer V2 state', async () => {
   const indexedDB = new FakeIndexedDB();
   const localStorage = new FakeStorage({
