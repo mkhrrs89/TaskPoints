@@ -13710,7 +13710,12 @@ function initTaskCompactToggle(){
 }
 
 function capitalizeWords(value) {
-  return String(value).replace(/\b([a-z])/g, (match, letter) => letter.toUpperCase());
+  return String(value).replace(/\b([a-z])/g, (match, letter, offset, source) => {
+    const previous = source[offset - 1];
+    const beforePrevious = source[offset - 2];
+    const isEmbeddedApostrophe = (previous === "'" || previous === '’') && /\w/.test(beforePrevious || '');
+    return isEmbeddedApostrophe ? match : letter.toUpperCase();
+  });
 }
 
 function applyCapitalizeWordsInput(input) {
