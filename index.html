@@ -5615,22 +5615,59 @@ state = cleanupLiveDiffHistory(state);
         return Number(yearStr) === 2025;
       };
 
-      const dailyDateClass = (row) => (isYear2025(row.key) ? 'leaderboard-year-2025' : '');
-      const weeklyDateClass = (row) =>
-        (row.start && row.end && (row.start.getFullYear() === 2025 || row.end.getFullYear() === 2025))
-          ? 'leaderboard-year-2025'
-          : '';
-      const monthlyDateClass = (row) => (isYear2025(row.key) ? 'leaderboard-year-2025' : '');
+      const isFirstHalf2026Date = (value) => {
+        if (!value) return false;
+        const key = String(value).slice(0, 10);
+        return key >= '2026-01-01' && key <= '2026-06-30';
+      };
+
+      const isFirstHalf2026Month = (value) => {
+        if (!value) return false;
+        const key = String(value).slice(0, 7);
+        return key >= '2026-01' && key <= '2026-06';
+      };
+
+      const dailyDateClass = (row) => {
+        if (isYear2025(row.key)) return 'leaderboard-year-2025';
+        if (isFirstHalf2026Date(row.key)) return 'leaderboard-first-half-2026';
+        return '';
+      };
+      const weeklyDateClass = (row) => {
+        if (row.start && row.end && (row.start.getFullYear() === 2025 || row.end.getFullYear() === 2025)) {
+          return 'leaderboard-year-2025';
+        }
+        if (
+          row.start
+          && row.end
+          && (
+            isFirstHalf2026Date(dateKey(row.start))
+            || isFirstHalf2026Date(dateKey(row.end))
+          )
+        ) {
+          return 'leaderboard-first-half-2026';
+        }
+        return '';
+      };
+      const monthlyDateClass = (row) => {
+        if (isYear2025(row.key)) return 'leaderboard-year-2025';
+        if (isFirstHalf2026Month(row.key)) return 'leaderboard-first-half-2026';
+        return '';
+      };
 
       // Labels with NO "(Today / This Week / This Month)" text
       const topBestDays = fillBoard('dailyBoard', bestDays, r => niceDate(fromKey(r.key)), dailyDateClass);
       const topBestWeeks = fillBoard('weeklyBoard', bestWeeks, r => `${niceDate(r.start)} – ${niceDate(r.end)}`, weeklyDateClass);
       fillBoard('monthlyBoard', bestMonths, r => r.displayLabel || formatMonthKey(r.key), monthlyDateClass);
 
-      const bestTaskDays = buildDailyRecordBoard(isNormalTaskCompletion);
-      const bestSleepDays = buildDailyRecordBoard(isSleepCompletion);
-      const bestWorkDays = buildDailyRecordBoard(isWorkCompletion);
-      const bestMoodDays = buildDailyRecordBoard(isMoodCompletion);
+      const markCurrentMonthRecordRows = (rows) => rows.map((row) => ({
+        ...row,
+        isCurrentMonth: String(row?.key || '').slice(0, 7) === thisMonthK,
+      }));
+
+      const bestTaskDays = markCurrentMonthRecordRows(buildDailyRecordBoard(isNormalTaskCompletion));
+      const bestSleepDays = markCurrentMonthRecordRows(buildDailyRecordBoard(isSleepCompletion));
+      const bestWorkDays = markCurrentMonthRecordRows(buildDailyRecordBoard(isWorkCompletion));
+      const bestMoodDays = markCurrentMonthRecordRows(buildDailyRecordBoard(isMoodCompletion));
 
       fillBoard('taskDaysBoard', bestTaskDays, r => niceDate(fromKey(r.key)), dailyDateClass);
       fillBoard('sleepDaysBoard', bestSleepDays, r => niceDate(fromKey(r.key)), dailyDateClass);
@@ -13695,7 +13732,12 @@ function initTaskCompactToggle(){
 }
 
 function capitalizeWords(value) {
-  return String(value).replace(/\b([a-z])/g, (match, letter) => letter.toUpperCase());
+  return String(value).replace(/\b([a-z])/g, (match, letter, offset, source) => {
+    const previous = source[offset - 1];
+    const beforePrevious = source[offset - 2];
+    const isEmbeddedApostrophe = (previous === "'" || previous === '’') && /\w/.test(beforePrevious || '');
+    return isEmbeddedApostrophe ? match : letter.toUpperCase();
+  });
 }
 
 function applyCapitalizeWordsInput(input) {

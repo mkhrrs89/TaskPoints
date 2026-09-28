@@ -118,6 +118,36 @@ function ledgerState(players, balances) {
   };
 }
 
+test('champion bonus is 30 going forward without rewriting settled historical awards', () => {
+  const { api } = install();
+  assert.equal(api.LEGACY_CHAMPION_BONUS, 25);
+  assert.equal(api.CHAMPION_BONUS, 30);
+  assert.equal(api.CHAMPION_BONUS_EFFECTIVE_DATE, '2026-09-28');
+  assert.equal(api.championBonusForSeason({ endDate: '2026-09-27' }), 25);
+  assert.equal(api.championBonusForSeason({ endDate: '2026-10-31' }), 30);
+
+  const state = ledgerState([{ id: 'A', greed: 0, active: true }], {});
+  state.goldLedger.push({
+    id: 'gold:champion:old:A',
+    type: 'champion_bonus',
+    playerId: 'A',
+    amount: 25,
+    balanceAfter: 25,
+    seasonId: 'old',
+    dateKey: '2026-08-31'
+  });
+  state.goldEconomy.settledChampionKeys = ['old'];
+  state.seasonHistory = [
+    { id: 'old', endDate: '2026-08-31', championId: 'A' },
+    { id: 'future', endDate: '2026-10-31', championId: 'A' }
+  ];
+
+  assert.equal(api.reconcileChampionBonuses(state), true);
+  const championRows = state.goldLedger.filter((row) => row.type === 'champion_bonus');
+  assert.deepEqual(championRows.map((row) => row.amount), [25, 30]);
+  assert.equal(api.goldBalance(state, 'A'), 55);
+});
+
 test('Greed performance bonus multiplies GR by normalized opponent Gold', () => {
   const { api } = install();
   const state = ledgerState([

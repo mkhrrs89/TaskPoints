@@ -5,7 +5,9 @@
   if (!core || core.__seasonChampionGoldBonusInstalled) return;
   core.__seasonChampionGoldBonusInstalled = true;
 
-  const BONUS_GOLD = 25;
+  const LEGACY_BONUS_GOLD = 25;
+  const BONUS_GOLD = 30;
+  const BONUS_GOLD_EFFECTIVE_DATE = '2026-09-28';
   const GOLD_START_DATE = '2026-07-01';
   const MAX_INSTALL_ATTEMPTS = 120;
   const ALL_MATCHUPS_KEY = '__taskPointsAllRankingMatchups';
@@ -276,6 +278,11 @@
     }
   }
 
+  function championBonusForSeason(season) {
+    const boundary = seasonBoundaryDate(season);
+    return boundary && boundary >= BONUS_GOLD_EFFECTIVE_DATE ? BONUS_GOLD : LEGACY_BONUS_GOLD;
+  }
+
   function getTournamentChampionGoldBonus(playerId, stateInput = null) {
     const id = String(playerId || '').trim();
     if (!id) return 0;
@@ -293,7 +300,7 @@
 
       const boundary = seasonBoundaryDate(season);
       if (!boundary || boundary < GOLD_START_DATE) return;
-      if (championIdForSeason(season) === id) bonus += BONUS_GOLD;
+      if (championIdForSeason(season) === id) bonus += championBonusForSeason(season);
     });
 
     return bonus;
@@ -408,14 +415,19 @@
   }
 
   core.SEASON_CHAMPION_GOLD_BONUS = BONUS_GOLD;
+  core.SEASON_CHAMPION_GOLD_LEGACY_BONUS = LEGACY_BONUS_GOLD;
+  core.SEASON_CHAMPION_GOLD_BONUS_EFFECTIVE_DATE = BONUS_GOLD_EFFECTIVE_DATE;
   core.SEASON_CHAMPION_GOLD_START_DATE = GOLD_START_DATE;
   core.getTournamentChampionGoldBonus = getTournamentChampionGoldBonus;
   global.TaskPointsSeasonChampionGoldBonus = {
+    LEGACY_BONUS_GOLD,
     BONUS_GOLD,
+    BONUS_GOLD_EFFECTIVE_DATE,
     GOLD_START_DATE,
     ALL_MATCHUPS_KEY,
     collectCompleteRankingMatchups,
     getCumulativeMatchupGold,
+    championBonusForSeason,
     getTournamentChampionGoldBonus,
     installGoldDisplayPatches,
     patchRankingsHistory,

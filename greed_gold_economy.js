@@ -10,7 +10,9 @@
   const GREED_SCORE_MAX_BONUS = 5;
   const GREED_THEFT_MAX_RATE = 0.10;
   const YOU_THEFT_GREED = 50;
-  const CHAMPION_BONUS = 25;
+  const LEGACY_CHAMPION_BONUS = 25;
+  const CHAMPION_BONUS = 30;
+  const CHAMPION_BONUS_EFFECTIVE_DATE = '2026-09-28';
   const LEGACY_GOLD_START_DATE = '2026-07-01';
   const NPC_SCORE_HARD_MAX = 85;
   const MAX_PATCH_ATTEMPTS = 160;
@@ -199,6 +201,11 @@
     return /^\d{4}-\d{2}$/.test(month) ? `${month}-31` : '';
   }
 
+  function championBonusForSeason(season) {
+    const boundary = seasonBoundaryDate(season);
+    return boundary && boundary >= CHAMPION_BONUS_EFFECTIVE_DATE ? CHAMPION_BONUS : LEGACY_CHAMPION_BONUS;
+  }
+
   function legacyGoldForPlayer(state, playerId, todayKey = localDateKey()) {
     const id = String(playerId || '').trim();
     if (!id) return 0;
@@ -216,7 +223,7 @@
     });
     [state?.currentSeason, ...(Array.isArray(state?.seasonHistory) ? state.seasonHistory : [])].filter(Boolean).forEach((season) => {
       const boundary = seasonBoundaryDate(season);
-      if (boundary && boundary >= LEGACY_GOLD_START_DATE && championIdForSeason(season) === id) gold += CHAMPION_BONUS;
+      if (boundary && boundary >= LEGACY_GOLD_START_DATE && championIdForSeason(season) === id) gold += championBonusForSeason(season);
     });
     return roundGold(gold);
   }
@@ -491,6 +498,7 @@
       const key = seasonIdentity(season, index);
       if (!key || ignored.has(key) || settled.has(key)) return;
       const date = seasonBoundaryDate(season) || localDateKey();
+      const championBonus = championBonusForSeason(season);
       appendLedgerEntry(state, {
         id: `gold:champion:${safeId(key)}:${safeId(championId)}`,
         type: 'champion_bonus',
@@ -500,8 +508,8 @@
         seasonId: String(season?.id || key),
         dateKey: date,
         createdAtISO: String(season?.championSummary?.crownedAtISO || season?.completedAtISO || `${date}T23:59:59.000Z`),
-        amount: CHAMPION_BONUS,
-        meta: { championBonus: CHAMPION_BONUS }
+        amount: championBonus,
+        meta: { championBonus }
       });
       settled.add(key);
       changed = true;
@@ -995,7 +1003,10 @@
     GREED_SCORE_MAX_BONUS,
     GREED_THEFT_MAX_RATE,
     YOU_THEFT_GREED,
+    LEGACY_CHAMPION_BONUS,
     CHAMPION_BONUS,
+    CHAMPION_BONUS_EFFECTIVE_DATE,
+    championBonusForSeason,
     roundGold,
     rowDateKey,
     matchupIdentity,

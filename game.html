@@ -2940,11 +2940,21 @@ const rankingByPlayerId = new Map(
         </p>
       `;
 
-      // clicking the image in gallery view opens modal editor for that player
+      // clicking the image in gallery view opens the appropriate editor
       const imgArea = card.querySelector(".player-img-inner");
       if (imgArea) {
         imgArea.style.cursor = "pointer";
         imgArea.addEventListener("click", () => {
+          if (p.isYou) {
+            // YOU is a virtual player and does not live in state.players, so the
+            // NPC modal lookup cannot resolve it. Reuse the existing self-profile
+            // editor by switching to card view and entering YOU edit mode.
+            editingPlayerId = "YOU";
+            viewMode = "card";
+            renderPlayers();
+            updateViewToggleUI();
+            return;
+          }
           openPlayerEditor(p.id);
         });
       }
