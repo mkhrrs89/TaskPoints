@@ -108,10 +108,15 @@ function makeContext(pathname = '/other.html') {
   return { context, state };
 }
 
-test('awards 25 Gold once per unique post-June championship', () => {
+test('grandfathers old championships and awards 30 Gold to future champions', () => {
   const { context, state } = makeContext();
-  assert.equal(context.TaskPointsCore.getTournamentChampionGoldBonus('A', state), 50);
-  assert.equal(context.TaskPointsCore.getTournamentChampionGoldBonus('B', state), 25);
+  assert.equal(context.TaskPointsSeasonChampionGoldBonus.LEGACY_BONUS_GOLD, 25);
+  assert.equal(context.TaskPointsSeasonChampionGoldBonus.BONUS_GOLD, 30);
+  assert.equal(context.TaskPointsSeasonChampionGoldBonus.BONUS_GOLD_EFFECTIVE_DATE, '2026-09-28');
+  assert.equal(context.TaskPointsSeasonChampionGoldBonus.championBonusForSeason({ endDate: '2026-09-27' }), 25);
+  assert.equal(context.TaskPointsSeasonChampionGoldBonus.championBonusForSeason({ endDate: '2026-09-28' }), 30);
+  assert.equal(context.TaskPointsCore.getTournamentChampionGoldBonus('A', state), 55);
+  assert.equal(context.TaskPointsCore.getTournamentChampionGoldBonus('B', state), 30);
   assert.equal(context.TaskPointsCore.getTournamentChampionGoldBonus('C', state), 0);
 });
 
@@ -159,7 +164,7 @@ test('rankings Gold carries all past matchup and championship Gold into a Season
 
   const scoped = context.getScopedRankingsState(state);
   const result = context.computeRankingExtrasForPlayer({ id: 'A' }, { playerId: 'A' }, scoped);
-  assert.deepEqual(JSON.parse(JSON.stringify(result)), { gold: 52.5, mov: 7, baseDelta: 1 });
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), { gold: 57.5, mov: 7, baseDelta: 1 });
 });
 
 test('rankings Gold remains cumulative even when the visible scope contains no Gold-era games', () => {
@@ -174,15 +179,15 @@ test('rankings Gold remains cumulative even when the visible scope contains no G
   context.TaskPointsSeasonChampionGoldBonus.patchRankingsGold();
 
   const scoped = context.getScopedRankingsState(state);
-  assert.equal(context.computeRankingExtrasForPlayer({ id: 'A' }, { playerId: 'A' }, scoped).gold, 52.5);
+  assert.equal(context.computeRankingExtrasForPlayer({ id: 'A' }, { playerId: 'A' }, scoped).gold, 57.5);
 });
 
 test('homepage Gold wrapper preserves cumulative matchup Gold and adds champion bonuses once', () => {
   const { context } = makeContext('/index.html');
   context.getHomepageGoldValue = () => 2.5;
   assert.equal(context.TaskPointsSeasonChampionGoldBonus.patchHomepageGold(), true);
-  assert.equal(context.getHomepageGoldValue('A'), 52.5);
-  assert.equal(context.formatHomepageGold('A'), 'Gold: 52.5');
+  assert.equal(context.getHomepageGoldValue('A'), 57.5);
+  assert.equal(context.formatHomepageGold('A'), 'Gold: 57.5');
 });
 
 test('shared scoring bundle loader requests the champion Gold module once', () => {
