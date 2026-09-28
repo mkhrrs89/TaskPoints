@@ -47,3 +47,36 @@ test('2025 styling keeps precedence for a week that crosses from 2025 into 2026'
   const weeklyLogic = indexSource.slice(weeklyStart, weeklyEnd);
   assert.ok(weeklyLogic.indexOf("return 'leaderboard-year-2025'") < weeklyLogic.indexOf("return 'leaderboard-first-half-2026'"));
 });
+
+
+test('current-month orange applies only to Task, Sleep, Work, and Mood daily record boards', () => {
+  assert.match(indexSource, /const markCurrentMonthRecordRows = \(rows\) => rows\.map/);
+  assert.match(indexSource, /isCurrentMonth: String\(row\?\.key \|\| ''\)\.slice\(0, 7\) === thisMonthK/);
+
+  for (const sourceName of [
+    'isNormalTaskCompletion',
+    'isSleepCompletion',
+    'isWorkCompletion',
+    'isMoodCompletion'
+  ]) {
+    const pattern = new RegExp(
+      'markCurrentMonthRecordRows\\(buildDailyRecordBoard\\(' + sourceName + '\\)\\)'
+    );
+    assert.match(indexSource, pattern, sourceName + ' board should mark current-month rows');
+  }
+
+  assert.match(
+    indexSource,
+    /if \(row\.isCurrentMonth \|\| row\.isOnTrack\) \{\s*li\.classList\.add\('leaderboard-current'\);/
+  );
+  assert.match(
+    indexSource,
+    /const topBestDays = fillBoard\('dailyBoard', bestDays,/,
+    'Best Days should continue using its existing today-only current-period highlighting'
+  );
+  assert.doesNotMatch(
+    indexSource,
+    /fillBoard\('dailyBoard', markCurrentMonthRecordRows\(/,
+    'Best Days must not mark every day in the current month orange'
+  );
+});
