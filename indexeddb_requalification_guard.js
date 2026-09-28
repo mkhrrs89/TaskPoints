@@ -296,6 +296,19 @@
   document.head.appendChild(script);
 })(typeof window !== 'undefined' ? window : globalThis);
 
+;(function loadTaskPointsRecordsMarginOfVictoryTab(global) {
+  'use strict';
+  const document = global.document;
+  const path = String(global.location?.pathname || '');
+  if (!/(^|\/)records(?:\.html)?$/i.test(path)) return;
+  if (!document?.head || document.querySelector?.('script[data-taskpoints-records-margin-of-victory-tab]')) return;
+  const script = document.createElement('script');
+  script.src = 'records_margin_of_victory_tab.js?v=20260927-1';
+  script.defer = true;
+  script.dataset.taskpointsRecordsMarginOfVictoryTab = 'true';
+  document.head.appendChild(script);
+})(typeof window !== 'undefined' ? window : globalThis);
+
 ;(function loadTaskPointsHomeStreakBonusConsistency(global) {
   'use strict';
   const document = global.document;
