@@ -5659,10 +5659,15 @@ state = cleanupLiveDiffHistory(state);
       const topBestWeeks = fillBoard('weeklyBoard', bestWeeks, r => `${niceDate(r.start)} – ${niceDate(r.end)}`, weeklyDateClass);
       fillBoard('monthlyBoard', bestMonths, r => r.displayLabel || formatMonthKey(r.key), monthlyDateClass);
 
-      const bestTaskDays = buildDailyRecordBoard(isNormalTaskCompletion);
-      const bestSleepDays = buildDailyRecordBoard(isSleepCompletion);
-      const bestWorkDays = buildDailyRecordBoard(isWorkCompletion);
-      const bestMoodDays = buildDailyRecordBoard(isMoodCompletion);
+      const markCurrentMonthRecordRows = (rows) => rows.map((row) => ({
+        ...row,
+        isCurrentMonth: String(row?.key || '').slice(0, 7) === thisMonthK,
+      }));
+
+      const bestTaskDays = markCurrentMonthRecordRows(buildDailyRecordBoard(isNormalTaskCompletion));
+      const bestSleepDays = markCurrentMonthRecordRows(buildDailyRecordBoard(isSleepCompletion));
+      const bestWorkDays = markCurrentMonthRecordRows(buildDailyRecordBoard(isWorkCompletion));
+      const bestMoodDays = markCurrentMonthRecordRows(buildDailyRecordBoard(isMoodCompletion));
 
       fillBoard('taskDaysBoard', bestTaskDays, r => niceDate(fromKey(r.key)), dailyDateClass);
       fillBoard('sleepDaysBoard', bestSleepDays, r => niceDate(fromKey(r.key)), dailyDateClass);
