@@ -122,6 +122,10 @@ test('margin record ranking uses canonical matchup scoreA and scoreB and exclude
 
 test('production Records loader includes the margin-of-victory extension only on Records', () => {
   assert.match(guardSource, /loadTaskPointsRecordsMarginOfVictoryTab/);
+  const loaderStart = guardSource.indexOf('loadTaskPointsRecordsMarginOfVictoryTab');
+  const loaderEnd = guardSource.indexOf('})(typeof window', loaderStart);
+  const loader = guardSource.slice(loaderStart, loaderEnd);
+  assert.match(loader, /\/\(\^\|\\\/\)records\(\?:\\\.html\)\?\$\/i\.test\(path\)/);
   assert.match(guardSource, /records_margin_of_victory_tab\.js\?v=20260927-1/);
   assert.match(guardSource, /data-taskpoints-records-margin-of-victory-tab/);
 });
