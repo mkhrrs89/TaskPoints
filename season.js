@@ -507,7 +507,7 @@ const draftOptions = {
   endDate,
   dateWindows,
   status: 'preview',
-  seedMode: MANUAL_SEED_MODE,
+  seedMode: isOctoberSeasonThree ? AUTO_SEED_MODE : MANUAL_SEED_MODE,
   seedRankingScope: isOctoberSeasonThree ? 'season3' : (isAugustSeasonTwo ? 'season2' : undefined),
   playerPool,
   seeds,
@@ -1526,10 +1526,10 @@ function getRoundForToday(season, dateKey = getEffectiveDateKey()) {
 <label class="muted text-xs">Start date <input class="season-admin-input" type="date" data-create-season-start value="2026-10-01"></label>
 <label class="muted text-xs">End date <input class="season-admin-input" type="date" data-create-season-end value="2026-10-31"></label>
           </div>
-          <p class="muted text-sm mt-3">Player pool review: all active players are included in the Season 3 ranking pool by default (${escapeHtml(count)} active players). The top ${SEASON_THREE_ENTRANT_COUNT} by Season 3 rankings qualify; seeds 61+ miss the tournament.</p>
+          <p class="muted text-sm mt-3">All active players are included in the Season 3 ranking pool (${escapeHtml(count)} active players). The top ${SEASON_THREE_ENTRANT_COUNT} by Sept. 1–30 Season 3 rankings qualify; seeds 61+ miss the tournament. Change a player's Active status if they should not be eligible.</p>
           ${count < SEASON_THREE_ENTRANT_COUNT ? `<p class="season-manual-banner">Season 3 needs at least ${SEASON_THREE_ENTRANT_COUNT} active ranked players before the official bracket can be created.</p>` : ''}
           <div class="season-history-list mt-3 season-player-pool-review">
-            ${pool.map((player) => `<label class="season-history-item"><span>${escapeHtml(player.name || player.id || player.playerId)}</span><input type="checkbox" data-create-season-player value="${escapeHtml(player.id || player.playerId)}" checked></label>`).join('') || '<p class="muted text-sm">No active players available.</p>'}
+            ${pool.map((player) => `<label class="season-history-item"><span>${escapeHtml(player.name || player.id || player.playerId)}</span><input type="checkbox" data-create-season-player value="${escapeHtml(player.id || player.playerId)}" checked disabled aria-label="Included in Season 3 qualification pool"></label>`).join('') || '<p class="muted text-sm">No active players available.</p>'}
           </div>
           <div class="season-rebuild-actions mt-3">
             <button type="button" class="btn btn-success btn-toolbar" data-season-action="create-manual-season-preview">Create preview</button>
