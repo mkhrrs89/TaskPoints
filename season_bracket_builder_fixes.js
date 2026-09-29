@@ -74,6 +74,16 @@
     };
   }
 
+  function isSeasonThreeSeason(season) {
+    const id = String(season?.id || '').toLowerCase();
+    const label = String(season?.label || '').toLowerCase();
+    return season?.monthKey === '2026-10'
+      || id.includes('season_3')
+      || id.includes('2026-10')
+      || id.includes('october_2026')
+      || label.includes('october 2026');
+  }
+
   function enableLockedSeasonMatchupControl(result) {
     if (!result?.ok || !result.season) return result;
     const season = {
@@ -108,8 +118,19 @@
   };
 
   api.lockConfiguredSeasonBracket = function lockConfiguredSeasonBracket(state, config, options = {}) {
-    const seeds = state?.currentSeason?.seeds || [];
+    const season = state?.currentSeason || null;
+    const seeds = season?.seeds || [];
     const validation = validateConfig(config, seeds);
+    if (isSeasonThreeSeason(season) && validation.config?.presetId !== api.SEASON_THREE_PRESET_ID) {
+      return {
+        ok: false,
+        error: 'invalid_config',
+        state,
+        config: validation.config,
+        errors: ['Season 3 is fixed to the top 60 ranked seeds and must use the Season 3 60-player preset.'],
+        warnings: validation.warnings || []
+      };
+    }
     if (!validation.ok) {
       return {
         ok: false,
@@ -127,6 +148,7 @@
   global.TaskPointsBracketBuilderFixes = {
     normalizeConfig,
     validateConfig,
+    isSeasonThreeSeason,
     enableLockedSeasonMatchupControl
   };
 
