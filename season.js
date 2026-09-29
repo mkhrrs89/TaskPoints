@@ -28,12 +28,14 @@ const SEASON_THREE_LABEL = 'October 2026 TaskPoints Championship';
 const SEASON_THREE_MONTH_KEY = '2026-10';
 const SEASON_THREE_START_DATE = '2026-10-01';
 const SEASON_THREE_END_DATE = '2026-10-31';
+const SEASON_THREE_ENTRANT_COUNT = 60;
 const SEASON_THREE_DATE_WINDOWS = [
-  { id: 'play_in', startDate: '2026-10-01', endDate: '2026-10-03', displayName: 'Play-In', bestOf: 3 },
-  { id: 'round_of_32', startDate: '2026-10-04', endDate: '2026-10-08', displayName: 'Round of 32', bestOf: 5 },
-  { id: 'sweet_16', startDate: '2026-10-09', endDate: '2026-10-13', displayName: 'Sweet 16', bestOf: 5 },
-  { id: 'quarterfinals', startDate: '2026-10-14', endDate: '2026-10-18', displayName: 'Quarterfinals', bestOf: 5 },
-  { id: 'semifinals', startDate: '2026-10-19', endDate: '2026-10-23', displayName: 'Semifinals', bestOf: 5 },
+  { id: 'play_in', startDate: '2026-10-01', endDate: '2026-10-01', displayName: 'Play-In', bestOf: 1 },
+  { id: 'opening_round', startDate: '2026-10-02', endDate: '2026-10-04', displayName: 'Opening Round', bestOf: 3 },
+  { id: 'round_of_32', startDate: '2026-10-05', endDate: '2026-10-09', displayName: 'Round of 32', bestOf: 5 },
+  { id: 'round_of_16', startDate: '2026-10-10', endDate: '2026-10-14', displayName: 'Round of 16', bestOf: 5 },
+  { id: 'quarterfinals', startDate: '2026-10-15', endDate: '2026-10-19', displayName: 'Quarterfinals', bestOf: 5 },
+  { id: 'semifinals', startDate: '2026-10-20', endDate: '2026-10-24', displayName: 'Semifinals', bestOf: 5 },
   { id: 'finals', startDate: '2026-10-25', endDate: '2026-10-31', displayName: 'Finals', bestOf: 7 }
 ];
   const AUTO_SEED_MODE = 'auto';
@@ -326,6 +328,34 @@ function getRoundDefs(season = null) {
     };
   }
 
+  function isSeasonThreeSeason(season) {
+    const id = String(season?.id || '').toLowerCase();
+    return season?.monthKey === SEASON_THREE_MONTH_KEY
+      || id === SEASON_THREE_ID
+      || id.includes('season_3')
+      || id.includes('october_2026');
+  }
+
+  function buildSeasonThreeProjectedBracketShell() {
+    return {
+      type: 'season3_60_player_preview_shell',
+      generatedAtISO: new Date().toISOString(),
+      entrantCount: SEASON_THREE_ENTRANT_COUNT,
+      rounds: SEASON_THREE_DATE_WINDOWS.map((round) => ({
+        id: round.id,
+        displayName: round.displayName,
+        status: 'placeholder',
+        matches: []
+      }))
+    };
+  }
+
+  function buildPreviewBracketForSeason(season, seeds) {
+    return isSeasonThreeSeason(season)
+      ? buildSeasonThreeProjectedBracketShell()
+      : buildProjectedBracket(seeds);
+  }
+
   function getPlayerPool(state) {
     if (typeof core.getActiveSeasonPlayerPool === 'function') {
       try { return core.getActiveSeasonPlayerPool(state || {}); } catch (e) { return []; }
@@ -356,7 +386,7 @@ function getRoundDefs(season = null) {
       updatedAtISO: now,
       playerPool: getPlayerPool(state || {}),
       seeds: projected.seeds,
-      bracket: buildProjectedBracket(projected.seeds),
+      bracket: buildPreviewBracketForSeason(season, projected.seeds),
       warnings: projected.warnings,
       meta: { previewOnly: true, lockHint: 'Official bracket locks June 1 at 5am.' }
     };
@@ -383,7 +413,7 @@ function getRoundDefs(season = null) {
       ...(season || {}),
       seedMode: season?.seedMode === MANUAL_SEED_MODE ? MANUAL_SEED_MODE : (season?.seedMode || AUTO_SEED_MODE),
       seeds,
-      bracket: buildProjectedBracket(seeds),
+      bracket: buildPreviewBracketForSeason(season, seeds),
       updatedAtISO: nowIso(options)
     };
   }
@@ -402,7 +432,7 @@ function getRoundDefs(season = null) {
       ...(season || {}),
       seedMode: MANUAL_SEED_MODE,
       seeds: renumbered,
-      bracket: buildProjectedBracket(renumbered),
+      bracket: buildPreviewBracketForSeason(season, renumbered),
       updatedAtISO: nowIso(options)
     };
   }
@@ -450,14 +480,23 @@ function getRoundDefs(season = null) {
         warningFlags: Array.isArray(projectedRow.warningFlags) ? projectedRow.warningFlags : []
       };
     });
+    const isAugustSeasonTwo = monthKey === SEASON_TWO_MONTH_KEY;
+    const isOctoberSeasonThree = monthKey === SEASON_THREE_MONTH_KEY;
     const warnings = [];
-    if (seeds.length !== 34) warnings.push({ code: 'non_34_player_pool', message: 'This format was designed for 34 players.' });
-    const canCreateOfficialBracket = seeds.length === 34;
-const isAugustSeasonTwo = monthKey === SEASON_TWO_MONTH_KEY;
-const isOctoberSeasonThree = monthKey === SEASON_THREE_MONTH_KEY;
-const dateWindows = isOctoberSeasonThree
-  ? SEASON_THREE_DATE_WINDOWS.map((round) => ({ ...round }))
-  : (isAugustSeasonTwo ? SEASON_TWO_DATE_WINDOWS.map((round) => ({ ...round })) : []);
+    if (isOctoberSeasonThree && seeds.length < SEASON_THREE_ENTRANT_COUNT) {
+      warnings.push({
+        code: 'season3_insufficient_qualifiers',
+        message: `Season 3 requires at least ${SEASON_THREE_ENTRANT_COUNT} ranked active players so the top ${SEASON_THREE_ENTRANT_COUNT} can qualify.`
+      });
+    } else if (!isOctoberSeasonThree && seeds.length !== 34) {
+      warnings.push({ code: 'non_34_player_pool', message: 'This format was designed for 34 players.' });
+    }
+    const canCreateOfficialBracket = isOctoberSeasonThree
+      ? seeds.length >= SEASON_THREE_ENTRANT_COUNT
+      : seeds.length === 34;
+    const dateWindows = isOctoberSeasonThree
+      ? SEASON_THREE_DATE_WINDOWS.map((round) => ({ ...round }))
+      : (isAugustSeasonTwo ? SEASON_TWO_DATE_WINDOWS.map((round) => ({ ...round })) : []);
 
 const draftOptions = {
   id: isOctoberSeasonThree ? SEASON_THREE_ID : (isAugustSeasonTwo ? SEASON_TWO_ID : undefined),
@@ -472,14 +511,18 @@ const draftOptions = {
   seedRankingScope: isOctoberSeasonThree ? 'season3' : (isAugustSeasonTwo ? 'season2' : undefined),
   playerPool,
   seeds,
-  bracket: canCreateOfficialBracket ? buildProjectedBracket(seeds) : { type: 'manual_preview_shell', rounds: [] },
+  bracket: isOctoberSeasonThree
+    ? buildSeasonThreeProjectedBracketShell()
+    : (canCreateOfficialBracket ? buildProjectedBracket(seeds) : { type: 'manual_preview_shell', rounds: [] }),
   warnings: warnings.concat(projected.warnings || []),
   meta: {
     manualSeason: true,
     canCreateOfficialBracket,
-    autoAdaptedBracketAvailable: false,
+    autoAdaptedBracketAvailable: isOctoberSeasonThree,
     previewOnly: !canCreateOfficialBracket,
-    bufferDays: isOctoberSeasonThree ? ['2026-10-24'] : (isAugustSeasonTwo ? ['2026-08-24'] : [])
+    qualificationFieldSize: isOctoberSeasonThree ? SEASON_THREE_ENTRANT_COUNT : null,
+    qualificationRule: isOctoberSeasonThree ? 'top_60_season3_rankings' : '',
+    bufferDays: isOctoberSeasonThree ? [] : (isAugustSeasonTwo ? ['2026-08-24'] : [])
   }
 };
     if (typeof core.createEmptySeasonDraft === 'function') return core.createEmptySeasonDraft(draftOptions);
@@ -804,11 +847,17 @@ function renderFormatList(season = null) {
   }
 
   function renderProjectedBracket(season, state = {}) {
-    const rounds = Array.isArray(season?.bracket?.rounds) ? season.bracket.rounds : buildProjectedBracket(season?.seeds || []).rounds;
+    const seasonThree = isSeasonThreeSeason(season);
+    const rounds = Array.isArray(season?.bracket?.rounds)
+      ? season.bracket.rounds
+      : buildPreviewBracketForSeason(season, season?.seeds || []).rounds;
+    const note = seasonThree
+      ? `Top ${SEASON_THREE_ENTRANT_COUNT} Season 3 seeds qualify. Seeds 61+ remain ranked but do not enter the tournament. Build Bracket will create the 60 → 48 → 32 field.`
+      : 'Play-In winners use protected placeholders: the lowest remaining Play-In winner faces Seed 1, and the other winner faces Seed 2.';
     return `
       <section class="glass season-card">
-        <h3 class="season-section-title">Projected Bracket</h3>
-        <p class="muted text-sm">Play-In winners use protected placeholders: the lowest remaining Play-In winner faces Seed 1, and the other winner faces Seed 2.</p>
+        <h3 class="season-section-title">${seasonThree ? 'Projected Tournament Format' : 'Projected Bracket'}</h3>
+        <p class="muted text-sm">${escapeHtml(note)}</p>
         <div class="season-bracket-stack">
           ${rounds.map((round) => renderBracketRound(round, state)).join('')}
         </div>
@@ -1477,8 +1526,8 @@ function getRoundForToday(season, dateKey = getEffectiveDateKey()) {
 <label class="muted text-xs">Start date <input class="season-admin-input" type="date" data-create-season-start value="2026-10-01"></label>
 <label class="muted text-xs">End date <input class="season-admin-input" type="date" data-create-season-end value="2026-10-31"></label>
           </div>
-          <p class="muted text-sm mt-3">Player pool review: all active players are included by default (${escapeHtml(count)} active players).</p>
-          ${count !== 34 ? '<p class="season-manual-banner">This format was designed for 34 players. Review/edit the player pool to 34 players, or create a preview shell with warning; invalid official brackets will not be created.</p>' : ''}
+          <p class="muted text-sm mt-3">Player pool review: all active players are included in the Season 3 ranking pool by default (${escapeHtml(count)} active players). The top ${SEASON_THREE_ENTRANT_COUNT} by Season 3 rankings qualify; seeds 61+ miss the tournament.</p>
+          ${count < SEASON_THREE_ENTRANT_COUNT ? `<p class="season-manual-banner">Season 3 needs at least ${SEASON_THREE_ENTRANT_COUNT} active ranked players before the official bracket can be created.</p>` : ''}
           <div class="season-history-list mt-3 season-player-pool-review">
             ${pool.map((player) => `<label class="season-history-item"><span>${escapeHtml(player.name || player.id || player.playerId)}</span><input type="checkbox" data-create-season-player value="${escapeHtml(player.id || player.playerId)}" checked></label>`).join('') || '<p class="muted text-sm">No active players available.</p>'}
           </div>
@@ -1878,13 +1927,19 @@ function saveAndRenderSeason(nextState, savePath = 'season-preview-action', save
         const state = currentMountedState();
         const playerIds = Array.from(root.querySelectorAll('[data-create-season-player]:checked')).map((input) => input.value).filter(Boolean);
         const count = playerIds.length;
-        if (count !== 34) {
+        const startDate = root.querySelector('[data-create-season-start]')?.value || '';
+        const isOctoberSeasonThree = startDate.slice(0, 7) === SEASON_THREE_MONTH_KEY;
+        if (isOctoberSeasonThree && count < SEASON_THREE_ENTRANT_COUNT) {
+          alert(`Season 3 needs at least ${SEASON_THREE_ENTRANT_COUNT} active ranked players so the top ${SEASON_THREE_ENTRANT_COUNT} can qualify.`);
+          return;
+        }
+        if (!isOctoberSeasonThree && count !== 34) {
           const msg = 'This format was designed for 34 players. Auto-adapted bracket is not implemented yet. Create a preview shell with warning instead?';
           if (typeof global.confirm === 'function' && !global.confirm(msg)) return;
         }
         const season = buildManualSeasonPreview(state, {
           name: root.querySelector('[data-create-season-name]')?.value,
-          startDate: root.querySelector('[data-create-season-start]')?.value,
+          startDate,
           endDate: root.querySelector('[data-create-season-end]')?.value,
           playerIds
         });
@@ -1925,6 +1980,7 @@ function saveAndRenderSeason(nextState, savePath = 'season-preview-action', save
     SEASON_ONE_ID,
     SEASON_THREE_ID,
     SEASON_THREE_MONTH_KEY,
+    SEASON_THREE_ENTRANT_COUNT,
     SEASON_THREE_DATE_WINDOWS,
     AUTO_SEED_MODE,
     MANUAL_SEED_MODE,
