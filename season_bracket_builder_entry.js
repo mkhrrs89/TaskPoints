@@ -21,7 +21,12 @@
     const existing = root.querySelector('[data-season-action="create-official-bracket"], [data-season-action="open-bracket-builder"]');
     if (existing) {
       if (existing.dataset.seasonAction !== 'open-bracket-builder') existing.dataset.seasonAction = 'open-bracket-builder';
-      const label = season.bracketConfig ? 'Continue Building Bracket' : 'Build Bracket';
+      const isSeasonThree = season?.monthKey === '2026-10'
+        || String(season?.id || '').toLowerCase().includes('season_3')
+        || String(season?.label || '').toLowerCase().includes('october 2026');
+      const label = season.bracketConfig
+        ? 'Continue Building Bracket'
+        : (isSeasonThree ? 'Build 60-Player Bracket' : 'Build Bracket');
       if (existing.textContent !== label) existing.textContent = label;
       const shouldDisable = !Array.isArray(season.seeds) || season.seeds.length < 2;
       if (existing.disabled !== shouldDisable) existing.disabled = shouldDisable;
@@ -32,7 +37,12 @@
       const note = global.document.createElement('p');
       note.className = 'muted text-sm mt-3';
       note.setAttribute('data-bracket-builder-next-step', '');
-      note.textContent = 'Next step: use Build Bracket to choose the field size, byes, round formats, and full tournament calendar before creating the official bracket.';
+      const isSeasonThree = season?.monthKey === '2026-10'
+        || String(season?.id || '').toLowerCase().includes('season_3')
+        || String(season?.label || '').toLowerCase().includes('october 2026');
+      note.textContent = isSeasonThree
+        ? 'Season 3 is fixed at the top 60 ranked players. Seeds 61+ do not qualify; Build 60-Player Bracket will lock the 60 → 48 → 32 format and October schedule.'
+        : 'Next step: use Build Bracket to choose the field size, byes, round formats, and full tournament calendar before creating the official bracket.';
       hero.appendChild(note);
     }
 
