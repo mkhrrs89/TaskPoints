@@ -64,8 +64,13 @@
   }
 
   function readConfigFromForm() {
-    const presetId = mount.querySelector('[data-builder-preset]')?.value || config?.presetId;
-    const entrantCount = Number(mount.querySelector('[data-builder-entrant-count]')?.value) || config?.entrantCount;
+    const fixedSeasonThree = isSeasonThree(season);
+    const presetId = fixedSeasonThree
+      ? builder.SEASON_THREE_PRESET_ID
+      : (mount.querySelector('[data-builder-preset]')?.value || config?.presetId);
+    const entrantCount = fixedSeasonThree
+      ? 60
+      : (Number(mount.querySelector('[data-builder-entrant-count]')?.value) || config?.entrantCount);
     const rounds = Array.from(mount.querySelectorAll('[data-builder-round-index]')).map((card) => ({
       id: card.dataset.roundId,
       displayName: card.querySelector('[data-builder-round-name]')?.value || '',
@@ -175,8 +180,8 @@
             <div class="builder-stat"><span class="muted text-xs">Stages</span><strong>${escapeHtml(config.rounds.length)}</strong></div>
           </div>
           <div class="builder-controls-grid mt-4">
-            <label class="builder-field"><span>Starting structure</span><select class="season-admin-input" data-builder-preset>${isSeasonThree(season) ? `<option value="${builder.SEASON_THREE_PRESET_ID}" ${config.presetId === builder.SEASON_THREE_PRESET_ID ? 'selected' : ''} ${totalSeeds < 60 ? 'disabled' : ''}>Season 3: 60 → 48 → 32</option>` : ''}${isSeasonTwo(season) ? `<option value="${builder.SEASON_TWO_PRESET_ID}" ${config.presetId === builder.SEASON_TWO_PRESET_ID ? 'selected' : ''} ${totalSeeds < 60 ? 'disabled' : ''}>Season 2: 60 → 48 → 32</option>` : ''}<option value="custom_single_elimination" ${config.presetId !== builder.SEASON_TWO_PRESET_ID && config.presetId !== builder.SEASON_THREE_PRESET_ID ? 'selected' : ''}>Auto-fit single elimination</option></select></label>
-            <label class="builder-field"><span>Use top N seeds</span><input class="season-admin-input" type="number" min="2" max="${escapeHtml(totalSeeds)}" data-builder-entrant-count value="${escapeHtml(config.entrantCount)}"></label>
+            <label class="builder-field"><span>Starting structure</span><select class="season-admin-input" data-builder-preset>${isSeasonThree(season) ? `<option value="${builder.SEASON_THREE_PRESET_ID}" ${config.presetId === builder.SEASON_THREE_PRESET_ID ? 'selected' : ''} ${totalSeeds < 60 ? 'disabled' : ''}>Season 3: 60 → 48 → 32</option>` : ''}${isSeasonTwo(season) ? `<option value="${builder.SEASON_TWO_PRESET_ID}" ${config.presetId === builder.SEASON_TWO_PRESET_ID ? 'selected' : ''} ${totalSeeds < 60 ? 'disabled' : ''}>Season 2: 60 → 48 → 32</option>` : ''}<option value="custom_single_elimination" ${config.presetId !== builder.SEASON_TWO_PRESET_ID && config.presetId !== builder.SEASON_THREE_PRESET_ID ? 'selected' : ''} ${isSeasonThree(season) ? 'disabled' : ''}>Auto-fit single elimination</option></select></label>
+            <label class="builder-field"><span>Use top N seeds</span><input class="season-admin-input" type="number" min="2" max="${escapeHtml(totalSeeds)}" data-builder-entrant-count value="${escapeHtml(config.entrantCount)}" ${isSeasonThree(season) ? 'disabled aria-label="Season 3 field is fixed at the top 60 seeds"' : ''}></label>
             <button type="button" class="btn btn-teal btn-toolbar" data-builder-action="apply-structure">Generate structure</button>
             <button type="button" class="btn btn-ghost btn-toolbar" data-builder-action="fit-dates">Fit dates to season</button>
           </div>
@@ -207,8 +212,12 @@
   }
 
   function applyStructure() {
-    const preset = mount.querySelector('[data-builder-preset]')?.value;
-    const count = Math.min(Number(mount.querySelector('[data-builder-entrant-count]')?.value) || 2, season.seeds.length);
+    const preset = isSeasonThree(season)
+      ? builder.SEASON_THREE_PRESET_ID
+      : mount.querySelector('[data-builder-preset]')?.value;
+    const count = isSeasonThree(season)
+      ? 60
+      : Math.min(Number(mount.querySelector('[data-builder-entrant-count]')?.value) || 2, season.seeds.length);
     if (preset === builder.SEASON_THREE_PRESET_ID) {
       if (season.seeds.length < 60) {
         global.alert?.('The Season 3 preset requires at least 60 ranked seeds so the top 60 can qualify.');
