@@ -71,3 +71,49 @@ test('Season 3 preset is accepted only for the October 2026 championship', () =>
   assert.equal(invalid.ok, false);
   assert.match(invalid.errors.join(' '), /only available for the October 1–31, 2026 championship/);
 });
+
+
+test('Season 3 official locking refuses a custom field instead of bypassing the top-60 cutoff', () => {
+  const state = {
+    currentSeason: {
+      id: 'season_3_october_2026',
+      name: 'Season 3',
+      label: 'October 2026 TaskPoints Championship',
+      monthKey: '2026-10',
+      startDate: '2026-10-01',
+      endDate: '2026-10-31',
+      status: 'preview',
+      seeds: seeds(80)
+    }
+  };
+  const custom = builder.createGenericConfig({
+    entrantCount: 80,
+    startDate: '2026-10-01',
+    endDate: '2026-10-31'
+  });
+  const result = builder.lockConfiguredSeasonBracket(state, custom);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'invalid_config');
+  assert.match(result.errors.join(' '), /fixed to the top 60 ranked seeds/);
+});
+
+test('Season 3 official locking accepts the dedicated preset and enables matchup control', () => {
+  const state = {
+    currentSeason: {
+      id: 'season_3_october_2026',
+      name: 'Season 3',
+      label: 'October 2026 TaskPoints Championship',
+      monthKey: '2026-10',
+      startDate: '2026-10-01',
+      endDate: '2026-10-31',
+      status: 'preview',
+      seeds: seeds(80)
+    }
+  };
+  const result = builder.lockConfiguredSeasonBracket(state, builder.createSeasonThreePreset());
+
+  assert.equal(result.ok, true);
+  assert.equal(result.season.seeds.length, 60);
+  assert.equal(result.season.meta.seasonMatchupControlEnabled, true);
+});
