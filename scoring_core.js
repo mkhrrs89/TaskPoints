@@ -1183,6 +1183,7 @@ function isJuneSeasonDate(dateKey) {
       updatedAtISO: typeof options.updatedAtISO === 'string' ? options.updatedAtISO : nowISO,
       playerPool: Array.isArray(options.playerPool) ? options.playerPool.slice() : [],
       seedMode: typeof options.seedMode === 'string' ? options.seedMode : 'standings',
+      seedRankingScope: typeof options.seedRankingScope === 'string' ? options.seedRankingScope : '',
       seeds: Array.isArray(options.seeds) ? options.seeds.slice() : [],
       bracket: isSeasonObject(options.bracket) ? { ...options.bracket } : {},
       series: isSeasonObject(options.series) ? { ...options.series } : {},
