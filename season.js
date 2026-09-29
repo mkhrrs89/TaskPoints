@@ -558,9 +558,12 @@ const draftOptions = {
       changed = true;
     } else if (currentSeason?.status === 'preview') {
       const mode = currentSeason.seedMode === MANUAL_SEED_MODE ? MANUAL_SEED_MODE : AUTO_SEED_MODE;
-      currentSeason = mode === AUTO_SEED_MODE
-        ? rebuildPreviewFromStandings(normalized, { ...currentSeason, seedMode: AUTO_SEED_MODE }, options)
-        : rebuildPreviewFromManualOrder({ ...currentSeason, seedMode: MANUAL_SEED_MODE }, options);
+      const usesSeasonThreeRankingScope = mode === AUTO_SEED_MODE && currentSeason.seedRankingScope === 'season3';
+      currentSeason = usesSeasonThreeRankingScope
+        ? currentSeason
+        : (mode === AUTO_SEED_MODE
+          ? rebuildPreviewFromStandings(normalized, { ...currentSeason, seedMode: AUTO_SEED_MODE }, options)
+          : rebuildPreviewFromManualOrder({ ...currentSeason, seedMode: MANUAL_SEED_MODE }, options));
       changed = before !== semanticSeasonSnapshot(currentSeason);
     }
 
