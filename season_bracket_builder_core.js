@@ -3,6 +3,7 @@
 
   const STANDARD_BEST_OF = [1, 3, 5, 7];
   const SEASON_TWO_PRESET_ID = 'season2_60_august_2026';
+  const SEASON_THREE_PRESET_ID = 'season3_60_october_2026';
 
   function clone(value) {
     return value == null ? value : JSON.parse(JSON.stringify(value));
@@ -178,15 +179,45 @@
     };
   }
 
+  function createSeasonThreePreset(options = {}) {
+    const startDate = options.startDate || '2026-10-01';
+    const endDate = options.endDate || '2026-10-31';
+    return {
+      version: 1,
+      presetId: SEASON_THREE_PRESET_ID,
+      name: 'Season 3 — 60 to 48 to 32',
+      entrantCount: 60,
+      startDate,
+      endDate,
+      mainBracketSize: 32,
+      preliminarySeries: 12,
+      directByes: 16,
+      pairingMethod: 'season3_60_seeded',
+      rounds: [
+        { id: 'play_in', displayName: 'Play-In', bestOf: 1, startDate: '2026-10-01', endDate: '2026-10-01', tieBreaker: 'higher_seed' },
+        { id: 'opening_round', displayName: 'Opening Round', bestOf: 3, startDate: '2026-10-02', endDate: '2026-10-04', tieBreaker: 'none' },
+        { id: 'round_of_32', displayName: 'Round of 32', bestOf: 5, startDate: '2026-10-05', endDate: '2026-10-09', tieBreaker: 'none' },
+        { id: 'round_of_16', displayName: 'Round of 16', bestOf: 5, startDate: '2026-10-10', endDate: '2026-10-14', tieBreaker: 'none' },
+        { id: 'quarterfinals', displayName: 'Quarterfinals', bestOf: 5, startDate: '2026-10-15', endDate: '2026-10-19', tieBreaker: 'none' },
+        { id: 'semifinals', displayName: 'Semifinals', bestOf: 5, startDate: '2026-10-20', endDate: '2026-10-24', tieBreaker: 'none' },
+        { id: 'finals', displayName: 'Finals', bestOf: 7, startDate: '2026-10-25', endDate: '2026-10-31', tieBreaker: 'none' }
+      ]
+    };
+  }
+
   function normalizeConfig(config, availableSeeds = []) {
     const incoming = clone(config || {});
     const entrantCount = Math.min(
       Math.max(2, Math.floor(Number(incoming.entrantCount) || 2)),
       Math.max(2, availableSeeds.length || Number(incoming.entrantCount) || 2)
     );
-    let normalized = incoming.presetId === SEASON_TWO_PRESET_ID && entrantCount >= 60
-      ? { ...createSeasonTwoPreset(incoming), ...incoming, entrantCount: 60 }
-      : { ...createGenericConfig({ ...incoming, entrantCount }), ...incoming, entrantCount };
+    const isSeasonTwoPreset = incoming.presetId === SEASON_TWO_PRESET_ID && entrantCount >= 60;
+    const isSeasonThreePreset = incoming.presetId === SEASON_THREE_PRESET_ID && entrantCount >= 60;
+    let normalized = isSeasonThreePreset
+      ? { ...createSeasonThreePreset(incoming), ...incoming, entrantCount: 60 }
+      : (isSeasonTwoPreset
+        ? { ...createSeasonTwoPreset(incoming), ...incoming, entrantCount: 60 }
+        : { ...createGenericConfig({ ...incoming, entrantCount }), ...incoming, entrantCount });
     normalized.rounds = (Array.isArray(incoming.rounds) && incoming.rounds.length ? incoming.rounds : normalized.rounds)
       .map((round, index) => ({
         id: slugify(round.id || round.displayName, index === (normalized.rounds?.length || 1) - 1 ? 'finals' : `round_${index + 1}`),
@@ -222,6 +253,7 @@
     if (!finals || finals.id !== 'finals') errors.push('The final round must be Finals.');
     if (finals && finals.endDate !== normalized.endDate) warnings.push(`The last possible Finals game is ${finals.endDate}, not ${normalized.endDate}.`);
     if (normalized.presetId === SEASON_TWO_PRESET_ID && normalized.entrantCount !== 60) errors.push('The Season 2 preset requires exactly 60 entrants.');
+    if (normalized.presetId === SEASON_THREE_PRESET_ID && normalized.entrantCount !== 60) errors.push('The Season 3 preset requires exactly 60 entrants.');
     return { ok: errors.length === 0, config: normalized, errors, warnings };
   }
 
@@ -522,7 +554,7 @@
     const validation = validateConfig(config, seeds);
     if (!validation.ok) return { ok: false, config: validation.config, errors: validation.errors, warnings: validation.warnings, bracket: null, series: {} };
     const selectedSeeds = (Array.isArray(seeds) ? seeds : []).slice(0, validation.config.entrantCount).map((seed, index) => ({ ...seed, seed: index + 1 }));
-    const built = validation.config.presetId === SEASON_TWO_PRESET_ID
+    const built = (validation.config.presetId === SEASON_TWO_PRESET_ID || validation.config.presetId === SEASON_THREE_PRESET_ID)
       ? buildSeasonTwoTournament(selectedSeeds, validation.config, options)
       : buildGenericTournament(selectedSeeds, validation.config, options);
     return { ok: true, config: validation.config, selectedSeeds, errors: [], warnings: validation.warnings, ...built };
@@ -563,6 +595,7 @@
   const api = {
     STANDARD_BEST_OF,
     SEASON_TWO_PRESET_ID,
+    SEASON_THREE_PRESET_ID,
     addDays,
     daysInclusive,
     largestPowerOfTwoAtMost,
@@ -570,6 +603,7 @@
     fitRoundDates,
     createGenericConfig,
     createSeasonTwoPreset,
+    createSeasonThreePreset,
     normalizeConfig,
     validateConfig,
     buildConfiguredTournament,

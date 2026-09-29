@@ -25,9 +25,12 @@
     const incoming = clone(config || {});
     const entrantCount = requestedEntrantCount(incoming, availableSeeds);
     const useSeasonTwoPreset = incoming.presetId === api.SEASON_TWO_PRESET_ID && entrantCount >= 60;
-    const generated = useSeasonTwoPreset
-      ? api.createSeasonTwoPreset(incoming)
-      : api.createGenericConfig({ ...incoming, entrantCount });
+    const useSeasonThreePreset = incoming.presetId === api.SEASON_THREE_PRESET_ID && entrantCount >= 60;
+    const generated = useSeasonThreePreset
+      ? api.createSeasonThreePreset(incoming)
+      : (useSeasonTwoPreset
+        ? api.createSeasonTwoPreset(incoming)
+        : api.createGenericConfig({ ...incoming, entrantCount }));
 
     const merged = {
       ...incoming,
@@ -52,6 +55,14 @@
       && (normalized.startDate !== '2026-08-01' || normalized.endDate !== '2026-08-31')
     ) {
       const message = 'The Season 2 preset is only available for the August 1–31, 2026 championship.';
+      if (!errors.includes(message)) errors.push(message);
+    }
+
+    if (
+      normalized.presetId === api.SEASON_THREE_PRESET_ID
+      && (normalized.startDate !== '2026-10-01' || normalized.endDate !== '2026-10-31')
+    ) {
+      const message = 'The Season 3 preset is only available for the October 1–31, 2026 championship.';
       if (!errors.includes(message)) errors.push(message);
     }
 

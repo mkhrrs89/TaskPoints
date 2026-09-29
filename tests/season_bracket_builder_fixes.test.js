@@ -57,3 +57,17 @@ test('official locking also refuses a Season 2 preset with mismatched dates', ()
   assert.equal(result.ok, false);
   assert.equal(result.error, 'invalid_config');
 });
+
+
+test('Season 3 preset is accepted only for the October 2026 championship', () => {
+  const valid = builder.validateConfig(builder.createSeasonThreePreset(), seeds(80));
+  assert.equal(valid.ok, true);
+  assert.equal(valid.config.entrantCount, 60);
+
+  const invalid = builder.validateConfig(builder.createSeasonThreePreset({
+    startDate: '2026-11-01',
+    endDate: '2026-11-30'
+  }), seeds(80));
+  assert.equal(invalid.ok, false);
+  assert.match(invalid.errors.join(' '), /only available for the October 1–31, 2026 championship/);
+});

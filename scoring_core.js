@@ -865,11 +865,12 @@ const AUGUST_2026_SEASON_DATE_WINDOWS = [
   { id: 'finals', startDate: '2026-08-25', endDate: '2026-08-31', displayName: 'Finals', bestOf: 7 }
 ];
 const OCTOBER_2026_SEASON_DATE_WINDOWS = [
-  { id: 'play_in', startDate: '2026-10-01', endDate: '2026-10-03', displayName: 'Play-In', bestOf: 3 },
-  { id: 'round_of_32', startDate: '2026-10-04', endDate: '2026-10-08', displayName: 'Round of 32', bestOf: 5 },
-  { id: 'sweet_16', startDate: '2026-10-09', endDate: '2026-10-13', displayName: 'Sweet 16', bestOf: 5 },
-  { id: 'quarterfinals', startDate: '2026-10-14', endDate: '2026-10-18', displayName: 'Quarterfinals', bestOf: 5 },
-  { id: 'semifinals', startDate: '2026-10-19', endDate: '2026-10-23', displayName: 'Semifinals', bestOf: 5 },
+  { id: 'play_in', startDate: '2026-10-01', endDate: '2026-10-01', displayName: 'Play-In', bestOf: 1 },
+  { id: 'opening_round', startDate: '2026-10-02', endDate: '2026-10-04', displayName: 'Opening Round', bestOf: 3 },
+  { id: 'round_of_32', startDate: '2026-10-05', endDate: '2026-10-09', displayName: 'Round of 32', bestOf: 5 },
+  { id: 'round_of_16', startDate: '2026-10-10', endDate: '2026-10-14', displayName: 'Round of 16', bestOf: 5 },
+  { id: 'quarterfinals', startDate: '2026-10-15', endDate: '2026-10-19', displayName: 'Quarterfinals', bestOf: 5 },
+  { id: 'semifinals', startDate: '2026-10-20', endDate: '2026-10-24', displayName: 'Semifinals', bestOf: 5 },
   { id: 'finals', startDate: '2026-10-25', endDate: '2026-10-31', displayName: 'Finals', bestOf: 7 }
 ];
 
@@ -1182,6 +1183,7 @@ function isJuneSeasonDate(dateKey) {
       updatedAtISO: typeof options.updatedAtISO === 'string' ? options.updatedAtISO : nowISO,
       playerPool: Array.isArray(options.playerPool) ? options.playerPool.slice() : [],
       seedMode: typeof options.seedMode === 'string' ? options.seedMode : 'standings',
+      seedRankingScope: typeof options.seedRankingScope === 'string' ? options.seedRankingScope : '',
       seeds: Array.isArray(options.seeds) ? options.seeds.slice() : [],
       bracket: isSeasonObject(options.bracket) ? { ...options.bracket } : {},
       series: isSeasonObject(options.series) ? { ...options.series } : {},
