@@ -37,8 +37,15 @@
     return seasonLike?.monthKey === '2026-08' || id.includes('season_2') || id.includes('2026-08') || label.includes('august 2026');
   }
 
+  function isSeasonThree(seasonLike) {
+    const id = String(seasonLike?.id || '').toLowerCase();
+    const label = String(seasonLike?.label || '').toLowerCase();
+    return seasonLike?.monthKey === '2026-10' || id.includes('season_3') || id.includes('2026-10') || label.includes('october 2026');
+  }
+
   function defaultConfig() {
     const count = Array.isArray(season?.seeds) ? season.seeds.length : 0;
+    if (isSeasonThree(season) && count >= 60) return builder.createSeasonThreePreset({ startDate: season.startDate, endDate: season.endDate });
     if (isSeasonTwo(season) && count >= 60) return builder.createSeasonTwoPreset({ startDate: season.startDate, endDate: season.endDate });
     return builder.createGenericConfig({ entrantCount: count, startDate: season?.startDate, endDate: season?.endDate, name: season?.name });
   }
@@ -98,12 +105,14 @@
   }
 
   function renderTierSummary() {
-    if (config.presetId === builder.SEASON_TWO_PRESET_ID) {
+    if (config.presetId === builder.SEASON_TWO_PRESET_ID || config.presetId === builder.SEASON_THREE_PRESET_ID) {
+      const playInDate = config.rounds?.find((round) => round.id === 'play_in')?.startDate || '';
+      const openingDate = config.rounds?.find((round) => round.id === 'opening_round')?.startDate || '';
       return `
         <div class="builder-tier-grid">
           <div class="builder-tier"><strong>Seeds 1–16</strong><span>Round of 32 berth and Opening Round bye</span></div>
-          <div class="builder-tier"><strong>Seeds 17–36</strong><span>Enter the Opening Round on August 2</span></div>
-          <div class="builder-tier"><strong>Seeds 37–60</strong><span>Single-game Play-In on August 1</span></div>
+          <div class="builder-tier"><strong>Seeds 17–36</strong><span>Enter the Opening Round on ${escapeHtml(openingDate)}</span></div>
+          <div class="builder-tier"><strong>Seeds 37–60</strong><span>Single-game Play-In on ${escapeHtml(playInDate)}</span></div>
         </div>`;
     }
     const preliminary = Number(config.preliminarySeries) || 0;
@@ -166,7 +175,7 @@
             <div class="builder-stat"><span class="muted text-xs">Stages</span><strong>${escapeHtml(config.rounds.length)}</strong></div>
           </div>
           <div class="builder-controls-grid mt-4">
-            <label class="builder-field"><span>Starting structure</span><select class="season-admin-input" data-builder-preset><option value="${builder.SEASON_TWO_PRESET_ID}" ${config.presetId === builder.SEASON_TWO_PRESET_ID ? 'selected' : ''} ${totalSeeds < 60 ? 'disabled' : ''}>Season 2: 60 → 48 → 32</option><option value="custom_single_elimination" ${config.presetId !== builder.SEASON_TWO_PRESET_ID ? 'selected' : ''}>Auto-fit single elimination</option></select></label>
+            <label class="builder-field"><span>Starting structure</span><select class="season-admin-input" data-builder-preset>${isSeasonThree(season) ? `<option value="${builder.SEASON_THREE_PRESET_ID}" ${config.presetId === builder.SEASON_THREE_PRESET_ID ? 'selected' : ''} ${totalSeeds < 60 ? 'disabled' : ''}>Season 3: 60 → 48 → 32</option>` : ''}${isSeasonTwo(season) ? `<option value="${builder.SEASON_TWO_PRESET_ID}" ${config.presetId === builder.SEASON_TWO_PRESET_ID ? 'selected' : ''} ${totalSeeds < 60 ? 'disabled' : ''}>Season 2: 60 → 48 → 32</option>` : ''}<option value="custom_single_elimination" ${config.presetId !== builder.SEASON_TWO_PRESET_ID && config.presetId !== builder.SEASON_THREE_PRESET_ID ? 'selected' : ''}>Auto-fit single elimination</option></select></label>
             <label class="builder-field"><span>Use top N seeds</span><input class="season-admin-input" type="number" min="2" max="${escapeHtml(totalSeeds)}" data-builder-entrant-count value="${escapeHtml(config.entrantCount)}"></label>
             <button type="button" class="btn btn-teal btn-toolbar" data-builder-action="apply-structure">Generate structure</button>
             <button type="button" class="btn btn-ghost btn-toolbar" data-builder-action="fit-dates">Fit dates to season</button>
@@ -200,7 +209,13 @@
   function applyStructure() {
     const preset = mount.querySelector('[data-builder-preset]')?.value;
     const count = Math.min(Number(mount.querySelector('[data-builder-entrant-count]')?.value) || 2, season.seeds.length);
-    if (preset === builder.SEASON_TWO_PRESET_ID) {
+    if (preset === builder.SEASON_THREE_PRESET_ID) {
+      if (season.seeds.length < 60) {
+        global.alert?.('The Season 3 preset requires at least 60 ranked seeds so the top 60 can qualify.');
+        return;
+      }
+      config = builder.createSeasonThreePreset({ startDate: season.startDate, endDate: season.endDate });
+    } else if (preset === builder.SEASON_TWO_PRESET_ID) {
       if (season.seeds.length < 60) {
         global.alert?.('The Season 2 preset requires 60 locked seeds.');
         return;
