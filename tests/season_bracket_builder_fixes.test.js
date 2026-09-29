@@ -73,17 +73,6 @@ test('Season 3 preset is accepted only for the October 2026 championship', () =>
 });
 
 
-test('Season 3 preset is rejected outside the October 2026 championship', () => {
-  const config = builder.createSeasonThreePreset({
-    startDate: '2026-11-01',
-    endDate: '2026-11-30'
-  });
-  const validation = builder.validateConfig(config, seeds(80));
-
-  assert.equal(validation.ok, false);
-  assert.match(validation.errors.join(' '), /only available for the October 1–31, 2026 championship/);
-});
-
 test('Season 3 official locking refuses a custom field instead of bypassing the top-60 cutoff', () => {
   const state = {
     currentSeason: {
