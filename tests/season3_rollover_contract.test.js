@@ -25,9 +25,16 @@ assert(seeds.includes('key >= SEASON_THREE_START_DATE && key < SEASON_THREE_TOUR
 assert(season.includes("const SEASON_THREE_ID = 'season_3_october_2026'"));
 assert(season.includes("const SEASON_THREE_START_DATE = '2026-10-01'"));
 assert(season.includes("const SEASON_THREE_END_DATE = '2026-10-31'"));
-assert(season.includes("startDate: '2026-10-01', endDate: '2026-10-03'"));
-assert(season.includes("startDate: '2026-10-25', endDate: '2026-10-31'"));
-assert(season.includes("bufferDays: isOctoberSeasonThree ? ['2026-10-24']"));
+assert(season.includes("const SEASON_THREE_ENTRANT_COUNT = 60"));
+assert(season.includes("startDate: '2026-10-01', endDate: '2026-10-01', displayName: 'Play-In', bestOf: 1"));
+assert(season.includes("id: 'opening_round', startDate: '2026-10-02', endDate: '2026-10-04'"));
+assert(season.includes("id: 'round_of_32', startDate: '2026-10-05', endDate: '2026-10-09'"));
+assert(season.includes("id: 'round_of_16', startDate: '2026-10-10', endDate: '2026-10-14'"));
+assert(season.includes("id: 'quarterfinals', startDate: '2026-10-15', endDate: '2026-10-19'"));
+assert(season.includes("id: 'semifinals', startDate: '2026-10-20', endDate: '2026-10-24'"));
+assert(season.includes("startDate: '2026-10-25', endDate: '2026-10-31', displayName: 'Finals', bestOf: 7"));
+assert(season.includes("qualificationRule: isOctoberSeasonThree ? 'top_60_season3_rankings'"));
+assert(season.includes("bufferDays: isOctoberSeasonThree ? []"));
 assert(season.includes("seedRankingScope: isOctoberSeasonThree ? 'season3'"));
 assert(season.includes('value="Season 3"'));
 assert(season.includes('value="2026-10-01"'));
@@ -35,6 +42,8 @@ assert(season.includes('value="2026-10-31"'));
 assert(season.includes("this Season's configured tournament dates"));
 
 assert(core.includes('const OCTOBER_2026_SEASON_DATE_WINDOWS = ['));
+assert(core.includes("id: 'opening_round', startDate: '2026-10-02', endDate: '2026-10-04'"));
+assert(core.includes("id: 'round_of_16', startDate: '2026-10-10', endDate: '2026-10-14'"));
 assert(core.includes('return OCTOBER_2026_SEASON_DATE_WINDOWS.map'));
 assert(core.includes("seasonId.includes('october_2026')"));
 
