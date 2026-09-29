@@ -386,7 +386,7 @@ function getRoundDefs(season = null) {
       updatedAtISO: now,
       playerPool: getPlayerPool(state || {}),
       seeds: projected.seeds,
-      bracket: buildPreviewBracketForSeason(season, projected.seeds),
+      bracket: buildProjectedBracket(projected.seeds),
       warnings: projected.warnings,
       meta: { previewOnly: true, lockHint: 'Official bracket locks June 1 at 5am.' }
     };
@@ -401,7 +401,7 @@ function getRoundDefs(season = null) {
       seedMode: AUTO_SEED_MODE,
       playerPool: getPlayerPool(state || {}),
       seeds: projected.seeds,
-      bracket: buildProjectedBracket(projected.seeds),
+      bracket: buildPreviewBracketForSeason(season, projected.seeds),
       warnings: projected.warnings,
       updatedAtISO: nowIso(options)
     };
