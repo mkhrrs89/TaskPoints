@@ -35,6 +35,8 @@ assert(season.includes("id: 'semifinals', startDate: '2026-10-20', endDate: '202
 assert(season.includes("startDate: '2026-10-25', endDate: '2026-10-31', displayName: 'Finals', bestOf: 7"));
 assert(season.includes("qualificationRule: isOctoberSeasonThree ? 'top_60_season3_rankings'"));
 assert(season.includes("bufferDays: isOctoberSeasonThree ? []"));
+assert(season.includes("seedMode: isOctoberSeasonThree ? AUTO_SEED_MODE : MANUAL_SEED_MODE"));
+assert(season.includes("usesSeasonThreeRankingScope = mode === AUTO_SEED_MODE && currentSeason.seedRankingScope === 'season3'"));
 assert(season.includes("seedRankingScope: isOctoberSeasonThree ? 'season3'"));
 assert(season.includes('value="Season 3"'));
 assert(season.includes('value="2026-10-01"'));
