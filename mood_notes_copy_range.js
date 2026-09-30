@@ -42,6 +42,13 @@
     }
   }
 
+  function moodScoreFromTitle(title) {
+    const match = String(title || '').match(/^Mood Score\s*(?:\(\s*)?([+-]?\d+(?:\.\d+)?)\s*\)?/i);
+    if (!match) return null;
+    const score = Number(match[1]);
+    return Number.isFinite(score) ? score : null;
+  }
+
   function getMoodNoteEntries(state = getStoredState()) {
     const completions = Array.isArray(state?.completions) ? state.completions : [];
     return completions
@@ -52,6 +59,7 @@
         const completedDate = new Date(entry.completedAtISO);
         return {
           note,
+          moodScore: moodScoreFromTitle(entry.title),
           completedDate,
           completedAtISO: entry.completedAtISO,
           dateKey: localDateKey(completedDate)
@@ -67,7 +75,8 @@
     entries.forEach((entry) => {
       if (entry.dateKey !== currentDateKey) {
         if (lines.length) lines.push('');
-        lines.push(formatCompactDate(entry.completedDate));
+        const scoreText = Number.isFinite(entry.moodScore) ? String(entry.moodScore) : 'Mood score unavailable';
+        lines.push(`${formatCompactDate(entry.completedDate)} - ${scoreText}`);
         currentDateKey = entry.dateKey;
       }
       lines.push(`- ${entry.note}`);
@@ -218,6 +227,7 @@
   const api = {
     installed: true,
     localDateKey,
+    moodScoreFromTitle,
     getMoodNoteEntries,
     buildGroupedMoodNotesText,
     buildRangeCopy,
