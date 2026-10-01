@@ -94,13 +94,17 @@
     let dragged = false;
     let gestureActive = false;
     let refreshAfterGesture = false;
+    let lastGestureActivityNoteAt = 0;
 
     let animationFrame = 0;
     let pendingScale = null;
     let pendingScaleAnchor = null;
     let refreshFrame = 0;
 
-    function noteGestureActivity() {
+    function noteGestureActivity(force = false) {
+      const now = Date.now();
+      if (!force && now - lastGestureActivityNoteAt < 1000) return;
+      lastGestureActivityNoteAt = now;
       try { global.TaskPointsCore?.noteStorageUserInteraction?.(); } catch (_) {}
     }
 
@@ -229,7 +233,7 @@
     }
 
     viewport.addEventListener('touchstart', (event) => {
-      noteGestureActivity();
+      noteGestureActivity(true);
       if (event.touches.length >= 2) {
         event.preventDefault();
         startPinch(event.touches);
@@ -276,7 +280,7 @@
     }, { passive: false });
 
     viewport.addEventListener('touchend', (event) => {
-      noteGestureActivity();
+      noteGestureActivity(true);
       flushFrameNow();
 
       if (event.touches.length >= 2) {
@@ -294,7 +298,7 @@
     }, { passive: true });
 
     viewport.addEventListener('touchcancel', () => {
-      noteGestureActivity();
+      noteGestureActivity(true);
       gestureActive = false;
       singleTouchStart = null;
       pinch = null;
