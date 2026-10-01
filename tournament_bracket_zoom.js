@@ -39,8 +39,9 @@
         position: relative;
         max-height: min(72vh, 900px);
         min-height: 280px;
-        touch-action: none;
+        touch-action: pan-x pan-y;
         scroll-behavior: auto !important;
+        scroll-snap-type: none !important;
         overscroll-behavior: contain;
         -webkit-overflow-scrolling: touch;
       }
@@ -88,7 +89,7 @@
     let scale = 1;
     let baseWidth = 1;
     let baseHeight = 1;
-    let panLast = null;
+    let singleTouchStart = null;
     let pinch = null;
     let dragged = false;
     let gestureActive = false;
@@ -97,8 +98,6 @@
     let animationFrame = 0;
     let pendingScale = null;
     let pendingScaleAnchor = null;
-    let pendingPanX = 0;
-    let pendingPanY = 0;
     let refreshFrame = 0;
 
     function noteGestureActivity() {
@@ -143,12 +142,6 @@
         pendingScaleAnchor = null;
       }
 
-      if (pendingPanX || pendingPanY) {
-        viewport.scrollLeft -= pendingPanX;
-        viewport.scrollTop -= pendingPanY;
-        pendingPanX = 0;
-        pendingPanY = 0;
-      }
     }
 
     function scheduleFrame() {
@@ -208,10 +201,8 @@
 
     function startSingleTouch(touch) {
       gestureActive = true;
-      panLast = { x: touch.clientX, y: touch.clientY };
+      singleTouchStart = { x: touch.clientX, y: touch.clientY };
       pinch = null;
-      pendingPanX = 0;
-      pendingPanY = 0;
       dragged = false;
       noteGestureActivity();
     }
@@ -232,9 +223,7 @@
         contentX: (viewport.scrollLeft + mid.x) / Math.max(scale, 0.0001),
         contentY: (viewport.scrollTop + mid.y) / Math.max(scale, 0.0001)
       };
-      panLast = null;
-      pendingPanX = 0;
-      pendingPanY = 0;
+      singleTouchStart = null;
       dragged = true;
       noteGestureActivity();
     }
@@ -242,11 +231,12 @@
     viewport.addEventListener('touchstart', (event) => {
       noteGestureActivity();
       if (event.touches.length >= 2) {
+        event.preventDefault();
         startPinch(event.touches);
       } else if (event.touches.length === 1) {
         startSingleTouch(event.touches[0]);
       }
-    }, { passive: true });
+    }, { passive: false });
 
     viewport.addEventListener('touchmove', (event) => {
       noteGestureActivity();
@@ -270,19 +260,18 @@
 
       if (event.touches.length === 1) {
         const touch = event.touches[0];
-        if (!panLast) {
+        if (!singleTouchStart) {
           startSingleTouch(touch);
           return;
         }
 
-        const dx = touch.clientX - panLast.x;
-        const dy = touch.clientY - panLast.y;
-        if (Math.abs(dx) + Math.abs(dy) > 2) dragged = true;
-        event.preventDefault();
-        pendingPanX += dx;
-        pendingPanY += dy;
-        panLast = { x: touch.clientX, y: touch.clientY };
-        scheduleFrame();
+        const dx = touch.clientX - singleTouchStart.x;
+        const dy = touch.clientY - singleTouchStart.y;
+        if (Math.abs(dx) + Math.abs(dy) > 6) dragged = true;
+
+        // Deliberately do not preventDefault and do not write scrollLeft/scrollTop
+        // here. Let iOS/Safari own one-finger panning so it stays compositor-
+        // driven and retains native momentum/inertial scrolling.
       }
     }, { passive: false });
 
@@ -297,7 +286,7 @@
         startSingleTouch(event.touches[0]);
       } else {
         gestureActive = false;
-        panLast = null;
+        singleTouchStart = null;
         pinch = null;
         finishGestureSizing();
         global.setTimeout?.(() => { dragged = false; }, 0);
@@ -307,13 +296,11 @@
     viewport.addEventListener('touchcancel', () => {
       noteGestureActivity();
       gestureActive = false;
-      panLast = null;
+      singleTouchStart = null;
       pinch = null;
       dragged = false;
       pendingScale = null;
       pendingScaleAnchor = null;
-      pendingPanX = 0;
-      pendingPanY = 0;
       finishGestureSizing();
     }, { passive: true });
 
