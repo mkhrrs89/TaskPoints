@@ -37,6 +37,7 @@ const CORE_BUNDLE_ASSET_PATHS = Object.freeze([
   '/season3_tournament_rollover.js'
 ]);
 const CORE_BUNDLE_QUERY_KEY = 'v';
+const CORE_BUNDLE_BUILD_REVISION = '2026-10-01-season3-rollover-v2';
 const CORE_BUNDLE_BROWSER_MAX_AGE = 31536000;
 const CORE_REDIRECT_BROWSER_MAX_AGE = 60;
 
@@ -119,7 +120,7 @@ function getCoreBundleVersion(env, request) {
   if (!coreBundleVersionPromise) {
     coreBundleVersionPromise = Promise.all(
       CORE_BUNDLE_ASSET_PATHS.map((pathname) => readAssetFingerprint(env, request, pathname))
-    ).then((fingerprints) => `tp-${fnv1a(fingerprints.join('\n'))}`);
+    ).then((fingerprints) => `tp-${fnv1a([CORE_BUNDLE_BUILD_REVISION, ...fingerprints].join('\n'))}`);
   }
   return coreBundleVersionPromise;
 }
@@ -195,7 +196,7 @@ async function buildCoreBundle(request, env, ctx, version) {
   try { coreSource = await response.text(); }
   catch (_) { return response; }
 
-  const [perfSource, aliasSource, youAliasSource, habitGuardSource, habitFastPathControlSource, sharedSaveWorkSource, inboxBadgeSource, seasonSeriesUpsetSource, taskMutationJournalSource, taskCreateFastPathSource, stateHotCacheSource, storageIdleSource, greedGoldSource, goldTheftTop50Source] = await Promise.all([
+  const [perfSource, aliasSource, youAliasSource, habitGuardSource, habitFastPathControlSource, sharedSaveWorkSource, inboxBadgeSource, seasonSeriesUpsetSource, taskMutationJournalSource, taskCreateFastPathSource, stateHotCacheSource, storageIdleSource, greedGoldSource, goldTheftTop50Source, seasonBracketBuilderSource, seasonBracketBuilderFixesSource, season3RolloverSource] = await Promise.all([
     readAssetSource(env, request, '/performance_diagnostics.js'),
     readAssetSource(env, request, '/score_alias_consistency.js'),
     readAssetSource(env, request, '/you_score_alias_alignment.js'),
@@ -209,10 +210,16 @@ async function buildCoreBundle(request, env, ctx, version) {
     readAssetSource(env, request, '/state_hot_cache.js'),
     readAssetSource(env, request, '/storage_maintenance_idle.js'),
     readAssetSource(env, request, '/greed_gold_economy.js'),
-    readAssetSource(env, request, '/gold_theft_top50_notifications.js')
+    readAssetSource(env, request, '/gold_theft_top50_notifications.js'),
+    readAssetSource(env, request, '/season_bracket_builder_core.js'),
+    readAssetSource(env, request, '/season_bracket_builder_fixes.js'),
+    readAssetSource(env, request, '/season3_tournament_rollover.js')
   ]);
   const additions = [aliasSource, youAliasSource, habitGuardSource, habitFastPathControlSource, sharedSaveWorkSource, inboxBadgeSource, seasonSeriesUpsetSource, taskMutationJournalSource, taskCreateFastPathSource, stateHotCacheSource, storageIdleSource, greedGoldSource].filter(Boolean);
   if (goldTheftTop50Source) additions.push(goldTheftTop50Source);
+  if (seasonBracketBuilderSource) additions.push(seasonBracketBuilderSource);
+  if (seasonBracketBuilderFixesSource) additions.push(seasonBracketBuilderFixesSource);
+  if (season3RolloverSource) additions.push(season3RolloverSource);
   const source = [
     perfSource,
     coreSource,
@@ -234,7 +241,9 @@ async function buildCoreBundle(request, env, ctx, version) {
     'x-taskpoints-state-hot-cache': stateHotCacheSource ? 'included' : 'missing',
     'x-taskpoints-storage-idle': storageIdleSource ? 'included' : 'missing',
     'x-taskpoints-greed-gold-economy': greedGoldSource ? 'included' : 'missing',
-    'x-taskpoints-gold-theft-top50-notifications': goldTheftTop50Source ? 'included' : 'missing'
+    'x-taskpoints-gold-theft-top50-notifications': goldTheftTop50Source ? 'included' : 'missing',
+    'x-taskpoints-season-bracket-builder': seasonBracketBuilderSource && seasonBracketBuilderFixesSource ? 'included' : 'partial',
+    'x-taskpoints-season3-rollover': season3RolloverSource ? 'included' : 'missing'
   });
 }
 
