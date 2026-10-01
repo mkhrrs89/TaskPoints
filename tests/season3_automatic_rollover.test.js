@@ -127,6 +127,43 @@ test('Season 3 rollover is idempotent once the official bracket is locked', () =
   assert.equal(JSON.stringify(second.state.currentSeason), snapshot);
 });
 
+test('a champion-crowned prior Season is archived before Season 3 starts', () => {
+  const state = makeState();
+  state.currentSeason = core.createEmptySeasonDraft({
+    id: 'season_2_august_2026',
+    name: 'Season 2',
+    label: 'August 2026 TaskPoints Championship',
+    monthKey: '2026-08',
+    startDate: '2026-08-01',
+    endDate: '2026-08-31',
+    status: 'champion_crowned',
+    championSummary: {
+      championId: 'P01',
+      championName: 'Player 01',
+      runnerUpId: 'P02',
+      runnerUpName: 'Player 02',
+      finalsResult: 'Player 01 defeats Player 02, 4–2'
+    }
+  });
+
+  const result = rollover.ensureSeasonThreeTournamentRollover(state, {
+    effectiveDateKey: '2026-10-01',
+    nowISO: '2026-10-01T12:00:00.000Z',
+    materialize: false
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.changed, true);
+  assert.equal(result.reason, 'prior_season_archived_and_season3_started');
+  assert.equal(result.state.currentSeason.id, 'season_3_october_2026');
+  assert.equal(result.state.currentSeason.status, 'locked');
+  assert.equal(result.state.currentSeason.seeds.length, 60);
+
+  const archivedSeasonTwo = result.state.seasonHistory.find((season) => season.id === 'season_2_august_2026');
+  assert.ok(archivedSeasonTwo);
+  assert.equal(archivedSeasonTwo.status, 'finalized');
+});
+
 test('a different current Season is never overwritten by Season 3 rollover', () => {
   const state = makeState();
   state.currentSeason = core.createEmptySeasonDraft({
