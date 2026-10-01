@@ -31,7 +31,10 @@ const CORE_BUNDLE_ASSET_PATHS = Object.freeze([
   '/state_hot_cache.js',
   '/storage_maintenance_idle.js',
   '/greed_gold_economy.js',
-  '/gold_theft_top50_notifications.js'
+  '/gold_theft_top50_notifications.js',
+  '/season_bracket_builder_core.js',
+  '/season_bracket_builder_fixes.js',
+  '/season3_tournament_rollover.js'
 ]);
 const CORE_BUNDLE_QUERY_KEY = 'v';
 const CORE_BUNDLE_BROWSER_MAX_AGE = 31536000;
