@@ -167,31 +167,66 @@
   }
 
   function ensureSeasonThreeTournamentRollover(stateInput, options = {}) {
-    const state = typeof core.normalizeState === 'function'
+    let workingState = typeof core.normalizeState === 'function'
       ? core.normalizeState(stateInput || {})
       : clone(stateInput || {});
     const dayKey = effectiveDateKey(options);
     const nowISO = options.nowISO || (dayKey ? `${dayKey}T12:00:00.000Z` : new Date().toISOString());
 
     if (!dayKey || dayKey < TOURNAMENT_START) {
-      return { ok: true, changed: false, reason: 'before_tournament_start', state };
+      return { ok: true, changed: false, reason: 'before_tournament_start', state: workingState };
     }
     if (dayKey > TOURNAMENT_END && options.allowLateRollover !== true) {
-      return { ok: true, changed: false, reason: 'after_tournament_window', state };
+      return { ok: true, changed: false, reason: 'after_tournament_window', state: workingState };
     }
 
-    const current = state.currentSeason || null;
+    let current = workingState.currentSeason || null;
+    let archivedPriorSeason = null;
+
     if (current && !isSeasonThree(current)) {
-      return { ok: true, changed: false, reason: 'different_current_season', state };
-    }
-    if (current && current.status !== 'preview') {
-      return { ok: true, changed: false, reason: 'season3_already_official', state };
-    }
-    if (!current && (Array.isArray(state.seasonHistory) ? state.seasonHistory : []).some(isSeasonThree)) {
-      return { ok: true, changed: false, reason: 'season3_already_archived', state };
+      const priorStatus = String(current.status || '').toLowerCase();
+      const completedPriorSeason = priorStatus === 'champion_crowned' || priorStatus === 'finalized';
+
+      if (!completedPriorSeason) {
+        return { ok: true, changed: false, reason: 'different_current_season', state: workingState };
+      }
+      if (typeof core.finalizeCurrentSeason !== 'function') {
+        return {
+          ok: false,
+          changed: false,
+          reason: 'prior_season_archive_unavailable',
+          error: 'season3_prior_season_archive_unavailable',
+          state: workingState
+        };
+      }
+
+      const archived = core.finalizeCurrentSeason(workingState, {
+        dateKey: dayKey,
+        force: true
+      });
+      if (!archived?.ok || !archived?.state) {
+        return {
+          ok: false,
+          changed: false,
+          reason: 'prior_season_archive_failed',
+          error: archived?.error || 'season3_prior_season_archive_failed',
+          state: workingState
+        };
+      }
+
+      archivedPriorSeason = archived.archiveEntry || current;
+      workingState = archived.state;
+      current = workingState.currentSeason || null;
     }
 
-    const qualification = finalQualificationSeeds(state, current);
+    if (current && current.status !== 'preview') {
+      return { ok: true, changed: false, reason: 'season3_already_official', state: workingState };
+    }
+    if (!current && (Array.isArray(workingState.seasonHistory) ? workingState.seasonHistory : []).some(isSeasonThree)) {
+      return { ok: true, changed: false, reason: 'season3_already_archived', state: workingState };
+    }
+
+    const qualification = finalQualificationSeeds(workingState, current);
     if (qualification.seeds.length < ENTRANT_COUNT) {
       return {
         ok: false,
@@ -200,17 +235,17 @@
         error: 'season3_insufficient_qualifiers',
         required: ENTRANT_COUNT,
         available: qualification.seeds.length,
-        state
+        state: workingState
       };
     }
 
-    const preview = buildPreview(state, current, qualification, nowISO);
+    const preview = buildPreview(workingState, current, qualification, nowISO);
     const previewState = typeof core.normalizeState === 'function'
-      ? core.normalizeState({ ...state, currentSeason: preview, latestSeasonId: SEASON_ID })
-      : { ...state, currentSeason: preview, latestSeasonId: SEASON_ID };
+      ? core.normalizeState({ ...workingState, currentSeason: preview, latestSeasonId: SEASON_ID })
+      : { ...workingState, currentSeason: preview, latestSeasonId: SEASON_ID };
 
     if (typeof builder.createSeasonThreePreset !== 'function' || typeof builder.lockConfiguredSeasonBracket !== 'function') {
-      return { ok: false, changed: false, reason: 'builder_unavailable', error: 'season3_builder_unavailable', state };
+      return { ok: false, changed: false, reason: 'builder_unavailable', error: 'season3_builder_unavailable', state: workingState };
     }
 
     const locked = builder.lockConfiguredSeasonBracket(
@@ -224,7 +259,7 @@
         ok: false,
         changed: false,
         reason: locked?.error || 'season3_lock_failed',
-        state
+        state: workingState
       };
     }
 
@@ -266,9 +301,12 @@
     return {
       ok: true,
       changed: true,
-      reason: current ? 'season3_preview_locked' : 'season3_created_and_locked',
+      reason: current
+        ? 'season3_preview_locked'
+        : (archivedPriorSeason ? 'prior_season_archived_and_season3_started' : 'season3_created_and_locked'),
       state: nextState,
       season: nextState.currentSeason,
+      archivedPriorSeason,
       qualificationSeedCount: qualification.seeds.length,
       tournamentSeedCount: Array.isArray(nextState.currentSeason?.seeds) ? nextState.currentSeason.seeds.length : 0,
       materializedCount
