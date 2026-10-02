@@ -6793,7 +6793,8 @@ return { state: merged, storageKey };
     const allowGeneratedCacheClear = Boolean(options.allowGeneratedCacheClear || options.storageEmergencyCompaction);
     const stickyArrayFields = [
       'tasks', 'completions', 'habits', 'players', 'flexActions',
-      'gameHistory', 'matchups', 'weightHistory', 'vo2MaxHistory', 'reminders', 'seasonHistory'
+      'gameHistory', 'matchups', 'weightHistory', 'vo2MaxHistory', 'reminders', 'seasonHistory',
+      'reservedPlayerPids'
     ];
     if (!allowGeneratedCacheClear) {
       stickyArrayFields.push('schedule');
