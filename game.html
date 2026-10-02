@@ -2699,6 +2699,7 @@ async function renderPlayers() {
   const youColors = getYouPlayerColors();
   const youPlayer = {
     id: "YOU",
+    pid: "P000",
     name: youName,
     imageId: state.youImageId || "",
     todayPoints: todayPoints.toFixed(1),
@@ -2938,6 +2939,9 @@ const rankingByPlayerId = new Map(
         <p class="mt-1 text-xs sm:text-sm font-medium text-center break-words leading-snug ${!isActive ? "player-inactive-text" : ""}">
           ${escapeHtml(displayName)}
         </p>
+        <p class="text-[10px] opacity-60 text-center">
+          PID ${escapeHtml(p.isYou ? "P000" : (TaskPointsCore?.getPlayerPid?.(state, p.id) || "Unassigned"))}
+        </p>
       `;
 
       // clicking the image in gallery view opens the appropriate editor
@@ -3015,6 +3019,7 @@ const rankingByPlayerId = new Map(
         </div>
 
         <div class="space-y-1">
+          <div class="text-xs opacity-70">PID <strong class="opacity-100">P000</strong> · Permanent</div>
           <label class="text-xs opacity-70" for="youNameInput">Display name</label>
           <input
             id="youNameInput"
@@ -3065,6 +3070,7 @@ const rankingByPlayerId = new Map(
         </div>
 
         <div class="text-xs opacity-80 leading-[1.0] space-y-[2px] mt-1">
+          <p>PID: P000</p>
           <p>Record: ${youStats.record}</p>
           <p>PPD: ${youStats.avgPPD.toFixed(1)}</p>
          
@@ -3196,6 +3202,7 @@ card.innerHTML = `
         </div>
 
         <div class="text-xs opacity-80 leading-[1.0] space-y-[2px]">
+          <p>PID: ${escapeHtml(TaskPointsCore?.getPlayerPid?.(state, p.id) || "Unassigned")}</p>
           <p>Record: ${recordText}</p>
           <p>PPD: ${avgPpd}</p>
 <p>Baseline: ${p.baseline ?? "—"}</p>
@@ -3271,6 +3278,27 @@ function buildPlayerEditorContent(player) {
   const primaryColor = normalizePlayerColor(player.primaryColor, DEFAULT_PRIMARY_COLOR);
   const secondaryColor = normalizePlayerColor(player.secondaryColor, DEFAULT_SECONDARY_COLOR);
   const playerImageUrl = player.imageId ? getCachedImageUrl(player.imageId) : "";
+  const playerPid = TaskPointsCore?.getPlayerPid?.(state, player.id) || "";
+  const pidControl = playerPid
+    ? `
+        <div class="player-editor-field">
+          <label>PID</label>
+          <div class="flex items-center justify-between gap-2 rounded-lg border border-slate-600/60 px-2 py-2 text-sm">
+            <strong>${escapeHtml(playerPid)}</strong>
+            <span class="text-[10px] uppercase tracking-wide opacity-60">Permanent</span>
+          </div>
+        </div>
+      `
+    : `
+        <div class="player-editor-field">
+          <label>PID</label>
+          <div class="flex items-center gap-2">
+            <input data-field="pid" inputmode="numeric" autocomplete="off" autocapitalize="characters" placeholder="P001" maxlength="8" />
+            <button type="button" data-act="save-pid" data-id="${player.id}" class="rounded-lg border border-emerald-500/70 px-2 py-1 text-xs whitespace-nowrap">Save PID</button>
+          </div>
+          <p class="text-[10px] opacity-60 mt-1">Permanent once saved. P000 is reserved for you.</p>
+        </div>
+      `;
 
   return `
     <div class="flex items-start justify-between gap-2">
@@ -3297,6 +3325,8 @@ function buildPlayerEditorContent(player) {
         </label>
       </div>
     </div>
+
+    ${pidControl}
 
     <div class="player-editor-grid">
       <div class="player-editor-field">
@@ -3517,6 +3547,34 @@ function wirePlayerColorEditors(root = document) {
       }
 
 
+
+      if (act === "save-pid"){
+        const card = resolveEditRoot(btn, id);
+        const input = card?.querySelector('input[data-field="pid"]');
+        if (!card || !input) return;
+
+        const result = TaskPointsCore?.assignPlayerPid?.(state, id, input.value);
+        if (!result?.ok) {
+          const messages = {
+            invalid_pid: "Enter a PID like P001. You can also type just 1 and it will become P001.",
+            you_pid_locked: "Your PID is permanently P000.",
+            pid_reserved_for_you: "P000 is reserved for your player.",
+            pid_in_use: result?.ownerName
+              ? `${result.ownerName} already uses ${result.pid}.`
+              : `${result?.pid || "That PID"} is already in use.`,
+            pid_reserved: `${result?.pid || "That PID"} was previously saved and cannot be reused.`,
+            pid_locked: `This player already has permanent PID ${result?.pid || ""}.`,
+            player_not_found: "That player could not be found."
+          };
+          alert(messages[result?.error] || "That PID could not be saved.");
+          return;
+        }
+
+        state = saveState(result.state);
+        openPlayerEditor(id);
+        renderPlayers();
+        return;
+      }
 
       if (act === "delete"){
         const player = state.players.find(p => p.id === id);
@@ -3799,6 +3857,7 @@ const greed = Number($("playerGreed").value || 25);
 
     state.players.push({
       id: makeId(),
+      pid: "",
       name,
       notes,
       imageId: imageId || "",
