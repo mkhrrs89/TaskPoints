@@ -5464,11 +5464,130 @@ if (maxEntries !== null && finalSchedules.length > maxEntries) {
     return cleanedState;
   }
 
+  const YOU_PID = 'P000';
+
+  function normalizePlayerPid(value) {
+    const raw = String(value ?? '').trim().toUpperCase();
+    if (!raw) return '';
+
+    const numericText = raw.startsWith('P') ? raw.slice(1) : raw;
+    if (!/^\d+$/.test(numericText)) return '';
+
+    const numeric = Number(numericText);
+    if (!Number.isSafeInteger(numeric) || numeric < 0) return '';
+    return `P${String(numeric).padStart(3, '0')}`;
+  }
+
+  function normalizeReservedPlayerPids(values, players = []) {
+    const reserved = new Set([YOU_PID]);
+    (Array.isArray(values) ? values : []).forEach((value) => {
+      const pid = normalizePlayerPid(value);
+      if (pid) reserved.add(pid);
+    });
+    (Array.isArray(players) ? players : []).forEach((player) => {
+      const pid = normalizePlayerPid(player?.pid);
+      if (pid) reserved.add(pid);
+    });
+    return Array.from(reserved).sort((a, b) => {
+      const an = Number(a.slice(1));
+      const bn = Number(b.slice(1));
+      return an - bn;
+    });
+  }
+
+  function getPlayerPid(stateInput, playerId) {
+    const playerKey = String(playerId || '');
+    if (playerKey === 'YOU') return YOU_PID;
+    const player = (Array.isArray(stateInput?.players) ? stateInput.players : [])
+      .find((entry) => String(entry?.id || '') === playerKey);
+    return normalizePlayerPid(player?.pid);
+  }
+
+  function resolvePlayerIdFromPid(stateInput, pidInput) {
+    const pid = normalizePlayerPid(pidInput);
+    if (!pid) return '';
+    if (pid === YOU_PID) return 'YOU';
+    const player = (Array.isArray(stateInput?.players) ? stateInput.players : [])
+      .find((entry) => normalizePlayerPid(entry?.pid) === pid);
+    return player?.id ? String(player.id) : '';
+  }
+
+  function assignPlayerPid(stateInput, playerId, pidInput) {
+    const state = normalizeState(stateInput || {});
+    const playerKey = String(playerId || '');
+    const pid = normalizePlayerPid(pidInput);
+
+    if (!pid) {
+      return { ok: false, changed: false, error: 'invalid_pid', state };
+    }
+    if (playerKey === 'YOU') {
+      return pid === YOU_PID
+        ? { ok: true, changed: false, pid: YOU_PID, playerId: 'YOU', state }
+        : { ok: false, changed: false, error: 'you_pid_locked', state };
+    }
+    if (pid === YOU_PID) {
+      return { ok: false, changed: false, error: 'pid_reserved_for_you', state };
+    }
+
+    const playerIndex = state.players.findIndex((player) => String(player?.id || '') === playerKey);
+    if (playerIndex < 0) {
+      return { ok: false, changed: false, error: 'player_not_found', state };
+    }
+
+    const player = state.players[playerIndex];
+    const existingPid = normalizePlayerPid(player?.pid);
+    if (existingPid) {
+      return existingPid === pid
+        ? { ok: true, changed: false, pid: existingPid, playerId: playerKey, state }
+        : { ok: false, changed: false, error: 'pid_locked', pid: existingPid, state };
+    }
+
+    const currentOwner = state.players.find((entry, index) => (
+      index !== playerIndex && normalizePlayerPid(entry?.pid) === pid
+    ));
+    if (currentOwner) {
+      return {
+        ok: false,
+        changed: false,
+        error: 'pid_in_use',
+        pid,
+        ownerId: String(currentOwner.id || ''),
+        ownerName: String(currentOwner.name || ''),
+        state
+      };
+    }
+
+    const reserved = new Set(normalizeReservedPlayerPids(state.reservedPlayerPids, state.players));
+    if (reserved.has(pid)) {
+      return { ok: false, changed: false, error: 'pid_reserved', pid, state };
+    }
+
+    const nextPlayers = state.players.slice();
+    nextPlayers[playerIndex] = { ...player, pid };
+    const nextState = normalizeState({
+      ...state,
+      players: nextPlayers,
+      reservedPlayerPids: Array.from(new Set([
+        ...(Array.isArray(state.reservedPlayerPids) ? state.reservedPlayerPids : []),
+        pid
+      ]))
+    });
+
+    return {
+      ok: true,
+      changed: true,
+      pid,
+      playerId: playerKey,
+      state: nextState
+    };
+  }
+
   function normalizePlayer(player) {
     if (!player || typeof player !== 'object' || Array.isArray(player)) return player;
     const greed = Number(player.greed);
     return {
       ...player,
+      pid: normalizePlayerPid(player.pid),
       greed: Number.isFinite(greed) ? Math.min(100, Math.max(0, greed)) : 0
     };
   }
@@ -5481,6 +5600,7 @@ if (maxEntries !== null && finalSchedules.length > maxEntries) {
       reminders:   Array.isArray(src.reminders)   ? src.reminders   : [],
       completions: Array.isArray(src.completions) ? src.completions.map(normalizeCompletion) : [],
       players:     Array.isArray(src.players)     ? src.players.map(normalizePlayer) : [],
+      reservedPlayerPids: normalizeReservedPlayerPids(src.reservedPlayerPids, src.players),
       habits:      Array.isArray(src.habits)      ? src.habits.map(normalizeHabit)      : [],
       flexActions: Array.isArray(src.flexActions) ? src.flexActions : [],
       gameHistory: Array.isArray(src.gameHistory) ? src.gameHistory : [],
@@ -9415,6 +9535,12 @@ return Number(cappedScore.toFixed(1));
     DEFAULT_SEASON_NAME,
     DEFAULT_SEASON_MONTH_KEY,
     JUNE_2026_SEASON_DATE_WINDOWS,
+    YOU_PID,
+    normalizePlayerPid,
+    normalizeReservedPlayerPids,
+    getPlayerPid,
+    resolvePlayerIdFromPid,
+    assignPlayerPid,
     normalizeTask,
     normalizeScoringSettings,
     getScoringSettings,
