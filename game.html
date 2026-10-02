@@ -401,7 +401,10 @@
 .player-editor-modal-panel {
   width: min(100%, 520px);
   max-height: calc(100svh - 28px);
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   border-radius: 18px;
   background: #18181b !important;
   backdrop-filter: none !important;
@@ -478,8 +481,12 @@
   .player-editor-modal-panel {
     width: 100%;
     max-height: calc(100svh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 18px);
-    padding: 10px;
+    padding:
+      10px
+      10px
+      calc(env(safe-area-inset-bottom, 0px) + 28px);
     gap: 7px;
+    scroll-padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 28px);
   }
 
   .player-editor-header {
@@ -518,6 +525,11 @@ body.create-player-modal-open > .mx-auto > header {
 
 body.create-player-modal-open #bottomToolbarMount,
 body.create-player-modal-open #mobileBottomNav {
+  display: none !important;
+}
+
+body.player-editor-modal-open #bottomToolbarMount,
+body.player-editor-modal-open #mobileBottomNav {
   display: none !important;
 }
 
@@ -3418,6 +3430,7 @@ function syncPlayerEditorModalState() {
     const wasOpen = modal.classList.contains("is-open");
     modal.classList.remove("is-open");
     modal.setAttribute("aria-hidden", "true");
+    document.body.classList.remove("player-editor-modal-open");
     if (wasOpen) window.unlockScrollForModal?.();
   }
 }
@@ -3437,6 +3450,8 @@ function openPlayerEditor(playerId) {
   wirePlayerColorEditors(content);
   modal.classList.add("is-open");
   modal.setAttribute("aria-hidden", "false");
+  document.body.classList.add("player-editor-modal-open");
+  panel.scrollTop = 0;
   window.lockScrollForModal?.();
   window.requestAnimationFrame(() => {
     content.querySelector('input[data-field="name"]')?.focus?.({ preventScroll: true });
@@ -3449,6 +3464,7 @@ function closePlayerEditor({ keepEditingState = false } = {}) {
   if (!modal) return;
   modal.classList.remove("is-open");
   modal.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("player-editor-modal-open");
   if (!keepEditingState) editingPlayerId = null;
   window.unlockScrollForModal?.();
 }
@@ -3458,6 +3474,7 @@ function suspendPlayerEditorForCrop() {
   if (!modal || !modal.classList.contains("is-open")) return false;
   modal.classList.remove("is-open");
   modal.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("player-editor-modal-open");
   modal.dataset.suspendedForCrop = "1";
   return true;
 }
@@ -3468,6 +3485,7 @@ function resumePlayerEditorAfterCrop() {
   modal.dataset.suspendedForCrop = "0";
   modal.classList.add("is-open");
   modal.setAttribute("aria-hidden", "false");
+  document.body.classList.add("player-editor-modal-open");
 }
 
 function resolveEditRoot(btn, id) {
