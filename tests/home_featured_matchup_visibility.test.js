@@ -146,6 +146,23 @@ test('featured matchup no longer includes a Best of label', () => {
   assert.doesNotMatch(mount.innerHTML, /Best of/i);
 });
 
+test('featured rivalry matchup is labeled as a rivalry on Home', () => {
+  const state = activeState(5);
+  const featured = {
+    title: 'Alpha vs Beta',
+    roundName: 'Round of 32',
+    gameNumber: 1,
+    statusText: 'Series tied 0–0',
+    isRivalry: true
+  };
+  const { window, mount } = makeContext({ state, featured });
+
+  const view = window.TaskPointsHomeFeaturedMatchup.render(state, '2026-08-01');
+
+  assert.equal(view.visible, true);
+  assert.match(mount.innerHTML, /Rivalry/);
+});
+
 test('places Best of directly after the SERIES line in the user current-series scoreboard', () => {
   const state = activeState(5);
   const { window, scoreboard } = makeContext({ state, featured: null });
