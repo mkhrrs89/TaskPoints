@@ -88,36 +88,8 @@
       <button id="refreshGameHub" class="btn btn-ghost btn-toolbar">Refresh</button>
     </div>
 
-    <!-- Top row: Your snapshot + Today's matchup -->
-    <div class="grid grid-cols-1 lg:grid-cols-[1fr_1.2fr] gap-3 mb-6">
-
-      <!-- Your snapshot -->
-      <div class="glass p-4">
-        <div class="flex items-center justify-between mb-1">
-          <h3 class="font-semibold text-lg">Your Stats</h3>
-          <div class="muted text-xs" id="youRankLine">—</div>
-        </div>
-
-        <div class="grid grid-cols-4 sm:grid-cols-2 gap-3" id="youStatsGrid">
-          <div class="glass p-3 text-center">
-            <div class="muted text-[11px] uppercase tracking-wide">Record</div>
-            <div class="text-xl font-extrabold tabular-nums tp-score-num" id="youRecord">—</div>
-          </div>
-          <div class="glass p-3 text-center">
-            <div class="muted text-[11px] uppercase tracking-wide">Win %</div>
-            <div class="text-xl font-extrabold tabular-nums tp-score-num" id="youWinPct">—</div>
-          </div>
-          <div class="glass p-3 text-center">
-            <div class="muted text-[11px] uppercase tracking-wide">PPD</div>
-            <div class="text-xl font-extrabold tabular-nums tp-score-num" id="youPPD">—</div>
-          </div>
-          <div class="glass p-3 text-center">
-            <div class="muted text-[11px] uppercase tracking-wide">Games</div>
-            <div class="text-xl font-extrabold tabular-nums tp-score-num" id="youGames">—</div>
-          </div>
-        </div>
-
-      </div>
+    <!-- Top row: Today's matchup -->
+    <div class="mb-6">
 
       <!-- Today's matchup -->
       <div class="glass p-4">
@@ -233,8 +205,6 @@
     <div class="mu-val mu-right" id="muOppRisk">—</div>
   </div>
 </div>
-
-
 
           <div id="noMatchupNotice" class="muted text-sm mt-3 hidden">
             No matchup found for today yet.
@@ -844,27 +814,6 @@ renderAvatarInto(avatarSlot, {
     if (el) el.innerHTML = '';
   }
 
-  function renderYourStats(state, standings){
-    const youRow = standings.find(r => r.id === 'YOU');
-    if (!youRow) return;
-
-    $('youRecord').textContent = (youRow.wins != null && youRow.losses != null) ? `${youRow.wins}-${youRow.losses}` : '—';
-    $('youWinPct').textContent = fmtPct(youRow.winPct);
-    $('youPPD').textContent = fmt1(youRow.avgPPD);
-    $('youGames').textContent = youRow.games != null ? String(youRow.games) : '—';
-
-    const rank = standings.findIndex(r => r.id === 'YOU');
-    const total = standings.length;
-    $('youRankLine').textContent = (rank >= 0) ? `#${rank+1} of ${total}` : '—';
-
-    const quick = $('youQuickLine');
-    clearEl(quick);
-    if (quick) {
-      quick.appendChild(playerLine(state, 'YOU', `PPD ${fmt1(youRow.avgPPD)}`));
-      if (Number.isFinite(youRow.winPct)) quick.appendChild(playerLine(state, 'YOU', `Win% ${fmtPct(youRow.winPct)}`));
-    }
-  }
-
   function renderStandings(state){
     const standings = buildStandings(state);
 
@@ -939,7 +888,6 @@ renderAvatarInto(avatarSlot, {
       applyNameButton(nameText, r.id);
     }
 
-    renderYourStats(state, standings);
     return { standings };
   }
 
