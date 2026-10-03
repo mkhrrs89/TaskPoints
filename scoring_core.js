@@ -2228,6 +2228,24 @@ const seasonGateOpen = directSeason
     });
   }
 
+  function isPlayerRivalry(state, playerAId, playerBId) {
+    const aId = String(playerAId || '');
+    const bId = String(playerBId || '');
+    if (!aId || !bId || aId === bId) return false;
+
+    const players = Array.isArray(state?.players) ? state.players : [];
+    const byId = new Map(players
+      .filter((player) => player?.id)
+      .map((player) => [String(player.id), player]));
+
+    const a = byId.get(aId);
+    const b = byId.get(bId);
+    const aRival = String(a?.rivalId || '');
+    const bRival = String(b?.rivalId || '');
+
+    return aRival === bId || bRival === aId;
+  }
+
   function getFeaturedSeasonMatchup(season, dateKeyStr, state = {}) {
     const entries = getSeasonSeriesEntries(season).filter((series) => series && !isSeasonSeriesComplete(series) && series.playerAId && series.playerBId);
     if (!entries.length) return null;
@@ -2240,7 +2258,8 @@ const seasonGateOpen = directSeason
       seedSum: (Number(series.playerASeed) || 99) + (Number(series.playerBSeed) || 99),
       upsetThreat: Math.abs((Number(series.playerASeed) || 99) - (Number(series.playerBSeed) || 99)),
       tied: (Number(series.winsA) || 0) === (Number(series.winsB) || 0) && ((Number(series.winsA) || 0) + (Number(series.winsB) || 0) > 0),
-      elimination: isSeasonEliminationGame(series)
+      elimination: isSeasonEliminationGame(series),
+      rivalry: isPlayerRivalry(state, series.playerAId, series.playerBId)
     }));
     const byOrder = (a, b) => {
       if (a.today !== b.today) return a.today ? -1 : 1;
@@ -2259,9 +2278,25 @@ const seasonGateOpen = directSeason
     for (let i = 0; i < priorityGroups.length; i += 1) {
       let group = candidates.filter(priorityGroups[i]);
       if (!group.length) continue;
-      if (i === 3) group = group.sort((a, b) => b.upsetThreat - a.upsetThreat || a.seedSum - b.seedSum || byOrder(a, b));
-      else if (i === 4) group = group.sort((a, b) => a.seedSum - b.seedSum || byOrder(a, b));
-      else group = group.sort(byOrder);
+      if (i === 3) {
+        group = group.sort((a, b) =>
+          Number(b.rivalry) - Number(a.rivalry)
+          || b.upsetThreat - a.upsetThreat
+          || a.seedSum - b.seedSum
+          || byOrder(a, b)
+        );
+      } else if (i === 4) {
+        group = group.sort((a, b) =>
+          Number(b.rivalry) - Number(a.rivalry)
+          || a.seedSum - b.seedSum
+          || byOrder(a, b)
+        );
+      } else {
+        group = group.sort((a, b) =>
+          Number(b.rivalry) - Number(a.rivalry)
+          || byOrder(a, b)
+        );
+      }
       const chosen = group[0];
       return {
         series: chosen.series,
@@ -2269,7 +2304,8 @@ const seasonGateOpen = directSeason
         roundName: chosen.series.roundName || getSeasonDisplayName(chosen.series.roundId),
         statusText: getSeriesStatusText(chosen.series),
         gameNumber: getCurrentSeriesGameNumberForHome(chosen.series, dateKeyStr),
-        isEliminationGame: isSeasonEliminationGame(chosen.series)
+        isEliminationGame: isSeasonEliminationGame(chosen.series),
+        isRivalry: chosen.rivalry
       };
     }
     return null;
@@ -9559,6 +9595,7 @@ return Number(cappedScore.toFixed(1));
     getRoundScheduledGameNumberForDate,
     inferSeasonRoundActualStartDateKey,
     getSeasonSeriesLength,
+    isPlayerRivalry,
     getSeasonDisplayName,
     getSeasonDateWindows,
     isSeasonDate,
