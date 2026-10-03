@@ -57,3 +57,100 @@ test('featured home matchup uses live series score for game number and eliminati
   assert.equal(featured.gameNumber, 3);
   assert.equal(featured.isEliminationGame, true);
 });
+
+test('featured matchup prefers a rivalry over a comparable ordinary matchup', () => {
+  const rivalry = buildSeries({
+    id: 'rivalry',
+    seriesIndex: 2,
+    playerAId: 'A',
+    playerAName: 'Alpha',
+    playerASeed: 18,
+    playerBId: 'B',
+    playerBName: 'Beta',
+    playerBSeed: 19,
+    winsA: 0,
+    winsB: 0,
+    bestOf: 5,
+    winsNeeded: 3
+  });
+  const ordinary = buildSeries({
+    id: 'ordinary',
+    seriesIndex: 1,
+    playerAId: 'C',
+    playerAName: 'Charlie',
+    playerASeed: 1,
+    playerBId: 'D',
+    playerBName: 'Delta',
+    playerBSeed: 32,
+    winsA: 0,
+    winsB: 0,
+    bestOf: 5,
+    winsNeeded: 3
+  });
+  const season = { id: 'season-1', status: 'active', series: { rivalry, ordinary } };
+  const state = {
+    players: [
+      { id: 'A', name: 'Alpha', rivalId: 'B' },
+      { id: 'B', name: 'Beta' },
+      { id: 'C', name: 'Charlie' },
+      { id: 'D', name: 'Delta' }
+    ],
+    matchups: [
+      { dateKey: '2026-06-02', matchupType: 'tournament', seriesId: 'rivalry' },
+      { dateKey: '2026-06-02', matchupType: 'tournament', seriesId: 'ordinary' }
+    ]
+  };
+
+  const featured = core.getFeaturedSeasonMatchup(season, '2026-06-02', state);
+
+  assert.equal(core.isPlayerRivalry(state, 'A', 'B'), true);
+  assert.equal(core.isPlayerRivalry(state, 'B', 'A'), true);
+  assert.equal(featured.series.id, 'rivalry');
+  assert.equal(featured.isRivalry, true);
+});
+
+test('rivalry boost does not outrank a higher-stakes elimination game', () => {
+  const rivalry = buildSeries({
+    id: 'rivalry',
+    seriesIndex: 1,
+    playerAId: 'A',
+    playerAName: 'Alpha',
+    playerBId: 'B',
+    playerBName: 'Beta',
+    winsA: 0,
+    winsB: 0,
+    bestOf: 5,
+    winsNeeded: 3
+  });
+  const elimination = buildSeries({
+    id: 'elimination',
+    seriesIndex: 2,
+    playerAId: 'C',
+    playerAName: 'Charlie',
+    playerBId: 'D',
+    playerBName: 'Delta',
+    winsA: 2,
+    winsB: 0,
+    bestOf: 5,
+    winsNeeded: 3
+  });
+  const season = { id: 'season-1', status: 'active', series: { rivalry, elimination } };
+  const state = {
+    players: [
+      { id: 'A', rivalId: 'B' },
+      { id: 'B' },
+      { id: 'C' },
+      { id: 'D' }
+    ],
+    matchups: [
+      { dateKey: '2026-06-02', matchupType: 'tournament', seriesId: 'rivalry' },
+      { dateKey: '2026-06-02', matchupType: 'tournament', seriesId: 'elimination' }
+    ]
+  };
+
+  const featured = core.getFeaturedSeasonMatchup(season, '2026-06-02', state);
+
+  assert.equal(featured.series.id, 'elimination');
+  assert.equal(featured.isEliminationGame, true);
+  assert.equal(featured.isRivalry, false);
+});
