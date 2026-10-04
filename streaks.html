@@ -537,6 +537,9 @@
         const todayKey = appDateKey(new Date());
         const yesterdayKey = previousDayKey(todayKey);
         const current = [];
+        const sharedRisk = typeof core?.getAtRiskStreakRows === 'function'
+          ? core.getAtRiskStreakRows(state, { todayKey, pendingDeltas })
+          : null;
         const risk = [];
 
         for (const habit of habits) {
@@ -549,7 +552,7 @@
           // At Risk keeps the displayed streak at the completed-through-yesterday
           // count, while the Bonus column previews the value of completing today.
           const yesterdayStreak = countStreakEndingOn(status.done, yesterdayKey);
-          if (todayState === '' && yesterdayStreak > 0) {
+          if (!sharedRisk && todayState === '' && yesterdayStreak > 0) {
             risk.push(makeRow(
               habit,
               yesterdayStreak,
@@ -568,7 +571,7 @@
           }
         }
 
-        return { current, risk };
+        return { current, risk: sharedRisk || risk };
       }
 
       function compareRows(a, b, context) {
