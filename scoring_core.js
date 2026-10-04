@@ -865,11 +865,12 @@ const AUGUST_2026_SEASON_DATE_WINDOWS = [
   { id: 'finals', startDate: '2026-08-25', endDate: '2026-08-31', displayName: 'Finals', bestOf: 7 }
 ];
 const OCTOBER_2026_SEASON_DATE_WINDOWS = [
-  { id: 'play_in', startDate: '2026-10-01', endDate: '2026-10-03', displayName: 'Play-In', bestOf: 3 },
-  { id: 'round_of_32', startDate: '2026-10-04', endDate: '2026-10-08', displayName: 'Round of 32', bestOf: 5 },
-  { id: 'sweet_16', startDate: '2026-10-09', endDate: '2026-10-13', displayName: 'Sweet 16', bestOf: 5 },
-  { id: 'quarterfinals', startDate: '2026-10-14', endDate: '2026-10-18', displayName: 'Quarterfinals', bestOf: 5 },
-  { id: 'semifinals', startDate: '2026-10-19', endDate: '2026-10-23', displayName: 'Semifinals', bestOf: 5 },
+  { id: 'play_in', startDate: '2026-10-01', endDate: '2026-10-01', displayName: 'Play-In', bestOf: 1 },
+  { id: 'opening_round', startDate: '2026-10-02', endDate: '2026-10-04', displayName: 'Opening Round', bestOf: 3 },
+  { id: 'round_of_32', startDate: '2026-10-05', endDate: '2026-10-09', displayName: 'Round of 32', bestOf: 5 },
+  { id: 'round_of_16', startDate: '2026-10-10', endDate: '2026-10-14', displayName: 'Round of 16', bestOf: 5 },
+  { id: 'quarterfinals', startDate: '2026-10-15', endDate: '2026-10-19', displayName: 'Quarterfinals', bestOf: 5 },
+  { id: 'semifinals', startDate: '2026-10-20', endDate: '2026-10-24', displayName: 'Semifinals', bestOf: 5 },
   { id: 'finals', startDate: '2026-10-25', endDate: '2026-10-31', displayName: 'Finals', bestOf: 7 }
 ];
 
@@ -1182,6 +1183,7 @@ function isJuneSeasonDate(dateKey) {
       updatedAtISO: typeof options.updatedAtISO === 'string' ? options.updatedAtISO : nowISO,
       playerPool: Array.isArray(options.playerPool) ? options.playerPool.slice() : [],
       seedMode: typeof options.seedMode === 'string' ? options.seedMode : 'standings',
+      seedRankingScope: typeof options.seedRankingScope === 'string' ? options.seedRankingScope : '',
       seeds: Array.isArray(options.seeds) ? options.seeds.slice() : [],
       bracket: isSeasonObject(options.bracket) ? { ...options.bracket } : {},
       series: isSeasonObject(options.series) ? { ...options.series } : {},
@@ -2226,6 +2228,24 @@ const seasonGateOpen = directSeason
     });
   }
 
+  function isPlayerRivalry(state, playerAId, playerBId) {
+    const aId = String(playerAId || '');
+    const bId = String(playerBId || '');
+    if (!aId || !bId || aId === bId) return false;
+
+    const players = Array.isArray(state?.players) ? state.players : [];
+    const byId = new Map(players
+      .filter((player) => player?.id)
+      .map((player) => [String(player.id), player]));
+
+    const a = byId.get(aId);
+    const b = byId.get(bId);
+    const aRival = String(a?.rivalId || '');
+    const bRival = String(b?.rivalId || '');
+
+    return aRival === bId || bRival === aId;
+  }
+
   function getFeaturedSeasonMatchup(season, dateKeyStr, state = {}) {
     const entries = getSeasonSeriesEntries(season).filter((series) => series && !isSeasonSeriesComplete(series) && series.playerAId && series.playerBId);
     if (!entries.length) return null;
@@ -2238,7 +2258,8 @@ const seasonGateOpen = directSeason
       seedSum: (Number(series.playerASeed) || 99) + (Number(series.playerBSeed) || 99),
       upsetThreat: Math.abs((Number(series.playerASeed) || 99) - (Number(series.playerBSeed) || 99)),
       tied: (Number(series.winsA) || 0) === (Number(series.winsB) || 0) && ((Number(series.winsA) || 0) + (Number(series.winsB) || 0) > 0),
-      elimination: isSeasonEliminationGame(series)
+      elimination: isSeasonEliminationGame(series),
+      rivalry: isPlayerRivalry(state, series.playerAId, series.playerBId)
     }));
     const byOrder = (a, b) => {
       if (a.today !== b.today) return a.today ? -1 : 1;
@@ -2257,9 +2278,25 @@ const seasonGateOpen = directSeason
     for (let i = 0; i < priorityGroups.length; i += 1) {
       let group = candidates.filter(priorityGroups[i]);
       if (!group.length) continue;
-      if (i === 3) group = group.sort((a, b) => b.upsetThreat - a.upsetThreat || a.seedSum - b.seedSum || byOrder(a, b));
-      else if (i === 4) group = group.sort((a, b) => a.seedSum - b.seedSum || byOrder(a, b));
-      else group = group.sort(byOrder);
+      if (i === 3) {
+        group = group.sort((a, b) =>
+          Number(b.rivalry) - Number(a.rivalry)
+          || b.upsetThreat - a.upsetThreat
+          || a.seedSum - b.seedSum
+          || byOrder(a, b)
+        );
+      } else if (i === 4) {
+        group = group.sort((a, b) =>
+          Number(b.rivalry) - Number(a.rivalry)
+          || a.seedSum - b.seedSum
+          || byOrder(a, b)
+        );
+      } else {
+        group = group.sort((a, b) =>
+          Number(b.rivalry) - Number(a.rivalry)
+          || byOrder(a, b)
+        );
+      }
       const chosen = group[0];
       return {
         series: chosen.series,
@@ -2267,7 +2304,8 @@ const seasonGateOpen = directSeason
         roundName: chosen.series.roundName || getSeasonDisplayName(chosen.series.roundId),
         statusText: getSeriesStatusText(chosen.series),
         gameNumber: getCurrentSeriesGameNumberForHome(chosen.series, dateKeyStr),
-        isEliminationGame: isSeasonEliminationGame(chosen.series)
+        isEliminationGame: isSeasonEliminationGame(chosen.series),
+        isRivalry: chosen.rivalry
       };
     }
     return null;
@@ -5462,11 +5500,130 @@ if (maxEntries !== null && finalSchedules.length > maxEntries) {
     return cleanedState;
   }
 
+  const YOU_PID = 'P000';
+
+  function normalizePlayerPid(value) {
+    const raw = String(value ?? '').trim().toUpperCase();
+    if (!raw) return '';
+
+    const numericText = raw.startsWith('P') ? raw.slice(1) : raw;
+    if (!/^\d+$/.test(numericText)) return '';
+
+    const numeric = Number(numericText);
+    if (!Number.isSafeInteger(numeric) || numeric < 0) return '';
+    return `P${String(numeric).padStart(3, '0')}`;
+  }
+
+  function normalizeReservedPlayerPids(values, players = []) {
+    const reserved = new Set([YOU_PID]);
+    (Array.isArray(values) ? values : []).forEach((value) => {
+      const pid = normalizePlayerPid(value);
+      if (pid) reserved.add(pid);
+    });
+    (Array.isArray(players) ? players : []).forEach((player) => {
+      const pid = normalizePlayerPid(player?.pid);
+      if (pid) reserved.add(pid);
+    });
+    return Array.from(reserved).sort((a, b) => {
+      const an = Number(a.slice(1));
+      const bn = Number(b.slice(1));
+      return an - bn;
+    });
+  }
+
+  function getPlayerPid(stateInput, playerId) {
+    const playerKey = String(playerId || '');
+    if (playerKey === 'YOU') return YOU_PID;
+    const player = (Array.isArray(stateInput?.players) ? stateInput.players : [])
+      .find((entry) => String(entry?.id || '') === playerKey);
+    return normalizePlayerPid(player?.pid);
+  }
+
+  function resolvePlayerIdFromPid(stateInput, pidInput) {
+    const pid = normalizePlayerPid(pidInput);
+    if (!pid) return '';
+    if (pid === YOU_PID) return 'YOU';
+    const player = (Array.isArray(stateInput?.players) ? stateInput.players : [])
+      .find((entry) => normalizePlayerPid(entry?.pid) === pid);
+    return player?.id ? String(player.id) : '';
+  }
+
+  function assignPlayerPid(stateInput, playerId, pidInput) {
+    const state = normalizeState(stateInput || {});
+    const playerKey = String(playerId || '');
+    const pid = normalizePlayerPid(pidInput);
+
+    if (!pid) {
+      return { ok: false, changed: false, error: 'invalid_pid', state };
+    }
+    if (playerKey === 'YOU') {
+      return pid === YOU_PID
+        ? { ok: true, changed: false, pid: YOU_PID, playerId: 'YOU', state }
+        : { ok: false, changed: false, error: 'you_pid_locked', state };
+    }
+    if (pid === YOU_PID) {
+      return { ok: false, changed: false, error: 'pid_reserved_for_you', state };
+    }
+
+    const playerIndex = state.players.findIndex((player) => String(player?.id || '') === playerKey);
+    if (playerIndex < 0) {
+      return { ok: false, changed: false, error: 'player_not_found', state };
+    }
+
+    const player = state.players[playerIndex];
+    const existingPid = normalizePlayerPid(player?.pid);
+    if (existingPid) {
+      return existingPid === pid
+        ? { ok: true, changed: false, pid: existingPid, playerId: playerKey, state }
+        : { ok: false, changed: false, error: 'pid_locked', pid: existingPid, state };
+    }
+
+    const currentOwner = state.players.find((entry, index) => (
+      index !== playerIndex && normalizePlayerPid(entry?.pid) === pid
+    ));
+    if (currentOwner) {
+      return {
+        ok: false,
+        changed: false,
+        error: 'pid_in_use',
+        pid,
+        ownerId: String(currentOwner.id || ''),
+        ownerName: String(currentOwner.name || ''),
+        state
+      };
+    }
+
+    const reserved = new Set(normalizeReservedPlayerPids(state.reservedPlayerPids, state.players));
+    if (reserved.has(pid)) {
+      return { ok: false, changed: false, error: 'pid_reserved', pid, state };
+    }
+
+    const nextPlayers = state.players.slice();
+    nextPlayers[playerIndex] = { ...player, pid };
+    const nextState = normalizeState({
+      ...state,
+      players: nextPlayers,
+      reservedPlayerPids: Array.from(new Set([
+        ...(Array.isArray(state.reservedPlayerPids) ? state.reservedPlayerPids : []),
+        pid
+      ]))
+    });
+
+    return {
+      ok: true,
+      changed: true,
+      pid,
+      playerId: playerKey,
+      state: nextState
+    };
+  }
+
   function normalizePlayer(player) {
     if (!player || typeof player !== 'object' || Array.isArray(player)) return player;
     const greed = Number(player.greed);
     return {
       ...player,
+      pid: normalizePlayerPid(player.pid),
       greed: Number.isFinite(greed) ? Math.min(100, Math.max(0, greed)) : 0
     };
   }
@@ -5479,6 +5636,7 @@ if (maxEntries !== null && finalSchedules.length > maxEntries) {
       reminders:   Array.isArray(src.reminders)   ? src.reminders   : [],
       completions: Array.isArray(src.completions) ? src.completions.map(normalizeCompletion) : [],
       players:     Array.isArray(src.players)     ? src.players.map(normalizePlayer) : [],
+      reservedPlayerPids: normalizeReservedPlayerPids(src.reservedPlayerPids, src.players),
       habits:      Array.isArray(src.habits)      ? src.habits.map(normalizeHabit)      : [],
       flexActions: Array.isArray(src.flexActions) ? src.flexActions : [],
       gameHistory: Array.isArray(src.gameHistory) ? src.gameHistory : [],
@@ -6671,7 +6829,8 @@ return { state: merged, storageKey };
     const allowGeneratedCacheClear = Boolean(options.allowGeneratedCacheClear || options.storageEmergencyCompaction);
     const stickyArrayFields = [
       'tasks', 'completions', 'habits', 'players', 'flexActions',
-      'gameHistory', 'matchups', 'weightHistory', 'vo2MaxHistory', 'reminders', 'seasonHistory'
+      'gameHistory', 'matchups', 'weightHistory', 'vo2MaxHistory', 'reminders', 'seasonHistory',
+      'reservedPlayerPids'
     ];
     if (!allowGeneratedCacheClear) {
       stickyArrayFields.push('schedule');
@@ -7829,6 +7988,121 @@ function computeCalLogBonusPoints(calorieEntries, settings) {
     if (streakPoints != null) return streakPoints;
 
     return roundPoints(entry?.points);
+  }
+
+  function getAtRiskStreakRows(stateInput, options = {}) {
+    const state = stateInput && typeof stateInput === 'object' ? stateInput : {};
+    const habits = Array.isArray(state.habits) ? state.habits : [];
+    const today = /^\d{4}-\d{2}-\d{2}$/.test(String(options.todayKey || ''))
+      ? String(options.todayKey)
+      : todayKey();
+    const yesterday = addDaysToDateKey(today, -1);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(today) || !/^\d{4}-\d{2}-\d{2}$/.test(yesterday)) return [];
+
+    let pendingDeltas = Array.isArray(options.pendingDeltas) ? options.pendingDeltas : null;
+    if (!pendingDeltas) {
+      try { pendingDeltas = readPendingHabitDeltas(); }
+      catch (_) { pendingDeltas = []; }
+    }
+
+    const completionDaysByHabit = new Map();
+    for (const completion of (Array.isArray(state.completions) ? state.completions : [])) {
+      if (completion?.source !== 'habit' && completion?.source !== 'vice') continue;
+      const habitId = String(completion?.habitId || completion?.viceId || '');
+      const day = getCompletionDayKey(completion);
+      if (!habitId || !/^\d{4}-\d{2}-\d{2}$/.test(day)) continue;
+      if (!completionDaysByHabit.has(habitId)) completionDaysByHabit.set(habitId, new Set());
+      completionDaysByHabit.get(habitId).add(day);
+    }
+
+    const latestPendingByHabitDay = new Map();
+    for (const delta of pendingDeltas) {
+      const habitId = String(delta?.habitId || '');
+      const day = String(delta?.dayKey || '');
+      if (!habitId || !/^\d{4}-\d{2}-\d{2}$/.test(day)) continue;
+      const key = `${habitId}:${day}`;
+      const prior = latestPendingByHabitDay.get(key);
+      if (!prior || String(delta?.updatedAtISO || '') >= String(prior?.updatedAtISO || '')) {
+        latestPendingByHabitDay.set(key, delta);
+      }
+    }
+
+    const countStreakEndingOn = (done, endKey) => {
+      if (!done.has(endKey)) return 0;
+      let count = 0;
+      let cursor = endKey;
+      while (cursor && done.has(cursor)) {
+        count += 1;
+        if (count > 5000) break;
+        cursor = addDaysToDateKey(cursor, -1);
+      }
+      return count;
+    };
+
+    const rows = [];
+    for (const habit of habits) {
+      if (!habit || habit.retired || !habit.id) continue;
+      const habitId = String(habit.id);
+      const done = new Set((Array.isArray(habit.doneKeys) ? habit.doneKeys : []).filter((key) => /^\d{4}-\d{2}-\d{2}$/.test(String(key))));
+      const failed = new Set((Array.isArray(habit.failedKeys) ? habit.failedKeys : []).filter((key) => /^\d{4}-\d{2}-\d{2}$/.test(String(key))));
+
+      completionDaysByHabit.get(habitId)?.forEach((day) => done.add(day));
+      failed.forEach((day) => done.delete(day));
+
+      for (const [key, delta] of latestPendingByHabitDay) {
+        if (!key.startsWith(`${habitId}:`)) continue;
+        const day = String(delta.dayKey || '');
+        done.delete(day);
+        failed.delete(day);
+        const isDone = delta?.done === true || delta?.status === 'full' || delta?.status === 'half';
+        const isFailed = delta?.failed === true || delta?.status === 'failed';
+        if (isDone) done.add(day);
+        else if (isFailed) failed.add(day);
+      }
+
+      if (done.has(today) || failed.has(today)) continue;
+      const streak = countStreakEndingOn(done, yesterday);
+      if (streak <= 0) continue;
+
+      const basePoints = roundPoints(Number(habit.pointsPerDay) || 0, 2);
+      let bonus = 0;
+      if (habit.streakMultiplierEnabled === true && streak >= 1 && basePoints) {
+        const previewHabit = {
+          ...habit,
+          doneKeys: Array.from(new Set([...done, today])),
+          failedKeys: Array.from(failed).filter((day) => day !== today)
+        };
+        const previewState = {
+          ...state,
+          habits: habits.map((candidate) => candidate?.id === habit.id ? previewHabit : candidate)
+        };
+        const source = habit.category === 'vice' ? 'vice' : 'habit';
+        const synthetic = {
+          id: `streak-preview:${habit.id}:${today}`,
+          taskId: `streak-preview:${habit.id}:${today}`,
+          source,
+          habitId: habit.id,
+          dayKey: today,
+          completedAtISO: `${today}T12:00:00.000`,
+          points: basePoints,
+          completionFraction: 1
+        };
+        const adjusted = Number(pointsForCompletion(synthetic, previewState));
+        if (Number.isFinite(adjusted)) bonus = roundPoints(adjusted - basePoints, 2);
+      }
+
+      rows.push({
+        id: habitId,
+        name: String(habit.name || 'Untitled'),
+        category: habit.category === 'vice' ? 'vice' : 'habit',
+        streak,
+        points: basePoints,
+        bonus,
+        pointsAtRisk: bonus
+      });
+    }
+
+    return rows;
   }
 
   function caloriesToPoints(cal, settings){
@@ -9413,6 +9687,12 @@ return Number(cappedScore.toFixed(1));
     DEFAULT_SEASON_NAME,
     DEFAULT_SEASON_MONTH_KEY,
     JUNE_2026_SEASON_DATE_WINDOWS,
+    YOU_PID,
+    normalizePlayerPid,
+    normalizeReservedPlayerPids,
+    getPlayerPid,
+    resolvePlayerIdFromPid,
+    assignPlayerPid,
     normalizeTask,
     normalizeScoringSettings,
     getScoringSettings,
@@ -9430,6 +9710,7 @@ return Number(cappedScore.toFixed(1));
     getRoundScheduledGameNumberForDate,
     inferSeasonRoundActualStartDateKey,
     getSeasonSeriesLength,
+    isPlayerRivalry,
     getSeasonDisplayName,
     getSeasonDateWindows,
     isSeasonDate,
@@ -9569,6 +9850,7 @@ softCurbNpcScore,
 simulateAiScoreForPlayerCore,
     deriveCompletionPoints,
     pointsForCompletion,
+    getAtRiskStreakRows,
     syncDerivedPoints,
     computeMatchupRecord,
     computeCompletionRecord,
