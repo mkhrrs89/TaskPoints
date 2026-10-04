@@ -6938,3 +6938,147 @@ metal background attached only to the day-bubble row.
     grid-column: 1 / -1;
   }
 }
+
+
+/* Home Habits/Vices: shared top-three streaks at risk */
+.home-streak-risk-card {
+  overflow: hidden;
+  border-color: rgba(127, 29, 29, 0.72) !important;
+  background:
+    linear-gradient(180deg, rgba(88, 28, 28, 0.34), rgba(24, 24, 27, 0.92)) !important;
+}
+
+.home-streak-risk-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(127, 29, 29, 0.45);
+  background: rgba(69, 10, 10, 0.30);
+}
+
+.home-streak-risk-kicker {
+  color: #fecaca;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.home-streak-risk-subtitle {
+  margin-top: 1px;
+  color: #9ca3af;
+  font-size: 10px;
+  line-height: 1.25;
+}
+
+.home-streak-risk-link {
+  flex: 0 0 auto;
+  color: #fca5a5;
+  font-size: 10px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.home-streak-risk-link:hover {
+  text-decoration: underline;
+}
+
+.home-streak-risk-list {
+  display: grid;
+}
+
+.home-streak-risk-row {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  min-height: 44px;
+  padding: 7px 12px;
+  border-bottom: 1px solid rgba(63, 63, 70, 0.58);
+}
+
+.home-streak-risk-row:last-child {
+  border-bottom: 0;
+}
+
+.home-streak-risk-rank {
+  color: #71717a;
+  font-size: 10px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.home-streak-risk-main {
+  min-width: 0;
+}
+
+.home-streak-risk-name {
+  overflow: hidden;
+  color: #f4f4f5;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-streak-risk-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+  color: #8b949e;
+  font-size: 9px;
+  line-height: 1.2;
+}
+
+.home-streak-risk-value {
+  display: grid;
+  justify-items: end;
+  min-width: 52px;
+  font-variant-numeric: tabular-nums;
+}
+
+.home-streak-risk-value strong {
+  color: #fca5a5;
+  font-size: 13px;
+  line-height: 1.1;
+}
+
+.home-streak-risk-value span {
+  margin-top: 2px;
+  color: #8b949e;
+  font-size: 8px;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.home-streak-risk-empty {
+  padding: 13px 12px;
+  color: #71717a;
+  font-size: 11px;
+  text-align: center;
+}
+
+@media (max-width: 640px) {
+  .home-streak-risk-card {
+    margin-bottom: 10px !important;
+  }
+
+  .home-streak-risk-head {
+    padding: 8px 10px;
+  }
+
+  .home-streak-risk-row {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+}
+
+@media (min-width: 768px) {
+  .home-streak-risk-card {
+    display: none;
+  }
+}

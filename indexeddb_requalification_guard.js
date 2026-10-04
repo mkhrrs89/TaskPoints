@@ -135,21 +135,39 @@
   const HIGH_START = 62;
   const OLD_HIGH_MAX = 85;
   const NEW_HIGH_MAX = 86;
+  const HIGH_TAIL_POWER = 1.5;
+  const HIGH_TAIL_EFFECTIVE_DATE = '2026-09-30';
   const LOW_START = 20;
   const LOW_MIN = 5;
   const OLD_HIGH_RANGE = OLD_HIGH_MAX - HIGH_START;
   const NEW_HIGH_RANGE = NEW_HIGH_MAX - HIGH_START;
   const roundScore = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 10) / 10;
 
-  core.softCurbNpcScore = function softCurbNpcScore86(rawScore) {
+  function shouldUseAggressiveHighTail(dateKey) {
+    const normalized = String(dateKey || '').slice(0, 10);
+    return !normalized || normalized >= HIGH_TAIL_EFFECTIVE_DATE;
+  }
+
+  function highCurbFromRaw(rawScore, aggressive = true) {
+    const score = Number(rawScore);
+    if (!Number.isFinite(score) || score <= HIGH_START) return score;
+
+    const over = score - HIGH_START;
+    const progress = over / (over + NEW_HIGH_RANGE);
+    const shapedProgress = aggressive ? Math.pow(progress, HIGH_TAIL_POWER) : progress;
+    return HIGH_START + NEW_HIGH_RANGE * shapedProgress;
+  }
+
+  core.softCurbNpcScore = function softCurbNpcScore86(rawScore, options = {}) {
     const score = Number(rawScore);
     if (!Number.isFinite(score)) return LOW_MIN;
 
     let cappedScore = score;
     if (score > HIGH_START) {
-      const over = score - HIGH_START;
-      cappedScore = HIGH_START + NEW_HIGH_RANGE * (over / (over + NEW_HIGH_RANGE));
+      const requestedDateKey = typeof options === 'string' ? options : options?.dateKey;
+      cappedScore = highCurbFromRaw(score, shouldUseAggressiveHighTail(requestedDateKey));
     } else if (score < LOW_START) {
+      // Preserve the existing low-end taper exactly.
       const under = LOW_START - score;
       const lowRange = LOW_START - LOW_MIN;
       cappedScore = LOW_START - lowRange * (under / (under + lowRange));
@@ -159,16 +177,19 @@
     return roundScore(cappedScore);
   };
 
-  function remapOldHighCurbTo86(value) {
+  function remapOldHighCurbTo86(value, dateKey) {
     const score = Number(value);
     if (!Number.isFinite(score) || score <= HIGH_START) return score;
     if (score >= OLD_HIGH_MAX) return NEW_HIGH_MAX;
 
+    // Recover the approximate pre-taper raw score from the legacy 62→85 curve,
+    // then apply either the historical 62→86 curve or the new thinner-tail curve.
     const delta = score - HIGH_START;
     const denominator = OLD_HIGH_RANGE - delta;
     if (denominator <= 0) return NEW_HIGH_MAX;
     const estimatedOver = (OLD_HIGH_RANGE * delta) / denominator;
-    return roundScore(HIGH_START + NEW_HIGH_RANGE * (estimatedOver / (estimatedOver + NEW_HIGH_RANGE)));
+    const estimatedRawScore = HIGH_START + estimatedOver;
+    return roundScore(highCurbFromRaw(estimatedRawScore, shouldUseAggressiveHighTail(dateKey)));
   }
 
   function installFinalSimulatorWrapper() {
@@ -185,13 +206,13 @@
       };
 
       const oldFinalScore = Number(current(player, dateKey, { ...options, context: wrappedContext }));
-      let newFinalScore = remapOldHighCurbTo86(oldFinalScore);
+      let newFinalScore = remapOldHighCurbTo86(oldFinalScore, dateKey);
       let nextEffects = capturedEffects;
 
       if (capturedEffects && Number(capturedEffects.greedTelemetryVersion) >= 1) {
         const oldAppliedGreed = Number(capturedEffects.greedBonus) || 0;
         const oldBaseScore = oldFinalScore - oldAppliedGreed;
-        const newBaseScore = remapOldHighCurbTo86(oldBaseScore);
+        const newBaseScore = remapOldHighCurbTo86(oldBaseScore, dateKey);
         const potentialGreed = capturedEffects.greedPerformanceEligible === true
           ? Math.max(0, Number(capturedEffects.greedPotentialBonus) || 0)
           : 0;

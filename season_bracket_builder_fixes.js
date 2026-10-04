@@ -25,9 +25,12 @@
     const incoming = clone(config || {});
     const entrantCount = requestedEntrantCount(incoming, availableSeeds);
     const useSeasonTwoPreset = incoming.presetId === api.SEASON_TWO_PRESET_ID && entrantCount >= 60;
-    const generated = useSeasonTwoPreset
-      ? api.createSeasonTwoPreset(incoming)
-      : api.createGenericConfig({ ...incoming, entrantCount });
+    const useSeasonThreePreset = incoming.presetId === api.SEASON_THREE_PRESET_ID && entrantCount >= 60;
+    const generated = useSeasonThreePreset
+      ? api.createSeasonThreePreset(incoming)
+      : (useSeasonTwoPreset
+        ? api.createSeasonTwoPreset(incoming)
+        : api.createGenericConfig({ ...incoming, entrantCount }));
 
     const merged = {
       ...incoming,
@@ -55,12 +58,30 @@
       if (!errors.includes(message)) errors.push(message);
     }
 
+    if (
+      normalized.presetId === api.SEASON_THREE_PRESET_ID
+      && (normalized.startDate !== '2026-10-01' || normalized.endDate !== '2026-10-31')
+    ) {
+      const message = 'The Season 3 preset is only available for the October 1–31, 2026 championship.';
+      if (!errors.includes(message)) errors.push(message);
+    }
+
     return {
       ...result,
       ok: errors.length === 0,
       config: normalized,
       errors
     };
+  }
+
+  function isSeasonThreeSeason(season) {
+    const id = String(season?.id || '').toLowerCase();
+    const label = String(season?.label || '').toLowerCase();
+    return season?.monthKey === '2026-10'
+      || id.includes('season_3')
+      || id.includes('2026-10')
+      || id.includes('october_2026')
+      || label.includes('october 2026');
   }
 
   function enableLockedSeasonMatchupControl(result) {
@@ -97,8 +118,19 @@
   };
 
   api.lockConfiguredSeasonBracket = function lockConfiguredSeasonBracket(state, config, options = {}) {
-    const seeds = state?.currentSeason?.seeds || [];
+    const season = state?.currentSeason || null;
+    const seeds = season?.seeds || [];
     const validation = validateConfig(config, seeds);
+    if (isSeasonThreeSeason(season) && validation.config?.presetId !== api.SEASON_THREE_PRESET_ID) {
+      return {
+        ok: false,
+        error: 'invalid_config',
+        state,
+        config: validation.config,
+        errors: ['Season 3 is fixed to the top 60 ranked seeds and must use the Season 3 60-player preset.'],
+        warnings: validation.warnings || []
+      };
+    }
     if (!validation.ok) {
       return {
         ok: false,
@@ -116,6 +148,7 @@
   global.TaskPointsBracketBuilderFixes = {
     normalizeConfig,
     validateConfig,
+    isSeasonThreeSeason,
     enableLockedSeasonMatchupControl
   };
 

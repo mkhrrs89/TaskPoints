@@ -148,7 +148,7 @@
 
     const title = featured.title || 'Featured matchup';
     const roundLine = `${featured.roundName || 'Round'}${featured.gameNumber ? `, Gm ${featured.gameNumber}` : ''}`;
-    const detail = `${featured.statusText || ''}${featured.isEliminationGame ? ' • Elimination game' : ''}`;
+    const detail = `${featured.statusText || ''}${featured.isEliminationGame ? ' • Elimination game' : ''}${featured.isRivalry ? ' • Rivalry' : ''}`;
     const html = `
       <section class="home-season-featured" aria-label="Featured tournament matchup">
         <div class="home-season-featured-kicker">

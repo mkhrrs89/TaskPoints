@@ -265,14 +265,21 @@
     const playerIds = Array.from(panel.querySelectorAll('[data-create-season-player]:checked'))
       .map((input) => input.value)
       .filter(Boolean);
-    if (playerIds.length !== 34) {
+    const startDate = panel.querySelector('[data-create-season-start]')?.value || '';
+    const isOctoberSeasonThree = startDate.slice(0, 7) === '2026-10';
+    const seasonThreeEntrantCount = Number(seasonApi.SEASON_THREE_ENTRANT_COUNT) || 60;
+    if (isOctoberSeasonThree && playerIds.length < seasonThreeEntrantCount) {
+      global.alert?.(`Season 3 needs at least ${seasonThreeEntrantCount} active ranked players so the top ${seasonThreeEntrantCount} can qualify.`);
+      return;
+    }
+    if (!isOctoberSeasonThree && playerIds.length !== 34) {
       const message = 'This format was designed for 34 players. Auto-adapted bracket is not implemented yet. Create a preview shell with warning instead?';
       if (typeof global.confirm === 'function' && !global.confirm(message)) return;
     }
 
     const baseSeason = seasonApi.buildManualSeasonPreview(state, {
       name: panel.querySelector('[data-create-season-name]')?.value,
-      startDate: panel.querySelector('[data-create-season-start]')?.value,
+      startDate,
       endDate: panel.querySelector('[data-create-season-end]')?.value,
       playerIds
     });

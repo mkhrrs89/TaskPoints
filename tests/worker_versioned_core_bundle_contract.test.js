@@ -53,6 +53,9 @@ function loadWorker({ assetVersion = 'a' } = {}) {
         if (url.pathname === '/season_series_upset_notifications.js') return new Response('SERIES_UPSET');
         if (url.pathname === '/state_hot_cache.js') return new Response('HOT_CACHE');
         if (url.pathname === '/storage_maintenance_idle.js') return new Response('STORAGE_IDLE');
+        if (url.pathname === '/season_bracket_builder_core.js') return new Response('SEASON_BUILDER');
+        if (url.pathname === '/season_bracket_builder_fixes.js') return new Response('SEASON_BUILDER_FIXES');
+        if (url.pathname === '/season3_tournament_rollover.js') return new Response('SEASON3_ROLLOVER');
         return new Response(`ASSET:${url.pathname}`);
       }
     }
@@ -129,7 +132,7 @@ test('the versioned bundle is immutable and reused from the edge cache', async (
     harness.ctx
   );
   const versionedUrl = redirect.headers.get('location');
-  const expected = 'PERF\nCORE\nALIAS\nYOU_ALIAS\nGUARD\nSHARED\nINBOX\nSERIES_UPSET\nHOT_CACHE\nSTORAGE_IDLE\n;globalThis.TaskPointsPerf?.recordBundleReady?.();\n';
+  const expected = 'PERF\nCORE\nALIAS\nYOU_ALIAS\nGUARD\nASSET:/habit_fast_path_control.js\nSHARED\nINBOX\nSERIES_UPSET\nASSET:/task_mutation_journal.js\nASSET:/task_create_fast_path.js\nHOT_CACHE\nSTORAGE_IDLE\nASSET:/greed_gold_economy.js\nASSET:/gold_theft_top50_notifications.js\nSEASON_BUILDER\nSEASON_BUILDER_FIXES\nSEASON3_ROLLOVER\n;globalThis.TaskPointsPerf?.recordBundleReady?.();\n';
 
   const first = await harness.worker.fetch(new Request(versionedUrl), harness.env, harness.ctx);
   assert.equal(first.status, 200);
@@ -142,6 +145,8 @@ test('the versioned bundle is immutable and reused from the edge cache', async (
   assert.equal(first.headers.get('x-taskpoints-season-series-upsets'), 'included');
   assert.equal(first.headers.get('x-taskpoints-state-hot-cache'), 'included');
   assert.equal(first.headers.get('x-taskpoints-storage-idle'), 'included');
+  assert.equal(first.headers.get('x-taskpoints-season-bracket-builder'), 'included');
+  assert.equal(first.headers.get('x-taskpoints-season3-rollover'), 'included');
   assert.equal(first.headers.get('x-taskpoints-scwm-fast-path'), null);
   assert.equal(harness.baseFetchCalls(), 1);
   await harness.flush();
@@ -185,7 +190,10 @@ test('the fingerprint list covers every module assembled by the core worker', ()
     '/inbox_count_badge.js',
     '/season_series_upset_notifications.js',
     '/state_hot_cache.js',
-    '/storage_maintenance_idle.js'
+    '/storage_maintenance_idle.js',
+    '/season_bracket_builder_core.js',
+    '/season_bracket_builder_fixes.js',
+    '/season3_tournament_rollover.js'
   ]) {
     const escaped = pathname.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     assert.match(outer, new RegExp(`['"]${escaped}['"]`), pathname);

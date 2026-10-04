@@ -112,3 +112,20 @@ test('new preview ordering follows the chosen scope without changing the selecte
   assert.deepEqual(rebuilt.warnings, [{ code: 'structural', message: 'Keep me' }]);
   assert.equal(rebuilt.seedRankingScope, 'season2');
 });
+
+
+test('Season 3 ranking scope includes September and excludes October tournament games', () => {
+  const sample = {
+    matchups: [
+      { id: 'aug', dateKey: '2026-08-31' },
+      { id: 'sep1', dateKey: '2026-09-01' },
+      { id: 'sep30', dateKey: '2026-09-30' },
+      { id: 'oct1', dateKey: '2026-10-01' }
+    ],
+    gameHistory: [],
+    completions: []
+  };
+  const seasonThree = seedSources.getScopedState(sample, 'season3');
+  assert.deepEqual(seasonThree.matchups.map((row) => row.id), ['sep1', 'sep30']);
+  assert.equal(seedSources.normalizeScope('', { id: 'season_3_october_2026' }), 'season3');
+});

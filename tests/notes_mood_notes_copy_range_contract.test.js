@@ -25,7 +25,7 @@ function loadApi() {
   return context.module.exports;
 }
 
-function completion(date, note, title = 'Mood Score 7') {
+function completion(date, note, title = 'Mood Score (7)') {
   return { title, moodNotes: note, completedAtISO: `${date}T12:00:00.000Z` };
 }
 
@@ -41,9 +41,9 @@ test('range copy includes only Mood Score notes inside the inclusive date range'
   const result = api.buildRangeCopy('2026-09-03', '2026-09-05', {
     completions: [
       completion('2026-09-02', 'too early'),
-      completion('2026-09-03', 'start day'),
-      completion('2026-09-04', 'middle day'),
-      completion('2026-09-05', 'end day'),
+      completion('2026-09-03', 'start day', 'Mood Score (6.5)'),
+      completion('2026-09-04', 'middle day', 'Mood Score 8'),
+      completion('2026-09-05', 'end day', 'Mood Score (9)'),
       completion('2026-09-06', 'too late'),
       completion('2026-09-04', 'not mood', 'Habit completion')
     ]
@@ -52,9 +52,9 @@ test('range copy includes only Mood Score notes inside the inclusive date range'
   assert.equal(result.ok, true);
   assert.equal(result.count, 3);
   assert.match(result.text, /Mood Notes — 9\/3\/26 to 9\/5\/26/);
-  assert.match(result.text, /start day/);
-  assert.match(result.text, /middle day/);
-  assert.match(result.text, /end day/);
+  assert.match(result.text, /9\/3\/26 - 6\.5\n- start day/);
+  assert.match(result.text, /9\/4\/26 - 8\n- middle day/);
+  assert.match(result.text, /9\/5\/26 - 9\n- end day/);
   assert.doesNotMatch(result.text, /too early|too late|not mood/);
 });
 
@@ -75,4 +75,13 @@ test('copy feature remains read-only with respect to TaskPoints persistence', ()
   assert.doesNotMatch(source, /saveAppState|saveStateSnapshot|writeTaskPointsStoredState|localStorage\.setItem|localStorage\.removeItem/);
   assert.match(source, /navigator\?\.clipboard\?\.writeText/);
   assert.match(source, /execCommand\('copy'\)/);
+});
+
+
+test('mood score parser supports current and legacy title formats', () => {
+  const api = loadApi();
+  assert.equal(api.moodScoreFromTitle('Mood Score (8)'), 8);
+  assert.equal(api.moodScoreFromTitle('Mood Score 7.5'), 7.5);
+  assert.equal(api.moodScoreFromTitle('Mood Score (0)'), 0);
+  assert.equal(api.moodScoreFromTitle('Mood Score'), null);
 });

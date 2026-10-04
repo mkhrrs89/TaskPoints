@@ -62,3 +62,88 @@ test('config validation rejects rounds too short for their best-of maximum', () 
   assert.equal(result.ok, false);
   assert.match(result.errors.join(' '), /fewer than its best-of-3 maximum/);
 });
+
+
+test('Season 3 preset fills October with the 60-to-48-to-32 structure', () => {
+  const config = builder.createSeasonThreePreset();
+  assert.equal(config.presetId, builder.SEASON_THREE_PRESET_ID);
+  assert.equal(config.entrantCount, 60);
+  assert.equal(config.startDate, '2026-10-01');
+  assert.equal(config.endDate, '2026-10-31');
+  assert.deepEqual(config.rounds.map((round) => [round.id, round.bestOf, round.startDate, round.endDate]), [
+    ['play_in', 1, '2026-10-01', '2026-10-01'],
+    ['opening_round', 3, '2026-10-02', '2026-10-04'],
+    ['round_of_32', 5, '2026-10-05', '2026-10-09'],
+    ['round_of_16', 5, '2026-10-10', '2026-10-14'],
+    ['quarterfinals', 5, '2026-10-15', '2026-10-19'],
+    ['semifinals', 5, '2026-10-20', '2026-10-24'],
+    ['finals', 7, '2026-10-25', '2026-10-31']
+  ]);
+  assert.equal(config.rounds.reduce((sum, round) => sum + builder.daysInclusive(round.startDate, round.endDate), 0), 31);
+});
+
+test('Season 3 cuts an 80-player ranked pool to seeds 1-60 only', () => {
+  const built = builder.buildConfiguredTournament(seeds(80), builder.createSeasonThreePreset(), {
+    seasonId: 'season_3_october_2026',
+    nowISO: '2026-09-30T23:59:00.000Z'
+  });
+  assert.equal(built.ok, true);
+  assert.equal(built.selectedSeeds.length, 60);
+  assert.equal(built.selectedSeeds[0].playerId, 'P1');
+  assert.equal(built.selectedSeeds.at(-1).playerId, 'P60');
+
+  const participantIds = new Set(
+    Object.values(built.series)
+      .flatMap((series) => [series.playerAId, series.playerBId])
+      .filter(Boolean)
+  );
+  assert.equal(participantIds.has('P60'), true);
+  assert.equal(participantIds.has('P61'), false);
+  assert.equal(participantIds.has('P80'), false);
+
+  const playIns = Object.values(built.series)
+    .filter((series) => series.roundId === 'play_in')
+    .sort((a, b) => a.seriesIndex - b.seriesIndex);
+  assert.equal(playIns.length, 12);
+  assert.deepEqual(playIns.map((series) => [series.playerASeed, series.playerBSeed]), [
+    [37, 60], [38, 59], [39, 58], [40, 57], [41, 56], [42, 55],
+    [43, 54], [44, 53], [45, 52], [46, 51], [47, 50], [48, 49]
+  ]);
+
+  assert.equal(Object.values(built.series).filter((series) => series.roundId === 'opening_round').length, 16);
+  assert.equal(Object.values(built.series).filter((series) => series.roundId === 'round_of_32').length, 16);
+  assert.equal(Object.values(built.series).filter((series) => series.roundId === 'round_of_16').length, 8);
+});
+
+test('locking Season 3 with 80 ranked seeds stores only the top 60 as tournament seeds', () => {
+  const seasonSeeds = seeds(80);
+  const state = {
+    currentSeason: {
+      id: 'season_3_october_2026',
+      name: 'Season 3',
+      label: 'October 2026 TaskPoints Championship',
+      monthKey: '2026-10',
+      startDate: '2026-10-01',
+      endDate: '2026-10-31',
+      status: 'preview',
+      seeds: seasonSeeds,
+      playerPool: seasonSeeds.map((seed) => ({ id: seed.playerId, name: seed.playerName })),
+      bracket: {},
+      series: {},
+      meta: {}
+    }
+  };
+  const locked = builder.lockConfiguredSeasonBracket(state, builder.createSeasonThreePreset(), {
+    nowISO: '2026-09-30T23:59:00.000Z'
+  });
+  assert.equal(locked.ok, true);
+  assert.equal(locked.season.seeds.length, 60);
+  assert.equal(locked.season.seeds.at(-1).playerId, 'P60');
+  assert.deepEqual(locked.season.bracket.roundOrder, [
+    'play_in', 'opening_round', 'round_of_32', 'round_of_16', 'quarterfinals', 'semifinals', 'finals'
+  ]);
+  assert.deepEqual(
+    locked.season.dateWindows.map((round) => [round.id, round.startDate, round.endDate]),
+    builder.createSeasonThreePreset().rounds.map((round) => [round.id, round.startDate, round.endDate])
+  );
+});
