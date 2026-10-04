@@ -1594,6 +1594,18 @@ Nothing visible on the page is built here. === -->
 
 
   <!-- HABITS -->
+<div class="home-streak-risk-card glass mb-3" data-home-streak-risk-card>
+  <div class="home-streak-risk-head">
+    <div>
+      <div class="home-streak-risk-kicker">Streaks at Risk</div>
+      <div class="home-streak-risk-subtitle">Top 3 by bonus at risk today</div>
+    </div>
+    <a href="streaks.html" class="home-streak-risk-link">All streaks</a>
+  </div>
+  <div class="home-streak-risk-list" data-home-streak-risk-list></div>
+  <div class="home-streak-risk-empty" data-home-streak-risk-empty>No streaks at risk today.</div>
+</div>
+
 <div class="glass mb-6 habits-card sectionCard sectionCard--teal">
 <div class="sectionHeader sectionHeader--teal">
 <div class="habitsControlsRow sectionHeaderControls habitsControlsRow--withTitle">
@@ -1625,6 +1637,18 @@ Nothing visible on the page is built here. === -->
   <section id="homePanelVices" class="home-tab-panel" data-home-panel="vices" role="tabpanel" aria-labelledby="homeTabVices">
     
 <!-- VICES -->
+<div class="home-streak-risk-card glass mb-3" data-home-streak-risk-card>
+  <div class="home-streak-risk-head">
+    <div>
+      <div class="home-streak-risk-kicker">Streaks at Risk</div>
+      <div class="home-streak-risk-subtitle">Top 3 by bonus at risk today</div>
+    </div>
+    <a href="streaks.html" class="home-streak-risk-link">All streaks</a>
+  </div>
+  <div class="home-streak-risk-list" data-home-streak-risk-list></div>
+  <div class="home-streak-risk-empty" data-home-streak-risk-empty>No streaks at risk today.</div>
+</div>
+
 <div class="glass mb-6 habits-card sectionCard sectionCard--teal">
 <div class="sectionHeader sectionHeader--teal">
   <div class="vicesControlsRow sectionHeaderControls vicesControlsRow--withTitle">
@@ -8226,12 +8250,83 @@ const controlsHtml = `
 
 
 
+let homeStreakRiskRenderFrameId = 0;
+
+function formatHomeStreakRiskBonus(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || Math.abs(n) < 0.005) return '0';
+  const rounded = Math.round(n * 100) / 100;
+  const text = Math.abs(rounded).toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+  return rounded > 0 ? `+${text}` : `-${text}`;
+}
+
+function renderHomeStreaksAtRisk() {
+  const cards = Array.from(document.querySelectorAll('[data-home-streak-risk-card]'));
+  if (!cards.length) return [];
+
+  const rows = typeof TaskPointsCore?.getAtRiskStreakRows === 'function'
+    ? TaskPointsCore.getAtRiskStreakRows(state)
+    : [];
+
+  const topRows = rows
+    .slice()
+    .sort((a, b) =>
+      (Number(b.pointsAtRisk) || 0) - (Number(a.pointsAtRisk) || 0)
+      || (Number(b.streak) || 0) - (Number(a.streak) || 0)
+      || (Number(b.points) || 0) - (Number(a.points) || 0)
+      || String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' })
+    )
+    .slice(0, 3);
+
+  cards.forEach((card) => {
+    const list = card.querySelector('[data-home-streak-risk-list]');
+    const empty = card.querySelector('[data-home-streak-risk-empty]');
+    if (!list || !empty) return;
+
+    list.innerHTML = '';
+    empty.classList.toggle('hidden', topRows.length > 0);
+
+    topRows.forEach((row, index) => {
+      const item = document.createElement('div');
+      item.className = 'home-streak-risk-row';
+      item.innerHTML = `
+        <div class="home-streak-risk-rank">${index + 1}</div>
+        <div class="home-streak-risk-main">
+          <div class="home-streak-risk-name">${escapeHtml(row.name || 'Untitled')}</div>
+          <div class="home-streak-risk-meta">
+            <span>${row.category === 'vice' ? 'Vice' : 'Habit'}</span>
+            <span>•</span>
+            <span>${Number(row.streak) || 0}d streak</span>
+          </div>
+        </div>
+        <div class="home-streak-risk-value">
+          <strong>${formatHomeStreakRiskBonus(row.pointsAtRisk)}</strong>
+          <span>at risk</span>
+        </div>
+      `;
+      list.appendChild(item);
+    });
+  });
+
+  return topRows;
+}
+
+function scheduleHomeStreaksAtRiskRender() {
+  if (homeStreakRiskRenderFrameId) return;
+  homeStreakRiskRenderFrameId = requestAnimationFrame(() => {
+    homeStreakRiskRenderFrameId = 0;
+    try { renderHomeStreaksAtRisk(); }
+    catch (error) { console.error('renderHomeStreaksAtRisk error:', error); }
+  });
+}
+
 let habitTapHandlerBound = false;
 let viceTapHandlerBound = false;
 // A restack must never replace a bubble while its pointer gesture is live.
 let activeHabitPointerGesture = null;
 
 function renderHabits(){
+  scheduleHomeStreaksAtRiskRender();
   const wrap  = $('habitsList');
   const empty = $('habitsEmpty');
   wrap.innerHTML = '';
@@ -8415,6 +8510,7 @@ if (!habitTapHandlerBound) {
 }
 
 function renderVices(){
+  scheduleHomeStreaksAtRiskRender();
   const wrap  = $('vicesList');
   const empty = $('vicesEmpty');
   wrap.innerHTML = '';
@@ -9667,6 +9763,7 @@ try {
 // Journal durability precedes the immediate canonical paint. Do not ask getDerived()
 // or serialize/compress before this projection and its weekly row update.
 applyCanonicalHabitBubbleVisual(bubbleEl, h, dayKey, statusClass);
+scheduleHomeStreaksAtRiskRender();
 
   const row = bubbleEl.closest('.habitRow[data-habit-row-id]');
   refreshHabitRowWeekCompleteVisual(row, h, weekDays(habitViceBaseDate()));
