@@ -7990,6 +7990,121 @@ function computeCalLogBonusPoints(calorieEntries, settings) {
     return roundPoints(entry?.points);
   }
 
+  function getAtRiskStreakRows(stateInput, options = {}) {
+    const state = stateInput && typeof stateInput === 'object' ? stateInput : {};
+    const habits = Array.isArray(state.habits) ? state.habits : [];
+    const today = /^\d{4}-\d{2}-\d{2}$/.test(String(options.todayKey || ''))
+      ? String(options.todayKey)
+      : todayKey();
+    const yesterday = addDaysToDateKey(today, -1);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(today) || !/^\d{4}-\d{2}-\d{2}$/.test(yesterday)) return [];
+
+    let pendingDeltas = Array.isArray(options.pendingDeltas) ? options.pendingDeltas : null;
+    if (!pendingDeltas) {
+      try { pendingDeltas = readPendingHabitDeltas(); }
+      catch (_) { pendingDeltas = []; }
+    }
+
+    const completionDaysByHabit = new Map();
+    for (const completion of (Array.isArray(state.completions) ? state.completions : [])) {
+      if (completion?.source !== 'habit' && completion?.source !== 'vice') continue;
+      const habitId = String(completion?.habitId || completion?.viceId || '');
+      const day = getCompletionDayKey(completion);
+      if (!habitId || !/^\d{4}-\d{2}-\d{2}$/.test(day)) continue;
+      if (!completionDaysByHabit.has(habitId)) completionDaysByHabit.set(habitId, new Set());
+      completionDaysByHabit.get(habitId).add(day);
+    }
+
+    const latestPendingByHabitDay = new Map();
+    for (const delta of pendingDeltas) {
+      const habitId = String(delta?.habitId || '');
+      const day = String(delta?.dayKey || '');
+      if (!habitId || !/^\d{4}-\d{2}-\d{2}$/.test(day)) continue;
+      const key = `${habitId}:${day}`;
+      const prior = latestPendingByHabitDay.get(key);
+      if (!prior || String(delta?.updatedAtISO || '') >= String(prior?.updatedAtISO || '')) {
+        latestPendingByHabitDay.set(key, delta);
+      }
+    }
+
+    const countStreakEndingOn = (done, endKey) => {
+      if (!done.has(endKey)) return 0;
+      let count = 0;
+      let cursor = endKey;
+      while (cursor && done.has(cursor)) {
+        count += 1;
+        if (count > 5000) break;
+        cursor = addDaysToDateKey(cursor, -1);
+      }
+      return count;
+    };
+
+    const rows = [];
+    for (const habit of habits) {
+      if (!habit || habit.retired || !habit.id) continue;
+      const habitId = String(habit.id);
+      const done = new Set((Array.isArray(habit.doneKeys) ? habit.doneKeys : []).filter((key) => /^\d{4}-\d{2}-\d{2}$/.test(String(key))));
+      const failed = new Set((Array.isArray(habit.failedKeys) ? habit.failedKeys : []).filter((key) => /^\d{4}-\d{2}-\d{2}$/.test(String(key))));
+
+      completionDaysByHabit.get(habitId)?.forEach((day) => done.add(day));
+      failed.forEach((day) => done.delete(day));
+
+      for (const [key, delta] of latestPendingByHabitDay) {
+        if (!key.startsWith(`${habitId}:`)) continue;
+        const day = String(delta.dayKey || '');
+        done.delete(day);
+        failed.delete(day);
+        const isDone = delta?.done === true || delta?.status === 'full' || delta?.status === 'half';
+        const isFailed = delta?.failed === true || delta?.status === 'failed';
+        if (isDone) done.add(day);
+        else if (isFailed) failed.add(day);
+      }
+
+      if (done.has(today) || failed.has(today)) continue;
+      const streak = countStreakEndingOn(done, yesterday);
+      if (streak <= 0) continue;
+
+      const basePoints = roundPoints(Number(habit.pointsPerDay) || 0, 2);
+      let bonus = 0;
+      if (habit.streakMultiplierEnabled === true && streak >= 1 && basePoints) {
+        const previewHabit = {
+          ...habit,
+          doneKeys: Array.from(new Set([...done, today])),
+          failedKeys: Array.from(failed).filter((day) => day !== today)
+        };
+        const previewState = {
+          ...state,
+          habits: habits.map((candidate) => candidate?.id === habit.id ? previewHabit : candidate)
+        };
+        const source = habit.category === 'vice' ? 'vice' : 'habit';
+        const synthetic = {
+          id: `streak-preview:${habit.id}:${today}`,
+          taskId: `streak-preview:${habit.id}:${today}`,
+          source,
+          habitId: habit.id,
+          dayKey: today,
+          completedAtISO: `${today}T12:00:00.000`,
+          points: basePoints,
+          completionFraction: 1
+        };
+        const adjusted = Number(pointsForCompletion(synthetic, previewState));
+        if (Number.isFinite(adjusted)) bonus = roundPoints(adjusted - basePoints, 2);
+      }
+
+      rows.push({
+        id: habitId,
+        name: String(habit.name || 'Untitled'),
+        category: habit.category === 'vice' ? 'vice' : 'habit',
+        streak,
+        points: basePoints,
+        bonus,
+        pointsAtRisk: bonus
+      });
+    }
+
+    return rows;
+  }
+
   function caloriesToPoints(cal, settings){
     const scoring = getScoringSettings(settings);
     const calories = scoring.calories;
@@ -9735,6 +9850,7 @@ softCurbNpcScore,
 simulateAiScoreForPlayerCore,
     deriveCompletionPoints,
     pointsForCompletion,
+    getAtRiskStreakRows,
     syncDerivedPoints,
     computeMatchupRecord,
     computeCompletionRecord,
