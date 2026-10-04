@@ -108,10 +108,15 @@ test('pending today toggle immediately removes a streak from At Risk', () => {
 });
 
 test('Habits and Vices contain identical shared top-three at-risk cards', () => {
-  const cards = index.match(/<div class="home-streak-risk-card glass mb-3" data-home-streak-risk-card>[\s\S]*?<\/div>\s*\n\s*<div class="glass mb-6 habits-card/g) || [];
-  assert.equal(cards.length, 2);
+  assert.equal(
+    index.split('<div class="home-streak-risk-card glass mb-3" data-home-streak-risk-card>').length - 1,
+    2
+  );
   assert.equal((index.match(/Top 3 by bonus at risk today/g) || []).length, 2);
-  assert.equal((index.match(/data-home-streak-risk-list/g) || []).length >= 2, true);
+  assert.equal(
+    index.split('<div class="home-streak-risk-list" data-home-streak-risk-list></div>').length - 1,
+    2
+  );
   assert.match(index, /\.sort\(\(a, b\) =>[\s\S]*pointsAtRisk[\s\S]*\.slice\(0, 3\)/);
   assert.match(index, /scheduleHomeStreaksAtRiskRender\(\)/);
 });
