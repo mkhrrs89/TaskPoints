@@ -7076,3 +7076,9 @@ metal background attached only to the day-bubble row.
     padding-right: 10px;
   }
 }
+
+@media (min-width: 768px) {
+  .home-streak-risk-card {
+    display: none;
+  }
+}
