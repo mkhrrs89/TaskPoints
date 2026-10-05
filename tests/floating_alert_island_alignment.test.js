@@ -20,17 +20,18 @@ test('orange island gets only a slight downward nudge', () => {
   assert.match(moduleSource, /orange\.style\.right = ORANGE_RIGHT/);
 });
 
-test('red island mirrors the orange island size, row center, and horizontal position', () => {
+test('red island mirrors stable orange layout metrics without following transform jitter', () => {
   assert.match(moduleSource, /const RED_FALLBACK_SIZE_PX = 60/);
   assert.match(moduleSource, /function sizeRedIsland\(red, orange\)/);
-  assert.match(moduleSource, /Number\(orangeRect\?\.width\) > 0/);
-  assert.match(moduleSource, /Number\(orangeRect\?\.height\) > 0/);
+  assert.match(moduleSource, /orange\?\.offsetWidth/);
+  assert.match(moduleSource, /orange\?\.offsetHeight/);
   assert.match(moduleSource, /red\.style\.width = `\$\{Math\.round\(width\)\}px`/);
   assert.match(moduleSource, /red\.style\.height = `\$\{Math\.round\(height\)\}px`/);
-  assert.match(moduleSource, /red\.style\.top = `\$\{Math\.round\(orangeRect\.top\)\}px`/);
-  assert.match(moduleSource, /function mirrorRedToOrange\(red, orange\)/);
-  assert.match(moduleSource, /const orangeCenterX = orangeRect\.left \+ \(orangeRect\.width \/ 2\)/);
-  assert.match(moduleSource, /const mirroredCenterX = viewportWidth - orangeCenterX/);
+  assert.match(moduleSource, /stableOrangeTop/);
+  assert.match(moduleSource, /red\.style\.top = stableOrangeTop/);
+  assert.match(moduleSource, /const rightInset = String\(orange\?\.style\?\.right/);
+  assert.match(moduleSource, /red\.style\.left = rightInset/);
+  assert.doesNotMatch(moduleSource, /mirroredCenterX/);
 });
 
 test('alignment does not attach a scroll listener or alter floating transforms', () => {
@@ -43,6 +44,6 @@ test('alignment does not attach a scroll listener or alter floating transforms',
 });
 
 test('shared production loader includes cache-busted floating island alignment module', () => {
-  assert.match(loaderSource, /floating_alert_island_alignment\.js\?v=20261005-1/);
+  assert.match(loaderSource, /floating_alert_island_alignment\.js\?v=20261005-2/);
   assert.match(loaderSource, /data-taskpoints-floating-alert-alignment/);
 });
