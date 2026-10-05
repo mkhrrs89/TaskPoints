@@ -1072,7 +1072,15 @@ Nothing visible on the page is built here. === -->
           <div class="muted font-semibold uppercase tracking-wide text-[10px] mt-1">Last 10</div>
           <div id="matchupLastTenRecord" class="matchupLastTenRecord">0–0</div>
         </div>
-        <div id="yesterdayResultsPanel" class="yesterdayResultsPanel flex flex-col justify-center gap-1.5 px-4 py-4">
+        <div
+          id="yesterdayResultsPanel"
+          class="yesterdayResultsPanel flex flex-col justify-center gap-1.5 px-4 py-4"
+          role="button"
+          tabindex="0"
+          aria-expanded="false"
+          aria-controls="yesterdayRecentResultsDropdown"
+          aria-label="Yesterday’s Results. Tap to show your last five matchup results."
+        >
           <div class="muted font-semibold uppercase tracking-wide text-[10px]">Yesterday’s Results</div>
           <div class="yesterdayResultRow flex items-center justify-between text-[11px]">
             <span class="yesterdayResultIdentity yesterday-result-player inline-flex items-center gap-1.5 min-w-0">
@@ -5430,6 +5438,11 @@ state = cleanupLiveDiffHistory(state);
 
       renderTodaysMatchup(matchupKey, matchupPoints);
       renderYesterdaysResult(dailyTotals);
+      bindYesterdayRecentResultsDropdown();
+      if (yesterdayRecentResultsOpen) {
+        renderYesterdayRecentResultsDropdown();
+        scheduleYesterdayRecentResultsPosition();
+      }
       renderMatchupStreakPanel();
 
       // Today's breakdown bar – wrapped in try/catch so it can't kill stats
@@ -6317,6 +6330,165 @@ function getCompletedYouMatchupsForStats(){
       if (byDate !== 0) return byDate;
       return String(b.id || '').localeCompare(String(a.id || ''));
     });
+}
+
+let yesterdayRecentResultsBound = false;
+let yesterdayRecentResultsOpen = false;
+let yesterdayRecentResultsPositionFrame = 0;
+
+function formatRecentMatchupDate(dateKeyValue) {
+  const key = String(dateKeyValue || '').slice(0, 10);
+  const match = key.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return key || '—';
+  return `${Number(match[2])}/${Number(match[3])}/${String(match[1]).slice(-2)}`;
+}
+
+function ensureYesterdayRecentResultsDropdown() {
+  let dropdown = document.getElementById('yesterdayRecentResultsDropdown');
+  if (dropdown) return dropdown;
+
+  dropdown = document.createElement('div');
+  dropdown.id = 'yesterdayRecentResultsDropdown';
+  dropdown.className = 'yesterday-recent-results-dropdown';
+  dropdown.setAttribute('aria-hidden', 'true');
+  dropdown.setAttribute('role', 'list');
+  document.body.appendChild(dropdown);
+  return dropdown;
+}
+
+function buildYesterdayRecentResultsRows() {
+  return getCompletedYouMatchupsForStats().slice(0, 5).map((row) => {
+    const youAreA = row.playerAId === 'YOU';
+    const opponentId = youAreA ? row.playerBId : row.playerAId;
+    return {
+      ...row,
+      opponentId,
+      opponentName: getPlayerNameById(opponentId),
+      resultLabel: row.result === 'W' ? 'W' : (row.result === 'L' ? 'L' : 'T')
+    };
+  });
+}
+
+function renderYesterdayRecentResultsDropdown() {
+  const dropdown = ensureYesterdayRecentResultsDropdown();
+  const rows = buildYesterdayRecentResultsRows();
+
+  if (!rows.length) {
+    dropdown.innerHTML = '<div class="yesterday-recent-result-empty">No completed matchups yet.</div>';
+    return rows;
+  }
+
+  dropdown.innerHTML = rows.map((row) => {
+    const resultClass = row.result === 'W'
+      ? 'is-win'
+      : (row.result === 'L' ? 'is-loss' : 'is-tie');
+    return `
+      <div class="yesterday-recent-result-row ${resultClass}" role="listitem">
+        <div class="yesterday-recent-result-date">${escapeHtml(formatRecentMatchupDate(row.dateKey))}</div>
+        <div class="yesterday-recent-result-main">
+          <div class="yesterday-recent-result-opponent">${escapeHtml(row.opponentName || 'Opponent')}</div>
+          <div class="yesterday-recent-result-score">
+            ${Number(row.youScore).toFixed(1)}–${Number(row.oppScore).toFixed(1)}
+          </div>
+        </div>
+        <div class="yesterday-recent-result-outcome">${row.resultLabel}</div>
+      </div>
+    `;
+  }).join('');
+
+  return rows;
+}
+
+function positionYesterdayRecentResultsDropdown() {
+  if (!yesterdayRecentResultsOpen) return;
+  const panel = $('yesterdayResultsPanel');
+  const dropdown = $('yesterdayRecentResultsDropdown');
+  if (!panel || !dropdown) return;
+
+  const rect = panel.getBoundingClientRect();
+  const toolbarHeightRaw = getComputedStyle(document.documentElement).getPropertyValue('--tp-toolbar-height');
+  const toolbarHeight = Number.parseFloat(toolbarHeightRaw) || 88;
+  const safeBottom = 10;
+  const availableHeight = Math.max(
+    92,
+    window.innerHeight - rect.bottom - toolbarHeight - safeBottom - 8
+  );
+
+  dropdown.style.left = `${Math.round(rect.left)}px`;
+  dropdown.style.top = `${Math.round(rect.bottom)}px`;
+  dropdown.style.width = `${Math.round(rect.width)}px`;
+  dropdown.style.maxHeight = `${Math.round(availableHeight)}px`;
+}
+
+function scheduleYesterdayRecentResultsPosition() {
+  if (!yesterdayRecentResultsOpen || yesterdayRecentResultsPositionFrame) return;
+  yesterdayRecentResultsPositionFrame = requestAnimationFrame(() => {
+    yesterdayRecentResultsPositionFrame = 0;
+    positionYesterdayRecentResultsDropdown();
+  });
+}
+
+function closeYesterdayRecentResultsDropdown() {
+  const panel = $('yesterdayResultsPanel');
+  const dropdown = $('yesterdayRecentResultsDropdown');
+  yesterdayRecentResultsOpen = false;
+  if (panel) {
+    panel.classList.remove('is-recent-results-open');
+    panel.setAttribute('aria-expanded', 'false');
+  }
+  if (dropdown) {
+    dropdown.classList.remove('is-open');
+    dropdown.setAttribute('aria-hidden', 'true');
+  }
+}
+
+function openYesterdayRecentResultsDropdown() {
+  const panel = $('yesterdayResultsPanel');
+  const dropdown = ensureYesterdayRecentResultsDropdown();
+  if (!panel || !dropdown) return;
+
+  renderYesterdayRecentResultsDropdown();
+  yesterdayRecentResultsOpen = true;
+  panel.classList.add('is-recent-results-open');
+  panel.setAttribute('aria-expanded', 'true');
+  dropdown.setAttribute('aria-hidden', 'false');
+  positionYesterdayRecentResultsDropdown();
+
+  requestAnimationFrame(() => dropdown.classList.add('is-open'));
+}
+
+function toggleYesterdayRecentResultsDropdown() {
+  if (yesterdayRecentResultsOpen) closeYesterdayRecentResultsDropdown();
+  else openYesterdayRecentResultsDropdown();
+}
+
+function bindYesterdayRecentResultsDropdown() {
+  if (yesterdayRecentResultsBound) return;
+  const panel = $('yesterdayResultsPanel');
+  if (!panel) return;
+
+  panel.addEventListener('click', (event) => {
+    event.preventDefault();
+    toggleYesterdayRecentResultsDropdown();
+  });
+
+  panel.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    toggleYesterdayRecentResultsDropdown();
+  });
+
+  const dropdown = ensureYesterdayRecentResultsDropdown();
+  dropdown.addEventListener('click', (event) => {
+    event.preventDefault();
+    closeYesterdayRecentResultsDropdown();
+  });
+
+  window.addEventListener('resize', scheduleYesterdayRecentResultsPosition, { passive: true });
+  window.addEventListener('orientationchange', scheduleYesterdayRecentResultsPosition);
+  window.addEventListener('scroll', scheduleYesterdayRecentResultsPosition, { passive: true });
+
+  yesterdayRecentResultsBound = true;
 }
 
 function computeCurrentYouStreak(){
