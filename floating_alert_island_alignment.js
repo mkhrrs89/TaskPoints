@@ -9,7 +9,7 @@
   const HEADER_ROW_SELECTOR = '.header-nav';
   const RED_FALLBACK_LEFT = '0.75rem';
   const ORANGE_RIGHT = '0.75rem';
-  const RED_SIZE_PX = 52;
+  const RED_FALLBACK_SIZE_PX = 60;
   const ORANGE_VERTICAL_NUDGE_PX = 4;
   const FALLBACK_RED_TOP = 'calc(env(safe-area-inset-top, 0px) + 3.45rem)';
   const FALLBACK_ORANGE_TOP = 'calc(env(safe-area-inset-top, 0px) + 3.7rem)';
@@ -59,14 +59,22 @@
     }) || oranges[0] || null;
   }
 
-  function sizeRedIsland(red) {
+  function sizeRedIsland(red, orange) {
     if (!red) return;
-    const size = `${RED_SIZE_PX}px`;
-    red.style.width = size;
-    red.style.height = size;
-    red.style.minWidth = size;
-    red.style.minHeight = size;
-    red.style.padding = '0.35rem';
+
+    const orangeRect = orange?.getBoundingClientRect?.();
+    const width = Number(orangeRect?.width) > 0
+      ? Number(orangeRect.width)
+      : RED_FALLBACK_SIZE_PX;
+    const height = Number(orangeRect?.height) > 0
+      ? Number(orangeRect.height)
+      : RED_FALLBACK_SIZE_PX;
+
+    red.style.width = `${Math.round(width)}px`;
+    red.style.height = `${Math.round(height)}px`;
+    red.style.minWidth = `${Math.round(width)}px`;
+    red.style.minHeight = `${Math.round(height)}px`;
+    red.style.padding = '0';
     red.style.boxSizing = 'border-box';
   }
 
@@ -124,9 +132,17 @@
     });
 
     if (red) {
-      sizeRedIsland(red);
-      centerFixedElementOnDocumentY(red, centerY, FALLBACK_RED_TOP);
-      mirrorRedToOrange(red, visibleOrange(oranges));
+      const orange = visibleOrange(oranges);
+      sizeRedIsland(red, orange);
+
+      const orangeRect = orange?.getBoundingClientRect?.();
+      if (orangeRect && orangeRect.height > 0) {
+        red.style.top = `${Math.round(orangeRect.top)}px`;
+      } else {
+        centerFixedElementOnDocumentY(red, centerY, FALLBACK_RED_TOP);
+      }
+
+      mirrorRedToOrange(red, orange);
     }
 
     return Boolean(red || oranges.length);
@@ -171,7 +187,7 @@
         headerRowFound: Boolean(visibleHeaderRow()),
         redFound: Boolean(global.document?.getElementById?.(RED_ID)),
         orangeCount: global.document?.querySelectorAll?.(ORANGE_SELECTOR)?.length || 0,
-        redSizePx: RED_SIZE_PX,
+        redFallbackSizePx: RED_FALLBACK_SIZE_PX,
         orangeVerticalNudgePx: ORANGE_VERTICAL_NUDGE_PX
       };
     }
