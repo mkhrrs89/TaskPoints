@@ -40,8 +40,7 @@
 
   function centerFixedElementOnDocumentY(element, centerY, fallbackTop) {
     if (!element) return false;
-    const rect = element.getBoundingClientRect?.();
-    const height = Number(rect?.height || element.offsetHeight || 0);
+    const height = Number(element.offsetHeight || element.getBoundingClientRect?.()?.height || 0);
     if (Number.isFinite(centerY) && height > 0) {
       element.style.top = `${Math.round(centerY - (height / 2))}px`;
     } else {
@@ -62,12 +61,13 @@
   function sizeRedIsland(red, orange) {
     if (!red) return;
 
-    const orangeRect = orange?.getBoundingClientRect?.();
-    const width = Number(orangeRect?.width) > 0
-      ? Number(orangeRect.width)
+    // offsetWidth/offsetHeight are layout dimensions and do not wobble with
+    // the orange island's visual shake transform.
+    const width = Number(orange?.offsetWidth || 0) > 0
+      ? Number(orange.offsetWidth)
       : RED_FALLBACK_SIZE_PX;
-    const height = Number(orangeRect?.height) > 0
-      ? Number(orangeRect.height)
+    const height = Number(orange?.offsetHeight || 0) > 0
+      ? Number(orange.offsetHeight)
       : RED_FALLBACK_SIZE_PX;
 
     red.style.width = `${Math.round(width)}px`;
@@ -80,17 +80,18 @@
 
   function mirrorRedToOrange(red, orange) {
     if (!red) return false;
-    const viewportWidth = Number(global.innerWidth || global.document?.documentElement?.clientWidth || 0);
-    const orangeRect = orange?.getBoundingClientRect?.();
-    const redRect = red.getBoundingClientRect?.();
-    if (!(viewportWidth > 0) || !orangeRect || !redRect || !(orangeRect.width > 0) || !(redRect.width > 0)) {
-      red.style.left = RED_FALLBACK_LEFT;
-      return false;
+
+    // The orange island is right-anchored. Mirror that stable layout inset
+    // directly to the red island instead of reading its animated screen rect.
+    const orangeStyle = orange ? global.getComputedStyle?.(orange) : null;
+    const rightInset = String(orange?.style?.right || orangeStyle?.right || '').trim();
+    if (rightInset && rightInset !== 'auto') {
+      red.style.left = rightInset;
+      return true;
     }
-    const orangeCenterX = orangeRect.left + (orangeRect.width / 2);
-    const mirroredCenterX = viewportWidth - orangeCenterX;
-    red.style.left = `${Math.round(mirroredCenterX - (redRect.width / 2))}px`;
-    return true;
+
+    red.style.left = RED_FALLBACK_LEFT;
+    return false;
   }
 
   function align() {
@@ -135,9 +136,12 @@
       const orange = visibleOrange(oranges);
       sizeRedIsland(red, orange);
 
-      const orangeRect = orange?.getBoundingClientRect?.();
-      if (orangeRect && orangeRect.height > 0) {
-        red.style.top = `${Math.round(orangeRect.top)}px`;
+      // Use the orange island's fixed layout top, not its transformed visual
+      // rect, so red does not chase animation pixels during a swipe.
+      const orangeStyle = orange ? global.getComputedStyle?.(orange) : null;
+      const stableOrangeTop = String(orange?.style?.top || orangeStyle?.top || '').trim();
+      if (stableOrangeTop && stableOrangeTop !== 'auto') {
+        red.style.top = stableOrangeTop;
       } else {
         centerFixedElementOnDocumentY(red, centerY, FALLBACK_RED_TOP);
       }
@@ -177,7 +181,7 @@
 
   global.TaskPointsFloatingAlertIslandAlignment = {
     installed: true,
-    version: 2,
+    version: 3,
     align,
     scheduleAlign,
     getStatus() {
