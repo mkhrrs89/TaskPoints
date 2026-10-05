@@ -23,8 +23,9 @@ test('critical task exclamation marks are spaced, red, glowing, and pulsing', ()
   const end = styles.indexOf('@keyframes tpCriticalIslandMarkPulse', start);
   const block = styles.slice(start, end);
 
+  assert.match(block, /font-size:\s*2\.65rem;/);
   assert.match(block, /color:\s*#ef4444;/);
-  assert.match(block, /letter-spacing:\s*0\.20em;/);
+  assert.match(block, /letter-spacing:\s*0\.24em;/);
   assert.match(block, /text-shadow:/);
   assert.match(block, /animation:\s*tpCriticalIslandMarkPulse 1\.15s ease-in-out infinite;/);
   assert.match(styles, /@keyframes tpCriticalIslandMarkPulse/);
