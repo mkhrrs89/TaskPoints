@@ -1928,6 +1928,11 @@ body {
   transition: transform 180ms ease;
 }
 
+#criticalTasksIsland.nudge-for-today{
+  transform: translateY(var(--tp-critical-today-nudge, 18px));
+  transition: transform 180ms ease;
+}
+
 #criticalTasksIsland{
   transition: transform 180ms ease;
 }
