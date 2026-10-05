@@ -3776,7 +3776,10 @@ function updateCritIslandStacking() {
     if (count <= 0) {
       island.style.display = 'none';
       island.classList.add('hidden');
-      island.classList.remove('stack-under-today');
+      island.classList.remove('stack-under-today', 'nudge-for-today');
+      island.dataset.layoutMode = '';
+      document.documentElement.style.removeProperty('--tp-today-island-h');
+      document.documentElement.style.removeProperty('--tp-critical-today-nudge');
       island.setAttribute('aria-hidden', 'true');
       island.dataset.active = '0';
       window.tpUpdateToastAnchor?.();
