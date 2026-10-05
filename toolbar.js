@@ -3710,11 +3710,24 @@ function updateCritIslandStacking() {
   const todayIsland = document.getElementById('todayScoreIsland');
   if (!island || island.dataset.active !== '1') return;
 
-  const todayVisible = !!(todayIsland && !todayIsland.classList.contains('hidden'));
-  island.classList.toggle('stack-under-today', todayVisible);
+  const visibleOrangeAlert = Array.from(document.querySelectorAll('.tp-reminder-island')).find((orange) => {
+    if (!orange || orange.classList.contains('hidden')) return false;
+    const rect = orange.getBoundingClientRect?.();
+    if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+    const style = window.getComputedStyle?.(orange);
+    return style?.display !== 'none' && style?.visibility !== 'hidden';
+  }) || null;
 
-  // Dynamic stacking offset: match the actual Today island height
-  if (todayVisible) {
+  const todayVisible = !!(todayIsland && !todayIsland.classList.contains('hidden'));
+
+  // When the orange alert exists, it owns the alert-row alignment. Keep the
+  // red Critical Tasks alert directly mirrored on that same row instead of
+  // translating it downward beneath the Today score island.
+  const shouldStackUnderToday = todayVisible && !visibleOrangeAlert;
+  island.classList.toggle('stack-under-today', shouldStackUnderToday);
+
+  // Dynamic stacking remains as the fallback when there is no orange alert.
+  if (shouldStackUnderToday) {
     const h = Math.round(todayIsland.getBoundingClientRect().height || 0);
     if (h > 0) {
       document.documentElement.style.setProperty('--tp-today-island-h', `${h}px`);
@@ -3722,6 +3735,8 @@ function updateCritIslandStacking() {
   } else {
     document.documentElement.style.removeProperty('--tp-today-island-h');
   }
+
+  window.TaskPointsFloatingAlertIslandAlignment?.scheduleAlign?.();
 }
 
   function updateCriticalTasksIsland(stateInput = null) {
