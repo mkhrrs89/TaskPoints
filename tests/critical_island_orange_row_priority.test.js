@@ -37,3 +37,13 @@ test('critical alert does not realign on every scroll frame', () => {
   assert.match(body, /if \(previousMode !== nextMode\)/);
   assert.match(body, /TaskPointsFloatingAlertIslandAlignment\?\.scheduleAlign\?\.\(\)/);
 });
+
+
+test('Today-island nudge is based on red fixed top and is hard-bounded after modal geometry changes', () => {
+  const body = between(toolbar, 'function updateCritIslandStacking()', 'function updateCriticalTasksIsland');
+
+  assert.match(body, /const baseTop = Number\.parseFloat\(islandStyle\?\.top/);
+  assert.match(body, /const rawNudge = Number\.isFinite\(baseTop\)/);
+  assert.match(body, /const nudge = Math\.min\(96, Math\.max\(18, rawNudge\)\)/);
+  assert.doesNotMatch(body, /orangeTop/);
+});
