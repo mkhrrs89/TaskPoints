@@ -824,6 +824,8 @@ body {
   letter-spacing: 0.24em;
   padding-left: 0.24em;
   margin: 0;
+  position: relative;
+  top: 4px;
   color: #ef4444;
   transform-origin: center;
   text-align: center;
