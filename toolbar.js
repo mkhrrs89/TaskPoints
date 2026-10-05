@@ -3712,31 +3712,58 @@ function updateCritIslandStacking() {
 
   const visibleOrangeAlert = Array.from(document.querySelectorAll('.tp-reminder-island')).find((orange) => {
     if (!orange || orange.classList.contains('hidden')) return false;
-    const rect = orange.getBoundingClientRect?.();
-    if (!rect || rect.width <= 0 || rect.height <= 0) return false;
     const style = window.getComputedStyle?.(orange);
-    return style?.display !== 'none' && style?.visibility !== 'hidden';
+    return (orange.offsetWidth || 0) > 0
+      && (orange.offsetHeight || 0) > 0
+      && style?.display !== 'none'
+      && style?.visibility !== 'hidden';
   }) || null;
 
   const todayVisible = !!(todayIsland && !todayIsland.classList.contains('hidden'));
-
-  // When the orange alert exists, it owns the alert-row alignment. Keep the
-  // red Critical Tasks alert directly mirrored on that same row instead of
-  // translating it downward beneath the Today score island.
   const shouldStackUnderToday = todayVisible && !visibleOrangeAlert;
-  island.classList.toggle('stack-under-today', shouldStackUnderToday);
+  const shouldNudgeForToday = todayVisible && !!visibleOrangeAlert;
+  const nextMode = shouldStackUnderToday
+    ? 'stack'
+    : (shouldNudgeForToday ? 'nudge' : 'base');
+  const previousMode = island.dataset.layoutMode || '';
 
-  // Dynamic stacking remains as the fallback when there is no orange alert.
+  island.classList.toggle('stack-under-today', shouldStackUnderToday);
+  island.classList.toggle('nudge-for-today', shouldNudgeForToday);
+
   if (shouldStackUnderToday) {
     const h = Math.round(todayIsland.getBoundingClientRect().height || 0);
     if (h > 0) {
       document.documentElement.style.setProperty('--tp-today-island-h', `${h}px`);
     }
+    document.documentElement.style.removeProperty('--tp-critical-today-nudge');
+  } else if (shouldNudgeForToday) {
+    // Compute this only when entering the nudged state. The Today island is
+    // fixed, so repeatedly measuring it during every scroll frame just causes
+    // visible jitter for no benefit.
+    if (previousMode !== 'nudge') {
+      const todayRect = todayIsland.getBoundingClientRect();
+      const orangeStyle = window.getComputedStyle?.(visibleOrangeAlert);
+      const orangeTop = Number.parseFloat(
+        visibleOrangeAlert.style.top || orangeStyle?.top || ''
+      );
+      const minimumGap = 8;
+      const nudge = Number.isFinite(orangeTop)
+        ? Math.max(14, Math.ceil(todayRect.bottom + minimumGap - orangeTop))
+        : 18;
+      document.documentElement.style.setProperty('--tp-critical-today-nudge', `${nudge}px`);
+    }
+    document.documentElement.style.removeProperty('--tp-today-island-h');
   } else {
     document.documentElement.style.removeProperty('--tp-today-island-h');
+    document.documentElement.style.removeProperty('--tp-critical-today-nudge');
   }
 
-  window.TaskPointsFloatingAlertIslandAlignment?.scheduleAlign?.();
+  island.dataset.layoutMode = nextMode;
+
+  // Re-align only when the layout mode changes, not on every scroll event.
+  if (previousMode !== nextMode) {
+    window.TaskPointsFloatingAlertIslandAlignment?.scheduleAlign?.();
+  }
 }
 
   function updateCriticalTasksIsland(stateInput = null) {
