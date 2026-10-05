@@ -6414,9 +6414,18 @@ function positionYesterdayRecentResultsDropdown() {
     window.innerHeight - rect.bottom - toolbarHeight - safeBottom - 8
   );
 
-  dropdown.style.left = `${Math.round(rect.left)}px`;
+  const desiredWidth = Math.max(
+    rect.width,
+    Math.min(280, Math.max(160, window.innerWidth - 24))
+  );
+  const left = Math.min(
+    Math.max(12, rect.right - desiredWidth),
+    Math.max(12, window.innerWidth - desiredWidth - 12)
+  );
+
+  dropdown.style.left = `${Math.round(left)}px`;
   dropdown.style.top = `${Math.round(rect.bottom)}px`;
-  dropdown.style.width = `${Math.round(rect.width)}px`;
+  dropdown.style.width = `${Math.round(desiredWidth)}px`;
   dropdown.style.maxHeight = `${Math.round(availableHeight)}px`;
 }
 
