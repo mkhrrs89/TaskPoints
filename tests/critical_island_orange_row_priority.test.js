@@ -11,13 +11,14 @@ function between(source, startMarker, endMarker) {
   return source.slice(start, end);
 }
 
-test('orange reminder alert prevents Critical Tasks from stacking under Today island', () => {
+test('orange reminder alert uses a stable Today-island nudge instead of full stacking', () => {
   const body = between(toolbar, 'function updateCritIslandStacking()', 'function updateCriticalTasksIsland');
 
   assert.match(body, /querySelectorAll\('\.tp-reminder-island'\)/);
   assert.match(body, /const shouldStackUnderToday = todayVisible && !visibleOrangeAlert/);
-  assert.match(body, /classList\.toggle\('stack-under-today', shouldStackUnderToday\)/);
-  assert.match(body, /TaskPointsFloatingAlertIslandAlignment\?\.scheduleAlign\?\.\(\)/);
+  assert.match(body, /const shouldNudgeForToday = todayVisible && !!visibleOrangeAlert/);
+  assert.match(body, /classList\.toggle\('nudge-for-today', shouldNudgeForToday\)/);
+  assert.match(body, /--tp-critical-today-nudge/);
 });
 
 test('Today-island collision fallback is preserved when orange alert is absent', () => {
@@ -26,4 +27,13 @@ test('Today-island collision fallback is preserved when orange alert is absent',
   assert.match(body, /if \(shouldStackUnderToday\)/);
   assert.match(body, /todayIsland\.getBoundingClientRect\(\)\.height/);
   assert.match(body, /--tp-today-island-h/);
+});
+
+
+test('critical alert does not realign on every scroll frame', () => {
+  const body = between(toolbar, 'function updateCritIslandStacking()', 'function updateCriticalTasksIsland');
+
+  assert.match(body, /const previousMode = island\.dataset\.layoutMode/);
+  assert.match(body, /if \(previousMode !== nextMode\)/);
+  assert.match(body, /TaskPointsFloatingAlertIslandAlignment\?\.scheduleAlign\?\.\(\)/);
 });
