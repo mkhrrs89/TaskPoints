@@ -657,7 +657,7 @@ body {
 
 .yesterday-recent-results-dropdown {
   position: fixed;
-  z-index: 10000;
+  z-index: calc(var(--tp-z-toolbar-popup-layer) - 1);
   box-sizing: border-box;
   overflow-y: auto;
   overflow-x: hidden;
