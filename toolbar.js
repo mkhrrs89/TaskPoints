@@ -3742,14 +3742,19 @@ function updateCritIslandStacking() {
     // visible jitter for no benefit.
     if (previousMode !== 'nudge') {
       const todayRect = todayIsland.getBoundingClientRect();
-      const orangeStyle = window.getComputedStyle?.(visibleOrangeAlert);
-      const orangeTop = Number.parseFloat(
-        visibleOrangeAlert.style.top || orangeStyle?.top || ''
-      );
+      const islandStyle = window.getComputedStyle?.(island);
+      const baseTop = Number.parseFloat(islandStyle?.top || '');
       const minimumGap = 8;
-      const nudge = Number.isFinite(orangeTop)
-        ? Math.max(14, Math.ceil(todayRect.bottom + minimumGap - orangeTop))
-        : 18;
+
+      // Use the red island's own fixed layout top, which is unaffected by
+      // orange-button animation or modal scroll-lock transforms. Clamp the
+      // result so transient modal geometry can never fling the alert far
+      // down the screen.
+      const rawNudge = Number.isFinite(baseTop)
+        ? Math.ceil(todayRect.bottom + minimumGap - baseTop)
+        : 64;
+      const nudge = Math.min(96, Math.max(18, rawNudge));
+
       document.documentElement.style.setProperty('--tp-critical-today-nudge', `${nudge}px`);
     }
     document.documentElement.style.removeProperty('--tp-today-island-h');
