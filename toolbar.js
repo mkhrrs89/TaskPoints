@@ -3710,17 +3710,64 @@ function updateCritIslandStacking() {
   const todayIsland = document.getElementById('todayScoreIsland');
   if (!island || island.dataset.active !== '1') return;
 
-  const todayVisible = !!(todayIsland && !todayIsland.classList.contains('hidden'));
-  island.classList.toggle('stack-under-today', todayVisible);
+  const visibleOrangeAlert = Array.from(document.querySelectorAll('.tp-reminder-island')).find((orange) => {
+    if (!orange || orange.classList.contains('hidden')) return false;
+    const style = window.getComputedStyle?.(orange);
+    return (orange.offsetWidth || 0) > 0
+      && (orange.offsetHeight || 0) > 0
+      && style?.display !== 'none'
+      && style?.visibility !== 'hidden';
+  }) || null;
 
-  // Dynamic stacking offset: match the actual Today island height
-  if (todayVisible) {
+  const todayVisible = !!(todayIsland && !todayIsland.classList.contains('hidden'));
+  const shouldStackUnderToday = todayVisible && !visibleOrangeAlert;
+  const shouldNudgeForToday = todayVisible && !!visibleOrangeAlert;
+  const nextMode = shouldStackUnderToday
+    ? 'stack'
+    : (shouldNudgeForToday ? 'nudge' : 'base');
+  const previousMode = island.dataset.layoutMode || '';
+
+  island.classList.toggle('stack-under-today', shouldStackUnderToday);
+  island.classList.toggle('nudge-for-today', shouldNudgeForToday);
+
+  if (shouldStackUnderToday) {
     const h = Math.round(todayIsland.getBoundingClientRect().height || 0);
     if (h > 0) {
       document.documentElement.style.setProperty('--tp-today-island-h', `${h}px`);
     }
+    document.documentElement.style.removeProperty('--tp-critical-today-nudge');
+  } else if (shouldNudgeForToday) {
+    // Compute this only when entering the nudged state. The Today island is
+    // fixed, so repeatedly measuring it during every scroll frame just causes
+    // visible jitter for no benefit.
+    if (previousMode !== 'nudge') {
+      const todayRect = todayIsland.getBoundingClientRect();
+      const islandStyle = window.getComputedStyle?.(island);
+      const baseTop = Number.parseFloat(islandStyle?.top || '');
+      const minimumGap = 8;
+
+      // Use the red island's own fixed layout top, which is unaffected by
+      // orange-button animation or modal scroll-lock transforms. Clamp the
+      // result so transient modal geometry can never fling the alert far
+      // down the screen.
+      const rawNudge = Number.isFinite(baseTop)
+        ? Math.ceil(todayRect.bottom + minimumGap - baseTop)
+        : 64;
+      const nudge = Math.min(96, Math.max(18, rawNudge));
+
+      document.documentElement.style.setProperty('--tp-critical-today-nudge', `${nudge}px`);
+    }
+    document.documentElement.style.removeProperty('--tp-today-island-h');
   } else {
     document.documentElement.style.removeProperty('--tp-today-island-h');
+    document.documentElement.style.removeProperty('--tp-critical-today-nudge');
+  }
+
+  island.dataset.layoutMode = nextMode;
+
+  // Re-align only when the layout mode changes, not on every scroll event.
+  if (previousMode !== nextMode) {
+    window.TaskPointsFloatingAlertIslandAlignment?.scheduleAlign?.();
   }
 }
 
@@ -3734,7 +3781,10 @@ function updateCritIslandStacking() {
     if (count <= 0) {
       island.style.display = 'none';
       island.classList.add('hidden');
-      island.classList.remove('stack-under-today');
+      island.classList.remove('stack-under-today', 'nudge-for-today');
+      island.dataset.layoutMode = '';
+      document.documentElement.style.removeProperty('--tp-today-island-h');
+      document.documentElement.style.removeProperty('--tp-critical-today-nudge');
       island.setAttribute('aria-hidden', 'true');
       island.dataset.active = '0';
       window.tpUpdateToastAnchor?.();
