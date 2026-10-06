@@ -9,7 +9,7 @@
   const HEADER_ROW_SELECTOR = '.header-nav';
   const RED_FALLBACK_LEFT = '0.75rem';
   const ORANGE_RIGHT = '0.75rem';
-  const RED_SIZE_PX = 52;
+  const RED_FALLBACK_SIZE_PX = 60;
   const ORANGE_VERTICAL_NUDGE_PX = 4;
   const FALLBACK_RED_TOP = 'calc(env(safe-area-inset-top, 0px) + 3.45rem)';
   const FALLBACK_ORANGE_TOP = 'calc(env(safe-area-inset-top, 0px) + 3.7rem)';
@@ -40,8 +40,7 @@
 
   function centerFixedElementOnDocumentY(element, centerY, fallbackTop) {
     if (!element) return false;
-    const rect = element.getBoundingClientRect?.();
-    const height = Number(rect?.height || element.offsetHeight || 0);
+    const height = Number(element.offsetHeight || element.getBoundingClientRect?.()?.height || 0);
     if (Number.isFinite(centerY) && height > 0) {
       element.style.top = `${Math.round(centerY - (height / 2))}px`;
     } else {
@@ -59,30 +58,83 @@
     }) || oranges[0] || null;
   }
 
-  function sizeRedIsland(red) {
+  function sizeRedIsland(red, orange) {
     if (!red) return;
-    const size = `${RED_SIZE_PX}px`;
-    red.style.width = size;
-    red.style.height = size;
-    red.style.minWidth = size;
-    red.style.minHeight = size;
-    red.style.padding = '0.35rem';
+
+    // offsetWidth/offsetHeight are layout dimensions and do not wobble with
+    // the orange island's visual shake transform.
+    const width = Number(orange?.offsetWidth || 0) > 0
+      ? Number(orange.offsetWidth)
+      : RED_FALLBACK_SIZE_PX;
+    const height = Number(orange?.offsetHeight || 0) > 0
+      ? Number(orange.offsetHeight)
+      : RED_FALLBACK_SIZE_PX;
+
+    red.style.width = `${Math.round(width)}px`;
+    red.style.height = `${Math.round(height)}px`;
+    red.style.minWidth = `${Math.round(width)}px`;
+    red.style.minHeight = `${Math.round(height)}px`;
+    red.style.padding = '0';
     red.style.boxSizing = 'border-box';
+  }
+
+  function anchorRedMarkFromTwoMarkBaseline(red) {
+    const mark = red?.querySelector?.('#criticalTasksIslandMark');
+    if (!red || !mark || !global.document?.body) return;
+
+    const style = global.getComputedStyle?.(mark);
+    if (!style) return;
+
+    const probe = global.document.createElement('span');
+    probe.textContent = '!!';
+    probe.setAttribute('aria-hidden', 'true');
+    Object.assign(probe.style, {
+      position: 'fixed',
+      left: '-10000px',
+      top: '-10000px',
+      visibility: 'hidden',
+      pointerEvents: 'none',
+      display: 'inline-flex',
+      alignItems: 'center',
+      whiteSpace: 'nowrap',
+      boxSizing: 'border-box',
+      fontFamily: style.fontFamily,
+      fontWeight: style.fontWeight,
+      fontSize: style.fontSize,
+      lineHeight: style.lineHeight,
+      letterSpacing: style.letterSpacing,
+      paddingLeft: style.paddingLeft,
+      paddingRight: style.paddingRight,
+      margin: '0',
+      transform: 'none',
+      animation: 'none'
+    });
+
+    global.document.body.appendChild(probe);
+    const twoMarkWidth = Number(probe.offsetWidth || probe.getBoundingClientRect?.()?.width || 0);
+    probe.remove();
+
+    const islandWidth = Number(red.offsetWidth || 0);
+    if (!(islandWidth > 0) || !(twoMarkWidth > 0)) return;
+
+    const leftInset = Math.max(0, Math.round((islandWidth - twoMarkWidth) / 2));
+    red.style.setProperty('--tp-critical-mark-left-anchor', `${leftInset}px`);
   }
 
   function mirrorRedToOrange(red, orange) {
     if (!red) return false;
-    const viewportWidth = Number(global.innerWidth || global.document?.documentElement?.clientWidth || 0);
-    const orangeRect = orange?.getBoundingClientRect?.();
-    const redRect = red.getBoundingClientRect?.();
-    if (!(viewportWidth > 0) || !orangeRect || !redRect || !(orangeRect.width > 0) || !(redRect.width > 0)) {
-      red.style.left = RED_FALLBACK_LEFT;
-      return false;
+
+    // The orange island is right-anchored. Mirror that stable layout inset
+    // directly to the red island instead of reading its animated screen rect.
+    const orangeStyle = orange ? global.getComputedStyle?.(orange) : null;
+    const rightInset = String(orange?.style?.right || orangeStyle?.right || '').trim();
+    if (rightInset && rightInset !== 'auto') {
+      red.style.left = rightInset;
+      return true;
     }
-    const orangeCenterX = orangeRect.left + (orangeRect.width / 2);
-    const mirroredCenterX = viewportWidth - orangeCenterX;
-    red.style.left = `${Math.round(mirroredCenterX - (redRect.width / 2))}px`;
-    return true;
+
+    red.style.left = RED_FALLBACK_LEFT;
+    return false;
   }
 
   function align() {
@@ -124,9 +176,21 @@
     });
 
     if (red) {
-      sizeRedIsland(red);
-      centerFixedElementOnDocumentY(red, centerY, FALLBACK_RED_TOP);
-      mirrorRedToOrange(red, visibleOrange(oranges));
+      const orange = visibleOrange(oranges);
+      sizeRedIsland(red, orange);
+      anchorRedMarkFromTwoMarkBaseline(red);
+
+      // Use the orange island's fixed layout top, not its transformed visual
+      // rect, so red does not chase animation pixels during a swipe.
+      const orangeStyle = orange ? global.getComputedStyle?.(orange) : null;
+      const stableOrangeTop = String(orange?.style?.top || orangeStyle?.top || '').trim();
+      if (stableOrangeTop && stableOrangeTop !== 'auto') {
+        red.style.top = stableOrangeTop;
+      } else {
+        centerFixedElementOnDocumentY(red, centerY, FALLBACK_RED_TOP);
+      }
+
+      mirrorRedToOrange(red, orange);
     }
 
     return Boolean(red || oranges.length);
@@ -161,7 +225,7 @@
 
   global.TaskPointsFloatingAlertIslandAlignment = {
     installed: true,
-    version: 2,
+    version: 4,
     align,
     scheduleAlign,
     getStatus() {
@@ -171,7 +235,7 @@
         headerRowFound: Boolean(visibleHeaderRow()),
         redFound: Boolean(global.document?.getElementById?.(RED_ID)),
         orangeCount: global.document?.querySelectorAll?.(ORANGE_SELECTOR)?.length || 0,
-        redSizePx: RED_SIZE_PX,
+        redFallbackSizePx: RED_FALLBACK_SIZE_PX,
         orangeVerticalNudgePx: ORANGE_VERTICAL_NUDGE_PX
       };
     }
