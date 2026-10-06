@@ -43,7 +43,15 @@ test('alignment does not attach a scroll listener or alter floating transforms',
   assert.match(moduleSource, /addEventListener\?*\('pageshow', scheduleAlign/);
 });
 
+test('critical mark uses a fixed two-mark left anchor so extra marks only grow right', () => {
+  assert.match(moduleSource, /function anchorRedMarkFromTwoMarkBaseline\(red\)/);
+  assert.match(moduleSource, /probe\.textContent = '!!'/);
+  assert.match(moduleSource, /const leftInset = Math\.max\(0, Math\.round\(\(islandWidth - twoMarkWidth\) \/ 2\)\)/);
+  assert.match(moduleSource, /--tp-critical-mark-left-anchor/);
+  assert.match(moduleSource, /anchorRedMarkFromTwoMarkBaseline\(red\)/);
+});
+
 test('shared production loader includes cache-busted floating island alignment module', () => {
-  assert.match(loaderSource, /floating_alert_island_alignment\.js\?v=20261005-2/);
+  assert.match(loaderSource, /floating_alert_island_alignment\.js\?v=20261006-1/);
   assert.match(loaderSource, /data-taskpoints-floating-alert-alignment/);
 });
