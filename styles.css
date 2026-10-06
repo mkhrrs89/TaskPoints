@@ -632,11 +632,146 @@ body {
 
 
 .yesterdayResultsPanel {
+  position: relative;
   background: transparent;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  transition:
+    background 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.yesterdayResultsPanel:focus-visible {
+  outline: 2px solid rgba(94, 234, 212, 0.78);
+  outline-offset: -2px;
+}
+
+.yesterdayResultsPanel.is-recent-results-open {
+  box-shadow: inset 0 -1px 0 rgba(255,255,255,0.14);
 }
 
 .yesterdayResultsPanel.yesterday-win {
   background: var(--tp-btn-teal-grad);
+}
+
+.yesterday-recent-results-dropdown {
+  position: fixed;
+  z-index: calc(var(--tp-z-toolbar-popup-layer) - 1);
+  box-sizing: border-box;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid rgba(51, 65, 85, 0.95);
+  border-top: 0;
+  border-radius: 0 0 16px 16px;
+  background:
+    linear-gradient(180deg, rgba(21, 35, 38, 0.985), rgba(11, 17, 20, 0.995));
+  box-shadow:
+    0 18px 36px rgba(0,0,0,0.48),
+    0 0 0 1px rgba(255,255,255,0.025) inset;
+  opacity: 0;
+  transform: translateY(-8px) scaleY(0.92);
+  transform-origin: top center;
+  clip-path: inset(0 0 100% 0 round 0 0 16px 16px);
+  pointer-events: none;
+  transition:
+    opacity 170ms ease,
+    transform 220ms cubic-bezier(.2,.78,.25,1),
+    clip-path 240ms cubic-bezier(.2,.78,.25,1);
+  will-change: transform, opacity, clip-path;
+}
+
+.yesterday-recent-results-dropdown.is-open {
+  opacity: 1;
+  transform: translateY(0) scaleY(1);
+  clip-path: inset(0 0 0 0 round 0 0 16px 16px);
+  pointer-events: auto;
+}
+
+.yesterday-recent-result-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 9px;
+  min-height: 48px;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(71, 85, 105, 0.52);
+}
+
+.yesterday-recent-result-row:last-child {
+  border-bottom: 0;
+}
+
+.yesterday-recent-result-date {
+  color: #94a3b8;
+  font-size: 9px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.yesterday-recent-result-main {
+  min-width: 0;
+}
+
+.yesterday-recent-result-opponent {
+  overflow: hidden;
+  color: #e5e7eb;
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.yesterday-recent-result-score {
+  margin-top: 2px;
+  color: #9ca3af;
+  font-size: 10px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.yesterday-recent-result-outcome {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.yesterday-recent-result-row.is-win .yesterday-recent-result-outcome {
+  background: rgba(20, 184, 166, 0.20);
+  color: #5eead4;
+}
+
+.yesterday-recent-result-row.is-loss .yesterday-recent-result-outcome {
+  background: rgba(239, 68, 68, 0.18);
+  color: #fca5a5;
+}
+
+.yesterday-recent-result-row.is-tie .yesterday-recent-result-outcome {
+  background: rgba(249, 115, 22, 0.18);
+  color: #fdba74;
+}
+
+.yesterday-recent-result-empty {
+  padding: 14px 12px;
+  color: #94a3b8;
+  font-size: 10px;
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .yesterday-recent-results-dropdown {
+    transition: opacity 120ms ease;
+    transform: none;
+    clip-path: none;
+  }
 }
 
 .yesterdayResultsPanel .yesterdayWinner,
@@ -678,13 +813,55 @@ body {
 
 .critIslandMark,
 #criticalTasksIslandMark {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-start;
+  white-space: nowrap;
   font-family: 'Teko', 'Inter', ui-sans-serif, system-ui, -apple-system,
     BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  font-weight: 800;
-  font-size: 1.65rem;
+  font-weight: 900;
+  font-size: 2.65rem;
   line-height: 1;
-  letter-spacing: 0.3px;
-  margin-top: 1px;
+  letter-spacing: 0.24em;
+  padding-left: 0.24em;
+  margin: 0 0 0 var(--tp-critical-mark-left-anchor, 0px);
+  position: relative;
+  top: 4px;
+  color: #ef4444;
+  transform-origin: left center;
+  text-align: left;
+  text-shadow:
+    0 0 5px rgba(239, 68, 68, 1),
+    0 0 12px rgba(239, 68, 68, 0.95),
+    0 0 24px rgba(220, 38, 38, 0.78);
+  animation: tpCriticalIslandMarkPulse 1.15s ease-in-out infinite;
+  will-change: transform, opacity, text-shadow;
+}
+
+@keyframes tpCriticalIslandMarkPulse {
+  0%, 100% {
+    transform: scale(0.96);
+    opacity: 0.82;
+    text-shadow:
+      0 0 3px rgba(239, 68, 68, 0.92),
+      0 0 8px rgba(239, 68, 68, 0.72),
+      0 0 15px rgba(220, 38, 38, 0.48);
+  }
+  50% {
+    transform: scale(1.08);
+    opacity: 1;
+    text-shadow:
+      0 0 5px rgba(248, 113, 113, 1),
+      0 0 13px rgba(239, 68, 68, 1),
+      0 0 26px rgba(220, 38, 38, 0.88);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #criticalTasksIslandMark {
+    animation: none;
+  }
 }
 
 #youStatsGrid {
@@ -1730,25 +1907,31 @@ body {
   left: 0.75rem;
   min-width: 56px;
   min-height: 56px;
-  border-radius: 999px;
-  padding: 0.45rem 0.8rem;
-  border: 1px solid #3a0b0b;
-  background: linear-gradient(135deg, #5b1414 0%, #240707 100%);
-  color: #ffffff;
-  box-shadow: 0 12px 24px rgba(0,0,0,0.32), 0 0 0 1px rgba(255,255,255,0.06) inset;
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  border-radius: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #ef4444;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   z-index: calc(var(--tp-z-floating) + 1) !important;
   transform: translateY(0);
   opacity: 1;
   transition: transform 220ms ease, opacity 180ms ease;
   pointer-events: auto;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
+  -webkit-tap-highlight-color: transparent;
 }
 
 #criticalTasksIsland.stack-under-today{
   transform: translateY(calc(var(--tp-today-island-h, 66px) + 12px));
+  transition: transform 180ms ease;
+}
+
+#criticalTasksIsland.nudge-for-today{
+  transform: translateY(var(--tp-critical-today-nudge, 18px));
   transition: transform 180ms ease;
 }
 
