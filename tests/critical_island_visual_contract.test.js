@@ -26,6 +26,10 @@ test('critical task exclamation marks are spaced, red, glowing, and pulsing', ()
   assert.match(block, /font-size:\s*2\.65rem;/);
   assert.match(block, /position:\s*relative;/);
   assert.match(block, /top:\s*4px;/);
+  assert.match(block, /justify-content:\s*flex-start;/);
+  assert.match(block, /white-space:\s*nowrap;/);
+  assert.match(block, /transform-origin:\s*left center;/);
+  assert.match(block, /text-align:\s*left;/);
   assert.match(block, /color:\s*#ef4444;/);
   assert.match(block, /letter-spacing:\s*0\.24em;/);
   assert.match(block, /text-shadow:/);
