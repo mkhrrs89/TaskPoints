@@ -78,6 +78,49 @@
     red.style.boxSizing = 'border-box';
   }
 
+  function anchorRedMarkFromTwoMarkBaseline(red) {
+    const mark = red?.querySelector?.('#criticalTasksIslandMark');
+    if (!red || !mark || !global.document?.body) return;
+
+    const style = global.getComputedStyle?.(mark);
+    if (!style) return;
+
+    const probe = global.document.createElement('span');
+    probe.textContent = '!!';
+    probe.setAttribute('aria-hidden', 'true');
+    Object.assign(probe.style, {
+      position: 'fixed',
+      left: '-10000px',
+      top: '-10000px',
+      visibility: 'hidden',
+      pointerEvents: 'none',
+      display: 'inline-flex',
+      alignItems: 'center',
+      whiteSpace: 'nowrap',
+      boxSizing: 'border-box',
+      fontFamily: style.fontFamily,
+      fontWeight: style.fontWeight,
+      fontSize: style.fontSize,
+      lineHeight: style.lineHeight,
+      letterSpacing: style.letterSpacing,
+      paddingLeft: style.paddingLeft,
+      paddingRight: style.paddingRight,
+      margin: '0',
+      transform: 'none',
+      animation: 'none'
+    });
+
+    global.document.body.appendChild(probe);
+    const twoMarkWidth = Number(probe.offsetWidth || probe.getBoundingClientRect?.()?.width || 0);
+    probe.remove();
+
+    const islandWidth = Number(red.offsetWidth || 0);
+    if (!(islandWidth > 0) || !(twoMarkWidth > 0)) return;
+
+    const leftInset = Math.max(0, Math.round((islandWidth - twoMarkWidth) / 2));
+    red.style.setProperty('--tp-critical-mark-left-anchor', `${leftInset}px`);
+  }
+
   function mirrorRedToOrange(red, orange) {
     if (!red) return false;
 
@@ -135,6 +178,7 @@
     if (red) {
       const orange = visibleOrange(oranges);
       sizeRedIsland(red, orange);
+      anchorRedMarkFromTwoMarkBaseline(red);
 
       // Use the orange island's fixed layout top, not its transformed visual
       // rect, so red does not chase animation pixels during a swipe.
@@ -181,7 +225,7 @@
 
   global.TaskPointsFloatingAlertIslandAlignment = {
     installed: true,
-    version: 3,
+    version: 4,
     align,
     scheduleAlign,
     getStatus() {
