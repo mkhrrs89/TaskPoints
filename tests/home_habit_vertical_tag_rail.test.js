@@ -62,8 +62,8 @@ test('habit rail groups have no trailing bottom gap after their final habit', ()
 });
 
 
-test('bottommost silver habit paints through the group bottom breathing room without changing layout', () => {
-  assert.match(styles, /\.habitGroup--rail-layout \.habitGroupBody > \.habitWeekCompleteStack:last-child::before\{[\s\S]*?bottom:-8px;/);
-  assert.match(styles, /\.habitGroup--rail-layout \.habitGroupBody > \.habitWeekCompleteStack:last-child::after\{[\s\S]*?bottom:-7px;/);
-  assert.match(styles, /\.habitGroup--rail-layout \.habitGroupBody > \.habitRow\.habitRow--week-complete:last-child::before\{[\s\S]*?bottom:-8px;/);
+test('bottommost silver habit keeps normal silver underside depth and reaches the next group flush', () => {
+  assert.match(styles, /\.habitGroup--rail-layout \.habitGroupBody:has\(> \.habitWeekCompleteStack:last-child\)\{[\s\S]*?padding-bottom:0;/);
+  assert.match(styles, /@media \(max-width:640px\)[\s\S]*?\.habitGroup--rail-layout \.habitGroupBody \.habitWeekCompleteStack > \.habitRow\.habitRow--week-complete\{[\s\S]*?margin-bottom:1rem;/);
+  assert.doesNotMatch(styles, /\.habitGroup--rail-layout \.habitGroupBody > \.habitWeekCompleteStack:last-child::before\{[\s\S]*?bottom:-8px;/);
 });
