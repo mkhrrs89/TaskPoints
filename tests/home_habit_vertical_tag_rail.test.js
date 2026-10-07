@@ -29,3 +29,19 @@ test('completed-week plate starts at the rail/content boundary rather than exten
   assert.match(styles, /\.habitGroup--rail-layout \.habitGroupBody \.habitWeekCompleteStack\{[\s\S]*?margin-left:0;[\s\S]*?width:100%;/);
   assert.doesNotMatch(styles, /\.habitGroup--rail-layout \.habitGroupBody \.habitWeekCompleteStack\{[\s\S]*?margin-left:\s*-36px/);
 });
+
+
+test('Home rail sections touch and extend flush to both Habits card edges', () => {
+  assert.match(index, /id="habitsList" class="grid gap-2 habitsList--rail-layout"/);
+  assert.match(styles, /#habitsList\.habitsList--rail-layout\{[\s\S]*?gap:0;[\s\S]*?margin-left:-16px;[\s\S]*?margin-right:-16px;[\s\S]*?width:calc\(100% \+ 32px\);/);
+  assert.match(styles, /\.habitGroup\.habitGroup--rail-layout \+ \.habitGroup\.habitGroup--rail-layout\{[\s\S]*?margin-top:-1px;/);
+});
+
+test('vertical habit group labels are larger uppercase text', () => {
+  assert.match(styles, /\.habitGroup--rail-layout \.habitGroupTitle\{[\s\S]*?font-size:15px;[\s\S]*?text-transform:uppercase;/);
+  assert.match(styles, /@media \(max-width:640px\)[\s\S]*?\.habitGroup--rail-layout \.habitGroupTitle\{[\s\S]*?font-size:14px;/);
+});
+
+test('Home habit bubbles disable iOS double-tap zoom while preserving tap and pinch behavior', () => {
+  assert.match(styles, /#habitsList\.habitsList--rail-layout \.habitDay\{[\s\S]*?touch-action:manipulation;[\s\S]*?-webkit-tap-highlight-color:transparent;/);
+});
