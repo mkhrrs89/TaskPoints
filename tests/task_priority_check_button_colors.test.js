@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 const styles = readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
 
 test('critical task check button is white with a red checkmark', () => {
-  assert.match(styles, /\.critical-card \.btn-check,[\s\S]*?background:#ffffff !important;[\s\S]*?color:#b91c1c !important;/);
+  assert.match(styles, /\.critical-card \.btn-check,[\s\S]*?background:linear-gradient\([\s\S]*?#ffffff,[\s\S]*?#d8dde3[\s\S]*?\) !important;[\s\S]*?color:#b91c1c !important;/);
 });
 
 test('high task check button uses the same translucent orange-brown gradient as the high task card', () => {
