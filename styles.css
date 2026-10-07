@@ -7290,3 +7290,160 @@ metal background attached only to the day-bubble row.
     display: none;
   }
 }
+
+
+/* =======================================================================
+   HABIT TAG RAIL PREVIEW
+   Vertical left-side tag labels + open right edge, per 2026-10-07 mockup.
+   Scoped to Home's new rail-layout wrapper so Week/Vices stay unchanged.
+   ======================================================================= */
+.habitGroup.habitGroup--rail-layout{
+  --habit-group-rail-width: 40px;
+  position:relative;
+  display:grid;
+  grid-template-columns:var(--habit-group-rail-width) minmax(0,1fr);
+  grid-template-rows:auto;
+  gap:0;
+  padding:0;
+  border:0;
+  border-top:1px solid var(--border);
+  border-bottom:1px solid var(--border);
+  border-radius:0;
+  background:transparent;
+  overflow:visible;
+}
+
+.habitGroup--rail-layout .habitGroupRail{
+  grid-column:1;
+  grid-row:1;
+  min-width:var(--habit-group-rail-width);
+  min-height:100%;
+  display:flex;
+  align-items:flex-start;
+  justify-content:center;
+  padding:9px 0 8px;
+  box-sizing:border-box;
+  background:linear-gradient(180deg, #254c52 0%, #1a383b 100%);
+  color:#f8fafc;
+  overflow:hidden;
+}
+
+.habitGroup--rail-layout .habitGroupTitle{
+  margin:0;
+  padding:0;
+  border:0;
+  border-radius:0;
+  background:transparent;
+  color:inherit;
+  font-weight:700;
+  font-size:12px;
+  line-height:1;
+  letter-spacing:.045em;
+  text-transform:none;
+  writing-mode:vertical-rl;
+  text-orientation:mixed;
+  transform:rotate(180deg);
+  white-space:nowrap;
+  max-height:100%;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+.habitGroup--rail-layout .habitGroupContent{
+  grid-column:2;
+  grid-row:1;
+  min-width:0;
+  position:relative;
+  overflow:visible;
+}
+
+.habitGroup--rail-layout .habitGroupBody{
+  display:grid;
+  gap:.5rem;
+  padding:8px 0;
+  min-width:0;
+}
+
+.habitGroup--rail-layout.habitGroup--reorderable .habitGroupBody{
+  padding-top:32px;
+}
+
+.habitGroup--rail-layout .habitGroupControls{
+  position:absolute;
+  top:4px;
+  right:6px;
+  z-index:5;
+  margin:0;
+  display:flex;
+  align-items:center;
+  gap:.2rem;
+}
+
+.habitGroup--rail-layout .habitGroupBody > .habitRow{
+  box-sizing:border-box;
+  padding-left:10px;
+  padding-right:10px;
+}
+
+/* The silver completed-week plate begins exactly at the rail boundary. */
+.habitGroup--rail-layout .habitGroupBody .habitWeekCompleteStack{
+  margin-left:0;
+  margin-right:0;
+  width:100%;
+  padding:10px 10px 8px;
+  box-sizing:border-box;
+}
+
+.habitGroup--rail-layout .habitGroupBody .habitWeekCompleteStack > .habitRow.habitRow--week-complete{
+  margin-left:0;
+  margin-right:0;
+  width:100%;
+  padding:10px 0 8px;
+  box-sizing:border-box;
+}
+
+.habitGroup--rail-layout .habitGroupBody > .habitRow.habitRow--week-complete{
+  margin-left:0;
+  margin-right:0;
+  width:100%;
+  padding:10px 10px 8px;
+  box-sizing:border-box;
+}
+
+/* No rounded/right-side bubble outline: only the full-width top/bottom rules remain. */
+.habitGroup--rail-layout,
+.habitGroup--rail-layout .habitGroupContent,
+.habitGroup--rail-layout .habitGroupBody{
+  border-right:0 !important;
+  border-radius:0 !important;
+}
+
+@media (max-width:640px){
+  .habitGroup.habitGroup--rail-layout{
+    --habit-group-rail-width:34px;
+  }
+
+  .habitGroup--rail-layout .habitGroupRail{
+    padding-top:8px;
+  }
+
+  .habitGroup--rail-layout .habitGroupTitle{
+    font-size:11px;
+    letter-spacing:.035em;
+  }
+
+  .habitGroup--rail-layout .habitGroupBody > .habitRow{
+    padding-left:8px;
+    padding-right:8px;
+  }
+
+  .habitGroup--rail-layout .habitGroupBody .habitWeekCompleteStack{
+    padding-left:8px;
+    padding-right:8px;
+  }
+
+  .habitGroup--rail-layout .habitGroupBody > .habitRow.habitRow--week-complete{
+    padding-left:8px;
+    padding-right:8px;
+  }
+}
