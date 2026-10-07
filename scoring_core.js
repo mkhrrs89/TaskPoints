@@ -1421,12 +1421,25 @@ function officialRoundDef(roundId, seasonOrOptions = null) {
 
   function getSeasonSeriesWinner(series) {
     if (!series || typeof series !== 'object') return null;
-    if (series.winnerId && (series.winnerId === series.playerAId || series.winnerId === series.playerBId)) return series.winnerId;
     const winsNeeded = Number(series.winsNeeded) || (Math.floor((Number(series.bestOf) || 1) / 2) + 1);
     const winsA = Number(series.winsA) || 0;
     const winsB = Number(series.winsB) || 0;
     if (winsA >= winsNeeded && winsA > winsB) return series.playerAId || null;
     if (winsB >= winsNeeded && winsB > winsA) return series.playerBId || null;
+
+    const storedWinner = (series.winnerId === series.playerAId || series.winnerId === series.playerBId)
+      ? series.winnerId
+      : '';
+    const hasWinEvidence = winsA > 0
+      || winsB > 0
+      || (Array.isArray(series.gameResults) && series.gameResults.length > 0);
+
+    // A stored winner is only a legacy fallback when there is no usable win
+    // evidence at all. If a current series says 1-1, 2-0, etc. in a best-of-5,
+    // winnerId must never override the three-win clinch requirement.
+    if (!hasWinEvidence && storedWinner && ['complete', 'completed', 'final', 'finalized', 'finished'].includes(String(series.status || '').toLowerCase())) {
+      return storedWinner;
+    }
     return null;
   }
 
@@ -1853,7 +1866,71 @@ function officialRoundDef(roundId, seasonOrOptions = null) {
     let nextSeason = normalizeSeasonState(season);
     if (!nextSeason) return { ok: false, error: 'invalid_season', season, changed: false };
     let changed = false;
-    getSeasonRoundOrder(nextSeason).forEach((roundId) => {
+    const roundOrder = getSeasonRoundOrder(nextSeason);
+
+    // First remove impossible stored winners and any downstream slot they filled.
+    // This repairs state such as a best-of-5 showing a 1-1 player in the next round.
+    roundOrder.forEach((roundId) => {
+      const entries = Object.values(nextSeason.series || {})
+        .filter((series) => series?.roundId === roundId)
+        .sort((a, b) => (Number(a.seriesIndex) || 0) - (Number(b.seriesIndex) || 0));
+
+      entries.forEach((series) => {
+        const winsA = Number(series?.winsA) || 0;
+        const winsB = Number(series?.winsB) || 0;
+        const hasWinEvidence = winsA > 0
+          || winsB > 0
+          || (Array.isArray(series?.gameResults) && series.gameResults.length > 0);
+        const storedWinner = (series?.winnerId === series?.playerAId || series?.winnerId === series?.playerBId)
+          ? series.winnerId
+          : '';
+        const validWinner = getSeasonSeriesWinner(series);
+
+        if (storedWinner && hasWinEvidence && !validWinner) {
+          const repairedSource = {
+            ...series,
+            winnerId: '',
+            loserId: '',
+            status: series.playerAId && series.playerBId ? 'active' : 'pending',
+            updatedAtISO: seasonNowISO(options)
+          };
+          nextSeason.series = { ...(nextSeason.series || {}), [series.id]: repairedSource };
+          series = repairedSource;
+          changed = true;
+        }
+
+        if (validWinner || !series?.nextSeriesId || !series?.nextSlot) return;
+        const target = nextSeason.series?.[series.nextSeriesId];
+        if (!target) return;
+        const prefix = series.nextSlot === 'B' ? 'B' : 'A';
+        const occupant = target[`player${prefix}Id`] || '';
+        const cameFromThisSeries = occupant
+          && (occupant === series.playerAId || occupant === series.playerBId);
+        if (!cameFromThisSeries) return;
+
+        const clearedTarget = {
+          ...target,
+          [`player${prefix}Id`]: '',
+          [`player${prefix}Name`]: '',
+          [`player${prefix}Seed`]: null,
+          [`placeholder${prefix}`]: target[`placeholder${prefix}`] || 'Awaiting winner',
+          gameResults: [],
+          winsA: 0,
+          winsB: 0,
+          winnerId: '',
+          loserId: '',
+          status: 'pending',
+          manualResult: false,
+          resultSource: '',
+          updatedAtISO: seasonNowISO(options)
+        };
+        nextSeason.series = { ...(nextSeason.series || {}), [series.nextSeriesId]: clearedTarget };
+        changed = true;
+      });
+    });
+
+    // Then fill/repair only legitimately clinched advancement slots.
+    roundOrder.forEach((roundId) => {
       const entries = Object.values(nextSeason.series || {})
         .filter((series) => series?.roundId === roundId && getSeasonSeriesWinner(series))
         .sort((a, b) => (Number(a.seriesIndex) || 0) - (Number(b.seriesIndex) || 0));
