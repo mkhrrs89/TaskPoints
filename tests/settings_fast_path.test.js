@@ -39,6 +39,13 @@ test('Home prefetches Settings for faster navigation', () => {
   assert.match(source, /rel=\\"prefetch\\" href=\\"\/settings\.html\\"/);
 });
 
+test('transformed Home and Settings HTML cannot reuse a stale inline runtime shell', () => {
+  assert.match(source, /headers\.set\('cache-control', 'no-cache, no-store, must-revalidate'\)/);
+  assert.match(source, /headers\.set\('pragma', 'no-cache'\)/);
+  assert.match(source, /headers\.set\('expires', '0'\)/);
+});
+
+
 test('every Settings card except Navigation Shortcuts is collapsed', () => {
   assert.ok(source.includes('heading.textContent.trim() === "Navigation Shortcuts"'));
   assert.ok(source.includes('if (card === navigationCard) continue'));
