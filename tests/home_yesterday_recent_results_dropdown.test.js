@@ -15,8 +15,8 @@ test('Yesterday Results panel is keyboard/tap interactive and controls recent re
 test('recent results dropdown uses exactly the last five completed user matchups', () => {
   assert.match(index, /getCompletedYouMatchupsForStats\(\)\.slice\(0, 5\)/);
   assert.match(index, /opponentName:\s*getPlayerNameById\(opponentId\)/);
-  assert.match(index, /Number\(row\.youScore\)\.toFixed\(1\)/);
-  assert.match(index, /Number\(row\.oppScore\)\.toFixed\(1\)/);
+  assert.match(index, /Number\(row\.youScore\)\.toFixed\(2\)/);
+  assert.match(index, /Number\(row\.oppScore\)\.toFixed\(2\)/);
 });
 
 test('tapping anywhere inside the open dropdown retracts it', () => {
