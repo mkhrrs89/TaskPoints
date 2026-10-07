@@ -288,6 +288,67 @@
     return JSON.parse(raw) || {};
   }
 
+  function isoToMs(value) {
+    if (!value) return 0;
+    const ms = Date.parse(value);
+    return Number.isFinite(ms) ? ms : 0;
+  }
+
+  function taskVersionMs(task) {
+    if (!task || typeof task !== 'object' || Array.isArray(task)) return 0;
+    return Math.max(
+      isoToMs(task.updatedAtISO),
+      isoToMs(task.createdAtISO),
+      isoToMs(task.completedAtISO),
+      isoToMs(task.deletedAtISO)
+    );
+  }
+
+  function protectNewerPersistedTaskRows(candidateState, options = {}) {
+    if (options.allowDestructiveOverwrite === true) return candidateState;
+    if ((options.storageKey || STORAGE_KEY) !== STORAGE_KEY) return candidateState;
+    if (!candidateState || typeof candidateState !== 'object' || !Array.isArray(candidateState.tasks)) return candidateState;
+
+    let savedState;
+    try { savedState = persistedState(); }
+    catch (_) { return candidateState; }
+    if (!Array.isArray(savedState?.tasks) || savedState.tasks.length === 0) return candidateState;
+
+    const savedById = new Map();
+    savedState.tasks.forEach((task) => {
+      const id = String(task?.id || '');
+      if (id) savedById.set(id, task);
+    });
+
+    let protectedCount = 0;
+    const tasks = candidateState.tasks.map((task) => {
+      const id = String(task?.id || '');
+      if (!id) return task;
+      const saved = savedById.get(id);
+      if (!saved) return task;
+
+      // A delayed full-state save may have been captured before a journaled
+      // task edit (+1 Day, Edit Save, Won't Do) compacted successfully. Once
+      // the journal clears, that older snapshot must not roll the task back.
+      // Preserve only strictly newer persisted rows; equal/newer incoming rows
+      // still win, and destructive import/restore explicitly bypasses this.
+      if (taskVersionMs(saved) > taskVersionMs(task)) {
+        protectedCount += 1;
+        return clone(saved);
+      }
+      return task;
+    });
+
+    if (!protectedCount) return candidateState;
+    try {
+      global.TaskPointsPerf?.mark?.('taskMutation.staleTaskRowsProtected', {
+        count: protectedCount,
+        savePath: options.savePath || options.source || options.reason || ''
+      });
+    } catch (_) {}
+    return { ...candidateState, tasks };
+  }
+
   function persistPending(reason = 'quiet') {
     if (compactionRunning || !originalSaveStateSnapshot) return false;
     const current = readRecord();
@@ -448,7 +509,10 @@
   if (originalSaveStateSnapshot) {
     core.saveStateSnapshot = function saveStateSnapshotWithTaskJournal(state, options = {}) {
       const current = readRecord();
-      const candidate = current.malformed || isEmpty(current.record) ? state : applyRecord(state, current.record);
+      const protectedState = protectNewerPersistedTaskRows(state, options);
+      const candidate = current.malformed || isEmpty(current.record)
+        ? protectedState
+        : applyRecord(protectedState, current.record);
       const result = originalSaveStateSnapshot(candidate, options);
       if (!current.malformed && !isEmpty(current.record) && !result?.skipped && !result?.blockedByQuotaCircuit && result?.state) {
         try {
