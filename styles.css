@@ -7290,3 +7290,213 @@ metal background attached only to the day-bubble row.
     display: none;
   }
 }
+
+
+/* =======================================================================
+   HABIT TAG RAIL PREVIEW
+   Vertical left-side tag labels + open right edge, per 2026-10-07 mockup.
+   Scoped to Home's new rail-layout wrapper so Week/Vices stay unchanged.
+   ======================================================================= */
+#habitsList.habitsList--rail-layout{
+  gap:0;
+  margin-left:-16px;
+  margin-right:-16px;
+  width:calc(100% + 32px);
+}
+
+.habitGroup.habitGroup--rail-layout{
+  --habit-group-rail-width: 40px;
+  position:relative;
+  display:grid;
+  grid-template-columns:var(--habit-group-rail-width) minmax(0,1fr);
+  grid-template-rows:auto;
+  gap:0;
+  padding:0;
+  border:0;
+  border-top:1px solid var(--border);
+  border-bottom:1px solid var(--border);
+  border-radius:0;
+  background:transparent;
+  overflow:visible;
+}
+
+.habitGroup.habitGroup--rail-layout + .habitGroup.habitGroup--rail-layout{
+  margin-top:-1px;
+}
+
+.habitGroup--rail-layout .habitGroupRail{
+  grid-column:1;
+  grid-row:1;
+  min-width:var(--habit-group-rail-width);
+  min-height:100%;
+  display:flex;
+  align-items:flex-start;
+  justify-content:center;
+  padding:9px 0 8px;
+  box-sizing:border-box;
+  background:linear-gradient(180deg, #254c52 0%, #1a383b 100%);
+  color:#f8fafc;
+  overflow:hidden;
+}
+
+.habitGroup--rail-layout .habitGroupTitle{
+  margin:0;
+  padding:0;
+  border:0;
+  border-radius:0;
+  background:transparent;
+  color:inherit;
+  font-weight:800;
+  font-size:15px;
+  line-height:1;
+  letter-spacing:.055em;
+  text-transform:uppercase;
+  writing-mode:vertical-rl;
+  text-orientation:mixed;
+  transform:rotate(180deg);
+  white-space:nowrap;
+  max-height:100%;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+.habitGroup--rail-layout .habitGroupContent{
+  grid-column:2;
+  grid-row:1;
+  min-width:0;
+  position:relative;
+  overflow:visible;
+}
+
+.habitGroup--rail-layout .habitGroupBody{
+  display:grid;
+  gap:.5rem;
+  padding:8px 0;
+  min-width:0;
+}
+
+/* No trailing blank band at the bottom of a tag section. Keep normal
+   spacing between rows, but let the final row/stack meet the next section. */
+.habitGroup--rail-layout .habitGroupBody > .habitRow:last-child{
+  margin-bottom:0;
+}
+
+/* When the last item is silver, its own normal silver underside supplies the
+   bottom spacing. Remove the group's extra 8px so the metal meets the next
+   group flush while keeping the same underside depth as other silver rows. */
+.habitGroup--rail-layout .habitGroupBody:has(> .habitWeekCompleteStack:last-child){
+  padding-bottom:0;
+}
+
+
+.habitGroup--rail-layout.habitGroup--reorderable .habitGroupBody{
+  padding-top:32px;
+}
+
+.habitGroup--rail-layout .habitGroupControls{
+  position:absolute;
+  top:4px;
+  right:6px;
+  z-index:5;
+  margin:0;
+  display:flex;
+  align-items:center;
+  gap:.2rem;
+}
+
+.habitGroup--rail-layout .habitGroupBody > .habitRow{
+  box-sizing:border-box;
+  padding-left:10px;
+  padding-right:10px;
+}
+
+/* iOS: keep rapid taps on neighboring habit bubbles as taps, not double-tap zoom. */
+#habitsList.habitsList--rail-layout .habitDay{
+  touch-action:manipulation;
+  -webkit-tap-highlight-color:transparent;
+  -webkit-user-select:none;
+  user-select:none;
+}
+
+/* The silver completed-week plate begins exactly at the rail boundary.
+   It must be layout-neutral: enabling the visual cannot make a habit taller. */
+.habitGroup--rail-layout .habitGroupBody .habitWeekCompleteStack{
+  margin-left:0;
+  margin-right:0;
+  width:100%;
+  padding:0 10px;
+  box-sizing:border-box;
+  display:grid;
+  gap:.5rem;
+}
+
+.habitGroup--rail-layout .habitGroupBody .habitWeekCompleteStack > .habitRow.habitRow--week-complete{
+  margin-left:0;
+  margin-right:0;
+  width:100%;
+  padding:0;
+  box-sizing:border-box;
+}
+
+/* Fast-restacked completed rows can briefly be direct body children too. */
+.habitGroup--rail-layout .habitGroupBody > .habitRow.habitRow--week-complete{
+  margin-left:0;
+  margin-right:0;
+  width:100%;
+  padding-top:0;
+  padding-bottom:0;
+  box-sizing:border-box;
+}
+
+/* Completed and incomplete rows keep the same day-row vertical offset. */
+.habitGroup--rail-layout .habitRow--week-complete .habitDaysRow.week-complete-row{
+  margin-top:-4px;
+}
+
+
+@media (max-width:640px){
+  /* Normal mobile habit rows carry 1rem bottom spacing. The wrapper removes
+     the child's old margin, so restore the same spacing here without adding
+     any new height beyond the normal row footprint. */
+  .habitGroup--rail-layout .habitGroupBody .habitWeekCompleteStack > .habitRow.habitRow--week-complete{
+    margin-bottom:1rem;
+  }
+}
+
+/* No rounded/right-side bubble outline: only the full-width top/bottom rules remain. */
+.habitGroup--rail-layout,
+.habitGroup--rail-layout .habitGroupContent,
+.habitGroup--rail-layout .habitGroupBody{
+  border-right:0 !important;
+  border-radius:0 !important;
+}
+
+@media (max-width:640px){
+  .habitGroup.habitGroup--rail-layout{
+    --habit-group-rail-width:34px;
+  }
+
+  .habitGroup--rail-layout .habitGroupRail{
+    padding-top:8px;
+  }
+
+  .habitGroup--rail-layout .habitGroupTitle{
+    font-size:14px;
+    letter-spacing:.045em;
+  }
+
+  .habitGroup--rail-layout .habitGroupBody > .habitRow{
+    padding-left:8px;
+    padding-right:8px;
+  }
+
+  .habitGroup--rail-layout .habitGroupBody .habitWeekCompleteStack{
+    padding-left:8px;
+    padding-right:8px;
+  }
+
+  .habitGroup--rail-layout .habitGroupBody > .habitRow.habitRow--week-complete{
+    padding-left:8px;
+    padding-right:8px;
+  }
+}

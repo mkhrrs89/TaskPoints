@@ -1636,7 +1636,7 @@ Nothing visible on the page is built here. === -->
 
   <div id="habitsWeekWrap" class="weekSwapWrap">
     <div class="grid gap-2 text-sm muted mb-2" id="habitWeekLabels"></div>
-    <div id="habitsList" class="grid gap-2"></div>
+    <div id="habitsList" class="grid gap-2 habitsList--rail-layout"></div>
   </div>
   <div id="habitsEmpty" class="text-sm muted hidden">No habits yet.</div>
 </div>
@@ -8524,66 +8524,96 @@ function renderHabits(){
   empty.classList.add('hidden');
 
   const { entries } = buildHabitRenderEntries(habits, sortMode);
-  let appendStandaloneRow = createHabitWeekCompleteAppender(wrap);
 
-  entries.forEach((entry, entryIndex) => {
+  // Render every visible habit inside the same left-rail geometry.
+  // Named multi-habit tag groups get a colored vertical label rail.
+  // Consecutive rows that are not part of a named group share a blank teal rail,
+  // preserving their sort order while keeping the content columns aligned.
+  const displaySections = [];
+  entries.forEach((entry) => {
     if (entry.type === 'group') {
-      const groupWrap = document.createElement('div');
-      groupWrap.className = 'habitGroup';
-
-      const header = document.createElement('div');
-      header.className = 'habitGroupHeader';
-      header.innerHTML = `
-        <div class="habitGroupTitle"${getHabitGroupStyleAttr(entry.tag)}>
-          ${escapeHtml(entry.tag)}
-        </div>
-        <div class="habitGroupControls">
-          ${sortMode === 'custom' ? `
-            <button class="btn btn-ghost" style="padding:2px 6px;font-size:11px"
-                    data-act="habit-group-up" data-tag="${escapeHtml(entry.tag)}">▲</button>
-            <button class="btn btn-ghost" style="padding:2px 6px;font-size:11px"
-                    data-act="habit-group-down" data-tag="${escapeHtml(entry.tag)}">▼</button>
-          ` : ``}
-        </div>
-      `;
-      groupWrap.appendChild(header);
-
-      const body = document.createElement('div');
-      body.className = 'habitGroupBody';
-      const groupedRows = entry.habits.map(h => ({
-        h,
-        isWeeklyComplete: isHabitWeeklyCompleteForDays(h, days)
-      }));
-      const appendGroupedRow = createHabitWeekCompleteAppender(body);
-      groupedRows.forEach(({ h, isWeeklyComplete }, index) => renderHabitRow(h, days, body, {
-  showMoveButtons: sortMode === 'custom',
-  showTag: false,
-  isGrouped: true,
-  groupMoveTag: entry.tag,
-  isWeeklyCompleteForVisibleWeek: isWeeklyComplete,
-  previousIsWeeklyComplete: groupedRows[index - 1]?.isWeeklyComplete === true,
-  nextIsWeeklyComplete: groupedRows[index + 1]?.isWeeklyComplete === true,
-  appendRow: appendGroupedRow
-}));
-      groupWrap.appendChild(body);
-      wrap.appendChild(groupWrap);
-      appendStandaloneRow = createHabitWeekCompleteAppender(wrap);
+      displaySections.push({
+        type: 'group',
+        tag: entry.tag,
+        habits: entry.habits
+      });
       return;
     }
 
-    const isWeeklyComplete = isHabitWeeklyCompleteForDays(entry.habit, days);
-    const previousEntry = entries[entryIndex - 1];
-    const nextEntry = entries[entryIndex + 1];
-    renderHabitRow(entry.habit, days, wrap, {
+    let section = displaySections[displaySections.length - 1];
+    if (!section || section.type !== 'untagged') {
+      section = { type: 'untagged', tag: '', habits: [] };
+      displaySections.push(section);
+    }
+    section.habits.push(entry.habit);
+  });
+
+  displaySections.forEach((section) => {
+    const isTaggedGroup = section.type === 'group';
+    const groupWrap = document.createElement('div');
+    groupWrap.className = `habitGroup habitGroup--rail-layout ${isTaggedGroup ? 'habitGroup--tagged' : 'habitGroup--untagged'}`;
+    if (isTaggedGroup && sortMode === 'custom') {
+      groupWrap.classList.add('habitGroup--reorderable');
+    }
+
+    const rail = document.createElement('div');
+    rail.className = 'habitGroupRail';
+    if (isTaggedGroup) {
+      const color = getHabitTagColor(section.tag);
+      if (color) {
+        const dark = darkenHex(color, 0.35) || color;
+        rail.style.background = `linear-gradient(180deg, ${color} 0%, ${dark} 100%)`;
+        rail.style.color = getContrastText(color);
+      }
+
+      const title = document.createElement('div');
+      title.className = 'habitGroupTitle';
+      title.textContent = section.tag;
+      title.title = section.tag;
+      rail.appendChild(title);
+    } else {
+      rail.setAttribute('aria-hidden', 'true');
+    }
+
+    const content = document.createElement('div');
+    content.className = 'habitGroupContent';
+
+    if (isTaggedGroup && sortMode === 'custom') {
+      const controls = document.createElement('div');
+      controls.className = 'habitGroupControls';
+      controls.innerHTML = `
+        <button class="btn btn-ghost" style="padding:2px 6px;font-size:11px"
+                data-act="habit-group-up" data-tag="${escapeHtml(section.tag)}">▲</button>
+        <button class="btn btn-ghost" style="padding:2px 6px;font-size:11px"
+                data-act="habit-group-down" data-tag="${escapeHtml(section.tag)}">▼</button>
+      `;
+      content.appendChild(controls);
+    }
+
+    const body = document.createElement('div');
+    body.className = 'habitGroupBody';
+
+    const sectionRows = section.habits.map(h => ({
+      h,
+      isWeeklyComplete: isHabitWeeklyCompleteForDays(h, days)
+    }));
+    const appendSectionRow = createHabitWeekCompleteAppender(body);
+
+    sectionRows.forEach(({ h, isWeeklyComplete }, index) => renderHabitRow(h, days, body, {
       showMoveButtons: sortMode === 'custom',
-      isGrouped: false,
+      showTag: !isTaggedGroup,
+      isGrouped: true,
+      groupMoveTag: isTaggedGroup ? section.tag : '',
       isWeeklyCompleteForVisibleWeek: isWeeklyComplete,
-      previousIsWeeklyComplete: previousEntry?.type === 'single'
-        && isHabitWeeklyCompleteForDays(previousEntry.habit, days),
-      nextIsWeeklyComplete: nextEntry?.type === 'single'
-        && isHabitWeeklyCompleteForDays(nextEntry.habit, days),
-      appendRow: appendStandaloneRow
-    });
+      previousIsWeeklyComplete: sectionRows[index - 1]?.isWeeklyComplete === true,
+      nextIsWeeklyComplete: sectionRows[index + 1]?.isWeeklyComplete === true,
+      appendRow: appendSectionRow
+    }));
+
+    content.appendChild(body);
+    groupWrap.appendChild(rail);
+    groupWrap.appendChild(content);
+    wrap.appendChild(groupWrap);
   });
 
   // Edit / delete
