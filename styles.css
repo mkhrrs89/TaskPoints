@@ -2461,7 +2461,11 @@ header,
     /* Priority-specific task completion buttons */
     .critical-card .btn-check,
     .critical-card .btn-check:hover{
-      background:#ffffff !important;
+      background:linear-gradient(
+        180deg,
+        #ffffff,
+        #d8dde3
+      ) !important;
       color:#b91c1c !important;
       border:none !important;
       box-shadow:none !important;
