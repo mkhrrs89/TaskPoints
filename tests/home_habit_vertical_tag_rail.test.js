@@ -45,3 +45,11 @@ test('vertical habit group labels are larger uppercase text', () => {
 test('Home habit bubbles disable iOS double-tap zoom while preserving tap and pinch behavior', () => {
   assert.match(styles, /#habitsList\.habitsList--rail-layout \.habitDay\{[\s\S]*?touch-action:manipulation;[\s\S]*?-webkit-tap-highlight-color:transparent;/);
 });
+
+
+test('silver week-complete visual is layout-neutral inside Home habit rails', () => {
+  assert.match(styles, /\.habitGroup--rail-layout \.habitGroupBody \.habitWeekCompleteStack\{[\s\S]*?padding:0 10px;[\s\S]*?display:grid;[\s\S]*?gap:\.5rem;/);
+  assert.match(styles, /\.habitGroup--rail-layout \.habitGroupBody \.habitWeekCompleteStack > \.habitRow\.habitRow--week-complete\{[\s\S]*?padding:0;/);
+  assert.match(styles, /\.habitGroup--rail-layout \.habitRow--week-complete \.habitDaysRow\.week-complete-row\{[\s\S]*?margin-top:-4px;/);
+  assert.match(styles, /@media \(max-width:640px\)[\s\S]*?\.habitGroup--rail-layout \.habitGroupBody \.habitWeekCompleteStack > \.habitRow\.habitRow--week-complete\{[\s\S]*?margin-bottom:1rem;/);
+});
