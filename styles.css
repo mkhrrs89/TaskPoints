@@ -7381,9 +7381,13 @@ metal background attached only to the day-bubble row.
   margin-bottom:0;
 }
 
-.habitGroup--rail-layout .habitGroupBody > .habitWeekCompleteStack:last-child > .habitRow:last-child{
-  margin-bottom:0;
+/* When the last item is silver, its own normal silver underside supplies the
+   bottom spacing. Remove the group's extra 8px so the metal meets the next
+   group flush while keeping the same underside depth as other silver rows. */
+.habitGroup--rail-layout .habitGroupBody:has(> .habitWeekCompleteStack:last-child){
+  padding-bottom:0;
 }
+
 
 .habitGroup--rail-layout.habitGroup--reorderable .habitGroupBody{
   padding-top:32px;
@@ -7449,25 +7453,6 @@ metal background attached only to the day-bubble row.
   margin-top:-4px;
 }
 
-/* If the final habit in a group is silver, let the metal paint through the
-   group's normal 8px bottom breathing room without changing layout height. */
-.habitGroup--rail-layout .habitGroupBody > .habitWeekCompleteStack:last-child::before{
-  bottom:-8px;
-}
-
-.habitGroup--rail-layout .habitGroupBody > .habitWeekCompleteStack:last-child::after{
-  bottom:-7px;
-}
-
-/* Same visual extension for the brief fast-restack state where the completed
-   row can still be a direct child before it is wrapped. */
-.habitGroup--rail-layout .habitGroupBody > .habitRow.habitRow--week-complete:last-child::before{
-  bottom:-8px;
-}
-
-.habitGroup--rail-layout .habitGroupBody > .habitRow.habitRow--week-complete:last-child::after{
-  bottom:-7px;
-}
 
 @media (max-width:640px){
   /* Normal mobile habit rows carry 1rem bottom spacing. The wrapper removes
