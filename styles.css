@@ -7404,29 +7404,48 @@ metal background attached only to the day-bubble row.
   user-select:none;
 }
 
-/* The silver completed-week plate begins exactly at the rail boundary. */
+/* The silver completed-week plate begins exactly at the rail boundary.
+   It must be layout-neutral: enabling the visual cannot make a habit taller. */
 .habitGroup--rail-layout .habitGroupBody .habitWeekCompleteStack{
   margin-left:0;
   margin-right:0;
   width:100%;
-  padding:10px 10px 8px;
+  padding:0 10px;
   box-sizing:border-box;
+  display:grid;
+  gap:.5rem;
 }
 
 .habitGroup--rail-layout .habitGroupBody .habitWeekCompleteStack > .habitRow.habitRow--week-complete{
   margin-left:0;
   margin-right:0;
   width:100%;
-  padding:10px 0 8px;
+  padding:0;
   box-sizing:border-box;
 }
 
+/* Fast-restacked completed rows can briefly be direct body children too. */
 .habitGroup--rail-layout .habitGroupBody > .habitRow.habitRow--week-complete{
   margin-left:0;
   margin-right:0;
   width:100%;
-  padding:10px 10px 8px;
+  padding-top:0;
+  padding-bottom:0;
   box-sizing:border-box;
+}
+
+/* Completed and incomplete rows keep the same day-row vertical offset. */
+.habitGroup--rail-layout .habitRow--week-complete .habitDaysRow.week-complete-row{
+  margin-top:-4px;
+}
+
+@media (max-width:640px){
+  /* Normal mobile habit rows carry 1rem bottom spacing. The wrapper removes
+     the child's old margin, so restore the same spacing here without adding
+     any new height beyond the normal row footprint. */
+  .habitGroup--rail-layout .habitGroupBody .habitWeekCompleteStack > .habitRow.habitRow--week-complete{
+    margin-bottom:1rem;
+  }
 }
 
 /* No rounded/right-side bubble outline: only the full-width top/bottom rules remain. */
