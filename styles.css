@@ -7371,8 +7371,18 @@ metal background attached only to the day-bubble row.
 .habitGroup--rail-layout .habitGroupBody{
   display:grid;
   gap:.5rem;
-  padding:8px 0;
+  padding:8px 0 0;
   min-width:0;
+}
+
+/* No trailing blank band at the bottom of a tag section. Keep normal
+   spacing between rows, but let the final row/stack meet the next section. */
+.habitGroup--rail-layout .habitGroupBody > .habitRow:last-child{
+  margin-bottom:0;
+}
+
+.habitGroup--rail-layout .habitGroupBody > .habitWeekCompleteStack:last-child > .habitRow:last-child{
+  margin-bottom:0;
 }
 
 .habitGroup--rail-layout.habitGroup--reorderable .habitGroupBody{
