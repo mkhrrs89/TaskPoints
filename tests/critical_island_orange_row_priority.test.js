@@ -38,6 +38,15 @@ test('critical alert does not realign on every scroll frame', () => {
   assert.match(body, /TaskPointsFloatingAlertIslandAlignment\?\.scheduleAlign\?\.\(\)/);
 });
 
+test('Today-island nudge refreshes from current geometry instead of freezing on first entry', () => {
+  const body = between(toolbar, 'function updateCritIslandStacking()', 'function updateCriticalTasksIsland');
+
+  assert.match(body, /const todayRect = todayIsland\.getBoundingClientRect\(\)/);
+  assert.match(body, /const currentNudge = Number\.parseFloat/);
+  assert.match(body, /Math\.abs\(currentNudge - nudge\) >= 1/);
+  assert.doesNotMatch(body, /if \(previousMode !== 'nudge'\)/);
+});
+
 
 test('Today-island nudge is based on red fixed top and is hard-bounded after modal geometry changes', () => {
   const body = between(toolbar, 'function updateCritIslandStacking()', 'function updateCriticalTasksIsland');
@@ -46,4 +55,11 @@ test('Today-island nudge is based on red fixed top and is hard-bounded after mod
   assert.match(body, /const rawNudge = Number\.isFinite\(baseTop\)/);
   assert.match(body, /const nudge = Math\.min\(96, Math\.max\(18, rawNudge\)\)/);
   assert.doesNotMatch(body, /orangeTop/);
+});
+
+test('critical layout refreshes after iOS resume and orientation changes', () => {
+  assert.match(toolbar, /window\.tpRefreshCriticalIslandLayout = \(\) => updateCritIslandStacking\(\)/);
+  assert.match(toolbar, /addEventListener\('pageshow',[\s\S]*requestAnimationFrame\(\(\) => requestAnimationFrame\(updateCritIslandStacking\)\)/);
+  assert.match(toolbar, /visibilitychange/);
+  assert.match(toolbar, /orientationchange/);
 });
