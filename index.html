@@ -6388,7 +6388,7 @@ function renderYesterdayRecentResultsDropdown() {
         <div class="yesterday-recent-result-main">
           <div class="yesterday-recent-result-opponent">${escapeHtml(row.opponentName || 'Opponent')}</div>
           <div class="yesterday-recent-result-score">
-            ${Number(row.youScore).toFixed(1)}–${Number(row.oppScore).toFixed(1)}
+            ${Number(row.youScore).toFixed(2)}–${Number(row.oppScore).toFixed(2)}
           </div>
         </div>
         <div class="yesterday-recent-result-outcome">${row.resultLabel}</div>
