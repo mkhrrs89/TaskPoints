@@ -193,6 +193,12 @@
       mirrorRedToOrange(red, orange);
     }
 
+    // The toolbar owns Today-island collision clearance. If this alignment
+    // pass changed the red island's fixed top, immediately let that helper
+    // recompute its transform from the new base position so an old nudge
+    // cannot remain stuck after resume/reflow.
+    global.tpRefreshCriticalIslandLayout?.();
+
     return Boolean(red || oranges.length);
   }
 
@@ -225,7 +231,7 @@
 
   global.TaskPointsFloatingAlertIslandAlignment = {
     installed: true,
-    version: 4,
+    version: 5,
     align,
     scheduleAlign,
     getStatus() {
