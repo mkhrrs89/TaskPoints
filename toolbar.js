@@ -3737,24 +3737,28 @@ function updateCritIslandStacking() {
     }
     document.documentElement.style.removeProperty('--tp-critical-today-nudge');
   } else if (shouldNudgeForToday) {
-    // Compute this only when entering the nudged state. The Today island is
-    // fixed, so repeatedly measuring it during every scroll frame just causes
-    // visible jitter for no benefit.
-    if (previousMode !== 'nudge') {
-      const todayRect = todayIsland.getBoundingClientRect();
-      const islandStyle = window.getComputedStyle?.(island);
-      const baseTop = Number.parseFloat(islandStyle?.top || '');
-      const minimumGap = 8;
+    const todayRect = todayIsland.getBoundingClientRect();
+    const islandStyle = window.getComputedStyle?.(island);
+    const baseTop = Number.parseFloat(islandStyle?.top || '');
+    const minimumGap = 8;
 
-      // Use the red island's own fixed layout top, which is unaffected by
-      // orange-button animation or modal scroll-lock transforms. Clamp the
-      // result so transient modal geometry can never fling the alert far
-      // down the screen.
-      const rawNudge = Number.isFinite(baseTop)
-        ? Math.ceil(todayRect.bottom + minimumGap - baseTop)
-        : 64;
-      const nudge = Math.min(96, Math.max(18, rawNudge));
+    // Recompute from the CURRENT fixed top each time this layout helper runs.
+    // The base top can change after pageshow, orientation changes, safe-area
+    // recalculation, or Home reflow. Keeping the original nudge after that
+    // leaves the red marks visibly stuck too low.
+    //
+    // We still avoid visual jitter by only writing the CSS variable when the
+    // rounded value actually changes.
+    const rawNudge = Number.isFinite(baseTop)
+      ? Math.ceil(todayRect.bottom + minimumGap - baseTop)
+      : 64;
+    const nudge = Math.min(96, Math.max(18, rawNudge));
+    const rootStyle = window.getComputedStyle?.(document.documentElement);
+    const currentNudge = Number.parseFloat(
+      rootStyle?.getPropertyValue?.('--tp-critical-today-nudge') || ''
+    );
 
+    if (!Number.isFinite(currentNudge) || Math.abs(currentNudge - nudge) >= 1) {
       document.documentElement.style.setProperty('--tp-critical-today-nudge', `${nudge}px`);
     }
     document.documentElement.style.removeProperty('--tp-today-island-h');
@@ -3816,6 +3820,7 @@ function updateCritIslandStacking() {
 
   window.tpUpdateCriticalIsland = updateCriticalTasksIsland;
   window.updateCriticalTasksIsland = updateCriticalTasksIsland;
+  window.tpRefreshCriticalIslandLayout = () => updateCritIslandStacking();
 
   installToolbarStorageBridge();
   ensureTodayScoreIsland();
@@ -3854,6 +3859,12 @@ function updateCritIslandStacking() {
   }
 
   window.addEventListener('resize', updateCritIslandStacking, { passive: true });
+  window.addEventListener('orientationchange', () => requestAnimationFrame(updateCritIslandStacking));
+  window.addEventListener('pageshow', () => requestAnimationFrame(() => requestAnimationFrame(updateCritIslandStacking)));
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    requestAnimationFrame(() => requestAnimationFrame(updateCritIslandStacking));
+  });
 
   
   const scrollButtons = Array.from(document.querySelectorAll('[data-scroll-top]'));
