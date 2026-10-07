@@ -41,6 +41,7 @@ test('alignment does not attach a scroll listener or alter floating transforms',
   assert.match(moduleSource, /addEventListener\?*\('resize', scheduleAlign/);
   assert.match(moduleSource, /addEventListener\?*\('orientationchange', scheduleAlign/);
   assert.match(moduleSource, /addEventListener\?*\('pageshow', scheduleAlign/);
+  assert.match(moduleSource, /tpRefreshCriticalIslandLayout\?\.\(\)/);
 });
 
 test('critical mark uses a fixed two-mark left anchor so extra marks only grow right', () => {
@@ -52,6 +53,6 @@ test('critical mark uses a fixed two-mark left anchor so extra marks only grow r
 });
 
 test('shared production loader includes cache-busted floating island alignment module', () => {
-  assert.match(loaderSource, /floating_alert_island_alignment\.js\?v=20261006-1/);
+  assert.match(loaderSource, /floating_alert_island_alignment\.js\?v=20261007-2/);
   assert.match(loaderSource, /data-taskpoints-floating-alert-alignment/);
 });
