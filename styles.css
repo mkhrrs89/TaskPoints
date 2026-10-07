@@ -2458,6 +2458,27 @@ header,
       font-size:13px;
     }
 
+    /* Priority-specific task completion buttons */
+    .critical-card .btn-check,
+    .critical-card .btn-check:hover{
+      background:#ffffff !important;
+      color:#b91c1c !important;
+      border:none !important;
+      box-shadow:none !important;
+    }
+
+    .high-card .btn-check,
+    .high-card .btn-check:hover{
+      background:linear-gradient(
+        180deg,
+        rgba(180, 83, 9, 0.24),
+        rgba(120, 52, 4, 0.16)
+      ) !important;
+      color:#ffffff !important;
+      border:1px solid rgba(180, 83, 9, 0.16) !important;
+      box-shadow:none !important;
+    }
+
 
 /* =========================
    SECTION 4 — TASK UI (TASK TITLE WRAPPING)
