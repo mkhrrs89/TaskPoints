@@ -7297,6 +7297,13 @@ metal background attached only to the day-bubble row.
    Vertical left-side tag labels + open right edge, per 2026-10-07 mockup.
    Scoped to Home's new rail-layout wrapper so Week/Vices stay unchanged.
    ======================================================================= */
+#habitsList.habitsList--rail-layout{
+  gap:0;
+  margin-left:-16px;
+  margin-right:-16px;
+  width:calc(100% + 32px);
+}
+
 .habitGroup.habitGroup--rail-layout{
   --habit-group-rail-width: 40px;
   position:relative;
@@ -7311,6 +7318,10 @@ metal background attached only to the day-bubble row.
   border-radius:0;
   background:transparent;
   overflow:visible;
+}
+
+.habitGroup.habitGroup--rail-layout + .habitGroup.habitGroup--rail-layout{
+  margin-top:-1px;
 }
 
 .habitGroup--rail-layout .habitGroupRail{
@@ -7335,11 +7346,11 @@ metal background attached only to the day-bubble row.
   border-radius:0;
   background:transparent;
   color:inherit;
-  font-weight:700;
-  font-size:12px;
+  font-weight:800;
+  font-size:15px;
   line-height:1;
-  letter-spacing:.045em;
-  text-transform:none;
+  letter-spacing:.055em;
+  text-transform:uppercase;
   writing-mode:vertical-rl;
   text-orientation:mixed;
   transform:rotate(180deg);
@@ -7385,6 +7396,14 @@ metal background attached only to the day-bubble row.
   padding-right:10px;
 }
 
+/* iOS: keep rapid taps on neighboring habit bubbles as taps, not double-tap zoom. */
+#habitsList.habitsList--rail-layout .habitDay{
+  touch-action:manipulation;
+  -webkit-tap-highlight-color:transparent;
+  -webkit-user-select:none;
+  user-select:none;
+}
+
 /* The silver completed-week plate begins exactly at the rail boundary. */
 .habitGroup--rail-layout .habitGroupBody .habitWeekCompleteStack{
   margin-left:0;
@@ -7428,8 +7447,8 @@ metal background attached only to the day-bubble row.
   }
 
   .habitGroup--rail-layout .habitGroupTitle{
-    font-size:11px;
-    letter-spacing:.035em;
+    font-size:14px;
+    letter-spacing:.045em;
   }
 
   .habitGroup--rail-layout .habitGroupBody > .habitRow{
