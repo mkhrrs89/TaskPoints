@@ -7371,7 +7371,7 @@ metal background attached only to the day-bubble row.
 .habitGroup--rail-layout .habitGroupBody{
   display:grid;
   gap:.5rem;
-  padding:8px 0 0;
+  padding:8px 0;
   min-width:0;
 }
 
