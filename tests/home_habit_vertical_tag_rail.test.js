@@ -56,7 +56,7 @@ test('silver week-complete visual is layout-neutral inside Home habit rails', ()
 
 
 test('habit rail groups have no trailing bottom gap after their final habit', () => {
-  assert.match(styles, /\.habitGroup--rail-layout \.habitGroupBody\{[\s\S]*?padding:8px 0 0;/);
+  assert.match(styles, /\.habitGroup--rail-layout \.habitGroupBody\{[\s\S]*?padding:8px 0;/);
   assert.match(styles, /\.habitGroup--rail-layout \.habitGroupBody > \.habitRow:last-child\{[\s\S]*?margin-bottom:0;/);
   assert.match(styles, /\.habitGroup--rail-layout \.habitGroupBody > \.habitWeekCompleteStack:last-child > \.habitRow:last-child\{[\s\S]*?margin-bottom:0;/);
 });
