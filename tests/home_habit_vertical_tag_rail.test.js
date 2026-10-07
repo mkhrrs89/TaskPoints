@@ -60,3 +60,10 @@ test('habit rail groups have no trailing bottom gap after their final habit', ()
   assert.match(styles, /\.habitGroup--rail-layout \.habitGroupBody > \.habitRow:last-child\{[\s\S]*?margin-bottom:0;/);
   assert.match(styles, /\.habitGroup--rail-layout \.habitGroupBody > \.habitWeekCompleteStack:last-child > \.habitRow:last-child\{[\s\S]*?margin-bottom:0;/);
 });
+
+
+test('bottommost silver habit paints through the group bottom breathing room without changing layout', () => {
+  assert.match(styles, /\.habitGroup--rail-layout \.habitGroupBody > \.habitWeekCompleteStack:last-child::before\{[\s\S]*?bottom:-8px;/);
+  assert.match(styles, /\.habitGroup--rail-layout \.habitGroupBody > \.habitWeekCompleteStack:last-child::after\{[\s\S]*?bottom:-7px;/);
+  assert.match(styles, /\.habitGroup--rail-layout \.habitGroupBody > \.habitRow\.habitRow--week-complete:last-child::before\{[\s\S]*?bottom:-8px;/);
+});
