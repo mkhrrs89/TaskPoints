@@ -553,7 +553,6 @@
 
   function getTournamentSeriesWinnerId(series) {
     if (!series) return '';
-    if (series.winnerId) return series.winnerId;
 
     const winsA = Number(series.winsA) || 0;
     const winsB = Number(series.winsB) || 0;
@@ -566,6 +565,19 @@
 
     if (winsB >= winsNeeded && winsB > winsA) {
       return series.playerBId || series.playerB?.id || series.competitorBId || '';
+    }
+
+    const playerAId = series.playerAId || series.playerA?.id || series.competitorAId || '';
+    const playerBId = series.playerBId || series.playerB?.id || series.competitorBId || '';
+    const storedWinner = series.winnerId === playerAId || series.winnerId === playerBId
+      ? series.winnerId
+      : '';
+    const hasWinEvidence = winsA > 0
+      || winsB > 0
+      || (Array.isArray(series.gameResults) && series.gameResults.length > 0);
+
+    if (!hasWinEvidence && storedWinner && ['complete', 'completed', 'final', 'finalized', 'finished'].includes(String(series.status || '').toLowerCase())) {
+      return storedWinner;
     }
 
     return '';

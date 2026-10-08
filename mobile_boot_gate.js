@@ -489,6 +489,13 @@ function transformHomeBoot(response) {
   headers.delete('content-length');
   headers.delete('etag');
   headers.delete('last-modified');
+  // Home/Settings contain substantial inline runtime code. Never let Safari,
+  // an installed iPhone web app, or an intermediary reuse an older transformed
+  // HTML shell after a production deploy; stale inline code can otherwise make
+  // a successfully deployed UI fix appear to revert later.
+  headers.set('cache-control', 'no-cache, no-store, must-revalidate');
+  headers.set('pragma', 'no-cache');
+  headers.set('expires', '0');
   headers.set('content-type', 'text/html; charset=utf-8');
 
   const freshResponse = new Response(response.body, {

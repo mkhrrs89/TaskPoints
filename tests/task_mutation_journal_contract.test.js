@@ -150,6 +150,101 @@ test('full saves automatically include pending mutations before verification cle
   assert.equal(h.storage.getItem(JOURNAL_KEY), null);
 });
 
+
+test('+1 Day stays durable after journal compaction even if an older delayed full save fires later', () => {
+  const baseline = {
+    tasks: [{
+      id: 't1',
+      title: 'Task',
+      status: 'active',
+      counts: 0,
+      dueDateISO: '2026-10-06',
+      updatedAtISO: '2026-10-06T18:00:00.000Z'
+    }],
+    completions: []
+  };
+  const h = makeHarness({ [STORAGE_KEY]: JSON.stringify(baseline) });
+  const staleBeforeBump = clone(baseline);
+  const bumped = {
+    ...baseline.tasks[0],
+    dueDateISO: '2026-10-07',
+    postponedDays: 1,
+    updatedAtISO: '2026-10-06T20:00:00.000Z'
+  };
+
+  h.core.journalTaskMutation({ task: bumped });
+  assert.equal(h.core.flushPendingTaskMutations(), true);
+  assert.equal(h.storage.getItem(JOURNAL_KEY), null, 'verified compaction should clear the pending journal');
+  assert.equal(JSON.parse(h.storage.getItem(STORAGE_KEY)).tasks[0].dueDateISO, '2026-10-07');
+
+  // Reproduce the reported failure mode: an unrelated delayed save still holds
+  // the pre-bump task snapshot and runs only after the journal already cleared.
+  h.core.saveStateSnapshot(staleBeforeBump, { savePath: 'delayed-stale-full-save' });
+
+  const persisted = JSON.parse(h.storage.getItem(STORAGE_KEY));
+  assert.equal(persisted.tasks[0].dueDateISO, '2026-10-07');
+  assert.equal(persisted.tasks[0].updatedAtISO, '2026-10-06T20:00:00.000Z');
+});
+
+test('newer intentional task edits still win after stale-task protection is installed', () => {
+  const baseline = {
+    tasks: [{
+      id: 't1',
+      title: 'Task',
+      status: 'active',
+      counts: 0,
+      dueDateISO: '2026-10-07',
+      updatedAtISO: '2026-10-06T20:00:00.000Z'
+    }],
+    completions: []
+  };
+  const h = makeHarness({ [STORAGE_KEY]: JSON.stringify(baseline) });
+  const newerCorrection = clone(baseline);
+  newerCorrection.tasks[0].dueDateISO = '2026-10-06';
+  newerCorrection.tasks[0].updatedAtISO = '2026-10-06T21:00:00.000Z';
+
+  h.core.saveStateSnapshot(newerCorrection, { savePath: 'newer-user-task-edit' });
+
+  const persisted = JSON.parse(h.storage.getItem(STORAGE_KEY));
+  assert.equal(persisted.tasks[0].dueDateISO, '2026-10-06');
+  assert.equal(persisted.tasks[0].updatedAtISO, '2026-10-06T21:00:00.000Z');
+});
+
+test('explicit destructive import can intentionally replace a newer persisted task row', () => {
+  const current = {
+    tasks: [{
+      id: 't1',
+      title: 'Current',
+      status: 'active',
+      counts: 0,
+      dueDateISO: '2026-10-07',
+      updatedAtISO: '2026-10-06T20:00:00.000Z'
+    }],
+    completions: []
+  };
+  const imported = {
+    tasks: [{
+      id: 't1',
+      title: 'Imported backup',
+      status: 'active',
+      counts: 0,
+      dueDateISO: '2026-10-06',
+      updatedAtISO: '2026-10-05T20:00:00.000Z'
+    }],
+    completions: []
+  };
+  const h = makeHarness({ [STORAGE_KEY]: JSON.stringify(current) });
+
+  h.core.saveStateSnapshot(imported, {
+    savePath: 'toolbar-import',
+    allowDestructiveOverwrite: true
+  });
+
+  const persisted = JSON.parse(h.storage.getItem(STORAGE_KEY));
+  assert.equal(persisted.tasks[0].title, 'Imported backup');
+  assert.equal(persisted.tasks[0].dueDateISO, '2026-10-06');
+});
+
 test('Home and Log use the tiny journal instead of immediate full-state saves for targeted interactions', () => {
   assert.match(homeSource, /journalTaskMutation\(\{ task: liveTask, completionUpsert: completion \}\)/);
   assert.match(logSource, /completionDeleteId: c\.id \|\| key/);

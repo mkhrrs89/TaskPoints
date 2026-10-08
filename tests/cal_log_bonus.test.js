@@ -2144,6 +2144,90 @@ test('status complete alone does not make a Season series complete', () => {
   }), null);
 });
 
+test('stored winnerId cannot prematurely clinch a best-of-5 series', () => {
+  assert.equal(core.getSeasonSeriesWinner({
+    playerAId: 'a',
+    playerBId: 'b',
+    winsA: 1,
+    winsB: 1,
+    bestOf: 5,
+    winsNeeded: 3,
+    winnerId: 'a',
+    status: 'complete'
+  }), null);
+
+  assert.equal(core.getSeasonSeriesWinner({
+    playerAId: 'a',
+    playerBId: 'b',
+    winsA: 2,
+    winsB: 1,
+    bestOf: 5,
+    winsNeeded: 3,
+    winnerId: 'a',
+    status: 'complete'
+  }), null);
+});
+
+test('championship repair clears a prematurely advanced next-round slot', () => {
+  const state = core.normalizeState({
+    currentSeason: {
+      id: 'season_test_oct_2026',
+      status: 'active',
+      monthKey: '2026-10',
+      series: {
+        r32_1: {
+          id: 'r32_1',
+          roundId: 'round_of_32',
+          roundIndex: 1,
+          seriesIndex: 1,
+          playerAId: 'a',
+          playerAName: 'A',
+          playerASeed: 2,
+          playerBId: 'b',
+          playerBName: 'B',
+          playerBSeed: 31,
+          bestOf: 5,
+          winsNeeded: 3,
+          winsA: 1,
+          winsB: 1,
+          winnerId: 'a',
+          loserId: 'b',
+          status: 'complete',
+          nextSeriesId: 's16_1',
+          nextSlot: 'A',
+          gameResults: []
+        },
+        s16_1: {
+          id: 's16_1',
+          roundId: 'sweet_16',
+          roundIndex: 2,
+          seriesIndex: 1,
+          playerAId: 'a',
+          playerAName: 'A',
+          playerASeed: 2,
+          playerBId: 'c',
+          playerBName: 'C',
+          playerBSeed: 15,
+          bestOf: 5,
+          winsNeeded: 3,
+          winsA: 0,
+          winsB: 0,
+          winnerId: '',
+          loserId: '',
+          status: 'pending',
+          gameResults: []
+        }
+      }
+    }
+  });
+
+  const repaired = core.repairSeasonChampionshipData(state, { nowISO: '2026-10-07T12:00:00.000Z' });
+  assert.equal(repaired.state.currentSeason.series.r32_1.winnerId, '');
+  assert.equal(repaired.state.currentSeason.series.r32_1.status, 'active');
+  assert.equal(repaired.state.currentSeason.series.s16_1.playerAId, '');
+  assert.equal(repaired.state.currentSeason.series.s16_1.status, 'pending');
+});
+
 test('completed Play-In and Round of 32 series advance valid winners during sync', () => {
   const state = buildJuneSeason();
   const pi1 = state.currentSeason.series.season_1_june_2026_play_in_1;
