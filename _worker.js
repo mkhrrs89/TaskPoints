@@ -288,6 +288,23 @@ export default {
       return handleCoreBundleRequest(request, env, ctx);
     }
 
+    if ((request.method === 'GET' || request.method === 'HEAD') && url.pathname === '/toolbar.js') {
+      const toolbarRequest = new Request(request.url, {
+        method: request.method,
+        headers: freshHeaders(request.headers)
+      });
+      const toolbarResponse = await env.ASSETS.fetch(toolbarRequest);
+      if (!toolbarResponse.ok) return toolbarResponse;
+
+      const headers = noCacheHeaders(toolbarResponse.headers);
+      headers.set('content-type', 'application/javascript; charset=utf-8');
+      return new Response(request.method === 'HEAD' ? null : toolbarResponse.body, {
+        status: toolbarResponse.status,
+        statusText: toolbarResponse.statusText,
+        headers
+      });
+    }
+
     const response = await baseWorker.fetch(request, env, ctx);
 
     if (request.method === 'GET' && response.ok && isHomePagePath(url.pathname)) {

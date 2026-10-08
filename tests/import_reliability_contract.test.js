@@ -5,6 +5,7 @@ const path = require('node:path');
 
 const toolbar = fs.readFileSync(path.join(__dirname, '..', 'toolbar.js'), 'utf8');
 const settings = fs.readFileSync(path.join(__dirname, '..', 'settings.html'), 'utf8');
+const worker = fs.readFileSync(path.join(__dirname, '..', '_worker.js'), 'utf8');
 
 test('shared toolbar import explicitly opens hidden file inputs and requires a committed save', () => {
   assert.match(toolbar, /label\.addEventListener\('click',[\s\S]*?event\.preventDefault\(\);[\s\S]*?input\.click\(\);/);
@@ -52,4 +53,11 @@ test('Settings import handlers await async import completion and surface real er
   assert.match(settings, /await applyImportedState\(parsed\);/);
   assert.match(settings, /async function handleSettingsPaste\(\)/);
   assert.match(settings, /alert\(\`Import failed: \$\{err\?\.message/);
+});
+
+
+test('desktop shared toolbar asset cannot remain stale after an import-handler deploy', () => {
+  assert.match(worker, /url\.pathname === '\/toolbar\.js'/);
+  assert.match(worker, /const headers = noCacheHeaders\(toolbarResponse\.headers\);/);
+  assert.match(worker, /cache-control', 'no-cache, no-store, must-revalidate'/);
 });
