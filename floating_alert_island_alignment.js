@@ -31,11 +31,12 @@
     }) || null;
   }
 
-  function documentRowCenterY(row) {
+  function viewportRowCenterY(row) {
     const rect = row?.getBoundingClientRect?.();
     if (!rect || rect.height <= 0) return null;
-    const scrollY = Number(global.scrollY || global.pageYOffset || 0);
-    return rect.top + scrollY + (rect.height / 2);
+    // Fixed-position islands use viewport coordinates. Adding scrollY here
+    // incorrectly shifts them after a modal changes the page scroll offset.
+    return rect.top + (rect.height / 2);
   }
 
   function centerFixedElementOnDocumentY(element, centerY, fallbackTop) {
@@ -164,7 +165,7 @@
     }
 
     const row = visibleHeaderRow();
-    const centerY = documentRowCenterY(row);
+    const centerY = viewportRowCenterY(row);
 
     oranges.forEach((orange) => {
       orange.style.right = ORANGE_RIGHT;
@@ -231,7 +232,7 @@
 
   global.TaskPointsFloatingAlertIslandAlignment = {
     installed: true,
-    version: 5,
+    version: 6,
     align,
     scheduleAlign,
     getStatus() {
