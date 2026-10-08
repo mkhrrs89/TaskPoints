@@ -67,3 +67,9 @@ test('bottommost silver habit keeps normal silver underside depth and reaches th
   assert.match(styles, /@media \(max-width:640px\)[\s\S]*?\.habitGroup--rail-layout \.habitGroupBody \.habitWeekCompleteStack > \.habitRow\.habitRow--week-complete\{[\s\S]*?margin-bottom:1rem;/);
   assert.doesNotMatch(styles, /\.habitGroup--rail-layout \.habitGroupBody > \.habitWeekCompleteStack:last-child::before\{[\s\S]*?bottom:-8px;/);
 });
+
+
+test('untagged habits start flush when they immediately follow a named tag group', () => {
+  assert.match(styles, /\.habitGroup--tagged \+ \.habitGroup--untagged \.habitGroupBody\{[\s\S]*?padding-top:0;/);
+  assert.match(styles, /\.habitGroup--rail-layout \.habitGroupBody\{[\s\S]*?padding:8px 0;/);
+});
