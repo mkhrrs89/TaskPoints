@@ -7433,8 +7433,10 @@ ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 ctx.clearRect(0, 0, width, height);
 
 
+  const SCORE_TREND_START_DATE = '2025-12-01';
   let entries = Object.entries(dailyTotals)
     .map(([key, total]) => ({ key, total }))
+    .filter((entry) => entry.key >= SCORE_TREND_START_DATE)
     .sort((a, b) => a.key.localeCompare(b.key));
 
 // Show full history, but downsample if it's huge (keeps last point)
