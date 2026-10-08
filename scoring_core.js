@@ -5834,6 +5834,7 @@ workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
 
     let removedJune9Matchups = 0;
     let removedJune9GameHistory = 0;
+    const foundJune14Ids = new Set();
     const repairedJune14Ids = new Set();
     const unresolved = [];
 
@@ -5841,6 +5842,7 @@ workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
       const id = rowId(row);
       const expectedPlayers = JUNE_14_CONFIRMED_EXHIBITION_REPAIRS[id];
       if (!expectedPlayers) return row;
+      foundJune14Ids.add(id);
       if (rowDate(row, fallbackDate) !== '2026-06-14' || String(row.matchupType || '').toLowerCase() !== 'exhibition') {
         unresolved.push({ id, reason: 'signature_mismatch' });
         return row;
@@ -5938,7 +5940,8 @@ workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
 
     const repairedJune14Matchups = repairedJune14Ids.size;
     const dataChanged = repairedJune14Matchups > 0 || removedJune9Matchups > 0 || removedJune9GameHistory > 0;
-    const complete = unresolvedIds.size === 0;
+    const expectedJune14Count = Object.keys(JUNE_14_CONFIRMED_EXHIBITION_REPAIRS).length;
+    const complete = foundJune14Ids.size === expectedJune14Count && unresolvedIds.size === 0;
     const markerChanged = complete && markers[JUNE_2026_LIFETIME_REPAIR_MARKER] !== true;
     const historicalRepairMarkers = markerChanged
       ? { ...markers, [JUNE_2026_LIFETIME_REPAIR_MARKER]: true }
