@@ -1958,7 +1958,8 @@ let state = (() => {
     const loaded = TaskPointsCore.loadAppState({
       preloadedState: nativeCandidate,
       syncDerived: false,
-      persistSync: false
+      persistSync: false,
+      persistConfirmedHistoricalRepairs: true
     });
     if (__TP_PERF_BOOT) console.timeEnd('LOAD: IndexedDB native prepare');
 
@@ -3289,7 +3290,11 @@ function getCachedStorageState() {
 
   if (__TP_PERF_BOOT) console.time('LOAD: JSON.parse');
   // Shared loader replays the habit journal before this page derives or paints.
-  const parsed = TaskPointsCore.loadAppState({ syncDerived: false, persistSync: false }).state;
+  const parsed = TaskPointsCore.loadAppState({
+    syncDerived: false,
+    persistSync: false,
+    persistConfirmedHistoricalRepairs: true
+  }).state;
   if (__TP_PERF_BOOT) console.timeEnd('LOAD: JSON.parse');
 
   storageCache.raw = raw;
