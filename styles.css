@@ -1821,6 +1821,14 @@ body {
 
 .sectionDivider{margin:18px 0 8px;border-top:1px dashed var(--border);padding-top:8px;font-weight:700;opacity:.9}
 
+/* App-wide iOS gesture policy: keep normal scrolling + pinch zoom, but never
+   treat two quick taps as a browser zoom gesture. Specific drag/scroll
+   surfaces can still override this with their own touch-action rules. */
+html,
+body{
+  touch-action: manipulation;
+}
+
 .task-date-group-header{
   display:flex;
   align-items:center;
@@ -7302,6 +7310,17 @@ metal background attached only to the day-bubble row.
   margin-left:-16px;
   margin-right:-16px;
   width:calc(100% + 32px);
+}
+
+/* Weekday labels live inside the card's normal 16px inset, while grouped
+   habit bubbles begin after the rail + row padding. Shift only the Habit
+   labels by that difference so Mon-Sun centers match the seven bubbles. */
+@media (max-width:640px){
+  #habitWeekLabels{
+    box-sizing:border-box;
+    width:100%;
+    padding-left:26px; /* 34px rail + 8px row pad - 16px card inset */
+  }
 }
 
 .habitGroup.habitGroup--rail-layout{
