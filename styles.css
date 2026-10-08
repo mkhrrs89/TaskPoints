@@ -7375,6 +7375,12 @@ metal background attached only to the day-bubble row.
   min-width:0;
 }
 
+/* A blank-rail section immediately after a named tag group should begin
+   directly at the shared boundary instead of inserting another top buffer. */
+.habitGroup--tagged + .habitGroup--untagged .habitGroupBody{
+  padding-top:0;
+}
+
 /* No trailing blank band at the bottom of a tag section. Keep normal
    spacing between rows, but let the final row/stack meet the next section. */
 .habitGroup--rail-layout .habitGroupBody > .habitRow:last-child{
