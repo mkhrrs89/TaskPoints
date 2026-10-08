@@ -145,12 +145,14 @@
     return entries.filter((_, index) => index % step === 0 || index === entries.length - 1);
   }
 
+  const SCORE_TREND_START_DATE = '2025-12-01';
+
   function getDailyTrendEntries(dailyTotals) {
     if (!dailyTotals || typeof dailyTotals !== 'object') return [];
     return downsampleTrendEntries(
       Object.entries(dailyTotals)
         .map(([key, total]) => ({ key, value: Number(total) }))
-        .filter((entry) => Number.isFinite(entry.value))
+        .filter((entry) => entry.key >= SCORE_TREND_START_DATE && Number.isFinite(entry.value))
         .sort((a, b) => a.key.localeCompare(b.key))
     );
   }
