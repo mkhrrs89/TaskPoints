@@ -146,3 +146,9 @@ test('Calories Trend paints its orange moving average above the raw dots', () =>
   assert.equal(harness.context.drawCaloriesTrend.__taskPointsTrendLineAboveDots, true);
   assertOrangeStrokeIsAboveDots(harness.caloriesLog);
 });
+
+
+test('Home score trend ignores partial November 2025 history', () => {
+  assert.match(moduleSource, /const SCORE_TREND_START_DATE = '2025-12-01'/);
+  assert.match(moduleSource, /entry\.key >= SCORE_TREND_START_DATE/);
+});
