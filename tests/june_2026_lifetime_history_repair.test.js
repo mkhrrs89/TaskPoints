@@ -174,3 +174,14 @@ test('Home opts into repair-only persistence on both localStorage and native boo
   const occurrences = home.match(/persistConfirmedHistoricalRepairs:\s*true/g) || [];
   assert.equal(occurrences.length, 2);
 });
+
+
+test('an unrelated or empty state is never marked as already repaired', () => {
+  const empty = {
+    tasks:[], reminders:[], completions:[], players:[], habits:[], flexActions:[],
+    gameHistory:[], matchups:[], schedule:[], seasonHistory:[]
+  };
+  const result = core.repairConfirmedJune2026LifetimeHistory(empty);
+  assert.equal(result.changed, false);
+  assert.notEqual(result.state.historicalRepairMarkers?.june2026LifetimeMatchupsV1, true);
+});
