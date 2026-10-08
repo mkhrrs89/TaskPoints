@@ -5769,6 +5769,193 @@ workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
     return normalized;
   }
 
+  const JUNE_2026_LIFETIME_REPAIR_MARKER = 'june2026LifetimeMatchupsV1';
+
+  const JUNE_9_SYNTHETIC_LIFETIME_MATCHUP_IDS = new Set([
+    'season_1_june_2026_season_1_june_2026_sweet_16_3_admin_catchup_2026_06_09',
+    'season_1_june_2026_season_1_june_2026_sweet_16_4_admin_catchup_2026_06_09'
+  ]);
+
+  const JUNE_9_SYNTHETIC_UNLINKED_HISTORY_IDS = new Set([
+    '0aa96495-d223-43c8-82d1-a9df15a84042'
+  ]);
+
+  const JUNE_14_CONFIRMED_EXHIBITION_REPAIRS = Object.freeze({
+    '2026-06-14_exhibition_1_7eed8920-278f-4a8a-8e90-318c5a5ac139_274a84e6-2538-4bde-b76d-c13363b87ded': ['7eed8920-278f-4a8a-8e90-318c5a5ac139', '274a84e6-2538-4bde-b76d-c13363b87ded'],
+    '2026-06-14_exhibition_2_f31541a6-7db0-4df8-a864-ef17ac9a407b_8ff55473-882a-4cd5-b956-26cebf323802': ['f31541a6-7db0-4df8-a864-ef17ac9a407b', '8ff55473-882a-4cd5-b956-26cebf323802'],
+    '2026-06-14_exhibition_3_41d3da52-c883-425a-b6d4-0e8479d65e40_44469065-6bcc-4f93-8fc1-2a6b257f716d': ['41d3da52-c883-425a-b6d4-0e8479d65e40', '44469065-6bcc-4f93-8fc1-2a6b257f716d'],
+    '2026-06-14_exhibition_4_268a1d34-73e5-4944-b786-904e610a8f6a_4f35710c-90ce-40d2-85c7-3398b714c7f3': ['268a1d34-73e5-4944-b786-904e610a8f6a', '4f35710c-90ce-40d2-85c7-3398b714c7f3'],
+    '2026-06-14_exhibition_5_fb53fef8-ec83-471c-aef1-4c6c64b4b5ce_b9ec0138-ca2f-46e1-870f-594b53e7f888': ['fb53fef8-ec83-471c-aef1-4c6c64b4b5ce', 'b9ec0138-ca2f-46e1-870f-594b53e7f888'],
+    '2026-06-14_exhibition_6_e5956916-50d8-432d-98df-eff6c6c1649b_7576d45e-7a91-4d80-b2c6-c7a19f4a7a20': ['e5956916-50d8-432d-98df-eff6c6c1649b', '7576d45e-7a91-4d80-b2c6-c7a19f4a7a20'],
+    '2026-06-14_exhibition_7_1be88608-b4bb-4edf-9a20-739b9d33e6d9_a82a958b-9281-4250-9115-e3e2ee741d09': ['1be88608-b4bb-4edf-9a20-739b9d33e6d9', 'a82a958b-9281-4250-9115-e3e2ee741d09'],
+    '2026-06-14_exhibition_8_1fa8befc-e31e-4948-abf3-483ccbca23f5_3228e55f-cf13-4719-a9ff-b91d0bc55066': ['1fa8befc-e31e-4948-abf3-483ccbca23f5', '3228e55f-cf13-4719-a9ff-b91d0bc55066'],
+    '2026-06-14_exhibition_9_250ec440-6a9b-40dc-a456-07aeee77ebab_1b87a9ea-cede-48da-a4e8-33d0a6131548': ['250ec440-6a9b-40dc-a456-07aeee77ebab', '1b87a9ea-cede-48da-a4e8-33d0a6131548'],
+    '2026-06-14_exhibition_11_090665ac-c226-4e92-a211-3244159240ed_d62801f2-7396-4456-b146-d5deabc45f9a': ['090665ac-c226-4e92-a211-3244159240ed', 'd62801f2-7396-4456-b146-d5deabc45f9a'],
+    '2026-06-14_exhibition_12_96f64ec3-5ed6-42e0-9dde-596cba7e11b7_2e5b6d94-7982-4992-9185-8bab67e3bda8': ['96f64ec3-5ed6-42e0-9dde-596cba7e11b7', '2e5b6d94-7982-4992-9185-8bab67e3bda8'],
+    '2026-06-14_exhibition_13_0129b7e2-8af6-4d7f-9ad1-502e7ff44193_63d43b6f-d36f-4b44-ba0d-87e9e1471499': ['0129b7e2-8af6-4d7f-9ad1-502e7ff44193', '63d43b6f-d36f-4b44-ba0d-87e9e1471499']
+  });
+
+  function repairConfirmedJune2026LifetimeHistory(stateInput) {
+    const state = normalizeState(stateInput || {});
+    const markers = state.historicalRepairMarkers && typeof state.historicalRepairMarkers === 'object'
+      ? { ...state.historicalRepairMarkers }
+      : {};
+    if (markers[JUNE_2026_LIFETIME_REPAIR_MARKER] === true) {
+      return {
+        state,
+        changed: false,
+        repairedJune14Matchups: 0,
+        removedJune9Matchups: 0,
+        removedJune9GameHistory: 0,
+        unresolved: []
+      };
+    }
+
+    const rowId = (row) => String(row?.id || row?.matchupId || '').trim();
+    const rowDate = (row, fallback = '') =>
+      String(row?.dateKey || row?.date || row?.dateISO || fallback || '').slice(0, 10);
+    const finiteScore = (value) =>
+      value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value));
+
+    const june14HistoryScores = new Map();
+    (Array.isArray(state.gameHistory) ? state.gameHistory : []).forEach((row) => {
+      if (!row || rowDate(row) !== '2026-06-14') return;
+      const playerId = String(row.playerId || '').trim();
+      const score = row.score ?? row.points ?? row.total;
+      if (!playerId || !finiteScore(score)) return;
+      if (!june14HistoryScores.has(playerId)) june14HistoryScores.set(playerId, []);
+      june14HistoryScores.get(playerId).push(Number(score));
+    });
+
+    const uniqueJune14Score = (playerId) => {
+      const values = june14HistoryScores.get(String(playerId || '')) || [];
+      return values.length === 1 ? values[0] : null;
+    };
+
+    let removedJune9Matchups = 0;
+    let removedJune9GameHistory = 0;
+    const repairedJune14Ids = new Set();
+    const unresolved = [];
+
+    const repairJune14Row = (row, fallbackDate = '') => {
+      const id = rowId(row);
+      const expectedPlayers = JUNE_14_CONFIRMED_EXHIBITION_REPAIRS[id];
+      if (!expectedPlayers) return row;
+      if (rowDate(row, fallbackDate) !== '2026-06-14' || String(row.matchupType || '').toLowerCase() !== 'exhibition') {
+        unresolved.push({ id, reason: 'signature_mismatch' });
+        return row;
+      }
+      const playerAId = String(row.playerAId || '');
+      const playerBId = String(row.playerBId || '');
+      if (playerAId !== expectedPlayers[0] || playerBId !== expectedPlayers[1]) {
+        unresolved.push({ id, reason: 'participant_mismatch' });
+        return row;
+      }
+
+      const historyA = uniqueJune14Score(playerAId);
+      const historyB = uniqueJune14Score(playerBId);
+      if (!Number.isFinite(historyA) || !Number.isFinite(historyB)) {
+        unresolved.push({ id, reason: 'history_score_not_unique' });
+        return row;
+      }
+
+      const existingA = finiteScore(row.scoreA) ? Number(row.scoreA) : null;
+      const existingB = finiteScore(row.scoreB) ? Number(row.scoreB) : null;
+      if ((existingA !== null && Math.abs(existingA - historyA) > 0.001)
+        || (existingB !== null && Math.abs(existingB - historyB) > 0.001)) {
+        unresolved.push({ id, reason: 'existing_score_conflict' });
+        return row;
+      }
+
+      const next = { ...row };
+      let localChanged = false;
+      if (!finiteScore(next.scoreA)) { next.scoreA = historyA; localChanged = true; }
+      if (!finiteScore(next.playerAScore)) { next.playerAScore = historyA; localChanged = true; }
+      if (!finiteScore(next.scoreB)) { next.scoreB = historyB; localChanged = true; }
+      if (!finiteScore(next.playerBScore)) { next.playerBScore = historyB; localChanged = true; }
+      if (localChanged) repairedJune14Ids.add(id);
+      return localChanged ? next : row;
+    };
+
+    const matchups = [];
+    (Array.isArray(state.matchups) ? state.matchups : []).forEach((row) => {
+      const id = rowId(row);
+      if (
+        JUNE_9_SYNTHETIC_LIFETIME_MATCHUP_IDS.has(id)
+        && rowDate(row) === '2026-06-09'
+        && String(row.source || '').toLowerCase() === 'admin_catch_up'
+        && Number(row.scoreA) === 55
+        && Number(row.scoreB) === 45
+      ) {
+        removedJune9Matchups += 1;
+        return;
+      }
+      matchups.push(repairJune14Row(row));
+    });
+
+    const gameHistory = (Array.isArray(state.gameHistory) ? state.gameHistory : []).filter((row) => {
+      const linkedMatchupId = String(row?.matchupId || '').trim();
+      const id = String(row?.id || '').trim();
+      const linkedSynthetic = JUNE_9_SYNTHETIC_LIFETIME_MATCHUP_IDS.has(linkedMatchupId);
+      const knownUnlinkedSynthetic = JUNE_9_SYNTHETIC_UNLINKED_HISTORY_IDS.has(id)
+        && rowDate(row) === '2026-06-09'
+        && String(row?.playerId || '') === '250ec440-6a9b-40dc-a456-07aeee77ebab'
+        && Number(row?.score) === 45;
+      if (linkedSynthetic || knownUnlinkedSynthetic) {
+        removedJune9GameHistory += 1;
+        return false;
+      }
+      return true;
+    });
+
+    const schedule = (Array.isArray(state.schedule) ? state.schedule : []).map((day) => {
+      if (!Array.isArray(day?.matchups)) return day;
+      const dayDate = String(day.dateKey || day.date || '').slice(0, 10);
+      let localChanged = false;
+      const nextRows = [];
+      day.matchups.forEach((row) => {
+        const id = rowId(row);
+        if (JUNE_9_SYNTHETIC_LIFETIME_MATCHUP_IDS.has(id) && rowDate(row, dayDate) === '2026-06-09') {
+          localChanged = true;
+          return;
+        }
+        const repaired = repairJune14Row(row, dayDate);
+        if (repaired !== row) localChanged = true;
+        nextRows.push(repaired);
+      });
+      return localChanged ? { ...day, matchups: nextRows } : day;
+    });
+
+    const unresolvedIds = new Set(unresolved.map((item) => item.id));
+    Object.keys(JUNE_14_CONFIRMED_EXHIBITION_REPAIRS).forEach((id) => {
+      const row = matchups.find((item) => rowId(item) === id);
+      if (!row) return;
+      if (!finiteScore(row.scoreA) || !finiteScore(row.scoreB)) unresolvedIds.add(id);
+    });
+    JUNE_9_SYNTHETIC_LIFETIME_MATCHUP_IDS.forEach((id) => {
+      if (matchups.some((row) => rowId(row) === id)) unresolvedIds.add(id);
+    });
+
+    const repairedJune14Matchups = repairedJune14Ids.size;
+    const dataChanged = repairedJune14Matchups > 0 || removedJune9Matchups > 0 || removedJune9GameHistory > 0;
+    const complete = unresolvedIds.size === 0;
+    const markerChanged = complete && markers[JUNE_2026_LIFETIME_REPAIR_MARKER] !== true;
+    const historicalRepairMarkers = markerChanged
+      ? { ...markers, [JUNE_2026_LIFETIME_REPAIR_MARKER]: true }
+      : markers;
+
+    return {
+      state: dataChanged || markerChanged
+        ? normalizeState({ ...state, matchups, gameHistory, schedule, historicalRepairMarkers })
+        : state,
+      changed: dataChanged || markerChanged,
+      repairedJune14Matchups,
+      removedJune9Matchups,
+      removedJune9GameHistory,
+      unresolved: Array.from(unresolvedIds)
+    };
+  }
+
   function loadAppState(options = {}) {
     let parsed = {};
     let storageKeysFound = [];
@@ -5805,6 +5992,10 @@ workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
     const shouldSync = options.syncDerived !== false;
     const shouldPersist = options.persistSync !== false;
     let changed = false;
+
+    const june2026HistoryRepair = repairConfirmedJune2026LifetimeHistory(state);
+    state = june2026HistoryRepair.state;
+    changed = changed || june2026HistoryRepair.changed;
 
     const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
     const cutoff = Date.now() - THIRTY_DAYS_MS;
@@ -9776,6 +9967,7 @@ return Number(cappedScore.toFixed(1));
     normalizeState,
     extractImportStateRoot,
     normalizeImportedFullBackupState,
+    repairConfirmedJune2026LifetimeHistory,
     normalizeSeasonState,
     normalizeSeasonHistory,
     normalizeCurrentSeason,
