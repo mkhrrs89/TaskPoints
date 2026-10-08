@@ -2193,38 +2193,76 @@ function ensureUpcomingScheduleFallback(state, days = 7) {
 }
 
 function saveStateSnapshotFallback(next, options = {}) {
+  const requireCommitted = options.requireCommitted === true;
   try {
+    let result = null;
     if (window.TaskPointsCore?.saveValidatedSnapshot) {
-      const { trimmed, blocked, reason } = TaskPointsCore.saveValidatedSnapshot(next, {
+      result = TaskPointsCore.saveValidatedSnapshot(next, {
         storageKey: STORAGE_KEY_FALLBACK,
         immediateWrite: true,
+        userInitiated: requireCommitted,
         source: options.source || 'toolbar-full-snapshot',
         allowDestructiveOverwrite: Boolean(options.allowDestructiveOverwrite)
       });
-      if (blocked) {
-        console.warn(`Snapshot write blocked by validation guard (toolbar.js): ${reason || 'unknown reason'}`);
-      } else if (trimmed) {
-        console.warn('Storage nearing capacity. Older history items were trimmed to keep saves working.');
-      }
-      return;
+    } else if (window.TaskPointsCore?.saveStateSnapshot) {
+      result = TaskPointsCore.saveStateSnapshot(next, {
+        storageKey: STORAGE_KEY_FALLBACK,
+        immediateWrite: true,
+        userInitiated: requireCommitted,
+        source: options.source || 'toolbar-full-snapshot',
+        allowDestructiveOverwrite: Boolean(options.allowDestructiveOverwrite)
+      });
+    } else if (window.TaskPointsCore?.mergeAndSaveState) {
+      result = TaskPointsCore.mergeAndSaveState(next, {
+        storageKey: STORAGE_KEY_FALLBACK,
+        immediateWrite: true,
+        userInitiated: requireCommitted,
+        source: options.source || 'toolbar-full-snapshot',
+        allowDestructiveOverwrite: Boolean(options.allowDestructiveOverwrite)
+      });
+    } else {
+      const error = new Error('TaskPointsCore save helper is unavailable.');
+      console.warn('toolbar saveStateSnapshotFallback skipped localStorage write; TaskPointsCore missing.');
+      if (requireCommitted) throw error;
+      return null;
     }
-    if (window.TaskPointsCore?.saveStateSnapshot) {
-      const { trimmed } = TaskPointsCore.saveStateSnapshot(next, { storageKey: STORAGE_KEY_FALLBACK, immediateWrite: true });
-      if (trimmed) {
-        console.warn('Storage nearing capacity. Older history items were trimmed to keep saves working.');
-      }
-      return;
+
+    if (result?.blocked) {
+      const error = new Error(result.reason || 'Snapshot write was blocked by the validation guard.');
+      console.warn(`Snapshot write blocked by validation guard (toolbar.js): ${result.reason || 'unknown reason'}`);
+      if (requireCommitted) throw error;
     }
-    if (window.TaskPointsCore?.mergeAndSaveState) {
-      const { trimmed } = TaskPointsCore.saveStateSnapshot(next, { storageKey: STORAGE_KEY_FALLBACK, immediateWrite: true });
-      if (trimmed) {
-        console.warn('Storage nearing capacity. Older history items were trimmed to keep saves working.');
-      }
-      return;
+    if (result?.skipped || result?.blockedByQuotaCircuit) {
+      const error = new Error(result.reason || result.skipReason || 'Snapshot write was skipped.');
+      console.warn('Snapshot write was skipped (toolbar.js).', result);
+      if (requireCommitted) throw error;
     }
-    console.warn('toolbar saveStateSnapshotFallback skipped localStorage write; TaskPointsCore missing.');
+    if (requireCommitted && !result?.state) {
+      throw new Error('Import save did not return a committed state.');
+    }
+    if (result?.trimmed) {
+      console.warn('Storage nearing capacity. Older history items were trimmed to keep saves working.');
+    }
+    return result;
   } catch (e) {
     console.error('Failed to save imported state (toolbar.js)', e);
+    if (requireCommitted) throw e;
+    return null;
+  }
+}
+
+async function flushImportedStatePersistenceFallback() {
+  const core = window.TaskPointsCore;
+  if (!core) return;
+
+  // A full import is rare and user-initiated. Before reloading, force any
+  // IndexedDB-primary/native mirrors to catch up to the newly committed
+  // localStorage snapshot instead of leaving that work behind a quiet-time gate.
+  if (typeof core.flushPhase4PrimaryWrites === 'function') {
+    await core.flushPhase4PrimaryWrites();
+  }
+  if (typeof core.flushPhase5ANativeSnapshotWrites === 'function') {
+    await core.flushPhase5ANativeSnapshotWrites();
   }
 }
 
@@ -3212,13 +3250,22 @@ async function applyImportedStateFallback(rootOrPayload) {
     console.warn('Could not clear existing TaskPoints storage before import', e);
   }
 
-  saveStateSnapshotFallback(normalized, { allowDestructiveOverwrite: true, source: 'toolbar-import' });
+  const saveResult = saveStateSnapshotFallback(normalized, {
+    allowDestructiveOverwrite: true,
+    source: 'toolbar-import',
+    requireCommitted: true
+  });
+  if (!saveResult?.state) {
+    throw new Error('Imported TaskPoints state was not committed.');
+  }
   if (importedNotesPayload != null) {
     applyImportedNotesPayloadFallback(importedNotesPayload, {
       source: 'toolbar-full-import',
       allowEmptyReplace: true
     });
   }
+
+  await flushImportedStatePersistenceFallback();
   window.location.reload();
 }
 
@@ -3386,10 +3433,24 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   document.querySelectorAll('[data-import-input]').forEach((input) => {
-    if (input instanceof HTMLInputElement) {
-      input.accept = 'application/json,application/zip,.zip';
-    }
+    if (!(input instanceof HTMLInputElement)) return;
+
+    input.accept = 'application/json,application/zip,.zip';
     input.addEventListener('change', fileHandler);
+
+    // Do not rely solely on implicit <label><input type=file> activation.
+    // Some desktop/browser combinations have been unreliable with a hidden
+    // file input inside the shared toolbar label. Route the visible label click
+    // to the picker explicitly while leaving direct input clicks alone.
+    const label = input.closest('label');
+    if (label && label.dataset.tpImportPickerBound !== '1') {
+      label.dataset.tpImportPickerBound = '1';
+      label.addEventListener('click', (event) => {
+        if (event.target === input) return;
+        event.preventDefault();
+        input.click();
+      });
+    }
   });
 
   document.querySelectorAll('[data-import-paste]').forEach((btn) => {
