@@ -1113,7 +1113,38 @@ ${b}`;
       return false;
     }
 
-    function applyImportedState(data) {
+    function assertCommittedSettingsImport(result, label = "Import") {
+      if (!result || result.blocked || result.skipped || result.blockedByQuotaCircuit || !result.state) {
+        const reason = result?.reason || result?.skipReason || "the state snapshot was not committed";
+        throw new Error(`${label} failed: ${reason}`);
+      }
+      return result;
+    }
+
+    async function flushSettingsImportPersistence() {
+      const core = window.TaskPointsCore;
+      if (!core) return;
+      if (typeof core.flushPhase4PrimaryWrites === "function") {
+        await core.flushPhase4PrimaryWrites();
+      }
+      if (typeof core.flushPhase5ANativeSnapshotWrites === "function") {
+        await core.flushPhase5ANativeSnapshotWrites();
+      }
+    }
+
+    function bindSettingsFilePicker(inputId) {
+      const input = document.getElementById(inputId);
+      const label = input?.closest?.("label");
+      if (!(input instanceof HTMLInputElement) || !label || label.dataset.tpImportPickerBound === "1") return;
+      label.dataset.tpImportPickerBound = "1";
+      label.addEventListener("click", (event) => {
+        if (event.target === input) return;
+        event.preventDefault();
+        input.click();
+      });
+    }
+
+    async function applyImportedState(data) {
       const isFullBackup = data && data.exportType === "taskpoints_full_backup" && data.state;
       const root =
         (data && Array.isArray(data.tasks) && Array.isArray(data.completions)) ? data :
@@ -1152,27 +1183,33 @@ ${b}`;
       if (!Object.prototype.hasOwnProperty.call(root, "scoringSettings")) {
   delete normalized.scoringSettings;
 }
+      let importSaveResult = null;
       if (window.TaskPointsCore?.saveValidatedSnapshot) {
-        TaskPointsCore.saveValidatedSnapshot(normalized, {
+        importSaveResult = TaskPointsCore.saveValidatedSnapshot(normalized, {
           storageKey: SETTINGS_STORAGE_KEY,
           allowScoringSettingsOverwrite: false,
           allowHabitTagColorReset: true,
           allowStickyOverwriteKeys: ["youImageId", "youName", "youPrimaryColor", "youSecondaryColor", "habitTagColors"],
           allowDestructiveOverwrite: true,
           source: "settings-import",
-          immediateWrite: true
+          immediateWrite: true,
+          userInitiated: true
         });
       } else if (window.TaskPointsCore?.saveStateSnapshot) {
-        TaskPointsCore.saveStateSnapshot(normalized, {
+        importSaveResult = TaskPointsCore.saveStateSnapshot(normalized, {
           storageKey: SETTINGS_STORAGE_KEY,
           allowScoringSettingsOverwrite: false,
           allowHabitTagColorReset: true,
           allowStickyOverwriteKeys: ["youImageId", "youName", "youPrimaryColor", "youSecondaryColor", "habitTagColors"],
-          immediateWrite: true
+          allowDestructiveOverwrite: true,
+          source: "settings-import",
+          immediateWrite: true,
+          userInitiated: true
         });
       } else {
-        console.warn("settings import skipped localStorage write; TaskPointsCore missing.");
+        throw new Error("TaskPointsCore save helper is unavailable.");
       }
+      assertCommittedSettingsImport(importSaveResult);
       if (importedNotesPayload != null) {
         applyImportedNotesPayload(importedNotesPayload, {
           source: "settings-full-import",
@@ -1185,6 +1222,13 @@ ${b}`;
           localStorage.setItem("tp_projects_v1", incomingProjects);
         }
       }
+      await flushSettingsImportPersistence();
+
+      const persistedImport = TaskPointsCore.readTaskPointsStoredState(SETTINGS_STORAGE_KEY, null);
+      if (!persistedImport || !Array.isArray(persistedImport.tasks) || !Array.isArray(persistedImport.completions)) {
+        throw new Error("Import verification failed after save.");
+      }
+
       alert("Import complete! Reload any open TaskPoints tabs to see the changes.");
     }
 
@@ -1282,47 +1326,33 @@ ${b}`;
       return manifest;
     }
 
-    function handleSettingsFile(ev) {
+    async function handleSettingsFile(ev) {
       const file = ev.target.files?.[0];
       if (!file) return;
 
-      if (isZipFile(file)) {
-        importBackupZip(file).then((manifest) => {
-          applyImportedState(manifest);
-        }).catch((err) => {
-          console.error("Import failed", err);
-          alert("Import failed. Please confirm the zip was exported from TaskPoints.");
-        }).finally(() => {
-          ev.target.value = "";
-        });
-        return;
+      try {
+        const parsed = isZipFile(file)
+          ? await importBackupZip(file)
+          : JSON.parse(await file.text());
+        await applyImportedState(parsed);
+      } catch (err) {
+        console.error("Import failed", err);
+        alert(`Import failed: ${err?.message || "Please confirm the file is a valid TaskPoints backup."}`);
+      } finally {
+        ev.target.value = "";
       }
-
-      const reader = new FileReader();
-      reader.onload = () => {
-        try {
-          const parsed = JSON.parse(String(reader.result));
-          applyImportedState(parsed);
-        } catch (err) {
-          console.error("Import failed", err);
-          alert("Import failed. Please confirm the file is valid TaskPoints JSON.");
-        }
-      };
-
-      reader.readAsText(file);
-      ev.target.value = "";
     }
 
-    function handleSettingsPaste() {
+    async function handleSettingsPaste() {
       const txt = prompt("Paste TaskPoints JSON:");
       if (!txt) return;
 
       try {
         const parsed = JSON.parse(txt);
-        applyImportedState(parsed);
+        await applyImportedState(parsed);
       } catch (err) {
         console.error("Paste import failed", err);
-        alert("The text is not valid JSON. Please try again.");
+        alert(`Paste import failed: ${err?.message || "Please try again."}`);
       }
     }
 
@@ -1507,15 +1537,20 @@ ${summaryWithNotes}`)) return;
           }
           notesRestored = applyNotesRestore(mode, backupNotes);
         }
+        let mergeSaveResult = null;
         if (window.TaskPointsCore?.saveStateSnapshot) {
-          TaskPointsCore.saveStateSnapshot(mergedState, {
+          mergeSaveResult = TaskPointsCore.saveStateSnapshot(mergedState, {
             storageKey: SETTINGS_STORAGE_KEY,
             immediateWrite: true,
+            userInitiated: true,
             source: 'settings-merge-backup',
             limits: { allowHistoryPrune: false, allowCompletionPrune: false }
           });
-        } else {
+          assertCommittedSettingsImport(mergeSaveResult, "Merge");
+        } else if (window.TaskPointsCore?.writeTaskPointsStoredState) {
           TaskPointsCore.writeTaskPointsStoredState(mergedState, { storageKey: SETTINGS_STORAGE_KEY });
+        } else {
+          throw new Error("TaskPointsCore save helper is unavailable.");
         }
         if (notesRestored) {
           applyImportedNotesPayload(localStorage.getItem("taskpoints_notes_v1") || "", {
@@ -1523,6 +1558,8 @@ ${summaryWithNotes}`)) return;
             allowEmptyReplace: true
           });
         }
+
+        await flushSettingsImportPersistence();
 
         const saved = TaskPointsCore.readTaskPointsStoredState(SETTINGS_STORAGE_KEY, {});
         console.debug('[merge backup] after save verification', {
@@ -4720,6 +4757,8 @@ rows.push([
       document.getElementById('settingsImportInput')?.addEventListener('change', handleSettingsFile);
       document.getElementById('settingsImportPasteBtn')?.addEventListener('click', handleSettingsPaste);
       document.getElementById('settingsMergeBackupInput')?.addEventListener('change', handleMergeBackupFile);
+      bindSettingsFilePicker('settingsImportInput');
+      bindSettingsFilePicker('settingsMergeBackupInput');
       document.getElementById('settingsResetGameStatsBtn')?.addEventListener('click', handleSettingsResetGameStats);
       document.getElementById('settingsClearAllSkillsBtn')?.addEventListener('click', handleClearAllSkills);
       document.getElementById('settingsResetBtn')?.addEventListener('click', handleSettingsReset);
