@@ -5997,6 +5997,20 @@ workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
     state = june2026HistoryRepair.state;
     changed = changed || june2026HistoryRepair.changed;
 
+    // Home's normal startup load is intentionally read-only for performance.
+    // Allow only this exact, confirmed one-time historical repair to persist
+    // without opting the rest of startup normalization into writes.
+    if (
+      june2026HistoryRepair.changed
+      && options.persistConfirmedHistoricalRepairs === true
+      && !shouldPersist
+    ) {
+      mergeAndSaveState(state, {
+        storageKey: STORAGE_KEY,
+        savePath: 'june-2026-lifetime-history-repair'
+      });
+    }
+
     const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
     const cutoff = Date.now() - THIRTY_DAYS_MS;
     const beforeCount = state.tasks.length;
