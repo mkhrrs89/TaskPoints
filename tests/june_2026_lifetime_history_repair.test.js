@@ -137,12 +137,20 @@ test('repair never overwrites a conflicting June 14 score', () => {
   assert.notEqual(result.state.historicalRepairMarkers?.june2026LifetimeMatchupsV1, true);
 });
 
-test('loadAppState applies the repair even with derived synchronization disabled', () => {
+test('loadAppState can persist only the confirmed repair while general startup persistence stays disabled', () => {
   storage.clear();
   storage.set('taskpoints_v1', JSON.stringify(baseFixture()));
-  const loaded = core.loadAppState({ syncDerived:false, persistSync:false });
+  const loaded = core.loadAppState({
+    syncDerived:false,
+    persistSync:false,
+    persistConfirmedHistoricalRepairs:true
+  });
   assert.equal(loaded.state.matchups.some((m) => m.id === SYNTH_3 || m.id === SYNTH_4), false);
   assert.equal(loaded.state.historicalRepairMarkers.june2026LifetimeMatchupsV1, true);
+
+  const persisted = core.parseTaskPointsStorageJson(storage.get('taskpoints_v1'), {});
+  assert.equal(persisted.matchups.some((m) => m.id === SYNTH_3 || m.id === SYNTH_4), false);
+  assert.equal(persisted.historicalRepairMarkers.june2026LifetimeMatchupsV1, true);
 });
 
 test('known Oct 8 lifetime totals become 178 for all original 16 after the confirmed deltas', () => {
@@ -156,4 +164,13 @@ test('known Oct 8 lifetime totals become 178 for all original 16 after the confi
     const after = before[name] - (june9Removed.has(name) ? 1 : 0) + (june14Recovered.has(name) ? 1 : 0);
     assert.equal(after, 178, name);
   });
+});
+
+
+test('Home opts into repair-only persistence on both localStorage and native boot paths', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const home = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const occurrences = home.match(/persistConfirmedHistoricalRepairs:\s*true/g) || [];
+  assert.equal(occurrences.length, 2);
 });
