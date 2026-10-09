@@ -1235,8 +1235,17 @@ ${b}`;
       if (!persistedImport || !Array.isArray(persistedImport.tasks) || !Array.isArray(persistedImport.completions)) {
         throw new Error("Import verification failed after save.");
       }
+      // Verify the imported records, not merely the presence of valid arrays.
+      // A stale storage mirror can otherwise make an unchanged save look successful.
+      const recordSignature = (records) => JSON.stringify(records);
+      for (const key of ["tasks", "completions", "habits", "players", "flexActions", "gameHistory", "matchups", "schedule", "seasonHistory"]) {
+        if (!Array.isArray(normalized[key])) continue;
+        if (!Array.isArray(persistedImport[key]) || recordSignature(persistedImport[key]) !== recordSignature(normalized[key])) {
+          throw new Error(`Import verification failed: saved ${key} records do not match the selected backup. Your current data may not have been replaced. Export a safety backup before retrying.`);
+        }
+      }
 
-      alert("Import complete! Reload any open TaskPoints tabs to see the changes.");
+      alert("Import verified! Reload any open TaskPoints tabs to see the changes.");
     }
 
     function isZipFile(file) {
