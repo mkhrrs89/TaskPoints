@@ -34,9 +34,11 @@
   function viewportRowCenterY(row) {
     const rect = row?.getBoundingClientRect?.();
     if (!rect || rect.height <= 0) return null;
-    // Fixed-position islands use viewport coordinates. Adding scrollY here
-    // incorrectly shifts them after a modal changes the page scroll offset.
-    return rect.top + (rect.height / 2);
+    // The header row scrolls with the document while the islands are fixed.
+    // Recover its document-space position so repeated alignment passes do not
+    // move the fixed islands when the user scrolls away and back.
+    const scrollY = Number(global.scrollY ?? global.pageYOffset ?? 0);
+    return rect.top + scrollY + (rect.height / 2);
   }
 
   function centerFixedElementOnDocumentY(element, centerY, fallbackTop) {
@@ -232,7 +234,7 @@
 
   global.TaskPointsFloatingAlertIslandAlignment = {
     installed: true,
-    version: 6,
+    version: 7,
     align,
     scheduleAlign,
     getStatus() {
