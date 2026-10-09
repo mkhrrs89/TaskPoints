@@ -8,7 +8,10 @@ const settings = fs.readFileSync(path.join(__dirname, '..', 'settings.html'), 'u
 const worker = fs.readFileSync(path.join(__dirname, '..', '_worker.js'), 'utf8');
 
 test('shared toolbar import explicitly opens hidden file inputs and requires a committed save', () => {
-  assert.match(toolbar, /label\.addEventListener\('click',[\s\S]*?event\.preventDefault\(\);[\s\S]*?input\.click\(\);/);
+  assert.match(toolbar, /label\.addEventListener\('click',[\s\S]*?event\.preventDefault\(\);/);
+  assert.match(toolbar, /typeof input\.showPicker === 'function'/);
+  assert.match(toolbar, /input\.showPicker\(\);/);
+  assert.match(toolbar, /input\.click\(\);/);
   assert.match(toolbar, /requireCommitted:\s*true/);
   assert.match(toolbar, /if \(requireCommitted && !result\?\.state\)/);
   assert.match(toolbar, /result\?\.blocked/);
@@ -37,8 +40,12 @@ test('Settings full import cannot report success after a blocked or skipped save
 });
 
 test('Settings file imports and merge backup use explicit picker activation and verified persistence', () => {
-  assert.match(settings, /bindSettingsFilePicker\('settingsImportInput'\)/);
-  assert.match(settings, /bindSettingsFilePicker\('settingsMergeBackupInput'\)/);
+  assert.match(settings, /id="settingsImportPickerBtn"/);
+  assert.match(settings, /id="settingsMergeBackupPickerBtn"/);
+  assert.match(settings, /bindSettingsFilePicker\('settingsImportPickerBtn', 'settingsImportInput'\)/);
+  assert.match(settings, /bindSettingsFilePicker\('settingsMergeBackupPickerBtn', 'settingsMergeBackupInput'\)/);
+  assert.match(settings, /typeof input\.showPicker === "function"/);
+  assert.match(settings, /input\.showPicker\(\);/);
   assert.match(settings, /input\.click\(\);/);
   assert.match(settings, /assertCommittedSettingsImport\(mergeSaveResult, "Merge"\);/);
 
