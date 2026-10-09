@@ -103,13 +103,11 @@
 
         <div class="space-y-3 pt-4">
           <div class="flex flex-wrap gap-2 items-center">
-            <label class="btn btn-teal btn-toolbar nav-btn cursor-pointer">Import JSON
-              <input id="settingsImportInput" type="file" accept="application/json,application/zip,.zip" class="hidden" />
-            </label>
+            <button id="settingsImportPickerBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Import JSON</button>
+            <input id="settingsImportInput" type="file" accept="application/json,application/zip,.zip" class="hidden" />
             <button id="settingsImportPasteBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Paste JSON</button>
-            <label class="btn btn-teal btn-toolbar nav-btn cursor-pointer">Merge Backup
-              <input id="settingsMergeBackupInput" type="file" accept="application/json,application/zip,.zip" class="hidden" />
-            </label>
+            <button id="settingsMergeBackupPickerBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Merge Backup</button>
+            <input id="settingsMergeBackupInput" type="file" accept="application/json,application/zip,.zip" class="hidden" />
             <button type="button" class="btn btn-ghost btn-toolbar nav-btn" data-export-images>Backup + Images</button>
             <button id="settingsExportMatchupsBtn" class="btn btn-ghost btn-toolbar nav-btn" type="button">
               Export Matchups + Player History (CSV)
@@ -1132,16 +1130,25 @@ ${b}`;
       }
     }
 
-    function bindSettingsFilePicker(inputId) {
+    function openSettingsFilePicker(input) {
+      if (!(input instanceof HTMLInputElement)) return;
+      try {
+        if (typeof input.showPicker === "function") {
+          input.showPicker();
+          return;
+        }
+      } catch (error) {
+        console.warn("Native file picker activation failed; falling back to input.click().", error);
+      }
+      input.click();
+    }
+
+    function bindSettingsFilePicker(buttonId, inputId) {
+      const button = document.getElementById(buttonId);
       const input = document.getElementById(inputId);
-      const label = input?.closest?.("label");
-      if (!(input instanceof HTMLInputElement) || !label || label.dataset.tpImportPickerBound === "1") return;
-      label.dataset.tpImportPickerBound = "1";
-      label.addEventListener("click", (event) => {
-        if (event.target === input) return;
-        event.preventDefault();
-        input.click();
-      });
+      if (!(button instanceof HTMLButtonElement) || !(input instanceof HTMLInputElement) || button.dataset.tpImportPickerBound === "1") return;
+      button.dataset.tpImportPickerBound = "1";
+      button.addEventListener("click", () => openSettingsFilePicker(input));
     }
 
     async function applyImportedState(data) {
@@ -4757,8 +4764,8 @@ rows.push([
       document.getElementById('settingsImportInput')?.addEventListener('change', handleSettingsFile);
       document.getElementById('settingsImportPasteBtn')?.addEventListener('click', handleSettingsPaste);
       document.getElementById('settingsMergeBackupInput')?.addEventListener('change', handleMergeBackupFile);
-      bindSettingsFilePicker('settingsImportInput');
-      bindSettingsFilePicker('settingsMergeBackupInput');
+      bindSettingsFilePicker('settingsImportPickerBtn', 'settingsImportInput');
+      bindSettingsFilePicker('settingsMergeBackupPickerBtn', 'settingsMergeBackupInput');
       document.getElementById('settingsResetGameStatsBtn')?.addEventListener('click', handleSettingsResetGameStats);
       document.getElementById('settingsClearAllSkillsBtn')?.addEventListener('click', handleClearAllSkills);
       document.getElementById('settingsResetBtn')?.addEventListener('click', handleSettingsReset);
