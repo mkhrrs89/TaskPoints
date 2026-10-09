@@ -3448,6 +3448,14 @@ document.addEventListener('DOMContentLoaded', () => {
       label.addEventListener('click', (event) => {
         if (event.target === input) return;
         event.preventDefault();
+        try {
+          if (typeof input.showPicker === 'function') {
+            input.showPicker();
+            return;
+          }
+        } catch (error) {
+          console.warn('Native file picker activation failed; falling back to input.click().', error);
+        }
         input.click();
       });
     }
