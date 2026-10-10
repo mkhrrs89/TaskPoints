@@ -591,6 +591,16 @@
         </div>
       </details>
 
+      <details class="glass space-y-3" id="timeOfDayColorsSection">
+        <summary class="flex items-center justify-between gap-3 flex-wrap cursor-pointer">
+          <div><div class="text-lg font-semibold">Time of Day groups and colors</div>
+          <div class="muted text-sm">Create, rename, and color independent Habit/Vice Time of Day groups.</div></div>
+        </summary>
+        <div class="space-y-3 pt-3">
+          <div class="flex flex-wrap gap-2"><input id="newTimeOfDayGroup" class="input" placeholder="New Time of Day group"><button type="button" id="addTimeOfDayGroup" class="btn btn-teal">Add Group</button></div>
+          <div id="timeOfDayColorsList" class="habitTagColorGrid"></div>
+        </div>
+      </details>
       <details class="glass space-y-3" id="habitTagColorsSection">
         <summary class="flex items-center justify-between gap-3 flex-wrap cursor-pointer">
           <div>
@@ -723,7 +733,8 @@
       if (!habit || typeof habit !== "object") return habit;
       return {
         ...habit,
-        tag: typeof habit.tag === "string" ? habit.tag.trim() : ""
+        tag: typeof habit.tag === "string" ? habit.tag.trim() : "",
+        timeOfDay: typeof habit.timeOfDay === "string" ? habit.timeOfDay.trim() : ""
       };
     }
 
@@ -749,6 +760,8 @@
         youSecondaryColor: normalizeHexColor(src.youSecondaryColor) || "#254c52",
         notes: typeof src.notes === "string" ? src.notes : "",
         habitTagColors: normalizeHabitTagColors(src.habitTagColors),
+        timeOfDayColors: normalizeHabitTagColors(src.timeOfDayColors),
+        timeOfDayGroups: Array.isArray(src.timeOfDayGroups) ? [...new Set(src.timeOfDayGroups.map(x => String(x || "").trim()).filter(Boolean))] : [],
         scoringSettings: (window.TaskPointsCore?.normalizeScoringSettings)
           ? TaskPointsCore.normalizeScoringSettings(src.scoringSettings || {})
           : (src.scoringSettings || {}),
@@ -2193,6 +2206,91 @@ ${summaryWithNotes}`)) return;
       } finally {
         if (perfLabel) console.timeEnd(perfLabel);
       }
+    }
+
+    function saveTimeOfDayConfiguration(state, reason) {
+      const result = saveSettingsState(state, { immediateWrite: true, allowDestructiveOverwrite: true, source: reason });
+      const check = loadSettingsState();
+      if (JSON.stringify(check.timeOfDayColors || {}) !== JSON.stringify(state.timeOfDayColors || {}) ||
+          JSON.stringify(check.timeOfDayGroups || []) !== JSON.stringify(state.timeOfDayGroups || [])) {
+        alert("Time of Day settings could not be verified in storage. Please export a backup and try again.");
+      }
+      return result;
+    }
+
+    function renderTimeOfDayColors() {
+      const list = document.getElementById("timeOfDayColorsList");
+      if (!list) return;
+      const state = loadSettingsState();
+      const groups = [...new Set([...(state.timeOfDayGroups || []),
+        ...Object.keys(state.timeOfDayColors || {}),
+        ...(state.habits || []).map(h => String(h.timeOfDay || "").trim()).filter(Boolean)])].sort((a,b) => a.localeCompare(b));
+      list.replaceChildren();
+      for (const group of groups) {
+        const row = document.createElement("div");
+        row.className = "habitTagColorCard";
+        const title = document.createElement("input");
+        title.className = "input habitTagColorName";
+        title.value = group;
+        title.setAttribute("aria-label", "Rename Time of Day group");
+        const color = document.createElement("input");
+        color.type = "color"; color.className = "habitTagColorPicker";
+        color.value = normalizeHexColor(state.timeOfDayColors?.[group]) || "#ffffff";
+        const hex = document.createElement("input");
+        hex.className = "input habitTagColorHex"; hex.placeholder = "#HEXCODE";
+        hex.value = normalizeHexColor(state.timeOfDayColors?.[group]) || "";
+        const remove = document.createElement("button");
+        remove.type = "button"; remove.className = "habitTagColorDelete"; remove.textContent = "Delete";
+        row.append(title,color,hex,remove); list.appendChild(row);
+        function changeColor(value) {
+          const next = loadSettingsState();
+          next.timeOfDayColors = { ...(next.timeOfDayColors || {}) };
+          const normalized = normalizeHexColor(value);
+          if (normalized) next.timeOfDayColors[group] = normalized;
+          else delete next.timeOfDayColors[group];
+          next.timeOfDayGroups = [...new Set([...(next.timeOfDayGroups || []),group])];
+          saveTimeOfDayConfiguration(next, "settings-time-of-day-color");
+        }
+        color.addEventListener("change", () => { hex.value = color.value; changeColor(color.value); });
+        hex.addEventListener("change", () => {
+          if (hex.value.trim() && !normalizeHexColor(hex.value)) { alert("Enter a valid hex color."); return; }
+          if (hex.value.trim()) color.value = normalizeHexColor(hex.value);
+          changeColor(hex.value.trim());
+        });
+        title.addEventListener("change", () => {
+          const renamed = title.value.trim();
+          if (!renamed || renamed === group) { title.value = group; return; }
+          const next = loadSettingsState();
+          next.timeOfDayGroups = [...new Set([...(next.timeOfDayGroups || []).filter(g => g !== group),renamed])];
+          next.habits = (next.habits || []).map(h => h.timeOfDay === group ? {...h,timeOfDay:renamed} : h);
+          next.timeOfDayColors = {...(next.timeOfDayColors || {})};
+          if (next.timeOfDayColors[group]) next.timeOfDayColors[renamed] = next.timeOfDayColors[group];
+          delete next.timeOfDayColors[group];
+          saveTimeOfDayConfiguration(next, "settings-time-of-day-rename"); renderTimeOfDayColors();
+        });
+        remove.addEventListener("click", () => {
+          if (!confirm('Delete Time of Day group "' + group + '"? Assigned habits and vices will become ungrouped; no items or history will be deleted.')) return;
+          const next = loadSettingsState();
+          next.timeOfDayGroups = (next.timeOfDayGroups || []).filter(g => g !== group);
+          next.habits = (next.habits || []).map(h => h.timeOfDay === group ? {...h,timeOfDay:""} : h);
+          next.timeOfDayColors = {...(next.timeOfDayColors || {})};
+          delete next.timeOfDayColors[group];
+          saveTimeOfDayConfiguration(next, "settings-time-of-day-delete"); renderTimeOfDayColors();
+        });
+      }
+    }
+
+    function initializeTimeOfDayControls() {
+      document.getElementById("addTimeOfDayGroup")?.addEventListener("click", () => {
+        const input = document.getElementById("newTimeOfDayGroup");
+        const group = input?.value.trim();
+        if (!group) return;
+        const next = loadSettingsState();
+        next.timeOfDayGroups = [...new Set([...(next.timeOfDayGroups || []), group])];
+        next.timeOfDayColors = {...(next.timeOfDayColors || {})};
+        saveTimeOfDayConfiguration(next, "settings-time-of-day-add");
+        input.value = ""; renderTimeOfDayColors();
+      });
     }
 
     function renderHabitTagColors() {
@@ -4880,6 +4978,8 @@ rows.push([
       missingScoreSaveBtn?.addEventListener("click", applyMissingScoreEntry);
       scheduleRender(renderScoringSettings);
       scheduleRender(renderHabitTagColors);
+      scheduleRender(renderTimeOfDayColors);
+      initializeTimeOfDayControls();
       scheduleRender(renderHabitCalendarSelector);
       scheduleRender(renderStorageHealthPanel);
       scheduleRender(renderHealthDataManager);
