@@ -8100,7 +8100,15 @@ function buildHabitRenderEntries(habits, sortMode) {
       if (!groups.has(name)) groups.set(name, []);
       groups.get(name).push(h);
     });
-    return { entries: [...Array.from(groups.keys()).sort((a,b) => a.localeCompare(b)).map(tag => ({ type: 'group', tag, habits: groups.get(tag) })), ...singles] };
+    const orderKey = sortMode === 'timeOfDay' ? 'taskpoints_time_of_day_group_order' : 'taskpoints_tag_group_order';
+    let saved = [];
+    try { saved = JSON.parse(localStorage.getItem(orderKey) || '[]'); } catch (_) {}
+    if (!Array.isArray(saved)) saved = [];
+    const names = [...groups.keys()].sort((a,b) => {
+      const ai = saved.indexOf(a), bi = saved.indexOf(b);
+      return ai >= 0 && bi >= 0 ? ai - bi : ai >= 0 ? -1 : bi >= 0 ? 1 : a.localeCompare(b);
+    });
+    return { entries: [...names.map(tag => ({ type: 'group', tag, habits: groups.get(tag) })), ...singles] };
   }
   const tagCounts = new Map();
   habits.forEach(h => {
@@ -8595,7 +8603,7 @@ function renderHabits(){
     const isTaggedGroup = section.type === 'group';
     const groupWrap = document.createElement('div');
     groupWrap.className = `habitGroup habitGroup--rail-layout ${isTaggedGroup ? 'habitGroup--tagged' : 'habitGroup--untagged'}`;
-    if (isTaggedGroup && sortMode === 'custom') {
+    if (isTaggedGroup && (sortMode === 'custom' || sortMode === 'timeOfDay' || sortMode === 'tag')) {
       groupWrap.classList.add('habitGroup--reorderable');
     }
 
@@ -8621,7 +8629,7 @@ function renderHabits(){
     const content = document.createElement('div');
     content.className = 'habitGroupContent';
 
-    if (isTaggedGroup && sortMode === 'custom') {
+    if (isTaggedGroup && (sortMode === 'custom' || sortMode === 'timeOfDay' || sortMode === 'tag')) {
       const controls = document.createElement('div');
       controls.className = 'habitGroupControls';
       controls.innerHTML = `
@@ -8643,7 +8651,7 @@ function renderHabits(){
     const appendSectionRow = createHabitWeekCompleteAppender(body);
 
     sectionRows.forEach(({ h, isWeeklyComplete }, index) => renderHabitRow(h, days, body, {
-      showMoveButtons: sortMode === 'custom',
+      showMoveButtons: sortMode === 'custom' || sortMode === 'timeOfDay' || sortMode === 'tag',
       showTag: !isTaggedGroup,
       isGrouped: true,
       groupMoveTag: isTaggedGroup ? section.tag : '',
@@ -9352,7 +9360,8 @@ function moveHabitWithinGroup(id, tag, delta) {
   if (!h || h.retired) return;
 
   const category = h.category || 'habit';
-  const currentTag = (h.tag || '').trim();
+  const field = getHabitSortMode() === 'timeOfDay' ? 'timeOfDay' : 'tag';
+  const currentTag = (h[field] || '').trim();
 
   if (category === 'vice') return;
   if (currentTag !== groupTag) return;
@@ -9361,7 +9370,7 @@ function moveHabitWithinGroup(id, tag, delta) {
     .filter(x =>
       !x.retired &&
       (x.category || 'habit') !== 'vice' &&
-      (x.tag || '').trim() === groupTag
+      (x[field] || '').trim() === groupTag
     )
     .slice()
     .sort((a,b) => {
@@ -9398,6 +9407,25 @@ function moveHabitWithinGroup(id, tag, delta) {
 }
   
 function moveHabitGroup(tag, delta) {
+  const mode = getHabitSortMode();
+  if (mode === 'timeOfDay' || mode === 'tag') {
+    const field = mode === 'timeOfDay' ? 'timeOfDay' : 'tag';
+    const names = [...new Set(state.habits.filter(h => !h.retired && (h.category || 'habit') !== 'vice').map(h => String(h[field] || '').trim()).filter(Boolean))];
+    const key = mode === 'timeOfDay' ? 'taskpoints_time_of_day_group_order' : 'taskpoints_tag_group_order';
+    let saved = [];
+    try { saved = JSON.parse(localStorage.getItem(key) || '[]'); } catch (_) {}
+    if (!Array.isArray(saved)) saved = [];
+    names.sort((a,b) => {
+      const ai = saved.indexOf(a), bi = saved.indexOf(b);
+      return ai >= 0 && bi >= 0 ? ai - bi : ai >= 0 ? -1 : bi >= 0 ? 1 : a.localeCompare(b);
+    });
+    const index = names.indexOf(String(tag || '').trim()), target = index + delta;
+    if (index < 0 || target < 0 || target >= names.length) return;
+    [names[index], names[target]] = [names[target], names[index]];
+    localStorage.setItem(key, JSON.stringify(names));
+    renderHabits();
+    return;
+  }
   const groupTag = (tag || '').trim();
   if (!groupTag) return;
 
