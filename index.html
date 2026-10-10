@@ -3406,6 +3406,7 @@ function load() {
       youSecondaryColor: normalizeHexColor(p.youSecondaryColor) || "#254c52",
       habitTagColors: normalizeHabitTagColors(p.habitTagColors),
       timeOfDayColors: normalizeHabitTagColors(p.timeOfDayColors),
+      timeOfDayGroups: Array.isArray(p.timeOfDayGroups) ? p.timeOfDayGroups : [],
       scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
         ? TaskPointsCore.normalizeScoringSettings(p.scoringSettings || {})
         : (p.scoringSettings || {}),
