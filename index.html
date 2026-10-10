@@ -3357,6 +3357,12 @@ function load() {
         youPrimaryColor: "#1a383b",
         youSecondaryColor: "#254c52",
         habitTagColors: {},
+    timeOfDayColors: {},
+    timeOfDayGroups: [],
+      timeOfDayColors: {},
+      timeOfDayGroups: [],
+        timeOfDayColors: {},
+        timeOfDayGroups: [],
         scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
           ? TaskPointsCore.normalizeScoringSettings({})
           : {},
@@ -3429,6 +3435,10 @@ function load() {
       youPrimaryColor: "#1a383b",
       youSecondaryColor: "#254c52",
       habitTagColors: {},
+    timeOfDayColors: {},
+    timeOfDayGroups: [],
+      timeOfDayColors: {},
+      timeOfDayGroups: [],
       scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
         ? TaskPointsCore.normalizeScoringSettings({})
         : {}
@@ -4792,6 +4802,8 @@ function resetAll(){
     schedule:     [],
     projects:     [],
     habitTagColors: {},
+    timeOfDayColors: {},
+    timeOfDayGroups: [],
     scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
       ? TaskPointsCore.normalizeScoringSettings({})
       : {}
@@ -8777,6 +8789,23 @@ function renderVices(){
   const appendViceRow = createHabitWeekCompleteAppender(wrap);
 
   renderedViceRows.forEach(({ h, isWeeklyComplete }, index) => {
+    if (viceSortMode === 'tag' || viceSortMode === 'timeOfDay') {
+      const field = viceSortMode === 'tag' ? 'tag' : 'timeOfDay';
+      const label = String(h[field] || '').trim();
+      const previous = index > 0 ? String(renderedViceRows[index - 1].h[field] || '').trim() : null;
+      if (label !== previous) {
+        const header = document.createElement('div');
+        header.className = 'habitGroupTitle';
+        header.style.cssText = 'padding:8px 12px;margin-top:8px;border-radius:8px;font-weight:700;';
+        header.textContent = label || 'Ungrouped';
+        const color = viceSortMode === 'timeOfDay' ? normalizeHexColor(state.timeOfDayColors?.[label]) : getHabitTagColor(label);
+        if (color) {
+          header.style.background = `linear-gradient(135deg, ${color}, ${darkenHex(color, 0.35) || color})`;
+          header.style.color = getContrastText(color);
+        }
+        wrap.appendChild(header);
+      }
+    }
     h.doneKeys = Array.isArray(h.doneKeys) ? h.doneKeys : [];
     h.failedKeys = Array.isArray(h.failedKeys) ? h.failedKeys : [];
     const streak       = computeHabitStreak(h);
