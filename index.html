@@ -1623,7 +1623,7 @@ Nothing visible on the page is built here. === -->
   <button id="addHabitBtn" class="btn btn-primary btn-compact" type="button">+</button>
 
   <select id="habitsSortSelect" class="input habitsSortSelectCompact">
-    <option value="custom">Custom</option>
+    <option value="custom">Custom (Tag groups)</option><option value="tag">Group by Tag</option><option value="timeOfDay">Group by Time of Day</option>
     <option value="points">Point value</option>
     <option value="streak">Current streak</option>
     <option value="completion">% completion</option>
@@ -1663,7 +1663,7 @@ Nothing visible on the page is built here. === -->
   <div class="vicesControlsRow sectionHeaderControls vicesControlsRow--withTitle">
     <h2 id="vicesAnchor" class="sectionTitle sectionTitle--inline">Vices</h2>
 
-    <button id="addViceBtn" class="btn btn-primary btn-compact" type="button">+</button>
+    <button id="addViceBtn" class="btn btn-primary btn-compact" type="button">+</button><select id="vicesSortSelect" class="input habitsSortSelectCompact"><option value="custom">Custom</option><option value="tag">Group by Tag</option><option value="timeOfDay">Group by Time of Day</option></select>
 
     <button id="weekBackBtnVices" class="btn btn-secondary btn-compact" type="button">
       ◀︎ Week
@@ -2200,6 +2200,7 @@ function normalizeHabit(habit) {
   return {
     ...habit,
     tag: typeof habit.tag === 'string' ? habit.tag.trim() : '',
+    timeOfDay: typeof habit.timeOfDay === 'string' ? habit.timeOfDay.trim() : '',
     halfPointEnabled: habit.halfPointEnabled !== false,
     streakMultiplierEnabled: habit.streakMultiplierEnabled === true,
     streakMultiplierStartDateKey: validMultiplierStart,
@@ -2281,6 +2282,13 @@ function getHabitGroupStyleAttr(tag) {
   return ` style="background:linear-gradient(135deg, ${color} 0%, ${dark} 100%);border-color:${dark};color:${textColor};"`;
 }
 
+function getViceSortMode() { return $('vicesSortSelect')?.value || localStorage.getItem('taskpoints_vices_sort') || 'custom'; }
+function initViceSortControl() {
+  const sel = $('vicesSortSelect'); if (!sel) return;
+  const saved = localStorage.getItem('taskpoints_vices_sort');
+  if (saved && Array.from(sel.options).some(o => o.value === saved)) sel.value = saved;
+  sel.addEventListener('change', () => { localStorage.setItem('taskpoints_vices_sort', sel.value); renderVices(); });
+}
 function getHabitSortMode(){
   return ($('habitsSortSelect')?.value)
     || localStorage.getItem(HABITS_SORT_KEY)
@@ -3391,6 +3399,7 @@ function load() {
       youPrimaryColor: normalizeHexColor(p.youPrimaryColor) || "#1a383b",
       youSecondaryColor: normalizeHexColor(p.youSecondaryColor) || "#254c52",
       habitTagColors: normalizeHabitTagColors(p.habitTagColors),
+      timeOfDayColors: normalizeHabitTagColors(p.timeOfDayColors),
       scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
         ? TaskPointsCore.normalizeScoringSettings(p.scoringSettings || {})
         : (p.scoringSettings || {}),
@@ -4645,6 +4654,7 @@ function normalizeState(s) {
     projects:    Array.isArray(src.projects)    ? src.projects    : loadProjectsFromStorage(),
     notes: typeof src.notes === "string" ? src.notes : "",
     habitTagColors: normalizeHabitTagColors(src.habitTagColors),
+    timeOfDayColors: normalizeHabitTagColors(src.timeOfDayColors),
     scoringSettings: window.TaskPointsCore?.normalizeScoringSettings
       ? TaskPointsCore.normalizeScoringSettings(src.scoringSettings || {})
       : (src.scoringSettings || {}),
@@ -8068,6 +8078,17 @@ function sortHabitsForMode(habits, sortMode) {
 }
 
 function buildHabitRenderEntries(habits, sortMode) {
+  if (sortMode === 'timeOfDay' || sortMode === 'tag') {
+    const field = sortMode === 'timeOfDay' ? 'timeOfDay' : 'tag';
+    const groups = new Map(), singles = [];
+    sortHabitsForMode(habits.slice(), 'custom').forEach(h => {
+      const name = String(h[field] || '').trim();
+      if (!name) { singles.push({ type: 'single', habit: h }); return; }
+      if (!groups.has(name)) groups.set(name, []);
+      groups.get(name).push(h);
+    });
+    return { entries: [...Array.from(groups.keys()).sort((a,b) => a.localeCompare(b)).map(tag => ({ type: 'group', tag, habits: groups.get(tag) })), ...singles] };
+  }
   const tagCounts = new Map();
   habits.forEach(h => {
     const tag = (h.tag || '').trim();
@@ -8337,6 +8358,7 @@ const daysHtml = days.map(d => {
         <input class="input" data-field="name" value="${escapeHtml(h.name)}">
         <input class="input" data-field="points" type="number" value="${h.pointsPerDay||0}">
         <input class="input" data-field="tag" value="${escapeHtml(h.tag || '')}" placeholder="Tag">
+        <input class="input" data-field="time-of-day" value="${escapeHtml(h.timeOfDay || '')}" placeholder="Time of Day">
         <label class="text-xs muted flex flex-col gap-1">
           <span>Week complete at</span>
           <input class="input" data-field="days-per-complete-week" type="number" min="0" max="7" step="1" value="${Number.isFinite(Number(h.daysPerCompleteWeek)) ? Number(h.daysPerCompleteWeek) : ''}" placeholder="Days for complete week">
@@ -8567,7 +8589,7 @@ function renderHabits(){
     const rail = document.createElement('div');
     rail.className = 'habitGroupRail';
     if (isTaggedGroup) {
-      const color = getHabitTagColor(section.tag);
+      const color = sortMode === 'timeOfDay' ? normalizeHexColor(state.timeOfDayColors?.[section.tag]) : getHabitTagColor(section.tag);
       if (color) {
         const dark = darkenHex(color, 0.35) || color;
         rail.style.background = `linear-gradient(180deg, ${color} 0%, ${dark} 100%)`;
@@ -8743,6 +8765,11 @@ function renderVices(){
   }
   empty.classList.add('hidden');
 
+  const viceSortMode = getViceSortMode();
+  if (viceSortMode === 'timeOfDay' || viceSortMode === 'tag') {
+    const field = viceSortMode === 'timeOfDay' ? 'timeOfDay' : 'tag';
+    habits.sort((a,b) => String(a[field] || '\uffff').localeCompare(String(b[field] || '\uffff')));
+  }
   const renderedViceRows = habits.map(h => ({
     h,
     isWeeklyComplete: isHabitWeeklyCompleteForDays(h, days)
@@ -8791,6 +8818,7 @@ const daysHtml = days.map(d => {
           <input class="input" data-field="name" value="${escapeHtml(h.name)}">
           <input class="input" data-field="points" type="number" value="${h.pointsPerDay||0}">
           <input class="input" data-field="tag" value="${escapeHtml(h.tag || '')}" placeholder="Tag">
+        <input class="input" data-field="time-of-day" value="${escapeHtml(h.timeOfDay || '')}" placeholder="Time of Day">
 <label class="text-xs muted flex flex-col gap-1">
   <span>Week complete at</span>
   <input class="input" data-field="days-per-complete-week" type="number" min="0" max="7" step="1" value="${Number.isFinite(Number(h.daysPerCompleteWeek)) ? Number(h.daysPerCompleteWeek) : ''}" placeholder="Days for complete week">
@@ -8997,6 +9025,7 @@ function closeFlexModal() {
 function addHabit(){
   const name = $('habitName')?.value.trim() || '';
   const tag  = $('habitTag')?.value.trim() || '';
+  const timeOfDay = $('habitTimeOfDay')?.value.trim() || '';
   const pts  = Number($('habitPts')?.value)||0;
   const halfPointEnabled = $('habitHalfPointEnabledInput')?.checked !== false;
   const streakMultiplierEnabled = $('habitStreakMultiplierEnabledInput')?.checked === true;
@@ -9020,6 +9049,7 @@ function addHabit(){
     updatedAtISO: new Date().toISOString(),
     category: 'habit',
     tag,
+    timeOfDay,
     order: maxOrder + 1,
     halfPointEnabled,
     streakMultiplierEnabled,
@@ -9029,7 +9059,7 @@ function addHabit(){
 
   state.habits.push(h);
   save();
-  $('habitName').value=''; $('habitPts').value=''; if ($('habitTag')) $('habitTag').value='';
+  $('habitName').value=''; $('habitPts').value=''; if ($('habitTag')) $('habitTag').value=''; if ($('habitTimeOfDay')) $('habitTimeOfDay').value='';
     if ($('habitStreakMultiplierEnabledInput')) $('habitStreakMultiplierEnabledInput').checked = false;
   closeHabitModal();
 
@@ -9041,6 +9071,7 @@ function addHabit(){
 function addVice(){
   const name = $('viceName')?.value.trim() || '';
   const tag  = $('viceTag')?.value.trim() || '';
+  const timeOfDay = $('viceTimeOfDay')?.value.trim() || '';
   const pts  = Number($('vicePts')?.value)||0;
   const streakMultiplierEnabled = $('viceStreakMultiplierEnabledInput')?.checked === true;
   const streakMultiplierStartDateKey = streakMultiplierEnabled ? todayKey() : null;
@@ -9063,6 +9094,7 @@ function addVice(){
     updatedAtISO: new Date().toISOString(),
     category: 'vice',
     tag,
+    timeOfDay,
     order: maxOrder + 1,
     streakMultiplierEnabled,
     streakMultiplierStartDateKey
@@ -9131,6 +9163,7 @@ function saveHabitEdit(id,row){
   const nameInput=row.querySelector('input[data-field="name"]');
   const ptsInput=row.querySelector('input[data-field="points"]');
   const tagInput=row.querySelector('input[data-field="tag"]');
+  const timeOfDayInput=row.querySelector('input[data-field="time-of-day"]');
   const completeWeekInput = row.querySelector('input[data-field="days-per-complete-week"]');
   const halfPointEnabledInput = row.querySelector('input[data-field="half-point-enabled"]');
   const streakMultiplierEnabledInput = row.querySelector('input[data-field="streak-multiplier-enabled"]');
@@ -9161,6 +9194,7 @@ function saveHabitEdit(id,row){
   h.name = nameInput?.value.trim() || h.name;
   h.pointsPerDay = newPoints;
   if (tagInput) h.tag = tagInput.value.trim();
+  if (timeOfDayInput) h.timeOfDay = timeOfDayInput.value.trim();
   if (completeWeekInput) {
     const rawDaysPerCompleteWeek = completeWeekInput.value.trim();
     if (rawDaysPerCompleteWeek === '') {
@@ -14163,6 +14197,7 @@ try {
   
   initCaloriesDatePicker();
   initHabitSortControl();
+  initViceSortControl();
   initHomeTabs();
 updateWeekToggleButtons();
 updateFlexDayToggleButton();
@@ -14573,6 +14608,8 @@ function tpPerfMark(label) {
     <label class="grid gap-1 text-sm font-medium mt-3">
       Tag
       <input id="habitTag" class="input" placeholder="Tag">
+    </label><label class="grid gap-1 text-sm font-medium mt-3">Time of Day
+      <input id="habitTimeOfDay" class="input" placeholder="Custom time of day">
     </label>
 
     <label class="grid gap-1 text-sm font-medium mt-3">
@@ -14635,6 +14672,8 @@ function tpPerfMark(label) {
     <label class="grid gap-1 text-sm font-medium mt-3">
       Tag
       <input id="viceTag" class="input" placeholder="Tag">
+    </label><label class="grid gap-1 text-sm font-medium mt-3">Time of Day
+      <input id="viceTimeOfDay" class="input" placeholder="Custom time of day">
     </label>
 
     <label class="grid gap-1 text-sm font-medium mt-3">
