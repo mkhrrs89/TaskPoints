@@ -8272,7 +8272,21 @@ function computeCalLogBonusPoints(calorieEntries, settings) {
       ? storedPoints
       : (Number.isFinite(habitPoints) ? habitPoints * getHabitCompletionFraction(entry) : 0);
 
-    const multiplier = habitStreakMultiplierForDay(streakDay, dayKeyStr);
+    let multiplier = habitStreakMultiplierForDay(streakDay, dayKeyStr);
+    // Grandfather an active streak's multiplier as of Oct 10. Its first
+    // post-cutoff completion adds only the new day's tapered growth; it
+    // never retroactively reduces the multiplier already earned.
+    if (dayKeyStr >= HABIT_STREAK_TAPER_START_DATE_KEY) {
+      const cutoffStreak = getHabitStreakDayForKey(habit, '2026-10-10');
+      if (cutoffStreak > 0 && streakDay > cutoffStreak) {
+        const cutoffMultiplier = Math.pow(1.01, cutoffStreak - 1);
+        let growth = 1;
+        for (let day = cutoffStreak + 1; day <= streakDay; day += 1) {
+          growth *= day <= 100 ? 1.01 : day <= 200 ? 1.005 : 1.0025;
+        }
+        multiplier = cutoffMultiplier * growth;
+      }
+    }
     return roundPoints(basePoints * multiplier);
   }
 
