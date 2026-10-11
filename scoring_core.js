@@ -502,9 +502,11 @@
     return unpackTaskPointsStorageState(JSON.parse(decodedRaw) || fallback);
   }
 
-function buildOptimizedTaskPointsStorageRaw(state) {
-  const packedState = packTaskPointsStorageState(state);
-  const packedRawJson = JSON.stringify(packedState);
+function buildOptimizedTaskPointsStorageRaw(state, prepared = null) {
+  // Save callers may already have packed and serialized this exact candidate.
+  // Reuse that work instead of repeating the full history traversal.
+  const packedState = prepared ? prepared.packedState : packTaskPointsStorageState(state);
+  const packedRawJson = prepared ? prepared.packedRawJson : JSON.stringify(packedState);
 
   let compressedWrapperRaw = '';
   let useCompressed = false;
@@ -7340,7 +7342,7 @@ if (!userInitiatedSave && blockedUntil > Date.now()) {
           chosenChars: packedRawJson.length,
           chosenBytes: packedRawJson.length * 2
         }
-        : buildOptimizedTaskPointsStorageRaw(candidateWithSticky);
+        : buildOptimizedTaskPointsStorageRaw(candidateWithSticky, { packedState, packedRawJson });
       const packedCandidateBytes = storagePlan.packedRawChars * 2;
       const compressedCandidateBytes = storagePlan.compressedRawChars * 2;
       const chosenStorageBytes = storagePlan.chosenChars * 2;
