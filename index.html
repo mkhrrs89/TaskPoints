@@ -8181,7 +8181,12 @@ function getHabitCurrentStreakBonusText(h, streak) {
   const basePoints = Number(h.pointsPerDay) || 0;
   if (!basePoints) return '';
 
-  const multiplier = Math.pow(1.01, streakDay - 1);
+  const dayKeyStr = todayKey();
+  const multiplier = dayKeyStr < '2026-10-11'
+    ? Math.pow(1.01, streakDay - 1)
+    : Math.pow(1.01, Math.min(streakDay - 1, 99))
+      * Math.pow(1.005, Math.min(Math.max(streakDay - 100, 0), 100))
+      * Math.pow(1.0025, Math.max(streakDay - 200, 0));
   const bonus = basePoints * multiplier - basePoints;
   const text = formatHabitStreakBonusAmount(bonus);
 
