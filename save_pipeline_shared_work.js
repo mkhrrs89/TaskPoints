@@ -510,6 +510,9 @@
     const baseline = ensureBaseline();
     let synchronizedSides = 0;
     let scheduleCopies = 0;
+    // Collect the post-save baseline during the existing matchup traversal.
+    // This avoids another full traversal on successful saves that retain the candidate.
+    const nextBaseline = new Map();
 
     (Array.isArray(state.matchups) ? state.matchups : []).forEach((matchup, index) => {
       if (!matchup) return;
@@ -518,6 +521,7 @@
         if (!isYou(matchup[fields.playerIdName]) || !finite(matchup[fields.primaryName])) return;
         const key = `${matchupIdentity(matchup, index)}|${side}`;
         const primary = Number(matchup[fields.primaryName]);
+        nextBaseline.set(key, primary);
         const priorPrimary = baseline.get(key);
         const isNewSide = !baseline.has(key);
         const primaryChanged = finite(priorPrimary) && Math.abs(primary - Number(priorPrimary)) > EPSILON;
@@ -530,7 +534,7 @@
       });
     });
 
-    return { state, synchronizedSides, scheduleCopies };
+    return { state, synchronizedSides, scheduleCopies, nextBaseline };
   }
 
   function saveSucceeded(result) {
@@ -543,7 +547,9 @@
     const result = originalSaveStateSnapshot(sync.state, options);
     if (saveSucceeded(result)) {
       const savedState = result?.state && typeof result.state === 'object' ? result.state : sync.state;
-      if (Array.isArray(savedState?.matchups)) baselineBySide = buildBaseline(savedState);
+      if (Array.isArray(savedState?.matchups)) {
+        baselineBySide = savedState === sync.state ? sync.nextBaseline : buildBaseline(savedState);
+      }
       automaticSynchronizedSides += sync.synchronizedSides;
       automaticScheduleCopies += sync.scheduleCopies;
     }
