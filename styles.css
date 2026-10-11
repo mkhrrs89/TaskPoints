@@ -7394,6 +7394,17 @@ metal background attached only to the day-bubble row.
   min-width:0;
 }
 
+/* The first blank teal rail must begin level with its first silver
+   completed-week plate, not at the group's outer top boundary.
+   Keep the grid/row geometry unchanged; only delay the rail paint. */
+#habitsList.habitsList--rail-layout > .habitGroup--untagged:first-child .habitGroupRail{
+  background:linear-gradient(to bottom,
+    transparent 0,
+    transparent 8px,
+    #254c52 8px,
+    #1a383b 100%);
+}
+
 /* A blank-rail section immediately after a named tag group should begin
    directly at the shared boundary instead of inserting another top buffer. */
 .habitGroup--tagged + .habitGroup--untagged .habitGroupBody{
