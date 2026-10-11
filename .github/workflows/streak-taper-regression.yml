@@ -1,0 +1,17 @@
+name: Streak taper regression
+on:
+  push:
+    branches: [test/streak-taper-oct11-regression]
+  pull_request:
+    paths:
+      - 'scoring_core.js'
+      - 'tests/streak_taper_oct11_regression.test.js'
+jobs:
+  streak-taper:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test tests/streak_taper_oct11_regression.test.js
