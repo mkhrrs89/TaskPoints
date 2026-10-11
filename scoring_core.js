@@ -181,6 +181,17 @@
   // browsers. Plain and packed JSON remain supported by the reader for older saves.
   const TASKPOINTS_ENABLE_COMPRESSED_STORAGE = true;
   const HABIT_STREAK_MULTIPLIER_RATE = 1.01;
+  // Historical completions must retain the original 1% compounded formula.
+  const HABIT_STREAK_TAPER_START_DATE_KEY = '2026-10-11';
+  function habitStreakMultiplierForDay(streakDay, completionDayKey) {
+    const days = Math.max(1, Math.floor(Number(streakDay) || 1));
+    if (completionDayKey < HABIT_STREAK_TAPER_START_DATE_KEY) {
+      return Math.pow(HABIT_STREAK_MULTIPLIER_RATE, days - 1);
+    }
+    return Math.pow(1.01, Math.min(days - 1, 99))
+      * Math.pow(1.005, Math.min(Math.max(days - 100, 0), 100))
+      * Math.pow(1.0025, Math.max(days - 200, 0));
+  }
   
   // UTF-16 localStorage-safe LZ compression derived from lz-string 1.4.4
   // (Pieroxy, MIT License): https://github.com/pieroxy/lz-string
@@ -8261,7 +8272,7 @@ function computeCalLogBonusPoints(calorieEntries, settings) {
       ? storedPoints
       : (Number.isFinite(habitPoints) ? habitPoints * getHabitCompletionFraction(entry) : 0);
 
-    const multiplier = Math.pow(HABIT_STREAK_MULTIPLIER_RATE, streakDay - 1);
+    const multiplier = habitStreakMultiplierForDay(streakDay, dayKeyStr);
     return roundPoints(basePoints * multiplier);
   }
 
