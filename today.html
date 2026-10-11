@@ -335,7 +335,7 @@ function loadTodayDb() {
   const raw = localStorage.getItem(TODAY_STORE_KEY);
   if (!raw) return { version: 1, tasksByDay: {}, notesByDay: {}, selectedHabitIdsByDay: {}, orderByDay: {} };
   try {
-    const parsed = TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY, {});
+    const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object') throw new Error('bad');
     return {
       version: 1,
@@ -596,7 +596,7 @@ const habits = getActiveHabits().filter(h => {
         const perfLabel = window.TP_DEBUG_PERF ? 'renderTodayList' : null;
         if (perfLabel) console.time(perfLabel);
         try {
-          loadApp();
+          // Use the already loaded state; a full reload on every interaction blocks the UI.
           const dayKey = dayKeyNow();
           ensureAutoTasks(dayKey);
 
