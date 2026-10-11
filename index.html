@@ -7180,8 +7180,12 @@ function bindHomeGraphInteractions() {
       homeGraphScrollRaf = null;
       const width = viewport.clientWidth || 1;
       const nextIndex = Math.round(viewport.scrollLeft / width);
+      const enteredLiveDiffPanel = nextIndex === 3 && homeGraphPanelIndex !== 3;
       updateHomeGraphDots(nextIndex);
-      if (nextIndex === 3) {
+      // A single swipe can emit many scroll frames while panel 3 is visible.
+      // Capture on entry, not every frame: the five-minute timer and initial
+      // capture still provide the regular live-differential history samples.
+      if (enteredLiveDiffPanel) {
         captureLiveDiffPoint();
       }
     });
