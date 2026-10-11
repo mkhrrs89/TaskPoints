@@ -8182,11 +8182,26 @@ function getHabitCurrentStreakBonusText(h, streak) {
   if (!basePoints) return '';
 
   const dayKeyStr = todayKey();
-  const multiplier = dayKeyStr < '2026-10-11'
+  let multiplier = dayKeyStr < '2026-10-11'
     ? Math.pow(1.01, streakDay - 1)
     : Math.pow(1.01, Math.min(streakDay - 1, 99))
       * Math.pow(1.005, Math.min(Math.max(streakDay - 100, 0), 100))
       * Math.pow(1.0025, Math.max(streakDay - 200, 0));
+  if (dayKeyStr >= '2026-10-11') {
+    const done = new Set(Array.isArray(h.doneKeys) ? h.doneKeys : []);
+    let cutoffStreak = 0;
+    let cursor = new Date('2026-10-10T12:00:00Z');
+    while (done.has(cursor.toISOString().slice(0, 10)) && cutoffStreak < 5000) {
+      cutoffStreak += 1;
+      cursor.setUTCDate(cursor.getUTCDate() - 1);
+    }
+    if (cutoffStreak && streakDay > cutoffStreak) {
+      multiplier = Math.pow(1.01, cutoffStreak - 1);
+      for (let day = cutoffStreak + 1; day <= streakDay; day++) {
+        multiplier *= day <= 100 ? 1.01 : day <= 200 ? 1.005 : 1.0025;
+      }
+    }
+  }
   const bonus = basePoints * multiplier - basePoints;
   const text = formatHabitStreakBonusAmount(bonus);
 
