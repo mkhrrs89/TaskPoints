@@ -181,6 +181,18 @@
   // browsers. Plain and packed JSON remain supported by the reader for older saves.
   const TASKPOINTS_ENABLE_COMPRESSED_STORAGE = true;
   const HABIT_STREAK_MULTIPLIER_RATE = 1.01;
+  // Historical completions must retain the original 1% compounded formula.
+  const HABIT_STREAK_TAPER_START_DATE_KEY = '2026-10-11';
+  function habitStreakMultiplierForDay(streakDay, completionDayKey) {
+    const days = Math.max(1, Math.floor(Number(streakDay) || 1));
+    if (completionDayKey < HABIT_STREAK_TAPER_START_DATE_KEY) {
+      return Math.pow(HABIT_STREAK_MULTIPLIER_RATE, days - 1);
+    }
+    return Math.pow(1.01, Math.min(days - 1, 99))
+      * Math.pow(1.005, Math.min(Math.max(days - 100, 0), 100))
+      * Math.pow(1.0025, Math.max(days - 200, 0));
+  }
+  
   
   // UTF-16 localStorage-safe LZ compression derived from lz-string 1.4.4
   // (Pieroxy, MIT License): https://github.com/pieroxy/lz-string
@@ -491,9 +503,9 @@
     return unpackTaskPointsStorageState(JSON.parse(decodedRaw) || fallback);
   }
 
-function buildOptimizedTaskPointsStorageRaw(state) {
-  const packedState = packTaskPointsStorageState(state);
-  const packedRawJson = JSON.stringify(packedState);
+function buildOptimizedTaskPointsStorageRaw(state, prepared = null) {
+  const packedState = prepared ? prepared.packedState : packTaskPointsStorageState(state);
+  const packedRawJson = prepared ? prepared.packedRawJson : JSON.stringify(packedState);
 
   let compressedWrapperRaw = '';
   let useCompressed = false;
@@ -7121,7 +7133,7 @@ if (!userInitiatedSave && blockedUntil > Date.now()) {
           chosenChars: packedRawJson.length,
           chosenBytes: packedRawJson.length * 2
         }
-        : buildOptimizedTaskPointsStorageRaw(candidateWithSticky);
+        : buildOptimizedTaskPointsStorageRaw(candidateWithSticky, { packedState, packedRawJson });
       const packedCandidateBytes = storagePlan.packedRawChars * 2;
       const compressedCandidateBytes = storagePlan.compressedRawChars * 2;
       const chosenStorageBytes = storagePlan.chosenChars * 2;
@@ -8053,7 +8065,21 @@ function computeCalLogBonusPoints(calorieEntries, settings) {
       ? storedPoints
       : (Number.isFinite(habitPoints) ? habitPoints * getHabitCompletionFraction(entry) : 0);
 
-    const multiplier = Math.pow(HABIT_STREAK_MULTIPLIER_RATE, streakDay - 1);
+    let multiplier = habitStreakMultiplierForDay(streakDay, dayKeyStr);
+    // Grandfather an active streak's multiplier as of Oct 10. Its first
+    // post-cutoff completion adds only the new day's tapered growth; it
+    // never retroactively reduces the multiplier already earned.
+    if (dayKeyStr >= HABIT_STREAK_TAPER_START_DATE_KEY) {
+      const cutoffStreak = getHabitStreakDayForKey(habit, '2026-10-10');
+      if (cutoffStreak > 0 && streakDay > cutoffStreak) {
+        const cutoffMultiplier = Math.pow(1.01, cutoffStreak - 1);
+        let growth = 1;
+        for (let day = cutoffStreak + 1; day <= streakDay; day += 1) {
+          growth *= day <= 100 ? 1.01 : day <= 200 ? 1.005 : 1.0025;
+        }
+        multiplier = cutoffMultiplier * growth;
+      }
+    }
     return roundPoints(basePoints * multiplier);
   }
 
