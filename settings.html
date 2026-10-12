@@ -103,13 +103,11 @@
 
         <div class="space-y-3 pt-4">
           <div class="flex flex-wrap gap-2 items-center">
-            <label class="btn btn-teal btn-toolbar nav-btn cursor-pointer">Import JSON
-              <input id="settingsImportInput" type="file" accept="application/json,application/zip,.zip" class="hidden" />
-            </label>
+            <button id="settingsImportPickerBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Import JSON</button>
+            <input id="settingsImportInput" type="file" accept="application/json,application/zip,.zip" class="hidden" />
             <button id="settingsImportPasteBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Paste JSON</button>
-            <label class="btn btn-teal btn-toolbar nav-btn cursor-pointer">Merge Backup
-              <input id="settingsMergeBackupInput" type="file" accept="application/json,application/zip,.zip" class="hidden" />
-            </label>
+            <button id="settingsMergeBackupPickerBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Merge Backup</button>
+            <input id="settingsMergeBackupInput" type="file" accept="application/json,application/zip,.zip" class="hidden" />
             <button type="button" class="btn btn-ghost btn-toolbar nav-btn" data-export-images>Backup + Images</button>
             <button id="settingsExportMatchupsBtn" class="btn btn-ghost btn-toolbar nav-btn" type="button">
               Export Matchups + Player History (CSV)
@@ -593,6 +591,16 @@
         </div>
       </details>
 
+      <details class="glass space-y-3" id="timeOfDayColorsSection">
+        <summary class="flex items-center justify-between gap-3 flex-wrap cursor-pointer">
+          <div><div class="text-lg font-semibold">Time of Day groups and colors</div>
+          <div class="muted text-sm">Create, rename, and color independent Habit/Vice Time of Day groups.</div></div>
+        </summary>
+        <div class="space-y-3 pt-3">
+          <div class="flex flex-wrap gap-2"><input id="newTimeOfDayGroup" class="input" placeholder="New Time of Day group"><button type="button" id="addTimeOfDayGroup" class="btn btn-teal">Add Group</button></div>
+          <div id="timeOfDayColorsList" class="habitTagColorGrid"></div>
+        </div>
+      </details>
       <details class="glass space-y-3" id="habitTagColorsSection">
         <summary class="flex items-center justify-between gap-3 flex-wrap cursor-pointer">
           <div>
@@ -725,7 +733,8 @@
       if (!habit || typeof habit !== "object") return habit;
       return {
         ...habit,
-        tag: typeof habit.tag === "string" ? habit.tag.trim() : ""
+        tag: typeof habit.tag === "string" ? habit.tag.trim() : "",
+        timeOfDay: typeof habit.timeOfDay === "string" ? habit.timeOfDay.trim() : ""
       };
     }
 
@@ -751,6 +760,8 @@
         youSecondaryColor: normalizeHexColor(src.youSecondaryColor) || "#254c52",
         notes: typeof src.notes === "string" ? src.notes : "",
         habitTagColors: normalizeHabitTagColors(src.habitTagColors),
+        timeOfDayColors: normalizeHabitTagColors(src.timeOfDayColors),
+        timeOfDayGroups: Array.isArray(src.timeOfDayGroups) ? [...new Set(src.timeOfDayGroups.map(x => String(x || "").trim()).filter(Boolean))] : [],
         scoringSettings: (window.TaskPointsCore?.normalizeScoringSettings)
           ? TaskPointsCore.normalizeScoringSettings(src.scoringSettings || {})
           : (src.scoringSettings || {}),
@@ -1113,7 +1124,47 @@ ${b}`;
       return false;
     }
 
-    function applyImportedState(data) {
+    function assertCommittedSettingsImport(result, label = "Import") {
+      if (!result || result.blocked || result.skipped || result.blockedByQuotaCircuit || !result.state) {
+        const reason = result?.reason || result?.skipReason || "the state snapshot was not committed";
+        throw new Error(`${label} failed: ${reason}`);
+      }
+      return result;
+    }
+
+    async function flushSettingsImportPersistence() {
+      const core = window.TaskPointsCore;
+      if (!core) return;
+      if (typeof core.flushPhase4PrimaryWrites === "function") {
+        await core.flushPhase4PrimaryWrites();
+      }
+      if (typeof core.flushPhase5ANativeSnapshotWrites === "function") {
+        await core.flushPhase5ANativeSnapshotWrites();
+      }
+    }
+
+    function openSettingsFilePicker(input) {
+      if (!(input instanceof HTMLInputElement)) return;
+      try {
+        if (typeof input.showPicker === "function") {
+          input.showPicker();
+          return;
+        }
+      } catch (error) {
+        console.warn("Native file picker activation failed; falling back to input.click().", error);
+      }
+      input.click();
+    }
+
+    function bindSettingsFilePicker(buttonId, inputId) {
+      const button = document.getElementById(buttonId);
+      const input = document.getElementById(inputId);
+      if (!(button instanceof HTMLButtonElement) || !(input instanceof HTMLInputElement) || button.dataset.tpImportPickerBound === "1") return;
+      button.dataset.tpImportPickerBound = "1";
+      button.addEventListener("click", () => openSettingsFilePicker(input));
+    }
+
+    async function applyImportedState(data) {
       const isFullBackup = data && data.exportType === "taskpoints_full_backup" && data.state;
       const root =
         (data && Array.isArray(data.tasks) && Array.isArray(data.completions)) ? data :
@@ -1152,27 +1203,33 @@ ${b}`;
       if (!Object.prototype.hasOwnProperty.call(root, "scoringSettings")) {
   delete normalized.scoringSettings;
 }
+      let importSaveResult = null;
       if (window.TaskPointsCore?.saveValidatedSnapshot) {
-        TaskPointsCore.saveValidatedSnapshot(normalized, {
+        importSaveResult = TaskPointsCore.saveValidatedSnapshot(normalized, {
           storageKey: SETTINGS_STORAGE_KEY,
           allowScoringSettingsOverwrite: false,
           allowHabitTagColorReset: true,
           allowStickyOverwriteKeys: ["youImageId", "youName", "youPrimaryColor", "youSecondaryColor", "habitTagColors"],
           allowDestructiveOverwrite: true,
           source: "settings-import",
-          immediateWrite: true
+          immediateWrite: true,
+          userInitiated: true
         });
       } else if (window.TaskPointsCore?.saveStateSnapshot) {
-        TaskPointsCore.saveStateSnapshot(normalized, {
+        importSaveResult = TaskPointsCore.saveStateSnapshot(normalized, {
           storageKey: SETTINGS_STORAGE_KEY,
           allowScoringSettingsOverwrite: false,
           allowHabitTagColorReset: true,
           allowStickyOverwriteKeys: ["youImageId", "youName", "youPrimaryColor", "youSecondaryColor", "habitTagColors"],
-          immediateWrite: true
+          allowDestructiveOverwrite: true,
+          source: "settings-import",
+          immediateWrite: true,
+          userInitiated: true
         });
       } else {
-        console.warn("settings import skipped localStorage write; TaskPointsCore missing.");
+        throw new Error("TaskPointsCore save helper is unavailable.");
       }
+      assertCommittedSettingsImport(importSaveResult);
       if (importedNotesPayload != null) {
         applyImportedNotesPayload(importedNotesPayload, {
           source: "settings-full-import",
@@ -1185,7 +1242,23 @@ ${b}`;
           localStorage.setItem("tp_projects_v1", incomingProjects);
         }
       }
-      alert("Import complete! Reload any open TaskPoints tabs to see the changes.");
+      await flushSettingsImportPersistence();
+
+      const persistedImport = TaskPointsCore.readTaskPointsStoredState(SETTINGS_STORAGE_KEY, null);
+      if (!persistedImport || !Array.isArray(persistedImport.tasks) || !Array.isArray(persistedImport.completions)) {
+        throw new Error("Import verification failed after save.");
+      }
+      // Verify the imported records, not merely the presence of valid arrays.
+      // A stale storage mirror can otherwise make an unchanged save look successful.
+      const recordSignature = (records) => JSON.stringify(records);
+      for (const key of ["tasks", "completions", "habits", "players", "flexActions", "gameHistory", "matchups", "schedule", "seasonHistory"]) {
+        if (!Array.isArray(normalized[key])) continue;
+        if (!Array.isArray(persistedImport[key]) || recordSignature(persistedImport[key]) !== recordSignature(normalized[key])) {
+          throw new Error(`Import verification failed: saved ${key} records do not match the selected backup. Your current data may not have been replaced. Export a safety backup before retrying.`);
+        }
+      }
+
+      alert("Import verified! Reload any open TaskPoints tabs to see the changes.");
     }
 
     function isZipFile(file) {
@@ -1282,47 +1355,33 @@ ${b}`;
       return manifest;
     }
 
-    function handleSettingsFile(ev) {
+    async function handleSettingsFile(ev) {
       const file = ev.target.files?.[0];
       if (!file) return;
 
-      if (isZipFile(file)) {
-        importBackupZip(file).then((manifest) => {
-          applyImportedState(manifest);
-        }).catch((err) => {
-          console.error("Import failed", err);
-          alert("Import failed. Please confirm the zip was exported from TaskPoints.");
-        }).finally(() => {
-          ev.target.value = "";
-        });
-        return;
+      try {
+        const parsed = isZipFile(file)
+          ? await importBackupZip(file)
+          : JSON.parse(await file.text());
+        await applyImportedState(parsed);
+      } catch (err) {
+        console.error("Import failed", err);
+        alert(`Import failed: ${err?.message || "Please confirm the file is a valid TaskPoints backup."}`);
+      } finally {
+        ev.target.value = "";
       }
-
-      const reader = new FileReader();
-      reader.onload = () => {
-        try {
-          const parsed = JSON.parse(String(reader.result));
-          applyImportedState(parsed);
-        } catch (err) {
-          console.error("Import failed", err);
-          alert("Import failed. Please confirm the file is valid TaskPoints JSON.");
-        }
-      };
-
-      reader.readAsText(file);
-      ev.target.value = "";
     }
 
-    function handleSettingsPaste() {
+    async function handleSettingsPaste() {
       const txt = prompt("Paste TaskPoints JSON:");
       if (!txt) return;
 
       try {
         const parsed = JSON.parse(txt);
-        applyImportedState(parsed);
+        await applyImportedState(parsed);
       } catch (err) {
         console.error("Paste import failed", err);
-        alert("The text is not valid JSON. Please try again.");
+        alert(`Paste import failed: ${err?.message || "Please try again."}`);
       }
     }
 
@@ -1507,15 +1566,20 @@ ${summaryWithNotes}`)) return;
           }
           notesRestored = applyNotesRestore(mode, backupNotes);
         }
+        let mergeSaveResult = null;
         if (window.TaskPointsCore?.saveStateSnapshot) {
-          TaskPointsCore.saveStateSnapshot(mergedState, {
+          mergeSaveResult = TaskPointsCore.saveStateSnapshot(mergedState, {
             storageKey: SETTINGS_STORAGE_KEY,
             immediateWrite: true,
+            userInitiated: true,
             source: 'settings-merge-backup',
             limits: { allowHistoryPrune: false, allowCompletionPrune: false }
           });
-        } else {
+          assertCommittedSettingsImport(mergeSaveResult, "Merge");
+        } else if (window.TaskPointsCore?.writeTaskPointsStoredState) {
           TaskPointsCore.writeTaskPointsStoredState(mergedState, { storageKey: SETTINGS_STORAGE_KEY });
+        } else {
+          throw new Error("TaskPointsCore save helper is unavailable.");
         }
         if (notesRestored) {
           applyImportedNotesPayload(localStorage.getItem("taskpoints_notes_v1") || "", {
@@ -1523,6 +1587,8 @@ ${summaryWithNotes}`)) return;
             allowEmptyReplace: true
           });
         }
+
+        await flushSettingsImportPersistence();
 
         const saved = TaskPointsCore.readTaskPointsStoredState(SETTINGS_STORAGE_KEY, {});
         console.debug('[merge backup] after save verification', {
@@ -2140,6 +2206,91 @@ ${summaryWithNotes}`)) return;
       } finally {
         if (perfLabel) console.timeEnd(perfLabel);
       }
+    }
+
+    function saveTimeOfDayConfiguration(state, reason) {
+      const result = saveSettingsState(state, { immediateWrite: true, allowDestructiveOverwrite: true, source: reason });
+      const check = loadSettingsState();
+      if (JSON.stringify(check.timeOfDayColors || {}) !== JSON.stringify(state.timeOfDayColors || {}) ||
+          JSON.stringify(check.timeOfDayGroups || []) !== JSON.stringify(state.timeOfDayGroups || [])) {
+        alert("Time of Day settings could not be verified in storage. Please export a backup and try again.");
+      }
+      return result;
+    }
+
+    function renderTimeOfDayColors() {
+      const list = document.getElementById("timeOfDayColorsList");
+      if (!list) return;
+      const state = loadSettingsState();
+      const groups = [...new Set([...(state.timeOfDayGroups || []),
+        ...Object.keys(state.timeOfDayColors || {}),
+        ...(state.habits || []).map(h => String(h.timeOfDay || "").trim()).filter(Boolean)])].sort((a,b) => a.localeCompare(b));
+      list.replaceChildren();
+      for (const group of groups) {
+        const row = document.createElement("div");
+        row.className = "habitTagColorCard";
+        const title = document.createElement("input");
+        title.className = "input habitTagColorName";
+        title.value = group;
+        title.setAttribute("aria-label", "Rename Time of Day group");
+        const color = document.createElement("input");
+        color.type = "color"; color.className = "habitTagColorPicker";
+        color.value = normalizeHexColor(state.timeOfDayColors?.[group]) || "#ffffff";
+        const hex = document.createElement("input");
+        hex.className = "input habitTagColorHex"; hex.placeholder = "#HEXCODE";
+        hex.value = normalizeHexColor(state.timeOfDayColors?.[group]) || "";
+        const remove = document.createElement("button");
+        remove.type = "button"; remove.className = "habitTagColorDelete"; remove.textContent = "Delete";
+        row.append(title,color,hex,remove); list.appendChild(row);
+        function changeColor(value) {
+          const next = loadSettingsState();
+          next.timeOfDayColors = { ...(next.timeOfDayColors || {}) };
+          const normalized = normalizeHexColor(value);
+          if (normalized) next.timeOfDayColors[group] = normalized;
+          else delete next.timeOfDayColors[group];
+          next.timeOfDayGroups = [...new Set([...(next.timeOfDayGroups || []),group])];
+          saveTimeOfDayConfiguration(next, "settings-time-of-day-color");
+        }
+        color.addEventListener("change", () => { hex.value = color.value; changeColor(color.value); });
+        hex.addEventListener("change", () => {
+          if (hex.value.trim() && !normalizeHexColor(hex.value)) { alert("Enter a valid hex color."); return; }
+          if (hex.value.trim()) color.value = normalizeHexColor(hex.value);
+          changeColor(hex.value.trim());
+        });
+        title.addEventListener("change", () => {
+          const renamed = title.value.trim();
+          if (!renamed || renamed === group) { title.value = group; return; }
+          const next = loadSettingsState();
+          next.timeOfDayGroups = [...new Set([...(next.timeOfDayGroups || []).filter(g => g !== group),renamed])];
+          next.habits = (next.habits || []).map(h => h.timeOfDay === group ? {...h,timeOfDay:renamed} : h);
+          next.timeOfDayColors = {...(next.timeOfDayColors || {})};
+          if (next.timeOfDayColors[group]) next.timeOfDayColors[renamed] = next.timeOfDayColors[group];
+          delete next.timeOfDayColors[group];
+          saveTimeOfDayConfiguration(next, "settings-time-of-day-rename"); renderTimeOfDayColors();
+        });
+        remove.addEventListener("click", () => {
+          if (!confirm('Delete Time of Day group "' + group + '"? Assigned habits and vices will become ungrouped; no items or history will be deleted.')) return;
+          const next = loadSettingsState();
+          next.timeOfDayGroups = (next.timeOfDayGroups || []).filter(g => g !== group);
+          next.habits = (next.habits || []).map(h => h.timeOfDay === group ? {...h,timeOfDay:""} : h);
+          next.timeOfDayColors = {...(next.timeOfDayColors || {})};
+          delete next.timeOfDayColors[group];
+          saveTimeOfDayConfiguration(next, "settings-time-of-day-delete"); renderTimeOfDayColors();
+        });
+      }
+    }
+
+    function initializeTimeOfDayControls() {
+      document.getElementById("addTimeOfDayGroup")?.addEventListener("click", () => {
+        const input = document.getElementById("newTimeOfDayGroup");
+        const group = input?.value.trim();
+        if (!group) return;
+        const next = loadSettingsState();
+        next.timeOfDayGroups = [...new Set([...(next.timeOfDayGroups || []), group])];
+        next.timeOfDayColors = {...(next.timeOfDayColors || {})};
+        saveTimeOfDayConfiguration(next, "settings-time-of-day-add");
+        input.value = ""; renderTimeOfDayColors();
+      });
     }
 
     function renderHabitTagColors() {
@@ -4720,6 +4871,8 @@ rows.push([
       document.getElementById('settingsImportInput')?.addEventListener('change', handleSettingsFile);
       document.getElementById('settingsImportPasteBtn')?.addEventListener('click', handleSettingsPaste);
       document.getElementById('settingsMergeBackupInput')?.addEventListener('change', handleMergeBackupFile);
+      bindSettingsFilePicker('settingsImportPickerBtn', 'settingsImportInput');
+      bindSettingsFilePicker('settingsMergeBackupPickerBtn', 'settingsMergeBackupInput');
       document.getElementById('settingsResetGameStatsBtn')?.addEventListener('click', handleSettingsResetGameStats);
       document.getElementById('settingsClearAllSkillsBtn')?.addEventListener('click', handleClearAllSkills);
       document.getElementById('settingsResetBtn')?.addEventListener('click', handleSettingsReset);
@@ -4825,6 +4978,8 @@ rows.push([
       missingScoreSaveBtn?.addEventListener("click", applyMissingScoreEntry);
       scheduleRender(renderScoringSettings);
       scheduleRender(renderHabitTagColors);
+      scheduleRender(renderTimeOfDayColors);
+      initializeTimeOfDayControls();
       scheduleRender(renderHabitCalendarSelector);
       scheduleRender(renderStorageHealthPanel);
       scheduleRender(renderHealthDataManager);
