@@ -516,7 +516,13 @@
           } catch (_) {}
         }
 
-        return round2(base * Math.pow(1.01, Math.max(0, streak.days - 1)) - base);
+        const n = streak.days;
+        const multiplier = streak.endKey < '2026-10-11'
+          ? Math.pow(1.01, Math.max(0, n - 1))
+          : Math.pow(1.01, Math.min(n - 1, 99))
+            * Math.pow(1.005, Math.min(Math.max(n - 100, 0), 100))
+            * Math.pow(1.0025, Math.max(n - 200, 0));
+        return round2(base * multiplier - base);
       }
 
       function makeRow(habit, streakDays, endKey, state, bonusStreakDays = streakDays, bonusEndKey = endKey) {
