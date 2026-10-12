@@ -73,3 +73,9 @@ test('untagged habits start flush when they immediately follow a named tag group
   assert.match(styles, /\.habitGroup--tagged \+ \.habitGroup--untagged \.habitGroupBody\{[\s\S]*?padding-top:0;/);
   assert.match(styles, /\.habitGroup--rail-layout \.habitGroupBody\{[\s\S]*?padding:8px 0;/);
 });
+
+
+test('mobile Habit weekday labels align to the post-rail bubble columns', () => {
+  assert.match(styles, /@media \(max-width:640px\)\{[\s\S]*?#habitWeekLabels\{[\s\S]*?box-sizing:border-box;[\s\S]*?width:100%;[\s\S]*?padding-left:26px;/);
+  assert.doesNotMatch(styles, /#viceWeekLabels\{[\s\S]*?padding-left:26px;/);
+});
