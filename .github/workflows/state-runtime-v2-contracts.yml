@@ -48,6 +48,9 @@ jobs:
       - name: Run V2 serializer ordering contract
         run: node --test tests/state_runtime_v2_serialization_guard_contract.test.js
 
+      - name: Verify Main/V2 reconciliation and safety guards
+        run: node --test tests/state_runtime_v2_main_reconciliation_contract.test.js
+
       - name: Run V2 core storage contracts
         run: >-
           node --test
