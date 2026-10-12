@@ -8,7 +8,7 @@ const loaderSource = fs.readFileSync(path.join(__dirname, '..', 'indexeddb_requa
 
 test('mobile floating alert islands align to the former header-nav row', () => {
   assert.match(moduleSource, /HEADER_ROW_SELECTOR = '\.header-nav'/);
-  assert.match(moduleSource, /documentRowCenterY\(row\)/);
+  assert.match(moduleSource, /viewportRowCenterY/);
   assert.match(moduleSource, /rect\.top \+ scrollY \+ \(rect\.height \/ 2\)/);
   assert.match(moduleSource, /centerFixedElementOnDocumentY\(\s*orange,/);
 });
