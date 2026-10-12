@@ -1821,6 +1821,14 @@ body {
 
 .sectionDivider{margin:18px 0 8px;border-top:1px dashed var(--border);padding-top:8px;font-weight:700;opacity:.9}
 
+/* App-wide iOS gesture policy: keep normal scrolling + pinch zoom, but never
+   treat two quick taps as a browser zoom gesture. Specific drag/scroll
+   surfaces can still override this with their own touch-action rules. */
+html,
+body{
+  touch-action: manipulation;
+}
+
 .task-date-group-header{
   display:flex;
   align-items:center;
@@ -7304,6 +7312,17 @@ metal background attached only to the day-bubble row.
   width:calc(100% + 32px);
 }
 
+/* Weekday labels live inside the card's normal 16px inset, while grouped
+   habit bubbles begin after the rail + row padding. Shift only the Habit
+   labels by that difference so Mon-Sun centers match the seven bubbles. */
+@media (max-width:640px){
+  #habitWeekLabels{
+    box-sizing:border-box;
+    width:100%;
+    padding-left:26px; /* 34px rail + 8px row pad - 16px card inset */
+  }
+}
+
 .habitGroup.habitGroup--rail-layout{
   --habit-group-rail-width: 40px;
   position:relative;
@@ -7373,6 +7392,13 @@ metal background attached only to the day-bubble row.
   gap:.5rem;
   padding:8px 0;
   min-width:0;
+}
+
+/* Remove the unused top inset on the first untagged section.
+   The teal rail and the first silver completed-week plate now both begin
+   at the section's top boundary, without moving later rows or controls. */
+#habitsList.habitsList--rail-layout > .habitGroup--untagged:first-child .habitGroupBody{
+  padding-top:0;
 }
 
 /* A blank-rail section immediately after a named tag group should begin
