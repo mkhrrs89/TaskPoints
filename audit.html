@@ -3503,6 +3503,29 @@ if (!dripSchedule) {
         });
       }
 
+      // Read-only configuration check for the silver completed-week indicator.
+      // A threshold must be a whole number of days between 1 and 7.
+      const activeHabits = (Array.isArray(state?.habits) ? state.habits : [])
+        .filter(h => h && (h.category || 'habit') === 'habit' && !h.retired);
+      const invalidWeekTargets = activeHabits.filter(h => {
+        const raw = h.daysPerCompleteWeek;
+        const value = Number(raw);
+        return raw == null || String(raw).trim() === '' ||
+          !Number.isInteger(value) || value < 1 || value > 7;
+      });
+      checks.push({
+        id: 'habit-weekly-completion-targets',
+        title: 'Habit weekly completion targets',
+        section: 'Habits',
+        status: invalidWeekTargets.length ? 'WARN' : 'PASS',
+        expected: 'Every active habit has a whole-number weekly completion target (1–7 days)',
+        actual: `${activeHabits.length - invalidWeekTargets.length} of ${activeHabits.length} active habits configured`,
+        details: invalidWeekTargets.map(h =>
+          `${h.name || h.title || h.id || 'Unnamed habit'}: ${h.daysPerCompleteWeek == null || String(h.daysPerCompleteWeek).trim() === '' ? 'missing' : 'invalid (' + String(h.daysPerCompleteWeek) + ')'}`),
+        trace: 'state.habits[].daysPerCompleteWeek (active, non-retired habits only)',
+        tips: 'Edit each listed habit on the Home page and set “Week complete at” to a number from 1 to 7. This audit does not change habit settings.'
+      });
+
       const noOpVisitAudit = runNoOpPageVisitAudit(state);
       checks.push({
         id: 'page-visit-read-only',
