@@ -7159,8 +7159,10 @@ function bindHomeGraphInteractions() {
       homeGraphScrollRaf = null;
       const width = viewport.clientWidth || 1;
       const nextIndex = Math.round(viewport.scrollLeft / width);
+      const enteredLiveDiffPanel = nextIndex === 3 && homeGraphPanelIndex !== 3;
       updateHomeGraphDots(nextIndex);
-      if (nextIndex === 3) {
+      // Capture once on entering the panel, not every scroll animation frame.
+      if (enteredLiveDiffPanel) {
         captureLiveDiffPoint();
       }
     });
