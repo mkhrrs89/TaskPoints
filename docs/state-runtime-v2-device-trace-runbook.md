@@ -182,3 +182,79 @@ and no suspicious reseed. If parity remains red, inspect the new field samples
 rather than weakening the comparator. Keep Main unchanged and do not authorize
 V2 mutation ownership from this representation-only correction.
 
+
+## October 13 verified physical Step 4 pass and next WAL recovery gate
+
+The second October 13 iPhone preview review (`reportGeneratedAtISO:
+2026-10-13T19:47:42.167Z`, 575 events on two pages) **passes all ten
+primary Step 4 device evidence checks**:
+
+- Four completions, two order changes, one Habit edit, and one Habit
+  presence/add were durably committed: **8/8**, with **zero** V2 mutation,
+  subsystem, runtime-mirror, or revision-conflict failures.
+- Strict parity is confirmed: both hashes were `ee7014a3:1638415`,
+  **69/69** Habits and **4,584/4,584** pilot Habit/Vice completions matched,
+  with no missing, extra, reordered, or changed authoritative fields.
+  **2,751** unrelated legacy completions stayed out of pilot scope, and
+  **zero** unrelated completion rows entered the V2 database.
+- The parity-only projection transparently accounted for **65** missing
+  versus explicitly empty `timeOfDay` defaults. It did not modify stored
+  records, and strict comparisons for real values remain in effect.
+- Maintenance was deferred and released after the full 20-second quiet
+  window (**56** interaction preemptions; 20,507 ms after last interaction).
+  No direct foreground V2 parity/compatibility maintenance was recorded.
+- Startup reused the existing V2 pilot database via
+  `stateV2.seedAlreadyCurrent` (revision 181), without a full reseed.
+- Foreground V2 synchronous enqueue costs were at most **2 ms**.
+  The old full-state foreground save path still overlapped Habit edit
+  (up to **1,391 ms**) and Habit creation/presence (**1,309 ms**);
+  these are remaining **legacy performance costs**, not V2 failures.
+  No next-paint boundaries were captured, so these are not definitive
+  input-to-visible-frame response times.
+
+This closes the primary **Step 4 dark-mirror physical trace** gate only.
+It does **not** satisfy the separate device lifecycle/recovery gates, and
+does **not** authorize V2 mutation authority or merging into Main.
+
+### Next: deterministic preview WAL interruption/replay test
+
+The preview already has an **Arm WAL kill test** button in **V2 TEST**
+(`state_runtime_v2_live_review.js`). It intentionally preserves the
+ordinary authoritative V1 write and the synchronous V2 WAL, but holds
+V2 async confirmation until the current page restarts. This tests a
+real page interruption without touching production or resetting data.
+
+1. In the stable V2 branch preview, make sure dark mode/PERF is enabled.
+   Open **V2 TEST**, click **Start fresh test** **before** arming, if a
+   clean trace is desired.
+2. Open **V2 TEST**, select **Arm WAL kill test**, and close the panel.
+3. Toggle **one** noncritical Habit, noting its expected new completion
+   state. The legacy write should remain authoritative. Do not reset,
+   import, or open the V2 cleanup page.
+4. **Immediately reload or close/reopen the preview** to end the held
+   page lifetime (real standalone iPhone app force-quit/reopen is also
+   useful). Do not click **Start fresh test** *after* restarting,
+   because it discards the trace of the recovery.
+5. With the restarted preview visible, open **V2 TEST** and select
+   **Refresh evidence**, then **Copy review**. If needed, leave the
+   preview foregrounded and untouched for at least 20 seconds to allow
+   the idle parity pass, then refresh/copy again.
+6. Required evidence: `startupRecoveryOrder.mode === 'wal_then_seed'`
+   when compatible V2 metadata and a current-generation WAL entry
+   exist; `walRecovery.replayAttemptCount >= 1`,
+   `walRecovery.replayClearedCount >= 1`,
+   `walRecovery.replayRecoveryConfirmed === true`,
+   and `walRecovery.replayFailureCount === 0`. Verify the Habit has the
+   intended state once, parity is green, there is no data duplication
+   or suspicious reseed, and no V2 failure.
+   If the hold did not activate or confirmation raced ahead, the trace
+   may not contain a replay—report that as inconclusive, not a pass.
+
+This specific test is **preview-only**, gated away from
+`taskpoints.pages.dev`. The first physical trace's
+`walRecovery.observed === false` is expected because it had no
+interrupted pending WAL entry.
+
+Only after this recovery test should the next device gate cover rapid
+completion bursts, multi-context revision conflicts, foreground /
+background lifecycle interruption, and export/reset/restore parity.
