@@ -2266,6 +2266,21 @@
   // Exclude them only from parity; stored records and compatibility exports stay intact.
   const DERIVED_HABIT_CACHE_FIELDS = ['__streak', '__completion', '__failedStreak'];
 
+  // Home normalizeHabit() has defined a missing timeOfDay as the empty string
+  // since Time of Day grouping was introduced. Older V2 rows may legitimately
+  // predate that field while the legacy Home normalization writes timeOfDay: ''.
+  // Treat ONLY absence and the explicit empty string as equivalent for parity.
+  // Nonempty labels, whitespace, null and unrelated Habit fields remain strict.
+  // This projection is read-only: it never changes either persisted store.
+  const HABIT_PARITY_EMPTY_DEFAULT_FIELDS = ['timeOfDay'];
+  function normalizeHabitForParity(habit) {
+    if (!habit || typeof habit !== 'object') return habit;
+    const copy = { ...habit };
+    for (const field of DERIVED_HABIT_CACHE_FIELDS) delete copy[field];
+    if (!Object.prototype.hasOwnProperty.call(copy, 'timeOfDay')) copy.timeOfDay = '';
+    return copy;
+  }
+
   // Legacy full Habit completions historically may omit completionFraction.
   // Production verification already treats that omission as canonical 1. Keep
   // parity strict for half/custom fractions while honoring the same full-row
@@ -2287,12 +2302,7 @@
   function paritySubset(state) {
     const scoped = parityInput(state);
     return {
-      habits: scoped.habits.map((habit) => {
-        if (!habit || typeof habit !== 'object') return habit;
-        const copy = { ...habit };
-        for (const field of DERIVED_HABIT_CACHE_FIELDS) delete copy[field];
-        return copy;
-      }),
+      habits: scoped.habits.map(normalizeHabitForParity),
       completions: scoped.completions.map(normalizePilotCompletionForParity)
     };
   }
@@ -2305,6 +2315,7 @@
     const limit = 20;
     const sampleCounts = { habits: 0, completions: 0 };
     const ignoredDerivedCacheDifferences = { records: 0, fields: Object.fromEntries(DERIVED_HABIT_CACHE_FIELDS.map((field) => [field, 0])) };
+    const normalizedHabitDefaultDifferences = { records: 0, fields: { timeOfDay: 0 } };
     for (const collection of ['habits', 'completions']) {
       const left = expected[collection] || [];
       const right = actual[collection] || [];
@@ -2363,7 +2374,17 @@
             ignoredDerivedCacheDifferences.records += 1;
             for (const field of ignored) ignoredDerivedCacheDifferences.fields[field] += 1;
           }
-          const fields = allFields.filter((field) => !ignored.includes(field));
+          const emptyDefaults = collection === 'habits'
+            ? allFields.filter((field) => field === 'timeOfDay' && (
+              (!Object.prototype.hasOwnProperty.call(row.value || {}, field) && other.value?.[field] === '')
+              || (!Object.prototype.hasOwnProperty.call(other.value || {}, field) && row.value?.[field] === '')
+            ))
+            : [];
+          if (emptyDefaults.length) {
+            normalizedHabitDefaultDifferences.records += 1;
+            for (const field of emptyDefaults) normalizedHabitDefaultDifferences.fields[field] += 1;
+          }
+          const fields = allFields.filter((field) => !ignored.includes(field) && !emptyDefaults.includes(field));
           if (fields.length) add(row, 'changed', other, fields);
         }
       }
@@ -2384,7 +2405,7 @@
       collections[collection] = counts;
     }
     const total = Object.values(collections).reduce((sum, counts) => sum + Object.values(counts).reduce((a, b) => a + b, 0), 0);
-    return { collections, samples, sampleCounts, truncated: total > samples.length, sampleLimit: limit * 2, sampleLimitPerCollection: limit, ignoredDerivedCacheDifferences };
+    return { collections, samples, sampleCounts, truncated: total > samples.length, sampleLimit: limit * 2, sampleLimitPerCollection: limit, ignoredDerivedCacheDifferences, normalizedHabitDefaultDifferences };
   }
 
   async function verifyParity() {
@@ -2410,7 +2431,9 @@
       actualHash: `${fnv1a(actualText)}:${actualText.length}`,
       comparisonScope: 'habit_records_plus_habit_vice_completions_normalizing_full_fraction',
       ignoredHabitCacheFields: [...DERIVED_HABIT_CACHE_FIELDS],
+      normalizedHabitEmptyDefaultFields: [...HABIT_PARITY_EMPTY_DEFAULT_FIELDS],
       ignoredDerivedCacheDifferences: diagnostics?.ignoredDerivedCacheDifferences || null,
+      normalizedHabitDefaultDifferences: diagnostics?.normalizedHabitDefaultDifferences || null,
       differences: expectedText === actualText ? null : diagnostics,
       expectedCounts: { habits: expectedScoped.habits.length, completions: expectedScoped.completions.length },
       actualCounts: { habits: actualScoped.habits.length, completions: actualScoped.completions.length },
