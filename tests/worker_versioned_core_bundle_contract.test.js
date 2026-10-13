@@ -132,7 +132,7 @@ test('the versioned bundle is immutable and reused from the edge cache', async (
     harness.ctx
   );
   const versionedUrl = redirect.headers.get('location');
-  const expected = 'PERF\nCORE\nALIAS\nYOU_ALIAS\nGUARD\nASSET:/habit_fast_path_control.js\nSHARED\nINBOX\nSERIES_UPSET\nASSET:/task_mutation_journal.js\nASSET:/task_create_fast_path.js\nHOT_CACHE\nSTORAGE_IDLE\nASSET:/greed_gold_economy.js\nASSET:/gold_theft_top50_notifications.js\nSEASON_BUILDER\nSEASON_BUILDER_FIXES\nSEASON3_ROLLOVER\n;globalThis.TaskPointsPerf?.recordBundleReady?.();\n';
+  const expected = 'PERF\nCORE\nALIAS\nYOU_ALIAS\nGUARD\nASSET:/habit_fast_path_control.js\nASSET:/state_runtime_v2_generation.js\nASSET:/state_runtime_v2_wal.js\nASSET:/state_runtime_v2.js\nASSET:/state_runtime_v2_wal_bridge.js\nASSET:/state_runtime_v2_habit_edit_bridge.js\nASSET:/state_runtime_v2_habit_structure_bridge.js\nSHARED\nINBOX\nSERIES_UPSET\nASSET:/task_mutation_journal.js\nASSET:/task_create_fast_path.js\nHOT_CACHE\nSTORAGE_IDLE\nASSET:/greed_gold_economy.js\nASSET:/gold_theft_top50_notifications.js\nSEASON_BUILDER\nSEASON_BUILDER_FIXES\nSEASON3_ROLLOVER\n;globalThis.TaskPointsPerf?.recordBundleReady?.();\n';
 
   const first = await harness.worker.fetch(new Request(versionedUrl), harness.env, harness.ctx);
   assert.equal(first.status, 200);
@@ -143,6 +143,12 @@ test('the versioned bundle is immutable and reused from the edge cache', async (
   assert.equal(first.headers.get('x-taskpoints-perf-diagnostics'), 'included');
   assert.equal(first.headers.get('x-taskpoints-you-score-alias-alignment'), 'included');
   assert.equal(first.headers.get('x-taskpoints-season-series-upsets'), 'included');
+  assert.equal(first.headers.get('x-taskpoints-state-runtime-v2-generation'), 'included');
+  assert.equal(first.headers.get('x-taskpoints-state-runtime-v2-wal'), 'included');
+  assert.equal(first.headers.get('x-taskpoints-state-runtime-v2'), 'included');
+  assert.equal(first.headers.get('x-taskpoints-state-runtime-v2-wal-bridge'), 'included');
+  assert.equal(first.headers.get('x-taskpoints-state-runtime-v2-habit-edit-bridge'), 'included');
+  assert.equal(first.headers.get('x-taskpoints-state-runtime-v2-habit-structure-bridge'), 'included');
   assert.equal(first.headers.get('x-taskpoints-state-hot-cache'), 'included');
   assert.equal(first.headers.get('x-taskpoints-storage-idle'), 'included');
   assert.equal(first.headers.get('x-taskpoints-season-bracket-builder'), 'included');
