@@ -138,3 +138,47 @@ The primary Step 4 trace is not the only manual lifecycle evidence required befo
 - cleanup while another preview tab holds the V2 database open.
 
 Those are separate lifecycle/recovery gates. They should not be conflated with the foreground-performance evidence collected by the V2 TEST panel.
+
+## October 13 Time of Day parity trace (post-Main reconciliation)
+
+The October 13 physical preview review (schemaVersion 4; 954 events) observed all
+four pilot mutation classes: 14 completions, 2 reorders, 1 edit and 1 presence
+mutation. All 18 V2 transactions committed durably; no V2 mutation/runtime
+failures or revision conflicts were observed. The deep-idle maintenance and
+interaction-preemption checks passed (20-second quiet boundary; 97 preemptions).
+Habit/Vice pilot ownership was correct: zero nonpilot completions in V2.
+All 4,584 pilot completions matched, with 2,751 nonpilot legacy completions
+correctly excluded.
+
+Parity was red for 66 of 68 Habits. All 20 available bounded samples showed
+the same exact field difference: legacy `timeOfDay` was the literal empty string,
+and the corresponding older V2 row did not have that property. The sampled
+empty-string hash was `ffcaaa85` (the stable JSON representation `""`).
+The remaining 46 changed Habit rows were not individually sampled, so do not
+assume they were all equivalent defaults without a fresh green parity check.
+
+Home's `normalizeHabit` maps an absent Time of Day to `''`; newly introduced
+grouping has no semantic distinction between these two cases. V2 therefore now
+normalizes **only the missing `timeOfDay` property to `''` for parity
+comparison**. The comparison still rejects nonempty Time of Day labels,
+whitespace, explicit null, and all other authoritative-field differences.
+No legacy records, V2 database records, WAL entries, revisions, compatibility
+exports, or user data are rewritten by this diagnostic projection.
+The report includes `normalizedHabitEmptyDefaultFields` and
+`normalizedHabitDefaultDifferences` for transparent inspection of these
+representation-only differences.
+
+The foreground correlation also found a legacy 1,624 ms full-state save during
+Habit edit and a 1,282 ms save during Habit creation; V2 synchronous enqueue
+work stayed at 0–2 ms. These legacy costs remain a performance problem,
+not evidence that V2 itself made the actions fast. No paint boundaries
+were available, so the report is not a full input-to-paint measurement.
+
+**Next physical verification:** reload the updated branch preview, start a
+fresh V2 TEST, exercise completion/reorder/edit/presence, and capture a new
+10-check review after 20 seconds idle. Confirm strict parity green, all pilot
+completions match, no out-of-scope V2 completions, no mutation/runtime failures,
+and no suspicious reseed. If parity remains red, inspect the new field samples
+rather than weakening the comparator. Keep Main unchanged and do not authorize
+V2 mutation ownership from this representation-only correction.
+
