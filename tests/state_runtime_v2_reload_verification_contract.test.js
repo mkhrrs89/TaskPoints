@@ -185,6 +185,47 @@ test('V2 preview survives repeated runtime recreation and repeated parity verifi
 });
 
 
+test('a newly explicit empty Time of Day does not wipe V2 incremental history on reload', async () => {
+  const indexedDB = new FakeIndexedDB();
+  const localStorage = new FakeStorage({
+    [DARK_MODE_KEY]: '1',
+    [LEGACY_KEY]: JSON.stringify(legacyState())
+  });
+
+  const runtimeA = installRuntime(indexedDB, localStorage, 'time-of-day-a');
+  await runtimeA.seedFromLegacy();
+  await runtimeA.applyHabitDelta(delta());
+  const state = await runtimeA.buildCompatibilitySnapshot();
+
+  // Main's Home normalization starts persisting this blank default after the
+  // existing V2 mirror and its WAL-backed mutation ledger were established.
+  state.habits[0].timeOfDay = '';
+  localStorage.setItem(LEGACY_KEY, JSON.stringify(state));
+  const before = indexedDB.dump(DB_NAME);
+  assert.equal(Object.prototype.hasOwnProperty.call(before.habits[0].value, 'timeOfDay'), false);
+  assert.equal(before.mutations.length, 1);
+
+  const runtimeB = installRuntime(indexedDB, localStorage, 'time-of-day-b');
+  const seedB = await runtimeB.seedFromLegacy();
+  const afterB = indexedDB.dump(DB_NAME);
+
+  assert.equal(seedB.seeded, false, 'the default-only divergence does not justify a full reseed');
+  assert.equal(seedB.reason, 'verified_current');
+  assert.equal(seedB.verifiedExisting, true);
+  assert.deepEqual(plain(afterB.habits), plain(before.habits));
+  assert.deepEqual(plain(afterB.completions), plain(before.completions));
+  assert.deepEqual(plain(afterB.mutations), plain(before.mutations));
+  assert.equal(afterB.meta[0].revision, before.meta[0].revision);
+  assert.equal((await runtimeB.verifyParity()).match, true);
+
+  const runtimeC = installRuntime(indexedDB, localStorage, 'time-of-day-c');
+  const seedC = await runtimeC.seedFromLegacy();
+  assert.equal(seedC.seeded, false);
+  assert.equal(seedC.reason, 'already_current');
+  assert.deepEqual(plain(indexedDB.dump(DB_NAME)), plain(afterB),
+    'subsequent reloads retain V2 rows and mutation evidence byte-for-byte');
+});
+
 test('reload startup emits explicit non-destructive reuse evidence', () => {
   assert.match(runtimeSource, /mark\('stateV2\.seedAlreadyCurrent'/);
   assert.match(runtimeSource, /mark\('stateV2\.seedAdoptedExisting'/);
