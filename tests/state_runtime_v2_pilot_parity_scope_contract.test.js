@@ -137,6 +137,62 @@ test('V2 pilot parity ignores unmigrated completion classes and treats omitted f
   assert.equal(Object.prototype.hasOwnProperty.call(legacyHabitCompletion, 'completionFraction'), false);
 });
 
+test('missing Time of Day and the explicit empty default compare equally without modifying either store', async () => {
+  const app = install();
+  await app.api.seedFromLegacy();
+
+  // This exact evolution occurred when Main added Home's timeOfDay default:
+  // an older V2 Habit has no field while normalized legacy now stores ''.
+  updateLegacy(app.localStorage, (state) => { state.habits[0].timeOfDay = ''; });
+  const before = clone(app.indexedDB.dump(DB_NAME));
+  const parity = await app.api.verifyParity();
+
+  assert.equal(parity.match, true);
+  assert.equal(parity.differences, null);
+  assert.deepEqual(Array.from(parity.normalizedHabitEmptyDefaultFields), ['timeOfDay']);
+  assert.equal(parity.normalizedHabitDefaultDifferences.records, 1);
+  assert.equal(parity.normalizedHabitDefaultDifferences.fields.timeOfDay, 1);
+  assert.deepEqual(clone(app.indexedDB.dump(DB_NAME)), before,
+    'parity projection must not reseed or mutate old V2 data');
+  assert.equal(JSON.parse(app.localStorage.getItem(LEGACY_KEY)).habits[0].timeOfDay, '');
+  assert.equal(Object.prototype.hasOwnProperty.call(
+    app.indexedDB.dump(DB_NAME).habits[0].value, 'timeOfDay'), false);
+});
+
+test('Time of Day parity remains strict for actual labels and invalid explicit values', async () => {
+  const app = install();
+  await app.api.seedFromLegacy();
+
+  updateLegacy(app.localStorage, (state) => { state.habits[0].timeOfDay = 'Morning'; });
+  let parity = await app.api.verifyParity();
+  assert.equal(parity.match, false, 'a real Time of Day grouping cannot be silently discarded');
+  assert.equal(parity.differences.collections.habits.changed, 1);
+  assert.deepEqual(Array.from(parity.differences.samples[0].fields), ['timeOfDay']);
+
+  updateLegacy(app.localStorage, (state) => { state.habits[0].timeOfDay = ''; });
+  const habitStore = app.indexedDB._databases.get(DB_NAME)._stores.get('habits');
+  const row = clone(habitStore.get('h1'));
+  row.value.timeOfDay = 'Evening';
+  habitStore.set('h1', row);
+  parity = await app.api.verifyParity();
+  assert.equal(parity.match, false, 'V2 must not hide an actual grouping value');
+
+  row.value.timeOfDay = null;
+  habitStore.set('h1', row);
+  parity = await app.api.verifyParity();
+  assert.equal(parity.match, false, 'explicit null is not the canonical empty string');
+
+  row.value.timeOfDay = ' ';
+  habitStore.set('h1', row);
+  parity = await app.api.verifyParity();
+  assert.equal(parity.match, false, 'a whitespace value is not silently trimmed');
+
+  row.value.timeOfDay = '';
+  habitStore.set('h1', row);
+  parity = await app.api.verifyParity();
+  assert.equal(parity.match, true, 'identical explicit defaults must still pass');
+});
+
 test('V2 pilot parity remains strict for half/full fraction differences', async () => {
   const app = install();
   await app.api.seedFromLegacy();
