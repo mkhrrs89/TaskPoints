@@ -258,3 +258,52 @@ interrupted pending WAL entry.
 Only after this recovery test should the next device gate cover rapid
 completion bursts, multi-context revision conflicts, foreground /
 background lifecycle interruption, and export/reset/restore parity.
+
+
+## October 14 physical WAL recovery result — PASS
+
+The physical preview trace generated at `2026-10-14T22:59:03.384Z`
+(schemaVersion 4, 251 events) confirms the deterministic single-Habit
+interruption/restart recovery gate:
+
+- Startup detected **one** current-generation WAL entry against a compatible
+  persisted V2 runtime at revision **189** and chose
+  `stateV2.startupWalReplayFirst` (`wal_then_seed`).
+- Replay was attempted **before** seed verification, and **one** pending
+  completion mutation (`habit-delta:1b972bb2:402`) was committed durably
+  and cleared. The recovery transaction took **10 ms**.
+- `walRecovery`: attempted **1**, cleared **1**, failures **0**,
+  stale rows **0**, duplicate-clear rows **0**,
+  `replayRecoveryConfirmed: true`.
+- Startup then reported `stateV2.seedAdoptedExisting` /
+  `verified_current` at revision **190**. No destructive full reseed or
+  suspicious reseed was observed; prior V2 database identity was preserved.
+- Post-restart strict parity was green, with matching hash
+  `bcac5dd9:1638764`: **69/69** Habits and **4,585/4,585** pilot
+  Habit/Vice completions matched. **2,751** unrelated legacy completions
+  remained outside V2 pilot scope; **zero** wrong-scope completion rows
+  were in V2.
+- No runtime mirror, mutation, parity, subsystem, or WAL replay failures
+  were detected. Deep-idle automatic parity ran after the 20-second
+  quiet window and no direct V2 foreground maintenance ran.
+
+The report is a **recovery-only trace** with one page after restart.
+`completion.enqueueCount === 0`, and order/edit/presence weren't observed;
+`evidenceCompleteForDeviceTrace === false` is therefore expected and
+does not reverse the **separately passed October 13 ten-check Step 4
+dark-mirror primary trace**. This confirms a deterministic preview-held
+WAL and live page-restart replay, not every possible operating-system
+process-termination timing or multi-tab crash scenario.
+
+The remaining legacy full-state save cost was up to **1,945 ms** in
+`home-season-slate-idle-materialization`; it is not attributed to a
+V2 replay. The WAL recovery evidence does not establish that all legacy
+foreground bottlenecks have been solved.
+
+**Gate status:** physical primary dark-mirror trace PASS; deterministic
+single-Habit WAL interruption/restart replay PASS. Keep Main and V1
+authoritative. Next separately prove rapid-burst interruption, real PWA
+background/foreground and Safari/multi-tab revisions, reload churn,
+and export/reset/import/restore plus blocked V2 cleanup, with strict
+non-loss and parity checks. Do not switch V2 to mutation authority
+before those gates pass.
