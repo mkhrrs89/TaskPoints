@@ -307,3 +307,55 @@ background/foreground and Safari/multi-tab revisions, reload churn,
 and export/reset/import/restore plus blocked V2 cleanup, with strict
 non-loss and parity checks. Do not switch V2 to mutation authority
 before those gates pass.
+
+## October 14 physical three-Habit rapid-burst interruption — replay PASS, parity pending
+
+The user submitted a one-page, post-restart trace at
+`2026-10-14T23:33:18.422Z` (schemaVersion 4; 189 events) from the
+preview WAL interruption test after three rapid Habit toggles.
+
+**Confirmed recovery evidence:**
+- Startup found exactly **3** WAL entries for the current generation,
+  with previously persisted V2 revision **190**; it selected
+  `stateV2.startupWalReplayFirst` (`wal_then_seed`) before any seed
+  verification.
+- WAL replay **attempted 3**, **cleared 3**, and had **0 failures**,
+  **0 stale rows** and **0 duplicate replay clears**. Three individual
+  completion transactions durably committed (maximum observed transaction
+  **109 ms**). Replay IDs were
+  `habit-delta:89b7ce53:404`, `habit-delta:0567f64a:404`,
+  and `habit-delta:2a89828e:404`.
+- On completed replay, startup `stateV2.seedAdoptedExisting` reported
+  **69 Habits**, **4,588 pilot completions**, and revision **193**
+  (`verified_current`, no full reseed, no suspicious reseed).
+  The three-revision advancement from 190 to 193 is consistent with
+  those three recovered commits.
+- Runtime, mutation, subsystem, and replay failures: **zero**.
+  No direct foreground V2 parity maintenance ran.
+
+**Separate check still pending, not failed:** this was recorded
+before the automatic deep-idle parity task was released. The report
+had `deepDeferredCount: 1`, `deepReleasedCount: 0`,
+`scheduledParityCount: 0`, `parity.observed: false`, and
+`pilotOwnership.observed: false`. Thus there is **not yet** a
+confirmed strict comparison of all 69 Habits and all 4,588 pilot
+completions for this rapid-burst run. The 11 preemption events
+indicate the quiet interval may have been interrupted.
+
+The prior primary Step 4 and single-Habit WAL tests remain green.
+This recovery-only trace is not expected to observe completion enqueues
+or edit/order/presence mutations after restart, so
+`evidenceCompleteForDeviceTrace: false` does **not** invalidate those
+separately passed tests. Do not claim all ten Step 4 tests passed
+*in this restart trace*.
+
+**Follow-up:** on the same preview session, leave the app foregrounded
+and untouched for at least 25–30 seconds, then tap V2 TEST →
+Refresh evidence → Copy review. **Do not** start a new trace or redo
+the three mutations. Require `parity.matchConfirmed === true`,
+`pilotOwnership.v2StoreContainsOnlyPilotCompletions === true`,
+matching counts/hashes, no failures, and no suspicious reseed before
+marking the three-Habit end-to-end recovery/parity gate complete.
+
+Production Main and V1 storage authority remain unchanged.
+
