@@ -359,3 +359,74 @@ marking the three-Habit end-to-end recovery/parity gate complete.
 
 Production Main and V1 storage authority remain unchanged.
 
+
+
+## October 14 burst follow-up — unexpected reseed and count regression (BLOCKER)
+
+**Do not mark the rapid-burst end-to-end gate green.** A subsequent
+iPhone preview report generated at `2026-10-14T23:36:00.222Z`
+(schemaVersion 4, pageCount 1, eventCount 390) unexpectedly showed:
+
+- `startupSeed.eventName: stateV2.seeded`,
+  `reseedReason: parity_mismatch`, `suspiciousReseed: true`;
+  existing schemaVersion **2** and identical reset generation, so it was
+  **not** an intentional generation reset or bootstrap.
+- `startupRecoveryOrder: seed_then_wal` because no pending
+  current-generation WAL rows remained; no replay in this newer page.
+- V2 revision advanced from **193** in the immediately preceding
+  three-replay trace to **194** via the destructive reseed.
+- The previous live post-replay trace's `seedAdoptedExisting` had
+  **4,588** pilot completions, while this report's newly reseeded
+  source and V2 each have only **4,585**. **69 Habits** were present
+  in both. The three-completion decrease is *suspicious*, especially
+  following three held/replayed writes; the summaries alone do **not**
+  prove which individual completions were removed or whether every
+  change was intended.
+- After the reseed, parity is green: expected/actual hashes both
+  `bcac5dd9:1638764`; 69 Habits and 4,585 completions matched.
+  This is **post-reseed agreement**, not proof the original three
+  mutations survived. V2 pilot ownership and 20-second idle checks
+  were green, with zero runtime failures.
+
+**Code inspection / mechanism:** In `state_runtime_v2.js`,
+`seedFromLegacy()` verifies same-generation persisted V2 data
+against `parseLegacyStateWithPending()`, then on any mismatch
+falls through to an IndexedDB transaction clearing V2 Habits,
+completions, and the mutation ledger before repopulating from the
+effective V1 authority. The `parity_mismatch` marker is emitted
+only **after** this destructive transaction. Consequently the
+post-reseed green parity cannot tell us the missing pre-reseed field
+and row differences; the original V2-only copy is gone from those
+stores.
+
+**Plausible but unconfirmed upstream race:** V1 Habit taps are
+crash-durable in `taskpoints_pending_habit_deltas_v1` and later
+compacted to `taskpoints_v1`. Home also has non-Habit full-save
+paths (`home-season-slate-idle-materialization`,
+`home-live-diff-capture`). The generic
+`preserveStickyFieldsBeforeSave` routine protects empty-history
+overwrites, but does **not** itself incorporate the current
+pending Habit journal into every arbitrary supplied full-state
+candidate. A stale Home state could therefore persist an older
+Habit/completion view; the exact sequence for this incident is
+not established by the summary alone. The earlier burst trace
+contained full-state serialization of both 7,336- and
+7,339-completion views, which supports investigating the race
+without identifying its cause definitively.
+
+**Safety decision:** leave production Main and V1 authority
+untouched. Do not run further toggles, imports, clears, or
+destructive tests in the affected preview until the expected
+three Habit states can be confirmed and recoverability assessed.
+Before enabling V2-owned mutations, strengthen the same-generation
+reseed diagnostic/evidence preservation and V1 pending-journal
+versus stale full-save safety tests. Do **not** weaken strict
+parity or silently accept the post-reseed green result as a pass.
+
+**Evidence still needed:** physical confirmation of the three
+specific Habit/day states after restart, whether the test
+actions were full/half/off, and a non-destructive backup/export
+or trace from before the suspicious reseed if one is available.
+The report's bounded hashes omit Habit names and mutation
+contents, so individual row recovery is not possible from the
+JSON review alone.
