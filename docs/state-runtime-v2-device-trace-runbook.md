@@ -423,10 +423,47 @@ reseed diagnostic/evidence preservation and V1 pending-journal
 versus stale full-save safety tests. Do **not** weaken strict
 parity or silently accept the post-reseed green result as a pass.
 
-**Evidence still needed:** physical confirmation of the three
-specific Habit/day states after restart, whether the test
-actions were full/half/off, and a non-destructive backup/export
+**User clarification on October 16:** all three burst-test taps were
+**incomplete → complete**, not removals or half-point toggles. The
+user cannot recall the exact three Habits or their displayed states
+after several days. Do not ask the user to reconstruct this from memory.
+This strengthens concern about the 4,588 → 4,585 regression, but is not
+by itself proof of which records were lost.
+
+**Evidence still needed:** read-only verification of the three
+specific Habit/day states from available saved data, and a non-destructive backup/export
 or trace from before the suspicious reseed if one is available.
 The report's bounded hashes omit Habit names and mutation
 contents, so individual row recovery is not possible from the
 JSON review alone.
+
+## October 16 V2 safety mitigation — preserve same-generation mismatches
+
+On the V2 branch only, startup `seedFromLegacy()` now **fails closed**
+for a parity mismatch between compatible V2 records and the effective
+V1 state in the **same reset generation**, instead of destroying all
+V2 Habit records, completion records, and its mutation ledger.
+An explicit `force: true` repair or a legitimate generation change
+still retains the intended reseeding capability; neither is run
+automatically to resolve this incident.
+
+A bounded `stateV2.seedParityMismatchBlocked` trace includes expected
+and actual Habit/pilot completion counts, revision, hashes, and up to
+16 differing record IDs per category. It intentionally omits full
+Habits, titles, and notes. The trace reviewer reports
+`startupSeed.outcome: blocked_parity_mismatch`,
+`evidencePreserved: true`, and `fullReseedObserved: false`.
+The guard also closes a seed-hash shortcut that could otherwise trust
+a pre-WAL baseline even when V2's persisted revision had advanced.
+
+Automated regression tests cover simulated three-Habit V1 rollback,
+preservation of the V2 ledger, blocking additional dark-mirror writes
+while discrepant, read-only reuse once V1 legitimately catches up,
+retention of the deliberate force-repair path, and reviewer visibility.
+Physical validation of the safeguard on a device is **not yet proven**.
+This is a preventative fix: it **cannot restore** completion rows
+already overwritten during the October 14 reseed.
+
+Keep Main/V1 authoritative and the Stage B authority promotion blocked
+until the underlying legacy-journal / background-save interaction has
+been investigated and cross-context plus recovery testing passes.
