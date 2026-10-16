@@ -430,3 +430,28 @@ test('startup review classifies expected bootstrap and suspicious parity reseeds
   assert.equal(mismatchResult.expectedBootstrapSeed, false);
   assert.equal(mismatchResult.suspiciousReseed, true);
 });
+
+
+test('physical-device review reports blocked same-generation mismatch without implying a successful reseed', () => {
+  const event = {
+    epochMs: 31000, type: 'mark', name: 'stateV2.seedParityMismatchBlocked',
+    detail: {
+      existingRevision: 193,
+      expected: { habits: 69, completions: 4585 },
+      actual: { habits: 69, completions: 4588 },
+      v2OnlyCompletions: 3,
+      v2OnlyCompletionIds: ['c1', 'c2', 'c3'],
+      evidencePreserved: true,
+      destructiveReseedBlocked: true
+    }
+  };
+  const r = reviewer.review(baseReport([event]));
+  assert.equal(r.startupSeed.observed, true);
+  assert.equal(r.startupSeed.outcome, 'blocked_parity_mismatch');
+  assert.equal(r.startupSeed.safeReuseConfirmed, false);
+  assert.equal(r.startupSeed.fullReseedObserved, false);
+  assert.equal(r.startupSeed.suspiciousParityMismatchBlocked, true);
+  assert.equal(r.startupSeed.evidencePreserved, true);
+  assert.equal(r.startupSeed.detail.v2OnlyCompletions, 3);
+  assert.equal(r.startupSeed.detail.existingRevision, 193);
+});
