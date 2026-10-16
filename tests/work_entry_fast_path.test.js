@@ -121,6 +121,38 @@ function makeHarness({ journalFails = false, preflightFails = false, targetedUi 
     context.renderAll();
   };
 
+  // These real Home commit entrypoints all use the shared completion journal.
+  // The Mood form opens earlier; submitMoodEditModal executes its onSave callback.
+  context.saveSleepScore = function saveSleepScore() {
+    state.completions.unshift({
+      id: 'sleep-new', title: 'Sleep Score (84) — Rest 6',
+      points: 8.4, sleepRested: 6, source: 'metric',
+      completedAtISO: '2026-08-15T12:00:00.000Z'
+    });
+    context.save(); context.renderAll();
+  };
+  context.submitSleepEditModal = function submitSleepEditModal() {
+    const row = state.completions.find(x => x.id === 'sleep-new');
+    if (row) { row.title = 'Sleep Score (90) — Rest 7'; row.points = 9; row.sleepRested = 7; }
+    context.save(); context.renderAll();
+  };
+  context.saveCalories = function saveCalories() {
+    state.completions.unshift({
+      id: 'cal-new', title: 'Calories (1810)',
+      points: 8, calories: 1810, calLogBonusEnabled: false,
+      source: 'metric', completedAtISO: '2026-08-15T12:00:00.000Z'
+    });
+    context.save(); context.renderAll();
+  };
+  context.submitMoodEditModal = function submitMoodEditModal() {
+    state.completions.unshift({
+      id: 'mood-new', title: 'Mood Score (3.8)',
+      points: 3.8, moodNotes: 'kept privately and completely',
+      source: 'metric', completedAtISO: '2026-08-15T12:00:00.000Z'
+    });
+    context.save(); context.renderAll();
+  };
+
   vm.createContext(context);
   vm.runInContext(source, context, { filename: 'work_entry_fast_path.js' });
   if (timers.length) timers.shift()(); // install only
@@ -137,7 +169,7 @@ function makeHarness({ journalFails = false, preflightFails = false, targetedUi 
 }
 
 test('loader keeps the Work fast path outside the core worker while loading the current Home version', () => {
-  assert.match(guardSource, /work_entry_fast_path\.js\?v=20260815-2/);
+  assert.match(guardSource, /work_entry_fast_path\.js\?v=20261015-1/);
   assert.match(guardSource, /data-taskpoints-work-entry-fast-path/);
 });
 
@@ -156,7 +188,7 @@ test('editing a Work entry journals the completion and uses targeted score rende
   assert.ok(h.calls.idleTouches > 0);
 
   const status = h.context.TaskPointsWorkEntryFastPath.getStatus();
-  assert.equal(status.version, 2);
+  assert.equal(status.version, 3);
   assert.equal(status.counters.fastCommits, 1);
   assert.equal(status.counters.suppressedFullSaves, 1);
   assert.equal(status.counters.targetedRenders, 1);
@@ -202,4 +234,58 @@ test('recovery/journal preflight failures leave the original Work save and rende
   assert.equal(h.calls.fullSaves, 1);
   assert.equal(h.calls.renders, 1);
   assert.equal(h.calls.journal.length, 0);
+});
+
+
+test('Sleep creation and edit preserve score/rested fields in the crash-safe completion journal', () => {
+  const h = makeHarness();
+  h.context.saveSleepScore();
+  assert.equal(h.calls.fullSaves, 0);
+  assert.equal(h.calls.journal.length, 1);
+  assert.deepEqual(
+    { id: h.calls.journal[0].completionUpsert.id, rested: h.calls.journal[0].completionUpsert.sleepRested },
+    { id: 'sleep-new', rested: 6 }
+  );
+  h.context.submitSleepEditModal();
+  assert.equal(h.calls.fullSaves, 0);
+  assert.equal(h.calls.journal.length, 2);
+  assert.equal(h.calls.journal[1].completionUpsert.sleepRested, 7);
+  assert.equal(h.calls.journal[1].completionUpsert.title, 'Sleep Score (90) — Rest 7');
+});
+
+test('Calories creation journals full bonus metadata instead of a foreground full-state save', () => {
+  const h = makeHarness();
+  h.context.saveCalories();
+  assert.equal(h.calls.fullSaves, 0);
+  assert.equal(h.calls.journal.length, 1);
+  assert.equal(h.calls.journal[0].completionUpsert.id, 'cal-new');
+  assert.equal(h.calls.journal[0].completionUpsert.calLogBonusEnabled, false);
+});
+
+test('Mood modal completion journals the entire mood text and score before yielding to the renderer', () => {
+  const h = makeHarness();
+  h.context.submitMoodEditModal();
+  assert.equal(h.calls.fullSaves, 0);
+  assert.equal(h.calls.journal.length, 1);
+  const saved = h.calls.journal[0].completionUpsert;
+  assert.equal(saved.id, 'mood-new');
+  assert.equal(saved.moodNotes, 'kept privately and completely');
+  assert.equal(saved.points, 3.8);
+  assert.equal(h.calls.scwmRefreshes, 1);
+});
+
+test('Mood entry journal failure retains authoritative full-save fallback and full render', () => {
+  const h = makeHarness({ journalFails: true });
+  h.context.submitMoodEditModal();
+  assert.equal(h.calls.fullSaves, 1);
+  assert.equal(h.calls.renders, 1);
+  assert.equal(h.calls.lastSavePath, 'work-entry-fast-path-fallback');
+});
+
+test('Mood preflight failure does not suppress its original save or renderer', () => {
+  const h = makeHarness({ preflightFails: true });
+  h.context.submitMoodEditModal();
+  assert.equal(h.calls.fullSaves, 1);
+  assert.equal(h.calls.journal.length, 0);
+  assert.equal(h.calls.renders, 1);
 });
