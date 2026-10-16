@@ -369,7 +369,7 @@
   'use strict';
 
   const SCRIPT_ID = 'tpWorkEntryFastPathScript';
-  const SCRIPT_SRC = '/work_entry_fast_path.js?v=20261015-1';
+  const SCRIPT_SRC = '/work_entry_fast_path.js?v=20261015-2';
 
   function isHomePage() {
     const pathname = String(global.location?.pathname || '');
