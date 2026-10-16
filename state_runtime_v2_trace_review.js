@@ -389,7 +389,8 @@
         'stateV2.seedAlreadyCurrent',
         'stateV2.seedAdoptedExisting',
         'stateV2.seeded',
-        'stateV2.seededEmpty'
+        'stateV2.seededEmpty',
+        'stateV2.seedParityMismatchBlocked'
       ].includes(String(event?.name || '')))
       .sort((a, b) => (eventTime(a) ?? 0) - (eventTime(b) ?? 0));
     const firstReplay = replayAttempts[0] || null;
@@ -422,7 +423,8 @@
         'stateV2.seedAlreadyCurrent',
         'stateV2.seedAdoptedExisting',
         'stateV2.seeded',
-        'stateV2.seededEmpty'
+        'stateV2.seededEmpty',
+        'stateV2.seedParityMismatchBlocked'
       ].includes(String(event?.name || '')))
       .sort((a, b) => (eventTime(a) ?? 0) - (eventTime(b) ?? 0));
     const latest = rows[rows.length - 1] || null;
@@ -443,13 +445,17 @@
         ? 'verified_current'
         : eventName === 'stateV2.seededEmpty'
           ? 'legacy_missing'
-          : 'seeded';
+          : eventName === 'stateV2.seedParityMismatchBlocked'
+            ? 'blocked_parity_mismatch'
+            : 'seeded';
     return {
       observed: true,
       eventName,
       outcome,
       safeReuseConfirmed: outcome === 'already_current' || outcome === 'verified_current',
       fullReseedObserved: outcome === 'seeded',
+      suspiciousParityMismatchBlocked: outcome === 'blocked_parity_mismatch',
+      evidencePreserved: outcome === 'blocked_parity_mismatch' && detailObject(latest).evidencePreserved === true,
       reseedReason: outcome === 'seeded' ? String(detailObject(latest).reseedReason || 'unknown') : null,
       expectedBootstrapSeed: outcome === 'seeded' && String(detailObject(latest).reseedReason || '') === 'initial_bootstrap',
       suspiciousReseed: outcome === 'seeded' && !['initial_bootstrap', 'generation_changed', 'schema_changed', 'previous_legacy_missing'].includes(String(detailObject(latest).reseedReason || '')),
