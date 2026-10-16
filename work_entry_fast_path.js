@@ -3,7 +3,7 @@
 
   if (global.TaskPointsWorkEntryFastPath?.installed) return;
 
-  const VERSION = 2;
+  const VERSION = 3;
   const MAX_INSTALL_ATTEMPTS = 240;
   const INSTALL_RETRY_MS = 50;
   const POST_COMMIT_QUIET_MS = 3200;
@@ -71,9 +71,14 @@
     return JSON.parse(JSON.stringify(value));
   }
 
-  function isWorkCompletion(entry) {
+  function isScwmCompletion(entry) {
     if (!entry || typeof entry !== 'object') return false;
-    return entry.source === 'work' || String(entry.title || '').startsWith('Work Score');
+    const title = String(entry.title || '');
+    return entry.source === 'work'
+      || title.startsWith('Work Score')
+      || title.startsWith('Sleep Score')
+      || title.startsWith('Calories')
+      || title.startsWith('Mood Score');
   }
 
   function fingerprint(entry) {
@@ -81,23 +86,23 @@
     catch (_) { return null; }
   }
 
-  function snapshotWorkRows() {
+  function snapshotScwmRows() {
     const state = homeState();
     if (!state || !Array.isArray(state.completions)) return null;
     const rows = new Map();
     for (const entry of state.completions) {
-      if (!isWorkCompletion(entry) || entry.id == null) continue;
+      if (!isScwmCompletion(entry) || entry.id == null) continue;
       rows.set(String(entry.id), fingerprint(entry));
     }
     return rows;
   }
 
-  function changedWorkRows(before) {
+  function changedScwmRows(before) {
     const state = homeState();
     if (!before || !state || !Array.isArray(state.completions)) return [];
     const changed = [];
     for (const entry of state.completions) {
-      if (!isWorkCompletion(entry) || entry.id == null) continue;
+      if (!isScwmCompletion(entry) || entry.id == null) continue;
       const id = String(entry.id);
       if (!before.has(id) || before.get(id) !== fingerprint(entry)) changed.push(entry);
     }
@@ -244,7 +249,7 @@
     if (typeof global.save !== 'function') return false;
     if (typeof core.journalTaskMutation !== 'function') return false;
     if (typeof core.assertTaskMutationJournalWritable !== 'function') return false;
-    return Boolean(snapshotWorkRows());
+    return Boolean(snapshotScwmRows());
   }
 
   function saveFallback(originalSave, reason) {
@@ -276,7 +281,7 @@
     let before;
     try {
       core.assertTaskMutationJournalWritable();
-      before = snapshotWorkRows();
+      before = snapshotScwmRows();
     } catch (_) {
       return original.apply(thisArg, args);
     }
@@ -330,7 +335,7 @@
       return result;
     }
 
-    const changed = changedWorkRows(before);
+    const changed = changedScwmRows(before);
     if (!changed.length) {
       counters.unchangedCommits += 1;
       counters.fastCommits += 1;
@@ -390,8 +395,15 @@
 
     const editWrapped = ready && wrapCommit('submitWorkEditModal');
     const addWrapped = ready && wrapCommit('saveWorkScore');
+    // Preserve existing metric forms and scoring; journal the final completion
+    // before feedback instead of serializing all history on the Save button.
+    // Do not intercept async editTodayCalories: its modal crosses an await.
+    const sleepAddWrapped = ready && wrapCommit('saveSleepScore');
+    const sleepEditWrapped = ready && wrapCommit('submitSleepEditModal');
+    const caloriesAddWrapped = ready && wrapCommit('saveCalories');
+    const moodEditWrapped = ready && wrapCommit('submitMoodEditModal');
 
-    if (editWrapped || addWrapped) {
+    if (editWrapped || addWrapped || sleepAddWrapped || sleepEditWrapped || caloriesAddWrapped || moodEditWrapped) {
       if (!installed) {
         installed = true;
         counters.installs += 1;
@@ -399,7 +411,8 @@
       }
     }
 
-    if ((!editWrapped || !addWrapped) && ++installAttempts < MAX_INSTALL_ATTEMPTS && installTimer == null) {
+    if ((!editWrapped || !addWrapped || !sleepAddWrapped || !sleepEditWrapped || !caloriesAddWrapped || !moodEditWrapped)
+      && ++installAttempts < MAX_INSTALL_ATTEMPTS && installTimer == null) {
       installTimer = global.setTimeout?.(() => {
         installTimer = null;
         install();
