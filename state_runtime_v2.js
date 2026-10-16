@@ -513,6 +513,53 @@
     return { habits, completions };
   }
 
+  // A same-generation mismatch is a safety incident, not permission to destroy
+  // a potentially newer incremental mirror. Keep a bounded, read-only diff
+  // so that post-restart evidence survives investigation.
+  function summarizeBlockedSeedMismatch(legacy, mirrored, previousMeta, generation) {
+    const expected = paritySubset(sourceSubset(legacy));
+    const actual = paritySubset(mirrored);
+    const keyed = (rows) => new Map((rows || [])
+      .filter((row) => row && row.id != null)
+      .map((row) => [String(row.id), row]));
+    const expectedCompletions = keyed(expected.completions);
+    const actualCompletions = keyed(actual.completions);
+    const expectedHabits = keyed(expected.habits);
+    const actualHabits = keyed(actual.habits);
+    const only = (left, right) => [...left.keys()].filter((id) => !right.has(id));
+    const changed = (left, right) => [...left.keys()]
+      .filter((id) => right.has(id) && stableJson(left.get(id)) !== stableJson(right.get(id)));
+    const sample = (items) => items.slice(0, 16);
+    const v2OnlyCompletionIds = only(actualCompletions, expectedCompletions);
+    const legacyOnlyCompletionIds = only(expectedCompletions, actualCompletions);
+    const changedCompletionIds = changed(expectedCompletions, actualCompletions);
+    const v2OnlyHabitIds = only(actualHabits, expectedHabits);
+    const legacyOnlyHabitIds = only(expectedHabits, actualHabits);
+    const changedHabitIds = changed(expectedHabits, actualHabits);
+    return {
+      resetGeneration: generation,
+      existingRevision: Number(previousMeta?.revision || 0),
+      expected: { habits: expected.habits.length, completions: expected.completions.length },
+      actual: { habits: actual.habits.length, completions: actual.completions.length },
+      legacyHash: subsetHash(legacy),
+      v2Hash: subsetHash(mirrored),
+      v2OnlyCompletions: v2OnlyCompletionIds.length,
+      legacyOnlyCompletions: legacyOnlyCompletionIds.length,
+      changedCompletions: changedCompletionIds.length,
+      changedHabits: changedHabitIds.length,
+      v2OnlyHabits: v2OnlyHabitIds.length,
+      legacyOnlyHabits: legacyOnlyHabitIds.length,
+      v2OnlyCompletionIds: sample(v2OnlyCompletionIds),
+      legacyOnlyCompletionIds: sample(legacyOnlyCompletionIds),
+      changedCompletionIds: sample(changedCompletionIds),
+      changedHabitIds: sample(changedHabitIds),
+      v2OnlyHabitIds: sample(v2OnlyHabitIds),
+      legacyOnlyHabitIds: sample(legacyOnlyHabitIds),
+      evidencePreserved: true,
+      destructiveReseedBlocked: true
+    };
+  }
+
   async function refreshSeedMarker(db, previousMeta, hash, desiredGeneration, reason) {
     if (!previousMeta || previousMeta.seedHash === hash) return previousMeta;
     const nextMeta = {
@@ -636,6 +683,17 @@
             revision: lastKnownRevision
           };
         }
+        // Never silently clear the only V2 copy of WAL-replayed Habits or
+        // completions on an unexplained mismatch with the *same* V1 generation.
+        // V1 remains authoritative; V2 goes read/write fail-closed until an
+        // explicit, separately authorized repair or legitimate generation reset.
+        const evidence = summarizeBlockedSeedMismatch(source.state, collections, previousMeta, desiredGeneration);
+        mark('stateV2.seedParityMismatchBlocked', evidence);
+        const error = new Error('state_runtime_v2_same_generation_parity_mismatch_preserved');
+        error.code = 'STATE_V2_PARITY_MISMATCH_PRESERVED';
+        error.evidence = evidence;
+        lastError = error.message;
+        throw error;
       }
 
       const habits = source.state.habits;
