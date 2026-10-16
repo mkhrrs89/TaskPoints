@@ -169,7 +169,7 @@ function makeHarness({ journalFails = false, preflightFails = false, targetedUi 
 }
 
 test('loader keeps the Work fast path outside the core worker while loading the current Home version', () => {
-  assert.match(guardSource, /work_entry_fast_path\.js\?v=20261015-1/);
+  assert.match(guardSource, /work_entry_fast_path\.js\?v=20261015-2/);
   assert.match(guardSource, /data-taskpoints-work-entry-fast-path/);
 });
 
@@ -288,4 +288,29 @@ test('Mood preflight failure does not suppress its original save or renderer', (
   assert.equal(h.calls.fullSaves, 1);
   assert.equal(h.calls.journal.length, 0);
   assert.equal(h.calls.renders, 1);
+});
+
+test('when SCWM defers the emergency fallback, flush it before returning after journal failure', () => {
+  const h = makeHarness({ journalFails: true });
+  let pending = null;
+  let flushed = 0;
+  h.context.save = function deferredScwmSave() {
+    pending = Array.from(arguments);
+  };
+  h.context.TaskPointsScwmInteractionFastPath = {
+    getStatus() { return { pendingSave: Boolean(pending) }; },
+    flush() {
+      if (!pending) return false;
+      h.calls.fullSaves += 1;
+      h.calls.lastSavePath = pending[0] || '';
+      pending = null;
+      flushed += 1;
+      return true;
+    }
+  };
+  h.context.submitMoodEditModal();
+  assert.equal(flushed, 1, 'durable fallback flush happens before the action returns');
+  assert.equal(h.calls.fullSaves, 1);
+  assert.equal(h.calls.lastSavePath, 'work-entry-fast-path-fallback');
+  assert.equal(pending, null);
 });
