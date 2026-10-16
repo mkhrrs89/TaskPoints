@@ -262,6 +262,13 @@
         immediateWrite: true,
         workEntryFastPathFallbackReason: reason
       });
+      // SCWM's UI layer may postpone its ordinary full save until after paint.
+      // That is unsafe as the *only* fallback if the durable journal failed.
+      // Flush only that pending SCWM save; all successful journal paths stay fast.
+      const scwm = global.TaskPointsScwmInteractionFastPath;
+      if (scwm?.getStatus?.().pendingSave === true && scwm.flush?.() !== true) {
+        throw new Error('TaskPoints SCWM fallback save could not be flushed');
+      }
       counters.fallbackFullSaves += 1;
       return true;
     } catch (error) {
