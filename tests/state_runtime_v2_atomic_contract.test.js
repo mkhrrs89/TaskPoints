@@ -240,6 +240,11 @@ test('V2-06 committed revision survives runtime recreation and is used by the ne
   const revisionAfterFirst = runtimeMeta(afterFirst).revision;
   assert.equal(first.revision, revisionAfterFirst);
 
+  // Model a real fully persisted V1 action before the next page opens. A V2
+  // mutation that is *not* reflected by its V1 authority must now be preserved
+  // as mismatch evidence rather than silently adopted or discarded.
+  localStorage.setItem(LEGACY_KEY, JSON.stringify(await firstRuntime.api.buildCompatibilitySnapshot()));
+
   const secondRuntime = installRuntime({ indexedDB, localStorage });
   await secondRuntime.api.seedFromLegacy();
   assert.equal(runtimeMeta(indexedDB.dump(DB_NAME)).revision, revisionAfterFirst);
