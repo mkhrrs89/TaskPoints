@@ -569,6 +569,7 @@
       resetGeneration: desiredGeneration,
       seedHash: hash,
       seedVerifiedAtISO: nowIso(),
+      seedVerifiedRevision: Number(previousMeta.revision || 0),
       seedVerifiedReason: String(reason || 'verified-current')
     };
     const tx = db.transaction('meta', 'readwrite');
@@ -624,6 +625,12 @@
         && previousMeta?.seedHash === hash
         && previousMeta?.legacyMissing !== true
         && previousMeta?.resetGeneration === desiredGeneration
+        // Incremental mutation metadata can retain an old seedHash. Never
+        // trust that baseline hash after WAL or edit/order/presence writes.
+        // Require a verification marker for the *current* V2 revision.
+        && (previousMeta.lastMutationId == null
+          || (previousMeta.seedVerifiedRevision != null
+            && Number(previousMeta.seedVerifiedRevision) === Number(previousMeta.revision)))
       ) {
         seeded = true;
         lastSeedHash = hash;
