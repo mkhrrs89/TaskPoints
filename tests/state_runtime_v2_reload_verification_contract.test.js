@@ -245,3 +245,108 @@ test('full seed diagnostics identify why a destructive seed occurred', () => {
   assert.match(runtimeSource, /previousResetGeneration/);
   assert.match(runtimeSource, /parityComparedBeforeReseed/);
 });
+
+
+test('same-generation V1 rollback after three WAL-equivalent commits preserves V2 evidence instead of reseeding', async () => {
+  const indexedDB = new FakeIndexedDB();
+  const initialLegacy = legacyState();
+  const localStorage = new FakeStorage({
+    [DARK_MODE_KEY]: '1',
+    [LEGACY_KEY]: JSON.stringify(initialLegacy)
+  });
+  const runtimeA = installRuntime(indexedDB, localStorage, 'burst-protect-a');
+  await runtimeA.seedFromLegacy();
+  const day = '2026-10-14';
+  for (let i = 0; i < 3; i += 1) {
+    const extraHabitId = 'burst-' + i;
+    const state = JSON.parse(localStorage.getItem(LEGACY_KEY));
+    state.habits.push({
+      id: extraHabitId, name: 'Burst ' + i,
+      pointsPerDay: 4, doneKeys: [], failedKeys: [], iceKeys: []
+    });
+    localStorage.setItem(LEGACY_KEY, JSON.stringify(state));
+    await runtimeA.applyHabitPresenceSnapshot(
+      runtimeA.captureHabitPresenceSnapshotFromLegacy(extraHabitId, { source: 'burst-setup' })
+    );
+  }
+  // Mirror three durable V1 Habit journal mutations, but simulate a legacy
+  // full-state rollback that omitted their pending journal before next reload.
+  for (let i = 0; i < 3; i += 1) {
+    const d = {
+      ...delta(), id: 'habit:burst-' + i + ':' + day,
+      habitId: 'burst-' + i, dayKey: day,
+      updatedAtISO: '2026-10-14T22:22:' + String(i).padStart(2, '0') + '.000Z'
+    };
+    await runtimeA.applyHabitDelta(d);
+  }
+  const before = plain(indexedDB.dump(DB_NAME));
+  const v2Before = before.completions.length;
+  assert.equal(v2Before, 3);
+  const revisionBefore = before.meta[0].revision;
+  const runtimeB = installRuntime(indexedDB, localStorage, 'burst-protect-b');
+
+  await assert.rejects(
+    runtimeB.seedFromLegacy(),
+    (error) => {
+      assert.equal(error.code, 'STATE_V2_PARITY_MISMATCH_PRESERVED');
+      assert.equal(error.evidence.actual.completions, 3);
+      assert.equal(error.evidence.expected.completions, 0);
+      assert.equal(error.evidence.v2OnlyCompletions, 3);
+      assert.equal(error.evidence.v2OnlyCompletionIds.length, 3);
+      assert.equal(error.evidence.evidencePreserved, true);
+      assert.equal(error.evidence.destructiveReseedBlocked, true);
+      return true;
+    }
+  );
+  assert.deepEqual(plain(indexedDB.dump(DB_NAME)), before,
+    'the three pilot completions and mutation ledger must remain intact');
+  assert.equal(indexedDB.dump(DB_NAME).meta[0].revision, revisionBefore);
+  await assert.rejects(
+    runtimeB.applyHabitDelta({ ...delta(), habitId: 'h1' }),
+    /same_generation_parity_mismatch_preserved/,
+    'new V2 writes must fail closed until the mismatch is resolved'
+  );
+  assert.deepEqual(plain(indexedDB.dump(DB_NAME)), before);
+});
+
+test('same-generation mismatch resolves by read-only adoption if V1 journal catches up', async () => {
+  const indexedDB = new FakeIndexedDB();
+  const localStorage = new FakeStorage({
+    [DARK_MODE_KEY]: '1',
+    [LEGACY_KEY]: JSON.stringify(legacyState())
+  });
+  const runtimeA = installRuntime(indexedDB, localStorage, 'catchup-a');
+  await runtimeA.seedFromLegacy();
+  await runtimeA.applyHabitDelta(delta());
+  const before = plain(indexedDB.dump(DB_NAME));
+
+  const runtimeB = installRuntime(indexedDB, localStorage, 'catchup-b');
+  await assert.rejects(runtimeB.seedFromLegacy(), /same_generation_parity_mismatch_preserved/);
+
+  // After the production journal/authoritative source catches up, the next
+  // startup should adopt V2 without clearing the recovered mutation ledger.
+  const recoveredLegacy = await runtimeA.buildCompatibilitySnapshot();
+  localStorage.setItem(LEGACY_KEY, JSON.stringify(recoveredLegacy));
+  const result = await runtimeB.seedFromLegacy();
+  assert.equal(result.seeded, false);
+  assert.equal(result.reason, 'verified_current');
+  assert.deepEqual(plain(indexedDB.dump(DB_NAME).completions), before.completions);
+  assert.deepEqual(plain(indexedDB.dump(DB_NAME).mutations), before.mutations);
+});
+
+test('forced bootstrap remains available for separately authorized repair', async () => {
+  const indexedDB = new FakeIndexedDB();
+  const localStorage = new FakeStorage({
+    [DARK_MODE_KEY]: '1',
+    [LEGACY_KEY]: JSON.stringify(legacyState())
+  });
+  const runtimeA = installRuntime(indexedDB, localStorage, 'explicit-a');
+  await runtimeA.seedFromLegacy();
+  await runtimeA.applyHabitDelta(delta());
+  const runtimeB = installRuntime(indexedDB, localStorage, 'explicit-b');
+  await assert.rejects(runtimeB.seedFromLegacy(), /same_generation_parity_mismatch_preserved/);
+  const fixed = await runtimeB.seedFromLegacy({ force: true });
+  assert.equal(fixed.seeded, true);
+  assert.equal(fixed.reseedReason, 'forced');
+  assert.equal(indexedDB.dump(DB_NAME).completions.length, 0);
+});
