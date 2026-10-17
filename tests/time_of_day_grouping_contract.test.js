@@ -127,3 +127,102 @@ test('ordinary Tag sorting retains its original distinct-label behavior', () => 
     { Daily: 2, daily: 1, Night: 1 });
   assert.equal(h.calls.saves, 0);
 });
+
+
+function createTimeOfDayBubbleColorHarness() {
+  const vm = require('node:vm');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
+  const extract = (start, next) => {
+    const i = home.indexOf(start);
+    const j = home.indexOf(next, i);
+    assert.ok(i >= 0 && j > i, 'missing Habit bubble color helper: ' + start);
+    return home.slice(i, j);
+  };
+  const state = {
+    habitTagColors: { Hygiene: '#dd2299' },
+    timeOfDayColors: { 'First Thing': '#ffde00' },
+    timeOfDayGroups: ['First Thing'],
+    habits: []
+  };
+  const sortSelect = { value: 'timeOfDay' };
+  const context = {
+    state,
+    $: id => id === 'habitsSortSelect' ? sortSelect : null,
+    localStorage: { getItem() { return null; } },
+    normalizeHexColor(value) {
+      return /^#[0-9a-f]{6}$/i.test(String(value || '')) ? value : null;
+    }
+  };
+  vm.runInNewContext(
+    extract('function hexToRgb(hex)', 'function getHabitCompletionFraction')
+      + '\n' + extract('function timeOfDayGroupKey(value)', 'function buildHabitRenderEntries')
+      + '\n' + extract('function applyHabitBubbleStyle(el, habit, statusClass)', 'function applyHabitDayToggle'),
+    context
+  );
+  const styleFor = (habit, status) => context.getHabitBubbleStyleAttrForHabit(habit, status);
+  const tapStyleFor = (habit, status) => {
+    const el = {
+      style: '',
+      setAttribute(name, value) {
+        if (name === 'style') this.style = value;
+      },
+      removeAttribute(name) {
+        if (name === 'style') this.style = '';
+      }
+    };
+    context.applyHabitBubbleStyle(el, habit, status);
+    return el.style;
+  };
+  return { styleFor, tapStyleFor, sortSelect, state, css };
+}
+
+test('Time of Day Habit completions use TOD colors rather than ordinary Tag colors', () => {
+  const h = createTimeOfDayBubbleColorHarness();
+  const habit = { category: 'habit', tag: 'Hygiene', timeOfDay: '  first   thing ' };
+  const style = h.styleFor(habit, 'on');
+  assert.match(style, /#ffde00/i);
+  assert.doesNotMatch(style, /#dd2299/i);
+  assert.match(h.tapStyleFor(habit, 'on'), /#ffde00/i,
+    'an immediate tap must paint the same color as the full Habit renderer');
+});
+
+test('Time of Day Habits without assigned or colored TOD groups use original dark teal CSS', () => {
+  const h = createTimeOfDayBubbleColorHarness();
+  const unassigned = { category: 'habit', tag: 'Hygiene', timeOfDay: '' };
+  const uncolored = { category: 'habit', tag: 'Hygiene', timeOfDay: 'Afternoon' };
+  for (const habit of [unassigned, uncolored]) {
+    assert.equal(h.styleFor(habit, 'on'), '',
+      'no inline Tag color: allow normal teal completed bubble CSS');
+    assert.equal(h.tapStyleFor(habit, 'on'), '',
+      'tap repaint must restore normal teal completed bubble CSS');
+    assert.equal(h.styleFor(habit, 'half'), '',
+      'half points use the existing dark teal ring default');
+  }
+  assert.match(h.css, /\.habitDay\.on:not\(\[style\]\)/);
+  assert.match(h.css, /--habit-half-color, #254C52/);
+});
+
+test('Time of Day half completions use TOD ring color while incomplete stays transparent', () => {
+  const h = createTimeOfDayBubbleColorHarness();
+  const habit = { category: 'habit', tag: 'Hygiene', timeOfDay: 'FIRST THING' };
+  const half = h.styleFor(habit, 'half');
+  assert.match(half, /--habit-half-color:#ffde00/i);
+  assert.match(h.tapStyleFor(habit, 'half'), /--habit-half-color:#ffde00/i);
+  assert.equal(h.styleFor(habit, 'off'), '',
+    'uncompleted bubbles remain visually distinct from completions');
+  assert.equal(h.styleFor(habit, 'failed'), '',
+    'failed status should not be customized in this Habit-only case');
+});
+
+test('Tag and custom sorting keep old Tag colors; Vice colors remain unchanged', () => {
+  const h = createTimeOfDayBubbleColorHarness();
+  const habit = { category: 'habit', tag: 'Hygiene', timeOfDay: 'First Thing' };
+  const vice = { category: 'vice', tag: 'Hygiene', timeOfDay: 'First Thing' };
+  h.sortSelect.value = 'tag';
+  assert.match(h.styleFor(habit, 'on'), /#dd2299/i);
+  h.sortSelect.value = 'custom';
+  assert.match(h.styleFor(habit, 'on'), /#dd2299/i);
+  h.sortSelect.value = 'timeOfDay';
+  assert.match(h.styleFor(vice, 'on'), /#dd2299/i);
+  assert.equal(h.state.habits.length, 0);
+});
