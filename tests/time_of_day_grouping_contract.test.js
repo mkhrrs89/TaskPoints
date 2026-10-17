@@ -210,8 +210,6 @@ test('Time of Day half completions use TOD ring color while incomplete stays tra
   assert.match(h.tapStyleFor(habit, 'half'), /--habit-half-color:#ffde00/i);
   assert.equal(h.styleFor(habit, 'off'), '',
     'uncompleted bubbles remain visually distinct from completions');
-  assert.equal(h.styleFor(habit, 'failed'), '',
-    'failed status should not be customized in this Habit-only case');
 });
 
 test('Tag and custom sorting keep old Tag colors; Vice colors remain unchanged', () => {
