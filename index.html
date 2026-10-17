@@ -8094,25 +8094,52 @@ function sortHabitsForMode(habits, sortMode) {
   return habits;
 }
 
+// Only the *view* key is normalized. Existing labels, Habit records, color
+// assignments and persisted order are not rewritten or merged in storage.
+function timeOfDayGroupKey(value) {
+  return String(value || '').normalize('NFKC').replace(/\s+/g, ' ').trim().toLocaleLowerCase('en-US');
+}
+
+function getTimeOfDayGroupLabel(key, fallback) {
+  const configured = [
+    ...(Array.isArray(state.timeOfDayGroups) ? state.timeOfDayGroups : []),
+    ...Object.keys(state.timeOfDayColors || {})
+  ];
+  return configured.find(name => timeOfDayGroupKey(name) === key)?.trim() || fallback;
+}
+
+function getTimeOfDayGroupColor(label) {
+  const colors = state.timeOfDayColors || {};
+  const direct = normalizeHexColor(colors[label]);
+  if (direct) return direct;
+  const key = timeOfDayGroupKey(label);
+  const matching = Object.keys(colors).find(name => timeOfDayGroupKey(name) === key && normalizeHexColor(colors[name]));
+  return matching ? normalizeHexColor(colors[matching]) : '';
+}
+
 function buildHabitRenderEntries(habits, sortMode) {
   if (sortMode === 'timeOfDay' || sortMode === 'tag') {
-    const field = sortMode === 'timeOfDay' ? 'timeOfDay' : 'tag';
+    const isTimeOfDay = sortMode === 'timeOfDay';
+    const field = isTimeOfDay ? 'timeOfDay' : 'tag';
     const groups = new Map(), singles = [];
     sortHabitsForMode(habits.slice(), 'custom').forEach(h => {
       const name = String(h[field] || '').trim();
       if (!name) { singles.push({ type: 'single', habit: h }); return; }
-      if (!groups.has(name)) groups.set(name, []);
-      groups.get(name).push(h);
+      const key = isTimeOfDay ? timeOfDayGroupKey(name) : name;
+      if (!groups.has(key)) groups.set(key, { tag: isTimeOfDay ? getTimeOfDayGroupLabel(key, name) : name, habits: [] });
+      groups.get(key).habits.push(h);
     });
-    const orderKey = sortMode === 'timeOfDay' ? 'taskpoints_time_of_day_group_order' : 'taskpoints_tag_group_order';
+    const orderKey = isTimeOfDay ? 'taskpoints_time_of_day_group_order' : 'taskpoints_tag_group_order';
     let saved = [];
     try { saved = JSON.parse(localStorage.getItem(orderKey) || '[]'); } catch (_) {}
     if (!Array.isArray(saved)) saved = [];
-    const names = [...groups.keys()].sort((a,b) => {
-      const ai = saved.indexOf(a), bi = saved.indexOf(b);
-      return ai >= 0 && bi >= 0 ? ai - bi : ai >= 0 ? -1 : bi >= 0 ? 1 : a.localeCompare(b);
+    const savedKeys = isTimeOfDay ? saved.map(timeOfDayGroupKey) : saved;
+    const keys = [...groups.keys()].sort((a,b) => {
+      const ai = savedKeys.indexOf(a), bi = savedKeys.indexOf(b);
+      return ai >= 0 && bi >= 0 ? ai - bi : ai >= 0 ? -1 : bi >= 0 ? 1
+        : groups.get(a).tag.localeCompare(groups.get(b).tag);
     });
-    return { entries: [...names.map(tag => ({ type: 'group', tag, habits: groups.get(tag) })), ...singles] };
+    return { entries: [...keys.map(key => ({ type: 'group', ...groups.get(key) })), ...singles] };
   }
   const tagCounts = new Map();
   habits.forEach(h => {
@@ -8634,7 +8661,7 @@ function renderHabits(){
     const rail = document.createElement('div');
     rail.className = 'habitGroupRail';
     if (isTaggedGroup) {
-      const color = sortMode === 'timeOfDay' ? normalizeHexColor(state.timeOfDayColors?.[section.tag]) : getHabitTagColor(section.tag);
+      const color = sortMode === 'timeOfDay' ? getTimeOfDayGroupColor(section.tag) : getHabitTagColor(section.tag);
       if (color) {
         const dark = darkenHex(color, 0.35) || color;
         rail.style.background = `linear-gradient(180deg, ${color} 0%, ${dark} 100%)`;
@@ -9384,17 +9411,19 @@ function moveHabitWithinGroup(id, tag, delta) {
   if (!h || h.retired) return;
 
   const category = h.category || 'habit';
-  const field = getHabitSortMode() === 'timeOfDay' ? 'timeOfDay' : 'tag';
+  const isTimeOfDay = getHabitSortMode() === 'timeOfDay';
+  const field = isTimeOfDay ? 'timeOfDay' : 'tag';
+  const groupKey = isTimeOfDay ? timeOfDayGroupKey(groupTag) : groupTag;
   const currentTag = (h[field] || '').trim();
 
   if (category === 'vice') return;
-  if (currentTag !== groupTag) return;
+  if ((isTimeOfDay ? timeOfDayGroupKey(currentTag) : currentTag) !== groupKey) return;
 
   const siblings = state.habits
     .filter(x =>
       !x.retired &&
       (x.category || 'habit') !== 'vice' &&
-      (x[field] || '').trim() === groupTag
+      (isTimeOfDay ? timeOfDayGroupKey(x[field]) : (x[field] || '').trim()) === groupKey
     )
     .slice()
     .sort((a,b) => {
@@ -9433,20 +9462,30 @@ function moveHabitWithinGroup(id, tag, delta) {
 function moveHabitGroup(tag, delta) {
   const mode = getHabitSortMode();
   if (mode === 'timeOfDay' || mode === 'tag') {
-    const field = mode === 'timeOfDay' ? 'timeOfDay' : 'tag';
-    const names = [...new Set(state.habits.filter(h => !h.retired && (h.category || 'habit') !== 'vice').map(h => String(h[field] || '').trim()).filter(Boolean))];
-    const key = mode === 'timeOfDay' ? 'taskpoints_time_of_day_group_order' : 'taskpoints_tag_group_order';
+    const isTimeOfDay = mode === 'timeOfDay';
+    const field = isTimeOfDay ? 'timeOfDay' : 'tag';
+    const groupKey = name => isTimeOfDay ? timeOfDayGroupKey(name) : name;
+    const groups = new Map();
+    state.habits.filter(h => !h.retired && (h.category || 'habit') !== 'vice').forEach(h => {
+      const name = String(h[field] || '').trim();
+      if (!name) return;
+      const identity = groupKey(name);
+      if (!groups.has(identity)) groups.set(identity, isTimeOfDay ? getTimeOfDayGroupLabel(identity, name) : name);
+    });
+    const key = isTimeOfDay ? 'taskpoints_time_of_day_group_order' : 'taskpoints_tag_group_order';
     let saved = [];
     try { saved = JSON.parse(localStorage.getItem(key) || '[]'); } catch (_) {}
     if (!Array.isArray(saved)) saved = [];
-    names.sort((a,b) => {
-      const ai = saved.indexOf(a), bi = saved.indexOf(b);
-      return ai >= 0 && bi >= 0 ? ai - bi : ai >= 0 ? -1 : bi >= 0 ? 1 : a.localeCompare(b);
+    const savedKeys = isTimeOfDay ? saved.map(groupKey) : saved;
+    const names = [...groups.keys()].sort((a,b) => {
+      const ai = savedKeys.indexOf(a), bi = savedKeys.indexOf(b);
+      return ai >= 0 && bi >= 0 ? ai - bi : ai >= 0 ? -1 : bi >= 0 ? 1
+        : groups.get(a).localeCompare(groups.get(b));
     });
-    const index = names.indexOf(String(tag || '').trim()), target = index + delta;
+    const index = names.indexOf(groupKey(String(tag || '').trim())), target = index + delta;
     if (index < 0 || target < 0 || target >= names.length) return;
     [names[index], names[target]] = [names[target], names[index]];
-    localStorage.setItem(key, JSON.stringify(names));
+    localStorage.setItem(key, JSON.stringify(names.map(name => groups.get(name))));
     renderHabits();
     return;
   }
