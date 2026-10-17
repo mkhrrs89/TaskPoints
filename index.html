@@ -2250,10 +2250,11 @@ function getHabitTagColor(tag) {
   return normalizeHexColor(colors[key]);
 }
 
-function getHabitBubbleStyleAttr(tag, status) {
-  if (!tag) return '';
+function getHabitBubbleStyleAttr(tag, status, colorOverride) {
   if (status !== 'on' && status !== 'failed' && status !== 'half') return '';
-  const color = getHabitTagColor(tag);
+  // Explicit override (including '') intentionally bypasses the ordinary Tag
+  // color. No color means the existing dark-teal .habitDay CSS remains in use.
+  const color = colorOverride === undefined ? getHabitTagColor(tag) : normalizeHexColor(colorOverride);
   if (!color) return '';
   const dark = darkenHex(color, 0.35) || color;
   const textColor = getContrastText(color);
@@ -2261,6 +2262,15 @@ function getHabitBubbleStyleAttr(tag, status) {
     return ` style="--habit-half-color:${color};--habit-half-glow:${color};"`;
   }
   return ` style="background:linear-gradient(135deg, ${color} 0%, ${dark} 100%);border-color:${dark};color:${textColor};"`;
+}
+
+// The mode changes only the visual projection, not Habit or tag settings.
+// Vices and all non-Time-of-Day Habit modes retain their original Tag colors.
+function getHabitBubbleStyleAttrForHabit(habit, status) {
+  if ((habit?.category || 'habit') !== 'vice' && getHabitSortMode() === 'timeOfDay') {
+    return getHabitBubbleStyleAttr(habit?.tag, status, getTimeOfDayGroupColor(habit?.timeOfDay));
+  }
+  return getHabitBubbleStyleAttr(habit?.tag, status);
 }
 function getHabitCompletionFraction(completion) {
   const raw = Number(completion?.completionFraction);
@@ -8414,7 +8424,7 @@ const daysHtml = days.map(d => {
   const isIcy = status === 'on' && Array.isArray(h.iceKeys) && h.iceKeys.includes(d.key);
   const isHalfCompleteNormalHabit = status === 'half' && !isShowerHabit(h);
   const isPastIncomplete = !on && d.key < dateKey(new Date());
-  const styleAttr = getHabitBubbleStyleAttr(h.tag, status);
+  const styleAttr = getHabitBubbleStyleAttrForHabit(h, status);
   return `<div class="habitDay ${status}${isHalfCompleteNormalHabit ? ' habit-half' : ''}${isIcy ? ' icy' : ''}${isPastIncomplete ? ' past-incomplete' : ''}"${styleAttr} data-habit="${h.id}" data-day="${d.key}">
     ${d.date.getDate()}
   </div>`;
@@ -9805,7 +9815,7 @@ function applyCanonicalHabitBubbleVisual(bubble, habit, dayKey, statusClass) {
 }
 
 function applyHabitBubbleStyle(el, habit, statusClass) {
-  const styleAttr = getHabitBubbleStyleAttr(habit.tag, statusClass);
+  const styleAttr = getHabitBubbleStyleAttrForHabit(habit, statusClass);
   if (styleAttr) {
     const styleValue = styleAttr.replace(/^ style="/, '').replace(/"$/, '');
     el.setAttribute('style', styleValue);
