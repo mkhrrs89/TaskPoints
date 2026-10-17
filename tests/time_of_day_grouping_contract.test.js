@@ -123,7 +123,7 @@ test('ordinary Tag sorting retains its original distinct-label behavior', () => 
   const h = createHomeTimeOfDayHarness();
   const groups = h.context.buildHabitRenderEntries(h.state.habits, 'tag').entries
     .filter(entry => entry.type === 'group');
-  assert.deepEqual(Array.from(groups, entry => [entry.tag, entry.habits.length]),
-    [['Daily', 2], ['Night', 1], ['daily', 1]]);
+  assert.deepEqual(Object.fromEntries(Array.from(groups, entry => [entry.tag, entry.habits.length])),
+    { Daily: 2, daily: 1, Night: 1 });
   assert.equal(h.calls.saves, 0);
 });
