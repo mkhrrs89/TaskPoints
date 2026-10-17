@@ -148,6 +148,7 @@ function createTimeOfDayBubbleColorHarness() {
   const context = {
     state,
     $: id => id === 'habitsSortSelect' ? sortSelect : null,
+    getHabitSortMode() { return sortSelect.value; },
     localStorage: { getItem() { return null; } },
     normalizeHexColor(value) {
       return /^#[0-9a-f]{6}$/i.test(String(value || '')) ? value : null;
