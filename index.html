@@ -8272,6 +8272,58 @@ function isHabitWeeklyCompleteForDays(h, days) {
   return hasValidWeeklyThreshold && completedCountForVisibleWeek >= weeklyThreshold;
 }
 
+// Weekly silver milestones begin with a single opening credit for every
+// Habit already present during Oct 12–18, 2026. Older silver weeks do not
+// retroactively accumulate. Future weeks derive from the *same* full/half-day
+// threshold used by the silver slab, so each Monday week counts only once.
+// This remains read-only: no extra save, journal, or mutation on a Habit tap.
+const HABIT_SILVER_WEEK_COUNTER_START = '2026-10-12';
+const HABIT_SILVER_WEEK_COUNTER_NEXT = '2026-10-19';
+
+function computeHabitSilverWeekCounts(habits, completions, currentDayKey = getCurrentTaskPointsDayKey()) {
+  const result = new Map();
+  const fractionsByHabit = new Map();
+  for (const completion of (Array.isArray(completions) ? completions : [])) {
+    if (completion?.source !== 'habit' || !completion.habitId || !completion.dayKey) continue;
+    const habitId = String(completion.habitId);
+    if (!fractionsByHabit.has(habitId)) fractionsByHabit.set(habitId, new Map());
+    const fractionMap = fractionsByHabit.get(habitId);
+    if (!fractionMap.has(completion.dayKey)) {
+      fractionMap.set(completion.dayKey, getHabitCompletionFraction(completion));
+    }
+  }
+
+  const currentWeekKey = dateKey(startOfWeek(fromKey(currentDayKey)));
+  for (const habit of (Array.isArray(habits) ? habits : [])) {
+    if (!habit?.id || (habit.category || 'habit') === 'vice') continue;
+    const created = habit.createdAtISO ? new Date(habit.createdAtISO) : null;
+    const createdKey = created && !Number.isNaN(created.getTime())
+      ? getCurrentTaskPointsDayKey(created) : '';
+    const openingCredit = !createdKey || createdKey < HABIT_SILVER_WEEK_COUNTER_NEXT ? 1 : 0;
+    const rawThreshold = Number(habit.daysPerCompleteWeek);
+    if (!Number.isFinite(rawThreshold) || rawThreshold <= 0 || rawThreshold > 7) {
+      result.set(String(habit.id), openingCredit);
+      continue;
+    }
+    const threshold = Math.round(rawThreshold);
+    const fractions = fractionsByHabit.get(String(habit.id));
+    const totalsByWeek = new Map();
+    // Include legacy doneKeys with no matching completion as one full day,
+    // exactly as the existing silver-week evaluator does.
+    for (const key of new Set(Array.isArray(habit.doneKeys) ? habit.doneKeys : [])) {
+      if (typeof key !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(key) || key > currentDayKey) continue;
+      const weekKey = dateKey(startOfWeek(fromKey(key)));
+      if (weekKey < HABIT_SILVER_WEEK_COUNTER_NEXT || weekKey > currentWeekKey) continue;
+      const fraction = fractions?.get(key) ?? 1;
+      totalsByWeek.set(weekKey, (totalsByWeek.get(weekKey) || 0) + fraction);
+    }
+    const earnedWeeks = Array.from(totalsByWeek.values())
+      .filter(total => total >= threshold).length;
+    result.set(String(habit.id), openingCredit + earnedWeeks);
+  }
+  return result;
+}
+
 function addHabitWeeklyCompleteClasses(row, isWeeklyComplete, previousIsWeeklyComplete, nextIsWeeklyComplete) {
   if (!isWeeklyComplete) return;
 
@@ -8401,6 +8453,7 @@ function renderHabitRow(h, days, wrap, options = {}) {
   const failedStreak = Number(h.__failedStreak || 0);
   const completion = Number(h.__completion || 0);
   const streakBonusText = getHabitCurrentStreakBonusText(h, streak);
+  const silverWeeks = Number(options.silverWeekCount) || 0;
 
 const row = document.createElement('div');
 row.className = 'habitRow';
@@ -8501,6 +8554,7 @@ const daysHtml = days.map(d => {
         ${failedStreak}d
       </div>
     ` : '')}
+      <span class="tag habit-silver-weeks" data-silver-weeks="${silverWeeks}" title="Silver weeks earned since Oct 12, 2026; existing Habits start at 1" aria-label="${silverWeeks} silver ${silverWeeks === 1 ? 'week' : 'weeks'}">${silverWeeks} wk</span>
       <div class="tag bg-zinc-200/60 dark:bg-zinc-700/60 text-orange-400">
         ${completion}%
       </div>
@@ -8636,6 +8690,7 @@ function renderHabits(){
   empty.classList.add('hidden');
 
   const { entries } = buildHabitRenderEntries(habits, sortMode);
+  const silverWeekCounts = computeHabitSilverWeekCounts(habits, state.completions);
 
   // Render every visible habit inside the same left-rail geometry.
   // Named multi-habit tag groups get a colored vertical label rail.
@@ -8716,6 +8771,7 @@ function renderHabits(){
       showTag: !isTaggedGroup,
       isGrouped: true,
       groupMoveTag: isTaggedGroup ? section.tag : '',
+      silverWeekCount: silverWeekCounts.get(String(h.id)) || 0,
       isWeeklyCompleteForVisibleWeek: isWeeklyComplete,
       previousIsWeeklyComplete: sectionRows[index - 1]?.isWeeklyComplete === true,
       nextIsWeeklyComplete: sectionRows[index + 1]?.isWeeklyComplete === true,
