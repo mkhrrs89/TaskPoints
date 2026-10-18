@@ -25,8 +25,8 @@ test('Tournament header cleanup preserves Export, Import and the championship br
   assert.match(html, /data-import-input/);
   assert.match(html, /id="tournamentBracket"/);
   assert.match(html, /class="tournament-bracket-scroll"/);
-  assert.match(html, /<h2 class="text-lg font-semibold mb-1">Tournament<\/h2>/);
-  assert.match(html, /Current Season tournament bracket view\./);
+  assert.match(html, /<h2 class="text-lg font-semibold mb-4">Tournament<\/h2>/);
+  assert.doesNotMatch(html, /Current Season tournament bracket view\./);
   assert.match(html, /<a href="season\.html" class="btn btn-teal btn-toolbar nav-btn">Season<\/a>/);
   assert.match(html, /<a href="settings\.html" class="btn btn-teal btn-toolbar nav-btn">Settings<\/a>/);
 });
