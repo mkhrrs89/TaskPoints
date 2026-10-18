@@ -8249,7 +8249,40 @@ function getHabitCurrentStreakBonusText(h, streak) {
   return text ? ` (${text})` : '';
 }
   
-function isHabitWeeklyCompleteForDays(h, days) {
+// For one Home Habits paint, index only currently visible Habit/day rows.
+// This replaces repeated linear scans across thousands of historical entries
+// while preserving first-match completion ordering and the legacy fallback.
+function buildVisibleHabitCompletionLookup(habits, days, completions) {
+  const requested = new Set();
+  for (const habit of habits) {
+    if (!habit?.id) continue;
+    for (const day of days) {
+      if (day?.key && Array.isArray(habit.doneKeys) && habit.doneKeys.includes(day.key)) {
+        requested.add(`${habit.id}|\u0000|${day.key}`);
+      }
+    }
+  }
+  const found = new Map();
+  if (!requested.size) return found;
+  for (const entry of (Array.isArray(completions) ? completions : [])) {
+    if (entry?.source !== 'habit' || entry.habitId == null || !entry.dayKey) continue;
+    const key = `${entry.habitId}|\u0000|${entry.dayKey}`;
+    if (requested.has(key) && !found.has(key)) found.set(key, entry);
+    if (found.size === requested.size) break;
+  }
+  return found;
+}
+
+function findHabitCompletionForDay(habitId, dayKey, visibleLookup = null) {
+  if (visibleLookup instanceof Map) {
+    return visibleLookup.get(`${habitId}|\u0000|${dayKey}`) || null;
+  }
+  return Array.isArray(state.completions)
+    ? state.completions.find(c => c?.source === 'habit' && c?.habitId === habitId && c?.dayKey === dayKey) || null
+    : null;
+}
+
+function isHabitWeeklyCompleteForDays(h, days, visibleLookup = null) {
   h.doneKeys = Array.isArray(h.doneKeys) ? h.doneKeys : [];
   const weeklyThresholdRaw = Number(h.daysPerCompleteWeek);
   const hasValidWeeklyThreshold = Number.isFinite(weeklyThresholdRaw)
@@ -8259,9 +8292,7 @@ function isHabitWeeklyCompleteForDays(h, days) {
   const completedCountForVisibleWeek = days.reduce((count, d) => {
     if (!h.doneKeys.includes(d.key)) return count;
 
-    const completion = Array.isArray(state.completions)
-      ? state.completions.find(c => c?.source === 'habit' && c?.habitId === h.id && c?.dayKey === d.key)
-      : null;
+    const completion = findHabitCompletionForDay(h.id, d.key, visibleLookup);
 
     // Older habit days may be marked complete in doneKeys without having
     // a matching completion record. Since the bubble displays as fully
@@ -8439,7 +8470,7 @@ function renderHabitRow(h, days, wrap, options = {}) {
   const isGrouped = options.isGrouped ?? false;
 
   const isWeeklyCompleteForVisibleWeek = options.isWeeklyCompleteForVisibleWeek
-    ?? isHabitWeeklyCompleteForDays(h, days);
+    ?? isHabitWeeklyCompleteForDays(h, days, options.visibleCompletionLookup);
   const appendRow = options.appendRow
     ?? ((rowToAppend) => wrap.appendChild(rowToAppend));
 
@@ -8466,7 +8497,7 @@ addHabitWeeklyCompleteClasses(
 );
 
 const daysHtml = days.map(d => {
-  const status = getHabitBubbleStatusClass(h, d.key);
+  const status = getHabitBubbleStatusClass(h, d.key, options.visibleCompletionLookup);
   const on = status !== 'off';
   const isIcy = status === 'on' && Array.isArray(h.iceKeys) && h.iceKeys.includes(d.key);
   const isHalfCompleteNormalHabit = status === 'half' && !isShowerHabit(h);
@@ -8685,6 +8716,7 @@ function renderHabits(){
 
   const { entries } = buildHabitRenderEntries(habits, sortMode);
   const silverWeekCounts = computeHabitSilverWeekCounts(habits, state.completions);
+  const visibleCompletionLookup = buildVisibleHabitCompletionLookup(habits, days, state.completions);
 
   // Render every visible habit inside the same left-rail geometry.
   // Named multi-habit tag groups get a colored vertical label rail.
@@ -8756,7 +8788,7 @@ function renderHabits(){
 
     const sectionRows = section.habits.map(h => ({
       h,
-      isWeeklyComplete: isHabitWeeklyCompleteForDays(h, days)
+      isWeeklyComplete: isHabitWeeklyCompleteForDays(h, days, visibleCompletionLookup)
     }));
     const appendSectionRow = createHabitWeekCompleteAppender(body);
 
@@ -8766,6 +8798,7 @@ function renderHabits(){
       isGrouped: true,
       groupMoveTag: isTaggedGroup ? section.tag : '',
       silverWeekCount: silverWeekCounts.get(String(h.id)) || 0,
+      visibleCompletionLookup,
       isWeeklyCompleteForVisibleWeek: isWeeklyComplete,
       previousIsWeeklyComplete: sectionRows[index - 1]?.isWeeklyComplete === true,
       nextIsWeeklyComplete: sectionRows[index + 1]?.isWeeklyComplete === true,
@@ -9832,15 +9865,13 @@ function scheduleHabitStatsRefresh() {
   }, 1200);
 }
 
-function getHabitBubbleStatusClass(h, dayKey) {
+function getHabitBubbleStatusClass(h, dayKey, visibleLookup = null) {
   const isDone = Array.isArray(h?.doneKeys) && h.doneKeys.includes(dayKey);
   if (!isDone) return 'off';
 
   const isHabit = (h?.category || 'habit') !== 'vice';
   if (isHabit && !isShowerHabit(h)) {
-    const completion = Array.isArray(state.completions)
-      ? state.completions.find(c => c?.source === 'habit' && c?.habitId === h.id && c?.dayKey === dayKey)
-      : null;
+    const completion = findHabitCompletionForDay(h.id, dayKey, visibleLookup);
     if (completion && getHabitCompletionFraction(completion) === 0.5) {
       return 'half';
     }
