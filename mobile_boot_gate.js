@@ -5,7 +5,9 @@ const COORDINATOR_SCRIPT = `<script id="tp-mobile-boot-runtime-coordinator">
   if (window.__tpMobileBootCoordinator) return;
 
   const WORD = "TASKPOINTS";
-  const FINAL_HOLD_MS = 1000;
+  // Keep the finished TASKPOINTS animation visible briefly, but avoid an
+  // extra full second of blank-app waiting once runtime initialization is ready.
+  const FINAL_HOLD_MS = 160;
   const shouldGate = document.documentElement.classList.contains("tp-boot-pending");
   const originalCompleteBootView = window.__tpCompleteBootView;
   const titleEl = document.getElementById("matrixTitle");
