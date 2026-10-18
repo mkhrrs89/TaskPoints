@@ -8272,13 +8272,11 @@ function isHabitWeeklyCompleteForDays(h, days) {
   return hasValidWeeklyThreshold && completedCountForVisibleWeek >= weeklyThreshold;
 }
 
-// Weekly silver milestones begin with a single opening credit for every
-// Habit already present during Oct 12–18, 2026. Older silver weeks do not
-// retroactively accumulate. Future weeks derive from the *same* full/half-day
-// threshold used by the silver slab, so each Monday week counts only once.
+// Silver weeks count only after an actual weekly threshold is reached,
+// starting Monday Oct 12, 2026. No opening credit and no historical backfill.
+// Use the existing full/half-day slab threshold, once per Monday–Sunday week.
 // This remains read-only: no extra save, journal, or mutation on a Habit tap.
 const HABIT_SILVER_WEEK_COUNTER_START = '2026-10-12';
-const HABIT_SILVER_WEEK_COUNTER_NEXT = '2026-10-19';
 
 function computeHabitSilverWeekCounts(habits, completions, currentDayKey = getCurrentTaskPointsDayKey()) {
   const result = new Map();
@@ -8296,13 +8294,9 @@ function computeHabitSilverWeekCounts(habits, completions, currentDayKey = getCu
   const currentWeekKey = dateKey(startOfWeek(fromKey(currentDayKey)));
   for (const habit of (Array.isArray(habits) ? habits : [])) {
     if (!habit?.id || (habit.category || 'habit') === 'vice') continue;
-    const created = habit.createdAtISO ? new Date(habit.createdAtISO) : null;
-    const createdKey = created && !Number.isNaN(created.getTime())
-      ? getCurrentTaskPointsDayKey(created) : '';
-    const openingCredit = !createdKey || createdKey < HABIT_SILVER_WEEK_COUNTER_NEXT ? 1 : 0;
     const rawThreshold = Number(habit.daysPerCompleteWeek);
     if (!Number.isFinite(rawThreshold) || rawThreshold <= 0 || rawThreshold > 7) {
-      result.set(String(habit.id), openingCredit);
+      result.set(String(habit.id), 0);
       continue;
     }
     const threshold = Math.round(rawThreshold);
@@ -8313,13 +8307,13 @@ function computeHabitSilverWeekCounts(habits, completions, currentDayKey = getCu
     for (const key of new Set(Array.isArray(habit.doneKeys) ? habit.doneKeys : [])) {
       if (typeof key !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(key) || key > currentDayKey) continue;
       const weekKey = dateKey(startOfWeek(fromKey(key)));
-      if (weekKey < HABIT_SILVER_WEEK_COUNTER_NEXT || weekKey > currentWeekKey) continue;
+      if (weekKey < HABIT_SILVER_WEEK_COUNTER_START || weekKey > currentWeekKey) continue;
       const fraction = fractions?.get(key) ?? 1;
       totalsByWeek.set(weekKey, (totalsByWeek.get(weekKey) || 0) + fraction);
     }
     const earnedWeeks = Array.from(totalsByWeek.values())
       .filter(total => total >= threshold).length;
-    result.set(String(habit.id), openingCredit + earnedWeeks);
+    result.set(String(habit.id), earnedWeeks);
   }
   return result;
 }
@@ -8554,7 +8548,7 @@ const daysHtml = days.map(d => {
         ${failedStreak}d
       </div>
     ` : '')}
-      <span class="tag habit-silver-weeks" data-silver-weeks="${silverWeeks}" title="Silver weeks earned since Oct 12, 2026; existing Habits start at 1" aria-label="${silverWeeks} silver ${silverWeeks === 1 ? 'week' : 'weeks'}">${silverWeeks} wk</span>
+      <span class="tag habit-silver-weeks" data-silver-weeks="${silverWeeks}" title="Weeks meeting the silver threshold since Oct 12, 2026" aria-label="${silverWeeks} silver ${silverWeeks === 1 ? 'week' : 'weeks'}">${silverWeeks} wk</span>
       <div class="tag bg-zinc-200/60 dark:bg-zinc-700/60 text-orange-400">
         ${completion}%
       </div>
