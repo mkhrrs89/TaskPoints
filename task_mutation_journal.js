@@ -304,14 +304,16 @@
     );
   }
 
-  function protectNewerPersistedTaskRows(candidateState, options = {}) {
+  function protectNewerPersistedTaskRows(candidateState, options = {}, suppliedSavedState = null) {
     if (options.allowDestructiveOverwrite === true) return candidateState;
     if ((options.storageKey || STORAGE_KEY) !== STORAGE_KEY) return candidateState;
     if (!candidateState || typeof candidateState !== 'object' || !Array.isArray(candidateState.tasks)) return candidateState;
 
-    let savedState;
-    try { savedState = persistedState(); }
-    catch (_) { return candidateState; }
+    let savedState = suppliedSavedState;
+    if (!savedState) {
+      try { savedState = persistedState(); }
+      catch (_) { return candidateState; }
+    }
     if (!Array.isArray(savedState?.tasks) || savedState.tasks.length === 0) return candidateState;
 
     const savedById = new Map();
@@ -347,6 +349,64 @@
       });
     } catch (_) {}
     return { ...candidateState, tasks };
+  }
+
+  // The Home screen may hold an older in-memory snapshot while another
+  // journal compacts (or another tab commits an SCWM entry). Once that
+  // journal clears, a delayed Home season/score save must not delete the
+  // newer, already-persisted metric completion. Protect only recently
+  // persisted *missing IDs*, not edits or explicit import/reset operations.
+  function protectRecentScwmRowsFromStaleHomeSave(candidateState, savedState, options = {}) {
+    if (options.allowDestructiveOverwrite === true
+      || options.allowScwmCompletionRemoval === true
+      || (options.storageKey || STORAGE_KEY) !== STORAGE_KEY) return candidateState;
+    const pathname = String(global.location?.pathname || '');
+    const homePage = pathname === '/' || pathname === '' || pathname.endsWith('/index.html');
+    const savePath = String(options.savePath || options.source || options.reason || '');
+    if (!homePage && !savePath.startsWith('home-')) return candidateState;
+    if (!Array.isArray(candidateState?.completions) || !Array.isArray(savedState?.completions)) return candidateState;
+
+    const currentIds = new Set(candidateState.completions
+      .filter((entry) => entry?.id != null)
+      .map((entry) => String(entry.id)));
+    const protectedRows = [];
+    const cutoff = Date.now() - 14 * 86400000;
+    const isScwm = (entry) => {
+      const title = String(entry?.title || '');
+      return title.startsWith('Sleep Score') || title.startsWith('Mood Score')
+        || title.startsWith('Work Score') || title.startsWith('Calories');
+    };
+    // Do not restore an older entry deliberately replaced by another record
+    // of the same category and day (or an explicit SCWM deletion).
+    const categoryDay = (entry) => {
+      const title = String(entry?.title || '');
+      const category = title.startsWith('Sleep Score') ? 'sleep'
+        : title.startsWith('Mood Score') ? 'mood'
+        : title.startsWith('Work Score') ? 'work'
+        : title.startsWith('Calories') ? 'calories' : '';
+      const date = String(entry?.completedAtISO || '').slice(0, 10);
+      return category && /^\d{4}-\d{2}-\d{2}$/.test(date) ? category + ':' + date : '';
+    };
+    const currentCategoryDays = new Set(candidateState.completions.map(categoryDay).filter(Boolean));
+    for (const entry of savedState.completions) {
+      const id = String(entry?.id || '');
+      if (!id || !isScwm(entry) || currentIds.has(id)) continue;
+      const at = Date.parse(entry?.completedAtISO || '');
+      if (!Number.isFinite(at) || at < cutoff || at > Date.now() + 86400000) continue;
+      const slot = categoryDay(entry);
+      if (slot && currentCategoryDays.has(slot)) continue;
+      currentIds.add(id);
+      if (slot) currentCategoryDays.add(slot);
+      protectedRows.push(clone(entry));
+    }
+    if (!protectedRows.length) return candidateState;
+    try {
+      global.TaskPointsPerf?.mark?.('taskMutation.staleScwmRowsProtected', {
+        count: protectedRows.length,
+        savePath
+      });
+    } catch (_) {}
+    return { ...candidateState, completions: [...protectedRows, ...candidateState.completions] };
   }
 
   function persistPending(reason = 'quiet') {
@@ -509,7 +569,12 @@
   if (originalSaveStateSnapshot) {
     core.saveStateSnapshot = function saveStateSnapshotWithTaskJournal(state, options = {}) {
       const current = readRecord();
-      const protectedState = protectNewerPersistedTaskRows(state, options);
+      // Read the persisted snapshot once for both stale-task and stale-SCWM
+      // guards; large TaskPoints datasets should not be parsed twice.
+      let savedForProtection = null;
+      try { savedForProtection = persistedState(); } catch (_) {}
+      const protectedTasks = protectNewerPersistedTaskRows(state, options, savedForProtection);
+      const protectedState = protectRecentScwmRowsFromStaleHomeSave(protectedTasks, savedForProtection, options);
       const candidate = current.malformed || isEmpty(current.record)
         ? protectedState
         : applyRecord(protectedState, current.record);

@@ -287,6 +287,14 @@
   }
 
   function fastSave() {
+    // A user submitting Sleep, Calories, Work, or Mood data must never
+    // depend on a future animation/idle/pagehide event for the *only* save.
+    // The journal-backed fast path suppresses this full save when it has
+    // safely written the mutation first; any fallback goes through now.
+    if (commitDepth > 0) {
+      if (pendingSave) flushSave();
+      return originals.save.apply(this, arguments);
+    }
     if (!scwmBusy()) return originals.save.apply(this, arguments);
     pendingSave = { thisArg: this, args: Array.from(arguments) };
     status.savesDeferred += 1;

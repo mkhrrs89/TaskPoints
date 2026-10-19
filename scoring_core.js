@@ -5712,10 +5712,13 @@ if (maxEntries !== null && finalSchedules.length > maxEntries) {
   function normalizePlayer(player) {
     if (!player || typeof player !== 'object' || Array.isArray(player)) return player;
     const greed = Number(player.greed);
+    const streaky = Number(player.streaky);
     return {
       ...player,
       pid: normalizePlayerPid(player.pid),
-      greed: Number.isFinite(greed) ? Math.min(100, Math.max(0, greed)) : 0
+      greed: Number.isFinite(greed) ? Math.min(100, Math.max(0, greed)) : 0,
+      // Placeholder: 0–100, not used in simulation or OVR.
+      streaky: Number.isFinite(streaky) ? Math.min(100, Math.max(0, streaky)) : 0
     };
   }
 
