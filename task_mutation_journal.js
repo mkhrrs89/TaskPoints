@@ -304,14 +304,16 @@
     );
   }
 
-  function protectNewerPersistedTaskRows(candidateState, options = {}) {
+  function protectNewerPersistedTaskRows(candidateState, options = {}, suppliedSavedState = null) {
     if (options.allowDestructiveOverwrite === true) return candidateState;
     if ((options.storageKey || STORAGE_KEY) !== STORAGE_KEY) return candidateState;
     if (!candidateState || typeof candidateState !== 'object' || !Array.isArray(candidateState.tasks)) return candidateState;
 
-    let savedState;
-    try { savedState = persistedState(); }
-    catch (_) { return candidateState; }
+    let savedState = suppliedSavedState;
+    if (!savedState) {
+      try { savedState = persistedState(); }
+      catch (_) { return candidateState; }
+    }
     if (!Array.isArray(savedState?.tasks) || savedState.tasks.length === 0) return candidateState;
 
     const savedById = new Map();
@@ -383,7 +385,7 @@
         : title.startsWith('Work Score') ? 'work'
         : title.startsWith('Calories') ? 'calories' : '';
       const date = String(entry?.completedAtISO || '').slice(0, 10);
-      return category && /^\\d{4}-\\d{2}-\\d{2}$/.test(date) ? category + ':' + date : '';
+      return category && /^\d{4}-\d{2}-\d{2}$/.test(date) ? category + ':' + date : '';
     };
     const currentCategoryDays = new Set(candidateState.completions.map(categoryDay).filter(Boolean));
     for (const entry of savedState.completions) {
@@ -567,13 +569,12 @@
   if (originalSaveStateSnapshot) {
     core.saveStateSnapshot = function saveStateSnapshotWithTaskJournal(state, options = {}) {
       const current = readRecord();
-      const protectedTasks = protectNewerPersistedTaskRows(state, options);
-      // SCWM's durable journal may have compacted after this Home state was
-      // captured. Preserve recent persisted rows even when that journal has
-      // already been verified and cleared.
-      let savedForScwm = null;
-      try { savedForScwm = persistedState(); } catch (_) {}
-      const protectedState = protectRecentScwmRowsFromStaleHomeSave(protectedTasks, savedForScwm, options);
+      // Read the persisted snapshot once for both stale-task and stale-SCWM
+      // guards; large TaskPoints datasets should not be parsed twice.
+      let savedForProtection = null;
+      try { savedForProtection = persistedState(); } catch (_) {}
+      const protectedTasks = protectNewerPersistedTaskRows(state, options, savedForProtection);
+      const protectedState = protectRecentScwmRowsFromStaleHomeSave(protectedTasks, savedForProtection, options);
       const candidate = current.malformed || isEmpty(current.record)
         ? protectedState
         : applyRecord(protectedState, current.record);
