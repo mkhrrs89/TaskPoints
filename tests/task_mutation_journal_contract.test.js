@@ -410,3 +410,62 @@ test('compact task verification still rejects substantive field corruption', () 
   assert.equal(h.getSaveCalls(), 1);
   assert.ok(h.storage.getItem(JOURNAL_KEY), 'journal must remain durable after substantive verification failure');
 });
+
+test('stale Home Season save cannot erase previously committed Sleep and Mood entries after journal clears', () => {
+  const now = new Date();
+  now.setHours(12, 0, 0, 0);
+  const when = now.toISOString();
+  const sleep = { id: 'sleep-committed', title: 'Sleep Score (87) — Rest 6', points: 9.3, completedAtISO: when, source: 'metric', sleepRested: 6 };
+  const mood = { id: 'mood-committed', title: 'Mood Score (3.75)', points: 3.75, completedAtISO: when, source: 'metric', moodNotes: 'Important private note' };
+  const h = makeHarness();
+  const saved = JSON.parse(h.storage.getItem(STORAGE_KEY));
+  saved.completions.unshift(sleep, mood);
+  h.storage.setItem(STORAGE_KEY, JSON.stringify(saved));
+  const oldHome = { ...saved, completions: saved.completions.filter((c) => c.id !== sleep.id && c.id !== mood.id) };
+  const result = h.core.saveStateSnapshot(oldHome, { savePath: 'home-season-slate-idle-materialization' });
+  assert.ok(result.state.completions.some((c) => c.id === sleep.id));
+  assert.ok(result.state.completions.some((c) => c.id === mood.id));
+  const persisted = JSON.parse(h.storage.getItem(STORAGE_KEY));
+  assert.deepEqual(persisted.completions.find((c) => c.id === sleep.id), sleep);
+  assert.deepEqual(persisted.completions.find((c) => c.id === mood.id), mood);
+  assert.equal(h.storage.getItem(JOURNAL_KEY), null, 'no pending journal exists to rescue lost rows');
+});
+
+test('stale Home save protects recent SCWM once but does not duplicate previously matching entries', () => {
+  const now = new Date();
+  now.setHours(12, 0, 0, 0);
+  const row = { id: 'mood-saved', title: 'Mood Score (4)', points: 4, source: 'metric', completedAtISO: now.toISOString() };
+  const h = makeHarness();
+  const state = JSON.parse(h.storage.getItem(STORAGE_KEY));
+  state.completions.push(row);
+  h.storage.setItem(STORAGE_KEY, JSON.stringify(state));
+  h.core.saveStateSnapshot({ ...state, completions: state.completions.filter((c) => c.id !== row.id) });
+  let result = JSON.parse(h.storage.getItem(STORAGE_KEY));
+  assert.equal(result.completions.filter((c) => c.id === row.id).length, 1);
+  h.core.saveStateSnapshot(result);
+  result = JSON.parse(h.storage.getItem(STORAGE_KEY));
+  assert.equal(result.completions.filter((c) => c.id === row.id).length, 1);
+});
+
+test('SCWM guard allows explicit import/reset and Log deletion, never resurrecting intentionally replaced same-day rows', () => {
+  const when = new Date().toISOString();
+  const row = { id: 'mood-before', title: 'Mood Score (2)', points: 2, source: 'metric', completedAtISO: when };
+  const h = makeHarness();
+  const persisted = JSON.parse(h.storage.getItem(STORAGE_KEY));
+  persisted.completions.push(row);
+  h.storage.setItem(STORAGE_KEY, JSON.stringify(persisted));
+  const replacement = { ...row, id: 'mood-after', title: 'Mood Score (4)', points: 4 };
+  const replaced = { ...persisted, completions: [...persisted.completions.filter(c => c.id !== row.id), replacement] };
+  h.core.saveStateSnapshot(replaced, { savePath: 'general-scwm-user-edit' });
+  assert.ok(!JSON.parse(h.storage.getItem(STORAGE_KEY)).completions.some(c => c.id === row.id));
+
+  h.storage.setItem(STORAGE_KEY, JSON.stringify(persisted));
+  h.context.location = { pathname: '/log.html' };
+  h.core.saveStateSnapshot({ ...persisted, completions: persisted.completions.filter(c => c.id !== row.id) }, { savePath: 'log-delete' });
+  assert.ok(!JSON.parse(h.storage.getItem(STORAGE_KEY)).completions.some(c => c.id === row.id));
+
+  h.storage.setItem(STORAGE_KEY, JSON.stringify(persisted));
+  h.context.location = { pathname: '/' };
+  h.core.saveStateSnapshot({ ...persisted, completions: persisted.completions.filter(c => c.id !== row.id) }, { allowDestructiveOverwrite: true });
+  assert.ok(!JSON.parse(h.storage.getItem(STORAGE_KEY)).completions.some(c => c.id === row.id));
+});
