@@ -2475,6 +2475,11 @@ header,
         #9ca3af
       ) !important;
       color:#b91c1c !important;
+      /* iOS renders the ✓ glyph with an unusually thin default stroke.
+         Weight plus a red text stroke makes it clearly bold without
+         changing the white button or any completion interaction. */
+      font-weight:900 !important;
+      -webkit-text-stroke:1.6px currentColor;
       border:none !important;
       box-shadow:none !important;
     }
@@ -3021,6 +3026,24 @@ header,
 
 .habitRow .tag.streak-pill.failed-streak-pill{
   color:#ef4444;
+}
+
+/* Lifetime silver-week milestone count; keep its silver appearance even
+   alongside the generic orange Habit metric tags. */
+.habitRow .habitLeft .tag.habit-silver-weeks {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 6px !important;
+  border: 1px solid rgba(203, 213, 225, 0.48) !important;
+  border-radius: 6px !important;
+  background: linear-gradient(145deg, rgba(203, 213, 225, 0.16), rgba(100, 116, 139, 0.18)) !important;
+  color: #e2e8f0 !important;
+  font-size: 11px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.35;
+  white-space: nowrap;
 }
 
 /* Habits/Vices reorder arrows: remove faint outer ring from base .btn styles */

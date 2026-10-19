@@ -161,6 +161,9 @@
     let saveTimer = null;
     let notesDirty = false;
     let loadedNotesValue = "";
+    // The authoritative/dirty markers are durable state transitions, not
+    // per-character data. One successful write per editing session suffices.
+    let notesCacheMarkersEstablished = false;
 
     function getStoredState() {
       if (window.TaskPointsCore?.loadAppState) {
@@ -177,7 +180,7 @@
 
     function setStatus(message) {
       if (!notesStatus) return;
-      notesStatus.textContent = message;
+      if (notesStatus.textContent !== message) notesStatus.textContent = message;
     }
 
     function getBestNotesTextFromStorage() {
@@ -319,7 +322,13 @@
         setStatus("Saved locally");
         return false;
       }
-      try { localStorage.removeItem(NOTES_DIRTY_KEY); } catch (_) {}
+      try {
+        localStorage.removeItem(NOTES_DIRTY_KEY);
+        notesCacheMarkersEstablished = false;
+      } catch (_) {
+        // The cache remains authoritative and dirty; retry reconciliation
+        // rather than losing notes if clearing its marker fails.
+      }
       loadedNotesValue = value;
       notesDirty = false;
       window.dispatchEvent(new CustomEvent("taskpoints-notes-updated", {
@@ -336,11 +345,18 @@
         saveTimer = null;
       }
       try {
+        // Retain the crash-safe full note write on every input. Avoid two
+        // redundant synchronous storage writes and repeated DOM mutations
+        // on the rest of the keystrokes in this editing session.
         localStorage.setItem(NOTES_STORAGE_KEY, notesInput?.value || "");
-        localStorage.setItem(NOTES_AUTHORITY_KEY, "1");
-        localStorage.setItem(NOTES_DIRTY_KEY, "1");
+        if (!notesCacheMarkersEstablished) {
+          localStorage.setItem(NOTES_AUTHORITY_KEY, "1");
+          localStorage.setItem(NOTES_DIRTY_KEY, "1");
+          notesCacheMarkersEstablished = true;
+        }
         setStatus("Saved");
       } catch (err) {
+        notesCacheMarkersEstablished = false;
         console.error("Failed to cache notes", err);
         setStatus("Save pending");
       }
@@ -357,6 +373,7 @@
       notesInput.value = notesText;
       loadedNotesValue = notesText;
       notesDirty = false;
+      notesCacheMarkersEstablished = false;
     }
 
     function formatCompactDate(date) {

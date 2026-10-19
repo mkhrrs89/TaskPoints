@@ -2250,10 +2250,11 @@ function getHabitTagColor(tag) {
   return normalizeHexColor(colors[key]);
 }
 
-function getHabitBubbleStyleAttr(tag, status) {
-  if (!tag) return '';
+function getHabitBubbleStyleAttr(tag, status, colorOverride) {
   if (status !== 'on' && status !== 'failed' && status !== 'half') return '';
-  const color = getHabitTagColor(tag);
+  // Explicit override (including '') intentionally bypasses the ordinary Tag
+  // color. No color means the existing dark-teal .habitDay CSS remains in use.
+  const color = colorOverride === undefined ? getHabitTagColor(tag) : normalizeHexColor(colorOverride);
   if (!color) return '';
   const dark = darkenHex(color, 0.35) || color;
   const textColor = getContrastText(color);
@@ -2261,6 +2262,15 @@ function getHabitBubbleStyleAttr(tag, status) {
     return ` style="--habit-half-color:${color};--habit-half-glow:${color};"`;
   }
   return ` style="background:linear-gradient(135deg, ${color} 0%, ${dark} 100%);border-color:${dark};color:${textColor};"`;
+}
+
+// The mode changes only the visual projection, not Habit or tag settings.
+// Vices and all non-Time-of-Day Habit modes retain their original Tag colors.
+function getHabitBubbleStyleAttrForHabit(habit, status) {
+  if ((habit?.category || 'habit') !== 'vice' && getHabitSortMode() === 'timeOfDay') {
+    return getHabitBubbleStyleAttr(habit?.tag, status, getTimeOfDayGroupColor(habit?.timeOfDay));
+  }
+  return getHabitBubbleStyleAttr(habit?.tag, status);
 }
 function getHabitCompletionFraction(completion) {
   const raw = Number(completion?.completionFraction);
@@ -8105,25 +8115,52 @@ function sortHabitsForMode(habits, sortMode) {
   return habits;
 }
 
+// Only the *view* key is normalized. Existing labels, Habit records, color
+// assignments and persisted order are not rewritten or merged in storage.
+function timeOfDayGroupKey(value) {
+  return String(value || '').normalize('NFKC').replace(/\s+/g, ' ').trim().toLocaleLowerCase('en-US');
+}
+
+function getTimeOfDayGroupLabel(key, fallback) {
+  const configured = [
+    ...(Array.isArray(state.timeOfDayGroups) ? state.timeOfDayGroups : []),
+    ...Object.keys(state.timeOfDayColors || {})
+  ];
+  return configured.find(name => timeOfDayGroupKey(name) === key)?.trim() || fallback;
+}
+
+function getTimeOfDayGroupColor(label) {
+  const colors = state.timeOfDayColors || {};
+  const direct = normalizeHexColor(colors[label]);
+  if (direct) return direct;
+  const key = timeOfDayGroupKey(label);
+  const matching = Object.keys(colors).find(name => timeOfDayGroupKey(name) === key && normalizeHexColor(colors[name]));
+  return matching ? normalizeHexColor(colors[matching]) : '';
+}
+
 function buildHabitRenderEntries(habits, sortMode) {
   if (sortMode === 'timeOfDay' || sortMode === 'tag') {
-    const field = sortMode === 'timeOfDay' ? 'timeOfDay' : 'tag';
+    const isTimeOfDay = sortMode === 'timeOfDay';
+    const field = isTimeOfDay ? 'timeOfDay' : 'tag';
     const groups = new Map(), singles = [];
     sortHabitsForMode(habits.slice(), 'custom').forEach(h => {
       const name = String(h[field] || '').trim();
       if (!name) { singles.push({ type: 'single', habit: h }); return; }
-      if (!groups.has(name)) groups.set(name, []);
-      groups.get(name).push(h);
+      const key = isTimeOfDay ? timeOfDayGroupKey(name) : name;
+      if (!groups.has(key)) groups.set(key, { tag: isTimeOfDay ? getTimeOfDayGroupLabel(key, name) : name, habits: [] });
+      groups.get(key).habits.push(h);
     });
-    const orderKey = sortMode === 'timeOfDay' ? 'taskpoints_time_of_day_group_order' : 'taskpoints_tag_group_order';
+    const orderKey = isTimeOfDay ? 'taskpoints_time_of_day_group_order' : 'taskpoints_tag_group_order';
     let saved = [];
     try { saved = JSON.parse(localStorage.getItem(orderKey) || '[]'); } catch (_) {}
     if (!Array.isArray(saved)) saved = [];
-    const names = [...groups.keys()].sort((a,b) => {
-      const ai = saved.indexOf(a), bi = saved.indexOf(b);
-      return ai >= 0 && bi >= 0 ? ai - bi : ai >= 0 ? -1 : bi >= 0 ? 1 : a.localeCompare(b);
+    const savedKeys = isTimeOfDay ? saved.map(timeOfDayGroupKey) : saved;
+    const keys = [...groups.keys()].sort((a,b) => {
+      const ai = savedKeys.indexOf(a), bi = savedKeys.indexOf(b);
+      return ai >= 0 && bi >= 0 ? ai - bi : ai >= 0 ? -1 : bi >= 0 ? 1
+        : groups.get(a).tag.localeCompare(groups.get(b).tag);
     });
-    return { entries: [...names.map(tag => ({ type: 'group', tag, habits: groups.get(tag) })), ...singles] };
+    return { entries: [...keys.map(key => ({ type: 'group', ...groups.get(key) })), ...singles] };
   }
   const tagCounts = new Map();
   habits.forEach(h => {
@@ -8223,7 +8260,40 @@ function getHabitCurrentStreakBonusText(h, streak) {
   return text ? ` (${text})` : '';
 }
   
-function isHabitWeeklyCompleteForDays(h, days) {
+// For one Home Habits paint, index only currently visible Habit/day rows.
+// This replaces repeated linear scans across thousands of historical entries
+// while preserving first-match completion ordering and the legacy fallback.
+function buildVisibleHabitCompletionLookup(habits, days, completions) {
+  const requested = new Set();
+  for (const habit of habits) {
+    if (!habit?.id) continue;
+    for (const day of days) {
+      if (day?.key && Array.isArray(habit.doneKeys) && habit.doneKeys.includes(day.key)) {
+        requested.add(`${habit.id}|\u0000|${day.key}`);
+      }
+    }
+  }
+  const found = new Map();
+  if (!requested.size) return found;
+  for (const entry of (Array.isArray(completions) ? completions : [])) {
+    if (entry?.source !== 'habit' || entry.habitId == null || !entry.dayKey) continue;
+    const key = `${entry.habitId}|\u0000|${entry.dayKey}`;
+    if (requested.has(key) && !found.has(key)) found.set(key, entry);
+    if (found.size === requested.size) break;
+  }
+  return found;
+}
+
+function findHabitCompletionForDay(habitId, dayKey, visibleLookup = null) {
+  if (visibleLookup instanceof Map) {
+    return visibleLookup.get(`${habitId}|\u0000|${dayKey}`) || null;
+  }
+  return Array.isArray(state.completions)
+    ? state.completions.find(c => c?.source === 'habit' && c?.habitId === habitId && c?.dayKey === dayKey) || null
+    : null;
+}
+
+function isHabitWeeklyCompleteForDays(h, days, visibleLookup = null) {
   h.doneKeys = Array.isArray(h.doneKeys) ? h.doneKeys : [];
   const weeklyThresholdRaw = Number(h.daysPerCompleteWeek);
   const hasValidWeeklyThreshold = Number.isFinite(weeklyThresholdRaw)
@@ -8233,9 +8303,7 @@ function isHabitWeeklyCompleteForDays(h, days) {
   const completedCountForVisibleWeek = days.reduce((count, d) => {
     if (!h.doneKeys.includes(d.key)) return count;
 
-    const completion = Array.isArray(state.completions)
-      ? state.completions.find(c => c?.source === 'habit' && c?.habitId === h.id && c?.dayKey === d.key)
-      : null;
+    const completion = findHabitCompletionForDay(h.id, d.key, visibleLookup);
 
     // Older habit days may be marked complete in doneKeys without having
     // a matching completion record. Since the bubble displays as fully
@@ -8244,6 +8312,52 @@ function isHabitWeeklyCompleteForDays(h, days) {
   }, 0);
 
   return hasValidWeeklyThreshold && completedCountForVisibleWeek >= weeklyThreshold;
+}
+
+// Silver weeks count only after an actual weekly threshold is reached,
+// starting Monday Oct 12, 2026. No opening credit and no historical backfill.
+// Use the existing full/half-day slab threshold, once per Monday–Sunday week.
+// This remains read-only: no extra save, journal, or mutation on a Habit tap.
+const HABIT_SILVER_WEEK_COUNTER_START = '2026-10-12';
+
+function computeHabitSilverWeekCounts(habits, completions, currentDayKey = getCurrentTaskPointsDayKey()) {
+  const result = new Map();
+  const fractionsByHabit = new Map();
+  for (const completion of (Array.isArray(completions) ? completions : [])) {
+    if (completion?.source !== 'habit' || !completion.habitId || !completion.dayKey) continue;
+    const habitId = String(completion.habitId);
+    if (!fractionsByHabit.has(habitId)) fractionsByHabit.set(habitId, new Map());
+    const fractionMap = fractionsByHabit.get(habitId);
+    if (!fractionMap.has(completion.dayKey)) {
+      fractionMap.set(completion.dayKey, getHabitCompletionFraction(completion));
+    }
+  }
+
+  const currentWeekKey = dateKey(startOfWeek(fromKey(currentDayKey)));
+  for (const habit of (Array.isArray(habits) ? habits : [])) {
+    if (!habit?.id || (habit.category || 'habit') === 'vice') continue;
+    const rawThreshold = Number(habit.daysPerCompleteWeek);
+    if (!Number.isFinite(rawThreshold) || rawThreshold <= 0 || rawThreshold > 7) {
+      result.set(String(habit.id), 0);
+      continue;
+    }
+    const threshold = Math.round(rawThreshold);
+    const fractions = fractionsByHabit.get(String(habit.id));
+    const totalsByWeek = new Map();
+    // Include legacy doneKeys with no matching completion as one full day,
+    // exactly as the existing silver-week evaluator does.
+    for (const key of new Set(Array.isArray(habit.doneKeys) ? habit.doneKeys : [])) {
+      if (typeof key !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(key) || key > currentDayKey) continue;
+      const weekKey = dateKey(startOfWeek(fromKey(key)));
+      if (weekKey < HABIT_SILVER_WEEK_COUNTER_START || weekKey > currentWeekKey) continue;
+      const fraction = fractions?.get(key) ?? 1;
+      totalsByWeek.set(weekKey, (totalsByWeek.get(weekKey) || 0) + fraction);
+    }
+    const earnedWeeks = Array.from(totalsByWeek.values())
+      .filter(total => total >= threshold).length;
+    result.set(String(habit.id), earnedWeeks);
+  }
+  return result;
 }
 
 function addHabitWeeklyCompleteClasses(row, isWeeklyComplete, previousIsWeeklyComplete, nextIsWeeklyComplete) {
@@ -8367,7 +8481,7 @@ function renderHabitRow(h, days, wrap, options = {}) {
   const isGrouped = options.isGrouped ?? false;
 
   const isWeeklyCompleteForVisibleWeek = options.isWeeklyCompleteForVisibleWeek
-    ?? isHabitWeeklyCompleteForDays(h, days);
+    ?? isHabitWeeklyCompleteForDays(h, days, options.visibleCompletionLookup);
   const appendRow = options.appendRow
     ?? ((rowToAppend) => wrap.appendChild(rowToAppend));
 
@@ -8375,6 +8489,7 @@ function renderHabitRow(h, days, wrap, options = {}) {
   const failedStreak = Number(h.__failedStreak || 0);
   const completion = Number(h.__completion || 0);
   const streakBonusText = getHabitCurrentStreakBonusText(h, streak);
+  const silverWeeks = Number(options.silverWeekCount) || 0;
 
 const row = document.createElement('div');
 row.className = 'habitRow';
@@ -8393,12 +8508,12 @@ addHabitWeeklyCompleteClasses(
 );
 
 const daysHtml = days.map(d => {
-  const status = getHabitBubbleStatusClass(h, d.key);
+  const status = getHabitBubbleStatusClass(h, d.key, options.visibleCompletionLookup);
   const on = status !== 'off';
   const isIcy = status === 'on' && Array.isArray(h.iceKeys) && h.iceKeys.includes(d.key);
   const isHalfCompleteNormalHabit = status === 'half' && !isShowerHabit(h);
   const isPastIncomplete = !on && d.key < dateKey(new Date());
-  const styleAttr = getHabitBubbleStyleAttr(h.tag, status);
+  const styleAttr = getHabitBubbleStyleAttrForHabit(h, status);
   return `<div class="habitDay ${status}${isHalfCompleteNormalHabit ? ' habit-half' : ''}${isIcy ? ' icy' : ''}${isPastIncomplete ? ' past-incomplete' : ''}"${styleAttr} data-habit="${h.id}" data-day="${d.key}">
     ${d.date.getDate()}
   </div>`;
@@ -8475,6 +8590,7 @@ const daysHtml = days.map(d => {
         ${failedStreak}d
       </div>
     ` : '')}
+      <span class="tag habit-silver-weeks" data-silver-weeks="${silverWeeks}" title="Weeks meeting the silver threshold since Oct 12, 2026" aria-label="${silverWeeks} silver ${silverWeeks === 1 ? 'week' : 'weeks'}">${silverWeeks} wk</span>
       <div class="tag bg-zinc-200/60 dark:bg-zinc-700/60 text-orange-400">
         ${completion}%
       </div>
@@ -8610,6 +8726,8 @@ function renderHabits(){
   empty.classList.add('hidden');
 
   const { entries } = buildHabitRenderEntries(habits, sortMode);
+  const silverWeekCounts = computeHabitSilverWeekCounts(habits, state.completions);
+  const visibleCompletionLookup = buildVisibleHabitCompletionLookup(habits, days, state.completions);
 
   // Render every visible habit inside the same left-rail geometry.
   // Named multi-habit tag groups get a colored vertical label rail.
@@ -8645,7 +8763,7 @@ function renderHabits(){
     const rail = document.createElement('div');
     rail.className = 'habitGroupRail';
     if (isTaggedGroup) {
-      const color = sortMode === 'timeOfDay' ? normalizeHexColor(state.timeOfDayColors?.[section.tag]) : getHabitTagColor(section.tag);
+      const color = sortMode === 'timeOfDay' ? getTimeOfDayGroupColor(section.tag) : getHabitTagColor(section.tag);
       if (color) {
         const dark = darkenHex(color, 0.35) || color;
         rail.style.background = `linear-gradient(180deg, ${color} 0%, ${dark} 100%)`;
@@ -8681,7 +8799,7 @@ function renderHabits(){
 
     const sectionRows = section.habits.map(h => ({
       h,
-      isWeeklyComplete: isHabitWeeklyCompleteForDays(h, days)
+      isWeeklyComplete: isHabitWeeklyCompleteForDays(h, days, visibleCompletionLookup)
     }));
     const appendSectionRow = createHabitWeekCompleteAppender(body);
 
@@ -8690,6 +8808,8 @@ function renderHabits(){
       showTag: !isTaggedGroup,
       isGrouped: true,
       groupMoveTag: isTaggedGroup ? section.tag : '',
+      silverWeekCount: silverWeekCounts.get(String(h.id)) || 0,
+      visibleCompletionLookup,
       isWeeklyCompleteForVisibleWeek: isWeeklyComplete,
       previousIsWeeklyComplete: sectionRows[index - 1]?.isWeeklyComplete === true,
       nextIsWeeklyComplete: sectionRows[index + 1]?.isWeeklyComplete === true,
@@ -9395,17 +9515,19 @@ function moveHabitWithinGroup(id, tag, delta) {
   if (!h || h.retired) return;
 
   const category = h.category || 'habit';
-  const field = getHabitSortMode() === 'timeOfDay' ? 'timeOfDay' : 'tag';
+  const isTimeOfDay = getHabitSortMode() === 'timeOfDay';
+  const field = isTimeOfDay ? 'timeOfDay' : 'tag';
+  const groupKey = isTimeOfDay ? timeOfDayGroupKey(groupTag) : groupTag;
   const currentTag = (h[field] || '').trim();
 
   if (category === 'vice') return;
-  if (currentTag !== groupTag) return;
+  if ((isTimeOfDay ? timeOfDayGroupKey(currentTag) : currentTag) !== groupKey) return;
 
   const siblings = state.habits
     .filter(x =>
       !x.retired &&
       (x.category || 'habit') !== 'vice' &&
-      (x[field] || '').trim() === groupTag
+      (isTimeOfDay ? timeOfDayGroupKey(x[field]) : (x[field] || '').trim()) === groupKey
     )
     .slice()
     .sort((a,b) => {
@@ -9444,20 +9566,30 @@ function moveHabitWithinGroup(id, tag, delta) {
 function moveHabitGroup(tag, delta) {
   const mode = getHabitSortMode();
   if (mode === 'timeOfDay' || mode === 'tag') {
-    const field = mode === 'timeOfDay' ? 'timeOfDay' : 'tag';
-    const names = [...new Set(state.habits.filter(h => !h.retired && (h.category || 'habit') !== 'vice').map(h => String(h[field] || '').trim()).filter(Boolean))];
-    const key = mode === 'timeOfDay' ? 'taskpoints_time_of_day_group_order' : 'taskpoints_tag_group_order';
+    const isTimeOfDay = mode === 'timeOfDay';
+    const field = isTimeOfDay ? 'timeOfDay' : 'tag';
+    const groupKey = name => isTimeOfDay ? timeOfDayGroupKey(name) : name;
+    const groups = new Map();
+    state.habits.filter(h => !h.retired && (h.category || 'habit') !== 'vice').forEach(h => {
+      const name = String(h[field] || '').trim();
+      if (!name) return;
+      const identity = groupKey(name);
+      if (!groups.has(identity)) groups.set(identity, isTimeOfDay ? getTimeOfDayGroupLabel(identity, name) : name);
+    });
+    const key = isTimeOfDay ? 'taskpoints_time_of_day_group_order' : 'taskpoints_tag_group_order';
     let saved = [];
     try { saved = JSON.parse(localStorage.getItem(key) || '[]'); } catch (_) {}
     if (!Array.isArray(saved)) saved = [];
-    names.sort((a,b) => {
-      const ai = saved.indexOf(a), bi = saved.indexOf(b);
-      return ai >= 0 && bi >= 0 ? ai - bi : ai >= 0 ? -1 : bi >= 0 ? 1 : a.localeCompare(b);
+    const savedKeys = isTimeOfDay ? saved.map(groupKey) : saved;
+    const names = [...groups.keys()].sort((a,b) => {
+      const ai = savedKeys.indexOf(a), bi = savedKeys.indexOf(b);
+      return ai >= 0 && bi >= 0 ? ai - bi : ai >= 0 ? -1 : bi >= 0 ? 1
+        : groups.get(a).localeCompare(groups.get(b));
     });
-    const index = names.indexOf(String(tag || '').trim()), target = index + delta;
+    const index = names.indexOf(groupKey(String(tag || '').trim())), target = index + delta;
     if (index < 0 || target < 0 || target >= names.length) return;
     [names[index], names[target]] = [names[target], names[index]];
-    localStorage.setItem(key, JSON.stringify(names));
+    localStorage.setItem(key, JSON.stringify(names.map(name => groups.get(name))));
     renderHabits();
     return;
   }
@@ -9747,15 +9879,13 @@ function scheduleHabitStatsRefresh() {
   }, 1200);
 }
 
-function getHabitBubbleStatusClass(h, dayKey) {
+function getHabitBubbleStatusClass(h, dayKey, visibleLookup = null) {
   const isDone = Array.isArray(h?.doneKeys) && h.doneKeys.includes(dayKey);
   if (!isDone) return 'off';
 
   const isHabit = (h?.category || 'habit') !== 'vice';
   if (isHabit && !isShowerHabit(h)) {
-    const completion = Array.isArray(state.completions)
-      ? state.completions.find(c => c?.source === 'habit' && c?.habitId === h.id && c?.dayKey === dayKey)
-      : null;
+    const completion = findHabitCompletionForDay(h.id, dayKey, visibleLookup);
     if (completion && getHabitCompletionFraction(completion) === 0.5) {
       return 'half';
     }
@@ -9780,7 +9910,7 @@ function applyCanonicalHabitBubbleVisual(bubble, habit, dayKey, statusClass) {
 }
 
 function applyHabitBubbleStyle(el, habit, statusClass) {
-  const styleAttr = getHabitBubbleStyleAttr(habit.tag, statusClass);
+  const styleAttr = getHabitBubbleStyleAttrForHabit(habit, statusClass);
   if (styleAttr) {
     const styleValue = styleAttr.replace(/^ style="/, '').replace(/"$/, '');
     el.setAttribute('style', styleValue);

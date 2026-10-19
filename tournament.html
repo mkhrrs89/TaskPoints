@@ -9,10 +9,19 @@
   <link rel="stylesheet" href="styles.css" />
   <link rel="preload" href="toolbar.js" as="script">
   <script src="toolbar.js" defer></script>
+  <style>
+    /* Tournament-only mobile safe area: the header must clear the iPhone
+       status bar even when standalone Safari reports an inset of zero. */
+    @media (max-width: 767px) {
+      .tournament-page-frame {
+        padding-top: max(64px, calc(env(safe-area-inset-top, 0px) + 14px));
+      }
+    }
+  </style>
 </head>
 
 <body class="min-h-screen">
-  <div class="mx-auto max-w-6xl p-3 sm:p-4 pb-16 md:pb-5">
+  <div class="tournament-page-frame mx-auto max-w-6xl p-3 sm:p-4 pb-16 md:pb-5">
     <div class="flex items-center justify-between gap-3 mb-3 md:hidden">
       <a href="index.html" class="flex items-center gap-3">
         <img src="assets/taskpoints-logo.png" alt="TaskPoints logo" class="w-10 h-10 rounded-2xl object-cover shrink-0 shadow-sm">
@@ -37,7 +46,6 @@
           </div>
           <div class="min-w-0">
             <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight flex items-center gap-2 page-title">Tournament</h1>
-            <p class="muted text-sm">Season Championship bracket view.</p>
           </div>
         </div>
 
@@ -47,7 +55,6 @@
           <a href="daily_sources.html" class="btn btn-teal btn-toolbar nav-btn">Sources</a>
           <a href="log.html" class="btn btn-teal btn-toolbar nav-btn">Log</a>
           <a href="week.html" class="btn btn-teal btn-toolbar nav-btn">Week</a>
-          <a href="notes.html" class="btn btn-teal btn-toolbar nav-btn">Notes</a>
 
           <div class="dropdown hidden md:block">
             <button type="button" class="btn btn-teal btn-toolbar dropdown-toggle nav-btn" data-dropdown-toggle aria-expanded="false">
@@ -66,9 +73,6 @@
             </div>
           </div>
 
-          <a href="projects.html" class="btn btn-teal btn-toolbar nav-btn">Projects</a>
-          <a href="skills.html" class="btn btn-teal btn-toolbar nav-btn">Skills</a>
-          <a href="tournament.html" class="btn btn-teal btn-toolbar nav-btn active">Tourney</a>
           <a href="season.html" class="btn btn-teal btn-toolbar nav-btn">Season</a>
         <a href="settings.html" class="btn btn-teal btn-toolbar nav-btn">Settings</a>
         </div>
@@ -76,8 +80,7 @@
     </header>
 
     <section class="glass">
-      <h2 class="text-lg font-semibold mb-1">Tournament</h2>
-      <p class="muted text-sm mb-4">Current Season tournament bracket view.</p>
+      <h2 class="text-lg font-semibold mb-4">Tournament</h2>
 
       <div class="tournament-bracket-scroll" aria-label="Season Championship bracket" role="region">
         <div class="tournament-bracket" id="tournamentBracket" data-bracket-format="official_34_player_championship"></div>
