@@ -2475,6 +2475,11 @@ header,
         #9ca3af
       ) !important;
       color:#b91c1c !important;
+      /* iOS renders the ✓ glyph with an unusually thin default stroke.
+         Weight plus a red text stroke makes it clearly bold without
+         changing the white button or any completion interaction. */
+      font-weight:900 !important;
+      -webkit-text-stroke:1.6px currentColor;
       border:none !important;
       box-shadow:none !important;
     }
