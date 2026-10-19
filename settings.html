@@ -2377,6 +2377,7 @@ function normalizeSimPlayer(player) {
   const risky = Number.isFinite(player?.risky) ? player.risky : 3;
   const intimidation = Number.isFinite(player?.intimidation) ? player.intimidation : 0;
   const poise = Number.isFinite(player?.poise) ? player.poise : 0;
+  const streaky = Number.isFinite(Number(player?.streaky)) ? Number(player.streaky) : 0;
 
   return {
     ...player,
@@ -2386,7 +2387,8 @@ function normalizeSimPlayer(player) {
     momentum,
     risky,
     intimidation: Math.min(100, Math.max(0, intimidation)),
-    poise: Math.min(100, Math.max(0, poise))
+    poise: Math.min(100, Math.max(0, poise)),
+    streaky: Math.min(100, Math.max(0, streaky))
   };
 }
 
@@ -3300,6 +3302,7 @@ return {
   risky: getNormalizedRisky(player.risky),
   intimidation: Number(player.intimidation) || 0,
   poise: Number(player.poise) || 0,
+  streaky: Number(player.streaky) || 0,
   high,
   low,
   aboveBaselinePct: (aboveBaseline / total) * 100,
@@ -3410,6 +3413,7 @@ const headers = [
   { label: "Risky", key: "risky" },
   { label: "INT", key: "intimidation" },
   { label: "Poise", key: "poise" },
+  { label: "Streaky", key: "streaky" },
   { label: "High", key: "high" },
   { label: "Low", key: "low" },
   { label: "Above Baseline", key: "aboveBaselinePct" },
@@ -3464,6 +3468,7 @@ const headers = [
 <td class="pr-4 py-2">${formatNumber(row.risky)}</td>
 <td class="pr-4 py-2">${formatNumber(row.intimidation)}</td>
 <td class="pr-4 py-2">${formatNumber(row.poise)}</td>
+<td class="pr-4 py-2">${formatNumber(row.streaky)}</td>
 <td class="pr-4 py-2">${formatNumber(row.high)}</td>
             <td class="pr-4 py-2">${formatNumber(row.low)}</td>
             <td class="pr-4 py-2">${formatPercent(row.aboveBaselinePct)}</td>
