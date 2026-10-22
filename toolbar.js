@@ -3730,17 +3730,51 @@ document.addEventListener('DOMContentLoaded', () => {
     const ids = Array.isArray(taskIds) && taskIds.length
       ? taskIds.map((id) => String(id))
       : getCriticalDueList().map((t) => String(t.id));
+    const wantedIds = new Set(ids);
 
     const maxAttempts = 18;
     let attempts = 0;
 
     const run = () => {
       attempts += 1;
+
+      // The mobile Home tabs hide inactive panels. Make Tasks visible before
+      // trying to scroll to a critical task, including after a cross-page jump.
+      if (typeof window.setHomeTab === 'function') {
+        window.setHomeTab('tasks');
+      } else {
+        document.querySelector('[data-home-tab="tasks"]')?.click?.();
+      }
+
       const sectionTarget = getCriticalTasksSectionTarget();
-      if (sectionTarget) sectionTarget.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const criticalCard = Array.from(document.querySelectorAll('#taskList .critical-card[data-task-id]'))
+        .find((card) => wantedIds.has(String(card.getAttribute('data-task-id') || '')));
+      const group = criticalCard?.closest('.task-date-group');
+      const groupBody = group?.querySelector('[data-task-group-body]');
+
+      // An overdue/today group may have been collapsed manually. Open it via
+      // the existing task-group handler so the target is actually visible.
+      if (groupBody && (groupBody.hidden || groupBody.classList.contains('hidden'))) {
+        const toggle = group.querySelector('[data-task-group-toggle]');
+        if (toggle && attempts < maxAttempts) {
+          toggle.click();
+          setTimeout(run, 120);
+          return;
+        }
+      }
+
+      const cardVisible = criticalCard && (!groupBody
+        || (!groupBody.hidden && !groupBody.classList.contains('hidden')));
+      const target = cardVisible ? criticalCard : sectionTarget;
+      if (target) {
+        target.scrollIntoView({
+          behavior: 'smooth',
+          block: cardVisible ? 'center' : 'start'
+        });
+      }
 
       const pulsed = pulseTaskCardsByIds(ids);
-      const done = !!sectionTarget && (ids.length === 0 || pulsed > 0);
+      const done = !!sectionTarget && (ids.length === 0 || (cardVisible && pulsed > 0));
       if (done || attempts >= maxAttempts) return;
       setTimeout(run, 120);
     };

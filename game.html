@@ -1174,6 +1174,8 @@ textarea{
           >
             <option value="name-asc">Name (A → Z)</option>
             <option value="name-desc">Name (Z → A)</option>
+            <option value="pid-asc">PID (low → high)</option>
+            <option value="pid-desc">PID (high → low)</option>
             <option value="avg-desc">PPD (high → low)</option>
             <option value="overall-desc">Overall Rating (high → low)</option>
             <option value="ranking-asc">Ranking</option>
@@ -1641,6 +1643,8 @@ const GROUP_ACTIVE_PLAYERS_STORAGE_KEY = "taskpoints_group_active_players";
 const PLAYER_SORT_OPTIONS = [
   "name-asc",
   "name-desc",
+  "pid-asc",
+  "pid-desc",
   "avg-desc",
   "overall-desc",
   "ranking-asc",
@@ -2882,6 +2886,21 @@ const rankingByPlayerId = new Map(
     const createdB = getCreatedTs(b);
 
     switch (playerSortMode) {
+      case "pid-asc":
+      case "pid-desc": {
+        // PIDs are permanent numeric identities. Compare their numeric values
+        // rather than using lexicographic order; unassigned players go last.
+        const pidA = a.isYou ? "P000" : (TaskPointsCore?.getPlayerPid?.(state, a.id) || "");
+        const pidB = b.isYou ? "P000" : (TaskPointsCore?.getPlayerPid?.(state, b.id) || "");
+        const numericA = /^P\d+$/.test(pidA) ? Number(pidA.slice(1)) : null;
+        const numericB = /^P\d+$/.test(pidB) ? Number(pidB.slice(1)) : null;
+        if (numericA === null && numericB !== null) return 1;
+        if (numericB === null && numericA !== null) return -1;
+        if (numericA !== null && numericB !== null && numericA !== numericB) {
+          return playerSortMode === "pid-asc" ? numericA - numericB : numericB - numericA;
+        }
+        break;
+      }
       case "name-desc":
         return nameB.localeCompare(nameA);
       case "avg-desc": {
