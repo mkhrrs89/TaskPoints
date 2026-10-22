@@ -527,3 +527,14 @@ test('deferred compression never compacts a pre-tap view while Habit journal rem
   assert.equal(core.readPendingHabitDeltas().length, 1);
   storage.delete(core.PENDING_HABIT_DELTAS_KEY);
 });
+
+
+test('direct optimized serializer and writer accept ordinary options instead of treating them as a prepacked plan', () => {
+  storage.clear();
+  const current = largeState();
+  const raw = core.serializeTaskPointsStoredState(current);
+  assert.equal(core.parseTaskPointsStorageJson(raw, {}).habits.length, current.habits.length);
+  const written = core.writeTaskPointsStoredState(current, { storageKey: core.STORAGE_KEY });
+  assert.equal(written, storage.get(core.STORAGE_KEY));
+  assert.equal(core.parseTaskPointsStorageJson(written, {}).completions.length, current.completions.length);
+});
