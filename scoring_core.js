@@ -602,7 +602,10 @@ function buildOptimizedTaskPointsStorageRaw(state, prepared = null) {
 
   function serializeTaskPointsStoredState(nextState, options = {}) {
     if (typeof buildOptimizedTaskPointsStorageRaw === 'function') {
-      const built = buildOptimizedTaskPointsStorageRaw(nextState, options);
+      // Options describe the write (storageKey, overwrite guards, etc.), not
+      // a prepacked storage plan. Passing them as a plan leaves packedRawJson
+      // undefined and makes direct writer/serializer callers throw.
+      const built = buildOptimizedTaskPointsStorageRaw(nextState);
       return typeof built === 'string' ? built : (built.chosenRaw || built.raw || JSON.stringify(nextState || {}));
     }
     return JSON.stringify(packTaskPointsStorageState ? packTaskPointsStorageState(nextState) : (nextState || {}));
