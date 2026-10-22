@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>V2 Synthetic Browser Storage Fixture</title>
+<body><p id="fixture-status">Synthetic V2 fixture, localhost only</p>
+<script>
+(() => {
+  if (!['127.0.0.1','localhost'].includes(location.hostname)) {
+    throw Error('Synthetic V2 fixture cannot run on a deployed host');
+  }
+  if (localStorage.getItem('tp_v2_browser_fixture_initialized') !== '1') {
+    const habits = ['h1','h2','h3'].map((id, index) => ({
+      id, name: 'Synthetic ' + id, category: 'habit', pointsPerDay: index + 3,
+      doneKeys: [], failedKeys: [], iceKeys: [], order: index + 1,
+      halfPointEnabled: true, updatedAtISO: '2026-10-20T12:00:00.000Z'
+    }));
+    localStorage.setItem('taskpoints_v1', JSON.stringify({
+      habits, completions: [{
+        id: 'synthetic-task-completion', source: 'task', taskId: 'synthetic-task',
+        title: 'Outside V2 pilot scope', points: 1, completedAtISO: '2026-10-20T12:00:00.000Z'
+      }],
+      tasks: [{ id:'synthetic-task', title: 'Synthetic task' }],
+      gameHistory: [], matchups: [], players: [], notes: 'SYNTHETIC ONLY'
+    }));
+    localStorage.setItem('tp_v2_browser_fixture_initialized', '1');
+  }
+  localStorage.setItem('taskpoints_state_v2_dark_mode_v1', '1');
+})();
+</script>
+<script src="../../scoring_core.js"></script>
+<script src="../../task_mutation_journal.js"></script>
+<script src="../../state_runtime_v2_generation.js"></script>
+<script src="../../state_runtime_v2_wal.js"></script>
+<script src="../../state_runtime_v2.js"></script>
+<script src="../../state_runtime_v2_wal_bridge.js"></script>
+<script>
+window.V2BrowserFixture = {
+  async start() {
+    await window.TaskPointsStateRuntimeV2.startCoordinatedDarkMirror();
+    return this.status();
+  },
+  status() {
+    return {
+      runtime: window.TaskPointsStateRuntimeV2.getStatus(),
+      bridge: window.TaskPointsStateRuntimeV2WalBridge.getStatus(),
+      wal: window.TaskPointsStateRuntimeV2Wal.getStatus()
+    };
+  },
+  delta(habitId, dayKey, status = 'full', n = 1) {
+    const points = { h1: 3, h2: 4, h3: 5 }[habitId];
+    return window.TaskPointsCore.writePendingHabitDelta({
+      habitId, dayKey, source: 'habit', status,
+      done: status === 'full' || status === 'half',
+      failed: status === 'failed', icy: false,
+      completionFraction: status === 'half' ? 0.5 : status === 'full' ? 1 : 0,
+      completionPoints: status === 'half' ? points / 2 : status === 'full' ? points : 0,
+      updatedAtISO: '2026-10-22T12:00:' + String(n).padStart(2, '0') + '.000Z',
+      completedAtISO: dayKey + 'T12:00:00.000Z'
+    });
+  },
+  rawLegacy() {
+    const core = window.TaskPointsCore;
+    return core.parseTaskPointsStorageJson(localStorage.getItem(core.STORAGE_KEY), {});
+  }
+};
+document.getElementById('fixture-status').textContent = 'Synthetic isolated storage fixture ready';
+</script></body></html>
