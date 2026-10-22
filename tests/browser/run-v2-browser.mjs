@@ -63,6 +63,17 @@ async function run(name, test) {
     results.push({ name, result:'FAIL', error:String(error.stack || error) });
     console.error('FAIL ' + name + ': ' + String(error.stack || error));
     for (const [i, page] of context.pages().entries()) {
+      try {
+        const diagnostics = await page.evaluate(() => ({
+          status: window.V2BrowserFixture?.status(),
+          journal: window.TaskPointsCore?.readPendingHabitDeltas?.(),
+          stored: window.V2BrowserFixture?.rawLegacy?.()?.completions?.filter(x => x.source === 'habit')
+        }));
+        console.error('PAGE_DIAGNOSTICS ' + i + ' ' + JSON.stringify(diagnostics));
+        await writeFile(join(artifacts, 'diagnostics-' + results.length + '-' + i + '.json'), JSON.stringify(diagnostics, null, 2));
+      } catch (diagnosticError) { console.error('Diagnostic collection failed: ' + String(diagnosticError)); }
+    }
+    for (const [i, page] of context.pages().entries()) {
       try { await page.screenshot({ path: join(artifacts, 'failed-' + results.length + '-' + i + '.png') }); } catch (_) {}
     }
   } finally { await context.close(); }
