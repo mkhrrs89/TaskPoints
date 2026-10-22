@@ -409,6 +409,49 @@
     return { ...candidateState, completions: [...protectedRows, ...candidateState.completions] };
   }
 
+  // V2-only containment for the stale-Home save race observed during the
+  // rapid Habit WAL interruption test. These two background maintenance paths
+  // do not edit Habits or completion records. They must not replace those
+  // authoritative collections using an old in-memory Home snapshot.
+  // A fresh journal overlay is applied *after* the newest stored snapshot,
+  // so a tap that has not yet compacted still wins (including off/failed).
+  function preserveHabitPilotOnHomeMaintenance(candidateState, savedState, options = {}) {
+    const savePath = String(options.savePath || options.source || options.reason || '');
+    if (savePath !== 'home-season-slate-idle-materialization'
+      && savePath !== 'home-live-diff-capture') return candidateState;
+    if (options.allowDestructiveOverwrite === true
+      || options.allowHabitCompletionRemoval === true
+      || (options.storageKey || STORAGE_KEY) !== STORAGE_KEY) return candidateState;
+    if (!candidateState || typeof candidateState !== 'object'
+      || !Array.isArray(candidateState.habits)
+      || !Array.isArray(candidateState.completions)
+      || !Array.isArray(savedState?.habits)
+      || !Array.isArray(savedState?.completions)) return candidateState;
+
+    // A malformed nonempty Habit journal is evidence of an unresolved write.
+    // Never discard that evidence by running another full-state maintenance save.
+    const pending = typeof core.readPendingHabitDeltas === 'function'
+      ? core.readPendingHabitDeltas()
+      : [];
+    if (pending.length && typeof core.applyPendingHabitDeltas !== 'function') {
+      throw new Error('Habit journal replay unavailable; stale Home maintenance save blocked');
+    }
+    const authoritative = {
+      habits: clone(savedState.habits),
+      completions: clone(savedState.completions)
+    };
+    if (pending.length) core.applyPendingHabitDeltas(authoritative, pending);
+    try {
+      global.TaskPointsPerf?.mark?.('stateV2.legacyHabitMaintenanceRebased', {
+        savePath,
+        pendingDeltas: pending.length,
+        savedHabits: authoritative.habits.length,
+        savedCompletions: authoritative.completions.length
+      });
+    } catch (_) {}
+    return { ...candidateState, habits: authoritative.habits, completions: authoritative.completions };
+  }
+
   function persistPending(reason = 'quiet') {
     if (compactionRunning || !originalSaveStateSnapshot) return false;
     const current = readRecord();
@@ -575,9 +618,10 @@
       try { savedForProtection = persistedState(); } catch (_) {}
       const protectedTasks = protectNewerPersistedTaskRows(state, options, savedForProtection);
       const protectedState = protectRecentScwmRowsFromStaleHomeSave(protectedTasks, savedForProtection, options);
+      const habitSafeState = preserveHabitPilotOnHomeMaintenance(protectedState, savedForProtection, options);
       const candidate = current.malformed || isEmpty(current.record)
-        ? protectedState
-        : applyRecord(protectedState, current.record);
+        ? habitSafeState
+        : applyRecord(habitSafeState, current.record);
       const result = originalSaveStateSnapshot(candidate, options);
       if (!current.malformed && !isEmpty(current.record) && !result?.skipped && !result?.blockedByQuotaCircuit && result?.state) {
         try {

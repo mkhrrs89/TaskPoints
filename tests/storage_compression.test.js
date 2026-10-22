@@ -500,3 +500,30 @@ test('opt-in oversized interactive save defers before synchronous compression an
   assert.ok(result.packedBytes >= result.safePackedLimitBytes);
   assert.equal(storage.get(core.STORAGE_KEY), before);
 });
+
+
+test('deferred compression cannot roll back a different newer storage snapshot', () => {
+  storage.clear();
+  const old = largeState();
+  core.saveStateSnapshot(old, { storageKey: core.STORAGE_KEY, immediateWrite: true, interactive: true, deferCompression: true });
+  const moreRecent = largeState();
+  moreRecent.habits[0].doneKeys = ['2026-10-14'];
+  const newerRaw = core.serializeTaskPointsStoredState(moreRecent);
+  storage.set(core.STORAGE_KEY, newerRaw);
+  core.flushPendingInteractiveRecompresses();
+  assert.equal(storage.get(core.STORAGE_KEY), newerRaw);
+  assert.deepEqual(core.parseTaskPointsStorageJson(storage.get(core.STORAGE_KEY), {}).habits[0].doneKeys, ['2026-10-14']);
+});
+
+test('deferred compression never compacts a pre-tap view while Habit journal remains pending', () => {
+  storage.clear();
+  const previous = largeState();
+  core.saveStateSnapshot(previous, { storageKey: core.STORAGE_KEY, immediateWrite: true, interactive: true, deferCompression: true });
+  const packedRaw = storage.get(core.STORAGE_KEY);
+  const delta = { id: 'habit:habit-row-0:2026-10-14', habitId: 'habit-row-0', dayKey: '2026-10-14', source: 'habit', status: 'full', done: true, updatedAtISO: '2026-10-14T15:00:00.000Z', completionPoints: 1 };
+  core.writePendingHabitDelta(delta);
+  core.flushPendingInteractiveRecompresses();
+  assert.equal(storage.get(core.STORAGE_KEY), packedRaw, 'the pre-tap packed snapshot must not be rewritten');
+  assert.equal(core.readPendingHabitDeltas().length, 1);
+  storage.delete(core.PENDING_HABIT_DELTAS_KEY);
+});

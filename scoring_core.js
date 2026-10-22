@@ -631,8 +631,17 @@ function buildOptimizedTaskPointsStorageRaw(state, prepared = null) {
     if (pending.idleId != null && typeof global.cancelIdleCallback === 'function') global.cancelIdleCallback(pending.idleId);
     const started = Date.now();
     try {
-      // Build from the newest snapshot, never the snapshot that started a burst.
+      // This job captured one specific fast-packed write. Another tab or a
+      // journal compaction may have advanced the authoritative snapshot since
+      // then; never replace it with the older captured object.
+      if (localStorage.getItem(storageKey) !== pending.rawSnapshot) return false;
+      // An outstanding Habit tap is authoritative even before its full-state
+      // compaction. Leave the safe packed snapshot alone until the journal
+      // drains rather than compressing a pre-tap view on pagehide/idle.
+      if (storageKey === STORAGE_KEY && readPendingHabitDeltas().length) return false;
       const plan = buildOptimizedTaskPointsStorageRaw(pending.state);
+      if (localStorage.getItem(storageKey) !== pending.rawSnapshot) return false;
+      if (storageKey === STORAGE_KEY && readPendingHabitDeltas().length) return false;
       safeReplaceTaskPointsStorage(storageKey, plan.chosenRaw);
       if (global?.TP_DEBUG_PERF) console.debug('[TP_DEBUG_PERF] idle-recompress', { ms: Date.now() - started, encoding: plan.chosenEncoding, storageKey });
       return true;
@@ -653,6 +662,10 @@ function buildOptimizedTaskPointsStorageRaw(state, prepared = null) {
       pending = { state, timeoutId: null, idleId: null };
       pendingInteractiveRecompresses.set(storageKey, pending);
     }
+    // The snapshot identity is captured synchronously after the fast write.
+    // Do not later overwrite a distinct packed or compressed state from a
+    // newer tab/save (even if the queued object still looks valid).
+    pending.rawSnapshot = localStorage.getItem(storageKey);
     const scheduleIdle = () => {
       pending.timeoutId = null;
       const run = () => runPendingInteractiveRecompress(storageKey);

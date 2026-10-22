@@ -469,3 +469,74 @@ test('SCWM guard allows explicit import/reset and Log deletion, never resurrecti
   h.core.saveStateSnapshot({ ...persisted, completions: persisted.completions.filter(c => c.id !== row.id) }, { allowDestructiveOverwrite: true });
   assert.ok(!JSON.parse(h.storage.getItem(STORAGE_KEY)).completions.some(c => c.id === row.id));
 });
+
+
+test('V2 Home maintenance keeps newer persisted Habit completion after its journal already compacted', () => {
+  const h = makeHarness();
+  const newer = { id: 'habit-1', name: 'Morning', doneKeys: ['2026-10-14'], failedKeys: [], iceKeys: [], updatedAtISO: '2026-10-14T23:32:00.000Z' };
+  const completion = { id: 'habit:habit-1:2026-10-14', habitId: 'habit-1', dayKey: '2026-10-14', source: 'habit', points: 3, completedAtISO: '2026-10-14T18:00:00.000Z' };
+  const persisted = JSON.parse(h.storage.getItem(STORAGE_KEY));
+  persisted.habits = [newer];
+  persisted.completions.unshift(completion);
+  h.storage.setItem(STORAGE_KEY, JSON.stringify(persisted));
+  const stale = clone(persisted);
+  stale.habits[0] = { ...newer, doneKeys: [], updatedAtISO: '2026-10-14T23:30:00.000Z' };
+  stale.completions = stale.completions.filter(row => row.id !== completion.id);
+  stale.liveDiffHistory = { '2026-10-14': [{ score: 4 }] };
+  const result = h.core.saveStateSnapshot(stale, { savePath: 'home-season-slate-idle-materialization' });
+  assert.deepEqual(result.state.habits[0], newer);
+  assert.deepEqual(result.state.completions[0], completion);
+  assert.deepEqual(result.state.liveDiffHistory, stale.liveDiffHistory);
+  assert.deepEqual(JSON.parse(h.storage.getItem(STORAGE_KEY)).completions[0], completion);
+});
+
+test('V2 Home background maintenance preserves an authoritative off-toggle instead of resurrecting it', () => {
+  const h = makeHarness();
+  const latest = JSON.parse(h.storage.getItem(STORAGE_KEY));
+  latest.habits = [{ id: 'habit-1', doneKeys: [], failedKeys: [], iceKeys: [], updatedAtISO: '2026-10-14T23:35:00.000Z' }];
+  h.storage.setItem(STORAGE_KEY, JSON.stringify(latest));
+  const stale = clone(latest);
+  stale.habits[0].doneKeys = ['2026-10-14'];
+  stale.habits[0].updatedAtISO = '2026-10-14T23:30:00.000Z';
+  stale.completions.unshift({ id: 'habit:habit-1:2026-10-14', habitId: 'habit-1', dayKey: '2026-10-14', source: 'habit', points: 3 });
+  const result = h.core.saveStateSnapshot(stale, { savePath: 'home-live-diff-capture' });
+  assert.deepEqual(result.state.habits[0].doneKeys, []);
+  assert.equal(result.state.completions.some(x => x.habitId === 'habit-1'), false);
+});
+
+test('V2 Home background maintenance overlays an un-compacted Habit tap after rebasing', () => {
+  const h = makeHarness();
+  const state = JSON.parse(h.storage.getItem(STORAGE_KEY));
+  state.habits = [{ id: 'habit-1', name: 'Morning', doneKeys: [], failedKeys: [], iceKeys: [], updatedAtISO: '2026-10-14T23:31:00.000Z' }];
+  h.storage.setItem(STORAGE_KEY, JSON.stringify(state));
+  const pending = [{ id: 'habit:habit-1:2026-10-14', habitId: 'habit-1', dayKey: '2026-10-14', source: 'habit', status: 'full', updatedAtISO: '2026-10-14T23:35:00.000Z', completedAtISO: '2026-10-14T18:00:00.000Z', completionPoints: 3, completionFraction: 1 }];
+  h.storage.setItem('taskpoints_pending_habit_deltas_v1', JSON.stringify(pending));
+  h.core.readPendingHabitDeltas = () => JSON.parse(h.storage.getItem('taskpoints_pending_habit_deltas_v1') || '[]');
+  h.core.applyPendingHabitDeltas = (target, deltas) => {
+    for (const d of deltas) {
+      const habit = target.habits.find(row => row.id === d.habitId);
+      habit.doneKeys = [d.dayKey];
+      habit.updatedAtISO = d.updatedAtISO;
+      target.completions.unshift({ id: 'habit:habit-1:2026-10-14', habitId: d.habitId, dayKey: d.dayKey, source: 'habit', points: d.completionPoints, completedAtISO: d.completedAtISO });
+    }
+    return { state: target };
+  };
+  const result = h.core.saveStateSnapshot(clone(state), { savePath: 'home-season-slate-idle-materialization' });
+  assert.deepEqual(result.state.habits[0].doneKeys, ['2026-10-14']);
+  assert.equal(result.state.completions.filter(row => row.habitId === 'habit-1').length, 1);
+  assert.equal(h.core.readPendingHabitDeltas().length, 1, 'background maintenance may not discard the durable journal');
+});
+
+test('V2 snapshot protection does not hijack intentional edits, delete, or import/restore', () => {
+  const h = makeHarness();
+  const saved = JSON.parse(h.storage.getItem(STORAGE_KEY));
+  saved.habits = [{ id: 'habit-1', doneKeys: ['2026-10-14'], updatedAtISO: '2026-10-14T23:35:00.000Z' }];
+  saved.completions.unshift({ id: 'habit:habit-1:2026-10-14', habitId: 'habit-1', dayKey: '2026-10-14', source: 'habit' });
+  h.storage.setItem(STORAGE_KEY, JSON.stringify(saved));
+  const stale = { ...saved, habits: [{ ...saved.habits[0], doneKeys: [] }], completions: saved.completions.filter(x => !x.habitId) };
+  let result = h.core.saveStateSnapshot(stale, { savePath: 'habit-journal-compaction' });
+  assert.equal(result.state.completions.some(x => x.habitId === 'habit-1'), false);
+  h.storage.setItem(STORAGE_KEY, JSON.stringify(saved));
+  result = h.core.saveStateSnapshot(stale, { savePath: 'home-season-slate-idle-materialization', allowDestructiveOverwrite: true });
+  assert.equal(result.state.completions.some(x => x.habitId === 'habit-1'), false);
+});
