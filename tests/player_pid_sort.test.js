@@ -14,7 +14,7 @@ test('Players page includes persistent ascending and descending PID sort modes',
   assert.match(options, /"pid-desc"/);
   assert.match(source, /const stored = localStorage\.getItem\(PLAYER_SORT_STORAGE_KEY\)/);
   assert.match(source, /persistSortMode\(mode\)/);
-  assert.equal(source.split(String.raw`/^P\\d+$/`).length - 1, 2,
+  assert.equal(source.split(String.raw`/^P\d+$/`).length - 1, 2,
     'both PID comparisons must use the numeric-digit pattern');
 });
 
