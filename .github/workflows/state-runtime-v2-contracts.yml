@@ -45,6 +45,12 @@ jobs:
           tests/state_runtime_v2_live_review_contract.test.js
           tests/state_runtime_v2_hot_snapshot_device_evidence_contract.test.js
 
+      - name: Validate V2 legacy Habit journal and compression protections
+        run: >-
+          node --test
+          tests/task_mutation_journal_contract.test.js
+          tests/storage_compression.test.js
+
       - name: Run V2 serializer ordering contract
         run: node --test tests/state_runtime_v2_serialization_guard_contract.test.js
 
