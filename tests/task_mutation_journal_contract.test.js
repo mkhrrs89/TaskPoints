@@ -483,10 +483,14 @@ test('V2 Home maintenance keeps newer persisted Habit completion after its journ
   stale.habits[0] = { ...newer, doneKeys: [], updatedAtISO: '2026-10-14T23:30:00.000Z' };
   stale.completions = stale.completions.filter(row => row.id !== completion.id);
   stale.liveDiffHistory = { '2026-10-14': [{ score: 4 }] };
+  const unrelated = { id: 'new-task-completion', source: 'task', points: 12 };
+  stale.completions.push(unrelated);
   const result = h.core.saveStateSnapshot(stale, { savePath: 'home-season-slate-idle-materialization' });
   assert.deepEqual(result.state.habits[0], newer);
   assert.deepEqual(result.state.completions[0], completion);
   assert.deepEqual(result.state.liveDiffHistory, stale.liveDiffHistory);
+  assert.ok(result.state.completions.some(x => x.id === unrelated.id), 'unrelated new task completion must not be overwritten');
+  assert.equal(result.state.completions.filter(x => x.id === completion.id).length, 1, 'no pilot completion duplicated');
   assert.deepEqual(JSON.parse(h.storage.getItem(STORAGE_KEY)).completions[0], completion);
 });
 
@@ -539,4 +543,28 @@ test('V2 snapshot protection does not hijack intentional edits, delete, or impor
   h.storage.setItem(STORAGE_KEY, JSON.stringify(saved));
   result = h.core.saveStateSnapshot(stale, { savePath: 'home-season-slate-idle-materialization', allowDestructiveOverwrite: true });
   assert.equal(result.state.completions.some(x => x.habitId === 'habit-1'), false);
+});
+
+
+test('V2 Home maintenance fails closed on malformed Habit journal without reaching raw snapshot fallback', () => {
+  const h = makeHarness();
+  const original = h.storage.getItem(STORAGE_KEY);
+  const candidate = JSON.parse(original);
+  candidate.liveDiffHistory = { newPoint: [{ score: 4 }] };
+  h.core.readPendingHabitDeltas = () => { throw new Error('malformed Habit journal'); };
+  const result = h.core.saveStateSnapshot(candidate, { savePath: 'home-live-diff-capture' });
+  assert.equal(result.skipped, true);
+  assert.equal(result.blockedByHabitJournal, true);
+  assert.equal(h.storage.getItem(STORAGE_KEY), original, 'the persisted snapshot must not change');
+  assert.equal(h.getSaveCalls(), 0, 'no unguarded underlying save');
+});
+
+test('V2 Home maintenance refuses to rebuild without an authoritative persisted pilot', () => {
+  const h = makeHarness();
+  const original = h.storage.getItem(STORAGE_KEY);
+  const candidate = JSON.parse(original);
+  candidate.habits = [{ id: 'habit-1', doneKeys: ['2026-10-14'] }];
+  const result = h.core.saveStateSnapshot(candidate, { savePath: 'home-season-slate-idle-materialization' });
+  assert.equal(result.skipped, true);
+  assert.equal(h.storage.getItem(STORAGE_KEY), original);
 });

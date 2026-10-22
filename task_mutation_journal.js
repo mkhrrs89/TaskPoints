@@ -426,7 +426,9 @@
       || !Array.isArray(candidateState.habits)
       || !Array.isArray(candidateState.completions)
       || !Array.isArray(savedState?.habits)
-      || !Array.isArray(savedState?.completions)) return candidateState;
+      || !Array.isArray(savedState?.completions)) {
+      throw new Error('Latest persisted Habit pilot unavailable; background save blocked');
+    }
 
     // A malformed nonempty Habit journal is evidence of an unresolved write.
     // Never discard that evidence by running another full-state maintenance save.
@@ -436,9 +438,27 @@
     if (pending.length && typeof core.applyPendingHabitDeltas !== 'function') {
       throw new Error('Habit journal replay unavailable; stale Home maintenance save blocked');
     }
+    // Keep nonpilot candidate completions (SCWM, Tasks, Flex, manual etc.)
+    // untouched. Only Habit/Vice completion records are owned by this guard.
+    // Preserve saved pilot ordering even if the old Home snapshot has fewer
+    // pilot entries; never duplicate a restored completion.
+    const isPilot = (row) => Boolean(row?.habitId)
+      && (row.source === 'habit' || row.source === 'vice');
+    const savedPilot = savedState.completions.filter(isPilot).map(clone);
+    const merged = [];
+    let position = 0;
+    candidateState.completions.forEach((row) => {
+      if (!isPilot(row)) {
+        merged.push(row);
+      } else if (position < savedPilot.length) {
+        merged.push(savedPilot[position]);
+        position += 1;
+      }
+    });
+    const missingSavedPilot = savedPilot.slice(position);
     const authoritative = {
       habits: clone(savedState.habits),
-      completions: clone(savedState.completions)
+      completions: missingSavedPilot.concat(merged)
     };
     if (pending.length) core.applyPendingHabitDeltas(authoritative, pending);
     try {
@@ -618,7 +638,20 @@
       try { savedForProtection = persistedState(); } catch (_) {}
       const protectedTasks = protectNewerPersistedTaskRows(state, options, savedForProtection);
       const protectedState = protectRecentScwmRowsFromStaleHomeSave(protectedTasks, savedForProtection, options);
-      const habitSafeState = preserveHabitPilotOnHomeMaintenance(protectedState, savedForProtection, options);
+      let habitSafeState;
+      try {
+        habitSafeState = preserveHabitPilotOnHomeMaintenance(protectedState, savedForProtection, options);
+      } catch (error) {
+        // Home's save() catch branch has an unguarded last-ditch writer.
+        // Return a skipped save instead of throwing into that fallback.
+        console.warn('V2 Habit authority guard postponed Home maintenance save.', error);
+        try {
+          global.TaskPointsPerf?.mark?.('stateV2.legacyHabitMaintenanceBlocked', {
+            savePath: options.savePath || options.source || options.reason || ''
+          });
+        } catch (_) {}
+        return { state, skipped: true, blockedByHabitJournal: true };
+      }
       const candidate = current.malformed || isEmpty(current.record)
         ? habitSafeState
         : applyRecord(habitSafeState, current.record);
