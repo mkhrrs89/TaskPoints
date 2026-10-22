@@ -277,7 +277,18 @@
     const applyOptions = { expectedGeneration: generation };
     if (options.skipInitialSeedForVerifiedReplay === true) applyOptions.skipInitialSeedForVerifiedReplay = true;
     if (options.expectedRevision != null) applyOptions.expectedRevision = Number(options.expectedRevision);
-    const result = await runtime.applyHabitDelta(delta, applyOptions);
+    // The ordinary V2 dark-mirror hook runs before the outer WAL hook.
+    // Give its serialized queue first chance to commit the same mutation.
+    // A readonly exact-ID check then avoids a duplicate transaction.
+    if (phase === 'confirm' && typeof runtime.waitForHabitMirrorIdle === 'function') {
+      await runtime.waitForHabitMirrorIdle();
+    }
+    const alreadyCommitted = typeof runtime.hasCommittedHabitMutation === 'function'
+      ? await runtime.hasCommittedHabitMutation(mutationId, generation)
+      : false;
+    const result = alreadyCommitted
+      ? { committed: false, duplicate: true, mutationId, durableVerified: true }
+      : await runtime.applyHabitDelta(delta, applyOptions);
     if (result?.committed !== true && result?.duplicate !== true) {
       return { cleared: false, reason: result?.reason || 'mutation_not_verified', result };
     }

@@ -865,6 +865,27 @@
     };
   }
 
+  // A WAL confirmation may follow a queued dark mirror of the same delta.
+  // Inspect the exact durable mutation without writing or replaying it again.
+  // The generation and revision checks prevent an unrelated/stale transaction
+  // from being mistaken for successful confirmation.
+  async function hasCommittedHabitMutation(mutationId, expectedGeneration) {
+    if (!isDarkEnabled() || !mutationId || !expectedGeneration) return false;
+    const db = await open();
+    if (!db) return false;
+    const tx = db.transaction(['mutations', 'meta'], 'readonly');
+    const [mutation, meta] = await Promise.all([
+      requestPromise(tx.objectStore('mutations').get(String(mutationId))),
+      requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID))
+    ]);
+    return mutation?.status === 'committed'
+      && String(mutation?.id || '') === String(mutationId)
+      && String(mutation?.resetGeneration || '') === String(expectedGeneration)
+      && String(meta?.resetGeneration || '') === String(expectedGeneration)
+      && Number.isFinite(Number(mutation?.revision))
+      && Number(meta?.revision || 0) >= Number(mutation.revision);
+  }
+
   async function applyHabitDelta(deltaInput, options = {}) {
     if (!isDarkEnabled()) return { committed: false, reason: 'dark_disabled' };
     const delta = normalizeDelta(deltaInput);
@@ -2647,6 +2668,10 @@
       return Promise.reject(new Error('state_runtime_v2_unsupported_dark_mutation'));
     },
     applyHabitDelta,
+    // Dark mirrors are already serialized. WAL confirmation can wait for the
+    // current queue without adding a second racing mutation transaction.
+    waitForHabitMirrorIdle: () => mirrorTail,
+    hasCommittedHabitMutation,
     applyHabitOrderOverlay,
     enqueueHabitOrderOverlay,
     captureHabitEditSnapshotFromLegacy,

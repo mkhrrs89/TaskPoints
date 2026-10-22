@@ -403,3 +403,41 @@ test('bridge hook installation is idempotent', async () => {
   assert.equal(app.context.TaskPointsStateRuntimeV2WalBridge.installHook(), true);
   assert.equal(app.core.writePendingHabitDelta, wrapped);
 });
+
+
+test('WAL confirmation waits for the dark mirror queue and acknowledges only exact durable mutation IDs', async () => {
+  const app = install();
+  await app.flushTimers();
+  const events = app.events;
+  app.context.TaskPointsStateRuntimeV2.waitForHabitMirrorIdle = async () => {
+    events.push('mirror-drained');
+  };
+  app.context.TaskPointsStateRuntimeV2.hasCommittedHabitMutation = async (id, generation) => {
+    events.push('durable-check');
+    assert.equal(typeof id, 'string');
+    assert.equal(generation, app.context.TaskPointsStateRuntimeV2Generation.read());
+    return true;
+  };
+  events.length = 0;
+  app.core.writePendingHabitDelta(delta);
+  await app.flushTimers();
+  assert.ok(events.includes('mirror-drained'));
+  assert.ok(events.includes('durable-check'));
+  assert.equal(events.includes('apply'), false, 'already committed mutation must not be applied a second time');
+  assert.equal(app.localStorage.getItem(WAL_KEY), null, 'only verified durable mutation can clear WAL');
+  assert.equal(app.context.TaskPointsStateRuntimeV2WalBridge.getStatus().confirmationsCleared, 1);
+});
+
+test('WAL confirmation still attempts the actual mutation when no matching durable record exists', async () => {
+  const app = install();
+  await app.flushTimers();
+  const events = app.events;
+  app.context.TaskPointsStateRuntimeV2.waitForHabitMirrorIdle = async () => events.push('mirror-drained');
+  app.context.TaskPointsStateRuntimeV2.hasCommittedHabitMutation = async () => false;
+  events.length = 0;
+  app.core.writePendingHabitDelta(delta);
+  await app.flushTimers();
+  assert.ok(events.includes('mirror-drained'));
+  assert.ok(events.includes('apply'), 'uncommitted mutation still uses the existing guarded apply path');
+  assert.equal(app.localStorage.getItem(WAL_KEY), null);
+});
