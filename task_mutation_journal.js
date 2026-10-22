@@ -423,11 +423,17 @@
       || options.allowHabitCompletionRemoval === true
       || (options.storageKey || STORAGE_KEY) !== STORAGE_KEY) return candidateState;
     if (!candidateState || typeof candidateState !== 'object'
-      || !Array.isArray(candidateState.habits)
       || !Array.isArray(candidateState.completions)
-      || !Array.isArray(savedState?.habits)
       || !Array.isArray(savedState?.completions)) {
       throw new Error('Latest persisted Habit pilot unavailable; background save blocked');
+    }
+    // Older snapshots may legitimately omit the Habits key when the user
+    // has no Habits at all. Only block a missing *persisted* Habit collection
+    // when the candidate actually claims Habit data could be lost.
+    const candidateHabits = Array.isArray(candidateState.habits) ? candidateState.habits : [];
+    const savedHabits = Array.isArray(savedState.habits) ? savedState.habits : [];
+    if (candidateHabits.length && !Array.isArray(savedState.habits)) {
+      throw new Error('Latest persisted Habits collection unavailable; background save blocked');
     }
 
     // A malformed nonempty Habit journal is evidence of an unresolved write.
@@ -457,7 +463,7 @@
     });
     const missingSavedPilot = savedPilot.slice(position);
     const authoritative = {
-      habits: clone(savedState.habits),
+      habits: clone(savedHabits),
       completions: missingSavedPilot.concat(merged)
     };
     if (pending.length) core.applyPendingHabitDeltas(authoritative, pending);
