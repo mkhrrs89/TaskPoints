@@ -564,10 +564,18 @@ try{
     await card.locator('input[data-field="points"]').fill('29');
     await card.locator('select[data-field="importance"]').selectOption('Critical');
     await card.locator('[data-task-action="task-save"]').click({force:true});
+    // Edit Save uses the Task mutation journal rather than a synchronous
+    // full-state snapshot. Either the durable journal or a completed
+    // compaction may own the most recent record at this moment.
     await page.waitForFunction(id=>{
-      const s=window.TaskPointsCore.readTaskPointsStoredState();
-      const t=s.tasks.find(t=>t.id===id);
-      return t?.title==='Synthetic Task Edited'&&t.points===29&&t.importance==='Critical';
+      const core=window.TaskPointsCore;
+      const live=typeof state!=='undefined' ? state.tasks.find(t=>t.id===id) : null;
+      const journal=core.readPendingTaskMutations?.()?.record?.tasks?.find(t=>t.id===id);
+      const stored=core.readTaskPointsStoredState().tasks.find(t=>t.id===id);
+      const newest=journal||stored;
+      return live?.title==='Synthetic Task Edited'&&live.points===29
+        && newest?.title==='Synthetic Task Edited'
+        && newest.points===29&&newest.importance==='Critical';
     },id,{timeout:12000});
     await page.reload({waitUntil:'load'});
     await page.waitForFunction(()=>document.querySelectorAll('#habitsList .habitDay').length>=21);
@@ -606,8 +614,18 @@ try{
     const {page}=await home(ctx);
     await page.locator('[data-home-tab="scwm"]').click({force:true});
     const mood=page.locator('#scoreV2Row .scoreV2-card[data-scorev2="mood"]');
-    await mood.click({force:true});
-    await page.locator('#moodEditModal').waitFor({state:'visible'});
+    // Start with Sleep, matching the normal dashboard initialization path.
+    // The second Sleep edit later must update, not duplicate, this record.
+    await page.locator('#scoreV2Row .scoreV2-card[data-scorev2="sleep"]').click();
+    await page.locator('#sleepEditModal').waitFor({state:'visible'});
+    await page.locator('#sleepEditScoreInput').fill('66');
+    await page.locator('#sleepEditRestedInput').fill('0.5');
+    await page.locator('#sleepEditSaveBtn').click();
+    await page.waitForFunction(()=>window.TaskPointsCore.readTaskPointsStoredState()
+      .completions.some(c=>c.title.startsWith('Sleep Score (66)')),null,{timeout:12000});
+    await page.locator('[data-home-tab="scwm"]').click({force:true});
+    await mood.click();
+    await page.locator('#moodEditModal').waitFor({state:'visible',timeout:12000});
     await page.locator('#moodEditScoreInput').fill('2.1');
     await page.locator('#moodEditNotesInput').fill('Early synthetic note');
     await page.locator('#moodEditSaveBtn').click();
@@ -619,8 +637,8 @@ try{
     await page.waitForFunction(key=>window.TaskPointsCore.readPendingHabitDeltas()
       .some(d=>d.habitId==='h1'&&d.dayKey===key&&d.status==='full'),day);
     await page.locator('[data-home-tab="scwm"]').click({force:true});
-    await mood.click({force:true});
-    await page.locator('#moodEditModal').waitFor({state:'visible'});
+    await mood.click();
+    await page.locator('#moodEditModal').waitFor({state:'visible',timeout:12000});
     await page.locator('#moodEditScoreInput').fill('4.4');
     await page.locator('#moodEditNotesInput').fill('Latest synthetic note after habit');
     await page.locator('#moodEditSaveBtn').click();
