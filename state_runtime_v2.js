@@ -214,11 +214,32 @@
       habitId: detail?.habitId != null ? String(detail.habitId) : null,
       dayKey: detail?.dayKey != null ? String(detail.dayKey) : null
     });
+    // A protected stale-tab reload must not silently swallow the user's
+    // actual Habit tap. Save only its identity (not a stale state snapshot).
+    // The Home fast-path controller will replay the normal toggle against
+    // freshly loaded V1 authority after the navigation completes.
+    const habitId = String(detail?.habitId || '').trim();
+    const dayKey = String(detail?.dayKey || '').trim();
+    let tapContinuationSaved = false;
+    if (habitId && /^\\d{4}-\\d{2}-\\d{2}$/.test(dayKey)) {
+      try {
+        const generation = currentGeneration({ create: false });
+        const payload = {
+          version: 1, habitId, dayKey, generation,
+          pathname: String(global.location?.pathname || ''),
+          createdEpochMs: Date.now()
+        };
+        global.sessionStorage?.setItem?.('taskpoints_v2_stale_habit_tap_v1', JSON.stringify(payload));
+        tapContinuationSaved = global.sessionStorage?.getItem?.('taskpoints_v2_stale_habit_tap_v1')
+          === JSON.stringify(payload);
+      } catch (_) {}
+    }
     try { global.location?.reload?.(); } catch (_) {}
     return {
       proceed: false,
       reason: 'external_revision_invalidated',
       reloadRequested: true,
+      tapContinuationSaved,
       revision: externalRevision
     };
   }
