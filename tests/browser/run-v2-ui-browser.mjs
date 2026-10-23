@@ -226,6 +226,44 @@ try{
     return {day,statuses:observed.map(v=>v.status),final:result,parity:parity.match};
   });
 
+
+  await test('two actual Home tabs retain overlapping Habit touches after closing and reopening one tab',async ctx=>{
+    const first=(await home(ctx)).page;
+    const second=(await home(ctx)).page;
+    await Promise.all([
+      first.locator('[data-home-tab="habits"]').click({force:true}),
+      second.locator('[data-home-tab="habits"]').click({force:true})
+    ]);
+    const day=await first.locator('#habitsList .habitDay[data-habit="h1"]').first().getAttribute('data-day');
+    assert.ok(day);
+    await Promise.all([
+      first.locator('#habitsList .habitDay[data-habit="h1"][data-day="'+day+'"]').tap({force:true}),
+      second.locator('#habitsList .habitDay[data-habit="h2"][data-day="'+day+'"]').tap({force:true})
+    ]);
+    const fromFirst=await first.evaluate(key=>window.TaskPointsCore.readPendingHabitDeltas()
+      .filter(d=>d.dayKey===key&&['h1','h2'].includes(d.habitId))
+      .map(d=>d.habitId).sort(),day);
+    assert.deepEqual(fromFirst,['h1','h2'],'two overlapping Home touches must stay in the durable journal');
+    await second.close();
+    await first.reload({waitUntil:'load'});
+    await first.waitForFunction(()=>document.querySelectorAll('#habitsList .habitDay').length>=21);
+    await first.evaluate(()=>window.TaskPointsStateRuntimeV2.startCoordinatedDarkMirror());
+    const result=await first.evaluate(key=>{
+      const core=window.TaskPointsCore;
+      const baseline=core.readTaskPointsStoredState();
+      const effective=structuredClone(baseline);
+      core.applyPendingHabitDeltas(effective);
+      return {done:effective.habits.filter(h=>['h1','h2'].includes(h.id)&&h.doneKeys.includes(key)).map(h=>h.id).sort(),
+        journal:core.readPendingHabitDeltas().filter(d=>d.dayKey===key).map(d=>d.habitId).sort(),
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    },day);
+    assert.deepEqual(result.done,['h1','h2']);
+    assert.equal(result.authority,'legacy_only');
+    const p=await first.evaluate(()=>window.TaskPointsStateRuntimeV2.verifyParity());
+    assert.equal(p.match,true,JSON.stringify(p.differences));
+    return {day,touched:result.done,durableJournal:result.journal,parity:p.match};
+  });
+
 }finally{
   await writeFile(join(artifacts,'results.json'),JSON.stringify({failures,records},null,2));
   await browser.close();
