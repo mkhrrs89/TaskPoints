@@ -713,11 +713,16 @@ try{
   });
 
 
-  await test('rapid Mood corrections survive pagehide and reload without resurrecting an earlier score',async ctx=>{
+  await test('three Mood corrections across reloads retain only the most recent entry',async ctx=>{
     const {page}=await home(ctx);
     await page.locator('[data-home-tab="scwm"]').click({force:true});
     const mood=page.locator('#scoreV2Row .scoreV2-card[data-scorev2="mood"]');
+    let correction=0;
     for(const [score,note] of [['1.8','Synthetic first draft'],['2.6','Synthetic corrected draft'],['4.1','Synthetic final draft']]){
+      if(correction++>0){
+        await page.reload({waitUntil:'load'});
+        await page.waitForFunction(()=>document.querySelectorAll('#habitsList .habitDay').length>=21);
+      }
       // The Home SCWM card may be replaced by a canonical rerender after
       // Save. Return to SCWM and use the current rendered card each time.
       await page.locator('[data-home-tab="scwm"]').click({force:true});
