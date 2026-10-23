@@ -555,6 +555,34 @@ try {
     return {staleEvidencePreserved:true,ignoredAcrossGeneration:true,parity:p.match};
   });
 
+
+  await run('repeated overlapping writes in two tabs preserve every distinct V1 Habit/day event',async context=>{
+    const first=await open(context),second=await open(context);
+    for(let day=1;day<=8;day++){
+      const key='2026-09-'+String(day).padStart(2,'0');
+      await Promise.all([
+        first.evaluate(([date,n])=>window.V2BrowserFixture.delta('h1',date,'full',n),[key,2*day-1]),
+        second.evaluate(([date,n])=>window.V2BrowserFixture.delta('h2',date,'full',n),[key,2*day])
+      ]);
+    }
+    const evidence=await first.evaluate(()=>{
+      const core=window.TaskPointsCore;
+      const rows=core.readPendingHabitDeltas();
+      const events=Array.from({length:localStorage.length},(_,i)=>localStorage.key(i))
+        .filter(key=>key.startsWith('taskpoints_v2_habit_journal_event_v1:'));
+      return {journalCount:rows.length,distinctDeltas:new Set(rows.map(r=>r.id)).size,
+        h1:rows.filter(r=>r.habitId==='h1').length,
+        h2:rows.filter(r=>r.habitId==='h2').length,sidecarCount:events.length};
+    });
+    assert.equal(evidence.journalCount,16,'no concurrent V1 journal entry may disappear');
+    assert.equal(evidence.distinctDeltas,16);
+    assert.equal(evidence.h1,8);
+    assert.equal(evidence.h2,8);
+    assert.equal(evidence.sidecarCount,16,'every original tap retains its own independent event key');
+    return {rounds:8,concurrentTaps:16,
+      durableIndependentEvents:evidence.sidecarCount,legacyReadCount:evidence.journalCount};
+  });
+
 } finally {
   await writeFile(join(artifacts,'results.json'),JSON.stringify({ failures, results },null,2));
   await browser.close();
