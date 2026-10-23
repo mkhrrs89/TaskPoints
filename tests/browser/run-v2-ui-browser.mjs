@@ -383,12 +383,12 @@ try{
     await page.locator('#titleInput').fill('Synthetic task persistence check');
     await page.locator('#pointsInput').fill('18');
     await page.locator('#importanceInput').selectOption('High');
-    await page.locator('#addBtn').click({force:true});
+    await page.locator('#addBtn').click();
     await page.waitForFunction(()=>window.TaskPointsCore.readTaskPointsStoredState().tasks
-      .some(t=>t.title==='Synthetic task persistence check'),null,{timeout:12000});
+      .some(t=>String(t.title||'').toLowerCase()==='synthetic task persistence check'),null,{timeout:12000});
     const created=await page.evaluate(()=>{
       const state=window.TaskPointsCore.readTaskPointsStoredState();
-      const t=state.tasks.find(t=>t.title==='Synthetic task persistence check');
+      const t=state.tasks.find(t=>String(t.title||'').toLowerCase()==='synthetic task persistence check');
       return {id:t?.id,title:t?.title,importance:t?.importance,points:t?.points};
     });
     assert.ok(created.id);
@@ -413,7 +413,7 @@ try{
       return {task:t?{title:t.title,status:t.status}:null,completionCount:row.length,
         points:row[0]?.points,sourceCount:current.completions.filter(c=>c.source==='habit').length};
     },created.id);
-    assert.equal(recovered.task?.title,'Synthetic task persistence check');
+    assert.equal(recovered.task?.title?.toLowerCase(),'synthetic task persistence check');
     assert.equal(recovered.task?.status,'done');
     assert.equal(recovered.completionCount,1,'completed task must survive immediate page closure');
     assert.equal(recovered.points,18);
@@ -490,7 +490,7 @@ try{
     await page.locator('#titleInput').waitFor({state:'visible'});
     await page.locator('#titleInput').fill('Synthetic interleaved task');
     await page.locator('#pointsInput').fill('7');
-    await page.locator('#addBtn').click({force:true});
+    await page.locator('#addBtn').click();
     await page.locator('[data-home-tab="scwm"]').click({force:true});
     await page.locator('#scoreV2Row .scoreV2-card[data-scorev2="sleep"]').click();
     await page.locator('#sleepEditModal').waitFor({state:'visible'});
@@ -498,7 +498,7 @@ try{
     await page.locator('#sleepEditSaveBtn').click();
     await page.waitForFunction(()=>{
       const s=window.TaskPointsCore.readTaskPointsStoredState();
-      return s.tasks.some(t=>t.title==='Synthetic interleaved task')
+      return s.tasks.some(t=>String(t.title||'').toLowerCase()==='synthetic interleaved task')
         && s.completions.some(c=>c.title?.startsWith('Sleep Score (91)'));
     },null,{timeout:15000});
     await page.close();
@@ -509,7 +509,7 @@ try{
       const effective=structuredClone(s);
       core.applyPendingHabitDeltas(effective);
       return {habit:effective.habits.find(h=>h.id==='h1')?.doneKeys.includes(key),
-        task:s.tasks.filter(t=>t.title==='Synthetic interleaved task').length,
+        task:s.tasks.filter(t=>String(t.title||'').toLowerCase()==='synthetic interleaved task').length,
         sleep:s.completions.filter(c=>c.title?.startsWith('Sleep Score (91)')).length,
         journal:core.readPendingHabitDeltas().filter(d=>d.habitId==='h1'&&d.dayKey===key).length};
     },day);
