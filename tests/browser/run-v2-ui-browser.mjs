@@ -657,8 +657,17 @@ try{
       && Boolean(document.querySelector('#habitsList .habitDay[data-habit="h1"]')));
     const day=await page.locator('#habitsList .habitDay[data-habit="h1"]').first().getAttribute('data-day');
     await page.locator('#habitsList .habitDay[data-habit="h1"][data-day="'+day+'"]').tap();
-    await page.waitForFunction(key=>window.TaskPointsCore.readPendingHabitDeltas()
-      .some(d=>d.habitId==='h1'&&d.dayKey===key&&d.status==='full'),day,{timeout:12000});
+    await page.waitForFunction(key=>{
+      const core=window.TaskPointsCore;
+      const pending=core.readPendingHabitDeltas();
+      if(pending.some(d=>d.habitId==='h1'&&d.dayKey===key&&d.status==='full'))return true;
+      // A fast verified full-state compaction legitimately drains the
+      // journal before Playwright observes it. Check the saved completion
+      // and matching doneKey instead of requiring the temporary journal.
+      const s=core.readTaskPointsStoredState();
+      return s.habits.some(h=>h.id==='h1'&&h.doneKeys?.includes(key))
+        && s.completions.some(c=>c.habitId==='h1'&&c.dayKey===key);
+    },day,{timeout:12000});
     await page.locator('[data-home-tab="scwm"]').click({force:true});
     await mood.click();
     await page.locator('#moodEditModal').waitFor({state:'visible',timeout:12000});
