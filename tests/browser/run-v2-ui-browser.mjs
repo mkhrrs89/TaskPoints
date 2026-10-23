@@ -133,7 +133,20 @@ async function test(name,fn){
           tab:document.querySelector('[data-home-tab].is-active')?.getAttribute('data-home-tab'),
           runtime:window.TaskPointsStateRuntimeV2?.getStatus?.(),
           bridge:window.TaskPointsStateRuntimeV2WalBridge?.getStatus?.(),
-          journal:window.TaskPointsCore?.readPendingHabitDeltas?.()
+          journal:window.TaskPointsCore?.readPendingHabitDeltas?.(),
+          taskJournal:window.TaskPointsCore?.readPendingTaskMutations?.()?.record?.tasks
+            ?.map(t=>({id:t.id,title:t.title,status:t.status,points:t.points})),
+          liveTasks:(typeof state!=='undefined'?state.tasks:[])?.map(t=>({
+            id:t.id,title:t.title,status:t.status,points:t.points
+          })),
+          rawTasks:window.TaskPointsCore?.readTaskPointsStoredState?.()?.tasks?.map(t=>({
+            id:t.id,title:t.title,status:t.status,points:t.points
+          })),
+          liveMetrics:(typeof state!=='undefined'?state.completions:[])
+            .filter(c=>c.source==='metric').map(c=>({title:c.title,notes:c.moodNotes})),
+          rawMetrics:window.TaskPointsCore?.readTaskPointsStoredState?.()?.completions
+            ?.filter(c=>c.source==='metric').map(c=>({title:c.title,notes:c.moodNotes})),
+          moodModal:document.querySelector('#moodEditModal')?.className
         }));
         await writeFile(join(artifacts,'failed-'+records.length+'-'+i+'.json'),JSON.stringify(diag,null,2));
         console.error('UI DIAGNOSTICS '+JSON.stringify(diag).slice(0,2500));
