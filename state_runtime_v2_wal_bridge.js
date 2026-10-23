@@ -205,7 +205,12 @@
       let succeeded = false;
       try {
         result = original.apply(this, arguments);
-        succeeded = true;
+        // Validated restores can decline an invalid or suspicious snapshot
+        // without throwing. Never rotate the V2 generation for a rejected
+        // replacement: the existing WAL and IndexedDB still belong to the
+        // unchanged authoritative V1 snapshot.
+        succeeded = result?.blocked !== true && result?.skipped !== true
+          && result?.saved !== false;
         return result;
       } finally {
         replacementCallDepth = Math.max(0, replacementCallDepth - 1);
