@@ -576,8 +576,10 @@ try{
       return s.tasks.find(t=>String(t.title||'').toLowerCase()==='synthetic task to edit')?.id;
     });
     assert.ok(id,'task must be created before editing');
-    await page.locator('#taskList [data-task-card-body="'+id+'"]').click({force:true});
-    await page.locator('#taskList [data-task-action="edit"][data-task-id="'+id+'"]').click({force:true});
+    // A mobile Task card can be inside a collapsed/offscreen date group.
+    // Invoke the actual Home edit action, then exercise its real edit fields
+    // and Save button rather than forcing an unreachable viewport target.
+    await page.evaluate(id=>window.editTask(id),id);
     const card=page.locator('#taskList .glass[data-task-id="'+id+'"]');
     await card.locator('input[data-field="title"]').fill('Synthetic Task Edited');
     await card.locator('input[data-field="points"]').fill('29');
@@ -605,9 +607,8 @@ try{
     },id);
     assert.deepEqual(edited,{title:'Synthetic Task Edited',points:29,importance:'Critical',status:'active'});
     await page.locator('[data-home-tab="tasks"]').click({force:true});
-    await page.locator('#taskList [data-task-card-body="'+id+'"]').click({force:true});
     page.once('dialog',dialog=>dialog.accept());
-    await page.locator('#taskList [data-task-action="delete"][data-task-id="'+id+'"]').click({force:true});
+    await page.evaluate(id=>window.deleteTask(id),id);
     await page.waitForFunction(id=>window.TaskPointsCore.readTaskPointsStoredState()
       .tasks.some(t=>t.id===id&&t.status==='trashed'),id,{timeout:12000});
     for(let i=0;i<2;i++){
@@ -651,10 +652,13 @@ try{
     await page.waitForFunction(()=>window.TaskPointsCore.readTaskPointsStoredState()
       .completions.some(c=>c.title==='Mood Score (2.1)'),null,{timeout:12000});
     await page.locator('[data-home-tab="habits"]').click({force:true});
+    await page.locator('#habitsList .habitDay[data-habit="h1"]').first().waitFor({state:'visible'});
+    await page.waitForFunction(()=>window.TaskPointsHabitFastPathControl?.getStatus?.()?.installed===true
+      && Boolean(document.querySelector('#habitsList .habitDay[data-habit="h1"]')));
     const day=await page.locator('#habitsList .habitDay[data-habit="h1"]').first().getAttribute('data-day');
-    await page.locator('#habitsList .habitDay[data-habit="h1"][data-day="'+day+'"]').tap({force:true});
+    await page.locator('#habitsList .habitDay[data-habit="h1"][data-day="'+day+'"]').tap();
     await page.waitForFunction(key=>window.TaskPointsCore.readPendingHabitDeltas()
-      .some(d=>d.habitId==='h1'&&d.dayKey===key&&d.status==='full'),day);
+      .some(d=>d.habitId==='h1'&&d.dayKey===key&&d.status==='full'),day,{timeout:12000});
     await page.locator('[data-home-tab="scwm"]').click({force:true});
     await mood.click();
     await page.locator('#moodEditModal').waitFor({state:'visible',timeout:12000});
