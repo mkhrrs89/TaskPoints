@@ -273,6 +273,67 @@ try{
     return {day,touched:result.done,durableJournal:result.journal,parity:p.match};
   });
 
+
+  await test('stale Home tab safely reloads and replays the intercepted Habit tap exactly once',async ctx=>{
+    const first=(await home(ctx)).page;
+    const stale=(await home(ctx)).page;
+    await first.locator('[data-home-tab="habits"]').click({force:true});
+    await stale.locator('[data-home-tab="habits"]').click({force:true});
+    const day=await first.locator('#habitsList .habitDay[data-habit="h1"]').first().getAttribute('data-day');
+    assert.ok(day);
+    await first.locator('#habitsList .habitDay[data-habit="h1"][data-day="'+day+'"]').tap({force:true});
+    await first.waitForFunction(key=>window.TaskPointsCore.readPendingHabitDeltas()
+      .some(d=>d.habitId==='h1'&&d.dayKey===key),day);
+    await stale.waitForFunction(()=>window.TaskPointsStateRuntimeV2?.getStatus?.()?.externalRevisionInvalidated===true,
+      null,{timeout:12000});
+    // The second bubble is stale. Its guard must reload before applying it,
+    // while keeping the user's intended tap for exactly one fresh replay.
+    await stale.locator('#habitsList .habitDay[data-habit="h2"][data-day="'+day+'"]').tap({force:true});
+    await stale.waitForFunction(key=>window.TaskPointsCore?.readPendingHabitDeltas?.()
+      .some(d=>d.habitId==='h2'&&d.dayKey===key),day,{timeout:20000});
+    const evidence=await stale.evaluate(key=>{
+      const core=window.TaskPointsCore;
+      const pending=core.readPendingHabitDeltas();
+      const h2=pending.filter(d=>d.habitId==='h2'&&d.dayKey===key);
+      const control=window.TaskPointsHabitFastPathControl?.getStatus?.();
+      return {h1:pending.some(d=>d.habitId==='h1'&&d.dayKey===key),
+        h2Count:h2.length,h2Status:h2[0]?.status,
+        replays:control?.staleTapReplays,
+        pending:control?.pendingStaleTap,
+        generation:window.TaskPointsStateRuntimeV2.getStatus().currentGeneration};
+    },day);
+    assert.equal(evidence.h1,true);
+    assert.equal(evidence.h2Count,1,'stale user tap must execute once, never twice');
+    assert.equal(evidence.h2Status,'full');
+    assert.equal(evidence.replays,1);
+    assert.equal(evidence.pending,false);
+    await stale.evaluate(()=>window.TaskPointsStateRuntimeV2.startCoordinatedDarkMirror());
+    const parity=await stale.evaluate(()=>window.TaskPointsStateRuntimeV2.verifyParity());
+    assert.equal(parity.match,true,JSON.stringify(parity.differences));
+    return {replayedExactlyOnce:true,journalPreserved:true,parity:parity.match};
+  });
+
+  await test('stale Habit continuation from a previous V2 generation is discarded without toggling',async ctx=>{
+    const {page}=await home(ctx);
+    const generation=await page.evaluate(()=>window.TaskPointsStateRuntimeV2.getStatus().currentGeneration);
+    await page.evaluate(generation=>sessionStorage.setItem('taskpoints_v2_stale_habit_tap_v1',
+      JSON.stringify({version:1,habitId:'h2',dayKey:'2026-10-19',
+        generation:'old-generation-'+generation,pathname:location.pathname,
+        createdEpochMs:Date.now()})),generation);
+    await page.reload({waitUntil:'load'});
+    await page.waitForFunction(()=>window.TaskPointsHabitFastPathControl?.getStatus?.().staleTapDiscarded===1,
+      null,{timeout:10000});
+    const evidence=await page.evaluate(()=>({
+      count:window.TaskPointsCore.readPendingHabitDeltas().filter(d=>d.habitId==='h2').length,
+      replays:window.TaskPointsHabitFastPathControl.getStatus().staleTapReplays,
+      pending:sessionStorage.getItem('taskpoints_v2_stale_habit_tap_v1')
+    }));
+    assert.equal(evidence.count,0);
+    assert.equal(evidence.replays,0);
+    assert.equal(evidence.pending,null);
+    return {wrongGenerationTapDiscarded:true,noUnexpectedMutation:true};
+  });
+
 }finally{
   await writeFile(join(artifacts,'results.json'),JSON.stringify({failures,records},null,2));
   await browser.close();
