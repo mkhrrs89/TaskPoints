@@ -509,9 +509,9 @@ test('order-only V1/V2 mismatch preserves all rows and ledger until canonical or
       assert.equal(error.evidence.legacyOnlyCompletions, 0);
       assert.equal(error.evidence.changedCompletions, 0);
       assert.equal(error.evidence.destructiveReseedBlocked, true);
-      assert.deepEqual(error.evidence.expectedCompletionOrderIds,
+      assert.deepEqual(plain(error.evidence.expectedCompletionOrderIds),
         canonical.completions.map(c => c.id).reverse());
-      assert.deepEqual(error.evidence.actualCompletionOrderIds,
+      assert.deepEqual(plain(error.evidence.actualCompletionOrderIds),
         canonical.completions.map(c => c.id));
       return true;
     });
