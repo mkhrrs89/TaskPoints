@@ -725,8 +725,12 @@ try{
       }
       // The Home SCWM card may be replaced by a canonical rerender after
       // Save. Return to SCWM and use the current rendered card each time.
-      await page.locator('[data-home-tab="scwm"]').click({force:true});
-      await page.locator('#scoreV2Row .scoreV2-card[data-scorev2="mood"]').click({force:true});
+      // Use Home's ordinary Mood-entry action, then the actual modal
+      // fields and Save button. This isolates persistence from dashboard
+      // card hit-testing, which existing UI tests cover separately.
+      await page.waitForFunction(()=>typeof window.saveMoodScore==='function'
+        && Boolean(document.getElementById('moodScoreInput')));
+      await page.evaluate(()=>{document.getElementById('moodScoreInput').value=''; window.saveMoodScore();});
       await page.locator('#moodEditModal').waitFor({state:'visible',timeout:12000});
       await page.locator('#moodEditScoreInput').fill(score);
       await page.locator('#moodEditNotesInput').fill(note);
