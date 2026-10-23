@@ -221,7 +221,7 @@
     const habitId = String(detail?.habitId || '').trim();
     const dayKey = String(detail?.dayKey || '').trim();
     let tapContinuationSaved = false;
-    if (habitId && /^\\d{4}-\\d{2}-\\d{2}$/.test(dayKey)) {
+    if (habitId && /^\d{4}-\d{2}-\d{2}$/.test(dayKey)) {
       try {
         const generation = currentGeneration({ create: false });
         const payload = {
