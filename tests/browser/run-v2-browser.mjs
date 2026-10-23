@@ -686,7 +686,8 @@ try {
     const match=await parity(recovery);
     assert.equal(state.mutations,1);
     assert.equal(state.completions,1);
-    assert.equal(state.reason==='verified_current'||state.reason==='already_current',true);
+    assert.ok(['verified_current','already_current','already_seeded_this_page'].includes(state.reason),
+      'an already-completed startup adoption is also a valid recovery result');
     return {repeatedReloads:5,tabs:2,mutationsPreserved:state.mutations,
       completionsPreserved:state.completions,parity:match.match};
   });
