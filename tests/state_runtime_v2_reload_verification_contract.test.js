@@ -477,3 +477,54 @@ test('a concurrent cross-tab commit cannot be erased by a delayed verified seed 
   assert.equal(persisted.mutations.length, 2);
   assert.equal(persisted.completions.length, 1);
 });
+
+
+test('order-only V1/V2 mismatch preserves all rows and ledger until canonical order is restored', async () => {
+  const indexedDB = new FakeIndexedDB();
+  const localStorage = new FakeStorage({
+    [DARK_MODE_KEY]: '1',
+    [LEGACY_KEY]: JSON.stringify(legacyState())
+  });
+  const first = installRuntime(indexedDB, localStorage, 'order-evidence-first');
+  await first.seedFromLegacy();
+  await first.applyHabitDelta(delta());
+  await first.applyHabitDelta({
+    ...delta(),
+    id: 'habit:h1:2026-09-04', dayKey: '2026-09-04',
+    updatedAtISO: '2026-09-04T14:30:00.000Z'
+  });
+  const canonical = await first.buildCompatibilitySnapshot();
+  assert.equal(canonical.completions.length, 2);
+  const reordered = structuredClone(canonical);
+  reordered.completions.reverse();
+  localStorage.setItem(LEGACY_KEY, JSON.stringify(reordered));
+  const before = plain(indexedDB.dump(DB_NAME));
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const reader = installRuntime(indexedDB, localStorage, 'order-evidence-tab-' + attempt);
+    await assert.rejects(reader.seedFromLegacy(), (error) => {
+      assert.equal(error.code, 'STATE_V2_PARITY_MISMATCH_PRESERVED');
+      assert.equal(error.evidence.completionOrderDisagreements, 2);
+      assert.equal(error.evidence.v2OnlyCompletions, 0);
+      assert.equal(error.evidence.legacyOnlyCompletions, 0);
+      assert.equal(error.evidence.changedCompletions, 0);
+      assert.equal(error.evidence.destructiveReseedBlocked, true);
+      assert.deepEqual(error.evidence.expectedCompletionOrderIds,
+        canonical.completions.map(c => c.id).reverse());
+      assert.deepEqual(error.evidence.actualCompletionOrderIds,
+        canonical.completions.map(c => c.id));
+      return true;
+    });
+    assert.deepEqual(plain(indexedDB.dump(DB_NAME)), before,
+      'a strict order mismatch must never repair V2 by replacing its ledger');
+  }
+
+  localStorage.setItem(LEGACY_KEY, JSON.stringify(canonical));
+  const recovered = installRuntime(indexedDB, localStorage, 'order-evidence-recovered');
+  const result = await recovered.seedFromLegacy();
+  assert.equal(result.reason, 'verified_current');
+  const after = plain(indexedDB.dump(DB_NAME));
+  assert.deepEqual(after.mutations, before.mutations);
+  assert.deepEqual(after.completions, before.completions);
+  assert.equal((await recovered.verifyParity()).match, true);
+});
