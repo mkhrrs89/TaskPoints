@@ -302,6 +302,29 @@ try {
     return {replayed:status.bridge.replayCleared,parity:report.match};
   });
 
+
+  await run('incomplete restore snapshot is rejected without rotating generation or changing V1',async context=>{
+    const page=await open(context);
+    const outcome=await page.evaluate(()=>{
+      const core=window.TaskPointsCore;
+      const initial=localStorage.getItem(core.STORAGE_KEY);
+      const generation=window.TaskPointsStateRuntimeV2Generation.read();
+      const result=core.saveValidatedSnapshot({ habits:[],completions:[] },{
+        allowDestructiveOverwrite:true,source:'settings-restore',immediateWrite:true
+      });
+      return {blocked:result?.blocked===true,reason:result?.reason,
+        originalUnchanged:localStorage.getItem(core.STORAGE_KEY)===initial,
+        generationUnchanged:window.TaskPointsStateRuntimeV2Generation.read()===generation};
+    });
+    assert.equal(outcome.blocked,true);
+    assert.match(outcome.reason,/missing required domains/);
+    assert.equal(outcome.originalUnchanged,true);
+    assert.equal(outcome.generationUnchanged,true);
+    const p=await parity(page);
+    assert.equal(p.actualCounts.habits,3);
+    return {blockedSafely:true,generationUnchanged:true,parity:p.match};
+  });
+
 } finally {
   await writeFile(join(artifacts,'results.json'),JSON.stringify({ failures, results },null,2));
   await browser.close();
