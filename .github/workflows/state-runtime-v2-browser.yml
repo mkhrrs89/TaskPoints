@@ -33,11 +33,15 @@ jobs:
         run: npx playwright install chromium
       - name: Run real-browser synthetic V2 storage safety scenarios
         run: node tests/browser/run-v2-browser.mjs
+      - name: Exercise actual Home UI with synthetic V2 state
+        run: node tests/browser/run-v2-ui-browser.mjs
       - name: Upload browser test evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: v2-real-browser-evidence
-          path: v2-browser-artifacts
+          path: |
+            v2-browser-artifacts
+            v2-ui-browser-artifacts
           if-no-files-found: warn
           retention-days: 7
