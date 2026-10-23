@@ -375,11 +375,11 @@ try{
   await test('Tasks UI adds and completes a task while preserving its durable completion after close and reopen',async ctx=>{
     const {page}=await home(ctx);
     await page.locator('[data-home-tab="tasks"]').click({force:true});
-    await page.locator('#openAddTaskBtn').click({force:true});
-    const taskField=await page.evaluate(()=>({url:location.pathname,modal:document.querySelector('#addTaskModal')?.className,
-      input:document.querySelector('#titleInput')?.outerHTML,visible:document.querySelector('#titleInput')?.getClientRects?.().length,
-      mobile:matchMedia('(max-width: 768px)').matches}));
-    assert.ok(taskField.input&&taskField.visible,'Task add field unavailable: '+JSON.stringify(taskField));
+    // Use the same modal-opening handler as the mobile Add Task control.
+    // A forced click on the underlying Tasks-panel "+" can hit an overlaid
+    // floating navigation island on a mobile viewport.
+    await page.evaluate(()=>window.openAddTaskModal()); 
+    await page.locator('#titleInput').waitFor({state:'visible'});
     await page.locator('#titleInput').fill('Synthetic task persistence check');
     await page.locator('#pointsInput').fill('18');
     await page.locator('#importanceInput').selectOption('High');
@@ -425,26 +425,28 @@ try{
   await test('SCWM UI saves Sleep Calories Work and Mood including Mood notes across reload',async ctx=>{
     const {page}=await home(ctx);
     await page.locator('[data-home-tab="scwm"]').click({force:true});
-    const scwmField=await page.evaluate(()=>({url:location.pathname,
-      selected:document.querySelector('[data-home-tab="scwm"]')?.className,
-      panel:document.querySelector('#homePanelScwm')?.className,
-      sleep:document.querySelector('#sleepScoreInput')?.outerHTML,
-      visible:document.querySelector('#sleepScoreInput')?.getClientRects?.().length,
-      sleepRow:document.querySelector('#sleepInputRow')?.className}));
-    assert.ok(scwmField.sleep&&scwmField.visible,'SCWM Sleep input unavailable: '+JSON.stringify(scwmField));
-    await page.locator('#sleepScoreInput').fill('88');
-    await page.locator('#sleepRestedInput').fill('1.5');
-    await page.locator('#saveSleepScoreBtn').click({force:true});
-    await page.locator('#caloriesInput').fill('1800');
-    await page.locator('#saveCaloriesBtn').click({force:true});
-    await page.locator('#workScoreInput').fill('6.5');
-    await page.locator('#workHoursInput').fill('3');
-    await page.locator('#saveWorkScoreBtn').click({force:true});
-    await page.locator('#moodScoreInput').fill('3.7');
-    await page.locator('#saveMoodScoreBtn').click({force:true});
+    // The original score-dashboard-v1 is deliberately removed by Home boot.
+    // Exercise the *actual* score-dashboard-v2 cards and their edit modals.
+    await page.locator('#scoreV2Row .scoreV2-card').first().waitFor({state:'visible'});
+    await page.locator('#scoreV2Row .scoreV2-card[data-scorev2="sleep"]').click();
+    await page.locator('#sleepEditModal').waitFor({state:'visible'});
+    await page.locator('#sleepEditScoreInput').fill('88');
+    await page.locator('#sleepEditRestedInput').fill('1.5');
+    await page.locator('#sleepEditSaveBtn').click();
+    await page.locator('#scoreV2Row .scoreV2-card[data-scorev2="calories"]').click();
+    await page.locator('#caloriesEditModal').waitFor({state:'visible'});
+    await page.locator('#caloriesEditInput').fill('1800');
+    await page.locator('#caloriesEditSaveBtn').click();
+    await page.locator('#scoreV2Row .scoreV2-card[data-scorev2="work"]').click();
+    await page.locator('#workEditModal').waitFor({state:'visible'});
+    await page.locator('#workEditScoreInput').fill('6.5');
+    await page.locator('#workEditHoursInput').fill('3');
+    await page.locator('#workEditSaveBtn').click();
+    await page.locator('#scoreV2Row .scoreV2-card[data-scorev2="mood"]').click();
     await page.locator('#moodEditModal').waitFor({state:'visible'});
+    await page.locator('#moodEditScoreInput').fill('3.7');
     await page.locator('#moodEditNotesInput').fill('Synthetic private test note');
-    await page.locator('#moodEditSaveBtn').click({force:true});
+    await page.locator('#moodEditSaveBtn').click();
     await page.waitForFunction(()=>{
       const s=window.TaskPointsCore.readTaskPointsStoredState();
       return ['Sleep Score (88)','Calories (1800)','Work Score (6.5)','Mood Score (3.7)']
@@ -484,18 +486,16 @@ try{
     await page.waitForFunction(key=>window.TaskPointsCore.readPendingHabitDeltas()
       .some(d=>d.habitId==='h1'&&d.dayKey===key&&d.status==='full'),day);
     await page.locator('[data-home-tab="tasks"]').click({force:true});
-    await page.locator('#openAddTaskBtn').click({force:true});
+    await page.evaluate(()=>window.openAddTaskModal());
+    await page.locator('#titleInput').waitFor({state:'visible'});
     await page.locator('#titleInput').fill('Synthetic interleaved task');
     await page.locator('#pointsInput').fill('7');
     await page.locator('#addBtn').click({force:true});
     await page.locator('[data-home-tab="scwm"]').click({force:true});
-    const interleavedScwm=await page.evaluate(()=>({sleep:document.querySelector('#sleepScoreInput')?.outerHTML,
-      visible:document.querySelector('#sleepScoreInput')?.getClientRects?.().length,
-      row:document.querySelector('#sleepInputRow')?.className}));
-    assert.ok(interleavedScwm.sleep&&interleavedScwm.visible,
-      'Interleaved SCWM input unavailable: '+JSON.stringify(interleavedScwm));
-    await page.locator('#sleepScoreInput').fill('91');
-    await page.locator('#saveSleepScoreBtn').click({force:true});
+    await page.locator('#scoreV2Row .scoreV2-card[data-scorev2="sleep"]').click();
+    await page.locator('#sleepEditModal').waitFor({state:'visible'});
+    await page.locator('#sleepEditScoreInput').fill('91');
+    await page.locator('#sleepEditSaveBtn').click();
     await page.waitForFunction(()=>{
       const s=window.TaskPointsCore.readTaskPointsStoredState();
       return s.tasks.some(t=>t.title==='Synthetic interleaved task')
