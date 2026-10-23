@@ -13065,7 +13065,12 @@ function hideTask(id){
 function deleteTask(id){
   if(!confirm('Move this task to Trash?')) return;
   const t = state.tasks.find(x => x.id === id);
-  if (!t || !moveTaskToTrash(t, 'TasksScreen')) return;
+  // V2 Task edits can still be pending in the durable mutation journal.
+  // Journal the newer Trash state before the full save, or an older Edit
+  // entry could win during the journal overlay and resurrect this Task.
+  if (!t || (TaskPointsCore?.journalTaskMutation && !assertTaskActionMutationWritable())
+      || !moveTaskToTrash(t, 'TasksScreen')) return;
+  if (TaskPointsCore?.journalTaskMutation) persistTaskActionMutation(t, 'move-to-trash');
   if (editingTaskId === id) editingTaskId = null;
   save();
   renderTasks();
