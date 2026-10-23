@@ -728,11 +728,11 @@ try{
       // Use Home's ordinary Mood-entry action, then the actual modal
       // fields and Save button. This isolates persistence from dashboard
       // card hit-testing, which existing UI tests cover separately.
-      await page.waitForFunction(()=>Boolean(document.getElementById('saveMoodScoreBtn'))
-        && Boolean(document.getElementById('moodScoreInput')));
+      await page.waitForFunction(()=>Boolean(document.querySelector('#scoreV2Row .scoreV2-card[data-scorev2="mood"]')));
+      // Dispatch the same DOM click listener used by the real dashboard.
+      // This avoids offscreen touch targeting while preserving its onSave path.
       await page.evaluate(()=>{
-        document.getElementById('moodScoreInput').value='';
-        document.getElementById('saveMoodScoreBtn').click();
+        document.querySelector('#scoreV2Row .scoreV2-card[data-scorev2="mood"]').click();
       });
       await page.locator('#moodEditModal').waitFor({state:'visible',timeout:12000});
       await page.locator('#moodEditScoreInput').fill(score);
