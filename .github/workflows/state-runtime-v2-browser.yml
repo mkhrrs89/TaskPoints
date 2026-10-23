@@ -31,11 +31,23 @@ jobs:
         run: npm install --no-save --package-lock=false playwright@1.56.1
       - name: Install Chromium browser
         run: npx playwright install chromium
-      - name: Run real-browser synthetic V2 storage safety scenarios
-        run: node tests/browser/run-v2-browser.mjs
-      - name: Exercise actual Home UI with synthetic V2 state
+      - name: Run real-browser synthetic V2 storage safety scenarios three times
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            echo "V2 storage safety independent browser run $attempt of 3"
+            node tests/browser/run-v2-browser.mjs
+          done
+      - name: Exercise actual Home UI with synthetic V2 state twice
         if: success() || failure()
-        run: node tests/browser/run-v2-ui-browser.mjs
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2; do
+            echo "V2 Home UI independent browser run $attempt of 2"
+            node tests/browser/run-v2-ui-browser.mjs
+          done
       - name: Upload browser test evidence
         if: always()
         uses: actions/upload-artifact@v4
