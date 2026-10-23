@@ -195,6 +195,113 @@ try {
     assert.deepEqual(journal.map(x=>x.habitId).sort(), ['h1','h2']);
     return { tabs:2, durableEntries:journal.length };
   });
+
+  await run('repeated reloads retain V2 mutation ledger and completed Habit parity', async context => {
+    const page=await open(context);
+    await page.evaluate(()=>{
+      const f=window.V2BrowserFixture;
+      f.delta('h1','2026-10-21','full',1);
+      f.delta('h2','2026-10-21','half',2);
+      f.delta('h3','2026-10-21','full',3);
+    });
+    await settled(page,3);
+    let previousRevision=0;
+    for(let i=0;i<5;i++){
+      await page.reload({waitUntil:'load'});
+      await page.evaluate(()=>window.V2BrowserFixture.start());
+      const p=await parity(page);
+      assert.equal(p.actualCounts.completions,3);
+      const evidence=await page.evaluate(async()=>{
+        const db=await window.TaskPointsStateRuntimeV2.open();
+        const tx=db.transaction(['meta','mutations'],'readonly');
+        const read=r=>new Promise((resolve,reject)=>{
+          r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);
+        });
+        const [meta,rows]=await Promise.all([
+          read(tx.objectStore('meta').get('runtime')),
+          read(tx.objectStore('mutations').getAll())
+        ]);
+        return {revision:meta.revision,ids:rows.map(r=>r.id)};
+      });
+      assert.equal(evidence.ids.length,3,'committed mutation ledger must survive reload');
+      assert.equal(new Set(evidence.ids).size,3,'no duplicated mutations');
+      assert.ok(evidence.revision>=previousRevision,'revisions cannot move backward');
+      previousRevision=evidence.revision;
+    }
+    return {reloads:5,completions:3,mutationsRetained:3};
+  });
+
+  await run('backup serialize, authorized import and restore protect generation and unrelated completions',async context=>{
+    const page=await open(context);
+    const first=await page.evaluate(()=>{
+      const core=window.TaskPointsCore;
+      const backup=core.serializeTaskPointsStoredState(window.V2BrowserFixture.rawLegacy());
+      const decoded=core.parseTaskPointsStorageJson(backup,{});
+      const previous=window.TaskPointsStateRuntimeV2Generation.read();
+      const imported=structuredClone(decoded);
+      imported.habits[0].name='Imported Synthetic Habit';
+      imported.notes='Import-only synthetic note';
+      const result=core.saveValidatedSnapshot(imported,{
+        allowDestructiveOverwrite:true,source:'settings-import',immediateWrite:true
+      });
+      return {backup,previous,after:window.TaskPointsStateRuntimeV2Generation.read(),
+        resultBlocked:result?.blocked===true,
+        importedName:window.V2BrowserFixture.rawLegacy().habits[0].name};
+    });
+    assert.equal(first.resultBlocked,false);
+    assert.notEqual(first.previous,first.after);
+    assert.equal(first.importedName,'Imported Synthetic Habit');
+    await page.evaluate(()=>window.TaskPointsStateRuntimeV2.startCoordinatedDarkMirror());
+    await page.waitForFunction(async()=> (await window.TaskPointsStateRuntimeV2.getHabit('h1'))?.name==='Imported Synthetic Habit');
+    await parity(page);
+    const restored=await page.evaluate(backup=>{
+      const core=window.TaskPointsCore;
+      const data=core.parseTaskPointsStorageJson(backup,{});
+      const result=core.saveValidatedSnapshot(data,{
+        allowDestructiveOverwrite:true,source:'settings-restore',immediateWrite:true
+      });
+      const saved=window.V2BrowserFixture.rawLegacy();
+      return {generation:window.TaskPointsStateRuntimeV2Generation.read(),
+        blocked:result?.blocked===true,name:saved.habits[0].name,
+        taskRows:saved.completions.filter(r=>r.source==='task').length};
+    },first.backup);
+    assert.equal(restored.blocked,false);
+    assert.notEqual(restored.generation,first.after);
+    assert.equal(restored.name,'Synthetic h1');
+    assert.equal(restored.taskRows,1);
+    await page.evaluate(()=>window.TaskPointsStateRuntimeV2.startCoordinatedDarkMirror());
+    await page.waitForFunction(async()=> (await window.TaskPointsStateRuntimeV2.getHabit('h1'))?.name==='Synthetic h1');
+    await parity(page);
+    return {importAndRestoreGenerationsRotated:true,unrelatedTaskPreserved:true};
+  });
+
+  await run('closing a tab with held WAL replays safely from a surviving tab',async context=>{
+    const first=await open(context),second=await open(context);
+    await second.evaluate(()=>{
+      sessionStorage.setItem('taskpoints_state_v2_wal_test_armed_v1','1');
+      window.V2BrowserFixture.delta('h3','2026-10-21','full',1);
+    });
+    assert.equal((await second.evaluate(()=>window.V2BrowserFixture.status())).wal.pendingCount,1);
+    await second.close();
+    const durable=await first.evaluate(()=>({
+      wal:window.TaskPointsStateRuntimeV2Wal.getPendingRows(),
+      journal:window.TaskPointsCore.readPendingHabitDeltas()
+    }));
+    assert.equal(durable.wal.rows.length,1);
+    assert.equal(durable.journal.filter(r=>r.habitId==='h3').length,1);
+    await first.reload({waitUntil:'load'});
+    await first.waitForFunction(()=>{
+      const s=window.V2BrowserFixture?.status();
+      return s && s.wal.pendingCount===0 && s.bridge.replayCleared>=1;
+    },null,{timeout:20000});
+    const report=await parity(first);
+    assert.equal(report.actualCounts.completions,1);
+    const status=await first.evaluate(()=>window.V2BrowserFixture.status());
+    assert.equal(status.bridge.failures,0);
+    assert.equal(status.bridge.lastStartupOrder,'wal_then_seed');
+    return {replayed:status.bridge.replayCleared,parity:report.match};
+  });
+
 } finally {
   await writeFile(join(artifacts,'results.json'),JSON.stringify({ failures, results },null,2));
   await browser.close();
