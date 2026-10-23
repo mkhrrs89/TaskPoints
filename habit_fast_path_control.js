@@ -71,8 +71,72 @@
     return true;
   }
 
+  // V2-only continuation for a Habit tap intercepted by a stale-tab reload.
+  // Replay through the unchanged Home handler against freshly loaded V1 state.
+  const STALE_TAP_KEY = 'taskpoints_v2_stale_habit_tap_v1';
+  const STALE_TAP_MAX_AGE_MS = 30000;
+  let staleTapReplayScheduled = false;
+  let staleTapReplays = 0;
+  let staleTapDiscarded = 0;
+  function readStaleTap() {
+    try {
+      const raw = global.sessionStorage?.getItem?.(STALE_TAP_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (_) { return null; }
+  }
+  function discardStaleTap() {
+    try { global.sessionStorage?.removeItem?.(STALE_TAP_KEY); } catch (_) {}
+    staleTapDiscarded += 1;
+  }
+  function scheduleStaleTapReplay() {
+    if (staleTapReplayScheduled || !readStaleTap() || typeof global.setTimeout !== 'function') return;
+    staleTapReplayScheduled = true;
+    let attempts = 0;
+    const tryReplay = () => {
+      const pending = readStaleTap();
+      if (!pending) { staleTapReplayScheduled = false; return; }
+      const runtime = global.TaskPointsStateRuntimeV2;
+      const status = runtime?.getStatus?.();
+      const age = Date.now() - Number(pending.createdEpochMs || 0);
+      if (pending.version !== 1 || !pending.habitId || !/^\d{4}-\d{2}-\d{2}$/.test(String(pending.dayKey || ''))
+        || !Number.isFinite(age) || age < 0 || age > STALE_TAP_MAX_AGE_MS
+        || String(pending.pathname || '') !== String(global.location?.pathname || '')
+        || (status?.currentGeneration && String(pending.generation || '') !== String(status.currentGeneration))
+        || global.localStorage?.getItem?.('taskpoints_state_v2_dark_mode_v1') !== '1') {
+        discardStaleTap();
+        staleTapReplayScheduled = false;
+        return;
+      }
+      const bubbles = global.document?.querySelectorAll?.('.habitDay[data-habit][data-day]') || [];
+      const bubble = Array.from(bubbles).find(node =>
+        String(node?.getAttribute?.('data-habit')) === String(pending.habitId)
+        && String(node?.getAttribute?.('data-day')) === String(pending.dayKey));
+      if (!bubble || !status || status.externalRevisionInvalidated
+        || status.readAuthority !== 'legacy_only' || !controlledHandler) {
+        attempts += 1;
+        if (attempts > 100) {
+          discardStaleTap();
+          staleTapReplayScheduled = false;
+        } else {
+          global.setTimeout(tryReplay, 100);
+        }
+        return;
+      }
+      // At-most-once: consume first, then use the ordinary journal-first tap.
+      // A subsequent stale-revision guard can requeue on a new reload.
+      try { global.sessionStorage?.removeItem?.(STALE_TAP_KEY); } catch (_) { return; }
+      staleTapReplayScheduled = false;
+      staleTapReplays += 1;
+      global.handleHabitBubbleTap?.(bubble);
+    };
+    global.setTimeout(tryReplay, 0);
+  }
+
   function status() {
     return {
+      staleTapReplays,
+      staleTapDiscarded,
+      pendingStaleTap: Boolean(readStaleTap()),
       installed,
       enabled: !isDisabled(),
       disabledKey: DISABLED_KEY,
@@ -138,6 +202,7 @@
     if (installed) {
       installedAtISO = new Date().toISOString();
       lastReason = isDisabled() ? 'installed_disabled' : 'installed_enabled';
+      scheduleStaleTapReplay();
     } else {
       controlledHandler = null;
       originalHandler = null;
