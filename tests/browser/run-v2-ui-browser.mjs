@@ -72,6 +72,10 @@ async function makeContext(){
       gameHistory:[],matchups:[],schedule:[],opponentDripSchedules:[],flexActions:[],
       notes:'SYNTHETIC UI DATA',scoringSettings:{},habitTagColors:{}
     }));
+    // Real Home uses both the state snapshot and a separate Notes cache.
+    // A consistent synthetic backup must initialize both, or first-load
+    // Notes reconciliation can legitimately select an empty cache.
+    localStorage.setItem('taskpoints_notes_v1','SYNTHETIC UI DATA');
     localStorage.setItem('v2_synthetic_ui_seed','1');
   });
   return ctx;
