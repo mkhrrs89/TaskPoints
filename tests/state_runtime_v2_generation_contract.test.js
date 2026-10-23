@@ -55,6 +55,9 @@ function install({ initialState = legacyState(), initialStorage = {} } = {}) {
     habitCompletionId(habitId, dayKey) { return `habit:${habitId}:${dayKey}`; },
     writePendingHabitDelta(input) { return { ...input }; },
     saveValidatedSnapshot(nextState, options = {}) {
+      if (options.testBlocked === true) {
+        return { state: JSON.parse(localStorage.getItem(LEGACY_KEY)), blocked: true, reason: 'snapshot-shape-invalid' };
+      }
       localStorage.setItem(LEGACY_KEY, JSON.stringify(nextState));
       return { state: nextState, options };
     },
@@ -197,6 +200,27 @@ test('V2-14 destructive import rotates generation and makes pre-import WAL perma
   assert.equal(snapshot.completions.length, 0);
   assert.equal(snapshot.mutations.length, 0);
   assert.equal(runtimeMeta(app).resetGeneration, newGeneration);
+});
+
+test('rejected authorized restore preserves original generation, V1 data and pending WAL', async () => {
+  const app = install();
+  await app.runtime.seedFromLegacy();
+  const originalGeneration = app.generation.read();
+  const originalState = app.localStorage.getItem(LEGACY_KEY);
+  app.wal.appendHabitDelta(delta(), { generation: originalGeneration });
+
+  const rejected = app.core.saveValidatedSnapshot({ habits: [] }, {
+    allowDestructiveOverwrite: true,
+    source: 'settings-restore',
+    immediateWrite: true,
+    testBlocked: true
+  });
+  await app.settle();
+
+  assert.equal(rejected.blocked, true);
+  assert.equal(app.localStorage.getItem(LEGACY_KEY), originalState);
+  assert.equal(app.generation.read(), originalGeneration, 'rejected restore may not rotate generation');
+  assert.equal(app.wal.getPendingRows().rows.length, 1, 'rejected restore must preserve WAL');
 });
 
 test('ordinary validated snapshot save does not rotate V2 generation', async () => {
