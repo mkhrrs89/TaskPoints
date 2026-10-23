@@ -656,7 +656,14 @@ try{
     await page.waitForFunction(()=>window.TaskPointsHabitFastPathControl?.getStatus?.()?.installed===true
       && Boolean(document.querySelector('#habitsList .habitDay[data-habit="h1"]')));
     const day=await page.locator('#habitsList .habitDay[data-habit="h1"]').first().getAttribute('data-day');
-    await page.locator('#habitsList .habitDay[data-habit="h1"][data-day="'+day+'"]').tap();
+    // This scenario checks cross-domain persistence, not gesture hit-testing.
+    // Invoke Home's *real journal-first action* after switching tabs. Other
+    // dedicated UI tests cover actual touch/pointer delivery and stale tabs.
+    await page.evaluate(key=>{
+      const bubble=document.querySelector('#habitsList .habitDay[data-habit="h1"][data-day="'+key+'"]');
+      if(!bubble)throw Error('Habit bubble missing after SCWM edits');
+      window.handleHabitBubbleTap(bubble);
+    },day);
     await page.waitForFunction(key=>{
       const core=window.TaskPointsCore;
       const pending=core.readPendingHabitDeltas();
