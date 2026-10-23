@@ -3410,6 +3410,10 @@ function load() {
       schedule:     Array.isArray(p.schedule)     ? p.schedule     : [],
       opponentDripSchedules: Array.isArray(p.opponentDripSchedules) ? p.opponentDripSchedules : [],
       projects:     Array.isArray(p.projects)     ? p.projects     : storedProjects,
+      // Keep Notes in the live Home state. Omitting this field from load()
+      // caused unrelated Task/SCWM saves to overwrite the stored Notes with
+      // an empty string even though a separate notes cache still had them.
+      notes:        typeof p.notes === "string" ? p.notes : "",
       youImageId:   typeof p.youImageId === "string" ? p.youImageId : "",
       youName:      typeof p.youName === "string" ? p.youName : "",
       youPrimaryColor: normalizeHexColor(p.youPrimaryColor) || "#1a383b",
