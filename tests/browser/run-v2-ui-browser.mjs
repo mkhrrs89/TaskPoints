@@ -150,6 +150,12 @@ async function test(name,fn){
         }));
         await writeFile(join(artifacts,'failed-'+records.length+'-'+i+'.json'),JSON.stringify(diag,null,2));
         console.error('UI DIAGNOSTICS '+JSON.stringify(diag).slice(0,2500));
+        console.error('UI STORAGE DIAGNOSTICS '+JSON.stringify({
+          liveTasks:diag.liveTasks,taskJournal:diag.taskJournal,rawTasks:diag.rawTasks,
+          liveMetrics:diag.liveMetrics,rawMetrics:diag.rawMetrics,
+          journal:diag.journal,habitGuard:diag.runtime?.externalRevisionInvalidated,
+          modal:diag.moodModal
+        }).slice(0,7000));
       }catch(e){console.error('UI diag '+String(e));}
       try{await p.screenshot({path:join(artifacts,'failure-'+records.length+'-'+i+'.png')});}catch{}
     }
