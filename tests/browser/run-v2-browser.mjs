@@ -637,7 +637,10 @@ try {
     });
     assert.equal(baseline.counts[2],1);
     assert.equal(baseline.counts[3],1);
-    await first.evaluate(()=>localStorage.removeItem('taskpoints_v1'));
+    // Model browser storage eviction without invoking TaskPoints' intentional
+    // Reset All hook (which rightly rotates the V2 generation).
+    await first.evaluate(()=>Storage.prototype.__taskPointsV2GenerationOriginalRemoveItem
+      .call(localStorage,'taskpoints_v1'));
 
     for(let attempt=0;attempt<5;attempt++){
       const other=await open(context);
