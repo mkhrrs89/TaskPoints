@@ -6271,7 +6271,13 @@ const updateTodayScoreIsland = (value) => {
     setHomeSeriesRecordLabel('');
     const yesterdayPanelEl = $('yesterdayResultsPanel');
     if (yesterdayPanelEl) yesterdayPanelEl.classList.remove('yesterday-win');
-    clearYesterdayResultClasses();
+    // This branch runs inside renderStats, not renderYesterdaysResult.
+    // Its local clearYesterdayResultClasses closure is unavailable here.
+    // Clear the same four styling targets directly when no match is scheduled.
+    ['yesterdayYouName', 'yesterdayYourScore', 'yesterdayOpponent', 'yesterdayOpponentScore']
+      .forEach(id => $(id)?.classList.remove(
+        'yesterdayWinner', 'yesterdayWinnerScore', 'yesterdayLoser', 'yesterdayLoserScore'
+      ));
     diffValueEl.textContent = '—';
     oppScoreEl.textContent = '—';
     const yourNum = Number(yourScore);
