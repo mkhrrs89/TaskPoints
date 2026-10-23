@@ -376,7 +376,42 @@ try {
       const s=window.V2BrowserFixture?.status();
       return s?.wal.pendingCount===0;
     },null,{timeout:25000});
-    const p=await parity(first);
+    let p;
+    try {
+      p=await parity(first);
+    } catch (error) {
+      // A same-generation parity gate must never be bypassed to make a test
+      // pass. Capture readonly V1/V2 evidence and leave the browser failure.
+      const evidence=await first.evaluate(async()=>{
+        const runtime=window.TaskPointsStateRuntimeV2;
+        const db=await runtime.open();
+        const tx=db.transaction(['meta','habits','completions','mutations'],'readonly');
+        const getAll=store=>new Promise((resolve,reject)=>{
+          const request=tx.objectStore(store).getAll();
+          request.onsuccess=()=>resolve(request.result);
+          request.onerror=()=>reject(request.error);
+        });
+        const [meta,habits,completions,mutations]=await Promise.all([
+          getAll('meta'),getAll('habits'),getAll('completions'),getAll('mutations')
+        ]);
+        const core=window.TaskPointsCore;
+        const raw=window.V2BrowserFixture.rawLegacy();
+        const deltas=core.readPendingHabitDeltas();
+        const effective=structuredClone(raw);
+        core.applyPendingHabitDeltas(effective,deltas);
+        return {revision:meta.find(m=>m.id==='runtime')?.revision,
+          journal:deltas.map(d=>({id:d.id,habitId:d.habitId,status:d.status})),
+          v1:effective.habits.map(h=>({id:h.id,doneKeys:h.doneKeys})),
+          v2:habits.map(h=>({id:h.id,doneKeys:h.value?.doneKeys})),
+          expectedCompletions:effective.completions.filter(c=>c.source==='habit').map(c=>c.id),
+          actualCompletions:completions.map(c=>({id:c.id,valueId:c.value?.id})),
+          mutations:mutations.map(m=>({id:m.id,status:m.status,revision:m.revision})),
+          wal:window.TaskPointsStateRuntimeV2Wal.getPendingRows(),
+          status:runtime.getStatus()};
+      });
+      console.error('MULTITAB_PARITY_EVIDENCE '+JSON.stringify(evidence));
+      throw error;
+    }
     assert.equal(p.actualCounts.completions,2);
     const status=await first.evaluate(()=>window.V2BrowserFixture.status());
     assert.equal(status.wal.pendingCount,0);
