@@ -325,6 +325,105 @@ try {
     return {blockedSafely:true,generationUnchanged:true,parity:p.match};
   });
 
+
+  await run('60 rapid synthetic Habit/day writes preserve exact durable V1 and V2 record counts',async context=>{
+    const page=await open(context);
+    await page.evaluate(()=>{
+      const f=window.V2BrowserFixture;
+      for(let day=1;day<=20;day++){
+        const key='2026-09-'+String(day).padStart(2,'0');
+        for(let habit=0;habit<3;habit++){
+          f.delta('h'+(habit+1),key,'full',(day-1)*3+habit);
+        }
+      }
+    });
+    await settled(page,60);
+    const p=await parity(page);
+    assert.equal(p.actualCounts.completions,60);
+    assert.equal(p.expectedCounts.completions,60);
+    const observed=await page.evaluate(async()=>{
+      const core=window.TaskPointsCore;
+      const journal=core.readPendingHabitDeltas();
+      const db=await window.TaskPointsStateRuntimeV2.open();
+      const request=db.transaction('mutations','readonly').objectStore('mutations').getAll();
+      const mutations=await new Promise((resolve,reject)=>{
+        request.onsuccess=()=>resolve(request.result);
+        request.onerror=()=>reject(request.error);
+      });
+      return {journal:journal.length,uniqueDays:new Set(journal.map(x=>x.dayKey)).size,
+        mutations:mutations.length,mutationsDistinct:new Set(mutations.map(x=>x.id)).size};
+    });
+    assert.deepEqual(observed,{journal:60,uniqueDays:20,mutations:60,mutationsDistinct:60});
+    return {writes:60,days:20,pilotCompletions:p.actualCounts.completions,mutations:observed.mutations};
+  });
+
+  await run('two concurrent tabs retain both writes and recover outstanding WAL after reopening',async context=>{
+    const first=await open(context),second=await open(context);
+    await Promise.all([
+      first.evaluate(()=>window.V2BrowserFixture.delta('h1','2026-10-20','full',1)),
+      second.evaluate(()=>window.V2BrowserFixture.delta('h2','2026-10-20','full',2))
+    ]);
+    const original=await first.evaluate(()=>window.TaskPointsCore.readPendingHabitDeltas());
+    assert.deepEqual(original.map(row=>row.habitId).sort(),['h1','h2']);
+    await first.waitForTimeout(350);
+    const pending=await first.evaluate(()=>window.V2BrowserFixture.status().wal.pendingCount);
+    // Another tab can advance the V2 revision between transactions. The WAL
+    // must remain durable if a conflict prevents immediate V2 confirmation.
+    assert.ok(pending>=0 && pending<=2,'no WAL entry may be duplicated');
+    await second.close();
+    await first.reload({waitUntil:'load'});
+    await first.waitForFunction(()=>{
+      const s=window.V2BrowserFixture?.status();
+      return s?.wal.pendingCount===0;
+    },null,{timeout:25000});
+    const p=await parity(first);
+    assert.equal(p.actualCounts.completions,2);
+    const status=await first.evaluate(()=>window.V2BrowserFixture.status());
+    assert.equal(status.wal.pendingCount,0);
+    const journal=await first.evaluate(()=>window.TaskPointsCore.readPendingHabitDeltas());
+    assert.equal(journal.length,2);
+    return {concurrentWrites:2,recoveryReplayCount:status.bridge.replayCleared,
+      durableLegacyDeltas:journal.length,parity:p.match};
+  });
+
+  await run('temporary IndexedDB write failure keeps legacy journal and WAL until restart replay',async context=>{
+    const page=await open(context);
+    await page.evaluate(()=>{
+      const original=IDBDatabase.prototype.transaction;
+      window.__syntheticV2WriteFault=true;
+      IDBDatabase.prototype.transaction=function(storeNames,mode,...options){
+        if(window.__syntheticV2WriteFault && mode==='readwrite'){
+          throw new DOMException('Synthetic V2 write unavailable','QuotaExceededError');
+        }
+        return original.call(this,storeNames,mode,...options);
+      };
+      window.V2BrowserFixture.delta('h1','2026-10-20','full',1);
+    });
+    await page.waitForFunction(()=>{
+      const s=window.V2BrowserFixture?.status();
+      return s?.bridge.failures>0 && s?.runtime.mirrorFailures>0;
+    },null,{timeout:16000});
+    const protectedRecords=await page.evaluate(()=>({
+      status:window.V2BrowserFixture.status(),
+      journal:window.TaskPointsCore.readPendingHabitDeltas()
+    }));
+    assert.equal(protectedRecords.status.wal.pendingCount,1);
+    assert.equal(protectedRecords.journal.length,1);
+    assert.equal(protectedRecords.journal[0].habitId,'h1');
+    await page.reload({waitUntil:'load'});
+    await page.waitForFunction(()=>{
+      const s=window.V2BrowserFixture?.status();
+      return s && s.wal.pendingCount===0 && s.bridge.replayCleared>=1;
+    },null,{timeout:20000});
+    const p=await parity(page);
+    assert.equal(p.actualCounts.completions,1);
+    const status=await page.evaluate(()=>window.V2BrowserFixture.status());
+    assert.equal(status.bridge.failures,0);
+    assert.equal(status.runtime.mirrorFailures,0);
+    return {fault:'synthetic IDB readwrite rejection',walReplayed:status.bridge.replayCleared,
+      legacyJournalPreserved:true,parity:p.match};
+  });
+
 } finally {
   await writeFile(join(artifacts,'results.json'),JSON.stringify({ failures, results },null,2));
   await browser.close();
