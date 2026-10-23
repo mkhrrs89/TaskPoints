@@ -621,7 +621,7 @@ try {
 
   await run('missing V1 during five repeated two-tab reloads preserves V2 WAL evidence for recovery',async context=>{
     const first=await open(context);
-    await first.evaluate(()=>window.V2BrowserFixture.delta('h1','2026-10-20','full',901));
+    await first.evaluate(()=>window.V2BrowserFixture.delta('h1','2026-10-20','full',9));
     await settled(first,1);
     const baseline=await first.evaluate(async()=>{
       const db=await window.TaskPointsStateRuntimeV2.open();
