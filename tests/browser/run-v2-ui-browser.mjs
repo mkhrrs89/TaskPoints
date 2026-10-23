@@ -712,6 +712,71 @@ try{
     return {lastMoodWins:true,oneMoodEntry:true,habitAndSleepRetained:true,parity:p.match};
   });
 
+
+  await test('rapid Mood corrections survive pagehide and reload without resurrecting an earlier score',async ctx=>{
+    const {page}=await home(ctx);
+    await page.locator('[data-home-tab="scwm"]').click({force:true});
+    const mood=page.locator('#scoreV2Row .scoreV2-card[data-scorev2="mood"]');
+    for(const [score,note] of [['1.8','Synthetic first draft'],['2.6','Synthetic corrected draft'],['4.1','Synthetic final draft']]){
+      await mood.click({force:true});
+      await page.locator('#moodEditModal').waitFor({state:'visible'});
+      await page.locator('#moodEditScoreInput').fill(score);
+      await page.locator('#moodEditNotesInput').fill(note);
+      await page.locator('#moodEditSaveBtn').click();
+      await page.waitForFunction(([expected,notes])=>{
+        const entries=window.TaskPointsCore.readTaskPointsStoredState().completions
+          .filter(c=>c.title?.startsWith('Mood Score'));
+        return entries.length===1 && entries[0].title==='Mood Score ('+expected+')'
+          && entries[0].moodNotes===notes;
+      },[score,note],{timeout:12000});
+    }
+    await page.evaluate(()=>{
+      document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new Event('pagehide'));
+    });
+    await page.close();
+    const reopened=(await home(ctx)).page;
+    const result=await reopened.evaluate(()=>{
+      const s=window.TaskPointsCore.readTaskPointsStoredState();
+      const mood=s.completions.filter(c=>c.title?.startsWith('Mood Score'));
+      return {mood:mood.map(c=>({title:c.title,notes:c.moodNotes})),
+        journal:window.TaskPointsCore.readPendingHabitDeltas().length,
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    });
+    assert.deepEqual(result.mood,[{title:'Mood Score (4.1)',notes:'Synthetic final draft'}]);
+    assert.equal(result.authority,'legacy_only');
+    await reopened.evaluate(()=>window.TaskPointsStateRuntimeV2.startCoordinatedDarkMirror());
+    const parity=await reopened.evaluate(()=>window.TaskPointsStateRuntimeV2.verifyParity());
+    assert.equal(parity.match,true,JSON.stringify(parity.differences));
+    return {corrections:3,finalMood:'4.1',duplicates:0,parity:parity.match};
+  });
+
+  await test('unsaved Task creation form does not create a ghost Task after background and reload',async ctx=>{
+    const {page}=await home(ctx);
+    await page.locator('[data-home-tab="tasks"]').click({force:true});
+    await page.evaluate(()=>window.openAddTaskModal());
+    await page.locator('#titleInput').waitFor({state:'visible'});
+    await page.locator('#titleInput').fill('Synthetic draft must never save');
+    await page.locator('#pointsInput').fill('43');
+    await page.evaluate(()=>{
+      document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new Event('pagehide'));
+    });
+    await page.reload({waitUntil:'load'});
+    await page.waitForFunction(()=>document.querySelectorAll('#habitsList .habitDay').length>=21);
+    const saved=await page.evaluate(()=>{
+      const s=window.TaskPointsCore.readTaskPointsStoredState();
+      const journal=window.TaskPointsCore.readPendingTaskMutations?.()?.record?.tasks||[];
+      return {tasks:s.tasks.filter(t=>t.title==='Synthetic draft must never save').length,
+        pending:journal.filter(t=>t.title==='Synthetic draft must never save').length};
+    });
+    assert.equal(saved.tasks,0,'form without Save must not persist a Task');
+    assert.equal(saved.pending,0,'unsaved draft must not enter the Task journal');
+    const p=await page.evaluate(()=>window.TaskPointsStateRuntimeV2.verifyParity());
+    assert.equal(p.match,true,JSON.stringify(p.differences));
+    return {ghostTasks:0,pendingDrafts:0,parity:p.match};
+  });
+
 }finally{
   await writeFile(join(artifacts,'results.json'),JSON.stringify({failures,records},null,2));
   await browser.close();
