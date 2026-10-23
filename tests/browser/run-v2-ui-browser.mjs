@@ -417,7 +417,14 @@ try{
     assert.ok(created.id);
     assert.equal(created.importance,'High');
     assert.equal(created.points,18);
-    await page.locator('#taskList [data-task-action="complete"][data-task-id="'+created.id+'"]').click({force:true});
+    // The persistence test must exercise the real DOM click listener on
+    // the completed task, not risk force-clicking a mobile overlay above it.
+    // Other browser cases independently test pointer targeting.
+    await page.evaluate(id=>{
+      const button=document.querySelector('#taskList [data-task-action="complete"][data-task-id="'+id+'"]');
+      if(!button)throw Error('Task completion control was not rendered');
+      button.click();
+    },created.id);
     await page.waitForFunction(id=>{
       const live=typeof state !== 'undefined' ? state : null;
       const journal=window.TaskPointsCore.readPendingTaskMutations?.();
@@ -641,6 +648,7 @@ try{
     await page.locator('#sleepEditScoreInput').fill('66');
     await page.locator('#sleepEditRestedInput').fill('0.5');
     await page.locator('#sleepEditSaveBtn').click();
+    await page.locator('#sleepEditModal').waitFor({state:'hidden',timeout:12000});
     await page.waitForFunction(()=>window.TaskPointsCore.readTaskPointsStoredState()
       .completions.some(c=>c.title.startsWith('Sleep Score (66)')),null,{timeout:12000});
     await page.locator('[data-home-tab="scwm"]').click({force:true});
@@ -649,6 +657,7 @@ try{
     await page.locator('#moodEditScoreInput').fill('2.1');
     await page.locator('#moodEditNotesInput').fill('Early synthetic note');
     await page.locator('#moodEditSaveBtn').click();
+    await page.locator('#moodEditModal').waitFor({state:'hidden',timeout:12000});
     await page.waitForFunction(()=>window.TaskPointsCore.readTaskPointsStoredState()
       .completions.some(c=>c.title==='Mood Score (2.1)'),null,{timeout:12000});
     await page.locator('[data-home-tab="habits"]').click({force:true});
@@ -681,6 +690,7 @@ try{
     await page.locator('#moodEditScoreInput').fill('4.4');
     await page.locator('#moodEditNotesInput').fill('Latest synthetic note after habit');
     await page.locator('#moodEditSaveBtn').click();
+    await page.locator('#moodEditModal').waitFor({state:'hidden',timeout:12000});
     await page.locator('#scoreV2Row .scoreV2-card[data-scorev2="sleep"]').click({force:true});
     await page.locator('#sleepEditModal').waitFor({state:'visible'});
     await page.locator('#sleepEditScoreInput').fill('79');
