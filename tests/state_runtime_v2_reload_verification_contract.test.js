@@ -350,3 +350,130 @@ test('forced bootstrap remains available for separately authorized repair', asyn
   assert.equal(fixed.reseedReason, 'forced');
   assert.equal(indexedDB.dump(DB_NAME).completions.length, 0);
 });
+
+
+test('a temporarily missing V1 key preserves V2 completion and ledger across repeated tabs and restarts', async () => {
+  const indexedDB = new FakeIndexedDB();
+  const localStorage = new FakeStorage({
+    [DARK_MODE_KEY]: '1',
+    [LEGACY_KEY]: JSON.stringify(legacyState())
+  });
+  const first = installRuntime(indexedDB, localStorage, 'missing-v1-first');
+  await first.seedFromLegacy();
+  await first.applyHabitDelta(delta());
+  const recoveredLegacy = await first.buildCompatibilitySnapshot();
+  const before = plain(indexedDB.dump(DB_NAME));
+  localStorage.removeItem(LEGACY_KEY);
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const tab = installRuntime(indexedDB, localStorage, 'missing-v1-tab-' + attempt);
+    await assert.rejects(tab.seedFromLegacy(), error => {
+      assert.equal(error.code, 'STATE_V2_LEGACY_MISSING_PRESERVED');
+      assert.equal(error.evidence.destructiveReseedBlocked, true);
+      assert.equal(error.evidence.existingRevision, before.meta[0].revision);
+      return true;
+    });
+    assert.deepEqual(plain(indexedDB.dump(DB_NAME)), before,
+      'reopening must never erase a potentially recoverable incremental V2 copy');
+    assert.equal(tab.getStatus().readAuthority, 'legacy_only');
+  }
+
+  localStorage.setItem(LEGACY_KEY, JSON.stringify(recoveredLegacy));
+  const recovered = installRuntime(indexedDB, localStorage, 'missing-v1-recovered');
+  const adoption = await recovered.seedFromLegacy();
+  assert.equal(adoption.reason, 'verified_current');
+  assert.equal(indexedDB.dump(DB_NAME).completions.length, 1);
+  assert.equal(indexedDB.dump(DB_NAME).mutations.length, 1);
+  assert.equal((await recovered.verifyParity()).match, true);
+});
+
+test('a newer cross-tab revision aborts an in-flight destructive seed without clearing evidence', async () => {
+  const indexedDB = new FakeIndexedDB();
+  const localStorage = new FakeStorage({
+    [DARK_MODE_KEY]: '1',
+    [LEGACY_KEY]: JSON.stringify(legacyState())
+  });
+  const first = installRuntime(indexedDB, localStorage, 'seed-race-first');
+  await first.seedFromLegacy();
+  await first.applyHabitDelta(delta());
+  const db = await first.open();
+  const originalTransaction = db.transaction.bind(db);
+  let injected = false;
+
+  // Simulate the other tab committing between readMeta() and the seed's
+  // readwrite transaction. The stale tab must fail closed.
+  db.transaction = function (names, mode) {
+    if (!injected && mode === 'readwrite' && Array.isArray(names)
+        && names.includes('mutations') && names.includes('meta')) {
+      injected = true;
+      const current = db._stores.get('meta').get('runtime');
+      db._stores.get('meta').set('runtime', {
+        ...current, revision: current.revision + 1, lastMutationId: 'other-tab-commit'
+      });
+      db._stores.get('mutations').set('other-tab-commit', {
+        id: 'other-tab-commit', status: 'committed',
+        revision: current.revision + 1, resetGeneration: current.resetGeneration
+      });
+    }
+    return originalTransaction(names, mode);
+  };
+
+  const second = installRuntime(indexedDB, localStorage, 'seed-race-second');
+  await assert.rejects(second.seedFromLegacy({ force: true }), error => {
+    assert.equal(error.code, 'STATE_RUNTIME_V2_REVISION_CONFLICT');
+    assert.equal(error.actualRevision, error.expectedRevision + 1);
+    return true;
+  });
+  assert.equal(injected, true, 'the startup replacement path was exercised');
+  const saved = indexedDB.dump(DB_NAME);
+  assert.equal(saved.completions.length, 1);
+  assert.equal(saved.mutations.length, 2);
+  assert.equal(saved.mutations.some(row => row.id === 'other-tab-commit'), true);
+  assert.equal(saved.meta[0].revision, 3);
+  assert.equal(second.getStatus().readAuthority, 'legacy_only');
+});
+
+test('a concurrent cross-tab commit cannot be erased by a delayed verified seed marker', async () => {
+  const indexedDB = new FakeIndexedDB();
+  const localStorage = new FakeStorage({
+    [DARK_MODE_KEY]: '1',
+    [LEGACY_KEY]: JSON.stringify(legacyState())
+  });
+  const first = installRuntime(indexedDB, localStorage, 'marker-race-first');
+  await first.seedFromLegacy();
+  await first.applyHabitDelta(delta());
+  const compatible = await first.buildCompatibilitySnapshot();
+  localStorage.setItem(LEGACY_KEY, JSON.stringify(compatible));
+
+  const db = await first.open();
+  const originalTransaction = db.transaction.bind(db);
+  let injected = false;
+  db.transaction = function (names, mode) {
+    if (!injected && names === 'meta' && mode === 'readwrite') {
+      injected = true;
+      const current = db._stores.get('meta').get('runtime');
+      db._stores.get('meta').set('runtime', {
+        ...current, revision: current.revision + 1, lastMutationId: 'cross-tab-newer'
+      });
+      db._stores.get('mutations').set('cross-tab-newer', {
+        id: 'cross-tab-newer', status: 'committed',
+        revision: current.revision + 1, resetGeneration: current.resetGeneration
+      });
+    }
+    return originalTransaction(names, mode);
+  };
+
+  const second = installRuntime(indexedDB, localStorage, 'marker-race-second');
+  await assert.rejects(second.seedFromLegacy(), error => {
+    assert.equal(error.code, 'STATE_RUNTIME_V2_REVISION_CONFLICT');
+    return true;
+  });
+  assert.equal(injected, true);
+  const persisted = indexedDB.dump(DB_NAME);
+  assert.equal(persisted.meta[0].revision, 3);
+  assert.equal(persisted.meta[0].lastMutationId, 'cross-tab-newer');
+  assert.notEqual(persisted.meta[0].seedVerifiedRevision, 3,
+    'the delayed marker cannot falsely mark the newer revision verified');
+  assert.equal(persisted.mutations.length, 2);
+  assert.equal(persisted.completions.length, 1);
+});
