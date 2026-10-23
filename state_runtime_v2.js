@@ -586,6 +586,19 @@
     const v2OnlyHabitIds = only(actualHabits, expectedHabits);
     const legacyOnlyHabitIds = only(expectedHabits, actualHabits);
     const changedHabitIds = changed(expectedHabits, actualHabits);
+    // Order is authoritative. Concurrent tabs can commit identical rows in
+    // a different transaction order from V1's timestamp-ordered journal.
+    // Diagnose the ordering conflict without normalizing it away or reseeding.
+    const completionIds = (rows) => rows.map((row, index) =>
+      row?.id == null ? `missing:${index}` : String(row.id));
+    const expectedCompletionOrder = completionIds(expected.completions);
+    const actualCompletionOrder = completionIds(actual.completions);
+    const completionOrderDisagreements = Math.max(
+      expectedCompletionOrder.length, actualCompletionOrder.length
+    ) === 0 ? 0 : Array.from({
+      length: Math.max(expectedCompletionOrder.length, actualCompletionOrder.length)
+    }, (_, index) => index).filter((index) =>
+      expectedCompletionOrder[index] !== actualCompletionOrder[index]).length;
     return {
       resetGeneration: generation,
       existingRevision: Number(previousMeta?.revision || 0),
@@ -596,6 +609,9 @@
       v2OnlyCompletions: v2OnlyCompletionIds.length,
       legacyOnlyCompletions: legacyOnlyCompletionIds.length,
       changedCompletions: changedCompletionIds.length,
+      completionOrderDisagreements,
+      expectedCompletionOrderIds: sample(expectedCompletionOrder),
+      actualCompletionOrderIds: sample(actualCompletionOrder),
       changedHabits: changedHabitIds.length,
       v2OnlyHabits: v2OnlyHabitIds.length,
       legacyOnlyHabits: legacyOnlyHabitIds.length,
