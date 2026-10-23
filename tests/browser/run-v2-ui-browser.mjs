@@ -718,8 +718,11 @@ try{
     await page.locator('[data-home-tab="scwm"]').click({force:true});
     const mood=page.locator('#scoreV2Row .scoreV2-card[data-scorev2="mood"]');
     for(const [score,note] of [['1.8','Synthetic first draft'],['2.6','Synthetic corrected draft'],['4.1','Synthetic final draft']]){
-      await mood.click({force:true});
-      await page.locator('#moodEditModal').waitFor({state:'visible'});
+      // The Home SCWM card may be replaced by a canonical rerender after
+      // Save. Return to SCWM and use the current rendered card each time.
+      await page.locator('[data-home-tab="scwm"]').click({force:true});
+      await page.locator('#scoreV2Row .scoreV2-card[data-scorev2="mood"]').click({force:true});
+      await page.locator('#moodEditModal').waitFor({state:'visible',timeout:12000});
       await page.locator('#moodEditScoreInput').fill(score);
       await page.locator('#moodEditNotesInput').fill(note);
       await page.locator('#moodEditSaveBtn').click();
