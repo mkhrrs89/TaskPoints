@@ -543,6 +543,118 @@ try{
     return {habitRetained:true,taskRetained:true,sleepRetained:true,parity:p.match};
   });
 
+
+  await test('Task UI edit then Trash survives repeated reloads without resurrecting an older task',async ctx=>{
+    const {page}=await home(ctx);
+    await page.locator('[data-home-tab="tasks"]').click({force:true});
+    await page.evaluate(()=>window.openAddTaskModal());
+    await page.locator('#titleInput').waitFor({state:'visible'});
+    await page.locator('#titleInput').fill('Synthetic Task To Edit');
+    await page.locator('#pointsInput').fill('11');
+    await page.locator('#addBtn').click();
+    const id=await page.evaluate(()=>{
+      const s=window.TaskPointsCore.readTaskPointsStoredState();
+      return s.tasks.find(t=>String(t.title||'').toLowerCase()==='synthetic task to edit')?.id;
+    });
+    assert.ok(id,'task must be created before editing');
+    await page.locator('#taskList [data-task-card-body="'+id+'"]').click({force:true});
+    await page.locator('#taskList [data-task-action="edit"][data-task-id="'+id+'"]').click({force:true});
+    const card=page.locator('#taskList .glass[data-task-id="'+id+'"]');
+    await card.locator('input[data-field="title"]').fill('Synthetic Task Edited');
+    await card.locator('input[data-field="points"]').fill('29');
+    await card.locator('select[data-field="importance"]').selectOption('Critical');
+    await card.locator('[data-task-action="task-save"]').click({force:true});
+    await page.waitForFunction(id=>{
+      const s=window.TaskPointsCore.readTaskPointsStoredState();
+      const t=s.tasks.find(t=>t.id===id);
+      return t?.title==='Synthetic Task Edited'&&t.points===29&&t.importance==='Critical';
+    },id,{timeout:12000});
+    await page.reload({waitUntil:'load'});
+    await page.waitForFunction(()=>document.querySelectorAll('#habitsList .habitDay').length>=21);
+    const edited=await page.evaluate(id=>{
+      const s=window.TaskPointsCore.readTaskPointsStoredState();
+      const t=s.tasks.find(x=>x.id===id);
+      return t&&{title:t.title,points:t.points,importance:t.importance,status:t.status};
+    },id);
+    assert.deepEqual(edited,{title:'Synthetic Task Edited',points:29,importance:'Critical',status:'active'});
+    await page.locator('[data-home-tab="tasks"]').click({force:true});
+    await page.locator('#taskList [data-task-card-body="'+id+'"]').click({force:true});
+    page.once('dialog',dialog=>dialog.accept());
+    await page.locator('#taskList [data-task-action="delete"][data-task-id="'+id+'"]').click({force:true});
+    await page.waitForFunction(id=>window.TaskPointsCore.readTaskPointsStoredState()
+      .tasks.some(t=>t.id===id&&t.status==='trashed'),id,{timeout:12000});
+    for(let i=0;i<2;i++){
+      await page.reload({waitUntil:'load'});
+      await page.waitForFunction(()=>document.querySelectorAll('#habitsList .habitDay').length>=21);
+    }
+    const final=await page.evaluate(id=>{
+      const s=window.TaskPointsCore.readTaskPointsStoredState();
+      const matches=s.tasks.filter(t=>t.id===id);
+      return {count:matches.length,status:matches[0]?.status,
+        deletedFrom:matches[0]?.deletedFrom,
+        visible:Boolean(document.querySelector('#taskList [data-task-id="'+id+'"]'))};
+    },id);
+    assert.equal(final.count,1,'Task must never be duplicated');
+    assert.equal(final.status,'trashed','explicitly deleted task must not resurrect');
+    assert.equal(final.visible,false);
+    const p=await page.evaluate(()=>window.TaskPointsStateRuntimeV2.verifyParity());
+    assert.equal(p.match,true,JSON.stringify(p.differences));
+    return {taskEditsPersisted:true,trashPersisted:true,reloads:3,habitParity:p.match};
+  });
+
+  await test('repeated Mood edits interleaved with Habit and Sleep preserve the latest note and no duplicates',async ctx=>{
+    const {page}=await home(ctx);
+    await page.locator('[data-home-tab="scwm"]').click({force:true});
+    const mood=page.locator('#scoreV2Row .scoreV2-card[data-scorev2="mood"]');
+    await mood.click({force:true});
+    await page.locator('#moodEditModal').waitFor({state:'visible'});
+    await page.locator('#moodEditScoreInput').fill('2.1');
+    await page.locator('#moodEditNotesInput').fill('Early synthetic note');
+    await page.locator('#moodEditSaveBtn').click();
+    await page.waitForFunction(()=>window.TaskPointsCore.readTaskPointsStoredState()
+      .completions.some(c=>c.title==='Mood Score (2.1)'),null,{timeout:12000});
+    await page.locator('[data-home-tab="habits"]').click({force:true});
+    const day=await page.locator('#habitsList .habitDay[data-habit="h1"]').first().getAttribute('data-day');
+    await page.locator('#habitsList .habitDay[data-habit="h1"][data-day="'+day+'"]').tap({force:true});
+    await page.waitForFunction(key=>window.TaskPointsCore.readPendingHabitDeltas()
+      .some(d=>d.habitId==='h1'&&d.dayKey===key&&d.status==='full'),day);
+    await page.locator('[data-home-tab="scwm"]').click({force:true});
+    await mood.click({force:true});
+    await page.locator('#moodEditModal').waitFor({state:'visible'});
+    await page.locator('#moodEditScoreInput').fill('4.4');
+    await page.locator('#moodEditNotesInput').fill('Latest synthetic note after habit');
+    await page.locator('#moodEditSaveBtn').click();
+    await page.locator('#scoreV2Row .scoreV2-card[data-scorev2="sleep"]').click({force:true});
+    await page.locator('#sleepEditModal').waitFor({state:'visible'});
+    await page.locator('#sleepEditScoreInput').fill('79');
+    await page.locator('#sleepEditRestedInput').fill('0.8');
+    await page.locator('#sleepEditSaveBtn').click();
+    await page.waitForFunction(()=>{
+      const c=window.TaskPointsCore.readTaskPointsStoredState().completions;
+      return c.some(x=>x.title==='Mood Score (4.4)'&&x.moodNotes==='Latest synthetic note after habit')
+        && c.some(x=>x.title.startsWith('Sleep Score (79)'));
+    },null,{timeout:12000});
+    await page.close();
+    const reopened=(await home(ctx)).page;
+    const final=await reopened.evaluate(key=>{
+      const core=window.TaskPointsCore;
+      const state=core.readTaskPointsStoredState();
+      const effective=structuredClone(state);
+      core.applyPendingHabitDeltas(effective);
+      const moods=state.completions.filter(c=>c.title?.startsWith('Mood Score'));
+      const sleeps=state.completions.filter(c=>c.title?.startsWith('Sleep Score'));
+      return {moods:moods.map(c=>({title:c.title,notes:c.moodNotes})),
+        sleeps:sleeps.map(c=>c.title),
+        habit:effective.habits.find(h=>h.id==='h1')?.doneKeys.includes(key)};
+    },day);
+    assert.deepEqual(final.moods,[{title:'Mood Score (4.4)',notes:'Latest synthetic note after habit'}]);
+    assert.equal(final.sleeps.length,1);
+    assert.equal(final.habit,true);
+    const p=await reopened.evaluate(()=>window.TaskPointsStateRuntimeV2.verifyParity());
+    assert.equal(p.match,true,JSON.stringify(p.differences));
+    return {lastMoodWins:true,oneMoodEntry:true,habitAndSleepRetained:true,parity:p.match};
+  });
+
 }finally{
   await writeFile(join(artifacts,'results.json'),JSON.stringify({failures,records},null,2));
   await browser.close();
