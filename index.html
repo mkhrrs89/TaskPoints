@@ -10644,7 +10644,12 @@ function showTrashToast(taskId){
   };
   undoBtn?.addEventListener('click', () => {
     const t = state.tasks.find(x => x.id === taskId);
+    if (TaskPointsCore?.journalTaskMutation && !assertTaskActionMutationWritable()) return;
     if (restoreTaskFromTrash(t)) {
+      // Undo is newer than the prior Trash journal entry. Keep the original
+      // whole-state save but journal Undo first, so delayed compaction cannot
+      // restore the stale trashed status.
+      if (TaskPointsCore?.journalTaskMutation) persistTaskActionMutation(t, 'undo-trash');
       save();
       renderTasks();
       window.updateCriticalTasksIsland?.();
