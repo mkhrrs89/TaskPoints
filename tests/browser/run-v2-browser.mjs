@@ -490,6 +490,71 @@ try {
     return {legacyWriteRejected:true,walOrphans:0,generationUnchanged:true,parity:p.match};
   });
 
+
+  await run('verified legacy compaction clears durable sidecars only after retaining pilot completions',async context=>{
+    const page=await open(context);
+    await page.evaluate(()=>{
+      window.V2BrowserFixture.delta('h1','2026-10-20','full',1);
+      window.V2BrowserFixture.delta('h2','2026-10-20','half',2);
+    });
+    await settled(page,2);
+    const evidence=await page.evaluate(()=>{
+      const core=window.TaskPointsCore;
+      const prefix='taskpoints_v2_habit_journal_event_v1:';
+      const keys=()=>Array.from({length:localStorage.length},(_,i)=>localStorage.key(i))
+        .filter(key=>key.startsWith(prefix));
+      const before=keys().length;
+      const pending=core.readPendingHabitDeltas();
+      const candidate=window.V2BrowserFixture.rawLegacy();
+      core.applyPendingHabitDeltas(candidate,pending);
+      core.saveStateSnapshot(candidate,{immediateWrite:true,replaceCompletions:true,
+        savePath:'habit-journal-compaction'});
+      const saved=window.V2BrowserFixture.rawLegacy();
+      const verified=pending.filter(d=>saved.completions.some(c=>c.habitId===d.habitId && c.dayKey===d.dayKey));
+      const removed=core.clearCompactedHabitDeltas(verified);
+      return {before,pending:pending.length,removed,after:keys().length,
+        primary:core.readPendingHabitDeltas().length,
+        completions:window.V2BrowserFixture.rawLegacy().completions.filter(c=>c.source==='habit').length};
+    });
+    assert.equal(evidence.pending,2);
+    assert.equal(evidence.before,2);
+    assert.equal(evidence.after,0);
+    assert.equal(evidence.primary,0);
+    assert.equal(evidence.completions,2);
+    const p=await parity(page);
+    return {clearedSidecars:2,remainingPilotCompletions:2,parity:p.match};
+  });
+
+  await run('old-generation V2 sidecar remains inspectable but cannot replay into a new generation',async context=>{
+    const page=await open(context);
+    await page.evaluate(()=>window.V2BrowserFixture.delta('h3','2026-10-20','full',1));
+    await settled(page,1);
+    const result=await page.evaluate(()=>{
+      const core=window.TaskPointsCore;
+      const prefix='taskpoints_v2_habit_journal_event_v1:';
+      const sidecarKeys=()=>Array.from({length:localStorage.length},(_,i)=>localStorage.key(i))
+        .filter(key=>key.startsWith(prefix));
+      const before=window.TaskPointsStateRuntimeV2Generation.read();
+      const saved=sidecarKeys();
+      // Simulate the canonical journal reset performed by a destructive
+      // import/restore, isolating the sidecar's own epoch guard.
+      localStorage.setItem(core.PENDING_HABIT_DELTAS_KEY,'[]');
+      window.TaskPointsStateRuntimeV2Generation.rotate('synthetic-generation-transition');
+      return {before,after:window.TaskPointsStateRuntimeV2Generation.read(),
+        sidecarsBefore:saved.length,sidecarsAfter:sidecarKeys().length,
+        legacyRows:core.readPendingHabitDeltas().length};
+    });
+    assert.notEqual(result.before,result.after);
+    assert.equal(result.sidecarsBefore,1);
+    assert.equal(result.sidecarsAfter,1,'preserve old sidecar evidence without replaying it');
+    assert.equal(result.legacyRows,0);
+    await page.evaluate(()=>window.TaskPointsStateRuntimeV2.startCoordinatedDarkMirror());
+    await page.waitForFunction(async()=> (await window.TaskPointsStateRuntimeV2.getCompletionsForHabit('h3')).length===0);
+    const p=await parity(page);
+    assert.equal(p.actualCounts.completions,0);
+    return {staleEvidencePreserved:true,ignoredAcrossGeneration:true,parity:p.match};
+  });
+
 } finally {
   await writeFile(join(artifacts,'results.json'),JSON.stringify({ failures, results },null,2));
   await browser.close();
