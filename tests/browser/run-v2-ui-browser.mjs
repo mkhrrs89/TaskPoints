@@ -371,6 +371,141 @@ try{
     return {fullToHalfAcrossTabs:true,duplicateCompletions:0,parity:p.match};
   });
 
+
+  await test('Tasks UI adds and completes a task while preserving its durable completion after close and reopen',async ctx=>{
+    const {page}=await home(ctx);
+    await page.locator('[data-home-tab="tasks"]').click({force:true});
+    await page.locator('#openAddTaskBtn').click({force:true});
+    await page.locator('#titleInput').fill('Synthetic task persistence check');
+    await page.locator('#pointsInput').fill('18');
+    await page.locator('#importanceInput').selectOption('High');
+    await page.locator('#addBtn').click({force:true});
+    await page.waitForFunction(()=>window.TaskPointsCore.readTaskPointsStoredState().tasks
+      .some(t=>t.title==='Synthetic task persistence check'),null,{timeout:12000});
+    const created=await page.evaluate(()=>{
+      const state=window.TaskPointsCore.readTaskPointsStoredState();
+      const t=state.tasks.find(t=>t.title==='Synthetic task persistence check');
+      return {id:t?.id,title:t?.title,importance:t?.importance,points:t?.points};
+    });
+    assert.ok(created.id);
+    assert.equal(created.importance,'High');
+    assert.equal(created.points,18);
+    await page.locator('#taskList [data-task-action="complete"][data-task-id="'+created.id+'"]').click({force:true});
+    await page.waitForFunction(id=>{
+      const state=window.TaskPointsCore.readTaskPointsStoredState();
+      return state.tasks.some(t=>t.id===id&&t.status==='done')
+        || Boolean(window.TaskPointsCore.readPendingTaskMutations?.()?.some?.(x=>x.taskId===id));
+    },created.id,{timeout:14000});
+    // Pagehide is the browser's actual navigation lifecycle event. Kill this
+    // tab immediately after the completion has been journaled, then reopen
+    // the real Home UI from an entirely new page in the same isolated context.
+    await page.close();
+    const reopened=(await home(ctx)).page;
+    const recovered=await reopened.evaluate(id=>{
+      const core=window.TaskPointsCore;
+      const current=core.readTaskPointsStoredState();
+      const t=current.tasks.find(t=>t.id===id);
+      const row=current.completions.filter(c=>c.taskId===id);
+      return {task:t?{title:t.title,status:t.status}:null,completionCount:row.length,
+        points:row[0]?.points,sourceCount:current.completions.filter(c=>c.source==='habit').length};
+    },created.id);
+    assert.equal(recovered.task?.title,'Synthetic task persistence check');
+    assert.equal(recovered.task?.status,'done');
+    assert.equal(recovered.completionCount,1,'completed task must survive immediate page closure');
+    assert.equal(recovered.points,18);
+    const p=await reopened.evaluate(()=>window.TaskPointsStateRuntimeV2.verifyParity());
+    assert.equal(p.match,true,JSON.stringify(p.differences));
+    return {taskRetained:true,completedOnce:true,points:recovered.points,habitParity:p.match};
+  });
+
+  await test('SCWM UI saves Sleep Calories Work and Mood including Mood notes across reload',async ctx=>{
+    const {page}=await home(ctx);
+    await page.locator('[data-home-tab="scwm"]').click({force:true});
+    await page.locator('#sleepScoreInput').fill('88');
+    await page.locator('#sleepRestedInput').fill('1.5');
+    await page.locator('#saveSleepScoreBtn').click({force:true});
+    await page.locator('#caloriesInput').fill('1800');
+    await page.locator('#saveCaloriesBtn').click({force:true});
+    await page.locator('#workScoreInput').fill('6.5');
+    await page.locator('#workHoursInput').fill('3');
+    await page.locator('#saveWorkScoreBtn').click({force:true});
+    await page.locator('#moodScoreInput').fill('3.7');
+    await page.locator('#saveMoodScoreBtn').click({force:true});
+    await page.locator('#moodEditModal').waitFor({state:'visible'});
+    await page.locator('#moodEditNotesInput').fill('Synthetic private test note');
+    await page.locator('#moodEditSaveBtn').click({force:true});
+    await page.waitForFunction(()=>{
+      const s=window.TaskPointsCore.readTaskPointsStoredState();
+      return ['Sleep Score (88)','Calories (1800)','Work Score (6.5)','Mood Score (3.7)']
+        .every(prefix=>s.completions.some(c=>c.title?.startsWith(prefix)));
+    },null,{timeout:15000});
+    // Exercise app backgrounding behavior without sacrificing the open tab.
+    await page.evaluate(()=>{
+      document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new Event('pagehide'));
+    });
+    await page.reload({waitUntil:'load'});
+    await page.waitForFunction(()=>Boolean(window.TaskPointsStateRuntimeV2?.getStatus?.()?.seeded));
+    const saved=await page.evaluate(()=>{
+      const s=window.TaskPointsCore.readTaskPointsStoredState();
+      const get=prefix=>s.completions.filter(c=>c.title?.startsWith(prefix));
+      return {sleep:get('Sleep Score (88)'),calories:get('Calories (1800)'),
+        work:get('Work Score (6.5)'),mood:get('Mood Score (3.7)'),
+        habits:s.habits.length};
+    });
+    for(const key of ['sleep','calories','work','mood'])assert.equal(saved[key].length,1,key+' must remain unique');
+    assert.equal(saved.sleep[0].sleepRested,1.5);
+    assert.equal(saved.calories[0].calories,1800);
+    assert.equal(saved.work[0].workHours,3);
+    assert.equal(saved.mood[0].moodNotes,'Synthetic private test note');
+    assert.equal(saved.habits,3);
+    await page.evaluate(()=>window.TaskPointsStateRuntimeV2.startCoordinatedDarkMirror());
+    const p=await page.evaluate(()=>window.TaskPointsStateRuntimeV2.verifyParity());
+    assert.equal(p.match,true,JSON.stringify(p.differences));
+    return {fourSCWMCardsRetained:true,moodNotesRetained:true,habitParity:p.match};
+  });
+
+  await test('interleaved Habit Task and SCWM UI actions retain every domain through navigation and restart',async ctx=>{
+    const {page}=await home(ctx);
+    await page.locator('[data-home-tab="habits"]').click({force:true});
+    const day=await page.locator('#habitsList .habitDay[data-habit="h1"]').first().getAttribute('data-day');
+    await page.locator('#habitsList .habitDay[data-habit="h1"][data-day="'+day+'"]').tap({force:true});
+    await page.waitForFunction(key=>window.TaskPointsCore.readPendingHabitDeltas()
+      .some(d=>d.habitId==='h1'&&d.dayKey===key&&d.status==='full'),day);
+    await page.locator('[data-home-tab="tasks"]').click({force:true});
+    await page.locator('#openAddTaskBtn').click({force:true});
+    await page.locator('#titleInput').fill('Synthetic interleaved task');
+    await page.locator('#pointsInput').fill('7');
+    await page.locator('#addBtn').click({force:true});
+    await page.locator('[data-home-tab="scwm"]').click({force:true});
+    await page.locator('#sleepScoreInput').fill('91');
+    await page.locator('#saveSleepScoreBtn').click({force:true});
+    await page.waitForFunction(()=>{
+      const s=window.TaskPointsCore.readTaskPointsStoredState();
+      return s.tasks.some(t=>t.title==='Synthetic interleaved task')
+        && s.completions.some(c=>c.title?.startsWith('Sleep Score (91)'));
+    },null,{timeout:15000});
+    await page.close();
+    const reopened=(await home(ctx)).page;
+    const evidence=await reopened.evaluate(key=>{
+      const core=window.TaskPointsCore;
+      const s=core.readTaskPointsStoredState();
+      const effective=structuredClone(s);
+      core.applyPendingHabitDeltas(effective);
+      return {habit:effective.habits.find(h=>h.id==='h1')?.doneKeys.includes(key),
+        task:s.tasks.filter(t=>t.title==='Synthetic interleaved task').length,
+        sleep:s.completions.filter(c=>c.title?.startsWith('Sleep Score (91)')).length,
+        journal:core.readPendingHabitDeltas().filter(d=>d.habitId==='h1'&&d.dayKey===key).length};
+    },day);
+    assert.equal(evidence.habit,true,'newer Habit tap must not be lost to non-Habit full snapshot saves');
+    assert.equal(evidence.task,1);
+    assert.equal(evidence.sleep,1);
+    await reopened.evaluate(()=>window.TaskPointsStateRuntimeV2.startCoordinatedDarkMirror());
+    const p=await reopened.evaluate(()=>window.TaskPointsStateRuntimeV2.verifyParity());
+    assert.equal(p.match,true,JSON.stringify(p.differences));
+    return {habitRetained:true,taskRetained:true,sleepRetained:true,parity:p.match};
+  });
+
 }finally{
   await writeFile(join(artifacts,'results.json'),JSON.stringify({failures,records},null,2));
   await browser.close();
