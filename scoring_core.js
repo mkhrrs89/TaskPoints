@@ -81,7 +81,16 @@
       if (!raw) continue;
       const rows = parseHabitJournalRows(raw);
       if (rows.length !== 1) throw new Error('Pending V2 Habit sidecar is malformed and was preserved.');
-      rows.forEach(remember);
+      const currentGeneration = localStorage.getItem('taskpoints_state_v2_generation_v1');
+      rows.forEach((row) => {
+        // Stale sidecars belong to the previous V2 database generation.
+        // Keep their evidence untouched, but never replay them into a
+        // subsequently imported or restored authoritative snapshot.
+        if (row.__v2JournalGeneration
+          && String(row.__v2JournalGeneration) !== String(currentGeneration || '')) return;
+        const { __v2JournalGeneration, ...legacyDelta } = row;
+        remember(legacyDelta);
+      });
     }
     return Array.from(merged.values());
   }
@@ -99,7 +108,9 @@
       && typeof localStorage?.key === 'function') {
       const unique = global?.crypto?.randomUUID?.()
         || (String(Date.now()) + '-' + Math.random().toString(36).slice(2));
-      localStorage.setItem(V2_HABIT_EVENT_PREFIX + unique, JSON.stringify([next]));
+      const generation = localStorage.getItem('taskpoints_state_v2_generation_v1');
+      localStorage.setItem(V2_HABIT_EVENT_PREFIX + unique,
+        JSON.stringify([{ ...next, __v2JournalGeneration: generation || null }]));
     }
     return next;
   }
