@@ -618,6 +618,76 @@ try {
       durableIndependentEvents:evidence.sidecarCount,legacyReadCount:evidence.journalCount};
   });
 
+
+  await run('missing V1 during five repeated two-tab reloads preserves V2 WAL evidence for recovery',async context=>{
+    const first=await open(context);
+    await first.evaluate(()=>window.V2BrowserFixture.delta('h1','2026-10-20','full',901));
+    await settled(first,1);
+    const baseline=await first.evaluate(async()=>{
+      const db=await window.TaskPointsStateRuntimeV2.open();
+      const tx=db.transaction(['meta','habits','completions','mutations'],'readonly');
+      const all=name=>new Promise((resolve,reject)=>{
+        const request=tx.objectStore(name).getAll();
+        request.onsuccess=()=>resolve(request.result);
+        request.onerror=()=>reject(request.error);
+      });
+      const rows=await Promise.all(['meta','habits','completions','mutations'].map(all));
+      return {snapshot:JSON.stringify(rows),counts:rows.map(x=>x.length),
+        source:localStorage.getItem('taskpoints_v1')};
+    });
+    assert.equal(baseline.counts[2],1);
+    assert.equal(baseline.counts[3],1);
+    await first.evaluate(()=>localStorage.removeItem('taskpoints_v1'));
+
+    for(let attempt=0;attempt<5;attempt++){
+      const other=await open(context);
+      const evidence=await other.evaluate(async()=>{
+        const runtime=window.TaskPointsStateRuntimeV2;
+        let error=null;
+        try { await runtime.seedFromLegacy(); }
+        catch(e){ error={code:e.code,message:e.message}; }
+        const db=await runtime.open();
+        const tx=db.transaction(['meta','habits','completions','mutations'],'readonly');
+        const all=name=>new Promise((resolve,reject)=>{
+          const request=tx.objectStore(name).getAll();
+          request.onsuccess=()=>resolve(request.result);
+          request.onerror=()=>reject(request.error);
+        });
+        const rows=await Promise.all(['meta','habits','completions','mutations'].map(all));
+        return {error,snapshot:JSON.stringify(rows),v1Missing:localStorage.getItem('taskpoints_v1')===null,
+          authority:runtime.getStatus().readAuthority};
+      });
+      assert.equal(evidence.error?.code,'STATE_V2_LEGACY_MISSING_PRESERVED');
+      assert.equal(evidence.v1Missing,true);
+      assert.equal(evidence.snapshot,baseline.snapshot,
+        'neither a second tab nor another reload may rewrite V2 evidence');
+      assert.equal(evidence.authority,'legacy_only');
+      await other.close();
+    }
+
+    await first.evaluate(value=>localStorage.setItem('taskpoints_v1',value),baseline.source);
+    const recovery=await open(context);
+    const state=await recovery.evaluate(async()=>{
+      const result=await window.TaskPointsStateRuntimeV2.seedFromLegacy();
+      const db=await window.TaskPointsStateRuntimeV2.open();
+      const tx=db.transaction(['mutations','completions'],'readonly');
+      const all=name=>new Promise((resolve,reject)=>{
+        const request=tx.objectStore(name).getAll();
+        request.onsuccess=()=>resolve(request.result);
+        request.onerror=()=>reject(request.error);
+      });
+      const [mutations,completions]=await Promise.all([all('mutations'),all('completions')]);
+      return {reason:result.reason,mutations:mutations.length,
+        completions:completions.length};
+    });
+    const match=await parity(recovery);
+    assert.equal(state.mutations,1);
+    assert.equal(state.completions,1);
+    assert.equal(state.reason==='verified_current'||state.reason==='already_current',true);
+    return {repeatedReloads:5,tabs:2,mutationsPreserved:state.mutations,
+      completionsPreserved:state.completions,parity:match.match};
+  });
+
 } finally {
   await writeFile(join(artifacts,'results.json'),JSON.stringify({ failures, results },null,2));
   await browser.close();
