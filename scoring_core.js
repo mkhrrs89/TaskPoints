@@ -38,21 +38,52 @@
   // Completion IDs are intentionally category-independent for historical
   // compatibility. Journal IDs may distinguish vice/habit for coalescing.
   function habitCompletionId(habitId, dayKey) { return `habit:${habitId}:${dayKey}`; }
-  function readPendingHabitDeltas(storageKey = PENDING_HABIT_DELTAS_KEY) {
-    const raw = localStorage.getItem(storageKey);
+  // V2-only, per-event durable keys protect concurrent browser tabs from
+  // clobbering each other's V1 read-modify-write Habit journal.
+  const V2_HABIT_EVENT_PREFIX = 'taskpoints_v2_habit_journal_event_v1:';
+  function habitSidecarKeys() {
+    if (typeof localStorage?.key !== 'function') return [];
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (typeof key === 'string' && key.startsWith(V2_HABIT_EVENT_PREFIX)) keys.push(key);
+    }
+    return keys.sort();
+  }
+  function parseHabitJournalRows(raw) {
     if (!raw) return [];
     try {
       const parsed = JSON.parse(raw);
       const values = Array.isArray(parsed) ? parsed : Object.values(parsed || {});
       return values.filter(d => d && d.habitId && d.dayKey && ['habit', 'vice'].includes(d.source));
     } catch (error) {
-      // Never turn a corrupt non-empty journal into an empty one: doing so
-      // would let the next tap overwrite evidence of durable user input.
+      // Do not turn a corrupt non-empty journal into an empty one.
       const journalError = new Error('Pending habit journal is malformed and was preserved.');
       journalError.cause = error;
       journalError.raw = raw;
       throw journalError;
     }
+  }
+  function readPendingHabitDeltas(storageKey = PENDING_HABIT_DELTAS_KEY) {
+    const primary = parseHabitJournalRows(localStorage.getItem(storageKey));
+    if (storageKey !== PENDING_HABIT_DELTAS_KEY) return primary;
+    const merged = new Map();
+    const remember = (delta) => {
+      const id = delta.id || habitDeltaId(delta);
+      const previous = merged.get(id);
+      if (!previous || String(delta.updatedAtISO || '') >= String(previous.updatedAtISO || '')) {
+        merged.set(id, { ...delta, id });
+      }
+    };
+    primary.forEach(remember);
+    for (const key of habitSidecarKeys()) {
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      const rows = parseHabitJournalRows(raw);
+      if (rows.length !== 1) throw new Error('Pending V2 Habit sidecar is malformed and was preserved.');
+      rows.forEach(remember);
+    }
+    return Array.from(merged.values());
   }
   function writePendingHabitDelta(delta, storageKey = PENDING_HABIT_DELTAS_KEY) {
     const entries = readPendingHabitDeltas(storageKey);
@@ -61,6 +92,15 @@
     const at = entries.findIndex(entry => entry.id === id);
     if (at >= 0) entries[at] = next; else entries.push(next);
     localStorage.setItem(storageKey, JSON.stringify(entries));
+    // Preserve the canonical V1 key. V2 additionally stores an independent
+    // event key so two concurrent tabs cannot overwrite each other's taps.
+    if (storageKey === PENDING_HABIT_DELTAS_KEY
+      && localStorage.getItem('taskpoints_state_v2_dark_mode_v1') === '1'
+      && typeof localStorage?.key === 'function') {
+      const unique = global?.crypto?.randomUUID?.()
+        || (String(Date.now()) + '-' + Math.random().toString(36).slice(2));
+      localStorage.setItem(V2_HABIT_EVENT_PREFIX + unique, JSON.stringify([next]));
+    }
     return next;
   }
   function applyPendingHabitDeltas(state, deltas = readPendingHabitDeltas()) {
@@ -127,9 +167,25 @@
   }
   function clearCompactedHabitDeltas(compacted, storageKey = PENDING_HABIT_DELTAS_KEY) {
     const byId = new Map((compacted || []).map(d => [d.id, JSON.stringify(d)]));
+    const verifiedAt = new Map((compacted || []).map(d => [d.id, String(d.updatedAtISO || '')]));
     const current = readPendingHabitDeltas(storageKey);
     const remaining = current.filter(d => byId.get(d.id) !== JSON.stringify(d));
     localStorage.setItem(storageKey, JSON.stringify(remaining));
+    if (storageKey === PENDING_HABIT_DELTAS_KEY) {
+      // Each sidecar has a unique key. A concurrent new event uses a different
+      // key; only events older than the already verified state are cleared.
+      for (const key of habitSidecarKeys()) {
+        const raw = localStorage.getItem(key);
+        if (!raw) continue;
+        const rows = parseHabitJournalRows(raw);
+        if (rows.length !== 1) throw new Error('Malformed V2 Habit sidecar preserved during compaction.');
+        const delta = rows[0];
+        const id = delta.id || habitDeltaId(delta);
+        if (verifiedAt.has(id)
+          && String(delta.updatedAtISO || '') <= verifiedAt.get(id)
+          && localStorage.getItem(key) === raw) localStorage.removeItem(key);
+      }
+    }
     return current.length - remaining.length;
   }
   function schedulePendingHabitDeltaCompaction(state, options = {}) {
