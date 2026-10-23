@@ -8897,29 +8897,35 @@ if (!habitTapHandlerBound) {
     if (dx > 12 || dy > 12) tap.moved = true; // scroll threshold
   }, { passive: true });
 
-  wrap.addEventListener('pointerup', (e) => {
+  // A deferred Home render can replace Habit bubbles between pointerdown
+  // and pointerup (notably after saving SCWM). Preserve a stationary intended
+  // tap by its stable Habit/day ID and release coordinates, never by retaining
+  // or toggling a detached DOM node. Real scrolling/cancelled/outside gestures
+  // still do nothing.
+  const finishHabitPointerGesture = (e) => {
     if (!tap || e.pointerId !== tap.pointerId) return;
     const gesture = tap;
     tap = null; activeHabitPointerGesture = null;
-    // Compare stable identity, not a DOM node that a delayed render may replace.
-    const ended = e.target.closest('.habitDay[data-habit][data-day]');
-    if (gesture.moved || !ended || ended.dataset.habit !== gesture.habitId || ended.dataset.day !== gesture.dayKey) {
+    if (gesture.moved || e.type === 'pointercancel') {
       scheduleDeferredHabitRestack(); return;
     }
     const bubble = wrap.querySelector(`.habitDay[data-habit="${CSS.escape(gesture.habitId)}"][data-day="${CSS.escape(gesture.dayKey)}"]`);
-    if (bubble) handleHabitBubbleTap(bubble);
-    scheduleDeferredHabitRestack();
-  }, { passive: true });
-
-  const clearHabitGestureFromDocument = (e) => {
-    if (!tap || e.pointerId !== tap.pointerId) return;
-    tap = null; activeHabitPointerGesture = null;
+    const ended = e.target?.closest?.('.habitDay[data-habit][data-day]');
+    const sameIdentity = ended?.dataset.habit === gesture.habitId && ended?.dataset.day === gesture.dayKey;
+    const bounds = bubble?.getBoundingClientRect?.();
+    const overSameBubble = Boolean(bounds
+      && e.clientX >= bounds.left && e.clientX <= bounds.right
+      && e.clientY >= bounds.top && e.clientY <= bounds.bottom);
+    if (bubble && (sameIdentity || overSameBubble)) handleHabitBubbleTap(bubble);
     scheduleDeferredHabitRestack();
   };
-  wrap.addEventListener('pointercancel', clearHabitGestureFromDocument, { passive: true });
-  // A release outside the list does not bubble through wrap; clean it up without toggling.
-  document.addEventListener('pointerup', clearHabitGestureFromDocument, { passive: true });
-  document.addEventListener('pointercancel', clearHabitGestureFromDocument, { passive: true });
+  wrap.addEventListener('pointerup', finishHabitPointerGesture, { passive: true });
+  wrap.addEventListener('pointercancel', finishHabitPointerGesture, { passive: true });
+  // A release outside the list is ignored unless the replacement bubble
+  // occupies the original tap's release point. This covers mid-gesture DOM
+  // replacement without accepting arbitrary outside releases.
+  document.addEventListener('pointerup', finishHabitPointerGesture, { passive: true });
+  document.addEventListener('pointercancel', finishHabitPointerGesture, { passive: true });
 }
 }
 
