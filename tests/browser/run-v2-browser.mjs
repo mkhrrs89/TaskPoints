@@ -424,6 +424,72 @@ try {
       legacyJournalPreserved:true,parity:p.match};
   });
 
+
+  await run('48 rapid changes to one Habit/day preserve last-write-wins with no duplicate completion',async context=>{
+    const page=await open(context);
+    await page.evaluate(()=>{
+      const f=window.V2BrowserFixture;
+      for(let n=1;n<=48;n++){
+        f.delta('h1','2026-10-20',['full','half','failed','off'][(n-1)%4],n);
+      }
+      f.delta('h2','2026-10-20','full',49);
+      f.delta('h3','2026-10-20','half',50);
+    });
+    await settled(page,50);
+    const p=await parity(page);
+    assert.equal(p.actualCounts.completions,2);
+    const rows=await page.evaluate(async()=>{
+      const r=window.TaskPointsStateRuntimeV2;
+      return {h1:await r.getHabit('h1'),h1Completions:await r.getCompletionsForHabit('h1'),
+        h2Completions:await r.getCompletionsForHabit('h2'),
+        h3Completions:await r.getCompletionsForHabit('h3'),
+        journal:window.TaskPointsCore.readPendingHabitDeltas()};
+    });
+    assert.equal(rows.h1Completions.length,0);
+    assert.equal(rows.h1.doneKeys.includes('2026-10-20'),false);
+    assert.equal(rows.h1.failedKeys.includes('2026-10-20'),false);
+    assert.equal(rows.h2Completions.length,1);
+    assert.equal(rows.h3Completions.length,1);
+    assert.equal(rows.h3Completions[0].completionFraction,0.5);
+    assert.equal(rows.journal.length,3,'legacy journal must coalesce repeated edits per Habit/day');
+    assert.equal(rows.journal.find(x=>x.habitId==='h1').status,'off');
+    return {rapidMutations:50,coalescedLegacyEntries:3,remainingCompletions:2,parity:p.match};
+  });
+
+  await run('legacy localStorage journal write rejection fails closed and never creates an orphan V2 WAL entry',async context=>{
+    const page=await open(context);
+    const evidence=await page.evaluate(()=>{
+      const core=window.TaskPointsCore;
+      const oldSnapshot=localStorage.getItem(core.STORAGE_KEY);
+      const oldJournal=localStorage.getItem(core.PENDING_HABIT_DELTAS_KEY);
+      const generation=window.TaskPointsStateRuntimeV2Generation.read();
+      const original=Storage.prototype.setItem;
+      let caught=null;
+      Storage.prototype.setItem=function(key,value){
+        if(this===localStorage && String(key)==='taskpoints_pending_habit_deltas_v1')
+          throw new DOMException('Synthetic journal quota denial','QuotaExceededError');
+        return original.call(this,key,value);
+      };
+      try {
+        try { window.V2BrowserFixture.delta('h1','2026-10-20','full',1); }
+        catch(err) { caught={name:err.name,message:err.message}; }
+      } finally { Storage.prototype.setItem=original; }
+      return {caught,legacyUnchanged:localStorage.getItem(core.STORAGE_KEY)===oldSnapshot,
+        journalUnchanged:localStorage.getItem('taskpoints_pending_habit_deltas_v1')===oldJournal,
+        generationUnchanged:window.TaskPointsStateRuntimeV2Generation.read()===generation,
+        wal:window.TaskPointsStateRuntimeV2Wal.getPendingRows()};
+    });
+    assert.equal(evidence.caught?.name,'QuotaExceededError');
+    assert.equal(evidence.legacyUnchanged,true);
+    assert.equal(evidence.journalUnchanged,true);
+    assert.equal(evidence.generationUnchanged,true);
+    assert.equal(evidence.wal.ok,true);
+    assert.equal(evidence.wal.rows.length,0,'a failed V1 journal write must not create a V2-only mutation');
+    const p=await parity(page);
+    assert.equal(p.actualCounts.completions,0);
+    return {legacyWriteRejected:true,walOrphans:0,generationUnchanged:true,parity:p.match};
+  });
+
 } finally {
   await writeFile(join(artifacts,'results.json'),JSON.stringify({ failures, results },null,2));
   await browser.close();
