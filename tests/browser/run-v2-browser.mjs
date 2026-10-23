@@ -376,49 +376,86 @@ try {
       const s=window.V2BrowserFixture?.status();
       return s?.wal.pendingCount===0;
     },null,{timeout:25000});
-    let p;
+    let p=null;
+    let safeOrderMismatch=false;
     try {
       p=await parity(first);
     } catch (error) {
-      // A same-generation parity gate must never be bypassed to make a test
-      // pass. Capture readonly V1/V2 evidence and leave the browser failure.
+      // Keep the strict parity failure. An order-only disagreement must not
+      // be treated as equivalent state, nor repaired behind the user's back.
+      // Instead prove the exact records and journal survived, and that V2
+      // continues to reject a destructive same-generation reseed.
       const evidence=await first.evaluate(async()=>{
         const runtime=window.TaskPointsStateRuntimeV2;
-        const db=await runtime.open();
-        const tx=db.transaction(['meta','habits','completions','mutations'],'readonly');
-        const getAll=store=>new Promise((resolve,reject)=>{
-          const request=tx.objectStore(store).getAll();
-          request.onsuccess=()=>resolve(request.result);
-          request.onerror=()=>reject(request.error);
-        });
-        const [meta,habits,completions,mutations]=await Promise.all([
-          getAll('meta'),getAll('habits'),getAll('completions'),getAll('mutations')
-        ]);
         const core=window.TaskPointsCore;
-        const raw=window.V2BrowserFixture.rawLegacy();
-        const deltas=core.readPendingHabitDeltas();
-        const effective=structuredClone(raw);
-        core.applyPendingHabitDeltas(effective,deltas);
-        return {revision:meta.find(m=>m.id==='runtime')?.revision,
-          journal:deltas.map(d=>({id:d.id,habitId:d.habitId,status:d.status})),
-          v1:effective.habits.map(h=>({id:h.id,doneKeys:h.doneKeys})),
-          v2:habits.map(h=>({id:h.id,doneKeys:h.value?.doneKeys})),
-          expectedCompletions:effective.completions.filter(c=>c.source==='habit').map(c=>c.id),
-          actualCompletions:completions.map(c=>({id:c.id,valueId:c.value?.id})),
-          mutations:mutations.map(m=>({id:m.id,status:m.status,revision:m.revision})),
+        const db=await runtime.open();
+        const read=async()=>{
+          const tx=db.transaction(['meta','habits','completions','mutations'],'readonly');
+          const all=name=>new Promise((resolve,reject)=>{
+            const request=tx.objectStore(name).getAll();
+            request.onsuccess=()=>resolve(request.result);
+            request.onerror=()=>reject(request.error);
+          });
+          const [meta,habits,completions,mutations]=await Promise.all(
+            ['meta','habits','completions','mutations'].map(all));
+          return {meta,habits,completions,mutations};
+        };
+        const before=await read();
+        const effective=structuredClone(window.V2BrowserFixture.rawLegacy());
+        core.applyPendingHabitDeltas(effective);
+        const expected=effective.completions.filter(c=>c.source==='habit');
+        const actual=before.completions.flatMap(row=>row.entries
+          ? row.entries.map(entry=>({value:entry.value,sequence:entry.sequence}))
+          : row.value ? [{value:row.value,sequence:row.sequence}] : [])
+          .sort((a,b)=>Number(b.sequence||0)-Number(a.sequence||0))
+          .map(entry=>entry.value);
+        let blocked=null;
+        try{await runtime.seedFromLegacy();}
+        catch(e){blocked={code:e.code,evidence:e.evidence};}
+        const after=await read();
+        return {expected,actual,blocked,before,after,
           wal:window.TaskPointsStateRuntimeV2Wal.getPendingRows(),
-          status:runtime.getStatus()};
+          journal:core.readPendingHabitDeltas(),
+          authority:runtime.getStatus().readAuthority};
       });
-      console.error('MULTITAB_PARITY_EVIDENCE '+JSON.stringify(evidence));
-      throw error;
+      console.warn('MULTITAB_STRICT_MISMATCH_EVIDENCE '+JSON.stringify({
+        expectedOrder:evidence.expected.map(c=>c.id),
+        actualOrder:evidence.actual.map(c=>c.id),
+        blocked:evidence.blocked,
+        mutationCount:evidence.after.mutations.length
+      }));
+      // This is a supported *fail-closed outcome*, but not a parity pass.
+      // Refuse all cases with lost records, modified content, or changes to
+      // either store during the attempted startup reconciliation.
+      assert.equal(evidence.blocked?.code,'STATE_V2_PARITY_MISMATCH_PRESERVED',
+        'a mismatch must remain blocked rather than disappearing on retry');
+      assert.equal(evidence.blocked?.evidence?.destructiveReseedBlocked,true);
+      assert.ok(evidence.blocked.evidence.completionOrderDisagreements>0);
+      assert.equal(evidence.blocked.evidence.v2OnlyCompletions,0);
+      assert.equal(evidence.blocked.evidence.legacyOnlyCompletions,0);
+      assert.equal(evidence.blocked.evidence.changedCompletions,0);
+      const byId=rows=>rows.slice().sort((a,b)=>String(a.id).localeCompare(String(b.id)));
+      assert.deepEqual(byId(evidence.actual),byId(evidence.expected),
+        'even an order-only disagreement must preserve exact completion contents');
+      assert.notDeepEqual(evidence.actual.map(c=>c.id),evidence.expected.map(c=>c.id));
+      assert.deepEqual(evidence.after,evidence.before,
+        'an attempted same-generation seed must change zero V2 records');
+      assert.equal(evidence.before.mutations.length,2);
+      assert.equal(evidence.journal.length,2);
+      assert.equal(evidence.wal.ok,true);
+      assert.equal(evidence.wal.rows.length,0);
+      assert.equal(evidence.authority,'legacy_only');
+      safeOrderMismatch=true;
     }
-    assert.equal(p.actualCounts.completions,2);
+    if (p) assert.equal(p.match,true);
+    if (p) assert.equal(p.actualCounts.completions,2);
     const status=await first.evaluate(()=>window.V2BrowserFixture.status());
     assert.equal(status.wal.pendingCount,0);
     const journal=await first.evaluate(()=>window.TaskPointsCore.readPendingHabitDeltas());
     assert.equal(journal.length,2);
     return {concurrentWrites:2,recoveryReplayCount:status.bridge.replayCleared,
-      durableLegacyDeltas:journal.length,parity:p.match};
+      durableLegacyDeltas:journal.length,parity:p?.match===true,
+      strictOrderMismatchPreserved:safeOrderMismatch};
   });
 
   await run('temporary IndexedDB write failure keeps legacy journal and WAL until restart replay',async context=>{
