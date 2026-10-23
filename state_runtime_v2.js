@@ -491,25 +491,54 @@
       .map((entry) => clone(entry.value));
   }
 
+  // Protect a full seed and the mutation ledger from another tab advancing the
+  // same IndexedDB database after this tab read its startup metadata. The check
+  // and all replacement writes share one readwrite transaction, so a newer
+  // committed revision cannot be wiped by a late startup continuation.
+  async function guardedSeedReplace(db, previousMeta, replaceRows) {
+    const tx = db.transaction(STORE_NAMES, 'readwrite');
+    const metaStore = tx.objectStore('meta');
+    const request = metaStore.get(RUNTIME_META_ID);
+    let failure = null;
+    request.onsuccess = () => {
+      const currentMeta = request.result || null;
+      if (stableJson(currentMeta) !== stableJson(previousMeta || null)) {
+        failure = revisionConflictError(
+          previousMeta?.revision ?? null, currentMeta?.revision ?? null, 'seed-precondition'
+        );
+        mark('stateV2.concurrentSeedBlocked', {
+          expectedRevision: previousMeta?.revision ?? null,
+          actualRevision: currentMeta?.revision ?? null
+        });
+        tx.abort();
+        return;
+      }
+      try { replaceRows(tx); }
+      catch (error) { failure = error; tx.abort(); }
+    };
+    try { await transactionPromise(tx); }
+    catch (error) { throw failure || error; }
+  }
+
   async function clearForMissingLegacy(db, previousMeta = null, resetGeneration = currentGeneration()) {
     const revision = Number(previousMeta?.revision || 0) + 1;
-    const tx = db.transaction(STORE_NAMES, 'readwrite');
-    tx.objectStore('habits').clear();
-    tx.objectStore('completions').clear();
-    tx.objectStore('mutations').clear();
-    tx.objectStore('meta').put({
-      id: RUNTIME_META_ID,
-      schemaVersion: SCHEMA_VERSION,
-      revision,
-      completionSequence: 0,
-      resetGeneration,
-      source: 'legacy-dark-mirror',
-      seedHash: null,
-      seededAtISO: nowIso(),
-      updatedAtISO: nowIso(),
-      legacyMissing: true
+    await guardedSeedReplace(db, previousMeta, (tx) => {
+      tx.objectStore('habits').clear();
+      tx.objectStore('completions').clear();
+      tx.objectStore('mutations').clear();
+      tx.objectStore('meta').put({
+        id: RUNTIME_META_ID,
+        schemaVersion: SCHEMA_VERSION,
+        revision,
+        completionSequence: 0,
+        resetGeneration,
+        source: 'legacy-dark-mirror',
+        seedHash: null,
+        seededAtISO: nowIso(),
+        updatedAtISO: nowIso(),
+        legacyMissing: true
+      });
     });
-    await transactionPromise(tx);
     seeded = true;
     lastSeedHash = null;
     lastResetGeneration = resetGeneration;
@@ -583,19 +612,38 @@
 
   async function refreshSeedMarker(db, previousMeta, hash, desiredGeneration, reason) {
     if (!previousMeta || previousMeta.seedHash === hash) return previousMeta;
-    const nextMeta = {
-      ...previousMeta,
-      id: RUNTIME_META_ID,
-      schemaVersion: SCHEMA_VERSION,
-      resetGeneration: desiredGeneration,
-      seedHash: hash,
-      seedVerifiedAtISO: nowIso(),
-      seedVerifiedRevision: Number(previousMeta.revision || 0),
-      seedVerifiedReason: String(reason || 'verified-current')
-    };
     const tx = db.transaction('meta', 'readwrite');
-    tx.objectStore('meta').put(nextMeta);
-    await transactionPromise(tx);
+    const store = tx.objectStore('meta');
+    const request = store.get(RUNTIME_META_ID);
+    let nextMeta = null;
+    let conflict = null;
+    request.onsuccess = () => {
+      const currentMeta = request.result || null;
+      if (stableJson(currentMeta) !== stableJson(previousMeta)) {
+        conflict = revisionConflictError(
+          previousMeta.revision ?? null, currentMeta?.revision ?? null, 'seed-marker'
+        );
+        mark('stateV2.concurrentSeedMarkerBlocked', {
+          expectedRevision: previousMeta.revision ?? null,
+          actualRevision: currentMeta?.revision ?? null
+        });
+        tx.abort();
+        return;
+      }
+      nextMeta = {
+        ...currentMeta,
+        id: RUNTIME_META_ID,
+        schemaVersion: SCHEMA_VERSION,
+        resetGeneration: desiredGeneration,
+        seedHash: hash,
+        seedVerifiedAtISO: nowIso(),
+        seedVerifiedRevision: Number(currentMeta.revision || 0),
+        seedVerifiedReason: String(reason || 'verified-current')
+      };
+      store.put(nextMeta);
+    };
+    try { await transactionPromise(tx); }
+    catch (error) { throw conflict || error; }
     return nextMeta;
   }
 
@@ -628,7 +676,31 @@
       const db = await open();
       if (!db) return { seeded: false, reason: 'dark_disabled' };
       let previousMeta = await readMeta(db);
-      if (source.missing) return clearForMissingLegacy(db, previousMeta, desiredGeneration);
+      if (source.missing) {
+        // A temporarily missing V1 key is not proof of an authorized reset.
+        // A same-generation V2 copy may be the only remaining durable evidence.
+        if (previousMeta?.resetGeneration === desiredGeneration && options.force !== true) {
+          if (previousMeta.legacyMissing === true) {
+            seeded = true;
+            lastSeedHash = null;
+            lastResetGeneration = desiredGeneration;
+            lastKnownRevision = Number(previousMeta.revision || 0);
+            return { seeded: false, reason: 'already_missing', revision: lastKnownRevision, resetGeneration: desiredGeneration };
+          }
+          const error = new Error('state_runtime_v2_legacy_temporarily_missing_preserved');
+          error.code = 'STATE_V2_LEGACY_MISSING_PRESERVED';
+          error.evidence = {
+            resetGeneration: desiredGeneration,
+            existingRevision: Number(previousMeta.revision || 0),
+            evidencePreserved: true,
+            destructiveReseedBlocked: true
+          };
+          lastError = error.message;
+          mark('stateV2.legacyMissingSeedBlocked', error.evidence);
+          throw error;
+        }
+        return clearForMissingLegacy(db, previousMeta, desiredGeneration);
+      }
 
       const hash = capturedHash;
       const seedContext = {
@@ -690,6 +762,7 @@
           try {
             previousMeta = await refreshSeedMarker(db, previousMeta, hash, desiredGeneration, 'read-only-reload-verification');
           } catch (error) {
+            if (error?.code === 'STATE_RUNTIME_V2_REVISION_CONFLICT') throw error;
             mark('stateV2.seedMarkerRefreshFailed', { message: String(error?.message || error) });
           }
           seeded = true;
@@ -726,34 +799,34 @@
 
       const habits = source.state.habits;
       const completions = pilotCompletions(source.state);
-      const tx = db.transaction(STORE_NAMES, 'readwrite');
-      const habitsStore = tx.objectStore('habits');
-      const completionsStore = tx.objectStore('completions');
-      habitsStore.clear();
-      completionsStore.clear();
-      tx.objectStore('mutations').clear();
-
-      habits.forEach((habit, index) => {
-        if (!habit?.id) return;
-        habitsStore.put({ id: String(habit.id), value: clone(habit), legacyIndex: index });
-      });
-      packLegacyCompletionRows(completions).forEach((row) => completionsStore.put(row));
-
       const revision = Number(previousMeta?.revision || 0) + 1;
-      tx.objectStore('meta').put({
-        id: RUNTIME_META_ID,
-        schemaVersion: SCHEMA_VERSION,
-        revision,
-        completionSequence: completions.length,
-        resetGeneration: desiredGeneration,
-        source: 'legacy-dark-mirror',
-        seedHash: hash,
-        seededAtISO: nowIso(),
-        updatedAtISO: nowIso(),
-        legacyMissing: false,
-        counts: { habits: habits.length, completions: completions.length }
+      await guardedSeedReplace(db, previousMeta, (tx) => {
+        const habitsStore = tx.objectStore('habits');
+        const completionsStore = tx.objectStore('completions');
+        habitsStore.clear();
+        completionsStore.clear();
+        tx.objectStore('mutations').clear();
+
+        habits.forEach((habit, index) => {
+          if (!habit?.id) return;
+          habitsStore.put({ id: String(habit.id), value: clone(habit), legacyIndex: index });
+        });
+        packLegacyCompletionRows(completions).forEach((row) => completionsStore.put(row));
+
+        tx.objectStore('meta').put({
+          id: RUNTIME_META_ID,
+          schemaVersion: SCHEMA_VERSION,
+          revision,
+          completionSequence: completions.length,
+          resetGeneration: desiredGeneration,
+          source: 'legacy-dark-mirror',
+          seedHash: hash,
+          seededAtISO: nowIso(),
+          updatedAtISO: nowIso(),
+          legacyMissing: false,
+          counts: { habits: habits.length, completions: completions.length }
+        });
       });
-      await transactionPromise(tx);
 
       const currentAfterCommit = currentGeneration({ create: false });
       if (currentAfterCommit && currentAfterCommit !== desiredGeneration) {
