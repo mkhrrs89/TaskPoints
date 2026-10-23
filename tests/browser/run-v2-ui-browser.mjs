@@ -227,7 +227,7 @@ try{
   });
 
 
-  await test('two actual Home tabs preserve sequential Habit touches across focus changes and reload',async ctx=>{
+  await test('two actual Home tabs preserve Habit touches when the inactive tab refreshes before editing',async ctx=>{
     const first=(await home(ctx)).page;
     const second=(await home(ctx)).page;
     await first.locator('[data-home-tab="habits"]').click({force:true});
@@ -238,11 +238,13 @@ try{
     await first.locator('#habitsList .habitDay[data-habit="h1"][data-day="'+day+'"]').tap({force:true});
     await first.waitForFunction(key=>window.TaskPointsCore.readPendingHabitDeltas()
       .some(d=>d.habitId==='h1'&&d.dayKey===key),day);
-    // Home may automatically reload an inactive tab after a revision signal.
-    // Allow that lifecycle to finish before making the next real user gesture.
-    await second.waitForTimeout(300);
-    await second.waitForLoadState('load');
+    // A tab opened before another tab's write may have stale Home data.
+    // Refresh that tab *before* interacting so its optimistic UI and storage
+    // authority agree. The separate synthetic storage suite validates
+    // same-time writes without a UI reload.
+    await second.reload({waitUntil:'load'});
     await second.waitForFunction(()=>document.querySelectorAll('#habitsList .habitDay').length>=21);
+    await second.evaluate(()=>window.TaskPointsStateRuntimeV2.startCoordinatedDarkMirror());
     await second.locator('[data-home-tab="habits"]').click({force:true});
     await second.locator('#habitsList .habitDay[data-habit="h2"][data-day="'+day+'"]').tap({force:true});
     await second.waitForFunction(key=>window.TaskPointsCore.readPendingHabitDeltas()
