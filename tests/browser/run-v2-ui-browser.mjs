@@ -376,6 +376,10 @@ try{
     const {page}=await home(ctx);
     await page.locator('[data-home-tab="tasks"]').click({force:true});
     await page.locator('#openAddTaskBtn').click({force:true});
+    const taskField=await page.evaluate(()=>({url:location.pathname,modal:document.querySelector('#addTaskModal')?.className,
+      input:document.querySelector('#titleInput')?.outerHTML,visible:document.querySelector('#titleInput')?.getClientRects?.().length,
+      mobile:matchMedia('(max-width: 768px)').matches}));
+    assert.ok(taskField.input&&taskField.visible,'Task add field unavailable: '+JSON.stringify(taskField));
     await page.locator('#titleInput').fill('Synthetic task persistence check');
     await page.locator('#pointsInput').fill('18');
     await page.locator('#importanceInput').selectOption('High');
@@ -421,6 +425,13 @@ try{
   await test('SCWM UI saves Sleep Calories Work and Mood including Mood notes across reload',async ctx=>{
     const {page}=await home(ctx);
     await page.locator('[data-home-tab="scwm"]').click({force:true});
+    const scwmField=await page.evaluate(()=>({url:location.pathname,
+      selected:document.querySelector('[data-home-tab="scwm"]')?.className,
+      panel:document.querySelector('#homePanelScwm')?.className,
+      sleep:document.querySelector('#sleepScoreInput')?.outerHTML,
+      visible:document.querySelector('#sleepScoreInput')?.getClientRects?.().length,
+      sleepRow:document.querySelector('#sleepInputRow')?.className}));
+    assert.ok(scwmField.sleep&&scwmField.visible,'SCWM Sleep input unavailable: '+JSON.stringify(scwmField));
     await page.locator('#sleepScoreInput').fill('88');
     await page.locator('#sleepRestedInput').fill('1.5');
     await page.locator('#saveSleepScoreBtn').click({force:true});
@@ -478,6 +489,11 @@ try{
     await page.locator('#pointsInput').fill('7');
     await page.locator('#addBtn').click({force:true});
     await page.locator('[data-home-tab="scwm"]').click({force:true});
+    const interleavedScwm=await page.evaluate(()=>({sleep:document.querySelector('#sleepScoreInput')?.outerHTML,
+      visible:document.querySelector('#sleepScoreInput')?.getClientRects?.().length,
+      row:document.querySelector('#sleepInputRow')?.className}));
+    assert.ok(interleavedScwm.sleep&&interleavedScwm.visible,
+      'Interleaved SCWM input unavailable: '+JSON.stringify(interleavedScwm));
     await page.locator('#sleepScoreInput').fill('91');
     await page.locator('#saveSleepScoreBtn').click({force:true});
     await page.waitForFunction(()=>{
