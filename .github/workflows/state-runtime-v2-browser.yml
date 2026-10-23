@@ -34,6 +34,7 @@ jobs:
       - name: Run real-browser synthetic V2 storage safety scenarios
         run: node tests/browser/run-v2-browser.mjs
       - name: Exercise actual Home UI with synthetic V2 state
+        if: success() || failure()
         run: node tests/browser/run-v2-ui-browser.mjs
       - name: Upload browser test evidence
         if: always()
