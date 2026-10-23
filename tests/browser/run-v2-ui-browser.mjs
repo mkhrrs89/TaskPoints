@@ -78,9 +78,14 @@ async function makeContext(){
 }
 async function home(context){
   const page=await context.newPage();
-  const pageErrors=[];
+  const pageErrors=[],consoleErrors=[];
   page.on('pageerror',e=>pageErrors.push(e.message));
-  page.on('console',msg=>{if(msg.type()==='error') console.warn('HOME CONSOLE '+msg.text().slice(0,250));});
+  page.on('console',msg=>{
+    if(msg.type()==='error'){
+      consoleErrors.push(msg.text());
+      console.warn('HOME CONSOLE '+msg.text().slice(0,250));
+    }
+  });
   await page.goto(origin+'/index.html?perf=1',{waitUntil:'load'});
   await page.waitForFunction(()=>typeof window.renderHabits==='function'
     && Boolean(window.TaskPointsCore?.writePendingHabitDelta),null,{timeout:20000});
@@ -98,7 +103,12 @@ async function home(context){
   assert.equal(status.dark,true,'V2 preview must be enabled only for this synthetic context');
   assert.equal(status.readAuthority,'legacy_only');
   assert.equal(status.notes,'SYNTHETIC UI DATA');
-  return {page,pageErrors,status};
+  // This is the real Home bundle, not the isolated fixture. Ensure its
+  // preview mirror is seeded before inspecting actual UI mutation parity.
+  await page.evaluate(() => window.TaskPointsStateRuntimeV2.startCoordinatedDarkMirror());
+  assert.equal(consoleErrors.some(s=>s.includes('renderStats error')),false,
+    'Home should not throw from a missing scoreboard helper');
+  return {page,pageErrors,consoleErrors,status};
 }
 async function test(name,fn){
   const ctx=await makeContext();
@@ -130,11 +140,15 @@ async function test(name,fn){
 }
 try{
   await test('actual Home paints three synthetic Habits and keeps V1 authority',async ctx=>{
-    const {page,status}=await home(ctx);
+    const {page,status,pageErrors,consoleErrors}=await home(ctx);
     assert.equal(status.cards,3);
     assert.equal(status.names.length,3);
-    assert.equal(status.pageErrors?.length||0,0);
-    return {cards:status.cards,readAuthority:status.readAuthority};
+    assert.equal(pageErrors.length,0,'no uncaught Home startup errors');
+    assert.equal(consoleErrors.some(s=>s.includes('renderStats error')),false);
+    const p=await page.evaluate(()=>window.TaskPointsStateRuntimeV2.verifyParity());
+    assert.equal(p.checked,true);
+    assert.equal(p.match,true,JSON.stringify(p.differences));
+    return {cards:status.cards,readAuthority:status.readAuthority,parity:p.match};
   });
   await test('Home Habit bubble touch writes one durable journal entry and survives reload',async ctx=>{
     const {page}=await home(ctx);
@@ -165,8 +179,53 @@ try{
     },[chosen.id,chosen.day]);
     assert.ok(persisted.done||persisted.pending==='full','tap must survive reload in V1 authority');
     assert.equal(persisted.v2,'legacy_only');
-    return {day:chosen.day,detectedBefore:before.status,retainedAfter: persisted};
+    await page.evaluate(()=>window.TaskPointsStateRuntimeV2.startCoordinatedDarkMirror());
+    const parity=await page.evaluate(()=>window.TaskPointsStateRuntimeV2.verifyParity());
+    assert.equal(parity.checked,true);
+    assert.equal(parity.match,true,JSON.stringify(parity.differences));
+    return {day:chosen.day,detectedBefore:before.status,retainedAfter:persisted,parity:parity.match};
   });
+
+  await test('actual Habit touch cycles full to half to off with matching V1 and V2 state',async ctx=>{
+    const {page}=await home(ctx);
+    await page.locator('[data-home-tab="habits"]').click({force:true});
+    const day=await page.locator('#habitsList .habitDay[data-habit="h2"]').first().getAttribute('data-day');
+    assert.ok(day);
+    const bubble=()=>page.locator('#habitsList .habitDay[data-habit="h2"][data-day="'+day+'"]');
+    const observed=[];
+    for(const expected of ['full','half','off']){
+      await bubble().tap({force:true});
+      await page.waitForFunction(([key,value])=>
+        window.TaskPointsCore.readPendingHabitDeltas()
+          .some(d=>d.habitId==='h2'&&d.dayKey===key&&d.status===value),
+        [day,expected],{timeout:12000});
+      observed.push(await page.evaluate(key=>{
+        const el=document.querySelector('#habitsList .habitDay[data-habit="h2"][data-day="'+key+'"]');
+        const entry=window.TaskPointsCore.readPendingHabitDeltas().find(d=>d.habitId==='h2'&&d.dayKey===key);
+        return {classList:el?.className,status:entry?.status};
+      },day));
+    }
+    assert.deepEqual(observed.map(v=>v.status),['full','half','off']);
+    await page.reload({waitUntil:'load'});
+    await page.waitForFunction(()=>document.querySelectorAll('#habitsList .habitDay').length>=21);
+    await page.evaluate(()=>window.TaskPointsStateRuntimeV2.startCoordinatedDarkMirror());
+    const result=await page.evaluate(key=>{
+      const core=window.TaskPointsCore;
+      const source=core.readTaskPointsStoredState();
+      const overlay=core.readPendingHabitDeltas();
+      const p=source.habits.find(h=>h.id==='h2');
+      return {done:p.doneKeys.includes(key),pilotCompletion:source.completions
+        .some(c=>c.habitId==='h2'&&c.dayKey===key),
+        journal:overlay.find(d=>d.habitId==='h2'&&d.dayKey===key)?.status};
+    },day);
+    assert.equal(result.done,false);
+    assert.equal(result.pilotCompletion,false);
+    assert.ok(result.journal==null||result.journal==='off');
+    const parity=await page.evaluate(()=>window.TaskPointsStateRuntimeV2.verifyParity());
+    assert.equal(parity.match,true,JSON.stringify(parity.differences));
+    return {day,statuses:observed.map(v=>v.status),final:result,parity:parity.match};
+  });
+
 }finally{
   await writeFile(join(artifacts,'results.json'),JSON.stringify({failures,records},null,2));
   await browser.close();
