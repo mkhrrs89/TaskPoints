@@ -400,10 +400,19 @@ try{
     assert.equal(created.points,18);
     await page.locator('#taskList [data-task-action="complete"][data-task-id="'+created.id+'"]').click({force:true});
     await page.waitForFunction(id=>{
-      const state=window.TaskPointsCore.readTaskPointsStoredState();
-      return state.tasks.some(t=>t.id===id&&t.status==='done')
-        || Boolean(window.TaskPointsCore.readPendingTaskMutations?.()?.some?.(x=>x.taskId===id));
+      const live=typeof state !== 'undefined' ? state : null;
+      const journal=window.TaskPointsCore.readPendingTaskMutations?.();
+      return live?.tasks?.some(t=>t.id===id&&t.status==='done')
+        || journal?.record?.tasks?.some?.(t=>t.id===id&&t.status==='done');
     },created.id,{timeout:14000});
+    const durableTask=await page.evaluate(id=>({
+      live:typeof state !== 'undefined' ? state.tasks.find(t=>t.id===id)?.status : null,
+      pending:window.TaskPointsCore.readPendingTaskMutations?.()?.record?.tasks?.find(t=>t.id===id)?.status,
+      raw:window.TaskPointsCore.readTaskPointsStoredState().tasks.find(t=>t.id===id)?.status
+    }),created.id);
+    assert.equal(durableTask.live,'done','Task completion must update Home state');
+    assert.ok(durableTask.pending==='done'||durableTask.raw==='done',
+      'Task completion must be durable in the journal or verified snapshot');
     // Pagehide is the browser's actual navigation lifecycle event. Kill this
     // tab immediately after the completion has been journaled, then reopen
     // the real Home UI from an entirely new page in the same isolated context.
@@ -505,6 +514,14 @@ try{
       return s.tasks.some(t=>String(t.title||'').toLowerCase()==='synthetic interleaved task')
         && s.completions.some(c=>c.title?.startsWith('Sleep Score (91)'));
     },null,{timeout:15000});
+    const beforeClose=await page.evaluate(()=>({
+      stateNotes:typeof state!=='undefined'?state.notes:null,
+      storedNotes:window.TaskPointsCore.readTaskPointsStoredState().notes,
+      companionNotes:localStorage.getItem('taskpoints_notes_v1'),
+      rawSnapshotNotes:window.TaskPointsCore.parseTaskPointsStorageJson(localStorage.getItem('taskpoints_v1'),{}).notes
+    }));
+    assert.equal(beforeClose.storedNotes,'SYNTHETIC UI DATA',
+      'Notes lost before reload: '+JSON.stringify(beforeClose));
     await page.close();
     const reopened=(await home(ctx)).page;
     const evidence=await reopened.evaluate(key=>{
