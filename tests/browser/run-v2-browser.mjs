@@ -692,6 +692,81 @@ try {
       completionsPreserved:state.completions,parity:match.match};
   });
 
+
+  await run('three V2-only commits survive eight cross-tab reloads and recover when V1 catches up',async context=>{
+    const writer=await open(context);
+    const legacyBefore=await writer.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const committed=await writer.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const results=[];
+      for(let day=11;day<=13;day++){
+        const dayKey='2026-10-'+String(day).padStart(2,'0');
+        results.push(await runtime.applyHabitDelta({
+          id:'habit:h1:'+dayKey,habitId:'h1',dayKey,source:'habit',
+          status:'full',done:true,failed:false,icy:false,
+          completionFraction:1,completionPoints:3,
+          updatedAtISO:dayKey+'T12:00:00.000Z',
+          completedAtISO:dayKey+'T12:00:00.000Z'
+        }));
+      }
+      return results;
+    });
+    assert.equal(committed.every(result=>result.committed),true);
+    assert.equal(await writer.evaluate(()=>localStorage.getItem('taskpoints_v1')),legacyBefore);
+    // In this synthetic failure, V2 committed but a legacy checkpoint rolled
+    // back. Read both stores without modifying either one.
+    const inspect=async page=>page.evaluate(async()=>{
+      const db=await window.TaskPointsStateRuntimeV2.open();
+      const tx=db.transaction(['meta','habits','completions','mutations'],'readonly');
+      const all=name=>new Promise((resolve,reject)=>{
+        const request=tx.objectStore(name).getAll();
+        request.onsuccess=()=>resolve(request.result);
+        request.onerror=()=>reject(request.error);
+      });
+      const [meta,habits,completions,mutations]=await Promise.all(
+        ['meta','habits','completions','mutations'].map(all));
+      return {meta,habits,completions,mutations};
+    });
+    const before=await inspect(writer);
+    assert.equal(before.completions.length,3);
+    assert.equal(before.mutations.length,3);
+
+    for(let attempt=0;attempt<8;attempt++){
+      const tab=await open(context);
+      const error=await tab.evaluate(async()=>{
+        try{await window.TaskPointsStateRuntimeV2.seedFromLegacy();return null;}
+        catch(e){return {code:e.code,evidence:e.evidence};}
+      });
+      assert.equal(error?.code,'STATE_V2_PARITY_MISMATCH_PRESERVED');
+      assert.equal(error?.evidence?.destructiveReseedBlocked,true);
+      assert.equal(error?.evidence?.v2OnlyCompletions,3);
+      assert.deepEqual(await inspect(tab),before,
+        'new tabs must not overwrite unmatched V2 completion and mutation evidence');
+      assert.equal((await tab.evaluate(()=>window.TaskPointsStateRuntimeV2.getStatus())).readAuthority,'legacy_only');
+      await tab.close();
+    }
+
+    await writer.evaluate(async()=>{
+      const recovered=await window.TaskPointsStateRuntimeV2.buildCompatibilitySnapshot();
+      localStorage.setItem('taskpoints_v1',JSON.stringify(recovered));
+    });
+    const recoveredTab=await open(context);
+    const adopted=await recoveredTab.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const seed=await runtime.seedFromLegacy();
+      return {reason:seed.reason,parity:await runtime.verifyParity()};
+    });
+    const after=await inspect(recoveredTab);
+    assert.ok(['verified_current','already_current','already_seeded_this_page'].includes(adopted.reason));
+    assert.equal(adopted.parity.match,true);
+    assert.deepEqual(after.habits,before.habits);
+    assert.deepEqual(after.completions,before.completions);
+    assert.deepEqual(after.mutations,before.mutations,
+      'recovery must reuse the original mutation ledger, not rewrite it');
+    return {v2OnlyWrites:3,repeatedReopens:8,mutationsRecovered:after.mutations.length,
+      parity:adopted.parity.match};
+  });
+
 } finally {
   await writeFile(join(artifacts,'results.json'),JSON.stringify({ failures, results },null,2));
   await browser.close();
