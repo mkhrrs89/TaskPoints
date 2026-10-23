@@ -728,9 +728,12 @@ try{
       // Use Home's ordinary Mood-entry action, then the actual modal
       // fields and Save button. This isolates persistence from dashboard
       // card hit-testing, which existing UI tests cover separately.
-      await page.waitForFunction(()=>typeof window.saveMoodScore==='function'
+      await page.waitForFunction(()=>Boolean(document.getElementById('saveMoodScoreBtn'))
         && Boolean(document.getElementById('moodScoreInput')));
-      await page.evaluate(()=>{document.getElementById('moodScoreInput').value=''; window.saveMoodScore();});
+      await page.evaluate(()=>{
+        document.getElementById('moodScoreInput').value='';
+        document.getElementById('saveMoodScoreBtn').click();
+      });
       await page.locator('#moodEditModal').waitFor({state:'visible',timeout:12000});
       await page.locator('#moodEditScoreInput').fill(score);
       await page.locator('#moodEditNotesInput').fill(note);
