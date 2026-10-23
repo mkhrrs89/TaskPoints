@@ -334,6 +334,43 @@ try{
     return {wrongGenerationTapDiscarded:true,noUnexpectedMutation:true};
   });
 
+
+  await test('stale same-Habit tap advances from the newer tab state instead of duplicating full completion',async ctx=>{
+    const first=(await home(ctx)).page;
+    const stale=(await home(ctx)).page;
+    await first.locator('[data-home-tab="habits"]').click({force:true});
+    await stale.locator('[data-home-tab="habits"]').click({force:true});
+    const day=await first.locator('#habitsList .habitDay[data-habit="h1"]').first().getAttribute('data-day');
+    assert.ok(day);
+    await first.locator('#habitsList .habitDay[data-habit="h1"][data-day="'+day+'"]').tap({force:true});
+    await first.waitForFunction(key=>window.TaskPointsCore.readPendingHabitDeltas()
+      .some(d=>d.habitId==='h1'&&d.dayKey===key&&d.status==='full'),day);
+    await stale.waitForFunction(()=>window.TaskPointsStateRuntimeV2?.getStatus?.()?.externalRevisionInvalidated===true,
+      null,{timeout:12000});
+    await stale.locator('#habitsList .habitDay[data-habit="h1"][data-day="'+day+'"]').tap({force:true});
+    await stale.waitForFunction(key=>window.TaskPointsCore?.readPendingHabitDeltas?.()
+      .some(d=>d.habitId==='h1'&&d.dayKey===key&&d.status==='half'),day,{timeout:20000});
+    const observed=await stale.evaluate(key=>{
+      const core=window.TaskPointsCore;
+      const snap=core.readTaskPointsStoredState();
+      const pending=core.readPendingHabitDeltas();
+      const effective=structuredClone(snap);
+      core.applyPendingHabitDeltas(effective,pending);
+      const rows=effective.completions.filter(c=>c.habitId==='h1'&&c.dayKey===key);
+      return {journal:pending.filter(d=>d.habitId==='h1'&&d.dayKey===key).map(d=>d.status),
+        count:rows.length,fraction:rows[0]?.completionFraction,
+        replayCount:window.TaskPointsHabitFastPathControl.getStatus().staleTapReplays};
+    },day);
+    assert.deepEqual(observed.journal,['half']);
+    assert.equal(observed.count,1,'same Habit/day must not acquire duplicate completions');
+    assert.equal(observed.fraction,0.5,'reload must advance newer full state to half');
+    assert.equal(observed.replayCount,1);
+    await stale.evaluate(()=>window.TaskPointsStateRuntimeV2.startCoordinatedDarkMirror());
+    const p=await stale.evaluate(()=>window.TaskPointsStateRuntimeV2.verifyParity());
+    assert.equal(p.match,true,JSON.stringify(p.differences));
+    return {fullToHalfAcrossTabs:true,duplicateCompletions:0,parity:p.match};
+  });
+
 }finally{
   await writeFile(join(artifacts,'results.json'),JSON.stringify({failures,records},null,2));
   await browser.close();
