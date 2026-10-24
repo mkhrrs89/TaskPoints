@@ -467,7 +467,7 @@
   const JOURNAL_COMPLETION_SEQUENCE_BASE = 100000000000000;
   function completionSequenceForJournalDelta(delta, fallbackSequence) {
     const iso = String(delta?.updatedAtISO || '');
-    if (!/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$/.test(iso)) {
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(iso)) {
       return fallbackSequence;
     }
     const millis = Date.parse(iso);
