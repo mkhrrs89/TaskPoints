@@ -645,6 +645,7 @@ try{
     // The second Sleep edit later must update, not duplicate, this record.
     await page.locator('#scoreV2Row .scoreV2-card[data-scorev2="sleep"]').click();
     await page.locator('#sleepEditModal').waitFor({state:'visible'});
+    await page.locator('#moodEditModal').waitFor({state:'hidden',timeout:12000});
     await page.locator('#sleepEditScoreInput').fill('66');
     await page.locator('#sleepEditRestedInput').fill('0.5');
     await page.locator('#sleepEditSaveBtn').click();
@@ -658,6 +659,7 @@ try{
     // actual rendered Home card click without relying on Playwright's hit test.
     await mood.evaluate(card=>card.click());
     await page.locator('#moodEditModal').waitFor({state:'visible',timeout:12000});
+    await page.locator('#sleepEditModal').waitFor({state:'hidden',timeout:12000});
     await page.locator('#moodEditScoreInput').fill('2.1');
     await page.locator('#moodEditNotesInput').fill('Early synthetic note');
     await page.locator('#moodEditSaveBtn').click();
@@ -695,12 +697,14 @@ try{
     // actual rendered Home card click without relying on Playwright's hit test.
     await mood.evaluate(card=>card.click());
     await page.locator('#moodEditModal').waitFor({state:'visible',timeout:12000});
+    await page.locator('#sleepEditModal').waitFor({state:'hidden',timeout:12000});
     await page.locator('#moodEditScoreInput').fill('4.4');
     await page.locator('#moodEditNotesInput').fill('Latest synthetic note after habit');
     await page.locator('#moodEditSaveBtn').click();
     await page.locator('#moodEditModal').waitFor({state:'hidden',timeout:12000});
     await page.locator('#scoreV2Row .scoreV2-card[data-scorev2="sleep"]').click({force:true});
     await page.locator('#sleepEditModal').waitFor({state:'visible'});
+    await page.locator('#moodEditModal').waitFor({state:'hidden',timeout:12000});
     await page.locator('#sleepEditScoreInput').fill('79');
     await page.locator('#sleepEditRestedInput').fill('0.8');
     await page.locator('#sleepEditSaveBtn').click();
