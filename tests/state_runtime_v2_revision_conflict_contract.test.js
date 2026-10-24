@@ -463,3 +463,61 @@ test('unrelated V1 snapshot save does not erase V2 un-compacted Habit ordering h
     assert.deepEqual(after.mutations.find(row => row.id === previous.id), previous);
   }
 });
+
+
+test('unrelated V1 task save between cross-Habit edits does not create a second completion epoch', async () => {
+  const indexedDB = new FakeIndexedDB();
+  const legacy = legacyState();
+  legacy.habits.push({ id: 'h2', name: 'Walk', pointsPerDay: 5,
+    doneKeys: [], failedKeys: [], iceKeys: [] });
+  const storage = new FakeStorage({
+    [DARK_MODE_KEY]: '1',
+    [LEGACY_KEY]: JSON.stringify(legacy)
+  });
+  const runtime = installRuntime(indexedDB, storage, 'two-habits-checkpoint');
+  await runtime.seedFromLegacy();
+  const event = (habitId, dayKey, second) => ({
+    ...delta(dayKey),
+    id: 'habit:' + habitId + ':' + dayKey,
+    habitId,
+    completionPoints: habitId === 'h2' ? 5 : 4,
+    updatedAtISO: '2026-09-20T12:00:' + String(second).padStart(2, '0') + '.000Z'
+  });
+
+  await runtime.applyHabitDelta(event('h1', '2026-09-10', 1));
+  await runtime.applyHabitDelta(event('h2', '2026-09-10', 2));
+  const checkpoint = await runtime.buildCompatibilitySnapshot();
+  storage.setItem(LEGACY_KEY, JSON.stringify(checkpoint));
+
+  await runtime.applyHabitDelta(event('h1', '2026-09-11', 9));
+  const unrelated = structuredClone(checkpoint);
+  unrelated.tasks = [{ id: 'unrelated-task', title: 'No Habit data changed' }];
+  storage.setItem(LEGACY_KEY, JSON.stringify(unrelated));
+  await runtime.applyHabitDelta(event('h2', '2026-09-11', 5));
+
+  const result = await runtime.buildCompatibilitySnapshot();
+  assert.deepEqual(result.completions.slice(0, 2).map(c => c.id), [
+    'habit:h1:2026-09-11', 'habit:h2:2026-09-11'
+  ], 'cross-Habit journal writes must retain V1 timestamp order despite an unrelated save');
+  const durable = JSON.parse(JSON.stringify(indexedDB.dump(DB_NAME)));
+  assert.equal(durable.meta[0].completionOrderEpoch, 1,
+    'unrelated task data cannot mint a second compaction epoch');
+  assert.equal(durable.mutations.length, 4);
+  assert.deepEqual(Object.keys(durable.habits.find(row => row.id === 'h1').journalDayOrder),
+    ['2026-09-11']);
+  assert.deepEqual(Object.keys(durable.habits.find(row => row.id === 'h2').journalDayOrder),
+    ['2026-09-11']);
+
+  // V1's authoritative replay would unshift newer timestamp last.
+  const expected = structuredClone(unrelated);
+  expected.habits = JSON.parse(JSON.stringify(result.habits));
+  expected.completions = JSON.parse(JSON.stringify(result.completions));
+  storage.setItem(LEGACY_KEY, JSON.stringify(expected));
+  const reopened = installRuntime(indexedDB, storage, 'two-habits-checkpoint-reopen');
+  assert.equal((await reopened.seedFromLegacy()).reason, 'verified_current');
+  assert.equal((await reopened.verifyParity()).match, true);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(indexedDB.dump(DB_NAME).mutations)),
+    durable.mutations
+  );
+});
