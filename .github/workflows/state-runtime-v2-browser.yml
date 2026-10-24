@@ -58,3 +58,39 @@ jobs:
             v2-ui-browser-artifacts
           if-no-files-found: warn
           retention-days: 7
+
+  webkit-storage-safety:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out V2
+        uses: actions/checkout@v4
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - name: Install locked app dependencies
+        run: npm ci
+      - name: Install pinned Playwright without changing the package lock
+        run: npm install --no-save --package-lock=false playwright@1.56.1
+      - name: Install WebKit and Linux system dependencies
+        run: npx playwright install --with-deps webkit
+      - name: Run synthetic V2 storage safety in WebKit twice
+        shell: bash
+        env:
+          V2_BROWSER_ENGINE: webkit
+        run: |
+          set -euo pipefail
+          for attempt in 1 2; do
+            echo "V2 WebKit storage safety run $attempt of 2"
+            node tests/browser/run-v2-browser.mjs
+          done
+      - name: Upload WebKit browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v2-webkit-browser-evidence
+          path: v2-browser-artifacts/webkit
+          if-no-files-found: warn
+          retention-days: 7
