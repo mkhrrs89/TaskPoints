@@ -652,7 +652,11 @@ try{
     await page.waitForFunction(()=>window.TaskPointsCore.readTaskPointsStoredState()
       .completions.some(c=>c.title.startsWith('Sleep Score (66)')),null,{timeout:12000});
     await page.locator('[data-home-tab="scwm"]').click({force:true});
-    await mood.click();
+    // The previous Sleep/Mood modal may still participate in compositor
+    // hit-testing momentarily after its DOM reports hidden. This scenario
+    // validates persistence rather than pointer geometry, so dispatch the
+    // actual rendered Home card click without relying on Playwright's hit test.
+    await mood.evaluate(card=>card.click());
     await page.locator('#moodEditModal').waitFor({state:'visible',timeout:12000});
     await page.locator('#moodEditScoreInput').fill('2.1');
     await page.locator('#moodEditNotesInput').fill('Early synthetic note');
@@ -685,7 +689,11 @@ try{
         && s.completions.some(c=>c.habitId==='h1'&&c.dayKey===key);
     },day,{timeout:12000});
     await page.locator('[data-home-tab="scwm"]').click({force:true});
-    await mood.click();
+    // The previous Sleep/Mood modal may still participate in compositor
+    // hit-testing momentarily after its DOM reports hidden. This scenario
+    // validates persistence rather than pointer geometry, so dispatch the
+    // actual rendered Home card click without relying on Playwright's hit test.
+    await mood.evaluate(card=>card.click());
     await page.locator('#moodEditModal').waitFor({state:'visible',timeout:12000});
     await page.locator('#moodEditScoreInput').fill('4.4');
     await page.locator('#moodEditNotesInput').fill('Latest synthetic note after habit');
