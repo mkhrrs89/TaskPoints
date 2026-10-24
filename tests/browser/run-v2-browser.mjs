@@ -2,10 +2,14 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { resolve, join, sep, extname } from 'node:path';
-import { chromium } from 'playwright';
+import { chromium, webkit } from 'playwright';
 
+const engine = process.env.V2_BROWSER_ENGINE || 'chromium';
+if (!['chromium', 'webkit'].includes(engine)) {
+  throw Error('Unsupported V2 browser engine: ' + engine);
+}
 const root = resolve(process.cwd());
-const artifacts = join(root, 'v2-browser-artifacts');
+const artifacts = join(root, 'v2-browser-artifacts', engine);
 await mkdir(artifacts, { recursive: true });
 const server = createServer(async (req, res) => {
   try {
@@ -19,7 +23,8 @@ const server = createServer(async (req, res) => {
 });
 await new Promise(done => server.listen(0, '127.0.0.1', done));
 const url = 'http://127.0.0.1:' + server.address().port + '/tests/browser/v2-storage-fixture.html';
-const browser = await chromium.launch({ headless: true });
+const browser = await (engine === 'webkit' ? webkit : chromium).launch({ headless: true });
+console.log('V2 storage safety browser engine: ' + engine);
 const results = [];
 let failures = 0;
 async function open(context) {
