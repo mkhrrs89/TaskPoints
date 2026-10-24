@@ -220,3 +220,78 @@ test('internal journal and generic mutation dispatch share the queue with an in-
   assert.equal(runtime.getObservedRevision(), before + 3);
   assert.equal((await runtime.getCompletionsForHabit('h1')).length, 2);
 });
+
+
+test('cross-tab commits with reverse timestamps keep V1 journal completion order without reseeding', async () => {
+  const indexedDB = new FakeIndexedDB();
+  const legacy = legacyState();
+  legacy.habits.push({
+    id:'h2',name:'Walk',pointsPerDay:5,doneKeys:[],failedKeys:[],iceKeys:[]
+  });
+  const localStorage = new FakeStorage({
+    [DARK_MODE_KEY]:'1',[LEGACY_KEY]:JSON.stringify(legacy)
+  });
+  const newerTab = installRuntime(indexedDB, localStorage, 'timestamp-newer-tab');
+  const olderTab = installRuntime(indexedDB, localStorage, 'timestamp-older-tab');
+  await newerTab.seedFromLegacy();
+  await olderTab.seedFromLegacy();
+
+  const newer = await newerTab.applyHabitDelta(delta('2026-09-10'));
+  assert.equal(newer.committed,true);
+  const olderDelta = {
+    ...delta('2026-09-09'),
+    id:'habit:h2:2026-09-09',
+    habitId:'h2',completionPoints:5
+  };
+  await assert.rejects(
+    olderTab.applyHabitDelta(olderDelta),
+    e=>e.code==='STATE_RUNTIME_V2_REVISION_CONFLICT'
+  );
+  const older = await olderTab.applyHabitDelta(olderDelta);
+  assert.equal(older.committed,true);
+
+  const actual = await newerTab.buildCompatibilitySnapshot();
+  const ids = actual.completions.map(c=>c.id);
+  assert.deepEqual(ids, ['habit:h1:2026-09-10','habit:h2:2026-09-09'],
+    'V2 must follow journal update time, not the reverse IndexedDB commit order');
+  const v2Before = JSON.parse(JSON.stringify(indexedDB.dump(DB_NAME)));
+  assert.equal(v2Before.mutations.length,2);
+
+  // Model the production journal's canonical oldest-first replay, which
+  // unshifts the latest timestamped event before the earlier event.
+  const canonical = structuredClone(actual);
+  canonical.completions.sort((a,b)=>
+    String(b.completedAtISO).localeCompare(String(a.completedAtISO)));
+  localStorage.setItem(LEGACY_KEY,JSON.stringify(canonical));
+  const reopened = installRuntime(indexedDB,localStorage,'timestamp-reopened');
+  const reused = await reopened.seedFromLegacy();
+  assert.equal(reused.reason,'verified_current');
+  assert.equal((await reopened.verifyParity()).match,true);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(indexedDB.dump(DB_NAME).mutations)),
+    v2Before.mutations,
+    'correct ordering must not rewrite or discard the existing mutation ledger');
+});
+
+test('timestamp-ranked new completions remain in front of the original legacy baseline', async () => {
+  const indexedDB = new FakeIndexedDB();
+  const legacy = legacyState();
+  legacy.habits[0].doneKeys.push('2026-09-20');
+  legacy.completions.push({
+    id:'habit:h1:2026-09-20',taskId:'habit:h1:2026-09-20',
+    title:'[Habit] Read (2026-09-20)',points:4,
+    completedAtISO:'2026-09-20T12:00:00.000Z',
+    source:'habit',habitId:'h1',dayKey:'2026-09-20',completionFraction:1
+  });
+  const storage = new FakeStorage({
+    [DARK_MODE_KEY]:'1',[LEGACY_KEY]:JSON.stringify(legacy)
+  });
+  const runtime = installRuntime(indexedDB,storage,'historical-baseline');
+  await runtime.seedFromLegacy();
+  const newerWrite = await runtime.applyHabitDelta(delta('2026-09-01'));
+  assert.equal(newerWrite.committed,true);
+  const snapshot = await runtime.buildCompatibilitySnapshot();
+  assert.deepEqual(snapshot.completions.map(c=>c.dayKey),
+    ['2026-09-01','2026-09-20'],
+    'a pending journal event precedes seeded legacy entries even if its day is earlier');
+});
