@@ -571,6 +571,16 @@ test('equal-timestamp cross-tab ordering ambiguity stays blocked and preserves o
     assert.equal(tab.getStatus().readAuthority, 'legacy_only');
   }
   const canonical = await writer.buildCompatibilitySnapshot();
+  // Compatibility exports preserve the V1 list's existing slot order by
+  // design. Here the V1 slots were intentionally reversed for the mismatch,
+  // so restore the actual recorded V2 order from its durable completion rows.
+  canonical.habits = before.habits.map(row => plain(row.value));
+  canonical.completions = before.completions
+    .flatMap(row => row.entries
+      ? row.entries.map(entry => ({ ...entry }))
+      : [{ value: row.value, sequence: row.sequence }])
+    .sort((a, b) => Number(b.sequence || 0) - Number(a.sequence || 0))
+    .map(entry => plain(entry.value));
   localStorage.setItem(LEGACY_KEY, JSON.stringify(canonical));
   // A matching V1 snapshot permits read-only reuse without a destructive seed.
   const recovered = installRuntime(indexedDB, localStorage, 'equal-timestamp-recovered');
