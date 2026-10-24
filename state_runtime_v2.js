@@ -457,6 +457,25 @@
     return `${fnv1a(text)}:${text.length}`;
   }
 
+  // V1's pending-Habit journal replays timestamps from oldest to newest and
+  // unshifts each completion, so newest updatedAtISO comes first regardless of
+  // IndexedDB commit timing. Reserve a disjoint numeric sequence range for
+  // *new* canonical UTC journal timestamps; seeded/historical sequences remain
+  // unchanged. This is an incremental ordering key, not a snapshot rewrite.
+  // Equal timestamps remain subject to strict parity (V1's stable insertion
+  // order cannot safely be inferred from independently committed V2 events).
+  const JOURNAL_COMPLETION_SEQUENCE_BASE = 100000000000000;
+  function completionSequenceForJournalDelta(delta, fallbackSequence) {
+    const iso = String(delta?.updatedAtISO || '');
+    if (!/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$/.test(iso)) {
+      return fallbackSequence;
+    }
+    const millis = Date.parse(iso);
+    const sequence = JOURNAL_COMPLETION_SEQUENCE_BASE + millis;
+    return Number.isSafeInteger(millis) && millis >= 0 && Number.isSafeInteger(sequence)
+      ? sequence : fallbackSequence;
+  }
+
   function packLegacyCompletionRows(completions) {
     const rows = new Map();
     (completions || []).forEach((completion, index) => {
@@ -1134,7 +1153,10 @@
           let completionSequence = Number(runtimeMeta.completionSequence || 0);
           if (completion) {
             completionSequence += 1;
-            completionsStore.put({ id: completionId, value: completion, sequence: completionSequence });
+            completionsStore.put({
+              id: completionId, value: completion,
+              sequence: completionSequenceForJournalDelta(delta, completionSequence)
+            });
           } else {
             completionsStore.delete(completionId);
           }
