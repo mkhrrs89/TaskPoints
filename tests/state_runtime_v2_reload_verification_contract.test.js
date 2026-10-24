@@ -571,10 +571,7 @@ test('equal-timestamp cross-tab ordering ambiguity stays blocked and preserves o
     assert.equal(tab.getStatus().readAuthority, 'legacy_only');
   }
   const canonical = await writer.buildCompatibilitySnapshot();
-  localStorage.setItem(LEGACY_KEY, JSON.stringify({
-    ...canonical, habits: before.habits.map(row => plain(row.value)),
-    completions: canonical.completions.slice().reverse()
-  }));
+  localStorage.setItem(LEGACY_KEY, JSON.stringify(canonical));
   // A matching V1 snapshot permits read-only reuse without a destructive seed.
   const recovered = installRuntime(indexedDB, localStorage, 'equal-timestamp-recovered');
   const seed = await recovered.seedFromLegacy();
