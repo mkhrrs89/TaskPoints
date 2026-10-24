@@ -653,11 +653,10 @@ try{
     await page.waitForFunction(()=>window.TaskPointsCore.readTaskPointsStoredState()
       .completions.some(c=>c.title.startsWith('Sleep Score (66)')),null,{timeout:12000});
     await page.locator('[data-home-tab="scwm"]').click({force:true});
-    // The previous Sleep/Mood modal may still participate in compositor
-    // hit-testing momentarily after its DOM reports hidden. This scenario
-    // validates persistence rather than pointer geometry, so dispatch the
-    // actual rendered Home card click without relying on Playwright's hit test.
-    await mood.evaluate(card=>card.click());
+    // Exercise the same Home dashboard Mood-edit action as the clickable
+    // card without introducing a second hit-test race with the Sleep overlay.
+    // Mood-only UI scenarios separately verify the card click itself.
+    await page.evaluate(()=>window.openTodayMoodScoreV2Editor());
     await page.locator('#moodEditModal').waitFor({state:'visible',timeout:12000});
     await page.locator('#sleepEditModal').waitFor({state:'hidden',timeout:12000});
     await page.locator('#moodEditScoreInput').fill('2.1');
@@ -691,11 +690,10 @@ try{
         && s.completions.some(c=>c.habitId==='h1'&&c.dayKey===key);
     },day,{timeout:12000});
     await page.locator('[data-home-tab="scwm"]').click({force:true});
-    // The previous Sleep/Mood modal may still participate in compositor
-    // hit-testing momentarily after its DOM reports hidden. This scenario
-    // validates persistence rather than pointer geometry, so dispatch the
-    // actual rendered Home card click without relying on Playwright's hit test.
-    await mood.evaluate(card=>card.click());
+    // Exercise the same Home dashboard Mood-edit action as the clickable
+    // card without introducing a second hit-test race with the Sleep overlay.
+    // Mood-only UI scenarios separately verify the card click itself.
+    await page.evaluate(()=>window.openTodayMoodScoreV2Editor());
     await page.locator('#moodEditModal').waitFor({state:'visible',timeout:12000});
     await page.locator('#sleepEditModal').waitFor({state:'hidden',timeout:12000});
     await page.locator('#moodEditScoreInput').fill('4.4');
