@@ -120,9 +120,12 @@ try {
     await page.evaluate(() => {
       sessionStorage.setItem('taskpoints_state_v2_wal_test_armed_v1', '1');
       const f = window.V2BrowserFixture;
-      f.delta('h1', '2026-10-21', 'full', 1);
-      f.delta('h2', '2026-10-21', 'full', 2);
-      f.delta('h3', '2026-10-21', 'full', 3);
+      // Deliberately append newest-first, opposite V1's replay order.
+      // WAL replay may commit these in append order, but the saved completion
+      // ordering must still follow their V1 journal timestamps.
+      f.delta('h1', '2026-10-21', 'full', 9);
+      f.delta('h2', '2026-10-21', 'full', 5);
+      f.delta('h3', '2026-10-21', 'full', 1);
     });
     const before = await page.evaluate(() => window.V2BrowserFixture.status());
     assert.equal(before.wal.pendingCount, 3);
@@ -136,6 +139,12 @@ try {
     assert.equal(after.bridge.failures, 0);
     const p = await parity(page);
     assert.equal(p.actualCounts.completions, 3);
+    const order=await page.evaluate(async()=> (await window.TaskPointsStateRuntimeV2
+      .buildCompatibilitySnapshot()).completions
+      .filter(c=>c.source==='habit').map(c=>c.id));
+    assert.deepEqual(order,[
+      'habit:h1:2026-10-21','habit:h2:2026-10-21','habit:h3:2026-10-21'
+    ],'WAL replay order cannot override V1 canonical timestamp order');
     return { replayCleared: after.bridge.replayCleared, startupOrder: after.bridge.lastStartupOrder };
   });
 
