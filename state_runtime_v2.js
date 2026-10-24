@@ -982,7 +982,10 @@
           .map(habit => [String(habit.id), habit])
       );
       persistedHabitCacheRaw = raw;
-      persistedHabitCacheSignature = `${fnv1a(raw)}:${raw.length}`;
+      // Only the saved V1 pilot state can define a Habit compaction epoch.
+      // Unrelated task/notes/game saves change the serialized V1 blob but
+      // must not advance completion ranks for still-pending Habit deltas.
+      persistedHabitCacheSignature = subsetHash(saved);
     }
     return persistedHabitCache.get(String(habitId)) || null;
   }
