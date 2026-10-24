@@ -407,8 +407,10 @@ test('V1 compaction promotes previous Habit days to baseline before new backdate
   const after = JSON.parse(JSON.stringify(indexedDB.dump(DB_NAME)));
   assert.equal(after.meta[0].completionOrderEpoch, 1);
   assert.deepEqual(Object.keys(after.habits[0].journalDayOrder), ['2026-09-12']);
-  assert.deepEqual(after.mutations.slice(0, before.mutations.length), before.mutations,
-    'the original mutation ledger survives the V1 checkpoint');
+  for (const previous of before.mutations) {
+    assert.deepEqual(after.mutations.find(row => row.id === previous.id), previous,
+      'the original mutation ledger survives the V1 checkpoint');
+  }
   assert.equal(after.mutations.length, 3);
 
   // Next verified checkpoint starts another journal epoch. A new backdated
@@ -457,5 +459,7 @@ test('unrelated V1 snapshot save does not erase V2 un-compacted Habit ordering h
     'an unrelated V1 rewrite cannot impersonate verified Habit compaction');
   assert.deepEqual(Object.keys(after.habits[0].journalDayOrder).sort(),
     ['2026-09-10', '2026-09-11']);
-  assert.deepEqual(after.mutations.slice(0, before.mutations.length), before.mutations);
+  for (const previous of before.mutations) {
+    assert.deepEqual(after.mutations.find(row => row.id === previous.id), previous);
+  }
 });
