@@ -958,17 +958,36 @@
     const journalDayOrder = clone(previousJournalDayOrder || {});
     const dayKey = String(delta.dayKey);
     const seen = journalDayOrder[dayKey];
-    const nextOrdinal = Object.values(journalDayOrder).reduce((max, entry) =>
-      Math.max(max, Number(entry?.firstSeen || 0)), 0) + 1;
-    journalDayOrder[dayKey] = {
-      updatedAtISO: String(delta.updatedAtISO || ''),
-      firstSeen: Number.isSafeInteger(Number(seen?.firstSeen)) && Number(seen.firstSeen) > 0
-        ? Number(seen.firstSeen) : nextOrdinal
-    };
+    const done = delta.done === true || delta.status === 'full' || delta.status === 'half';
+    const failed = delta.failed === true || delta.status === 'failed';
+    const includesDay = (values) => Array.isArray(values) && values.includes(dayKey);
+    // Existing completed days keep their position during full/half changes,
+    // exactly as the V2 atomic compatibility contract requires. Only a newly
+    // entered journal day (or a day already indexed by this journal) can be
+    // reordered by timestamps across independent tabs.
+    const establishedDayUnchanged = !seen && (
+      (done && includesDay(next.doneKeys))
+      || (failed && includesDay(next.failedKeys))
+      || (delta.icy === true && includesDay(next.iceKeys))
+    );
+    if (!establishedDayUnchanged) {
+      const nextOrdinal = Object.values(journalDayOrder).reduce((max, entry) =>
+        Math.max(max, Number(entry?.firstSeen || 0)), 0) + 1;
+      journalDayOrder[dayKey] = {
+        updatedAtISO: String(delta.updatedAtISO || ''),
+        firstSeen: Number.isSafeInteger(Number(seen?.firstSeen)) && Number(seen.firstSeen) > 0
+          ? Number(seen.firstSeen) : nextOrdinal
+      };
+    }
 
     const sortedDayKeys = (values, shouldContain) => {
-      const current = Array.isArray(values) ? values.filter(key => key !== dayKey) : [];
-      if (shouldContain) current.push(dayKey);
+      const current = Array.isArray(values) ? values.slice() : [];
+      const wasPresent = current.includes(dayKey);
+      if (!shouldContain && wasPresent) {
+        for (let index = current.length - 1; index >= 0; index--) {
+          if (current[index] === dayKey) current.splice(index, 1);
+        }
+      } else if (shouldContain && !wasPresent) current.push(dayKey);
       const baseline = [];
       const journal = [];
       for (const key of current) {
@@ -982,8 +1001,6 @@
       return [...baseline, ...journal];
     };
 
-    const done = delta.done === true || delta.status === 'full' || delta.status === 'half';
-    const failed = delta.failed === true || delta.status === 'failed';
     next.doneKeys = sortedDayKeys(next.doneKeys, done);
     next.failedKeys = sortedDayKeys(next.failedKeys, failed);
     next.iceKeys = sortedDayKeys(next.iceKeys, delta.icy === true);
@@ -991,7 +1008,9 @@
       (value, entry) => String(entry?.updatedAtISO || '').localeCompare(value) > 0
         ? String(entry.updatedAtISO) : value, ''
     );
-    next.updatedAtISO = latest || delta.updatedAtISO || next.updatedAtISO;
+    next.updatedAtISO = String(delta.updatedAtISO || '').localeCompare(latest) >= 0
+      ? (delta.updatedAtISO || next.updatedAtISO)
+      : latest;
     return { habit: next, journalDayOrder };
   }
 
