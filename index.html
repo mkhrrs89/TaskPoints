@@ -2524,6 +2524,9 @@ let sleepEditContext = null;
 function promptEditSleepEntry(entry) {
   if (!entry) return;
 
+  // These sibling dashboard editors share a z-index. Never leave the Mood
+  // editor active underneath Sleep; retain each editor's regular close path.
+  if (!$('moodEditModal')?.classList.contains('hidden')) closeMoodEditModal();
   sleepEditContext = entry;
 
   const { score, rested } = getSleepInfo(entry);
@@ -12330,6 +12333,9 @@ function openMoodEditModal({ entry = null, score = '', notes = '', onSave = null
   const notesInput = $('moodEditNotesInput');
   if (!modal || !scoreInput || !notesInput) return;
 
+  // Sleep is later in the DOM at the same z-index and can otherwise intercept
+  // clicks on this editor after quick dashboard updates or overlapping taps.
+  if (!$('sleepEditModal')?.classList.contains('hidden')) closeSleepEditModal();
   moodEditContext = { entry, onSave };
 
   $('moodEditDateLabel').textContent = entry?.completedAtISO
