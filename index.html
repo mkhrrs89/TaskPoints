@@ -13838,6 +13838,17 @@ if (key === "calories") {
 }
 
 if (key === "mood") {
+  openTodayMoodScoreV2Editor();
+  return;
+}
+
+    });
+  }
+}
+
+// Shared action for the SCWM Mood card and persistence-focused UI checks.
+// The card retains its normal delegated click handling and save callback.
+function openTodayMoodScoreV2Editor() {
   const e = (typeof getTodayMoodEntry === "function") ? getTodayMoodEntry() : null;
   const entry = e || ensureTodayScoreEntry("mood");
 
@@ -13883,11 +13894,6 @@ if (key === "mood") {
     }
   });
 
-  return;
-}
-
-    });
-  }
 }
 
 let scoreV2RecentOpen = true;
