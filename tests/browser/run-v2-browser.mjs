@@ -794,31 +794,54 @@ try {
 
   await run('repeated overlapping writes in two tabs preserve every distinct V1 Habit/day event',async context=>{
     const first=await open(context),second=await open(context);
+    const expectedIds=new Set();
     for(let day=1;day<=8;day++){
       const key='2026-09-'+String(day).padStart(2,'0');
-      await Promise.all([
+      const [left,right]=await Promise.all([
         first.evaluate(([date,n])=>window.V2BrowserFixture.delta('h1',date,'full',n),[key,2*day-1]),
         second.evaluate(([date,n])=>window.V2BrowserFixture.delta('h2',date,'full',n),[key,2*day])
       ]);
+      assert.equal(left.id,'habit:h1:'+key);
+      assert.equal(right.id,'habit:h2:'+key);
+      expectedIds.add(left.id);expectedIds.add(right.id);
     }
-    const evidence=await first.evaluate(()=>{
+    // Cross-tab localStorage visibility may lag the writer's synchronous
+    // return. Require eventual agreement in BOTH browsing contexts, without
+    // lowering the 16/16 durability gate or masking a missing sidecar.
+    const sync=page=>page.waitForFunction(n=>{
+      const core=window.TaskPointsCore;
+      const rows=core.readPendingHabitDeltas();
+      const sidecars=Array.from({length:localStorage.length},(_,i)=>localStorage.key(i))
+        .filter(key=>key.startsWith('taskpoints_v2_habit_journal_event_v1:'));
+      return rows.length===n&&sidecars.length===n;
+    },16,{timeout:12000,polling:75});
+    await Promise.all([sync(first),sync(second)]);
+    const read=page=>page.evaluate(()=>{
       const core=window.TaskPointsCore;
       const rows=core.readPendingHabitDeltas();
       const events=Array.from({length:localStorage.length},(_,i)=>localStorage.key(i))
         .filter(key=>key.startsWith('taskpoints_v2_habit_journal_event_v1:'));
+      const eventRows=events.flatMap(key=>JSON.parse(localStorage.getItem(key)||'[]'));
       return {journalCount:rows.length,distinctDeltas:new Set(rows.map(r=>r.id)).size,
         h1:rows.filter(r=>r.habitId==='h1').length,
-        h2:rows.filter(r=>r.habitId==='h2').length,sidecarCount:events.length};
+        h2:rows.filter(r=>r.habitId==='h2').length,sidecarCount:events.length,
+        journalIds:rows.map(row=>row.id).sort(),sidecarIds:eventRows.map(row=>row.id).sort()};
     });
-    assert.equal(evidence.journalCount,16,'no concurrent V1 journal entry may disappear');
-    assert.equal(evidence.distinctDeltas,16);
-    assert.equal(evidence.h1,8);
-    assert.equal(evidence.h2,8);
-    assert.equal(evidence.sidecarCount,16,'every original tap retains its own independent event key');
+    const evidence=await read(first),other=await read(second);
+    for(const view of [evidence,other]){
+      assert.equal(view.journalCount,16,'no concurrent V1 journal entry may disappear');
+      assert.equal(view.distinctDeltas,16);
+      assert.equal(view.h1,8);
+      assert.equal(view.h2,8);
+      assert.equal(view.sidecarCount,16,'every original tap retains its own independent event key');
+      assert.deepEqual(view.journalIds,[...expectedIds].sort());
+      assert.deepEqual(view.sidecarIds,[...expectedIds].sort(),
+        'each tap must remain independently durable, not merely present in the shared V1 key');
+    }
     return {rounds:8,concurrentTaps:16,
-      durableIndependentEvents:evidence.sidecarCount,legacyReadCount:evidence.journalCount};
+      durableIndependentEvents:evidence.sidecarCount,legacyReadCount:evidence.journalCount,
+      bothTabsVerified:true};
   });
-
 
   await run('missing V1 during five repeated two-tab reloads preserves V2 WAL evidence for recovery',async context=>{
     const first=await open(context);
