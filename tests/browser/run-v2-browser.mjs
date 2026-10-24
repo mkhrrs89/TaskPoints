@@ -480,8 +480,13 @@ try {
       assert.equal(evidence.authority,'legacy_only');
       safeOrderMismatch=true;
     }
-    if (p) assert.equal(p.match,true);
-    if (p) assert.equal(p.actualCounts.completions,2);
+    // Both test events have different canonical UTC timestamps. With V1's
+    // timestamp ordering implemented, this must now produce actual parity;
+    // the fail-closed diagnostic path above remains strictly non-destructive.
+    assert.equal(safeOrderMismatch,false,
+      'cross-tab writes with distinct timestamps must not leave an order mismatch');
+    assert.equal(p?.match,true,'cross-tab WAL recovery must fully match V1');
+    assert.equal(p.actualCounts.completions,2);
     const status=await first.evaluate(()=>window.V2BrowserFixture.status());
     assert.equal(status.wal.pendingCount,0);
     const journal=await first.evaluate(()=>window.TaskPointsCore.readPendingHabitDeltas());
