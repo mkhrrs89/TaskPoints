@@ -528,3 +528,58 @@ test('order-only V1/V2 mismatch preserves all rows and ledger until canonical or
   assert.deepEqual(after.completions, before.completions);
   assert.equal((await recovered.verifyParity()).match, true);
 });
+
+
+test('equal-timestamp cross-tab ordering ambiguity stays blocked and preserves original V2 data', async () => {
+  const indexedDB = new FakeIndexedDB();
+  const localStorage = new FakeStorage({
+    [DARK_MODE_KEY]: '1',
+    [LEGACY_KEY]: JSON.stringify(legacyState())
+  });
+  const writer = installRuntime(indexedDB, localStorage, 'equal-timestamp-writer');
+  await writer.seedFromLegacy();
+  const when = '2026-09-14T12:00:00.000Z';
+  const a = { ...delta(), dayKey: '2026-09-12',
+    id: 'habit:h1:2026-09-12', updatedAtISO: when };
+  const b = { ...delta(), dayKey: '2026-09-13',
+    id: 'habit:h1:2026-09-13', updatedAtISO: when };
+  await writer.applyHabitDelta(a);
+  await writer.applyHabitDelta(b);
+  const before = plain(indexedDB.dump(DB_NAME));
+  assert.equal(before.mutations.length, 2);
+
+  const reversed = await writer.buildCompatibilitySnapshot();
+  reversed.habits[0].doneKeys.reverse();
+  reversed.completions.reverse();
+  localStorage.setItem(LEGACY_KEY, JSON.stringify(reversed));
+
+  for (let i = 0; i < 4; i++) {
+    const tab = installRuntime(indexedDB, localStorage, 'equal-timestamp-tab-' + i);
+    await assert.rejects(tab.seedFromLegacy(), error => {
+      assert.equal(error.code, 'STATE_V2_PARITY_MISMATCH_PRESERVED');
+      assert.equal(error.evidence.destructiveReseedBlocked, true);
+      assert.equal(error.evidence.evidencePreserved, true);
+      assert.equal(error.evidence.completionOrderDisagreements, 2);
+      assert.equal(error.evidence.changedHabits, 1);
+      assert.equal(error.evidence.v2OnlyCompletions, 0);
+      assert.equal(error.evidence.legacyOnlyCompletions, 0);
+      assert.equal(error.evidence.changedCompletions, 0);
+      return true;
+    });
+    assert.deepEqual(plain(indexedDB.dump(DB_NAME)), before,
+      'ambiguous tie ordering must preserve both V2 events and mutation evidence');
+    assert.equal(tab.getStatus().readAuthority, 'legacy_only');
+  }
+  const canonical = await writer.buildCompatibilitySnapshot();
+  localStorage.setItem(LEGACY_KEY, JSON.stringify({
+    ...canonical, habits: before.habits.map(row => plain(row.value)),
+    completions: canonical.completions.slice().reverse()
+  }));
+  // A matching V1 snapshot permits read-only reuse without a destructive seed.
+  const recovered = installRuntime(indexedDB, localStorage, 'equal-timestamp-recovered');
+  const seed = await recovered.seedFromLegacy();
+  assert.equal(seed.reason, 'verified_current');
+  assert.equal((await recovered.verifyParity()).match, true);
+  assert.deepEqual(plain(indexedDB.dump(DB_NAME).mutations), before.mutations);
+});
+
