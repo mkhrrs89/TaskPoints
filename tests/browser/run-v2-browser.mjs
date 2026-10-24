@@ -357,6 +357,39 @@ try {
     return {writes:60,days:20,pilotCompletions:p.actualCounts.completions,mutations:observed.mutations};
   });
 
+  await run('journal timestamp ordering is stable when IndexedDB commits run newest event first',async context=>{
+    const page=await open(context);
+    // Commit in the opposite order from V1's timestamp-sorted replay:
+    // the new h1 event has a later timestamp but commits before older h2.
+    page.on('pageerror',e=>console.warn('order-test browser error: '+e.message));
+    await page.evaluate(()=>window.V2BrowserFixture.delta('h1','2026-10-20','full',9));
+    await settled(page,1);
+    await page.evaluate(()=>window.V2BrowserFixture.delta('h2','2026-10-20','full',1));
+    await settled(page,2);
+    const report=await parity(page);
+    const proof=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const db=await runtime.open();
+      const read=async name=>new Promise((resolve,reject)=>{
+        const r=db.transaction(name,'readonly').objectStore(name).getAll();
+        r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);
+      });
+      const rows=await read('completions');
+      const visible=await runtime.buildCompatibilitySnapshot();
+      return {order:visible.completions.filter(c=>c.source==='habit').map(c=>c.id),
+        mutationRows:(await read('mutations')).length,completionRows:rows.length};
+    });
+    assert.deepEqual(proof.order,['habit:h1:2026-10-20','habit:h2:2026-10-20']);
+    assert.equal(proof.mutationRows,2);
+    assert.equal(proof.completionRows,2);
+    // Reopening must adopt the verified existing rows rather than reseed.
+    await page.reload({waitUntil:'load'});
+    await page.waitForFunction(()=>window.V2BrowserFixture?.status().runtime.installed);
+    assert.equal((await parity(page)).match,true);
+    return {reverseCommitOrder:true,canonicalV1Order:proof.order,
+      mutationRowsRetained:proof.mutationRows,parity:report.match};
+  });
+
   await run('two concurrent tabs retain both writes and recover outstanding WAL after reopening',async context=>{
     const first=await open(context),second=await open(context);
     await Promise.all([
