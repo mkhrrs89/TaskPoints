@@ -465,15 +465,26 @@
   // Equal timestamps remain subject to strict parity (V1's stable insertion
   // order cannot safely be inferred from independently committed V2 events).
   const JOURNAL_COMPLETION_SEQUENCE_BASE = 100000000000000;
-  function completionSequenceForJournalDelta(delta, fallbackSequence) {
+  const JOURNAL_COMPLETION_EPOCH_SPAN = 6000000000000;
+  function completionSequenceForJournalDelta(delta, fallbackSequence, epoch = 0) {
     const iso = String(delta?.updatedAtISO || '');
     if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(iso)) {
       return fallbackSequence;
     }
     const millis = Date.parse(iso);
-    const sequence = JOURNAL_COMPLETION_SEQUENCE_BASE + millis;
-    return Number.isSafeInteger(millis) && millis >= 0 && Number.isSafeInteger(sequence)
-      ? sequence : fallbackSequence;
+    // A V1 compaction freezes the previous journal epoch as the new baseline.
+    // Newly pending completions must sit ahead of that entire baseline, even
+    // when the next journal event is backdated. Each epoch retains timestamp
+    // ordering within itself. An exhausted rank aborts rather than risking an
+    // unsafe ordering collision.
+    const sequence = JOURNAL_COMPLETION_SEQUENCE_BASE
+      + epoch * JOURNAL_COMPLETION_EPOCH_SPAN + millis;
+    if (!Number.isSafeInteger(millis) || millis < 0
+      || millis >= JOURNAL_COMPLETION_EPOCH_SPAN || !Number.isSafeInteger(epoch)
+      || epoch < 0 || !Number.isSafeInteger(sequence)) {
+      throw new Error('state_runtime_v2_journal_completion_epoch_exhausted');
+    }
+    return sequence;
   }
 
   function packLegacyCompletionRows(completions) {
@@ -957,6 +968,7 @@
   // baseline days. Decode only when the V1 snapshot changes; no hot-path
   // decompression is needed between saves.
   let persistedHabitCacheRaw = null;
+  let persistedHabitCacheSignature = null;
   let persistedHabitCache = new Map();
   function persistedLegacyHabit(habitId) {
     const raw = safeGet(core.STORAGE_KEY || 'taskpoints_v1');
@@ -970,6 +982,7 @@
           .map(habit => [String(habit.id), habit])
       );
       persistedHabitCacheRaw = raw;
+      persistedHabitCacheSignature = `${fnv1a(raw)}:${raw.length}`;
     }
     return persistedHabitCache.get(String(habitId)) || null;
   }
@@ -1100,6 +1113,7 @@
     // If V1 compacted concurrently afterward, keep the old hints and fail
     // closed rather than guessing that it was a completed checkpoint.
     const persistedHabitBeforeWrite = persistedLegacyHabit(delta.habitId);
+    const checkpointSignature = persistedHabitCacheSignature;
 
     const generationBeforeOpen = currentGeneration({ create: false });
     if (generationBeforeOpen !== expectedGeneration) {
@@ -1226,8 +1240,13 @@
           habitsStore.put({
             ...habitRow, id: delta.habitId, value: nextHabit, journalDayOrder
           });
-          if (compactedIntoV1) mark('stateV2.habitCompactionOrderingRetired', {
-            habitId: delta.habitId, priorJournalDays: Object.keys(oldJournalOrder).length
+          const newCheckpoint = compactedIntoV1 && checkpointSignature
+            && String(runtimeMeta.habitCheckpointSignature || '') !== String(checkpointSignature);
+          const completionOrderEpoch = Number(runtimeMeta.completionOrderEpoch || 0)
+            + (newCheckpoint ? 1 : 0);
+          if (newCheckpoint) mark('stateV2.habitCompactionOrderingRetired', {
+            habitId: delta.habitId, priorJournalDays: Object.keys(oldJournalOrder).length,
+            completionOrderEpoch
           });
 
           const completionId = typeof core.habitCompletionId === 'function'
@@ -1239,7 +1258,7 @@
             completionSequence += 1;
             completionsStore.put({
               id: completionId, value: completion,
-              sequence: completionSequenceForJournalDelta(delta, completionSequence)
+              sequence: completionSequenceForJournalDelta(delta, completionSequence, completionOrderEpoch)
             });
           } else {
             completionsStore.delete(completionId);
@@ -1263,6 +1282,8 @@
             schemaVersion: SCHEMA_VERSION,
             revision: nextRevision,
             completionSequence,
+            completionOrderEpoch,
+            ...(newCheckpoint ? { habitCheckpointSignature: checkpointSignature } : {}),
             resetGeneration: expectedGeneration,
             source: 'legacy-dark-mirror',
             lastMutationId: mutationId,
