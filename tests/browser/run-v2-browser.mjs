@@ -679,6 +679,88 @@ try {
     return {clearedSidecars:2,remainingPilotCompletions:2,parity:p.match};
   });
 
+  await run('two real V1 journal compactions preserve V2 completion epochs and Habit day order across reload',async context=>{
+    const page=await open(context);
+    // First journal epoch: newer timestamp commits before older timestamp.
+    await page.evaluate(()=>window.V2BrowserFixture.delta('h1','2026-10-18','full',9));
+    await settled(page,1);
+    await page.evaluate(()=>window.V2BrowserFixture.delta('h1','2026-10-19','full',1));
+    await settled(page,2);
+    const compact=async p=>p.evaluate(()=>{
+      const core=window.TaskPointsCore;
+      const pending=core.readPendingHabitDeltas();
+      const snapshot=window.V2BrowserFixture.rawLegacy();
+      core.applyPendingHabitDeltas(snapshot,pending);
+      const saved=core.saveStateSnapshot(snapshot,{immediateWrite:true,replaceCompletions:true,
+        savePath:'habit-journal-compaction'});
+      if(saved?.blocked||saved?.skipped)throw Error('V1 compaction did not save');
+      const persisted=window.V2BrowserFixture.rawLegacy();
+      const verified=core.verifyPersistedHabitDeltas
+        ? core.verifyPersistedHabitDeltas(persisted,pending,pending)
+        : pending.filter(d=>persisted.completions.some(c=>c.habitId===d.habitId && c.dayKey===d.dayKey));
+      core.clearCompactedHabitDeltas(verified);
+      return {journalRemaining:core.readPendingHabitDeltas().length,
+        compacted:verified.length,doneKeys:persisted.habits.find(h=>h.id==='h1').doneKeys};
+    });
+    const first=await compact(page);
+    assert.equal(first.journalRemaining,0);
+    assert.equal(first.compacted,2);
+    assert.deepEqual(first.doneKeys,['2026-10-19','2026-10-18']);
+    assert.equal((await parity(page)).match,true);
+
+    await page.evaluate(()=>window.V2BrowserFixture.delta('h1','2026-10-20','full',5));
+    await settled(page,3);
+    let state=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const snapshot=await runtime.buildCompatibilitySnapshot();
+      const db=await runtime.open();
+      const tx=db.transaction(['habits','meta','mutations'],'readonly');
+      const get=name=>new Promise((resolve,reject)=>{
+        const r=tx.objectStore(name).getAll();
+        r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);
+      });
+      const [habits,meta,mutations]=await Promise.all(['habits','meta','mutations'].map(get));
+      return {doneKeys:snapshot.habits.find(h=>h.id==='h1').doneKeys,
+        completionDays:snapshot.completions.filter(c=>c.habitId==='h1').map(c=>c.dayKey),
+        epoch:meta[0].completionOrderEpoch,
+        hints:Object.keys(habits.find(h=>h.id==='h1').journalDayOrder||{}),
+        mutations:mutations.length};
+    });
+    assert.deepEqual(state.doneKeys,['2026-10-19','2026-10-18','2026-10-20']);
+    assert.deepEqual(state.completionDays,['2026-10-20','2026-10-18','2026-10-19']);
+    assert.equal(state.epoch,1);
+    assert.deepEqual(state.hints,['2026-10-20']);
+    assert.equal(state.mutations,3);
+    assert.equal((await parity(page)).match,true);
+    await page.reload({waitUntil:'load'});
+    assert.equal((await parity(page)).match,true);
+
+    const second=await compact(page);
+    assert.equal(second.journalRemaining,0);
+    assert.equal(second.compacted,1);
+    await page.evaluate(()=>window.V2BrowserFixture.delta('h1','2026-10-21','full',2));
+    await settled(page,1);
+    const result=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const snapshot=await runtime.buildCompatibilitySnapshot();
+      const db=await runtime.open();
+      const tx=db.transaction('meta','readonly');
+      const request=tx.objectStore('meta').get('runtime');
+      const meta=await new Promise((resolve,reject)=>{
+        request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);
+      });
+      return {doneKeys:snapshot.habits.find(h=>h.id==='h1').doneKeys,
+        completionDays:snapshot.completions.filter(c=>c.habitId==='h1').map(c=>c.dayKey),
+        epoch:meta.completionOrderEpoch};
+    });
+    assert.deepEqual(result.doneKeys,['2026-10-19','2026-10-18','2026-10-20','2026-10-21']);
+    assert.deepEqual(result.completionDays,['2026-10-21','2026-10-20','2026-10-18','2026-10-19']);
+    assert.equal(result.epoch,2);
+    assert.equal((await parity(page)).match,true);
+    return {verifiedCompactions:2,epochs:result.epoch,reloaded:true,
+      canonicalDayOrder:result.doneKeys,parity:true};
+  });
+
   await run('old-generation V2 sidecar remains inspectable but cannot replay into a new generation',async context=>{
     const page=await open(context);
     await page.evaluate(()=>window.V2BrowserFixture.delta('h3','2026-10-20','full',1));
