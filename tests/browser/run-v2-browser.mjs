@@ -399,6 +399,41 @@ try {
       mutationRowsRetained:proof.mutationRows,parity:report.match};
   });
 
+
+  await run('different-day writes to same Habit preserve V1 timestamp order across reverse commits and reload',async context=>{
+    const page=await open(context);
+    // The higher timestamp is committed first. Legacy Habit replay sorts the
+    // timestamps before appending day keys, even though IDB commit order differs.
+    await page.evaluate(()=>window.V2BrowserFixture.delta('h1','2026-10-18','full',9));
+    await settled(page,1);
+    await page.evaluate(()=>window.V2BrowserFixture.delta('h1','2026-10-19','full',1));
+    await settled(page,2);
+    const order=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const habit=await runtime.getHabit('h1');
+      const snapshot=await runtime.buildCompatibilitySnapshot();
+      const db=await runtime.open();
+      const request=db.transaction('mutations','readonly').objectStore('mutations').getAll();
+      const mutations=await new Promise((resolve,reject)=>{
+        request.onsuccess=()=>resolve(request.result);
+        request.onerror=()=>reject(request.error);
+      });
+      return {doneKeys:habit.doneKeys,latest:habit.updatedAtISO,
+        completionIds:snapshot.completions.filter(c=>c.source==='habit').map(c=>c.id),
+        mutationCount:mutations.length};
+    });
+    assert.deepEqual(order.doneKeys,['2026-10-19','2026-10-18']);
+    assert.equal(order.latest,'2026-10-22T12:00:09.000Z');
+    assert.deepEqual(order.completionIds,
+      ['habit:h1:2026-10-18','habit:h1:2026-10-19']);
+    assert.equal(order.mutationCount,2);
+    assert.equal((await parity(page)).match,true);
+    await page.reload({waitUntil:'load'});
+    assert.equal((await parity(page)).match,true);
+    return {reversedCommits:2,reloaded:true,doneKeys:order.doneKeys,
+      originalMutationsPreserved:order.mutationCount};
+  });
+
   await run('two concurrent tabs retain both writes and recover outstanding WAL after reopening',async context=>{
     const first=await open(context),second=await open(context);
     await Promise.all([
