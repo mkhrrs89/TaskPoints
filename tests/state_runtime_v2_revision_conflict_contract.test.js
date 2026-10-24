@@ -376,3 +376,86 @@ test('a correction to an older Habit day moves that day to its later V1 journal 
   assert.equal(snapshot.completions.length, 2);
 });
 
+
+
+test('V1 compaction promotes previous Habit days to baseline before new backdated V2 events', async () => {
+  const indexedDB = new FakeIndexedDB();
+  const storage = new FakeStorage({
+    [DARK_MODE_KEY]: '1',
+    [LEGACY_KEY]: JSON.stringify(legacyState())
+  });
+  const runtime = installRuntime(indexedDB, storage, 'compaction-epoch');
+  await runtime.seedFromLegacy();
+  const make = (dayKey, second) => ({
+    ...delta(dayKey),
+    updatedAtISO: '2026-09-20T12:00:' + String(second).padStart(2, '0') + '.000Z'
+  });
+  await runtime.applyHabitDelta(make('2026-09-11', 9));
+  await runtime.applyHabitDelta(make('2026-09-10', 1));
+  const first = await runtime.buildCompatibilitySnapshot();
+  assert.deepEqual(first.habits[0].doneKeys, ['2026-09-10', '2026-09-11']);
+  assert.deepEqual(first.completions.map(c => c.dayKey), ['2026-09-11', '2026-09-10']);
+  const before = JSON.parse(JSON.stringify(indexedDB.dump(DB_NAME)));
+  storage.setItem(LEGACY_KEY, JSON.stringify(first)); // V1 compacted its journal
+
+  await runtime.applyHabitDelta(make('2026-09-12', 5));
+  const next = await runtime.buildCompatibilitySnapshot();
+  assert.deepEqual(next.habits[0].doneKeys, ['2026-09-10', '2026-09-11', '2026-09-12'],
+    'days saved by V1 compaction must remain a stable baseline');
+  assert.deepEqual(next.completions.map(c => c.dayKey), ['2026-09-12', '2026-09-11', '2026-09-10'],
+    'a new pending completion must precede the compacted V1 baseline');
+  const after = JSON.parse(JSON.stringify(indexedDB.dump(DB_NAME)));
+  assert.equal(after.meta[0].completionOrderEpoch, 1);
+  assert.deepEqual(Object.keys(after.habits[0].journalDayOrder), ['2026-09-12']);
+  assert.deepEqual(after.mutations.slice(0, before.mutations.length), before.mutations,
+    'the original mutation ledger survives the V1 checkpoint');
+  assert.equal(after.mutations.length, 3);
+
+  // Next verified checkpoint starts another journal epoch. A new backdated
+  // completion must again be placed in front without touching old rows.
+  storage.setItem(LEGACY_KEY, JSON.stringify(next));
+  const reopened = installRuntime(indexedDB, storage, 'compaction-epoch-reload');
+  assert.equal((await reopened.seedFromLegacy()).reason, 'verified_current');
+  await reopened.applyHabitDelta(make('2026-09-13', 2));
+  const third = await reopened.buildCompatibilitySnapshot();
+  assert.deepEqual(third.habits[0].doneKeys, [
+    '2026-09-10', '2026-09-11', '2026-09-12', '2026-09-13'
+  ]);
+  assert.deepEqual(third.completions.map(c => c.dayKey), [
+    '2026-09-13', '2026-09-12', '2026-09-11', '2026-09-10'
+  ]);
+  assert.equal(runtimeMeta(indexedDB).completionOrderEpoch, 2);
+  storage.setItem(LEGACY_KEY, JSON.stringify(third));
+  const final = installRuntime(indexedDB, storage, 'compaction-final-reload');
+  assert.equal((await final.seedFromLegacy()).reason, 'verified_current');
+  assert.equal((await final.verifyParity()).match, true);
+  assert.equal(indexedDB.dump(DB_NAME).mutations.length, 4);
+});
+
+test('unrelated V1 snapshot save does not erase V2 un-compacted Habit ordering hints', async () => {
+  const indexedDB = new FakeIndexedDB();
+  const legacy = legacyState();
+  const storage = new FakeStorage({
+    [DARK_MODE_KEY]: '1',
+    [LEGACY_KEY]: JSON.stringify(legacy)
+  });
+  const runtime = installRuntime(indexedDB, storage, 'unrelated-snapshot');
+  await runtime.seedFromLegacy();
+  const make = (dayKey, second) => ({
+    ...delta(dayKey),
+    updatedAtISO: '2026-09-20T12:00:' + String(second).padStart(2, '0') + '.000Z'
+  });
+  await runtime.applyHabitDelta(make('2026-09-11', 9));
+  const before = JSON.parse(JSON.stringify(indexedDB.dump(DB_NAME)));
+  const unrelated = structuredClone(legacy);
+  unrelated.tasks = [{ id: 'task-outside-pilot', title: 'Unrelated' }];
+  storage.setItem(LEGACY_KEY, JSON.stringify(unrelated));
+  await runtime.applyHabitDelta(make('2026-09-10', 1));
+  const after = JSON.parse(JSON.stringify(indexedDB.dump(DB_NAME)));
+  assert.deepEqual(after.habits[0].value.doneKeys, ['2026-09-10', '2026-09-11']);
+  assert.equal(after.meta[0].completionOrderEpoch || 0, 0,
+    'an unrelated V1 rewrite cannot impersonate verified Habit compaction');
+  assert.deepEqual(Object.keys(after.habits[0].journalDayOrder).sort(),
+    ['2026-09-10', '2026-09-11']);
+  assert.deepEqual(after.mutations.slice(0, before.mutations.length), before.mutations);
+});
