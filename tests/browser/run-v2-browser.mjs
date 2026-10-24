@@ -922,6 +922,58 @@ try {
       bothTabsVerified:true};
   });
 
+  await run('forty-eight overlapping two-tab Habit writes survive mid-session tab reopen without losing a sidecar',async context=>{
+    let first=await open(context),second=await open(context);
+    const expected=new Set();
+    const check=page=>page.waitForFunction(count=>{
+      const rows=window.TaskPointsCore.readPendingHabitDeltas();
+      const keys=Array.from({length:localStorage.length},(_,i)=>localStorage.key(i))
+        .filter(k=>k.startsWith('taskpoints_v2_habit_journal_event_v1:'));
+      return rows.length===count&&keys.length===count;
+    },expected.size,{timeout:18000,polling:75});
+    for(let n=1;n<=24;n++){
+      const date=n<=20
+        ? '2026-09-'+String(n).padStart(2,'0')
+        : '2026-10-'+String(n-20).padStart(2,'0');
+      const [a,b]=await Promise.all([
+        first.evaluate(([day,x])=>window.V2BrowserFixture.delta('h1',day,'full',x),[date,2*n-1]),
+        second.evaluate(([day,x])=>window.V2BrowserFixture.delta('h2',day,'full',x),[date,2*n])
+      ]);
+      assert.equal(a.id,'habit:h1:'+date);
+      assert.equal(b.id,'habit:h2:'+date);
+      expected.add(a.id);expected.add(b.id);
+      if(n%8===0){
+        await Promise.all([check(first),check(second)]);
+        if(n<24){
+          // Do not clear V1 or compact the journal during the tab handoff.
+          // The other tab remains live, exercising shared localStorage sidecars
+          // and V2 IndexedDB/WAL startup across separate browsing contexts.
+          await first.close();
+          first=await open(context);
+          await Promise.all([check(first),check(second)]);
+        }
+      }
+    }
+    const evidence=await Promise.all([first,second].map(page=>page.evaluate(()=>{
+      const journal=window.TaskPointsCore.readPendingHabitDeltas();
+      const keys=Array.from({length:localStorage.length},(_,i)=>localStorage.key(i))
+        .filter(k=>k.startsWith('taskpoints_v2_habit_journal_event_v1:'));
+      return {authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority,
+        ids:journal.map(row=>row.id).sort(),
+        independent:keys.flatMap(key=>JSON.parse(localStorage.getItem(key)||'[]')).map(r=>r.id).sort(),
+        duplicates:keys.length-new Set(keys).size};
+    })));
+    for(const tab of evidence){
+      assert.equal(tab.authority,'legacy_only');
+      assert.equal(tab.ids.length,48);
+      assert.deepEqual(tab.ids,[...expected].sort());
+      assert.deepEqual(tab.independent,[...expected].sort(),
+        'all 48 separate sidecars must survive a tab reopening mid-session');
+      assert.equal(tab.duplicates,0);
+    }
+    return {writes:48,tabReopens:2,distinctSidecars:48,checkedInBothTabs:true};
+  });
+
   await run('missing V1 during five repeated two-tab reloads preserves V2 WAL evidence for recovery',async context=>{
     const first=await open(context);
     await first.evaluate(()=>window.V2BrowserFixture.delta('h1','2026-10-20','full',9));
