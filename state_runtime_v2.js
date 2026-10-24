@@ -953,6 +953,27 @@
   // IndexedDB transactions across tabs can commit in the opposite order.
   // This row metadata changes only the touched Habit and never rewrites the
   // historical completion ledger or relaxes strict parity verification.
+  // A canonical V1 compaction turns formerly pending Habit days into
+  // baseline days. Decode only when the V1 snapshot changes; no hot-path
+  // decompression is needed between saves.
+  let persistedHabitCacheRaw = null;
+  let persistedHabitCache = new Map();
+  function persistedLegacyHabit(habitId) {
+    const raw = safeGet(core.STORAGE_KEY || 'taskpoints_v1');
+    if (raw === null) return null;
+    if (persistedHabitCacheRaw !== raw) {
+      const saved = typeof core.parseTaskPointsStorageJson === 'function'
+        ? core.parseTaskPointsStorageJson(raw, {}) : JSON.parse(raw);
+      persistedHabitCache = new Map(
+        (Array.isArray(saved?.habits) ? saved.habits : [])
+          .filter(habit => habit && habit.id != null)
+          .map(habit => [String(habit.id), habit])
+      );
+      persistedHabitCacheRaw = raw;
+    }
+    return persistedHabitCache.get(String(habitId)) || null;
+  }
+
   function patchHabit(habit, delta, previousJournalDayOrder = {}) {
     const next = clone(habit || {});
     const journalDayOrder = clone(previousJournalDayOrder || {});
@@ -1075,6 +1096,11 @@
       ? Number(options.expectedRevision)
       : lastKnownRevision;
 
+    // Read the saved (pre-journal) V1 Habit before any IndexedDB wait.
+    // If V1 compacted concurrently afterward, keep the old hints and fail
+    // closed rather than guessing that it was a completed checkpoint.
+    const persistedHabitBeforeWrite = persistedLegacyHabit(delta.habitId);
+
     const generationBeforeOpen = currentGeneration({ create: false });
     if (generationBeforeOpen !== expectedGeneration) {
       generationInvalidations += 1;
@@ -1186,11 +1212,22 @@
           if (!habitRow?.value) throw new Error(`state_runtime_v2_habit_missing:${delta.habitId}`);
 
           nextRevision = actualRevision + 1;
+          const oldJournalOrder = habitRow.journalDayOrder || {};
+          const compactedIntoV1 = Object.keys(oldJournalOrder).length > 0
+            && persistedHabitBeforeWrite
+            && stableJson(normalizeHabitForParity(persistedHabitBeforeWrite))
+              === stableJson(normalizeHabitForParity(habitRow.value));
+          // V1's checkpoint makes all currently saved days the new baseline.
+          // Only retire ordering hints, atomically with this new mutation.
+          // Completion rows, mutation ledger and V1 data are never modified.
           const { habit: nextHabit, journalDayOrder } = patchHabit(
-            habitRow.value, delta, habitRow.journalDayOrder
+            habitRow.value, delta, compactedIntoV1 ? {} : oldJournalOrder
           );
           habitsStore.put({
             ...habitRow, id: delta.habitId, value: nextHabit, journalDayOrder
+          });
+          if (compactedIntoV1) mark('stateV2.habitCompactionOrderingRetired', {
+            habitId: delta.habitId, priorJournalDays: Object.keys(oldJournalOrder).length
           });
 
           const completionId = typeof core.habitCompletionId === 'function'
