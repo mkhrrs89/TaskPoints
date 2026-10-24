@@ -761,6 +761,80 @@ try {
       canonicalDayOrder:result.doneKeys,parity:true};
   });
 
+  await run('unrelated V1 task-only save cannot advance cross-Habit journal completion epoch',async context=>{
+    const page=await open(context);
+    const coreCompaction=()=> {
+      const core=window.TaskPointsCore;
+      const pending=core.readPendingHabitDeltas();
+      const snapshot=window.V2BrowserFixture.rawLegacy();
+      core.applyPendingHabitDeltas(snapshot,pending);
+      const result=core.saveStateSnapshot(snapshot,{immediateWrite:true,replaceCompletions:true,
+        savePath:'habit-journal-compaction'});
+      if(result?.skipped||result?.blocked)throw Error('canonical V1 checkpoint was not persisted');
+      const saved=window.V2BrowserFixture.rawLegacy();
+      const verified=core.verifyPersistedHabitDeltas(saved,pending,pending);
+      core.clearCompactedHabitDeltas(verified);
+      return {compacted:verified.length,remaining:core.readPendingHabitDeltas().length};
+    };
+    await page.evaluate(()=>window.V2BrowserFixture.delta('h1','2026-10-19','full',1));
+    await settled(page,1);
+    await page.evaluate(()=>window.V2BrowserFixture.delta('h2','2026-10-19','full',2));
+    await settled(page,2);
+    const first=await page.evaluate(coreCompaction);
+    assert.deepEqual(first,{compacted:2,remaining:0});
+    assert.equal((await parity(page)).match,true);
+
+    await page.evaluate(()=>window.V2BrowserFixture.delta('h1','2026-10-20','full',9));
+    await settled(page,3);
+    // This uses the existing production V1 save path and changes only a Task,
+    // not a Habit/completion. It must not mint an additional V2 ordering epoch.
+    const unrelated=await page.evaluate(()=>{
+      const core=window.TaskPointsCore;
+      const snapshot=window.V2BrowserFixture.rawLegacy();
+      snapshot.tasks[0].title='Task-only title changed';
+      const save=core.saveStateSnapshot(snapshot,{immediateWrite:true,replaceCompletions:true,
+        savePath:'task-only-unrelated-save'});
+      if(save?.skipped||save?.blocked)throw Error('unrelated V1 save was not persisted');
+      return {pending:core.readPendingHabitDeltas().length,
+        taskTitle:window.V2BrowserFixture.rawLegacy().tasks[0].title};
+    });
+    assert.equal(unrelated.pending,1);
+    assert.equal(unrelated.taskTitle,'Task-only title changed');
+
+    await page.evaluate(()=>window.V2BrowserFixture.delta('h2','2026-10-20','full',5));
+    await settled(page,4);
+    const data=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const snapshot=await runtime.buildCompatibilitySnapshot();
+      const db=await runtime.open();
+      const tx=db.transaction(['meta','habits','mutations'],'readonly');
+      const read=name=>new Promise((resolve,reject)=>{
+        const r=tx.objectStore(name).getAll();
+        r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);
+      });
+      const [meta,habits,mutations]=await Promise.all(['meta','habits','mutations'].map(read));
+      return {epoch:meta[0].completionOrderEpoch,
+        completionIds:snapshot.completions.filter(c=>c.source==='habit').map(c=>c.id),
+        ledgerRows:mutations.length,
+        journalDays:habits.map(row=>({
+          habitId:row.id,days:Object.keys(row.journalDayOrder||{})
+        }))};
+    });
+    assert.equal(data.epoch,1,
+      'a task-only V1 save cannot impersonate another Habit checkpoint');
+    assert.deepEqual(data.completionIds,[
+      'habit:h1:2026-10-20','habit:h2:2026-10-20',
+      'habit:h2:2026-10-19','habit:h1:2026-10-19'
+    ]);
+    assert.equal(data.ledgerRows,4);
+    assert.deepEqual(data.journalDays.filter(r=>r.days.length).map(r=>r.habitId).sort(),['h1','h2']);
+    assert.equal((await parity(page)).match,true);
+    await page.reload({waitUntil:'load'});
+    assert.equal((await parity(page)).match,true);
+    return {checkpointEpoch:data.epoch,preservedMutations:data.ledgerRows,
+      checkpointSafeAcrossTwoHabits:true,unrelatedTaskSave:true,reloaded:true};
+  });
+
   await run('old-generation V2 sidecar remains inspectable but cannot replay into a new generation',async context=>{
     const page=await open(context);
     await page.evaluate(()=>window.V2BrowserFixture.delta('h3','2026-10-20','full',1));
