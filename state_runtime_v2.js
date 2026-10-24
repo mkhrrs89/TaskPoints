@@ -947,28 +947,52 @@
     return `habit-delta:${fnv1a(identity)}:${identity.length}`;
   }
 
-  function patchHabit(habit, delta) {
+  // Keep an incremental journal-day ordering index OUTSIDE Habit.value.
+  // V1 replays pending Habit deltas in updatedAtISO order, preserving the
+  // relative order of baseline days and appending the affected journal days.
+  // IndexedDB transactions across tabs can commit in the opposite order.
+  // This row metadata changes only the touched Habit and never rewrites the
+  // historical completion ledger or relaxes strict parity verification.
+  function patchHabit(habit, delta, previousJournalDayOrder = {}) {
     const next = clone(habit || {});
-    const preserveOrRemoveDay = (values, shouldContain) => {
-      const current = Array.isArray(values) ? values.slice() : [];
-      const alreadyContains = current.includes(delta.dayKey);
-      if (shouldContain) {
-        // Match the legacy foreground mutation exactly: when a day stays in
-        // the same set (for example full -> half or normal -> icy), its array
-        // position does not change. Only a newly-added day is appended.
-        if (!alreadyContains) current.push(delta.dayKey);
-        return current;
+    const journalDayOrder = clone(previousJournalDayOrder || {});
+    const dayKey = String(delta.dayKey);
+    const seen = journalDayOrder[dayKey];
+    const nextOrdinal = Object.values(journalDayOrder).reduce((max, entry) =>
+      Math.max(max, Number(entry?.firstSeen || 0)), 0) + 1;
+    journalDayOrder[dayKey] = {
+      updatedAtISO: String(delta.updatedAtISO || ''),
+      firstSeen: Number.isSafeInteger(Number(seen?.firstSeen)) && Number(seen.firstSeen) > 0
+        ? Number(seen.firstSeen) : nextOrdinal
+    };
+
+    const sortedDayKeys = (values, shouldContain) => {
+      const current = Array.isArray(values) ? values.filter(key => key !== dayKey) : [];
+      if (shouldContain) current.push(dayKey);
+      const baseline = [];
+      const journal = [];
+      for (const key of current) {
+        if (Object.prototype.hasOwnProperty.call(journalDayOrder, key)) journal.push(key);
+        else baseline.push(key);
       }
-      return current.filter((key) => key !== delta.dayKey);
+      journal.sort((left, right) =>
+        String(journalDayOrder[left].updatedAtISO).localeCompare(
+          String(journalDayOrder[right].updatedAtISO)
+        ) || Number(journalDayOrder[left].firstSeen) - Number(journalDayOrder[right].firstSeen));
+      return [...baseline, ...journal];
     };
 
     const done = delta.done === true || delta.status === 'full' || delta.status === 'half';
     const failed = delta.failed === true || delta.status === 'failed';
-    next.doneKeys = preserveOrRemoveDay(next.doneKeys, done);
-    next.failedKeys = preserveOrRemoveDay(next.failedKeys, failed);
-    next.iceKeys = preserveOrRemoveDay(next.iceKeys, delta.icy === true);
-    next.updatedAtISO = delta.updatedAtISO || next.updatedAtISO;
-    return next;
+    next.doneKeys = sortedDayKeys(next.doneKeys, done);
+    next.failedKeys = sortedDayKeys(next.failedKeys, failed);
+    next.iceKeys = sortedDayKeys(next.iceKeys, delta.icy === true);
+    const latest = Object.values(journalDayOrder).reduce(
+      (value, entry) => String(entry?.updatedAtISO || '').localeCompare(value) > 0
+        ? String(entry.updatedAtISO) : value, ''
+    );
+    next.updatedAtISO = latest || delta.updatedAtISO || next.updatedAtISO;
+    return { habit: next, journalDayOrder };
   }
 
   function completionForDelta(habit, delta) {
@@ -1143,8 +1167,12 @@
           if (!habitRow?.value) throw new Error(`state_runtime_v2_habit_missing:${delta.habitId}`);
 
           nextRevision = actualRevision + 1;
-          const nextHabit = patchHabit(habitRow.value, delta);
-          habitsStore.put({ ...habitRow, id: delta.habitId, value: nextHabit });
+          const { habit: nextHabit, journalDayOrder } = patchHabit(
+            habitRow.value, delta, habitRow.journalDayOrder
+          );
+          habitsStore.put({
+            ...habitRow, id: delta.habitId, value: nextHabit, journalDayOrder
+          });
 
           const completionId = typeof core.habitCompletionId === 'function'
             ? core.habitCompletionId(delta.habitId, delta.dayKey)
