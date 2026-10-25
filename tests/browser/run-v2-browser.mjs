@@ -388,6 +388,100 @@ try {
       crossTabFollowupEdits:3,mutationRows:6,completionRows:6,parity:true};
   });
 
+  await run('two suspended writers recover across verified V1 compaction without losing either WAL mutation',async context=>{
+    const survivor=await open(context);
+    const expected=[
+      {habitId:'h1',day:'2026-10-14',n:14},
+      {habitId:'h2',day:'2026-10-15',n:15}
+    ];
+    const initial=await survivor.evaluate(()=>({
+      generation:window.TaskPointsStateRuntimeV2.getStatus().currentGeneration
+    }));
+    for(const event of expected){
+      const writer=await open(context);
+      const held=await writer.evaluate(({habitId,day,n})=>{
+        sessionStorage.setItem('taskpoints_state_v2_wal_test_armed_v1','1');
+        const result=window.V2BrowserFixture.delta(habitId,day,'full',n);
+        document.dispatchEvent(new Event('visibilitychange'));
+        window.dispatchEvent(new Event('pagehide'));
+        return {id:result.id,wal:window.TaskPointsStateRuntimeV2Wal.getPendingRows().rows.length,
+          journal:window.TaskPointsCore.readPendingHabitDeltas().length};
+      },event);
+      assert.equal(held.id,'habit:'+event.habitId+':'+event.day);
+      assert.equal(held.wal,expected.indexOf(event)+1);
+      assert.equal(held.journal,expected.indexOf(event)+1);
+      await writer.close();
+    }
+    const checkpoint=await survivor.evaluate(()=>{
+      const core=window.TaskPointsCore;
+      const pending=core.readPendingHabitDeltas();
+      const walBefore=window.TaskPointsStateRuntimeV2Wal.getPendingRows();
+      const originalGeneration=window.TaskPointsStateRuntimeV2.getStatus().currentGeneration;
+      const raw=window.V2BrowserFixture.rawLegacy();
+      const applied=core.applyPendingHabitDeltas(raw,pending);
+      const saved=core.saveStateSnapshot(raw,{immediateWrite:true,replaceCompletions:true,
+        savePath:'habit-journal-compaction'});
+      if(saved?.blocked||saved?.skipped)throw Error('V1 verified checkpoint save blocked');
+      const persisted=window.V2BrowserFixture.rawLegacy();
+      const verified=core.verifyPersistedHabitDeltas(persisted,pending,applied.appliedDeltas);
+      core.clearCompactedHabitDeltas(verified);
+      return {walIds:walBefore.rows.map(r=>r.id).sort(),
+        verified:verified.length,remaining:core.readPendingHabitDeltas().length,
+        walAfter:window.TaskPointsStateRuntimeV2Wal.getPendingRows().rows.length,
+        pilotIds:persisted.completions.filter(c=>c.source==='habit').map(c=>c.id).sort(),
+        generationUnchanged:originalGeneration===window.TaskPointsStateRuntimeV2.getStatus().currentGeneration};
+    });
+    assert.equal(checkpoint.verified,2,'both V1 journal deltas must be verified before cleanup');
+    assert.equal(checkpoint.remaining,0,'verified V1 journal must be compacted');
+    assert.equal(checkpoint.walAfter,2,'V1 compaction must not remove pending V2 WAL evidence');
+    assert.equal(checkpoint.walIds.length,2);
+    assert.deepEqual(checkpoint.pilotIds,['habit:h1:2026-10-14','habit:h2:2026-10-15']);
+    assert.equal(checkpoint.generationUnchanged,true);
+    await survivor.reload({waitUntil:'load'});
+    await survivor.waitForFunction(()=>{
+      const s=window.V2BrowserFixture?.status();
+      return s&&s.wal.pendingCount===0&&s.bridge.replayCleared>=2;
+    },null,{timeout:25000});
+    const recovered=await parity(survivor);
+    assert.equal(recovered.actualCounts.completions,2);
+    const status=await survivor.evaluate(()=>window.V2BrowserFixture.status());
+    assert.equal(status.bridge.failures,0);
+    assert.equal(status.runtime.readAuthority,'legacy_only');
+    assert.equal(status.bridge.lastStartupOrder,'wal_then_seed');
+    // An additional post-compaction event must not be lost or misplaced by
+    // leftover checkpoint metadata from the earlier held WAL.
+    await survivor.evaluate(()=>window.V2BrowserFixture.delta('h1','2026-10-16','full',16));
+    await settled(survivor,1);
+    assert.equal((await parity(survivor)).actualCounts.completions,3);
+    await survivor.reload({waitUntil:'load'});
+    assert.equal((await parity(survivor)).actualCounts.completions,3);
+    const proof=await survivor.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const db=await runtime.open();
+      const tx=db.transaction(['mutations','completions'],'readonly');
+      const get=name=>new Promise((resolve,reject)=>{
+        const r=tx.objectStore(name).getAll();
+        r.onsuccess=()=>resolve(r.result);
+        r.onerror=()=>reject(r.error);
+      });
+      const [mutations,rows]=await Promise.all(['mutations','completions'].map(get));
+      return {mutations:mutations.map(x=>x.id).sort(),
+        completionIds:rows.flatMap(x=>Array.isArray(x.entries)
+          ?x.entries.map(y=>y.value.id):x.value?.id?[x.value.id]:[]).sort(),
+        order:(await runtime.buildCompatibilitySnapshot()).completions
+          .filter(c=>c.source==='habit').map(c=>c.id),
+        generation:runtime.getStatus().currentGeneration};
+    });
+    assert.equal(proof.mutations.length,3);
+    assert.equal(new Set(proof.mutations).size,3);
+    assert.deepEqual(proof.completionIds,[
+      'habit:h1:2026-10-14','habit:h1:2026-10-16','habit:h2:2026-10-15']);
+    assert.equal(proof.order[0],'habit:h1:2026-10-16');
+    assert.equal(proof.generation,initial.generation);
+    return {suspendedWriters:2,verifiedV1Compaction:true,replayedWal:2,
+      laterWriteRetained:true,mutations:3,parity:true};
+  });
+
   await run('incomplete restore snapshot is rejected without rotating generation or changing V1',async context=>{
     const page=await open(context);
     const outcome=await page.evaluate(()=>{
