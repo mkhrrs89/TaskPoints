@@ -14,6 +14,8 @@ class FakeStorage {
   getItem(key) { return this.rows.has(String(key)) ? this.rows.get(String(key)) : null; }
   setItem(key, value) { this.rows.set(String(key), String(value)); }
   removeItem(key) { this.rows.delete(String(key)); }
+  get length() { return this.rows.size; }
+  key(index) { return [...this.rows.keys()][index] ?? null; }
 }
 
 function install(initial = {}) {
@@ -137,3 +139,54 @@ test('WAL preserves canonical completion time and distinguishes timestamp correc
   assert.equal(saved.row.delta.completedAtISO, delta.completedAtISO);
   assert.notEqual(api.mutationIdForDelta(delta), api.mutationIdForDelta(deltaA));
 });
+
+test('independent WAL events survive a stale shared-key overwrite and selective cleanup', () => {
+  const { api, localStorage } = install({ [DARK]: '1' });
+  const a = api.appendHabitDelta(deltaA);
+  const b = api.appendHabitDelta(deltaB);
+  const sidecarPrefix = 'taskpoints_v2_pending_mutation_event_v1:';
+  assert.equal(localStorage.getItem(sidecarPrefix + a.mutationId) !== null, true);
+  assert.equal(localStorage.getItem(sidecarPrefix + b.mutationId) !== null, true);
+  // Simulates another tab writing an obsolete view of the shared array.
+  localStorage.setItem(KEY, JSON.stringify([a.row]));
+  assert.deepEqual(api.getPendingRows().rows.map(r=>r.id).sort(),
+    [a.mutationId,b.mutationId].sort());
+  api.removeMutation(a.mutationId);
+  assert.equal(localStorage.getItem(sidecarPrefix + a.mutationId), null);
+  assert.equal(api.getPendingRows().rows.length, 1);
+  assert.equal(api.getPendingRows().rows[0].id, b.mutationId);
+  api.removeMutation(b.mutationId);
+  assert.equal(api.getPendingRows().rows.length, 0);
+  assert.equal(api.getStatus().independentEventCount, 0);
+});
+
+test('independent WAL event survives a shared-key write failure before the tab closes', () => {
+  const { api, localStorage } = install({ [DARK]: '1' });
+  const original = localStorage.setItem.bind(localStorage);
+  localStorage.setItem = (key, value) => {
+    if (String(key) === KEY) throw new Error('simulated full WAL array quota error');
+    return original(key, value);
+  };
+  assert.throws(() => api.appendHabitDelta(deltaA), /state_runtime_v2_wal_write_failed/);
+  localStorage.setItem = original;
+  const surviving = api.getPendingRows();
+  assert.equal(surviving.ok, true);
+  assert.equal(surviving.rows.length, 1);
+  assert.equal(surviving.rows[0].delta.habitId, 'h1');
+  assert.equal(api.getStatus().independentEventCount, 1);
+});
+
+test('malformed independently durable WAL event fails closed and preserves its bytes', () => {
+  const { api, localStorage } = install({ [DARK]: '1' });
+  const key = 'taskpoints_v2_pending_mutation_event_v1:corrupted';
+  const original = '{"incomplete":';
+  localStorage.setItem(key, original);
+  const read = api.getPendingRows();
+  assert.equal(read.ok, false);
+  assert.match(read.error, /state_runtime_v2_wal_malformed/);
+  assert.equal(localStorage.getItem(key), original);
+  assert.throws(() => api.appendHabitDelta(deltaA), /state_runtime_v2_wal_malformed/);
+  assert.throws(() => api.removeMutation('corrupted'), /state_runtime_v2_wal_malformed/);
+  assert.equal(localStorage.getItem(key), original);
+});
+
