@@ -753,6 +753,76 @@ try {
   });
 
 
+  await run('interrupted independent WAL cleanup replays exactly once after browser restart',async context=>{
+    const page=await open(context);
+    const injected=await page.evaluate(()=>{
+      const prefix='taskpoints_v2_pending_mutation_event_v1:';
+      const original=Storage.prototype.removeItem;
+      window.__walRemoveOriginal=original;
+      let blocked=0;
+      Storage.prototype.removeItem=function(key){
+        if(this===localStorage && String(key).startsWith(prefix)){
+          blocked++;
+          throw new DOMException('Synthetic WAL cleanup interrupted','QuotaExceededError');
+        }
+        return original.call(this,key);
+      };
+      window.V2BrowserFixture.delta('h1','2026-10-20','full',1);
+      return {initial:window.TaskPointsStateRuntimeV2Wal.getPendingRows().rows.length,
+        generation:window.TaskPointsStateRuntimeV2Generation.read(),
+        blockedNow:blocked};
+    });
+    assert.equal(injected.initial,1);
+    await page.waitForFunction(()=>{
+      const s=window.V2BrowserFixture?.status();
+      return s?.bridge.failures>0
+        && s.wal.pendingCount===1
+        && s.wal.independentEventCount===1;
+    },null,{timeout:20000});
+    const evidence=await page.evaluate(()=>{
+      const s=window.V2BrowserFixture.status();
+      const rows=window.TaskPointsStateRuntimeV2Wal.getPendingRows().rows;
+      const pending=window.TaskPointsCore.readPendingHabitDeltas();
+      const source=window.V2BrowserFixture.rawLegacy();
+      return {failures:s.bridge.failures,
+        preserved:rows.map(r=>r.id),sidecars:s.wal.independentEventCount,
+        v1Journal:pending.filter(r=>r.habitId==='h1').length,
+        canonicalGeneration:window.TaskPointsStateRuntimeV2Generation.read(),
+        v1Pilot:source.completions.filter(c=>c.source==='habit').length};
+    });
+    assert.equal(evidence.preserved.length,1);
+    assert.equal(evidence.sidecars,1);
+    assert.equal(evidence.v1Journal,1);
+    assert.equal(evidence.canonicalGeneration,injected.generation);
+    await page.reload({waitUntil:'load'});
+    await page.waitForFunction(()=>{
+      const s=window.V2BrowserFixture?.status();
+      return s&&s.wal.pendingCount===0
+        && s.wal.independentEventCount===0
+        && s.bridge.replayCleared>=1;
+    },null,{timeout:25000});
+    const p=await parity(page);
+    assert.equal(p.actualCounts.completions,1);
+    const final=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const db=await runtime.open();
+      const request=db.transaction('mutations','readonly').objectStore('mutations').getAll();
+      const mutations=await new Promise((resolve,reject)=>{
+        request.onsuccess=()=>resolve(request.result);
+        request.onerror=()=>reject(request.error);
+      });
+      return {mutations:mutations.map(m=>m.id),
+        generation:window.TaskPointsStateRuntimeV2Generation.read(),
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(final.mutations.length,1);
+    assert.equal(new Set(final.mutations).size,1);
+    assert.equal(final.generation,injected.generation);
+    assert.equal(final.authority,'legacy_only');
+    return {interruptedSidecarCleanup:true,retainedUntilRecovery:true,
+      replayedExactlyOnce:true,mutationCount:1,generationUnchanged:true,parity:true};
+  });
+
   await run('48 rapid changes to one Habit/day preserve last-write-wins with no duplicate completion',async context=>{
     const page=await open(context);
     await page.evaluate(()=>{
