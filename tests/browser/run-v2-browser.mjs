@@ -1025,7 +1025,40 @@ try {
       const s=window.V2BrowserFixture?.status();
       return s && s.wal.pendingCount===0;
     },null,{timeout:22000});
-    const proof=await parity(compactor);
+    let proof;
+    try {
+      proof=await parity(compactor);
+    } catch(error) {
+      // A same-generation mismatch is intentionally fail-closed. Keep the gate
+      // failing, but print both durable stores without triggering another seed
+      // so that engine-specific ordering or missing-data causes can be fixed.
+      const detail=await compactor.evaluate(async()=>{
+        const core=window.TaskPointsCore,runtime=window.TaskPointsStateRuntimeV2;
+        const expected=window.V2BrowserFixture.rawLegacy();
+        core.applyPendingHabitDeltas(expected);
+        const db=await runtime.open();
+        const tx=db.transaction(['meta','habits','completions','mutations'],'readonly');
+        const get=name=>new Promise((resolve,reject)=>{
+          const r=tx.objectStore(name).getAll();
+          r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);
+        });
+        const [meta,habits,completions,mutations]=await Promise.all(
+          ['meta','habits','completions','mutations'].map(get));
+        return {expectedHabits:expected.habits.map(h=>({id:h.id,doneKeys:h.doneKeys,
+            updatedAtISO:h.updatedAtISO})),
+          expectedPilot:expected.completions.filter(c=>c.source==='habit')
+            .map(c=>({id:c.id,points:c.points,completionFraction:c.completionFraction})),
+          actualHabits:habits.map(h=>({id:h.id,doneKeys:h.value?.doneKeys,
+            updatedAtISO:h.value?.updatedAtISO})),
+          actualPilot:completions.flatMap(c=>Array.isArray(c.entries)
+            ?c.entries.map(e=>e.value):c.value?[c.value]:[])
+            .map(c=>({id:c.id,points:c.points,completionFraction:c.completionFraction})),
+          meta,mutations:mutations.map(m=>({id:m.id,delta:m.delta,
+            revision:m.revision})),runtime:runtime.getStatus()};
+      });
+      console.warn('DELAYED_CROSS_TAB_MISMATCH_DIAGNOSTIC '+JSON.stringify(detail));
+      throw error;
+    }
     assert.equal(proof.actualCounts.completions,2);
     const saved=await compactor.evaluate(async()=>{
       const core=window.TaskPointsCore;
