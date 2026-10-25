@@ -457,6 +457,32 @@
     return `${fnv1a(text)}:${text.length}`;
   }
 
+  // An actual V1 Habit checkpoint changes the authoritative completion
+  // baseline (completed/failed/icy days or pilot completion rows). Cosmetic
+  // Habit edits and unrelated Task saves must not start a new ordering epoch.
+  // Keep this separate from seedHash, which includes pending journal overlays.
+  function canonicalCompletionCheckpointSignature(state) {
+    const habits = (Array.isArray(state?.habits) ? state.habits : [])
+      .filter(h => h?.id != null)
+      .map(h => ({
+        id: String(h.id),
+        doneKeys: h.doneKeys || [],
+        failedKeys: h.failedKeys || [],
+        iceKeys: h.iceKeys || []
+      }))
+      .sort((a, b) => a.id.localeCompare(b.id));
+    const text = stableJson({ habits, completions: pilotCompletions(state) });
+    return `${fnv1a(text)}:${text.length}`;
+  }
+
+  function readCanonicalPersistedCompletionSignature() {
+    const raw = safeGet(core.STORAGE_KEY || 'taskpoints_v1');
+    if (raw == null) return null;
+    const saved = typeof core.parseTaskPointsStorageJson === 'function'
+      ? core.parseTaskPointsStorageJson(raw, {}) : JSON.parse(raw);
+    return canonicalCompletionCheckpointSignature(saved);
+  }
+
   // V1's pending-Habit journal replays timestamps from oldest to newest and
   // unshifts each completion, so newest updatedAtISO comes first regardless of
   // IndexedDB commit timing. Reserve a disjoint numeric sequence range for
@@ -656,8 +682,8 @@
     };
   }
 
-  async function refreshSeedMarker(db, previousMeta, hash, desiredGeneration, reason) {
-    if (!previousMeta || previousMeta.seedHash === hash) return previousMeta;
+  async function refreshSeedMarker(db, previousMeta, hash, desiredGeneration, reason, canonicalSignature) {
+    if (!previousMeta || (previousMeta.seedHash === hash && previousMeta.canonicalCompletionCheckpointSignature)) return previousMeta;
     const tx = db.transaction('meta', 'readwrite');
     const store = tx.objectStore('meta');
     const request = store.get(RUNTIME_META_ID);
@@ -684,7 +710,9 @@
         seedHash: hash,
         seedVerifiedAtISO: nowIso(),
         seedVerifiedRevision: Number(currentMeta.revision || 0),
-        seedVerifiedReason: String(reason || 'verified-current')
+        seedVerifiedReason: String(reason || 'verified-current'),
+        canonicalCompletionCheckpointSignature: currentMeta.canonicalCompletionCheckpointSignature
+          || canonicalSignature || null
       };
       store.put(nextMeta);
     };
@@ -717,6 +745,8 @@
     const desiredGeneration = currentGeneration();
     const source = parseLegacyStateWithPending();
     const capturedHash = source.missing ? null : subsetHash(source.state);
+    const capturedCanonicalCompletionSignature = source.missing
+      ? null : readCanonicalPersistedCompletionSignature();
 
     const run = async () => {
       const db = await open();
@@ -762,6 +792,7 @@
         options.force !== true
         && previousMeta?.schemaVersion === SCHEMA_VERSION
         && previousMeta?.seedHash === hash
+        && previousMeta?.canonicalCompletionCheckpointSignature != null
         && previousMeta?.legacyMissing !== true
         && previousMeta?.resetGeneration === desiredGeneration
         // Incremental mutation metadata can retain an old seedHash. Never
@@ -806,7 +837,8 @@
         parityComparedBeforeReseed = true;
         if (expectedText === actualText) {
           try {
-            previousMeta = await refreshSeedMarker(db, previousMeta, hash, desiredGeneration, 'read-only-reload-verification');
+            previousMeta = await refreshSeedMarker(db, previousMeta, hash, desiredGeneration,
+              'read-only-reload-verification', capturedCanonicalCompletionSignature);
           } catch (error) {
             if (error?.code === 'STATE_RUNTIME_V2_REVISION_CONFLICT') throw error;
             mark('stateV2.seedMarkerRefreshFailed', { message: String(error?.message || error) });
@@ -867,6 +899,7 @@
           resetGeneration: desiredGeneration,
           source: 'legacy-dark-mirror',
           seedHash: hash,
+          canonicalCompletionCheckpointSignature: capturedCanonicalCompletionSignature,
           seededAtISO: nowIso(),
           updatedAtISO: nowIso(),
           legacyMissing: false,
@@ -969,6 +1002,7 @@
   // decompression is needed between saves.
   let persistedHabitCacheRaw = null;
   let persistedHabitCacheSignature = null;
+  let persistedCanonicalCompletionCacheSignature = null;
   let persistedHabitCache = new Map();
   function persistedLegacyHabit(habitId) {
     const raw = safeGet(core.STORAGE_KEY || 'taskpoints_v1');
@@ -986,6 +1020,7 @@
       // Unrelated task/notes/game saves change the serialized V1 blob but
       // must not advance completion ranks for still-pending Habit deltas.
       persistedHabitCacheSignature = subsetHash(saved);
+      persistedCanonicalCompletionCacheSignature = canonicalCompletionCheckpointSignature(saved);
     }
     return persistedHabitCache.get(String(habitId)) || null;
   }
@@ -1117,6 +1152,7 @@
     // closed rather than guessing that it was a completed checkpoint.
     const persistedHabitBeforeWrite = persistedLegacyHabit(delta.habitId);
     const checkpointSignature = persistedHabitCacheSignature;
+    const canonicalCheckpointSignature = persistedCanonicalCompletionCacheSignature;
 
     const generationBeforeOpen = currentGeneration({ create: false });
     if (generationBeforeOpen !== expectedGeneration) {
@@ -1243,8 +1279,21 @@
           habitsStore.put({
             ...habitRow, id: delta.habitId, value: nextHabit, journalDayOrder
           });
-          const newCheckpoint = compactedIntoV1 && checkpointSignature
+          // A checkpoint can land between delayed mutations from *different*
+          // Habits. A per-Habit hint misses the boundary for Habits that did
+          // not participate in the checkpoint, placing their completion in the
+          // wrong epoch despite both mutations being durable. Compare the
+          // canonical V1 completion baseline captured before the IDB wait.
+          const hasCanonicalMarker = Boolean(runtimeMeta.canonicalCompletionCheckpointSignature);
+          const canonicalCheckpointChanged = hasCanonicalMarker && canonicalCheckpointSignature
+            && String(runtimeMeta.canonicalCompletionCheckpointSignature) !== String(canonicalCheckpointSignature);
+          // Existing V2 databases may not yet have a global marker. Preserve
+          // their original strict per-Habit detector until a trusted marker is
+          // established; never infer an epoch from an unknown baseline.
+          const legacyCheckpointChanged = !hasCanonicalMarker
+            && compactedIntoV1 && checkpointSignature
             && String(runtimeMeta.habitCheckpointSignature || '') !== String(checkpointSignature);
+          const newCheckpoint = Boolean(canonicalCheckpointChanged || legacyCheckpointChanged);
           const completionOrderEpoch = Number(runtimeMeta.completionOrderEpoch || 0)
             + (newCheckpoint ? 1 : 0);
           if (newCheckpoint) mark('stateV2.habitCompactionOrderingRetired', {
@@ -1287,6 +1336,8 @@
             completionSequence,
             completionOrderEpoch,
             ...(newCheckpoint ? { habitCheckpointSignature: checkpointSignature } : {}),
+            canonicalCompletionCheckpointSignature: canonicalCheckpointSignature
+              || runtimeMeta.canonicalCompletionCheckpointSignature || null,
             resetGeneration: expectedGeneration,
             source: 'legacy-dark-mirror',
             lastMutationId: mutationId,
