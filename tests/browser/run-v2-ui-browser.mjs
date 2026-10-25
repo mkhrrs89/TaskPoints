@@ -300,6 +300,77 @@ try{
   });
 
 
+  await test('Home survives simulated iPhone background pagehide and foreground resume between two Habit touches',async ctx=>{
+    const {page}=await home(ctx);
+    await page.locator('[data-home-tab="habits"]').click({force:true});
+    const day=await page.locator('#habitsList .habitDay[data-habit="h1"]').first().getAttribute('data-day');
+    assert.ok(day);
+    const touch=async habitId=>{
+      await page.locator('#habitsList .habitDay[data-habit="'+habitId+'"][data-day="'+day+'"]')
+        .tap({force:true});
+      await page.waitForFunction(([id,key])=>{
+        const core=window.TaskPointsCore;
+        const pending=core.readPendingHabitDeltas();
+        if(pending.some(d=>d.habitId===id&&d.dayKey===key&&d.status==='full'))return true;
+        const source=core.readTaskPointsStoredState();
+        return source.habits.some(h=>h.id===id&&h.doneKeys?.includes(key));
+      },[habitId,day],{timeout:16000});
+      await page.waitForFunction(()=>window.TaskPointsStateRuntimeV2Wal?.getStatus?.()?.pendingCount===0,
+        null,{timeout:20000});
+    };
+    await touch('h1');
+    // Headless WebKit may not report native hidden visibility. Creating a
+    // second foreground page and dispatching lifecycle events separately
+    // exercises both the browser tab handoff and Home's pagehide listeners.
+    const foreground=await ctx.newPage();
+    await foreground.goto('about:blank');
+    const suspended=await page.evaluate(()=>{
+      const visibility=document.visibilityState;
+      document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new Event('pagehide'));
+      return {visibility,authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority,
+        generation:window.TaskPointsStateRuntimeV2.getStatus().currentGeneration};
+    });
+    await page.bringToFront();
+    await page.evaluate(()=>{
+      window.dispatchEvent(new Event('pageshow'));
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await foreground.close();
+    assert.equal(suspended.authority,'legacy_only');
+    await page.locator('[data-home-tab="habits"]').click({force:true});
+    await touch('h2');
+    await page.reload({waitUntil:'load'});
+    await page.waitForFunction(()=>document.querySelectorAll('#habitsList .habitDay').length>=21);
+    await page.evaluate(()=>window.TaskPointsStateRuntimeV2.startCoordinatedDarkMirror());
+    const proof=await page.evaluate(async key=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const core=window.TaskPointsCore;
+      const effective=structuredClone(core.readTaskPointsStoredState());
+      core.applyPendingHabitDeltas(effective);
+      const db=await runtime.open();
+      const request=db.transaction('mutations','readonly').objectStore('mutations').getAll();
+      const mutations=await new Promise((resolve,reject)=>{
+        request.onsuccess=()=>resolve(request.result);
+        request.onerror=()=>reject(request.error);
+      });
+      return {days:effective.habits.filter(h=>['h1','h2'].includes(h.id)&&h.doneKeys.includes(key))
+        .map(h=>h.id).sort(),mutationIds:mutations.map(m=>m.id),
+        authority:runtime.getStatus().readAuthority,
+        generation:runtime.getStatus().currentGeneration};
+    },day);
+    assert.deepEqual(proof.days,['h1','h2']);
+    assert.equal(new Set(proof.mutationIds).size,proof.mutationIds.length);
+    assert.ok(proof.mutationIds.length>=2,'both independent Habit taps must be in the V2 ledger');
+    assert.equal(proof.authority,'legacy_only');
+    assert.equal(proof.generation,suspended.generation);
+    const p=await page.evaluate(()=>window.TaskPointsStateRuntimeV2.verifyParity());
+    assert.equal(p.match,true,JSON.stringify(p.differences));
+    return {engine,day,backgroundVisibility:suspended.visibility,
+      resumedTouchPreserved:true,ledgerRows:proof.mutationIds.length,
+      generationUnchanged:true,parity:true};
+  });
+
   await test('stale Home tab safely reloads and replays the intercepted Habit tap exactly once',async ctx=>{
     const first=(await home(ctx)).page;
     const stale=(await home(ctx)).page;
