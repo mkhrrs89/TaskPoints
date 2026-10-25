@@ -18,8 +18,8 @@ class FakeStorage {
   key(index) { return [...this.rows.keys()][index] ?? null; }
 }
 
-function install(initial = {}) {
-  const localStorage = new FakeStorage(initial);
+function install(initial = {}, sharedStorage = null) {
+  const localStorage = sharedStorage || new FakeStorage(initial);
   let uuid = 0;
   const context = {
     localStorage,
@@ -190,3 +190,118 @@ test('malformed independently durable WAL event fails closed and preserves its b
   assert.equal(localStorage.getItem(key), original);
 });
 
+
+test('two independent browser contexts preserve WAL events when a stale shared array replaces newer rows', () => {
+  const storage = new FakeStorage({ [DARK]: '1' });
+  const tabA = install({}, storage).api;
+  const tabB = install({}, storage).api;
+  const first = tabA.appendHabitDelta(deltaA);
+  const staleShared = storage.getItem(KEY);
+  const second = tabB.appendHabitDelta(deltaB);
+  storage.setItem(KEY, staleShared);
+  const expected = [first.mutationId, second.mutationId].sort();
+  assert.deepEqual(tabA.getPendingRows().rows.map(r=>r.id).sort(), expected);
+  assert.deepEqual(tabB.getPendingRows().rows.map(r=>r.id).sort(), expected);
+  tabA.removeMutation(first.mutationId);
+  assert.deepEqual(tabB.getPendingRows().rows.map(r=>r.id), [second.mutationId]);
+  tabB.removeMutation(second.mutationId);
+  assert.equal(tabA.getPendingRows().rows.length, 0);
+});
+
+test('quota-denied independent WAL append does not create a shared-only mutation', () => {
+  const { api, localStorage } = install({ [DARK]: '1' });
+  const before = localStorage.getItem(KEY);
+  const original = localStorage.setItem.bind(localStorage);
+  localStorage.setItem = (key, value) => {
+    if (String(key).startsWith('taskpoints_v2_pending_mutation_event_v1:'))
+      throw new Error('synthetic WAL sidecar QuotaExceededError');
+    return original(key, value);
+  };
+  assert.throws(() => api.appendHabitDelta(deltaA),
+    /state_runtime_v2_wal_independent_write_failed/);
+  localStorage.setItem = original;
+  assert.equal(localStorage.getItem(KEY), before,
+    'shared WAL must never claim durability when the independent record failed');
+  assert.equal(api.getPendingRows().rows.length, 0);
+  assert.equal(api.getStatus().independentEventCount, 0);
+});
+
+test('interrupted shared WAL cleanup retains independent evidence and can retry', () => {
+  const { api, localStorage } = install({ [DARK]: '1' });
+  const a = api.appendHabitDelta(deltaA), b = api.appendHabitDelta(deltaB);
+  const before = localStorage.getItem(KEY);
+  const original = localStorage.setItem.bind(localStorage);
+  localStorage.setItem = (key, value) => {
+    if (String(key) === KEY) throw new Error('synthetic shared WAL cleanup quota');
+    return original(key, value);
+  };
+  assert.throws(() => api.removeMutation(a.mutationId), /state_runtime_v2_wal_write_failed/);
+  localStorage.setItem = original;
+  assert.equal(localStorage.getItem(KEY), before);
+  assert.deepEqual(api.getPendingRows().rows.map(r=>r.id).sort(),
+    [a.mutationId, b.mutationId].sort());
+  assert.equal(api.removeMutation(a.mutationId).removed, true);
+  assert.deepEqual(api.getPendingRows().rows.map(r=>r.id), [b.mutationId]);
+});
+
+test('interrupted independent WAL cleanup retains evidence after shared cleanup until retry', () => {
+  const { api, localStorage } = install({ [DARK]: '1' });
+  const a = api.appendHabitDelta(deltaA), b = api.appendHabitDelta(deltaB);
+  const prefix = 'taskpoints_v2_pending_mutation_event_v1:';
+  const original = localStorage.removeItem.bind(localStorage);
+  localStorage.removeItem = key => {
+    if (String(key) === prefix + a.mutationId)
+      throw new Error('synthetic WAL sidecar removal interruption');
+    return original(key);
+  };
+  assert.throws(() => api.removeMutation(a.mutationId),
+    /state_runtime_v2_wal_independent_remove_failed/);
+  localStorage.removeItem = original;
+  assert.ok(localStorage.getItem(prefix+a.mutationId),
+    'unremoved sidecar is retained as recoverable evidence');
+  assert.deepEqual(api.getPendingRows().rows.map(r=>r.id).sort(),
+    [a.mutationId,b.mutationId].sort());
+  assert.equal(api.removeMutation(a.mutationId).removed, true);
+  assert.deepEqual(api.getPendingRows().rows.map(r=>r.id), [b.mutationId]);
+  assert.equal(api.getStatus().independentEventCount, 1);
+});
+
+test('three generation rotations retain stale evidence without cross-generation mutation identity collision', () => {
+  const { api, generation, localStorage } = install({ [DARK]: '1' });
+  const events = [];
+  for (let round=0;round<4;round++) {
+    if (round) generation.rotate('simulated-import-'+round);
+    const item=api.appendHabitDelta(deltaA);
+    assert.equal(item.written,true);
+    assert.equal(item.generation,generation.read());
+    events.push(item);
+  }
+  assert.equal(new Set(events.map(e=>e.mutationId)).size,4);
+  assert.equal(api.getStatus().independentEventCount,4);
+  assert.equal(api.getPendingRows().rows.length,4);
+  const all=api.getPendingRows().rows;
+  assert.equal(all.filter(x=>x.generation===generation.read()).length,1);
+  // Earlier-generation rows must remain inspectable, not silently migrated.
+  const keyPrefix='taskpoints_v2_pending_mutation_event_v1:';
+  for (const row of events.slice(0,-1))
+    assert.ok(localStorage.getItem(keyPrefix+row.mutationId));
+  assert.equal(api.removeMutation(events[3].mutationId).removed,true);
+  assert.deepEqual(api.getPendingRows().rows.map(r=>r.id).sort(),
+    events.slice(0,-1).map(e=>e.mutationId).sort());
+  assert.equal(api.getStatus().independentEventCount,3);
+});
+
+test('a malformed shared record conflicts with an intact independent row without deleting evidence', () => {
+  const { api, localStorage } = install({ [DARK]: '1' });
+  const mutation=api.appendHabitDelta(deltaA);
+  const sidecar='taskpoints_v2_pending_mutation_event_v1:'+mutation.mutationId;
+  const saved=localStorage.getItem(sidecar);
+  localStorage.setItem(KEY, JSON.stringify([{...mutation.row,
+    delta:{...mutation.row.delta,status:'off'}}]));
+  const read=api.getPendingRows();
+  assert.equal(read.ok,false);
+  assert.match(read.error,/wal_shared_independent_identity_conflict/);
+  assert.equal(localStorage.getItem(sidecar),saved);
+  assert.throws(()=>api.removeMutation(mutation.mutationId), /wal_shared_independent_identity_conflict/);
+  assert.equal(localStorage.getItem(sidecar),saved);
+});
