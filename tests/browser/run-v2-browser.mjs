@@ -853,6 +853,101 @@ try {
     return {clearedSidecars:2,remainingPilotCompletions:2,parity:p.match};
   });
 
+  await run('late Habit correction survives V1 compaction cleanup and stale shared-journal overwrite',async context=>{
+    // The delayed tab is opened before any write. The compactor and the
+    // suspended tab must see the same origin while V1 remains authoritative.
+    const compactor=await open(context), delayed=await open(context);
+    await compactor.evaluate(()=>window.V2BrowserFixture.delta('h1','2026-10-18','full',1));
+    await settled(compactor,1);
+    const checkpoint=await compactor.evaluate(()=>{
+      const core=window.TaskPointsCore;
+      const old=core.readPendingHabitDeltas();
+      if(old.length!==1)throw Error('Expected one pre-compaction delta');
+      const state=window.V2BrowserFixture.rawLegacy();
+      const applied=core.applyPendingHabitDeltas(state,old);
+      const save=core.saveStateSnapshot(state,{immediateWrite:true,replaceCompletions:true,
+        savePath:'habit-journal-compaction'});
+      if(save?.blocked||save?.skipped)throw Error('V1 compaction save blocked');
+      const persisted=window.V2BrowserFixture.rawLegacy();
+      const verified=core.verifyPersistedHabitDeltas(persisted,old,applied.appliedDeltas);
+      if(verified.length!==1)throw Error('V1 checkpoint failed verification');
+      const original=Storage.prototype.setItem;
+      let injected=false;
+      try{
+        Storage.prototype.setItem=function(key,value){
+          if(this===localStorage && key===core.PENDING_HABIT_DELTAS_KEY && !injected){
+            injected=true;
+            // Synchronously place two later events at the precise boundary
+            // between verification and the compactor's primary-key cleanup.
+            // The outer clear overwrites their shared-key copy, as a stale
+            // cross-tab storage write could; unique sidecars must protect both.
+            window.V2BrowserFixture.delta('h1','2026-10-18','half',9);
+            window.V2BrowserFixture.delta('h2','2026-10-19','full',10);
+          }
+          return original.call(this,key,value);
+        };
+        core.clearCompactedHabitDeltas(verified);
+      }finally{Storage.prototype.setItem=original;}
+      const primary=JSON.parse(localStorage.getItem(core.PENDING_HABIT_DELTAS_KEY)||'[]');
+      const merged=core.readPendingHabitDeltas();
+      const sidecarKeys=Array.from({length:localStorage.length},(_,i)=>localStorage.key(i))
+        .filter(k=>k.startsWith('taskpoints_v2_habit_journal_event_v1:'));
+      return {injected,primary:primary.map(x=>x.id),
+        merged:merged.map(x=>({id:x.id,status:x.status})).sort((a,b)=>a.id.localeCompare(b.id)),
+        sidecars:sidecarKeys.length,
+        rawCommitted:persisted.completions.filter(c=>c.source==='habit').map(c=>c.id),
+        v1Generation:window.TaskPointsStateRuntimeV2Generation.read()};
+    });
+    assert.equal(checkpoint.injected,true);
+    assert.deepEqual(checkpoint.primary,[],
+      'the test must actually reproduce the stale shared-key overwrite');
+    assert.deepEqual(checkpoint.merged,[
+      {id:'habit:h1:2026-10-18',status:'half'},
+      {id:'habit:h2:2026-10-19',status:'full'}
+    ]);
+    assert.equal(checkpoint.sidecars,2,
+      'compaction must remove only the verified old sidecar, retaining both delayed writes');
+    assert.deepEqual(checkpoint.rawCommitted,['habit:h1:2026-10-18']);
+    // No initial page restart hides a failed async mirror operation.
+    await compactor.waitForFunction(()=>{
+      const s=window.V2BrowserFixture.status();
+      return s.wal.pendingCount===0 && s.bridge.confirmationsCleared>=3;
+    },null,{timeout:20000});
+    let p=await parity(compactor);
+    assert.equal(p.actualCounts.completions,2);
+    await Promise.all([compactor.reload({waitUntil:'load'}),delayed.reload({waitUntil:'load'})]);
+    const proof=async page=>{
+      await page.evaluate(()=>window.V2BrowserFixture.start());
+      const report=await parity(page);
+      const values=await page.evaluate(()=>{
+        const core=window.TaskPointsCore;
+        const snapshot=window.V2BrowserFixture.rawLegacy();
+        core.applyPendingHabitDeltas(snapshot);
+        const h1=snapshot.habits.find(h=>h.id==='h1');
+        const h2=snapshot.habits.find(h=>h.id==='h2');
+        return {h1Half:snapshot.completions.find(c=>c.habitId==='h1'
+            && c.dayKey==='2026-10-18')?.completionFraction,
+          h2Done:h2.doneKeys.includes('2026-10-19'),
+          h1Done:h1.doneKeys.includes('2026-10-18'),
+          generation:window.TaskPointsStateRuntimeV2Generation.read(),
+          authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+      });
+      return {parity:report.match,counts:report.actualCounts.completions,...values};
+    };
+    const observations=await Promise.all([proof(compactor),proof(delayed)]);
+    for(const r of observations){
+      assert.equal(r.parity,true);
+      assert.equal(r.counts,2);
+      assert.equal(r.h1Half,0.5);
+      assert.equal(r.h1Done,true);
+      assert.equal(r.h2Done,true);
+      assert.equal(r.authority,'legacy_only');
+      assert.equal(r.generation,checkpoint.v1Generation);
+    }
+    return {lateEvents:2,stalePrimaryOverwrite:true,sidecarsPreserved:2,
+      correctedFraction:0.5,checkedAfterTwoTabReload:true,parity:true};
+  });
+
   await run('two real V1 journal compactions preserve V2 completion epochs and Habit day order across reload',async context=>{
     const page=await open(context);
     // First journal epoch: newer timestamp commits before older timestamp.
