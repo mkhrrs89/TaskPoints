@@ -948,6 +948,111 @@ try {
       correctedFraction:0.5,checkedAfterTwoTabReload:true,parity:true};
   });
 
+  await run('two backgrounded tabs deliver late updates during another tabs verified V1 cleanup',async context=>{
+    // Pre-open every context before the first write: opening a tab after
+    // holding a WAL entry would trigger startup recovery and change the race.
+    const compactor=await open(context);
+    const delayed=await open(context);
+    const secondDelayed=await open(context);
+    const target='2026-10-18';
+    await compactor.evaluate(day=>window.V2BrowserFixture.delta('h1',day,'full',1),target);
+    await settled(compactor,1);
+    const prepared=await compactor.evaluate(()=>{
+      const core=window.TaskPointsCore;
+      const pending=core.readPendingHabitDeltas();
+      const snapshot=window.V2BrowserFixture.rawLegacy();
+      const applied=core.applyPendingHabitDeltas(snapshot,pending);
+      const result=core.saveStateSnapshot(snapshot,{
+        immediateWrite:true,replaceCompletions:true,savePath:'habit-journal-compaction'
+      });
+      if(result?.blocked||result?.skipped)throw Error('V1 compaction save failed');
+      const persisted=window.V2BrowserFixture.rawLegacy();
+      const verified=core.verifyPersistedHabitDeltas(persisted,pending,applied.appliedDeltas);
+      // Hold the verified list while other tabs record late corrections.
+      window.__v2PendingVerifiedCompaction=verified;
+      return {verified:verified.map(v=>v.id),
+        checkpointCompletions:persisted.completions.filter(c=>c.source==='habit').map(c=>c.id),
+        generation:window.TaskPointsStateRuntimeV2Generation.read()};
+    });
+    assert.deepEqual(prepared.verified,['habit:h1:2026-10-18']);
+    assert.deepEqual(prepared.checkpointCompletions,['habit:h1:2026-10-18']);
+    // Both independent writers are backgrounded. Dispatch lifecycle events
+    // and then model their queued user actions arriving after verification.
+    await Promise.all([delayed,secondDelayed].map(page=>page.evaluate(()=>{
+      document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new Event('pagehide'));
+    })));
+    const [correction,other]=await Promise.all([
+      delayed.evaluate(day=>window.V2BrowserFixture.delta('h1',day,'half',9),target),
+      secondDelayed.evaluate(()=>window.V2BrowserFixture.delta('h2','2026-10-19','full',10))
+    ]);
+    assert.equal(correction.id,'habit:h1:2026-10-18');
+    assert.equal(other.id,'habit:h2:2026-10-19');
+    await compactor.waitForFunction(()=>{
+      const core=window.TaskPointsCore;
+      const pending=core.readPendingHabitDeltas();
+      return pending.length===2 &&
+        pending.some(d=>d.id==='habit:h1:2026-10-18'&&d.status==='half') &&
+        pending.some(d=>d.id==='habit:h2:2026-10-19'&&d.status==='full');
+    },null,{timeout:14000,polling:75});
+    const cleaned=await compactor.evaluate(()=>{
+      const core=window.TaskPointsCore;
+      const verified=window.__v2PendingVerifiedCompaction;
+      const removed=core.clearCompactedHabitDeltas(verified);
+      const keys=Array.from({length:localStorage.length},(_,i)=>localStorage.key(i))
+        .filter(k=>k.startsWith('taskpoints_v2_habit_journal_event_v1:'));
+      return {removed,keys:keys.length,
+        sidecarEvents:keys.flatMap(k=>JSON.parse(localStorage.getItem(k)||'[]'))
+          .map(r=>({id:r.id,status:r.status})).sort((a,b)=>a.id.localeCompare(b.id)),
+        merged:core.readPendingHabitDeltas()
+          .map(r=>({id:r.id,status:r.status})).sort((a,b)=>a.id.localeCompare(b.id)),
+        generation:window.TaskPointsStateRuntimeV2Generation.read()};
+    });
+    const expected=[
+      {id:'habit:h1:2026-10-18',status:'half'},
+      {id:'habit:h2:2026-10-19',status:'full'}
+    ];
+    assert.equal(cleaned.removed,0,
+      'the newer same-day correction is not a byte-for-byte verified old event');
+    assert.equal(cleaned.keys,2,'cleanup must preserve both late independent sidecars');
+    assert.deepEqual(cleaned.sidecarEvents,expected);
+    assert.deepEqual(cleaned.merged,expected);
+    assert.equal(cleaned.generation,prepared.generation);
+    await Promise.all([delayed.close(),secondDelayed.close()]);
+    await compactor.reload({waitUntil:'load'});
+    await compactor.evaluate(()=>window.V2BrowserFixture.start());
+    await compactor.waitForFunction(()=>{
+      const s=window.V2BrowserFixture?.status();
+      return s && s.wal.pendingCount===0;
+    },null,{timeout:22000});
+    const proof=await parity(compactor);
+    assert.equal(proof.actualCounts.completions,2);
+    const saved=await compactor.evaluate(async()=>{
+      const core=window.TaskPointsCore;
+      const effective=window.V2BrowserFixture.rawLegacy();
+      core.applyPendingHabitDeltas(effective);
+      const db=await window.TaskPointsStateRuntimeV2.open();
+      const r=db.transaction('mutations','readonly').objectStore('mutations').getAll();
+      const mutations=await new Promise((resolve,reject)=>{
+        r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);
+      });
+      return {h1Fraction:effective.completions.find(c=>c.habitId==='h1'
+          && c.dayKey==='2026-10-18')?.completionFraction,
+        h2Complete:effective.habits.find(h=>h.id==='h2').doneKeys.includes('2026-10-19'),
+        mutationIds:mutations.map(m=>m.id),
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    });
+    assert.equal(saved.h1Fraction,0.5);
+    assert.equal(saved.h2Complete,true);
+    assert.equal(saved.authority,'legacy_only');
+    assert.equal(new Set(saved.mutationIds).size,saved.mutationIds.length);
+    assert.equal(saved.mutationIds.length,3,
+      'both delayed writes and the original completion must remain in the V2 ledger');
+    return {lateIndependentTabs:2,interleavedCompaction:true,
+      correctedHalfCompletion:true,independentSidecarsRetained:2,
+      distinctMutations:3,parity:proof.match};
+  });
+
   await run('two real V1 journal compactions preserve V2 completion epochs and Habit day order across reload',async context=>{
     const page=await open(context);
     // First journal epoch: newer timestamp commits before older timestamp.
