@@ -372,7 +372,9 @@ try {
       });
       const [mutations,completions]=await Promise.all(['mutations','completions'].map(get));
       return {mutationIds:mutations.map(m=>m.id),
-        completionIds:completions.flatMap(row=>row.entries.map(x=>x.value.id)),
+        completionIds:completions.flatMap(row=>Array.isArray(row.entries)
+          ? row.entries.map(x=>x.value.id)
+          : row.value?.id?[row.value.id]:[]),
         generation:runtime.getStatus().currentGeneration,
         authority:runtime.getStatus().readAuthority};
     });
