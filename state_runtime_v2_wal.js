@@ -4,6 +4,9 @@
   if (!global || global.TaskPointsStateRuntimeV2Wal?.__installedModule) return;
 
   const KEY = 'taskpoints_v2_pending_mutations_v1';
+  // Independently durable event keys prevent concurrent tabs from
+  // overwriting each other's rows in the legacy shared WAL array.
+  const EVENT_PREFIX = 'taskpoints_v2_pending_mutation_event_v1:';
   const DARK_MODE_KEY = 'taskpoints_state_v2_dark_mode_v1';
   const GENERATION_KEY = 'taskpoints_state_v2_generation_v1';
   const SCHEMA_VERSION = 1;
@@ -130,19 +133,64 @@
     return `habit-delta:${fnv1a(identity)}:${identity.length}`;
   }
 
+  function supportsIndependentRows() {
+    return typeof global.localStorage?.key === 'function';
+  }
+
+  function independentKey(mutationId) {
+    return EVENT_PREFIX + String(mutationId);
+  }
+
+  function independentKeys() {
+    if (!supportsIndependentRows()) return [];
+    const keys = [];
+    const storage = global.localStorage;
+    for (let i = 0; i < storage.length; i += 1) {
+      const key = storage.key(i);
+      if (typeof key === 'string' && key.startsWith(EVENT_PREFIX)) keys.push(key);
+    }
+    return keys.sort();
+  }
+
+  function validateRow(row) {
+    return row && typeof row === 'object' && typeof row.id === 'string'
+      && row.delta && typeof row.generation === 'string';
+  }
+
   function read() {
     const raw = safeGet(KEY);
-    if (raw == null || raw === '') return { ok: true, rows: [], raw: raw ?? null };
     try {
-      const parsed = JSON.parse(raw);
+      const parsed = raw == null || raw === '' ? [] : JSON.parse(raw);
       if (!Array.isArray(parsed)) throw new Error('wal_root_not_array');
-      const rows = parsed.filter((row) => row && typeof row === 'object' && typeof row.id === 'string' && row.delta);
-      if (rows.length !== parsed.length) throw new Error('wal_contains_invalid_rows');
-      return { ok: true, rows: clone(rows), raw };
+      if (!parsed.every(validateRow)) throw new Error('wal_contains_invalid_rows');
+
+      // Read both the established shared WAL and every independently durable
+      // row. An overlapping stale shared-key write must never erase a
+      // different tab's mutation from the recoverable WAL.
+      const merged = new Map(parsed.map(row => [row.id, row]));
+      for (const key of independentKeys()) {
+        const independentRaw = safeGet(key);
+        if (independentRaw == null) continue; // concurrently confirmed/removed
+        const row = JSON.parse(independentRaw);
+        if (!validateRow(row) || independentKey(row.id) !== key) {
+          throw new Error('wal_independent_row_invalid');
+        }
+        const old = merged.get(row.id);
+        if (old && (old.generation !== row.generation
+          || stableJson(old.delta) !== stableJson(row.delta))) {
+          throw new Error('wal_shared_independent_identity_conflict');
+        }
+        merged.set(row.id, row);
+      }
+      const rows = [...merged.values()].sort((a, b) =>
+        String(a.delta.updatedAtISO || '').localeCompare(String(b.delta.updatedAtISO || ''))
+        || String(a.createdAtISO || '').localeCompare(String(b.createdAtISO || ''))
+        || a.id.localeCompare(b.id));
+      return { ok: true, rows: clone(rows), raw: raw ?? null };
     } catch (error) {
       malformedReads += 1;
       lastError = `state_runtime_v2_wal_malformed:${String(error?.message || error)}`;
-      return { ok: false, rows: [], raw, error: lastError };
+      return { ok: false, rows: [], raw: raw ?? null, error: lastError };
     }
   }
 
@@ -160,7 +208,14 @@
     const current = read();
     if (!current.ok) throw new Error(current.error || 'state_runtime_v2_wal_unreadable');
     const existing = current.rows.find((row) => row.id === mutationId && row.generation === generation);
-    if (existing) return { written: false, duplicate: true, mutationId, generation, row: clone(existing) };
+    if (existing) {
+      // Upgrade a pending row written before independent WAL keys existed.
+      if (supportsIndependentRows() && safeGet(independentKey(mutationId)) == null
+        && !safeSet(independentKey(mutationId), JSON.stringify(existing))) {
+        throw new Error(`state_runtime_v2_wal_independent_write_failed:${lastError || 'unknown'}`);
+      }
+      return { written: false, duplicate: true, mutationId, generation, row: clone(existing) };
+    }
 
     const row = {
       id: mutationId,
@@ -172,6 +227,12 @@
     };
     const next = [...current.rows, row];
     if (next.length > MAX_ROWS) throw new Error('state_runtime_v2_wal_capacity_exceeded');
+    // Sidecar FIRST: if this tab is suspended while updating the shared array,
+    // another tab can still replay this exact mutation after restart.
+    if (supportsIndependentRows()
+      && !safeSet(independentKey(mutationId), JSON.stringify(row))) {
+      throw new Error(`state_runtime_v2_wal_independent_write_failed:${lastError || 'unknown'}`);
+    }
     writeRows(next);
     appendCount += 1;
     try { global.TaskPointsPerf?.mark?.('stateV2.walAppended', { mutationId, generation, habitId: delta.habitId, dayKey: delta.dayKey }); } catch (_) {}
@@ -186,6 +247,11 @@
     if (next.length === current.rows.length) return { removed: false, reason: 'not_found', mutationId: String(mutationId) };
     if (next.length) writeRows(next);
     else if (!safeRemove(KEY)) throw new Error(`state_runtime_v2_wal_remove_failed:${lastError || 'unknown'}`);
+    // A confirmed mutation may be removed only after the shared WAL update;
+    // a failed sidecar deletion keeps recoverable evidence for safe replay.
+    if (supportsIndependentRows() && !safeRemove(independentKey(mutationId))) {
+      throw new Error(`state_runtime_v2_wal_independent_remove_failed:${lastError || 'unknown'}`);
+    }
     removeCount += 1;
     try { global.TaskPointsPerf?.mark?.('stateV2.walCleared', { mutationId: String(mutationId) }); } catch (_) {}
     return { removed: true, mutationId: String(mutationId), remaining: next.length };
@@ -203,6 +269,8 @@
       installed: true,
       enabled: isEnabled(),
       key: KEY,
+      independentEventPrefix: EVENT_PREFIX,
+      independentEventCount: supportsIndependentRows() ? independentKeys().length : null,
       generationKey: GENERATION_KEY,
       generation: cloneGeneration(),
       pendingCount: current.ok ? current.rows.length : null,
