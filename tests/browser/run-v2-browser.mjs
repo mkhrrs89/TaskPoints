@@ -1285,6 +1285,112 @@ try {
       canonicalDayOrder:result.doneKeys,parity:true};
   });
 
+  await run('three canonical V1 compactions and a cosmetic Habit edit advance only real completion epochs',async context=>{
+    const page=await open(context);
+    const readMeta=()=>page.evaluate(async()=>{
+      const db=await window.TaskPointsStateRuntimeV2.open();
+      const request=db.transaction('meta','readonly').objectStore('meta').get('runtime');
+      const m=await new Promise((resolve,reject)=>{
+        request.onsuccess=()=>resolve(request.result);
+        request.onerror=()=>reject(request.error);
+      });
+      return {epoch:Number(m.completionOrderEpoch||0),
+        signature:m.canonicalCompletionCheckpointSignature,
+        generation:m.resetGeneration};
+    });
+    const compact=()=>page.evaluate(()=>{
+      const core=window.TaskPointsCore;
+      const journal=core.readPendingHabitDeltas();
+      if(!journal.length)throw Error('No V1 journal rows to compact');
+      const snapshot=window.V2BrowserFixture.rawLegacy();
+      const applied=core.applyPendingHabitDeltas(snapshot,journal);
+      const saved=core.saveStateSnapshot(snapshot,{
+        immediateWrite:true,replaceCompletions:true,savePath:'habit-journal-compaction'});
+      if(saved?.blocked||saved?.skipped)throw Error('Compaction checkpoint save blocked');
+      const persisted=window.V2BrowserFixture.rawLegacy();
+      const verified=core.verifyPersistedHabitDeltas(persisted,journal,applied.appliedDeltas);
+      if(verified.length!==journal.length)throw Error('Not all V1 journal rows verified');
+      core.clearCompactedHabitDeltas(verified);
+      if(core.readPendingHabitDeltas().length)throw Error('V1 journal remained after verified compaction');
+      return {verified:verified.length,
+        pilotCompletions:persisted.completions.filter(c=>c.source==='habit').length};
+    });
+    const firstMeta=await readMeta();
+    assert.ok(firstMeta.signature,'bootstrap needs a durable canonical baseline marker');
+    await page.evaluate(()=>window.V2BrowserFixture.delta('h1','2026-10-17','full',1));
+    await settled(page,1);
+    assert.equal((await compact()).verified,1);
+    await page.evaluate(()=>window.V2BrowserFixture.delta('h2','2026-10-18','full',2));
+    await settled(page,2);
+    const afterFirst=await readMeta();
+    assert.equal(afterFirst.epoch,1);
+    assert.notEqual(afterFirst.signature,firstMeta.signature);
+    assert.equal((await parity(page)).actualCounts.completions,2);
+    // Change a real display field through the existing V1 save and V2 Habit
+    // edit mirror. It is not a completion checkpoint and must not mint an epoch.
+    const cosmetic=await page.evaluate(async()=>{
+      const core=window.TaskPointsCore,runtime=window.TaskPointsStateRuntimeV2;
+      const stored=window.V2BrowserFixture.rawLegacy();
+      stored.habits.find(h=>h.id==='h3').name='Renamed Synthetic h3';
+      const saved=core.saveStateSnapshot(stored,{
+        immediateWrite:true,replaceCompletions:true,savePath:'habit-cosmetic-edit'});
+      if(saved?.blocked||saved?.skipped)throw Error('V1 cosmetic save blocked');
+      await runtime.enqueueHabitEditFromLegacy('h3',{source:'synthetic-cosmetic-edit'});
+      const mirrored=await runtime.getHabit('h3');
+      return {name:mirrored?.name,authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(cosmetic.name,'Renamed Synthetic h3');
+    assert.equal(cosmetic.authority,'legacy_only');
+    assert.deepEqual(await readMeta(),{...afterFirst,epoch:1});
+    await page.evaluate(()=>window.V2BrowserFixture.delta('h3','2026-10-19','full',3));
+    await settled(page,3);
+    assert.equal((await readMeta()).epoch,1,'cosmetic name change did not create a new epoch');
+    assert.equal((await parity(page)).actualCounts.completions,3);
+    assert.equal((await compact()).verified,2);
+    await page.evaluate(()=>window.V2BrowserFixture.delta('h1','2026-10-20','full',4));
+    await settled(page,4);
+    const second=await readMeta();
+    assert.equal(second.epoch,2);
+    assert.notEqual(second.signature,afterFirst.signature);
+    // Derived Habit presentation caches may be persisted by Home but are not
+    // canonical completion state. Their save must not advance the checkpoint.
+    await page.evaluate(()=>{
+      const core=window.TaskPointsCore;
+      const snapshot=window.V2BrowserFixture.rawLegacy();
+      snapshot.habits.find(h=>h.id==='h1').__streak=87;
+      const saved=core.saveStateSnapshot(snapshot,{
+        immediateWrite:true,replaceCompletions:true,savePath:'habit-derived-display-cache'});
+      if(saved?.blocked||saved?.skipped)throw Error('Derived cache save blocked');
+    });
+    await page.evaluate(()=>window.V2BrowserFixture.delta('h2','2026-10-21','full',5));
+    await settled(page,5);
+    assert.equal((await readMeta()).epoch,2,'derived display cache did not mint a checkpoint');
+    assert.equal((await parity(page)).actualCounts.completions,5);
+    assert.equal((await compact()).verified,2);
+    await page.evaluate(()=>window.V2BrowserFixture.delta('h3','2026-10-22','full',6));
+    await settled(page,6);
+    const third=await readMeta();
+    assert.equal(third.epoch,3);
+    assert.notEqual(third.signature,second.signature);
+    const finalParity=await parity(page);
+    assert.equal(finalParity.actualCounts.completions,6);
+    await page.reload({waitUntil:'load'});
+    const afterReload=await readMeta();
+    assert.deepEqual(afterReload,third);
+    assert.equal((await parity(page)).actualCounts.completions,6);
+    const state=await page.evaluate(async()=>{
+      const r=window.TaskPointsStateRuntimeV2;
+      const snapshot=await r.buildCompatibilitySnapshot();
+      return {ids:snapshot.completions.filter(c=>c.source==='habit').map(c=>c.id),
+        name:snapshot.habits.find(h=>h.id==='h3')?.name};
+    });
+    assert.equal(state.name,'Renamed Synthetic h3');
+    assert.equal(new Set(state.ids).size,6);
+    return {verifiedCompactions:3,epochs:[afterFirst.epoch,second.epoch,third.epoch],
+      nameEditPreserved:true,derivedCacheSafe:true,completionRows:state.ids.length,
+      generationUnchanged:third.generation===firstMeta.generation,reloadParity:true};
+  });
+
   await run('unrelated V1 task-only save cannot advance cross-Habit journal completion epoch',async context=>{
     const page=await open(context);
     const coreCompaction=()=> {
