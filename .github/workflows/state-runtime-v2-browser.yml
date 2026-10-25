@@ -86,11 +86,21 @@ jobs:
             echo "V2 WebKit storage safety run $attempt of 2"
             node tests/browser/run-v2-browser.mjs
           done
+      - name: Exercise real Home UI in WebKit iPhone-sized touch emulation
+        if: success() || failure()
+        shell: bash
+        env:
+          V2_BROWSER_ENGINE: webkit
+        run: |
+          set -euo pipefail
+          node tests/browser/run-v2-ui-browser.mjs
       - name: Upload WebKit browser evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: v2-webkit-browser-evidence
-          path: v2-browser-artifacts/webkit
+          path: |
+            v2-browser-artifacts/webkit
+            v2-ui-browser-artifacts/webkit
           if-no-files-found: warn
           retention-days: 7
