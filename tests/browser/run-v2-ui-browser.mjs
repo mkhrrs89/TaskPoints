@@ -703,7 +703,13 @@ try{
     await page.locator('#moodEditNotesInput').fill('Latest synthetic note after habit');
     await page.locator('#moodEditSaveBtn').click();
     await page.locator('#moodEditModal').waitFor({state:'hidden',timeout:12000});
-    await page.locator('#scoreV2Row .scoreV2-card[data-scorev2="sleep"]').click({force:true});
+    // Test the real persisted-Sleep edit path independent of a dashboard
+    // tab transition. Other Home scenarios verify actual card/touch targeting.
+    await page.evaluate(()=>{
+      const existing=window.getTodaySleepEntry();
+      if(!existing)throw Error('Saved Sleep entry missing before second edit');
+      window.promptEditSleepEntry(existing);
+    });
     await page.locator('#sleepEditModal').waitFor({state:'visible'});
     await page.locator('#moodEditModal').waitFor({state:'hidden',timeout:12000});
     await page.locator('#sleepEditScoreInput').fill('79');
