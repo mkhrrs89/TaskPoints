@@ -1391,6 +1391,108 @@ try {
       generationUnchanged:third.generation===firstMeta.generation,reloadParity:true};
   });
 
+  await run('authorized import and restore reset canonical checkpoint epochs without inheriting previous generation ranks',async context=>{
+    const page=await open(context);
+    const readMeta=()=>page.evaluate(async()=>{
+      const db=await window.TaskPointsStateRuntimeV2.open();
+      const request=db.transaction('meta','readonly').objectStore('meta').get('runtime');
+      const meta=await new Promise((resolve,reject)=>{
+        request.onsuccess=()=>resolve(request.result);
+        request.onerror=()=>reject(request.error);
+      });
+      return {generation:meta.resetGeneration,
+        epoch:Number(meta.completionOrderEpoch||0),
+        marker:meta.canonicalCompletionCheckpointSignature,
+        revision:meta.revision};
+    });
+    const compact=()=>page.evaluate(()=>{
+      const core=window.TaskPointsCore,rows=core.readPendingHabitDeltas();
+      if(!rows.length)throw Error('No pending V1 Habit updates to compact');
+      const snapshot=window.V2BrowserFixture.rawLegacy();
+      const applied=core.applyPendingHabitDeltas(snapshot,rows);
+      const saved=core.saveStateSnapshot(snapshot,{immediateWrite:true,
+        replaceCompletions:true,savePath:'habit-journal-compaction'});
+      if(saved?.skipped||saved?.blocked)throw Error('V1 checkpoint save rejected');
+      const verified=core.verifyPersistedHabitDeltas(
+        window.V2BrowserFixture.rawLegacy(),rows,applied.appliedDeltas);
+      if(verified.length!==rows.length)throw Error('Compaction unverified');
+      core.clearCompactedHabitDeltas(verified);
+      if(core.readPendingHabitDeltas().length)throw Error('Journal remains after compaction');
+      return {verified:verified.length};
+    });
+    await page.evaluate(()=>window.V2BrowserFixture.delta('h1','2026-10-17','full',1));
+    await settled(page,1);
+    assert.equal((await compact()).verified,1);
+    await page.evaluate(()=>window.V2BrowserFixture.delta('h2','2026-10-18','full',2));
+    await settled(page,2);
+    assert.equal((await readMeta()).epoch,1);
+    assert.equal((await compact()).verified,1);
+    assert.equal((await parity(page)).actualCounts.completions,2);
+    const before=await readMeta();
+    const imported=await page.evaluate(()=>{
+      const core=window.TaskPointsCore;
+      const backup=window.V2BrowserFixture.rawLegacy();
+      const replacement=structuredClone(backup);
+      replacement.habits.find(h=>h.id==='h3').name='Imported generation Habit';
+      const result=core.saveValidatedSnapshot(replacement,{
+        allowDestructiveOverwrite:true,source:'settings-import',immediateWrite:true});
+      return {blocked:result?.blocked===true,backup,
+        generation:window.TaskPointsStateRuntimeV2Generation.read()};
+    });
+    assert.equal(imported.blocked,false);
+    assert.notEqual(imported.generation,before.generation);
+    await page.evaluate(()=>window.TaskPointsStateRuntimeV2.startCoordinatedDarkMirror());
+    const fresh=await readMeta();
+    assert.equal(fresh.generation,imported.generation);
+    assert.equal(fresh.epoch,0,'authorized generation change must not inherit previous epoch');
+    assert.ok(fresh.marker,'authorized import must store a fresh canonical marker');
+    assert.notEqual(fresh.marker,before.marker,
+      'new generation baseline includes the second verified Habit checkpoint');
+    assert.equal((await parity(page)).actualCounts.completions,2);
+    await page.evaluate(()=>window.V2BrowserFixture.delta('h3','2026-10-19','full',3));
+    await settled(page,3);
+    assert.equal((await readMeta()).epoch,0,
+      'first mutation after fresh import uses fresh baseline without phantom compaction');
+    assert.equal((await compact()).verified,1);
+    await page.evaluate(()=>window.V2BrowserFixture.delta('h1','2026-10-20','full',4));
+    await settled(page,4);
+    assert.equal((await readMeta()).epoch,1);
+    assert.equal((await parity(page)).actualCounts.completions,4);
+    const restored=await page.evaluate(backup=>{
+      const core=window.TaskPointsCore;
+      const result=core.saveValidatedSnapshot(backup,{
+        allowDestructiveOverwrite:true,source:'settings-restore',immediateWrite:true});
+      return {blocked:result?.blocked===true,
+        generation:window.TaskPointsStateRuntimeV2Generation.read()};
+    },imported.backup);
+    assert.equal(restored.blocked,false);
+    assert.notEqual(restored.generation,imported.generation);
+    await page.evaluate(()=>window.TaskPointsStateRuntimeV2.startCoordinatedDarkMirror());
+    await page.reload({waitUntil:'load'});
+    const final=await readMeta();
+    assert.equal(final.generation,restored.generation);
+    assert.equal(final.epoch,0,'authorized restore resets the completion ordering baseline');
+    assert.ok(final.marker);
+    const report=await parity(page);
+    assert.equal(report.actualCounts.completions,2);
+    const proof=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const snapshot=await runtime.buildCompatibilitySnapshot();
+      return {name:snapshot.habits.find(h=>h.id==='h3').name,
+        completed:snapshot.completions.filter(c=>c.source==='habit').map(c=>c.id).sort(),
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(proof.name,'Synthetic h3');
+    assert.deepEqual(proof.completed,[
+      'habit:h1:2026-10-17','habit:h2:2026-10-18'
+    ]);
+    assert.equal(proof.authority,'legacy_only');
+    return {authorizedGenerationRotations:2,
+      originalEpoch:before.epoch,importedEpoch:fresh.epoch,
+      postImportCompactionEpoch:1,restoredEpoch:final.epoch,
+      restoredCompletions:2,legacyAuthorityPreserved:true,parity:true};
+  });
+
   await run('unrelated V1 task-only save cannot advance cross-Habit journal completion epoch',async context=>{
     const page=await open(context);
     const coreCompaction=()=> {
