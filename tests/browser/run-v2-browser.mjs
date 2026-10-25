@@ -753,6 +753,53 @@ try {
   });
 
 
+  await run('independent WAL quota denial preserves V1 journal and cannot claim an orphan V2 mutation',async context=>{
+    const page=await open(context);
+    const result=await page.evaluate(()=>{
+      const original=Storage.prototype.setItem;
+      const prefix='taskpoints_v2_pending_mutation_event_v1:';
+      let rejected=0;
+      Storage.prototype.setItem=function(key,value){
+        if(this===localStorage && String(key).startsWith(prefix)){
+          rejected++;
+          throw new DOMException('Synthetic sidecar quota denial','QuotaExceededError');
+        }
+        return original.call(this,key,value);
+      };
+      try { window.V2BrowserFixture.delta('h1','2026-10-20','full',1); }
+      finally { Storage.prototype.setItem=original; }
+      const wal=window.TaskPointsStateRuntimeV2Wal.getPendingRows();
+      const legacy=window.TaskPointsCore.readPendingHabitDeltas();
+      return {rejected,walOk:wal.ok,walRows:wal.rows.length,
+        legacyCount:legacy.length,legacyStatus:legacy[0]?.status,
+        generation:window.TaskPointsStateRuntimeV2Generation.read(),
+        readAuthority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    });
+    assert.equal(result.rejected,1);
+    assert.equal(result.walOk,true);
+    assert.equal(result.walRows,0,'V2 must never report a WAL mutation whose sidecar could not be saved');
+    assert.equal(result.legacyCount,1);
+    assert.equal(result.legacyStatus,'full');
+    assert.equal(result.readAuthority,'legacy_only');
+    await page.waitForFunction(()=>{
+      const s=window.V2BrowserFixture?.status();
+      return s && s.bridge.failures>=1 && s.runtime.mirroredMutations>=1;
+    },null,{timeout:18000});
+    // Only V1 is authoritative: the independent WAL failure must not make a
+    // new generation or strand the successful independent V2 mirror.
+    await page.reload({waitUntil:'load'});
+    await page.waitForFunction(()=>window.V2BrowserFixture?.status()?.runtime.installed,
+      null,{timeout:18000});
+    const p=await parity(page);
+    assert.equal(p.actualCounts.completions,1);
+    const status=await page.evaluate(()=>window.V2BrowserFixture.status());
+    assert.equal(status.wal.pendingCount,0);
+    assert.equal(status.runtime.currentGeneration,result.generation);
+    assert.equal(status.runtime.readAuthority,'legacy_only');
+    return {quotaDeniedSidecar:true,v1AuthoritativeJournalPreserved:true,
+      orphanWalRows:0,generationUnchanged:true,parity:true};
+  });
+
   await run('interrupted independent WAL cleanup replays exactly once after browser restart',async context=>{
     const page=await open(context);
     const injected=await page.evaluate(()=>{
