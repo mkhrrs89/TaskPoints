@@ -1474,23 +1474,32 @@ try {
     assert.equal(final.epoch,0,'authorized restore resets the completion ordering baseline');
     assert.ok(final.marker);
     const report=await parity(page);
-    assert.equal(report.actualCounts.completions,2);
     const proof=await page.evaluate(async()=>{
+      const core=window.TaskPointsCore;
       const runtime=window.TaskPointsStateRuntimeV2;
       const snapshot=await runtime.buildCompatibilitySnapshot();
+      const source=window.V2BrowserFixture.rawLegacy();
+      core.applyPendingHabitDeltas(source);
       return {name:snapshot.habits.find(h=>h.id==='h3').name,
         completed:snapshot.completions.filter(c=>c.source==='habit').map(c=>c.id).sort(),
+        authoritativeCompletions:source.completions.filter(c=>c.source==='habit')
+          .map(c=>c.id).sort(),
         authority:runtime.getStatus().readAuthority};
     });
     assert.equal(proof.name,'Synthetic h3');
-    assert.deepEqual(proof.completed,[
-      'habit:h1:2026-10-17','habit:h2:2026-10-18'
-    ]);
+    // Production V1 restore uses merge-preserving completion semantics, not
+    // an implicit delete of entries written after the backup. Assert the
+    // exact authoritative set rather than presuming an older backup's length.
+    assert.deepEqual(proof.completed,proof.authoritativeCompletions);
+    assert.equal(proof.completed.length,report.actualCounts.completions);
+    for(const id of ['habit:h1:2026-10-17','habit:h2:2026-10-18'])
+      assert.ok(proof.completed.includes(id),'restored baseline completion must survive');
     assert.equal(proof.authority,'legacy_only');
     return {authorizedGenerationRotations:2,
       originalEpoch:before.epoch,importedEpoch:fresh.epoch,
       postImportCompactionEpoch:1,restoredEpoch:final.epoch,
-      restoredCompletions:2,legacyAuthorityPreserved:true,parity:true};
+      restoredCompletions:proof.completed.length,
+      v1MergeSemanticsPreserved:true,legacyAuthorityPreserved:true,parity:true};
   });
 
   await run('unrelated V1 task-only save cannot advance cross-Habit journal completion epoch',async context=>{
