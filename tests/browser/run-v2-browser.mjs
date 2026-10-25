@@ -317,6 +317,75 @@ try {
   });
 
 
+  await run('three simulated Safari background kills replay held WAL without losing later cross-tab edits',async context=>{
+    const survivor=await open(context);
+    let replayed=0;
+    for(let round=0;round<3;round++){
+      const writer=await open(context);
+      const key='2026-10-'+String(10+round).padStart(2,'0');
+      await writer.evaluate(day=>{
+        // Preview-only test fault models iOS suspending a tab before the V2
+        // mirror confirmation. V1 has already durably written its journal.
+        sessionStorage.setItem('taskpoints_state_v2_wal_test_armed_v1','1');
+        window.V2BrowserFixture.delta('h1',day,'full',roundNumber(day));
+        function roundNumber(day){ return Number(day.slice(-2)); }
+      },key);
+      const before=await writer.evaluate(day=>{
+        const s=window.V2BrowserFixture.status();
+        const journal=window.TaskPointsCore.readPendingHabitDeltas();
+        return {wal:s.wal.pendingCount,
+          journal:journal.filter(d=>d.habitId==='h1'&&d.dayKey===day).length,
+          authority:s.runtime.readAuthority};
+      },key);
+      assert.deepEqual(before,{wal:1,journal:1,authority:'legacy_only'},
+        'held mutation must be represented independently in the WAL and V1 journal');
+      const lifecycle=await writer.evaluate(()=>{
+        document.dispatchEvent(new Event('visibilitychange'));
+        window.dispatchEvent(new Event('pagehide'));
+        return {wal:window.TaskPointsStateRuntimeV2Wal.getPendingRows().rows.length,
+          journal:window.TaskPointsCore.readPendingHabitDeltas().length};
+      });
+      assert.equal(lifecycle.wal,1,'background lifecycle must not erase uncommitted WAL');
+      assert.ok(lifecycle.journal>=1,'background lifecycle must retain the authoritative journal');
+      await writer.close(); // kill the held writer, as if iOS evicted its tab
+      await survivor.reload({waitUntil:'load'});
+      await survivor.waitForFunction(()=>{
+        const s=window.V2BrowserFixture?.status();
+        return s&&s.wal.pendingCount===0&&s.bridge.replayCleared>=1;
+      },null,{timeout:20000});
+      replayed++;
+      assert.equal((await parity(survivor)).actualCounts.completions,2*round+1);
+      await survivor.evaluate(([day,n])=>
+        window.V2BrowserFixture.delta('h2',day,'full',n),[key,30+round]);
+      await settled(survivor,1);
+      const p=await parity(survivor);
+      assert.equal(p.actualCounts.completions,2*(round+1));
+    }
+    await survivor.reload({waitUntil:'load'});
+    const result=await survivor.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const db=await runtime.open();
+      const tx=db.transaction(['mutations','completions'],'readonly');
+      const get=name=>new Promise((resolve,reject)=>{
+        const r=tx.objectStore(name).getAll();
+        r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);
+      });
+      const [mutations,completions]=await Promise.all(['mutations','completions'].map(get));
+      return {mutationIds:mutations.map(m=>m.id),
+        completionIds:completions.flatMap(row=>row.entries.map(x=>x.value.id)),
+        generation:runtime.getStatus().currentGeneration,
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(result.mutationIds.length,6);
+    assert.equal(new Set(result.mutationIds).size,6);
+    assert.equal(result.completionIds.length,6);
+    assert.equal(new Set(result.completionIds).size,6);
+    assert.equal(result.authority,'legacy_only');
+    assert.equal((await parity(survivor)).match,true);
+    return {simulatedSuspensions:3,heldWalRecoveries:replayed,
+      crossTabFollowupEdits:3,mutationRows:6,completionRows:6,parity:true};
+  });
+
   await run('incomplete restore snapshot is rejected without rotating generation or changing V1',async context=>{
     const page=await open(context);
     const outcome=await page.evaluate(()=>{
