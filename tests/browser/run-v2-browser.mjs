@@ -397,8 +397,12 @@ try {
     const initial=await survivor.evaluate(()=>({
       generation:window.TaskPointsStateRuntimeV2.getStatus().currentGeneration
     }));
-    for(const event of expected){
-      const writer=await open(context);
+    // All three browsing contexts must finish initial startup BEFORE any
+    // WAL is held. Opening writer two after writer one closes would itself
+    // replay writer one's WAL, so that is a different single-row scenario.
+    const writers=await Promise.all(expected.map(()=>open(context)));
+    for(const [index,event] of expected.entries()){
+      const writer=writers[index];
       const held=await writer.evaluate(({habitId,day,n})=>{
         sessionStorage.setItem('taskpoints_state_v2_wal_test_armed_v1','1');
         const result=window.V2BrowserFixture.delta(habitId,day,'full',n);
