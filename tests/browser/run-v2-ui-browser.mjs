@@ -2,12 +2,14 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { resolve, sep, join, extname } from 'node:path';
-import { chromium } from 'playwright';
+import { chromium, webkit } from 'playwright';
 
 // The real TaskPoints Home HTML and JS run on a disposable localhost origin.
 // The script is a focused local equivalent of _worker.js's scoring bundle;
 // it does not contact the deployed app, GitHub, or any external API.
-const root=resolve(process.cwd()), artifacts=join(root,'v2-ui-browser-artifacts');
+const engine=process.env.V2_BROWSER_ENGINE||'chromium';
+if(!['chromium','webkit'].includes(engine))throw Error('Unsupported V2 Home browser engine: '+engine);
+const root=resolve(process.cwd()), artifacts=join(root,'v2-ui-browser-artifacts',engine);
 await mkdir(artifacts,{recursive:true});
 const bundlePaths=[
   'performance_diagnostics.js','scoring_core.js',
@@ -49,7 +51,8 @@ const server=createServer(async(req,res)=>{
 });
 await new Promise(done=>server.listen(0,'127.0.0.1',done));
 const origin='http://127.0.0.1:'+server.address().port;
-const browser=await chromium.launch({headless:true});
+const browser=await (engine==='webkit'?webkit:chromium).launch({headless:true});
+console.log('V2 Home UI browser engine: '+engine+' (390x844 touch emulation)');
 const records=[];let failures=0;
 async function makeContext(){
   const ctx=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,
