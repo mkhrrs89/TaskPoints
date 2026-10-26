@@ -5,7 +5,8 @@
   if (!global || !core || global.TaskPointsStateRuntimeV2?.__installedModule) return;
 
   const DB_NAME = 'taskpoints_state_v2';
-  const DB_VERSION = 1;
+  const DB_VERSION = 2;
+  const COMPLETION_HABIT_INDEX = 'by_habit_ids';
   const DARK_MODE_KEY = 'taskpoints_state_v2_dark_mode_v1';
   const WAL_TEST_ACTIVE_GLOBAL = '__taskpointsStateV2WalKillHoldV1';
   const GENERATION_KEY = 'taskpoints_state_v2_generation_v1';
@@ -370,11 +371,34 @@
     });
   }
 
-  function ensureStores(db) {
+  function ensureStores(db, upgradeTransaction) {
     if (!db.objectStoreNames.contains('habits')) db.createObjectStore('habits', { keyPath: 'id' });
     if (!db.objectStoreNames.contains('completions')) db.createObjectStore('completions', { keyPath: 'id' });
     if (!db.objectStoreNames.contains('mutations')) db.createObjectStore('mutations', { keyPath: 'id' });
     if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta', { keyPath: 'id' });
+    const completions = upgradeTransaction.objectStore('completions');
+    if (!completions.indexNames.contains(COMPLETION_HABIT_INDEX)) {
+      completions.createIndex(COMPLETION_HABIT_INDEX, 'habitIds', { multiEntry: true });
+    }
+    // All legacy metadata corrections run inside the same versionchange
+    // transaction as index creation. Any read/put error aborts the upgrade;
+    // nothing is partially migrated and V1 remains authoritative.
+    const rowsRequest = completions.getAll();
+    rowsRequest.onsuccess = () => {
+      try {
+        for (const row of rowsRequest.result || []) {
+          const corrected = withCompletionHabitIds(row);
+          if (stableJson(row?.habitIds) !== stableJson(corrected.habitIds)) {
+            completions.put(corrected);
+          }
+        }
+      } catch (_) {
+        try { upgradeTransaction.abort(); } catch (_) {}
+      }
+    };
+    rowsRequest.onerror = () => {
+      try { upgradeTransaction.abort(); } catch (_) {}
+    };
   }
 
   function open() {
@@ -388,7 +412,10 @@
 
     dbPromise = new Promise((resolve, reject) => {
       const request = global.indexedDB.open(DB_NAME, DB_VERSION);
-      request.onupgradeneeded = () => ensureStores(request.result);
+      request.onupgradeneeded = () => {
+        try { ensureStores(request.result, request.transaction); }
+        catch (_) { try { request.transaction?.abort?.(); } catch (_) {} }
+      };
       request.onsuccess = () => {
         opened = true;
         mark('stateV2.opened', { database: DB_NAME, version: DB_VERSION });
