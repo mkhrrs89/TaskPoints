@@ -1218,3 +1218,72 @@ test('read probe preserves cross-Habit duplicate-ID coverage and refuses an alte
     'a parity refusal must not silently fix or delete corrupted mirror evidence');
   assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
 });
+
+test('persisted foreign revision signal alone invalidates a stale pilot without storage events',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const healthy=await app.runtime.inspectPilotReadiness();
+  assert.equal(healthy.eligible,true,JSON.stringify(healthy));
+  const sourceBefore=app.localStorage.getItem(LEGACY_KEY);
+  const mirrorBefore=structuredClone(app.indexedDB.dump(DB_NAME));
+  const status=app.runtime.getStatus();
+  // The fake browser dispatches no storage or BroadcastChannel events.
+  app.localStorage.setItem(status.revisionSignalKey,JSON.stringify({
+    sourceId:'another-tab-with-a-durable-write',
+    generation:status.currentGeneration,
+    revision:Number(status.lastKnownRevision||0)+1,
+    epochMs:Date.now()+10000,
+    atISO:new Date().toISOString()
+  }));
+  const blocked=await app.runtime.inspectPilotReadiness();
+  assert.equal(blocked.eligible,false);
+  assert.equal(blocked.reason,'external_revision_invalidated');
+  assert.equal(app.runtime.getStatus().externalRevisionInvalidated,true);
+  assert.equal(app.runtime.getStatus().externalRevisionSource,'persisted_signal');
+  const candidate=await app.runtime.readPilotHabitCandidate('h1');
+  assert.equal(candidate.eligible,false);
+  assert.equal(Object.hasOwn(candidate,'habit'),false);
+  assert.equal(app.localStorage.getItem(LEGACY_KEY),sourceBefore);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME),mirrorBefore);
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
+
+test('durable foreign revision appearing during an IDB scan rejects the in-flight candidate',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const db=await app.runtime.open();
+  const txOriginal=db.transaction.bind(db);
+  let injected=0;
+  db.transaction=(...args)=>{
+    const tx=txOriginal(...args);
+    const objectStore=tx.objectStore.bind(tx);
+    tx.objectStore=name=>{
+      const store=objectStore(name);
+      if(name==='habits'){
+        const getAll=store.getAll.bind(store);
+        store.getAll=(...inputs)=>{
+          if(injected++===0){
+            const state=app.runtime.getStatus();
+            app.localStorage.setItem(state.revisionSignalKey,JSON.stringify({
+              sourceId:'late-foreign-context',
+              generation:state.currentGeneration,
+              revision:Number(state.lastKnownRevision||0)+1,
+              epochMs:Date.now()+10000
+            }));
+          }
+          return getAll(...inputs);
+        };
+      }
+      return store;
+    };
+    return tx;
+  };
+  const denied=await app.runtime.readPilotHabitCandidate('h1');
+  db.transaction=txOriginal;
+  assert.equal(injected,1);
+  assert.equal(denied.eligible,false);
+  assert.equal(denied.readAuthority,'legacy_only');
+  assert.equal(Object.hasOwn(denied,'completions'),false);
+  assert.equal(app.runtime.getStatus().externalRevisionInvalidated,true);
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
