@@ -58,6 +58,7 @@
   // and never routes live Home reads away from the V1 authority.
   let pilotReadProbeEnabled = false;
   let pilotReadProbeEpoch = 0;
+  let darkMirrorModeEpoch = 0;
   let pilotReadProbeChecks = 0;
   let pilotReadProbeMatches = 0;
   let pilotReadProbeRefusals = 0;
@@ -3010,6 +3011,7 @@
       checked: true, eligible: false, reason, readAuthority: 'legacy_only'
     });
     if (!isDarkEnabled()) return refused('dark_disabled');
+    const initialModeEpoch = darkMirrorModeEpoch;
     if (!interactionPageGeneration) return refused('page_generation_unbound');
     if (externalRevisionInvalidated) return refused('external_revision_invalidated');
     const wal = global.TaskPointsStateRuntimeV2Wal;
@@ -3050,7 +3052,8 @@
       const metaAfter = await readMeta(db);
       // Preview opt-out during any asynchronous IDB read is an immediate
       // refusal, even when the underlying mirror data happened to match.
-      if (!isDarkEnabled()) return refused('dark_disabled_during_check');
+      if (!isDarkEnabled() || initialModeEpoch !== darkMirrorModeEpoch)
+        return refused('dark_disabled_during_check');
       const secondGeneration = currentGeneration({ create: false });
       const secondPending = wal.getPendingRows();
       if (!secondGeneration || secondGeneration !== initialGeneration
@@ -3337,6 +3340,7 @@
   }
 
   function enableDarkMirror() {
+    darkMirrorModeEpoch += 1;
     safeSet(DARK_MODE_KEY, '1');
     currentGeneration();
     startCoordinatedDarkMirror();
@@ -3344,6 +3348,7 @@
   }
 
   function disableDarkMirror() {
+    darkMirrorModeEpoch += 1;
     safeRemove(DARK_MODE_KEY);
     return getStatus();
   }
