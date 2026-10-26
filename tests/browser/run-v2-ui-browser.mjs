@@ -598,6 +598,71 @@ try{
       resumedPostImportTapReplayedExactlyOnce:true,importedDataRetained:true,parity:true};
   });
 
+  await test('Home never replays a queued Habit tap until session deletion is verified',async ctx=>{
+    const {page}=await home(ctx);
+    await page.locator('[data-home-tab="habits"]').click({force:true});
+    const day=await page.locator('#habitsList .habitDay[data-habit="h2"]').first().getAttribute('data-day');
+    assert.ok(day);
+    await page.evaluate(day=>{
+      const generation=window.TaskPointsStateRuntimeV2Generation.read();
+      sessionStorage.setItem('taskpoints_v2_stale_habit_tap_v1',JSON.stringify({
+        version:1,habitId:'h2',dayKey:day,generation,
+        pathname:location.pathname,createdEpochMs:Date.now()
+      }));
+      const remove=Storage.prototype.removeItem;
+      window.__syntheticStaleTapRemove=remove;
+      Storage.prototype.removeItem=function(key){
+        if(this===sessionStorage && key==='taskpoints_v2_stale_habit_tap_v1') return;
+        return remove.call(this,key);
+      };
+      window.dispatchEvent(new Event('pageshow'));
+    },day);
+    try{
+      await page.waitForTimeout(300);
+      const blocked=await page.evaluate(day=>({
+        journal:window.TaskPointsCore.readPendingHabitDeltas()
+          .filter(row=>row.habitId==='h2'&&row.dayKey===day),
+        stale:sessionStorage.getItem('taskpoints_v2_stale_habit_tap_v1'),
+        replays:window.TaskPointsHabitFastPathControl.getStatus().staleTapReplays
+      }),day);
+      assert.deepEqual(blocked.journal,[]);
+      assert.ok(blocked.stale,'unconsumed session tap remains available');
+      assert.equal(blocked.replays,0);
+    }finally{
+      await page.evaluate(()=>{
+        if(window.__syntheticStaleTapRemove){
+          Storage.prototype.removeItem=window.__syntheticStaleTapRemove;
+          delete window.__syntheticStaleTapRemove;
+        }
+      });
+    }
+    await page.waitForFunction(day=>window.TaskPointsCore.readPendingHabitDeltas()
+      .some(row=>row.habitId==='h2'&&row.dayKey===day&&row.status==='full'),
+      day,{timeout:15000});
+    const result=await page.evaluate(async day=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      await runtime.startCoordinatedDarkMirror();
+      const parity=await runtime.verifyParity();
+      return {
+        journal:window.TaskPointsCore.readPendingHabitDeltas()
+          .filter(row=>row.habitId==='h2'&&row.dayKey===day).map(row=>row.status),
+        pending:sessionStorage.getItem('taskpoints_v2_stale_habit_tap_v1'),
+        replays:window.TaskPointsHabitFastPathControl.getStatus().staleTapReplays,
+        authority:runtime.getStatus().readAuthority,parity
+      };
+    },day);
+    assert.deepEqual(result.journal,['full']);
+    assert.equal(result.pending,null);
+    assert.equal(result.replays,1);
+    assert.equal(result.authority,'legacy_only');
+    assert.equal(result.parity.match,true,JSON.stringify(result.parity.differences));
+    await page.reload({waitUntil:'load'});
+    const after=await page.evaluate(day=>window.TaskPointsCore.readPendingHabitDeltas()
+      .filter(row=>row.habitId==='h2'&&row.dayKey===day).length,day);
+    assert.ok(after<=1,'reopening cannot duplicate a previously consumed Habit tap');
+    return {silentStorageNoopPrevented:true,tapAppliedOnceAfterRecovery:true,parity:true};
+  });
+
   await test('stale Habit continuation from a previous V2 generation is discarded without toggling',async ctx=>{
     const {page}=await home(ctx);
     const generation=await page.evaluate(()=>window.TaskPointsStateRuntimeV2.getStatus().currentGeneration);
