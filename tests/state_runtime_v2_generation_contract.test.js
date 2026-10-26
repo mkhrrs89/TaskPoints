@@ -1371,3 +1371,71 @@ test('mutation-handoff preflight refuses a legacy journal change during asynchro
   assert.equal(app.localStorage.getItem(LEGACY_KEY),original);
   assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
 });
+
+test('guarded V2 readiness refuses unreadable cross-tab revision signals without touching V1 or WAL',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const initial=await app.runtime.inspectPilotReadiness();
+  assert.equal(initial.eligible,true);
+  const savedV1=app.localStorage.getItem(LEGACY_KEY);
+  const storedV2=structuredClone(app.indexedDB.dump(DB_NAME));
+  const signalKey=app.runtime.getStatus().revisionSignalKey;
+  const originalGet=app.localStorage.getItem.bind(app.localStorage);
+  app.localStorage.getItem=key=>{
+    if(String(key)===signalKey) throw Error('synthetic Safari security denial');
+    return originalGet(key);
+  };
+  const blocked=await app.runtime.inspectPilotReadiness();
+  const candidate=await app.runtime.readPilotHabitCandidate('h1');
+  app.localStorage.getItem=originalGet;
+  assert.equal(blocked.eligible,false);
+  assert.equal(blocked.reason,'revision_signal_unreadable');
+  assert.equal(candidate.eligible,false);
+  assert.equal(candidate.reason,'revision_signal_unreadable');
+  assert.equal(Object.hasOwn(candidate,'habit'),false);
+  assert.equal(app.localStorage.getItem(LEGACY_KEY),savedV1);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME),storedV2);
+  assert.equal(app.wal.getPendingRows().rows.length,0);
+  assert.equal((await app.runtime.inspectPilotReadiness()).eligible,true);
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
+
+test('guarded V2 readiness rejects revision-signal read denial after asynchronous scan',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const db=await app.runtime.open();
+  const originalTx=db.transaction.bind(db);
+  const originalGet=app.localStorage.getItem.bind(app.localStorage);
+  const signalKey=app.runtime.getStatus().revisionSignalKey;
+  let injected=0;
+  db.transaction=(...args)=>{
+    const tx=originalTx(...args);
+    const originalStore=tx.objectStore.bind(tx);
+    tx.objectStore=name=>{
+      const store=originalStore(name);
+      if(name==='habits'){
+        const getAll=store.getAll.bind(store);
+        store.getAll=(...params)=>{
+          if(injected++===0){
+            app.localStorage.getItem=key=>{
+              if(String(key)===signalKey) throw Error('midflight revision probe denied');
+              return originalGet(key);
+            };
+          }
+          return getAll(...params);
+        };
+      }
+      return store;
+    };
+    return tx;
+  };
+  const refused=await app.runtime.readPilotHabitCandidate('h1');
+  db.transaction=originalTx;
+  app.localStorage.getItem=originalGet;
+  assert.equal(injected,1);
+  assert.equal(refused.eligible,false);
+  assert.equal(refused.reason,'revision_signal_unreadable');
+  assert.equal(Object.hasOwn(refused,'completions'),false);
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+  assert.equal((await app.runtime.inspectPilotReadiness()).eligible,true);
+});
