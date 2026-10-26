@@ -207,7 +207,24 @@
   }
 
   function beforeHabitInteraction(detail = {}) {
-    if (!isDarkEnabled()) return { proceed: true, reason: 'dark_disabled' };
+    let previewFlag = null;
+    try {
+      const storage = global.localStorage;
+      if (!storage || typeof storage.getItem !== 'function') {
+        throw new Error('preview_flag_storage_unavailable');
+      }
+      previewFlag = storage.getItem(DARK_MODE_KEY);
+    } catch (error) {
+      // A suspended V2 page must not mistake inaccessible storage for a
+      // deliberate disabling of the preview: that would bypass the stale
+      // generation guard and apply an old Habit view to newer V1 data.
+      if (!interactionPageGeneration) return { proceed: true, reason: 'dark_unavailable_without_v2_page' };
+      generationInteractionSafetyBlocks += 1;
+      lastError = `state_runtime_v2_interaction_dark_mode_unreadable:${String(error?.message || error)}`;
+      mark('stateV2.habitInteractionBlocked', { reason: 'dark_mode_unreadable' });
+      return { proceed: false, reason: 'dark_mode_unreadable' };
+    }
+    if (previewFlag !== '1') return { proceed: true, reason: 'dark_disabled' };
     let durableGeneration = null;
     try {
       installRevisionInvalidationListeners();
