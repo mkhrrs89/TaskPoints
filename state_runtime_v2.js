@@ -3000,6 +3000,47 @@
     }
   }
 
+  // A read-only migration gate for the future IndexedDB completion index.
+  // Existing V2 databases may contain rows from before Habit-ID metadata was
+  // introduced. Report those rows for an explicit safe backfill later; never
+  // alter them or silently trust an incomplete indexed lookup.
+  async function inspectPilotCompletionIndexCoverage() {
+    const refuse = (reason) => ({
+      checked: true, indexReady: false, reason, readAuthority: 'legacy_only'
+    });
+    const before = await inspectPilotReadiness();
+    if (!before.eligible) return refuse(before.reason);
+    try {
+      const db = await open();
+      if (!db) return refuse('v2_unavailable');
+      const tx = db.transaction('completions', 'readonly');
+      const rows = await requestPromise(tx.objectStore('completions').getAll());
+      let missing = 0;
+      let mismatched = 0;
+      let complete = 0;
+      for (const row of rows || []) {
+        const expected = completionHabitIdsForRow(row);
+        if (!Array.isArray(row?.habitIds)) missing += 1;
+        else if (stableJson(row.habitIds) !== stableJson(expected)) mismatched += 1;
+        else complete += 1;
+      }
+      const after = await inspectPilotReadiness();
+      if (!after.eligible) return refuse(after.reason);
+      if (before.generation !== after.generation || before.revision !== after.revision)
+        return refuse('read_window_changed');
+      const indexReady = missing === 0 && mismatched === 0;
+      return {
+        checked: true, indexReady,
+        reason: indexReady ? 'metadata_complete' : 'metadata_backfill_required',
+        readAuthority: 'legacy_only',
+        generation: after.generation, revision: after.revision,
+        counts: { total: (rows || []).length, complete, missing, mismatched }
+      };
+    } catch (_) {
+      return refuse('storage_unreadable');
+    }
+  }
+
   // Diagnostic-only targeted projection for Stage C development. No live
   // application caller is routed here: the legacy snapshot remains read
   // authority. Never return a V2 candidate across an asynchronous epoch,
@@ -3208,6 +3249,7 @@
     buildCompatibilitySnapshot,
     verifyParity,
     inspectPilotReadiness,
+    inspectPilotCompletionIndexCoverage,
     readPilotHabitCandidate,
     getStatus
   };
