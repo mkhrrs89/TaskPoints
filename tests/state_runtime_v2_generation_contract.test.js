@@ -652,14 +652,14 @@ test('targeted pilot reader uses Habit primary key, retaining packed cross-Habit
   db.transaction = transaction;
   assert.equal(result.eligible, true, JSON.stringify(result));
   assert.equal(result.habit.id, 'h1');
-  assert.deepEqual(result.completions.map(row => row.points), [4, 7]);
-  assert.deepEqual(result.completions.map(row => row.id), ['duplicate','duplicate']);
+  assert.deepEqual(Array.from(result.completions, row => row.points), [4, 7]);
+  assert.deepEqual(Array.from(result.completions, row => row.id), ['duplicate','duplicate']);
   assert.equal(calls.targetedHabits, 1);
   assert.equal(calls.fullHabits, 2, 'only the two whole-pilot parity preflights scan all Habits');
   assert.equal(calls.fullCompletions, 3, 'complete scope is still verified on both sides');
   const other = await app.runtime.readPilotHabitCandidate('h2');
   assert.equal(other.eligible, true);
-  assert.deepEqual(other.completions.map(row => row.points), [5]);
+  assert.deepEqual(Array.from(other.completions, row => row.points), [5]);
   assert.equal(app.runtime.getStatus().readAuthority, 'legacy_only');
 });
 
