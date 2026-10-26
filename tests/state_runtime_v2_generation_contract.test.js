@@ -1287,3 +1287,87 @@ test('durable foreign revision appearing during an IDB scan rejects the in-fligh
   assert.equal(app.runtime.getStatus().externalRevisionInvalidated,true);
   assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
 });
+
+test('mutation-handoff preflight reports proven mirror checks but never grants storage authority',async()=>{
+  const app=install({initialState:{
+    ...legacyState(),
+    completions:[{id:'unrelated-task',source:'task',taskId:'t',points:3}]
+  }});
+  await app.runtime.startCoordinatedDarkMirror();
+  const legacyBefore=app.localStorage.getItem(LEGACY_KEY);
+  const v2Before=structuredClone(app.indexedDB.dump(DB_NAME));
+  const report=await app.runtime.inspectMutationHandoffPrerequisites();
+  assert.equal(report.checked,true);
+  assert.equal(report.canPromote,false);
+  assert.equal(report.mutationAuthority,'legacy_only');
+  assert.equal(report.readAuthority,'legacy_only');
+  assert.equal(report.checks.pilotConsistent,true,JSON.stringify(report));
+  assert.equal(report.checks.completionIndexReady,true);
+  assert.equal(report.checks.legacyJournalEmpty,true);
+  assert.equal(report.checks.noObservedMirrorFailures,true);
+  assert.equal(report.counts.nonPilotLegacyCompletions,1);
+  for(const blocker of ['exclusive_writer_lease_not_implemented',
+    'durable_authority_rollback_not_implemented','nonpilot_collections_not_migrated'])
+    assert.ok(report.blockers.includes(blocker),JSON.stringify(report));
+  assert.equal(app.localStorage.getItem(LEGACY_KEY),legacyBefore);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME),v2Before);
+});
+
+test('mutation-handoff preflight inventories uncompacted legacy journal without claiming readiness',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  app.core.readPendingHabitDeltas=()=>[delta()];
+  const v1=app.localStorage.getItem(LEGACY_KEY);
+  const mirror=structuredClone(app.indexedDB.dump(DB_NAME));
+  const report=await app.runtime.inspectMutationHandoffPrerequisites();
+  assert.equal(report.canPromote,false);
+  assert.equal(report.checks.pilotConsistent,true,JSON.stringify(report));
+  assert.equal(report.checks.legacyJournalEmpty,false);
+  assert.equal(report.counts.legacyJournalPending,1);
+  assert.ok(report.blockers.includes('legacy_journal_pending'));
+  assert.equal(app.localStorage.getItem(LEGACY_KEY),v1);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME),mirror);
+});
+
+test('mutation-handoff preflight refuses pending WAL, V1 divergence, and unreadable journal',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const pending=app.wal.appendHabitDelta(delta());
+  const wal=await app.runtime.inspectMutationHandoffPrerequisites();
+  assert.equal(wal.canPromote,false);
+  assert.equal(wal.reason,'pilot_not_consistent');
+  assert.ok(wal.blockers.includes('pilot_wal_pending'));
+  assert.equal(app.wal.getPendingRows().rows.length,1);
+  app.wal.removeMutation(pending.mutationId);
+  const original=app.localStorage.getItem(LEGACY_KEY);
+  app.localStorage.setItem(LEGACY_KEY,JSON.stringify(legacyState('h1','V1 only correction')));
+  const mismatch=await app.runtime.inspectMutationHandoffPrerequisites();
+  assert.equal(mismatch.canPromote,false);
+  assert.ok(mismatch.blockers.includes('pilot_pilot_parity_mismatch'));
+  assert.equal(JSON.parse(app.localStorage.getItem(LEGACY_KEY)).habits[0].name,'V1 only correction');
+  app.localStorage.setItem(LEGACY_KEY,original);
+  app.core.readPendingHabitDeltas=()=>{throw Error('synthetic unreadable legacy journal');};
+  const denial=await app.runtime.inspectMutationHandoffPrerequisites();
+  assert.equal(denial.canPromote,false);
+  assert.ok(denial.blockers.some(reason=>reason==='pilot_storage_unreadable'
+    || reason==='handoff_inventory_unreadable'),JSON.stringify(denial));
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
+
+test('mutation-handoff preflight refuses a legacy journal change during asynchronous parity inspection',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  let calls=0;
+  app.core.readPendingHabitDeltas=()=>{
+    calls++;
+    // First readiness performs two V1 snapshots before the inventory read.
+    return calls>=5 ? [delta()] : [];
+  };
+  const original=app.localStorage.getItem(LEGACY_KEY);
+  const report=await app.runtime.inspectMutationHandoffPrerequisites();
+  assert.equal(report.canPromote,false);
+  assert.ok(report.blockers.some(reason=>reason==='legacy_journal_changed_during_preflight'
+    || reason.startsWith('pilot_')),JSON.stringify({report,calls}));
+  assert.equal(app.localStorage.getItem(LEGACY_KEY),original);
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
