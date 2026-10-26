@@ -57,6 +57,7 @@
   // Ephemeral diagnostic toggle only. This is deliberately NOT persisted,
   // and never routes live Home reads away from the V1 authority.
   let pilotReadProbeEnabled = false;
+  let pilotReadProbeEpoch = 0;
   let pilotReadProbeChecks = 0;
   let pilotReadProbeMatches = 0;
   let pilotReadProbeRefusals = 0;
@@ -3159,6 +3160,10 @@
   // this flag only allows an explicit diagnostic comparison. The selected
   // backend is ALWAYS legacy, including on an eligible V2 match.
   function setPilotReadProbeEnabled(enabled) {
+    // Every explicit toggle fences off outstanding read comparisons. A
+    // rapid off/on cycle cannot revive a candidate started in the older
+    // session even if the toggle ends in the enabled state again.
+    pilotReadProbeEpoch += 1;
     pilotReadProbeEnabled = enabled === true;
     return {
       enabled: pilotReadProbeEnabled,
@@ -3173,6 +3178,7 @@
       readAuthority: 'legacy_only', reason, ...extras
     });
     if (!pilotReadProbeEnabled) return result('probe_disabled', { checked: false });
+    const probeEpoch = pilotReadProbeEpoch;
     const habitId = String(habitIdInput ?? '').trim();
     if (!habitId) return result('habit_id_required', { matched: false });
     pilotReadProbeChecks += 1;
@@ -3194,7 +3200,7 @@
       const candidate = await readPilotHabitCandidate(habitId);
       // The explicit diagnostic switch may be turned off while the awaited
       // IDB comparison is in flight. Refuse instead of returning late results.
-      if (!pilotReadProbeEnabled) {
+      if (!pilotReadProbeEnabled || probeEpoch !== pilotReadProbeEpoch) {
         pilotReadProbeRefusals += 1;
         return result('probe_disabled_during_check', { matched: false });
       }
@@ -3219,7 +3225,7 @@
         habit: normalizeHabitForParity(candidate.habit),
         completions: candidate.completions.map(normalizePilotCompletionForParity)
       });
-      if (!pilotReadProbeEnabled) {
+      if (!pilotReadProbeEnabled || probeEpoch !== pilotReadProbeEpoch) {
         pilotReadProbeRefusals += 1;
         return result('probe_disabled_during_check', { matched: false });
       }
