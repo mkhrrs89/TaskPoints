@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>V2 Isolated Index Migration Fixture</title>
+<body><p>Synthetic V2 schema-v1 migration fixture (localhost only)</p>
+<script>
+(() => {
+  if (!['127.0.0.1','localhost'].includes(location.hostname))
+    throw Error('V2 migration fixture restricted to localhost');
+  window.TaskPointsCore = {
+    STORAGE_KEY: 'taskpoints_v1',
+    parseTaskPointsStorageJson: raw => JSON.parse(raw),
+    readPendingHabitDeltas: () => [],
+    applyPendingHabitDeltas: () => {}
+  };
+  window.makeOldV2Fixture = () => new Promise((resolve, reject) => {
+    const legacy = {
+      habits: [
+        {id:'h1',name:'Read',doneKeys:[],failedKeys:[],iceKeys:[],pointsPerDay:4},
+        {id:'h2',name:'Walk',doneKeys:[],failedKeys:[],iceKeys:[],pointsPerDay:5}
+      ],
+      completions: [
+        {id:'shared-old',source:'habit',habitId:'h1',dayKey:'2026-10-19',points:4},
+        {id:'shared-old',source:'habit',habitId:'h2',dayKey:'2026-10-19',points:5}
+      ]
+    };
+    localStorage.setItem('taskpoints_v1',JSON.stringify(legacy));
+    localStorage.setItem('taskpoints_state_v2_dark_mode_v1','0');
+    const req=indexedDB.open('taskpoints_state_v2',1);
+    req.onupgradeneeded=()=>{
+      const db=req.result;
+      for(const name of ['habits','completions','mutations','meta'])
+        db.createObjectStore(name,{keyPath:'id'});
+      req.transaction.objectStore('completions').put({
+        id:'shared-old',entries:[
+          {sequence:2,value:legacy.completions[0]},
+          {sequence:1,value:legacy.completions[1]}
+        ]
+      });
+    };
+    req.onsuccess=()=>{req.result.close();resolve(true);};
+    req.onerror=()=>reject(req.error);
+  });
+})();
+</script></body></html>
