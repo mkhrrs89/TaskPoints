@@ -215,3 +215,15 @@ Current non-destructive preparation:
 - Future schema work must first prove an atomic, abort-safe upgrade/backfill for older packs, preserve the cross-Habit duplicate case, and provide a tested scan fallback when metadata/index migration is incomplete or blocked.
 
 The focused Node and real-browser regression suite exercises complete packs, cross-Habit duplicate IDs, retroactive edits, missing/mismatched legacy metadata, pending WAL, and unchanged V1 authority. CI status is determined by the branch's GitHub Actions runs, not by this text.
+
+## October 26 — Versioned completion index upgrade (preview branch only)
+
+This phase advances the earlier metadata-only preparation. The dedicated **V2 preview database** now requests IndexedDB version 2 and defines `completions.by_habit_ids` as a multi-entry index over `habitIds`. This is a V2-specific schema upgrade: **it does not migrate Main, take over V1 reads, remove any legacy data, or enable V2 as primary storage.**
+
+- During an upgrade from a legacy V2 version-1 database, the same IndexedDB `versionchange` transaction creates the index and backfills missing/incorrect `habitIds` on existing completion packs. If a request errors, the upgrade aborts; the previous database version, metadata, and original completion rows remain intact for retry. The request is not treated as a successful migration.
+- A completion pack can contain duplicate completion IDs with several Habit owners. Each owner gets an index entry, and the entries' sequence and payload are preserved.
+- The preview-only Habit reader checks full-pilot V1/V2 parity, WAL emptiness, epoch consistency, and index metadata completeness *before and after* querying the index. It uses `by_habit_ids` for a verified candidate; otherwise it retains the full completion scan. This guard continues to reject stale or mismatched data without returning records.
+- Node contracts simulate version-1 upgrades, cross-Habit duplicates, aborted reads and writes, retry recovery, and no V1 changes. Chromium/WebKit scenarios run a real legacy IndexedDB upgrade from a localhost-only isolated fixture.
+- Before a wider authority transition, complete device preview validation and repeated multi-tab/version-blocking tests. Version changes must be safe when another tab is open; never delete or silently reset the preview database to force an upgrade.
+
+The readiness and candidate interfaces remain diagnostic-only. All live application reads and writes continue through the existing authority.
