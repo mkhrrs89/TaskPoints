@@ -1178,3 +1178,43 @@ test('brief dark-mirror disable and re-enable rejects the original parity read e
   assert.equal((await app.runtime.inspectPilotReadiness()).eligible,true,
     'newly started parity check may run only after a fresh complete inspection');
 });
+
+test('read probe preserves cross-Habit duplicate-ID coverage and refuses an altered V2 packed entry',async()=>{
+  const completions=[
+    {id:'shared',source:'habit',habitId:'h1',dayKey:'2026-09-03',points:4},
+    {id:'shared',source:'vice',habitId:'h2',dayKey:'2026-09-02',points:3},
+    {id:'shared',source:'habit',habitId:'h1',dayKey:'2026-09-01',points:2}
+  ];
+  const app=install({initialState:{
+    habits:[legacyState('h1','Read').habits[0],legacyState('h2','Walk').habits[0]],
+    completions
+  }});
+  await app.runtime.startCoordinatedDarkMirror();
+  app.runtime.setPilotReadProbeEnabled(true);
+  const one=await app.runtime.probePilotHabitRead('h1');
+  const two=await app.runtime.probePilotHabitRead('h2');
+  assert.equal(one.matched,true,JSON.stringify(one));
+  assert.equal(one.counts.legacyCompletions,2);
+  assert.equal(one.counts.candidateCompletions,2);
+  assert.equal(two.matched,true,JSON.stringify(two));
+  assert.equal(two.counts.candidateCompletions,1);
+  const rawV1=app.localStorage.getItem(LEGACY_KEY);
+  const db=await app.runtime.open();
+  const row=structuredClone(app.indexedDB.dump(DB_NAME).completions[0]);
+  row.entries[1].value.points=999;
+  const tx=db.transaction('completions','readwrite');
+  tx.objectStore('completions').put(row);
+  await new Promise((resolve,reject)=>{
+    tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
+  });
+  const corrupted=structuredClone(app.indexedDB.dump(DB_NAME));
+  const refused=await app.runtime.probePilotHabitRead('h2');
+  assert.equal(refused.matched,false);
+  assert.equal(refused.reason,'pilot_parity_mismatch');
+  assert.equal(refused.selectedSource,'legacy_only');
+  assert.equal(Object.hasOwn(refused,'completions'),false);
+  assert.equal(app.localStorage.getItem(LEGACY_KEY),rawV1);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME),corrupted,
+    'a parity refusal must not silently fix or delete corrupted mirror evidence');
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
