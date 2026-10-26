@@ -507,6 +507,48 @@ try{
       importedNamePreserved:true,completionNotDuplicated:true,parity:true};
   });
 
+  await test('active V2 Home never falls back to a stale Habit mutation when the guard throws',async ctx=>{
+    const {page}=await home(ctx);
+    await page.locator('[data-home-tab="habits"]').click({force:true});
+    const day=await page.locator('#habitsList .habitDay[data-habit="h2"]').first().getAttribute('data-day');
+    assert.ok(day);
+    await page.evaluate(()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const status=runtime.getStatus();
+      if(!status.interactionPageGeneration) throw Error('Home must have a bound V2 preview generation');
+      window.__originalV2HabitGuard=runtime.beforeHabitInteraction;
+      runtime.beforeHabitInteraction=()=>{throw Error('Synthetic V2 guard failure during active preview');};
+    });
+    try {
+      await page.locator('#habitsList .habitDay[data-habit="h2"][data-day="'+day+'"]').tap({force:true});
+      const blocked=await page.evaluate(day=>({
+        journal:window.TaskPointsCore.readPendingHabitDeltas()
+          .filter(d=>d.habitId==='h2'&&d.dayKey===day),
+        controller:window.TaskPointsHabitFastPathControl.getStatus(),
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority
+      }),day);
+      assert.deepEqual(blocked.journal,[]);
+      assert.equal(blocked.controller.lastReason,'v2_interaction_guard_failed_closed');
+      assert.equal(blocked.authority,'legacy_only');
+    } finally {
+      await page.evaluate(()=>{
+        window.TaskPointsStateRuntimeV2.beforeHabitInteraction=window.__originalV2HabitGuard;
+        delete window.__originalV2HabitGuard;
+      });
+    }
+    await page.locator('#habitsList .habitDay[data-habit="h2"][data-day="'+day+'"]').tap({force:true});
+    await page.waitForFunction(day=>window.TaskPointsCore?.readPendingHabitDeltas?.()
+      .some(d=>d.habitId==='h2'&&d.dayKey===day&&d.status==='full'),
+      day,{timeout:15000});
+    await page.evaluate(()=>window.TaskPointsStateRuntimeV2.startCoordinatedDarkMirror());
+    const parity=await page.evaluate(()=>window.TaskPointsStateRuntimeV2.verifyParity());
+    assert.equal(parity.match,true,JSON.stringify(parity.differences));
+    const persisted=await page.evaluate(day=>window.TaskPointsCore.readPendingHabitDeltas()
+      .filter(d=>d.habitId==='h2'&&d.dayKey===day).map(d=>d.status),day);
+    assert.deepEqual(persisted,['full']);
+    return {failedGuardBlockedBothMutationPaths:true,healthyHabitTapPreserved:true,parity:true};
+  });
+
   await test('suspended Home tab does not bypass V2 generation guard when preview flag read fails',async ctx=>{
     const sleeping=(await home(ctx)).page;
     const importer=(await home(ctx)).page;
