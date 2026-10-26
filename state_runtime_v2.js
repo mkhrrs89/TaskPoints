@@ -565,6 +565,24 @@
     return sequence;
   }
 
+  // IndexedDB can index a multi-entry array on a completion *pack* only
+  // when the array names every Habit represented by that pack. Duplicate
+  // historical completion IDs can span different Habits; never infer the
+  // owner from the pack's storage key or its first entry.
+  function completionHabitIdsForRow(row) {
+    const entries = Array.isArray(row?.entries)
+      ? row.entries
+      : (row && Object.prototype.hasOwnProperty.call(row, 'value') ? [row] : []);
+    return Array.from(new Set(entries
+      .map((entry) => entry?.value)
+      .filter(isPilotCompletion)
+      .map((completion) => String(completion.habitId).trim()))).sort();
+  }
+
+  function withCompletionHabitIds(row) {
+    return { ...row, habitIds: completionHabitIdsForRow(row) };
+  }
+
   function packLegacyCompletionRows(completions) {
     const rows = new Map();
     (completions || []).forEach((completion, index) => {
@@ -578,7 +596,7 @@
       });
       rows.set(storageId, row);
     });
-    return Array.from(rows.values());
+    return Array.from(rows.values(), withCompletionHabitIds);
   }
 
   function unpackCompletionRows(rows) {
@@ -1393,10 +1411,10 @@
           let completionSequence = Number(runtimeMeta.completionSequence || 0);
           if (completion) {
             completionSequence += 1;
-            completionsStore.put({
+            completionsStore.put(withCompletionHabitIds({
               id: completionId, value: completion,
               sequence: completionSequenceForJournalDelta(delta, completionSequence, completionOrderEpoch)
-            });
+            }));
           } else {
             completionsStore.delete(completionId);
           }
@@ -2050,7 +2068,7 @@
             const combined = [...retainedEntries, ...rewrittenDesiredEntries]
               .sort((a, b) => Number(b.sequence || 0) - Number(a.sequence || 0));
             if (combined.length) {
-              completionsStore.put({ id: storageId, entries: combined });
+              completionsStore.put(withCompletionHabitIds({ id: storageId, entries: combined }));
             } else {
               completionsStore.delete(storageId);
             }
