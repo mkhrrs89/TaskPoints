@@ -633,7 +633,7 @@ test('targeted pilot reader uses Habit primary key, retaining packed cross-Habit
     ['h1', 'h2'], 'shared completion ID must index every participating Habit');
   const db = await app.runtime.open();
   const transaction = db.transaction.bind(db);
-  const calls = { targetedHabits: 0, fullHabits: 0, fullCompletions: 0 };
+  const calls = { targetedHabits: 0, fullHabits: 0, fullCompletions: 0, indexedCompletions: 0 };
   db.transaction = (...args) => {
     const tx = transaction(...args);
     const objectStore = tx.objectStore.bind(tx);
@@ -646,6 +646,13 @@ test('targeted pilot reader uses Habit primary key, retaining packed cross-Habit
         store.getAll = (...params) => { calls.fullHabits++; return originalGetAll(...params); };
       } else if (name === 'completions') {
         store.getAll = (...params) => { calls.fullCompletions++; return originalGetAll(...params); };
+        const originalIndex = store.index.bind(store);
+        store.index = (...params) => {
+          const index = originalIndex(...params);
+          const original = index.getAll.bind(index);
+          index.getAll = (...args) => { calls.indexedCompletions++; return original(...args); };
+          return index;
+        };
       }
       return store;
     };
@@ -659,7 +666,9 @@ test('targeted pilot reader uses Habit primary key, retaining packed cross-Habit
   assert.deepEqual(Array.from(result.completions, row => row.id), ['duplicate','duplicate']);
   assert.equal(calls.targetedHabits, 1);
   assert.equal(calls.fullHabits, 2, 'only the two whole-pilot parity preflights scan all Habits');
-  assert.equal(calls.fullCompletions, 3, 'complete scope is still verified on both sides');
+  assert.equal(calls.fullCompletions, 2, 'the two complete pilot preflights still scan all completions');
+  assert.equal(calls.indexedCompletions, 1, 'candidate reads only the Habit indexed packs');
+  assert.equal(result.lookupMode, 'indexed');
   const other = await app.runtime.readPilotHabitCandidate('h2');
   assert.equal(other.eligible, true);
   assert.deepEqual(Array.from(other.completions, row => row.points), [5]);
