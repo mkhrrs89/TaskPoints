@@ -166,3 +166,63 @@ test('reinstall does not wrap the handler more than once', () => {
   context.window.handleHabitBubbleTap(context.bubble);
   assert.equal(context.fastCalls(), 1);
 });
+
+test('queued stale Habit tap is not consumed before generation storage becomes readable', () => {
+  const pendingKey = 'taskpoints_v2_stale_habit_tap_v1';
+  const storage = new Map([['taskpoints_state_v2_dark_mode_v1', '1']]);
+  const pending = { version: 1, habitId: 'habit-1', dayKey: '2026-08-02',
+    generation: 'generation:valid', pathname: '/index.html', createdEpochMs: Date.now() };
+  const session = new Map([[pendingKey, JSON.stringify(pending)]]);
+  const timers = [];
+  let generationReadable = false, handlerCalls = 0;
+  const bubble = {
+    getAttribute(name) {
+      return { 'data-habit': 'habit-1', 'data-day': '2026-08-02' }[name] || '';
+    }
+  };
+  const document = {
+    readyState: 'complete', addEventListener() {},
+    querySelectorAll() { return [bubble]; }
+  };
+  const window = {
+    document, Date, location: { pathname: '/index.html' },
+    localStorage: { getItem(k) { return storage.get(k) ?? null; } },
+    sessionStorage: {
+      getItem(k) { return session.get(k) ?? null; },
+      removeItem(k) { session.delete(k); }
+    },
+    setTimeout(fn) { timers.push(fn); return timers.length; },
+    addEventListener() {},
+    handleHabitBubbleTap() { handlerCalls += 1; },
+    TaskPointsStateRuntimeV2: {
+      getStatus() {
+        return { generationReadable, currentGeneration: generationReadable ? 'generation:valid' : null,
+          externalRevisionInvalidated: false, readAuthority: 'legacy_only' };
+      },
+      beforeHabitInteraction() { return { proceed: generationReadable }; }
+    }
+  };
+  vm.runInContext(source, vm.createContext({ window, document, globalThis: window,
+    module: { exports: {} }, console, Date }));
+
+  // The initial install schedules a replay, but it must never consume an
+  // intercepted user action while its epoch cannot be validated.
+  for (let i = 0; i < 8 && timers.length; i += 1) timers.shift()();
+  assert.equal(handlerCalls, 0);
+  assert.ok(session.has(pendingKey), 'hold the continuation while generation is unreadable');
+  assert.equal(window.TaskPointsHabitFastPathControl.getStatus().staleTapReplays, 0);
+
+  generationReadable = true;
+  for (let i = 0; i < 20 && timers.length; i += 1) timers.shift()();
+  assert.equal(handlerCalls, 1, 'replay the original interaction exactly once after recovery');
+  assert.equal(session.has(pendingKey), false);
+  assert.equal(window.TaskPointsHabitFastPathControl.getStatus().staleTapReplays, 1);
+  for (let i = 0; i < 4 && timers.length; i += 1) timers.shift()();
+  assert.equal(handlerCalls, 1, 'subsequent timer passes must not repeat the tap');
+});
+
+test('old-generation stale tap is still discarded once the generation becomes readable', () => {
+  const sourcePattern = /generationReady && String\(pending\.generation \|\| ''\) !== String\(status\.currentGeneration\)/;
+  assert.match(source, sourcePattern,
+    'only a verifiably current epoch can authorize a replay; confirmed stale taps must be discarded');
+});
