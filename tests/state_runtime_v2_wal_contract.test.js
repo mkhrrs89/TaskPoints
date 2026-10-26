@@ -427,7 +427,7 @@ test('standalone WAL fallback never manufactures a new epoch when generation rea
   const sidecarBefore = localStorage.getItem('taskpoints_v2_pending_mutation_event_v1:' + saved.mutationId);
   // Simulate recovery while the generation module is unavailable. The WAL
   // module must not interpret transient storage denial as an absent epoch.
-  delete context.TaskPointsStateRuntimeV2Generation;
+  context.TaskPointsStateRuntimeV2Generation = null;
   const get = localStorage.getItem.bind(localStorage);
   localStorage.getItem = key => {
     if (String(key) === GENERATION_KEY) throw new Error('generation key SecurityError');
@@ -456,7 +456,10 @@ test('standalone WAL fallback never manufactures a new epoch when generation rea
 
 test('standalone WAL fallback creates an epoch only when storage proves key is missing', () => {
   const { api, context, localStorage } = install({ [DARK]: '1' });
-  delete context.TaskPointsStateRuntimeV2Generation;
+  // The full generation module creates its bootstrap epoch during setup.
+  // Remove it deliberately to model a truly absent key with verified reads.
+  localStorage.removeItem(GENERATION_KEY);
+  context.TaskPointsStateRuntimeV2Generation = null;
   assert.equal(localStorage.getItem(GENERATION_KEY), null);
   const result = api.appendHabitDelta(deltaA);
   assert.equal(result.written, true);
