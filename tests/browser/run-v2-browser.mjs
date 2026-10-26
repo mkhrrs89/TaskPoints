@@ -605,6 +605,93 @@ try {
     return { tabs:2, durableEntries:journal.length };
   });
 
+  await run('ephemeral V1-only pilot read probe resets across five reloads and keeps WAL recovery intact', async context => {
+    const page=await open(context);
+    const first=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const disabled=await runtime.probePilotHabitRead('h1');
+      runtime.setPilotReadProbeEnabled(true);
+      const enabled=await runtime.probePilotHabitRead('h1');
+      return {disabled,enabled,status:runtime.getStatus(),
+        originalV1:localStorage.getItem(window.TaskPointsCore.STORAGE_KEY)};
+    });
+    assert.equal(first.disabled.reason,'probe_disabled');
+    assert.equal(first.enabled.matched,true,JSON.stringify(first.enabled));
+    assert.equal(first.enabled.selectedSource,'legacy_only');
+    assert.equal(first.status.readAuthority,'legacy_only');
+    for(let i=0;i<5;i++){
+      await page.reload({waitUntil:'load'});
+      await page.evaluate(()=>window.V2BrowserFixture.start());
+      const before=await page.evaluate(async()=>{
+        const runtime=window.TaskPointsStateRuntimeV2;
+        const status=runtime.getStatus();
+        return {active:status.pilotReadProbeEnabled,
+          disabled:await runtime.probePilotHabitRead('h1'),
+          rawV1:localStorage.getItem(window.TaskPointsCore.STORAGE_KEY)};
+      });
+      assert.equal(before.active,false,'read probe must not persist across reloads');
+      assert.equal(before.disabled.reason,'probe_disabled');
+      assert.equal(before.disabled.selectedSource,'legacy_only');
+      assert.equal(before.rawV1,first.originalV1);
+      await page.evaluate(()=>window.TaskPointsStateRuntimeV2.setPilotReadProbeEnabled(true));
+      const proof=await page.evaluate(()=>window.TaskPointsStateRuntimeV2.probePilotHabitRead('h1'));
+      assert.equal(proof.matched,true,JSON.stringify(proof));
+      assert.equal(proof.lookupMode,'indexed');
+      assert.equal(proof.selectedSource,'legacy_only');
+      assert.equal((await parity(page)).match,true);
+      assert.equal((await page.evaluate(()=>window.TaskPointsStateRuntimeV2.getStatus())).readAuthority,'legacy_only');
+    }
+    await page.evaluate(()=>window.V2BrowserFixture.delta('h1','2026-10-22','full',1));
+    await settled(page,1);
+    const after=await page.evaluate(()=>window.TaskPointsStateRuntimeV2.probePilotHabitRead('h1'));
+    assert.equal(after.matched,true,JSON.stringify(after));
+    assert.equal(after.counts.candidateCompletions,1);
+    assert.equal(after.counts.legacyCompletions,1);
+    await parity(page);
+    await page.evaluate(()=>window.TaskPointsStateRuntimeV2.setPilotReadProbeEnabled(false));
+    assert.equal((await page.evaluate(()=>window.TaskPointsStateRuntimeV2.probePilotHabitRead('h1'))).reason,'probe_disabled');
+    return {reloads:5,probeDefaultsOff:true,legacyOnly:true,postReloadCompletionCompared:true};
+  });
+
+  await run('cross-tab V2 revision invalidates probe until refreshed V1 and V2 match again', async context => {
+    const first=await open(context);
+    const stale=await open(context);
+    const ready=await stale.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      runtime.setPilotReadProbeEnabled(true);
+      return runtime.probePilotHabitRead('h2');
+    });
+    assert.equal(ready.matched,true,JSON.stringify(ready));
+    await first.evaluate(()=>window.V2BrowserFixture.delta('h2','2026-10-22','full',2));
+    await settled(first,1);
+    await stale.waitForFunction(()=>window.TaskPointsStateRuntimeV2.getStatus().externalRevisionInvalidated===true,
+      null,{timeout:12000});
+    const refused=await stale.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const before=await runtime.probePilotHabitRead('h2');
+      return {before,rawLegacy:localStorage.getItem(window.TaskPointsCore.STORAGE_KEY)};
+    });
+    assert.equal(refused.before.matched,false);
+    assert.equal(refused.before.reason,'external_revision_invalidated');
+    assert.equal(refused.before.selectedSource,'legacy_only');
+    assert.equal(Object.hasOwn(refused.before,'habit'),false);
+    await stale.reload({waitUntil:'load'});
+    await stale.evaluate(()=>window.V2BrowserFixture.start());
+    const recovered=await stale.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const off=await runtime.probePilotHabitRead('h2');
+      runtime.setPilotReadProbeEnabled(true);
+      const result=await runtime.probePilotHabitRead('h2');
+      return {off,result,status:runtime.getStatus()};
+    });
+    assert.equal(recovered.off.reason,'probe_disabled');
+    assert.equal(recovered.result.matched,true,JSON.stringify(recovered.result));
+    assert.equal(recovered.result.counts.candidateCompletions,1);
+    assert.equal(recovered.status.readAuthority,'legacy_only');
+    assert.equal((await parity(stale)).match,true);
+    return {staleTabRefused:true,refreshedTabMatched:true,readAuthority:'legacy_only'};
+  });
+
   await run('repeated reloads retain V2 mutation ledger and completed Habit parity', async context => {
     const page=await open(context);
     await page.evaluate(()=>{
