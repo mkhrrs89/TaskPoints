@@ -780,3 +780,94 @@ test('preview completion-index coverage refuses incomplete WAL without inspectin
   assert.equal(app.wal.getPendingRows().rows[0].id, mutation.mutationId);
   assert.equal(app.runtime.getStatus().readAuthority, 'legacy_only');
 });
+
+async function installLegacyV2Database(app, rows) {
+  const request = app.indexedDB.open(DB_NAME, 1);
+  return new Promise((resolve, reject) => {
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      for (const name of ['habits', 'completions', 'mutations', 'meta'])
+        db.createObjectStore(name, { keyPath: 'id' });
+      const store = request.transaction.objectStore('completions');
+      for (const row of rows) store.put(row);
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+test('V2 index upgrade atomically backfills old mixed-Habit completion packs without altering event bytes', async () => {
+  const app = install();
+  const original = {
+    id: 'shared-legacy',
+    entries: [
+      { sequence: 17, value: { id: 'shared-legacy', habitId: 'h1', source: 'habit', points: 3 } },
+      { sequence: 16, value: { id: 'shared-legacy', habitId: 'h2', source: 'vice', points: 4 } },
+      { sequence: 15, value: { id: 'shared-legacy', habitId: 'h1', source: 'habit', points: 5 } }
+    ]
+  };
+  await installLegacyV2Database(app, [original]);
+  const before = structuredClone(app.indexedDB.dump(DB_NAME));
+  const savedV1 = app.localStorage.getItem(LEGACY_KEY);
+  const db = await app.runtime.open();
+  assert.equal(db.version, 2);
+  assert.equal(db.transaction('completions','readonly').objectStore('completions')
+    .indexNames.contains('by_habit_ids'), true);
+  const backfilled = app.indexedDB.dump(DB_NAME).completions[0];
+  assert.deepEqual(Array.from(backfilled.habitIds), ['h1','h2']);
+  assert.deepEqual(backfilled.entries, original.entries,
+    'upgrade must preserve every packed entry and its ordering/sequence');
+  for (const habitId of ['h1','h2']) {
+    const tx = db.transaction('completions', 'readonly');
+    const result = await new Promise((resolve, reject) => {
+      const req = tx.objectStore('completions').index('by_habit_ids').getAll(habitId);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    assert.equal(result.length,1);
+    assert.equal(result[0].id,original.id);
+  }
+  assert.equal(app.localStorage.getItem(LEGACY_KEY),savedV1);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME).mutations,before.mutations);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME).meta,before.meta);
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
+
+test('V2 index migration aborted by a failed backfill rolls back version, index and bytes; retry succeeds', async () => {
+  const app = install();
+  const old = { id: 'old-row', entries: [
+    { sequence: 3, value: { id: 'old-row', habitId: 'h1', source: 'habit' } },
+    { sequence: 2, value: { id: 'old-row', habitId: 'h2', source: 'vice' } }
+  ] };
+  await installLegacyV2Database(app,[old]);
+  const original = structuredClone(app.indexedDB.dump(DB_NAME));
+  const legacyRaw = app.localStorage.getItem(LEGACY_KEY);
+  app.indexedDB.failNext({store:'completions',operation:'put',
+    error: new Error('synthetic backfill QuotaExceededError')});
+  await assert.rejects(app.runtime.open(), /QuotaExceededError|fake_indexeddb_upgrade_aborted/);
+  assert.equal(app.indexedDB._databases.get(DB_NAME).version,1);
+  assert.equal(app.indexedDB._databases.get(DB_NAME)._indexes
+    .get('completions').has('by_habit_ids'),false);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME),original,'no partial upgrade may persist');
+  assert.equal(app.localStorage.getItem(LEGACY_KEY),legacyRaw);
+  const retry = await app.runtime.open();
+  assert.equal(retry.version,2);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME).completions[0].habitIds,['h1','h2']);
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
+
+test('V2 index migration read error aborts and retains all legacy completion evidence', async () => {
+  const app = install();
+  const old = { id:'old', value: {id:'old', habitId:'h1', source:'habit',points:8}, sequence:1 };
+  await installLegacyV2Database(app,[old]);
+  const original = structuredClone(app.indexedDB.dump(DB_NAME));
+  app.indexedDB.failNext({store:'completions',operation:'getAll',
+    error:new Error('synthetic upgrade read denial')});
+  await assert.rejects(app.runtime.open(), /synthetic upgrade read denial/);
+  assert.equal(app.indexedDB._databases.get(DB_NAME).version,1);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME),original);
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+  const retry=await app.runtime.open();
+  assert.equal(retry.version,2);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME).completions[0].habitIds,['h1']);
+});
