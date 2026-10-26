@@ -960,6 +960,80 @@ try {
       orphanWalRows:0,generationUnchanged:true,parity:true};
   });
 
+  await run('standalone WAL fallback rejects denied generation reads and retains epoch through restart',async context=>{
+    const page=await open(context);
+    const before=await page.evaluate(()=>{
+      sessionStorage.setItem('taskpoints_state_v2_wal_test_armed_v1','1');
+      window.V2BrowserFixture.delta('h1','2026-10-20','full',1);
+      const wal=window.TaskPointsStateRuntimeV2Wal;
+      const originalRow=wal.getPendingRows().rows[0];
+      if(!originalRow) throw Error('Expected held WAL before generation access denial');
+      const generationKey='taskpoints_state_v2_generation_v1';
+      const sharedKey='taskpoints_v2_pending_mutations_v1';
+      const sidecarKey='taskpoints_v2_pending_mutation_event_v1:'+originalRow.id;
+      const storedGeneration=window.TaskPointsStateRuntimeV2Generation.read();
+      const originalShared=localStorage.getItem(sharedKey);
+      const originalSidecar=localStorage.getItem(sidecarKey);
+      const storedV1=localStorage.getItem(window.TaskPointsCore.STORAGE_KEY);
+      const originalGet=Storage.prototype.getItem;
+      const originalModule=window.TaskPointsStateRuntimeV2Generation;
+      let attempts=0,readsDenied=0,diagnostic=null;
+      try{
+        window.TaskPointsStateRuntimeV2Generation=null;
+        Storage.prototype.getItem=function(key){
+          if(this===localStorage&&String(key)===generationKey){
+            readsDenied++;
+            throw new DOMException('Synthetic WAL fallback epoch read denied','SecurityError');
+          }
+          return originalGet.call(this,key);
+        };
+        for(const fn of [
+          ()=>wal.ensureGeneration(),
+          ()=>wal.mutationIdForDelta({id:'habit:h2:2026-10-21',habitId:'h2',
+            dayKey:'2026-10-21',status:'full',source:'habit',done:true}),
+          ()=>wal.appendHabitDelta({id:'habit:h2:2026-10-21',habitId:'h2',
+            dayKey:'2026-10-21',status:'full',source:'habit',done:true})
+        ]){
+          try{fn();}catch(error){
+            if(/wal_storage_read_failed/.test(String(error))) attempts++;
+          }
+        }
+        diagnostic=wal.getStatus();
+      }finally{
+        Storage.prototype.getItem=originalGet;
+        window.TaskPointsStateRuntimeV2Generation=originalModule;
+      }
+      return {attempts,readsDenied,
+        unreadable:diagnostic.generationReadable===false&&diagnostic.pendingCount===null,
+        originalGeneration:storedGeneration,
+        restoredGeneration:window.TaskPointsStateRuntimeV2Generation.read(),
+        originalId:originalRow.id,
+        rawSharedUnchanged:localStorage.getItem(sharedKey)===originalShared,
+        sidecarUnchanged:localStorage.getItem(sidecarKey)===originalSidecar,
+        v1Unchanged:localStorage.getItem(window.TaskPointsCore.STORAGE_KEY)===storedV1,
+        rows:wal.getPendingRows().rows.map(row=>row.id),
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    });
+    assert.equal(before.attempts,3);
+    assert.ok(before.readsDenied>=4);
+    assert.equal(before.unreadable,true);
+    assert.equal(before.restoredGeneration,before.originalGeneration);
+    assert.equal(before.rawSharedUnchanged,true);
+    assert.equal(before.sidecarUnchanged,true);
+    assert.equal(before.v1Unchanged,true);
+    assert.deepEqual(before.rows,[before.originalId]);
+    assert.equal(before.authority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    await page.waitForFunction(()=>{
+      const status=window.V2BrowserFixture?.status();
+      return status?.wal.pendingCount===0&&status.bridge.replayCleared>=1;
+    },null,{timeout:25000});
+    const report=await parity(page);
+    assert.equal(report.actualCounts.completions,1);
+    return {deniedFallbackGenerationReads:true,originalEpochRetained:true,
+      v1AndWalUnchanged:true,replayedExactlyOnceAfterRestart:true,parity:true};
+  });
+
   await run('temporary shared and sidecar WAL read denial preserves mutation evidence through reload',async context=>{
     const page=await open(context);
     const evidence=await page.evaluate(()=>{
