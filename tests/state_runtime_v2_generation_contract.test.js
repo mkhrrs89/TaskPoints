@@ -662,3 +662,26 @@ test('targeted pilot reader uses Habit primary key, retaining packed cross-Habit
   assert.deepEqual(other.completions.map(row => row.points), [5]);
   assert.equal(app.runtime.getStatus().readAuthority, 'legacy_only');
 });
+
+test('targeted Habit candidate read fails closed on IDB primary-key failure and recovers without writes', async () => {
+  const app = install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const legacyBefore = app.localStorage.getItem(LEGACY_KEY);
+  const metaBefore = structuredClone(runtimeMeta(app));
+  const habitRowsBefore = structuredClone(app.indexedDB.dump(DB_NAME).habits);
+  app.indexedDB.failNext({
+    store: 'habits', operation: 'get', error: Error('synthetic targeted IDB read failure')
+  });
+  const denied = await app.runtime.readPilotHabitCandidate('h1');
+  assert.equal(denied.eligible, false);
+  assert.equal(denied.reason, 'storage_unreadable');
+  assert.equal(Object.hasOwn(denied, 'habit'), false);
+  assert.equal(Object.hasOwn(denied, 'completions'), false);
+  assert.equal(app.localStorage.getItem(LEGACY_KEY), legacyBefore);
+  assert.deepEqual(runtimeMeta(app), metaBefore);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME).habits, habitRowsBefore);
+  const retry = await app.runtime.readPilotHabitCandidate('h1');
+  assert.equal(retry.eligible, true, JSON.stringify(retry));
+  assert.equal(retry.habit.id, 'h1');
+  assert.equal(app.runtime.getStatus().readAuthority, 'legacy_only');
+});
