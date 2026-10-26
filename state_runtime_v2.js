@@ -417,9 +417,20 @@
         catch (_) { try { request.transaction?.abort?.(); } catch (_) {} }
       };
       request.onsuccess = () => {
+        const connection = request.result;
+        // A second tab requesting a newer schema version must never leave
+        // this page continuing to use a stale V2 connection. Close it,
+        // invalidate preview candidates, and let V1 stay authoritative.
+        connection.onversionchange = () => {
+          externalRevisionInvalidated = true;
+          lastError = 'state_runtime_v2_connection_version_changed';
+          mark('stateV2.connectionVersionChanged', { database: DB_NAME });
+          try { connection.close(); } catch (_) {}
+          if (dbPromise) dbPromise = null;
+        };
         opened = true;
         mark('stateV2.opened', { database: DB_NAME, version: DB_VERSION });
-        resolve(request.result);
+        resolve(connection);
       };
       request.onerror = () => {
         const error = request.error || new Error('state_runtime_v2_open_failed');
