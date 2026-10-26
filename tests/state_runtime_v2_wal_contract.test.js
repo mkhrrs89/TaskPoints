@@ -363,3 +363,56 @@ test('independent sidecar read denial blocks replay and selective cleanup withou
     'selective cleanup resumes only once both durable records are readable');
   assert.equal(api.getPendingRows().rows.length, 0);
 });
+
+test('denied WAL key enumeration fails closed without crashing status or dropping sidecars', () => {
+  const { api, localStorage } = install({ [DARK]: '1' });
+  const first = api.appendHabitDelta(deltaA);
+  const sharedBefore = localStorage.getItem(KEY);
+  const sidecarKey = 'taskpoints_v2_pending_mutation_event_v1:' + first.mutationId;
+  const sidecarBefore = localStorage.getItem(sidecarKey);
+  const originalKey = localStorage.key;
+  localStorage.key = () => { throw new Error('synthetic localStorage.key SecurityError'); };
+  try {
+    const pending = api.getPendingRows();
+    assert.equal(pending.ok, false);
+    assert.match(pending.error, /synthetic localStorage\.key SecurityError/);
+    const status = api.getStatus();
+    assert.equal(status.malformed, true);
+    assert.equal(status.pendingCount, null);
+    assert.equal(status.independentEventCount, null);
+    assert.match(status.lastError, /state_runtime_v2_wal_inventory_unreadable/);
+    assert.throws(() => api.appendHabitDelta(deltaB), /state_runtime_v2_wal_malformed/);
+    assert.throws(() => api.removeMutation(first.mutationId), /state_runtime_v2_wal_malformed/);
+  } finally {
+    localStorage.key = originalKey;
+  }
+  assert.equal(localStorage.getItem(KEY), sharedBefore);
+  assert.equal(localStorage.getItem(sidecarKey), sidecarBefore);
+  assert.deepEqual(api.getPendingRows().rows.map(row => row.id), [first.mutationId]);
+  assert.equal(api.getStatus().malformed, false);
+  assert.equal(api.removeMutation(first.mutationId).removed, true);
+});
+
+test('denied localStorage length inventory keeps pending WAL unknown rather than falsely zero', () => {
+  const { api, localStorage } = install({ [DARK]: '1' });
+  const first = api.appendHabitDelta(deltaA);
+  const sharedBefore = localStorage.getItem(KEY);
+  Object.defineProperty(localStorage, 'length', {
+    configurable: true,
+    get() { throw new Error('synthetic localStorage.length SecurityError'); }
+  });
+  try {
+    const status = api.getStatus();
+    assert.equal(status.malformed, true);
+    assert.equal(status.pendingCount, null);
+    assert.equal(status.independentEventCount, null);
+    assert.match(status.lastError, /state_runtime_v2_wal_inventory_unreadable/);
+    assert.equal(api.getPendingRows().ok, false);
+    assert.throws(() => api.removeMutation(first.mutationId), /state_runtime_v2_wal_malformed/);
+  } finally {
+    delete localStorage.length;
+  }
+  assert.equal(localStorage.getItem(KEY), sharedBefore);
+  assert.equal(api.getPendingRows().rows.length, 1);
+  assert.equal(api.getStatus().independentEventCount, 1);
+});
