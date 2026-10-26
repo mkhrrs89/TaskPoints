@@ -1136,3 +1136,45 @@ test('rapid disable and re-enable cannot resurrect an older successful V2 read p
   assert.deepEqual(app.indexedDB.dump(DB_NAME),originalMirror);
   assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
 });
+
+test('brief dark-mirror disable and re-enable rejects the original parity read even if V1 and V2 match',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const originalV1=app.localStorage.getItem(LEGACY_KEY);
+  const beforeV2=structuredClone(app.indexedDB.dump(DB_NAME));
+  const db=await app.runtime.open();
+  const originalTransaction=db.transaction.bind(db);
+  let changed=0;
+  db.transaction=(...args)=>{
+    const tx=originalTransaction(...args);
+    const originalStore=tx.objectStore.bind(tx);
+    tx.objectStore=name=>{
+      const store=originalStore(name);
+      if(name==='habits'){
+        const originalGetAll=store.getAll.bind(store);
+        store.getAll=(...params)=>{
+          if(changed++===0){
+            app.runtime.disableDarkMirror();
+            // Simulate a rapid user re-enabling the flag before the
+            // asynchronous IndexedDB read settles, without reseeding.
+            app.localStorage.setItem(DARK,'1');
+          }
+          return originalGetAll(...params);
+        };
+      }
+      return store;
+    };
+    return tx;
+  };
+  const refused=await app.runtime.inspectPilotReadiness();
+  db.transaction=originalTransaction;
+  assert.equal(changed,1);
+  assert.equal(refused.eligible,false);
+  assert.equal(refused.reason,'dark_disabled_during_check');
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+  assert.equal(app.runtime.getStatus().darkEnabled,true);
+  assert.equal(app.localStorage.getItem(LEGACY_KEY),originalV1);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME),beforeV2);
+  assert.equal((await app.runtime.inspectPilotReadiness()).eligible,true,
+    'newly started parity check may run only after a fresh complete inspection');
+});
