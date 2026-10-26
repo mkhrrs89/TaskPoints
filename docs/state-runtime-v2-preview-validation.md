@@ -249,3 +249,16 @@ A small diagnostic-only Stage-C rehearsal is now available on the V2 development
 - The browser matrix now includes a five-reload default-off check, a successful candidate check before/after an actual Habit completion, stale-tab revision refusal, post-reload recovery, and an unchanged V1 authority verdict. Node tests additionally inject an opt-out in the middle of IDB access and confirm no late result is accepted.
 
 This is a diagnostic prerequisite. A real targeted V2 read switch must wait for the separate, controlled mutation-authority stage, explicit device tests and a tested rollback. No automatic cutover is performed.
+
+## October 26 — Repeated diagnostic read race protection
+
+The opt-in Habit read probe is **not** a Stage-C production switch; V1 remains the only selected read authority. A follow-up race audit identified an ABA possibility: a diagnostic read started in one enabled session could return after an immediate off/on toggle and see a misleading `enabled: true` value. Likewise, a mirror parity read might begin before a quick disable/re-enable and find V2 enabled again at completion.
+
+The development runtime now uses volatile per-session counters to fence these cases:
+
+- Every explicit probe toggle starts a new probe epoch. A comparison from an older epoch is refused even if the probe is enabled again by the time it returns. Fresh comparisons in the new epoch remain allowed.
+- Every public dark-mirror enable/disable increments a separate control epoch. A readiness check that crosses one of those transitions is refused, even when the resulting persisted flag is again enabled.
+- Refusals preserve V1 data, indexed V2 records, WAL entries, and the existing user interface. They do not select V2 reads or repair a mismatch.
+- Contract coverage injects off/on cycles during IndexedDB reads and verifies the refusal, counters, recovery via a fresh check, and unchanged records.
+
+These protections address local public control transitions. They are **not** a distributed lock or proof that every browser storage transition is observable. Production authority promotion remains blocked by the separate later migration and physical-device validation gates.
