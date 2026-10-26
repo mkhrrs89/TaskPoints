@@ -511,3 +511,70 @@ test('preview pilot readiness fails closed on denied WAL reads and changed gener
   app.localStorage.setItem(GENERATION_KEY, originalEpoch);
   assert.equal((await app.runtime.inspectPilotReadiness()).eligible, true);
 });
+
+test('guarded pilot Habit candidate exposes isolated preview records without replacing V1 authority', async () => {
+  const app = install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const originalV1 = app.localStorage.getItem(LEGACY_KEY);
+  const originalMeta = structuredClone(runtimeMeta(app));
+  const read = await app.runtime.readPilotHabitCandidate('h1');
+  assert.equal(read.eligible, true, JSON.stringify(read));
+  assert.equal(read.source, 'v2_preview_only');
+  assert.equal(read.readAuthority, 'legacy_only');
+  assert.equal(read.habit.id, 'h1');
+  assert.equal(read.completions.length, 0);
+  read.habit.name = 'Mutated preview only';
+  assert.equal((await app.runtime.readPilotHabitCandidate('h1')).habit.name, 'Read');
+  assert.equal(app.localStorage.getItem(LEGACY_KEY), originalV1);
+  assert.deepEqual(runtimeMeta(app), originalMeta);
+  assert.equal(app.runtime.getStatus().readAuthority, 'legacy_only');
+  const invalid = await app.runtime.readPilotHabitCandidate('   ');
+  assert.equal(invalid.eligible, false);
+  assert.equal(invalid.reason, 'habit_id_required');
+  assert.equal(Object.hasOwn(invalid, 'habit'), false);
+  const missing = await app.runtime.readPilotHabitCandidate('does-not-exist');
+  assert.equal(missing.eligible, true);
+  assert.equal(missing.habit, null);
+  assert.equal(missing.completions.length, 0);
+});
+
+test('guarded pilot Habit candidate refuses pending mutations and same-generation V1 mismatch', async () => {
+  const app = install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const first = app.wal.appendHabitDelta(delta());
+  const pending = await app.runtime.readPilotHabitCandidate('h1');
+  assert.equal(pending.eligible, false);
+  assert.equal(pending.reason, 'wal_pending');
+  assert.equal(Object.hasOwn(pending, 'habit'), false);
+  app.wal.removeMutation(first.mutationId);
+  const initialRaw = app.localStorage.getItem(LEGACY_KEY);
+  app.localStorage.setItem(LEGACY_KEY, JSON.stringify(legacyState('h1', 'External edit')));
+  const mismatch = await app.runtime.readPilotHabitCandidate('h1');
+  assert.equal(mismatch.eligible, false);
+  assert.equal(mismatch.reason, 'pilot_parity_mismatch');
+  assert.equal(Object.hasOwn(mismatch, 'completions'), false);
+  assert.equal(JSON.parse(app.localStorage.getItem(LEGACY_KEY)).habits[0].name, 'External edit');
+  app.localStorage.setItem(LEGACY_KEY, initialRaw);
+  assert.equal((await app.runtime.readPilotHabitCandidate('h1')).eligible, true);
+});
+
+test('guarded pilot Habit candidate rejects a concurrent V1 edit during its read window', async () => {
+  const app = install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const get = app.localStorage.getItem.bind(app.localStorage);
+  let v1Reads = 0;
+  app.localStorage.getItem = key => {
+    if (String(key) === LEGACY_KEY && ++v1Reads === 3) {
+      app.localStorage.setItem(LEGACY_KEY, JSON.stringify(legacyState('h1', 'Changed during async read')));
+    }
+    return get(key);
+  };
+  const result = await app.runtime.readPilotHabitCandidate('h1');
+  app.localStorage.getItem = get;
+  assert.ok(v1Reads >= 3, 'a second preflight must follow the candidate IDB read');
+  assert.equal(result.eligible, false);
+  assert.equal(result.reason, 'pilot_parity_mismatch');
+  assert.equal(Object.hasOwn(result, 'habit'), false);
+  assert.equal(JSON.parse(app.localStorage.getItem(LEGACY_KEY)).habits[0].name, 'Changed during async read');
+  assert.equal(app.runtime.getStatus().readAuthority, 'legacy_only');
+});
