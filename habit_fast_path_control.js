@@ -65,8 +65,19 @@
         return false;
       }
     } catch (_) {
-      // V2 is preview-only here. Never make the existing Habit path inert
-      // because the invalidation guard itself failed.
+      // An active V2 preview Home is bound to its startup generation. If its
+      // safety guard crashes, running the old handler can apply a stale tap
+      // after an import in another tab. Only fail closed when the page is
+      // positively known to have an active V2 generation; V1-only Home keeps
+      // its existing legacy behavior.
+      let activeV2Page = false;
+      try {
+        activeV2Page = Boolean(global.TaskPointsStateRuntimeV2?.getStatus?.()?.interactionPageGeneration);
+      } catch (_) {}
+      if (activeV2Page) {
+        lastReason = 'v2_interaction_guard_failed_closed';
+        return false;
+      }
     }
     return true;
   }
