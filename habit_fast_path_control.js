@@ -92,11 +92,32 @@
     if (staleTapReplayScheduled || !readStaleTap() || typeof global.setTimeout !== 'function') return;
     staleTapReplayScheduled = true;
     let attempts = 0;
+    const retry = () => {
+      attempts += 1;
+      if (attempts > 100) {
+        // Keep the session-backed tap available for a later page resume or
+        // reload. Do not confuse a temporarily inaccessible storage backend
+        // with an explicit decision to discard the user's action.
+        staleTapReplayScheduled = false;
+        return;
+      }
+      global.setTimeout(tryReplay, 100);
+    };
     const tryReplay = () => {
       const pending = readStaleTap();
       if (!pending) { staleTapReplayScheduled = false; return; }
       const runtime = global.TaskPointsStateRuntimeV2;
-      const status = runtime?.getStatus?.();
+      let status = null;
+      let darkMode = null;
+      try {
+        status = runtime?.getStatus?.() || null;
+        darkMode = global.localStorage?.getItem?.('taskpoints_state_v2_dark_mode_v1') ?? null;
+      } catch (_) {
+        // A transient SecurityError must not eat the queued tap or crash the
+        // timer. Retry after the browser resumes access to its storage.
+        retry();
+        return;
+      }
       const generationReady = status?.generationReadable !== false
         && Boolean(status?.currentGeneration);
       const age = Date.now() - Number(pending.createdEpochMs || 0);
@@ -104,7 +125,7 @@
         || !Number.isFinite(age) || age < 0 || age > STALE_TAP_MAX_AGE_MS
         || String(pending.pathname || '') !== String(global.location?.pathname || '')
         || (generationReady && String(pending.generation || '') !== String(status.currentGeneration))
-        || global.localStorage?.getItem?.('taskpoints_state_v2_dark_mode_v1') !== '1') {
+        || darkMode !== '1') {
         discardStaleTap();
         staleTapReplayScheduled = false;
         return;
@@ -115,18 +136,13 @@
         && String(node?.getAttribute?.('data-day')) === String(pending.dayKey));
       if (!bubble || !status || !generationReady || status.externalRevisionInvalidated
         || status.readAuthority !== 'legacy_only' || !controlledHandler) {
-        attempts += 1;
-        if (attempts > 100) {
-          discardStaleTap();
-          staleTapReplayScheduled = false;
-        } else {
-          global.setTimeout(tryReplay, 100);
-        }
+        retry();
         return;
       }
       // At-most-once: consume first, then use the ordinary journal-first tap.
       // A subsequent stale-revision guard can requeue on a new reload.
-      try { global.sessionStorage?.removeItem?.(STALE_TAP_KEY); } catch (_) { return; }
+      try { global.sessionStorage?.removeItem?.(STALE_TAP_KEY); }
+      catch (_) { retry(); return; }
       staleTapReplayScheduled = false;
       staleTapReplays += 1;
       global.handleHabitBubbleTap?.(bubble);
