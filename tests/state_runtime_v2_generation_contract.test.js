@@ -1012,3 +1012,75 @@ test('ephemeral V2 read probe refuses pending WAL and V1 divergence without expo
   assert.equal(Object.hasOwn(mismatch,'completions'),false);
   assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
 });
+
+test('switching off an in-flight read probe refuses its late IDB candidate without switching authority',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  app.runtime.setPilotReadProbeEnabled(true);
+  const db=await app.runtime.open();
+  const originalTransaction=db.transaction.bind(db);
+  let triggered=0;
+  db.transaction=(...args)=>{
+    const tx=originalTransaction(...args);
+    const originalStore=tx.objectStore.bind(tx);
+    tx.objectStore=name=>{
+      const store=originalStore(name);
+      if(name==='completions'){
+        const originalIndex=store.index.bind(store);
+        store.index=indexName=>{
+          const index=originalIndex(indexName);
+          const originalGetAll=index.getAll.bind(index);
+          index.getAll=key=>{
+            triggered++;
+            app.runtime.setPilotReadProbeEnabled(false);
+            return originalGetAll(key);
+          };
+          return index;
+        };
+      }
+      return store;
+    };
+    return tx;
+  };
+  const result=await app.runtime.probePilotHabitRead('h1');
+  db.transaction=originalTransaction;
+  assert.equal(triggered,1);
+  assert.equal(result.matched,false);
+  assert.equal(result.reason,'probe_disabled_during_check');
+  assert.equal(result.selectedSource,'legacy_only');
+  assert.equal(Object.hasOwn(result,'habit'),false);
+  assert.equal(app.runtime.getStatus().pilotReadProbeEnabled,false);
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
+
+test('disabling dark mirror during asynchronous parity check makes V2 readiness fail closed',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const db=await app.runtime.open();
+  const originalTransaction=db.transaction.bind(db);
+  let triggered=0;
+  db.transaction=(...args)=>{
+    const tx=originalTransaction(...args);
+    const originalStore=tx.objectStore.bind(tx);
+    tx.objectStore=name=>{
+      const store=originalStore(name);
+      if(name==='habits'){
+        const originalGetAll=store.getAll.bind(store);
+        store.getAll=(...params)=>{
+          if(!triggered++){app.runtime.disableDarkMirror();}
+          return originalGetAll(...params);
+        };
+      }
+      return store;
+    };
+    return tx;
+  };
+  const check=await app.runtime.inspectPilotReadiness();
+  db.transaction=originalTransaction;
+  assert.equal(triggered,1);
+  assert.equal(check.eligible,false);
+  assert.equal(check.reason,'dark_disabled_during_check');
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+  assert.equal(app.runtime.getStatus().darkEnabled,false);
+  assert.equal(app.wal.getPendingRows().rows.length,0);
+});
