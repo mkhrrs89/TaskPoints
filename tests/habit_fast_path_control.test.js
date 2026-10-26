@@ -237,7 +237,7 @@ function makePendingTapHarness(options = {}) {
   })]]);
   const timers = [];
   const listeners = new Map();
-  let fault = null, calls = 0;
+  let fault = null, calls = 0, failReadbackOnce = false;
   const bubble = {
     getAttribute(k) { return { 'data-habit': 'habit-1', 'data-day': '2026-08-02' }[k] || ''; }
   };
@@ -254,11 +254,19 @@ function makePendingTapHarness(options = {}) {
       }
     },
     sessionStorage: {
-      getItem(k) { return session.get(k) ?? null; },
+      getItem(k) {
+        if (failReadbackOnce) {
+          failReadbackOnce = false;
+          throw Error('synthetic readback SecurityError');
+        }
+        return session.get(k) ?? null;
+      },
+      setItem(k, value) { session.set(k, String(value)); },
       removeItem(k) {
         if (fault === 'remove') throw Error('synthetic session write SecurityError');
         if (fault === 'silent-remove') return; // storage silently refused the deletion
         session.delete(k);
+        if (fault === 'readback') failReadbackOnce = true;
       }
     },
     TaskPointsStateRuntimeV2: {
@@ -354,4 +362,19 @@ test('silently ignored sessionStorage removal never permits duplicate Habit repl
   h.listeners.get('pageshow').forEach(fn => fn());
   assert.equal(h.timers.length, 0);
   assert.equal(h.calls(), 1, 'a page resume cannot replay the same tap again');
+});
+
+test('failed session readback after successful removal restores the original pending tap', () => {
+  const h = makePendingTapHarness();
+  h.setFault('readback');
+  for (let n = 0; n < 3; n += 1) h.pump(); // Install Home helpers.
+  h.pump(); // Removal happened; its verification read threw.
+  assert.equal(h.calls(), 0, 'unverified removal must never execute the action');
+  assert.equal(h.session.has(h.KEY), true, 'requeue the intent before retrying');
+  assert.equal(h.window.TaskPointsHabitFastPathControl.getStatus().staleTapReplays, 0);
+  h.setFault(null);
+  h.pump();
+  assert.equal(h.calls(), 1);
+  assert.equal(h.session.has(h.KEY), false);
+  assert.equal(h.window.TaskPointsHabitFastPathControl.getStatus().staleTapReplays, 1);
 });
