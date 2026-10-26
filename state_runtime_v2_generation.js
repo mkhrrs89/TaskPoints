@@ -126,8 +126,19 @@
   }
 
   function read() {
-    const value = safeGet(KEY);
-    return typeof value === 'string' && value ? value : null;
+    // A denied read is not proof that the old generation was removed. Never
+    // manufacture a replacement epoch during a transient storage failure.
+    try {
+      const storage = global.localStorage;
+      if (!storage || typeof storage.getItem !== 'function') {
+        throw new Error('storage_unavailable');
+      }
+      const value = storage.getItem(KEY);
+      return typeof value === 'string' && value ? value : null;
+    } catch (error) {
+      lastError = `state_runtime_v2_generation_read_failed:${String(error?.message || error)}`;
+      throw new Error(lastError);
+    }
   }
 
   function notify(event) {
@@ -167,11 +178,16 @@
   }
 
   function getStatus() {
+    let generation = null;
+    let generationReadable = true;
+    try { generation = read(); }
+    catch (_) { generationReadable = false; }
     return {
       installed: true,
       enabled: isEnabled(),
       key: KEY,
-      generation: read(),
+      generation,
+      generationReadable,
       rotations,
       externalChanges,
       previewQueryBootstrap,
