@@ -703,7 +703,9 @@
   async function readV2CollectionsFromDb(db) {
     const tx = db.transaction(['habits', 'completions'], 'readonly');
     const habitsRequest = tx.objectStore('habits').getAll();
-    const completionsRequest = tx.objectStore('completions').getAll();
+    const completionStore = tx.objectStore('completions');
+    const completionIndexPresent = completionStore.indexNames.contains(COMPLETION_HABIT_INDEX);
+    const completionsRequest = completionStore.getAll();
     const [habitRows, completionRows] = await Promise.all([
       requestPromise(habitsRequest),
       requestPromise(completionsRequest)
@@ -713,7 +715,11 @@
       .sort((a, b) => Number(a.legacyIndex || 0) - Number(b.legacyIndex || 0))
       .map((row) => clone(row.value));
     const completions = unpackCompletionRows(completionRows);
-    return { habits, completions };
+    const completionIndexReady = completionIndexPresent && (completionRows || []).every(
+      row => Array.isArray(row?.habitIds)
+        && stableJson(row.habitIds) === stableJson(completionHabitIdsForRow(row))
+    );
+    return { habits, completions, completionIndexReady };
   }
 
   // Target only one Habit object rather than materializing every Habit in
@@ -722,10 +728,15 @@
   // existing database has no validated per-Habit completion index. Filtering
   // before cloning keeps the result bounded without changing their order.
   // The outer readiness checks continue verifying the entire pilot scope.
-  async function readPilotHabitRowsFromDb(db, habitId) {
+  async function readPilotHabitRowsFromDb(db, habitId, indexed = false) {
     const tx = db.transaction(['habits', 'completions'], 'readonly');
     const habitRequest = tx.objectStore('habits').get(habitId);
-    const completionRequest = tx.objectStore('completions').getAll();
+    const completionsStore = tx.objectStore('completions');
+    // A missing or corrupt index never substitutes a partial result.
+    const useIndex = indexed && completionsStore.indexNames.contains(COMPLETION_HABIT_INDEX);
+    const completionRequest = useIndex
+      ? completionsStore.index(COMPLETION_HABIT_INDEX).getAll(habitId)
+      : completionsStore.getAll();
     const [habitRow, completionRows] = await Promise.all([
       requestPromise(habitRequest), requestPromise(completionRequest)
     ]);
@@ -745,7 +756,8 @@
     matching.sort((a, b) => b.sequence - a.sequence);
     return {
       habit: habitRow?.value ? clone(habitRow.value) : null,
-      completions: matching.map(entry => clone(entry.value))
+      completions: matching.map(entry => clone(entry.value)),
+      lookupMode: useIndex ? 'indexed' : 'legacy_scan'
     };
   }
 
@@ -3019,7 +3031,8 @@
         checked: true, eligible: true, reason: 'pilot_consistent',
         readAuthority: 'legacy_only', generation: initialGeneration,
         revision: Number(metaAfter.revision || 0),
-        counts: { habits: actual.habits.length, completions: actual.completions.length }
+        counts: { habits: actual.habits.length, completions: actual.completions.length },
+        completionIndexReady: actual.completionIndexReady === true
       };
     } catch (error) {
       mark('stateV2.pilotReadinessBlocked', { reason: 'storage_unreadable' });
@@ -3086,17 +3099,20 @@
       if (!db) return refuse('v2_unavailable');
       // Query one Habit by primary key and filter completion packs within
       // one read-only transaction. This avoids a third whole-Habits read.
-      const candidate = await readPilotHabitRowsFromDb(db, habitId);
+      const candidate = await readPilotHabitRowsFromDb(db, habitId,
+        before.completionIndexReady === true);
       const after = await inspectPilotReadiness();
       if (!after.eligible) return refuse(after.reason);
-      if (before.generation !== after.generation || before.revision !== after.revision)
+      if (before.generation !== after.generation || before.revision !== after.revision
+        || before.completionIndexReady !== after.completionIndexReady)
         return refuse('read_window_changed');
       return {
         checked: true, eligible: true, reason: 'stable_preview_candidate',
         source: 'v2_preview_only', readAuthority: 'legacy_only',
         generation: after.generation, revision: after.revision,
         habit: candidate.habit,
-        completions: candidate.completions
+        completions: candidate.completions,
+        lookupMode: candidate.lookupMode
       };
     } catch (error) {
       return refuse('storage_unreadable');
