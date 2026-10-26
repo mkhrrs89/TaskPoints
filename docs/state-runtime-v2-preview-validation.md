@@ -227,3 +227,14 @@ This phase advances the earlier metadata-only preparation. The dedicated **V2 pr
 - Before a wider authority transition, complete device preview validation and repeated multi-tab/version-blocking tests. Version changes must be safe when another tab is open; never delete or silently reset the preview database to force an upgrade.
 
 The readiness and candidate interfaces remain diagnostic-only. All live application reads and writes continue through the existing authority.
+
+## October 26 — Blocked-upgrade and stale-tab lifecycle hardening
+
+The schema-v2 index migration now has explicit protection for a blocked IndexedDB opening request. When another tab holds an older V2 connection, IndexedDB can fire `blocked` and later still deliver an upgrade opportunity; there is no cancel-open API. The runtime immediately refuses the blocked attempt, aborts any later versionchange transaction from that abandoned request, and closes a late connection if one arrives. Late callbacks cannot clear a newer successful open attempt. V1 authority and the original pending WAL are never modified by these refusals.
+
+A currently open V2 connection also closes on `versionchange` from another tab and invalidates preview-only reads. The updated tests include:
+- A blocked V2 open with delayed upgrade/success/error events, successive blocked opens, and a later successful retry.
+- Real Chromium/WebKit tab pairs where a schema-v1 holder blocks a schema-v2 migration, then releases it for a safe retry with historical cross-Habit completion packs intact.
+- Real browser tab pairs where a newer schema upgrade invalidates the stale V2 connection. The old page refuses preview candidates rather than reopening or silently using an obsolete schema.
+
+These are fail-closed preview protections, **not** authorization to switch V2 to live reads or writes. Browser automation cannot prove every physical Safari lifecycle condition; the existing real-device gate is still required. No feature or legacy dataset was removed.
