@@ -280,16 +280,28 @@
 
   function getStatus() {
     const current = read();
+    let independentEventCount = null;
+    let enumerationError = null;
+    // Diagnostics must remain readable even when the browser denies access
+    // to localStorage.length/key during a storage-security transition. Never
+    // treat an incomplete WAL inventory as an empty healthy queue.
+    try {
+      if (supportsIndependentRows()) independentEventCount = independentKeys().length;
+    } catch (error) {
+      enumerationError = `state_runtime_v2_wal_inventory_unreadable:${String(error?.message || error)}`;
+      lastError = enumerationError;
+    }
+    const readable = current.ok && !enumerationError;
     return {
       installed: true,
       enabled: isEnabled(),
       key: KEY,
       independentEventPrefix: EVENT_PREFIX,
-      independentEventCount: supportsIndependentRows() ? independentKeys().length : null,
+      independentEventCount,
       generationKey: GENERATION_KEY,
       generation: cloneGeneration(),
-      pendingCount: current.ok ? current.rows.length : null,
-      malformed: !current.ok,
+      pendingCount: readable ? current.rows.length : null,
+      malformed: !readable,
       appendCount,
       removeCount,
       malformedReads,
