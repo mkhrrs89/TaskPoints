@@ -960,6 +960,75 @@ try {
       orphanWalRows:0,generationUnchanged:true,parity:true};
   });
 
+  await run('temporary shared and sidecar WAL read denial preserves mutation evidence through reload',async context=>{
+    const page=await open(context);
+    const evidence=await page.evaluate(()=>{
+      sessionStorage.setItem('taskpoints_state_v2_wal_test_armed_v1','1');
+      window.V2BrowserFixture.delta('h1','2026-10-20','full',1);
+      const wal=window.TaskPointsStateRuntimeV2Wal;
+      const pending=wal.getPendingRows();
+      if(!pending.ok||pending.rows.length!==1) throw Error('Expected one held WAL mutation');
+      const mutationId=pending.rows[0].id;
+      const sharedKey='taskpoints_v2_pending_mutations_v1';
+      const sidecarKey='taskpoints_v2_pending_mutation_event_v1:'+mutationId;
+      const originalGet=Storage.prototype.getItem;
+      const sharedBefore=originalGet.call(localStorage,sharedKey);
+      const sidecarBefore=originalGet.call(localStorage,sidecarKey);
+      const denied=[];
+      for(const blockedKey of [sharedKey,sidecarKey]){
+        let readsDenied=0;
+        Storage.prototype.getItem=function(key){
+          if(this===localStorage && String(key)===blockedKey){
+            readsDenied++;
+            throw new DOMException('Synthetic WAL read denied','SecurityError');
+          }
+          return originalGet.call(this,key);
+        };
+        try{
+          const read=wal.getPendingRows();
+          let appendBlocked=false,cleanupBlocked=false;
+          try{
+            wal.appendHabitDelta({id:'habit:h2:2026-10-21',habitId:'h2',
+              dayKey:'2026-10-21',source:'habit',status:'full',done:true,
+              updatedAtISO:'2026-10-21T12:00:00.000Z'});
+          }catch(error){ appendBlocked=/wal_storage_read_failed/.test(String(error)); }
+          try{wal.removeMutation(mutationId);}
+          catch(error){cleanupBlocked=/wal_storage_read_failed/.test(String(error));}
+          denied.push({target:blockedKey===sharedKey?'shared':'sidecar',
+            readFailed:read.ok===false && /wal_storage_read_failed/.test(read.error||''),
+            appendBlocked,cleanupBlocked,readsDenied});
+        }finally{Storage.prototype.getItem=originalGet;}
+      }
+      return {denied,
+        sameShared:localStorage.getItem(sharedKey)===sharedBefore,
+        sameSidecar:localStorage.getItem(sidecarKey)===sidecarBefore,
+        pendingAfter:wal.getPendingRows().rows.map(r=>r.id),
+        v1Journal:window.TaskPointsCore.readPendingHabitDeltas().length,
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    });
+    assert.deepEqual(evidence.denied.map(x=>x.target),['shared','sidecar']);
+    for(const attempt of evidence.denied){
+      assert.equal(attempt.readFailed,true,JSON.stringify(attempt));
+      assert.equal(attempt.appendBlocked,true,JSON.stringify(attempt));
+      assert.equal(attempt.cleanupBlocked,true,JSON.stringify(attempt));
+      assert.ok(attempt.readsDenied>=3,JSON.stringify(attempt));
+    }
+    assert.equal(evidence.sameShared,true);
+    assert.equal(evidence.sameSidecar,true);
+    assert.equal(evidence.pendingAfter.length,1);
+    assert.equal(evidence.v1Journal,1);
+    assert.equal(evidence.authority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    await page.waitForFunction(()=>{
+      const s=window.V2BrowserFixture?.status();
+      return s && s.wal.pendingCount===0 && s.bridge.replayCleared>=1;
+    },null,{timeout:25000});
+    const p=await parity(page);
+    assert.equal(p.actualCounts.completions,1);
+    return {deniedTargets:2,durableWalPreserved:true,
+      restoredReadAndReplayed:true,legacyAuthorityRetained:true,parity:p.match};
+  });
+
   await run('interrupted independent WAL cleanup replays exactly once after browser restart',async context=>{
     const page=await open(context);
     const injected=await page.evaluate(()=>{
