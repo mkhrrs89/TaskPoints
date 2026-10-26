@@ -94,6 +94,70 @@ try {
     return p.actualCounts;
   });
 
+  await run('blocked V2 upgrade safely refuses stale open and retries after other tab releases v1', async context => {
+    const legacyPage=await context.newPage();
+    const seedUrl=url.replace('v2-storage-fixture.html','v2-upgrade-seed.html');
+    await legacyPage.goto(seedUrl,{waitUntil:'load'});
+    await legacyPage.evaluate(()=>window.makeOldV2Fixture());
+    const legacyBefore=await legacyPage.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const held=await legacyPage.evaluate(async ()=>{
+      window.__v1VersionChanges=0;
+      window.__v1Connection=await new Promise((resolve,reject)=>{
+        const request=indexedDB.open('taskpoints_state_v2',1);
+        request.onsuccess=()=>resolve(request.result);
+        request.onerror=()=>reject(request.error);
+      });
+      window.__v1Connection.onversionchange=()=>{window.__v1VersionChanges++;};
+      return window.__v1Connection.version;
+    });
+    assert.equal(held,1);
+    const candidatePage=await context.newPage();
+    await candidatePage.goto(seedUrl,{waitUntil:'load'});
+    // Load runtime with dark mode off: no background seed races with the
+    // explicit upgrade attempt held by the other tab.
+    await candidatePage.evaluate(()=>localStorage.setItem('taskpoints_state_v2_dark_mode_v1','0'));
+    await candidatePage.addScriptTag({url:'/state_runtime_v2.js'});
+    const refused=await candidatePage.evaluate(async()=>{
+      localStorage.setItem('taskpoints_state_v2_dark_mode_v1','1');
+      try {
+        await window.TaskPointsStateRuntimeV2.open();
+        return {refused:false};
+      } catch(error) {
+        return {refused:true,reason:String(error?.message||error),
+          authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority,
+          legacy:localStorage.getItem('taskpoints_v1')};
+      }
+    });
+    assert.equal(refused.refused,true,JSON.stringify(refused));
+    assert.equal(refused.reason,'state_runtime_v2_open_blocked');
+    assert.equal(refused.authority,'legacy_only');
+    assert.equal(refused.legacy,legacyBefore);
+    await legacyPage.waitForFunction(()=>window.__v1VersionChanges>0,null,{timeout:12000});
+    await legacyPage.evaluate(()=>window.__v1Connection.close());
+    // Once the aborted late upgrade is resolved, the next explicit attempt
+    // must still be able to acquire the V2 database and repair legacy packs.
+    const retry=await candidatePage.evaluate(async()=>{
+      const db=await window.TaskPointsStateRuntimeV2.open();
+      const read=req=>new Promise((resolve,reject)=>{
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      const all=await read(db.transaction('completions','readonly').objectStore('completions').getAll());
+      const fromIndex=await read(db.transaction('completions','readonly')
+        .objectStore('completions').index('by_habit_ids').getAll('h2'));
+      return {version:db.version,habitIds:all[0]?.habitIds,
+        sharedIndexRows:fromIndex.map(row=>row.id),
+        legacy:localStorage.getItem('taskpoints_v1'),
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    });
+    assert.equal(retry.version,2);
+    assert.deepEqual(retry.habitIds,['h1','h2']);
+    assert.deepEqual(retry.sharedIndexRows,['shared-old']);
+    assert.equal(retry.legacy,legacyBefore);
+    assert.equal(retry.authority,'legacy_only');
+    return {blockedUpgradeRejected:true,recoveredAfterClose:true,
+      crossHabitDuplicatesRetained:true,legacyAuthorityPreserved:true};
+  });
+
   await run('real IndexedDB v1-to-v2 upgrade backfills cross-Habit completion index atomically', async context => {
     const page=await context.newPage();
     page.on('pageerror',err=>console.warn('Upgrade fixture error: '+err.message));
