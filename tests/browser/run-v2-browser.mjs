@@ -1029,6 +1029,58 @@ try {
       restoredReadAndReplayed:true,legacyAuthorityRetained:true,parity:p.match};
   });
 
+  await run('denied WAL sidecar enumeration stays diagnosable and recovers on restart',async context=>{
+    const page=await open(context);
+    const blocked=await page.evaluate(()=>{
+      sessionStorage.setItem('taskpoints_state_v2_wal_test_armed_v1','1');
+      window.V2BrowserFixture.delta('h1','2026-10-20','full',1);
+      const wal=window.TaskPointsStateRuntimeV2Wal;
+      const originalRow=wal.getPendingRows().rows[0];
+      if(!originalRow) throw Error('Missing held WAL event');
+      const originalKey=Storage.prototype.key;
+      let denials=0,readOk=null,status=null,removeFailed=false;
+      Storage.prototype.key=function(index){
+        if(this===localStorage){
+          denials++;
+          throw new DOMException('Synthetic WAL enumeration refused','SecurityError');
+        }
+        return originalKey.call(this,index);
+      };
+      try{
+        readOk=wal.getPendingRows().ok;
+        status=wal.getStatus();
+        try{wal.removeMutation(originalRow.id);}
+        catch(error){removeFailed=/state_runtime_v2_wal_malformed/.test(String(error));}
+      }finally{Storage.prototype.key=originalKey;}
+      return {
+        denials,readOk,malformed:status.malformed,pendingCount:status.pendingCount,
+        sidecars:status.independentEventCount,
+        diagnostic:/state_runtime_v2_wal_inventory_unreadable/.test(status.lastError||''),
+        removeFailed,originalId:originalRow.id,
+        retained:wal.getPendingRows().rows.map(row=>row.id),
+        legacyJournal:window.TaskPointsCore.readPendingHabitDeltas().length
+      };
+    });
+    assert.ok(blocked.denials>=3);
+    assert.equal(blocked.readOk,false);
+    assert.equal(blocked.malformed,true);
+    assert.equal(blocked.pendingCount,null);
+    assert.equal(blocked.sidecars,null);
+    assert.equal(blocked.diagnostic,true);
+    assert.equal(blocked.removeFailed,true);
+    assert.deepEqual(blocked.retained,[blocked.originalId]);
+    assert.equal(blocked.legacyJournal,1);
+    await page.reload({waitUntil:'load'});
+    await page.waitForFunction(()=>{
+      const s=window.V2BrowserFixture?.status();
+      return s&&s.wal.pendingCount===0&&s.bridge.replayCleared>=1;
+    },null,{timeout:25000});
+    const p=await parity(page);
+    assert.equal(p.actualCounts.completions,1);
+    return {inventoryDenied:true,diagnosticsStayedAvailable:true,
+      eventPreserved:true,replayedOnRestart:true,parity:p.match};
+  });
+
   await run('interrupted independent WAL cleanup replays exactly once after browser restart',async context=>{
     const page=await open(context);
     const injected=await page.evaluate(()=>{
