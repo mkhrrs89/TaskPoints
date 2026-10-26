@@ -483,3 +483,107 @@ test('WAL never bypasses an installed generation authority that declines to prov
   context.TaskPointsStateRuntimeV2Generation = original;
   assert.equal(api.appendHabitDelta(deltaA).written, true);
 });
+
+test('silent sidecar write refusal never claims a durable WAL mutation', () => {
+  const { api, localStorage } = install({ [DARK]: '1' });
+  const before = localStorage.getItem(KEY);
+  const original = localStorage.setItem.bind(localStorage);
+  localStorage.setItem = (key, value) => {
+    if (String(key).startsWith('taskpoints_v2_pending_mutation_event_v1:')) return;
+    return original(key, value);
+  };
+  try {
+    assert.throws(() => api.appendHabitDelta(deltaA), /wal_independent_write_failed:unverified_write/);
+    assert.equal(localStorage.getItem(KEY), before);
+    assert.equal(api.getPendingRows().rows.length, 0);
+  } finally { localStorage.setItem = original; }
+  assert.equal(api.appendHabitDelta(deltaA).written, true);
+  assert.equal(api.getPendingRows().rows.length, 1);
+});
+
+test('silent shared WAL write retains the verified sidecar for later recovery', () => {
+  const { api, localStorage } = install({ [DARK]: '1' });
+  const original = localStorage.setItem.bind(localStorage);
+  localStorage.setItem = (key, value) => {
+    if (String(key) === KEY) return;
+    return original(key, value);
+  };
+  try {
+    assert.throws(() => api.appendHabitDelta(deltaA), /wal_write_failed:unverified_write/);
+    assert.equal(localStorage.getItem(KEY), null);
+    const pending = api.getPendingRows();
+    assert.equal(pending.ok, true);
+    assert.equal(pending.rows.length, 1);
+  } finally { localStorage.setItem = original; }
+  assert.equal(api.appendHabitDelta(deltaA).duplicate, true);
+  assert.equal(api.getPendingRows().rows.length, 1);
+  assert.equal(api.removeMutation(api.getPendingRows().rows[0].id).removed, true);
+  assert.equal(api.getPendingRows().rows.length, 0);
+});
+
+test('silent shared WAL cleanup cannot remove its independently durable row', () => {
+  const { api, localStorage } = install({ [DARK]: '1' });
+  const a = api.appendHabitDelta(deltaA);
+  const savedShared = localStorage.getItem(KEY);
+  const sidecar = 'taskpoints_v2_pending_mutation_event_v1:' + a.mutationId;
+  const savedSidecar = localStorage.getItem(sidecar);
+  const original = localStorage.removeItem.bind(localStorage);
+  localStorage.removeItem = key => {
+    if (String(key) === KEY) return;
+    return original(key);
+  };
+  try {
+    assert.throws(() => api.removeMutation(a.mutationId), /wal_remove_failed:unverified_remove/);
+    assert.equal(localStorage.getItem(KEY), savedShared);
+    assert.equal(localStorage.getItem(sidecar), savedSidecar);
+  } finally { localStorage.removeItem = original; }
+  assert.equal(api.removeMutation(a.mutationId).removed, true);
+  assert.equal(api.getPendingRows().rows.length, 0);
+});
+
+test('silent sidecar cleanup preserves replayable evidence and supports retry', () => {
+  const { api, localStorage } = install({ [DARK]: '1' });
+  const a = api.appendHabitDelta(deltaA);
+  const sidecar = 'taskpoints_v2_pending_mutation_event_v1:' + a.mutationId;
+  const original = localStorage.removeItem.bind(localStorage);
+  localStorage.removeItem = key => {
+    if (String(key) === sidecar) return;
+    return original(key);
+  };
+  try {
+    assert.throws(() => api.removeMutation(a.mutationId),
+      /wal_independent_remove_failed:unverified_remove/);
+    assert.equal(localStorage.getItem(KEY), null);
+    assert.ok(localStorage.getItem(sidecar));
+    assert.deepEqual(api.getPendingRows().rows.map(row => row.id), [a.mutationId]);
+  } finally { localStorage.removeItem = original; }
+  assert.equal(api.removeMutation(a.mutationId).removed, true);
+  assert.equal(api.getPendingRows().rows.length, 0);
+});
+
+test('failed sidecar write verification read fails closed without erasing a durable event', () => {
+  const { api, localStorage } = install({ [DARK]: '1' });
+  const get = localStorage.getItem.bind(localStorage);
+  const set = localStorage.setItem.bind(localStorage);
+  let denyNextRead = false;
+  localStorage.setItem = (key, value) => {
+    set(key, value);
+    if (String(key).startsWith('taskpoints_v2_pending_mutation_event_v1:')) denyNextRead = true;
+  };
+  localStorage.getItem = key => {
+    if (denyNextRead && String(key).startsWith('taskpoints_v2_pending_mutation_event_v1:')) {
+      denyNextRead = false;
+      throw Error('readback SecurityError');
+    }
+    return get(key);
+  };
+  try {
+    assert.throws(() => api.appendHabitDelta(deltaA), /wal_storage_read_failed/);
+    assert.equal(localStorage.getItem(KEY), null);
+  } finally {
+    localStorage.setItem = set;
+    localStorage.getItem = get;
+  }
+  assert.equal(api.getPendingRows().rows.length, 1);
+  assert.equal(api.appendHabitDelta(deltaA).duplicate, true);
+});
