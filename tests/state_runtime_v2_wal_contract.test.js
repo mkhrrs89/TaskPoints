@@ -41,7 +41,7 @@ function install(initial = {}, sharedStorage = null) {
   context.globalThis = context;
   vm.runInNewContext(generationSource, context, { filename: 'state_runtime_v2_generation.js' });
   vm.runInNewContext(walSource, context, { filename: 'state_runtime_v2_wal.js' });
-  return { api: context.TaskPointsStateRuntimeV2Wal, generation: context.TaskPointsStateRuntimeV2Generation, localStorage };
+  return { api: context.TaskPointsStateRuntimeV2Wal, generation: context.TaskPointsStateRuntimeV2Generation, localStorage, context };
 }
 
 const DARK = 'taskpoints_state_v2_dark_mode_v1';
@@ -415,4 +415,65 @@ test('denied localStorage length inventory keeps pending WAL unknown rather than
   assert.equal(localStorage.getItem(KEY), sharedBefore);
   assert.equal(api.getPendingRows().rows.length, 1);
   assert.equal(api.getStatus().independentEventCount, 1);
+});
+
+test('standalone WAL fallback never manufactures a new epoch when generation read is denied', () => {
+  const oldEpoch = 'original-stored-generation';
+  const first = install({ [DARK]: '1', [GENERATION_KEY]: oldEpoch });
+  const { api, localStorage, context } = first;
+  const saved = api.appendHabitDelta(deltaA);
+  assert.equal(saved.generation, oldEpoch);
+  const walBefore = localStorage.getItem(KEY);
+  const sidecarBefore = localStorage.getItem('taskpoints_v2_pending_mutation_event_v1:' + saved.mutationId);
+  // Simulate recovery while the generation module is unavailable. The WAL
+  // module must not interpret transient storage denial as an absent epoch.
+  delete context.TaskPointsStateRuntimeV2Generation;
+  const get = localStorage.getItem.bind(localStorage);
+  localStorage.getItem = key => {
+    if (String(key) === GENERATION_KEY) throw new Error('generation key SecurityError');
+    return get(key);
+  };
+  try {
+    assert.throws(() => api.ensureGeneration(), /wal_storage_read_failed/);
+    assert.throws(() => api.mutationIdForDelta(deltaB), /wal_storage_read_failed/);
+    assert.throws(() => api.appendHabitDelta(deltaB), /wal_storage_read_failed/);
+    const status = api.getStatus();
+    assert.equal(status.generationReadable, false);
+    assert.equal(status.pendingCount, null);
+    assert.equal(status.malformed, true);
+  } finally {
+    localStorage.getItem = get;
+  }
+  assert.equal(localStorage.getItem(GENERATION_KEY), oldEpoch);
+  assert.equal(localStorage.getItem(KEY), walBefore);
+  assert.equal(localStorage.getItem('taskpoints_v2_pending_mutation_event_v1:' + saved.mutationId),
+    sidecarBefore);
+  assert.deepEqual(api.getPendingRows().rows.map(row => row.id), [saved.mutationId]);
+  assert.equal(api.ensureGeneration(), oldEpoch);
+  assert.equal(api.appendHabitDelta(deltaB).written, true);
+  assert.equal(api.getPendingRows().rows.length, 2);
+});
+
+test('standalone WAL fallback creates an epoch only when storage proves key is missing', () => {
+  const { api, context, localStorage } = install({ [DARK]: '1' });
+  delete context.TaskPointsStateRuntimeV2Generation;
+  assert.equal(localStorage.getItem(GENERATION_KEY), null);
+  const result = api.appendHabitDelta(deltaA);
+  assert.equal(result.written, true);
+  assert.equal(result.generation, localStorage.getItem(GENERATION_KEY));
+  assert.equal(api.getPendingRows().rows.length, 1);
+});
+
+test('WAL never bypasses an installed generation authority that declines to provide an epoch', () => {
+  const { api, context, localStorage } = install({ [DARK]: '1' });
+  const original = context.TaskPointsStateRuntimeV2Generation;
+  context.TaskPointsStateRuntimeV2Generation = {
+    ensure() { return { enabled: false, generation: null }; },
+    read() { return null; }
+  };
+  assert.throws(() => api.appendHabitDelta(deltaA), /wal_generation_unavailable/);
+  assert.equal(localStorage.getItem(GENERATION_KEY), null);
+  assert.equal(localStorage.getItem(KEY), null);
+  context.TaskPointsStateRuntimeV2Generation = original;
+  assert.equal(api.appendHabitDelta(deltaA).written, true);
 });
