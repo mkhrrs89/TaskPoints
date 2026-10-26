@@ -94,6 +94,59 @@ try {
     return p.actualCounts;
   });
 
+  await run('completion pack index metadata remains nonauthoritative and reports legacy gaps', async context => {
+    const page = await open(context);
+    const initial = await page.evaluate(() => window.TaskPointsStateRuntimeV2.inspectPilotCompletionIndexCoverage());
+    assert.equal(initial.indexReady, true, JSON.stringify(initial));
+    assert.deepEqual(initial.counts, {total:0,complete:0,missing:0,mismatched:0});
+    await page.evaluate(() => {
+      window.V2BrowserFixture.delta('h1','2026-10-20','full',1);
+      window.V2BrowserFixture.delta('h2','2026-10-20','half',2);
+    });
+    await settled(page, 2);
+    const saved = await page.evaluate(async () => {
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const db=await runtime.open();
+      const req=db.transaction('completions','readonly').objectStore('completions').getAll();
+      const rows=await new Promise((resolve,reject)=>{
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      return {report:await runtime.inspectPilotCompletionIndexCoverage(),
+        rows:rows.map(r=>({id:r.id,habitIds:r.habitIds})),
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(saved.report.indexReady,true,JSON.stringify(saved.report));
+    assert.equal(saved.report.counts.total,2);
+    assert.deepEqual(saved.rows.map(row=>row.habitIds).sort(),[['h1'],['h2']]);
+    assert.equal(saved.authority,'legacy_only');
+    const legacyGap=await page.evaluate(async ()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const db=await runtime.open();
+      const store=db.transaction('completions','readonly').objectStore('completions');
+      const row=await new Promise((resolve,reject)=>{
+        const req=store.get('habit:h1:2026-10-20');
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      delete row.habitIds;
+      const tx=db.transaction('completions','readwrite');
+      tx.objectStore('completions').put(row);
+      await new Promise((resolve,reject)=>{
+        tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
+      });
+      return {report:await runtime.inspectPilotCompletionIndexCoverage(),
+        candidate:await runtime.readPilotHabitCandidate('h1'),
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(legacyGap.report.indexReady,false);
+    assert.equal(legacyGap.report.reason,'metadata_backfill_required');
+    assert.equal(legacyGap.report.counts.missing,1);
+    assert.equal(legacyGap.candidate.eligible,true,
+      'legacy completion scan must continue working before metadata backfill');
+    assert.deepEqual(legacyGap.candidate.completions.map(c=>c.id),['habit:h1:2026-10-20']);
+    assert.equal(legacyGap.authority,'legacy_only');
+    return {metadataCreated:true,legacyGapsDiagnosed:true,oldReadersUnchanged:true};
+  });
+
   await run('pilot read readiness is preview-only, read-only, and refuses pending WAL', async context => {
     const page = await open(context);
     const before = await page.evaluate(async () => {
