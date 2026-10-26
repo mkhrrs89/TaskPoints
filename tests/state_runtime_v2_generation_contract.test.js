@@ -688,3 +688,86 @@ test('targeted Habit candidate read fails closed on IDB primary-key failure and 
   assert.equal(retry.habit.id, 'h1');
   assert.equal(app.runtime.getStatus().readAuthority, 'legacy_only');
 });
+
+test('preview completion-index coverage verifies every packed Habit owner without changing the stores', async () => {
+  const initialState = {
+    habits: [
+      { id: 'h1', name: 'Read', pointsPerDay: 4, doneKeys: [], failedKeys: [], iceKeys: [] },
+      { id: 'h2', name: 'Walk', pointsPerDay: 5, doneKeys: [], failedKeys: [], iceKeys: [] }
+    ],
+    completions: [
+      { id: 'duplicate', habitId: 'h1', source: 'habit', dayKey: '2026-09-01', points: 4 },
+      { id: 'duplicate', habitId: 'h2', source: 'habit', dayKey: '2026-09-01', points: 5 },
+      { id: 'h1-second', habitId: 'h1', source: 'habit', dayKey: '2026-09-02', points: 4 }
+    ]
+  };
+  const app = install({ initialState });
+  await app.runtime.startCoordinatedDarkMirror();
+  const before = structuredClone(app.indexedDB.dump(DB_NAME));
+  const rawV1 = app.localStorage.getItem(LEGACY_KEY);
+  const report = await app.runtime.inspectPilotCompletionIndexCoverage();
+  assert.equal(report.indexReady, true, JSON.stringify(report));
+  assert.equal(report.reason, 'metadata_complete');
+  assert.deepEqual(JSON.parse(JSON.stringify(report.counts)), {
+    total: 2, complete: 2, missing: 0, mismatched: 0
+  });
+  assert.deepEqual(app.indexedDB.dump(DB_NAME), before,
+    'coverage check must not write to or repair V2');
+  assert.equal(app.localStorage.getItem(LEGACY_KEY), rawV1);
+  assert.equal(app.runtime.getStatus().readAuthority, 'legacy_only');
+});
+
+test('preview completion-index coverage detects old rows and stale metadata without auto-backfill', async () => {
+  const initialState = {
+    habits: [
+      { id: 'h1', name: 'Read', pointsPerDay: 4, doneKeys: [], failedKeys: [], iceKeys: [] },
+      { id: 'h2', name: 'Walk', pointsPerDay: 5, doneKeys: [], failedKeys: [], iceKeys: [] }
+    ],
+    completions: [
+      { id: 'duplicate', habitId: 'h1', source: 'habit', dayKey: '2026-09-01', points: 4 },
+      { id: 'duplicate', habitId: 'h2', source: 'habit', dayKey: '2026-09-01', points: 5 },
+      { id: 'h1-second', habitId: 'h1', source: 'habit', dayKey: '2026-09-02', points: 4 }
+    ]
+  };
+  const app = install({ initialState });
+  await app.runtime.startCoordinatedDarkMirror();
+  const db = await app.runtime.open();
+  const originalRows = app.indexedDB.dump(DB_NAME).completions;
+  const oldRow = structuredClone(originalRows.find(row => row.id === 'duplicate'));
+  delete oldRow.habitIds;
+  const wrongRow = structuredClone(originalRows.find(row => row.id === 'h1-second'));
+  wrongRow.habitIds = ['h2'];
+  const tx = db.transaction('completions', 'readwrite');
+  tx.objectStore('completions').put(oldRow);
+  tx.objectStore('completions').put(wrongRow);
+  await new Promise((resolve, reject) => {
+    tx.oncomplete = resolve;
+    tx.onabort = () => reject(tx.error);
+    tx.onerror = () => reject(tx.error);
+  });
+  const before = structuredClone(app.indexedDB.dump(DB_NAME));
+  const report = await app.runtime.inspectPilotCompletionIndexCoverage();
+  assert.equal(report.indexReady, false);
+  assert.equal(report.reason, 'metadata_backfill_required');
+  assert.deepEqual(JSON.parse(JSON.stringify(report.counts)), {
+    total: 2, complete: 0, missing: 1, mismatched: 1
+  });
+  assert.deepEqual(app.indexedDB.dump(DB_NAME), before, 'untrusted metadata remains for diagnosis');
+  const reader = await app.runtime.readPilotHabitCandidate('h1');
+  assert.equal(reader.eligible, true, JSON.stringify(reader));
+  assert.deepEqual(Array.from(reader.completions, item => item.id), ['duplicate', 'h1-second'],
+    'legacy scan path must remain usable while historical rows lack index metadata');
+  assert.equal(app.runtime.getStatus().readAuthority, 'legacy_only');
+});
+
+test('preview completion-index coverage refuses incomplete WAL without inspecting as healthy', async () => {
+  const app = install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const mutation = app.wal.appendHabitDelta(delta());
+  const result = await app.runtime.inspectPilotCompletionIndexCoverage();
+  assert.equal(result.indexReady, false);
+  assert.equal(result.reason, 'wal_pending');
+  assert.equal(Object.hasOwn(result, 'counts'), false);
+  assert.equal(app.wal.getPendingRows().rows[0].id, mutation.mutationId);
+  assert.equal(app.runtime.getStatus().readAuthority, 'legacy_only');
+});
