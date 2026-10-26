@@ -386,6 +386,76 @@ try {
       recoveredWithoutReseeding:true, authorityUnchanged:true};
   });
 
+  await run('persisted cross-tab revision signal denies preview even with no storage event delivery', async context => {
+    const page=await open(context);
+    const evidence=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      runtime.setPilotReadProbeEnabled(true);
+      const healthy=await runtime.probePilotHabitRead('h1');
+      const before=runtime.getStatus();
+      const legacy=localStorage.getItem(window.TaskPointsCore.STORAGE_KEY);
+      // Same-tab setItem does NOT dispatch a storage event to its origin;
+      // only the durable revision probe can detect this foreign signal.
+      localStorage.setItem(before.revisionSignalKey,JSON.stringify({
+        sourceId:'synthetic-other-tab-notification-lost',
+        revision:Number(before.lastKnownRevision||0)+1,
+        generation:before.currentGeneration,
+        epochMs:Date.now()+10000,
+        atISO:new Date().toISOString()
+      }));
+      const inspection=await runtime.inspectPilotReadiness();
+      const candidate=await runtime.probePilotHabitRead('h1');
+      return {healthy,inspection,candidate,status:runtime.getStatus(),
+        v1Unchanged:localStorage.getItem(window.TaskPointsCore.STORAGE_KEY)===legacy};
+    });
+    assert.equal(evidence.healthy.matched,true,JSON.stringify(evidence.healthy));
+    assert.equal(evidence.inspection.eligible,false);
+    assert.equal(evidence.inspection.reason,'external_revision_invalidated');
+    assert.equal(evidence.candidate.matched,false);
+    assert.equal(evidence.candidate.reason,'external_revision_invalidated');
+    assert.equal(evidence.candidate.selectedSource,'legacy_only');
+    assert.equal(Object.hasOwn(evidence.candidate,'habit'),false);
+    assert.equal(evidence.status.externalRevisionSource,'persisted_signal');
+    assert.equal(evidence.status.readAuthority,'legacy_only');
+    assert.equal(evidence.v1Unchanged,true);
+    return {missedNotificationDetected:true,staleReadRejected:true,noAuthorityChange:true};
+  });
+
+  await run('mutation-handoff preflight inventories pilot readiness but cannot promote V2', async context => {
+    const page=await open(context);
+    const baseline=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const oldV1=localStorage.getItem(window.TaskPointsCore.STORAGE_KEY);
+      return {report:await runtime.inspectMutationHandoffPrerequisites(),
+        v1Unchanged:localStorage.getItem(window.TaskPointsCore.STORAGE_KEY)===oldV1,
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(baseline.report.canPromote,false);
+    assert.equal(baseline.report.checks.pilotConsistent,true,JSON.stringify(baseline.report));
+    assert.equal(baseline.report.checks.completionIndexReady,true);
+    assert.equal(baseline.report.counts.nonPilotLegacyCompletions,1);
+    assert.ok(baseline.report.blockers.includes('exclusive_writer_lease_not_implemented'));
+    assert.ok(baseline.report.blockers.includes('durable_authority_rollback_not_implemented'));
+    assert.ok(baseline.report.blockers.includes('nonpilot_collections_not_migrated'));
+    assert.equal(baseline.v1Unchanged,true);
+    assert.equal(baseline.authority,'legacy_only');
+    await page.evaluate(()=>window.V2BrowserFixture.delta('h1','2026-10-23','full',1));
+    await settled(page,1);
+    const after=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      return {report:await runtime.inspectMutationHandoffPrerequisites(),
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(after.report.canPromote,false);
+    assert.equal(after.authority,'legacy_only');
+    assert.equal(after.report.checks.pilotConsistent,true,JSON.stringify(after.report));
+    assert.ok(after.report.blockers.includes('legacy_journal_pending'),
+      'uncompacted V1 journal must block a mutation handoff');
+    assert.ok(after.report.counts.legacyJournalPending>0);
+    return {immutableHandoffGate:true,retainsNonPilotData:true,
+      journalBlockerObserved:true,authority:'legacy_only'};
+  });
+
   await run('guarded V2 Habit candidate reads prove data without changing V1 authority', async context => {
     const page = await open(context);
     const before = await page.evaluate(async () => {
