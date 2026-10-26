@@ -410,41 +410,56 @@
       return Promise.reject(error);
     }
 
-    dbPromise = new Promise((resolve, reject) => {
+    let attempt = null;
+    let abandoned = false;
+    attempt = new Promise((resolve, reject) => {
       const request = global.indexedDB.open(DB_NAME, DB_VERSION);
+      const fail = (error) => {
+        lastError = String(error?.message || error);
+        if (dbPromise === attempt) dbPromise = null;
+        if (!abandoned) {
+          abandoned = true;
+          reject(error);
+        }
+      };
       request.onupgradeneeded = () => {
+        // A blocked request cannot be cancelled by IndexedDB. If it later
+        // obtains an upgrade transaction, abort it rather than unexpectedly
+        // upgrading storage after the caller has already failed closed.
+        if (abandoned) {
+          try { request.transaction?.abort?.(); } catch (_) {}
+          return;
+        }
         try { ensureStores(request.result, request.transaction); }
         catch (_) { try { request.transaction?.abort?.(); } catch (_) {} }
       };
       request.onsuccess = () => {
         const connection = request.result;
-        // A second tab requesting a newer schema version must never leave
-        // this page continuing to use a stale V2 connection. Close it,
-        // invalidate preview candidates, and let V1 stay authoritative.
+        // A late success from an abandoned request must neither resurrect a
+        // stale connection nor overwrite a newer open attempt.
+        if (abandoned) {
+          try { connection.close(); } catch (_) {}
+          return;
+        }
         connection.onversionchange = () => {
           externalRevisionInvalidated = true;
           lastError = 'state_runtime_v2_connection_version_changed';
           mark('stateV2.connectionVersionChanged', { database: DB_NAME });
           try { connection.close(); } catch (_) {}
-          if (dbPromise) dbPromise = null;
+          if (dbPromise === attempt) dbPromise = null;
         };
         opened = true;
         mark('stateV2.opened', { database: DB_NAME, version: DB_VERSION });
         resolve(connection);
       };
       request.onerror = () => {
-        const error = request.error || new Error('state_runtime_v2_open_failed');
-        lastError = String(error?.message || error);
-        dbPromise = null;
-        reject(error);
+        fail(request.error || new Error('state_runtime_v2_open_failed'));
       };
       request.onblocked = () => {
-        const error = new Error('state_runtime_v2_open_blocked');
-        lastError = error.message;
-        dbPromise = null;
-        reject(error);
+        fail(new Error('state_runtime_v2_open_blocked'));
       };
     });
+    dbPromise = attempt;
     return dbPromise;
   }
 
