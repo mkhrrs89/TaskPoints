@@ -141,8 +141,22 @@
       }
       // At-most-once: consume first, then use the ordinary journal-first tap.
       // A subsequent stale-revision guard can requeue on a new reload.
-      try { global.sessionStorage?.removeItem?.(STALE_TAP_KEY); }
-      catch (_) { retry(); return; }
+      // Some browser storage shims can acknowledge removeItem without
+      // actually deleting the entry. Verify the readback before replaying,
+      // or a future page load could execute the same tap a second time.
+      try {
+        const session = global.sessionStorage;
+        if (!session || typeof session.removeItem !== 'function'
+          || typeof session.getItem !== 'function') {
+          retry();
+          return;
+        }
+        session.removeItem(STALE_TAP_KEY);
+        if (session.getItem(STALE_TAP_KEY) !== null) {
+          retry();
+          return;
+        }
+      } catch (_) { retry(); return; }
       staleTapReplayScheduled = false;
       staleTapReplays += 1;
       global.handleHabitBubbleTap?.(bubble);
