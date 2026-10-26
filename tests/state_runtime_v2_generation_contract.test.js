@@ -578,3 +578,37 @@ test('guarded pilot Habit candidate rejects a concurrent V1 edit during its read
   assert.equal(JSON.parse(app.localStorage.getItem(LEGACY_KEY)).habits[0].name, 'Changed during async read');
   assert.equal(app.runtime.getStatus().readAuthority, 'legacy_only');
 });
+
+test('pilot readiness and Habit preview reject nonpilot completion records without deleting them', async () => {
+  const app = install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const db = await app.runtime.open();
+  const unexpected = {
+    id: 'nonpilot:unexpected-task',
+    value: { id: 'nonpilot:unexpected-task', habitId: 'h1', source: 'task',
+      points: 5, completedAtISO: '2026-09-01T12:00:00.000Z' },
+    sequence: 100
+  };
+  const tx = db.transaction('completions', 'readwrite');
+  tx.objectStore('completions').put(unexpected);
+  await new Promise((resolve, reject) => {
+    tx.oncomplete = resolve;
+    tx.onabort = () => reject(tx.error);
+    tx.onerror = () => reject(tx.error);
+  });
+  const initialRaw = app.localStorage.getItem(LEGACY_KEY);
+  const initialMeta = structuredClone(runtimeMeta(app));
+  const blocked = await app.runtime.inspectPilotReadiness();
+  assert.equal(blocked.eligible, false);
+  assert.equal(blocked.reason, 'unexpected_nonpilot_completions');
+  const candidate = await app.runtime.readPilotHabitCandidate('h1');
+  assert.equal(candidate.eligible, false);
+  assert.equal(candidate.reason, 'unexpected_nonpilot_completions');
+  assert.equal(Object.hasOwn(candidate, 'completions'), false);
+  assert.equal(app.localStorage.getItem(LEGACY_KEY), initialRaw);
+  assert.deepEqual(runtimeMeta(app), initialMeta);
+  const rows = app.indexedDB.dump(DB_NAME).completions;
+  assert.equal(rows.length, 1);
+  assert.deepEqual(rows[0], unexpected, 'a refused read must preserve the unexpected record for diagnosis');
+  assert.equal(app.runtime.getStatus().readAuthority, 'legacy_only');
+});
