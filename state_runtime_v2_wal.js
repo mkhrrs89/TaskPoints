@@ -291,7 +291,16 @@
       enumerationError = `state_runtime_v2_wal_inventory_unreadable:${String(error?.message || error)}`;
       lastError = enumerationError;
     }
-    const readable = current.ok && !enumerationError;
+    let generation = null;
+    let generationReadable = true;
+    try { generation = cloneGeneration(); }
+    catch (error) {
+      generationReadable = false;
+      lastError = String(error?.message || error);
+    }
+    // A pending mutation cannot be declared safely recoverable against an
+    // unknown generation. Preserve every WAL row and report unknown counts.
+    const readable = current.ok && !enumerationError && generationReadable;
     return {
       installed: true,
       enabled: isEnabled(),
@@ -299,7 +308,8 @@
       independentEventPrefix: EVENT_PREFIX,
       independentEventCount,
       generationKey: GENERATION_KEY,
-      generation: cloneGeneration(),
+      generation,
+      generationReadable,
       pendingCount: readable ? current.rows.length : null,
       malformed: !readable,
       appendCount,
