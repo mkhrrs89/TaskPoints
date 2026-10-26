@@ -97,11 +97,13 @@
       if (!pending) { staleTapReplayScheduled = false; return; }
       const runtime = global.TaskPointsStateRuntimeV2;
       const status = runtime?.getStatus?.();
+      const generationReady = status?.generationReadable !== false
+        && Boolean(status?.currentGeneration);
       const age = Date.now() - Number(pending.createdEpochMs || 0);
       if (pending.version !== 1 || !pending.habitId || !/^\d{4}-\d{2}-\d{2}$/.test(String(pending.dayKey || ''))
         || !Number.isFinite(age) || age < 0 || age > STALE_TAP_MAX_AGE_MS
         || String(pending.pathname || '') !== String(global.location?.pathname || '')
-        || (status?.currentGeneration && String(pending.generation || '') !== String(status.currentGeneration))
+        || (generationReady && String(pending.generation || '') !== String(status.currentGeneration))
         || global.localStorage?.getItem?.('taskpoints_state_v2_dark_mode_v1') !== '1') {
         discardStaleTap();
         staleTapReplayScheduled = false;
@@ -111,7 +113,7 @@
       const bubble = Array.from(bubbles).find(node =>
         String(node?.getAttribute?.('data-habit')) === String(pending.habitId)
         && String(node?.getAttribute?.('data-day')) === String(pending.dayKey));
-      if (!bubble || !status || status.externalRevisionInvalidated
+      if (!bubble || !status || !generationReady || status.externalRevisionInvalidated
         || status.readAuthority !== 'legacy_only' || !controlledHandler) {
         attempts += 1;
         if (attempts > 100) {
