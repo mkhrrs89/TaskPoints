@@ -421,6 +421,41 @@ try {
     return {missedNotificationDetected:true,staleReadRejected:true,noAuthorityChange:true};
   });
 
+  await run('denied persisted revision signal reads refuse preview and recover when storage returns', async context => {
+    const page=await open(context);
+    const proof=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const originalV1=localStorage.getItem(window.TaskPointsCore.STORAGE_KEY);
+      const initial=await runtime.inspectPilotReadiness();
+      const signalKey=runtime.getStatus().revisionSignalKey;
+      const originalGet=Storage.prototype.getItem;
+      let denied,blockedCandidate;
+      Storage.prototype.getItem=function(key){
+        if(this===localStorage && String(key)===signalKey)
+          throw new DOMException('synthetic revision key denial','SecurityError');
+        return originalGet.call(this,key);
+      };
+      try{
+        denied=await runtime.inspectPilotReadiness();
+        blockedCandidate=await runtime.readPilotHabitCandidate('h1');
+      }finally{Storage.prototype.getItem=originalGet;}
+      return {initial,denied,blockedCandidate,
+        healthy:await runtime.inspectPilotReadiness(),
+        v1Unchanged:localStorage.getItem(window.TaskPointsCore.STORAGE_KEY)===originalV1,
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(proof.initial.eligible,true);
+    assert.equal(proof.denied.eligible,false);
+    assert.equal(proof.denied.reason,'revision_signal_unreadable');
+    assert.equal(proof.blockedCandidate.eligible,false);
+    assert.equal(proof.blockedCandidate.reason,'revision_signal_unreadable');
+    assert.equal(Object.hasOwn(proof.blockedCandidate,'habit'),false);
+    assert.equal(proof.healthy.eligible,true,JSON.stringify(proof.healthy));
+    assert.equal(proof.v1Unchanged,true);
+    assert.equal(proof.authority,'legacy_only');
+    return {deniedReadFailsClosed:true,recoveryWithoutRebuild:true,legacyOnly:true};
+  });
+
   await run('mutation-handoff preflight inventories pilot readiness but cannot promote V2', async context => {
     const page=await open(context);
     const baseline=await page.evaluate(async()=>{
