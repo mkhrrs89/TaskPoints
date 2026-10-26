@@ -692,6 +692,72 @@ try {
     return {staleTabRefused:true,refreshedTabMatched:true,readAuthority:'legacy_only'};
   });
 
+  await run('three repeated same-generation V1 mismatch reloads preserve V2 evidence without auto-repair', async context => {
+    const page=await open(context);
+    const baseline=await page.evaluate(async()=>{
+      const db=await window.TaskPointsStateRuntimeV2.open();
+      const inspect=async()=>{
+        const tx=db.transaction(['meta','habits','completions','mutations'],'readonly');
+        const read=name=>new Promise((resolve,reject)=>{
+          const req=tx.objectStore(name).getAll();
+          req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+        });
+        return JSON.stringify(await Promise.all(['meta','habits','completions','mutations'].map(read)));
+      };
+      return {original:localStorage.getItem('taskpoints_v1'),mirror:await inspect(),
+        generation:window.TaskPointsStateRuntimeV2Generation.read()};
+    });
+    await page.evaluate(()=>{
+      const key='taskpoints_v1';
+      const edited=JSON.parse(localStorage.getItem(key));
+      edited.habits[0].name='Synthetic V1-only external correction';
+      localStorage.setItem(key,JSON.stringify(edited));
+    });
+    for(let attempt=0;attempt<3;attempt++){
+      await page.reload({waitUntil:'load'});
+      await page.evaluate(()=>window.V2BrowserFixture.start());
+      const proof=await page.evaluate(async()=>{
+        const runtime=window.TaskPointsStateRuntimeV2;
+        runtime.setPilotReadProbeEnabled(true);
+        const verdict=await runtime.probePilotHabitRead('h1');
+        const db=await runtime.open();
+        const tx=db.transaction(['meta','habits','completions','mutations'],'readonly');
+        const read=name=>new Promise((resolve,reject)=>{
+          const req=tx.objectStore(name).getAll();
+          req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+        });
+        const mirror=JSON.stringify(await Promise.all(
+          ['meta','habits','completions','mutations'].map(read)));
+        return {verdict,mirror,
+          legacyName:JSON.parse(localStorage.getItem('taskpoints_v1')).habits[0].name,
+          generation:window.TaskPointsStateRuntimeV2Generation.read(),
+          readAuthority:runtime.getStatus().readAuthority};
+      });
+      assert.equal(proof.verdict.matched,false);
+      assert.equal(proof.verdict.reason,'pilot_parity_mismatch');
+      assert.equal(proof.verdict.selectedSource,'legacy_only');
+      assert.equal(Object.hasOwn(proof.verdict,'habit'),false);
+      assert.equal(proof.mirror,baseline.mirror,
+        'failed parity cannot silently replace V2 mirror evidence after reload');
+      assert.equal(proof.legacyName,'Synthetic V1-only external correction');
+      assert.equal(proof.generation,baseline.generation);
+      assert.equal(proof.readAuthority,'legacy_only');
+    }
+    await page.evaluate(raw=>localStorage.setItem('taskpoints_v1',raw),baseline.original);
+    await page.reload({waitUntil:'load'});
+    await page.evaluate(()=>window.V2BrowserFixture.start());
+    const recovered=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      runtime.setPilotReadProbeEnabled(true);
+      return {probe:await runtime.probePilotHabitRead('h1'),
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(recovered.probe.matched,true,JSON.stringify(recovered.probe));
+    assert.equal(recovered.authority,'legacy_only');
+    return {repeatedMismatchesPreserved:3,legacyCorrectionRetained:true,
+      recoveryWithoutRepair:true,readAuthority:'legacy_only'};
+  });
+
   await run('repeated reloads retain V2 mutation ledger and completed Habit parity', async context => {
     const page=await open(context);
     await page.evaluate(()=>{
