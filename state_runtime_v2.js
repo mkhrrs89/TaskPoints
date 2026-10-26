@@ -54,6 +54,13 @@
   let interactionPageGeneration = null;
   let generationInteractionReloadRequests = 0;
   let generationInteractionSafetyBlocks = 0;
+  // Ephemeral diagnostic toggle only. This is deliberately NOT persisted,
+  // and never routes live Home reads away from the V1 authority.
+  let pilotReadProbeEnabled = false;
+  let pilotReadProbeChecks = 0;
+  let pilotReadProbeMatches = 0;
+  let pilotReadProbeRefusals = 0;
+
 
   function nowIso() { return new Date().toISOString(); }
 
@@ -3145,6 +3152,81 @@
     }
   }
 
+  // Stage-C *comparison harness*, not a read-authority switch. Enabling
+  // this flag only allows an explicit diagnostic comparison. The selected
+  // backend is ALWAYS legacy, including on an eligible V2 match.
+  function setPilotReadProbeEnabled(enabled) {
+    pilotReadProbeEnabled = enabled === true;
+    return {
+      enabled: pilotReadProbeEnabled,
+      readAuthority: 'legacy_only',
+      persisted: false
+    };
+  }
+
+  async function probePilotHabitRead(habitIdInput) {
+    const result = (reason, extras = {}) => ({
+      checked: true, selectedSource: 'legacy_only',
+      readAuthority: 'legacy_only', reason, ...extras
+    });
+    if (!pilotReadProbeEnabled) return result('probe_disabled', { checked: false });
+    const habitId = String(habitIdInput ?? '').trim();
+    if (!habitId) return result('habit_id_required', { matched: false });
+    pilotReadProbeChecks += 1;
+    try {
+      // Snapshot effective V1 both before and after V2 comparison. A
+      // mid-flight V1 change is a refusal, even if the final values appear
+      // equal; a candidate must never be silently selected in that window.
+      const sourceBefore = parseLegacyStateWithPending();
+      if (sourceBefore.missing) {
+        pilotReadProbeRefusals += 1;
+        return result('legacy_unavailable', { matched: false });
+      }
+      const beforeSubset = sourceSubset(sourceBefore.state);
+      const beforeFingerprint = stableJson(paritySubset(beforeSubset));
+      const legacyHabit = beforeSubset.habits.find(habit =>
+        String(habit?.id ?? '') === habitId) || null;
+      const legacyCompletions = beforeSubset.completions.filter(row =>
+        String(row?.habitId ?? '') === habitId);
+      const candidate = await readPilotHabitCandidate(habitId);
+      if (!candidate.eligible) {
+        pilotReadProbeRefusals += 1;
+        return result(candidate.reason, { matched: false });
+      }
+      const sourceAfter = parseLegacyStateWithPending();
+      if (sourceAfter.missing
+        || stableJson(paritySubset(sourceSubset(sourceAfter.state))) !== beforeFingerprint) {
+        pilotReadProbeRefusals += 1;
+        return result('legacy_changed_during_probe', { matched: false });
+      }
+      // Habit row plus all duplicate-ID completion instances must match
+      // under the exact same narrowly scoped canonicalization as full pilot
+      // parity. Do not log, cache, expose, or repair private record payloads.
+      const expected = stableJson({
+        habit: normalizeHabitForParity(legacyHabit),
+        completions: legacyCompletions.map(normalizePilotCompletionForParity)
+      });
+      const actual = stableJson({
+        habit: normalizeHabitForParity(candidate.habit),
+        completions: candidate.completions.map(normalizePilotCompletionForParity)
+      });
+      const matched = expected === actual;
+      if (matched) pilotReadProbeMatches += 1;
+      else pilotReadProbeRefusals += 1;
+      return result(matched ? 'preview_matches_legacy' : 'preview_mismatch', {
+        matched,
+        lookupMode: candidate.lookupMode,
+        generation: candidate.generation,
+        revision: candidate.revision,
+        counts: { legacyCompletions: legacyCompletions.length,
+          candidateCompletions: candidate.completions.length }
+      });
+    } catch (_) {
+      pilotReadProbeRefusals += 1;
+      return result('probe_unreadable', { matched: false });
+    }
+  }
+
   function getStatus() {
     let visibleGeneration = null;
     let generationReadable = true;
@@ -3192,6 +3274,10 @@
       lastError,
       lastParity,
       readAuthority: 'legacy_only',
+      pilotReadProbeEnabled,
+      pilotReadProbeChecks,
+      pilotReadProbeMatches,
+      pilotReadProbeRefusals,
       walMode: 'v2_generation_stamped_wal_with_revision_conflict_guard_and_legacy_authority',
       habitOrderDurability: 'production_habit_order_overlay',
       habitEditDurability: 'persisted_legacy_habit_subset_after_home_save',
@@ -3320,6 +3406,8 @@
     inspectPilotReadiness,
     inspectPilotCompletionIndexCoverage,
     readPilotHabitCandidate,
+    setPilotReadProbeEnabled,
+    probePilotHabitRead,
     getStatus
   };
 
