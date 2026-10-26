@@ -226,3 +226,110 @@ test('old-generation stale tap is still discarded once the generation becomes re
   assert.match(source, sourcePattern,
     'only a verifiably current epoch can authorize a replay; confirmed stale taps must be discarded');
 });
+
+function makePendingTapHarness(options = {}) {
+  const KEY = 'taskpoints_v2_stale_habit_tap_v1';
+  const local = new Map([['taskpoints_state_v2_dark_mode_v1', '1']]);
+  const session = new Map([[KEY, JSON.stringify({
+    version: 1, habitId: 'habit-1', dayKey: '2026-08-02',
+    generation: options.pendingGeneration || 'generation:valid',
+    pathname: '/index.html', createdEpochMs: Date.now()
+  })]]);
+  const timers = [];
+  const listeners = new Map();
+  let fault = null, calls = 0;
+  const bubble = {
+    getAttribute(k) { return { 'data-habit': 'habit-1', 'data-day': '2026-08-02' }[k] || ''; }
+  };
+  const document = {
+    readyState: 'complete', addEventListener() {},
+    querySelectorAll() { return [bubble]; }
+  };
+  const window = {
+    document, Date, location: { pathname: '/index.html' },
+    localStorage: {
+      getItem(k) {
+        if (fault === 'dark') throw Error('synthetic dark-mode read SecurityError');
+        return local.get(k) ?? null;
+      }
+    },
+    sessionStorage: {
+      getItem(k) { return session.get(k) ?? null; },
+      removeItem(k) {
+        if (fault === 'remove') throw Error('synthetic session write SecurityError');
+        session.delete(k);
+      }
+    },
+    TaskPointsStateRuntimeV2: {
+      getStatus() {
+        if (fault === 'status') throw Error('synthetic generation status SecurityError');
+        return { generationReadable: true, currentGeneration: 'generation:valid',
+          externalRevisionInvalidated: false, readAuthority: 'legacy_only' };
+      },
+      beforeHabitInteraction() { return { proceed: true }; }
+    },
+    addEventListener(type, fn) { listeners.set(type, fn); },
+    setTimeout(fn) { timers.push(fn); return timers.length; },
+    handleHabitBubbleTap() { calls += 1; }
+  };
+  vm.runInContext(source, vm.createContext({
+    window, document, globalThis: window, module: { exports: {} }, console, Date
+  }));
+  return {
+    window, session, timers, listeners, KEY,
+    setFault(value) { fault = value; },
+    pump() { assert.ok(timers.length, 'a replay/retry timer must be queued'); timers.shift()(); },
+    calls() { return calls; }
+  };
+}
+
+test('transient storage exceptions never consume a queued Habit until its one safe replay', () => {
+  const h = makePendingTapHarness();
+  h.setFault('status');
+  h.pump(); // Install the existing Home handler and schedule recovery.
+  h.pump(); // Generation status read unavailable.
+  assert.equal(h.calls(), 0);
+  assert.equal(h.session.has(h.KEY), true);
+  h.setFault('dark');
+  h.pump(); // Reading the dark-mode flag also fails closed.
+  assert.equal(h.calls(), 0);
+  assert.equal(h.session.has(h.KEY), true);
+  h.setFault('remove');
+  h.pump(); // SessionStorage refuses to consume the continuation.
+  assert.equal(h.calls(), 0);
+  assert.equal(h.session.has(h.KEY), true);
+  h.setFault(null);
+  h.pump(); // Both stores are available; only now replay.
+  assert.equal(h.calls(), 1);
+  assert.equal(h.session.has(h.KEY), false);
+  assert.equal(h.window.TaskPointsHabitFastPathControl.getStatus().staleTapReplays, 1);
+  assert.equal(h.timers.length, 0);
+});
+
+test('bounded blocked replay stays in session and rearms when page resumes', () => {
+  const h = makePendingTapHarness();
+  h.setFault('dark');
+  h.pump(); // Install.
+  for (let n = 0; n < 101; n += 1) h.pump();
+  assert.equal(h.timers.length, 0, 'stop retries instead of spinning forever');
+  assert.equal(h.calls(), 0);
+  assert.equal(h.session.has(h.KEY), true, 'never silently erase the pending touch');
+  h.setFault(null);
+  assert.equal(typeof h.listeners.get('pageshow'), 'function');
+  h.listeners.get('pageshow')();
+  h.pump();
+  assert.equal(h.calls(), 1, 'resumption replays the original tap once');
+  assert.equal(h.session.has(h.KEY), false);
+  h.listeners.get('pageshow')();
+  assert.equal(h.timers.length, 0, 'an already completed tap cannot be rescheduled');
+  assert.equal(h.calls(), 1);
+});
+
+test('verified old-generation continuation is discarded rather than replayed after recovery', () => {
+  const h = makePendingTapHarness({ pendingGeneration: 'generation:old' });
+  h.pump();
+  h.pump();
+  assert.equal(h.calls(), 0);
+  assert.equal(h.session.has(h.KEY), false);
+  assert.equal(h.window.TaskPointsHabitFastPathControl.getStatus().staleTapDiscarded, 1);
+});
