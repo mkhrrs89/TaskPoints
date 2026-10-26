@@ -336,3 +336,53 @@ test('denied generation read during module bootstrap preserves the preexisting e
   assert.equal(generation.read(), 'preexisting-generation:abc');
   assert.equal(generation.getStatus().rotations, 0);
 });
+
+test('Home interaction is held when generation cannot be read, without changing V1 or V2 WAL', async () => {
+  const app = install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const originalGeneration = app.generation.read();
+  const first = app.wal.appendHabitDelta(delta());
+  const originalWal = app.localStorage.getItem(WAL_KEY);
+  const originalV1 = app.localStorage.getItem(LEGACY_KEY);
+  const get = app.localStorage.getItem.bind(app.localStorage);
+  app.localStorage.getItem = (key) => {
+    if (String(key) === GENERATION_KEY) throw new Error('denied generation for resumed tap');
+    return get(key);
+  };
+  try {
+    const decision = app.runtime.beforeHabitInteraction({ habitId: 'h1', dayKey: '2026-09-01' });
+    assert.equal(decision.proceed, false);
+    assert.equal(decision.reason, 'generation_unreadable');
+    const status = app.runtime.getStatus();
+    assert.equal(status.generationReadable, false);
+    assert.equal(status.currentGeneration, null);
+    assert.equal(status.generationInteractionSafetyBlocks, 1);
+    assert.equal(status.readAuthority, 'legacy_only');
+  } finally {
+    app.localStorage.getItem = get;
+  }
+  assert.equal(app.localStorage.getItem(LEGACY_KEY), originalV1);
+  assert.equal(app.localStorage.getItem(WAL_KEY), originalWal);
+  assert.equal(app.generation.read(), originalGeneration);
+  assert.deepEqual(app.wal.getPendingRows().rows.map(x => x.id), [first.mutationId]);
+  const resumed = app.runtime.beforeHabitInteraction({ habitId: 'h1', dayKey: '2026-09-01' });
+  assert.equal(resumed.proceed, true);
+  assert.equal(app.runtime.getStatus().generationReadable, true);
+});
+
+test('temporarily missing generation key blocks stale Home interactions without creating a replacement epoch', async () => {
+  const app = install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const originalEpoch = app.generation.read();
+  const V1 = app.localStorage.getItem(LEGACY_KEY);
+  app.localStorage.removeItem(GENERATION_KEY);
+  const blocked = app.runtime.beforeHabitInteraction({ habitId: 'h1', dayKey: '2026-09-01' });
+  assert.equal(blocked.proceed, false);
+  assert.equal(blocked.reason, 'generation_missing');
+  assert.equal(app.runtime.getStatus().generationInteractionSafetyBlocks, 1);
+  assert.equal(app.localStorage.getItem(GENERATION_KEY), null,
+    'a normal tap must not silently manufacture another generation');
+  assert.equal(app.localStorage.getItem(LEGACY_KEY), V1);
+  app.localStorage.setItem(GENERATION_KEY, originalEpoch);
+  assert.equal(app.runtime.beforeHabitInteraction({ habitId: 'h1', dayKey: '2026-09-01' }).proceed, true);
+});
