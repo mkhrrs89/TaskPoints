@@ -386,3 +386,57 @@ test('temporarily missing generation key blocks stale Home interactions without 
   app.localStorage.setItem(GENERATION_KEY, originalEpoch);
   assert.equal(app.runtime.beforeHabitInteraction({ habitId: 'h1', dayKey: '2026-09-01' }).proceed, true);
 });
+
+test('Home Habit guard rejects inaccessible V2 preview flag without losing existing V1 or WAL', async () => {
+  const app = install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const epoch = app.generation.read();
+  const first = app.wal.appendHabitDelta(delta());
+  const legacyBefore = app.localStorage.getItem(LEGACY_KEY);
+  const walBefore = app.localStorage.getItem(WAL_KEY);
+  const get = app.localStorage.getItem.bind(app.localStorage);
+  app.localStorage.getItem = key => {
+    if (String(key) === DARK) throw new Error('synthetic dark-mode read SecurityError');
+    return get(key);
+  };
+  try {
+    const decision = app.runtime.beforeHabitInteraction({ habitId: 'h1', dayKey: '2026-09-01' });
+    assert.equal(decision.proceed, false);
+    assert.equal(decision.reason, 'dark_mode_unreadable');
+    assert.equal(app.runtime.getStatus().generationInteractionSafetyBlocks, 1);
+    assert.equal(app.generation.read(), epoch);
+  } finally {
+    app.localStorage.getItem = get;
+  }
+  assert.equal(app.localStorage.getItem(LEGACY_KEY), legacyBefore);
+  assert.equal(app.localStorage.getItem(WAL_KEY), walBefore);
+  assert.deepEqual(app.wal.getPendingRows().rows.map(row => row.id), [first.mutationId]);
+  assert.equal(app.runtime.beforeHabitInteraction({ habitId: 'h1', dayKey: '2026-09-01' }).proceed, true);
+  assert.equal(app.runtime.getStatus().readAuthority, 'legacy_only');
+});
+
+test('normal V1-only Home remains available when the optional V2 preview flag is unreadable', () => {
+  const storage = new FakeStorage({
+    [DARK]: '0',
+    [LEGACY_KEY]: JSON.stringify(legacyState())
+  });
+  const context = {
+    localStorage: storage, JSON, Date, Math, String, Number, Boolean, Array, Object, Map, Set,
+    console: { warn() {}, error() {}, log() {} }
+  };
+  context.window = context;
+  context.globalThis = context;
+  vm.runInNewContext(runtimeSource, context, { filename: 'state_runtime_v2.js' });
+  const oldGet = storage.getItem.bind(storage);
+  storage.getItem = key => {
+    if (String(key) === DARK) throw new Error('synthetic optional preview key read failure');
+    return oldGet(key);
+  };
+  try {
+    const result = context.TaskPointsStateRuntimeV2.beforeHabitInteraction({
+      habitId: 'h1', dayKey: '2026-09-01'
+    });
+    assert.equal(result.proceed, true);
+    assert.equal(result.reason, 'dark_unavailable_without_v2_page');
+  } finally { storage.getItem = oldGet; }
+});
