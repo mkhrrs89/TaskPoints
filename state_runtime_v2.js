@@ -163,6 +163,20 @@
     return acceptRevisionSignal(safeGet(REVISION_SIGNAL_KEY), 'persisted_signal');
   }
 
+  // Unlike the best-effort UI signal listener, storage inspection for a
+  // preview-consistency gate is safety-critical. A denied read cannot be
+  // interpreted as "no other tab committed anything."
+  function inspectDurableRevisionSignal() {
+    const storage = global.localStorage;
+    if (!storage || typeof storage.getItem !== 'function') return false;
+    try {
+      acceptRevisionSignal(storage.getItem(REVISION_SIGNAL_KEY), 'persisted_signal');
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   function installRevisionInvalidationListeners() {
     if (!isDarkEnabled() || revisionInvalidationListenersInstalled) return revisionInvalidationListenersInstalled;
     revisionInvalidationListenersInstalled = true;
@@ -3014,9 +3028,8 @@
     const initialModeEpoch = darkMirrorModeEpoch;
     if (!interactionPageGeneration) return refused('page_generation_unbound');
     // Some Safari/PWA lifecycle transitions delay storage or BroadcastChannel
-    // events. Check the persisted revision signal even if no event was seen,
-    // before trusting parity in this potentially stale page.
-    checkForExternalRevisionSignal();
+    // events. A denied signal read is not evidence of no new revision.
+    if (!inspectDurableRevisionSignal()) return refused('revision_signal_unreadable');
     if (externalRevisionInvalidated) return refused('external_revision_invalidated');
     const wal = global.TaskPointsStateRuntimeV2Wal;
     if (typeof wal?.getPendingRows !== 'function') return refused('wal_unavailable');
@@ -3054,7 +3067,7 @@
       // A tab/import or new journal write may race the asynchronous IDB read.
       // Recheck all authorities, the current IDB revision, and effective V1.
       const metaAfter = await readMeta(db);
-      checkForExternalRevisionSignal();
+      if (!inspectDurableRevisionSignal()) return refused('revision_signal_unreadable');
       // Preview opt-out during any asynchronous IDB read is an immediate
       // refusal, even when the underlying mirror data happened to match.
       if (!isDarkEnabled() || initialModeEpoch !== darkMirrorModeEpoch)
