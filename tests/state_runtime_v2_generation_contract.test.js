@@ -273,3 +273,66 @@ test('generation module is default-off and does not create an epoch on productio
   assert.equal(context.TaskPointsStateRuntimeV2Generation.getStatus().enabled, false);
   assert.equal(localStorage.getItem(GENERATION_KEY), null);
 });
+
+test('generation read denial never manufactures an epoch or discards existing WAL evidence', () => {
+  const app = install();
+  const epoch = app.generation.read();
+  const first = app.wal.appendHabitDelta(delta());
+  const savedWal = app.localStorage.getItem(WAL_KEY);
+  const savedGeneration = app.localStorage.getItem(GENERATION_KEY);
+  const originalGet = app.localStorage.getItem.bind(app.localStorage);
+  app.localStorage.getItem = (key) => {
+    if (String(key) === GENERATION_KEY) throw new Error('synthetic generation read SecurityError');
+    return originalGet(key);
+  };
+  try {
+    assert.throws(() => app.generation.read(), /state_runtime_v2_generation_read_failed/);
+    assert.throws(() => app.generation.ensure(), /state_runtime_v2_generation_read_failed/);
+    assert.throws(() => app.generation.rotate('unauthorized-rotation'), /state_runtime_v2_generation_read_failed/);
+    assert.throws(() => app.wal.appendHabitDelta(delta('h2')), /state_runtime_v2_generation_read_failed/);
+    const status = app.generation.getStatus();
+    assert.equal(status.generation, null);
+    assert.equal(status.generationReadable, false);
+    assert.equal(status.rotations, 0);
+    assert.match(status.lastError, /state_runtime_v2_generation_read_failed/);
+    const walStatus = app.wal.getStatus();
+    assert.equal(walStatus.generationReadable, false);
+    assert.equal(walStatus.pendingCount, null);
+    assert.equal(walStatus.malformed, true);
+  } finally {
+    app.localStorage.getItem = originalGet;
+  }
+  assert.equal(app.localStorage.getItem(GENERATION_KEY), savedGeneration);
+  assert.equal(app.localStorage.getItem(WAL_KEY), savedWal);
+  assert.equal(app.generation.read(), epoch);
+  assert.deepEqual(app.wal.getPendingRows().rows.map(row => row.id), [first.mutationId]);
+  assert.equal(app.generation.ensure().created, false);
+  assert.equal(app.wal.getStatus().generationReadable, true);
+  assert.equal(app.wal.getStatus().pendingCount, 1);
+});
+
+test('denied generation read during module bootstrap preserves the preexisting epoch for a later reload', () => {
+  const localStorage = new FakeStorage({
+    [DARK]: '1',
+    [GENERATION_KEY]: 'preexisting-generation:abc',
+    [WAL_KEY]: '[{"id":"old-evidence","generation":"preexisting-generation:abc","delta":{"habitId":"h1","dayKey":"2026-09-01"}}]'
+  });
+  const rawRead = localStorage.getItem.bind(localStorage);
+  localStorage.getItem = key => {
+    if (String(key) === GENERATION_KEY) throw new Error('synthetic bootstrap read SecurityError');
+    return rawRead(key);
+  };
+  const context = { localStorage, JSON, Date, Math, String, Number, Boolean, Array, Object, Map, Set, console };
+  context.window = context;
+  context.globalThis = context;
+  vm.runInNewContext(generationSource, context, { filename: 'state_runtime_v2_generation.js' });
+  const generation = context.TaskPointsStateRuntimeV2Generation;
+  assert.equal(rawRead(GENERATION_KEY), 'preexisting-generation:abc');
+  assert.equal(generation.getStatus().generationReadable, false);
+  assert.throws(() => generation.ensure(), /state_runtime_v2_generation_read_failed/);
+  assert.equal(rawRead(GENERATION_KEY), 'preexisting-generation:abc');
+  localStorage.getItem = rawRead;
+  assert.equal(generation.ensure().created, false);
+  assert.equal(generation.read(), 'preexisting-generation:abc');
+  assert.equal(generation.getStatus().rotations, 0);
+});
