@@ -94,6 +94,48 @@ try {
     return p.actualCounts;
   });
 
+  await run('real IndexedDB v1-to-v2 upgrade backfills cross-Habit completion index atomically', async context => {
+    const page=await context.newPage();
+    page.on('pageerror',err=>console.warn('Upgrade fixture error: '+err.message));
+    await page.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),{waitUntil:'load'});
+    await page.evaluate(()=>window.makeOldV2Fixture());
+    const before=await page.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    // Keep dark disabled while the runtime script loads so only this test,
+    // not background startup seeding, initiates and observes the upgrade.
+    await page.addScriptTag({url:'/state_runtime_v2.js'});
+    const changed=await page.evaluate(async ()=>{
+      localStorage.setItem('taskpoints_state_v2_dark_mode_v1','1');
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const db=await runtime.open();
+      const tx=db.transaction('completions','readonly');
+      const store=tx.objectStore('completions');
+      const get=(req)=>new Promise((resolve,reject)=>{
+        req.onsuccess=()=>resolve(req.result);
+        req.onerror=()=>reject(req.error);
+      });
+      const all=await get(store.getAll());
+      const h1=await get(db.transaction('completions','readonly')
+        .objectStore('completions').index('by_habit_ids').getAll('h1'));
+      const h2=await get(db.transaction('completions','readonly')
+        .objectStore('completions').index('by_habit_ids').getAll('h2'));
+      return {version:db.version,indexPresent:store.indexNames.contains('by_habit_ids'),
+        entries:all[0].entries,habitIds:all[0].habitIds,
+        h1:h1.map(r=>r.id),h2:h2.map(r=>r.id),
+        authority:runtime.getStatus().readAuthority,
+        legacy:localStorage.getItem('taskpoints_v1')};
+    });
+    assert.equal(changed.version,2);
+    assert.equal(changed.indexPresent,true);
+    assert.deepEqual(changed.habitIds,['h1','h2']);
+    assert.deepEqual(changed.h1,['shared-old']);
+    assert.deepEqual(changed.h2,['shared-old']);
+    assert.deepEqual(changed.entries.map(e=>e.value.points),[4,5]);
+    assert.equal(changed.legacy,before);
+    assert.equal(changed.authority,'legacy_only');
+    return {oldVersionUpgraded:true,crossHabitDuplicatePreserved:true,
+      indexedBothHabits:true,legacyUnchanged:true};
+  });
+
   await run('completion pack index metadata remains nonauthoritative and reports legacy gaps', async context => {
     const page = await open(context);
     const initial = await page.evaluate(() => window.TaskPointsStateRuntimeV2.inspectPilotCompletionIndexCoverage());
