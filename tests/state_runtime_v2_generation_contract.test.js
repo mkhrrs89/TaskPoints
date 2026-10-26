@@ -972,3 +972,43 @@ test('two successive blocked V2 opens cannot invalidate a later healthy open', a
   assert.equal(await app.runtime.open(),healthy);
   assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
 });
+
+test('ephemeral V2 read probe remains V1-authoritative, reversible, and read-only',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const original=structuredClone(app.indexedDB.dump(DB_NAME));
+  const v1=app.localStorage.getItem(LEGACY_KEY);
+  assert.equal((await app.runtime.probePilotHabitRead('h1')).reason,'probe_disabled');
+  assert.equal(app.runtime.getStatus().pilotReadProbeEnabled,false);
+  assert.equal(app.runtime.setPilotReadProbeEnabled(true).persisted,false);
+  const result=await app.runtime.probePilotHabitRead('h1');
+  assert.equal(result.matched,true,JSON.stringify(result));
+  assert.equal(result.lookupMode,'indexed');
+  assert.equal(result.selectedSource,'legacy_only');
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+  assert.equal(app.runtime.getStatus().pilotReadProbeChecks,1);
+  assert.equal(app.runtime.getStatus().pilotReadProbeMatches,1);
+  app.runtime.setPilotReadProbeEnabled(false);
+  assert.equal((await app.runtime.probePilotHabitRead('h1')).reason,'probe_disabled');
+  assert.deepEqual(app.indexedDB.dump(DB_NAME),original);
+  assert.equal(app.localStorage.getItem(LEGACY_KEY),v1);
+});
+
+test('ephemeral V2 read probe refuses pending WAL and V1 divergence without exposing a record',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  app.runtime.setPilotReadProbeEnabled(true);
+  const pending=app.wal.appendHabitDelta(delta());
+  const refused=await app.runtime.probePilotHabitRead('h1');
+  assert.equal(refused.reason,'wal_pending');
+  assert.equal(refused.selectedSource,'legacy_only');
+  assert.equal(Object.hasOwn(refused,'habit'),false);
+  app.wal.removeMutation(pending.mutationId);
+  app.localStorage.setItem(LEGACY_KEY,JSON.stringify(legacyState('h1','External V1 only')));
+  const mismatch=await app.runtime.probePilotHabitRead('h1');
+  assert.equal(mismatch.matched,false);
+  assert.equal(mismatch.reason,'pilot_parity_mismatch');
+  assert.equal(mismatch.selectedSource,'legacy_only');
+  assert.equal(Object.hasOwn(mismatch,'completions'),false);
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
