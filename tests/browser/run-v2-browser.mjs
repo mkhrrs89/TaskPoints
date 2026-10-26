@@ -1081,6 +1081,91 @@ try {
       eventPreserved:true,replayedOnRestart:true,parity:p.match};
   });
 
+  await run('generation read denial preserves epoch and held WAL until restart',async context=>{
+    const page=await open(context);
+    const evidence=await page.evaluate(()=>{
+      sessionStorage.setItem('taskpoints_state_v2_wal_test_armed_v1','1');
+      window.V2BrowserFixture.delta('h1','2026-10-20','full',1);
+      const gen=window.TaskPointsStateRuntimeV2Generation;
+      const wal=window.TaskPointsStateRuntimeV2Wal;
+      const epoch=gen.read();
+      const rows=wal.getPendingRows().rows;
+      if(rows.length!==1) throw Error('Expected held recovery mutation');
+      const originalGet=Storage.prototype.getItem;
+      const sharedKey=wal.KEY;
+      const sharedBefore=localStorage.getItem(sharedKey);
+      const sidecarKey='taskpoints_v2_pending_mutation_event_v1:'+rows[0].id;
+      const sidecarBefore=localStorage.getItem(sidecarKey);
+      let denied=0;
+      const blocked={};
+      Storage.prototype.getItem=function(key){
+        if(this===localStorage && String(key)===gen.KEY){
+          denied++;
+          throw new DOMException('Synthetic generation read denied','SecurityError');
+        }
+        return originalGet.call(this,key);
+      };
+      try{
+        for(const [name,fn] of [
+          ['read',()=>gen.read()],
+          ['ensure',()=>gen.ensure()],
+          ['rotate',()=>gen.rotate('should-not-rotate')],
+          ['walAppend',()=>wal.appendHabitDelta({
+            habitId:'h2',dayKey:'2026-10-21',source:'habit',status:'full',done:true,
+            updatedAtISO:'2026-10-21T12:00:00.000Z'
+          })]
+        ]){
+          try{fn();blocked[name]=false;}
+          catch(error){blocked[name]=/state_runtime_v2_generation_read_failed/.test(String(error));}
+        }
+        const generationStatus=gen.getStatus();
+        const walStatus=wal.getStatus();
+        blocked.status={generationReadable:generationStatus.generationReadable,
+          rotations:generationStatus.rotations,
+          walGenerationReadable:walStatus.generationReadable,
+          walPendingCount:walStatus.pendingCount,
+          walMalformed:walStatus.malformed};
+      }finally{Storage.prototype.getItem=originalGet;}
+      return {epoch,denied,blocked,
+        sameEpoch:gen.read()===epoch,
+        sameShared:localStorage.getItem(sharedKey)===sharedBefore,
+        sameSidecar:localStorage.getItem(sidecarKey)===sidecarBefore,
+        pending:wal.getPendingRows().rows.map(row=>row.id),
+        originalId:rows[0].id,
+        legacyJournal:window.TaskPointsCore.readPendingHabitDeltas().length,
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    });
+    assert.ok(evidence.denied>=6);
+    for(const op of ['read','ensure','rotate','walAppend']){
+      assert.equal(evidence.blocked[op],true,op+' must fail closed');
+    }
+    assert.deepEqual(evidence.blocked.status,{
+      generationReadable:false,rotations:0,walGenerationReadable:false,
+      walPendingCount:null,walMalformed:true
+    });
+    assert.equal(evidence.sameEpoch,true);
+    assert.equal(evidence.sameShared,true);
+    assert.equal(evidence.sameSidecar,true);
+    assert.deepEqual(evidence.pending,[evidence.originalId]);
+    assert.equal(evidence.legacyJournal,1);
+    assert.equal(evidence.authority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    await page.waitForFunction(()=>{
+      const s=window.V2BrowserFixture?.status();
+      return s && s.wal.pendingCount===0 && s.bridge.replayCleared>=1;
+    },null,{timeout:25000});
+    const p=await parity(page);
+    assert.equal(p.actualCounts.completions,1);
+    const after=await page.evaluate(()=>({
+      epoch:window.TaskPointsStateRuntimeV2Generation.read(),
+      authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority
+    }));
+    assert.equal(after.epoch,evidence.epoch);
+    assert.equal(after.authority,'legacy_only');
+    return {generationRetained:true,walPreserved:true,replayedAfterReadRecovered:true,
+      authority:'legacy_only',parity:p.match};
+  });
+
   await run('interrupted independent WAL cleanup replays exactly once after browser restart',async context=>{
     const page=await open(context);
     const injected=await page.evaluate(()=>{
