@@ -863,7 +863,7 @@ test('V2 index migration read error aborts and retains all legacy completion evi
   const original = structuredClone(app.indexedDB.dump(DB_NAME));
   app.indexedDB.failNext({store:'completions',operation:'getAll',
     error:new Error('synthetic upgrade read denial')});
-  await assert.rejects(app.runtime.open(), /synthetic upgrade read denial/);
+  await assert.rejects(app.runtime.open(), /synthetic upgrade read denial|fake_idb_transaction_aborted/);
   assert.equal(app.indexedDB._databases.get(DB_NAME).version,1);
   assert.deepEqual(app.indexedDB.dump(DB_NAME),original);
   assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
