@@ -628,6 +628,9 @@ test('targeted pilot reader uses Habit primary key, retaining packed cross-Habit
     completions: [first, forH2, second]
   } });
   await app.runtime.startCoordinatedDarkMirror();
+  const packed = app.indexedDB.dump(DB_NAME).completions;
+  assert.deepEqual(Array.from(packed.find(row => row.id === 'duplicate').habitIds),
+    ['h1', 'h2'], 'shared completion ID must index every participating Habit');
   const db = await app.runtime.open();
   const transaction = db.transaction.bind(db);
   const calls = { targetedHabits: 0, fullHabits: 0, fullCompletions: 0 };
