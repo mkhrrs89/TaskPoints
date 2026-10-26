@@ -241,6 +241,10 @@ class FakeDatabase {
     return this._upgradeTx ? new FakeObjectStore(this._upgradeTx, normalized) : { name: normalized };
   }
 
+  close() {
+    this._closed = true;
+  }
+
   transaction(storeNames, mode = 'readonly') {
     const names = Array.isArray(storeNames) ? storeNames.map(String) : [String(storeNames)];
     for (const name of names) {
