@@ -441,3 +441,73 @@ test('normal V1-only Home remains available when the optional V2 preview flag is
     assert.equal(result.reason, 'dark_unavailable_without_v2_page');
   } finally { storage.getItem = oldGet; }
 });
+
+test('preview pilot readiness checks a stable verified mirror but never switches read authority', async () => {
+  const app = install();
+  const beforeStart = await app.runtime.inspectPilotReadiness();
+  assert.equal(beforeStart.eligible, false);
+  assert.equal(beforeStart.reason, 'page_generation_unbound');
+  await app.runtime.startCoordinatedDarkMirror();
+  const oldMeta = structuredClone(runtimeMeta(app));
+  const legacyBefore = app.localStorage.getItem(LEGACY_KEY);
+  const ready = await app.runtime.inspectPilotReadiness();
+  assert.equal(ready.checked, true);
+  assert.equal(ready.eligible, true, JSON.stringify(ready));
+  assert.equal(ready.reason, 'pilot_consistent');
+  assert.equal(ready.readAuthority, 'legacy_only');
+  assert.equal(ready.counts.habits, 1);
+  assert.equal(ready.counts.completions, 0);
+  assert.deepEqual(runtimeMeta(app), oldMeta, 'inspection must never update meta or seed revision');
+  assert.equal(app.localStorage.getItem(LEGACY_KEY), legacyBefore);
+  assert.equal(app.runtime.getStatus().readAuthority, 'legacy_only');
+});
+
+test('preview pilot readiness refuses pending WAL and unverified same-generation Habit differences', async () => {
+  const app = install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const initial = await app.runtime.inspectPilotReadiness();
+  assert.equal(initial.eligible, true, JSON.stringify(initial));
+  const generation = app.generation.read();
+  const first = app.wal.appendHabitDelta(delta());
+  const blockedWal = await app.runtime.inspectPilotReadiness();
+  assert.equal(blockedWal.reason, 'wal_pending');
+  assert.equal(blockedWal.eligible, false);
+  assert.equal(app.wal.getPendingRows().rows.length, 1);
+  app.wal.removeMutation(first.mutationId);
+  const originalV1 = app.localStorage.getItem(LEGACY_KEY);
+  app.localStorage.setItem(LEGACY_KEY, JSON.stringify(legacyState('h1', 'Later external edit')));
+  const mismatch = await app.runtime.inspectPilotReadiness();
+  assert.equal(mismatch.reason, 'pilot_parity_mismatch');
+  assert.equal(mismatch.eligible, false);
+  assert.equal(app.localStorage.getItem(LEGACY_KEY).includes('Later external edit'), true);
+  app.localStorage.setItem(LEGACY_KEY, originalV1);
+  const recovered = await app.runtime.inspectPilotReadiness();
+  assert.equal(recovered.eligible, true, JSON.stringify(recovered));
+  assert.equal(app.generation.read(), generation);
+  assert.equal(app.runtime.getStatus().readAuthority, 'legacy_only');
+});
+
+test('preview pilot readiness fails closed on denied WAL reads and changed generations', async () => {
+  const app = install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const get = app.localStorage.getItem.bind(app.localStorage);
+  app.localStorage.getItem = key => {
+    if (String(key) === WAL_KEY) throw Error('temporary WAL read denied');
+    return get(key);
+  };
+  try {
+    const denied = await app.runtime.inspectPilotReadiness();
+    assert.equal(denied.eligible, false);
+    assert.equal(denied.reason, 'wal_unreadable');
+  } finally { app.localStorage.getItem = get; }
+  assert.equal((await app.runtime.inspectPilotReadiness()).eligible, true);
+  const originalEpoch = app.generation.read();
+  app.localStorage.setItem(GENERATION_KEY, 'import-replacement-epoch');
+  const changed = await app.runtime.inspectPilotReadiness();
+  assert.equal(changed.eligible, false);
+  assert.equal(changed.reason, 'generation_changed');
+  assert.equal(app.localStorage.getItem(GENERATION_KEY), 'import-replacement-epoch');
+  assert.equal(app.runtime.getStatus().readAuthority, 'legacy_only');
+  app.localStorage.setItem(GENERATION_KEY, originalEpoch);
+  assert.equal((await app.runtime.inspectPilotReadiness()).eligible, true);
+});
