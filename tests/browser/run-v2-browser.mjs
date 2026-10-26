@@ -181,6 +181,69 @@ try {
       recoveredWithoutReseeding:true, authorityUnchanged:true};
   });
 
+  await run('guarded V2 Habit candidate reads prove data without changing V1 authority', async context => {
+    const page = await open(context);
+    const before = await page.evaluate(async () => {
+      const runtime = window.TaskPointsStateRuntimeV2;
+      const rawV1 = localStorage.getItem(window.TaskPointsCore.STORAGE_KEY);
+      const candidate = await runtime.readPilotHabitCandidate('h1');
+      const invalid = await runtime.readPilotHabitCandidate(' ');
+      return { candidate, invalid, legacyUnchanged: rawV1 === localStorage.getItem(window.TaskPointsCore.STORAGE_KEY),
+        authority: runtime.getStatus().readAuthority };
+    });
+    assert.equal(before.candidate.eligible, true, JSON.stringify(before.candidate));
+    assert.equal(before.candidate.source, 'v2_preview_only');
+    assert.equal(before.candidate.habit.name, 'Synthetic h1');
+    assert.deepEqual(before.candidate.completions, []);
+    assert.equal(before.invalid.eligible, false);
+    assert.equal(before.invalid.reason, 'habit_id_required');
+    assert.equal(before.legacyUnchanged, true);
+    assert.equal(before.authority, 'legacy_only');
+    await page.evaluate(() => window.V2BrowserFixture.delta('h1', '2026-10-20', 'full', 1));
+    await settled(page, 1);
+    const completed = await page.evaluate(async () => {
+      const runtime = window.TaskPointsStateRuntimeV2;
+      return { candidate: await runtime.readPilotHabitCandidate('h1'),
+        authority: runtime.getStatus().readAuthority };
+    });
+    assert.equal(completed.candidate.eligible, true, JSON.stringify(completed.candidate));
+    assert.deepEqual(completed.candidate.completions.map(c => c.id), ['habit:h1:2026-10-20']);
+    assert.equal(completed.authority, 'legacy_only');
+    await parity(page);
+    return {previewHabitRead:true,completionRead:true,legacyAuthorityUnchanged:true};
+  });
+
+  await run('guarded V2 Habit candidate rejects mid-read V1 change without exposing stale records', async context => {
+    const page = await open(context);
+    const result = await page.evaluate(async () => {
+      const runtime = window.TaskPointsStateRuntimeV2;
+      const storageKey = window.TaskPointsCore.STORAGE_KEY;
+      const original = Storage.prototype.getItem;
+      let reads = 0;
+      Storage.prototype.getItem = function(key) {
+        if (this === localStorage && String(key) === storageKey && ++reads === 3) {
+          const changed = window.V2BrowserFixture.rawLegacy();
+          changed.habits[0].name = 'Mid-read external edit';
+          localStorage.setItem(storageKey, JSON.stringify(changed));
+        }
+        return original.call(this, key);
+      };
+      let candidate;
+      try { candidate = await runtime.readPilotHabitCandidate('h1'); }
+      finally { Storage.prototype.getItem = original; }
+      return {candidate, reads, v1Name:window.V2BrowserFixture.rawLegacy().habits[0].name,
+        readAuthority:runtime.getStatus().readAuthority};
+    });
+    assert.ok(result.reads >= 3, 'must recheck V1 after IDB candidate read');
+    assert.equal(result.candidate.eligible, false);
+    assert.equal(result.candidate.source, 'none');
+    assert.equal(result.candidate.reason, 'pilot_parity_mismatch');
+    assert.equal(Object.hasOwn(result.candidate, 'habit'), false);
+    assert.equal(result.v1Name, 'Mid-read external edit');
+    assert.equal(result.readAuthority, 'legacy_only');
+    return {midReadChangeBlocked:true,noStaleV2DataReturned:true,v1EditPreserved:true};
+  });
+
   await run('rapid full-half-off burst and two further Habits preserve final state', async context => {
     const page = await open(context);
     await page.evaluate(() => {
