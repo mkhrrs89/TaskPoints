@@ -470,12 +470,15 @@ test('standalone WAL fallback creates an epoch only when storage proves key is m
 test('WAL never bypasses an installed generation authority that declines to provide an epoch', () => {
   const { api, context, localStorage } = install({ [DARK]: '1' });
   const original = context.TaskPointsStateRuntimeV2Generation;
+  const existingEpoch = localStorage.getItem(GENERATION_KEY);
+  assert.ok(existingEpoch, 'normal setup automatically bootstraps the original epoch');
   context.TaskPointsStateRuntimeV2Generation = {
     ensure() { return { enabled: false, generation: null }; },
     read() { return null; }
   };
   assert.throws(() => api.appendHabitDelta(deltaA), /wal_generation_unavailable/);
-  assert.equal(localStorage.getItem(GENERATION_KEY), null);
+  assert.equal(localStorage.getItem(GENERATION_KEY), existingEpoch,
+    'declined authority must not replace or erase its existing generation');
   assert.equal(localStorage.getItem(KEY), null);
   context.TaskPointsStateRuntimeV2Generation = original;
   assert.equal(api.appendHabitDelta(deltaA).written, true);
