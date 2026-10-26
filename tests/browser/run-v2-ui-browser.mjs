@@ -507,6 +507,97 @@ try{
       importedNamePreserved:true,completionNotDuplicated:true,parity:true};
   });
 
+  await test('suspended Home tab blocks unreadable generation before first post-import Habit tap',async ctx=>{
+    const sleeping=(await home(ctx)).page;
+    const importer=(await home(ctx)).page;
+    await sleeping.locator('[data-home-tab="habits"]').click({force:true});
+    const day=await sleeping.locator('#habitsList .habitDay[data-habit="h2"]').first().getAttribute('data-day');
+    assert.ok(day);
+    const oldGeneration=await sleeping.evaluate(
+      ()=>window.TaskPointsStateRuntimeV2Generation.read());
+    await importer.bringToFront();
+    const replacement=await importer.evaluate(()=>{
+      const core=window.TaskPointsCore;
+      const candidate=structuredClone(core.readTaskPointsStoredState());
+      const habit=candidate.habits.find(h=>h.id==='h1');
+      habit.name='Generation Read Recovery Import';
+      habit.updatedAtISO=new Date(Date.now()+60000).toISOString();
+      const result=core.saveValidatedSnapshot(candidate,{
+        allowDestructiveOverwrite:true,source:'settings-import',immediateWrite:true});
+      return {blocked:result?.blocked===true,
+        generation:window.TaskPointsStateRuntimeV2Generation.read(),
+        name:core.parseTaskPointsStorageJson(localStorage.getItem(core.STORAGE_KEY),{})
+          .habits.find(h=>h.id==='h1')?.name};
+    });
+    assert.equal(replacement.blocked,false);
+    assert.notEqual(replacement.generation,oldGeneration);
+    assert.equal(replacement.name,'Generation Read Recovery Import');
+    await importer.evaluate(()=>window.TaskPointsStateRuntimeV2.startCoordinatedDarkMirror());
+    await sleeping.bringToFront();
+
+    await sleeping.evaluate(()=>{
+      const original=Storage.prototype.getItem;
+      window.__syntheticGenerationReadOriginal=original;
+      Storage.prototype.getItem=function(key){
+        if(this===localStorage && String(key)==='taskpoints_state_v2_generation_v1')
+          throw new DOMException('Synthetic suspended generation access denied','SecurityError');
+        return original.call(this,key);
+      };
+    });
+    try{
+      await sleeping.locator('#habitsList .habitDay[data-habit="h2"][data-day="'+day+'"]').tap({force:true});
+      const denied=await sleeping.evaluate(day=>({
+        safetyBlocks:window.TaskPointsStateRuntimeV2.getStatus().generationInteractionSafetyBlocks,
+        readable:window.TaskPointsStateRuntimeV2.getStatus().generationReadable,
+        journal:window.TaskPointsCore.readPendingHabitDeltas()
+          .filter(d=>d.habitId==='h2'&&d.dayKey===day).length,
+        replayCount:window.TaskPointsHabitFastPathControl.getStatus().staleTapReplays,
+        pendingTap:sessionStorage.getItem('taskpoints_v2_stale_habit_tap_v1')
+      }),day);
+      assert.equal(denied.safetyBlocks,1,'unreadable generation must block the actual Home tap');
+      assert.equal(denied.readable,false);
+      assert.equal(denied.journal,0,'no V1 Habit mutation can cross an unknown generation');
+      assert.equal(denied.replayCount,0);
+      assert.equal(denied.pendingTap,null,'unknown epoch cannot stamp a replay continuation');
+    }finally{
+      await sleeping.evaluate(()=>{
+        if(window.__syntheticGenerationReadOriginal){
+          Storage.prototype.getItem=window.__syntheticGenerationReadOriginal;
+          delete window.__syntheticGenerationReadOriginal;
+        }
+      });
+    }
+
+    await sleeping.locator('#habitsList .habitDay[data-habit="h2"][data-day="'+day+'"]').tap({force:true});
+    await sleeping.waitForFunction(day=>{
+      const pending=window.TaskPointsCore?.readPendingHabitDeltas?.()||[];
+      const ctl=window.TaskPointsHabitFastPathControl?.getStatus?.();
+      return pending.some(d=>d.habitId==='h2'&&d.dayKey===day&&d.status==='full')
+        && ctl?.staleTapReplays===1;
+    },day,{timeout:24000});
+    const result=await sleeping.evaluate(async day=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      await runtime.startCoordinatedDarkMirror();
+      const core=window.TaskPointsCore;
+      return {generation:window.TaskPointsStateRuntimeV2Generation.read(),
+        importedName:core.parseTaskPointsStorageJson(localStorage.getItem(core.STORAGE_KEY),{})
+          .habits.find(h=>h.id==='h1')?.name,
+        completions:core.readPendingHabitDeltas()
+          .filter(d=>d.habitId==='h2'&&d.dayKey===day).map(d=>d.status),
+        replayCount:window.TaskPointsHabitFastPathControl.getStatus().staleTapReplays,
+        parity:await runtime.verifyParity(),
+        readAuthority:runtime.getStatus().readAuthority};
+    },day);
+    assert.equal(result.generation,replacement.generation);
+    assert.equal(result.importedName,'Generation Read Recovery Import');
+    assert.deepEqual(result.completions,['full']);
+    assert.equal(result.replayCount,1);
+    assert.equal(result.parity.match,true,JSON.stringify(result.parity.differences));
+    assert.equal(result.readAuthority,'legacy_only');
+    return {unknownGenerationBlocked:true,noV1MutationDuringDenial:true,
+      resumedPostImportTapReplayedExactlyOnce:true,importedDataRetained:true,parity:true};
+  });
+
   await test('stale Habit continuation from a previous V2 generation is discarded without toggling',async ctx=>{
     const {page}=await home(ctx);
     const generation=await page.evaluate(()=>window.TaskPointsStateRuntimeV2.getStatus().currentGeneration);
