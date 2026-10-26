@@ -3164,6 +3164,89 @@
     }
   }
 
+  // Read-only Stage-D prerequisites, NOT an authority promotion API.
+  // A full mutation handoff requires a cross-tab exclusive writer lease,
+  // durable rollback, and coverage of all app collections. None exists yet.
+  // Therefore canPromote is deliberately hard-false regardless of parity.
+  async function inspectMutationHandoffPrerequisites() {
+    const permanentBlockers = [
+      'exclusive_writer_lease_not_implemented',
+      'durable_authority_rollback_not_implemented',
+      'nonpilot_collections_not_migrated'
+    ];
+    const output = (checks, extraBlockers = [], reason = 'handoff_prerequisites_incomplete') => ({
+      checked: true, canPromote: false, reason,
+      mutationAuthority: 'legacy_only', readAuthority: 'legacy_only',
+      blockers: [...extraBlockers, ...permanentBlockers],
+      checks
+    });
+    const before = await inspectPilotReadiness();
+    if (!before.eligible) {
+      return output({ pilotConsistent: false, completionIndexReady: false,
+        legacyJournalEmpty: null, mirrorQueueStable: null },
+      ['pilot_' + before.reason], 'pilot_not_consistent');
+    }
+    const observedTail = mirrorTail;
+    let pendingCount = null;
+    let nonPilotCompletions = null;
+    let bridgeFailures = null;
+    try {
+      if (typeof core.readPendingHabitDeltas !== 'function')
+        return output({ pilotConsistent: true, completionIndexReady: before.completionIndexReady,
+          legacyJournalEmpty: null, mirrorQueueStable: null },
+        ['legacy_journal_unavailable'], 'handoff_prerequisites_incomplete');
+      const legacyJournal = core.readPendingHabitDeltas();
+      if (!Array.isArray(legacyJournal)) throw Error('invalid_legacy_journal');
+      pendingCount = legacyJournal.length;
+      const source = parseLegacyStateWithPending();
+      if (source.missing) throw Error('legacy_unavailable');
+      nonPilotCompletions = source.state.completions.length
+        - pilotCompletions(source.state).length;
+      const bridge = global.TaskPointsStateRuntimeV2WalBridge;
+      const status = bridge?.getStatus?.();
+      bridgeFailures = status && Number.isFinite(Number(status.failures))
+        ? Number(status.failures) : null;
+      const after = await inspectPilotReadiness();
+      if (!after.eligible) {
+        return output({ pilotConsistent: false, completionIndexReady: false,
+          legacyJournalEmpty: pendingCount === 0,
+          mirrorQueueStable: mirrorTail === observedTail },
+        ['pilot_' + after.reason], 'pilot_changed_during_preflight');
+      }
+      if (before.generation !== after.generation || before.revision !== after.revision
+        || before.completionIndexReady !== after.completionIndexReady) {
+        return output({ pilotConsistent: false, completionIndexReady: false,
+          legacyJournalEmpty: pendingCount === 0,
+          mirrorQueueStable: mirrorTail === observedTail },
+        ['pilot_changed_during_preflight'], 'pilot_changed_during_preflight');
+      }
+      const checks = {
+        pilotConsistent: true,
+        completionIndexReady: after.completionIndexReady === true,
+        legacyJournalEmpty: pendingCount === 0,
+        mirrorQueueStable: mirrorTail === observedTail,
+        noObservedMirrorFailures: mirrorFailures === 0,
+        noObservedBridgeFailures: bridgeFailures === 0
+      };
+      const blockers = [];
+      if (!checks.completionIndexReady) blockers.push('completion_index_incomplete');
+      if (!checks.legacyJournalEmpty) blockers.push('legacy_journal_pending');
+      if (!checks.mirrorQueueStable) blockers.push('mirror_queue_changed_during_preflight');
+      if (!checks.noObservedMirrorFailures) blockers.push('mirror_failures_observed');
+      if (!checks.noObservedBridgeFailures) blockers.push('bridge_not_confirmed_healthy');
+      return {
+        ...output(checks, blockers),
+        counts: { legacyJournalPending: pendingCount,
+          nonPilotLegacyCompletions: nonPilotCompletions },
+        generation: after.generation, revision: after.revision
+      };
+    } catch (_) {
+      return output({ pilotConsistent: false, completionIndexReady: false,
+        legacyJournalEmpty: null, mirrorQueueStable: null },
+      ['handoff_inventory_unreadable'], 'handoff_inventory_unreadable');
+    }
+  }
+
   // Stage-C *comparison harness*, not a read-authority switch. Enabling
   // this flag only allows an explicit diagnostic comparison. The selected
   // backend is ALWAYS legacy, including on an eligible V2 match.
@@ -3434,6 +3517,7 @@
     verifyParity,
     inspectPilotReadiness,
     inspectPilotCompletionIndexCoverage,
+    inspectMutationHandoffPrerequisites,
     readPilotHabitCandidate,
     setPilotReadProbeEnabled,
     probePilotHabitRead,
