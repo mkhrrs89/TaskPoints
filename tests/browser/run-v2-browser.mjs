@@ -416,6 +416,16 @@ try {
       assert.equal(held.journal,expected.indexOf(event)+1);
       await writer.close();
     }
+    // All independently durable rows must be visible before compaction.
+    // WebKit can dispatch a cross-tab storage update after the writer page
+    // closes, so an immediate read is not a stable observation point.
+    await survivor.waitForFunction(()=>{
+      const wal=window.TaskPointsStateRuntimeV2Wal.getPendingRows();
+      const journal=window.TaskPointsCore.readPendingHabitDeltas();
+      return wal.ok && wal.rows.length===2
+        && new Set(wal.rows.map(r=>r.id)).size===2
+        && journal.length===2;
+    },null,{timeout:12000,polling:50});
     const checkpoint=await survivor.evaluate(()=>{
       const core=window.TaskPointsCore;
       const pending=core.readPendingHabitDeltas();
@@ -437,7 +447,16 @@ try {
     });
     assert.equal(checkpoint.verified,2,'both V1 journal deltas must be verified before cleanup');
     assert.equal(checkpoint.remaining,0,'verified V1 journal must be compacted');
-    assert.equal(checkpoint.walAfter,2,'V1 compaction must not remove pending V2 WAL evidence');
+    // Verify the durable sidecars are still present *after* the verified V1
+    // cleanup, not just transiently visible during a concurrent storage event.
+    // Keep the exact-set check: a genuinely lost row still fails the gate.
+    await survivor.waitForFunction(expectedIds=>{
+      const wal=window.TaskPointsStateRuntimeV2Wal.getPendingRows();
+      const ids=wal.rows.map(r=>r.id).sort();
+      return wal.ok && ids.length===expectedIds.length
+        && ids.every((id,i)=>id===expectedIds[i])
+        && window.TaskPointsStateRuntimeV2Wal.getStatus().independentEventCount===2;
+    },checkpoint.walIds,{timeout:12000,polling:50});
     assert.equal(checkpoint.walIds.length,2);
     assert.deepEqual(checkpoint.pilotIds,['habit:h1:2026-10-14','habit:h2:2026-10-15']);
     assert.equal(checkpoint.generationUnchanged,true);
