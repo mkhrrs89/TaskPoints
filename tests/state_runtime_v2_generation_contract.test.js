@@ -909,3 +909,66 @@ test('indexed candidate failures do not expose partial results and recover witho
   assert.equal(retried.lookupMode,'indexed');
   assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
 });
+
+test('blocked V2 open rejects immediately, aborts delayed upgrade and never supersedes a successful retry', async () => {
+  const app=install();
+  const originalOpen=app.indexedDB.open.bind(app.indexedDB);
+  const savedV1=app.localStorage.getItem(LEGACY_KEY);
+  let heldRequest=null;
+  let aborted=0;
+  let lateClosed=0;
+  app.indexedDB.open=()=>{
+    const request={
+      result:{close(){lateClosed++;}},
+      transaction:{abort(){aborted++;}},
+      error:null,
+      onsuccess:null,onerror:null,onblocked:null,onupgradeneeded:null
+    };
+    heldRequest=request;
+    queueMicrotask(()=>request.onblocked?.());
+    return request;
+  };
+  await assert.rejects(app.runtime.open(),/state_runtime_v2_open_blocked/);
+  assert.ok(heldRequest);
+  // IDB has no cancel-open API: a blocked request may later be granted an
+  // upgrade even though the caller has already returned safely to V1.
+  heldRequest.onupgradeneeded();
+  assert.equal(aborted,1,'abandoned versionchange must abort before writing');
+  heldRequest.onsuccess();
+  assert.equal(lateClosed,1,'stale late-success connection must be closed');
+  app.indexedDB.open=originalOpen;
+  const healthy=await app.runtime.open();
+  assert.equal(healthy.version,2);
+  heldRequest.error=new Error('late blocked request error');
+  heldRequest.onerror();
+  assert.equal(await app.runtime.open(),healthy,
+    'stale late error cannot erase the newer successful open promise');
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+  assert.equal(app.localStorage.getItem(LEGACY_KEY),savedV1);
+  assert.equal(app.wal.getPendingRows().rows.length,0);
+});
+
+test('two successive blocked V2 opens cannot invalidate a later healthy open', async () => {
+  const app=install();
+  const rawOpen=app.indexedDB.open.bind(app.indexedDB);
+  const stale=[];
+  app.indexedDB.open=()=>{
+    const req={result:{close(){}},transaction:{abort(){}},
+      error:null,onblocked:null,onupgradeneeded:null,onsuccess:null,onerror:null};
+    stale.push(req);
+    queueMicrotask(()=>req.onblocked?.());
+    return req;
+  };
+  await assert.rejects(app.runtime.open(),/open_blocked/);
+  await assert.rejects(app.runtime.open(),/open_blocked/);
+  app.indexedDB.open=rawOpen;
+  const healthy=await app.runtime.open();
+  for(const request of stale){
+    request.onupgradeneeded();
+    request.onsuccess();
+    request.error=new Error('delayed obsolete IDB request');
+    request.onerror();
+  }
+  assert.equal(await app.runtime.open(),healthy);
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
