@@ -3198,6 +3198,7 @@
       const legacyJournal = core.readPendingHabitDeltas();
       if (!Array.isArray(legacyJournal)) throw Error('invalid_legacy_journal');
       pendingCount = legacyJournal.length;
+      const legacyJournalFingerprint = stableJson(legacyJournal);
       const source = parseLegacyStateWithPending();
       if (source.missing) throw Error('legacy_unavailable');
       nonPilotCompletions = source.state.completions.length
@@ -3207,6 +3208,16 @@
       bridgeFailures = status && Number.isFinite(Number(status.failures))
         ? Number(status.failures) : null;
       const after = await inspectPilotReadiness();
+      // Compaction or another tab can change the legacy journal without
+      // necessarily changing effective V1 data. Never treat that as a stable
+      // mutation-authority boundary.
+      const journalAfter = core.readPendingHabitDeltas();
+      if (!Array.isArray(journalAfter)
+        || stableJson(journalAfter) !== legacyJournalFingerprint) {
+        return output({ pilotConsistent: false, completionIndexReady: false,
+          legacyJournalEmpty: false, mirrorQueueStable: mirrorTail === observedTail },
+        ['legacy_journal_changed_during_preflight'], 'handoff_inventory_changed');
+      }
       if (!after.eligible) {
         return output({ pilotConsistent: false, completionIndexReady: false,
           legacyJournalEmpty: pendingCount === 0,
