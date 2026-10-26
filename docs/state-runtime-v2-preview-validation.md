@@ -262,3 +262,13 @@ The development runtime now uses volatile per-session counters to fence these ca
 - Contract coverage injects off/on cycles during IndexedDB reads and verifies the refusal, counters, recovery via a fresh check, and unchanged records.
 
 These protections address local public control transitions. They are **not** a distributed lock or proof that every browser storage transition is observable. Production authority promotion remains blocked by the separate later migration and physical-device validation gates.
+
+## October 26 — Mutation-authority preflight remains deliberately nonpromotable
+
+The V2 development runtime now exposes a read-only `inspectMutationHandoffPrerequisites()` report. It cannot enable a V2 writer or switch live read authority. Its `canPromote` result is **always false** until an explicit, separately tested authority protocol exists.
+
+This preflight verifies the existing scoped Habit/Vice mirror parity and completion index; checks whether the uncompacted legacy Habit journal is empty; samples cross-tab revision and generation stability; detects observed mirror/bridge failures; and reports only bounded counts for legacy journal rows and completions outside V2's present pilot scope. It never returns private record payloads, edits the WAL, reseeds a database, or rewrites a mismatch. It reports hard blockers for the missing exclusive cross-tab writer lease, durable rollback contract, and migration of application collections outside the Habit pilot. These blockers are not overridable by the existing diagnostic probe.
+
+The durable revision signal is now synchronously re-read **before and after** the guarded parity scan. A late persisted signal blocks a stale tab even when Storage/BroadcastChannel events were not delivered. Unlike optional UI notifications, denied reads of the revision-signal key are a hard `revision_signal_unreadable` refusal, not proof that no revision happened. Existing WAL, mirror, and V1 records remain intact and a fresh preview check is possible once storage becomes readable again.
+
+Node contracts and real Chromium/WebKit browser scenarios cover healthy-but-nonpromotable audits, uncompacted V1 journals, pending WAL, mismatched V1/V2 rows, missed revision events, denied revision-signal access, and restoration without destructive repair. The separate physical-device, multi-tab writer-lease and explicit cutover/rollback checks remain pending. No current feature was removed, and Main is not affected.
