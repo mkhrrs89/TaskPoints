@@ -1084,3 +1084,55 @@ test('disabling dark mirror during asynchronous parity check makes V2 readiness 
   assert.equal(app.runtime.getStatus().darkEnabled,false);
   assert.equal(app.wal.getPendingRows().rows.length,0);
 });
+
+test('rapid disable and re-enable cannot resurrect an older successful V2 read probe',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  app.runtime.setPilotReadProbeEnabled(true);
+  const db=await app.runtime.open();
+  const originalTransaction=db.transaction.bind(db);
+  let toggled=0;
+  db.transaction=(...args)=>{
+    const tx=originalTransaction(...args);
+    const originalStore=tx.objectStore.bind(tx);
+    tx.objectStore=name=>{
+      const store=originalStore(name);
+      if(name==='completions'){
+        const originalIndex=store.index.bind(store);
+        store.index=indexName=>{
+          const index=originalIndex(indexName);
+          const originalGetAll=index.getAll.bind(index);
+          index.getAll=key=>{
+            if(toggled++===0){
+              app.runtime.setPilotReadProbeEnabled(false);
+              app.runtime.setPilotReadProbeEnabled(true);
+            }
+            return originalGetAll(key);
+          };
+          return index;
+        };
+      }
+      return store;
+    };
+    return tx;
+  };
+  const originalLegacy=app.localStorage.getItem(LEGACY_KEY);
+  const originalMirror=structuredClone(app.indexedDB.dump(DB_NAME));
+  const stale=await app.runtime.probePilotHabitRead('h1');
+  assert.equal(toggled,1);
+  assert.equal(stale.reason,'probe_disabled_during_check');
+  assert.equal(stale.matched,false);
+  assert.equal(stale.selectedSource,'legacy_only');
+  assert.equal(Object.hasOwn(stale,'habit'),false);
+  assert.equal(app.runtime.getStatus().pilotReadProbeEnabled,true);
+  db.transaction=originalTransaction;
+  const fresh=await app.runtime.probePilotHabitRead('h1');
+  assert.equal(fresh.matched,true,JSON.stringify(fresh));
+  assert.equal(fresh.selectedSource,'legacy_only');
+  assert.equal(app.runtime.getStatus().pilotReadProbeChecks,2);
+  assert.equal(app.runtime.getStatus().pilotReadProbeMatches,1);
+  assert.equal(app.runtime.getStatus().pilotReadProbeRefusals,1);
+  assert.equal(app.localStorage.getItem(LEGACY_KEY),originalLegacy);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME),originalMirror);
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
