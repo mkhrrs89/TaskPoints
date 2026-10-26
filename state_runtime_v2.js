@@ -3013,6 +3013,10 @@
     if (!isDarkEnabled()) return refused('dark_disabled');
     const initialModeEpoch = darkMirrorModeEpoch;
     if (!interactionPageGeneration) return refused('page_generation_unbound');
+    // Some Safari/PWA lifecycle transitions delay storage or BroadcastChannel
+    // events. Check the persisted revision signal even if no event was seen,
+    // before trusting parity in this potentially stale page.
+    checkForExternalRevisionSignal();
     if (externalRevisionInvalidated) return refused('external_revision_invalidated');
     const wal = global.TaskPointsStateRuntimeV2Wal;
     if (typeof wal?.getPendingRows !== 'function') return refused('wal_unavailable');
@@ -3050,6 +3054,7 @@
       // A tab/import or new journal write may race the asynchronous IDB read.
       // Recheck all authorities, the current IDB revision, and effective V1.
       const metaAfter = await readMeta(db);
+      checkForExternalRevisionSignal();
       // Preview opt-out during any asynchronous IDB read is an immediate
       // refusal, even when the underlying mirror data happened to match.
       if (!isDarkEnabled() || initialModeEpoch !== darkMirrorModeEpoch)
