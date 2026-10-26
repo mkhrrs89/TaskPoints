@@ -47,6 +47,11 @@
   let externalRevisionAtISO = null;
   let externalRevisionSource = null;
   let externalRevisionReloadRequests = 0;
+  // The generation attached to this Home page's in-memory view. A different
+  // localStorage generation means an authorized replacement occurred while
+  // this page was open, even if no same-generation revision signal was sent.
+  let interactionPageGeneration = null;
+  let generationInteractionReloadRequests = 0;
 
   function nowIso() { return new Date().toISOString(); }
 
@@ -204,13 +209,22 @@
     if (!isDarkEnabled()) return { proceed: true, reason: 'dark_disabled' };
     installRevisionInvalidationListeners();
     checkForExternalRevisionSignal();
-    if (!externalRevisionInvalidated) return { proceed: true, reason: 'current' };
+    const durableGeneration = currentGeneration({ create: false });
+    const generationChanged = Boolean(interactionPageGeneration && durableGeneration
+      && String(interactionPageGeneration) !== String(durableGeneration));
+    if (!externalRevisionInvalidated && !generationChanged) {
+      return { proceed: true, reason: 'current' };
+    }
 
     externalRevisionReloadRequests += 1;
+    if (generationChanged) generationInteractionReloadRequests += 1;
     mark('stateV2.externalRevisionReloadRequested', {
       revision: externalRevision,
       mutationId: externalRevisionMutationId,
       source: externalRevisionSource,
+      generationChanged,
+      interactionPageGeneration,
+      durableGeneration,
       habitId: detail?.habitId != null ? String(detail.habitId) : null,
       dayKey: detail?.dayKey != null ? String(detail.dayKey) : null
     });
@@ -223,7 +237,11 @@
     let tapContinuationSaved = false;
     if (habitId && /^\d{4}-\d{2}-\d{2}$/.test(dayKey)) {
       try {
-        const generation = currentGeneration({ create: false });
+        // A resumed tap belongs to the *current* V1 generation: Home will
+        // reload first, then run the unchanged toggle against fresh authority.
+        // If another import occurs during navigation the continuation's
+        // generation check discards it instead of replaying across boundaries.
+        const generation = durableGeneration;
         const payload = {
           version: 1, habitId, dayKey, generation,
           pathname: String(global.location?.pathname || ''),
@@ -237,7 +255,7 @@
     try { global.location?.reload?.(); } catch (_) {}
     return {
       proceed: false,
-      reason: 'external_revision_invalidated',
+      reason: generationChanged ? 'generation_changed' : 'external_revision_invalidated',
       reloadRequested: true,
       tapContinuationSaved,
       revision: externalRevision
@@ -2855,6 +2873,8 @@
       externalRevisionAtISO,
       externalRevisionSource,
       externalRevisionReloadRequests,
+      generationInteractionReloadRequests,
+      interactionPageGeneration,
       generationKey: GENERATION_KEY,
       currentGeneration: currentGeneration({ create: false }),
       lastResetGeneration,
@@ -2887,6 +2907,11 @@
 
   function startCoordinatedDarkMirror() {
     if (!isDarkEnabled()) return Promise.resolve(getStatus());
+    // Bind the Home page's in-memory UI to its *startup* generation once.
+    // Never silently adopt a newer imported generation in an old tab:
+    // the next Habit touch must refresh V1 before changing anything.
+    const startupGeneration = currentGeneration();
+    if (!interactionPageGeneration) interactionPageGeneration = startupGeneration;
     // Preserve the ordinary dark-mirror mutation hook. The WAL bridge owns only
     // startup seed/replay ordering; it does not replace the normal mirror path.
     currentGeneration();
