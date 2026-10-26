@@ -422,6 +422,7 @@ test('normal V1-only Home remains available when the optional V2 preview flag is
   });
   const context = {
     localStorage: storage, JSON, Date, Math, String, Number, Boolean, Array, Object, Map, Set,
+    TaskPointsCore: { STORAGE_KEY: LEGACY_KEY },
     console: { warn() {}, error() {}, log() {} }
   };
   context.window = context;
