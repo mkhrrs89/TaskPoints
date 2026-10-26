@@ -305,3 +305,61 @@ test('a malformed shared record conflicts with an intact independent row without
   assert.throws(()=>api.removeMutation(mutation.mutationId), /wal_shared_independent_identity_conflict/);
   assert.equal(localStorage.getItem(sidecar),saved);
 });
+
+test('shared WAL read denial is not mistaken for an empty log or permission to clear evidence', () => {
+  const { api, localStorage } = install({ [DARK]: '1' });
+  const first = api.appendHabitDelta(deltaA);
+  const sidecarKey = 'taskpoints_v2_pending_mutation_event_v1:' + first.mutationId;
+  const originalShared = localStorage.getItem(KEY);
+  const originalSidecar = localStorage.getItem(sidecarKey);
+  const originalGet = localStorage.getItem.bind(localStorage);
+  localStorage.getItem = (key) => {
+    if (String(key) === KEY) throw new Error('synthetic WAL shared read SecurityError');
+    return originalGet(key);
+  };
+
+  try {
+    const unreadable = api.getPendingRows();
+    assert.equal(unreadable.ok, false);
+    assert.match(unreadable.error, /wal_storage_read_failed/);
+    assert.throws(() => api.appendHabitDelta(deltaB), /wal_storage_read_failed/);
+    assert.throws(() => api.removeMutation(first.mutationId), /wal_storage_read_failed/);
+  } finally {
+    localStorage.getItem = originalGet;
+  }
+
+  assert.equal(localStorage.getItem(KEY), originalShared, 'shared bytes survive denied reads');
+  assert.equal(localStorage.getItem(sidecarKey), originalSidecar, 'sidecar bytes survive denied reads');
+  assert.deepEqual(api.getPendingRows().rows.map(row => row.id), [first.mutationId],
+    'recovery can inspect the original WAL again when reads resume');
+});
+
+test('independent sidecar read denial blocks replay and selective cleanup without losing a row', () => {
+  const { api, localStorage } = install({ [DARK]: '1' });
+  const first = api.appendHabitDelta(deltaA);
+  const sidecarKey = 'taskpoints_v2_pending_mutation_event_v1:' + first.mutationId;
+  const originalShared = localStorage.getItem(KEY);
+  const originalSidecar = localStorage.getItem(sidecarKey);
+  const originalGet = localStorage.getItem.bind(localStorage);
+  localStorage.getItem = (key) => {
+    if (String(key) === sidecarKey) throw new Error('synthetic WAL sidecar read SecurityError');
+    return originalGet(key);
+  };
+
+  try {
+    const unreadable = api.getPendingRows();
+    assert.equal(unreadable.ok, false);
+    assert.match(unreadable.error, /wal_storage_read_failed/);
+    assert.throws(() => api.appendHabitDelta(deltaB), /wal_storage_read_failed/);
+    assert.throws(() => api.removeMutation(first.mutationId), /wal_storage_read_failed/);
+  } finally {
+    localStorage.getItem = originalGet;
+  }
+
+  assert.equal(localStorage.getItem(KEY), originalShared);
+  assert.equal(localStorage.getItem(sidecarKey), originalSidecar);
+  assert.deepEqual(api.getPendingRows().rows.map(row => row.id), [first.mutationId]);
+  assert.equal(api.removeMutation(first.mutationId).removed, true,
+    'selective cleanup resumes only once both durable records are readable');
+  assert.equal(api.getPendingRows().rows.length, 0);
+});
