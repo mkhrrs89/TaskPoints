@@ -2944,6 +2944,45 @@
     }
   }
 
+  // Diagnostic-only targeted projection for Stage C development. No live
+  // application caller is routed here: the legacy snapshot remains read
+  // authority. Never return a V2 candidate across an asynchronous epoch,
+  // revision, WAL, or V1 parity change. A refusal includes no stale records.
+  async function readPilotHabitCandidate(habitIdInput) {
+    const refuse = (reason) => ({
+      checked: true, eligible: false, reason,
+      source: 'none', readAuthority: 'legacy_only'
+    });
+    const habitId = String(habitIdInput ?? '').trim();
+    if (!habitId) return refuse('habit_id_required');
+    const before = await inspectPilotReadiness();
+    if (!before.eligible) return refuse(before.reason);
+    try {
+      const db = await open();
+      if (!db) return refuse('v2_unavailable');
+      // The single read-only transaction reads both pilot collections as one
+      // consistent IDB snapshot. This is deliberately not the future optimized
+      // per-Habit query; it proves the safe reader contract first.
+      const collections = await readV2CollectionsFromDb(db);
+      const after = await inspectPilotReadiness();
+      if (!after.eligible) return refuse(after.reason);
+      if (before.generation !== after.generation || before.revision !== after.revision)
+        return refuse('read_window_changed');
+      const habit = collections.habits.find(row => String(row?.id ?? '') === habitId);
+      const completions = collections.completions.filter(
+        row => String(row?.habitId ?? '') === habitId);
+      return {
+        checked: true, eligible: true, reason: 'stable_preview_candidate',
+        source: 'v2_preview_only', readAuthority: 'legacy_only',
+        generation: after.generation, revision: after.revision,
+        habit: habit ? clone(habit) : null,
+        completions: clone(completions)
+      };
+    } catch (error) {
+      return refuse('storage_unreadable');
+    }
+  }
+
   function getStatus() {
     let visibleGeneration = null;
     let generationReadable = true;
@@ -3117,6 +3156,7 @@
     buildCompatibilitySnapshot,
     verifyParity,
     inspectPilotReadiness,
+    readPilotHabitCandidate,
     getStatus
   };
 
