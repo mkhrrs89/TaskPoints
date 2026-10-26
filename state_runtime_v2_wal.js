@@ -44,6 +44,23 @@
     }
   }
 
+  // A browser extension, storage shim, or quota transition may report
+  // success without applying the write. Do not count a WAL row as durable,
+  // or a confirmed row as cleared, until the same key reads back correctly.
+  function setWalStorageVerified(key, value, code) {
+    const text = String(value);
+    if (!safeSet(key, text)) throw new Error(`${code}:${lastError || 'unknown'}`);
+    const actual = readWalStorage(key);
+    if (actual !== text) throw new Error(`${code}:unverified_write`);
+    return true;
+  }
+
+  function removeWalStorageVerified(key, code) {
+    if (!safeRemove(key)) throw new Error(`${code}:${lastError || 'unknown'}`);
+    if (readWalStorage(key) !== null) throw new Error(`${code}:unverified_remove`);
+    return true;
+  }
+
   // WAL reads are safety-critical: a denied read is not an empty log. The
   // permissive safeGet helper is only suitable for optional mode/metadata
   // probes; mutation recovery and cleanup must fail closed on read errors.
@@ -219,7 +236,7 @@
 
   function writeRows(rows) {
     const text = JSON.stringify(rows);
-    if (!safeSet(KEY, text)) throw new Error(`state_runtime_v2_wal_write_failed:${lastError || 'unknown'}`);
+    setWalStorageVerified(KEY, text, 'state_runtime_v2_wal_write_failed');
     return true;
   }
 
@@ -233,9 +250,9 @@
     const existing = current.rows.find((row) => row.id === mutationId && row.generation === generation);
     if (existing) {
       // Upgrade a pending row written before independent WAL keys existed.
-      if (supportsIndependentRows() && safeGet(independentKey(mutationId)) == null
-        && !safeSet(independentKey(mutationId), JSON.stringify(existing))) {
-        throw new Error(`state_runtime_v2_wal_independent_write_failed:${lastError || 'unknown'}`);
+      if (supportsIndependentRows() && readWalStorage(independentKey(mutationId)) == null) {
+        setWalStorageVerified(independentKey(mutationId), JSON.stringify(existing),
+          'state_runtime_v2_wal_independent_write_failed');
       }
       return { written: false, duplicate: true, mutationId, generation, row: clone(existing) };
     }
@@ -252,9 +269,9 @@
     if (next.length > MAX_ROWS) throw new Error('state_runtime_v2_wal_capacity_exceeded');
     // Sidecar FIRST: if this tab is suspended while updating the shared array,
     // another tab can still replay this exact mutation after restart.
-    if (supportsIndependentRows()
-      && !safeSet(independentKey(mutationId), JSON.stringify(row))) {
-      throw new Error(`state_runtime_v2_wal_independent_write_failed:${lastError || 'unknown'}`);
+    if (supportsIndependentRows()) {
+      setWalStorageVerified(independentKey(mutationId), JSON.stringify(row),
+        'state_runtime_v2_wal_independent_write_failed');
     }
     writeRows(next);
     appendCount += 1;
@@ -269,11 +286,12 @@
     const next = current.rows.filter((row) => row.id !== String(mutationId));
     if (next.length === current.rows.length) return { removed: false, reason: 'not_found', mutationId: String(mutationId) };
     if (next.length) writeRows(next);
-    else if (!safeRemove(KEY)) throw new Error(`state_runtime_v2_wal_remove_failed:${lastError || 'unknown'}`);
+    else removeWalStorageVerified(KEY, 'state_runtime_v2_wal_remove_failed');
     // A confirmed mutation may be removed only after the shared WAL update;
     // a failed sidecar deletion keeps recoverable evidence for safe replay.
-    if (supportsIndependentRows() && !safeRemove(independentKey(mutationId))) {
-      throw new Error(`state_runtime_v2_wal_independent_remove_failed:${lastError || 'unknown'}`);
+    if (supportsIndependentRows()) {
+      removeWalStorageVerified(independentKey(mutationId),
+        'state_runtime_v2_wal_independent_remove_failed');
     }
     removeCount += 1;
     try { global.TaskPointsPerf?.mark?.('stateV2.walCleared', { mutationId: String(mutationId) }); } catch (_) {}
