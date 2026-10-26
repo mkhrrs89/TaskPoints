@@ -486,6 +486,147 @@ try {
       laterWriteRetained:true,mutations:3,parity:true};
   });
 
+  await run('suspended pre-import WAL stays quarantined through two authorized generations and new writes',async context=>{
+    // Both tabs already exist before the old-generation WAL event. Keeping
+    // writer alive simulates an iPhone tab suspended through two restores.
+    const active=await open(context),sleeping=await open(context);
+    const previous=await active.evaluate(()=>window.TaskPointsStateRuntimeV2Generation.read());
+    const held=await sleeping.evaluate(()=>{
+      sessionStorage.setItem('taskpoints_state_v2_wal_test_armed_v1','1');
+      const row=window.V2BrowserFixture.delta('h1','2026-10-14','full',1);
+      document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new Event('pagehide'));
+      return {id:row.id,wal:window.TaskPointsStateRuntimeV2Wal.getPendingRows()};
+    });
+    assert.equal(held.wal.ok,true);
+    assert.equal(held.wal.rows.length,1);
+    assert.equal(held.wal.rows[0].generation,previous);
+    const staleId=held.wal.rows[0].id;
+    // Make the V1 journal entry a verified canonical completion, preserving
+    // the real user's data rather than throwing away it during the restore.
+    const firstCheckpoint=await active.evaluate(()=>{
+      const core=window.TaskPointsCore;
+      const journal=core.readPendingHabitDeltas();
+      const canonical=window.V2BrowserFixture.rawLegacy();
+      const applied=core.applyPendingHabitDeltas(canonical,journal);
+      const saved=core.saveStateSnapshot(canonical,{
+        immediateWrite:true,replaceCompletions:true,savePath:'habit-journal-compaction'});
+      if(saved?.blocked||saved?.skipped)throw Error('V1 checkpoint failed');
+      const verified=core.verifyPersistedHabitDeltas(
+        window.V2BrowserFixture.rawLegacy(),journal,applied.appliedDeltas);
+      if(verified.length!==1)throw Error('Old-generation V1 checkpoint not verified');
+      core.clearCompactedHabitDeltas(verified);
+      return {remaining:core.readPendingHabitDeltas().length,
+        completed:window.V2BrowserFixture.rawLegacy().completions.filter(c=>c.source==='habit').length};
+    });
+    assert.deepEqual(firstCheckpoint,{remaining:0,completed:1});
+    const rotate=async name=>active.evaluate(async label=>{
+      const core=window.TaskPointsCore;
+      const incoming=window.V2BrowserFixture.rawLegacy();
+      incoming.habits.find(h=>h.id==='h3').name=label;
+      const saved=core.saveValidatedSnapshot(incoming,{
+        allowDestructiveOverwrite:true,source:'settings-import',immediateWrite:true});
+      if(saved?.blocked||saved?.skipped)throw Error('Authorized V1 import rejected');
+      const generation=window.TaskPointsStateRuntimeV2Generation.read();
+      await window.TaskPointsStateRuntimeV2.startCoordinatedDarkMirror();
+      return {generation,name:window.V2BrowserFixture.rawLegacy().habits.find(h=>h.id==='h3').name};
+    },name);
+    const first=await rotate('Imported h3 generation one');
+    assert.notEqual(first.generation,previous);
+    assert.equal(first.name,'Imported h3 generation one');
+    const inspect=page=>page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const wal=window.TaskPointsStateRuntimeV2Wal.getPendingRows();
+      const db=await runtime.open();
+      const tx=db.transaction(['mutations','meta'],'readonly');
+      const get=name=>new Promise((resolve,reject)=>{
+        const request=tx.objectStore(name).getAll();
+        request.onsuccess=()=>resolve(request.result);
+        request.onerror=()=>reject(request.error);
+      });
+      const [mutations,meta]=await Promise.all(['mutations','meta'].map(get));
+      return {rows:wal.rows.map(r=>({id:r.id,generation:r.generation})),
+        mutations:mutations.map(m=>({id:m.id,generation:m.resetGeneration})),
+        meta:meta[0],authority:runtime.getStatus().readAuthority};
+    });
+    let state=await inspect(active);
+    assert.equal(state.meta.resetGeneration,first.generation);
+    assert.equal(state.meta.completionOrderEpoch||0,0);
+    assert.deepEqual(state.rows,[{id:staleId,generation:previous}]);
+    assert.deepEqual(state.mutations,[],'import must not replay old generation mutation');
+    assert.equal((await parity(active)).actualCounts.completions,1);
+    const resume=await sleeping.evaluate(async()=>{
+      window.dispatchEvent(new Event('pageshow'));
+      document.dispatchEvent(new Event('visibilitychange'));
+      return await window.TaskPointsStateRuntimeV2WalBridge.replayPending();
+    });
+    assert.equal(resume.cleared,0);
+    assert.equal(resume.stale,1);
+    assert.equal((await inspect(active)).rows.length,1);
+    await active.evaluate(()=>window.V2BrowserFixture.delta('h2','2026-10-15','full',2));
+    await active.waitForFunction(()=> {
+      const s=window.V2BrowserFixture.status();
+      return s.bridge.confirmationsCleared>=1&&s.wal.pendingCount===1;
+    },null,{timeout:20000});
+    state=await inspect(active);
+    assert.deepEqual(state.mutations.map(x=>x.generation),[first.generation]);
+    assert.equal(state.mutations.some(x=>x.id===staleId),false);
+    assert.equal((await parity(active)).actualCounts.completions,2);
+    // Compact the post-import edit before another authorized replacement.
+    const secondCheckpoint=await active.evaluate(()=>{
+      const core=window.TaskPointsCore,journal=core.readPendingHabitDeltas();
+      const canonical=window.V2BrowserFixture.rawLegacy();
+      const applied=core.applyPendingHabitDeltas(canonical,journal);
+      const save=core.saveStateSnapshot(canonical,{
+        immediateWrite:true,replaceCompletions:true,savePath:'habit-journal-compaction'});
+      if(save?.blocked||save?.skipped)throw Error('Second V1 checkpoint rejected');
+      const verified=core.verifyPersistedHabitDeltas(
+        window.V2BrowserFixture.rawLegacy(),journal,applied.appliedDeltas);
+      core.clearCompactedHabitDeltas(verified);
+      return {verified:verified.length,pending:core.readPendingHabitDeltas().length};
+    });
+    assert.deepEqual(secondCheckpoint,{verified:1,pending:0});
+    const second=await rotate('Imported h3 generation two');
+    assert.notEqual(second.generation,first.generation);
+    state=await inspect(active);
+    assert.equal(state.meta.resetGeneration,second.generation);
+    assert.equal(state.meta.completionOrderEpoch||0,0);
+    assert.deepEqual(state.mutations,[],'second generation must not inherit old mutations');
+    assert.deepEqual(state.rows,[{id:staleId,generation:previous}],
+      'old WAL evidence remains inspectable through both rotations');
+    assert.equal((await parity(active)).actualCounts.completions,2);
+    // Restart the formerly suspended tab in the newest generation. Startup
+    // must still preserve rather than replay or delete the old WAL.
+    await sleeping.reload({waitUntil:'load'});
+    const reopened=await sleeping.evaluate(async()=>{
+      const result=await window.TaskPointsStateRuntimeV2WalBridge.replayPending();
+      return {replay:result,authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority,
+        wal:window.TaskPointsStateRuntimeV2Wal.getPendingRows().rows
+          .map(r=>({id:r.id,generation:r.generation}))};
+    });
+    assert.equal(reopened.replay.cleared,0);
+    assert.equal(reopened.replay.stale,1);
+    assert.equal(reopened.authority,'legacy_only');
+    assert.deepEqual(reopened.wal,[{id:staleId,generation:previous}]);
+    await active.evaluate(()=>window.V2BrowserFixture.delta('h3','2026-10-16','full',3));
+    await active.waitForFunction(()=>{
+      const s=window.V2BrowserFixture.status();
+      return s.wal.pendingCount===1&&s.bridge.confirmationsCleared>=2;
+    },null,{timeout:20000});
+    state=await inspect(active);
+    assert.deepEqual(state.mutations.map(m=>m.generation),[second.generation]);
+    assert.equal(state.rows.length,1);
+    assert.equal((await parity(active)).actualCounts.completions,3);
+    await active.reload({waitUntil:'load'});
+    assert.equal((await parity(active)).actualCounts.completions,3);
+    const afterReload=await inspect(active);
+    assert.deepEqual(afterReload.rows,[{id:staleId,generation:previous}]);
+    assert.deepEqual(afterReload.mutations.map(x=>x.generation),[second.generation]);
+    return {authorizedRotations:2,suspendedTabResumed:true,staleWalRowsPreserved:1,
+      crossGenerationReplays:0,oldMutationsReintroduced:0,
+      newGenerationWrites:2,completionRows:3,parity:true};
+  });
+
   await run('incomplete restore snapshot is rejected without rotating generation or changing V1',async context=>{
     const page=await open(context);
     const outcome=await page.evaluate(()=>{
