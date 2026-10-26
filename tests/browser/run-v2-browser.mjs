@@ -913,6 +913,97 @@ try {
   });
 
 
+  await run('silent independent WAL write denial cannot claim durability or lose V1',async context=>{
+    const page=await open(context);
+    const outcome=await page.evaluate(()=>{
+      const core=window.TaskPointsCore;
+      const wal=window.TaskPointsStateRuntimeV2Wal;
+      const prefix='taskpoints_v2_pending_mutation_event_v1:';
+      const shared='taskpoints_v2_pending_mutations_v1';
+      const original=Storage.prototype.setItem;
+      let swallowed=0;
+      Storage.prototype.setItem=function(key,value){
+        if(this===localStorage&&String(key).startsWith(prefix)){
+          swallowed+=1;return;
+        }
+        return original.call(this,key,value);
+      };
+      try{window.V2BrowserFixture.delta('h1','2026-10-20','full',1);}
+      finally{Storage.prototype.setItem=original;}
+      return {swallowed,shared:localStorage.getItem(shared),
+        pending:wal.getPendingRows(),journal:core.readPendingHabitDeltas(),
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    });
+    assert.equal(outcome.swallowed,1);
+    assert.equal(outcome.shared,null);
+    assert.equal(outcome.pending.ok,true);
+    assert.equal(outcome.pending.rows.length,0);
+    assert.equal(outcome.journal.length,1);
+    assert.equal(outcome.journal[0].status,'full');
+    assert.equal(outcome.authority,'legacy_only');
+    await page.waitForFunction(()=>{
+      const s=window.V2BrowserFixture?.status();
+      return s&&s.bridge.failures>=1&&s.runtime.mirroredMutations>=1;
+    },null,{timeout:18000});
+    await page.reload({waitUntil:'load'});
+    const p=await parity(page);
+    assert.equal(p.actualCounts.completions,1);
+    return {silentSidecarIgnored:true,noFalseWalDurability:true,
+      v1Persisted:true,parity:p.match};
+  });
+
+  await run('silent WAL removal preserves committed event until retry',async context=>{
+    const page=await open(context);
+    const evidence=await page.evaluate(()=>{
+      sessionStorage.setItem('taskpoints_state_v2_wal_test_armed_v1','1');
+      window.V2BrowserFixture.delta('h1','2026-10-20','full',1);
+      const wal=window.TaskPointsStateRuntimeV2Wal;
+      const row=wal.getPendingRows().rows[0];
+      if(!row)throw Error('Expected one held WAL event');
+      const sharedKey='taskpoints_v2_pending_mutations_v1';
+      const sidecarKey='taskpoints_v2_pending_mutation_event_v1:'+row.id;
+      const original=Storage.prototype.removeItem;
+      const cases=[];
+      for(const blockedKey of [sharedKey,sidecarKey]){
+        let swallowed=0,blocked=false;
+        Storage.prototype.removeItem=function(key){
+          if(this===localStorage&&String(key)===blockedKey){swallowed++;return;}
+          return original.call(this,key);
+        };
+        try{
+          try{wal.removeMutation(row.id);}
+          catch(error){blocked=/unverified_remove/.test(String(error));}
+        }finally{Storage.prototype.removeItem=original;}
+        cases.push({which:blockedKey===sharedKey?'shared':'sidecar',
+          swallowed,blocked,remaining:wal.getPendingRows().rows.map(r=>r.id)});
+      }
+      return {cases,
+        shared:localStorage.getItem(sharedKey),
+        sidecar:localStorage.getItem(sidecarKey),
+        journal:window.TaskPointsCore.readPendingHabitDeltas().length,
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    });
+    assert.deepEqual(evidence.cases.map(c=>c.which),['shared','sidecar']);
+    for(const trial of evidence.cases){
+      assert.equal(trial.swallowed,1);
+      assert.equal(trial.blocked,true,JSON.stringify(trial));
+      assert.equal(trial.remaining.length,1);
+    }
+    assert.equal(evidence.shared,null,'shared key can be removed on the later attempt');
+    assert.ok(evidence.sidecar,'silent cleanup cannot delete the independent record');
+    assert.equal(evidence.journal,1);
+    assert.equal(evidence.authority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    await page.waitForFunction(()=>{
+      const s=window.V2BrowserFixture?.status();
+      return s?.wal.pendingCount===0&&s.bridge.replayCleared>=1;
+    },null,{timeout:25000});
+    const p=await parity(page);
+    assert.equal(p.actualCounts.completions,1);
+    return {silentSharedAndSidecarDeletesBlocked:true,
+      eventRecoveredAfterRestart:true,parity:p.match};
+  });
+
   await run('independent WAL quota denial preserves V1 journal and cannot claim an orphan V2 mutation',async context=>{
     const page=await open(context);
     const result=await page.evaluate(()=>{
