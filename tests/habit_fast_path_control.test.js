@@ -33,6 +33,7 @@ function makeContext(options = {}) {
 
   if (typeof options.v2Guard === 'function') {
     window.TaskPointsStateRuntimeV2 = { beforeHabitInteraction: options.v2Guard };
+    if (options.v2Status) window.TaskPointsStateRuntimeV2.getStatus = () => options.v2Status;
   }
 
   if (options.legacyAvailable !== false) {
@@ -105,6 +106,29 @@ test('V2 guard failure never makes the existing Habit path inert', () => {
   });
   assert.equal(context.window.handleHabitBubbleTap(context.bubble), 'fast');
   assert.equal(context.fastCalls(), 1);
+});
+
+test('thrown Habit guard on an active V2 page blocks both fast and legacy mutation paths', () => {
+  const context = makeContext({
+    v2Guard() { throw new Error('synthetic stale-tab generation check failed'); },
+    v2Status: { darkEnabled: true, interactionPageGeneration: 'generation:old',
+      currentGeneration: 'generation:new', readAuthority: 'legacy_only' }
+  });
+  assert.equal(context.window.handleHabitBubbleTap(context.bubble), undefined);
+  assert.equal(context.fastCalls(), 0);
+  assert.equal(context.legacyCalls(), 0);
+  assert.equal(context.window.TaskPointsHabitFastPathControl.getStatus().lastReason,
+    'v2_interaction_guard_failed_closed');
+});
+
+test('thrown optional V2 guard still permits normal V1-only Home Habit interactions', () => {
+  const context = makeContext({
+    v2Guard() { throw new Error('V2 diagnostics unavailable'); },
+    v2Status: { darkEnabled: false, interactionPageGeneration: null, readAuthority: 'legacy_only' }
+  });
+  assert.equal(context.window.handleHabitBubbleTap(context.bubble), 'fast');
+  assert.equal(context.fastCalls(), 1);
+  assert.equal(context.legacyCalls(), 0);
 });
 
 test('persisted kill switch uses the existing synchronous legacy path', () => {
