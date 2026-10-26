@@ -410,6 +410,94 @@ try{
     return {replayedExactlyOnce:true,journalPreserved:true,parity:parity.match};
   });
 
+  await test('backgrounded Home tab refreshes imported generation before replaying its first Habit touch',async ctx=>{
+    const sleeping=(await home(ctx)).page;
+    const replacing=(await home(ctx)).page;
+    await sleeping.locator('[data-home-tab="habits"]').click({force:true});
+    const day=await sleeping.locator('#habitsList .habitDay[data-habit="h2"]').first().getAttribute('data-day');
+    assert.ok(day);
+    const original=await sleeping.evaluate(()=>({
+      generation:window.TaskPointsStateRuntimeV2.getStatus().currentGeneration,
+      invalidated:window.TaskPointsStateRuntimeV2.getStatus().externalRevisionInvalidated
+    }));
+    assert.equal(original.invalidated,false);
+    await replacing.bringToFront();
+    await sleeping.evaluate(()=>{
+      document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new Event('pagehide'));
+    });
+    const imported=await replacing.evaluate(()=>{
+      const core=window.TaskPointsCore;
+      const source=core.readTaskPointsStoredState();
+      const candidate=structuredClone(source);
+      candidate.habits.find(h=>h.id==='h1').name='Imported Generation h1';
+      const result=core.saveValidatedSnapshot(candidate,{
+        allowDestructiveOverwrite:true,source:'settings-import',immediateWrite:true});
+      return {blocked:result?.blocked===true,
+        generation:window.TaskPointsStateRuntimeV2Generation.read(),
+        persistedName:core.readTaskPointsStoredState().habits.find(h=>h.id==='h1')?.name};
+    });
+    assert.equal(imported.blocked,false);
+    assert.notEqual(imported.generation,original.generation);
+    assert.equal(imported.persistedName,'Imported Generation h1');
+    await replacing.evaluate(()=>window.TaskPointsStateRuntimeV2.startCoordinatedDarkMirror());
+    await sleeping.bringToFront();
+    await sleeping.evaluate(()=>{
+      window.dispatchEvent(new Event('pageshow'));
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    // A generation replacement need not publish a same-generation V2
+    // revision signal. Even without that signal, an old page must reload
+    // before handling the tap, so it never uses pre-import Home state.
+    const observed=await sleeping.evaluate(()=>({
+      generation:window.TaskPointsStateRuntimeV2Generation.read(),
+      pageRuntimeGeneration:window.TaskPointsStateRuntimeV2.getStatus().currentGeneration,
+      revisionInvalidated:window.TaskPointsStateRuntimeV2.getStatus().externalRevisionInvalidated,
+      importedName:window.TaskPointsCore.readTaskPointsStoredState().habits.find(h=>h.id==='h1')?.name
+    }));
+    assert.equal(observed.generation,imported.generation);
+    assert.equal(observed.importedName,'Imported Generation h1');
+    await sleeping.locator('#habitsList .habitDay[data-habit="h2"][data-day="'+day+'"]').tap({force:true});
+    await sleeping.waitForFunction(key=>{
+      const pending=window.TaskPointsCore?.readPendingHabitDeltas?.()||[];
+      const ctl=window.TaskPointsHabitFastPathControl?.getStatus?.();
+      return pending.some(row=>row.habitId==='h2'&&row.dayKey===key&&row.status==='full')
+        && ctl?.staleTapReplays===1;
+    },day,{timeout:24000});
+    const proof=await sleeping.evaluate(async key=>{
+      const core=window.TaskPointsCore;
+      const runtime=window.TaskPointsStateRuntimeV2;
+      await runtime.startCoordinatedDarkMirror();
+      const pending=core.readPendingHabitDeltas();
+      const p=await runtime.verifyParity();
+      const db=await runtime.open();
+      const request=db.transaction(['mutations','meta'],'readonly').objectStore('mutations').getAll();
+      const mutations=await new Promise((resolve,reject)=>{
+        request.onsuccess=()=>resolve(request.result);
+        request.onerror=()=>reject(request.error);
+      });
+      return {h2:pending.filter(row=>row.habitId==='h2'&&row.dayKey===key).map(row=>row.status),
+        importedName:core.readTaskPointsStoredState().habits.find(h=>h.id==='h1').name,
+        generation:runtime.getStatus().currentGeneration,
+        authority:runtime.getStatus().readAuthority,
+        pendingTap:sessionStorage.getItem('taskpoints_v2_stale_habit_tap_v1'),
+        replayCount:window.TaskPointsHabitFastPathControl.getStatus().staleTapReplays,
+        mutationRows:mutations.length,distinctMutations:new Set(mutations.map(m=>m.id)).size,
+        parity:p};
+    },day);
+    assert.deepEqual(proof.h2,['full']);
+    assert.equal(proof.importedName,'Imported Generation h1');
+    assert.equal(proof.generation,imported.generation);
+    assert.equal(proof.authority,'legacy_only');
+    assert.equal(proof.pendingTap,null);
+    assert.equal(proof.replayCount,1);
+    assert.equal(proof.mutationRows,1);
+    assert.equal(proof.distinctMutations,1);
+    assert.equal(proof.parity.match,true,JSON.stringify(proof.parity.differences));
+    return {importGenerationTransition:true,firstResumedTouchReplayedExactlyOnce:true,
+      importedNamePreserved:true,completionNotDuplicated:true,parity:true};
+  });
+
   await test('stale Habit continuation from a previous V2 generation is discarded without toggling',async ctx=>{
     const {page}=await home(ctx);
     const generation=await page.evaluate(()=>window.TaskPointsStateRuntimeV2.getStatus().currentGeneration);
