@@ -161,6 +161,9 @@ try {
     assert.equal(saved.report.counts.total,2);
     assert.deepEqual(saved.rows.map(row=>row.habitIds).sort(),[['h1'],['h2']]);
     assert.equal(saved.authority,'legacy_only');
+    const indexed=await page.evaluate(()=>window.TaskPointsStateRuntimeV2.readPilotHabitCandidate('h1'));
+    assert.equal(indexed.eligible,true,JSON.stringify(indexed));
+    assert.equal(indexed.lookupMode,'indexed');
     const legacyGap=await page.evaluate(async ()=>{
       const runtime=window.TaskPointsStateRuntimeV2;
       const db=await runtime.open();
@@ -184,6 +187,7 @@ try {
     assert.equal(legacyGap.report.counts.missing,1);
     assert.equal(legacyGap.candidate.eligible,true,
       'legacy completion scan must continue working before metadata backfill');
+    assert.equal(legacyGap.candidate.lookupMode,'legacy_scan');
     assert.deepEqual(legacyGap.candidate.completions.map(c=>c.id),['habit:h1:2026-10-20']);
     assert.equal(legacyGap.authority,'legacy_only');
     return {metadataCreated:true,legacyGapsDiagnosed:true,oldReadersUnchanged:true};
