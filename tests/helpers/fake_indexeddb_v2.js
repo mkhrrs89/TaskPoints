@@ -53,7 +53,7 @@ class FakeTransaction {
     this._finishVersion = 0;
     this._working = new Map();
 
-    if (this.mode === 'readwrite') {
+    if (this.mode === 'readwrite' || this.mode === 'versionchange') {
       for (const name of this.storeNames) {
         this._working.set(name, cloneMap(this.db._stores.get(name)));
       }
@@ -75,7 +75,7 @@ class FakeTransaction {
   }
 
   _mapFor(storeName) {
-    if (this.mode === 'readwrite') return this._working.get(storeName);
+    if (this.mode === 'readwrite' || this.mode === 'versionchange') return this._working.get(storeName);
     return this.db._stores.get(storeName);
   }
 
@@ -102,7 +102,7 @@ class FakeTransaction {
 
   _commit() {
     if (this._finished || this._aborted) return;
-    if (this.mode === 'readwrite') {
+    if (this.mode === 'readwrite' || this.mode === 'versionchange') {
       for (const name of this.storeNames) {
         this.db._stores.set(name, cloneMap(this._working.get(name)));
       }
@@ -183,6 +183,31 @@ class FakeObjectStore {
       return undefined;
     });
   }
+
+  get indexNames() {
+    const names = this.tx.db._indexes.get(this.name) || new Map();
+    return { contains: name => names.has(String(name)), get length() { return names.size; } };
+  }
+
+  createIndex(name, keyPath, options = {}) {
+    if (this.tx.mode !== 'versionchange') throw Error('fake_index_requires_upgrade');
+    const definitions = this.tx.db._indexes.get(this.name);
+    const normalized = String(name);
+    if (definitions.has(normalized)) throw Error('fake_index_duplicate');
+    definitions.set(normalized, { keyPath: String(keyPath), multiEntry: options.multiEntry === true });
+    return this.index(normalized);
+  }
+
+  index(name) {
+    const definition = this.tx.db._indexes.get(this.name)?.get(String(name));
+    if (!definition) throw Error('fake_index_missing:' + name);
+    return {
+      getAll: key => this._request('indexGetAll', map => [...map.values()].filter(row => {
+        const value = row?.[definition.keyPath];
+        return definition.multiEntry ? Array.isArray(value) && value.includes(key) : value === key;
+      }).sort((a,b) => String(a.id).localeCompare(String(b.id))))
+    };
+  }
 }
 
 class FakeDatabase {
@@ -191,6 +216,8 @@ class FakeDatabase {
     this.version = version;
     this._owner = owner;
     this._stores = new Map();
+    this._indexes = new Map();
+    this._upgradeTx = null;
   }
 
   get objectStoreNames() {
@@ -206,7 +233,12 @@ class FakeDatabase {
   createObjectStore(name) {
     const normalized = String(name);
     if (!this._stores.has(normalized)) this._stores.set(normalized, new Map());
-    return { name: normalized };
+    if (!this._indexes.has(normalized)) this._indexes.set(normalized, new Map());
+    if (this._upgradeTx && !this._upgradeTx.storeNames.includes(normalized)) {
+      this._upgradeTx.storeNames.push(normalized);
+      this._upgradeTx._working.set(normalized, new Map());
+    }
+    return this._upgradeTx ? new FakeObjectStore(this._upgradeTx, normalized) : { name: normalized };
   }
 
   transaction(storeNames, mode = 'readonly') {
@@ -241,23 +273,45 @@ class FakeIndexedDB {
     this.openCalls.push({ name: normalized, version: Number(version || 1) });
 
     queueMicrotask(() => {
-      try {
-        let db = this._databases.get(normalized);
-        const isNew = !db;
-        const needsUpgrade = isNew || Number(version || 1) > Number(db.version || 0);
-        if (!db) {
-          db = new FakeDatabase(normalized, Number(version || 1), this);
-          this._databases.set(normalized, db);
-        } else if (needsUpgrade) {
-          db.version = Number(version || db.version);
-        }
-
-        request.result = db;
-        if (needsUpgrade) request.onupgradeneeded?.({ target: request });
+      let db = this._databases.get(normalized);
+      const isNew = !db;
+      const needsUpgrade = isNew || Number(version || 1) > Number(db.version || 0);
+      if (!db) {
+        db = new FakeDatabase(normalized, Number(version || 1), this);
+        this._databases.set(normalized, db);
+      }
+      request.result = db;
+      if (!needsUpgrade) {
         queueMicrotask(() => request.onsuccess?.({ target: request }));
+        return;
+      }
+      const priorVersion = db.version;
+      const priorStores = new Map([...db._stores].map(([k,v])=>[k, cloneMap(v)]));
+      const priorIndexes = new Map([...db._indexes].map(([k,v])=>[k,
+        new Map([...v].map(([i,definition])=>[i,{...definition}]))]));
+      const tx = new FakeTransaction(db, [...db._stores.keys()], 'versionchange');
+      db._upgradeTx = tx;
+      request.transaction = tx;
+      db.version = Number(version || 1);
+      const rollback = error => {
+        db._stores = priorStores;
+        db._indexes = priorIndexes;
+        db.version = priorVersion;
+        db._upgradeTx = null;
+        if (isNew) this._databases.delete(normalized);
+        request.error = error || tx.error || Error('fake_indexeddb_upgrade_aborted');
+        request.onerror?.({target:request});
+      };
+      tx.onabort = () => rollback(tx.error);
+      tx.oncomplete = () => {
+        db._upgradeTx = null;
+        queueMicrotask(() => request.onsuccess?.({ target: request }));
+      };
+      try {
+        request.onupgradeneeded?.({ target: request });
+        if (!tx._aborted) tx._scheduleCompletion();
       } catch (error) {
-        request.error = error;
-        request.onerror?.({ target: request });
+        tx.abort(error);
       }
     });
 
