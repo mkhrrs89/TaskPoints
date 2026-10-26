@@ -871,3 +871,41 @@ test('V2 index migration read error aborts and retains all legacy completion evi
   assert.equal(retry.version,2);
   assert.deepEqual(app.indexedDB.dump(DB_NAME).completions[0].habitIds,['h1']);
 });
+
+test('IndexedDB versionchange closes an older preview connection and refuses stale candidates', async () => {
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const db=await app.runtime.open();
+  const legacyRaw=app.localStorage.getItem(LEGACY_KEY);
+  const walBefore=app.wal.getPendingRows();
+  assert.equal((await app.runtime.readPilotHabitCandidate('h1')).eligible,true);
+  assert.equal(typeof db.onversionchange,'function');
+  db.onversionchange({oldVersion:2,newVersion:3});
+  assert.equal(db._closed,true);
+  const status=app.runtime.getStatus();
+  assert.equal(status.readAuthority,'legacy_only');
+  assert.equal(status.externalRevisionInvalidated,true);
+  const blocked=await app.runtime.readPilotHabitCandidate('h1');
+  assert.equal(blocked.eligible,false);
+  assert.equal(blocked.reason,'external_revision_invalidated');
+  assert.equal(Object.hasOwn(blocked,'habit'),false);
+  assert.equal(app.localStorage.getItem(LEGACY_KEY),legacyRaw);
+  assert.deepEqual(app.wal.getPendingRows(),walBefore);
+});
+
+test('indexed candidate failures do not expose partial results and recover without reseeding', async () => {
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const before=structuredClone(app.indexedDB.dump(DB_NAME));
+  app.indexedDB.failNext({store:'completions',operation:'indexGetAll',
+    error:new Error('synthetic IndexedDB indexed read interrupted')});
+  const failed=await app.runtime.readPilotHabitCandidate('h1');
+  assert.equal(failed.eligible,false);
+  assert.equal(failed.reason,'storage_unreadable');
+  assert.equal(Object.hasOwn(failed,'completions'),false);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME),before);
+  const retried=await app.runtime.readPilotHabitCandidate('h1');
+  assert.equal(retried.eligible,true,JSON.stringify(retried));
+  assert.equal(retried.lookupMode,'indexed');
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
