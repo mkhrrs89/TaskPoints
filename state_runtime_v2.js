@@ -3047,6 +3047,9 @@
       // A tab/import or new journal write may race the asynchronous IDB read.
       // Recheck all authorities, the current IDB revision, and effective V1.
       const metaAfter = await readMeta(db);
+      // Preview opt-out during any asynchronous IDB read is an immediate
+      // refusal, even when the underlying mirror data happened to match.
+      if (!isDarkEnabled()) return refused('dark_disabled_during_check');
       const secondGeneration = currentGeneration({ create: false });
       const secondPending = wal.getPendingRows();
       if (!secondGeneration || secondGeneration !== initialGeneration
@@ -3189,6 +3192,12 @@
       const legacyCompletions = beforeSubset.completions.filter(row =>
         String(row?.habitId ?? '') === habitId);
       const candidate = await readPilotHabitCandidate(habitId);
+      // The explicit diagnostic switch may be turned off while the awaited
+      // IDB comparison is in flight. Refuse instead of returning late results.
+      if (!pilotReadProbeEnabled) {
+        pilotReadProbeRefusals += 1;
+        return result('probe_disabled_during_check', { matched: false });
+      }
       if (!candidate.eligible) {
         pilotReadProbeRefusals += 1;
         return result(candidate.reason, { matched: false });
@@ -3210,6 +3219,10 @@
         habit: normalizeHabitForParity(candidate.habit),
         completions: candidate.completions.map(normalizePilotCompletionForParity)
       });
+      if (!pilotReadProbeEnabled) {
+        pilotReadProbeRefusals += 1;
+        return result('probe_disabled_during_check', { matched: false });
+      }
       const matched = expected === actual;
       if (matched) pilotReadProbeMatches += 1;
       else pilotReadProbeRefusals += 1;
