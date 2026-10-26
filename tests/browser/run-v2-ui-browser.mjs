@@ -430,7 +430,11 @@ try{
       const core=window.TaskPointsCore;
       const source=core.readTaskPointsStoredState();
       const candidate=structuredClone(source);
-      candidate.habits.find(h=>h.id==='h1').name='Imported Generation h1';
+      const importedHabit=candidate.habits.find(h=>h.id==='h1');
+      importedHabit.name='Imported Generation h1';
+      // V1 resolves Habit merges by updatedAtISO, so the synthetic import
+      // must describe a newer Habit edit rather than a stale identical version.
+      importedHabit.updatedAtISO=new Date(Date.now()+60000).toISOString();
       const result=core.saveValidatedSnapshot(candidate,{
         allowDestructiveOverwrite:true,source:'settings-import',immediateWrite:true});
       return {blocked:result?.blocked===true,
