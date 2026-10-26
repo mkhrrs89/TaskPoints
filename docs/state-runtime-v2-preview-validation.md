@@ -238,3 +238,14 @@ A currently open V2 connection also closes on `versionchange` from another tab a
 - Real browser tab pairs where a newer schema upgrade invalidates the stale V2 connection. The old page refuses preview candidates rather than reopening or silently using an obsolete schema.
 
 These are fail-closed preview protections, **not** authorization to switch V2 to live reads or writes. Browser automation cannot prove every physical Safari lifecycle condition; the existing real-device gate is still required. No feature or legacy dataset was removed.
+
+## October 26 — Explicit reversible Habit read comparison probe
+
+A small diagnostic-only Stage-C rehearsal is now available on the V2 development branch. It does **not** enable a live read-authority switch. The only current selector is `legacy_only`.
+
+- `setPilotReadProbeEnabled(true)` opt-ins to an ephemeral, in-memory comparison harness. It does not persist across page reloads and does not change Home's source, V1 writes, V2 writer ownership, or storage configuration. Calling it with `false` instantly disables the probe.
+- `probePilotHabitRead(habitId)` compares the effective V1 Habit and its Habit/Vice completions against the independently guarded V2 candidate, using the existing parity-only normalization. It returns a bounded verdict, completion counts, revision and lookup mode but **never exposes record payloads, silently repairs data, or selects V2 authority**.
+- Pending WAL, unreadable stores, parity mismatches, external revision signals, changed generations, and a probe/dark-mode opt-out during a check all fail closed to V1.
+- The browser matrix now includes a five-reload default-off check, a successful candidate check before/after an actual Habit completion, stale-tab revision refusal, post-reload recovery, and an unchanged V1 authority verdict. Node tests additionally inject an opt-out in the middle of IDB access and confirm no late result is accepted.
+
+This is a diagnostic prerequisite. A real targeted V2 read switch must wait for the separate, controlled mutation-authority stage, explicit device tests and a tested rollback. No automatic cutover is performed.
