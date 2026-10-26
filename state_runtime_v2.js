@@ -2913,6 +2913,11 @@
       if (legacyBefore.missing) return refused('legacy_unavailable');
       const firstText = stableJson(paritySubset(sourceSubset(legacyBefore.state)));
       const actual = await readV2CollectionsFromDb(db);
+      // Pilot-scoped parity intentionally excludes Tasks and other completion
+      // classes, but those records must also never appear inside V2's pilot
+      // store. Reject contaminated candidate reads without deleting evidence.
+      if (pilotCompletions(actual).length !== actual.completions.length)
+        return refused('unexpected_nonpilot_completions');
       const actualText = stableJson(paritySubset(actual));
       if (firstText !== actualText) return refused('pilot_parity_mismatch');
 
