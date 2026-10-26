@@ -52,6 +52,7 @@
   // this page was open, even if no same-generation revision signal was sent.
   let interactionPageGeneration = null;
   let generationInteractionReloadRequests = 0;
+  let generationInteractionSafetyBlocks = 0;
 
   function nowIso() { return new Date().toISOString(); }
 
@@ -207,10 +208,26 @@
 
   function beforeHabitInteraction(detail = {}) {
     if (!isDarkEnabled()) return { proceed: true, reason: 'dark_disabled' };
-    installRevisionInvalidationListeners();
-    checkForExternalRevisionSignal();
-    const durableGeneration = currentGeneration({ create: false });
-    const generationChanged = Boolean(interactionPageGeneration && durableGeneration
+    let durableGeneration = null;
+    try {
+      installRevisionInvalidationListeners();
+      checkForExternalRevisionSignal();
+      durableGeneration = currentGeneration({ create: false });
+    } catch (error) {
+      generationInteractionSafetyBlocks += 1;
+      lastError = `state_runtime_v2_interaction_generation_unreadable:${String(error?.message || error)}`;
+      mark('stateV2.habitInteractionBlocked', { reason: 'generation_unreadable' });
+      // No stale-tap continuation can safely be stamped with an unknown epoch.
+      // V1 authority and the existing WAL are left untouched until storage
+      // becomes readable again; never run an old Home view against it.
+      return { proceed: false, reason: 'generation_unreadable' };
+    }
+    if (!durableGeneration) {
+      generationInteractionSafetyBlocks += 1;
+      mark('stateV2.habitInteractionBlocked', { reason: 'generation_missing' });
+      return { proceed: false, reason: 'generation_missing' };
+    }
+    const generationChanged = Boolean(interactionPageGeneration
       && String(interactionPageGeneration) !== String(durableGeneration));
     if (!externalRevisionInvalidated && !generationChanged) {
       return { proceed: true, reason: 'current' };
@@ -2845,6 +2862,10 @@
   }
 
   function getStatus() {
+    let visibleGeneration = null;
+    let generationReadable = true;
+    try { visibleGeneration = currentGeneration({ create: false }); }
+    catch (_) { generationReadable = false; }
     return {
       installed: true,
       darkEnabled: isDarkEnabled(),
@@ -2874,9 +2895,11 @@
       externalRevisionSource,
       externalRevisionReloadRequests,
       generationInteractionReloadRequests,
+      generationInteractionSafetyBlocks,
       interactionPageGeneration,
       generationKey: GENERATION_KEY,
-      currentGeneration: currentGeneration({ create: false }),
+      currentGeneration: visibleGeneration,
+      generationReadable,
       lastResetGeneration,
       lastKnownRevision,
       lastRevisionConflict,
