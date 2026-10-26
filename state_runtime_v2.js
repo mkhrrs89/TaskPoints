@@ -2878,6 +2878,72 @@
     return lastParity;
   }
 
+  // Stage-B/C preflight only. This is a diagnostic candidate gate, NOT a
+  // storage authority flag and not a replacement for the live V1 read path.
+  // No mutation, compaction, reseeding, or automatic cutover is performed.
+  async function inspectPilotReadiness() {
+    const refused = (reason) => ({
+      checked: true, eligible: false, reason, readAuthority: 'legacy_only'
+    });
+    if (!isDarkEnabled()) return refused('dark_disabled');
+    if (!interactionPageGeneration) return refused('page_generation_unbound');
+    if (externalRevisionInvalidated) return refused('external_revision_invalidated');
+    const wal = global.TaskPointsStateRuntimeV2Wal;
+    if (typeof wal?.getPendingRows !== 'function') return refused('wal_unavailable');
+    try {
+      const initialGeneration = currentGeneration({ create: false });
+      if (!initialGeneration) return refused('generation_missing');
+      if (initialGeneration !== interactionPageGeneration) return refused('generation_changed');
+      const firstPending = wal.getPendingRows();
+      if (firstPending?.ok !== true) return refused('wal_unreadable');
+      if (firstPending.rows.length) return refused('wal_pending');
+
+      // A preview gate must never seed V2 to make itself appear ready.
+      const db = await open();
+      if (!db) return refused('v2_unavailable');
+      const metaBefore = await readMeta(db);
+      if (!metaBefore || metaBefore.schemaVersion !== SCHEMA_VERSION
+        || metaBefore.legacyMissing === true
+        || metaBefore.resetGeneration !== initialGeneration) {
+        return refused('meta_not_current');
+      }
+
+      // Verify the actual collections directly, without invoking seeding.
+      const legacyBefore = parseLegacyStateWithPending();
+      if (legacyBefore.missing) return refused('legacy_unavailable');
+      const firstText = stableJson(paritySubset(sourceSubset(legacyBefore.state)));
+      const actual = await readV2CollectionsFromDb(db);
+      const actualText = stableJson(paritySubset(actual));
+      if (firstText !== actualText) return refused('pilot_parity_mismatch');
+
+      // A tab/import or new journal write may race the asynchronous IDB read.
+      // Recheck all authorities, the current IDB revision, and effective V1.
+      const metaAfter = await readMeta(db);
+      const secondGeneration = currentGeneration({ create: false });
+      const secondPending = wal.getPendingRows();
+      if (!secondGeneration || secondGeneration !== initialGeneration
+        || secondGeneration !== interactionPageGeneration
+        || externalRevisionInvalidated) return refused('generation_or_revision_changed');
+      if (secondPending?.ok !== true) return refused('wal_unreadable');
+      if (secondPending.rows.length) return refused('wal_pending');
+      if (stableJson(metaBefore) !== stableJson(metaAfter))
+        return refused('v2_revision_changed');
+      const legacyAfter = parseLegacyStateWithPending();
+      if (legacyAfter.missing) return refused('legacy_unavailable');
+      if (stableJson(paritySubset(sourceSubset(legacyAfter.state))) !== firstText)
+        return refused('legacy_changed_during_check');
+      return {
+        checked: true, eligible: true, reason: 'pilot_consistent',
+        readAuthority: 'legacy_only', generation: initialGeneration,
+        revision: Number(metaAfter.revision || 0),
+        counts: { habits: actual.habits.length, completions: actual.completions.length }
+      };
+    } catch (error) {
+      mark('stateV2.pilotReadinessBlocked', { reason: 'storage_unreadable' });
+      return refused('storage_unreadable');
+    }
+  }
+
   function getStatus() {
     let visibleGeneration = null;
     let generationReadable = true;
@@ -3050,6 +3116,7 @@
     },
     buildCompatibilitySnapshot,
     verifyParity,
+    inspectPilotReadiness,
     getStatus
   };
 
