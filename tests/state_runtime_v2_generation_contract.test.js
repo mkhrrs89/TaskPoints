@@ -612,3 +612,53 @@ test('pilot readiness and Habit preview reject nonpilot completion records witho
   assert.deepEqual(rows[0], unexpected, 'a refused read must preserve the unexpected record for diagnosis');
   assert.equal(app.runtime.getStatus().readAuthority, 'legacy_only');
 });
+
+test('targeted pilot reader uses Habit primary key, retaining packed cross-Habit duplicate completion order', async () => {
+  const first = { id: 'duplicate', source: 'habit', habitId: 'h1', dayKey: '2026-09-02',
+    points: 4, completedAtISO: '2026-09-02T08:00:00.000Z' };
+  const forH2 = { id: 'duplicate', source: 'habit', habitId: 'h2', dayKey: '2026-09-01',
+    points: 5, completedAtISO: '2026-09-01T08:00:00.000Z' };
+  const second = { id: 'duplicate', source: 'habit', habitId: 'h1', dayKey: '2026-08-31',
+    points: 7, completedAtISO: '2026-08-31T08:00:00.000Z' };
+  const app = install({ initialState: {
+    habits: [
+      { id: 'h1', name: 'Read', doneKeys: [], failedKeys: [], iceKeys: [], pointsPerDay: 4 },
+      { id: 'h2', name: 'Walk', doneKeys: [], failedKeys: [], iceKeys: [], pointsPerDay: 5 }
+    ],
+    completions: [first, forH2, second]
+  } });
+  await app.runtime.startCoordinatedDarkMirror();
+  const db = await app.runtime.open();
+  const transaction = db.transaction.bind(db);
+  const calls = { targetedHabits: 0, fullHabits: 0, fullCompletions: 0 };
+  db.transaction = (...args) => {
+    const tx = transaction(...args);
+    const objectStore = tx.objectStore.bind(tx);
+    tx.objectStore = name => {
+      const store = objectStore(name);
+      const originalGetAll = store.getAll.bind(store);
+      if (name === 'habits') {
+        const originalGet = store.get.bind(store);
+        store.get = key => { calls.targetedHabits++; return originalGet(key); };
+        store.getAll = (...params) => { calls.fullHabits++; return originalGetAll(...params); };
+      } else if (name === 'completions') {
+        store.getAll = (...params) => { calls.fullCompletions++; return originalGetAll(...params); };
+      }
+      return store;
+    };
+    return tx;
+  };
+  const result = await app.runtime.readPilotHabitCandidate('h1');
+  db.transaction = transaction;
+  assert.equal(result.eligible, true, JSON.stringify(result));
+  assert.equal(result.habit.id, 'h1');
+  assert.deepEqual(result.completions.map(row => row.points), [4, 7]);
+  assert.deepEqual(result.completions.map(row => row.id), ['duplicate','duplicate']);
+  assert.equal(calls.targetedHabits, 1);
+  assert.equal(calls.fullHabits, 2, 'only the two whole-pilot parity preflights scan all Habits');
+  assert.equal(calls.fullCompletions, 3, 'complete scope is still verified on both sides');
+  const other = await app.runtime.readPilotHabitCandidate('h2');
+  assert.equal(other.eligible, true);
+  assert.deepEqual(other.completions.map(row => row.points), [5]);
+  assert.equal(app.runtime.getStatus().readAuthority, 'legacy_only');
+});
