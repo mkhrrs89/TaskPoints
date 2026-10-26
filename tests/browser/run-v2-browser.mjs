@@ -94,6 +94,93 @@ try {
     return p.actualCounts;
   });
 
+  await run('pilot read readiness is preview-only, read-only, and refuses pending WAL', async context => {
+    const page = await open(context);
+    const before = await page.evaluate(async () => {
+      const runtime = window.TaskPointsStateRuntimeV2;
+      const db = await runtime.open();
+      const getMeta = () => new Promise((resolve, reject) => {
+        const req = db.transaction('meta', 'readonly').objectStore('meta').get('runtime');
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+      return {
+        result: await runtime.inspectPilotReadiness(),
+        meta: await getMeta(),
+        legacy: localStorage.getItem(window.TaskPointsCore.STORAGE_KEY),
+        authority: runtime.getStatus().readAuthority
+      };
+    });
+    assert.equal(before.result.eligible, true, JSON.stringify(before.result));
+    assert.equal(before.result.reason, 'pilot_consistent');
+    assert.equal(before.result.readAuthority, 'legacy_only');
+    assert.equal(before.authority, 'legacy_only');
+    assert.equal(before.result.counts.habits, 3);
+    const held = await page.evaluate(async () => {
+      sessionStorage.setItem('taskpoints_state_v2_wal_test_armed_v1', '1');
+      window.V2BrowserFixture.delta('h1', '2026-10-20', 'full', 1);
+      const pending = window.TaskPointsStateRuntimeV2Wal.getPendingRows();
+      return { pending: pending.rows.length,
+        gate: await window.TaskPointsStateRuntimeV2.inspectPilotReadiness(),
+        authority: window.TaskPointsStateRuntimeV2.getStatus().readAuthority };
+    });
+    assert.equal(held.pending, 1);
+    assert.equal(held.gate.eligible, false);
+    assert.equal(held.gate.reason, 'wal_pending');
+    assert.equal(held.authority, 'legacy_only');
+    await page.reload({ waitUntil: 'load' });
+    await page.waitForFunction(() => window.V2BrowserFixture?.status()?.wal.pendingCount === 0,
+      null, { timeout: 25000 });
+    const after = await page.evaluate(async () =>
+      window.TaskPointsStateRuntimeV2.inspectPilotReadiness());
+    assert.equal(after.eligible, true, JSON.stringify(after));
+    assert.equal(after.readAuthority, 'legacy_only');
+    return {healthyPilotEligible:true, pendingWalRefused:true,
+      restartRecovered:true, authorityUnchanged:true};
+  });
+
+  await run('pilot read gate refuses same-generation V1 differences and unreadable WAL without writes', async context => {
+    const page = await open(context);
+    const checked = await page.evaluate(async () => {
+      const runtime = window.TaskPointsStateRuntimeV2;
+      const core = window.TaskPointsCore;
+      const originalRaw = localStorage.getItem(core.STORAGE_KEY);
+      const first = await runtime.inspectPilotReadiness();
+      const changed = core.parseTaskPointsStorageJson(originalRaw, {});
+      changed.habits[0].name = 'Synthetic external V1 edit';
+      const changedRaw = JSON.stringify(changed);
+      localStorage.setItem(core.STORAGE_KEY, changedRaw);
+      const mismatch = await runtime.inspectPilotReadiness();
+      const preserved = localStorage.getItem(core.STORAGE_KEY) === changedRaw;
+      localStorage.setItem(core.STORAGE_KEY, originalRaw);
+      const sharedKey = 'taskpoints_v2_pending_mutations_v1';
+      const originalGet = Storage.prototype.getItem;
+      let unreadable = null;
+      Storage.prototype.getItem = function(key) {
+        if (this === localStorage && String(key) === sharedKey)
+          throw new DOMException('Synthetic WAL inspection failure', 'SecurityError');
+        return originalGet.call(this, key);
+      };
+      try { unreadable = await runtime.inspectPilotReadiness(); }
+      finally { Storage.prototype.getItem = originalGet; }
+      const recovered = await runtime.inspectPilotReadiness();
+      return {first, mismatch, preserved, unreadable, recovered,
+        legacyUnchanged: localStorage.getItem(core.STORAGE_KEY) === originalRaw,
+        authority: runtime.getStatus().readAuthority};
+    });
+    assert.equal(checked.first.eligible, true);
+    assert.equal(checked.mismatch.eligible, false);
+    assert.equal(checked.mismatch.reason, 'pilot_parity_mismatch');
+    assert.equal(checked.preserved, true);
+    assert.equal(checked.unreadable.eligible, false);
+    assert.equal(checked.unreadable.reason, 'wal_unreadable');
+    assert.equal(checked.recovered.eligible, true, JSON.stringify(checked.recovered));
+    assert.equal(checked.legacyUnchanged, true);
+    assert.equal(checked.authority, 'legacy_only');
+    return {parityMismatchBlocked:true, storageDenialBlocked:true,
+      recoveredWithoutReseeding:true, authorityUnchanged:true};
+  });
+
   await run('rapid full-half-off burst and two further Habits preserve final state', async context => {
     const page = await open(context);
     await page.evaluate(() => {
