@@ -144,6 +144,7 @@
       // Some browser storage shims can acknowledge removeItem without
       // actually deleting the entry. Verify the readback before replaying,
       // or a future page load could execute the same tap a second time.
+      let removedForReplay = false;
       try {
         const session = global.sessionStorage;
         if (!session || typeof session.removeItem !== 'function'
@@ -152,11 +153,23 @@
           return;
         }
         session.removeItem(STALE_TAP_KEY);
+        removedForReplay = true;
         if (session.getItem(STALE_TAP_KEY) !== null) {
           retry();
           return;
         }
-      } catch (_) { retry(); return; }
+      } catch (_) {
+        if (removedForReplay) {
+          // If the removal succeeded but its verification read failed,
+          // restore the known pending intent before retrying. Otherwise the
+          // action would be lost despite never reaching the V1 journal.
+          try {
+            global.sessionStorage?.setItem?.(STALE_TAP_KEY, JSON.stringify(pending));
+          } catch (_) {}
+        }
+        retry();
+        return;
+      }
       staleTapReplayScheduled = false;
       staleTapReplays += 1;
       global.handleHabitBubbleTap?.(bubble);
