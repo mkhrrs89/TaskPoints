@@ -437,9 +437,11 @@ try{
       importedHabit.updatedAtISO=new Date(Date.now()+60000).toISOString();
       const result=core.saveValidatedSnapshot(candidate,{
         allowDestructiveOverwrite:true,source:'settings-import',immediateWrite:true});
+      const persisted=core.parseTaskPointsStorageJson(localStorage.getItem(core.STORAGE_KEY),{});
       return {blocked:result?.blocked===true,
         generation:window.TaskPointsStateRuntimeV2Generation.read(),
-        persistedName:core.readTaskPointsStoredState().habits.find(h=>h.id==='h1')?.name};
+        persistedName:persisted.habits.find(h=>h.id==='h1')?.name,
+        returnedName:result?.state?.habits?.find(h=>h.id==='h1')?.name};
     });
     assert.equal(imported.blocked,false);
     assert.notEqual(imported.generation,original.generation);
@@ -457,7 +459,9 @@ try{
       generation:window.TaskPointsStateRuntimeV2Generation.read(),
       pageRuntimeGeneration:window.TaskPointsStateRuntimeV2.getStatus().currentGeneration,
       revisionInvalidated:window.TaskPointsStateRuntimeV2.getStatus().externalRevisionInvalidated,
-      importedName:window.TaskPointsCore.readTaskPointsStoredState().habits.find(h=>h.id==='h1')?.name
+      importedName:(()=>{const core=window.TaskPointsCore;
+        return core.parseTaskPointsStorageJson(localStorage.getItem(core.STORAGE_KEY),{})
+          .habits.find(h=>h.id==='h1')?.name;})()
     }));
     assert.equal(observed.generation,imported.generation);
     assert.equal(observed.importedName,'Imported Generation h1');
@@ -481,7 +485,8 @@ try{
         request.onerror=()=>reject(request.error);
       });
       return {h2:pending.filter(row=>row.habitId==='h2'&&row.dayKey===key).map(row=>row.status),
-        importedName:core.readTaskPointsStoredState().habits.find(h=>h.id==='h1').name,
+        importedName:core.parseTaskPointsStorageJson(localStorage.getItem(core.STORAGE_KEY),{})
+          .habits.find(h=>h.id==='h1').name,
         generation:runtime.getStatus().currentGeneration,
         authority:runtime.getStatus().readAuthority,
         pendingTap:sessionStorage.getItem('taskpoints_v2_stale_habit_tap_v1'),
