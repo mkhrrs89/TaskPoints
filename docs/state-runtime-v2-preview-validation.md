@@ -201,3 +201,17 @@ The V2 branch now enforces the pilot boundary consistently:
 Focused ownership, compatibility, Habit-edit, trace-review, live-review, atomic-replacement, and data-loss fail-closed contracts pass with these changes. V2 remains default-off, preview-only, and legacy-read-authoritative. No authority transition is authorized by this change.
 
 The next Step 4 physical pass should use the updated stable branch preview, Start fresh test, exercise completion/reorder/edit/add, keep interacting briefly to preempt pending maintenance, then leave the page visible and untouched for at least 20 seconds. A complete session now requires all ten live checks, including both green pilot ownership and green pilot-scoped parity. If either is red, copy the review without resetting TaskPoints data.
+
+## October 26 — Completion lookup index preparation (no schema cutover)
+
+The guarded preview-only Habit reader and the original V2 database continue to preserve V1 read authority. The next optimization is a per-Habit completion index, but historical completion storage is packed by completion ID rather than by Habit ID. One pack can contain duplicate completion IDs belonging to multiple Habits. Key-prefix searches or assuming that only the first packed entry matters would silently omit records.
+
+Current non-destructive preparation:
+
+- Newly seeded completion packs, journal-mirrored completions, and retroactively rewritten completion packs include a sorted, deduplicated `habitIds` metadata array covering **every** Habit/Vice completion in the pack. This is metadata on the V2 pack; its canonical completion values, duplicate semantics, and existing ordering are unchanged.
+- `inspectPilotCompletionIndexCoverage()` checks the actual stored packs, with existing generation/WAL/parity checks before and after. Its output is read-only, bounded to aggregate counts (`total`, `complete`, `missing`, `mismatched`) and contains no completion payloads or automatic repairs.
+- Older packs may lack `habitIds` and remain intact. When coverage is incomplete, the present guarded Habit reader continues using the existing completion scan. It must **not** substitute a partial future index.
+- No IndexedDB version upgrade, new index, migration/backfill, live read change, production feature deletion, or V1 authority switch is made by this preparation.
+- Future schema work must first prove an atomic, abort-safe upgrade/backfill for older packs, preserve the cross-Habit duplicate case, and provide a tested scan fallback when metadata/index migration is incomplete or blocked.
+
+The focused Node and real-browser regression suite exercises complete packs, cross-Habit duplicate IDs, retroactive edits, missing/mismatched legacy metadata, pending WAL, and unchanged V1 authority. CI status is determined by the branch's GitHub Actions runs, not by this text.
