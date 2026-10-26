@@ -507,6 +507,96 @@ try{
       importedNamePreserved:true,completionNotDuplicated:true,parity:true};
   });
 
+  await test('suspended Home tab does not bypass V2 generation guard when preview flag read fails',async ctx=>{
+    const sleeping=(await home(ctx)).page;
+    const importer=(await home(ctx)).page;
+    await sleeping.locator('[data-home-tab="habits"]').click({force:true});
+    const day=await sleeping.locator('#habitsList .habitDay[data-habit="h2"]').first().getAttribute('data-day');
+    assert.ok(day);
+    const epoch=await sleeping.evaluate(()=>window.TaskPointsStateRuntimeV2Generation.read());
+    await importer.bringToFront();
+    const imported=await importer.evaluate(()=>{
+      const core=window.TaskPointsCore;
+      const candidate=structuredClone(core.readTaskPointsStoredState());
+      const habit=candidate.habits.find(h=>h.id==='h1');
+      habit.name='Preview Flag Import Recovery';
+      habit.updatedAtISO=new Date(Date.now()+60000).toISOString();
+      const result=core.saveValidatedSnapshot(candidate,{
+        allowDestructiveOverwrite:true,source:'settings-import',immediateWrite:true});
+      return {blocked:result?.blocked===true,
+        epoch:window.TaskPointsStateRuntimeV2Generation.read()};
+    });
+    assert.equal(imported.blocked,false);
+    assert.notEqual(imported.epoch,epoch);
+    await importer.evaluate(()=>window.TaskPointsStateRuntimeV2.startCoordinatedDarkMirror());
+    await sleeping.bringToFront();
+    const baseline=await sleeping.evaluate(day=>({
+      journal:window.TaskPointsCore.readPendingHabitDeltas()
+        .filter(d=>d.habitId==='h2'&&d.dayKey===day).length,
+      generation:window.TaskPointsStateRuntimeV2Generation.read()
+    }),day);
+    assert.equal(baseline.journal,0);
+    assert.equal(baseline.generation,imported.epoch);
+    await sleeping.evaluate(()=>{
+      const original=Storage.prototype.getItem;
+      window.__previewFlagGetOriginal=original;
+      Storage.prototype.getItem=function(key){
+        if(this===localStorage && String(key)==='taskpoints_state_v2_dark_mode_v1')
+          throw new DOMException('Synthetic inaccessible V2 dark flag','SecurityError');
+        return original.call(this,key);
+      };
+    });
+    try{
+      await sleeping.locator('#habitsList .habitDay[data-habit="h2"][data-day="'+day+'"]').tap({force:true});
+      const blocked=await sleeping.evaluate(day=>({
+        journal:window.TaskPointsCore.readPendingHabitDeltas()
+          .filter(d=>d.habitId==='h2'&&d.dayKey===day).length,
+        blocked:window.TaskPointsStateRuntimeV2.getStatus().generationInteractionSafetyBlocks,
+        queued:sessionStorage.getItem('taskpoints_v2_stale_habit_tap_v1')
+      }),day);
+      assert.equal(blocked.blocked,1,'a denied preview flag must block an old Home tap');
+      assert.equal(blocked.journal,0,'V1 must not receive a stale Habit write');
+      assert.equal(blocked.queued,null,'an unknown preview state cannot queue an unsafe replay');
+    }finally{
+      await sleeping.evaluate(()=>{
+        if(window.__previewFlagGetOriginal){
+          Storage.prototype.getItem=window.__previewFlagGetOriginal;
+          delete window.__previewFlagGetOriginal;
+        }
+      });
+    }
+    await sleeping.locator('#habitsList .habitDay[data-habit="h2"][data-day="'+day+'"]').tap({force:true});
+    await sleeping.waitForFunction(day=>{
+      const journal=window.TaskPointsCore?.readPendingHabitDeltas?.()||[];
+      const ctl=window.TaskPointsHabitFastPathControl?.getStatus?.();
+      return journal.some(d=>d.habitId==='h2'&&d.dayKey===day&&d.status==='full')
+        && ctl?.staleTapReplays===1;
+    },day,{timeout:24000});
+    const verified=await sleeping.evaluate(async day=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      await runtime.startCoordinatedDarkMirror();
+      const core=window.TaskPointsCore;
+      return {
+        generation:window.TaskPointsStateRuntimeV2Generation.read(),
+        habitName:core.parseTaskPointsStorageJson(localStorage.getItem(core.STORAGE_KEY),{})
+          .habits.find(h=>h.id==='h1')?.name,
+        journal:core.readPendingHabitDeltas()
+          .filter(d=>d.habitId==='h2'&&d.dayKey===day).map(d=>d.status),
+        replays:window.TaskPointsHabitFastPathControl.getStatus().staleTapReplays,
+        parity:await runtime.verifyParity(),
+        authority:runtime.getStatus().readAuthority
+      };
+    },day);
+    assert.equal(verified.generation,imported.epoch);
+    assert.equal(verified.habitName,'Preview Flag Import Recovery');
+    assert.deepEqual(verified.journal,['full']);
+    assert.equal(verified.replays,1);
+    assert.equal(verified.parity.match,true,JSON.stringify(verified.parity.differences));
+    assert.equal(verified.authority,'legacy_only');
+    return {previewFlagDenialBlocked:true,noStaleV1Mutation:true,
+      postRecoveryTapExactlyOnce:true,importRetained:true,parity:true};
+  });
+
   await test('suspended Home tab blocks unreadable generation before first post-import Habit tap',async ctx=>{
     const sleeping=(await home(ctx)).page;
     const importer=(await home(ctx)).page;
