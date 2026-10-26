@@ -44,6 +44,20 @@
     }
   }
 
+  // WAL reads are safety-critical: a denied read is not an empty log. The
+  // permissive safeGet helper is only suitable for optional mode/metadata
+  // probes; mutation recovery and cleanup must fail closed on read errors.
+  function readWalStorage(key) {
+    const storage = global.localStorage;
+    if (!storage || typeof storage.getItem !== 'function') {
+      throw new Error('wal_storage_read_unavailable');
+    }
+    try { return storage.getItem(key); }
+    catch (error) {
+      throw new Error(`wal_storage_read_failed:${String(error?.message || error)}`);
+    }
+  }
+
   function isEnabled() {
     return safeGet(DARK_MODE_KEY) === '1';
   }
@@ -158,8 +172,9 @@
   }
 
   function read() {
-    const raw = safeGet(KEY);
+    let raw = null;
     try {
+      raw = readWalStorage(KEY);
       const parsed = raw == null || raw === '' ? [] : JSON.parse(raw);
       if (!Array.isArray(parsed)) throw new Error('wal_root_not_array');
       if (!parsed.every(validateRow)) throw new Error('wal_contains_invalid_rows');
@@ -169,7 +184,7 @@
       // different tab's mutation from the recoverable WAL.
       const merged = new Map(parsed.map(row => [row.id, row]));
       for (const key of independentKeys()) {
-        const independentRaw = safeGet(key);
+        const independentRaw = readWalStorage(key);
         if (independentRaw == null) continue; // concurrently confirmed/removed
         const row = JSON.parse(independentRaw);
         if (!validateRow(row) || independentKey(row.id) !== key) {
