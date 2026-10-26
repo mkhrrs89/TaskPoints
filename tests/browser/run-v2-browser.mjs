@@ -158,6 +158,48 @@ try {
       crossHabitDuplicatesRetained:true,legacyAuthorityPreserved:true};
   });
 
+  await run('cross-tab V2 schema update invalidates stale reader while retaining V1', async context => {
+    const page=await open(context);
+    const before=await page.evaluate(async()=>{
+      return {candidate:await window.TaskPointsStateRuntimeV2.readPilotHabitCandidate('h1'),
+        legacy:localStorage.getItem('taskpoints_v1'),
+        wal:window.TaskPointsStateRuntimeV2Wal.getPendingRows().rows.length};
+    });
+    assert.equal(before.candidate.eligible,true);
+    const upgrader=await context.newPage();
+    await upgrader.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),{waitUntil:'load'});
+    const newVersion=await upgrader.evaluate(()=>new Promise((resolve,reject)=>{
+      const req=indexedDB.open('taskpoints_state_v2',3);
+      req.onupgradeneeded=()=>{};
+      req.onsuccess=()=>{const v=req.result.version;req.result.close();resolve(v);};
+      req.onerror=()=>reject(req.error);
+      req.onblocked=()=>reject(Error('existing V2 runtime refused to close for upgrade'));
+    }));
+    assert.equal(newVersion,3);
+    await page.waitForFunction(()=>window.TaskPointsStateRuntimeV2.getStatus().externalRevisionInvalidated,
+      null,{timeout:10000});
+    const stale=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const candidate=await runtime.readPilotHabitCandidate('h1');
+      let openFailure=null;
+      try{await runtime.open();}
+      catch(error){openFailure=String(error?.name||error);}
+      return {candidate,openFailure,
+        legacy:localStorage.getItem('taskpoints_v1'),
+        authority:runtime.getStatus().readAuthority,
+        wal:window.TaskPointsStateRuntimeV2Wal.getPendingRows().rows.length};
+    });
+    assert.equal(stale.candidate.eligible,false);
+    assert.equal(stale.candidate.reason,'external_revision_invalidated');
+    assert.equal(Object.hasOwn(stale.candidate,'habit'),false);
+    assert.ok(stale.openFailure,'stale version-2 open must not reopen a version-3 database');
+    assert.equal(stale.legacy,before.legacy);
+    assert.equal(stale.wal,before.wal);
+    assert.equal(stale.authority,'legacy_only');
+    return {oldConnectionReleased:true,staleReaderRejected:true,
+      newerSchemaUntouched:true,v1Retained:true};
+  });
+
   await run('real IndexedDB v1-to-v2 upgrade backfills cross-Habit completion index atomically', async context => {
     const page=await context.newPage();
     page.on('pageerror',err=>console.warn('Upgrade fixture error: '+err.message));
