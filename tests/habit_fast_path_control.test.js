@@ -268,7 +268,9 @@ function makePendingTapHarness(options = {}) {
       },
       beforeHabitInteraction() { return { proceed: true }; }
     },
-    addEventListener(type, fn) { listeners.set(type, fn); },
+    addEventListener(type, fn) {
+      listeners.set(type, [...(listeners.get(type) || []), fn]);
+    },
     setTimeout(fn) { timers.push(fn); return timers.length; },
     handleHabitBubbleTap() { calls += 1; }
   };
@@ -286,7 +288,8 @@ function makePendingTapHarness(options = {}) {
 test('transient storage exceptions never consume a queued Habit until its one safe replay', () => {
   const h = makePendingTapHarness();
   h.setFault('status');
-  h.pump(); // Install the existing Home handler and schedule recovery.
+  // The combined module installs three independent Home helpers first.
+  for (let n = 0; n < 3; n += 1) h.pump();
   h.pump(); // Generation status read unavailable.
   assert.equal(h.calls(), 0);
   assert.equal(h.session.has(h.KEY), true);
@@ -309,25 +312,25 @@ test('transient storage exceptions never consume a queued Habit until its one sa
 test('bounded blocked replay stays in session and rearms when page resumes', () => {
   const h = makePendingTapHarness();
   h.setFault('dark');
-  h.pump(); // Install.
+  for (let n = 0; n < 3; n += 1) h.pump(); // Install Home helpers.
   for (let n = 0; n < 101; n += 1) h.pump();
   assert.equal(h.timers.length, 0, 'stop retries instead of spinning forever');
   assert.equal(h.calls(), 0);
   assert.equal(h.session.has(h.KEY), true, 'never silently erase the pending touch');
   h.setFault(null);
-  assert.equal(typeof h.listeners.get('pageshow'), 'function');
-  h.listeners.get('pageshow')();
+  assert.ok(h.listeners.get('pageshow')?.length >= 1);
+  h.listeners.get('pageshow').forEach(fn => fn());
   h.pump();
   assert.equal(h.calls(), 1, 'resumption replays the original tap once');
   assert.equal(h.session.has(h.KEY), false);
-  h.listeners.get('pageshow')();
+  h.listeners.get('pageshow').forEach(fn => fn());
   assert.equal(h.timers.length, 0, 'an already completed tap cannot be rescheduled');
   assert.equal(h.calls(), 1);
 });
 
 test('verified old-generation continuation is discarded rather than replayed after recovery', () => {
   const h = makePendingTapHarness({ pendingGeneration: 'generation:old' });
-  h.pump();
+  for (let n = 0; n < 3; n += 1) h.pump(); // Install Home helpers.
   h.pump();
   assert.equal(h.calls(), 0);
   assert.equal(h.session.has(h.KEY), false);
