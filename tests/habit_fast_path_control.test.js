@@ -257,6 +257,7 @@ function makePendingTapHarness(options = {}) {
       getItem(k) { return session.get(k) ?? null; },
       removeItem(k) {
         if (fault === 'remove') throw Error('synthetic session write SecurityError');
+        if (fault === 'silent-remove') return; // storage silently refused the deletion
         session.delete(k);
       }
     },
@@ -335,4 +336,22 @@ test('verified old-generation continuation is discarded rather than replayed aft
   assert.equal(h.calls(), 0);
   assert.equal(h.session.has(h.KEY), false);
   assert.equal(h.window.TaskPointsHabitFastPathControl.getStatus().staleTapDiscarded, 1);
+});
+
+test('silently ignored sessionStorage removal never permits duplicate Habit replay', () => {
+  const h = makePendingTapHarness();
+  h.setFault('silent-remove');
+  for (let n = 0; n < 3; n += 1) h.pump(); // Install Home helpers.
+  h.pump(); // Deletion returns without actually removing the queued tap.
+  assert.equal(h.calls(), 0, 'unconfirmed deletion must block execution');
+  assert.equal(h.session.has(h.KEY), true, 'the original tap remains recoverable');
+  assert.equal(h.window.TaskPointsHabitFastPathControl.getStatus().staleTapReplays, 0);
+  h.setFault(null);
+  h.pump(); // The next attempt can confirm the deletion.
+  assert.equal(h.calls(), 1);
+  assert.equal(h.session.has(h.KEY), false);
+  assert.equal(h.window.TaskPointsHabitFastPathControl.getStatus().staleTapReplays, 1);
+  h.listeners.get('pageshow').forEach(fn => fn());
+  assert.equal(h.timers.length, 0);
+  assert.equal(h.calls(), 1, 'a page resume cannot replay the same tap again');
 });
