@@ -174,6 +174,7 @@
     if (controlledHandler && global.handleHabitBubbleTap === controlledHandler) {
       installed = true;
       lastReason = isDisabled() ? 'installed_disabled' : 'installed_enabled';
+      scheduleStaleTapReplay();
       return status();
     }
 
@@ -190,6 +191,7 @@
       installed = true;
       installedAtISO ||= new Date().toISOString();
       lastReason = isDisabled() ? 'installed_disabled' : 'installed_enabled';
+      scheduleStaleTapReplay();
       return status();
     }
 
