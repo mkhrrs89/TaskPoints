@@ -80,8 +80,14 @@
     if (typeof generationApi?.ensure === 'function') {
       const result = generationApi.ensure();
       if (result?.generation) return String(result.generation);
+      // The generation authority was present but could not provide an epoch.
+      // A separate WAL fallback must never manufacture one behind its back.
+      throw new Error('state_runtime_v2_wal_generation_unavailable');
     }
-    const existing = safeGet(GENERATION_KEY);
+    // The older standalone WAL fallback is still supported, but a denied
+    // read cannot be treated as an empty generation key. Only a verified null
+    // result authorizes creating a fresh fallback epoch.
+    const existing = readWalStorage(GENERATION_KEY);
     if (existing) return String(existing);
     const generation = newFallbackGeneration();
     if (!safeSet(GENERATION_KEY, generation)) {
@@ -91,7 +97,9 @@
   }
 
   function cloneGeneration() {
-    return global.TaskPointsStateRuntimeV2Generation?.read?.() || safeGet(GENERATION_KEY) || null;
+    const generationApi = global.TaskPointsStateRuntimeV2Generation;
+    if (typeof generationApi?.read === 'function') return generationApi.read();
+    return readWalStorage(GENERATION_KEY);
   }
 
   function fnv1a(text) {
