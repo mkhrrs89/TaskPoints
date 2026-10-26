@@ -213,6 +213,46 @@ try {
     return {previewHabitRead:true,completionRead:true,legacyAuthorityUnchanged:true};
   });
 
+  await run('preview Habit reader refuses out-of-scope V2 completion without deleting it', async context => {
+    const page = await open(context);
+    const state = await page.evaluate(async () => {
+      const runtime = window.TaskPointsStateRuntimeV2;
+      const db = await runtime.open();
+      const candidate = {id:'unexpected:task',value:{
+        id:'unexpected:task',habitId:'h1',source:'task',points:1,
+        completedAtISO:'2026-10-20T12:00:00.000Z'
+      },sequence:999};
+      const tx = db.transaction('completions', 'readwrite');
+      tx.objectStore('completions').put(candidate);
+      await new Promise((resolve,reject)=>{
+        tx.oncomplete=resolve;
+        tx.onerror=()=>reject(tx.error);
+        tx.onabort=()=>reject(tx.error);
+      });
+      const legacyRaw = localStorage.getItem(window.TaskPointsCore.STORAGE_KEY);
+      const readiness = await runtime.inspectPilotReadiness();
+      const habitRead = await runtime.readPilotHabitCandidate('h1');
+      const request = db.transaction('completions','readonly')
+        .objectStore('completions').get(candidate.id);
+      const preserved = await new Promise((resolve,reject)=>{
+        request.onsuccess=()=>resolve(request.result);
+        request.onerror=()=>reject(request.error);
+      });
+      return {readiness,habitRead,preserved,
+        sameV1:localStorage.getItem(window.TaskPointsCore.STORAGE_KEY)===legacyRaw,
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(state.readiness.eligible,false);
+    assert.equal(state.readiness.reason,'unexpected_nonpilot_completions');
+    assert.equal(state.habitRead.eligible,false);
+    assert.equal(state.habitRead.reason,'unexpected_nonpilot_completions');
+    assert.equal(Object.hasOwn(state.habitRead,'habit'),false);
+    assert.equal(state.preserved.id,'unexpected:task');
+    assert.equal(state.sameV1,true);
+    assert.equal(state.authority,'legacy_only');
+    return {outOfScopeRejected:true,diagnosticEvidenceRetained:true,v1Unchanged:true};
+  });
+
   await run('guarded V2 Habit candidate rejects mid-read V1 change without exposing stale records', async context => {
     const page = await open(context);
     const result = await page.evaluate(async () => {
