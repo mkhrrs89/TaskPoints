@@ -671,6 +671,39 @@
     return { habits, completions };
   }
 
+  // Target only one Habit object rather than materializing every Habit in
+  // the candidate read. Completion rows still need an all-row scan: historical
+  // duplicate-ID packs can contain entries for different Habits and the
+  // existing database has no validated per-Habit completion index. Filtering
+  // before cloning keeps the result bounded without changing their order.
+  // The outer readiness checks continue verifying the entire pilot scope.
+  async function readPilotHabitRowsFromDb(db, habitId) {
+    const tx = db.transaction(['habits', 'completions'], 'readonly');
+    const habitRequest = tx.objectStore('habits').get(habitId);
+    const completionRequest = tx.objectStore('completions').getAll();
+    const [habitRow, completionRows] = await Promise.all([
+      requestPromise(habitRequest), requestPromise(completionRequest)
+    ]);
+    const matching = [];
+    for (const row of completionRows || []) {
+      if (Array.isArray(row?.entries)) {
+        for (const entry of row.entries) {
+          if (String(entry?.value?.habitId ?? '') === habitId) {
+            matching.push({ sequence: Number(entry?.sequence || 0), value: entry.value });
+          }
+        }
+      } else if (row && Object.prototype.hasOwnProperty.call(row, 'value')
+        && String(row.value?.habitId ?? '') === habitId) {
+        matching.push({ sequence: Number(row.sequence || 0), value: row.value });
+      }
+    }
+    matching.sort((a, b) => b.sequence - a.sequence);
+    return {
+      habit: habitRow?.value ? clone(habitRow.value) : null,
+      completions: matching.map(entry => clone(entry.value))
+    };
+  }
+
   // A same-generation mismatch is a safety incident, not permission to destroy
   // a potentially newer incremental mirror. Keep a bounded, read-only diff
   // so that post-restart evidence survives investigation.
@@ -2965,23 +2998,19 @@
     try {
       const db = await open();
       if (!db) return refuse('v2_unavailable');
-      // The single read-only transaction reads both pilot collections as one
-      // consistent IDB snapshot. This is deliberately not the future optimized
-      // per-Habit query; it proves the safe reader contract first.
-      const collections = await readV2CollectionsFromDb(db);
+      // Query one Habit by primary key and filter completion packs within
+      // one read-only transaction. This avoids a third whole-Habits read.
+      const candidate = await readPilotHabitRowsFromDb(db, habitId);
       const after = await inspectPilotReadiness();
       if (!after.eligible) return refuse(after.reason);
       if (before.generation !== after.generation || before.revision !== after.revision)
         return refuse('read_window_changed');
-      const habit = collections.habits.find(row => String(row?.id ?? '') === habitId);
-      const completions = collections.completions.filter(
-        row => String(row?.habitId ?? '') === habitId);
       return {
         checked: true, eligible: true, reason: 'stable_preview_candidate',
         source: 'v2_preview_only', readAuthority: 'legacy_only',
         generation: after.generation, revision: after.revision,
-        habit: habit ? clone(habit) : null,
-        completions: clone(completions)
+        habit: candidate.habit,
+        completions: candidate.completions
       };
     } catch (error) {
       return refuse('storage_unreadable');
