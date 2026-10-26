@@ -287,6 +287,10 @@ test('retroactive point edit rewrites only the edited Habits entries even inside
   assert.equal(result.completionRowsTouched, 2);
   assert.equal(h1Duplicate.points, 12);
   assert.equal(h2Duplicate.points, 5, 'the other Habits entry sharing duplicate id must remain byte-for-byte semantically unchanged');
+  const indexedRows = app.indexedDB.dump(DB_NAME).completions;
+  assert.deepEqual(plain(indexedRows.find((row) => row.id === 'dup').habitIds), ['h1', 'h2'],
+    'retroactive rewrite must preserve both Habit owners on a shared completion ID');
+  assert.deepEqual(plain(indexedRows.find((row) => row.id === 'h1-half').habitIds), ['h1']);
   assert.equal(half.points, 6);
   assert.equal(unrelated.points, 20);
   assert.equal((await app.api.verifyParity()).match, true);
