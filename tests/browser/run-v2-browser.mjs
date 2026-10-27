@@ -3385,6 +3385,138 @@ try {
       parity:adopted.parity.match};
   });
 
+
+  await run('explicit preview rollback checkpoint persists through two tabs and reload without restoring V1', async context => {
+    const page=await open(context);
+    const initial=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const original=localStorage.getItem('taskpoints_v1');
+      const baseline=await runtime.inspectLegacyRollbackSource();
+      const saved=await runtime.createPreviewRecoveryCheckpoint();
+      const inspection=await runtime.inspectPreviewRecoveryCheckpoint(saved.checkpointId);
+      return {original,baseline,saved,inspection};
+    });
+    assert.equal(initial.baseline.sourceStable,true);
+    assert.equal(initial.saved.saved,true,JSON.stringify(initial.saved));
+    assert.equal(initial.saved.verified,true);
+    assert.equal(initial.saved.sourceStable,true);
+    assert.equal(initial.saved.mutationAuthority,'legacy_only');
+    assert.equal(initial.inspection.intact,true,JSON.stringify(initial.inspection));
+    assert.equal(initial.inspection.integrityCoverage,'metadata_and_payload');
+    assert.match(initial.inspection.fingerprint,/^sha256:[a-f0-9]{64}:\d+$/);
+    const changed=await page.evaluate(()=>{
+      const original=JSON.parse(localStorage.getItem('taskpoints_v1'));
+      original.notes='SYNTHETIC EDIT AFTER CHECKPOINT';
+      localStorage.setItem('taskpoints_v1',JSON.stringify(original));
+      return localStorage.getItem('taskpoints_v1');
+    });
+    assert.notEqual(changed,initial.original);
+    await page.reload({waitUntil:'load'});
+    await page.waitForFunction(()=>Boolean(window.V2BrowserFixture?.status().runtime.installed));
+    const another=await open(context);
+    const observations=[];
+    for(const active of [page,another]){
+      const result=await active.evaluate(async id=>{
+        const runtime=window.TaskPointsStateRuntimeV2;
+        const inspected=await runtime.inspectPreviewRecoveryCheckpoint(id);
+        const rehearsal=await runtime.inspectPreviewRollbackPlan(id);
+        const recovered=await new Promise((resolve,reject)=>{
+          const request=indexedDB.open('taskpoints_v2_recovery_checkpoints_preview',1);
+          request.onsuccess=()=>resolve(request.result);
+          request.onerror=()=>reject(request.error);
+        });
+        const checkpoint=await new Promise((resolve,reject)=>{
+          const request=recovered.transaction('snapshots','readonly')
+            .objectStore('snapshots').get(id);
+          request.onsuccess=()=>resolve(request.result);
+          request.onerror=()=>reject(request.error);
+        });
+        recovered.close();
+        return {inspected,rehearsal,storedV1:checkpoint.entries
+          .find(entry=>entry[0]==='taskpoints_v1')?.[1],
+          currentV1:localStorage.getItem('taskpoints_v1'),
+          authority:runtime.getStatus().readAuthority};
+      },initial.saved.checkpointId);
+      observations.push(result);
+      assert.equal(result.inspected.intact,true);
+      assert.equal(result.inspected.integrityCoverage,'metadata_and_payload');
+      assert.equal(result.storedV1,initial.original,
+        'checkpoint must retain independent pre-edit V1 bytes');
+      assert.equal(result.currentV1,changed,
+        'startup/inspection/rehearsal must never auto-restore saved V1');
+      assert.equal(result.rehearsal.planValid,true,JSON.stringify(result.rehearsal));
+      assert.equal(result.rehearsal.canApply,false);
+      assert.equal(result.rehearsal.counts.replaceChanged>=1,true);
+      assert.ok(result.rehearsal.blockers.includes('production_writer_fencing_not_implemented'));
+      assert.equal(result.authority,'legacy_only');
+    }
+    return {durableCheckpoint:true,readbacks:observations.length,
+      checksumVerified:true,nonMutatingRehearsal:true,autoRestore:false};
+  });
+
+  await run('preview rollback checkpoint rejects tampered payload and capture metadata across reload', async context => {
+    const page=await open(context);
+    const originalV1=await page.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const created=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const first=await runtime.createPreviewRecoveryCheckpoint();
+      const second=await runtime.createPreviewRecoveryCheckpoint();
+      return {first,second};
+    });
+    for(const saved of [created.first,created.second]){
+      assert.equal(saved.saved,true,JSON.stringify(saved));
+      assert.equal(saved.verified,true);
+    }
+    const tampered=await page.evaluate(async ids=>{
+      const db=await new Promise((resolve,reject)=>{
+        const request=indexedDB.open('taskpoints_v2_recovery_checkpoints_preview',1);
+        request.onsuccess=()=>resolve(request.result);
+        request.onerror=()=>reject(request.error);
+      });
+      const tx=db.transaction('snapshots','readwrite');
+      const store=tx.objectStore('snapshots');
+      const read=id=>new Promise((resolve,reject)=>{
+        const request=store.get(id);
+        request.onsuccess=()=>resolve(request.result);
+        request.onerror=()=>reject(request.error);
+      });
+      const first=await read(ids[0]),second=await read(ids[1]);
+      first.entries=first.entries.map(entry=>entry[0]==='taskpoints_v1'
+        ? ['taskpoints_v1','{"notes":"CORRUPTED CHECKPOINT"}'] : entry);
+      second.capturedAtISO='1999-01-01T00:00:00.000Z';
+      store.put(first);
+      store.put(second);
+      await new Promise((resolve,reject)=>{
+        tx.oncomplete=resolve;
+        tx.onabort=()=>reject(tx.error||Error('checkpoint tamper transaction aborted'));
+        tx.onerror=()=>reject(tx.error||Error('checkpoint tamper failed'));
+      });
+      db.close();
+      return true;
+    },[created.first.checkpointId,created.second.checkpointId]);
+    assert.equal(tampered,true);
+    await page.reload({waitUntil:'load'});
+    await page.waitForFunction(()=>Boolean(window.V2BrowserFixture?.status().runtime.installed));
+    for(const saved of [created.first,created.second]){
+      const result=await page.evaluate(async id=>{
+        const runtime=window.TaskPointsStateRuntimeV2;
+        return {inspection:await runtime.inspectPreviewRecoveryCheckpoint(id),
+          plan:await runtime.inspectPreviewRollbackPlan(id),
+          legacy:localStorage.getItem('taskpoints_v1'),
+          authority:runtime.getStatus().readAuthority};
+      },saved.checkpointId);
+      assert.equal(result.inspection.intact,false);
+      assert.equal(result.inspection.reason,'checkpoint_integrity_failed');
+      assert.equal(result.plan.planValid,false);
+      assert.equal(result.plan.canApply,false);
+      assert.equal(result.plan.reason,'checkpoint_integrity_failed');
+      assert.equal(result.legacy,originalV1,'failed checksum must never touch V1');
+      assert.equal(result.authority,'legacy_only');
+    }
+    return {payloadCorruptionRejected:true,metadataCorruptionRejected:true,
+      reloadVerified:true,legacyUnchanged:true};
+  });
+
 } finally {
   await writeFile(join(artifacts,'results.json'),JSON.stringify({ failures, results },null,2));
   await browser.close();
