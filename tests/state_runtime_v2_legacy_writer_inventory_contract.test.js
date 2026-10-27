@@ -159,6 +159,16 @@ test('exclusive snapshot writer rehearsal stays developer-only and cannot change
     'currentGeneration({ create: false })',
     'darkMirrorModeEpoch',
     'assertPreviewGenerationCurrent',
+    'assertPreviewLegacySnapshotUnchanged',
+    'STATE_RUNTIME_V2_PREVIEW_SNAPSHOT_CHANGED',
+    'STATE_RUNTIME_V2_PREVIEW_SNAPSHOT_UNREADABLE',
+    'STATE_RUNTIME_V2_PREVIEW_SNAPSHOT_TOKEN_REQUIRED',
+    'STATE_RUNTIME_V2_PREVIEW_SNAPSHOT_GUARD_INACTIVE',
+    'serialized_operation_snapshot_changed',
+    'serialized_operation_snapshot_unreadable',
+    'serialized_operation_snapshot_token_required',
+    'callbackActive = false',
+    "storage.getItem(core.STORAGE_KEY || 'taskpoints_v1')",
     'await operation(previewGuard)',
     'serialized_operation_generation_invalidated',
     'serialized_snapshot_rehearsed',
@@ -172,6 +182,11 @@ test('exclusive snapshot writer rehearsal stays developer-only and cannot change
   assert.ok(runtime.includes('    exercisePreviewSerializedSnapshotLease,'),
     'Serialized prototype must be available only through an explicit preview call');
   assert.ok(!section.includes('canPromote: true'));
+  // The guard only compares the exact saved V1 snapshot. Journals and
+  // separately written keys require their own provenance/fence protocols.
+  assert.match(section, /actualRaw !== expectedRaw/);
+  assert.match(section, /if \(!callbackActive\)/);
+  assert.match(section, /callbackActive = true/);
   for(const file of [
     'index.html','today.html','settings.html','notes.html',
     'emergency_recovery.html','scoring_core.js','task_mutation_journal.js'
