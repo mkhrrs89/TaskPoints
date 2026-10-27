@@ -514,6 +514,69 @@ try {
       v1Unchanged:true,noAuthorityPromotion:true};
   });
 
+  await run('noncooperating browser tab changes unrelated V1 settings during writer lock preflight',async context=>{
+    const contender=await open(context),legacyTab=await open(context);
+    const initial=await contender.evaluate(()=>({
+      legacy:localStorage.getItem('taskpoints_v1'),
+      supported:typeof navigator.locks?.request==='function'
+    }));
+    if(!initial.supported){
+      const denied=await contender.evaluate(()=>
+        window.TaskPointsStateRuntimeV2.rehearseExclusiveWriterLease());
+      assert.equal(denied.reason,'lock_manager_unavailable');
+      assert.equal(denied.canPromote,false);
+      return {lockUnavailableSafely:true,authority:'legacy_only'};
+    }
+    const pending=contender.evaluate(async()=>{
+      const original=SubtleCrypto.prototype.digest;
+      let paused=false;
+      SubtleCrypto.prototype.digest=function(){
+        if(!paused){
+          paused=true;
+          const self=this,args=arguments;
+          localStorage.setItem('v2_browser_writer_preflight_paused','ready');
+          return new Promise((resolve,reject)=>{
+            window.__resumeV2WriterPreflight=()=>
+              Promise.resolve(original.apply(self,args)).then(resolve,reject);
+          });
+        }
+        return original.apply(this,arguments);
+      };
+      try{return await window.TaskPointsStateRuntimeV2.rehearseExclusiveWriterLease();}
+      finally{
+        SubtleCrypto.prototype.digest=original;
+        delete window.__resumeV2WriterPreflight;
+      }
+    });
+    await legacyTab.waitForFunction(()=>
+      localStorage.getItem('v2_browser_writer_preflight_paused')==='ready',
+      null,{timeout:12000});
+    // Deliberately change a V1-owned, non-pilot preference. The V2 Habit
+    // revision and parity stay unchanged, so the full namespace check is
+    // the safeguard that must reject this simulated authority handoff.
+    await legacyTab.evaluate(()=>
+      localStorage.setItem('taskpoints_legacy_settings_unfenced','changed by old tab'));
+    await contender.evaluate(()=>window.__resumeV2WriterPreflight());
+    const refused=await pending;
+    assert.equal(refused.lockAcquired,false,JSON.stringify(refused));
+    assert.equal(refused.reason,'legacy_changed_under_lock');
+    assert.equal(refused.canPromote,false);
+    assert.equal(refused.mutationAuthority,'legacy_only');
+    const retry=await contender.evaluate(async()=>{
+      const proof=await window.TaskPointsStateRuntimeV2.rehearseExclusiveWriterLease();
+      return {proof,legacy:localStorage.getItem('taskpoints_v1'),
+        preference:localStorage.getItem('taskpoints_legacy_settings_unfenced'),
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    });
+    assert.equal(retry.proof.lockAcquired,true,JSON.stringify(retry.proof));
+    assert.equal(retry.proof.canPromote,false);
+    assert.equal(retry.legacy,initial.legacy);
+    assert.equal(retry.preference,'changed by old tab');
+    assert.equal(retry.authority,'legacy_only');
+    return {unfencedLegacyWriteDetected:true,writerHandoffRefused:true,
+      stableRetrySafe:true,authority:'legacy_only'};
+  });
+
   await run('independent immutable SHA-256 checkpoint survives reload and detects tampering without restore',async context=>{
     const page=await open(context);
     const created=await page.evaluate(async()=>{
