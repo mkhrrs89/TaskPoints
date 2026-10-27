@@ -172,6 +172,15 @@ class FakeObjectStore {
       return key;
     });
   }
+  add(value) {
+    return this._request('add', (map) => {
+      if (!value || value.id == null) throw new Error(`fake_idb_missing_key:${this.name}`);
+      const key = String(value.id);
+      if (map.has(key)) throw new Error('ConstraintError: duplicate IndexedDB key');
+      map.set(key, clone(value));
+      return key;
+    });
+  }
 
   delete(key) {
     const normalized = String(key);
