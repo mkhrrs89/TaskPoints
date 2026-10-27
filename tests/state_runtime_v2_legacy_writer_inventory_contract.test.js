@@ -83,6 +83,14 @@ test('shared writer rehearsal cannot be mistaken for a production writer lease o
   assert.match(rehearsal, /allLegacyWritersKnown:\s*false/);
   assert.match(rehearsal, /canPromote:\s*false/);
   assert.doesNotMatch(rehearsal, /canPromote:\s*true\b/);
+  // Preview callback writers must be able to voluntarily recheck the
+  // generation after an await and before any fixture side effect. This
+  // reduces a TOCTOU window but does not fence legacy writers globally.
+  assert.match(rehearsal, /const assertPreviewGenerationCurrent = \(\) =>/);
+  assert.match(rehearsal, /STATE_RUNTIME_V2_PREVIEW_GENERATION_CHANGED/);
+  assert.match(rehearsal, /await operation\(previewGuard\)/);
+  assert.match(rehearsal, /cooperative_operation_generation_invalidated/);
+
   // Normal V1 writers do not yet participate in the prototype. Before any
   // handoff this must be replaced by actual writer fencing, not a test tweak.
   for (const file of [
