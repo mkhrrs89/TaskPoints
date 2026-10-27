@@ -439,4 +439,34 @@ Browser regressions involve actual `TaskPointsCore.journalTaskMutation()` and `T
 
 **Limits:** Primary journal equality is not an effective-state transaction. This guard does not cover V2's independent per-event Habit sidecars, nonpilot keys, pending background compaction, write-after-check races, older nonparticipating tabs, or physical Safari/PWA process termination. Two equal reads (or ABA changes) cannot grant an authority switch. Ordinary V1 writers remain unchanged and synchronous. Complete writer fencing and safe offline rollback are still mandatory blockers.
 
+### Independent Habit sidecar and verified-row cleanup rehearsal
+
+The explicit **preview-only** `exercisePreviewSerializedSnapshotLease()` now offers
+`assertPreviewHabitSidecarsUnchanged(expectedEntries)`, a strict, synchronous
+comparison of the `taskpoints_v2_habit_journal_event_v1:` localStorage key/value
+inventory captured before the exercise. The caller supplies a sorted list of
+`[key, rawValue]` pairs; missing, duplicate, unsorted or malformed tokens are
+rejected, and a denied key enumeration or value read fails closed. This guard
+also checks the preview generation and cannot be invoked outside an active
+exclusive-lock callback. It performs **no writes** and has no restore powers.
+
+Browser regressions intentionally distinguish the sidecar from the primary
+Habit journal and `taskpoints_v1`: (1) a second tab creates an independent,
+valid Habit event key while all three primary values remain unchanged;
+(2) the existing `clearCompactedHabitDeltas()` helper removes an already
+verified sidecar after its completion has been persisted in V1; and (3)
+malformed expected inventory or a blocked sidecar read is rejected. In each
+case the stale preview callback must refuse to certify a successful
+serialized operation; surviving events and verified V1 completions must
+remain intact.
+
+**No production fence is implied.** The array is an observational token,
+not an atomic snapshot. A nonparticipant can create, delete or recreate a
+sidecar between the test's observations, and a compaction process can change
+both journals and snapshots independently. The method does not wrap real
+Habit writes, grant a migration lease, guarantee timely WebKit localStorage
+visibility, or verify background OS/PWA termination. Safe future cutover
+still requires a transactional authority generation, complete writer
+coverage, recovery and real-device validation.
+
 **Cutover remains prohibited.** Before a production lease can replace this prototype: audit and integrate every V1 writer with abort/fencing semantics, preserve urgent writes and crash-recovery behavior, verify an off-device rollback source, migrate all nonpilot collections, and run full physical Safari/PWA lifecycle testing. This test API must never be mistaken for production writer fencing.
