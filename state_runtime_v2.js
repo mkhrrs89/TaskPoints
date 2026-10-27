@@ -3360,12 +3360,21 @@
     return entries;
   }
 
-  function previewRecoveryFingerprint(entries) {
-    const bytes = JSON.stringify(entries);
-    return `${fnv1a(bytes)}:${bytes.length}`;
+  async function previewRecoveryFingerprint(entries) {
+    // The preview checkpoint must be cryptographically checked against
+    // accidental and adversarial content alteration. Never weaken to an
+    // unchecked or 32-bit fallback when WebCrypto is unavailable.
+    if (typeof global.crypto?.subtle?.digest !== 'function'
+      || typeof global.TextEncoder !== 'function')
+      throw Error('preview_recovery_sha256_unavailable');
+    const bytes = new global.TextEncoder().encode(JSON.stringify(entries));
+    const digest = await global.crypto.subtle.digest('SHA-256', bytes);
+    const hex = Array.from(new Uint8Array(digest),
+      byte => byte.toString(16).padStart(2, '0')).join('');
+    return `sha256:${hex}:${bytes.byteLength}`;
   }
 
-  function validPreviewRecoveryRecord(record) {
+  async function validPreviewRecoveryRecord(record) {
     if (!record || record.schemaVersion !== PREVIEW_RECOVERY_SCHEMA
       || !Array.isArray(record.entries) || !record.entries.length
       || typeof record.id !== 'string' || !record.id.startsWith('v1-preview:')
@@ -3382,7 +3391,7 @@
       if (entry[0] === (core.STORAGE_KEY || 'taskpoints_v1')) hasLegacy = true;
       previous = entry[0];
     }
-    return hasLegacy && previewRecoveryFingerprint(record.entries) === record.fingerprint;
+    return hasLegacy && (await previewRecoveryFingerprint(record.entries)) === record.fingerprint;
   }
 
   async function openPreviewRecoveryDb() {
@@ -3416,9 +3425,9 @@
     });
   }
 
-  // Returns metadata only: never the captured personal data. The digest is a
-  // checksum for accidental corruption, NOT a cryptographic authenticity
-  // signature and NOT sufficient grounds to promote V2 mutation authority.
+  // Returns metadata only: never the captured personal data. The SHA-256
+  // digest verifies byte integrity, but is not a keyed authenticity proof
+  // or evidence sufficient to promote V2 mutation authority.
   async function inspectPreviewRecoveryCheckpoint(idInput) {
     const id = String(idInput || '');
     const refuse = reason => ({
@@ -3432,7 +3441,7 @@
       const tx = db.transaction(PREVIEW_RECOVERY_STORE, 'readonly');
       const record = await requestPromise(tx.objectStore(PREVIEW_RECOVERY_STORE).get(id));
       if (!record) return refuse('checkpoint_missing');
-      if (!validPreviewRecoveryRecord(record)) return refuse('checkpoint_integrity_failed');
+      if (!await validPreviewRecoveryRecord(record)) return refuse('checkpoint_integrity_failed');
       return {
         checked: true, intact: true, reason: 'checkpoint_intact',
         checkpointId: id, canAutoRestore: false,
@@ -3467,7 +3476,7 @@
       const record = {
         id, schemaVersion: PREVIEW_RECOVERY_SCHEMA,
         capturedAtISO: nowIso(), generation, entries,
-        fingerprint: previewRecoveryFingerprint(entries)
+        fingerprint: await previewRecoveryFingerprint(entries)
       };
       db = await openPreviewRecoveryDb();
       const tx = db.transaction(PREVIEW_RECOVERY_STORE, 'readwrite');
@@ -3482,7 +3491,7 @@
       const after = await inspectLegacyRollbackSource();
       let sameInventory = false;
       try {
-        sameInventory = previewRecoveryFingerprint(captureLegacyNamespace()) === record.fingerprint;
+        sameInventory = await previewRecoveryFingerprint(captureLegacyNamespace()) === record.fingerprint;
       } catch (_) {}
       const stillCurrent = after.sourceStable && after.generation === generation && sameInventory;
       return {
