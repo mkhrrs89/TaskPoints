@@ -1526,3 +1526,49 @@ test('legacy rollback-source audit remains read-only, reports complete V1 scope 
   assert.equal(app.localStorage.getItem(LEGACY_KEY),raw);
   assert.deepEqual(app.indexedDB.dump(DB_NAME),mirror);
 });
+
+test('legacy rollback-source audit refuses inaccessible and changed Habit-order overlay evidence',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const source=app.localStorage.getItem(LEGACY_KEY);
+  const mirror=structuredClone(app.indexedDB.dump(DB_NAME));
+  const key='taskpoints_habit_order_overlay_v1';
+  const originalGet=app.localStorage.getItem.bind(app.localStorage);
+  app.localStorage.getItem=value=>{
+    if(String(value)===key)throw Error('overlay inaccessible in suspended tab');
+    return originalGet(value);
+  };
+  const unreadable=await app.runtime.inspectLegacyRollbackSource();
+  app.localStorage.getItem=originalGet;
+  assert.equal(unreadable.sourceStable,false);
+  assert.equal(unreadable.reason,'legacy_inventory_unreadable');
+  app.localStorage.setItem(key,JSON.stringify({orders:{h1:1}}));
+  let requested=0;
+  app.localStorage.getItem=value=>{
+    if(String(value)===key && requested++===1)
+      app.localStorage.setItem(key,JSON.stringify({orders:{h1:2}}));
+    return originalGet(value);
+  };
+  const changed=await app.runtime.inspectLegacyRollbackSource();
+  app.localStorage.getItem=originalGet;
+  assert.equal(changed.sourceStable,false);
+  assert.equal(changed.reason,'legacy_changed_during_inventory');
+  assert.equal(changed.checkpointExists,false);
+  assert.equal(app.localStorage.getItem(LEGACY_KEY),source);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME),mirror);
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
+
+test('writer-lock rehearsal rejects a pending WAL before requesting exclusivity',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  let requested=0;
+  app.context.navigator={locks:{request:async()=>{requested++;throw Error('must not acquire')}}};
+  const pending=app.wal.appendHabitDelta(delta());
+  const report=await app.runtime.rehearseExclusiveWriterLease();
+  assert.equal(report.lockAcquired,false);
+  assert.equal(report.reason,'pilot_not_consistent');
+  assert.equal(requested,0);
+  assert.equal(app.wal.getPendingRows().rows[0].id,pending.mutationId);
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
