@@ -101,3 +101,33 @@ test('shared writer rehearsal cannot be mistaken for a production writer lease o
       file + ' began calling the prototype: perform a full writer/rollback safety review.');
   }
 });
+
+test('full cutover inventory is read-only, hard-blocked, and observes legacy nonpilot races', () => {
+  const runtime = read('state_runtime_v2.js');
+  const first = runtime.indexOf('  async function inspectAuthorityCutoverBarriers()');
+  const last = runtime.indexOf('  // Explicit forensic inspection', first);
+  assert.ok(first > 0 && last > first, 'Cutover inspection API missing');
+  const report = runtime.slice(first,last);
+  for (const protection of [
+    'allLegacyWritersFenced: false',
+    'allAuthoritativeCollectionsMigrated: false',
+    'independentOffDeviceRollbackVerified: false',
+    'physicalSafariPwaLifecycleValidated: false',
+    'productionMultiContextHandoffValidated: false',
+    "canPromote: false",
+    "mutationAuthority: 'legacy_only'",
+    "readAuthority: 'legacy_only'",
+    'legacyNamespaceBefore = stableJson(captureLegacyNamespace())',
+    'legacyNamespaceAfter = stableJson(captureLegacyNamespace())',
+    'stableJson(pilot) !== stableJson(pilotAfter)',
+    'stableJson(rollback) !== stableJson(rollbackAfter)'
+  ]) {
+    assert.ok(report.includes(protection), 'Missing mandatory non-promotable V2 barrier: '+protection);
+  }
+  assert.ok(runtime.includes('    inspectAuthorityCutoverBarriers,'),
+    'Full cutover barrier inspection must remain available in the preview API');
+  assert.ok(!report.includes('enableDarkMirror('));
+  assert.ok(!report.includes('createPreviewRecoveryCheckpoint('));
+  assert.ok(!report.includes('safeReplaceTaskPointsStorage('));
+  assert.ok(!report.includes('seedFromLegacy('));
+});
