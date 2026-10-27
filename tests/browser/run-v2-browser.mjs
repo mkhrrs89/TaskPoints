@@ -584,6 +584,58 @@ try {
       noProductionAuthorityChange:true};
   });
 
+  await run('releases a preview cooperative lock after its holder tab closes',async context=>{
+    const holder=await open(context),observer=await open(context);
+    const supported=await observer.evaluate(()=>
+      typeof navigator.locks?.request==='function');
+    if(!supported){
+      const refusal=await observer.evaluate(()=>
+        window.TaskPointsStateRuntimeV2.exercisePreviewCooperativeWriterLease(()=>{}));
+      assert.equal(refusal.reason,'lock_manager_unavailable');
+      assert.equal(refusal.canPromote,false);
+      return {unsupportedFailClosed:true,authorityUnchanged:true};
+    }
+    const originalV1=await observer.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    // Simulate a browser tab disappearing with an unfinished cooperative
+    // operation. This tests document teardown, not a physical OS/PWA kill.
+    const pending=holder.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.exercisePreviewCooperativeWriterLease(
+        async()=>{
+          localStorage.setItem('v2_closing_writer_lock_held','ready');
+          await new Promise(()=>{});
+        })).catch(error=>String(error.message||error));
+    await observer.waitForFunction(()=>
+      localStorage.getItem('v2_closing_writer_lock_held')==='ready',
+      null,{timeout:12000});
+    const blocked=await observer.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.rehearseExclusiveWriterLease());
+    assert.equal(blocked.lockAcquired,false,JSON.stringify(blocked));
+    assert.equal(blocked.reason,'lock_held_elsewhere');
+    assert.equal(blocked.canPromote,false);
+    await holder.close({runBeforeUnload:false});
+    await pending; // A closed page may reject its outstanding evaluate promise.
+    // Real browser lock ownership must end with the closed document, not
+    // depend on a callback/finally running in the destroyed page.
+    await observer.waitForFunction(async()=>{
+      const proof=await window.TaskPointsStateRuntimeV2.rehearseExclusiveWriterLease();
+      window.__postClosingWriterProof=proof;
+      return proof.lockAcquired===true;
+    },null,{timeout:12000,polling:100});
+    const after=await observer.evaluate(()=>({
+      proof:window.__postClosingWriterProof,
+      v1:localStorage.getItem('taskpoints_v1'),
+      authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority
+    }));
+    assert.equal(after.proof.lockHeldAfterReturn,false);
+    assert.equal(after.proof.canPromote,false);
+    assert.equal(after.proof.productionWritersFenced,false);
+    assert.equal(after.proof.allLegacyWritersKnown,false);
+    assert.equal(after.v1,originalV1);
+    assert.equal(after.authority,'legacy_only');
+    return {tabCloseReleasesSharedLock:true,exclusiveRehearsalRecovered:true,
+      v1Unchanged:true,authorityUnchanged:true,physicalPwaKillStillRequired:true};
+  });
+
   await run('exclusive rehearsal blocks a new cooperative writer and releases after callback failure',async context=>{
     const first=await open(context),second=await open(context);
     const supported=await first.evaluate(()=>
