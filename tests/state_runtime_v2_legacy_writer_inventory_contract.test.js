@@ -208,7 +208,7 @@ test('exclusive snapshot writer rehearsal stays developer-only and cannot change
   assert.match(section, /if \(!callbackActive\)/);
   assert.match(section, /taskRaw !== expected\.taskJournalRaw/);
   assert.match(section, /habitRaw !== expected\.habitJournalRaw/);
-  assert.match(section, /function_missing_preview_sidecar_noop|const readPreviewHabitSidecarInventory/);
+  assert.match(section, /const readPreviewHabitSidecarInventory = \(\) =>/);
   assert.match(section, /key\.startsWith\(sidecarPrefix\)/);
   assert.match(section, /storage\.key\(index\)/);
   assert.match(section, /storage\.getItem\(key\)/);
