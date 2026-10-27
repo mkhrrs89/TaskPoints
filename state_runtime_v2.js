@@ -3275,6 +3275,70 @@
     }
   }
 
+  // Explicit forensic inspection of an unexplained same-generation V1/V2
+  // mismatch. Unlike verifyParity(), this never calls seedFromLegacy(), does
+  // not refresh metadata, and cannot clear or reconcile either copy. A V2
+  // database must already be open: diagnosing an absent mirror must not
+  // create a database as a side effect of inspection.
+  async function inspectPreservedParityMismatch() {
+    const refuse = reason => ({
+      checked: true, stable: false, mismatch: null,
+      reason, canRepair: false, evidencePreserved: true,
+      mutationAuthority: 'legacy_only', readAuthority: 'legacy_only'
+    });
+    if (!isDarkEnabled()) return refuse('dark_disabled');
+    if (!dbPromise) return refuse('v2_not_open');
+    try {
+      const firstAudit = await inspectLegacyRollbackSource();
+      if (!firstAudit.sourceStable)
+        return refuse('legacy_source_' + firstAudit.reason);
+      const beforeNamespace = captureLegacyNamespace();
+      const beforeSource = parseLegacyStateWithPending();
+      if (beforeSource.missing) return refuse('legacy_unavailable');
+      const generation = currentGeneration({ create: false });
+      if (!generation || generation !== firstAudit.generation)
+        return refuse('generation_changed_during_inspection');
+      const db = await dbPromise;
+      if (!db) return refuse('v2_unavailable');
+      const metaBefore = await readMeta(db);
+      if (!metaBefore || metaBefore.schemaVersion !== SCHEMA_VERSION
+        || metaBefore.legacyMissing === true
+        || metaBefore.resetGeneration !== generation)
+        return refuse('v2_generation_not_current');
+      const collections = await readV2CollectionsFromDb(db);
+      const metaAfter = await readMeta(db);
+      const afterAudit = await inspectLegacyRollbackSource();
+      if (!afterAudit.sourceStable
+        || afterAudit.generation !== generation
+        || currentGeneration({ create: false }) !== generation
+        || stableJson(metaAfter) !== stableJson(metaBefore)
+        || stableJson(captureLegacyNamespace()) !== stableJson(beforeNamespace))
+        return refuse('inspection_window_changed');
+      const expected = stableJson(paritySubset(sourceSubset(beforeSource.state)));
+      const actual = stableJson(paritySubset(collections));
+      if (expected === actual) {
+        return {
+          checked: true, stable: true, mismatch: false,
+          reason: 'pilot_parity_matched', canRepair: false,
+          evidencePreserved: true, resetGeneration: generation,
+          revision: Number(metaAfter.revision || 0),
+          mutationAuthority: 'legacy_only', readAuthority: 'legacy_only'
+        };
+      }
+      const evidence = summarizeBlockedSeedMismatch(
+        beforeSource.state, collections, metaAfter, generation);
+      return {
+        checked: true, stable: true, mismatch: true,
+        reason: 'same_generation_parity_mismatch_preserved',
+        canRepair: false, evidencePreserved: true,
+        mutationAuthority: 'legacy_only', readAuthority: 'legacy_only',
+        evidence
+      };
+    } catch (_) {
+      return refuse('inspection_unreadable');
+    }
+  }
+
   // Read-only rollback *source* inventory. It is not a checkpoint or a
   // restore method: the existing V1 record remains the only authority. A
   // future cutover must provide an independently durable rollback checkpoint.
@@ -3969,6 +4033,7 @@
     inspectPilotReadiness,
     inspectPilotCompletionIndexCoverage,
     inspectMutationHandoffPrerequisites,
+    inspectPreservedParityMismatch,
     inspectLegacyRollbackSource,
     createPreviewRecoveryCheckpoint,
     inspectPreviewRecoveryCheckpoint,
