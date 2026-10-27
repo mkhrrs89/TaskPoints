@@ -1697,6 +1697,35 @@ test('writer rehearsal refuses a lost legacy inventory read after SHA-256 resolv
   assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
 });
 
+test('writer rehearsal refuses preview off-on cycle while an in-lock digest is pending',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const legacy=app.localStorage.getItem(LEGACY_KEY);
+  const originalDigest=app.context.crypto.subtle.digest;
+  let calls=0;
+  app.context.navigator={locks:{request:async(name,options,callback)=>
+    callback({name,mode:options.mode})}};
+  app.context.crypto.subtle.digest=async function(type,bytes){
+    calls++;
+    if(calls===2){
+      await Promise.resolve();
+      app.runtime.disableDarkMirror();
+      app.runtime.enableDarkMirror();
+    }
+    return originalDigest.call(this,type,bytes);
+  };
+  let refused;
+  try { refused=await app.runtime.rehearseExclusiveWriterLease(); }
+  finally { app.context.crypto.subtle.digest=originalDigest; }
+  assert.equal(calls,2);
+  assert.equal(refused.lockAcquired,false,JSON.stringify(refused));
+  assert.equal(refused.reason,'dark_mode_changed_during_lock_verification');
+  assert.equal(refused.canPromote,false);
+  assert.equal(app.localStorage.getItem(LEGACY_KEY),legacy);
+  assert.equal(app.runtime.isDarkEnabled(),true);
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
+
 test('legacy rollback-source audit remains read-only, reports complete V1 scope and refuses WAL denial',async()=>{
   const app=install({initialState:{...legacyState(),
     completions:[{id:'task-one',source:'task',points:1},{id:'task-two',source:'task',points:2}]}});
