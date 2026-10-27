@@ -8,6 +8,9 @@
   const DB_VERSION = 2;
   const COMPLETION_HABIT_INDEX = 'by_habit_ids';
   const EXCLUSIVE_WRITER_REHEARSAL_LOCK = 'taskpoints_v2_writer_handoff_rehearsal_v1';
+  const PREVIEW_RECOVERY_DB = 'taskpoints_v2_recovery_checkpoints_preview';
+  const PREVIEW_RECOVERY_STORE = 'snapshots';
+  const PREVIEW_RECOVERY_SCHEMA = 1;
   const DARK_MODE_KEY = 'taskpoints_state_v2_dark_mode_v1';
   const WAL_TEST_ACTIVE_GLOBAL = '__taskpointsStateV2WalKillHoldV1';
   const GENERATION_KEY = 'taskpoints_state_v2_generation_v1';
@@ -3325,6 +3328,175 @@
     } catch (_) { return fail('legacy_inventory_unreadable'); }
   }
 
+  // Explicit, immutable, preview-only copies of the existing V1 namespace.
+  // This database is deliberately SEPARATE from V2's live mirror and from
+  // V1 localStorage. Nothing writes here during startup, seeding, or ordinary
+  // Habit edits. No restore or authority-switch operation is provided.
+  function captureLegacyNamespace() {
+    const storage = global.localStorage;
+    if (!storage || typeof storage.length !== 'number'
+      || typeof storage.key !== 'function' || typeof storage.getItem !== 'function')
+      throw Error('preview_recovery_storage_not_enumerable');
+    const startingLength = storage.length;
+    const keys = [];
+    const seen = new Set();
+    for (let i = 0; i < startingLength; i += 1) {
+      const key = storage.key(i);
+      if (typeof key !== 'string' || seen.has(key))
+        throw Error('preview_recovery_storage_inventory_changed');
+      seen.add(key);
+      if (key.toLowerCase().startsWith('taskpoints_')) keys.push(key);
+    }
+    if (storage.length !== startingLength) throw Error('preview_recovery_storage_inventory_changed');
+    if (!seen.has(core.STORAGE_KEY || 'taskpoints_v1'))
+      throw Error('preview_recovery_legacy_missing');
+    keys.sort();
+    const entries = keys.map(key => {
+      const value = storage.getItem(key);
+      if (typeof value !== 'string') throw Error('preview_recovery_key_unreadable');
+      return [key, value];
+    });
+    if (storage.length !== startingLength) throw Error('preview_recovery_storage_inventory_changed');
+    return entries;
+  }
+
+  function previewRecoveryFingerprint(entries) {
+    const bytes = JSON.stringify(entries);
+    return `${fnv1a(bytes)}:${bytes.length}`;
+  }
+
+  function validPreviewRecoveryRecord(record) {
+    if (!record || record.schemaVersion !== PREVIEW_RECOVERY_SCHEMA
+      || !Array.isArray(record.entries) || !record.entries.length
+      || typeof record.id !== 'string' || !record.id.startsWith('v1-preview:')
+      || typeof record.generation !== 'string' || !record.generation
+      || typeof record.fingerprint !== 'string')
+      return false;
+    let previous = null;
+    let hasLegacy = false;
+    for (const entry of record.entries) {
+      if (!Array.isArray(entry) || entry.length !== 2
+        || typeof entry[0] !== 'string' || typeof entry[1] !== 'string'
+        || !entry[0].toLowerCase().startsWith('taskpoints_')
+        || (previous !== null && previous >= entry[0])) return false;
+      if (entry[0] === (core.STORAGE_KEY || 'taskpoints_v1')) hasLegacy = true;
+      previous = entry[0];
+    }
+    return hasLegacy && previewRecoveryFingerprint(record.entries) === record.fingerprint;
+  }
+
+  async function openPreviewRecoveryDb() {
+    if (typeof global.indexedDB?.open !== 'function')
+      throw Error('preview_recovery_indexeddb_unavailable');
+    return new Promise((resolve, reject) => {
+      const req = global.indexedDB.open(PREVIEW_RECOVERY_DB, PREVIEW_RECOVERY_SCHEMA);
+      let settled = false;
+      const fail = error => {
+        if (settled) return;
+        settled = true;
+        reject(error || Error('preview_recovery_db_open_failed'));
+      };
+      req.onupgradeneeded = () => {
+        try {
+          const db = req.result;
+          if (!db.objectStoreNames.contains(PREVIEW_RECOVERY_STORE))
+            db.createObjectStore(PREVIEW_RECOVERY_STORE, { keyPath: 'id' });
+        } catch (error) {
+          try { req.transaction?.abort(); } catch (_) {}
+          fail(error);
+        }
+      };
+      req.onsuccess = () => {
+        if (settled) { try { req.result?.close(); } catch (_) {} return; }
+        settled = true;
+        resolve(req.result);
+      };
+      req.onerror = () => fail(req.error);
+      req.onblocked = () => fail(Error('preview_recovery_db_blocked'));
+    });
+  }
+
+  // Returns metadata only: never the captured personal data. The digest is a
+  // checksum for accidental corruption, NOT a cryptographic authenticity
+  // signature and NOT sufficient grounds to promote V2 mutation authority.
+  async function inspectPreviewRecoveryCheckpoint(idInput) {
+    const id = String(idInput || '');
+    const refuse = reason => ({
+      checked: true, intact: false, reason, checkpointId: id || null,
+      canAutoRestore: false, mutationAuthority: 'legacy_only'
+    });
+    if (!id.startsWith('v1-preview:')) return refuse('checkpoint_id_required');
+    let db;
+    try {
+      db = await openPreviewRecoveryDb();
+      const tx = db.transaction(PREVIEW_RECOVERY_STORE, 'readonly');
+      const record = await requestPromise(tx.objectStore(PREVIEW_RECOVERY_STORE).get(id));
+      if (!record) return refuse('checkpoint_missing');
+      if (!validPreviewRecoveryRecord(record)) return refuse('checkpoint_integrity_failed');
+      return {
+        checked: true, intact: true, reason: 'checkpoint_intact',
+        checkpointId: id, canAutoRestore: false,
+        mutationAuthority: 'legacy_only', readAuthority: 'legacy_only',
+        capturedGeneration: record.generation, capturedAtISO: record.capturedAtISO,
+        keyCount: record.entries.length,
+        fingerprint: record.fingerprint
+      };
+    } catch (_) { return refuse('checkpoint_unreadable'); }
+    finally { try { db?.close(); } catch (_) {} }
+  }
+
+  // Explicit only. Atomic IndexedDB add keeps any previously saved copy
+  // immutable; a failed write cannot replace another checkpoint. Evidence
+  // stays separate from the V2 mirror (which may be reseeded), and no copy
+  // is automatically restored into V1.
+  async function createPreviewRecoveryCheckpoint() {
+    const fail = (reason, extras = {}) => ({
+      checked: true, saved: false, sourceStable: false,
+      canAutoRestore: false, reason,
+      mutationAuthority: 'legacy_only', readAuthority: 'legacy_only', ...extras
+    });
+    const source = await inspectLegacyRollbackSource();
+    if (!source.sourceStable) return fail('legacy_source_' + source.reason);
+    let db;
+    try {
+      const entries = captureLegacyNamespace();
+      const generation = currentGeneration({ create: false });
+      if (!generation || generation !== source.generation)
+        return fail('generation_changed_before_capture');
+      const id = `v1-preview:${global.crypto?.randomUUID?.() || `${Date.now()}:${Math.random().toString(36).slice(2)}`}`;
+      const record = {
+        id, schemaVersion: PREVIEW_RECOVERY_SCHEMA,
+        capturedAtISO: nowIso(), generation, entries,
+        fingerprint: previewRecoveryFingerprint(entries)
+      };
+      db = await openPreviewRecoveryDb();
+      const tx = db.transaction(PREVIEW_RECOVERY_STORE, 'readwrite');
+      const completion = transactionPromise(tx);
+      const writing = requestPromise(tx.objectStore(PREVIEW_RECOVERY_STORE).add(record));
+      await Promise.all([writing, completion]);
+      db.close();
+      db = null;
+      const stored = await inspectPreviewRecoveryCheckpoint(id);
+      if (!stored.intact || stored.fingerprint !== record.fingerprint)
+        return fail('checkpoint_readback_failed', { checkpointId: id });
+      const after = await inspectLegacyRollbackSource();
+      let sameInventory = false;
+      try {
+        sameInventory = previewRecoveryFingerprint(captureLegacyNamespace()) === record.fingerprint;
+      } catch (_) {}
+      const stillCurrent = after.sourceStable && after.generation === generation && sameInventory;
+      return {
+        checked: true, saved: true, verified: true,
+        sourceStable: stillCurrent,
+        reason: stillCurrent ? 'checkpoint_saved_and_current' : 'checkpoint_saved_but_source_changed',
+        checkpointId: id, keyCount: entries.length,
+        canAutoRestore: false,
+        mutationAuthority: 'legacy_only', readAuthority: 'legacy_only'
+      };
+    } catch (_) { return fail('checkpoint_write_failed'); }
+    finally { try { db?.close(); } catch (_) {} }
+  }
+
   // Browser-native exclusive-lock *rehearsal*, never a writer handoff.
   // Browser LockManager is shared by same-origin tabs and serializes callbacks
   // without vulnerable localStorage time-based leases. No fallback assumes
@@ -3644,6 +3816,8 @@
     inspectPilotCompletionIndexCoverage,
     inspectMutationHandoffPrerequisites,
     inspectLegacyRollbackSource,
+    createPreviewRecoveryCheckpoint,
+    inspectPreviewRecoveryCheckpoint,
     rehearseExclusiveWriterLease,
     readPilotHabitCandidate,
     setPilotReadProbeEnabled,
