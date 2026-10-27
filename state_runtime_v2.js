@@ -3491,6 +3491,12 @@
     try {
       const verdict = await inspectPreviewRecoveryCheckpoint(id);
       if (!verdict.intact) return refused(verdict.reason);
+      // Historical payload-only records remain inspectable, but their
+      // capture generation and timestamp were never cryptographically bound
+      // to the payload. A mutation-authority rollback rehearsal must never
+      // classify that provenance as an authenticated recovery source.
+      if (verdict.integrityCoverage !== 'metadata_and_payload')
+        return refused('checkpoint_provenance_unverified');
       const before = await inspectLegacyRollbackSource();
       if (!before.sourceStable) return refused('legacy_source_' + before.reason);
       const currentBefore = captureLegacyNamespace();
