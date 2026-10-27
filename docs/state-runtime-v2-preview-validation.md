@@ -323,3 +323,23 @@ V2 now exposes `inspectPreviewWriterPeers()` to perform a short, voluntary Broad
 The report deliberately includes `allLegacyWritersKnown:false`, `productionWritersFenced:false`, and `canPromote:false` **in every outcome**, including when all observed peers responded and Web Locks are supported. An unresponsive, background-suspended, pre-V2, or legacy-only tab can still write without ever answering the challenge. Receiving zero answers never proves there are no other tabs. Absent BroadcastChannel support or a changed generation/preview mode gives a nonpromotable failure/limited result.
 
 Node contracts simulate participating peers (including one without Web Locks) and verify no storage modifications. Actual Chromium/WebKit browser checks use two V2-preview tabs plus a third legacy-only page which writes an unrelated V1 key without responding; the report still refuses to certify complete writer coverage. This is protocol scaffolding, **not a production handoff**. A future stage must gate *all* V1 mutation entry points on a real cross-tab writer lease and test stale tokens, suspended tabs, imports, WAL, compaction, and crash recovery before any authority switch.
+
+
+## October 27 — Cooperative shared writer-lock prototype (developer-only)
+
+V2 now has `exercisePreviewCooperativeWriterLease(operation)`, an **explicit developer-only** rehearsal restricted to localhost and approved branch-preview hosts. It requests a **shared Web Lock** under the same resource name that `rehearseExclusiveWriterLease()` requests exclusively. Multiple voluntary cooperative operations may coexist, while a pending exclusive handoff proof must refuse a busy lock. Conversely, an existing exclusive lock denies new cooperative operations. The lock is released as soon as the callback finishes or fails.
+
+The method does **not** install itself on Home, normal V1 saves, imports, journal compaction, notes, or settings. It cannot select V2 reads/writes, issue a durable authority token, pause an unfenced legacy tab, or promote V2. Every result keeps `productionWritersFenced:false`, `allLegacyWritersKnown:false`, and `canPromote:false`. An operation that throws is reported as failed; the failure does not claim to undo side effects already performed by that operation. A generation or preview-mode change during the callback invalidates its rehearsal result.
+
+The concrete existing legacy write-entry inventory includes:
+
+- `scoring_core.js` `writePendingHabitDelta()` writes the V1 journal and independent V2-preview event sidecar keys.
+- `scoring_core.js` `saveStateSnapshot()`, `saveValidatedSnapshot()` and `safeReplaceTaskPointsStorage()` write full snapshots, including recovery, import and replacement paths.
+- `task_mutation_journal.js` wraps `saveStateSnapshot()` for Tasks, SCWM and protection against stale Home saves.
+- `state_runtime_v2_wal_bridge.js` wraps snapshot replacement/restore generation transitions.
+- Standalone notes/preferences, emergency storage and other `localStorage` writers must also be inventoried. A wrapper around **only** the above methods would not fence every legacy write.
+- Older currently open tabs remain outside any newly added locking protocol until explicitly verified to have reloaded and opted in. Browser Locks alone cannot retroactively fence them.
+
+Node contracts test callback rejection, absent Web Locks, preview-host restrictions, operation failure, and preview off/on invalidation. Chromium/WebKit scenarios exercise two simultaneous shared operations, exclusive-versus-shared contention in both directions, lock release following a failed callback, and a silent legacy-only page continuing to write without the new lock.
+
+**Cutover remains prohibited.** Before a production lease can replace this prototype: audit and integrate every V1 writer with abort/fencing semantics, preserve urgent writes and crash-recovery behavior, verify an off-device rollback source, migrate all nonpilot collections, and run full physical Safari/PWA lifecycle testing. This test API must never be mistaken for production writer fencing.
