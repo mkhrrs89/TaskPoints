@@ -3283,6 +3283,13 @@
       const first = parseLegacyStateWithPending();
       if (first.missing) return fail('legacy_unavailable');
       const firstRaw = first.raw;
+      // The Habit order overlay is also V1-authoritative until compaction.
+      // Check it through a strict read: an optional safeGet() fallback to
+      // null would incorrectly classify denied storage as an empty overlay.
+      const legacyStorage = global.localStorage;
+      if (typeof legacyStorage?.getItem !== 'function')
+        return fail('legacy_inventory_unreadable');
+      const firstOrderOverlay = legacyStorage.getItem('taskpoints_habit_order_overlay_v1');
       const firstFingerprint = stableJson(paritySubset(sourceSubset(first.state)));
       const wal = global.TaskPointsStateRuntimeV2Wal;
       const beforeWal = wal?.getPendingRows?.();
@@ -3299,6 +3306,7 @@
       const afterWal = wal?.getPendingRows?.();
       const afterJournal = core.readPendingHabitDeltas?.();
       if (second.missing || second.raw !== firstRaw
+        || legacyStorage.getItem('taskpoints_habit_order_overlay_v1') !== firstOrderOverlay
         || stableJson(paritySubset(sourceSubset(second.state))) !== firstFingerprint
         || stableJson(afterJournal) !== journalFingerprint
         || stableJson(afterWal) !== stableJson(beforeWal)
