@@ -1652,6 +1652,26 @@ try {
         ['meta','habits','completions','mutations'].map(read));
       return {meta,habits,completions,mutations};
     });
+    // A WebKit document may see a newly written V1 value before all
+    // asynchronous forensic observation boundaries settle. Refusals must
+    // remain non-destructive; retry only this explicitly expected transient
+    // reason, never an unrelated integrity or generation failure.
+    const inspectStable=async expectedV1=>{
+      let proof;
+      for(let attempt=0;attempt<5;attempt++){
+        await observer.waitForFunction(raw=>
+          localStorage.getItem('taskpoints_v1')===raw,
+          expectedV1,{timeout:12000});
+        proof=await observer.evaluate(()=>
+          window.TaskPointsStateRuntimeV2.inspectPreservedParityMismatch());
+        if(proof.stable===true)return proof;
+        assert.equal(proof.reason,'inspection_window_changed',JSON.stringify(proof));
+        assert.equal(proof.canRepair,false);
+        assert.equal(proof.evidencePreserved,true);
+        assert.equal(proof.readAuthority,'legacy_only');
+      }
+      return proof;
+    };
     const baseline=await observer.evaluate(async()=>({
       report:await window.TaskPointsStateRuntimeV2.inspectPreservedParityMismatch(),
       originalV1:localStorage.getItem('taskpoints_v1')
@@ -1666,8 +1686,7 @@ try {
       return localStorage.getItem('taskpoints_v1');
     });
     assert.notEqual(newer,baseline.originalV1);
-    const report=await observer.evaluate(async()=>
-      window.TaskPointsStateRuntimeV2.inspectPreservedParityMismatch());
+    const report=await inspectStable(newer);
     assert.equal(report.stable,true,JSON.stringify(report));
     assert.equal(report.mismatch,true);
     assert.equal(report.evidencePreserved,true);
@@ -1679,8 +1698,7 @@ try {
     assert.deepEqual(await readMirror(observer),originalMirror,
       'inspection must leave all V2 stores and mutation ledger untouched');
     await writer.evaluate(raw=>localStorage.setItem('taskpoints_v1',raw),baseline.originalV1);
-    const matched=await observer.evaluate(async()=>
-      window.TaskPointsStateRuntimeV2.inspectPreservedParityMismatch());
+    const matched=await inspectStable(baseline.originalV1);
     assert.equal(matched.stable,true);
     assert.equal(matched.mismatch,false);
     assert.deepEqual(await readMirror(observer),originalMirror);
