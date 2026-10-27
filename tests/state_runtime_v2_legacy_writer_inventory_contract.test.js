@@ -144,3 +144,37 @@ test('full cutover inventory is read-only, hard-blocked, and observes legacy non
   // is a read-only safety diagnostic and cannot silently alter backups.
   assert.match(runtime, /function captureLegacyNamespace\(\)/);
 });
+
+test('exclusive snapshot writer rehearsal stays developer-only and cannot change production authority', () => {
+  const runtime = read('state_runtime_v2.js');
+  const first = runtime.indexOf('async function exercisePreviewSerializedSnapshotLease(operation)');
+  const last = runtime.indexOf('async function rehearseExclusiveWriterLease()', first);
+  assert.ok(first > 0 && last > first, 'Serialized writer preview helper missing');
+  const section = runtime.slice(first, last);
+  for(const fragment of [
+    'isWalTestPreviewHost()',
+    'isDarkEnabled()',
+    "mode: 'exclusive', ifAvailable: true",
+    'EXCLUSIVE_WRITER_REHEARSAL_LOCK',
+    'currentGeneration({ create: false })',
+    'darkMirrorModeEpoch',
+    'assertPreviewGenerationCurrent',
+    'await operation(previewGuard)',
+    'serialized_operation_generation_invalidated',
+    'serialized_snapshot_rehearsed',
+    'exclusiveLockAcquired: true',
+    'productionWritersFenced: false',
+    'allLegacyWritersKnown: false',
+    'canPromote: false',
+    "mutationAuthority: 'legacy_only'",
+    "readAuthority: 'legacy_only'"
+  ]) assert.ok(section.includes(fragment), 'Missing preview-only serialization guard: ' + fragment);
+  assert.ok(runtime.includes('    exercisePreviewSerializedSnapshotLease,'),
+    'Serialized prototype must be available only through an explicit preview call');
+  assert.ok(!section.includes('canPromote: true'));
+  for(const file of [
+    'index.html','today.html','settings.html','notes.html',
+    'emergency_recovery.html','scoring_core.js','task_mutation_journal.js'
+  ]) assert.ok(!read(file).includes('exercisePreviewSerializedSnapshotLease('),
+    'Normal legacy writer was silently made asynchronous: '+file);
+});
