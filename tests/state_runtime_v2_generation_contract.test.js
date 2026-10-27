@@ -1517,6 +1517,58 @@ test('writer-lock rehearsal rejects V1 changes while holding exclusive lock',asy
   assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
 });
 
+test('writer-lock rehearsal detects nonpilot legacy settings edited by an unfenced tab',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const key='taskpoints_unrelated_legacy_preferences';
+  app.localStorage.setItem(key,'before');
+  const v1=app.localStorage.getItem(LEGACY_KEY);
+  const pilot=structuredClone(app.indexedDB.dump(DB_NAME));
+  let acquired=false;
+  app.context.navigator={locks:{request:async(name,options,callback)=>{
+    acquired=true;
+    // An ordinary V1 settings page is not required to acquire this V2
+    // rehearsal lock. A pilot-only revision check would miss the edit.
+    app.localStorage.setItem(key,'updated by independent legacy tab');
+    return callback({name,mode:options.mode});
+  }}};
+  const denied=await app.runtime.rehearseExclusiveWriterLease();
+  assert.equal(acquired,true);
+  assert.equal(denied.lockAcquired,false);
+  assert.equal(denied.reason,'legacy_changed_under_lock');
+  assert.equal(denied.canPromote,false);
+  assert.equal(denied.mutationAuthority,'legacy_only');
+  assert.equal(app.localStorage.getItem(key),'updated by independent legacy tab');
+  assert.equal(app.localStorage.getItem(LEGACY_KEY),v1);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME),pilot);
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+  // A fresh rehearsal is allowed when the legacy source has stopped
+  // changing. No permanent writer authority is granted in either pass.
+  const retry=await app.runtime.rehearseExclusiveWriterLease();
+  assert.equal(retry.lockAcquired,true,JSON.stringify(retry));
+  assert.equal(retry.canPromote,false);
+});
+
+test('writer-lock rehearsal refuses legacy inventory read denial under the lock',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const source=app.localStorage.getItem(LEGACY_KEY);
+  const originalKey=app.localStorage.key.bind(app.localStorage);
+  const snapshot=structuredClone(app.indexedDB.dump(DB_NAME));
+  app.context.navigator={locks:{request:async(name,options,callback)=>{
+    app.localStorage.key=()=>{throw Error('synthetic localStorage permission revoked');};
+    try{return await callback({name,mode:options.mode});}
+    finally{app.localStorage.key=originalKey;}
+  }}};
+  const denied=await app.runtime.rehearseExclusiveWriterLease();
+  assert.equal(denied.lockAcquired,false);
+  assert.equal(denied.reason,'legacy_inventory_unreadable');
+  assert.equal(denied.canPromote,false);
+  assert.equal(app.localStorage.getItem(LEGACY_KEY),source);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME),snapshot);
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
+
 test('legacy rollback-source audit remains read-only, reports complete V1 scope and refuses WAL denial',async()=>{
   const app=install({initialState:{...legacyState(),
     completions:[{id:'task-one',source:'task',points:1},{id:'task-two',source:'task',points:2}]}});
