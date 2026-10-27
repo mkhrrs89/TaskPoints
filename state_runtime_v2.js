@@ -3454,6 +3454,61 @@
     finally { try { db?.close(); } catch (_) {} }
   }
 
+  // Non-mutating rollback rehearsal. Counts only; does NOT expose captured
+  // values, choose an authority, write any storage key or attempt a restore.
+  async function inspectPreviewRollbackPlan(idInput) {
+    const id = String(idInput || '');
+    const refused = (reason, extra = {}) => ({
+      checked: true, planValid: false, canApply: false,
+      reason, checkpointId: id || null,
+      mutationAuthority: 'legacy_only', readAuthority: 'legacy_only',
+      ...extra
+    });
+    if (!id.startsWith('v1-preview:')) return refused('checkpoint_id_required');
+    let db;
+    try {
+      const verdict = await inspectPreviewRecoveryCheckpoint(id);
+      if (!verdict.intact) return refused(verdict.reason);
+      const before = await inspectLegacyRollbackSource();
+      if (!before.sourceStable) return refused('legacy_source_' + before.reason);
+      const currentBefore = captureLegacyNamespace();
+      db = await openPreviewRecoveryDb();
+      const tx = db.transaction(PREVIEW_RECOVERY_STORE, 'readonly');
+      const record = await requestPromise(tx.objectStore(PREVIEW_RECOVERY_STORE).get(id));
+      if (!await validPreviewRecoveryRecord(record))
+        return refused('checkpoint_integrity_failed');
+      const savedKeys = new Map(record.entries);
+      const currentKeys = new Map(currentBefore);
+      let removed = 0;
+      let restored = 0;
+      let replaced = 0;
+      for (const [key, value] of savedKeys) {
+        if (!currentKeys.has(key)) restored += 1;
+        else if (currentKeys.get(key) !== value) replaced += 1;
+      }
+      for (const key of currentKeys.keys()) if (!savedKeys.has(key)) removed += 1;
+      const after = await inspectLegacyRollbackSource();
+      if (!after.sourceStable
+        || before.generation !== after.generation
+        || (await previewRecoveryFingerprint(currentBefore)) !== (await previewRecoveryFingerprint(captureLegacyNamespace())))
+        return refused('legacy_changed_during_plan');
+      const generationMatches = before.generation === record.generation;
+      return {
+        checked: true, planValid: true, canApply: false,
+        reason: generationMatches ? 'dry_run_only' : 'checkpoint_generation_differs',
+        checkpointId: id, mutationAuthority: 'legacy_only',
+        readAuthority: 'legacy_only', capturedGeneration: record.generation,
+        generationMatches,
+        counts: { restoreMissing: restored, replaceChanged: replaced,
+          removeNewer: removed, captured: savedKeys.size, current: currentKeys.size },
+        blockers: ['production_writer_fencing_not_implemented',
+          'external_checkpoint_backup_unverified',
+          'rollback_restore_transaction_not_implemented']
+      };
+    } catch (_) { return refused('rollback_plan_unreadable'); }
+    finally { try { db?.close(); } catch (_) {} }
+  }
+
   // Explicit only. Atomic IndexedDB add keeps any previously saved copy
   // immutable; a failed write cannot replace another checkpoint. Evidence
   // stays separate from the V2 mirror (which may be reseeded), and no copy
@@ -3827,6 +3882,7 @@
     inspectLegacyRollbackSource,
     createPreviewRecoveryCheckpoint,
     inspectPreviewRecoveryCheckpoint,
+    inspectPreviewRollbackPlan,
     rehearseExclusiveWriterLease,
     readPilotHabitCandidate,
     setPilotReadProbeEnabled,
