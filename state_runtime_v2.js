@@ -4026,7 +4026,50 @@
       }
       return true;
     };
-    const previewGuard = Object.freeze({ assertPreviewGenerationCurrent });
+    // An explicit caller may carry an exact V1 snapshot source token from
+    // before its asynchronous work and compare it inside this exclusive lock
+    // immediately before a *synchronous* save. This guards one stale Home
+    // snapshot case; task/Habit journals and unfenced writes remain outside
+    // its scope. No token is stored or transmitted.
+    let callbackActive = false;
+    const assertPreviewLegacySnapshotUnchanged = expectedRaw => {
+      if (!callbackActive) {
+        const error = new Error('state_runtime_v2_preview_snapshot_guard_outside_lock');
+        error.code = 'STATE_RUNTIME_V2_PREVIEW_SNAPSHOT_GUARD_INACTIVE';
+        throw error;
+      }
+      assertPreviewGenerationCurrent();
+      if (typeof expectedRaw !== 'string' || !expectedRaw.length) {
+        const error = new Error('state_runtime_v2_preview_snapshot_token_required');
+        error.code = 'STATE_RUNTIME_V2_PREVIEW_SNAPSHOT_TOKEN_REQUIRED';
+        throw error;
+      }
+      let actualRaw;
+      try {
+        const storage = global.localStorage;
+        if (!storage || typeof storage.getItem !== 'function')
+          throw Error('storage_unavailable');
+        actualRaw = storage.getItem(core.STORAGE_KEY || 'taskpoints_v1');
+      } catch (_) {
+        const error = new Error('state_runtime_v2_preview_snapshot_unreadable');
+        error.code = 'STATE_RUNTIME_V2_PREVIEW_SNAPSHOT_UNREADABLE';
+        throw error;
+      }
+      if (typeof actualRaw !== 'string') {
+        const error = new Error('state_runtime_v2_preview_snapshot_unreadable');
+        error.code = 'STATE_RUNTIME_V2_PREVIEW_SNAPSHOT_UNREADABLE';
+        throw error;
+      }
+      if (actualRaw !== expectedRaw) {
+        const error = new Error('state_runtime_v2_preview_snapshot_changed');
+        error.code = 'STATE_RUNTIME_V2_PREVIEW_SNAPSHOT_CHANGED';
+        throw error;
+      }
+      return true;
+    };
+    const previewGuard = Object.freeze({
+      assertPreviewGenerationCurrent, assertPreviewLegacySnapshotUnchanged
+    });
     let result = refuse('exclusive_lock_unavailable');
     try {
       await locks.request(EXCLUSIVE_WRITER_REHEARSAL_LOCK,
@@ -4038,15 +4081,27 @@
             return;
           }
           try {
+            callbackActive = true;
             await operation(previewGuard);
           } catch (error) {
-            result = refuse(error?.code === 'STATE_RUNTIME_V2_PREVIEW_GENERATION_CHANGED'
+            const reason = error?.code === 'STATE_RUNTIME_V2_PREVIEW_GENERATION_CHANGED'
               ? 'serialized_operation_generation_invalidated'
-              : 'serialized_operation_failed', {
+              : error?.code === 'STATE_RUNTIME_V2_PREVIEW_SNAPSHOT_CHANGED'
+                ? 'serialized_operation_snapshot_changed'
+                : error?.code === 'STATE_RUNTIME_V2_PREVIEW_SNAPSHOT_UNREADABLE'
+                  ? 'serialized_operation_snapshot_unreadable'
+                  : error?.code === 'STATE_RUNTIME_V2_PREVIEW_SNAPSHOT_TOKEN_REQUIRED'
+                    ? 'serialized_operation_snapshot_token_required'
+                    : error?.code === 'STATE_RUNTIME_V2_PREVIEW_SNAPSHOT_GUARD_INACTIVE'
+                      ? 'serialized_operation_snapshot_guard_inactive'
+                      : 'serialized_operation_failed';
+            result = refuse(reason, {
               exclusiveLockAcquired: true, operationRan: true,
               lockHeldAfterReturn: false
             });
             return;
+          } finally {
+            callbackActive = false;
           }
           if (!isDarkEnabled() || initialModeEpoch !== darkMirrorModeEpoch
             || currentGeneration({ create: false }) !== initialGeneration) {
