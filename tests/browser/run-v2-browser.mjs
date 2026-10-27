@@ -479,12 +479,13 @@ try {
     await holder.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),
       {waitUntil:'load'});
     await holder.evaluate(()=>new Promise((resolve,reject)=>{
+      window.__lockRehearsalReleased=false;
       navigator.locks.request('taskpoints_v2_writer_handoff_rehearsal_v1',
         {mode:'exclusive'},async(lock)=>{
           window.__releaseExclusiveTestLock=null;
           resolve(true);
           await new Promise(done=>{window.__releaseExclusiveTestLock=done;});
-        }).catch(reject);
+        }).then(()=>{window.__lockRehearsalReleased=true;}).catch(reject);
     }));
     const busy=await candidate.evaluate(()=>
       window.TaskPointsStateRuntimeV2.rehearseExclusiveWriterLease());
@@ -493,6 +494,7 @@ try {
     assert.equal(busy.mutationAuthority,'legacy_only');
     assert.equal(busy.canPromote,false);
     await holder.evaluate(()=>window.__releaseExclusiveTestLock());
+    await holder.waitForFunction(()=>window.__lockRehearsalReleased===true,null,{timeout:12000});
     // Once the other tab relinquishes the lock, a fresh read-only proof
     // may run. It must release immediately and never turn into a live lease.
     const successful=await candidate.evaluate(()=>
