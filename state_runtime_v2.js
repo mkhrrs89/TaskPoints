@@ -4107,9 +4107,72 @@
       }
       return true;
     };
+    // Independent per-event Habit sidecars can survive a primary journal
+    // rewrite or race across legacy tabs. A serialized preview callback may
+    // compare their exact key/value inventory against an earlier explicit
+    // capture. This is NOT an atomic snapshot or a fence for uncooperative
+    // writers and is never called by production V1 save paths.
+    const sidecarPrefix = 'taskpoints_v2_habit_journal_event_v1:';
+    const readPreviewHabitSidecarInventory = () => {
+      const storage = global.localStorage;
+      if (!storage || typeof storage.key !== 'function'
+        || typeof storage.getItem !== 'function'
+        || !Number.isSafeInteger(storage.length) || storage.length < 0)
+        throw Error('preview_habit_sidecar_inventory_unavailable');
+      const count = storage.length;
+      const keys = new Set();
+      const sidecarKeys = [];
+      for (let index = 0; index < count; index += 1) {
+        const key = storage.key(index);
+        if (typeof key !== 'string' || keys.has(key))
+          throw Error('preview_habit_sidecar_inventory_changed');
+        keys.add(key);
+        if (key.startsWith(sidecarPrefix)) sidecarKeys.push(key);
+      }
+      if (storage.length !== count) throw Error('preview_habit_sidecar_inventory_changed');
+      const entries = sidecarKeys.sort().map(key => {
+        const raw = storage.getItem(key);
+        if (typeof raw !== 'string')
+          throw Error('preview_habit_sidecar_inventory_unreadable');
+        return [key, raw];
+      });
+      if (storage.length !== count) throw Error('preview_habit_sidecar_inventory_changed');
+      return entries;
+    };
+    const assertPreviewHabitSidecarsUnchanged = expectedEntries => {
+      if (!callbackActive) {
+        const error = new Error('state_runtime_v2_preview_sidecar_guard_outside_lock');
+        error.code = 'STATE_RUNTIME_V2_PREVIEW_SIDECAR_GUARD_INACTIVE';
+        throw error;
+      }
+      assertPreviewGenerationCurrent();
+      if (!Array.isArray(expectedEntries)
+        || expectedEntries.some((row, index) =>
+          !Array.isArray(row) || row.length !== 2
+          || typeof row[0] !== 'string' || !row[0].startsWith(sidecarPrefix)
+          || typeof row[1] !== 'string'
+          || (index > 0 && expectedEntries[index - 1][0] >= row[0]))) {
+        const error = new Error('state_runtime_v2_preview_sidecar_token_invalid');
+        error.code = 'STATE_RUNTIME_V2_PREVIEW_SIDECAR_TOKEN_INVALID';
+        throw error;
+      }
+      let actualEntries;
+      try { actualEntries = readPreviewHabitSidecarInventory(); }
+      catch (_) {
+        const error = new Error('state_runtime_v2_preview_sidecar_inventory_unreadable');
+        error.code = 'STATE_RUNTIME_V2_PREVIEW_SIDECAR_UNREADABLE';
+        throw error;
+      }
+      if (stableJson(actualEntries) !== stableJson(expectedEntries)) {
+        const error = new Error('state_runtime_v2_preview_sidecar_inventory_changed');
+        error.code = 'STATE_RUNTIME_V2_PREVIEW_SIDECARS_CHANGED';
+        throw error;
+      }
+      return true;
+    };
     const previewGuard = Object.freeze({
       assertPreviewGenerationCurrent, assertPreviewLegacySnapshotUnchanged,
-      assertPreviewPrimaryJournalsUnchanged
+      assertPreviewPrimaryJournalsUnchanged, assertPreviewHabitSidecarsUnchanged
     });
     let result = refuse('exclusive_lock_unavailable');
     try {
@@ -4129,6 +4192,14 @@
               ? 'serialized_operation_generation_invalidated'
               : error?.code === 'STATE_RUNTIME_V2_PREVIEW_SNAPSHOT_CHANGED'
                 ? 'serialized_operation_snapshot_changed'
+                : error?.code === 'STATE_RUNTIME_V2_PREVIEW_SIDECARS_CHANGED'
+                  ? 'serialized_operation_habit_sidecars_changed'
+                  : error?.code === 'STATE_RUNTIME_V2_PREVIEW_SIDECAR_UNREADABLE'
+                    ? 'serialized_operation_habit_sidecars_unreadable'
+                    : error?.code === 'STATE_RUNTIME_V2_PREVIEW_SIDECAR_TOKEN_INVALID'
+                      ? 'serialized_operation_habit_sidecar_token_invalid'
+                      : error?.code === 'STATE_RUNTIME_V2_PREVIEW_SIDECAR_GUARD_INACTIVE'
+                        ? 'serialized_operation_habit_sidecar_guard_inactive'
                 : error?.code === 'STATE_RUNTIME_V2_PREVIEW_JOURNALS_CHANGED'
                   ? 'serialized_operation_primary_journals_changed'
                   : error?.code === 'STATE_RUNTIME_V2_PREVIEW_JOURNAL_UNREADABLE'
