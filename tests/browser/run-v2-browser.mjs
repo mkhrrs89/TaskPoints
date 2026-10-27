@@ -514,6 +514,116 @@ try {
       v1Unchanged:true,noAuthorityPromotion:true};
   });
 
+  await run('cooperative shared writer locks coexist and block exclusive handoff while legacy tabs remain unfenced',async context=>{
+    const first=await open(context),second=await open(context);
+    const silent=await context.newPage();
+    await silent.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),
+      {waitUntil:'load'});
+    const supported=await first.evaluate(()=>
+      typeof navigator.locks?.request==='function');
+    if(!supported){
+      const refusal=await first.evaluate(()=>
+        window.TaskPointsStateRuntimeV2.exercisePreviewCooperativeWriterLease(()=>{}));
+      assert.equal(refusal.reason,'lock_manager_unavailable');
+      assert.equal(refusal.canPromote,false);
+      return {unsupportedFailClosed:true,legacyOnly:true};
+    }
+    const original=await first.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const held=first.evaluate(async()=>{
+      return window.TaskPointsStateRuntimeV2.exercisePreviewCooperativeWriterLease(async()=>{
+        localStorage.setItem('v2_shared_writer_fixture_held','ready');
+        await new Promise(resolve=>{window.__releaseV2SharedWriter=resolve;});
+        localStorage.setItem('taskpoints_shared_writer_fixture_one','committed');
+      });
+    });
+    await second.waitForFunction(()=>
+      localStorage.getItem('v2_shared_writer_fixture_held')==='ready',
+      null,{timeout:12000});
+    // Two cooperating writers may hold a *shared* browser lock together.
+    const concurrent=await second.evaluate(async()=>
+      window.TaskPointsStateRuntimeV2.exercisePreviewCooperativeWriterLease(async()=>{
+        localStorage.setItem('taskpoints_shared_writer_fixture_two','committed');
+      }));
+    assert.equal(concurrent.sharedLockAcquired,true,JSON.stringify(concurrent));
+    assert.equal(concurrent.operationRan,true);
+    assert.equal(concurrent.canPromote,false);
+    // An exclusive handoff cannot start while either cooperating writer is
+    // inside its callback. This is real browser-level shared/exclusive locking.
+    const exclusive=await second.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.rehearseExclusiveWriterLease());
+    assert.equal(exclusive.lockAcquired,false,JSON.stringify(exclusive));
+    assert.equal(exclusive.reason,'lock_held_elsewhere');
+    assert.equal(exclusive.canPromote,false);
+    // A legacy-only tab is *not* forced to honor this new protocol.
+    await silent.evaluate(()=>localStorage.setItem(
+      'taskpoints_unfenced_during_cooperative_lease','outside shared writer lock'));
+    await first.evaluate(()=>window.__releaseV2SharedWriter());
+    const completed=await held;
+    assert.equal(completed.sharedLockAcquired,true,JSON.stringify(completed));
+    assert.equal(completed.operationRan,true);
+    assert.equal(completed.lockHeldAfterReturn,false);
+    assert.equal(completed.canPromote,false);
+    const after=await second.evaluate(async()=>{
+      const proof=await window.TaskPointsStateRuntimeV2.rehearseExclusiveWriterLease();
+      return {proof,
+        v1:localStorage.getItem('taskpoints_v1'),
+        one:localStorage.getItem('taskpoints_shared_writer_fixture_one'),
+        two:localStorage.getItem('taskpoints_shared_writer_fixture_two'),
+        silent:localStorage.getItem('taskpoints_unfenced_during_cooperative_lease'),
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    });
+    assert.equal(after.proof.lockAcquired,true,JSON.stringify(after.proof));
+    assert.equal(after.proof.canPromote,false);
+    assert.equal(after.v1,original);
+    assert.equal(after.one,'committed');
+    assert.equal(after.two,'committed');
+    assert.equal(after.silent,'outside shared writer lock');
+    assert.equal(after.authority,'legacy_only');
+    return {concurrentSharedWriters:2,exclusiveBlockedWhileHeld:true,
+      exclusiveRehearsalAfterRelease:true,silentLegacyWriterStillUnfenced:true,
+      noProductionAuthorityChange:true};
+  });
+
+  await run('exclusive rehearsal blocks a new cooperative writer and releases after callback failure',async context=>{
+    const first=await open(context),second=await open(context);
+    const supported=await first.evaluate(()=>
+      typeof navigator.locks?.request==='function');
+    if(!supported){
+      const denied=await second.evaluate(()=>
+        window.TaskPointsStateRuntimeV2.exercisePreviewCooperativeWriterLease(()=>{}));
+      assert.equal(denied.reason,'lock_manager_unavailable');
+      return {unsupportedFailClosed:true};
+    }
+    const exclusiveHolder=first.evaluate(async()=>navigator.locks.request(
+      'taskpoints_v2_writer_handoff_rehearsal_v1',{mode:'exclusive'},async()=>{
+        localStorage.setItem('v2_exclusive_fixture_held','ready');
+        await new Promise(resolve=>{window.__releaseV2ExclusiveFixture=resolve;});
+      }));
+    await second.waitForFunction(()=>
+      localStorage.getItem('v2_exclusive_fixture_held')==='ready',
+      null,{timeout:12000});
+    const busy=await second.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.exercisePreviewCooperativeWriterLease(()=>{}));
+    assert.equal(busy.reason,'lock_held_elsewhere');
+    assert.equal(busy.operationRan,false);
+    await first.evaluate(()=>window.__releaseV2ExclusiveFixture());
+    await exclusiveHolder;
+    const failed=await second.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.exercisePreviewCooperativeWriterLease(()=>{
+        throw Error('synthetic callback failure');
+      }));
+    assert.equal(failed.reason,'cooperative_operation_failed');
+    assert.equal(failed.sharedLockAcquired,true);
+    assert.equal(failed.operationRan,true);
+    const recovered=await second.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.exercisePreviewCooperativeWriterLease(()=>{}));
+    assert.equal(recovered.reason,'cooperative_shared_lock_rehearsed');
+    assert.equal(recovered.sharedLockAcquired,true);
+    assert.equal(recovered.canPromote,false);
+    return {exclusiveBlocksCooperator:true,errorReleasesSharedLock:true,
+      recoveredSafely:true,noPromotion:true};
+  });
+
   await run('preview writer peer handshake sees cooperating V2 tabs but cannot certify silent legacy writer',async context=>{
     const observer=await open(context),cooperator=await open(context);
     // A real same-origin V1 page can still mutate localStorage without
