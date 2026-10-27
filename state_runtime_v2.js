@@ -3658,9 +3658,19 @@
           }
           // A notes/settings change outside the pilot may not change V2
           // revision or pilot parity. It still invalidates the handoff proof.
-          let currentFingerprint;
+          let currentFingerprint, currentInventory;
           try {
-            currentFingerprint = await previewRecoveryFingerprint(captureLegacyNamespace());
+            currentInventory = captureLegacyNamespace();
+            currentFingerprint = await previewRecoveryFingerprint(currentInventory);
+            // SHA-256 is asynchronous. A nonparticipating V1 tab may change
+            // settings, notes or another collection *while the digest is
+            // pending*. Make one final synchronous read in the same turn
+            // before reporting a completed rehearsal. This is a diagnostic
+            // consistency check, NOT a durable cross-tab writer fence.
+            if (stableJson(captureLegacyNamespace()) !== stableJson(currentInventory)) {
+              result = fail('legacy_changed_during_lock_verification');
+              return;
+            }
           } catch (_) { result = fail('legacy_inventory_unreadable'); return; }
           if (currentFingerprint !== initialInventoryFingerprint) {
             result = fail('legacy_changed_under_lock');
