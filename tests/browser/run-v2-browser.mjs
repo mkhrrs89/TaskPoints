@@ -973,6 +973,13 @@ try {
       return {before,after};
     });
     assert.notEqual(rotated.before,rotated.after);
+    // Safari/WebKit can deliver localStorage updates across documents
+    // asynchronously. Prove the suspended tab has *observed* the new
+    // generation before releasing it, instead of assuming the other tab's
+    // setItem() return establishes cross-process visibility.
+    await writer.waitForFunction(expected=>
+      localStorage.getItem('taskpoints_state_v2_generation_v1')===expected,
+      rotated.after,{timeout:12000});
     await writer.evaluate(()=>window.__releaseGenerationRaceWriter());
     const refused=await pending;
     assert.equal(refused.reason,'generation_or_preview_changed_under_lock',
