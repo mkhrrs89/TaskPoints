@@ -1679,3 +1679,42 @@ test('checkpoint cannot be declared saved when V1 namespace enumeration is unrea
   assert.equal(app.indexedDB.dump('taskpoints_v2_recovery_checkpoints_preview'),null);
   assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
 });
+
+test('checkpoint creation fails closed without WebCrypto rather than saving an unauthenticated checksum',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const v1=app.localStorage.getItem(LEGACY_KEY);
+  const originalSubtle=app.context.crypto.subtle;
+  app.context.crypto.subtle=null;
+  const noHash=await app.runtime.createPreviewRecoveryCheckpoint();
+  app.context.crypto.subtle=originalSubtle;
+  assert.equal(noHash.saved,false);
+  assert.equal(noHash.reason,'checkpoint_write_failed');
+  assert.equal(app.indexedDB.dump('taskpoints_v2_recovery_checkpoints_preview'),null);
+  assert.equal(app.localStorage.getItem(LEGACY_KEY),v1);
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+  const fresh=await app.runtime.createPreviewRecoveryCheckpoint();
+  assert.equal(fresh.saved,true,JSON.stringify(fresh));
+  const inspected=await app.runtime.inspectPreviewRecoveryCheckpoint(fresh.checkpointId);
+  assert.equal(inspected.intact,true);
+  assert.match(inspected.fingerprint,/^sha256:[0-9a-f]{64}:\d+$/);
+  assert.equal(inspected.canAutoRestore,false);
+});
+
+test('explicit checkpoint snapshots can coexist without overwriting older snapshots',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const first=await app.runtime.createPreviewRecoveryCheckpoint();
+  assert.equal(first.saved,true,JSON.stringify(first));
+  const initial=structuredClone(app.indexedDB.dump('taskpoints_v2_recovery_checkpoints_preview').snapshots[0]);
+  app.localStorage.setItem('taskpoints_newer_private_note','version two');
+  const second=await app.runtime.createPreviewRecoveryCheckpoint();
+  assert.equal(second.saved,true,JSON.stringify(second));
+  assert.notEqual(second.checkpointId,first.checkpointId);
+  const rows=app.indexedDB.dump('taskpoints_v2_recovery_checkpoints_preview').snapshots;
+  assert.equal(rows.length,2);
+  assert.deepEqual(rows.find(row=>row.id===first.checkpointId),initial);
+  assert.equal((await app.runtime.inspectPreviewRecoveryCheckpoint(first.checkpointId)).intact,true);
+  assert.equal((await app.runtime.inspectPreviewRecoveryCheckpoint(second.checkpointId)).intact,true);
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
