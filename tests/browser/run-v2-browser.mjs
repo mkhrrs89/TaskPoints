@@ -627,6 +627,50 @@ try {
     return {generationTamperingDetected:true,zeroRestoreWrites:true};
   });
 
+  await run('historical payload-only checkpoint is inspectable but cannot justify rollback',async context=>{
+    const page=await open(context);
+    const proof=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const made=await runtime.createPreviewRecoveryCheckpoint();
+      if(!made.saved)throw Error('Checkpoint fixture failed: '+made.reason);
+      const v1=localStorage.getItem('taskpoints_v1');
+      const db=await new Promise((resolve,reject)=>{
+        const r=indexedDB.open('taskpoints_v2_recovery_checkpoints_preview',1);
+        r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);
+      });
+      const source=await new Promise((resolve,reject)=>{
+        const r=db.transaction('snapshots','readonly')
+          .objectStore('snapshots').get(made.checkpointId);
+        r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);
+      });
+      const old={...source};
+      delete old.integrityVersion;
+      old.generation='legacy-unsigned-claimed-generation';
+      const payload=new TextEncoder().encode(JSON.stringify(old.entries));
+      const hash=await crypto.subtle.digest('SHA-256',payload);
+      old.fingerprint='sha256:'+Array.from(new Uint8Array(hash),
+        b=>b.toString(16).padStart(2,'0')).join('')+':'+payload.byteLength;
+      const tx=db.transaction('snapshots','readwrite');
+      tx.objectStore('snapshots').put(old);
+      await new Promise((resolve,reject)=>{
+        tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
+      });
+      db.close();
+      return {inspected:await runtime.inspectPreviewRecoveryCheckpoint(made.checkpointId),
+        plan:await runtime.inspectPreviewRollbackPlan(made.checkpointId),
+        v1Unchanged:localStorage.getItem('taskpoints_v1')===v1,
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(proof.inspected.intact,true,JSON.stringify(proof.inspected));
+    assert.equal(proof.inspected.integrityCoverage,'legacy_payload_only');
+    assert.equal(proof.plan.planValid,false);
+    assert.equal(proof.plan.canApply,false);
+    assert.equal(proof.plan.reason,'checkpoint_provenance_unverified');
+    assert.equal(proof.v1Unchanged,true);
+    assert.equal(proof.authority,'legacy_only');
+    return {historicalPreserved:true,provenanceBlocked:true,noRestore:true};
+  });
+
   await run('checkpoint rollback preview survives reload and reports differences without writing V1',async context=>{
     const page=await open(context);
     const saved=await page.evaluate(async()=>{
