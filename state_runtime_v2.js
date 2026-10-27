@@ -3779,6 +3779,77 @@
     finally { try { db?.close(); } catch (_) {} }
   }
 
+  // Developer-only cooperative-writer prototype. Real V1 mutation paths do
+  // NOT call this method. A participating caller can voluntarily execute one
+  // operation while holding a browser shared lock, which conflicts with the
+  // existing exclusive handoff rehearsal. It proves only the cooperative
+  // protocol mechanics, not global legacy writer fencing or safe cutover.
+  //
+  // Restrict this experimental callback API to localhost/branch-preview
+  // hosts. It must not become a hidden wrapper around production V1 saves.
+  async function exercisePreviewCooperativeWriterLease(operation) {
+    const refuse = (reason, details = {}) => ({
+      checked: true, sharedLockAcquired: false, operationRan: false,
+      canPromote: false, reason, productionWritersFenced: false,
+      allLegacyWritersKnown: false,
+      mutationAuthority: 'legacy_only', readAuthority: 'legacy_only',
+      ...details
+    });
+    if (!isWalTestPreviewHost()) return refuse('preview_host_required');
+    if (!isDarkEnabled()) return refuse('dark_disabled');
+    if (typeof operation !== 'function') return refuse('operation_required');
+    const locks = global.navigator?.locks;
+    if (typeof locks?.request !== 'function') return refuse('lock_manager_unavailable');
+    const initialModeEpoch = darkMirrorModeEpoch;
+    const initialGeneration = currentGeneration({ create: false });
+    if (!initialGeneration) return refuse('generation_unavailable');
+    let result = refuse('shared_lock_unavailable');
+    try {
+      await locks.request(EXCLUSIVE_WRITER_REHEARSAL_LOCK,
+        { mode: 'shared', ifAvailable: true }, async lock => {
+          if (!lock) { result = refuse('lock_held_elsewhere'); return; }
+          if (!isDarkEnabled() || initialModeEpoch !== darkMirrorModeEpoch
+            || currentGeneration({ create: false }) !== initialGeneration) {
+            result = refuse('generation_or_preview_changed_under_lock');
+            return;
+          }
+          // This callback is an explicit fixture/developer operation. It may
+          // alter V1, but neither this runtime nor the real application
+          // installs it as an automatic writer path. Never claim that its
+          // outcome proves a production writer fence.
+          let ran = false;
+          try {
+            ran = true;
+            await operation();
+          } catch (_) {
+            result = refuse('cooperative_operation_failed',
+              { sharedLockAcquired: true, operationRan: ran,
+                lockHeldAfterReturn: false });
+            return;
+          }
+          if (!isDarkEnabled() || initialModeEpoch !== darkMirrorModeEpoch
+            || currentGeneration({ create: false }) !== initialGeneration) {
+            result = refuse('generation_or_preview_changed_under_lock',
+              { sharedLockAcquired: true, operationRan: ran,
+                lockHeldAfterReturn: false });
+            return;
+          }
+          result = {
+            checked: true, sharedLockAcquired: true, operationRan: ran,
+            reason: 'cooperative_shared_lock_rehearsed',
+            lockHeldAfterReturn: false,
+            canPromote: false, productionWritersFenced: false,
+            allLegacyWritersKnown: false,
+            mutationAuthority: 'legacy_only', readAuthority: 'legacy_only'
+          };
+        });
+    } catch (_) {
+      return refuse('shared_lock_request_failed',
+        { operationMayHaveRun: result.operationRan === true });
+    }
+    return result;
+  }
+
   // Browser-native exclusive-lock *rehearsal*, never a writer handoff.
   // Browser LockManager is shared by same-origin tabs and serializes callbacks
   // without vulnerable localStorage time-based leases. No fallback assumes
@@ -4147,6 +4218,7 @@
     inspectPilotCompletionIndexCoverage,
     inspectMutationHandoffPrerequisites,
     inspectPreviewWriterPeers,
+    exercisePreviewCooperativeWriterLease,
     inspectPreservedParityMismatch,
     inspectLegacyRollbackSource,
     createPreviewRecoveryCheckpoint,
