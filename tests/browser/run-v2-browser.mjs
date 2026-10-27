@@ -456,6 +456,62 @@ try {
     return {deniedReadFailsClosed:true,recoveryWithoutRebuild:true,legacyOnly:true};
   });
 
+  await run('exclusive-writer lock rehearsal denies competing tabs and releases safely without promotion', async context => {
+    const candidate=await open(context);
+    const initial=await candidate.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      return {source:localStorage.getItem('taskpoints_v1'),
+        lockSupported:typeof navigator.locks?.request==='function',
+        rollback:await runtime.inspectLegacyRollbackSource(),
+        before:await runtime.inspectPilotReadiness()};
+    });
+    assert.equal(initial.rollback.sourceStable,true);
+    assert.equal(initial.before.eligible,true,JSON.stringify(initial.before));
+    if(!initial.lockSupported){
+      const failClosed=await candidate.evaluate(()=>
+        window.TaskPointsStateRuntimeV2.rehearseExclusiveWriterLease());
+      assert.equal(failClosed.reason,'lock_manager_unavailable');
+      assert.equal(failClosed.canPromote,false);
+      assert.equal(failClosed.mutationAuthority,'legacy_only');
+      return {unsupportedSafely:true,authority:'legacy_only'};
+    }
+    const holder=await context.newPage();
+    await holder.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),
+      {waitUntil:'load'});
+    await holder.evaluate(()=>new Promise((resolve,reject)=>{
+      navigator.locks.request('taskpoints_v2_writer_handoff_rehearsal_v1',
+        {mode:'exclusive'},async(lock)=>{
+          window.__releaseExclusiveTestLock=null;
+          resolve(true);
+          await new Promise(done=>{window.__releaseExclusiveTestLock=done;});
+        }).catch(reject);
+    }));
+    const busy=await candidate.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.rehearseExclusiveWriterLease());
+    assert.equal(busy.lockAcquired,false);
+    assert.equal(busy.reason,'lock_held_elsewhere',JSON.stringify(busy));
+    assert.equal(busy.mutationAuthority,'legacy_only');
+    assert.equal(busy.canPromote,false);
+    await holder.evaluate(()=>window.__releaseExclusiveTestLock());
+    // Once the other tab relinquishes the lock, a fresh read-only proof
+    // may run. It must release immediately and never turn into a live lease.
+    const successful=await candidate.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.rehearseExclusiveWriterLease());
+    assert.equal(successful.lockAcquired,true,JSON.stringify(successful));
+    assert.equal(successful.lockHeldAfterReturn,false);
+    assert.equal(successful.canPromote,false);
+    assert.equal(successful.rollbackSourceStable,true);
+    assert.equal(successful.mutationAuthority,'legacy_only');
+    const after=await candidate.evaluate(()=>({
+      source:localStorage.getItem('taskpoints_v1'),
+      status:window.TaskPointsStateRuntimeV2.getStatus()
+    }));
+    assert.equal(after.source,initial.source);
+    assert.equal(after.status.readAuthority,'legacy_only');
+    return {lockConflictDetected:true,releaseRecovered:true,
+      v1Unchanged:true,noAuthorityPromotion:true};
+  });
+
   await run('mutation-handoff preflight inventories pilot readiness but cannot promote V2', async context => {
     const page=await open(context);
     const baseline=await page.evaluate(async()=>{
