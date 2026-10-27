@@ -1505,6 +1505,109 @@ test('parity forensics does not create V2 storage when no mirror was opened',asy
   assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
 });
 
+test('parity forensics refuses a V2-only store edit that never increments revision',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const beforeV1=app.localStorage.getItem(LEGACY_KEY);
+  const beforeMeta=structuredClone(runtimeMeta(app));
+  const db=await app.runtime.open();
+  const originalTransaction=db.transaction.bind(db);
+  let reads=0;
+  db.transaction=function(names,mode){
+    if(Array.isArray(names) && names.includes('habits') && names.includes('completions')){
+      reads++;
+      if(reads===2){
+        // A noncooperating IndexedDB client bypasses the revision marker.
+        // Forensics must compare both raw store observations anyway.
+        const old=db._stores.get('habits').get('h1');
+        db._stores.get('habits').set('h1',{
+          ...old,value:{...old.value,name:'Foreign V2-only update during forensics'}
+        });
+      }
+    }
+    return originalTransaction(names,mode);
+  };
+  let refused;
+  try{refused=await app.runtime.inspectPreservedParityMismatch();}
+  finally{db.transaction=originalTransaction;}
+  assert.equal(reads,2);
+  assert.equal(refused.stable,false,JSON.stringify(refused));
+  assert.equal(refused.mismatch,null);
+  assert.equal(refused.reason,'v2_collections_changed_during_inspection');
+  assert.equal(refused.canRepair,false);
+  assert.equal(refused.evidencePreserved,true);
+  assert.equal(app.localStorage.getItem(LEGACY_KEY),beforeV1);
+  assert.deepEqual(runtimeMeta(app),beforeMeta,'no silent metadata or revision repair');
+  assert.equal(app.indexedDB.dump(DB_NAME).habits[0].value.name,
+    'Foreign V2-only update during forensics','the independent V2 write must be preserved');
+  const stable=await app.runtime.inspectPreservedParityMismatch();
+  assert.equal(stable.stable,true,JSON.stringify(stable));
+  assert.equal(stable.mismatch,true);
+  assert.equal(stable.evidence.changedHabits,1);
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
+
+test('parity forensics refuses a V1 write while an IndexedDB read is underway',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const db=await app.runtime.open();
+  const originalTransaction=db.transaction.bind(db);
+  const beforeMirror=structuredClone(app.indexedDB.dump(DB_NAME));
+  const newV1=JSON.stringify(legacyState('h1','V1 writer during forensic read'));
+  let injected=false;
+  db.transaction=function(names,mode){
+    if(!injected && Array.isArray(names)&&names.includes('habits')){
+      injected=true;
+      app.localStorage.setItem(LEGACY_KEY,newV1);
+    }
+    return originalTransaction(names,mode);
+  };
+  let refused;
+  try{refused=await app.runtime.inspectPreservedParityMismatch();}
+  finally{db.transaction=originalTransaction;}
+  assert.equal(injected,true);
+  assert.equal(refused.stable,false,JSON.stringify(refused));
+  assert.equal(refused.mismatch,null);
+  assert.equal(refused.reason,'inspection_window_changed');
+  assert.equal(refused.canRepair,false);
+  assert.equal(app.localStorage.getItem(LEGACY_KEY),newV1);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME),beforeMirror);
+  const stable=await app.runtime.inspectPreservedParityMismatch();
+  assert.equal(stable.stable,true,JSON.stringify(stable));
+  assert.equal(stable.mismatch,true);
+  assert.equal(stable.evidence.changedHabits,1);
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
+
+test('parity forensics rejects a preview opt-out during the mirror scan',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const db=await app.runtime.open();
+  const originalTransaction=db.transaction.bind(db);
+  const source=app.localStorage.getItem(LEGACY_KEY);
+  const before=structuredClone(app.indexedDB.dump(DB_NAME));
+  let triggered=false;
+  db.transaction=function(names,mode){
+    if(!triggered && Array.isArray(names)&&names.includes('habits')){
+      triggered=true;
+      app.runtime.disableDarkMirror();
+    }
+    return originalTransaction(names,mode);
+  };
+  let refused;
+  try{refused=await app.runtime.inspectPreservedParityMismatch();}
+  finally{db.transaction=originalTransaction;}
+  assert.equal(triggered,true);
+  assert.equal(refused.stable,false,JSON.stringify(refused));
+  assert.equal(refused.mismatch,null);
+  assert.equal(refused.reason,'dark_mode_changed_during_inspection');
+  assert.equal(refused.canRepair,false);
+  assert.equal(app.runtime.isDarkEnabled(),false);
+  assert.equal(app.localStorage.getItem(LEGACY_KEY),source);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME),before);
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
+
 test('writer-lock rehearsal refuses unsupported browsers, stays nonauthoritative, and never writes state',async()=>{
   const app=install();
   await app.runtime.startCoordinatedDarkMirror();
