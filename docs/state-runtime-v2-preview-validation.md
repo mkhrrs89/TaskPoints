@@ -344,6 +344,12 @@ Node contracts test callback rejection, absent Web Locks, preview-host restricti
 
 Browser-level coverage additionally checks that closing a preview tab while its cooperative shared-lock callback remains pending releases the browser lock, allows another tab to complete a *read-only* exclusive rehearsal, and leaves `taskpoints_v1` and authority unchanged. Closing a Playwright page is **not** equivalent to an operating-system kill of a physical Safari/PWA process; the latter remains a required manual validation.
 
+### Cooperative-lock lifecycle follow-up (October 27)
+
+The WebKit browser gate exposed an assertion issue in the new tab-close recovery test: its asynchronous polling recorded a successful exclusive rehearsal, then could observe a subsequent denied result in the shared browser global. The test now retries one rehearsal at a time from Playwright and asserts the retained successful proof directly. This is a test-harness correction; it does not change storage behavior or certify physical PWA termination.
+
+A separate two-tab browser regression deliberately rotates the **synthetic fixture generation** while one developer-only cooperative shared-lock callback is suspended. The expected result is `generation_or_preview_changed_under_lock` with `canPromote:false`, release of the shared lock, unchanged V1 snapshot, and continued `legacy_only` authority. The fixture does not execute production Reset All/import or prove all legacy writers participate. Physical Safari/PWA interruption and full writer fencing remain required before authority can ever be switched.
+
 ### Legacy writer inventory: initial CI guard
 
 The V2-only `tests/state_runtime_v2_legacy_writer_inventory_contract.test.js` now scans top-level JavaScript/HTML for direct browser-storage writes and core save/replacement calls. The V2 Contracts workflow hard-gates the following verified legacy write surfaces:
