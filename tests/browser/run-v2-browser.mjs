@@ -514,6 +514,107 @@ try {
       v1Unchanged:true,noAuthorityPromotion:true};
   });
 
+  await run('independent immutable SHA-256 checkpoint survives reload and detects tampering without restore',async context=>{
+    const page=await open(context);
+    const created=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      localStorage.setItem('taskpoints_preview_fixture_note','preserved from before reload');
+      const savedV1=localStorage.getItem('taskpoints_v1');
+      const mirrorBefore=await runtime.verifyParity();
+      const created=await runtime.createPreviewRecoveryCheckpoint();
+      return {created,savedV1,mirrorBefore,
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(created.created.saved,true,JSON.stringify(created.created));
+    assert.equal(created.created.verified,true);
+    assert.equal(created.created.sourceStable,true);
+    assert.equal(created.created.canAutoRestore,false);
+    assert.equal(created.authority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    await page.evaluate(()=>window.V2BrowserFixture.start());
+    const after=await page.evaluate(async id=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const inspected=await runtime.inspectPreviewRecoveryCheckpoint(id);
+      const db=await new Promise((resolve,reject)=>{
+        const request=indexedDB.open('taskpoints_v2_recovery_checkpoints_preview',1);
+        request.onsuccess=()=>resolve(request.result);
+        request.onerror=()=>reject(request.error);
+      });
+      const tx=db.transaction('snapshots','readonly');
+      const snapshot=await new Promise((resolve,reject)=>{
+        const req=tx.objectStore('snapshots').get(id);
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      db.close();
+      return {inspected,rawV1:new Map(snapshot.entries).get('taskpoints_v1'),
+        fixtureNote:new Map(snapshot.entries).get('taskpoints_preview_fixture_note'),
+        independentDatabase:runtime.getStatus().databaseName!=='taskpoints_v2_recovery_checkpoints_preview',
+        authority:runtime.getStatus().readAuthority};
+    },created.created.checkpointId);
+    assert.equal(after.inspected.intact,true,JSON.stringify(after.inspected));
+    assert.match(after.inspected.fingerprint,/^sha256:[0-9a-f]{64}:\d+$/);
+    assert.equal(after.rawV1,created.savedV1);
+    assert.equal(after.fixtureNote,'preserved from before reload');
+    assert.equal(after.independentDatabase,true);
+    assert.equal(after.authority,'legacy_only');
+    const corrupted=await page.evaluate(async id=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const db=await new Promise((resolve,reject)=>{
+        const request=indexedDB.open('taskpoints_v2_recovery_checkpoints_preview',1);
+        request.onsuccess=()=>resolve(request.result);
+        request.onerror=()=>reject(request.error);
+      });
+      const get=()=>new Promise((resolve,reject)=>{
+        const req=db.transaction('snapshots','readonly').objectStore('snapshots').get(id);
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      const row=await get();
+      row.entries[0][1]='corrupted checkpoint payload';
+      const tx=db.transaction('snapshots','readwrite');
+      tx.objectStore('snapshots').put(row);
+      await new Promise((resolve,reject)=>{
+        tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
+      });
+      db.close();
+      return {verdict:await runtime.inspectPreviewRecoveryCheckpoint(id),
+        v1:localStorage.getItem('taskpoints_v1'),
+        authority:runtime.getStatus().readAuthority};
+    },created.created.checkpointId);
+    assert.equal(corrupted.verdict.intact,false);
+    assert.equal(corrupted.verdict.reason,'checkpoint_integrity_failed');
+    assert.equal(corrupted.verdict.canAutoRestore,false);
+    assert.equal(corrupted.v1,created.savedV1);
+    assert.equal(corrupted.authority,'legacy_only');
+    return {independentSave:true,persistsAcrossReload:true,
+      integritySha256:true,corruptionRejected:true,authority:'legacy_only'};
+  });
+
+  await run('failed second preview checkpoint leaves first independent checkpoint intact',async context=>{
+    const page=await open(context);
+    const proof=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const first=await runtime.createPreviewRecoveryCheckpoint();
+      const oldAdd=IDBObjectStore.prototype.add;
+      IDBObjectStore.prototype.add=function(){
+        if(this.name==='snapshots')
+          throw new DOMException('synthetic full disk','QuotaExceededError');
+        return oldAdd.apply(this,arguments);
+      };
+      let second;
+      try{second=await runtime.createPreviewRecoveryCheckpoint();}
+      finally{IDBObjectStore.prototype.add=oldAdd;}
+      return {first,second,
+        intact:await runtime.inspectPreviewRecoveryCheckpoint(first.checkpointId),
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(proof.first.saved,true,JSON.stringify(proof.first));
+    assert.equal(proof.second.saved,false);
+    assert.equal(proof.second.reason,'checkpoint_write_failed');
+    assert.equal(proof.intact.intact,true);
+    assert.equal(proof.authority,'legacy_only');
+    return {quotaFailureContained:true,existingCheckpointPreserved:true};
+  });
+
   await run('mutation-handoff preflight inventories pilot readiness but cannot promote V2', async context => {
     const page=await open(context);
     const baseline=await page.evaluate(async()=>{
