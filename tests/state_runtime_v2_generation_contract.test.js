@@ -1750,7 +1750,8 @@ test('checkpoint refuses lost legacy enumeration permission without opening a re
   const denied=await app.runtime.createPreviewRecoveryCheckpoint();
   app.localStorage.key=originalKey;
   assert.equal(denied.saved,false);
-  assert.equal(denied.reason,'checkpoint_write_failed');
+  assert.equal(denied.reason,'legacy_source_wal_unreadable',
+    'WAL inventory denial must fail before checkpoint creation even starts');
   assert.equal(app.indexedDB.dump('taskpoints_v2_recovery_checkpoints_preview'),null);
   assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
 });
