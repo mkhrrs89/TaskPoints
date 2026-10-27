@@ -1631,6 +1631,72 @@ test('writer rehearsal refuses new bridge failures after lock acquisition',async
   assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
 });
 
+test('writer rehearsal rejects a nonpilot V1 write during asynchronous lock verification',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const key='taskpoints_unfenced_note_during_digest';
+  app.localStorage.setItem(key,'before');
+  const rawV1=app.localStorage.getItem(LEGACY_KEY);
+  const snapshot=structuredClone(app.indexedDB.dump(DB_NAME));
+  const originalDigest=app.context.crypto.subtle.digest;
+  let calls=0;
+  app.context.navigator={locks:{request:async(name,options,callback)=>
+    callback({name,mode:options.mode})}};
+  app.context.crypto.subtle.digest=async function(type,bytes){
+    calls++;
+    if(calls===2){
+      // Yield during the in-lock digest, after the bytes were captured but
+      // before their checksum resolves, as an ordinary legacy tab might do.
+      await Promise.resolve();
+      app.localStorage.setItem(key,'changed during SHA-256');
+    }
+    return originalDigest.call(this,type,bytes);
+  };
+  let result;
+  try { result=await app.runtime.rehearseExclusiveWriterLease(); }
+  finally { app.context.crypto.subtle.digest=originalDigest; }
+  assert.equal(calls,2);
+  assert.equal(result.lockAcquired,false,JSON.stringify(result));
+  assert.equal(result.reason,'legacy_changed_during_lock_verification');
+  assert.equal(result.canPromote,false);
+  assert.equal(app.localStorage.getItem(key),'changed during SHA-256');
+  assert.equal(app.localStorage.getItem(LEGACY_KEY),rawV1);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME),snapshot);
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+  const retry=await app.runtime.rehearseExclusiveWriterLease();
+  assert.equal(retry.lockAcquired,true,JSON.stringify(retry));
+  assert.equal(retry.canPromote,false);
+});
+
+test('writer rehearsal refuses a lost legacy inventory read after SHA-256 resolves',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const originalDigest=app.context.crypto.subtle.digest;
+  const originalKey=app.localStorage.key.bind(app.localStorage);
+  const originalV1=app.localStorage.getItem(LEGACY_KEY);
+  let calls=0;
+  app.context.navigator={locks:{request:async(name,options,callback)=>
+    callback({name,mode:options.mode})}};
+  app.context.crypto.subtle.digest=async function(type,bytes){
+    calls++;
+    const hashed=await originalDigest.call(this,type,bytes);
+    if(calls===2) app.localStorage.key=()=>{throw Error('storage enumeration revoked mid-digest');};
+    return hashed;
+  };
+  let denied;
+  try { denied=await app.runtime.rehearseExclusiveWriterLease(); }
+  finally {
+    app.localStorage.key=originalKey;
+    app.context.crypto.subtle.digest=originalDigest;
+  }
+  assert.equal(calls,2);
+  assert.equal(denied.lockAcquired,false);
+  assert.equal(denied.reason,'legacy_inventory_unreadable');
+  assert.equal(denied.canPromote,false);
+  assert.equal(app.localStorage.getItem(LEGACY_KEY),originalV1);
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
+
 test('legacy rollback-source audit remains read-only, reports complete V1 scope and refuses WAL denial',async()=>{
   const app=install({initialState:{...legacyState(),
     completions:[{id:'task-one',source:'task',points:1},{id:'task-two',source:'task',points:2}]}});
