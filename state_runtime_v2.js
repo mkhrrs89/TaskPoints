@@ -3442,9 +3442,13 @@
     try {
       const pilot = await inspectMutationHandoffPrerequisites();
       const rollback = await inspectLegacyRollbackSource();
+      // Include unrelated taskpoints_* preferences/notes in the explicit
+      // audit; a valid Habit pilot can coexist with a changed legacy key.
+      const legacyNamespaceBefore = stableJson(captureLegacyNamespace());
       const peers = await inspectPreviewWriterPeers();
       const pilotAfter = await inspectMutationHandoffPrerequisites();
       const rollbackAfter = await inspectLegacyRollbackSource();
+      const legacyNamespaceAfter = stableJson(captureLegacyNamespace());
       // The asynchronous peer observation is NOT a lock. Detect a new
       // generation or explicit preview switch during the report; never use
       // an earlier green preflight as evidence about a newer generation.
@@ -3453,7 +3457,8 @@
         || (pilot.generation && pilot.generation !== initialGeneration)
         || (rollback.generation && rollback.generation !== initialGeneration)
         || stableJson(pilot) !== stableJson(pilotAfter)
-        || stableJson(rollback) !== stableJson(rollbackAfter))
+        || stableJson(rollback) !== stableJson(rollbackAfter)
+        || legacyNamespaceBefore !== legacyNamespaceAfter)
         return snapshot('inventory_changed_during_check', pilot, rollback, peers,
           ['preview_or_generation_changed_during_check']);
       return snapshot('authority_cutover_blocked', pilot, rollback, peers);
