@@ -1562,7 +1562,9 @@ test('writer-lock rehearsal refuses legacy inventory read denial under the lock'
   }}};
   const denied=await app.runtime.rehearseExclusiveWriterLease();
   assert.equal(denied.lockAcquired,false);
-  assert.equal(denied.reason,'legacy_inventory_unreadable');
+  // The rollback-source audit fails closed before the separate full
+  // inventory hash is attempted, because WAL enumeration is unavailable.
+  assert.equal(denied.reason,'rollback_source_unavailable');
   assert.equal(denied.canPromote,false);
   assert.equal(app.localStorage.getItem(LEGACY_KEY),source);
   assert.deepEqual(app.indexedDB.dump(DB_NAME),snapshot);
