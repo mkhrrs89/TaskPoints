@@ -1622,16 +1622,17 @@ try {
     const pending=inspector.evaluate(async()=>{
       const original=BroadcastChannel.prototype.postMessage;
       BroadcastChannel.prototype.postMessage=function(message){
-        // This marker is outside the taskpoints_* namespace being audited.
+        // Test-only, in-memory synchronization; do not alter the storage
+        // inventory being observed before the legacy-only tab writes.
         if(message?.type==='writer_probe_v1')
-          localStorage.setItem('v2_cutover_peer_probe_active','yes');
+          window.__v2CutoverPeerProbeActive=true;
         return original.apply(this,arguments);
       };
       try{return await window.TaskPointsStateRuntimeV2.inspectAuthorityCutoverBarriers();}
       finally{BroadcastChannel.prototype.postMessage=original;}
     });
-    await legacy.waitForFunction(()=>
-      localStorage.getItem('v2_cutover_peer_probe_active')==='yes',
+    await inspector.waitForFunction(()=>
+      window.__v2CutoverPeerProbeActive===true,
       null,{timeout:12000});
     const edited=await legacy.evaluate(()=>{
       localStorage.setItem('taskpoints_notes_v1','legacy-only tab edited notes');
@@ -1653,6 +1654,82 @@ try {
     assert.equal(final.authority,'legacy_only');
     return {nonpilotWriteRaceDetected:true,oldLegacyNotesPreserved:true,
       pilotStateNotClobbered:true,noAuthorityPromotion:true};
+  });
+
+  await run('full cutover audit observes tp_projects key outside checkpoint namespace',async context=>{
+    const inspector=await open(context),legacy=await context.newPage();
+    await legacy.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),
+      {waitUntil:'load'});
+    const before=await inspector.evaluate(()=>({
+      v1:localStorage.getItem('taskpoints_v1'),
+      projects:localStorage.getItem('tp_projects_v1')
+    }));
+    const pending=inspector.evaluate(async()=>{
+      const original=BroadcastChannel.prototype.postMessage;
+      BroadcastChannel.prototype.postMessage=function(message){
+        if(message?.type==='writer_probe_v1')
+          window.__v2ProjectsProbeStarted=true;
+        return original.apply(this,arguments);
+      };
+      try{return await window.TaskPointsStateRuntimeV2.inspectAuthorityCutoverBarriers();}
+      finally{BroadcastChannel.prototype.postMessage=original;}
+    });
+    await inspector.waitForFunction(()=>window.__v2ProjectsProbeStarted===true,
+      null,{timeout:12000});
+    const changed=await legacy.evaluate(()=>{
+      const value='[{"id":"project-from-unfenced-legacy-tab"}]';
+      localStorage.setItem('tp_projects_v1',value);
+      return localStorage.getItem('tp_projects_v1');
+    });
+    const result=await pending;
+    assert.equal(result.reason,'inventory_changed_during_check',JSON.stringify(result));
+    assert.ok(result.blockers.includes('legacy_or_preview_inventory_changed_during_check'));
+    assert.equal(result.canPromote,false);
+    assert.equal(result.checks.allLegacyWritersFenced,false);
+    assert.equal(result.mutationAuthority,'legacy_only');
+    const after=await inspector.evaluate(()=>({
+      v1:localStorage.getItem('taskpoints_v1'),
+      projects:localStorage.getItem('tp_projects_v1'),
+      authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority
+    }));
+    assert.equal(after.v1,before.v1);
+    assert.equal(after.projects,changed);
+    assert.notEqual(after.projects,before.projects);
+    assert.equal(after.authority,'legacy_only');
+    return {unprefixedLegacyProjectsRaceDetected:true,
+      projectWritePreserved:true,legacySnapshotUnchanged:true,cutoverStillBlocked:true};
+  });
+
+  await run('cutover inspection fails closed when full-origin storage key read is denied',async context=>{
+    const page=await open(context);
+    await page.evaluate(()=>localStorage.setItem('tp_projects_v1','synthetic-original-projects'));
+    const proof=await page.evaluate(async()=>{
+      const originalV1=localStorage.getItem('taskpoints_v1');
+      const originalProject=localStorage.getItem('tp_projects_v1');
+      const original=Storage.prototype.getItem;
+      let report;
+      Storage.prototype.getItem=function(key){
+        if(this===localStorage && key==='tp_projects_v1')
+          throw new DOMException('synthetic project access denial','SecurityError');
+        return original.call(this,key);
+      };
+      try{report=await window.TaskPointsStateRuntimeV2.inspectAuthorityCutoverBarriers();}
+      finally{Storage.prototype.getItem=original;}
+      return {report,
+        originalV1,originalProject,
+        afterV1:localStorage.getItem('taskpoints_v1'),
+        afterProject:localStorage.getItem('tp_projects_v1'),
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    });
+    assert.equal(proof.report.reason,'inspection_unreadable',JSON.stringify(proof.report));
+    assert.ok(proof.report.blockers.includes('authority_cutover_inventory_unreadable'));
+    assert.equal(proof.report.canPromote,false);
+    assert.equal(proof.report.checks.allLegacyWritersFenced,false);
+    assert.equal(proof.originalV1,proof.afterV1);
+    assert.equal(proof.originalProject,proof.afterProject);
+    assert.equal(proof.authority,'legacy_only');
+    return {deniedProjectKeyAbortsInspection:true,
+      noLegacyWrites:true,productionAuthorityUnchanged:true};
   });
 
   await run('guarded V2 Habit candidate reads prove data without changing V1 authority', async context => {
